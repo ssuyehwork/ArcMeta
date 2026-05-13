@@ -129,10 +129,17 @@ private:
     ~MftReader();
 
     // 内部扫描逻辑 (移植自 ScanDialog 的高性能实现)
+    // 2026-05-11 极致对标：使用 RawEntry 代替 IndexedEntry，彻底在扫描阶段禁用 QString
+    struct RawEntry {
+        unsigned __int64 frn;
+        unsigned __int64 parentFrn;
+        uint32_t attributes;
+        uint64_t modifyTime;
+        std::string nameUtf8;
+    };
+
     struct DriveResult {
-        std::vector<IndexedEntry> entries;
-        QHash<QString, int> typeCounts;
-        QHash<QString, int> suffixCounts;
+        std::vector<RawEntry> entries;
     };
     DriveResult performMftScan(const QString& driveRoot);
     
@@ -162,7 +169,7 @@ private:
 
     // 监控器管理
     QVector<UsnWatcher*> m_watchers;
-    QHash<QString, unsigned __int64> m_nextUsns;
+    QHash<QString, uint64_t> m_nextUsns; // 2026-05-11 物理补全：记录各盘符的 NextUsn 水位线
 
     bool m_isInitialized = false;
 

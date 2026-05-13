@@ -1203,7 +1203,12 @@ void MainWindow::initTrayIcon() {
         activateWindow();
     });
 
-    connect(quitAction, &QAction::triggered, qApp, &QApplication::quit);
+    // 2026-05-11 物理加固退出逻辑：在退出前显式隐藏托盘并释放核心引擎，确保 USN 线程安全停止
+    connect(quitAction, &QAction::triggered, this, [this]() {
+        if (m_trayIcon) m_trayIcon->hide();
+        MftReader::instance().clear();
+        QApplication::quit();
+    });
 
     m_trayIcon->setContextMenu(trayMenu);
 
