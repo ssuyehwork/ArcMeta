@@ -1,0 +1,84 @@
+#pragma once
+
+#include <QWidget>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QCheckBox>
+#include <QScrollArea>
+#include <QPushButton>
+#include <QMap>
+#include <QStringList>
+
+namespace ArcMeta {
+
+struct FilterState {
+    QList<int>   ratings;
+    QStringList  colors;
+    QStringList  tags;
+    QStringList  types;
+    QStringList  createDates;   // "today" | "yesterday" | "YYYY-MM-DD"
+    QStringList  modifyDates;
+};
+
+/**
+ * @brief 筛选面板 — 动态 Adobe Bridge 风格
+ *
+ * 由 MainWindow 在目录切换后调用 populate() 驱动数据填充。
+ * 每行整体可点击（不需要对准复选框）。
+ */
+class FilterPanel : public QFrame {
+    Q_OBJECT
+
+public:
+    explicit FilterPanel(QWidget* parent = nullptr);
+    ~FilterPanel() override = default;
+
+
+    void populate(
+        const QMap<int, int>&        ratingCounts,
+        const QMap<QString, int>&    colorCounts,
+        const QMap<QString, int>&    tagCounts,
+        const QMap<QString, int>&    typeCounts,
+        const QMap<QString, int>&    createDateCounts,
+        const QMap<QString, int>&    modifyDateCounts
+    );
+
+    FilterState currentFilter() const { return m_filter; }
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
+signals:
+    void filterChanged(const FilterState& state);
+    void resetSearchRequested();
+
+public slots:
+    void clearAllFilters();
+
+private:
+    void rebuildGroups();
+
+    QWidget*   buildGroup(const QString& title, QVBoxLayout*& outContentLayout);
+    QCheckBox* addFilterRow(QVBoxLayout* layout, const QString& label,
+                            int count, const QColor& dotColor = Qt::transparent);
+
+    static QMap<QString, QColor> s_colorMap();
+
+    FilterState m_filter;
+
+    QMap<int, int>      m_ratingCounts;
+    QMap<QString, int>  m_colorCounts;
+    QMap<QString, int>  m_tagCounts;
+    QMap<QString, int>  m_typeCounts;
+    QMap<QString, int>  m_createDateCounts;
+    QMap<QString, int>  m_modifyDateCounts;
+
+    QVBoxLayout*  m_mainLayout      = nullptr;
+    QScrollArea*  m_scrollArea      = nullptr;
+    QWidget*      m_container       = nullptr;
+    QVBoxLayout*  m_containerLayout = nullptr;
+    QPushButton*  m_btnClearAll     = nullptr;
+};
+
+} // namespace ArcMeta
