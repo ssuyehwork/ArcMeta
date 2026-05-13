@@ -315,28 +315,24 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
         if (!regex.isValid()) return {}; // 正则语法错误，直接返回空
     }
 
-    // 2026-05-10 物理加固：采用分块并行规约，确保百万级索引秒开
-    // 为避免 QVector 并发插入的竞态或互斥锁损耗，采用 std::vector 并行收集后合并
-    std::vector<int> allIndices(totalSearchCount);
-    std::iota(allIndices.begin(), allIndices.end(), 0); // 填充 0 到 N
+    // 2026-05-10 物理加固：预先提取所有索引（物理索引 + Overlay 虚拟索引），彻底消除并行循环中的 O(N) 迭代
+    std::vector<int> allIndices;
+    allIndices.reserve(totalSearchCount);
 
-    // 处理虚拟索引偏移 (i < totalItems 为原始 SoA，i >= totalItems 为 Overlay)
-    auto getActualIndex = [totalItems, this](int i) {
-        if (i < totalItems) return i;
-        // 映射回虚拟索引 -2, -3...
-        int overlayOffset = i - totalItems;
-        auto it = m_indexToOverlayFrn.begin();
-        std::advance(it, overlayOffset);
-        return it->first;
-    };
+    // 1. 填充物理索引 (0 到 N-1)
+    for (int i = 0; i < totalItems; ++i) allIndices.push_back(i);
+
+    // 2. 填充 Overlay 虚拟索引 (-2, -3...)
+    for (const auto& pair : m_indexToOverlayFrn) {
+        allIndices.push_back(pair.first);
+    }
 
     std::vector<int> filtered;
     std::mutex resultMutex;
     filtered.reserve(totalSearchCount / 10);
 
     // 并行过滤
-    std::for_each(std::execution::par, allIndices.begin(), allIndices.end(), [&](int i) {
-        int idx = getActualIndex(i);
+    std::for_each(std::execution::par, allIndices.begin(), allIndices.end(), [&](int idx) {
         uint32_t attr = getAttributes(idx);
 
         if (!includeHidden && (attr & FILE_ATTRIBUTE_HIDDEN)) return;
@@ -367,7 +363,8 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
         }
     });
 
-    return QVector<int>::fromStdVector(filtered);
+    // 2026-05-10 物理修复：改用构造函数初始化，避免在某些 Qt 6 环境下找不到 fromStdVector 标识符的问题
+    return QVector<int>(filtered.begin(), filtered.end());
 }
 
 // 2026-05-10 按照用户要求：实现前缀极速查找（二分法）
