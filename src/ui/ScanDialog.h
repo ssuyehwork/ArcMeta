@@ -80,6 +80,7 @@ private:
  */
 class ScanDialog : public FramelessDialog {
     Q_OBJECT
+    friend class ScanTableModel; // 2026-05-10 物理修复：允许 Model 访问私有图标缓存
 public:
     explicit ScanDialog(QWidget* parent = nullptr);
     ~ScanDialog() override;
@@ -117,6 +118,9 @@ private:
 
     std::unique_ptr<CacheManager> m_cacheManager;
     QFileIconProvider m_iconProvider;
+
+    // 2026-05-10 物理修复：移除静态全局缓存，改用成员变量管理图标生命周期
+    mutable QHash<QString, QIcon> m_iconCache;
 };
 
 } // namespace ArcMeta

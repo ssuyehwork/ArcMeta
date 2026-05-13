@@ -72,15 +72,9 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             case 2: {
                 if (reader.isDirectory(actualIndex)) return QVariant();
                 int64_t size = reader.getSize(actualIndex);
-                // 2026-05-10 对标 Rust 核心修复：MFT 扫描无法获取文件大小，
-                // 当 size=0 时即时调用系统 API 补偿真实文件大小
-                if (size <= 0) {
-                    QString path = reader.getFullPath(actualIndex);
-                    QFileInfo fi(path);
-                    if (fi.exists() && fi.isFile()) {
-                        size = fi.size();
-                    }
-                }
+
+                // 2026-05-10 物理修复：彻底禁绝在 data() 渲染路径中进行同步 QFileInfo::size() 磁盘 I/O。
+                // 若 MFT 记录为 0 且扫描阶段未填充，此处仅展示 "0 B" 或 "-"，确保 UI 零卡顿。
                 if (size <= 0) return "0 B";
                 if (size < 1024) return QString("%1 B").arg(size);
                 if (size < 1024 * 1024) return QString("%1 KB").arg(size / 1024.0, 0, 'f', 1);
@@ -90,12 +84,23 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             case 3: return QDateTime::fromMSecsSinceEpoch(reader.getModifyTime(actualIndex)).toString("yyyy-MM-dd HH:mm");
         }
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        static QHash<QString, QIcon> iconCache;
+        // 2026-05-10 物理修复：移除静态 iconCache，通过向上查找父窗口获取成员缓存，解决内存泄漏
+        ScanDialog* dlg = qobject_cast<ScanDialog*>(this->parent());
+        if (!dlg) return QVariant();
+
         QString name = reader.getName(actualIndex);
-        QString ext = name.mid(name.lastIndexOf('.') + 1).toLower();
+        int dotIdx = name.lastIndexOf('.');
+        QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
         if (reader.isDirectory(actualIndex)) ext = "folder";
         
-        if (iconCache.contains(ext)) return iconCache[ext];
+        // 访问 ScanDialog 成员变量 m_iconCache (ScanDialog 必须设为 Model 的 Parent)
+        // 注意：此处需要 ScanDialog 的头文件支持，或通过 property 转发。
+        // 由于 ScanDialog.h 中已增加 m_iconCache，我们直接通过 property 机制或辅助函数获取
+
+        // 为了极致规范，我们采用 property 方式或直接在 ScanDialog 中定义访问器。
+        // 由于是在同一个命名空间，我们直接访问成员。
+        auto it = dlg->m_iconCache.find(ext);
+        if (it != dlg->m_iconCache.end()) return *it;
         
         QFileIconProvider provider;
         QIcon icon;
@@ -103,7 +108,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         else {
             icon = provider.icon(QFileInfo("dummy." + ext));
         }
-        iconCache[ext] = icon;
+        dlg->m_iconCache[ext] = icon;
         return icon;
     } else if (role == Qt::TextAlignmentRole) {
         return static_cast<int>(Qt::AlignLeft | Qt::AlignVCenter);
@@ -139,14 +144,23 @@ void ScanTableModel::setFilterState(const ScanFilterState& state) {
 }
 
 void ScanTableModel::startAsyncRebuild() {
-    m_filterWatcher.cancel();
-    m_filterWatcher.waitForFinished();
+    // 2026-05-10 物理加固：取消先前的过滤任务，避免结果交织导致乱序或崩溃
+    if (m_filterWatcher.isRunning()) {
+        m_filterWatcher.cancel();
+        // 此处不调用 waitForFinished 以免阻塞 UI 线程，利用 QFutureWatcher 的生命周期管理
+    }
     
     QFuture<QVector<int>> future = QtConcurrent::run([this, text = m_filterText, state = m_filterState]() {
         return performRebuild(text, state);
     });
     
+    // 断开旧连接，防止多次执行回调
+    disconnect(&m_filterWatcher, &QFutureWatcher<QVector<int>>::finished, nullptr, nullptr);
+
     connect(&m_filterWatcher, &QFutureWatcher<QVector<int>>::finished, this, [this]() {
+        // 检查是否已被取消
+        if (m_filterWatcher.isCanceled()) return;
+
         beginResetModel();
         m_filteredIndices = m_filterWatcher.result();
         m_displayLimit = 200; // 重置显示限制
