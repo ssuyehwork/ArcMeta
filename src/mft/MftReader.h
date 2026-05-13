@@ -101,6 +101,7 @@ public:
     // 核心生命周期
     void buildIndex(const QStringList& drives = QStringList());
     bool loadFromCache();
+    bool saveToCache(); // 2026-05-11 新增：SoA 持久化接口
     void clear(); // 释放所有内存资源
 
     // 极致查询接口 (SoA 并行分块规约)
@@ -176,7 +177,6 @@ private:
     mutable LruPathCache m_pathCache{20000}; // 2万条目的路径 LRU 缓存
     std::vector<int> m_sharedIndices; // 常驻内存复用
     int m_dirtyCount = 0;
-    mutable QString m_sharedPath; // 路径缓存复用字符串
 };
 
 } // namespace ArcMeta
