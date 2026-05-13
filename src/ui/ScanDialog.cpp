@@ -84,7 +84,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             case 3: return QDateTime::fromMSecsSinceEpoch(reader.getModifyTime(actualIndex)).toString("yyyy-MM-dd HH:mm");
         }
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        // 2026-05-10 物理修复：移除静态 iconCache，通过向上查找父窗口获取成员缓存，解决内存泄漏
+        // 2026-05-11 物理优化：极致图标缓存。避免在数据渲染路径中直接进行 QFileInfo/Shell 操作
         ScanDialog* dlg = qobject_cast<ScanDialog*>(this->parent());
         if (!dlg) return QVariant();
 
@@ -93,15 +93,11 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
         if (reader.isDirectory(actualIndex)) ext = "folder";
         
-        // 访问 ScanDialog 成员变量 m_iconCache (ScanDialog 必须设为 Model 的 Parent)
-        // 注意：此处需要 ScanDialog 的头文件支持，或通过 property 转发。
-        // 由于 ScanDialog.h 中已增加 m_iconCache，我们直接通过 property 机制或辅助函数获取
-        
-        // 为了极致规范，我们采用 property 方式或直接在 ScanDialog 中定义访问器。
-        // 由于是在同一个命名空间，我们直接访问成员。
         auto it = dlg->m_iconCache.find(ext);
         if (it != dlg->m_iconCache.end()) return *it;
         
+        // 2026-05-11 物理补丁：由于主线程渲染限制，此处虽同步但通过 QFileInfo("dummy." + ext)
+        // 绕过了对真实物理文件的访问，大幅降低 I/O 延迟。
         QFileIconProvider provider;
         QIcon icon;
         if (ext == "folder") icon = provider.icon(QFileIconProvider::Folder);
@@ -355,6 +351,11 @@ void ScanDialog::setupUi() {
     m_resultView->setAlternatingRowColors(true);
     
     // 交互连接
+    connect(&MftReader::instance(), &MftReader::dataChanged, this, [this]() {
+        // 2026-05-11 响应式刷新：当 USN 监控到变动时，自动触发模型重绘
+        m_tableModel->setFilterText(m_searchEdit->text());
+    });
+
     connect(m_resultView, &QTableView::customContextMenuRequested, this, &ScanDialog::onCustomContextMenu);
     connect(m_resultView, &QTableView::doubleClicked, this, &ScanDialog::onItemDoubleClicked);
     connect(m_resultView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ScanDialog::onSelectionChanged);

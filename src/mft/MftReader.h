@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QObject>
 #include <QString>
 #include <QVector>
 #include <QHash>
@@ -88,10 +89,15 @@ struct OverlayEntry {
  * 采用 SoA (Structure of Arrays) 架构，彻底取代旧版 unordered_map 逻辑。
  * 实现百万级文件秒级扫描、零拷贝加载与实时监控。
  */
-class MftReader {
+class MftReader : public QObject {
+    Q_OBJECT
 public:
     static MftReader& instance();
 
+signals:
+    void dataChanged(); // 2026-05-11 新增：USN 变更通知信号
+
+public:
     // 核心生命周期
     void buildIndex(const QStringList& drives = QStringList());
     bool loadFromCache();
