@@ -386,7 +386,7 @@ void MainWindow::initUi() {
     });
 
     // 5a. 目录装载完成 -> FilterPanel 动态填充 (六参数版本)
-    connect(m_contentPanel, &ContentPanel::directoryStatsReady,
+    connect(m_contentPanel, &ContentPanel::directoryStatsReady, this,
         [this](const QMap<int,int>& r, const QMap<QString,int>& c,
                const QMap<QString,int>& t, const QMap<QString,int>& tp,
                const QMap<QString,int>& cd, const QMap<QString,int>& md) {
@@ -1070,6 +1070,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     // 2026-05-09 按照用户要求：扫描窗口与主界面操作相互不干扰，去除父子关系
     connect(m_btnScan, &QPushButton::clicked, this, [this]() {
         auto* dlg = new ScanDialog(nullptr);
+        dlg->setAttribute(Qt::WA_DeleteOnClose); // 2026-05-27 物理修复：关闭后自动释放内存
         dlg->setModal(false);
         dlg->show();
     });

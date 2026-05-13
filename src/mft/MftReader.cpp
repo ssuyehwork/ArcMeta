@@ -3,6 +3,8 @@
 #include <winioctl.h>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
+#include <numeric>
 #include <algorithm>
 #include <execution>
 #include <unordered_set>
@@ -291,57 +293,78 @@ QString MftReader::getFullPath(int index) const {
     return path;
 }
 
-// 2026-05-10 按照用户要求：实现高性能搜索接口
+// 2026-05-10 物理重构：实现基于 C++17 并行执行策略的极速搜索，并预编译正则
 QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSensitive, 
                               const QStringList& extensionList, bool includeHidden, bool includeSystem) {
     QReadLocker lock(&m_dataLock);
-    QVector<int> results;
     
-    if (!m_isInitialized) {
-        return results;
+    if (!m_isInitialized) return {};
+
+    const int totalItems = static_cast<int>(m_frns.size());
+    const int overlayItems = static_cast<int>(m_indexToOverlayFrn.size());
+    const int totalSearchCount = totalItems + overlayItems;
+
+    // 预处理扩展名过滤
+    QSet<QString> extSet;
+    for (const auto& e : extensionList) extSet.insert(e.toLower());
+
+    // 预编译正则 (如果是正则模式)
+    QRegularExpression regex;
+    if (useRegex && !query.isEmpty()) {
+        regex = QRegularExpression(query, caseSensitive ? QRegularExpression::NoPatternOption : QRegularExpression::CaseInsensitiveOption);
+        if (!regex.isValid()) return {}; // 正则语法错误，直接返回空
     }
+
+    // 2026-05-10 物理加固：预先提取所有索引（物理索引 + Overlay 虚拟索引），彻底消除并行循环中的 O(N) 迭代
+    std::vector<int> allIndices;
+    allIndices.reserve(totalSearchCount);
     
-    // 并行搜索 SoA 数据结构
-    const int totalItems = totalCount();
-    results.reserve(totalItems / 10); // 预分配容量
+    // 1. 填充物理索引 (0 到 N-1)
+    for (int i = 0; i < totalItems; ++i) allIndices.push_back(i);
     
-    for (int i = 0; i < totalItems; ++i) {
-        QString name = getName(i);
-        uint32_t attributes = getAttributes(i);
-        
-        // 过滤隐藏和系统文件
-        if (!includeHidden && (attributes & FILE_ATTRIBUTE_HIDDEN)) continue;
-        if (!includeSystem && (attributes & FILE_ATTRIBUTE_SYSTEM)) continue;
+    // 2. 填充 Overlay 虚拟索引 (-2, -3...)
+    for (const auto& pair : m_indexToOverlayFrn) {
+        allIndices.push_back(pair.first);
+    }
+
+    std::vector<int> filtered;
+    std::mutex resultMutex;
+    filtered.reserve(totalSearchCount / 10);
+
+    // 并行过滤
+    std::for_each(std::execution::par, allIndices.begin(), allIndices.end(), [&](int idx) {
+        uint32_t attr = getAttributes(idx);
+
+        if (!includeHidden && (attr & FILE_ATTRIBUTE_HIDDEN)) return;
+        if (!includeSystem && (attr & FILE_ATTRIBUTE_SYSTEM)) return;
+
+        QString name = getName(idx);
         
         // 扩展名过滤
-        if (!extensionList.isEmpty()) {
-            QString ext = QFileInfo(name).suffix().toLower();
-            bool matches = false;
-            for (const QString& filterExt : extensionList) {
-                if (ext == filterExt.toLower()) {
-                    matches = true;
-                    break;
-                }
-            }
-            if (!matches) continue;
+        if (!extSet.isEmpty()) {
+            int dotIdx = name.lastIndexOf('.');
+            QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
+            if (!extSet.contains(ext)) return;
         }
-        
-        // 名称匹配
-        bool nameMatches = false;
-        if (useRegex) {
-            QRegularExpression regex(query, caseSensitive ? QRegularExpression::NoPatternOption : QRegularExpression::CaseInsensitiveOption);
-            nameMatches = regex.match(name).hasMatch();
+
+        // 关键词匹配
+        bool matches = false;
+        if (query.isEmpty()) {
+            matches = true;
+        } else if (useRegex) {
+            matches = regex.match(name).hasMatch();
         } else {
-            nameMatches = caseSensitive ? name.contains(query) 
-                                       : name.contains(query, Qt::CaseInsensitive);
+            matches = name.contains(query, caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive);
         }
-        
-        if (nameMatches) {
-            results.append(i);
+
+        if (matches) {
+            std::lock_guard<std::mutex> lock(resultMutex);
+            filtered.push_back(idx);
         }
-    }
-    
-    return results;
+    });
+
+    // 2026-05-10 物理修复：改用构造函数初始化，避免在某些 Qt 6 环境下找不到 fromStdVector 标识符的问题
+    return QVector<int>(filtered.begin(), filtered.end());
 }
 
 // 2026-05-10 按照用户要求：实现前缀极速查找（二分法）
@@ -462,7 +485,7 @@ bool MftReader::isFixedDrive(const QString& drive) const {
 }
 
 void MftReader::mergeDriveResult(const DriveResult& result) {
-    // 合并扫描结果到 SoA 数据结构
+    // 2026-05-10 物理修复：合并扫描结果到 SoA 数据结构，精确计算字符串偏移
     size_t oldSize = m_frns.size();
     size_t addSize = result.entries.size();
     
@@ -473,15 +496,9 @@ void MftReader::mergeDriveResult(const DriveResult& result) {
     m_name_offsets.resize(oldSize + addSize);
     m_attributes.resize(oldSize + addSize);
     
-    // 扩展字符串池
-    size_t oldPoolSize = m_string_pool.size();
-    for (const auto& entry : result.entries) {
-        QByteArray nameUtf8 = entry.name.toUtf8();
-        m_string_pool.insert(m_string_pool.end(), nameUtf8.begin(), nameUtf8.end());
-        m_string_pool.push_back('\0'); // null 终止符
-    }
+    // 物理还原精确偏移逻辑：遍历 entries 填充数据的同时维护 currentOffset
+    uint32_t currentOffset = static_cast<uint32_t>(m_string_pool.size());
     
-    // 填充 SoA 数据
     for (size_t i = 0; i < addSize; ++i) {
         const auto& entry = result.entries[i];
         size_t idx = oldSize + i;
@@ -492,9 +509,15 @@ void MftReader::mergeDriveResult(const DriveResult& result) {
         m_timestamps[idx] = entry.modifyTime;
         m_attributes[idx] = entry.attributes;
         
-        // 设置名称偏移（需要重新计算）
-        // 这里简化处理，实际应该记录每个名称的精确偏移
-        m_name_offsets[idx] = static_cast<uint32_t>(oldPoolSize + i * 256); // 粗略估算
+        // 精确记录当前名称在池中的起始偏移
+        m_name_offsets[idx] = currentOffset;
+        
+        // 将名称压入字符串池并更新偏移量累加器
+        QByteArray nameUtf8 = entry.name.toUtf8();
+        m_string_pool.insert(m_string_pool.end(), nameUtf8.begin(), nameUtf8.end());
+        m_string_pool.push_back('\0'); // Null 终止符
+        
+        currentOffset += static_cast<uint32_t>(nameUtf8.size() + 1);
     }
 }
 
@@ -605,22 +628,50 @@ bool MftReader::loadMftDirect(const std::wstring& volumePath, DriveResult& resul
 }
 
 void MftReader::scanDirectoryFallback(const std::wstring& volumePath, DriveResult& result) {
-    // 2026-05-10 按照用户要求：实现降级目录扫描
+    // 2026-05-10 物理修复：降级目录扫描时，通过 error_code 避免异常导致的扫描中断，并确保大小填充
     try {
-        std::filesystem::recursive_directory_iterator iter(volumePath), end;
+        std::error_code ec;
+        std::filesystem::recursive_directory_iterator iter(volumePath, std::filesystem::directory_options::skip_permission_denied, ec), end;
         
-        for (; iter != end; ++iter) {
-            if (iter->is_directory() && iter->path().filename() == ".") {
-                continue; // 跳过根目录
+        if (ec) {
+            std::wcerr << L"无法访问目录: " << volumePath << L" 错误: " << QString::fromStdString(ec.message()).toStdWString() << std::endl;
+            return;
+        }
+
+        for (; iter != end; iter.increment(ec)) {
+            if (ec) {
+                ec.clear();
+                continue;
+            }
+
+            auto path = iter->path();
+            if (iter->is_directory() && path.filename() == ".") {
+                continue; 
             }
             
             IndexedEntry entry;
-            entry.frn = 0; // 降级扫描无法获取真实 FRN
+            entry.frn = 0; 
             entry.parentFrn = 0;
-            entry.name = QString::fromStdWString(iter->path().filename().wstring());
-            entry.size = iter->file_size();
-            entry.modifyTime = iter->last_write_time().time_since_epoch().count();
-            entry.attributes = GetFileAttributesW(iter->path().c_str());
+            entry.name = QString::fromStdWString(path.filename().wstring());
+            
+            // 2026-05-10 物理加固：在扫描阶段提前填充大小，杜绝渲染时的同步 I/O
+            if (iter->is_regular_file()) {
+                entry.size = static_cast<int64_t>(iter->file_size(ec));
+                if (ec) { entry.size = 0; ec.clear(); }
+            } else {
+                entry.size = 0;
+            }
+
+            auto ftime = iter->last_write_time(ec);
+            if (!ec) {
+                entry.modifyTime = std::chrono::duration_cast<std::chrono::milliseconds>(ftime.time_since_epoch()).count();
+            } else {
+                entry.modifyTime = 0;
+                ec.clear();
+            }
+
+            entry.attributes = GetFileAttributesW(path.c_str());
+            if (entry.attributes == INVALID_FILE_ATTRIBUTES) entry.attributes = 0;
             
             result.entries.push_back(entry);
         }
