@@ -73,6 +73,8 @@ set(SOURCES
     src/meta/MetadataManager.h
     src/mft/MftReader.cpp
     src/mft/MftReader.h
+    src/mft/ScchCache.cpp
+    src/mft/ScchCache.h
     src/ui/BatchRenameDialog.cpp
     src/ui/BatchRenameDialog.h
     src/ui/BatchRenamePreviewDialog.cpp
