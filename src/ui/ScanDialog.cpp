@@ -28,6 +28,7 @@
 #include <QApplication>
 #include <QProcess>
 #include <QMessageBox>
+#include <QInputDialog>
 #include <QtConcurrent>
 #include <QDir>
 #include <QReadLocker>
@@ -403,6 +404,7 @@ void ScanDialog::refreshDriveList() {
 }
 
 void ScanDialog::onDriveContextMenu(const QString& drive, const QPoint& pos) {
+    Q_UNUSED(pos);
     QMenu menu(this);
     menu.setStyleSheet("QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; } QMenu::item:selected { background: #232D37; color: #FFF; }");
 
@@ -427,6 +429,7 @@ void ScanDialog::onDriveContextMenu(const QString& drive, const QPoint& pos) {
 }
 
 void ScanDialog::onIgnoredDriveContextMenu(const QString& drive, const QPoint& pos) {
+    Q_UNUSED(pos);
     QMenu menu(this);
     menu.setStyleSheet("QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; } QMenu::item:selected { background: #232D37; color: #FFF; }");
     menu.addAction("恢复驱动器", [this, drive]() {
@@ -550,6 +553,7 @@ void ScanDialog::onFilterOptionChanged() {
 }
 
 void ScanDialog::updateStatus(const QString& text, bool scanning) {
+    Q_UNUSED(text);
     m_statusLabel->setText(scanning ? "SCANNING" : "READY");
     m_statusLabel->setStyleSheet(scanning ? "color: #FF8C00; font-weight: bold;" : "color: #46B478; font-weight: bold;");
     if (scanning) { m_progressBar->show(); m_progressBar->setRange(0, 0); }
