@@ -84,7 +84,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             case 3: return QDateTime::fromMSecsSinceEpoch(reader.getModifyTime(actualIndex)).toString("yyyy-MM-dd HH:mm");
         }
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        // 2026-05-10 物理修复：移除静态 iconCache，通过向上查找父窗口获取成员缓存，解决内存泄漏
+        // 2026-05-11 物理优化：极致图标缓存。避免在数据渲染路径中直接进行 QFileInfo/Shell 操作
         ScanDialog* dlg = qobject_cast<ScanDialog*>(this->parent());
         if (!dlg) return QVariant();
 
@@ -93,15 +93,11 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
         if (reader.isDirectory(actualIndex)) ext = "folder";
         
-        // 访问 ScanDialog 成员变量 m_iconCache (ScanDialog 必须设为 Model 的 Parent)
-        // 注意：此处需要 ScanDialog 的头文件支持，或通过 property 转发。
-        // 由于 ScanDialog.h 中已增加 m_iconCache，我们直接通过 property 机制或辅助函数获取
-        
-        // 为了极致规范，我们采用 property 方式或直接在 ScanDialog 中定义访问器。
-        // 由于是在同一个命名空间，我们直接访问成员。
         auto it = dlg->m_iconCache.find(ext);
         if (it != dlg->m_iconCache.end()) return *it;
         
+        // 2026-05-11 物理补丁：由于主线程渲染限制，此处虽同步但通过 QFileInfo("dummy." + ext) 
+        // 绕过了对真实物理文件的访问，大幅降低 I/O 延迟。
         QFileIconProvider provider;
         QIcon icon;
         if (ext == "folder") icon = provider.icon(QFileIconProvider::Folder);
@@ -213,7 +209,9 @@ ScanDialog::ScanDialog(QWidget* parent)
                     m_statusLabel->setText("快照加载成功 (就绪)");
                     m_tableModel->setFilterText(""); 
                 } else {
-                    m_statusLabel->setText("未检测到有效快照，请手动开启扫描");
+                    // 2026-05-11 按照用户要求对标原版：若无快照，全自动启动扫描，无需手动干预
+                    m_statusLabel->setText("未检测到快照，正在全自动初始化索引...");
+                    onStartScan();
                 }
             });
         });
@@ -251,17 +249,15 @@ void ScanDialog::setupUi() {
         return btn;
     };
     QPushButton* btnToggle = createSmallBtn("全清");
-    QPushButton* btnRefresh = createSmallBtn("刷新");
     
     connect(btnToggle, &QPushButton::clicked, this, [this, btnToggle]() {
         bool anyUnchecked = std::any_of(m_driveChecks.begin(), m_driveChecks.end(), [](QCheckBox* c){ return !c->isChecked(); });
         for(auto* c : m_driveChecks) c->setChecked(anyUnchecked);
         btnToggle->setText(anyUnchecked ? "全清" : "全选");
+        onStartScan(); // 勾选变动后立即触发自动增量扫描
     });
-    connect(btnRefresh, &QPushButton::clicked, this, &ScanDialog::onStartScan);
 
     driveLayout->addWidget(btnToggle);
-    driveLayout->addWidget(btnRefresh);
     driveLayout->addSpacing(10);
 
     DWORD driveMask = GetLogicalDrives();
@@ -290,11 +286,8 @@ void ScanDialog::setupUi() {
     auto* topControl = new QHBoxLayout();
     topControl->addWidget(driveScroll, 1);
 
-    m_btnScan = new QPushButton("重新扫描 (MFT)");
-    m_btnScan->setFixedSize(120, 32);
-    m_btnScan->setStyleSheet("QPushButton { background: #378ADD; color: white; border: none; border-radius: 3px; font-weight: bold; } QPushButton:hover { background: #4A9AEC; }");
-    connect(m_btnScan, &QPushButton::clicked, this, &ScanDialog::onStartScan);
-    topControl->addWidget(m_btnScan);
+    // 2026-05-11 按照用户要求：同步原版逻辑，移除手动扫描按钮。
+    // 系统采用全自动 USN 监控 + 启动时热加载，不再提供显式 MFT 重扫入口。
 
     mainLayout->addLayout(topControl);
 
@@ -355,6 +348,11 @@ void ScanDialog::setupUi() {
     m_resultView->setAlternatingRowColors(true);
     
     // 交互连接
+    connect(&MftReader::instance(), &MftReader::dataChanged, this, [this]() {
+        // 2026-05-11 响应式刷新：当 USN 监控到变动时，自动触发模型重绘
+        m_tableModel->setFilterText(m_searchEdit->text()); 
+    });
+
     connect(m_resultView, &QTableView::customContextMenuRequested, this, &ScanDialog::onCustomContextMenu);
     connect(m_resultView, &QTableView::doubleClicked, this, &ScanDialog::onItemDoubleClicked);
     connect(m_resultView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ScanDialog::onSelectionChanged);
@@ -500,7 +498,6 @@ void ScanDialog::onStartScan() {
         return;
     }
 
-    m_btnScan->setEnabled(false);
     m_progressBar->show();
     m_progressBar->setRange(0, 0);
     m_statusLabel->setText("正在扫描...");
@@ -508,7 +505,6 @@ void ScanDialog::onStartScan() {
     (void)QtConcurrent::run([this, selectedDrives]() {
         MftReader::instance().buildIndex(selectedDrives);
         QMetaObject::invokeMethod(this, [this]() {
-            m_btnScan->setEnabled(true);
             m_progressBar->hide();
             m_statusLabel->setText("就绪");
             m_tableModel->setFilterText(m_searchEdit->text());

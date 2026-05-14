@@ -39,12 +39,17 @@ void CoreController::startSystem() {
             qDebug() << "[Core] 数据库元数据缓存加载完成，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
 
             // 2. 初始化文件系统索引 (MFT)
-            QMetaObject::invokeMethod(this, [this]() {
-                setStatus("正在构建文件索引...", true);
-            }, Qt::QueuedConnection);
-            
-            MftReader::instance().buildIndex();
-            qDebug() << "[Core] MFT 索引构建完成，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
+            // 2026-05-11 极致对标：优先尝试热加载本地快照，实现瞬间就绪
+            bool cacheOk = MftReader::instance().loadFromCache();
+            if (!cacheOk) {
+                QMetaObject::invokeMethod(this, [this]() {
+                    setStatus("正在构建文件索引...", true);
+                }, Qt::QueuedConnection);
+                MftReader::instance().buildIndex();
+            } else {
+                qDebug() << "[Core] MFT 快照加载成功，已跳过全量扫描。";
+            }
+            qDebug() << "[Core] MFT 引擎就位，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
 
             // 3. 执行一次增量对账
             SyncEngine::instance().runIncrementalSync();
