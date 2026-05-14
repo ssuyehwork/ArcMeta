@@ -61,10 +61,10 @@ void UsnWatcher::run() {
     readData.UsnJournalID   = journalData.UsnJournalID;
 
     const int bufferSize = 128 * 1024;
-    std::vector<uint8_t> buffer(bufferSize);
+    std::unique_ptr<uint8_t[]> buffer(new uint8_t[bufferSize]);
 
     while (!m_stopRequested.load()) {
-        if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.data(), (DWORD)buffer.size(), &bytesReturned, NULL)) {
+        if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), static_cast<DWORD>(bufferSize), &bytesReturned, NULL)) {
             // 发生错误或超时，小步长休眠
             for (int i = 0; i < 10 && !m_stopRequested.load(); ++i) msleep(50);
             continue;
@@ -76,21 +76,21 @@ void UsnWatcher::run() {
             continue;
         }
 
-        uint8_t* pRecord = buffer.data() + sizeof(USN);
-        uint8_t* pEnd = buffer.data() + bytesReturned;
+        uint8_t* pRecord = buffer.get() + sizeof(USN);
+        uint8_t* pEnd = buffer.get() + bytesReturned;
 
         while (pRecord < pEnd) {
-            USN_RECORD_V2* record = (USN_RECORD_V2*)pRecord;
+            ::USN_RECORD_V2* record = reinterpret_cast<::USN_RECORD_V2*>(pRecord);
             handleRecord(record);
             pRecord += record->RecordLength;
         }
 
-        readData.StartUsn = *(USN*)buffer.data();
+        readData.StartUsn = *reinterpret_cast<USN*>(buffer.get());
         m_lastUsn = readData.StartUsn;
     }
 }
 
-void UsnWatcher::handleRecord(USN_RECORD_V2* pRecord) {
+void UsnWatcher::handleRecord(::USN_RECORD_V2* pRecord) {
     // 按照任务要求，只更新 MftReader 内存，不操作数据库
     if (pRecord->Reason & USN_REASON_FILE_CREATE ||
         pRecord->Reason & USN_REASON_DATA_OVERWRITE ||

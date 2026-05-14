@@ -1,11 +1,12 @@
 #pragma once
 
+#include <windows.h>
+#include <winioctl.h>
 #include <QThread>
 #include <QString>
 #include <QList>
 #include <string>
 #include <atomic>
-#include <windows.h>
 
 namespace ArcMeta {
 
@@ -40,7 +41,7 @@ protected:
     void run() override;
 
 private:
-    void handleRecord(struct _USN_RECORD_V2* pRecord);
+    void handleRecord(::USN_RECORD_V2* pRecord);
 
     std::wstring m_volume; // e.g. L"C:"
     uint64_t m_lastUsn;
