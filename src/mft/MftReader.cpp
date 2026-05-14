@@ -6,8 +6,8 @@
 #include <algorithm>
 #include <iostream>
 #include <numeric>
-#include <mutex>
 #include <unordered_set>
+#include <mutex>
 #include <QDateTime>
 #include <QDebug>
 
@@ -42,6 +42,8 @@ void MftReader::clearInternal() {
     m_name_offsets.clear();
     m_attributes.clear();
     m_string_pool.clear();
+    m_drive_indices.clear();
+    m_drive_list.clear();
     m_frn_to_idx.clear();
     m_parent_to_children.clear();
     m_path_cache.clear();
@@ -51,7 +53,6 @@ void MftReader::clearInternal() {
 }
 
 void MftReader::clear() {
-    // 1. 先在锁外停止所有 watcher，防止死锁
     std::vector<UsnWatcher*> toStop;
     {
         QWriteLocker lock(&m_dataLock);
@@ -64,16 +65,15 @@ void MftReader::clear() {
         }
     }
 
-    // 2. 加写锁执行内部清理
     QWriteLocker lock(&m_dataLock);
     clearInternal();
 }
 
 void MftReader::buildIndex(const QStringList& drives) {
-    clear(); // 先清理，此时无锁
+    clear();
 
     {
-        QWriteLocker lock(&m_dataLock); // 再加锁
+        QWriteLocker lock(&m_dataLock);
 
         QStringList targetDrives = drives.isEmpty() ? getAvailableDrives() : drives;
 
@@ -94,12 +94,10 @@ void MftReader::buildIndex(const QStringList& drives) {
         m_isInitialized = true;
     }
 
-    // 在锁外保存缓存，因为 saveToCache 内部会加读锁
     saveToCache();
     
     {
         QWriteLocker lock(&m_dataLock);
-        // 启动监控
         for (auto& [drive, usn] : m_next_usns) {
             auto* watcher = new UsnWatcher(drive, usn);
             m_watchers.push_back(watcher);
@@ -109,7 +107,7 @@ void MftReader::buildIndex(const QStringList& drives) {
 }
 
 bool MftReader::loadFromCache() {
-    clear(); // 清理
+    clear();
 
     std::unordered_map<std::string, uint64_t> usnMap;
     {
@@ -123,14 +121,20 @@ bool MftReader::loadFromCache() {
 
         if (result != ScchResult::Ok) return false;
 
-        for (const auto& [drive, usn] : usnMap)
-            m_next_usns[QString::fromStdString(drive).toStdWString()] = usn;
+        for (const auto& [drive, usn] : usnMap) {
+            std::wstring wdrive = QString::fromStdString(drive).toStdWString();
+            m_next_usns[wdrive] = usn;
+            m_drive_list.push_back(wdrive);
+        }
+
+        if (m_drive_indices.size() != m_frns.size()) {
+            m_drive_indices.assign(m_frns.size(), 0);
+        }
 
         rebuildFrnToIndexMap();
         buildSortedIndices();
         m_isInitialized = true;
 
-        // 启动 UsnWatcher 追平离线变更
         for (const auto& [drive, usn] : m_next_usns) {
             auto* watcher = new UsnWatcher(drive, usn);
             m_watchers.push_back(watcher);
@@ -157,9 +161,9 @@ bool MftReader::saveToCache() {
 }
 
 std::wstring MftReader::getPathFast(const std::wstring& volume, uint64_t frn) {
-    QReadLocker lock(&m_dataLock);
+    // 采用写锁保护路径缓存写入
+    QWriteLocker lock(&m_dataLock);
     
-    // 先查缓存
     auto it = m_path_cache.find(frn);
     if (it != m_path_cache.end()) return it->second;
 
@@ -171,12 +175,11 @@ std::wstring MftReader::getPathFast(const std::wstring& volume, uint64_t frn) {
         uint64_t maskedFrn = currentFrn & 0x0000FFFFFFFFFFFFull;
         auto idxIt = m_frn_to_idx.find(maskedFrn);
         if (idxIt == m_frn_to_idx.end()) break;
-        if (visited.count(maskedFrn)) break;  // 环路保护
+        if (visited.count(maskedFrn)) break;
 
         visited.insert(maskedFrn);
         uint32_t idx = idxIt->second;
 
-        // 从字符串池取名
         const char* namePtr = reinterpret_cast<const char*>(
             m_string_pool.data() + m_name_offsets[idx]);
         segments.push_back(QString::fromUtf8(namePtr).toStdWString());
@@ -188,7 +191,7 @@ std::wstring MftReader::getPathFast(const std::wstring& volume, uint64_t frn) {
 
     if (segments.empty()) return L"";
 
-    std::wstring fullPath = volume; // "C:"
+    std::wstring fullPath = volume;
     for (auto itSeg = segments.rbegin(); itSeg != segments.rend(); ++itSeg)
         fullPath += L"\\" + *itSeg;
 
@@ -197,9 +200,20 @@ std::wstring MftReader::getPathFast(const std::wstring& volume, uint64_t frn) {
 }
 
 QString MftReader::getFullPath(int index) const {
-    // 这里简单实现，由于SoA目前没存volume索引，在单盘下可用，多盘需在SoA加volume索引
-    // 目前保持接口存在
-    return QString();
+    uint64_t frn = 0;
+    uint16_t driveIdx = 0;
+    std::wstring volume;
+
+    {
+        QReadLocker lock(&m_dataLock);
+        if (index < 0 || index >= (int)m_frns.size()) return QString();
+        frn = m_frns[index];
+        driveIdx = m_drive_indices[index];
+        volume = (driveIdx < m_drive_list.size()) ? m_drive_list[driveIdx] : L"";
+    }
+
+    if (frn == 0) return QString();
+    return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(volume, frn));
 }
 
 QString MftReader::getName(int index) const {
@@ -259,6 +273,16 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* pRecord, const std::wstring& v
         m_timestamps.push_back(0);
         m_name_offsets.push_back(0);
         m_attributes.push_back(0);
+        m_drive_indices.push_back(0);
+
+        auto itDrive = std::find(m_drive_list.begin(), m_drive_list.end(), volume);
+        if (itDrive != m_drive_list.end()) {
+            m_drive_indices.back() = (uint16_t)std::distance(m_drive_list.begin(), itDrive);
+        } else {
+            m_drive_indices.back() = (uint16_t)m_drive_list.size();
+            m_drive_list.push_back(volume);
+        }
+
         m_frn_to_idx[maskedFrn] = idx;
     }
 
@@ -267,7 +291,6 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* pRecord, const std::wstring& v
     m_attributes[idx] = pRecord->FileAttributes;
     m_timestamps[idx] = filetimeToUnixMs(pRecord->TimeStamp.QuadPart);
 
-    // 更新名称
     std::wstring wname(reinterpret_cast<const wchar_t*>((uint8_t*)pRecord + pRecord->FileNameOffset), pRecord->FileNameLength / 2);
     std::string nameUtf8 = QString::fromStdWString(wname).toUtf8().toStdString();
 
@@ -293,6 +316,10 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
         m_path_cache.erase(maskedFrn);
         emit dataChanged();
     }
+}
+
+void MftReader::applyChanges(const QList<UsnChange>& changes) {
+    // 逻辑已在 handleRecord -> updateEntryFromUsn 中体现。
 }
 
 QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSensitive, const QStringList& extensionList, bool includeHidden, bool includeSystem) {
@@ -390,7 +417,8 @@ bool MftReader::loadMftDirect(const std::wstring& volumePath, DriveResult& resul
         return false;
     }
 
-    m_next_usns[volumePath.substr(0, 2)] = journalData.NextUsn;
+    result.volume = volumePath.substr(0, 2);
+    m_next_usns[result.volume] = journalData.NextUsn;
 
     MFT_ENUM_DATA_V0 enumData = {0};
     enumData.HighUsn = journalData.NextUsn;
@@ -409,7 +437,7 @@ bool MftReader::loadMftDirect(const std::wstring& volumePath, DriveResult& resul
             entry.parentFrn = record->ParentFileReferenceNumber;
             entry.attributes = record->FileAttributes;
             entry.modifyTime = filetimeToUnixMs(record->TimeStamp.QuadPart);
-            entry.size = 0;
+            entry.size = (record->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? 0 : 4096;
 
             std::wstring wname(record->FileName, record->FileNameLength / 2);
             entry.nameUtf8 = QString::fromStdWString(wname).toUtf8().toStdString();
@@ -426,12 +454,17 @@ bool MftReader::loadMftDirect(const std::wstring& volumePath, DriveResult& resul
 void MftReader::mergeDriveResult(const DriveResult& result) {
     size_t oldSize = m_frns.size();
     size_t addSize = result.entries.size();
+
+    m_drive_list.push_back(result.volume);
+    uint16_t driveIdx = (uint16_t)(m_drive_list.size() - 1);
+
     m_frns.resize(oldSize + addSize);
     m_parent_frns.resize(oldSize + addSize);
     m_sizes.resize(oldSize + addSize);
     m_timestamps.resize(oldSize + addSize);
     m_name_offsets.resize(oldSize + addSize);
     m_attributes.resize(oldSize + addSize);
+    m_drive_indices.resize(oldSize + addSize, driveIdx);
 
     size_t totalStringDelta = 0;
     for (const auto& entry : result.entries) totalStringDelta += entry.nameUtf8.size() + 1;

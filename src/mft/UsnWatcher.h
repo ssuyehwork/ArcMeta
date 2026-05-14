@@ -1,11 +1,24 @@
 #pragma once
 
 #include <QThread>
+#include <QString>
+#include <QList>
 #include <string>
 #include <atomic>
 #include <windows.h>
 
 namespace ArcMeta {
+
+// 变动记录结构
+struct UsnChange {
+    enum Type { Created, Deleted, Renamed, Modified };
+    Type type;
+    unsigned __int64 frn;
+    unsigned __int64 parentFrn;
+    QString name;
+    uint32_t attributes;
+    long long size;
+};
 
 /**
  * @brief 最终合并版 UsnWatcher
@@ -20,11 +33,14 @@ public:
 
     void stop();
 
+signals:
+    void changesDetected(const QList<UsnChange>& changes);
+
 protected:
     void run() override;
 
 private:
-    void handleRecord(USN_RECORD_V2* pRecord);
+    void handleRecord(struct _USN_RECORD_V2* pRecord);
 
     std::wstring m_volume; // e.g. L"C:"
     uint64_t m_lastUsn;

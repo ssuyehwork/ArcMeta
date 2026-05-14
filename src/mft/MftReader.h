@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <QList>
 #include <QReadWriteLock>
 #include <vector>
 #include <string>
@@ -12,10 +13,9 @@
 #include <windows.h>
 #include <winioctl.h>
 #include "ScchCache.h"
+#include "UsnWatcher.h"
 
 namespace ArcMeta {
-
-class UsnWatcher;
 
 /**
  * @brief 最终合并版 MftReader
@@ -53,6 +53,7 @@ public:
     // USN 更新接口
     void updateEntryFromUsn(USN_RECORD_V2* pRecord, const std::wstring& volume);
     void removeEntryByFrn(const std::wstring& volume, uint64_t frn);
+    void applyChanges(const QList<UsnChange>& changes);
 
 signals:
     void dataChanged();
@@ -74,6 +75,7 @@ private:
         std::string nameUtf8;
     };
     struct DriveResult {
+        std::wstring volume;
         std::vector<RawEntry> entries;
     };
     bool loadMftDirect(const std::wstring& volumePath, DriveResult& result);
@@ -83,13 +85,17 @@ private:
     bool isFixedDrive(const QString& drive) const;
 
     // SoA 主数据
-    std::vector<uint64_t>  m_frns;
-    std::vector<uint64_t>  m_parent_frns;
-    std::vector<int64_t>   m_sizes;
-    std::vector<int64_t>   m_timestamps;   // Unix 毫秒
-    std::vector<uint32_t>  m_name_offsets;
-    std::vector<uint32_t>  m_attributes;
-    std::vector<uint8_t>   m_string_pool;
+    std::vector<uint64_t>      m_frns;
+    std::vector<uint64_t>      m_parent_frns;
+    std::vector<int64_t>       m_sizes;
+    std::vector<int64_t>       m_timestamps;   // Unix 毫秒
+    std::vector<uint32_t>      m_name_offsets;
+    std::vector<uint32_t>      m_attributes;
+    std::vector<uint8_t>       m_string_pool;
+    std::vector<uint16_t>      m_drive_indices; // 对应 m_drive_list 的索引
+
+    // 盘符列表 (如 L"C:")
+    std::vector<std::wstring>  m_drive_list;
 
     // 反向索引
     std::unordered_map<uint64_t, uint32_t>              m_frn_to_idx;
