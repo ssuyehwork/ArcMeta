@@ -20,11 +20,24 @@
 #include <QFileInfo>
 #include <QDateTime>
 #include <QHash>
+#include <QSet>
 #include <QReadWriteLock>
 #include <atomic>
 #include <memory>
 
 namespace ArcMeta {
+
+/**
+ * @brief 简单的配置结构，对标 Rust 的 AppConfig
+ */
+struct ScanConfig {
+    QSet<QString> activeDrives;
+    QSet<QString> defaultDrives;
+    QSet<QString> ignoredDrives;
+
+    void load();
+    void save();
+};
 
 struct ScanFilterState {
     QStringList extensionList; 
@@ -38,9 +51,6 @@ struct ScanFilterState {
     }
 };
 
-/**
- * @brief 虚拟化表格模型 (代理 MftReader)
- */
 class ScanTableModel : public QAbstractTableModel {
     Q_OBJECT
 public:
@@ -54,10 +64,6 @@ public:
 
     void setFilterText(const QString& text);
     void setFilterState(const ScanFilterState& state);
-    void setEntries(QList<IndexedEntry>&& entries); // 保持签名兼容但内部空实现
-    void applyChanges(const QList<UsnChange>& changes);
-
-    // 2026-05-10 新增虚拟分页机制
     void loadMore(int count = 200);
     int totalFilteredCount() const { return m_filteredIndices.size(); }
 
@@ -72,15 +78,12 @@ private:
     QString m_filterText;
     ScanFilterState m_filterState;
     QFutureWatcher<QVector<int>> m_filterWatcher;
-    int m_displayLimit = 200; // 默认仅渲染前 200 条，其余动态加载
+    int m_displayLimit = 200;
 };
 
-/**
- * @brief 极致扫描与查找对话框
- */
 class ScanDialog : public FramelessDialog {
     Q_OBJECT
-    friend class ScanTableModel; // 2026-05-10 物理修复：允许 Model 访问私有图标缓存
+    friend class ScanTableModel;
 public:
     explicit ScanDialog(QWidget* parent = nullptr);
     ~ScanDialog() override;
@@ -91,22 +94,27 @@ private slots:
     void onCustomContextMenu(const QPoint& pos);
     void onItemDoubleClicked(const QModelIndex& index);
     void onSelectionChanged();
-    void onDriveContextMenu(QCheckBox* cb, const QPoint& pos);
+    void onDriveContextMenu(const QString& drive, const QPoint& pos);
+    void onIgnoredDriveContextMenu(const QString& drive, const QPoint& pos);
+    void onRenameTriggered();
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
     void setupUi();
+    void refreshDriveList();
+    void updateStatus(const QString& text, bool scanning = false);
 
-    // UI 组件
     QLineEdit* m_searchEdit = nullptr;
     QLineEdit* m_extEdit = nullptr;
     QCheckBox* m_checkRegex = nullptr;
     QCheckBox* m_checkCase = nullptr;
     QCheckBox* m_checkHidden = nullptr;
     QCheckBox* m_checkSystem = nullptr;
-    QList<QCheckBox*> m_driveChecks;
+
+    QHBoxLayout* m_driveLayout = nullptr;
+    QWidget* m_driveContainer = nullptr;
     
     QTableView* m_resultView = nullptr;
     ScanTableModel* m_tableModel = nullptr;
@@ -117,9 +125,9 @@ private:
 
     std::unique_ptr<CacheManager> m_cacheManager;
     QFileIconProvider m_iconProvider;
-
-    // 2026-05-10 物理修复：移除静态全局缓存，改用成员变量管理图标生命周期
     mutable QHash<QString, QIcon> m_iconCache;
+
+    ScanConfig m_config;
 };
 
 } // namespace ArcMeta
