@@ -65,12 +65,12 @@ void UsnWatcher::run() {
 
     while (!m_stopRequested.load()) {
         if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), static_cast<DWORD>(bufferSize), &bytesReturned, NULL)) {
-            msleep(500);
+            for (int i = 0; i < 10 && !m_stopRequested.load(); ++i) msleep(50);
             continue;
         }
 
         if (bytesReturned <= sizeof(USN)) {
-            msleep(500);
+            for (int i = 0; i < 10 && !m_stopRequested.load(); ++i) msleep(50);
             continue;
         }
 

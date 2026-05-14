@@ -1,17 +1,20 @@
 #pragma once
 
+#include <QObject>
 #include <QString>
 #include <QVector>
 #include <QHash>
 #include <QReadWriteLock>
 #include <memory>
 #include <vector>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <list>
 #include <mutex>
 #include <windows.h>
 #include "../core/IndexedEntry.h"
+#include "ScchCache.h"
 
 namespace ArcMeta {
 
@@ -88,13 +91,19 @@ struct OverlayEntry {
  * 采用 SoA (Structure of Arrays) 架构，彻底取代旧版 unordered_map 逻辑。
  * 实现百万级文件秒级扫描、零拷贝加载与实时监控。
  */
-class MftReader {
+class MftReader : public QObject {
+    Q_OBJECT
 public:
     static MftReader& instance();
 
+signals:
+    void dataChanged(); // 2026-05-11 新增：USN 变更通知信号
+
+public:
     // 核心生命周期
     void buildIndex(const QStringList& drives = QStringList());
     bool loadFromCache();
+    bool saveToCache(); // 2026-05-11 新增：SoA 持久化接口
     void clear(); // 释放所有内存资源
 
     // 极致查询接口 (SoA 并行分块规约)
@@ -122,10 +131,17 @@ private:
     ~MftReader();
 
     // 内部扫描逻辑 (移植自 ScanDialog 的高性能实现)
+    // 2026-05-11 极致对标：使用 RawEntry 代替 IndexedEntry，彻底在扫描阶段禁用 QString
+    struct RawEntry {
+        unsigned __int64 frn;
+        unsigned __int64 parentFrn;
+        uint32_t attributes;
+        uint64_t modifyTime;
+        std::string nameUtf8;
+    };
+
     struct DriveResult {
-        std::vector<IndexedEntry> entries;
-        QHash<QString, int> typeCounts;
-        QHash<QString, int> suffixCounts;
+        std::vector<RawEntry> entries;
     };
     DriveResult performMftScan(const QString& driveRoot);
     
@@ -143,8 +159,8 @@ private:
     // 2026-05-10 对标 Rust：纯FRN SoA架构 (Structure of Arrays)
     std::vector<uint64_t> m_frns;           // FRN数组
     std::vector<uint64_t> m_parent_frns;     // 父FRN数组  
-    std::vector<uint64_t> m_sizes;           // 文件大小
-    std::vector<uint64_t> m_timestamps;      // 修改时间戳
+    std::vector<int64_t>  m_sizes;           // 文件大小
+    std::vector<int64_t>  m_timestamps;      // 修改时间戳
     std::vector<uint32_t> m_name_offsets;    // 名称在字符串池中的偏移
     std::vector<uint32_t> m_attributes;      // 文件属性
     std::vector<uint8_t>  m_string_pool;      // 单一连续字符串池
@@ -154,8 +170,8 @@ private:
     mutable QReadWriteLock m_dataLock;
 
     // 监控器管理
-    QVector<UsnWatcher*> m_watchers;
-    QHash<QString, unsigned __int64> m_nextUsns;
+    std::vector<UsnWatcher*> m_watchers; // 2026-05-11 物理补全：使用标准容器配合安全退出逻辑
+    QHash<QString, uint64_t> m_nextUsns; // 2026-05-11 物理补全：记录各盘符的 NextUsn 水位线
 
     bool m_isInitialized = false;
 
@@ -170,7 +186,6 @@ private:
     mutable LruPathCache m_pathCache{20000}; // 2万条目的路径 LRU 缓存
     std::vector<int> m_sharedIndices; // 常驻内存复用
     int m_dirtyCount = 0;
-    mutable QString m_sharedPath; // 路径缓存复用字符串
 };
 
 } // namespace ArcMeta

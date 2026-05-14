@@ -114,7 +114,6 @@ private:
     QLabel* m_summaryLabel = nullptr;
     QLabel* m_selectionLabel = nullptr;
     QProgressBar* m_progressBar = nullptr;
-    QPushButton* m_btnScan = nullptr;
 
     std::unique_ptr<CacheManager> m_cacheManager;
     QFileIconProvider m_iconProvider;
