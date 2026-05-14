@@ -32,7 +32,8 @@ public:
     // 核心生命周期
     void buildIndex(const QStringList& drives = QStringList());
     bool loadFromCache();
-    bool saveToCache();
+    bool saveToCache(); // 保存所有已加载的盘符
+    bool saveDriveToCache(size_t driveIdx); // 保存特定盘符
     void clear();
 
     // 查询接口
@@ -96,7 +97,7 @@ private:
     std::unordered_map<uint64_t, uint32_t>              m_frn_to_idx;
     std::unordered_map<uint64_t, std::vector<uint64_t>> m_parent_to_children;
 
-    // 路径缓存与互斥锁 (防止读锁期间写入导致的死锁/冲突)
+    // 路径缓存与互斥锁
     mutable std::unordered_map<uint64_t, std::wstring>  m_path_cache;
     mutable std::mutex m_pathCacheMutex;
 
@@ -110,7 +111,7 @@ private:
     bool m_isInitialized = false;
     uint32_t m_dirty_count = 0;
 
-    // 排序索引 (用于加速某些搜索或显示)
+    // 排序索引
     std::vector<uint32_t> m_sorted_indices;
 };
 
