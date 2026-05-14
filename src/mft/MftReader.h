@@ -62,6 +62,8 @@ private:
     MftReader();
     ~MftReader();
 
+    bool saveDriveToCacheInternal(size_t driveIdx); // 内部无锁版本
+
     void clearInternal(); // 内部无锁版本
     void rebuildFrnToIndexMap();
     void buildSortedIndices();

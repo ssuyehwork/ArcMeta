@@ -34,6 +34,8 @@ struct ScanConfig {
     QSet<QString> activeDrives;
     QSet<QString> defaultDrives;
     QSet<QString> ignoredDrives;
+    QStringList queryHistory;
+    QStringList extHistory;
 
     void load();
     void save();
@@ -90,6 +92,7 @@ public:
 
 private slots:
     void onStartScan();
+    void onTriggerSearch();
     void onFilterOptionChanged();
     void onCustomContextMenu(const QPoint& pos);
     void onItemDoubleClicked(const QModelIndex& index);
@@ -100,14 +103,19 @@ private slots:
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void setupUi();
     void refreshDriveList();
     void updateStatus(const QString& text, bool scanning = false);
+    void updateStatusBar();
+    QString formatNumber(int64_t n);
+    QString formatSize(int64_t bytes);
 
     QLineEdit* m_searchEdit = nullptr;
     QLineEdit* m_extEdit = nullptr;
+    QPushButton* m_searchBtn = nullptr;
     QCheckBox* m_checkRegex = nullptr;
     QCheckBox* m_checkCase = nullptr;
     QCheckBox* m_checkHidden = nullptr;
@@ -118,10 +126,17 @@ private:
     
     QTableView* m_resultView = nullptr;
     ScanTableModel* m_tableModel = nullptr;
-    QLabel* m_statusLabel = nullptr;
-    QLabel* m_summaryLabel = nullptr;
-    QLabel* m_selectionLabel = nullptr;
+
+    // 2026-05-14 对标原版界面组件 (物理对标 P0：确保变量名唯一，防止指针覆盖导致闪退)
+    QLabel* m_titleStatusLabel = nullptr; // 标题栏 "READY - 0"
+    QLabel* m_statLabelMain = nullptr;    // 状态栏 "共 X 条 | 本页 Y 条"
+    QLabel* m_statLabelTime = nullptr;    // 状态栏 "耗时 X ms"
+    QLabel* m_statLabelMemory = nullptr; // 状态栏 "数据占用 X MB"
+    QLabel* m_selectionLabel = nullptr;  // 状态栏 "已选 X 项 | 合计大小 Z"
+    QPushButton* m_csvBtn = nullptr;     // 状态栏 "导出所选为 CSV"
     QProgressBar* m_progressBar = nullptr;
+
+    int64_t m_lastSearchMs = 0;
 
     std::unique_ptr<CacheManager> m_cacheManager;
     QFileIconProvider m_iconProvider;

@@ -68,35 +68,65 @@ void MftReader::clear() {
 }
 
 void MftReader::buildIndex(const QStringList& drives) {
-    clear();
-    QWriteLocker lock(&m_dataLock);
-    
+    // 2026-05-14 物理对标修复点 P2：将耗时扫描逻辑移出写锁，仅在合并数据时持锁
+    // 1. 确定目标盘符 (锁外)
     QStringList targetDrives = drives;
     if (targetDrives.isEmpty()) {
         DWORD mask = GetLogicalDrives();
         for (int i = 0; i < 26; ++i) {
             if (mask & (1 << i)) {
                 QString root = QString(QChar('A' + i)) + ":\\";
-                if (GetDriveTypeW(reinterpret_cast<const wchar_t*>(root.utf16())) == DRIVE_FIXED)
+                // 对标 Rust 版：支持 USB 盘扫描
+                UINT type = GetDriveTypeW(reinterpret_cast<const wchar_t*>(root.utf16()));
+                if (type == DRIVE_FIXED || type == DRIVE_REMOVABLE)
                     targetDrives << root.left(2);
             }
         }
     }
 
-    for (const QString& driveStr : targetDrives) {
-        std::wstring volume = driveStr.toStdWString();
-        if (volume.size() > 2 && volume.back() == L'\\') volume.pop_back();
-
+    // 2. 执行并发磁盘 I/O 扫描 (锁外)
+    struct ScannedDrive {
+        std::wstring volume;
         DriveResult result;
-        if (loadMftDirect(volume, result)) {
-            size_t driveIdx = m_drive_list.size();
-            m_drive_list.push_back(volume);
-            m_next_usns[volume] = result.nextUsn;
-            mergeDriveResult(volume, result, driveIdx);
-            
-            // 扫描完一个盘立即保存
-            saveDriveToCache(driveIdx);
-        }
+        bool success = false;
+    };
+    std::vector<ScannedDrive> scannedResults(targetDrives.size());
+    
+    std::vector<int> driveIndices(targetDrives.size());
+    std::iota(driveIndices.begin(), driveIndices.end(), 0);
+    
+    // 使用并行算法加速多盘扫描，杜绝单盘挂起导致全盘阻塞
+    std::for_each(std::execution::par, driveIndices.begin(), driveIndices.end(), [&](int i) {
+        std::wstring volume = targetDrives[i].toStdWString();
+        if (volume.size() > 2 && volume.back() == L'\\') volume.pop_back();
+        
+        scannedResults[i].volume = volume;
+        scannedResults[i].success = loadMftDirect(volume, scannedResults[i].result);
+    });
+
+    // 3. 进入原子写锁周期进行内存合并 (此时已无耗时 I/O)
+    QWriteLocker lock(&m_dataLock);
+    
+    // 停止并清理旧监控器
+    std::vector<UsnWatcher*> toStop = std::move(m_watchers);
+    m_watchers.clear();
+    // 临时释放锁以停止线程，防止 MftReader 对象生命周期竞争导致的阻塞
+    lock.unlock();
+    for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
+    lock.relock();
+
+    clearInternal();
+
+    for (auto& sr : scannedResults) {
+        if (!sr.success || sr.result.entries.empty()) continue;
+        
+        size_t driveIdx = m_drive_list.size();
+        m_drive_list.push_back(sr.volume);
+        m_next_usns[sr.volume] = sr.result.nextUsn;
+        mergeDriveResult(sr.volume, sr.result, driveIdx);
+        
+        // 2026-05-14 修复：由于当前已持锁，必须调用 Internal 版本，防止死锁
+        saveDriveToCacheInternal(driveIdx);
     }
 
     rebuildFrnToIndexMap();
@@ -104,19 +134,21 @@ void MftReader::buildIndex(const QStringList& drives) {
     m_isInitialized = true;
 
     for (const auto& [volume, usn] : m_next_usns) {
-        auto* watcher = new UsnWatcher(volume, usn, this);
+        auto* watcher = new UsnWatcher(volume, usn, nullptr);
         m_watchers.push_back(watcher);
         watcher->start();
     }
 }
 
 bool MftReader::loadFromCache() {
-    clearInternal();
-    
+    // 2026-05-14 修复点 2：修复数据竞争 (Data Race)。
+    // 物理上必须先拿锁，再清空容器，杜绝查询线程访问到已清空的碎片数据。
     std::filesystem::path cacheDir = "ArcMeta/cache";
     if (!std::filesystem::exists(cacheDir)) return false;
 
     QWriteLocker lock(&m_dataLock);
+    clearInternal();
+
     for (auto const& dir_entry : std::filesystem::directory_iterator{cacheDir}) {
         if (dir_entry.path().extension() == ".scch") {
             std::vector<uint64_t>  f, pf;
@@ -128,18 +160,25 @@ bool MftReader::loadFromCache() {
             ScchResult res = ScchCache::load(dir_entry.path().string().c_str(), f, pf, s, t, no, attr, sp, usnMap);
             if (res == ScchResult::Ok) {
                 size_t driveIdx = m_drive_list.size();
-                size_t oldTotal = m_frns.size();
                 size_t count = f.size();
                 size_t oldPoolSize = m_string_pool.size();
 
-                // 合并数据
-                m_frns.insert(m_frns.end(), f.begin(), f.end());
-                m_sizes.insert(m_sizes.end(), s.begin(), s.end());
-                m_timestamps.insert(m_timestamps.end(), t.begin(), t.end());
-                m_attributes.insert(m_attributes.end(), attr.begin(), attr.end());
-                
-                // 合并并修正盘符索引与名称偏移
+                // 2026-05-14 物理对标修复点 P4：确保 SoA 数组长度在合并过程中严格对齐。
+                // 预留空间，防止循环中频繁重分配
+                m_frns.reserve(m_frns.size() + count);
+                m_sizes.reserve(m_sizes.size() + count);
+                m_timestamps.reserve(m_timestamps.size() + count);
+                m_attributes.reserve(m_attributes.size() + count);
+                m_parent_frns.reserve(m_parent_frns.size() + count);
+                m_name_offsets.reserve(m_name_offsets.size() + count);
+
+                // 同步填充，确保各数组在任意时刻的 size 偏差最小（虽然已持锁，但这符合 SoA 鲁棒性规范）
                 for (size_t i = 0; i < count; ++i) {
+                    m_frns.push_back(f[i]);
+                    m_sizes.push_back(s[i]);
+                    m_timestamps.push_back(t[i]);
+                    m_attributes.push_back(attr[i]);
+                    
                     uint64_t encodedPf = (static_cast<uint64_t>(driveIdx) << 48) | (pf[i] & 0x0000FFFFFFFFFFFFull);
                     m_parent_frns.push_back(encodedPf);
                     m_name_offsets.push_back(no[i] + (uint32_t)oldPoolSize);
@@ -162,7 +201,8 @@ bool MftReader::loadFromCache() {
     m_isInitialized = true;
 
     for (const auto& [volume, usn] : m_next_usns) {
-        auto* watcher = new UsnWatcher(volume, usn, this);
+        // 2026-05-14 修复点 1：杜绝跨线程父对象绑定
+        auto* watcher = new UsnWatcher(volume, usn, nullptr);
         m_watchers.push_back(watcher);
         watcher->start();
     }
@@ -179,6 +219,11 @@ bool MftReader::saveToCache() {
 }
 
 bool MftReader::saveDriveToCache(size_t driveIdx) {
+    QReadLocker lock(&m_dataLock);
+    return saveDriveToCacheInternal(driveIdx);
+}
+
+bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     if (driveIdx >= m_drive_list.size()) return false;
     std::wstring volume = m_drive_list[driveIdx];
     
@@ -189,7 +234,8 @@ bool MftReader::saveDriveToCache(size_t driveIdx) {
     std::unordered_map<uint32_t, uint32_t> offsetMap;
 
     for (size_t i = 0; i < m_frns.size(); ++i) {
-        if ((m_parent_frns[i] >> 48) == driveIdx) {
+        // FRN 为 0 表示该项已被逻辑删除，不保存
+        if (m_frns[i] != 0 && (m_parent_frns[i] >> 48) == driveIdx) {
             f.push_back(m_frns[i]);
             pf.push_back(m_parent_frns[i] & 0x0000FFFFFFFFFFFFull);
             s.push_back(m_sizes[i]);
