@@ -104,7 +104,7 @@ void MftReader::buildIndex(const QStringList& drives) {
     m_isInitialized = true;
 
     for (const auto& [volume, usn] : m_next_usns) {
-        auto* watcher = new UsnWatcher(volume, usn, this);
+        auto* watcher = new UsnWatcher(volume, usn);
         m_watchers.push_back(watcher);
         watcher->start();
     }
@@ -114,11 +114,11 @@ bool MftReader::loadFromCache() {
     clearInternal();
 
     std::filesystem::path cacheDir = "ArcMeta/cache";
-    if (!std::filesystem::exists(cacheDir)) return false;
+    if (!std::filesystem::exists(cacheDir) || !std::filesystem::is_directory(cacheDir)) return false;
 
     QWriteLocker lock(&m_dataLock);
     for (auto const& dir_entry : std::filesystem::directory_iterator{cacheDir}) {
-        if (dir_entry.path().extension() == ".scch") {
+        if (dir_entry.is_regular_file() && dir_entry.path().extension() == ".scch") {
             std::vector<uint64_t>  f, pf;
             std::vector<int64_t>   s, t;
             std::vector<uint32_t>  no, attr;
@@ -126,31 +126,35 @@ bool MftReader::loadFromCache() {
             std::unordered_map<std::string, uint64_t> usnMap;
 
             ScchResult res = ScchCache::load(dir_entry.path().string().c_str(), f, pf, s, t, no, attr, sp, usnMap);
-            if (res == ScchResult::Ok) {
-                size_t driveIdx = m_drive_list.size();
-                size_t oldTotal = m_frns.size();
-                size_t count = f.size();
+            if (res == ScchResult::Ok && !usnMap.empty()) {
+                // 物理对标：获取该缓存对应的正确盘符索引，防止多盘合并时的索引错位
+                std::wstring wDrive = QString::fromStdString(usnMap.begin()->first).toStdWString();
+                size_t driveIdx = 0;
+                auto it = std::find(m_drive_list.begin(), m_drive_list.end(), wDrive);
+                if (it == m_drive_list.end()) {
+                    driveIdx = m_drive_list.size();
+                    m_drive_list.push_back(wDrive);
+                } else {
+                    driveIdx = std::distance(m_drive_list.begin(), it);
+                }
+                m_next_usns[wDrive] = usnMap.begin()->second;
+
                 size_t oldPoolSize = m_string_pool.size();
+                size_t count = f.size();
 
-                // 合并数据
-                m_frns.insert(m_frns.end(), f.begin(), f.end());
-                m_sizes.insert(m_sizes.end(), s.begin(), s.end());
-                m_timestamps.insert(m_timestamps.end(), t.begin(), t.end());
-                m_attributes.insert(m_attributes.end(), attr.begin(), attr.end());
-
-                // 合并并修正盘符索引与名称偏移
+                // 合并 SoA 数据并执行 48 位 FRN 编码，彻底杜绝跨盘符 FRN 冲突
                 for (size_t i = 0; i < count; ++i) {
+                    uint64_t encodedFrn = (static_cast<uint64_t>(driveIdx) << 48) | (f[i] & 0x0000FFFFFFFFFFFFull);
                     uint64_t encodedPf = (static_cast<uint64_t>(driveIdx) << 48) | (pf[i] & 0x0000FFFFFFFFFFFFull);
+
+                    m_frns.push_back(encodedFrn);
                     m_parent_frns.push_back(encodedPf);
+                    m_sizes.push_back(s[i]);
+                    m_timestamps.push_back(t[i]);
+                    m_attributes.push_back(attr[i]);
                     m_name_offsets.push_back(no[i] + (uint32_t)oldPoolSize);
                 }
                 m_string_pool.insert(m_string_pool.end(), sp.begin(), sp.end());
-
-                for (const auto& [drive, usn] : usnMap) {
-                    std::wstring wDrive = QString::fromStdString(drive).toStdWString();
-                    m_drive_list.push_back(wDrive);
-                    m_next_usns[wDrive] = usn;
-                }
             }
         }
     }
@@ -162,7 +166,7 @@ bool MftReader::loadFromCache() {
     m_isInitialized = true;
 
     for (const auto& [volume, usn] : m_next_usns) {
-        auto* watcher = new UsnWatcher(volume, usn, this);
+        auto* watcher = new UsnWatcher(volume, usn);
         m_watchers.push_back(watcher);
         watcher->start();
     }
@@ -277,12 +281,19 @@ std::wstring MftReader::getPathFast(const std::wstring& volume, uint64_t frn) {
         auto idxIt = m_frn_to_idx.find(cur);
         if (idxIt == m_frn_to_idx.end() || vis.count(cur)) break;
         vis.insert(cur);
+
         uint32_t idx = idxIt->second;
         const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
         segments.push_back(QString::fromUtf8(p).toStdWString());
-        uint64_t parent = m_parent_frns[idx] & 0x0000FFFFFFFFFFFFull;
-        if (parent == 5 || parent == cur || parent == 0) break;
-        cur = parent;
+
+        uint64_t drivePart = m_parent_frns[idx] & 0xFFFF000000000000ull;
+        uint64_t parentIndex = m_parent_frns[idx] & 0x0000FFFFFFFFFFFFull;
+
+        // 物理规则：FRN 5 是 NTFS 根目录。到达根目录或父级无效时停止。
+        if (parentIndex == 5 || parentIndex == (cur & 0x0000FFFFFFFFFFFFull) || parentIndex == 0) break;
+
+        // 维持带盘符编码的 FRN 进行下一轮查找
+        cur = drivePart | parentIndex;
     }
     if (segments.empty()) return L"";
     std::wstring path = volume;
@@ -334,14 +345,19 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
     uint64_t frn = record->FileReferenceNumber;
     QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(
         reinterpret_cast<uint8_t*>(record) + record->FileNameOffset), record->FileNameLength / 2);
-    
-    size_t dIdx = 0;
-    for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
 
+    size_t dIdx = 0;
+    bool found = false;
+    for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; found = true; break; } }
+    if (!found) return; // 未知盘符变动，不予处理
+
+    uint64_t encodedFrn = (static_cast<uint64_t>(dIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
     uint64_t encodedPf = (static_cast<uint64_t>(dIdx) << 48) | (record->ParentFileReferenceNumber & 0x0000FFFFFFFFFFFFull);
-    auto it = m_frn_to_idx.find(frn);
+
+    auto it = m_frn_to_idx.find(encodedFrn);
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
+        m_frns[idx] = encodedFrn; // 冗余确认
         m_parent_frns[idx] = encodedPf;
         m_attributes[idx] = record->FileAttributes;
         m_timestamps[idx] = filetimeToUnixMs(record->TimeStamp.QuadPart);
@@ -360,9 +376,9 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         m_name_offsets.push_back((uint32_t)m_string_pool.size());
         m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
         m_string_pool.push_back('\0');
-        m_frn_to_idx[frn] = newIdx;
+        m_frn_to_idx[encodedFrn] = newIdx;
     }
-    { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
+    { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(encodedFrn); }
     m_next_usns[volume] = record->Usn;
     m_dirty_count++;
     if (m_dirty_count >= 1000) { m_dirty_count = 0; saveDriveToCache(dIdx); }
@@ -370,13 +386,19 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
 }
 
 void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
-    Q_UNUSED(volume);
     QWriteLocker lock(&m_dataLock);
-    auto it = m_frn_to_idx.find(frn);
+    size_t dIdx = 0;
+    bool found = false;
+    for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; found = true; break; } }
+    if (!found) return;
+
+    uint64_t encodedFrn = (static_cast<uint64_t>(dIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
+
+    auto it = m_frn_to_idx.find(encodedFrn);
     if (it != m_frn_to_idx.end()) {
         m_frns[it->second] = 0;
         m_frn_to_idx.erase(it);
-        { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
+        { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(encodedFrn); }
         emit dataChanged();
     }
 }
@@ -417,10 +439,18 @@ void MftReader::mergeDriveResult(const std::wstring& volume, const DriveResult& 
     m_timestamps.reserve(m_timestamps.size() + count);
     m_name_offsets.reserve(m_name_offsets.size() + count);
     m_attributes.reserve(m_attributes.size() + count);
+
     for (const auto& e : result.entries) {
-        m_frns.push_back(e.frn);
-        m_parent_frns.push_back((static_cast<uint64_t>(driveIdx) << 48) | (e.parentFrn & 0x0000FFFFFFFFFFFFull));
-        m_sizes.push_back(0); m_timestamps.push_back(e.modifyTime); m_attributes.push_back(e.attributes);
+        // 物理补丁：在 SoA 核心数组中直接存储带盘符编码的 FRN，确保全局唯一性
+        uint64_t encodedFrn = (static_cast<uint64_t>(driveIdx) << 48) | (e.frn & 0x0000FFFFFFFFFFFFull);
+        uint64_t encodedPf = (static_cast<uint64_t>(driveIdx) << 48) | (e.parentFrn & 0x0000FFFFFFFFFFFFull);
+
+        m_frns.push_back(encodedFrn);
+        m_parent_frns.push_back(encodedPf);
+        m_sizes.push_back(0);
+        m_timestamps.push_back(e.modifyTime);
+        m_attributes.push_back(e.attributes);
+
         m_name_offsets.push_back((uint32_t)m_string_pool.size());
         m_string_pool.insert(m_string_pool.end(), e.nameUtf8.begin(), e.nameUtf8.end());
         m_string_pool.push_back('\0');
@@ -428,12 +458,19 @@ void MftReader::mergeDriveResult(const std::wstring& volume, const DriveResult& 
 }
 
 void MftReader::rebuildFrnToIndexMap() {
-    m_frn_to_idx.clear(); m_parent_to_children.clear();
+    m_frn_to_idx.clear();
+    m_parent_to_children.clear();
     for (size_t i = 0; i < m_frns.size(); ++i) {
-        if (m_frns[i] != 0) {
-            m_frn_to_idx[m_frns[i]] = (uint32_t)i;
-            uint64_t p = m_parent_frns[i] & 0x0000FFFFFFFFFFFFull;
-            if (p != 0) m_parent_to_children[p].push_back(m_frns[i]);
+        uint64_t encodedFrn = m_frns[i];
+        if (encodedFrn != 0) {
+            m_frn_to_idx[encodedFrn] = (uint32_t)i;
+
+            // 物理对标：父子关系映射也必须携带盘符编码，防止跨盘符 FRN 冲突
+            uint64_t encodedPf = m_parent_frns[i];
+            uint64_t parentFrnOnly = encodedPf & 0x0000FFFFFFFFFFFFull;
+            if (parentFrnOnly != 0 && parentFrnOnly != 5) {
+                m_parent_to_children[encodedPf].push_back(encodedFrn);
+            }
         }
     }
 }

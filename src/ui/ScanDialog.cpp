@@ -85,7 +85,10 @@ void ScanConfig::save() {
 // --- ScanTableModel Implementation ---
 
 ScanTableModel::ScanTableModel(QObject* parent) : QAbstractTableModel(parent) {}
-ScanTableModel::~ScanTableModel() {}
+ScanTableModel::~ScanTableModel() {
+    m_filterWatcher.cancel();
+    m_filterWatcher.waitForFinished();
+}
 
 int ScanTableModel::rowCount(const QModelIndex& parent) const {
     if (parent.isValid()) return 0;
@@ -239,6 +242,17 @@ void ScanDialog::setupUi() {
     mainLayout->setContentsMargins(15, 15, 15, 15);
     mainLayout->setSpacing(12);
 
+    // 核心修复：极致加固。在 setupUi 最开始初始化所有成员指针，彻底杜绝任何时序导致的空指针闪退
+    m_statusLabel = new QLabel("READY");
+    m_statLabel = new QLabel("");
+    m_selectionLabel = new QLabel("");
+    m_memLabel = new QLabel("");
+    m_progressBar = new QProgressBar();
+    m_exportBtn = new QPushButton("导出所选为 CSV");
+    m_resultView = new QTableView();
+    m_tableModel = new ScanTableModel(this);
+    m_resultView->setModel(m_tableModel);
+
     auto* driveScroll = new QScrollArea();
     driveScroll->setFixedHeight(45);
     driveScroll->setWidgetResizable(true);
@@ -285,9 +299,6 @@ void ScanDialog::setupUi() {
     }
     mainLayout->addLayout(searchRow);
 
-    m_resultView = new QTableView();
-    m_tableModel = new ScanTableModel(this);
-    m_resultView->setModel(m_tableModel);
     m_resultView->setContextMenuPolicy(Qt::CustomContextMenu);
     m_resultView->setStyleSheet("QTableView { background: #1E1E1E; border: 1px solid #333; color: #D4D4D4; selection-background-color: #094771; outline: none; } QTableView::item { border-bottom: 1px solid #252526; }");
     m_resultView->horizontalHeader()->setStretchLastSection(true);
@@ -309,20 +320,16 @@ void ScanDialog::setupUi() {
     mainLayout->addWidget(m_resultView);
 
     auto* statusBar = new QHBoxLayout();
-    m_statusLabel = new QLabel("READY");
     m_statusLabel->setStyleSheet("color: #46B478; font-weight: bold; font-size: 10px;");
     statusBar->addWidget(m_statusLabel);
     statusBar->addSpacing(12);
 
-    m_statLabel = new QLabel("");
     m_statLabel->setStyleSheet("color: #7A8F9E; font-size: 10px;");
     statusBar->addWidget(m_statLabel);
 
-    m_selectionLabel = new QLabel("");
     m_selectionLabel->setStyleSheet("color: #7A8F9E; font-size: 10px;");
     statusBar->addWidget(m_selectionLabel);
 
-    m_exportBtn = new QPushButton("导出所选为 CSV");
     m_exportBtn->setFlat(true);
     m_exportBtn->setCursor(Qt::PointingHandCursor);
     m_exportBtn->setStyleSheet("QPushButton { color: #FF8C00; font-size: 10px; border: none; background: transparent; padding: 0; } QPushButton:hover { text-decoration: underline; }");
@@ -332,11 +339,9 @@ void ScanDialog::setupUi() {
 
     statusBar->addStretch();
 
-    m_memLabel = new QLabel("");
     m_memLabel->setStyleSheet("color: #7A8F9E; font-size: 10px;");
     statusBar->addWidget(m_memLabel);
 
-    m_progressBar = new QProgressBar();
     m_progressBar->setFixedWidth(150);
     m_progressBar->setFixedHeight(10);
     m_progressBar->setTextVisible(false);
