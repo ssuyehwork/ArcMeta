@@ -7,12 +7,14 @@
 #include <QReadWriteLock>
 #include <memory>
 #include <vector>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <list>
 #include <mutex>
 #include <windows.h>
 #include "../core/IndexedEntry.h"
+#include "ScchCache.h"
 
 namespace ArcMeta {
 
@@ -157,8 +159,8 @@ private:
     // 2026-05-10 对标 Rust：纯FRN SoA架构 (Structure of Arrays)
     std::vector<uint64_t> m_frns;           // FRN数组
     std::vector<uint64_t> m_parent_frns;     // 父FRN数组  
-    std::vector<uint64_t> m_sizes;           // 文件大小
-    std::vector<uint64_t> m_timestamps;      // 修改时间戳
+    std::vector<int64_t>  m_sizes;           // 文件大小
+    std::vector<int64_t>  m_timestamps;      // 修改时间戳
     std::vector<uint32_t> m_name_offsets;    // 名称在字符串池中的偏移
     std::vector<uint32_t> m_attributes;      // 文件属性
     std::vector<uint8_t>  m_string_pool;      // 单一连续字符串池
@@ -168,7 +170,7 @@ private:
     mutable QReadWriteLock m_dataLock;
 
     // 监控器管理
-    QVector<UsnWatcher*> m_watchers;
+    std::vector<UsnWatcher*> m_watchers; // 2026-05-11 物理补全：使用标准容器配合安全退出逻辑
     QHash<QString, uint64_t> m_nextUsns; // 2026-05-11 物理补全：记录各盘符的 NextUsn 水位线
 
     bool m_isInitialized = false;

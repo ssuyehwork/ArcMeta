@@ -10,6 +10,7 @@
 #include "QuickLookWindow.h"
 #include "ToolTipOverlay.h"
 #include "ScanDialog.h"
+#include "../mft/MftReader.h"
 #include "../db/CategoryRepo.h"
 #include "../db/ItemRepo.h"
 #include "SearchHistoryPanel.h"

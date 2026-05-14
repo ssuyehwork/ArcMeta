@@ -51,10 +51,25 @@ MftReader::~MftReader() {
     clear();
 }
 
+// 2026-05-11 物理优化：重构清理逻辑，解决退出死锁。
+// 必须遵循：先停止外部线程 -> 后加锁清理数据 的原则。
 void MftReader::clear() {
+    // 1. 先在锁外停止所有监控线程，防止 stop() 内部等待时与 dataLock 产生死锁
+    std::vector<UsnWatcher*> watchersToClean;
+    {
+        QWriteLocker lock(&m_dataLock);
+        watchersToClean = std::move(m_watchers);
+    }
+
+    for (auto* watcher : watchersToClean) {
+        if (watcher) {
+            watcher->stop();
+            delete watcher;
+        }
+    }
+
+    // 2. 二次加锁，彻底清空内存状态
     QWriteLocker lock(&m_dataLock);
-    
-    // 清理 SoA 数据结构
     m_frns.clear();
     m_parent_frns.clear();
     m_sizes.clear();
@@ -62,22 +77,12 @@ void MftReader::clear() {
     m_name_offsets.clear();
     m_attributes.clear();
     m_string_pool.clear();
-    
-    // 清理索引
     m_frn_to_idx.clear();
     m_sorted_indices.clear();
     m_overlay.clear();
     m_indexToOverlayFrn.clear();
-    
-    // 清理缓存
     m_pathCache.clear();
     m_sharedIndices.clear();
-    
-    // 清理监控器
-    for (auto* watcher : m_watchers) {
-        delete watcher;
-    }
-    m_watchers.clear();
     m_nextUsns.clear();
     
     m_isInitialized = false;
@@ -103,7 +108,7 @@ void MftReader::buildIndex(const QStringList& drives) {
                 uint64_t startUsn = m_nextUsns.value(drive.left(2).toUpper(), 0);
                 auto* watcher = new UsnWatcher(drive, startUsn, this);
                 connect(watcher, &UsnWatcher::changesDetected, this, &MftReader::applyChanges);
-                m_watchers.append(watcher);
+                m_watchers.push_back(watcher);
                 watcher->start();
             } catch (const std::exception& e) {
                 std::wcerr << L"MFT 扫描失败: " << drive.toStdWString() 
@@ -118,119 +123,51 @@ void MftReader::buildIndex(const QStringList& drives) {
     m_isInitialized = true;
 }
 
-// 2026-05-11 物理优化：实现大块顺序 I/O 加载，大幅提升 SoA 还原速度
+// 2026-05-11 物理优化：实现大块顺序 I/O 加载，大幅提升 SoA 还原速度 (已升级至 .scch 格式)
 bool MftReader::loadFromCache() {
-    try {
-        std::ifstream cacheFile("ArcMeta/cache/mft_cache.bin", std::ios::binary);
-        if (!cacheFile.is_open()) return false;
+    clear(); // 清理旧数据
 
-        QWriteLocker lock(&m_dataLock);
-        
-        auto readVec = [&](auto& vec) {
-            size_t size = 0;
-            cacheFile.read(reinterpret_cast<char*>(&size), sizeof(size));
-            vec.resize(size);
-            if (size > 0) {
-                cacheFile.read(reinterpret_cast<char*>(vec.data()), size * sizeof(vec[0]));
-            }
-        };
+    std::unordered_map<std::string, uint64_t> usnMap;
+    QWriteLocker lock(&m_dataLock);
 
-        readVec(m_frns);
-        readVec(m_parent_frns);
-        readVec(m_sizes);
-        readVec(m_timestamps);
-        readVec(m_name_offsets);
-        readVec(m_attributes);
+    ScchResult result = ScchCache::load(
+        SCCH_DEFAULT_PATH,
+        m_frns, m_parent_frns, m_sizes, m_timestamps,
+        m_name_offsets, m_attributes, m_string_pool, usnMap
+    );
 
-        // 2026-05-11 物理补全：读取 USN 水位线
-        size_t usnMapSize = 0;
-        cacheFile.read(reinterpret_cast<char*>(&usnMapSize), sizeof(usnMapSize));
-        m_nextUsns.clear();
-        for (size_t i = 0; i < usnMapSize; ++i) {
-            size_t dSize = 0;
-            cacheFile.read(reinterpret_cast<char*>(&dSize), sizeof(dSize));
-            QByteArray driveData(dSize, 0);
-            cacheFile.read(driveData.data(), dSize);
-            uint64_t usn = 0;
-            cacheFile.read(reinterpret_cast<char*>(&usn), sizeof(usn));
-            m_nextUsns[QString::fromUtf8(driveData)] = usn;
+    if (result != ScchResult::Ok) {
+        if (result != ScchResult::FileNotFound) {
+            std::cerr << "[MftReader] .scch 加载失败: "
+                      << scchResultString(result) << "\n";
         }
-
-        // 字符串池
-        size_t poolSize = 0;
-        cacheFile.read(reinterpret_cast<char*>(&poolSize), sizeof(poolSize));
-        m_string_pool.resize(poolSize);
-        if (poolSize > 0) {
-            cacheFile.read(reinterpret_cast<char*>(m_string_pool.data()), poolSize);
-        }
-        
-        // 重建 FRN 到索引的映射
-        rebuildFrnToIndexMap();
-        
-        // 构建排序索引
-        buildSortedIndices();
-        
-        m_isInitialized = true;
-        return true;
-        
-    } catch (const std::exception& e) {
-        std::wcerr << L"缓存加载失败: " << e.what() << std::endl;
         return false;
     }
+
+    m_nextUsns.clear();
+    for (const auto& [drive, usn] : usnMap)
+        m_nextUsns[QString::fromStdString(drive)] = usn;
+
+    rebuildFrnToIndexMap();
+    buildSortedIndices();
+    m_isInitialized = true;
+    return true;
 }
 
-// 2026-05-11 物理补完：实现 SoA 数据结构的极速序列化，对接全自动加载流程
+// 2026-05-11 物理补完：实现 SoA 数据结构的极速序列化，对接全自动加载流程 (已升级至 .scch 格式)
 bool MftReader::saveToCache() {
     QReadLocker lock(&m_dataLock);
     if (!m_isInitialized) return false;
 
-    try {
-        // 确保目录存在
-        std::filesystem::path cachePath = "ArcMeta/cache/mft_cache.bin";
-        std::filesystem::create_directories(cachePath.parent_path());
+    std::unordered_map<std::string, uint64_t> usnMap;
+    for (auto it = m_nextUsns.begin(); it != m_nextUsns.end(); ++it)
+        usnMap[it.key().toStdString()] = it.value();
 
-        std::ofstream cacheFile(cachePath, std::ios::binary);
-        if (!cacheFile.is_open()) return false;
-
-        auto writeVec = [&](const auto& vec) {
-            size_t size = vec.size();
-            cacheFile.write(reinterpret_cast<const char*>(&size), sizeof(size));
-            if (size > 0) {
-                cacheFile.write(reinterpret_cast<const char*>(vec.data()), size * sizeof(vec[0]));
-            }
-        };
-
-        writeVec(m_frns);
-        writeVec(m_parent_frns);
-        writeVec(m_sizes);
-        writeVec(m_timestamps);
-        writeVec(m_name_offsets);
-        writeVec(m_attributes);
-
-        // 2026-05-11 物理补全：持久化 USN 水位线
-        size_t usnMapSize = m_nextUsns.size();
-        cacheFile.write(reinterpret_cast<const char*>(&usnMapSize), sizeof(usnMapSize));
-        for (auto it = m_nextUsns.begin(); it != m_nextUsns.end(); ++it) {
-            QByteArray drive = it.key().toUtf8();
-            size_t dSize = drive.size();
-            cacheFile.write(reinterpret_cast<const char*>(&dSize), sizeof(dSize));
-            cacheFile.write(drive.data(), dSize);
-            uint64_t usn = it.value();
-            cacheFile.write(reinterpret_cast<const char*>(&usn), sizeof(usn));
-        }
-
-        // 字符串池单独处理 (uint8_t)
-        size_t poolSize = m_string_pool.size();
-        cacheFile.write(reinterpret_cast<const char*>(&poolSize), sizeof(poolSize));
-        if (poolSize > 0) {
-            cacheFile.write(reinterpret_cast<const char*>(m_string_pool.data()), poolSize);
-        }
-
-        return true;
-    } catch (const std::exception& e) {
-        std::wcerr << L"缓存保存失败: " << e.what() << std::endl;
-        return false;
-    }
+    return ScchCache::save(
+        SCCH_DEFAULT_PATH,
+        m_frns, m_parent_frns, m_sizes, m_timestamps,
+        m_name_offsets, m_attributes, m_string_pool, usnMap
+    );
 }
 
 // 2026-05-10 按照用户要求：实现 SoA 数据访问接口
@@ -738,12 +675,16 @@ unsigned __int64 MftReader::getParentFrn(int index) const {
     return 0;
 }
 
-// 2026-05-11 物理重构：极致性能补完。直接将 WCHAR 转换为 UTF-8 std::string，绕过所有 Qt 转换层。
+// 2026-05-11 物理重构：极致性能补完。
+// 1. 采用 2MB 超大缓冲区减少系统调用。
+// 2. 开启 BACKUP_SEMANTICS 与 SEQUENTIAL_SCAN 优化磁盘预读。
+// 3. 绕过 Qt 转换层，直接利用 WinAPI 填充 std::string。
 bool MftReader::loadMftDirect(const std::wstring& volumePath, DriveResult& result) {
     std::wstring devicePath = L"\\\\.\\" + volumePath.substr(0, 2);
     HANDLE hVolume = CreateFileW(devicePath.c_str(), GENERIC_READ, 
                                 FILE_SHARE_READ | FILE_SHARE_WRITE, 
-                                nullptr, OPEN_EXISTING, 0, nullptr);
+                                nullptr, OPEN_EXISTING,
+                                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
     if (hVolume == INVALID_HANDLE_VALUE) return false;
 
     USN_JOURNAL_DATA_V0 journalData;
@@ -758,8 +699,12 @@ bool MftReader::loadMftDirect(const std::wstring& volumePath, DriveResult& resul
     MFT_ENUM_DATA_V0 enumData = {0};
     enumData.HighUsn = journalData.NextUsn;
 
-    std::vector<uint8_t> buffer(65536);
+    // 2026-05-11 极致性能：2MB 巨型缓冲区，显著减少百万级文件枚举时的上下文切换开销
+    std::vector<uint8_t> buffer(2 * 1024 * 1024);
     char utf8Buf[MAX_PATH * 4];
+
+    // 预估文件数量并提前分配内存，防止 push_back 导致的数千万次 CPU 迁移与拷贝
+    result.entries.reserve(1000000);
 
     while (DeviceIoControl(hVolume, FSCTL_ENUM_USN_DATA, &enumData, sizeof(enumData), buffer.data(), (DWORD)buffer.size(), &cb, NULL)) {
         if (cb < 8) break;
