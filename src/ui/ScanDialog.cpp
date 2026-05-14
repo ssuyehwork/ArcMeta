@@ -272,6 +272,7 @@ void ScanDialog::setupUi() {
     m_resultView->setContextMenuPolicy(Qt::CustomContextMenu);
     m_resultView->setStyleSheet("QTableView { background: #1E1E1E; border: 1px solid #333; color: #D4D4D4; selection-background-color: #094771; outline: none; } QTableView::item { border-bottom: 1px solid #252526; }");
     m_resultView->horizontalHeader()->setStretchLastSection(true);
+    m_resultView->horizontalHeader()->setMinimumSectionSize(100);
     m_resultView->verticalHeader()->setVisible(false);
     m_resultView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_resultView->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -359,6 +360,20 @@ void ScanDialog::refreshDriveList() {
     for (int i = 0; i < 26; ++i) {
         if (driveMask & (1 << i)) {
             QString driveLetter = QString(QChar('A' + i)) + ":";
+
+            // 物理过滤：仅显示固定硬盘或已就绪的盘符（过滤掉未插入光盘的 DVD/CD 驱动器）
+            std::wstring wDrive = (driveLetter + "\\").toStdWString();
+            UINT type = GetDriveTypeW(wDrive.c_str());
+            if (type == DRIVE_CDROM || type == DRIVE_REMOVABLE) {
+                ULARGE_INTEGER freeBytes, totalBytes, totalFree;
+                if (!GetDiskFreeSpaceExW(wDrive.c_str(), &freeBytes, &totalBytes, &totalFree)) {
+                    continue; // 盘符未就绪（如光驱无盘），不显示
+                }
+            } else if (type != DRIVE_FIXED) {
+                // 如果不是固定硬盘，且不是正在处理的可移动介质，也跳过
+                continue;
+            }
+
             if (m_config.ignoredDrives.contains(driveLetter)) continue;
 
             bool isActive = m_config.activeDrives.contains(driveLetter);
@@ -448,7 +463,7 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
     menu.setStyleSheet("QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; } QMenu::item:selected { background: #232D37; color: #FFF; }");
 
     int count = selectedRows.size();
-    
+
     menu.addAction(count > 1 ? "批量打开文件" : "打开文件", [this, selectedRows]() {
         for (const auto& index : selectedRows) onItemDoubleClicked(index);
     });
