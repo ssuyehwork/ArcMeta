@@ -33,6 +33,8 @@
 #include <QDir>
 #include <QReadLocker>
 #include <QWriteLocker>
+#include <QElapsedTimer>
+#include <QFileDialog>
 #include <numeric>
 #include <QJsonObject>
 #include <QJsonDocument>
@@ -128,6 +130,10 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         QIcon icon = reader.isDirectory(actualIndex) ? provider.icon(QFileIconProvider::Folder) : provider.icon(QFileInfo("dummy." + ext));
         dlg->m_iconCache[ext] = icon;
         return icon;
+    } else if (role == Qt::TextAlignmentRole) {
+        if (index.column() == 2 || index.column() == 3)
+            return static_cast<int>(Qt::AlignRight | Qt::AlignVCenter);
+        return static_cast<int>(Qt::AlignLeft | Qt::AlignVCenter);
     } else if (role == Qt::ForegroundRole && reader.isDirectory(actualIndex)) {
         return QColor("#3498db");
     } else if (role == Qt::UserRole) {
@@ -137,12 +143,18 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
 }
 
 QVariant ScanTableModel::headerData(int section, Qt::Orientation orientation, int role) const {
-    if (orientation == Qt::Horizontal && role == Qt::DisplayRole) {
-        switch (section) {
-            case 0: return "名称";
-            case 1: return "路径";
-            case 2: return "大小";
-            case 3: return "修改日期";
+    if (orientation == Qt::Horizontal) {
+        if (role == Qt::DisplayRole) {
+            switch (section) {
+                case 0: return "名称";
+                case 1: return "路径";
+                case 2: return "大小";
+                case 3: return "修改日期";
+            }
+        } else if (role == Qt::TextAlignmentRole) {
+            if (section == 2 || section == 3)
+                return static_cast<int>(Qt::AlignRight | Qt::AlignVCenter);
+            return static_cast<int>(Qt::AlignLeft | Qt::AlignVCenter);
         }
     }
     return QVariant();
@@ -161,17 +173,24 @@ void ScanTableModel::setFilterState(const ScanFilterState& state) {
 
 void ScanTableModel::startAsyncRebuild() {
     if (m_filterWatcher.isRunning()) m_filterWatcher.cancel();
-    QFuture<QVector<int>> future = QtConcurrent::run([this, text = m_filterText, state = m_filterState]() {
-        return MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem);
+
+    QFuture<SearchResult> future = QtConcurrent::run([text = m_filterText, state = m_filterState]() {
+        QElapsedTimer timer;
+        timer.start();
+        auto indices = MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem);
+        return SearchResult{indices, timer.nsecsElapsed() / 1000000.0};
     });
-    connect(&m_filterWatcher, &QFutureWatcher<QVector<int>>::finished, this, [this]() {
+
+    disconnect(&m_filterWatcher, &QFutureWatcher<SearchResult>::finished, nullptr, nullptr);
+    connect(&m_filterWatcher, &QFutureWatcher<SearchResult>::finished, this, [this]() {
         if (m_filterWatcher.isCanceled()) return;
         beginResetModel();
-        m_filteredIndices = m_filterWatcher.result();
+        auto res = m_filterWatcher.result();
+        m_filteredIndices = res.indices;
         m_displayLimit = 200;
         endResetModel();
-        emit filterFinished(m_filteredIndices.size());
-    }, Qt::UniqueConnection);
+        emit filterFinished(m_filteredIndices.size(), res.ms);
+    });
     m_filterWatcher.setFuture(future);
 }
 
@@ -187,7 +206,7 @@ void ScanTableModel::loadMore(int count) {
 // --- ScanDialog Implementation ---
 
 ScanDialog::ScanDialog(QWidget* parent)
-    : FramelessDialog("极致扫描与查找", parent) 
+    : FramelessDialog("FERREX", parent)
 {
     m_config.load();
     resize(960, 640);
@@ -195,15 +214,15 @@ ScanDialog::ScanDialog(QWidget* parent)
     setupUi();
 
     QTimer::singleShot(100, this, [this]() {
-        updateStatus("正在载入本地快照...");
+        updateStatus("");
         (void)QtConcurrent::run([this]() {
             bool ok = MftReader::instance().loadFromCache();
             QMetaObject::invokeMethod(this, [this, ok]() {
                 if (ok) {
-                    updateStatus("就绪");
+                    updateStatus("");
                     m_tableModel->setFilterText(""); 
                 } else {
-                    updateStatus("未检测到快照，全自动初始化...");
+                    updateStatus("", true);
                     onStartScan();
                 }
             });
@@ -290,17 +309,33 @@ void ScanDialog::setupUi() {
     mainLayout->addWidget(m_resultView);
 
     auto* statusBar = new QHBoxLayout();
-    m_statusLabel = new QLabel("就绪");
-    m_statusLabel->setStyleSheet("color: #007ACC; font-weight: bold; font-size: 11px;");
+    m_statusLabel = new QLabel("READY");
+    m_statusLabel->setStyleSheet("color: #46B478; font-weight: bold; font-size: 10px;");
     statusBar->addWidget(m_statusLabel);
-    statusBar->addSpacing(10);
-    m_summaryLabel = new QLabel("索引总数: 0");
-    m_summaryLabel->setStyleSheet("color: #888; font-size: 11px;");
-    statusBar->addWidget(m_summaryLabel);
+    statusBar->addSpacing(12);
+
+    m_statLabel = new QLabel("");
+    m_statLabel->setStyleSheet("color: #7A8F9E; font-size: 10px;");
+    statusBar->addWidget(m_statLabel);
+
     m_selectionLabel = new QLabel("");
-    m_selectionLabel->setStyleSheet("color: #AAA; font-size: 11px; margin-left: 10px;");
+    m_selectionLabel->setStyleSheet("color: #7A8F9E; font-size: 10px;");
     statusBar->addWidget(m_selectionLabel);
+
+    m_exportBtn = new QPushButton("导出所选为 CSV");
+    m_exportBtn->setFlat(true);
+    m_exportBtn->setCursor(Qt::PointingHandCursor);
+    m_exportBtn->setStyleSheet("QPushButton { color: #FF8C00; font-size: 10px; border: none; background: transparent; padding: 0; } QPushButton:hover { text-decoration: underline; }");
+    m_exportBtn->hide();
+    connect(m_exportBtn, &QPushButton::clicked, this, &ScanDialog::onExportCsv);
+    statusBar->addWidget(m_exportBtn);
+
     statusBar->addStretch();
+
+    m_memLabel = new QLabel("");
+    m_memLabel->setStyleSheet("color: #7A8F9E; font-size: 10px;");
+    statusBar->addWidget(m_memLabel);
+
     m_progressBar = new QProgressBar();
     m_progressBar->setFixedWidth(150);
     m_progressBar->setFixedHeight(10);
@@ -309,8 +344,14 @@ void ScanDialog::setupUi() {
     statusBar->addWidget(m_progressBar);
     mainLayout->addLayout(statusBar);
 
-    connect(m_tableModel, &ScanTableModel::filterFinished, this, [this](int count) {
-        m_summaryLabel->setText(QString("匹配结果: %1 | 索引总数: %2").arg(count).arg(MftReader::instance().totalCount()));
+    connect(m_tableModel, &ScanTableModel::filterFinished, this, [this](int count, double ms) {
+        m_statLabel->setText(QString("共 %1 条 | 耗时 %2 ms").arg(QLocale(QLocale::English).toString(count)).arg(ms, 0, 'f', 1));
+
+        // 计算大约内存占用，对标原版 (total * 184 bytes)
+        double memoryMb = (count * 184.0) / 1024.0 / 1024.0;
+        m_memLabel->setText(QString("数据占用 %.1f MB").arg(memoryMb));
+
+        updateStatus("");
     });
 }
 
@@ -528,18 +569,30 @@ void ScanDialog::onItemDoubleClicked(const QModelIndex& index) {
 
 void ScanDialog::onSelectionChanged() {
     auto selectedRows = m_resultView->selectionModel()->selectedRows();
-    if (selectedRows.isEmpty()) { m_selectionLabel->clear(); return; }
+    if (selectedRows.size() <= 1) {
+        m_selectionLabel->clear();
+        m_exportBtn->hide();
+        m_statLabel->show();
+        return;
+    }
+
+    m_statLabel->hide();
+
     int64_t totalSize = 0;
     auto& reader = MftReader::instance();
     for (const auto& index : selectedRows) {
         int actualIdx = m_tableModel->data(index, Qt::UserRole).toInt();
         if (!reader.isDirectory(actualIdx)) totalSize += reader.getSize(actualIdx);
     }
+
     QString sizeStr;
     if (totalSize < 1024) sizeStr = QString("%1 B").arg(totalSize);
     else if (totalSize < 1024 * 1024) sizeStr = QString("%1 KB").arg(totalSize / 1024.0, 0, 'f', 1);
-    else sizeStr = QString("%1 MB").arg(totalSize / (1024.0 * 1024.0), 0, 'f', 1);
-    m_selectionLabel->setText(QString("已选择 %1 项 | 合计大小: %2").arg(selectedRows.size()).arg(sizeStr));
+    else if (totalSize < 1024LL * 1024 * 1024) sizeStr = QString("%1 MB").arg(totalSize / (1024.0 * 1024.0), 0, 'f', 1);
+    else sizeStr = QString("%1 GB").arg(totalSize / (1024.0 * 1024.0 * 1024.0), 0, 'f', 2);
+
+    m_selectionLabel->setText(QString("已选 %1 项 | 合计大小 %2").arg(selectedRows.size()).arg(sizeStr));
+    m_exportBtn->show();
 }
 
 void ScanDialog::onStartScan() {
@@ -570,7 +623,22 @@ void ScanDialog::onFilterOptionChanged() {
 void ScanDialog::updateStatus(const QString& text, bool scanning) {
     Q_UNUSED(text);
     m_statusLabel->setText(scanning ? "SCANNING" : "READY");
-    m_statusLabel->setStyleSheet(scanning ? "color: #FF8C00; font-weight: bold;" : "color: #46B478; font-weight: bold;");
+    m_statusLabel->setStyleSheet(scanning ? "color: #FF8C00; font-weight: bold; font-size: 10px;" : "color: #46B478; font-weight: bold; font-size: 10px;");
+
+    // 对标原版标题栏显示：[品牌名] [状态 - 数量]
+    int total = MftReader::instance().totalCount();
+    QString totalStr = QLocale(QLocale::English).toString(total);
+
+    if (!scanning) {
+        m_titleLabel->setText(QString("FERREX    READY - %1").arg(totalStr));
+        // 这里需要对文字进行部分着色，但 QLabel::setText 不支持局部样式，除非用 HTML
+        m_titleLabel->setText(QString("<html><head/><body><p><span style=\"color:#FF8C00; letter-spacing:1.5pt;\">FERREX</span>"
+                                     "&nbsp;&nbsp;&nbsp;&nbsp;<span style=\"color:#46B478; font-size:9pt;\">READY - %1</span></p></body></html>").arg(totalStr));
+    } else {
+        m_titleLabel->setText("<html><head/><body><p><span style=\"color:#FF8C00; letter-spacing:1.5pt;\">FERREX</span>"
+                             "&nbsp;&nbsp;&nbsp;&nbsp;<span style=\"color:#FF8C00; font-size:9pt;\">SCANNING...</span></p></body></html>");
+    }
+
     if (scanning) { m_progressBar->show(); m_progressBar->setRange(0, 0); }
     else { m_progressBar->hide(); }
 }
@@ -589,6 +657,30 @@ void ScanDialog::onRenameTriggered() {
         QString newPath = fi.absolutePath() + "/" + newName;
         if (QFile::rename(oldPath, newPath)) m_tableModel->setFilterText(m_searchEdit->text());
         else QMessageBox::warning(this, "错误", "重命名失败，请检查文件是否被占用。");
+    }
+}
+
+void ScanDialog::onExportCsv() {
+    auto selectedRows = m_resultView->selectionModel()->selectedRows();
+    if (selectedRows.isEmpty()) return;
+
+    QString fileName = QFileDialog::getSaveFileName(this, "导出所选为 CSV", "ferrex_export.csv", "CSV 文件 (*.csv)");
+    if (fileName.isEmpty()) return;
+
+    QFile file(fileName);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QTextStream out(&file);
+        out << "名称,路径,大小,修改日期\n";
+        auto& reader = MftReader::instance();
+        for (const auto& index : selectedRows) {
+            int actualIdx = m_tableModel->data(index, Qt::UserRole).toInt();
+            out << QString("\"%1\",\"%2\",\"%3\",\"%4\"\n")
+                .arg(reader.getName(actualIdx))
+                .arg(reader.getFullPath(actualIdx))
+                .arg(reader.getSize(actualIdx))
+                .arg(QDateTime::fromMSecsSinceEpoch(reader.getModifyTime(actualIdx)).toString("yyyy-MM-dd HH:mm"));
+        }
+        file.close();
     }
 }
 

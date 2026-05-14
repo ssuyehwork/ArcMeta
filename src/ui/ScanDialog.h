@@ -68,16 +68,20 @@ public:
     int totalFilteredCount() const { return m_filteredIndices.size(); }
 
 signals:
-    void filterFinished(int count);
+    void filterFinished(int count, double ms);
 
 private:
     void startAsyncRebuild();
     QVector<int> performRebuild(const QString& filterText, const ScanFilterState& filterState);
 
+    struct SearchResult {
+        QVector<int> indices;
+        double ms;
+    };
     QVector<int> m_filteredIndices;
     QString m_filterText;
     ScanFilterState m_filterState;
-    QFutureWatcher<QVector<int>> m_filterWatcher;
+    QFutureWatcher<SearchResult> m_filterWatcher;
     int m_displayLimit = 200;
 };
 
@@ -97,6 +101,7 @@ private slots:
     void onDriveContextMenu(const QString& drive, const QPoint& pos);
     void onIgnoredDriveContextMenu(const QString& drive, const QPoint& pos);
     void onRenameTriggered();
+    void onExportCsv();
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
@@ -119,8 +124,10 @@ private:
     QTableView* m_resultView = nullptr;
     ScanTableModel* m_tableModel = nullptr;
     QLabel* m_statusLabel = nullptr;
-    QLabel* m_summaryLabel = nullptr;
-    QLabel* m_selectionLabel = nullptr;
+    QLabel* m_statLabel = nullptr;      // "共 x 条 | 耗时 y ms"
+    QLabel* m_selectionLabel = nullptr; // "已选 x 项 | 合计大小 y"
+    QLabel* m_memLabel = nullptr;       // "数据占用 x MB"
+    QPushButton* m_exportBtn = nullptr;
     QProgressBar* m_progressBar = nullptr;
 
     std::unique_ptr<CacheManager> m_cacheManager;
