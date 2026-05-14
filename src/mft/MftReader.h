@@ -2,94 +2,23 @@
 
 #include <QObject>
 #include <QString>
-#include <QVector>
-#include <QHash>
+#include <QList>
 #include <QReadWriteLock>
-#include <memory>
 #include <vector>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <list>
 #include <mutex>
 #include <windows.h>
-#include "../core/IndexedEntry.h"
+#include <winioctl.h>
 #include "ScchCache.h"
 
 namespace ArcMeta {
 
 class UsnWatcher;
-struct UsnChange; // 前向声明 UsnChange
-
-// 2026-05-10 对标 Rust：引入轻量级线程安全 LRU 缓存，用于极速路径解析
-class LruPathCache {
-public:
-    explicit LruPathCache(size_t capacity) : m_capacity(capacity) {}
-
-    bool tryGet(int index, QString& outPath) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        auto it = m_map.find(index);
-        if (it == m_map.end()) return false;
-        m_list.splice(m_list.begin(), m_list, it->second.second);
-        outPath = it->second.first;
-        return true;
-    }
-
-    void put(int index, const QString& path) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        auto it = m_map.find(index);
-        if (it != m_map.end()) {
-            m_list.splice(m_list.begin(), m_list, it->second.second);
-            it->second.first = path;
-            return;
-        }
-        if (m_map.size() >= m_capacity) {
-            int old = m_list.back();
-            m_list.pop_back();
-            m_map.erase(old);
-        }
-        m_list.push_front(index);
-        m_map[index] = {path, m_list.begin()};
-    }
-
-    void invalidate(int index) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        auto it = m_map.find(index);
-        if (it != m_map.end()) {
-            m_list.erase(it->second.second);
-            m_map.erase(it);
-        }
-    }
-    
-    void clear() {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_map.clear();
-        m_list.clear();
-    }
-
-private:
-    size_t m_capacity;
-    std::mutex m_mutex;
-    std::list<int> m_list;
-    std::unordered_map<int, std::pair<QString, std::list<int>::iterator>> m_map;
-};
-
-// 2026-05-10 对标 Rust：增量覆盖层机制，实现无锁 USN 变更即时反映
-struct OverlayEntry {
-    QString name;
-    int64_t size = 0;
-    int64_t modifyTime = 0;
-    uint32_t attributes = 0;
-    unsigned __int64 parentFrn = 0;
-    bool isDeleted = false;
-    bool isDir = false;
-};
 
 /**
- * @brief 高性能 MFT 索引引擎 (2026-05-09 极致重构)
- * 
- * 采用 SoA (Structure of Arrays) 架构，彻底取代旧版 unordered_map 逻辑。
- * 实现百万级文件秒级扫描、零拷贝加载与实时监控。
+ * @brief 高性能 MFT 索引引擎 (SoA 架构)
  */
 class MftReader : public QObject {
     Q_OBJECT
@@ -97,95 +26,92 @@ public:
     static MftReader& instance();
 
 signals:
-    void dataChanged(); // 2026-05-11 新增：USN 变更通知信号
+    void dataChanged();
 
 public:
     // 核心生命周期
     void buildIndex(const QStringList& drives = QStringList());
     bool loadFromCache();
-    bool saveToCache(); // 2026-05-11 新增：SoA 持久化接口
-    void clear(); // 释放所有内存资源
+    bool saveToCache();
+    void clear();
 
-    // 极致查询接口 (SoA 并行分块规约)
-    QVector<int> search(const QString& query, bool useRegex = false, bool caseSensitive = false, const QStringList& extensionList = QStringList(), bool includeHidden = true, bool includeSystem = true);
+    // 查询接口
+    QVector<int> search(const QString& query, bool useRegex = false, bool caseSensitive = false,
+                        const QStringList& extensionList = QStringList(),
+                        bool includeHidden = true, bool includeSystem = true);
     
-    // 2026-05-10 对标 Rust：前缀极速查找 (二分法)
-    QVector<int> searchPrefix(const QString& prefix);
-
-    // USN 覆盖层同步接口
-    void applyChanges(const QList<UsnChange>& changes);
-
-    // SoA 数据访问 (支持 Overlay 虚拟索引)
+    // SoA 数据访问
     QString getName(int index) const;
     int64_t getSize(int index) const;
     int64_t getModifyTime(int index) const;
     uint32_t getAttributes(int index) const;
-    unsigned __int64 getFrn(int index) const;
+    uint64_t getFrn(int index) const;
     bool isDirectory(int index) const;
     int totalCount() const;
     QString getFullPath(int index) const;
 
+    // USN 实时更新接口 (由 UsnWatcher 调用)
+    void updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& volume);
+    void removeEntryByFrn(const std::wstring& volume, uint64_t frn);
+
+    // 路径重建 (含盘符注入)
+    std::wstring getPathFast(const std::wstring& volume, uint64_t frn);
 
 private:
     MftReader();
     ~MftReader();
 
-    // 内部扫描逻辑 (移植自 ScanDialog 的高性能实现)
-    // 2026-05-11 极致对标：使用 RawEntry 代替 IndexedEntry，彻底在扫描阶段禁用 QString
-    struct RawEntry {
-        unsigned __int64 frn;
-        unsigned __int64 parentFrn;
-        uint32_t attributes;
-        uint64_t modifyTime;
-        std::string nameUtf8; 
-    };
-
-    struct DriveResult {
-        std::vector<RawEntry> entries;
-    };
-    DriveResult performMftScan(const QString& driveRoot);
-    
-    // 辅助方法
-    QStringList getAvailableDrives() const;
-    bool isFixedDrive(const QString& drive) const;
-    void mergeDriveResult(const DriveResult& result);
+    void clearInternal(); // 内部无锁版本
     void rebuildFrnToIndexMap();
     void buildSortedIndices();
-    QString buildFullPath(int index) const;
-    unsigned __int64 getParentFrn(int index) const;
-    bool loadMftDirect(const std::wstring& volumePath, DriveResult& result);
-    void scanDirectoryFallback(const std::wstring& volumePath, DriveResult& result);
 
-    // 2026-05-10 对标 Rust：纯FRN SoA架构 (Structure of Arrays)
-    std::vector<uint64_t> m_frns;           // FRN数组
-    std::vector<uint64_t> m_parent_frns;     // 父FRN数组  
-    std::vector<int64_t>  m_sizes;           // 文件大小
-    std::vector<int64_t>  m_timestamps;      // 修改时间戳
-    std::vector<uint32_t> m_name_offsets;    // 名称在字符串池中的偏移
-    std::vector<uint32_t> m_attributes;      // 文件属性
-    std::vector<uint8_t>  m_string_pool;      // 单一连续字符串池
-    
-    // 快速索引 (对标 Rust)
-    std::unordered_map<uint64_t, uint32_t> m_frn_to_idx; // FRN -> 索引映射
-    mutable QReadWriteLock m_dataLock;
+    // MFT 扫描辅助
+    struct RawEntry {
+        uint64_t frn;
+        uint64_t parentFrn;
+        uint32_t attributes;
+        int64_t  modifyTime;
+        std::string nameUtf8;
+    };
+    struct DriveResult {
+        std::vector<RawEntry> entries;
+        uint64_t nextUsn;
+    };
+    bool loadMftDirect(const std::wstring& volume, DriveResult& result);
+    void mergeDriveResult(const std::wstring& volume, const DriveResult& result, size_t driveIdx);
+
+    // SoA 主数据
+    std::vector<uint64_t>  m_frns;
+    std::vector<uint64_t>  m_parent_frns; // 高 16 位存储盘符索引
+    std::vector<int64_t>   m_sizes;
+    std::vector<int64_t>   m_timestamps;   // Unix 毫秒
+    std::vector<uint32_t>  m_name_offsets;
+    std::vector<uint32_t>  m_attributes;
+    std::vector<uint8_t>   m_string_pool;
+
+    // 盘符列表 (用于编码/解码)
+    std::vector<std::wstring> m_drive_list;
+
+    // 反向索引
+    std::unordered_map<uint64_t, uint32_t>              m_frn_to_idx;
+    std::unordered_map<uint64_t, std::vector<uint64_t>> m_parent_to_children;
+
+    // 路径缓存与互斥锁 (防止读锁期间写入导致的死锁/冲突)
+    mutable std::unordered_map<uint64_t, std::wstring>  m_path_cache;
+    mutable std::mutex m_pathCacheMutex;
+
+    // USN 水位线
+    std::unordered_map<std::wstring, uint64_t>          m_next_usns;
 
     // 监控器管理
-    std::vector<UsnWatcher*> m_watchers; // 2026-05-11 物理补全：使用标准容器配合安全退出逻辑
-    QHash<QString, uint64_t> m_nextUsns; // 2026-05-11 物理补全：记录各盘符的 NextUsn 水位线
+    std::vector<UsnWatcher*> m_watchers;
 
+    mutable QReadWriteLock m_dataLock;
     bool m_isInitialized = false;
+    uint32_t m_dirty_count = 0;
 
-    // 2026-05-10 对标 Rust：前缀二分查找所需的排序索引
-    std::vector<uint32_t> m_sorted_indices; // 排序后的索引数组
-
-    // 2026-05-10 对标 Rust：Overlay 覆盖层与 LRU 缓存
-    std::unordered_map<unsigned __int64, OverlayEntry> m_overlay; // FRN -> 变更条目
-    std::unordered_map<int, unsigned __int64> m_indexToOverlayFrn; // 将新条目映射为一个伪索引 (负数)
-    int m_nextVirtualIndex = -2; // 虚拟索引从 -2 开始递减
-    
-    mutable LruPathCache m_pathCache{20000}; // 2万条目的路径 LRU 缓存
-    std::vector<int> m_sharedIndices; // 常驻内存复用
-    int m_dirtyCount = 0;
+    // 排序索引 (用于加速某些搜索或显示)
+    std::vector<uint32_t> m_sorted_indices;
 };
 
 } // namespace ArcMeta
