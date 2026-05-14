@@ -1,10 +1,12 @@
 #pragma once
 
-#include <QString>
-#include <QThread>
-#include <QList>
-#include <atomic>
 #include <windows.h>
+#include <winioctl.h>
+#include <QThread>
+#include <QString>
+#include <QList>
+#include <string>
+#include <atomic>
 
 namespace ArcMeta {
 
@@ -20,16 +22,14 @@ struct UsnChange {
 };
 
 /**
- * @brief 高性能 USN 日志监控器 (2026-05-09 重构)
+ * @brief 最终合并版 UsnWatcher
  * 
- * 实时监控 NTFS 卷的文件变动，对标 Rust 版本的 spawn_usn_watcher。
- * 统一作为项目中唯一的 USN 监控组件。
+ * 实时监控卷变动，并调用 MftReader 接口更新内存 SoA。
  */
 class UsnWatcher : public QThread {
     Q_OBJECT
 public:
-    // 支持 2 参数 (MftReader) 和 3 参数 (ScanDialog) 调用
-    explicit UsnWatcher(const QString& volume, unsigned __int64 startUsn = 0, QObject* parent = nullptr);
+    explicit UsnWatcher(const std::wstring& volume, uint64_t startUsn = 0, QObject* parent = nullptr);
     virtual ~UsnWatcher();
 
     void stop();
@@ -41,10 +41,10 @@ protected:
     void run() override;
 
 private:
-    void handleLegacyRecord(struct _USN_RECORD_V2* record); // 兼容旧逻辑的内部处理(可选)
+    void handleRecord(::USN_RECORD_V2* pRecord);
 
-    QString m_volume;
-    unsigned __int64 m_startUsn;
+    std::wstring m_volume; // e.g. L"C:"
+    uint64_t m_lastUsn;
     std::atomic<bool> m_stopRequested;
     HANDLE m_hVolume;
 };
