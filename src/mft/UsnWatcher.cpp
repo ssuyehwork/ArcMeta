@@ -87,7 +87,7 @@ void UsnWatcher::run() {
             
             // 处理 V2 和 V3 版本记录
             if (header->MajorVersion == 2 || header->MajorVersion == 3) {
-                handleRecord(reinterpret_cast<::USN_RECORD_V2*>(pRecord));
+                handleRecord(reinterpret_cast<USN_RECORD_V2*>(pRecord));
             }
 
             pRecord += header->RecordLength;
@@ -99,7 +99,7 @@ void UsnWatcher::run() {
     }
 }
 
-void UsnWatcher::handleRecord(::USN_RECORD_V2* pRecord) {
+void UsnWatcher::handleRecord(USN_RECORD_V2* pRecord) {
     USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(pRecord);
     uint32_t reason;
     uint64_t frn;
