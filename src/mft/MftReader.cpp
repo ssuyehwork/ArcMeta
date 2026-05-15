@@ -15,6 +15,8 @@
 #include <QRegularExpression>
 #include <QDir>
 #include <QDateTime>
+#include <QFileIconProvider>
+#include <QFileInfo>
 
 namespace ArcMeta {
 
@@ -70,13 +72,15 @@ void MftReader::clearInternal() {
     m_drive_list.clear();
     m_drive_active_mask = 0;
     m_frn_to_idx.clear();
-    m_parent_to_children.clear();
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
         m_path_cache.clear();
     }
+    {
+        QWriteLocker lock(&m_iconCacheLock);
+        m_icon_cache.clear();
+    }
     m_next_usns.clear();
-    m_sorted_indices.clear();
     m_isInitialized = false;
     m_dirty_count = 0;
 }
@@ -156,7 +160,6 @@ void MftReader::buildIndex(const QStringList& drives) {
     }
 
     rebuildFrnToIndexMap();
-    buildSortedIndices();
     m_isInitialized = true;
 
     lock.unlock();
@@ -212,7 +215,6 @@ bool MftReader::loadFromCache() {
 
     if (m_frns.empty()) return false;
     rebuildFrnToIndexMap();
-    buildSortedIndices();
     m_isInitialized = true;
     return true;
 }
@@ -472,15 +474,11 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         std::wstring rootPath = volume + L"\\";
         HANDLE hHint = CreateFileW(rootPath.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
         if (hHint != INVALID_HANDLE_VALUE) {
+            // 2026-05-14 兼容性修正：统一使用 64 位 FileIdType 以适配旧版 Windows SDK
             FILE_ID_DESCRIPTOR id = {0};
             id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
-            if (header->MajorVersion == 2) {
-                id.Type = FileIdType;
-                id.FileId.QuadPart = frn;
-            } else {
-                id.Type = ExtendedFileIdType;
-                id.FileId128 = reinterpret_cast<USN_RECORD_V3*>(record)->FileReferenceNumber;
-            }
+            id.Type = FileIdType;
+            id.FileId.QuadPart = frn;
             HANDLE hFile = OpenFileById(hHint, &id, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
             if (hFile != INVALID_HANDLE_VALUE) {
                 BY_HANDLE_FILE_INFORMATION bhfi;
@@ -505,8 +503,11 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         uint32_t idx = it->second;
         m_parent_frns[idx] = encodedPf;
         m_attributes[idx] = finalAttr;
-        m_timestamps[idx] = finalModifyTime;
-        m_sizes[idx] = fileSize;
+
+        // 2026-05-14 逻辑加固：仅在获取到有效物理属性时才更新，避免 API 失败导致的 USN 数据被默认 0 值覆盖
+        if (fileSize > 0) m_sizes[idx] = fileSize;
+        if (finalModifyTime > 0) m_timestamps[idx] = finalModifyTime;
+
         QByteArray utf8 = name.toUtf8();
         uint32_t oldOff = m_name_offsets[idx];
         const char* oldPtr = reinterpret_cast<const char*>(m_string_pool.data() + oldOff);
@@ -612,7 +613,6 @@ void MftReader::compact() {
     m_dead_count = 0;
     m_wasted_string_bytes = 0;
     rebuildFrnToIndexMap();
-    buildSortedIndices();
 }
 
 bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult& result) {
@@ -671,15 +671,11 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
             e.modifyTime = filetimeToUnixMs(timestamp.QuadPart);
 
             if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                // 2026-05-14 兼容性修正：统一使用 64 位 FileIdType 以适配旧版 Windows SDK
                 FILE_ID_DESCRIPTOR id = {0};
                 id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
-                if (header->MajorVersion == 2) {
-                    id.Type = FileIdType;
-                    id.FileId.QuadPart = frn;
-                } else {
-                    id.Type = ExtendedFileIdType;
-                    id.FileId128 = reinterpret_cast<USN_RECORD_V3*>(p)->FileReferenceNumber;
-                }
+                id.Type = FileIdType;
+                id.FileId.QuadPart = frn;
 
                 // 2026-05-14 工业级属性获取：以 0 访问权限打开句柄，配合 Hint 句柄，极大提升成功率
                 HANDLE hFile = OpenFileById(hHint != INVALID_HANDLE_VALUE ? hHint : h, &id, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
@@ -726,24 +722,37 @@ void MftReader::mergeDriveResult(const std::wstring& volume, const MftReader::Dr
 }
 
 void MftReader::rebuildFrnToIndexMap() {
-    m_frn_to_idx.clear(); m_parent_to_children.clear();
+    m_frn_to_idx.clear();
     for (size_t i = 0; i < m_frns.size(); ++i) {
         if (m_frns[i] != 0) {
             m_frn_to_idx[m_frns[i]] = (uint32_t)i;
-            uint64_t p = m_parent_frns[i] & 0x0000FFFFFFFFFFFFull;
-            if (p != 0) m_parent_to_children[p].push_back(m_frns[i]);
         }
     }
 }
 
-void MftReader::buildSortedIndices() {
-    m_sorted_indices.resize(m_frns.size());
-    std::iota(m_sorted_indices.begin(), m_sorted_indices.end(), 0);
-    std::sort(std::execution::par, m_sorted_indices.begin(), m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
-        const char* s1 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[a]);
-        const char* s2 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[b]);
-        return _stricmp(s1, s2) < 0;
-    });
+QIcon MftReader::getCachedIcon(const QString& ext, bool isDir) {
+    QString key = isDir ? "folder" : ext.toLower();
+    {
+        QReadLocker lock(&m_iconCacheLock);
+        auto it = m_icon_cache.find(key);
+        if (it != m_icon_cache.end()) return *it;
+    }
+
+    QFileIconProvider provider;
+    QIcon icon;
+    if (isDir) {
+        icon = provider.icon(QFileIconProvider::Folder);
+    } else {
+        if (key.length() > 12) key = "unknown";
+        icon = provider.icon(QFileInfo("dummy." + key));
+        if (icon.isNull()) icon = provider.icon(QFileIconProvider::File);
+    }
+
+    {
+        QWriteLocker lock(&m_iconCacheLock);
+        m_icon_cache[key] = icon;
+    }
+    return icon;
 }
 
 } // namespace ArcMeta

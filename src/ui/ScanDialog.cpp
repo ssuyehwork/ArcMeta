@@ -128,30 +128,10 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             case 3: return QDateTime::fromMSecsSinceEpoch(reader.getModifyTime(actualIndex)).toString("yyyy-MM-dd HH:mm");
         }
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        ScanDialog* dlg = qobject_cast<ScanDialog*>(this->parent());
-        if (!dlg) return QVariant();
         QString name = reader.getName(actualIndex);
         int dotIdx = name.lastIndexOf('.');
         QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
-        if (reader.isDirectory(actualIndex)) ext = "folder";
-        
-        {
-            QReadLocker lock(&dlg->m_iconCacheLock);
-            auto it = dlg->m_iconCache.find(ext);
-            if (it != dlg->m_iconCache.end()) return *it;
-        }
-
-        if (ext.length() > 12) ext = "unknown"; 
-
-        QFileIconProvider provider;
-        QIcon icon = reader.isDirectory(actualIndex) ? provider.icon(QFileIconProvider::Folder) : provider.icon(QFileInfo("dummy." + ext));
-        if (icon.isNull()) icon = provider.icon(QFileIconProvider::File);
-
-        {
-            QWriteLocker lock(&dlg->m_iconCacheLock);
-            dlg->m_iconCache[ext] = icon;
-        }
-        return icon;
+        return reader.getCachedIcon(ext, reader.isDirectory(actualIndex));
     } else if (role == Qt::ForegroundRole && reader.isDirectory(actualIndex)) {
         return QColor("#3498db");
     } else if (role == Qt::TextAlignmentRole) {
