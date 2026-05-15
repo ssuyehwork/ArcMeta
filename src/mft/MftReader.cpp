@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "MftReader.h"
 #include "UsnWatcher.h"
 #include <winioctl.h>

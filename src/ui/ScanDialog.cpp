@@ -99,7 +99,7 @@ ScanTableModel::~ScanTableModel() {}
 
 int ScanTableModel::rowCount(const QModelIndex& parent) const {
     if (parent.isValid()) return 0;
-    return std::min(static_cast<int>(m_filteredIndices.size()), m_displayLimit);
+    return (std::min)(static_cast<int>(m_filteredIndices.size()), m_displayLimit);
 }
 
 int ScanTableModel::columnCount(const QModelIndex& /*parent*/) const { return 4; }
@@ -119,8 +119,6 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             case 2: {
                 if (reader.isDirectory(actualIndex)) return "-";
                 int64_t size = reader.getSize(actualIndex);
-                
-                // 2026-05-14 物理对标原版 format_size 逻辑
                 if (size <= 0) return "0 B";
                 if (size < 1024) return QString("%1 B").arg(size);
                 if (size < 1024 * 1024) return QString("%1 KB").arg(size / 1024.0, 0, 'f', 2);
@@ -137,7 +135,6 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
         if (reader.isDirectory(actualIndex)) ext = "folder";
         
-        // 2026-05-14 修复点 5：增加图标缓存命中检查与畸形后缀屏蔽，防止高频触发 Shell API 导致的 UI 假死
         auto it = dlg->m_iconCache.find(ext);
         if (it != dlg->m_iconCache.end()) return *it;
 
@@ -152,7 +149,6 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
     } else if (role == Qt::ForegroundRole && reader.isDirectory(actualIndex)) {
         return QColor("#3498db");
     } else if (role == Qt::TextAlignmentRole) {
-        // 2026-05-14 物理修复点 3：名称路径左对齐，大小日期右对齐，对标原版 Align2
         switch (index.column()) {
             case 0: case 1: return static_cast<int>(Qt::AlignLeft | Qt::AlignVCenter);
             case 2: case 3: return static_cast<int>(Qt::AlignRight | Qt::AlignVCenter);
@@ -190,13 +186,10 @@ void ScanTableModel::setFilterState(const ScanFilterState& state) {
 void ScanTableModel::startAsyncRebuild() {
     if (m_filterWatcher.isRunning()) m_filterWatcher.cancel();
     
-    // 2026-05-14 修复点 3：物理隔离 UI 数据访问。
-    // 在主线程记录开始时间，使用 finished 槽在主线程更新 UI 成员，杜绝悬垂指针与跨线程冲突。
     QElapsedTimer* timer = new QElapsedTimer();
     timer->start();
 
     QFuture<QVector<int>> future = QtConcurrent::run([this, text = m_filterText, state = m_filterState]() {
-        // 纯计算任务，不触碰任何 UI 指针
         return MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem);
     });
 
@@ -213,7 +206,6 @@ void ScanTableModel::startAsyncRebuild() {
         m_displayLimit = 200;
         endResetModel();
 
-        // 核心修复：回到主线程后再更新 UI 状态
         ScanDialog* dlg = qobject_cast<ScanDialog*>(parent());
         if (dlg) {
             dlg->m_lastSearchMs = timer->elapsed();
@@ -229,7 +221,7 @@ void ScanTableModel::startAsyncRebuild() {
 void ScanTableModel::loadMore(int count) {
     if (m_displayLimit >= m_filteredIndices.size()) return;
     int oldLimit = m_displayLimit;
-    int newLimit = std::min(static_cast<int>(m_filteredIndices.size()), m_displayLimit + count);
+    int newLimit = (std::min)(static_cast<int>(m_filteredIndices.size()), m_displayLimit + count);
     beginInsertRows(QModelIndex(), oldLimit, newLimit - 1);
     m_displayLimit = newLimit;
     endInsertRows();
@@ -244,7 +236,6 @@ ScanDialog::ScanDialog(QWidget* parent)
     resize(1000, 700);
     setMinimumSize(800, 500);
 
-    // 2026-05-14 修复点 4：标题栏布局防御性编程。确保 m_titleStatusLabel 无论如何都被安全初始化
     m_titleStatusLabel = new QLabel("READY - 0");
     m_titleStatusLabel->setStyleSheet("color: #46B478; font-size: 10px; font-weight: bold; margin-left: 12px;");
 
@@ -252,20 +243,18 @@ ScanDialog::ScanDialog(QWidget* parent)
         m_titleLabel->hide(); 
         auto* titleLayout = qobject_cast<QHBoxLayout*>(m_pinBtn->parentWidget()->layout());
         if (titleLayout) {
-            // 注入 Logo (对标原版专属 SVG)
             QLabel* logoLabel = new QLabel();
             logoLabel->setFixedSize(18, 18);
             logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#FF8C00"), 18).pixmap(18, 18));
             titleLayout->insertWidget(0, logoLabel);
             
-            // 注入品牌名
             QLabel* brandLabel = new QLabel("FERREX");
             brandLabel->setStyleSheet("color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 6px;");
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
         } else {
-            m_titleStatusLabel->hide(); // 防御性：若无布局则隐藏，但指针不为空
+            m_titleStatusLabel->hide();
         }
     } else {
         m_titleStatusLabel->hide();
@@ -363,7 +352,6 @@ void ScanDialog::setupUi() {
     }
     searchVLayout->addLayout(searchRow);
 
-    // 2026-05-14 物理修复点 5：进度条位移。从状态栏移至搜索框正下方，高度 2px，对标 egui ProgressBar
     m_progressBar = new QProgressBar();
     m_progressBar->setFixedHeight(2);
     m_progressBar->setTextVisible(false);
@@ -378,7 +366,6 @@ void ScanDialog::setupUi() {
     m_resultView->setModel(m_tableModel);
     m_resultView->setContextMenuPolicy(Qt::CustomContextMenu);
     
-    // 2026-05-14 物理修复点 2：完善 QTableView 与 QHeaderView 的样式，设置深色背景，杜绝白色残留导致“超出范围”
     m_resultView->setStyleSheet(
         "QTableView { background: #1E1E1E; border: 1px solid #333; color: #D4D4D4; selection-background-color: #094771; outline: none; gridline-color: transparent; }"
         "QTableView::item { border-bottom: 1px solid #252526; }"
@@ -386,15 +373,13 @@ void ScanDialog::setupUi() {
         "QHeaderView { background: #252526; border: none; }"
     );
     
-    m_resultView->horizontalHeader()->setStretchLastSection(false); // 2026-05-14 按照图片反馈：禁用末尾强制拉伸
+    m_resultView->horizontalHeader()->setStretchLastSection(false);
     m_resultView->horizontalHeader()->setMinimumSectionSize(60);
     m_resultView->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
     
-    // 2026-05-14 物理修复点 3：设置初始列宽与拉伸模式，对标 egui 渲染
-    m_resultView->setColumnWidth(0, 260); // 名称
-    // 路径 (1) 设为 Stretch
-    m_resultView->setColumnWidth(2, 100); // 大小
-    m_resultView->setColumnWidth(3, 140); // 修改日期
+    m_resultView->setColumnWidth(0, 260);
+    m_resultView->setColumnWidth(2, 100);
+    m_resultView->setColumnWidth(3, 140);
     
     m_resultView->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_resultView->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Interactive);
@@ -408,9 +393,6 @@ void ScanDialog::setupUi() {
     m_resultView->setShowGrid(false);
     m_resultView->setAlternatingRowColors(true);
     
-    // 2026-05-14 修复：禁止数据变更自动触发搜索，防止 USN 更新导致搜索风暴。仅在用户手动搜索时刷新。
-    // connect(&MftReader::instance(), &MftReader::dataChanged, this, ...); // 已移除
-
     connect(m_resultView, &QTableView::customContextMenuRequested, this, &ScanDialog::onCustomContextMenu);
     connect(m_resultView, &QTableView::doubleClicked, this, &ScanDialog::onItemDoubleClicked);
     connect(m_resultView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ScanDialog::onSelectionChanged);
@@ -425,7 +407,6 @@ void ScanDialog::setupUi() {
     statusBar->setContentsMargins(16, 0, 16, 0);
     statusBar->setSpacing(0);
 
-    // 左侧统计/选择区
     m_selectionLabel = new QLabel("");
     m_selectionLabel->setStyleSheet("color: #7A8F9E; font-size: 10px;");
     statusBar->addWidget(m_selectionLabel);
@@ -447,7 +428,6 @@ void ScanDialog::setupUi() {
 
     statusBar->addStretch();
 
-    // 右侧内存占用
     m_statLabelMemory = new QLabel("");
     m_statLabelMemory->setStyleSheet("color: #7A8F9E; font-size: 10px;");
     statusBar->addWidget(m_statLabelMemory);
@@ -461,7 +441,6 @@ void ScanDialog::setupUi() {
 }
 
 void ScanDialog::refreshDriveList() {
-    // 2026-05-14 按照用户要求对标原版：将耗时探测异步化，杜绝休眠/坏道盘导致 UI 挂起
     QPointer<ScanDialog> weakThis(this);
     (void)QtConcurrent::run([weakThis]() {
         if (!weakThis) return;
@@ -481,7 +460,6 @@ void ScanDialog::refreshDriveList() {
                 
                 WCHAR volName[MAX_PATH + 1] = {0};
                 WCHAR fsName[MAX_PATH + 1] = {0};
-                // 此处 API 可能因磁盘休眠产生 2-5秒 阻塞，已在后台线程中执行
                 BOOL ok = GetVolumeInformationW(reinterpret_cast<const wchar_t*>(root.utf16()), 
                                               volName, MAX_PATH + 1, NULL, NULL, NULL, 
                                               fsName, MAX_PATH + 1);
@@ -499,9 +477,7 @@ void ScanDialog::refreshDriveList() {
             }
         }
 
-        // 回到主线程渲染 UI
         QMetaObject::invokeMethod(weakThis.data(), [weakThis, validDrives]() {
-            // 2026-05-14 依据第四定律：物理防御异步销毁导致的崩溃
             if (!weakThis) return;
 
             QLayoutItem* item;
@@ -681,7 +657,7 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                 QString path = m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
                 QFile::remove(path);
             }
-            m_tableModel->setFilterText(m_searchEdit->text());
+            m_tableModel->triggerSearch();
         }
     });
     
@@ -740,7 +716,6 @@ void ScanDialog::onStartScan() {
 }
 
 void ScanDialog::onTriggerSearch() {
-    // 1. 物理同步历史记录
     QString q = m_searchEdit->text().trimmed();
     if (!q.isEmpty()) {
         m_config.queryHistory.removeAll(q);
@@ -755,10 +730,9 @@ void ScanDialog::onTriggerSearch() {
     }
     m_config.save();
 
-    // 2. 同步状态并手动执行搜索
     onFilterOptionChanged();
     m_tableModel->setFilterText(m_searchEdit->text());
-    m_tableModel->triggerSearch(); // 显式手动触发
+    m_tableModel->triggerSearch();
 }
 
 void ScanDialog::onFilterOptionChanged() {
@@ -770,13 +744,11 @@ void ScanDialog::onFilterOptionChanged() {
     QString extText = m_extEdit->text().toLower();
     if (!extText.isEmpty()) state.extensionList = extText.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
     
-    // 2026-05-14 修复：仅更新内部状态，不自动触发搜索。
     m_tableModel->setFilterState(state);
 }
 
 void ScanDialog::updateStatus(const QString& text, bool scanning) {
     Q_UNUSED(text);
-    // 2026-05-14 对标原版标题栏状态切换
     if (m_titleStatusLabel) {
         int total = MftReader::instance().totalCount();
         m_titleStatusLabel->setText(QString("%1 - %2").arg(scanning ? "SCANNING" : "READY").arg(formatNumber(total)));
@@ -814,7 +786,6 @@ void ScanDialog::updateStatusBar() {
         m_statLabelTime->setText(QString("耗时 %1 ms").arg(m_lastSearchMs));
     }
     
-    // 2026-05-14 对标原版内存估算逻辑：184 字节/条目
     double memoryMb = (MftReader::instance().totalCount() * 184.0) / 1024.0 / 1024.0;
     m_statLabelMemory->setText(QString("数据占用 %1 MB").arg(memoryMb, 0, 'f', 1));
 }
@@ -847,7 +818,7 @@ void ScanDialog::onRenameTriggered() {
     if (ok && !newName.isEmpty() && newName != oldName) {
         QFileInfo fi(oldPath);
         QString newPath = fi.absolutePath() + "/" + newName;
-        if (QFile::rename(oldPath, newPath)) m_tableModel->setFilterText(m_searchEdit->text());
+        if (QFile::rename(oldPath, newPath)) m_tableModel->triggerSearch();
         else QMessageBox::warning(this, "错误", "重命名失败，请检查文件是否被占用。");
     }
 }
@@ -855,7 +826,6 @@ void ScanDialog::onRenameTriggered() {
 void ScanDialog::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_A && event->modifiers() == Qt::ControlModifier) { m_resultView->selectAll(); return; }
     if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
-        // 如果焦点在搜索框，触发搜索；如果在列表，触发打开
         if (m_searchEdit->hasFocus() || m_extEdit->hasFocus()) {
             onTriggerSearch();
         } else {
