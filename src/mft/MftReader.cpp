@@ -354,35 +354,82 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
                               const QStringList& extensionList, bool includeHidden, bool includeSystem) {
     QReadLocker lock(&m_dataLock);
     if (!m_isInitialized) return {};
-    std::vector<int> res;
+
+    bool hasQuery = !query.isEmpty();
+    bool hasExt = !extensionList.isEmpty();
     QRegularExpression re;
-    if (useRegex && !query.isEmpty())
+    if (useRegex && hasQuery) {
         re = QRegularExpression(query, caseSensitive ? QRegularExpression::NoPatternOption : QRegularExpression::CaseInsensitiveOption);
-    
-    std::mutex mtx;
-    std::vector<int> indices(m_frns.size());
-    std::iota(indices.begin(), indices.end(), 0);
+    }
 
-    std::for_each(std::execution::par, indices.begin(), indices.end(), [&](int i) {
-        if (m_frns[i] == 0) return;
-        uint32_t at = m_attributes[i];
-        if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) return;
-        if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) return;
-        const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
-        QString name = QString::fromUtf8(p);
-        if (!extensionList.isEmpty()) {
-            bool ok = false;
-            for (const QString& ex : extensionList) { if (name.endsWith("." + ex, Qt::CaseInsensitive)) { ok = true; break; } }
-            if (!ok) return;
+    // 预处理扩展名，确保兼容 ".txt" 和 "txt"
+    QStringList normalizedExts;
+    if (hasExt) {
+        for (const QString& ex : extensionList) {
+            normalizedExts << (ex.startsWith('.') ? ex : "." + ex);
         }
-        bool m = false;
-        if (query.isEmpty()) m = true;
-        else if (useRegex) m = re.match(name).hasMatch();
-        else m = name.contains(query, caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive);
+    }
 
-        if (m) { std::lock_guard<std::mutex> l(mtx); res.push_back(i); }
+    // 2026-05-14 深度优化：采用分块归并模式，大幅降低锁竞争与内存分配频率
+    std::mutex mtx;
+    std::vector<int> finalRes;
+    finalRes.reserve(m_frns.size() / 16);
+
+    size_t total = m_frns.size();
+    const size_t grainSize = 4096; // 每块处理 4096 条，平衡并行度与锁竞争
+    size_t numChunks = (total + grainSize - 1) / grainSize;
+    std::vector<size_t> chunkIndices(numChunks);
+    std::iota(chunkIndices.begin(), chunkIndices.end(), 0);
+
+    std::for_each(std::execution::par, chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
+        std::vector<int> localRes;
+        localRes.reserve(grainSize / 8);
+
+        size_t start = chunkIdx * grainSize;
+        size_t end = std::min(start + grainSize, total);
+
+        for (size_t i = start; i < end; ++i) {
+            if (m_frns[i] == 0) continue;
+
+            // 1. 属性过滤 (比特位操作，极快)
+            uint32_t at = m_attributes[i];
+            if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
+            if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
+
+            const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
+
+            // 2. 字符串匹配 (按需延迟转换)
+            if (!hasQuery && !hasExt) {
+                localRes.push_back((int)i);
+                continue;
+            }
+
+            QString name = QString::fromUtf8(p);
+
+            if (hasExt) {
+                bool extMatch = false;
+                for (const QString& ex : normalizedExts) {
+                    if (name.endsWith(ex, Qt::CaseInsensitive)) { extMatch = true; break; }
+                }
+                if (!extMatch) continue;
+            }
+
+            if (!hasQuery) {
+                localRes.push_back((int)i);
+            } else {
+                bool match = useRegex ? re.match(name).hasMatch()
+                                     : name.contains(query, caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive);
+                if (match) localRes.push_back((int)i);
+            }
+        }
+
+        if (!localRes.empty()) {
+            std::lock_guard<std::mutex> l(mtx);
+            finalRes.insert(finalRes.end(), localRes.begin(), localRes.end());
+        }
     });
-    return QVector<int>(res.begin(), res.end());
+
+    return QVector<int>::fromStdVector(finalRes);
 }
 
 void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& volume) {

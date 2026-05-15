@@ -752,8 +752,8 @@ void ScanDialog::onTriggerSearch() {
     }
     m_config.save();
 
-    // 2. 执行搜索
-    m_tableModel->setFilterText(m_searchEdit->text());
+    // 2. 执行搜索 (同步 UI 状态并触发)
+    onFilterOptionChanged();
 }
 
 void ScanDialog::onFilterOptionChanged() {
