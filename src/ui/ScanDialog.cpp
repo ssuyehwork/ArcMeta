@@ -366,8 +366,9 @@ void ScanDialog::setupUi() {
     m_resultView->setModel(m_tableModel);
     m_resultView->setContextMenuPolicy(Qt::CustomContextMenu);
     
+    // 2026-05-14 视觉优化：将斑马纹调整为深灰色与黑色搭配，提升专业感
     m_resultView->setStyleSheet(
-        "QTableView { background: #1E1E1E; border: 1px solid #333; color: #D4D4D4; selection-background-color: #094771; outline: none; gridline-color: transparent; }"
+        "QTableView { background-color: #000000; alternate-background-color: #1A1A1A; border: 1px solid #333; color: #D4D4D4; selection-background-color: #094771; outline: none; gridline-color: transparent; }"
         "QTableView::item { border-bottom: 1px solid #252526; }"
         "QHeaderView::section { background: #252526; color: #888; border: none; border-right: 1px solid #333; padding: 4px; height: 24px; }"
         "QHeaderView { background: #252526; border: none; }"
