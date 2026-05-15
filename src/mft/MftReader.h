@@ -58,6 +58,7 @@ public:
     bool isDirectory(int index) const;
     int totalCount() const;
     QString getFullPath(int index) const;
+    void requestMetadata(int index);
 
     // USN 更新
     void updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& volume);

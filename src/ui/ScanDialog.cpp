@@ -119,13 +119,23 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             case 2: {
                 if (reader.isDirectory(actualIndex)) return "-";
                 int64_t size = reader.getSize(actualIndex);
-                if (size <= 0) return "0 B";
+                if (size == 0) {
+                    const_cast<MftReader&>(reader).requestMetadata(actualIndex);
+                    return "...";
+                }
                 if (size < 1024) return QString("%1 B").arg(size);
                 if (size < 1024 * 1024) return QString("%1 KB").arg(size / 1024.0, 0, 'f', 2);
                 if (size < 1024LL * 1024 * 1024) return QString("%1 MB").arg(size / (1024.0 * 1024.0), 0, 'f', 2);
                 return QString("%1 GB").arg(size / (1024.0 * 1024.0 * 1024.0), 0, 'f', 2);
             }
-            case 3: return QDateTime::fromMSecsSinceEpoch(reader.getModifyTime(actualIndex)).toString("yyyy-MM-dd HH:mm");
+            case 3: {
+                int64_t ts = reader.getModifyTime(actualIndex);
+                if (ts == 0) {
+                    const_cast<MftReader&>(reader).requestMetadata(actualIndex);
+                    return "-";
+                }
+                return QDateTime::fromMSecsSinceEpoch(ts).toString("yyyy-MM-dd HH:mm");
+            }
         }
     } else if (role == Qt::DecorationRole && index.column() == 0) {
         QString name = reader.getName(actualIndex);

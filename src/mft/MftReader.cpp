@@ -513,9 +513,9 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         m_parent_frns[idx] = encodedPf;
         m_attributes[idx] = finalAttr;
 
-        // 2026-05-14 逻辑加固：仅在获取到有效物理属性时才更新，避免 API 失败导致的 USN 数据被默认 0 值覆盖
-        if (fileSize > 0) m_sizes[idx] = fileSize;
-        if (finalModifyTime > 0) m_timestamps[idx] = finalModifyTime;
+        // 2026-05-14 逻辑加固：优先使用 API 获取的属性，若失败则回退至 USN 提供的时间戳
+        m_sizes[idx] = fileSize;
+        m_timestamps[idx] = (finalModifyTime > 0) ? finalModifyTime : filetimeToUnixMs(timestamp.QuadPart);
 
         QByteArray utf8 = name.toUtf8();
         uint32_t oldOff = m_name_offsets[idx];
@@ -652,8 +652,6 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
             uint32_t attr;
             WORD fileNameLength, fileNameOffset;
 
-            // 2026-05-14 核心排查：针对 V2 (64bit FRN) 和 V3 (128bit FRN) 进行严格的偏移匹配
-            // V3 记录的布局与 V2 完全不同，若错用 V2 偏移会导致时间戳和属性读取到错误的字节位
             if (header->MajorVersion == 2) {
                 ::USN_RECORD_V2* rec = reinterpret_cast<::USN_RECORD_V2*>(p);
                 frn = rec->FileReferenceNumber;
@@ -663,7 +661,6 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
                 fileNameLength = rec->FileNameLength;
                 fileNameOffset = rec->FileNameOffset;
             } else if (header->MajorVersion == 3) {
-                // 手动映射 V3 布局，避免 SDK 定义缺失导致的读取错误
                 struct V3_LAYOUT {
                     DWORD RecordLength; WORD MajorVersion; WORD MinorVersion;
                     BYTE FileReferenceNumber[16]; BYTE ParentFileReferenceNumber[16];
@@ -680,26 +677,14 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
                 p += header->RecordLength; continue;
             }
 
+            // 2026-05-14 极致性能优化：全量扫描阶段仅获取核心字段，将重量级 I/O 转移至延迟补全队列
             MftReader::RawEntry e;
-            e.frn = frn; e.parentFrn = parentFrn;
-            e.size = 0; e.attributes = attr;
+            e.frn = frn;
+            e.parentFrn = parentFrn;
+            e.size = 0;
+            e.attributes = attr;
             e.modifyTime = filetimeToUnixMs(timestamp.QuadPart);
 
-            if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
-                id.FileId.QuadPart = frn;
-                // 使用 FILE_READ_ATTRIBUTES 权限调用 OpenFileById，这是获取大小的必要前提
-                HANDLE hFile = OpenFileById(hHint != INVALID_HANDLE_VALUE ? hHint : h, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
-                if (hFile != INVALID_HANDLE_VALUE) {
-                    BY_HANDLE_FILE_INFORMATION bhfi;
-                    if (GetFileInformationByHandle(hFile, &bhfi)) {
-                        e.size = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
-                        e.attributes = bhfi.dwFileAttributes;
-                        e.modifyTime = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
-                    }
-                    CloseHandle(hFile);
-                }
-            }
             QString n = QString::fromUtf16(reinterpret_cast<const char16_t*>(p + fileNameOffset), fileNameLength / 2);
             e.nameUtf8 = n.toUtf8().toStdString();
             result.entries.push_back(std::move(e));
@@ -739,6 +724,46 @@ void MftReader::rebuildFrnToIndexMap() {
             m_frn_to_idx[m_frns[i]] = (uint32_t)i;
         }
     }
+}
+
+void MftReader::requestMetadata(int index) {
+    // 2026-05-14 工业级异步补全架构：仅在 UI 可见区域按需拉取物理属性
+    QReadLocker readLock(&m_dataLock);
+    if (index < 0 || index >= (int)m_frns.size() || m_frns[index] == 0) return;
+    if (m_sizes[index] != 0 || m_timestamps[index] != 0) return; // 已拉取过
+
+    uint64_t frn = m_frns[index];
+    size_t dIdx = static_cast<size_t>(m_parent_frns[index] >> 48);
+    if (dIdx >= m_drive_list.size()) return;
+    std::wstring volume = m_drive_list[dIdx];
+    readLock.unlock();
+
+    (void)QtConcurrent::run([this, index, frn, volume]() {
+        std::wstring rootPath = volume + L"\\";
+        // 关键：必须具有 GENERIC_READ 权限才能辅助 OpenFileById
+        HANDLE hHint = CreateFileW(rootPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        if (hHint == INVALID_HANDLE_VALUE) return;
+
+        FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
+        id.FileId.QuadPart = frn;
+
+        // 关键：DesiredAccess 设置为 GENERIC_READ 以确保获取完整元数据
+        HANDLE hFile = OpenFileById(hHint, &id, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
+        if (hFile != INVALID_HANDLE_VALUE) {
+            BY_HANDLE_FILE_INFORMATION bhfi;
+            if (GetFileInformationByHandle(hFile, &bhfi)) {
+                QWriteLocker writeLock(&m_dataLock);
+                if (index < (int)m_frns.size() && m_frns[index] == frn) {
+                    m_sizes[index] = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
+                    m_timestamps[index] = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
+                    m_attributes[index] = bhfi.dwFileAttributes;
+                }
+            }
+            CloseHandle(hFile);
+        }
+        CloseHandle(hHint);
+        emit dataChanged();
+    });
 }
 
 QIcon MftReader::getCachedIcon(const QString& ext, bool isDir) {
