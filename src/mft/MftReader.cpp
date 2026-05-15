@@ -83,7 +83,6 @@ void MftReader::updateActiveDrives(const QStringList& activeDrives) {
 }
 
 void MftReader::buildIndex(const QStringList& drives) {
-    // 2026-05-14 物理架构修正：同步激活状态，不再暴力清空内存
     updateActiveDrives(drives);
 
     std::vector<std::wstring> toScan;
@@ -100,30 +99,30 @@ void MftReader::buildIndex(const QStringList& drives) {
 
     struct ScannedDrive {
         std::wstring volume;
-        DriveResult result;
+        MftReader::DriveResult res;
         bool success = false;
     };
     std::vector<ScannedDrive> scannedResults(toScan.size());
-    std::vector<int> scanIndices(toScan.size());
+    std::vector<int> scanIndices((int)toScan.size());
     std::iota(scanIndices.begin(), scanIndices.end(), 0);
     std::for_each(std::execution::par, scanIndices.begin(), scanIndices.end(), [&](int i) {
         scannedResults[i].volume = toScan[i];
-        scannedResults[i].success = loadMftDirect(toScan[i], scannedResults[i].result);
+        scannedResults[i].success = loadMftDirect(toScan[i], scannedResults[i].res);
     });
 
     QWriteLocker lock(&m_dataLock);
     std::vector<UsnWatcher*> newWatchers;
     for (auto& sr : scannedResults) {
-        if (!sr.success || sr.result.entries.empty()) continue;
+        if (!sr.success || sr.res.entries.empty()) continue;
         
         size_t dIdx = m_drive_list.size();
         m_drive_list.push_back(sr.volume);
         m_drive_active_flags.push_back(true);
-        m_next_usns[sr.volume] = sr.result.nextUsn;
-        mergeDriveResult(sr.volume, sr.result, dIdx);
+        m_next_usns[sr.volume] = sr.res.nextUsn;
+        mergeDriveResult(sr.volume, sr.res, dIdx);
         saveDriveToCacheInternal(dIdx);
 
-        auto* w = new UsnWatcher(sr.volume, sr.result.nextUsn, nullptr);
+        auto* w = new UsnWatcher(sr.volume, sr.res.nextUsn, nullptr);
         m_watchers.push_back(w);
         newWatchers.push_back(w);
     }
@@ -145,6 +144,7 @@ bool MftReader::loadFromCache() {
 
     for (auto const& entry : std::filesystem::directory_iterator{cacheDir}) {
         if (entry.path().extension() == ".scch") {
+            MftReader::DriveResult dr;
             std::vector<uint64_t> f, pf;
             std::vector<int64_t> s, t;
             std::vector<uint32_t> no, attr;
@@ -176,7 +176,7 @@ bool MftReader::loadFromCache() {
                 for (const auto& [drive, usn] : usnMap) {
                     std::wstring wDrive = QString::fromStdString(drive).toStdWString();
                     m_drive_list.push_back(wDrive);
-                    m_drive_active_flags.push_back(false); // 默认未激活，待 UI 同步
+                    m_drive_active_flags.push_back(false);
                     m_next_usns[wDrive] = usn;
                 }
             }
@@ -346,7 +346,6 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
         for (size_t i = startPos; i < endPos; ++i) {
             if (m_frns[i] == 0) continue;
 
-            // 2026-05-14 核心修正：增加驱动器掩码过滤，杜绝搜出未勾选盘符的数据
             size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
             if (dIdx >= m_drive_active_flags.size() || !m_drive_active_flags[dIdx]) continue;
 
@@ -429,7 +428,7 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
     }
 }
 
-bool MftReader::loadMftDirect(const std::wstring& volume, DriveResult& result) {
+bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult& result) {
     std::wstring dev = L"\\\\.\\" + volume;
     HANDLE h = CreateFileW(dev.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (h == INVALID_HANDLE_VALUE) return false;
@@ -443,7 +442,7 @@ bool MftReader::loadMftDirect(const std::wstring& volume, DriveResult& result) {
         uint8_t* p = buf.data() + 8; uint8_t* end = buf.data() + cb;
         while (p < end) {
             ::USN_RECORD_V2* rec = reinterpret_cast<::USN_RECORD_V2*>(p);
-            RawEntry e; e.frn = rec->FileReferenceNumber; e.parentFrn = rec->ParentFileReferenceNumber;
+            MftReader::RawEntry e; e.frn = rec->FileReferenceNumber; e.parentFrn = rec->ParentFileReferenceNumber;
             e.attributes = rec->FileAttributes; e.modifyTime = filetimeToUnixMs(rec->TimeStamp.QuadPart);
             QString n = QString::fromUtf16(reinterpret_cast<const char16_t*>(p + rec->FileNameOffset), rec->FileNameLength / 2);
             e.nameUtf8 = n.toUtf8().toStdString();
@@ -456,7 +455,7 @@ bool MftReader::loadMftDirect(const std::wstring& volume, DriveResult& result) {
     return !result.entries.empty();
 }
 
-void MftReader::mergeDriveResult(const std::wstring& volume, const DriveResult& result, size_t driveIdx) {
+void MftReader::mergeDriveResult(const std::wstring& volume, const MftReader::DriveResult& result, size_t driveIdx) {
     Q_UNUSED(volume);
     size_t count = result.entries.size();
     m_frns.reserve(m_frns.size() + count);

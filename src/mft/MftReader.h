@@ -29,21 +29,22 @@ signals:
     void dataChanged();
 
 public:
-    // 核心生命周期
+    // 生命周期管理
     void buildIndex(const QStringList& drives = QStringList());
     bool loadFromCache();
     bool saveToCache();
     bool saveDriveToCache(size_t driveIdx);
     void clear();
 
-    // 驱动器状态管理
+    // 驱动器隔离状态管理
     void updateActiveDrives(const QStringList& activeDrives);
 
-    // 查询接口 (支持驱动器过滤)
+    // 查询接口 (支持驱动器掩码隔离)
     QVector<int> search(const QString& query, bool useRegex = false, bool caseSensitive = false, 
                         const QStringList& extensionList = QStringList(), 
                         bool includeHidden = true, bool includeSystem = true);
     
+    // SoA 访问接口
     QString getName(int index) const;
     int64_t getSize(int index) const;
     int64_t getModifyTime(int index) const;
@@ -53,6 +54,7 @@ public:
     int totalCount() const;
     QString getFullPath(int index) const;
 
+    // USN 更新
     void updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& volume);
     void removeEntryByFrn(const std::wstring& volume, uint64_t frn);
 
@@ -62,16 +64,30 @@ private:
     MftReader();
     ~MftReader();
 
+    // 内部结构体
+    struct RawEntry {
+        uint64_t frn;
+        uint64_t parentFrn;
+        uint32_t attributes;
+        int64_t  modifyTime;
+        std::string nameUtf8;
+    };
+    struct DriveResult {
+        std::vector<RawEntry> entries;
+        uint64_t nextUsn;
+    };
+
     bool saveDriveToCacheInternal(size_t driveIdx);
     void clearInternal();
     void rebuildFrnToIndexMap();
     void buildSortedIndices();
-    
+
     bool loadMftDirect(const std::wstring& volume, DriveResult& result);
     void mergeDriveResult(const std::wstring& volume, const DriveResult& result, size_t driveIdx);
 
+    // SoA 主数据
     std::vector<uint64_t>  m_frns;
-    std::vector<uint64_t>  m_parent_frns;
+    std::vector<uint64_t>  m_parent_frns; // 高 16 位存储盘符索引
     std::vector<int64_t>   m_sizes;
     std::vector<int64_t>   m_timestamps;
     std::vector<uint32_t>  m_name_offsets;
@@ -79,7 +95,7 @@ private:
     std::vector<uint8_t>   m_string_pool;
 
     std::vector<std::wstring> m_drive_list;
-    std::vector<bool>         m_drive_active_flags; // 驱动器激活状态掩码
+    std::vector<bool>         m_drive_active_flags; // 驱动器过滤掩码
 
     std::unordered_map<uint64_t, uint32_t>              m_frn_to_idx;
     std::unordered_map<uint64_t, std::vector<uint64_t>> m_parent_to_children;

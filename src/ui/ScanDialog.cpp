@@ -689,6 +689,7 @@ void ScanDialog::onStartScan() {
 }
 
 void ScanDialog::onTriggerSearch() {
+    // 1. 同步搜索历史
     QString q = m_searchEdit->text().trimmed();
     if (!q.isEmpty()) {
         m_config.queryHistory.removeAll(q);
@@ -703,6 +704,12 @@ void ScanDialog::onTriggerSearch() {
     }
     m_config.save();
 
+    // 2. 核心同步：将 UI 盘符勾选状态更新至搜索引擎掩码 (修复搜出未选盘符数据的傻逼 Bug)
+    QStringList activeList;
+    for (const QString& drive : m_config.activeDrives) activeList << drive;
+    MftReader::instance().updateActiveDrives(activeList);
+
+    // 3. 执行过滤并触发搜索
     onFilterOptionChanged();
     m_tableModel->setFilterText(m_searchEdit->text());
     m_tableModel->triggerSearch();
