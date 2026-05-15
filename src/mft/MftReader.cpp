@@ -557,9 +557,9 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
 
     size_t total = m_frns.size();
     const size_t grainSize = 4096;
-    size_t numChunks = (total + grainSize - 1) / grainSize;
-    std::vector<size_t> chunkIndices(numChunks);
-    std::iota(chunkIndices.begin(), chunkIndices.end(), 0);
+    size_t nChunksTotal = (total + grainSize - 1) / grainSize;
+    std::vector<size_t> chunkIndicesTotal(nChunksTotal);
+    std::iota(chunkIndicesTotal.begin(), chunkIndicesTotal.end(), 0);
 
     // 2026-05-14 极致算法优化：如果是简单前缀匹配且非正则、非后缀过滤，直接使用二分查找 O(log N)
     if (hasQuery && !useRegex && !caseSensitive && !hasExt) {
@@ -635,11 +635,11 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
 
             size_t count = view.count;
             const size_t grain = 8192;
-            size_t numChunks = (count + grain - 1) / grain;
-            std::vector<size_t> chunks(numChunks);
-            std::iota(chunks.begin(), chunks.end(), 0);
+            size_t nViewChunks = (count + grain - 1) / grain;
+            std::vector<size_t> viewChunks(nViewChunks);
+            std::iota(viewChunks.begin(), viewChunks.end(), 0);
 
-            std::for_each(std::execution::par, chunks.begin(), chunks.end(), [&](size_t chunkIdx) {
+            std::for_each(std::execution::par, viewChunks.begin(), viewChunks.end(), [&](size_t chunkIdx) {
                 std::vector<int> localRes;
                 size_t start = chunkIdx * grain;
                 size_t end = (std::min)(start + grain, count);
@@ -677,17 +677,17 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
         }
 
         // 2. 并行扫描 SoA vector
-        size_t count = m_frns.size();
-        if (count > 0) {
+        size_t countVector = m_frns.size();
+        if (countVector > 0) {
             const size_t grain = 8192;
-            size_t numChunks = (count + grain - 1) / grain;
-            std::vector<size_t> chunks(numChunks);
-            std::iota(chunks.begin(), chunks.end(), 0);
+            size_t nVectorChunks = (countVector + grain - 1) / grain;
+            std::vector<size_t> vectorChunks(nVectorChunks);
+            std::iota(vectorChunks.begin(), vectorChunks.end(), 0);
 
-            std::for_each(std::execution::par, chunks.begin(), chunks.end(), [&](size_t chunkIdx) {
+            std::for_each(std::execution::par, vectorChunks.begin(), vectorChunks.end(), [&](size_t chunkIdx) {
                 std::vector<int> localRes;
                 size_t start = chunkIdx * grain;
-                size_t end = (std::min)(start + grain, count);
+                size_t end = (std::min)(start + grain, countVector);
                 for (size_t i = start; i < end; ++i) {
                     if (m_frns[i] == 0 || m_overlay.count(m_frns[i])) continue;
                     size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
@@ -1110,7 +1110,7 @@ void MftReader::requestMetadata(int index) {
     writeLock.unlock();
 
     s_activeMetadataTasks++;
-    QtConcurrent::run([this, index, frn, volume]() {
+    (void)QtConcurrent::run([this, index, frn, volume]() {
         struct TaskGuard { ~TaskGuard() { s_activeMetadataTasks--; } } guard;
 
         std::wstring rootPath = volume + L"\\";

@@ -105,7 +105,7 @@ void SyncEngine::runIncrementalSync() {
     emit syncStatusChanged(true);
 
     // 2026-06-16 按照用户要求：从事务日志读取 FID -> 同步物理 JSON 到数据库 -> 核实后清空
-    QtConcurrent::run([this]() {
+    (void)QtConcurrent::run([this]() {
         auto& mgr = MetadataManager::instance();
         QStringList pendingFids = mgr.getPendingSyncDirs();
         QStringList remainingFids;
