@@ -62,6 +62,7 @@ void MftReader::clear() {
     {
         QWriteLocker lock(&m_dataLock);
         toStop = std::move(m_watchers);
+        m_watchers.clear();
     }
     for (auto* w : toStop) {
         if (w) { w->stop(); delete w; }
@@ -71,47 +72,60 @@ void MftReader::clear() {
 }
 
 void MftReader::buildIndex(const QStringList& drives) {
-    QStringList targetDrives = drives;
-    if (targetDrives.isEmpty()) {
-        DWORD mask = GetLogicalDrives();
-        for (int i = 0; i < 26; ++i) {
-            if (mask & (1 << i)) {
-                QString root = QString(QChar('A' + i)) + ":\\";
-                UINT type = GetDriveTypeW(reinterpret_cast<const wchar_t*>(root.utf16()));
-                if (type == DRIVE_FIXED || type == DRIVE_REMOVABLE)
-                    targetDrives << root.left(2);
+    // 2026-05-14 物理架构重构：实现 C++ 极致增量更新
+    std::vector<std::wstring> targetVolumes;
+    for (const QString& d : drives) {
+        std::wstring w = d.toStdWString();
+        if (w.size() > 2 && w.back() == L'\\') w.pop_back();
+        targetVolumes.push_back(w);
+    }
+
+    std::vector<std::wstring> toScan;
+    {
+        QReadLocker lock(&m_dataLock);
+        for (const auto& tv : targetVolumes) {
+            if (std::find(m_drive_list.begin(), m_drive_list.end(), tv) == m_drive_list.end()) {
+                toScan.push_back(tv);
             }
         }
     }
 
+    // 1. 并发扫描新盘符 (锁外)
     struct ScannedDrive {
         std::wstring volume;
         DriveResult result;
         bool success = false;
     };
-    std::vector<ScannedDrive> scannedResults(targetDrives.size());
-    
-    std::vector<int> driveIndices(targetDrives.size());
-    std::iota(driveIndices.begin(), driveIndices.end(), 0);
-    
-    std::for_each(std::execution::par, driveIndices.begin(), driveIndices.end(), [&](int i) {
-        std::wstring volume = targetDrives[i].toStdWString();
-        if (volume.size() > 2 && volume.back() == L'\\') volume.pop_back();
-        
-        scannedResults[i].volume = volume;
-        scannedResults[i].success = loadMftDirect(volume, scannedResults[i].result);
+    std::vector<ScannedDrive> scannedResults(toScan.size());
+    std::vector<int> scanIndices(toScan.size());
+    std::iota(scanIndices.begin(), scanIndices.end(), 0);
+    std::for_each(std::execution::par, scanIndices.begin(), scanIndices.end(), [&](int i) {
+        scannedResults[i].volume = toScan[i];
+        scannedResults[i].success = loadMftDirect(toScan[i], scannedResults[i].result);
     });
 
+    // 2. 内存合并与逻辑删除 (锁内)
     QWriteLocker lock(&m_dataLock);
-    
-    std::vector<UsnWatcher*> toStop = std::move(m_watchers);
-    m_watchers.clear();
-    lock.unlock();
-    for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
-    lock.relock();
+    bool dataChangedFlag = false;
 
-    clearInternal();
+    // A. 处理卸载：逻辑删除不在目标列表中的盘符数据 (FRN 标记为 0)
+    for (size_t dIdx = 0; dIdx < m_drive_list.size(); ++dIdx) {
+        bool stillNeeded = false;
+        for (const auto& tv : targetVolumes) { if (m_drive_list[dIdx] == tv) { stillNeeded = true; break; } }
 
+        if (!stillNeeded) {
+            for (size_t i = 0; i < m_frns.size(); ++i) {
+                if (m_frns[i] != 0 && (m_parent_frns[i] >> 48) == dIdx) {
+                    m_frns[i] = 0;
+                    dataChangedFlag = true;
+                }
+            }
+            // 注意：暂时保留 m_drive_list 中的占位，以维持 SoA 高位索引的稳定性
+        }
+    }
+
+    // B. 处理挂载：追加新盘符数据
+    std::vector<UsnWatcher*> newWatchers;
     for (auto& sr : scannedResults) {
         if (!sr.success || sr.result.entries.empty()) continue;
         
@@ -119,23 +133,22 @@ void MftReader::buildIndex(const QStringList& drives) {
         m_drive_list.push_back(sr.volume);
         m_next_usns[sr.volume] = sr.result.nextUsn;
         mergeDriveResult(sr.volume, sr.result, driveIdx);
-        
         saveDriveToCacheInternal(driveIdx);
+
+        auto* watcher = new UsnWatcher(sr.volume, sr.result.nextUsn, nullptr);
+        m_watchers.push_back(watcher);
+        newWatchers.push_back(watcher);
+        dataChangedFlag = true;
     }
 
-    rebuildFrnToIndexMap();
-    buildSortedIndices();
-    m_isInitialized = true;
-
-    for (const auto& [volume, usn] : m_next_usns) {
-        auto* watcher = new UsnWatcher(volume, usn, nullptr);
-        m_watchers.push_back(watcher);
+    if (dataChangedFlag) {
+        rebuildFrnToIndexMap();
+        buildSortedIndices();
+        m_isInitialized = true;
     }
 
     lock.unlock();
-    for (auto* watcher : m_watchers) {
-        watcher->start();
-    }
+    for (auto* w : newWatchers) { w->start(); }
 }
 
 bool MftReader::loadFromCache() {
@@ -156,8 +169,8 @@ bool MftReader::loadFromCache() {
             ScchResult res = ScchCache::load(dir_entry.path().string().c_str(), f, pf, s, t, no, attr, sp, usnMap);
             if (res == ScchResult::Ok) {
                 size_t driveIdx = m_drive_list.size();
-                size_t count = f.size();
                 size_t oldPoolSize = m_string_pool.size();
+                size_t count = f.size();
 
                 m_frns.reserve(m_frns.size() + count);
                 m_sizes.reserve(m_sizes.size() + count);
@@ -171,9 +184,7 @@ bool MftReader::loadFromCache() {
                     m_sizes.push_back(s[i]);
                     m_timestamps.push_back(t[i]);
                     m_attributes.push_back(attr[i]);
-                    
-                    uint64_t encodedPf = (static_cast<uint64_t>(driveIdx) << 48) | (pf[i] & 0x0000FFFFFFFFFFFFull);
-                    m_parent_frns.push_back(encodedPf);
+                    m_parent_frns.push_back((static_cast<uint64_t>(driveIdx) << 48) | (pf[i] & 0x0000FFFFFFFFFFFFull));
                     m_name_offsets.push_back(no[i] + (uint32_t)oldPoolSize);
                 }
                 m_string_pool.insert(m_string_pool.end(), sp.begin(), sp.end());
@@ -188,20 +199,13 @@ bool MftReader::loadFromCache() {
     }
 
     if (m_frns.empty()) return false;
-
     rebuildFrnToIndexMap();
     buildSortedIndices();
     m_isInitialized = true;
 
-    for (const auto& [volume, usn] : m_next_usns) {
-        auto* watcher = new UsnWatcher(volume, usn, nullptr);
-        m_watchers.push_back(watcher);
-    }
-
+    std::vector<UsnWatcher*> watchersToStart = m_watchers;
     lock.unlock();
-    for (auto* watcher : m_watchers) {
-        watcher->start();
-    }
+    for (auto* watcher : watchersToStart) { watcher->start(); }
     return true;
 }
 
@@ -222,11 +226,10 @@ bool MftReader::saveDriveToCache(size_t driveIdx) {
 bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     if (driveIdx >= m_drive_list.size()) return false;
     std::wstring volume = m_drive_list[driveIdx];
-    
-    std::vector<uint64_t>  f, pf;
-    std::vector<int64_t>   s, t;
-    std::vector<uint32_t>  no, attr;
-    std::vector<uint8_t>   sp;
+    std::vector<uint64_t> f, pf;
+    std::vector<int64_t> s, t;
+    std::vector<uint32_t> no, attr;
+    std::vector<uint8_t> sp;
     std::unordered_map<uint32_t, uint32_t> offsetMap;
 
     for (size_t i = 0; i < m_frns.size(); ++i) {
@@ -248,10 +251,8 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
             no.push_back(offsetMap[oldOff]);
         }
     }
-
     std::unordered_map<std::string, uint64_t> usnMap;
     usnMap[QString::fromStdWString(volume).toStdString()] = m_next_usns[volume];
-
     QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
     return ScchCache::save(path.toStdString().c_str(), f, pf, s, t, no, attr, sp, usnMap);
 }
@@ -259,8 +260,7 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
 QString MftReader::getName(int index) const {
     QReadLocker lock(&m_dataLock);
     if (index < 0 || index >= (int)m_name_offsets.size()) return QString();
-    const char* ptr = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[index]);
-    return QString::fromUtf8(ptr);
+    return QString::fromUtf8(reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[index]));
 }
 
 int64_t MftReader::getSize(int index) const {
@@ -346,13 +346,8 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
     if (useRegex && hasQuery) {
         re = QRegularExpression(query, caseSensitive ? QRegularExpression::NoPatternOption : QRegularExpression::CaseInsensitiveOption);
     }
-
     QStringList normalizedExts;
-    if (hasExt) {
-        for (const QString& ex : extensionList) {
-            normalizedExts << (ex.startsWith('.') ? ex : "." + ex);
-        }
-    }
+    if (hasExt) { for (const QString& ex : extensionList) normalizedExts << (ex.startsWith('.') ? ex : "." + ex); }
 
     std::mutex mtx;
     std::vector<int> finalRes;
@@ -367,61 +362,39 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
     std::for_each(std::execution::par, chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
         std::vector<int> localRes;
         localRes.reserve(grainSize / 8);
-
         size_t startPos = chunkIdx * grainSize;
         size_t endPos = (std::min)(startPos + grainSize, total);
 
         for (size_t i = startPos; i < endPos; ++i) {
             if (m_frns[i] == 0) continue;
-
             uint32_t at = m_attributes[i];
             if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
             if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
-
             const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
-
-            if (!hasQuery && !hasExt) {
-                localRes.push_back((int)i);
-                continue;
-            }
-
+            if (!hasQuery && !hasExt) { localRes.push_back((int)i); continue; }
             QString name = QString::fromUtf8(p);
-
             if (hasExt) {
                 bool extMatch = false;
-                for (const QString& ex : normalizedExts) {
-                    if (name.endsWith(ex, Qt::CaseInsensitive)) { extMatch = true; break; }
-                }
+                for (const QString& ex : normalizedExts) { if (name.endsWith(ex, Qt::CaseInsensitive)) { extMatch = true; break; } }
                 if (!extMatch) continue;
             }
-
-            if (!hasQuery) {
-                localRes.push_back((int)i);
-            } else {
-                bool match = useRegex ? re.match(name).hasMatch()
-                                     : name.contains(query, caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive);
+            if (!hasQuery) { localRes.push_back((int)i); }
+            else {
+                bool match = useRegex ? re.match(name).hasMatch() : name.contains(query, caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive);
                 if (match) localRes.push_back((int)i);
             }
         }
-
-        if (!localRes.empty()) {
-            std::lock_guard<std::mutex> l(mtx);
-            finalRes.insert(finalRes.end(), localRes.begin(), localRes.end());
-        }
+        if (!localRes.empty()) { std::lock_guard<std::mutex> l(mtx); finalRes.insert(finalRes.end(), localRes.begin(), localRes.end()); }
     });
-
     return QVector<int>(finalRes.begin(), finalRes.end());
 }
 
 void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& volume) {
     QWriteLocker lock(&m_dataLock);
     uint64_t frn = record->FileReferenceNumber;
-    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(
-        reinterpret_cast<uint8_t*>(record) + record->FileNameOffset), record->FileNameLength / 2);
-    
+    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(reinterpret_cast<uint8_t*>(record) + record->FileNameOffset), record->FileNameLength / 2);
     size_t dIdx = 0;
     for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
-
     uint64_t encodedPf = (static_cast<uint64_t>(dIdx) << 48) | (record->ParentFileReferenceNumber & 0x0000FFFFFFFFFFFFull);
     auto it = m_frn_to_idx.find(frn);
     if (it != m_frn_to_idx.end()) {
@@ -429,13 +402,10 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         m_parent_frns[idx] = encodedPf;
         m_attributes[idx] = record->FileAttributes;
         m_timestamps[idx] = filetimeToUnixMs(record->TimeStamp.QuadPart);
-
         QByteArray utf8 = name.toUtf8();
         uint32_t oldOff = m_name_offsets[idx];
-
         const char* oldPtr = reinterpret_cast<const char*>(m_string_pool.data() + oldOff);
         size_t oldLen = strlen(oldPtr);
-
         if ((size_t)utf8.size() <= oldLen) {
             memcpy(m_string_pool.data() + oldOff, utf8.constData(), utf8.size());
             m_string_pool[oldOff + utf8.size()] = '\0';

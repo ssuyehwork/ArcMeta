@@ -272,8 +272,10 @@ ScanDialog::ScanDialog(QWidget* parent)
                 if (ok) {
                     weakThis->updateStatus("就绪");
                     weakThis->m_tableModel->setFilterText("");
+                    weakThis->refreshDriveList(true); // 后台探测硬件
                 } else {
                     weakThis->updateStatus("未检测到快照，全自动初始化...");
+                    weakThis->refreshDriveList(true);
                     weakThis->onStartScan();
                 }
             });
@@ -301,8 +303,6 @@ void ScanDialog::setupUi() {
     m_driveLayout->setContentsMargins(10, 0, 10, 0);
     m_driveLayout->setSpacing(15);
     driveScroll->setWidget(m_driveContainer);
-
-    refreshDriveList();
 
     auto* topControl = new QHBoxLayout();
     topControl->addWidget(driveScroll, 1);
@@ -440,30 +440,25 @@ void ScanDialog::setupUi() {
     });
 }
 
-void ScanDialog::refreshDriveList() {
+void ScanDialog::refreshDriveList(bool forceProbe) {
+    if (!forceProbe && !m_cachedDriveInfos.isEmpty()) {
+        updateDriveButtonStyles();
+        return;
+    }
+
     QPointer<ScanDialog> weakThis(this);
     (void)QtConcurrent::run([weakThis]() {
         if (!weakThis) return;
-        struct DriveInfo {
-            QString letter;
-            QString label;
-            bool isNtfs;
-            bool hasMedia;
-        };
-        QVector<DriveInfo> validDrives;
+        QVector<DriveInfo> drives;
         DWORD driveMask = GetLogicalDrives();
-        
         for (int i = 0; i < 26; ++i) {
             if (driveMask & (1 << i)) {
                 QString letter = QString(QChar('A' + i)) + ":";
-                QString root = letter + "\\";
-                
                 WCHAR volName[MAX_PATH + 1] = {0};
                 WCHAR fsName[MAX_PATH + 1] = {0};
-                BOOL ok = GetVolumeInformationW(reinterpret_cast<const wchar_t*>(root.utf16()), 
+                BOOL ok = GetVolumeInformationW(reinterpret_cast<const wchar_t*>((letter + "\\").utf16()),
                                               volName, MAX_PATH + 1, NULL, NULL, NULL, 
                                               fsName, MAX_PATH + 1);
-                
                 DriveInfo info;
                 info.letter = letter;
                 info.hasMedia = ok;
@@ -473,108 +468,77 @@ void ScanDialog::refreshDriveList() {
                 } else {
                     info.isNtfs = false;
                 }
-                validDrives.append(info);
+                drives.append(info);
             }
         }
 
-        QMetaObject::invokeMethod(weakThis.data(), [weakThis, validDrives]() {
+        QMetaObject::invokeMethod(weakThis.data(), [weakThis, drives]() {
             if (!weakThis) return;
+            weakThis->m_cachedDriveInfos = drives;
 
             QLayoutItem* item;
             while ((item = weakThis->m_driveLayout->takeAt(0)) != nullptr) {
                 if (item->widget()) item->widget()->deleteLater();
                 delete item;
             }
+            weakThis->m_driveButtonMap.clear();
 
             QLabel* driveLabel = new QLabel("DRIVES");
             driveLabel->setStyleSheet("color: #3D5060; font-weight: bold; font-size: 10px;");
             weakThis->m_driveLayout->addWidget(driveLabel);
 
-            auto createActionBtn = [&](const QString& text) {
-                QPushButton* btn = new QPushButton(text);
-                btn->setFlat(true);
-                btn->setFixedSize(32, 20);
-                btn->setStyleSheet("QPushButton { color: #3D5060; font-size: 10px; border: none; } QPushButton:hover { color: #FF8C00; }");
-                return btn;
-            };
-
-            QPushButton* btnAll = createActionBtn("全选");
-            connect(btnAll, &QPushButton::clicked, weakThis.data(), [weakThis, validDrives]() {
-                if (!weakThis) return;
-                bool anyAdded = false;
-                for (const auto& info : validDrives) {
-                    if (info.hasMedia && info.isNtfs) {
-                        if (!weakThis->m_config.ignoredDrives.contains(info.letter) && !weakThis->m_config.activeDrives.contains(info.letter)) {
-                            weakThis->m_config.activeDrives.insert(info.letter);
-                            anyAdded = true;
-                        }
-                    }
-                }
-                if (!anyAdded) {
-                    weakThis->m_config.activeDrives.clear();
-                    for (const auto& d : weakThis->m_config.defaultDrives) weakThis->m_config.activeDrives.insert(d);
-                }
-                weakThis->m_config.save();
-                weakThis->refreshDriveList();
-                weakThis->onStartScan();
-            });
-            weakThis->m_driveLayout->addWidget(btnAll);
-
-            for (const auto& info : validDrives) {
+            for (const auto& info : drives) {
                 if (!info.hasMedia || !info.isNtfs) continue;
                 if (weakThis->m_config.ignoredDrives.contains(info.letter)) continue;
 
-                bool isActive = weakThis->m_config.activeDrives.contains(info.letter);
-                bool isDefault = weakThis->m_config.defaultDrives.contains(info.letter);
-                QString driveLetter = info.letter;
-                QString label = info.label;
-                if (label.isEmpty()) label = "本地磁盘";
-                
-                QString btnText = QString("%1%2 (%3)").arg(isDefault ? "★ " : "").arg(driveLetter).arg(label);
+                QString label = info.label.isEmpty() ? "本地磁盘" : info.label;
+                QString btnText = QString("%1 (%2)").arg(info.letter).arg(label);
                 
                 QPushButton* btn = new QPushButton(btnText);
                 btn->setCheckable(true);
-                btn->setChecked(isActive);
                 btn->setFixedHeight(24);
+                weakThis->m_driveButtonMap[info.letter] = btn;
                 
-                QString style = isActive ? "QPushButton { background: rgba(255, 140, 0, 30); color: #FF8C00; border: 1px solid #FF8C00; padding: 0 10px; font-size: 12px; font-weight: bold; }" 
-                                         : "QPushButton { background: #111519; color: #7A8F9E; border: 1px solid #252E37; padding: 0 10px; font-size: 12px; }";
-                btn->setStyleSheet(style);
-                
-                connect(btn, &QPushButton::clicked, weakThis.data(), [weakThis, driveLetter, isActive]() {
+                connect(btn, &QPushButton::clicked, weakThis.data(), [weakThis, letter = info.letter]() {
                     if (!weakThis) return;
-                    if (isActive) {
-                        if (weakThis->m_config.activeDrives.size() > 1) weakThis->m_config.activeDrives.remove(driveLetter);
+                    if (weakThis->m_config.activeDrives.contains(letter)) {
+                        if (weakThis->m_config.activeDrives.size() > 1) weakThis->m_config.activeDrives.remove(letter);
                     } else {
-                        weakThis->m_config.activeDrives.insert(driveLetter);
+                        weakThis->m_config.activeDrives.insert(letter);
                     }
-                    weakThis->m_config.save();
-                    weakThis->refreshDriveList();
+                    weakThis->updateDriveButtonStyles();
                     weakThis->onStartScan();
                 });
                 
                 btn->setContextMenuPolicy(Qt::CustomContextMenu);
-                connect(btn, &QPushButton::customContextMenuRequested, weakThis.data(), [weakThis, driveLetter](const QPoint& pos) {
-                    if (weakThis) weakThis->onDriveContextMenu(driveLetter, pos);
+                connect(btn, &QPushButton::customContextMenuRequested, weakThis.data(), [weakThis, letter = info.letter](const QPoint& pos) {
+                    if (weakThis) weakThis->onDriveContextMenu(letter, pos);
                 });
                 
                 weakThis->m_driveLayout->addWidget(btn);
             }
-
-            for (const auto& ignored : weakThis->m_config.ignoredDrives) {
-                QPushButton* btn = new QPushButton(ignored + ": IGNORED");
-                btn->setStyleSheet("QPushButton { background: transparent; color: #3D5060; border: 1px solid rgba(61, 80, 96, 50); padding: 0 8px; }");
-                btn->setContextMenuPolicy(Qt::CustomContextMenu);
-                connect(btn, &QPushButton::customContextMenuRequested, weakThis.data(), [weakThis, ignored](const QPoint& pos) {
-                    if (weakThis) weakThis->onIgnoredDriveContextMenu(ignored, pos);
-                });
-                weakThis->m_driveLayout->addWidget(btn);
-            }
-
             weakThis->m_driveLayout->addStretch();
+            weakThis->updateDriveButtonStyles();
         });
     });
 }
+
+void ScanDialog::updateDriveButtonStyles() {
+    for (auto it = m_driveButtonMap.begin(); it != m_driveButtonMap.end(); ++it) {
+        bool isActive = m_config.activeDrives.contains(it.key());
+        bool isDefault = m_config.defaultDrives.contains(it.key());
+        it.value()->setChecked(isActive);
+
+        QString style = isActive ? "QPushButton { background: rgba(255, 140, 0, 30); color: #FF8C00; border: 1px solid #FF8C00; padding: 0 10px; font-size: 12px; font-weight: bold; }"
+                                 : "QPushButton { background: #111519; color: #7A8F9E; border: 1px solid #252E37; padding: 0 10px; font-size: 12px; }";
+        it.value()->setStyleSheet(style);
+
+        QString label = "";
+        for (const auto& info : m_cachedDriveInfos) { if (info.letter == it.key()) { label = info.label; break; } }
+        it.value()->setText(QString("%1%2 (%3)").arg(isDefault ? "★ " : "").arg(it.key()).arg(label.isEmpty() ? "本地磁盘" : label));
+    }
+}
+
 void ScanDialog::onDriveContextMenu(const QString& drive, const QPoint& /*pos*/) {
     QMenu menu(this);
     menu.setStyleSheet("QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; } QMenu::item:selected { background: #232D37; color: #FFF; }");
@@ -584,15 +548,14 @@ void ScanDialog::onDriveContextMenu(const QString& drive, const QPoint& /*pos*/)
         if (isDefault) m_config.defaultDrives.remove(drive);
         else m_config.defaultDrives.insert(drive);
         m_config.save();
-        refreshDriveList();
+        updateDriveButtonStyles();
     });
     
     menu.addAction("忽略此驱动器", [this, drive]() {
         m_config.ignoredDrives.insert(drive);
         m_config.activeDrives.remove(drive);
-        m_config.defaultDrives.remove(drive);
         m_config.save();
-        refreshDriveList();
+        refreshDriveList(true); // 重新生成按钮
         onStartScan();
     });
     
@@ -606,7 +569,7 @@ void ScanDialog::onIgnoredDriveContextMenu(const QString& drive, const QPoint& p
     menu.addAction("恢复驱动器", [this, drive]() {
         m_config.ignoredDrives.remove(drive);
         m_config.save();
-        refreshDriveList();
+        refreshDriveList(true);
     });
     menu.exec(QCursor::pos());
 }

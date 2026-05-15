@@ -21,15 +21,13 @@
 #include <QDateTime>
 #include <QHash>
 #include <QSet>
+#include <QMap>
 #include <QReadWriteLock>
 #include <atomic>
 #include <memory>
 
 namespace ArcMeta {
 
-/**
- * @brief 简单的配置结构，对标 Rust 的 AppConfig
- */
 struct ScanConfig {
     QSet<QString> activeDrives;
     QSet<QString> defaultDrives;
@@ -108,11 +106,21 @@ protected:
 
 private:
     void setupUi();
-    void refreshDriveList();
+    void refreshDriveList(bool forceProbe = false);
+    void updateDriveButtonStyles();
     void updateStatus(const QString& text, bool scanning = false);
     void updateStatusBar();
     QString formatNumber(int64_t n);
     QString formatSize(int64_t bytes);
+
+    struct DriveInfo {
+        QString letter;
+        QString label;
+        bool isNtfs;
+        bool hasMedia;
+    };
+    QVector<DriveInfo> m_cachedDriveInfos;
+    QMap<QString, QPushButton*> m_driveButtonMap;
 
     QLineEdit* m_searchEdit = nullptr;
     QLineEdit* m_extEdit = nullptr;
