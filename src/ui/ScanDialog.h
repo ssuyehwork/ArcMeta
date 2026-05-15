@@ -21,15 +21,13 @@
 #include <QDateTime>
 #include <QHash>
 #include <QSet>
+#include <QMap>
 #include <QReadWriteLock>
 #include <atomic>
 #include <memory>
 
 namespace ArcMeta {
 
-/**
- * @brief 简单的配置结构，对标 Rust 的 AppConfig
- */
 struct ScanConfig {
     QSet<QString> activeDrives;
     QSet<QString> defaultDrives;
@@ -66,6 +64,7 @@ public:
 
     void setFilterText(const QString& text);
     void setFilterState(const ScanFilterState& state);
+    void triggerSearch();
     void loadMore(int count = 200);
     int totalFilteredCount() const { return m_filteredIndices.size(); }
 
@@ -107,11 +106,21 @@ protected:
 
 private:
     void setupUi();
-    void refreshDriveList();
+    void refreshDriveList(bool forceProbe = false);
+    void updateDriveButtonStyles();
     void updateStatus(const QString& text, bool scanning = false);
     void updateStatusBar();
     QString formatNumber(int64_t n);
     QString formatSize(int64_t bytes);
+
+    struct DriveInfo {
+        QString letter;
+        QString label;
+        bool isNtfs;
+        bool hasMedia;
+    };
+    QVector<DriveInfo> m_cachedDriveInfos;
+    QMap<QString, QPushButton*> m_driveButtonMap;
 
     QLineEdit* m_searchEdit = nullptr;
     QLineEdit* m_extEdit = nullptr;
@@ -127,13 +136,12 @@ private:
     QTableView* m_resultView = nullptr;
     ScanTableModel* m_tableModel = nullptr;
 
-    // 2026-05-14 对标原版界面组件 (物理对标 P0：确保变量名唯一，防止指针覆盖导致闪退)
-    QLabel* m_titleStatusLabel = nullptr; // 标题栏 "READY - 0"
-    QLabel* m_statLabelMain = nullptr;    // 状态栏 "共 X 条 | 本页 Y 条"
-    QLabel* m_statLabelTime = nullptr;    // 状态栏 "耗时 X ms"
-    QLabel* m_statLabelMemory = nullptr; // 状态栏 "数据占用 X MB"
-    QLabel* m_selectionLabel = nullptr;  // 状态栏 "已选 X 项 | 合计大小 Z"
-    QPushButton* m_csvBtn = nullptr;     // 状态栏 "导出所选为 CSV"
+    QLabel* m_titleStatusLabel = nullptr; 
+    QLabel* m_statLabelMain = nullptr;    
+    QLabel* m_statLabelTime = nullptr;    
+    QLabel* m_statLabelMemory = nullptr; 
+    QLabel* m_selectionLabel = nullptr;  
+    QPushButton* m_csvBtn = nullptr;     
     QProgressBar* m_progressBar = nullptr;
 
     int64_t m_lastSearchMs = 0;
