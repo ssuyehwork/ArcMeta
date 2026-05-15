@@ -385,7 +385,8 @@ void ScanDialog::setupUi() {
     
     m_resultView->horizontalHeader()->setStretchLastSection(false); 
     m_resultView->horizontalHeader()->setMinimumSectionSize(60);
-    m_resultView->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
+    // 2026-05-14 物理修正：强制列标题水平居中对齐
+    m_resultView->horizontalHeader()->setDefaultAlignment(Qt::AlignCenter);
     
     m_resultView->setColumnWidth(0, 260); 
     m_resultView->setColumnWidth(2, 100); 
