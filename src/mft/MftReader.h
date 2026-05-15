@@ -88,6 +88,7 @@ private:
     void clearInternal(); 
     void rebuildFrnToIndexMap();
     void compact();
+    void buildSortedIndices();
     
     bool loadMftDirect(const std::wstring& volume, DriveResult& result);
     void mergeDriveResult(const std::wstring& volume, const DriveResult& result, size_t driveIdx);
@@ -99,6 +100,7 @@ private:
     std::vector<int64_t>   m_timestamps;   
     std::vector<uint32_t>  m_name_offsets;
     std::vector<uint32_t>  m_attributes;
+    std::vector<uint8_t>   m_metadata_fetched; // 0: 未获取, 1: 获取中, 2: 已完成
     std::vector<uint8_t>   m_string_pool;
 
     std::vector<std::wstring> m_drive_list;
@@ -120,6 +122,7 @@ private:
     uint32_t m_dirty_count = 0;
     size_t   m_dead_count = 0;
     size_t   m_wasted_string_bytes = 0;
+    std::vector<uint32_t> m_sorted_indices;
 };
 
 } // namespace ArcMeta

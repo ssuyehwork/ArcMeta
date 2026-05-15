@@ -1,5 +1,5 @@
 #include "ScchCache.h"
-#include <fstream>
+#include <windows.h>
 #include <filesystem>
 #include <chrono>
 #include <cstring>
@@ -42,7 +42,7 @@ uint32_t ScchCache::computeCrc32(const uint8_t* data, size_t len) {
     return crc ^ 0xFFFFFFFFu;
 }
 
-// ── 保存 ─────────────────────────────────────────────────────────
+// ── 保存 (Mmap 优化) ───────────────────────────────────────────
 
 bool ScchCache::save(
     const char*                                  path,
@@ -52,94 +52,99 @@ bool ScchCache::save(
     const std::vector<int64_t>&                  timestamps,
     const std::vector<uint32_t>&                 name_offsets,
     const std::vector<uint32_t>&                 attributes,
+    const std::vector<uint8_t>&                  metadata_fetched,
     const std::vector<uint8_t>&                  string_pool,
     const std::unordered_map<std::string, uint64_t>& usn_map
 ) {
     try {
-        std::filesystem::create_directories(
-            std::filesystem::path(path).parent_path()
-        );
+        std::filesystem::path p(path);
+        std::filesystem::create_directories(p.parent_path());
 
-        // ── 1. 先把正文全部序列化到内存缓冲区，便于计算 CRC ──────
-        std::vector<uint8_t> body;
-        body.reserve(
-            frns.size() * (8 + 8 + 8 + 8 + 4 + 4) +
-            string_pool.size() + usn_map.size() * sizeof(ScchUsnEntry) + 256
-        );
+        std::string tmpPath = p.string() + ".tmp";
+        std::wstring wTmpPath = std::filesystem::path(tmpPath).wstring();
 
-        auto appendRaw = [&](const void* data, size_t len) {
-            const uint8_t* p = reinterpret_cast<const uint8_t*>(data);
-            body.insert(body.end(), p, p + len);
+        // 1. 计算总大小
+        size_t bodySize = 0;
+        bodySize += 8 + frns.size() * 8;
+        bodySize += 8 + parent_frns.size() * 8;
+        bodySize += 8 + sizes.size() * 8;
+        bodySize += 8 + timestamps.size() * 8;
+        bodySize += 8 + name_offsets.size() * 4;
+        bodySize += 8 + attributes.size() * 4;
+        bodySize += 8 + metadata_fetched.size();
+        bodySize += 8 + string_pool.size();
+        bodySize += 8 + usn_map.size() * sizeof(ScchUsnEntry);
+
+        size_t totalSize = sizeof(ScchHeader) + bodySize;
+
+        // 2. 创建文件并映射
+        HANDLE hFile = CreateFileW(wTmpPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile == INVALID_HANDLE_VALUE) return false;
+
+        LARGE_INTEGER li; li.QuadPart = totalSize;
+        if (!SetFilePointerEx(hFile, li, NULL, FILE_BEGIN) || !SetEndOfFile(hFile)) {
+            CloseHandle(hFile); return false;
+        }
+
+        HANDLE hMap = CreateFileMappingW(hFile, NULL, PAGE_READWRITE, 0, 0, NULL);
+        if (!hMap) { CloseHandle(hFile); return false; }
+
+        uint8_t* base = static_cast<uint8_t*>(MapViewOfFile(hMap, FILE_MAP_WRITE, 0, 0, 0));
+        if (!base) { CloseHandle(hMap); CloseHandle(hFile); return false; }
+
+        // 3. 顺序写入数据
+        uint8_t* ptr = base + sizeof(ScchHeader);
+        auto writeRaw = [&](const void* data, size_t len) {
+            memcpy(ptr, data, len);
+            ptr += len;
         };
+        auto writeU64 = [&](uint64_t v) { writeRaw(&v, 8); };
+        auto writeVec64u = [&](const std::vector<uint64_t>& v) { writeU64(v.size()); writeRaw(v.data(), v.size() * 8); };
+        auto writeVec64i = [&](const std::vector<int64_t>& v) { writeU64(v.size()); writeRaw(v.data(), v.size() * 8); };
+        auto writeVec32 = [&](const std::vector<uint32_t>& v) { writeU64(v.size()); writeRaw(v.data(), v.size() * 4); };
 
-        auto appendU64 = [&](uint64_t v) { appendRaw(&v, 8); };
+        writeVec64u(frns);
+        writeVec64u(parent_frns);
+        writeVec64i(sizes);
+        writeVec64i(timestamps);
+        writeVec32(name_offsets);
+        writeVec32(attributes);
 
-        // SoA 数组，每组先写 count 再写数据
-        auto appendVec64u = [&](const std::vector<uint64_t>& v) {
-            appendU64(v.size());
-            appendRaw(v.data(), v.size() * 8);
-        };
-        auto appendVec64i = [&](const std::vector<int64_t>& v) {
-            appendU64(v.size());
-            appendRaw(v.data(), v.size() * 8);
-        };
-        auto appendVec32 = [&](const std::vector<uint32_t>& v) {
-            appendU64(v.size());
-            appendRaw(v.data(), v.size() * 4);
-        };
+        writeU64(metadata_fetched.size());
+        writeRaw(metadata_fetched.data(), metadata_fetched.size());
 
-        appendVec64u(frns);
-        appendVec64u(parent_frns);
-        appendVec64i(sizes);
-        appendVec64i(timestamps);
-        appendVec32(name_offsets);
-        appendVec32(attributes);
+        writeU64(string_pool.size());
+        writeRaw(string_pool.data(), string_pool.size());
 
-        // 字符串池
-        appendU64(string_pool.size());
-        appendRaw(string_pool.data(), string_pool.size());
-
-        // USN 水位线 map
-        appendU64(usn_map.size());
+        writeU64(usn_map.size());
         for (const auto& [drive, usn] : usn_map) {
             ScchUsnEntry entry{};
             size_t copyLen = std::min(drive.size(), sizeof(entry.drive) - 1);
             memcpy(entry.drive, drive.data(), copyLen);
             entry.next_usn = usn;
-            appendRaw(&entry, sizeof(entry));
+            writeRaw(&entry, sizeof(entry));
         }
 
-        // ── 2. 计算正文 CRC32 ────────────────────────────────────
-        uint32_t crc = computeCrc32(body.data(), body.size());
-
-        // ── 3. 构造头部 ──────────────────────────────────────────
-        ScchHeader header{};
-        memcpy(header.magic, SCCH_MAGIC, 4);
-        header.version_major = SCCH_VERSION_MAJOR;
-        header.version_minor = SCCH_VERSION_MINOR;
-        header.created_at    = std::chrono::duration_cast<std::chrono::milliseconds>(
+        // 4. 计算 CRC 并填充头部
+        uint32_t crc = computeCrc32(base + sizeof(ScchHeader), bodySize);
+        ScchHeader* header = reinterpret_cast<ScchHeader*>(base);
+        memcpy(header->magic, SCCH_MAGIC, 4);
+        header->version_major = SCCH_VERSION_MAJOR;
+        header->version_minor = SCCH_VERSION_MINOR;
+        header->created_at = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
-        header.record_count  = frns.size();
-        header.pool_size     = string_pool.size();
-        header.usn_map_count = usn_map.size();
-        header.crc32         = crc;
-        header.flags         = 0;
+        header->record_count = frns.size();
+        header->pool_size = string_pool.size();
+        header->usn_map_count = usn_map.size();
+        header->crc32 = crc;
+        header->flags = 0;
 
-        // ── 4. 原子写入：先写临时文件，成功后重命名 ─────────────
-        std::string tmpPath = std::string(path) + ".tmp";
-        std::ofstream f(tmpPath, std::ios::binary | std::ios::trunc);
-        if (!f) return false;
+        // 5. 解除映射
+        UnmapViewOfFile(base);
+        CloseHandle(hMap);
+        CloseHandle(hFile);
 
-        f.write(reinterpret_cast<const char*>(&header), sizeof(header));
-        f.write(reinterpret_cast<const char*>(body.data()), body.size());
-        f.close();
-
-        if (!f) {
-            std::filesystem::remove(tmpPath);
-            return false;
-        }
-
-        // 原子替换
+        // 6. 原子替换
         std::filesystem::rename(tmpPath, path);
         return true;
 
@@ -149,7 +154,7 @@ bool ScchCache::save(
     }
 }
 
-// ── 加载 ─────────────────────────────────────────────────────────
+// ── 加载 (Mmap 优化 - 零拷贝思路) ───────────────────────────────────
 
 ScchResult ScchCache::load(
     const char*                                  path,
@@ -159,116 +164,114 @@ ScchResult ScchCache::load(
     std::vector<int64_t>&                        timestamps,
     std::vector<uint32_t>&                       name_offsets,
     std::vector<uint32_t>&                       attributes,
+    std::vector<uint8_t>&                        metadata_fetched,
     std::vector<uint8_t>&                        string_pool,
     std::unordered_map<std::string, uint64_t>&   usn_map
 ) {
     try {
-        if (!std::filesystem::exists(path))
-            return ScchResult::FileNotFound;
+        std::wstring wpath = std::filesystem::path(path).wstring();
+        HANDLE hFile = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile == INVALID_HANDLE_VALUE) return ScchResult::FileNotFound;
 
-        std::ifstream f(path, std::ios::binary);
-        if (!f) return ScchResult::IoError;
+        LARGE_INTEGER li;
+        if (!GetFileSizeEx(hFile, &li)) { CloseHandle(hFile); return ScchResult::IoError; }
+        size_t fileSize = static_cast<size_t>(li.QuadPart);
+        if (fileSize < sizeof(ScchHeader)) { CloseHandle(hFile); return ScchResult::Truncated; }
 
-        // ── 1. 读头部 ────────────────────────────────────────────
-        ScchHeader header{};
-        f.read(reinterpret_cast<char*>(&header), sizeof(header));
-        if (!f) return ScchResult::Truncated;
+        HANDLE hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+        if (!hMap) { CloseHandle(hFile); return ScchResult::IoError; }
 
-        // ── 2. 验证魔数 ──────────────────────────────────────────
-        if (memcmp(header.magic, SCCH_MAGIC, 4) != 0)
+        const uint8_t* base = static_cast<const uint8_t*>(MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0));
+        if (!base) { CloseHandle(hMap); CloseHandle(hFile); return ScchResult::IoError; }
+
+        const ScchHeader* header = reinterpret_cast<const ScchHeader*>(base);
+        if (memcmp(header->magic, SCCH_MAGIC, 4) != 0) {
+            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
             return ScchResult::BadMagic;
-
-        // ── 3. 验证版本（主版本必须一致）────────────────────────
-        if (header.version_major != SCCH_VERSION_MAJOR)
+        }
+        if (header->version_major != SCCH_VERSION_MAJOR) {
+            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
             return ScchResult::VersionMismatch;
+        }
 
-        // ── 4. 读取全部正文到内存 ────────────────────────────────
-        f.seekg(0, std::ios::end);
-        size_t fileSize = f.tellg();
-        if (fileSize < sizeof(ScchHeader)) return ScchResult::Truncated;
         size_t bodySize = fileSize - sizeof(ScchHeader);
-        f.seekg(sizeof(ScchHeader), std::ios::beg);
-        
-        std::vector<uint8_t> body(bodySize);
-        f.read(reinterpret_cast<char*>(body.data()), bodySize);
-        if (!f) return ScchResult::Truncated;
-
-        // ── 5. 验证 CRC32 ────────────────────────────────────────
-        uint32_t actualCrc = computeCrc32(body.data(), body.size());
-        if (actualCrc != header.crc32)
+        if (computeCrc32(base + sizeof(ScchHeader), bodySize) != header->crc32) {
+            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
             return ScchResult::CrcMismatch;
+        }
 
-        // ── 6. 从 body 反序列化 SoA ──────────────────────────────
-        const uint8_t* p   = body.data();
-        const uint8_t* end = body.data() + body.size();
+        const uint8_t* ptr = base + sizeof(ScchHeader);
+        const uint8_t* end = base + fileSize;
 
         auto readU64 = [&](uint64_t& v) -> bool {
-            if (p + 8 > end) return false;
-            memcpy(&v, p, 8); p += 8; return true;
+            if (ptr + 8 > end) return false;
+            memcpy(&v, ptr, 8); ptr += 8; return true;
         };
 
         auto readVec64u = [&](std::vector<uint64_t>& v, uint64_t expected) -> bool {
             uint64_t count = 0;
-            if (!readU64(count)) return false;
-            if (count != expected) return false;
-            if (p + count * 8 > end) return false;
-            v.resize(count);
-            memcpy(v.data(), p, count * 8);
-            p += count * 8;
-            return true;
+            if (!readU64(count) || count != expected || ptr + count * 8 > end) return false;
+            v.assign(reinterpret_cast<const uint64_t*>(ptr), reinterpret_cast<const uint64_t*>(ptr) + count);
+            ptr += count * 8; return true;
         };
 
         auto readVec64i = [&](std::vector<int64_t>& v, uint64_t expected) -> bool {
             uint64_t count = 0;
-            if (!readU64(count)) return false;
-            if (count != expected) return false;
-            if (p + count * 8 > end) return false;
-            v.resize(count);
-            memcpy(v.data(), p, count * 8);
-            p += count * 8;
-            return true;
+            if (!readU64(count) || count != expected || ptr + count * 8 > end) return false;
+            v.assign(reinterpret_cast<const int64_t*>(ptr), reinterpret_cast<const int64_t*>(ptr) + count);
+            ptr += count * 8; return true;
         };
 
         auto readVec32 = [&](std::vector<uint32_t>& v, uint64_t expected) -> bool {
             uint64_t count = 0;
-            if (!readU64(count)) return false;
-            if (count != expected) return false;
-            if (p + count * 4 > end) return false;
-            v.resize(count);
-            memcpy(v.data(), p, count * 4);
-            p += count * 4;
-            return true;
+            if (!readU64(count) || count != expected || ptr + count * 4 > end) return false;
+            v.assign(reinterpret_cast<const uint32_t*>(ptr), reinterpret_cast<const uint32_t*>(ptr) + count);
+            ptr += count * 4; return true;
         };
 
-        uint64_t rc = header.record_count;
-        if (!readVec64u(frns,         rc)) return ScchResult::Truncated;
-        if (!readVec64u(parent_frns,  rc)) return ScchResult::Truncated;
-        if (!readVec64i(sizes,        rc)) return ScchResult::Truncated;
-        if (!readVec64i(timestamps,   rc)) return ScchResult::Truncated;
-        if (!readVec32(name_offsets, rc)) return ScchResult::Truncated;
-        if (!readVec32(attributes,   rc)) return ScchResult::Truncated;
+        uint64_t rc = header->record_count;
+        if (!readVec64u(frns, rc) || !readVec64u(parent_frns, rc) || !readVec64i(sizes, rc) ||
+            !readVec64i(timestamps, rc) || !readVec32(name_offsets, rc) || !readVec32(attributes, rc)) {
+            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
+            return ScchResult::Truncated;
+        }
 
-        // 字符串池
+        uint64_t fetchedSize = 0;
+        if (!readU64(fetchedSize) || fetchedSize != rc || ptr + fetchedSize > end) {
+            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
+            return ScchResult::Truncated;
+        }
+        metadata_fetched.assign(ptr, ptr + fetchedSize);
+        ptr += fetchedSize;
+
         uint64_t poolSize = 0;
-        if (!readU64(poolSize)) return ScchResult::Truncated;
-        if (poolSize != header.pool_size) return ScchResult::Truncated;
-        if (p + poolSize > end) return ScchResult::Truncated;
-        string_pool.assign(p, p + poolSize);
-        p += poolSize;
+        if (!readU64(poolSize) || poolSize != header->pool_size || ptr + poolSize > end) {
+            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
+            return ScchResult::Truncated;
+        }
+        string_pool.assign(ptr, ptr + poolSize);
+        ptr += poolSize;
 
-        // USN 水位线
         uint64_t usnCount = 0;
-        if (!readU64(usnCount)) return ScchResult::Truncated;
-        if (usnCount != header.usn_map_count) return ScchResult::Truncated;
+        if (!readU64(usnCount) || usnCount != header->usn_map_count) {
+            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
+            return ScchResult::Truncated;
+        }
         usn_map.clear();
         for (uint64_t i = 0; i < usnCount; ++i) {
-            if (p + sizeof(ScchUsnEntry) > end) return ScchResult::Truncated;
+            if (ptr + sizeof(ScchUsnEntry) > end) {
+                UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
+                return ScchResult::Truncated;
+            }
             ScchUsnEntry entry{};
-            memcpy(&entry, p, sizeof(entry));
-            p += sizeof(entry);
+            memcpy(&entry, ptr, sizeof(entry));
+            ptr += sizeof(entry);
             usn_map[std::string(entry.drive)] = entry.next_usn;
         }
 
+        UnmapViewOfFile(base);
+        CloseHandle(hMap);
+        CloseHandle(hFile);
         return ScchResult::Ok;
 
     } catch (const std::exception& e) {

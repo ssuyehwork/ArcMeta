@@ -71,10 +71,12 @@ void MftReader::clearInternal() {
     m_timestamps.clear();
     m_name_offsets.clear();
     m_attributes.clear();
+    m_metadata_fetched.clear();
     m_string_pool.clear();
     m_drive_list.clear();
     m_drive_active_mask = 0;
     m_frn_to_idx.clear();
+    m_sorted_indices.clear();
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
         m_path_cache.clear();
@@ -163,6 +165,7 @@ void MftReader::buildIndex(const QStringList& drives) {
     }
 
     rebuildFrnToIndexMap();
+    buildSortedIndices();
     m_isInitialized = true;
 
     lock.unlock();
@@ -182,10 +185,10 @@ bool MftReader::loadFromCache() {
             std::vector<uint64_t> f, pf;
             std::vector<int64_t> s, t;
             std::vector<uint32_t> no, attr;
-            std::vector<uint8_t> sp;
+            std::vector<uint8_t> sp, mf;
             std::unordered_map<std::string, uint64_t> usnMap;
 
-            if (ScchCache::load(entry.path().string().c_str(), f, pf, s, t, no, attr, sp, usnMap) == ScchResult::Ok) {
+            if (ScchCache::load(entry.path().string().c_str(), f, pf, s, t, no, attr, mf, sp, usnMap) == ScchResult::Ok) {
                 size_t dIdx = m_drive_list.size();
                 size_t oldPoolSize = m_string_pool.size();
                 size_t count = f.size();
@@ -196,6 +199,7 @@ bool MftReader::loadFromCache() {
                 m_timestamps.reserve(m_timestamps.size() + count);
                 m_name_offsets.reserve(m_name_offsets.size() + count);
                 m_attributes.reserve(m_attributes.size() + count);
+                m_metadata_fetched.reserve(m_metadata_fetched.size() + count);
 
                 for (size_t i = 0; i < count; ++i) {
                     m_frns.push_back(f[i]);
@@ -204,6 +208,7 @@ bool MftReader::loadFromCache() {
                     m_timestamps.push_back(t[i]);
                     m_name_offsets.push_back(no[i] + (uint32_t)oldPoolSize);
                     m_attributes.push_back(attr[i]);
+                    m_metadata_fetched.push_back(mf[i]);
                 }
                 m_string_pool.insert(m_string_pool.end(), sp.begin(), sp.end());
 
@@ -218,6 +223,7 @@ bool MftReader::loadFromCache() {
 
     if (m_frns.empty()) return false;
     rebuildFrnToIndexMap();
+    buildSortedIndices();
     m_isInitialized = true;
     return true;
 }
@@ -240,7 +246,7 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     std::vector<uint64_t> f, pf;
     std::vector<int64_t> s, t;
     std::vector<uint32_t> no, attr;
-    std::vector<uint8_t> sp;
+    std::vector<uint8_t> sp, mf;
     std::unordered_map<uint32_t, uint32_t> offsetMap;
 
     for (size_t i = 0; i < m_frns.size(); ++i) {
@@ -250,6 +256,7 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
             s.push_back(m_sizes[i]);
             t.push_back(m_timestamps[i]);
             attr.push_back(m_attributes[i]);
+            mf.push_back(m_metadata_fetched[i]);
             uint32_t oldOff = m_name_offsets[i];
             if (offsetMap.find(oldOff) == offsetMap.end()) {
                 uint32_t newOff = (uint32_t)sp.size();
@@ -264,7 +271,7 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     std::unordered_map<std::string, uint64_t> usnMap;
     usnMap[QString::fromStdWString(volume).toStdString()] = m_next_usns[volume];
     QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
-    return ScchCache::save(path.toStdString().c_str(), f, pf, s, t, no, attr, sp, usnMap);
+    return ScchCache::save(path.toStdString().c_str(), f, pf, s, t, no, attr, mf, sp, usnMap);
 }
 
 QString MftReader::getName(int index) const {
@@ -386,62 +393,98 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
     std::vector<size_t> chunkIndices(numChunks);
     std::iota(chunkIndices.begin(), chunkIndices.end(), 0);
 
-    std::for_each(std::execution::par, chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
-        std::vector<int> localRes;
-        localRes.reserve(grainSize / 8);
-        size_t startPos = chunkIdx * grainSize;
-        size_t endPos = (std::min)(startPos + grainSize, total);
+    // 2026-05-14 极致算法优化：如果是简单前缀匹配且非正则、非后缀过滤，直接使用二分查找 O(log N)
+    if (hasQuery && !useRegex && !caseSensitive && !hasExt) {
+        auto it_start = std::lower_bound(m_sorted_indices.begin(), m_sorted_indices.end(), queryUtf8.constData(),
+            [this](uint32_t idx, const char* q) {
+                const char* name = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
+                return _strnicmp(name, q, strlen(q)) < 0;
+            });
 
-        for (size_t i = startPos; i < endPos; ++i) {
+        for (auto it = it_start; it != m_sorted_indices.end(); ++it) {
+            uint32_t i = *it;
             if (m_frns[i] == 0) continue;
-            
+            const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
+            if (_strnicmp(p, queryUtf8.constData(), queryUtf8.size()) != 0) break; // 超出前缀范围，停止
+
             size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
             if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
-
             uint32_t at = m_attributes[i];
             if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
             if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
 
-            // 2026-05-14 交互优化：对齐 Rust 原版逻辑 (空即是无)
-            // 如果用户没有输入任何搜索词或后缀，则不显示任何结果。
-            if (!hasQuery && !hasExt) continue;
+            finalRes.push_back((int)i);
+            if (finalRes.size() > 50000) break;
+        }
 
+        // 2026-05-14 补缺搜索：对尚未进入排序索引的新增条目进行线性扫描 (USN 实时产生的新文件)
+        for (size_t i = m_sorted_indices.size(); i < m_frns.size(); ++i) {
+            if (m_frns[i] == 0) continue;
             const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
-
-            // 2026-05-14 性能优化：在字节流上直接操作，避免 QString 构造开销
-            if (hasExt) {
-                bool extMatch = false;
-                size_t nameLen = strlen(p);
-                for (const auto& ex : extUtf8) {
-                    if (nameLen >= (size_t)ex.size()) {
-                        if (_stricmp(p + nameLen - ex.size(), ex.constData()) == 0) {
-                            extMatch = true;
-                            break;
-                        }
-                    }
-                }
-                if (!extMatch) continue;
-            }
-
-            if (!hasQuery) {
-                localRes.push_back((int)i);
-            } else {
-                bool match = false;
-                if (useRegex) {
-                    match = re.match(QString::fromUtf8(p)).hasMatch();
-                } else {
-                    if (caseSensitive) {
-                        match = (strstr(p, queryUtf8.constData()) != nullptr);
-                    } else {
-                        // 使用 Windows API 高效执行大小写无关子串查找
-                        match = (StrStrIA(p, queryUtf8.constData()) != nullptr);
-                    }
-                }
-                if (match) localRes.push_back((int)i);
+            if (_strnicmp(p, queryUtf8.constData(), queryUtf8.size()) == 0) {
+                size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
+                if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
+                uint32_t at = m_attributes[i];
+                if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
+                if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
+                finalRes.push_back((int)i);
             }
         }
-        if (!localRes.empty()) { std::lock_guard<std::mutex> l(mtx); finalRes.insert(finalRes.end(), localRes.begin(), localRes.end()); }
-    });
+    } else {
+        // 回退到并行线性扫描 (用于复杂子串匹配、正则或后缀过滤)
+        std::for_each(std::execution::par, chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
+            std::vector<int> localRes;
+            localRes.reserve(grainSize / 8);
+            size_t startPos = chunkIdx * grainSize;
+            size_t endPos = (std::min)(startPos + grainSize, total);
+
+            for (size_t i = startPos; i < endPos; ++i) {
+                if (m_frns[i] == 0) continue;
+
+                size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
+                if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
+
+                uint32_t at = m_attributes[i];
+                if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
+                if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
+
+                if (!hasQuery && !hasExt) continue;
+
+                const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
+
+                if (hasExt) {
+                    bool extMatch = false;
+                    size_t nameLen = strlen(p);
+                    for (const auto& ex : extUtf8) {
+                        if (nameLen >= (size_t)ex.size()) {
+                            if (_stricmp(p + nameLen - ex.size(), ex.constData()) == 0) {
+                                extMatch = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!extMatch) continue;
+                }
+
+                if (!hasQuery) {
+                    localRes.push_back((int)i);
+                } else {
+                    bool match = false;
+                    if (useRegex) {
+                        match = re.match(QString::fromUtf8(p)).hasMatch();
+                    } else {
+                        if (caseSensitive) {
+                            match = (strstr(p, queryUtf8.constData()) != nullptr);
+                        } else {
+                            match = (StrStrIA(p, queryUtf8.constData()) != nullptr);
+                        }
+                    }
+                    if (match) localRes.push_back((int)i);
+                }
+            }
+            if (!localRes.empty()) { std::lock_guard<std::mutex> l(mtx); finalRes.insert(finalRes.end(), localRes.begin(), localRes.end()); }
+        });
+    }
     return QVector<int>(finalRes.begin(), finalRes.end());
 }
 
@@ -514,6 +557,7 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         uint32_t idx = it->second;
         m_parent_frns[idx] = encodedPf;
         m_attributes[idx] = finalAttr;
+        m_metadata_fetched[idx] = (finalModifyTime > 0) ? 2 : 0;
 
         // 2026-05-14 逻辑加固：优先使用 API 获取的属性，若失败则回退至 USN 提供的时间戳
         m_sizes[idx] = fileSize;
@@ -540,6 +584,7 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         m_sizes.push_back(fileSize);
         m_timestamps.push_back(finalModifyTime);
         m_attributes.push_back(finalAttr);
+        m_metadata_fetched.push_back(finalModifyTime > 0 ? 2 : 0);
         QByteArray utf8 = name.toUtf8();
         m_name_offsets.push_back((uint32_t)m_string_pool.size());
         m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
@@ -583,6 +628,7 @@ void MftReader::compact() {
     std::vector<int64_t>   new_timestamps;
     std::vector<uint32_t>  new_name_offsets;
     std::vector<uint32_t>  new_attributes;
+    std::vector<uint8_t>   new_metadata_fetched;
     std::vector<uint8_t>   new_string_pool;
 
     size_t count = m_frns.size();
@@ -592,6 +638,7 @@ void MftReader::compact() {
     new_timestamps.reserve(count - m_dead_count);
     new_name_offsets.reserve(count - m_dead_count);
     new_attributes.reserve(count - m_dead_count);
+    new_metadata_fetched.reserve(count - m_dead_count);
     new_string_pool.reserve(m_string_pool.size() - m_wasted_string_bytes);
 
     m_frn_to_idx.clear();
@@ -606,6 +653,7 @@ void MftReader::compact() {
         new_sizes.push_back(m_sizes[i]);
         new_timestamps.push_back(m_timestamps[i]);
         new_attributes.push_back(m_attributes[i]);
+        new_metadata_fetched.push_back(m_metadata_fetched[i]);
 
         const char* name = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
         size_t len = strlen(name) + 1;
@@ -619,11 +667,13 @@ void MftReader::compact() {
     m_timestamps = std::move(new_timestamps);
     m_name_offsets = std::move(new_name_offsets);
     m_attributes = std::move(new_attributes);
+    m_metadata_fetched = std::move(new_metadata_fetched);
     m_string_pool = std::move(new_string_pool);
 
     m_dead_count = 0;
     m_wasted_string_bytes = 0;
     rebuildFrnToIndexMap();
+    buildSortedIndices();
 }
 
 bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult& result) {
@@ -708,11 +758,13 @@ void MftReader::mergeDriveResult(const std::wstring& volume, const MftReader::Dr
     m_timestamps.reserve(m_timestamps.size() + count);
     m_name_offsets.reserve(m_name_offsets.size() + count);
     m_attributes.reserve(m_attributes.size() + count);
+    m_metadata_fetched.reserve(m_metadata_fetched.size() + count);
     for (const auto& e : result.entries) {
         m_frns.push_back(e.frn);
         m_parent_frns.push_back((static_cast<uint64_t>(driveIdx) << 48) | (e.parentFrn & 0x0000FFFFFFFFFFFFull));
         m_sizes.push_back(e.size); // 2026-05-14 修正：将扫描到的大小压入 SoA
         m_timestamps.push_back(e.modifyTime); m_attributes.push_back(e.attributes);
+        m_metadata_fetched.push_back(0);
         m_name_offsets.push_back((uint32_t)m_string_pool.size());
         m_string_pool.insert(m_string_pool.end(), e.nameUtf8.begin(), e.nameUtf8.end());
         m_string_pool.push_back('\0');
@@ -728,28 +780,47 @@ void MftReader::rebuildFrnToIndexMap() {
     }
 }
 
+void MftReader::buildSortedIndices() {
+    // 2026-05-14 性能增强：构建预排序索引，支持二分查找 O(log N)
+    m_sorted_indices.resize(m_frns.size());
+    std::iota(m_sorted_indices.begin(), m_sorted_indices.end(), 0);
+    std::sort(std::execution::par, m_sorted_indices.begin(), m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
+        const char* s1 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[a]);
+        const char* s2 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[b]);
+        return _stricmp(s1, s2) < 0;
+    });
+}
+
 void MftReader::requestMetadata(int index) {
     // 2026-05-14 工业级异步补全架构：仅在 UI 可见区域按需拉取物理属性
-    QReadLocker readLock(&m_dataLock);
+    QWriteLocker writeLock(&m_dataLock);
     if (index < 0 || index >= (int)m_frns.size() || m_frns[index] == 0) return;
-    if (m_sizes[index] != 0 || m_timestamps[index] != 0) return; // 已拉取过
+
+    // 状态机：0-未获取, 1-拉取中, 2-已完成
+    if (m_metadata_fetched[index] != 0) return;
+    m_metadata_fetched[index] = 1; // 标记为拉取中，防止重复触发并发任务
 
     uint64_t frn = m_frns[index];
     size_t dIdx = static_cast<size_t>(m_parent_frns[index] >> 48);
-    if (dIdx >= m_drive_list.size()) return;
+    if (dIdx >= m_drive_list.size()) {
+        m_metadata_fetched[index] = 0;
+        return;
+    }
     std::wstring volume = m_drive_list[dIdx];
-    readLock.unlock();
+    writeLock.unlock();
 
     (void)QtConcurrent::run([this, index, frn, volume]() {
         std::wstring rootPath = volume + L"\\";
-        // 关键：必须具有 GENERIC_READ 权限才能辅助 OpenFileById
         HANDLE hHint = CreateFileW(rootPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-        if (hHint == INVALID_HANDLE_VALUE) return;
+        if (hHint == INVALID_HANDLE_VALUE) {
+            QWriteLocker lock(&m_dataLock);
+            if (index < (int)m_metadata_fetched.size()) m_metadata_fetched[index] = 0;
+            return;
+        }
 
         FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
         id.FileId.QuadPart = frn;
 
-        // 关键：DesiredAccess 设置为 GENERIC_READ 以确保获取完整元数据
         HANDLE hFile = OpenFileById(hHint, &id, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
         if (hFile != INVALID_HANDLE_VALUE) {
             BY_HANDLE_FILE_INFORMATION bhfi;
@@ -759,11 +830,17 @@ void MftReader::requestMetadata(int index) {
                     m_sizes[index] = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
                     m_timestamps[index] = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
                     m_attributes[index] = bhfi.dwFileAttributes;
+                    m_metadata_fetched[index] = 2; // 已完成
                 }
             }
             CloseHandle(hFile);
+        } else {
+            QWriteLocker lock(&m_dataLock);
+            if (index < (int)m_metadata_fetched.size()) m_metadata_fetched[index] = 0;
         }
         CloseHandle(hHint);
+
+        // 2026-05-14 性能优化：触发局部模型刷新，避免百万行全量重绘
         emit dataChanged();
     });
 }

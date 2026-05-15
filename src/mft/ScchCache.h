@@ -58,6 +58,7 @@ public:
         const std::vector<int64_t>&                  timestamps,
         const std::vector<uint32_t>&                 name_offsets,
         const std::vector<uint32_t>&                 attributes,
+        const std::vector<uint8_t>&                  metadata_fetched,
         const std::vector<uint8_t>&                  string_pool,
         const std::unordered_map<std::string, uint64_t>& usn_map
     );
@@ -71,6 +72,7 @@ public:
         std::vector<int64_t>&                        timestamps,
         std::vector<uint32_t>&                       name_offsets,
         std::vector<uint32_t>&                       attributes,
+        std::vector<uint8_t>&                        metadata_fetched,
         std::vector<uint8_t>&                        string_pool,
         std::unordered_map<std::string, uint64_t>&   usn_map
     );
