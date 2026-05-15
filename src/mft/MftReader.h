@@ -17,6 +17,7 @@
 #include <QIcon>
 #include <QHash>
 #include "ScchCache.h"
+#include "LruCache.h"
 
 #ifdef min
 #undef min
@@ -63,7 +64,7 @@ public:
                         const QStringList& extensionList = QStringList(), 
                         bool includeHidden = true, bool includeSystem = true);
     
-    // SoA 访问接口
+    // SoA 访问接口 (支持索引重定向，处理 Overlay 覆盖层)
     QString getName(int index) const;
     int64_t getSize(int index) const;
     int64_t getModifyTime(int index) const;
@@ -89,10 +90,20 @@ private:
     struct RawEntry {
         uint64_t frn;
         uint64_t parentFrn;
-        uint64_t size; // 2026-05-14 补全：文件大小字段
+        uint64_t size;
         uint32_t attributes;
         int64_t  modifyTime;
         std::string nameUtf8;
+    };
+
+    struct OverlayEntry {
+        uint64_t frn;
+        uint64_t parentFrn;
+        uint64_t size;
+        uint32_t attributes;
+        int64_t  modifyTime;
+        std::string nameUtf8;
+        bool deleted = false;
     };
     struct DriveResult {
         std::vector<RawEntry> entries;
@@ -108,14 +119,32 @@ private:
     bool loadMftDirect(const std::wstring& volume, DriveResult& result);
     void mergeDriveResult(const std::wstring& volume, const DriveResult& result, size_t driveIdx);
 
-    // SoA 主数据
+    // SoA 视图层 (零拷贝引用)
+    struct DriveView {
+        const uint64_t* frns = nullptr;
+        const uint64_t* parent_frns = nullptr;
+        const int64_t*  sizes = nullptr;
+        const int64_t*  timestamps = nullptr;
+        const uint32_t* name_offsets = nullptr;
+        const uint32_t* attributes = nullptr;
+        const uint8_t*  metadata_fetched = nullptr;
+        const uint8_t*  string_pool = nullptr;
+        const uint32_t* sorted_indices = nullptr;
+        size_t          count = 0;
+        size_t          pool_size = 0;
+        size_t          drive_idx = 0;
+        uint32_t        global_offset = 0; // 该驱动器在全局索引中的起始偏移
+    };
+    std::vector<DriveView> m_drive_views;
+
+    // SoA 主数据 (仅用于新扫描的数据)
     std::vector<uint64_t>  m_frns;
-    std::vector<uint64_t>  m_parent_frns; // 高 16 位存储盘符索引
+    std::vector<uint64_t>  m_parent_frns;
     std::vector<int64_t>   m_sizes;
     std::vector<int64_t>   m_timestamps;   
     std::vector<uint32_t>  m_name_offsets;
     std::vector<uint32_t>  m_attributes;
-    std::vector<uint8_t>   m_metadata_fetched; // 0: 未获取, 1: 获取中, 2: 已完成
+    std::vector<uint8_t>   m_metadata_fetched;
     std::vector<uint8_t>   m_string_pool;
 
     std::vector<std::wstring> m_drive_list;
@@ -123,11 +152,16 @@ private:
 
     std::unordered_map<uint64_t, uint32_t>              m_frn_to_idx;
 
-    mutable std::unordered_map<uint64_t, std::wstring>  m_path_cache;
-    mutable std::mutex m_pathCacheMutex;
+    mutable LruCache<uint64_t, std::wstring>            m_path_cache;
 
     std::unordered_map<std::wstring, uint64_t>          m_next_usns;
+    std::vector<std::unique_ptr<ScchMmapData>> m_mmap_datas;
     std::vector<UsnWatcher*> m_watchers;
+
+    // Overlay 覆盖层模型：用于实时变动，保持主 SoA 索引只读
+    mutable QReadWriteLock m_overlayLock;
+    std::unordered_map<uint64_t, OverlayEntry> m_overlay;
+    std::vector<uint64_t> m_overlay_frns; // 辅助顺序访问
 
     mutable QReadWriteLock m_dataLock;
     mutable QReadWriteLock m_iconCacheLock;
