@@ -111,8 +111,8 @@ private:
     mutable QReadWriteLock m_dataLock;
     bool m_isInitialized = false;
     uint32_t m_dirty_count = 0;
-    uint32_t m_dead_count = 0;
-    uint32_t m_wasted_string_bytes = 0;
+    size_t   m_dead_count = 0;
+    size_t   m_wasted_string_bytes = 0;
     std::vector<uint32_t> m_sorted_indices;
 };
 
