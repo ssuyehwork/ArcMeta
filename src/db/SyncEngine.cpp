@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "SyncEngine.h"
 #include "Database.h"
 #include "ItemRepo.h"

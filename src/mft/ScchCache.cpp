@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "ScchCache.h"
 #include <windows.h>
 #include <filesystem>
@@ -6,6 +9,17 @@
 #include <iostream>
 #include <array>
 #include <algorithm>
+
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#ifdef run
+#undef run
+#endif
+
 
 namespace ArcMeta {
 
@@ -119,7 +133,7 @@ bool ScchCache::save(
         writeU64(usn_map.size());
         for (const auto& [drive, usn] : usn_map) {
             ScchUsnEntry entry{};
-            size_t copyLen = std::min(drive.size(), sizeof(entry.drive) - 1);
+            size_t copyLen = (std::min)(drive.size(), sizeof(entry.drive) - 1);
             memcpy(entry.drive, drive.data(), copyLen);
             entry.next_usn = usn;
             writeRaw(&entry, sizeof(entry));

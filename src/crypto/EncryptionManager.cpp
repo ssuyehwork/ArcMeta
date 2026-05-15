@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "EncryptionManager.h"
 #include <windows.h>
 #include <bcrypt.h>

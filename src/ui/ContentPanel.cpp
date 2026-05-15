@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "ContentPanel.h" 
 #include "SvgIcons.h" 
 #include "TreeItemDelegate.h" 

@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "CacheManager.h"
 #include "IndexedEntry.h"
 #include <QDir>

@@ -16,9 +16,21 @@
 #include <QDir>
 #include <QDateTime>
 #include <QtConcurrent/QtConcurrent>
+#include <QtConcurrent>
 #include <QFuture>
 #include <QFileIconProvider>
 #include <QFileInfo>
+
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#ifdef run
+#undef run
+#endif
+
 
 namespace ArcMeta {
 
@@ -142,7 +154,7 @@ void MftReader::buildIndex(const QStringList& drives) {
     std::vector<ScannedDrive> scannedResults(toScan.size());
     std::vector<int> scanIndices((int)toScan.size());
     std::iota(scanIndices.begin(), scanIndices.end(), 0);
-    std::for_each(std::execution::par, scanIndices.begin(), scanIndices.end(), [&](int i) {
+    std::for_each((std::execution::par), scanIndices.begin(), scanIndices.end(), [&](int i) {
         scannedResults[i].volume = toScan[i];
         scannedResults[i].success = loadMftDirect(toScan[i], scannedResults[i].res);
     });
@@ -308,6 +320,12 @@ bool MftReader::isDirectory(int index) const {
     return (getAttributes(index) & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
+bool MftReader::isMetadataFetched(int index) const {
+    QReadLocker lock(&m_dataLock);
+    if (index < 0 || index >= (int)m_metadata_fetched.size()) return true;
+    return m_metadata_fetched[index] == 2;
+}
+
 int MftReader::totalCount() const {
     QReadLocker lock(&m_dataLock);
     return (int)m_frns.size();
@@ -432,7 +450,7 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
         }
     } else {
         // 回退到并行线性扫描 (用于复杂子串匹配、正则或后缀过滤)
-        std::for_each(std::execution::par, chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
+        std::for_each((std::execution::par), chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
             std::vector<int> localRes;
             localRes.reserve(grainSize / 8);
             size_t startPos = chunkIdx * grainSize;
@@ -488,7 +506,7 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
     return QVector<int>(finalRes.begin(), finalRes.end());
 }
 
-void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& volume) {
+void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& volume) {
     USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(record);
     uint64_t frn, parentFrn;
     uint32_t attr;
@@ -522,6 +540,7 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
     uint64_t fileSize = 0;
     int64_t finalModifyTime = filetimeToUnixMs(timestamp.QuadPart);
     uint32_t finalAttr = attr;
+    bool fetchedSuccess = false;
 
     if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
         std::wstring rootPath = volume + L"\\";
@@ -540,6 +559,7 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
                     fileSize = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
                     finalAttr = bhfi.dwFileAttributes;
                     finalModifyTime = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
+                    fetchedSuccess = true;
                 }
                 CloseHandle(hFile);
             }
@@ -557,7 +577,7 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         uint32_t idx = it->second;
         m_parent_frns[idx] = encodedPf;
         m_attributes[idx] = finalAttr;
-        m_metadata_fetched[idx] = (finalModifyTime > 0) ? 2 : 0;
+        m_metadata_fetched[idx] = fetchedSuccess ? 2 : 0;
 
         // 2026-05-14 逻辑加固：优先使用 API 获取的属性，若失败则回退至 USN 提供的时间戳
         m_sizes[idx] = fileSize;
@@ -584,7 +604,7 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         m_sizes.push_back(fileSize);
         m_timestamps.push_back(finalModifyTime);
         m_attributes.push_back(finalAttr);
-        m_metadata_fetched.push_back(finalModifyTime > 0 ? 2 : 0);
+        m_metadata_fetched.push_back(fetchedSuccess ? 2 : 0);
         QByteArray utf8 = name.toUtf8();
         m_name_offsets.push_back((uint32_t)m_string_pool.size());
         m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
@@ -595,7 +615,7 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
     m_next_usns[volume] = record->Usn;
     m_dirty_count++;
     if (m_dirty_count >= 1000) { m_dirty_count = 0; saveDriveToCacheInternal(dIdx); }
-    emit dataChanged();
+    int idx = (it != m_frn_to_idx.end()) ? (int)it->second : -1; emit dataChanged(idx);
 }
 
 void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
@@ -616,7 +636,7 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
             compact();
         }
 
-        emit dataChanged();
+        emit dataChanged(-1);
     }
 }
 
@@ -705,7 +725,7 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
             WORD fileNameLength, fileNameOffset;
 
             if (header->MajorVersion == 2) {
-                ::USN_RECORD_V2* rec = reinterpret_cast<::USN_RECORD_V2*>(p);
+                USN_RECORD_V2* rec = reinterpret_cast<USN_RECORD_V2*>(p);
                 frn = rec->FileReferenceNumber;
                 parentFrn = rec->ParentFileReferenceNumber;
                 timestamp = rec->TimeStamp;
@@ -784,7 +804,7 @@ void MftReader::buildSortedIndices() {
     // 2026-05-14 性能增强：构建预排序索引，支持二分查找 O(log N)
     m_sorted_indices.resize(m_frns.size());
     std::iota(m_sorted_indices.begin(), m_sorted_indices.end(), 0);
-    std::sort(std::execution::par, m_sorted_indices.begin(), m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
+    std::sort((std::execution::par), m_sorted_indices.begin(), m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
         const char* s1 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[a]);
         const char* s2 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[b]);
         return _stricmp(s1, s2) < 0;
@@ -809,7 +829,7 @@ void MftReader::requestMetadata(int index) {
     std::wstring volume = m_drive_list[dIdx];
     writeLock.unlock();
 
-    (void)QtConcurrent::run([this, index, frn, volume]() {
+    QtConcurrent::run([this, index, frn, volume]() {
         std::wstring rootPath = volume + L"\\";
         HANDLE hHint = CreateFileW(rootPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
         if (hHint == INVALID_HANDLE_VALUE) {
@@ -841,7 +861,7 @@ void MftReader::requestMetadata(int index) {
         CloseHandle(hHint);
 
         // 2026-05-14 性能优化：触发局部模型刷新，避免百万行全量重绘
-        emit dataChanged();
+        emit dataChanged(index);
     });
 }
 
