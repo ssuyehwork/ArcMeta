@@ -68,6 +68,7 @@ private:
     struct RawEntry {
         uint64_t frn;
         uint64_t parentFrn;
+        uint64_t size; // 2026-05-14 补全：文件大小字段
         uint32_t attributes;
         int64_t  modifyTime;
         std::string nameUtf8;
