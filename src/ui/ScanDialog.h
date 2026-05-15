@@ -149,6 +149,7 @@ private:
     std::unique_ptr<CacheManager> m_cacheManager;
     QFileIconProvider m_iconProvider;
     mutable QHash<QString, QIcon> m_iconCache;
+    mutable QReadWriteLock m_iconCacheLock;
 
     ScanConfig m_config;
 };

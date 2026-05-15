@@ -83,14 +83,14 @@ void UsnWatcher::run() {
         uint8_t* pEnd = buffer.get() + bytesReturned;
 
         while (pRecord < pEnd) {
-            ::USN_RECORD_V2* record = reinterpret_cast<::USN_RECORD_V2*>(pRecord);
+            USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(pRecord);
             
-            // 检查版本，如果是 V2 则处理
-            if (record->MajorVersion == 2) {
-                handleRecord(record);
+            // 处理 V2 和 V3 版本记录
+            if (header->MajorVersion == 2 || header->MajorVersion == 3) {
+                handleRecord(reinterpret_cast<::USN_RECORD_V2*>(pRecord));
             }
 
-            pRecord += record->RecordLength;
+            pRecord += header->RecordLength;
         }
 
         // 更新起始 USN 为本次读取后的 NextUsn
@@ -100,14 +100,27 @@ void UsnWatcher::run() {
 }
 
 void UsnWatcher::handleRecord(::USN_RECORD_V2* pRecord) {
+    USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(pRecord);
+    uint32_t reason;
+    uint64_t frn;
+
+    if (header->MajorVersion == 2) {
+        reason = pRecord->Reason;
+        frn = pRecord->FileReferenceNumber;
+    } else if (header->MajorVersion == 3) {
+        USN_RECORD_V3* v3 = reinterpret_cast<USN_RECORD_V3*>(pRecord);
+        reason = v3->Reason;
+        frn = *reinterpret_cast<uint64_t*>(&v3->FileReferenceNumber);
+    } else return;
+
     // 仅更新 MftReader 内存 SoA，不直接操作数据库
-    if (pRecord->Reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE)) {
+    if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE)) {
         MftReader::instance().updateEntryFromUsn(pRecord, m_volume);
     }
-    else if (pRecord->Reason & USN_REASON_FILE_DELETE) {
-        MftReader::instance().removeEntryByFrn(m_volume, pRecord->FileReferenceNumber);
+    else if (reason & USN_REASON_FILE_DELETE) {
+        MftReader::instance().removeEntryByFrn(m_volume, frn);
     }
-    else if (pRecord->Reason & USN_REASON_RENAME_NEW_NAME) {
+    else if (reason & USN_REASON_RENAME_NEW_NAME) {
         MftReader::instance().updateEntryFromUsn(pRecord, m_volume);
     }
 }
