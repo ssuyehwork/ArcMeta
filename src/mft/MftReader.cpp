@@ -20,14 +20,34 @@ namespace ArcMeta {
 
 static int64_t filetimeToUnixMs(int64_t filetime) {
     // 2026-05-14 物理对标 Windows FILETIME 标准 (1601 Epoch to 1970 Unix)
-    if (filetime <= 0) return 0;
     // 116444736000000000LL 是 1601 到 1970 的 100纳秒数
+    if (filetime < 116444736000000000LL) return 0;
     // 10000LL 将 100纳秒 转换为 毫秒 (1ms = 10,000 * 100ns)
     return (filetime - 116444736000000000LL) / 10000LL;
 }
 
+static bool enablePrivilege(LPCWSTR privilege) {
+    HANDLE hToken;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) return false;
+    LUID luid;
+    if (!LookupPrivilegeValue(NULL, privilege, &luid)) { CloseHandle(hToken); return false; }
+    TOKEN_PRIVILEGES tp;
+    tp.PrivilegeCount = 1;
+    tp.Privileges[0].Luid = luid;
+    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), NULL, NULL)) { CloseHandle(hToken); return false; }
+    bool ok = (GetLastError() == ERROR_SUCCESS);
+    CloseHandle(hToken);
+    return ok;
+}
+
 MftReader& MftReader::instance() {
     static MftReader inst;
+    static std::once_flag flag;
+    std::call_once(flag, []() {
+        enablePrivilege(SE_BACKUP_NAME);
+        enablePrivilege(SE_RESTORE_NAME);
+    });
     return inst;
 }
 
@@ -421,39 +441,71 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
 }
 
 void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& volume) {
-    uint64_t frn = record->FileReferenceNumber;
-    uint64_t fileSize = 0;
+    USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(record);
+    uint64_t frn, parentFrn;
+    uint32_t attr;
+    LARGE_INTEGER timestamp;
+    WORD fileNameLength, fileNameOffset;
 
-    // 2026-05-14 性能优化：将耗时的磁盘 I/O 移出锁范围
-    if (!(record->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-        std::wstring dev = L"\\\\.\\" + volume;
-        HANDLE hVol = CreateFileW(dev.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-        if (hVol != INVALID_HANDLE_VALUE) {
+    if (header->MajorVersion == 2) {
+        frn = record->FileReferenceNumber;
+        parentFrn = record->ParentFileReferenceNumber;
+        attr = record->FileAttributes;
+        timestamp = record->TimeStamp;
+        fileNameLength = record->FileNameLength;
+        fileNameOffset = record->FileNameOffset;
+    } else if (header->MajorVersion == 3) {
+        USN_RECORD_V3* v3 = reinterpret_cast<USN_RECORD_V3*>(record);
+        frn = *reinterpret_cast<uint64_t*>(&v3->FileReferenceNumber);
+        parentFrn = *reinterpret_cast<uint64_t*>(&v3->ParentFileReferenceNumber);
+        attr = v3->FileAttributes;
+        timestamp = v3->TimeStamp;
+        fileNameLength = v3->FileNameLength;
+        fileNameOffset = v3->FileNameOffset;
+    } else return;
+
+    uint64_t fileSize = 0;
+    int64_t finalModifyTime = filetimeToUnixMs(timestamp.QuadPart);
+    uint32_t finalAttr = attr;
+
+    if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        std::wstring rootPath = volume + L"\\";
+        HANDLE hHint = CreateFileW(rootPath.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        if (hHint != INVALID_HANDLE_VALUE) {
             FILE_ID_DESCRIPTOR id = {0};
             id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
-            id.Type = FileIdType;
-            id.FileId.QuadPart = frn;
-            HANDLE hFile = OpenFileById(hVol, &id, 0, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, 0);
+            if (header->MajorVersion == 2) {
+                id.Type = FileIdType;
+                id.FileId.QuadPart = frn;
+            } else {
+                id.Type = ExtendedFileIdType;
+                id.FileId128 = reinterpret_cast<USN_RECORD_V3*>(record)->FileReferenceNumber;
+            }
+            HANDLE hFile = OpenFileById(hHint, &id, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
             if (hFile != INVALID_HANDLE_VALUE) {
-                LARGE_INTEGER fs;
-                if (GetFileSizeEx(hFile, &fs)) fileSize = (uint64_t)fs.QuadPart;
+                BY_HANDLE_FILE_INFORMATION bhfi;
+                if (GetFileInformationByHandle(hFile, &bhfi)) {
+                    fileSize = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
+                    finalAttr = bhfi.dwFileAttributes;
+                    finalModifyTime = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
+                }
                 CloseHandle(hFile);
             }
-            CloseHandle(hVol);
+            CloseHandle(hHint);
         }
     }
 
     QWriteLocker lock(&m_dataLock);
-    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(reinterpret_cast<uint8_t*>(record) + record->FileNameOffset), record->FileNameLength / 2);
+    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(reinterpret_cast<uint8_t*>(record) + fileNameOffset), fileNameLength / 2);
     size_t dIdx = 0;
     for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
-    uint64_t encodedPf = (static_cast<uint64_t>(dIdx) << 48) | (record->ParentFileReferenceNumber & 0x0000FFFFFFFFFFFFull);
+    uint64_t encodedPf = (static_cast<uint64_t>(dIdx) << 48) | (parentFrn & 0x0000FFFFFFFFFFFFull);
     auto it = m_frn_to_idx.find(frn);
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
         m_parent_frns[idx] = encodedPf;
-        m_attributes[idx] = record->FileAttributes;
-        m_timestamps[idx] = filetimeToUnixMs(record->TimeStamp.QuadPart);
+        m_attributes[idx] = finalAttr;
+        m_timestamps[idx] = finalModifyTime;
         m_sizes[idx] = fileSize;
         QByteArray utf8 = name.toUtf8();
         uint32_t oldOff = m_name_offsets[idx];
@@ -474,8 +526,8 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         m_frns.push_back(frn);
         m_parent_frns.push_back(encodedPf);
         m_sizes.push_back(fileSize);
-        m_timestamps.push_back(filetimeToUnixMs(record->TimeStamp.QuadPart));
-        m_attributes.push_back(record->FileAttributes);
+        m_timestamps.push_back(finalModifyTime);
+        m_attributes.push_back(finalAttr);
         QByteArray utf8 = name.toUtf8();
         m_name_offsets.push_back((uint32_t)m_string_pool.size());
         m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
@@ -567,8 +619,16 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
     std::wstring dev = L"\\\\.\\" + volume;
     HANDLE h = CreateFileW(dev.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (h == INVALID_HANDLE_VALUE) return false;
+
+    // 2026-05-14 获取根目录句柄作为 Hint，这对于 OpenFileById 的稳定性至关重要
+    std::wstring rootPath = volume + L"\\";
+    HANDLE hHint = CreateFileW(rootPath.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+
     USN_JOURNAL_DATA_V0 j; DWORD cb;
-    if (!DeviceIoControl(h, FSCTL_QUERY_USN_JOURNAL, NULL, 0, &j, sizeof(j), &cb, NULL)) { CloseHandle(h); return false; }
+    if (!DeviceIoControl(h, FSCTL_QUERY_USN_JOURNAL, NULL, 0, &j, sizeof(j), &cb, NULL)) {
+        if (hHint != INVALID_HANDLE_VALUE) CloseHandle(hHint);
+        CloseHandle(h); return false;
+    }
     result.nextUsn = j.NextUsn;
     MFT_ENUM_DATA_V0 ed = {0}; ed.HighUsn = j.NextUsn;
     std::vector<uint8_t> buf(1024 * 1024);
@@ -576,33 +636,71 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
         if (cb < 8) break;
         uint8_t* p = buf.data() + 8; uint8_t* end = buf.data() + cb;
         while (p < end) {
-            ::USN_RECORD_V2* rec = reinterpret_cast<::USN_RECORD_V2*>(p);
-            MftReader::RawEntry e; e.frn = rec->FileReferenceNumber; e.parentFrn = rec->ParentFileReferenceNumber;
-            // 2026-05-14 深度修正：从磁盘原始记录中获取真实的物理大小。
-            // 文件夹属性下，物理大小无意义，统一设为 0；文件则初始化。
+            USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(p);
+            uint64_t frn, parentFrn;
+            LARGE_INTEGER timestamp;
+            uint32_t attr;
+            WORD fileNameLength, fileNameOffset;
+
+            if (header->MajorVersion == 2) {
+                USN_RECORD_V2* rec = reinterpret_cast<USN_RECORD_V2*>(p);
+                frn = rec->FileReferenceNumber;
+                parentFrn = rec->ParentFileReferenceNumber;
+                timestamp = rec->TimeStamp;
+                attr = rec->FileAttributes;
+                fileNameLength = rec->FileNameLength;
+                fileNameOffset = rec->FileNameOffset;
+            } else if (header->MajorVersion == 3) {
+                USN_RECORD_V3* rec = reinterpret_cast<USN_RECORD_V3*>(p);
+                frn = *reinterpret_cast<uint64_t*>(&rec->FileReferenceNumber);
+                parentFrn = *reinterpret_cast<uint64_t*>(&rec->ParentFileReferenceNumber);
+                timestamp = rec->TimeStamp;
+                attr = rec->FileAttributes;
+                fileNameLength = rec->FileNameLength;
+                fileNameOffset = rec->FileNameOffset;
+            } else {
+                p += header->RecordLength;
+                continue;
+            }
+
+            MftReader::RawEntry e;
+            e.frn = frn;
+            e.parentFrn = parentFrn;
             e.size = 0;
-            if (!(rec->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                // 2026-05-14 核心修正：修复 OpenFileById 传参错误，正确获取物理大小
+            e.attributes = attr;
+            e.modifyTime = filetimeToUnixMs(timestamp.QuadPart);
+
+            if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
                 FILE_ID_DESCRIPTOR id = {0};
                 id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
-                id.Type = FileIdType;
-                id.FileId.QuadPart = rec->FileReferenceNumber;
+                if (header->MajorVersion == 2) {
+                    id.Type = FileIdType;
+                    id.FileId.QuadPart = frn;
+                } else {
+                    id.Type = ExtendedFileIdType;
+                    id.FileId128 = reinterpret_cast<USN_RECORD_V3*>(p)->FileReferenceNumber;
+                }
 
-                HANDLE hFile = OpenFileById(h, &id, 0, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, 0);
+                // 2026-05-14 工业级属性获取：以 0 访问权限打开句柄，配合 Hint 句柄，极大提升成功率
+                HANDLE hFile = OpenFileById(hHint != INVALID_HANDLE_VALUE ? hHint : h, &id, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
                 if (hFile != INVALID_HANDLE_VALUE) {
-                    LARGE_INTEGER fs;
-                    if (GetFileSizeEx(hFile, &fs)) e.size = (uint64_t)fs.QuadPart;
+                    BY_HANDLE_FILE_INFORMATION bhfi;
+                    if (GetFileInformationByHandle(hFile, &bhfi)) {
+                        e.size = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
+                        e.attributes = bhfi.dwFileAttributes;
+                        e.modifyTime = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
+                    }
                     CloseHandle(hFile);
                 }
             }
-            e.attributes = rec->FileAttributes; e.modifyTime = filetimeToUnixMs(rec->TimeStamp.QuadPart);
-            QString n = QString::fromUtf16(reinterpret_cast<const char16_t*>(p + rec->FileNameOffset), rec->FileNameLength / 2);
+            QString n = QString::fromUtf16(reinterpret_cast<const char16_t*>(p + fileNameOffset), fileNameLength / 2);
             e.nameUtf8 = n.toUtf8().toStdString();
             result.entries.push_back(std::move(e));
-            p += rec->RecordLength;
+            p += header->RecordLength;
         }
         ed.StartFileReferenceNumber = *reinterpret_cast<DWORDLONG*>(buf.data());
     }
+    if (hHint != INVALID_HANDLE_VALUE) CloseHandle(hHint);
     CloseHandle(h);
     return !result.entries.empty();
 }
