@@ -55,10 +55,10 @@ public:
     void updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& volume);
     void removeEntryByFrn(const std::wstring& volume, uint64_t frn);
 
+private:
     // 路径重建 (含盘符注入)
     std::wstring getPathFast(const std::wstring& volume, uint64_t frn);
 
-private:
     MftReader();
     ~MftReader();
 

@@ -199,23 +199,28 @@ void ScanTableModel::startAsyncRebuild() {
         return MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem);
     });
 
+    disconnect(&m_filterWatcher, &QFutureWatcher<QVector<int>>::finished, this, nullptr);
+
     connect(&m_filterWatcher, &QFutureWatcher<QVector<int>>::finished, this, [this, timer]() {
-        if (m_filterWatcher.isCanceled()) { delete timer; return; }
-        
+        if (m_filterWatcher.isCanceled()) {
+            delete timer;
+            return;
+        }
+
         beginResetModel();
         m_filteredIndices = m_filterWatcher.result();
         m_displayLimit = 200;
         endResetModel();
-        
+
         // 核心修复：回到主线程后再更新 UI 状态
         ScanDialog* dlg = qobject_cast<ScanDialog*>(parent());
         if (dlg) {
             dlg->m_lastSearchMs = timer->elapsed();
         }
         delete timer;
-        
+
         emit filterFinished(m_filteredIndices.size());
-    }, Qt::UniqueConnection);
+    });
 
     m_filterWatcher.setFuture(future);
 }
@@ -269,15 +274,17 @@ ScanDialog::ScanDialog(QWidget* parent)
 
     QTimer::singleShot(100, this, [this]() {
         updateStatus("正在载入本地快照...");
-        (void)QtConcurrent::run([this]() {
+        QPointer<ScanDialog> weakThis(this);
+        (void)QtConcurrent::run([weakThis]() {
             bool ok = MftReader::instance().loadFromCache();
-            QMetaObject::invokeMethod(this, [this, ok]() {
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis, ok]() {
+                if (!weakThis) return;
                 if (ok) {
-                    updateStatus("就绪");
-                    m_tableModel->setFilterText(""); 
+                    weakThis->updateStatus("就绪");
+                    weakThis->m_tableModel->setFilterText("");
                 } else {
-                    updateStatus("未检测到快照，全自动初始化...");
-                    onStartScan();
+                    weakThis->updateStatus("未检测到快照，全自动初始化...");
+                    weakThis->onStartScan();
                 }
             });
         });
