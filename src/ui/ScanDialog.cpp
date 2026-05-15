@@ -135,8 +135,11 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
         if (reader.isDirectory(actualIndex)) ext = "folder";
         
-        auto it = dlg->m_iconCache.find(ext);
-        if (it != dlg->m_iconCache.end()) return *it;
+        {
+            QReadLocker lock(&dlg->m_iconCacheLock);
+            auto it = dlg->m_iconCache.find(ext);
+            if (it != dlg->m_iconCache.end()) return *it;
+        }
 
         if (ext.length() > 12) ext = "unknown"; 
 
@@ -144,7 +147,10 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         QIcon icon = reader.isDirectory(actualIndex) ? provider.icon(QFileIconProvider::Folder) : provider.icon(QFileInfo("dummy." + ext));
         if (icon.isNull()) icon = provider.icon(QFileIconProvider::File);
 
-        dlg->m_iconCache[ext] = icon;
+        {
+            QWriteLocker lock(&dlg->m_iconCacheLock);
+            dlg->m_iconCache[ext] = icon;
+        }
         return icon;
     } else if (role == Qt::ForegroundRole && reader.isDirectory(actualIndex)) {
         return QColor("#3498db");
@@ -284,7 +290,8 @@ ScanDialog::ScanDialog(QWidget* parent)
 }
 
 ScanDialog::~ScanDialog() {
-    MftReader::instance().clear();
+    // 2026-05-14 架构优化：移除 MftReader::instance().clear()
+    // MftReader 作为全局单例，其生命周期不应与搜索窗口绑定。
 }
 
 void ScanDialog::setupUi() {

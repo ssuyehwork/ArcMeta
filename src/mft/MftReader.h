@@ -82,6 +82,7 @@ private:
     void clearInternal(); 
     void rebuildFrnToIndexMap();
     void buildSortedIndices();
+    void compact();
     
     bool loadMftDirect(const std::wstring& volume, DriveResult& result);
     void mergeDriveResult(const std::wstring& volume, const DriveResult& result, size_t driveIdx);
@@ -96,7 +97,7 @@ private:
     std::vector<uint8_t>   m_string_pool;
 
     std::vector<std::wstring> m_drive_list;
-    std::vector<bool>         m_drive_active_flags; // 驱动器过滤掩码
+    std::atomic<uint32_t>     m_drive_active_mask{0}; // 驱动器过滤掩码 (位图)
 
     std::unordered_map<uint64_t, uint32_t>              m_frn_to_idx;
     std::unordered_map<uint64_t, std::vector<uint64_t>> m_parent_to_children;
@@ -110,6 +111,8 @@ private:
     mutable QReadWriteLock m_dataLock;
     bool m_isInitialized = false;
     uint32_t m_dirty_count = 0;
+    uint32_t m_dead_count = 0;
+    uint32_t m_wasted_string_bytes = 0;
     std::vector<uint32_t> m_sorted_indices;
 };
 
