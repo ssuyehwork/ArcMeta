@@ -23,7 +23,8 @@ namespace ArcMeta {
 static int64_t filetimeToUnixMs(int64_t filetime) {
     // 2026-05-14 物理对标 Windows FILETIME 标准 (1601 Epoch to 1970 Unix)
     // 116444736000000000LL 是 1601 到 1970 的 100纳秒数
-    if (filetime < 116444736000000000LL) return 0;
+    // 如果时间戳小于 1970 或等于 0，则返回 0 以便 UI 能够正确忽略或显示占位符
+    if (filetime <= 116444736000000000LL) return 0;
     // 10000LL 将 100纳秒 转换为 毫秒 (1ms = 10,000 * 100ns)
     return (filetime - 116444736000000000LL) / 10000LL;
 }
@@ -449,6 +450,7 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
     LARGE_INTEGER timestamp;
     WORD fileNameLength, fileNameOffset;
 
+    // 2026-05-14 核心排查：针对 V2 (64bit FRN) 和 V3 (128bit FRN) 进行严格的偏移匹配
     if (header->MajorVersion == 2) {
         frn = record->FileReferenceNumber;
         parentFrn = record->ParentFileReferenceNumber;
@@ -457,9 +459,15 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         fileNameLength = record->FileNameLength;
         fileNameOffset = record->FileNameOffset;
     } else if (header->MajorVersion == 3) {
-        USN_RECORD_V3* v3 = reinterpret_cast<USN_RECORD_V3*>(record);
-        frn = *reinterpret_cast<uint64_t*>(&v3->FileReferenceNumber);
-        parentFrn = *reinterpret_cast<uint64_t*>(&v3->ParentFileReferenceNumber);
+        // 手动映射 V3 布局，避免 SDK 定义缺失导致的读取错误
+        struct V3_LAYOUT {
+            DWORD RecordLength; WORD MajorVersion; WORD MinorVersion;
+            BYTE FileReferenceNumber[16]; BYTE ParentFileReferenceNumber[16];
+            USN Usn; LARGE_INTEGER TimeStamp; DWORD Reason; DWORD SourceInfo;
+            DWORD SecurityId; DWORD FileAttributes; WORD FileNameLength; WORD FileNameOffset;
+        } *v3 = reinterpret_cast<V3_LAYOUT*>(record);
+        frn = *reinterpret_cast<uint64_t*>(v3->FileReferenceNumber);
+        parentFrn = *reinterpret_cast<uint64_t*>(v3->ParentFileReferenceNumber);
         attr = v3->FileAttributes;
         timestamp = v3->TimeStamp;
         fileNameLength = v3->FileNameLength;
@@ -472,14 +480,15 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
 
     if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
         std::wstring rootPath = volume + L"\\";
-        HANDLE hHint = CreateFileW(rootPath.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        // 2026-05-14 修正：hHint 需要 FILE_READ_ATTRIBUTES 权限来辅助 OpenFileById
+        HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
         if (hHint != INVALID_HANDLE_VALUE) {
-            // 2026-05-14 兼容性修正：统一使用 64 位 FileIdType 以适配旧版 Windows SDK
             FILE_ID_DESCRIPTOR id = {0};
             id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
             id.Type = FileIdType;
             id.FileId.QuadPart = frn;
-            HANDLE hFile = OpenFileById(hHint, &id, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
+            // 2026-05-14 核心修正：OpenFileById 的 DesiredAccess 不能为 0，必须至少为 FILE_READ_ATTRIBUTES 才能获取文件大小
+            HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
             if (hFile != INVALID_HANDLE_VALUE) {
                 BY_HANDLE_FILE_INFORMATION bhfi;
                 if (GetFileInformationByHandle(hFile, &bhfi)) {
@@ -622,7 +631,8 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
 
     // 2026-05-14 获取根目录句柄作为 Hint，这对于 OpenFileById 的稳定性至关重要
     std::wstring rootPath = volume + L"\\";
-    HANDLE hHint = CreateFileW(rootPath.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    // 修正：赋予 FILE_READ_ATTRIBUTES 权限
+    HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
 
     USN_JOURNAL_DATA_V0 j; DWORD cb;
     if (!DeviceIoControl(h, FSCTL_QUERY_USN_JOURNAL, NULL, 0, &j, sizeof(j), &cb, NULL)) {
@@ -642,8 +652,10 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
             uint32_t attr;
             WORD fileNameLength, fileNameOffset;
 
+            // 2026-05-14 核心排查：针对 V2 (64bit FRN) 和 V3 (128bit FRN) 进行严格的偏移匹配
+            // V3 记录的布局与 V2 完全不同，若错用 V2 偏移会导致时间戳和属性读取到错误的字节位
             if (header->MajorVersion == 2) {
-                USN_RECORD_V2* rec = reinterpret_cast<USN_RECORD_V2*>(p);
+                ::USN_RECORD_V2* rec = reinterpret_cast<::USN_RECORD_V2*>(p);
                 frn = rec->FileReferenceNumber;
                 parentFrn = rec->ParentFileReferenceNumber;
                 timestamp = rec->TimeStamp;
@@ -651,34 +663,33 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
                 fileNameLength = rec->FileNameLength;
                 fileNameOffset = rec->FileNameOffset;
             } else if (header->MajorVersion == 3) {
-                USN_RECORD_V3* rec = reinterpret_cast<USN_RECORD_V3*>(p);
-                frn = *reinterpret_cast<uint64_t*>(&rec->FileReferenceNumber);
-                parentFrn = *reinterpret_cast<uint64_t*>(&rec->ParentFileReferenceNumber);
+                // 手动映射 V3 布局，避免 SDK 定义缺失导致的读取错误
+                struct V3_LAYOUT {
+                    DWORD RecordLength; WORD MajorVersion; WORD MinorVersion;
+                    BYTE FileReferenceNumber[16]; BYTE ParentFileReferenceNumber[16];
+                    USN Usn; LARGE_INTEGER TimeStamp; DWORD Reason; DWORD SourceInfo;
+                    DWORD SecurityId; DWORD FileAttributes; WORD FileNameLength; WORD FileNameOffset;
+                } *rec = reinterpret_cast<V3_LAYOUT*>(p);
+                frn = *reinterpret_cast<uint64_t*>(rec->FileReferenceNumber);
+                parentFrn = *reinterpret_cast<uint64_t*>(rec->ParentFileReferenceNumber);
                 timestamp = rec->TimeStamp;
                 attr = rec->FileAttributes;
                 fileNameLength = rec->FileNameLength;
                 fileNameOffset = rec->FileNameOffset;
             } else {
-                p += header->RecordLength;
-                continue;
+                p += header->RecordLength; continue;
             }
 
             MftReader::RawEntry e;
-            e.frn = frn;
-            e.parentFrn = parentFrn;
-            e.size = 0;
-            e.attributes = attr;
+            e.frn = frn; e.parentFrn = parentFrn;
+            e.size = 0; e.attributes = attr;
             e.modifyTime = filetimeToUnixMs(timestamp.QuadPart);
 
             if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                // 2026-05-14 兼容性修正：统一使用 64 位 FileIdType 以适配旧版 Windows SDK
-                FILE_ID_DESCRIPTOR id = {0};
-                id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
-                id.Type = FileIdType;
+                FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
                 id.FileId.QuadPart = frn;
-
-                // 2026-05-14 工业级属性获取：以 0 访问权限打开句柄，配合 Hint 句柄，极大提升成功率
-                HANDLE hFile = OpenFileById(hHint != INVALID_HANDLE_VALUE ? hHint : h, &id, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
+                // 使用 FILE_READ_ATTRIBUTES 权限调用 OpenFileById，这是获取大小的必要前提
+                HANDLE hFile = OpenFileById(hHint != INVALID_HANDLE_VALUE ? hHint : h, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
                 if (hFile != INVALID_HANDLE_VALUE) {
                     BY_HANDLE_FILE_INFORMATION bhfi;
                     if (GetFileInformationByHandle(hFile, &bhfi)) {
