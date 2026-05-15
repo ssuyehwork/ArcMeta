@@ -19,7 +19,10 @@
 namespace ArcMeta {
 
 static int64_t filetimeToUnixMs(int64_t filetime) {
+    // 2026-05-14 物理对标 Windows FILETIME 标准 (1601 Epoch to 1970 Unix)
     if (filetime <= 0) return 0;
+    // 116444736000000000LL 是 1601 到 1970 的 100纳秒数
+    // 10000LL 将 100纳秒 转换为 毫秒 (1ms = 10,000 * 100ns)
     return (filetime - 116444736000000000LL) / 10000LL;
 }
 
