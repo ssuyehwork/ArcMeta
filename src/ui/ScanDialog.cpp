@@ -493,9 +493,10 @@ void ScanDialog::refreshDriveList(bool forceProbe) {
             }
             weakThis->m_driveButtonMap.clear();
 
-            QLabel* driveLabel = new QLabel("DRIVES");
-            driveLabel->setStyleSheet("color: #3D5060; font-weight: bold; font-size: 10px;");
-            weakThis->m_driveLayout->addWidget(driveLabel);
+            // 2026-05-14 用户要求彻底移除 "DRIVES" 标签
+            // QLabel* driveLabel = new QLabel("DRIVES");
+            // driveLabel->setStyleSheet("color: #3D5060; font-weight: bold; font-size: 10px;");
+            // weakThis->m_driveLayout->addWidget(driveLabel);
 
             for (const auto& info : drives) {
                 if (!info.hasMedia || !info.isNtfs) continue;
