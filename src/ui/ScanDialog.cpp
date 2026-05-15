@@ -109,19 +109,31 @@ void ScanConfig::save() {
 // --- ScanTableModel Implementation ---
 
 ScanTableModel::ScanTableModel(QObject* parent) : QAbstractTableModel(parent) {
+    m_batchTimer = new QTimer(this);
+    m_batchTimer->setInterval(50); // 50ms 节流刷新
+    m_batchTimer->setSingleShot(true);
+    connect(m_batchTimer, &QTimer::timeout, this, [this]() {
+        if (m_pendingChanges.isEmpty()) return;
+        for (int idx : m_pendingChanges) {
+            int row = m_indexToRowMap.value(idx, -1);
+            if (row != -1 && row < m_displayLimit) {
+                emit dataChanged(index(row, 0), index(row, 3));
+            }
+        }
+        m_pendingChanges.clear();
+    });
+
     connect(&MftReader::instance(), &MftReader::dataChanged, this, [this](int index) {
         if (index == -1) {
             beginResetModel();
+            m_indexToRowMap.clear();
+            for(int i=0; i<m_filteredIndices.size(); ++i) m_indexToRowMap[m_filteredIndices[i]] = i;
             endResetModel();
             return;
         }
-        // 性能优化：仅刷新受影响的行
-        for (int i = 0; i < m_filteredIndices.size(); ++i) {
-            if (m_filteredIndices[i] == index) {
-                emit dataChanged(this->index(i, 0), this->index(i, 3));
-                break;
-            }
-        }
+        // 极致性能优化：使用 Hash 映射定位行，并节流刷新
+        m_pendingChanges.insert(index);
+        if (!m_batchTimer->isActive()) m_batchTimer->start();
     });
 }
 ScanTableModel::~ScanTableModel() {}
@@ -229,6 +241,8 @@ void ScanTableModel::startAsyncRebuild() {
 
         beginResetModel();
         m_filteredIndices = m_filterWatcher.result();
+        m_indexToRowMap.clear();
+        for(int i=0; i<m_filteredIndices.size(); ++i) m_indexToRowMap[m_filteredIndices[i]] = i;
         m_displayLimit = 200;
         endResetModel();
 

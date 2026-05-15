@@ -23,6 +23,7 @@
 #include <QSet>
 #include <QMap>
 #include <QReadWriteLock>
+#include <QTimer>
 #include <atomic>
 #include <memory>
 
@@ -76,10 +77,14 @@ private:
     QVector<int> performRebuild(const QString& filterText, const ScanFilterState& filterState);
 
     QVector<int> m_filteredIndices;
+    QHash<int, int> m_indexToRowMap; // actualIndex -> row
     QString m_filterText;
     ScanFilterState m_filterState;
     QFutureWatcher<QVector<int>> m_filterWatcher;
     int m_displayLimit = 200;
+
+    QTimer* m_batchTimer = nullptr;
+    QSet<int> m_pendingChanges;
 };
 
 class ScanDialog : public FramelessDialog {
