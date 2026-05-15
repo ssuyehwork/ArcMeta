@@ -179,7 +179,7 @@ void ScanTableModel::setFilterText(const QString& text) {
     m_filterText = text;
 }
 
-void ScanTableModel::triggerManualSearch() {
+void ScanTableModel::triggerSearch() {
     startAsyncRebuild();
 }
 
