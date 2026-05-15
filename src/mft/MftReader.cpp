@@ -450,8 +450,14 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
             // 文件夹属性下，物理大小无意义，统一设为 0；文件则初始化。
             e.size = 0;
             if (!(rec->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                // 在高性能枚举中，利用 FileReference 尝试快速同步大小
-                // 这部分逻辑对标 C++ 极致优化，如果 MFT 记录中未直接提供，我们会设置延迟探测
+                // 2026-05-14 核心修正：利用 FileReference 瞬时获取物理大小
+                // 之前的逻辑漏掉了这个最关键的 Win32 API 调用
+                HANDLE hFile = OpenFileById(h, (LPFILE_ID_DESCRIPTOR)&rec->FileReferenceNumber, 0, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, 0);
+                if (hFile != INVALID_HANDLE_VALUE) {
+                    LARGE_INTEGER fs;
+                    if (GetFileSizeEx(hFile, &fs)) e.size = (uint64_t)fs.QuadPart;
+                    CloseHandle(hFile);
+                }
             }
             e.attributes = rec->FileAttributes; e.modifyTime = filetimeToUnixMs(rec->TimeStamp.QuadPart);
             QString n = QString::fromUtf16(reinterpret_cast<const char16_t*>(p + rec->FileNameOffset), rec->FileNameLength / 2);
