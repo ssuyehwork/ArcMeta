@@ -446,10 +446,19 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
         while (p < end) {
             ::USN_RECORD_V2* rec = reinterpret_cast<::USN_RECORD_V2*>(p);
             MftReader::RawEntry e; e.frn = rec->FileReferenceNumber; e.parentFrn = rec->ParentFileReferenceNumber;
-            // 2026-05-14 物理修正：从 MFT 记录中提取实际的文件大小 (对标 Rust 原版 lib.rs 第 78 行)
-            // USN_RECORD_V2 本身不直接包含 TotalSize，需要从 MFT Entry 属性中获取。
-            // 但在 MFT 遍历中，我们可以通过 MFT 枚举直接获取记录。
-            e.size = 0; // 默认初始化
+            // 2026-05-14 深度修正：从磁盘原始记录中获取真实的物理大小。
+            // 文件夹属性下，物理大小无意义，统一设为 0；文件则初始化。
+            e.size = 0;
+            if (!(rec->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                // 2026-05-14 核心修正：利用 FileReference 瞬时获取物理大小
+                // 之前的逻辑漏掉了这个最关键的 Win32 API 调用
+                HANDLE hFile = OpenFileById(h, (LPFILE_ID_DESCRIPTOR)&rec->FileReferenceNumber, 0, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, 0);
+                if (hFile != INVALID_HANDLE_VALUE) {
+                    LARGE_INTEGER fs;
+                    if (GetFileSizeEx(hFile, &fs)) e.size = (uint64_t)fs.QuadPart;
+                    CloseHandle(hFile);
+                }
+            }
             e.attributes = rec->FileAttributes; e.modifyTime = filetimeToUnixMs(rec->TimeStamp.QuadPart);
             QString n = QString::fromUtf16(reinterpret_cast<const char16_t*>(p + rec->FileNameOffset), rec->FileNameLength / 2);
             e.nameUtf8 = n.toUtf8().toStdString();
