@@ -48,7 +48,7 @@ void MftReader::clearInternal() {
     m_attributes.clear();
     m_string_pool.clear();
     m_drive_list.clear();
-    m_drive_active_flags.clear();
+    m_drive_active_mask = 0;
     m_frn_to_idx.clear();
     m_parent_to_children.clear();
     {
@@ -74,15 +74,20 @@ void MftReader::clear() {
 }
 
 void MftReader::updateActiveDrives(const QStringList& activeDrives) {
-    QWriteLocker lock(&m_dataLock);
-    m_drive_active_flags.assign(m_drive_list.size(), false);
+    // 2026-05-14 核心修正：使用原子掩码替代 QWriteLocker，消除 UI 线程同步死锁风险
+    uint32_t mask = 0;
+    QReadLocker lock(&m_dataLock);
     for (const QString& d : activeDrives) {
         std::wstring vol = d.toStdWString();
         if (vol.size() > 2 && vol.back() == L'\\') vol.pop_back();
         for (size_t i = 0; i < m_drive_list.size(); ++i) {
-            if (m_drive_list[i] == vol) { m_drive_active_flags[i] = true; break; }
+            if (m_drive_list[i] == vol) {
+                mask |= (1 << i);
+                break;
+            }
         }
     }
+    m_drive_active_mask.store(mask, std::memory_order_relaxed);
 }
 
 void MftReader::buildIndex(const QStringList& drives) {
@@ -120,7 +125,7 @@ void MftReader::buildIndex(const QStringList& drives) {
         
         size_t dIdx = m_drive_list.size();
         m_drive_list.push_back(sr.volume);
-        m_drive_active_flags.push_back(true);
+        if (dIdx < 32) m_drive_active_mask.fetch_or(1 << dIdx);
         m_next_usns[sr.volume] = sr.res.nextUsn;
         mergeDriveResult(sr.volume, sr.res, dIdx);
         saveDriveToCacheInternal(dIdx);
@@ -179,7 +184,6 @@ bool MftReader::loadFromCache() {
                 for (const auto& [drive, usn] : usnMap) {
                     std::wstring wDrive = QString::fromStdString(drive).toStdWString();
                     m_drive_list.push_back(wDrive);
-                    m_drive_active_flags.push_back(false); 
                     m_next_usns[wDrive] = usn;
                 }
             }
@@ -311,6 +315,11 @@ std::wstring MftReader::getPathFast(const std::wstring& volume, uint64_t frn) {
     for (auto it = segments.rbegin(); it != segments.rend(); ++it) path += L"\\" + *it;
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
+        // 2026-05-14 内存优化：简单的缓存淘汰策略，防止路径缓存无限增长
+        if (m_path_cache.size() > 100000) {
+            auto it_clear = m_path_cache.begin();
+            for (int i = 0; i < 1000; ++i) it_clear = m_path_cache.erase(it_clear);
+        }
         m_path_cache[frn] = path;
     }
     return path;
@@ -323,12 +332,24 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
 
     bool hasQuery = !query.isEmpty();
     bool hasExt = !extensionList.isEmpty();
+
     QRegularExpression re;
-    if (useRegex && hasQuery) {
-        re = QRegularExpression(query, caseSensitive ? QRegularExpression::NoPatternOption : QRegularExpression::CaseInsensitiveOption);
+    QByteArray queryUtf8;
+    if (hasQuery) {
+        if (useRegex) {
+            re = QRegularExpression(query, caseSensitive ? QRegularExpression::NoPatternOption : QRegularExpression::CaseInsensitiveOption);
+        } else {
+            queryUtf8 = query.toUtf8();
+        }
     }
-    QStringList normalizedExts;
-    if (hasExt) { for (const QString& ex : extensionList) normalizedExts << (ex.startsWith('.') ? ex : "." + ex); }
+
+    std::vector<QByteArray> extUtf8;
+    if (hasExt) {
+        for (const QString& ex : extensionList) {
+            QString normalized = (ex.startsWith('.') ? ex : "." + ex);
+            extUtf8.push_back(normalized.toUtf8());
+        }
+    }
 
     std::mutex mtx;
     std::vector<int> finalRes;
@@ -350,22 +371,47 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
             if (m_frns[i] == 0) continue;
             
             size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
-            if (dIdx >= m_drive_active_flags.size() || !m_drive_active_flags[dIdx]) continue;
+            if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
 
             uint32_t at = m_attributes[i];
             if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
             if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
+
+            // 2026-05-14 交互优化：对齐 Rust 原版逻辑 (空即是无)
+            // 如果用户没有输入任何搜索词或后缀，则不显示任何结果。
+            if (!hasQuery && !hasExt) continue;
+
             const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
-            if (!hasQuery && !hasExt) { localRes.push_back((int)i); continue; }
-            QString name = QString::fromUtf8(p);
+
+            // 2026-05-14 性能优化：在字节流上直接操作，避免 QString 构造开销
             if (hasExt) {
                 bool extMatch = false;
-                for (const QString& ex : normalizedExts) { if (name.endsWith(ex, Qt::CaseInsensitive)) { extMatch = true; break; } }
+                size_t nameLen = strlen(p);
+                for (const auto& ex : extUtf8) {
+                    if (nameLen >= (size_t)ex.size()) {
+                        if (_stricmp(p + nameLen - ex.size(), ex.constData()) == 0) {
+                            extMatch = true;
+                            break;
+                        }
+                    }
+                }
                 if (!extMatch) continue;
             }
-            if (!hasQuery) { localRes.push_back((int)i); } 
-            else {
-                bool match = useRegex ? re.match(name).hasMatch() : name.contains(query, caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive);
+
+            if (!hasQuery) {
+                localRes.push_back((int)i);
+            } else {
+                bool match = false;
+                if (useRegex) {
+                    match = re.match(QString::fromUtf8(p)).hasMatch();
+                } else {
+                    if (caseSensitive) {
+                        match = (strstr(p, queryUtf8.constData()) != nullptr);
+                    } else {
+                        // 使用 Windows API 高效执行大小写无关子串查找
+                        match = (StrStrIA(p, queryUtf8.constData()) != nullptr);
+                    }
+                }
                 if (match) localRes.push_back((int)i);
             }
         }
@@ -375,8 +421,29 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
 }
 
 void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& volume) {
-    QWriteLocker lock(&m_dataLock);
     uint64_t frn = record->FileReferenceNumber;
+    uint64_t fileSize = 0;
+
+    // 2026-05-14 性能优化：将耗时的磁盘 I/O 移出锁范围
+    if (!(record->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+        std::wstring dev = L"\\\\.\\" + volume;
+        HANDLE hVol = CreateFileW(dev.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        if (hVol != INVALID_HANDLE_VALUE) {
+            FILE_ID_DESCRIPTOR id = {0};
+            id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
+            id.Type = FileIdType;
+            id.FileId.QuadPart = frn;
+            HANDLE hFile = OpenFileById(hVol, &id, 0, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, 0);
+            if (hFile != INVALID_HANDLE_VALUE) {
+                LARGE_INTEGER fs;
+                if (GetFileSizeEx(hFile, &fs)) fileSize = (uint64_t)fs.QuadPart;
+                CloseHandle(hFile);
+            }
+            CloseHandle(hVol);
+        }
+    }
+
+    QWriteLocker lock(&m_dataLock);
     QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(reinterpret_cast<uint8_t*>(record) + record->FileNameOffset), record->FileNameLength / 2);
     size_t dIdx = 0;
     for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
@@ -387,6 +454,7 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         m_parent_frns[idx] = encodedPf;
         m_attributes[idx] = record->FileAttributes;
         m_timestamps[idx] = filetimeToUnixMs(record->TimeStamp.QuadPart);
+        m_sizes[idx] = fileSize;
         QByteArray utf8 = name.toUtf8();
         uint32_t oldOff = m_name_offsets[idx];
         const char* oldPtr = reinterpret_cast<const char*>(m_string_pool.data() + oldOff);
@@ -394,7 +462,9 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         if ((size_t)utf8.size() <= oldLen) {
             memcpy(m_string_pool.data() + oldOff, utf8.constData(), utf8.size());
             m_string_pool[oldOff + utf8.size()] = '\0';
+            if ((size_t)utf8.size() < oldLen) m_wasted_string_bytes += (oldLen - utf8.size());
         } else {
+            m_wasted_string_bytes += (oldLen + 1);
             m_name_offsets[idx] = (uint32_t)m_string_pool.size();
             m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
             m_string_pool.push_back('\0');
@@ -403,7 +473,7 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         uint32_t newIdx = (uint32_t)m_frns.size();
         m_frns.push_back(frn);
         m_parent_frns.push_back(encodedPf);
-        m_sizes.push_back(0);
+        m_sizes.push_back(fileSize);
         m_timestamps.push_back(filetimeToUnixMs(record->TimeStamp.QuadPart));
         m_attributes.push_back(record->FileAttributes);
         QByteArray utf8 = name.toUtf8();
@@ -424,11 +494,73 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
     QWriteLocker lock(&m_dataLock);
     auto it = m_frn_to_idx.find(frn);
     if (it != m_frn_to_idx.end()) {
-        m_frns[it->second] = 0;
+        uint32_t idx = it->second;
+        m_frns[idx] = 0;
         m_frn_to_idx.erase(it);
+        m_dead_count++;
+        const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
+        m_wasted_string_bytes += (strlen(p) + 1);
+
         { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
+
+        if (m_dead_count > 50000 || m_wasted_string_bytes > 10 * 1024 * 1024) {
+            compact();
+        }
+
         emit dataChanged();
     }
+}
+
+void MftReader::compact() {
+    // 2026-05-14 内存管理优化：执行碎片整理，回收无效条目和字符串池空间
+    std::vector<uint64_t>  new_frns;
+    std::vector<uint64_t>  new_parent_frns;
+    std::vector<int64_t>   new_sizes;
+    std::vector<int64_t>   new_timestamps;
+    std::vector<uint32_t>  new_name_offsets;
+    std::vector<uint32_t>  new_attributes;
+    std::vector<uint8_t>   new_string_pool;
+
+    size_t count = m_frns.size();
+    new_frns.reserve(count - m_dead_count);
+    new_parent_frns.reserve(count - m_dead_count);
+    new_sizes.reserve(count - m_dead_count);
+    new_timestamps.reserve(count - m_dead_count);
+    new_name_offsets.reserve(count - m_dead_count);
+    new_attributes.reserve(count - m_dead_count);
+    new_string_pool.reserve(m_string_pool.size() - m_wasted_string_bytes);
+
+    m_frn_to_idx.clear();
+    for (size_t i = 0; i < count; ++i) {
+        if (m_frns[i] == 0) continue;
+
+        uint32_t newIdx = (uint32_t)new_frns.size();
+        m_frn_to_idx[m_frns[i]] = newIdx;
+
+        new_frns.push_back(m_frns[i]);
+        new_parent_frns.push_back(m_parent_frns[i]);
+        new_sizes.push_back(m_sizes[i]);
+        new_timestamps.push_back(m_timestamps[i]);
+        new_attributes.push_back(m_attributes[i]);
+
+        const char* name = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
+        size_t len = strlen(name) + 1;
+        new_name_offsets.push_back((uint32_t)new_string_pool.size());
+        new_string_pool.insert(new_string_pool.end(), name, name + len);
+    }
+
+    m_frns = std::move(new_frns);
+    m_parent_frns = std::move(new_parent_frns);
+    m_sizes = std::move(new_sizes);
+    m_timestamps = std::move(new_timestamps);
+    m_name_offsets = std::move(new_name_offsets);
+    m_attributes = std::move(new_attributes);
+    m_string_pool = std::move(new_string_pool);
+
+    m_dead_count = 0;
+    m_wasted_string_bytes = 0;
+    rebuildFrnToIndexMap();
+    buildSortedIndices();
 }
 
 bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult& result) {
@@ -450,9 +582,13 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
             // 文件夹属性下，物理大小无意义，统一设为 0；文件则初始化。
             e.size = 0;
             if (!(rec->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                // 2026-05-14 核心修正：利用 FileReference 瞬时获取物理大小
-                // 之前的逻辑漏掉了这个最关键的 Win32 API 调用
-                HANDLE hFile = OpenFileById(h, (LPFILE_ID_DESCRIPTOR)&rec->FileReferenceNumber, 0, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, 0);
+                // 2026-05-14 核心修正：修复 OpenFileById 传参错误，正确获取物理大小
+                FILE_ID_DESCRIPTOR id = {0};
+                id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
+                id.Type = FileIdType;
+                id.FileId.QuadPart = rec->FileReferenceNumber;
+
+                HANDLE hFile = OpenFileById(h, &id, 0, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, 0);
                 if (hFile != INVALID_HANDLE_VALUE) {
                     LARGE_INTEGER fs;
                     if (GetFileSizeEx(hFile, &fs)) e.size = (uint64_t)fs.QuadPart;
