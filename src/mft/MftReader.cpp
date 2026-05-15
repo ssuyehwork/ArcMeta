@@ -15,6 +15,8 @@
 #include <QRegularExpression>
 #include <QDir>
 #include <QDateTime>
+#include <QtConcurrent/QtConcurrent>
+#include <QFuture>
 #include <QFileIconProvider>
 #include <QFileInfo>
 
