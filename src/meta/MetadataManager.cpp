@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "MetadataManager.h"
 #include "../db/Database.h"
 #include "../db/ItemRepo.h"

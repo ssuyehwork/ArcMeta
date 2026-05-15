@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 //2813583 main 禁止删除此行
 #include <QApplication>
 #include <QMessageBox>

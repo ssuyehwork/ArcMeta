@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #pragma once
 
 #include <QObject>
@@ -15,6 +18,17 @@
 #include <QHash>
 #include "ScchCache.h"
 
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#ifdef run
+#undef run
+#endif
+
+
 namespace ArcMeta {
 
 class UsnWatcher;
@@ -31,7 +45,7 @@ public:
     QIcon getCachedIcon(const QString& ext, bool isDir);
 
 signals:
-    void dataChanged();
+    void dataChanged(int index = -1);
 
 public:
     // 生命周期管理
@@ -59,9 +73,10 @@ public:
     int totalCount() const;
     QString getFullPath(int index) const;
     void requestMetadata(int index);
+    bool isMetadataFetched(int index) const;
 
     // USN 更新
-    void updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& volume);
+    void updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& volume);
     void removeEntryByFrn(const std::wstring& volume, uint64_t frn);
 
 private:
@@ -88,6 +103,7 @@ private:
     void clearInternal(); 
     void rebuildFrnToIndexMap();
     void compact();
+    void buildSortedIndices();
     
     bool loadMftDirect(const std::wstring& volume, DriveResult& result);
     void mergeDriveResult(const std::wstring& volume, const DriveResult& result, size_t driveIdx);
@@ -99,6 +115,7 @@ private:
     std::vector<int64_t>   m_timestamps;   
     std::vector<uint32_t>  m_name_offsets;
     std::vector<uint32_t>  m_attributes;
+    std::vector<uint8_t>   m_metadata_fetched; // 0: 未获取, 1: 获取中, 2: 已完成
     std::vector<uint8_t>   m_string_pool;
 
     std::vector<std::wstring> m_drive_list;
@@ -120,6 +137,7 @@ private:
     uint32_t m_dirty_count = 0;
     size_t   m_dead_count = 0;
     size_t   m_wasted_string_bytes = 0;
+    std::vector<uint32_t> m_sorted_indices;
 };
 
 } // namespace ArcMeta

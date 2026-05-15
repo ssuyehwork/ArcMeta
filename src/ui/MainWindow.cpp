@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "MainWindow.h"
 #include "../core/CoreController.h"
 #include "BreadcrumbBar.h"

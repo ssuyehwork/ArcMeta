@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "ScanDialog.h"
 #include "../core/CacheManager.h"
 #include "../mft/MftReader.h"
@@ -41,6 +44,17 @@
 #include <QJsonArray>
 #include <windows.h>
 #include <shellapi.h>
+
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#ifdef run
+#undef run
+#endif
+
 
 namespace ArcMeta {
 
@@ -94,7 +108,22 @@ void ScanConfig::save() {
 
 // --- ScanTableModel Implementation ---
 
-ScanTableModel::ScanTableModel(QObject* parent) : QAbstractTableModel(parent) {}
+ScanTableModel::ScanTableModel(QObject* parent) : QAbstractTableModel(parent) {
+    connect(&MftReader::instance(), &MftReader::dataChanged, this, [this](int index) {
+        if (index == -1) {
+            beginResetModel();
+            endResetModel();
+            return;
+        }
+        // 性能优化：仅刷新受影响的行
+        for (int i = 0; i < m_filteredIndices.size(); ++i) {
+            if (m_filteredIndices[i] == index) {
+                emit dataChanged(this->index(i, 0), this->index(i, 3));
+                break;
+            }
+        }
+    });
+}
 ScanTableModel::~ScanTableModel() {}
 
 int ScanTableModel::rowCount(const QModelIndex& parent) const {
@@ -119,7 +148,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             case 2: {
                 if (reader.isDirectory(actualIndex)) return "-";
                 int64_t size = reader.getSize(actualIndex);
-                if (size == 0) {
+                if (size == 0 && !reader.isMetadataFetched(actualIndex)) {
                     const_cast<MftReader&>(reader).requestMetadata(actualIndex);
                     return "...";
                 }
@@ -130,10 +159,11 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             }
             case 3: {
                 int64_t ts = reader.getModifyTime(actualIndex);
-                if (ts == 0) {
+                if (ts == 0 && !reader.isMetadataFetched(actualIndex)) {
                     const_cast<MftReader&>(reader).requestMetadata(actualIndex);
                     return "-";
                 }
+                if (ts == 0) return "-";
                 return QDateTime::fromMSecsSinceEpoch(ts).toString("yyyy-MM-dd HH:mm");
             }
         }
@@ -185,7 +215,7 @@ void ScanTableModel::startAsyncRebuild() {
     QElapsedTimer* timer = new QElapsedTimer();
     timer->start();
 
-    QFuture<QVector<int>> future = QtConcurrent::run([this, text = m_filterText, state = m_filterState]() {
+    QFuture<QVector<int>> future = (QtConcurrent::run)([this, text = m_filterText, state = m_filterState]() {
         return MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem);
     });
 
@@ -261,7 +291,7 @@ ScanDialog::ScanDialog(QWidget* parent)
     QTimer::singleShot(100, this, [this]() {
         updateStatus("正在载入本地快照...");
         QPointer<ScanDialog> weakThis(this);
-        (void)QtConcurrent::run([weakThis]() {
+        (void)(QtConcurrent::run)([weakThis]() {
             bool ok = MftReader::instance().loadFromCache();
             QMetaObject::invokeMethod(weakThis.data(), [weakThis, ok]() {
                 if (!weakThis) return;
@@ -455,7 +485,7 @@ void ScanDialog::refreshDriveList(bool forceProbe) {
     }
 
     QPointer<ScanDialog> weakThis(this);
-    (void)QtConcurrent::run([weakThis]() {
+    (void)(QtConcurrent::run)([weakThis]() {
         if (!weakThis) return;
         QVector<DriveInfo> drives;
         DWORD driveMask = GetLogicalDrives();
@@ -677,7 +707,7 @@ void ScanDialog::onStartScan() {
     updateStatus("正在扫描...", true);
 
     QPointer<ScanDialog> weakThis(this);
-    (void)QtConcurrent::run([weakThis, selectedDrives]() {
+    (void)(QtConcurrent::run)([weakThis, selectedDrives]() {
         MftReader::instance().buildIndex(selectedDrives);
         QMetaObject::invokeMethod(weakThis.data(), [weakThis]() {
             if (!weakThis) return;
