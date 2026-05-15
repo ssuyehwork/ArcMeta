@@ -11,6 +11,8 @@
 #include <mutex>
 #include <windows.h>
 #include <winioctl.h>
+#include <QIcon>
+#include <QHash>
 #include "ScchCache.h"
 
 namespace ArcMeta {
@@ -24,6 +26,9 @@ class MftReader : public QObject {
     Q_OBJECT
 public:
     static MftReader& instance();
+
+    // 全局图标缓存管理 (解决 UAF 风险)
+    QIcon getCachedIcon(const QString& ext, bool isDir);
 
 signals:
     void dataChanged();
@@ -81,7 +86,6 @@ private:
     bool saveDriveToCacheInternal(size_t driveIdx); 
     void clearInternal(); 
     void rebuildFrnToIndexMap();
-    void buildSortedIndices();
     void compact();
     
     bool loadMftDirect(const std::wstring& volume, DriveResult& result);
@@ -100,7 +104,6 @@ private:
     std::atomic<uint32_t>     m_drive_active_mask{0}; // 驱动器过滤掩码 (位图)
 
     std::unordered_map<uint64_t, uint32_t>              m_frn_to_idx;
-    std::unordered_map<uint64_t, std::vector<uint64_t>> m_parent_to_children;
 
     mutable std::unordered_map<uint64_t, std::wstring>  m_path_cache;
     mutable std::mutex m_pathCacheMutex;
@@ -109,11 +112,13 @@ private:
     std::vector<UsnWatcher*> m_watchers;
 
     mutable QReadWriteLock m_dataLock;
+    mutable QReadWriteLock m_iconCacheLock;
+    QHash<QString, QIcon>  m_icon_cache;
+
     bool m_isInitialized = false;
     uint32_t m_dirty_count = 0;
     size_t   m_dead_count = 0;
     size_t   m_wasted_string_bytes = 0;
-    std::vector<uint32_t> m_sorted_indices;
 };
 
 } // namespace ArcMeta
