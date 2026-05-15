@@ -23,6 +23,12 @@
 
 namespace ArcMeta {
 
+void ScchMmapData::unmap() {
+    if (base) { UnmapViewOfFile(base); base = nullptr; }
+    if (hMap) { CloseHandle(hMap); hMap = nullptr; }
+    if (hFile != (void*)-1) { CloseHandle(hFile); hFile = (void*)-1; }
+}
+
 const char* scchResultString(ScchResult r) {
     switch (r) {
         case ScchResult::Ok:               return "Ok";
@@ -68,6 +74,7 @@ bool ScchCache::save(
     const std::vector<uint32_t>&                 attributes,
     const std::vector<uint8_t>&                  metadata_fetched,
     const std::vector<uint8_t>&                  string_pool,
+    const std::vector<uint32_t>&                 sorted_indices,
     const std::unordered_map<std::string, uint64_t>& usn_map
 ) {
     try {
@@ -87,6 +94,7 @@ bool ScchCache::save(
         bodySize += 8 + attributes.size() * 4;
         bodySize += 8 + metadata_fetched.size();
         bodySize += 8 + string_pool.size();
+        bodySize += 8 + sorted_indices.size() * 4;
         bodySize += 8 + usn_map.size() * sizeof(ScchUsnEntry);
 
         size_t totalSize = sizeof(ScchHeader) + bodySize;
@@ -129,6 +137,8 @@ bool ScchCache::save(
 
         writeU64(string_pool.size());
         writeRaw(string_pool.data(), string_pool.size());
+
+        writeVec32(sorted_indices);
 
         writeU64(usn_map.size());
         for (const auto& [drive, usn] : usn_map) {
@@ -180,6 +190,7 @@ ScchResult ScchCache::load(
     std::vector<uint32_t>&                       attributes,
     std::vector<uint8_t>&                        metadata_fetched,
     std::vector<uint8_t>&                        string_pool,
+    std::vector<uint32_t>&                       sorted_indices,
     std::unordered_map<std::string, uint64_t>&   usn_map
 ) {
     try {
@@ -266,6 +277,11 @@ ScchResult ScchCache::load(
         string_pool.assign(ptr, ptr + poolSize);
         ptr += poolSize;
 
+        if (!readVec32(sorted_indices, rc)) {
+            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
+            return ScchResult::Truncated;
+        }
+
         uint64_t usnCount = 0;
         if (!readU64(usnCount) || usnCount != header->usn_map_count) {
             UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
@@ -290,6 +306,126 @@ ScchResult ScchCache::load(
 
     } catch (const std::exception& e) {
         std::cerr << "[ScchCache] load failed: " << e.what() << "\n";
+        return ScchResult::IoError;
+    }
+}
+
+ScchResult ScchCache::loadMmap(
+    const char*                                  path,
+    ScchMmapData&                                outData,
+    std::unordered_map<std::string, uint64_t>&   usn_map
+) {
+    try {
+        std::wstring wpath = std::filesystem::path(path).wstring();
+        HANDLE hFile = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile == INVALID_HANDLE_VALUE) return ScchResult::FileNotFound;
+
+        LARGE_INTEGER li;
+        if (!GetFileSizeEx(hFile, &li)) { CloseHandle(hFile); return ScchResult::IoError; }
+        size_t fileSize = static_cast<size_t>(li.QuadPart);
+        if (fileSize < sizeof(ScchHeader)) { CloseHandle(hFile); return ScchResult::Truncated; }
+
+        HANDLE hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+        if (!hMap) { CloseHandle(hFile); return ScchResult::IoError; }
+
+        const uint8_t* base = static_cast<const uint8_t*>(MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0));
+        if (!base) { CloseHandle(hMap); CloseHandle(hFile); return ScchResult::IoError; }
+
+        const ScchHeader* header = reinterpret_cast<const ScchHeader*>(base);
+        if (memcmp(header->magic, SCCH_MAGIC, 4) != 0) {
+            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
+            return ScchResult::BadMagic;
+        }
+        if (header->version_major != SCCH_VERSION_MAJOR) {
+            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
+            return ScchResult::VersionMismatch;
+        }
+
+        size_t bodySize = fileSize - sizeof(ScchHeader);
+        if (computeCrc32(base + sizeof(ScchHeader), bodySize) != header->crc32) {
+            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
+            return ScchResult::CrcMismatch;
+        }
+
+        const uint8_t* ptr = base + sizeof(ScchHeader);
+        const uint8_t* end = base + fileSize;
+
+        auto readU64 = [&](uint64_t& v) -> bool {
+            if (ptr + 8 > end) return false;
+            memcpy(&v, ptr, 8); ptr += 8; return true;
+        };
+
+        outData.unmap();
+        outData.hFile = hFile;
+        outData.hMap = hMap;
+        outData.base = base;
+        outData.fileSize = fileSize;
+        outData.record_count = header->record_count;
+        outData.pool_size = header->pool_size;
+
+        uint64_t rc = header->record_count;
+        uint64_t count = 0;
+
+        // FRNs
+        if (!readU64(count) || count != rc) return ScchResult::Truncated;
+        outData.frns = reinterpret_cast<const uint64_t*>(ptr);
+        ptr += count * 8;
+
+        // Parent FRNs
+        if (!readU64(count) || count != rc) return ScchResult::Truncated;
+        outData.parent_frns = reinterpret_cast<const uint64_t*>(ptr);
+        ptr += count * 8;
+
+        // Sizes
+        if (!readU64(count) || count != rc) return ScchResult::Truncated;
+        outData.sizes = reinterpret_cast<const int64_t*>(ptr);
+        ptr += count * 8;
+
+        // Timestamps
+        if (!readU64(count) || count != rc) return ScchResult::Truncated;
+        outData.timestamps = reinterpret_cast<const int64_t*>(ptr);
+        ptr += count * 8;
+
+        // Name Offsets
+        if (!readU64(count) || count != rc) return ScchResult::Truncated;
+        outData.name_offsets = reinterpret_cast<const uint32_t*>(ptr);
+        ptr += count * 4;
+
+        // Attributes
+        if (!readU64(count) || count != rc) return ScchResult::Truncated;
+        outData.attributes = reinterpret_cast<const uint32_t*>(ptr);
+        ptr += count * 4;
+
+        // Metadata Fetched
+        if (!readU64(count) || count != rc) return ScchResult::Truncated;
+        outData.metadata_fetched = ptr;
+        ptr += count;
+
+        // String Pool
+        if (!readU64(count) || count != header->pool_size) return ScchResult::Truncated;
+        outData.string_pool = ptr;
+        ptr += count;
+
+        // Sorted Indices
+        if (!readU64(count) || count != rc) return ScchResult::Truncated;
+        outData.sorted_indices = reinterpret_cast<const uint32_t*>(ptr);
+        ptr += count * 4;
+
+        uint64_t usnCount = 0;
+        if (!readU64(usnCount) || usnCount != header->usn_map_count) return ScchResult::Truncated;
+        usn_map.clear();
+        for (uint64_t i = 0; i < usnCount; ++i) {
+            if (ptr + sizeof(ScchUsnEntry) > end) return ScchResult::Truncated;
+            ScchUsnEntry entry{};
+            memcpy(&entry, ptr, sizeof(entry));
+            ptr += sizeof(entry);
+            usn_map[std::string(entry.drive)] = entry.next_usn;
+        }
+
+        return ScchResult::Ok;
+
+    } catch (const std::exception& e) {
+        std::cerr << "[ScchCache] loadMmap failed: " << e.what() << "\n";
         return ScchResult::IoError;
     }
 }

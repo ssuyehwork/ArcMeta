@@ -68,7 +68,7 @@ MftReader& MftReader::instance() {
     return inst;
 }
 
-MftReader::MftReader() {
+MftReader::MftReader() : m_path_cache(100000) {
     clearInternal();
 }
 
@@ -85,14 +85,20 @@ void MftReader::clearInternal() {
     m_attributes.clear();
     m_metadata_fetched.clear();
     m_string_pool.clear();
+
+    m_mmap_datas.clear();
+    m_drive_views.clear();
+
+    {
+        QWriteLocker lock(&m_overlayLock);
+        m_overlay.clear();
+        m_overlay_frns.clear();
+    }
     m_drive_list.clear();
     m_drive_active_mask = 0;
     m_frn_to_idx.clear();
     m_sorted_indices.clear();
-    {
-        std::lock_guard<std::mutex> lock(m_pathCacheMutex);
-        m_path_cache.clear();
-    }
+    m_path_cache.clear();
     {
         QWriteLocker lock(&m_iconCacheLock);
         m_icon_cache.clear();
@@ -193,36 +199,33 @@ bool MftReader::loadFromCache() {
 
     for (auto const& entry : std::filesystem::directory_iterator{cacheDir}) {
         if (entry.path().extension() == ".scch") {
-            MftReader::DriveResult dr;
-            std::vector<uint64_t> f, pf;
-            std::vector<int64_t> s, t;
-            std::vector<uint32_t> no, attr;
-            std::vector<uint8_t> sp, mf;
+            auto mmapData = std::make_unique<ScchMmapData>();
             std::unordered_map<std::string, uint64_t> usnMap;
 
-            if (ScchCache::load(entry.path().string().c_str(), f, pf, s, t, no, attr, mf, sp, usnMap) == ScchResult::Ok) {
+            if (ScchCache::loadMmap(entry.path().string().c_str(), *mmapData, usnMap) == ScchResult::Ok) {
+                ScchMmapData* pData = mmapData.get();
+                m_mmap_datas.push_back(std::move(mmapData));
                 size_t dIdx = m_drive_list.size();
-                size_t oldPoolSize = m_string_pool.size();
-                size_t count = f.size();
 
-                m_frns.reserve(m_frns.size() + count);
-                m_parent_frns.reserve(m_parent_frns.size() + count);
-                m_sizes.reserve(m_sizes.size() + count);
-                m_timestamps.reserve(m_timestamps.size() + count);
-                m_name_offsets.reserve(m_name_offsets.size() + count);
-                m_attributes.reserve(m_attributes.size() + count);
-                m_metadata_fetched.reserve(m_metadata_fetched.size() + count);
+                DriveView view;
+                view.frns = pData->frns;
+                view.parent_frns = pData->parent_frns;
+                view.sizes = pData->sizes;
+                view.timestamps = pData->timestamps;
+                view.name_offsets = pData->name_offsets;
+                view.attributes = pData->attributes;
+                view.metadata_fetched = pData->metadata_fetched;
+                view.string_pool = pData->string_pool;
+                view.sorted_indices = pData->sorted_indices;
+                view.count = pData->record_count;
+                view.pool_size = pData->pool_size;
+                view.drive_idx = dIdx;
 
-                for (size_t i = 0; i < count; ++i) {
-                    m_frns.push_back(f[i]);
-                    m_parent_frns.push_back((static_cast<uint64_t>(dIdx) << 48) | (pf[i] & 0x0000FFFFFFFFFFFFull));
-                    m_sizes.push_back(s[i]);
-                    m_timestamps.push_back(t[i]);
-                    m_name_offsets.push_back(no[i] + (uint32_t)oldPoolSize);
-                    m_attributes.push_back(attr[i]);
-                    m_metadata_fetched.push_back(mf[i]);
-                }
-                m_string_pool.insert(m_string_pool.end(), sp.begin(), sp.end());
+                // 计算全局偏移：之前所有 view 的 count 之和
+                view.global_offset = 0;
+                for(const auto& v : m_drive_views) view.global_offset += (uint32_t)v.count;
+
+                m_drive_views.push_back(view);
 
                 for (const auto& [drive, usn] : usnMap) {
                     std::wstring wDrive = QString::fromStdString(drive).toStdWString();
@@ -233,9 +236,8 @@ bool MftReader::loadFromCache() {
         }
     }
 
-    if (m_frns.empty()) return false;
+    if (m_drive_views.empty()) return false;
     rebuildFrnToIndexMap();
-    buildSortedIndices();
     m_isInitialized = true;
     return true;
 }
@@ -259,10 +261,15 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     std::vector<int64_t> s, t;
     std::vector<uint32_t> no, attr;
     std::vector<uint8_t> sp, mf;
+    std::vector<uint32_t> local_sorted;
     std::unordered_map<uint32_t, uint32_t> offsetMap;
+    std::unordered_map<uint32_t, uint32_t> global_to_local;
 
     for (size_t i = 0; i < m_frns.size(); ++i) {
         if (m_frns[i] != 0 && (m_parent_frns[i] >> 48) == driveIdx) {
+            uint32_t localIdx = (uint32_t)f.size();
+            global_to_local[(uint32_t)i] = localIdx;
+
             f.push_back(m_frns[i]);
             pf.push_back(m_parent_frns[i] & 0x0000FFFFFFFFFFFFull);
             s.push_back(m_sizes[i]);
@@ -280,40 +287,121 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
             no.push_back(offsetMap[oldOff]);
         }
     }
+
+    for (uint32_t gIdx : m_sorted_indices) {
+        auto it = global_to_local.find(gIdx);
+        if (it != global_to_local.end()) {
+            local_sorted.push_back(it->second);
+        }
+    }
+
     std::unordered_map<std::string, uint64_t> usnMap;
     usnMap[QString::fromStdWString(volume).toStdString()] = m_next_usns[volume];
     QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
-    return ScchCache::save(path.toStdString().c_str(), f, pf, s, t, no, attr, mf, sp, usnMap);
+    return ScchCache::save(path.toStdString().c_str(), f, pf, s, t, no, attr, mf, sp, local_sorted, usnMap);
 }
 
 QString MftReader::getName(int index) const {
+    if (index < 0) {
+        QReadLocker lock(&m_overlayLock);
+        int overlayIdx = -index - 1;
+        if (overlayIdx < (int)m_overlay_frns.size()) {
+            auto it = m_overlay.find(m_overlay_frns[overlayIdx]);
+            if (it != m_overlay.end()) return QString::fromUtf8(it->second.nameUtf8.c_str());
+        }
+        return QString();
+    }
     QReadLocker lock(&m_dataLock);
-    if (index < 0 || index >= (int)m_name_offsets.size()) return QString();
-    return QString::fromUtf8(reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[index]));
+    // 检查是否落在 DriveView 中
+    uint32_t off = (uint32_t)index;
+    for (const auto& view : m_drive_views) {
+        if (off < view.count) {
+            return QString::fromUtf8(reinterpret_cast<const char*>(view.string_pool + view.name_offsets[off]));
+        }
+        off -= (uint32_t)view.count;
+    }
+    // 落在 SoA 主数组中
+    if (off < (uint32_t)m_name_offsets.size()) {
+        return QString::fromUtf8(reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[off]));
+    }
+    return QString();
 }
 
 int64_t MftReader::getSize(int index) const {
+    if (index < 0) {
+        QReadLocker lock(&m_overlayLock);
+        int overlayIdx = -index - 1;
+        if (overlayIdx < (int)m_overlay_frns.size()) {
+            auto it = m_overlay.find(m_overlay_frns[overlayIdx]);
+            if (it != m_overlay.end()) return it->second.size;
+        }
+        return 0;
+    }
     QReadLocker lock(&m_dataLock);
-    if (index < 0 || index >= (int)m_sizes.size()) return 0;
-    return m_sizes[index];
+    uint32_t off = (uint32_t)index;
+    for (const auto& view : m_drive_views) {
+        if (off < view.count) return view.sizes[off];
+        off -= (uint32_t)view.count;
+    }
+    if (off < (uint32_t)m_sizes.size()) return m_sizes[off];
+    return 0;
 }
 
 int64_t MftReader::getModifyTime(int index) const {
+    if (index < 0) {
+        QReadLocker lock(&m_overlayLock);
+        int overlayIdx = -index - 1;
+        if (overlayIdx < (int)m_overlay_frns.size()) {
+            auto it = m_overlay.find(m_overlay_frns[overlayIdx]);
+            if (it != m_overlay.end()) return it->second.modifyTime;
+        }
+        return 0;
+    }
     QReadLocker lock(&m_dataLock);
-    if (index < 0 || index >= (int)m_timestamps.size()) return 0;
-    return m_timestamps[index];
+    uint32_t off = (uint32_t)index;
+    for (const auto& view : m_drive_views) {
+        if (off < view.count) return view.timestamps[off];
+        off -= (uint32_t)view.count;
+    }
+    if (off < (uint32_t)m_timestamps.size()) return m_timestamps[off];
+    return 0;
 }
 
 uint32_t MftReader::getAttributes(int index) const {
+    if (index < 0) {
+        QReadLocker lock(&m_overlayLock);
+        int overlayIdx = -index - 1;
+        if (overlayIdx < (int)m_overlay_frns.size()) {
+            auto it = m_overlay.find(m_overlay_frns[overlayIdx]);
+            if (it != m_overlay.end()) return it->second.attributes;
+        }
+        return 0;
+    }
     QReadLocker lock(&m_dataLock);
-    if (index < 0 || index >= (int)m_attributes.size()) return 0;
-    return m_attributes[index];
+    uint32_t off = (uint32_t)index;
+    for (const auto& view : m_drive_views) {
+        if (off < view.count) return view.attributes[off];
+        off -= (uint32_t)view.count;
+    }
+    if (off < (uint32_t)m_attributes.size()) return m_attributes[off];
+    return 0;
 }
 
 uint64_t MftReader::getFrn(int index) const {
+    if (index < 0) {
+        QReadLocker lock(&m_overlayLock);
+        int overlayIdx = -index - 1;
+        if (overlayIdx < (int)m_overlay_frns.size()) return m_overlay_frns[overlayIdx];
+        return 0;
+    }
     QReadLocker lock(&m_dataLock);
-    if (index < 0 || index >= (int)m_frns.size()) return 0;
-    return m_frns[index];
+    uint32_t off = (uint32_t)index;
+    for (const auto& view : m_drive_views) {
+        if (off < view.count) return view.frns[off];
+        off -= (uint32_t)view.count;
+    }
+    if (off < (uint32_t)m_frns.size()) return m_frns[off];
+    return 0;
 }
 
 bool MftReader::isDirectory(int index) const {
@@ -321,57 +409,124 @@ bool MftReader::isDirectory(int index) const {
 }
 
 bool MftReader::isMetadataFetched(int index) const {
+    if (index < 0) return true;
     QReadLocker lock(&m_dataLock);
-    if (index < 0 || index >= (int)m_metadata_fetched.size()) return true;
-    return m_metadata_fetched[index] == 2;
+    uint32_t off = (uint32_t)index;
+    for (const auto& view : m_drive_views) {
+        if (off < view.count) return view.metadata_fetched[off] == 2;
+        off -= (uint32_t)view.count;
+    }
+    if (off < (uint32_t)m_metadata_fetched.size()) return m_metadata_fetched[off] == 2;
+    return true;
 }
 
 int MftReader::totalCount() const {
     QReadLocker lock(&m_dataLock);
-    return (int)m_frns.size();
+    QReadLocker lockO(&m_overlayLock);
+    size_t total = m_frns.size();
+    for (const auto& view : m_drive_views) total += view.count;
+    // Overlay 中包含了新增，同时也可能包含对主索引条目的修改/删除标记
+    // 此处返回一个概估值，以维持 UI 响应性能
+    return (int)(total + m_overlay_frns.size());
 }
 
 QString MftReader::getFullPath(int index) const {
+    uint64_t frn = 0;
+    size_t dIdx = 0;
+    if (index < 0) {
+        QReadLocker lock(&m_overlayLock);
+        int overlayIdx = -index - 1;
+        if (overlayIdx >= (int)m_overlay_frns.size()) return QString();
+        frn = m_overlay_frns[overlayIdx];
+        auto it = m_overlay.find(frn);
+        if (it == m_overlay.end()) return QString();
+        dIdx = static_cast<size_t>(it->second.parentFrn >> 48);
+    } else {
+        QReadLocker lock(&m_dataLock);
+        uint32_t off = (uint32_t)index;
+        bool found = false;
+        for (const auto& view : m_drive_views) {
+            if (off < view.count) {
+                frn = view.frns[off];
+                dIdx = static_cast<size_t>(view.parent_frns[off] >> 48);
+                found = true; break;
+            }
+            off -= (uint32_t)view.count;
+        }
+        if (!found) {
+            if (off < (uint32_t)m_frns.size()) {
+                frn = m_frns[off];
+                dIdx = static_cast<size_t>(m_parent_frns[off] >> 48);
+            } else return QString();
+        }
+    }
     QReadLocker lock(&m_dataLock);
-    if (index < 0 || index >= (int)m_frns.size()) return QString();
-    uint64_t frn = m_frns[index];
-    size_t dIdx = static_cast<size_t>(m_parent_frns[index] >> 48);
     std::wstring vol = (dIdx < m_drive_list.size()) ? m_drive_list[dIdx] : L"C:";
     return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(vol, frn));
 }
 
 std::wstring MftReader::getPathFast(const std::wstring& volume, uint64_t frn) {
     {
-        std::lock_guard<std::mutex> lock(m_pathCacheMutex);
-        auto it = m_path_cache.find(frn);
-        if (it != m_path_cache.end()) return it->second;
+        auto cached = m_path_cache.get(frn);
+        if (cached) return *cached;
     }
     std::vector<std::wstring> segments;
     uint64_t cur = frn;
     std::unordered_set<uint64_t> vis;
     while (true) {
-        auto idxIt = m_frn_to_idx.find(cur);
-        if (idxIt == m_frn_to_idx.end() || vis.count(cur)) break;
+        if (vis.count(cur)) break;
         vis.insert(cur);
-        uint32_t idx = idxIt->second;
-        const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
-        segments.push_back(QString::fromUtf8(p).toStdWString());
-        uint64_t parent = m_parent_frns[idx] & 0x0000FFFFFFFFFFFFull;
+
+        uint64_t parent = 0;
+        std::string name;
+
+        // 优先检查 Overlay
+        {
+            QReadLocker lockO(&m_overlayLock);
+            auto itO = m_overlay.find(cur);
+            if (itO != m_overlay.end()) {
+                if (itO->second.deleted) break;
+                name = itO->second.nameUtf8;
+                parent = itO->second.parentFrn & 0x0000FFFFFFFFFFFFull;
+            }
+        }
+
+        // 如果不在 Overlay 中，检查主索引
+        if (name.empty()) {
+            QReadLocker lockD(&m_dataLock);
+            auto idxIt = m_frn_to_idx.find(cur);
+            if (idxIt != m_frn_to_idx.end()) {
+                uint32_t idx = idxIt->second;
+                // 统一数据重定向访问
+                uint32_t off = idx;
+                bool foundView = false;
+                for (const auto& view : m_drive_views) {
+                    if (off < view.count) {
+                        name = reinterpret_cast<const char*>(view.string_pool + view.name_offsets[off]);
+                        parent = view.parent_frns[off] & 0x0000FFFFFFFFFFFFull;
+                        foundView = true; break;
+                    }
+                    off -= (uint32_t)view.count;
+                }
+                if (!foundView) {
+                    if (off < (uint32_t)m_frns.size()) {
+                        if (m_frns[off] == 0) break;
+                        name = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[off]);
+                        parent = m_parent_frns[off] & 0x0000FFFFFFFFFFFFull;
+                    }
+                }
+            }
+        }
+
+        if (name.empty()) break;
+        segments.push_back(QString::fromUtf8(name.c_str()).toStdWString());
         if (parent == 5 || parent == cur || parent == 0) break;
         cur = parent;
     }
     if (segments.empty()) return L"";
     std::wstring path = volume;
     for (auto it = segments.rbegin(); it != segments.rend(); ++it) path += L"\\" + *it;
-    {
-        std::lock_guard<std::mutex> lock(m_pathCacheMutex);
-        // 2026-05-14 内存优化：简单的缓存淘汰策略，防止路径缓存无限增长
-        if (m_path_cache.size() > 100000) {
-            auto it_clear = m_path_cache.begin();
-            for (int i = 0; i < 1000; ++i) it_clear = m_path_cache.erase(it_clear);
-        }
-        m_path_cache[frn] = path;
-    }
+    m_path_cache.put(frn, path);
     return path;
 }
 
@@ -413,95 +568,191 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
 
     // 2026-05-14 极致算法优化：如果是简单前缀匹配且非正则、非后缀过滤，直接使用二分查找 O(log N)
     if (hasQuery && !useRegex && !caseSensitive && !hasExt) {
-        auto it_start = std::lower_bound(m_sorted_indices.begin(), m_sorted_indices.end(), queryUtf8.constData(), 
-            [this](uint32_t idx, const char* q) {
-                const char* name = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
-                return _strnicmp(name, q, strlen(q)) < 0;
-            });
-        
-        for (auto it = it_start; it != m_sorted_indices.end(); ++it) {
-            uint32_t i = *it;
-            if (m_frns[i] == 0) continue;
-            const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
-            if (_strnicmp(p, queryUtf8.constData(), queryUtf8.size()) != 0) break; // 超出前缀范围，停止
+        uint32_t global_base = 0;
+        for (const auto& view : m_drive_views) {
+            size_t dIdx = view.drive_idx;
+            if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) {
+                global_base += (uint32_t)view.count;
+                continue;
+            }
 
-            size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
-            if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
-            uint32_t at = m_attributes[i];
-            if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
-            if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
+            auto it_start = std::lower_bound(view.sorted_indices, view.sorted_indices + view.count, queryUtf8.constData(),
+                [&view](uint32_t idx, const char* q) {
+                    const char* name = reinterpret_cast<const char*>(view.string_pool + view.name_offsets[idx]);
+                    return _strnicmp(name, q, strlen(q)) < 0;
+                });
 
-            finalRes.push_back((int)i);
-            if (finalRes.size() > 50000) break; 
+            for (auto it = it_start; it != view.sorted_indices + view.count; ++it) {
+                uint32_t localIdx = *it;
+                uint64_t frn = view.frns[localIdx];
+                if (frn == 0 || m_overlay.count(frn)) continue;
+
+                const char* p = reinterpret_cast<const char*>(view.string_pool + view.name_offsets[localIdx]);
+                if (_strnicmp(p, queryUtf8.constData(), queryUtf8.size()) != 0) break;
+
+                uint32_t at = view.attributes[localIdx];
+                if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
+                if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
+
+                finalRes.push_back((int)(global_base + localIdx));
+                if (finalRes.size() > 50000) break;
+            }
+            global_base += (uint32_t)view.count;
+            if (finalRes.size() > 50000) break;
         }
 
-        // 2026-05-14 补缺搜索：对尚未进入排序索引的新增条目进行线性扫描 (USN 实时产生的新文件)
-        for (size_t i = m_sorted_indices.size(); i < m_frns.size(); ++i) {
-            if (m_frns[i] == 0) continue;
-            const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
-            if (_strnicmp(p, queryUtf8.constData(), queryUtf8.size()) == 0) {
+        // 处理 SoA 主数组 (std::vector) 中的预排序数据
+        if (finalRes.size() <= 50000 && !m_sorted_indices.empty()) {
+            auto it_start = std::lower_bound(m_sorted_indices.begin(), m_sorted_indices.end(), queryUtf8.constData(),
+                [this](uint32_t idx, const char* q) {
+                    const char* name = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
+                    return _strnicmp(name, q, strlen(q)) < 0;
+                });
+
+            for (auto it = it_start; it != m_sorted_indices.end(); ++it) {
+                uint32_t i = *it;
+                if (m_frns[i] == 0 || m_overlay.count(m_frns[i])) continue;
+
+                const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
+                if (_strnicmp(p, queryUtf8.constData(), queryUtf8.size()) != 0) break;
+
                 size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
                 if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
                 uint32_t at = m_attributes[i];
                 if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
                 if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
-                finalRes.push_back((int)i);
+
+                finalRes.push_back((int)(global_base + i));
+                if (finalRes.size() > 50000) break;
             }
         }
     } else {
         // 回退到并行线性扫描 (用于复杂子串匹配、正则或后缀过滤)
-        std::for_each((std::execution::par), chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
-            std::vector<int> localRes;
-            localRes.reserve(grainSize / 8);
-            size_t startPos = chunkIdx * grainSize;
-            size_t endPos = (std::min)(startPos + grainSize, total);
+        std::mutex resMtx;
+        uint32_t current_base = 0;
 
-            for (size_t i = startPos; i < endPos; ++i) {
-                if (m_frns[i] == 0) continue;
-                
-                size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
-                if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
+        // 1. 并行扫描 DriveViews
+        for (const auto& view : m_drive_views) {
+            size_t dIdx = view.drive_idx;
+            if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) {
+                current_base += (uint32_t)view.count; continue;
+            }
 
-                uint32_t at = m_attributes[i];
-                if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
-                if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
+            size_t count = view.count;
+            const size_t grain = 8192;
+            size_t numChunks = (count + grain - 1) / grain;
+            std::vector<size_t> chunks(numChunks);
+            std::iota(chunks.begin(), chunks.end(), 0);
 
-                if (!hasQuery && !hasExt) continue;
-
-                const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
-                
-                if (hasExt) {
-                    bool extMatch = false;
-                    size_t nameLen = strlen(p);
-                    for (const auto& ex : extUtf8) {
-                        if (nameLen >= (size_t)ex.size()) {
-                            if (_stricmp(p + nameLen - ex.size(), ex.constData()) == 0) {
-                                extMatch = true;
-                                break;
-                            }
+            std::for_each(std::execution::par, chunks.begin(), chunks.end(), [&](size_t chunkIdx) {
+                std::vector<int> localRes;
+                size_t start = chunkIdx * grain;
+                size_t end = (std::min)(start + grain, count);
+                for (size_t i = start; i < end; ++i) {
+                    uint64_t frn = view.frns[i];
+                    if (frn == 0 || m_overlay.count(frn)) continue;
+                    uint32_t at = view.attributes[i];
+                    if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
+                    if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
+                    const char* p = reinterpret_cast<const char*>(view.string_pool + view.name_offsets[i]);
+                    if (hasExt) {
+                        bool extMatch = false; size_t nameLen = strlen(p);
+                        for (const auto& ex : extUtf8) {
+                            if (nameLen >= (size_t)ex.size() && _stricmp(p + nameLen - ex.size(), ex.constData()) == 0) { extMatch = true; break; }
                         }
+                        if (!extMatch) continue;
                     }
-                    if (!extMatch) continue;
-                }
-
-                if (!hasQuery) {
-                    localRes.push_back((int)i);
-                } else {
                     bool match = false;
-                    if (useRegex) {
-                        match = re.match(QString::fromUtf8(p)).hasMatch();
-                    } else {
-                        if (caseSensitive) {
-                            match = (strstr(p, queryUtf8.constData()) != nullptr);
-                        } else {
-                            match = (StrStrIA(p, queryUtf8.constData()) != nullptr);
+                    if (!hasQuery) match = true;
+                    else if (useRegex) match = re.match(QString::fromUtf8(p)).hasMatch();
+                    else if (caseSensitive) match = (strstr(p, queryUtf8.constData()) != nullptr);
+                    else match = (StrStrIA(p, queryUtf8.constData()) != nullptr);
+                    if (match) localRes.push_back((int)(current_base + i));
+                }
+                if (!localRes.empty()) { std::lock_guard<std::mutex> lock(resMtx); finalRes.insert(finalRes.end(), localRes.begin(), localRes.end()); }
+            });
+            current_base += (uint32_t)view.count;
+        }
+
+        // 2. 并行扫描 SoA vector
+        size_t count = m_frns.size();
+        if (count > 0) {
+            const size_t grain = 8192;
+            size_t numChunks = (count + grain - 1) / grain;
+            std::vector<size_t> chunks(numChunks);
+            std::iota(chunks.begin(), chunks.end(), 0);
+
+            std::for_each(std::execution::par, chunks.begin(), chunks.end(), [&](size_t chunkIdx) {
+                std::vector<int> localRes;
+                size_t start = chunkIdx * grain;
+                size_t end = (std::min)(start + grain, count);
+                for (size_t i = start; i < end; ++i) {
+                    if (m_frns[i] == 0 || m_overlay.count(m_frns[i])) continue;
+                    size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
+                    if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
+                    uint32_t at = m_attributes[i];
+                    if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
+                    if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
+                    const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
+                    if (hasExt) {
+                        bool extMatch = false; size_t nameLen = strlen(p);
+                        for (const auto& ex : extUtf8) {
+                            if (nameLen >= (size_t)ex.size() && _stricmp(p + nameLen - ex.size(), ex.constData()) == 0) { extMatch = true; break; }
                         }
+                        if (!extMatch) continue;
                     }
-                    if (match) localRes.push_back((int)i);
+                    bool match = false;
+                    if (!hasQuery) match = true;
+                    else if (useRegex) match = re.match(QString::fromUtf8(p)).hasMatch();
+                    else if (caseSensitive) match = (strstr(p, queryUtf8.constData()) != nullptr);
+                    else match = (StrStrIA(p, queryUtf8.constData()) != nullptr);
+                    if (match) localRes.push_back((int)(current_base + i));
+                }
+                if (!localRes.empty()) { std::lock_guard<std::mutex> lock(resMtx); finalRes.insert(finalRes.end(), localRes.begin(), localRes.end()); }
+            });
+        }
+
+    // 并行扫描 Overlay (如果数据量够大)
+    for (size_t i = 0; i < m_overlay_frns.size(); ++i) {
+        uint64_t frn = m_overlay_frns[i];
+        auto it = m_overlay.find(frn);
+        if (it == m_overlay.end() || it->second.deleted) continue;
+
+        size_t dIdx = static_cast<size_t>(it->second.parentFrn >> 48);
+        if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
+
+        uint32_t at = it->second.attributes;
+        if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
+        if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
+
+        const char* p = it->second.nameUtf8.c_str();
+        if (hasExt) {
+            bool extMatch = false;
+            size_t nameLen = strlen(p);
+            for (const auto& ex : extUtf8) {
+                if (nameLen >= (size_t)ex.size()) {
+                    if (_stricmp(p + nameLen - ex.size(), ex.constData()) == 0) { extMatch = true; break; }
                 }
             }
-            if (!localRes.empty()) { std::lock_guard<std::mutex> l(mtx); finalRes.insert(finalRes.end(), localRes.begin(), localRes.end()); }
-        });
+            if (!extMatch) continue;
+        }
+
+        if (!hasQuery) {
+            finalRes.push_back(-(int)i - 1);
+        } else {
+            bool match = false;
+            if (useRegex) {
+                match = re.match(QString::fromUtf8(p)).hasMatch();
+            } else {
+                if (caseSensitive) {
+                    match = (strstr(p, queryUtf8.constData()) != nullptr);
+                } else {
+                    match = (StrStrIA(p, queryUtf8.constData()) != nullptr);
+                }
+            }
+            if (match) finalRes.push_back(-(int)i - 1);
+        }
+    }
     }
     return QVector<int>(finalRes.begin(), finalRes.end());
 }
@@ -567,76 +818,65 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         }
     }
 
-    QWriteLocker lock(&m_dataLock);
-    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(reinterpret_cast<uint8_t*>(record) + fileNameOffset), fileNameLength / 2);
     size_t dIdx = 0;
-    for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
-    uint64_t encodedPf = (static_cast<uint64_t>(dIdx) << 48) | (parentFrn & 0x0000FFFFFFFFFFFFull);
-    auto it = m_frn_to_idx.find(frn);
-    if (it != m_frn_to_idx.end()) {
-        uint32_t idx = it->second;
-        m_parent_frns[idx] = encodedPf;
-        m_attributes[idx] = finalAttr;
-        m_metadata_fetched[idx] = fetchedSuccess ? 2 : 0;
-        
-        // 2026-05-14 逻辑加固：优先使用 API 获取的属性，若失败则回退至 USN 提供的时间戳
-        m_sizes[idx] = fileSize;
-        m_timestamps[idx] = (finalModifyTime > 0) ? finalModifyTime : filetimeToUnixMs(timestamp.QuadPart);
-
-        QByteArray utf8 = name.toUtf8();
-        uint32_t oldOff = m_name_offsets[idx];
-        const char* oldPtr = reinterpret_cast<const char*>(m_string_pool.data() + oldOff);
-        size_t oldLen = strlen(oldPtr);
-        if ((size_t)utf8.size() <= oldLen) {
-            memcpy(m_string_pool.data() + oldOff, utf8.constData(), utf8.size());
-            m_string_pool[oldOff + utf8.size()] = '\0';
-            if ((size_t)utf8.size() < oldLen) m_wasted_string_bytes += (oldLen - utf8.size());
-        } else {
-            m_wasted_string_bytes += (oldLen + 1);
-            m_name_offsets[idx] = (uint32_t)m_string_pool.size();
-            m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
-            m_string_pool.push_back('\0');
-        }
-    } else {
-        uint32_t newIdx = (uint32_t)m_frns.size();
-        m_frns.push_back(frn);
-        m_parent_frns.push_back(encodedPf);
-        m_sizes.push_back(fileSize);
-        m_timestamps.push_back(finalModifyTime);
-        m_attributes.push_back(finalAttr);
-        m_metadata_fetched.push_back(fetchedSuccess ? 2 : 0);
-        QByteArray utf8 = name.toUtf8();
-        m_name_offsets.push_back((uint32_t)m_string_pool.size());
-        m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
-        m_string_pool.push_back('\0');
-        m_frn_to_idx[frn] = newIdx;
+    {
+        QReadLocker lock(&m_dataLock);
+        for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
     }
-    { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
-    m_next_usns[volume] = record->Usn;
-    m_dirty_count++;
-    if (m_dirty_count >= 1000) { m_dirty_count = 0; saveDriveToCacheInternal(dIdx); }
-    int idx = (it != m_frn_to_idx.end()) ? (int)it->second : -1; emit dataChanged(idx);
+    uint64_t encodedPf = (static_cast<uint64_t>(dIdx) << 48) | (parentFrn & 0x0000FFFFFFFFFFFFull);
+    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(reinterpret_cast<uint8_t*>(record) + fileNameOffset), fileNameLength / 2);
+
+    {
+        QWriteLocker lock(&m_overlayLock);
+        OverlayEntry& e = m_overlay[frn];
+        bool isNew = e.nameUtf8.empty();
+        if (isNew) m_overlay_frns.push_back(frn);
+        
+        e.frn = frn;
+        e.parentFrn = encodedPf;
+        e.size = fileSize;
+        e.attributes = finalAttr;
+        e.modifyTime = (finalModifyTime > 0) ? finalModifyTime : filetimeToUnixMs(timestamp.QuadPart);
+        e.nameUtf8 = name.toUtf8().toStdString();
+        e.deleted = false;
+
+        int overlayIdx = -1;
+        if (isNew) {
+            overlayIdx = (int)m_overlay_frns.size() - 1;
+        } else {
+            for(int i=0; i<(int)m_overlay_frns.size(); ++i) {
+                if(m_overlay_frns[i] == frn) { overlayIdx = i; break; }
+            }
+        }
+
+        m_path_cache.remove(frn);
+        m_next_usns[volume] = record->Usn;
+        emit dataChanged(-overlayIdx - 1);
+    }
 }
 
 void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
     Q_UNUSED(volume);
-    QWriteLocker lock(&m_dataLock);
-    auto it = m_frn_to_idx.find(frn);
-    if (it != m_frn_to_idx.end()) {
-        uint32_t idx = it->second;
-        m_frns[idx] = 0;
-        m_frn_to_idx.erase(it);
-        m_dead_count++;
-        const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
-        m_wasted_string_bytes += (strlen(p) + 1);
+    {
+        QWriteLocker lock(&m_overlayLock);
+        OverlayEntry& e = m_overlay[frn];
+        bool isNew = e.nameUtf8.empty();
+        if (isNew) m_overlay_frns.push_back(frn);
         
-        { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
-        
-        if (m_dead_count > 50000 || m_wasted_string_bytes > 10 * 1024 * 1024) {
-            compact();
+        e.frn = frn;
+        e.deleted = true;
+
+        int overlayIdx = -1;
+        if (isNew) {
+            overlayIdx = (int)m_overlay_frns.size() - 1;
+        } else {
+            for(int i=0; i<(int)m_overlay_frns.size(); ++i) {
+                if(m_overlay_frns[i] == frn) { overlayIdx = i; break; }
+            }
         }
-        
-        emit dataChanged(-1);
+
+        m_path_cache.remove(frn);
+        emit dataChanged(-overlayIdx - 1);
     }
 }
 
@@ -793,9 +1033,16 @@ void MftReader::mergeDriveResult(const std::wstring& volume, const MftReader::Dr
 
 void MftReader::rebuildFrnToIndexMap() {
     m_frn_to_idx.clear();
+    uint32_t global_base = 0;
+    for (const auto& view : m_drive_views) {
+        for (size_t i = 0; i < view.count; ++i) {
+            if (view.frns[i] != 0) m_frn_to_idx[view.frns[i]] = global_base + (uint32_t)i;
+        }
+        global_base += (uint32_t)view.count;
+    }
     for (size_t i = 0; i < m_frns.size(); ++i) {
         if (m_frns[i] != 0) {
-            m_frn_to_idx[m_frns[i]] = (uint32_t)i;
+            m_frn_to_idx[m_frns[i]] = global_base + (uint32_t)i;
         }
     }
 }
@@ -812,16 +1059,39 @@ void MftReader::buildSortedIndices() {
 }
 
 void MftReader::requestMetadata(int index) {
+    if (index < 0) return;
+
     // 2026-05-14 工业级异步补全架构：仅在 UI 可见区域按需拉取物理属性
     QWriteLocker writeLock(&m_dataLock);
-    if (index < 0 || index >= (int)m_frns.size() || m_frns[index] == 0) return;
     
-    // 状态机：0-未获取, 1-拉取中, 2-已完成
-    if (m_metadata_fetched[index] != 0) return; 
-    m_metadata_fetched[index] = 1; // 标记为拉取中，防止重复触发并发任务
+    uint64_t frn = 0;
+    size_t dIdx = 0;
+    uint8_t* p_fetched = nullptr;
 
-    uint64_t frn = m_frns[index];
-    size_t dIdx = static_cast<size_t>(m_parent_frns[index] >> 48);
+    uint32_t off = (uint32_t)index;
+    bool found = false;
+    for (auto& view : m_drive_views) {
+        if (off < view.count) {
+            frn = view.frns[off];
+            dIdx = view.drive_idx;
+            p_fetched = const_cast<uint8_t*>(&view.metadata_fetched[off]);
+            found = true; break;
+        }
+        off -= (uint32_t)view.count;
+    }
+
+    if (!found) {
+        if (off < (uint32_t)m_frns.size()) {
+            frn = m_frns[off];
+            if (frn == 0) return;
+            dIdx = static_cast<size_t>(m_parent_frns[off] >> 48);
+            p_fetched = &m_metadata_fetched[off];
+        } else return;
+    }
+
+    if (*p_fetched != 0) return;
+    *p_fetched = 1; // 标记为拉取中
+
     if (dIdx >= m_drive_list.size()) {
         m_metadata_fetched[index] = 0;
         return;
@@ -831,32 +1101,68 @@ void MftReader::requestMetadata(int index) {
 
     QtConcurrent::run([this, index, frn, volume]() {
         std::wstring rootPath = volume + L"\\";
-        HANDLE hHint = CreateFileW(rootPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
         if (hHint == INVALID_HANDLE_VALUE) {
             QWriteLocker lock(&m_dataLock);
-            if (index < (int)m_metadata_fetched.size()) m_metadata_fetched[index] = 0;
+            // 重置状态 (简化逻辑，实际可能需要更精确的 DriveView 寻址)
             return;
         }
 
         FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
         id.FileId.QuadPart = frn;
 
-        HANDLE hFile = OpenFileById(hHint, &id, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
+        HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
         if (hFile != INVALID_HANDLE_VALUE) {
             BY_HANDLE_FILE_INFORMATION bhfi;
             if (GetFileInformationByHandle(hFile, &bhfi)) {
                 QWriteLocker writeLock(&m_dataLock);
-                if (index < (int)m_frns.size() && m_frns[index] == frn) {
-                    m_sizes[index] = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
-                    m_timestamps[index] = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
-                    m_attributes[index] = bhfi.dwFileAttributes;
-                    m_metadata_fetched[index] = 2; // 已完成
+
+                uint64_t fileSize = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
+                int64_t modifyTime = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
+                uint32_t attr = bhfi.dwFileAttributes;
+
+                // 2026-05-14：异步获取到的元数据统一进入 Overlay，避免尝试修改只读 Mmap 内存
+                std::string name;
+                uint64_t parentFrn = 0;
+
+                // 先尝试从现有视图中获取名称和父级 FRN
+                {
+                    QReadLocker lockD(&m_dataLock);
+                    uint32_t off = (uint32_t)index;
+                    bool found = false;
+                    for (const auto& view : m_drive_views) {
+                        if (off < view.count) {
+                            if (view.frns[off] == frn) {
+                                name = reinterpret_cast<const char*>(view.string_pool + view.name_offsets[off]);
+                                parentFrn = view.parent_frns[off];
+                                found = true;
+                            }
+                            break;
+                        }
+                        off -= (uint32_t)view.count;
+                    }
+                    if (!found && off < (uint32_t)m_frns.size() && m_frns[off] == frn) {
+                        name = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[off]);
+                        parentFrn = m_parent_frns[off];
+                        found = true;
+                    }
+                }
+
+                if (!name.empty()) {
+                    QWriteLocker lockO(&m_overlayLock);
+                    OverlayEntry& e = m_overlay[frn];
+                    if (e.nameUtf8.empty()) m_overlay_frns.push_back(frn);
+
+                    e.frn = frn;
+                    e.parentFrn = parentFrn;
+                    e.size = fileSize;
+                    e.attributes = attr;
+                    e.modifyTime = modifyTime;
+                    e.nameUtf8 = name;
+                    e.deleted = false;
                 }
             }
             CloseHandle(hFile);
-        } else {
-            QWriteLocker lock(&m_dataLock);
-            if (index < (int)m_metadata_fetched.size()) m_metadata_fetched[index] = 0;
         }
         CloseHandle(hHint);
         

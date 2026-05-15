@@ -733,7 +733,7 @@ void ScanDialog::onTriggerSearch() {
     }
     m_config.save();
 
-    // 2. 核心同步：将 UI 盘符勾选状态更新至搜索引擎掩码 (修复搜出未选盘符数据的傻逼 Bug)
+    // 2. 核心同步：将 UI 盘符勾选状态更新至搜索引擎掩码
     QStringList activeList;
     for (const QString& drive : m_config.activeDrives) activeList << drive;
     MftReader::instance().updateActiveDrives(activeList);

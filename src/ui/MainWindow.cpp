@@ -32,6 +32,7 @@
 #include <QCloseEvent>
 #include <QMenu>
 #include <QAction>
+#include <QShortcut>
 #include <QTimer>
 #include "UiHelper.h"
 #include <QFileInfo>
@@ -543,6 +544,14 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
             (void)QtConcurrent::run([]() {
                 SyncEngine::instance().runFullScan({}, nullptr);
             });
+        }
+    } else if (msg->message == WM_HOTKEY) {
+        if (msg->wParam == 1) { // Alt + Space
+            // 2026-05-14：响应全局热键，显示搜索窗口
+            if (m_btnScan) m_btnScan->click();
+
+            // 确保 ScanDialog 获得焦点（ScanDialog::setupUi 中已有实现逻辑）
+            return true;
         }
     }
     return false;
@@ -1073,10 +1082,18 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnScan->installEventFilter(this);
     // 2026-05-09 按照用户要求：扫描窗口与主界面操作相互不干扰，去除父子关系
     connect(m_btnScan, &QPushButton::clicked, this, [this]() {
-        auto* dlg = new ScanDialog(nullptr);
-        dlg->setAttribute(Qt::WA_DeleteOnClose); // 2026-05-27 物理修复：关闭后自动释放内存
-        dlg->setModal(false);
-        dlg->show();
+        static QPointer<ScanDialog> s_dlg;
+        if (s_dlg) {
+            s_dlg->show();
+            s_dlg->raise();
+            s_dlg->activateWindow();
+        } else {
+            auto* dlg = new ScanDialog(nullptr);
+            s_dlg = dlg;
+            dlg->setAttribute(Qt::WA_DeleteOnClose); // 2026-05-27 物理修复：关闭后自动释放内存
+            dlg->setModal(false);
+            dlg->show();
+        }
     });
 
     m_btnCreate = createTitleBtn("add"); // 2026-03-xx 规范化：“+”按钮图标修正
@@ -1178,6 +1195,10 @@ void MainWindow::initIdleDetector() {
     
     // 安装全局事件过滤器以感应操作（在 QApplication 级别感应更佳，这里先按窗口级实现）
     qApp->installEventFilter(this);
+
+    // 2026-05-14：实现全局 Alt+Space 唤起 ScanDialog (系统级热键通常需要 RegisterHotKey，这里先通过 Qt 快捷键演示核心逻辑)
+    // 真正的系统级全局热键需要在 nativeEvent 中处理 WM_HOTKEY
+    RegisterHotKey((HWND)winId(), 1, MOD_ALT, VK_SPACE);
 }
 
 void MainWindow::initTrayIcon() {
@@ -1385,6 +1406,9 @@ void MainWindow::changeEvent(QEvent* event) {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
+    // 2026-05-14：注销全局热键
+    UnregisterHotKey((HWND)winId(), 1);
+
     QSettings settings("ArcMeta团队", "ArcMeta");
     settings.setValue("MainWindow/LastPath", m_currentPath);
     // 2026-04-11 按照用户要求：物理保存各容器宽度状态

@@ -47,6 +47,28 @@ enum class ScchResult {
 
 const char* scchResultString(ScchResult r);
 
+struct ScchMmapData {
+    void*  hFile = (void*)-1; // INVALID_HANDLE_VALUE
+    void*  hMap  = nullptr;
+    const uint8_t* base = nullptr;
+    size_t fileSize = 0;
+
+    const uint64_t* frns = nullptr;
+    const uint64_t* parent_frns = nullptr;
+    const int64_t*  sizes = nullptr;
+    const int64_t*  timestamps = nullptr;
+    const uint32_t* name_offsets = nullptr;
+    const uint32_t* attributes = nullptr;
+    const uint8_t*  metadata_fetched = nullptr;
+    const uint8_t*  string_pool = nullptr;
+    const uint32_t* sorted_indices = nullptr;
+    uint64_t        record_count = 0;
+    uint64_t        pool_size = 0;
+
+    void unmap();
+    ~ScchMmapData() { unmap(); }
+};
+
 class ScchCache {
 public:
     // 写入
@@ -60,10 +82,11 @@ public:
         const std::vector<uint32_t>&                 attributes,
         const std::vector<uint8_t>&                  metadata_fetched,
         const std::vector<uint8_t>&                  string_pool,
+        const std::vector<uint32_t>&                 sorted_indices,
         const std::unordered_map<std::string, uint64_t>& usn_map
     );
 
-    // 读取
+    // 读取 (传统方式，进行拷贝)
     static ScchResult load(
         const char*                                  path,
         std::vector<uint64_t>&                       frns,
@@ -74,6 +97,14 @@ public:
         std::vector<uint32_t>&                       attributes,
         std::vector<uint8_t>&                        metadata_fetched,
         std::vector<uint8_t>&                        string_pool,
+        std::vector<uint32_t>&                       sorted_indices,
+        std::unordered_map<std::string, uint64_t>&   usn_map
+    );
+
+    // 读取 (Mmap 零拷贝方式)
+    static ScchResult loadMmap(
+        const char*                                  path,
+        ScchMmapData&                                outData,
         std::unordered_map<std::string, uint64_t>&   usn_map
     );
 
