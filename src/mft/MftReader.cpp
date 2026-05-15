@@ -136,6 +136,11 @@ void MftReader::buildIndex(const QStringList& drives) {
     for (const auto& [volume, usn] : m_next_usns) {
         auto* watcher = new UsnWatcher(volume, usn, nullptr);
         m_watchers.push_back(watcher);
+    }
+    
+    // 2026-05-14 修复：锁释放后再启动线程
+    lock.unlock();
+    for (auto* watcher : m_watchers) {
         watcher->start();
     }
 }
@@ -204,6 +209,11 @@ bool MftReader::loadFromCache() {
         // 2026-05-14 修复点 1：杜绝跨线程父对象绑定
         auto* watcher = new UsnWatcher(volume, usn, nullptr);
         m_watchers.push_back(watcher);
+    }
+
+    // 2026-05-14 修复：锁释放后再启动线程
+    lock.unlock();
+    for (auto* watcher : m_watchers) {
         watcher->start();
     }
     return true;
@@ -213,7 +223,7 @@ bool MftReader::saveToCache() {
     QReadLocker lock(&m_dataLock);
     if (!m_isInitialized) return false;
     for (size_t i = 0; i < m_drive_list.size(); ++i) {
-        saveDriveToCache(i);
+        saveDriveToCacheInternal(i);
     }
     return true;
 }
@@ -391,10 +401,25 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
         m_parent_frns[idx] = encodedPf;
         m_attributes[idx] = record->FileAttributes;
         m_timestamps[idx] = filetimeToUnixMs(record->TimeStamp.QuadPart);
+
         QByteArray utf8 = name.toUtf8();
-        m_name_offsets[idx] = (uint32_t)m_string_pool.size();
-        m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
-        m_string_pool.push_back('\0');
+        uint32_t oldOff = m_name_offsets[idx];
+
+        // 计算旧字符串的容量（含 '\0'）
+        const char* oldPtr = reinterpret_cast<const char*>(m_string_pool.data() + oldOff);
+        size_t oldLen = strlen(oldPtr); // 不含 '\0'
+
+        if ((size_t)utf8.size() <= oldLen) {
+            // 新名称不超过旧名称长度：原地覆写，零额外分配
+            memcpy(m_string_pool.data() + oldOff, utf8.constData(), utf8.size());
+            m_string_pool[oldOff + utf8.size()] = '\0';
+            // m_name_offsets[idx] 保持不变
+        } else {
+            // 新名称更长：追加到池尾，旧空间标记为废弃（靠定期 saveToCache 清理）
+            m_name_offsets[idx] = (uint32_t)m_string_pool.size();
+            m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
+            m_string_pool.push_back('\0');
+        }
     } else {
         uint32_t newIdx = (uint32_t)m_frns.size();
         m_frns.push_back(frn);
@@ -411,7 +436,7 @@ void MftReader::updateEntryFromUsn(::USN_RECORD_V2* record, const std::wstring& 
     { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
     m_next_usns[volume] = record->Usn;
     m_dirty_count++;
-    if (m_dirty_count >= 1000) { m_dirty_count = 0; saveDriveToCache(dIdx); }
+    if (m_dirty_count >= 1000) { m_dirty_count = 0; saveDriveToCacheInternal(dIdx); }
     emit dataChanged();
 }
 
