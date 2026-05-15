@@ -376,8 +376,12 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
             uint32_t at = m_attributes[i];
             if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
             if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
+
+            // 2026-05-14 交互优化：对齐 Rust 原版逻辑 (空即是无)
+            // 如果用户没有输入任何搜索词或后缀，则不显示任何结果。
+            if (!hasQuery && !hasExt) continue;
+
             const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
-            if (!hasQuery && !hasExt) { localRes.push_back((int)i); continue; }
 
             // 2026-05-14 性能优化：在字节流上直接操作，避免 QString 构造开销
             if (hasExt) {
