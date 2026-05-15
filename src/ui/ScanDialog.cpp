@@ -176,14 +176,15 @@ QVariant ScanTableModel::headerData(int section, Qt::Orientation orientation, in
 }
 
 void ScanTableModel::setFilterText(const QString& text) {
-    if (m_filterText == text) return;
     m_filterText = text;
+}
+
+void ScanTableModel::triggerManualSearch() {
     startAsyncRebuild();
 }
 
 void ScanTableModel::setFilterState(const ScanFilterState& state) {
     m_filterState = state;
-    startAsyncRebuild();
 }
 
 void ScanTableModel::startAsyncRebuild() {
@@ -407,7 +408,9 @@ void ScanDialog::setupUi() {
     m_resultView->setShowGrid(false);
     m_resultView->setAlternatingRowColors(true);
     
-    connect(&MftReader::instance(), &MftReader::dataChanged, this, [this]() { m_tableModel->setFilterText(m_searchEdit->text()); });
+    // 2026-05-14 修复：禁止数据变更自动触发搜索，防止 USN 更新导致搜索风暴。仅在用户手动搜索时刷新。
+    // connect(&MftReader::instance(), &MftReader::dataChanged, this, ...); // 已移除
+
     connect(m_resultView, &QTableView::customContextMenuRequested, this, &ScanDialog::onCustomContextMenu);
     connect(m_resultView, &QTableView::doubleClicked, this, &ScanDialog::onItemDoubleClicked);
     connect(m_resultView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ScanDialog::onSelectionChanged);
@@ -737,7 +740,7 @@ void ScanDialog::onStartScan() {
 }
 
 void ScanDialog::onTriggerSearch() {
-    // 1. 物理同步历史记录 (对标 Rust: 成功触发搜索时存入)
+    // 1. 物理同步历史记录
     QString q = m_searchEdit->text().trimmed();
     if (!q.isEmpty()) {
         m_config.queryHistory.removeAll(q);
@@ -752,8 +755,10 @@ void ScanDialog::onTriggerSearch() {
     }
     m_config.save();
 
-    // 2. 执行搜索 (同步 UI 状态并触发)
+    // 2. 同步状态并手动执行搜索
     onFilterOptionChanged();
+    m_tableModel->setFilterText(m_searchEdit->text());
+    m_tableModel->triggerSearch(); // 显式手动触发
 }
 
 void ScanDialog::onFilterOptionChanged() {
@@ -764,10 +769,9 @@ void ScanDialog::onFilterOptionChanged() {
     state.includeSystem = m_checkSystem->isChecked();
     QString extText = m_extEdit->text().toLower();
     if (!extText.isEmpty()) state.extensionList = extText.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
-    m_tableModel->setFilterState(state);
     
-    // 物理对标 P2：过滤项改变直接刷新，无需回车 (类似 Rust 版 Checkbox 响应)
-    m_tableModel->setFilterText(m_searchEdit->text());
+    // 2026-05-14 修复：仅更新内部状态，不自动触发搜索。
+    m_tableModel->setFilterState(state);
 }
 
 void ScanDialog::updateStatus(const QString& text, bool scanning) {

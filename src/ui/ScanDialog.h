@@ -66,6 +66,7 @@ public:
 
     void setFilterText(const QString& text);
     void setFilterState(const ScanFilterState& state);
+    void triggerSearch() { startAsyncRebuild(); }
     void loadMore(int count = 200);
     int totalFilteredCount() const { return m_filteredIndices.size(); }
 
