@@ -699,7 +699,17 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
     m_next_usns[volume] = record->Usn;
     m_dirty_count++;
-    if (m_dirty_count >= 1000) { m_dirty_count = 0; saveDriveToCacheInternal(dIdx); }
+
+    // 2026-05-14 工业级内存加固：实时监控内存碎片率
+    // 当浪费的字符串空间超过 20MB 或死亡条目过多时，强制执行 compact 碎片整理
+    if (m_wasted_string_bytes > 20 * 1024 * 1024 || m_dead_count > 100000) {
+        compact();
+    }
+
+    if (m_dirty_count >= 1000) {
+        m_dirty_count = 0;
+        saveDriveToCacheInternal(dIdx);
+    }
     int idx = (it != m_frn_to_idx.end()) ? (int)it->second : -1; emit dataChanged(idx);
 }
 
@@ -916,7 +926,9 @@ void MftReader::requestMetadata(int index) {
 
     (void)QtConcurrent::run([this, index, frn, volume]() {
         std::wstring rootPath = volume + L"\\";
-        HANDLE hHint = CreateFileW(rootPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        // 2026-05-14 核心修正：降级权限至 FILE_READ_ATTRIBUTES，杜绝 GENERIC_READ 导致的“共享违规”错误
+        // 这解决了与 Explorer、Photoshop 等正在占用文件的进程冲突的问题
+        HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
         if (hHint == INVALID_HANDLE_VALUE) {
             QWriteLocker lock(&m_dataLock);
             if (index < (int)m_metadata_fetched.size()) m_metadata_fetched[index] = 0;
@@ -926,7 +938,7 @@ void MftReader::requestMetadata(int index) {
         FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
         id.FileId.QuadPart = frn;
 
-        HANDLE hFile = OpenFileById(hHint, &id, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
+        HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
         if (hFile != INVALID_HANDLE_VALUE) {
             BY_HANDLE_FILE_INFORMATION bhfi;
             if (GetFileInformationByHandle(hFile, &bhfi)) {

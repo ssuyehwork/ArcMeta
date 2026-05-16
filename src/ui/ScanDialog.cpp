@@ -109,17 +109,45 @@ void ScanConfig::save() {
 // --- ScanTableModel Implementation ---
 
 ScanTableModel::ScanTableModel(QObject* parent) : QAbstractTableModel(parent) {
+    m_throttleTimer = new QTimer(this);
+    m_throttleTimer->setInterval(100); // 100ms 聚合周期
+    connect(m_throttleTimer, &QTimer::timeout, this, [this]() {
+        if (m_pendingRows.isEmpty()) return;
+
+        // 2026-05-14 信号聚合优化：将数千次零散刷新合并为极少数范围刷新
+        // 这大幅降低了绘制压力，对标 Rust 版立即模式渲染的流畅感
+        QList<int> rows = m_pendingRows.values();
+        std::sort(rows.begin(), rows.end());
+        m_pendingRows.clear();
+
+        int startRow = rows[0];
+        int endRow = rows[0];
+        for (int i = 1; i < rows.size(); ++i) {
+            if (rows[i] == endRow + 1) {
+                endRow = rows[i];
+            } else {
+                emit dataChanged(index(startRow, 0), index(endRow, 3));
+                startRow = rows[i];
+                endRow = rows[i];
+            }
+        }
+        emit dataChanged(index(startRow, 0), index(endRow, 3));
+    });
+
     connect(&MftReader::instance(), &MftReader::dataChanged, this, [this](int index) {
         if (index == -1) {
+            m_pendingRows.clear();
             beginResetModel();
             endResetModel();
             return;
         }
-        // 性能优化：仅刷新受影响的行
-        for (int i = 0; i < m_filteredIndices.size(); ++i) {
-            if (m_filteredIndices[i] == index) {
-                emit dataChanged(this->index(i, 0), this->index(i, 3));
-                break;
+        // 2026-05-14 算法优化：将 O(N) 线性查找升级为 O(1) 映射查找
+        auto it = m_actualToRow.find(index);
+        if (it != m_actualToRow.end()) {
+            int row = it->second;
+            if (row < m_displayLimit) {
+                m_pendingRows.insert(row);
+                if (!m_throttleTimer->isActive()) m_throttleTimer->start();
             }
         }
     });
@@ -229,6 +257,14 @@ void ScanTableModel::startAsyncRebuild() {
 
         beginResetModel();
         m_filteredIndices = m_filterWatcher.result();
+
+        // 2026-05-14 物理同步：构建反向映射表以支持 O(1) 行定位
+        m_actualToRow.clear();
+        m_actualToRow.reserve(m_filteredIndices.size());
+        for (int i = 0; i < m_filteredIndices.size(); ++i) {
+            m_actualToRow[m_filteredIndices[i]] = i;
+        }
+
         m_displayLimit = 200;
         endResetModel();
 
