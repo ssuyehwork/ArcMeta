@@ -57,6 +57,7 @@ public:
 
     // 驱动器隔离状态管理
     void updateActiveDrives(const QStringList& activeDrives);
+    bool isDriveIndexed(const QString& drive);
 
     // 查询接口 (支持驱动器掩码隔离)
     QVector<int> search(const QString& query, bool useRegex = false, bool caseSensitive = false, 
