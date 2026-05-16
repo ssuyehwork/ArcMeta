@@ -325,7 +325,7 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     std::vector<uint32_t> no, attr, ds;
     std::vector<uint8_t> sp, mf;
     std::unordered_map<uint32_t, uint32_t> offsetMap;
-    std::unordered_map<uint32_t, uint32_t> globalToLocal;
+    std::unordered_map<size_t, uint32_t> globalToLocal; // 2026-05-14 修正：使用 size_t 消除 C4267 警告
 
     for (size_t i = 0; i < m_frns.size(); ++i) {
         if (m_frns[i] != 0 && (m_parent_frns[i] >> 48) == driveIdx) {
