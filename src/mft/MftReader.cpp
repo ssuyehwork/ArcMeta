@@ -216,38 +216,41 @@ bool MftReader::loadFromCache() {
     QWriteLocker lock(&m_dataLock);
     clearInternal();
 
+    struct DriveIndices {
+        std::vector<uint32_t> sorted;
+        uint32_t baseIdx;
+    };
+    std::vector<DriveIndices> allSortedIndices;
+
     for (auto const& entry : std::filesystem::directory_iterator{cacheDir}) {
         if (entry.path().extension() == ".scch") {
-            MftReader::DriveResult dr;
+            // 2026-05-14 零拷贝优化思路：虽然 ScchCache::load 现在支持增量 insert，
+            // 但为了正确处理盘符编码 (dIdx) 和字符串池全局偏移 (oldPoolSize)，我们仍需局部处理。
             std::vector<uint64_t> f, pf;
             std::vector<int64_t> s, t;
-            std::vector<uint32_t> no, attr;
+            std::vector<uint32_t> no, attr, ds;
             std::vector<uint8_t> sp, mf;
             std::unordered_map<std::string, uint64_t> usnMap;
 
-            if (ScchCache::load(entry.path().string().c_str(), f, pf, s, t, no, attr, mf, sp, usnMap) == ScchResult::Ok) {
+            if (ScchCache::load(entry.path().string().c_str(), f, pf, s, t, no, attr, mf, sp, ds, usnMap) == ScchResult::Ok) {
                 size_t dIdx = m_drive_list.size();
                 size_t oldPoolSize = m_string_pool.size();
+                uint32_t baseIdx = (uint32_t)m_frns.size();
                 size_t count = f.size();
 
-                m_frns.reserve(m_frns.size() + count);
-                m_parent_frns.reserve(m_parent_frns.size() + count);
-                m_sizes.reserve(m_sizes.size() + count);
-                m_timestamps.reserve(m_timestamps.size() + count);
-                m_name_offsets.reserve(m_name_offsets.size() + count);
-                m_attributes.reserve(m_attributes.size() + count);
-                m_metadata_fetched.reserve(m_metadata_fetched.size() + count);
+                m_frns.insert(m_frns.end(), f.begin(), f.end());
+                m_sizes.insert(m_sizes.end(), s.begin(), s.end());
+                m_timestamps.insert(m_timestamps.end(), t.begin(), t.end());
+                m_attributes.insert(m_attributes.end(), attr.begin(), attr.end());
+                m_metadata_fetched.insert(m_metadata_fetched.end(), mf.begin(), mf.end());
+                m_string_pool.insert(m_string_pool.end(), sp.begin(), sp.end());
 
                 for (size_t i = 0; i < count; ++i) {
-                    m_frns.push_back(f[i]);
                     m_parent_frns.push_back((static_cast<uint64_t>(dIdx) << 48) | (pf[i] & 0x0000FFFFFFFFFFFFull));
-                    m_sizes.push_back(s[i]);
-                    m_timestamps.push_back(t[i]);
                     m_name_offsets.push_back(no[i] + (uint32_t)oldPoolSize);
-                    m_attributes.push_back(attr[i]);
-                    m_metadata_fetched.push_back(mf[i]);
                 }
-                m_string_pool.insert(m_string_pool.end(), sp.begin(), sp.end());
+                
+                allSortedIndices.push_back({std::move(ds), baseIdx});
 
                 for (const auto& [drive, usn] : usnMap) {
                     std::wstring wDrive = QString::fromStdString(drive).toStdWString();
@@ -260,7 +263,44 @@ bool MftReader::loadFromCache() {
 
     if (m_frns.empty()) return false;
     rebuildFrnToIndexMap();
-    buildSortedIndices();
+
+    // 2026-05-14 核心性能优化：执行 K 路归并合并排序索引 (Complexity: O(N log K))
+    // 这取代了耗时的 O(N log N) 全量排序，是 C++ 找回极致性能的关键
+    if (!allSortedIndices.empty()) {
+        m_sorted_indices.clear();
+        m_sorted_indices.reserve(m_frns.size());
+
+        struct MergeNode {
+            uint32_t globalIdx;
+            size_t driveArrIdx;
+            size_t innerIdx;
+            bool operator>(const MergeNode& other) const {
+                const char* s1 = reinterpret_cast<const char*>(MftReader::instance().m_string_pool.data() + MftReader::instance().m_name_offsets[globalIdx]);
+                const char* s2 = reinterpret_cast<const char*>(MftReader::instance().m_string_pool.data() + MftReader::instance().m_name_offsets[other.globalIdx]);
+                return _stricmp(s1, s2) > 0;
+            }
+        };
+        std::priority_queue<MergeNode, std::vector<MergeNode>, std::greater<MergeNode>> pq;
+
+        for (size_t i = 0; i < allSortedIndices.size(); ++i) {
+            if (!allSortedIndices[i].sorted.empty()) {
+                pq.push({allSortedIndices[i].sorted[0] + allSortedIndices[i].baseIdx, i, 0});
+            }
+        }
+
+        while (!pq.empty()) {
+            MergeNode top = pq.top();
+            pq.pop();
+            m_sorted_indices.push_back(top.globalIdx);
+            if (top.innerIdx + 1 < allSortedIndices[top.driveArrIdx].sorted.size()) {
+                size_t nextInner = top.innerIdx + 1;
+                pq.push({allSortedIndices[top.driveArrIdx].sorted[nextInner] + allSortedIndices[top.driveArrIdx].baseIdx, top.driveArrIdx, nextInner});
+            }
+        }
+    } else {
+        buildSortedIndices();
+    }
+
     m_isInitialized = true;
     return true;
 }
@@ -282,12 +322,16 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     std::wstring volume = m_drive_list[driveIdx];
     std::vector<uint64_t> f, pf;
     std::vector<int64_t> s, t;
-    std::vector<uint32_t> no, attr;
+    std::vector<uint32_t> no, attr, ds;
     std::vector<uint8_t> sp, mf;
     std::unordered_map<uint32_t, uint32_t> offsetMap;
+    std::unordered_map<uint32_t, uint32_t> globalToLocal;
 
     for (size_t i = 0; i < m_frns.size(); ++i) {
         if (m_frns[i] != 0 && (m_parent_frns[i] >> 48) == driveIdx) {
+            uint32_t localIdx = (uint32_t)f.size();
+            globalToLocal[i] = localIdx;
+
             f.push_back(m_frns[i]);
             pf.push_back(m_parent_frns[i] & 0x0000FFFFFFFFFFFFull);
             s.push_back(m_sizes[i]);
@@ -305,10 +349,19 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
             no.push_back(offsetMap[oldOff]);
         }
     }
+
+    // 2026-05-14 物理优化：从全局排序索引中提取并重映射属于该盘符的子索引
+    for (uint32_t gIdx : m_sorted_indices) {
+        auto it = globalToLocal.find(gIdx);
+        if (it != globalToLocal.end()) {
+            ds.push_back(it->second);
+        }
+    }
+
     std::unordered_map<std::string, uint64_t> usnMap;
     usnMap[QString::fromStdWString(volume).toStdString()] = m_next_usns[volume];
     QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
-    return ScchCache::save(path.toStdString().c_str(), f, pf, s, t, no, attr, mf, sp, usnMap);
+    return ScchCache::save(path.toStdString().c_str(), f, pf, s, t, no, attr, mf, sp, ds, usnMap);
 }
 
 QString MftReader::getName(int index) const {
@@ -436,28 +489,35 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
     std::vector<size_t> chunkIndices(numChunks);
     std::iota(chunkIndices.begin(), chunkIndices.end(), 0);
 
-    // 2026-05-14 极致算法优化：如果是简单前缀匹配且非正则、非后缀过滤，直接使用二分查找 O(log N)
+    // 2026-05-14 极致算法重构：对标 Rust 版 O(log N) 性能
+    // 针对简单前缀匹配且非正则、非后缀过滤的情形，利用预排序索引执行二分查找
     if (hasQuery && !useRegex && !caseSensitive && !hasExt) {
+        // 使用 std::lower_bound 定位前缀范围起点
         auto it_start = std::lower_bound(m_sorted_indices.begin(), m_sorted_indices.end(), queryUtf8.constData(), 
             [this](uint32_t idx, const char* q) {
                 const char* name = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
+                // 使用 _strnicmp 确保 Windows 下文件名比较的正确性 (O(K))
                 return _strnicmp(name, q, strlen(q)) < 0;
             });
         
+        // 顺序收集匹配项，直到超出前缀范围或达到显示上限
         for (auto it = it_start; it != m_sorted_indices.end(); ++it) {
             uint32_t i = *it;
             if (m_frns[i] == 0) continue;
+            
             const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
-            if (_strnicmp(p, queryUtf8.constData(), queryUtf8.size()) != 0) break; // 超出前缀范围，停止
+            if (_strnicmp(p, queryUtf8.constData(), queryUtf8.size()) != 0) break; 
 
+            // 视图过滤：仅检查位掩码，极其轻量 (O(1))
             size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
             if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
+            
             uint32_t at = m_attributes[i];
             if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
             if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
 
             finalRes.push_back((int)i);
-            if (finalRes.size() > 50000) break; 
+            if (finalRes.size() > 100000) break; 
         }
 
         // 2026-05-14 补缺搜索：对尚未进入排序索引的新增条目进行线性扫描 (USN 实时产生的新文件)
@@ -854,7 +914,7 @@ void MftReader::requestMetadata(int index) {
     std::wstring volume = m_drive_list[dIdx];
     writeLock.unlock();
 
-    QtConcurrent::run([this, index, frn, volume]() {
+    (void)QtConcurrent::run([this, index, frn, volume]() {
         std::wstring rootPath = volume + L"\\";
         HANDLE hHint = CreateFileW(rootPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
         if (hHint == INVALID_HANDLE_VALUE) {
