@@ -231,21 +231,27 @@ ScchResult ScchCache::load(
         auto readVec64u = [&](std::vector<uint64_t>& v, uint64_t expected) -> bool {
             uint64_t count = 0;
             if (!readU64(count) || count != expected || ptr + count * 8 > end) return false;
-            v.insert(v.end(), reinterpret_cast<const uint64_t*>(ptr), reinterpret_cast<const uint64_t*>(ptr) + count);
+            size_t oldSize = v.size();
+            v.resize(oldSize + (size_t)count);
+            memcpy(v.data() + oldSize, ptr, (size_t)count * 8);
             ptr += count * 8; return true;
         };
 
         auto readVec64i = [&](std::vector<int64_t>& v, uint64_t expected) -> bool {
             uint64_t count = 0;
             if (!readU64(count) || count != expected || ptr + count * 8 > end) return false;
-            v.insert(v.end(), reinterpret_cast<const int64_t*>(ptr), reinterpret_cast<const int64_t*>(ptr) + count);
+            size_t oldSize = v.size();
+            v.resize(oldSize + (size_t)count);
+            memcpy(v.data() + oldSize, ptr, (size_t)count * 8);
             ptr += count * 8; return true;
         };
 
         auto readVec32 = [&](std::vector<uint32_t>& v, uint64_t expected) -> bool {
             uint64_t count = 0;
             if (!readU64(count) || count != expected || ptr + count * 4 > end) return false;
-            v.insert(v.end(), reinterpret_cast<const uint32_t*>(ptr), reinterpret_cast<const uint32_t*>(ptr) + count);
+            size_t oldSize = v.size();
+            v.resize(oldSize + (size_t)count);
+            memcpy(v.data() + oldSize, ptr, (size_t)count * 4);
             ptr += count * 4; return true;
         };
 

@@ -125,6 +125,19 @@ private:
 
     std::unordered_map<uint64_t, uint32_t>              m_frn_to_idx;
 
+    // 2026-05-14 架构对标重构：引入覆盖层实现读写分离
+    struct OverlayEntry {
+        uint64_t encodedPf;
+        int64_t size;
+        int64_t timestamp;
+        uint32_t attributes;
+        uint32_t nameOffset;
+        uint8_t metadataFetched;
+    };
+    std::unordered_map<uint64_t, OverlayEntry> m_usn_overlay;
+    std::unordered_set<uint64_t>               m_deleted_frns;
+    mutable QReadWriteLock m_overlayLock;
+
     mutable std::unordered_map<uint64_t, std::wstring>  m_path_cache;
     mutable std::mutex m_pathCacheMutex;
 
