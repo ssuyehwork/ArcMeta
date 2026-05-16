@@ -287,13 +287,13 @@ bool MftReader::loadFromCache() {
             uint32_t globalIdx;
             size_t driveArrIdx;
             size_t innerIdx;
-            bool operator>(const MergeNode& other) const {
-                const char* s1 = reinterpret_cast<const char*>(MftReader::instance().m_string_pool.data() + MftReader::instance().m_name_offsets[globalIdx]);
-                const char* s2 = reinterpret_cast<const char*>(MftReader::instance().m_string_pool.data() + MftReader::instance().m_name_offsets[other.globalIdx]);
-                return _stricmp(s1, s2) > 0;
-            }
         };
-        std::priority_queue<MergeNode, std::vector<MergeNode>, std::greater<MergeNode>> pq;
+        auto cmp = [this](const MergeNode& a, const MergeNode& b) {
+            const char* s1 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[a.globalIdx]);
+            const char* s2 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[b.globalIdx]);
+            return _stricmp(s1, s2) > 0;
+        };
+        std::priority_queue<MergeNode, std::vector<MergeNode>, decltype(cmp)> pq(cmp);
 
         for (size_t i = 0; i < allSortedIndices.size(); ++i) {
             if (!allSortedIndices[i].sorted.empty()) {
@@ -427,10 +427,10 @@ QString MftReader::getFullPath(int index) const {
     if (index < 0 || index >= (int)m_frns.size()) return QString();
     uint64_t frn = m_frns[index];
     size_t dIdx = static_cast<size_t>(m_parent_frns[index] >> 48);
-    return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(dIdx, frn));
+    return QString::fromStdWString(getPathFast(dIdx, frn));
 }
 
-std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
+std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) const {
     if (driveIdx >= m_drive_list.size()) return L"";
     const std::wstring& volume = m_drive_list[driveIdx];
     uint64_t cacheKey = (static_cast<uint64_t>(driveIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
