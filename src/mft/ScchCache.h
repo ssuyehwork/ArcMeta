@@ -21,6 +21,7 @@ struct ScchHeader {
     uint64_t record_count;
     uint64_t pool_size;
     uint64_t usn_map_count;
+    uint64_t sorted_indices_count; // 2026-05-14 新增：持久化排序索引
     uint32_t crc32;              // 头部之后所有字节的 CRC32
     uint32_t flags;              // 保留，写 0
     // 总计 48 字节，对齐友好
@@ -60,10 +61,11 @@ public:
         const std::vector<uint32_t>&                 attributes,
         const std::vector<uint8_t>&                  metadata_fetched,
         const std::vector<uint8_t>&                  string_pool,
+        const std::vector<uint32_t>&                 sorted_indices,
         const std::unordered_map<std::string, uint64_t>& usn_map
     );
 
-    // 读取
+    // 读取 (增量加载模式)
     static ScchResult load(
         const char*                                  path,
         std::vector<uint64_t>&                       frns,
@@ -74,6 +76,7 @@ public:
         std::vector<uint32_t>&                       attributes,
         std::vector<uint8_t>&                        metadata_fetched,
         std::vector<uint8_t>&                        string_pool,
+        std::vector<uint32_t>&                       sorted_indices,
         std::unordered_map<std::string, uint64_t>&   usn_map
     );
 

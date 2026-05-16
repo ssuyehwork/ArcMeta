@@ -1,0 +1,96 @@
+bool MftReader::loadFromCache() {
+    std::filesystem::path cacheDir = "ArcMeta/cache";
+    if (!std::filesystem::exists(cacheDir)) return false;
+
+    QWriteLocker lock(&m_dataLock);
+    clearInternal();
+
+    struct DriveIndices {
+        std::vector<uint32_t> sorted;
+        uint32_t baseIdx;
+    };
+    std::vector<DriveIndices> allSortedIndices;
+
+    for (auto const& entry : std::filesystem::directory_iterator{cacheDir}) {
+        if (entry.path().extension() == ".scch") {
+            // 使用局部临时变量加载，然后批量移动到 SoA 数组中，以符合 ScchCache 的增量接口设计
+            // 虽然 ScchCache::load 现在是 insert 模式，但为了正确处理 parent_frn 的盘符编码和 name_offset 的全局池偏移，
+            // 我们仍需逐条处理。由于是在加载阶段，这种“内存中拷贝”相对于之前的“磁盘到中间Buffer再到SoA”已大幅优化。
+            std::vector<uint64_t> f, pf;
+            std::vector<int64_t> s, t;
+            std::vector<uint32_t> no, attr, ds;
+            std::vector<uint8_t> sp, mf;
+            std::unordered_map<std::string, uint64_t> usnMap;
+
+            if (ScchCache::load(entry.path().string().c_str(), f, pf, s, t, no, attr, mf, sp, ds, usnMap) == ScchResult::Ok) {
+                size_t dIdx = m_drive_list.size();
+                size_t oldPoolSize = m_string_pool.size();
+                uint32_t baseIdx = (uint32_t)m_frns.size();
+                size_t count = f.size();
+
+                m_frns.insert(m_frns.end(), f.begin(), f.end());
+                m_sizes.insert(m_sizes.end(), s.begin(), s.end());
+                m_timestamps.insert(m_timestamps.end(), t.begin(), t.end());
+                m_attributes.insert(m_attributes.end(), attr.begin(), attr.end());
+                m_metadata_fetched.insert(m_metadata_fetched.end(), mf.begin(), mf.end());
+                m_string_pool.insert(m_string_pool.end(), sp.begin(), sp.end());
+
+                for (size_t i = 0; i < count; ++i) {
+                    m_parent_frns.push_back((static_cast<uint64_t>(dIdx) << 48) | (pf[i] & 0x0000FFFFFFFFFFFFull));
+                    m_name_offsets.push_back(no[i] + (uint32_t)oldPoolSize);
+                }
+
+                allSortedIndices.push_back({std::move(ds), baseIdx});
+
+                for (const auto& [drive, usn] : usnMap) {
+                    std::wstring wDrive = QString::fromStdString(drive).toStdWString();
+                    m_drive_list.push_back(wDrive);
+                    m_next_usns[wDrive] = usn;
+                }
+            }
+        }
+    }
+
+    if (m_frns.empty()) return false;
+    rebuildFrnToIndexMap();
+
+    // 2026-05-14 核心性能优化：执行 K 路归并合并排序索引 (Complexity: O(N log K))
+    if (!allSortedIndices.empty()) {
+        m_sorted_indices.clear();
+        m_sorted_indices.reserve(m_frns.size());
+
+        struct MergeNode {
+            uint32_t globalIdx;
+            size_t driveArrIdx;
+            size_t innerIdx;
+            // 优先级队列默认为最大堆，我们需要最小堆 (std::greater)
+            bool operator>(const MergeNode& other) const {
+                const char* s1 = reinterpret_cast<const char*>(MftReader::instance().m_string_pool.data() + MftReader::instance().m_name_offsets[globalIdx]);
+                const char* s2 = reinterpret_cast<const char*>(MftReader::instance().m_string_pool.data() + MftReader::instance().m_name_offsets[other.globalIdx]);
+                return _stricmp(s1, s2) > 0;
+            }
+        };
+        std::priority_queue<MergeNode, std::vector<MergeNode>, std::greater<MergeNode>> pq;
+
+        for (size_t i = 0; i < allSortedIndices.size(); ++i) {
+            if (!allSortedIndices[i].sorted.empty()) {
+                pq.push({allSortedIndices[i].sorted[0] + allSortedIndices[i].baseIdx, i, 0});
+            }
+        }
+
+        while (!pq.empty()) {
+            MergeNode top = pq.top();
+            pq.pop();
+            m_sorted_indices.push_back(top.globalIdx);
+            if (top.innerIdx + 1 < allSortedIndices[top.driveArrIdx].sorted.size()) {
+                size_t nextInner = top.innerIdx + 1;
+                pq.push({allSortedIndices[top.driveArrIdx].sorted[nextInner] + allSortedIndices[top.driveArrIdx].baseIdx, top.driveArrIdx, nextInner});
+            }
+        }
+    } else {
+        buildSortedIndices();
+    }
+
+    m_isInitialized = true;
+    return true;
+}
