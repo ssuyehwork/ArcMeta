@@ -166,6 +166,10 @@ MainWindow::MainWindow(QWidget* parent)
     initUi();
     initTrayIcon();
     initIdleDetector();
+
+    // 2026-05-14 物理同步：注册全局热键 Alt+Space (MOD_ALT = 0x0001, VK_SPACE = 0x20)
+    // 标识符设为 1001，确保在 Windows 层面全局唯一
+    RegisterHotKey((HWND)winId(), 1001, MOD_ALT, VK_SPACE);
     qDebug() << "[Main] MainWindow 构造函数 UI/托盘/闲置检测初始化完成";
 
     // 2026-03-xx 性能优化：严禁在构造函数中执行任何可能导致阻塞的同步加载 (如 navigateTo)。
@@ -186,6 +190,12 @@ MainWindow::MainWindow(QWidget* parent)
             m_navPanel->selectPath("computer://");
         }
     });
+}
+
+MainWindow::~MainWindow() {
+#ifdef Q_OS_WIN
+    UnregisterHotKey((HWND)winId(), 1001);
+#endif
 }
 
 void MainWindow::initUi() {
@@ -535,6 +545,23 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
     Q_UNUSED(result);
 
     MSG* msg = static_cast<MSG*>(message);
+
+    // 2026-05-14 响应全局热键 Alt+Space
+    if (msg->message == WM_HOTKEY && msg->wParam == 1001) {
+        if (isVisible() && !isMinimized() && isActiveWindow()) {
+            hide();
+        } else {
+            showNormal();
+            activateWindow();
+            // 2026-05-14 物理同步：自动聚焦搜索框，实现极致对标 Rust 的启动即搜索体验
+            if (m_searchEdit) {
+                m_searchEdit->setFocus();
+                m_searchEdit->selectAll();
+            }
+        }
+        return true;
+    }
+
     if (msg->message == WM_DEVICECHANGE) {
         // 2026-05-24 按照用户要求：捕捉硬件变更，硬盘插入时触发 GLOB 扫描对账
         if (msg->wParam == DBT_DEVICEARRIVAL || msg->wParam == DBT_DEVICEREMOVECOMPLETE) {
@@ -1219,11 +1246,15 @@ void MainWindow::initTrayIcon() {
     // 点击托盘图标逻辑
     connect(m_trayIcon, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
         if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) {
-            if (isVisible()) {
+            if (isVisible() && !isMinimized() && isActiveWindow()) {
                 hide();
             } else {
                 showNormal();
                 activateWindow();
+                if (m_searchEdit) {
+                    m_searchEdit->setFocus();
+                    m_searchEdit->selectAll();
+                }
             }
         }
     });

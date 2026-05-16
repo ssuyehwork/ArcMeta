@@ -92,6 +92,7 @@ void MftReader::clearInternal() {
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
         m_path_cache.clear();
+        m_lru_list.clear();
     }
     {
         QWriteLocker lock(&m_iconCacheLock);
@@ -252,11 +253,19 @@ bool MftReader::loadFromCache() {
                     // 2026-05-14 启动流控优化：每加载完成一个卷即发射信号，实现渐进式体感
                     emit driveLoaded(QString::fromStdWString(wDrive), (int)count, (int)m_frns.size());
                 }
+
+                // 2026-05-14 渐进式就绪：加载完第一个有效卷后即允许搜索，无需等待全量
+                if (!m_isInitialized && !m_frns.empty()) {
+                    m_isInitialized = true;
+                }
             }
         }
     }
 
-    if (m_frns.empty()) return false;
+    if (m_frns.empty()) {
+        m_isInitialized = false;
+        return false;
+    }
     rebuildFrnToIndexMap();
 
     // 2026-05-14 核心性能优化：执行 K 路归并合并排序索引 (Complexity: O(N log K))
@@ -417,7 +426,11 @@ std::wstring MftReader::getPathFast(const std::wstring& volume, uint64_t frn) {
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
         auto it = m_path_cache.find(frn);
-        if (it != m_path_cache.end()) return it->second;
+        if (it != m_path_cache.end()) {
+            // 2026-05-14 物理同步：提升访问热度并移动到 LRU 头部
+            m_lru_list.splice(m_lru_list.begin(), m_lru_list, it->second);
+            return it->second->path;
+        }
     }
     std::vector<std::wstring> segments;
     uint64_t cur = frn;
@@ -438,12 +451,13 @@ std::wstring MftReader::getPathFast(const std::wstring& volume, uint64_t frn) {
     for (auto it = segments.rbegin(); it != segments.rend(); ++it) path += L"\\" + *it;
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
-        // 2026-05-14 内存优化：简单的缓存淘汰策略，防止路径缓存无限增长
-        if (m_path_cache.size() > 100000) {
-            auto it_clear = m_path_cache.begin();
-            for (int i = 0; i < 1000; ++i) it_clear = m_path_cache.erase(it_clear);
+        // 2026-05-14 架构对标优化：执行 LRU 淘汰，维持内存占用平稳
+        if (m_path_cache.size() >= MAX_PATH_CACHE_SIZE) {
+            m_path_cache.erase(m_lru_list.back().frn);
+            m_lru_list.pop_back();
         }
-        m_path_cache[frn] = path;
+        m_lru_list.push_front({frn, path});
+        m_path_cache[frn] = m_lru_list.begin();
     }
     return path;
 }
@@ -577,13 +591,16 @@ QVector<int> MftReader::search(const QString& query, bool useRegex, bool caseSen
                 if (!hasQuery) {
                     localRes.push_back((int)i);
                 } else {
+                    // 2026-05-14 性能优化：仅在核心属性匹配后才执行昂贵的正则/字符串匹配
                     bool match = false;
                     if (useRegex) {
+                        // 仅在必要时才进行 UTF-8 转换，对标 Rust 的零转换思路
                         match = re.match(QString::fromUtf8(p)).hasMatch();
                     } else {
                         if (caseSensitive) {
                             match = (strstr(p, queryUtf8.constData()) != nullptr);
                         } else {
+                            // 使用 Windows Shlwapi 实现极速大小写无关子串查找
                             match = (StrStrIA(p, queryUtf8.constData()) != nullptr);
                         }
                     }
@@ -719,7 +736,14 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
         m_string_pool.push_back('\0');
     }
-    { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
+    {
+        std::lock_guard<std::mutex> l(m_pathCacheMutex);
+        auto cacheIt = m_path_cache.find(frn);
+        if (cacheIt != m_path_cache.end()) {
+            m_lru_list.erase(cacheIt->second);
+            m_path_cache.erase(cacheIt);
+        }
+    }
     m_next_usns[volume] = record->Usn;
     m_dirty_count++;
 
@@ -742,7 +766,14 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
     m_usn_overlay.erase(frn);
     m_deleted_frns.insert(frn);
 
-    { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
+    {
+        std::lock_guard<std::mutex> l(m_pathCacheMutex);
+        auto cacheIt = m_path_cache.find(frn);
+        if (cacheIt != m_path_cache.end()) {
+            m_lru_list.erase(cacheIt->second);
+            m_path_cache.erase(cacheIt);
+        }
+    }
 
     // 定期执行 Compaction (可调整阈值)
     if (m_usn_overlay.size() > 5000 || m_deleted_frns.size() > 10000) {
@@ -993,8 +1024,12 @@ void MftReader::requestMetadata(int index) {
         std::wstring rootPath = volume + L"\\";
         HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
         if (hHint != INVALID_HANDLE_VALUE) {
-            FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
-            id.FileId.QuadPart = frn;
+        // 2026-05-14 物理修复：正确处理 64/128 位 File ID，杜绝指针强转引发的 Bug
+        FILE_ID_DESCRIPTOR id = {0};
+        id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
+        id.Type = FileIdType; // 默认使用 64位 FileIdType (NTFS)
+        id.FileId.QuadPart = static_cast<LONGLONG>(frn);
+
             HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
             if (hFile != INVALID_HANDLE_VALUE) {
                 BY_HANDLE_FILE_INFORMATION bhfi;

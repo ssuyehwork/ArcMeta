@@ -9,6 +9,7 @@
 #include <QReadWriteLock>
 #include <vector>
 #include <string>
+#include <list>
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
@@ -138,7 +139,11 @@ private:
     std::unordered_set<uint64_t>               m_deleted_frns;
     mutable QReadWriteLock m_overlayLock;
 
-    mutable std::unordered_map<uint64_t, std::wstring>  m_path_cache;
+    // 2026-05-14 架构对标：实现 LRU 淘汰策略的路径缓存
+    struct LruNode { uint64_t frn; std::wstring path; };
+    mutable std::list<LruNode> m_lru_list;
+    mutable std::unordered_map<uint64_t, std::list<LruNode>::iterator> m_path_cache;
+    const size_t MAX_PATH_CACHE_SIZE = 100000;
     mutable std::mutex m_pathCacheMutex;
 
     std::unordered_map<std::wstring, uint64_t>          m_next_usns;
