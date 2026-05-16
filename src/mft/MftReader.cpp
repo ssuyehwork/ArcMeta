@@ -914,7 +914,7 @@ void MftReader::requestMetadata(int index) {
     std::wstring volume = m_drive_list[dIdx];
     writeLock.unlock();
 
-    QtConcurrent::run([this, index, frn, volume]() {
+    (void)QtConcurrent::run([this, index, frn, volume]() {
         std::wstring rootPath = volume + L"\\";
         HANDLE hHint = CreateFileW(rootPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
         if (hHint == INVALID_HANDLE_VALUE) {

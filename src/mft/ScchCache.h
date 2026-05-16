@@ -24,11 +24,11 @@ struct ScchHeader {
     uint64_t sorted_indices_count; // 2026-05-14 新增：持久化排序索引
     uint32_t crc32;              // 头部之后所有字节的 CRC32
     uint32_t flags;              // 保留，写 0
-    // 总计 48 字节，对齐友好
+    // 总计 56 字节，对齐友好
 };
 #pragma pack(pop)
 
-static_assert(sizeof(ScchHeader) == 48, "ScchHeader size mismatch");
+static_assert(sizeof(ScchHeader) == 56, "ScchHeader size mismatch");
 
 struct ScchUsnEntry {
     char     drive[4];           // e.g. "C:\0"
