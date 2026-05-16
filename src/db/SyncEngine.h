@@ -20,7 +20,7 @@ public:
     /**
      * @brief 启动增量同步：处理 Synchronize.json 中的待处理目录
      */
-    void runIncrementalSync();
+    void runIncrementalSync(std::function<void()> onFinished = nullptr);
 
     /**
      * @brief 检查是否有待处理的同步任务

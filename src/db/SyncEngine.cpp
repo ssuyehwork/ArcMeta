@@ -98,14 +98,17 @@ SyncEngine& SyncEngine::instance() {
     return inst;
 }
 
-void SyncEngine::runIncrementalSync() {
+void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
     auto& mgr = MetadataManager::instance();
-    if (!mgr.hasPendingSync()) return;
+    if (!mgr.hasPendingSync()) {
+        if (onFinished) onFinished();
+        return;
+    }
 
     emit syncStatusChanged(true);
 
     // 2026-06-16 按照用户要求：从事务日志读取 FID -> 同步物理 JSON 到数据库 -> 核实后清空
-    (void)QtConcurrent::run([this]() {
+    (void)QtConcurrent::run([this, onFinished]() {
         auto& mgr = MetadataManager::instance();
         QStringList pendingFids = mgr.getPendingSyncDirs();
         QStringList remainingFids;
@@ -180,8 +183,9 @@ void SyncEngine::runIncrementalSync() {
 
         qDebug() << "[Sync] 对账同步结束，剩余任务:" << remainingFids.size();
         
-        QMetaObject::invokeMethod(this, [this]() {
+        QMetaObject::invokeMethod(this, [this, onFinished]() {
             emit syncStatusChanged(false);
+            if (onFinished) onFinished();
         }, Qt::QueuedConnection);
     });
 }

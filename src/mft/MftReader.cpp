@@ -256,6 +256,9 @@ bool MftReader::loadFromCache() {
                     std::wstring wDrive = QString::fromStdString(drive).toStdWString();
                     m_drive_list.push_back(wDrive);
                     m_next_usns[wDrive] = usn;
+
+                    // 2026-05-14 启动流控优化：每加载完成一个卷即发射信号，实现渐进式体感
+                    emit driveLoaded(QString::fromStdWString(wDrive), (int)count, (int)m_frns.size());
                 }
             }
         }
@@ -925,39 +928,51 @@ void MftReader::requestMetadata(int index) {
     writeLock.unlock();
 
     (void)QtConcurrent::run([this, index, frn, volume]() {
-        std::wstring rootPath = volume + L"\\";
-        // 2026-05-14 核心修正：降级权限至 FILE_READ_ATTRIBUTES，杜绝 GENERIC_READ 导致的“共享违规”错误
-        // 这解决了与 Explorer、Photoshop 等正在占用文件的进程冲突的问题
-        HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-        if (hHint == INVALID_HANDLE_VALUE) {
+        // 2026-05-14 极致性能重构：对标 Rust 原版，采用 API 分级拉取策略
+        // 1. 优先使用 GetFileAttributesExW (不涉及文件句柄，非侵入式，性能极高)
+        QString fullPath = getFullPath(index);
+        WIN32_FILE_ATTRIBUTE_DATA attrData;
+        if (GetFileAttributesExW(reinterpret_cast<const wchar_t*>(fullPath.utf16()), GetFileExInfoStandard, &attrData)) {
             QWriteLocker lock(&m_dataLock);
-            if (index < (int)m_metadata_fetched.size()) m_metadata_fetched[index] = 0;
-            return;
-        }
-
-        FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
-        id.FileId.QuadPart = frn;
-
-        HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
-        if (hFile != INVALID_HANDLE_VALUE) {
-            BY_HANDLE_FILE_INFORMATION bhfi;
-            if (GetFileInformationByHandle(hFile, &bhfi)) {
-                QWriteLocker writeLock(&m_dataLock);
-                if (index < (int)m_frns.size() && m_frns[index] == frn) {
-                    m_sizes[index] = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
-                    m_timestamps[index] = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
-                    m_attributes[index] = bhfi.dwFileAttributes;
-                    m_metadata_fetched[index] = 2; // 已完成
-                }
+            if (index < (int)m_frns.size() && m_frns[index] == frn) {
+                m_sizes[index] = (static_cast<uint64_t>(attrData.nFileSizeHigh) << 32) | attrData.nFileSizeLow;
+                m_timestamps[index] = filetimeToUnixMs((static_cast<int64_t>(attrData.ftLastWriteTime.dwHighDateTime) << 32) | attrData.ftLastWriteTime.dwLowDateTime);
+                m_attributes[index] = attrData.dwFileAttributes;
+                m_metadata_fetched[index] = 2;
+                lock.unlock();
+                emit dataChanged(index);
+                return;
             }
-            CloseHandle(hFile);
-        } else {
-            QWriteLocker lock(&m_dataLock);
-            if (index < (int)m_metadata_fetched.size()) m_metadata_fetched[index] = 0;
         }
-        CloseHandle(hHint);
-        
-        // 2026-05-14 性能优化：触发局部模型刷新，避免百万行全量重绘
+
+        // 2. 退化方案：对于特殊文件（如被独占锁定但允许属性读取的文件），使用 OpenFileById
+        std::wstring rootPath = volume + L"\\";
+        HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        if (hHint != INVALID_HANDLE_VALUE) {
+            FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
+            id.FileId.QuadPart = frn;
+            HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
+            if (hFile != INVALID_HANDLE_VALUE) {
+                BY_HANDLE_FILE_INFORMATION bhfi;
+                if (GetFileInformationByHandle(hFile, &bhfi)) {
+                    QWriteLocker writeLock(&m_dataLock);
+                    if (index < (int)m_frns.size() && m_frns[index] == frn) {
+                        m_sizes[index] = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
+                        m_timestamps[index] = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
+                        m_attributes[index] = bhfi.dwFileAttributes;
+                        m_metadata_fetched[index] = 2;
+                    }
+                }
+                CloseHandle(hFile);
+            }
+            CloseHandle(hHint);
+        }
+
+        QWriteLocker lock(&m_dataLock);
+        if (index < (int)m_metadata_fetched.size() && m_metadata_fetched[index] == 1) {
+            if (m_metadata_fetched[index] != 2) m_metadata_fetched[index] = 0;
+        }
+        lock.unlock();
         emit dataChanged(index); 
     });
 }
