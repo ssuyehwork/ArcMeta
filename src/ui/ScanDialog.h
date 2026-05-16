@@ -152,6 +152,8 @@ private:
 
     std::unique_ptr<CacheManager> m_cacheManager;
     ScanConfig m_config;
+
+    QSet<QString> m_loadingDrives; // 2026-05-14 新增：记录处于加载/归并状态的盘符
 };
 
 } // namespace ArcMeta

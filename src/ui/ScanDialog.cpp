@@ -324,6 +324,15 @@ ScanDialog::ScanDialog(QWidget* parent)
 
     setupUi();
 
+    // 2026-05-14 物理同步：监听分卷加载信号，实现“渐进式复色”
+    connect(&MftReader::instance(), &MftReader::driveLoaded, this, [this](const QString& drive, int /*count*/, int /*total*/) {
+        QString letter = drive;
+        if (letter.endsWith("\\") || letter.endsWith("/")) letter.resize(letter.size() - 1);
+
+        m_loadingDrives.remove(letter);
+        updateDriveButtonStyles();
+    });
+
     QTimer::singleShot(100, this, [this]() {
         updateStatus("正在载入本地快照...");
         QPointer<ScanDialog> weakThis(this);
@@ -335,9 +344,20 @@ ScanDialog::ScanDialog(QWidget* parent)
                     weakThis->updateStatus("就绪");
                     weakThis->m_tableModel->setFilterText("");
                     weakThis->refreshDriveList(true); // 后台探测硬件
+
+                    // 2026-05-14 物理同步：快照加载任务完成后，确保所有已索引的盘符脱离 Loading 状态
+                    for (const QString& d : weakThis->m_driveButtonMap.keys()) {
+                        if (MftReader::instance().isDriveIndexed(d)) {
+                            weakThis->m_loadingDrives.remove(d);
+                        }
+                    }
+                    weakThis->updateDriveButtonStyles();
                 } else {
                     weakThis->updateStatus("未检测到快照，全自动初始化...");
                     weakThis->refreshDriveList(true);
+                    // 2026-05-14 容错修复：进入实时扫描模式后，强制清空加载状态队列以恢复 UI 交互
+                    weakThis->m_loadingDrives.clear();
+                    weakThis->updateDriveButtonStyles();
                     weakThis->onStartScan();
                 }
             });
@@ -566,6 +586,9 @@ void ScanDialog::refreshDriveList(bool forceProbe) {
                 if (!info.hasMedia || !info.isNtfs) continue;
                 if (weakThis->m_config.ignoredDrives.contains(info.letter)) continue;
 
+                // 2026-05-14 物理同步：初始化时默认所有 NTFS 卷均处于“正在探测/载入”状态
+                weakThis->m_loadingDrives.insert(info.letter);
+
                 QString label = info.label.isEmpty() ? "本地磁盘" : info.label;
                 QString btnText = QString("%1 (%2)").arg(info.letter).arg(label);
                 
@@ -621,10 +644,21 @@ void ScanDialog::updateDriveButtonStyles() {
     for (auto it = m_driveButtonMap.begin(); it != m_driveButtonMap.end(); ++it) {
         bool isActive = m_config.activeDrives.contains(it.key());
         bool isDefault = m_config.defaultDrives.contains(it.key());
+        bool isLoading = m_loadingDrives.contains(it.key());
+
         it.value()->setChecked(isActive);
+        it.value()->setEnabled(!isLoading); // 加载时禁用交互
+
+        QString style;
+        if (isLoading) {
+            // 2026-05-14 视觉对标：加载缓存过程中显示为灰色，消除交互歧义
+            style = "QPushButton { background: #1a1a1a; color: #444; border: 1px solid #333; padding: 0 10px; font-size: 12px; }";
+        } else if (isActive) {
+            style = "QPushButton { background: rgba(255, 140, 0, 30); color: #FF8C00; border: 1px solid #FF8C00; padding: 0 10px; font-size: 12px; font-weight: bold; }";
+        } else {
+            style = "QPushButton { background: #111519; color: #7A8F9E; border: 1px solid #252E37; padding: 0 10px; font-size: 12px; }";
+        }
         
-        QString style = isActive ? "QPushButton { background: rgba(255, 140, 0, 30); color: #FF8C00; border: 1px solid #FF8C00; padding: 0 10px; font-size: 12px; font-weight: bold; }" 
-                                 : "QPushButton { background: #111519; color: #7A8F9E; border: 1px solid #252E37; padding: 0 10px; font-size: 12px; }";
         it.value()->setStyleSheet(style);
         
         QString label = "";
