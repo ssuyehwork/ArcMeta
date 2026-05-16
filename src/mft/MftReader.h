@@ -123,8 +123,10 @@ private:
     std::vector<std::wstring> m_drive_list;
     std::atomic<uint32_t>     m_drive_active_mask{0}; // 驱动器过滤掩码 (位图)
 
-    std::unordered_map<uint64_t, uint32_t>              m_frn_to_idx;
+    // 2026-05-15 物理隔离：按盘符隔离的 FRN 映射表，彻底消除哈希碰撞
+    std::vector<std::unordered_map<uint64_t, uint32_t>> m_frn_to_idx;
 
+    // 2026-05-15 物理隔离：路径缓存也必须带上盘符上下文 (Key: driveIdx << 48 | frn)
     mutable std::unordered_map<uint64_t, std::wstring>  m_path_cache;
     mutable std::mutex m_pathCacheMutex;
 
