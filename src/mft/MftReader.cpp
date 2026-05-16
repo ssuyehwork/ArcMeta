@@ -120,15 +120,26 @@ void MftReader::updateActiveDrives(const QStringList& activeDrives) {
     QReadLocker lock(&m_dataLock);
     for (const QString& d : activeDrives) {
         std::wstring vol = d.toStdWString();
-        if (vol.size() > 2 && vol.back() == L'\\') vol.pop_back();
+        if (vol.size() > 1 && (vol.back() == L'\\' || vol.back() == L'/')) vol.pop_back();
         for (size_t i = 0; i < m_drive_list.size(); ++i) {
-            if (m_drive_list[i] == vol) {
+            if (_wcsicmp(m_drive_list[i].c_str(), vol.c_str()) == 0) {
                 mask |= (1 << i);
                 break;
             }
         }
     }
     m_drive_active_mask.store(mask, std::memory_order_relaxed);
+}
+
+bool MftReader::isDriveIndexed(const QString& drive) {
+    std::wstring vol = drive.toStdWString();
+    if (vol.size() > 1 && (vol.back() == L'\\' || vol.back() == L'/')) vol.pop_back();
+
+    QReadLocker lock(&m_dataLock);
+    for (const auto& indexedVol : m_drive_list) {
+        if (_wcsicmp(indexedVol.c_str(), vol.c_str()) == 0) return true;
+    }
+    return false;
 }
 
 void MftReader::buildIndex(const QStringList& drives) {
@@ -139,11 +150,25 @@ void MftReader::buildIndex(const QStringList& drives) {
         QReadLocker lock(&m_dataLock);
         for (const QString& d : drives) {
             std::wstring vol = d.toStdWString();
-            if (vol.size() > 2 && vol.back() == L'\\') vol.pop_back();
-            if (std::find(m_drive_list.begin(), m_drive_list.end(), vol) == m_drive_list.end()) {
+            if (vol.size() > 1 && (vol.back() == L'\\' || vol.back() == L'/')) vol.pop_back();
+
+            bool found = false;
+            for (const auto& indexedVol : m_drive_list) {
+                if (_wcsicmp(indexedVol.c_str(), vol.c_str()) == 0) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
                 toScan.push_back(vol);
             }
         }
+    }
+
+    if (toScan.empty()) {
+        // 如果没有新盘需要扫描，且已经初始化，则不需要重建索引
+        QReadLocker lock(&m_dataLock);
+        if (m_isInitialized) return;
     }
 
     struct ScannedDrive {
