@@ -757,7 +757,10 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         m_dirty_count = 0;
         saveDriveToCacheInternal(dIdx);
     }
-    int idx = (it != m_frn_to_idx.end()) ? (int)it->second : -1; emit dataChanged(idx);
+
+    // 2026-05-14 架构修正：由于覆盖层架构下新增项不直接对应 SoA 索引，
+    // 此处发送 -1 以通知 UI 进行全量/视图刷新。
+    emit dataChanged(-1);
 }
 
 void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
