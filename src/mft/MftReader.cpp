@@ -267,6 +267,16 @@ bool MftReader::loadFromCache() {
     if (m_frns.empty()) return false;
     rebuildFrnToIndexMap();
 
+    // 2026-05-15 补全：加载缓存后立即启动 USN 追赶，确保数据实时性
+    for (const auto& vol : m_drive_list) {
+        auto it = m_next_usns.find(vol);
+        if (it != m_next_usns.end()) {
+            auto* w = new UsnWatcher(vol, it->second, nullptr);
+            m_watchers.push_back(w);
+            w->start();
+        }
+    }
+
     // 2026-05-14 核心性能优化：执行 K 路归并合并排序索引 (Complexity: O(N log K))
     // 这取代了耗时的 O(N log N) 全量排序，是 C++ 找回极致性能的关键
     if (!allSortedIndices.empty()) {
@@ -417,41 +427,60 @@ QString MftReader::getFullPath(int index) const {
     if (index < 0 || index >= (int)m_frns.size()) return QString();
     uint64_t frn = m_frns[index];
     size_t dIdx = static_cast<size_t>(m_parent_frns[index] >> 48);
-    std::wstring vol = (dIdx < m_drive_list.size()) ? m_drive_list[dIdx] : L"C:";
-    return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(vol, frn));
+    return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(dIdx, frn));
 }
 
-std::wstring MftReader::getPathFast(const std::wstring& volume, uint64_t frn) {
+std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
+    if (driveIdx >= m_drive_list.size()) return L"";
+    const std::wstring& volume = m_drive_list[driveIdx];
+    uint64_t cacheKey = (static_cast<uint64_t>(driveIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
+
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
-        auto it = m_path_cache.find(frn);
+        auto it = m_path_cache.find(cacheKey);
         if (it != m_path_cache.end()) return it->second;
     }
+
+    if (driveIdx >= m_frn_to_idx.size()) return volume;
+
     std::vector<std::wstring> segments;
     uint64_t cur = frn;
     std::unordered_set<uint64_t> vis;
+    auto& current_map = m_frn_to_idx[driveIdx];
+
     while (true) {
-        auto idxIt = m_frn_to_idx.find(cur);
-        if (idxIt == m_frn_to_idx.end() || vis.count(cur)) break;
+        auto idxIt = current_map.find(cur);
+        if (idxIt == current_map.end() || vis.count(cur)) break;
         vis.insert(cur);
         uint32_t idx = idxIt->second;
+
+        // 校验：确保该条目确实属于当前盘符 (防御性编程)
+        if (static_cast<size_t>(m_parent_frns[idx] >> 48) != driveIdx) break;
+
         const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
         segments.push_back(QString::fromUtf8(p).toStdWString());
+
         uint64_t parent = m_parent_frns[idx] & 0x0000FFFFFFFFFFFFull;
         if (parent == 5 || parent == cur || parent == 0) break;
         cur = parent;
     }
-    if (segments.empty()) return L"";
+
     std::wstring path = volume;
-    for (auto it = segments.rbegin(); it != segments.rend(); ++it) path += L"\\" + *it;
+    if (segments.empty()) {
+        if (frn != 5) path += L"\\<unknown>";
+    } else {
+        for (auto it = segments.rbegin(); it != segments.rend(); ++it) {
+            path += L"\\" + *it;
+        }
+    }
+
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
-        // 2026-05-14 内存优化：简单的缓存淘汰策略，防止路径缓存无限增长
         if (m_path_cache.size() > 100000) {
             auto it_clear = m_path_cache.begin();
             for (int i = 0; i < 1000; ++i) it_clear = m_path_cache.erase(it_clear);
         }
-        m_path_cache[frn] = path;
+        m_path_cache[cacheKey] = path;
     }
     return path;
 }
@@ -660,8 +689,11 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     size_t dIdx = 0;
     for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
     uint64_t encodedPf = (static_cast<uint64_t>(dIdx) << 48) | (parentFrn & 0x0000FFFFFFFFFFFFull);
-    auto it = m_frn_to_idx.find(frn);
-    if (it != m_frn_to_idx.end()) {
+
+    if (dIdx >= m_frn_to_idx.size()) m_frn_to_idx.resize(dIdx + 1);
+    auto& current_map = m_frn_to_idx[dIdx];
+    auto it = current_map.find(frn);
+    if (it != current_map.end()) {
         uint32_t idx = it->second;
         m_parent_frns[idx] = encodedPf;
         m_attributes[idx] = finalAttr;
@@ -697,9 +729,12 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         m_name_offsets.push_back((uint32_t)m_string_pool.size());
         m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
         m_string_pool.push_back('\0');
-        m_frn_to_idx[frn] = newIdx;
+        current_map[frn] = newIdx;
     }
-    { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
+    {
+        std::lock_guard<std::mutex> l(m_pathCacheMutex);
+        m_path_cache.erase((static_cast<uint64_t>(dIdx) << 48) | frn);
+    }
     m_next_usns[volume] = record->Usn;
     m_dirty_count++;
     
@@ -713,22 +748,30 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         m_dirty_count = 0; 
         saveDriveToCacheInternal(dIdx); 
     }
-    int idx = (it != m_frn_to_idx.end()) ? (int)it->second : -1; emit dataChanged(idx);
+    int idx = (it != current_map.end()) ? (int)it->second : -1; emit dataChanged(idx);
 }
 
 void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
-    Q_UNUSED(volume);
     QWriteLocker lock(&m_dataLock);
-    auto it = m_frn_to_idx.find(frn);
-    if (it != m_frn_to_idx.end()) {
+    size_t dIdx = 0;
+    bool foundDrive = false;
+    for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; foundDrive = true; break; } }
+    if (!foundDrive || dIdx >= m_frn_to_idx.size()) return;
+
+    auto& current_map = m_frn_to_idx[dIdx];
+    auto it = current_map.find(frn);
+    if (it != current_map.end()) {
         uint32_t idx = it->second;
         m_frns[idx] = 0;
-        m_frn_to_idx.erase(it);
+        current_map.erase(it);
         m_dead_count++;
         const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
         m_wasted_string_bytes += (strlen(p) + 1);
         
-        { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
+        {
+            std::lock_guard<std::mutex> l(m_pathCacheMutex);
+            m_path_cache.erase((static_cast<uint64_t>(dIdx) << 48) | frn);
+        }
         
         if (m_dead_count > 50000 || m_wasted_string_bytes > 10 * 1024 * 1024) {
             compact();
@@ -759,12 +802,8 @@ void MftReader::compact() {
     new_metadata_fetched.reserve(count - m_dead_count);
     new_string_pool.reserve(m_string_pool.size() - m_wasted_string_bytes);
 
-    m_frn_to_idx.clear();
     for (size_t i = 0; i < count; ++i) {
         if (m_frns[i] == 0) continue;
-        
-        uint32_t newIdx = (uint32_t)new_frns.size();
-        m_frn_to_idx[m_frns[i]] = newIdx;
         
         new_frns.push_back(m_frns[i]);
         new_parent_frns.push_back(m_parent_frns[i]);
@@ -890,10 +929,16 @@ void MftReader::mergeDriveResult(const std::wstring& volume, const MftReader::Dr
 }
 
 void MftReader::rebuildFrnToIndexMap() {
-    m_frn_to_idx.clear();
+    for (auto& map : m_frn_to_idx) map.clear();
+    if (m_frn_to_idx.size() < m_drive_list.size()) {
+        m_frn_to_idx.resize(m_drive_list.size());
+    }
     for (size_t i = 0; i < m_frns.size(); ++i) {
         if (m_frns[i] != 0) {
-            m_frn_to_idx[m_frns[i]] = (uint32_t)i;
+            size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
+            if (dIdx < m_frn_to_idx.size()) {
+                m_frn_to_idx[dIdx][m_frns[i]] = (uint32_t)i;
+            }
         }
     }
 }
@@ -914,7 +959,7 @@ void MftReader::requestMetadata(int index) {
     QWriteLocker writeLock(&m_dataLock);
     if (index < 0 || index >= (int)m_frns.size() || m_frns[index] == 0) return;
     
-    // 状态机：0-未获取, 1-拉取中, 2-已完成
+    // 状态机：0-未获取, 1-拉取中, 2-已完成, 3-获取失败
     if (m_metadata_fetched[index] != 0) return; 
     m_metadata_fetched[index] = 1; // 标记为拉取中，防止重复触发并发任务
 
@@ -970,7 +1015,8 @@ void MftReader::requestMetadata(int index) {
 
         QWriteLocker lock(&m_dataLock);
         if (index < (int)m_metadata_fetched.size() && m_metadata_fetched[index] == 1) {
-            if (m_metadata_fetched[index] != 2) m_metadata_fetched[index] = 0; 
+            // 2026-05-15 闭环管理：拉取失败后标记为 3，防止 UI 重绘导致的无限循环请求
+            if (m_metadata_fetched[index] != 2) m_metadata_fetched[index] = 3;
         }
         lock.unlock();
         emit dataChanged(index); 
