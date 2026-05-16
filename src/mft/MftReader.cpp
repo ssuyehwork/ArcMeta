@@ -417,41 +417,50 @@ QString MftReader::getFullPath(int index) const {
     if (index < 0 || index >= (int)m_frns.size()) return QString();
     uint64_t frn = m_frns[index];
     size_t dIdx = static_cast<size_t>(m_parent_frns[index] >> 48);
-    std::wstring vol = (dIdx < m_drive_list.size()) ? m_drive_list[dIdx] : L"C:";
-    return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(vol, frn));
+    return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(dIdx, frn));
 }
 
-std::wstring MftReader::getPathFast(const std::wstring& volume, uint64_t frn) {
+std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
+    // 2026-05-16 核心修正：使用复合 Key (driveIdx << 48 | 48位FRN) 解决多盘符冲突与序列号匹配失效
+    uint64_t compositeKey = (static_cast<uint64_t>(driveIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
+
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
-        auto it = m_path_cache.find(frn);
+        auto it = m_path_cache.find(compositeKey);
         if (it != m_path_cache.end()) return it->second;
     }
+
     std::vector<std::wstring> segments;
     uint64_t cur = frn;
     std::unordered_set<uint64_t> vis;
     while (true) {
-        auto idxIt = m_frn_to_idx.find(cur);
+        uint64_t curKey = (static_cast<uint64_t>(driveIdx) << 48) | (cur & 0x0000FFFFFFFFFFFFull);
+        auto idxIt = m_frn_to_idx.find(curKey);
         if (idxIt == m_frn_to_idx.end() || vis.count(cur)) break;
         vis.insert(cur);
+
         uint32_t idx = idxIt->second;
         const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
         segments.push_back(QString::fromUtf8(p).toStdWString());
+
         uint64_t parent = m_parent_frns[idx] & 0x0000FFFFFFFFFFFFull;
         if (parent == 5 || parent == cur || parent == 0) break;
         cur = parent;
     }
+
     if (segments.empty()) return L"";
+
+    std::wstring volume = (driveIdx < m_drive_list.size()) ? m_drive_list[driveIdx] : L"C:";
     std::wstring path = volume;
     for (auto it = segments.rbegin(); it != segments.rend(); ++it) path += L"\\" + *it;
+
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
-        // 2026-05-14 内存优化：简单的缓存淘汰策略，防止路径缓存无限增长
-        if (m_path_cache.size() > 100000) {
+        if (m_path_cache.size() > 200000) { // 2026-05-16 扩容路径缓存以提升深度目录渲染性能
             auto it_clear = m_path_cache.begin();
-            for (int i = 0; i < 1000; ++i) it_clear = m_path_cache.erase(it_clear);
+            for (int i = 0; i < 2000; ++i) it_clear = m_path_cache.erase(it_clear);
         }
-        m_path_cache[frn] = path;
+        m_path_cache[compositeKey] = path;
     }
     return path;
 }
@@ -660,7 +669,8 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     size_t dIdx = 0;
     for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
     uint64_t encodedPf = (static_cast<uint64_t>(dIdx) << 48) | (parentFrn & 0x0000FFFFFFFFFFFFull);
-    auto it = m_frn_to_idx.find(frn);
+    uint64_t compositeKey = (static_cast<uint64_t>(dIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
+    auto it = m_frn_to_idx.find(compositeKey);
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
         m_parent_frns[idx] = encodedPf;
@@ -697,9 +707,9 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         m_name_offsets.push_back((uint32_t)m_string_pool.size());
         m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
         m_string_pool.push_back('\0');
-        m_frn_to_idx[frn] = newIdx;
+        m_frn_to_idx[compositeKey] = newIdx;
     }
-    { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
+    { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
     m_next_usns[volume] = record->Usn;
     m_dirty_count++;
     
@@ -717,9 +727,12 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
 }
 
 void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
-    Q_UNUSED(volume);
     QWriteLocker lock(&m_dataLock);
-    auto it = m_frn_to_idx.find(frn);
+    size_t dIdx = 0;
+    for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
+    uint64_t compositeKey = (static_cast<uint64_t>(dIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
+
+    auto it = m_frn_to_idx.find(compositeKey);
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
         m_frns[idx] = 0;
@@ -728,7 +741,7 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
         const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
         m_wasted_string_bytes += (strlen(p) + 1);
         
-        { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
+        { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
         
         if (m_dead_count > 50000 || m_wasted_string_bytes > 10 * 1024 * 1024) {
             compact();
@@ -893,7 +906,9 @@ void MftReader::rebuildFrnToIndexMap() {
     m_frn_to_idx.clear();
     for (size_t i = 0; i < m_frns.size(); ++i) {
         if (m_frns[i] != 0) {
-            m_frn_to_idx[m_frns[i]] = (uint32_t)i;
+            size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
+            uint64_t key = (static_cast<uint64_t>(dIdx) << 48) | (m_frns[i] & 0x0000FFFFFFFFFFFFull);
+            m_frn_to_idx[key] = (uint32_t)i;
         }
     }
 }

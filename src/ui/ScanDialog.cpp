@@ -80,6 +80,12 @@ void ScanConfig::load() {
         for (const auto& v : qArr) queryHistory.append(v.toString());
         QJsonArray eArr = obj["extHistory"].toArray();
         for (const auto& v : eArr) extHistory.append(v.toString());
+        
+        // 2026-05-16 持久化加载：视图、图标尺寸与排序规则
+        if (obj.contains("viewMode")) viewMode = obj["viewMode"].toInt();
+        if (obj.contains("iconSize")) iconSize = obj["iconSize"].toInt();
+        if (obj.contains("sortColumn")) sortColumn = obj["sortColumn"].toInt();
+        if (obj.contains("sortOrder")) sortOrder = obj["sortOrder"].toInt();
     }
 }
 
@@ -101,6 +107,12 @@ void ScanConfig::save() {
         obj["queryHistory"] = qArr;
         QJsonArray eArr; for (const auto& v : extHistory) eArr.append(v);
         obj["extHistory"] = eArr;
+        
+        // 2026-05-16 持久化存盘
+        obj["viewMode"] = viewMode;
+        obj["iconSize"] = iconSize;
+        obj["sortColumn"] = sortColumn;
+        obj["sortOrder"] = sortOrder;
         
         file.write(QJsonDocument(obj).toJson());
     }
@@ -169,7 +181,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
     int actualIndex = m_filteredIndices[row];
     auto& reader = MftReader::instance();
     
-    if (role == Qt::DisplayRole) {
+    if (role == Qt::DisplayRole || role == Qt::EditRole) {
         switch (index.column()) {
             case 0: return reader.getName(actualIndex);
             case 1: return reader.getFullPath(actualIndex);
@@ -211,6 +223,42 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         return actualIndex;
     }
     return QVariant();
+}
+
+Qt::ItemFlags ScanTableModel::flags(const QModelIndex& index) const {
+    Qt::ItemFlags f = QAbstractTableModel::flags(index);
+    if (index.isValid() && index.column() == 0) {
+        // 2026-05-16 物理对标：仅名称列允许行内编辑
+        f |= Qt::ItemIsEditable;
+    }
+    return f;
+}
+
+bool ScanTableModel::setData(const QModelIndex& index, const QVariant& value, int role) {
+    if (!index.isValid() || role != Qt::EditRole || index.column() != 0) return false;
+    
+    int row = index.row();
+    if (row < 0 || row >= m_filteredIndices.size()) return false;
+    
+    int actualIndex = m_filteredIndices[row];
+    auto& reader = MftReader::instance();
+    
+    QString oldName = reader.getName(actualIndex);
+    QString newName = value.toString().trimmed();
+    if (newName.isEmpty() || newName == oldName) return false;
+    
+    QString oldPath = reader.getFullPath(actualIndex);
+    QFileInfo fi(oldPath);
+    QString newPath = fi.absolutePath() + "/" + newName;
+    
+    if (QFile::rename(oldPath, newPath)) {
+        // 2026-05-16 交互加固：物理重命名后，USN 监听器会捕获事件并自动更新模型。
+        // 我们在此处不需要手动修改内存池，等待系统级同步最为稳健。
+        return true;
+    } else {
+        QMessageBox::warning(nullptr, "重命名失败", "无法重命名文件，请检查文件是否被占用或是否有权限。");
+        return false;
+    }
 }
 
 QVariant ScanTableModel::headerData(int section, Qt::Orientation orientation, int role) const {
@@ -289,6 +337,30 @@ void ScanTableModel::loadMore(int count) {
     endInsertRows();
 }
 
+void ScanTableModel::sort(int column, Qt::SortOrder order) {
+    if (m_filteredIndices.isEmpty()) return;
+    
+    auto& reader = MftReader::instance();
+    // 2026-05-16 物理重排逻辑：基于 MftReader 的 SoA 数据进行异步稳定的排序
+    std::sort(m_filteredIndices.begin(), m_filteredIndices.end(), [&](int a, int b) {
+        bool less = false;
+        switch (column) {
+            case 0: less = QString::compare(reader.getName(a), reader.getName(b), Qt::CaseInsensitive) < 0; break;
+            case 1: less = QString::compare(reader.getFullPath(a), reader.getFullPath(b), Qt::CaseInsensitive) < 0; break;
+            case 2: less = reader.getSize(a) < reader.getSize(b); break;
+            case 3: less = reader.getModifyTime(a) < reader.getModifyTime(b); break;
+            default: return false;
+        }
+        return (order == Qt::AscendingOrder) ? less : !less;
+    });
+    
+    // 重建反向映射表以维持 O(1) 实时同步能力
+    m_actualToRow.clear();
+    for (int i = 0; i < m_filteredIndices.size(); ++i) m_actualToRow[m_filteredIndices[i]] = i;
+    
+    emit dataChanged(index(0, 0), index(rowCount() - 1, columnCount() - 1));
+}
+
 // --- ScanDialog Implementation ---
 
 ScanDialog::ScanDialog(QWidget* parent)
@@ -323,6 +395,31 @@ ScanDialog::ScanDialog(QWidget* parent)
     }
 
     setupUi();
+
+    // --- 2026-05-16 持久化恢复：根据配置恢复视图、尺寸与排序状态 ---
+    m_viewStack->setCurrentIndex(m_config.viewMode);
+    if (m_config.viewMode == 1) { // 图标模式
+        m_iconView->setIconSize(QSize(m_config.iconSize, m_config.iconSize));
+        m_iconView->setGridSize(QSize(m_config.iconSize + 40, m_config.iconSize + 60));
+    }
+    
+    // 恢复排序状态 (同时作用于模型和表头视觉)
+    m_resultView->horizontalHeader()->setSortIndicator(m_config.sortColumn, static_cast<Qt::SortOrder>(m_config.sortOrder));
+    m_tableModel->sort(m_config.sortColumn, static_cast<Qt::SortOrder>(m_config.sortOrder));
+
+    // 2026-05-16 物理重载：断开基类 Qt 置顶逻辑，改用 Win32 原生 SetWindowPos 以实现无损切换
+    if (m_pinBtn) {
+        disconnect(m_pinBtn, &QPushButton::toggled, nullptr, nullptr);
+        connect(m_pinBtn, &QPushButton::toggled, this, [this](bool checked) {
+            m_pinBtn->setIcon(UiHelper::getIcon(checked ? "pin" : "pin_tilted", QColor("#CCCCCC"), 14));
+            HWND hwnd = reinterpret_cast<HWND>(winId());
+            if (checked) {
+                SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            } else {
+                SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            }
+        });
+    }
 
     QTimer::singleShot(100, this, [this]() {
         updateStatus("正在载入本地快照...");
@@ -470,10 +567,42 @@ void ScanDialog::setupUi() {
     connect(m_resultView, &QTableView::customContextMenuRequested, this, &ScanDialog::onCustomContextMenu);
     connect(m_resultView, &QTableView::doubleClicked, this, &ScanDialog::onItemDoubleClicked);
     connect(m_resultView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ScanDialog::onSelectionChanged);
+    
+    // 2026-05-16 交互优化：开启行内编辑触发器 (双击或按F2)
+    m_resultView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
+    
     connect(m_resultView->verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
         if (value >= m_resultView->verticalScrollBar()->maximum() * 0.9) m_tableModel->loadMore(200);
     });
-    mainLayout->addWidget(m_resultView);
+    
+    // --- 2026-05-16 多态视图重构：引入 QStackedWidget 与 QListView (IconMode) ---
+    m_viewStack = new QStackedWidget();
+    m_viewStack->addWidget(m_resultView);
+    
+    m_iconView = new QListView();
+    m_iconView->setModel(m_tableModel);
+    m_iconView->setViewMode(QListView::IconMode);
+    m_iconView->setResizeMode(QListView::Adjust);
+    m_iconView->setMovement(QListView::Static);
+    m_iconView->setSpacing(15);
+    m_iconView->setWordWrap(true);
+    m_iconView->setTextElideMode(Qt::ElideMiddle);
+    m_iconView->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_iconView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
+    m_iconView->setStyleSheet(
+        "QListView { background-color: #1E1E1E; border: 1px solid #333; color: #D4D4D4; outline: none; }"
+        "QListView::item:hover { background-color: #2D2D2D; border-radius: 4px; }"
+        "QListView::item:selected { background-color: #094771; border-radius: 4px; color: #FFFFFF; }"
+    );
+    
+    connect(m_iconView, &QListView::doubleClicked, this, &ScanDialog::onItemDoubleClicked);
+    connect(m_iconView, &QListView::customContextMenuRequested, this, &ScanDialog::onCustomContextMenu);
+    connect(m_iconView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ScanDialog::onSelectionChanged);
+    
+    m_viewStack->addWidget(m_iconView);
+    m_viewStack->setCurrentIndex(0); // 默认详情视图
+    
+    mainLayout->addWidget(m_viewStack);
 
     auto* statusContainer = new QWidget();
     statusContainer->setFixedHeight(26);
@@ -669,90 +798,182 @@ void ScanDialog::onIgnoredDriveContextMenu(const QString& drive, const QPoint& p
 }
 
 void ScanDialog::onCustomContextMenu(const QPoint& pos) {
-    auto selectedRows = m_resultView->selectionModel()->selectedRows();
-    if (selectedRows.isEmpty()) return;
+    QAbstractItemView* activeView = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
+    
+    // 2026-05-16 空间感知修正：优先探测点击位置
+    QModelIndex indexAtPos = activeView->indexAt(pos);
+    QModelIndexList selectedRows;
 
-    QMenu menu(this);
-    menu.setStyleSheet("QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; } QMenu::item:selected { background: #232D37; color: #FFF; }");
-    
-    int count = selectedRows.size();
-    
-    menu.addAction(count > 1 ? "批量打开文件" : "打开文件", [this, selectedRows]() {
-        for (const auto& index : selectedRows) onItemDoubleClicked(index);
-    });
-    
-    menu.addAction("在“资源管理器”中显示", [this, selectedRows]() {
-        QString path = m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 1)).toString();
-        QProcess::startDetached("explorer.exe", {"/select,", QDir::toNativeSeparators(path)});
-    });
-    
-    menu.addSeparator();
-    
-    menu.addAction(count > 1 ? "批量复制路径" : "复制路径", [this, selectedRows]() {
-        QStringList paths;
-        for (const auto& idx : selectedRows) paths << m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
-        QApplication::clipboard()->setText(paths.join("\n"));
-    });
-    
-    menu.addAction(count > 1 ? "批量复制文件名" : "复制文件名", [this, selectedRows]() {
-        QStringList names;
-        for (const auto& idx : selectedRows) names << m_tableModel->data(m_tableModel->index(idx.row(), 0)).toString();
-        QApplication::clipboard()->setText(names.join("\n"));
-    });
-    
-    if (count == 1) {
-        menu.addAction("重命名", this, &ScanDialog::onRenameTriggered);
+    if (indexAtPos.isValid()) {
+        // 1. 点击在项目上：确保该项被选中，并拉取所有选中项用于构建文件操作菜单
+        if (!activeView->selectionModel()->isSelected(indexAtPos)) {
+            activeView->selectionModel()->select(indexAtPos, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        }
+        
+        auto allSelected = activeView->selectionModel()->selectedIndexes();
+        for (const auto& idx : allSelected) {
+            if (idx.column() == 0) selectedRows.append(idx);
+        }
+    } else {
+        // 2. 点击在空白处：清空用于构建菜单的局部索引列表，确保下方 !selectedRows.isEmpty() 判定失败
+        // 注意：这里不清除 view 的真实 selectionModel，仅让菜单表现为“无目标”状态
+        selectedRows.clear();
     }
     
-    menu.addSeparator();
-    
-    menu.addAction(count > 1 ? "批量删除" : "删除", [this, selectedRows]() {
-        QString msg = (selectedRows.size() == 1) ? QString("确定要永久删除 %1 吗？").arg(m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 0)).toString())
-                                               : QString("确定要永久删除选中的 %1 个项目吗？").arg(selectedRows.size());
-        if (QMessageBox::question(this, "确认删除", msg) == QMessageBox::Yes) {
-            for (const auto& idx : selectedRows) {
-                QString path = m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
-                QFile::remove(path);
-            }
-            m_tableModel->triggerSearch();
+    QMenu menu(this);
+    menu.setStyleSheet("QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; } QMenu::item:selected { background: #232D37; color: #FFF; }");
+
+    if (!selectedRows.isEmpty()) {
+        int count = selectedRows.size();
+        menu.addAction(count > 1 ? "批量打开文件" : "打开文件", [this, selectedRows]() {
+            for (const auto& index : selectedRows) onItemDoubleClicked(index);
+        });
+        
+        menu.addAction("在“资源管理器”中显示", [this, selectedRows]() {
+            QString path = m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 1)).toString();
+            QProcess::startDetached("explorer.exe", {"/select,", QDir::toNativeSeparators(path)});
+        });
+        
+        menu.addSeparator();
+        
+        menu.addAction(count > 1 ? "批量复制路径" : "复制路径", [this, selectedRows]() {
+            QStringList paths;
+            for (const auto& idx : selectedRows) paths << m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
+            QApplication::clipboard()->setText(paths.join("\n"));
+        });
+        
+        menu.addAction(count > 1 ? "批量复制文件名" : "复制文件名", [this, selectedRows]() {
+            QStringList names;
+            for (const auto& idx : selectedRows) names << m_tableModel->data(m_tableModel->index(idx.row(), 0)).toString();
+            QApplication::clipboard()->setText(names.join("\n"));
+        });
+        
+        if (count == 1) {
+            menu.addAction("重命名", this, &ScanDialog::onRenameTriggered);
         }
-    });
+        
+        menu.addSeparator();
+        
+        menu.addAction(count > 1 ? "批量删除" : "删除", [this, selectedRows]() {
+            QString msg = (selectedRows.size() == 1) ? QString("确定要永久删除 %1 吗？").arg(m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 0)).toString())
+                                                   : QString("确定要永久删除选中的 %1 个项目吗？").arg(selectedRows.size());
+            if (QMessageBox::question(this, "确认删除", msg) == QMessageBox::Yes) {
+                for (const auto& idx : selectedRows) {
+                    QString path = m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
+                    QFile::remove(path);
+                }
+                m_tableModel->triggerSearch();
+            }
+        });
+        
+        menu.addSeparator();
+        menu.addAction("属性", [this, selectedRows]() {
+            QString path = m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 1)).toString();
+            std::wstring wpath = path.toStdWString();
+            SHELLEXECUTEINFOW sei = { sizeof(sei) };
+            sei.fMask = SEE_MASK_INVOKEIDLIST;
+            sei.lpVerb = L"properties";
+            sei.lpFile = wpath.c_str();
+            sei.nShow = SW_SHOW;
+            ShellExecuteExW(&sei);
+        });
+
+        menu.addSeparator();
+    }
+
+    // --- 2026-05-16 新增：视图、排序、刷新全局功能菜单 ---
     
-    menu.addSeparator();
-    menu.addAction("属性", [this, selectedRows]() {
-        QString path = m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 1)).toString();
-        std::wstring wpath = path.toStdWString();
-        SHELLEXECUTEINFOW sei = { sizeof(sei) };
-        sei.fMask = SEE_MASK_INVOKEIDLIST;
-        sei.lpVerb = L"properties";
-        sei.lpFile = wpath.c_str();
-        sei.nShow = SW_SHOW;
-        ShellExecuteExW(&sei);
+    QMenu* viewMenu = menu.addMenu("视图(V)");
+    QActionGroup* viewGroup = new QActionGroup(this);
+    
+    auto addViewAction = [this, viewMenu, viewGroup](const QString& text, const QString& shortcut, int stackIdx, int iconSize) {
+        QAction* act = viewMenu->addAction(text);
+        act->setShortcut(QKeySequence(shortcut));
+        act->setCheckable(true);
+        viewGroup->addAction(act);
+        connect(act, &QAction::triggered, this, [this, stackIdx, iconSize]() {
+            m_viewStack->setCurrentIndex(stackIdx);
+            m_config.viewMode = stackIdx;
+            if (stackIdx == 1) { // 图标模式
+                m_iconView->setIconSize(QSize(iconSize, iconSize));
+                m_iconView->setGridSize(QSize(iconSize + 40, iconSize + 60));
+                m_config.iconSize = iconSize;
+            }
+            m_config.save();
+        });
+        return act;
+    };
+
+    QAction* xLargeAction = addViewAction("超大图标(X)", "Ctrl+Shift+1", 1, 256);
+    QAction* largeAction = addViewAction("大图标(L)", "Ctrl+Shift+2", 1, 128);
+    QAction* mediumAction = addViewAction("中图标(M)", "Ctrl+Shift+3", 1, 64);
+    
+    viewMenu->addSeparator();
+    
+    QAction* detailsAction = addViewAction("详情(D)", "Ctrl+Shift+6", 0, 0);
+    
+    // 同步当前视图状态
+    if (m_viewStack->currentIndex() == 0) detailsAction->setChecked(true);
+    else {
+        int currentSize = m_iconView->iconSize().width();
+        if (currentSize == 256) xLargeAction->setChecked(true);
+        else if (currentSize == 128) largeAction->setChecked(true);
+        else mediumAction->setChecked(true);
+    }
+    
+    QMenu* sortMenu = menu.addMenu("排序(S)");
+    QStringList sortOptions = {"名称", "路径", "大小", "修改日期"};
+    for (int i = 0; i < sortOptions.size(); ++i) {
+        QAction* act = sortMenu->addAction(sortOptions[i]);
+        connect(act, &QAction::triggered, this, [this, i]() {
+            Qt::SortOrder order = m_resultView->horizontalHeader()->sortIndicatorOrder();
+            m_resultView->sortByColumn(i, order);
+            m_config.sortColumn = i;
+            m_config.sortOrder = static_cast<int>(order);
+            m_config.save();
+        });
+    }
+    sortMenu->addSeparator();
+    QAction* ascAction = sortMenu->addAction("升序(A)");
+    QAction* descAction = sortMenu->addAction("降序(D)");
+    connect(ascAction, &QAction::triggered, this, [this]() { 
+        m_resultView->sortByColumn(m_resultView->horizontalHeader()->sortIndicatorSection(), Qt::AscendingOrder); 
+        m_config.sortOrder = 0;
+        m_config.save();
+    });
+    connect(descAction, &QAction::triggered, this, [this]() { 
+        m_resultView->sortByColumn(m_resultView->horizontalHeader()->sortIndicatorSection(), Qt::DescendingOrder); 
+        m_config.sortOrder = 1;
+        m_config.save();
     });
 
-    menu.exec(m_resultView->viewport()->mapToGlobal(pos));
+    QAction* refreshAction = menu.addAction("刷新(R)");
+    refreshAction->setShortcut(QKeySequence(Qt::Key_F5));
+    connect(refreshAction, &QAction::triggered, this, &ScanDialog::onTriggerSearch);
+
+    QAbstractItemView* view = qobject_cast<QAbstractItemView*>(sender());
+    if (view) menu.exec(view->viewport()->mapToGlobal(pos));
 }
 
 void ScanDialog::onItemDoubleClicked(const QModelIndex& index) {
     if (!index.isValid()) return;
+    
     QString path = m_tableModel->data(m_tableModel->index(index.row(), 1)).toString();
     ShellExecuteW(NULL, L"open", reinterpret_cast<const wchar_t*>(path.utf16()), NULL, NULL, SW_SHOWNORMAL);
 }
 
 void ScanDialog::onSelectionChanged() {
-    auto selectedRows = m_resultView->selectionModel()->selectedRows();
+    auto view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
+    auto selectedRows = view->selectionModel()->selectedRows();
     if (selectedRows.isEmpty()) { m_selectionLabel->clear(); return; }
+    
     int64_t totalSize = 0;
     auto& reader = MftReader::instance();
     for (const auto& index : selectedRows) {
         int actualIdx = m_tableModel->data(index, Qt::UserRole).toInt();
         if (!reader.isDirectory(actualIdx)) totalSize += reader.getSize(actualIdx);
     }
-    QString sizeStr;
-    if (totalSize < 1024) sizeStr = QString("%1 B").arg(totalSize);
-    else if (totalSize < 1024 * 1024) sizeStr = QString("%1 KB").arg(totalSize / 1024.0, 0, 'f', 1);
-    else sizeStr = QString("%1 MB").arg(totalSize / (1024.0 * 1024.0), 0, 'f', 1);
-    m_selectionLabel->setText(QString("已选择 %1 项 | 合计大小: %2").arg(selectedRows.size()).arg(sizeStr));
+    m_selectionLabel->setText(QString("已选择 %1 项 | 合计大小: %2").arg(selectedRows.size()).arg(formatSize(totalSize)));
 }
 
 void ScanDialog::onStartScan() {
@@ -824,7 +1045,8 @@ void ScanDialog::updateStatus(const QString& text, bool scanning) {
 }
 
 void ScanDialog::updateStatusBar() {
-    auto selectedRows = m_resultView->selectionModel()->selectedRows();
+    auto view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
+    auto selectedRows = view->selectionModel()->selectedRows();
     if (selectedRows.size() > 1) {
         m_statLabelMain->hide();
         m_statLabelTime->hide();
@@ -871,29 +1093,34 @@ QString ScanDialog::formatSize(int64_t bytes) {
 }
 
 void ScanDialog::onRenameTriggered() {
-    auto selection = m_resultView->selectionModel()->selectedRows();
+    auto view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
+    auto selection = view->selectionModel()->selectedRows();
     if (selection.isEmpty()) return;
-    int row = selection.first().row();
-    QString oldPath = m_tableModel->data(m_tableModel->index(row, 1)).toString();
-    QString oldName = m_tableModel->data(m_tableModel->index(row, 0)).toString();
     
-    bool ok;
-    QString newName = QInputDialog::getText(this, "重命名", "请输入新名称:", QLineEdit::Normal, oldName, &ok);
-    if (ok && !newName.isEmpty() && newName != oldName) {
-        QFileInfo fi(oldPath);
-        QString newPath = fi.absolutePath() + "/" + newName;
-        if (QFile::rename(oldPath, newPath)) m_tableModel->triggerSearch();
-        else QMessageBox::warning(this, "错误", "重命名失败，请检查文件是否被占用。");
-    }
+    // 2026-05-16 交互进化：触发行内编辑
+    view->edit(selection.first());
 }
 
 void ScanDialog::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_A && event->modifiers() == Qt::ControlModifier) { m_resultView->selectAll(); return; }
+    if (event->key() == Qt::Key_F2) {
+        onRenameTriggered();
+        return;
+    }
+    if (event->key() == Qt::Key_F5) {
+        onTriggerSearch();
+        return;
+    }
+    if (event->key() == Qt::Key_A && event->modifiers() == Qt::ControlModifier) { 
+        auto view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
+        view->selectAll(); 
+        return; 
+    }
     if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
         if (m_searchEdit->hasFocus() || m_extEdit->hasFocus()) {
             onTriggerSearch();
         } else {
-            auto index = m_resultView->currentIndex();
+            auto view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
+            auto index = view->currentIndex();
             if (index.isValid()) onItemDoubleClicked(index);
         }
         return;

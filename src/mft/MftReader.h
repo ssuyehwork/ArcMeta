@@ -82,7 +82,7 @@ public:
     void removeEntryByFrn(const std::wstring& volume, uint64_t frn);
 
 private:
-    std::wstring getPathFast(const std::wstring& volume, uint64_t frn);
+    std::wstring getPathFast(size_t driveIdx, uint64_t frn);
 
     MftReader();
     ~MftReader();

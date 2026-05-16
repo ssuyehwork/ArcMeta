@@ -24,6 +24,9 @@
 #include <QMap>
 #include <QTimer>
 #include <QReadWriteLock>
+#include <QStackedWidget>
+#include <QListView>
+#include <QActionGroup>
 #include <atomic>
 #include <memory>
 
@@ -35,6 +38,11 @@ struct ScanConfig {
     QSet<QString> ignoredDrives;
     QStringList queryHistory;
     QStringList extHistory;
+    
+    int viewMode = 0;   // 0: Details, 1: Icons
+    int iconSize = 128; // 256, 128, 64
+    int sortColumn = 0; 
+    int sortOrder = 0;  // 0: Asc, 1: Desc
 
     void load();
     void save();
@@ -62,11 +70,14 @@ public:
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
+    Qt::ItemFlags flags(const QModelIndex& index) const override;
+    bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
 
     void setFilterText(const QString& text);
     void setFilterState(const ScanFilterState& state);
     void triggerSearch();
     void loadMore(int count = 200);
+    void sort(int column, Qt::SortOrder order = Qt::AscendingOrder) override;
     int totalFilteredCount() const { return m_filteredIndices.size(); }
 
 signals:
@@ -138,6 +149,8 @@ private:
     QWidget* m_driveContainer = nullptr;
     
     QTableView* m_resultView = nullptr;
+    QListView* m_iconView = nullptr;
+    QStackedWidget* m_viewStack = nullptr;
     ScanTableModel* m_tableModel = nullptr;
 
     QLabel* m_titleStatusLabel = nullptr; 
