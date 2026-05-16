@@ -22,6 +22,7 @@
 #include <QHash>
 #include <QSet>
 #include <QMap>
+#include <QTimer>
 #include <QReadWriteLock>
 #include <atomic>
 #include <memory>
@@ -79,6 +80,9 @@ private:
     QString m_filterText;
     ScanFilterState m_filterState;
     QFutureWatcher<QVector<int>> m_filterWatcher;
+    std::unordered_map<int, int> m_actualToRow; // 2026-05-14 新增：O(1) 定位索引
+    QSet<int> m_pendingRows;  // 2026-05-14 信号聚合：待刷新的行号集合
+    QTimer* m_throttleTimer = nullptr;
     int m_displayLimit = 200;
 };
 

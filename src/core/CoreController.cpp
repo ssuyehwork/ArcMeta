@@ -14,7 +14,13 @@ CoreController& CoreController::instance() {
     return inst;
 }
 
-CoreController::CoreController(QObject* parent) : QObject(parent) {}
+CoreController::CoreController(QObject* parent) : QObject(parent) {
+    connect(&MftReader::instance(), &MftReader::driveLoaded, this, [this](const QString& drive, int count, int total) {
+        QMetaObject::invokeMethod(this, [this, drive, count, total]() {
+            setStatus(QString("已加载 %1 (%2/%3)...").arg(drive).arg(count).arg(total), true);
+        }, Qt::QueuedConnection);
+    });
+}
 
 CoreController::~CoreController() {}
 
@@ -52,16 +58,14 @@ void CoreController::startSystem() {
             qDebug() << "[Core] MFT 引擎就位，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
 
             // 3. 执行一次增量对账
-            SyncEngine::instance().runIncrementalSync();
-
-            QMetaObject::invokeMethod(this, [this]() {
-                setStatus("系统就绪", false);
-            }, Qt::QueuedConnection);
-            
-            qDebug() << "[Core] !!! 纯数据库架构初始化就绪，总耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
-            
-            // 2026-04-12 修复：使用 QMetaObject::invokeMethod 确保信号在主线程发出
-            QMetaObject::invokeMethod(this, &CoreController::initializationFinished, Qt::QueuedConnection);
+            // 2026-05-14 架构修正：消除“异步就绪幻觉”，确保对账完成后再宣告就绪
+            SyncEngine::instance().runIncrementalSync([this, startTime]() {
+                QMetaObject::invokeMethod(this, [this, startTime]() {
+                    setStatus("系统就绪", false);
+                    qDebug() << "[Core] !!! 纯数据库架构初始化就绪，总耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
+                    emit initializationFinished();
+                }, Qt::QueuedConnection);
+            });
         } catch (const std::exception& e) {
             qCritical() << "[Core] 初始化过程中发生异常:" << e.what();
             QMetaObject::invokeMethod(this, [this]() {

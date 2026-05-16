@@ -256,6 +256,9 @@ bool MftReader::loadFromCache() {
                     std::wstring wDrive = QString::fromStdString(drive).toStdWString();
                     m_drive_list.push_back(wDrive);
                     m_next_usns[wDrive] = usn;
+                    
+                    // 2026-05-14 启动流控优化：每加载完成一个卷即发射信号，实现渐进式体感
+                    emit driveLoaded(QString::fromStdWString(wDrive), (int)count, (int)m_frns.size());
                 }
             }
         }
@@ -325,7 +328,7 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     std::vector<uint32_t> no, attr, ds;
     std::vector<uint8_t> sp, mf;
     std::unordered_map<uint32_t, uint32_t> offsetMap;
-    std::unordered_map<uint32_t, uint32_t> globalToLocal;
+    std::unordered_map<size_t, uint32_t> globalToLocal; // 2026-05-14 修正：使用 size_t 消除 C4267 警告
 
     for (size_t i = 0; i < m_frns.size(); ++i) {
         if (m_frns[i] != 0 && (m_parent_frns[i] >> 48) == driveIdx) {
@@ -699,7 +702,17 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(frn); }
     m_next_usns[volume] = record->Usn;
     m_dirty_count++;
-    if (m_dirty_count >= 1000) { m_dirty_count = 0; saveDriveToCacheInternal(dIdx); }
+    
+    // 2026-05-14 工业级内存加固：实时监控内存碎片率
+    // 当浪费的字符串空间超过 20MB 或死亡条目过多时，强制执行 compact 碎片整理
+    if (m_wasted_string_bytes > 20 * 1024 * 1024 || m_dead_count > 100000) {
+        compact();
+    }
+
+    if (m_dirty_count >= 1000) { 
+        m_dirty_count = 0; 
+        saveDriveToCacheInternal(dIdx); 
+    }
     int idx = (it != m_frn_to_idx.end()) ? (int)it->second : -1; emit dataChanged(idx);
 }
 
@@ -915,37 +928,51 @@ void MftReader::requestMetadata(int index) {
     writeLock.unlock();
 
     (void)QtConcurrent::run([this, index, frn, volume]() {
-        std::wstring rootPath = volume + L"\\";
-        HANDLE hHint = CreateFileW(rootPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-        if (hHint == INVALID_HANDLE_VALUE) {
+        // 2026-05-14 极致性能重构：对标 Rust 原版，采用 API 分级拉取策略
+        // 1. 优先使用 GetFileAttributesExW (不涉及文件句柄，非侵入式，性能极高)
+        QString fullPath = getFullPath(index);
+        WIN32_FILE_ATTRIBUTE_DATA attrData;
+        if (GetFileAttributesExW(reinterpret_cast<const wchar_t*>(fullPath.utf16()), GetFileExInfoStandard, &attrData)) {
             QWriteLocker lock(&m_dataLock);
-            if (index < (int)m_metadata_fetched.size()) m_metadata_fetched[index] = 0;
-            return;
-        }
-
-        FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
-        id.FileId.QuadPart = frn;
-
-        HANDLE hFile = OpenFileById(hHint, &id, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
-        if (hFile != INVALID_HANDLE_VALUE) {
-            BY_HANDLE_FILE_INFORMATION bhfi;
-            if (GetFileInformationByHandle(hFile, &bhfi)) {
-                QWriteLocker writeLock(&m_dataLock);
-                if (index < (int)m_frns.size() && m_frns[index] == frn) {
-                    m_sizes[index] = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
-                    m_timestamps[index] = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
-                    m_attributes[index] = bhfi.dwFileAttributes;
-                    m_metadata_fetched[index] = 2; // 已完成
-                }
+            if (index < (int)m_frns.size() && m_frns[index] == frn) {
+                m_sizes[index] = (static_cast<uint64_t>(attrData.nFileSizeHigh) << 32) | attrData.nFileSizeLow;
+                m_timestamps[index] = filetimeToUnixMs((static_cast<int64_t>(attrData.ftLastWriteTime.dwHighDateTime) << 32) | attrData.ftLastWriteTime.dwLowDateTime);
+                m_attributes[index] = attrData.dwFileAttributes;
+                m_metadata_fetched[index] = 2;
+                lock.unlock();
+                emit dataChanged(index);
+                return;
             }
-            CloseHandle(hFile);
-        } else {
-            QWriteLocker lock(&m_dataLock);
-            if (index < (int)m_metadata_fetched.size()) m_metadata_fetched[index] = 0;
         }
-        CloseHandle(hHint);
-        
-        // 2026-05-14 性能优化：触发局部模型刷新，避免百万行全量重绘
+
+        // 2. 退化方案：对于特殊文件（如被独占锁定但允许属性读取的文件），使用 OpenFileById
+        std::wstring rootPath = volume + L"\\";
+        HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        if (hHint != INVALID_HANDLE_VALUE) {
+            FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
+            id.FileId.QuadPart = frn;
+            HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
+            if (hFile != INVALID_HANDLE_VALUE) {
+                BY_HANDLE_FILE_INFORMATION bhfi;
+                if (GetFileInformationByHandle(hFile, &bhfi)) {
+                    QWriteLocker writeLock(&m_dataLock);
+                    if (index < (int)m_frns.size() && m_frns[index] == frn) {
+                        m_sizes[index] = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
+                        m_timestamps[index] = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
+                        m_attributes[index] = bhfi.dwFileAttributes;
+                        m_metadata_fetched[index] = 2;
+                    }
+                }
+                CloseHandle(hFile);
+            }
+            CloseHandle(hHint);
+        }
+
+        QWriteLocker lock(&m_dataLock);
+        if (index < (int)m_metadata_fetched.size() && m_metadata_fetched[index] == 1) {
+            if (m_metadata_fetched[index] != 2) m_metadata_fetched[index] = 0; 
+        }
+        lock.unlock();
         emit dataChanged(index); 
     });
 }

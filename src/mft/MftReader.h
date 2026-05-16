@@ -46,6 +46,7 @@ public:
 
 signals:
     void dataChanged(int index = -1);
+    void driveLoaded(const QString& drive, int count, int total); // 2026-05-14 新增：驱动器就绪信号
 
 public:
     // 生命周期管理
