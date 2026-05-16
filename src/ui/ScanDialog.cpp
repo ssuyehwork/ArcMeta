@@ -540,13 +540,32 @@ void ScanDialog::refreshDriveList(bool forceProbe) {
                 
                 connect(btn, &QPushButton::clicked, weakThis.data(), [weakThis, letter = info.letter]() {
                     if (!weakThis) return;
+                    bool isSelected = false;
                     if (weakThis->m_config.activeDrives.contains(letter)) {
-                        if (weakThis->m_config.activeDrives.size() > 1) weakThis->m_config.activeDrives.remove(letter);
+                        if (weakThis->m_config.activeDrives.size() > 1) {
+                            weakThis->m_config.activeDrives.remove(letter);
+                        } else {
+                            isSelected = true; // 保持选中
+                        }
                     } else {
                         weakThis->m_config.activeDrives.insert(letter);
+                        isSelected = true;
                     }
+                    
                     weakThis->updateDriveButtonStyles();
-                    weakThis->onStartScan();
+
+                    // 2026-05-14 核心同步：显式同步盘符状态至搜索引擎掩码，防止视图过滤失效
+                    QStringList activeList;
+                    for (const QString& d : weakThis->m_config.activeDrives) activeList << d;
+                    MftReader::instance().updateActiveDrives(activeList);
+
+                    // 2026-05-14 架构对标优化：如果驱动器已在索引中，仅进行视图过滤（瞬时响应）
+                    // 只有当点击的是新驱动器且需要初始扫描时，才调用重量级的 onStartScan
+                    if (isSelected && !MftReader::instance().isDriveIndexed(letter)) {
+                        weakThis->onStartScan();
+                    } else {
+                        weakThis->onTriggerSearch();
+                    }
                 });
                 
                 btn->setContextMenuPolicy(Qt::CustomContextMenu);
