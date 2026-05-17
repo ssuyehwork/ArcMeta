@@ -130,8 +130,10 @@ void Database::createTables() {
     addColumnIfNotExist("folders", "encrypt_iv", "TEXT DEFAULT ''");
     addColumnIfNotExist("folders", "encrypt_verify_hash", "TEXT DEFAULT ''");
     addColumnIfNotExist("folders", "file_id_128", "TEXT DEFAULT ''");
+    addColumnIfNotExist("folders", "palettes", "TEXT DEFAULT ''");
     addColumnIfNotExist("items", "file_id_128", "TEXT DEFAULT ''");
     addColumnIfNotExist("items", "size", "INTEGER DEFAULT 0");
+    addColumnIfNotExist("items", "palettes", "TEXT DEFAULT ''");
 
     // 2026-06-xx 物理架构升级：检测并迁移 category_items 表结构
     // 逻辑：如果表里还存在 item_path 字段，说明是旧版结构，执行“核平”式重建（因为旧路径关联已废弃）

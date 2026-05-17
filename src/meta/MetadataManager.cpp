@@ -1,3 +1,19 @@
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QSqlRecord>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QFileInfo>
+#include <QCryptographicHash>
+#include <QRandomGenerator>
+#include <QtConcurrent>
+#include <QThreadPool>
+#include <QDir>
+#include <QDebug>
+#include <QTimer>
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -22,21 +38,6 @@
 #include <cwchar>
 #include <sstream>
 #include <iomanip>
-
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QSqlRecord>
-#include <QJsonDocument>
-#include <QJsonArray>
-#include <QFileInfo>
-#include <QCryptographicHash>
-#include <QRandomGenerator>
-#include <QtConcurrent>
-#include <QThreadPool>
-#include <QDir>
-#include <QDebug>
-#include <QTimer>
 #include <mutex>
 #include <shared_mutex>
 
@@ -165,11 +166,25 @@ void MetadataManager::initFromDatabase() {
             meta.pinned = query.value(5).toBool();
             meta.encrypted = query.value(6).toBool();
             meta.note = query.value(7).toString().toStdWString();
+            // 2026-06-xx 物理兼容：从数据库加载 palettes (若存在)
+            if (query.record().indexOf("palettes") != -1) {
+                QByteArray palRaw = query.value("palettes").toByteArray();
+                if (!palRaw.isEmpty()) {
+                    QJsonDocument doc = QJsonDocument::fromJson(palRaw);
+                    if (doc.isArray()) {
+                        for (const auto& v : doc.array()) {
+                            QJsonObject o = v.toObject();
+                            QJsonArray c = o.value("color").toArray();
+                            meta.palettes.push_back({QColor(c[0].toInt(), c[1].toInt(), c[2].toInt()), (float)o.value("ratio").toDouble()});
+                        }
+                    }
+                }
+            }
             tempCache[finalPath] = std::move(meta);
         }
     };
-    loadTable("SELECT volume, path, rating, color, tags, pinned, encrypted, note FROM items WHERE rating > 0 OR color != '' OR tags != '' OR pinned = 1 OR encrypted = 1 OR note != ''");
-    loadTable("SELECT volume, path, rating, color, tags, pinned, encrypted, note FROM folders WHERE rating > 0 OR color != '' OR tags != '' OR pinned = 1 OR encrypted = 1 OR note != ''");
+    loadTable("SELECT volume, path, rating, color, tags, pinned, encrypted, note, palettes FROM items WHERE rating > 0 OR color != '' OR tags != '' OR pinned = 1 OR encrypted = 1 OR note != '' OR palettes != ''");
+    loadTable("SELECT volume, path, rating, color, tags, pinned, encrypted, note, palettes FROM folders WHERE rating > 0 OR color != '' OR tags != '' OR pinned = 1 OR encrypted = 1 OR note != '' OR palettes != ''");
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache = std::move(tempCache);
@@ -209,6 +224,7 @@ void MetadataManager::initFromJsonMode() {
             fMeta.pinned = amJson.folder().pinned;
             fMeta.note = amJson.folder().note;
             fMeta.encrypted = amJson.folder().encrypted;
+            fMeta.palettes = amJson.folder().palettes;
             tempCache[normalizePath(resolvedPath)] = std::move(fMeta);
             
             // 2. 加载文件夹下所有文件的元数据
@@ -220,6 +236,7 @@ void MetadataManager::initFromJsonMode() {
                 iMeta.pinned = item.pinned;
                 iMeta.note = item.note;
                 iMeta.encrypted = item.encrypted;
+                iMeta.palettes = item.palettes;
                 std::wstring itemPath = resolvedPath + L"\\" + name;
                 tempCache[normalizePath(itemPath)] = std::move(iMeta);
             }
@@ -257,6 +274,7 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
             rm.rating = item.rating; rm.color = item.color;
             rm.pinned = item.pinned; rm.encrypted = item.encrypted;
             rm.note = item.note;
+            rm.palettes = item.palettes;
             for (const auto& t : item.tags) rm.tags << QString::fromStdWString(t);
             
             // 写入缓存并返回
@@ -272,6 +290,7 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
                 RuntimeMeta rm;
                 rm.rating = folder.rating; rm.color = folder.color;
                 rm.pinned = folder.pinned; rm.note = folder.note;
+                rm.palettes = folder.palettes;
                 for (const auto& t : folder.tags) rm.tags << QString::fromStdWString(t);
                 
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
@@ -322,6 +341,20 @@ void MetadataManager::setNote(const std::wstring& path, const std::wstring& note
 void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted) {
     std::wstring nPath = normalizePath(path);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].encrypted = encrypted; }
+    emit metaChanged(QString::fromStdWString(nPath));
+    debouncePersist(nPath);
+}
+
+void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes) {
+    std::wstring nPath = normalizePath(path);
+    std::vector<PaletteEntry> entries;
+    for (const auto& p : palettes) {
+        entries.push_back({p.first, p.second});
+    }
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_cache[nPath].palettes = entries;
+    }
     emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
@@ -441,6 +474,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
             fMeta.pinned = rMeta.pinned; fMeta.note = rMeta.note;
             fMeta.tags.clear();
             for (const auto& t : rMeta.tags) fMeta.tags.push_back(t.toStdWString());
+            fMeta.palettes = rMeta.palettes;
             FolderRepo::save(vol, nPath, fMeta);
         } else {
             ItemMeta iMeta;
@@ -451,6 +485,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
             iMeta.encrypted = rMeta.encrypted;
             iMeta.tags.clear();
             for (const auto& t : rMeta.tags) iMeta.tags.push_back(t.toStdWString());
+            iMeta.palettes = rMeta.palettes;
             ItemRepo::save(parentDir, fileName, iMeta);
         }
     }

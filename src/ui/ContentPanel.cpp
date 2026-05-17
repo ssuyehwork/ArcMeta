@@ -965,13 +965,16 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionExtractColor: {
             QPointer<ContentPanel> weakThis(this);
             (void)QtConcurrent::run([weakThis, path]() {
-                QColor color = UiHelper::extractDominantColor(path);
-                QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, color]() {
-                    if (weakThis && color.isValid()) {
-                        // 2026-06-xx 物理同步：强制执行 4-bit 量化，确保存储真值与搜索桶完全匹配
-                        QColor quantized = UiHelper::quantizeColor(color);
-                        QString colorHex = quantized.name().toUpper();
+                auto palette = UiHelper::extractPalette(path);
+                if (palette.isEmpty()) return;
+                
+                QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                QString colorHex = dominant.name().toUpper();
+                
+                QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, colorHex, palette, dominant]() {
+                    if (weakThis) {
                         MetadataManager::instance().setColor(path.toStdWString(), colorHex.toStdWString());
+                        MetadataManager::instance().setPalettes(path.toStdWString(), palette);
                         
                         // 物理同步 UI 状态：定位模型索引并注入新颜色与着色图标
                         auto* model = weakThis->m_model;
@@ -988,13 +991,13 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                     if (!thumb.isNull()) coloredIcon = QIcon(thumb);
                                 }
                                 if (coloredIcon.isNull()) {
-                                    coloredIcon = UiHelper::getFileIcon(path, 128, color);
+                                    coloredIcon = UiHelper::getFileIcon(path, 128, dominant);
                                 }
                                 item->setData(coloredIcon, Qt::DecorationRole);
                                 break;
                             }
                         }
-                        ToolTipOverlay::instance()->showText(QCursor::pos(), "主色调已提取并绑定", 1500, QColor("#2ecc71"));
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "调色盘已提取并绑定", 1500, QColor("#2ecc71"));
                     }
                 });
             });

@@ -913,12 +913,15 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                     // 开启异步分析链，防止 UI 阻塞
                     QPointer<ScanDialog> weakThis(this);
                     (void)QtConcurrent::run([weakThis, path]() {
-                        QColor color = UiHelper::extractDominantColor(QString::fromStdWString(path));
-                        QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, color]() {
-                            if (weakThis && color.isValid()) {
+                        auto palette = UiHelper::extractPalette(QString::fromStdWString(path));
+                        if (palette.isEmpty()) return;
+                        
+                        QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                        QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, dominant, palette]() {
+                            if (weakThis) {
                                 // 2026-06-xx 物理同步：强制执行 4-bit 量化
-                                QColor quantized = UiHelper::quantizeColor(color);
-                                MetadataManager::instance().setColor(path, quantized.name().toUpper().toStdWString());
+                                MetadataManager::instance().setColor(path, dominant.name().toUpper().toStdWString());
+                                MetadataManager::instance().setPalettes(path, palette);
                                 weakThis->m_tableModel->triggerSearch();
                             }
                         });
