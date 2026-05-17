@@ -58,6 +58,8 @@ public:
 
     static QColor parseColorName(const QString& colorName) {
         if (colorName.isEmpty()) return QColor();
+
+        // 优先尝试原生解析 (支持 #RRGGBB)
         QColor c(colorName);
         if (c.isValid()) return c;
 
@@ -69,37 +71,12 @@ public:
         if (colorName == "blue" || colorName == "蓝") return QColor("#378ADD");
         if (colorName == "purple" || colorName == "紫") return QColor("#7F77DD");
         if (colorName == "gray" || colorName == "灰") return QColor("#5F5E5A");
+        if (colorName == "black" || colorName == "黑") return QColor("#000000");
+        if (colorName == "white" || colorName == "白") return QColor("#FFFFFF");
         
         return QColor();
     }
 
-    static QString mapToPredefinedColor(const QColor& color) {
-        if (!color.isValid()) return "";
-        QList<QPair<QString, QColor>> targets = {
-            {"red", QColor("#E24B4A")},
-            {"orange", QColor("#EF9F27")},
-            {"yellow", QColor("#FAC775")},
-            {"green", QColor("#639922")},
-            {"cyan", QColor("#1D9E75")},
-            {"blue", QColor("#378ADD")},
-            {"purple", QColor("#7F77DD")},
-            {"gray", QColor("#5F5E5A")}
-        };
-        QString closestName = "gray";
-        long long minDistanceSq = 1e18;
-        for (const auto& target : targets) {
-            long r = color.red() - target.second.red();
-            long g = color.green() - target.second.green();
-            long b = color.blue() - target.second.blue();
-            long rmean_avg = (color.red() + target.second.red()) / 2;
-            long long distSq = (((512 + rmean_avg) * r * r) >> 8) + 4 * g * g + (((767 - rmean_avg) * b * b) >> 8);
-            if (distSq < minDistanceSq) {
-                minDistanceSq = distSq;
-                closestName = target.first;
-            }
-        }
-        return closestName;
-    }
 
     static QPixmap renderIcon(const QString& key, const QSize& size, const QColor& color) {
         if (!SvgIcons::icons.contains(key)) return QPixmap();
@@ -195,6 +172,14 @@ public:
     }
 
     /**
+     * @brief 对颜色进行 4-bit 量化，确保存储与搜索的一致性
+     */
+    static inline QColor quantizeColor(const QColor& color) {
+        if (!color.isValid()) return color;
+        return QColor(color.red() & 0xF0, color.green() & 0xF0, color.blue() & 0xF0);
+    }
+
+    /**
      * @brief 从图像中提取主色调 (2026-05-16 健壮版)
      */
     static inline QColor extractDominantColor(const QString& targetFile) {
@@ -220,11 +205,12 @@ public:
         QMap<QRgb, int> freqMap;
         for (int row = 0; row < sampled.height(); ++row) {
             for (int col = 0; col < sampled.width(); ++col) {
-                QColor pixCol = sampled.pixelColor(col, row);
-                // 排除无效背景
-                if (pixCol.saturation() < 30 || pixCol.value() > 240 || pixCol.value() < 20) continue;
-                
-                // 量化聚合
+                QRgb rgb = sampled.pixel(col, row);
+                // Alpha 过滤：仅排除物理透明区域，确保不统计 PNG 的透明背景
+                if (qAlpha(rgb) < 128) continue;
+
+                QColor pixCol(rgb);
+                // 量化聚合：使用 & 0xF0 位掩码（4-bit 量化）提高搜索命中率，防止频率统计碎片化
                 QRgb rgbKey = qRgb(pixCol.red() & 0xF0, pixCol.green() & 0xF0, pixCol.blue() & 0xF0);
                 freqMap[rgbKey]++;
             }

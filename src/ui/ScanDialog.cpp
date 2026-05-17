@@ -916,7 +916,9 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                         QColor color = UiHelper::extractDominantColor(QString::fromStdWString(path));
                         QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, color]() {
                             if (weakThis && color.isValid()) {
-                                MetadataManager::instance().setColor(path, color.name().toStdWString());
+                                // 2026-06-xx 物理同步：强制执行 4-bit 量化
+                                QColor quantized = UiHelper::quantizeColor(color);
+                                MetadataManager::instance().setColor(path, quantized.name().toUpper().toStdWString());
                                 weakThis->m_tableModel->triggerSearch();
                             }
                         });
@@ -926,25 +928,25 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
             }
 
             // 2026-05-17 按照用户要求：重构标记颜色列表，彻底与主界面色彩及存储大一统，使用高雅配色并生成预览图标
-            struct ColorItem { QString name; QString label; QColor preview; };
+            struct ColorItem { QString value; QString label; QColor preview; };
             QList<ColorItem> colorItems = {
                 {"", "默认", QColor("#888780")},
-                {"red", "红色", QColor("#E24B4A")},
-                {"orange", "橙色", QColor("#EF9F27")},
-                {"yellow", "黄色", QColor("#FAC775")},
-                {"green", "绿色", QColor("#639922")},
-                {"cyan", "青色", QColor("#1D9E75")},
-                {"blue", "蓝色", QColor("#378ADD")},
-                {"purple", "紫色", QColor("#7F77DD")},
-                {"gray", "灰色", QColor("#5F5E5A")}
+                {"#E04040", "红色", QColor("#E24B4A")},
+                {"#E09020", "橙色", QColor("#EF9F27")},
+                {"#F0C070", "黄色", QColor("#FAC775")},
+                {"#609020", "绿色", QColor("#639922")},
+                {"#109070", "青色", QColor("#1D9E75")},
+                {"#3080D0", "蓝色", QColor("#378ADD")},
+                {"#7070D0", "紫色", QColor("#7F77DD")},
+                {"#505050", "灰色", QColor("#5F5E5A")}
             };
             for (const auto& ci : colorItems) {
                 QAction* act = labelMenu->addAction(ci.label);
-                connect(act, &QAction::triggered, this, [this, path, name = ci.name]() {
-                    MetadataManager::instance().setColor(path, name.toStdWString());
+                connect(act, &QAction::triggered, this, [this, path, value = ci.value]() {
+                    MetadataManager::instance().setColor(path, value.toStdWString());
                     m_tableModel->triggerSearch();
                 });
-                if (meta.color == ci.name.toStdWString()) {
+                if (meta.color == ci.value.toStdWString()) {
                     act->setCheckable(true);
                     act->setChecked(true);
                 }
