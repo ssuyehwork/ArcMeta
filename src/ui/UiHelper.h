@@ -19,6 +19,10 @@
 #include <QSet>
 #include <QCoreApplication>
 #include <QWidget>
+#include <QProcess>
+#include <QUuid>
+#include <QDir>
+#include <QFile>
 
 // Windows Shell 缩略图引擎依赖
 #ifdef Q_OS_WIN
@@ -40,32 +44,18 @@ namespace ArcMeta {
 
 /**
  * @brief UI 辅助类 (全量热加载版 - 杜绝懒加载)
- * 2026-05-25 按照用户要求：实现图标全量预渲染，确保启动后 UI 响应零延迟。
  */
 class UiHelper {
 public:
-    /**
-     * @brief 获取图标缓存池 (使用 QMap 存储，支持懒加载)
-     * 2026-04-13 改为懒加载 + QMap缓存：启动时不预渲染，首次使用时渲染缓存，减少启动时间 5-10s
-     */
     static QMap<QString, QPixmap>& iconPixmapCache() {
         static QMap<QString, QPixmap> cache;
         return cache;
     }
 
-    /**
-     * @brief 初始化图标系统 (现已改为空实现，预渲染已废止)
-     * 2026-04-13 按用户要求：删除全量预热逻辑，改为懒加载 + LRU 缓存
-     * 此函数保留仅为向后兼容，main.cpp 无需修改调用点
-     */
     static void initializeHotIcons() {
-        qDebug() << "[UiHelper] 图标系统已启用懒加载模式（预渲染已取消）";
-        // 空实现 - 图标将在第一次使用时按需渲染
+        qDebug() << "[UiHelper] 图标系统已启用懒加载模式";
     }
 
-    /**
-     * @brief 解析颜色名称为 QColor (统一处理项目中 red, orange 等标记)
-     */
     static QColor parseColorName(const QString& colorName) {
         if (colorName.isEmpty()) return QColor();
         QColor c(colorName);
@@ -83,19 +73,38 @@ public:
         return QColor();
     }
 
-    /**
-     * @brief 渲染单个 SVG 并缓存 (支持懒加载)
-     * 2026-04-13 改为真正的按需渲染，不再预热
-     */
-    static QPixmap renderIcon(const QString& key, const QSize& size, const QColor& color) {
-        if (!SvgIcons::icons.contains(key)) {
-            qWarning() << "[UiHelper] 图标未找到:" << key;
-            return QPixmap();
+    static QString mapToPredefinedColor(const QColor& color) {
+        if (!color.isValid()) return "";
+        QList<QPair<QString, QColor>> targets = {
+            {"red", QColor("#E24B4A")},
+            {"orange", QColor("#EF9F27")},
+            {"yellow", QColor("#FAC775")},
+            {"green", QColor("#639922")},
+            {"cyan", QColor("#1D9E75")},
+            {"blue", QColor("#378ADD")},
+            {"purple", QColor("#7F77DD")},
+            {"gray", QColor("#5F5E5A")}
+        };
+        QString closestName = "gray";
+        long long minDistanceSq = 1e18;
+        for (const auto& target : targets) {
+            long r = color.red() - target.second.red();
+            long g = color.green() - target.second.green();
+            long b = color.blue() - target.second.blue();
+            long rmean_avg = (color.red() + target.second.red()) / 2;
+            long long distSq = (((512 + rmean_avg) * r * r) >> 8) + 4 * g * g + (((767 - rmean_avg) * b * b) >> 8);
+            if (distSq < minDistanceSq) {
+                minDistanceSq = distSq;
+                closestName = target.first;
+            }
         }
+        return closestName;
+    }
 
+    static QPixmap renderIcon(const QString& key, const QSize& size, const QColor& color) {
+        if (!SvgIcons::icons.contains(key)) return QPixmap();
         QString svgData = SvgIcons::icons[key];
         svgData.replace("currentColor", color.name());
-        
         QPixmap pixmap(size);
         pixmap.fill(Qt::transparent);
         QPainter painter(&pixmap);
@@ -112,19 +121,11 @@ public:
 
     static QIcon getIcon(const QString& key, const QColor& color, int size = 18) {
         QIcon icon;
-        // 2026-04-13 简化设计：仅加载请求大小的图标，减少性能开销
-        // 首次加载时渲染一次，之后从缓存读取
         QPixmap pix = getPixmap(key, QSize(size, size), color);
-        if (!pix.isNull()) {
-            icon.addPixmap(pix);
-        }
+        if (!pix.isNull()) icon.addPixmap(pix);
         return icon;
     }
 
-    /**
-     * @brief 根据路径智能获取 SVG 图标 (彻底替代原生系统图标)
-     * 2026-06-05 按照要求增加 overrideColor 参数，实现根据标记色实时着色图标
-     */
     static QIcon getFileIcon(const QString& filePath, int size = 18, const QColor& overrideColor = QColor()) {
         QFileInfo info(filePath);
         QString ext = info.suffix().toLower();
@@ -132,74 +133,33 @@ public:
         QColor baseColor("#aaaaaa");
 
         if (info.isDir()) {
-            // 2026-06-xx 按照要求：文件夹统一使用 folder_filled 图标
             iconKey = "folder_filled";
             baseColor = QColor("#3498db");
         } else {
-            if (isGraphicsFile(ext)) {
-                iconKey = "image";
-                baseColor = QColor("#EF9F27"); // 橙黄色
-            } else if (ext == "pdf") {
-                iconKey = "file_pdf";
-                baseColor = QColor("#e74c3c"); // 红色
-            } else if (ext == "doc" || ext == "docx") {
-                iconKey = "file_word";
-                baseColor = QColor("#3498db"); // 蓝色
-            } else if (ext == "xls" || ext == "xlsx" || ext == "csv") {
-                iconKey = "table";
-                baseColor = QColor("#2ecc71"); // 绿色
-            } else if (ext == "ppt" || ext == "pptx") {
-                iconKey = "file_ppt";
-                baseColor = QColor("#EF9F27"); // 橙色
-            } else if (QStringList({"cpp", "h", "py", "js", "ts", "html", "css", "json", "xml", "md"}).contains(ext)) {
-                iconKey = "code";
-                baseColor = QColor("#3498db");
-            } else if (QStringList({"zip", "rar", "7z", "tar", "gz"}).contains(ext)) {
-                iconKey = "archive";
-                baseColor = QColor("#f1c40f");
-            } else if (QStringList({"exe", "msi", "bat", "sh"}).contains(ext)) {
-                iconKey = "file_executable";
-                baseColor = QColor("#E81123");
-            } else if (QStringList({"mp4", "mkv", "avi", "mov"}).contains(ext)) {
-                iconKey = "video";
-                baseColor = QColor("#9b59b6");
-            } else if (QStringList({"mp3", "wav", "flac", "ogg"}).contains(ext)) {
-                iconKey = "music";
-                baseColor = QColor("#e91e63");
-            }
+            if (isGraphicsFile(ext)) { iconKey = "image"; baseColor = QColor("#EF9F27"); }
+            else if (ext == "pdf") { iconKey = "file_pdf"; baseColor = QColor("#e74c3c"); }
+            else if (ext == "doc" || ext == "docx") { iconKey = "file_word"; baseColor = QColor("#3498db"); }
+            else if (ext == "xls" || ext == "xlsx" || ext == "csv") { iconKey = "table"; baseColor = QColor("#2ecc71"); }
+            else if (ext == "ppt" || ext == "pptx") { iconKey = "file_ppt"; baseColor = QColor("#EF9F27"); }
+            else if (QStringList({"cpp", "h", "py", "js", "ts", "html", "css", "json", "xml", "md"}).contains(ext)) { iconKey = "code"; baseColor = QColor("#3498db"); }
+            else if (QStringList({"zip", "rar", "7z", "tar", "gz"}).contains(ext)) { iconKey = "archive"; baseColor = QColor("#f1c40f"); }
+            else if (QStringList({"exe", "msi", "bat", "sh"}).contains(ext)) { iconKey = "file_executable"; baseColor = QColor("#E81123"); }
+            else if (QStringList({"mp4", "mkv", "avi", "mov"}).contains(ext)) { iconKey = "video"; baseColor = QColor("#9b59b6"); }
+            else if (QStringList({"mp3", "wav", "flac", "ogg"}).contains(ext)) { iconKey = "music"; baseColor = QColor("#e91e63"); }
         }
 
-        // 如果用户指定了覆盖色，则使用覆盖色，否则使用系统默认色
         QColor finalColor = overrideColor.isValid() ? overrideColor : baseColor;
         return getIcon(iconKey, finalColor, size);
     }
 
-    /**
-     * @brief 获取 Pixmap (支持懒加载 + QMap 缓存)
-     * 2026-04-13 改为：先查缓存，缓存未命中则现场渲染（~50ms 用户无感知）
-     */
     static QPixmap getPixmap(const QString& key, const QSize& size, const QColor& color) {
         QString cKey = QString("%1_%2_%3_%4").arg(key).arg(size.width()).arg(size.height()).arg(color.rgba());
-        
-        // 缓存查询 - QMap contains() 快速检查
-        if (iconPixmapCache().contains(cKey)) {
-            return iconPixmapCache()[cKey];
-        }
-        
-        // 缓存未命中 - 现场渲染并缓存（首次使用时）
+        if (iconPixmapCache().contains(cKey)) return iconPixmapCache()[cKey];
         QPixmap rendered = renderIcon(key, size, color);
-        if (!rendered.isNull()) {
-            iconPixmapCache().insert(cKey, rendered);
-        } else {
-            qWarning() << "[UiHelper] 渲染失败:" << key << size << color.name();
-        }
+        if (!rendered.isNull()) iconPixmapCache().insert(cKey, rendered);
         return rendered;
     }
 
-    /**
-     * @brief 统一应用菜单样式，消除硬编码 CSS
-     * 2026-06-01 按照用户要求：集中管理 QMenu 皮肤
-     */
     static void applyMenuStyle(QWidget* menu) {
         if (!menu) return;
         menu->setStyleSheet(
@@ -234,6 +194,87 @@ public:
         return color;
     }
 
+    /**
+     * @brief 从图像中提取主色调 (2026-05-16 健壮版)
+     */
+    static inline QColor extractDominantColor(const QString& targetFile) {
+        QFileInfo fileInfo(targetFile);
+        QString suffix = fileInfo.suffix().toLower();
+        QImage targetImg;
+        QString temporaryPng;
+
+        if (suffix == "psd" || suffix == "ai" || suffix == "eps") {
+            temporaryPng = convertDesignFileToPng(targetFile);
+            if (!temporaryPng.isEmpty()) {
+                targetImg.load(temporaryPng);
+                QFile::remove(temporaryPng); 
+            }
+        } else {
+            targetImg.load(targetFile);
+        }
+
+        if (targetImg.isNull()) return QColor();
+
+        // 缩放并进行频率分析
+        QImage sampled = targetImg.scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QMap<QRgb, int> freqMap;
+        for (int row = 0; row < sampled.height(); ++row) {
+            for (int col = 0; col < sampled.width(); ++col) {
+                QColor pixCol = sampled.pixelColor(col, row);
+                // 排除无效背景
+                if (pixCol.saturation() < 30 || pixCol.value() > 240 || pixCol.value() < 20) continue;
+                
+                // 量化聚合
+                QRgb rgbKey = qRgb(pixCol.red() & 0xF0, pixCol.green() & 0xF0, pixCol.blue() & 0xF0);
+                freqMap[rgbKey]++;
+            }
+        }
+
+        if (freqMap.isEmpty()) {
+            return targetImg.scaled(1, 1, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).pixelColor(0, 0);
+        }
+
+        QRgb winnerRgb = 0;
+        int maxFreq = 0;
+        for (auto it = freqMap.begin(); it != freqMap.end(); ++it) {
+            if (it.value() > maxFreq) {
+                maxFreq = it.value();
+                winnerRgb = it.key();
+            }
+        }
+        return QColor(winnerRgb);
+    }
+
+private:
+    static inline QString convertDesignFileToPng(const QString& srcPath) {
+        QString workDir = QCoreApplication::applicationDirPath() + "/Cache/tmp";
+        QDir().mkpath(workDir);
+        QString dstPath = workDir + "/" + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".png";
+        QString ext = QFileInfo(srcPath).suffix().toLower();
+
+        QProcess converter;
+        QString cmd;
+        QStringList params;
+
+        if (ext == "psd") {
+            cmd = "magick";
+            params << srcPath + "[0]" << "-flatten" << dstPath;
+        } else if (ext == "ai" || ext == "eps") {
+            cmd = "gs";
+            params << "-dNOPAUSE" << "-dBATCH" << "-dSAFER" << "-sDEVICE=png16m" << "-r72" << "-dFirstPage=1" << "-dLastPage=1" 
+                   << QString("-sOutputFile=%1").arg(dstPath) << srcPath;
+        }
+
+        converter.start(cmd, params);
+        if (converter.waitForFinished(15000)) {
+            if (QFile::exists(dstPath)) return dstPath;
+        } else {
+            converter.kill();
+        }
+        return "";
+    }
+
+public:
     static QPixmap getShellThumbnail(const QString& path, int size, bool forceMirror = false) {
 #ifdef Q_OS_WIN
         PIDLIST_ABSOLUTE pidl = nullptr;

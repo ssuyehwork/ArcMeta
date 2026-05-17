@@ -80,10 +80,9 @@ public:
     // USN 更新
     void updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& volume);
     void removeEntryByFrn(const std::wstring& volume, uint64_t frn);
-
-private:
     std::wstring getPathFast(size_t driveIdx, uint64_t frn);
 
+private:
     MftReader();
     ~MftReader();
 

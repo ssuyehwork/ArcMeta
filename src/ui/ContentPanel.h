@@ -122,7 +122,8 @@ public:
         ActionPaste,
         ActionDelete,
         ActionCopyPath,
-        ActionProperties
+        ActionProperties,
+        ActionExtractColor
     };
 
     explicit ContentPanel(QWidget* parent = nullptr);
@@ -230,6 +231,7 @@ private:
     bool m_isRecursive = false;
     void updateGridSize();
     void updateStatusBarStats();
+    void recalculateAndEmitStats();
 
     void addItemsFromDirectory(const QString& path, bool recursive,
                                QMap<int, int>& ratingCounts,

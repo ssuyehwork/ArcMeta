@@ -87,7 +87,29 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     // 2. 颜色过滤 
     if (!currentFilter.colors.isEmpty()) { 
         QString c = idx.data(ColorRole).toString(); 
-        if (!currentFilter.colors.contains(c)) return false; 
+        bool matchColor = false;
+        
+        for (const QString& fc : currentFilter.colors) {
+            if (fc.startsWith("#")) {
+                // 2026-06-xx 按照用户要求：支持高级相近色过滤
+                QColor filterColor = UiHelper::parseColorName(fc);
+                QColor itemColor = UiHelper::parseColorName(c);
+                if (filterColor.isValid() && itemColor.isValid()) {
+                    long rmean = (filterColor.red() + itemColor.red()) / 2;
+                    long r = filterColor.red() - itemColor.red();
+                    long g = filterColor.green() - itemColor.green();
+                    long b = filterColor.blue() - itemColor.blue();
+                    long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
+                    
+                    if (distSq < 15000) { // 容差阈值
+                        matchColor = true; break;
+                    }
+                }
+            } else {
+                if (c == fc) { matchColor = true; break; }
+            }
+        }
+        if (!matchColor) return false; 
     } 
  
     // 3. 标签过滤 
@@ -182,6 +204,14 @@ ContentPanel::ContentPanel(QWidget* parent)
     m_model = new QStandardItemModel(this); 
     m_proxyModel = new FilterProxyModel(this); 
     m_proxyModel->setSourceModel(m_model); 
+    
+    // 2026-05-17 新增：当模型数据发生改变时，自动触发统计重新计算并推送至 FilterPanel
+    connect(m_model, &QStandardItemModel::dataChanged, this, [this](const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles) {
+        Q_UNUSED(topLeft); Q_UNUSED(bottomRight);
+        if (roles.isEmpty() || roles.contains(ColorRole) || roles.contains(RatingRole) || roles.contains(TagsRole)) {
+            recalculateAndEmitStats();
+        }
+    });
      
     // 2026-04-12 深度修复：强制锁定过滤列为第 0 列（名称列），确保搜索逻辑不偏离 
     m_proxyModel->setFilterKeyColumn(0); 
@@ -332,7 +362,8 @@ void ContentPanel::initUi() {
         "}" 
     ); 
     QHBoxLayout* titleL = new QHBoxLayout(titleBar); 
-    titleL->setContentsMargins(15, 2, 15, 0); 
+    titleL->setContentsMargins(15, 0, 5, 0); // 2026-05-17 按照用户要求：右侧边距统一设为 5px，消除 15px 留白
+    titleL->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
  
     QLabel* iconLabel = new QLabel(titleBar); 
     iconLabel->setPixmap(UiHelper::getIcon("eye", QColor("#41F2F2"), 18).pixmap(18, 18)); 
@@ -377,7 +408,7 @@ void ContentPanel::initUi() {
  
     titleL->addWidget(titleLabel); 
     titleL->addStretch(); 
-    titleL->addWidget(m_btnLayers); 
+    titleL->addWidget(m_btnLayers, 0, Qt::AlignVCenter); 
  
     m_mainLayout->addWidget(titleBar); 
  
@@ -432,11 +463,12 @@ void ContentPanel::updateGridSize() {
     m_gridView->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
     
     int side = m_zoomLevel + 46; // 正方形边长
+    int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
     int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
-    int gap = 10; // 正方形与名称的间距
+    int gap = 6;                // 间距归一化
     
-    // 总高度 = 正方形边长 + 间距 + 名称高度 + 底部缓冲
-    int totalH = side + gap + nameH + 8;
+    // 总高度 = 正方形边长 + 间距1 + 评分高度 + 间距2 + 名称高度 + 底部缓冲
+    int totalH = side + gap + ratingH + gap + nameH + 8;
     m_gridView->setGridSize(QSize(side, totalH));
 
     // 2026-06-05 按照要求：持久化保存当前的缩放级别
@@ -801,6 +833,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
         menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
  
+        // --- 2026-05-16 图像分析：从图中提取主色调 ---
+        QString ext = QFileInfo(path).suffix().toLower();
+        if (UiHelper::isGraphicsFile(ext)) {
+            menu.addAction("解析颜色...")->setData(ActionExtractColor);
+        }
+
         menu.addSeparator(); 
  
         // [批量与加密区] 
@@ -906,12 +944,58 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     m_proxyModel->setData(idx, colorName, ColorRole); 
  
                     // 2026-06-05 按照要求：设置颜色后立即重新生成并应用着色图标，实现视觉同步 
-                    QIcon coloredIcon = UiHelper::getFileIcon(itemPath, 128, tagColor); 
+                    // 2026-05-17 逻辑修复：针对图像格式，必须优先尝试提取缩略图，防止图标覆盖内容
+                    QIcon coloredIcon;
+                    QString ext = QFileInfo(itemPath).suffix().toLower();
+                    if (UiHelper::isGraphicsFile(ext)) {
+                        QPixmap thumb = UiHelper::getShellThumbnail(itemPath, 128, false);
+                        if (!thumb.isNull()) coloredIcon = QIcon(thumb);
+                    }
+                    if (coloredIcon.isNull()) {
+                        coloredIcon = UiHelper::getFileIcon(itemPath, 128, tagColor);
+                    }
                     m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
                 } 
             } 
             break; 
         } 
+        case ActionExtractColor: {
+            QPointer<ContentPanel> weakThis(this);
+            (void)QtConcurrent::run([weakThis, path]() {
+                QColor color = UiHelper::extractDominantColor(path);
+                QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, color]() {
+                    if (weakThis && color.isValid()) {
+                        QString colorName = UiHelper::mapToPredefinedColor(color);
+                        QColor tagColor = UiHelper::parseColorName(colorName);
+                        MetadataManager::instance().setColor(path.toStdWString(), colorName.toStdWString());
+                        
+                        // 物理同步 UI 状态：定位模型索引并注入新颜色与着色图标
+                        auto* model = weakThis->m_model;
+                        for (int i = 0; i < model->rowCount(); ++i) {
+                            auto* item = model->item(i, 0);
+                            if (item && item->data(PathRole).toString() == path) {
+                                item->setData(colorName, ColorRole);
+                                
+                                // 2026-05-17 逻辑修复：针对图像格式，必须优先尝试提取缩略图，防止图标覆盖内容
+                                QIcon coloredIcon;
+                                QString suffix = QFileInfo(path).suffix().toLower();
+                                if (UiHelper::isGraphicsFile(suffix)) {
+                                    QPixmap thumb = UiHelper::getShellThumbnail(path, 128, false);
+                                    if (!thumb.isNull()) coloredIcon = QIcon(thumb);
+                                }
+                                if (coloredIcon.isNull()) {
+                                    coloredIcon = UiHelper::getFileIcon(path, 128, tagColor);
+                                }
+                                item->setData(coloredIcon, Qt::DecorationRole);
+                                break;
+                            }
+                        }
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "主色调已提取并绑定", 1500, QColor("#2ecc71"));
+                    }
+                });
+            });
+            break;
+        }
         case ActionEncrypt: { 
             bool ok; 
             QString pwd = QInputDialog::getText(this, "加密保护", "设置加密密码:", QLineEdit::Password, "", &ok); 
@@ -1102,6 +1186,7 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     qDebug() << "[Content] 开始物理递归扫描 ->" << path << (recursive ? "递归" : "单级"); 
+    emit dataSourceChanged("nav"); // 2026-05-17 按照用户要求：发射数据源变更信号，高亮展示导航面板焦点线条
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -1268,16 +1353,39 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
 void ContentPanel::search(const QString& query) { 
     qDebug() << "[Content] 触发代理过滤 (局部手动关键词) ->" << query; 
-    // 2026-03-xx 按照用户最新要求：补全基于模型的即时搜索过滤逻辑 
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
  
-    // 2026-04-12 关键修复：废弃 setFilterFixedString (因为其自动填充转义字符 '\' 导致含标点搜索失效) 
-    // 改为直接投递自定义搜索字符串 
-    // 2026-05-25 编译修复：改用 qobject_cast 彻底根除 static_cast 指针转换报错 
     auto* proxy = qobject_cast<FilterProxyModel*>(m_proxyModel); 
-    if (proxy) proxy->setSearchQuery(query); 
+    if (proxy) {
+        proxy->setSearchQuery(query);
+        
+        // 2026-06-xx 按照用户要求：搜索后实时重新计算可见项统计，同步给筛选面板
+        ScanStats stats;
+        for (int i = 0; i < proxy->rowCount(); ++i) {
+            QModelIndex idx = proxy->index(i, 0);
+            int rating = idx.data(RatingRole).toInt();
+            QString color = idx.data(ColorRole).toString();
+            QString type = idx.data(TypeRole).toString();
+            QStringList tags = idx.data(TagsRole).toStringList();
+            
+            stats.ratingCounts[rating]++;
+            stats.colorCounts[color]++;
+            if (type == "folder") stats.typeCounts["folder"]++;
+            else {
+                QString path = idx.data(PathRole).toString();
+                stats.typeCounts[QFileInfo(path).suffix().toUpper()]++;
+            }
+            
+            for (const QString& t : tags) stats.tagCounts[t]++;
+            if (tags.isEmpty()) stats.noTagCount++;
+        }
+        if (stats.noTagCount > 0) stats.tagCounts["__none__"] = stats.noTagCount;
+        
+        emit directoryStatsReady(stats.ratingCounts, stats.colorCounts, stats.tagCounts,
+                               stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts);
+    }
 } 
  
 void ContentPanel::applyFilters(const FilterState& state) { 
@@ -1340,6 +1448,7 @@ void ContentPanel::loadCategory(int categoryId) {
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
+    emit dataSourceChanged("category"); // 2026-05-17 按照用户要求：发射数据源变更信号，高亮展示分类面板焦点线条
      
     m_lazyIconTimer->stop(); 
     m_iconPendingPaths.clear(); 
@@ -1456,6 +1565,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
+    emit dataSourceChanged("category"); // 2026-05-17 按照用户要求：发射数据源变更信号，高亮展示分类面板焦点线条
      
     m_lazyIconTimer->stop(); 
     m_iconPendingPaths.clear(); 
@@ -1605,22 +1715,21 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     m.squareRect = QRect(m.cardRect.left(), m.cardRect.top(), side, side); 
  
     m.iconDrawSize = (int)(zoom * 0.7); 
-    m.gap1         = 10;  
-    m.ratingH      = qMax(12, (int)(zoom * 0.15)); // 与starSize保持一致，避免垂直位置计算错误 
-    m.gap2         = 10; // 正方形底部与名称之间的间距 
+    m.ratingH      = 16;  // 2026-05-17 物理锁定评分区高度 
     m.nameH        = (int)(zoom * 0.25); 
  
-    // 内容在正方形内垂直居中，并按照用户要求向下偏移 10 像素 
-    int contentH_inside = m.iconDrawSize + m.gap1 + m.ratingH; 
-    int startY_inside = m.squareRect.top() + (m.squareRect.height() - contentH_inside) / 2 + 10; 
+    // 2026-05-17 按照用户要求：主图标在正方形内垂直居中
+    m.iconRect = QRect(m.squareRect.left() + (m.squareRect.width() - m.iconDrawSize) / 2, 
+                       m.squareRect.top() + (m.squareRect.height() - m.iconDrawSize) / 2, 
+                       m.iconDrawSize, m.iconDrawSize); 
+    
+    // 2026-05-17 物理布局重构：星级区置于正方形下方
+    m.ratingY = m.squareRect.bottom() + 6; 
  
-    m.iconRect = QRect(m.squareRect.left() + (m.squareRect.width() - m.iconDrawSize) / 2, startY_inside, m.iconDrawSize, m.iconDrawSize); 
-    m.ratingY = m.iconRect.bottom() + m.gap1; 
- 
-    m.starSize    = qMax(12, (int)(zoom * 0.15)); // 恢复原来的计算，保证最小可见尺寸
-    m.starSpacing = qMax(2, (int)(zoom * 0.02));  // 间距也恢复  
+    m.starSize    = 14; // 2026-05-17 尺寸微调以匹配外部布局
+    m.starSpacing = 2;   
     int banW = m.ratingH; 
-    int banGap = qMax(2, (int)(zoom * 0.04)); 
+    int banGap = 4; 
  
     m.infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing); 
     m.infoStartX = m.squareRect.left() + (m.squareRect.width() - m.infoTotalW) / 2; 
@@ -1628,8 +1737,8 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     m.banRect = QRect(m.infoStartX, m.ratingY + (m.ratingH - banW) / 2, banW, banW); 
     m.starsStartX = m.infoStartX + banW + banGap; 
      
-    // 名称区紧贴正方形下方 
-    m.nameY = m.squareRect.bottom() + m.gap2; 
+    // 名称区紧贴评分区下方 
+    m.nameY = m.ratingY + m.ratingH + 6; 
     m.nameRect = QRect(m.cardRect.left(), m.nameY, m.cardRect.width(), m.nameH); 
  
     return m; 
@@ -1889,6 +1998,53 @@ void GridItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, 
         MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString()); 
     }  
 } 
+
+void ContentPanel::recalculateAndEmitStats() {
+    ScanStats stats;
+    for (int i = 0; i < m_model->rowCount(); ++i) {
+        QStandardItem* nameItem = m_model->item(i, 0);
+        if (!nameItem) continue;
+        int rating = nameItem->data(RatingRole).toInt();
+        QString colorName = nameItem->data(ColorRole).toString();
+        QString type = nameItem->data(TypeRole).toString();
+        QStringList tags = nameItem->data(TagsRole).toStringList();
+        
+        stats.ratingCounts[rating]++;
+        if (!colorName.isEmpty()) stats.colorCounts[colorName]++;
+        else stats.colorCounts[""]++;
+        
+        if (type == "folder") {
+            stats.typeCounts["folder"]++;
+        } else {
+            QString path = nameItem->data(PathRole).toString();
+            stats.typeCounts[QFileInfo(path).suffix().toUpper()]++;
+        }
+        
+        for (const QString& tag : tags) {
+            stats.tagCounts[tag]++;
+        }
+        if (tags.isEmpty()) stats.noTagCount++;
+        
+        QString path = nameItem->data(PathRole).toString();
+        QFileInfo info(path);
+        if (info.exists()) {
+            QDate cdate = info.birthTime().date();
+            QDate mdate = info.lastModified().date();
+            QDate today = QDate::currentDate();
+            
+            if (cdate == today) stats.createDateCounts["today"]++;
+            else if (cdate == today.addDays(-1)) stats.createDateCounts["yesterday"]++;
+            else stats.createDateCounts[cdate.toString("yyyy-MM-dd")]++;
+            
+            if (mdate == today) stats.modifyDateCounts["today"]++;
+            else if (mdate == today.addDays(-1)) stats.modifyDateCounts["yesterday"]++;
+            else stats.modifyDateCounts[mdate.toString("yyyy-MM-dd")]++;
+        }
+    }
+    if (stats.noTagCount > 0) stats.tagCounts["__none__"] = stats.noTagCount;
+    emit directoryStatsReady(stats.ratingCounts, stats.colorCounts, stats.tagCounts,
+                           stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts);
+}
  
 void GridItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const { 
     Q_UNUSED(index); 

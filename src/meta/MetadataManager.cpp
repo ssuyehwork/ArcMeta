@@ -7,6 +7,9 @@
 #include "../db/FolderRepo.h"
 #include "MetadataDefs.h"
 #include "AmMetaJson.h"
+#include "AllFrnManager.h"
+#include "../mft/MftReader.h"
+#include "../db/CategoryRepo.h"
 
 #include <windows.h>
 #include <fileapi.h>
@@ -167,6 +170,61 @@ void MetadataManager::initFromDatabase() {
     };
     loadTable("SELECT volume, path, rating, color, tags, pinned, encrypted, note FROM items WHERE rating > 0 OR color != '' OR tags != '' OR pinned = 1 OR encrypted = 1 OR note != ''");
     loadTable("SELECT volume, path, rating, color, tags, pinned, encrypted, note FROM folders WHERE rating > 0 OR color != '' OR tags != '' OR pinned = 1 OR encrypted = 1 OR note != ''");
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_cache = std::move(tempCache);
+    }
+    emit metaChanged("__RELOAD_ALL__");
+}
+
+void MetadataManager::initFromJsonMode() {
+    std::unordered_map<std::wstring, RuntimeMeta> tempCache;
+    auto frnsMap = AllFrnManager::getAllFrns();
+    
+    for (auto it = frnsMap.begin(); it != frnsMap.end(); ++it) {
+        QString frnStr = it.key();
+        QString lastKnownPath = it.value();
+        std::wstring resolvedPath = lastKnownPath.toStdWString();
+        
+        // 物理路径自愈性校准：如果 MftReader 已经预热好，使用 FRN 在各盘符下寻找最新物理路径
+        bool ok = false;
+        uint64_t frnVal = frnStr.toULongLong(&ok);
+        if (ok) {
+            for (size_t d = 0; d < 26; ++d) {
+                std::wstring p = MftReader::instance().getPathFast(d, frnVal);
+                if (!p.empty()) {
+                    resolvedPath = p;
+                    break;
+                }
+            }
+        }
+        
+        AmMetaJson amJson(resolvedPath);
+        if (amJson.load()) {
+            // 1. 加载文件夹本身的元数据
+            RuntimeMeta fMeta;
+            fMeta.rating = amJson.folder().rating;
+            fMeta.color = amJson.folder().color;
+            for (const auto& t : amJson.folder().tags) fMeta.tags << QString::fromStdWString(t);
+            fMeta.pinned = amJson.folder().pinned;
+            fMeta.note = amJson.folder().note;
+            fMeta.encrypted = amJson.folder().encrypted;
+            tempCache[normalizePath(resolvedPath)] = std::move(fMeta);
+            
+            // 2. 加载文件夹下所有文件的元数据
+            for (const auto& [name, item] : amJson.items()) {
+                RuntimeMeta iMeta;
+                iMeta.rating = item.rating;
+                iMeta.color = item.color;
+                for (const auto& t : item.tags) iMeta.tags << QString::fromStdWString(t);
+                iMeta.pinned = item.pinned;
+                iMeta.note = item.note;
+                iMeta.encrypted = item.encrypted;
+                std::wstring itemPath = resolvedPath + L"\\" + name;
+                tempCache[normalizePath(itemPath)] = std::move(iMeta);
+            }
+        }
+    }
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache = std::move(tempCache);
@@ -373,26 +431,28 @@ void MetadataManager::persistAsync(const std::wstring& path) {
 
     RuntimeMeta rMeta = getMeta(nPath);
 
-    // 1. 同步到内存与数据库（保证响应速度）
-    if (info.isDir()) {
-        FolderMeta fMeta;
-        FolderRepo::get(vol, nPath, fMeta);
-        fetchWinApiMetadataDirect(nPath, fMeta.fileId128, nullptr);
-        fMeta.rating = rMeta.rating; fMeta.color = rMeta.color;
-        fMeta.pinned = rMeta.pinned; fMeta.note = rMeta.note;
-        fMeta.tags.clear();
-        for (const auto& t : rMeta.tags) fMeta.tags.push_back(t.toStdWString());
-        FolderRepo::save(vol, nPath, fMeta);
-    } else {
-        ItemMeta iMeta;
-        iMeta.volume = vol;
-        fetchWinApiMetadataDirect(nPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
-        iMeta.rating = rMeta.rating; iMeta.color = rMeta.color;
-        iMeta.pinned = rMeta.pinned; iMeta.note = rMeta.note;
-        iMeta.encrypted = rMeta.encrypted;
-        iMeta.tags.clear();
-        for (const auto& t : rMeta.tags) iMeta.tags.push_back(t.toStdWString());
-        ItemRepo::save(parentDir, fileName, iMeta);
+    // 1. 同步到内存与数据库（在 JSON 模式下跳过对数据库的保存）
+    if (!CategoryRepo::isJsonMode()) {
+        if (info.isDir()) {
+            FolderMeta fMeta;
+            FolderRepo::get(vol, nPath, fMeta);
+            fetchWinApiMetadataDirect(nPath, fMeta.fileId128, nullptr);
+            fMeta.rating = rMeta.rating; fMeta.color = rMeta.color;
+            fMeta.pinned = rMeta.pinned; fMeta.note = rMeta.note;
+            fMeta.tags.clear();
+            for (const auto& t : rMeta.tags) fMeta.tags.push_back(t.toStdWString());
+            FolderRepo::save(vol, nPath, fMeta);
+        } else {
+            ItemMeta iMeta;
+            iMeta.volume = vol;
+            fetchWinApiMetadataDirect(nPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
+            iMeta.rating = rMeta.rating; iMeta.color = rMeta.color;
+            iMeta.pinned = rMeta.pinned; iMeta.note = rMeta.note;
+            iMeta.encrypted = rMeta.encrypted;
+            iMeta.tags.clear();
+            for (const auto& t : rMeta.tags) iMeta.tags.push_back(t.toStdWString());
+            ItemRepo::save(parentDir, fileName, iMeta);
+        }
     }
 
     // 2. 物理落地：写入 .am_meta.json (物理侧真值先行)
@@ -413,6 +473,13 @@ void MetadataManager::persistAsync(const std::wstring& path) {
         for (const auto& t : rMeta.tags) item.tags.push_back(t.toStdWString());
     }
     amJson.save();
+
+    // 2.5 提取该父文件夹的物理 FRN，安全、自动登记到根目录 All_FRN_am_meta.json 中
+    std::wstring folderFrn;
+    std::string folderFid;
+    if (fetchWinApiMetadataDirect(parentDir, folderFid, &folderFrn)) {
+        AllFrnManager::registerFrn(folderFrn, parentDir);
+    }
 
     // 3. 提取侧挂 .am_meta.json 的物理 FID 并记入日志
     std::wstring amJsonPath = parentDir + L"\\.am_meta.json";

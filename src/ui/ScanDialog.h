@@ -125,6 +125,7 @@ private:
     void updateDriveButtonStyles();
     void updateStatus(const QString& text, bool scanning = false);
     void updateStatusBar();
+    void handleMetadataShortcut(QKeyEvent* event);
     QString formatNumber(int64_t n);
     QString formatSize(int64_t bytes);
 

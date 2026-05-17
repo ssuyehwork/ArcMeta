@@ -127,54 +127,57 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
             }
 
             if (targetPath.empty() || !QFile::exists(QString::fromStdWString(targetPath))) {
-                qWarning() << "[Sync] 无法定位物理文件(可能磁盘已卸载)，保留 FID:" << fidItem;
-                remainingFids << fidItem;
+                qDebug() << "[Sync] 物理路径已失效或不存在，自动清理任务:" << fidItem;
+                // 不加入 remainingFids，即视为“已处理”以便从日志移除
                 continue;
             }
 
             // 2. 执行物理 JSON 到数据库的对账同步
-            // 注意：targetPath 是 .am_meta.json 的路径
             QFileInfo fi(QString::fromStdWString(targetPath));
-            std::wstring parentDir = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
-            
-            AmMetaJson amJson(parentDir);
+            std::wstring syncDir;
+            if (fi.isDir()) {
+                syncDir = QDir::toNativeSeparators(fi.absoluteFilePath()).toStdWString();
+            } else {
+                syncDir = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
+            }
+
+            AmMetaJson amJson(syncDir);
             if (amJson.load()) {
                 bool ok = true;
                 // A. 同步文件夹自身元数据
                 if (!amJson.folder().isDefault()) {
-                    FolderRepo::save(MetadataManager::getVolumeSerialNumber(parentDir), parentDir, amJson.folder());
+                    FolderRepo::save(MetadataManager::getVolumeSerialNumber(syncDir), syncDir, amJson.folder());
                 }
 
-                // B. 同步目录下所有项 (兼容旧版 MSVC，不使用结构化绑定)
+                // B. 同步目录下所有项
                 auto const& itemsMap = amJson.items();
                 for (auto it = itemsMap.begin(); it != itemsMap.end(); ++it) {
                     const std::wstring& name = it->first;
                     const ItemMeta& item = it->second;
 
-                    std::wstring fullPath = parentDir + L"\\" + name;
+                    std::wstring fullPath = syncDir + L"\\" + name;
                     ItemMeta iMeta;
-                    // 这里由于是物理上行，需要重新探测一次基础属性
                     MetadataManager::instance().fetchWinApiMetadataDirect(fullPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
                     iMeta.rating = item.rating; iMeta.color = item.color;
                     iMeta.pinned = item.pinned; iMeta.note = item.note;
                     iMeta.encrypted = item.encrypted;
                     iMeta.tags = item.tags;
-                    iMeta.volume = MetadataManager::getVolumeSerialNumber(parentDir);
+                    iMeta.volume = MetadataManager::getVolumeSerialNumber(syncDir);
                     
-                    if (!ItemRepo::save(parentDir, name, iMeta)) ok = false;
+                    if (!ItemRepo::save(syncDir, name, iMeta)) ok = false;
                 }
 
-                if (ok) {
-                    qDebug() << "[Sync] 物理对账验证通过，移除 FID:" << fidItem;
-                } else {
+                if (!ok) {
+                    qWarning() << "[Sync] 部分条目入库失败，任务将重试:" << fidItem;
                     remainingFids << fidItem;
                 }
             } else {
-                remainingFids << fidItem;
+                qDebug() << "[Sync] 找不到有效的 .am_meta.json，清理冗余任务:" << fidItem;
+                // 无法加载通常意味着文件不存在或损坏，不再阻塞同步
             }
         }
 
-        // 3. 立即验证并原子化写回日志 (仅移除已成功的 FID，符合铁律 2)
+        // 3. 立即验证并原子化写回日志 (仅移除已成功的 FID)
         QStringList successfulFids;
         for (const auto& fid : pendingFids) {
             if (!remainingFids.contains(fid)) successfulFids << fid;

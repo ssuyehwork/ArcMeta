@@ -3,8 +3,11 @@
 #endif
 #include "ScanDialog.h"
 #include "../core/CacheManager.h"
+#include <QPainter>
+#include <QIcon>
 #include "../mft/MftReader.h"
 #include "UiHelper.h"
+#include "../meta/MetadataManager.h"
 #include <QFileInfo>
 #include <QCheckBox>
 #include <QFrame>
@@ -212,8 +215,24 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         int dotIdx = name.lastIndexOf('.');
         QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
         return reader.getCachedIcon(ext, reader.isDirectory(actualIndex));
-    } else if (role == Qt::ForegroundRole && reader.isDirectory(actualIndex)) {
-        return QColor("#3498db");
+    } else if (role == Qt::ForegroundRole) {
+        // 2026-05-16 视觉同步：从 MetadataManager 获取颜色标记并适配主界面高端色值
+        // 2026-05-17 按照用户要求：使用 UiHelper::parseColorName 确保所有颜色（如黄色 #FAC775）完全一致高雅
+        std::wstring path = reader.getFullPath(actualIndex).toStdWString();
+        auto meta = MetadataManager::instance().getMeta(path);
+        if (!meta.color.empty()) {
+            QColor tagC = UiHelper::parseColorName(QString::fromStdWString(meta.color));
+            if (tagC.isValid()) return tagC;
+        }
+        if (reader.isDirectory(actualIndex)) return QColor("#3498db");
+    } else if (role == Qt::ToolTipRole) {
+        // 2026-05-16 交互同步：显示备注与标签
+        std::wstring path = reader.getFullPath(actualIndex).toStdWString();
+        auto meta = MetadataManager::instance().getMeta(path);
+        QString tip = "路径: " + QString::fromStdWString(path);
+        if (!meta.note.empty()) tip += "\n备注: " + QString::fromStdWString(meta.note);
+        if (!meta.tags.isEmpty()) tip += "\n标签: " + meta.tags.join(", ");
+        return tip;
     } else if (role == Qt::TextAlignmentRole) {
         switch (index.column()) {
             case 0: case 1: return static_cast<int>(Qt::AlignLeft | Qt::AlignVCenter);
@@ -411,7 +430,8 @@ ScanDialog::ScanDialog(QWidget* parent)
     if (m_pinBtn) {
         disconnect(m_pinBtn, &QPushButton::toggled, nullptr, nullptr);
         connect(m_pinBtn, &QPushButton::toggled, this, [this](bool checked) {
-            m_pinBtn->setIcon(UiHelper::getIcon(checked ? "pin" : "pin_tilted", QColor("#CCCCCC"), 14));
+            m_pinBtn->setIcon(UiHelper::getIcon(checked ? "pin_vertical" : "pin_tilted", 
+                                                checked ? QColor("#FF551C") : QColor("#CCCCCC"), 18));
             HWND hwnd = reinterpret_cast<HWND>(winId());
             if (checked) {
                 SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
@@ -867,6 +887,105 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
         });
         
         menu.addSeparator();
+        menu.addSeparator();
+        
+        // --- 2026-05-16 深度管理：评分、标记、备注、标签 ---
+        if (count == 1) {
+            std::wstring path = m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 1)).toString().toStdWString();
+            auto meta = MetadataManager::instance().getMeta(path);
+
+            QMenu* ratingMenu = menu.addMenu("评分");
+            for (int i = 0; i <= 5; ++i) {
+                QString star = (i == 0) ? "无评分" : QString(i, QChar(0x2605));
+                QAction* act = ratingMenu->addAction(star, [this, path, i]() {
+                    MetadataManager::instance().setRating(path, i);
+                    m_tableModel->triggerSearch();
+                });
+                if (meta.rating == i) act->setCheckable(true), act->setChecked(true);
+            }
+
+            QMenu* labelMenu = menu.addMenu("标记颜色");
+            
+            // --- 2026-05-16 图像分析：从图中提取主色调 ---
+            QString ext = QFileInfo(QString::fromStdWString(path)).suffix().toLower();
+            if (UiHelper::isGraphicsFile(ext)) {
+                labelMenu->addAction("解析颜色...", [this, path]() {
+                    // 开启异步分析链，防止 UI 阻塞
+                    QPointer<ScanDialog> weakThis(this);
+                    (void)QtConcurrent::run([weakThis, path]() {
+                        QColor color = UiHelper::extractDominantColor(QString::fromStdWString(path));
+                        QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, color]() {
+                            if (weakThis && color.isValid()) {
+                                MetadataManager::instance().setColor(path, color.name().toStdWString());
+                                weakThis->m_tableModel->triggerSearch();
+                            }
+                        });
+                    });
+                });
+                labelMenu->addSeparator();
+            }
+
+            // 2026-05-17 按照用户要求：重构标记颜色列表，彻底与主界面色彩及存储大一统，使用高雅配色并生成预览图标
+            struct ColorItem { QString name; QString label; QColor preview; };
+            QList<ColorItem> colorItems = {
+                {"", "默认", QColor("#888780")},
+                {"red", "红色", QColor("#E24B4A")},
+                {"orange", "橙色", QColor("#EF9F27")},
+                {"yellow", "黄色", QColor("#FAC775")},
+                {"green", "绿色", QColor("#639922")},
+                {"cyan", "青色", QColor("#1D9E75")},
+                {"blue", "蓝色", QColor("#378ADD")},
+                {"purple", "紫色", QColor("#7F77DD")},
+                {"gray", "灰色", QColor("#5F5E5A")}
+            };
+            for (const auto& ci : colorItems) {
+                QAction* act = labelMenu->addAction(ci.label);
+                connect(act, &QAction::triggered, this, [this, path, name = ci.name]() {
+                    MetadataManager::instance().setColor(path, name.toStdWString());
+                    m_tableModel->triggerSearch();
+                });
+                if (meta.color == ci.name.toStdWString()) {
+                    act->setCheckable(true);
+                    act->setChecked(true);
+                }
+                QPixmap pix(12, 12); pix.fill(Qt::transparent);
+                QPainter p(&pix); p.setRenderHint(QPainter::Antialiasing);
+                p.setBrush(ci.preview); p.setPen(Qt::NoPen);
+                p.drawEllipse(0, 0, 12, 12);
+                act->setIcon(QIcon(pix));
+            }
+
+            menu.addAction(meta.pinned ? "取消置顶" : "置顶文件", [this, path, meta]() {
+                MetadataManager::instance().setPinned(path, !meta.pinned);
+                m_tableModel->triggerSearch();
+            });
+
+            menu.addAction("编辑标签...", [this, path, meta]() {
+                bool ok;
+                QString text = QInputDialog::getText(this, "编辑标签", "标签 (逗号分隔):", QLineEdit::Normal, meta.tags.join(","), &ok);
+                if (ok) {
+                    MetadataManager::instance().setTags(path, text.split(",", Qt::SkipEmptyParts));
+                    m_tableModel->triggerSearch();
+                }
+            });
+
+            menu.addAction("编辑备注...", [this, path, meta]() {
+                bool ok;
+                QString text = QInputDialog::getMultiLineText(this, "编辑备注", "备注内容:", QString::fromStdWString(meta.note), &ok);
+                if (ok) {
+                    MetadataManager::instance().setNote(path, text.toStdWString());
+                    m_tableModel->triggerSearch();
+                }
+            });
+
+            menu.addAction(meta.encrypted ? "解密文件" : "加密文件", [this, path, meta]() {
+                MetadataManager::instance().setEncrypted(path, !meta.encrypted);
+                m_tableModel->triggerSearch();
+            });
+
+            menu.addSeparator();
+        }
+        
         menu.addAction("属性", [this, selectedRows]() {
             QString path = m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 1)).toString();
             std::wstring wpath = path.toStdWString();
@@ -1125,7 +1244,51 @@ void ScanDialog::keyPressEvent(QKeyEvent* event) {
         }
         return;
     }
+    handleMetadataShortcut(event);
     FramelessDialog::keyPressEvent(event);
+}
+
+// 2026-05-16 快捷键核心处理逻辑：支持评分、置顶、标签等深度管理快捷键
+void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
+    auto view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
+    auto selection = view->selectionModel()->selectedRows();
+    if (selection.isEmpty()) return;
+    
+    std::wstring path = m_tableModel->data(m_tableModel->index(selection.first().row(), 1)).toString().toStdWString();
+    auto meta = MetadataManager::instance().getMeta(path);
+
+    // Ctrl + 0-5: 评分
+    if (event->modifiers() == Qt::ControlModifier && event->key() >= Qt::Key_0 && event->key() <= Qt::Key_5) {
+        int rating = event->key() - Qt::Key_0;
+        MetadataManager::instance().setRating(path, rating);
+        m_tableModel->triggerSearch();
+        return;
+    }
+
+    // Alt 快捷键
+    if (event->modifiers() == Qt::AltModifier) {
+        if (event->key() == Qt::Key_P) { // 置顶
+            MetadataManager::instance().setPinned(path, !meta.pinned);
+            m_tableModel->triggerSearch();
+        } else if (event->key() == Qt::Key_L) { // 加密
+            MetadataManager::instance().setEncrypted(path, !meta.encrypted);
+            m_tableModel->triggerSearch();
+        } else if (event->key() == Qt::Key_T) { // 标签
+            bool ok;
+            QString text = QInputDialog::getText(this, "编辑标签", "标签 (逗号分隔):", QLineEdit::Normal, meta.tags.join(","), &ok);
+            if (ok) {
+                MetadataManager::instance().setTags(path, text.split(",", Qt::SkipEmptyParts));
+                m_tableModel->triggerSearch();
+            }
+        } else if (event->key() == Qt::Key_N) { // 备注
+            bool ok;
+            QString text = QInputDialog::getMultiLineText(this, "编辑备注", "备注内容:", QString::fromStdWString(meta.note), &ok);
+            if (ok) {
+                MetadataManager::instance().setNote(path, text.toStdWString());
+                m_tableModel->triggerSearch();
+            }
+        }
+    }
 }
 
 bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {

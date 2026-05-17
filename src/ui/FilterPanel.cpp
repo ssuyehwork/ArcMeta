@@ -1,6 +1,7 @@
 #include "FilterPanel.h"
 #include "ToolTipOverlay.h"
 #include "UiHelper.h"
+#include "ColorPicker.h"
 #include <QPushButton>
 #include <QMouseEvent>
 #include <QCursor>
@@ -94,12 +95,12 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     topBar->setStyleSheet(
         "QWidget#ContainerHeader {"
         "  background-color: #252526;"
-        "  border-bottom: 1px solid #333;"
+        "  border-bottom: none;" // 2026-05-17 按照用户要求：覆盖全局 QSS 的 border-bottom，避免与首个 GroupHdrRow 的 border-top 叠加形成 2px 视觉分割线
         "}"
     );
     QHBoxLayout* topL = new QHBoxLayout(topBar);
-    topL->setContentsMargins(15, 2, 15, 0); // 严格还原 15px 左右边距，顶部 2px 偏移以垂直居中
-    topL->setSpacing(8);
+    topL->setContentsMargins(15, 0, 5, 0); // 2026-05-17 按照用户要求：右侧边距统一设为 5px，上下 0px 垂直居中
+    topL->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
 
     QLabel* iconLabel = new QLabel(topBar);
     iconLabel->setPixmap(UiHelper::getIcon("filter", QColor("#f1c40f"), 18).pixmap(18, 18));
@@ -108,19 +109,22 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     QLabel* title = new QLabel("筛选", topBar);
     title->setStyleSheet("font-size: 13px; font-weight: bold; color: #f1c40f; background: transparent; border: none;");
 
-    m_btnClearAll = new QPushButton("清除", topBar);
-    m_btnClearAll->setFixedSize(42, 22);
+    m_btnClearAll = new QPushButton(topBar);
+    m_btnClearAll->setFixedSize(24, 24); // 2026-05-17 按照用户要求：统一为 24x24 规格以实现像素级对齐
+    m_btnClearAll->setIcon(UiHelper::getIcon("trash", QColor("#B0B0B0"))); // 将文字重构为具有高度语义化的 trash SVG 图标
+    m_btnClearAll->setIconSize(QSize(16, 16));
+    m_btnClearAll->setFlat(true);
+    m_btnClearAll->setCursor(Qt::PointingHandCursor);
     m_btnClearAll->setProperty("tooltipText", "重置所有筛选条件");
     m_btnClearAll->installEventFilter(this);
     m_btnClearAll->setStyleSheet(
-        "QPushButton { background: transparent; border: none; border-radius: 4px;"
-        "              color: #AAAAAA; font-size: 11px; }"
-        "QPushButton:hover { background: #3e3e42; color: #EEEEEE; }");
+        "QPushButton { background: transparent; border: none; border-radius: 4px; }"
+        "QPushButton:hover { background: rgba(255, 255, 255, 0.1); }");
     connect(m_btnClearAll, &QPushButton::clicked, this, &FilterPanel::clearAllFilters);
 
     topL->addWidget(title);
     topL->addStretch();
-    topL->addWidget(m_btnClearAll);
+    topL->addWidget(m_btnClearAll, 0, Qt::AlignVCenter);
     m_mainLayout->addWidget(topBar);
 
     // 滚动内容区
@@ -134,7 +138,7 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     m_container->setStyleSheet("QWidget { background: transparent; }");
     m_containerLayout = new QVBoxLayout(m_container);
     // 恢复旧版边距：右侧和底部留出 10px 缓冲空间
-    m_containerLayout->setContentsMargins(0, 0, 10, 10);
+    m_containerLayout->setContentsMargins(0, 0, 0, 10); // 2026-05-17 按照用户要求：右侧由 10 改为 0，消除内容区右侧留白
     m_containerLayout->setSpacing(0);
     m_containerLayout->addStretch();
 
@@ -153,6 +157,8 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
     } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::MouseButtonPress) {
         ToolTipOverlay::hideTip();
     }
+    
+    // 2026-05-17 根因修复：已废除 Resize 监听逻辑（原用于绝对定位，现已改为内嵌布局）
     return QWidget::eventFilter(watched, event);
 }
 
@@ -205,9 +211,69 @@ void FilterPanel::rebuildGroups() {
     }
 
     // ── 2. 颜色标记 ──────────────────────────────────────────
-    if (!m_colorCounts.isEmpty()) {
+    if (!m_colorCounts.isEmpty() || !m_filter.colors.isEmpty()) {
         QVBoxLayout* gl = nullptr;
-        QWidget* g = buildGroup("颜色标记", gl);
+        QHBoxLayout* hdrLayout = nullptr; // 标题行内嵌布局
+        QWidget* g = buildGroup("颜色标记", gl, &hdrLayout);
+        
+        if (hdrLayout) {
+            QPushButton* btnCustomColor = new QPushButton(hdrLayout->parentWidget());
+            btnCustomColor->setObjectName("BtnCustomColor");
+            btnCustomColor->setFixedSize(20, 20);
+            btnCustomColor->setCursor(Qt::PointingHandCursor);
+            // 2026-05-17 按照用户要求：rebuildGroups 每次重建按钮，图标颜色必须从
+            // m_filter.colors 中反查最后一个自定义色（#开头）来初始化，
+            // 而不能固定为蓝色，否则 rebuildGroups 后颜色会被还原。
+            QColor btnIconColor("#3498db"); // 默认蓝，未选过自定义颜色时的占位色
+            for (const QString& key : m_filter.colors)
+                if (key.startsWith('#')) btnIconColor = QColor(key);
+            btnCustomColor->setIcon(UiHelper::getIcon("paint_bucket", btnIconColor, 14));
+            btnCustomColor->setStyleSheet(
+                "QPushButton { background: transparent; border: none; }"
+                "QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }"
+            );
+            hdrLayout->addWidget(btnCustomColor); 
+            
+            connect(btnCustomColor, &QPushButton::clicked, this, [this, btnCustomColor]() {
+                ColorPicker* picker = new ColorPicker(this);
+                connect(picker, &ColorPicker::colorSelected, this, [this, btnCustomColor](const QColor& c, int tolerance) {
+                    QString hex = c.name().toUpper();
+                    // 2026-05-17 按照用户要求：存入容差值并触发筛选更新
+                    m_filter.colorTolerance = tolerance;
+                    // 2026-05-17 按照用户要求：图标颜色随所选颜色实时同步，不再固定为蓝色
+                    btnCustomColor->setIcon(UiHelper::getIcon("paint_bucket", c, 14));
+                    if (!m_filter.colors.contains(hex)) {
+                        m_filter.colors.append(hex);
+                        emit filterChanged(m_filter);
+                        rebuildGroups();
+                    }
+                });
+                picker->adjustSize();
+                QPoint pos = btnCustomColor->mapToGlobal(QPoint(0, 0));
+                pos.setY(pos.y() - picker->height() - 5);
+                picker->move(pos);
+                picker->show();
+            });
+        }
+        
+        // 追加已被筛选但不在基础列表中的自定义颜色 (相近色)
+        for (const QString& key : m_filter.colors) {
+            if (key.startsWith("#")) {
+                QColor dotC = QColor(key);
+                QCheckBox* cb = addFilterRow(gl, "相近色: " + key, 0, dotC);
+                cb->blockSignals(true);
+                cb->setChecked(true);
+                cb->blockSignals(false);
+                connect(cb, &QCheckBox::toggled, this, [this, key](bool on) {
+                    if (!on) {
+                        m_filter.colors.removeAll(key);
+                        emit filterChanged(m_filter);
+                        rebuildGroups();
+                    }
+                });
+            }
+        }
+
         for (const QString& key : QStringList{"", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "gray"}) {
             if (!m_colorCounts.contains(key)) continue;
             QCheckBox* cb = addFilterRow(gl, colorDisplayName(key), m_colorCounts[key], colorMap.value(key));
@@ -356,46 +422,79 @@ void FilterPanel::rebuildGroups() {
 }
 
 // ─── buildGroup ───────────────────────────────────────────────────
-QWidget* FilterPanel::buildGroup(const QString& title, QVBoxLayout*& outContentLayout) {
+// 2026-05-17 终极根因修复：引入独立 hdrRow(QWidget) 作为标题行容器
+// hdr(QPushButton) 恢复原始有文字写法，绝对不携带任何子控件和内嵌布局
+// btnCustomColor 等右侧按钮通过 outHdrLayout 追加到 hdrRow 的 QHBoxLayout 里
+// 这是 Qt 最正规的写法，彻底消除 QPushButton 内嵌布局引发的渲染冲突和留白
+QWidget* FilterPanel::buildGroup(const QString& title, QVBoxLayout*& outContentLayout,
+                                  QHBoxLayout** outHdrLayout) {
     QWidget* wrapper = new QWidget(m_container);
-    wrapper->setStyleSheet("QWidget { background: transparent; }");
+    // 2026-05-17 根因修复：不使用 "QWidget { background: transparent; }" 类选择器
+    // 该选择器会级联到所有子孙 QWidget，与 MainWindow 全局 QSS 相互叠加造成混乱
+    // 改为仅对 wrapper 自身设置透明背景（借助 WA_StyledBackground 隔离传播）
+    wrapper->setAttribute(Qt::WA_StyledBackground, true);
+    wrapper->setStyleSheet("background: transparent;"); // 无选择器，仅作用于 wrapper 自身
     QVBoxLayout* wl = new QVBoxLayout(wrapper);
     wl->setContentsMargins(0, 0, 0, 0);
     wl->setSpacing(0);
 
-    // 2026-05-07 按照用户要求：改用 QPushButton 替代 QToolButton，因为 QPushButton 对 text-align 支持更好
-    QPushButton* hdr = new QPushButton(title, wrapper);
+    // hdrRow：整个标题行的容器，负责背景色和上边框
+    // 2026-05-17 终极根因修复：必须使用 ID 选择器 QWidget#GroupHdrRow
+    // 原因：MainWindow 全局 QSS 有 #FilterContainer { background-color: #1E1E1E } 的规则，
+    //       会级联到所有 QWidget 子孙，将 hdrRow 的背景强制变为 #1E1E1E（深黑色），
+    //       造成标题行与内容区视觉上无法区分，形成"留白"假象。
+    //       ID 选择器的 QSS 特异性高于祖先容器的规则，可以正确覆盖。
+    QWidget* hdrRow = new QWidget(wrapper);
+    hdrRow->setObjectName("GroupHdrRow");   // ← 关键：打上 ID 以提升 QSS 优先级
+    hdrRow->setFixedHeight(24);
+    hdrRow->setAttribute(Qt::WA_StyledBackground, true);
+    hdrRow->setStyleSheet(
+        "QWidget#GroupHdrRow {"            // ID 选择器，特异性高于全局级联
+        "  background: #252526;"
+        "  border-top: 1px solid #333333;"
+        "}");
+
+    QHBoxLayout* hdrRowLayout = new QHBoxLayout(hdrRow);
+    hdrRowLayout->setContentsMargins(0, 0, 0, 0);
+    hdrRowLayout->setSpacing(0);
+
+    // 2026-05-07 按照用户要求：QPushButton（有文字，text-align left），纯净无子控件
+    // 2026-05-17 终极修复：parent 改为 hdrRow，背景 transparent（由 hdrRow 统一提供）
+    QPushButton* hdr = new QPushButton(title, hdrRow);
     hdr->setCheckable(true);
     hdr->setChecked(true);
     hdr->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     hdr->setFixedHeight(24);
     hdr->setStyleSheet(
-        "QPushButton { "
-        "  background: #252526; "
-        "  border: none; "
-        "  border-top: 1px solid #333333;"
-        "  color: #AAAAAA; "
-        "  font-size: 11px; "
-        "  font-weight: 600; "
-        "  text-align: left; "
-        "  padding-left: 8px; "
-        "  padding-right: 0px; "
-        "  padding-top: 0px; "
-        "  padding-bottom: 0px; "
-        "  margin: 0px; "
-        "} "
-        "QPushButton:hover { color: #EEEEEE; } "
-        "QPushButton:pressed { background: #252526; }"); 
+        "QPushButton {"
+        "  background: transparent;"   // hdrRow 已提供背景，此处透明即可
+        "  border: none;"
+        "  color: #AAAAAA;"
+        "  font-size: 11px;"
+        "  font-weight: 600;"
+        "  text-align: left;"
+        "  padding-left: 8px;"
+        "  padding-right: 4px;"
+        "  padding-top: 0px;"
+        "  padding-bottom: 0px;"
+        "  margin: 0px;"
+        "}"
+        "QPushButton:hover { color: #EEEEEE; }"
+        "QPushButton:pressed { background: transparent; }");
+    hdrRowLayout->addWidget(hdr);   // hdr 占满剩余宽度
+
+    if (outHdrLayout) *outHdrLayout = hdrRowLayout; // 暴露 hdrRow 布局，供追加右侧按钮
 
     QWidget* content = new QWidget(wrapper);
-    content->setStyleSheet("QWidget { background: transparent; }");
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet("background: transparent;"); // 无选择器，仅作用于 content 自身
     outContentLayout = new QVBoxLayout(content);
     outContentLayout->setContentsMargins(0, 0, 0, 0);
     outContentLayout->setSpacing(0);
 
     connect(hdr, &QPushButton::toggled, content, &QWidget::setVisible);
 
-    wl->addWidget(hdr);
+    wl->addWidget(hdrRow);     // 加入 hdrRow，不再直接加 hdr
     wl->addWidget(content);
     return wrapper;
 }

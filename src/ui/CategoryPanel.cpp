@@ -13,6 +13,7 @@
 #include <QRegularExpression>
 #include "../db/CategoryRepo.h"
 #include "../db/ItemRepo.h"
+#include "../db/SyncEngine.h"
 #include "../meta/MetadataManager.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -636,8 +637,8 @@ void CategoryPanel::initUi() {
         "}"
     );
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 2, 15, 0);
-    headerLayout->setSpacing(8);
+    headerLayout->setContentsMargins(15, 0, 5, 0); // 2026-05-17 按照用户要求：右侧边距统一设为 5px，上下 0px 垂直居中
+    headerLayout->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
 
     QLabel* iconLabel = new QLabel(header);
     iconLabel->setPixmap(UiHelper::getIcon("folder_filled", QColor("#3498db"), 18).pixmap(18, 18));
@@ -647,6 +648,72 @@ void CategoryPanel::initUi() {
     titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #3498db; background: transparent; border: none;");
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
+
+    // 2026-05-17 按照用户要求：在“手动全量扫描与对账”按钮左侧新增一个开关切换按钮，暂时设为空壳
+    QPushButton* btnSwitch = new QPushButton(header);
+    btnSwitch->setFixedSize(24, 24);
+    btnSwitch->setCheckable(true);
+    btnSwitch->setFlat(true);
+    btnSwitch->setCursor(Qt::PointingHandCursor);
+    btnSwitch->setIcon(UiHelper::getIcon("switch_off", QColor("#B0B0B0")));
+    btnSwitch->setIconSize(QSize(16, 16));
+    btnSwitch->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }");
+    btnSwitch->setProperty("tooltipText", "工作模式切换：关闭采用数据库模式，开启采用JSON内存模式");
+    btnSwitch->installEventFilter(this);
+    connect(btnSwitch, &QPushButton::toggled, this, [this, btnSwitch](bool checked) {
+        // 先发拉起物理对账同步，确保双轨数据一致、零数据落差平滑迁移！
+        CategoryRepo::syncDatabaseAndJson();
+
+        if (checked) {
+            btnSwitch->setIcon(UiHelper::getIcon("switch_on", QColor("#2ecc71")));
+            btnSwitch->setProperty("tooltipText", "工作模式切换：当前为JSON模式（内存）");
+        } else {
+            btnSwitch->setIcon(UiHelper::getIcon("switch_off", QColor("#B0B0B0")));
+            btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
+        }
+
+        // 1. 设置底层分类库模式
+        CategoryRepo::setJsonMode(checked);
+
+        // 2. 促使元数据管理器进行数据重载与重构
+        if (checked) {
+            MetadataManager::instance().initFromJsonMode();
+        } else {
+            MetadataManager::instance().initFromDatabase();
+        }
+
+        // 3. 树模型重新拉取
+        if (m_categoryModel) {
+            m_categoryModel->refresh();
+        }
+    });
+    headerLayout->addWidget(btnSwitch, 0, Qt::AlignVCenter);
+
+    // 2026-06-xx 按照用户要求：从状态栏迁移至此，执行手动全量扫描与对账
+    QPushButton* btnRescan = new QPushButton(header);
+    btnRescan->setFixedSize(24, 24); // 适当放大以适应标题栏高度
+    btnRescan->setIcon(UiHelper::getIcon("sync", QColor("#B0B0B0"))); 
+    btnRescan->setIconSize(QSize(16, 16));
+    btnRescan->setFlat(true);
+    btnRescan->setCursor(Qt::PointingHandCursor);
+    btnRescan->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }");
+    btnRescan->setProperty("tooltipText", "手动全量扫描与对账");
+    btnRescan->installEventFilter(this); // 2026-06-xx 按照规范：安装过滤器以驱动自定义 ToolTip
+    connect(btnRescan, &QPushButton::clicked, this, [this]() {
+        // 1. 全量双向分类与项映射物理对账同步
+        CategoryRepo::syncDatabaseAndJson();
+
+        // 2. 瞬时刷新界面树展示
+        if (m_categoryModel) {
+            m_categoryModel->refresh();
+        }
+
+        // 3. 启动后台文件与分布式 USN 对账扫描
+        (void)QtConcurrent::run([]() {
+            SyncEngine::instance().runFullScan({}, nullptr);
+        });
+    });
+    headerLayout->addWidget(btnRescan, 0, Qt::AlignVCenter);
 
     m_mainLayout->addWidget(header);
 
@@ -1067,6 +1134,17 @@ bool CategoryPanel::tryUnlockCategory(const QModelIndex& index) {
 }
 
 bool CategoryPanel::eventFilter(QObject* obj, QEvent* event) {
+    // 2026-06-xx 按照用户要求：补全对 ToolTipOverlay 的物理拦截与映射逻辑
+    // 理由：主窗口无法自动拦截深层嵌套子组件的 Hover 事件，需在组件层手动分发
+    if (event->type() == QEvent::HoverEnter || event->type() == QEvent::Enter) {
+        QString text = obj->property("tooltipText").toString();
+        if (!text.isEmpty()) {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), text);
+        }
+    } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::Leave) {
+        ToolTipOverlay::hideTip();
+    }
+
     if (event->type() == QEvent::KeyPress) {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
         

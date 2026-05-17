@@ -105,14 +105,42 @@ void StarRatingWidget::paintEvent(QPaintEvent*) {
     QPixmap emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), QColor("#444444"));
     for (int i = 0; i < 5; ++i) { QRect r(i * (starSize + spacing), 0, starSize, starSize); painter.drawPixmap(r, (i < m_rating) ? filledStar : emptyStar); }
 }
-void StarRatingWidget::mousePressEvent(QMouseEvent* e) { e->accept(); }
+void StarRatingWidget::mousePressEvent(QMouseEvent* e) {
+    e->accept();
+    int x = e->pos().x();
+    int starSize = 20;
+    int spacing = 4;
+    int index = x / (starSize + spacing);
+    if (index >= 0 && index < 5) {
+        int newRating = index + 1;
+        // 如果点击的是当前已选择的星级，则支持反选清除为 0
+        if (newRating == m_rating) newRating = 0;
+        setRating(newRating);
+        emit ratingChanged(newRating);
+    }
+}
 
 // --- ColorPickerWidget ---
 ColorPickerWidget::ColorPickerWidget(QWidget* parent) : QWidget(parent) {
     m_colors = {{L"", QColor("#888780")}, {L"red", QColor("#E24B4A")}, {L"orange", QColor("#EF9F27")}, {L"yellow", QColor("#FAC775")}, {L"green", QColor("#639922")}, {L"cyan", QColor("#1D9E75")}, {L"blue", QColor("#378ADD")}, {L"purple", QColor("#7F77DD")}, {L"gray", QColor("#5F5E5A")}};
     setFixedSize((int)m_colors.size() * 24, 24); setCursor(Qt::PointingHandCursor);
 }
-void ColorPickerWidget::setColor(const std::wstring& name) { m_currentColor = name; update(); }
+void ColorPickerWidget::setColor(const std::wstring& name) {
+    m_currentColor = name;
+    // 2026-05-17 按照要求：如果有第 10 个提取色点，重置还原为前 9 个系统色点
+    if (m_colors.size() > 9) {
+        m_colors.resize(9);
+    }
+    // 动态检测是否为自定义的十六进制主色码，并作为第 10 个临时色点进行渲染以提供直观反馈
+    if (!name.empty() && name[0] == L'#') {
+        QColor customColor(QString::fromStdWString(name));
+        if (customColor.isValid()) {
+            m_colors.push_back({name, customColor});
+        }
+    }
+    setFixedSize((int)m_colors.size() * 24, 24);
+    update();
+}
 void ColorPickerWidget::paintEvent(QPaintEvent*) {
     QPainter p(this); p.setRenderHint(QPainter::Antialiasing);
     for (int i = 0; i < (int)m_colors.size(); ++i) {
@@ -121,7 +149,15 @@ void ColorPickerWidget::paintEvent(QPaintEvent*) {
         p.setPen(Qt::NoPen); p.setBrush(m_colors[i].value); p.drawEllipse(r);
     }
 }
-void ColorPickerWidget::mousePressEvent(QMouseEvent* e) { e->accept(); }
+void ColorPickerWidget::mousePressEvent(QMouseEvent* e) {
+    e->accept();
+    int x = e->pos().x();
+    int index = x / 24;
+    if (index >= 0 && index < (int)m_colors.size()) {
+        setColor(m_colors[index].name);
+        emit colorChanged(m_colors[index].name);
+    }
+}
 
 // --- MetaPanel ---
 MetaPanel::MetaPanel(QWidget* parent) : QFrame(parent) {
@@ -133,7 +169,9 @@ MetaPanel::MetaPanel(QWidget* parent) : QFrame(parent) {
 void MetaPanel::initUi() {
     QWidget* header = new QWidget(this); header->setObjectName("ContainerHeader"); header->setFixedHeight(32);
     header->setStyleSheet("QWidget#ContainerHeader { background-color: #252526; border-bottom: 1px solid #333; }");
-    QHBoxLayout* headerLayout = new QHBoxLayout(header); headerLayout->setContentsMargins(15, 2, 15, 0); headerLayout->setSpacing(8);
+    QHBoxLayout* headerLayout = new QHBoxLayout(header);
+    headerLayout->setContentsMargins(15, 0, 5, 0); // 2026-05-17 按照用户要求：右侧边距统一设为 5px，消除 15px 留白
+    headerLayout->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
     QLabel* iconLabel = new QLabel(header); iconLabel->setPixmap(UiHelper::getIcon("all_data", QColor("#4a90e2"), 18).pixmap(18, 18)); headerLayout->addWidget(iconLabel);
     QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
@@ -144,13 +182,16 @@ void MetaPanel::initUi() {
         "QPushButton:hover { background-color: #F1707A; } "
         "QPushButton:pressed { background-color: #A50000; }"
     );
-    connect(closeBtn, &QPushButton::clicked, [this]() { this->hide(); }); headerLayout->addWidget(closeBtn); m_mainLayout->addWidget(header);
+    connect(closeBtn, &QPushButton::clicked, [this]() { this->hide(); });
+    headerLayout->addWidget(closeBtn, 0, Qt::AlignVCenter);
+    m_mainLayout->addWidget(header);
     m_scrollArea = new QScrollArea(this); m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scrollArea->setWidgetResizable(true); m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
     m_container = new QWidget(m_scrollArea); m_containerLayout = new QVBoxLayout(m_container); m_containerLayout->setContentsMargins(0, 0, 0, 0); m_containerLayout->setSpacing(0);
     addInfoRow("名称", lblName); addInfoRow("类型", lblType); addInfoRow("大小", lblSize);
     addInfoRow("创建时间", lblCtime); addInfoRow("修改时间", lblMtime); addInfoRow("访问时间", lblAtime);
     addInfoRow("物理路径", lblPath); addInfoRow("加密状态", lblEncrypted);
+
     m_containerLayout->addWidget(createSeparator());
     m_containerLayout->addSpacing(6);  // separator 后统一留 6px
 

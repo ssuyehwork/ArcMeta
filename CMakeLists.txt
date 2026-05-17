@@ -66,6 +66,8 @@ set(SOURCES
     src/db/SyncEngine.h
     src/meta/AmMetaJson.cpp
     src/meta/AmMetaJson.h
+    src/meta/AllFrnManager.cpp
+    src/meta/AllFrnManager.h
     src/meta/BatchRenameEngine.cpp
     src/meta/BatchRenameEngine.h
     src/meta/MetadataDefs.h
@@ -90,6 +92,8 @@ set(SOURCES
     src/ui/CategoryPanel.h
     src/ui/CategorySetPasswordDialog.cpp
     src/ui/CategorySetPasswordDialog.h
+    src/ui/ColorPicker.cpp
+    src/ui/ColorPicker.h
     src/ui/ContentPanel.cpp
     src/ui/ContentPanel.h
     src/ui/DropListView.cpp

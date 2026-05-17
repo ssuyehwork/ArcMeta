@@ -966,20 +966,8 @@ void MainWindow::setupSplitters() {
     m_statusLeft = new QLabel("就绪中...", statusBar);
     m_statusLeft->setStyleSheet("font-size: 11px; color: #B0B0B0; background: transparent;");
 
-    // 2026-05-24 按照用户要求：在 UI 中添加手动“重新扫描”入口
-    QPushButton* btnRescan = new QPushButton(statusBar);
-    btnRescan->setFixedSize(20, 20);
-    btnRescan->setIcon(UiHelper::getIcon("layers", QColor("#B0B0B0"))); // 复用 layers 图标表示对账
-    btnRescan->setIconSize(QSize(14, 14));
-    btnRescan->setFlat(true);
-    btnRescan->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 2px; }");
-    btnRescan->setProperty("tooltipText", "手动全量扫描与对账");
-    btnRescan->installEventFilter(this);
-    connect(btnRescan, &QPushButton::clicked, []() {
-        (void)QtConcurrent::run([]() {
-            SyncEngine::instance().runFullScan({}, nullptr);
-        });
-    });
+    statusL->addWidget(m_statusLeft);
+    statusL->addStretch(1);
 
     // 绑定 CoreController 状态到状态栏
     auto updateStatus = [this](const QString& text) {
@@ -995,10 +983,6 @@ void MainWindow::setupSplitters() {
         updateStatus(CoreController::instance().statusText());
     });
     updateStatus(CoreController::instance().statusText());
-
-    statusL->addWidget(m_statusLeft);
-    statusL->addWidget(btnRescan);
-    statusL->addStretch(1);
 
     mainL->addWidget(m_titleBarWidget);
     mainL->addWidget(m_navBarWidget);
@@ -1235,11 +1219,15 @@ void MainWindow::navigateTo(const QString& path, bool record) {
     if (path.isEmpty()) return;
     qDebug() << "[Main] 执行跳转 ->" << path << (record ? "(记录历史)" : "(不记录)");
 
-    // 2026-04-12 关键协议：任何导航操作（手动输入、点击、后退、上级）都应强制重置搜索态
+    // 2026-04-12 关键协议：任何导航操作（手动输入、点击、后退、上级）都应强制重置搜索态与筛选态
     if (m_searchEdit && !m_searchEdit->text().isEmpty()) {
         qDebug() << "[Main] 检测到导航操作，物理清空搜索关键词残留:" << m_searchEdit->text();
         m_searchEdit->clear();
         m_contentPanel->search("");
+    }
+    
+    if (m_filterPanel) {
+        m_filterPanel->clearAllFilters();
     }
     
     // 处理虚拟路径 "computer://" —— 此电脑（磁盘分区列表）

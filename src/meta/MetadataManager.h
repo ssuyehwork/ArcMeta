@@ -42,6 +42,7 @@ public:
     static MetadataManager& instance();
 
     void initFromDatabase();
+    void initFromJsonMode();
     RuntimeMeta getMeta(const std::wstring& path);
 
     void setRating(const std::wstring& path, int rating);

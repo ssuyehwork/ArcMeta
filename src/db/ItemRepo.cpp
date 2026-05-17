@@ -243,6 +243,10 @@ QStringList ItemRepo::getPathsBySystemType(const QString& type) {
     } else if (type == "untagged") {
         q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' "
                   "AND (tags IS NULL OR tags = '' OR tags = '[]') GROUP BY file_id_128 LIMIT 1000");
+    } else if (type == "tags") {
+        // 2026-06-xx 按照用户要求：返回所有已设置标签的文件
+        q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' "
+                  "AND (tags IS NOT NULL AND tags != '' AND tags != '[]') GROUP BY file_id_128 LIMIT 1000");
     } else if (type == "trash") {
         q.prepare("SELECT MIN(path) FROM items WHERE deleted = 1 AND type = 'file' GROUP BY file_id_128 LIMIT 1000");
     } else {

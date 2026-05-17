@@ -19,6 +19,7 @@ struct FilterState {
     QStringList  types;
     QStringList  createDates;   // "today" | "yesterday" | "YYYY-MM-DD"
     QStringList  modifyDates;
+    int          colorTolerance = 30; // 2026-05-17 按照用户要求：自定义颜色相近色容差（0~100），由 ColorPicker 准确度滑条驱动
 };
 
 /**
@@ -59,7 +60,10 @@ public slots:
 private:
     void rebuildGroups();
 
-    QWidget*   buildGroup(const QString& title, QVBoxLayout*& outContentLayout);
+    // 2026-05-17 根因修复：增加 outHdrLayout 参数，让调用方直接往标题行布局追加按钮
+    // 彻底替代绝对定位方案，消除非布局子控件撑高 wrapper 导致的留白
+    QWidget*   buildGroup(const QString& title, QVBoxLayout*& outContentLayout,
+                          QHBoxLayout** outHdrLayout = nullptr);
     QCheckBox* addFilterRow(QVBoxLayout* layout, const QString& label,
                             int count, const QColor& dotColor = Qt::transparent);
 
