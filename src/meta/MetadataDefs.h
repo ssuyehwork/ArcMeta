@@ -5,7 +5,14 @@
 #include <vector>
 #include <QString>
 
+#include <QColor>
+
 namespace ArcMeta {
+
+struct PaletteEntry {
+    QColor color;
+    float ratio;
+};
 
 /**
  * @brief 文件夹级别的元数据
@@ -23,10 +30,11 @@ struct FolderMeta {
     std::string encryptIv;
     std::string encryptVerifyHash;
     std::string fileId128; // 128-bit File ID (Hex string)
+    std::vector<PaletteEntry> palettes;
 
     bool isDefault() const {
         return sortBy == L"name" && sortOrder == L"asc" && rating == 0 &&
-               color.empty() && tags.empty() && !pinned && note.empty() && !encrypted && fileId128.empty();
+               color.empty() && tags.empty() && !pinned && note.empty() && !encrypted && fileId128.empty() && palettes.empty();
     }
 };
 
@@ -52,10 +60,11 @@ struct ItemMeta {
     long long creationTime = 0;   // ctime (毫秒)
     long long modificationTime = 0; // mtime (毫秒)
     long long accessTime = 0;     // atime (毫秒)
+    std::vector<PaletteEntry> palettes;
 
     bool hasUserOperations() const {
         return rating > 0 || !color.empty() || !tags.empty() || pinned ||
-               !note.empty() || encrypted || !fileId128.empty();
+               !note.empty() || encrypted || !fileId128.empty() || !palettes.empty();
     }
 };
 

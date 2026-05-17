@@ -23,6 +23,7 @@ struct RuntimeMeta {
     std::wstring note;
     bool pinned = false;
     bool encrypted = false;
+    std::vector<PaletteEntry> palettes;
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
@@ -51,6 +52,7 @@ public:
     void setTags(const std::wstring& path, const QStringList& tags);
     void setNote(const std::wstring& path, const std::wstring& note);
     void setEncrypted(const std::wstring& path, bool encrypted);
+    void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes);
 
     void renameItem(const std::wstring& oldPath, const std::wstring& newPath);
 

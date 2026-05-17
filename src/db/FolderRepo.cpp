@@ -12,7 +12,7 @@ bool FolderRepo::save(const std::wstring& volume, const std::wstring& path, cons
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     
-    q.prepare("INSERT OR REPLACE INTO folders (volume, path, rating, color, tags, pinned, note, sort_by, sort_order, encrypted, encrypt_salt, encrypt_iv, encrypt_verify_hash, file_id_128) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    q.prepare("INSERT OR REPLACE INTO folders (volume, path, rating, color, tags, pinned, note, sort_by, sort_order, encrypted, encrypt_salt, encrypt_iv, encrypt_verify_hash, file_id_128, palettes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     q.addBindValue(QString::fromStdWString(volume));
     q.addBindValue(QString::fromStdWString(path));
     q.addBindValue(meta.rating);
@@ -32,13 +32,24 @@ bool FolderRepo::save(const std::wstring& volume, const std::wstring& path, cons
     q.addBindValue(QString::fromStdString(meta.encryptVerifyHash));
     q.addBindValue(QString::fromStdString(meta.fileId128));
     
+    QJsonArray palArr;
+    for (const auto& p : meta.palettes) {
+        QJsonObject pObj;
+        QJsonArray cArr;
+        cArr.append(p.color.red()); cArr.append(p.color.green()); cArr.append(p.color.blue());
+        pObj["color"] = cArr;
+        pObj["ratio"] = (double)p.ratio;
+        palArr.append(pObj);
+    }
+    q.addBindValue(QJsonDocument(palArr).toJson(QJsonDocument::Compact));
+
     return q.exec();
 }
 
 bool FolderRepo::get(const std::wstring& volume, const std::wstring& path, FolderMeta& meta) {
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
-    q.prepare("SELECT rating, color, tags, pinned, note, sort_by, sort_order, encrypted, encrypt_salt, encrypt_iv, encrypt_verify_hash, file_id_128 FROM folders WHERE volume = ? AND path = ?");
+    q.prepare("SELECT rating, color, tags, pinned, note, sort_by, sort_order, encrypted, encrypt_salt, encrypt_iv, encrypt_verify_hash, file_id_128, palettes FROM folders WHERE volume = ? AND path = ?");
     q.addBindValue(QString::fromStdWString(volume));
     q.addBindValue(QString::fromStdWString(path));
     
@@ -61,6 +72,18 @@ bool FolderRepo::get(const std::wstring& volume, const std::wstring& path, Folde
         meta.encryptIv = q.value(9).toString().toStdString();
         meta.encryptVerifyHash = q.value(10).toString().toStdString();
         meta.fileId128 = q.value(11).toString().toStdString();
+
+        QJsonDocument palDoc = QJsonDocument::fromJson(q.value(12).toByteArray());
+        meta.palettes.clear();
+        if (palDoc.isArray()) {
+            for (const auto& v : palDoc.array()) {
+                QJsonObject pObj = v.toObject();
+                QJsonArray cArr = pObj["color"].toArray();
+                if (cArr.size() >= 3) {
+                    meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj["ratio"].toDouble()});
+                }
+            }
+        }
         return true;
     }
     return false;

@@ -109,6 +109,18 @@ QJsonObject AmMetaJson::folderToEntry(const FolderMeta& meta) {
     obj["file_id_128"] = QString::fromStdString(meta.fileId128);
     QJsonArray tagsArr; for (const auto& t : meta.tags) tagsArr.append(toQString(t));
     obj["tags"] = tagsArr;
+    if (!meta.palettes.empty()) {
+        QJsonArray palArr;
+        for (const auto& p : meta.palettes) {
+            QJsonObject pObj;
+            QJsonArray cArr;
+            cArr.append(p.color.red()); cArr.append(p.color.green()); cArr.append(p.color.blue());
+            pObj["color"] = cArr;
+            pObj["ratio"] = (double)p.ratio;
+            palArr.append(pObj);
+        }
+        obj["palettes"] = palArr;
+    }
     return obj;
 }
 
@@ -124,6 +136,15 @@ FolderMeta AmMetaJson::entryToFolder(const QJsonObject& obj) {
     meta.fileId128 = obj["file_id_128"].toString().toStdString();
     if (obj.contains("tags") && obj["tags"].isArray()) {
         for (const auto& v : obj["tags"].toArray()) meta.tags.push_back(toStdWString(v.toString()));
+    }
+    if (obj.contains("palettes") && obj["palettes"].isArray()) {
+        for (const auto& v : obj["palettes"].toArray()) {
+            QJsonObject pObj = v.toObject();
+            QJsonArray cArr = pObj["color"].toArray();
+            if (cArr.size() >= 3) {
+                meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj["ratio"].toDouble()});
+            }
+        }
     }
     return meta;
 }
@@ -145,6 +166,18 @@ QJsonObject AmMetaJson::itemToEntry(const ItemMeta& meta) {
     obj["file_id_128"] = QString::fromStdString(meta.fileId128);
     QJsonArray tagsArr; for (const auto& t : meta.tags) tagsArr.append(toQString(t));
     obj["tags"] = tagsArr;
+    if (!meta.palettes.empty()) {
+        QJsonArray palArr;
+        for (const auto& p : meta.palettes) {
+            QJsonObject pObj;
+            QJsonArray cArr;
+            cArr.append(p.color.red()); cArr.append(p.color.green()); cArr.append(p.color.blue());
+            pObj["color"] = cArr;
+            pObj["ratio"] = (double)p.ratio;
+            palArr.append(pObj);
+        }
+        obj["palettes"] = palArr;
+    }
     return obj;
 }
 
@@ -165,6 +198,15 @@ ItemMeta AmMetaJson::entryToItem(const QJsonObject& obj) {
     meta.fileId128 = obj["file_id_128"].toString().toStdString();
     if (obj.contains("tags") && obj["tags"].isArray()) {
         for (const auto& v : obj["tags"].toArray()) meta.tags.push_back(toStdWString(v.toString()));
+    }
+    if (obj.contains("palettes") && obj["palettes"].isArray()) {
+        for (const auto& v : obj["palettes"].toArray()) {
+            QJsonObject pObj = v.toObject();
+            QJsonArray cArr = pObj["color"].toArray();
+            if (cArr.size() >= 3) {
+                meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj["ratio"].toDouble()});
+            }
+        }
     }
     return meta;
 }

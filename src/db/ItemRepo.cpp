@@ -55,7 +55,7 @@ bool ItemRepo::save(const std::wstring& parentPath, const std::wstring& name, co
     // 铁律：元数据更新即视为激活该物理文件。
     u.prepare("UPDATE items SET rating = ?, color = ?, tags = ?, pinned = ?, note = ?, "
               "encrypted = ?, encrypt_salt = ?, encrypt_iv = ?, encrypt_verify_hash = ?, "
-              "original_name = ?, file_id_128 = ?, size = ?, deleted = 0, type = ? "
+              "original_name = ?, file_id_128 = ?, size = ?, deleted = 0, type = ?, palettes = ? "
               "WHERE volume = ? AND frn = ?");
     u.addBindValue(meta.rating);
     u.addBindValue(QString::fromStdWString(meta.color));
@@ -74,6 +74,18 @@ bool ItemRepo::save(const std::wstring& parentPath, const std::wstring& name, co
     u.addBindValue(QString::fromStdString(meta.fileId128));
     u.addBindValue(meta.size);
     u.addBindValue(QString::fromStdWString(meta.type)); // 物理对齐 type
+
+    QJsonArray palArr;
+    for (const auto& p : meta.palettes) {
+        QJsonObject pObj;
+        QJsonArray cArr;
+        cArr.append(p.color.red()); cArr.append(p.color.green()); cArr.append(p.color.blue());
+        pObj["color"] = cArr;
+        pObj["ratio"] = (double)p.ratio;
+        palArr.append(pObj);
+    }
+    u.addBindValue(QJsonDocument(palArr).toJson(QJsonDocument::Compact));
+
     u.addBindValue(QString::fromStdWString(volume));
     u.addBindValue(QString::fromStdWString(frn));
 
