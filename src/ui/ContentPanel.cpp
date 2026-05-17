@@ -101,6 +101,9 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
                     long b = filterColor.blue() - itemColor.blue();
                     long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
                     
+                    // 2026-06-xx 物理修复：如果 HEX 完全一致，直接命中，否则再走相近色逻辑
+                    if (fc == c.toUpper()) { matchColor = true; break; }
+                    
                     if (distSq < 15000) { // 容差阈值
                         matchColor = true; break;
                     }
@@ -560,27 +563,27 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
             if ((keyEvent->modifiers() & Qt::AltModifier) &&  
                 (keyEvent->key() >= Qt::Key_1 && keyEvent->key() <= Qt::Key_9)) { 
                  
-                QString color; 
+                QString colorValue; 
                 switch (keyEvent->key()) { 
-                    case Qt::Key_1: color = "red"; break; 
-                    case Qt::Key_2: color = "orange"; break; 
-                    case Qt::Key_3: color = "yellow"; break; 
-                    case Qt::Key_4: color = "green"; break; 
-                    case Qt::Key_5: color = "cyan"; break; 
-                    case Qt::Key_6: color = "blue"; break; 
-                    case Qt::Key_7: color = "purple"; break; 
-                    case Qt::Key_8: color = "gray"; break; 
-                    case Qt::Key_9: color = ""; break; 
+                    case Qt::Key_1: colorValue = "#E04040"; break; // red (quantized)
+                    case Qt::Key_2: colorValue = "#E09020"; break; // orange (quantized)
+                    case Qt::Key_3: colorValue = "#F0C070"; break; // yellow (quantized)
+                    case Qt::Key_4: colorValue = "#609020"; break; // green (quantized)
+                    case Qt::Key_5: colorValue = "#109070"; break; // cyan (quantized)
+                    case Qt::Key_6: colorValue = "#3080D0"; break; // blue (quantized)
+                    case Qt::Key_7: colorValue = "#7070D0"; break; // purple (quantized)
+                    case Qt::Key_8: colorValue = "#505050"; break; // gray (quantized)
+                    case Qt::Key_9: colorValue = ""; break; 
                 } 
  
-                QColor tagColor = UiHelper::parseColorName(color); 
+                QColor tagColor = UiHelper::parseColorName(colorValue); 
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 for (const auto& idx : indexes) { 
                     if (idx.column() == 0) { 
                         QString path = idx.data(PathRole).toString(); 
                         if (!path.isEmpty()) { 
-                            MetadataManager::instance().setColor(path.toStdWString(), color.toStdWString()); 
-                            m_proxyModel->setData(idx, color, ColorRole); 
+                            MetadataManager::instance().setColor(path.toStdWString(), colorValue.toStdWString()); 
+                            m_proxyModel->setData(idx, colorValue, ColorRole); 
  
                             // 2026-06-05 按照要求：快捷键设置颜色后立即重渲染图标，实现视觉同步 
                             QIcon coloredIcon = UiHelper::getFileIcon(path, 128, tagColor); 
@@ -807,22 +810,22 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         QMenu* colorMenu = menu.addMenu("设定颜色标签"); 
         UiHelper::applyMenuStyle(colorMenu); 
         colorMenu->setIcon(UiHelper::getIcon("palette", QColor("#EEEEEE"))); 
-        struct ColorItem { QString name; QString label; QColor preview; }; 
+        struct ColorItem { QString value; QString label; QColor preview; }; 
         QList<ColorItem> colorItems = { 
             {"", "无颜色", QColor("#888780")}, 
-            {"red", "红色", QColor("#E24B4A")}, 
-            {"orange", "橙色", QColor("#EF9F27")}, 
-            {"yellow", "黄色", QColor("#FAC775")}, 
-            {"green", "绿色", QColor("#639922")}, 
-            {"cyan", "青色", QColor("#1D9E75")}, 
-            {"blue", "蓝色", QColor("#378ADD")}, 
-            {"purple", "紫色", QColor("#7F77DD")}, 
-            {"gray", "灰色", QColor("#5F5E5A")} 
+            {"#E04040", "红色", QColor("#E24B4A")}, 
+            {"#E09020", "橙色", QColor("#EF9F27")}, 
+            {"#F0C070", "黄色", QColor("#FAC775")}, 
+            {"#609020", "绿色", QColor("#639922")}, 
+            {"#109070", "青色", QColor("#1D9E75")}, 
+            {"#3080D0", "蓝色", QColor("#378ADD")}, 
+            {"#7070D0", "紫色", QColor("#7F77DD")}, 
+            {"#505050", "灰色", QColor("#5F5E5A")} 
         }; 
         for (const auto& ci : colorItems) { 
             QAction* ca = colorMenu->addAction(ci.label); 
             ca->setData(ActionColorTag); 
-            ca->setProperty("colorName", ci.name); 
+            ca->setProperty("colorName", ci.value); 
             QPixmap pix(12, 12); pix.fill(Qt::transparent); 
             QPainter p(&pix); p.setRenderHint(QPainter::Antialiasing); 
             p.setBrush(ci.preview); p.setPen(Qt::NoPen); 
@@ -965,16 +968,17 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 QColor color = UiHelper::extractDominantColor(path);
                 QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, color]() {
                     if (weakThis && color.isValid()) {
-                        QString colorName = UiHelper::mapToPredefinedColor(color);
-                        QColor tagColor = UiHelper::parseColorName(colorName);
-                        MetadataManager::instance().setColor(path.toStdWString(), colorName.toStdWString());
+                        // 2026-06-xx 物理同步：强制执行 4-bit 量化，确保存储真值与搜索桶完全匹配
+                        QColor quantized = UiHelper::quantizeColor(color);
+                        QString colorHex = quantized.name().toUpper();
+                        MetadataManager::instance().setColor(path.toStdWString(), colorHex.toStdWString());
                         
                         // 物理同步 UI 状态：定位模型索引并注入新颜色与着色图标
                         auto* model = weakThis->m_model;
                         for (int i = 0; i < model->rowCount(); ++i) {
                             auto* item = model->item(i, 0);
                             if (item && item->data(PathRole).toString() == path) {
-                                item->setData(colorName, ColorRole);
+                                item->setData(colorHex, ColorRole);
                                 
                                 // 2026-05-17 逻辑修复：针对图像格式，必须优先尝试提取缩略图，防止图标覆盖内容
                                 QIcon coloredIcon;
@@ -984,7 +988,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                     if (!thumb.isNull()) coloredIcon = QIcon(thumb);
                                 }
                                 if (coloredIcon.isNull()) {
-                                    coloredIcon = UiHelper::getFileIcon(path, 128, tagColor);
+                                    coloredIcon = UiHelper::getFileIcon(path, 128, color);
                                 }
                                 item->setData(coloredIcon, Qt::DecorationRole);
                                 break;
