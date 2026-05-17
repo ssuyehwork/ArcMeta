@@ -23,6 +23,8 @@
 #include <QUuid>
 #include <QDir>
 #include <QFile>
+#include <algorithm>
+#include <cmath>
 
 // Windows Shell 缩略图引擎依赖
 #ifdef Q_OS_WIN
@@ -172,17 +174,17 @@ public:
     }
 
     /**
-     * @brief 对颜色进行 4-bit 量化，确保存储与搜索的一致性
+     * @brief 对颜色进行 3-bit 量化，确保存储与搜索的一致性
      */
     static inline QColor quantizeColor(const QColor& color) {
         if (!color.isValid()) return color;
-        return QColor(color.red() & 0xF0, color.green() & 0xF0, color.blue() & 0xF0);
+        return QColor(color.red() & 0xE0, color.green() & 0xE0, color.blue() & 0xE0);
     }
 
     /**
-     * @brief 从图像中提取主色调 (2026-05-16 健壮版)
+     * @brief 从图像中提取调色盘 (5 色占比版)
      */
-    static inline QColor extractDominantColor(const QString& targetFile) {
+    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile, int topN = 5) {
         QFileInfo fileInfo(targetFile);
         QString suffix = fileInfo.suffix().toLower();
         QImage targetImg;
@@ -192,43 +194,83 @@ public:
             temporaryPng = convertDesignFileToPng(targetFile);
             if (!temporaryPng.isEmpty()) {
                 targetImg.load(temporaryPng);
-                QFile::remove(temporaryPng); 
+                QFile::remove(temporaryPng);
             }
         } else {
             targetImg.load(targetFile);
         }
 
-        if (targetImg.isNull()) return QColor();
+        if (targetImg.isNull()) return {};
 
-        // 缩放并进行频率分析
-        QImage sampled = targetImg.scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        // 1. 采样：使用 128x128 提高颜色覆盖度
+        QImage sampled = targetImg.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         QMap<QRgb, int> freqMap;
+        int totalValidPixels = 0;
+
         for (int row = 0; row < sampled.height(); ++row) {
             for (int col = 0; col < sampled.width(); ++col) {
                 QRgb rgb = sampled.pixel(col, row);
-                // Alpha 过滤：仅排除物理透明区域，确保不统计 PNG 的透明背景
+                // 2. Alpha 过滤
                 if (qAlpha(rgb) < 128) continue;
 
-                QColor pixCol(rgb);
-                // 量化聚合：使用 & 0xF0 位掩码（4-bit 量化）提高搜索命中率，防止频率统计碎片化
-                QRgb rgbKey = qRgb(pixCol.red() & 0xF0, pixCol.green() & 0xF0, pixCol.blue() & 0xF0);
+                // 3. 量化：使用 3-bit (& 0xE0) 减少碎片化并保持区分度
+                QRgb rgbKey = qRgb(qRed(rgb) & 0xE0, qGreen(rgb) & 0xE0, qBlue(rgb) & 0xE0);
                 freqMap[rgbKey]++;
+                totalValidPixels++;
             }
         }
 
-        if (freqMap.isEmpty()) {
-            return targetImg.scaled(1, 1, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).pixelColor(0, 0);
-        }
+        if (freqMap.isEmpty()) return {};
 
-        QRgb winnerRgb = 0;
-        int maxFreq = 0;
+        // 4. 排序频率桶
+        QList<QPair<QRgb, int>> sortedBuckets;
         for (auto it = freqMap.begin(); it != freqMap.end(); ++it) {
-            if (it.value() > maxFreq) {
-                maxFreq = it.value();
-                winnerRgb = it.key();
+            sortedBuckets.append({it.key(), it.value()});
+        }
+        std::sort(sortedBuckets.begin(), sortedBuckets.end(), [](const QPair<QRgb, int>& a, const QPair<QRgb, int>& b) {
+            return a.second > b.second;
+        });
+
+        // 5. 合并相似颜色桶 (曼哈顿距离 < 32)
+        QList<QPair<QRgb, int>> mergedBuckets;
+        for (const auto& bucket : sortedBuckets) {
+            bool merged = false;
+            for (auto& target : mergedBuckets) {
+                int dr = std::abs(qRed(bucket.first) - qRed(target.first));
+                int dg = std::abs(qGreen(bucket.first) - qGreen(target.first));
+                int db = std::abs(qBlue(bucket.first) - qBlue(target.first));
+                if (dr + dg + db < 32) {
+                    target.second += bucket.second;
+                    merged = true;
+                    break;
+                }
+            }
+            if (!merged) {
+                mergedBuckets.append(bucket);
             }
         }
-        return QColor(winnerRgb);
+
+        // 6. 再次排序并截取 Top N
+        std::sort(mergedBuckets.begin(), mergedBuckets.end(), [](const QPair<QRgb, int>& a, const QPair<QRgb, int>& b) {
+            return a.second > b.second;
+        });
+
+        QVector<QPair<QColor, float>> result;
+        int count = qMin((int)mergedBuckets.size(), topN);
+        for (int i = 0; i < count; ++i) {
+            float ratio = (float)mergedBuckets[i].second / totalValidPixels;
+            result.append({QColor(mergedBuckets[i].first), ratio});
+        }
+
+        return result;
+    }
+
+    /**
+     * @brief 从图像中提取主色调 (向后兼容封装版)
+     */
+    static inline QColor extractDominantColor(const QString& targetFile) {
+        auto palette = extractPalette(targetFile);
+        return palette.isEmpty() ? QColor() : palette.first().first;
     }
 
 private:
