@@ -1,14 +1,15 @@
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include "AmMetaJson.h"
-#include <windows.h>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDir>
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include "AmMetaJson.h"
+#include <windows.h>
 
 namespace ArcMeta {
 
@@ -37,13 +38,13 @@ bool AmMetaJson::load() {
     if (doc.isNull() || !doc.isObject()) return false;
 
     QJsonObject root = doc.object();
-    if (root.contains("folder") && root["folder"].isObject()) {
-        m_folder = entryToFolder(root["folder"].toObject());
+    if (root.contains("folder") && root.value("folder").isObject()) {
+        m_folder = entryToFolder(root.value("folder").toObject());
     }
     
     m_items.clear();
-    if (root.contains("items") && root["items"].isObject()) {
-        QJsonObject itemsObj = root["items"].toObject();
+    if (root.contains("items") && root.value("items").isObject()) {
+        QJsonObject itemsObj = root.value("items").toObject();
         for (auto it = itemsObj.begin(); it != itemsObj.end(); ++it) {
             m_items[toStdWString(it.key())] = entryToItem(it.value().toObject());
         }
@@ -53,16 +54,16 @@ bool AmMetaJson::load() {
 
 bool AmMetaJson::save() const {
     QJsonObject root;
-    root["version"] = "2"; // 2026-06-xx 物理加固：版本升至 2 以对齐 SHA-256
-    root["folder"] = folderToEntry(m_folder);
+    root.insert("version", "2"); // 2026-06-xx 物理加固：版本升至 2 以对齐 SHA-256
+    root.insert("folder", folderToEntry(m_folder));
 
     QJsonObject itemsObj;
     for (const auto& [name, meta] : m_items) {
         if (meta.hasUserOperations()) {
-            itemsObj[toQString(name)] = itemToEntry(meta);
+            itemsObj.insert(toQString(name), itemToEntry(meta));
         }
     }
-    root["items"] = itemsObj;
+    root.insert("items", itemsObj);
 
     QByteArray jsonData = QJsonDocument(root).toJson(QJsonDocument::Indented);
     QString tmpPath = toQString(m_filePath) + ".tmp";
@@ -99,50 +100,50 @@ bool AmMetaJson::renameItem(const QString& folderPath, const QString& oldName, c
 
 QJsonObject AmMetaJson::folderToEntry(const FolderMeta& meta) {
     QJsonObject obj;
-    obj["sort_by"] = toQString(meta.sortBy);
-    obj["sort_order"] = toQString(meta.sortOrder);
-    obj["rating"] = meta.rating;
-    obj["color"] = toQString(meta.color);
-    obj["pinned"] = meta.pinned;
-    obj["note"] = toQString(meta.note);
-    obj["encrypted"] = meta.encrypted;
-    obj["file_id_128"] = QString::fromStdString(meta.fileId128);
+    obj.insert("sort_by", toQString(meta.sortBy));
+    obj.insert("sort_order", toQString(meta.sortOrder));
+    obj.insert("rating", meta.rating);
+    obj.insert("color", toQString(meta.color));
+    obj.insert("pinned", meta.pinned);
+    obj.insert("note", toQString(meta.note));
+    obj.insert("encrypted", meta.encrypted);
+    obj.insert("file_id_128", QString::fromStdString(meta.fileId128));
     QJsonArray tagsArr; for (const auto& t : meta.tags) tagsArr.append(toQString(t));
-    obj["tags"] = tagsArr;
+    obj.insert("tags", tagsArr);
     if (!meta.palettes.empty()) {
         QJsonArray palArr;
         for (const auto& p : meta.palettes) {
             QJsonObject pObj;
             QJsonArray cArr;
             cArr.append(p.color.red()); cArr.append(p.color.green()); cArr.append(p.color.blue());
-            pObj["color"] = cArr;
-            pObj["ratio"] = (double)p.ratio;
+            pObj.insert("color", cArr);
+            pObj.insert("ratio", (double)p.ratio);
             palArr.append(pObj);
         }
-        obj["palettes"] = palArr;
+        obj.insert("palettes", palArr);
     }
     return obj;
 }
 
 FolderMeta AmMetaJson::entryToFolder(const QJsonObject& obj) {
     FolderMeta meta;
-    meta.sortBy = toStdWString(obj["sort_by"].toString("name"));
-    meta.sortOrder = toStdWString(obj["sort_order"].toString("asc"));
-    meta.rating = obj["rating"].toInt();
-    meta.color = toStdWString(obj["color"].toString());
-    meta.pinned = obj["pinned"].toBool();
-    meta.note = toStdWString(obj["note"].toString());
-    meta.encrypted = obj["encrypted"].toBool();
-    meta.fileId128 = obj["file_id_128"].toString().toStdString();
-    if (obj.contains("tags") && obj["tags"].isArray()) {
-        for (const auto& v : obj["tags"].toArray()) meta.tags.push_back(toStdWString(v.toString()));
+    meta.sortBy = toStdWString(obj.value("sort_by").toString("name"));
+    meta.sortOrder = toStdWString(obj.value("sort_order").toString("asc"));
+    meta.rating = obj.value("rating").toInt();
+    meta.color = toStdWString(obj.value("color").toString());
+    meta.pinned = obj.value("pinned").toBool();
+    meta.note = toStdWString(obj.value("note").toString());
+    meta.encrypted = obj.value("encrypted").toBool();
+    meta.fileId128 = obj.value("file_id_128").toString().toStdString();
+    if (obj.contains("tags") && obj.value("tags").isArray()) {
+        for (const auto& v : obj.value("tags").toArray()) meta.tags.push_back(toStdWString(v.toString()));
     }
-    if (obj.contains("palettes") && obj["palettes"].isArray()) {
-        for (const auto& v : obj["palettes"].toArray()) {
+    if (obj.contains("palettes") && obj.value("palettes").isArray()) {
+        for (const auto& v : obj.value("palettes").toArray()) {
             QJsonObject pObj = v.toObject();
-            QJsonArray cArr = pObj["color"].toArray();
+            QJsonArray cArr = pObj.value("color").toArray();
             if (cArr.size() >= 3) {
-                meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj["ratio"].toDouble()});
+                meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj.value("ratio").toDouble()});
             }
         }
     }
@@ -151,60 +152,60 @@ FolderMeta AmMetaJson::entryToFolder(const QJsonObject& obj) {
 
 QJsonObject AmMetaJson::itemToEntry(const ItemMeta& meta) {
     QJsonObject obj;
-    obj["type"] = toQString(meta.type);
-    obj["rating"] = meta.rating;
-    obj["color"] = toQString(meta.color);
-    obj["pinned"] = meta.pinned;
-    obj["note"] = toQString(meta.note);
-    obj["encrypted"] = meta.encrypted;
-    obj["encrypt_salt"] = QString::fromStdString(meta.encryptSalt);
-    obj["encrypt_iv"] = QString::fromLatin1(QByteArray::fromStdString(meta.encryptIv).toBase64());
-    obj["encrypt_verify_hash"] = QString::fromStdString(meta.encryptVerifyHash);
-    obj["original_name"] = toQString(meta.originalName);
-    obj["volume"] = toQString(meta.volume);
-    obj["frn"] = toQString(meta.frn);
-    obj["file_id_128"] = QString::fromStdString(meta.fileId128);
+    obj.insert("type", toQString(meta.type));
+    obj.insert("rating", meta.rating);
+    obj.insert("color", toQString(meta.color));
+    obj.insert("pinned", meta.pinned);
+    obj.insert("note", toQString(meta.note));
+    obj.insert("encrypted", meta.encrypted);
+    obj.insert("encrypt_salt", QString::fromStdString(meta.encryptSalt));
+    obj.insert("encrypt_iv", QString::fromLatin1(QByteArray::fromStdString(meta.encryptIv).toBase64()));
+    obj.insert("encrypt_verify_hash", QString::fromStdString(meta.encryptVerifyHash));
+    obj.insert("original_name", toQString(meta.originalName));
+    obj.insert("volume", toQString(meta.volume));
+    obj.insert("frn", toQString(meta.frn));
+    obj.insert("file_id_128", QString::fromStdString(meta.fileId128));
     QJsonArray tagsArr; for (const auto& t : meta.tags) tagsArr.append(toQString(t));
-    obj["tags"] = tagsArr;
+    obj.insert("tags", tagsArr);
     if (!meta.palettes.empty()) {
         QJsonArray palArr;
         for (const auto& p : meta.palettes) {
             QJsonObject pObj;
             QJsonArray cArr;
             cArr.append(p.color.red()); cArr.append(p.color.green()); cArr.append(p.color.blue());
-            pObj["color"] = cArr;
-            pObj["ratio"] = (double)p.ratio;
+            pObj.insert("color", cArr);
+            pObj.insert("ratio", (double)p.ratio);
             palArr.append(pObj);
         }
-        obj["palettes"] = palArr;
+        obj.insert("palettes", palArr);
     }
     return obj;
 }
 
 ItemMeta AmMetaJson::entryToItem(const QJsonObject& obj) {
     ItemMeta meta;
-    meta.type = toStdWString(obj["type"].toString("file"));
-    meta.rating = obj["rating"].toInt();
-    meta.color = toStdWString(obj["color"].toString());
-    meta.pinned = obj["pinned"].toBool();
-    meta.note = toStdWString(obj["note"].toString());
-    meta.encrypted = obj["encrypted"].toBool();
-    meta.encryptSalt = obj["encrypt_salt"].toString().toStdString();
-    meta.encryptIv = QByteArray::fromBase64(obj["encrypt_iv"].toString().toLatin1()).toStdString();
-    meta.encryptVerifyHash = obj["encrypt_verify_hash"].toString().toStdString();
-    meta.originalName = toStdWString(obj["original_name"].toString());
-    meta.volume = toStdWString(obj["volume"].toString());
-    meta.frn = toStdWString(obj["frn"].toString());
-    meta.fileId128 = obj["file_id_128"].toString().toStdString();
-    if (obj.contains("tags") && obj["tags"].isArray()) {
-        for (const auto& v : obj["tags"].toArray()) meta.tags.push_back(toStdWString(v.toString()));
+    meta.type = toStdWString(obj.value("type").toString("file"));
+    meta.rating = obj.value("rating").toInt();
+    meta.color = toStdWString(obj.value("color").toString());
+    meta.pinned = obj.value("pinned").toBool();
+    meta.note = toStdWString(obj.value("note").toString());
+    meta.encrypted = obj.value("encrypted").toBool();
+    meta.encryptSalt = obj.value("encrypt_salt").toString().toStdString();
+    meta.encryptIv = QByteArray::fromBase64(obj.value("encrypt_iv").toString().toLatin1()).toStdString();
+    meta.encryptVerifyHash = obj.value("encrypt_verify_hash").toString().toStdString();
+    meta.originalName = toStdWString(obj.value("original_name").toString());
+    meta.volume = toStdWString(obj.value("volume").toString());
+    meta.frn = toStdWString(obj.value("frn").toString());
+    meta.fileId128 = obj.value("file_id_128").toString().toStdString();
+    if (obj.contains("tags") && obj.value("tags").isArray()) {
+        for (const auto& v : obj.value("tags").toArray()) meta.tags.push_back(toStdWString(v.toString()));
     }
-    if (obj.contains("palettes") && obj["palettes"].isArray()) {
-        for (const auto& v : obj["palettes"].toArray()) {
+    if (obj.contains("palettes") && obj.value("palettes").isArray()) {
+        for (const auto& v : obj.value("palettes").toArray()) {
             QJsonObject pObj = v.toObject();
-            QJsonArray cArr = pObj["color"].toArray();
+            QJsonArray cArr = pObj.value("color").toArray();
             if (cArr.size() >= 3) {
-                meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj["ratio"].toDouble()});
+                meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj.value("ratio").toDouble()});
             }
         }
     }

@@ -1,3 +1,19 @@
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QSqlRecord>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QFileInfo>
+#include <QCryptographicHash>
+#include <QRandomGenerator>
+#include <QtConcurrent>
+#include <QThreadPool>
+#include <QDir>
+#include <QDebug>
+#include <QTimer>
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -22,21 +38,6 @@
 #include <cwchar>
 #include <sstream>
 #include <iomanip>
-
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QSqlRecord>
-#include <QJsonDocument>
-#include <QJsonArray>
-#include <QFileInfo>
-#include <QCryptographicHash>
-#include <QRandomGenerator>
-#include <QtConcurrent>
-#include <QThreadPool>
-#include <QDir>
-#include <QDebug>
-#include <QTimer>
 #include <mutex>
 #include <shared_mutex>
 
@@ -173,8 +174,8 @@ void MetadataManager::initFromDatabase() {
                     if (doc.isArray()) {
                         for (const auto& v : doc.array()) {
                             QJsonObject o = v.toObject();
-                            QJsonArray c = o["color"].toArray();
-                            meta.palettes.push_back({QColor(c[0].toInt(), c[1].toInt(), c[2].toInt()), (float)o["ratio"].toDouble()});
+                            QJsonArray c = o.value("color").toArray();
+                            meta.palettes.push_back({QColor(c[0].toInt(), c[1].toInt(), c[2].toInt()), (float)o.value("ratio").toDouble()});
                         }
                     }
                 }

@@ -1,11 +1,12 @@
-#include "ItemRepo.h"
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QJsonArray>
 #include <QCryptographicHash>
 #include <QStringList>
+#include "ItemRepo.h"
 #include "../meta/MetadataDefs.h"
 #include "../meta/MetadataManager.h"
 
@@ -80,8 +81,8 @@ bool ItemRepo::save(const std::wstring& parentPath, const std::wstring& name, co
         QJsonObject pObj;
         QJsonArray cArr;
         cArr.append(p.color.red()); cArr.append(p.color.green()); cArr.append(p.color.blue());
-        pObj["color"] = cArr;
-        pObj["ratio"] = (double)p.ratio;
+        pObj.insert("color", cArr);
+        pObj.insert("ratio", (double)p.ratio);
         palArr.append(pObj);
     }
     u.addBindValue(QJsonDocument(palArr).toJson(QJsonDocument::Compact));

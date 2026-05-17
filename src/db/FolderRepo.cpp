@@ -1,9 +1,10 @@
-#include "FolderRepo.h"
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QJsonArray>
+#include "FolderRepo.h"
 
 namespace ArcMeta {
 
@@ -37,8 +38,8 @@ bool FolderRepo::save(const std::wstring& volume, const std::wstring& path, cons
         QJsonObject pObj;
         QJsonArray cArr;
         cArr.append(p.color.red()); cArr.append(p.color.green()); cArr.append(p.color.blue());
-        pObj["color"] = cArr;
-        pObj["ratio"] = (double)p.ratio;
+        pObj.insert("color", cArr);
+        pObj.insert("ratio", (double)p.ratio);
         palArr.append(pObj);
     }
     q.addBindValue(QJsonDocument(palArr).toJson(QJsonDocument::Compact));
@@ -78,9 +79,9 @@ bool FolderRepo::get(const std::wstring& volume, const std::wstring& path, Folde
         if (palDoc.isArray()) {
             for (const auto& v : palDoc.array()) {
                 QJsonObject pObj = v.toObject();
-                QJsonArray cArr = pObj["color"].toArray();
+                QJsonArray cArr = pObj.value("color").toArray();
                 if (cArr.size() >= 3) {
-                    meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj["ratio"].toDouble()});
+                    meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj.value("ratio").toDouble()});
                 }
             }
         }
