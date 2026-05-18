@@ -225,7 +225,9 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
 }
 
 Qt::DropActions CategoryModel::supportedDropActions() const {
-    return Qt::MoveAction;
+    // 2026-06-xx 物理修复：扩展支持的动作。界外拖入通常被识别为 Copy 或 Link。
+    // 只有在此处声明，Qt 视图才不会在拖入时显示“禁止图标”。
+    return Qt::MoveAction | Qt::CopyAction | Qt::LinkAction;
 }
 
 bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction action, int row, int column, const QModelIndex& parent) {

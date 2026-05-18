@@ -20,11 +20,17 @@ DropTreeView::DropTreeView(QWidget* parent) : QTreeView(parent) {
 
 void DropTreeView::dragEnterEvent(QDragEnterEvent* event) {
     Logger::log(QString("[树形视图] 拖拽进入 | 格式: %1").arg(event->mimeData()->formats().join(",")));
-    if (event->mimeData()->hasFormat("application/x-note-ids") || 
-        event->mimeData()->hasFormat("application/x-qabstractitemmodeldatalist") ||
-        event->mimeData()->hasUrls()) {
+
+    // 2026-06-xx 物理修复：针对界外拖入的 URL 或纯文本路径，强制设置为 LinkAction
+    // 这是消除“禁止图标”的视觉反馈核心逻辑
+    if (event->mimeData()->hasUrls() || event->mimeData()->hasFormat("text/plain")) {
+        event->setDropAction(Qt::LinkAction);
+        event->accept();
+        Logger::log("[树形视图] 已接受外部 URL/路径拖拽进入");
+    } else if (event->mimeData()->hasFormat("application/x-note-ids") ||
+               event->mimeData()->hasFormat("application/x-qabstractitemmodeldatalist")) {
         event->acceptProposedAction();
-        Logger::log("[树形视图] 已接受拖拽进入信号");
+        Logger::log("[树形视图] 已接受内部对象拖拽进入");
     } else {
         event->ignore();
     }
@@ -33,9 +39,11 @@ void DropTreeView::dragEnterEvent(QDragEnterEvent* event) {
 void DropTreeView::dragMoveEvent(QDragMoveEvent* event) {
     QTreeView::dragMoveEvent(event);
 
-    if (event->mimeData()->hasFormat("application/x-note-ids") || 
-        event->mimeData()->hasFormat("application/x-qabstractitemmodeldatalist") ||
-        event->mimeData()->hasUrls()) {
+    if (event->mimeData()->hasUrls() || event->mimeData()->hasFormat("text/plain")) {
+        event->setDropAction(Qt::LinkAction);
+        event->accept();
+    } else if (event->mimeData()->hasFormat("application/x-note-ids") ||
+               event->mimeData()->hasFormat("application/x-qabstractitemmodeldatalist")) {
         event->acceptProposedAction();
     } else {
         event->ignore();
@@ -55,21 +63,33 @@ void DropTreeView::dropEvent(QDropEvent* event) {
     Logger::log(QString("[树形视图] 释放事件 | 目标索引是否有效: %1 | 名称: %2")
                 .arg(index.isValid() ? "是" : "否").arg(index.data().toString()));
 
-    // 优先处理路径拖入 (收藏逻辑)
+    // 优先处理路径拖入 (归类逻辑)
+    QStringList paths;
     if (event->mimeData()->hasUrls()) {
-        QStringList paths;
         for (const QUrl& url : event->mimeData()->urls()) {
             if (url.isLocalFile()) {
                 paths << QDir::toNativeSeparators(url.toLocalFile());
             }
         }
-        Logger::log(QString("[树形视图] 释放的文件路径: %1").arg(paths.join(",")));
-        if (!paths.isEmpty()) {
-            emit pathsDropped(paths, index);
-            event->setDropAction(Qt::LinkAction); // 视觉上显示为“链接/快捷方式”
-            event->accept();
-            return;
+    } else if (event->mimeData()->hasFormat("text/plain")) {
+        // 2026-06-xx 物理增强：尝试从纯文本中解析路径（兼容某些界外源）
+        QString text = event->mimeData()->text();
+        QStringList lines = text.split(QRegularExpression("[\r\n]"), Qt::SkipEmptyParts);
+        for (const QString& line : lines) {
+            QString trimmed = line.trimmed();
+            if (trimmed.startsWith("file:///")) trimmed = QUrl(trimmed).toLocalFile();
+            if (QFileInfo::exists(trimmed)) {
+                paths << QDir::toNativeSeparators(trimmed);
+            }
         }
+    }
+
+    if (!paths.isEmpty()) {
+        Logger::log(QString("[树形视图] 释放的文件路径: %1").arg(paths.join(",")));
+        emit pathsDropped(paths, index);
+        event->setDropAction(Qt::LinkAction);
+        event->accept();
+        return;
     }
 
     // 处理内部 ID 拖拽 (如果以后有用)
