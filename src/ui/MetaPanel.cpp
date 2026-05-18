@@ -111,7 +111,7 @@ private:
         });
 
         menu.addAction("复制 cmyk格式", [this]() {
-            qreal c, m, y, k;
+            float c, m, y, k;
             m_color.getCmykF(&c, &m, &y, &k);
             QApplication::clipboard()->setText(QString("cmyk(%1%, %2%, %3%, %4%)")
                 .arg(qRound(c * 100)).arg(qRound(m * 100)).arg(qRound(y * 100)).arg(qRound(k * 100)));
