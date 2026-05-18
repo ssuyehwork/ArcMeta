@@ -12,6 +12,8 @@
 !ferrex_source-原版/**
 !FERREX-Rust-原版/
 !FERREX-Rust-原版/**
+!mainwindowUI参数/
+!mainwindowUI参数/**
 
 !.cargo/
 !.cargo/**
