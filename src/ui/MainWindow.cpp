@@ -295,9 +295,14 @@ void MainWindow::initUi() {
             m_metaPanel->setPinned(idx.data(IsLockedRole).toBool());
             m_metaPanel->setTags(idx.data(TagsRole).toStringList());
             
-            // 加载备注
+            // 加载备注和色板
             RuntimeMeta rm = MetadataManager::instance().getMeta(path.toStdWString());
             m_metaPanel->setNote(rm.note);
+
+            // 将色板数据转换为 QVector<QPair<QColor, float>>
+            QVector<QPair<QColor, float>> pal;
+            for (const auto& p : rm.palettes) pal.append({p.color, p.ratio});
+            m_metaPanel->setPalettes(pal);
         }
         
         // 触发状态栏更新以显示选中状态
@@ -501,6 +506,13 @@ void MainWindow::initUi() {
                 m_contentPanel->getProxyModel()->setData(idx, QString::fromStdWString(color), ColorRole);
                 MetadataManager::instance().setColor(path.toStdWString(), color);
             }
+        }
+    });
+
+    // 2026-06-xx 调色盘搜索联动
+    connect(m_metaPanel, &MetaPanel::searchByColor, this, [this](const QColor& color) {
+        if (m_contentPanel) {
+            m_contentPanel->search(color.name().toUpper());
         }
     });
 
