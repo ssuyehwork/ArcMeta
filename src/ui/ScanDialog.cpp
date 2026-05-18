@@ -223,17 +223,19 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
 
             // 尚未请求过，则发起异步请求
             if (!m_requestedThumbs.contains(actualIndex)) {
-                const_cast<ScanTableModel*>(this)->m_requestedThumbs.insert(actualIndex);
+                m_requestedThumbs.insert(actualIndex);
                 QString fullPath = reader.getFullPath(actualIndex);
 
-                (void)QtConcurrent::run([this, actualIndex, fullPath]() {
+                // 2026-06-xx 物理修复：定义非 const 指针以解决异步回调中 dataChanged 信号的调用权限问题
+                ScanTableModel* mutableThis = const_cast<ScanTableModel*>(this);
+                (void)QtConcurrent::run([mutableThis, actualIndex, fullPath]() {
                     QPixmap thumb = UiHelper::getShellThumbnail(fullPath, 48);
                     if (!thumb.isNull()) {
-                        QMetaObject::invokeMethod(const_cast<ScanTableModel*>(this), [this, actualIndex, thumb]() {
-                            const_cast<ScanTableModel*>(this)->m_thumbCache[actualIndex] = thumb;
-                            auto itRow = m_actualToRow.find(actualIndex);
-                            if (itRow != m_actualToRow.end()) {
-                                emit dataChanged(this->index(itRow->second, 0), this->index(itRow->second, 0), {Qt::DecorationRole});
+                        QMetaObject::invokeMethod(mutableThis, [mutableThis, actualIndex, thumb]() {
+                            mutableThis->m_thumbCache[actualIndex] = thumb;
+                            auto itRow = mutableThis->m_actualToRow.find(actualIndex);
+                            if (itRow != mutableThis->m_actualToRow.end()) {
+                                emit mutableThis->dataChanged(mutableThis->index(itRow->second, 0), mutableThis->index(itRow->second, 0), {Qt::DecorationRole});
                             }
                         });
                     }
