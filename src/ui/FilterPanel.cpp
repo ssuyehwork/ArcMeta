@@ -7,6 +7,8 @@
 #include <QCursor>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QPainter>
+#include <QLinearGradient>
 
 namespace ArcMeta {
 
@@ -71,6 +73,72 @@ protected:
 private:
     QCheckBox* m_cb;
 };
+
+// ─── InlineHueSlider ─────────────────────────────────────────────
+InlineHueSlider::InlineHueSlider(QWidget* parent) : QWidget(parent) {
+    setFixedHeight(28); 
+    setCursor(Qt::PointingHandCursor);
+}
+
+void InlineHueSlider::setHue(int h) {
+    m_h = qBound(0, h, 359);
+    update();
+}
+
+void InlineHueSlider::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    int margin = 10; 
+    int barHeight = 12;
+    int barY = (height() - barHeight) / 2;
+    QRectF barRect(margin, barY, width() - 2 * margin, barHeight);
+
+    QLinearGradient grad(barRect.left(), 0, barRect.right(), 0);
+    // 2026-06-xx 按照代码审查建议：将饱和度和明度设为 220，与实际选色逻辑保持一致
+    grad.setColorAt(0.0/6.0, QColor::fromHsv(0, 220, 220));
+    grad.setColorAt(1.0/6.0, QColor::fromHsv(60, 220, 220));
+    grad.setColorAt(2.0/6.0, QColor::fromHsv(120, 220, 220));
+    grad.setColorAt(3.0/6.0, QColor::fromHsv(180, 220, 220));
+    grad.setColorAt(4.0/6.0, QColor::fromHsv(240, 220, 220));
+    grad.setColorAt(5.0/6.0, QColor::fromHsv(300, 220, 220));
+    grad.setColorAt(6.0/6.0, QColor::fromHsv(359, 220, 220));
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(grad);
+    painter.drawRoundedRect(barRect, 6, 6);
+
+    // Thumb: 16px white circle, 1px dark border
+    double ratio = m_h / 359.0;
+    int tx = margin + ratio * barRect.width();
+    int ty = height() / 2;
+    
+    painter.setBrush(Qt::white);
+    painter.setPen(QPen(QColor(50, 50, 50), 1));
+    painter.drawEllipse(QPoint(tx, ty), 8, 8);
+}
+
+void InlineHueSlider::updateFromPos(int x) {
+    int margin = 10;
+    int barWidth = width() - 2 * margin;
+    if (barWidth <= 0) return;
+    int lx = qBound(0, x - margin, barWidth);
+    m_h = (lx * 359) / barWidth;
+    update();
+    emit hueChanged(m_h);
+}
+
+void InlineHueSlider::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) updateFromPos(event->pos().x());
+}
+
+void InlineHueSlider::mouseMoveEvent(QMouseEvent* event) {
+    if (event->buttons() & Qt::LeftButton) updateFromPos(event->pos().x());
+}
+
+void InlineHueSlider::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) emit sliderReleased();
+}
 
 // ─── FilterPanel ──────────────────────────────────────────────────
 FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
@@ -270,6 +338,41 @@ void FilterPanel::rebuildGroups() {
                 picker->show();
             });
         }
+
+        // 插入色相滑块
+        InlineHueSlider* hueSlider = new InlineHueSlider(g);
+        if (!m_hueSliderColor.isEmpty()) {
+            QColor c(m_hueSliderColor);
+            int h, s, v;
+            c.getHsv(&h, &s, &v);
+            hueSlider->setHue(h);
+        }
+        connect(hueSlider, &InlineHueSlider::sliderReleased, this, [this, hueSlider]() {
+            int h = hueSlider->hue();
+            if (h == 0) {
+                // 清除
+                if (!m_hueSliderColor.isEmpty()) {
+                    m_filter.colors.removeAll(m_hueSliderColor);
+                    m_hueSliderColor.clear();
+                    emit filterChanged(m_filter);
+                    rebuildGroups();
+                }
+            } else {
+                QColor c = QColor::fromHsv(h, 220, 220);
+                QString hex = c.name().toUpper();
+                if (!m_hueSliderColor.isEmpty()) {
+                    m_filter.colors.removeAll(m_hueSliderColor);
+                }
+                m_hueSliderColor = hex;
+                if (!m_filter.colors.contains(hex)) {
+                    m_filter.colors.append(hex);
+                }
+                m_filter.colorTolerance = 40;
+                emit filterChanged(m_filter);
+                rebuildGroups();
+            }
+        });
+        gl->insertWidget(0, hueSlider);
         
         // 追加已被筛选但不在基础列表中的自定义颜色 (相近色)
         for (const QString& key : m_filter.colors) {
@@ -592,3 +695,4 @@ void FilterPanel::clearAllFilters() {
 }
 
 } // namespace ArcMeta
+

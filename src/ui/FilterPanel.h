@@ -12,6 +12,29 @@
 
 namespace ArcMeta {
 
+// ─── 色相滑块 (内嵌版) ─────────────────────────────────────────────
+class InlineHueSlider : public QWidget {
+    Q_OBJECT
+public:
+    explicit InlineHueSlider(QWidget* parent = nullptr);
+    void setHue(int h);
+    int hue() const { return m_h; }
+
+signals:
+    void hueChanged(int h);
+    void sliderReleased();
+
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+
+private:
+    void updateFromPos(int x);
+    int m_h = 0;
+};
+
 struct FilterState {
     QList<int>   ratings;
     QStringList  colors;
@@ -70,6 +93,7 @@ private:
     static QMap<QString, QColor> s_colorMap();
 
     FilterState m_filter;
+    QString     m_hueSliderColor;
 
     QMap<int, int>      m_ratingCounts;
     QMap<QString, int>  m_colorCounts;
