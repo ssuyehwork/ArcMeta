@@ -887,24 +887,21 @@ void CategoryPanel::initUi() {
     connect(m_categoryTree, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& index) {
         // 2026-06-xx 彻底重构：物理递归遍历 + 分类镜像创建 + SHA-256 物理加固
         // 核心规则：文件夹拖入空白/分类均递归建树；文件入空白归未分类，入分类归该分类。
-        int targetId = 0;
-        bool isBlankSpace = true;
+        int targetCatId = 0;
 
         if (index.isValid()) {
             QString type = index.data(CategoryModel::TypeRole).toString();
             if (type == "category") {
-                targetId = index.data(CategoryModel::IdRole).toInt();
-                isBlankSpace = false;
+                targetCatId = index.data(CategoryModel::IdRole).toInt();
             } else if (index.data(CategoryModel::NameRole).toString() == "我的分类") {
-                targetId = 0;
-                isBlankSpace = false;
+                targetCatId = 0;
             }
         }
 
         ProgressDialog* progress = new ProgressDialog("正在同步导入文件夹(递归)...", this);
         progress->show();
         
-        (void)QThreadPool::globalInstance()->start([this, paths, targetId, isBlankSpace, progress]() {
+        (void)QThreadPool::globalInstance()->start([this, paths, targetCatId, progress]() {
             QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
             
             // A. 第一阶段：快速物理统计总项数 (包含文件夹)
@@ -998,7 +995,7 @@ void CategoryPanel::initUi() {
                 
                 if (rootInfo.isDir()) {
                     // 文件夹逻辑：自动创建分类节点
-                    int rootCatId = ensureCategory(rootInfo.fileName().toStdWString(), targetId);
+                    int rootCatId = ensureCategory(rootInfo.fileName().toStdWString(), targetCatId);
                     pathIdMap[nativeRoot] = rootCatId;
                     
                     // 物理递归：1:1 复刻文件夹层级到分类树
@@ -1034,7 +1031,7 @@ void CategoryPanel::initUi() {
                     }
                 } else {
                     // 单个文件逻辑：入空白归未分类(catId=0)，入分类归该分类
-                    processItem(rootPath, targetId);
+                    processItem(rootPath, targetCatId);
                     currentTask++;
                 }
             }
