@@ -499,6 +499,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
         folder.pinned = rMeta.pinned; folder.note = rMeta.note;
         folder.tags.clear();
         for (const auto& t : rMeta.tags) folder.tags.push_back(t.toStdWString());
+        folder.palettes = rMeta.palettes;
     } else {
         ItemMeta& item = amJson.items()[fileName];
         item.rating = rMeta.rating; item.color = rMeta.color;
@@ -506,6 +507,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
         item.note = rMeta.note;
         item.tags.clear();
         for (const auto& t : rMeta.tags) item.tags.push_back(t.toStdWString());
+        item.palettes = rMeta.palettes;
     }
     amJson.save();
 

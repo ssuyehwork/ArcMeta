@@ -178,7 +178,7 @@ public:
      */
     static inline QColor quantizeColor(const QColor& color) {
         if (!color.isValid()) return color;
-        return QColor(color.red() & 0xE0, color.green() & 0xE0, color.blue() & 0xE0);
+        return QColor(color.red() & 0xF0, color.green() & 0xF0, color.blue() & 0xF0);
     }
 
     /**
@@ -204,65 +204,76 @@ public:
 
         // 1. 采样：使用 128x128 提高颜色覆盖度
         QImage sampled = targetImg.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        QMap<QRgb, int> freqMap;
+
+        struct BucketInfo {
+            long long rSum = 0, gSum = 0, bSum = 0;
+            int count = 0;
+        };
+        QMap<QRgb, BucketInfo> bucketStats;
         int totalValidPixels = 0;
 
         for (int row = 0; row < sampled.height(); ++row) {
             for (int col = 0; col < sampled.width(); ++col) {
                 QRgb rgb = sampled.pixel(col, row);
-                // 2. Alpha 过滤
                 if (qAlpha(rgb) < 128) continue;
 
-                // 3. 量化：使用 3-bit (& 0xE0) 减少碎片化并保持区分度
-                QRgb rgbKey = qRgb(qRed(rgb) & 0xE0, qGreen(rgb) & 0xE0, qBlue(rgb) & 0xE0);
-                freqMap[rgbKey]++;
+                // 2. 量化分组：使用 4-bit 建立桶，提高色彩敏感度，防止 Top-5 被过粗的量化合并
+                QRgb rgbKey = qRgb(qRed(rgb) & 0xF0, qGreen(rgb) & 0xF0, qBlue(rgb) & 0xF0);
+                auto& stat = bucketStats[rgbKey];
+                stat.rSum += qRed(rgb);
+                stat.gSum += qGreen(rgb);
+                stat.bSum += qBlue(rgb);
+                stat.count++;
                 totalValidPixels++;
             }
         }
 
-        if (freqMap.isEmpty()) return {};
+        if (bucketStats.isEmpty()) return {};
 
-        // 4. 排序频率桶
-        QList<QPair<QRgb, int>> sortedBuckets;
-        for (auto it = freqMap.begin(); it != freqMap.end(); ++it) {
-            sortedBuckets.append({it.key(), it.value()});
+        // 3. 计算桶的平均真色并初步排序
+        struct FinalBucket { QColor avgColor; int count; };
+        QList<FinalBucket> buckets;
+        for (auto it = bucketStats.begin(); it != bucketStats.end(); ++it) {
+            const auto& s = it.value();
+            buckets.append({ QColor((int)(s.rSum / s.count), (int)(s.gSum / s.count), (int)(s.bSum / s.count)), s.count });
         }
-        std::sort(sortedBuckets.begin(), sortedBuckets.end(), [](const QPair<QRgb, int>& a, const QPair<QRgb, int>& b) {
-            return a.second > b.second;
+        std::sort(buckets.begin(), buckets.end(), [](const FinalBucket& a, const FinalBucket& b) {
+            return a.count > b.count;
         });
 
-        // 5. 合并相似颜色桶 (曼哈顿距离 < 48)
-        // 2026-06-xx 逻辑优化：阈值由 32 提升至 48，以提供更合理的视觉区分度，防止 Top-5 被过细的色阶占据
-        QList<QPair<QRgb, int>> mergedBuckets;
-        for (const auto& bucket : sortedBuckets) {
-            bool merged = false;
-            for (auto& target : mergedBuckets) {
-                int dr = std::abs(qRed(bucket.first) - qRed(target.first));
-                int dg = std::abs(qGreen(bucket.first) - qGreen(target.first));
-                int db = std::abs(qBlue(bucket.first) - qBlue(target.first));
-                if (dr + dg + db < 48) {
-                    target.second += bucket.second;
-                    merged = true;
+        // 4. 相似合并 (曼哈顿距离 < 32)：采用 4-bit 量化配合 32 阈值，提供工业级色彩区分度
+        QList<FinalBucket> merged;
+        for (const auto& b : buckets) {
+            bool found = false;
+            for (auto& m : merged) {
+                int dist = std::abs(b.avgColor.red() - m.avgColor.red()) +
+                           std::abs(b.avgColor.green() - m.avgColor.green()) +
+                           std::abs(b.avgColor.blue() - m.avgColor.blue());
+                if (dist < 32) {
+                    // 重新计算加权平均色，确保最终 HEX 真值不偏离物理重心
+                    int total = m.count + b.count;
+                    int nr = (m.avgColor.red() * m.count + b.avgColor.red() * b.count) / total;
+                    int ng = (m.avgColor.green() * m.count + b.avgColor.green() * b.count) / total;
+                    int nb = (m.avgColor.blue() * m.count + b.avgColor.blue() * b.count) / total;
+                    m.avgColor = QColor(nr, ng, nb);
+                    m.count = total;
+                    found = true;
                     break;
                 }
             }
-            if (!merged) {
-                mergedBuckets.append(bucket);
-            }
+            if (!found) merged.append(b);
         }
 
-        // 6. 再次排序并截取 Top N
-        std::sort(mergedBuckets.begin(), mergedBuckets.end(), [](const QPair<QRgb, int>& a, const QPair<QRgb, int>& b) {
-            return a.second > b.second;
+        // 5. 再次排序并截取 Top N
+        std::sort(merged.begin(), merged.end(), [](const FinalBucket& a, const FinalBucket& b) {
+            return a.count > b.count;
         });
 
         QVector<QPair<QColor, float>> result;
-        int count = qMin((int)mergedBuckets.size(), topN);
-        for (int i = 0; i < count; ++i) {
-            float ratio = (float)mergedBuckets[i].second / totalValidPixels;
-            result.append({QColor(mergedBuckets[i].first), ratio});
+        int limit = qMin((int)merged.size(), topN);
+        for (int i = 0; i < limit; ++i) {
+            result.append({ merged[i].avgColor, (float)merged[i].count / totalValidPixels });
         }
-
         return result;
     }
 
