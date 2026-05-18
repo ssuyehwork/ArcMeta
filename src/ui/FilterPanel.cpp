@@ -20,37 +20,15 @@ QMap<QString, QColor> FilterPanel::s_colorMap() {
         { "#3080D0", QColor("#378ADD") },
         { "#7070D0", QColor("#7F77DD") },
         { "#505050", QColor("#5F5E5A") },
-        // 兼容旧语义名数据
-        { "red",    QColor("#E24B4A") },
-        { "orange", QColor("#EF9F27") },
-        { "yellow", QColor("#FAC775") },
-        { "green",  QColor("#639922") },
-        { "cyan",   QColor("#1D9E75") },
-        { "blue",   QColor("#378ADD") },
-        { "purple", QColor("#7F77DD") },
-        { "gray",   QColor("#5F5E5A") },
+        { "#000000", QColor("#000000") },
+        { "#FFFFFF", QColor("#FFFFFF") }
     };
 }
 
 static QString colorDisplayName(const QString& key) {
-    static QMap<QString, QString> n {
-        { "",        "无色标" }, 
-        { "#E04040", "红色" },
-        { "#E09020", "橙色" },
-        { "#F0C070", "黄色" },
-        { "#609020", "绿色" },
-        { "#109070", "青色" },
-        { "#3080D0", "蓝色" },
-        { "#7070D0", "紫色" },
-        { "#505050", "灰色" },
-        { "#000000", "黑色" },
-        { "#F0F0F0", "白色" },
-        // 兼容旧语义名
-        { "red",    "红色" }, { "orange", "橙色" }, { "yellow", "黄色" },
-        { "green",  "绿色" }, { "cyan",   "青色" }, { "blue",   "蓝色" },
-        { "purple", "紫色" }, { "gray",   "灰色" },
-    };
-    return n.value(key, key);
+    if (key.isEmpty()) return "无色标";
+    // 物理对标：筛选器直接展示 HEX 真值，绝不进行模糊语义映射
+    return key;
 }
 
 static QString ratingDisplayName(int r) {
@@ -234,7 +212,7 @@ void FilterPanel::rebuildGroups() {
         QVBoxLayout* gl = nullptr;
         QHBoxLayout* hdrLayout = nullptr; // 标题行内嵌布局
         QWidget* g = buildGroup("颜色标记", gl, &hdrLayout);
-        
+
         if (hdrLayout) {
             QPushButton* btnCustomColor = new QPushButton(hdrLayout->parentWidget());
             btnCustomColor->setObjectName("BtnCustomColor");
@@ -293,34 +271,27 @@ void FilterPanel::rebuildGroups() {
             }
         }
 
-        // 2026-06-xx 按照要求：动态展示所有存在的颜色
-        QSet<QString> processedKeys;
-        
-        // 1. 优先按品牌色顺序排列常用颜色
-        QStringList priorityKeys = {"", "#E04040", "#E09020", "#F0C070", "#609020", "#109070", "#3080D0", "#7070D0", "#505050", "#000000", "#F0F0F0",
-                                    "red", "orange", "yellow", "green", "cyan", "blue", "purple", "gray"};
-        for (const QString& key : priorityKeys) {
-            if (m_colorCounts.contains(key)) {
-                QCheckBox* cb = addFilterRow(gl, colorDisplayName(key), m_colorCounts[key], colorMap.value(key, QColor(key)));
-                cb->blockSignals(true);
-                cb->setChecked(m_filter.colors.contains(key));
-                cb->blockSignals(false);
-                connect(cb, &QCheckBox::toggled, this, [this, key](bool on) {
-                    if (on) { if (!m_filter.colors.contains(key)) m_filter.colors.append(key); }
-                    else m_filter.colors.removeAll(key);
-                    emit filterChanged(m_filter);
-                });
-                processedKeys.insert(key);
-            }
-        }
-
-        // 2. 展示其他所有动态提取到的量化颜色
+        // 2026-06-xx 按照要求：如实展示所有物理提取到的真值颜色
         QStringList allKeys = m_colorCounts.keys();
         allKeys.sort();
+
+        // 优先显示无色标
+        if (m_colorCounts.contains("")) {
+            QCheckBox* cb = addFilterRow(gl, "无色标", m_colorCounts[""], QColor("#888780"));
+            cb->blockSignals(true);
+            cb->setChecked(m_filter.colors.contains(""));
+            cb->blockSignals(false);
+            connect(cb, &QCheckBox::toggled, this, [this](bool on) {
+                if (on) { if (!m_filter.colors.contains("")) m_filter.colors.append(""); }
+                else m_filter.colors.removeAll("");
+                emit filterChanged(m_filter);
+            });
+            allKeys.removeAll("");
+        }
+
         for (const QString& key : allKeys) {
-            if (processedKeys.contains(key)) continue;
-            
-            QCheckBox* cb = addFilterRow(gl, colorDisplayName(key), m_colorCounts[key], QColor(key));
+            QColor dotC = UiHelper::parseColorName(key);
+            QCheckBox* cb = addFilterRow(gl, colorDisplayName(key), m_colorCounts[key], dotC);
             cb->blockSignals(true);
             cb->setChecked(m_filter.colors.contains(key));
             cb->blockSignals(false);

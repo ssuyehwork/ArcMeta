@@ -9,10 +9,130 @@
 #include <QScrollArea>
 #include <QFileInfo>
 #include <QLabel>
+#include <QClipboard>
+#include <QApplication>
+#include <QMenu>
 #include "UiHelper.h"
 #include "../meta/MetadataManager.h"
 
 namespace ArcMeta {
+
+/**
+ * @brief PaletteSwatch: 调色盘圆形色块组件 (16px)
+ */
+class PaletteSwatch : public QWidget {
+public:
+    explicit PaletteSwatch(const QColor& color, const QString& path, QWidget* parent = nullptr)
+        : QWidget(parent), m_color(color), m_path(path) {
+        setFixedSize(16, 16);
+        setCursor(Qt::PointingHandCursor);
+        setToolTip(color.name().toUpper());
+    }
+
+    void setSelected(bool selected) {
+        m_selected = selected;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        
+        // 绘制主圆
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(m_color);
+        painter.drawEllipse(rect().adjusted(1, 1, -1, -1));
+
+        // 选中态：白色外环 (参考 ColorPickerWidget)
+        if (m_selected) {
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(Qt::white, 1.5));
+            painter.drawEllipse(rect().adjusted(1, 1, -1, -1));
+        }
+    }
+
+    void mousePressEvent(QMouseEvent* event) override {
+        setSelected(true);
+        showMenu(event->globalPosition().toPoint());
+    }
+
+private:
+    void showMenu(const QPoint& pos) {
+        QMenu menu(this);
+        UiHelper::applyMenuStyle(&menu);
+
+        menu.addAction("搜索相似颜项目的项目", [this]() {
+            // 通过父组件发射信号
+            MetaPanel* panel = qobject_cast<MetaPanel*>(window()->findChild<MetaPanel*>("MetadataContainer"));
+            if (!panel) {
+                // 备选方案：向上寻找
+                QWidget* p = this->parentWidget();
+                while (p && !qobject_cast<MetaPanel*>(p)) p = p->parentWidget();
+                panel = qobject_cast<MetaPanel*>(p);
+            }
+            if (panel) emit panel->searchByColor(m_color);
+        });
+
+        menu.addSeparator();
+
+        menu.addAction(QString("复制 %1").arg(m_color.name().toUpper()), [this]() {
+            QApplication::clipboard()->setText(m_color.name().toUpper());
+        });
+
+        menu.addAction(QString("复制 rgb(%1, %2, %3)").arg(m_color.red()).arg(m_color.green()).arg(m_color.blue()), [this]() {
+            QApplication::clipboard()->setText(QString("rgb(%1, %2, %3)").arg(m_color.red()).arg(m_color.green()).arg(m_color.blue()));
+        });
+
+        menu.addAction(QString("复制 rgba(%1, %2, %3, 1)").arg(m_color.red()).arg(m_color.green()).arg(m_color.blue()), [this]() {
+            QApplication::clipboard()->setText(QString("rgba(%1, %2, %3, 1)").arg(m_color.red()).arg(m_color.green()).arg(m_color.blue()));
+        });
+
+        menu.addAction("复制 hsl格式", [this]() {
+            int h, s, l;
+            m_color.getHsl(&h, &s, &l);
+            QApplication::clipboard()->setText(QString("hsl(%1, %2%, %3%)").arg(h == -1 ? 0 : h).arg(qRound(s/2.55)).arg(qRound(l/2.55)));
+        });
+
+        menu.addAction("复制 hsv格式", [this]() {
+            int h, s, v;
+            m_color.getHsv(&h, &s, &v);
+            QApplication::clipboard()->setText(QString("hsv(%1, %2%, %3%)").arg(h == -1 ? 0 : h).arg(qRound(s/2.55)).arg(qRound(v/2.55)));
+        });
+
+        menu.addAction("复制 hwb格式", [this]() {
+            // HWB: W = (1-S)*V, B = 1-V
+            double h = m_color.hsvHueF(); if (h < 0) h = 0;
+            double s = m_color.hsvSaturationF();
+            double v = m_color.valueF();
+            double w = (1.0 - s) * v;
+            double b = 1.0 - v;
+            QApplication::clipboard()->setText(QString("hwb(%1, %2%, %3%)").arg(qRound(h * 360)).arg(qRound(w * 100)).arg(qRound(b * 100)));
+        });
+
+        menu.addAction("复制 cmyk格式", [this]() {
+            float c, m, y, k;
+            m_color.getCmykF(&c, &m, &y, &k);
+            QApplication::clipboard()->setText(QString("cmyk(%1%, %2%, %3%, %4%)")
+                .arg(qRound(c * 100)).arg(qRound(m * 100)).arg(qRound(y * 100)).arg(qRound(k * 100)));
+        });
+
+        menu.addSeparator();
+
+        menu.addAction("设置为自定义主色", [this]() {
+            if (!m_path.isEmpty() && m_path != "-") {
+                MetadataManager::instance().setColor(m_path.toStdWString(), m_color.name().toUpper().toStdWString());
+            }
+        });
+
+        menu.exec(pos);
+        setSelected(false);
+    }
+
+    QColor m_color;
+    QString m_path;
+    bool m_selected = false;
+};
 
 // --- TagPill ---
 TagPill::TagPill(const QString& text, QWidget* parent) 
@@ -192,6 +312,24 @@ void MetaPanel::initUi() {
     addInfoRow("创建时间", lblCtime); addInfoRow("修改时间", lblMtime); addInfoRow("访问时间", lblAtime);
     addInfoRow("物理路径", lblPath); addInfoRow("加密状态", lblEncrypted);
 
+    // 2026-06-xx 调色盘显示行
+    QWidget* paletteRow = new QWidget(m_container);
+    QHBoxLayout* paletteL = new QHBoxLayout(paletteRow);
+    paletteL->setContentsMargins(10, 4, 10, 4);
+    paletteL->setSpacing(6);
+    QLabel* palLbl = new QLabel("颜色", paletteRow);
+    palLbl->setStyleSheet("font-size: 12px; color: #888888; font-weight: bold;");
+    palLbl->setFixedWidth(60);
+    paletteL->addWidget(palLbl);
+    
+    m_paletteContainer = new QWidget(paletteRow);
+    m_paletteLayout = new QHBoxLayout(m_paletteContainer);
+    m_paletteLayout->setContentsMargins(0, 0, 0, 0);
+    m_paletteLayout->setSpacing(4);
+    m_paletteLayout->addStretch();
+    paletteL->addWidget(m_paletteContainer, 1);
+    m_containerLayout->addWidget(paletteRow);
+
     m_containerLayout->addWidget(createSeparator());
     m_containerLayout->addSpacing(6);  // separator 后统一留 6px
 
@@ -314,6 +452,23 @@ void MetaPanel::setTags(const QStringList& tags) {
     for (const QString& tag : tags) { TagPill* pill = new TagPill(tag, m_tagContainer); connect(pill, &TagPill::deleteRequested, this, &MetaPanel::onTagDeleted); m_tagFlowLayout->addWidget(pill); }
 }
 void MetaPanel::setNote(const std::wstring& note) { m_noteEdit->blockSignals(true); m_noteEdit->setPlainText(QString::fromStdWString(note)); m_noteEdit->blockSignals(false); }
+
+void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
+    if (!m_paletteLayout) return;
+    
+    // 清理旧色块 (保留末尾 stretch)
+    while (m_paletteLayout->count() > 1) {
+        QLayoutItem* item = m_paletteLayout->takeAt(0);
+        if (QWidget* w = item->widget()) w->deleteLater();
+        delete item;
+    }
+
+    QString currentPath = lblPath->text();
+    for (const auto& p : palette) {
+        PaletteSwatch* swatch = new PaletteSwatch(p.first, currentPath, m_paletteContainer);
+        m_paletteLayout->insertWidget(m_paletteLayout->count() - 1, swatch);
+    }
+}
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_noteEdit && event->type() == QEvent::FocusOut) {
         QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setNote(currentPath.toStdWString(), m_noteEdit->toPlainText().toStdWString());

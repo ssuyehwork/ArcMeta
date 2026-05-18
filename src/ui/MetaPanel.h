@@ -113,6 +113,11 @@ public:
     void updateInfo(const QString& name, const QString& type, const QString& size,
                     const QString& ctime, const QString& mtime, const QString& atime,
                     const QString& path, bool encrypted);
+
+    /**
+     * @brief 设置变长色板显示
+     */
+    void setPalettes(const QVector<QPair<QColor, float>>& palette);
     
 signals:
     /**
@@ -121,6 +126,11 @@ signals:
      * @param color L"__NO_CHANGE__" 表示未变
      */
     void metadataChanged(int rating, const std::wstring& color);
+
+    /**
+     * @brief 根据颜色搜索项目
+     */
+    void searchByColor(const QColor& color);
 
 public:
     /**
@@ -152,6 +162,8 @@ private:
     QLabel* lblName = nullptr, *lblType = nullptr, *lblSize = nullptr;
     QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
     QLabel* lblPath = nullptr, *lblEncrypted = nullptr;
+    QWidget* m_paletteContainer = nullptr;
+    QHBoxLayout* m_paletteLayout = nullptr;
     QWidget* m_tagContainer = nullptr;
     FlowLayout* m_tagFlowLayout = nullptr;
     QLineEdit* m_tagEdit = nullptr;

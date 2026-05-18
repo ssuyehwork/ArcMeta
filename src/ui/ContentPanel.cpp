@@ -84,33 +84,48 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         if (!currentFilter.ratings.contains(r)) return false; 
     } 
  
-    // 2. 颜色过滤 
+    // 2. 颜色过滤 (变长物理多色板命中逻辑)
     if (!currentFilter.colors.isEmpty()) { 
-        QString c = idx.data(ColorRole).toString(); 
-        bool matchColor = false;
+        QString path = idx.data(PathRole).toString();
+        QString dominantColor = idx.data(ColorRole).toString();
         
+        // 获取该项目的所有物理颜色 (变长色板)
+        QVector<QColor> palettes = MetadataManager::instance().getPalettes(path.toStdWString());
+        
+        bool matchColor = false;
         for (const QString& fc : currentFilter.colors) {
-            if (fc.startsWith("#")) {
-                // 2026-06-xx 按照用户要求：支持高级相近色过滤
-                QColor filterColor = UiHelper::parseColorName(fc);
-                QColor itemColor = UiHelper::parseColorName(c);
-                if (filterColor.isValid() && itemColor.isValid()) {
-                    long rmean = (filterColor.red() + itemColor.red()) / 2;
-                    long r = filterColor.red() - itemColor.red();
-                    long g = filterColor.green() - itemColor.green();
-                    long b = filterColor.blue() - itemColor.blue();
-                    long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
+            // 物理修复：如果 HEX 完全一致（主色命中），直接通过
+            if (fc == dominantColor.toUpper()) { matchColor = true; break; }
+
+            // 如果色板存在，遍历色板执行容差检查
+            if (!palettes.isEmpty()) {
+                for (const auto& pc : palettes) {
+                    if (fc == pc.name().toUpper()) { matchColor = true; break; }
                     
-                    // 2026-06-xx 物理修复：如果 HEX 完全一致，直接命中，否则再走相近色逻辑
-                    if (fc == c.toUpper()) { matchColor = true; break; }
-                    
-                    if (distSq < 15000) { // 容差阈值
-                        matchColor = true; break;
+                    QColor fCol = UiHelper::parseColorName(fc);
+                    if (fCol.isValid()) {
+                        long rmean = (fCol.red() + pc.red()) / 2;
+                        long r = fCol.red() - pc.red();
+                        long g = fCol.green() - pc.green();
+                        long b = fCol.blue() - pc.blue();
+                        long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
+                        if (distSq < 15000) { matchColor = true; break; }
                     }
                 }
             } else {
-                if (c == fc) { matchColor = true; break; }
+                // 向下兼容：若色板为空，回退到对主色调的容差检查
+                QColor dCol = UiHelper::parseColorName(dominantColor);
+                QColor fCol = UiHelper::parseColorName(fc);
+                if (dCol.isValid() && fCol.isValid()) {
+                    long rmean = (fCol.red() + dCol.red()) / 2;
+                    long r = fCol.red() - dCol.red();
+                    long g = fCol.green() - dCol.green();
+                    long b = fCol.blue() - dCol.blue();
+                    long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
+                    if (distSq < 15000) { matchColor = true; break; }
+                }
             }
+            if (matchColor) break;
         }
         if (!matchColor) return false; 
     } 
@@ -263,6 +278,13 @@ ContentPanel::ContentPanel(QWidget* parent)
             nameItem->setData(data.meta.encrypted, EncryptedRole); 
             nameItem->setData(data.meta.tags, TagsRole); 
             nameItem->setData(data.isEmpty, IsEmptyRole); 
+            // 2026-06-xx 按照要求：注入物理色板，确保多色统计与过滤生效
+            QVariantList palList;
+            for (const auto& p : data.meta.palettes) {
+                QVariantMap m; m["color"] = p.color; m["ratio"] = p.ratio;
+                palList << m;
+            }
+            nameItem->setData(palList, PalettesRole);
              
             // 2026-06-xx 按照要求：基于 JSON 存在性注入已录入状态（判断逻辑已在扫描端完成） 
             // 物理修复：校准作用域 
@@ -968,22 +990,31 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 auto palette = UiHelper::extractPalette(path);
                 if (palette.isEmpty()) return;
                 
+                // 1. 提取第一个颜色作为主色调 (用于图标着色)
                 QColor dominant = UiHelper::quantizeColor(palette.first().first);
                 QString colorHex = dominant.name().toUpper();
                 
                 QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, colorHex, palette, dominant]() {
                     if (weakThis) {
+                        // 2. 物理双重存储：主色 + 全量变长色板
                         MetadataManager::instance().setColor(path.toStdWString(), colorHex.toStdWString());
                         MetadataManager::instance().setPalettes(path.toStdWString(), palette);
                         
-                        // 物理同步 UI 状态：定位模型索引并注入新颜色与着色图标
+                        // 3. 物理同步 UI 状态
                         auto* model = weakThis->m_model;
                         for (int i = 0; i < model->rowCount(); ++i) {
                             auto* item = model->item(i, 0);
                             if (item && item->data(PathRole).toString() == path) {
                                 item->setData(colorHex, ColorRole);
                                 
-                                // 2026-05-17 逻辑修复：针对图像格式，必须优先尝试提取缩略图，防止图标覆盖内容
+                                // 向下兼容注入 PalettesRole (用于当前视图即时搜索)
+                                QVariantList palList;
+                                for (const auto& p : palette) {
+                                    QVariantMap m; m["color"] = p.first; m["ratio"] = p.second;
+                                    palList << m;
+                                }
+                                item->setData(palList, PalettesRole);
+                                
                                 QIcon coloredIcon;
                                 QString suffix = QFileInfo(path).suffix().toLower();
                                 if (UiHelper::isGraphicsFile(suffix)) {
@@ -997,7 +1028,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                 break;
                             }
                         }
-                        ToolTipOverlay::instance()->showText(QCursor::pos(), "调色盘已提取并绑定", 1500, QColor("#2ecc71"));
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "变长色板已物理提取并绑定", 1500, QColor("#2ecc71"));
                     }
                 });
             });
@@ -1519,6 +1550,13 @@ void ContentPanel::loadCategory(int categoryId) {
             nameItem->setData(rm.pinned, PinnedRole); 
             nameItem->setData(rm.pinned, IsLockedRole); 
             nameItem->setData(rm.tags, TagsRole); 
+            // 2026-06-xx 注入物理色板
+            QVariantList palList;
+            for (const auto& p : rm.palettes) {
+                QVariantMap m; m["color"] = p.color; m["ratio"] = p.ratio;
+                palList << m;
+            }
+            nameItem->setData(palList, PalettesRole);
  
             bool isEmpty = false; 
             if (type == "folder") isEmpty = QDir(itemPath).isEmpty(); 
@@ -1608,6 +1646,13 @@ void ContentPanel::loadPaths(const QStringList& paths) {
         nameItem->setData(rm.pinned, PinnedRole); 
         nameItem->setData(rm.pinned, IsLockedRole); 
         nameItem->setData(rm.tags, TagsRole); 
+        // 2026-06-xx 注入物理色板
+        QVariantList palList;
+        for (const auto& p : rm.palettes) {
+            QVariantMap m; m["color"] = p.color; m["ratio"] = p.ratio;
+            palList << m;
+        }
+        nameItem->setData(palList, PalettesRole);
  
         bool isEmpty = false; 
         if (info.isDir()) isEmpty = QDir(path).isEmpty(); 
@@ -2012,13 +2057,29 @@ void ContentPanel::recalculateAndEmitStats() {
         QStandardItem* nameItem = m_model->item(i, 0);
         if (!nameItem) continue;
         int rating = nameItem->data(RatingRole).toInt();
-        QString colorName = nameItem->data(ColorRole).toString();
         QString type = nameItem->data(TypeRole).toString();
         QStringList tags = nameItem->data(TagsRole).toStringList();
         
         stats.ratingCounts[rating]++;
-        if (!colorName.isEmpty()) stats.colorCounts[colorName]++;
-        else stats.colorCounts[""]++;
+
+        // 2026-06-xx 物理占比统计：遍历所有色板颜色，而不仅仅是主色调
+        QVariant palVar = nameItem->data(PalettesRole);
+        QString dominantColor = nameItem->data(ColorRole).toString();
+        
+        if (palVar.isValid()) {
+            QVariantList pal = palVar.toList();
+            for (const auto& v : pal) {
+                QVariantMap m = v.toMap();
+                QColor c = m["color"].value<QColor>();
+                // 4-bit 量化对齐，防止统计碎片化
+                QString hex = UiHelper::quantizeColor(c).name().toUpper();
+                stats.colorCounts[hex]++;
+            }
+        } else if (!dominantColor.isEmpty()) {
+            stats.colorCounts[dominantColor.toUpper()]++;
+        } else {
+            stats.colorCounts[""]++;
+        }
         
         if (type == "folder") {
             stats.typeCounts["folder"]++;

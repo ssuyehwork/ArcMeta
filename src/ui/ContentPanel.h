@@ -55,7 +55,8 @@ enum ItemRole {
     TypeRole,
     IsEmptyRole,
     CategoryIdRole,
-    InDatabaseRole
+    InDatabaseRole,
+    PalettesRole
 };
 
 /**

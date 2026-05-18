@@ -1,6 +1,8 @@
 {
     "folder": {
         "color": "",
+        "encrypted": false,
+        "file_id_128": "",
         "note": "",
         "pinned": false,
         "rating": 0,
@@ -16,6 +18,7 @@
             "encrypt_salt": "",
             "encrypt_verify_hash": "",
             "encrypted": false,
+            "file_id_128": "",
             "frn": "",
             "note": "",
             "original_name": "",
@@ -27,5 +30,5 @@
             "volume": ""
         }
     },
-    "version": "1"
+    "version": "2"
 }
