@@ -231,7 +231,8 @@ public:
             return a.second > b.second;
         });
 
-        // 5. 合并相似颜色桶 (曼哈顿距离 < 32)
+        // 5. 合并相似颜色桶 (曼哈顿距离 < 48)
+        // 2026-06-xx 逻辑优化：阈值由 32 提升至 48，以提供更合理的视觉区分度，防止 Top-5 被过细的色阶占据
         QList<QPair<QRgb, int>> mergedBuckets;
         for (const auto& bucket : sortedBuckets) {
             bool merged = false;
@@ -239,7 +240,7 @@ public:
                 int dr = std::abs(qRed(bucket.first) - qRed(target.first));
                 int dg = std::abs(qGreen(bucket.first) - qGreen(target.first));
                 int db = std::abs(qBlue(bucket.first) - qBlue(target.first));
-                if (dr + dg + db < 32) {
+                if (dr + dg + db < 48) {
                     target.second += bucket.second;
                     merged = true;
                     break;
