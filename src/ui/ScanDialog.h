@@ -90,6 +90,8 @@ private:
     QVector<int> m_filteredIndices;
     QString m_filterText;
     ScanFilterState m_filterState;
+    mutable QMap<int, QPixmap> m_thumbCache;
+    mutable QSet<int> m_requestedThumbs;
     QFutureWatcher<QVector<int>> m_filterWatcher;
     std::unordered_map<int, int> m_actualToRow; // 2026-05-14 新增：O(1) 定位索引
     QSet<int> m_pendingRows;  // 2026-05-14 信号聚合：待刷新的行号集合

@@ -231,7 +231,12 @@ Qt::DropActions CategoryModel::supportedDropActions() const {
 }
 
 bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction action, int row, int column, const QModelIndex& parent) {
-    Q_UNUSED(mimeData);
+    // 2026-06-xx 物理修复：如果是外部 URL/路径拖入，放宽校验限制。
+    // 允许在侧边栏任意位置释放，由 CategoryPanel 处理具体的分类归属逻辑。
+    if (mimeData->hasUrls() || mimeData->hasFormat("text/plain")) {
+        return true;
+    }
+
     Q_UNUSED(action);
     Q_UNUSED(row);
     Q_UNUSED(column);
@@ -244,6 +249,7 @@ bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction actio
         QString type = parentItem->data(TypeRole).toString();
         QString name = parentItem->data(NameRole).toString();
         
+        // 内部拖拽（Move）依然保持严格校验，仅允许移动到分类、书签或根组
         if (type != "category" && type != "bookmark" && name != "我的分类") {
             return false; 
         }
