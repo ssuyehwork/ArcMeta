@@ -513,8 +513,9 @@ void ScanDialog::setupUi() {
 
     m_driveContainer = new QWidget();
     m_driveLayout = new QHBoxLayout(m_driveContainer);
-    m_driveLayout->setContentsMargins(10, 0, 10, 0);
-    m_driveLayout->setSpacing(15);
+    // 2026-06-xx 按照用户要求：盘符部分也调整为 5 像素间距
+    m_driveLayout->setContentsMargins(5, 0, 5, 0);
+    m_driveLayout->setSpacing(5);
     driveScroll->setWidget(m_driveContainer);
 
     auto* topControl = new QHBoxLayout();
@@ -528,34 +529,42 @@ void ScanDialog::setupUi() {
 
     auto* searchRow = new QHBoxLayout();
     searchRow->setContentsMargins(5, 8, 5, 8);
-    searchRow->setSpacing(0); // 2026-06-xx 物理修复：搜索栏组件应紧密贴合
+    // 2026-06-xx 按照要求：整体搜索行保持 5px 设计间距
+    searchRow->setSpacing(5);
+
+    // A. 紧凑型输入组 (搜索 + 后缀 + 按钮)
+    auto* inputGroup = new QHBoxLayout();
+    inputGroup->setSpacing(0);
 
     m_searchEdit = new QLineEdit();
     m_searchEdit->setPlaceholderText("输入文件名 / 关键词...");
     m_searchEdit->setMinimumHeight(36);
-    // 2026-06-xx 物理修复：移除 border-right: none，改用合并边框策略，解决渲染重叠覆盖问题
-    m_searchEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; border-radius: 6px 0 0 6px; padding: 0 10px; color: #EEE; font-size: 14px; }");
+    // 2026-06-xx 物理修复：采用“左侧圆角 + 移除右边框”以实现无缝对接
+    m_searchEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; border-right: none; border-radius: 6px 0 0 6px; padding: 0 10px; color: #EEE; font-size: 14px; }");
     m_searchEdit->installEventFilter(this);
     connect(m_searchEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
-    searchRow->addWidget(m_searchEdit, 1);
+    inputGroup->addWidget(m_searchEdit, 1);
 
     m_extEdit = new QLineEdit();
     m_extEdit->setPlaceholderText("后缀");
     m_extEdit->setFixedWidth(80);
     m_extEdit->setMinimumHeight(36);
-    // 2026-06-xx 物理修复：采用统一边框，消除覆盖 Bug
-    m_extEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; border-left: none; color: #EEE; font-size: 14px; }");
+    // 2026-06-xx 物理修复：采用“无圆角 + 仅保留上下边框 + 加深左分割线”消除“污染”Bug
+    m_extEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border-top: 1px solid #3F3F3F; border-bottom: 1px solid #3F3F3F; border-left: 1px solid #444; border-right: none; color: #EEE; font-size: 14px; }");
     m_extEdit->installEventFilter(this);
     connect(m_extEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
-    searchRow->addWidget(m_extEdit);
+    inputGroup->addWidget(m_extEdit);
 
     m_searchBtn = new QPushButton("搜索");
     m_searchBtn->setFixedWidth(70);
     m_searchBtn->setMinimumHeight(36);
     m_searchBtn->setCursor(Qt::PointingHandCursor);
+    // 2026-06-xx 物理修复：采用“右侧圆角 + 保持主色边框”
     m_searchBtn->setStyleSheet("QPushButton { background: #FF8C00; color: #000; border: 1px solid #FF8C00; border-radius: 0 6px 6px 0; font-weight: bold; font-size: 13px; } QPushButton:hover { background: #FFA500; } QPushButton:pressed { background: #CC6600; }");
     connect(m_searchBtn, &QPushButton::clicked, this, &ScanDialog::onTriggerSearch);
-    searchRow->addWidget(m_searchBtn);
+    inputGroup->addWidget(m_searchBtn);
+
+    searchRow->addLayout(inputGroup, 1);
 
     m_checkRegex = new QCheckBox("正则");
     m_checkCase = new QCheckBox("大小写");
@@ -584,7 +593,7 @@ void ScanDialog::setupUi() {
     m_resultView->setContextMenuPolicy(Qt::CustomContextMenu);
     
     // 2026-05-14 视觉优化：基于色码分析，将斑马纹调整为深灰色 (#1E1E1E) 与纯黑色 (#000000) 搭配
-    // 2026-06-xx 按照用户要求：设置左侧 10px 间距，确保坐标校准
+    // 2026-06-xx 按照用户要求：设置左侧 10px 间距，确保坐标校准，同时修正表头首列偏移
     m_resultView->setStyleSheet(
         "QTableView { "
         "background-color: #1E1E1E; "
@@ -599,6 +608,7 @@ void ScanDialog::setupUi() {
         "}"
         "QTableView::item { border-bottom: 1px solid #252526; }"
         "QHeaderView::section { background-color: #252526; color: #888; border: none; border-right: 1px solid #333; padding: 4px; height: 24px; }"
+        "QHeaderView::section:horizontal:first { padding-left: 14px; }" // 10px 基础 + 4px 原有内边距
         "QHeaderView { background-color: #252526; border: none; }"
     );
     
