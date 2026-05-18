@@ -37,12 +37,17 @@ void DropTreeView::dragEnterEvent(QDragEnterEvent* event) {
 }
 
 void DropTreeView::dragMoveEvent(QDragMoveEvent* event) {
-    QTreeView::dragMoveEvent(event);
-
+    // 2026-06-xx 物理修复：针对外部拖拽，优先设置 LinkAction 并拦截。
+    // 不再先调用基类，防止 QTreeView 的内部索引校验将 Action 重置为 Ignore。
     if (event->mimeData()->hasUrls() || event->mimeData()->hasFormat("text/plain")) {
         event->setDropAction(Qt::LinkAction);
         event->accept();
-    } else if (event->mimeData()->hasFormat("application/x-note-ids") ||
+        return;
+    }
+
+    QTreeView::dragMoveEvent(event);
+
+    if (event->mimeData()->hasFormat("application/x-note-ids") ||
                event->mimeData()->hasFormat("application/x-qabstractitemmodeldatalist")) {
         event->acceptProposedAction();
     } else {
