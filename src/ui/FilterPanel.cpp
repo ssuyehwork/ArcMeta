@@ -5,6 +5,8 @@
 #include <QPushButton>
 #include <QMouseEvent>
 #include <QCursor>
+#include <QGuiApplication>
+#include <QScreen>
 
 namespace ArcMeta {
 
@@ -247,7 +249,23 @@ void FilterPanel::rebuildGroups() {
                 });
                 picker->adjustSize();
                 QPoint pos = btnCustomColor->mapToGlobal(QPoint(0, 0));
-                pos.setY(pos.y() - picker->height() - 5);
+
+                // 2026-06-xx 物理修复：引入智能边界避障算法，防止最大化时弹出框溢出屏幕
+                QScreen* currentScreen = QGuiApplication::screenAt(QCursor::pos());
+                QRect screen = currentScreen ? currentScreen->availableGeometry() : QRect(0, 0, 1920, 1080);
+
+                // 水平避障：如果右侧空间不足，则改为向左对齐
+                if (pos.x() + picker->width() > screen.right()) {
+                    pos.setX(btnCustomColor->mapToGlobal(QPoint(btnCustomColor->width(), 0)).x() - picker->width());
+                }
+
+                // 垂直避障：如果上方空间不足，则向下弹出
+                if (pos.y() - picker->height() - 5 < screen.top()) {
+                    pos.setY(btnCustomColor->mapToGlobal(QPoint(0, btnCustomColor->height())).y() + 5);
+                } else {
+                    pos.setY(pos.y() - picker->height() - 5);
+                }
+
                 picker->move(pos);
                 picker->show();
             });
