@@ -178,14 +178,14 @@ public:
      */
     static inline QColor quantizeColor(const QColor& color) {
         if (!color.isValid()) return color;
-        return QColor(color.red() & 0xF0, color.green() & 0xF0, color.blue() & 0xF0);
+        return QColor(color.red() & 0xE0, color.green() & 0xE0, color.blue() & 0xE0);
     }
 
 
     /**
-     * @brief 从图像中提取调色盘 (5 色占比版)
+     * @brief 从图像中提取调色盘 (变长色板版)
      */
-    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile, int topN = 5) {
+    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
         QFileInfo fileInfo(targetFile);
         QString suffix = fileInfo.suffix().toLower();
         QImage targetImg;
@@ -218,8 +218,8 @@ public:
                 QRgb rgb = sampled.pixel(col, row);
                 if (qAlpha(rgb) < 128) continue;
 
-                // 2. 量化分组：使用 4-bit 建立桶，提高色彩敏感度，防止 Top-5 被过粗的量化合并
-                QRgb rgbKey = qRgb(qRed(rgb) & 0xF0, qGreen(rgb) & 0xF0, qBlue(rgb) & 0xF0);
+                // 2. 量化分组：使用 3-bit 建立桶
+                QRgb rgbKey = qRgb(qRed(rgb) & 0xE0, qGreen(rgb) & 0xE0, qBlue(rgb) & 0xE0);
                 auto& stat = bucketStats[rgbKey];
                 stat.rSum += qRed(rgb);
                 stat.gSum += qGreen(rgb);
@@ -242,7 +242,7 @@ public:
             return a.count > b.count;
         });
 
-        // 4. 相似合并 (曼哈顿距离 < 32)：采用 4-bit 量化配合 32 阈值，提供工业级色彩区分度
+        // 4. 相似合并 (曼哈顿距离 < 48)
         QList<FinalBucket> merged;
         for (const auto& b : buckets) {
             bool found = false;
@@ -250,7 +250,7 @@ public:
                 int dist = std::abs(b.avgColor.red() - m.avgColor.red()) +
                            std::abs(b.avgColor.green() - m.avgColor.green()) +
                            std::abs(b.avgColor.blue() - m.avgColor.blue());
-                if (dist < 32) {
+                if (dist < 48) {
                     // 重新计算加权平均色，确保最终 HEX 真值不偏离物理重心
                     int total = m.count + b.count;
                     int nr = (m.avgColor.red() * m.count + b.avgColor.red() * b.count) / total;
@@ -265,14 +265,13 @@ public:
             if (!found) merged.append(b);
         }
 
-        // 5. 再次排序并截取 Top N
+        // 5. 再次排序并返回全量色板
         std::sort(merged.begin(), merged.end(), [](const FinalBucket& a, const FinalBucket& b) {
             return a.count > b.count;
         });
 
         QVector<QPair<QColor, float>> result;
-        int limit = qMin((int)merged.size(), topN);
-        for (int i = 0; i < limit; ++i) {
+        for (int i = 0; i < (int)merged.size(); ++i) {
             result.append({ merged[i].avgColor, (float)merged[i].count / totalValidPixels });
         }
         return result;

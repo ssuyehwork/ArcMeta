@@ -84,44 +84,45 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         if (!currentFilter.ratings.contains(r)) return false; 
     } 
  
-    // 2. 颜色过滤 (物理多色板命中逻辑)
+    // 2. 颜色过滤 (变长物理多色板命中逻辑)
     if (!currentFilter.colors.isEmpty()) { 
-        // 2026-06-xx 按照用户要求：只要项目色板中包含该颜色（或其特征值），即判定为命中
-        QVariant palVar = idx.data(PalettesRole);
+        QString path = idx.data(PathRole).toString();
         QString dominantColor = idx.data(ColorRole).toString();
+
+        // 获取该项目的所有物理颜色 (变长色板)
+        QVector<QColor> palettes = MetadataManager::instance().getPalettes(path.toStdWString());
         
         bool matchColor = false;
         for (const QString& fc : currentFilter.colors) {
             // 物理修复：如果 HEX 完全一致（主色命中），直接通过
             if (fc == dominantColor.toUpper()) { matchColor = true; break; }
 
-            // 检查色板
-            if (palVar.isValid()) {
-                QVector<QPair<QColor, float>> pal;
-                // 由于跨线程或存储原因，色板可能以 QVariantList 形式存在
-                if (palVar.canConvert<QVariantList>()) {
-                    for (const auto& v : palVar.toList()) {
-                        QVariantMap m = v.toMap();
-                        pal.append({m["color"].value<QColor>(), (float)m["ratio"].toDouble()});
+            // 如果色板存在，遍历色板执行容差检查
+            if (!palettes.isEmpty()) {
+                for (const auto& pc : palettes) {
+                    if (fc == pc.name().toUpper()) { matchColor = true; break; }
+
+                    QColor fCol = UiHelper::parseColorName(fc);
+                    if (fCol.isValid()) {
+                        long rmean = (fCol.red() + pc.red()) / 2;
+                        long r = fCol.red() - pc.red();
+                        long g = fCol.green() - pc.green();
+                        long b = fCol.blue() - pc.blue();
+                        long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
+                        if (distSq < 15000) { matchColor = true; break; }
                     }
                 }
-
-                for (const auto& p : pal) {
-                    QString pc = p.first.name().toUpper();
-                    if (fc == pc) { matchColor = true; break; }
-
-                    // 物理容差检查 (4-bit 量化对齐)
-                    if (fc.startsWith("#")) {
-                        QColor fCol = UiHelper::parseColorName(fc);
-                        if (fCol.isValid()) {
-                            long rmean = (fCol.red() + p.first.red()) / 2;
-                            long r = fCol.red() - p.first.red();
-                            long g = fCol.green() - p.first.green();
-                            long b = fCol.blue() - p.first.blue();
-                            long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
-                            if (distSq < 15000) { matchColor = true; break; }
-                        }
-                    }
+            } else {
+                // 向下兼容：若色板为空，回退到对主色调的容差检查
+                QColor dCol = UiHelper::parseColorName(dominantColor);
+                QColor fCol = UiHelper::parseColorName(fc);
+                if (dCol.isValid() && fCol.isValid()) {
+                    long rmean = (fCol.red() + dCol.red()) / 2;
+                    long r = fCol.red() - dCol.red();
+                    long g = fCol.green() - dCol.green();
+                    long b = fCol.blue() - dCol.blue();
+                    long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
+                    if (distSq < 15000) { matchColor = true; break; }
                 }
             }
             if (matchColor) break;
@@ -989,22 +990,31 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 auto palette = UiHelper::extractPalette(path);
                 if (palette.isEmpty()) return;
 
+                // 1. 提取第一个颜色作为主色调 (用于图标着色)
                 QColor dominant = UiHelper::quantizeColor(palette.first().first);
                 QString colorHex = dominant.name().toUpper();
 
                 QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, colorHex, palette, dominant]() {
                     if (weakThis) {
+                        // 2. 物理双重存储：主色 + 全量变长色板
                         MetadataManager::instance().setColor(path.toStdWString(), colorHex.toStdWString());
                         MetadataManager::instance().setPalettes(path.toStdWString(), palette);
                         
-                        // 物理同步 UI 状态：定位模型索引并注入新颜色与着色图标
+                        // 3. 物理同步 UI 状态
                         auto* model = weakThis->m_model;
                         for (int i = 0; i < model->rowCount(); ++i) {
                             auto* item = model->item(i, 0);
                             if (item && item->data(PathRole).toString() == path) {
                                 item->setData(colorHex, ColorRole);
+
+                                // 向下兼容注入 PalettesRole (用于当前视图即时搜索)
+                                QVariantList palList;
+                                for (const auto& p : palette) {
+                                    QVariantMap m; m["color"] = p.first; m["ratio"] = p.second;
+                                    palList << m;
+                                }
+                                item->setData(palList, PalettesRole);
                                 
-                                // 2026-05-17 逻辑修复：针对图像格式，必须优先尝试提取缩略图，防止图标覆盖内容
                                 QIcon coloredIcon;
                                 QString suffix = QFileInfo(path).suffix().toLower();
                                 if (UiHelper::isGraphicsFile(suffix)) {
@@ -1018,7 +1028,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                 break;
                             }
                         }
-                        ToolTipOverlay::instance()->showText(QCursor::pos(), "调色盘已提取并绑定", 1500, QColor("#2ecc71"));
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "变长色板已物理提取并绑定", 1500, QColor("#2ecc71"));
                     }
                 });
             });

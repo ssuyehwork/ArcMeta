@@ -347,6 +347,8 @@ void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted) {
 
 void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes) {
     std::wstring nPath = normalizePath(path);
+
+    // 1. 同步内存缓存
     std::vector<PaletteEntry> entries;
     for (const auto& p : palettes) {
         entries.push_back({p.first, p.second});
@@ -355,8 +357,49 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache[nPath].palettes = entries;
     }
+
+    // 2. 物理原子更新 .am_meta.json
+    QFileInfo info(QString::fromStdWString(nPath));
+    std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
+    std::wstring fileName = info.fileName().toStdWString();
+
+    AmMetaJson amJson(parentDir);
+    if (amJson.load()) {
+        if (info.isDir()) {
+            amJson.folder().palettes = entries;
+        } else {
+            amJson.items()[fileName].palettes = entries;
+        }
+        amJson.save();
+    }
+
     emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
+}
+
+QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
+    std::wstring nPath = normalizePath(path);
+    QFileInfo info(QString::fromStdWString(nPath));
+    std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
+    std::wstring fileName = info.fileName().toStdWString();
+
+    AmMetaJson amJson(parentDir);
+    if (amJson.load()) {
+        std::vector<PaletteEntry> entries;
+        if (info.isDir()) {
+            entries = amJson.folder().palettes;
+        } else {
+            auto& items = amJson.items();
+            if (items.count(fileName)) {
+                entries = items.at(fileName).palettes;
+            }
+        }
+
+        QVector<QColor> colors;
+        for (const auto& e : entries) colors << e.color;
+        return colors;
+    }
+    return {};
 }
 
 void MetadataManager::debouncePersist(const std::wstring& nPath) {

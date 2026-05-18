@@ -53,6 +53,7 @@ public:
     void setNote(const std::wstring& path, const std::wstring& note);
     void setEncrypted(const std::wstring& path, bool encrypted);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes);
+    QVector<QColor> getPalettes(const std::wstring& path);
 
     void renameItem(const std::wstring& oldPath, const std::wstring& newPath);
 
