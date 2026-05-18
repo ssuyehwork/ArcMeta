@@ -5,6 +5,7 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
+#include <QTimer>
 
 namespace ArcMeta {
 
@@ -24,6 +25,11 @@ protected:
     void startDrag(Qt::DropActions supportedActions) override;
 
     void keyboardSearch(const QString& search) override;
+
+private:
+    // 2026-06-xx 物理辅助：拖拽悬停自动展开
+    QTimer* m_autoExpandTimer = nullptr;
+    QModelIndex m_hoverIndex;
 };
 
 } // namespace ArcMeta

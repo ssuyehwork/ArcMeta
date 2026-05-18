@@ -32,6 +32,7 @@
 #include <winbase.h>
 #include <handleapi.h>
 #include <winnt.h>
+#include <sddl.h>
 
 
 #include <cstdio>
