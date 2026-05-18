@@ -143,7 +143,7 @@ FolderMeta AmMetaJson::entryToFolder(const QJsonObject& obj) {
             QJsonObject pObj = v.toObject();
             QJsonArray cArr = pObj.value("color").toArray();
             if (cArr.size() >= 3) {
-                meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj.value("ratio").toDouble()});
+                meta.palettes.push_back({QColor(cArr.at(0).toInt(), cArr.at(1).toInt(), cArr.at(2).toInt()), (float)pObj.value("ratio").toDouble()});
             }
         }
     }
@@ -205,7 +205,7 @@ ItemMeta AmMetaJson::entryToItem(const QJsonObject& obj) {
             QJsonObject pObj = v.toObject();
             QJsonArray cArr = pObj.value("color").toArray();
             if (cArr.size() >= 3) {
-                meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj.value("ratio").toDouble()});
+                meta.palettes.push_back({QColor(cArr.at(0).toInt(), cArr.at(1).toInt(), cArr.at(2).toInt()), (float)pObj.value("ratio").toDouble()});
             }
         }
     }
