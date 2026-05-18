@@ -182,6 +182,44 @@ public:
     }
 
     /**
+     * @brief 将任意颜色映射到标准色桶 (用于筛选器聚合)
+     */
+    static QString getStandardColorBucket(const QString& colorStr) {
+        if (colorStr.isEmpty()) return "";
+        QColor c = parseColorName(colorStr);
+        if (!c.isValid()) return colorStr;
+
+        struct Bucket { QString key; QColor color; };
+        static const QList<Bucket> buckets = {
+            { "#E04040", QColor("#E24B4A") }, // 红
+            { "#E09020", QColor("#EF9F27") }, // 橙
+            { "#F0C070", QColor("#FAC775") }, // 黄
+            { "#609020", QColor("#639922") }, // 绿
+            { "#109070", QColor("#1D9E75") }, // 青
+            { "#3080D0", QColor("#378ADD") }, // 蓝
+            { "#7070D0", QColor("#7F77DD") }, // 紫
+            { "#505050", QColor("#5F5E5A") }, // 灰
+            { "#000000", QColor("#000000") }, // 黑
+            { "#FFFFFF", QColor("#FFFFFF") }  // 白
+        };
+
+        QString bestKey = colorStr;
+        long minPulse = 2000000;
+        for (const auto& b : buckets) {
+            long rmean = (c.red() + b.color.red()) / 2;
+            long r = c.red() - b.color.red();
+            long g = c.green() - b.color.green();
+            long bl = c.blue() - b.color.blue();
+            long distSq = (((512 + rmean) * r * r) >> 8) + 4 * g * g + (((767 - rmean) * bl * bl) >> 8);
+            if (distSq < minPulse) {
+                minPulse = distSq;
+                bestKey = b.key;
+            }
+        }
+        return (minPulse < 60000) ? bestKey : colorStr;
+    }
+
+    /**
      * @brief 从图像中提取调色盘 (5 色占比版)
      */
     static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile, int topN = 5) {

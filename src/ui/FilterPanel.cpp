@@ -234,6 +234,13 @@ void FilterPanel::rebuildGroups() {
         QVBoxLayout* gl = nullptr;
         QHBoxLayout* hdrLayout = nullptr; // 标题行内嵌布局
         QWidget* g = buildGroup("颜色标记", gl, &hdrLayout);
+
+        // 2026-06-xx 聚合统计：将所有 HEX 碎片映射到标准色桶进行展示
+        QMap<QString, int> aggregatedCounts;
+        for (auto it = m_colorCounts.begin(); it != m_colorCounts.end(); ++it) {
+            QString bucket = UiHelper::getStandardColorBucket(it.key());
+            aggregatedCounts[bucket] += it.value();
+        }
         
         if (hdrLayout) {
             QPushButton* btnCustomColor = new QPushButton(hdrLayout->parentWidget());
@@ -293,34 +300,50 @@ void FilterPanel::rebuildGroups() {
             }
         }
 
-        // 2026-06-xx 按照要求：动态展示所有存在的颜色
+        // 2026-06-xx 按照要求：动态展示聚合后的标准色桶
         QSet<QString> processedKeys;
 
         // 1. 优先按品牌色顺序排列常用颜色
-        QStringList priorityKeys = {"", "#E04040", "#E09020", "#F0C070", "#609020", "#109070", "#3080D0", "#7070D0", "#505050", "#000000", "#F0F0F0",
+        QStringList priorityKeys = {"", "#E04040", "#E09020", "#F0C070", "#609020", "#109070", "#3080D0", "#7070D0", "#505050", "#000000", "#FFFFFF",
                                     "red", "orange", "yellow", "green", "cyan", "blue", "purple", "gray"};
         for (const QString& key : priorityKeys) {
-            if (m_colorCounts.contains(key)) {
-                QCheckBox* cb = addFilterRow(gl, colorDisplayName(key), m_colorCounts[key], colorMap.value(key, QColor(key)));
+            if (aggregatedCounts.contains(key)) {
+                QString displayKey = key;
+                // 兼容旧语义名，但在 UI 上统一展示为标准名
+                if (key == "red") displayKey = "#E04040";
+                else if (key == "orange") displayKey = "#E09020";
+                else if (key == "yellow") displayKey = "#F0C070";
+                else if (key == "green") displayKey = "#609020";
+                else if (key == "cyan") displayKey = "#109070";
+                else if (key == "blue") displayKey = "#3080D0";
+                else if (key == "purple") displayKey = "#7070D0";
+                else if (key == "gray") displayKey = "#505050";
+
+                if (processedKeys.contains(displayKey)) {
+                    // 如果已处理过对应的标准 HEX 桶，则累加旧语义名的数据并跳过
+                    continue;
+                }
+
+                QCheckBox* cb = addFilterRow(gl, colorDisplayName(displayKey), aggregatedCounts[key], colorMap.value(displayKey, QColor(displayKey)));
                 cb->blockSignals(true);
-                cb->setChecked(m_filter.colors.contains(key));
+                cb->setChecked(m_filter.colors.contains(displayKey));
                 cb->blockSignals(false);
-                connect(cb, &QCheckBox::toggled, this, [this, key](bool on) {
-                    if (on) { if (!m_filter.colors.contains(key)) m_filter.colors.append(key); }
-                    else m_filter.colors.removeAll(key);
+                connect(cb, &QCheckBox::toggled, this, [this, displayKey](bool on) {
+                    if (on) { if (!m_filter.colors.contains(displayKey)) m_filter.colors.append(displayKey); }
+                    else m_filter.colors.removeAll(displayKey);
                     emit filterChanged(m_filter);
                 });
-                processedKeys.insert(key);
+                processedKeys.insert(displayKey);
             }
         }
 
-        // 2. 展示其他所有动态提取到的量化颜色
-        QStringList allKeys = m_colorCounts.keys();
+        // 2. 展示未命中标准桶的其他颜色（作为兜底）
+        QStringList allKeys = aggregatedCounts.keys();
         allKeys.sort();
         for (const QString& key : allKeys) {
             if (processedKeys.contains(key)) continue;
 
-            QCheckBox* cb = addFilterRow(gl, colorDisplayName(key), m_colorCounts[key], QColor(key));
+            QCheckBox* cb = addFilterRow(gl, colorDisplayName(key), aggregatedCounts[key], QColor(key));
             cb->blockSignals(true);
             cb->setChecked(m_filter.colors.contains(key));
             cb->blockSignals(false);
