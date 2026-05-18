@@ -1372,10 +1372,10 @@ void MainWindow::changeEvent(QEvent* event) {
             m_btnMax->setIcon(UiHelper::getIcon(iconKey, QColor("#EEEEEE")));
         }
 
-        // 2026-05-08 按照用户要求：关键修复：最大化时清除 bodyWrapper 边距，还原时恢复
+        // 2026-06-xx 按照用户要求：最大化时保留顶部 5px 间距，防止与地址栏粘连
         if (m_bodyLayout) {
             if (isMaximized()) {
-                m_bodyLayout->setContentsMargins(0, 0, 0, 0);
+                m_bodyLayout->setContentsMargins(0, 5, 0, 0);
             } else {
                 m_bodyLayout->setContentsMargins(5, 5, 5, 5);
             }
