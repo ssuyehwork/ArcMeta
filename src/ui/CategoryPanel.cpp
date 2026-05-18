@@ -972,6 +972,23 @@ void CategoryPanel::initUi() {
 
                     // 2026-06-xx 物理同步：触发元数据持久化以生成 .am_meta.json，实现“目录导航”状态感应
                     MetadataManager::instance().syncPhysicalMetadata(wPath);
+
+                    // 2026-06-xx 按照用户要求：针对特定格式文件，在拖拽导入时自动进行颜色解析
+                    QString ext = info.suffix().toLower();
+                    static const QSet<QString> targetExts = {"psd", "ai", "eps", "png", "jpg", "jpeg"};
+                    if (targetExts.contains(ext)) {
+                        // 1. 提取全量色板
+                        auto palette = UiHelper::extractPalette(itemPath);
+                        if (!palette.isEmpty()) {
+                            // 2. 提取第一个颜色作为主色调并量化
+                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                            QString colorHex = dominant.name().toUpper();
+
+                            // 3. 物理双重存储：主色 + 全量变长色板
+                            MetadataManager::instance().setColor(wPath, colorHex.toStdWString());
+                            MetadataManager::instance().setPalettes(wPath, palette);
+                        }
+                    }
                 }
             };
 
