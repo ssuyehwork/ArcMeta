@@ -59,7 +59,7 @@ MainWindow::MainWindow(QWidget* parent)
     ToolTipOverlay::instance();
 
     resize(1200, 800);
-    setMinimumSize(1000, 600);
+    setMinimumSize(1180, 653); // 物理对齐：5x230px面板 + 20px分割手柄 + 10px全局边距
     setWindowTitle("ArcMeta");
 
     // 从设置读取置顶状态
@@ -918,8 +918,8 @@ void MainWindow::setupSplitters() {
     // --- 3. 主体核心容器 (物理还原：10px 全局边距包裹，确保边缘resize可用) ---
     QWidget* bodyWrapper = new QWidget(centralC);
     bodyWrapper->setStyleSheet("background: transparent;"); // 确保背景透明不遮挡阴影
-    m_bodyLayout = new QVBoxLayout(bodyWrapper); // 2026-05-08 按照用户要求：提升为成员变量以支持动态边距切换
-    m_bodyLayout->setContentsMargins(10, 10, 10, 10); // 2026-05-08 按照用户要求：增加到10px确保边缘resize可用
+    m_bodyLayout = new QVBoxLayout(bodyWrapper);
+    m_bodyLayout->setContentsMargins(5, 5, 5, 5); // 物理还原：5px 边距是 1180px 宽度计算的逻辑基础
     m_bodyLayout->setSpacing(0);
 
     // --- 3. 主拆分条 (物理还原：5px 物理缝隙) ---
@@ -1377,7 +1377,7 @@ void MainWindow::changeEvent(QEvent* event) {
             if (isMaximized()) {
                 m_bodyLayout->setContentsMargins(0, 0, 0, 0);
             } else {
-                m_bodyLayout->setContentsMargins(10, 10, 10, 10);
+                m_bodyLayout->setContentsMargins(5, 5, 5, 5);
             }
         }
     }
