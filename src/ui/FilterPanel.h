@@ -70,6 +70,7 @@ private:
     static QMap<QString, QColor> s_colorMap();
 
     FilterState m_filter;
+    QString     m_hueSliderColor;
 
     QMap<int, int>      m_ratingCounts;
     QMap<QString, int>  m_colorCounts;
