@@ -74,86 +74,71 @@ private:
     QCheckBox* m_cb;
 };
 
-// ─── 色相滑块 (内嵌版) ─────────────────────────────────────────────
-class InlineHueSlider : public QWidget {
-    Q_OBJECT
-public:
-    explicit InlineHueSlider(QWidget* parent = nullptr) : QWidget(parent) {
-        setFixedHeight(28);
-        setCursor(Qt::PointingHandCursor);
-    }
+// ─── InlineHueSlider ─────────────────────────────────────────────
+InlineHueSlider::InlineHueSlider(QWidget* parent) : QWidget(parent) {
+    setFixedHeight(28);
+    setCursor(Qt::PointingHandCursor);
+}
 
-    void setHue(int h) {
-        m_h = qBound(0, h, 359);
-        update();
-    }
+void InlineHueSlider::setHue(int h) {
+    m_h = qBound(0, h, 359);
+    update();
+}
 
-    int hue() const { return m_h; }
+void InlineHueSlider::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
 
-signals:
-    void hueChanged(int h);
-    void sliderReleased();
+    int margin = 10;
+    int barHeight = 12;
+    int barY = (height() - barHeight) / 2;
+    QRectF barRect(margin, barY, width() - 2 * margin, barHeight);
 
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
+    QLinearGradient grad(barRect.left(), 0, barRect.right(), 0);
+    // 2026-06-xx 按照代码审查建议：将饱和度和明度设为 220，与实际选色逻辑保持一致
+    grad.setColorAt(0.0/6.0, QColor::fromHsv(0, 220, 220));
+    grad.setColorAt(1.0/6.0, QColor::fromHsv(60, 220, 220));
+    grad.setColorAt(2.0/6.0, QColor::fromHsv(120, 220, 220));
+    grad.setColorAt(3.0/6.0, QColor::fromHsv(180, 220, 220));
+    grad.setColorAt(4.0/6.0, QColor::fromHsv(240, 220, 220));
+    grad.setColorAt(5.0/6.0, QColor::fromHsv(300, 220, 220));
+    grad.setColorAt(6.0/6.0, QColor::fromHsv(359, 220, 220));
 
-        int margin = 10;
-        int barHeight = 12;
-        int barY = (height() - barHeight) / 2;
-        QRectF barRect(margin, barY, width() - 2 * margin, barHeight);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(grad);
+    painter.drawRoundedRect(barRect, 6, 6);
 
-        QLinearGradient grad(barRect.left(), 0, barRect.right(), 0);
-        // 0°(红) → 60°(黄) → 120°(绿) → 180°(青) → 240°(蓝) → 300°(紫) → 360°(红)
-        // 2026-06-xx 按照代码审查建议：将饱和度和明度设为 220，与实际选色逻辑保持一致
-        grad.setColorAt(0.0/6.0, QColor::fromHsv(0, 220, 220));
-        grad.setColorAt(1.0/6.0, QColor::fromHsv(60, 220, 220));
-        grad.setColorAt(2.0/6.0, QColor::fromHsv(120, 220, 220));
-        grad.setColorAt(3.0/6.0, QColor::fromHsv(180, 220, 220));
-        grad.setColorAt(4.0/6.0, QColor::fromHsv(240, 220, 220));
-        grad.setColorAt(5.0/6.0, QColor::fromHsv(300, 220, 220));
-        grad.setColorAt(6.0/6.0, QColor::fromHsv(359, 220, 220));
+    // Thumb: 16px white circle, 1px dark border
+    double ratio = m_h / 359.0;
+    int tx = margin + ratio * barRect.width();
+    int ty = height() / 2;
 
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(grad);
-        painter.drawRoundedRect(barRect, 6, 6);
+    painter.setBrush(Qt::white);
+    painter.setPen(QPen(QColor(50, 50, 50), 1));
+    painter.drawEllipse(QPoint(tx, ty), 8, 8);
+}
 
-        // Thumb: 16px white circle, 1px dark border
-        double ratio = m_h / 359.0;
-        int tx = margin + ratio * barRect.width();
-        int ty = height() / 2;
+void InlineHueSlider::updateFromPos(int x) {
+    int margin = 10;
+    int barWidth = width() - 2 * margin;
+    if (barWidth <= 0) return;
+    int lx = qBound(0, x - margin, barWidth);
+    m_h = (lx * 359) / barWidth;
+    update();
+    emit hueChanged(m_h);
+}
 
-        painter.setBrush(Qt::white);
-        painter.setPen(QPen(QColor(50, 50, 50), 1));
-        painter.drawEllipse(QPoint(tx, ty), 8, 8);
-    }
+void InlineHueSlider::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) updateFromPos(event->pos().x());
+}
 
-    void updateFromPos(int x) {
-        int margin = 10;
-        int barWidth = width() - 2 * margin;
-        if (barWidth <= 0) return;
-        int lx = qBound(0, x - margin, barWidth);
-        m_h = (lx * 359) / barWidth;
-        update();
-        emit hueChanged(m_h);
-    }
+void InlineHueSlider::mouseMoveEvent(QMouseEvent* event) {
+    if (event->buttons() & Qt::LeftButton) updateFromPos(event->pos().x());
+}
 
-    void mousePressEvent(QMouseEvent* event) override {
-        if (event->button() == Qt::LeftButton) updateFromPos(event->pos().x());
-    }
-
-    void mouseMoveEvent(QMouseEvent* event) override {
-        if (event->buttons() & Qt::LeftButton) updateFromPos(event->pos().x());
-    }
-
-    void mouseReleaseEvent(QMouseEvent* event) override {
-        if (event->button() == Qt::LeftButton) emit sliderReleased();
-    }
-
-private:
-    int m_h = 0;
-};
+void InlineHueSlider::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) emit sliderReleased();
+}
 
 // ─── FilterPanel ──────────────────────────────────────────────────
 FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
@@ -710,5 +695,3 @@ void FilterPanel::clearAllFilters() {
 }
 
 } // namespace ArcMeta
-
-#include "FilterPanel.moc"
