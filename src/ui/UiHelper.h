@@ -242,15 +242,21 @@ public:
             return a.count > b.count;
         });
 
-        // 4. 相似合并 (曼哈顿距离 < 48)
+        // 4. 相似合并 (HSL 空间比对：deltaH < 20, deltaS < 25, deltaL < 20)
         QList<FinalBucket> merged;
         for (const auto& b : buckets) {
             bool found = false;
+            int h1, s1, l1; b.avgColor.getHsl(&h1, &s1, &l1);
+
             for (auto& m : merged) {
-                int dist = std::abs(b.avgColor.red() - m.avgColor.red()) +
-                           std::abs(b.avgColor.green() - m.avgColor.green()) +
-                           std::abs(b.avgColor.blue() - m.avgColor.blue());
-                if (dist < 48) {
+                int h2, s2, l2; m.avgColor.getHsl(&h2, &s2, &l2);
+
+                int dh = std::abs(h1 - h2);
+                if (dh > 180) dh = 360 - dh; // 色相环循环处理
+                int ds = std::abs(s1 - s2);
+                int dl = std::abs(l1 - l2);
+
+                if (dh < 20 && ds < 25 && dl < 20) {
                     // 重新计算加权平均色，确保最终 HEX 真值不偏离物理重心
                     int total = m.count + b.count;
                     int nr = (m.avgColor.red() * m.count + b.avgColor.red() * b.count) / total;
@@ -272,7 +278,10 @@ public:
 
         QVector<QPair<QColor, float>> result;
         for (int i = 0; i < (int)merged.size(); ++i) {
-            result.append({ merged[i].avgColor, (float)merged[i].count / totalValidPixels });
+            float ratio = (float)merged[i].count / totalValidPixels;
+            // 物理过滤：占比不足 1% 的杂色直接丢弃，对标 Eagle 密度
+            if (ratio < 0.01f) continue;
+            result.append({ merged[i].avgColor, ratio });
         }
         return result;
     }
