@@ -787,6 +787,7 @@ void ScanDialog::setupUi() {
     mainLayout->addWidget(statusContainer);
 
     connect(m_controller, &ScanController::searchFinished, this, [this](int count, int64_t elapsedMs) {
+        Q_UNUSED(count);
         m_lastSearchMs = elapsedMs;
         m_tableModel->updateResults();
         updateStatusBar();
