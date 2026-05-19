@@ -418,6 +418,56 @@ int MftReader::getIndexByKey(uint64_t compositeKey) const {
     return (it != m_frn_to_idx.end()) ? (int)it->second : -1;
 }
 
+bool MftReader::matchEntry(int i, const QString& query, bool useRegex, bool caseSensitive,
+                          const QStringList& extensionList, bool includeHidden, bool includeSystem) const {
+    QReadLocker lock(&m_dataLock);
+    if (i < 0 || i >= (int)m_frns.size() || m_frns[i] == 0) return false;
+
+    // 驱动器过滤
+    size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
+    if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) return false;
+
+    // 属性过滤
+    uint32_t at = m_attributes[i];
+    if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) return false;
+    if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) return false;
+
+    if (query.isEmpty() && extensionList.isEmpty()) return true;
+
+    const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
+
+    // 后缀过滤
+    if (!extensionList.isEmpty()) {
+        bool extMatch = false;
+        size_t nameLen = strlen(p);
+        for (const QString& ex : extensionList) {
+            QByteArray exUtf8 = (ex.startsWith('.') ? ex : "." + ex).toUtf8();
+            if (nameLen >= (size_t)exUtf8.size()) {
+                if (_stricmp(p + nameLen - exUtf8.size(), exUtf8.constData()) == 0) {
+                    extMatch = true;
+                    break;
+                }
+            }
+        }
+        if (!extMatch) return false;
+    }
+
+    if (query.isEmpty()) return true;
+
+    // 内容过滤
+    if (useRegex) {
+        QRegularExpression re(query, caseSensitive ? QRegularExpression::NoPatternOption : QRegularExpression::CaseInsensitiveOption);
+        return re.match(QString::fromUtf8(p)).hasMatch();
+    } else {
+        QByteArray queryUtf8 = query.toUtf8();
+        if (caseSensitive) {
+            return (strstr(p, queryUtf8.constData()) != nullptr);
+        } else {
+            return (StrStrIA(p, queryUtf8.constData()) != nullptr);
+        }
+    }
+}
+
 uint64_t MftReader::getKeyByIndex(int index) const {
     QReadLocker lock(&m_dataLock);
     if (index < 0 || index >= (int)m_frns.size()) return 0;
@@ -729,7 +779,20 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         m_dirty_count = 0; 
         saveDriveToCacheInternal(dIdx); 
     }
-    int idx = (it != m_frn_to_idx.end()) ? (int)it->second : -1; emit dataChanged(idx);
+
+    int finalIdx = -1;
+    bool isNew = (it == m_frn_to_idx.end());
+    if (!isNew) finalIdx = (int)it->second;
+    else finalIdx = (int)m_frns.size() - 1;
+
+    lock.unlock(); // 2026-06-xx 物理安全：先解锁再发射信号，杜绝 DirectConnection 导致的跨模块死锁
+
+    if (isNew) {
+        emit entryAdded(compositeKey);
+    } else {
+        emit entryUpdated(compositeKey);
+    }
+    emit dataChanged(finalIdx);
 }
 
 void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
@@ -753,6 +816,8 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
             compact();
         }
         
+        lock.unlock(); // 物理安全：解锁后再发射信号
+        emit entryRemoved(compositeKey);
         emit dataChanged(-1);
     }
 }
