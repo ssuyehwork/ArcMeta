@@ -549,7 +549,7 @@ ScanDialog::ScanDialog(QWidget* parent)
                 if (!weakThis) return;
                 if (ok) {
                     weakThis->updateStatus("就绪");
-                    weakThis->m_tableModel->setFilterText("");
+                    weakThis->m_controller->setSearchText("");
                     weakThis->refreshDriveList(true); // 后台探测硬件
                 } else {
                     weakThis->updateStatus("未检测到快照，全自动初始化...");
@@ -1028,7 +1028,7 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                     QString path = m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
                     QFile::remove(path);
                 }
-                m_tableModel->triggerSearch();
+                m_controller->triggerSearch(true);
             }
         });
         
@@ -1045,7 +1045,7 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                 QString star = (i == 0) ? "无评分" : QString(i, QChar(0x2605));
                 QAction* act = ratingMenu->addAction(star, [this, path, i]() {
                     MetadataManager::instance().setRating(path, i);
-                    m_tableModel->triggerSearch();
+                    m_controller->triggerSearch(true);
                 });
                 if (meta.rating == i) act->setCheckable(true), act->setChecked(true);
             }
@@ -1068,7 +1068,7 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                                 // 2026-06-xx 物理同步：强制执行 4-bit 量化
                                 MetadataManager::instance().setColor(path, dominant.name().toUpper().toStdWString());
                                 MetadataManager::instance().setPalettes(path, palette);
-                                weakThis->m_tableModel->triggerSearch();
+                                weakThis->m_controller->triggerSearch(true);
                             }
                         });
                     });
@@ -1093,7 +1093,7 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                 QAction* act = labelMenu->addAction(ci.label);
                 connect(act, &QAction::triggered, this, [this, path, value = ci.value]() {
                     MetadataManager::instance().setColor(path, value.toStdWString());
-                    m_tableModel->triggerSearch();
+                    m_controller->triggerSearch(true);
                 });
                 if (meta.color == ci.value.toStdWString()) {
                     act->setCheckable(true);
@@ -1108,7 +1108,7 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
 
             menu.addAction(meta.pinned ? "取消置顶" : "置顶文件", [this, path, meta]() {
                 MetadataManager::instance().setPinned(path, !meta.pinned);
-                m_tableModel->triggerSearch();
+                m_controller->triggerSearch(true);
             });
 
             menu.addAction("编辑标签...", [this, path, meta]() {
@@ -1116,7 +1116,7 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                 QString text = QInputDialog::getText(this, "编辑标签", "标签 (逗号分隔):", QLineEdit::Normal, meta.tags.join(","), &ok);
                 if (ok) {
                     MetadataManager::instance().setTags(path, text.split(",", Qt::SkipEmptyParts));
-                    m_tableModel->triggerSearch();
+                    m_controller->triggerSearch(true);
                 }
             });
 
@@ -1125,13 +1125,13 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                 QString text = QInputDialog::getMultiLineText(this, "编辑备注", "备注内容:", QString::fromStdWString(meta.note), &ok);
                 if (ok) {
                     MetadataManager::instance().setNote(path, text.toStdWString());
-                    m_tableModel->triggerSearch();
+                    m_controller->triggerSearch(true);
                 }
             });
 
             menu.addAction(meta.encrypted ? "解密文件" : "加密文件", [this, path, meta]() {
                 MetadataManager::instance().setEncrypted(path, !meta.encrypted);
-                m_tableModel->triggerSearch();
+                m_controller->triggerSearch(true);
             });
 
             menu.addSeparator();
@@ -1423,7 +1423,7 @@ void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
     if (event->modifiers() == Qt::ControlModifier && event->key() >= Qt::Key_0 && event->key() <= Qt::Key_5) {
         int rating = event->key() - Qt::Key_0;
         MetadataManager::instance().setRating(path, rating);
-        m_tableModel->triggerSearch();
+        m_controller->triggerSearch(true);
         return;
     }
 
@@ -1431,23 +1431,23 @@ void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
     if (event->modifiers() == Qt::AltModifier) {
         if (event->key() == Qt::Key_P) { // 置顶
             MetadataManager::instance().setPinned(path, !meta.pinned);
-            m_tableModel->triggerSearch();
+            m_controller->triggerSearch(true);
         } else if (event->key() == Qt::Key_L) { // 加密
             MetadataManager::instance().setEncrypted(path, !meta.encrypted);
-            m_tableModel->triggerSearch();
+            m_controller->triggerSearch(true);
         } else if (event->key() == Qt::Key_T) { // 标签
             bool ok;
             QString text = QInputDialog::getText(this, "编辑标签", "标签 (逗号分隔):", QLineEdit::Normal, meta.tags.join(","), &ok);
             if (ok) {
                 MetadataManager::instance().setTags(path, text.split(",", Qt::SkipEmptyParts));
-                m_tableModel->triggerSearch();
+                m_controller->triggerSearch(true);
             }
         } else if (event->key() == Qt::Key_N) { // 备注
             bool ok;
             QString text = QInputDialog::getMultiLineText(this, "编辑备注", "备注内容:", QString::fromStdWString(meta.note), &ok);
             if (ok) {
                 MetadataManager::instance().setNote(path, text.toStdWString());
-                m_tableModel->triggerSearch();
+                m_controller->triggerSearch(true);
             }
         }
     }
