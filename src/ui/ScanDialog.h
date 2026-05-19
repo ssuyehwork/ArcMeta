@@ -76,6 +76,7 @@ public:
     void setFilterText(const QString& text);
     void setFilterState(const ScanFilterState& state);
     void triggerSearch();
+    void loadPage(int page, int pageSize);
     void loadMore(int count = 200);
     void sort(int column, Qt::SortOrder order = Qt::AscendingOrder) override;
     int totalFilteredCount() const { return m_filteredIndices.size(); }
@@ -99,7 +100,7 @@ private:
     std::unordered_map<int, int> m_actualToRow; // 2026-05-14 新增：O(1) 定位索引
     QSet<int> m_pendingRows;  // 2026-05-14 信号聚合：待刷新的行号集合
     QTimer* m_throttleTimer = nullptr;
-    int m_displayLimit = 200;
+    int m_displayLimit = 1000000; // 2026-06-xx 性能解封：对标 Rust 版支持百万级即时显示
 };
 
 class ScanDialog : public FramelessDialog {
@@ -158,6 +159,12 @@ private:
     QListView* m_iconView = nullptr;
     QStackedWidget* m_viewStack = nullptr;
     ScanTableModel* m_tableModel = nullptr;
+
+    QPushButton* m_prevBtn = nullptr;
+    QPushButton* m_nextBtn = nullptr;
+    QLabel* m_pageLabel = nullptr;
+    int m_currentPage = 0;
+    const int m_pageSize = 1000;
 
     QLabel* m_titleStatusLabel = nullptr; 
     QLabel* m_statLabelMain = nullptr;    

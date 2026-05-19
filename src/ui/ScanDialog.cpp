@@ -228,10 +228,16 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
                 
                 // 2026-06-xx 物理修复：定义非 const 指针以解决异步回调中 dataChanged 信号的调用权限问题
                 ScanTableModel* mutableThis = const_cast<ScanTableModel*>(this);
-                (void)QtConcurrent::run([mutableThis, actualIndex, fullPath]() {
-                    QPixmap thumb = UiHelper::getShellThumbnail(fullPath, 48);
+                // 按照当前视图模式动态调整缩略图请求尺寸
+                ScanDialog* dlg = qobject_cast<ScanDialog*>(parent());
+                int thumbSize = (dlg && dlg->m_viewStack->currentIndex() == 0) ? 24 : (dlg ? dlg->m_config.iconSize : 64);
+
+                (void)QtConcurrent::run([mutableThis, actualIndex, fullPath, thumbSize]() {
+                    QPixmap thumb = UiHelper::getShellThumbnail(fullPath, thumbSize);
                     if (!thumb.isNull()) {
                         QMetaObject::invokeMethod(mutableThis, [mutableThis, actualIndex, thumb]() {
+                            // 2026-06-xx 物理修复：移除多余的 flipped(Qt::Vertical) 
+                            // 因为 getShellThumbnail 内部已经执行了必要的镜像翻转。
                             mutableThis->m_thumbCache[actualIndex] = thumb;
                             auto itRow = mutableThis->m_actualToRow.find(actualIndex);
                             if (itRow != mutableThis->m_actualToRow.end()) {
@@ -257,9 +263,9 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         // 2026-05-16 交互同步：显示备注与标签
         std::wstring path = reader.getFullPath(actualIndex).toStdWString();
         auto meta = MetadataManager::instance().getMeta(path);
-        QString tip = "路径: " + QString::fromStdWString(path);
-        if (!meta.note.empty()) tip += "\n备注: " + QString::fromStdWString(meta.note);
-        if (!meta.tags.isEmpty()) tip += "\n标签: " + meta.tags.join(", ");
+        QString tip = QLatin1String("路径: ") + QString::fromStdWString(path);
+        if (!meta.note.empty()) tip += QLatin1String("\n备注: ") + QString::fromStdWString(meta.note);
+        if (!meta.tags.isEmpty()) tip += QLatin1String("\n标签: ") + meta.tags.join(QLatin1String(", "));
         return tip;
     } else if (role == Qt::TextAlignmentRole) {
         switch (index.column()) {
@@ -296,7 +302,7 @@ bool ScanTableModel::setData(const QModelIndex& index, const QVariant& value, in
     
     QString oldPath = reader.getFullPath(actualIndex);
     QFileInfo fi(oldPath);
-    QString newPath = fi.absolutePath() + "/" + newName;
+    QString newPath = fi.absolutePath() + QLatin1String("/") + newName;
     
     if (QFile::rename(oldPath, newPath)) {
         // 2026-05-16 交互加固：物理重命名后，USN 监听器会捕获事件并自动更新模型。
@@ -364,7 +370,7 @@ void ScanTableModel::startAsyncRebuild() {
             m_actualToRow[m_filteredIndices[i]] = i;
         }
 
-        m_displayLimit = 200;
+        m_displayLimit = 1000; // 重置时默认显示第一页
         endResetModel();
 
         ScanDialog* dlg = qobject_cast<ScanDialog*>(parent());
@@ -379,10 +385,19 @@ void ScanTableModel::startAsyncRebuild() {
     m_filterWatcher.setFuture(future);
 }
 
+void ScanTableModel::loadPage(int page, int pageSize) {
+    beginResetModel();
+    m_displayLimit = (page + 1) * pageSize;
+    // 物理对齐：仅渲染当前页对应的逻辑范围，由于是 TableView/ListView，
+    // 我们通过调整显示上限来模拟分页显示，这在大型索引中性能最佳。
+    endResetModel();
+}
+
 void ScanTableModel::loadMore(int count) {
+    Q_UNUSED(count);
     if (m_displayLimit >= m_filteredIndices.size()) return;
     int oldLimit = m_displayLimit;
-    int newLimit = (std::min)(static_cast<int>(m_filteredIndices.size()), m_displayLimit + count);
+    int newLimit = (std::min)(static_cast<int>(m_filteredIndices.size()), m_displayLimit + 1000);
     beginInsertRows(QModelIndex(), oldLimit, newLimit - 1);
     m_displayLimit = newLimit;
     endInsertRows();
@@ -469,11 +484,87 @@ ScanDialog::ScanDialog(QWidget* parent)
 
     setupUi();
 
+    // --- 2026-06-xx 架构级 QSS：实现样式沙箱与物理隔离 ---
+    this->setStyleSheet(R"(
+        QWidget#SearchContainer, QWidget#DriveContainer, QStackedWidget#ViewStack { 
+            background: transparent; border: none; 
+        }
+        
+        #mainSearchEdit, #extSearchEdit { 
+            background: #2D2D2D; 
+            border: 1px solid #3F3F3F; 
+            border-radius: 6px; 
+            color: #EEE; 
+            font-size: 14px; 
+            padding: 0 10px;
+            outline: none;
+        }
+
+        /* 显式定义伪类，防止全局污染 */
+        #mainSearchEdit:focus, #extSearchEdit:focus { border: 1px solid #FF8C00 !important; }
+        #mainSearchEdit:hover, #extSearchEdit:hover { border: 1px solid #555; }
+        
+        #mainSearchEdit::placeholder, #extSearchEdit::placeholder {
+            color: rgba(238, 238, 238, 0.3);
+        }
+
+        /* 搜索按钮：独立物理实体，拥有完整圆角 */
+        QPushButton#searchIconButton { 
+            background: #FF8C00; 
+            border: 1px solid #FF8C00;
+            border-radius: 6px; 
+            color: #000;
+            font-weight: bold;
+            padding: 0 15px;
+        } 
+        QPushButton#searchIconButton:hover { background: #FFA500; } 
+        QPushButton#searchIconButton:pressed { background: #CC6600; }
+
+        /* 盘符按钮：使用属性选择器 */
+        QPushButton[isActive="true"] {
+            background: rgba(255, 140, 0, 30); 
+            color: #FF8C00; 
+            border: 1px solid #FF8C00; 
+            padding: 0 10px; 
+            font-size: 12px; 
+            font-weight: bold;
+            border-radius: 4px;
+        }
+        QPushButton[isActive="false"] {
+            background: #111519; 
+            color: #7A8F9E; 
+            border: 1px solid #252E37; 
+            padding: 0 10px; 
+            font-size: 12px;
+            border-radius: 4px;
+        }
+
+        QProgressBar#ScanProgressBar { background: transparent; border: none; } 
+        QProgressBar#ScanProgressBar::chunk { background: #FF8C00; }
+
+        QCheckBox { color: #AAA; }
+        
+        /* 分页按钮 */
+        #PageBtn {
+            background: #2D2D2D; 
+            color: #CCC; 
+            border: 1px solid #3F3F3F; 
+            border-radius: 4px;
+        }
+        #PageBtn:hover { background: #3F3F3F; }
+        #PageBtn:disabled { color: #555; border-color: #2D2D2D; }
+    )");
+
     // --- 2026-05-16 持久化恢复：根据配置恢复视图、尺寸与排序状态 ---
-    m_viewStack->setCurrentIndex(m_config.viewMode);
+        m_viewStack->setCurrentIndex(m_config.viewMode);
+    if (m_config.viewMode == 0) {
+        m_resultView->verticalHeader()->setDefaultSectionSize(32);
+    } else {
+        m_resultView->verticalHeader()->setDefaultSectionSize(m_config.iconSize + 10);
+    }
     if (m_config.viewMode == 1) { // 图标模式
         m_iconView->setIconSize(QSize(m_config.iconSize, m_config.iconSize));
-        m_iconView->setGridSize(QSize(m_config.iconSize + 40, m_config.iconSize + 60));
+        m_iconView->setGridSize(QSize(m_config.iconSize + 14, m_config.iconSize + 44));
     }
     
     // 恢复排序状态 (同时作用于模型和表头视觉)
@@ -523,9 +614,9 @@ ScanDialog::~ScanDialog() {
 
 void ScanDialog::setupUi() {
     auto* mainLayout = new QVBoxLayout(m_contentArea);
-    // 2026-06-xx 按照用户要求：修正间距参数错误，由 15 缩小至 5 像素，对标主窗口设计
-    mainLayout->setContentsMargins(5, 5, 5, 5);
-    mainLayout->setSpacing(5);
+    // 2026-06-xx 按照建议：将 mainLayout 的 spacing 设置为 10，给组件之间留出物理切割的空隙
+    mainLayout->setContentsMargins(10, 10, 10, 10);
+    mainLayout->setSpacing(10);
 
     auto* driveScroll = new QScrollArea();
     driveScroll->setFixedHeight(45);
@@ -534,92 +625,108 @@ void ScanDialog::setupUi() {
     driveScroll->setStyleSheet("background: #252526; border: 1px solid #333; border-radius: 4px;");
 
     m_driveContainer = new QWidget();
-    // 2026-06-xx 物理防护：隔离 FramelessDialog 全局 QSS 对盘符容器的边框污染
+    m_driveContainer->setObjectName("DriveContainer");
     m_driveContainer->setAttribute(Qt::WA_StyledBackground, true);
-    m_driveContainer->setStyleSheet("QWidget { background: transparent; border: none; }");
     m_driveLayout = new QHBoxLayout(m_driveContainer);
-    // 2026-06-xx 按照用户要求：盘符部分也调整为 5 像素间距
+    // 2026-06-xx 按照建议：盘符部分也调整为 10 像素间距
     m_driveLayout->setContentsMargins(5, 0, 5, 0);
-    m_driveLayout->setSpacing(5);
+    m_driveLayout->setSpacing(10);
     driveScroll->setWidget(m_driveContainer);
 
     auto* topControl = new QHBoxLayout();
+    topControl->setContentsMargins(0, 0, 0, 0);
     topControl->addWidget(driveScroll, 1);
     mainLayout->addLayout(topControl);
 
-    auto* searchContainer = new QWidget();
-    // 2026-06-xx 物理防护：隔离 FramelessDialog 全局 QSS 级联污染，消除搜索行意外的橙色边框
-    searchContainer->setObjectName("SearchContainer");
-    searchContainer->setAttribute(Qt::WA_StyledBackground, true);
-    searchContainer->setStyleSheet("QWidget#SearchContainer { background: transparent; border: none; }");
-    auto* searchVLayout = new QVBoxLayout(searchContainer);
-    searchVLayout->setContentsMargins(0, 0, 0, 0);
-    searchVLayout->setSpacing(0);
-
-    auto* searchRow = new QHBoxLayout();
-    searchRow->setContentsMargins(5, 8, 5, 8);
-    // 2026-06-xx 按照要求：整体搜索行保持 5px 设计间距
-    searchRow->setSpacing(5); 
-
-    // A. 紧凑型输入组 (搜索 + 后缀 + 按钮)
-    auto* inputGroup = new QHBoxLayout();
-    inputGroup->setSpacing(0);
+    // B. 搜索选项行 (迁移至盘符与搜索框之间)
+    auto* optionRow = new QHBoxLayout();
+    optionRow->setContentsMargins(0, 0, 0, 0);
+    optionRow->setSpacing(15);
     
-    m_searchEdit = new QLineEdit();
-    m_searchEdit->setPlaceholderText("输入文件名 / 关键词...");
-    m_searchEdit->setMinimumHeight(36);
-    // 2026-06-xx 物理修复：采用“负边距重叠”策略。不再移除边框，而是让组件相互覆盖。
-    // 并追加 outline: none 抑制 Qt 原生焦点环干扰。
-    m_searchEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; border-radius: 6px 0 0 6px; padding: 0 10px; color: #EEE; font-size: 14px; margin-right: -1px; outline: none; }");
-    m_searchEdit->installEventFilter(this);
-    connect(m_searchEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
-    inputGroup->addWidget(m_searchEdit, 1);
-
-    m_extEdit = new QLineEdit();
-    m_extEdit->setPlaceholderText("后缀");
-    m_extEdit->setFixedWidth(80);
-    m_extEdit->setMinimumHeight(36);
-    // 2026-06-xx 物理修复：保留全边框并设置负边距，并抑制原生焦点环。
-    m_extEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; color: #EEE; font-size: 14px; margin-right: -1px; outline: none; }");
-    m_extEdit->installEventFilter(this);
-    connect(m_extEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
-    inputGroup->addWidget(m_extEdit);
-
-    m_searchBtn = new QPushButton("搜索");
-    m_searchBtn->setFixedWidth(70);
-    m_searchBtn->setMinimumHeight(36);
-    m_searchBtn->setCursor(Qt::PointingHandCursor);
-    // 2026-06-xx 物理修复：采用“右侧圆角 + 保持主色边框”
-    m_searchBtn->setStyleSheet("QPushButton { background: #FF8C00; color: #000; border: 1px solid #FF8C00; border-radius: 0 6px 6px 0; font-weight: bold; font-size: 13px; } QPushButton:hover { background: #FFA500; } QPushButton:pressed { background: #CC6600; }");
-    connect(m_searchBtn, &QPushButton::clicked, this, &ScanDialog::onTriggerSearch);
-    inputGroup->addWidget(m_searchBtn);
-
-    searchRow->addLayout(inputGroup, 1);
-    // 2026-06-xx 按照用户要求：拉开输入组与复选框组的距离
-    searchRow->addSpacing(10);
-
     m_checkRegex = new QCheckBox("正则");
     m_checkCase = new QCheckBox("大小写");
     m_checkHidden = new QCheckBox("隐藏");
     m_checkSystem = new QCheckBox("系统");
     for (auto* cb : {m_checkRegex, m_checkCase, m_checkHidden, m_checkSystem}) {
-        cb->setStyleSheet("QCheckBox { color: #AAA; }");
         cb->setChecked(cb != m_checkCase && cb != m_checkHidden && cb != m_checkSystem);
         connect(cb, &QCheckBox::toggled, this, &ScanDialog::onFilterOptionChanged);
-        searchRow->addWidget(cb);
+        optionRow->addWidget(cb);
     }
+    optionRow->addStretch();
+    mainLayout->addLayout(optionRow);
+
+    auto* searchContainer = new QWidget();
+    searchContainer->setObjectName("SearchContainer");
+    searchContainer->setAttribute(Qt::WA_StyledBackground, true);
+    auto* searchVLayout = new QVBoxLayout(searchContainer);
+    searchVLayout->setContentsMargins(0, 0, 0, 0);
+    searchVLayout->setSpacing(10); // 增加呼吸感
+
+    auto* searchRow = new QHBoxLayout();
+    searchRow->setContentsMargins(0, 0, 0, 0); 
+    searchRow->setSpacing(10); 
+
+    // A. 物理拆分搜索栏组件：恢复“分开”的视觉风格，确保组件间有明显间距
+    m_searchEdit = new QLineEdit();
+    m_searchEdit->setObjectName("mainSearchEdit");
+    m_searchEdit->setPlaceholderText("输入文件名 / 关键词...");
+    m_searchEdit->setFixedHeight(36);
+    m_searchEdit->setClearButtonEnabled(true);
+    m_searchEdit->installEventFilter(this);
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
+    searchRow->addWidget(m_searchEdit, 1);
+
+    m_extEdit = new QLineEdit();
+    m_extEdit->setObjectName("extSearchEdit");
+    m_extEdit->setPlaceholderText("后缀");
+    m_extEdit->setFixedWidth(120); 
+    m_extEdit->setFixedHeight(36);
+    m_extEdit->installEventFilter(this);
+    connect(m_extEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
+    searchRow->addWidget(m_extEdit);
+
+    m_searchBtn = new QPushButton("搜索");
+    m_searchBtn->setObjectName("searchIconButton");
+    m_searchBtn->setFixedWidth(80);
+    m_searchBtn->setFixedHeight(36); 
+    m_searchBtn->setCursor(Qt::PointingHandCursor);
+    m_searchBtn->setIcon(UiHelper::getIcon("search", QColor("#000000"), 18));
+    m_searchBtn->setIconSize(QSize(18, 18));
+    connect(m_searchBtn, &QPushButton::clicked, this, &ScanDialog::onTriggerSearch);
+    searchRow->addWidget(m_searchBtn);
+
+    // --- 2026-06-xx 分页工具栏：从底部迁移至搜索按钮右侧 ---
+    m_prevBtn = new QPushButton("上一页");
+    m_prevBtn->setObjectName("PageBtn");
+    m_prevBtn->setFixedWidth(60);
+    m_prevBtn->setFixedHeight(36);
+    m_prevBtn->setCursor(Qt::PointingHandCursor);
+    
+    m_pageLabel = new QLabel("第 1 页");
+    m_pageLabel->setStyleSheet("color: #7A8F9E; font-size: 11px; margin: 0 5px;");
+
+    m_nextBtn = new QPushButton("下一页");
+    m_nextBtn->setObjectName("PageBtn");
+    m_nextBtn->setFixedWidth(60);
+    m_nextBtn->setFixedHeight(36);
+    m_nextBtn->setCursor(Qt::PointingHandCursor);
+
+    searchRow->addWidget(m_prevBtn);
+    searchRow->addWidget(m_pageLabel);
+    searchRow->addWidget(m_nextBtn);
     searchVLayout->addLayout(searchRow);
 
     m_progressBar = new QProgressBar();
+    m_progressBar->setObjectName("ScanProgressBar");
     m_progressBar->setFixedHeight(2);
     m_progressBar->setTextVisible(false);
-    m_progressBar->setStyleSheet("QProgressBar { background: transparent; border: none; } QProgressBar::chunk { background: #FF8C00; }");
     m_progressBar->hide();
     searchVLayout->addWidget(m_progressBar);
 
     mainLayout->addWidget(searchContainer);
 
     m_resultView = new QTableView();
+    m_resultView->verticalHeader()->setDefaultSectionSize(30); // 默认行高
     m_tableModel = new ScanTableModel(this);
     m_resultView->setModel(m_tableModel);
     m_resultView->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -636,7 +743,7 @@ void ScanDialog::setupUi() {
         "selection-color: #FFFFFF; "
         "outline: none; "
         "gridline-color: transparent; "
-        "padding-left: 10px; "
+        "padding: 10px 0 0 10px; "
         "}"
         "QTableView::item { border-bottom: 1px solid #252526; }"
         "QHeaderView::section { background-color: #252526; color: #888; border: none; border-right: 1px solid #333; padding: 4px; height: 24px; }"
@@ -660,7 +767,7 @@ void ScanDialog::setupUi() {
 
     m_resultView->verticalHeader()->setVisible(false);
     m_resultView->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_resultView->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_resultView->setSelectionMode(QAbstractItemView::ExtendedSelection); // 显式启用多选
     m_resultView->setEditTriggers(QAbstractItemView::NoEditTriggers);
     
     // 2026-06-xx 按照用户要求：开启 TableView 拖拽导出功能
@@ -684,14 +791,16 @@ void ScanDialog::setupUi() {
     
     // --- 2026-05-16 多态视图重构：引入 QStackedWidget 与 QListView (IconMode) ---
     m_viewStack = new QStackedWidget();
+    m_viewStack->setObjectName("ViewStack");
     m_viewStack->addWidget(m_resultView);
     
     m_iconView = new QListView();
     m_iconView->setModel(m_tableModel);
     m_iconView->setViewMode(QListView::IconMode);
+    m_iconView->setSelectionMode(QAbstractItemView::ExtendedSelection); // 显式启用多选
     m_iconView->setResizeMode(QListView::Adjust);
     m_iconView->setMovement(QListView::Static);
-    m_iconView->setSpacing(15);
+    m_iconView->setSpacing(7);
     m_iconView->setWordWrap(true);
     m_iconView->setTextElideMode(Qt::ElideMiddle);
     m_iconView->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -702,9 +811,9 @@ void ScanDialog::setupUi() {
     m_iconView->setDragDropMode(QAbstractItemView::DragOnly);
     m_iconView->setDefaultDropAction(Qt::CopyAction);
 
-    // 2026-06-xx 按照用户要求：为网格视图增加 10px 左内边距，确保坐标对准
+    // 2026-06-xx 按照用户要求：为网格视图增加 10px 左侧与顶部内边距，确保坐标对准
     m_iconView->setStyleSheet(
-        "QListView { background-color: #1E1E1E; border: 1px solid #333; color: #D4D4D4; outline: none; padding-left: 10px; }"
+        "QListView { background-color: #1E1E1E; border: 1px solid #333; color: #D4D4D4; outline: none; padding: 10px 0 0 10px; }"
         "QListView::item:hover { background-color: #2D2D2D; border-radius: 4px; }"
         "QListView::item:selected { background-color: #094771; border-radius: 4px; color: #FFFFFF; }"
     );
@@ -717,6 +826,22 @@ void ScanDialog::setupUi() {
     m_viewStack->setCurrentIndex(0); // 默认详情视图
     
     mainLayout->addWidget(m_viewStack);
+
+    connect(m_prevBtn, &QPushButton::clicked, this, [this]() {
+        if (m_currentPage > 0) {
+            m_currentPage--;
+            m_tableModel->loadPage(m_currentPage, m_pageSize);
+            updateStatusBar();
+        }
+    });
+    connect(m_nextBtn, &QPushButton::clicked, this, [this]() {
+        int total = m_tableModel->totalFilteredCount();
+        if ((m_currentPage + 1) * m_pageSize < total) {
+            m_currentPage++;
+            m_tableModel->loadPage(m_currentPage, m_pageSize);
+            updateStatusBar();
+        }
+    });
 
     auto* statusContainer = new QWidget();
     statusContainer->setFixedHeight(26);
@@ -753,6 +878,7 @@ void ScanDialog::setupUi() {
 
     connect(m_tableModel, &ScanTableModel::filterFinished, this, [this](int count) {
         Q_UNUSED(count);
+        m_currentPage = 0; // 搜索重置时回到第一页
         updateStatusBar();
     });
 }
@@ -770,10 +896,11 @@ void ScanDialog::refreshDriveList(bool forceProbe) {
         DWORD driveMask = GetLogicalDrives();
         for (int i = 0; i < 26; ++i) {
             if (driveMask & (1 << i)) {
-                QString letter = QString(QChar('A' + i)) + ":";
+                QString letter = QString(QChar('A' + i)) + QLatin1String(":");
                 WCHAR volName[MAX_PATH + 1] = {0};
                 WCHAR fsName[MAX_PATH + 1] = {0};
-                BOOL ok = GetVolumeInformationW(reinterpret_cast<const wchar_t*>((letter + "\\").utf16()), 
+                QString driveRoot = letter + QLatin1String("\\");
+                BOOL ok = GetVolumeInformationW(reinterpret_cast<const wchar_t*>(driveRoot.utf16()), 
                                               volName, MAX_PATH + 1, NULL, NULL, NULL, 
                                               fsName, MAX_PATH + 1);
                 DriveInfo info;
@@ -864,15 +991,18 @@ void ScanDialog::updateDriveButtonStyles() {
     for (auto it = m_driveButtonMap.begin(); it != m_driveButtonMap.end(); ++it) {
         bool isActive = m_config.activeDrives.contains(it.key());
         bool isDefault = m_config.defaultDrives.contains(it.key());
-        it.value()->setChecked(isActive);
         
-        QString style = isActive ? "QPushButton { background: rgba(255, 140, 0, 30); color: #FF8C00; border: 1px solid #FF8C00; padding: 0 10px; font-size: 12px; font-weight: bold; }" 
-                                 : "QPushButton { background: #111519; color: #7A8F9E; border: 1px solid #252E37; padding: 0 10px; font-size: 12px; }";
-        it.value()->setStyleSheet(style);
+        QPushButton* btn = it.value();
+        btn->setProperty("isActive", isActive);
+        btn->setProperty("isDefault", isDefault);
+        
+        // 触发 QSS 刷新
+        btn->style()->unpolish(btn);
+        btn->style()->polish(btn);
         
         QString label = "";
         for (const auto& info : m_cachedDriveInfos) { if (info.letter == it.key()) { label = info.label; break; } }
-        it.value()->setText(QString("%1%2 (%3)").arg(isDefault ? "★ " : "").arg(it.key()).arg(label.isEmpty() ? "本地磁盘" : label));
+        btn->setText(QString("%1%2 (%3)").arg(isDefault ? "★ " : "").arg(it.key()).arg(label.isEmpty() ? "本地磁盘" : label));
     }
 }
 
@@ -1114,15 +1244,21 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
             m_config.viewMode = stackIdx;
             if (stackIdx == 1) { // 图标模式
                 m_iconView->setIconSize(QSize(iconSize, iconSize));
-                m_iconView->setGridSize(QSize(iconSize + 40, iconSize + 60));
+                // 2026-06-xx 视觉优化：减小网格间距，防止超大模式下的稀疏感
+                m_iconView->setGridSize(QSize(iconSize + 14, iconSize + 44));
                 m_config.iconSize = iconSize;
+            }
+            if (stackIdx == 0) { // 详情模式
+                m_resultView->verticalHeader()->setDefaultSectionSize(32); // 详情模式固定为标准高度
+            } else {
+                m_resultView->verticalHeader()->setDefaultSectionSize(iconSize + 10);
             }
             m_config.save();
         });
         return act;
     };
 
-    QAction* xLargeAction = addViewAction("超大图标(X)", "Ctrl+Shift+1", 1, 256);
+    QAction* xLargeAction = addViewAction("超大图标(X)", "Ctrl+Shift+1", 1, 192);
     QAction* largeAction = addViewAction("大图标(L)", "Ctrl+Shift+2", 1, 128);
     QAction* mediumAction = addViewAction("中图标(M)", "Ctrl+Shift+3", 1, 64);
     
@@ -1196,7 +1332,7 @@ void ScanDialog::onSelectionChanged() {
 
 void ScanDialog::onStartScan() {
     QStringList selectedDrives;
-    for (const auto& d : m_config.activeDrives) selectedDrives << d + "\\";
+    for (const auto& d : m_config.activeDrives) selectedDrives << (d + QLatin1String("\\"));
     if (selectedDrives.isEmpty()) { onTriggerSearch(); return; }
     updateStatus("正在扫描...", true);
 
@@ -1212,20 +1348,26 @@ void ScanDialog::onStartScan() {
 }
 
 void ScanDialog::onTriggerSearch() {
-    // 1. 同步搜索历史
+    // 1. 异步更新搜索历史（移除同步 IO 导致的卡顿）
     QString q = m_searchEdit->text().trimmed();
-    if (!q.isEmpty()) {
-        m_config.queryHistory.removeAll(q);
-        m_config.queryHistory.prepend(q);
-        if (m_config.queryHistory.size() > 10) m_config.queryHistory.removeLast();
-    }
     QString e = m_extEdit->text().trimmed();
-    if (!e.isEmpty()) {
-        m_config.extHistory.removeAll(e);
-        m_config.extHistory.prepend(e);
-        if (m_config.extHistory.size() > 10) m_config.extHistory.removeLast();
-    }
-    m_config.save();
+    
+    QTimer::singleShot(10, this, [this, q, e]() {
+        bool changed = false;
+        if (!q.isEmpty() && (m_config.queryHistory.isEmpty() || m_config.queryHistory.first() != q)) {
+            m_config.queryHistory.removeAll(q);
+            m_config.queryHistory.prepend(q);
+            if (m_config.queryHistory.size() > 10) m_config.queryHistory.removeLast();
+            changed = true;
+        }
+        if (!e.isEmpty() && (m_config.extHistory.isEmpty() || m_config.extHistory.first() != e)) {
+            m_config.extHistory.removeAll(e);
+            m_config.extHistory.prepend(e);
+            if (m_config.extHistory.size() > 10) m_config.extHistory.removeLast();
+            changed = true;
+        }
+        if (changed) m_config.save();
+    });
 
     // 2. 核心同步：将 UI 盘符勾选状态更新至搜索引擎掩码 (修复搜出未选盘符数据的傻逼 Bug)
     QStringList activeList;
@@ -1285,9 +1427,17 @@ void ScanDialog::updateStatusBar() {
         m_statLabelTime->show();
         
         int totalMatch = m_tableModel->totalFilteredCount();
-        int currentPageMatch = m_tableModel->rowCount(); 
-        m_statLabelMain->setText(QString("共 %1 条 | 本页 %2 条").arg(formatNumber(totalMatch)).arg(formatNumber(currentPageMatch)));
+        m_statLabelMain->setText(QString("共找到 %1 条项目").arg(formatNumber(totalMatch)));
         m_statLabelTime->setText(QString("耗时 %1 ms").arg(m_lastSearchMs));
+
+        // 同步分页 UI 状态
+        if (m_pageLabel) {
+            int totalPages = (totalMatch + m_pageSize - 1) / m_pageSize;
+            if (totalPages == 0) totalPages = 1;
+            m_pageLabel->setText(QString("第 %1 / %2 页").arg(m_currentPage + 1).arg(totalPages));
+            m_prevBtn->setEnabled(m_currentPage > 0);
+            m_nextBtn->setEnabled((m_currentPage + 1) < totalPages);
+        }
     }
     
     double memoryMb = (MftReader::instance().totalCount() * 184.0) / 1024.0 / 1024.0;

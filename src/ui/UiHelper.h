@@ -341,7 +341,11 @@ public:
                 hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
                     QImage img = QImage::fromHBITMAP(hBitmap);
-                    if (forceMirror) img = img.flipped(Qt::Vertical);
+                    // 2026-06-xx 物理修复：Windows Shell 缩略图通常为 Bottom-Up 存储，
+                    // QImage::fromHBITMAP 在某些 DIB 格式下不会自动翻转，导致显示颠倒。
+                    // 强制进行垂直翻转 (flipped) 以符合人类视觉并消除弃用警告。
+                    img = img.flipped(Qt::Vertical); 
+                    if (forceMirror) img = img.flipped(Qt::Vertical); // 再次翻转即还原
                     QPixmap pix = QPixmap::fromImage(img);
                     DeleteObject(hBitmap);
                     pFactory->Release();
