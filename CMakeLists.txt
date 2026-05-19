@@ -118,6 +118,8 @@ set(SOURCES
     src/ui/QuickLookWindow.h
     src/ui/RuleRow.cpp
     src/ui/RuleRow.h
+    src/ui/ScanController.cpp
+    src/ui/ScanController.h
     src/ui/ScanDialog.cpp
     src/ui/ScanDialog.h
     src/ui/SearchHistoryPanel.cpp

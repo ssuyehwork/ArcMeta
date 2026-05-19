@@ -48,6 +48,8 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include "ScanController.h"
+
 #ifdef min
 #undef min
 #endif
@@ -123,14 +125,15 @@ void ScanConfig::save() {
 
 // --- ScanTableModel Implementation ---
 
-ScanTableModel::ScanTableModel(QObject* parent) : QAbstractTableModel(parent) {
+ScanTableModel::ScanTableModel(ScanController* controller, QObject* parent)
+    : QAbstractTableModel(parent), m_controller(controller)
+{
+    m_thumbCache.setMaxCost(500); // 限制缩略图内存占用
     m_throttleTimer = new QTimer(this);
-    m_throttleTimer->setInterval(100); // 100ms 聚合周期
+    m_throttleTimer->setInterval(100);
     connect(m_throttleTimer, &QTimer::timeout, this, [this]() {
         if (m_pendingRows.isEmpty()) return;
         
-        // 2026-05-14 信号聚合优化：将数千次零散刷新合并为极少数范围刷新
-        // 这大幅降低了绘制压力，对标 Rust 版立即模式渲染的流畅感
         QList<int> rows = m_pendingRows.values();
         std::sort(rows.begin(), rows.end());
         m_pendingRows.clear();
@@ -149,18 +152,21 @@ ScanTableModel::ScanTableModel(QObject* parent) : QAbstractTableModel(parent) {
         emit dataChanged(index(startRow, 0), index(endRow, 3));
     });
 
-    connect(&MftReader::instance(), &MftReader::dataChanged, this, [this](int index) {
-        if (index == -1) {
+    connect(&MftReader::instance(), &MftReader::dataChanged, this, [this](int actualIdx) {
+        if (actualIdx == -1) {
             m_pendingRows.clear();
             beginResetModel();
             endResetModel();
             return;
         }
-        // 2026-05-14 算法优化：将 O(N) 线性查找升级为 O(1) 映射查找
-        auto it = m_actualToRow.find(index);
-        if (it != m_actualToRow.end()) {
+        // 2026-06-xx 物理重构：基于稳定主键进行反向查找，杜绝索引漂移，完美支持多盘符同步
+        auto& reader = MftReader::instance();
+        uint64_t key = reader.getKeyByIndex(actualIdx);
+
+        auto it = m_keyToRow.find(key);
+        if (it != m_keyToRow.end()) {
             int row = it->second;
-            if (row < m_displayLimit) {
+            if (row < m_displayCount) {
                 m_pendingRows.insert(row);
                 if (!m_throttleTimer->isActive()) m_throttleTimer->start();
             }
@@ -171,7 +177,7 @@ ScanTableModel::~ScanTableModel() {}
 
 int ScanTableModel::rowCount(const QModelIndex& parent) const {
     if (parent.isValid()) return 0;
-    return (std::min)(static_cast<int>(m_filteredIndices.size()), m_displayLimit);
+    return m_displayCount;
 }
 
 int ScanTableModel::columnCount(const QModelIndex& /*parent*/) const { return 4; }
@@ -179,10 +185,12 @@ int ScanTableModel::columnCount(const QModelIndex& /*parent*/) const { return 4;
 QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
     if (!index.isValid()) return QVariant();
     int row = index.row();
-    if (row < 0 || row >= m_filteredIndices.size()) return QVariant();
+    if (row < 0 || row >= (int)m_filteredKeys.size()) return QVariant();
     
-    int actualIndex = m_filteredIndices[row];
+    uint64_t key = m_filteredKeys[row];
     auto& reader = MftReader::instance();
+    int actualIndex = reader.getIndexByKey(key);
+    if (actualIndex == -1) return QVariant(); // 文件可能已被删除
     
     if (role == Qt::DisplayRole || role == Qt::EditRole) {
         switch (index.column()) {
@@ -215,32 +223,29 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         int dotIdx = name.lastIndexOf('.');
         QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
         
-        // 2026-06-xx 按照用户要求：支持显示缩略图，针对特定格式进行异步拉取
         static const QSet<QString> thumbExts = {"psd", "ai", "eps", "jpg", "jpeg", "png", "webp"};
         if (thumbExts.contains(ext) && !reader.isDirectory(actualIndex)) {
-            auto it = m_thumbCache.find(actualIndex);
-            if (it != m_thumbCache.end()) return *it;
+            QString fullPath = reader.getFullPath(actualIndex);
+            int64_t size = reader.getSize(actualIndex);
+            int64_t mtime = reader.getModifyTime(actualIndex);
+            QString cacheKey = QString("%1_%2_%3").arg(fullPath).arg(size).arg(mtime);
 
-            // 尚未请求过，则发起异步请求
-            if (!m_requestedThumbs.contains(actualIndex)) {
-                m_requestedThumbs.insert(actualIndex);
-                QString fullPath = reader.getFullPath(actualIndex);
-                
-                // 2026-06-xx 物理修复：定义非 const 指针以解决异步回调中 dataChanged 信号的调用权限问题
+            QPixmap* cached = m_thumbCache.object(cacheKey);
+            if (cached) return *cached;
+
+            if (!m_requestedThumbs.contains(key)) {
+                m_requestedThumbs.insert(key);
                 ScanTableModel* mutableThis = const_cast<ScanTableModel*>(this);
-                // 按照当前视图模式动态调整缩略图请求尺寸
                 ScanDialog* dlg = qobject_cast<ScanDialog*>(parent());
                 int thumbSize = (dlg && dlg->m_viewStack->currentIndex() == 0) ? 24 : (dlg ? dlg->m_config.iconSize : 64);
 
-                (void)QtConcurrent::run([mutableThis, actualIndex, fullPath, thumbSize]() {
+                (void)QtConcurrent::run([mutableThis, key, fullPath, cacheKey, thumbSize]() {
                     QPixmap thumb = UiHelper::getShellThumbnail(fullPath, thumbSize);
                     if (!thumb.isNull()) {
-                        QMetaObject::invokeMethod(mutableThis, [mutableThis, actualIndex, thumb]() {
-                            // 2026-06-xx 物理修复：移除多余的 flipped(Qt::Vertical) 
-                            // 因为 getShellThumbnail 内部已经执行了必要的镜像翻转。
-                            mutableThis->m_thumbCache[actualIndex] = thumb;
-                            auto itRow = mutableThis->m_actualToRow.find(actualIndex);
-                            if (itRow != mutableThis->m_actualToRow.end()) {
+                        QMetaObject::invokeMethod(mutableThis, [mutableThis, key, cacheKey, thumb]() {
+                            mutableThis->m_thumbCache.insert(cacheKey, new QPixmap(thumb));
+                            auto itRow = mutableThis->m_keyToRow.find(key);
+                            if (itRow != mutableThis->m_keyToRow.end()) {
                                 emit mutableThis->dataChanged(mutableThis->index(itRow->second, 0), mutableThis->index(itRow->second, 0), {Qt::DecorationRole});
                             }
                         });
@@ -273,7 +278,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             case 2: case 3: return static_cast<int>(Qt::AlignRight | Qt::AlignVCenter);
         }
     } else if (role == Qt::UserRole) {
-        return actualIndex;
+        return key;
     }
     return QVariant();
 }
@@ -291,10 +296,12 @@ bool ScanTableModel::setData(const QModelIndex& index, const QVariant& value, in
     if (!index.isValid() || role != Qt::EditRole || index.column() != 0) return false;
     
     int row = index.row();
-    if (row < 0 || row >= m_filteredIndices.size()) return false;
+    if (row < 0 || row >= (int)m_filteredKeys.size()) return false;
     
-    int actualIndex = m_filteredIndices[row];
+    uint64_t key = m_filteredKeys[row];
     auto& reader = MftReader::instance();
+    int actualIndex = reader.getIndexByKey(key);
+    if (actualIndex == -1) return false;
     
     QString oldName = reader.getName(actualIndex);
     QString newName = value.toString().trimmed();
@@ -326,103 +333,59 @@ QVariant ScanTableModel::headerData(int section, Qt::Orientation orientation, in
     return QVariant();
 }
 
-void ScanTableModel::setFilterText(const QString& text) {
-    m_filterText = text;
-}
-
-void ScanTableModel::triggerSearch() {
-    startAsyncRebuild();
-}
-
-void ScanTableModel::setFilterState(const ScanFilterState& state) {
-    m_filterState = state;
-}
-
-void ScanTableModel::startAsyncRebuild() {
-    if (m_filterWatcher.isRunning()) m_filterWatcher.cancel();
-    
-    QElapsedTimer* timer = new QElapsedTimer();
-    timer->start();
-
-    QFuture<QVector<int>> future = (QtConcurrent::run)([this, text = m_filterText, state = m_filterState]() {
-        return MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem);
-    });
-
-    disconnect(&m_filterWatcher, &QFutureWatcher<QVector<int>>::finished, this, nullptr);
-
-    connect(&m_filterWatcher, &QFutureWatcher<QVector<int>>::finished, this, [this, timer]() {
-        if (m_filterWatcher.isCanceled()) {
-            delete timer;
-            return;
-        }
-
-        beginResetModel();
-        m_filteredIndices = m_filterWatcher.result();
-        
-        // 2026-06-xx 物理修复：重置过滤器时清空缩略图请求状态与缓存
-        m_requestedThumbs.clear();
-        m_thumbCache.clear();
-
-        // 2026-05-14 物理同步：构建反向映射表以支持 O(1) 行定位
-        m_actualToRow.clear();
-        m_actualToRow.reserve(m_filteredIndices.size());
-        for (int i = 0; i < m_filteredIndices.size(); ++i) {
-            m_actualToRow[m_filteredIndices[i]] = i;
-        }
-
-        m_displayLimit = 1000; // 重置时默认显示第一页
-        endResetModel();
-
-        ScanDialog* dlg = qobject_cast<ScanDialog*>(parent());
-        if (dlg) {
-            dlg->m_lastSearchMs = timer->elapsed();
-        }
-        delete timer;
-
-        emit filterFinished(m_filteredIndices.size());
-    });
-
-    m_filterWatcher.setFuture(future);
-}
-
-void ScanTableModel::loadPage(int page, int pageSize) {
+void ScanTableModel::updateResults() {
     beginResetModel();
-    m_displayLimit = (page + 1) * pageSize;
-    // 物理对齐：仅渲染当前页对应的逻辑范围，由于是 TableView/ListView，
-    // 我们通过调整显示上限来模拟分页显示，这在大型索引中性能最佳。
+    m_filteredKeys = m_controller->results();
+    m_displayCount = (std::min)((int)m_filteredKeys.size(), 100); // 初始加载 100 条
+    
+    m_keyToRow.clear();
+    for (int i = 0; i < m_displayCount; ++i) m_keyToRow[m_filteredKeys[i]] = i;
+
+    m_requestedThumbs.clear();
+    // m_thumbCache 不必清空，因为是基于路径的持久化缓存
     endResetModel();
 }
 
-void ScanTableModel::loadMore(int count) {
-    Q_UNUSED(count);
-    if (m_displayLimit >= m_filteredIndices.size()) return;
-    int oldLimit = m_displayLimit;
-    int newLimit = (std::min)(static_cast<int>(m_filteredIndices.size()), m_displayLimit + 1000);
-    beginInsertRows(QModelIndex(), oldLimit, newLimit - 1);
-    m_displayLimit = newLimit;
+bool ScanTableModel::canFetchMore(const QModelIndex& parent) const {
+    if (parent.isValid()) return false;
+    return m_displayCount < (int)m_filteredKeys.size();
+}
+
+void ScanTableModel::fetchMore(const QModelIndex& parent) {
+    if (parent.isValid()) return;
+    int remainder = (int)m_filteredKeys.size() - m_displayCount;
+    int itemsToFetch = (std::min)(remainder, 100);
+
+    beginInsertRows(QModelIndex(), m_displayCount, m_displayCount + itemsToFetch - 1);
+    for (int i = 0; i < itemsToFetch; ++i) {
+        m_keyToRow[m_filteredKeys[m_displayCount + i]] = m_displayCount + i;
+    }
+    m_displayCount += itemsToFetch;
     endInsertRows();
 }
 
 void ScanTableModel::sort(int column, Qt::SortOrder order) {
-    if (m_filteredIndices.isEmpty()) return;
+    if (m_filteredKeys.empty()) return;
     
     auto& reader = MftReader::instance();
-    // 2026-05-16 物理重排逻辑：基于 MftReader 的 SoA 数据进行异步稳定的排序
-    std::sort(m_filteredIndices.begin(), m_filteredIndices.end(), [&](int a, int b) {
+    std::sort(m_filteredKeys.begin(), m_filteredKeys.end(), [&](uint64_t a, uint64_t b) {
+        int idxA = reader.getIndexByKey(a);
+        int idxB = reader.getIndexByKey(b);
+        if (idxA == -1 || idxB == -1) return false;
+
         bool less = false;
         switch (column) {
-            case 0: less = QString::compare(reader.getName(a), reader.getName(b), Qt::CaseInsensitive) < 0; break;
-            case 1: less = QString::compare(reader.getFullPath(a), reader.getFullPath(b), Qt::CaseInsensitive) < 0; break;
-            case 2: less = reader.getSize(a) < reader.getSize(b); break;
-            case 3: less = reader.getModifyTime(a) < reader.getModifyTime(b); break;
+            case 0: less = QString::compare(reader.getName(idxA), reader.getName(idxB), Qt::CaseInsensitive) < 0; break;
+            case 1: less = QString::compare(reader.getFullPath(idxA), reader.getFullPath(idxB), Qt::CaseInsensitive) < 0; break;
+            case 2: less = reader.getSize(idxA) < reader.getSize(idxB); break;
+            case 3: less = reader.getModifyTime(idxA) < reader.getModifyTime(idxB); break;
             default: return false;
         }
         return (order == Qt::AscendingOrder) ? less : !less;
     });
     
-    // 重建反向映射表以维持 O(1) 实时同步能力
-    m_actualToRow.clear();
-    for (int i = 0; i < m_filteredIndices.size(); ++i) m_actualToRow[m_filteredIndices[i]] = i;
+    m_keyToRow.clear();
+    for (int i = 0; i < m_displayCount; ++i) m_keyToRow[m_filteredKeys[i]] = i;
     
     emit dataChanged(index(0, 0), index(rowCount() - 1, columnCount() - 1));
 }
@@ -438,9 +401,10 @@ QMimeData* ScanTableModel::mimeData(const QModelIndexList& indexes) const {
     for (const QModelIndex& idx : indexes) {
         if (idx.column() != 0) continue;
         int row = idx.row();
-        if (row < 0 || row >= m_filteredIndices.size()) continue;
-        int actualIdx = m_filteredIndices[row];
-        if (seen.contains(actualIdx)) continue;
+        if (row < 0 || row >= (int)m_filteredKeys.size()) continue;
+        uint64_t key = m_filteredKeys[row];
+        int actualIdx = MftReader::instance().getIndexByKey(key);
+        if (actualIdx == -1 || seen.contains(actualIdx)) continue;
         seen.insert(actualIdx);
         QString path = MftReader::instance().getFullPath(actualIdx);
         if (!path.isEmpty()) urls << QUrl::fromLocalFile(path);
@@ -543,16 +507,6 @@ ScanDialog::ScanDialog(QWidget* parent)
         QProgressBar#ScanProgressBar::chunk { background: #FF8C00; }
 
         QCheckBox { color: #AAA; }
-        
-        /* 分页按钮 */
-        #PageBtn {
-            background: #2D2D2D; 
-            color: #CCC; 
-            border: 1px solid #3F3F3F; 
-            border-radius: 4px;
-        }
-        #PageBtn:hover { background: #3F3F3F; }
-        #PageBtn:disabled { color: #555; border-color: #2D2D2D; }
     )");
 
     // --- 2026-05-16 持久化恢复：根据配置恢复视图、尺寸与排序状态 ---
@@ -673,6 +627,10 @@ void ScanDialog::setupUi() {
     m_searchEdit->setFixedHeight(36);
     m_searchEdit->setClearButtonEnabled(true);
     m_searchEdit->installEventFilter(this);
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+        m_controller->setSearchText(text);
+        m_controller->triggerSearch();
+    });
     connect(m_searchEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
     searchRow->addWidget(m_searchEdit, 1);
 
@@ -695,25 +653,6 @@ void ScanDialog::setupUi() {
     connect(m_searchBtn, &QPushButton::clicked, this, &ScanDialog::onTriggerSearch);
     searchRow->addWidget(m_searchBtn);
 
-    // --- 2026-06-xx 分页工具栏：从底部迁移至搜索按钮右侧 ---
-    m_prevBtn = new QPushButton("上一页");
-    m_prevBtn->setObjectName("PageBtn");
-    m_prevBtn->setFixedWidth(60);
-    m_prevBtn->setFixedHeight(36);
-    m_prevBtn->setCursor(Qt::PointingHandCursor);
-    
-    m_pageLabel = new QLabel("第 1 页");
-    m_pageLabel->setStyleSheet("color: #7A8F9E; font-size: 11px; margin: 0 5px;");
-
-    m_nextBtn = new QPushButton("下一页");
-    m_nextBtn->setObjectName("PageBtn");
-    m_nextBtn->setFixedWidth(60);
-    m_nextBtn->setFixedHeight(36);
-    m_nextBtn->setCursor(Qt::PointingHandCursor);
-
-    searchRow->addWidget(m_prevBtn);
-    searchRow->addWidget(m_pageLabel);
-    searchRow->addWidget(m_nextBtn);
     searchVLayout->addLayout(searchRow);
 
     m_progressBar = new QProgressBar();
@@ -727,7 +666,8 @@ void ScanDialog::setupUi() {
 
     m_resultView = new QTableView();
     m_resultView->verticalHeader()->setDefaultSectionSize(30); // 默认行高
-    m_tableModel = new ScanTableModel(this);
+    m_controller = new ScanController(this);
+    m_tableModel = new ScanTableModel(m_controller, this);
     m_resultView->setModel(m_tableModel);
     m_resultView->setContextMenuPolicy(Qt::CustomContextMenu);
     
@@ -785,9 +725,7 @@ void ScanDialog::setupUi() {
     // 2026-05-16 交互优化：开启行内编辑触发器 (双击或按F2)
     m_resultView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
     
-    connect(m_resultView->verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
-        if (value >= m_resultView->verticalScrollBar()->maximum() * 0.9) m_tableModel->loadMore(200);
-    });
+    // 虚拟化加载已由 QAbstractItemModel::fetchMore 处理，无需手动 loadMore
     
     // --- 2026-05-16 多态视图重构：引入 QStackedWidget 与 QListView (IconMode) ---
     m_viewStack = new QStackedWidget();
@@ -827,22 +765,6 @@ void ScanDialog::setupUi() {
     
     mainLayout->addWidget(m_viewStack);
 
-    connect(m_prevBtn, &QPushButton::clicked, this, [this]() {
-        if (m_currentPage > 0) {
-            m_currentPage--;
-            m_tableModel->loadPage(m_currentPage, m_pageSize);
-            updateStatusBar();
-        }
-    });
-    connect(m_nextBtn, &QPushButton::clicked, this, [this]() {
-        int total = m_tableModel->totalFilteredCount();
-        if ((m_currentPage + 1) * m_pageSize < total) {
-            m_currentPage++;
-            m_tableModel->loadPage(m_currentPage, m_pageSize);
-            updateStatusBar();
-        }
-    });
-
     auto* statusContainer = new QWidget();
     statusContainer->setFixedHeight(26);
     auto* statusBar = new QHBoxLayout(statusContainer);
@@ -876,9 +798,9 @@ void ScanDialog::setupUi() {
 
     mainLayout->addWidget(statusContainer);
 
-    connect(m_tableModel, &ScanTableModel::filterFinished, this, [this](int count) {
-        Q_UNUSED(count);
-        m_currentPage = 0; // 搜索重置时回到第一页
+    connect(m_controller, &ScanController::searchFinished, this, [this](int count, int64_t elapsedMs) {
+        m_lastSearchMs = elapsedMs;
+        m_tableModel->updateResults();
         updateStatusBar();
     });
 }
@@ -1348,7 +1270,6 @@ void ScanDialog::onStartScan() {
 }
 
 void ScanDialog::onTriggerSearch() {
-    // 1. 异步更新搜索历史（移除同步 IO 导致的卡顿）
     QString q = m_searchEdit->text().trimmed();
     QString e = m_extEdit->text().trimmed();
     
@@ -1369,15 +1290,13 @@ void ScanDialog::onTriggerSearch() {
         if (changed) m_config.save();
     });
 
-    // 2. 核心同步：将 UI 盘符勾选状态更新至搜索引擎掩码 (修复搜出未选盘符数据的傻逼 Bug)
     QStringList activeList;
     for (const QString& drive : m_config.activeDrives) activeList << drive;
     MftReader::instance().updateActiveDrives(activeList);
 
-    // 3. 执行过滤并触发搜索
     onFilterOptionChanged();
-    m_tableModel->setFilterText(m_searchEdit->text());
-    m_tableModel->triggerSearch(); 
+    m_controller->setSearchText(m_searchEdit->text());
+    m_controller->triggerSearch(true); // 按钮点击立即搜索
 }
 
 void ScanDialog::onFilterOptionChanged() {
@@ -1389,7 +1308,8 @@ void ScanDialog::onFilterOptionChanged() {
     QString extText = m_extEdit->text().toLower();
     if (!extText.isEmpty()) state.extensionList = extText.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
     
-    m_tableModel->setFilterState(state);
+    m_controller->setFilterState(state);
+    m_controller->triggerSearch();
 }
 
 void ScanDialog::updateStatus(const QString& text, bool scanning) {
@@ -1416,8 +1336,9 @@ void ScanDialog::updateStatusBar() {
         int64_t totalSize = 0;
         auto& reader = MftReader::instance();
         for (const auto& index : selectedRows) {
-            int actualIdx = m_tableModel->data(index, Qt::UserRole).toInt();
-            if (!reader.isDirectory(actualIdx)) totalSize += reader.getSize(actualIdx);
+            uint64_t key = m_tableModel->data(index, Qt::UserRole).toULongLong();
+            int actualIdx = reader.getIndexByKey(key);
+            if (actualIdx != -1 && !reader.isDirectory(actualIdx)) totalSize += reader.getSize(actualIdx);
         }
         m_selectionLabel->setText(QString("已选 %1 项 | 合计大小 %2  ").arg(selectedRows.size()).arg(formatSize(totalSize)));
     } else {
