@@ -31,6 +31,7 @@
 #include <QActionGroup>
 #include <atomic>
 
+#include "ScanController.h"
 namespace ArcMeta {
 
 struct ScanConfig {
@@ -49,7 +50,6 @@ struct ScanConfig {
     void save();
 };
 
-#include "ScanController.h"
 
 class ScanTableModel : public QAbstractTableModel {
     Q_OBJECT
