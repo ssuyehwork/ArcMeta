@@ -3,6 +3,8 @@
 #endif
 #include "ScanDialog.h"
 #include "../core/CacheManager.h"
+#include "../core/ScanController.h"
+#include "../core/ThumbnailManager.h"
 #include <QPainter>
 #include <QIcon>
 #include "../mft/MftReader.h"
@@ -61,76 +63,31 @@
 
 namespace ArcMeta {
 
-// --- ScanConfig Implementation ---
-
-void ScanConfig::load() {
-    QFile file("arcmeta_scan_config.json");
-    if (file.open(QIODevice::ReadOnly)) {
-        QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-        QJsonObject obj = doc.object();
-        
-        auto loadSet = [&](const QString& key, QSet<QString>& set) {
-            set.clear();
-            QJsonArray arr = obj[key].toArray();
-            for (const auto& v : arr) set.insert(v.toString());
-        };
-        
-        loadSet("activeDrives", activeDrives);
-        loadSet("defaultDrives", defaultDrives);
-        loadSet("ignoredDrives", ignoredDrives);
-        
-        QJsonArray qArr = obj["queryHistory"].toArray();
-        for (const auto& v : qArr) queryHistory.append(v.toString());
-        QJsonArray eArr = obj["extHistory"].toArray();
-        for (const auto& v : eArr) extHistory.append(v.toString());
-        
-        // 2026-05-16 持久化加载：视图、图标尺寸与排序规则
-        if (obj.contains("viewMode")) viewMode = obj["viewMode"].toInt();
-        if (obj.contains("iconSize")) iconSize = obj["iconSize"].toInt();
-        if (obj.contains("sortColumn")) sortColumn = obj["sortColumn"].toInt();
-        if (obj.contains("sortOrder")) sortOrder = obj["sortOrder"].toInt();
+class MftDataProvider : public IDataProvider {
+public:
+    int totalCount() const override { return MftReader::instance().totalCount(); }
+    QVector<int> search(const QString& query, const ScanFilterState& state) override {
+        return MftReader::instance().search(query, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem);
     }
-}
-
-void ScanConfig::save() {
-    QFile file("arcmeta_scan_config.json");
-    if (file.open(QIODevice::WriteOnly)) {
-        QJsonObject obj;
-        auto saveSet = [&](const QString& key, const QSet<QString>& set) {
-            QJsonArray arr;
-            for (const auto& v : set) arr.append(v);
-            obj[key] = arr;
-        };
-        
-        saveSet("activeDrives", activeDrives);
-        saveSet("defaultDrives", defaultDrives);
-        saveSet("ignoredDrives", ignoredDrives);
-        
-        QJsonArray qArr; for (const auto& v : queryHistory) qArr.append(v);
-        obj["queryHistory"] = qArr;
-        QJsonArray eArr; for (const auto& v : extHistory) eArr.append(v);
-        obj["extHistory"] = eArr;
-        
-        // 2026-05-16 持久化存盘
-        obj["viewMode"] = viewMode;
-        obj["iconSize"] = iconSize;
-        obj["sortColumn"] = sortColumn;
-        obj["sortOrder"] = sortOrder;
-        
-        file.write(QJsonDocument(obj).toJson());
-    }
-}
+    QString getName(int index) const override { return MftReader::instance().getName(index); }
+    QString getFullPath(int index) const override { return MftReader::instance().getFullPath(index); }
+    int64_t getSize(int index) const override { return MftReader::instance().getSize(index); }
+    int64_t getModifyTime(int index) const override { return MftReader::instance().getModifyTime(index); }
+    bool isDirectory(int index) const override { return MftReader::instance().isDirectory(index); }
+    QIcon getCachedIcon(const QString& ext, bool isDir) override { return MftReader::instance().getCachedIcon(ext, isDir); }
+    bool isMetadataFetched(int index) const override { return MftReader::instance().isMetadataFetched(index); }
+    void requestMetadata(int index) override { MftReader::instance().requestMetadata(index); }
+};
 
 // --- ScanTableModel Implementation ---
 
-ScanTableModel::ScanTableModel(QObject* parent) : QAbstractTableModel(parent) {
+ScanTableModel::ScanTableModel(IDataProvider* provider, QObject* parent)
+    : QAbstractTableModel(parent), m_provider(provider) {
     m_throttleTimer = new QTimer(this);
-    m_throttleTimer->setInterval(100); // 100ms 聚合周期
+    m_throttleTimer->setInterval(100);
     connect(m_throttleTimer, &QTimer::timeout, this, [this]() {
         if (m_pendingRows.isEmpty()) return;
         
-        // 2026-05-14 信号聚合优化：将数千次零散刷新合并为极少数范围刷新
-        // 这大幅降低了绘制压力，对标 Rust 版立即模式渲染的流畅感
         QList<int> rows = m_pendingRows.values();
         std::sort(rows.begin(), rows.end());
         m_pendingRows.clear();
@@ -156,7 +113,6 @@ ScanTableModel::ScanTableModel(QObject* parent) : QAbstractTableModel(parent) {
             endResetModel();
             return;
         }
-        // 2026-05-14 算法优化：将 O(N) 线性查找升级为 O(1) 映射查找
         auto it = m_actualToRow.find(index);
         if (it != m_actualToRow.end()) {
             int row = it->second;
@@ -167,7 +123,9 @@ ScanTableModel::ScanTableModel(QObject* parent) : QAbstractTableModel(parent) {
         }
     });
 }
-ScanTableModel::~ScanTableModel() {}
+ScanTableModel::~ScanTableModel() {
+    delete m_provider;
+}
 
 int ScanTableModel::rowCount(const QModelIndex& parent) const {
     if (parent.isValid()) return 0;
@@ -182,17 +140,16 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
     if (row < 0 || row >= m_filteredIndices.size()) return QVariant();
     
     int actualIndex = m_filteredIndices[row];
-    auto& reader = MftReader::instance();
     
     if (role == Qt::DisplayRole || role == Qt::EditRole) {
         switch (index.column()) {
-            case 0: return reader.getName(actualIndex);
-            case 1: return reader.getFullPath(actualIndex);
+            case 0: return m_provider->getName(actualIndex);
+            case 1: return m_provider->getFullPath(actualIndex);
             case 2: {
-                if (reader.isDirectory(actualIndex)) return "-";
-                int64_t size = reader.getSize(actualIndex);
-                if (size == 0 && !reader.isMetadataFetched(actualIndex)) {
-                    const_cast<MftReader&>(reader).requestMetadata(actualIndex);
+                if (m_provider->isDirectory(actualIndex)) return "-";
+                int64_t size = m_provider->getSize(actualIndex);
+                if (size == 0 && !m_provider->isMetadataFetched(actualIndex)) {
+                    m_provider->requestMetadata(actualIndex);
                     return "...";
                 }
                 if (size < 1024) return QString("%1 B").arg(size);
@@ -201,9 +158,9 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
                 return QString("%1 GB").arg(size / (1024.0 * 1024.0 * 1024.0), 0, 'f', 2);
             }
             case 3: {
-                int64_t ts = reader.getModifyTime(actualIndex);
-                if (ts == 0 && !reader.isMetadataFetched(actualIndex)) {
-                    const_cast<MftReader&>(reader).requestMetadata(actualIndex);
+                int64_t ts = m_provider->getModifyTime(actualIndex);
+                if (ts == 0 && !m_provider->isMetadataFetched(actualIndex)) {
+                    m_provider->requestMetadata(actualIndex);
                     return "-";
                 }
                 if (ts == 0) return "-";
@@ -211,57 +168,33 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             }
         }
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        QString name = reader.getName(actualIndex);
+        QString name = m_provider->getName(actualIndex);
         int dotIdx = name.lastIndexOf('.');
         QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
         
-        // 2026-06-xx 按照用户要求：支持显示缩略图，针对特定格式进行异步拉取
         static const QSet<QString> thumbExts = {"psd", "ai", "eps", "jpg", "jpeg", "png", "webp"};
-        if (thumbExts.contains(ext) && !reader.isDirectory(actualIndex)) {
-            auto it = m_thumbCache.find(actualIndex);
-            if (it != m_thumbCache.end()) return *it;
+        if (thumbExts.contains(ext) && !m_provider->isDirectory(actualIndex)) {
+            QString fullPath = m_provider->getFullPath(actualIndex);
+            auto& config = ScanController::instance().config();
+            int thumbSize = config.iconSize; // 简化处理，使用配置的图标大小
 
-            // 尚未请求过，则发起异步请求
-            if (!m_requestedThumbs.contains(actualIndex)) {
-                m_requestedThumbs.insert(actualIndex);
-                QString fullPath = reader.getFullPath(actualIndex);
-                
-                // 2026-06-xx 物理修复：定义非 const 指针以解决异步回调中 dataChanged 信号的调用权限问题
-                ScanTableModel* mutableThis = const_cast<ScanTableModel*>(this);
-                // 按照当前视图模式动态调整缩略图请求尺寸
-                ScanDialog* dlg = qobject_cast<ScanDialog*>(parent());
-                int thumbSize = (dlg && dlg->m_viewStack->currentIndex() == 0) ? 24 : (dlg ? dlg->m_config.iconSize : 64);
+            QPixmap thumb = ThumbnailManager::instance().getThumbnail(fullPath, thumbSize, this, [this, row](const QPixmap& /*p*/) {
+                emit dataChanged(index(row, 0), index(row, 0), {Qt::DecorationRole});
+            });
 
-                (void)QtConcurrent::run([mutableThis, actualIndex, fullPath, thumbSize]() {
-                    QPixmap thumb = UiHelper::getShellThumbnail(fullPath, thumbSize);
-                    if (!thumb.isNull()) {
-                        QMetaObject::invokeMethod(mutableThis, [mutableThis, actualIndex, thumb]() {
-                            // 2026-06-xx 物理修复：移除多余的 flipped(Qt::Vertical) 
-                            // 因为 getShellThumbnail 内部已经执行了必要的镜像翻转。
-                            mutableThis->m_thumbCache[actualIndex] = thumb;
-                            auto itRow = mutableThis->m_actualToRow.find(actualIndex);
-                            if (itRow != mutableThis->m_actualToRow.end()) {
-                                emit mutableThis->dataChanged(mutableThis->index(itRow->second, 0), mutableThis->index(itRow->second, 0), {Qt::DecorationRole});
-                            }
-                        });
-                    }
-                });
-            }
+            if (!thumb.isNull()) return thumb;
         }
-        return reader.getCachedIcon(ext, reader.isDirectory(actualIndex));
+        return m_provider->getCachedIcon(ext, m_provider->isDirectory(actualIndex));
     } else if (role == Qt::ForegroundRole) {
-        // 2026-05-16 视觉同步：从 MetadataManager 获取颜色标记并适配主界面高端色值
-        // 2026-05-17 按照用户要求：使用 UiHelper::parseColorName 确保所有颜色（如黄色 #FAC775）完全一致高雅
-        std::wstring path = reader.getFullPath(actualIndex).toStdWString();
+        std::wstring path = m_provider->getFullPath(actualIndex).toStdWString();
         auto meta = MetadataManager::instance().getMeta(path);
         if (!meta.color.empty()) {
             QColor tagC = UiHelper::parseColorName(QString::fromStdWString(meta.color));
             if (tagC.isValid()) return tagC;
         }
-        if (reader.isDirectory(actualIndex)) return QColor("#3498db");
+        if (m_provider->isDirectory(actualIndex)) return QColor("#3498db");
     } else if (role == Qt::ToolTipRole) {
-        // 2026-05-16 交互同步：显示备注与标签
-        std::wstring path = reader.getFullPath(actualIndex).toStdWString();
+        std::wstring path = m_provider->getFullPath(actualIndex).toStdWString();
         auto meta = MetadataManager::instance().getMeta(path);
         QString tip = QLatin1String("路径: ") + QString::fromStdWString(path);
         if (!meta.note.empty()) tip += QLatin1String("\n备注: ") + QString::fromStdWString(meta.note);
@@ -281,7 +214,6 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
 Qt::ItemFlags ScanTableModel::flags(const QModelIndex& index) const {
     Qt::ItemFlags f = QAbstractTableModel::flags(index);
     if (index.isValid() && index.column() == 0) {
-        // 2026-05-16 物理对标：仅名称列允许行内编辑
         f |= Qt::ItemIsEditable;
     }
     return f;
@@ -294,19 +226,16 @@ bool ScanTableModel::setData(const QModelIndex& index, const QVariant& value, in
     if (row < 0 || row >= m_filteredIndices.size()) return false;
     
     int actualIndex = m_filteredIndices[row];
-    auto& reader = MftReader::instance();
     
-    QString oldName = reader.getName(actualIndex);
+    QString oldName = m_provider->getName(actualIndex);
     QString newName = value.toString().trimmed();
     if (newName.isEmpty() || newName == oldName) return false;
     
-    QString oldPath = reader.getFullPath(actualIndex);
+    QString oldPath = m_provider->getFullPath(actualIndex);
     QFileInfo fi(oldPath);
     QString newPath = fi.absolutePath() + QLatin1String("/") + newName;
     
     if (QFile::rename(oldPath, newPath)) {
-        // 2026-05-16 交互加固：物理重命名后，USN 监听器会捕获事件并自动更新模型。
-        // 我们在此处不需要手动修改内存池，等待系统级同步最为稳健。
         return true;
     } else {
         QMessageBox::warning(nullptr, "重命名失败", "无法重命名文件，请检查文件是否被占用或是否有权限。");
@@ -345,7 +274,7 @@ void ScanTableModel::startAsyncRebuild() {
     timer->start();
 
     QFuture<QVector<int>> future = (QtConcurrent::run)([this, text = m_filterText, state = m_filterState]() {
-        return MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem);
+        return m_provider->search(text, state);
     });
 
     disconnect(&m_filterWatcher, &QFutureWatcher<QVector<int>>::finished, this, nullptr);
@@ -359,19 +288,15 @@ void ScanTableModel::startAsyncRebuild() {
         beginResetModel();
         m_filteredIndices = m_filterWatcher.result();
         
-        // 2026-06-xx 物理修复：重置过滤器时清空缩略图请求状态与缓存
-        m_requestedThumbs.clear();
-        m_thumbCache.clear();
-
-        // 2026-05-14 物理同步：构建反向映射表以支持 O(1) 行定位
         m_actualToRow.clear();
         m_actualToRow.reserve(m_filteredIndices.size());
         for (int i = 0; i < m_filteredIndices.size(); ++i) {
             m_actualToRow[m_filteredIndices[i]] = i;
         }
 
-        m_displayLimit = 1000; // 重置时默认显示第一页
+        m_displayLimit = 0;
         endResetModel();
+        if (canFetchMore(QModelIndex())) fetchMore(QModelIndex());
 
         ScanDialog* dlg = qobject_cast<ScanDialog*>(parent());
         if (dlg) {
@@ -385,42 +310,38 @@ void ScanTableModel::startAsyncRebuild() {
     m_filterWatcher.setFuture(future);
 }
 
-void ScanTableModel::loadPage(int page, int pageSize) {
-    beginResetModel();
-    m_displayLimit = (page + 1) * pageSize;
-    // 物理对齐：仅渲染当前页对应的逻辑范围，由于是 TableView/ListView，
-    // 我们通过调整显示上限来模拟分页显示，这在大型索引中性能最佳。
-    endResetModel();
+bool ScanTableModel::canFetchMore(const QModelIndex& parent) const {
+    if (parent.isValid()) return false;
+    return m_displayLimit < m_filteredIndices.size();
 }
 
-void ScanTableModel::loadMore(int count) {
-    Q_UNUSED(count);
-    if (m_displayLimit >= m_filteredIndices.size()) return;
-    int oldLimit = m_displayLimit;
-    int newLimit = (std::min)(static_cast<int>(m_filteredIndices.size()), m_displayLimit + 1000);
-    beginInsertRows(QModelIndex(), oldLimit, newLimit - 1);
-    m_displayLimit = newLimit;
+void ScanTableModel::fetchMore(const QModelIndex& parent) {
+    if (parent.isValid()) return;
+    int remainder = m_filteredIndices.size() - m_displayLimit;
+    int itemsToFetch = std::min(100, remainder);
+
+    if (itemsToFetch <= 0) return;
+
+    beginInsertRows(QModelIndex(), m_displayLimit, m_displayLimit + itemsToFetch - 1);
+    m_displayLimit += itemsToFetch;
     endInsertRows();
 }
 
 void ScanTableModel::sort(int column, Qt::SortOrder order) {
     if (m_filteredIndices.isEmpty()) return;
     
-    auto& reader = MftReader::instance();
-    // 2026-05-16 物理重排逻辑：基于 MftReader 的 SoA 数据进行异步稳定的排序
     std::sort(m_filteredIndices.begin(), m_filteredIndices.end(), [&](int a, int b) {
         bool less = false;
         switch (column) {
-            case 0: less = QString::compare(reader.getName(a), reader.getName(b), Qt::CaseInsensitive) < 0; break;
-            case 1: less = QString::compare(reader.getFullPath(a), reader.getFullPath(b), Qt::CaseInsensitive) < 0; break;
-            case 2: less = reader.getSize(a) < reader.getSize(b); break;
-            case 3: less = reader.getModifyTime(a) < reader.getModifyTime(b); break;
+            case 0: less = QString::compare(m_provider->getName(a), m_provider->getName(b), Qt::CaseInsensitive) < 0; break;
+            case 1: less = QString::compare(m_provider->getFullPath(a), m_provider->getFullPath(b), Qt::CaseInsensitive) < 0; break;
+            case 2: less = m_provider->getSize(a) < m_provider->getSize(b); break;
+            case 3: less = m_provider->getModifyTime(a) < m_provider->getModifyTime(b); break;
             default: return false;
         }
         return (order == Qt::AscendingOrder) ? less : !less;
     });
     
-    // 重建反向映射表以维持 O(1) 实时同步能力
     m_actualToRow.clear();
     for (int i = 0; i < m_filteredIndices.size(); ++i) m_actualToRow[m_filteredIndices[i]] = i;
     
@@ -442,7 +363,7 @@ QMimeData* ScanTableModel::mimeData(const QModelIndexList& indexes) const {
         int actualIdx = m_filteredIndices[row];
         if (seen.contains(actualIdx)) continue;
         seen.insert(actualIdx);
-        QString path = MftReader::instance().getFullPath(actualIdx);
+        QString path = m_provider->getFullPath(actualIdx);
         if (!path.isEmpty()) urls << QUrl::fromLocalFile(path);
     }
     data->setUrls(urls);
@@ -454,7 +375,7 @@ QMimeData* ScanTableModel::mimeData(const QModelIndexList& indexes) const {
 ScanDialog::ScanDialog(QWidget* parent)
     : FramelessDialog("FERREX-META", parent) 
 {
-    m_config.load();
+    ScanController::instance().loadConfig();
     resize(1000, 700);
     setMinimumSize(800, 500);
 
@@ -484,94 +405,32 @@ ScanDialog::ScanDialog(QWidget* parent)
 
     setupUi();
 
-    // --- 2026-06-xx 架构级 QSS：实现样式沙箱与物理隔离 ---
-    this->setStyleSheet(R"(
-        QWidget#SearchContainer, QWidget#DriveContainer, QStackedWidget#ViewStack { 
-            background: transparent; border: none; 
+    QFile qssFile(":/qss/scan_dialog.qss");
+    if (qssFile.open(QFile::ReadOnly)) {
+        this->setStyleSheet(qssFile.readAll());
+    } else {
+        // Fallback for development if resource is not compiled yet
+        QFile devQss("resources/qss/scan_dialog.qss");
+        if (devQss.open(QFile::ReadOnly)) {
+            this->setStyleSheet(devQss.readAll());
         }
-        
-        #mainSearchEdit, #extSearchEdit { 
-            background: #2D2D2D; 
-            border: 1px solid #3F3F3F; 
-            border-radius: 6px; 
-            color: #EEE; 
-            font-size: 14px; 
-            padding: 0 10px;
-            outline: none;
-        }
+    }
 
-        /* 显式定义伪类，防止全局污染 */
-        #mainSearchEdit:focus, #extSearchEdit:focus { border: 1px solid #FF8C00 !important; }
-        #mainSearchEdit:hover, #extSearchEdit:hover { border: 1px solid #555; }
-        
-        #mainSearchEdit::placeholder, #extSearchEdit::placeholder {
-            color: rgba(238, 238, 238, 0.3);
-        }
-
-        /* 搜索按钮：独立物理实体，拥有完整圆角 */
-        QPushButton#searchIconButton { 
-            background: #FF8C00; 
-            border: 1px solid #FF8C00;
-            border-radius: 6px; 
-            color: #000;
-            font-weight: bold;
-            padding: 0 15px;
-        } 
-        QPushButton#searchIconButton:hover { background: #FFA500; } 
-        QPushButton#searchIconButton:pressed { background: #CC6600; }
-
-        /* 盘符按钮：使用属性选择器 */
-        QPushButton[isActive="true"] {
-            background: rgba(255, 140, 0, 30); 
-            color: #FF8C00; 
-            border: 1px solid #FF8C00; 
-            padding: 0 10px; 
-            font-size: 12px; 
-            font-weight: bold;
-            border-radius: 4px;
-        }
-        QPushButton[isActive="false"] {
-            background: #111519; 
-            color: #7A8F9E; 
-            border: 1px solid #252E37; 
-            padding: 0 10px; 
-            font-size: 12px;
-            border-radius: 4px;
-        }
-
-        QProgressBar#ScanProgressBar { background: transparent; border: none; } 
-        QProgressBar#ScanProgressBar::chunk { background: #FF8C00; }
-
-        QCheckBox { color: #AAA; }
-        
-        /* 分页按钮 */
-        #PageBtn {
-            background: #2D2D2D; 
-            color: #CCC; 
-            border: 1px solid #3F3F3F; 
-            border-radius: 4px;
-        }
-        #PageBtn:hover { background: #3F3F3F; }
-        #PageBtn:disabled { color: #555; border-color: #2D2D2D; }
-    )");
-
-    // --- 2026-05-16 持久化恢复：根据配置恢复视图、尺寸与排序状态 ---
-        m_viewStack->setCurrentIndex(m_config.viewMode);
-    if (m_config.viewMode == 0) {
+    auto& config = ScanController::instance().config();
+    m_viewStack->setCurrentIndex(config.viewMode);
+    if (config.viewMode == 0) {
         m_resultView->verticalHeader()->setDefaultSectionSize(32);
     } else {
-        m_resultView->verticalHeader()->setDefaultSectionSize(m_config.iconSize + 10);
+        m_resultView->verticalHeader()->setDefaultSectionSize(config.iconSize + 10);
     }
-    if (m_config.viewMode == 1) { // 图标模式
-        m_iconView->setIconSize(QSize(m_config.iconSize, m_config.iconSize));
-        m_iconView->setGridSize(QSize(m_config.iconSize + 14, m_config.iconSize + 44));
+    if (config.viewMode == 1) { // 图标模式
+        m_iconView->setIconSize(QSize(config.iconSize, config.iconSize));
+        m_iconView->setGridSize(QSize(config.iconSize + 14, config.iconSize + 44));
     }
     
-    // 恢复排序状态 (同时作用于模型和表头视觉)
-    m_resultView->horizontalHeader()->setSortIndicator(m_config.sortColumn, static_cast<Qt::SortOrder>(m_config.sortOrder));
-    m_tableModel->sort(m_config.sortColumn, static_cast<Qt::SortOrder>(m_config.sortOrder));
+    m_resultView->horizontalHeader()->setSortIndicator(config.sortColumn, static_cast<Qt::SortOrder>(config.sortOrder));
+    m_tableModel->sort(config.sortColumn, static_cast<Qt::SortOrder>(config.sortOrder));
 
-    // 2026-05-16 物理重载：断开基类 Qt 置顶逻辑，改用 Win32 原生 SetWindowPos 以实现无损切换
     if (m_pinBtn) {
         disconnect(m_pinBtn, &QPushButton::toggled, nullptr, nullptr);
         connect(m_pinBtn, &QPushButton::toggled, this, [this](bool checked) {
@@ -586,6 +445,67 @@ ScanDialog::ScanDialog(QWidget* parent)
         });
     }
 
+    connect(&ScanController::instance(), &ScanController::driveProbeFinished, this, [this](const QVector<DriveInfo>& drives) {
+            QLayoutItem* item;
+            while ((item = m_driveLayout->takeAt(0)) != nullptr) {
+                if (item->widget()) item->widget()->deleteLater();
+                delete item;
+            }
+            m_driveButtonMap.clear();
+
+            auto& config = ScanController::instance().config();
+            for (const auto& info : drives) {
+                if (!info.hasMedia || !info.isNtfs) continue;
+                if (config.ignoredDrives.contains(info.letter)) continue;
+
+                QString label = info.label.isEmpty() ? "本地磁盘" : info.label;
+                QString btnText = QString("%1 (%2)").arg(info.letter).arg(label);
+
+                QPushButton* btn = new QPushButton(btnText);
+                btn->setCheckable(true);
+                btn->setFixedHeight(24);
+                m_driveButtonMap[info.letter] = btn;
+
+                connect(btn, &QPushButton::clicked, this, [this, letter = info.letter]() {
+                    auto& config = ScanController::instance().config();
+                    bool isSelected = false;
+                    if (config.activeDrives.contains(letter)) {
+                        if (config.activeDrives.size() > 1) {
+                            config.activeDrives.remove(letter);
+                        } else {
+                            isSelected = true; // 保持选中
+                        }
+                    } else {
+                        config.activeDrives.insert(letter);
+                        isSelected = true;
+                    }
+
+                    updateDriveButtonStyles();
+
+                    QStringList activeList;
+                    for (const QString& d : config.activeDrives) activeList << d;
+                    ScanController::instance().updateActiveDrives(activeList);
+
+                    if (isSelected && !MftReader::instance().isDriveIndexed(letter)) {
+                        onStartScan();
+                    } else {
+                        onTriggerSearch();
+                    }
+                });
+
+                btn->setContextMenuPolicy(Qt::CustomContextMenu);
+                connect(btn, &QPushButton::customContextMenuRequested, this, [this, letter = info.letter](const QPoint& pos) {
+                    onDriveContextMenu(letter, pos);
+                });
+
+                m_driveLayout->addWidget(btn);
+            }
+            m_driveLayout->addStretch();
+            updateDriveButtonStyles();
+    });
+
+    connect(&ScanController::instance(), &ScanController::statusUpdated, this, &ScanDialog::updateStatus);
+
     QTimer::singleShot(100, this, [this]() {
         updateStatus("正在载入本地快照...");
         QPointer<ScanDialog> weakThis(this);
@@ -596,10 +516,10 @@ ScanDialog::ScanDialog(QWidget* parent)
                 if (ok) {
                     weakThis->updateStatus("就绪");
                     weakThis->m_tableModel->setFilterText("");
-                    weakThis->refreshDriveList(true); // 后台探测硬件
+                    ScanController::instance().requestDriveProbe(true);
                 } else {
                     weakThis->updateStatus("未检测到快照，全自动初始化...");
-                    weakThis->refreshDriveList(true);
+                    ScanController::instance().requestDriveProbe(true);
                     weakThis->onStartScan();
                 }
             });
@@ -608,13 +528,10 @@ ScanDialog::ScanDialog(QWidget* parent)
 }
 
 ScanDialog::~ScanDialog() {
-    // 2026-05-14 架构优化：移除 MftReader::instance().clear()
-    // MftReader 作为全局单例，其生命周期不应与搜索窗口绑定。
 }
 
 void ScanDialog::setupUi() {
     auto* mainLayout = new QVBoxLayout(m_contentArea);
-    // 2026-06-xx 按照建议：将 mainLayout 的 spacing 设置为 10，给组件之间留出物理切割的空隙
     mainLayout->setContentsMargins(10, 10, 10, 10);
     mainLayout->setSpacing(10);
 
@@ -628,7 +545,6 @@ void ScanDialog::setupUi() {
     m_driveContainer->setObjectName("DriveContainer");
     m_driveContainer->setAttribute(Qt::WA_StyledBackground, true);
     m_driveLayout = new QHBoxLayout(m_driveContainer);
-    // 2026-06-xx 按照建议：盘符部分也调整为 10 像素间距
     m_driveLayout->setContentsMargins(5, 0, 5, 0);
     m_driveLayout->setSpacing(10);
     driveScroll->setWidget(m_driveContainer);
@@ -638,7 +554,6 @@ void ScanDialog::setupUi() {
     topControl->addWidget(driveScroll, 1);
     mainLayout->addLayout(topControl);
 
-    // B. 搜索选项行 (迁移至盘符与搜索框之间)
     auto* optionRow = new QHBoxLayout();
     optionRow->setContentsMargins(0, 0, 0, 0);
     optionRow->setSpacing(15);
@@ -660,20 +575,27 @@ void ScanDialog::setupUi() {
     searchContainer->setAttribute(Qt::WA_StyledBackground, true);
     auto* searchVLayout = new QVBoxLayout(searchContainer);
     searchVLayout->setContentsMargins(0, 0, 0, 0);
-    searchVLayout->setSpacing(10); // 增加呼吸感
+    searchVLayout->setSpacing(10);
 
     auto* searchRow = new QHBoxLayout();
     searchRow->setContentsMargins(0, 0, 0, 0); 
     searchRow->setSpacing(10); 
 
-    // A. 物理拆分搜索栏组件：恢复“分开”的视觉风格，确保组件间有明显间距
     m_searchEdit = new QLineEdit();
     m_searchEdit->setObjectName("mainSearchEdit");
     m_searchEdit->setPlaceholderText("输入文件名 / 关键词...");
     m_searchEdit->setFixedHeight(36);
     m_searchEdit->setClearButtonEnabled(true);
     m_searchEdit->installEventFilter(this);
-    connect(m_searchEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this]() {
+        if (!m_searchThrottleTimer) {
+            m_searchThrottleTimer = new QTimer(this);
+            m_searchThrottleTimer->setSingleShot(true);
+            m_searchThrottleTimer->setInterval(200);
+            connect(m_searchThrottleTimer, &QTimer::timeout, this, &ScanDialog::onTriggerSearch);
+        }
+        m_searchThrottleTimer->start();
+    });
     searchRow->addWidget(m_searchEdit, 1);
 
     m_extEdit = new QLineEdit();
@@ -695,7 +617,6 @@ void ScanDialog::setupUi() {
     connect(m_searchBtn, &QPushButton::clicked, this, &ScanDialog::onTriggerSearch);
     searchRow->addWidget(m_searchBtn);
 
-    // --- 2026-06-xx 分页工具栏：从底部迁移至搜索按钮右侧 ---
     m_prevBtn = new QPushButton("上一页");
     m_prevBtn->setObjectName("PageBtn");
     m_prevBtn->setFixedWidth(60);
@@ -726,34 +647,14 @@ void ScanDialog::setupUi() {
     mainLayout->addWidget(searchContainer);
 
     m_resultView = new QTableView();
-    m_resultView->verticalHeader()->setDefaultSectionSize(30); // 默认行高
-    m_tableModel = new ScanTableModel(this);
+    m_resultView->setObjectName("ScanResultView");
+    m_resultView->verticalHeader()->setDefaultSectionSize(30);
+    m_tableModel = new ScanTableModel(new MftDataProvider(), this);
     m_resultView->setModel(m_tableModel);
     m_resultView->setContextMenuPolicy(Qt::CustomContextMenu);
     
-    // 2026-05-14 视觉优化：基于色码分析，将斑马纹调整为深灰色 (#1E1E1E) 与纯黑色 (#000000) 搭配
-    // 2026-06-xx 按照用户要求：设置左侧 10px 间距，确保坐标校准，同时修正表头首列偏移
-    m_resultView->setStyleSheet(
-        "QTableView { "
-        "background-color: #1E1E1E; "
-        "alternate-background-color: #000000; "
-        "border: 1px solid #333; "
-        "color: #D4D4D4; "
-        "selection-background-color: #094771; "
-        "selection-color: #FFFFFF; "
-        "outline: none; "
-        "gridline-color: transparent; "
-        "padding: 10px 0 0 10px; "
-        "}"
-        "QTableView::item { border-bottom: 1px solid #252526; }"
-        "QHeaderView::section { background-color: #252526; color: #888; border: none; border-right: 1px solid #333; padding: 4px; height: 24px; }"
-        "QHeaderView::section:horizontal:first { padding-left: 14px; }" // 10px 基础 + 4px 原有内边距
-        "QHeaderView { background-color: #252526; border: none; }"
-    );
-    
     m_resultView->horizontalHeader()->setStretchLastSection(false); 
     m_resultView->horizontalHeader()->setMinimumSectionSize(60);
-    // 2026-05-14 物理修正：强制列标题水平居中对齐
     m_resultView->horizontalHeader()->setDefaultAlignment(Qt::AlignCenter);
     
     m_resultView->setColumnWidth(0, 260); 
@@ -767,10 +668,9 @@ void ScanDialog::setupUi() {
 
     m_resultView->verticalHeader()->setVisible(false);
     m_resultView->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_resultView->setSelectionMode(QAbstractItemView::ExtendedSelection); // 显式启用多选
+    m_resultView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_resultView->setEditTriggers(QAbstractItemView::NoEditTriggers);
     
-    // 2026-06-xx 按照用户要求：开启 TableView 拖拽导出功能
     m_resultView->setDragEnabled(true);
     m_resultView->setDragDropMode(QAbstractItemView::DragOnly);
     m_resultView->setDefaultDropAction(Qt::CopyAction);
@@ -782,22 +682,18 @@ void ScanDialog::setupUi() {
     connect(m_resultView, &QTableView::doubleClicked, this, &ScanDialog::onItemDoubleClicked);
     connect(m_resultView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ScanDialog::onSelectionChanged);
     
-    // 2026-05-16 交互优化：开启行内编辑触发器 (双击或按F2)
     m_resultView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
     
-    connect(m_resultView->verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
-        if (value >= m_resultView->verticalScrollBar()->maximum() * 0.9) m_tableModel->loadMore(200);
-    });
     
-    // --- 2026-05-16 多态视图重构：引入 QStackedWidget 与 QListView (IconMode) ---
     m_viewStack = new QStackedWidget();
     m_viewStack->setObjectName("ViewStack");
     m_viewStack->addWidget(m_resultView);
     
     m_iconView = new QListView();
+    m_iconView->setObjectName("ScanIconView");
     m_iconView->setModel(m_tableModel);
     m_iconView->setViewMode(QListView::IconMode);
-    m_iconView->setSelectionMode(QAbstractItemView::ExtendedSelection); // 显式启用多选
+    m_iconView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_iconView->setResizeMode(QListView::Adjust);
     m_iconView->setMovement(QListView::Static);
     m_iconView->setSpacing(7);
@@ -806,42 +702,22 @@ void ScanDialog::setupUi() {
     m_iconView->setContextMenuPolicy(Qt::CustomContextMenu);
     m_iconView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
     
-    // 2026-06-xx 按照用户要求：开启 IconView 拖拽导出功能
     m_iconView->setDragEnabled(true);
     m_iconView->setDragDropMode(QAbstractItemView::DragOnly);
     m_iconView->setDefaultDropAction(Qt::CopyAction);
-
-    // 2026-06-xx 按照用户要求：为网格视图增加 10px 左侧与顶部内边距，确保坐标对准
-    m_iconView->setStyleSheet(
-        "QListView { background-color: #1E1E1E; border: 1px solid #333; color: #D4D4D4; outline: none; padding: 10px 0 0 10px; }"
-        "QListView::item:hover { background-color: #2D2D2D; border-radius: 4px; }"
-        "QListView::item:selected { background-color: #094771; border-radius: 4px; color: #FFFFFF; }"
-    );
     
     connect(m_iconView, &QListView::doubleClicked, this, &ScanDialog::onItemDoubleClicked);
     connect(m_iconView, &QListView::customContextMenuRequested, this, &ScanDialog::onCustomContextMenu);
     connect(m_iconView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ScanDialog::onSelectionChanged);
     
     m_viewStack->addWidget(m_iconView);
-    m_viewStack->setCurrentIndex(0); // 默认详情视图
+    m_viewStack->setCurrentIndex(0);
     
     mainLayout->addWidget(m_viewStack);
 
-    connect(m_prevBtn, &QPushButton::clicked, this, [this]() {
-        if (m_currentPage > 0) {
-            m_currentPage--;
-            m_tableModel->loadPage(m_currentPage, m_pageSize);
-            updateStatusBar();
-        }
-    });
-    connect(m_nextBtn, &QPushButton::clicked, this, [this]() {
-        int total = m_tableModel->totalFilteredCount();
-        if ((m_currentPage + 1) * m_pageSize < total) {
-            m_currentPage++;
-            m_tableModel->loadPage(m_currentPage, m_pageSize);
-            updateStatusBar();
-        }
-    });
+    m_prevBtn->hide();
+    m_pageLabel->hide();
+    m_nextBtn->hide();
 
     auto* statusContainer = new QWidget();
     statusContainer->setFixedHeight(26);
@@ -878,130 +754,27 @@ void ScanDialog::setupUi() {
 
     connect(m_tableModel, &ScanTableModel::filterFinished, this, [this](int count) {
         Q_UNUSED(count);
-        m_currentPage = 0; // 搜索重置时回到第一页
+        m_currentPage = 0;
         updateStatusBar();
     });
 }
 
-void ScanDialog::refreshDriveList(bool forceProbe) {
-    if (!forceProbe && !m_cachedDriveInfos.isEmpty()) {
-        updateDriveButtonStyles();
-        return;
-    }
-
-    QPointer<ScanDialog> weakThis(this);
-    (void)(QtConcurrent::run)([weakThis]() {
-        if (!weakThis) return;
-        QVector<DriveInfo> drives;
-        DWORD driveMask = GetLogicalDrives();
-        for (int i = 0; i < 26; ++i) {
-            if (driveMask & (1 << i)) {
-                QString letter = QString(QChar('A' + i)) + QLatin1String(":");
-                WCHAR volName[MAX_PATH + 1] = {0};
-                WCHAR fsName[MAX_PATH + 1] = {0};
-                QString driveRoot = letter + QLatin1String("\\");
-                BOOL ok = GetVolumeInformationW(reinterpret_cast<const wchar_t*>(driveRoot.utf16()), 
-                                              volName, MAX_PATH + 1, NULL, NULL, NULL, 
-                                              fsName, MAX_PATH + 1);
-                DriveInfo info;
-                info.letter = letter;
-                info.hasMedia = ok;
-                if (ok) {
-                    info.label = QString::fromWCharArray(volName);
-                    info.isNtfs = QString::fromWCharArray(fsName).contains("NTFS", Qt::CaseInsensitive);
-                } else {
-                    info.isNtfs = false;
-                }
-                drives.append(info);
-            }
-        }
-
-        QMetaObject::invokeMethod(weakThis.data(), [weakThis, drives]() {
-            if (!weakThis) return;
-            weakThis->m_cachedDriveInfos = drives;
-            
-            QLayoutItem* item;
-            while ((item = weakThis->m_driveLayout->takeAt(0)) != nullptr) {
-                if (item->widget()) item->widget()->deleteLater();
-                delete item;
-            }
-            weakThis->m_driveButtonMap.clear();
-
-            // 2026-05-14 用户要求彻底移除 "DRIVES" 标签
-            // QLabel* driveLabel = new QLabel("DRIVES");
-            // driveLabel->setStyleSheet("color: #3D5060; font-weight: bold; font-size: 10px;");
-            // weakThis->m_driveLayout->addWidget(driveLabel);
-
-            for (const auto& info : drives) {
-                if (!info.hasMedia || !info.isNtfs) continue;
-                if (weakThis->m_config.ignoredDrives.contains(info.letter)) continue;
-
-                QString label = info.label.isEmpty() ? "本地磁盘" : info.label;
-                QString btnText = QString("%1 (%2)").arg(info.letter).arg(label);
-                
-                QPushButton* btn = new QPushButton(btnText);
-                btn->setCheckable(true);
-                btn->setFixedHeight(24);
-                weakThis->m_driveButtonMap[info.letter] = btn;
-                
-                connect(btn, &QPushButton::clicked, weakThis.data(), [weakThis, letter = info.letter]() {
-                    if (!weakThis) return;
-                    bool isSelected = false;
-                    if (weakThis->m_config.activeDrives.contains(letter)) {
-                        if (weakThis->m_config.activeDrives.size() > 1) {
-                            weakThis->m_config.activeDrives.remove(letter);
-                        } else {
-                            isSelected = true; // 保持选中
-                        }
-                    } else {
-                        weakThis->m_config.activeDrives.insert(letter);
-                        isSelected = true;
-                    }
-                    
-                    weakThis->updateDriveButtonStyles();
-
-                    // 2026-05-14 核心同步：显式同步盘符状态至搜索引擎掩码，防止视图过滤失效
-                    QStringList activeList;
-                    for (const QString& d : weakThis->m_config.activeDrives) activeList << d;
-                    MftReader::instance().updateActiveDrives(activeList);
-
-                    // 2026-05-14 架构对标优化：如果驱动器已在索引中，仅进行视图过滤（瞬时响应）
-                    // 只有当点击的是新驱动器且需要初始扫描时，才调用重量级的 onStartScan
-                    if (isSelected && !MftReader::instance().isDriveIndexed(letter)) {
-                        weakThis->onStartScan();
-                    } else {
-                        weakThis->onTriggerSearch();
-                    }
-                });
-                
-                btn->setContextMenuPolicy(Qt::CustomContextMenu);
-                connect(btn, &QPushButton::customContextMenuRequested, weakThis.data(), [weakThis, letter = info.letter](const QPoint& pos) {
-                    if (weakThis) weakThis->onDriveContextMenu(letter, pos);
-                });
-                
-                weakThis->m_driveLayout->addWidget(btn);
-            }
-            weakThis->m_driveLayout->addStretch();
-            weakThis->updateDriveButtonStyles();
-        });
-    });
-}
-
 void ScanDialog::updateDriveButtonStyles() {
+    auto& config = ScanController::instance().config();
+    auto drives = ScanController::instance().cachedDriveInfos();
     for (auto it = m_driveButtonMap.begin(); it != m_driveButtonMap.end(); ++it) {
-        bool isActive = m_config.activeDrives.contains(it.key());
-        bool isDefault = m_config.defaultDrives.contains(it.key());
+        bool isActive = config.activeDrives.contains(it.key());
+        bool isDefault = config.defaultDrives.contains(it.key());
         
         QPushButton* btn = it.value();
         btn->setProperty("isActive", isActive);
         btn->setProperty("isDefault", isDefault);
         
-        // 触发 QSS 刷新
         btn->style()->unpolish(btn);
         btn->style()->polish(btn);
         
         QString label = "";
-        for (const auto& info : m_cachedDriveInfos) { if (info.letter == it.key()) { label = info.label; break; } }
+        for (const auto& info : drives) { if (info.letter == it.key()) { label = info.label; break; } }
         btn->setText(QString("%1%2 (%3)").arg(isDefault ? "★ " : "").arg(it.key()).arg(label.isEmpty() ? "本地磁盘" : label));
     }
 }
@@ -1010,19 +783,22 @@ void ScanDialog::onDriveContextMenu(const QString& drive, const QPoint& /*pos*/)
     QMenu menu(this);
     menu.setStyleSheet("QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; } QMenu::item:selected { background: #232D37; color: #FFF; }");
     
-    bool isDefault = m_config.defaultDrives.contains(drive);
+    auto& config = ScanController::instance().config();
+    bool isDefault = config.defaultDrives.contains(drive);
     menu.addAction(isDefault ? "取消默认选项" : "设为默认选项", [this, drive, isDefault]() {
-        if (isDefault) m_config.defaultDrives.remove(drive);
-        else m_config.defaultDrives.insert(drive);
-        m_config.save();
+        auto& config = ScanController::instance().config();
+        if (isDefault) config.defaultDrives.remove(drive);
+        else config.defaultDrives.insert(drive);
+        ScanController::instance().saveConfig();
         updateDriveButtonStyles();
     });
     
     menu.addAction("忽略此驱动器", [this, drive]() {
-        m_config.ignoredDrives.insert(drive);
-        m_config.activeDrives.remove(drive);
-        m_config.save();
-        refreshDriveList(true); // 重新生成按钮
+        auto& config = ScanController::instance().config();
+        config.ignoredDrives.insert(drive);
+        config.activeDrives.remove(drive);
+        ScanController::instance().saveConfig();
+        ScanController::instance().requestDriveProbe(true);
         onStartScan();
     });
     
@@ -1034,9 +810,10 @@ void ScanDialog::onIgnoredDriveContextMenu(const QString& drive, const QPoint& p
     QMenu menu(this);
     menu.setStyleSheet("QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; } QMenu::item:selected { background: #232D37; color: #FFF; }");
     menu.addAction("恢复驱动器", [this, drive]() {
-        m_config.ignoredDrives.remove(drive);
-        m_config.save();
-        refreshDriveList(true);
+        auto& config = ScanController::instance().config();
+        config.ignoredDrives.remove(drive);
+        ScanController::instance().saveConfig();
+        ScanController::instance().requestDriveProbe(true);
     });
     menu.exec(QCursor::pos());
 }
@@ -1044,12 +821,10 @@ void ScanDialog::onIgnoredDriveContextMenu(const QString& drive, const QPoint& p
 void ScanDialog::onCustomContextMenu(const QPoint& pos) {
     QAbstractItemView* activeView = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
     
-    // 2026-05-16 空间感知修正：优先探测点击位置
     QModelIndex indexAtPos = activeView->indexAt(pos);
     QModelIndexList selectedRows;
 
     if (indexAtPos.isValid()) {
-        // 1. 点击在项目上：确保该项被选中，并拉取所有选中项用于构建文件操作菜单
         if (!activeView->selectionModel()->isSelected(indexAtPos)) {
             activeView->selectionModel()->select(indexAtPos, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
         }
@@ -1059,8 +834,6 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
             if (idx.column() == 0) selectedRows.append(idx);
         }
     } else {
-        // 2. 点击在空白处：清空用于构建菜单的局部索引列表，确保下方 !selectedRows.isEmpty() 判定失败
-        // 注意：这里不清除 view 的真实 selectionModel，仅让菜单表现为“无目标”状态
         selectedRows.clear();
     }
     
@@ -1113,7 +886,6 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
         menu.addSeparator();
         menu.addSeparator();
         
-        // --- 2026-05-16 深度管理：评分、标记、备注、标签 ---
         if (count == 1) {
             std::wstring path = m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 1)).toString().toStdWString();
             auto meta = MetadataManager::instance().getMeta(path);
@@ -1130,11 +902,9 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
 
             QMenu* labelMenu = menu.addMenu("标记颜色");
             
-            // --- 2026-05-16 图像分析：从图中提取主色调 ---
             QString ext = QFileInfo(QString::fromStdWString(path)).suffix().toLower();
             if (UiHelper::isGraphicsFile(ext)) {
                 labelMenu->addAction("解析颜色...", [this, path]() {
-                    // 开启异步分析链，防止 UI 阻塞
                     QPointer<ScanDialog> weakThis(this);
                     (void)QtConcurrent::run([weakThis, path]() {
                         auto palette = UiHelper::extractPalette(QString::fromStdWString(path));
@@ -1143,7 +913,6 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                         QColor dominant = UiHelper::quantizeColor(palette.first().first);
                         QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, dominant, palette]() {
                             if (weakThis) {
-                                // 2026-06-xx 物理同步：强制执行 4-bit 量化
                                 MetadataManager::instance().setColor(path, dominant.name().toUpper().toStdWString());
                                 MetadataManager::instance().setPalettes(path, palette);
                                 weakThis->m_tableModel->triggerSearch();
@@ -1154,7 +923,6 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                 labelMenu->addSeparator();
             }
 
-            // 2026-05-17 按照用户要求：重构标记颜色列表，彻底与主界面色彩及存储大一统，使用高雅配色并生成预览图标
             struct ColorItem { QString value; QString label; QColor preview; };
             QList<ColorItem> colorItems = {
                 {"", "默认", QColor("#888780")},
@@ -1229,7 +997,6 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
         menu.addSeparator();
     }
 
-    // --- 2026-05-16 新增：视图、排序、刷新全局功能菜单 ---
     
     QMenu* viewMenu = menu.addMenu("视图(V)");
     QActionGroup* viewGroup = new QActionGroup(this);
@@ -1240,20 +1007,20 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
         act->setCheckable(true);
         viewGroup->addAction(act);
         connect(act, &QAction::triggered, this, [this, stackIdx, iconSize]() {
+            auto& config = ScanController::instance().config();
             m_viewStack->setCurrentIndex(stackIdx);
-            m_config.viewMode = stackIdx;
+            config.viewMode = stackIdx;
             if (stackIdx == 1) { // 图标模式
                 m_iconView->setIconSize(QSize(iconSize, iconSize));
-                // 2026-06-xx 视觉优化：减小网格间距，防止超大模式下的稀疏感
                 m_iconView->setGridSize(QSize(iconSize + 14, iconSize + 44));
-                m_config.iconSize = iconSize;
+                config.iconSize = iconSize;
             }
             if (stackIdx == 0) { // 详情模式
-                m_resultView->verticalHeader()->setDefaultSectionSize(32); // 详情模式固定为标准高度
+                m_resultView->verticalHeader()->setDefaultSectionSize(32);
             } else {
                 m_resultView->verticalHeader()->setDefaultSectionSize(iconSize + 10);
             }
-            m_config.save();
+            ScanController::instance().saveConfig();
         });
         return act;
     };
@@ -1266,11 +1033,10 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
     
     QAction* detailsAction = addViewAction("详情(D)", "Ctrl+Shift+6", 0, 0);
     
-    // 同步当前视图状态
     if (m_viewStack->currentIndex() == 0) detailsAction->setChecked(true);
     else {
         int currentSize = m_iconView->iconSize().width();
-        if (currentSize == 256) xLargeAction->setChecked(true);
+        if (currentSize == 192) xLargeAction->setChecked(true);
         else if (currentSize == 128) largeAction->setChecked(true);
         else mediumAction->setChecked(true);
     }
@@ -1280,25 +1046,28 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
     for (int i = 0; i < sortOptions.size(); ++i) {
         QAction* act = sortMenu->addAction(sortOptions[i]);
         connect(act, &QAction::triggered, this, [this, i]() {
+            auto& config = ScanController::instance().config();
             Qt::SortOrder order = m_resultView->horizontalHeader()->sortIndicatorOrder();
             m_resultView->sortByColumn(i, order);
-            m_config.sortColumn = i;
-            m_config.sortOrder = static_cast<int>(order);
-            m_config.save();
+            config.sortColumn = i;
+            config.sortOrder = static_cast<int>(order);
+            ScanController::instance().saveConfig();
         });
     }
     sortMenu->addSeparator();
     QAction* ascAction = sortMenu->addAction("升序(A)");
     QAction* descAction = sortMenu->addAction("降序(D)");
     connect(ascAction, &QAction::triggered, this, [this]() { 
+        auto& config = ScanController::instance().config();
         m_resultView->sortByColumn(m_resultView->horizontalHeader()->sortIndicatorSection(), Qt::AscendingOrder); 
-        m_config.sortOrder = 0;
-        m_config.save();
+        config.sortOrder = 0;
+        ScanController::instance().saveConfig();
     });
     connect(descAction, &QAction::triggered, this, [this]() { 
+        auto& config = ScanController::instance().config();
         m_resultView->sortByColumn(m_resultView->horizontalHeader()->sortIndicatorSection(), Qt::DescendingOrder); 
-        m_config.sortOrder = 1;
-        m_config.save();
+        config.sortOrder = 1;
+        ScanController::instance().saveConfig();
     });
 
     QAction* refreshAction = menu.addAction("刷新(R)");
@@ -1331,50 +1100,42 @@ void ScanDialog::onSelectionChanged() {
 }
 
 void ScanDialog::onStartScan() {
+    auto& config = ScanController::instance().config();
     QStringList selectedDrives;
-    for (const auto& d : m_config.activeDrives) selectedDrives << (d + QLatin1String("\\"));
+    for (const auto& d : config.activeDrives) selectedDrives << (d + QLatin1String("\\"));
     if (selectedDrives.isEmpty()) { onTriggerSearch(); return; }
-    updateStatus("正在扫描...", true);
 
-    QPointer<ScanDialog> weakThis(this);
-    (void)(QtConcurrent::run)([weakThis, selectedDrives]() {
-        MftReader::instance().buildIndex(selectedDrives);
-        QMetaObject::invokeMethod(weakThis.data(), [weakThis]() {
-            if (!weakThis) return;
-            weakThis->updateStatus("就绪");
-            weakThis->onTriggerSearch();
-        });
-    });
+    ScanController::instance().requestScan(selectedDrives);
+    connect(&ScanController::instance(), &ScanController::scanFinished, this, &ScanDialog::onTriggerSearch, Qt::UniqueConnection);
 }
 
 void ScanDialog::onTriggerSearch() {
-    // 1. 异步更新搜索历史（移除同步 IO 导致的卡顿）
+    auto& config = ScanController::instance().config();
     QString q = m_searchEdit->text().trimmed();
     QString e = m_extEdit->text().trimmed();
     
     QTimer::singleShot(10, this, [this, q, e]() {
+        auto& config = ScanController::instance().config();
         bool changed = false;
-        if (!q.isEmpty() && (m_config.queryHistory.isEmpty() || m_config.queryHistory.first() != q)) {
-            m_config.queryHistory.removeAll(q);
-            m_config.queryHistory.prepend(q);
-            if (m_config.queryHistory.size() > 10) m_config.queryHistory.removeLast();
+        if (!q.isEmpty() && (config.queryHistory.isEmpty() || config.queryHistory.first() != q)) {
+            config.queryHistory.removeAll(q);
+            config.queryHistory.prepend(q);
+            if (config.queryHistory.size() > 10) config.queryHistory.removeLast();
             changed = true;
         }
-        if (!e.isEmpty() && (m_config.extHistory.isEmpty() || m_config.extHistory.first() != e)) {
-            m_config.extHistory.removeAll(e);
-            m_config.extHistory.prepend(e);
-            if (m_config.extHistory.size() > 10) m_config.extHistory.removeLast();
+        if (!e.isEmpty() && (config.extHistory.isEmpty() || config.extHistory.first() != e)) {
+            config.extHistory.removeAll(e);
+            config.extHistory.prepend(e);
+            if (config.extHistory.size() > 10) config.extHistory.removeLast();
             changed = true;
         }
-        if (changed) m_config.save();
+        if (changed) ScanController::instance().saveConfig();
     });
 
-    // 2. 核心同步：将 UI 盘符勾选状态更新至搜索引擎掩码 (修复搜出未选盘符数据的傻逼 Bug)
     QStringList activeList;
-    for (const QString& drive : m_config.activeDrives) activeList << drive;
-    MftReader::instance().updateActiveDrives(activeList);
+    for (const QString& drive : config.activeDrives) activeList << drive;
+    ScanController::instance().updateActiveDrives(activeList);
 
-    // 3. 执行过滤并触发搜索
     onFilterOptionChanged();
     m_tableModel->setFilterText(m_searchEdit->text());
     m_tableModel->triggerSearch(); 
@@ -1430,7 +1191,6 @@ void ScanDialog::updateStatusBar() {
         m_statLabelMain->setText(QString("共找到 %1 条项目").arg(formatNumber(totalMatch)));
         m_statLabelTime->setText(QString("耗时 %1 ms").arg(m_lastSearchMs));
 
-        // 同步分页 UI 状态
         if (m_pageLabel) {
             int totalPages = (totalMatch + m_pageSize - 1) / m_pageSize;
             if (totalPages == 0) totalPages = 1;
@@ -1465,7 +1225,6 @@ void ScanDialog::onRenameTriggered() {
     auto selection = view->selectionModel()->selectedRows();
     if (selection.isEmpty()) return;
     
-    // 2026-05-16 交互进化：触发行内编辑
     view->edit(selection.first());
 }
 
@@ -1497,7 +1256,6 @@ void ScanDialog::keyPressEvent(QKeyEvent* event) {
     FramelessDialog::keyPressEvent(event);
 }
 
-// 2026-05-16 快捷键核心处理逻辑：支持评分、置顶、标签等深度管理快捷键
 void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
     auto view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
     auto selection = view->selectionModel()->selectedRows();
@@ -1506,7 +1264,6 @@ void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
     std::wstring path = m_tableModel->data(m_tableModel->index(selection.first().row(), 1)).toString().toStdWString();
     auto meta = MetadataManager::instance().getMeta(path);
 
-    // Ctrl + 0-5: 评分
     if (event->modifiers() == Qt::ControlModifier && event->key() >= Qt::Key_0 && event->key() <= Qt::Key_5) {
         int rating = event->key() - Qt::Key_0;
         MetadataManager::instance().setRating(path, rating);
@@ -1514,7 +1271,6 @@ void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
         return;
     }
 
-    // Alt 快捷键
     if (event->modifiers() == Qt::AltModifier) {
         if (event->key() == Qt::Key_P) { // 置顶
             MetadataManager::instance().setPinned(path, !meta.pinned);
@@ -1543,7 +1299,8 @@ void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
 bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
     if ((watched == m_searchEdit || watched == m_extEdit) && event->type() == QEvent::MouseButtonDblClick) {
         bool isQuery = (watched == m_searchEdit);
-        const QStringList& history = isQuery ? m_config.queryHistory : m_config.extHistory;
+        auto& config = ScanController::instance().config();
+        const QStringList& history = isQuery ? config.queryHistory : config.extHistory;
         
         if (!history.isEmpty()) {
             QMenu menu(this);
@@ -1559,9 +1316,10 @@ bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
             
             menu.addSeparator();
             menu.addAction("清空历史记录", [this, isQuery]() {
-                if (isQuery) m_config.queryHistory.clear();
-                else m_config.extHistory.clear();
-                m_config.save();
+                auto& config = ScanController::instance().config();
+                if (isQuery) config.queryHistory.clear();
+                else config.extHistory.clear();
+                ScanController::instance().saveConfig();
             });
             
             menu.exec(static_cast<QWidget*>(watched)->mapToGlobal(QPoint(0, static_cast<QWidget*>(watched)->height())));
