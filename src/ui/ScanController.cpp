@@ -1,6 +1,6 @@
 #include "ScanController.h"
 #include "../mft/MftReader.h"
-#include <QtConcurrent>
+#include <QtConcurrent/QtConcurrent>
 #include <QElapsedTimer>
 
 namespace ArcMeta {

@@ -37,7 +37,7 @@
 #include <QInputDialog>
 #include <QPointer>
 #include <QElapsedTimer>
-#include <QtConcurrent>
+#include <QtConcurrent/QtConcurrent>
 #include <QDir>
 #include <QReadLocker>
 #include <QWriteLocker>
@@ -1347,18 +1347,10 @@ void ScanDialog::updateStatusBar() {
         m_statLabelMain->show();
         m_statLabelTime->show();
         
-        int totalMatch = m_tableModel->totalFilteredCount();
+        int totalMatch = m_controller->resultCount();
         m_statLabelMain->setText(QString("共找到 %1 条项目").arg(formatNumber(totalMatch)));
         m_statLabelTime->setText(QString("耗时 %1 ms").arg(m_lastSearchMs));
 
-        // 同步分页 UI 状态
-        if (m_pageLabel) {
-            int totalPages = (totalMatch + m_pageSize - 1) / m_pageSize;
-            if (totalPages == 0) totalPages = 1;
-            m_pageLabel->setText(QString("第 %1 / %2 页").arg(m_currentPage + 1).arg(totalPages));
-            m_prevBtn->setEnabled(m_currentPage > 0);
-            m_nextBtn->setEnabled((m_currentPage + 1) < totalPages);
-        }
     }
     
     double memoryMb = (MftReader::instance().totalCount() * 184.0) / 1024.0 / 1024.0;

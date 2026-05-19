@@ -22,6 +22,7 @@
 #include <QHash>
 #include <QSet>
 #include <QMap>
+#include <QCache>
 #include <QTimer>
 #include <QReadWriteLock>
 #include <QStackedWidget>
