@@ -178,8 +178,14 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             auto& config = ScanController::instance().config();
             int thumbSize = config.iconSize; // 简化处理，使用配置的图标大小
 
-            QPixmap thumb = ThumbnailManager::instance().getThumbnail(fullPath, thumbSize, this, [this, row](const QPixmap& /*p*/) {
-                emit dataChanged(index(row, 0), index(row, 0), {Qt::DecorationRole});
+            QPixmap thumb = ThumbnailManager::instance().getThumbnail(fullPath, thumbSize, this, [this, actualIndex](const QPixmap& /*p*/) {
+                auto itRow = m_actualToRow.find(actualIndex);
+                if (itRow != m_actualToRow.end()) {
+                    int currentRow = itRow->second;
+                    if (currentRow < m_displayLimit) {
+                        emit dataChanged(index(currentRow, 0), index(currentRow, 0), {Qt::DecorationRole});
+                    }
+                }
             });
 
             if (!thumb.isNull()) return thumb;
@@ -509,7 +515,7 @@ ScanDialog::ScanDialog(QWidget* parent)
     QTimer::singleShot(100, this, [this]() {
         updateStatus("正在载入本地快照...");
         QPointer<ScanDialog> weakThis(this);
-        (void)(QtConcurrent::run)([weakThis]() {
+        (void)QtConcurrent::run([weakThis]() {
             bool ok = MftReader::instance().loadFromCache();
             QMetaObject::invokeMethod(weakThis.data(), [weakThis, ok]() {
                 if (!weakThis) return;

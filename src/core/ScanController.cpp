@@ -100,7 +100,7 @@ void ScanController::requestDriveProbe(bool force) {
         return;
     }
 
-    QtConcurrent::run([this]() {
+    (void)QtConcurrent::run([this]() {
         QVector<DriveInfo> drives;
         DWORD driveMask = GetLogicalDrives();
         for (int i = 0; i < 26; ++i) {
@@ -141,7 +141,7 @@ void ScanController::requestScan(const QStringList& drives) {
     emit statusUpdated("正在扫描...", true);
     emit scanStarted();
 
-    QtConcurrent::run([this, drives]() {
+    (void)QtConcurrent::run([this, drives]() {
         MftReader::instance().buildIndex(drives);
         QMetaObject::invokeMethod(this, [this]() {
             emit statusUpdated("就绪", false);

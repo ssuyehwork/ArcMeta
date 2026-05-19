@@ -5,6 +5,8 @@
 #include <QString>
 #include <QCache>
 #include <QMutex>
+#include <QSet>
+#include <functional>
 
 namespace ArcMeta {
 

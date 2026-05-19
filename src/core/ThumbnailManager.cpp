@@ -41,22 +41,25 @@ QPixmap ThumbnailManager::getThumbnail(const QString& path, int size, QObject* r
         if (!pix.isNull()) {
             QMutexLocker locker(&m_mutex);
             m_memoryCache.insert(key, new QPixmap(pix));
+            m_pendingRequests.remove(key);
             return pix;
         }
     }
 
     // 异步拉取
     QPointer<QObject> weakReceiver(receiver);
-    QtConcurrent::run([this, path, size, key, diskPath, weakReceiver, callback]() {
-        QPixmap thumb = UiHelper::getShellThumbnail(path, size);
-        if (!thumb.isNull()) {
-            thumb.save(diskPath, "PNG");
+    (void)QtConcurrent::run([this, path, size, key, diskPath, weakReceiver, callback]() {
+        QImage thumbImg = UiHelper::getShellThumbnailImage(path, size);
+        if (!thumbImg.isNull()) {
+            thumbImg.save(diskPath, "PNG");
         }
 
-        QMetaObject::invokeMethod(this, [this, key, thumb, weakReceiver, callback]() {
+        QMetaObject::invokeMethod(this, [this, key, thumbImg, weakReceiver, callback]() {
+            QPixmap thumb;
             {
                 QMutexLocker locker(&m_mutex);
-                if (!thumb.isNull()) {
+                if (!thumbImg.isNull()) {
+                    thumb = QPixmap::fromImage(thumbImg);
                     m_memoryCache.insert(key, new QPixmap(thumb));
                 }
                 m_pendingRequests.remove(key);
