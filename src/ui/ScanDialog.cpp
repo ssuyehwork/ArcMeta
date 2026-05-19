@@ -539,8 +539,9 @@ void ScanDialog::setupUi() {
     m_searchEdit = new QLineEdit();
     m_searchEdit->setPlaceholderText("输入文件名 / 关键词...");
     m_searchEdit->setMinimumHeight(36);
-    // 2026-06-xx 物理修复：采用“左侧圆角 + 移除右边框”以实现无缝对接
-    m_searchEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; border-right: none; border-radius: 6px 0 0 6px; padding: 0 10px; color: #EEE; font-size: 14px; }");
+    // 2026-06-xx 物理修复：采用“负边距重叠”策略。不再移除边框，而是让组件相互覆盖。
+    // 这能有效解决 High-DPI 下由于舍入误差导致的 1px 缝隙或渲染“污染”。
+    m_searchEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; border-radius: 6px 0 0 6px; padding: 0 10px; color: #EEE; font-size: 14px; margin-right: -1px; }");
     m_searchEdit->installEventFilter(this);
     connect(m_searchEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
     inputGroup->addWidget(m_searchEdit, 1);
@@ -549,8 +550,8 @@ void ScanDialog::setupUi() {
     m_extEdit->setPlaceholderText("后缀");
     m_extEdit->setFixedWidth(80);
     m_extEdit->setMinimumHeight(36);
-    // 2026-06-xx 物理修复：采用“无圆角 + 仅保留上下边框 + 加深左分割线”消除“污染”Bug
-    m_extEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border-top: 1px solid #3F3F3F; border-bottom: 1px solid #3F3F3F; border-left: 1px solid #444; border-right: none; color: #EEE; font-size: 14px; }");
+    // 2026-06-xx 物理修复：保留全边框并设置负边距，实现与搜索框和按钮的无缝压盖
+    m_extEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; color: #EEE; font-size: 14px; margin-right: -1px; }");
     m_extEdit->installEventFilter(this);
     connect(m_extEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
     inputGroup->addWidget(m_extEdit);
@@ -565,6 +566,8 @@ void ScanDialog::setupUi() {
     inputGroup->addWidget(m_searchBtn);
 
     searchRow->addLayout(inputGroup, 1);
+    // 2026-06-xx 按照用户要求：拉开输入组与复选框组的距离
+    searchRow->addSpacing(10);
 
     m_checkRegex = new QCheckBox("正则");
     m_checkCase = new QCheckBox("大小写");
@@ -658,8 +661,9 @@ void ScanDialog::setupUi() {
     m_iconView->setTextElideMode(Qt::ElideMiddle);
     m_iconView->setContextMenuPolicy(Qt::CustomContextMenu);
     m_iconView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
+    // 2026-06-xx 按照用户要求：为网格视图增加 10px 左内边距，确保坐标对准
     m_iconView->setStyleSheet(
-        "QListView { background-color: #1E1E1E; border: 1px solid #333; color: #D4D4D4; outline: none; }"
+        "QListView { background-color: #1E1E1E; border: 1px solid #333; color: #D4D4D4; outline: none; padding-left: 10px; }"
         "QListView::item:hover { background-color: #2D2D2D; border-radius: 4px; }"
         "QListView::item:selected { background-color: #094771; border-radius: 4px; color: #FFFFFF; }"
     );
