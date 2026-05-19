@@ -133,43 +133,51 @@ ScanTableModel::ScanTableModel(ScanController* controller, QObject* parent)
     m_throttleTimer->setInterval(100); 
     connect(m_throttleTimer, &QTimer::timeout, this, [this]() {
         if (m_pendingRows.isEmpty()) return;
-        
         QList<int> rows = m_pendingRows.values();
         std::sort(rows.begin(), rows.end());
         m_pendingRows.clear();
-
         int startRow = rows[0];
         int endRow = rows[0];
         for (int i = 1; i < rows.size(); ++i) {
-            if (rows[i] == endRow + 1) {
-                endRow = rows[i];
-            } else {
+            if (rows[i] == endRow + 1) endRow = rows[i];
+            else {
                 emit dataChanged(index(startRow, 0), index(endRow, 3));
-                startRow = rows[i];
-                endRow = rows[i];
+                startRow = rows[i]; endRow = rows[i];
             }
         }
         emit dataChanged(index(startRow, 0), index(endRow, 3));
     });
 
-    connect(&MftReader::instance(), &MftReader::dataChanged, this, [this](int actualIdx) {
-        if (actualIdx == -1) {
-            m_pendingRows.clear();
-            beginResetModel();
-            endResetModel();
-            return;
+    // 2026-06-xx 架构重构：切换至 Controller 驱动的响应式更新
+    connect(m_controller, &ScanController::resultsSwapped, this, &ScanTableModel::updateResults);
+    
+    connect(m_controller, &ScanController::entryAdded, this, [this](uint64_t key, int row) {
+        m_filteredKeys = m_controller->results();
+        // 2026-06-xx 物理同步：只有当新条目在当前已加载范围内（或紧随其后）时才执行 Model 插入
+        if (row <= m_displayCount) {
+            beginInsertRows(QModelIndex(), row, row);
+            m_displayCount++;
+            m_keyToRow[key] = row;
+            endInsertRows();
         }
-        // 2026-06-xx 物理重构：基于稳定主键进行反向查找，杜绝索引漂移，完美支持多盘符同步
-        auto& reader = MftReader::instance();
-        uint64_t key = reader.getKeyByIndex(actualIdx);
+    });
 
-        auto it = m_keyToRow.find(key);
-        if (it != m_keyToRow.end()) {
-            int row = it->second;
-            if (row < m_displayCount) {
-                m_pendingRows.insert(row);
-                if (!m_throttleTimer->isActive()) m_throttleTimer->start();
-            }
+    connect(m_controller, &ScanController::entryRemoved, this, [this](uint64_t key, int row) {
+        m_filteredKeys = m_controller->results();
+        if (row < m_displayCount) {
+            beginRemoveRows(QModelIndex(), row, row);
+            m_displayCount--;
+            m_keyToRow.erase(key);
+            // 重新校准后续行的映射
+            for (int i = row; i < m_displayCount; ++i) m_keyToRow[m_filteredKeys[i]] = i;
+            endRemoveRows();
+        }
+    });
+
+    connect(m_controller, &ScanController::entryUpdated, this, [this](uint64_t key, int row) {
+        if (row < m_displayCount) {
+            m_pendingRows.insert(row);
+            if (!m_throttleTimer->isActive()) m_throttleTimer->start();
         }
     });
 }
@@ -365,29 +373,8 @@ void ScanTableModel::fetchMore(const QModelIndex& parent) {
 }
 
 void ScanTableModel::sort(int column, Qt::SortOrder order) {
-    if (m_filteredKeys.empty()) return;
-    
-    auto& reader = MftReader::instance();
-    std::sort(m_filteredKeys.begin(), m_filteredKeys.end(), [&](uint64_t a, uint64_t b) {
-        int idxA = reader.getIndexByKey(a);
-        int idxB = reader.getIndexByKey(b);
-        if (idxA == -1 || idxB == -1) return false;
-
-        bool less = false;
-        switch (column) {
-            case 0: less = QString::compare(reader.getName(idxA), reader.getName(idxB), Qt::CaseInsensitive) < 0; break;
-            case 1: less = QString::compare(reader.getFullPath(idxA), reader.getFullPath(idxB), Qt::CaseInsensitive) < 0; break;
-            case 2: less = reader.getSize(idxA) < reader.getSize(idxB); break;
-            case 3: less = reader.getModifyTime(idxA) < reader.getModifyTime(idxB); break;
-            default: return false;
-        }
-        return (order == Qt::AscendingOrder) ? less : !less;
-    });
-    
-    m_keyToRow.clear();
-    for (int i = 0; i < m_displayCount; ++i) m_keyToRow[m_filteredKeys[i]] = i;
-    
-    emit dataChanged(index(0, 0), index(rowCount() - 1, columnCount() - 1));
+    // 2026-06-xx 逻辑剥离：Model 不再拥有排序权，仅向 Controller 发起异步请求
+    m_controller->sort(column, static_cast<int>(order));
 }
 
 Qt::DropActions ScanTableModel::supportedDragActions() const {
@@ -801,6 +788,10 @@ void ScanDialog::setupUi() {
     connect(m_controller, &ScanController::searchFinished, this, [this](int count, int64_t elapsedMs) {
         m_lastSearchMs = elapsedMs;
         m_tableModel->updateResults();
+        updateStatusBar();
+    });
+
+    connect(m_controller, &ScanController::resultsSwapped, this, [this]() {
         updateStatusBar();
     });
 }
@@ -1309,6 +1300,7 @@ void ScanDialog::onFilterOptionChanged() {
     if (!extText.isEmpty()) state.extensionList = extText.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
     
     m_controller->setFilterState(state);
+    // 2026-06-xx 物理对标：只有在配置变更时触发防抖搜索，如果是手动输入则由 QLineEdit 连接处理
     m_controller->triggerSearch();
 }
 

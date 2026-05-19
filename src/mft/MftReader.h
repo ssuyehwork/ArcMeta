@@ -46,6 +46,9 @@ public:
 
 signals:
     void dataChanged(int index = -1);
+    void entryAdded(uint64_t key);   // 2026-06-xx 新增：实时增量信号
+    void entryRemoved(uint64_t key); // 2026-06-xx 新增：实时删除信号
+    void entryUpdated(uint64_t key); // 2026-06-xx 新增：实时更新信号
     void driveLoaded(const QString& drive, int count, int total); // 2026-05-14 新增：驱动器就绪信号
 
 public:
@@ -67,6 +70,8 @@ public:
                                  bool includeHidden = true, bool includeSystem = true);
     
     // SoA 访问接口
+    bool     matchEntry(int index, const QString& query, bool useRegex, bool caseSensitive, 
+                        const QStringList& extensionList, bool includeHidden, bool includeSystem) const;
     int      getIndexByKey(uint64_t compositeKey) const;
     uint64_t getKeyByIndex(int index) const;
     QString  getName(int index) const;
