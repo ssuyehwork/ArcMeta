@@ -15,6 +15,8 @@
 #include <QFileInfo>
 #include <QImage>
 #include <QStringList>
+#include <QStandardPaths>
+#include <QtConcurrent/QtConcurrent>
 #include <QDebug>
 #include <QSet>
 #include <QCoreApplication>
@@ -325,6 +327,21 @@ private:
 
 public:
     static QPixmap getShellThumbnail(const QString& path, int size, bool forceMirror = false) {
+        // 2026-06-xx 物理重构：引入磁盘缓存机制，消除“失忆症”
+        QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QString cacheDir = QDir(appData).filePath("thumbs/");
+        QDir().mkpath(cacheDir);
+
+        QFileInfo fi(path);
+        QString hashKey = QString("%1_%2_%3_%4").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        QString safeName = QString::number(qHash(hashKey), 16) + ".png";
+        QString cachePath = cacheDir + safeName;
+
+        if (QFile::exists(cachePath)) {
+            QPixmap pix;
+            if (pix.load(cachePath)) return pix;
+        }
+
 #ifdef Q_OS_WIN
         PIDLIST_ABSOLUTE pidl = nullptr;
         HRESULT hr = SHParseDisplayName(path.toStdWString().c_str(), nullptr, &pidl, 0, nullptr);
@@ -347,6 +364,12 @@ public:
                     img = img.flipped(Qt::Vertical); 
                     if (forceMirror) img = img.flipped(Qt::Vertical); // 再次翻转即还原
                     QPixmap pix = QPixmap::fromImage(img);
+                    
+                    // 异步存入磁盘缓存
+                    (void)QtConcurrent::run([img, cachePath]() {
+                        img.save(cachePath, "PNG");
+                    });
+
                     DeleteObject(hBitmap);
                     pFactory->Release();
                     pItem->Release();

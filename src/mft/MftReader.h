@@ -61,12 +61,15 @@ public:
     bool isDriveIndexed(const QString& drive);
 
     // 查询接口 (支持驱动器掩码隔离)
-    QVector<int> search(const QString& query, bool useRegex = false, bool caseSensitive = false, 
-                        const QStringList& extensionList = QStringList(), 
-                        bool includeHidden = true, bool includeSystem = true);
+    // 2026-06-xx 物理重构：返回稳定的复合 FRN 主键而非数组下标，杜绝跨线程索引漂移
+    std::vector<uint64_t> search(const QString& query, bool useRegex = false, bool caseSensitive = false, 
+                                 const QStringList& extensionList = QStringList(), 
+                                 bool includeHidden = true, bool includeSystem = true);
     
     // SoA 访问接口
-    QString getName(int index) const;
+    int      getIndexByKey(uint64_t compositeKey) const;
+    uint64_t getKeyByIndex(int index) const;
+    QString  getName(int index) const;
     int64_t getSize(int index) const;
     int64_t getModifyTime(int index) const;
     uint32_t getAttributes(int index) const;
@@ -76,6 +79,11 @@ public:
     QString getFullPath(int index) const;
     void requestMetadata(int index);
     bool isMetadataFetched(int index) const;
+
+    // 辅助工具：生成复合主键
+    static inline uint64_t makeKey(size_t driveIdx, uint64_t frn) {
+        return (static_cast<uint64_t>(driveIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
+    }
 
     // USN 更新
     void updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& volume);
