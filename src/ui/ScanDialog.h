@@ -18,6 +18,7 @@
 #include <QScrollArea>
 #include <QFileIconProvider>
 #include <QFileInfo>
+#include <memory>
 #include <QDateTime>
 #include <QHash>
 #include <QSet>
@@ -29,7 +30,6 @@
 #include <QListView>
 #include <QActionGroup>
 #include <atomic>
-#include <memory>
 
 namespace ArcMeta {
 
@@ -49,7 +49,7 @@ struct ScanConfig {
     void save();
 };
 
-class ScanController;
+#include "ScanController.h"
 
 class ScanTableModel : public QAbstractTableModel {
     Q_OBJECT

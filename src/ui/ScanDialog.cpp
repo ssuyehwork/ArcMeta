@@ -49,6 +49,8 @@
 #include <shellapi.h>
 
 #include "ScanController.h"
+#include <memory>
+#include <algorithm>
 
 #ifdef min
 #undef min
@@ -350,7 +352,7 @@ QVariant ScanTableModel::headerData(int section, Qt::Orientation orientation, in
 void ScanTableModel::updateResults() {
     beginResetModel();
     m_currentResultSet = m_controller->snapshot();
-    m_displayCount = (std::min)((int)m_currentResultSet->keys.size(), 100);
+    m_displayCount = (std::min<int>)(static_cast<int>(m_currentResultSet->keys.size()), 100);
     
     m_requestedThumbs.clear();
     endResetModel();
@@ -363,8 +365,8 @@ bool ScanTableModel::canFetchMore(const QModelIndex& parent) const {
 
 void ScanTableModel::fetchMore(const QModelIndex& parent) {
     if (parent.isValid()) return;
-    int remainder = (int)m_currentResultSet->keys.size() - m_displayCount;
-    int itemsToFetch = (std::min)(remainder, 100);
+    int remainder = static_cast<int>(m_currentResultSet->keys.size()) - m_displayCount;
+    int itemsToFetch = (std::min<int>)(remainder, 100);
 
     beginInsertRows(QModelIndex(), m_displayCount, m_displayCount + itemsToFetch - 1);
     m_displayCount += itemsToFetch;
