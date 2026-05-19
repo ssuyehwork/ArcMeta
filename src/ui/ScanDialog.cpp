@@ -128,6 +128,7 @@ void ScanConfig::save() {
 ScanTableModel::ScanTableModel(ScanController* controller, QObject* parent)
     : QAbstractTableModel(parent), m_controller(controller)
 {
+    m_currentResultSet = std::make_shared<ResultSet>();
     m_thumbCache.setMaxCost(500); // 限制缩略图内存占用
     m_throttleTimer = new QTimer(this);
     m_throttleTimer->setInterval(100);
@@ -148,33 +149,35 @@ ScanTableModel::ScanTableModel(ScanController* controller, QObject* parent)
         emit dataChanged(index(startRow, 0), index(endRow, 3));
     });
 
-    // 2026-06-xx 架构重构：切换至 Controller 驱动的响应式更新
-    connect(m_controller, &ScanController::resultsSwapped, this, &ScanTableModel::updateResults);
+    // 2026-06-xx 架构重构：切换至 Controller 驱动的原子快照更新 (使用信号携带的快照，绝对安全)
+    connect(m_controller, &ScanController::resultsSwapped, this, [this](std::shared_ptr<ResultSet> newSet) {
+        m_currentResultSet = newSet;
+        updateResults();
+    });
 
-    connect(m_controller, &ScanController::entryAdded, this, [this](uint64_t key, int row) {
-        m_filteredKeys = m_controller->results();
-        // 2026-06-xx 物理同步：只有当新条目在当前已加载范围内（或紧随其后）时才执行 Model 插入
+    connect(m_controller, &ScanController::entryAdded, this, [this](std::shared_ptr<ResultSet> newSet, uint64_t key, int row) {
+        Q_UNUSED(key);
+        m_currentResultSet = newSet;
         if (row <= m_displayCount) {
             beginInsertRows(QModelIndex(), row, row);
             m_displayCount++;
-            m_keyToRow[key] = row;
             endInsertRows();
         }
     });
 
-    connect(m_controller, &ScanController::entryRemoved, this, [this](uint64_t key, int row) {
-        m_filteredKeys = m_controller->results();
+    connect(m_controller, &ScanController::entryRemoved, this, [this](std::shared_ptr<ResultSet> newSet, uint64_t key, int row) {
+        Q_UNUSED(key);
+        m_currentResultSet = newSet;
         if (row < m_displayCount) {
             beginRemoveRows(QModelIndex(), row, row);
             m_displayCount--;
-            m_keyToRow.erase(key);
-            // 重新校准后续行的映射
-            for (int i = row; i < m_displayCount; ++i) m_keyToRow[m_filteredKeys[i]] = i;
             endRemoveRows();
         }
     });
 
-    connect(m_controller, &ScanController::entryUpdated, this, [this](uint64_t key, int row) {
+    connect(m_controller, &ScanController::entryUpdated, this, [this](std::shared_ptr<ResultSet> newSet, uint64_t key, int row) {
+        Q_UNUSED(key);
+        m_currentResultSet = newSet;
         if (row < m_displayCount) {
             m_pendingRows.insert(row);
             if (!m_throttleTimer->isActive()) m_throttleTimer->start();
@@ -193,9 +196,9 @@ int ScanTableModel::columnCount(const QModelIndex& /*parent*/) const { return 4;
 QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
     if (!index.isValid()) return QVariant();
     int row = index.row();
-    if (row < 0 || row >= (int)m_filteredKeys.size()) return QVariant();
+    if (row < 0 || row >= (int)m_currentResultSet->keys.size()) return QVariant();
     
-    uint64_t key = m_filteredKeys[row];
+    uint64_t key = m_currentResultSet->keys[row];
     auto& reader = MftReader::instance();
     int actualIndex = reader.getIndexByKey(key);
     if (actualIndex == -1) return QVariant(); // 文件可能已被删除
@@ -252,9 +255,12 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
                     if (!thumb.isNull()) {
                         QMetaObject::invokeMethod(mutableThis, [mutableThis, key, cacheKey, thumb]() {
                             mutableThis->m_thumbCache.insert(cacheKey, new QPixmap(thumb));
-                            auto itRow = mutableThis->m_keyToRow.find(key);
-                            if (itRow != mutableThis->m_keyToRow.end()) {
-                                emit mutableThis->dataChanged(mutableThis->index(itRow->second, 0), mutableThis->index(itRow->second, 0), {Qt::DecorationRole});
+
+                            // 2026-06-xx 物理安全：直接从 Snapshot 中定位 Position，杜绝脱节
+                            auto snapshot = mutableThis->m_controller->snapshot();
+                            auto itPos = snapshot->keyToPos.find(key);
+                            if (itPos != snapshot->keyToPos.end() && itPos->second < mutableThis->m_displayCount) {
+                                emit mutableThis->dataChanged(mutableThis->index(itPos->second, 0), mutableThis->index(itPos->second, 0), {Qt::DecorationRole});
                             }
                         });
                     }
@@ -304,9 +310,9 @@ bool ScanTableModel::setData(const QModelIndex& index, const QVariant& value, in
     if (!index.isValid() || role != Qt::EditRole || index.column() != 0) return false;
     
     int row = index.row();
-    if (row < 0 || row >= (int)m_filteredKeys.size()) return false;
+    if (row < 0 || row >= (int)m_currentResultSet->keys.size()) return false;
     
-    uint64_t key = m_filteredKeys[row];
+    uint64_t key = m_currentResultSet->keys[row];
     auto& reader = MftReader::instance();
     int actualIndex = reader.getIndexByKey(key);
     if (actualIndex == -1) return false;
@@ -343,31 +349,24 @@ QVariant ScanTableModel::headerData(int section, Qt::Orientation orientation, in
 
 void ScanTableModel::updateResults() {
     beginResetModel();
-    m_filteredKeys = m_controller->results();
-    m_displayCount = (std::min)((int)m_filteredKeys.size(), 100); // 初始加载 100 条
+    m_currentResultSet = m_controller->snapshot();
+    m_displayCount = (std::min)((int)m_currentResultSet->keys.size(), 100);
     
-    m_keyToRow.clear();
-    for (int i = 0; i < m_displayCount; ++i) m_keyToRow[m_filteredKeys[i]] = i;
-
     m_requestedThumbs.clear();
-    // m_thumbCache 不必清空，因为是基于路径的持久化缓存
     endResetModel();
 }
 
 bool ScanTableModel::canFetchMore(const QModelIndex& parent) const {
     if (parent.isValid()) return false;
-    return m_displayCount < (int)m_filteredKeys.size();
+    return m_displayCount < (int)m_currentResultSet->keys.size();
 }
 
 void ScanTableModel::fetchMore(const QModelIndex& parent) {
     if (parent.isValid()) return;
-    int remainder = (int)m_filteredKeys.size() - m_displayCount;
+    int remainder = (int)m_currentResultSet->keys.size() - m_displayCount;
     int itemsToFetch = (std::min)(remainder, 100);
 
     beginInsertRows(QModelIndex(), m_displayCount, m_displayCount + itemsToFetch - 1);
-    for (int i = 0; i < itemsToFetch; ++i) {
-        m_keyToRow[m_filteredKeys[m_displayCount + i]] = m_displayCount + i;
-    }
     m_displayCount += itemsToFetch;
     endInsertRows();
 }
@@ -388,8 +387,8 @@ QMimeData* ScanTableModel::mimeData(const QModelIndexList& indexes) const {
     for (const QModelIndex& idx : indexes) {
         if (idx.column() != 0) continue;
         int row = idx.row();
-        if (row < 0 || row >= (int)m_filteredKeys.size()) continue;
-        uint64_t key = m_filteredKeys[row];
+        if (row < 0 || row >= (int)m_currentResultSet->keys.size()) continue;
+        uint64_t key = m_currentResultSet->keys[row];
         int actualIdx = MftReader::instance().getIndexByKey(key);
         if (actualIdx == -1 || seen.contains(actualIdx)) continue;
         seen.insert(actualIdx);

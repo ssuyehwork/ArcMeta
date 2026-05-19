@@ -26,6 +26,14 @@ struct ScanFilterState {
     }
 };
 
+/**
+ * @brief 稳定的结果集封装 (支持 O(1) 定位)
+ */
+struct ResultSet {
+    std::vector<uint64_t> keys;
+    std::unordered_map<uint64_t, int> keyToPos;
+};
+
 class ScanController : public QObject {
     Q_OBJECT
 public:
@@ -41,19 +49,22 @@ public:
     // 排序接口（异步）
     void sort(int column, int order);
 
-    // 结果访问 (线程安全)
-    std::vector<uint64_t> results() const;
+    // 结果访问 (线程安全快照)
+    std::shared_ptr<ResultSet> snapshot() const;
     int resultCount() const;
+
+    // 内部比较逻辑 (复用于二分插入与全局排序)
+    static bool compareKeys(uint64_t a, uint64_t b, int column, int order);
 
 signals:
     void searchStarted();
     void searchFinished(int count, int64_t elapsedMs);
 
-    // 2026-06-xx 响应式信号
-    void resultsSwapped();
-    void entryAdded(uint64_t key, int row);
-    void entryRemoved(uint64_t key, int row);
-    void entryUpdated(uint64_t key, int row);
+    // 2026-06-xx 响应式信号 (携带原子快照，确保 Model 同步绝对安全)
+    void resultsSwapped(std::shared_ptr<ResultSet> newSet);
+    void entryAdded(std::shared_ptr<ResultSet> newSet, uint64_t key, int row);
+    void entryRemoved(std::shared_ptr<ResultSet> newSet, uint64_t key, int row);
+    void entryUpdated(std::shared_ptr<ResultSet> newSet, uint64_t key, int row);
 
 private slots:
     void onMftEntryAdded(uint64_t key);
@@ -62,11 +73,14 @@ private slots:
 
 private:
     void performSearch();
+    void updateKeyToPosMapping(ResultSet& rs);
 
     QString m_searchText;
     ScanFilterState m_filterState;
-    std::vector<uint64_t> m_results;
-    std::unordered_set<uint64_t> m_resultsSet; // 用于 O(1) 存在性检查
+    int m_currentSortColumn = 0;
+    int m_currentSortOrder = 0;
+
+    std::shared_ptr<ResultSet> m_resultSet;
     mutable std::mutex m_resultsMutex;
 
     QTimer* m_debounceTimer = nullptr;

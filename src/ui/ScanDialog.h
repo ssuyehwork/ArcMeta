@@ -76,13 +76,12 @@ public:
 
 private:
     ScanController* m_controller;
-    std::vector<uint64_t> m_filteredKeys;
+    std::shared_ptr<ResultSet> m_currentResultSet;
     int m_displayCount = 0;
 
     mutable QCache<QString, QPixmap> m_thumbCache;
     mutable QSet<uint64_t> m_requestedThumbs;
 
-    std::unordered_map<uint64_t, int> m_keyToRow;
     QSet<int> m_pendingRows;
     QTimer* m_throttleTimer = nullptr;
 };
