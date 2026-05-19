@@ -45,6 +45,10 @@ set(SOURCES
     src/main.cpp
     src/core/CoreController.cpp
     src/core/CoreController.h
+    src/core/ScanController.cpp
+    src/core/ScanController.h
+    src/core/ThumbnailManager.cpp
+    src/core/ThumbnailManager.h
     src/core/CacheManager.cpp
     src/core/CacheManager.h
     src/core/IndexedEntry.h

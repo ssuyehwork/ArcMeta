@@ -30,23 +30,9 @@
 #include <atomic>
 #include <memory>
 
+#include "../core/ScanController.h"
+
 namespace ArcMeta {
-
-struct ScanConfig {
-    QSet<QString> activeDrives;
-    QSet<QString> defaultDrives;
-    QSet<QString> ignoredDrives;
-    QStringList queryHistory;
-    QStringList extHistory;
-    
-    int viewMode = 0;   // 0: Details, 1: Icons
-    int iconSize = 128; // 256, 128, 64
-    int sortColumn = 0; 
-    int sortOrder = 0;  // 0: Asc, 1: Desc
-
-    void load();
-    void save();
-};
 
 struct ScanFilterState {
     QStringList extensionList; 
@@ -60,10 +46,25 @@ struct ScanFilterState {
     }
 };
 
+class IDataProvider {
+public:
+    virtual ~IDataProvider() = default;
+    virtual int totalCount() const = 0;
+    virtual QVector<int> search(const QString& query, const ScanFilterState& state) = 0;
+    virtual QString getName(int index) const = 0;
+    virtual QString getFullPath(int index) const = 0;
+    virtual int64_t getSize(int index) const = 0;
+    virtual int64_t getModifyTime(int index) const = 0;
+    virtual bool isDirectory(int index) const = 0;
+    virtual QIcon getCachedIcon(const QString& ext, bool isDir) = 0;
+    virtual bool isMetadataFetched(int index) const = 0;
+    virtual void requestMetadata(int index) = 0;
+};
+
 class ScanTableModel : public QAbstractTableModel {
     Q_OBJECT
 public:
-    explicit ScanTableModel(QObject* parent = nullptr);
+    explicit ScanTableModel(IDataProvider* provider, QObject* parent = nullptr);
     ~ScanTableModel() override;
 
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
@@ -76,8 +77,10 @@ public:
     void setFilterText(const QString& text);
     void setFilterState(const ScanFilterState& state);
     void triggerSearch();
-    void loadPage(int page, int pageSize);
-    void loadMore(int count = 200);
+
+    bool canFetchMore(const QModelIndex& parent) const override;
+    void fetchMore(const QModelIndex& parent) override;
+
     void sort(int column, Qt::SortOrder order = Qt::AscendingOrder) override;
     int totalFilteredCount() const { return m_filteredIndices.size(); }
 
@@ -94,8 +97,7 @@ private:
     QVector<int> m_filteredIndices;
     QString m_filterText;
     ScanFilterState m_filterState;
-    mutable QMap<int, QPixmap> m_thumbCache;
-    mutable QSet<int> m_requestedThumbs;
+    IDataProvider* m_provider = nullptr;
     QFutureWatcher<QVector<int>> m_filterWatcher;
     std::unordered_map<int, int> m_actualToRow; // 2026-05-14 新增：O(1) 定位索引
     QSet<int> m_pendingRows;  // 2026-05-14 信号聚合：待刷新的行号集合
@@ -127,7 +129,6 @@ protected:
 
 private:
     void setupUi();
-    void refreshDriveList(bool forceProbe = false);
     void updateDriveButtonStyles();
     void updateStatus(const QString& text, bool scanning = false);
     void updateStatusBar();
@@ -135,13 +136,6 @@ private:
     QString formatNumber(int64_t n);
     QString formatSize(int64_t bytes);
 
-    struct DriveInfo {
-        QString letter;
-        QString label;
-        bool isNtfs;
-        bool hasMedia;
-    };
-    QVector<DriveInfo> m_cachedDriveInfos;
     QMap<QString, QPushButton*> m_driveButtonMap;
 
     QLineEdit* m_searchEdit = nullptr;
@@ -175,9 +169,9 @@ private:
     QProgressBar* m_progressBar = nullptr;
 
     int64_t m_lastSearchMs = 0;
+    QTimer* m_searchThrottleTimer = nullptr;
 
     std::unique_ptr<CacheManager> m_cacheManager;
-    ScanConfig m_config;
 };
 
 } // namespace ArcMeta
