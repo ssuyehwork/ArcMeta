@@ -412,6 +412,28 @@ void ScanTableModel::sort(int column, Qt::SortOrder order) {
     emit dataChanged(index(0, 0), index(rowCount() - 1, columnCount() - 1));
 }
 
+Qt::DropActions ScanTableModel::supportedDragActions() const {
+    return Qt::CopyAction;
+}
+
+QMimeData* ScanTableModel::mimeData(const QModelIndexList& indexes) const {
+    QMimeData* data = new QMimeData();
+    QList<QUrl> urls;
+    QSet<int> seen;
+    for (const QModelIndex& idx : indexes) {
+        if (idx.column() != 0) continue;
+        int row = idx.row();
+        if (row < 0 || row >= m_filteredIndices.size()) continue;
+        int actualIdx = m_filteredIndices[row];
+        if (seen.contains(actualIdx)) continue;
+        seen.insert(actualIdx);
+        QString path = MftReader::instance().getFullPath(actualIdx);
+        if (!path.isEmpty()) urls << QUrl::fromLocalFile(path);
+    }
+    data->setUrls(urls);
+    return data;
+}
+
 // --- ScanDialog Implementation ---
 
 ScanDialog::ScanDialog(QWidget* parent)
@@ -640,6 +662,12 @@ void ScanDialog::setupUi() {
     m_resultView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_resultView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_resultView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    // 2026-06-xx 按照用户要求：开启 TableView 拖拽导出功能
+    m_resultView->setDragEnabled(true);
+    m_resultView->setDragDropMode(QAbstractItemView::DragOnly);
+    m_resultView->setDefaultDropAction(Qt::CopyAction);
+
     m_resultView->setShowGrid(false);
     m_resultView->setAlternatingRowColors(true);
     
@@ -668,6 +696,12 @@ void ScanDialog::setupUi() {
     m_iconView->setTextElideMode(Qt::ElideMiddle);
     m_iconView->setContextMenuPolicy(Qt::CustomContextMenu);
     m_iconView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
+
+    // 2026-06-xx 按照用户要求：开启 IconView 拖拽导出功能
+    m_iconView->setDragEnabled(true);
+    m_iconView->setDragDropMode(QAbstractItemView::DragOnly);
+    m_iconView->setDefaultDropAction(Qt::CopyAction);
+
     // 2026-06-xx 按照用户要求：为网格视图增加 10px 左内边距，确保坐标对准
     m_iconView->setStyleSheet(
         "QListView { background-color: #1E1E1E; border: 1px solid #333; color: #D4D4D4; outline: none; padding-left: 10px; }"
