@@ -512,6 +512,9 @@ void ScanDialog::setupUi() {
     driveScroll->setStyleSheet("background: #252526; border: 1px solid #333; border-radius: 4px;");
 
     m_driveContainer = new QWidget();
+    // 2026-06-xx 物理防护：隔离 FramelessDialog 全局 QSS 对盘符容器的边框污染
+    m_driveContainer->setAttribute(Qt::WA_StyledBackground, true);
+    m_driveContainer->setStyleSheet("QWidget { background: transparent; border: none; }");
     m_driveLayout = new QHBoxLayout(m_driveContainer);
     // 2026-06-xx 按照用户要求：盘符部分也调整为 5 像素间距
     m_driveLayout->setContentsMargins(5, 0, 5, 0);
@@ -523,6 +526,10 @@ void ScanDialog::setupUi() {
     mainLayout->addLayout(topControl);
 
     auto* searchContainer = new QWidget();
+    // 2026-06-xx 物理防护：隔离 FramelessDialog 全局 QSS 级联污染，消除搜索行意外的橙色边框
+    searchContainer->setObjectName("SearchContainer");
+    searchContainer->setAttribute(Qt::WA_StyledBackground, true);
+    searchContainer->setStyleSheet("QWidget#SearchContainer { background: transparent; border: none; }");
     auto* searchVLayout = new QVBoxLayout(searchContainer);
     searchVLayout->setContentsMargins(0, 0, 0, 0);
     searchVLayout->setSpacing(0);
@@ -540,8 +547,8 @@ void ScanDialog::setupUi() {
     m_searchEdit->setPlaceholderText("输入文件名 / 关键词...");
     m_searchEdit->setMinimumHeight(36);
     // 2026-06-xx 物理修复：采用“负边距重叠”策略。不再移除边框，而是让组件相互覆盖。
-    // 这能有效解决 High-DPI 下由于舍入误差导致的 1px 缝隙或渲染“污染”。
-    m_searchEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; border-radius: 6px 0 0 6px; padding: 0 10px; color: #EEE; font-size: 14px; margin-right: -1px; }");
+    // 并追加 outline: none 抑制 Qt 原生焦点环干扰。
+    m_searchEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; border-radius: 6px 0 0 6px; padding: 0 10px; color: #EEE; font-size: 14px; margin-right: -1px; outline: none; }");
     m_searchEdit->installEventFilter(this);
     connect(m_searchEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
     inputGroup->addWidget(m_searchEdit, 1);
@@ -550,8 +557,8 @@ void ScanDialog::setupUi() {
     m_extEdit->setPlaceholderText("后缀");
     m_extEdit->setFixedWidth(80);
     m_extEdit->setMinimumHeight(36);
-    // 2026-06-xx 物理修复：保留全边框并设置负边距，实现与搜索框和按钮的无缝压盖
-    m_extEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; color: #EEE; font-size: 14px; margin-right: -1px; }");
+    // 2026-06-xx 物理修复：保留全边框并设置负边距，并抑制原生焦点环。
+    m_extEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; color: #EEE; font-size: 14px; margin-right: -1px; outline: none; }");
     m_extEdit->installEventFilter(this);
     connect(m_extEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
     inputGroup->addWidget(m_extEdit);
