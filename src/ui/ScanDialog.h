@@ -80,6 +80,9 @@ public:
     void sort(int column, Qt::SortOrder order = Qt::AscendingOrder) override;
     int totalFilteredCount() const { return m_filteredIndices.size(); }
 
+    Qt::DropActions supportedDragActions() const override;
+    QMimeData* mimeData(const QModelIndexList& indexes) const override;
+
 signals:
     void filterFinished(int count);
 

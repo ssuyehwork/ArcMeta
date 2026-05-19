@@ -412,6 +412,28 @@ void ScanTableModel::sort(int column, Qt::SortOrder order) {
     emit dataChanged(index(0, 0), index(rowCount() - 1, columnCount() - 1));
 }
 
+Qt::DropActions ScanTableModel::supportedDragActions() const {
+    return Qt::CopyAction;
+}
+
+QMimeData* ScanTableModel::mimeData(const QModelIndexList& indexes) const {
+    QMimeData* data = new QMimeData();
+    QList<QUrl> urls;
+    QSet<int> seen;
+    for (const QModelIndex& idx : indexes) {
+        if (idx.column() != 0) continue;
+        int row = idx.row();
+        if (row < 0 || row >= m_filteredIndices.size()) continue;
+        int actualIdx = m_filteredIndices[row];
+        if (seen.contains(actualIdx)) continue;
+        seen.insert(actualIdx);
+        QString path = MftReader::instance().getFullPath(actualIdx);
+        if (!path.isEmpty()) urls << QUrl::fromLocalFile(path);
+    }
+    data->setUrls(urls);
+    return data;
+}
+
 // --- ScanDialog Implementation ---
 
 ScanDialog::ScanDialog(QWidget* parent)
@@ -512,6 +534,9 @@ void ScanDialog::setupUi() {
     driveScroll->setStyleSheet("background: #252526; border: 1px solid #333; border-radius: 4px;");
 
     m_driveContainer = new QWidget();
+    // 2026-06-xx 物理防护：隔离 FramelessDialog 全局 QSS 对盘符容器的边框污染
+    m_driveContainer->setAttribute(Qt::WA_StyledBackground, true);
+    m_driveContainer->setStyleSheet("QWidget { background: transparent; border: none; }");
     m_driveLayout = new QHBoxLayout(m_driveContainer);
     // 2026-06-xx 按照用户要求：盘符部分也调整为 5 像素间距
     m_driveLayout->setContentsMargins(5, 0, 5, 0);
@@ -523,6 +548,10 @@ void ScanDialog::setupUi() {
     mainLayout->addLayout(topControl);
 
     auto* searchContainer = new QWidget();
+    // 2026-06-xx 物理防护：隔离 FramelessDialog 全局 QSS 级联污染，消除搜索行意外的橙色边框
+    searchContainer->setObjectName("SearchContainer");
+    searchContainer->setAttribute(Qt::WA_StyledBackground, true);
+    searchContainer->setStyleSheet("QWidget#SearchContainer { background: transparent; border: none; }");
     auto* searchVLayout = new QVBoxLayout(searchContainer);
     searchVLayout->setContentsMargins(0, 0, 0, 0);
     searchVLayout->setSpacing(0);
@@ -539,8 +568,9 @@ void ScanDialog::setupUi() {
     m_searchEdit = new QLineEdit();
     m_searchEdit->setPlaceholderText("输入文件名 / 关键词...");
     m_searchEdit->setMinimumHeight(36);
-    // 2026-06-xx 物理修复：采用“左侧圆角 + 移除右边框”以实现无缝对接
-    m_searchEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; border-right: none; border-radius: 6px 0 0 6px; padding: 0 10px; color: #EEE; font-size: 14px; }");
+    // 2026-06-xx 物理修复：采用“负边距重叠”策略。不再移除边框，而是让组件相互覆盖。
+    // 并追加 outline: none 抑制 Qt 原生焦点环干扰。
+    m_searchEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; border-radius: 6px 0 0 6px; padding: 0 10px; color: #EEE; font-size: 14px; margin-right: -1px; outline: none; }");
     m_searchEdit->installEventFilter(this);
     connect(m_searchEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
     inputGroup->addWidget(m_searchEdit, 1);
@@ -549,8 +579,8 @@ void ScanDialog::setupUi() {
     m_extEdit->setPlaceholderText("后缀");
     m_extEdit->setFixedWidth(80);
     m_extEdit->setMinimumHeight(36);
-    // 2026-06-xx 物理修复：采用“无圆角 + 仅保留上下边框 + 加深左分割线”消除“污染”Bug
-    m_extEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border-top: 1px solid #3F3F3F; border-bottom: 1px solid #3F3F3F; border-left: 1px solid #444; border-right: none; color: #EEE; font-size: 14px; }");
+    // 2026-06-xx 物理修复：保留全边框并设置负边距，并抑制原生焦点环。
+    m_extEdit->setStyleSheet("QLineEdit { background: #2D2D2D; border: 1px solid #3F3F3F; color: #EEE; font-size: 14px; margin-right: -1px; outline: none; }");
     m_extEdit->installEventFilter(this);
     connect(m_extEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
     inputGroup->addWidget(m_extEdit);
@@ -565,6 +595,8 @@ void ScanDialog::setupUi() {
     inputGroup->addWidget(m_searchBtn);
 
     searchRow->addLayout(inputGroup, 1);
+    // 2026-06-xx 按照用户要求：拉开输入组与复选框组的距离
+    searchRow->addSpacing(10);
 
     m_checkRegex = new QCheckBox("正则");
     m_checkCase = new QCheckBox("大小写");
@@ -630,6 +662,12 @@ void ScanDialog::setupUi() {
     m_resultView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_resultView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_resultView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    
+    // 2026-06-xx 按照用户要求：开启 TableView 拖拽导出功能
+    m_resultView->setDragEnabled(true);
+    m_resultView->setDragDropMode(QAbstractItemView::DragOnly);
+    m_resultView->setDefaultDropAction(Qt::CopyAction);
+
     m_resultView->setShowGrid(false);
     m_resultView->setAlternatingRowColors(true);
     
@@ -658,8 +696,15 @@ void ScanDialog::setupUi() {
     m_iconView->setTextElideMode(Qt::ElideMiddle);
     m_iconView->setContextMenuPolicy(Qt::CustomContextMenu);
     m_iconView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
+    
+    // 2026-06-xx 按照用户要求：开启 IconView 拖拽导出功能
+    m_iconView->setDragEnabled(true);
+    m_iconView->setDragDropMode(QAbstractItemView::DragOnly);
+    m_iconView->setDefaultDropAction(Qt::CopyAction);
+
+    // 2026-06-xx 按照用户要求：为网格视图增加 10px 左内边距，确保坐标对准
     m_iconView->setStyleSheet(
-        "QListView { background-color: #1E1E1E; border: 1px solid #333; color: #D4D4D4; outline: none; }"
+        "QListView { background-color: #1E1E1E; border: 1px solid #333; color: #D4D4D4; outline: none; padding-left: 10px; }"
         "QListView::item:hover { background-color: #2D2D2D; border-radius: 4px; }"
         "QListView::item:selected { background-color: #094771; border-radius: 4px; color: #FFFFFF; }"
     );
