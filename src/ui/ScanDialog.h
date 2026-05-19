@@ -48,22 +48,12 @@ struct ScanConfig {
     void save();
 };
 
-struct ScanFilterState {
-    QStringList extensionList; 
-    bool useRegex = false;
-    bool caseSensitive = false;
-    bool includeHidden = true;
-    bool includeSystem = true;
-
-    bool isEmpty() const { 
-        return extensionList.isEmpty() && !useRegex && !caseSensitive && includeHidden && includeSystem; 
-    }
-};
+class ScanController;
 
 class ScanTableModel : public QAbstractTableModel {
     Q_OBJECT
 public:
-    explicit ScanTableModel(QObject* parent = nullptr);
+    explicit ScanTableModel(ScanController* controller, QObject* parent = nullptr);
     ~ScanTableModel() override;
 
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
@@ -73,34 +63,27 @@ public:
     Qt::ItemFlags flags(const QModelIndex& index) const override;
     bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
 
-    void setFilterText(const QString& text);
-    void setFilterState(const ScanFilterState& state);
-    void triggerSearch();
-    void loadPage(int page, int pageSize);
-    void loadMore(int count = 200);
+    // 虚拟化加载支持
+    bool canFetchMore(const QModelIndex& parent) const override;
+    void fetchMore(const QModelIndex& parent) override;
+
     void sort(int column, Qt::SortOrder order = Qt::AscendingOrder) override;
-    int totalFilteredCount() const { return m_filteredIndices.size(); }
+    void updateResults();
 
     Qt::DropActions supportedDragActions() const override;
     QMimeData* mimeData(const QModelIndexList& indexes) const override;
 
-signals:
-    void filterFinished(int count);
-
 private:
-    void startAsyncRebuild();
-    QVector<int> performRebuild(const QString& filterText, const ScanFilterState& filterState);
+    ScanController* m_controller;
+    std::vector<uint64_t> m_filteredKeys;
+    int m_displayCount = 0;
 
-    QVector<int> m_filteredIndices;
-    QString m_filterText;
-    ScanFilterState m_filterState;
-    mutable QMap<int, QPixmap> m_thumbCache;
-    mutable QSet<int> m_requestedThumbs;
-    QFutureWatcher<QVector<int>> m_filterWatcher;
-    std::unordered_map<int, int> m_actualToRow; // 2026-05-14 新增：O(1) 定位索引
-    QSet<int> m_pendingRows;  // 2026-05-14 信号聚合：待刷新的行号集合
+    mutable QCache<QString, QPixmap> m_thumbCache;
+    mutable QSet<uint64_t> m_requestedThumbs;
+
+    std::unordered_map<uint64_t, int> m_keyToRow;
+    QSet<int> m_pendingRows;
     QTimer* m_throttleTimer = nullptr;
-    int m_displayLimit = 1000000; // 2026-06-xx 性能解封：对标 Rust 版支持百万级即时显示
 };
 
 class ScanDialog : public FramelessDialog {
@@ -160,11 +143,7 @@ private:
     QStackedWidget* m_viewStack = nullptr;
     ScanTableModel* m_tableModel = nullptr;
 
-    QPushButton* m_prevBtn = nullptr;
-    QPushButton* m_nextBtn = nullptr;
-    QLabel* m_pageLabel = nullptr;
-    int m_currentPage = 0;
-    const int m_pageSize = 1000;
+    ScanController* m_controller = nullptr;
 
     QLabel* m_titleStatusLabel = nullptr; 
     QLabel* m_statLabelMain = nullptr;    
