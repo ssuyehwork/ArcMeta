@@ -1777,11 +1777,12 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
                        m.iconDrawSize, m.iconDrawSize); 
     
     // 2026-05-17 物理布局重构：星级区置于正方形下方
-    m.ratingY = m.squareRect.bottom() + 6; 
+    // 2026-06-xx 按照用户要求：下移 2 像素（从 +6 改为 +8）
+    m.ratingY = m.squareRect.bottom() + 8;
  
     m.starSize    = 14; // 2026-05-17 尺寸微调以匹配外部布局
     m.starSpacing = 2;   
-    int banW = 14;      // 2026-06-xx 物理对齐：将禁止图标缩减至 14px，与星级保持视觉一致
+    int banW = 12;      // 2026-06-xx 物理对齐：将禁止图标缩减至 12px，使其与星级在视觉权重上保持一致
     int banGap = 4; 
  
     m.infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing); 
