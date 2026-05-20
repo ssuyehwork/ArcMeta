@@ -95,6 +95,18 @@ public:
         return pixmap;
     }
 
+    static QString getSvgDataUrl(const QString& key, const QColor& color = QColor("#3498db")) {
+        // [PHYSICAL COMPATIBILITY] 转换为 PNG Base64 以确保 QSS 100% 渲染成功
+        QPixmap pix = renderIcon(key, QSize(16, 16), color);
+        if (pix.isNull()) return QString();
+        
+        QByteArray ba;
+        QBuffer buffer(&ba);
+        buffer.open(QIODevice::WriteOnly);
+        pix.save(&buffer, "PNG");
+        return QString("data:image/png;base64,%1").arg(QString(ba.toBase64()));
+    }
+
     static bool isGraphicsFile(const QString& ext) {
         static const QStringList graphicsExts = {"png", "jpg", "jpeg", "bmp", "gif", "webp", "ico", "tiff", "tif", "psd", "psb", "ai", "eps", "pdf", "svg", "cdr"};
         return graphicsExts.contains(ext.toLower());

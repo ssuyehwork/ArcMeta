@@ -724,38 +724,38 @@ void CategoryPanel::initUi() {
     sbContentLayout->setContentsMargins(8, 8, 8, 8);
     sbContentLayout->setSpacing(0);
 
-    QString treeStyle = R"(
+    QString arrowRight = UiHelper::getSvgDataUrl("arrow_right", QColor("#3498db"));
+    QString arrowDown = UiHelper::getSvgDataUrl("arrow_down", QColor("#3498db"));
+
+    QString treeStyle = QString(R"(
         QTreeView { background-color: transparent; border: none; color: #CCC; outline: none; }
         
-        /* 物理还原：复原三角形折叠图标 (资源系统路径) */
-        /* 2026-03-xx 按照用户要求：补全 branch 状态机，确保折叠图标持续显示而非选中才出现 */
         QTreeView::branch {
             background-color: transparent;
         }
 
         QTreeView::branch:has-children:closed { 
-            image: url(:/icons/arrow_right.svg); 
+            image: url(%1); 
             padding: 4px;
         }
         QTreeView::branch:has-children:open { 
-            image: url(:/icons/arrow_down.svg); 
+            image: url(%2); 
             padding: 4px;
         }
         QTreeView::branch:has-children:closed:has-siblings { 
-            image: url(:/icons/arrow_right.svg); 
+            image: url(%1); 
             padding: 4px;
         }
         QTreeView::branch:has-children:open:has-siblings { 
-            image: url(:/icons/arrow_down.svg); 
+            image: url(%2); 
             padding: 4px;
         }
 
-        /* 强制覆盖选中态，防止系统默认样式干扰导致图标消失 */
-        QTreeView::branch:has-children:closed:selected { image: url(:/icons/arrow_right.svg); padding: 4px; }
-        QTreeView::branch:has-children:open:selected   { image: url(:/icons/arrow_down.svg); padding: 4px; }
+        QTreeView::branch:has-children:closed:selected { image: url(%1); padding: 4px; }
+        QTreeView::branch:has-children:open:selected   { image: url(%2); padding: 4px; }
 
         QTreeView::item { height: 26px; padding-left: 0px; }
-    )";
+    )").arg(arrowRight, arrowDown);
 
     // 物理还原：单树架构，合并系统项与用户分类
     m_categoryTree = new DropTreeView(this);
