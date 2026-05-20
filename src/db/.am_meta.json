@@ -12,6 +12,23 @@
         ]
     },
     "items": {
+        "ItemRepo.h": {
+            "color": "",
+            "encrypt_iv": "",
+            "encrypt_salt": "",
+            "encrypt_verify_hash": "",
+            "encrypted": false,
+            "file_id_128": "",
+            "frn": "",
+            "note": "",
+            "original_name": "",
+            "pinned": false,
+            "rating": 5,
+            "tags": [
+            ],
+            "type": "file",
+            "volume": ""
+        }
     },
     "version": "2"
 }

@@ -739,7 +739,8 @@ void ContentPanel::initGridView() {
     m_gridView->setDragEnabled(true); 
     m_gridView->setDragDropMode(QAbstractItemView::DragOnly); 
  
-    m_gridView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked); 
+    // 2026-06-xx 物理修复：移除 SelectedClicked，防止选中卡片时意外触发重命名逻辑
+    m_gridView->setEditTriggers(QAbstractItemView::EditKeyPressed); 
  
     m_gridView->setModel(m_proxyModel); 
     m_gridView->setItemDelegate(new GridItemDelegate(this)); 
@@ -1776,11 +1777,12 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
                        m.iconDrawSize, m.iconDrawSize); 
     
     // 2026-05-17 物理布局重构：星级区置于正方形下方
-    m.ratingY = m.squareRect.bottom() + 6; 
+    // 2026-06-xx 按照用户要求：下移 2 像素（从 +6 改为 +8）
+    m.ratingY = m.squareRect.bottom() + 8; 
  
     m.starSize    = 14; // 2026-05-17 尺寸微调以匹配外部布局
     m.starSpacing = 2;   
-    int banW = m.ratingH; 
+    int banW = 12;      // 2026-06-xx 物理对齐：将禁止图标缩减至 12px，使其与星级在视觉权重上保持一致
     int banGap = 4; 
  
     m.infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing); 
@@ -1790,7 +1792,8 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     m.starsStartX = m.infoStartX + banW + banGap; 
      
     // 名称区紧贴评分区下方 
-    m.nameY = m.ratingY + m.ratingH + 6; 
+    // 2026-06-xx 按照要求：第三次向上偏移 2 像素以实现零间距极致排版（从 +2 调整为 +0）
+    m.nameY = m.ratingY + m.ratingH + 0; 
     m.nameRect = QRect(m.cardRect.left(), m.nameY, m.cardRect.width(), m.nameH); 
  
     return m; 
