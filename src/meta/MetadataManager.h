@@ -46,6 +46,13 @@ public:
     void initFromJsonMode();
     RuntimeMeta getMeta(const std::wstring& path);
 
+    /**
+     * @brief 2026-06-xx 按照用户要求：在 JSON 内存模式下执行多维搜索
+     * @param keyword 关键词
+     * @return 匹配的物理路径列表
+     */
+    QStringList searchInCache(const QString& keyword);
+
     void setRating(const std::wstring& path, int rating);
     void setColor(const std::wstring& path, const std::wstring& color);
     void setPinned(const std::wstring& path, bool pinned);
