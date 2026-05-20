@@ -1792,8 +1792,8 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     m.starsStartX = m.infoStartX + banW + banGap; 
      
     // 名称区紧贴评分区下方 
-    // 2026-06-xx 按照要求：向上偏移 2 像素以缩小间距（从 +6 调整为 +4）
-    m.nameY = m.ratingY + m.ratingH + 4;
+    // 2026-06-xx 按照要求：第三次向上偏移 2 像素以实现零间距极致排版（从 +2 调整为 +0）
+    m.nameY = m.ratingY + m.ratingH + 0;
     m.nameRect = QRect(m.cardRect.left(), m.nameY, m.cardRect.width(), m.nameH); 
  
     return m; 
