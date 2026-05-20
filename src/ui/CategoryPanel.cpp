@@ -724,8 +724,8 @@ void CategoryPanel::initUi() {
     sbContentLayout->setContentsMargins(8, 8, 8, 8);
     sbContentLayout->setSpacing(0);
 
-    QString arrowRight = UiHelper::getSvgTempFilePath("arrow_right", QColor("#3498db"));
-    QString arrowDown = UiHelper::getSvgTempFilePath("arrow_down", QColor("#3498db"));
+    QString arrowRight = QDir::toNativeSeparators(UiHelper::getSvgTempFilePath("arrow_right", QColor("#3498db")));
+    QString arrowDown  = QDir::toNativeSeparators(UiHelper::getSvgTempFilePath("arrow_down",  QColor("#3498db")));
 
     QString treeStyle = QString(R"(
         QTreeView { background-color: transparent; border: none; color: #CCC; outline: none; }
@@ -735,10 +735,10 @@ void CategoryPanel::initUi() {
             width: 20px;
         }
 
-        QTreeView::branch:has-children:closed { image: url(%1); }
-        QTreeView::branch:has-children:open   { image: url(%2); }
-        QTreeView::branch:has-children:closed:has-siblings { image: url(%1); }
-        QTreeView::branch:has-children:open:has-siblings   { image: url(%2); }
+        QTreeView::branch:has-children:closed { image: url("%1"); }
+        QTreeView::branch:has-children:open   { image: url("%2"); }
+        QTreeView::branch:has-children:closed:has-siblings { image: url("%1"); }
+        QTreeView::branch:has-children:open:has-siblings   { image: url("%2"); }
 
         QTreeView::item { height: 26px; padding-left: 0px; }
     )").arg(arrowRight, arrowDown);
