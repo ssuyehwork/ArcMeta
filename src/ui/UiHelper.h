@@ -21,6 +21,7 @@
 #include <QSet>
 #include <QCoreApplication>
 #include <QWidget>
+#include <QBuffer>
 #include <QProcess>
 #include <QUuid>
 #include <QDir>
@@ -97,7 +98,8 @@ public:
 
     static QString getSvgDataUrl(const QString& key, const QColor& color = QColor("#3498db")) {
         // [PHYSICAL COMPATIBILITY] 转换为 PNG Base64 以确保 QSS 100% 渲染成功
-        QPixmap pix = renderIcon(key, QSize(16, 16), color);
+        // 2026-06-xx 物理修正：使用 20x20 尺寸以匹配 QTreeView 默认分支宽度
+        QPixmap pix = renderIcon(key, QSize(20, 20), color);
         if (pix.isNull()) return QString();
         
         QByteArray ba;
@@ -105,6 +107,19 @@ public:
         buffer.open(QIODevice::WriteOnly);
         pix.save(&buffer, "PNG");
         return QString("data:image/png;base64,%1").arg(QString(ba.toBase64()));
+    }
+
+    static QString getSvgTempFilePath(const QString& key, const QColor& color) {
+        QPixmap pix = renderIcon(key, QSize(20, 20), color);
+        if (pix.isNull()) return QString();
+
+        // 2026-06-xx 物理修复：在路径中加入 V3 标识并强制覆盖。
+        // 核心修正：Qt QSS 必须使用正斜杠 (/)，反斜杠会被转义导致加载失败。强制转换为正斜杠。
+        QString tmpPath = QDir::temp().filePath(
+            QString("arcmeta_%1_%2_v3.png").arg(key).arg(color.name().mid(1))
+        );
+        pix.save(tmpPath, "PNG");
+        return QDir::fromNativeSeparators(tmpPath);
     }
 
     static bool isGraphicsFile(const QString& ext) {

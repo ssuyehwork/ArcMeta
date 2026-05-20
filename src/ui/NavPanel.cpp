@@ -164,17 +164,18 @@ void NavPanel::initUi() {
 
     // 树形控件样式美化
     // 2026-03-xx 按照用户要求：同步左侧“数据分类”样式，为三角形图标添加 padding 以实现清秀感，杜绝粗大感
-    QString arrowRight = UiHelper::getSvgDataUrl("arrow_right", QColor("#3498db"));
-    QString arrowDown = UiHelper::getSvgDataUrl("arrow_down", QColor("#3498db"));
+    QString arrowRight = UiHelper::getSvgTempFilePath("arrow_right", QColor("#3498db"));
+    QString arrowDown  = UiHelper::getSvgTempFilePath("arrow_down",  QColor("#3498db"));
 
     m_treeView->setStyleSheet(QString(
         "QTreeView { background-color: transparent; border: none; font-size: 12px; outline: none; }"
         "QTreeView::item { height: 28px; padding-left: 0px; color: #EEEEEE; }"
         
-        "QTreeView::branch:has-children:closed { image: url(%1); padding: 4px; }"
-        "QTreeView::branch:has-children:open   { image: url(%2); padding: 4px; }"
-        "QTreeView::branch:has-children:closed:has-siblings { image: url(%1); padding: 4px; }"
-        "QTreeView::branch:has-children:open:has-siblings   { image: url(%2); padding: 4px; }"
+        "QTreeView::branch { width: 20px; }"
+        "QTreeView::branch:has-children:closed { image: url(\"%1\"); }"
+        "QTreeView::branch:has-children:open   { image: url(\"%2\"); }"
+        "QTreeView::branch:has-children:closed:has-siblings { image: url(\"%1\"); }"
+        "QTreeView::branch:has-children:open:has-siblings   { image: url(\"%2\"); }"
     ).arg(arrowRight, arrowDown));
 
 
