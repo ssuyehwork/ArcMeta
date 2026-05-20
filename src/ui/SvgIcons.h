@@ -142,9 +142,7 @@ namespace SvgIcons {
         {"switch_on", R"svg(<svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="7" fill="white" /><rect x="3.5" y="6.5" width="17" height="11" rx="5.5" fill="currentColor" /><circle cx="15" cy="12" r="3.5" fill="white" /></svg>)svg"},
         {"switch_off", R"svg(<svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="7" fill="white" /><rect x="3.5" y="6.5" width="17" height="11" rx="5.5" fill="currentColor" /><circle cx="9" cy="12" r="3.5" fill="white" /></svg>)svg"},
         {"arrow_up", R"svg(<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5 L4 19 L20 19 Z"/></svg>)svg"},
-        {"arrow_down", R"svg(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
-  <path d="M3 4l3 4 3-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>)svg"},
+        {"arrow_down", R"svg(<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>)svg"},
         {"filter_funnel", R"svg(<svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="3.5" rx="1.5"/><path d="M4 8.5 L10 15.5 V21 L14 18 V15.5 L20 8.5 Z"/></svg>)svg"},
         {"file_import", R"svg(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M12 12v6m-3-3 3 3 3-3"/></svg>)svg"},
         {"folder_import", R"svg(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><path d="M12 12v6m-3-3 3 3 3-3"/></svg>)svg"},
@@ -179,9 +177,7 @@ namespace SvgIcons {
         {"gift", R"svg(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>)svg"},
         {"flag", R"svg(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>)svg"},
         {"arrow_left", R"svg(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>)svg"},
-        {"arrow_right", R"svg(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
-  <path d="M4 3l4 3-4 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>)svg"},
+        {"arrow_right", R"svg(<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 7l5 5-5 5z"/></svg>)svg"},
         {"chevron_up", R"svg(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>)svg"},
         {"chevron_down", R"svg(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>)svg"},
         {"chevron_left", R"svg(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>)svg"},
