@@ -109,6 +109,19 @@ public:
         return QString("data:image/png;base64,%1").arg(QString(ba.toBase64()));
     }
 
+    static QString getSvgTempFilePath(const QString& key, const QColor& color) {
+        QPixmap pix = renderIcon(key, QSize(20, 20), color);
+        if (pix.isNull()) return QString();
+
+        QString tmpPath = QDir::temp().filePath(
+            QString("arcmeta_%1_%2.png").arg(key).arg(color.name().mid(1))
+        );
+        if (!QFile::exists(tmpPath)) {
+            pix.save(tmpPath, "PNG");
+        }
+        return tmpPath;
+    }
+
     static bool isGraphicsFile(const QString& ext) {
         static const QStringList graphicsExts = {"png", "jpg", "jpeg", "bmp", "gif", "webp", "ico", "tiff", "tif", "psd", "psb", "ai", "eps", "pdf", "svg", "cdr"};
         return graphicsExts.contains(ext.toLower());
