@@ -49,6 +49,8 @@
 #include <shellapi.h>
 
 #include "ScanController.h"
+#include "JustifiedView.h"
+#include "ThumbnailDelegate.h"
 #include <memory>
 #include <algorithm>
 

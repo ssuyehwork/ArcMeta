@@ -29,12 +29,13 @@
 #include <QStackedWidget>
 #include <QListView>
 #include <QActionGroup>
-#include "JustifiedView.h"
-#include "ThumbnailDelegate.h"
 #include <atomic>
 
 #include "ScanController.h"
 namespace ArcMeta {
+
+class JustifiedView;
+class ThumbnailDelegate;
 
 struct ScanConfig {
     QSet<QString> activeDrives;

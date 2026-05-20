@@ -4,6 +4,7 @@
 #include <QPainter>
 #include <QIcon>
 #include <QPixmap>
+#include <QStyleOptionViewItem>
 #include "UiHelper.h"
 
 namespace ArcMeta {

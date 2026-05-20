@@ -4,6 +4,7 @@
 #include <QScrollBar>
 #include <QPainter>
 #include <QResizeEvent>
+#include <QStyleOptionViewItem>
 #include <vector>
 
 namespace ArcMeta {
