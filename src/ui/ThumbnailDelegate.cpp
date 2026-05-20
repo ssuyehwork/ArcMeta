@@ -15,7 +15,11 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
     QRect rect = option.rect;
+    const int textHeight = 22;
+    QRect thumbRect = rect.adjusted(0, 0, 0, -textHeight);
+    QRect textRect = rect.adjusted(4, rect.height() - textHeight, -4, 0);
 
+    // 绘制背景
     if (option.state & QStyle::State_Selected) {
         painter->fillRect(rect, option.palette.highlight());
     } else if (option.state & QStyle::State_MouseOver) {
@@ -30,11 +34,12 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         pixmap = decoration.value<QPixmap>();
     }
 
+    // 1. 绘制图像/图标
     if (isThumbnail && !pixmap.isNull()) {
         QSize thumbSize = pixmap.size();
-        thumbSize.scale(rect.size(), Qt::KeepAspectRatio);
-        QRect drawRect(rect.center().x() - thumbSize.width() / 2,
-                       rect.center().y() - thumbSize.height() / 2,
+        thumbSize.scale(thumbRect.size(), Qt::KeepAspectRatio);
+        QRect drawRect(thumbRect.center().x() - thumbSize.width() / 2,
+                       thumbRect.center().y() - thumbSize.height() / 2,
                        thumbSize.width(), thumbSize.height());
         painter->drawPixmap(drawRect, pixmap);
     } else {
@@ -47,16 +52,27 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
 
         if (!icon.isNull()) {
             QSize iconSize(48, 48);
-            if (iconSize.width() > rect.width() * 0.8) iconSize.setWidth(rect.width() * 0.8);
-            if (iconSize.height() > rect.height() * 0.8) iconSize.setHeight(rect.height() * 0.8);
+            if (iconSize.width() > thumbRect.width() * 0.8) iconSize.setWidth(thumbRect.width() * 0.8);
+            if (iconSize.height() > thumbRect.height() * 0.8) iconSize.setHeight(thumbRect.height() * 0.8);
 
-            QPoint center = rect.center();
+            QPoint center = thumbRect.center();
             QRect iconRect(center.x() - iconSize.width() / 2,
                            center.y() - iconSize.height() / 2,
                            iconSize.width(), iconSize.height());
             icon.paint(painter, iconRect);
         }
     }
+
+    // 2. 绘制文件名
+    QString fileName = index.data(Qt::DisplayRole).toString();
+    painter->setPen(option.state & QStyle::State_Selected ? option.palette.highlightedText().color() : QColor("#D4D4D4"));
+    QFont font = option.font;
+    font.setPointSizeF(8.5); // 稍微缩小字体以适应紧凑布局
+    painter->setFont(font);
+
+    QFontMetrics fm(font);
+    QString elidedName = fm.elidedText(fileName, Qt::ElideMiddle, textRect.width());
+    painter->drawText(textRect, Qt::AlignCenter, elidedName);
 
     painter->restore();
 }

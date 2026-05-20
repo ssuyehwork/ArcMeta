@@ -95,14 +95,44 @@ QModelIndex JustifiedView::moveCursor(CursorAction cursorAction, Qt::KeyboardMod
     if (!current.isValid()) return model()->index(0, 0);
 
     int row = current.row();
-    switch (cursorAction) {
-        case MoveLeft: row--; break;
-        case MoveRight: row++; break;
-        case MoveUp: row -= 5; break;
-        case MoveDown: row += 5; break;
-        default: break;
+    int count = (int)m_geometries.size();
+    if (row < 0 || row >= count) return current;
+
+    if (cursorAction == MoveLeft) {
+        row = std::max(0, row - 1);
+    } else if (cursorAction == MoveRight) {
+        row = std::min(count - 1, row + 1);
+    } else if (cursorAction == MoveUp || cursorAction == MoveDown) {
+        QRect currentRect = m_geometries[row].rect;
+        int centerX = currentRect.center().x();
+        int bestIdx = -1;
+        int minDistance = 1000000;
+
+        for (int i = 0; i < count; ++i) {
+            if (i == row) continue;
+            QRect targetRect = m_geometries[i].rect;
+
+            if (cursorAction == MoveUp && targetRect.bottom() < currentRect.top()) {
+                int dy = currentRect.top() - targetRect.bottom();
+                int dx = std::abs(targetRect.center().x() - centerX);
+                int dist = dy * 100 + dx;
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    bestIdx = i;
+                }
+            } else if (cursorAction == MoveDown && targetRect.top() > currentRect.bottom()) {
+                int dy = targetRect.top() - currentRect.bottom();
+                int dx = std::abs(targetRect.center().x() - centerX);
+                int dist = dy * 100 + dx;
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    bestIdx = i;
+                }
+            }
+        }
+        if (bestIdx != -1) row = bestIdx;
     }
-    row = std::max(0, std::min(row, (int)model()->rowCount() - 1));
+
     return model()->index(row, 0);
 }
 
@@ -193,6 +223,7 @@ void JustifiedView::doLayout() {
 
     int currentY = 10;
     int i = 0;
+    const int textHeight = 22; // 预留文件名显示高度
 
     while (i < count) {
         int rowStart = i;
@@ -234,10 +265,11 @@ void JustifiedView::doLayout() {
                 itemWidth = containerWidth + 10 - currentX;
             }
 
-            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight), itemIdx };
+            // 物理扩展：高度增加 textHeight 以容纳文件名
+            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + textHeight), itemIdx };
             currentX += itemWidth + 5;
         }
-        currentY += actualHeight + 5;
+        currentY += actualHeight + textHeight + 5;
     }
 
     m_totalHeight = currentY + 10;

@@ -267,6 +267,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
                             auto snapshot = mutableThis->m_controller->snapshot();
                             auto itPos = snapshot->keyToPos.find(key);
                             if (itPos != snapshot->keyToPos.end() && itPos->second < mutableThis->m_displayCount) {
+                                // 2026-06-xx 布局优化：显式发射 UserRole+2 角色，通知 JustifiedView 真实宽高比已就绪，触发重排
                                 emit mutableThis->dataChanged(mutableThis->index(itPos->second, 0), mutableThis->index(itPos->second, 0), {Qt::DecorationRole, Qt::UserRole + 1, Qt::UserRole + 2});
                             }
                         });
