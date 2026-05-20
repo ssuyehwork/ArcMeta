@@ -113,12 +113,13 @@ public:
         QPixmap pix = renderIcon(key, QSize(20, 20), color);
         if (pix.isNull()) return QString();
 
-        // 2026-06-xx 物理修复：在路径中加入 V2 标识并强制覆盖，防止由于临时文件缓存导致的图标“版本幻觉”
+        // 2026-06-xx 物理修复：在路径中加入 V3 标识并强制覆盖。
+        // 核心修正：Qt QSS 必须使用正斜杠 (/)，反斜杠会被转义导致加载失败。强制转换为正斜杠。
         QString tmpPath = QDir::temp().filePath(
-            QString("arcmeta_%1_%2_v2.png").arg(key).arg(color.name().mid(1))
+            QString("arcmeta_%1_%2_v3.png").arg(key).arg(color.name().mid(1))
         );
         pix.save(tmpPath, "PNG");
-        return tmpPath;
+        return QDir::fromNativeSeparators(tmpPath);
     }
 
     static bool isGraphicsFile(const QString& ext) {
