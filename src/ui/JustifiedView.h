@@ -17,6 +17,9 @@ public:
     void scrollTo(const QModelIndex& index, ScrollHint hint = EnsureVisible) override;
     QModelIndex indexAt(const QPoint& point) const override;
 
+    void reset() override;
+    void doItemsLayout() override;
+
 protected slots:
     void dataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight, const QList<int>& roles = QList<int>()) override;
     void rowsInserted(const QModelIndex& parent, int start, int end) override;

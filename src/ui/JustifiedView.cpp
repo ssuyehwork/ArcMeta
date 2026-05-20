@@ -14,8 +14,18 @@ namespace ArcMeta {
 JustifiedView::JustifiedView(QWidget* parent) : QAbstractItemView(parent) {
     horizontalScrollBar()->setRange(0, 0);
     verticalScrollBar()->setSingleStep(20);
-    // 2026-05-20 物理修复：显式设置视口背景，防止 QSS 穿透导致的重绘异常
+
+    // 2026-06-xx 物理加固：彻底消除背景穿透。
+    // 在开启 TranslucentBackground 的无边框窗口中，视口必须主动填充底色
+    setAutoFillBackground(true);
+    viewport()->setAutoFillBackground(true);
     viewport()->setAttribute(Qt::WA_OpaquePaintEvent);
+
+    // 显式调色板设置，确保渲染引擎不认为此处是透明区域
+    QPalette pal = viewport()->palette();
+    pal.setColor(QPalette::Window, QColor("#1E1E1E"));
+    viewport()->setPalette(pal);
+    setPalette(pal);
 }
 
 void JustifiedView::setTargetRowHeight(int h) {
@@ -23,6 +33,15 @@ void JustifiedView::setTargetRowHeight(int h) {
         m_targetRowHeight = h;
         doLayout();
     }
+}
+
+void JustifiedView::reset() {
+    QAbstractItemView::reset();
+    doLayout();
+}
+
+void JustifiedView::doItemsLayout() {
+    doLayout();
 }
 
 QRect JustifiedView::visualRect(const QModelIndex& index) const {
@@ -156,6 +175,8 @@ void JustifiedView::updateGeometries() {
 void JustifiedView::doLayout() {
     if (!model()) return;
     int count = model()->rowCount();
+
+    // 2026-06-xx 逻辑加固：即使 count 为 0 也要重置几何信息并触发滚动条更新
     if (count == 0) {
         m_geometries.clear();
         m_totalHeight = 0;
@@ -164,8 +185,14 @@ void JustifiedView::doLayout() {
         return;
     }
 
+    // 2026-06-xx 物理加固：如果视口宽度尚未有效（如窗口初始化中），延迟重排
+    if (viewport()->width() < 50) {
+        QTimer::singleShot(100, this, [this]() { doLayout(); });
+        return;
+    }
+
     m_geometries.resize(count);
-    int containerWidth = viewport()->width() - 20;
+    int containerWidth = viewport()->width() - 25; // 预留足够滚动条空间
     if (containerWidth <= 0) return;
 
     int currentY = 10;

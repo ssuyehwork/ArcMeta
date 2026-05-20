@@ -463,8 +463,13 @@ ScanDialog::ScanDialog(QWidget* parent)
             border-radius: 6px;
         }
 
-        QWidget#SearchContainer, QWidget#DriveContainer, QStackedWidget#ViewStack { 
+        QWidget#SearchContainer, QWidget#DriveContainer {
             background: transparent; border: none; 
+        }
+
+        QStackedWidget#ViewStack {
+            background-color: #1E1E1E;
+            border: none;
         }
         
         #mainSearchEdit, #extSearchEdit { 
