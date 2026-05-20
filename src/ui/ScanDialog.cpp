@@ -457,6 +457,12 @@ ScanDialog::ScanDialog(QWidget* parent)
 
     // --- 2026-06-xx 架构级 QSS：实现样式沙箱与物理隔离 ---
     this->setStyleSheet(R"(
+        #DialogContainer {
+            background-color: #1E1E1E;
+            border: 1px solid #333333;
+            border-radius: 6px;
+        }
+
         QWidget#SearchContainer, QWidget#DriveContainer, QStackedWidget#ViewStack { 
             background: transparent; border: none; 
         }

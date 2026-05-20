@@ -117,6 +117,9 @@ QRegion JustifiedView::visualRegionForSelection(const QItemSelection& selection)
 
 void JustifiedView::paintEvent(QPaintEvent*) {
     QPainter painter(viewport());
+    // 2026-06-xx 物理修复：在开启 TranslucentBackground 时手动填充坚实背景，防止透明穿透
+    painter.fillRect(viewport()->rect(), QColor("#1E1E1E"));
+
     painter.translate(0, -verticalScrollBar()->value());
 
     // 2026-05-20 物理修复：使用 initViewItemOption 替代 viewOptions 以符合 Qt 6 规范
