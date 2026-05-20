@@ -4,6 +4,7 @@
 #include "ScanDialog.h"
 #include "../core/CacheManager.h"
 #include <QPainter>
+#include <QTimer>
 #include <QIcon>
 #include "../mft/MftReader.h"
 #include "UiHelper.h"
