@@ -60,7 +60,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     resize(1200, 800);
     setMinimumSize(1180, 653); // 物理对齐：5x230px面板 + 20px分割手柄 + 10px全局边距
-    setWindowTitle("ArcMeta");
+    setWindowTitle("FERREX");
 
     // 从设置读取置顶状态
     QSettings settings("ArcMeta团队", "ArcMeta");
@@ -899,7 +899,7 @@ void MainWindow::setupSplitters() {
     m_titleBarLayout->setContentsMargins(8, 0, 5, 0); // 右侧对齐 5px 物理边距
     m_titleBarLayout->setSpacing(8);
 
-    m_appNameLabel = new QLabel("ArcMeta", m_titleBarWidget);
+    m_appNameLabel = new QLabel("FERREX", m_titleBarWidget);
     m_appNameLabel->setStyleSheet("color: #AAAAAA; font-size: 12px; font-weight: bold;");
     m_titleBarLayout->addWidget(m_appNameLabel);
     m_titleBarLayout->addStretch();

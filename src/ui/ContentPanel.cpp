@@ -739,7 +739,8 @@ void ContentPanel::initGridView() {
     m_gridView->setDragEnabled(true); 
     m_gridView->setDragDropMode(QAbstractItemView::DragOnly); 
  
-    m_gridView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked); 
+    // 2026-06-xx 物理修复：移除 SelectedClicked，防止选中卡片时意外触发重命名逻辑
+    m_gridView->setEditTriggers(QAbstractItemView::EditKeyPressed);
  
     m_gridView->setModel(m_proxyModel); 
     m_gridView->setItemDelegate(new GridItemDelegate(this)); 
@@ -1780,7 +1781,7 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
  
     m.starSize    = 14; // 2026-05-17 尺寸微调以匹配外部布局
     m.starSpacing = 2;   
-    int banW = m.ratingH; 
+    int banW = 14;      // 2026-06-xx 物理对齐：将禁止图标缩减至 14px，与星级保持视觉一致
     int banGap = 4; 
  
     m.infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing); 
