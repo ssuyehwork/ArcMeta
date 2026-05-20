@@ -255,14 +255,16 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
                 (void)QtConcurrent::run([mutableThis, key, fullPath, cacheKey, thumbSize]() {
                     QPixmap thumb = UiHelper::getShellThumbnail(fullPath, thumbSize);
                     if (!thumb.isNull()) {
-                        QMetaObject::invokeMethod(mutableThis, [mutableThis, key, cacheKey, thumb]() {
+                        double ar = (double)thumb.width() / thumb.height();
+                        QMetaObject::invokeMethod(mutableThis, [mutableThis, key, cacheKey, thumb, ar]() {
                             mutableThis->m_thumbCache.insert(cacheKey, new QPixmap(thumb));
+                            mutableThis->m_aspectRatios[key] = ar;
 
                             // 2026-06-xx 物理安全：直接从 Snapshot 中定位 Position，杜绝脱节
                             auto snapshot = mutableThis->m_controller->snapshot();
                             auto itPos = snapshot->keyToPos.find(key);
                             if (itPos != snapshot->keyToPos.end() && itPos->second < mutableThis->m_displayCount) {
-                                emit mutableThis->dataChanged(mutableThis->index(itPos->second, 0), mutableThis->index(itPos->second, 0), {Qt::DecorationRole});
+                                emit mutableThis->dataChanged(mutableThis->index(itPos->second, 0), mutableThis->index(itPos->second, 0), {Qt::DecorationRole, Qt::UserRole + 1, Qt::UserRole + 2});
                             }
                         });
                     }
@@ -295,6 +297,21 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         }
     } else if (role == Qt::UserRole) {
         return key;
+    } else if (role == Qt::UserRole + 1) {
+        // 返回是否是缩略图 (用于 Delegate 区分绘制逻辑)
+        QString name = reader.getName(actualIndex);
+        int dotIdx = name.lastIndexOf('.');
+        QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
+        static const QSet<QString> thumbExts = {"psd", "ai", "eps", "jpg", "jpeg", "png", "webp"};
+
+        int64_t size = reader.getSize(actualIndex);
+        int64_t mtime = reader.getModifyTime(actualIndex);
+        QString cacheKey = QString("%1_%2_%3").arg(reader.getFullPath(actualIndex)).arg(size).arg(mtime);
+
+        return thumbExts.contains(ext) && m_thumbCache.contains(cacheKey);
+    } else if (role == Qt::UserRole + 2) {
+        // 返回宽高比 (用于 JustifiedView 布局)
+        return m_aspectRatios.value(key, 1.0);
     }
     return QVariant();
 }
@@ -505,8 +522,7 @@ ScanDialog::ScanDialog(QWidget* parent)
         m_resultView->verticalHeader()->setDefaultSectionSize(m_config.iconSize + 10);
     }
     if (m_config.viewMode == 1) { // 图标模式
-        m_iconView->setIconSize(QSize(m_config.iconSize, m_config.iconSize));
-        m_iconView->setGridSize(QSize(m_config.iconSize + 14, m_config.iconSize + 44));
+        m_iconView->setTargetRowHeight(m_config.iconSize);
     }
     
     // 恢复排序状态 (同时作用于模型和表头视觉)
@@ -720,28 +736,20 @@ void ScanDialog::setupUi() {
     m_viewStack->setObjectName("ViewStack");
     m_viewStack->addWidget(m_resultView);
     
-    m_iconView = new QListView();
+    m_iconView = new JustifiedView();
     m_iconView->setModel(m_tableModel);
-    m_iconView->setViewMode(QListView::IconMode);
+    m_iconView->setItemDelegate(new ThumbnailDelegate(this));
+    m_iconView->setTargetRowHeight(m_config.iconSize);
     m_iconView->setSelectionMode(QAbstractItemView::ExtendedSelection); // 显式启用多选
-    m_iconView->setResizeMode(QListView::Adjust);
-    m_iconView->setMovement(QListView::Static);
-    m_iconView->setSpacing(7);
-    m_iconView->setWordWrap(true);
-    m_iconView->setTextElideMode(Qt::ElideMiddle);
     m_iconView->setContextMenuPolicy(Qt::CustomContextMenu);
     m_iconView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
     
     // 2026-06-xx 按照用户要求：开启 IconView 拖拽导出功能
     m_iconView->setDragEnabled(true);
-    m_iconView->setDragDropMode(QAbstractItemView::DragOnly);
-    m_iconView->setDefaultDropAction(Qt::CopyAction);
 
     // 2026-06-xx 按照用户要求：为网格视图增加 10px 左侧与顶部内边距，确保坐标对准
     m_iconView->setStyleSheet(
-        "QListView { background-color: #1E1E1E; border: 1px solid #333; color: #D4D4D4; outline: none; padding: 10px 0 0 10px; }"
-        "QListView::item:hover { background-color: #2D2D2D; border-radius: 4px; }"
-        "QListView::item:selected { background-color: #094771; border-radius: 4px; color: #FFFFFF; }"
+        "background-color: #1E1E1E; border: 1px solid #333; color: #D4D4D4; outline: none;"
     );
     
     connect(m_iconView, &QListView::doubleClicked, this, &ScanDialog::onItemDoubleClicked);
@@ -1158,9 +1166,7 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
             m_viewStack->setCurrentIndex(stackIdx);
             m_config.viewMode = stackIdx;
             if (stackIdx == 1) { // 图标模式
-                m_iconView->setIconSize(QSize(iconSize, iconSize));
-                // 2026-06-xx 视觉优化：减小网格间距，防止超大模式下的稀疏感
-                m_iconView->setGridSize(QSize(iconSize + 14, iconSize + 44));
+                m_iconView->setTargetRowHeight(iconSize);
                 m_config.iconSize = iconSize;
             }
             if (stackIdx == 0) { // 详情模式
@@ -1184,8 +1190,8 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
     // 同步当前视图状态
     if (m_viewStack->currentIndex() == 0) detailsAction->setChecked(true);
     else {
-        int currentSize = m_iconView->iconSize().width();
-        if (currentSize == 256) xLargeAction->setChecked(true);
+        int currentSize = m_config.iconSize;
+        if (currentSize == 192) xLargeAction->setChecked(true);
         else if (currentSize == 128) largeAction->setChecked(true);
         else mediumAction->setChecked(true);
     }

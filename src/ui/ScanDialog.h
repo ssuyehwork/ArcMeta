@@ -29,6 +29,8 @@
 #include <QStackedWidget>
 #include <QListView>
 #include <QActionGroup>
+#include "JustifiedView.h"
+#include "ThumbnailDelegate.h"
 #include <atomic>
 
 #include "ScanController.h"
@@ -81,6 +83,7 @@ private:
 
     mutable QCache<QString, QPixmap> m_thumbCache;
     mutable QSet<uint64_t> m_requestedThumbs;
+    mutable QMap<uint64_t, double> m_aspectRatios; // 存储宽高比
 
     QSet<int> m_pendingRows;
     QTimer* m_throttleTimer = nullptr;
@@ -139,7 +142,7 @@ private:
     QWidget* m_driveContainer = nullptr;
     
     QTableView* m_resultView = nullptr;
-    QListView* m_iconView = nullptr;
+    JustifiedView* m_iconView = nullptr;
     QStackedWidget* m_viewStack = nullptr;
     ScanTableModel* m_tableModel = nullptr;
 
