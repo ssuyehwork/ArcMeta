@@ -333,7 +333,8 @@ public:
         QDir().mkpath(cacheDir);
 
         QFileInfo fi(path);
-        QString hashKey = QString("%1_%2_%3_%4").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v2 标识，强制失效之前的“倒置”缩略图缓存
+        QString hashKey = QString("%1_%2_%3_%4_v2").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
         QString safeName = QString::number(qHash(hashKey), 16) + ".png";
         QString cachePath = cacheDir + safeName;
 
@@ -358,11 +359,9 @@ public:
                 hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
                     QImage img = QImage::fromHBITMAP(hBitmap);
-                    // 2026-06-xx 物理修复：Windows Shell 缩略图通常为 Bottom-Up 存储，
-                    // QImage::fromHBITMAP 在某些 DIB 格式下不会自动翻转，导致显示颠倒。
-                    // 强制进行垂直翻转 (flipped) 以符合人类视觉并消除弃用警告。
-                    img = img.flipped(Qt::Vertical); 
-                    if (forceMirror) img = img.flipped(Qt::Vertical); // 再次翻转即还原
+                    // 2026-06-xx 物理修正：移除错误的垂直翻转。
+                    // 实验证明，现代 Qt::fromHBITMAP 已能正确处理 DIB 步长，手动 flipped 导致了画面倒置。
+                    if (forceMirror) img = img.flipped(Qt::Vertical); 
                     QPixmap pix = QPixmap::fromImage(img);
                     
                     // 异步存入磁盘缓存

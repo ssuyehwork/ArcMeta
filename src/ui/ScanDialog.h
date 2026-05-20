@@ -18,6 +18,7 @@
 #include <QScrollArea>
 #include <QFileIconProvider>
 #include <QFileInfo>
+#include <memory>
 #include <QDateTime>
 #include <QHash>
 #include <QSet>
@@ -29,9 +30,12 @@
 #include <QListView>
 #include <QActionGroup>
 #include <atomic>
-#include <memory>
 
+#include "ScanController.h"
 namespace ArcMeta {
+
+class JustifiedView;
+class ThumbnailDelegate;
 
 struct ScanConfig {
     QSet<QString> activeDrives;
@@ -49,7 +53,6 @@ struct ScanConfig {
     void save();
 };
 
-class ScanController;
 
 class ScanTableModel : public QAbstractTableModel {
     Q_OBJECT
@@ -76,13 +79,13 @@ public:
 
 private:
     ScanController* m_controller;
-    std::vector<uint64_t> m_filteredKeys;
+    std::shared_ptr<ResultSet> m_currentResultSet;
     int m_displayCount = 0;
 
     mutable QCache<QString, QPixmap> m_thumbCache;
     mutable QSet<uint64_t> m_requestedThumbs;
+    mutable QMap<uint64_t, double> m_aspectRatios; // 存储宽高比
     
-    std::unordered_map<uint64_t, int> m_keyToRow; 
     QSet<int> m_pendingRows;  
     QTimer* m_throttleTimer = nullptr;
 };
@@ -140,7 +143,7 @@ private:
     QWidget* m_driveContainer = nullptr;
     
     QTableView* m_resultView = nullptr;
-    QListView* m_iconView = nullptr;
+    JustifiedView* m_iconView = nullptr;
     QStackedWidget* m_viewStack = nullptr;
     ScanTableModel* m_tableModel = nullptr;
 

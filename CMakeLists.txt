@@ -104,6 +104,10 @@ set(SOURCES
     src/ui/FilterPanel.h
     src/ui/FramelessDialog.cpp
     src/ui/FramelessDialog.h
+    src/ui/JustifiedView.cpp
+    src/ui/JustifiedView.h
+    src/ui/ThumbnailDelegate.cpp
+    src/ui/ThumbnailDelegate.h
     src/ui/LoadingWindow.cpp
     src/ui/LoadingWindow.h
     src/ui/Logger.h
