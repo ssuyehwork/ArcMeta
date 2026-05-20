@@ -581,8 +581,9 @@ ScanDialog::ScanDialog(QWidget* parent)
 }
 
 ScanDialog::~ScanDialog() {
-    // 2026-05-14 架构优化：移除 MftReader::instance().clear()
-    // MftReader 作为全局单例，其生命周期不应与搜索窗口绑定。
+    // 2026-06-xx 内存优化专项：按照用户要求实现“按需加载、及时卸载”。
+    // 关闭搜索窗口时物理卸载 MFT 索引，释放可能高达数百 MB 的内存占用。
+    MftReader::instance().clear();
 }
 
 void ScanDialog::setupUi() {
