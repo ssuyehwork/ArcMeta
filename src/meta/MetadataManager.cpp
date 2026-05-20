@@ -662,4 +662,35 @@ void MetadataManager::saveSyncLog() {
     // 逻辑已在 addToSyncLog 中原子化实现
 }
 
+QStringList MetadataManager::searchInCache(const QString& keyword) {
+    QStringList results;
+    if (keyword.isEmpty()) return results;
+
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
+        const std::wstring& path = it->first;
+        const RuntimeMeta& meta = it->second;
+
+        QString qPath = QString::fromStdWString(path);
+        QString qNote = QString::fromStdWString(meta.note);
+
+        bool match = qPath.contains(keyword, Qt::CaseInsensitive) ||
+                     qNote.contains(keyword, Qt::CaseInsensitive);
+
+        if (!match) {
+            for (const QString& tag : meta.tags) {
+                if (tag.contains(keyword, Qt::CaseInsensitive)) {
+                    match = true;
+                    break;
+                }
+            }
+        }
+
+        if (match) {
+            results << qPath;
+        }
+    }
+    return results;
+}
+
 } // namespace ArcMeta

@@ -180,17 +180,20 @@ QStringList ItemRepo::searchByKeyword(const QString& keyword, const QString& par
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     
-    // 2026-06-xx 物理修复：基于非空 Fallback ID 机制回归高性能查询。
-    // 铁律：允许关键词为空。由于 ID 保证非空唯一，直接按 file_id_128 分组。
+    // 2026-06-xx 物理重构：多维搜索与模式自适应。
+    // 按照用户要求：主界面搜索必须涵盖标签、名称和备注。
     QString sql;
+    QString likePattern = "%" + keyword + "%";
     if (parentPath.isEmpty()) {
         if (keyword.isEmpty()) {
             sql = "SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' GROUP BY file_id_128 LIMIT 1000";
             q.prepare(sql);
         } else {
-            sql = "SELECT MIN(path) FROM items WHERE path LIKE ? AND deleted = 0 AND type = 'file' GROUP BY file_id_128 LIMIT 1000";
+            sql = "SELECT MIN(path) FROM items WHERE (path LIKE ? OR tags LIKE ? OR note LIKE ?) AND deleted = 0 AND type = 'file' GROUP BY file_id_128 LIMIT 1000";
             q.prepare(sql);
-            q.addBindValue("%" + keyword + "%");
+            q.addBindValue(likePattern);
+            q.addBindValue(likePattern);
+            q.addBindValue(likePattern);
         }
     } else {
         if (keyword.isEmpty()) {
@@ -198,10 +201,12 @@ QStringList ItemRepo::searchByKeyword(const QString& keyword, const QString& par
             q.prepare(sql);
             q.addBindValue(parentPath);
         } else {
-            sql = "SELECT MIN(path) FROM items WHERE parent_path = ? AND path LIKE ? AND deleted = 0 AND type = 'file' GROUP BY file_id_128 LIMIT 1000";
+            sql = "SELECT MIN(path) FROM items WHERE parent_path = ? AND (path LIKE ? OR tags LIKE ? OR note LIKE ?) AND deleted = 0 AND type = 'file' GROUP BY file_id_128 LIMIT 1000";
             q.prepare(sql);
             q.addBindValue(parentPath);
-            q.addBindValue("%" + keyword + "%");
+            q.addBindValue(likePattern);
+            q.addBindValue(likePattern);
+            q.addBindValue(likePattern);
         }
     }
     

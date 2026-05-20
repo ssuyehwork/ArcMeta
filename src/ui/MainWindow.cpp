@@ -454,9 +454,15 @@ void MainWindow::initUi() {
         m_searchHistoryPanel->setHistory(m_searchHistory);
         m_searchHistoryPanel->hide();
 
-        // 按照用户要求：不再区分局部/全局，设定为全局搜索
-        // 全局数据库匹配加载
-        QStringList paths = ItemRepo::searchByKeyword(keyword, "");
+        // 2026-06-xx 物理加固：根据模式选择检索源
+        QStringList paths;
+        if (CategoryRepo::isJsonMode()) {
+            // 模式 A: 纯 JSON 内存搜索
+            paths = MetadataManager::instance().searchInCache(keyword);
+        } else {
+            // 模式 B: 经典数据库搜索 (已包含路径+标签+备注检索)
+            paths = ItemRepo::searchByKeyword(keyword, "");
+        }
         m_contentPanel->loadPaths(paths);
     };
 

@@ -15,11 +15,6 @@ CoreController& CoreController::instance() {
 }
 
 CoreController::CoreController(QObject* parent) : QObject(parent) {
-    connect(&MftReader::instance(), &MftReader::driveLoaded, this, [this](const QString& drive, int count, int total) {
-        QMetaObject::invokeMethod(this, [this, drive, count, total]() {
-            setStatus(QString("已加载 %1 (%2/%3)...").arg(drive).arg(count).arg(total), true);
-        }, Qt::QueuedConnection);
-    });
 }
 
 CoreController::~CoreController() {}
