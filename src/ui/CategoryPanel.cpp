@@ -734,25 +734,25 @@ void CategoryPanel::initUi() {
         }
 
         QTreeView::branch:has-children:closed { 
-            image: url(:/icons/arrow_right.svg); 
+            image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTQgM2w0IDMtNCAzIiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==);
             padding: 4px;
         }
         QTreeView::branch:has-children:open { 
-            image: url(:/icons/arrow_down.svg); 
+            image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTMgNGwzIDQgMy00IiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==);
             padding: 4px;
         }
         QTreeView::branch:has-children:closed:has-siblings { 
-            image: url(:/icons/arrow_right.svg); 
+            image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTQgM2w0IDMtNCAzIiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==);
             padding: 4px;
         }
         QTreeView::branch:has-children:open:has-siblings { 
-            image: url(:/icons/arrow_down.svg); 
+            image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTMgNGwzIDQgMy00IiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==);
             padding: 4px;
         }
 
         /* 强制覆盖选中态，防止系统默认样式干扰导致图标消失 */
-        QTreeView::branch:has-children:closed:selected { image: url(:/icons/arrow_right.svg); padding: 4px; }
-        QTreeView::branch:has-children:open:selected   { image: url(:/icons/arrow_down.svg); padding: 4px; }
+        QTreeView::branch:has-children:closed:selected { image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTQgM2w0IDMtNCAzIiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==); padding: 4px; }
+        QTreeView::branch:has-children:open:selected   { image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTMgNGwzIDQgMy00IiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==); padding: 4px; }
 
         QTreeView::item { height: 26px; padding-left: 0px; }
     )";

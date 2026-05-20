@@ -310,8 +310,8 @@ void MainWindow::initUI() {
 
     QString treeStyle = R"(
         QTreeView { background-color: transparent; border: none; color: #CCC; outline: none; }
-        QTreeView::branch:has-children:closed { image: url(:/icons/arrow_right.svg); }
-        QTreeView::branch:has-children:open   { image: url(:/icons/arrow_down.svg); }
+        QTreeView::branch:has-children:closed { image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTQgM2w0IDMtNCAzIiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==); }
+        QTreeView::branch:has-children:open   { image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTMgNGwzIDQgMy00IiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==); }
         QTreeView::item { height: 22px; padding-left: 10px; }
     )";
 

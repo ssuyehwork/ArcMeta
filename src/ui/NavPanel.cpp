@@ -169,10 +169,10 @@ void NavPanel::initUi() {
         "QTreeView::item { height: 28px; padding-left: 0px; color: #EEEEEE; }"
         
         "/* 物理还原：复原三角形折叠图标，增加 padding 以实现极致精简视觉 */"
-        "QTreeView::branch:has-children:closed { image: url(:/icons/arrow_right.svg); padding: 4px; }"
-        "QTreeView::branch:has-children:open   { image: url(:/icons/arrow_down.svg); padding: 4px; }"
-        "QTreeView::branch:has-children:closed:has-siblings { image: url(:/icons/arrow_right.svg); padding: 4px; }"
-        "QTreeView::branch:has-children:open:has-siblings   { image: url(:/icons/arrow_down.svg); padding: 4px; }"
+        "QTreeView::branch:has-children:closed { image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTQgM2w0IDMtNCAzIiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==); padding: 4px; }"
+        "QTreeView::branch:has-children:open   { image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTMgNGwzIDQgMy00IiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==); padding: 4px; }"
+        "QTreeView::branch:has-children:closed:has-siblings { image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTQgM2w0IDMtNCAzIiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==); padding: 4px; }"
+        "QTreeView::branch:has-children:open:has-siblings   { image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMiAxMiI+CiAgPHBhdGggZD0iTTMgNGwzIDQgMy00IiBmaWxsPSJub25lIiBzdHJva2U9IiNFRUVFRUUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPg==); padding: 4px; }"
     );
 
 
