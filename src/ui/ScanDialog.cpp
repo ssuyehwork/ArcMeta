@@ -984,17 +984,6 @@ void ScanDialog::setupUi() {
     statusBar->setContentsMargins(16, 0, 16, 0);
     statusBar->setSpacing(0);
 
-    m_selectionLabel = new QLabel("");
-    m_selectionLabel->setStyleSheet("color: #7A8F9E; font-size: 10px;");
-    statusBar->addWidget(m_selectionLabel);
-
-    m_csvBtn = new QPushButton("导出所选为 CSV");
-    m_csvBtn->setFlat(true);
-    m_csvBtn->setCursor(Qt::PointingHandCursor);
-    m_csvBtn->setStyleSheet("QPushButton { color: #FF8C00; font-size: 10px; border: none; padding: 0; text-decoration: none; } QPushButton:hover { text-decoration: underline; }");
-    m_csvBtn->hide();
-    statusBar->addWidget(m_csvBtn);
-
     m_statLabelMain = new QLabel("");
     m_statLabelMain->setStyleSheet("color: #7A8F9E; font-size: 10px;");
     statusBar->addWidget(m_statLabelMain);
@@ -1002,6 +991,17 @@ void ScanDialog::setupUi() {
     m_statLabelTime = new QLabel("");
     m_statLabelTime->setStyleSheet("color: #7A8F9E; font-size: 10px; margin-left: 12px;");
     statusBar->addWidget(m_statLabelTime);
+
+    m_selectionLabel = new QLabel("");
+    m_selectionLabel->setStyleSheet("color: #7A8F9E; font-size: 10px;");
+    statusBar->addWidget(m_selectionLabel);
+
+    m_csvBtn = new QPushButton("导出所选为 CSV");
+    m_csvBtn->setFlat(true);
+    m_csvBtn->setCursor(Qt::PointingHandCursor);
+    m_csvBtn->setStyleSheet("QPushButton { color: #FF8C00; font-size: 10px; border: none; padding: 0 0 0 8px; text-decoration: none; } QPushButton:hover { text-decoration: underline; }");
+    m_csvBtn->hide();
+    statusBar->addWidget(m_csvBtn);
 
     statusBar->addStretch();
 
@@ -1455,17 +1455,7 @@ void ScanDialog::onItemDoubleClicked(const QModelIndex& index) {
 }
 
 void ScanDialog::onSelectionChanged() {
-    auto view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
-    auto selectedRows = view->selectionModel()->selectedRows();
-    if (selectedRows.isEmpty()) { m_selectionLabel->clear(); return; }
-    
-    int64_t totalSize = 0;
-    auto& reader = MftReader::instance();
-    for (const auto& index : selectedRows) {
-        int actualIdx = m_tableModel->data(index, Qt::UserRole).toInt();
-        if (!reader.isDirectory(actualIdx)) totalSize += reader.getSize(actualIdx);
-    }
-    m_selectionLabel->setText(QString("已选择 %1 项 | 合计大小: %2").arg(selectedRows.size()).arg(formatSize(totalSize)));
+    updateStatusBar();
 }
 
 void ScanDialog::onStartScan() {
@@ -1560,12 +1550,13 @@ void ScanDialog::updateStatus(const QString& text, bool scanning) {
 void ScanDialog::updateStatusBar() {
     auto view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
     auto selectedRows = view->selectionModel()->selectedRows();
-    if (selectedRows.size() > 1) {
-        m_statLabelMain->hide();
-        m_statLabelTime->hide();
+
+    int totalMatch = m_controller->resultCount();
+    m_statLabelMain->setText(QString("共找到 %1 条项目").arg(formatNumber(totalMatch)));
+    m_statLabelTime->setText(QString("耗时 %1 ms").arg(m_lastSearchMs));
+
+    if (!selectedRows.isEmpty()) {
         m_selectionLabel->show();
-        m_csvBtn->show();
-        
         int64_t totalSize = 0;
         auto& reader = MftReader::instance();
         for (const auto& index : selectedRows) {
@@ -1573,17 +1564,13 @@ void ScanDialog::updateStatusBar() {
             int actualIdx = reader.getIndexByKey(key);
             if (actualIdx != -1 && !reader.isDirectory(actualIdx)) totalSize += reader.getSize(actualIdx);
         }
-        m_selectionLabel->setText(QString("已选 %1 项 | 合计大小 %2  ").arg(selectedRows.size()).arg(formatSize(totalSize)));
+        m_selectionLabel->setText(QString(" | 已选择 %1 项 (%2)").arg(selectedRows.size()).arg(formatSize(totalSize)));
+
+        if (selectedRows.size() > 1) m_csvBtn->show();
+        else m_csvBtn->hide();
     } else {
         m_selectionLabel->hide();
         m_csvBtn->hide();
-        m_statLabelMain->show();
-        m_statLabelTime->show();
-        
-        int totalMatch = m_controller->resultCount();
-        m_statLabelMain->setText(QString("共找到 %1 条项目").arg(formatNumber(totalMatch)));
-        m_statLabelTime->setText(QString("耗时 %1 ms").arg(m_lastSearchMs));
-
     }
     
     double memoryMb = (MftReader::instance().totalCount() * 184.0) / 1024.0 / 1024.0;
