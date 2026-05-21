@@ -462,12 +462,13 @@ ScanDialog::ScanDialog(QWidget* parent)
             // [Logo/标题/状态] -> [Stretch] -> [视图按钮②] -> [滑动条③] -> [窗口控制按钮①]
 
             // ① 视图切换按钮 (标记 2)
-            QPushButton* viewBtn = new QPushButton("视图");
-            viewBtn->setFixedHeight(22);
+            QPushButton* viewBtn = new QPushButton();
+            viewBtn->setFixedSize(24, 22);
+            viewBtn->setIcon(UiHelper::getIcon("grid", QColor("#CCCCCC"), 16));
             viewBtn->setCursor(Qt::PointingHandCursor);
             viewBtn->setStyleSheet(
                 "QPushButton { background: #2D2D2D; color: #CCC; border: 1px solid #3F3F3F; "
-                "border-radius: 4px; font-size: 11px; padding: 0 8px; }"
+                "border-radius: 4px; padding: 0; }"
                 "QPushButton:hover { background: #3A3A3A; color: #FFF; }"
             );
             connect(viewBtn, &QPushButton::clicked, this, [this, viewBtn]() {
