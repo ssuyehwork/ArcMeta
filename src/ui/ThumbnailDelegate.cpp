@@ -18,11 +18,14 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                            option.rect.width() - 6,
                            textHeight);
 
+    // ① 强制绘制底层背景（解决选中色污染）
+    painter->fillRect(option.rect, QColor("#1E1E1E"));
+
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    // ① 圆角裁剪（仅作用于卡片）
+    // ② 圆角裁剪（仅作用于卡片）
     QPainterPath clipPath;
     clipPath.addRoundedRect(cardRect, 6, 6);
     painter->setClipPath(clipPath);
@@ -43,25 +46,22 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
     }
 
-    // ② 选中高亮叠加层（在裁剪区内，仅覆盖卡片）
-    if (option.state & QStyle::State_Selected) {
-        painter->fillRect(cardRect, QColor(255, 140, 0, 50)); // 半透明橙色蒙版
-    }
+    // ③ 选中态不再使用蒙版，以保持图像原色 (根据用户反馈移除 fillRect)
 
     painter->restore(); // ← 释放裁剪区（与上方 save 对应）
 
-    // ③ 选中边框（在裁剪区外绘制，确保完整显示）
+    // ④ 选中边框（在裁剪区外绘制，确保完整显示）
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
     if (option.state & QStyle::State_Selected) {
-        painter->setPen(QPen(QColor("#FF8C00"), 2)); // 明亮橙色边框
+        painter->setPen(QPen(QColor("#3498db"), 2)); // 改回经典蓝色边框
         painter->setBrush(Qt::NoBrush);
         painter->drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 6, 6);
     }
 
-    // ④ 文件名（卡片下方，完全不受裁剪影响）
+    // ⑤ 文件名颜色同步
     painter->setPen(option.state & QStyle::State_Selected
-                    ? QColor("#FF8C00") : QColor("#C8C8C8"));
+                    ? QColor("#3498db") : QColor("#C8C8C8"));
     painter->drawText(textRect, Qt::AlignHCenter | Qt::AlignVCenter,
         option.fontMetrics.elidedText(
             index.data(Qt::DisplayRole).toString(),
