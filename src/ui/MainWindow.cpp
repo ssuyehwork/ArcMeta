@@ -51,6 +51,12 @@
 
 namespace ArcMeta {
 
+MainWindow::~MainWindow() {
+    if (m_resizeFilter) {
+        qApp->removeEventFilter(m_resizeFilter);
+    }
+}
+
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent) {
     // 2026-04-12 关键修复：显式初始化面板加载状态锁，防止未定义行为导致闪退
@@ -79,16 +85,36 @@ MainWindow::MainWindow(QWidget* parent)
         setWindowFlag(Qt::WindowStaysOnTopHint, true);
     }
 
-    // 应用全局样式（优先尝试从外部加载以支持动态同步）
+    // 应用全局样式（优先尝试从资源系统加载以支持动态同步）
+    // 2026-06-xx 物理修复：如果资源加载失败，则回退到内联样式以确保“物理切割感”永不消失
     QFile file(":/style.qss");
     if (file.open(QFile::ReadOnly)) {
         setStyleSheet(QLatin1String(file.readAll()));
     } else {
-        // 后备逻辑：如果资源未就绪，则从物理路径尝试
-        QFile physFile("resources/style.qss");
-        if (physFile.open(QFile::ReadOnly)) {
-            setStyleSheet(QLatin1String(physFile.readAll()));
-        }
+        QString qss = R"(
+            QMainWindow { background-color: #1E1E1E; }
+            #SidebarContainer, #ListContainer, #EditorContainer, #MetadataContainer, #FilterContainer {
+                background-color: #1E1E1E; border: 1px solid #333333; border-radius: 0px;
+            }
+            #ContainerHeader {
+                background-color: #252526; border-bottom: 1px solid #333333;
+            }
+            QScrollBar:vertical { border: none; background: transparent; width: 4px; }
+            QScrollBar::handle:vertical { background: #333333; min-height: 20px; border-radius: 2px; }
+            QScrollBar::handle:vertical:hover { background: #444444; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+            QScrollBar:horizontal { border: none; background: transparent; height: 4px; }
+            QScrollBar::handle:horizontal { background: #333333; min-width: 20px; border-radius: 2px; }
+            QScrollBar::handle:horizontal:hover { background: #444444; }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+            QLineEdit, QPlainTextEdit, QTextEdit {
+                background: #1E1E1E; border: 1px solid #333333; border-radius: 6px; color: #EEEEEE; padding-left: 8px;
+            }
+            QLineEdit:focus { border: 1px solid #378ADD; }
+        )";
+        setStyleSheet(qss);
     }
 
     initUi();
@@ -733,7 +759,7 @@ void MainWindow::initToolbar() {
     m_searchEdit->addAction(UiHelper::getIcon("search", QColor("#888888")), QLineEdit::LeadingPosition);
     // 按照用户要求：移除局部/全局切换按钮，恢复搜索框 6px 完整圆角
     m_searchEdit->setStyleSheet(
-        "QLineEdit { background: #1E1E1E; border: 1px solid #444444;"
+        "QLineEdit { background: #1E1E1E; border: 1px solid #333333;"
         "  border-radius: 6px;"
         "  color: #EEEEEE; padding-left: 5px; }"
         "QLineEdit:focus { border: 1px solid #378ADD; }"
@@ -754,9 +780,8 @@ void MainWindow::setupSplitters() {
 
     // --- 1. 自定义标题栏 (第一行) ---
     m_titleBarWidget = new QWidget(centralC);
+    m_titleBarWidget->setObjectName("TitleBar");
     m_titleBarWidget->setFixedHeight(32);
-    // 2026-03-xx 物理回归：将分割线重新锁定在第一行下方，保持物理切割感
-    m_titleBarWidget->setStyleSheet("QWidget { background-color: #1E1E1E; border-bottom: 1px solid #333333; }");
     m_titleBarLayout = new QHBoxLayout(m_titleBarWidget);
     m_titleBarLayout->setContentsMargins(8, 0, 5, 0); // 右侧对齐 5px 物理边距
     m_titleBarLayout->setSpacing(8);
@@ -768,8 +793,8 @@ void MainWindow::setupSplitters() {
 
     // --- 2. 统一导航栏 (第二行) ---
     m_navBarWidget = new QWidget(centralC);
+    m_navBarWidget->setObjectName("NavBar");
     m_navBarWidget->setFixedHeight(37); // 32px 内容 + 5px 上边距
-    m_navBarWidget->setStyleSheet("background: transparent; border: none;");
     
     m_navBarLayout = new QHBoxLayout(m_navBarWidget);
     // 2026-03-xx 物理对齐：实现上下 5px 呼吸感，上边距由本布局提供，下边距由 bodyLayout 提供
@@ -837,8 +862,8 @@ void MainWindow::setupSplitters() {
 
     // --- 4. 底部状态栏 (0 边距) ---
     QWidget* statusBar = new QWidget(centralC);
+    statusBar->setObjectName("StatusBar");
     statusBar->setFixedHeight(28);
-    statusBar->setStyleSheet("QWidget { background-color: #252525; border-top: 1px solid #333333; }");
     QHBoxLayout* statusL = new QHBoxLayout(statusBar);
     statusL->setContentsMargins(12, 0, 12, 0);
     statusL->setSpacing(0);

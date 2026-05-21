@@ -1,19 +1,36 @@
 /* 全局基础样式 */
-QMainWindow { background-color: #1E1E1E; }
+QMainWindow { background-color: #1E1E1E; color: #EEEEEE; }
+
+/* 标题栏与导航栏切割线 */
+#TitleBar {
+    background-color: #1E1E1E;
+    border-bottom: 1px solid #333333;
+}
+#NavBar {
+    background-color: #1E1E1E;
+    border-bottom: 1px solid #333333;
+}
 
 /* 核心容器样式 - 强化 1 像素物理切割感 */
 #SidebarContainer, #ListContainer, #EditorContainer, #MetadataContainer, #FilterContainer {
     background-color: #1E1E1E;
     border: 1px solid #333333;
     border-radius: 0px;
+    color: #EEEEEE;
 }
 
-/* 容器标题栏样式 */
+/* 容器标题栏样式 (回归绝对直角设计) */
 #ContainerHeader {
     background-color: #252526;
     border-bottom: 1px solid #333333;
     border-top-left-radius: 0px;
     border-top-right-radius: 0px;
+}
+
+/* 底部状态栏 */
+#StatusBar {
+    background-color: #252525;
+    border-top: 1px solid #333333;
 }
 
 /* 全局滚动条美化 (基于 Memories.md 规范) */
@@ -69,7 +86,7 @@ QCheckBox::indicator:checked {
     image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzc4QUREIiBzdHJva2Utd2lkdGg9IjMuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIyMCA2IDkgMTcgNCAxMiI+PC9wb2x5bGluZT48L3N2Zz4=);
 }
 
-/* 统一输入框样式 */
+/* 统一输入框与多行文本框样式，应用 6px 圆角规范 */
 QLineEdit, QPlainTextEdit, QTextEdit {
     background: #1E1E1E;
     border: 1px solid #333333;

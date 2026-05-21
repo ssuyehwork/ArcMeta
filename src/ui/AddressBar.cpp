@@ -12,14 +12,14 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     m_pathStack = new QStackedWidget(this);
     m_pathStack->setFixedHeight(32);
     m_pathStack->setMinimumWidth(300);
-    m_pathStack->setStyleSheet("QStackedWidget { background: #1E1E1E; border: 1px solid #444444; border-radius: 6px; }");
+    m_pathStack->setStyleSheet("QStackedWidget { background: #1E1E1E; border: 1px solid #333333; border-radius: 6px; }");
 
     m_breadcrumbBar = new BreadcrumbBar(m_pathStack);
     m_pathStack->addWidget(m_breadcrumbBar);
 
     m_pathEdit = new QLineEdit(m_pathStack);
     m_pathEdit->setPlaceholderText("输入路径...");
-    m_pathEdit->setFixedHeight(32);
+    m_pathEdit->setFixedHeight(30); // 扣除上下各 1px 边框，确保背景不溢出圆角
     m_pathEdit->setStyleSheet("QLineEdit { background: transparent; border: none; color: #EEEEEE; padding-left: 8px; }");
     m_pathStack->addWidget(m_pathEdit);
 
