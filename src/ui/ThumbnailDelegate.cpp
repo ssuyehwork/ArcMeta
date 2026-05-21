@@ -72,4 +72,13 @@ QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QMod
     return QStyledItemDelegate::sizeHint(option, index);
 }
 
+void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
+                                              const QStyleOptionViewItem& option,
+                                              const QModelIndex& /*index*/) const {
+    const int textHeight = 30;
+    // 编辑器精确定位到卡片下方的文字区域
+    QRect textRect = option.rect.adjusted(4, option.rect.height() - textHeight, -4, -4);
+    editor->setGeometry(textRect);
+}
+
 } // namespace ArcMeta

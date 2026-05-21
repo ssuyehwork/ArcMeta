@@ -758,7 +758,7 @@ void ScanDialog::setupUi() {
     m_iconView->setTargetRowHeight(m_config.iconSize);
     m_iconView->setSelectionMode(QAbstractItemView::ExtendedSelection); // 显式启用多选
     m_iconView->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_iconView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
+    m_iconView->setEditTriggers(QAbstractItemView::EditKeyPressed);
     
     // 2026-06-xx 按照用户要求：开启 IconView 拖拽导出功能
     m_iconView->setDragEnabled(true);

@@ -162,6 +162,28 @@ QRegion JustifiedView::visualRegionForSelection(const QItemSelection& selection)
     return region;
 }
 
+void JustifiedView::mouseDoubleClickEvent(QMouseEvent* event) {
+    QModelIndex idx = indexAt(event->pos());
+    if (!idx.isValid()) {
+        QAbstractItemView::mouseDoubleClickEvent(event);
+        return;
+    }
+
+    const int textHeight = 30;
+    QRect itemRect = visualRect(idx);
+    // 文字区域 = 卡片底部 textHeight 像素
+    QRect textRect(itemRect.left(), itemRect.bottom() - textHeight, itemRect.width(), textHeight);
+
+    if (textRect.contains(event->pos())) {
+        // 双击在文字区域 → 触发行内重命名
+        edit(idx);
+    } else {
+        // 双击在缩略图区域 → 触发打开文件（发射 doubleClicked 信号）
+        emit doubleClicked(idx);
+    }
+    // 不调用父类，防止父类再次触发默认编辑逻辑
+}
+
 void JustifiedView::paintEvent(QPaintEvent*) {
     QPainter painter(viewport());
     // 2026-06-xx 物理修复：在开启 TranslucentBackground 时手动填充坚实背景，防止透明穿透
