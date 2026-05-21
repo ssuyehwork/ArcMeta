@@ -451,7 +451,6 @@ ScanDialog::ScanDialog(QWidget* parent)
     m_titleStatusLabel = new QLabel("READY - 0");
     // 按照用户要求：间距严格对齐规范。 margin-left: 1px (配合 layout spacing 4px = 5px)
     m_titleStatusLabel->setStyleSheet("background: transparent; color: #46B478; font-size: 10px; font-weight: bold; margin-left: 1px;");
-    m_titleStatusLabel->setFixedHeight(34);
 
     if (m_titleLabel && m_pinBtn && m_pinBtn->parentWidget() && m_pinBtn->parentWidget()->layout()) {
         m_titleLabel->hide(); 
@@ -463,17 +462,15 @@ ScanDialog::ScanDialog(QWidget* parent)
             titleLayout->setContentsMargins(12, 0, 8, 0);
 
             QLabel* logoLabel = new QLabel();
-            logoLabel->setFixedSize(18, 18);
-            logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#FF8C00"), 18).pixmap(18, 18));
+            logoLabel->setFixedSize(16, 16);
+            logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#FF8C00"), 16).pixmap(16, 16));
             // 恢复高度并设为透明，物理分割线已独立
             logoLabel->setStyleSheet("background: transparent;");
-            logoLabel->setFixedHeight(34);
             titleLayout->insertWidget(0, logoLabel);
             
             QLabel* brandLabel = new QLabel("FERREX-META");
             // 间距计算：margin-left 6px + spacing 4px = 10px (补偿视觉)
             brandLabel->setStyleSheet("background: transparent; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 6px;");
-            brandLabel->setFixedHeight(34);
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
@@ -489,9 +486,9 @@ ScanDialog::ScanDialog(QWidget* parent)
 
             // ① 视图切换按钮 (标记 2)
             QPushButton* viewBtn = new QPushButton(); 
-            viewBtn->setFixedSize(24, 24); // 严格锁定 24x24
-            viewBtn->setIcon(UiHelper::getIcon("grid", QColor("#CCCCCC"), 18)); // 严格锁定图标 18x18
-            viewBtn->setIconSize(QSize(18, 18));
+            viewBtn->setFixedSize(20, 20); // 严格锁定 20x20
+            viewBtn->setIcon(UiHelper::getIcon("grid", QColor("#CCCCCC"), 16)); // 严格锁定图标 16x16
+            viewBtn->setIconSize(QSize(16, 16));
             viewBtn->setCursor(Qt::PointingHandCursor); 
             viewBtn->setToolTip(""); // 禁止原生 ToolTip
             viewBtn->setStyleSheet( 
@@ -538,7 +535,7 @@ ScanDialog::ScanDialog(QWidget* parent)
             m_sizeSlider = new QSlider(Qt::Horizontal); 
             m_sizeSlider->setRange(32, 256); 
             m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64); 
-            m_sizeSlider->setFixedSize(110, 24); // 高度调整为 24px，避免覆盖/截断
+            m_sizeSlider->setFixedSize(110, 20); // 高度调整为 20px，避免覆盖/截断
             m_sizeSlider->setCursor(Qt::PointingHandCursor); 
             m_sizeSlider->installEventFilter(this);
             // 间距计算：margin-right 1px + spacing 4px = 5px (精准对标视图按钮)
@@ -563,8 +560,8 @@ ScanDialog::ScanDialog(QWidget* parent)
             // 更新现有控制按钮样式以对标规范
             for (auto* btn : {m_pinBtn, m_minBtn, m_maxBtn}) {
                 if (!btn) continue;
-                btn->setFixedSize(24, 24);
-                btn->setIconSize(QSize(18, 18));
+                btn->setFixedSize(20, 20);
+                btn->setIconSize(QSize(16, 16));
                 btn->setToolTip("");
                 if (btn == m_pinBtn) {
                      btn->setStyleSheet(
@@ -581,8 +578,8 @@ ScanDialog::ScanDialog(QWidget* parent)
                 }
             }
             if (m_closeBtn) {
-                m_closeBtn->setFixedSize(24, 24);
-                m_closeBtn->setIconSize(QSize(18, 18));
+                m_closeBtn->setFixedSize(20, 20);
+                m_closeBtn->setIconSize(QSize(16, 16));
                 m_closeBtn->setToolTip("");
                 m_closeBtn->setStyleSheet(
                     "QPushButton { background-color: #E81123; border: none; border-radius: 4px; } "
@@ -778,7 +775,8 @@ ScanDialog::~ScanDialog() {
 void ScanDialog::setupUi() {
     auto* mainLayout = new QVBoxLayout(m_contentArea);
     // 2026-06-xx 按照建议：将 mainLayout 的 spacing 设置为 10，给组件之间留出物理切割的空隙
-    mainLayout->setContentsMargins(10, 10, 10, 10);
+    // 按照用户要求：底部边距设为 0，确保状态栏紧贴底边且高度严格受控
+    mainLayout->setContentsMargins(10, 10, 10, 0);
     mainLayout->setSpacing(10);
 
     auto* driveScroll = new QScrollArea();
@@ -859,6 +857,9 @@ void ScanDialog::setupUi() {
     m_extEdit->setFixedHeight(36);
     m_extEdit->setClearButtonEnabled(true);
     m_extEdit->installEventFilter(this);
+    connect(m_extEdit, &QLineEdit::textChanged, this, [this](const QString&) {
+        onFilterOptionChanged();
+    });
     connect(m_extEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
     searchRow->addWidget(m_extEdit);
 

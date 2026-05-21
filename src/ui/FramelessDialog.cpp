@@ -60,10 +60,10 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
 
     auto createTitleBtn = [this](const QString& iconName, const QString& tooltip, const QString& hoverColor) {
         QPushButton* btn = new QPushButton();
-        // 2026-05-16 对标 MainWindow 规范：尺寸固定为 24x24，图标 18x18，布局 spacing 控制间距
-        btn->setFixedSize(24, 24);
-        btn->setIcon(UiHelper::getIcon(iconName, QColor("#CCCCCC"), 18));
-        btn->setIconSize(QSize(18, 18));
+        // 2026-05-16 对标 MainWindow 规范：尺寸固定为 24x24 -> 20x20，图标 18x18 -> 16x16
+        btn->setFixedSize(20, 20);
+        btn->setIcon(UiHelper::getIcon(iconName, QColor("#CCCCCC"), 16));
+        btn->setIconSize(QSize(16, 16));
         btn->setAutoDefault(false);
         btn->setProperty("tooltipText", tooltip);
         btn->setCursor(Qt::PointingHandCursor);
@@ -107,9 +107,9 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
     });
 
     m_closeBtn = new QPushButton();
-    m_closeBtn->setFixedSize(24, 24); // 2026-05-16 同步为 24x24
-    m_closeBtn->setIcon(UiHelper::getIcon("close", QColor("#FFFFFF"), 18));
-    m_closeBtn->setIconSize(QSize(18, 18));
+    m_closeBtn->setFixedSize(20, 20); // 2026-05-16 同步为 20x20
+    m_closeBtn->setIcon(UiHelper::getIcon("close", QColor("#FFFFFF"), 16));
+    m_closeBtn->setIconSize(QSize(16, 16));
     m_closeBtn->setAutoDefault(false);
     m_closeBtn->setProperty("tooltipText", "关闭");
     m_closeBtn->setCursor(Qt::PointingHandCursor);
@@ -129,8 +129,8 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
 
     m_mainLayout->addWidget(titleBar);
 
-    // 按照用户要求：将标题栏下方的切割线向下偏移 2 像素
-    m_mainLayout->addSpacing(2);
+    // 按照用户要求：将标题栏下方的切割线向下偏移 2 像素 -> 增加到 4 像素以实现明显的向下偏移
+    m_mainLayout->addSpacing(4);
 
     // 添加独立的 1px 分割线，彻底杜绝 UI 穿透问题
     auto* line = new QFrame();
