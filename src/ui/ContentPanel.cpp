@@ -262,12 +262,8 @@ ContentPanel::ContentPanel(QWidget* parent)
  
             if (data.name == ".am_meta.json" || data.name == ".am_meta.json.tmp") continue; // 2026-06-xx 物理隔离 
  
-            // 2026-06-05 按照要求：检测标记颜色并实时着色图标 
-            QString colorName = QString::fromStdWString(data.meta.color); 
-            QColor tagColor = UiHelper::parseColorName(colorName); 
-             
-            // 2026-05-27 物理修复：图标分辨率由 18 提升至 128，对齐网格视图最大缩放 
-            QIcon itemIcon = UiHelper::getFileIcon(data.fullPath, 128, tagColor); 
+            // 回归原生：停止对从系统获取的物理图标进行人工着色
+            QIcon itemIcon = UiHelper::getFileIcon(data.fullPath, 128); 
             auto* nameItem = new QStandardItem(itemIcon, data.name); 
             nameItem->setData(data.fullPath, PathRole); 
             nameItem->setData(data.isDir ? "folder" : "file", TypeRole); 
@@ -349,13 +345,9 @@ ContentPanel::ContentPanel(QWidget* parent)
                         } 
                     } 
  
-                    // 降级保护：如果提取失败或非图形格式，使用 SVG 语义图标替代原生系统图标 
+                    // 降级保护：如果提取失败或非图形格式，直接指向 UiHelper::getFileIcon 获取原生图标
                     if (icon.isNull()) { 
-                        // 2026-06-05 按照要求：检测标记颜色并实时着色图标 
-                        QString colorName = pIdx.data(ColorRole).toString(); 
-                        QColor tagColor = UiHelper::parseColorName(colorName); 
-                        // 2026-05-27 物理修复：图标分辨率提升至 128 
-                        icon = UiHelper::getFileIcon(path, 128, tagColor); 
+                        icon = UiHelper::getFileIcon(path, 128); 
                     } 
  
                     m_model->setData(pIdx, icon, Qt::DecorationRole); 
@@ -608,7 +600,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                             m_proxyModel->setData(idx, colorValue, ColorRole); 
  
                             // 2026-06-05 按照要求：快捷键设置颜色后立即重渲染图标，实现视觉同步 
-                            QIcon coloredIcon = UiHelper::getFileIcon(path, 128, tagColor); 
+                            QIcon coloredIcon = UiHelper::getFileIcon(path, 128); 
                             m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
                         } 
                     } 
@@ -969,7 +961,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     MetadataManager::instance().setColor(itemPath.toStdWString(), colorName.toStdWString()); 
                     m_proxyModel->setData(idx, colorName, ColorRole); 
  
-                    // 2026-06-05 按照要求：设置颜色后立即重新生成并应用着色图标，实现视觉同步 
+                    // 2026-06-05 按照要求：设置颜色后立即重新生成并应用图标，实现视觉同步 
                     // 2026-05-17 逻辑修复：针对图像格式，必须优先尝试提取缩略图，防止图标覆盖内容
                     QIcon coloredIcon;
                     QString ext = QFileInfo(itemPath).suffix().toLower();
@@ -978,7 +970,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         if (!thumb.isNull()) coloredIcon = QIcon(thumb);
                     }
                     if (coloredIcon.isNull()) {
-                        coloredIcon = UiHelper::getFileIcon(itemPath, 128, tagColor);
+                        coloredIcon = UiHelper::getFileIcon(itemPath, 128);
                     }
                     m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
                 } 
@@ -1023,7 +1015,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                     if (!thumb.isNull()) coloredIcon = QIcon(thumb);
                                 }
                                 if (coloredIcon.isNull()) {
-                                    coloredIcon = UiHelper::getFileIcon(path, 128, dominant);
+                                    coloredIcon = UiHelper::getFileIcon(path, 128);
                                 }
                                 item->setData(coloredIcon, Qt::DecorationRole);
                                 break;
@@ -1254,19 +1246,15 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
         const auto drives = QDir::drives(); 
         QMap<int, int> rc; QMap<QString, int> cc, tc, tyc, cdc, mdc; 
+        QFileIconProvider provider;
         for (const QFileInfo& drive : drives) { 
             QString drivePath = drive.absolutePath(); 
  
             // 2026-04-12 按照用户最新铁律：从 MetadataManager 获取集中管理的磁盘元数据 
             RuntimeMeta rm = MetadataManager::instance().getMeta(drivePath.toStdWString()); 
              
-            // 2026-06-05 按照要求：检测标记颜色并实时着色图标 
-            QColor tagColor = UiHelper::parseColorName(QString::fromStdWString(rm.color)); 
-            QColor driveBaseColor = tagColor.isValid() ? tagColor : QColor("#95a5a6"); 
- 
-            // 物理替换：使用 hard_drive SVG 图标替代原生磁盘图标 
-            // 2026-05-27 物理修复：图标分辨率提升至 128 
-            QIcon driveIcon = UiHelper::getIcon("hard_drive", driveBaseColor, 128); 
+            // 回归原生：使用 QFileIconProvider 获取真实的磁盘分区图标，停止人工 SVG 着色
+            QIcon driveIcon = provider.icon(drive); 
             auto* item = new QStandardItem(driveIcon, drivePath); 
             item->setData(drivePath, PathRole); 
             item->setData("folder", TypeRole); 
@@ -1501,12 +1489,13 @@ void ContentPanel::loadCategory(int categoryId) {
  
     // 1. 加载子分类 
     auto allCategories = CategoryRepo::getAll(); 
+    QFileIconProvider provider;
     for (const auto& cat : allCategories) { 
         if (cat.parentId == categoryId) { 
             QList<QStandardItem*> row; 
             QString color = QString::fromStdWString(cat.color).isEmpty() ? "#aaaaaa" : QString::fromStdWString(cat.color); 
-            // 2026-06-xx 按照用户最新要求：统一使用 folder_filled 图标 
-            QIcon icon = UiHelper::getIcon("folder_filled", QColor(color), 128); 
+            // 回归原生：统一使用系统默认文件夹图标
+            QIcon icon = provider.icon(QFileIconProvider::Folder); 
              
             auto* item = new QStandardItem(icon, QString::fromStdWString(cat.name)); 
             item->setData("category", TypeRole); 
@@ -1540,9 +1529,8 @@ void ContentPanel::loadCategory(int categoryId) {
             QString normPath = QDir::toNativeSeparators(QDir::cleanPath(itemPath)); 
             RuntimeMeta rm = MetadataManager::instance().getMeta(normPath.toStdWString()); 
             QString colorName = QString::fromStdWString(rm.color); 
-            QColor tagColor = UiHelper::parseColorName(colorName); 
  
-            QIcon itemIcon = UiHelper::getFileIcon(itemPath, 128, tagColor); 
+            QIcon itemIcon = UiHelper::getFileIcon(itemPath, 128); 
             auto* nameItem = new QStandardItem(itemIcon, info.fileName()); 
             nameItem->setData(itemPath, PathRole); 
             nameItem->setData(type, TypeRole); 
@@ -1629,14 +1617,12 @@ void ContentPanel::loadPaths(const QStringList& paths) {
  
         QList<QStandardItem*> row; 
          
-        // 2026-06-05 按照要求：检测标记颜色并实时着色图标 
+        // 回归原生：停止对从系统获取的物理图标进行人工着色
         QString normPath = QDir::toNativeSeparators(QDir::cleanPath(path)); 
         RuntimeMeta rm = MetadataManager::instance().getMeta(normPath.toStdWString()); 
         QString colorName = QString::fromStdWString(rm.color); 
-        QColor tagColor = UiHelper::parseColorName(colorName); 
  
-        // 2026-05-27 物理修复：图标分辨率提升至 128 
-        QIcon itemIcon = UiHelper::getFileIcon(path, 128, tagColor); 
+        QIcon itemIcon = UiHelper::getFileIcon(path, 128); 
         auto* nameItem = new QStandardItem(itemIcon, info.fileName()); 
         nameItem->setData(path, PathRole); 
         nameItem->setData(info.isDir() ? "folder" : "file", TypeRole); 
