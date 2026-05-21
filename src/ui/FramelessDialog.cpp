@@ -46,8 +46,8 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
     // --- 标题栏 ---
     auto* titleBar = new QWidget();
     titleBar->setObjectName("TitleBar");
-    titleBar->setFixedHeight(32);
-    // 2026-05-16 物理对齐：高度压缩至 32px，边框色同步为主界面 #333333
+    titleBar->setFixedHeight(34);
+    // 2026-05-16 物理对齐：高度压缩至 34px，边框色同步为主界面 #333333
     titleBar->setStyleSheet("background-color: transparent; border-bottom: 1px solid #333333;");
     auto* titleLayout = new QHBoxLayout(titleBar);
     titleLayout->setContentsMargins(12, 0, 5, 0); // 右侧对齐 5px 物理边距
