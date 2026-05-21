@@ -419,7 +419,8 @@ int MftReader::getIndexByKey(uint64_t compositeKey) const {
 }
 
 bool MftReader::matchEntry(int i, const QString& query, bool useRegex, bool caseSensitive, 
-                          const QStringList& extensionList, bool includeHidden, bool includeSystem) const {
+                          const QStringList& extensionList, bool includeHidden, bool includeSystem,
+                          bool includeDollar) const {
     QReadLocker lock(&m_dataLock);
     if (i < 0 || i >= (int)m_frns.size() || m_frns[i] == 0) return false;
 
@@ -432,9 +433,12 @@ bool MftReader::matchEntry(int i, const QString& query, bool useRegex, bool case
     if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) return false;
     if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) return false;
 
-    if (query.isEmpty() && extensionList.isEmpty()) return true;
-
     const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
+
+    // $ 过滤逻辑：如果不包含 $，且文件名以 $ 开头，则过滤掉
+    if (!includeDollar && p[0] == '$') return false;
+
+    if (query.isEmpty() && extensionList.isEmpty()) return true;
 
     // 后缀过滤
     if (!extensionList.isEmpty()) {
@@ -529,7 +533,8 @@ std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
 }
 
 std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, bool caseSensitive, 
-                                       const QStringList& extensionList, bool includeHidden, bool includeSystem) {
+                                       const QStringList& extensionList, bool includeHidden, bool includeSystem,
+                                       bool includeDollar) {
     QReadLocker lock(&m_dataLock);
     if (!m_isInitialized) return {};
 
@@ -579,6 +584,9 @@ std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, boo
             const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
             if (_strnicmp(p, queryUtf8.constData(), queryUtf8.size()) != 0) break; 
 
+            // $ 过滤
+            if (!includeDollar && p[0] == '$') continue;
+
             size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
             if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
             
@@ -594,6 +602,9 @@ std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, boo
             if (m_frns[i] == 0) continue;
             const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
             if (_strnicmp(p, queryUtf8.constData(), queryUtf8.size()) == 0) {
+                // $ 过滤
+                if (!includeDollar && p[0] == '$') continue;
+
                 size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
                 if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
                 uint32_t at = m_attributes[i];
@@ -619,10 +630,16 @@ std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, boo
                 if (!includeHidden && (at & FILE_ATTRIBUTE_HIDDEN)) continue;
                 if (!includeSystem && (at & FILE_ATTRIBUTE_SYSTEM)) continue;
 
-                if (!hasQuery && !hasExt) continue;
-
                 const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[i]);
                 
+                // $ 过滤
+                if (!includeDollar && p[0] == '$') continue;
+
+                if (!hasQuery && !hasExt) {
+                    localRes.push_back(makeKey(dIdx, m_frns[i]));
+                    continue;
+                }
+
                 if (hasExt) {
                     bool extMatch = false;
                     size_t nameLen = strlen(p);

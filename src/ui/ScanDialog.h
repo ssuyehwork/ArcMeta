@@ -53,6 +53,8 @@ struct ScanConfig {
     bool caseSensitive = false;
     bool includeHidden = false;
     bool includeSystem = false;
+    bool includeDollar = false;
+    bool autoDisplay = false;
 
     void load();
     void save();
@@ -144,6 +146,8 @@ private:
     QCheckBox* m_checkCase = nullptr;
     QCheckBox* m_checkHidden = nullptr;
     QCheckBox* m_checkSystem = nullptr;
+    QCheckBox* m_checkDollar = nullptr;
+    QCheckBox* m_checkAuto = nullptr;
     
     QHBoxLayout* m_driveLayout = nullptr;
     QWidget* m_driveContainer = nullptr;

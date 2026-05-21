@@ -102,6 +102,8 @@ void ScanConfig::load() {
         if (obj.contains("caseSensitive")) caseSensitive = obj["caseSensitive"].toBool();
         if (obj.contains("includeHidden")) includeHidden = obj["includeHidden"].toBool();
         if (obj.contains("includeSystem")) includeSystem = obj["includeSystem"].toBool();
+        if (obj.contains("includeDollar")) includeDollar = obj["includeDollar"].toBool();
+        if (obj.contains("autoDisplay")) autoDisplay = obj["autoDisplay"].toBool();
     }
 }
 
@@ -134,6 +136,8 @@ void ScanConfig::save() {
         obj["caseSensitive"] = caseSensitive;
         obj["includeHidden"] = includeHidden;
         obj["includeSystem"] = includeSystem;
+        obj["includeDollar"] = includeDollar;
+        obj["autoDisplay"] = autoDisplay;
         
         file.write(QJsonDocument(obj).toJson());
     }
@@ -802,13 +806,17 @@ void ScanDialog::setupUi() {
     m_checkCase = new QCheckBox("大小写");
     m_checkHidden = new QCheckBox("隐藏");
     m_checkSystem = new QCheckBox("系统");
+    m_checkDollar = new QCheckBox("显示$");
+    m_checkAuto = new QCheckBox("自动显示");
 
     m_checkRegex->setChecked(m_config.useRegex);
     m_checkCase->setChecked(m_config.caseSensitive);
     m_checkHidden->setChecked(m_config.includeHidden);
     m_checkSystem->setChecked(m_config.includeSystem);
+    m_checkDollar->setChecked(m_config.includeDollar);
+    m_checkAuto->setChecked(m_config.autoDisplay);
 
-    for (auto* cb : {m_checkRegex, m_checkCase, m_checkHidden, m_checkSystem}) {
+    for (auto* cb : {m_checkRegex, m_checkCase, m_checkHidden, m_checkSystem, m_checkDollar, m_checkAuto}) {
         connect(cb, &QCheckBox::toggled, this, &ScanDialog::onFilterOptionChanged);
         optionRow->addWidget(cb);
     }
@@ -1508,6 +1516,8 @@ void ScanDialog::onFilterOptionChanged() {
     m_config.caseSensitive = m_checkCase->isChecked();
     m_config.includeHidden = m_checkHidden->isChecked();
     m_config.includeSystem = m_checkSystem->isChecked();
+    m_config.includeDollar = m_checkDollar->isChecked();
+    m_config.autoDisplay = m_checkAuto->isChecked();
     m_config.save();
 
     ScanFilterState state;
@@ -1515,6 +1525,8 @@ void ScanDialog::onFilterOptionChanged() {
     state.caseSensitive = m_config.caseSensitive;
     state.includeHidden = m_config.includeHidden;
     state.includeSystem = m_config.includeSystem;
+    state.includeDollar = m_config.includeDollar;
+    state.autoDisplay = m_config.autoDisplay;
     QString extText = m_extEdit->text().toLower();
     if (!extText.isEmpty()) state.extensionList = extText.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
     

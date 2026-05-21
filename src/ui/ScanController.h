@@ -21,9 +21,11 @@ struct ScanFilterState {
     bool caseSensitive = false;
     bool includeHidden = true;
     bool includeSystem = true;
+    bool includeDollar = true;
+    bool autoDisplay = false;
 
     bool isEmpty() const { 
-        return extensionList.isEmpty() && !useRegex && !caseSensitive && includeHidden && includeSystem; 
+        return extensionList.isEmpty() && !useRegex && !caseSensitive && includeHidden && includeSystem && includeDollar && !autoDisplay;
     }
 };
 

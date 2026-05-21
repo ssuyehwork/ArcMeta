@@ -67,11 +67,13 @@ public:
     // 2026-06-xx 物理重构：返回稳定的复合 FRN 主键而非数组下标，杜绝跨线程索引漂移
     std::vector<uint64_t> search(const QString& query, bool useRegex = false, bool caseSensitive = false, 
                                  const QStringList& extensionList = QStringList(), 
-                                 bool includeHidden = true, bool includeSystem = true);
+                                 bool includeHidden = true, bool includeSystem = true,
+                                 bool includeDollar = true);
     
     // SoA 访问接口
     bool     matchEntry(int index, const QString& query, bool useRegex, bool caseSensitive, 
-                        const QStringList& extensionList, bool includeHidden, bool includeSystem) const;
+                        const QStringList& extensionList, bool includeHidden, bool includeSystem,
+                        bool includeDollar = true) const;
     int      getIndexByKey(uint64_t compositeKey) const;
     uint64_t getKeyByIndex(int index) const;
     QString  getName(int index) const;

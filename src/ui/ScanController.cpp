@@ -77,7 +77,15 @@ void ScanController::performSearch() {
     timer.start();
 
     auto future = QtConcurrent::run([text = m_searchText, state = m_filterState]() {
-        return MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem);
+        // 如果开启自动显示且查询为空，则执行全量搜索（带过滤）
+        if (state.autoDisplay && text.isEmpty() && state.extensionList.isEmpty()) {
+            return MftReader::instance().search("", state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem, state.includeDollar);
+        }
+        // 否则，如果不是自动显示且查询为空，返回空结果
+        if (!state.autoDisplay && text.isEmpty() && state.extensionList.isEmpty()) {
+            return std::vector<uint64_t>();
+        }
+        return MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem, state.includeDollar);
     });
 
     disconnect(&m_watcher, &QFutureWatcher<std::vector<uint64_t>>::finished, this, nullptr);
@@ -152,8 +160,16 @@ void ScanController::onMftEntryAdded(uint64_t key) {
     int idx = MftReader::instance().getIndexByKey(key);
     if (idx == -1) return;
 
-    if (MftReader::instance().matchEntry(idx, m_searchText, m_filterState.useRegex, m_filterState.caseSensitive, 
-                                        m_filterState.extensionList, m_filterState.includeHidden, m_filterState.includeSystem)) {
+    bool matches = MftReader::instance().matchEntry(idx, m_searchText, m_filterState.useRegex, m_filterState.caseSensitive,
+                                                   m_filterState.extensionList, m_filterState.includeHidden, m_filterState.includeSystem,
+                                                   m_filterState.includeDollar);
+
+    // 如果查询为空，只有在开启自动显示的情况下才认为匹配
+    if (m_searchText.isEmpty() && m_filterState.extensionList.isEmpty()) {
+        matches = m_filterState.autoDisplay && matches;
+    }
+
+    if (matches) {
         
         // 2026-06-xx 物理加固：采用 Copy-On-Write 机制确保 ResultSet 快照的不可变性，杜绝 UI 线程数据竞争
         auto newSet = std::make_shared<ResultSet>(*m_resultSet);
@@ -191,7 +207,13 @@ void ScanController::onMftEntryUpdated(uint64_t key) {
     int idx = MftReader::instance().getIndexByKey(key);
     
     bool matches = (idx != -1) && MftReader::instance().matchEntry(idx, m_searchText, m_filterState.useRegex, m_filterState.caseSensitive, 
-                                                                  m_filterState.extensionList, m_filterState.includeHidden, m_filterState.includeSystem);
+                                                                  m_filterState.extensionList, m_filterState.includeHidden, m_filterState.includeSystem,
+                                                                  m_filterState.includeDollar);
+
+    // 如果查询为空，只有在开启自动显示的情况下才认为匹配
+    if (m_searchText.isEmpty() && m_filterState.extensionList.isEmpty()) {
+        matches = m_filterState.autoDisplay && matches;
+    }
 
     if (itPos != m_resultSet->keyToPos.end()) {
         int row = itPos->second;
