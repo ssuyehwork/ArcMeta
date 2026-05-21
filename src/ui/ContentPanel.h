@@ -312,25 +312,16 @@ public:
     using QStyledItemDelegate::QStyledItemDelegate;
 
     struct GridMetrics {
-        QRect cardRect;      // 整个条目占用的总区域
-        QRect squareRect;    // 正方形背景区域（包含图标、评级、角标）
-        int iconDrawSize;
-        int ratingH;
-        int nameH;
-        int gap1;            // 图标与评级之间的间距
-        int gap2;            // 正方形区与名称之间的间距
-        int totalH;
-        int startY;
-        QRect iconRect;
-        int ratingY;
-        int infoTotalW;
-        int infoStartX;
-        QRect banRect;
-        int starsStartX;
+        QRect cardRect;      // 整个条目的一体化圆角卡片区域
+        QRect thumbRect;     // 缩略图/图标展示区域 (充满策略)
+        QRect metadataRect;  // 底部元数据展示区 (包含名称和评级)
+        QRect nameRect;      // 文件名区域
+        QRect ratingRect;    // 评级星级区域
+
         int starSize;
         int starSpacing;
-        int nameY;
-        QRect nameRect;
+        int starsStartX;
+        QRect banRect;
     };
 
     static GridMetrics calculateMetrics(const QStyleOptionViewItem& option);

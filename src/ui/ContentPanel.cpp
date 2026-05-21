@@ -474,25 +474,20 @@ void ContentPanel::updateStatusBarStats() {
 }
 
 void ContentPanel::updateGridSize() {
-    // 2026-06-05 按照用户要求：彻底重构为正方形布局，名称外置
-    // 2026-06-05 按照要求：将最小值锁定为 56
-    m_zoomLevel = qBound(56, m_zoomLevel, 128);
+    // 2026-06-xx V3 重构：采用 ScanDialog 风格的一体化卡片设计
+    m_zoomLevel = qBound(56, m_zoomLevel, 256); // 扩展缩放上限至 256 以适配画廊感
     m_gridView->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
     
-    int side = m_zoomLevel + 46; // 正方形边长
-    int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
-    int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
-    int gap = 6;                // 间距归一化
+    int cardW = m_zoomLevel + 24;
+    int metadataH = 46; // 底部文件名和星级的固定高度
+    int totalH = cardW + metadataH + 12; // 12 为外边距留白
     
-    // 总高度 = 正方形边长 + 间距1 + 评分高度 + 间距2 + 名称高度 + 底部缓冲
-    int totalH = side + gap + ratingH + gap + nameH + 8;
-    m_gridView->setGridSize(QSize(side, totalH));
+    m_gridView->setGridSize(QSize(cardW + 10, totalH));
 
-    // 2026-06-05 按照要求：持久化保存当前的缩放级别
     QSettings settings("ArcMeta团队", "ArcMeta");
     settings.setValue("UI/GridZoomLevel", m_zoomLevel);
 
-    qDebug() << "[GridSize] Zoom:" << m_zoomLevel << "Square:" << side << "TotalH:" << totalH;
+    qDebug() << "[GridSize V3] Zoom:" << m_zoomLevel << "CardW:" << cardW << "TotalH:" << totalH;
 } 
  
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 
@@ -1745,42 +1740,25 @@ void ContentPanel::updateLayersButtonState() {
  
 GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOptionViewItem& option) { 
     GridMetrics m; 
-    // cardRect 为条目占用的总区域 
-    m.cardRect = option.rect.adjusted(5, 5, -5, -5); // 2026-05-08 按照用户要求：增加到5px使卡片之间间距达到10px 
-    double zoom = (double)option.decorationSize.width(); 
- 
-    // 2026-06-05 按照用户要求：定义正方形主体区域 
-    int side = m.cardRect.width(); 
-    m.squareRect = QRect(m.cardRect.left(), m.cardRect.top(), side, side); 
- 
-    m.iconDrawSize = (int)(zoom * 0.7); 
-    m.ratingH      = 16;  // 2026-05-17 物理锁定评分区高度 
-    m.nameH        = (int)(zoom * 0.25); 
- 
-    // 2026-05-17 按照用户要求：主图标在正方形内垂直居中
-    m.iconRect = QRect(m.squareRect.left() + (m.squareRect.width() - m.iconDrawSize) / 2, 
-                       m.squareRect.top() + (m.squareRect.height() - m.iconDrawSize) / 2, 
-                       m.iconDrawSize, m.iconDrawSize); 
+    // cardRect 为一体化卡片的总边界
+    m.cardRect = option.rect.adjusted(5, 5, -5, -5);
     
-    // 2026-05-17 物理布局重构：星级区置于正方形下方
-    // 2026-06-xx 按照用户要求：下移 2 像素（从 +6 改为 +8）
-    m.ratingY = m.squareRect.bottom() + 8; 
- 
-    m.starSize    = 14; // 2026-05-17 尺寸微调以匹配外部布局
+    int metadataH = 46; // 固定元数据区高度
+    m.thumbRect = QRect(m.cardRect.left(), m.cardRect.top(), m.cardRect.width(), m.cardRect.height() - metadataH);
+    m.metadataRect = QRect(m.cardRect.left(), m.thumbRect.bottom(), m.cardRect.width(), metadataH);
+
+    // 元数据区内部分两行
+    m.nameRect = QRect(m.metadataRect.left() + 6, m.metadataRect.top() + 4, m.metadataRect.width() - 12, 18);
+    m.ratingRect = QRect(m.metadataRect.left(), m.nameRect.bottom() + 2, m.metadataRect.width(), 16);
+
+    m.starSize    = 14;
     m.starSpacing = 2;   
-    int banW = 12;      // 2026-06-xx 物理对齐：将禁止图标缩减至 12px，使其与星级在视觉权重上保持一致
+    int banW = 12;
     int banGap = 4; 
  
-    m.infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing); 
-    m.infoStartX = m.squareRect.left() + (m.squareRect.width() - m.infoTotalW) / 2; 
- 
-    m.banRect = QRect(m.infoStartX, m.ratingY + (m.ratingH - banW) / 2, banW, banW); 
-    m.starsStartX = m.infoStartX + banW + banGap; 
-     
-    // 名称区紧贴评分区下方 
-    // 2026-06-xx 按照要求：第三次向上偏移 2 像素以实现零间距极致排版（从 +2 调整为 +0）
-    m.nameY = m.ratingY + m.ratingH + 0; 
-    m.nameRect = QRect(m.cardRect.left(), m.nameY, m.cardRect.width(), m.nameH); 
+    int infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing);
+    m.starsStartX = m.ratingRect.left() + (m.ratingRect.width() - infoTotalW) / 2 + banW + banGap;
+    m.banRect = QRect(m.starsStartX - banGap - banW, m.ratingRect.top() + (m.ratingRect.height() - banW) / 2, banW, banW);
  
     return m; 
 } 
@@ -1788,120 +1766,108 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
 void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const { 
     painter->save(); 
     painter->setRenderHint(QPainter::Antialiasing); 
+    painter->setRenderHint(QPainter::SmoothPixmapTransform);
  
     GridMetrics m = calculateMetrics(option); 
     bool isSelected = (option.state & QStyle::State_Selected); 
     bool isHovered = (option.state & QStyle::State_MouseOver); 
-     
-    // 2026-06-05 按照用户要求：背景框仅限正方形区域，名称外置 
-    QColor cardBg = isSelected ? QColor("#282828") : (isHovered ? QColor("#2A2A2A") : QColor("#2D2D2D")); 
-    painter->setPen(isSelected ? QPen(QColor("#3498db"), 2) : QPen(QColor("#333333"), 1)); 
-    painter->setBrush(cardBg); 
-    painter->drawRoundedRect(m.squareRect, 8, 8); 
- 
-    // [内容区绘制] - 均在正方形内 
-    // 1. 状态位图标绘制 (置顶 vs. 已录入 互斥) 
-    // 2026-06-xx 物理修复：校准 ItemRole 作用域，确保 GridItemDelegate 编译通过 
+
+    // 1. 绘制一体化卡片背景
+    QColor cardBg = isHovered ? QColor("#323233") : QColor("#2D2D2D");
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(cardBg);
+    painter->drawRoundedRect(m.cardRect, 8, 8);
+
+    // 2. 建立缩略图裁剪路径
+    painter->save();
+    QPainterPath clipPath;
+    clipPath.addRoundedRect(m.thumbRect, 8, 8);
+    painter->setClipPath(clipPath);
+
+    // 绘制缩略图或降级图标
+    QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
+    // 启发式：如果 QIcon 的实际大小接近 128px，我们认为它是“物理提取”的内容
+    QSize iconSize = icon.actualSize(QSize(256, 256));
+
+    if (iconSize.width() >= 96) {
+        // 充满策略：KeepAspectRatioByExpanding
+        QPixmap pix = icon.pixmap(iconSize);
+        QPixmap scaled = pix.scaled(m.thumbRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        int x = m.thumbRect.center().x() - scaled.width() / 2;
+        int y = m.thumbRect.center().y() - scaled.height() / 2;
+        painter->drawPixmap(x, y, scaled);
+    } else {
+        // 居中降级
+        QPoint center = m.thumbRect.center();
+        icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
+    }
+    painter->restore(); // 释放裁剪区
+
+    // 3. 状态位图标与角标 (绘制在图片上方，不受裁剪影响)
     bool isPinned = index.data(IsLockedRole).toBool(); 
     bool isManaged = index.data(InDatabaseRole).toBool(); 
-     
     if (isPinned || isManaged) { 
-        QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16); 
+        QRect statusRect(m.thumbRect.right() - 22, m.thumbRect.top() + 8, 16, 16);
         if (isPinned) { 
-            // 置顶优先 
             QIcon pinIcon = UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16); 
             pinIcon.paint(painter, statusRect); 
         } else { 
-            // 已录入但未置顶，显示绿对勾 
             QIcon checkIcon = UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16); 
             checkIcon.paint(painter, statusRect); 
         } 
     } 
  
-    // 2. 扩展名角标 
     QString path = index.data(PathRole).toString(); 
     QFileInfo info(path); 
     QString ext = info.isDir() ? "DIR" : info.suffix().toUpper(); 
     if (ext.isEmpty()) ext = "FILE"; 
     QColor badgeColor = UiHelper::getExtensionColor(ext); 
- 
-    QRect extRect(m.squareRect.left() + 8, m.squareRect.top() + 8, 36, 18); 
+    QRect extRect(m.thumbRect.left() + 8, m.thumbRect.top() + 8, 36, 18);
     painter->setPen(Qt::NoPen); 
     painter->setBrush(badgeColor); 
     painter->drawRoundedRect(extRect, 2, 2); 
     painter->setPen(QColor("#FFFFFF")); 
     QFont extFont = painter->font(); 
-    extFont.setPointSize(8); 
-    extFont.setBold(true); 
+    extFont.setPointSize(8); extFont.setBold(true);
     painter->setFont(extFont); 
     painter->drawText(extRect, Qt::AlignCenter, ext); 
  
-    // 3. 主图标 
-    QIcon icon = index.data(Qt::DecorationRole).value<QIcon>(); 
-    icon.paint(painter, m.iconRect); 
- 
-    // 4. 评级星级 
+    // 4. 元数据绘制 (文件名与星级)
+    QString name = index.data(Qt::DisplayRole).toString();
+    painter->setPen(QColor("#EEEEEE"));
+    if (!isSelected && !index.data(InDatabaseRole).toBool()) {
+        painter->setPen(QColor(238, 238, 238, 120));
+    }
+    QFont textFont = painter->font();
+    textFont.setPointSize(8); textFont.setBold(false);
+    painter->setFont(textFont);
+    QString elidedName = option.fontMetrics.elidedText(name, Qt::ElideMiddle, m.nameRect.width());
+    painter->drawText(m.nameRect, Qt::AlignCenter, elidedName);
+
     int rating = index.data(RatingRole).toInt(); 
-     
-    // 2026-xx-xx 按照最新要求： 
-    // 1. 如果已有打分 (rating > 0)，始终显示。 
-    // 2. 如果未打分但被选中，显示禁止图标和空心星。 
-    // 3. 如果未打分且未选中，不显示。 
-    bool shouldShowRating = (rating > 0) || isSelected; 
- 
-    if (shouldShowRating) { 
-        // 2026-xx-xx 深度修复：调高禁止图标与空心星亮度，确保在深色卡片背景下清晰可见 
-        QIcon banIcon = UiHelper::getIcon("no_color", QColor("#B0B0B0"), m.banRect.width()); 
+    if ((rating > 0) || isSelected) {
+        QIcon banIcon = UiHelper::getIcon("no_color", QColor("#B0B0B0"), 12);
         banIcon.paint(painter, m.banRect); 
- 
         QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(m.starSize, m.starSize), QColor("#EF9F27")); 
         QPixmap emptyStar = UiHelper::getPixmap("star", QSize(m.starSize, m.starSize), QColor("#888888")); 
- 
         for (int i = 0; i < 5; ++i) { 
-            QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
+            QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingRect.top() + (m.ratingRect.height() - m.starSize) / 2, m.starSize, m.starSize);
             painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar); 
         } 
     } 
-     
-    // [名称区绘制] - 在正方形下方 
-    QString colorName = index.data(ColorRole).toString(); 
-    bool isEmptyFolder = (index.data(TypeRole).toString() == "folder" && index.data(IsEmptyRole).toBool()); 
- 
-    if (isEmptyFolder) { 
-        // 对空文件夹正方形区进行特殊描边 
-        painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine)); 
-        painter->setBrush(QColor(65, 242, 242, 30)); 
-        painter->drawRoundedRect(m.squareRect, 8, 8); 
-        painter->setPen(QColor("#41F2F2")); 
-    } 
- 
-    QString name = index.data(Qt::DisplayRole).toString(); 
-    painter->setPen(QColor("#EEEEEE")); 
-    QFont textFont = painter->font(); 
-    textFont.setPointSize(8); 
-    textFont.setBold(false); 
-    painter->setFont(textFont); 
- 
-    // 2026-06-xx 按照要求：未录入项文字半透明 
-    // 2026-06-xx 物理修复：校准 InDatabaseRole 作用域 
-    if (!isSelected && !index.data(InDatabaseRole).toBool()) { 
-        painter->setPen(QColor(238, 238, 238, 120)); 
-    } 
- 
-    // 2026-06-05 按照用户要求：恢复自动换行逻辑，并在“实在太长”时使用省略号 
-    // 零宽空格注入以支持非标准断行（如下划线或点号） 
-    QString displayName = name; 
-    displayName.replace("_", "_\u200B"); 
-    displayName.replace(".", ".\u200B"); 
- 
-    // 首先尝试进行自动换行绘制，如果高度超出，则回退到省略号单行显示 
-    QRect boundingRect = painter->boundingRect(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName); 
-    if (boundingRect.height() > m.nameRect.height()) { 
-        QString elidedName = option.fontMetrics.elidedText(name, Qt::ElideRight, m.nameRect.width() - 8); 
-        painter->drawText(m.nameRect, Qt::AlignCenter, elidedName); 
-    } else { 
-        painter->drawText(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName); 
-    } 
+
+    // 5. 空文件夹特殊标记
+    if (index.data(TypeRole).toString() == "folder" && index.data(IsEmptyRole).toBool()) {
+        painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine));
+        painter->drawRoundedRect(m.cardRect, 8, 8);
+    }
+
+    // 6. 选中边框 (2px 标准蓝)
+    if (isSelected) {
+        painter->setPen(QPen(QColor("#3498db"), 2));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRoundedRect(m.cardRect, 8, 8);
+    }
  
     painter->restore(); 
 } 
@@ -1937,10 +1903,8 @@ bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) {
  
 bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) { 
     if (event->type() == QEvent::MouseButtonPress) { 
-        // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 子类转型歧义 
         QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event); 
         if (mEvent->button() == Qt::LeftButton) { 
-            // 2026-05-28 按照用户授权：废除本地硬编码判定，统一使用 calculateMetrics 保证 Hitbox 零偏差 
             GridMetrics m = calculateMetrics(option); 
             QString path = index.data(PathRole).toString(); 
  
@@ -1949,7 +1913,6 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
                     MetadataManager::instance().setRating(path.toStdWString(), 0); 
                     model->setData(index, 0, RatingRole); 
                 } 
-                // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器，防止清除星级时错误触发行内编辑
                 auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
                 if (view) {
                     QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
@@ -1963,14 +1926,13 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
             } 
  
             for (int i = 0; i < 5; ++i) { 
-                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
+                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingRect.top() + (m.ratingRect.height() - m.starSize) / 2, m.starSize, m.starSize);
                 if (starRect.contains(mEvent->pos())) { 
                     int r = i + 1; 
                     if (!path.isEmpty()) { 
                         MetadataManager::instance().setRating(path.toStdWString(), r); 
                         model->setData(index, r, RatingRole); 
                     } 
-                    // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器，防止星级点击时错误触发行内编辑
                     auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
                     if (view) {
                         QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
@@ -2105,7 +2067,6 @@ void ContentPanel::recalculateAndEmitStats() {
  
 void GridItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const { 
     Q_UNUSED(index); 
-    // 2026-06-05 按照重构布局：同步定位编辑器至正方形下方的名称区 
     GridMetrics m = calculateMetrics(option); 
     editor->setGeometry(m.nameRect); 
 } 
