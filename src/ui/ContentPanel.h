@@ -212,7 +212,7 @@ private:
     QLabel* m_imagePreview = nullptr;
 
     // 视图组件
-    QListView* m_gridView = nullptr;
+    QWidget* m_gridView = nullptr; // 2026-06-xx 重构：改为通用 QWidget 以支持 JustifiedView
     QTreeView* m_treeView = nullptr;
     QStandardItemModel* m_model = nullptr;
     QSortFilterProxyModel* m_proxyModel = nullptr;
