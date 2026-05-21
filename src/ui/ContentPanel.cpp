@@ -340,8 +340,8 @@ ContentPanel::ContentPanel(QWidget* parent)
                         } 
                     } else if (UiHelper::isGraphicsFile(ext)) { 
                         // 2026-04-11 按照用户要求：凡是图片/图形格式，物理强制提取内容缩略图 
-                        // 2026-04-11 按照用户要求：专属注入 true 参数，只对走缓存的小列表图执行垂直翻转修正 
-                        thumb = UiHelper::getShellThumbnail(path, 256, true);
+                        // 物理修正：停止强制垂直翻转。现代 Qt::fromHBITMAP 已能正确处理 DIB 步长，手动 flipped 导致了画面倒置。
+                        thumb = UiHelper::getShellThumbnail(path, 256, false);
                         if (!thumb.isNull()) { 
                             hasThumb = true;
                         } 
