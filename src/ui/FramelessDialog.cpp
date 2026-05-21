@@ -225,10 +225,10 @@ FramelessInputDialog::FramelessInputDialog(const QString& title, const QString& 
     m_edit->setStyleSheet(
         "QLineEdit {"
         "  background-color: #2D2D2D; border: 1px solid #444; border-radius: 6px;"
-        "  padding: 0px 10px; color: white; selection-background-color: #4A90E2;"
+        "  padding: 0px 10px; color: white; selection-background-color: #3498db;"
         "  font-size: 14px;"
         "}"
-        "QLineEdit:focus { border: 1px solid #4A90E2; }"
+        "QLineEdit:focus { border: 1px solid #3498db; }"
     );
     layout->addWidget(m_edit);
 
@@ -253,7 +253,7 @@ FramelessInputDialog::FramelessInputDialog(const QString& title, const QString& 
     btnOk->setFixedSize(80, 32);
     btnOk->setCursor(Qt::PointingHandCursor);
     btnOk->setStyleSheet(
-        "QPushButton { background-color: #4A90E2; color: white; border: none; border-radius: 4px; font-weight: bold; } "
+        "QPushButton { background-color: #3498db; color: white; border: none; border-radius: 4px; font-weight: bold; } "
         "QPushButton:hover { background-color: #3E3E42; }" // 统一悬停色
     );
     connect(btnOk, &QPushButton::clicked, this, &QDialog::accept);
