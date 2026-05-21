@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QWidget>
+#include <QAbstractItemView>
 #include <QListView>
 #include <QTreeView>
 #include <QStackedWidget>
@@ -149,9 +150,10 @@ public:
     QAbstractItemModel* model() const { return m_model; }
     QSortFilterProxyModel* getProxyModel() const { return m_proxyModel; }
     QModelIndexList getSelectedIndexes() const {
-        return (m_viewStack->currentWidget() == m_gridView) ? 
-                m_gridView->selectionModel()->selectedIndexes() : 
-                m_treeView->selectionModel()->selectedIndexes();
+        if (m_viewStack->currentWidget() == m_gridView && m_gridView) {
+            return m_gridView->selectionModel()->selectedIndexes();
+        }
+        return m_treeView->selectionModel()->selectedIndexes();
     }
 
     /**
@@ -212,7 +214,7 @@ private:
     QLabel* m_imagePreview = nullptr;
 
     // 视图组件
-    QWidget* m_gridView = nullptr; // 2026-06-xx 重构：改为通用 QWidget 以支持 JustifiedView
+    QAbstractItemView* m_gridView = nullptr; // 2026-06-xx 重构：支持 JustifiedView (继承自 QAbstractItemView)
     QTreeView* m_treeView = nullptr;
     QStandardItemModel* m_model = nullptr;
     QSortFilterProxyModel* m_proxyModel = nullptr;
