@@ -438,6 +438,8 @@ ScanDialog::ScanDialog(QWidget* parent)
         m_titleLabel->hide(); 
         auto* titleLayout = qobject_cast<QHBoxLayout*>(m_pinBtn->parentWidget()->layout());
         if (titleLayout) {
+            // 按照用户要求：移除标题栏底部的 1px 切割线
+            m_pinBtn->parentWidget()->setStyleSheet("background-color: transparent; border: none;");
             titleLayout->setSpacing(0);
             QLabel* logoLabel = new QLabel();
             logoLabel->setFixedSize(18, 18);
@@ -445,7 +447,8 @@ ScanDialog::ScanDialog(QWidget* parent)
             titleLayout->insertWidget(0, logoLabel);
             
             QLabel* brandLabel = new QLabel("FERREX-META");
-            brandLabel->setStyleSheet("color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 5px;");
+            // 按照用户要求：视觉上间距不足，将 margin-left 从 5px 增加到 8px
+            brandLabel->setStyleSheet("color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 8px;");
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
@@ -469,7 +472,7 @@ ScanDialog::ScanDialog(QWidget* parent)
             viewBtn->setCursor(Qt::PointingHandCursor);
             viewBtn->setStyleSheet(
                 "QPushButton { background: #2D2D2D; color: #CCC; border: 1px solid #3F3F3F; "
-                "border-radius: 4px; padding: 0; }"
+                "border-radius: 4px; padding: 0; margin-left: 5px; }"  // 增加 5px 间距，与左侧滑动条拉开
                 "QPushButton:hover { background: #3A3A3A; color: #FFF; }"
             );
             connect(viewBtn, &QPushButton::clicked, this, [this, viewBtn]() {
