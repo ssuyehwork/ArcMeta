@@ -461,26 +461,16 @@ ScanDialog::ScanDialog(QWidget* parent)
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
 
-            // 按照截图要求调整布局：
-            // [Logo/标题/状态] -> [Stretch] -> [滑动条③] -> [视图按钮②] -> [窗口控制按钮①]
+            titleLayout->addStretch(1); // 推到右侧
 
-            // 找到窗口控制按钮（m_pinBtn 等）在 layout 中的起始索引。
-            // 在 FramelessDialog 中，它们是依次 addWidget 的。
-            // 这里 titleLayout 是从 FramelessDialog 继承而来的，m_pinBtn 应该已经在里面。
-
-            titleLayout->insertStretch(titleLayout->indexOf(m_pinBtn));
-
-            // ① 视图切换按钮 (标记 2)
-            QPushButton* viewBtn = new QPushButton();
-            viewBtn->setFixedSize(24, 24); // 严格锁定 24x24
-            viewBtn->setIcon(UiHelper::getIcon("grid", QColor("#CCCCCC"), 18)); // 严格锁定图标 18x18
-            viewBtn->setIconSize(QSize(18, 18));
+            // ① 视图切换按钮
+            QPushButton* viewBtn = new QPushButton("视图");
+            viewBtn->setFixedHeight(22);
             viewBtn->setCursor(Qt::PointingHandCursor);
-            viewBtn->setToolTip(""); // 禁止原生 ToolTip
             viewBtn->setStyleSheet(
-                "QPushButton { background: transparent; border: none; border-radius: 4px; padding: 0; }"
-                "QPushButton:hover { background: rgba(255, 255, 255, 0.1); }"
-                "QPushButton:pressed { background: rgba(255, 255, 255, 0.2); }"
+                "QPushButton { background: #2D2D2D; color: #CCC; border: 1px solid #3F3F3F; "
+                "border-radius: 4px; font-size: 11px; padding: 0 8px; }"
+                "QPushButton:hover { background: #3A3A3A; color: #FFF; }"
             );
             connect(viewBtn, &QPushButton::clicked, this, [this, viewBtn]() {
                 QMenu* menu = new QMenu(this);
@@ -516,16 +506,15 @@ ScanDialog::ScanDialog(QWidget* parent)
                 }
                 menu->exec(viewBtn->mapToGlobal(QPoint(0, viewBtn->height() + 2)));
             });
+            titleLayout->addWidget(viewBtn);
 
-            // ② 尺寸滑动条 (标记 3)
+            // ② 尺寸滑动条
             m_sizeSlider = new QSlider(Qt::Horizontal);
             m_sizeSlider->setRange(32, 256);
             m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64);
-            m_sizeSlider->setFixedSize(110, 32); // 高度锁定 32px
+            m_sizeSlider->setFixedSize(110, 20);
             m_sizeSlider->setCursor(Qt::PointingHandCursor);
-            // 间距计算：margin-right 1px + spacing 4px = 5px (精准对标视图按钮)
             m_sizeSlider->setStyleSheet(
-                "QSlider { background: #1E1E1E; margin-bottom: -1px; margin-right: 1px; }"
                 "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }"
                 "QSlider::sub-page:horizontal { background: #FF8C00; border-radius: 2px; }"
                 "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; "
@@ -538,9 +527,7 @@ ScanDialog::ScanDialog(QWidget* parent)
                 m_tableModel->clearThumbCache();
                 m_config.save();
             });
-
-            titleLayout->insertWidget(titleLayout->indexOf(m_pinBtn), viewBtn);
-            titleLayout->insertWidget(titleLayout->indexOf(viewBtn), m_sizeSlider);
+            titleLayout->addWidget(m_sizeSlider);
 
             // 更新现有控制按钮样式以对标规范
             for (auto* btn : {m_pinBtn, m_minBtn, m_maxBtn}) {
@@ -651,6 +638,48 @@ ScanDialog::ScanDialog(QWidget* parent)
         QProgressBar#ScanProgressBar::chunk { background: #FF8C00; }
 
         QCheckBox { color: #AAA; }
+
+        QScrollBar:vertical {
+            border: none;
+            background: transparent;
+            width: 4px;
+            margin: 0px;
+        }
+        QScrollBar::handle:vertical {
+            background: #333333;
+            min-height: 20px;
+            border-radius: 2px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #444444;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+        }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            background: none;
+        }
+
+        QScrollBar:horizontal {
+            border: none;
+            background: transparent;
+            height: 4px;
+            margin: 0px;
+        }
+        QScrollBar::handle:horizontal {
+            background: #333333;
+            min-width: 20px;
+            border-radius: 2px;
+        }
+        QScrollBar::handle:horizontal:hover {
+            background: #444444;
+        }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+            width: 0px;
+        }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            background: none;
+        }
     )");
 
     // --- 2026-05-16 持久化恢复：根据配置恢复视图、尺寸与排序状态 ---
@@ -783,6 +812,7 @@ void ScanDialog::setupUi() {
     m_extEdit->setPlaceholderText("后缀");
     m_extEdit->setFixedWidth(120); 
     m_extEdit->setFixedHeight(36);
+    m_extEdit->setClearButtonEnabled(true);
     m_extEdit->installEventFilter(this);
     connect(m_extEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
     searchRow->addWidget(m_extEdit);
@@ -902,7 +932,7 @@ void ScanDialog::setupUi() {
     mainLayout->addWidget(m_viewStack);
 
     auto* statusContainer = new QWidget();
-    statusContainer->setFixedHeight(26);
+    statusContainer->setFixedHeight(20);
     auto* statusBar = new QHBoxLayout(statusContainer);
     statusBar->setContentsMargins(16, 0, 16, 0);
     statusBar->setSpacing(0);

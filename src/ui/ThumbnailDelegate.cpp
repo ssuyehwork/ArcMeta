@@ -43,31 +43,31 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
     }
 
-    // [V3 物理优化] 彻底移除选中高亮叠加层，确保图片颜色准确性
-    // 删除了原有的 painter->fillRect(cardRect, QColor(255, 140, 0, 50)) 逻辑
-
-    painter->restore(); // 释放裁剪区
-
-    // ② 选中边框（在裁剪区外绘制，确保完整显示）
+    // ② 选中高亮叠加层（在裁剪区内，仅覆盖卡片）
     if (option.state & QStyle::State_Selected) {
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing);
-        // 按照用户要求：修改为项目标准蓝 (#3498db)
-        painter->setPen(QPen(QColor("#3498db"), 2));
-        painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(cardRect.adjusted(0, 0, 0, 0), 6, 6);
-        painter->restore();
+        painter->fillRect(cardRect, QColor(255, 140, 0, 50)); // 半透明橙色蒙版
     }
 
-    // ③ 文件名（卡片下方）
+    painter->restore(); // ← 释放裁剪区（与上方 save 对应）
+
+    // ③ 选中边框（在裁剪区外绘制，确保完整显示）
     painter->save();
+    painter->setRenderHint(QPainter::Antialiasing);
+    if (option.state & QStyle::State_Selected) {
+        painter->setPen(QPen(QColor("#FF8C00"), 2)); // 明亮橙色边框
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 6, 6);
+    }
+
+    // ④ 文件名（卡片下方，完全不受裁剪影响）
     painter->setPen(option.state & QStyle::State_Selected
-                    ? QColor("#3498db") : QColor("#C8C8C8"));
+                    ? QColor("#FF8C00") : QColor("#C8C8C8"));
     painter->drawText(textRect, Qt::AlignHCenter | Qt::AlignVCenter,
         option.fontMetrics.elidedText(
             index.data(Qt::DisplayRole).toString(),
             Qt::ElideMiddle, textRect.width()));
-    painter->restore();
+
+    painter->restore(); // ← 与第二个 save 对应
 }
 
 QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const {
@@ -77,7 +77,6 @@ QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QMod
 QWidget* ThumbnailDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const {
     QWidget* editor = QStyledItemDelegate::createEditor(parent, option, index);
     if (editor) {
-        // 按照用户要求：修改为项目标准蓝 (#3498db)
         editor->setStyleSheet(
             "background-color: #2D2D2D; color: white; selection-background-color: #3498db; "
             "border: 1px solid #3498db; border-radius: 4px; padding: 0 4px;"
@@ -90,8 +89,6 @@ void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
                                               const QStyleOptionViewItem& option,
                                               const QModelIndex& /*index*/) const {
     const int textHeight = 36;
-    // 按照用户要求：修正编辑器位置。
-    // 计算文字区域：位于整体区域底部 textHeight 像素
     QRect textRect(option.rect.left() + 4,
                    option.rect.bottom() - textHeight,
                    option.rect.width() - 8,
