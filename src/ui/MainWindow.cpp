@@ -2,8 +2,11 @@
 #define NOMINMAX
 #endif
 #include "MainWindow.h"
+#include "TrayController.h"
+#include "HoverEventFilter.h"
+#include "ResizeEventFilter.h"
+#include "AddressBar.h"
 #include "../core/CoreController.h"
-#include "BreadcrumbBar.h"
 #include "CategoryPanel.h"
 #include "CategoryModel.h"
 #include "NavPanel.h"
@@ -76,95 +79,26 @@ MainWindow::MainWindow(QWidget* parent)
         setWindowFlag(Qt::WindowStaysOnTopHint, true);
     }
 
-    // 应用全局样式（包括滚动条美化）
-    QString qss = R"(
-        QMainWindow { background-color: #1E1E1E; }
-
-        /* 核心容器样式还原 - 强化 1 像素物理切割感，回归绝对直角设计 */
-        #SidebarContainer, #ListContainer, #EditorContainer, #MetadataContainer, #FilterContainer {
-            background-color: #1E1E1E;
-            border: 1px solid #333333;
-            border-radius: 0px;
+    // 应用全局样式（优先尝试从外部加载以支持动态同步）
+    QFile file(":/style.qss");
+    if (file.open(QFile::ReadOnly)) {
+        setStyleSheet(QLatin1String(file.readAll()));
+    } else {
+        // 后备逻辑：如果资源未就绪，则从物理路径尝试
+        QFile physFile("resources/style.qss");
+        if (physFile.open(QFile::ReadOnly)) {
+            setStyleSheet(QLatin1String(physFile.readAll()));
         }
-
-        /* 容器标题栏样式 (还原旧版 #252526 实色背景与下边框) */
-        /* 2026-03-xx 物理回归：标题栏必须保持绝对直角，以体现“物理切割感” */
-        #ContainerHeader {
-            background-color: #252526;
-            border-bottom: 1px solid #333333;
-            border-top-left-radius: 0px;
-            border-top-right-radius: 0px;
-        }
-
-        /* 全局滚动条美化 */
-        QScrollBar:vertical {
-            border: none;
-            background: transparent;
-            width: 4px;
-            margin: 0px;
-        }
-        QScrollBar::handle:vertical {
-            background: #333333;
-            min-height: 20px;
-            border-radius: 2px;
-        }
-        QScrollBar::handle:vertical:hover {
-            background: #444444;
-        }
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-            height: 0px;
-        }
-        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-            background: none;
-        }
-
-        QScrollBar:horizontal {
-            border: none;
-            background: transparent;
-            height: 4px;
-            margin: 0px;
-        }
-        QScrollBar::handle:horizontal {
-            background: #333333;
-            min-width: 20px;
-            border-radius: 2px;
-        }
-        QScrollBar::handle:horizontal:hover {
-            background: #444444;
-        }
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-            width: 0px;
-        }
-        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-            background: none;
-        }
-
-        /* 统一复选框样式 */
-        QCheckBox { color: #EEEEEE; font-size: 12px; spacing: 5px; }
-        QCheckBox::indicator { width: 15px; height: 15px; border: 1px solid #444; border-radius: 2px; background: #1E1E1E; }
-        QCheckBox::indicator:hover { border: 1px solid #666; }
-        QCheckBox::indicator:checked { 
-            border: 1px solid #378ADD; 
-            background: #1E1E1E; 
-            image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzc4QUREIiBzdHJva2Utd2lkdGg9IjMuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIyMCA2IDkgMTcgNCAxMiI+PC9wb2x5bGluZT48L3N2Zz4=);
-        }
-
-        /* 统一输入框与多行文本框样式，应用 6px 圆角规范 */
-        QLineEdit, QPlainTextEdit, QTextEdit {
-            background: #1E1E1E;
-            border: 1px solid #333333;
-            border-radius: 6px;
-            color: #EEEEEE;
-            padding-left: 8px;
-        }
-        QLineEdit:focus {
-            border: 1px solid #378ADD;
-        }
-    )";
-    setStyleSheet(qss);
+    }
 
     initUi();
-    initTrayIcon();
+
+    m_hoverFilter = new HoverEventFilter(this);
+    m_resizeFilter = new ResizeEventFilter(this);
+
+    m_trayController = new TrayController(this);
+    m_trayController->show();
+
     initIdleDetector();
     qDebug() << "[Main] MainWindow 构造函数 UI/托盘/闲置检测初始化完成";
 
@@ -230,8 +164,7 @@ void MainWindow::initUi() {
         if (m_searchEdit) m_searchEdit->clear();
         m_contentPanel->search("");
 
-        m_pathStack->setCurrentWidget(m_pathEdit);
-        m_pathEdit->setText("分类: " + name);
+        if (m_addressBar) m_addressBar->setPath("分类: " + name);
         
         if (type == "category") {
             // 2026-06-xx 重构逻辑：内容面板负责展示该分类下的子分类与绑定文件
@@ -415,19 +348,9 @@ void MainWindow::initUi() {
         m_contentPanel->search("");
     });
 
-    // 6. 工具栏路径跳转
-    // 2026-05-27 物理加固：补全 this 上下文
-    connect(m_pathEdit, &QLineEdit::returnPressed, this, [this]() {
-        QString input = m_pathEdit->text();
-        if (QDir(input).exists()) {
-            navigateTo(input);
-        } else if (input == "computer://" || input == "此电脑") {
-            navigateTo("computer://");
-        } else {
-            // 如果路径无效，恢复为当前实际路径
-            m_pathEdit->setText(QDir::toNativeSeparators(m_currentPath));
-            m_pathStack->setCurrentWidget(m_breadcrumbBar);
-        }
+    // 6. 地址栏路径跳转
+    connect(m_addressBar, &AddressBar::pathChanged, this, [this](const QString& path) {
+        navigateTo(path);
     });
 
     // 7. 搜索框回车触发逻辑 (带历史记录和搜索模式分流)
@@ -438,7 +361,7 @@ void MainWindow::initUi() {
     m_searchHistoryPanel->setHistory(m_searchHistory);
 
     // 回车搜索核心逻辑
-    auto performSearch = [this](const QString& keyword) {
+    auto doSearch = [this](const QString& keyword) {
         if (keyword.isEmpty()) {
             m_contentPanel->loadDirectory(m_currentPath);
             m_searchHistoryPanel->hide();
@@ -454,29 +377,22 @@ void MainWindow::initUi() {
         m_searchHistoryPanel->setHistory(m_searchHistory);
         m_searchHistoryPanel->hide();
 
-        // 2026-06-xx 物理加固：根据模式选择检索源
-        QStringList paths;
-        if (CategoryRepo::isJsonMode()) {
-            // 模式 A: 纯 JSON 内存搜索
-            paths = MetadataManager::instance().searchInCache(keyword);
-        } else {
-            // 模式 B: 经典数据库搜索 (已包含路径+标签+备注检索)
-            paths = ItemRepo::searchByKeyword(keyword, "");
-        }
+        // 使用 CoreController 的中枢搜索接口
+        QStringList paths = CoreController::instance().performSearch(keyword);
         m_contentPanel->loadPaths(paths);
     };
 
     // 2026-05-27 物理加固：补全 this 上下文
-    connect(m_searchEdit, &QLineEdit::returnPressed, this, [this, performSearch]() {
-        performSearch(m_searchEdit->text().trimmed());
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, [this, doSearch]() {
+        doSearch(m_searchEdit->text().trimmed());
     });
     
     m_searchEdit->installEventFilter(this); // 拦截 FocusIn 事件展示历史面板
 
     // 历史面板信号对接
-    connect(m_searchHistoryPanel, &SearchHistoryPanel::historyItemClicked, this, [this, performSearch](const QString& keyword) {
+    connect(m_searchHistoryPanel, &SearchHistoryPanel::historyItemClicked, this, [this, doSearch](const QString& keyword) {
         m_searchEdit->setText(keyword);
-        performSearch(keyword);
+        doSearch(keyword);
     });
 
     connect(m_searchHistoryPanel, &SearchHistoryPanel::historyItemRemoved, this, [this](const QString& keyword) {
@@ -675,7 +591,11 @@ void MainWindow::mouseMoveEvent(QMouseEvent* event) {
 
 // 2026-05-08 按照用户要求：实现边缘resize方向检测函数
 MainWindow::ResizeDirection MainWindow::getResizeDirection(const QPoint& pos) const {
-    const int m = kResizeMargin;
+    // 按照用户建议：将感应宽度改为根据 DPI 动态计算
+    int m = kResizeMargin;
+    if (windowHandle()) {
+        m = qRound(screen()->logicalDotsPerInch() / 96.0 * (double)kResizeMargin);
+    }
     const int w = width(), h = height();
     bool left   = pos.x() < m;
     bool right  = pos.x() > w - m;
@@ -744,30 +664,8 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
         }
     }
 
-    // 2026-05-08 按照用户要求：新增全局鼠标移动时同步更新边缘 Resize 光标
-    // 由于子控件会吃掉 MouseMove，必须在 qApp 级别拦截才能覆盖所有情况
-    if (event->type() == QEvent::MouseMove && !m_isResizing && !m_isDragging) {
-        QMouseEvent* me = static_cast<QMouseEvent*>(event);
-        QPoint localPos = mapFromGlobal(me->globalPosition().toPoint());
-        ResizeDirection dir = getResizeDirection(localPos);
-        updateCursorShape(dir);
-    }
-
-    // 2026-05-08 按照用户要求：新增鼠标离开窗口时恢复箭头光标
-    if (event->type() == QEvent::Leave && watched == this) {
-        if (!m_isResizing) setCursor(Qt::ArrowCursor);
-    }
-
-    // 2026-05-20 性能优化：同时支持 Enter/Leave 与 Hover 事件，确保标题栏按钮响应“零延迟”
-    if (event->type() == QEvent::HoverEnter || event->type() == QEvent::Enter) {
-        QString text = watched->property("tooltipText").toString();
-        if (!text.isEmpty()) {
-            // 物理级别禁绝原生 ToolTip，强制调用 ToolTipOverlay
-            ToolTipOverlay::instance()->showText(QCursor::pos(), text);
-        }
-    } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::Leave || event->type() == QEvent::MouseButtonPress) {
-        ToolTipOverlay::hideTip();
-    } else if (event->type() == QEvent::FocusIn && watched == m_searchEdit) {
+    // 2026-04-12 按照用户要求：搜索框获得焦点时弹出历史记录
+    if (event->type() == QEvent::FocusIn && watched == m_searchEdit) {
         // 2026-04-12 按照用户要求：搜索框获得焦点时弹出历史记录
         if (!m_searchHistory.isEmpty()) {
             m_searchHistoryPanel->showBelow(m_searchEdit);
@@ -803,58 +701,22 @@ void MainWindow::initToolbar() {
 
     m_btnBack = createBtn("nav_prev", "");
     m_btnBack->setProperty("tooltipText", "后退");
-    m_btnBack->installEventFilter(this);
+    m_btnBack->installEventFilter(m_hoverFilter);
 
     m_btnForward = createBtn("nav_next", "");
     m_btnForward->setProperty("tooltipText", "前进");
-    m_btnForward->installEventFilter(this);
+    m_btnForward->installEventFilter(m_hoverFilter);
 
     m_btnUp = createBtn("arrow_up", "");
     m_btnUp->setProperty("tooltipText", "上级");
-    m_btnUp->installEventFilter(this);
+    m_btnUp->installEventFilter(m_hoverFilter);
 
     connect(m_btnBack, &QPushButton::clicked, this, &MainWindow::onBackClicked);
     connect(m_btnForward, &QPushButton::clicked, this, &MainWindow::onForwardClicked);
     connect(m_btnUp, &QPushButton::clicked, this, &MainWindow::onUpClicked);
 
-    // --- 路径地址栏重构 (Stack: Breadcrumb + QLineEdit) ---
-    m_pathStack = new QStackedWidget(this);
-    // 2026-03-xx 按照用户最新要求：地址栏高度还原为 32px
-    m_pathStack->setFixedHeight(32); 
-    m_pathStack->setMinimumWidth(300);
-    m_pathStack->setStyleSheet("QStackedWidget { background: #1E1E1E; border: 1px solid #444444; border-radius: 6px; }");
-
-    // A. 面包屑视图
-    m_breadcrumbBar = new BreadcrumbBar(m_pathStack);
-    m_pathStack->addWidget(m_breadcrumbBar);
-
-    // B. 编辑视图
-    m_pathEdit = new QLineEdit(m_pathStack);
-    m_pathEdit->setPlaceholderText("输入路径...");
-    // 物理对齐：修正高度为 32px 以匹配 Stack 容器，确保圆角边框完美重合
-    m_pathEdit->setFixedHeight(32);
-    m_pathEdit->setStyleSheet("QLineEdit { background: transparent; border: none; color: #EEEEEE; padding-left: 8px; }");
-    m_pathStack->addWidget(m_pathEdit);
-
-    m_pathStack->setCurrentWidget(m_breadcrumbBar);
-
-    // 交互逻辑
-    // 2026-05-27 物理加固：补全 this 上下文
-    connect(m_breadcrumbBar, &BreadcrumbBar::blankAreaClicked, this, [this]() {
-        m_pathEdit->setText(QDir::toNativeSeparators(m_currentPath));
-        m_pathStack->setCurrentWidget(m_pathEdit);
-        m_pathEdit->setFocus();
-        m_pathEdit->selectAll();
-    });
-    connect(m_pathEdit, &QLineEdit::editingFinished, this, [this]() {
-        // 只有在失去焦点或按回车后切回面包屑 (如果不是由于 confirm 跳转)
-        if (m_pathStack->currentWidget() == m_pathEdit) {
-            m_pathStack->setCurrentWidget(m_breadcrumbBar);
-        }
-    });
-    connect(m_breadcrumbBar, &BreadcrumbBar::pathClicked, this, [this](const QString& path) {
-        navigateTo(path);
-    });
+    // --- 路径地址栏重构 (复合 AddressBar) ---
+    m_addressBar = new AddressBar(this);
 
 
     // 2026-04-12 按照用户要求：搜索框容器（搜索框 + 模式切换按钮）
@@ -918,7 +780,7 @@ void MainWindow::setupSplitters() {
     m_navBarLayout->addWidget(m_btnBack);
     m_navBarLayout->addWidget(m_btnForward);
     m_navBarLayout->addWidget(m_btnUp);
-    m_navBarLayout->addWidget(m_pathStack, 1);
+    m_navBarLayout->addWidget(m_addressBar, 1);
     m_navBarLayout->addWidget(m_searchContainer);
 
     // --- 3. 主体核心容器 (物理还原：10px 全局边距包裹，确保边缘resize可用) ---
@@ -1039,7 +901,7 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "无待同步任务");
-    m_btnSync->installEventFilter(this);
+    m_btnSync->installEventFilter(m_hoverFilter);
 
     // 2026-06-15 按照用户要求：手动点击同步
     connect(m_btnSync, &QPushButton::clicked, this, [this]() {
@@ -1072,7 +934,7 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     m_btnScan = createTitleBtn("scan");
     m_btnScan->setProperty("tooltipText", "实时扫描与查找...");
-    m_btnScan->installEventFilter(this);
+    m_btnScan->installEventFilter(m_hoverFilter);
     // 2026-05-09 按照用户要求：扫描窗口与主界面操作相互不干扰，去除父子关系
     connect(m_btnScan, &QPushButton::clicked, this, [this]() {
         auto* dlg = new ScanDialog(nullptr);
@@ -1113,7 +975,7 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     m_btnPinTop = createTitleBtn(m_isPinned ? "pin_vertical" : "pin_tilted");
     m_btnPinTop->setProperty("tooltipText", "置顶窗口");
-    m_btnPinTop->installEventFilter(this);
+    m_btnPinTop->installEventFilter(m_hoverFilter);
     m_btnPinTop->setCheckable(true);
     m_btnPinTop->setChecked(m_isPinned);
     if (m_isPinned) {
@@ -1122,11 +984,11 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     m_btnMin = createTitleBtn("minimize");
     m_btnMin->setProperty("tooltipText", "最小化");
-    m_btnMin->installEventFilter(this);
+    m_btnMin->installEventFilter(m_hoverFilter);
 
     m_btnMax = createTitleBtn(isMaximized() ? "restore_window" : "maximize");
     m_btnMax->setProperty("tooltipText", "最大化/还原");
-    m_btnMax->installEventFilter(this);
+    m_btnMax->installEventFilter(m_hoverFilter);
 
     m_btnClose = createTitleBtn("close", "#e81123"); // 初始创建
     // 按照用户要求：关闭按钮持续显示红色高亮，不再仅悬停显示
@@ -1136,9 +998,9 @@ void MainWindow::setupCustomTitleBarButtons() {
         "QPushButton:pressed { background-color: #A50000; }"
     );
     m_btnClose->setProperty("tooltipText", "关闭项目");
-    m_btnClose->installEventFilter(this);
+    m_btnClose->installEventFilter(m_hoverFilter);
 
-    m_btnCreate->installEventFilter(this);
+    m_btnCreate->installEventFilter(m_hoverFilter);
     layout->addWidget(m_btnSync);
     layout->addWidget(m_btnScan);
     layout->addWidget(m_btnCreate);
@@ -1180,57 +1042,7 @@ void MainWindow::initIdleDetector() {
     
     // 安装全局事件过滤器以感应操作（在 QApplication 级别感应更佳，这里先按窗口级实现）
     qApp->installEventFilter(this);
-}
-
-void MainWindow::initTrayIcon() {
-    // 2026-03-xx 按照用户要求：集成系统托盘功能
-    m_trayIcon = new QSystemTrayIcon(this);
-    
-    // 2026-04-14 物理加固：锁定图标来源为 Qt 资源系统中的标准 ico
-    // 杜绝使用 windowIcon() 导致的潜在路径失效风险
-    m_trayIcon->setIcon(QIcon(":/app_icon.ico"));
-
-    // 托盘图标由于是 OS 级容器，不受 ToolTipOverlay 控制，允许保留原生或根据系统行为处理
-    m_trayIcon->setToolTip("ArcMeta");
-
-    QMenu* trayMenu = new QMenu(this);
-    trayMenu->setStyleSheet(
-        "QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid #444; padding: 4px; border-radius: 8px; }"
-        "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; font-size: 12px; }"
-        "QMenu::item:selected { background-color: #3E3E42; color: white; }"
-    );
-
-    QAction* showAction = trayMenu->addAction("显示主界面");
-    trayMenu->addSeparator();
-    QAction* quitAction = trayMenu->addAction("退出 ArcMeta");
-
-    connect(showAction, &QAction::triggered, this, [this]() {
-        showNormal();
-        activateWindow();
-    });
-
-    // 2026-05-11 物理加固退出逻辑：在退出前显式隐藏托盘并释放核心引擎，确保 USN 线程安全停止
-    connect(quitAction, &QAction::triggered, this, [this]() {
-        if (m_trayIcon) m_trayIcon->hide();
-        MftReader::instance().clear(); 
-        QApplication::quit();
-    });
-
-    m_trayIcon->setContextMenu(trayMenu);
-
-    // 点击托盘图标逻辑
-    connect(m_trayIcon, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
-        if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) {
-            if (isVisible()) {
-                hide();
-            } else {
-                showNormal();
-                activateWindow();
-            }
-        }
-    });
-
-    m_trayIcon->show();
+    qApp->installEventFilter(m_resizeFilter);
 }
 
 void MainWindow::navigateTo(const QString& path, bool record) {
@@ -1257,9 +1069,7 @@ void MainWindow::navigateTo(const QString& path, bool record) {
                 m_historyIndex = static_cast<int>(m_history.size()) - 1;
             }
         }
-        m_pathEdit->setText("此电脑");
-        m_breadcrumbBar->setPath("computer://");
-        m_pathStack->setCurrentWidget(m_breadcrumbBar);
+        if (m_addressBar) m_addressBar->setPath("computer://");
         m_contentPanel->loadDirectory(""); 
         int driveCount = static_cast<int>(QDir::drives().count());
         m_statusLeft->setText(QString("%1 个分区").arg(driveCount));
@@ -1280,9 +1090,7 @@ void MainWindow::navigateTo(const QString& path, bool record) {
         }
     }
     
-    m_pathEdit->setText(normPath);
-    m_breadcrumbBar->setPath(normPath);
-    m_pathStack->setCurrentWidget(m_breadcrumbBar);
+    if (m_addressBar) m_addressBar->setPath(normPath);
     m_contentPanel->loadDirectory(normPath);
     updateNavButtons();
     updateStatusBar();
