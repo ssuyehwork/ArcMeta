@@ -449,10 +449,19 @@ ScanDialog::ScanDialog(QWidget* parent)
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
 
-            // 确认此段在 if (titleLayout) { ... } 内部
-            titleLayout->addStretch(1); // 推到右侧
+            // 按照截图要求调整布局：
+            // [Logo/标题/状态] -> [Stretch] -> [滑动条③] -> [视图按钮②] -> [窗口控制按钮①]
 
-            // ① 视图切换按钮
+            // 找到窗口控制按钮（m_pinBtn 等）在 layout 中的起始索引。
+            // 在 FramelessDialog 中，它们是依次 addWidget 的。
+            // 这里 titleLayout 是从 FramelessDialog 继承而来的，m_pinBtn 应该已经在里面。
+
+            titleLayout->insertStretch(titleLayout->indexOf(m_pinBtn));
+
+            // 按照截图要求调整布局：
+            // [Logo/标题/状态] -> [Stretch] -> [视图按钮②] -> [滑动条③] -> [窗口控制按钮①]
+
+            // ① 视图切换按钮 (标记 2)
             QPushButton* viewBtn = new QPushButton("视图");
             viewBtn->setFixedHeight(22);
             viewBtn->setCursor(Qt::PointingHandCursor);
@@ -495,9 +504,8 @@ ScanDialog::ScanDialog(QWidget* parent)
                 }
                 menu->exec(viewBtn->mapToGlobal(QPoint(0, viewBtn->height() + 2)));
             });
-            titleLayout->addWidget(viewBtn);
 
-            // ② 尺寸滑动条
+            // ② 尺寸滑动条 (标记 3)
             m_sizeSlider = new QSlider(Qt::Horizontal);
             m_sizeSlider->setRange(32, 256);
             m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64);
@@ -516,7 +524,9 @@ ScanDialog::ScanDialog(QWidget* parent)
                 m_tableModel->clearThumbCache();
                 m_config.save();
             });
-            titleLayout->addWidget(m_sizeSlider);
+
+            titleLayout->insertWidget(titleLayout->indexOf(m_pinBtn), viewBtn);
+            titleLayout->insertWidget(titleLayout->indexOf(viewBtn), m_sizeSlider);
         } else {
             m_titleStatusLabel->hide(); 
         }
