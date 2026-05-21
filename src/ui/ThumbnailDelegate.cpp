@@ -52,10 +52,9 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     if (option.state & QStyle::State_Selected) {
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
-        // 对标 Eagle：使用 3px 宽的品牌橙边框，无任何颜色叠加
-        painter->setPen(QPen(QColor("#FF8C00"), 3));
+        // 按照用户要求：由 3px 橙色修改为 2px 蓝色 (#4A90E2)
+        painter->setPen(QPen(QColor("#4A90E2"), 2));
         painter->setBrush(Qt::NoBrush);
-        // 按照用户要求：将高亮扩大 2 像素（将原本的 adjusted(2,2,-2,-2) 修改为显式的 adjusted(0,0,0,0)）
         painter->drawRoundedRect(cardRect.adjusted(0, 0, 0, 0), 6, 6);
         painter->restore();
     }
@@ -63,7 +62,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     // ③ 文件名（卡片下方）
     painter->save();
     painter->setPen(option.state & QStyle::State_Selected
-                    ? QColor("#FF8C00") : QColor("#C8C8C8"));
+                    ? QColor("#4A90E2") : QColor("#C8C8C8"));
     painter->drawText(textRect, Qt::AlignHCenter | Qt::AlignVCenter,
         option.fontMetrics.elidedText(
             index.data(Qt::DisplayRole).toString(),
@@ -73,6 +72,18 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
 
 QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const {
     return QStyledItemDelegate::sizeHint(option, index);
+}
+
+QWidget* ThumbnailDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const {
+    QWidget* editor = QStyledItemDelegate::createEditor(parent, option, index);
+    if (editor) {
+        // 按照用户要求：行内编辑框修改为 1px 蓝色边框，4px 圆角
+        editor->setStyleSheet(
+            "background-color: #2D2D2D; color: white; selection-background-color: #4A90E2; "
+            "border: 1px solid #4A90E2; border-radius: 4px; padding: 0 4px;"
+        );
+    }
+    return editor;
 }
 
 void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
