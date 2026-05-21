@@ -12,15 +12,17 @@ ThumbnailDelegate::ThumbnailDelegate(QObject* parent) : QStyledItemDelegate(pare
 
 void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const {
     const int textHeight = 36;
-    // 上半部分为图片卡片区域，下半部分留给文字
-    QRect cardRect = option.rect.adjusted(2, 2, -2, -textHeight);
+    QRect cardRect = option.rect.adjusted(3, 3, -3, -(textHeight + 3));
+    QRect textRect = QRect(option.rect.left() + 3,
+                           option.rect.bottom() - textHeight,
+                           option.rect.width() - 6,
+                           textHeight);
 
-    // --- 第一部分：绘制卡片内容 (需要裁剪) ---
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    // 设置 6px 圆角裁剪
+    // ① 圆角裁剪（仅作用于卡片）
     QPainterPath clipPath;
     clipPath.addRoundedRect(cardRect, 6, 6);
     painter->setClipPath(clipPath);
@@ -29,40 +31,44 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     QPixmap thumb = index.data(Qt::DecorationRole).value<QPixmap>();
 
     if (hasThumb && !thumb.isNull()) {
-        // 物理实现 Aspect Fill (铺满但不变形)
-        // 先按 KeepAspectRatioByExpanding 缩放
-        QPixmap scaledThumb = thumb.scaled(cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        // 计算居中坐标，利用裁剪实现铺满效果
-        int x = cardRect.center().x() - scaledThumb.width() / 2;
-        int y = cardRect.center().y() - scaledThumb.height() / 2;
-        painter->drawPixmap(x, y, scaledThumb);
+        QPixmap scaled = thumb.scaled(cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        int x = cardRect.center().x() - scaled.width() / 2;
+        int y = cardRect.center().y() - scaled.height() / 2;
+        painter->drawPixmap(x, y, scaled);
     } else {
-        // 降级：深色背景 + 文件类型图标居中
         painter->fillRect(cardRect, QColor("#2D2D2D"));
         QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
         QPoint center = cardRect.center();
-        icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
+        if (!icon.isNull())
+            icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
     }
+
+    // [V3 物理优化] 彻底移除选中高亮叠加层，确保图片颜色准确性
+    // 删除了原有的 painter->fillRect(cardRect, QColor(255, 140, 0, 50)) 逻辑
+
     painter->restore(); // 释放裁剪区
 
-    // --- 第二部分：绘制选中状态和文字 (不需要内容裁剪) ---
-    painter->save();
-    painter->setRenderHint(QPainter::Antialiasing);
-
-    // 选中态：蓝色圆角边框叠加在卡片区上 (使用 2px 画笔)
+    // ② 选中边框（在裁剪区外绘制，确保完整显示）
     if (option.state & QStyle::State_Selected) {
-        QPen pen(QColor("#094771"), 2);
-        painter->setPen(pen);
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        // 对标 Eagle：使用 3px 宽的品牌橙边框，无任何颜色叠加
+        painter->setPen(QPen(QColor("#FF8C00"), 3)); 
         painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 6, 6); // 稍微向内缩进 1px 确保边框完整
+        // 按照用户要求：将高亮扩大 2 像素（从原本缩进 2 像素改为不缩进，即物理扩大）
+        painter->drawRoundedRect(cardRect, 6, 6);
+        painter->restore();
     }
 
-    // 文件名标签（物理位于卡片下方的预留区域）
-    QString name = index.data(Qt::DisplayRole).toString();
-    QRect textRect = option.rect.adjusted(2, option.rect.height() - textHeight, -2, -4);
-    painter->setPen(QColor("#D4D4D4"));
-    painter->drawText(textRect, Qt::AlignHCenter | Qt::AlignVCenter | Qt::TextWordWrap,
-                      option.fontMetrics.elidedText(name, Qt::ElideMiddle, textRect.width()));
+    // ③ 文件名（卡片下方）
+    painter->save();
+    painter->setPen(option.state & QStyle::State_Selected
+                    ? QColor("#FF8C00") : QColor("#C8C8C8"));
+    painter->drawText(textRect, Qt::AlignHCenter | Qt::AlignVCenter,
+        option.fontMetrics.elidedText(
+            index.data(Qt::DisplayRole).toString(),
+            Qt::ElideMiddle, textRect.width()));
+    painter->restore();
 }
 
 QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const {

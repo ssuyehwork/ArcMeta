@@ -73,6 +73,7 @@ public:
 
     void sort(int column, Qt::SortOrder order = Qt::AscendingOrder) override;
     void updateResults();
+    void clearThumbCache() { m_thumbCache.clear(); }
 
     Qt::DropActions supportedDragActions() const override;
     QMimeData* mimeData(const QModelIndexList& indexes) const override;
@@ -156,6 +157,7 @@ private:
     QLabel* m_selectionLabel = nullptr;  
     QPushButton* m_csvBtn = nullptr;     
     QProgressBar* m_progressBar = nullptr;
+    QSlider* m_sizeSlider = nullptr;
 
     int64_t m_lastSearchMs = 0;
 

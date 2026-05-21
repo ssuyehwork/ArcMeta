@@ -432,22 +432,106 @@ ScanDialog::ScanDialog(QWidget* parent)
     setMinimumSize(800, 500);
 
     m_titleStatusLabel = new QLabel("READY - 0");
-    m_titleStatusLabel->setStyleSheet("color: #46B478; font-size: 10px; font-weight: bold; margin-left: 12px;");
+    m_titleStatusLabel->setStyleSheet("color: #46B478; font-size: 10px; font-weight: bold; margin-left: 5px;");
 
     if (m_titleLabel && m_pinBtn && m_pinBtn->parentWidget() && m_pinBtn->parentWidget()->layout()) {
         m_titleLabel->hide(); 
         auto* titleLayout = qobject_cast<QHBoxLayout*>(m_pinBtn->parentWidget()->layout());
         if (titleLayout) {
+            // 按照用户要求：移除标题栏底部的 1px 切割线
+            m_pinBtn->parentWidget()->setStyleSheet("background-color: transparent; border: none;");
+            titleLayout->setSpacing(0);
             QLabel* logoLabel = new QLabel();
             logoLabel->setFixedSize(18, 18);
             logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#FF8C00"), 18).pixmap(18, 18));
             titleLayout->insertWidget(0, logoLabel);
             
             QLabel* brandLabel = new QLabel("FERREX-META");
-            brandLabel->setStyleSheet("color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 6px;");
+            // 按照用户要求：视觉上间距不足，将 margin-left 从 5px 增加到 8px
+            brandLabel->setStyleSheet("color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 8px;");
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
+
+            // 按照截图要求调整布局：
+            // [Logo/标题/状态] -> [Stretch] -> [滑动条③] -> [视图按钮②] -> [窗口控制按钮①]
+            
+            // 找到窗口控制按钮（m_pinBtn 等）在 layout 中的起始索引。
+            // 在 FramelessDialog 中，它们是依次 addWidget 的。
+            // 这里 titleLayout 是从 FramelessDialog 继承而来的，m_pinBtn 应该已经在里面。
+            
+            titleLayout->insertStretch(titleLayout->indexOf(m_pinBtn));
+
+            // 按照截图要求调整布局：
+            // [Logo/标题/状态] -> [Stretch] -> [视图按钮②] -> [滑动条③] -> [窗口控制按钮①]
+            
+            // ① 视图切换按钮 (标记 2)
+            QPushButton* viewBtn = new QPushButton(); 
+            viewBtn->setFixedSize(24, 22); 
+            viewBtn->setIcon(UiHelper::getIcon("grid", QColor("#CCCCCC"), 16));
+            viewBtn->setCursor(Qt::PointingHandCursor); 
+            viewBtn->setStyleSheet( 
+                "QPushButton { background: #2D2D2D; color: #CCC; border: 1px solid #3F3F3F; " 
+                "border-radius: 4px; padding: 0; margin-left: 5px; }"  // 增加 5px 间距，与左侧滑动条拉开
+                "QPushButton:hover { background: #3A3A3A; color: #FFF; }" 
+            ); 
+            connect(viewBtn, &QPushButton::clicked, this, [this, viewBtn]() { 
+                QMenu* menu = new QMenu(this); 
+                menu->setStyleSheet( 
+                    "QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; border-radius: 6px; }" 
+                    "QMenu::item { padding: 6px 24px; }" 
+                    "QMenu::item:selected { background: #2A2A2A; color: #FFF; }" 
+                    "QMenu::item:checked { color: #FF8C00; }" 
+                ); 
+                struct ViewDef { QString label; int stackIdx; int size; }; 
+                for (auto& v : QList<ViewDef>{ 
+                    {"超大图标", 1, 192}, {"大图标", 1, 128}, {"中图标", 1, 64}, 
+                    {}, // separator 
+                    {"详情",    0, 0} 
+                }) { 
+                    if (v.label.isEmpty()) { menu->addSeparator(); continue; } 
+                    QAction* act = menu->addAction(v.label); 
+                    act->setCheckable(true); 
+                    act->setChecked(m_viewStack->currentIndex() == v.stackIdx && 
+                                    (v.stackIdx == 0 || m_config.iconSize == v.size)); 
+                    connect(act, &QAction::triggered, this, [this, v]() { 
+                        m_viewStack->setCurrentIndex(v.stackIdx); 
+                        m_config.viewMode = v.stackIdx; 
+                        if (v.stackIdx == 1) { 
+                            m_config.iconSize = v.size; 
+                            m_iconView->setTargetRowHeight(v.size); 
+                            if (m_sizeSlider) m_sizeSlider->setValue(v.size); 
+                        } 
+                        if (v.stackIdx == 0) 
+                            m_resultView->verticalHeader()->setDefaultSectionSize(m_config.iconSize); 
+                        m_config.save(); 
+                    }); 
+                } 
+                menu->exec(viewBtn->mapToGlobal(QPoint(0, viewBtn->height() + 2))); 
+            }); 
+
+            // ② 尺寸滑动条 (标记 3)
+            m_sizeSlider = new QSlider(Qt::Horizontal); 
+            m_sizeSlider->setRange(32, 256); 
+            m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64); 
+            m_sizeSlider->setFixedSize(110, 20); 
+            m_sizeSlider->setCursor(Qt::PointingHandCursor); 
+            m_sizeSlider->setStyleSheet( 
+                "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }" 
+                "QSlider::sub-page:horizontal { background: #FF8C00; border-radius: 2px; }" 
+                "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; " 
+                "  background: #FF8C00; border-radius: 6px; }" 
+            ); 
+            connect(m_sizeSlider, &QSlider::valueChanged, this, [this](int v) { 
+                m_config.iconSize = v; 
+                m_resultView->verticalHeader()->setDefaultSectionSize(v); 
+                m_iconView->setTargetRowHeight(v); 
+                m_tableModel->clearThumbCache(); 
+                m_config.save(); 
+            }); 
+            
+            titleLayout->insertWidget(titleLayout->indexOf(m_pinBtn), viewBtn);
+            titleLayout->insertWidget(titleLayout->indexOf(viewBtn), m_sizeSlider);
         } else {
             m_titleStatusLabel->hide(); 
         }
