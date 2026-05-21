@@ -33,6 +33,7 @@ protected:
     void setSelection(const QRect& rect, QItemSelectionModel::SelectionFlags command) override;
     QRegion visualRegionForSelection(const QItemSelection& selection) const override;
     void paintEvent(QPaintEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void updateGeometries() override;
 

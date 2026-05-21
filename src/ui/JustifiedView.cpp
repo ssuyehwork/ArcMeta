@@ -162,6 +162,28 @@ QRegion JustifiedView::visualRegionForSelection(const QItemSelection& selection)
     return region;
 }
 
+void JustifiedView::mouseDoubleClickEvent(QMouseEvent* event) {
+    QModelIndex idx = indexAt(event->pos());
+    if (!idx.isValid()) {
+        QAbstractItemView::mouseDoubleClickEvent(event);
+        return;
+    }
+
+    const int textHeight = 36;
+    QRect itemRect = visualRect(idx);
+    // 文字区域 = 卡片底部 textHeight 像素
+    QRect textRect(itemRect.left(), itemRect.bottom() - textHeight, itemRect.width(), textHeight);
+
+    if (textRect.contains(event->pos())) {
+        // 双击在文字区域 → 触发行内重命名
+        edit(idx);
+    } else {
+        // 双击在缩略图区域 → 触发打开文件（发射 doubleClicked 信号）
+        emit doubleClicked(idx);
+    }
+    // 不调用父类，防止父类再次触发默认编辑逻辑
+}
+
 void JustifiedView::paintEvent(QPaintEvent*) {
     QPainter painter(viewport());
     // 2026-06-xx 物理修复：在开启 TranslucentBackground 时手动填充坚实背景，防止透明穿透
@@ -223,7 +245,6 @@ void JustifiedView::doLayout() {
 
     int currentY = 10; 
     int i = 0;
-    const int textHeight = 22; // 预留文件名显示高度
     
     while (i < count) {
         int rowStart = i;
@@ -257,19 +278,20 @@ void JustifiedView::doLayout() {
         if (actualHeight > m_targetRowHeight * 1.5) actualHeight = m_targetRowHeight * 1.5;
 
         int currentX = 10;
+        const int textHeight = 36;
         for (int j = 0; j < numInRow; ++j) {
             int itemIdx = rowStart + j;
             int itemWidth = qRound(aspectRatios[j] * actualHeight);
             
             if (j == numInRow - 1 && !isLastRow) {
-                itemWidth = containerWidth + 10 - currentX;
+                itemWidth = containerWidth + 10 - currentX; // 最后一个补齐行宽 
             }
 
-            // 物理扩展：高度增加 textHeight 以容纳文件名
+            // 总高度 = 图片高度 + 文字区域高度
             m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + textHeight), itemIdx };
             currentX += itemWidth + 5; 
         }
-        currentY += actualHeight + textHeight + 5;
+        currentY += actualHeight + textHeight + 5; // 统一行高推进
     }
 
     m_totalHeight = currentY + 10;

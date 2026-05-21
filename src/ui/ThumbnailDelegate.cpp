@@ -1,5 +1,6 @@
 #include "ThumbnailDelegate.h"
 #include <QPainter>
+#include <QPainterPath>
 #include <QIcon>
 #include <QPixmap>
 #include <QStyleOptionViewItem>
@@ -10,75 +11,71 @@ namespace ArcMeta {
 ThumbnailDelegate::ThumbnailDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
 
 void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const {
+    const int textHeight = 36;
+    // 上半部分为图片卡片区域，下半部分留给文字
+    QRect cardRect = option.rect.adjusted(2, 2, -2, -textHeight);
+
+    // --- 第一部分：绘制卡片内容 (需要裁剪) ---
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    QRect rect = option.rect;
-    const int textHeight = 22;
-    QRect thumbRect = rect.adjusted(0, 0, 0, -textHeight);
-    QRect textRect = rect.adjusted(4, rect.height() - textHeight, -4, 0);
-    
-    // 绘制背景
-    if (option.state & QStyle::State_Selected) {
-        painter->fillRect(rect, option.palette.highlight());
-    } else if (option.state & QStyle::State_MouseOver) {
-        painter->fillRect(rect, QColor(255, 255, 255, 20));
-    }
+    // 设置 6px 圆角裁剪
+    QPainterPath clipPath;
+    clipPath.addRoundedRect(cardRect, 6, 6);
+    painter->setClipPath(clipPath);
 
-    QVariant decoration = index.data(Qt::DecorationRole);
-    QPixmap pixmap;
-    bool isThumbnail = index.data(Qt::UserRole + 1).toBool(); 
+    bool hasThumb = index.data(Qt::UserRole + 1).toBool();
+    QPixmap thumb = index.data(Qt::DecorationRole).value<QPixmap>();
 
-    if (decoration.canConvert<QPixmap>()) {
-        pixmap = decoration.value<QPixmap>();
-    }
-
-    // 1. 绘制图像/图标
-    if (isThumbnail && !pixmap.isNull()) {
-        QSize thumbSize = pixmap.size();
-        thumbSize.scale(thumbRect.size(), Qt::KeepAspectRatio);
-        QRect drawRect(thumbRect.center().x() - thumbSize.width() / 2,
-                       thumbRect.center().y() - thumbSize.height() / 2,
-                       thumbSize.width(), thumbSize.height());
-        painter->drawPixmap(drawRect, pixmap);
+    if (hasThumb && !thumb.isNull()) {
+        // 物理实现 Aspect Fill (铺满但不变形)
+        // 先按 KeepAspectRatioByExpanding 缩放
+        QPixmap scaledThumb = thumb.scaled(cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        // 计算居中坐标，利用裁剪实现铺满效果
+        int x = cardRect.center().x() - scaledThumb.width() / 2;
+        int y = cardRect.center().y() - scaledThumb.height() / 2;
+        painter->drawPixmap(x, y, scaledThumb);
     } else {
-        QIcon icon;
-        if (decoration.canConvert<QIcon>()) {
-            icon = decoration.value<QIcon>();
-        } else if (decoration.canConvert<QPixmap>()) {
-            icon = QIcon(decoration.value<QPixmap>());
-        }
+        // 降级：深色背景 + 文件类型图标居中
+        painter->fillRect(cardRect, QColor("#2D2D2D"));
+        QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
+        QPoint center = cardRect.center();
+        icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
+    }
+    painter->restore(); // 释放裁剪区
 
-        if (!icon.isNull()) {
-            QSize iconSize(48, 48);
-            if (iconSize.width() > thumbRect.width() * 0.8) iconSize.setWidth(thumbRect.width() * 0.8);
-            if (iconSize.height() > thumbRect.height() * 0.8) iconSize.setHeight(thumbRect.height() * 0.8);
-            
-            QPoint center = thumbRect.center();
-            QRect iconRect(center.x() - iconSize.width() / 2,
-                           center.y() - iconSize.height() / 2,
-                           iconSize.width(), iconSize.height());
-            icon.paint(painter, iconRect);
-        }
+    // --- 第二部分：绘制选中状态和文字 (不需要内容裁剪) ---
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing);
+
+    // 选中态：蓝色圆角边框叠加在卡片区上 (使用 2px 画笔)
+    if (option.state & QStyle::State_Selected) {
+        QPen pen(QColor("#094771"), 2);
+        painter->setPen(pen);
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 6, 6); // 稍微向内缩进 1px 确保边框完整
     }
 
-    // 2. 绘制文件名
-    QString fileName = index.data(Qt::DisplayRole).toString();
-    painter->setPen(option.state & QStyle::State_Selected ? option.palette.highlightedText().color() : QColor("#D4D4D4"));
-    QFont font = option.font;
-    font.setPointSizeF(8.5); // 稍微缩小字体以适应紧凑布局
-    painter->setFont(font);
-    
-    QFontMetrics fm(font);
-    QString elidedName = fm.elidedText(fileName, Qt::ElideMiddle, textRect.width());
-    painter->drawText(textRect, Qt::AlignCenter, elidedName);
-    
-    painter->restore();
+    // 文件名标签（物理位于卡片下方的预留区域）
+    QString name = index.data(Qt::DisplayRole).toString();
+    QRect textRect = option.rect.adjusted(2, option.rect.height() - textHeight, -2, -4);
+    painter->setPen(QColor("#D4D4D4"));
+    painter->drawText(textRect, Qt::AlignHCenter | Qt::AlignVCenter | Qt::TextWordWrap,
+                      option.fontMetrics.elidedText(name, Qt::ElideMiddle, textRect.width()));
 }
 
 QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const {
     return QStyledItemDelegate::sizeHint(option, index);
+}
+
+void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
+                                              const QStyleOptionViewItem& option,
+                                              const QModelIndex& /*index*/) const {
+    const int textHeight = 36;
+    // 编辑器精确定位到卡片下方的文字区域
+    QRect textRect = option.rect.adjusted(4, option.rect.height() - textHeight, -4, -4);
+    editor->setGeometry(textRect);
 }
 
 } // namespace ArcMeta
