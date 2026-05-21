@@ -23,6 +23,7 @@
 #include <QSortFilterProxyModel>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QStyle>
 #include <QDateTime>
 #include <algorithm>
 #include <execution>
@@ -523,6 +524,7 @@ ScanDialog::ScanDialog(QWidget* parent)
             m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64); 
             m_sizeSlider->setFixedSize(110, 34); // 高度锁定 34px
             m_sizeSlider->setCursor(Qt::PointingHandCursor); 
+            m_sizeSlider->installEventFilter(this);
             // 间距计算：margin-right 1px + spacing 4px = 5px (精准对标视图按钮)
             m_sizeSlider->setStyleSheet( 
                 "QSlider { background: transparent; margin-right: 1px; }"
@@ -651,6 +653,49 @@ ScanDialog::ScanDialog(QWidget* parent)
         QProgressBar#ScanProgressBar::chunk { background: #FF8C00; }
 
         QCheckBox { color: #AAA; }
+
+        /* 全局滚动条美化 */
+        QScrollBar:vertical {
+            border: none;
+            background: transparent;
+            width: 4px;
+            margin: 0px;
+        }
+        QScrollBar::handle:vertical {
+            background: #333333;
+            min-height: 20px;
+            border-radius: 2px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #444444;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+        }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            background: none;
+        }
+
+        QScrollBar:horizontal {
+            border: none;
+            background: transparent;
+            height: 4px;
+            margin: 0px;
+        }
+        QScrollBar::handle:horizontal {
+            background: #333333;
+            min-width: 20px;
+            border-radius: 2px;
+        }
+        QScrollBar::handle:horizontal:hover {
+            background: #444444;
+        }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+            width: 0px;
+        }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            background: none;
+        }
     )");
 
     // --- 2026-05-16 持久化恢复：根据配置恢复视图、尺寸与排序状态 ---
@@ -1595,6 +1640,14 @@ void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
 }
 
 bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_sizeSlider && event->type() == QEvent::MouseButtonPress) {
+        QMouseEvent* me = static_cast<QMouseEvent*>(event);
+        if (me->button() == Qt::LeftButton) {
+            int val = QStyle::sliderValueFromPosition(m_sizeSlider->minimum(), m_sizeSlider->maximum(), me->pos().x(), m_sizeSlider->width());
+            m_sizeSlider->setValue(val);
+            return true;
+        }
+    }
     if ((watched == m_searchEdit || watched == m_extEdit) && event->type() == QEvent::MouseButtonDblClick) {
         bool isQuery = (watched == m_searchEdit);
         const QStringList& history = isQuery ? m_config.queryHistory : m_config.extHistory;
