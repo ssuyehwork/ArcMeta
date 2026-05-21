@@ -432,23 +432,31 @@ ScanDialog::ScanDialog(QWidget* parent)
     setMinimumSize(800, 500);
 
     m_titleStatusLabel = new QLabel("READY - 0");
-    m_titleStatusLabel->setStyleSheet("color: #46B478; font-size: 10px; font-weight: bold; margin-left: 5px;");
+    // 按照用户要求：间距严格对齐规范。 margin-left: 1px (配合 layout spacing 4px = 5px)
+    m_titleStatusLabel->setStyleSheet("background: #1E1E1E; color: #46B478; font-size: 10px; font-weight: bold; margin-left: 1px; margin-bottom: -1px;");
+    m_titleStatusLabel->setFixedHeight(32);
 
     if (m_titleLabel && m_pinBtn && m_pinBtn->parentWidget() && m_pinBtn->parentWidget()->layout()) {
         m_titleLabel->hide(); 
         auto* titleLayout = qobject_cast<QHBoxLayout*>(m_pinBtn->parentWidget()->layout());
         if (titleLayout) {
-            // 按照用户要求：移除标题栏底部的 1px 切割线
-            m_pinBtn->parentWidget()->setStyleSheet("background-color: transparent; border: none;");
-            titleLayout->setSpacing(0);
+            // 按照用户要求：容器规范高度 32px，布局间距严格锁定 4px
+            m_pinBtn->parentWidget()->setFixedHeight(32);
+            titleLayout->setSpacing(4);
+            titleLayout->setContentsMargins(12, 0, 8, 0);
+
             QLabel* logoLabel = new QLabel();
             logoLabel->setFixedSize(18, 18);
             logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#FF8C00"), 18).pixmap(18, 18));
+            // 消除下方 1px 切割线：锁定 32px 高度并覆盖边框
+            logoLabel->setStyleSheet("background: #1E1E1E; margin-bottom: -1px;"); 
+            logoLabel->setFixedHeight(32);
             titleLayout->insertWidget(0, logoLabel);
             
             QLabel* brandLabel = new QLabel("FERREX-META");
-            // 按照用户要求：视觉上间距不足，将 margin-left 从 5px 增加到 8px
-            brandLabel->setStyleSheet("color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 8px;");
+            // 间距计算：margin-left 6px + spacing 4px = 10px (补偿视觉)
+            brandLabel->setStyleSheet("background: #1E1E1E; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 6px; margin-bottom: -1px;");
+            brandLabel->setFixedHeight(32);
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
@@ -462,18 +470,17 @@ ScanDialog::ScanDialog(QWidget* parent)
             
             titleLayout->insertStretch(titleLayout->indexOf(m_pinBtn));
 
-            // 按照截图要求调整布局：
-            // [Logo/标题/状态] -> [Stretch] -> [视图按钮②] -> [滑动条③] -> [窗口控制按钮①]
-            
             // ① 视图切换按钮 (标记 2)
             QPushButton* viewBtn = new QPushButton(); 
-            viewBtn->setFixedSize(24, 22); 
-            viewBtn->setIcon(UiHelper::getIcon("grid", QColor("#CCCCCC"), 16));
+            viewBtn->setFixedSize(24, 24); // 严格锁定 24x24
+            viewBtn->setIcon(UiHelper::getIcon("grid", QColor("#CCCCCC"), 18)); // 严格锁定图标 18x18
+            viewBtn->setIconSize(QSize(18, 18));
             viewBtn->setCursor(Qt::PointingHandCursor); 
+            viewBtn->setToolTip(""); // 禁止原生 ToolTip
             viewBtn->setStyleSheet( 
-                "QPushButton { background: #2D2D2D; color: #CCC; border: 1px solid #3F3F3F; " 
-                "border-radius: 4px; padding: 0; margin-left: 5px; }"  // 增加 5px 间距，与左侧滑动条拉开
-                "QPushButton:hover { background: #3A3A3A; color: #FFF; }" 
+                "QPushButton { background: transparent; border: none; border-radius: 4px; padding: 0; }" 
+                "QPushButton:hover { background: rgba(255, 255, 255, 0.1); }" 
+                "QPushButton:pressed { background: rgba(255, 255, 255, 0.2); }" 
             ); 
             connect(viewBtn, &QPushButton::clicked, this, [this, viewBtn]() { 
                 QMenu* menu = new QMenu(this); 
@@ -514,9 +521,11 @@ ScanDialog::ScanDialog(QWidget* parent)
             m_sizeSlider = new QSlider(Qt::Horizontal); 
             m_sizeSlider->setRange(32, 256); 
             m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64); 
-            m_sizeSlider->setFixedSize(110, 20); 
+            m_sizeSlider->setFixedSize(110, 32); // 高度锁定 32px
             m_sizeSlider->setCursor(Qt::PointingHandCursor); 
+            // 间距计算：margin-right 1px + spacing 4px = 5px (精准对标视图按钮)
             m_sizeSlider->setStyleSheet( 
+                "QSlider { background: #1E1E1E; margin-bottom: -1px; margin-right: 1px; }"
                 "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }" 
                 "QSlider::sub-page:horizontal { background: #FF8C00; border-radius: 2px; }" 
                 "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; " 
@@ -532,6 +541,37 @@ ScanDialog::ScanDialog(QWidget* parent)
             
             titleLayout->insertWidget(titleLayout->indexOf(m_pinBtn), viewBtn);
             titleLayout->insertWidget(titleLayout->indexOf(viewBtn), m_sizeSlider);
+
+            // 更新现有控制按钮样式以对标规范
+            for (auto* btn : {m_pinBtn, m_minBtn, m_maxBtn}) {
+                if (!btn) continue;
+                btn->setFixedSize(24, 24);
+                btn->setIconSize(QSize(18, 18));
+                btn->setToolTip("");
+                if (btn == m_pinBtn) {
+                     btn->setStyleSheet(
+                        "QPushButton { background: transparent; border: none; border-radius: 4px; } "
+                        "QPushButton:hover { background: rgba(255, 255, 255, 0.1); } "
+                        "QPushButton:checked { background: rgba(255, 85, 28, 0.2); }"
+                    );
+                } else {
+                    btn->setStyleSheet(
+                        "QPushButton { background: transparent; border: none; border-radius: 4px; } "
+                        "QPushButton:hover { background: rgba(255, 255, 255, 0.1); } "
+                        "QPushButton:pressed { background: rgba(255, 255, 255, 0.2); }"
+                    );
+                }
+            }
+            if (m_closeBtn) {
+                m_closeBtn->setFixedSize(24, 24);
+                m_closeBtn->setIconSize(QSize(18, 18));
+                m_closeBtn->setToolTip("");
+                m_closeBtn->setStyleSheet(
+                    "QPushButton { background-color: #E81123; border: none; border-radius: 4px; } "
+                    "QPushButton:hover { background-color: #F1707A; } "
+                    "QPushButton:pressed { background-color: #A50000; }"
+                );
+            }
         } else {
             m_titleStatusLabel->hide(); 
         }

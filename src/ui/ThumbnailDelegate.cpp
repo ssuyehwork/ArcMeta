@@ -52,18 +52,17 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     if (option.state & QStyle::State_Selected) {
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
-        // 对标 Eagle：使用 3px 宽的品牌橙边框，无任何颜色叠加
-        painter->setPen(QPen(QColor("#FF8C00"), 3)); 
+        // 按照用户要求：修改为项目标准蓝 (#3498db)
+        painter->setPen(QPen(QColor("#3498db"), 2)); 
         painter->setBrush(Qt::NoBrush);
-        // 按照用户要求：将高亮扩大 2 像素（从原本缩进 2 像素改为不缩进，即物理扩大）
-        painter->drawRoundedRect(cardRect, 6, 6);
+        painter->drawRoundedRect(cardRect.adjusted(0, 0, 0, 0), 6, 6);
         painter->restore();
     }
 
     // ③ 文件名（卡片下方）
     painter->save();
     painter->setPen(option.state & QStyle::State_Selected
-                    ? QColor("#FF8C00") : QColor("#C8C8C8"));
+                    ? QColor("#3498db") : QColor("#C8C8C8"));
     painter->drawText(textRect, Qt::AlignHCenter | Qt::AlignVCenter,
         option.fontMetrics.elidedText(
             index.data(Qt::DisplayRole).toString(),
@@ -75,12 +74,28 @@ QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QMod
     return QStyledItemDelegate::sizeHint(option, index);
 }
 
+QWidget* ThumbnailDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const {
+    QWidget* editor = QStyledItemDelegate::createEditor(parent, option, index);
+    if (editor) {
+        // 按照用户要求：修改为项目标准蓝 (#3498db)
+        editor->setStyleSheet(
+            "background-color: #2D2D2D; color: white; selection-background-color: #3498db; "
+            "border: 1px solid #3498db; border-radius: 4px; padding: 0 4px;"
+        );
+    }
+    return editor;
+}
+
 void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
                                               const QStyleOptionViewItem& option,
                                               const QModelIndex& /*index*/) const {
     const int textHeight = 36;
-    // 编辑器精确定位到卡片下方的文字区域
-    QRect textRect = option.rect.adjusted(4, option.rect.height() - textHeight, -4, -4);
+    // 按照用户要求：修正编辑器位置。
+    // 计算文字区域：位于整体区域底部 textHeight 像素
+    QRect textRect(option.rect.left() + 4,
+                   option.rect.bottom() - textHeight,
+                   option.rect.width() - 8,
+                   textHeight - 4);
     editor->setGeometry(textRect);
 }
 
