@@ -129,6 +129,9 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
 
     m_mainLayout->addWidget(titleBar);
 
+    // 按照用户要求：将标题栏下方的切割线向下偏移 2 像素
+    m_mainLayout->addSpacing(2);
+
     // 添加独立的 1px 分割线，彻底杜绝 UI 穿透问题
     auto* line = new QFrame();
     line->setFixedHeight(1);

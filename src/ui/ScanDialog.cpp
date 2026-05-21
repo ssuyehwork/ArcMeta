@@ -97,6 +97,13 @@ void ScanConfig::load() {
         if (obj.contains("iconSize")) iconSize = obj["iconSize"].toInt();
         if (obj.contains("sortColumn")) sortColumn = obj["sortColumn"].toInt();
         if (obj.contains("sortOrder")) sortOrder = obj["sortOrder"].toInt();
+
+        if (obj.contains("useRegex")) useRegex = obj["useRegex"].toBool();
+        if (obj.contains("caseSensitive")) caseSensitive = obj["caseSensitive"].toBool();
+        if (obj.contains("includeHidden")) includeHidden = obj["includeHidden"].toBool();
+        if (obj.contains("includeSystem")) includeSystem = obj["includeSystem"].toBool();
+        if (obj.contains("includeDollar")) includeDollar = obj["includeDollar"].toBool();
+        if (obj.contains("autoDisplay")) autoDisplay = obj["autoDisplay"].toBool();
     }
 }
 
@@ -124,6 +131,13 @@ void ScanConfig::save() {
         obj["iconSize"] = iconSize;
         obj["sortColumn"] = sortColumn;
         obj["sortOrder"] = sortOrder;
+
+        obj["useRegex"] = useRegex;
+        obj["caseSensitive"] = caseSensitive;
+        obj["includeHidden"] = includeHidden;
+        obj["includeSystem"] = includeSystem;
+        obj["includeDollar"] = includeDollar;
+        obj["autoDisplay"] = autoDisplay;
         
         file.write(QJsonDocument(obj).toJson());
     }
@@ -524,7 +538,7 @@ ScanDialog::ScanDialog(QWidget* parent)
             m_sizeSlider = new QSlider(Qt::Horizontal); 
             m_sizeSlider->setRange(32, 256); 
             m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64); 
-            m_sizeSlider->setFixedSize(110, 34); // 高度锁定 34px
+            m_sizeSlider->setFixedSize(110, 24); // 高度调整为 24px，避免覆盖/截断
             m_sizeSlider->setCursor(Qt::PointingHandCursor); 
             m_sizeSlider->installEventFilter(this);
             // 间距计算：margin-right 1px + spacing 4px = 5px (精准对标视图按钮)
@@ -604,7 +618,7 @@ ScanDialog::ScanDialog(QWidget* parent)
         
         #mainSearchEdit, #extSearchEdit { 
             background: #2D2D2D; 
-            border: 1px solid #3F3F3F; 
+            border: 1px solid #FF8C00; 
             border-radius: 6px; 
             color: #EEE; 
             font-size: 14px; 
@@ -612,9 +626,9 @@ ScanDialog::ScanDialog(QWidget* parent)
             outline: none;
         }
 
-        /* 显式定义伪类，防止全局污染 */
+        /* 显式定义伪类，保持橙色边框 */
         #mainSearchEdit:focus, #extSearchEdit:focus { border: 1px solid #FF8C00 !important; }
-        #mainSearchEdit:hover, #extSearchEdit:hover { border: 1px solid #555; }
+        #mainSearchEdit:hover, #extSearchEdit:hover { border: 1px solid #FF8C00; }
         
         #mainSearchEdit::placeholder, #extSearchEdit::placeholder {
             color: rgba(238, 238, 238, 0.3);
@@ -741,6 +755,10 @@ ScanDialog::ScanDialog(QWidget* parent)
                     weakThis->updateStatus("就绪");
                     weakThis->m_controller->setSearchText("");
                     weakThis->refreshDriveList(true); // 后台探测硬件
+                    // 2026-06-xx 物理对标：如果开启了“自动显示”，加载快照后立即触发一次全量过滤显示
+                    if (weakThis->m_config.autoDisplay) {
+                        weakThis->onFilterOptionChanged();
+                    }
                 } else {
                     weakThis->updateStatus("未检测到快照，全自动初始化...");
                     weakThis->refreshDriveList(true);
@@ -792,8 +810,17 @@ void ScanDialog::setupUi() {
     m_checkCase = new QCheckBox("大小写");
     m_checkHidden = new QCheckBox("隐藏");
     m_checkSystem = new QCheckBox("系统");
-    for (auto* cb : {m_checkRegex, m_checkCase, m_checkHidden, m_checkSystem}) {
-        cb->setChecked(cb != m_checkCase && cb != m_checkHidden && cb != m_checkSystem);
+    m_checkDollar = new QCheckBox("显示$");
+    m_checkAuto = new QCheckBox("自动显示");
+
+    m_checkRegex->setChecked(m_config.useRegex);
+    m_checkCase->setChecked(m_config.caseSensitive);
+    m_checkHidden->setChecked(m_config.includeHidden);
+    m_checkSystem->setChecked(m_config.includeSystem);
+    m_checkDollar->setChecked(m_config.includeDollar);
+    m_checkAuto->setChecked(m_config.autoDisplay);
+
+    for (auto* cb : {m_checkRegex, m_checkCase, m_checkHidden, m_checkSystem, m_checkDollar, m_checkAuto}) {
         connect(cb, &QCheckBox::toggled, this, &ScanDialog::onFilterOptionChanged);
         optionRow->addWidget(cb);
     }
@@ -950,21 +977,12 @@ void ScanDialog::setupUi() {
     mainLayout->addWidget(m_viewStack);
 
     auto* statusContainer = new QWidget();
+    statusContainer->setObjectName("StatusContainer");
     statusContainer->setFixedHeight(20);
+    statusContainer->setStyleSheet("QWidget#StatusContainer { background: transparent; border: none; }");
     auto* statusBar = new QHBoxLayout(statusContainer);
     statusBar->setContentsMargins(16, 0, 16, 0);
     statusBar->setSpacing(0);
-
-    m_selectionLabel = new QLabel("");
-    m_selectionLabel->setStyleSheet("color: #7A8F9E; font-size: 10px;");
-    statusBar->addWidget(m_selectionLabel);
-
-    m_csvBtn = new QPushButton("导出所选为 CSV");
-    m_csvBtn->setFlat(true);
-    m_csvBtn->setCursor(Qt::PointingHandCursor);
-    m_csvBtn->setStyleSheet("QPushButton { color: #FF8C00; font-size: 10px; border: none; padding: 0; text-decoration: none; } QPushButton:hover { text-decoration: underline; }");
-    m_csvBtn->hide();
-    statusBar->addWidget(m_csvBtn);
 
     m_statLabelMain = new QLabel("");
     m_statLabelMain->setStyleSheet("color: #7A8F9E; font-size: 10px;");
@@ -973,6 +991,17 @@ void ScanDialog::setupUi() {
     m_statLabelTime = new QLabel("");
     m_statLabelTime->setStyleSheet("color: #7A8F9E; font-size: 10px; margin-left: 12px;");
     statusBar->addWidget(m_statLabelTime);
+
+    m_selectionLabel = new QLabel("");
+    m_selectionLabel->setStyleSheet("color: #7A8F9E; font-size: 10px;");
+    statusBar->addWidget(m_selectionLabel);
+
+    m_csvBtn = new QPushButton("导出所选为 CSV");
+    m_csvBtn->setFlat(true);
+    m_csvBtn->setCursor(Qt::PointingHandCursor);
+    m_csvBtn->setStyleSheet("QPushButton { color: #FF8C00; font-size: 10px; border: none; padding: 0 0 0 8px; text-decoration: none; } QPushButton:hover { text-decoration: underline; }");
+    m_csvBtn->hide();
+    statusBar->addWidget(m_csvBtn);
 
     statusBar->addStretch();
 
@@ -1426,17 +1455,7 @@ void ScanDialog::onItemDoubleClicked(const QModelIndex& index) {
 }
 
 void ScanDialog::onSelectionChanged() {
-    auto view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
-    auto selectedRows = view->selectionModel()->selectedRows();
-    if (selectedRows.isEmpty()) { m_selectionLabel->clear(); return; }
-    
-    int64_t totalSize = 0;
-    auto& reader = MftReader::instance();
-    for (const auto& index : selectedRows) {
-        int actualIdx = m_tableModel->data(index, Qt::UserRole).toInt();
-        if (!reader.isDirectory(actualIdx)) totalSize += reader.getSize(actualIdx);
-    }
-    m_selectionLabel->setText(QString("已选择 %1 项 | 合计大小: %2").arg(selectedRows.size()).arg(formatSize(totalSize)));
+    updateStatusBar();
 }
 
 void ScanDialog::onStartScan() {
@@ -1487,17 +1506,33 @@ void ScanDialog::onTriggerSearch() {
 }
 
 void ScanDialog::onFilterOptionChanged() {
+    // 2026-06-xx 物理修复：在过滤选项变更时强制同步驱动器掩码。
+    // 如果不在此处同步，当用户切换“自动显示”开关时，搜索引擎可能因为默认 Mask 为 0 而导致搜索结果为空。
+    QStringList activeList;
+    for (const QString& d : m_config.activeDrives) activeList << d;
+    MftReader::instance().updateActiveDrives(activeList);
+
+    m_config.useRegex = m_checkRegex->isChecked();
+    m_config.caseSensitive = m_checkCase->isChecked();
+    m_config.includeHidden = m_checkHidden->isChecked();
+    m_config.includeSystem = m_checkSystem->isChecked();
+    m_config.includeDollar = m_checkDollar->isChecked();
+    m_config.autoDisplay = m_checkAuto->isChecked();
+    m_config.save();
+
     ScanFilterState state;
-    state.useRegex = m_checkRegex->isChecked();
-    state.caseSensitive = m_checkCase->isChecked();
-    state.includeHidden = m_checkHidden->isChecked();
-    state.includeSystem = m_checkSystem->isChecked();
+    state.useRegex = m_config.useRegex;
+    state.caseSensitive = m_config.caseSensitive;
+    state.includeHidden = m_config.includeHidden;
+    state.includeSystem = m_config.includeSystem;
+    state.includeDollar = m_config.includeDollar;
+    state.autoDisplay = m_config.autoDisplay;
     QString extText = m_extEdit->text().toLower();
     if (!extText.isEmpty()) state.extensionList = extText.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
     
     m_controller->setFilterState(state);
-    // 2026-06-xx 物理对标：只有在配置变更时触发防抖搜索，如果是手动输入则由 QLineEdit 连接处理
-    m_controller->triggerSearch();
+    // 2026-06-xx 物理对标：配置变更时触发立即搜索，以响应“自动显示”等开关状态
+    m_controller->triggerSearch(true);
 }
 
 void ScanDialog::updateStatus(const QString& text, bool scanning) {
@@ -1515,12 +1550,13 @@ void ScanDialog::updateStatus(const QString& text, bool scanning) {
 void ScanDialog::updateStatusBar() {
     auto view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
     auto selectedRows = view->selectionModel()->selectedRows();
-    if (selectedRows.size() > 1) {
-        m_statLabelMain->hide();
-        m_statLabelTime->hide();
+    
+    int totalMatch = m_controller->resultCount();
+    m_statLabelMain->setText(QString("共找到 %1 条项目").arg(formatNumber(totalMatch)));
+    m_statLabelTime->setText(QString("耗时 %1 ms").arg(m_lastSearchMs));
+
+    if (!selectedRows.isEmpty()) {
         m_selectionLabel->show();
-        m_csvBtn->show();
-        
         int64_t totalSize = 0;
         auto& reader = MftReader::instance();
         for (const auto& index : selectedRows) {
@@ -1528,17 +1564,13 @@ void ScanDialog::updateStatusBar() {
             int actualIdx = reader.getIndexByKey(key);
             if (actualIdx != -1 && !reader.isDirectory(actualIdx)) totalSize += reader.getSize(actualIdx);
         }
-        m_selectionLabel->setText(QString("已选 %1 项 | 合计大小 %2  ").arg(selectedRows.size()).arg(formatSize(totalSize)));
+        m_selectionLabel->setText(QString(" | 已选择 %1 项 (%2)").arg(selectedRows.size()).arg(formatSize(totalSize)));
+        
+        if (selectedRows.size() > 1) m_csvBtn->show();
+        else m_csvBtn->hide();
     } else {
         m_selectionLabel->hide();
         m_csvBtn->hide();
-        m_statLabelMain->show();
-        m_statLabelTime->show();
-        
-        int totalMatch = m_controller->resultCount();
-        m_statLabelMain->setText(QString("共找到 %1 条项目").arg(formatNumber(totalMatch)));
-        m_statLabelTime->setText(QString("耗时 %1 ms").arg(m_lastSearchMs));
-
     }
     
     double memoryMb = (MftReader::instance().totalCount() * 184.0) / 1024.0 / 1024.0;
