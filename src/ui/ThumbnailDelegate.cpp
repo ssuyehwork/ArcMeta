@@ -55,7 +55,8 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         // 对标 Eagle：使用 3px 宽的品牌橙边框，无任何颜色叠加
         painter->setPen(QPen(QColor("#FF8C00"), 3));
         painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(cardRect.adjusted(2, 2, -2, -2), 6, 6);
+        // 按照用户要求：将高亮扩大 2 像素（从原本缩进 2 像素改为不缩进，即物理扩大）
+        painter->drawRoundedRect(cardRect, 6, 6);
         painter->restore();
     }
 
