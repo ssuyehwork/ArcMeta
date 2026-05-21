@@ -240,10 +240,13 @@ void JustifiedView::doLayout() {
     }
 
     m_geometries.resize(count);
-    int containerWidth = viewport()->width() - 25; 
+    const int margin = 10;
+    const int spacing = 5;
+    // 可用宽度：视口宽度 - 左边距 - 右边距
+    int containerWidth = viewport()->width() - (margin * 2); 
     if (containerWidth <= 0) return;
 
-    int currentY = 10; 
+    int currentY = margin; 
     int i = 0;
     
     while (i < count) {
@@ -258,9 +261,17 @@ void JustifiedView::doLayout() {
             aspectRatios.push_back(ar);
             rowAspectRatioSum += ar;
             
-            double estimatedWidth = rowAspectRatioSum * m_targetRowHeight;
+            int numInRow = (int)aspectRatios.size();
+            // 预估宽度 = (宽高比总和 * 目标高度) + (项间距 * 间距数量)
+            double estimatedWidth = (rowAspectRatioSum * m_targetRowHeight) + (spacing * (numInRow - 1));
             if (estimatedWidth > containerWidth) {
-                i++;
+                // 如果单项就超过了容器宽度，则强制独占一行
+                if (numInRow > 1) {
+                    aspectRatios.pop_back();
+                    rowAspectRatioSum -= ar;
+                } else {
+                    i++;
+                }
                 break; 
             }
             i++;
@@ -268,30 +279,37 @@ void JustifiedView::doLayout() {
 
         int rowEnd = i;
         int numInRow = rowEnd - rowStart;
+        if (numInRow <= 0) break;
+
         int actualHeight = m_targetRowHeight;
         bool isLastRow = (i == count);
 
+        // 实际内容可用宽度（扣除项间距）
+        int availableContentWidth = containerWidth - (spacing * (numInRow - 1));
+
         if (!isLastRow || (rowAspectRatioSum * m_targetRowHeight > containerWidth * 0.8)) {
-            actualHeight = qRound(containerWidth / rowAspectRatioSum);
+            actualHeight = qRound(availableContentWidth / rowAspectRatioSum);
         }
 
-        if (actualHeight > m_targetRowHeight * 1.5) actualHeight = m_targetRowHeight * 1.5;
+        // 防止行高过大，限制在目标高度的 1.5 倍
+        if (actualHeight > m_targetRowHeight * 1.5) actualHeight = qRound(m_targetRowHeight * 1.5);
 
-        int currentX = 10;
+        int currentX = margin;
         const int textHeight = 36;
         for (int j = 0; j < numInRow; ++j) {
             int itemIdx = rowStart + j;
             int itemWidth = qRound(aspectRatios[j] * actualHeight);
             
+            // 最后一个项目：物理对齐右边缘 (margin)
             if (j == numInRow - 1 && !isLastRow) {
-                itemWidth = containerWidth + 10 - currentX; // 最后一个补齐行宽 
+                itemWidth = (containerWidth + margin) - currentX;
             }
 
             // 总高度 = 图片高度 + 文字区域高度
             m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + textHeight), itemIdx };
-            currentX += itemWidth + 5; 
+            currentX += itemWidth + spacing; 
         }
-        currentY += actualHeight + textHeight + 5; // 统一行高推进
+        currentY += actualHeight + textHeight + spacing; // 统一行高推进
     }
 
     m_totalHeight = currentY + 10;

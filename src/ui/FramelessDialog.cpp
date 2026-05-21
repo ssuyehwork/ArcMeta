@@ -46,9 +46,9 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
     // --- 标题栏 ---
     auto* titleBar = new QWidget();
     titleBar->setObjectName("TitleBar");
-    titleBar->setFixedHeight(32);
-    // 2026-05-16 物理对齐：高度压缩至 32px，边框色同步为主界面 #333333
-    titleBar->setStyleSheet("background-color: transparent; border-bottom: 1px solid #333333;");
+    titleBar->setFixedHeight(34);
+    // 移除 border-bottom 以防止穿透组件，改为使用独立的物理分割线
+    titleBar->setStyleSheet("background-color: transparent; border: none;");
     auto* titleLayout = new QHBoxLayout(titleBar);
     titleLayout->setContentsMargins(12, 0, 5, 0); // 右侧对齐 5px 物理边距
     titleLayout->setSpacing(4);
@@ -128,6 +128,14 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
     titleLayout->addWidget(m_closeBtn);
 
     m_mainLayout->addWidget(titleBar);
+
+    // 添加独立的 1px 分割线，彻底杜绝 UI 穿透问题
+    auto* line = new QFrame();
+    line->setFixedHeight(1);
+    line->setFrameShape(QFrame::HLine);
+    line->setFrameShadow(QFrame::Plain);
+    line->setStyleSheet("background-color: #333333; border: none;");
+    m_mainLayout->addWidget(line);
 
     m_contentArea = new QWidget();
     m_contentArea->setObjectName("DialogContentArea");

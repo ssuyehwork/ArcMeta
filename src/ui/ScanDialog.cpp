@@ -23,6 +23,7 @@
 #include <QSortFilterProxyModel>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QStyle>
 #include <QDateTime>
 #include <algorithm>
 #include <execution>
@@ -285,14 +286,16 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             QColor tagC = UiHelper::parseColorName(QString::fromStdWString(meta.color));
             if (tagC.isValid()) return tagC;
         }
-        if (reader.isDirectory(actualIndex)) return QColor("#3498db");
+        // 2026-06-xx 按照用户要求：名称列（第0列）强制显示为蓝色
+        if (index.column() == 0 || reader.isDirectory(actualIndex)) return QColor("#3498db");
     } else if (role == Qt::ToolTipRole) {
         // 2026-05-16 交互同步：显示备注与标签
+        // 2026-06-xx 物理修复：移除错误的 QLatin1String 引用，改用 UTF-8 字面量修复中文乱码
         std::wstring path = reader.getFullPath(actualIndex).toStdWString();
         auto meta = MetadataManager::instance().getMeta(path);
-        QString tip = QLatin1String("路径: ") + QString::fromStdWString(path);
-        if (!meta.note.empty()) tip += QLatin1String("\n备注: ") + QString::fromStdWString(meta.note);
-        if (!meta.tags.isEmpty()) tip += QLatin1String("\n标签: ") + meta.tags.join(QLatin1String(", "));
+        QString tip = QString::fromUtf8("路径: ") + QString::fromStdWString(path);
+        if (!meta.note.empty()) tip += QString::fromUtf8("\n备注: ") + QString::fromStdWString(meta.note);
+        if (!meta.tags.isEmpty()) tip += QString::fromUtf8("\n标签: ") + meta.tags.join(", ");
         return tip;
     } else if (role == Qt::TextAlignmentRole) {
         switch (index.column()) {
@@ -433,30 +436,30 @@ ScanDialog::ScanDialog(QWidget* parent)
 
     m_titleStatusLabel = new QLabel("READY - 0");
     // 按照用户要求：间距严格对齐规范。 margin-left: 1px (配合 layout spacing 4px = 5px)
-    m_titleStatusLabel->setStyleSheet("background: #1E1E1E; color: #46B478; font-size: 10px; font-weight: bold; margin-left: 1px; margin-bottom: -1px;");
-    m_titleStatusLabel->setFixedHeight(32);
+    m_titleStatusLabel->setStyleSheet("background: transparent; color: #46B478; font-size: 10px; font-weight: bold; margin-left: 1px;");
+    m_titleStatusLabel->setFixedHeight(34);
 
     if (m_titleLabel && m_pinBtn && m_pinBtn->parentWidget() && m_pinBtn->parentWidget()->layout()) {
         m_titleLabel->hide(); 
         auto* titleLayout = qobject_cast<QHBoxLayout*>(m_pinBtn->parentWidget()->layout());
         if (titleLayout) {
-            // 按照用户要求：容器规范高度 32px，布局间距严格锁定 4px
-            m_pinBtn->parentWidget()->setFixedHeight(32);
+            // 按照用户要求：容器规范高度 34px，布局间距严格锁定 4px
+            m_pinBtn->parentWidget()->setFixedHeight(34);
             titleLayout->setSpacing(4);
             titleLayout->setContentsMargins(12, 0, 8, 0);
 
             QLabel* logoLabel = new QLabel();
             logoLabel->setFixedSize(18, 18);
             logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#FF8C00"), 18).pixmap(18, 18));
-            // 消除下方 1px 切割线：锁定 32px 高度并覆盖边框
-            logoLabel->setStyleSheet("background: #1E1E1E; margin-bottom: -1px;"); 
-            logoLabel->setFixedHeight(32);
+            // 恢复高度并设为透明，物理分割线已独立
+            logoLabel->setStyleSheet("background: transparent;"); 
+            logoLabel->setFixedHeight(34);
             titleLayout->insertWidget(0, logoLabel);
             
             QLabel* brandLabel = new QLabel("FERREX-META");
             // 间距计算：margin-left 6px + spacing 4px = 10px (补偿视觉)
-            brandLabel->setStyleSheet("background: #1E1E1E; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 6px; margin-bottom: -1px;");
-            brandLabel->setFixedHeight(32);
+            brandLabel->setStyleSheet("background: transparent; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 6px;");
+            brandLabel->setFixedHeight(34);
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
@@ -521,11 +524,12 @@ ScanDialog::ScanDialog(QWidget* parent)
             m_sizeSlider = new QSlider(Qt::Horizontal); 
             m_sizeSlider->setRange(32, 256); 
             m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64); 
-            m_sizeSlider->setFixedSize(110, 32); // 高度锁定 32px
+            m_sizeSlider->setFixedSize(110, 34); // 高度锁定 34px
             m_sizeSlider->setCursor(Qt::PointingHandCursor); 
+            m_sizeSlider->installEventFilter(this);
             // 间距计算：margin-right 1px + spacing 4px = 5px (精准对标视图按钮)
             m_sizeSlider->setStyleSheet( 
-                "QSlider { background: #1E1E1E; margin-bottom: -1px; margin-right: 1px; }"
+                "QSlider { background: transparent; margin-right: 1px; }"
                 "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }" 
                 "QSlider::sub-page:horizontal { background: #FF8C00; border-radius: 2px; }" 
                 "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; " 
@@ -651,6 +655,49 @@ ScanDialog::ScanDialog(QWidget* parent)
         QProgressBar#ScanProgressBar::chunk { background: #FF8C00; }
 
         QCheckBox { color: #AAA; }
+
+        /* 全局滚动条美化 */
+        QScrollBar:vertical {
+            border: none;
+            background: transparent;
+            width: 4px;
+            margin: 0px;
+        }
+        QScrollBar::handle:vertical {
+            background: #333333;
+            min-height: 20px;
+            border-radius: 2px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #444444;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+        }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            background: none;
+        }
+
+        QScrollBar:horizontal {
+            border: none;
+            background: transparent;
+            height: 4px;
+            margin: 0px;
+        }
+        QScrollBar::handle:horizontal {
+            background: #333333;
+            min-width: 20px;
+            border-radius: 2px;
+        }
+        QScrollBar::handle:horizontal:hover {
+            background: #444444;
+        }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+            width: 0px;
+        }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            background: none;
+        }
     )");
 
     // --- 2026-05-16 持久化恢复：根据配置恢复视图、尺寸与排序状态 ---
@@ -783,6 +830,7 @@ void ScanDialog::setupUi() {
     m_extEdit->setPlaceholderText("后缀");
     m_extEdit->setFixedWidth(120); 
     m_extEdit->setFixedHeight(36);
+    m_extEdit->setClearButtonEnabled(true);
     m_extEdit->installEventFilter(this);
     connect(m_extEdit, &QLineEdit::returnPressed, this, &ScanDialog::onTriggerSearch);
     searchRow->addWidget(m_extEdit);
@@ -902,7 +950,7 @@ void ScanDialog::setupUi() {
     mainLayout->addWidget(m_viewStack);
 
     auto* statusContainer = new QWidget();
-    statusContainer->setFixedHeight(26);
+    statusContainer->setFixedHeight(20);
     auto* statusBar = new QHBoxLayout(statusContainer);
     statusBar->setContentsMargins(16, 0, 16, 0);
     statusBar->setSpacing(0);
@@ -1594,6 +1642,14 @@ void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
 }
 
 bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_sizeSlider && event->type() == QEvent::MouseButtonPress) {
+        QMouseEvent* me = static_cast<QMouseEvent*>(event);
+        if (me->button() == Qt::LeftButton) {
+            int val = QStyle::sliderValueFromPosition(m_sizeSlider->minimum(), m_sizeSlider->maximum(), me->pos().x(), m_sizeSlider->width());
+            m_sizeSlider->setValue(val);
+            return true;
+        }
+    }
     if ((watched == m_searchEdit || watched == m_extEdit) && event->type() == QEvent::MouseButtonDblClick) {
         bool isQuery = (watched == m_searchEdit);
         const QStringList& history = isQuery ? m_config.queryHistory : m_config.extHistory;
