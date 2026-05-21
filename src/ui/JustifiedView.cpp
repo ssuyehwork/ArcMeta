@@ -278,6 +278,7 @@ void JustifiedView::doLayout() {
         if (actualHeight > m_targetRowHeight * 1.5) actualHeight = m_targetRowHeight * 1.5;
 
         int currentX = 10;
+        const int textHeight = 36;
         for (int j = 0; j < numInRow; ++j) {
             int itemIdx = rowStart + j;
             int itemWidth = qRound(aspectRatios[j] * actualHeight);
@@ -286,10 +287,11 @@ void JustifiedView::doLayout() {
                 itemWidth = containerWidth + 10 - currentX; // 最后一个补齐行宽
             }
 
-            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight), itemIdx };
+            // 总高度 = 图片高度 + 文字区域高度
+            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + textHeight), itemIdx };
             currentX += itemWidth + 5; 
         }
-        currentY += actualHeight + 5; // 统一行高推进
+        currentY += actualHeight + textHeight + 5; // 统一行高推进
     }
 
     m_totalHeight = currentY + 10;
