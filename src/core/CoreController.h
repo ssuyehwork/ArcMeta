@@ -26,6 +26,13 @@ public:
     bool isIndexing() const { return m_isIndexing; }
     QString statusText() const { return m_statusText; }
 
+    /**
+     * @brief 统一搜索接口
+     * @param keyword 关键词
+     * @return 匹配的文件路径列表
+     */
+    QStringList performSearch(const QString& keyword);
+
 signals:
     void isIndexingChanged(bool indexing);
     void statusTextChanged(const QString& text);

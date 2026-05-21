@@ -1,7 +1,6 @@
 <RCC>
     <qresource prefix="/">
-        <file>qss/dark_style.qss</file>
-        <file>qss/scan_dialog.qss</file>
+        <file>style.qss</file>
         <file>app_icon.png</file>
         <file>app_icon.ico</file>
     </qresource>

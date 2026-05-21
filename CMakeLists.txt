@@ -113,6 +113,14 @@ set(SOURCES
     src/ui/Logger.h
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
+    src/ui/TrayController.cpp
+    src/ui/TrayController.h
+    src/ui/HoverEventFilter.cpp
+    src/ui/HoverEventFilter.h
+    src/ui/ResizeEventFilter.cpp
+    src/ui/ResizeEventFilter.h
+    src/ui/AddressBar.cpp
+    src/ui/AddressBar.h
     src/ui/MetaPanel.cpp
     src/ui/MetaPanel.h
     src/ui/NavPanel.cpp

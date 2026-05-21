@@ -1,6 +1,8 @@
 #include "CoreController.h"
 #include "../db/Database.h"
 #include "../db/SyncEngine.h"
+#include "../db/CategoryRepo.h"
+#include "../db/ItemRepo.h"
 #include "../meta/MetadataManager.h"
 #include "../mft/MftReader.h"
 #include <QtConcurrent>
@@ -66,6 +68,20 @@ void CoreController::startSystem() {
             QMetaObject::invokeMethod(this, &CoreController::initializationFinished, Qt::QueuedConnection);
         }
     });
+}
+
+QStringList CoreController::performSearch(const QString& keyword) {
+    if (keyword.isEmpty()) return {};
+
+    QStringList paths;
+    if (CategoryRepo::isJsonMode()) {
+        // 模式 A: 纯 JSON 内存搜索
+        paths = MetadataManager::instance().searchInCache(keyword);
+    } else {
+        // 模式 B: 经典数据库搜索 (已包含路径+标签+备注检索)
+        paths = ItemRepo::searchByKeyword(keyword, "");
+    }
+    return paths;
 }
 
 void CoreController::setStatus(const QString& text, bool indexing) {

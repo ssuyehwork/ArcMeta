@@ -13,7 +13,10 @@
 
 namespace ArcMeta {
 
-class BreadcrumbBar;
+class TrayController;
+class HoverEventFilter;
+class ResizeEventFilter;
+class AddressBar;
 class CategoryPanel;
 class NavPanel;
 class ContentPanel;
@@ -30,7 +33,7 @@ class MainWindow : public QMainWindow {
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
-    ~MainWindow() override = default;
+    ~MainWindow() override;
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
@@ -91,11 +94,9 @@ private:
     void initToolbar();
     void setupSplitters();
     void setupCustomTitleBarButtons();
-    void initTrayIcon();
 
-    // 面包屑地址栏
-    BreadcrumbBar* m_breadcrumbBar = nullptr;
-    QStackedWidget* m_pathStack = nullptr;
+    // 复合地址栏
+    AddressBar* m_addressBar = nullptr;
 
     // 六个面板
     CategoryPanel* m_categoryPanel = nullptr;
@@ -112,7 +113,6 @@ private:
 
     // 工具栏组件
     QToolBar* m_toolbar    = nullptr;
-    QLineEdit* m_pathEdit  = nullptr;
     QLineEdit* m_searchEdit = nullptr;
     QPushButton* m_btnBack    = nullptr;
     QPushButton* m_btnForward = nullptr;
@@ -147,8 +147,10 @@ private:
     bool m_isDragging = false;
     QPoint m_dragPosition;
 
-    // 系统托盘
-    QSystemTrayIcon* m_trayIcon = nullptr;
+    // 系统托盘控制器
+    TrayController* m_trayController = nullptr;
+    HoverEventFilter* m_hoverFilter = nullptr;
+    ResizeEventFilter* m_resizeFilter = nullptr;
     // 2026-04-17 按照用户要求：修复 m_idleTimer 重定义，保留上方唯一成员声明
     void initIdleDetector();
 };
