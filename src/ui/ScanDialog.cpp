@@ -433,8 +433,8 @@ ScanDialog::ScanDialog(QWidget* parent)
 
     m_titleStatusLabel = new QLabel("READY - 0");
     // 按照用户要求：间距严格对齐规范。 margin-left: 1px (配合 layout spacing 4px = 5px)
-    m_titleStatusLabel->setStyleSheet("background: #1E1E1E; color: #46B478; font-size: 10px; font-weight: bold; margin-left: 1px;");
-    m_titleStatusLabel->setFixedHeight(30);
+    m_titleStatusLabel->setStyleSheet("background: transparent; color: #46B478; font-size: 10px; font-weight: bold; margin-left: 1px;");
+    m_titleStatusLabel->setFixedHeight(34);
 
     if (m_titleLabel && m_pinBtn && m_pinBtn->parentWidget() && m_pinBtn->parentWidget()->layout()) {
         m_titleLabel->hide(); 
@@ -448,15 +448,15 @@ ScanDialog::ScanDialog(QWidget* parent)
             QLabel* logoLabel = new QLabel();
             logoLabel->setFixedSize(18, 18);
             logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#FF8C00"), 18).pixmap(18, 18));
-            // 调整高度以避免覆盖切割线
-            logoLabel->setStyleSheet("background: #1E1E1E;");
-            logoLabel->setFixedHeight(30);
+            // 恢复高度并设为透明，物理分割线已独立
+            logoLabel->setStyleSheet("background: transparent;");
+            logoLabel->setFixedHeight(34);
             titleLayout->insertWidget(0, logoLabel);
             
             QLabel* brandLabel = new QLabel("FERREX-META");
             // 间距计算：margin-left 6px + spacing 4px = 10px (补偿视觉)
-            brandLabel->setStyleSheet("background: #1E1E1E; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 6px;");
-            brandLabel->setFixedHeight(30);
+            brandLabel->setStyleSheet("background: transparent; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 6px;");
+            brandLabel->setFixedHeight(34);
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
@@ -521,11 +521,11 @@ ScanDialog::ScanDialog(QWidget* parent)
             m_sizeSlider = new QSlider(Qt::Horizontal); 
             m_sizeSlider->setRange(32, 256); 
             m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64); 
-            m_sizeSlider->setFixedSize(110, 30); // 高度锁定 30px
+            m_sizeSlider->setFixedSize(110, 34); // 高度锁定 34px
             m_sizeSlider->setCursor(Qt::PointingHandCursor); 
             // 间距计算：margin-right 1px + spacing 4px = 5px (精准对标视图按钮)
             m_sizeSlider->setStyleSheet( 
-                "QSlider { background: #1E1E1E; margin-right: 1px; }"
+                "QSlider { background: transparent; margin-right: 1px; }"
                 "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }" 
                 "QSlider::sub-page:horizontal { background: #FF8C00; border-radius: 2px; }" 
                 "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; " 
