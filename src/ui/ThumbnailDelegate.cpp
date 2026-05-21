@@ -90,8 +90,12 @@ void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
                                               const QStyleOptionViewItem& option,
                                               const QModelIndex& /*index*/) const {
     const int textHeight = 36;
-    // 编辑器精确定位到卡片下方的文字区域
-    QRect textRect = option.rect.adjusted(4, option.rect.height() - textHeight, -4, -4);
+    // 按照用户要求：修正编辑器位置。
+    // 计算文字区域：位于整体区域底部 textHeight 像素
+    QRect textRect(option.rect.left() + 4,
+                   option.rect.bottom() - textHeight,
+                   option.rect.width() - 8,
+                   textHeight - 4);
     editor->setGeometry(textRect);
 }
 
