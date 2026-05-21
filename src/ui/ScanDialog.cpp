@@ -755,6 +755,10 @@ ScanDialog::ScanDialog(QWidget* parent)
                     weakThis->updateStatus("就绪");
                     weakThis->m_controller->setSearchText("");
                     weakThis->refreshDriveList(true); // 后台探测硬件
+                    // 2026-06-xx 物理对标：如果开启了“自动显示”，加载快照后立即触发一次全量过滤显示
+                    if (weakThis->m_config.autoDisplay) {
+                        weakThis->onFilterOptionChanged();
+                    }
                 } else {
                     weakThis->updateStatus("未检测到快照，全自动初始化...");
                     weakThis->refreshDriveList(true);
@@ -1512,6 +1516,12 @@ void ScanDialog::onTriggerSearch() {
 }
 
 void ScanDialog::onFilterOptionChanged() {
+    // 2026-06-xx 物理修复：在过滤选项变更时强制同步驱动器掩码。
+    // 如果不在此处同步，当用户切换“自动显示”开关时，搜索引擎可能因为默认 Mask 为 0 而导致搜索结果为空。
+    QStringList activeList;
+    for (const QString& d : m_config.activeDrives) activeList << d;
+    MftReader::instance().updateActiveDrives(activeList);
+
     m_config.useRegex = m_checkRegex->isChecked();
     m_config.caseSensitive = m_checkCase->isChecked();
     m_config.includeHidden = m_checkHidden->isChecked();
@@ -1531,8 +1541,8 @@ void ScanDialog::onFilterOptionChanged() {
     if (!extText.isEmpty()) state.extensionList = extText.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
     
     m_controller->setFilterState(state);
-    // 2026-06-xx 物理对标：只有在配置变更时触发防抖搜索，如果是手动输入则由 QLineEdit 连接处理
-    m_controller->triggerSearch();
+    // 2026-06-xx 物理对标：配置变更时触发立即搜索，以响应“自动显示”等开关状态
+    m_controller->triggerSearch(true);
 }
 
 void ScanDialog::updateStatus(const QString& text, bool scanning) {

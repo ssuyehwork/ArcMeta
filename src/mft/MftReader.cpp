@@ -616,7 +616,7 @@ std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, boo
     } else {
         std::for_each((std::execution::par), chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
             std::vector<uint64_t> localRes;
-            localRes.reserve(grainSize / 8);
+            localRes.reserve(grainSize / 16);
             size_t startPos = chunkIdx * grainSize;
             size_t endPos = (std::min)(startPos + grainSize, total);
 
