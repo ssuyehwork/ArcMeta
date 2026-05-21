@@ -56,7 +56,8 @@ enum ItemRole {
     IsEmptyRole,
     CategoryIdRole,
     InDatabaseRole,
-    PalettesRole
+    PalettesRole,
+    HasThumbnailRole
 };
 
 /**
@@ -312,9 +313,8 @@ public:
     using QStyledItemDelegate::QStyledItemDelegate;
 
     struct GridMetrics {
-        QRect cardRect;      // 整个条目的一体化圆角卡片区域
-        QRect thumbRect;     // 缩略图/图标展示区域 (充满策略)
-        QRect metadataRect;  // 底部元数据展示区 (包含名称和评级)
+        QRect imageBoxRect;  // 顶部图像框 (带背景和边框)
+        QRect metadataRect;  // 底部元数据展示区 (透明背景)
         QRect nameRect;      // 文件名区域
         QRect ratingRect;    // 评级星级区域
 

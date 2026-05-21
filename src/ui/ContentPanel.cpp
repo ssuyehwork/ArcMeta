@@ -274,6 +274,7 @@ ContentPanel::ContentPanel(QWidget* parent)
             nameItem->setData(data.meta.encrypted, EncryptedRole); 
             nameItem->setData(data.meta.tags, TagsRole); 
             nameItem->setData(data.isEmpty, IsEmptyRole); 
+            nameItem->setData(false, HasThumbnailRole);
             // 2026-06-xx 按照要求：注入物理色板，确保多色统计与过滤生效
             QVariantList palList;
             for (const auto& p : data.meta.palettes) {
@@ -322,35 +323,39 @@ ContentPanel::ContentPanel(QWidget* parent)
                 if (pIdx.isValid()) { 
                     QFileInfo info(path); 
                     QString ext = info.suffix().toLower(); 
-                    QIcon icon; 
+                    QPixmap thumb;
+                    bool hasThumb = false;
  
                     // 2026-05-07 按照用户要求：SVG文件直接渲染显示实际内容 
                     if (ext.toLower() == "svg") { 
                         // 直接渲染SVG文件内容 
                         QSvgRenderer renderer(path); 
                         if (renderer.isValid()) { 
-                            QPixmap svgPixmap(96, 96); 
-                            svgPixmap.fill(Qt::transparent); 
-                            QPainter painter(&svgPixmap); 
+                            thumb = QPixmap(256, 256);
+                            thumb.fill(Qt::transparent);
+                            QPainter painter(&thumb);
                             renderer.render(&painter); 
                             painter.end(); 
-                            icon = QIcon(svgPixmap); 
+                            hasThumb = true;
                         } 
                     } else if (UiHelper::isGraphicsFile(ext)) { 
                         // 2026-04-11 按照用户要求：凡是图片/图形格式，物理强制提取内容缩略图 
                         // 2026-04-11 按照用户要求：专属注入 true 参数，只对走缓存的小列表图执行垂直翻转修正 
-                        QPixmap thumb = UiHelper::getShellThumbnail(path, 96, true); 
+                        thumb = UiHelper::getShellThumbnail(path, 256, true);
                         if (!thumb.isNull()) { 
-                            icon = QIcon(thumb); 
+                            hasThumb = true;
                         } 
                     } 
  
-                    // 降级保护：如果提取失败或非图形格式，直接指向 UiHelper::getFileIcon 获取原生图标
-                    if (icon.isNull()) { 
-                        icon = UiHelper::getFileIcon(path, 128);
-                    } 
- 
-                    m_model->setData(pIdx, icon, Qt::DecorationRole); 
+                    if (hasThumb) {
+                        m_model->setData(pIdx, thumb, Qt::DecorationRole);
+                        m_model->setData(pIdx, true, HasThumbnailRole);
+                    } else {
+                        // 降级保护：如果提取失败或非图形格式，直接指向 UiHelper::getFileIcon 获取原生图标
+                        QIcon icon = UiHelper::getFileIcon(path, 128);
+                        m_model->setData(pIdx, icon, Qt::DecorationRole);
+                        m_model->setData(pIdx, false, HasThumbnailRole);
+                    }
                 } 
                 m_pathToIndexMap.remove(path); 
             } 
@@ -479,7 +484,7 @@ void ContentPanel::updateGridSize() {
     m_gridView->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
     
     int cardW = m_zoomLevel + 24;
-    int metadataH = 46; // 底部文件名和星级的固定高度
+    int metadataH = 42; // 底部文件名和星级的固定高度，需与 Delegate 保持物理同步
     int totalH = cardW + metadataH + 12; // 12 为外边距留白
     
     m_gridView->setGridSize(QSize(cardW + 10, totalH));
@@ -956,18 +961,23 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     MetadataManager::instance().setColor(itemPath.toStdWString(), colorName.toStdWString()); 
                     m_proxyModel->setData(idx, colorName, ColorRole); 
  
-                    // 2026-06-05 按照要求：设置颜色后立即重新生成并应用图标，实现视觉同步
-                    // 2026-05-17 逻辑修复：针对图像格式，必须优先尝试提取缩略图，防止图标覆盖内容
-                    QIcon coloredIcon;
+                    // 2026-06-05 按照要求：设置颜色后立即重新生成并应用缩略图/图标，实现视觉同步
+                    QPixmap thumb;
+                    bool hasThumb = false;
                     QString ext = QFileInfo(itemPath).suffix().toLower();
                     if (UiHelper::isGraphicsFile(ext)) {
-                        QPixmap thumb = UiHelper::getShellThumbnail(itemPath, 128, false);
-                        if (!thumb.isNull()) coloredIcon = QIcon(thumb);
+                        thumb = UiHelper::getShellThumbnail(itemPath, 256, false);
+                        if (!thumb.isNull()) hasThumb = true;
                     }
-                    if (coloredIcon.isNull()) {
-                        coloredIcon = UiHelper::getFileIcon(itemPath, 128);
+
+                    if (hasThumb) {
+                        m_proxyModel->setData(idx, thumb, Qt::DecorationRole);
+                        m_proxyModel->setData(idx, true, HasThumbnailRole);
+                    } else {
+                        QIcon icon = UiHelper::getFileIcon(itemPath, 128);
+                        m_proxyModel->setData(idx, icon, Qt::DecorationRole);
+                        m_proxyModel->setData(idx, false, HasThumbnailRole);
                     }
-                    m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
                 } 
             } 
             break; 
@@ -1003,16 +1013,22 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                 }
                                 item->setData(palList, PalettesRole);
                                 
-                                QIcon coloredIcon;
+                                QPixmap thumb;
+                                bool hasThumb = false;
                                 QString suffix = QFileInfo(path).suffix().toLower();
                                 if (UiHelper::isGraphicsFile(suffix)) {
-                                    QPixmap thumb = UiHelper::getShellThumbnail(path, 128, false);
-                                    if (!thumb.isNull()) coloredIcon = QIcon(thumb);
+                                    thumb = UiHelper::getShellThumbnail(path, 256, false);
+                                    if (!thumb.isNull()) hasThumb = true;
                                 }
-                                if (coloredIcon.isNull()) {
-                                    coloredIcon = UiHelper::getFileIcon(path, 128);
+
+                                if (hasThumb) {
+                                    item->setData(thumb, Qt::DecorationRole);
+                                    item->setData(true, HasThumbnailRole);
+                                } else {
+                                    QIcon icon = UiHelper::getFileIcon(path, 128);
+                                    item->setData(icon, Qt::DecorationRole);
+                                    item->setData(false, HasThumbnailRole);
                                 }
-                                item->setData(coloredIcon, Qt::DecorationRole);
                                 break;
                             }
                         }
@@ -1257,6 +1273,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             item->setData(QString::fromStdWString(rm.color), ColorRole); 
             item->setData(rm.pinned, PinnedRole); // 逻辑还原：使用 PinnedRole 存储原始置顶状态 
             item->setData(rm.pinned, IsLockedRole); // 视觉还原：IsLockedRole 负责 UI 渲染 
+            item->setData(false, HasThumbnailRole);
  
             QList<QStandardItem*> row; 
             row << item << new QStandardItem("-") << new QStandardItem("磁盘分区") << new QStandardItem("-"); 
@@ -1496,6 +1513,7 @@ void ContentPanel::loadCategory(int categoryId) {
             item->setData("category", TypeRole); 
             item->setData(cat.id, CategoryIdRole); 
             item->setData(color, ColorRole); 
+            item->setData(false, HasThumbnailRole);
              
             row << item << new QStandardItem("-") << new QStandardItem("子分类") << new QStandardItem("-"); 
             m_model->appendRow(row); 
@@ -1534,6 +1552,7 @@ void ContentPanel::loadCategory(int categoryId) {
             nameItem->setData(rm.pinned, PinnedRole); 
             nameItem->setData(rm.pinned, IsLockedRole); 
             nameItem->setData(rm.tags, TagsRole); 
+            nameItem->setData(false, HasThumbnailRole);
             // 2026-06-xx 注入物理色板
             QVariantList palList;
             for (const auto& p : rm.palettes) {
@@ -1628,6 +1647,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
         nameItem->setData(rm.pinned, PinnedRole); 
         nameItem->setData(rm.pinned, IsLockedRole); 
         nameItem->setData(rm.tags, TagsRole); 
+        nameItem->setData(false, HasThumbnailRole);
         // 2026-06-xx 注入物理色板
         QVariantList palList;
         for (const auto& p : rm.palettes) {
@@ -1740,15 +1760,13 @@ void ContentPanel::updateLayersButtonState() {
  
 GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOptionViewItem& option) { 
     GridMetrics m; 
-    // cardRect 为一体化卡片的总边界
-    m.cardRect = option.rect.adjusted(5, 5, -5, -5);
+    int metadataH = 42;
+    // imageBoxRect 对应整体卡片的显示区域（带圆角背景的部分）
+    m.imageBoxRect = option.rect.adjusted(5, 5, -5, -(metadataH + 5));
+    // metadataRect 位于图像框下方，背景透明
+    m.metadataRect = QRect(option.rect.left() + 5, m.imageBoxRect.bottom(), option.rect.width() - 10, metadataH);
     
-    int metadataH = 46; // 固定元数据区高度
-    m.thumbRect = QRect(m.cardRect.left(), m.cardRect.top(), m.cardRect.width(), m.cardRect.height() - metadataH);
-    m.metadataRect = QRect(m.cardRect.left(), m.thumbRect.bottom(), m.cardRect.width(), metadataH);
-
-    // 元数据区内部分两行
-    m.nameRect = QRect(m.metadataRect.left() + 6, m.metadataRect.top() + 4, m.metadataRect.width() - 12, 18);
+    m.nameRect = QRect(m.metadataRect.left() + 4, m.metadataRect.top() + 4, m.metadataRect.width() - 8, 16);
     m.ratingRect = QRect(m.metadataRect.left(), m.nameRect.bottom() + 2, m.metadataRect.width(), 16);
 
     m.starSize    = 14;
@@ -1772,42 +1790,52 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     bool isSelected = (option.state & QStyle::State_Selected); 
     bool isHovered = (option.state & QStyle::State_MouseOver); 
 
-    // 1. 绘制一体化卡片背景
-    QColor cardBg = isHovered ? QColor("#323233") : QColor("#2D2D2D");
-    painter->setPen(Qt::NoPen);
-    painter->setBrush(cardBg);
-    painter->drawRoundedRect(m.cardRect, 8, 8);
-
-    // 2. 建立缩略图裁剪路径
+    // 1. 建立图像框裁剪路径并绘制背景
     painter->save();
     QPainterPath clipPath;
-    clipPath.addRoundedRect(m.thumbRect, 8, 8);
+    clipPath.addRoundedRect(m.imageBoxRect, 6, 6);
     painter->setClipPath(clipPath);
 
-    // 绘制缩略图或降级图标
-    QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
-    // 启发式：如果 QIcon 的实际大小接近 128px，我们认为它是“物理提取”的内容
-    QSize iconSize = icon.actualSize(QSize(256, 256));
-
-    if (iconSize.width() >= 96) {
-        // 充满策略：KeepAspectRatioByExpanding
-        QPixmap pix = icon.pixmap(iconSize);
-        QPixmap scaled = pix.scaled(m.thumbRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        int x = m.thumbRect.center().x() - scaled.width() / 2;
-        int y = m.thumbRect.center().y() - scaled.height() / 2;
-        painter->drawPixmap(x, y, scaled);
+    bool hasThumb = index.data(HasThumbnailRole).toBool();
+    if (hasThumb) {
+        QPixmap thumb = index.data(Qt::DecorationRole).value<QPixmap>();
+        if (!thumb.isNull()) {
+            // 物理对齐：充满策略 KeepAspectRatioByExpanding
+            QPixmap scaled = thumb.scaled(m.imageBoxRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+            int x = m.imageBoxRect.center().x() - scaled.width() / 2;
+            int y = m.imageBoxRect.center().y() - scaled.height() / 2;
+            painter->drawPixmap(x, y, scaled);
+        } else {
+            painter->fillRect(m.imageBoxRect, QColor("#2D2D2D"));
+        }
     } else {
-        // 居中降级
-        QPoint center = m.thumbRect.center();
-        icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
+        painter->fillRect(m.imageBoxRect, QColor("#2D2D2D"));
+        QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
+        QPoint center = m.imageBoxRect.center();
+        if (!icon.isNull())
+            icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
     }
     painter->restore(); // 释放裁剪区
 
-    // 3. 状态位图标与角标 (绘制在图片上方，不受裁剪影响)
+    // 2. 绘制选中边框 (在图像框外周)
+    if (isSelected) {
+        painter->save();
+        painter->setPen(QPen(QColor("#3498db"), 2));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRoundedRect(m.imageBoxRect, 6, 6);
+        painter->restore();
+    } else if (isHovered) {
+        painter->save();
+        painter->setPen(QPen(QColor("#444444"), 1));
+        painter->drawRoundedRect(m.imageBoxRect, 6, 6);
+        painter->restore();
+    }
+
+    // 3. 状态位图标与角标 (绘制在图像框上方)
     bool isPinned = index.data(IsLockedRole).toBool(); 
     bool isManaged = index.data(InDatabaseRole).toBool(); 
     if (isPinned || isManaged) { 
-        QRect statusRect(m.thumbRect.right() - 22, m.thumbRect.top() + 8, 16, 16);
+        QRect statusRect(m.imageBoxRect.right() - 22, m.imageBoxRect.top() + 8, 16, 16);
         if (isPinned) { 
             QIcon pinIcon = UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16); 
             pinIcon.paint(painter, statusRect); 
@@ -1822,7 +1850,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     QString ext = info.isDir() ? "DIR" : info.suffix().toUpper(); 
     if (ext.isEmpty()) ext = "FILE"; 
     QColor badgeColor = UiHelper::getExtensionColor(ext); 
-    QRect extRect(m.thumbRect.left() + 8, m.thumbRect.top() + 8, 36, 18);
+    QRect extRect(m.imageBoxRect.left() + 8, m.imageBoxRect.top() + 8, 36, 18);
     painter->setPen(Qt::NoPen); 
     painter->setBrush(badgeColor); 
     painter->drawRoundedRect(extRect, 2, 2); 
@@ -1834,7 +1862,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
  
     // 4. 元数据绘制 (文件名与星级)
     QString name = index.data(Qt::DisplayRole).toString();
-    painter->setPen(QColor("#EEEEEE"));
+    painter->setPen(isSelected ? QColor("#3498db") : QColor("#EEEEEE"));
     if (!isSelected && !index.data(InDatabaseRole).toBool()) {
         painter->setPen(QColor(238, 238, 238, 120));
     }
@@ -1859,14 +1887,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     // 5. 空文件夹特殊标记
     if (index.data(TypeRole).toString() == "folder" && index.data(IsEmptyRole).toBool()) {
         painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine));
-        painter->drawRoundedRect(m.cardRect, 8, 8);
-    }
-
-    // 6. 选中边框 (2px 标准蓝)
-    if (isSelected) {
-        painter->setPen(QPen(QColor("#3498db"), 2));
-        painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(m.cardRect, 8, 8);
+        painter->drawRoundedRect(m.imageBoxRect, 6, 6);
     }
  
     painter->restore(); 
@@ -2068,7 +2089,12 @@ void ContentPanel::recalculateAndEmitStats() {
 void GridItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const { 
     Q_UNUSED(index); 
     GridMetrics m = calculateMetrics(option); 
-    editor->setGeometry(m.nameRect); 
+    // 适配分离式布局的编辑器位置
+    editor->setGeometry(m.nameRect.adjusted(-2, -2, 2, 2));
+    editor->setStyleSheet(
+        "background-color: #2D2D2D; color: white; selection-background-color: #3498db; "
+        "border: 1px solid #3498db; border-radius: 4px; padding: 0 4px;"
+    );
 } 
  
 } // namespace ArcMeta
