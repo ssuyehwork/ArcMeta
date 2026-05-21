@@ -432,23 +432,24 @@ ScanDialog::ScanDialog(QWidget* parent)
     setMinimumSize(800, 500);
 
     m_titleStatusLabel = new QLabel("READY - 0");
-    m_titleStatusLabel->setStyleSheet("color: #46B478; font-size: 10px; font-weight: bold; margin-left: 5px;");
+    m_titleStatusLabel->setStyleSheet("color: #46B478; font-size: 10px; font-weight: bold; margin-left: 5px; margin-bottom: -1px;");
 
     if (m_titleLabel && m_pinBtn && m_pinBtn->parentWidget() && m_pinBtn->parentWidget()->layout()) {
         m_titleLabel->hide(); 
         auto* titleLayout = qobject_cast<QHBoxLayout*>(m_pinBtn->parentWidget()->layout());
         if (titleLayout) {
-            // 按照用户要求：移除标题栏底部的 1px 切割线
-            m_pinBtn->parentWidget()->setStyleSheet("background-color: transparent; border: none;");
             titleLayout->setSpacing(0);
             QLabel* logoLabel = new QLabel();
             logoLabel->setFixedSize(18, 18);
             logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#FF8C00"), 18).pixmap(18, 18));
+            // 按照用户要求：logo 下方不该有 1px 切割线。
+            // 物理对齐：由于标题栏设置了 border-bottom，我们将 logo 样式设为向下方偏移 1px 覆盖边框
+            logoLabel->setStyleSheet("margin-bottom: -1px;");
             titleLayout->insertWidget(0, logoLabel);
             
             QLabel* brandLabel = new QLabel("FERREX-META");
-            // 按照用户要求：视觉上间距不足，将 margin-left 从 5px 增加到 8px
-            brandLabel->setStyleSheet("color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 8px;");
+            // 按照用户要求：进一步增加 margin-left 到 10px 确保视觉达到 5px
+            brandLabel->setStyleSheet("color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 10px; margin-bottom: -1px;");
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
@@ -516,7 +517,9 @@ ScanDialog::ScanDialog(QWidget* parent)
             m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64);
             m_sizeSlider->setFixedSize(110, 20);
             m_sizeSlider->setCursor(Qt::PointingHandCursor);
+            // 按照用户要求：滑动条下方不该有切割线，且与右侧视图按钮保持 5px 间距
             m_sizeSlider->setStyleSheet(
+                "QSlider { margin-bottom: -1px; margin-right: 5px; }"
                 "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }"
                 "QSlider::sub-page:horizontal { background: #FF8C00; border-radius: 2px; }"
                 "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; "
