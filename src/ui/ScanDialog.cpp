@@ -448,6 +448,75 @@ ScanDialog::ScanDialog(QWidget* parent)
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
+
+            // 确认此段在 if (titleLayout) { ... } 内部
+            titleLayout->addStretch(1); // 推到右侧
+
+            // ① 视图切换按钮
+            QPushButton* viewBtn = new QPushButton("视图");
+            viewBtn->setFixedHeight(22);
+            viewBtn->setCursor(Qt::PointingHandCursor);
+            viewBtn->setStyleSheet(
+                "QPushButton { background: #2D2D2D; color: #CCC; border: 1px solid #3F3F3F; "
+                "border-radius: 4px; font-size: 11px; padding: 0 8px; }"
+                "QPushButton:hover { background: #3A3A3A; color: #FFF; }"
+            );
+            connect(viewBtn, &QPushButton::clicked, this, [this, viewBtn]() {
+                QMenu* menu = new QMenu(this);
+                menu->setStyleSheet(
+                    "QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; border-radius: 6px; }"
+                    "QMenu::item { padding: 6px 24px; }"
+                    "QMenu::item:selected { background: #2A2A2A; color: #FFF; }"
+                    "QMenu::item:checked { color: #FF8C00; }"
+                );
+                struct ViewDef { QString label; int stackIdx; int size; };
+                for (auto& v : QList<ViewDef>{
+                    {"超大图标", 1, 192}, {"大图标", 1, 128}, {"中图标", 1, 64},
+                    {}, // separator
+                    {"详情",    0, 0}
+                }) {
+                    if (v.label.isEmpty()) { menu->addSeparator(); continue; }
+                    QAction* act = menu->addAction(v.label);
+                    act->setCheckable(true);
+                    act->setChecked(m_viewStack->currentIndex() == v.stackIdx &&
+                                    (v.stackIdx == 0 || m_config.iconSize == v.size));
+                    connect(act, &QAction::triggered, this, [this, v]() {
+                        m_viewStack->setCurrentIndex(v.stackIdx);
+                        m_config.viewMode = v.stackIdx;
+                        if (v.stackIdx == 1) {
+                            m_config.iconSize = v.size;
+                            m_iconView->setTargetRowHeight(v.size);
+                            if (m_sizeSlider) m_sizeSlider->setValue(v.size);
+                        }
+                        if (v.stackIdx == 0)
+                            m_resultView->verticalHeader()->setDefaultSectionSize(m_config.iconSize);
+                        m_config.save();
+                    });
+                }
+                menu->exec(viewBtn->mapToGlobal(QPoint(0, viewBtn->height() + 2)));
+            });
+            titleLayout->addWidget(viewBtn);
+
+            // ② 尺寸滑动条
+            m_sizeSlider = new QSlider(Qt::Horizontal);
+            m_sizeSlider->setRange(32, 256);
+            m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64);
+            m_sizeSlider->setFixedSize(110, 20);
+            m_sizeSlider->setCursor(Qt::PointingHandCursor);
+            m_sizeSlider->setStyleSheet(
+                "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }"
+                "QSlider::sub-page:horizontal { background: #FF8C00; border-radius: 2px; }"
+                "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; "
+                "  background: #FF8C00; border-radius: 6px; }"
+            );
+            connect(m_sizeSlider, &QSlider::valueChanged, this, [this](int v) {
+                m_config.iconSize = v;
+                m_resultView->verticalHeader()->setDefaultSectionSize(v);
+                m_iconView->setTargetRowHeight(v);
+                m_tableModel->clearThumbCache();
+                m_config.save();
+            });
+            titleLayout->addWidget(m_sizeSlider);
         } else {
             m_titleStatusLabel->hide(); 
         }
