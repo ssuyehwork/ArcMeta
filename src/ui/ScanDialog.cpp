@@ -19,6 +19,7 @@
 #include <QLineEdit>
 #include <QTableView>
 #include <QAbstractTableModel>
+#include <QSvgRenderer>
 #include <QHeaderView>
 #include <QSortFilterProxyModel>
 #include <QScrollArea>
@@ -254,7 +255,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         int dotIdx = name.lastIndexOf('.');
         QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
         
-        static const QSet<QString> thumbExts = {"psd", "ai", "eps", "jpg", "jpeg", "png", "webp"};
+        static const QSet<QString> thumbExts = {"psd", "ai", "eps", "jpg", "jpeg", "png", "webp", "svg"};
         if (thumbExts.contains(ext) && !reader.isDirectory(actualIndex)) {
             QString fullPath = reader.getFullPath(actualIndex);
             int64_t size = reader.getSize(actualIndex);
@@ -270,8 +271,20 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
                 ScanDialog* dlg = qobject_cast<ScanDialog*>(parent());
                 int thumbSize = (dlg && dlg->m_viewStack->currentIndex() == 0) ? 24 : (dlg ? dlg->m_config.iconSize : 64);
 
-                (void)QtConcurrent::run([mutableThis, key, fullPath, cacheKey, thumbSize]() {
-                    QPixmap thumb = UiHelper::getShellThumbnail(fullPath, thumbSize);
+                (void)QtConcurrent::run([mutableThis, key, fullPath, cacheKey, thumbSize, ext]() {
+                    QPixmap thumb;
+                    if (ext == "svg") {
+                        QSvgRenderer renderer(fullPath);
+                        if (renderer.isValid()) {
+                            thumb = QPixmap(thumbSize, thumbSize);
+                            thumb.fill(Qt::transparent);
+                            QPainter painter(&thumb);
+                            renderer.render(&painter);
+                            painter.end();
+                        }
+                    } else {
+                        thumb = UiHelper::getShellThumbnail(fullPath, thumbSize);
+                    }
                     if (!thumb.isNull()) {
                         double ar = (double)thumb.width() / thumb.height();
                         QMetaObject::invokeMethod(mutableThis, [mutableThis, key, cacheKey, thumb, ar]() {
@@ -323,7 +336,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         QString name = reader.getName(actualIndex);
         int dotIdx = name.lastIndexOf('.');
         QString ext = (dotIdx != -1) ? name.mid(dotIdx + 1).toLower() : "";
-        static const QSet<QString> thumbExts = {"psd", "ai", "eps", "jpg", "jpeg", "png", "webp"};
+        static const QSet<QString> thumbExts = {"psd", "ai", "eps", "jpg", "jpeg", "png", "webp", "svg"};
         
         int64_t size = reader.getSize(actualIndex);
         int64_t mtime = reader.getModifyTime(actualIndex);

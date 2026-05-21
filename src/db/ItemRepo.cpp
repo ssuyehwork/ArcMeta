@@ -186,10 +186,10 @@ QStringList ItemRepo::searchByKeyword(const QString& keyword, const QString& par
     QString likePattern = "%" + keyword + "%";
     if (parentPath.isEmpty()) {
         if (keyword.isEmpty()) {
-            sql = "SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' GROUP BY file_id_128 LIMIT 1000";
+            sql = "SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' GROUP BY file_id_128";
             q.prepare(sql);
         } else {
-            sql = "SELECT MIN(path) FROM items WHERE (path LIKE ? OR tags LIKE ? OR note LIKE ?) AND deleted = 0 AND type = 'file' GROUP BY file_id_128 LIMIT 1000";
+            sql = "SELECT MIN(path) FROM items WHERE (path LIKE ? OR tags LIKE ? OR note LIKE ?) AND deleted = 0 AND type = 'file' GROUP BY file_id_128";
             q.prepare(sql);
             q.addBindValue(likePattern);
             q.addBindValue(likePattern);
@@ -197,11 +197,11 @@ QStringList ItemRepo::searchByKeyword(const QString& keyword, const QString& par
         }
     } else {
         if (keyword.isEmpty()) {
-            sql = "SELECT MIN(path) FROM items WHERE parent_path = ? AND deleted = 0 AND type = 'file' GROUP BY file_id_128 LIMIT 1000";
+            sql = "SELECT MIN(path) FROM items WHERE parent_path = ? AND deleted = 0 AND type = 'file' GROUP BY file_id_128";
             q.prepare(sql);
             q.addBindValue(parentPath);
         } else {
-            sql = "SELECT MIN(path) FROM items WHERE parent_path = ? AND (path LIKE ? OR tags LIKE ? OR note LIKE ?) AND deleted = 0 AND type = 'file' GROUP BY file_id_128 LIMIT 1000";
+            sql = "SELECT MIN(path) FROM items WHERE parent_path = ? AND (path LIKE ? OR tags LIKE ? OR note LIKE ?) AND deleted = 0 AND type = 'file' GROUP BY file_id_128";
             q.prepare(sql);
             q.addBindValue(parentPath);
             q.addBindValue(likePattern);
@@ -237,19 +237,19 @@ QStringList ItemRepo::getPathsBySystemType(const QString& type) {
     // 2026-06-15 物理修复：路径列表获取逻辑基于非空 Fallback ID 机制回归。
     // 铁律：物理锁定 type='file'。
     if (type == "all") {
-        q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' GROUP BY file_id_128 LIMIT 1000");
+        q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' GROUP BY file_id_128");
     } else if (type == "today") {
-        q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' AND (ctime >= ? OR mtime >= ?) GROUP BY file_id_128 LIMIT 1000");
+        q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' AND (ctime >= ? OR mtime >= ?) GROUP BY file_id_128");
         q.addBindValue(startOfToday);
         q.addBindValue(startOfToday);
     } else if (type == "yesterday") {
-        q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' AND (ctime >= ? OR mtime >= ?) AND (ctime < ? OR mtime < ?) GROUP BY file_id_128 LIMIT 1000");
+        q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' AND (ctime >= ? OR mtime >= ?) AND (ctime < ? OR mtime < ?) GROUP BY file_id_128");
         q.addBindValue(startOfYesterday);
         q.addBindValue(startOfYesterday);
         q.addBindValue(startOfToday);
         q.addBindValue(startOfToday);
     } else if (type == "recently_visited") {
-        q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' AND atime >= ? GROUP BY file_id_128 LIMIT 1000");
+        q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' AND atime >= ? GROUP BY file_id_128");
         q.addBindValue(now - 86400000.0);
     } else if (type == "uncategorized") {
         q.prepare("SELECT MIN(i.path) FROM items i "
@@ -257,16 +257,16 @@ QStringList ItemRepo::getPathsBySystemType(const QString& type) {
                   "AND NOT EXISTS ("
                   "  SELECT 1 FROM category_items ci "
                   "  WHERE ci.file_id_128 = i.file_id_128"
-                  ") GROUP BY i.file_id_128 LIMIT 1000");
+                  ") GROUP BY i.file_id_128");
     } else if (type == "untagged") {
         q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' "
-                  "AND (tags IS NULL OR tags = '' OR tags = '[]') GROUP BY file_id_128 LIMIT 1000");
+                  "AND (tags IS NULL OR tags = '' OR tags = '[]') GROUP BY file_id_128");
     } else if (type == "tags") {
         // 2026-06-xx 按照用户要求：返回所有已设置标签的文件
         q.prepare("SELECT MIN(path) FROM items WHERE deleted = 0 AND type = 'file' "
-                  "AND (tags IS NOT NULL AND tags != '' AND tags != '[]') GROUP BY file_id_128 LIMIT 1000");
+                  "AND (tags IS NOT NULL AND tags != '' AND tags != '[]') GROUP BY file_id_128");
     } else if (type == "trash") {
-        q.prepare("SELECT MIN(path) FROM items WHERE deleted = 1 AND type = 'file' GROUP BY file_id_128 LIMIT 1000");
+        q.prepare("SELECT MIN(path) FROM items WHERE deleted = 1 AND type = 'file' GROUP BY file_id_128");
     } else {
         return {};
     }

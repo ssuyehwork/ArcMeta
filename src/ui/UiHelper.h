@@ -26,6 +26,7 @@
 #include <QUuid>
 #include <QDir>
 #include <QFile>
+#include <QFileIconProvider>
 #include <algorithm>
 #include <cmath>
 
@@ -135,29 +136,31 @@ public:
     }
 
     static QIcon getFileIcon(const QString& filePath, int size = 18, const QColor& overrideColor = QColor()) {
+        Q_UNUSED(overrideColor);
+        Q_UNUSED(size);
+        
         QFileInfo info(filePath);
-        QString ext = info.suffix().toLower();
-        QString iconKey = "file";
-        QColor baseColor("#aaaaaa");
-
-        if (info.isDir()) {
-            iconKey = "folder_filled";
-            baseColor = QColor("#3498db");
-        } else {
-            if (isGraphicsFile(ext)) { iconKey = "image"; baseColor = QColor("#EF9F27"); }
-            else if (ext == "pdf") { iconKey = "file_pdf"; baseColor = QColor("#e74c3c"); }
-            else if (ext == "doc" || ext == "docx") { iconKey = "file_word"; baseColor = QColor("#3498db"); }
-            else if (ext == "xls" || ext == "xlsx" || ext == "csv") { iconKey = "table"; baseColor = QColor("#2ecc71"); }
-            else if (ext == "ppt" || ext == "pptx") { iconKey = "file_ppt"; baseColor = QColor("#EF9F27"); }
-            else if (QStringList({"cpp", "h", "py", "js", "ts", "html", "css", "json", "xml", "md"}).contains(ext)) { iconKey = "code"; baseColor = QColor("#3498db"); }
-            else if (QStringList({"zip", "rar", "7z", "tar", "gz"}).contains(ext)) { iconKey = "archive"; baseColor = QColor("#f1c40f"); }
-            else if (QStringList({"exe", "msi", "bat", "sh"}).contains(ext)) { iconKey = "file_executable"; baseColor = QColor("#E81123"); }
-            else if (QStringList({"mp4", "mkv", "avi", "mov"}).contains(ext)) { iconKey = "video"; baseColor = QColor("#9b59b6"); }
-            else if (QStringList({"mp3", "wav", "flac", "ogg"}).contains(ext)) { iconKey = "music"; baseColor = QColor("#e91e63"); }
+        QString key = info.isDir() ? "folder" : info.suffix().toLower();
+        if (key.length() > 12) key = "unknown";
+        
+        static QMap<QString, QIcon> s_iconCache;
+        if (s_iconCache.contains(key)) {
+            return s_iconCache[key];
         }
 
-        QColor finalColor = overrideColor.isValid() ? overrideColor : baseColor;
-        return getIcon(iconKey, finalColor, size);
+        QFileIconProvider provider;
+        QIcon icon;
+        if (info.isDir()) {
+            icon = provider.icon(QFileIconProvider::Folder);
+        } else {
+            icon = provider.icon(QFileInfo("dummy." + key));
+            if (icon.isNull()) {
+                icon = provider.icon(QFileIconProvider::File);
+            }
+        }
+        
+        s_iconCache[key] = icon;
+        return icon;
     }
 
     static QPixmap getPixmap(const QString& key, const QSize& size, const QColor& color) {

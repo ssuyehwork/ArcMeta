@@ -23,6 +23,21 @@
 - **页面区域 (Add/Sub-page)**: `background: none`
 
 ---
+**2026-05-21 需求记录：**
+1. **数据库分析**：分析当前版本DB类数据库是否采用唯一FRN（File Reference Number）方式，以避免同一文件重复创建数据。
+2. **列表计数排查**：分析为什么侧边栏分类中“全部数据”显示的计数为9708，而状态栏下只显示1000（两者数量不一致的问题）。
+3. **取消加载限制**：废除数据库查询中对 1000 条数据的 LIMIT 1000 限制，使状态栏 and ContentPanel 真实加载并显示相应的所有数据（例如全量加载）。
+4. **ScanDialog SVG支持**：ScanDialog.cpp 界面支持显示 .svg 类型图片，可参考/调用 ContentPanel 显示 SVG 的方式。
+5. **ScanDialog SVG缩略图显示修复**：修复由于 `Qt::UserRole + 1` 未识别 `svg` 后缀，导致 Grid 卡片视图下 SVG 缩略图未能绘制，而降级显示为默认关联浏览器（Edge）图标的问题。
+6. **编译构建排查**：解决用户在执行 Ninja 构建时报错 `build.ninja:35: loading 'CMakeFiles\rules.ninja': The system cannot find the file specified.` 的问题，指导用户清理 CMake 缓存并重新生成构建。
+7. **设计与架构咨询**：解答用户关于 `ContentPanel` 中不同类别图标来源的技术疑问，即区分物理 SVG 真实文件（物理真实内容渲染）和常规文件降级保护（读取 `SvgIcons.h` 内置的矢量图标集）的渲染逻辑。
+8. **图标系统架构对齐（方案 B）**：按用户明确要求，图标的降级/非缩略图显示机制必须统一为 Windows 系统原生关联图标风格。当文件无缩略图时，直接拉取 Windows 原生系统图标（如 Edge 图标、WinRAR 关联图标等），确保 `ContentPanel.cpp` 和 `ScanDialog.cpp` 的降级展示行为完美一致。
+
+
+
+
+
+---
 **2026-05-20 需求记录：**
 1. **品牌更名**：MainWindow 标题栏显示的名称由 "ArcMeta" 修改为 "FERREX"。
 2. **视觉对齐**：内容容器卡片下方的“禁止”图标与“星级”图标视觉大小不一致（禁止图标偏大），需进行等大处理。
