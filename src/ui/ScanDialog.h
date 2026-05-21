@@ -49,6 +49,11 @@ struct ScanConfig {
     int sortColumn = 0; 
     int sortOrder = 0;  // 0: Asc, 1: Desc
 
+    bool useRegex = true;
+    bool caseSensitive = false;
+    bool includeHidden = false;
+    bool includeSystem = false;
+
     void load();
     void save();
 };

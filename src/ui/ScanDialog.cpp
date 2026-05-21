@@ -97,6 +97,11 @@ void ScanConfig::load() {
         if (obj.contains("iconSize")) iconSize = obj["iconSize"].toInt();
         if (obj.contains("sortColumn")) sortColumn = obj["sortColumn"].toInt();
         if (obj.contains("sortOrder")) sortOrder = obj["sortOrder"].toInt();
+
+        if (obj.contains("useRegex")) useRegex = obj["useRegex"].toBool();
+        if (obj.contains("caseSensitive")) caseSensitive = obj["caseSensitive"].toBool();
+        if (obj.contains("includeHidden")) includeHidden = obj["includeHidden"].toBool();
+        if (obj.contains("includeSystem")) includeSystem = obj["includeSystem"].toBool();
     }
 }
 
@@ -124,6 +129,11 @@ void ScanConfig::save() {
         obj["iconSize"] = iconSize;
         obj["sortColumn"] = sortColumn;
         obj["sortOrder"] = sortOrder;
+
+        obj["useRegex"] = useRegex;
+        obj["caseSensitive"] = caseSensitive;
+        obj["includeHidden"] = includeHidden;
+        obj["includeSystem"] = includeSystem;
         
         file.write(QJsonDocument(obj).toJson());
     }
@@ -524,7 +534,7 @@ ScanDialog::ScanDialog(QWidget* parent)
             m_sizeSlider = new QSlider(Qt::Horizontal); 
             m_sizeSlider->setRange(32, 256); 
             m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64); 
-            m_sizeSlider->setFixedSize(110, 34); // 高度锁定 34px
+            m_sizeSlider->setFixedSize(110, 24); // 高度调整为 24px，避免覆盖/截断
             m_sizeSlider->setCursor(Qt::PointingHandCursor); 
             m_sizeSlider->installEventFilter(this);
             // 间距计算：margin-right 1px + spacing 4px = 5px (精准对标视图按钮)
@@ -604,7 +614,7 @@ ScanDialog::ScanDialog(QWidget* parent)
         
         #mainSearchEdit, #extSearchEdit { 
             background: #2D2D2D; 
-            border: 1px solid #3F3F3F; 
+            border: 1px solid #FF8C00;
             border-radius: 6px; 
             color: #EEE; 
             font-size: 14px; 
@@ -612,9 +622,9 @@ ScanDialog::ScanDialog(QWidget* parent)
             outline: none;
         }
 
-        /* 显式定义伪类，防止全局污染 */
+        /* 显式定义伪类，保持橙色边框 */
         #mainSearchEdit:focus, #extSearchEdit:focus { border: 1px solid #FF8C00 !important; }
-        #mainSearchEdit:hover, #extSearchEdit:hover { border: 1px solid #555; }
+        #mainSearchEdit:hover, #extSearchEdit:hover { border: 1px solid #FF8C00; }
         
         #mainSearchEdit::placeholder, #extSearchEdit::placeholder {
             color: rgba(238, 238, 238, 0.3);
@@ -792,8 +802,13 @@ void ScanDialog::setupUi() {
     m_checkCase = new QCheckBox("大小写");
     m_checkHidden = new QCheckBox("隐藏");
     m_checkSystem = new QCheckBox("系统");
+
+    m_checkRegex->setChecked(m_config.useRegex);
+    m_checkCase->setChecked(m_config.caseSensitive);
+    m_checkHidden->setChecked(m_config.includeHidden);
+    m_checkSystem->setChecked(m_config.includeSystem);
+
     for (auto* cb : {m_checkRegex, m_checkCase, m_checkHidden, m_checkSystem}) {
-        cb->setChecked(cb != m_checkCase && cb != m_checkHidden && cb != m_checkSystem);
         connect(cb, &QCheckBox::toggled, this, &ScanDialog::onFilterOptionChanged);
         optionRow->addWidget(cb);
     }
@@ -950,7 +965,9 @@ void ScanDialog::setupUi() {
     mainLayout->addWidget(m_viewStack);
 
     auto* statusContainer = new QWidget();
+    statusContainer->setObjectName("StatusContainer");
     statusContainer->setFixedHeight(20);
+    statusContainer->setStyleSheet("QWidget#StatusContainer { background: transparent; border: none; }");
     auto* statusBar = new QHBoxLayout(statusContainer);
     statusBar->setContentsMargins(16, 0, 16, 0);
     statusBar->setSpacing(0);
@@ -1487,11 +1504,17 @@ void ScanDialog::onTriggerSearch() {
 }
 
 void ScanDialog::onFilterOptionChanged() {
+    m_config.useRegex = m_checkRegex->isChecked();
+    m_config.caseSensitive = m_checkCase->isChecked();
+    m_config.includeHidden = m_checkHidden->isChecked();
+    m_config.includeSystem = m_checkSystem->isChecked();
+    m_config.save();
+
     ScanFilterState state;
-    state.useRegex = m_checkRegex->isChecked();
-    state.caseSensitive = m_checkCase->isChecked();
-    state.includeHidden = m_checkHidden->isChecked();
-    state.includeSystem = m_checkSystem->isChecked();
+    state.useRegex = m_config.useRegex;
+    state.caseSensitive = m_config.caseSensitive;
+    state.includeHidden = m_config.includeHidden;
+    state.includeSystem = m_config.includeSystem;
     QString extText = m_extEdit->text().toLower();
     if (!extText.isEmpty()) state.extensionList = extText.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
     
