@@ -223,7 +223,6 @@ void JustifiedView::doLayout() {
 
     int currentY = 10; 
     int i = 0;
-    const int textHeight = 22; // 预留文件名显示高度
     
     while (i < count) {
         int rowStart = i;
@@ -262,14 +261,13 @@ void JustifiedView::doLayout() {
             int itemWidth = qRound(aspectRatios[j] * actualHeight);
             
             if (j == numInRow - 1 && !isLastRow) {
-                itemWidth = containerWidth + 10 - currentX;
+                itemWidth = containerWidth + 10 - currentX; // 最后一个补齐行宽
             }
 
-            // 物理扩展：高度增加 textHeight 以容纳文件名
-            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + textHeight), itemIdx };
+            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight), itemIdx };
             currentX += itemWidth + 5; 
         }
-        currentY += actualHeight + textHeight + 5;
+        currentY += actualHeight + 5; // 统一行高推进
     }
 
     m_totalHeight = currentY + 10;

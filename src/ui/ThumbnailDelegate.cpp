@@ -1,5 +1,6 @@
 #include "ThumbnailDelegate.h"
 #include <QPainter>
+#include <QPainterPath>
 #include <QIcon>
 #include <QPixmap>
 #include <QStyleOptionViewItem>
@@ -14,67 +15,45 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    QRect rect = option.rect;
-    const int textHeight = 22;
-    QRect thumbRect = rect.adjusted(0, 0, 0, -textHeight);
-    QRect textRect = rect.adjusted(4, rect.height() - textHeight, -4, 0);
-    
-    // 绘制背景
-    if (option.state & QStyle::State_Selected) {
-        painter->fillRect(rect, option.palette.highlight());
-    } else if (option.state & QStyle::State_MouseOver) {
-        painter->fillRect(rect, QColor(255, 255, 255, 20));
-    }
+    QRect rect = option.rect.adjusted(2, 2, -2, -2); // 留出卡片间隙
 
-    QVariant decoration = index.data(Qt::DecorationRole);
-    QPixmap pixmap;
-    bool isThumbnail = index.data(Qt::UserRole + 1).toBool(); 
+    // 圆角路径裁剪
+    QPainterPath clipPath;
+    clipPath.addRoundedRect(rect, 6, 6);
+    painter->setClipPath(clipPath);
 
-    if (decoration.canConvert<QPixmap>()) {
-        pixmap = decoration.value<QPixmap>();
-    }
+    bool hasThumb = index.data(Qt::UserRole + 1).toBool();
+    QPixmap thumb = index.data(Qt::DecorationRole).value<QPixmap>();
 
-    // 1. 绘制图像/图标
-    if (isThumbnail && !pixmap.isNull()) {
-        QSize thumbSize = pixmap.size();
-        thumbSize.scale(thumbRect.size(), Qt::KeepAspectRatio);
-        QRect drawRect(thumbRect.center().x() - thumbSize.width() / 2,
-                       thumbRect.center().y() - thumbSize.height() / 2,
-                       thumbSize.width(), thumbSize.height());
-        painter->drawPixmap(drawRect, pixmap);
+    if (hasThumb && !thumb.isNull()) {
+        // 缩略图铺满卡片
+        painter->drawPixmap(rect, thumb.scaled(rect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
     } else {
-        QIcon icon;
-        if (decoration.canConvert<QIcon>()) {
-            icon = decoration.value<QIcon>();
-        } else if (decoration.canConvert<QPixmap>()) {
-            icon = QIcon(decoration.value<QPixmap>());
-        }
-
-        if (!icon.isNull()) {
-            QSize iconSize(48, 48);
-            if (iconSize.width() > thumbRect.width() * 0.8) iconSize.setWidth(thumbRect.width() * 0.8);
-            if (iconSize.height() > thumbRect.height() * 0.8) iconSize.setHeight(thumbRect.height() * 0.8);
-            
-            QPoint center = thumbRect.center();
-            QRect iconRect(center.x() - iconSize.width() / 2,
-                           center.y() - iconSize.height() / 2,
-                           iconSize.width(), iconSize.height());
-            icon.paint(painter, iconRect);
-        }
+        // 降级：深色背景 + 文件类型图标居中
+        painter->fillRect(rect, QColor("#2D2D2D"));
+        QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
+        QSize iconSize(48, 48);
+        QPoint center = rect.center();
+        icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
     }
 
-    // 2. 绘制文件名
-    QString fileName = index.data(Qt::DisplayRole).toString();
-    painter->setPen(option.state & QStyle::State_Selected ? option.palette.highlightedText().color() : QColor("#D4D4D4"));
-    QFont font = option.font;
-    font.setPointSizeF(8.5); // 稍微缩小字体以适应紧凑布局
-    painter->setFont(font);
-    
-    QFontMetrics fm(font);
-    QString elidedName = fm.elidedText(fileName, Qt::ElideMiddle, textRect.width());
-    painter->drawText(textRect, Qt::AlignCenter, elidedName);
-    
+    // 选中态：蓝色圆角边框叠加
+    if (option.state & QStyle::State_Selected) {
+        painter->setClipping(false);
+        QPen pen(QColor("#094771"), 2);
+        painter->setPen(pen);
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRoundedRect(rect, 6, 6);
+    }
+
     painter->restore();
+
+    // 文件名标签（卡片下方）
+    QString name = index.data(Qt::DisplayRole).toString();
+    QRect textRect = option.rect.adjusted(2, option.rect.height() - 36, -2, -4);
+    painter->setPen(QColor("#D4D4D4"));
+    painter->drawText(textRect, Qt::AlignHCenter | Qt::AlignVCenter | Qt::TextWordWrap,
+                      option.fontMetrics.elidedText(name, Qt::ElideMiddle, textRect.width()));
 }
 
 QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const {
