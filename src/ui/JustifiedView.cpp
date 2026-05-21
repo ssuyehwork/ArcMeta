@@ -223,6 +223,7 @@ void JustifiedView::doLayout() {
 
     int currentY = 10; 
     int i = 0;
+    const int textHeight = 30; // 预留文件名显示高度（卡片下方）
     
     while (i < count) {
         int rowStart = i;
@@ -264,10 +265,10 @@ void JustifiedView::doLayout() {
                 itemWidth = containerWidth + 10 - currentX; // 最后一个补齐行宽
             }
 
-            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight), itemIdx };
+            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + textHeight), itemIdx };
             currentX += itemWidth + 5; 
         }
-        currentY += actualHeight + 5; // 统一行高推进
+        currentY += actualHeight + textHeight + 5; // 统一行高推进
     }
 
     m_totalHeight = currentY + 10;
