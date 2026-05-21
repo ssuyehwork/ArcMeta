@@ -286,14 +286,16 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
             QColor tagC = UiHelper::parseColorName(QString::fromStdWString(meta.color));
             if (tagC.isValid()) return tagC;
         }
-        if (reader.isDirectory(actualIndex)) return QColor("#3498db");
+        // 2026-06-xx 按照用户要求：名称列（第0列）强制显示为蓝色
+        if (index.column() == 0 || reader.isDirectory(actualIndex)) return QColor("#3498db");
     } else if (role == Qt::ToolTipRole) {
         // 2026-05-16 交互同步：显示备注与标签
+        // 2026-06-xx 物理修复：移除错误的 QLatin1String 引用，改用 UTF-8 字面量修复中文乱码
         std::wstring path = reader.getFullPath(actualIndex).toStdWString();
         auto meta = MetadataManager::instance().getMeta(path);
-        QString tip = QLatin1String("路径: ") + QString::fromStdWString(path);
-        if (!meta.note.empty()) tip += QLatin1String("\n备注: ") + QString::fromStdWString(meta.note);
-        if (!meta.tags.isEmpty()) tip += QLatin1String("\n标签: ") + meta.tags.join(QLatin1String(", "));
+        QString tip = QString::fromUtf8("路径: ") + QString::fromStdWString(path);
+        if (!meta.note.empty()) tip += QString::fromUtf8("\n备注: ") + QString::fromStdWString(meta.note);
+        if (!meta.tags.isEmpty()) tip += QString::fromUtf8("\n标签: ") + meta.tags.join(", ");
         return tip;
     } else if (role == Qt::TextAlignmentRole) {
         switch (index.column()) {
