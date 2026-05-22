@@ -299,7 +299,7 @@ ContentPanel::ContentPanel(QWidget* parent)
         } 
  
         applyFilters(); 
-        if (!m_lazyIconTimer->isActive()) m_lazyIconTimer->start(); 
+        if (!this->m_lazyIconTimer->isActive()) this->m_lazyIconTimer->start(); 
     }); 
  
     // 2026-03-xx 物理加速：初始化懒加载图标定时器 
@@ -329,7 +329,8 @@ ContentPanel::ContentPanel(QWidget* parent)
                         // 直接渲染SVG文件内容 
                         QSvgRenderer renderer(path); 
                         if (renderer.isValid()) { 
-                            QPixmap svgPixmap(96, 96); 
+                            // 2026-06-xx 物理修复：使用动态 m_zoomLevel 确保 SVG 渲染清晰度与网格对齐
+                            QPixmap svgPixmap(this->m_zoomLevel, this->m_zoomLevel); 
                             svgPixmap.fill(Qt::transparent); 
                             QPainter painter(&svgPixmap); 
                             renderer.render(&painter); 
@@ -338,8 +339,8 @@ ContentPanel::ContentPanel(QWidget* parent)
                         } 
                     } else if (UiHelper::isGraphicsFile(ext)) { 
                         // 2026-04-11 按照用户要求：凡是图片/图形格式，物理强制提取内容缩略图 
-                        // 2026-04-11 按照用户要求：专属注入 true 参数，只对走缓存的小列表图执行垂直翻转修正 
-                        QImage img = UiHelper::getShellThumbnail(path, 96, true); 
+                        // 2026-06-xx 物理修复：使用动态 m_zoomLevel 提取缩略图，防止大网格下模糊
+                        QImage img = UiHelper::getShellThumbnail(path, this->m_zoomLevel, false); 
                         if (!img.isNull()) { 
                             icon = QIcon(QPixmap::fromImage(img)); 
                         } 
@@ -966,11 +967,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     QIcon coloredIcon;
                     QString ext = QFileInfo(itemPath).suffix().toLower();
                     if (UiHelper::isGraphicsFile(ext)) {
-                        QImage img = UiHelper::getShellThumbnail(itemPath, 128, false);
+                        // 2026-06-xx 物理同步：使用 m_zoomLevel 确保尺寸一致
+                        QImage img = UiHelper::getShellThumbnail(itemPath, this->m_zoomLevel, false);
                         if (!img.isNull()) coloredIcon = QIcon(QPixmap::fromImage(img));
                     }
                     if (coloredIcon.isNull()) {
-                        coloredIcon = UiHelper::getFileIcon(itemPath, 128);
+                        coloredIcon = UiHelper::getFileIcon(itemPath, this->m_zoomLevel);
                     }
                     m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
                 } 
@@ -1011,11 +1013,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                 QIcon coloredIcon;
                                 QString suffix = QFileInfo(path).suffix().toLower();
                                 if (UiHelper::isGraphicsFile(suffix)) {
-                                    QImage img = UiHelper::getShellThumbnail(path, 128, false);
+                                    // 2026-06-xx 物理同步：使用 m_zoomLevel 确保解析后更新的图标尺寸一致
+                                    QImage img = UiHelper::getShellThumbnail(path, weakThis->m_zoomLevel, false);
                                     if (!img.isNull()) coloredIcon = QIcon(QPixmap::fromImage(img));
                                 }
                                 if (coloredIcon.isNull()) {
-                                    coloredIcon = UiHelper::getFileIcon(path, 128);
+                                    coloredIcon = UiHelper::getFileIcon(path, weakThis->m_zoomLevel);
                                 }
                                 item->setData(coloredIcon, Qt::DecorationRole);
                                 break;

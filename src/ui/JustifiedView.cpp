@@ -262,8 +262,9 @@ void JustifiedView::doLayout() {
             rowAspectRatioSum += ar;
             
             int numInRow = (int)aspectRatios.size();
-            // 预估宽度 = (宽高比总和 * 目标高度) + (项间距 * 间距数量)
-            double estimatedWidth = (rowAspectRatioSum * m_targetRowHeight) + (spacing * (numInRow - 1));
+            // 2026-06-xx 物理修正：考虑 ThumbnailDelegate 的内边距 (左右各 3px = 6px)
+            // 预估宽度 = (宽高比总和 * 目标高度) + (内边距补偿 6px * 数量) + (项间距 * 间距数量)
+            double estimatedWidth = (rowAspectRatioSum * m_targetRowHeight) + (6 * numInRow) + (spacing * (numInRow - 1));
             if (estimatedWidth > containerWidth) {
                 // 如果单项就超过了容器宽度，则强制独占一行
                 if (numInRow > 1) {
@@ -284,11 +285,12 @@ void JustifiedView::doLayout() {
         int actualHeight = m_targetRowHeight;
         bool isLastRow = (i == count);
 
-        // 实际内容可用宽度（扣除项间距）
-        int availableContentWidth = containerWidth - (spacing * (numInRow - 1));
+        // 2026-06-xx 物理修正：考虑 ThumbnailDelegate 的内边距 (左右各 3px = 6px)
+        // 实际图片可用总宽度 = 容器宽度 - (项间距) - (所有项的 6px 内边距)
+        int availableImageWidth = containerWidth - (spacing * (numInRow - 1)) - (6 * numInRow);
 
         if (!isLastRow || (rowAspectRatioSum * m_targetRowHeight > containerWidth * 0.8)) {
-            actualHeight = qRound(availableContentWidth / rowAspectRatioSum);
+            actualHeight = qRound(availableImageWidth / rowAspectRatioSum);
         }
 
         // 防止行高过大，限制在目标高度的 1.5 倍
@@ -298,18 +300,19 @@ void JustifiedView::doLayout() {
         const int textHeight = 36;
         for (int j = 0; j < numInRow; ++j) {
             int itemIdx = rowStart + j;
-            int itemWidth = qRound(aspectRatios[j] * actualHeight);
+            // 2026-06-xx 物理修正：itemWidth 需要包含左右内边距 (6px)
+            int itemWidth = qRound(aspectRatios[j] * actualHeight) + 6;
             
-            // 最后一个项目：物理对齐右边缘 (margin)
+            // 最后一个项目：物理对齐右边缘 (针对非最后一行)
             if (j == numInRow - 1 && !isLastRow) {
                 itemWidth = (containerWidth + margin) - currentX;
             }
 
-            // 总高度 = 图片高度 + 文字区域高度
-            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + textHeight), itemIdx };
+            // 总高度 = 图片高度 (actualHeight) + 上下内边距 (6px) + 文字区域高度 (36px)
+            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + 6 + textHeight), itemIdx };
             currentX += itemWidth + spacing; 
         }
-        currentY += actualHeight + textHeight + spacing; // 统一行高推进
+        currentY += actualHeight + 6 + textHeight + spacing; // 统一行高推进
     }
 
     m_totalHeight = currentY + 10;

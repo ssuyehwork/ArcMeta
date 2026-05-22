@@ -757,6 +757,11 @@ ScanDialog::ScanDialog(QWidget* parent)
     m_resultView->horizontalHeader()->setSortIndicator(m_config.sortColumn, static_cast<Qt::SortOrder>(m_config.sortOrder));
     m_tableModel->sort(m_config.sortColumn, static_cast<Qt::SortOrder>(m_config.sortOrder));
 
+    // 2026-06-xx 物理对标：监听引擎加载信号，实现“更新数据中...”的体感同步
+    connect(&MftReader::instance(), &MftReader::driveLoaded, this, [this](const QString& drive, int count, int total) {
+        updateStatus(QString("正在加载快照 %1 (%2)...").arg(drive).arg(formatNumber(count)), true, total);
+    });
+
     // 2026-05-16 物理重载：断开基类 Qt 置顶逻辑，改用 Win32 原生 SetWindowPos 以实现无损切换
     if (m_pinBtn) {
         disconnect(m_pinBtn, &QPushButton::toggled, nullptr, nullptr);
@@ -1014,9 +1019,9 @@ void ScanDialog::setupUi() {
     statusContainer->setFixedHeight(20);
     statusContainer->setStyleSheet("QWidget#StatusContainer { background: transparent; border: none; }");
     auto* statusBar = new QHBoxLayout(statusContainer);
-    // 2026-06-xx 按照用户要求：显式设置垂直居中对齐
+    // 2026-06-xx 按照用户要求：显式设置垂直居中对齐，并向上偏移 10px (通过底部边距实现)
     statusBar->setAlignment(Qt::AlignVCenter);
-    statusBar->setContentsMargins(16, 0, 16, 0);
+    statusBar->setContentsMargins(16, 0, 16, 10);
     statusBar->setSpacing(0);
 
     m_statLabelMain = new QLabel("");
@@ -1056,6 +1061,22 @@ void ScanDialog::setupUi() {
     connect(m_controller, &ScanController::resultsSwapped, this, [this]() {
         updateStatusBar();
     });
+
+    showDriveLoading();
+}
+
+void ScanDialog::showDriveLoading() {
+    if (!m_driveLayout) return;
+
+    QLayoutItem* child;
+    while ((child = m_driveLayout->takeAt(0)) != nullptr) {
+        if (child->widget()) child->widget()->deleteLater();
+        delete child;
+    }
+    QLabel* loadingLbl = new QLabel("更新数据中...");
+    loadingLbl->setStyleSheet("background: transparent; border: none; color: #7A8F9E; font-size: 12px; font-weight: bold; margin-left: 10px;");
+    m_driveLayout->addWidget(loadingLbl);
+    m_driveLayout->addStretch();
 }
 
 void ScanDialog::refreshDriveList(bool forceProbe) {
@@ -1065,15 +1086,7 @@ void ScanDialog::refreshDriveList(bool forceProbe) {
     }
 
     // 2026-06-xx 按照用户要求：加载盘符数据（.scch）之前，先显示占位提示
-    QLayoutItem* child;
-    while ((child = m_driveLayout->takeAt(0)) != nullptr) {
-        if (child->widget()) child->widget()->deleteLater();
-        delete child;
-    }
-    QLabel* loadingLbl = new QLabel("更新数据中...");
-    loadingLbl->setStyleSheet("color: #7A8F9E; font-size: 12px; font-weight: bold; margin-left: 10px;");
-    m_driveLayout->addWidget(loadingLbl);
-    m_driveLayout->addStretch();
+    showDriveLoading();
 
     QPointer<ScanDialog> weakThis(this);
     (void)(QtConcurrent::run)([weakThis]() {
@@ -1581,10 +1594,10 @@ void ScanDialog::onFilterOptionChanged() {
     m_controller->triggerSearch(true);
 }
 
-void ScanDialog::updateStatus(const QString& text, bool scanning) {
+void ScanDialog::updateStatus(const QString& text, bool scanning, int64_t totalCount) {
     Q_UNUSED(text);
     if (m_titleStatusLabel) {
-        int total = MftReader::instance().totalCount();
+        int64_t total = (totalCount >= 0) ? totalCount : MftReader::instance().totalCount();
         m_titleStatusLabel->setText(QString("%1 - %2").arg(scanning ? "SCANNING" : "READY").arg(formatNumber(total)));
         m_titleStatusLabel->setStyleSheet(scanning ? "color: #FF8C00; font-size: 10px; font-weight: bold;" : "color: #46B478; font-size: 10px; font-weight: bold;");
     }
