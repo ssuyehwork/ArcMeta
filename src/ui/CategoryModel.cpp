@@ -166,8 +166,8 @@ void CategoryModel::refresh() {
         QStandardItem* userGroup = syncGroupHeader(currentRow++, "我的分类", "folder_filled");
 
         // 递归查找/更新函数
-        std::function<void(QStandardItem*, const std::vector<CategoryRepo::Category>&)> syncLevel;
-        syncLevel = [&](QStandardItem* parentItem, const std::vector<CategoryRepo::Category>& levelCats) {
+        std::function<void(QStandardItem*, const std::vector<Category>&)> syncLevel;
+        syncLevel = [&](QStandardItem* parentItem, const std::vector<Category>& levelCats) {
             int row = 0;
             for (const auto& cat : levelCats) {
                 int id = cat.id;
@@ -200,7 +200,7 @@ void CategoryModel::refresh() {
                 }
 
                 // 递归处理子分类
-                std::vector<CategoryRepo::Category> children;
+                std::vector<Category> children;
                 for(const auto& c : categories) if(c.parentId == id) children.push_back(c);
                 syncLevel(catItem, children);
                 row++;
@@ -208,7 +208,7 @@ void CategoryModel::refresh() {
             if (parentItem->rowCount() > row) parentItem->removeRows(row, parentItem->rowCount() - row);
         };
 
-        std::vector<CategoryRepo::Category> roots;
+        std::vector<Category> roots;
         for(const auto& c : categories) if(c.parentId <= 0) roots.push_back(c);
         syncLevel(userGroup, roots);
     }

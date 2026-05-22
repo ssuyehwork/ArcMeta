@@ -1575,7 +1575,6 @@ void ContentPanel::loadCategory(int categoryId) {
             if (rm.tags.empty()) stats.noTagCount++; 
              
             QDate cdate = info.birthTime().date(); 
-            QDate today = QDate::currentDate(); 
             if (cdate == today) stats.createDateCounts["today"]++; 
             else if (cdate == today.addDays(-1)) stats.createDateCounts["yesterday"]++; 
             else stats.createDateCounts[cdate.toString("yyyy-MM-dd")]++; 
@@ -1681,7 +1680,6 @@ void ContentPanel::loadPaths(const QStringList& paths) {
         if (rm.tags.empty()) stats.noTagCount++; 
          
         QDate cdate = info.birthTime().date(); 
-        QDate today = QDate::currentDate(); 
         if (cdate == today) stats.createDateCounts["today"]++; 
         else if (cdate == today.addDays(-1)) stats.createDateCounts["yesterday"]++; 
         else stats.createDateCounts[cdate.toString("yyyy-MM-dd")]++; 

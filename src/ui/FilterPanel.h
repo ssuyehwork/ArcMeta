@@ -43,6 +43,11 @@ struct FilterState {
     QStringList  createDates;   // "today" | "yesterday" | "YYYY-MM-DD"
     QStringList  modifyDates;
     int          colorTolerance = 30; // 2026-05-17 按照用户要求：自定义颜色相近色容差（0~100），由 ColorPicker 准确度滑条驱动
+
+    bool isEmpty() const {
+        return ratings.isEmpty() && colors.isEmpty() && tags.isEmpty() &&
+               types.isEmpty() && createDates.isEmpty() && modifyDates.isEmpty();
+    }
 };
 
 /**
