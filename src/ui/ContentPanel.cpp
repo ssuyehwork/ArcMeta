@@ -212,7 +212,9 @@ ContentPanel::ContentPanel(QWidget* parent)
     setObjectName("EditorContainer"); 
     setAttribute(Qt::WA_StyledBackground, true); 
     setMinimumWidth(230); 
-    setStyleSheet("color: #EEEEEE;"); 
+    setFrameShape(QFrame::NoFrame);
+    setLineWidth(0);
+    setStyleSheet("#EditorContainer { border: none; background-color: #1E1E1E; }");
  
     m_mainLayout = new QVBoxLayout(this); 
     m_mainLayout->setContentsMargins(0, 0, 0, 0); 
@@ -350,6 +352,9 @@ ContentPanel::ContentPanel(QWidget* parent)
                     if (hasThumb) {
                         m_model->setData(pIdx, thumb, Qt::DecorationRole);
                         m_model->setData(pIdx, true, HasThumbnailRole);
+                        // 2026-06-xx 物理注入宽高比角色，触发 JustifiedView 弹性重排
+                        double ar = (double)thumb.width() / thumb.height();
+                        m_model->setData(pIdx, ar, Qt::UserRole + 2);
                     } else {
                         // 降级保护：如果提取失败或非图形格式，直接指向 UiHelper::getFileIcon 获取原生图标
                         QIcon icon = UiHelper::getFileIcon(path, 128);
@@ -435,6 +440,9 @@ void ContentPanel::initUi() {
     m_mainLayout->addWidget(titleBar); 
  
     m_viewStack = new QStackedWidget(this); 
+    m_viewStack->setFrameShape(QFrame::NoFrame);
+    m_viewStack->setLineWidth(0);
+    m_viewStack->setStyleSheet("QStackedWidget { border: none; background-color: #1E1E1E; }");
      
     initGridView(); 
     initListView(); 
@@ -443,12 +451,7 @@ void ContentPanel::initUi() {
     m_viewStack->addWidget(m_treeView); 
     m_viewStack->setCurrentWidget(m_gridView); 
  
-    QVBoxLayout* contentWrapper = new QVBoxLayout(); 
-    contentWrapper->setContentsMargins(4, 4, 4, 4); // 2026-05-08 按照用户要求：增加到4px使卡片到容器边缘达到10px
-    contentWrapper->setSpacing(0); 
-    contentWrapper->addWidget(m_viewStack); 
-     
-    m_mainLayout->addLayout(contentWrapper); 
+    m_mainLayout->addWidget(m_viewStack, 1);
  
     m_textPreview = new QTextBrowser(this); 
     m_textPreview->setStyleSheet("background-color: #1E1E1E; color: #EEEEEE; border: none; padding: 20px; font-family: 'Segoe UI'; font-size: 14px;"); 
@@ -717,6 +720,9 @@ void ContentPanel::setViewMode(ViewMode mode) {
 void ContentPanel::initGridView() { 
     auto* gView = new DropJustifiedView(this);
     m_gridView = gView;
+    gView->setFrameShape(QFrame::NoFrame);
+    gView->setLineWidth(0);
+    gView->setStyleSheet("QAbstractItemView { border: none; outline: none; background-color: #1E1E1E; }");
     gView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     gView->setContextMenuPolicy(Qt::CustomContextMenu);
     gView->setEditTriggers(QAbstractItemView::EditKeyPressed);
@@ -732,6 +738,8 @@ void ContentPanel::initGridView() {
  
 void ContentPanel::initListView() { 
     m_treeView = new DropTreeView(this); 
+    m_treeView->setFrameShape(QFrame::NoFrame);
+    m_treeView->setLineWidth(0);
     m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
     m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
     m_treeView->setSortingEnabled(true); 
@@ -750,7 +758,7 @@ void ContentPanel::initListView() {
     m_treeView->viewport()->installEventFilter(this); 
  
     m_treeView->setStyleSheet( 
-        "QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
+        "QTreeView { background-color: transparent; border: none !important; outline: none; font-size: 12px; }"
         "QTreeView::item { height: 28px; color: #EEEEEE; padding-left: 0px; }" 
         "QTreeView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }" 
     ); 
@@ -1756,6 +1764,7 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     int banGap = 4; 
  
     int infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing);
+    // 弹性居中：根据当前 item 宽度动态计算起始 X 坐标
     m.starsStartX = m.ratingRect.left() + (m.ratingRect.width() - infoTotalW) / 2 + banW + banGap;
     m.banRect = QRect(m.starsStartX - banGap - banW, m.ratingRect.top() + (m.ratingRect.height() - banW) / 2, banW, banW);
  
