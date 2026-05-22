@@ -288,7 +288,11 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
                     if (!img.isNull()) {
                         double ar = (double)img.width() / img.height();
                         QMetaObject::invokeMethod(mutableThis, [mutableThis, key, cacheKey, img, ar]() {
-                            mutableThis->m_thumbCache.insert(cacheKey, new QPixmap(QPixmap::fromImage(img)));
+                            // 物理加固：显式转换并验证，杜绝类型初始化错误
+                            QPixmap pix = QPixmap::fromImage(img);
+                            if (!pix.isNull()) {
+                                mutableThis->m_thumbCache.insert(cacheKey, new QPixmap(pix));
+                            }
                             mutableThis->m_aspectRatios[key] = ar;
                             
                             // 2026-06-xx 物理安全：直接从 Snapshot 中定位 Position，杜绝脱节
