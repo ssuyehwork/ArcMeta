@@ -363,8 +363,8 @@ public:
         QDir().mkpath(cacheDir);
 
         QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v7 标识，强制刷新并校正倒置的缩略图
-        QString hashKey = QString("%1_%2_%3_%4_v7").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v9 标识，强制刷新并校正倒置的缩略图
+        QString hashKey = QString("%1_%2_%3_%4_v9").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
         QString safeName = QString::number(qHash(hashKey), 16) + ".png";
         QString cachePath = cacheDir + safeName;
 
@@ -388,9 +388,10 @@ public:
                 HBITMAP hBitmap = nullptr;
                 hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
-                    // 2026-06-xx 物理恢复：实践证明 QImage::fromHBITMAP 在处理 Shell 缩略图 HBITMAP 时
-                    // 未能自动识别 DIB 的底向上属性，必须物理翻转一次以修正倒置问题。
-                    QImage img = QImage::fromHBITMAP(hBitmap).flipped(Qt::Vertical);
+                    // 2026-06-xx 物理校准：修正之前的过度补偿。
+                    // 实践证明大多数现代 Shell 缩略图通过 fromHBITMAP 转换后方向已正确，
+                    // 之前的物理翻转导致了“反向倒置”。现移除翻转逻辑并升级缓存版本至 v9。
+                    QImage img = QImage::fromHBITMAP(hBitmap);
                     if (forceMirror) img = img.flipped(Qt::Vertical);
                     
                     // 异步存入磁盘缓存
