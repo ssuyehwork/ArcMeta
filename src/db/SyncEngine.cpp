@@ -31,6 +31,24 @@
 namespace ArcMeta {
 
 /**
+ * @brief 辅助函数：通过卷序列号查找驱动器号
+ */
+static wchar_t getDriveLetterBySerial(const std::wstring& volSerial) {
+    DWORD drives = GetLogicalDrives();
+    for (int i = 0; i < 26; i++) {
+        if (drives & (1 << i)) {
+            wchar_t root[] = { (wchar_t)(L'A' + i), L':', L'\\', L'\0' };
+            DWORD serial = 0;
+            if (GetVolumeInformationW(root, nullptr, 0, &serial, nullptr, nullptr, nullptr, 0)) {
+                wchar_t buf[16]; swprintf(buf, 16, L"%08X", serial);
+                if (volSerial == buf) return L'A' + i;
+            }
+        }
+    }
+    return 0;
+}
+
+/**
  * @brief 通过 FID 反查物理路径 (Windows API)
  * 2026-06-xx 优化：支持外部传入卷句柄缓存以提升批量解析效率
  */
@@ -47,18 +65,7 @@ static std::wstring resolveFidToPath(const std::string& fidStr, HANDLE hVolExter
 
     if (hVol == INVALID_HANDLE_VALUE) {
         // 1. 寻找匹配卷序列号的驱动器
-        wchar_t driveLetter = 0;
-        DWORD drives = GetLogicalDrives();
-        for (int i = 0; i < 26; i++) {
-            if (drives & (1 << i)) {
-                wchar_t root[] = { (wchar_t)(L'A' + i), L':', L'\\', L'\0' };
-                DWORD serial = 0;
-                if (GetVolumeInformationW(root, nullptr, 0, &serial, nullptr, nullptr, nullptr, 0)) {
-                    wchar_t buf[16]; swprintf(buf, 16, L"%08X", serial);
-                    if (volSerial == buf) { driveLetter = L'A' + i; break; }
-                }
-            }
-        }
+        wchar_t driveLetter = getDriveLetterBySerial(volSerial);
         if (driveLetter == 0) return L"";
 
         // 2. 打开卷句柄
@@ -132,18 +139,7 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
             if (volCache.count(volSerial)) return volCache[volSerial];
 
             // 寻找匹配卷序列号的驱动器
-            wchar_t driveLetter = 0;
-            DWORD drives = GetLogicalDrives();
-            for (int i = 0; i < 26; i++) {
-                if (drives & (1 << i)) {
-                    wchar_t root[] = { (wchar_t)(L'A' + i), L':', L'\\', L'\0' };
-                    DWORD serial = 0;
-                    if (GetVolumeInformationW(root, nullptr, 0, &serial, nullptr, nullptr, nullptr, 0)) {
-                        wchar_t buf[16]; swprintf(buf, 16, L"%08X", serial);
-                        if (volSerial == buf) { driveLetter = L'A' + i; break; }
-                    }
-                }
-            }
+            wchar_t driveLetter = getDriveLetterBySerial(volSerial);
             if (driveLetter == 0) return INVALID_HANDLE_VALUE;
 
             std::wstring driveRoot = std::wstring(1, driveLetter) + L":\\";

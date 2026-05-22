@@ -37,7 +37,6 @@ void CategoryModel::refresh() {
     QMap<int, int> catCounts;
     for (const auto& p : countsVec) catCounts[p.first] = p.second;
 
-    QStandardItem* root = invisibleRootItem();
     int currentRow = 0;
 
     // 1. 系统模块 (增量同步)
@@ -135,8 +134,9 @@ void CategoryModel::refresh() {
     if (m_type == User || m_type == Both) {
         QStandardItem* userGroup = syncGroupHeader(currentRow++, "我的分类", "folder_filled");
         
-        // 增量构建树形结构：先准备所有节点
-        QMap<int, QStandardItem*> itemMap;
+        // 增量构建树形结构：通过 ID 映射尝试重用节点 (使用成员变量 m_itemCache 确保生命周期安全)
+        QMap<int, QStandardItem*> nextItemMap;
+
         for (const auto& cat : categories) {
             int id = cat.id;
             QString name = QString::fromStdWString(cat.name);
@@ -144,32 +144,51 @@ void CategoryModel::refresh() {
             int count = catCounts.value(id, 0);
             QString display = QString("%1 (%2)").arg(name).arg(count);
 
-            QStandardItem* catItem = new QStandardItem(display);
-            catItem->setData("category", TypeRole);
-            catItem->setData(id, IdRole);
-            catItem->setData(color, ColorRole);
-            catItem->setData(name, NameRole);
+            QStandardItem* catItem = m_itemCache.value(id);
+            if (!catItem) {
+                catItem = new QStandardItem(display);
+                catItem->setData("category", TypeRole);
+                catItem->setData(id, IdRole);
+                catItem->setData(color, ColorRole);
+                catItem->setData(name, NameRole);
+                catItem->setFlags(catItem->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+            } else {
+                if (catItem->text() != display) catItem->setText(display);
+                // 清理旧层级关系，准备重新挂载
+                if (catItem->parent()) catItem->parent()->takeRow(catItem->row());
+            }
+
             catItem->setData(cat.pinned, PinnedRole);
             catItem->setData(cat.encrypted, EncryptedRole);
             catItem->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
-            catItem->setFlags(catItem->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
             
             if (cat.encrypted && !m_unlockedIds.contains(id)) {
                 catItem->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
             } else {
                 catItem->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
             }
-            itemMap[id] = catItem;
+            nextItemMap[id] = catItem;
         }
 
-        // 彻底清空并重新挂载（仅限分类组内，避免影响全局滚动）
-        userGroup->removeRows(0, userGroup->rowCount());
-        for (const auto& cat : categories) {
-            QStandardItem* catItem = itemMap[cat.id];
-            if (cat.parentId > 0 && itemMap.contains(cat.parentId)) {
-                itemMap[cat.parentId]->appendRow(catItem);
+        // 重新挂载逻辑
+        // 1. 移除已删除分类
+        for (auto it = m_itemCache.begin(); it != m_itemCache.end(); ) {
+            if (!nextItemMap.contains(it.key())) {
+                if (it.value()->parent()) it.value()->parent()->removeRow(it.value()->row());
+                it = m_itemCache.erase(it);
             } else {
-                userGroup->appendRow(catItem);
+                ++it;
+            }
+        }
+        m_itemCache = nextItemMap;
+
+        // 2. 物理挂载 (根据父子关系)
+        for (const auto& cat : categories) {
+            QStandardItem* catItem = m_itemCache[cat.id];
+            QStandardItem* parentItem = (cat.parentId > 0) ? m_itemCache.value(cat.parentId) : userGroup;
+
+            if (parentItem && catItem->parent() != parentItem) {
+                parentItem->appendRow(catItem);
             }
         }
     }

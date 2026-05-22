@@ -5,6 +5,7 @@
 #include <QVBoxLayout>
 #include <QSemaphore>
 #include <QThread>
+#include <QSharedPointer>
 
 namespace ArcMeta {
 
@@ -97,8 +98,8 @@ private:
     // 2026-04-15 物理锁：恢复状态期间严禁反向触发保存，防止信号回流污染 Settings
     bool m_isRestoringState = false;
 
-    // 2026-06-xx 物理加固：并发限制信号量，定义为成员变量以确保异步生命周期安全
-    QSemaphore m_colorSema{QThread::idealThreadCount()};
+    // 2026-06-xx 物理加固：并发限制信号量，使用 SharedPointer 确保异步线程在 Panel 销毁后依然安全
+    QSharedPointer<QSemaphore> m_colorSema = QSharedPointer<QSemaphore>::create(QThread::idealThreadCount());
 };
 
 } // namespace ArcMeta

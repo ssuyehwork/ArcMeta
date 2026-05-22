@@ -963,9 +963,10 @@ void CategoryPanel::initUi() {
                     QString ext = info.suffix().toLower();
                     static const QSet<QString> targetExts = {"psd", "ai", "eps", "png", "jpg", "jpeg"};
                     if (targetExts.contains(ext)) {
-                        // 性能优化：并发限制 (使用成员变量 m_colorSema 确保生命周期安全)
-                        m_colorSema.acquire();
-                        QtConcurrent::run([this, wPath, itemPath]() {
+                        // 性能优化：并发限制 (使用 SharedPointer 并在异步线程中 acquire 避免阻塞主循环)
+                        auto sema = m_colorSema;
+                        (void)QtConcurrent::run([sema, wPath, itemPath]() {
+                            sema->acquire();
                             // 1. 提取全量色板
                             auto palette = UiHelper::extractPalette(itemPath);
                             if (!palette.isEmpty()) {
@@ -977,7 +978,7 @@ void CategoryPanel::initUi() {
                                 MetadataManager::instance().setColor(wPath, colorHex.toStdWString());
                                 MetadataManager::instance().setPalettes(wPath, palette);
                             }
-                            m_colorSema.release();
+                            sema->release();
                         });
                     }
                 }
