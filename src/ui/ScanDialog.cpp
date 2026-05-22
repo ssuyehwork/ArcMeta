@@ -822,7 +822,8 @@ void ScanDialog::setupUi() {
     driveScroll->setWidget(m_driveContainer);
 
     auto* topControl = new QHBoxLayout();
-    topControl->setContentsMargins(0, 0, 0, 0);
+    // 按照用户要求：盘符整体向右偏移 5 像素
+    topControl->setContentsMargins(5, 0, 0, 0);
     topControl->addWidget(driveScroll, 1);
     mainLayout->addLayout(topControl);
 
