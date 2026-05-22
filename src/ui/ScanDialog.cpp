@@ -1069,7 +1069,7 @@ void ScanDialog::showDriveLoading() {
         delete child;
     }
     QLabel* loadingLbl = new QLabel("更新数据中...");
-    loadingLbl->setStyleSheet("color: #7A8F9E; font-size: 12px; font-weight: bold; margin-left: 10px;");
+    loadingLbl->setStyleSheet("background: transparent; border: none; color: #7A8F9E; font-size: 12px; font-weight: bold; margin-left: 10px;");
     m_driveLayout->addWidget(loadingLbl);
     m_driveLayout->addStretch();
 }
