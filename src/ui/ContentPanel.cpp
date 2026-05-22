@@ -603,8 +603,8 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                             m_proxyModel->setData(idx, colorValue, ColorRole); 
  
                             // 2026-06-05 按照要求：快捷键设置颜色后立即重渲染图标，实现视觉同步 
-                            QIcon coloredIcon = UiHelper::getFileIcon(path, 128);
-                            m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
+                            QIcon nativeIcon = UiHelper::getFileIcon(path, 128);
+                            m_proxyModel->setData(idx, nativeIcon, Qt::DecorationRole);
                         } 
                     } 
                 } 
@@ -1241,8 +1241,6 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     if (path.isEmpty() || path == "computer://") { 
         m_currentPath = "computer://"; 
         updateLayersButtonState(); 
-         
-        // 2026-06-xx 物理清理：移除 prefetchDirectory 调用 
  
         const auto drives = QDir::drives(); 
         QMap<int, int> rc; QMap<QString, int> cc, tc, tyc, cdc, mdc; 
