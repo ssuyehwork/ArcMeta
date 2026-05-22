@@ -363,8 +363,8 @@ public:
         QDir().mkpath(cacheDir);
 
         QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v9 标识，强制刷新并校正倒置的缩略图
-        QString hashKey = QString("%1_%2_%3_%4_v9").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v10 标识，强制刷新并校正倒置的缩略图
+        QString hashKey = QString("%1_%2_%3_%4_v10").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
         QString safeName = QString::number(qHash(hashKey), 16) + ".png";
         QString cachePath = cacheDir + safeName;
 
@@ -388,11 +388,12 @@ public:
                 HBITMAP hBitmap = nullptr;
                 hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
-                    // 2026-06-xx 物理校准：修正之前的过度补偿。
-                    // 实践证明大多数现代 Shell 缩略图通过 fromHBITMAP 转换后方向已正确，
-                    // 之前的物理翻转导致了“反向倒置”。现移除翻转逻辑并升级缓存版本至 v9。
-                    QImage img = QImage::fromHBITMAP(hBitmap);
-                    if (forceMirror) img = img.flipped(Qt::Vertical);
+                    // 2026-06-xx 物理校准：强制进行垂直镜像翻转。
+                    // 尽管部分文档称 fromHBITMAP 已修复方向问题，但在当前生产环境下
+                    // Windows DIB 仍然以自下而上的顺序存储，导致渲染结果倒置。
+                    // 升级缓存版本至 v10 以物理重刷所有错误方向的缩略图。
+                    QImage img = QImage::fromHBITMAP(hBitmap).mirrored(false, true);
+                    if (forceMirror) img = img.mirrored(false, true); // 如果外部再次请求翻转，则抵消
                     
                     // 异步存入磁盘缓存
                     (void)QtConcurrent::run([img, cachePath]() {
