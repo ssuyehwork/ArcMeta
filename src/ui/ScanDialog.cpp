@@ -353,6 +353,30 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         if (idx == -1) return 0;
         std::wstring itemPath = mftReader.getFullPath(idx).toStdWString();
         return MetadataManager::instance().getMeta(itemPath).rating;
+    } else if (role == Qt::UserRole + 4) {
+        // PinnedRole / IsLockedRole
+        auto& mftReader = MftReader::instance();
+        int idx = mftReader.getIndexByKey(key);
+        if (idx == -1) return false;
+        std::wstring itemPath = mftReader.getFullPath(idx).toStdWString();
+        return MetadataManager::instance().getMeta(itemPath).pinned;
+    } else if (role == Qt::UserRole + 5) {
+        // InDatabaseRole
+        auto& mftReader = MftReader::instance();
+        int idx = mftReader.getIndexByKey(key);
+        if (idx == -1) return false;
+        std::wstring itemPath = mftReader.getFullPath(idx).toStdWString();
+        return MetadataManager::instance().getMeta(itemPath).hasUserOperations();
+    } else if (role == Qt::UserRole + 6) {
+        // ExtensionRole
+        auto& mftReader = MftReader::instance();
+        int idx = mftReader.getIndexByKey(key);
+        if (idx == -1) return "FILE";
+        if (mftReader.isDirectory(idx)) return "DIR";
+        QString name = mftReader.getName(idx);
+        int dot = name.lastIndexOf('.');
+        if (dot == -1) return "FILE";
+        return name.mid(dot + 1).toUpper();
     }
     return QVariant();
 }

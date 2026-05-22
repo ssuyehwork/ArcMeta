@@ -11,36 +11,80 @@ namespace ArcMeta {
 ThumbnailDelegate::ThumbnailDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
 
 void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const {
-    const int textHeight = 36;
+    const int textHeight = 52; // 2026-06-xx 物理同步：增加高度以容纳外部化的评分区
+    const int ratingHeight = 22; // 2026-06-xx 物理对标：评分区高度
+
     QRect cardRect = option.rect.adjusted(3, 3, -3, -(textHeight + 3));
+
+    // 2026-06-xx 物理对标：评分区位于卡片正下方
+    QRect ratingRect = QRect(option.rect.left() + 3,
+                             cardRect.bottom() + 4,
+                             option.rect.width() - 6,
+                             ratingHeight);
+
+    // 2026-06-xx 物理对标：名称区位于评分区下方
     QRect textRect = QRect(option.rect.left() + 3,
-                           option.rect.bottom() - textHeight,
+                           ratingRect.bottom() + 2,
                            option.rect.width() - 6,
-                           textHeight);
+                           textHeight - ratingHeight - 8);
 
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    // ① 悬停状态 (Hover) 背景
-    if (option.state & QStyle::State_MouseOver) {
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(255, 255, 255, 15)); // 轻微提亮
-        painter->drawRoundedRect(cardRect, 6, 6);
+    // ① 背景与边框绘制 (对标 ContentPanel 风格)
+    bool isSelected = (option.state & QStyle::State_Selected);
+    bool isHovered = (option.state & QStyle::State_MouseOver);
+    QColor cardBg = isSelected ? QColor("#282828") : (isHovered ? QColor("#2A2A2A") : QColor("#2D2D2D"));
+    painter->setPen(isSelected ? QPen(QColor("#3498db"), 2) : QPen(QColor("#333333"), 1));
+    painter->setBrush(cardBg);
+    painter->drawRoundedRect(cardRect, 8, 8);
+
+    // ② 圆角裁剪（仅作用于卡片内容绘制）
+    QPainterPath clipPath;
+    clipPath.addRoundedRect(cardRect.adjusted(1, 1, -1, -1), 8, 8);
+    painter->setClipPath(clipPath);
+
+    // [V3 物理补完] 1. 置顶/已录入状态图标绘制 (对标 ContentPanel)
+    bool isPinned = index.data(Qt::UserRole + 4).toBool();
+    bool isManaged = index.data(Qt::UserRole + 5).toBool();
+    if (isPinned || isManaged) {
+        QRect statusRect(cardRect.right() - 22, cardRect.top() + 8, 16, 16);
+        if (isPinned) {
+            QIcon pinIcon = UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16);
+            pinIcon.paint(painter, statusRect);
+        } else {
+            QIcon checkIcon = UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16);
+            checkIcon.paint(painter, statusRect);
+        }
     }
 
-    // ② 圆角裁剪（仅作用于卡片）
-    QPainterPath clipPath;
-    clipPath.addRoundedRect(cardRect, 6, 6);
-    painter->setClipPath(clipPath);
+    // [V3 物理补完] 2. 扩展名角标绘制
+    QString ext = index.data(Qt::UserRole + 6).toString();
+    QColor badgeColor = UiHelper::getExtensionColor(ext);
+    QRect extRect(cardRect.left() + 8, cardRect.top() + 8, 36, 18);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(badgeColor);
+    painter->drawRoundedRect(extRect, 2, 2);
+    painter->setPen(QColor("#FFFFFF"));
+    QFont extFont = painter->font();
+    extFont.setPointSize(8);
+    extFont.setBold(true);
+    painter->setFont(extFont);
+    painter->drawText(extRect, Qt::AlignCenter, ext);
 
     bool hasThumb = index.data(Qt::UserRole + 1).toBool();
     QPixmap thumb = index.data(Qt::DecorationRole).value<QPixmap>();
 
     if (hasThumb && !thumb.isNull()) {
-        QPixmap scaled = thumb.scaled(cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        int x = cardRect.center().x() - scaled.width() / 2;
-        int y = cardRect.center().y() - scaled.height() / 2;
+        // 2026-06-xx 物理同步：适配 High DPI 填充裁剪模式
+        qreal dpr = painter->device()->devicePixelRatio();
+        QSize pixelSize = cardRect.size() * dpr;
+        QPixmap scaled = thumb.scaled(pixelSize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        scaled.setDevicePixelRatio(dpr);
+
+        int x = cardRect.center().x() - qRound(scaled.width() / dpr) / 2;
+        int y = cardRect.center().y() - qRound(scaled.height() / dpr) / 2;
         painter->drawPixmap(x, y, scaled);
     } else {
         painter->fillRect(cardRect, QColor("#2D2D2D"));
@@ -50,27 +94,28 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
     }
 
-    // [V3 物理优化] 彻底移除选中高亮叠加层，确保图片颜色准确性
-    // 删除了原有的 painter->fillRect(cardRect, QColor(255, 140, 0, 50)) 逻辑
+    painter->restore(); // 释放裁剪区
 
-    // ③ 信息密度增强：在缩略图上以半透明层形式叠加载入评分
-    int rating = index.data(Qt::UserRole + 3).toInt(); // 2026-06-xx 性能优化：直接从 Model 获取评分
-    if (rating > 0) {
-        // 物理修复：不重置 ClipPath，而是利用现有 ClipPath 确保评分条也有圆角
-        // 绘制底部半透明遮罩层
-        int barHeight = 24;
-        QRect ratingBar(cardRect.left(), cardRect.bottom() - barHeight, cardRect.width(), barHeight);
-        painter->fillRect(ratingBar, QColor(0, 0, 0, 100));
+    // ③ 评分区域绘制 (对标 ContentPanel 逻辑)
+    int rating = index.data(Qt::UserRole + 3).toInt();
+    bool shouldShowRating = (rating > 0) || isSelected;
 
-        // 绘制评分星级
+    if (shouldShowRating) {
         int starSize = 14;
         int starSpacing = 2;
-        int totalW = 5 * starSize + 4 * starSpacing;
-        int startX = ratingBar.left() + (ratingBar.width() - totalW) / 2;
-        int startY = ratingBar.top() + (ratingBar.height() - starSize) / 2;
+        int banW = 12;
+        int banGap = 4;
+        int infoTotalW = banW + banGap + (5 * starSize) + (4 * starSpacing);
+        int infoStartX = ratingRect.left() + (ratingRect.width() - infoTotalW) / 2;
 
-        // 2026-06-xx 性能优化：静态缓存 Pixmap 避免重复创建
-        // 物理修复：在 High DPI 下，应缓存对应分辨率的 Pixmap
+        QRect banRect(infoStartX, ratingRect.top() + (ratingRect.height() - banW) / 2, banW, banW);
+        int starsStartX = infoStartX + banW + banGap;
+
+        // 绘制禁止图标 (如果未打分但选中，则显示)
+        QIcon banIcon = UiHelper::getIcon("no_color", QColor("#B0B0B0"), banRect.width());
+        banIcon.paint(painter, banRect);
+
+        // 静态缓存星级 Pixmap (含 High DPI 适配)
         static QPixmap filledStar, emptyStar;
         static int lastStarSize = -1;
         static qreal lastDpr = -1.0;
@@ -87,25 +132,12 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         }
 
         for (int i = 0; i < 5; ++i) {
-            QRect starRect(startX + i * (starSize + starSpacing), startY, starSize, starSize);
+            QRect starRect(starsStartX + i * (starSize + starSpacing), ratingRect.top() + (ratingRect.height() - starSize) / 2, starSize, starSize);
             painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
         }
     }
 
-    painter->restore(); // 释放裁剪区
-
-    // ② 选中边框（在裁剪区外绘制，确保完整显示）
-    if (option.state & QStyle::State_Selected) {
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing);
-        // 按照用户要求：修改为项目标准蓝 (#3498db)
-        painter->setPen(QPen(QColor("#3498db"), 2)); 
-        painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(cardRect.adjusted(0, 0, 0, 0), 6, 6);
-        painter->restore();
-    }
-
-    // ③ 文件名（卡片下方）
+    // ③ 文件名（评分区下方）
     painter->save();
     painter->setPen(option.state & QStyle::State_Selected
                     ? QColor("#3498db") : QColor("#C8C8C8"));
@@ -135,13 +167,13 @@ QWidget* ThumbnailDelegate::createEditor(QWidget* parent, const QStyleOptionView
 void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
                                               const QStyleOptionViewItem& option,
                                               const QModelIndex& /*index*/) const {
-    const int textHeight = 36;
-    // 按照用户要求：修正编辑器位置。
-    // 计算文字区域：位于整体区域底部 textHeight 像素
+    const int textHeight = 52;
+    const int ratingHeight = 22;
+    // 2026-06-xx 物理修正：编辑器仅覆盖名称区域
     QRect textRect(option.rect.left() + 4,
-                   option.rect.bottom() - textHeight,
+                   option.rect.bottom() - (textHeight - ratingHeight - 4),
                    option.rect.width() - 8,
-                   textHeight - 4);
+                   (textHeight - ratingHeight - 8));
     editor->setGeometry(textRect);
 }
 

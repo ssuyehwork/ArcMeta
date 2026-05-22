@@ -169,7 +169,7 @@ void JustifiedView::mouseDoubleClickEvent(QMouseEvent* event) {
         return;
     }
 
-    const int textHeight = 36;
+    const int textHeight = 52; // 2026-06-xx 物理同步：增加至 52px 以容纳评分区
     QRect itemRect = visualRect(idx);
     // 文字区域 = 卡片底部 textHeight 像素
     QRect textRect(itemRect.left(), itemRect.bottom() - textHeight, itemRect.width(), textHeight);
@@ -294,29 +294,24 @@ void JustifiedView::doLayout() {
         // 防止行高过大，限制在目标高度的 1.5 倍
         if (actualHeight > m_targetRowHeight * 1.5) actualHeight = qRound(m_targetRowHeight * 1.5);
 
-        const int textHeight = 36;
-        const int minItemWidth = 40;
+        const int textHeight = 52; // 2026-06-xx 物理对标：增加高度以容纳外部化的评分区
 
-        // 预计算宽度并初步应用最小宽度限制
+        // 预计算宽度：按照图片真实比例计算，不再强制最小宽度限制
         std::vector<int> widths(numInRow);
         int totalItemsWidth = 0;
         for (int j = 0; j < numInRow; ++j) {
-            widths[j] = std::max(minItemWidth, qRound(aspectRatios[j] * actualHeight));
+            widths[j] = qRound(aspectRatios[j] * actualHeight);
             totalItemsWidth += widths[j];
         }
 
-        // 布局平衡：如果由于 minItemWidth 导致总宽度偏离 containerWidth，进行平滑修正
+        // 布局平衡：保持行宽对齐
         if (!isLastRow && numInRow > 0) {
             int diff = (containerWidth - (spacing * (numInRow - 1))) - totalItemsWidth;
             if (diff != 0) {
-                // 将差值分配给项，尽量不打破最小宽度限制
                 for (int j = 0; j < numInRow && diff != 0; ++j) {
-                    if (widths[j] > minItemWidth || diff > 0) {
-                        int adj = diff / (numInRow - j);
-                        if (widths[j] + adj < minItemWidth) adj = minItemWidth - widths[j];
-                        widths[j] += adj;
-                        diff -= adj;
-                    }
+                    int adj = diff / (numInRow - j);
+                    widths[j] += adj;
+                    diff -= adj;
                 }
             }
         }
