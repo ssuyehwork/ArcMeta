@@ -620,7 +620,8 @@ ScanDialog::ScanDialog(QWidget* parent)
             font-size: 14px;
             font-weight: bold;
             letter-spacing: 1.5px;
-            margin-left: 1px;
+            /* 物理负边距补偿，确保紧凑感显而易见 */
+            margin-left: -2px;
             padding: 0px;
         }
 
