@@ -213,8 +213,10 @@ bool MftReader::loadFromCache() {
     std::filesystem::path cacheDir = "ArcMeta/cache";
     if (!std::filesystem::exists(cacheDir)) return false;
 
-    QWriteLocker lock(&m_dataLock);
-    clearInternal();
+    {
+        QWriteLocker lock(&m_dataLock);
+        clearInternal();
+    }
 
     struct DriveIndices {
         std::vector<uint32_t> sorted;
@@ -224,8 +226,6 @@ bool MftReader::loadFromCache() {
 
     for (auto const& entry : std::filesystem::directory_iterator{cacheDir}) {
         if (entry.path().extension() == ".scch") {
-            // 2026-05-14 零拷贝优化思路：虽然 ScchCache::load 现在支持增量 insert，
-            // 但为了正确处理盘符编码 (dIdx) 和字符串池全局偏移 (oldPoolSize)，我们仍需局部处理。
             std::vector<uint64_t> f, pf;
             std::vector<int64_t> s, t;
             std::vector<uint32_t> no, attr, ds;
@@ -233,37 +233,48 @@ bool MftReader::loadFromCache() {
             std::unordered_map<std::string, uint64_t> usnMap;
 
             if (ScchCache::load(entry.path().string().c_str(), f, pf, s, t, no, attr, mf, sp, ds, usnMap) == ScchResult::Ok) {
-                size_t dIdx = m_drive_list.size();
-                size_t oldPoolSize = m_string_pool.size();
-                uint32_t baseIdx = (uint32_t)m_frns.size();
+                size_t dIdx;
+                size_t oldPoolSize;
+                uint32_t baseIdx;
                 size_t count = f.size();
+                size_t currentTotal;
+                std::wstring driveName;
 
-                m_frns.insert(m_frns.end(), f.begin(), f.end());
-                m_sizes.insert(m_sizes.end(), s.begin(), s.end());
-                m_timestamps.insert(m_timestamps.end(), t.begin(), t.end());
-                m_attributes.insert(m_attributes.end(), attr.begin(), attr.end());
-                m_metadata_fetched.insert(m_metadata_fetched.end(), mf.begin(), mf.end());
-                m_string_pool.insert(m_string_pool.end(), sp.begin(), sp.end());
+                {
+                    QWriteLocker lock(&m_dataLock);
+                    dIdx = m_drive_list.size();
+                    oldPoolSize = m_string_pool.size();
+                    baseIdx = (uint32_t)m_frns.size();
 
-                for (size_t i = 0; i < count; ++i) {
-                    m_parent_frns.push_back((static_cast<uint64_t>(dIdx) << 48) | (pf[i] & 0x0000FFFFFFFFFFFFull));
-                    m_name_offsets.push_back(no[i] + (uint32_t)oldPoolSize);
+                    m_frns.insert(m_frns.end(), f.begin(), f.end());
+                    m_sizes.insert(m_sizes.end(), s.begin(), s.end());
+                    m_timestamps.insert(m_timestamps.end(), t.begin(), t.end());
+                    m_attributes.insert(m_attributes.end(), attr.begin(), attr.end());
+                    m_metadata_fetched.insert(m_metadata_fetched.end(), mf.begin(), mf.end());
+                    m_string_pool.insert(m_string_pool.end(), sp.begin(), sp.end());
+
+                    for (size_t i = 0; i < count; ++i) {
+                        m_parent_frns.push_back((static_cast<uint64_t>(dIdx) << 48) | (pf[i] & 0x0000FFFFFFFFFFFFull));
+                        m_name_offsets.push_back(no[i] + (uint32_t)oldPoolSize);
+                    }
+
+                    allSortedIndices.push_back({std::move(ds), baseIdx});
+
+                    for (const auto& [drive, usn] : usnMap) {
+                        driveName = QString::fromStdString(drive).toStdWString();
+                        m_drive_list.push_back(driveName);
+                        m_next_usns[driveName] = usn;
+                    }
+                    currentTotal = m_frns.size();
                 }
-                
-                allSortedIndices.push_back({std::move(ds), baseIdx});
 
-                for (const auto& [drive, usn] : usnMap) {
-                    std::wstring wDrive = QString::fromStdString(drive).toStdWString();
-                    m_drive_list.push_back(wDrive);
-                    m_next_usns[wDrive] = usn;
-                    
-                    // 2026-05-14 启动流控优化：每加载完成一个卷即发射信号，实现渐进式体感
-                    emit driveLoaded(QString::fromStdWString(wDrive), (int)count, (int)m_frns.size());
-                }
+                // 2026-05-14 启动流控优化：释放锁后发射信号，避免 UI 线程调用 totalCount() 时死锁
+                emit driveLoaded(QString::fromStdWString(driveName), (int)count, (int)currentTotal);
             }
         }
     }
 
+    QWriteLocker lock(&m_dataLock);
     if (m_frns.empty()) return false;
     rebuildFrnToIndexMap();
 

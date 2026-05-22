@@ -125,7 +125,7 @@ private:
     void showDriveLoading();
     void refreshDriveList(bool forceProbe = false);
     void updateDriveButtonStyles();
-    void updateStatus(const QString& text, bool scanning = false);
+    void updateStatus(const QString& text, bool scanning = false, int64_t totalCount = -1);
     void updateStatusBar();
     void handleMetadataShortcut(QKeyEvent* event);
     QString formatNumber(int64_t n);

@@ -759,7 +759,7 @@ ScanDialog::ScanDialog(QWidget* parent)
 
     // 2026-06-xx 物理对标：监听引擎加载信号，实现“更新数据中...”的体感同步
     connect(&MftReader::instance(), &MftReader::driveLoaded, this, [this](const QString& drive, int count, int total) {
-        updateStatus(QString("正在加载快照 %1 (%2/%3)...").arg(drive).arg(formatNumber(count)).arg(formatNumber(total)), true);
+        updateStatus(QString("正在加载快照 %1 (%2)...").arg(drive).arg(formatNumber(count)), true, total);
     });
 
     // 2026-05-16 物理重载：断开基类 Qt 置顶逻辑，改用 Win32 原生 SetWindowPos 以实现无损切换
@@ -1594,10 +1594,10 @@ void ScanDialog::onFilterOptionChanged() {
     m_controller->triggerSearch(true);
 }
 
-void ScanDialog::updateStatus(const QString& text, bool scanning) {
+void ScanDialog::updateStatus(const QString& text, bool scanning, int64_t totalCount) {
     Q_UNUSED(text);
     if (m_titleStatusLabel) {
-        int total = MftReader::instance().totalCount();
+        int64_t total = (totalCount >= 0) ? totalCount : MftReader::instance().totalCount();
         m_titleStatusLabel->setText(QString("%1 - %2").arg(scanning ? "SCANNING" : "READY").arg(formatNumber(total)));
         m_titleStatusLabel->setStyleSheet(scanning ? "color: #FF8C00; font-size: 10px; font-weight: bold;" : "color: #46B478; font-size: 10px; font-weight: bold;");
     }
