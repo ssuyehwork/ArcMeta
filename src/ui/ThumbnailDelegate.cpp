@@ -70,12 +70,20 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         int startY = ratingBar.top() + (ratingBar.height() - starSize) / 2;
 
         // 2026-06-xx 性能优化：静态缓存 Pixmap 避免重复创建
+        // 物理修复：在 High DPI 下，应缓存对应分辨率的 Pixmap
         static QPixmap filledStar, emptyStar;
         static int lastStarSize = -1;
-        if (lastStarSize != starSize) {
-            filledStar = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), QColor("#EF9F27"));
-            emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), QColor("#888888"));
+        static qreal lastDpr = -1.0;
+        qreal currentDpr = painter->device()->devicePixelRatio();
+
+        if (lastStarSize != starSize || lastDpr != currentDpr) {
+            QSize pixelSize = QSize(starSize, starSize) * currentDpr;
+            filledStar = UiHelper::getPixmap("star_filled", pixelSize, QColor("#EF9F27"));
+            emptyStar = UiHelper::getPixmap("star", pixelSize, QColor("#888888"));
+            filledStar.setDevicePixelRatio(currentDpr);
+            emptyStar.setDevicePixelRatio(currentDpr);
             lastStarSize = starSize;
+            lastDpr = currentDpr;
         }
 
         for (int i = 0; i < 5; ++i) {

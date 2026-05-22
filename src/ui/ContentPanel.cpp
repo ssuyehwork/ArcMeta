@@ -1851,9 +1851,9 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
             painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
             // B. 创建圆角裁剪路径 (作用于整个图标绘制区 m.squareRect)
-            QPainterPath path;
-            path.addRoundedRect(m.squareRect, 8, 8);
-            painter->setClipPath(path);
+            QPainterPath clipPath;
+            clipPath.addRoundedRect(m.squareRect, 8, 8);
+            painter->setClipPath(clipPath);
 
             // C. 执行“按比例填充”缩放 (KeepAspectRatioByExpanding)
             // 物理修复：在 High DPI 下，应缩放至物理像素尺寸以保持清晰度
@@ -1864,8 +1864,9 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
             scaled.setDevicePixelRatio(painter->device()->devicePixelRatio());
 
             // D. 居中绘制 (此处 x, y 仍为逻辑坐标)
-            int x = m.squareRect.center().x() - (scaled.width() / (int)scaled.devicePixelRatio()) / 2;
-            int y = m.squareRect.center().y() - (scaled.height() / (int)scaled.devicePixelRatio()) / 2;
+            // 物理修复：移除 (int) 强转以支持 1.25x / 1.5x 等非整数缩放倍率
+            int x = m.squareRect.center().x() - qRound(scaled.width() / scaled.devicePixelRatio()) / 2;
+            int y = m.squareRect.center().y() - qRound(scaled.height() / scaled.devicePixelRatio()) / 2;
             painter->drawPixmap(x, y, scaled);
 
             painter->restore();
