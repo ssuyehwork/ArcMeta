@@ -5,7 +5,7 @@
 #include "SvgIcons.h" 
 #include "TreeItemDelegate.h" 
 #include "DropTreeView.h" 
-#include "DropListView.h" 
+#include "DropJustifiedView.h" 
 #include "ToolTipOverlay.h" 
  
 #include <QVBoxLayout> 
@@ -212,7 +212,9 @@ ContentPanel::ContentPanel(QWidget* parent)
     setObjectName("EditorContainer"); 
     setAttribute(Qt::WA_StyledBackground, true); 
     setMinimumWidth(230); 
-    setStyleSheet("color: #EEEEEE;"); 
+    setFrameShape(QFrame::NoFrame);
+    setLineWidth(0);
+    setStyleSheet("#EditorContainer { border: none; background-color: #1E1E1E; }"); 
  
     m_mainLayout = new QVBoxLayout(this); 
     m_mainLayout->setContentsMargins(0, 0, 0, 0); 
@@ -350,6 +352,9 @@ ContentPanel::ContentPanel(QWidget* parent)
                     if (hasThumb) {
                         m_model->setData(pIdx, thumb, Qt::DecorationRole);
                         m_model->setData(pIdx, true, HasThumbnailRole);
+                        // 2026-06-xx 物理注入宽高比角色，触发 JustifiedView 弹性重排
+                        double ar = (double)thumb.width() / thumb.height();
+                        m_model->setData(pIdx, ar, Qt::UserRole + 2);
                     } else {
                         // 降级保护：如果提取失败或非图形格式，直接指向 UiHelper::getFileIcon 获取原生图标
                         QIcon icon = UiHelper::getFileIcon(path, 128); 
@@ -435,6 +440,9 @@ void ContentPanel::initUi() {
     m_mainLayout->addWidget(titleBar); 
  
     m_viewStack = new QStackedWidget(this); 
+    m_viewStack->setFrameShape(QFrame::NoFrame);
+    m_viewStack->setLineWidth(0);
+    m_viewStack->setStyleSheet("QStackedWidget { border: none; background-color: #1E1E1E; }");
      
     initGridView(); 
     initListView(); 
@@ -443,12 +451,7 @@ void ContentPanel::initUi() {
     m_viewStack->addWidget(m_treeView); 
     m_viewStack->setCurrentWidget(m_gridView); 
  
-    QVBoxLayout* contentWrapper = new QVBoxLayout(); 
-    contentWrapper->setContentsMargins(4, 4, 4, 4); // 2026-05-08 按照用户要求：增加到4px使卡片到容器边缘达到10px
-    contentWrapper->setSpacing(0); 
-    contentWrapper->addWidget(m_viewStack); 
-     
-    m_mainLayout->addLayout(contentWrapper); 
+    m_mainLayout->addWidget(m_viewStack, 1); 
  
     m_textPreview = new QTextBrowser(this); 
     m_textPreview->setStyleSheet("background-color: #1E1E1E; color: #EEEEEE; border: none; padding: 20px; font-family: 'Segoe UI'; font-size: 14px;"); 
@@ -479,20 +482,18 @@ void ContentPanel::updateStatusBarStats() {
 }
 
 void ContentPanel::updateGridSize() {
-    // 2026-06-xx V3 重构：采用 ScanDialog 风格的一体化卡片设计
-    m_zoomLevel = qBound(56, m_zoomLevel, 256); // 扩展缩放上限至 256 以适配画廊感
-    m_gridView->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
+    // 2026-06-xx V3 重构：采用 JustifiedView 的“填充铺满”布局
+    m_zoomLevel = qBound(56, m_zoomLevel, 256); 
     
-    int cardW = m_zoomLevel + 24; 
-    int metadataH = 42; // 底部文件名和星级的固定高度，需与 Delegate 保持物理同步
-    int totalH = cardW + metadataH + 12; // 12 为外边距留白
-    
-    m_gridView->setGridSize(QSize(cardW + 10, totalH));
+    auto* gView = qobject_cast<JustifiedView*>(m_gridView);
+    if (gView) {
+        gView->setTargetRowHeight(m_zoomLevel);
+    }
 
     QSettings settings("ArcMeta团队", "ArcMeta");
     settings.setValue("UI/GridZoomLevel", m_zoomLevel);
 
-    qDebug() << "[GridSize V3] Zoom:" << m_zoomLevel << "CardW:" << cardW << "TotalH:" << totalH;
+    qDebug() << "[GridSize V3] Justified RowHeight:" << m_zoomLevel;
 } 
  
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 
@@ -507,17 +508,19 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         ToolTipOverlay::hideTip(); 
     } 
  
-    if ((obj == m_gridView || obj == m_gridView->viewport()) && event->type() == QEvent::Wheel) { 
-        // 2026-05-25 物理修复：改用 reinterpret_cast 避开 static_cast 的类型推导逻辑错误 
-        QWheelEvent* wEvent = reinterpret_cast<QWheelEvent*>(event); 
-        if (wEvent->modifiers() & Qt::ControlModifier) { 
-            int delta = wEvent->angleDelta().y(); 
-            if (delta > 0) m_zoomLevel += 8; 
-            else m_zoomLevel -= 8; 
-            updateGridSize(); 
-            return true; 
-        } 
-    } 
+    if (m_gridView) {
+        auto* gView = qobject_cast<JustifiedView*>(m_gridView);
+        if ((obj == gView || (gView && obj == gView->viewport())) && event->type() == QEvent::Wheel) { 
+            QWheelEvent* wEvent = reinterpret_cast<QWheelEvent*>(event); 
+            if (wEvent->modifiers() & Qt::ControlModifier) { 
+                int delta = wEvent->angleDelta().y(); 
+                if (delta > 0) m_zoomLevel += 8; 
+                else m_zoomLevel -= 8; 
+                updateGridSize(); 
+                return true; 
+            } 
+        }
+    }
  
     if (event->type() == QEvent::KeyPress) { 
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 到 QKeyEvent 的 static_cast 歧义 
@@ -715,44 +718,28 @@ void ContentPanel::setViewMode(ViewMode mode) {
 } 
  
 void ContentPanel::initGridView() { 
-    m_gridView = new DropListView(this); 
-    m_gridView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
-    m_gridView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
-    m_gridView->setViewMode(QListView::IconMode); 
-    m_gridView->setMovement(QListView::Static); 
-    m_gridView->setSpacing(8); 
-    m_gridView->setResizeMode(QListView::Adjust); 
-    m_gridView->setWrapping(true); 
-    m_gridView->setIconSize(QSize(96, 96)); 
-    m_gridView->setSpacing(0); 
-    m_gridView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
-    m_gridView->setContextMenuPolicy(Qt::CustomContextMenu); 
+    auto* gView = new DropJustifiedView(this); 
+    m_gridView = gView;
+    gView->setFrameShape(QFrame::NoFrame);
+    gView->setLineWidth(0);
+    gView->setStyleSheet("QAbstractItemView { border: none; outline: none; background-color: #1E1E1E; }");
+    gView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
+    gView->setContextMenuPolicy(Qt::CustomContextMenu); 
+    gView->setEditTriggers(QAbstractItemView::EditKeyPressed); 
  
-    m_gridView->setDragEnabled(true); 
-    m_gridView->setDragDropMode(QAbstractItemView::DragOnly); 
+    gView->setModel(m_proxyModel); 
+    gView->setItemDelegate(new GridItemDelegate(this)); 
+    gView->viewport()->installEventFilter(this); 
  
-    // 2026-06-xx 物理修复：移除 SelectedClicked，防止选中卡片时意外触发重命名逻辑
-    m_gridView->setEditTriggers(QAbstractItemView::EditKeyPressed); 
- 
-    m_gridView->setModel(m_proxyModel); 
-    m_gridView->setItemDelegate(new GridItemDelegate(this)); 
-    m_gridView->viewport()->installEventFilter(this); 
- 
-    connect(m_gridView, &QListView::doubleClicked, this, &ContentPanel::onDoubleClicked); 
- 
-    m_gridView->setStyleSheet( 
-        "QListView { background-color: transparent; border: none; outline: none; }" 
-        "QListView::item { background: transparent; }" 
-        "QListView::item:selected { background-color: rgba(55, 138, 221, 0.2); border-radius: 8px; }" 
-        "QListView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }" 
-    ); 
- 
-    connect(m_gridView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
-    connect(m_gridView, &QListView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
+    connect(gView, &JustifiedView::doubleClicked, this, &ContentPanel::onDoubleClicked); 
+    connect(gView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
+    connect(gView, &JustifiedView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
 } 
  
 void ContentPanel::initListView() { 
     m_treeView = new DropTreeView(this); 
+    m_treeView->setFrameShape(QFrame::NoFrame);
+    m_treeView->setLineWidth(0);
     m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
     m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
     m_treeView->setSortingEnabled(true); 
@@ -771,7 +758,7 @@ void ContentPanel::initListView() {
     m_treeView->viewport()->installEventFilter(this); 
  
     m_treeView->setStyleSheet( 
-        "QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
+        "QTreeView { background-color: transparent; border: none !important; outline: none; font-size: 12px; }" 
         "QTreeView::item { height: 28px; color: #EEEEEE; padding-left: 0px; }" 
         "QTreeView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }" 
     ); 
@@ -887,7 +874,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         // [空白处菜单] 
         QMenu* newMenu = menu.addMenu("新建..."); 
         UiHelper::applyMenuStyle(newMenu); 
-        newMenu->addAction(UiHelper::getIcon("folder_filled", QColor("#EEEEEE")), "创建文件夹")->setData(ActionNewFolder); 
+        
+        QFileIconProvider provider;
+        newMenu->addAction(provider.icon(QFileIconProvider::Folder), "创建文件夹")->setData(ActionNewFolder); 
         newMenu->addAction(UiHelper::getIcon("text", QColor("#EEEEEE")), "创建 Markdown")->setData(ActionNewMd); 
         newMenu->addAction(UiHelper::getIcon("text", QColor("#EEEEEE")), "创建纯文本文件 (txt)")->setData(ActionNewTxt); 
  
@@ -1761,12 +1750,12 @@ void ContentPanel::updateLayersButtonState() {
 GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOptionViewItem& option) { 
     GridMetrics m; 
     int metadataH = 42; 
-    // imageBoxRect 对应整体卡片的显示区域（带圆角背景的部分）
-    m.imageBoxRect = option.rect.adjusted(5, 5, -5, -(metadataH + 5)); 
+    // 物理同步：imageBoxRect 填满 JustifiedView 分配的动态宽度
+    m.imageBoxRect = option.rect.adjusted(3, 3, -3, -(metadataH + 3)); 
     // metadataRect 位于图像框下方，背景透明
-    m.metadataRect = QRect(option.rect.left() + 5, m.imageBoxRect.bottom(), option.rect.width() - 10, metadataH);
+    m.metadataRect = QRect(option.rect.left() + 3, m.imageBoxRect.bottom(), option.rect.width() - 6, metadataH);
     
-    m.nameRect = QRect(m.metadataRect.left() + 4, m.metadataRect.top() + 4, m.metadataRect.width() - 8, 16);
+    m.nameRect = QRect(m.metadataRect.left() + 2, m.metadataRect.top() + 4, m.metadataRect.width() - 4, 16);
     m.ratingRect = QRect(m.metadataRect.left(), m.nameRect.bottom() + 2, m.metadataRect.width(), 16);
 
     m.starSize    = 14; 
@@ -1775,6 +1764,7 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     int banGap = 4; 
  
     int infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing); 
+    // 弹性居中：根据当前 item 宽度动态计算起始 X 坐标
     m.starsStartX = m.ratingRect.left() + (m.ratingRect.width() - infoTotalW) / 2 + banW + banGap; 
     m.banRect = QRect(m.starsStartX - banGap - banW, m.ratingRect.top() + (m.ratingRect.height() - banW) / 2, banW, banW); 
  

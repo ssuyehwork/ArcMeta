@@ -253,8 +253,11 @@ void NavPanel::fetchChildDirs(QStandardItem* parent) {
             results << DirInfo{info.fileName(), info.absoluteFilePath(), hasSub};
         }
 
+        // 2026-06-xx 按照视觉要求：检测目录下是否存在 .am_meta.json 以点亮 UI
+        bool hasJson = QFileInfo(path + "/.am_meta.json").exists();
+
         // 投递回主线程进行 UI 更新
-        QMetaObject::invokeMethod(qApp, [this, pIdx, results]() {
+        QMetaObject::invokeMethod(qApp, [this, pIdx, results, hasJson]() {
             if (!pIdx.isValid()) return;
             QStandardItem* safeParent = m_model->itemFromIndex(pIdx);
             if (!safeParent) return;
@@ -262,10 +265,32 @@ void NavPanel::fetchChildDirs(QStandardItem* parent) {
             safeParent->removeRows(0, safeParent->rowCount());
             
             for (const auto& info : results) {
+                // 2026-06-xx 物理修复：在导航面板应用“受控状态”视觉
+                // 逻辑：基于本地 JSON 判定录入状态与置顶状态
+                bool isManaged = false;
+                bool isPinned = false;
+                if (hasJson) {
+                    AmMetaJson amJson(QFileInfo(info.absPath).absolutePath().toStdWString());
+                    if (amJson.load()) {
+                        auto& items = amJson.items();
+                        std::wstring wName = info.name.toStdWString();
+                        if (items.count(wName)) {
+                            isManaged = true;
+                            isPinned = items.at(wName).pinned;
+                        }
+                    }
+                }
+
                 QIcon folderIcon = UiHelper::getFileIcon(info.absPath, 18);
                 QStandardItem* child = new QStandardItem(folderIcon, info.name);
                 child->setData(info.absPath, Qt::UserRole + 1);
                 
+                // 2026-06-xx 按照要求：注入状态角色。
+                // InDatabaseRole 用于对勾逻辑，IsLockedRole 用于置顶逻辑（两者在 Delegate 互斥）
+                // 物理修复：校准作用域，ItemRole 位于 ArcMeta 空间而非 ContentPanel 类
+                child->setData(isManaged, InDatabaseRole);
+                child->setData(isPinned, IsLockedRole);
+
                 if (info.hasSub) {
                     child->appendRow(new QStandardItem("Loading..."));
                 }

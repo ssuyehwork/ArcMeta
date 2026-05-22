@@ -106,6 +106,8 @@ set(SOURCES
     src/ui/FramelessDialog.h
     src/ui/JustifiedView.cpp
     src/ui/JustifiedView.h
+    src/ui/DropJustifiedView.cpp
+    src/ui/DropJustifiedView.h
     src/ui/ThumbnailDelegate.cpp
     src/ui/ThumbnailDelegate.h
     src/ui/LoadingWindow.cpp
