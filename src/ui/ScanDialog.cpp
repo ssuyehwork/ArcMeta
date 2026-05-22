@@ -477,13 +477,14 @@ ScanDialog::ScanDialog(QWidget* parent)
             QLabel* logoLabel = new QLabel();
             logoLabel->setFixedSize(16, 16);
             logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#FF8C00"), 16).pixmap(16, 16));
-            // 恢复高度并设为透明，物理分割线已独立
-            logoLabel->setStyleSheet("background: transparent;"); 
+            // 物理修正：显式清除所有边距以确保基准对齐
+            logoLabel->setStyleSheet("background: transparent; margin: 0px; padding: 0px;");
             titleLayout->insertWidget(0, logoLabel);
             
             QLabel* brandLabel = new QLabel("FERREX-META");
-            // 间距计算：margin-left 1px + spacing 4px = 5px (按照用户要求紧凑化)
-            brandLabel->setStyleSheet("background: transparent; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 1px;");
+            brandLabel->setObjectName("TitleBrandLabel");
+            // 物理修正：将 margin-left 设为 0px。配合 Layout Spacing 4px 达到 4px 左右的极紧凑视觉
+            brandLabel->setStyleSheet("background: transparent; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 0px; padding: 0px;");
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
@@ -611,7 +612,18 @@ ScanDialog::ScanDialog(QWidget* parent)
     setupUi();
 
     // --- 2026-06-xx 架构级 QSS：实现样式沙箱与物理隔离 ---
-    this->setStyleSheet(R"(
+    // 2026-06-xx 物理修正：将标题栏品牌标签样式移入此处，确保优先级并严格锁定 1px 边距 (+4px Spacing = 5px Gap)
+    this->setStyleSheet(this->styleSheet() + R"(
+        #TitleBrandLabel {
+            background: transparent;
+            color: #FF8C00;
+            font-size: 14px;
+            font-weight: bold;
+            letter-spacing: 1.5px;
+            margin-left: 1px;
+            padding: 0px;
+        }
+
         #DialogContainer {
             background-color: #1E1E1E;
             border: 1px solid #333333;
