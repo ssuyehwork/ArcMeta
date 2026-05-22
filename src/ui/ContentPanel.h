@@ -6,7 +6,6 @@
 #include <QStringList>
 #include <QTimer>
 #include <QWidget>
-#include <QAbstractItemView>
 #include <QListView>
 #include <QTreeView>
 #include <QStackedWidget>
@@ -57,8 +56,7 @@ enum ItemRole {
     IsEmptyRole,
     CategoryIdRole,
     InDatabaseRole,
-    PalettesRole,
-    HasThumbnailRole
+    PalettesRole
 };
 
 /**
@@ -150,10 +148,9 @@ public:
     QAbstractItemModel* model() const { return m_model; }
     QSortFilterProxyModel* getProxyModel() const { return m_proxyModel; }
     QModelIndexList getSelectedIndexes() const {
-        if (m_viewStack->currentWidget() == m_gridView && m_gridView) {
-            return m_gridView->selectionModel()->selectedIndexes();
-        }
-        return m_treeView->selectionModel()->selectedIndexes();
+        return (m_viewStack->currentWidget() == m_gridView) ? 
+                m_gridView->selectionModel()->selectedIndexes() : 
+                m_treeView->selectionModel()->selectedIndexes();
     }
 
     /**
@@ -214,7 +211,7 @@ private:
     QLabel* m_imagePreview = nullptr;
 
     // 视图组件
-    QAbstractItemView* m_gridView = nullptr; // 2026-06-xx 重构：支持 JustifiedView (继承自 QAbstractItemView)
+    QListView* m_gridView = nullptr;
     QTreeView* m_treeView = nullptr;
     QStandardItemModel* m_model = nullptr;
     QSortFilterProxyModel* m_proxyModel = nullptr;
@@ -315,15 +312,25 @@ public:
     using QStyledItemDelegate::QStyledItemDelegate;
 
     struct GridMetrics {
-        QRect imageBoxRect;  // 顶部图像框 (带背景和边框)
-        QRect metadataRect;  // 底部元数据展示区 (透明背景)
-        QRect nameRect;      // 文件名区域
-        QRect ratingRect;    // 评级星级区域
-        
+        QRect cardRect;      // 整个条目占用的总区域
+        QRect squareRect;    // 正方形背景区域（包含图标、评级、角标）
+        int iconDrawSize;
+        int ratingH;
+        int nameH;
+        int gap1;            // 图标与评级之间的间距
+        int gap2;            // 正方形区与名称之间的间距
+        int totalH;
+        int startY;
+        QRect iconRect;
+        int ratingY;
+        int infoTotalW;
+        int infoStartX;
+        QRect banRect;
+        int starsStartX;
         int starSize;
         int starSpacing;
-        int starsStartX;
-        QRect banRect;
+        int nameY;
+        QRect nameRect;
     };
 
     static GridMetrics calculateMetrics(const QStyleOptionViewItem& option);

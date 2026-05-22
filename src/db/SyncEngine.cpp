@@ -31,28 +31,9 @@
 namespace ArcMeta {
 
 /**
- * @brief 辅助函数：通过卷序列号查找驱动器号
- */
-static wchar_t getDriveLetterBySerial(const std::wstring& volSerial) {
-    DWORD drives = GetLogicalDrives();
-    for (int i = 0; i < 26; i++) {
-        if (drives & (1 << i)) {
-            wchar_t root[] = { (wchar_t)(L'A' + i), L':', L'\\', L'\0' };
-            DWORD serial = 0;
-            if (GetVolumeInformationW(root, nullptr, 0, &serial, nullptr, nullptr, nullptr, 0)) {
-                wchar_t buf[16]; swprintf(buf, 16, L"%08X", serial);
-                if (volSerial == buf) return L'A' + i;
-            }
-        }
-    }
-    return 0;
-}
-
-/**
  * @brief 通过 FID 反查物理路径 (Windows API)
- * 2026-06-xx 优化：支持外部传入卷句柄缓存以提升批量解析效率
  */
-static std::wstring resolveFidToPath(const std::string& fidStr, HANDLE hVolExternal = INVALID_HANDLE_VALUE) {
+static std::wstring resolveFidToPath(const std::string& fidStr) {
     size_t dashPos = fidStr.find('-');
     if (dashPos == std::string::npos) return L"";
 
@@ -60,20 +41,25 @@ static std::wstring resolveFidToPath(const std::string& fidStr, HANDLE hVolExter
     std::string hexId = fidStr.substr(dashPos + 1);
     if (hexId.length() != 32) return L"";
 
-    HANDLE hVol = hVolExternal;
-    bool ownHandle = false;
-
-    if (hVol == INVALID_HANDLE_VALUE) {
-        // 1. 寻找匹配卷序列号的驱动器
-        wchar_t driveLetter = getDriveLetterBySerial(volSerial);
-        if (driveLetter == 0) return L"";
-
-        // 2. 打开卷句柄
-        std::wstring driveRoot = std::wstring(1, driveLetter) + L":\\";
-        hVol = CreateFileW(driveRoot.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-        if (hVol == INVALID_HANDLE_VALUE) return L"";
-        ownHandle = true;
+    // 1. 寻找匹配卷序列号的驱动器
+    wchar_t driveLetter = 0;
+    DWORD drives = GetLogicalDrives();
+    for (int i = 0; i < 26; i++) {
+        if (drives & (1 << i)) {
+            wchar_t root[] = { (wchar_t)(L'A' + i), L':', L'\\', L'\0' };
+            DWORD serial = 0;
+            if (GetVolumeInformationW(root, nullptr, 0, &serial, nullptr, nullptr, nullptr, 0)) {
+                wchar_t buf[16]; swprintf(buf, 16, L"%08X", serial);
+                if (volSerial == buf) { driveLetter = L'A' + i; break; }
+            }
+        }
     }
+    if (driveLetter == 0) return L"";
+
+    // 2. 使用 OpenFileById 反查
+    std::wstring driveRoot = std::wstring(1, driveLetter) + L":\\";
+    HANDLE hVol = CreateFileW(driveRoot.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (hVol == INVALID_HANDLE_VALUE) return L"";
 
     FILE_ID_DESCRIPTOR desc;
     desc.dwSize = sizeof(desc);
@@ -89,7 +75,7 @@ static std::wstring resolveFidToPath(const std::string& fidStr, HANDLE hVolExter
     }
 
     HANDLE hFile = OpenFileById(hVol, &desc, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
-    if (ownHandle) CloseHandle(hVol);
+    CloseHandle(hVol);
 
     if (hFile == INVALID_HANDLE_VALUE) return L"";
 
@@ -129,34 +115,13 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
         
         qDebug() << "[Sync] 开始执行 FID 驱动型对账同步，任务数:" << pendingFids.size();
 
-        // 2026-06-xx 性能优化：卷句柄缓存 (Volume Handle Cache)
-        std::map<std::wstring, HANDLE> volCache;
-        auto getCachedVolHandle = [&](const std::string& fidStr) -> HANDLE {
-            size_t dashPos = fidStr.find('-');
-            if (dashPos == std::string::npos) return INVALID_HANDLE_VALUE;
-            std::wstring volSerial = QString::fromStdString(fidStr.substr(0, dashPos)).toStdWString();
-            
-            if (volCache.count(volSerial)) return volCache[volSerial];
-
-            // 寻找匹配卷序列号的驱动器
-            wchar_t driveLetter = getDriveLetterBySerial(volSerial);
-            if (driveLetter == 0) return INVALID_HANDLE_VALUE;
-
-            std::wstring driveRoot = std::wstring(1, driveLetter) + L":\\";
-            HANDLE hVol = CreateFileW(driveRoot.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-            if (hVol != INVALID_HANDLE_VALUE) {
-                volCache[volSerial] = hVol;
-            }
-            return hVol;
-        };
-
         for (const QString& fidItem : pendingFids) {
             std::wstring targetPath;
             std::string fidStr = fidItem.toStdString();
             
             // 1. 尝试解析 FID 为物理路径
             if (fidStr.find('-') != std::string::npos && fidStr.length() > 30) {
-                targetPath = resolveFidToPath(fidStr, getCachedVolHandle(fidStr));
+                targetPath = resolveFidToPath(fidStr);
             } else {
                 targetPath = fidItem.toStdWString(); // 路径回退模式
             }
@@ -210,11 +175,6 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
                 qDebug() << "[Sync] 找不到有效的 .am_meta.json，清理冗余任务:" << fidItem;
                 // 无法加载通常意味着文件不存在或损坏，不再阻塞同步
             }
-        }
-
-        // 清理卷句柄缓存
-        for (auto const& [serial, handle] : volCache) {
-            if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
         }
 
         // 3. 立即验证并原子化写回日志 (仅移除已成功的 FID)

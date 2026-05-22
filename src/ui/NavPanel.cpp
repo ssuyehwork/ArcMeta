@@ -30,10 +30,8 @@ NavPanel::NavPanel(QWidget* parent)
     // 设置面板宽度（遵循文档：导航面板 230px）
     setMinimumWidth(230);
     
-    // 核心修正：显式设置边框和背景，确保“物理切割感”
-    setFrameShape(QFrame::StyledPanel);
-    setLineWidth(1);
-    setStyleSheet("#ListContainer { border: 1px solid #333333; background-color: #1E1E1E; color: #EEEEEE; }");
+    // 核心修正：移除宽泛的 QWidget QSS，防止其屏蔽 MainWindow 赋予的 ID 边框样式
+    setStyleSheet("color: #EEEEEE;");
 
     m_mainLayout = new QVBoxLayout(this);
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
@@ -52,18 +50,18 @@ void NavPanel::deferredInit() {
         return;
     }
 
-    // 1. 桌面入口 (使用原生系统图标)
+    // 1. 新增：桌面入口 (使用 SVG 语义图标替代原生图标)
     QString desktopPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
-    QFileIconProvider provider;
-    QIcon desktopIcon = provider.icon(QFileInfo(desktopPath));
+    QIcon desktopIcon = UiHelper::getIcon("home", QColor("#3498db"), 18);
     QStandardItem* desktopItem = new QStandardItem(desktopIcon, "桌面");
     desktopItem->setData(desktopPath, Qt::UserRole + 1);
     // 增加虚拟子项以便显示展开箭头
     desktopItem->appendRow(new QStandardItem("Loading..."));
     m_model->appendRow(desktopItem);
 
-    // 2. 此电脑入口 (使用原生系统图标)
-    QIcon computerIcon = provider.icon(QFileIconProvider::Computer);
+    // 2. 新增：此电脑入口 (使用 SVG 语义图标替代原生图标)
+    // 2026-03-xx 物理加速：先展示文字项，图标通过延时加载或在主线程空闲时补全，防止磁盘休眠导致启动假死
+    QIcon computerIcon = UiHelper::getIcon("monitor", QColor("#3498db"), 18);
     QStandardItem* computerItem = new QStandardItem(computerIcon, "此电脑");
     computerItem->setData("computer://", Qt::UserRole + 1);
     m_model->appendRow(computerItem);
@@ -79,12 +77,12 @@ void NavPanel::deferredInit() {
     }
 
     // 2026-03-xx 线程安全修复：图标提取必须在主线程执行。
+    // 为了平衡性能与安全，图标提取在主线程分批次（Idle 状态）补全。
     QTimer::singleShot(0, [this, drives]() {
-        qDebug() << "[NavPanel] 开始异步填充磁盘图标 (回归原生)...";
-        QFileIconProvider provider;
+        qDebug() << "[NavPanel] 开始异步填充磁盘图标 (SVG 版)...";
         for (int i = 0; i < drives.size(); ++i) {
             if (i + 2 < m_model->rowCount()) {
-                QIcon driveIcon = provider.icon(drives[i]);
+                QIcon driveIcon = UiHelper::getIcon("hard_drive", QColor("#95a5a6"), 18);
                 m_model->item(i + 2)->setIcon(driveIcon);
             }
         }
@@ -255,11 +253,8 @@ void NavPanel::fetchChildDirs(QStandardItem* parent) {
             results << DirInfo{info.fileName(), info.absoluteFilePath(), hasSub};
         }
 
-        // 2026-06-xx 按照视觉要求：检测目录下是否存在 .am_meta.json 以点亮 UI
-        bool hasJson = QFileInfo(path + "/.am_meta.json").exists();
-
         // 投递回主线程进行 UI 更新
-        QMetaObject::invokeMethod(qApp, [this, pIdx, results, hasJson]() {
+        QMetaObject::invokeMethod(qApp, [this, pIdx, results]() {
             if (!pIdx.isValid()) return;
             QStandardItem* safeParent = m_model->itemFromIndex(pIdx);
             if (!safeParent) return;
@@ -267,32 +262,10 @@ void NavPanel::fetchChildDirs(QStandardItem* parent) {
             safeParent->removeRows(0, safeParent->rowCount());
             
             for (const auto& info : results) {
-                // 2026-06-xx 物理修复：在导航面板应用“受控状态”视觉
-                // 逻辑：基于本地 JSON 判定录入状态与置顶状态
-                bool isManaged = false;
-                bool isPinned = false;
-                if (hasJson) {
-                    AmMetaJson amJson(QFileInfo(info.absPath).absolutePath().toStdWString());
-                    if (amJson.load()) {
-                        auto& items = amJson.items();
-                        std::wstring wName = info.name.toStdWString();
-                        if (items.count(wName)) {
-                            isManaged = true;
-                            isPinned = items.at(wName).pinned;
-                        }
-                    }
-                }
-
                 QIcon folderIcon = UiHelper::getFileIcon(info.absPath, 18);
                 QStandardItem* child = new QStandardItem(folderIcon, info.name);
                 child->setData(info.absPath, Qt::UserRole + 1);
                 
-                // 2026-06-xx 按照要求：注入状态角色。
-                // InDatabaseRole 用于对勾逻辑，IsLockedRole 用于置顶逻辑（两者在 Delegate 互斥）
-                // 物理修复：校准作用域，ItemRole 位于 ArcMeta 空间而非 ContentPanel 类
-                child->setData(isManaged, InDatabaseRole);
-                child->setData(isPinned, IsLockedRole);
-
                 if (info.hasSub) {
                     child->appendRow(new QStandardItem("Loading..."));
                 }

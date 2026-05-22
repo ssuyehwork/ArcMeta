@@ -13,7 +13,6 @@
 namespace ArcMeta {
 
 JustifiedView::JustifiedView(QWidget* parent) : QAbstractItemView(parent) {
-    setFrameShape(QFrame::NoFrame);
     horizontalScrollBar()->setRange(0, 0);
     verticalScrollBar()->setSingleStep(20);
     
@@ -170,7 +169,7 @@ void JustifiedView::mouseDoubleClickEvent(QMouseEvent* event) {
         return;
     }
 
-    const int textHeight = 42;
+    const int textHeight = 36;
     QRect itemRect = visualRect(idx);
     // 文字区域 = 卡片底部 textHeight 像素
     QRect textRect(itemRect.left(), itemRect.bottom() - textHeight, itemRect.width(), textHeight);
@@ -296,7 +295,7 @@ void JustifiedView::doLayout() {
         if (actualHeight > m_targetRowHeight * 1.5) actualHeight = qRound(m_targetRowHeight * 1.5);
 
         int currentX = margin;
-        const int textHeight = 42;
+        const int textHeight = 36;
         for (int j = 0; j < numInRow; ++j) {
             int itemIdx = rowStart + j;
             int itemWidth = qRound(aspectRatios[j] * actualHeight);

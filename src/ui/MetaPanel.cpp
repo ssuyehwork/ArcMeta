@@ -282,9 +282,7 @@ void ColorPickerWidget::mousePressEvent(QMouseEvent* e) {
 // --- MetaPanel ---
 MetaPanel::MetaPanel(QWidget* parent) : QFrame(parent) {
     setObjectName("MetadataContainer"); setAttribute(Qt::WA_StyledBackground, true); setMinimumWidth(230); 
-    setFrameShape(QFrame::StyledPanel);
-    setLineWidth(1);
-    setStyleSheet("#MetadataContainer { border: 1px solid #333333; background-color: #1E1E1E; color: #EEEEEE; }");
+    setStyleSheet("color: #EEEEEE;");
     m_mainLayout = new QVBoxLayout(this); m_mainLayout->setContentsMargins(0, 0, 0, 0); m_mainLayout->setSpacing(0);
     initUi();
 }

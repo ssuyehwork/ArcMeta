@@ -5,7 +5,7 @@
 #include "SvgIcons.h" 
 #include "TreeItemDelegate.h" 
 #include "DropTreeView.h" 
-#include "DropJustifiedView.h" 
+#include "DropListView.h" 
 #include "ToolTipOverlay.h" 
  
 #include <QVBoxLayout> 
@@ -212,9 +212,7 @@ ContentPanel::ContentPanel(QWidget* parent)
     setObjectName("EditorContainer"); 
     setAttribute(Qt::WA_StyledBackground, true); 
     setMinimumWidth(230); 
-    setFrameShape(QFrame::StyledPanel);
-    setLineWidth(1);
-    setStyleSheet("#EditorContainer { border: 1px solid #333333; background-color: #1E1E1E; }"); 
+    setStyleSheet("color: #EEEEEE;"); 
  
     m_mainLayout = new QVBoxLayout(this); 
     m_mainLayout->setContentsMargins(0, 0, 0, 0); 
@@ -276,7 +274,6 @@ ContentPanel::ContentPanel(QWidget* parent)
             nameItem->setData(data.meta.encrypted, EncryptedRole); 
             nameItem->setData(data.meta.tags, TagsRole); 
             nameItem->setData(data.isEmpty, IsEmptyRole); 
-            nameItem->setData(false, HasThumbnailRole);
             // 2026-06-xx 按照要求：注入物理色板，确保多色统计与过滤生效
             QVariantList palList;
             for (const auto& p : data.meta.palettes) {
@@ -325,42 +322,35 @@ ContentPanel::ContentPanel(QWidget* parent)
                 if (pIdx.isValid()) { 
                     QFileInfo info(path); 
                     QString ext = info.suffix().toLower(); 
-                    QPixmap thumb; 
-                    bool hasThumb = false;
+                    QIcon icon; 
  
                     // 2026-05-07 按照用户要求：SVG文件直接渲染显示实际内容 
                     if (ext.toLower() == "svg") { 
                         // 直接渲染SVG文件内容 
                         QSvgRenderer renderer(path); 
                         if (renderer.isValid()) { 
-                            thumb = QPixmap(256, 256); 
-                            thumb.fill(Qt::transparent); 
-                            QPainter painter(&thumb); 
+                            QPixmap svgPixmap(96, 96); 
+                            svgPixmap.fill(Qt::transparent); 
+                            QPainter painter(&svgPixmap); 
                             renderer.render(&painter); 
                             painter.end(); 
-                            hasThumb = true;
+                            icon = QIcon(svgPixmap); 
                         } 
                     } else if (UiHelper::isGraphicsFile(ext)) { 
                         // 2026-04-11 按照用户要求：凡是图片/图形格式，物理强制提取内容缩略图 
-                        // 物理修正：停止强制垂直翻转。现代 Qt::fromHBITMAP 已能正确处理 DIB 步长，手动 flipped 导致了画面倒置。
-                        thumb = UiHelper::getShellThumbnail(path, 256, false); 
+                        // 2026-04-11 按照用户要求：专属注入 true 参数，只对走缓存的小列表图执行垂直翻转修正 
+                        QPixmap thumb = UiHelper::getShellThumbnail(path, 96, true); 
                         if (!thumb.isNull()) { 
-                            hasThumb = true;
+                            icon = QIcon(thumb); 
                         } 
                     } 
  
-                    if (hasThumb) {
-                        m_model->setData(pIdx, thumb, Qt::DecorationRole);
-                        m_model->setData(pIdx, true, HasThumbnailRole);
-                        // 2026-06-xx 物理注入宽高比角色，触发 JustifiedView 弹性重排
-                        double ar = (double)thumb.width() / thumb.height();
-                        m_model->setData(pIdx, ar, Qt::UserRole + 2);
-                    } else {
-                        // 降级保护：如果提取失败或非图形格式，直接指向 UiHelper::getFileIcon 获取原生图标
-                        QIcon icon = UiHelper::getFileIcon(path, 128); 
-                        m_model->setData(pIdx, icon, Qt::DecorationRole); 
-                        m_model->setData(pIdx, false, HasThumbnailRole);
-                    }
+                    // 降级保护：如果提取失败或非图形格式，直接指向 UiHelper::getFileIcon 获取原生图标
+                    if (icon.isNull()) { 
+                        icon = UiHelper::getFileIcon(path, 128); 
+                    } 
+ 
+                    m_model->setData(pIdx, icon, Qt::DecorationRole); 
                 } 
                 m_pathToIndexMap.remove(path); 
             } 
@@ -440,9 +430,6 @@ void ContentPanel::initUi() {
     m_mainLayout->addWidget(titleBar); 
  
     m_viewStack = new QStackedWidget(this); 
-    m_viewStack->setFrameShape(QFrame::NoFrame);
-    m_viewStack->setLineWidth(0);
-    m_viewStack->setStyleSheet("QStackedWidget { border: none; background-color: #1E1E1E; }");
      
     initGridView(); 
     initListView(); 
@@ -451,7 +438,12 @@ void ContentPanel::initUi() {
     m_viewStack->addWidget(m_treeView); 
     m_viewStack->setCurrentWidget(m_gridView); 
  
-    m_mainLayout->addWidget(m_viewStack, 1); 
+    QVBoxLayout* contentWrapper = new QVBoxLayout(); 
+    contentWrapper->setContentsMargins(4, 4, 4, 4); // 2026-05-08 按照用户要求：增加到4px使卡片到容器边缘达到10px
+    contentWrapper->setSpacing(0); 
+    contentWrapper->addWidget(m_viewStack); 
+     
+    m_mainLayout->addLayout(contentWrapper); 
  
     m_textPreview = new QTextBrowser(this); 
     m_textPreview->setStyleSheet("background-color: #1E1E1E; color: #EEEEEE; border: none; padding: 20px; font-family: 'Segoe UI'; font-size: 14px;"); 
@@ -482,18 +474,25 @@ void ContentPanel::updateStatusBarStats() {
 }
 
 void ContentPanel::updateGridSize() {
-    // 2026-06-xx V3 重构：采用 JustifiedView 的“填充铺满”布局
-    m_zoomLevel = qBound(56, m_zoomLevel, 256); 
+    // 2026-06-05 按照用户要求：彻底重构为正方形布局，名称外置
+    // 2026-06-05 按照要求：将最小值锁定为 56
+    m_zoomLevel = qBound(56, m_zoomLevel, 128);
+    m_gridView->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
     
-    auto* gView = qobject_cast<JustifiedView*>(m_gridView);
-    if (gView) {
-        gView->setTargetRowHeight(m_zoomLevel);
-    }
+    int side = m_zoomLevel + 46; // 正方形边长
+    int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
+    int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
+    int gap = 6;                // 间距归一化
+    
+    // 总高度 = 正方形边长 + 间距1 + 评分高度 + 间距2 + 名称高度 + 底部缓冲
+    int totalH = side + gap + ratingH + gap + nameH + 8;
+    m_gridView->setGridSize(QSize(side, totalH));
 
+    // 2026-06-05 按照要求：持久化保存当前的缩放级别
     QSettings settings("ArcMeta团队", "ArcMeta");
     settings.setValue("UI/GridZoomLevel", m_zoomLevel);
 
-    qDebug() << "[GridSize V3] Justified RowHeight:" << m_zoomLevel;
+    qDebug() << "[GridSize] Zoom:" << m_zoomLevel << "Square:" << side << "TotalH:" << totalH;
 } 
  
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 
@@ -508,19 +507,17 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         ToolTipOverlay::hideTip(); 
     } 
  
-    if (m_gridView) {
-        auto* gView = qobject_cast<JustifiedView*>(m_gridView);
-        if ((obj == gView || (gView && obj == gView->viewport())) && event->type() == QEvent::Wheel) { 
-            QWheelEvent* wEvent = reinterpret_cast<QWheelEvent*>(event); 
-            if (wEvent->modifiers() & Qt::ControlModifier) { 
-                int delta = wEvent->angleDelta().y(); 
-                if (delta > 0) m_zoomLevel += 8; 
-                else m_zoomLevel -= 8; 
-                updateGridSize(); 
-                return true; 
-            } 
-        }
-    }
+    if ((obj == m_gridView || obj == m_gridView->viewport()) && event->type() == QEvent::Wheel) { 
+        // 2026-05-25 物理修复：改用 reinterpret_cast 避开 static_cast 的类型推导逻辑错误 
+        QWheelEvent* wEvent = reinterpret_cast<QWheelEvent*>(event); 
+        if (wEvent->modifiers() & Qt::ControlModifier) { 
+            int delta = wEvent->angleDelta().y(); 
+            if (delta > 0) m_zoomLevel += 8; 
+            else m_zoomLevel -= 8; 
+            updateGridSize(); 
+            return true; 
+        } 
+    } 
  
     if (event->type() == QEvent::KeyPress) { 
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 到 QKeyEvent 的 static_cast 歧义 
@@ -603,8 +600,8 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                             m_proxyModel->setData(idx, colorValue, ColorRole); 
  
                             // 2026-06-05 按照要求：快捷键设置颜色后立即重渲染图标，实现视觉同步 
-                            QIcon nativeIcon = UiHelper::getFileIcon(path, 128); 
-                            m_proxyModel->setData(idx, nativeIcon, Qt::DecorationRole); 
+                            QIcon coloredIcon = UiHelper::getFileIcon(path, 128); 
+                            m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
                         } 
                     } 
                 } 
@@ -718,28 +715,44 @@ void ContentPanel::setViewMode(ViewMode mode) {
 } 
  
 void ContentPanel::initGridView() { 
-    auto* gView = new DropJustifiedView(this); 
-    m_gridView = gView;
-    gView->setFrameShape(QFrame::NoFrame);
-    gView->setLineWidth(0);
-    gView->setStyleSheet("QAbstractItemView { border: none; outline: none; background-color: #1E1E1E; }");
-    gView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
-    gView->setContextMenuPolicy(Qt::CustomContextMenu); 
-    gView->setEditTriggers(QAbstractItemView::EditKeyPressed); 
+    m_gridView = new DropListView(this); 
+    m_gridView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
+    m_gridView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
+    m_gridView->setViewMode(QListView::IconMode); 
+    m_gridView->setMovement(QListView::Static); 
+    m_gridView->setSpacing(8); 
+    m_gridView->setResizeMode(QListView::Adjust); 
+    m_gridView->setWrapping(true); 
+    m_gridView->setIconSize(QSize(96, 96)); 
+    m_gridView->setSpacing(0); 
+    m_gridView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
+    m_gridView->setContextMenuPolicy(Qt::CustomContextMenu); 
  
-    gView->setModel(m_proxyModel); 
-    gView->setItemDelegate(new GridItemDelegate(this)); 
-    gView->viewport()->installEventFilter(this); 
+    m_gridView->setDragEnabled(true); 
+    m_gridView->setDragDropMode(QAbstractItemView::DragOnly); 
  
-    connect(gView, &JustifiedView::doubleClicked, this, &ContentPanel::onDoubleClicked); 
-    connect(gView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
-    connect(gView, &JustifiedView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
+    // 2026-06-xx 物理修复：移除 SelectedClicked，防止选中卡片时意外触发重命名逻辑
+    m_gridView->setEditTriggers(QAbstractItemView::EditKeyPressed); 
+ 
+    m_gridView->setModel(m_proxyModel); 
+    m_gridView->setItemDelegate(new GridItemDelegate(this)); 
+    m_gridView->viewport()->installEventFilter(this); 
+ 
+    connect(m_gridView, &QListView::doubleClicked, this, &ContentPanel::onDoubleClicked); 
+ 
+    m_gridView->setStyleSheet( 
+        "QListView { background-color: transparent; border: none; outline: none; }" 
+        "QListView::item { background: transparent; }" 
+        "QListView::item:selected { background-color: rgba(55, 138, 221, 0.2); border-radius: 8px; }" 
+        "QListView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }" 
+    ); 
+ 
+    connect(m_gridView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
+    connect(m_gridView, &QListView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
 } 
  
 void ContentPanel::initListView() { 
     m_treeView = new DropTreeView(this); 
-    m_treeView->setFrameShape(QFrame::NoFrame);
-    m_treeView->setLineWidth(0);
     m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
     m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
     m_treeView->setSortingEnabled(true); 
@@ -758,7 +771,7 @@ void ContentPanel::initListView() {
     m_treeView->viewport()->installEventFilter(this); 
  
     m_treeView->setStyleSheet( 
-        "QTreeView { background-color: transparent; border: none !important; outline: none; font-size: 12px; }" 
+        "QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
         "QTreeView::item { height: 28px; color: #EEEEEE; padding-left: 0px; }" 
         "QTreeView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }" 
     ); 
@@ -874,9 +887,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         // [空白处菜单] 
         QMenu* newMenu = menu.addMenu("新建..."); 
         UiHelper::applyMenuStyle(newMenu); 
-        
-        QFileIconProvider provider;
-        newMenu->addAction(provider.icon(QFileIconProvider::Folder), "创建文件夹")->setData(ActionNewFolder); 
+        newMenu->addAction(UiHelper::getIcon("folder_filled", QColor("#EEEEEE")), "创建文件夹")->setData(ActionNewFolder); 
         newMenu->addAction(UiHelper::getIcon("text", QColor("#EEEEEE")), "创建 Markdown")->setData(ActionNewMd); 
         newMenu->addAction(UiHelper::getIcon("text", QColor("#EEEEEE")), "创建纯文本文件 (txt)")->setData(ActionNewTxt); 
  
@@ -950,23 +961,18 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     MetadataManager::instance().setColor(itemPath.toStdWString(), colorName.toStdWString()); 
                     m_proxyModel->setData(idx, colorName, ColorRole); 
  
-                    // 2026-06-05 按照要求：设置颜色后立即重新生成并应用缩略图/图标，实现视觉同步 
-                    QPixmap thumb;
-                    bool hasThumb = false;
+                    // 2026-06-05 按照要求：设置颜色后立即重新生成并应用图标，实现视觉同步 
+                    // 2026-05-17 逻辑修复：针对图像格式，必须优先尝试提取缩略图，防止图标覆盖内容
+                    QIcon coloredIcon;
                     QString ext = QFileInfo(itemPath).suffix().toLower();
                     if (UiHelper::isGraphicsFile(ext)) {
-                        thumb = UiHelper::getShellThumbnail(itemPath, 256, false);
-                        if (!thumb.isNull()) hasThumb = true;
+                        QPixmap thumb = UiHelper::getShellThumbnail(itemPath, 128, false);
+                        if (!thumb.isNull()) coloredIcon = QIcon(thumb);
                     }
-
-                    if (hasThumb) {
-                        m_proxyModel->setData(idx, thumb, Qt::DecorationRole);
-                        m_proxyModel->setData(idx, true, HasThumbnailRole);
-                    } else {
-                        QIcon icon = UiHelper::getFileIcon(itemPath, 128);
-                        m_proxyModel->setData(idx, icon, Qt::DecorationRole);
-                        m_proxyModel->setData(idx, false, HasThumbnailRole);
+                    if (coloredIcon.isNull()) {
+                        coloredIcon = UiHelper::getFileIcon(itemPath, 128);
                     }
+                    m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
                 } 
             } 
             break; 
@@ -1002,22 +1008,16 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                 }
                                 item->setData(palList, PalettesRole);
                                 
-                                QPixmap thumb;
-                                bool hasThumb = false;
+                                QIcon coloredIcon;
                                 QString suffix = QFileInfo(path).suffix().toLower();
                                 if (UiHelper::isGraphicsFile(suffix)) {
-                                    thumb = UiHelper::getShellThumbnail(path, 256, false);
-                                    if (!thumb.isNull()) hasThumb = true;
+                                    QPixmap thumb = UiHelper::getShellThumbnail(path, 128, false);
+                                    if (!thumb.isNull()) coloredIcon = QIcon(thumb);
                                 }
-
-                                if (hasThumb) {
-                                    item->setData(thumb, Qt::DecorationRole);
-                                    item->setData(true, HasThumbnailRole);
-                                } else {
-                                    QIcon icon = UiHelper::getFileIcon(path, 128);
-                                    item->setData(icon, Qt::DecorationRole);
-                                    item->setData(false, HasThumbnailRole);
+                                if (coloredIcon.isNull()) {
+                                    coloredIcon = UiHelper::getFileIcon(path, 128);
                                 }
+                                item->setData(coloredIcon, Qt::DecorationRole);
                                 break;
                             }
                         }
@@ -1241,6 +1241,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     if (path.isEmpty() || path == "computer://") { 
         m_currentPath = "computer://"; 
         updateLayersButtonState(); 
+         
+        // 2026-06-xx 物理清理：移除 prefetchDirectory 调用 
  
         const auto drives = QDir::drives(); 
         QMap<int, int> rc; QMap<QString, int> cc, tc, tyc, cdc, mdc; 
@@ -1260,7 +1262,6 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             item->setData(QString::fromStdWString(rm.color), ColorRole); 
             item->setData(rm.pinned, PinnedRole); // 逻辑还原：使用 PinnedRole 存储原始置顶状态 
             item->setData(rm.pinned, IsLockedRole); // 视觉还原：IsLockedRole 负责 UI 渲染 
-            item->setData(false, HasThumbnailRole);
  
             QList<QStandardItem*> row; 
             row << item << new QStandardItem("-") << new QStandardItem("磁盘分区") << new QStandardItem("-"); 
@@ -1500,7 +1501,6 @@ void ContentPanel::loadCategory(int categoryId) {
             item->setData("category", TypeRole); 
             item->setData(cat.id, CategoryIdRole); 
             item->setData(color, ColorRole); 
-            item->setData(false, HasThumbnailRole);
              
             row << item << new QStandardItem("-") << new QStandardItem("子分类") << new QStandardItem("-"); 
             m_model->appendRow(row); 
@@ -1539,7 +1539,6 @@ void ContentPanel::loadCategory(int categoryId) {
             nameItem->setData(rm.pinned, PinnedRole); 
             nameItem->setData(rm.pinned, IsLockedRole); 
             nameItem->setData(rm.tags, TagsRole); 
-            nameItem->setData(false, HasThumbnailRole);
             // 2026-06-xx 注入物理色板
             QVariantList palList;
             for (const auto& p : rm.palettes) {
@@ -1634,7 +1633,6 @@ void ContentPanel::loadPaths(const QStringList& paths) {
         nameItem->setData(rm.pinned, PinnedRole); 
         nameItem->setData(rm.pinned, IsLockedRole); 
         nameItem->setData(rm.tags, TagsRole); 
-        nameItem->setData(false, HasThumbnailRole);
         // 2026-06-xx 注入物理色板
         QVariantList palList;
         for (const auto& p : rm.palettes) {
@@ -1747,24 +1745,42 @@ void ContentPanel::updateLayersButtonState() {
  
 GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOptionViewItem& option) { 
     GridMetrics m; 
-    int metadataH = 42; 
-    // 物理同步：imageBoxRect 填满 JustifiedView 分配的动态宽度
-    m.imageBoxRect = option.rect.adjusted(3, 3, -3, -(metadataH + 3)); 
-    // metadataRect 位于图像框下方，背景透明
-    m.metadataRect = QRect(option.rect.left() + 3, m.imageBoxRect.bottom(), option.rect.width() - 6, metadataH);
+    // cardRect 为条目占用的总区域 
+    m.cardRect = option.rect.adjusted(5, 5, -5, -5); // 2026-05-08 按照用户要求：增加到5px使卡片之间间距达到10px 
+    double zoom = (double)option.decorationSize.width(); 
+ 
+    // 2026-06-05 按照用户要求：定义正方形主体区域 
+    int side = m.cardRect.width(); 
+    m.squareRect = QRect(m.cardRect.left(), m.cardRect.top(), side, side); 
+ 
+    m.iconDrawSize = (int)(zoom * 0.7); 
+    m.ratingH      = 16;  // 2026-05-17 物理锁定评分区高度 
+    m.nameH        = (int)(zoom * 0.25); 
+ 
+    // 2026-05-17 按照用户要求：主图标在正方形内垂直居中
+    m.iconRect = QRect(m.squareRect.left() + (m.squareRect.width() - m.iconDrawSize) / 2, 
+                       m.squareRect.top() + (m.squareRect.height() - m.iconDrawSize) / 2, 
+                       m.iconDrawSize, m.iconDrawSize); 
     
-    m.nameRect = QRect(m.metadataRect.left() + 2, m.metadataRect.top() + 4, m.metadataRect.width() - 4, 16);
-    m.ratingRect = QRect(m.metadataRect.left(), m.nameRect.bottom() + 2, m.metadataRect.width(), 16);
-
-    m.starSize    = 14; 
+    // 2026-05-17 物理布局重构：星级区置于正方形下方
+    // 2026-06-xx 按照用户要求：下移 2 像素（从 +6 改为 +8）
+    m.ratingY = m.squareRect.bottom() + 8; 
+ 
+    m.starSize    = 14; // 2026-05-17 尺寸微调以匹配外部布局
     m.starSpacing = 2;   
-    int banW = 12;      
+    int banW = 12;      // 2026-06-xx 物理对齐：将禁止图标缩减至 12px，使其与星级在视觉权重上保持一致
     int banGap = 4; 
  
-    int infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing); 
-    // 弹性居中：根据当前 item 宽度动态计算起始 X 坐标
-    m.starsStartX = m.ratingRect.left() + (m.ratingRect.width() - infoTotalW) / 2 + banW + banGap; 
-    m.banRect = QRect(m.starsStartX - banGap - banW, m.ratingRect.top() + (m.ratingRect.height() - banW) / 2, banW, banW); 
+    m.infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing); 
+    m.infoStartX = m.squareRect.left() + (m.squareRect.width() - m.infoTotalW) / 2; 
+ 
+    m.banRect = QRect(m.infoStartX, m.ratingY + (m.ratingH - banW) / 2, banW, banW); 
+    m.starsStartX = m.infoStartX + banW + banGap; 
+     
+    // 名称区紧贴评分区下方 
+    // 2026-06-xx 按照要求：第三次向上偏移 2 像素以实现零间距极致排版（从 +2 调整为 +0）
+    m.nameY = m.ratingY + m.ratingH + 0; 
+    m.nameRect = QRect(m.cardRect.left(), m.nameY, m.cardRect.width(), m.nameH); 
  
     return m; 
 } 
@@ -1772,111 +1788,120 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
 void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const { 
     painter->save(); 
     painter->setRenderHint(QPainter::Antialiasing); 
-    painter->setRenderHint(QPainter::SmoothPixmapTransform);
  
     GridMetrics m = calculateMetrics(option); 
     bool isSelected = (option.state & QStyle::State_Selected); 
     bool isHovered = (option.state & QStyle::State_MouseOver); 
-    
-    // 1. 建立图像框裁剪路径并绘制背景
-    painter->save();
-    QPainterPath clipPath;
-    clipPath.addRoundedRect(m.imageBoxRect, 6, 6);
-    painter->setClipPath(clipPath);
-
-    bool hasThumb = index.data(HasThumbnailRole).toBool();
-    if (hasThumb) {
-        QPixmap thumb = index.data(Qt::DecorationRole).value<QPixmap>();
-        if (!thumb.isNull()) {
-            // 物理对齐：充满策略 KeepAspectRatioByExpanding
-            QPixmap scaled = thumb.scaled(m.imageBoxRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-            int x = m.imageBoxRect.center().x() - scaled.width() / 2;
-            int y = m.imageBoxRect.center().y() - scaled.height() / 2;
-            painter->drawPixmap(x, y, scaled);
-        } else {
-            painter->fillRect(m.imageBoxRect, QColor("#2D2D2D"));
-        }
-    } else {
-        painter->fillRect(m.imageBoxRect, QColor("#2D2D2D"));
-        QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
-        QPoint center = m.imageBoxRect.center();
-        if (!icon.isNull())
-            icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
-    }
-    painter->restore(); // 释放裁剪区
-
-    // 2. 绘制选中边框 (在图像框外周)
-    if (isSelected) {
-        painter->save();
-        painter->setPen(QPen(QColor("#3498db"), 2));
-        painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(m.imageBoxRect, 6, 6);
-        painter->restore();
-    } else if (isHovered) {
-        painter->save();
-        painter->setPen(QPen(QColor("#444444"), 1));
-        painter->drawRoundedRect(m.imageBoxRect, 6, 6);
-        painter->restore();
-    }
-
-    // 3. 状态位图标与角标 (绘制在图像框上方)
+     
+    // 2026-06-05 按照用户要求：背景框仅限正方形区域，名称外置 
+    QColor cardBg = isSelected ? QColor("#282828") : (isHovered ? QColor("#2A2A2A") : QColor("#2D2D2D")); 
+    painter->setPen(isSelected ? QPen(QColor("#3498db"), 2) : QPen(QColor("#333333"), 1)); 
+    painter->setBrush(cardBg); 
+    painter->drawRoundedRect(m.squareRect, 8, 8); 
+ 
+    // [内容区绘制] - 均在正方形内 
+    // 1. 状态位图标绘制 (置顶 vs. 已录入 互斥) 
+    // 2026-06-xx 物理修复：校准 ItemRole 作用域，确保 GridItemDelegate 编译通过 
     bool isPinned = index.data(IsLockedRole).toBool(); 
     bool isManaged = index.data(InDatabaseRole).toBool(); 
+     
     if (isPinned || isManaged) { 
-        QRect statusRect(m.imageBoxRect.right() - 22, m.imageBoxRect.top() + 8, 16, 16); 
+        QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16); 
         if (isPinned) { 
+            // 置顶优先 
             QIcon pinIcon = UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16); 
             pinIcon.paint(painter, statusRect); 
         } else { 
+            // 已录入但未置顶，显示绿对勾 
             QIcon checkIcon = UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16); 
             checkIcon.paint(painter, statusRect); 
         } 
     } 
  
+    // 2. 扩展名角标 
     QString path = index.data(PathRole).toString(); 
     QFileInfo info(path); 
     QString ext = info.isDir() ? "DIR" : info.suffix().toUpper(); 
     if (ext.isEmpty()) ext = "FILE"; 
     QColor badgeColor = UiHelper::getExtensionColor(ext); 
-    QRect extRect(m.imageBoxRect.left() + 8, m.imageBoxRect.top() + 8, 36, 18); 
+ 
+    QRect extRect(m.squareRect.left() + 8, m.squareRect.top() + 8, 36, 18); 
     painter->setPen(Qt::NoPen); 
     painter->setBrush(badgeColor); 
     painter->drawRoundedRect(extRect, 2, 2); 
     painter->setPen(QColor("#FFFFFF")); 
     QFont extFont = painter->font(); 
-    extFont.setPointSize(8); extFont.setBold(true); 
+    extFont.setPointSize(8); 
+    extFont.setBold(true); 
     painter->setFont(extFont); 
     painter->drawText(extRect, Qt::AlignCenter, ext); 
  
-    // 4. 元数据绘制 (文件名与星级)
-    QString name = index.data(Qt::DisplayRole).toString(); 
-    painter->setPen(isSelected ? QColor("#3498db") : QColor("#EEEEEE")); 
-    if (!isSelected && !index.data(InDatabaseRole).toBool()) { 
-        painter->setPen(QColor(238, 238, 238, 120)); 
-    } 
-    QFont textFont = painter->font(); 
-    textFont.setPointSize(8); textFont.setBold(false); 
-    painter->setFont(textFont); 
-    QString elidedName = option.fontMetrics.elidedText(name, Qt::ElideMiddle, m.nameRect.width()); 
-    painter->drawText(m.nameRect, Qt::AlignCenter, elidedName); 
-
+    // 3. 主图标 
+    QIcon icon = index.data(Qt::DecorationRole).value<QIcon>(); 
+    icon.paint(painter, m.iconRect); 
+ 
+    // 4. 评级星级 
     int rating = index.data(RatingRole).toInt(); 
-    if ((rating > 0) || isSelected) { 
-        QIcon banIcon = UiHelper::getIcon("no_color", QColor("#B0B0B0"), 12); 
+     
+    // 2026-xx-xx 按照最新要求： 
+    // 1. 如果已有打分 (rating > 0)，始终显示。 
+    // 2. 如果未打分但被选中，显示禁止图标和空心星。 
+    // 3. 如果未打分且未选中，不显示。 
+    bool shouldShowRating = (rating > 0) || isSelected; 
+ 
+    if (shouldShowRating) { 
+        // 2026-xx-xx 深度修复：调高禁止图标与空心星亮度，确保在深色卡片背景下清晰可见 
+        QIcon banIcon = UiHelper::getIcon("no_color", QColor("#B0B0B0"), m.banRect.width()); 
         banIcon.paint(painter, m.banRect); 
+ 
         QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(m.starSize, m.starSize), QColor("#EF9F27")); 
         QPixmap emptyStar = UiHelper::getPixmap("star", QSize(m.starSize, m.starSize), QColor("#888888")); 
+ 
         for (int i = 0; i < 5; ++i) { 
-            QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingRect.top() + (m.ratingRect.height() - m.starSize) / 2, m.starSize, m.starSize); 
+            QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
             painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar); 
         } 
     } 
-
-    // 5. 空文件夹特殊标记
-    if (index.data(TypeRole).toString() == "folder" && index.data(IsEmptyRole).toBool()) {
-        painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine));
-        painter->drawRoundedRect(m.imageBoxRect, 6, 6);
-    }
+     
+    // [名称区绘制] - 在正方形下方 
+    QString colorName = index.data(ColorRole).toString(); 
+    bool isEmptyFolder = (index.data(TypeRole).toString() == "folder" && index.data(IsEmptyRole).toBool()); 
+ 
+    if (isEmptyFolder) { 
+        // 对空文件夹正方形区进行特殊描边 
+        painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine)); 
+        painter->setBrush(QColor(65, 242, 242, 30)); 
+        painter->drawRoundedRect(m.squareRect, 8, 8); 
+        painter->setPen(QColor("#41F2F2")); 
+    } 
+ 
+    QString name = index.data(Qt::DisplayRole).toString(); 
+    painter->setPen(QColor("#EEEEEE")); 
+    QFont textFont = painter->font(); 
+    textFont.setPointSize(8); 
+    textFont.setBold(false); 
+    painter->setFont(textFont); 
+ 
+    // 2026-06-xx 按照要求：未录入项文字半透明 
+    // 2026-06-xx 物理修复：校准 InDatabaseRole 作用域 
+    if (!isSelected && !index.data(InDatabaseRole).toBool()) { 
+        painter->setPen(QColor(238, 238, 238, 120)); 
+    } 
+ 
+    // 2026-06-05 按照用户要求：恢复自动换行逻辑，并在“实在太长”时使用省略号 
+    // 零宽空格注入以支持非标准断行（如下划线或点号） 
+    QString displayName = name; 
+    displayName.replace("_", "_\u200B"); 
+    displayName.replace(".", ".\u200B"); 
+ 
+    // 首先尝试进行自动换行绘制，如果高度超出，则回退到省略号单行显示 
+    QRect boundingRect = painter->boundingRect(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName); 
+    if (boundingRect.height() > m.nameRect.height()) { 
+        QString elidedName = option.fontMetrics.elidedText(name, Qt::ElideRight, m.nameRect.width() - 8); 
+        painter->drawText(m.nameRect, Qt::AlignCenter, elidedName); 
+    } else { 
+        painter->drawText(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName); 
+    } 
  
     painter->restore(); 
 } 
@@ -1912,8 +1937,10 @@ bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) {
  
 bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) { 
     if (event->type() == QEvent::MouseButtonPress) { 
+        // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 子类转型歧义 
         QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event); 
         if (mEvent->button() == Qt::LeftButton) { 
+            // 2026-05-28 按照用户授权：废除本地硬编码判定，统一使用 calculateMetrics 保证 Hitbox 零偏差 
             GridMetrics m = calculateMetrics(option); 
             QString path = index.data(PathRole).toString(); 
  
@@ -1922,6 +1949,7 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
                     MetadataManager::instance().setRating(path.toStdWString(), 0); 
                     model->setData(index, 0, RatingRole); 
                 } 
+                // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器，防止清除星级时错误触发行内编辑
                 auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
                 if (view) {
                     QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
@@ -1935,13 +1963,14 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
             } 
  
             for (int i = 0; i < 5; ++i) { 
-                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingRect.top() + (m.ratingRect.height() - m.starSize) / 2, m.starSize, m.starSize); 
+                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
                 if (starRect.contains(mEvent->pos())) { 
                     int r = i + 1; 
                     if (!path.isEmpty()) { 
                         MetadataManager::instance().setRating(path.toStdWString(), r); 
                         model->setData(index, r, RatingRole); 
                     } 
+                    // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器，防止星级点击时错误触发行内编辑
                     auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
                     if (view) {
                         QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
@@ -2076,13 +2105,9 @@ void ContentPanel::recalculateAndEmitStats() {
  
 void GridItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const { 
     Q_UNUSED(index); 
+    // 2026-06-05 按照重构布局：同步定位编辑器至正方形下方的名称区 
     GridMetrics m = calculateMetrics(option); 
-    // 适配分离式布局的编辑器位置
-    editor->setGeometry(m.nameRect.adjusted(-2, -2, 2, 2)); 
-    editor->setStyleSheet(
-        "background-color: #2D2D2D; color: white; selection-background-color: #3498db; "
-        "border: 1px solid #3498db; border-radius: 4px; padding: 0 4px;"
-    );
+    editor->setGeometry(m.nameRect); 
 } 
  
 } // namespace ArcMeta
