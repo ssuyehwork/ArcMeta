@@ -156,7 +156,8 @@ void NavPanel::initUi() {
     m_treeView->setDragEnabled(true);
     m_treeView->setDragDropMode(QAbstractItemView::DragOnly);
     
-    m_treeView->setItemDelegate(new TreeItemDelegate(this));
+    // 按照用户要求：目录导航中的录入/置顶标记不再需要显示
+    m_treeView->setItemDelegate(new TreeItemDelegate(this, false));
 
     m_model = new QStandardItemModel(this);
     m_treeView->setModel(m_model);
