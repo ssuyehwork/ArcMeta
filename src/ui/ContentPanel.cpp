@@ -339,9 +339,9 @@ ContentPanel::ContentPanel(QWidget* parent)
                     } else if (UiHelper::isGraphicsFile(ext)) { 
                         // 2026-04-11 按照用户要求：凡是图片/图形格式，物理强制提取内容缩略图 
                         // 2026-04-11 按照用户要求：专属注入 true 参数，只对走缓存的小列表图执行垂直翻转修正 
-                        QPixmap thumb = UiHelper::getShellThumbnail(path, 96, true); 
-                        if (!thumb.isNull()) { 
-                            icon = QIcon(thumb); 
+                        QImage img = UiHelper::getShellThumbnail(path, 96, true);
+                        if (!img.isNull()) {
+                            icon = QIcon(QPixmap::fromImage(img));
                         } 
                     } 
  
@@ -966,8 +966,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     QIcon coloredIcon;
                     QString ext = QFileInfo(itemPath).suffix().toLower();
                     if (UiHelper::isGraphicsFile(ext)) {
-                        QPixmap thumb = UiHelper::getShellThumbnail(itemPath, 128, false);
-                        if (!thumb.isNull()) coloredIcon = QIcon(thumb);
+                        QImage img = UiHelper::getShellThumbnail(itemPath, 128, false);
+                        if (!img.isNull()) coloredIcon = QIcon(QPixmap::fromImage(img));
                     }
                     if (coloredIcon.isNull()) {
                         coloredIcon = UiHelper::getFileIcon(itemPath, 128);
@@ -1011,8 +1011,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                 QIcon coloredIcon;
                                 QString suffix = QFileInfo(path).suffix().toLower();
                                 if (UiHelper::isGraphicsFile(suffix)) {
-                                    QPixmap thumb = UiHelper::getShellThumbnail(path, 128, false);
-                                    if (!thumb.isNull()) coloredIcon = QIcon(thumb);
+                                    QImage img = UiHelper::getShellThumbnail(path, 128, false);
+                                    if (!img.isNull()) coloredIcon = QIcon(QPixmap::fromImage(img));
                                 }
                                 if (coloredIcon.isNull()) {
                                     coloredIcon = UiHelper::getFileIcon(path, 128);

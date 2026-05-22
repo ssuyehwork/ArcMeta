@@ -136,8 +136,9 @@ void QuickLookWindow::renderProfessionalImage(const QString& path) {
     m_graphicsView->resetTransform();
 
     // 2026-04-11 按照用户要求：请求 1024 级高清缩略图以支持 PSD/AI 快速预览
-    QPixmap pix = UiHelper::getShellThumbnail(path, 1024);
-    if (!pix.isNull()) {
+    QImage img = UiHelper::getShellThumbnail(path, 1024);
+    if (!img.isNull()) {
+        QPixmap pix = QPixmap::fromImage(img);
         auto item = m_scene->addPixmap(pix);
         m_graphicsView->fitInView(item, Qt::KeepAspectRatio);
     }
