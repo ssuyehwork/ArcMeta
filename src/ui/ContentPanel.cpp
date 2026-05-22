@@ -144,10 +144,16 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         if (!matchTag) return false; 
     } 
  
-    // 4. 类型过滤 
+    // 4. 类型过滤 (物理优化：使用 TypeRole 或缓存后缀)
     if (!currentFilter.types.isEmpty()) { 
         QString type = idx.data(TypeRole).toString();  
-        QString ext = QFileInfo(idx.data(PathRole).toString()).suffix().toUpper(); 
+        QString path = idx.data(PathRole).toString();
+        QString ext;
+        if (type != "folder") {
+            int lastDot = path.lastIndexOf('.');
+            if (lastDot != -1) ext = path.mid(lastDot + 1).toUpper();
+        }
+
         bool matchType = false; 
         for (const QString& fType : currentFilter.types) { 
             if (fType == "folder") { 
@@ -159,30 +165,26 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         if (!matchType) return false; 
     } 
  
-    // 5. 创建日期过滤 
+    // 5. 创建日期过滤 (性能红线：禁绝 QFileInfo，使用 CreateDateRole)
     if (!currentFilter.createDates.isEmpty()) { 
-        QDate d = QFileInfo(idx.data(PathRole).toString()).birthTime().date(); 
-        QDate today = QDate::currentDate(); 
-        QString dStr = d.toString("yyyy-MM-dd"); 
+        QString dKey = idx.data(CreateDateRole).toString();
+        if (dKey.isEmpty()) return false;
+
         bool matchDate = false; 
         for (const QString& fDate : currentFilter.createDates) { 
-            if (fDate == "today" && d == today) { matchDate = true; break; } 
-            if (fDate == "yesterday" && d == today.addDays(-1)) { matchDate = true; break; } 
-            if (fDate == dStr) { matchDate = true; break; } 
+            if (fDate == dKey) { matchDate = true; break; }
         } 
         if (!matchDate) return false; 
     } 
  
-    // 6. 修改日期过滤 
+    // 6. 修改日期过滤 (性能红线：禁绝 QFileInfo，使用 ModifyDateRole)
     if (!currentFilter.modifyDates.isEmpty()) { 
-        QDate d = QFileInfo(idx.data(PathRole).toString()).lastModified().date(); 
-        QDate today = QDate::currentDate(); 
-        QString dStr = d.toString("yyyy-MM-dd"); 
+        QString dKey = idx.data(ModifyDateRole).toString();
+        if (dKey.isEmpty()) return false;
+
         bool matchDate = false; 
         for (const QString& fDate : currentFilter.modifyDates) { 
-            if (fDate == "today" && d == today) { matchDate = true; break; } 
-            if (fDate == "yesterday" && d == today.addDays(-1)) { matchDate = true; break; } 
-            if (fDate == dStr) { matchDate = true; break; } 
+            if (fDate == dKey) { matchDate = true; break; }
         } 
         if (!matchDate) return false; 
     } 
@@ -284,6 +286,17 @@ ContentPanel::ContentPanel(QWidget* parent)
                 palList << m;
             }
             nameItem->setData(palList, PalettesRole);
+
+            // 2026-06-xx 性能优化：存入日期字符串角色，杜绝统计时的物理 I/O
+            QDate today = QDate::currentDate();
+            QDate yesterday = today.addDays(-1);
+            auto getDateKey = [&](const QDate& d) -> QString {
+                if (d == today) return "today";
+                if (d == yesterday) return "yesterday";
+                return d.toString("yyyy-MM-dd");
+            };
+            nameItem->setData(getDateKey(data.mtime.date()), ModifyDateRole);
+            nameItem->setData(getDateKey(data.btime.date()), CreateDateRole);
              
             // 2026-06-xx 按照要求：基于 JSON 存在性注入已录入状态（判断逻辑已在扫描端完成） 
             // 物理修复：校准作用域 
@@ -1329,6 +1342,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 data.suffix = info.suffix().toUpper(); 
                 data.size = info.size(); 
                 data.mtime = info.lastModified(); 
+                data.btime = info.birthTime();
                 data.meta = MetadataManager::instance().getMeta(data.fullPath.toStdWString()); 
  
                 // 2026-04-12 按照用户要求：探测空文件夹 
@@ -1387,30 +1401,8 @@ void ContentPanel::search(const QString& query) {
     if (proxy) {
         proxy->setSearchQuery(query);
         
-        // 2026-06-xx 按照用户要求：搜索后实时重新计算可见项统计，同步给筛选面板
-        ScanStats stats;
-        for (int i = 0; i < proxy->rowCount(); ++i) {
-            QModelIndex idx = proxy->index(i, 0);
-            int rating = idx.data(RatingRole).toInt();
-            QString color = idx.data(ColorRole).toString();
-            QString type = idx.data(TypeRole).toString();
-            QStringList tags = idx.data(TagsRole).toStringList();
-            
-            stats.ratingCounts[rating]++;
-            stats.colorCounts[color]++;
-            if (type == "folder") stats.typeCounts["folder"]++;
-            else {
-                QString path = idx.data(PathRole).toString();
-                stats.typeCounts[QFileInfo(path).suffix().toUpper()]++;
-            }
-            
-            for (const QString& t : tags) stats.tagCounts[t]++;
-            if (tags.isEmpty()) stats.noTagCount++;
-        }
-        if (stats.noTagCount > 0) stats.tagCounts["__none__"] = stats.noTagCount;
-        
-        emit directoryStatsReady(stats.ratingCounts, stats.colorCounts, stats.tagCounts,
-                               stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts);
+        // 2026-06-xx 性能优化：搜索结果改变后，触发增量统计推送
+        recalculateAndEmitStats();
     }
 } 
  
@@ -1540,6 +1532,17 @@ void ContentPanel::loadCategory(int categoryId) {
             nameItem->setData(rm.pinned, IsLockedRole); 
             nameItem->setData(rm.tags, TagsRole); 
             nameItem->setData(false, HasThumbnailRole);
+
+            QDate today = QDate::currentDate();
+            QDate yesterday = today.addDays(-1);
+            auto getDateKey = [&](const QDate& d) -> QString {
+                if (d == today) return "today";
+                if (d == yesterday) return "yesterday";
+                return d.toString("yyyy-MM-dd");
+            };
+            nameItem->setData(getDateKey(info.birthTime().date()), CreateDateRole);
+            nameItem->setData(getDateKey(mtime.date()), ModifyDateRole);
+
             // 2026-06-xx 注入物理色板
             QVariantList palList;
             for (const auto& p : rm.palettes) {
@@ -1635,6 +1638,17 @@ void ContentPanel::loadPaths(const QStringList& paths) {
         nameItem->setData(rm.pinned, IsLockedRole); 
         nameItem->setData(rm.tags, TagsRole); 
         nameItem->setData(false, HasThumbnailRole);
+
+        QDate today = QDate::currentDate();
+        QDate yesterday = today.addDays(-1);
+        auto getDateKey = [&](const QDate& d) -> QString {
+            if (d == today) return "today";
+            if (d == yesterday) return "yesterday";
+            return d.toString("yyyy-MM-dd");
+        };
+        nameItem->setData(getDateKey(info.birthTime().date()), CreateDateRole);
+        nameItem->setData(getDateKey(info.lastModified().date()), ModifyDateRole);
+
         // 2026-06-xx 注入物理色板
         QVariantList palList;
         for (const auto& p : rm.palettes) {
@@ -2012,26 +2026,35 @@ void GridItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, 
 } 
 
 void ContentPanel::recalculateAndEmitStats() {
+    // 2026-06-xx 物理修复：彻底依赖内存角色数据，禁绝统计时的 QFileInfo 同步 I/O
+    // 2026-06-xx 性能增强：支持基于代理模型的可见项统计，确保搜索后统计结果实时同步
     ScanStats stats;
-    for (int i = 0; i < m_model->rowCount(); ++i) {
-        QStandardItem* nameItem = m_model->item(i, 0);
-        if (!nameItem) continue;
-        int rating = nameItem->data(RatingRole).toInt();
-        QString type = nameItem->data(TypeRole).toString();
-        QStringList tags = nameItem->data(TagsRole).toStringList();
+
+    // 如果存在代理模型且处于搜索/过滤状态，则统计可见项；否则统计全量
+    bool isFiltering = !m_proxyModel->filterRegularExpression().pattern().isEmpty() ||
+                       !m_currentFilter.isEmpty() ||
+                       !qobject_cast<FilterProxyModel*>(m_proxyModel)->m_searchQuery.isEmpty();
+
+    int rowCount = isFiltering ? m_proxyModel->rowCount() : m_model->rowCount();
+
+    for (int i = 0; i < rowCount; ++i) {
+        QModelIndex idx = isFiltering ? m_proxyModel->index(i, 0) : m_model->index(i, 0);
+
+        int rating = idx.data(RatingRole).toInt();
+        QString type = idx.data(TypeRole).toString();
+        QStringList tags = idx.data(TagsRole).toStringList();
+        QString path = idx.data(PathRole).toString();
         
         stats.ratingCounts[rating]++;
 
-        // 2026-06-xx 物理占比统计：遍历所有色板颜色，而不仅仅是主色调
-        QVariant palVar = nameItem->data(PalettesRole);
-        QString dominantColor = nameItem->data(ColorRole).toString();
+        QVariant palVar = idx.data(PalettesRole);
+        QString dominantColor = idx.data(ColorRole).toString();
         
         if (palVar.isValid()) {
             QVariantList pal = palVar.toList();
             for (const auto& v : pal) {
                 QVariantMap m = v.toMap();
                 QColor c = m["color"].value<QColor>();
-                // 4-bit 量化对齐，防止统计碎片化
                 QString hex = UiHelper::quantizeColor(c).name().toUpper();
                 stats.colorCounts[hex]++;
             }
@@ -2044,8 +2067,9 @@ void ContentPanel::recalculateAndEmitStats() {
         if (type == "folder") {
             stats.typeCounts["folder"]++;
         } else {
-            QString path = nameItem->data(PathRole).toString();
-            stats.typeCounts[QFileInfo(path).suffix().toUpper()]++;
+            int lastDot = path.lastIndexOf('.');
+            QString ext = (lastDot != -1) ? path.mid(lastDot + 1).toUpper() : "FILE";
+            stats.typeCounts[ext]++;
         }
         
         for (const QString& tag : tags) {
@@ -2053,21 +2077,10 @@ void ContentPanel::recalculateAndEmitStats() {
         }
         if (tags.isEmpty()) stats.noTagCount++;
         
-        QString path = nameItem->data(PathRole).toString();
-        QFileInfo info(path);
-        if (info.exists()) {
-            QDate cdate = info.birthTime().date();
-            QDate mdate = info.lastModified().date();
-            QDate today = QDate::currentDate();
-            
-            if (cdate == today) stats.createDateCounts["today"]++;
-            else if (cdate == today.addDays(-1)) stats.createDateCounts["yesterday"]++;
-            else stats.createDateCounts[cdate.toString("yyyy-MM-dd")]++;
-            
-            if (mdate == today) stats.modifyDateCounts["today"]++;
-            else if (mdate == today.addDays(-1)) stats.modifyDateCounts["yesterday"]++;
-            else stats.modifyDateCounts[mdate.toString("yyyy-MM-dd")]++;
-        }
+        QString cDateStr = idx.data(CreateDateRole).toString();
+        QString mDateStr = idx.data(ModifyDateRole).toString();
+        if (!cDateStr.isEmpty()) stats.createDateCounts[cDateStr]++;
+        if (!mDateStr.isEmpty()) stats.modifyDateCounts[mDateStr]++;
     }
     if (stats.noTagCount > 0) stats.tagCounts["__none__"] = stats.noTagCount;
     emit directoryStatsReady(stats.ratingCounts, stats.colorCounts, stats.tagCounts,

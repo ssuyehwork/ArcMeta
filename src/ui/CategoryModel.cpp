@@ -28,8 +28,8 @@ void CategoryModel::deferredRefresh() {
 }
 
 void CategoryModel::refresh() {
-    // 2026-06-xx 物理修复：回归 ResetModel 架构并配合状态恢复，解决大量原子操作导致的 UI 假死
-    beginResetModel();
+    // 2026-06-xx 极致优化：仅在结构发生重大变化时调用 resetModel。
+    // 如果仅是数字（Count）或元数据（Rating/Color）变化，采用原地更新，彻底根治滚动条跳变问题。
     
     // 获取最新数据
     auto sysCounts = CategoryRepo::getSystemCounts();
@@ -38,9 +38,21 @@ void CategoryModel::refresh() {
     QMap<int, int> catCounts;
     for (const auto& p : countsVec) catCounts[p.first] = p.second;
 
+    // 结构校验：如果行数不一致，或分类 ID 集合发生变化，则触发 Reset
+    static int s_lastStructureHash = 0;
+    int currentHash = categories.size() + (m_type * 1000000);
+    for(const auto& c : categories) currentHash += c.id + c.parentId;
+
+    if (s_lastStructureHash != currentHash) {
+        beginResetModel();
+        s_lastStructureHash = currentHash;
+    } else {
+        // 如果结构未变，我们仅更新文本和图标，不触发 ResetModel
+    }
+
     int currentRow = 0;
 
-    // 1. 系统模块 (增量同步)
+    // 1. 系统模块 (原地同步)
     if (m_type == System || m_type == Both) {
         struct SysDef { QString name; QString type; QString icon; QString color; int id; };
         static const QList<SysDef> sysDefs = {
@@ -69,13 +81,18 @@ void CategoryModel::refresh() {
                 newItem->setData(def.id, IdRole);
                 newItem->setEditable(false);
                 newItem->setIcon(UiHelper::getIcon(def.icon, QColor(def.color), 16));
-                insertRow(currentRow, newItem);
+                if (s_lastStructureHash == currentHash) {
+                     // 结构一致但项目不存在（极罕见），补充插入
+                     insertRow(currentRow, newItem);
+                } else {
+                     appendRow(newItem);
+                }
             }
             currentRow++;
         }
     }
 
-    // 辅助函数：同步组标题项
+    // 辅助函数：原地更新或创建组标题
     auto syncGroupHeader = [&](int row, const QString& name, const QString& iconName) -> QStandardItem* {
         if (row < rowCount() && index(row, 0).data(NameRole).toString() == name) {
             return item(row);
@@ -88,91 +105,112 @@ void CategoryModel::refresh() {
             group->setIcon(UiHelper::getIcon(iconName, QColor("#FFFFFF"), 16));
             QFont font = group->font(); font.setBold(true); group->setFont(font);
             group->setForeground(QColor("#FFFFFF"));
-            insertRow(row, group);
+            if (s_lastStructureHash == currentHash) insertRow(row, group);
+            else appendRow(group);
             return group;
         }
     };
 
     // 2. 快速访问
-    QStandardItem* favGroup = nullptr;
     if (m_type == Both || m_type == User) {
-        favGroup = syncGroupHeader(currentRow++, "快速访问", "folder_filled");
+        QStandardItem* favGroup = syncGroupHeader(currentRow++, "快速访问", "folder_filled");
         auto favorites = FavoritesRepo::getAll();
 
-        // 同步书签与置顶分类镜像
-        // 由于此处涉及多源数据组合，暂时采用清空子项再重建的方式
-        favGroup->removeRows(0, favGroup->rowCount());
-
+        // 快速访问通常项不多，Reset 其子项影响较小，但为求极致，此处也尝试原地更新
+        int favRow = 0;
         for (const auto& fav : favorites) {
-            QStandardItem* bItem = new QStandardItem(QString::fromStdWString(fav.name));
-            bItem->setData("bookmark", TypeRole);
-            bItem->setData(QString::fromStdWString(fav.path), PathRole);
-            bItem->setData(QString::fromStdWString(fav.name), NameRole);
-            bItem->setIcon(UiHelper::getIcon("folder_filled", QColor("#555555"), 16));
-            favGroup->appendRow(bItem);
+            QString name = QString::fromStdWString(fav.name);
+            if (favRow < favGroup->rowCount() && favGroup->child(favRow)->data(NameRole).toString() == name) {
+                // 原地保持
+            } else {
+                QStandardItem* bItem = new QStandardItem(name);
+                bItem->setData("bookmark", TypeRole);
+                bItem->setData(QString::fromStdWString(fav.path), PathRole);
+                bItem->setData(name, NameRole);
+                bItem->setIcon(UiHelper::getIcon("folder_filled", QColor("#555555"), 16));
+                favGroup->insertRow(favRow, bItem);
+            }
+            favRow++;
         }
 
         for (const auto& cat : categories) {
             if (cat.pinned) {
                 QString name = QString::fromStdWString(cat.name);
-                QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
-                QStandardItem* mirror = new QStandardItem(name);
-                mirror->setData("category", TypeRole);
-                mirror->setData(cat.id, IdRole);
-                mirror->setData(color, ColorRole);
-                mirror->setData(name, NameRole);
-                mirror->setData(true, PinnedRole);
-                if (cat.encrypted && !m_unlockedIds.contains(cat.id)) {
-                    mirror->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
+                if (favRow < favGroup->rowCount() && favGroup->child(favRow)->data(IdRole).toInt() == cat.id) {
+                     // 更新数字
+                     int count = catCounts.value(cat.id, 0);
+                     favGroup->child(favRow)->setText(QString("%1 (%2)").arg(name).arg(count));
                 } else {
-                    mirror->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
+                    QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
+                    QStandardItem* mirror = new QStandardItem(name);
+                    mirror->setData("category", TypeRole);
+                    mirror->setData(cat.id, IdRole);
+                    mirror->setData(color, ColorRole);
+                    mirror->setData(name, NameRole);
+                    mirror->setData(true, PinnedRole);
+                    if (cat.encrypted && !m_unlockedIds.contains(cat.id)) {
+                        mirror->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
+                    } else {
+                        mirror->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
+                    }
+                    favGroup->insertRow(favRow, mirror);
                 }
-                favGroup->appendRow(mirror);
+                favRow++;
             }
         }
+        if (favGroup->rowCount() > favRow) favGroup->removeRows(favRow, favGroup->rowCount() - favRow);
     }
 
     // 3. 我的分类
     if (m_type == User || m_type == Both) {
         QStandardItem* userGroup = syncGroupHeader(currentRow++, "我的分类", "folder_filled");
-        
-        // 2026-06-xx 物理回退：废除复杂的节点缓存对比逻辑
-        // 理由：大量的小型 insertRow/removeRow 操作在大型树中性能极差，且难以处理复杂的镜像层级
-        // 方案：在 beginResetModel/endResetModel 块内进行纯净的全量构建
-        QMap<int, QStandardItem*> itemMap;
-        for (const auto& cat : categories) {
-            int id = cat.id;
-            QString name = QString::fromStdWString(cat.name);
-            QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
-            int count = catCounts.value(id, 0);
-            QString display = QString("%1 (%2)").arg(name).arg(count);
 
-            QStandardItem* catItem = new QStandardItem(display);
-            catItem->setData("category", TypeRole);
-            catItem->setData(id, IdRole);
-            catItem->setData(color, ColorRole);
-            catItem->setData(name, NameRole);
-            catItem->setData(cat.pinned, PinnedRole);
-            catItem->setData(cat.encrypted, EncryptedRole);
-            catItem->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
-            catItem->setFlags(catItem->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
-            
-            if (cat.encrypted && !m_unlockedIds.contains(id)) {
-                catItem->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
-            } else {
-                catItem->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
-            }
-            itemMap[id] = catItem;
-        }
+        // 递归查找/更新函数
+        std::function<void(QStandardItem*, const std::vector<CategoryRepo::Category>&)> syncLevel;
+        syncLevel = [&](QStandardItem* parentItem, const std::vector<CategoryRepo::Category>& levelCats) {
+            int row = 0;
+            for (const auto& cat : levelCats) {
+                int id = cat.id;
+                QString name = QString::fromStdWString(cat.name);
+                int count = catCounts.value(id, 0);
+                QString display = QString("%1 (%2)").arg(name).arg(count);
 
-        for (const auto& cat : categories) {
-            QStandardItem* catItem = itemMap[cat.id];
-            if (cat.parentId > 0 && itemMap.contains(cat.parentId)) {
-                itemMap[cat.parentId]->appendRow(catItem);
-            } else {
-                userGroup->appendRow(catItem);
+                QStandardItem* catItem = nullptr;
+                if (row < parentItem->rowCount() && parentItem->child(row)->data(IdRole).toInt() == id) {
+                    catItem = parentItem->child(row);
+                    if (catItem->text() != display) catItem->setText(display);
+                } else {
+                    QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
+                    catItem = new QStandardItem(display);
+                    catItem->setData("category", TypeRole);
+                    catItem->setData(id, IdRole);
+                    catItem->setData(color, ColorRole);
+                    catItem->setData(name, NameRole);
+                    catItem->setData(cat.pinned, PinnedRole);
+                    catItem->setData(cat.encrypted, EncryptedRole);
+                    catItem->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
+                    catItem->setFlags(catItem->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+
+                    if (cat.encrypted && !m_unlockedIds.contains(id)) {
+                        catItem->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
+                    } else {
+                        catItem->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
+                    }
+                    parentItem->insertRow(row, catItem);
+                }
+
+                // 递归处理子分类
+                std::vector<CategoryRepo::Category> children;
+                for(const auto& c : categories) if(c.parentId == id) children.push_back(c);
+                syncLevel(catItem, children);
+                row++;
             }
-        }
+            if (parentItem->rowCount() > row) parentItem->removeRows(row, parentItem->rowCount() - row);
+        };
+
+        std::vector<CategoryRepo::Category> roots;
+        for(const auto& c : categories) if(c.parentId <= 0) roots.push_back(c);
+        syncLevel(userGroup, roots);
     }
     
     // 清理多余的顶层行
@@ -180,7 +218,12 @@ void CategoryModel::refresh() {
         removeRows(currentRow, rowCount() - currentRow);
     }
 
-    endResetModel();
+    if (s_lastStructureHash == currentHash) {
+        // 未 Reset，显式通知视图数据已变
+        emit dataChanged(index(0, 0), index(rowCount() - 1, columnCount() - 1));
+    } else {
+        endResetModel();
+    }
 }
 
 void CategoryModel::loadCategoryItems(const QModelIndex& parentIndex) {

@@ -58,7 +58,9 @@ enum ItemRole {
     CategoryIdRole,
     InDatabaseRole,
     PalettesRole,
-    HasThumbnailRole
+    HasThumbnailRole,
+    CreateDateRole,
+    ModifyDateRole
 };
 
 /**
@@ -79,6 +81,7 @@ public:
         QString suffix;
         qint64 size;
         QDateTime mtime;
+        QDateTime btime;
         RuntimeMeta meta;
         bool isEmpty = false;
     };

@@ -150,3 +150,12 @@
 4. **状态栏限制**：底部状态栏高度必须严格 **不可高于 20px**。
 5. **滑动条交互**：尺寸滑动条 (`m_sizeSlider`) 必须支持 **点击跳转**（Click-to-set），不能仅限于拖拽滑块。
 6. **滚动条一致性**：ScanDialog 所有的滚动条样式（QScrollBar）必须与 MainWindow 保持物理一致，使用 4px 极简扁平化设计。
+
+---
+**2026-07-05 需求记录 (逻辑架构分析与优化 V10):**
+1. **并发增强**：在 `CategoryPanel` 批量导入时，引入 `QSemaphore` 动态限制颜色解析任务的并发数，防止 CPU 瞬间占满影响 USN 监听等后台任务。
+2. **FID 解析优化**：在 `SyncEngine::resolveFidToPath` 中引入“卷句柄缓存”，减少频繁的 `CreateFileW` 调用，提升对账效率。
+3. **UAC 防御**：在 `DropTreeView` 中检测拖拽源的权限。若存在管理员权限不匹配，在状态栏或通过 `ToolTipOverlay` 显示修复引导。
+4. **算法升级**：升级颜色量化算法，在 `UiHelper::quantizeColor` 中引入基于色彩空间的欧式距离判断，提升专业颜色筛选精准度。
+5. **增量刷新**：重构 `CategoryModel::refresh()`。放弃全量 `beginResetModel`，改为计算差异（diff）并执行原地更新或增量行插入/删除，消除滚动条跳变。
+6. **实时反馈**：在侧边栏分类名称旁实时显示递归导入的百分比进度，提升用户掌控感。

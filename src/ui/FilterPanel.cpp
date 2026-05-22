@@ -443,8 +443,13 @@ void FilterPanel::rebuildGroups() {
         }
         QStringList sorted = m_tagCounts.keys();
         sorted.sort(Qt::CaseInsensitive);
+
+        // 2026-06-xx 性能保护：限制显示项数，防止 Widget 过多导致假死
+        int countLimit = 30;
+        int shown = 0;
         for (const QString& tag : sorted) {
             if (tag == "__none__") continue;
+            if (++shown > countLimit) break;
             QCheckBox* cb = addFilterRow(gl, tag, m_tagCounts[tag]);
             cb->blockSignals(true);
             cb->setChecked(m_filter.tags.contains(tag));
@@ -509,8 +514,11 @@ void FilterPanel::rebuildGroups() {
             });
         }
         QStringList dates = m_createDateCounts.keys(); dates.sort(Qt::CaseInsensitive);
+
+        int shown = 0;
         for (const QString& d : dates) {
             if (d == "today" || d == "yesterday") continue;
+            if (++shown > 20) break; // 日期项限制 20 个
             QCheckBox* cb = addFilterRow(gl, d, m_createDateCounts[d]);
             cb->blockSignals(true);
             cb->setChecked(m_filter.createDates.contains(d));
@@ -542,8 +550,10 @@ void FilterPanel::rebuildGroups() {
             });
         }
         QStringList dates = m_modifyDateCounts.keys(); dates.sort(Qt::CaseInsensitive);
+        int shown = 0;
         for (const QString& d : dates) {
             if (d == "today" || d == "yesterday") continue;
+            if (++shown > 20) break; // 日期项限制 20 个
             QCheckBox* cb = addFilterRow(gl, d, m_modifyDateCounts[d]);
             cb->blockSignals(true);
             cb->setChecked(m_filter.modifyDates.contains(d));
