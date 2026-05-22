@@ -31,7 +31,9 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     QPixmap thumb = index.data(Qt::DecorationRole).value<QPixmap>();
 
     if (hasThumb && !thumb.isNull()) {
-        QPixmap scaled = thumb.scaled(cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        // 2026-06-xx 物理修复：配合 JustifiedView 的精确计算，将缩放模式改为 KeepAspectRatio。
+        // 这确保了在任何舍入误差下图片都不会被截断。
+        QPixmap scaled = thumb.scaled(cardRect.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
         int x = cardRect.center().x() - scaled.width() / 2;
         int y = cardRect.center().y() - scaled.height() / 2;
         painter->drawPixmap(x, y, scaled);
