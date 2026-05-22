@@ -338,8 +338,8 @@ ContentPanel::ContentPanel(QWidget* parent)
                         } 
                     } else if (UiHelper::isGraphicsFile(ext)) { 
                         // 2026-04-11 按照用户要求：凡是图片/图形格式，物理强制提取内容缩略图 
-                        // 2026-04-11 按照用户要求：专属注入 true 参数，只对走缓存的小列表图执行垂直翻转修正 
-                        QImage img = UiHelper::getShellThumbnail(path, 96, true); 
+                        // 2026-04-11 按照用户要求：物理强制提取内容缩略图
+                        QImage img = UiHelper::getShellThumbnail(path, 96, false);
                         if (!img.isNull()) { 
                             icon = QIcon(QPixmap::fromImage(img)); 
                         } 

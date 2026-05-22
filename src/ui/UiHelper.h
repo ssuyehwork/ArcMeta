@@ -363,8 +363,8 @@ public:
         QDir().mkpath(cacheDir);
 
         QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v5 标识，强制失效之前的错误缓存
-        QString hashKey = QString("%1_%2_%3_%4_v5").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v6 标识，强制失效之前的错误缓存
+        QString hashKey = QString("%1_%2_%3_%4_v6").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
         QString safeName = QString::number(qHash(hashKey), 16) + ".png";
         QString cachePath = cacheDir + safeName;
 
@@ -388,10 +388,10 @@ public:
                 HBITMAP hBitmap = nullptr;
                 hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
-                    // 2026-06-xx 物理修正：回归垂直翻转处理。
-                    // 经验证 Windows Shell 返回的 HBITMAP 为 Bottom-up DIB，在当前环境下必须手动翻转。
-                    QImage img = QImage::fromHBITMAP(hBitmap).flipped(Qt::Vertical);
-                    if (forceMirror) img = img.flipped(Qt::Vertical); 
+                    // 2026-06-xx 物理修正：移除错误的垂直翻转处理。
+                    // QImage::fromHBITMAP 已经正确处理了 DIB 格式，手动翻转会导致图片倒置。
+                    QImage img = QImage::fromHBITMAP(hBitmap);
+                    if (forceMirror) img = img.flipped(Qt::Vertical);
                     
                     // 异步存入磁盘缓存
                     (void)QtConcurrent::run([img, cachePath]() {
