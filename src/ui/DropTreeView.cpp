@@ -31,9 +31,11 @@ void DropTreeView::dragEnterEvent(QDragEnterEvent* event) {
         }
 
         if (hasInvalidUrl) {
+            QString msg = "[权限受限] 无法从管理员权限进程接收拖拽，请尝试重启程序或使用导入按钮。";
             ToolTipOverlay::instance()->showText(QCursor::pos(),
-                "<b style='color:#e74c3c;'>[权限受限]</b> 无法跨权限拖拽，请尝试以管理员运行或使用导入按钮。",
+                QString("<b style='color:#e74c3c;'>%1</b>").arg(msg),
                 3000, QColor("#e74c3c"));
+            emit uacConflictDetected(msg);
             event->ignore();
             return;
         }

@@ -554,15 +554,10 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
         
         counts["uncategorized"] = getUncategorizedItemCount();
         
-        QSqlQuery qFiles("SELECT path FROM items WHERE deleted=0 AND type='file'", db);
-        int untaggedCount = 0;
-        while (qFiles.next()) {
-            std::wstring path = qFiles.value(0).toString().toStdWString();
-            if (MetadataManager::instance().getMeta(path).tags.isEmpty()) {
-                untaggedCount++;
-            }
-        }
-        counts["untagged"] = untaggedCount;
+        // 2026-07-05 傻逼逻辑物理切除：严禁在循环内调用 getMeta 进行 untagged 统计。
+        // 直接使用数据库 JSON 提取或空字符串判断。
+        QSqlQuery qUntagged("SELECT COUNT(DISTINCT file_id_128) FROM items WHERE deleted=0 AND type='file' AND (tags IS NULL OR tags = '' OR tags = '[]')", db);
+        if (qUntagged.next()) counts["untagged"] = qUntagged.value(0).toInt();
         
         QSqlQuery qTags("SELECT COUNT(*) FROM tags", db);
         if (qTags.next()) counts["tags"] = qTags.value(0).toInt();

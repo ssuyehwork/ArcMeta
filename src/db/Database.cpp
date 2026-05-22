@@ -89,6 +89,14 @@ void Database::createTables() {
     q.exec("CREATE TABLE IF NOT EXISTS favorites (path TEXT PRIMARY KEY, type TEXT, name TEXT, sort_order INTEGER DEFAULT 0, added_at REAL)");
     q.exec("CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, parent_id INTEGER DEFAULT 0, name TEXT NOT NULL, color TEXT DEFAULT '', preset_tags TEXT DEFAULT '', sort_order INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0, encrypted INTEGER DEFAULT 0, encrypt_salt TEXT DEFAULT '', encrypt_iv TEXT DEFAULT '', encrypt_verify_hash TEXT DEFAULT '', encrypt_hint TEXT DEFAULT '', created_at REAL)");
     q.exec("CREATE TABLE IF NOT EXISTS category_items (category_id INTEGER, file_id_128 TEXT, added_at REAL, PRIMARY KEY (category_id, file_id_128))");
+
+    // 2026-07-05 按照用户 V10 专项要求：引入“统计摘要表” (Aggregation Table)
+    // 用于实现 O(1) 级极速侧边栏刷新，杜绝百万级数据下的 COUNT 聚合开销
+    q.exec("CREATE TABLE IF NOT EXISTS category_stats_cache ("
+           "category_id TEXT PRIMARY KEY, " // 支持系统项(string)和数据库分类(int)
+           "item_count INTEGER DEFAULT 0, "
+           "last_update REAL)");
+
     q.exec("CREATE TABLE IF NOT EXISTS sync_state (key TEXT PRIMARY KEY, value TEXT)");
     
     // 2026-04-12 按照用户要求：新增文件夹扫描缓存表，用于增量扫描剪枝

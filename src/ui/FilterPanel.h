@@ -44,6 +44,7 @@ struct FilterState {
     QStringList  modifyDates;
     int          colorTolerance = 30; // 2026-05-17 按照用户要求：自定义颜色相近色容差（0~100），由 ColorPicker 准确度滑条驱动
 
+    // 2026-07-05 启动卡死专项修复：补全缺失成员，用于快速判断过滤态
     bool isEmpty() const {
         return ratings.isEmpty() && colors.isEmpty() && tags.isEmpty() &&
                types.isEmpty() && createDates.isEmpty() && modifyDates.isEmpty();

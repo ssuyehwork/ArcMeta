@@ -37,6 +37,9 @@ public slots:
     // 2026-05-27 物理修复：refresh 改为异步逻辑，不再直接执行数据库
     void refresh();
 
+    // 2026-07-05 启动卡死专项修复：异步统计回调
+    void updateCounts(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts);
+
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     bool setData(const QModelIndex& index, const QVariant& val, int role = Qt::EditRole) override;
 
@@ -46,6 +49,7 @@ public slots:
 private:
     Type m_type;
     QSet<int> m_unlockedIds;
+    bool m_isCounting = false;
 };
 
 } // namespace ArcMeta

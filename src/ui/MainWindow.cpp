@@ -465,14 +465,21 @@ void MainWindow::initUi() {
     });
 
     // 9. 2026-03-xx 按照用户要求：响应元数据全局变更，同步刷新侧边栏计数
-    // 确保在内容面板收藏项目后，侧边栏的“收藏 (X)”数字能实时跳变
-    // 2026-05-27 物理修复：显式增加 this 上下文参数
-    // 理由：MetadataManager 可能在后台线程（如初始化扫描阶段）发射信号，
-    // 若无 context 参数，Lambda 将在发射信号的后台线程执行，导致非法线程操作 UI (refresh()) 引起崩溃。
-    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this]() {
+    // 2026-07-05 启动卡死专项修复：引入 300ms 防抖，杜绝后台解析阶段由于信号风暴引发的 UI 冻结。
+    m_sidebarRefreshTimer = new QTimer(this);
+    m_sidebarRefreshTimer->setInterval(300);
+    m_sidebarRefreshTimer->setSingleShot(true);
+    connect(m_sidebarRefreshTimer, &QTimer::timeout, this, [this]() {
         if (m_categoryPanel && m_categoryPanel->model()) {
             m_categoryPanel->model()->refresh();
         }
+    });
+
+    // 2026-05-27 物理修复：显式增加 this 上下文参数
+    // 理由：MetadataManager 可能在后台线程（如初始化扫描阶段）发射信号，
+    // 若无 context 参数，Lambda 将在发射信号的后台线程执行，导致非法线程操作 UI 引起崩溃。
+    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this]() {
+        if (m_sidebarRefreshTimer) m_sidebarRefreshTimer->start();
     });
 
     // 10. 侧边栏点击物理项（文件预览或文件夹跳转）
@@ -827,6 +834,19 @@ void MainWindow::setupSplitters() {
     
     m_navPanel = new NavPanel(this);
     m_navPanel->setObjectName("ListContainer");
+
+    // 2026-06-xx UAC 权限边界防御联动
+    auto handleUacConflict = [this](const QString& msg) {
+        if (m_statusLeft) {
+            m_statusLeft->setText(msg);
+            m_statusLeft->setStyleSheet("font-size: 11px; color: #E81123; background: transparent; font-weight: bold;");
+            // 5秒后恢复默认样式
+            QTimer::singleShot(5000, this, [this]() {
+                updateStatusBar();
+                m_statusLeft->setStyleSheet("font-size: 11px; color: #B0B0B0; background: transparent;");
+            });
+        }
+    };
     
     m_contentPanel = new ContentPanel(this);
     m_contentPanel->setObjectName("EditorContainer");
@@ -851,6 +871,10 @@ void MainWindow::setupSplitters() {
         }
         // 其他来源（搜索、筛选等）不显示焦点线
     });
+
+    // 连接侧边栏树的 UAC 信号
+    auto* catTree = m_categoryPanel->findChild<DropTreeView*>();
+    if (catTree) connect(catTree, &DropTreeView::uacConflictDetected, this, handleUacConflict);
 
     m_mainSplitter->addWidget(m_categoryPanel);
     m_mainSplitter->addWidget(m_navPanel);

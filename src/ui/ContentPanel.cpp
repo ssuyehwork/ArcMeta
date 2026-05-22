@@ -1477,7 +1477,8 @@ void ContentPanel::loadCategory(int categoryId) {
  
     // 2026-05-07 按照用户要求：添加统计数据结构，用于筛选器填充 
     ScanStats stats; 
- 
+    QDate today = QDate::currentDate();
+
     // 1. 加载子分类 
     auto allCategories = CategoryRepo::getAll(); 
     QFileIconProvider provider;
@@ -1613,6 +1614,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
  
     // 2026-05-07 按照用户要求：添加统计数据结构，用于筛选器填充 
     ScanStats stats; 
+    QDate today = QDate::currentDate();
      
     for (const QString& path : paths) { 
         QFileInfo info(path); 

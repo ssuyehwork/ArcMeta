@@ -153,6 +153,9 @@ private:
     ResizeEventFilter* m_resizeFilter = nullptr;
     // 2026-04-17 按照用户要求：修复 m_idleTimer 重定义，保留上方唯一成员声明
     void initIdleDetector();
+
+    // 2026-07-05 启动卡死专项修复：侧边栏刷新防抖定时器
+    QTimer* m_sidebarRefreshTimer = nullptr;
 };
 
 } // namespace ArcMeta
