@@ -506,7 +506,7 @@ void ContentPanel::updateGridSize() {
     QSettings settings("ArcMeta团队", "ArcMeta");
     settings.setValue("UI/GridZoomLevel", m_zoomLevel);
 
-    qDebug() << "[GridSize] Zoom:" << m_zoomLevel << "Square:" << side << "TotalH:" << totalH;
+    qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
 } 
  
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 
@@ -1933,11 +1933,6 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     painter->restore(); 
 } 
  
-QSize GridItemDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex&) const { 
-    auto* view = qobject_cast<QListView*>(const_cast<QWidget*>(option.widget)); 
-    if (view && view->gridSize().isValid()) return view->gridSize(); 
-    return QSize(96, 112); 
-} 
  
 bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) { 
     if (event->type() == QEvent::KeyPress) { 
