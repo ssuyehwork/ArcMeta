@@ -757,6 +757,11 @@ ScanDialog::ScanDialog(QWidget* parent)
     m_resultView->horizontalHeader()->setSortIndicator(m_config.sortColumn, static_cast<Qt::SortOrder>(m_config.sortOrder));
     m_tableModel->sort(m_config.sortColumn, static_cast<Qt::SortOrder>(m_config.sortOrder));
 
+    // 2026-06-xx 物理对标：监听引擎加载信号，实现“更新数据中...”的体感同步
+    connect(&MftReader::instance(), &MftReader::driveLoaded, this, [this](const QString& drive, int count, int total) {
+        updateStatus(QString("正在加载快照 %1 (%2/%3)...").arg(drive).arg(formatNumber(count)).arg(formatNumber(total)), true);
+    });
+
     // 2026-05-16 物理重载：断开基类 Qt 置顶逻辑，改用 Win32 原生 SetWindowPos 以实现无损切换
     if (m_pinBtn) {
         disconnect(m_pinBtn, &QPushButton::toggled, nullptr, nullptr);
