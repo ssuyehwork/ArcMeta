@@ -272,23 +272,23 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
                 int thumbSize = (dlg && dlg->m_viewStack->currentIndex() == 0) ? 24 : (dlg ? dlg->m_config.iconSize : 64);
 
                 (void)QtConcurrent::run([mutableThis, key, fullPath, cacheKey, thumbSize, ext]() {
-                    QPixmap thumb;
+                    QImage img;
                     if (ext == "svg") {
                         QSvgRenderer renderer(fullPath);
                         if (renderer.isValid()) {
-                            thumb = QPixmap(thumbSize, thumbSize);
-                            thumb.fill(Qt::transparent);
-                            QPainter painter(&thumb);
+                            img = QImage(thumbSize, thumbSize, QImage::Format_ARGB32);
+                            img.fill(Qt::transparent);
+                            QPainter painter(&img);
                             renderer.render(&painter);
                             painter.end();
                         }
                     } else {
-                        thumb = UiHelper::getShellThumbnail(fullPath, thumbSize);
+                        img = UiHelper::getShellThumbnail(fullPath, thumbSize);
                     }
-                    if (!thumb.isNull()) {
-                        double ar = (double)thumb.width() / thumb.height();
-                        QMetaObject::invokeMethod(mutableThis, [mutableThis, key, cacheKey, thumb, ar]() {
-                            mutableThis->m_thumbCache.insert(cacheKey, new QPixmap(thumb));
+                    if (!img.isNull()) {
+                        double ar = (double)img.width() / img.height();
+                        QMetaObject::invokeMethod(mutableThis, [mutableThis, key, cacheKey, img, ar]() {
+                            mutableThis->m_thumbCache.insert(cacheKey, new QPixmap(QPixmap::fromImage(img)));
                             mutableThis->m_aspectRatios[key] = ar;
                             
                             // 2026-06-xx 物理安全：直接从 Snapshot 中定位 Position，杜绝脱节
@@ -620,8 +620,8 @@ ScanDialog::ScanDialog(QWidget* parent)
             font-size: 14px;
             font-weight: bold;
             letter-spacing: 1.5px;
-            /* 物理负边距补偿，确保紧凑感显而易见 */
-            margin-left: -2px;
+            /* 物理负边距补偿：由 -2px 增加至 -4px，确保产生非常明显的紧凑效果 */
+            margin-left: -4px;
             padding: 0px;
         }
 
@@ -816,14 +816,14 @@ void ScanDialog::setupUi() {
     m_driveContainer->setObjectName("DriveContainer");
     m_driveContainer->setAttribute(Qt::WA_StyledBackground, true);
     m_driveLayout = new QHBoxLayout(m_driveContainer);
-    // 2026-06-xx 按照建议：盘符部分也调整为 10 像素间距
-    m_driveLayout->setContentsMargins(5, 0, 5, 0);
+    // 2026-06-xx 按照建议：盘符起始坐标向右偏移 5 像素 (5 -> 10)
+    m_driveLayout->setContentsMargins(10, 0, 5, 0);
     m_driveLayout->setSpacing(10);
     driveScroll->setWidget(m_driveContainer);
 
     auto* topControl = new QHBoxLayout();
-    // 按照用户要求：盘符整体向右偏移 5 像素
-    topControl->setContentsMargins(5, 0, 0, 0);
+    // 物理修正：恢复容器边距为 0，防止整个框发生偏移
+    topControl->setContentsMargins(0, 0, 0, 0);
     topControl->addWidget(driveScroll, 1);
     mainLayout->addLayout(topControl);
 
