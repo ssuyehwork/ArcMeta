@@ -256,7 +256,8 @@ void JustifiedView::doLayout() {
 
         while (i < count) {
             double ar = model()->data(model()->index(i, 0), Qt::UserRole + 2).toDouble();
-            if (ar <= 0) ar = 1.0;
+            // 2026-06-xx 布局优化：使用 4:3 横向默认比例，更接近真实图片预览，避免加载前的正方形突变
+            if (ar <= 0) ar = 1.333;
             
             aspectRatios.push_back(ar);
             rowAspectRatioSum += ar;
@@ -287,8 +288,16 @@ void JustifiedView::doLayout() {
         // 实际内容可用宽度（扣除项间距）
         int availableContentWidth = containerWidth - (spacing * (numInRow - 1));
 
-        if (!isLastRow || (rowAspectRatioSum * m_targetRowHeight > containerWidth * 0.8)) {
+        if (!isLastRow) {
             actualHeight = qRound(availableContentWidth / rowAspectRatioSum);
+        } else {
+            // 最后一行：高度默认固定为 targetRowHeight，但宽度受容器约束
+            // 如果按当前比例计算的总宽度超出容器，则反向压缩高度以适应
+            double naturalWidth = (rowAspectRatioSum * actualHeight) + (spacing * (numInRow - 1));
+            if (naturalWidth > containerWidth) {
+                actualHeight = qRound(availableContentWidth / rowAspectRatioSum);
+            }
+            // 否则保持 targetRowHeight，项目自然排列（左对齐）
         }
 
         // 防止行高过大，限制在目标高度的 1.5 倍
