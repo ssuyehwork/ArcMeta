@@ -1014,9 +1014,9 @@ void ScanDialog::setupUi() {
     statusContainer->setFixedHeight(20);
     statusContainer->setStyleSheet("QWidget#StatusContainer { background: transparent; border: none; }");
     auto* statusBar = new QHBoxLayout(statusContainer);
-    // 2026-06-xx 按照用户要求：显式设置垂直居中对齐
+    // 2026-06-xx 按照用户要求：显式设置垂直居中对齐，并向上偏移 7px (通过底部边距实现)
     statusBar->setAlignment(Qt::AlignVCenter);
-    statusBar->setContentsMargins(16, 0, 16, 0);
+    statusBar->setContentsMargins(16, 0, 16, 7);
     statusBar->setSpacing(0);
 
     m_statLabelMain = new QLabel("");
