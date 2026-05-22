@@ -935,7 +935,8 @@ void CategoryPanel::initUi() {
             QMap<QString, int> pathIdMap;
 
             // 辅助处理函数：执行物理入库并归类
-            auto processItem = [&](const QString& itemPath, int catId) {
+            auto processItem = [&](const QString& itemPath, int catId, int parentCatIdForFeedback) {
+                Q_UNUSED(parentCatIdForFeedback);
                 QFileInfo info(itemPath);
                 std::wstring wPath = QDir::toNativeSeparators(itemPath).toStdWString();
                 std::string fid;
@@ -962,17 +963,22 @@ void CategoryPanel::initUi() {
                     QString ext = info.suffix().toLower();
                     static const QSet<QString> targetExts = {"psd", "ai", "eps", "png", "jpg", "jpeg"};
                     if (targetExts.contains(ext)) {
-                        // 1. 提取全量色板
-                        auto palette = UiHelper::extractPalette(itemPath);
-                        if (!palette.isEmpty()) {
-                            // 2. 提取第一个颜色作为主色调并量化
-                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                            QString colorHex = dominant.name().toUpper();
+                        // 性能优化：并发限制 (使用成员变量 m_colorSema 确保生命周期安全)
+                        m_colorSema.acquire();
+                        QtConcurrent::run([this, wPath, itemPath]() {
+                            // 1. 提取全量色板
+                            auto palette = UiHelper::extractPalette(itemPath);
+                            if (!palette.isEmpty()) {
+                                // 2. 提取第一个颜色作为主色调并量化
+                                QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                QString colorHex = dominant.name().toUpper();
 
-                            // 3. 物理双重存储：主色 + 全量变长色板
-                            MetadataManager::instance().setColor(wPath, colorHex.toStdWString());
-                            MetadataManager::instance().setPalettes(wPath, palette);
-                        }
+                                // 3. 物理双重存储：主色 + 全量变长色板 (单例内部需处理并发锁)
+                                MetadataManager::instance().setColor(wPath, colorHex.toStdWString());
+                                MetadataManager::instance().setPalettes(wPath, palette);
+                            }
+                            m_colorSema.release();
+                        });
                     }
                 }
             };
@@ -1005,30 +1011,70 @@ void CategoryPanel::initUi() {
                         } else {
                             if (info.fileName() == ".am_meta.json") continue; // 2026-06-xx 物理隔离
                             // 文件入库并关联到当前层级分类
-                            processItem(itemPath, currentParentId);
+                            processItem(itemPath, currentParentId, rootCatId);
                         }
 
                         currentTask++;
                         if (currentTask % 100 == 0) {
                             db.commit(); db.transaction();
+                            int percent = (int)((float)currentTask / totalItems * 100);
                             QMetaObject::invokeMethod(progress, [progress, currentTask, nativePath]() {
                                 progress->setValue(currentTask);
                                 progress->setStatus("正在导入: " + QFileInfo(nativePath).fileName());
                             });
+                            // 2026-06-xx UX 增强：在侧边栏分类名旁通过 DataRole 提示百分比
+                            QMetaObject::invokeMethod(this, [this, rootCatId, percent]() {
+                                QModelIndex rootIdx;
+                                std::function<QModelIndex(const QModelIndex&)> findId;
+                                findId = [&](const QModelIndex& parent) -> QModelIndex {
+                                    for (int i = 0; i < m_categoryModel->rowCount(parent); ++i) {
+                                        QModelIndex idx = m_categoryModel->index(i, 0, parent);
+                                        if (idx.data(CategoryModel::IdRole).toInt() == rootCatId) return idx;
+                                        QModelIndex child = findId(idx);
+                                        if (child.isValid()) return child;
+                                    }
+                                    return QModelIndex();
+                                };
+                                rootIdx = findId(QModelIndex());
+                                if (rootIdx.isValid()) {
+                                    QString originalName = rootIdx.data(CategoryModel::NameRole).toString();
+                                    m_categoryModel->setData(rootIdx, QString("%1 (导入中 %2%)").arg(originalName).arg(percent), Qt::DisplayRole);
+                                }
+                            }, Qt::QueuedConnection);
                         }
                     }
                 } else {
                     // 单个文件逻辑：入空白归未分类(catId=0)，入分类归该分类
-                    processItem(rootPath, targetCatId);
+                    processItem(rootPath, targetCatId, targetCatId);
                     currentTask++;
                 }
             }
             
             db.commit();
 
-            QMetaObject::invokeMethod(this, [this, progress]() {
+            QMetaObject::invokeMethod(this, [this, progress, targetCatId]() {
                 progress->accept();
                 progress->deleteLater();
+
+                // 2026-06-xx 物理修复：导入完成后恢复分类名称显示
+                if (targetCatId > 0) {
+                    QModelIndex rootIdx;
+                    std::function<QModelIndex(const QModelIndex&)> findId;
+                    findId = [&](const QModelIndex& parent) -> QModelIndex {
+                        for (int i = 0; i < m_categoryModel->rowCount(parent); ++i) {
+                            QModelIndex idx = m_categoryModel->index(i, 0, parent);
+                            if (idx.data(CategoryModel::IdRole).toInt() == targetCatId) return idx;
+                            QModelIndex child = findId(idx);
+                            if (child.isValid()) return child;
+                        }
+                        return QModelIndex();
+                    };
+                    rootIdx = findId(QModelIndex());
+                    if (rootIdx.isValid()) {
+                        QString name = rootIdx.data(CategoryModel::NameRole).toString();
+                        m_categoryModel->setData(rootIdx, name, Qt::DisplayRole);
+                    }
+                }
                 
                 QSet<int> expandedIds;
                 QStringList expandedNames;

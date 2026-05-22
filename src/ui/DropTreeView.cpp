@@ -1,6 +1,7 @@
 #include "DropTreeView.h"
 #include "CategoryModel.h"
 #include "ContentPanel.h"
+#include "ToolTipOverlay.h"
 #include <QDrag>
 #include <QPixmap>
 #include <QAbstractProxyModel>
@@ -20,6 +21,23 @@ DropTreeView::DropTreeView(QWidget* parent) : QTreeView(parent) {
 
 void DropTreeView::dragEnterEvent(QDragEnterEvent* event) {
     if (event->mimeData()->hasUrls()) {
+        // 2026-06-xx 权限边界防御：检测拖拽源是否包含本地文件但路径为空 (通常由于 UAC 权限不匹配导致)
+        bool hasInvalidUrl = false;
+        for (const QUrl& url : event->mimeData()->urls()) {
+            if (url.isLocalFile() && url.toLocalFile().isEmpty()) {
+                hasInvalidUrl = true;
+                break;
+            }
+        }
+
+        if (hasInvalidUrl) {
+            ToolTipOverlay::instance()->showText(QCursor::pos(),
+                "<b style='color:#e74c3c;'>[权限受限]</b> 无法跨权限拖拽，请尝试以管理员运行或使用导入按钮。",
+                3000, QColor("#e74c3c"));
+            event->ignore();
+            return;
+        }
+
         event->acceptProposedAction();
     } else {
         QTreeView::dragEnterEvent(event);

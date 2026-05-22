@@ -3,6 +3,8 @@
 #include <QFrame>
 #include <QTreeView>
 #include <QVBoxLayout>
+#include <QSemaphore>
+#include <QThread>
 
 namespace ArcMeta {
 
@@ -94,6 +96,9 @@ private:
 
     // 2026-04-15 物理锁：恢复状态期间严禁反向触发保存，防止信号回流污染 Settings
     bool m_isRestoringState = false;
+
+    // 2026-06-xx 物理加固：并发限制信号量，定义为成员变量以确保异步生命周期安全
+    QSemaphore m_colorSema{QThread::idealThreadCount()};
 };
 
 } // namespace ArcMeta
