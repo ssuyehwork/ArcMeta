@@ -482,8 +482,8 @@ ScanDialog::ScanDialog(QWidget* parent)
             titleLayout->insertWidget(0, logoLabel);
             
             QLabel* brandLabel = new QLabel("FERREX-META");
-            // 间距计算：margin-left 6px + spacing 4px = 10px (补偿视觉)
-            brandLabel->setStyleSheet("background: transparent; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 6px;");
+            // 间距计算：margin-left 1px + spacing 4px = 5px (按照用户要求紧凑化)
+            brandLabel->setStyleSheet("background: transparent; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 1px;");
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
@@ -564,6 +564,7 @@ ScanDialog::ScanDialog(QWidget* parent)
                 m_resultView->verticalHeader()->setDefaultSectionSize(v); 
                 m_iconView->setTargetRowHeight(v); 
                 m_tableModel->clearThumbCache(); 
+                m_tableModel->updateResults(); // 确保触发重新加载并生成新尺寸的缩略图
                 m_config.save(); 
             }); 
             
