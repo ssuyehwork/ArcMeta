@@ -356,27 +356,27 @@ private:
     }
 
 public:
-    static QPixmap getShellThumbnail(const QString& path, int size, bool forceMirror = false) {
+    static QImage getShellThumbnail(const QString& path, int size, bool forceMirror = false) {
         // 2026-06-xx 物理重构：引入磁盘缓存机制，消除“失忆症”
         QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QString cacheDir = QDir(appData).filePath("thumbs/");
         QDir().mkpath(cacheDir);
 
         QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v2 标识，强制失效之前的“倒置”缩略图缓存
-        QString hashKey = QString("%1_%2_%3_%4_v2").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v5 标识，强制失效之前的错误缓存
+        QString hashKey = QString("%1_%2_%3_%4_v5").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
         QString safeName = QString::number(qHash(hashKey), 16) + ".png";
         QString cachePath = cacheDir + safeName;
 
         if (QFile::exists(cachePath)) {
-            QPixmap pix;
-            if (pix.load(cachePath)) return pix;
+            QImage img;
+            if (img.load(cachePath)) return img;
         }
 
 #ifdef Q_OS_WIN
         PIDLIST_ABSOLUTE pidl = nullptr;
         HRESULT hr = SHParseDisplayName(path.toStdWString().c_str(), nullptr, &pidl, 0, nullptr);
-        if (FAILED(hr)) return QPixmap();
+        if (FAILED(hr)) return QImage();
         IShellItem* pItem = nullptr;
         hr = SHCreateItemFromIDList(pidl, IID_IShellItem, (void**)&pItem);
         ILFree(pidl);
@@ -388,11 +388,10 @@ public:
                 HBITMAP hBitmap = nullptr;
                 hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
-                    QImage img = QImage::fromHBITMAP(hBitmap);
-                    // 2026-06-xx 物理修正：移除错误的垂直翻转。
-                    // 实验证明，现代 Qt::fromHBITMAP 已能正确处理 DIB 步长，手动 flipped 导致了画面倒置。
+                    // 2026-06-xx 物理修正：回归垂直翻转处理。
+                    // 经验证 Windows Shell 返回的 HBITMAP 为 Bottom-up DIB，在当前环境下必须手动翻转。
+                    QImage img = QImage::fromHBITMAP(hBitmap).flipped(Qt::Vertical);
                     if (forceMirror) img = img.flipped(Qt::Vertical); 
-                    QPixmap pix = QPixmap::fromImage(img);
                     
                     // 异步存入磁盘缓存
                     (void)QtConcurrent::run([img, cachePath]() {
@@ -402,7 +401,7 @@ public:
                     DeleteObject(hBitmap);
                     pFactory->Release();
                     pItem->Release();
-                    return pix;
+                    return img;
                 }
                 pFactory->Release();
             }
@@ -411,7 +410,7 @@ public:
 #else
         Q_UNUSED(path); Q_UNUSED(size); Q_UNUSED(forceMirror);
 #endif
-        return QPixmap();
+        return QImage();
     }
 };
 

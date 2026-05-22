@@ -272,23 +272,27 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
                 int thumbSize = (dlg && dlg->m_viewStack->currentIndex() == 0) ? 24 : (dlg ? dlg->m_config.iconSize : 64);
 
                 (void)QtConcurrent::run([mutableThis, key, fullPath, cacheKey, thumbSize, ext]() {
-                    QPixmap thumb;
+                    QImage img;
                     if (ext == "svg") {
                         QSvgRenderer renderer(fullPath);
                         if (renderer.isValid()) {
-                            thumb = QPixmap(thumbSize, thumbSize);
-                            thumb.fill(Qt::transparent);
-                            QPainter painter(&thumb);
+                            img = QImage(thumbSize, thumbSize, QImage::Format_ARGB32);
+                            img.fill(Qt::transparent);
+                            QPainter painter(&img);
                             renderer.render(&painter);
                             painter.end();
                         }
                     } else {
-                        thumb = UiHelper::getShellThumbnail(fullPath, thumbSize);
+                        img = UiHelper::getShellThumbnail(fullPath, thumbSize);
                     }
-                    if (!thumb.isNull()) {
-                        double ar = (double)thumb.width() / thumb.height();
-                        QMetaObject::invokeMethod(mutableThis, [mutableThis, key, cacheKey, thumb, ar]() {
-                            mutableThis->m_thumbCache.insert(cacheKey, new QPixmap(thumb));
+                    if (!img.isNull()) {
+                        double ar = (double)img.width() / img.height();
+                        QMetaObject::invokeMethod(mutableThis, [mutableThis, key, cacheKey, img, ar]() {
+                            // 物理加固：显式转换并验证，杜绝类型初始化错误
+                            QPixmap pix = QPixmap::fromImage(img);
+                            if (!pix.isNull()) {
+                                mutableThis->m_thumbCache.insert(cacheKey, new QPixmap(pix));
+                            }
                             mutableThis->m_aspectRatios[key] = ar;
                             
                             // 2026-06-xx 物理安全：直接从 Snapshot 中定位 Position，杜绝脱节
@@ -477,13 +481,14 @@ ScanDialog::ScanDialog(QWidget* parent)
             QLabel* logoLabel = new QLabel();
             logoLabel->setFixedSize(16, 16);
             logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#FF8C00"), 16).pixmap(16, 16));
-            // 恢复高度并设为透明，物理分割线已独立
-            logoLabel->setStyleSheet("background: transparent;"); 
+            // 物理修正：显式清除所有边距以确保基准对齐
+            logoLabel->setStyleSheet("background: transparent; margin: 0px; padding: 0px;"); 
             titleLayout->insertWidget(0, logoLabel);
             
             QLabel* brandLabel = new QLabel("FERREX-META");
-            // 间距计算：margin-left 6px + spacing 4px = 10px (补偿视觉)
-            brandLabel->setStyleSheet("background: transparent; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 6px;");
+            brandLabel->setObjectName("TitleBrandLabel");
+            // 物理修正：将 margin-left 设为 0px。配合 Layout Spacing 4px 达到 4px 左右的极紧凑视觉
+            brandLabel->setStyleSheet("background: transparent; color: #FF8C00; font-size: 14px; font-weight: bold; letter-spacing: 1.5px; margin-left: 0px; padding: 0px;");
             titleLayout->insertWidget(1, brandLabel);
             
             titleLayout->insertWidget(2, m_titleStatusLabel);
@@ -564,6 +569,7 @@ ScanDialog::ScanDialog(QWidget* parent)
                 m_resultView->verticalHeader()->setDefaultSectionSize(v); 
                 m_iconView->setTargetRowHeight(v); 
                 m_tableModel->clearThumbCache(); 
+                m_tableModel->updateResults(); // 确保触发重新加载并生成新尺寸的缩略图
                 m_config.save(); 
             }); 
             
@@ -610,7 +616,19 @@ ScanDialog::ScanDialog(QWidget* parent)
     setupUi();
 
     // --- 2026-06-xx 架构级 QSS：实现样式沙箱与物理隔离 ---
-    this->setStyleSheet(R"(
+    // 2026-06-xx 物理修正：将标题栏品牌标签样式移入此处，确保优先级并严格锁定 1px 边距 (+4px Spacing = 5px Gap)
+    this->setStyleSheet(this->styleSheet() + R"(
+        #TitleBrandLabel {
+            background: transparent; 
+            color: #FF8C00; 
+            font-size: 14px; 
+            font-weight: bold; 
+            letter-spacing: 1.5px; 
+            /* 物理负边距补偿：由 -2px 增加至 -4px，确保产生非常明显的紧凑效果 */
+            margin-left: -4px; 
+            padding: 0px;
+        }
+
         #DialogContainer {
             background-color: #1E1E1E;
             border: 1px solid #333333;
@@ -802,12 +820,13 @@ void ScanDialog::setupUi() {
     m_driveContainer->setObjectName("DriveContainer");
     m_driveContainer->setAttribute(Qt::WA_StyledBackground, true);
     m_driveLayout = new QHBoxLayout(m_driveContainer);
-    // 2026-06-xx 按照建议：盘符部分也调整为 10 像素间距
-    m_driveLayout->setContentsMargins(5, 0, 5, 0);
+    // 2026-06-xx 按照建议：盘符起始坐标向右偏移 5 像素 (5 -> 10)
+    m_driveLayout->setContentsMargins(10, 0, 5, 0);
     m_driveLayout->setSpacing(10);
     driveScroll->setWidget(m_driveContainer);
 
     auto* topControl = new QHBoxLayout();
+    // 物理修正：恢复容器边距为 0，防止整个框发生偏移
     topControl->setContentsMargins(0, 0, 0, 0);
     topControl->addWidget(driveScroll, 1);
     mainLayout->addLayout(topControl);
@@ -995,6 +1014,8 @@ void ScanDialog::setupUi() {
     statusContainer->setFixedHeight(20);
     statusContainer->setStyleSheet("QWidget#StatusContainer { background: transparent; border: none; }");
     auto* statusBar = new QHBoxLayout(statusContainer);
+    // 2026-06-xx 按照用户要求：显式设置垂直居中对齐
+    statusBar->setAlignment(Qt::AlignVCenter);
     statusBar->setContentsMargins(16, 0, 16, 0);
     statusBar->setSpacing(0);
 
@@ -1042,6 +1063,17 @@ void ScanDialog::refreshDriveList(bool forceProbe) {
         updateDriveButtonStyles();
         return;
     }
+
+    // 2026-06-xx 按照用户要求：加载盘符数据（.scch）之前，先显示占位提示
+    QLayoutItem* child;
+    while ((child = m_driveLayout->takeAt(0)) != nullptr) {
+        if (child->widget()) child->widget()->deleteLater();
+        delete child;
+    }
+    QLabel* loadingLbl = new QLabel("更新数据中...");
+    loadingLbl->setStyleSheet("color: #7A8F9E; font-size: 12px; font-weight: bold; margin-left: 10px;");
+    m_driveLayout->addWidget(loadingLbl);
+    m_driveLayout->addStretch();
 
     QPointer<ScanDialog> weakThis(this);
     (void)(QtConcurrent::run)([weakThis]() {
