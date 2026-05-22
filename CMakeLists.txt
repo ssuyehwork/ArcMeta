@@ -96,6 +96,8 @@ set(SOURCES
     src/ui/ColorPicker.h
     src/ui/ContentPanel.cpp
     src/ui/ContentPanel.h
+    src/ui/DropJustifiedView.cpp
+    src/ui/DropJustifiedView.h
     src/ui/DropListView.cpp
     src/ui/DropListView.h
     src/ui/DropTreeView.cpp
