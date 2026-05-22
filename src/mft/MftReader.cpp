@@ -11,6 +11,8 @@
 #include <mutex>
 #include <numeric>
 #include <filesystem>
+#include <queue>
+#include <functional>
 #include <QDebug>
 #include <QRegularExpression>
 #include <QDir>
@@ -274,23 +276,21 @@ bool MftReader::loadFromCache() {
         }
     }
 
-    QWriteLocker lock(&m_dataLock);
-    if (m_frns.empty()) return false;
-    rebuildFrnToIndexMap();
-
-    // 2026-05-14 核心性能优化：执行 K 路归并合并排序索引 (Complexity: O(N log K))
-    // 这取代了耗时的 O(N log N) 全量排序，是 C++ 找回极致性能的关键
+    // 2026-06-xx 物理性能优化：将 K 路归并移出核心锁区域，杜绝加载过程中的 UI 死锁
+    std::vector<uint32_t> mergedIndices;
     if (!allSortedIndices.empty()) {
-        m_sorted_indices.clear();
-        m_sorted_indices.reserve(m_frns.size());
+        mergedIndices.reserve(m_frns.size());
 
         struct MergeNode {
             uint32_t globalIdx;
             size_t driveArrIdx;
             size_t innerIdx;
+            std::vector<uint8_t>* pool;
+            std::vector<uint32_t>* offsets;
+
             bool operator>(const MergeNode& other) const {
-                const char* s1 = reinterpret_cast<const char*>(MftReader::instance().m_string_pool.data() + MftReader::instance().m_name_offsets[globalIdx]);
-                const char* s2 = reinterpret_cast<const char*>(MftReader::instance().m_string_pool.data() + MftReader::instance().m_name_offsets[other.globalIdx]);
+                const char* s1 = reinterpret_cast<const char*>(pool->data() + (*offsets)[globalIdx]);
+                const char* s2 = reinterpret_cast<const char*>(pool->data() + (*offsets)[other.globalIdx]);
                 return _stricmp(s1, s2) > 0;
             }
         };
@@ -298,19 +298,27 @@ bool MftReader::loadFromCache() {
 
         for (size_t i = 0; i < allSortedIndices.size(); ++i) {
             if (!allSortedIndices[i].sorted.empty()) {
-                pq.push({allSortedIndices[i].sorted[0] + allSortedIndices[i].baseIdx, i, 0});
+                pq.push({allSortedIndices[i].sorted[0] + allSortedIndices[i].baseIdx, i, 0, &m_string_pool, &m_name_offsets});
             }
         }
 
         while (!pq.empty()) {
             MergeNode top = pq.top();
             pq.pop();
-            m_sorted_indices.push_back(top.globalIdx);
+            mergedIndices.push_back(top.globalIdx);
             if (top.innerIdx + 1 < allSortedIndices[top.driveArrIdx].sorted.size()) {
                 size_t nextInner = top.innerIdx + 1;
-                pq.push({allSortedIndices[top.driveArrIdx].sorted[nextInner] + allSortedIndices[top.driveArrIdx].baseIdx, top.driveArrIdx, nextInner});
+                pq.push({allSortedIndices[top.driveArrIdx].sorted[nextInner] + allSortedIndices[top.driveArrIdx].baseIdx, top.driveArrIdx, nextInner, &m_string_pool, &m_name_offsets});
             }
         }
+    }
+
+    QWriteLocker lock(&m_dataLock);
+    if (m_frns.empty()) return false;
+    rebuildFrnToIndexMap();
+
+    if (!mergedIndices.empty()) {
+        m_sorted_indices = std::move(mergedIndices);
     } else {
         buildSortedIndices();
     }

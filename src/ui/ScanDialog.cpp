@@ -778,14 +778,14 @@ ScanDialog::ScanDialog(QWidget* parent)
     }
 
     QTimer::singleShot(100, this, [this]() {
-        updateStatus("正在载入本地快照...");
+        updateStatus("正在载入本地快照...", true);
         QPointer<ScanDialog> weakThis(this);
         (void)(QtConcurrent::run)([weakThis]() {
             bool ok = MftReader::instance().loadFromCache();
             QMetaObject::invokeMethod(weakThis.data(), [weakThis, ok]() {
                 if (!weakThis) return;
                 if (ok) {
-                    weakThis->updateStatus("就绪");
+                    weakThis->updateStatus("就绪", false);
                     weakThis->m_controller->setSearchText("");
                     weakThis->refreshDriveList(true); // 后台探测硬件
                     // 2026-06-xx 物理对标：如果开启了“自动显示”，加载快照后立即触发一次全量过滤显示
@@ -793,7 +793,7 @@ ScanDialog::ScanDialog(QWidget* parent)
                         weakThis->onFilterOptionChanged();
                     }
                 } else {
-                    weakThis->updateStatus("未检测到快照，全自动初始化...");
+                    weakThis->updateStatus("未检测到快照，全自动初始化...", false);
                     weakThis->refreshDriveList(true);
                     weakThis->onStartScan();
                 }
@@ -829,6 +829,7 @@ void ScanDialog::setupUi() {
     m_driveLayout->setContentsMargins(10, 0, 5, 0);
     m_driveLayout->setSpacing(10);
     driveScroll->setWidget(m_driveContainer);
+    showDriveLoading(); // 确保从一开始就显示“更新数据中...”
 
     auto* topControl = new QHBoxLayout();
     // 物理修正：恢复容器边距为 0，防止整个框发生偏移
@@ -1061,8 +1062,6 @@ void ScanDialog::setupUi() {
     connect(m_controller, &ScanController::resultsSwapped, this, [this]() {
         updateStatusBar();
     });
-
-    showDriveLoading();
 }
 
 void ScanDialog::showDriveLoading() {
@@ -1595,13 +1594,16 @@ void ScanDialog::onFilterOptionChanged() {
 }
 
 void ScanDialog::updateStatus(const QString& text, bool scanning, int64_t totalCount) {
-    Q_UNUSED(text);
     if (m_titleStatusLabel) {
         int64_t total = (totalCount >= 0) ? totalCount : MftReader::instance().totalCount();
         m_titleStatusLabel->setText(QString("%1 - %2").arg(scanning ? "SCANNING" : "READY").arg(formatNumber(total)));
         m_titleStatusLabel->setStyleSheet(scanning ? "color: #FF8C00; font-size: 10px; font-weight: bold;" : "color: #46B478; font-size: 10px; font-weight: bold;");
     }
     
+    if (!text.isEmpty()) {
+        m_statLabelMain->setText(text);
+    }
+
     if (scanning) { m_progressBar->show(); m_progressBar->setRange(0, 0); }
     else { m_progressBar->hide(); updateStatusBar(); }
 }
