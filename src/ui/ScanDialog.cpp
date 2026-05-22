@@ -1014,6 +1014,8 @@ void ScanDialog::setupUi() {
     statusContainer->setFixedHeight(20);
     statusContainer->setStyleSheet("QWidget#StatusContainer { background: transparent; border: none; }");
     auto* statusBar = new QHBoxLayout(statusContainer);
+    // 2026-06-xx 按照用户要求：显式设置垂直居中对齐
+    statusBar->setAlignment(Qt::AlignVCenter);
     statusBar->setContentsMargins(16, 0, 16, 0);
     statusBar->setSpacing(0);
 
@@ -1061,6 +1063,17 @@ void ScanDialog::refreshDriveList(bool forceProbe) {
         updateDriveButtonStyles();
         return;
     }
+
+    // 2026-06-xx 按照用户要求：加载盘符数据（.scch）之前，先显示占位提示
+    QLayoutItem* child;
+    while ((child = m_driveLayout->takeAt(0)) != nullptr) {
+        if (child->widget()) child->widget()->deleteLater();
+        delete child;
+    }
+    QLabel* loadingLbl = new QLabel("更新数据中...");
+    loadingLbl->setStyleSheet("color: #7A8F9E; font-size: 12px; font-weight: bold; margin-left: 10px;");
+    m_driveLayout->addWidget(loadingLbl);
+    m_driveLayout->addStretch();
 
     QPointer<ScanDialog> weakThis(this);
     (void)(QtConcurrent::run)([weakThis]() {
