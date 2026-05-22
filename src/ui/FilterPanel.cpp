@@ -146,9 +146,10 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     setAttribute(Qt::WA_StyledBackground, true);
     setMinimumWidth(230);
     
-    // 核心修正：移除宽泛的 QWidget QSS，防止其屏蔽 MainWindow 赋予的 ID 边框样式
-    // 统一将文字颜色设为 #EEEEEE
-    setStyleSheet("color: #EEEEEE;");
+    // 核心修正：显式设置边框和背景，确保“物理切割感”
+    setFrameShape(QFrame::StyledPanel);
+    setLineWidth(1);
+    setStyleSheet("#FilterContainer { border: 1px solid #333333; background-color: #1E1E1E; color: #EEEEEE; }");
 
     m_mainLayout = new QVBoxLayout(this);
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
