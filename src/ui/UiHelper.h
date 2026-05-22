@@ -206,11 +206,53 @@ public:
     }
 
     /**
-     * @brief 对颜色进行 3-bit 量化，确保存储与搜索的一致性
+     * @brief 对颜色进行量化与感知匹配，确保存储与搜索的一致性
+     * 2026-06-xx 升级：由简单的 3-bit 截断改为基于感知权重的欧式距离匹配
      */
     static inline QColor quantizeColor(const QColor& color) {
         if (!color.isValid()) return color;
-        return QColor(color.red() & 0xE0, color.green() & 0xE0, color.blue() & 0xE0);
+
+        // 1. 定义标准感知色板 (32个标准色，涵盖主流色相与明度)
+        static const QVector<QColor> standardPalette = {
+            QColor("#000000"), QColor("#FFFFFF"), QColor("#808080"), // 黑白灰
+            QColor("#FF0000"), QColor("#800000"), QColor("#FFCCCC"), // 红
+            QColor("#00FF00"), QColor("#008000"), QColor("#CCFFCC"), // 绿
+            QColor("#0000FF"), QColor("#000080"), QColor("#CCCCFF"), // 蓝
+            QColor("#FFFF00"), QColor("#808000"), QColor("#FFFFCC"), // 黄
+            QColor("#FF00FF"), QColor("#800080"), QColor("#FFCCFF"), // 品红
+            QColor("#00FFFF"), QColor("#008080"), QColor("#CCFFFF"), // 青
+            QColor("#FFA500"), QColor("#FF8C00"), QColor("#FFD700"), // 橙/金
+            QColor("#A52A2A"), QColor("#8B4513"), QColor("#D2B48C"), // 棕/褐
+            QColor("#800080"), QColor("#4B0082"), QColor("#E6E6FA")  // 紫
+        };
+
+        // 2. 在 RGB 空间计算加权欧式距离 (人眼对绿色更敏感)
+        // 权重系数：R:0.3, G:0.59, B:0.11 (参考亮度计算公式)
+        auto getDistance = [](const QColor& c1, const QColor& c2) -> double {
+            double dr = c1.red() - c2.red();
+            double dg = c1.green() - c2.green();
+            double db = c1.blue() - c2.blue();
+            // 使用感知加权欧式距离
+            return std::sqrt(dr * dr * 0.299 + dg * dg * 0.587 + db * db * 0.114);
+        };
+
+        QColor closest = standardPalette[0];
+        double minDistance = getDistance(color, closest);
+
+        for (int i = 1; i < standardPalette.size(); ++i) {
+            double dist = getDistance(color, standardPalette[i]);
+            if (dist < minDistance) {
+                minDistance = dist;
+                closest = standardPalette[i];
+            }
+        }
+
+        // 如果距离最近的标准色依然很远，回退到精细量化 (4-bit)
+        if (minDistance > 60.0) {
+            return QColor(color.red() & 0xF0, color.green() & 0xF0, color.blue() & 0xF0);
+        }
+
+        return closest;
     }
 
 

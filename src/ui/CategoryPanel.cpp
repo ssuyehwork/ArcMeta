@@ -935,7 +935,8 @@ void CategoryPanel::initUi() {
             QMap<QString, int> pathIdMap;
 
             // 辅助处理函数：执行物理入库并归类
-            auto processItem = [&](const QString& itemPath, int catId) {
+            auto processItem = [&](const QString& itemPath, int catId, int parentCatIdForFeedback) {
+                Q_UNUSED(parentCatIdForFeedback);
                 QFileInfo info(itemPath);
                 std::wstring wPath = QDir::toNativeSeparators(itemPath).toStdWString();
                 std::string fid;
@@ -955,24 +956,26 @@ void CategoryPanel::initUi() {
                         CategoryRepo::addItemToCategory(catId, fid);
                     }
 
-                    // 2026-06-xx 物理同步：触发元数据持久化以生成 .am_meta.json，实现“目录导航”状态感应
-                    MetadataManager::instance().syncPhysicalMetadata(wPath);
-
                     // 2026-06-xx 按照用户要求：针对特定格式文件，在拖拽导入时自动进行颜色解析
                     QString ext = info.suffix().toLower();
                     static const QSet<QString> targetExts = {"psd", "ai", "eps", "png", "jpg", "jpeg"};
                     if (targetExts.contains(ext)) {
-                        // 1. 提取全量色板
-                        auto palette = UiHelper::extractPalette(itemPath);
-                        if (!palette.isEmpty()) {
-                            // 2. 提取第一个颜色作为主色调并量化
-                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                            QString colorHex = dominant.name().toUpper();
+                        // 性能优化：并发限制 (使用 SharedPointer，在 run 之前获取许可避免过度入队导致假死)
+                        m_colorSema->acquire();
+                        (void)QtConcurrent::run([this, wPath, itemPath]() {
+                            // 1. 提取全量色板
+                            auto palette = UiHelper::extractPalette(itemPath);
+                            if (!palette.isEmpty()) {
+                                // 2. 提取第一个颜色作为主色调并量化
+                                QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                QString colorHex = dominant.name().toUpper();
 
-                            // 3. 物理双重存储：主色 + 全量变长色板
-                            MetadataManager::instance().setColor(wPath, colorHex.toStdWString());
-                            MetadataManager::instance().setPalettes(wPath, palette);
-                        }
+                                // 3. 物理双重存储：主色 + 全量变长色板 (单例内部需处理并发锁)
+                                MetadataManager::instance().setColor(wPath, colorHex.toStdWString());
+                                MetadataManager::instance().setPalettes(wPath, palette);
+                            }
+                            m_colorSema->release();
+                        });
                     }
                 }
             };
@@ -1000,36 +1003,75 @@ void CategoryPanel::initUi() {
                             // 创建子分类并记录 ID
                             int newId = ensureCategory(info.fileName().toStdWString(), currentParentId);
                             pathIdMap[nativePath] = newId;
-                            // 2026-06-xx 物理同步：文件夹入库后同样同步元数据
-                            MetadataManager::instance().syncPhysicalMetadata(info.absoluteFilePath().toStdWString());
                         } else {
                             if (info.fileName() == ".am_meta.json") continue; // 2026-06-xx 物理隔离
                             // 文件入库并关联到当前层级分类
-                            processItem(itemPath, currentParentId);
+                            processItem(itemPath, currentParentId, rootCatId);
                         }
 
                         currentTask++;
                         if (currentTask % 100 == 0) {
                             db.commit(); db.transaction();
-                            QMetaObject::invokeMethod(progress, [progress, currentTask, nativePath]() {
+                            int percent = (int)((float)currentTask / totalItems * 100);
+                            QMetaObject::invokeMethod(progress, [progress, currentTask, nativePath, rootCatId, percent, this]() {
                                 progress->setValue(currentTask);
                                 progress->setStatus("正在导入: " + QFileInfo(nativePath).fileName());
+
+                                // 2026-06-xx UX 增强：在侧边栏分类名旁提示百分比
+                                if (rootCatId > 0 && m_categoryModel) {
+                                    QModelIndex rootIdx;
+                                    std::function<QModelIndex(const QModelIndex&)> findId;
+                                    findId = [&](const QModelIndex& parent) -> QModelIndex {
+                                        for (int i = 0; i < m_categoryModel->rowCount(parent); ++i) {
+                                            QModelIndex idx = m_categoryModel->index(i, 0, parent);
+                                            if (idx.data(CategoryModel::IdRole).toInt() == rootCatId) return idx;
+                                            QModelIndex child = findId(idx);
+                                            if (child.isValid()) return child;
+                                        }
+                                        return QModelIndex();
+                                    };
+                                    rootIdx = findId(QModelIndex());
+                                    if (rootIdx.isValid()) {
+                                        QString originalName = rootIdx.data(CategoryModel::NameRole).toString();
+                                        m_categoryModel->setData(rootIdx, QString("%1 (%2%)").arg(originalName).arg(percent), Qt::DisplayRole);
+                                    }
+                                }
                             });
                         }
                     }
                 } else {
                     // 单个文件逻辑：入空白归未分类(catId=0)，入分类归该分类
-                    processItem(rootPath, targetCatId);
+                    processItem(rootPath, targetCatId, targetCatId);
                     currentTask++;
                 }
             }
             
             db.commit();
 
-            QMetaObject::invokeMethod(this, [this, progress]() {
+            QMetaObject::invokeMethod(this, [this, progress, targetCatId]() {
                 progress->accept();
                 progress->deleteLater();
-                
+
+                // 2026-06-xx 物理修复：导入完成后恢复分类名称显示
+                if (targetCatId > 0) {
+                    QModelIndex rootIdx;
+                    std::function<QModelIndex(const QModelIndex&)> findId;
+                    findId = [&](const QModelIndex& parent) -> QModelIndex {
+                        for (int i = 0; i < m_categoryModel->rowCount(parent); ++i) {
+                            QModelIndex idx = m_categoryModel->index(i, 0, parent);
+                            if (idx.data(CategoryModel::IdRole).toInt() == targetCatId) return idx;
+                            QModelIndex child = findId(idx);
+                            if (child.isValid()) return child;
+                        }
+                        return QModelIndex();
+                    };
+                    rootIdx = findId(QModelIndex());
+                    if (rootIdx.isValid()) {
+                        QString name = rootIdx.data(CategoryModel::NameRole).toString();
+                        m_categoryModel->setData(rootIdx, name, Qt::DisplayRole);
+                    }
+                }
+
                 QSet<int> expandedIds;
                 QStringList expandedNames;
                 saveExpandedState(m_categoryTree, QModelIndex(), expandedIds, expandedNames);

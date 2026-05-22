@@ -28,161 +28,156 @@ void CategoryModel::deferredRefresh() {
 }
 
 void CategoryModel::refresh() {
-    // 2026-06-xx 物理修复：废除破坏性的 clear()，改用 beginResetModel 手动管理。
-    // 理由：clear() 会提前发射重置信号，导致 UI 在数据还没填充时就尝试恢复展开状态，引发折叠。
+    // 2026-06-xx 物理修复：回归 ResetModel 架构并配合状态恢复，解决大量原子操作导致的 UI 假死
     beginResetModel();
     
-    // 清理旧项
-    removeRows(0, rowCount());
-    
-    QStandardItem* root = invisibleRootItem();
+    // 获取最新数据
+    auto sysCounts = CategoryRepo::getSystemCounts();
+    auto categories = CategoryRepo::getAll();
+    auto countsVec = CategoryRepo::getCounts();
+    QMap<int, int> catCounts;
+    for (const auto& p : countsVec) catCounts[p.first] = p.second;
 
-    // 1. 系统模块 (同步构建 - 8项)
+    int currentRow = 0;
+
+    // 1. 系统模块 (增量同步)
     if (m_type == System || m_type == Both) {
-        auto counts = CategoryRepo::getSystemCounts();
-        
-        auto addSystemItem = [&](const QString& name, const QString& type, const QString& icon, const QString& color, int sysId) {
-            int count = counts.value(type, 0);
-            QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
-            item->setData(type, TypeRole);
-            item->setData(name, NameRole);
-            item->setData(color, ColorRole); 
-            // 2026-06-xx 物理修复：为系统项分配负数 ID，彻底消除与数据库 ID (0/正数) 的歧义冲突
-            item->setData(sysId, IdRole);
-            item->setEditable(false); 
-            item->setIcon(UiHelper::getIcon(icon, QColor(color), 16));
-            root->appendRow(item);
+        struct SysDef { QString name; QString type; QString icon; QString color; int id; };
+        static const QList<SysDef> sysDefs = {
+            {"全部数据", "all", "all_data", "#3498db", -1},
+            {"未分类", "uncategorized", "uncategorized", "#95a5a6", -2},
+            {"未标签", "untagged", "untagged", "#7f8c8d", -3},
+            {"今日数据", "today", "today", "#2ecc71", -4},
+            {"昨日数据", "yesterday", "today", "#f39c12", -5},
+            {"最近访问", "recently_visited", "clock", "#9b59b6", -6},
+            {"标签管理", "tags", "tag", "#1abc9c", -7},
+            {"回收站", "trash", "trash", "#e74c3c", -8}
         };
 
-        // [还原] 还原原始设计的语义化图标与配色
-        // 物理分配负值 ID 空间
-        addSystemItem("全部数据", "all", "all_data", "#3498db", -1);
-        addSystemItem("未分类", "uncategorized", "uncategorized", "#95a5a6", -2);
-        addSystemItem("未标签", "untagged", "untagged", "#7f8c8d", -3);
-        addSystemItem("今日数据", "today", "today", "#2ecc71", -4);
-        addSystemItem("昨日数据", "yesterday", "today", "#f39c12", -5);
-        addSystemItem("最近访问", "recently_visited", "clock", "#9b59b6", -6);
-        addSystemItem("标签管理", "tags", "tag", "#1abc9c", -7);
-        addSystemItem("回收站", "trash", "trash", "#e74c3c", -8);
-    }
-
-    // 2. 快速访问模块
-    QStandardItem* favGroup = nullptr;
-    if (m_type == Both || m_type == User) {
-        favGroup = new QStandardItem("快速访问");
-        favGroup->setData("快速访问", NameRole);
-        favGroup->setSelectable(false);
-        favGroup->setEditable(false);
-        favGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#FFFFFF"), 16));
-        
-        QFont font = favGroup->font();
-        font.setBold(true);
-        favGroup->setFont(font);
-        favGroup->setForeground(QColor("#FFFFFF"));
-        root->appendRow(favGroup);
-
-        // A. 物理收藏路径 (FavoritesRepo)
-        auto favorites = FavoritesRepo::getAll();
-        for (const auto& fav : favorites) {
-            QStandardItem* item = new QStandardItem(QString::fromStdWString(fav.name));
-            item->setData("bookmark", TypeRole);
-            item->setData(QString::fromStdWString(fav.path), PathRole);
-            item->setData(QString::fromStdWString(fav.name), NameRole);
-            item->setIcon(UiHelper::getIcon("folder_filled", QColor("#555555"), 16));
-            favGroup->appendRow(item);
+        for (const auto& def : sysDefs) {
+            int count = sysCounts.value(def.type, 0);
+            QString display = QString("%1 (%2)").arg(def.name).arg(count);
+            
+            if (currentRow < rowCount() && index(currentRow, 0).data(IdRole).toInt() == def.id) {
+                QStandardItem* existing = item(currentRow);
+                if (existing->text() != display) existing->setText(display);
+            } else {
+                QStandardItem* newItem = new QStandardItem(display);
+                newItem->setData(def.type, TypeRole);
+                newItem->setData(def.name, NameRole);
+                newItem->setData(def.color, ColorRole); 
+                newItem->setData(def.id, IdRole);
+                newItem->setEditable(false); 
+                newItem->setIcon(UiHelper::getIcon(def.icon, QColor(def.color), 16));
+                insertRow(currentRow, newItem);
+            }
+            currentRow++;
         }
     }
 
-    // 3. 我的分类模块
-    QStandardItem* userGroup = nullptr;
-    if (m_type == User || m_type == Both) {
-        userGroup = new QStandardItem("我的分类");
-        userGroup->setData("我的分类", NameRole);
-        userGroup->setSelectable(false);
-        userGroup->setEditable(false);
-        userGroup->setFlags(userGroup->flags() | Qt::ItemIsDropEnabled);
-        userGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#FFFFFF"), 16));
+    // 辅助函数：同步组标题项
+    auto syncGroupHeader = [&](int row, const QString& name, const QString& iconName) -> QStandardItem* {
+        if (row < rowCount() && index(row, 0).data(NameRole).toString() == name) {
+            return item(row);
+        } else {
+            QStandardItem* group = new QStandardItem(name);
+            group->setData(name, NameRole);
+            group->setSelectable(false);
+            group->setEditable(false);
+            if (name == "我的分类") group->setFlags(group->flags() | Qt::ItemIsDropEnabled);
+            group->setIcon(UiHelper::getIcon(iconName, QColor("#FFFFFF"), 16));
+            QFont font = group->font(); font.setBold(true); group->setFont(font);
+            group->setForeground(QColor("#FFFFFF"));
+            insertRow(row, group);
+            return group;
+        }
+    };
+
+    // 2. 快速访问
+    QStandardItem* favGroup = nullptr;
+    if (m_type == Both || m_type == User) {
+        favGroup = syncGroupHeader(currentRow++, "快速访问", "folder_filled");
+        auto favorites = FavoritesRepo::getAll();
         
-        QFont font = userGroup->font();
-        font.setBold(true);
-        userGroup->setFont(font);
-        userGroup->setForeground(QColor("#FFFFFF"));
-        root->appendRow(userGroup);
-
-        auto categories = CategoryRepo::getAll();
-        auto countsVec = CategoryRepo::getCounts();
-        QMap<int, int> counts;
-        for (const auto& p : countsVec) counts[p.first] = p.second;
-
-        QMap<int, QStandardItem*> itemMap;
-        QMap<int, Category> catMap;
-
-        // 先创建所有分类节点，但不挂载
+        // 同步书签与置顶分类镜像
+        // 由于此处涉及多源数据组合，暂时采用清空子项再重建的方式
+        favGroup->removeRows(0, favGroup->rowCount());
+        
+        for (const auto& fav : favorites) {
+            QStandardItem* bItem = new QStandardItem(QString::fromStdWString(fav.name));
+            bItem->setData("bookmark", TypeRole);
+            bItem->setData(QString::fromStdWString(fav.path), PathRole);
+            bItem->setData(QString::fromStdWString(fav.name), NameRole);
+            bItem->setIcon(UiHelper::getIcon("folder_filled", QColor("#555555"), 16));
+            favGroup->appendRow(bItem);
+        }
+        
         for (const auto& cat : categories) {
-            catMap[cat.id] = cat;
+            if (cat.pinned) {
+                QString name = QString::fromStdWString(cat.name);
+                QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
+                QStandardItem* mirror = new QStandardItem(name);
+                mirror->setData("category", TypeRole);
+                mirror->setData(cat.id, IdRole);
+                mirror->setData(color, ColorRole);
+                mirror->setData(name, NameRole);
+                mirror->setData(true, PinnedRole);
+                if (cat.encrypted && !m_unlockedIds.contains(cat.id)) {
+                    mirror->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
+                } else {
+                    mirror->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
+                }
+                favGroup->appendRow(mirror);
+            }
+        }
+    }
+
+    // 3. 我的分类
+    if (m_type == User || m_type == Both) {
+        QStandardItem* userGroup = syncGroupHeader(currentRow++, "我的分类", "folder_filled");
+        
+        // 2026-06-xx 物理回退：废除复杂的节点缓存对比逻辑
+        // 理由：大量的小型 insertRow/removeRow 操作在大型树中性能极差，且难以处理复杂的镜像层级
+        // 方案：在 beginResetModel/endResetModel 块内进行纯净的全量构建
+        QMap<int, QStandardItem*> itemMap;
+        for (const auto& cat : categories) {
             int id = cat.id;
             QString name = QString::fromStdWString(cat.name);
             QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
-            int count = counts.value(id, 0);
+            int count = catCounts.value(id, 0);
+            QString display = QString("%1 (%2)").arg(name).arg(count);
 
-            QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
-            item->setData("category", TypeRole);
-            item->setData(id, IdRole);
-            item->setData(color, ColorRole);
-            item->setData(name, NameRole);
-            item->setData(cat.pinned, PinnedRole);
-            item->setData(cat.encrypted, EncryptedRole);
-            item->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
-            item->setFlags(item->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+            QStandardItem* catItem = new QStandardItem(display);
+            catItem->setData("category", TypeRole);
+            catItem->setData(id, IdRole);
+            catItem->setData(color, ColorRole);
+            catItem->setData(name, NameRole);
+            catItem->setData(cat.pinned, PinnedRole);
+            catItem->setData(cat.encrypted, EncryptedRole);
+            catItem->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
+            catItem->setFlags(catItem->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
             
             if (cat.encrypted && !m_unlockedIds.contains(id)) {
-                item->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
+                catItem->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
             } else {
-                item->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
+                catItem->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
             }
-            itemMap[id] = item;
+            itemMap[id] = catItem;
         }
 
-        // 2026-06-xx 按照用户要求回归“镜像模式”：实体保留，置顶生成快捷镜像
-        // 逻辑：1. 在“我的分类”中构建完整树；2. 将置顶项镜像一份到“快速访问”
-        
-        // 1. 在“我的分类”构建完整原始树 (不收置顶状态位移干扰)
         for (const auto& cat : categories) {
-            int id = cat.id;
-            QStandardItem* item = itemMap[id];
-            int parentId = cat.parentId;
-
-            if (parentId > 0 && itemMap.contains(parentId)) {
-                itemMap[parentId]->appendRow(item);
-            } else if (userGroup) {
-                userGroup->appendRow(item);
+            QStandardItem* catItem = itemMap[cat.id];
+            if (cat.parentId > 0 && itemMap.contains(cat.parentId)) {
+                itemMap[cat.parentId]->appendRow(catItem);
+            } else {
+                userGroup->appendRow(catItem);
             }
         }
-
-        // 2. 为置顶项在“快速访问”中创建虚拟镜像 (快捷入口)
-        if (favGroup) {
-            for (const auto& cat : categories) {
-                if (cat.pinned) {
-                    int id = cat.id;
-                    QString name = QString::fromStdWString(cat.name);
-                    QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
-                    
-                    QStandardItem* mirror = new QStandardItem(name);
-                    mirror->setData("category", TypeRole);
-                    mirror->setData(id, IdRole);
-                    mirror->setData(color, ColorRole);
-                    mirror->setData(name, NameRole);
-                    mirror->setData(true, PinnedRole);
-                    
-                    if (cat.encrypted && !m_unlockedIds.contains(id)) {
-                        mirror->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
-                    } else {
-                        mirror->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
-                    }
-                    favGroup->appendRow(mirror);
-                }
-            }
-        }
+    }
+    
+    // 清理多余的顶层行
+    if (rowCount() > currentRow) {
+        removeRows(currentRow, rowCount() - currentRow);
     }
     
     endResetModel();

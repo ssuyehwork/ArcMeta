@@ -2,6 +2,7 @@
 
 #include <QStandardItemModel>
 #include <QSet>
+#include <QMap>
 
 namespace ArcMeta {
 
