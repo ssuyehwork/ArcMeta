@@ -130,6 +130,7 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
         qDebug() << "[Sync] 开始执行 FID 驱动型对账同步，任务数:" << pendingFids.size();
 
         // 2026-06-xx 性能优化：卷句柄缓存 (Volume Handle Cache)
+        // 傻逼逻辑排查：严禁在循环内频繁 Open/Close 卷句柄，改用长期持有策略
         std::map<std::wstring, HANDLE> volCache;
         auto getCachedVolHandle = [&](const std::string& fidStr) -> HANDLE {
             size_t dashPos = fidStr.find('-');
@@ -143,6 +144,7 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
             if (driveLetter == 0) return INVALID_HANDLE_VALUE;
 
             std::wstring driveRoot = std::wstring(1, driveLetter) + L":\\";
+            // 物理修复：使用最低权限打开卷句柄，仅用于 OpenFileById
             HANDLE hVol = CreateFileW(driveRoot.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
             if (hVol != INVALID_HANDLE_VALUE) {
                 volCache[volSerial] = hVol;

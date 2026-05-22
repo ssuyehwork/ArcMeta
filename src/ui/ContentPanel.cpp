@@ -2037,6 +2037,7 @@ void ContentPanel::recalculateAndEmitStats() {
 
     for (int i = 0; i < rowCount; ++i) {
         QModelIndex idx = isFiltering ? m_proxyModel->index(i, 0) : m_model->index(i, 0);
+        if (!idx.isValid()) continue;
 
         int rating = idx.data(RatingRole).toInt();
         QString type = idx.data(TypeRole).toString();

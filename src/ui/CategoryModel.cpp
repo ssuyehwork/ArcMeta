@@ -166,8 +166,9 @@ void CategoryModel::refresh() {
         QStandardItem* userGroup = syncGroupHeader(currentRow++, "我的分类", "folder_filled");
 
         // 递归查找/更新函数
+        // 2026-07-05 修复：显式指定 std::function 模板参数，确保 lambda 捕获与递归逻辑闭环
         std::function<void(QStandardItem*, const std::vector<Category>&)> syncLevel;
-        syncLevel = [&](QStandardItem* parentItem, const std::vector<Category>& levelCats) {
+        syncLevel = [this, &catCounts, &categories, &syncLevel](QStandardItem* parentItem, const std::vector<Category>& levelCats) {
             int row = 0;
             for (const auto& cat : levelCats) {
                 int id = cat.id;
