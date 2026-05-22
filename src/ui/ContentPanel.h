@@ -56,7 +56,9 @@ enum ItemRole {
     IsEmptyRole,
     CategoryIdRole,
     InDatabaseRole,
-    PalettesRole
+    PalettesRole,
+    AspectRatioRole,
+    HasThumbnailRole
 };
 
 /**
@@ -211,7 +213,7 @@ private:
     QLabel* m_imagePreview = nullptr;
 
     // 视图组件
-    QListView* m_gridView = nullptr;
+    QAbstractItemView* m_gridView = nullptr;
     QTreeView* m_treeView = nullptr;
     QStandardItemModel* m_model = nullptr;
     QSortFilterProxyModel* m_proxyModel = nullptr;
