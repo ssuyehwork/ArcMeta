@@ -46,9 +46,6 @@ public slots:
 private:
     Type m_type;
     QSet<int> m_unlockedIds;
-
-    // 2026-06-xx 物理加固：节点缓存，用于实现增量刷新并确保生命周期安全
-    QMap<int, QStandardItem*> m_itemCache;
 };
 
 } // namespace ArcMeta

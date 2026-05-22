@@ -28,7 +28,8 @@ void CategoryModel::deferredRefresh() {
 }
 
 void CategoryModel::refresh() {
-    // 2026-06-xx 物理优化：全量采用增量刷新 (Incremental Refresh)，彻底解决刷新导致的滚动条跳变与选中丢失问题
+    // 2026-06-xx 物理修复：回归 ResetModel 架构并配合状态恢复，解决大量原子操作导致的 UI 假死
+    beginResetModel();
     
     // 获取最新数据
     auto sysCounts = CategoryRepo::getSystemCounts();
@@ -93,12 +94,13 @@ void CategoryModel::refresh() {
     };
 
     // 2. 快速访问
+    QStandardItem* favGroup = nullptr;
     if (m_type == Both || m_type == User) {
-        QStandardItem* favGroup = syncGroupHeader(currentRow++, "快速访问", "folder_filled");
+        favGroup = syncGroupHeader(currentRow++, "快速访问", "folder_filled");
         auto favorites = FavoritesRepo::getAll();
 
         // 同步书签与置顶分类镜像
-        // 由于此处涉及多源数据组合，暂时采用清空子项再重建的方式（仅限组内，不触发 ResetModel）
+        // 由于此处涉及多源数据组合，暂时采用清空子项再重建的方式
         favGroup->removeRows(0, favGroup->rowCount());
 
         for (const auto& fav : favorites) {
@@ -134,9 +136,10 @@ void CategoryModel::refresh() {
     if (m_type == User || m_type == Both) {
         QStandardItem* userGroup = syncGroupHeader(currentRow++, "我的分类", "folder_filled");
         
-        // 增量构建树形结构：通过 ID 映射尝试重用节点 (使用成员变量 m_itemCache 确保生命周期安全)
-        QMap<int, QStandardItem*> nextItemMap;
-
+        // 2026-06-xx 物理回退：废除复杂的节点缓存对比逻辑
+        // 理由：大量的小型 insertRow/removeRow 操作在大型树中性能极差，且难以处理复杂的镜像层级
+        // 方案：在 beginResetModel/endResetModel 块内进行纯净的全量构建
+        QMap<int, QStandardItem*> itemMap;
         for (const auto& cat : categories) {
             int id = cat.id;
             QString name = QString::fromStdWString(cat.name);
@@ -144,51 +147,30 @@ void CategoryModel::refresh() {
             int count = catCounts.value(id, 0);
             QString display = QString("%1 (%2)").arg(name).arg(count);
 
-            QStandardItem* catItem = m_itemCache.value(id);
-            if (!catItem) {
-                catItem = new QStandardItem(display);
-                catItem->setData("category", TypeRole);
-                catItem->setData(id, IdRole);
-                catItem->setData(color, ColorRole);
-                catItem->setData(name, NameRole);
-                catItem->setFlags(catItem->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
-            } else {
-                if (catItem->text() != display) catItem->setText(display);
-                // 清理旧层级关系，准备重新挂载
-                if (catItem->parent()) catItem->parent()->takeRow(catItem->row());
-            }
-
+            QStandardItem* catItem = new QStandardItem(display);
+            catItem->setData("category", TypeRole);
+            catItem->setData(id, IdRole);
+            catItem->setData(color, ColorRole);
+            catItem->setData(name, NameRole);
             catItem->setData(cat.pinned, PinnedRole);
             catItem->setData(cat.encrypted, EncryptedRole);
             catItem->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
+            catItem->setFlags(catItem->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
             
             if (cat.encrypted && !m_unlockedIds.contains(id)) {
                 catItem->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
             } else {
                 catItem->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
             }
-            nextItemMap[id] = catItem;
+            itemMap[id] = catItem;
         }
 
-        // 重新挂载逻辑
-        // 1. 移除已删除分类
-        for (auto it = m_itemCache.begin(); it != m_itemCache.end(); ) {
-            if (!nextItemMap.contains(it.key())) {
-                if (it.value()->parent()) it.value()->parent()->removeRow(it.value()->row());
-                it = m_itemCache.erase(it);
-            } else {
-                ++it;
-            }
-        }
-        m_itemCache = nextItemMap;
-
-        // 2. 物理挂载 (根据父子关系)
         for (const auto& cat : categories) {
-            QStandardItem* catItem = m_itemCache[cat.id];
-            QStandardItem* parentItem = (cat.parentId > 0) ? m_itemCache.value(cat.parentId) : userGroup;
-
-            if (parentItem && catItem->parent() != parentItem) {
-                parentItem->appendRow(catItem);
+            QStandardItem* catItem = itemMap[cat.id];
+            if (cat.parentId > 0 && itemMap.contains(cat.parentId)) {
+                itemMap[cat.parentId]->appendRow(catItem);
+            } else {
+                userGroup->appendRow(catItem);
             }
         }
     }
@@ -197,6 +179,8 @@ void CategoryModel::refresh() {
     if (rowCount() > currentRow) {
         removeRows(currentRow, rowCount() - currentRow);
     }
+
+    endResetModel();
 }
 
 void CategoryModel::loadCategoryItems(const QModelIndex& parentIndex) {
