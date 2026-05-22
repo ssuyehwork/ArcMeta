@@ -294,18 +294,38 @@ void JustifiedView::doLayout() {
         // 防止行高过大，限制在目标高度的 1.5 倍
         if (actualHeight > m_targetRowHeight * 1.5) actualHeight = qRound(m_targetRowHeight * 1.5);
 
-        int currentX = margin;
         const int textHeight = 36;
+        const int minItemWidth = 40;
+
+        // 预计算宽度并初步应用最小宽度限制
+        std::vector<int> widths(numInRow);
+        int totalItemsWidth = 0;
+        for (int j = 0; j < numInRow; ++j) {
+            widths[j] = std::max(minItemWidth, qRound(aspectRatios[j] * actualHeight));
+            totalItemsWidth += widths[j];
+        }
+
+        // 布局平衡：如果由于 minItemWidth 导致总宽度偏离 containerWidth，进行平滑修正
+        if (!isLastRow && numInRow > 0) {
+            int diff = (containerWidth - (spacing * (numInRow - 1))) - totalItemsWidth;
+            if (diff != 0) {
+                // 将差值分配给项，尽量不打破最小宽度限制
+                for (int j = 0; j < numInRow && diff != 0; ++j) {
+                    if (widths[j] > minItemWidth || diff > 0) {
+                        int adj = diff / (numInRow - j);
+                        if (widths[j] + adj < minItemWidth) adj = minItemWidth - widths[j];
+                        widths[j] += adj;
+                        diff -= adj;
+                    }
+                }
+            }
+        }
+
+        int currentX = margin;
         for (int j = 0; j < numInRow; ++j) {
             int itemIdx = rowStart + j;
-            int itemWidth = qRound(aspectRatios[j] * actualHeight);
-            
-            // 最后一个项目：物理对齐右边缘 (margin)
-            if (j == numInRow - 1 && !isLastRow) {
-                itemWidth = (containerWidth + margin) - currentX;
-            }
+            int itemWidth = widths[j];
 
-            // 总高度 = 图片高度 + 文字区域高度
             m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + textHeight), itemIdx };
             currentX += itemWidth + spacing; 
         }

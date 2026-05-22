@@ -13,6 +13,7 @@
 #include <QIcon> 
 #include <QSvgRenderer> 
 #include <QPainter> 
+#include <QPainterPath>
 #include <QHeaderView> 
 #include <QScrollBar> 
 #include <QStyle> 
@@ -1836,9 +1837,40 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     painter->setFont(extFont); 
     painter->drawText(extRect, Qt::AlignCenter, ext); 
  
-    // 3. 主图标 
+    // 3. 主图标 (采用 ScanDialog 风格的填充裁剪)
     QIcon icon = index.data(Qt::DecorationRole).value<QIcon>(); 
-    icon.paint(painter, m.iconRect); 
+    if (!icon.isNull()) {
+        // 提取尺寸 (例如 128x128 或根据 m.squareRect 大小取舍)
+        QSize targetSize = m.squareRect.size();
+        QPixmap pixmap = icon.pixmap(targetSize * painter->device()->devicePixelRatio());
+        if (!pixmap.isNull()) {
+            painter->save();
+
+            // A. 开启抗锯齿和高质量缩放
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setRenderHint(QPainter::SmoothPixmapTransform);
+
+            // B. 创建圆角裁剪路径 (作用于整个图标绘制区 m.squareRect)
+            QPainterPath path;
+            path.addRoundedRect(m.squareRect, 8, 8);
+            painter->setClipPath(path);
+
+            // C. 执行“按比例填充”缩放 (KeepAspectRatioByExpanding)
+            // 物理修复：在 High DPI 下，应缩放至物理像素尺寸以保持清晰度
+            QSize pixelSize = m.squareRect.size() * painter->device()->devicePixelRatio();
+            QPixmap scaled = pixmap.scaled(pixelSize,
+                                          Qt::KeepAspectRatioByExpanding,
+                                          Qt::SmoothTransformation);
+            scaled.setDevicePixelRatio(painter->device()->devicePixelRatio());
+
+            // D. 居中绘制 (此处 x, y 仍为逻辑坐标)
+            int x = m.squareRect.center().x() - (scaled.width() / (int)scaled.devicePixelRatio()) / 2;
+            int y = m.squareRect.center().y() - (scaled.height() / (int)scaled.devicePixelRatio()) / 2;
+            painter->drawPixmap(x, y, scaled);
+
+            painter->restore();
+        }
+    }
  
     // 4. 评级星级 
     int rating = index.data(RatingRole).toInt(); 

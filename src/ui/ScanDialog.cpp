@@ -346,6 +346,10 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
     } else if (role == Qt::UserRole + 2) {
         // 返回宽高比 (用于 JustifiedView 布局)
         return m_aspectRatios.value(key, 1.0);
+    } else if (role == Qt::UserRole + 3) {
+        // 2026-06-xx 性能优化：在 Model 层预先获取评分，避免 Delegate 高频查询
+        std::wstring path = reader.getFullPath(actualIndex).toStdWString();
+        return MetadataManager::instance().getRating(path);
     }
     return QVariant();
 }

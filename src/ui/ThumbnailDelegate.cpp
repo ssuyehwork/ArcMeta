@@ -22,7 +22,14 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    // ① 圆角裁剪（仅作用于卡片）
+    // ① 悬停状态 (Hover) 背景
+    if (option.state & QStyle::State_MouseOver) {
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(255, 255, 255, 15)); // 轻微提亮
+        painter->drawRoundedRect(cardRect, 6, 6);
+    }
+
+    // ② 圆角裁剪（仅作用于卡片）
     QPainterPath clipPath;
     clipPath.addRoundedRect(cardRect, 6, 6);
     painter->setClipPath(clipPath);
@@ -45,6 +52,37 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
 
     // [V3 物理优化] 彻底移除选中高亮叠加层，确保图片颜色准确性
     // 删除了原有的 painter->fillRect(cardRect, QColor(255, 140, 0, 50)) 逻辑
+
+    // ③ 信息密度增强：在缩略图上以半透明层形式叠加载入评分
+    int rating = index.data(Qt::UserRole + 3).toInt(); // 2026-06-xx 性能优化：直接从 Model 获取评分
+    if (rating > 0) {
+        // 物理修复：不重置 ClipPath，而是利用现有 ClipPath 确保评分条也有圆角
+        // 绘制底部半透明遮罩层
+        int barHeight = 24;
+        QRect ratingBar(cardRect.left(), cardRect.bottom() - barHeight, cardRect.width(), barHeight);
+        painter->fillRect(ratingBar, QColor(0, 0, 0, 100));
+
+        // 绘制评分星级
+        int starSize = 14;
+        int starSpacing = 2;
+        int totalW = 5 * starSize + 4 * starSpacing;
+        int startX = ratingBar.left() + (ratingBar.width() - totalW) / 2;
+        int startY = ratingBar.top() + (ratingBar.height() - starSize) / 2;
+
+        // 2026-06-xx 性能优化：静态缓存 Pixmap 避免重复创建
+        static QPixmap filledStar, emptyStar;
+        static int lastStarSize = -1;
+        if (lastStarSize != starSize) {
+            filledStar = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), QColor("#EF9F27"));
+            emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), QColor("#888888"));
+            lastStarSize = starSize;
+        }
+
+        for (int i = 0; i < 5; ++i) {
+            QRect starRect(startX + i * (starSize + starSpacing), startY, starSize, starSize);
+            painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
+        }
+    }
 
     painter->restore(); // 释放裁剪区
 
