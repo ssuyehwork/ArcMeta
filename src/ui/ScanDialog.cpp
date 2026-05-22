@@ -1056,15 +1056,13 @@ void ScanDialog::setupUi() {
     connect(m_controller, &ScanController::resultsSwapped, this, [this]() {
         updateStatusBar();
     });
+
+    showDriveLoading();
 }
 
-void ScanDialog::refreshDriveList(bool forceProbe) {
-    if (!forceProbe && !m_cachedDriveInfos.isEmpty()) {
-        updateDriveButtonStyles();
-        return;
-    }
+void ScanDialog::showDriveLoading() {
+    if (!m_driveLayout) return;
 
-    // 2026-06-xx 按照用户要求：加载盘符数据（.scch）之前，先显示占位提示
     QLayoutItem* child;
     while ((child = m_driveLayout->takeAt(0)) != nullptr) {
         if (child->widget()) child->widget()->deleteLater();
@@ -1074,6 +1072,16 @@ void ScanDialog::refreshDriveList(bool forceProbe) {
     loadingLbl->setStyleSheet("color: #7A8F9E; font-size: 12px; font-weight: bold; margin-left: 10px;");
     m_driveLayout->addWidget(loadingLbl);
     m_driveLayout->addStretch();
+}
+
+void ScanDialog::refreshDriveList(bool forceProbe) {
+    if (!forceProbe && !m_cachedDriveInfos.isEmpty()) {
+        updateDriveButtonStyles();
+        return;
+    }
+
+    // 2026-06-xx 按照用户要求：加载盘符数据（.scch）之前，先显示占位提示
+    showDriveLoading();
 
     QPointer<ScanDialog> weakThis(this);
     (void)(QtConcurrent::run)([weakThis]() {

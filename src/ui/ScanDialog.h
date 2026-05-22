@@ -122,6 +122,7 @@ protected:
 
 private:
     void setupUi();
+    void showDriveLoading();
     void refreshDriveList(bool forceProbe = false);
     void updateDriveButtonStyles();
     void updateStatus(const QString& text, bool scanning = false);
