@@ -212,9 +212,9 @@ ContentPanel::ContentPanel(QWidget* parent)
     setObjectName("EditorContainer"); 
     setAttribute(Qt::WA_StyledBackground, true); 
     setMinimumWidth(230); 
-    setFrameShape(QFrame::NoFrame);
-    setLineWidth(0);
-    setStyleSheet("#EditorContainer { border: none; background-color: #1E1E1E; }");
+    setFrameShape(QFrame::StyledPanel);
+    setLineWidth(1);
+    setStyleSheet("#EditorContainer { border: 1px solid #333333; background-color: #1E1E1E; }");
  
     m_mainLayout = new QVBoxLayout(this); 
     m_mainLayout->setContentsMargins(0, 0, 0, 0); 
