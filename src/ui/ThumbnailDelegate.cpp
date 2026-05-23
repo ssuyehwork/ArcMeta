@@ -73,39 +73,33 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
     // ① 绘制内容与裁剪 (Cover 模式)
+    painter->save();
+    QPainterPath clipPath;
+    clipPath.addRoundedRect(m.cardRect, 6, 6);
+    painter->setClipPath(clipPath);
+
+    // 绘制卡片背景 (填充整个矩形)
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor("#2d2d2d"));
+    painter->drawRect(m.cardRect);
+
     if (hasThumb && !thumb.isNull()) {
-        painter->save();
-        QPainterPath clipPath;
-        clipPath.addRoundedRect(m.cardRect, 6, 6);
-        painter->setClipPath(clipPath);
-
-        // 绘制卡片背景
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor("#2d2d2d"));
-        painter->drawRoundedRect(m.cardRect, 6, 6);
-
         QPixmap scaled = thumb.scaled(m.cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
         int x = m.cardRect.center().x() - scaled.width() / 2;
         int y = m.cardRect.center().y() - scaled.height() / 2;
         painter->drawPixmap(x, y, scaled);
-        painter->restore();
     } else {
-        painter->save();
-        QPainterPath clipPath;
-        clipPath.addRoundedRect(m.cardRect, 6, 6);
-        painter->setClipPath(clipPath);
-
-        // 绘制卡片背景
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor("#2d2d2d"));
-        painter->drawRect(m.cardRect);
-
         QIcon icon = qvariant_cast<QIcon>(decoData);
-        QPoint center = m.cardRect.center();
-        if (!icon.isNull())
-            icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
-        painter->restore();
+        if (!icon.isNull()) {
+            // 确保图标在正方形背景中居中显示，且不留白（由背景色填充）
+            int iconSize = qMin(m.cardRect.width(), m.cardRect.height()) * 0.6;
+            QRect iconRect(m.cardRect.center().x() - iconSize / 2,
+                           m.cardRect.center().y() - iconSize / 2,
+                           iconSize, iconSize);
+            icon.paint(painter, iconRect);
+        }
     }
+    painter->restore();
 
     // ③ 绘制卡片边框 (选中 3px 蓝色，未选中 1px #4a4a4a)
     painter->save();

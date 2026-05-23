@@ -270,7 +270,7 @@ void JustifiedView::doLayout() {
 
         while (i < count) {
             double ar = model()->data(model()->index(i, 0), m_aspectRatioRole).toDouble();
-            if (ar <= 0) ar = 1.333;
+            if (ar <= 0) ar = 1.0;
             
             aspectRatios.push_back(ar);
             rowAspectRatioSum += ar;
@@ -298,6 +298,7 @@ void JustifiedView::doLayout() {
 
         int actualHeight = m_targetRowHeight;
         bool isLastRow = (i == count);
+        bool rowIsJustified = false;
 
         // 2026-06-xx 物理修正：考虑 ThumbnailDelegate 的内边距 (左右各 3px = 6px)
         // 实际图片可用总宽度 = 容器宽度 - (项间距) - (所有项的 6px 内边距)
@@ -305,10 +306,14 @@ void JustifiedView::doLayout() {
 
         if (!isLastRow) {
             actualHeight = qRound(availableImageWidth / rowAspectRatioSum);
+            // 只有当行高在合理范围内（目标高度的 0.75 到 1.5 倍）时才进行两端对齐
+            if (actualHeight >= m_targetRowHeight * 0.75 && actualHeight <= m_targetRowHeight * 1.5) {
+                rowIsJustified = true;
+            } else {
+                actualHeight = std::min(actualHeight, (int)(m_targetRowHeight * 1.5));
+                actualHeight = std::max(actualHeight, (int)(m_targetRowHeight * 0.75));
+            }
         }
-
-        // 防止行高过大，限制在目标高度的 1.5 倍
-        if (actualHeight > m_targetRowHeight * 1.5) actualHeight = qRound(m_targetRowHeight * 1.5);
 
         int currentX = margin;
         const int textHeight = 36;
@@ -321,7 +326,7 @@ void JustifiedView::doLayout() {
             int itemIdx = rowStart + j;
             int itemWidth;
 
-            if (j == numInRow - 1 && !isLastRow) {
+            if (j == numInRow - 1 && rowIsJustified) {
                 // 最后一个 item 精确填满剩余宽度，消除舍入误差导致的空隙
                 itemWidth = (containerWidth + margin) - currentX;
             } else {
