@@ -152,25 +152,32 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         int rating = index.data(m_ratingRole).toInt();
         bool shouldShowRating = (rating > 0) || isSelected;
 
+        QColor starColor("#CCCCCC");
+        QColor emptyStarColor("#888888");
+
         if (m_colorRole != -1) {
             QString colorStr = index.data(m_colorRole).toString();
             QColor bgColor = UiHelper::parseColorName(colorStr);
             if (bgColor.isValid() && shouldShowRating) {
                 painter->save();
-                bgColor.setAlpha(150); // 设置半透明度
                 painter->setBrush(bgColor);
                 painter->setPen(Qt::NoPen);
                 // 计算并绘制圆角矩形背景
                 QRect totalRect = m.banRect.united(m.starRect(4));
                 painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
                 painter->restore();
+
+                // 物理对标参考图：在彩色背景上使用深色图标 (背景色的加深版本)
+                starColor = bgColor.darker(250);
+                emptyStarColor = bgColor.darker(150);
+                emptyStarColor.setAlpha(100);
             }
         }
 
         if (shouldShowRating) {
-            UiHelper::getIcon("no_color", QColor("#B0B0B0"), m.banRect.width()).paint(painter, m.banRect);
-            QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#B0B0B0"));
-            QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#888888"));
+            UiHelper::getIcon("no_color", starColor, m.banRect.width()).paint(painter, m.banRect);
+            QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), starColor);
+            QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor);
             for (int i = 0; i < 5; ++i) {
                 painter->drawPixmap(m.starRect(i), (i < rating) ? filledStar : emptyStar);
             }
@@ -202,7 +209,8 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     painter->restore();
 
     // ④ [新增] 空文件夹特殊标记 (ContentPanel 移植)
-    if (m_isEmptyRole != -1 && m_typeRole != -1) {
+    // 物理优化：如果已选中，则不显示虚线，避免与 3px 蓝色边框冲突
+    if (!isSelected && m_isEmptyRole != -1 && m_typeRole != -1) {
         if (index.data(m_typeRole).toString() == "folder" && index.data(m_isEmptyRole).toBool()) {
             painter->save();
             painter->setRenderHint(QPainter::Antialiasing);

@@ -768,7 +768,7 @@ void ContentPanel::initGridView() {
     m_gridView->setStyleSheet( 
         "QAbstractItemView { background-color: transparent; border: none; outline: none; }" 
         "QAbstractItemView::item { background: transparent; }" 
-        "QAbstractItemView::item:selected { background-color: rgba(55, 138, 221, 0.2); border-radius: 8px; }" 
+        "QAbstractItemView::item:selected { background-color: transparent; }" 
     ); 
  
     connect(m_gridView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
@@ -1824,6 +1824,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     GridMetrics m = calculateMetrics(option); 
     bool isSelected = (option.state & QStyle::State_Selected); 
     bool isHovered = (option.state & QStyle::State_MouseOver); 
+    QString colorName = index.data(ColorRole).toString();
      
     // 2026-06-05 按照用户要求：背景框仅限正方形区域，名称外置 
     QColor cardBg = isSelected ? QColor("#282828") : (isHovered ? QColor("#2A2A2A") : QColor("#2D2D2D")); 
@@ -1882,12 +1883,33 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     bool shouldShowRating = (rating > 0) || isSelected; 
  
     if (shouldShowRating) { 
+        QColor starColor("#CCCCCC");
+        QColor emptyStarColor("#888888");
+
+        // [新增] 物理同步：绘制彩色背景胶囊
+        if (!colorName.isEmpty()) {
+            QColor bgColor = UiHelper::parseColorName(colorName);
+            if (bgColor.isValid()) {
+                painter->save();
+                painter->setBrush(bgColor);
+                painter->setPen(Qt::NoPen);
+                QRect totalRect = m.banRect.united(QRect(m.starsStartX + 4 * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize));
+                painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
+                painter->restore();
+
+                // 物理对标参考图：在彩色背景上使用深色图标 (背景色的加深版本)
+                starColor = bgColor.darker(250);
+                emptyStarColor = bgColor.darker(150);
+                emptyStarColor.setAlpha(100);
+            }
+        }
+
         // 2026-xx-xx 深度修复：调高禁止图标与空心星亮度，确保在深色卡片背景下清晰可见 
-        QIcon banIcon = UiHelper::getIcon("no_color", QColor("#B0B0B0"), m.banRect.width()); 
+        QIcon banIcon = UiHelper::getIcon("no_color", starColor, m.banRect.width()); 
         banIcon.paint(painter, m.banRect); 
  
-        QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#EF9F27")); 
-        QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#888888")); 
+        QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), starColor); 
+        QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor); 
  
         for (int i = 0; i < 5; ++i) { 
             QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
@@ -1896,11 +1918,10 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     } 
      
     // [名称区绘制] - 在正方形下方 
-    QString colorName = index.data(ColorRole).toString(); 
     bool isEmptyFolder = (index.data(TypeRole).toString() == "folder" && index.data(IsEmptyRole).toBool()); 
  
-    if (isEmptyFolder) { 
-        // 对空文件夹正方形区进行特殊描边 
+    if (!isSelected && isEmptyFolder) { 
+        // 对空文件夹正方形区进行特殊描边 (仅限未选中状态，防止与蓝色边框重叠)
         painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine)); 
         painter->setBrush(QColor(65, 242, 242, 30)); 
         painter->drawRoundedRect(m.squareRect, 8, 8); 
