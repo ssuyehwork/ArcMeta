@@ -24,18 +24,25 @@ void ThumbnailDelegate::setIsEmptyRole(int role) { m_isEmptyRole = role; }
 ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptionViewItem& option) const {
     Metrics m;
     const int textHeight = 36;
-    m.cardRect = option.rect.adjusted(3, 3, -3, -(textHeight + 3));
+    const int ratingHeight = 20;
+    const int gap = 4;
+
+    m.ratingH = ratingHeight;
+    // 底部预留高度增加，包含星级区域和间隙
+    m.cardRect = option.rect.adjusted(3, 3, -3, -(textHeight + m.ratingH + gap + 3));
+    
+    // 星级坐标脱离卡片范围
+    m.ratingY = m.cardRect.bottom() + gap;
+
     m.textRect = QRect(option.rect.left() + 3,
-                       option.rect.bottom() - textHeight,
+                       m.ratingY + m.ratingH,
                        option.rect.width() - 6,
                        textHeight);
     
-    m.ratingH = 16;
-    m.ratingY = m.cardRect.bottom() - m.ratingH - 4;
-    m.starSize = 14;
+    m.starSize = 18;
     m.starSpacing = 2;
-    int banW = 12;
-    int banGap = 4;
+    int banW = 14;
+    int banGap = 5; // 保持间隙一致性
     int infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing);
     int infoStartX = m.cardRect.left() + (m.cardRect.width() - infoTotalW) / 2;
     
@@ -115,27 +122,21 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         painter->drawText(extRect, Qt::AlignCenter, ext);
     }
 
-    // [新增] 评级星级
+    painter->restore(); // 释放裁剪区 (解除对 cardRect 的裁剪)
+
+    // [新增] 评级星级 (现在绘制在裁剪区外，处于卡片与文件名的间隙处)
     if (m_ratingRole != -1) {
         int rating = index.data(m_ratingRole).toInt();
         bool shouldShowRating = (rating > 0) || isSelected;
         if (shouldShowRating) {
-            // 在图片下方绘制半透明背景，确保星级清晰
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(0, 0, 0, 100));
-            painter->drawRect(m.cardRect.left(), m.ratingY - 2, m.cardRect.width(), m.ratingH + 4);
-
             UiHelper::getIcon("no_color", QColor("#B0B0B0"), m.banRect.width()).paint(painter, m.banRect);
-            QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(m.starSize, m.starSize), QColor("#EF9F27"));
-            QPixmap emptyStar = UiHelper::getPixmap("star", QSize(m.starSize, m.starSize), QColor("#888888"));
+            QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#EF9F27"));
+            QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#888888"));
             for (int i = 0; i < 5; ++i) {
-                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
-                painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
+                painter->drawPixmap(m.starRect(i), (i < rating) ? filledStar : emptyStar);
             }
         }
     }
-
-    painter->restore(); // 释放裁剪区
 
     // ② 选中与悬停边框（在裁剪区外绘制，确保完整显示）
     if (isSelected) {
@@ -207,14 +208,9 @@ QWidget* ThumbnailDelegate::createEditor(QWidget* parent, const QStyleOptionView
 void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
                                               const QStyleOptionViewItem& option,
                                               const QModelIndex& /*index*/) const {
-    const int textHeight = 36;
-    // 按照用户要求：修正编辑器位置。
-    // 计算文字区域：位于整体区域底部 textHeight 像素
-    QRect textRect(option.rect.left() + 4,
-                   option.rect.bottom() - textHeight + 4,
-                   option.rect.width() - 8,
-                   textHeight - 8);
-    editor->setGeometry(textRect);
+    Metrics m = calculateMetrics(option);
+    // 修正编辑器位置，使其与文件名文字区域对齐并留出少量边距
+    editor->setGeometry(m.textRect.adjusted(1, 4, -1, -4));
 }
 
 void ThumbnailDelegate::setEditorData(QWidget* editor, const QModelIndex& index) const {
@@ -267,8 +263,7 @@ bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, co
             }
 
             for (int i = 0; i < 5; ++i) {
-                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
-                if (starRect.contains(mEvent->pos())) {
+                if (m.starRect(i).contains(mEvent->pos())) {
                     model->setData(index, i + 1, m_ratingRole);
                     event->accept();
                     return true;

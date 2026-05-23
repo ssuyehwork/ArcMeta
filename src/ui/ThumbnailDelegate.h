@@ -43,6 +43,12 @@ private:
         int starSpacing;
         int ratingY;
         int ratingH;
+
+        QRect starRect(int index) const {
+            return QRect(starsStartX + index * (starSize + starSpacing), 
+                         ratingY + (ratingH - starSize) / 2, 
+                         starSize, starSize);
+        }
     };
     Metrics calculateMetrics(const QStyleOptionViewItem& option) const;
 };
