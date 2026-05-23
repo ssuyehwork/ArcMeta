@@ -593,14 +593,14 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                  
                 QString colorValue; 
                 switch (keyEvent->key()) { 
-                    case Qt::Key_1: colorValue = "#E04040"; break; // red (quantized)
-                    case Qt::Key_2: colorValue = "#E09020"; break; // orange (quantized)
-                    case Qt::Key_3: colorValue = "#FECF0E"; break; // yellow (quantized)
-                    case Qt::Key_4: colorValue = "#609020"; break; // green (quantized)
-                    case Qt::Key_5: colorValue = "#109070"; break; // cyan (quantized)
-                    case Qt::Key_6: colorValue = "#3080D0"; break; // blue (quantized)
-                    case Qt::Key_7: colorValue = "#7070D0"; break; // purple (quantized)
-                    case Qt::Key_8: colorValue = "#505050"; break; // gray (quantized)
+                    case Qt::Key_1: colorValue = "#E24B4A"; break; // red
+                    case Qt::Key_2: colorValue = "#EF9F27"; break; // orange
+                    case Qt::Key_3: colorValue = "#FECF0E"; break; // yellow
+                    case Qt::Key_4: colorValue = "#639922"; break; // green
+                    case Qt::Key_5: colorValue = "#1D9E75"; break; // cyan
+                    case Qt::Key_6: colorValue = "#378ADD"; break; // blue
+                    case Qt::Key_7: colorValue = "#7F77DD"; break; // purple
+                    case Qt::Key_8: colorValue = "#5F5E5A"; break; // gray
                     case Qt::Key_9: colorValue = ""; break; 
                 } 
  
@@ -852,14 +852,14 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         struct ColorItem { QString value; QString label; QColor preview; }; 
         QList<ColorItem> colorItems = { 
             {"", "无颜色", QColor("#888780")}, 
-            {"#E04040", "红色", QColor("#E24B4A")}, 
-            {"#E09020", "橙色", QColor("#EF9F27")}, 
-            {"#FECF0E", "黄色", QColor("#FAC775")},
-            {"#609020", "绿色", QColor("#639922")}, 
-            {"#109070", "青色", QColor("#1D9E75")}, 
-            {"#3080D0", "蓝色", QColor("#378ADD")}, 
-            {"#7070D0", "紫色", QColor("#7F77DD")}, 
-            {"#505050", "灰色", QColor("#5F5E5A")} 
+            {"#E24B4A", "红色", QColor("#E24B4A")},
+            {"#EF9F27", "橙色", QColor("#EF9F27")},
+            {"#FECF0E", "黄色", QColor("#FECF0E")},
+            {"#639922", "绿色", QColor("#639922")},
+            {"#1D9E75", "青色", QColor("#1D9E75")},
+            {"#378ADD", "蓝色", QColor("#378ADD")},
+            {"#7F77DD", "紫色", QColor("#7F77DD")},
+            {"#5F5E5A", "灰色", QColor("#5F5E5A")}
         }; 
         for (const auto& ci : colorItems) { 
             QAction* ca = colorMenu->addAction(ci.label); 

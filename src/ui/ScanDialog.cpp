@@ -310,7 +310,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
         return reader.getCachedIcon(ext, reader.isDirectory(actualIndex));
     } else if (role == Qt::ForegroundRole) {
         // 2026-05-16 视觉同步：从 MetadataManager 获取颜色标记并适配主界面高端色值
-        // 2026-05-17 按照用户要求：使用 UiHelper::parseColorName 确保所有颜色（如黄色 #FAC775）完全一致高雅
+        // 2026-05-17 按照用户要求：使用 UiHelper::parseColorName 确保所有颜色（如黄色 #FECF0E）完全一致高雅
         std::wstring path = reader.getFullPath(actualIndex).toStdWString();
         auto meta = MetadataManager::instance().getMeta(path);
         if (!meta.color.empty()) {
@@ -1357,14 +1357,14 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
             struct ColorItem { QString value; QString label; QColor preview; };
             QList<ColorItem> colorItems = {
                 {"", "默认", QColor("#888780")},
-                {"#E04040", "红色", QColor("#E24B4A")},
-                {"#E09020", "橙色", QColor("#EF9F27")},
-                {"#FECF0E", "黄色", QColor("#FAC775")},
-                {"#609020", "绿色", QColor("#639922")},
-                {"#109070", "青色", QColor("#1D9E75")},
-                {"#3080D0", "蓝色", QColor("#378ADD")},
-                {"#7070D0", "紫色", QColor("#7F77DD")},
-                {"#505050", "灰色", QColor("#5F5E5A")}
+                {"#E24B4A", "红色", QColor("#E24B4A")},
+                {"#EF9F27", "橙色", QColor("#EF9F27")},
+                {"#FECF0E", "黄色", QColor("#FECF0E")},
+                {"#639922", "绿色", QColor("#639922")},
+                {"#1D9E75", "青色", QColor("#1D9E75")},
+                {"#378ADD", "蓝色", QColor("#378ADD")},
+                {"#7F77DD", "紫色", QColor("#7F77DD")},
+                {"#5F5E5A", "灰色", QColor("#5F5E5A")}
             };
             for (const auto& ci : colorItems) {
                 QAction* act = labelMenu->addAction(ci.label);
@@ -1697,6 +1697,24 @@ void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
     
     std::wstring path = m_tableModel->data(m_tableModel->index(selection.first().row(), 1)).toString().toStdWString();
     auto meta = MetadataManager::instance().getMeta(path);
+
+    // Alt + 1-8: 颜色标记
+    if (event->modifiers() == Qt::AltModifier && event->key() >= Qt::Key_1 && event->key() <= Qt::Key_8) {
+        QString colorValue;
+        switch (event->key()) {
+            case Qt::Key_1: colorValue = "#E24B4A"; break; // red
+            case Qt::Key_2: colorValue = "#EF9F27"; break; // orange
+            case Qt::Key_3: colorValue = "#FECF0E"; break; // yellow
+            case Qt::Key_4: colorValue = "#639922"; break; // green
+            case Qt::Key_5: colorValue = "#1D9E75"; break; // cyan
+            case Qt::Key_6: colorValue = "#378ADD"; break; // blue
+            case Qt::Key_7: colorValue = "#7F77DD"; break; // purple
+            case Qt::Key_8: colorValue = "#5F5E5A"; break; // gray
+        }
+        MetadataManager::instance().setColor(path, colorValue.toStdWString());
+        m_controller->triggerSearch(true);
+        return;
+    }
 
     // Ctrl + 0-5: 评分
     if (event->modifiers() == Qt::ControlModifier && event->key() >= Qt::Key_0 && event->key() <= Qt::Key_5) {

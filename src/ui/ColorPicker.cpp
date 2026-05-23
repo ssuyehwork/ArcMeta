@@ -176,7 +176,7 @@ ColorPicker::ColorPicker(QWidget* parent) : QWidget(parent, Qt::Popup | Qt::Fram
     
     QStringList presets = {
         "#FFFFFF", "#808080", "#000000", "#EAEAEA", "#A0A0A0", "#8B4513", "#FF69B4",
-        "#E24B4A", "#EF9F27", "#FAC775", "#639922", "#1D9E75", "#378ADD", "#7F77DD"
+        "#E24B4A", "#EF9F27", "#FECF0E", "#639922", "#1D9E75", "#378ADD", "#7F77DD"
     };
     
     int row = 0, col = 0;

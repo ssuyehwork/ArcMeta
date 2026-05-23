@@ -16,14 +16,14 @@ namespace ArcMeta {
 QMap<QString, QColor> FilterPanel::s_colorMap() {
     return {
         { "",        QColor("#888780") },
-        { "#E04040", QColor("#E24B4A") },
-        { "#E09020", QColor("#EF9F27") },
-        { "#FECF0E", QColor("#FAC775") },
-        { "#609020", QColor("#639922") },
-        { "#109070", QColor("#1D9E75") },
-        { "#3080D0", QColor("#378ADD") },
-        { "#7070D0", QColor("#7F77DD") },
-        { "#505050", QColor("#5F5E5A") },
+        { "#E24B4A", QColor("#E24B4A") },
+        { "#EF9F27", QColor("#EF9F27") },
+        { "#FECF0E", QColor("#FECF0E") },
+        { "#639922", QColor("#639922") },
+        { "#1D9E75", QColor("#1D9E75") },
+        { "#378ADD", QColor("#378ADD") },
+        { "#7F77DD", QColor("#7F77DD") },
+        { "#5F5E5A", QColor("#5F5E5A") },
         { "#000000", QColor("#000000") },
         { "#FFFFFF", QColor("#FFFFFF") }
     };
