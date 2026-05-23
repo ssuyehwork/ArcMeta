@@ -35,7 +35,7 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
     m.ratingY = m.cardRect.bottom() + gap;
 
     m.textRect = QRect(option.rect.left() + 3,
-                       m.ratingY + m.ratingH,
+                       m.ratingY + m.ratingH - 5,
                        option.rect.width() - 6,
                        textHeight);
     

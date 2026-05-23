@@ -746,6 +746,7 @@ void ContentPanel::initGridView() {
     auto* justifiedView = qobject_cast<JustifiedView*>(m_gridView);
     if (justifiedView) {
         justifiedView->setAspectRatioRole(AspectRatioRole);
+        justifiedView->setHasThumbnailRole(HasThumbnailRole);
         auto* delegate = new ThumbnailDelegate(this);
         delegate->setHasThumbnailRole(HasThumbnailRole);
         delegate->setRatingRole(RatingRole);

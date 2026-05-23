@@ -34,6 +34,13 @@ void JustifiedView::setTargetRowHeight(int h) {
     }
 }
 
+void JustifiedView::setHasThumbnailRole(int role) {
+    if (m_hasThumbnailRole != role) {
+        m_hasThumbnailRole = role;
+        doLayout();
+    }
+}
+
 void JustifiedView::setAspectRatioRole(int role) {
     if (m_aspectRatioRole != role) {
         m_aspectRatioRole = role;
@@ -307,21 +314,21 @@ void JustifiedView::doLayout() {
         const int textHeight = 36;
         const int ratingHeight = 20;
         const int gap = 4;
-        const int cardPadding = 6; // 左右+上下内边距总和
-        const int extraHeight = cardPadding + textHeight + ratingHeight + gap;
+        const int cardPadding = 6; // 左右内边距总和 (3px + 3px)
+        const int extraHeight = 6 + textHeight + ratingHeight + gap; // 6px 是上下内边距总和
 
         for (int j = 0; j < numInRow; ++j) {
             int itemIdx = rowStart + j;
             
             // 2026-06-xx 物理修正：根据是否具有缩略图动态调整宽度
-            // 如果没有缩略图，则 cardRect 应该是正方形 -> cardWidth = actualHeight
-            // itemWidth = cardWidth + cardPadding
-            bool hasThumb = model()->data(model()->index(itemIdx, 0), Qt::UserRole + 14).toBool(); // HasThumbnailRole
+            // 如果没有缩略图，则 cardRect 应该是正方形 -> cardWidth = cardHeight = actualHeight
+            // itemWidth = cardWidth + cardPadding_horizontal
+            bool hasThumb = model()->data(model()->index(itemIdx, 0), m_hasThumbnailRole).toBool();
             int itemWidth;
             if (hasThumb) {
-                itemWidth = qRound(aspectRatios[j] * actualHeight) + cardPadding;
+                itemWidth = qRound(aspectRatios[j] * actualHeight) + 6;
             } else {
-                itemWidth = actualHeight + cardPadding;
+                itemWidth = actualHeight + 6;
             }
 
             // 最后一个项目：物理对齐右边缘 (针对非最后一行且非强制正方形)
