@@ -55,7 +55,6 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
 void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const {
     Metrics m = calculateMetrics(option);
     bool isSelected = (option.state & QStyle::State_Selected);
-    bool isHovered = (option.state & QStyle::State_MouseOver);
 
     bool hasThumb = index.data(m_hasThumbnailRole).toBool();
     QVariant decoData = index.data(Qt::DecorationRole);
