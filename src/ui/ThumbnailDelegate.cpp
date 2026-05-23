@@ -82,7 +82,13 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    // ① 圆角裁剪（仅作用于卡片）
+    // ① 绘制卡片背景 (背景色强制为 #2d2d2d)
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor("#2d2d2d"));
+    painter->drawRoundedRect(m.cardRect, 6, 6);
+
+    // ② 内容绘制与裁剪
+    painter->save();
     QPainterPath clipPath;
     clipPath.addRoundedRect(m.cardRect, 6, 6);
     painter->setClipPath(clipPath);
@@ -90,12 +96,24 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     if (hasThumb && !thumb.isNull()) {
         painter->drawPixmap(m.cardRect.topLeft(), thumb);
     } else {
-        painter->fillRect(m.cardRect, QColor("#2D2D2D"));
         QIcon icon = qvariant_cast<QIcon>(decoData);
         QPoint center = m.cardRect.center();
         if (!icon.isNull())
             icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
     }
+    painter->restore();
+
+    // ③ 绘制卡片边框 (选中 3px 蓝色，未选中 2px #4a4a4a)
+    painter->save();
+    if (isSelected) {
+        painter->setPen(QPen(QColor("#3498db"), 3));
+    } else {
+        painter->setPen(QPen(QColor("#4a4a4a"), 2));
+    }
+    painter->setBrush(Qt::NoBrush);
+    // 抵消画笔宽度导致的一半粗细落在矩形外的问题
+    painter->drawRoundedRect(m.cardRect, 6, 6);
+    painter->restore();
 
     // [新增] 状态位图标绘制 (置顶 vs. 已录入 互斥)
     if (m_pinnedRole != -1 && m_managedRole != -1) {
@@ -144,21 +162,6 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         }
     }
 
-    // ② 选中与悬停边框（在裁剪区外绘制，确保完整显示）
-    if (isSelected) {
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing);
-        painter->setPen(QPen(QColor("#3498db"), 2)); 
-        painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(m.cardRect, 6, 6);
-        painter->restore();
-    } else if (isHovered) {
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing);
-        painter->setPen(QPen(QColor("#444444"), 1));
-        painter->drawRoundedRect(m.cardRect, 6, 6);
-        painter->restore();
-    }
 
     // ③ 文件名（卡片下方）
     painter->save();
