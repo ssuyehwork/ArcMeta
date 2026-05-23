@@ -256,6 +256,11 @@ void JustifiedView::doLayout() {
     int currentY = margin; 
     int i = 0;
     
+    const int textHeight = 36;
+    const int ratingHeight = 20;
+    const int gap = 4;
+    const int extraHeight = 6 + ratingHeight + gap + textHeight; // 上下内边距 6px + 评分区 + 间隙 + 文字区
+
     while (i < count) {
         int rowStart = i;
         double rowAspectRatioSum = 0;
@@ -304,7 +309,6 @@ void JustifiedView::doLayout() {
         if (actualHeight > m_targetRowHeight * 1.5) actualHeight = qRound(m_targetRowHeight * 1.5);
 
         int currentX = margin;
-        const int textHeight = 36;
         for (int j = 0; j < numInRow; ++j) {
             int itemIdx = rowStart + j;
             // 2026-06-xx 物理修正：itemWidth 需要包含左右内边距 (6px)
@@ -315,11 +319,11 @@ void JustifiedView::doLayout() {
                 itemWidth = (containerWidth + margin) - currentX;
             }
 
-            // 总高度 = 图片高度 (actualHeight) + 上下内边距 (6px) + 文字区域高度 (36px)
-            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + 6 + textHeight), itemIdx };
+            // 总高度 = 图片高度 (actualHeight) + extraHeight (包含上下内边距、评分区和文字区)
+            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + extraHeight), itemIdx };
             currentX += itemWidth + spacing; 
         }
-        currentY += actualHeight + 6 + textHeight + spacing; // 统一行高推进
+        currentY += actualHeight + extraHeight + spacing; // 统一行高推进
     }
 
     m_totalHeight = currentY + 10;
