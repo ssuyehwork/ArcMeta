@@ -392,7 +392,7 @@ public:
                     // 实验证明，现代 Qt::fromHBITMAP (Qt 6.x) 已能正确识别 DIB 步长，
                     // 再次执行镜像会导致原本正常的画面倒置。
                     QImage img = QImage::fromHBITMAP(hBitmap);
-                    if (forceMirror) img = img.mirrored(false, true);
+                    if (forceMirror) img = img.flipped(Qt::Vertical);
                     
                     // 异步存入磁盘缓存
                     (void)QtConcurrent::run([img, cachePath]() {

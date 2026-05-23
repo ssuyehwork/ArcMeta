@@ -172,8 +172,8 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     displayName.replace("_", "_\u200B");
     displayName.replace(".", ".\u200B");
 
-    painter->drawText(m_textRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap,
-        option.fontMetrics.elidedText(displayName, Qt::ElideMiddle, m_textRect.width() * 2));
+    painter->drawText(m.textRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap,
+        option.fontMetrics.elidedText(displayName, Qt::ElideMiddle, m.textRect.width() * 2));
     painter->restore();
 
     // ④ [新增] 空文件夹特殊标记 (ContentPanel 移植)
