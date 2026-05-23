@@ -356,15 +356,15 @@ private:
     }
 
 public:
-    static QImage getShellThumbnail(const QString& path, int size, bool forceMirror = false) {
+    static QImage getShellThumbnail(const QString& path, int size) {
         // 2026-06-xx 物理重构：引入磁盘缓存机制，消除“失忆症”
         QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QString cacheDir = QDir(appData).filePath("thumbs/");
         QDir().mkpath(cacheDir);
 
         QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v10 标识，强制刷新并校正倒置的缩略图
-        QString hashKey = QString("%1_%2_%3_%4_v10").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v13 标识，强制失效旧缓存
+        QString hashKey = QString("%1_%2_%3_%4_v13").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
         QString safeName = QString::number(qHash(hashKey), 16) + ".png";
         QString cachePath = cacheDir + safeName;
 
@@ -388,12 +388,33 @@ public:
                 HBITMAP hBitmap = nullptr;
                 hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
-                    // 2026-06-xx 物理校准：强制进行垂直镜像翻转。
-                    // 尽管部分文档称 fromHBITMAP 已修复方向问题，但在当前生产环境下
-                    // Windows DIB 仍然以自下而上的顺序存储，导致渲染结果倒置。
-                    // 升级缓存版本至 v10 以物理重刷所有错误方向的缩略图。
-                    QImage img = QImage::fromHBITMAP(hBitmap).mirrored(false, true);
-                    if (forceMirror) img = img.mirrored(false, true); // 如果外部再次请求翻转，则抵消
+                    BITMAP bmpInfo;
+                    GetObject(hBitmap, sizeof(bmpInfo), &bmpInfo);
+                    int w = bmpInfo.bmWidth;
+                    int h = std::abs(bmpInfo.bmHeight);
+
+                    BITMAPINFOHEADER bi = {};
+                    bi.biSize        = sizeof(BITMAPINFOHEADER);
+                    bi.biWidth       = w;
+                    bi.biHeight      = -h;   // 负值 = top-down，方向永远正确
+                    bi.biPlanes      = 1;
+                    bi.biBitCount    = 32;
+                    bi.biCompression = BI_RGB;
+
+                    QByteArray pixels(w * h * 4, 0);
+                    HDC hdc = GetDC(nullptr);
+                    GetDIBits(hdc, hBitmap, 0, h, pixels.data(),
+                              reinterpret_cast<BITMAPINFO*>(&bi), DIB_RGB_COLORS);
+                    ReleaseDC(nullptr, hdc);
+
+                    // Windows 返回 BGRA，Qt 需要 RGBA，交换 R/B 通道
+                    uint8_t* p = reinterpret_cast<uint8_t*>(pixels.data());
+                    for (int i = 0; i < w * h; ++i) {
+                        std::swap(p[i * 4 + 0], p[i * 4 + 2]);
+                    }
+
+                    QImage img(p, w, h, w * 4, QImage::Format_RGBA8888);
+                    img = img.copy(); // 确保数据所有权
                     
                     // 异步存入磁盘缓存
                     (void)QtConcurrent::run([img, cachePath]() {
@@ -410,7 +431,7 @@ public:
             pItem->Release();
         }
 #else
-        Q_UNUSED(path); Q_UNUSED(size); Q_UNUSED(forceMirror);
+        Q_UNUSED(path); Q_UNUSED(size);
 #endif
         return QImage();
     }
