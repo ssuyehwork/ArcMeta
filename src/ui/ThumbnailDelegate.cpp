@@ -40,9 +40,9 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
                        textHeight);
     
     m.starSize = 18;
-    m.starSpacing = 2;
+    m.starSpacing = 1;
     int banW = 14;
-    int banGap = 5; // 保持间隙一致性
+    int banGap = 2; // 保持间隙一致性
     int infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing);
     int infoStartX = m.cardRect.left() + (m.cardRect.width() - infoTotalW) / 2;
     

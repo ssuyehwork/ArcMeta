@@ -1795,9 +1795,9 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     m.ratingY = m.squareRect.bottom() + 8; 
  
     m.starSize    = 18; // 2026-05-17 尺寸微调以匹配外部布局
-    m.starSpacing = 2;   
+    m.starSpacing = 1;
     int banW = 14;      // 2026-06-xx 物理对齐：将禁止图标缩减至 12px，使其与星级在视觉权重上保持一致
-    int banGap = 4; 
+    int banGap = 2;
  
     m.infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing); 
     m.infoStartX = m.squareRect.left() + (m.squareRect.width() - m.infoTotalW) / 2; 
