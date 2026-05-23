@@ -34,6 +34,13 @@ void JustifiedView::setTargetRowHeight(int h) {
     }
 }
 
+void JustifiedView::setAspectRatioRole(int role) {
+    if (m_aspectRatioRole != role) {
+        m_aspectRatioRole = role;
+        doLayout();
+    }
+}
+
 void JustifiedView::reset() {
     QAbstractItemView::reset();
     doLayout();
@@ -74,7 +81,7 @@ QModelIndex JustifiedView::indexAt(const QPoint& point) const {
 }
 
 void JustifiedView::dataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight, const QList<int>& roles) {
-    if (roles.isEmpty() || roles.contains(Qt::UserRole + 2)) {
+    if (roles.isEmpty() || roles.contains(m_aspectRatioRole)) {
         doLayout();
     }
     QAbstractItemView::dataChanged(topLeft, bottomRight, roles);
@@ -255,7 +262,7 @@ void JustifiedView::doLayout() {
         std::vector<double> aspectRatios;
 
         while (i < count) {
-            double ar = model()->data(model()->index(i, 0), Qt::UserRole + 2).toDouble();
+            double ar = model()->data(model()->index(i, 0), m_aspectRatioRole).toDouble();
             if (ar <= 0) ar = 1.0;
             
             aspectRatios.push_back(ar);

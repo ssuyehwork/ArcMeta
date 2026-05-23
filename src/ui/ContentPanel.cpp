@@ -6,6 +6,8 @@
 #include "TreeItemDelegate.h" 
 #include "DropTreeView.h" 
 #include "DropListView.h" 
+#include "DropJustifiedView.h"
+#include "ThumbnailDelegate.h"
 #include "ToolTipOverlay.h" 
  
 #include <QVBoxLayout> 
@@ -274,6 +276,8 @@ ContentPanel::ContentPanel(QWidget* parent)
             nameItem->setData(data.meta.encrypted, EncryptedRole); 
             nameItem->setData(data.meta.tags, TagsRole); 
             nameItem->setData(data.isEmpty, IsEmptyRole); 
+            nameItem->setData(1.0, AspectRatioRole); // 默认 1.0
+            nameItem->setData(false, HasThumbnailRole);
             // 2026-06-xx 按照要求：注入物理色板，确保多色统计与过滤生效
             QVariantList palList;
             for (const auto& p : data.meta.palettes) {
@@ -336,6 +340,9 @@ ContentPanel::ContentPanel(QWidget* parent)
                             renderer.render(&painter); 
                             painter.end(); 
                             icon = QIcon(svgPixmap); 
+                            
+                            m_model->setData(pIdx, (double)svgPixmap.width() / svgPixmap.height(), AspectRatioRole);
+                            m_model->setData(pIdx, true, HasThumbnailRole);
                         } 
                     } else if (UiHelper::isGraphicsFile(ext)) { 
                         // 2026-04-11 按照用户要求：凡是图片/图形格式，物理强制提取内容缩略图 
@@ -343,6 +350,8 @@ ContentPanel::ContentPanel(QWidget* parent)
                         QImage img = UiHelper::getShellThumbnail(path, this->m_zoomLevel, false); 
                         if (!img.isNull()) { 
                             icon = QIcon(QPixmap::fromImage(img)); 
+                            m_model->setData(pIdx, (double)img.width() / img.height(), AspectRatioRole);
+                            m_model->setData(pIdx, true, HasThumbnailRole);
                         } 
                     } 
  
@@ -478,22 +487,26 @@ void ContentPanel::updateGridSize() {
     // 2026-06-05 按照用户要求：彻底重构为正方形布局，名称外置
     // 2026-06-05 按照要求：将最小值锁定为 56
     m_zoomLevel = qBound(56, m_zoomLevel, 128);
-    m_gridView->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
     
-    int side = m_zoomLevel + 46; // 正方形边长
-    int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
-    int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
-    int gap = 6;                // 间距归一化
-    
-    // 总高度 = 正方形边长 + 间距1 + 评分高度 + 间距2 + 名称高度 + 底部缓冲
-    int totalH = side + gap + ratingH + gap + nameH + 8;
-    m_gridView->setGridSize(QSize(side, totalH));
+    if (auto* jv = qobject_cast<JustifiedView*>(m_gridView)) {
+        jv->setTargetRowHeight(m_zoomLevel);
+    } else if (auto* lv = qobject_cast<QListView*>(m_gridView)) {
+        lv->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
+        int side = m_zoomLevel + 46; // 正方形边长
+        int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
+        int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
+        int gap = 6;                // 间距归一化
+        
+        // 总高度 = 正方形边长 + 间距1 + 评分高度 + 间距2 + 名称高度 + 底部缓冲
+        int totalH = side + gap + ratingH + gap + nameH + 8;
+        lv->setGridSize(QSize(side, totalH));
+    }
 
     // 2026-06-05 按照要求：持久化保存当前的缩放级别
     QSettings settings("ArcMeta团队", "ArcMeta");
     settings.setValue("UI/GridZoomLevel", m_zoomLevel);
 
-    qDebug() << "[GridSize] Zoom:" << m_zoomLevel << "Square:" << side << "TotalH:" << totalH;
+    qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
 } 
  
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 
@@ -716,16 +729,9 @@ void ContentPanel::setViewMode(ViewMode mode) {
 } 
  
 void ContentPanel::initGridView() { 
-    m_gridView = new DropListView(this); 
+    m_gridView = new DropJustifiedView(this); 
     m_gridView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
     m_gridView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
-    m_gridView->setViewMode(QListView::IconMode); 
-    m_gridView->setMovement(QListView::Static); 
-    m_gridView->setSpacing(8); 
-    m_gridView->setResizeMode(QListView::Adjust); 
-    m_gridView->setWrapping(true); 
-    m_gridView->setIconSize(QSize(96, 96)); 
-    m_gridView->setSpacing(0); 
     m_gridView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
     m_gridView->setContextMenuPolicy(Qt::CustomContextMenu); 
  
@@ -736,20 +742,34 @@ void ContentPanel::initGridView() {
     m_gridView->setEditTriggers(QAbstractItemView::EditKeyPressed); 
  
     m_gridView->setModel(m_proxyModel); 
-    m_gridView->setItemDelegate(new GridItemDelegate(this)); 
+
+    auto* justifiedView = qobject_cast<JustifiedView*>(m_gridView);
+    if (justifiedView) {
+        justifiedView->setAspectRatioRole(AspectRatioRole);
+        auto* delegate = new ThumbnailDelegate(this);
+        delegate->setHasThumbnailRole(HasThumbnailRole);
+        delegate->setRatingRole(RatingRole);
+        delegate->setPathRole(PathRole);
+        delegate->setPinnedRole(PinnedRole);
+        delegate->setManagedRole(InDatabaseRole);
+        delegate->setTypeRole(TypeRole);
+        m_gridView->setItemDelegate(delegate);
+    } else {
+        m_gridView->setItemDelegate(new GridItemDelegate(this)); 
+    }
+
     m_gridView->viewport()->installEventFilter(this); 
  
-    connect(m_gridView, &QListView::doubleClicked, this, &ContentPanel::onDoubleClicked); 
+    connect(m_gridView, &QAbstractItemView::doubleClicked, this, &ContentPanel::onDoubleClicked); 
  
     m_gridView->setStyleSheet( 
-        "QListView { background-color: transparent; border: none; outline: none; }" 
-        "QListView::item { background: transparent; }" 
-        "QListView::item:selected { background-color: rgba(55, 138, 221, 0.2); border-radius: 8px; }" 
-        "QListView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }" 
+        "QAbstractItemView { background-color: transparent; border: none; outline: none; }" 
+        "QAbstractItemView::item { background: transparent; }" 
+        "QAbstractItemView::item:selected { background-color: rgba(55, 138, 221, 0.2); border-radius: 8px; }" 
     ); 
  
     connect(m_gridView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
-    connect(m_gridView, &QListView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
+    connect(m_gridView, &QAbstractItemView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
 } 
  
 void ContentPanel::initListView() { 
@@ -1542,6 +1562,8 @@ void ContentPanel::loadCategory(int categoryId) {
             nameItem->setData(rm.pinned, PinnedRole); 
             nameItem->setData(rm.pinned, IsLockedRole); 
             nameItem->setData(rm.tags, TagsRole); 
+            nameItem->setData(1.0, AspectRatioRole);
+            nameItem->setData(false, HasThumbnailRole);
             // 2026-06-xx 注入物理色板
             QVariantList palList;
             for (const auto& p : rm.palettes) {
@@ -1636,6 +1658,8 @@ void ContentPanel::loadPaths(const QStringList& paths) {
         nameItem->setData(rm.pinned, PinnedRole); 
         nameItem->setData(rm.pinned, IsLockedRole); 
         nameItem->setData(rm.tags, TagsRole); 
+        nameItem->setData(1.0, AspectRatioRole);
+        nameItem->setData(false, HasThumbnailRole);
         // 2026-06-xx 注入物理色板
         QVariantList palList;
         for (const auto& p : rm.palettes) {
@@ -1909,11 +1933,6 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     painter->restore(); 
 } 
  
-QSize GridItemDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex&) const { 
-    auto* view = qobject_cast<QListView*>(const_cast<QWidget*>(option.widget)); 
-    if (view && view->gridSize().isValid()) return view->gridSize(); 
-    return QSize(96, 112); 
-} 
  
 bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) { 
     if (event->type() == QEvent::KeyPress) { 
@@ -2111,7 +2130,14 @@ void GridItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionV
     // 2026-06-05 按照重构布局：同步定位编辑器至正方形下方的名称区 
     GridMetrics m = calculateMetrics(option); 
     editor->setGeometry(m.nameRect); 
-} 
+}
+
+QSize GridItemDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const {
+    if (auto* view = qobject_cast<QListView*>(const_cast<QWidget*>(option.widget))) {
+        if (view->gridSize().isValid()) return view->gridSize();
+    }
+    return QStyledItemDelegate::sizeHint(option, index);
+}
  
 } // namespace ArcMeta
 // Force recompile to apply SvgIcons.h changes 

@@ -12,6 +12,7 @@ public:
     explicit JustifiedView(QWidget* parent = nullptr);
 
     void setTargetRowHeight(int h);
+    void setAspectRatioRole(int role);
 
     QRect visualRect(const QModelIndex& index) const override;
     void scrollTo(const QModelIndex& index, ScrollHint hint = EnsureVisible) override;
@@ -47,6 +48,7 @@ private:
     std::vector<ItemGeometry> m_geometries;
     int m_totalHeight = 0;
     int m_targetRowHeight = 128;
+    int m_aspectRatioRole = Qt::UserRole + 2;
 };
 
 } // namespace ArcMeta
