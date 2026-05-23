@@ -168,3 +168,9 @@
 4. **毒瘤 SQL 切除**：切除了 `CategoryRepo` 内部在循环中调用 `getMeta` 进行“未标签”统计的傻逼逻辑，改用纯 SQL 索引聚合，性能提升万倍。
 
 - 2026-05-23: 排查并修复了mainwindow和ScanDialog界面中图片显示倒置的问题。问题根源是 QImage::fromHBITMAP 依赖 Qt 内部解析，在不同版本行为不一致。解决方案是绕过它，直接用 GetDIBits 并强制指定 top-down 方向（负高度）。
+
+
+- 2026-05-23: \xd3û\xa7ƫ\xbaã\xba\xd4ڿ\xa8Ƭ\xca\xd3ͼ\xd6У\xac\xb2\xbbϣ\xcd\xfb\xd0Ǽ\xb6\xa3\xa8\xb4\xf2\xb7֣\xa9\xb5Ĳ\xbf\xb7\xd6λ\xd3ڿ\xa8Ƭ\xc4ڣ\xac\xb6\xf8\xca\xc7Ӧ\xb8÷\xc5\xd6\xc3\xd4ڿ\xa8Ƭ\xd3\xeb\xceļ\xfe\xc3\xfb\xb3Ƶ\xc4\xd6м\xe4λ\xd6á\xa3
+
+
+- 2026-05-23: UI偏好：ContentPanel中的星级（打分）部分不应位于卡片内部，应显示在卡片与文件名称的中间位置。

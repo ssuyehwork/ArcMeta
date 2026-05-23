@@ -39,10 +39,10 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
                        option.rect.width() - 6,
                        textHeight);
     
-    m.starSize = 18;
-    m.starSpacing = 1;
+    m.starSize = 16;      // 建议从 18 缩小到 16，更符合精致的卡片风格
+    m.starSpacing = -1;   // 将间距设为 -1，抵消图标内部边距，使星星靠得更近
     int banW = 14;
-    int banGap = 2; // 保持间隙一致性
+    int banGap = 1;       // 减小左侧图标与星星的间隙
     int infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing);
     int infoStartX = m.cardRect.left() + (m.cardRect.width() - infoTotalW) / 2;
     

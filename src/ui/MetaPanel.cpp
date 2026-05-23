@@ -216,11 +216,11 @@ int FlowLayout::doLayout(const QRect &rect, bool testOnly) const {
 }
 
 // --- StarRatingWidget ---
-StarRatingWidget::StarRatingWidget(QWidget* parent) : QWidget(parent) { setFixedSize(5 * 18 + 4 * 1, 20); setCursor(Qt::PointingHandCursor); }
+StarRatingWidget::StarRatingWidget(QWidget* parent) : QWidget(parent) { setFixedSize(5 * 16 + 4 * (-1), 20); setCursor(Qt::PointingHandCursor); }
 void StarRatingWidget::setRating(int rating) { m_rating = rating; update(); }
 void StarRatingWidget::paintEvent(QPaintEvent*) {
     QPainter painter(this); painter.setRenderHint(QPainter::Antialiasing); 
-    int starSize = 18; int spacing = 1;
+    int starSize = 16; int spacing = -1;
     QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(starSize, starSize), QColor("#EF9F27"));
     QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(starSize, starSize), QColor("#444444"));
     for (int i = 0; i < 5; ++i) { QRect r(i * (starSize + spacing), (height() - starSize) / 2, starSize, starSize); painter.drawPixmap(r, (i < m_rating) ? filledStar : emptyStar); }
@@ -228,8 +228,8 @@ void StarRatingWidget::paintEvent(QPaintEvent*) {
 void StarRatingWidget::mousePressEvent(QMouseEvent* e) {
     e->accept();
     int x = e->pos().x();
-    int starSize = 18;
-    int spacing = 1;
+    int starSize = 16;
+    int spacing = -1;
     int index = x / (starSize + spacing);
     if (index >= 0 && index < 5) {
         int newRating = index + 1;
