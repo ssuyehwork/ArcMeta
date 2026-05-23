@@ -103,12 +103,12 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     }
     painter->restore();
 
-    // ③ 绘制卡片边框 (选中 3px 蓝色，未选中 2px #4a4a4a)
+    // ③ 绘制卡片边框 (选中 3px 蓝色，未选中 1px #4a4a4a)
     painter->save();
     if (isSelected) {
         painter->setPen(QPen(QColor("#3498db"), 3));
     } else {
-        painter->setPen(QPen(QColor("#4a4a4a"), 2));
+        painter->setPen(QPen(QColor("#4a4a4a"), 1));
     }
     painter->setBrush(Qt::NoBrush);
     // 抵消画笔宽度导致的一半粗细落在矩形外的问题
