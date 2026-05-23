@@ -34,6 +34,13 @@ void JustifiedView::setTargetRowHeight(int h) {
     }
 }
 
+void JustifiedView::setHasThumbnailRole(int role) {
+    if (m_hasThumbnailRole != role) {
+        m_hasThumbnailRole = role;
+        doLayout();
+    }
+}
+
 void JustifiedView::setAspectRatioRole(int role) {
     if (m_aspectRatioRole != role) {
         m_aspectRatioRole = role;
@@ -291,35 +298,45 @@ void JustifiedView::doLayout() {
 
         int actualHeight = m_targetRowHeight;
         bool isLastRow = (i == count);
+        bool rowIsJustified = false;
 
         // 2026-06-xx 物理修正：考虑 ThumbnailDelegate 的内边距 (左右各 3px = 6px)
         // 实际图片可用总宽度 = 容器宽度 - (项间距) - (所有项的 6px 内边距)
         int availableImageWidth = containerWidth - (spacing * (numInRow - 1)) - (6 * numInRow);
 
-        if (!isLastRow || (rowAspectRatioSum * m_targetRowHeight > containerWidth * 0.8)) {
+        if (!isLastRow) {
             actualHeight = qRound(availableImageWidth / rowAspectRatioSum);
+            // 只有当行高在合理范围内（目标高度的 0.75 到 1.5 倍）时才进行两端对齐
+            if (actualHeight >= m_targetRowHeight * 0.75 && actualHeight <= m_targetRowHeight * 1.5) {
+                rowIsJustified = true;
+            } else {
+                actualHeight = std::min(actualHeight, (int)(m_targetRowHeight * 1.5));
+                actualHeight = std::max(actualHeight, (int)(m_targetRowHeight * 0.75));
+            }
         }
-
-        // 防止行高过大，限制在目标高度的 1.5 倍
-        if (actualHeight > m_targetRowHeight * 1.5) actualHeight = qRound(m_targetRowHeight * 1.5);
 
         int currentX = margin;
         const int textHeight = 36;
+        const int ratingHeight = 20;
+        const int gap = 4;
+        const int cardPadding = 6; // 左右内边距总和 (3px + 3px)
+        const int extraHeight = cardPadding + textHeight + ratingHeight + gap; // cardPadding 也是上下内边距总和
+
         for (int j = 0; j < numInRow; ++j) {
             int itemIdx = rowStart + j;
-            // 2026-06-xx 物理修正：itemWidth 需要包含左右内边距 (6px)
-            int itemWidth = qRound(aspectRatios[j] * actualHeight) + 6;
-            
-            // 最后一个项目：物理对齐右边缘 (针对非最后一行)
-            if (j == numInRow - 1 && !isLastRow) {
+            int itemWidth;
+
+            if (j == numInRow - 1 && rowIsJustified) {
+                // 最后一个 item 精确填满剩余宽度，消除舍入误差导致的空隙
                 itemWidth = (containerWidth + margin) - currentX;
+            } else {
+                itemWidth = qRound(aspectRatios[j] * actualHeight) + cardPadding;
             }
 
-            // 总高度 = 图片高度 (actualHeight) + 上下内边距 (6px) + 文字区域高度 (36px)
-            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + 6 + textHeight), itemIdx };
+            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + extraHeight), itemIdx };
             currentX += itemWidth + spacing; 
         }
-        currentY += actualHeight + 6 + textHeight + spacing; // 统一行高推进
+        currentY += actualHeight + extraHeight + spacing; // 统一行高推进
     }
 
     m_totalHeight = currentY + 10;

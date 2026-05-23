@@ -35,7 +35,7 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
     m.ratingY = m.cardRect.bottom() + gap;
 
     m.textRect = QRect(option.rect.left() + 3,
-                       m.ratingY + m.ratingH,
+                       m.ratingY + m.ratingH - 5,
                        option.rect.width() - 6,
                        textHeight);
     
@@ -55,16 +55,6 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
 void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const {
     Metrics m = calculateMetrics(option);
     bool isSelected = (option.state & QStyle::State_Selected);
-    bool isHovered = (option.state & QStyle::State_MouseOver);
-
-    painter->save();
-    painter->setRenderHint(QPainter::Antialiasing);
-    painter->setRenderHint(QPainter::SmoothPixmapTransform);
-
-    // ① 圆角裁剪（仅作用于卡片）
-    QPainterPath clipPath;
-    clipPath.addRoundedRect(m.cardRect, 6, 6);
-    painter->setClipPath(clipPath);
 
     bool hasThumb = index.data(m_hasThumbnailRole).toBool();
     QVariant decoData = index.data(Qt::DecorationRole);
@@ -78,18 +68,50 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         }
     }
 
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing);
+    painter->setRenderHint(QPainter::SmoothPixmapTransform);
+
+    // ① 绘制内容与裁剪 (Cover 模式)
+    painter->save();
+    QPainterPath clipPath;
+    clipPath.addRoundedRect(m.cardRect, 6, 6);
+    painter->setClipPath(clipPath);
+
+    // 绘制卡片背景 (填充整个矩形)
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor("#2d2d2d"));
+    painter->drawRect(m.cardRect);
+
     if (hasThumb && !thumb.isNull()) {
-        QPixmap scaled = thumb.scaled(m.cardRect.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QPixmap scaled = thumb.scaled(m.cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
         int x = m.cardRect.center().x() - scaled.width() / 2;
         int y = m.cardRect.center().y() - scaled.height() / 2;
         painter->drawPixmap(x, y, scaled);
     } else {
-        painter->fillRect(m.cardRect, QColor("#2D2D2D"));
         QIcon icon = qvariant_cast<QIcon>(decoData);
-        QPoint center = m.cardRect.center();
-        if (!icon.isNull())
-            icon.paint(painter, QRect(center.x() - 24, center.y() - 24, 48, 48));
+        if (!icon.isNull()) {
+            // 确保图标在正方形背景中居中显示，且不留白（由背景色填充）
+            int iconSize = qMin(m.cardRect.width(), m.cardRect.height()) * 0.6;
+            QRect iconRect(m.cardRect.center().x() - iconSize / 2,
+                           m.cardRect.center().y() - iconSize / 2,
+                           iconSize, iconSize);
+            icon.paint(painter, iconRect);
+        }
     }
+    painter->restore();
+
+    // ③ 绘制卡片边框 (选中 3px 蓝色，未选中 1px #4a4a4a)
+    painter->save();
+    if (isSelected) {
+        painter->setPen(QPen(QColor("#3498db"), 3));
+    } else {
+        painter->setPen(QPen(QColor("#4a4a4a"), 1));
+    }
+    painter->setBrush(Qt::NoBrush);
+    // 抵消画笔宽度导致的一半粗细落在矩形外的问题
+    painter->drawRoundedRect(m.cardRect, 6, 6);
+    painter->restore();
 
     // [新增] 状态位图标绘制 (置顶 vs. 已录入 互斥)
     if (m_pinnedRole != -1 && m_managedRole != -1) {
@@ -130,7 +152,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         bool shouldShowRating = (rating > 0) || isSelected;
         if (shouldShowRating) {
             UiHelper::getIcon("no_color", QColor("#B0B0B0"), m.banRect.width()).paint(painter, m.banRect);
-            QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#EF9F27"));
+            QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#B0B0B0"));
             QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#888888"));
             for (int i = 0; i < 5; ++i) {
                 painter->drawPixmap(m.starRect(i), (i < rating) ? filledStar : emptyStar);
@@ -138,21 +160,6 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         }
     }
 
-    // ② 选中与悬停边框（在裁剪区外绘制，确保完整显示）
-    if (isSelected) {
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing);
-        painter->setPen(QPen(QColor("#3498db"), 2)); 
-        painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(m.cardRect, 6, 6);
-        painter->restore();
-    } else if (isHovered) {
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing);
-        painter->setPen(QPen(QColor("#444444"), 1));
-        painter->drawRoundedRect(m.cardRect, 6, 6);
-        painter->restore();
-    }
 
     // ③ 文件名（卡片下方）
     painter->save();
@@ -210,7 +217,8 @@ void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
                                               const QModelIndex& /*index*/) const {
     Metrics m = calculateMetrics(option);
     // 修正编辑器位置，使其与文件名文字区域对齐并留出少量边距
-    editor->setGeometry(m.textRect.adjusted(1, 4, -1, -4));
+    // 高度降低 2 像素：通过上下各收缩 1 像素实现 (从 4 变 5)
+    editor->setGeometry(m.textRect.adjusted(1, 5, -1, -5));
 }
 
 void ThumbnailDelegate::setEditorData(QWidget* editor, const QModelIndex& index) const {

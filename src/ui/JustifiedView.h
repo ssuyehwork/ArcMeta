@@ -13,6 +13,7 @@ public:
 
     void setTargetRowHeight(int h);
     void setAspectRatioRole(int role);
+    void setHasThumbnailRole(int role);
 
     QRect visualRect(const QModelIndex& index) const override;
     void scrollTo(const QModelIndex& index, ScrollHint hint = EnsureVisible) override;
@@ -49,6 +50,7 @@ private:
     int m_totalHeight = 0;
     int m_targetRowHeight = 128;
     int m_aspectRatioRole = Qt::UserRole + 2;
+    int m_hasThumbnailRole = Qt::UserRole + 14;
 };
 
 } // namespace ArcMeta

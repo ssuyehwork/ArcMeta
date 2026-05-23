@@ -746,6 +746,7 @@ void ContentPanel::initGridView() {
     auto* justifiedView = qobject_cast<JustifiedView*>(m_gridView);
     if (justifiedView) {
         justifiedView->setAspectRatioRole(AspectRatioRole);
+        justifiedView->setHasThumbnailRole(HasThumbnailRole);
         auto* delegate = new ThumbnailDelegate(this);
         delegate->setHasThumbnailRole(HasThumbnailRole);
         delegate->setRatingRole(RatingRole);
@@ -1286,6 +1287,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             item->setData(QString::fromStdWString(rm.color), ColorRole); 
             item->setData(rm.pinned, PinnedRole); // 逻辑还原：使用 PinnedRole 存储原始置顶状态 
             item->setData(rm.pinned, IsLockedRole); // 视觉还原：IsLockedRole 负责 UI 渲染 
+            item->setData(1.0, AspectRatioRole);
+            item->setData(false, HasThumbnailRole);
  
             QList<QStandardItem*> row; 
             row << item << new QStandardItem("-") << new QStandardItem("磁盘分区") << new QStandardItem("-"); 
