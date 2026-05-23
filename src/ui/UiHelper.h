@@ -363,8 +363,8 @@ public:
         QDir().mkpath(cacheDir);
 
         QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v12 标识，强制失效旧缓存
-        QString hashKey = QString("%1_%2_%3_%4_v12").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v13 标识，强制失效旧缓存
+        QString hashKey = QString("%1_%2_%3_%4_v13").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
         QString safeName = QString::number(qHash(hashKey), 16) + ".png";
         QString cachePath = cacheDir + safeName;
 
@@ -388,8 +388,33 @@ public:
                 HBITMAP hBitmap = nullptr;
                 hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
-                    // 2026-06-xx 物理修正：统一不进行手动翻转，fromHBITMAP 已正确处理方向
-                    QImage img = QImage::fromHBITMAP(hBitmap);
+                    BITMAP bmpInfo;
+                    GetObject(hBitmap, sizeof(bmpInfo), &bmpInfo);
+                    int w = bmpInfo.bmWidth;
+                    int h = std::abs(bmpInfo.bmHeight);
+
+                    BITMAPINFOHEADER bi = {};
+                    bi.biSize        = sizeof(BITMAPINFOHEADER);
+                    bi.biWidth       = w;
+                    bi.biHeight      = -h;   // 负值 = top-down，方向永远正确
+                    bi.biPlanes      = 1;
+                    bi.biBitCount    = 32;
+                    bi.biCompression = BI_RGB;
+
+                    QByteArray pixels(w * h * 4, 0);
+                    HDC hdc = GetDC(nullptr);
+                    GetDIBits(hdc, hBitmap, 0, h, pixels.data(),
+                              reinterpret_cast<BITMAPINFO*>(&bi), DIB_RGB_COLORS);
+                    ReleaseDC(nullptr, hdc);
+
+                    // Windows 返回 BGRA，Qt 需要 RGBA，交换 R/B 通道
+                    uint8_t* p = reinterpret_cast<uint8_t*>(pixels.data());
+                    for (int i = 0; i < w * h; ++i) {
+                        std::swap(p[i * 4 + 0], p[i * 4 + 2]);
+                    }
+
+                    QImage img(p, w, h, w * 4, QImage::Format_RGBA8888);
+                    img = img.copy(); // 确保数据所有权
                     
                     // 异步存入磁盘缓存
                     (void)QtConcurrent::run([img, cachePath]() {

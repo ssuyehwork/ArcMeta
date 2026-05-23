@@ -343,6 +343,8 @@ ContentPanel::ContentPanel(QWidget* parent)
 
                             m_model->setData(pIdx, (double)svgPixmap.width() / svgPixmap.height(), AspectRatioRole);
                             m_model->setData(pIdx, true, HasThumbnailRole);
+                            // 2026-06-xx 物理对标：发射信号触发 JustifiedView 重排
+                            m_model->dataChanged(pIdx, pIdx, {AspectRatioRole, HasThumbnailRole});
                         } 
                     } else if (UiHelper::isGraphicsFile(ext)) { 
                         // 2026-04-11 按照用户要求：凡是图片/图形格式，物理强制提取内容缩略图 
@@ -352,6 +354,8 @@ ContentPanel::ContentPanel(QWidget* parent)
                             icon = QIcon(QPixmap::fromImage(img)); 
                             m_model->setData(pIdx, (double)img.width() / img.height(), AspectRatioRole);
                             m_model->setData(pIdx, true, HasThumbnailRole);
+                            // 2026-06-xx 物理对标：发射信号触发 JustifiedView 重排
+                            m_model->dataChanged(pIdx, pIdx, {AspectRatioRole, HasThumbnailRole});
                         } 
                     } 
  
@@ -484,29 +488,19 @@ void ContentPanel::updateStatusBarStats() {
 }
 
 void ContentPanel::updateGridSize() {
-    // 2026-06-05 按照用户要求：彻底重构为正方形布局，名称外置
-    // 2026-06-05 按照要求：将最小值锁定为 56
-    m_zoomLevel = qBound(56, m_zoomLevel, 128);
+    // 2026-06-xx 物理重构：按照 Plan-12 要求实现自适应布局
+    // m_zoomLevel 被重新定义为自适应布局的“目标行高”
+    m_zoomLevel = qBound(64, m_zoomLevel, 320);
     
     if (auto* jv = qobject_cast<JustifiedView*>(m_gridView)) {
         jv->setTargetRowHeight(m_zoomLevel);
-    } else if (auto* lv = qobject_cast<QListView*>(m_gridView)) {
-        lv->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
-        int side = m_zoomLevel + 46; // 正方形边长
-        int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
-        int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
-        int gap = 6;                // 间距归一化
-
-        // 总高度 = 正方形边长 + 间距1 + 评分高度 + 间距2 + 名称高度 + 底部缓冲
-        int totalH = side + gap + ratingH + gap + nameH + 8;
-        lv->setGridSize(QSize(side, totalH));
     }
 
     // 2026-06-05 按照要求：持久化保存当前的缩放级别
     QSettings settings("ArcMeta团队", "ArcMeta");
     settings.setValue("UI/GridZoomLevel", m_zoomLevel);
 
-    qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
+    qDebug() << "[GridSize] TargetRowHeight:" << m_zoomLevel;
 } 
  
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 
@@ -745,7 +739,7 @@ void ContentPanel::initGridView() {
 
     auto* justifiedView = qobject_cast<JustifiedView*>(m_gridView);
     if (justifiedView) {
-        justifiedView->setAspectRatioRole(AspectRatioRole);
+        // Role 已对齐，JustifiedView 默认使用 UserRole + 2
         auto* delegate = new ThumbnailDelegate(this);
         delegate->setHasThumbnailRole(HasThumbnailRole);
         delegate->setRatingRole(RatingRole);

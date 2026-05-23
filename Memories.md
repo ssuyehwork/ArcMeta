@@ -166,3 +166,5 @@
 2. **精准原地更新**：统计任务在后台完成后，通过 `updateCounts` 精准修改对应节点的文本，禁绝全量 `beginResetModel`，从而保留滚动位置与展开状态。
 3. **信号防抖机制**：在 `MainWindow` 响应 `metaChanged` 时引入 300ms 防抖，杜绝启动阶段由于后台高频解析引发的“信号风暴”导致 UI 假死。
 4. **毒瘤 SQL 切除**：切除了 `CategoryRepo` 内部在循环中调用 `getMeta` 进行“未标签”统计的傻逼逻辑，改用纯 SQL 索引聚合，性能提升万倍。
+
+- 2026-05-23: 排查并修复了mainwindow和ScanDialog界面中图片显示倒置的问题。问题根源是 QImage::fromHBITMAP 依赖 Qt 内部解析，在不同版本行为不一致。解决方案是绕过它，直接用 GetDIBits 并强制指定 top-down 方向（负高度）。

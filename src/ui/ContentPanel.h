@@ -45,20 +45,20 @@ protected:
  * @brief 自定义 Role 枚举，用于 QStandardItemModel 数据存取
  */
 enum ItemRole {
-    RatingRole = Qt::UserRole + 1,
-    ColorRole,
-    PinnedRole,
-    EncryptedRole,
-    PathRole,
-    IsLockedRole,
-    TagsRole,
-    TypeRole,
-    IsEmptyRole,
-    CategoryIdRole,
-    InDatabaseRole,
-    PalettesRole,
-    AspectRatioRole,
-    HasThumbnailRole
+    HasThumbnailRole = Qt::UserRole + 1, // 按照 ScanDialog 规范：1号位为缩略图状态
+    AspectRatioRole = Qt::UserRole + 2,  // 按照 ScanDialog 规范：2号位为宽高比 (JustifiedView 默认读取位)
+    RatingRole = Qt::UserRole + 3,
+    ColorRole = Qt::UserRole + 4,
+    PinnedRole = Qt::UserRole + 5,
+    EncryptedRole = Qt::UserRole + 6,
+    PathRole = Qt::UserRole + 7,
+    IsLockedRole = Qt::UserRole + 8,
+    TagsRole = Qt::UserRole + 9,
+    TypeRole = Qt::UserRole + 10,
+    IsEmptyRole = Qt::UserRole + 11,
+    CategoryIdRole = Qt::UserRole + 12,
+    InDatabaseRole = Qt::UserRole + 13,
+    PalettesRole = Qt::UserRole + 14
 };
 
 /**
