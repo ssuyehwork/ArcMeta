@@ -166,6 +166,11 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                 QRect totalRect = m.banRect.united(m.starRect(4));
                 painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
                 painter->restore();
+
+                // 物理对标参考图：在彩色背景上使用深色图标 (背景色的加深版本)
+                starColor = bgColor.darker(250);
+                emptyStarColor = bgColor.darker(150);
+                emptyStarColor.setAlpha(100);
             }
         }
 
