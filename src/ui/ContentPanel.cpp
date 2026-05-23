@@ -755,6 +755,7 @@ void ContentPanel::initGridView() {
         delegate->setManagedRole(InDatabaseRole);
         delegate->setTypeRole(TypeRole);
         delegate->setIsEmptyRole(IsEmptyRole);
+        delegate->setColorRole(ColorRole);
         m_gridView->setItemDelegate(delegate);
     } else {
         m_gridView->setItemDelegate(new GridItemDelegate(this)); 

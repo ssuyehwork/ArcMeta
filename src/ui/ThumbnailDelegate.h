@@ -16,6 +16,7 @@ public:
     void setManagedRole(int role);
     void setTypeRole(int role);
     void setIsEmptyRole(int role);
+    void setColorRole(int role);
 
     void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
     QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override;
@@ -33,6 +34,7 @@ private:
     int m_managedRole = -1;
     int m_typeRole = -1;
     int m_isEmptyRole = -1;
+    int m_colorRole = -1;
 
     struct Metrics {
         QRect cardRect;
