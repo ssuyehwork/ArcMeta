@@ -317,8 +317,8 @@ void MainWindow::initUi() {
 
         m_metaPanel->setRating(rating);
         // 2026-04-11 按照用户要求：在预览窗设定星级时，左上方即时反馈
-        QString msg = QString("已设定星级: <span style='color: #FAC775;'>%1 星</span>").arg(rating);
-        ToolTipOverlay::instance()->showText(QPoint(50, 50), msg, 1500, QColor("#FAC775"));
+        QString msg = QString("已设定星级: <span style='color: #FECF0E;'>%1 星</span>").arg(rating);
+        ToolTipOverlay::instance()->showText(QPoint(50, 50), msg, 1500, QColor("#FECF0E"));
     });
 
     connect(&QuickLookWindow::instance(), &QuickLookWindow::colorRequested, this, [this](const QString& color) {

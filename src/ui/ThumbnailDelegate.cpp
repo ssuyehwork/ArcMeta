@@ -20,6 +20,7 @@ void ThumbnailDelegate::setPinnedRole(int role) { m_pinnedRole = role; }
 void ThumbnailDelegate::setManagedRole(int role) { m_managedRole = role; }
 void ThumbnailDelegate::setTypeRole(int role) { m_typeRole = role; }
 void ThumbnailDelegate::setIsEmptyRole(int role) { m_isEmptyRole = role; }
+void ThumbnailDelegate::setColorRole(int role) { m_colorRole = role; }
 
 ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptionViewItem& option) const {
     Metrics m;
@@ -150,6 +151,22 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     if (m_ratingRole != -1) {
         int rating = index.data(m_ratingRole).toInt();
         bool shouldShowRating = (rating > 0) || isSelected;
+
+        if (m_colorRole != -1) {
+            QString colorStr = index.data(m_colorRole).toString();
+            QColor bgColor = UiHelper::parseColorName(colorStr);
+            if (bgColor.isValid() && shouldShowRating) {
+                painter->save();
+                bgColor.setAlpha(150); // 设置半透明度
+                painter->setBrush(bgColor);
+                painter->setPen(Qt::NoPen);
+                // 计算并绘制圆角矩形背景
+                QRect totalRect = m.banRect.united(m.starRect(4));
+                painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
+                painter->restore();
+            }
+        }
+
         if (shouldShowRating) {
             UiHelper::getIcon("no_color", QColor("#B0B0B0"), m.banRect.width()).paint(painter, m.banRect);
             QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#B0B0B0"));

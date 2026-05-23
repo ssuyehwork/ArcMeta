@@ -71,7 +71,7 @@ public:
 
         if (colorName == "red" || colorName == "红") return QColor("#E24B4A");
         if (colorName == "orange" || colorName == "橙") return QColor("#EF9F27");
-        if (colorName == "yellow" || colorName == "黄") return QColor("#FAC775");
+        if (colorName == "yellow" || colorName == "黄") return QColor("#FECF0E");
         if (colorName == "green" || colorName == "绿") return QColor("#639922");
         if (colorName == "cyan" || colorName == "青") return QColor("#1D9E75");
         if (colorName == "blue" || colorName == "蓝") return QColor("#378ADD");
@@ -206,11 +206,10 @@ public:
     }
 
     /**
-     * @brief 对颜色进行 3-bit 量化，确保存储与搜索的一致性
+     * @brief 对颜色进行量化 (已废除破坏性位截断，直接返回原色以确保预览色与上色完全一致)
      */
     static inline QColor quantizeColor(const QColor& color) {
-        if (!color.isValid()) return color;
-        return QColor(color.red() & 0xE0, color.green() & 0xE0, color.blue() & 0xE0);
+        return color;
     }
 
 

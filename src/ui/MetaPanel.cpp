@@ -242,7 +242,7 @@ void StarRatingWidget::mousePressEvent(QMouseEvent* e) {
 
 // --- ColorPickerWidget ---
 ColorPickerWidget::ColorPickerWidget(QWidget* parent) : QWidget(parent) {
-    m_colors = {{L"", QColor("#888780")}, {L"red", QColor("#E24B4A")}, {L"orange", QColor("#EF9F27")}, {L"yellow", QColor("#FAC775")}, {L"green", QColor("#639922")}, {L"cyan", QColor("#1D9E75")}, {L"blue", QColor("#378ADD")}, {L"purple", QColor("#7F77DD")}, {L"gray", QColor("#5F5E5A")}};
+    m_colors = {{L"", QColor("#888780")}, {L"red", QColor("#E24B4A")}, {L"orange", QColor("#EF9F27")}, {L"yellow", QColor("#FECF0E")}, {L"green", QColor("#639922")}, {L"cyan", QColor("#1D9E75")}, {L"blue", QColor("#378ADD")}, {L"purple", QColor("#7F77DD")}, {L"gray", QColor("#5F5E5A")}};
     setFixedSize((int)m_colors.size() * 24, 24); setCursor(Qt::PointingHandCursor);
 }
 void ColorPickerWidget::setColor(const std::wstring& name) {
