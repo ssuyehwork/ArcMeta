@@ -152,7 +152,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         bool shouldShowRating = (rating > 0) || isSelected;
         if (shouldShowRating) {
             UiHelper::getIcon("no_color", QColor("#B0B0B0"), m.banRect.width()).paint(painter, m.banRect);
-            QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#EF9F27"));
+            QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#B0B0B0"));
             QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#888888"));
             for (int i = 0; i < 5; ++i) {
                 painter->drawPixmap(m.starRect(i), (i < rating) ? filledStar : emptyStar);
@@ -217,7 +217,8 @@ void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
                                               const QModelIndex& /*index*/) const {
     Metrics m = calculateMetrics(option);
     // 修正编辑器位置，使其与文件名文字区域对齐并留出少量边距
-    editor->setGeometry(m.textRect.adjusted(1, 4, -1, -4));
+    // 高度降低 2 像素：通过上下各收缩 1 像素实现 (从 4 变 5)
+    editor->setGeometry(m.textRect.adjusted(1, 5, -1, -5));
 }
 
 void ThumbnailDelegate::setEditorData(QWidget* editor, const QModelIndex& index) const {
