@@ -166,10 +166,6 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                 QRect totalRect = m.banRect.united(m.starRect(4));
                 painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
                 painter->restore();
-
-                // 当背景存在时，为了视觉清晰度，将星星和图标改为白色（物理对齐：去除偏色蒙版感）
-                starColor = QColor("#FFFFFF");
-                emptyStarColor = QColor(255, 255, 255, 120);
             }
         }
 

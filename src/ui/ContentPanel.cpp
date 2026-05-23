@@ -1896,9 +1896,6 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
                 QRect totalRect = m.banRect.united(QRect(m.starsStartX + 4 * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize));
                 painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
                 painter->restore();
-
-                starColor = QColor("#FFFFFF");
-                emptyStarColor = QColor(255, 255, 255, 120);
             }
         }
 
