@@ -57,15 +57,6 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     bool isSelected = (option.state & QStyle::State_Selected);
     bool isHovered = (option.state & QStyle::State_MouseOver);
 
-    painter->save();
-    painter->setRenderHint(QPainter::Antialiasing);
-    painter->setRenderHint(QPainter::SmoothPixmapTransform);
-
-    // ① 圆角裁剪（仅作用于卡片）
-    QPainterPath clipPath;
-    clipPath.addRoundedRect(m.cardRect, 6, 6);
-    painter->setClipPath(clipPath);
-
     bool hasThumb = index.data(m_hasThumbnailRole).toBool();
     QVariant decoData = index.data(Qt::DecorationRole);
     QPixmap thumb;
@@ -78,11 +69,26 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         }
     }
 
+    // [修正] 如果具有缩略图，则动态收缩 cardRect 以匹配实际内容，消除留白
     if (hasThumb && !thumb.isNull()) {
         QPixmap scaled = thumb.scaled(m.cardRect.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        int x = m.cardRect.center().x() - scaled.width() / 2;
-        int y = m.cardRect.center().y() - scaled.height() / 2;
-        painter->drawPixmap(x, y, scaled);
+        m.cardRect = QRect(m.cardRect.center().x() - scaled.width() / 2,
+                           m.cardRect.center().y() - scaled.height() / 2,
+                           scaled.width(), scaled.height());
+        thumb = scaled;
+    }
+
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing);
+    painter->setRenderHint(QPainter::SmoothPixmapTransform);
+
+    // ① 圆角裁剪（仅作用于卡片）
+    QPainterPath clipPath;
+    clipPath.addRoundedRect(m.cardRect, 6, 6);
+    painter->setClipPath(clipPath);
+
+    if (hasThumb && !thumb.isNull()) {
+        painter->drawPixmap(m.cardRect.topLeft(), thumb);
     } else {
         painter->fillRect(m.cardRect, QColor("#2D2D2D"));
         QIcon icon = qvariant_cast<QIcon>(decoData);

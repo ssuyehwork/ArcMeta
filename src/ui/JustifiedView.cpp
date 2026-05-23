@@ -305,21 +305,35 @@ void JustifiedView::doLayout() {
 
         int currentX = margin;
         const int textHeight = 36;
+        const int ratingHeight = 20;
+        const int gap = 4;
+        const int cardPadding = 6; // 左右+上下内边距总和
+        const int extraHeight = cardPadding + textHeight + ratingHeight + gap;
+
         for (int j = 0; j < numInRow; ++j) {
             int itemIdx = rowStart + j;
-            // 2026-06-xx 物理修正：itemWidth 需要包含左右内边距 (6px)
-            int itemWidth = qRound(aspectRatios[j] * actualHeight) + 6;
             
-            // 最后一个项目：物理对齐右边缘 (针对非最后一行)
-            if (j == numInRow - 1 && !isLastRow) {
-                itemWidth = (containerWidth + margin) - currentX;
+            // 2026-06-xx 物理修正：根据是否具有缩略图动态调整宽度
+            // 如果没有缩略图，则 cardRect 应该是正方形 -> cardWidth = actualHeight
+            // itemWidth = cardWidth + cardPadding
+            bool hasThumb = model()->data(model()->index(itemIdx, 0), Qt::UserRole + 14).toBool(); // HasThumbnailRole
+            int itemWidth;
+            if (hasThumb) {
+                itemWidth = qRound(aspectRatios[j] * actualHeight) + cardPadding;
+            } else {
+                itemWidth = actualHeight + cardPadding;
             }
 
-            // 总高度 = 图片高度 (actualHeight) + 上下内边距 (6px) + 文字区域高度 (36px)
-            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + 6 + textHeight), itemIdx };
+            // 最后一个项目：物理对齐右边缘 (针对非最后一行且非强制正方形)
+            if (j == numInRow - 1 && !isLastRow && hasThumb) {
+                itemWidth = std::max(itemWidth, (containerWidth + margin) - currentX);
+            }
+
+            // 总高度 = 图片/卡片高度 (actualHeight) + 所有的额外区域高度
+            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + extraHeight), itemIdx };
             currentX += itemWidth + spacing; 
         }
-        currentY += actualHeight + 6 + textHeight + spacing; // 统一行高推进
+        currentY += actualHeight + extraHeight + spacing; // 统一行高推进
     }
 
     m_totalHeight = currentY + 10;
