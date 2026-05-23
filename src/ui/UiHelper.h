@@ -363,8 +363,8 @@ public:
         QDir().mkpath(cacheDir);
 
         QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v10 标识，强制刷新并校正倒置的缩略图
-        QString hashKey = QString("%1_%2_%3_%4_v10").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v11 标识，物理隔离错误的倒置缓存
+        QString hashKey = QString("%1_%2_%3_%4_v11").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
         QString safeName = QString::number(qHash(hashKey), 16) + ".png";
         QString cachePath = cacheDir + safeName;
 
@@ -388,12 +388,11 @@ public:
                 HBITMAP hBitmap = nullptr;
                 hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
-                    // 2026-06-xx 物理校准：强制进行垂直镜像翻转。
-                    // 尽管部分文档称 fromHBITMAP 已修复方向问题，但在当前生产环境下
-                    // Windows DIB 仍然以自下而上的顺序存储，导致渲染结果倒置。
-                    // 升级缓存版本至 v10 以物理重刷所有错误方向的缩略图。
-                    QImage img = QImage::fromHBITMAP(hBitmap).mirrored(false, true);
-                    if (forceMirror) img = img.mirrored(false, true); // 如果外部再次请求翻转，则抵消
+                    // 2026-06-xx 物理修正：移除硬编码的垂直翻转。
+                    // 实验证明，现代 Qt::fromHBITMAP (Qt 6.x) 已能正确识别 DIB 步长，
+                    // 再次执行镜像会导致原本正常的画面倒置。
+                    QImage img = QImage::fromHBITMAP(hBitmap);
+                    if (forceMirror) img = img.mirrored(false, true);
                     
                     // 异步存入磁盘缓存
                     (void)QtConcurrent::run([img, cachePath]() {

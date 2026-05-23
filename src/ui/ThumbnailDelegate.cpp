@@ -19,6 +19,7 @@ void ThumbnailDelegate::setPathRole(int role) { m_pathRole = role; }
 void ThumbnailDelegate::setPinnedRole(int role) { m_pinnedRole = role; }
 void ThumbnailDelegate::setManagedRole(int role) { m_managedRole = role; }
 void ThumbnailDelegate::setTypeRole(int role) { m_typeRole = role; }
+void ThumbnailDelegate::setIsEmptyRole(int role) { m_isEmptyRole = role; }
 
 ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptionViewItem& option) const {
     Metrics m;
@@ -47,6 +48,7 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
 void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const {
     Metrics m = calculateMetrics(option);
     bool isSelected = (option.state & QStyle::State_Selected);
+    bool isHovered = (option.state & QStyle::State_MouseOver);
 
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
@@ -135,7 +137,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
 
     painter->restore(); // 释放裁剪区
 
-    // ② 选中边框（在裁剪区外绘制，确保完整显示）
+    // ② 选中与悬停边框（在裁剪区外绘制，确保完整显示）
     if (isSelected) {
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
@@ -143,16 +145,47 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         painter->setBrush(Qt::NoBrush);
         painter->drawRoundedRect(m.cardRect, 6, 6);
         painter->restore();
+    } else if (isHovered) {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->setPen(QPen(QColor("#444444"), 1));
+        painter->drawRoundedRect(m.cardRect, 6, 6);
+        painter->restore();
     }
 
     // ③ 文件名（卡片下方）
     painter->save();
-    painter->setPen(isSelected ? QColor("#3498db") : QColor("#C8C8C8"));
-    painter->drawText(m.textRect, Qt::AlignHCenter | Qt::AlignVCenter,
-        option.fontMetrics.elidedText(
-            index.data(Qt::DisplayRole).toString(),
-            Qt::ElideMiddle, m.textRect.width()));
+    QString name = index.data(Qt::DisplayRole).toString();
+    painter->setPen(isSelected ? QColor("#3498db") : QColor("#EEEEEE"));
+
+    // 2026-06-xx 物理同步：针对未录入项目应用半透明效果
+    if (m_managedRole != -1 && !isSelected && !index.data(m_managedRole).toBool()) {
+        painter->setPen(QColor(238, 238, 238, 120));
+    }
+
+    QFont textFont = painter->font();
+    textFont.setPointSize(8);
+    painter->setFont(textFont);
+
+    // 零宽空格注入以支持非标准断行（针对两行显示的潜在需求，虽然目前 elidedText 是单行）
+    QString displayName = name;
+    displayName.replace("_", "_\u200B");
+    displayName.replace(".", ".\u200B");
+
+    painter->drawText(m_textRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap,
+        option.fontMetrics.elidedText(displayName, Qt::ElideMiddle, m_textRect.width() * 2));
     painter->restore();
+
+    // ④ [新增] 空文件夹特殊标记 (ContentPanel 移植)
+    if (m_isEmptyRole != -1 && m_typeRole != -1) {
+        if (index.data(m_typeRole).toString() == "folder" && index.data(m_isEmptyRole).toBool()) {
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine));
+            painter->drawRoundedRect(m.cardRect, 6, 6);
+            painter->restore();
+        }
+    }
 }
 
 QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const {
@@ -178,10 +211,25 @@ void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
     // 按照用户要求：修正编辑器位置。
     // 计算文字区域：位于整体区域底部 textHeight 像素
     QRect textRect(option.rect.left() + 4,
-                   option.rect.bottom() - textHeight,
+                   option.rect.bottom() - textHeight + 4,
                    option.rect.width() - 8,
-                   textHeight - 4);
+                   textHeight - 8);
     editor->setGeometry(textRect);
+}
+
+void ThumbnailDelegate::setEditorData(QWidget* editor, const QModelIndex& index) const {
+    QString value = index.model()->data(index, Qt::EditRole).toString();
+    QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor);
+    if (lineEdit) {
+        lineEdit->setText(value);
+        // 2026-06-xx 物理对标：重命名时仅选中主文件名，不含后缀
+        int lastDot = value.lastIndexOf('.');
+        if (lastDot > 0) {
+            lineEdit->setSelection(0, lastDot);
+        } else {
+            lineEdit->selectAll();
+        }
+    }
 }
 
 bool ThumbnailDelegate::eventFilter(QObject* obj, QEvent* event) {
