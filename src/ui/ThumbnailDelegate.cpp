@@ -152,7 +152,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         int rating = index.data(m_ratingRole).toInt();
         bool shouldShowRating = (rating > 0) || isSelected;
 
-        QColor starColor("#B0B0B0");
+        QColor starColor("#CCCCCC");
         QColor emptyStarColor("#888888");
 
         if (m_colorRole != -1) {

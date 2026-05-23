@@ -1883,7 +1883,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     bool shouldShowRating = (rating > 0) || isSelected; 
  
     if (shouldShowRating) { 
-        QColor starColor("#B0B0B0");
+        QColor starColor("#CCCCCC");
         QColor emptyStarColor("#888888");
 
         // [新增] 物理同步：绘制彩色背景胶囊
