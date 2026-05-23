@@ -347,7 +347,7 @@ ContentPanel::ContentPanel(QWidget* parent)
                     } else if (UiHelper::isGraphicsFile(ext)) { 
                         // 2026-04-11 按照用户要求：凡是图片/图形格式，物理强制提取内容缩略图 
                         // 2026-06-xx 物理修复：使用动态 m_zoomLevel 提取缩略图，防止大网格下模糊
-                        QImage img = UiHelper::getShellThumbnail(path, this->m_zoomLevel, false); 
+                        QImage img = UiHelper::getShellThumbnail(path, this->m_zoomLevel);
                         if (!img.isNull()) { 
                             icon = QIcon(QPixmap::fromImage(img)); 
                             m_model->setData(pIdx, (double)img.width() / img.height(), AspectRatioRole);
@@ -989,7 +989,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     QString ext = QFileInfo(itemPath).suffix().toLower();
                     if (UiHelper::isGraphicsFile(ext)) {
                         // 2026-06-xx 物理同步：使用 m_zoomLevel 确保尺寸一致
-                        QImage img = UiHelper::getShellThumbnail(itemPath, this->m_zoomLevel, false);
+                        QImage img = UiHelper::getShellThumbnail(itemPath, this->m_zoomLevel);
                         if (!img.isNull()) coloredIcon = QIcon(QPixmap::fromImage(img));
                     }
                     if (coloredIcon.isNull()) {
@@ -1035,7 +1035,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                 QString suffix = QFileInfo(path).suffix().toLower();
                                 if (UiHelper::isGraphicsFile(suffix)) {
                                     // 2026-06-xx 物理同步：使用 m_zoomLevel 确保解析后更新的图标尺寸一致
-                                    QImage img = UiHelper::getShellThumbnail(path, weakThis->m_zoomLevel, false);
+                                    QImage img = UiHelper::getShellThumbnail(path, weakThis->m_zoomLevel);
                                     if (!img.isNull()) coloredIcon = QIcon(QPixmap::fromImage(img));
                                 }
                                 if (coloredIcon.isNull()) {

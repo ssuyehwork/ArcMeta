@@ -356,15 +356,15 @@ private:
     }
 
 public:
-    static QImage getShellThumbnail(const QString& path, int size, bool forceMirror = false) {
+    static QImage getShellThumbnail(const QString& path, int size) {
         // 2026-06-xx 物理重构：引入磁盘缓存机制，消除“失忆症”
         QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QString cacheDir = QDir(appData).filePath("thumbs/");
         QDir().mkpath(cacheDir);
 
         QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v11 标识，物理隔离错误的倒置缓存
-        QString hashKey = QString("%1_%2_%3_%4_v11").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v12 标识，强制失效旧缓存
+        QString hashKey = QString("%1_%2_%3_%4_v12").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
         QString safeName = QString::number(qHash(hashKey), 16) + ".png";
         QString cachePath = cacheDir + safeName;
 
@@ -388,11 +388,8 @@ public:
                 HBITMAP hBitmap = nullptr;
                 hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
-                    // 2026-06-xx 物理修正：移除硬编码的垂直翻转。
-                    // 实验证明，现代 Qt::fromHBITMAP (Qt 6.x) 已能正确识别 DIB 步长，
-                    // 再次执行镜像会导致原本正常的画面倒置。
+                    // 2026-06-xx 物理修正：统一不进行手动翻转，fromHBITMAP 已正确处理方向
                     QImage img = QImage::fromHBITMAP(hBitmap);
-                    if (forceMirror) img = img.flipped(Qt::Vertical);
                     
                     // 异步存入磁盘缓存
                     (void)QtConcurrent::run([img, cachePath]() {
@@ -409,7 +406,7 @@ public:
             pItem->Release();
         }
 #else
-        Q_UNUSED(path); Q_UNUSED(size); Q_UNUSED(forceMirror);
+        Q_UNUSED(path); Q_UNUSED(size);
 #endif
         return QImage();
     }
