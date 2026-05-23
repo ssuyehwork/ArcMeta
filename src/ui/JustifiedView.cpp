@@ -270,7 +270,7 @@ void JustifiedView::doLayout() {
 
         while (i < count) {
             double ar = model()->data(model()->index(i, 0), m_aspectRatioRole).toDouble();
-            if (ar <= 0) ar = 1.0;
+            if (ar <= 0) ar = 1.333;
             
             aspectRatios.push_back(ar);
             rowAspectRatioSum += ar;
@@ -303,7 +303,7 @@ void JustifiedView::doLayout() {
         // 实际图片可用总宽度 = 容器宽度 - (项间距) - (所有项的 6px 内边距)
         int availableImageWidth = containerWidth - (spacing * (numInRow - 1)) - (6 * numInRow);
 
-        if (!isLastRow || (rowAspectRatioSum * m_targetRowHeight > containerWidth * 0.8)) {
+        if (!isLastRow) {
             actualHeight = qRound(availableImageWidth / rowAspectRatioSum);
         }
 
@@ -319,24 +319,15 @@ void JustifiedView::doLayout() {
 
         for (int j = 0; j < numInRow; ++j) {
             int itemIdx = rowStart + j;
-            
-            // 2026-06-xx 物理修正：根据是否具有缩略图动态调整宽度
-            // 如果没有缩略图，则 cardRect 应该是正方形 -> cardWidth = cardHeight = actualHeight
-            // itemWidth = cardWidth + cardPadding
-            bool hasThumb = model()->data(model()->index(itemIdx, 0), m_hasThumbnailRole).toBool();
             int itemWidth;
-            if (hasThumb) {
-                itemWidth = qRound(aspectRatios[j] * actualHeight) + cardPadding;
+
+            if (j == numInRow - 1 && !isLastRow) {
+                // 最后一个 item 精确填满剩余宽度，消除舍入误差导致的空隙
+                itemWidth = (containerWidth + margin) - currentX;
             } else {
-                itemWidth = actualHeight + cardPadding;
+                itemWidth = qRound(aspectRatios[j] * actualHeight) + cardPadding;
             }
 
-            // 最后一个项目：物理对齐右边缘 (针对非最后一行且非强制正方形)
-            if (j == numInRow - 1 && !isLastRow && hasThumb) {
-                itemWidth = std::max(itemWidth, (containerWidth + margin) - currentX);
-            }
-
-            // 总高度 = 图片/卡片高度 (actualHeight) + 所有的额外区域高度
             m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + extraHeight), itemIdx };
             currentX += itemWidth + spacing; 
         }
