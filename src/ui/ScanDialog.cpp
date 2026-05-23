@@ -1359,7 +1359,7 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                 {"", "默认", QColor("#888780")},
                 {"#E04040", "红色", QColor("#E24B4A")},
                 {"#E09020", "橙色", QColor("#EF9F27")},
-                {"#F0C070", "黄色", QColor("#FAC775")},
+                {"#FECF0E", "黄色", QColor("#FAC775")},
                 {"#609020", "绿色", QColor("#639922")},
                 {"#109070", "青色", QColor("#1D9E75")},
                 {"#3080D0", "蓝色", QColor("#378ADD")},

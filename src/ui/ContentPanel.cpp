@@ -595,7 +595,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 switch (keyEvent->key()) { 
                     case Qt::Key_1: colorValue = "#E04040"; break; // red (quantized)
                     case Qt::Key_2: colorValue = "#E09020"; break; // orange (quantized)
-                    case Qt::Key_3: colorValue = "#F0C070"; break; // yellow (quantized)
+                    case Qt::Key_3: colorValue = "#FECF0E"; break; // yellow (quantized)
                     case Qt::Key_4: colorValue = "#609020"; break; // green (quantized)
                     case Qt::Key_5: colorValue = "#109070"; break; // cyan (quantized)
                     case Qt::Key_6: colorValue = "#3080D0"; break; // blue (quantized)
@@ -853,7 +853,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             {"", "无颜色", QColor("#888780")}, 
             {"#E04040", "红色", QColor("#E24B4A")}, 
             {"#E09020", "橙色", QColor("#EF9F27")}, 
-            {"#F0C070", "黄色", QColor("#FAC775")}, 
+            {"#FECF0E", "黄色", QColor("#FAC775")},
             {"#609020", "绿色", QColor("#639922")}, 
             {"#109070", "青色", QColor("#1D9E75")}, 
             {"#3080D0", "蓝色", QColor("#378ADD")}, 

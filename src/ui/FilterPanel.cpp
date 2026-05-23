@@ -18,7 +18,7 @@ QMap<QString, QColor> FilterPanel::s_colorMap() {
         { "",        QColor("#888780") },
         { "#E04040", QColor("#E24B4A") },
         { "#E09020", QColor("#EF9F27") },
-        { "#F0C070", QColor("#FAC775") },
+        { "#FECF0E", QColor("#FAC775") },
         { "#609020", QColor("#639922") },
         { "#109070", QColor("#1D9E75") },
         { "#3080D0", QColor("#378ADD") },
