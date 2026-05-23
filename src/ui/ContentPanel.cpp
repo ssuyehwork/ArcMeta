@@ -1782,7 +1782,7 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     m.squareRect = QRect(m.cardRect.left(), m.cardRect.top(), side, side); 
  
     m.iconDrawSize = (int)(zoom * 0.7); 
-    m.ratingH      = 16;  // 2026-05-17 物理锁定评分区高度 
+    m.ratingH      = 20;  // 2026-05-17 物理锁定评分区高度 
     m.nameH        = (int)(zoom * 0.25); 
  
     // 2026-05-17 按照用户要求：主图标在正方形内垂直居中
@@ -1794,10 +1794,10 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     // 2026-06-xx 按照用户要求：下移 2 像素（从 +6 改为 +8）
     m.ratingY = m.squareRect.bottom() + 8; 
  
-    m.starSize    = 14; // 2026-05-17 尺寸微调以匹配外部布局
-    m.starSpacing = 2;   
-    int banW = 12;      // 2026-06-xx 物理对齐：将禁止图标缩减至 12px，使其与星级在视觉权重上保持一致
-    int banGap = 4; 
+    m.starSize    = 18; // 2026-05-17 尺寸微调以匹配外部布局
+    m.starSpacing = 1;   
+    int banW = 14;      // 2026-06-xx 物理对齐：将禁止图标缩减至 12px，使其与星级在视觉权重上保持一致
+    int banGap = 2; 
  
     m.infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing); 
     m.infoStartX = m.squareRect.left() + (m.squareRect.width() - m.infoTotalW) / 2; 
@@ -1882,8 +1882,8 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         QIcon banIcon = UiHelper::getIcon("no_color", QColor("#B0B0B0"), m.banRect.width()); 
         banIcon.paint(painter, m.banRect); 
  
-        QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(m.starSize, m.starSize), QColor("#EF9F27")); 
-        QPixmap emptyStar = UiHelper::getPixmap("star", QSize(m.starSize, m.starSize), QColor("#888888")); 
+        QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#EF9F27")); 
+        QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), QColor("#888888")); 
  
         for (int i = 0; i < 5; ++i) { 
             QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
