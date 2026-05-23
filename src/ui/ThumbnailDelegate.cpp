@@ -24,7 +24,7 @@ void ThumbnailDelegate::setIsEmptyRole(int role) { m_isEmptyRole = role; }
 ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptionViewItem& option) const {
     Metrics m;
     const int textHeight = 36;
-    const int ratingHeight = 16;
+    const int ratingHeight = 20;
     const int gap = 4;
 
     m.ratingH = ratingHeight;
@@ -39,9 +39,9 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
                        option.rect.width() - 6,
                        textHeight);
     
-    m.starSize = 14;
-    m.starSpacing = 2;
-    int banW = 12;
+    m.starSize = 18;
+    m.starSpacing = 1;
+    int banW = 14;
     int banGap = 5; // 保持间隙一致性
     int infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing);
     int infoStartX = m.cardRect.left() + (m.cardRect.width() - infoTotalW) / 2;
