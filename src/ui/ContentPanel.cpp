@@ -875,8 +875,8 @@ void ContentPanel::initGridView() {
  
 void ContentPanel::initListView() { 
     m_treeView = new DropTreeView(this); 
-    // 禁止水平方向溢出，超出部分以滚动条形式访问
-    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    // 禁止水平溢出
+    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
 
     // 确保容器本身不允许子 widget 溢出
@@ -911,25 +911,37 @@ void ContentPanel::initListView() {
     // 2026-06-08 按照要求：配置列宽策略，防止超出容器范围
     QHeaderView* header = m_treeView->header();
 
-    // 最后一列自动拉伸填满容器，防止内容超界
-    header->setStretchLastSection(true);
+    // 关闭最后一列自动拉伸（会导致最后列过宽）
+    header->setStretchLastSection(false);
 
-    header->setSectionResizeMode(0, QHeaderView::Stretch);   // 名称：拉伸填满
-    header->setSectionResizeMode(1, QHeaderView::Fixed);     // 状态
-    header->setSectionResizeMode(2, QHeaderView::Fixed);     // 星级
-    header->setSectionResizeMode(3, QHeaderView::Fixed);     // 颜色
-    header->setSectionResizeMode(4, QHeaderView::Fixed);     // 类型
-    header->setSectionResizeMode(5, QHeaderView::Fixed);     // 大小
-    header->setSectionResizeMode(6, QHeaderView::Fixed);     // 修改时间
+    // 各列宽度策略
+    // 第0列（名称）：自动拉伸填满剩余空间
+    header->setSectionResizeMode(0, QHeaderView::Stretch);
 
-    header->resizeSection(1, 40);   // 状态
-    header->resizeSection(2, 100);  // 星级
-    header->resizeSection(3, 80);   // 颜色
-    header->resizeSection(4, 100);  // 类型
-    header->resizeSection(5, 80);   // 大小
-    header->resizeSection(6, 160);  // 修改时间
+    // 第1列（状态图标）：固定宽度
+    header->setSectionResizeMode(1, QHeaderView::Fixed);
+    header->resizeSection(1, 32);
 
-    header->setMinimumSectionSize(40);
+    // 第2列（星级）：固定宽度
+    header->setSectionResizeMode(2, QHeaderView::Fixed);
+    header->resizeSection(2, 90);
+
+    // 第3列（颜色标记）：固定宽度
+    header->setSectionResizeMode(3, QHeaderView::Fixed);
+    header->resizeSection(3, 60);
+
+    // 第4列（类型）：固定宽度
+    header->setSectionResizeMode(4, QHeaderView::Fixed);
+    header->resizeSection(4, 80);
+
+    // 第5列（大小）：固定宽度
+    header->setSectionResizeMode(5, QHeaderView::Fixed);
+    header->resizeSection(5, 80);
+
+    // 第6列（修改时间）：固定宽度
+    header->setSectionResizeMode(6, QHeaderView::Fixed);
+    header->resizeSection(6, 120);
+
     header->setMinimumSectionSize(0); // 允许其他列收缩
     header->setCascadingSectionResizes(true);
     
