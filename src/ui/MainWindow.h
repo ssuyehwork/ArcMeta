@@ -11,6 +11,8 @@
 #include <QSystemTrayIcon>
 #include <QSet>
 
+class QSlider;
+
 namespace ArcMeta {
 
 class TrayController;
@@ -23,7 +25,6 @@ class ContentPanel;
 class MetaPanel;
 class FilterPanel;
 class SearchHistoryPanel;
-class QSlider;
 
 /**
  * @brief 主窗口类
