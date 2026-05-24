@@ -472,6 +472,7 @@ void ContentPanel::initUi() {
     m_imagePreview->installEventFilter(this); 
  
     m_gridView->installEventFilter(this); 
+    m_treeView->installEventFilter(this);
 } 
  
 void ContentPanel::updateStatusBarStats() {
@@ -525,14 +526,32 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         ToolTipOverlay::hideTip(); 
     } 
  
-    if ((obj == m_gridView || obj == m_gridView->viewport()) && event->type() == QEvent::Wheel) { 
+    if ((obj == m_gridView || obj == m_gridView->viewport() || obj == m_treeView || obj == m_treeView->viewport()) && event->type() == QEvent::Wheel) {
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 static_cast 的类型推导逻辑错误 
         QWheelEvent* wEvent = reinterpret_cast<QWheelEvent*>(event); 
         if (wEvent->modifiers() & Qt::ControlModifier) { 
             int delta = wEvent->angleDelta().y(); 
-            if (delta > 0) m_zoomLevel += 8; 
-            else m_zoomLevel -= 8; 
-            updateGridSize(); 
+            if (delta > 0) {
+                // 向上滚动（放大）
+                if (m_viewStack->currentWidget() == m_treeView) {
+                    // 如果当前是列表模式，向上滚动直接切换回网格模式并设为最小值 96
+                    m_zoomLevel = 96;
+                    setViewMode(GridView);
+                    updateGridSize();
+                } else {
+                    m_zoomLevel += 8;
+                    updateGridSize();
+                }
+            } else {
+                // 向下滚动（缩小）
+                if (m_viewStack->currentWidget() == m_gridView && m_zoomLevel <= 96) {
+                    // 如果已经在 96 且继续缩小，切换到列表模式
+                    setViewMode(ListView);
+                } else if (m_viewStack->currentWidget() == m_gridView) {
+                    m_zoomLevel -= 8;
+                    updateGridSize();
+                }
+            }
             return true; 
         } 
     } 
@@ -718,9 +737,25 @@ QString ContentPanel::getAdjacentFilePath(const QString& currentPath, int delta)
 void ContentPanel::wheelEvent(QWheelEvent* event) { 
     if (event->modifiers() & Qt::ControlModifier) { 
         int delta = event->angleDelta().y(); 
-        if (delta > 0) m_zoomLevel += 8; 
-        else m_zoomLevel -= 8; 
-        updateGridSize(); 
+        if (delta > 0) {
+            // 放大
+            if (m_viewStack->currentWidget() == m_treeView) {
+                m_zoomLevel = 96;
+                setViewMode(GridView);
+                updateGridSize();
+            } else {
+                m_zoomLevel += 8;
+                updateGridSize();
+            }
+        } else {
+            // 缩小
+            if (m_viewStack->currentWidget() == m_gridView && m_zoomLevel <= 96) {
+                setViewMode(ListView);
+            } else if (m_viewStack->currentWidget() == m_gridView) {
+                m_zoomLevel -= 8;
+                updateGridSize();
+            }
+        }
         event->accept(); 
     } else { 
         QWidget::wheelEvent(event); 
