@@ -23,6 +23,7 @@ class ContentPanel;
 class MetaPanel;
 class FilterPanel;
 class SearchHistoryPanel;
+class QSlider;
 
 /**
  * @brief 主窗口类
@@ -124,10 +125,13 @@ private:
     QStringList  m_searchHistory;             // 最近 10 条关键词
     
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
+    QPushButton* m_btnRefresh = nullptr;
     QPushButton* m_btnSync   = nullptr;
     QPushButton* m_btnScan   = nullptr;
     QPushButton* m_btnCreate = nullptr;
     QPushButton* m_btnPinTop = nullptr;
+    QSlider*     m_sizeSlider = nullptr;
+    QPushButton* m_btnViewMode = nullptr;
     QPushButton* m_btnMin = nullptr;
     QPushButton* m_btnMax = nullptr;
     QPushButton* m_btnClose = nullptr;

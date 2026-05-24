@@ -660,7 +660,17 @@ void CategoryPanel::initUi() {
     btnSwitch->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }");
     btnSwitch->setProperty("tooltipText", "工作模式切换：关闭采用数据库模式，开启采用JSON内存模式");
     btnSwitch->installEventFilter(this);
+
+    // [核心补丁]：从 QSettings 读取初始状态
+    QSettings settings("ArcMeta团队", "ArcMeta");
+    bool lastChecked = settings.value("Category/WorkModeJson", false).toBool();
+    btnSwitch->setChecked(lastChecked);
+
     connect(btnSwitch, &QPushButton::toggled, this, [this, btnSwitch](bool checked) {
+        // [核心补丁]：立即保存状态
+        QSettings settings("ArcMeta团队", "ArcMeta");
+        settings.setValue("Category/WorkModeJson", checked);
+
         // 先发拉起物理对账同步，确保双轨数据一致、零数据落差平滑迁移！
         CategoryRepo::syncDatabaseAndJson();
 

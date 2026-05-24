@@ -36,6 +36,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QTimer>
+#include <QSlider>
 #include "UiHelper.h"
 #include <QFileInfo>
 #include <QDir>
@@ -927,6 +928,19 @@ void MainWindow::setupCustomTitleBarButtons() {
         return btn;
     };
 
+    // 1. 创建刷新按钮
+    m_btnRefresh = createTitleBtn("sync"); // 复用同步图标或使用新图标
+    m_btnRefresh->setProperty("tooltipText", "刷新当前视图");
+    m_btnRefresh->installEventFilter(m_hoverFilter);
+
+    // 3. 功能绑定
+    connect(m_btnRefresh, &QPushButton::clicked, this, [this]() {
+        if (m_contentPanel) {
+            // 直接触发当前路径的重新加载
+            m_contentPanel->loadDirectory(m_currentPath);
+        }
+    });
+
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "无待同步任务");
     m_btnSync->installEventFilter(m_hoverFilter);
@@ -1029,10 +1043,48 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
+    layout->addWidget(m_btnRefresh);
     layout->addWidget(m_btnSync);
     layout->addWidget(m_btnScan);
     layout->addWidget(m_btnCreate);
     layout->addWidget(m_btnPinTop);
+
+    // --- 迁移滑动条与视图按钮 ---
+    m_sizeSlider = new QSlider(Qt::Horizontal);
+    m_sizeSlider->setRange(56, 128);
+    m_sizeSlider->setFixedSize(100, 20);
+    m_sizeSlider->setCursor(Qt::PointingHandCursor);
+    m_sizeSlider->setStyleSheet(
+        "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }"
+        "QSlider::sub-page:horizontal { background: #3498db; border-radius: 2px; }"
+        "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; background: #EEEEEE; border-radius: 6px; }"
+    );
+    // 从 QSettings 加载初始值 (参考 ContentPanel 逻辑)
+    QSettings settings("ArcMeta团队", "ArcMeta");
+    int initialZoom = settings.value("UI/GridZoomLevel", 96).toInt();
+    m_sizeSlider->setValue(initialZoom);
+
+    connect(m_sizeSlider, &QSlider::valueChanged, this, [this](int v) {
+        if (m_contentPanel) m_contentPanel->setZoomLevel(v);
+    });
+    layout->addWidget(m_sizeSlider);
+
+    m_btnViewMode = createTitleBtn("grid");
+    m_btnViewMode->setProperty("tooltipText", "切换视图模式");
+    m_btnViewMode->installEventFilter(m_hoverFilter);
+    connect(m_btnViewMode, &QPushButton::clicked, this, [this]() {
+        QMenu menu(this);
+        UiHelper::applyMenuStyle(&menu);
+
+        QAction* actGrid = menu.addAction("网格视图");
+        QAction* actList = menu.addAction("列表视图");
+
+        QAction* selected = menu.exec(m_btnViewMode->mapToGlobal(QPoint(0, m_btnViewMode->height())));
+        if (selected == actGrid) m_contentPanel->setViewMode(ContentPanel::GridView);
+        else if (selected == actList) m_contentPanel->setViewMode(ContentPanel::ListView);
+    });
+    layout->addWidget(m_btnViewMode);
+
     layout->addWidget(m_btnMin);
     layout->addWidget(m_btnMax);
     layout->addWidget(m_btnClose);

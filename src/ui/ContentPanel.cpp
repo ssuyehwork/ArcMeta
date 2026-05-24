@@ -64,7 +64,10 @@
 namespace ArcMeta { 
  
 // --- FilterProxyModel 实现 --- 
-FilterProxyModel::FilterProxyModel(QObject* parent) : QSortFilterProxyModel(parent) {} 
+FilterProxyModel::FilterProxyModel(QObject* parent) : QSortFilterProxyModel(parent) {
+    // [核心补丁]：开启动态监控，确保 Role 变化时立即重排
+    setDynamicSortFilter(true);
+}
  
 void FilterProxyModel::updateFilter() { 
     beginFilterChange(); 
@@ -727,6 +730,11 @@ void ContentPanel::setViewMode(ViewMode mode) {
     if (mode == GridView) m_viewStack->setCurrentWidget(m_gridView); 
     else m_viewStack->setCurrentWidget(m_treeView); 
 } 
+
+void ContentPanel::setZoomLevel(int size) {
+    m_zoomLevel = size;
+    updateGridSize(); // 原有内部函数，负责更新 QListView 布局
+}
  
 void ContentPanel::initGridView() { 
     m_gridView = new DropJustifiedView(this); 
@@ -973,10 +981,14 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             for (const QModelIndex& idx : indexes) { 
                 if (idx.column() == 0) { 
                     QString itemPath = idx.data(PathRole).toString(); 
-                    MetadataManager::instance().setPinned(itemPath.toStdWString(), pin); 
+                    // [核心补丁]：路径标准化处理
+                    std::wstring wPath = QDir::toNativeSeparators(itemPath).toStdWString();
+                    MetadataManager::instance().setPinned(wPath, pin);
                     m_proxyModel->setData(idx, pin, IsLockedRole); 
                 } 
             } 
+            // [核心补丁]：显式触发排序，双重保险
+            m_proxyModel->sort(m_proxyModel->sortColumn(), m_proxyModel->sortOrder());
             break; 
         } 
         case ActionColorTag: { 
