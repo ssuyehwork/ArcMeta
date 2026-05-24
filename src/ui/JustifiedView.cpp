@@ -8,6 +8,8 @@
 #include <QStyleOptionViewItem>
 #include <QAbstractItemDelegate>
 #include <QTimer>
+#include <QMouseEvent>
+#include <QItemSelection>
 #include <algorithm>
 
 namespace ArcMeta {
@@ -153,6 +155,48 @@ QModelIndex JustifiedView::moveCursor(CursorAction cursorAction, Qt::KeyboardMod
 int JustifiedView::horizontalOffset() const { return 0; }
 int JustifiedView::verticalOffset() const { return verticalScrollBar()->value(); }
 bool JustifiedView::isIndexHidden(const QModelIndex&) const { return false; }
+
+void JustifiedView::mousePressEvent(QMouseEvent* event) {
+    QModelIndex clicked = indexAt(event->pos());
+
+    if (event->modifiers() & Qt::ShiftModifier && m_anchorRow >= 0 && clicked.isValid()) {
+        // Shift+点击：按视觉顺序（左→右→下一行）选择范围
+        int clickedRow = clicked.row();
+
+        // 找 anchorRow 和 clickedRow 对应的视觉索引
+        int anchorVisual = -1, clickedVisual = -1;
+        for (int i = 0; i < (int)m_geometries.size(); ++i) {
+            if (m_geometries[i].index == m_anchorRow) anchorVisual = i;
+            if (m_geometries[i].index == clickedRow)  clickedVisual = i;
+        }
+
+        if (anchorVisual >= 0 && clickedVisual >= 0) {
+            int vFrom = std::min(anchorVisual, clickedVisual);
+            int vTo   = std::max(anchorVisual, clickedVisual);
+
+            QItemSelection selection;
+            for (int v = vFrom; v <= vTo; ++v) {
+                QModelIndex idx = model()->index(m_geometries[v].index, 0);
+                selection.select(idx, idx);
+            }
+            selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect);
+            setCurrentIndex(clicked); // 保持导航连续性
+        }
+        // 更新视口
+        viewport()->update();
+        return; // 跳过基类处理，因为它会使用矩形选择覆盖我们的逻辑
+    }
+
+    // Ctrl+点击或普通点击，交给基类处理以保留焦点/拖拽/单选等行为
+    QAbstractItemView::mousePressEvent(event);
+
+    // 基类处理完后，我们同步更新 anchorRow
+    if (clicked.isValid()) {
+        m_anchorRow = clicked.row();
+    } else {
+        m_anchorRow = -1;
+    }
+}
 
 void JustifiedView::setSelection(const QRect& rect, QItemSelectionModel::SelectionFlags command) {
     QRect contentsRect = rect.translated(0, verticalScrollBar()->value());

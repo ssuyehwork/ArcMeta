@@ -451,6 +451,8 @@ void ContentPanel::initUi() {
     m_mainLayout->addWidget(titleBar); 
  
     m_viewStack = new QStackedWidget(this); 
+    // 在 initUi() 中，确保 m_viewStack 设置了正确的尺寸策略
+    m_viewStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
      
     initGridView(); 
     initListView(); 
@@ -873,8 +875,13 @@ void ContentPanel::initGridView() {
  
 void ContentPanel::initListView() { 
     m_treeView = new DropTreeView(this); 
+    // 禁止水平方向溢出，超出部分以滚动条形式访问
+    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
-    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
+
+    // 确保容器本身不允许子 widget 溢出
+    m_treeView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
     m_treeView->setSortingEnabled(true); 
     m_treeView->setContextMenuPolicy(Qt::CustomContextMenu); 
     m_treeView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
@@ -903,6 +910,10 @@ void ContentPanel::initListView() {
 
     // 2026-06-08 按照要求：配置列宽策略，防止超出容器范围
     QHeaderView* header = m_treeView->header();
+
+    // 最后一列自动拉伸填满容器，防止内容超界
+    header->setStretchLastSection(true);
+
     header->setSectionResizeMode(0, QHeaderView::Stretch);   // 名称：拉伸填满
     header->setSectionResizeMode(1, QHeaderView::Fixed);     // 状态
     header->setSectionResizeMode(2, QHeaderView::Fixed);     // 星级

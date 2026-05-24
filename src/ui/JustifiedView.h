@@ -28,6 +28,7 @@ protected slots:
     void rowsAboutToBeRemoved(const QModelIndex& parent, int start, int end) override;
 
 protected:
+    void mousePressEvent(QMouseEvent* event) override;
     QModelIndex moveCursor(CursorAction cursorAction, Qt::KeyboardModifiers modifiers) override;
     int horizontalOffset() const override;
     int verticalOffset() const override;
@@ -51,6 +52,7 @@ private:
     int m_targetRowHeight = 128;
     int m_aspectRatioRole = Qt::UserRole + 2;
     int m_hasThumbnailRole = Qt::UserRole + 14;
+    int m_anchorRow = -1; // Shift 多选的锚点行
 };
 
 } // namespace ArcMeta
