@@ -40,9 +40,22 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
                        option.rect.width() - 6,
                        textHeight);
     
+    int zoom = option.decorationSize.width(); // 物理缩放级别
+
     m.starSize = 18;
-    m.starSpacing = -4;
+    m.starSpacing = -2; // 2026-06-08 优化：默认间距稍微拉开，提升呼吸感
     int banW = 14;
+
+    // 2026-06-08 按照调试增强版 V2 优化：实现“动态比例星级”
+    if (zoom < 60) {
+        m.starSize = 14; // 缩小约 20%
+        banW = 11;
+    }
+
+    if (zoom < 40) {
+        m.ratingH = 0; // 隐藏评分栏空间
+    }
+
     int banGap = 2; // 保持间隙一致性
     int infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing);
     int infoStartX = m.cardRect.left() + (m.cardRect.width() - infoTotalW) / 2;
@@ -146,7 +159,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     }
 
     // [新增] 评级星级 (现在绘制在裁剪区外，处于卡片与文件名的间隙处)
-    if (m_ratingRole != -1) {
+    if (m_ratingRole != -1 && m.ratingH > 0) {
         int rating = index.data(m_ratingRole).toInt();
         QString colorStr = (m_colorRole != -1) ? index.data(m_colorRole).toString() : "";
         

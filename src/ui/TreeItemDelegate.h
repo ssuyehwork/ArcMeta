@@ -24,25 +24,14 @@ public:
 
         if (selected || hover) {
             painter->save();
-            painter->setRenderHint(QPainter::Antialiasing);
-
-            // 默认使用蓝调高亮，或者根据需要自定义
+            // 2026-06-xx 按照用户最新要求：消除“坑坑洼洼”感，改用全行贯穿式直角高亮，填满整个区域
             QColor bg = selected ? QColor("#378ADD") : QColor("#2a2d2e");
-            if (selected) bg.setAlphaF(0.2f); 
+            if (selected) bg.setAlphaF(0.15f); 
 
-            QStyle* style = option.widget ? option.widget->style() : QApplication::style();
-            QRect decoRect = style->subElementRect(QStyle::SE_ItemViewItemDecoration, &option, option.widget);
-            QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &option, option.widget);
-            
-            QRect contentRect = decoRect.united(textRect);
-            contentRect = contentRect.intersected(option.rect);
-            
-            // 物理还原：选中高亮应用 5px 圆角，增加微量内缩
-            contentRect.adjust(0, 1, 0, -1);
-            
+            // 物理修复：直接使用 option.rect，不进行 adjust 缩进，不使用圆角，确保色块无缝对接
             painter->setBrush(bg);
             painter->setPen(Qt::NoPen);
-            painter->drawRoundedRect(contentRect, 5, 5);
+            painter->drawRect(option.rect);
             painter->restore();
         }
 
@@ -61,37 +50,52 @@ public:
             }
         }
 
-        QStyledItemDelegate::paint(painter, opt, index);
+        // 2026-06-08 按照 7 列架构重构：第 1, 2, 3 列由代理独立绘制，其他列由基类处理
+        int col = index.column();
+        if (col == 1 || col == 2 || col == 3) {
+            // 这三列不调用默认 paint，完全自定义
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing);
 
-        if (m_showStatus) {
-            // 2026-06-xx 按照要求：实现状态位图标互斥显示逻辑
-            // 位置复用原则：在项的末尾（或原本置顶图标的位置）进行绘制
-            // 物理修复：校准作用域
-            bool isPinned = index.data(IsLockedRole).toBool();
-            bool isManaged = index.data(InDatabaseRole).toBool();
-
-            if (isPinned || isManaged) {
-                painter->save();
-                painter->setRenderHint(QPainter::Antialiasing);
-                
-                // 计算状态位图标的矩形区域 (位于项的最右侧，预留 20px 宽度)
-                QRect statusRect = option.rect;
-                statusRect.setLeft(statusRect.right() - 24);
-                statusRect.setWidth(16);
-                statusRect.setTop(statusRect.top() + (statusRect.height() - 16) / 2);
-                statusRect.setHeight(16);
-
-                if (isPinned) {
-                    // 1. 置顶优先：显示置顶图标
-                    QIcon pinIcon = UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16);
-                    pinIcon.paint(painter, statusRect);
-                } else {
-                    // 2. 已录入但未置顶：在该位置显示绿对勾图标
-                    QIcon checkIcon = UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16);
-                    checkIcon.paint(painter, statusRect);
+            if (col == 1) { // 状态列
+                bool isPinned = index.model()->index(index.row(), 0).data(IsLockedRole).toBool();
+                bool isManaged = index.model()->index(index.row(), 0).data(InDatabaseRole).toBool();
+                if (isPinned || isManaged) {
+                    QRect iconRect(option.rect.left() + (option.rect.width() - 16) / 2,
+                                   option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
+                    if (isPinned) {
+                        UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, iconRect);
+                    } else {
+                        UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, iconRect);
+                    }
                 }
-                painter->restore();
+            } else if (col == 2) { // 星级列
+                int rating = index.model()->index(index.row(), 0).data(RatingRole).toInt();
+                if (rating > 0) {
+                    int starSize = 14;
+                    int spacing = 1;
+                    int totalW = 5 * starSize + 4 * spacing;
+                    int startX = option.rect.left() + (option.rect.width() - totalW) / 2;
+                    QPixmap star = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(starSize, starSize), QColor("#FECF0E"));
+                    for (int i = 0; i < rating; ++i) {
+                        painter->drawPixmap(startX + i * (starSize + spacing), 
+                                            option.rect.top() + (option.rect.height() - starSize) / 2, star);
+                    }
+                }
+            } else if (col == 3) { // 颜色列
+                QString colorHex = index.model()->index(index.row(), 0).data(ColorRole).toString();
+                if (!colorHex.isEmpty()) {
+                    QColor c = UiHelper::parseColorName(colorHex);
+                    if (c.isValid()) {
+                        painter->setBrush(c);
+                        painter->setPen(Qt::NoPen);
+                        painter->drawEllipse(option.rect.center(), 6, 6);
+                    }
+                }
             }
+            painter->restore();
+        } else {
+            QStyledItemDelegate::paint(painter, opt, index);
         }
     }
 

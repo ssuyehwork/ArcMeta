@@ -293,9 +293,19 @@ ContentPanel::ContentPanel(QWidget* parent)
  
             QList<QStandardItem*> row; 
             row << nameItem; 
-            row << new QStandardItem(data.isDir ? "-" : QString::number(data.size / 1024) + " KB"); 
+            row << new QStandardItem(""); // 状态列
+            row << new QStandardItem(""); // 星级列
+            row << new QStandardItem(""); // 颜色列
             row << new QStandardItem(data.isDir ? (data.isEmpty ? "文件夹 (空)" : "文件夹") : data.suffix + " 文件"); 
-            row << new QStandardItem(data.mtime.toString("yyyy-MM-dd HH:mm")); 
+            
+            auto* sizeItem = new QStandardItem(data.isDir ? "-" : QString::number(data.size / 1024) + " KB");
+            sizeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            row << sizeItem;
+
+            auto* mtimeItem = new QStandardItem(data.mtime.toString("yyyy-MM-dd HH:mm"));
+            mtimeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            row << mtimeItem;
+
             m_model->appendRow(row); 
  
             m_iconPendingPaths << data.fullPath; 
@@ -472,6 +482,7 @@ void ContentPanel::initUi() {
     m_imagePreview->installEventFilter(this); 
  
     m_gridView->installEventFilter(this); 
+    m_treeView->installEventFilter(this);
 } 
  
 void ContentPanel::updateStatusBarStats() {
@@ -486,24 +497,53 @@ void ContentPanel::updateStatusBarStats() {
 
 void ContentPanel::updateGridSize() {
     // 2026-06-05 按照用户要求：彻底重构为正方形布局，名称外置
-    // 2026-06-05 按照要求：将最小值锁定为 96
-    m_zoomLevel = qBound(96, m_zoomLevel, 128);
+    // 2026-06-08 按照用户核心铁律：物理强制锁定缩放最小值为 96 像素
+    
+    if (m_viewStack->currentWidget() == m_gridView) {
+        m_zoomLevel = qBound(96, m_zoomLevel, 128);
+    }
 
     // 写入实时日志 
     ArcMeta::Logger::log(QString("[UI_DEBUG] 卡片缩放级: %1").arg(m_zoomLevel));
     
-    if (auto* jv = qobject_cast<JustifiedView*>(m_gridView)) {
-        jv->setTargetRowHeight(m_zoomLevel);
-    } else if (auto* lv = qobject_cast<QListView*>(m_gridView)) {
-        lv->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
-        int side = m_zoomLevel + 46; // 正方形边长
-        int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
-        int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
-        int gap = 6;                // 间距归一化
+    if (m_viewStack->currentWidget() == m_gridView) {
+        if (auto* jv = qobject_cast<JustifiedView*>(m_gridView)) {
+            jv->setTargetRowHeight(m_zoomLevel);
+        } else if (auto* lv = qobject_cast<QListView*>(m_gridView)) {
+            lv->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
+            int side = m_zoomLevel + 46; // 正方形边长
+            int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
+            int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
+            int gap = 6;                // 间距归一化
+            
+            // 总高度 = 正方形边长 + 间距1 + 评分高度 + 间距2 + 名称高度 + 底部缓冲
+            int totalH = side + gap + ratingH + gap + nameH + 8;
+            lv->setGridSize(QSize(side, totalH));
+        }
+    } else if (m_viewStack->currentWidget() == m_treeView) {
+        // 2026-06-xx 按照要求：列表模式下调整行高
+        if (m_zoomLevel > 96) {
+            // 如果行高超过 96，自动切换到卡片形式
+            setViewMode(GridView);
+            m_zoomLevel = 96; // 修正：切换回网格时对齐红线
+            updateGridSize();
+            return;
+        }
         
-        // 总高度 = 正方形边长 + 间距1 + 评分高度 + 间距2 + 名称高度 + 底部缓冲
-        int totalH = side + gap + ratingH + gap + nameH + 8;
-        lv->setGridSize(QSize(side, totalH));
+        // 2026-06-xx 物理修复：图标大小必须随行高变化
+        m_treeView->setIconSize(QSize(m_zoomLevel - 8, m_zoomLevel - 8));
+        
+        // 2026-06-xx 性能优化：仅当行高发生实际变化时更新样式表
+        static int lastTreeHeight = -1;
+        if (lastTreeHeight != m_zoomLevel) {
+            m_treeView->setStyleSheet( 
+                QString("QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
+                        "QTreeView::item { height: %1px; color: #EEEEEE; padding-left: 0px; }" 
+                        "QTreeView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }")
+                .arg(m_zoomLevel)
+            );
+            lastTreeHeight = m_zoomLevel;
+        }
     }
 
     // 2026-06-05 按照要求：持久化保存当前的缩放级别
@@ -525,14 +565,40 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         ToolTipOverlay::hideTip(); 
     } 
  
-    if ((obj == m_gridView || obj == m_gridView->viewport()) && event->type() == QEvent::Wheel) { 
+    if ((obj == m_gridView || obj == m_gridView->viewport() || obj == m_treeView || obj == m_treeView->viewport()) && event->type() == QEvent::Wheel) { 
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 static_cast 的类型推导逻辑错误 
         QWheelEvent* wEvent = reinterpret_cast<QWheelEvent*>(event); 
         if (wEvent->modifiers() & Qt::ControlModifier) { 
             int delta = wEvent->angleDelta().y(); 
-            if (delta > 0) m_zoomLevel += 8; 
-            else m_zoomLevel -= 8; 
-            updateGridSize(); 
+            if (delta > 0) {
+                // 向上滚动（放大）
+                if (m_viewStack->currentWidget() == m_treeView) {
+                    m_zoomLevel += 4; // 列表模式步进调小一些，追求平滑
+                    if (m_zoomLevel > 96) {
+                        m_zoomLevel = 96;
+                        setViewMode(GridView);
+                    }
+                    updateGridSize();
+                } else {
+                    m_zoomLevel += 8;
+                    updateGridSize();
+                }
+            } else {
+                // 向下滚动（缩小）
+                if (m_viewStack->currentWidget() == m_gridView) {
+                    if (m_zoomLevel <= 96) {
+                        setViewMode(ListView);
+                        m_zoomLevel = 80; // 恢复之前的列表初始行高
+                        updateGridSize();
+                    } else {
+                        m_zoomLevel -= 8;
+                        updateGridSize();
+                    }
+                } else if (m_viewStack->currentWidget() == m_treeView) {
+                    m_zoomLevel = qMax(24, m_zoomLevel - 4); // 列表模式最小行高锁定 24
+                    updateGridSize();
+                }
+            }
             return true; 
         } 
     } 
@@ -718,9 +784,35 @@ QString ContentPanel::getAdjacentFilePath(const QString& currentPath, int delta)
 void ContentPanel::wheelEvent(QWheelEvent* event) { 
     if (event->modifiers() & Qt::ControlModifier) { 
         int delta = event->angleDelta().y(); 
-        if (delta > 0) m_zoomLevel += 8; 
-        else m_zoomLevel -= 8; 
-        updateGridSize(); 
+        if (delta > 0) {
+            // 放大
+            if (m_viewStack->currentWidget() == m_treeView) {
+                m_zoomLevel += 4;
+                if (m_zoomLevel > 96) {
+                    m_zoomLevel = 96;
+                    setViewMode(GridView);
+                }
+                updateGridSize();
+            } else {
+                m_zoomLevel += 8;
+                updateGridSize();
+            }
+        } else {
+            // 缩小
+            if (m_viewStack->currentWidget() == m_gridView) {
+                if (m_zoomLevel <= 96) {
+                    setViewMode(ListView);
+                    m_zoomLevel = 80;
+                    updateGridSize();
+                } else {
+                    m_zoomLevel -= 8;
+                    updateGridSize();
+                }
+            } else if (m_viewStack->currentWidget() == m_treeView) {
+                m_zoomLevel = qMax(24, m_zoomLevel - 4);
+                updateGridSize();
+            }
+        }
         event->accept(); 
     } else { 
         QWidget::wheelEvent(event); 
@@ -804,9 +896,53 @@ void ContentPanel::initListView() {
         "QTreeView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }" 
     ); 
  
+    m_treeView->header()->setDefaultAlignment(Qt::AlignCenter);
     m_treeView->header()->setStyleSheet( 
-        "QHeaderView::section { background-color: #252525; color: #B0B0B0; padding-left: 10px; border: none; height: 32px; font-size: 11px; }" 
+        "QHeaderView::section { background-color: #252525; color: #B0B0B0; border: none; border-right: 1px solid #333333; height: 32px; font-size: 11px; }" 
     ); 
+
+    // 2026-06-08 按照要求：配置列宽策略，防止超出容器范围
+    QHeaderView* header = m_treeView->header();
+    header->setSectionResizeMode(0, QHeaderView::Stretch);   // 名称：拉伸填满
+    header->setSectionResizeMode(1, QHeaderView::Fixed);     // 状态
+    header->setSectionResizeMode(2, QHeaderView::Fixed);     // 星级
+    header->setSectionResizeMode(3, QHeaderView::Fixed);     // 颜色
+    header->setSectionResizeMode(4, QHeaderView::Fixed);     // 类型
+    header->setSectionResizeMode(5, QHeaderView::Fixed);     // 大小
+    header->setSectionResizeMode(6, QHeaderView::Fixed);     // 修改时间
+
+    header->resizeSection(1, 40);   // 状态
+    header->resizeSection(2, 100);  // 星级
+    header->resizeSection(3, 80);   // 颜色
+    header->resizeSection(4, 100);  // 类型
+    header->resizeSection(5, 80);   // 大小
+    header->resizeSection(6, 160);  // 修改时间
+
+    header->setMinimumSectionSize(40);
+    header->setMinimumSectionSize(0); // 允许其他列收缩
+    header->setCascadingSectionResizes(true);
+    
+    // 强制锁定“修改时间”最小值为 150
+    m_treeView->setColumnWidth(6, 160);
+    // 注意：Qt Header 没有直接的每列 setMinimumWidth，但我们可以通过 resize 配合 Stretch 达到效果
+    
+    // 2026-06-xx 按照要求：持久化列表列宽
+    QSettings settings("ArcMeta团队", "ArcMeta");
+    QByteArray headerState = settings.value("UI/ListHeaderState").toByteArray();
+    if (!headerState.isEmpty()) {
+        m_treeView->header()->restoreState(headerState);
+    }
+    
+    connect(m_treeView->header(), &QHeaderView::sectionResized, [this](int logicalIndex, int oldSize, int newSize) {
+        Q_UNUSED(oldSize);
+        // 2026-06-08 按照要求：强制锁定“修改时间”列(索引6) 最小宽度为 150
+        if (logicalIndex == 6 && newSize < 150) {
+            m_treeView->header()->resizeSection(6, 150);
+        }
+
+        QSettings s("ArcMeta团队", "ArcMeta");
+        s.setValue("UI/ListHeaderState", m_treeView->header()->saveState());
+    });
  
     connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
     connect(m_treeView, &QTreeView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
@@ -1270,7 +1406,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     m_proxyModel->setDynamicSortFilter(false); 
  
     m_model->clear(); 
-    m_model->setHorizontalHeaderLabels({"名称", "大小", "类型", "修改时间"}); 
+    m_model->setHorizontalHeaderLabels({"名称", "状态", "星级", "颜色标记", "类型", "大小", "修改时间"}); 
+    for(int i=0; i<m_model->columnCount(); ++i) m_model->horizontalHeaderItem(i)->setTextAlignment(Qt::AlignCenter);
  
     if (path.isEmpty() || path == "computer://") { 
         m_currentPath = "computer://"; 
@@ -1300,7 +1437,18 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             item->setData(false, HasThumbnailRole);
  
             QList<QStandardItem*> row; 
-            row << item << new QStandardItem("-") << new QStandardItem("磁盘分区") << new QStandardItem("-"); 
+            row << item 
+                << new QStandardItem("") << new QStandardItem("") << new QStandardItem("")
+                << new QStandardItem("磁盘分区"); 
+            
+            auto* sizeItem = new QStandardItem("-");
+            sizeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            row << sizeItem;
+
+            auto* mtimeItem = new QStandardItem("-");
+            mtimeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            row << mtimeItem;
+
             m_model->appendRow(row); 
             tyc["folder"]++; 
         } 
@@ -1518,7 +1666,8 @@ void ContentPanel::loadCategory(int categoryId) {
     m_pathToIndexMap.clear(); 
  
     m_model->clear(); 
-    m_model->setHorizontalHeaderLabels({"名称", "大小", "类型", "修改时间"}); 
+    m_model->setHorizontalHeaderLabels({"名称", "状态", "星级", "颜色标记", "类型", "大小", "修改时间"}); 
+    for(int i=0; i<m_model->columnCount(); ++i) m_model->horizontalHeaderItem(i)->setTextAlignment(Qt::AlignCenter);
  
     // 2026-05-07 按照用户要求：添加统计数据结构，用于筛选器填充 
     ScanStats stats; 
@@ -1538,7 +1687,18 @@ void ContentPanel::loadCategory(int categoryId) {
             item->setData(cat.id, CategoryIdRole); 
             item->setData(color, ColorRole); 
              
-            row << item << new QStandardItem("-") << new QStandardItem("子分类") << new QStandardItem("-"); 
+            row << item 
+                << new QStandardItem("") << new QStandardItem("") << new QStandardItem("")
+                << new QStandardItem("子分类"); 
+            
+            auto* sizeItem = new QStandardItem("-");
+            sizeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            row << sizeItem;
+
+            auto* mtimeItem = new QStandardItem("-");
+            mtimeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            row << mtimeItem;
+
             m_model->appendRow(row); 
         } 
     } 
@@ -1590,9 +1750,17 @@ void ContentPanel::loadCategory(int categoryId) {
             nameItem->setData(isEmpty, IsEmptyRole); 
  
             row << nameItem; 
-            row << new QStandardItem(type == "folder" ? "-" : QString::number(size / 1024) + " KB"); 
+            row << new QStandardItem("") << new QStandardItem("") << new QStandardItem("");
             row << new QStandardItem(type == "folder" ? (isEmpty ? "文件夹 (空)" : "文件夹") : info.suffix().toUpper() + " 文件"); 
-            row << new QStandardItem(mtime.toString("yyyy-MM-dd HH:mm")); 
+
+            auto* sizeItem = new QStandardItem(type == "folder" ? "-" : QString::number(size / 1024) + " KB");
+            sizeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            row << sizeItem;
+
+            auto* mtimeItem = new QStandardItem(mtime.toString("yyyy-MM-dd HH:mm"));
+            mtimeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            row << mtimeItem;
+
             m_model->appendRow(row); 
  
             // 2026-05-07 按照用户要求：累加统计数据 
@@ -1644,7 +1812,8 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     m_pathToIndexMap.clear(); 
  
     m_model->clear(); 
-    m_model->setHorizontalHeaderLabels({"名称", "大小", "类型", "修改时间"}); 
+    m_model->setHorizontalHeaderLabels({"名称", "状态", "星级", "颜色标记", "类型", "大小", "修改时间"}); 
+    for(int i=0; i<m_model->columnCount(); ++i) m_model->horizontalHeaderItem(i)->setTextAlignment(Qt::AlignCenter);
  
     // 2026-05-07 按照用户要求：添加统计数据结构，用于筛选器填充 
     ScanStats stats; 
@@ -1686,9 +1855,17 @@ void ContentPanel::loadPaths(const QStringList& paths) {
         nameItem->setData(isEmpty, IsEmptyRole); 
  
         row << nameItem; 
-        row << new QStandardItem(info.isDir() ? "-" : QString::number(info.size() / 1024) + " KB"); 
+        row << new QStandardItem("") << new QStandardItem("") << new QStandardItem("");
         row << new QStandardItem(info.isDir() ? (isEmpty ? "文件夹 (空)" : "文件夹") : info.suffix().toUpper() + " 文件"); 
-        row << new QStandardItem(info.lastModified().toString("yyyy-MM-dd HH:mm")); 
+
+        auto* sizeItem = new QStandardItem(info.isDir() ? "-" : QString::number(info.size() / 1024) + " KB");
+        sizeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        row << sizeItem;
+
+        auto* mtimeItem = new QStandardItem(info.lastModified().toString("yyyy-MM-dd HH:mm"));
+        mtimeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        row << mtimeItem;
+
         m_model->appendRow(row); 
  
         // 2026-05-07 按照用户要求：累加统计数据 
@@ -1809,6 +1986,15 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     m.starSize    = 18; // 2026-05-17 尺寸微调以匹配外部布局
     m.starSpacing = 1;   
     int banW = 14;      // 2026-06-xx 物理对齐：将禁止图标缩减至 12px，使其与星级在视觉权重上保持一致
+
+    if (zoom < 60) {
+        m.starSize = 14;
+        banW = 11;
+    }
+
+    if (zoom < 40) {
+        m.ratingH = 0;
+    }
     int banGap = 2; 
  
     m.infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing); 
@@ -1884,6 +2070,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     // 4. 评级星级 
     int rating = index.data(RatingRole).toInt(); 
      
+    if (m.ratingH > 0) {
     // 2026-06-xx 逻辑重构：彩色胶囊背景由 colorName 独立驱动，不与星级耦合
     if (!colorName.isEmpty()) {
         QColor bgColor = UiHelper::parseColorName(colorName);
@@ -1922,6 +2109,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
             painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar); 
         } 
     } 
+    }
      
     // [名称区绘制] - 在正方形下方 
     bool isEmptyFolder = (index.data(TypeRole).toString() == "folder" && index.data(IsEmptyRole).toBool()); 
