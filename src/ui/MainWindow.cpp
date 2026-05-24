@@ -793,6 +793,8 @@ void MainWindow::setupSplitters() {
     // --- 2. 统一导航栏 (第二行) ---
     m_navBarWidget = new QWidget(centralC);
     m_navBarWidget->setObjectName("NavBar");
+    // 2026-06-xx 物理修正：移除 QWidget 可能自带的 1px 底部边框干扰，确保 100% 重合
+    m_navBarWidget->setStyleSheet("QWidget#NavBar { border: none; background: transparent; }");
     // 2026-06-xx 物理修正：将固定高度从 37px 增加到 42px (32+5+5)
     m_navBarWidget->setFixedHeight(42);
     
