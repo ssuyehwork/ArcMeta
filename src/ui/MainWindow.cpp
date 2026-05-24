@@ -1044,16 +1044,10 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     m_btnCreate->installEventFilter(m_hoverFilter);
 
-    layout->addWidget(m_btnSync);
-    layout->insertWidget(layout->indexOf(m_btnSync), m_btnRefresh);
-    layout->addWidget(m_btnScan);
-    layout->addWidget(m_btnCreate);
-    layout->addWidget(m_btnPinTop);
-
-    // --- 迁移滑动条与视图按钮 (严格 1:1 还原 ScanDialog 样式与间距) ---
+    // --- 1. 迁移滑动条与视图按钮 (移动到最左侧) ---
     m_sizeSlider = new QSlider(Qt::Horizontal);
     m_sizeSlider->setRange(56, 128);
-    m_sizeSlider->setFixedSize(110, 20);
+    m_sizeSlider->setFixedSize(110, 24); // 高度改为 24 以匹配标题栏按钮
     m_sizeSlider->setCursor(Qt::PointingHandCursor);
     // 间距计算：margin-right 1px + spacing 4px = 5px (精准对标视图按钮)
     m_sizeSlider->setStyleSheet(
@@ -1072,18 +1066,9 @@ void MainWindow::setupCustomTitleBarButtons() {
     });
     layout->addWidget(m_sizeSlider);
 
-    m_btnViewMode = new QPushButton(this);
-    m_btnViewMode->setFixedSize(20, 20); // 严格锁定 20x20
-    m_btnViewMode->setIcon(UiHelper::getIcon("grid", QColor("#CCCCCC"), 16)); // 严格锁定图标 16x16
-    m_btnViewMode->setIconSize(QSize(16, 16));
-    m_btnViewMode->setCursor(Qt::PointingHandCursor);
+    m_btnViewMode = createTitleBtn("grid"); // 使用 24x24 统一规格
     m_btnViewMode->setProperty("tooltipText", "切换视图模式");
     m_btnViewMode->installEventFilter(m_hoverFilter);
-    m_btnViewMode->setStyleSheet(
-        "QPushButton { background: transparent; border: none; border-radius: 4px; padding: 0; }"
-        "QPushButton:hover { background: rgba(255, 255, 255, 0.1); }"
-        "QPushButton:pressed { background: rgba(255, 255, 255, 0.2); }"
-    );
 
     connect(m_btnViewMode, &QPushButton::clicked, this, [this]() {
         QMenu menu(this);
@@ -1097,6 +1082,13 @@ void MainWindow::setupCustomTitleBarButtons() {
         else if (selected == actList) m_contentPanel->setViewMode(ContentPanel::ListView);
     });
     layout->addWidget(m_btnViewMode);
+
+    // --- 2. 添加原有功能按钮 ---
+    layout->addWidget(m_btnRefresh);
+    layout->addWidget(m_btnSync);
+    layout->addWidget(m_btnScan);
+    layout->addWidget(m_btnCreate);
+    layout->addWidget(m_btnPinTop);
 
     layout->addWidget(m_btnMin);
     layout->addWidget(m_btnMax);
