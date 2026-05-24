@@ -41,7 +41,7 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
                        textHeight);
     
     m.starSize = 18;
-    m.starSpacing = -2;
+    m.starSpacing = -4;
     int banW = 14;
     int banGap = 2; // 保持间隙一致性
     int infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing);
