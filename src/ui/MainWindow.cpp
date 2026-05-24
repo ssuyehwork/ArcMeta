@@ -927,6 +927,13 @@ void MainWindow::setupCustomTitleBarButtons() {
         return btn;
     };
 
+    m_btnRefresh = createTitleBtn("sync");
+    m_btnRefresh->setProperty("tooltipText", "刷新当前目录");
+    m_btnRefresh->installEventFilter(m_hoverFilter);
+    connect(m_btnRefresh, &QPushButton::clicked, this, [this]() {
+        if (m_contentPanel) m_contentPanel->loadDirectory(m_currentPath);
+    });
+
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "无待同步任务");
     m_btnSync->installEventFilter(m_hoverFilter);
@@ -958,6 +965,39 @@ void MainWindow::setupCustomTitleBarButtons() {
     // 启动时初始化一次状态
     QTimer::singleShot(500, this, [this, updateSyncBtnState]() {
         updateSyncBtnState(SyncEngine::instance().hasPendingTasks());
+    });
+
+    // ① 尺寸滑动条 (从 ScanDialog 迁移)
+    m_sizeSlider = new QSlider(Qt::Horizontal);
+    m_sizeSlider->setRange(56, 128); // ContentPanel 锁定的范围
+    QSettings settings("ArcMeta团队", "ArcMeta");
+    m_sizeSlider->setValue(settings.value("UI/GridZoomLevel", 96).toInt());
+    m_sizeSlider->setFixedSize(80, 20);
+    m_sizeSlider->setCursor(Qt::PointingHandCursor);
+    m_sizeSlider->setStyleSheet(
+        "QSlider { background: transparent; }"
+        "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }"
+        "QSlider::sub-page:horizontal { background: #3498db; border-radius: 2px; }"
+        "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; background: #3498db; border-radius: 6px; }"
+    );
+    connect(m_sizeSlider, &QSlider::valueChanged, this, [this](int v) {
+        if (m_contentPanel) m_contentPanel->setZoomLevel(v);
+    });
+
+    // ② 视图切换按钮 (从 ScanDialog 迁移)
+    m_btnViewMode = createTitleBtn("grid");
+    m_btnViewMode->setProperty("tooltipText", "切换视图模式");
+    m_btnViewMode->installEventFilter(m_hoverFilter);
+    connect(m_btnViewMode, &QPushButton::clicked, this, [this]() {
+        QMenu menu(this);
+        UiHelper::applyMenuStyle(&menu);
+
+        QAction* actGrid = menu.addAction("网格视图");
+        QAction* actList = menu.addAction("列表视图");
+
+        QAction* selected = menu.exec(m_btnViewMode->mapToGlobal(QPoint(0, m_btnViewMode->height())));
+        if (selected == actGrid) m_contentPanel->setViewMode(ContentPanel::GridView);
+        else if (selected == actList) m_contentPanel->setViewMode(ContentPanel::ListView);
     });
 
     m_btnScan = createTitleBtn("scan");
@@ -1029,6 +1069,9 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
+    layout->addWidget(m_sizeSlider);
+    layout->addWidget(m_btnViewMode);
+    layout->addWidget(m_btnRefresh);
     layout->addWidget(m_btnSync);
     layout->addWidget(m_btnScan);
     layout->addWidget(m_btnCreate);

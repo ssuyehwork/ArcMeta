@@ -549,32 +549,7 @@ ScanDialog::ScanDialog(QWidget* parent)
                 menu->exec(viewBtn->mapToGlobal(QPoint(0, viewBtn->height() + 2))); 
             }); 
 
-            // ② 尺寸滑动条 (标记 3)
-            m_sizeSlider = new QSlider(Qt::Horizontal); 
-            m_sizeSlider->setRange(32, 256); 
-            m_sizeSlider->setValue(m_config.iconSize > 0 ? m_config.iconSize : 64); 
-            m_sizeSlider->setFixedSize(110, 20); // 高度调整为 20px，避免覆盖/截断
-            m_sizeSlider->setCursor(Qt::PointingHandCursor); 
-            m_sizeSlider->installEventFilter(this);
-            // 间距计算：margin-right 1px + spacing 4px = 5px (精准对标视图按钮)
-            m_sizeSlider->setStyleSheet( 
-                "QSlider { background: transparent; margin-right: 1px; }"
-                "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }" 
-                "QSlider::sub-page:horizontal { background: #FF8C00; border-radius: 2px; }" 
-                "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; " 
-                "  background: #FF8C00; border-radius: 6px; }" 
-            ); 
-            connect(m_sizeSlider, &QSlider::valueChanged, this, [this](int v) { 
-                m_config.iconSize = v; 
-                m_resultView->verticalHeader()->setDefaultSectionSize(v); 
-                m_iconView->setTargetRowHeight(v); 
-                m_tableModel->clearThumbCache(); 
-                m_tableModel->updateResults(); // 确保触发重新加载并生成新尺寸的缩略图
-                m_config.save(); 
-            }); 
-            
             titleLayout->insertWidget(titleLayout->indexOf(m_pinBtn), viewBtn);
-            titleLayout->insertWidget(titleLayout->indexOf(viewBtn), m_sizeSlider);
 
             // 更新现有控制按钮样式以对标规范
             for (auto* btn : {m_pinBtn, m_minBtn, m_maxBtn}) {
@@ -1751,14 +1726,6 @@ void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
 }
 
 bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
-    if (watched == m_sizeSlider && event->type() == QEvent::MouseButtonPress) {
-        QMouseEvent* me = static_cast<QMouseEvent*>(event);
-        if (me->button() == Qt::LeftButton) {
-            int val = QStyle::sliderValueFromPosition(m_sizeSlider->minimum(), m_sizeSlider->maximum(), me->pos().x(), m_sizeSlider->width());
-            m_sizeSlider->setValue(val);
-            return true;
-        }
-    }
     if ((watched == m_searchEdit || watched == m_extEdit) && event->type() == QEvent::MouseButtonDblClick) {
         bool isQuery = (watched == m_searchEdit);
         const QStringList& history = isQuery ? m_config.queryHistory : m_config.extHistory;

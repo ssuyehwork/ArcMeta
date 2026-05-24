@@ -167,7 +167,6 @@ private:
     QLabel* m_selectionLabel = nullptr;  
     QPushButton* m_csvBtn = nullptr;     
     QProgressBar* m_progressBar = nullptr;
-    QSlider* m_sizeSlider = nullptr;
 
     int64_t m_lastSearchMs = 0;
 

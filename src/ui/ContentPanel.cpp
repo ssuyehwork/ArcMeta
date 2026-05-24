@@ -64,7 +64,10 @@
 namespace ArcMeta { 
  
 // --- FilterProxyModel 实现 --- 
-FilterProxyModel::FilterProxyModel(QObject* parent) : QSortFilterProxyModel(parent) {} 
+FilterProxyModel::FilterProxyModel(QObject* parent) : QSortFilterProxyModel(parent) {
+    // 2026-06-xx 架构修正：开启实时动态排序，确保置顶/星级变更后自动归位
+    setDynamicSortFilter(true);
+}
  
 void FilterProxyModel::updateFilter() { 
     beginFilterChange(); 
@@ -727,6 +730,11 @@ void ContentPanel::setViewMode(ViewMode mode) {
     if (mode == GridView) m_viewStack->setCurrentWidget(m_gridView); 
     else m_viewStack->setCurrentWidget(m_treeView); 
 } 
+
+void ContentPanel::setZoomLevel(int level) {
+    m_zoomLevel = level;
+    updateGridSize();
+}
  
 void ContentPanel::initGridView() { 
     m_gridView = new DropJustifiedView(this); 
@@ -977,6 +985,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     m_proxyModel->setData(idx, pin, IsLockedRole); 
                 } 
             } 
+            // 2026-06-xx 物理触发：置顶状态改变后显式触发行重排
+            m_proxyModel->sort(m_proxyModel->sortColumn(), m_proxyModel->sortOrder());
             break; 
         } 
         case ActionColorTag: { 
@@ -1278,7 +1288,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         QMap<int, int> rc; QMap<QString, int> cc, tc, tyc, cdc, mdc; 
         QFileIconProvider provider;
         for (const QFileInfo& drive : drives) { 
-            QString drivePath = drive.absolutePath(); 
+            // 2026-06-xx 物理对标：硬盘路径强制执行标准化，确保与 MetadataManager 键值对齐
+            QString drivePath = QDir::toNativeSeparators(drive.absolutePath());
  
             // 2026-04-12 按照用户最新铁律：从 MetadataManager 获取集中管理的磁盘元数据 
             RuntimeMeta rm = MetadataManager::instance().getMeta(drivePath.toStdWString()); 

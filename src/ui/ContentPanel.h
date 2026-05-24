@@ -142,6 +142,11 @@ public:
     void setViewMode(ViewMode mode);
 
     /**
+     * @brief 设置缩放比例
+     */
+    void setZoomLevel(int level);
+
+    /**
      * @brief 拦截空格键（红线：物理拦截 QEvent::KeyPress 且为 Key_Space）
      */
     bool eventFilter(QObject* obj, QEvent* event) override;

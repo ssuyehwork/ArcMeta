@@ -661,6 +661,10 @@ void CategoryPanel::initUi() {
     btnSwitch->setProperty("tooltipText", "工作模式切换：关闭采用数据库模式，开启采用JSON内存模式");
     btnSwitch->installEventFilter(this);
     connect(btnSwitch, &QPushButton::toggled, this, [this, btnSwitch](bool checked) {
+        // 2026-06-xx 持久化修正：保存工作模式状态
+        QSettings settings("ArcMeta团队", "ArcMeta");
+        settings.setValue("Category/WorkModeJson", checked);
+
         // 先发拉起物理对账同步，确保双轨数据一致、零数据落差平滑迁移！
         CategoryRepo::syncDatabaseAndJson();
 
@@ -687,6 +691,13 @@ void CategoryPanel::initUi() {
             m_categoryModel->refresh();
         }
     });
+
+    // 2026-06-xx 持久化修正：加载工作模式状态
+    {
+        QSettings settings("ArcMeta团队", "ArcMeta");
+        bool isJsonMode = settings.value("Category/WorkModeJson", false).toBool();
+        btnSwitch->setChecked(isJsonMode);
+    }
     headerLayout->addWidget(btnSwitch, 0, Qt::AlignVCenter);
 
     // 2026-06-xx 按照用户要求：从状态栏迁移至此，执行手动全量扫描与对账
