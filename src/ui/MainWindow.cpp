@@ -1043,21 +1043,24 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
-    layout->addWidget(m_btnRefresh);
+
     layout->addWidget(m_btnSync);
+    layout->insertWidget(layout->indexOf(m_btnSync), m_btnRefresh);
     layout->addWidget(m_btnScan);
     layout->addWidget(m_btnCreate);
     layout->addWidget(m_btnPinTop);
 
-    // --- 迁移滑动条与视图按钮 ---
+    // --- 迁移滑动条与视图按钮 (严格 1:1 还原 ScanDialog 样式与间距) ---
     m_sizeSlider = new QSlider(Qt::Horizontal);
     m_sizeSlider->setRange(56, 128);
-    m_sizeSlider->setFixedSize(100, 20);
+    m_sizeSlider->setFixedSize(110, 20);
     m_sizeSlider->setCursor(Qt::PointingHandCursor);
+    // 间距计算：margin-right 1px + spacing 4px = 5px (精准对标视图按钮)
     m_sizeSlider->setStyleSheet(
+        "QSlider { background: transparent; margin-right: 1px; }"
         "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }"
-        "QSlider::sub-page:horizontal { background: #3498db; border-radius: 2px; }"
-        "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; background: #EEEEEE; border-radius: 6px; }"
+        "QSlider::sub-page:horizontal { background: #FF8C00; border-radius: 2px; }"
+        "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; background: #FF8C00; border-radius: 6px; }"
     );
     // 从 QSettings 加载初始值 (参考 ContentPanel 逻辑)
     QSettings settings("ArcMeta团队", "ArcMeta");
@@ -1069,9 +1072,19 @@ void MainWindow::setupCustomTitleBarButtons() {
     });
     layout->addWidget(m_sizeSlider);
 
-    m_btnViewMode = createTitleBtn("grid");
+    m_btnViewMode = new QPushButton(this);
+    m_btnViewMode->setFixedSize(20, 20); // 严格锁定 20x20
+    m_btnViewMode->setIcon(UiHelper::getIcon("grid", QColor("#CCCCCC"), 16)); // 严格锁定图标 16x16
+    m_btnViewMode->setIconSize(QSize(16, 16));
+    m_btnViewMode->setCursor(Qt::PointingHandCursor);
     m_btnViewMode->setProperty("tooltipText", "切换视图模式");
     m_btnViewMode->installEventFilter(m_hoverFilter);
+    m_btnViewMode->setStyleSheet(
+        "QPushButton { background: transparent; border: none; border-radius: 4px; padding: 0; }"
+        "QPushButton:hover { background: rgba(255, 255, 255, 0.1); }"
+        "QPushButton:pressed { background: rgba(255, 255, 255, 0.2); }"
+    );
+
     connect(m_btnViewMode, &QPushButton::clicked, this, [this]() {
         QMenu menu(this);
         UiHelper::applyMenuStyle(&menu);
