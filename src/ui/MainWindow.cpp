@@ -793,6 +793,8 @@ void MainWindow::setupSplitters() {
     // --- 2. 统一导航栏 (第二行) ---
     m_navBarWidget = new QWidget(centralC);
     m_navBarWidget->setObjectName("NavBar");
+    // 2026-06-xx 物理修正：移除 QWidget 可能自带的 1px 底部边框干扰，确保 100% 重合
+    m_navBarWidget->setStyleSheet("QWidget#NavBar { border: none; background: transparent; }");
     // 2026-06-xx 物理修正：将固定高度从 37px 增加到 42px (32+5+5)
     m_navBarWidget->setFixedHeight(42); 
     
@@ -812,7 +814,8 @@ void MainWindow::setupSplitters() {
     QWidget* bodyWrapper = new QWidget(centralC);
     bodyWrapper->setStyleSheet("background: transparent;"); // 确保背景透明不遮挡阴影
     m_bodyLayout = new QVBoxLayout(bodyWrapper);
-    m_bodyLayout->setContentsMargins(5, 5, 5, 5); // 物理还原：5px 边距是 1180px 宽度计算的逻辑基础
+    // 2026-06-xx 物理修正：顶部边距设为 0，使容器顶部边框作为切割线与地址栏保持 5px 间距
+    m_bodyLayout->setContentsMargins(5, 0, 5, 5); 
     m_bodyLayout->setSpacing(0);
 
     // --- 3. 主拆分条 (物理还原：5px 物理缝隙) ---
@@ -1216,12 +1219,12 @@ void MainWindow::changeEvent(QEvent* event) {
             m_btnMax->setIcon(UiHelper::getIcon(iconKey, QColor("#EEEEEE")));
         }
 
-        // 2026-06-xx 按照用户要求：最大化时保留顶部 5px 间距，防止与地址栏粘连
+        // 2026-06-xx 按照用户要求：顶部始终为 0，确保容器顶部边框作为物理切割线
         if (m_bodyLayout) {
             if (isMaximized()) {
-                m_bodyLayout->setContentsMargins(0, 5, 0, 0);
+                m_bodyLayout->setContentsMargins(0, 0, 0, 0);
             } else {
-                m_bodyLayout->setContentsMargins(5, 5, 5, 5);
+                m_bodyLayout->setContentsMargins(5, 0, 5, 5);
             }
         }
     }

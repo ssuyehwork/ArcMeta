@@ -37,6 +37,7 @@ public:
     static bool reorder(int parentId, bool ascending);
     static bool reorderAll(bool ascending);
     static std::vector<Category> getAll();
+    static std::vector<Category> getRecentlyUsed(int limit);
     static std::vector<std::pair<int, int>> getCounts();
     static int getUniqueItemCount();
     static int getUncategorizedItemCount();

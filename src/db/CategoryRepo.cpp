@@ -324,6 +324,42 @@ static std::vector<std::string> getFileIdsRecursive(int categoryId) {
  * 2026-03-xx 物理修复：全面移除隐式 Default Connection，强制通过 getThreadDatabase 获取线程专用连接。
  */
 
+std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
+    if (m_isJsonMode) {
+        // 简化版 JSON 逻辑：暂按原序提取
+        return JsonCategoryEngine::getAll();
+    }
+    std::vector<Category> results;
+    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlQuery q(db);
+    // 按添加时间倒序提取最近的分类
+    q.prepare("SELECT c.id, c.parent_id, c.name, c.color, c.preset_tags, c.sort_order, c.pinned, c.encrypted, c.encrypt_hint "
+              "FROM categories c "
+              "JOIN (SELECT category_id, MAX(added_at) as max_at FROM category_items GROUP BY category_id) ci "
+              "ON c.id = ci.category_id ORDER BY ci.max_at DESC LIMIT ?");
+    q.addBindValue(limit);
+    
+    if (q.exec()) {
+        while (q.next()) {
+            Category cat;
+            cat.id = q.value(0).toInt();
+            cat.parentId = q.value(1).toInt();
+            cat.name = q.value(2).toString().toStdWString();
+            cat.color = q.value(3).toString().toStdWString();
+            QJsonDocument doc = QJsonDocument::fromJson(q.value(4).toByteArray());
+            if (doc.isArray()) {
+                for (const auto& v : doc.array()) cat.presetTags.push_back(v.toString().toStdWString());
+            }
+            cat.sortOrder = q.value(5).toInt();
+            cat.pinned = q.value(6).toBool();
+            cat.encrypted = q.value(7).toBool();
+            cat.encryptHint = q.value(8).toString().toStdWString();
+            results.push_back(cat);
+        }
+    }
+    return results;
+}
+
 bool CategoryRepo::add(Category& cat) {
     // 1. 写入 JSON 并分配自增 ID
     bool jsonOk = JsonCategoryEngine::add(cat);
