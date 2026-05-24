@@ -23,6 +23,7 @@ class ContentPanel;
 class MetaPanel;
 class FilterPanel;
 class SearchHistoryPanel;
+class QSlider;
 
 /**
  * @brief 主窗口类

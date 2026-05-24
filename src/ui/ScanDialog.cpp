@@ -539,7 +539,6 @@ ScanDialog::ScanDialog(QWidget* parent)
                         if (v.stackIdx == 1) { 
                             m_config.iconSize = v.size; 
                             m_iconView->setTargetRowHeight(v.size); 
-                            if (m_sizeSlider) m_sizeSlider->setValue(v.size); 
                         } 
                         if (v.stackIdx == 0) 
                             m_resultView->verticalHeader()->setDefaultSectionSize(m_config.iconSize); 

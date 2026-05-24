@@ -35,6 +35,7 @@
 #include <QCloseEvent>
 #include <QMenu>
 #include <QAction>
+#include <QSlider>
 #include <QTimer>
 #include "UiHelper.h"
 #include <QFileInfo>
