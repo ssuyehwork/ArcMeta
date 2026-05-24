@@ -24,19 +24,14 @@ public:
 
         if (selected || hover) {
             painter->save();
-            painter->setRenderHint(QPainter::Antialiasing);
-
-            // 2026-06-xx 按照要求：美化高亮效果，消除“坑坑洼洼”感，采用全行贯穿式圆角高亮
+            // 2026-06-xx 按照用户最新要求：消除“坑坑洼洼”感，改用全行贯穿式直角高亮，填满整个区域
             QColor bg = selected ? QColor("#378ADD") : QColor("#2a2d2e");
             if (selected) bg.setAlphaF(0.15f);
 
-            // 使用 option.rect 确保高亮条横向覆盖整个可视区域
-            QRect highlightRect = option.rect;
-            highlightRect.adjust(4, 1, -4, -1); // 左右留出少量呼吸间距，上下微调对齐
-            
+            // 物理修复：直接使用 option.rect，不进行 adjust 缩进，不使用圆角，确保色块无缝对接
             painter->setBrush(bg);
             painter->setPen(Qt::NoPen);
-            painter->drawRoundedRect(highlightRect, 4, 4);
+            painter->drawRect(option.rect);
             painter->restore();
         }
 
