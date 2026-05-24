@@ -26,23 +26,17 @@ public:
             painter->save();
             painter->setRenderHint(QPainter::Antialiasing);
 
-            // 默认使用蓝调高亮，或者根据需要自定义
+            // 2026-06-xx 按照要求：美化高亮效果，消除“坑坑洼洼”感，采用全行贯穿式圆角高亮
             QColor bg = selected ? QColor("#378ADD") : QColor("#2a2d2e");
-            if (selected) bg.setAlphaF(0.2f); 
+            if (selected) bg.setAlphaF(0.15f);
 
-            QStyle* style = option.widget ? option.widget->style() : QApplication::style();
-            QRect decoRect = style->subElementRect(QStyle::SE_ItemViewItemDecoration, &option, option.widget);
-            QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &option, option.widget);
-            
-            QRect contentRect = decoRect.united(textRect);
-            contentRect = contentRect.intersected(option.rect);
-            
-            // 物理还原：选中高亮应用 5px 圆角，增加微量内缩
-            contentRect.adjust(0, 1, 0, -1);
+            // 使用 option.rect 确保高亮条横向覆盖整个可视区域
+            QRect highlightRect = option.rect;
+            highlightRect.adjust(4, 1, -4, -1); // 左右留出少量呼吸间距，上下微调对齐
             
             painter->setBrush(bg);
             painter->setPen(Qt::NoPen);
-            painter->drawRoundedRect(contentRect, 5, 5);
+            painter->drawRoundedRect(highlightRect, 4, 4);
             painter->restore();
         }
 

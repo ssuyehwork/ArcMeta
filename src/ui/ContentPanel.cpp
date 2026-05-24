@@ -488,23 +488,48 @@ void ContentPanel::updateStatusBarStats() {
 void ContentPanel::updateGridSize() {
     // 2026-06-05 按照用户要求：彻底重构为正方形布局，名称外置
     // 2026-06-05 按照要求：将最小值锁定为 96
-    m_zoomLevel = qBound(96, m_zoomLevel, 128);
+
+    if (m_viewStack->currentWidget() == m_gridView) {
+        m_zoomLevel = qBound(96, m_zoomLevel, 128);
+    }
 
     // 写入实时日志
     ArcMeta::Logger::log(QString("[UI_DEBUG] 卡片缩放级: %1").arg(m_zoomLevel));
-    
-    if (auto* jv = qobject_cast<JustifiedView*>(m_gridView)) {
-        jv->setTargetRowHeight(m_zoomLevel);
-    } else if (auto* lv = qobject_cast<QListView*>(m_gridView)) {
-        lv->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
-        int side = m_zoomLevel + 46; // 正方形边长
-        int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
-        int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
-        int gap = 6;                // 间距归一化
+
+    if (m_viewStack->currentWidget() == m_gridView) {
+        if (auto* jv = qobject_cast<JustifiedView*>(m_gridView)) {
+            jv->setTargetRowHeight(m_zoomLevel);
+        } else if (auto* lv = qobject_cast<QListView*>(m_gridView)) {
+            lv->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
+            int side = m_zoomLevel + 46; // 正方形边长
+            int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
+            int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
+            int gap = 6;                // 间距归一化
+
+            // 总高度 = 正方形边长 + 间距1 + 评分高度 + 间距2 + 名称高度 + 底部缓冲
+            int totalH = side + gap + ratingH + gap + nameH + 8;
+            lv->setGridSize(QSize(side, totalH));
+        }
+    } else if (m_viewStack->currentWidget() == m_treeView) {
+        // 2026-06-xx 按照要求：列表模式下调整行高
+        if (m_zoomLevel > 96) {
+            // 如果行高超过 96，自动切换到卡片形式
+            setViewMode(GridView);
+            updateGridSize();
+            return;
+        }
         
-        // 总高度 = 正方形边长 + 间距1 + 评分高度 + 间距2 + 名称高度 + 底部缓冲
-        int totalH = side + gap + ratingH + gap + nameH + 8;
-        lv->setGridSize(QSize(side, totalH));
+        // 2026-06-xx 性能优化：仅当行高发生实际变化时更新样式表
+        static int lastTreeHeight = -1;
+        if (lastTreeHeight != m_zoomLevel) {
+            m_treeView->setStyleSheet(
+                QString("QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }"
+                        "QTreeView::item { height: %1px; color: #EEEEEE; padding-left: 0px; }"
+                        "QTreeView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }")
+                .arg(m_zoomLevel)
+            );
+            lastTreeHeight = m_zoomLevel;
+        }
     }
 
     // 2026-06-05 按照要求：持久化保存当前的缩放级别
@@ -534,9 +559,11 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
             if (delta > 0) {
                 // 向上滚动（放大）
                 if (m_viewStack->currentWidget() == m_treeView) {
-                    // 如果当前是列表模式，向上滚动直接切换回网格模式并设为最小值 96
-                    m_zoomLevel = 96;
-                    setViewMode(GridView);
+                    m_zoomLevel += 4; // 列表模式步进调小一些，追求平滑
+                    if (m_zoomLevel > 96) {
+                        m_zoomLevel = 96;
+                        setViewMode(GridView);
+                    }
                     updateGridSize();
                 } else {
                     m_zoomLevel += 8;
@@ -544,11 +571,17 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 }
             } else {
                 // 向下滚动（缩小）
-                if (m_viewStack->currentWidget() == m_gridView && m_zoomLevel <= 96) {
-                    // 如果已经在 96 且继续缩小，切换到列表模式
-                    setViewMode(ListView);
-                } else if (m_viewStack->currentWidget() == m_gridView) {
-                    m_zoomLevel -= 8;
+                if (m_viewStack->currentWidget() == m_gridView) {
+                    if (m_zoomLevel <= 96) {
+                        setViewMode(ListView);
+                        m_zoomLevel = 80; // 切换到列表时给一个初始行高
+                        updateGridSize();
+                    } else {
+                        m_zoomLevel -= 8;
+                        updateGridSize();
+                    }
+                } else if (m_viewStack->currentWidget() == m_treeView) {
+                    m_zoomLevel = qMax(24, m_zoomLevel - 4); // 列表模式最小行高锁定 24
                     updateGridSize();
                 }
             }
@@ -740,8 +773,11 @@ void ContentPanel::wheelEvent(QWheelEvent* event) {
         if (delta > 0) {
             // 放大
             if (m_viewStack->currentWidget() == m_treeView) {
-                m_zoomLevel = 96;
-                setViewMode(GridView);
+                m_zoomLevel += 4;
+                if (m_zoomLevel > 96) {
+                    m_zoomLevel = 96;
+                    setViewMode(GridView);
+                }
                 updateGridSize();
             } else {
                 m_zoomLevel += 8;
@@ -749,10 +785,17 @@ void ContentPanel::wheelEvent(QWheelEvent* event) {
             }
         } else {
             // 缩小
-            if (m_viewStack->currentWidget() == m_gridView && m_zoomLevel <= 96) {
-                setViewMode(ListView);
-            } else if (m_viewStack->currentWidget() == m_gridView) {
-                m_zoomLevel -= 8;
+            if (m_viewStack->currentWidget() == m_gridView) {
+                if (m_zoomLevel <= 96) {
+                    setViewMode(ListView);
+                    m_zoomLevel = 80;
+                    updateGridSize();
+                } else {
+                    m_zoomLevel -= 8;
+                    updateGridSize();
+                }
+            } else if (m_viewStack->currentWidget() == m_treeView) {
+                m_zoomLevel = qMax(24, m_zoomLevel - 4);
                 updateGridSize();
             }
         }
