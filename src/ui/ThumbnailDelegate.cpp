@@ -163,17 +163,22 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             }
         }
 
-        bool shouldShowRating = (rating > 0) || isSelected;
-        if (shouldShowRating) {
+        // 评级星级可见性：仅在星级 > 0 或被选中时显示
+        if (rating > 0 || isSelected) {
             QColor starColor = colorStr.isEmpty() ? QColor("#CCCCCC") : UiHelper::parseColorName(colorStr).darker(700);
             QColor emptyStarColor = colorStr.isEmpty() ? QColor("#888888") : UiHelper::parseColorName(colorStr).darker(400);
             if (!colorStr.isEmpty()) emptyStarColor.setAlpha(180);
 
+            // 绘制禁止图标（始终显示，作为交互热区）
             UiHelper::getIcon("no_color", starColor, m.banRect.width()).paint(painter, m.banRect);
-            QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), starColor);
-            QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor);
-            for (int i = 0; i < 5; ++i) {
-                painter->drawPixmap(m.starRect(i), (i < rating) ? filledStar : emptyStar);
+
+            // 核心修正：如果星级为 0，则不绘制任何星级（哪怕是空心的），除非 rating > 0
+            if (rating > 0) {
+                QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), starColor);
+                QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor);
+                for (int i = 0; i < 5; ++i) {
+                    painter->drawPixmap(m.starRect(i), (i < rating) ? filledStar : emptyStar);
+                }
             }
         }
     }

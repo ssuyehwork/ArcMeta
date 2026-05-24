@@ -35,7 +35,6 @@
 #include <QCloseEvent>
 #include <QMenu>
 #include <QAction>
-#include <QSlider>
 #include <QTimer>
 #include "UiHelper.h"
 #include <QFileInfo>
@@ -46,6 +45,8 @@
 #include <windows.h>
 #include <Dbt.h>
 #endif
+
+#include <QSlider>
 
 #include "../db/SyncEngine.h"
 #include <QtConcurrent>
