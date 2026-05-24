@@ -835,7 +835,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         // [归类与标记区] 
         QMenu* categorizeMenu = menu.addMenu("归类到..."); 
         UiHelper::applyMenuStyle(categorizeMenu); 
-        auto categories = CategoryRepo::getAll(); 
+        // 2026-06-xx 逻辑优化：仅显示最近使用的 15 个分类
+        auto categories = CategoryRepo::getRecentlyUsed(15);
+        if (categories.empty()) categories = CategoryRepo::getAll();
+        if (categories.size() > 15) categories.resize(15);
+
         if (categories.empty()) { 
             categorizeMenu->addAction("（暂无分类）")->setEnabled(false); 
         } else { 

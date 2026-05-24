@@ -173,6 +173,9 @@ public:
 
     static void applyMenuStyle(QWidget* menu) {
         if (!menu) return;
+        // 2026-06-xx 物理修复：开启透明背景属性，消除圆角外的直角溢出
+        menu->setAttribute(Qt::WA_TranslucentBackground);
+        menu->setWindowFlag(Qt::FramelessWindowHint);
         menu->setStyleSheet(
             "QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid #444; padding: 4px; border-radius: 8px; }"
             "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; font-size: 12px; }"
