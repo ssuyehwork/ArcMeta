@@ -9,12 +9,11 @@
 namespace ArcMeta {
 
 SearchHistoryPanel::SearchHistoryPanel(QWidget* parent)
-    : QFrame(parent, Qt::Tool | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint)
+    : QFrame(parent, Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint)
 {
-    // 2026-04-12 按照用户要求：悬浮面板样式 —— 深色背景、8px 圆角，带 1px 边框
+    // 2026-06-xx 架构重构：使用 Qt::Popup 代替 Qt::Tool，Popup 标志位自带失焦自动关闭逻辑
+    // 移除 Qt::WindowStaysOnTopHint，防止在主窗口关闭/最小化后依然置顶显示
     setAttribute(Qt::WA_TranslucentBackground, false);
-    setAttribute(Qt::WA_ShowWithoutActivating, true);
-    setWindowFlag(Qt::WindowStaysOnTopHint, true);
 
     setObjectName("SearchHistoryPanel");
     setStyleSheet(

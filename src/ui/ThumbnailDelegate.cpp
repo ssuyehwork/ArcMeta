@@ -213,6 +213,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             painter->save();
             painter->setRenderHint(QPainter::Antialiasing);
             painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine));
+            painter->setBrush(Qt::NoBrush); // 2026-06-xx 物理优化：确保空文件夹标记为全透明
             painter->drawRoundedRect(m.cardRect, 6, 6);
             painter->restore();
         }

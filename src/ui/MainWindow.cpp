@@ -690,9 +690,8 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
         }
     }
 
-    // 2026-04-12 按照用户要求：搜索框获得焦点时弹出历史记录
-    if (event->type() == QEvent::FocusIn && watched == m_searchEdit) {
-        // 2026-04-12 按照用户要求：搜索框获得焦点时弹出历史记录
+    // 2026-06-xx 物理修复：双击搜索框时弹出历史记录
+    if (event->type() == QEvent::MouseButtonDblClick && watched == m_searchEdit) {
         if (!m_searchHistory.isEmpty()) {
             m_searchHistoryPanel->showBelow(m_searchEdit);
         }
@@ -794,11 +793,12 @@ void MainWindow::setupSplitters() {
     // --- 2. 统一导航栏 (第二行) ---
     m_navBarWidget = new QWidget(centralC);
     m_navBarWidget->setObjectName("NavBar");
-    m_navBarWidget->setFixedHeight(37); // 32px 内容 + 5px 上边距
+    // 2026-06-xx 物理修正：将固定高度从 37px 增加到 42px (32+5+5)
+    m_navBarWidget->setFixedHeight(42); 
     
     m_navBarLayout = new QHBoxLayout(m_navBarWidget);
-    // 2026-03-xx 物理对齐：实现上下 5px 呼吸感，上边距由本布局提供，下边距由 bodyLayout 提供
-    m_navBarLayout->setContentsMargins(5, 5, 5, 0); 
+    // 2026-06-xx 物理修正：增加底部 5px 间距，确保切割线与地址栏不重合
+    m_navBarLayout->setContentsMargins(5, 5, 5, 5); 
     m_navBarLayout->setSpacing(5);
     m_navBarLayout->setAlignment(Qt::AlignVCenter);
 
@@ -1205,6 +1205,11 @@ void MainWindow::onPinToggled(bool checked) {
 
 void MainWindow::changeEvent(QEvent* event) {
     if (event->type() == QEvent::WindowStateChange) {
+        // 2026-06-xx 物理对标：当窗口最小化时，显式隐藏搜索历史面板
+        if (isMinimized() && m_searchHistoryPanel) {
+            m_searchHistoryPanel->hide();
+        }
+
         // 2026-04-11 按照用户要求：物理识别窗口状态，精准切换最大化/还原图标
         if (m_btnMax) {
             QString iconKey = isMaximized() ? "restore_window" : "maximize";

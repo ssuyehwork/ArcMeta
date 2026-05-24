@@ -1923,9 +1923,9 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     bool isEmptyFolder = (index.data(TypeRole).toString() == "folder" && index.data(IsEmptyRole).toBool()); 
  
     if (!isSelected && isEmptyFolder) { 
-        // 对空文件夹正方形区进行特殊描边 (仅限未选中状态，防止与蓝色边框重叠)
+        // 2026-06-xx 物理优化：移除半透明蒙版，改为全透明刷子
         painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine)); 
-        painter->setBrush(QColor(65, 242, 242, 30)); 
+        painter->setBrush(Qt::NoBrush); // 直接将其透明 
         painter->drawRoundedRect(m.squareRect, 8, 8); 
         painter->setPen(QColor("#41F2F2")); 
     } 
