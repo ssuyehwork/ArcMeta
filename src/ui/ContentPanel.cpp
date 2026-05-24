@@ -1893,14 +1893,16 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
                 painter->save();
                 painter->setBrush(bgColor);
                 painter->setPen(Qt::NoPen);
-                QRect totalRect = m.banRect.united(QRect(m.starsStartX + 4 * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize));
+                // 物理同步：计算胶囊背景区域
+                QRect lastStarRect(m.starsStartX + 4 * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
+                QRect totalRect = m.banRect.united(lastStarRect);
                 painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
                 painter->restore();
 
-                // 物理对标参考图：在彩色背景上使用深色图标 (背景色的加深版本)
-                starColor = bgColor.darker(250);
-                emptyStarColor = bgColor.darker(150);
-                emptyStarColor.setAlpha(100);
+                // 物理对标参考图：在彩色背景上使用深色图标 (背景色的极致加深版本)
+                starColor = bgColor.darker(700); // 极致加深
+                emptyStarColor = bgColor.darker(400);
+                emptyStarColor.setAlpha(180); // 进一步提高可见度
             }
         }
 

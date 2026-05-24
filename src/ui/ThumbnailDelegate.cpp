@@ -145,8 +145,6 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         painter->drawText(extRect, Qt::AlignCenter, ext);
     }
 
-    painter->restore(); // 释放裁剪区 (解除对 cardRect 的裁剪)
-
     // [新增] 评级星级 (现在绘制在裁剪区外，处于卡片与文件名的间隙处)
     if (m_ratingRole != -1) {
         int rating = index.data(m_ratingRole).toInt();
@@ -167,10 +165,10 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                 painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
                 painter->restore();
 
-                // 物理对标参考图：在彩色背景上使用深色图标 (背景色的加深版本)
-                starColor = bgColor.darker(250);
-                emptyStarColor = bgColor.darker(150);
-                emptyStarColor.setAlpha(100);
+                // 物理对标参考图：在彩色背景上使用深色图标 (背景色的极致加深版本)
+                starColor = bgColor.darker(700); // 极致加深，接近黑色但保留色调
+                emptyStarColor = bgColor.darker(400);
+                emptyStarColor.setAlpha(180); // 进一步提高可见度
             }
         }
 
@@ -219,6 +217,8 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             painter->restore();
         }
     }
+
+    painter->restore(); // 物理还原：释放 paint 函数开始处的 painter->save()
 }
 
 QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const {
