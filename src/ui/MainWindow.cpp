@@ -690,9 +690,8 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
         }
     }
 
-    // 2026-04-12 按照用户要求：搜索框获得焦点时弹出历史记录
-    if (event->type() == QEvent::FocusIn && watched == m_searchEdit) {
-        // 2026-04-12 按照用户要求：搜索框获得焦点时弹出历史记录
+    // 2026-06-xx 物理修复：双击搜索框时弹出历史记录
+    if (event->type() == QEvent::MouseButtonDblClick && watched == m_searchEdit) {
         if (!m_searchHistory.isEmpty()) {
             m_searchHistoryPanel->showBelow(m_searchEdit);
         }
