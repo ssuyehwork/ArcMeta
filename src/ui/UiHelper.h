@@ -140,8 +140,9 @@ public:
         Q_UNUSED(size);
         
         QFileInfo info(filePath);
-        QString key = info.isDir() ? "folder" : info.suffix().toLower();
-        if (key.length() > 12) key = "unknown";
+        // 2026-06-xx 架构修正：磁盘根目录图标应独立缓存，防止其覆盖通用文件夹图标
+        QString key = info.isDir() ? (info.isRoot() ? filePath : "folder") : info.suffix().toLower();
+        if (key.length() > 128) key = "unknown";
         
         static QMap<QString, QIcon> s_iconCache;
         if (s_iconCache.contains(key)) {
@@ -151,7 +152,13 @@ public:
         QFileIconProvider provider;
         QIcon icon;
         if (info.isDir()) {
-            icon = provider.icon(QFileIconProvider::Folder);
+            // 2026-06-xx 架构修正：判断是否为磁盘根目录
+            if (info.isRoot()) {
+                // 若是磁盘根目录，必须获取其盘符图标而非通用文件夹图标
+                icon = provider.icon(info);
+            } else {
+                icon = provider.icon(QFileIconProvider::Folder);
+            }
         } else {
             icon = provider.icon(QFileInfo("dummy." + key));
             if (icon.isNull()) {

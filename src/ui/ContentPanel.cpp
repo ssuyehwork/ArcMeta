@@ -1880,6 +1880,21 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     // 4. 评级星级 
     int rating = index.data(RatingRole).toInt(); 
      
+    // 2026-06-xx 逻辑重构：彩色胶囊背景由 colorName 独立驱动，不与星级耦合
+    if (!colorName.isEmpty()) {
+        QColor bgColor = UiHelper::parseColorName(colorName);
+        if (bgColor.isValid()) {
+            painter->save();
+            painter->setBrush(bgColor);
+            painter->setPen(Qt::NoPen);
+            // 即使星级为0，也应根据占位计算胶囊区域并绘制
+            QRect lastStarRect(m.starsStartX + 4 * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
+            QRect totalRect = m.banRect.united(lastStarRect);
+            painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
+            painter->restore();
+        }
+    }
+
     // 2026-xx-xx 按照最新要求： 
     // 1. 如果已有打分 (rating > 0)，始终显示。 
     // 2. 如果未打分但被选中，显示禁止图标和空心星。 
@@ -1887,28 +1902,9 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     bool shouldShowRating = (rating > 0) || isSelected; 
  
     if (shouldShowRating) { 
-        QColor starColor("#CCCCCC");
-        QColor emptyStarColor("#888888");
-
-        // [新增] 物理同步：绘制彩色背景胶囊
-        if (!colorName.isEmpty()) {
-            QColor bgColor = UiHelper::parseColorName(colorName);
-            if (bgColor.isValid()) {
-                painter->save();
-                painter->setBrush(bgColor);
-                painter->setPen(Qt::NoPen);
-                // 物理同步：计算胶囊背景区域
-                QRect lastStarRect(m.starsStartX + 4 * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
-                QRect totalRect = m.banRect.united(lastStarRect);
-                painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
-                painter->restore();
-
-                // 物理对标参考图：在彩色背景上使用深色图标 (背景色的极致加深版本)
-                starColor = bgColor.darker(700); // 极致加深
-                emptyStarColor = bgColor.darker(400);
-                emptyStarColor.setAlpha(180); // 进一步提高可见度
-            }
-        }
+        QColor starColor = colorName.isEmpty() ? QColor("#CCCCCC") : UiHelper::parseColorName(colorName).darker(700);
+        QColor emptyStarColor = colorName.isEmpty() ? QColor("#888888") : UiHelper::parseColorName(colorName).darker(400);
+        if (!colorName.isEmpty()) emptyStarColor.setAlpha(180);
 
         // 2026-xx-xx 深度修复：调高禁止图标与空心星亮度，确保在深色卡片背景下清晰可见 
         QIcon banIcon = UiHelper::getIcon("no_color", starColor, m.banRect.width()); 
