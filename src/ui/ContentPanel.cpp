@@ -486,8 +486,8 @@ void ContentPanel::updateStatusBarStats() {
 
 void ContentPanel::updateGridSize() {
     // 2026-06-05 按照用户要求：彻底重构为正方形布局，名称外置
-    // 2026-06-05 按照要求：将最小值锁定为 56
-    m_zoomLevel = qBound(56, m_zoomLevel, 128);
+    // 2026-06-05 按照要求：将最小值锁定为 96
+    m_zoomLevel = qBound(96, m_zoomLevel, 128);
 
     // 写入实时日志
     ArcMeta::Logger::log(QString("[UI_DEBUG] 卡片缩放级: %1").arg(m_zoomLevel));
