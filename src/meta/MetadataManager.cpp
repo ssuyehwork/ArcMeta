@@ -139,6 +139,26 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
 
 void MetadataManager::initFromDatabase() {
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
+
+    // 2026-06-xx 架构修正：从 FERREX_drivers.json 加载磁盘根目录元数据
+    QString driversPath = QCoreApplication::applicationDirPath() + "/FERREX_drivers.json";
+    QFile dFile(driversPath);
+    if (dFile.open(QIODevice::ReadOnly)) {
+        QJsonObject root = QJsonDocument::fromJson(dFile.readAll()).object();
+        for (auto it = root.begin(); it != root.end(); ++it) {
+            std::wstring nPath = normalizePath(it.key().toStdWString());
+            QJsonObject m = it.value().toObject();
+            RuntimeMeta rm;
+            rm.rating = m["rating"].toInt();
+            rm.color = m["color"].toString().toStdWString();
+            rm.pinned = m["pinned"].toBool();
+            rm.note = m["note"].toString().toStdWString();
+            QJsonArray tagsArr = m["tags"].toArray();
+            for (const auto& t : tagsArr) rm.tags << t.toString();
+            tempCache[nPath] = std::move(rm);
+        }
+    }
+
     auto volMap = getVolumeToDriveMap();
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     if (!db.isOpen()) return;
@@ -535,25 +555,53 @@ void MetadataManager::persistAsync(const std::wstring& path) {
     }
 
     // 2. 物理落地：写入 .am_meta.json (物理侧真值先行)
-    AmMetaJson amJson(parentDir);
-    amJson.load();
-    if (info.isDir()) {
-        FolderMeta& folder = amJson.folder();
-        folder.rating = rMeta.rating; folder.color = rMeta.color;
-        folder.pinned = rMeta.pinned; folder.note = rMeta.note;
-        folder.tags.clear();
-        for (const auto& t : rMeta.tags) folder.tags.push_back(t.toStdWString());
-        folder.palettes = rMeta.palettes;
+    // 2026-06-xx 架构修正：判断是否为磁盘根目录
+    if (info.isDir() && info.isRoot()) {
+        // 磁盘根目录元数据应持久化到程序根目录下的 FERREX_drivers.json，防止权限冲突或物理损坏
+        QString driversPath = qApp->applicationDirPath() + "/FERREX_drivers.json";
+        QFile file(driversPath);
+        QJsonObject root;
+        if (file.open(QIODevice::ReadOnly)) {
+            root = QJsonDocument::fromJson(file.readAll()).object();
+            file.close();
+        }
+
+        QJsonObject driveMeta;
+        driveMeta["rating"] = rMeta.rating;
+        driveMeta["color"] = QString::fromStdWString(rMeta.color);
+        driveMeta["pinned"] = rMeta.pinned;
+        driveMeta["note"] = QString::fromStdWString(rMeta.note);
+        QJsonArray tagsArr;
+        for (const auto& t : rMeta.tags) tagsArr.append(t);
+        driveMeta["tags"] = tagsArr;
+
+        root[QString::fromStdWString(nPath)] = driveMeta;
+
+        if (file.open(QIODevice::WriteOnly)) {
+            file.write(QJsonDocument(root).toJson());
+            file.close();
+        }
     } else {
-        ItemMeta& item = amJson.items()[fileName];
-        item.rating = rMeta.rating; item.color = rMeta.color;
-        item.pinned = rMeta.pinned; item.encrypted = rMeta.encrypted;
-        item.note = rMeta.note;
-        item.tags.clear();
-        for (const auto& t : rMeta.tags) item.tags.push_back(t.toStdWString());
-        item.palettes = rMeta.palettes;
+        AmMetaJson amJson(parentDir);
+        amJson.load();
+        if (info.isDir()) {
+            FolderMeta& folder = amJson.folder();
+            folder.rating = rMeta.rating; folder.color = rMeta.color;
+            folder.pinned = rMeta.pinned; folder.note = rMeta.note;
+            folder.tags.clear();
+            for (const auto& t : rMeta.tags) folder.tags.push_back(t.toStdWString());
+            folder.palettes = rMeta.palettes;
+        } else {
+            ItemMeta& item = amJson.items()[fileName];
+            item.rating = rMeta.rating; item.color = rMeta.color;
+            item.pinned = rMeta.pinned; item.encrypted = rMeta.encrypted;
+            item.note = rMeta.note;
+            item.tags.clear();
+            for (const auto& t : rMeta.tags) item.tags.push_back(t.toStdWString());
+            item.palettes = rMeta.palettes;
+        }
+        amJson.save();
     }
-    amJson.save();
 
     // 2.5 提取该父文件夹的物理 FRN，安全、自动登记到根目录 All_FRN_am_meta.json 中
     std::wstring folderFrn;

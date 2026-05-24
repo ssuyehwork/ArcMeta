@@ -148,31 +148,27 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     // [新增] 评级星级 (现在绘制在裁剪区外，处于卡片与文件名的间隙处)
     if (m_ratingRole != -1) {
         int rating = index.data(m_ratingRole).toInt();
-        bool shouldShowRating = (rating > 0) || isSelected;
+        QString colorStr = (m_colorRole != -1) ? index.data(m_colorRole).toString() : "";
 
-        QColor starColor("#CCCCCC");
-        QColor emptyStarColor("#888888");
-
-        if (m_colorRole != -1) {
-            QString colorStr = index.data(m_colorRole).toString();
+        // 2026-06-xx 逻辑重构：彩色胶囊背景独立于星级显示
+        if (!colorStr.isEmpty()) {
             QColor bgColor = UiHelper::parseColorName(colorStr);
-            if (bgColor.isValid() && shouldShowRating) {
+            if (bgColor.isValid()) {
                 painter->save();
                 painter->setBrush(bgColor);
                 painter->setPen(Qt::NoPen);
-                // 计算并绘制圆角矩形背景
                 QRect totalRect = m.banRect.united(m.starRect(4));
                 painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
                 painter->restore();
-
-                // 物理对标参考图：在彩色背景上使用深色图标 (背景色的极致加深版本)
-                starColor = bgColor.darker(700); // 极致加深，接近黑色但保留色调
-                emptyStarColor = bgColor.darker(400);
-                emptyStarColor.setAlpha(180); // 进一步提高可见度
             }
         }
 
+        bool shouldShowRating = (rating > 0) || isSelected;
         if (shouldShowRating) {
+            QColor starColor = colorStr.isEmpty() ? QColor("#CCCCCC") : UiHelper::parseColorName(colorStr).darker(700);
+            QColor emptyStarColor = colorStr.isEmpty() ? QColor("#888888") : UiHelper::parseColorName(colorStr).darker(400);
+            if (!colorStr.isEmpty()) emptyStarColor.setAlpha(180);
+
             UiHelper::getIcon("no_color", starColor, m.banRect.width()).paint(painter, m.banRect);
             QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), starColor);
             QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor);
