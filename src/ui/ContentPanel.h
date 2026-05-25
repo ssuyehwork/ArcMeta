@@ -42,6 +42,39 @@ protected:
 };
 
 /**
+ * @brief 虚拟化数据库模型：支持百万级条目瞬时加载 (2026-06-xx 重构)
+ */
+class FerrexVirtualDbModel : public QAbstractTableModel {
+    Q_OBJECT
+public:
+    explicit FerrexVirtualDbModel(QObject* parent = nullptr);
+
+    int rowCount(const QModelIndex& parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex& parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
+    bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
+
+    // 虚拟化加载
+    bool canFetchMore(const QModelIndex& parent) const override;
+    void fetchMore(const QModelIndex& parent) override;
+
+    void setRecords(const std::vector<ItemRepo::ItemRecord>& records);
+    void clear();
+
+    const std::vector<ItemRepo::ItemRecord>& allRecords() const { return m_allRecords; }
+
+private:
+    std::vector<ItemRepo::ItemRecord> m_allRecords;
+    int m_displayCount = 0;
+
+    mutable QCache<QString, QIcon> m_iconCache;
+    mutable QSet<QString> m_requestedIcons;
+    mutable QMap<QString, double> m_aspectRatios;
+    mutable QCache<QString, RuntimeMeta> m_metaCache;
+};
+
+/**
  * @brief 自定义 Role 枚举，用于 QStandardItemModel 数据存取
  */
 enum ItemRole {
@@ -215,17 +248,9 @@ private:
     // 视图组件
     QAbstractItemView* m_gridView = nullptr;
     QTreeView* m_treeView = nullptr;
-    QStandardItemModel* m_model = nullptr;
+    FerrexVirtualDbModel* m_model = nullptr;
     QSortFilterProxyModel* m_proxyModel = nullptr;
 
-    // 懒加载图标相关
-    QTimer* m_lazyIconTimer = nullptr;
-    QStringList m_iconPendingPaths;
-    QMap<QString, QPersistentModelIndex> m_pathToIndexMap;
-
-    // 2026-05-20 按照白皮书优化：双重缓冲 60FPS 平滑消费
-    QTimer* m_smoothConsumeTimer = nullptr;
-    std::deque<ScanItemData> m_uiPendingQueue;
 
     FilterState m_currentFilter;
 

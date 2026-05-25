@@ -278,4 +278,134 @@ QStringList ItemRepo::getPathsBySystemType(const QString& type) {
     return results;
 }
 
+std::vector<ItemRepo::ItemRecord> ItemRepo::getItemRecordsBySystemType(const QString& type) {
+    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlQuery q(db);
+
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    qint64 startOfToday = QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch();
+    qint64 startOfYesterday = QDateTime(QDate::currentDate().addDays(-1), QTime(0, 0)).toMSecsSinceEpoch();
+
+    QString sql;
+    if (type == "all") {
+        sql = "SELECT volume, frn, MIN(path) FROM items WHERE deleted = 0 AND type = 'file' GROUP BY file_id_128";
+    } else if (type == "today") {
+        sql = "SELECT volume, frn, MIN(path) FROM items WHERE deleted = 0 AND type = 'file' AND (ctime >= ? OR mtime >= ?) GROUP BY file_id_128";
+    } else if (type == "yesterday") {
+        sql = "SELECT volume, frn, MIN(path) FROM items WHERE deleted = 0 AND type = 'file' AND (ctime >= ? OR mtime >= ?) AND (ctime < ? OR mtime < ?) GROUP BY file_id_128";
+    } else if (type == "recently_visited") {
+        sql = "SELECT volume, frn, MIN(path) FROM items WHERE deleted = 0 AND type = 'file' AND atime >= ? GROUP BY file_id_128";
+    } else if (type == "uncategorized") {
+        sql = "SELECT i.volume, i.frn, MIN(i.path) FROM items i "
+              "WHERE i.deleted = 0 AND i.type = 'file' "
+              "AND NOT EXISTS ("
+              "  SELECT 1 FROM category_items ci "
+              "  WHERE ci.file_id_128 = i.file_id_128"
+              ") GROUP BY i.file_id_128";
+    } else if (type == "untagged") {
+        sql = "SELECT volume, frn, MIN(path) FROM items WHERE deleted = 0 AND type = 'file' "
+              "AND (tags IS NULL OR tags = '' OR tags = '[]') GROUP BY file_id_128";
+    } else if (type == "tags") {
+        sql = "SELECT volume, frn, MIN(path) FROM items WHERE deleted = 0 AND type = 'file' "
+              "AND (tags IS NOT NULL AND tags != '' AND tags != '[]') GROUP BY file_id_128";
+    } else if (type == "trash") {
+        sql = "SELECT volume, frn, MIN(path) FROM items WHERE deleted = 1 AND type = 'file' GROUP BY file_id_128";
+    } else {
+        return {};
+    }
+
+    q.prepare(sql);
+    if (type == "today") {
+        q.addBindValue(startOfToday); q.addBindValue(startOfToday);
+    } else if (type == "yesterday") {
+        q.addBindValue(startOfYesterday); q.addBindValue(startOfYesterday);
+        q.addBindValue(startOfToday); q.addBindValue(startOfToday);
+    } else if (type == "recently_visited") {
+        q.addBindValue(now - 86400000.0);
+    }
+
+    std::vector<ItemRecord> results;
+    if (q.exec()) {
+        while (q.next()) {
+            ItemRecord r;
+            r.volume = q.value(0).toString();
+            r.frn = q.value(1).toString();
+            r.path = q.value(2).toString();
+            r.isDir = false; // By System Type normally filters for 'file'
+            results.push_back(r);
+        }
+    }
+    return results;
+}
+
+std::vector<ItemRepo::ItemRecord> ItemRepo::searchRecordsByKeyword(const QString& keyword, const QString& parentPath) {
+    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlQuery q(db);
+
+    QString sql;
+    QString likePattern = "%" + keyword + "%";
+    if (parentPath.isEmpty()) {
+        if (keyword.isEmpty()) {
+            sql = "SELECT volume, frn, MIN(path) FROM items WHERE deleted = 0 AND type = 'file' GROUP BY file_id_128";
+            q.prepare(sql);
+        } else {
+            sql = "SELECT volume, frn, MIN(path) FROM items WHERE (path LIKE ? OR tags LIKE ? OR note LIKE ?) AND deleted = 0 AND type = 'file' GROUP BY file_id_128";
+            q.prepare(sql);
+            q.addBindValue(likePattern);
+            q.addBindValue(likePattern);
+            q.addBindValue(likePattern);
+        }
+    } else {
+        if (keyword.isEmpty()) {
+            sql = "SELECT volume, frn, MIN(path) FROM items WHERE parent_path = ? AND deleted = 0 AND type = 'file' GROUP BY file_id_128";
+            q.prepare(sql);
+            q.addBindValue(parentPath);
+        } else {
+            sql = "SELECT volume, frn, MIN(path) FROM items WHERE parent_path = ? AND (path LIKE ? OR tags LIKE ? OR note LIKE ?) AND deleted = 0 AND type = 'file' GROUP BY file_id_128";
+            q.prepare(sql);
+            q.addBindValue(parentPath);
+            q.addBindValue(likePattern);
+            q.addBindValue(likePattern);
+            q.addBindValue(likePattern);
+        }
+    }
+
+    std::vector<ItemRecord> results;
+    if (q.exec()) {
+        while (q.next()) {
+            ItemRecord r;
+            r.volume = q.value(0).toString();
+            r.frn = q.value(1).toString();
+            r.path = q.value(2).toString();
+            r.isDir = false;
+            results.push_back(r);
+        }
+    }
+    return results;
+}
+
+std::vector<ItemRepo::ItemRecord> ItemRepo::getRecordsInCategory(int categoryId) {
+    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlQuery q(db);
+
+    q.prepare("SELECT i.volume, i.frn, MIN(i.path) FROM items i "
+              "JOIN category_items ci ON i.file_id_128 = ci.file_id_128 "
+              "WHERE ci.category_id = ? AND i.deleted = 0 "
+              "GROUP BY i.file_id_128");
+    q.addBindValue(categoryId);
+
+    std::vector<ItemRecord> results;
+    if (q.exec()) {
+        while (q.next()) {
+            ItemRecord r;
+            r.volume = q.value(0).toString();
+            r.frn = q.value(1).toString();
+            r.path = q.value(2).toString();
+            r.isDir = false;
+            results.push_back(r);
+        }
+    }
+    return results;
+}
+
 } // namespace ArcMeta

@@ -52,9 +52,30 @@ public:
     static QStringList getUntaggedPaths();
 
     /**
+     * @brief 轻量级条目记录，用于虚拟化模型索引
+     */
+    struct ItemRecord {
+        QString volume;
+        QString frn;
+        QString path;
+        bool isDir = false;
+        bool isCategory = false;
+        int categoryId = 0;
+        QString categoryName;
+        QString categoryColor;
+    };
+
+    /**
      * @brief 2026-06-xx 新增：根据系统项类型获取对应的物理文件路径列表
      */
     static QStringList getPathsBySystemType(const QString& type);
+
+    /**
+     * @brief 2026-06-xx 新增：获取轻量级记录列表以支持虚拟化视图
+     */
+    static std::vector<ItemRecord> getItemRecordsBySystemType(const QString& type);
+    static std::vector<ItemRecord> searchRecordsByKeyword(const QString& keyword, const QString& parentPath = "");
+    static std::vector<ItemRecord> getRecordsInCategory(int categoryId);
 };
 
 } // namespace ArcMeta
