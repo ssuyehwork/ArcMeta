@@ -234,6 +234,7 @@ private:
     bool m_isRecursive = false;
     bool m_isLoading = false; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
     void updateGridSize();
+    void enforceNameColumnMinimum();
     void updateStatusBarStats();
     void recalculateAndEmitStats();
 

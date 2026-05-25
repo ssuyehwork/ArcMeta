@@ -552,8 +552,43 @@ void ContentPanel::updateGridSize() {
     settings.setValue("UI/GridZoomLevel", m_zoomLevel);
 
     qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
-} 
- 
+}
+
+void ContentPanel::enforceNameColumnMinimum() {
+    if (!m_treeView) return;
+    auto* header = m_treeView->header();
+    if (!header) return;
+
+    static bool inForce = false;
+    if (inForce) return;
+    inForce = true;
+
+    int nameWidth = header->sectionSize(0);
+    if (nameWidth < 220) {
+        int maxAvailable = m_treeView->viewport()->width();
+        if (maxAvailable > 100) {
+            int required = 220 - nameWidth;
+            // 2026-06-18 增强型优先级压缩序列：日期(7) > 大小(6) > 类型(5) > 标签(4) > 状态组(1,2,3)
+            int indices[] = {7, 6, 5, 4, 1, 2, 3};
+            for (int idx : indices) {
+                if (required <= 0) break;
+                int curSize = header->sectionSize(idx);
+                int minSize = (idx == 7) ? 150 : (idx >= 1 && idx <= 3 ? 20 : 30);
+                int canShrink = curSize - minSize;
+                if (canShrink > 0) {
+                    int shrinkBy = qMin(canShrink, required);
+                    header->resizeSection(idx, curSize - shrinkBy);
+                    required -= shrinkBy;
+                }
+            }
+            // 强制刷新名称列宽度
+            if (header->sectionSize(0) < 220) {
+                header->resizeSection(0, 220);
+            }
+        }
+    }
+    inForce = false;
+}
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 
     // 2026-03-xx 按照宪法要求：物理拦截 Hover 事件以触发 ToolTipOverlay 
     // 2026-05-20 性能优化：同时支持 Enter/Leave 事件，确保响应灵敏 
@@ -566,6 +601,10 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         ToolTipOverlay::hideTip(); 
     } 
  
+    if (obj == m_treeView && event->type() == QEvent::Resize) {
+        enforceNameColumnMinimum();
+    }
+
     if ((obj == m_gridView || obj == m_gridView->viewport() || obj == m_treeView || obj == m_treeView->viewport()) && event->type() == QEvent::Wheel) { 
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 static_cast 的类型推导逻辑错误 
         QWheelEvent* wEvent = reinterpret_cast<QWheelEvent*>(event); 
@@ -857,6 +896,7 @@ void ContentPanel::initGridView() {
         m_gridView->setItemDelegate(new GridItemDelegate(this)); 
     }
 
+    m_gridView->installEventFilter(this);
     m_gridView->viewport()->installEventFilter(this); 
  
     connect(m_gridView, &QAbstractItemView::doubleClicked, this, &ContentPanel::onDoubleClicked); 
@@ -888,6 +928,7 @@ void ContentPanel::initListView() {
     m_treeView->setItemDelegate(new TreeItemDelegate(this)); 
  
     m_treeView->setModel(m_proxyModel); 
+    m_treeView->installEventFilter(this);
     m_treeView->viewport()->installEventFilter(this); 
  
     m_treeView->setStyleSheet( 
@@ -933,6 +974,11 @@ void ContentPanel::initListView() {
     }
     header->setSectionResizeMode(0, QHeaderView::Stretch);
 
+    // 2026-06-18 物理补丁：初始化时立即执行一次红线校验，防止 restoreState 导致启动时宽度异常
+    QTimer::singleShot(100, this, [this]() {
+        enforceNameColumnMinimum();
+    });
+
     // 3. 宽度守恒与物理红线拦截逻辑
     connect(header, &QHeaderView::sectionResized, this, [this, header](int index, int oldSize, int newSize) {
         Q_UNUSED(oldSize);
@@ -943,7 +989,7 @@ void ContentPanel::initListView() {
         
         // 物理红线判定：名称（索引0）最小 220px, 修改日期（索引7）最小 150px
         if (index == 0 && newSize < 220) {
-            header->resizeSection(0, 220);
+            enforceNameColumnMinimum();
             guard = false;
             return;
         }
