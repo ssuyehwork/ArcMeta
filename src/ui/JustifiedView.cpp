@@ -34,13 +34,6 @@ void JustifiedView::setTargetRowHeight(int h) {
     }
 }
 
-void JustifiedView::setHasThumbnailRole(int role) {
-    if (m_hasThumbnailRole != role) {
-        m_hasThumbnailRole = role;
-        doLayout();
-    }
-}
-
 void JustifiedView::setAspectRatioRole(int role) {
     if (m_aspectRatioRole != role) {
         m_aspectRatioRole = role;
@@ -179,7 +172,7 @@ QRegion JustifiedView::visualRegionForSelection(const QItemSelection& selection)
 void JustifiedView::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton && (event->modifiers() & Qt::ShiftModifier)) {
         QModelIndex current = indexAt(event->pos());
-        QModelIndex anchor = currentIndex();
+        QModelIndex anchor = selectionModel()->currentIndex(); // 锁定原始锚点
 
         if (current.isValid() && anchor.isValid()) {
             int start = std::min(current.row(), anchor.row());
@@ -193,8 +186,7 @@ void JustifiedView::mousePressEvent(QMouseEvent* event) {
             } else {
                 selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect);
             }
-            // 物理同步：保持 anchor 不动，更新当前焦点为点击项
-            selectionModel()->setCurrentIndex(current, QItemSelectionModel::NoUpdate);
+            // 物理修复：保持 anchor 不动，不更新 currentIndex，确保连续 Shift 点击逻辑正确
             viewport()->update();
             event->accept();
             return;
@@ -210,19 +202,23 @@ void JustifiedView::mouseDoubleClickEvent(QMouseEvent* event) {
         return;
     }
 
+    // 2026-06-16 物理修复：同步 doLayout 中的高度计算逻辑，精准定位 Hitbox
     const int textHeight = 36;
+    const int ratingHeight = 20;
+    const int gap = 4;
+    const int totalTextZone = textHeight + ratingHeight + gap;
+
     QRect itemRect = visualRect(idx);
-    // 文字区域 = 卡片底部 textHeight 像素
-    QRect textRect(itemRect.left(), itemRect.bottom() - textHeight, itemRect.width(), textHeight);
+    // 文字区域实际位于卡片最底部
+    QRect textRect(itemRect.left(), itemRect.bottom() - totalTextZone, itemRect.width(), totalTextZone);
 
     if (textRect.contains(event->pos())) {
-        // 双击在文字区域 → 触发行内重命名
+        // 双击在文字或评分区域 → 触发行内重命名
         edit(idx);
     } else {
-        // 双击在缩略图区域 → 触发打开文件（发射 doubleClicked 信号）
+        // 双击在缩略图区域 → 触发打开文件
         emit doubleClicked(idx);
     }
-    // 不调用父类，防止父类再次触发默认编辑逻辑
 }
 
 void JustifiedView::paintEvent(QPaintEvent*) {
@@ -325,21 +321,15 @@ void JustifiedView::doLayout() {
 
         int actualHeight = m_targetRowHeight;
         bool isLastRow = (i == count);
-        bool rowIsJustified = false;
+        bool rowIsJustified = !isLastRow; // 2026-06-16 物理修正：除最后一行外，强制执行两端对齐，杜绝空隙
 
-        // 2026-06-xx 物理修正：考虑 ThumbnailDelegate 的内边距 (左右各 3px = 6px)
-        // 实际图片可用总宽度 = 容器宽度 - (项间距) - (所有项的 6px 内边距)
         int availableImageWidth = containerWidth - (spacing * (numInRow - 1)) - (6 * numInRow);
 
-        if (!isLastRow) {
+        if (rowIsJustified) {
             actualHeight = qRound(availableImageWidth / rowAspectRatioSum);
-            // 只有当行高在合理范围内（目标高度的 0.75 到 1.5 倍）时才进行两端对齐
-            if (actualHeight >= m_targetRowHeight * 0.75 && actualHeight <= m_targetRowHeight * 1.5) {
-                rowIsJustified = true;
-            } else {
-                actualHeight = std::min(actualHeight, (int)(m_targetRowHeight * 1.5));
-                actualHeight = std::max(actualHeight, (int)(m_targetRowHeight * 0.75));
-            }
+            // 工业级容差限制：防止单行高度由于项目过少而过度拉伸或压缩
+            actualHeight = std::min(actualHeight, (int)(m_targetRowHeight * 1.5));
+            actualHeight = std::max(actualHeight, (int)(m_targetRowHeight * 0.75));
         }
 
         int currentX = margin;

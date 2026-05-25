@@ -85,14 +85,14 @@ public:
                     int startX = banRect.right() + 5;
 
                     if (rating > 0) {
-                        QPixmap star = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(starSize, starSize), QColor("#FECF0E"));
+                        QPixmap star = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), QColor("#FECF0E"));
                         for (int i = 0; i < rating; ++i) {
                             painter->drawPixmap(startX + i * (starSize + spacing), 
                                                 option.rect.top() + (option.rect.height() - starSize) / 2, star);
                         }
                         // 如果选中，补齐剩余的空心星
                         if (isSelected && rating < 5) {
-                            QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(starSize, starSize), QColor("#555555"));
+                            QPixmap emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), QColor("#555555"));
                             for (int i = rating; i < 5; ++i) {
                                 painter->drawPixmap(startX + i * (starSize + spacing), 
                                                     option.rect.top() + (option.rect.height() - starSize) / 2, emptyStar);
@@ -100,7 +100,7 @@ public:
                         }
                     } else {
                         // 仅选中但无评分，显示 5 颗空心星
-                        QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(starSize, starSize), QColor("#555555"));
+                        QPixmap emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), QColor("#555555"));
                         for (int i = 0; i < 5; ++i) {
                             painter->drawPixmap(startX + i * (starSize + spacing), 
                                                 option.rect.top() + (option.rect.height() - starSize) / 2, emptyStar);
@@ -126,17 +126,15 @@ public:
 
 public:
     bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) override {
-        // 2026-06-16 按照方案 20：星级清空逻辑 (运行逻辑闭环)
+        // 2026-06-16 按照方案 20：交互逻辑闭环修正
         if (event->type() == QEvent::MouseButtonPress && index.column() == 2) {
             QMouseEvent* me = static_cast<QMouseEvent*>(event);
             
-            // 精准 Hitbox：禁止图标固定在列起始偏移 5px 处，大小 16px
+            // 精准 Hitbox：禁止图标
             QRect banHitbox(option.rect.left() + 5, option.rect.top() + (option.rect.height() - 16)/2, 16, 16);
             
             if (banHitbox.contains(me->pos())) {
-                QString path = index.model()->index(index.row(), 0).data(PathRole).toString();
-                // 核心意图：一键物理回滚
-                MetadataManager::instance().setRating(path.toStdWString(), 0);
+                // 核心意图：统一由模型 setData 触发持久化，消除双写冲突
                 model->setData(index.model()->index(index.row(), 0), 0, RatingRole);
                 return true;
             }
@@ -144,12 +142,10 @@ public:
             // 处理点击星级评分
             int starSize = 14;
             int spacing = 1;
-            int startX = option.rect.left() + 5 + 16 + 5; // banRect.right() + 5
+            int startX = option.rect.left() + 5 + 16 + 5; 
             for (int i = 0; i < 5; ++i) {
                 QRect starRect(startX + i * (starSize + spacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
                 if (starRect.contains(me->pos())) {
-                    QString path = index.model()->index(index.row(), 0).data(PathRole).toString();
-                    MetadataManager::instance().setRating(path.toStdWString(), i + 1);
                     model->setData(index.model()->index(index.row(), 0), i + 1, RatingRole);
                     return true;
                 }
