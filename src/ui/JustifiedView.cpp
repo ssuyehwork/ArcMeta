@@ -170,25 +170,54 @@ QRegion JustifiedView::visualRegionForSelection(const QItemSelection& selection)
 }
 
 void JustifiedView::mousePressEvent(QMouseEvent* event) {
-    if (event->button() == Qt::LeftButton && (event->modifiers() & Qt::ShiftModifier)) {
-        QModelIndex current = indexAt(event->pos());
-        QModelIndex anchor = selectionModel()->currentIndex(); // 锁定原始锚点
-
-        if (current.isValid() && anchor.isValid()) {
-            int start = std::min(current.row(), anchor.row());
-            int end = std::max(current.row(), anchor.row());
-
-            QItemSelection selection;
-            selection.select(model()->index(start, 0), model()->index(end, 0));
-            
-            if (event->modifiers() & Qt::ControlModifier) {
-                selectionModel()->select(selection, QItemSelectionModel::Select);
-            } else {
-                selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect);
+    if (event->button() == Qt::LeftButton) {
+        if (event->modifiers() & Qt::ShiftModifier) {
+            QModelIndex clicked = indexAt(event->pos());
+            if (clicked.isValid() && m_anchorRow >= 0) {
+                // 2026-06-16 工业级修复：基于视觉位置进行流式选择
+                int anchorVisual = -1, clickedVisual = -1;
+                for (int i = 0; i < (int)m_geometries.size(); ++i) {
+                    if (m_geometries[i].index == m_anchorRow)      anchorVisual = i;
+                    if (m_geometries[i].index == clicked.row())    clickedVisual = i;
+                }
+                if (anchorVisual >= 0 && clickedVisual >= 0) {
+                    int vFrom = std::min(anchorVisual, clickedVisual);
+                    int vTo   = std::max(anchorVisual, clickedVisual);
+                    QItemSelection sel;
+                    for (int v = vFrom; v <= vTo; ++v) {
+                        QModelIndex idx = model()->index(m_geometries[v].index, 0);
+                        sel.select(idx, idx);
+                    }
+                    selectionModel()->select(sel, QItemSelectionModel::ClearAndSelect);
+                    // 核心关键：不更新 m_anchorRow，锚点永远保持第一次点击的位置
+                    selectionModel()->setCurrentIndex(clicked, QItemSelectionModel::NoUpdate);
+                }
+                event->accept();
+                viewport()->update();
+                return;
             }
-            // 物理修复：保持 anchor 不动，不更新 currentIndex，确保连续 Shift 点击逻辑正确
-            viewport()->update();
+        } else if (event->modifiers() & Qt::ControlModifier) {
+            QModelIndex clicked = indexAt(event->pos());
+            if (clicked.isValid()) {
+                selectionModel()->select(clicked, QItemSelectionModel::Toggle);
+                m_anchorRow = clicked.row(); // Ctrl+点击重置锚点
+                setCurrentIndex(clicked);
+            }
             event->accept();
+            viewport()->update();
+            return;
+        } else {
+            QModelIndex clicked = indexAt(event->pos());
+            if (clicked.isValid()) {
+                selectionModel()->select(clicked, QItemSelectionModel::ClearAndSelect);
+                m_anchorRow = clicked.row(); // 普通单击重置锚点
+                setCurrentIndex(clicked);
+            } else {
+                selectionModel()->clearSelection();
+                m_anchorRow = -1;
+            }
+            event->accept();
+            viewport()->update();
             return;
         }
     }
@@ -202,22 +231,24 @@ void JustifiedView::mouseDoubleClickEvent(QMouseEvent* event) {
         return;
     }
 
-    // 2026-06-16 物理修复：同步 doLayout 中的高度计算逻辑，精准定位 Hitbox
-    const int textHeight = 36;
+    // 2026-06-16 工业级纠偏：与 doLayout 及 ThumbnailDelegate::calculateMetrics 保持 100% 同步
+    const int textHeight   = 36;
     const int ratingHeight = 20;
-    const int gap = 4;
-    const int totalTextZone = textHeight + ratingHeight + gap;
+    const int gap          = 4;
+    const int cardPadding  = 6;
+    const int extraHeight  = cardPadding + textHeight + ratingHeight + gap; 
 
     QRect itemRect = visualRect(idx);
-    // 文字区域实际位于卡片最底部
-    QRect textRect(itemRect.left(), itemRect.bottom() - totalTextZone, itemRect.width(), totalTextZone);
+
+    // 文字区域 = item 底部 textHeight 像素
+    QRect textRect(itemRect.left(), itemRect.bottom() - textHeight, itemRect.width(), textHeight);
+    // 缩略图区域 = item 顶部到文字区域之前
+    QRect thumbRect(itemRect.left(), itemRect.top(), itemRect.width(), itemRect.height() - extraHeight);
 
     if (textRect.contains(event->pos())) {
-        // 双击在文字或评分区域 → 触发行内重命名
-        edit(idx);
-    } else {
-        // 双击在缩略图区域 → 触发打开文件
-        emit doubleClicked(idx);
+        edit(idx);                  // 双击文字区域 → 触发行内重命名
+    } else if (thumbRect.contains(event->pos())) {
+        emit doubleClicked(idx);    // 双击缩略图区域 → 触发打开文件
     }
 }
 
@@ -321,15 +352,16 @@ void JustifiedView::doLayout() {
 
         int actualHeight = m_targetRowHeight;
         bool isLastRow = (i == count);
-        bool rowIsJustified = !isLastRow; // 2026-06-16 物理修正：除最后一行外，强制执行两端对齐，杜绝空隙
+        bool rowIsJustified = !isLastRow; // 2026-06-16 物理修正：非最后一行始终填满，杜绝空隙
 
         int availableImageWidth = containerWidth - (spacing * (numInRow - 1)) - (6 * numInRow);
 
         if (rowIsJustified) {
             actualHeight = qRound(availableImageWidth / rowAspectRatioSum);
-            // 工业级容差限制：防止单行高度由于项目过少而过度拉伸或压缩
-            actualHeight = std::min(actualHeight, (int)(m_targetRowHeight * 1.5));
+            // 工业级纠偏：允许高度在一定范围内浮动以填满行宽，无论是否超出 targetRowHeight 范围均开启对齐
             actualHeight = std::max(actualHeight, (int)(m_targetRowHeight * 0.75));
+            actualHeight = std::min(actualHeight, (int)(m_targetRowHeight * 1.5));
+            rowIsJustified = true; 
         }
 
         int currentX = margin;

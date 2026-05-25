@@ -181,8 +181,8 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             if (!colorStr.isEmpty()) emptyStarColor.setAlpha(180);
 
             UiHelper::getIcon("no_color", starColor, m.banRect.width()).paint(painter, m.banRect);
-            QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), starColor);
-            QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor);
+            QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(m.starSize, m.starSize), starColor);
+            QPixmap emptyStar = UiHelper::getPixmap("star", QSize(m.starSize, m.starSize), emptyStarColor);
             for (int i = 0; i < 5; ++i) {
                 painter->drawPixmap(m.starRect(i), (i < rating) ? filledStar : emptyStar);
             }

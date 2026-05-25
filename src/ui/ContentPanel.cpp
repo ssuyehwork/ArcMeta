@@ -901,61 +901,70 @@ void ContentPanel::initListView() {
         "QHeaderView::section { background-color: #252525; color: #B0B0B0; border: none; border-right: 1px solid #333333; height: 32px; font-size: 11px; }" 
     ); 
     
-    // 2026-06-16 物理参数锁定 (纠偏最终版)
+    // 2026-06-16 工业级 UI 架构重构 (Plan-21)：名称 Stretch + 日期可调且 Min 150px
     auto* header = m_treeView->header();
-    header->setStretchLastSection(false);
+    header->setStretchLastSection(false); // 禁止末端拉伸，交由名称列处理
     header->setCascadingSectionResizes(false);
-    header->setMinimumSectionSize(30);
+    header->setMinimumSectionSize(30);    // 全局最小宽度设定为 30 像素
 
     QSettings settings("ArcMeta团队", "ArcMeta");
     QByteArray headerState = settings.value("UI/ListHeaderState").toByteArray();
     if (!headerState.isEmpty()) {
         header->restoreState(headerState);
-    } else {
-        // 初始像素宽度设定
-        header->resizeSection(0, 400); // 名称
-        header->resizeSection(1, 50);  // 状态
-        header->resizeSection(2, 120); // 星级
-        header->resizeSection(3, 100); // 颜色标记
-        header->resizeSection(4, 100); // 标签
-        header->resizeSection(5, 80);  // 类型
-        header->resizeSection(6, 80);  // 大小
-        header->resizeSection(7, 150); // 修改日期
-    }
+    } 
+
+    // 无论是否恢复状态，都显式设定初始宽度与最小值，防止恢复状态异常导致列宽为0
+    // 确保所有列均可见
+    for(int i = 0; i <= 7; ++i) header->setSectionHidden(i, false);
+
+    // 初始像素宽度设定
+    header->resizeSection(0, 400); // 名称
+    header->resizeSection(1, 40);  // 状态 (固定图标区)
+    header->resizeSection(2, 60);  // 星级 (固定图标区)
+    header->resizeSection(3, 60);  // 颜色标记 (固定图标区)
+    header->resizeSection(4, 100); // 标签
+    header->resizeSection(5, 80);  // 类型
+    header->resizeSection(6, 80);  // 大小
+    header->resizeSection(7, 150); // 修改日期：物理锁定 150 像素
     
-    // 核心对齐：锁定物理边界
-    header->setSectionResizeMode(0, QHeaderView::Stretch); // 名称列弹性
-    for(int i = 1; i <= 6; ++i) {
+    // 1. 设定调整模式：名称列拉伸，其余列交互
+    for(int i = 1; i <= 7; ++i) {
         header->setSectionResizeMode(i, QHeaderView::Interactive);
     }
-    header->setSectionResizeMode(7, QHeaderView::Fixed); // 修改日期锁定 150px，禁止用户手动拉伸变形
-    header->resizeSection(7, 150); // 强制覆盖 restoreState 带来的残留宽度
+    header->setSectionResizeMode(0, QHeaderView::Stretch);
 
-    // 宽度守恒拦截逻辑 (解决递归与溢出)
+    // 3. 宽度守恒与物理红线拦截逻辑
     connect(header, &QHeaderView::sectionResized, this, [this, header](int index, int oldSize, int newSize) {
         Q_UNUSED(oldSize);
         static bool guard = false; 
-        if (guard || index == 0 || index == 7) return; 
+        if (guard || index == 0) return; 
         
         guard = true;
         
-        // 计算当前可见区域宽度
+        // 物理红线判定：修改日期（索引7）最小 150px
+        if (index == 7 && newSize < 150) {
+            header->resizeSection(7, 150);
+            guard = false;
+            return;
+        }
+
+        // 宽度守恒判定：杜绝水平滚动条
+        int currentTotal = header->length();
         int maxAvailable = m_treeView->viewport()->width();
-        if (maxAvailable > 100) {
-            // 计算除了名称列以外的所有列宽度总和
-            int staticWidth = 0;
-            for(int i = 1; i <= 7; ++i) staticWidth += header->sectionSize(i);
-            
-            // 守恒红线：如果剩余给名称列的空间小于 220px，则强制回滚当前调整
-            if (maxAvailable - staticWidth < 220) {
-                int allowed = newSize - (staticWidth - (maxAvailable - 220));
-                header->resizeSection(index, qMax(header->minimumSectionSize(), allowed));
-            }
+        
+        if (currentTotal > maxAvailable && maxAvailable > 100) {
+             int allowed = newSize - (currentTotal - maxAvailable);
+             int minAllowed = header->minimumSectionSize();
+             if (index == 7) minAllowed = 150; // 修改日期红线优先级最高
+             
+             header->resizeSection(index, qMax(minAllowed, allowed));
         }
         
-        // 持久化
-        QSettings s("ArcMeta团队", "ArcMeta");
-        s.setValue("UI/ListHeaderState", header->saveState());
+        // 5. 持久化逻辑：仅在非加载状态下保存，防止启动抖动
+        if (!m_isLoading) {
+            QSettings s("ArcMeta团队", "ArcMeta");
+            s.setValue("UI/ListHeaderState", header->saveState());
+        }
         
         guard = false;
     });
@@ -1402,6 +1411,7 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
 } 
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
+    m_isLoading = true;
     qDebug() << "[Content] 开始物理递归扫描 ->" << path << (recursive ? "递归" : "单级"); 
     emit dataSourceChanged("nav"); // 2026-05-17 按照用户要求：发射数据源变更信号，高亮展示导航面板焦点线条
     if (m_viewStack) m_viewStack->show(); 
@@ -1469,6 +1479,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             m_model->appendRow(row); 
             tyc["folder"]++; 
         } 
+        m_isLoading = false;
         emit directoryStatsReady(rc, cc, tc, tyc, cdc, mdc); 
         return; 
     } 
@@ -1569,6 +1580,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         // 最后发送全量统计结果供筛选面板使用 
         QMetaObject::invokeMethod(qApp, [panelPtr, path, globalStats]() { 
             if (panelPtr && panelPtr->m_currentPath == path) { 
+                panelPtr->m_isLoading = false;
                 emit panelPtr->directoryStatsReady(globalStats.ratingCounts, globalStats.colorCounts, globalStats.tagCounts,  
                                                   globalStats.typeCounts, globalStats.createDateCounts, globalStats.modifyDateCounts); 
             } 
@@ -1673,6 +1685,7 @@ void ContentPanel::previewFile(const QString& path) {
 } 
  
 void ContentPanel::loadCategory(int categoryId) { 
+    m_isLoading = true;
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -1813,6 +1826,7 @@ void ContentPanel::loadCategory(int categoryId) {
      
     // 2026-05-07 按照用户要求：发出统计数据信号，填充筛选器 
     if (stats.noTagCount > 0) stats.tagCounts["__none__"] = stats.noTagCount; 
+    m_isLoading = false;
     emit directoryStatsReady(stats.ratingCounts, stats.colorCounts, stats.tagCounts,  
                            stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts); 
      
@@ -1821,6 +1835,7 @@ void ContentPanel::loadCategory(int categoryId) {
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths) { 
+    m_isLoading = true;
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -1918,6 +1933,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
  
     // 2026-05-07 按照用户要求：发出统计数据信号，填充筛选器 
     if (stats.noTagCount > 0) stats.tagCounts["__none__"] = stats.noTagCount; 
+    m_isLoading = false;
     emit directoryStatsReady(stats.ratingCounts, stats.colorCounts, stats.tagCounts,  
                            stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts); 
      

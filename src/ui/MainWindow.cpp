@@ -823,10 +823,11 @@ void MainWindow::setupSplitters() {
     m_mainSplitter->setHandleWidth(5); 
     m_mainSplitter->setChildrenCollapsible(false);
     // 物理还原：显式设置手柄样式，增强物理切割感
+    // 2026-06-xx 物理强化：手柄背景设为 #1E1E1E，并在两侧增加深色线条，强化“切割”视觉效果
     m_mainSplitter->setStyleSheet(
         "QSplitter { background: transparent; border: none; }"
-        "QSplitter::handle { background: transparent; width: 5px; }"
-        "QSplitter::handle:hover { background: rgba(55, 138, 221, 0.1); }" // 悬停时轻微反馈
+        "QSplitter::handle { background-color: #1E1E1E; width: 5px; }"
+        "QSplitter::handle:hover { background-color: #2D2D2D; }" 
     );
 
     m_categoryPanel = new CategoryPanel(this);
