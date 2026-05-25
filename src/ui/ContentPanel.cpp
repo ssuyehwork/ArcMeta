@@ -223,6 +223,7 @@ QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientati
 }
 
 bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& value, int role) {
+    Q_UNUSED(value);
     if (!index.isValid()) return false;
 
     // 虚拟模型中 setData 主要用于触发 UI 刷新，实际持久化由 MetadataManager 处理
