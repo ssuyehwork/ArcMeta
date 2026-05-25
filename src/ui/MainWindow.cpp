@@ -67,8 +67,8 @@ MainWindow::MainWindow(QWidget* parent)
     // 配合 ToolTipOverlay 内部的 winId() 强行预热，消除初次显示延迟
     ToolTipOverlay::instance();
 
-    resize(1440, 900);
-    setMinimumSize(1280, 720); // 物理对齐：4x200px侧边栏 + 450px内容区 + 20px手柄 + 10px边距
+    resize(1200, 800);
+    setMinimumSize(1180, 653); // 物理对齐：5x230px面板 + 20px分割手柄 + 10px全局边距
     setWindowTitle("FERREX");
 
     // 从设置读取置顶状态
@@ -166,9 +166,9 @@ void MainWindow::initUi() {
     if (!state.isEmpty()) {
         m_mainSplitter->restoreState(state);
     } else {
-        // 初始默认分配: 200 | 200 | 640 | 200 | 200
+        // 初始默认分配: 230 | 230 | 600 | 230 | 230
         QList<int> sizes;
-        sizes << 200 << 200 << 640 << 200 << 200;
+        sizes << 230 << 230 << 600 << 230 << 230;
         m_mainSplitter->setSizes(sizes);
     }
 

@@ -28,7 +28,7 @@ NavPanel::NavPanel(QWidget* parent)
     setObjectName("ListContainer");
     setAttribute(Qt::WA_StyledBackground, true);
     // 设置面板宽度（遵循文档：导航面板 230px）
-    setMinimumWidth(200);
+    setMinimumWidth(230);
     
     // 核心修正：移除宽泛的 QWidget QSS，防止其屏蔽 MainWindow 赋予的 ID 边框样式
     setStyleSheet("color: #EEEEEE;");

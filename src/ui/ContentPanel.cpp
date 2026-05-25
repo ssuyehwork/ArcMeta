@@ -214,7 +214,7 @@ ContentPanel::ContentPanel(QWidget* parent)
     : QFrame(parent) { 
     setObjectName("EditorContainer"); 
     setAttribute(Qt::WA_StyledBackground, true); 
-    setMinimumWidth(450);
+    setMinimumWidth(230);
     setStyleSheet("color: #EEEEEE;"); 
  
     m_mainLayout = new QVBoxLayout(this); 
@@ -554,48 +554,6 @@ void ContentPanel::updateGridSize() {
     qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
 }
 
-void ContentPanel::enforceNameColumnMinimum() {
-    if (!m_treeView) return;
-    auto* header = m_treeView->header();
-    if (!header) return;
-
-    static bool inForce = false;
-    if (inForce) return;
-    inForce = true;
-
-    int nameWidth = header->sectionSize(0);
-    int maxAvailable = m_treeView->viewport()->width();
-
-    // 2026-06-18 物理铁律：名称列宽度绝对锁定为 220px 及其以上。
-    // 如果由于窗口缩小或其它列挤压导致低于 220px，则强制收缩其它交互列。
-    if (nameWidth < 220 && maxAvailable > 100) {
-        int required = 220 - nameWidth;
-        // 优先级压缩序列：日期(7) > 大小(6) > 类型(5) > 标签(4) > 状态组(1,2,3)
-        int indices[] = {7, 6, 5, 4, 1, 2, 3};
-        for (int idx : indices) {
-            if (required <= 0) break;
-            int curSize = header->sectionSize(idx);
-            int minSize = (idx == 7) ? 150 : (idx >= 1 && idx <= 3 ? 20 : 30);
-            int canShrink = curSize - minSize;
-            if (canShrink > 0) {
-                int shrinkBy = qMin(canShrink, required);
-                header->resizeSection(idx, curSize - shrinkBy);
-                required -= shrinkBy;
-            }
-        }
-        // 如果压缩其它列仍不足以腾挪空间，则暴力锁定名称列宽度（此时可能出现水平滚动条，符合红线要求）
-        header->resizeSection(0, 220);
-    }
-    // 反向逻辑：如果视口变大，名称列应承担“伪拉伸”职责
-    else if (maxAvailable > 100) {
-        int totalWidth = header->length();
-        if (totalWidth < maxAvailable) {
-            header->resizeSection(0, nameWidth + (maxAvailable - totalWidth));
-        }
-    }
-
-    inForce = false;
-}
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 
     // 2026-03-xx 按照宪法要求：物理拦截 Hover 事件以触发 ToolTipOverlay 
     // 2026-05-20 性能优化：同时支持 Enter/Leave 事件，确保响应灵敏 
@@ -608,9 +566,6 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         ToolTipOverlay::hideTip(); 
     } 
  
-    if (obj == m_treeView && event->type() == QEvent::Resize) {
-        enforceNameColumnMinimum();
-    }
 
     if ((obj == m_gridView || obj == m_gridView->viewport() || obj == m_treeView || obj == m_treeView->viewport()) && event->type() == QEvent::Wheel) { 
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 static_cast 的类型推导逻辑错误 
@@ -975,15 +930,11 @@ void ContentPanel::initListView() {
     header->resizeSection(6, 80);  // 大小
     header->resizeSection(7, 150); // 修改日期：物理锁定 150 像素
     
-    // 1. 设定调整模式：全部设为交互模式，废除 Stretch 以获得物理控制权
-    for(int i = 0; i <= 7; ++i) {
+    // 1. 设定调整模式：名称列拉伸，其余列交互
+    for(int i = 1; i <= 7; ++i) {
         header->setSectionResizeMode(i, QHeaderView::Interactive);
     }
-
-    // 2026-06-18 物理补丁：初始化时立即执行一次红线校验，防止 restoreState 导致启动时宽度异常
-    QTimer::singleShot(100, this, [this]() {
-        enforceNameColumnMinimum();
-    });
+    header->setSectionResizeMode(0, QHeaderView::Stretch);
 
     // 3. 宽度守恒与物理红线拦截逻辑
     connect(header, &QHeaderView::sectionResized, this, [this, header](int index, int oldSize, int newSize) {
