@@ -105,10 +105,10 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         return QVariant();
     }
 
-    auto getCachedMeta = [this](const QString& p) -> RuntimeMeta {
+    auto getCachedMeta = [this](const QString& p) -> ArcMeta::RuntimeMeta {
         if (m_metaCache.contains(p)) return *m_metaCache.object(p);
-        RuntimeMeta meta = MetadataManager::instance().getMeta(p.toStdWString());
-        m_metaCache.insert(p, new RuntimeMeta(meta));
+        ArcMeta::RuntimeMeta meta = MetadataManager::instance().getMeta(p.toStdWString());
+        m_metaCache.insert(p, new ArcMeta::RuntimeMeta(meta));
         return meta;
     };
 
@@ -246,7 +246,7 @@ void FerrexVirtualDbModel::fetchMore(const QModelIndex& parent) {
     endInsertRows();
 }
 
-void FerrexVirtualDbModel::setRecords(const std::vector<ItemRepo::ItemRecord>& records) {
+void FerrexVirtualDbModel::setRecords(const std::vector<ArcMeta::ItemRepo::ItemRecord>& records) {
     beginResetModel();
     m_allRecords = records;
     m_displayCount = qMin((int)m_allRecords.size(), 100);
@@ -1474,7 +1474,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         updateLayersButtonState(); 
  
         const auto drives = QDir::drives(); 
-        std::vector<ItemRepo::ItemRecord> driveRecords;
+        std::vector<ArcMeta::ItemRepo::ItemRecord> driveRecords;
         for (const QFileInfo& drive : drives) { 
             ItemRepo::ItemRecord r;
             r.path = QDir::toNativeSeparators(drive.absolutePath());
@@ -1494,7 +1494,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive]() { 
         if (!panelPtr) return; 
          
-        std::vector<ItemRepo::ItemRecord> allItems;
+        std::vector<ArcMeta::ItemRepo::ItemRecord> allItems;
  
         std::function<void(const QString&, bool)> scanDir; 
         scanDir = [&](const QString& p, bool rec) { 
@@ -1611,7 +1611,7 @@ void ContentPanel::loadCategory(int categoryId) {
      
     m_model->clear(); 
  
-    std::vector<ItemRepo::ItemRecord> allRecords;
+    std::vector<ArcMeta::ItemRepo::ItemRecord> allRecords;
 
     // 1. 加载子分类
     auto allCategories = CategoryRepo::getAll();
@@ -1646,7 +1646,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
      
     m_model->clear(); 
  
-    std::vector<ItemRepo::ItemRecord> records;
+    std::vector<ArcMeta::ItemRepo::ItemRecord> records;
     for (const QString& p : paths) {
         ItemRepo::ItemRecord r;
         r.path = QDir::toNativeSeparators(p);
@@ -1661,7 +1661,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
 } 
  
 void ContentPanel::recalculateAndEmitStats() {
-    const auto& records = m_model->allRecords();
+    const std::vector<ArcMeta::ItemRepo::ItemRecord>& records = m_model->allRecords();
     if (records.empty()) {
         emit directoryStatsReady({}, {}, {}, {}, {}, {});
         return;
@@ -1753,7 +1753,7 @@ void ContentPanel::createNewItem(const QString& type) {
     if (success) { 
         loadDirectory(m_currentPath, m_isRecursive); 
         // 虚拟模型中不再支持 findItems，需要手动寻找
-        const auto& records = m_model->allRecords();
+    const std::vector<ArcMeta::ItemRepo::ItemRecord>& records = m_model->allRecords();
         for (size_t i = 0; i < records.size(); ++i) {
             if (QFileInfo(records[i].path).fileName() == finalName) {
                 QModelIndex srcIdx = m_model->index(static_cast<int>(i), 0);

@@ -3,6 +3,8 @@
 #include <QDateTime>
 #include <QMap>
 #include <deque>
+#include <vector>
+#include <QCache>
 #include <QStringList>
 #include <QTimer>
 #include <QWidget>
@@ -17,8 +19,10 @@
 #include <QStyledItemDelegate>
 #include <QPersistentModelIndex>
 #include <QDebug>
+#include <QIcon>
 #include "FilterPanel.h"
 #include "../meta/MetadataManager.h"
+#include "../db/ItemRepo.h"
 
 namespace ArcMeta {
 
@@ -59,19 +63,19 @@ public:
     bool canFetchMore(const QModelIndex& parent) const override;
     void fetchMore(const QModelIndex& parent) override;
 
-    void setRecords(const std::vector<ItemRepo::ItemRecord>& records);
+    void setRecords(const std::vector<ArcMeta::ItemRepo::ItemRecord>& records);
     void clear();
 
-    const std::vector<ItemRepo::ItemRecord>& allRecords() const { return m_allRecords; }
+    const std::vector<ArcMeta::ItemRepo::ItemRecord>& allRecords() const { return m_allRecords; }
 
 private:
-    std::vector<ItemRepo::ItemRecord> m_allRecords;
+    std::vector<ArcMeta::ItemRepo::ItemRecord> m_allRecords;
     int m_displayCount = 0;
 
     mutable QCache<QString, QIcon> m_iconCache;
     mutable QSet<QString> m_requestedIcons;
     mutable QMap<QString, double> m_aspectRatios;
-    mutable QCache<QString, RuntimeMeta> m_metaCache;
+    mutable QCache<QString, ArcMeta::RuntimeMeta> m_metaCache;
 };
 
 /**
