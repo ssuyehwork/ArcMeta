@@ -937,11 +937,16 @@ void ContentPanel::initListView() {
     connect(header, &QHeaderView::sectionResized, this, [this, header](int index, int oldSize, int newSize) {
         Q_UNUSED(oldSize);
         static bool guard = false; 
-        if (guard || index == 0) return; 
+        if (guard) return;
         
         guard = true;
         
-        // 物理红线判定：修改日期（索引7）最小 150px
+        // 物理红线判定：名称（索引0）最小 220px, 修改日期（索引7）最小 150px
+        if (index == 0 && newSize < 220) {
+            header->resizeSection(0, 220);
+            guard = false;
+            return;
+        }
         if (index == 7 && newSize < 150) {
             header->resizeSection(7, 150);
             guard = false;
@@ -953,11 +958,23 @@ void ContentPanel::initListView() {
         int maxAvailable = m_treeView->viewport()->width();
         
         if (currentTotal > maxAvailable && maxAvailable > 100) {
-             int allowed = newSize - (currentTotal - maxAvailable);
-             int minAllowed = header->minimumSectionSize();
-             if (index == 7) minAllowed = 150; // 修改日期红线优先级最高
-             
-             header->resizeSection(index, qMax(minAllowed, allowed));
+             // 反向监控：若拉伸当前列导致名称列（索引0）被挤压至 < 220px，应回缩
+             int nameWidth = header->sectionSize(0);
+             if (index != 0 && nameWidth < 220) {
+                 int excess = 220 - nameWidth;
+                 header->resizeSection(index, qMax(header->minimumSectionSize(), newSize - excess));
+                 // 重新计算总宽度以进行后续守恒判断
+                 currentTotal = header->length();
+             }
+
+             if (currentTotal > maxAvailable) {
+                 int allowed = header->sectionSize(index) - (currentTotal - maxAvailable);
+                 int minAllowed = header->minimumSectionSize();
+                 if (index == 7) minAllowed = 150;
+                 if (index == 0) minAllowed = 220;
+
+                 header->resizeSection(index, qMax(minAllowed, allowed));
+             }
         }
         
         // 5. 持久化逻辑：仅在非加载状态下保存，防止启动抖动
