@@ -822,8 +822,12 @@ void MainWindow::setupSplitters() {
     m_mainSplitter = new QSplitter(Qt::Horizontal, bodyWrapper);
     m_mainSplitter->setHandleWidth(5); 
     m_mainSplitter->setChildrenCollapsible(false);
-    // 物理还原：严禁脑补，背景完全透明，依靠容器边框实现视觉缝隙
-    m_mainSplitter->setStyleSheet("QSplitter { background: transparent; border: none; } QSplitter::handle { background: transparent; }");
+    // 物理还原：显式设置手柄样式，增强物理切割感
+    m_mainSplitter->setStyleSheet(
+        "QSplitter { background: transparent; border: none; }"
+        "QSplitter::handle { background: transparent; width: 5px; }"
+        "QSplitter::handle:hover { background: rgba(55, 138, 221, 0.1); }" // 悬停时轻微反馈
+    );
 
     m_categoryPanel = new CategoryPanel(this);
     m_categoryPanel->setObjectName("SidebarContainer");

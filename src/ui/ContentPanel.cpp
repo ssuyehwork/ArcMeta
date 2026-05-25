@@ -296,6 +296,7 @@ ContentPanel::ContentPanel(QWidget* parent)
             row << new QStandardItem(""); // 状态列
             row << new QStandardItem(""); // 星级列
             row << new QStandardItem(""); // 颜色列
+            row << new QStandardItem(data.meta.tags.join(", ")); // 标签列
             row << new QStandardItem(data.isDir ? (data.isEmpty ? "文件夹 (空)" : "文件夹") : data.suffix + " 文件"); 
             
             auto* sizeItem = new QStandardItem(data.isDir ? "-" : QString::number(data.size / 1024) + " KB");
@@ -901,16 +902,63 @@ void ContentPanel::initListView() {
         "QHeaderView::section { background-color: #252525; color: #B0B0B0; border: none; border-right: 1px solid #333333; height: 32px; font-size: 11px; }" 
     ); 
     
-    // 2026-06-xx 按照要求：持久化列表列宽
+    // 2026-06-16 物理参数锁定 (纠偏最终版)
+    auto* header = m_treeView->header();
+    header->setStretchLastSection(false);
+    header->setCascadingSectionResizes(false);
+    header->setMinimumSectionSize(30);
+
     QSettings settings("ArcMeta团队", "ArcMeta");
     QByteArray headerState = settings.value("UI/ListHeaderState").toByteArray();
     if (!headerState.isEmpty()) {
-        m_treeView->header()->restoreState(headerState);
+        header->restoreState(headerState);
+    } else {
+        // 初始像素宽度设定
+        header->resizeSection(0, 400); // 名称
+        header->resizeSection(1, 50);  // 状态
+        header->resizeSection(2, 120); // 星级
+        header->resizeSection(3, 100); // 颜色标记
+        header->resizeSection(4, 100); // 标签
+        header->resizeSection(5, 80);  // 类型
+        header->resizeSection(6, 80);  // 大小
+        header->resizeSection(7, 150); // 修改日期
     }
     
-    connect(m_treeView->header(), &QHeaderView::sectionResized, [this]() {
+    // 核心对齐：锁定物理边界
+    header->setSectionResizeMode(0, QHeaderView::Stretch); // 名称列弹性
+    for(int i = 1; i <= 6; ++i) {
+        header->setSectionResizeMode(i, QHeaderView::Interactive);
+    }
+    header->setSectionResizeMode(7, QHeaderView::Fixed); // 修改日期锁定 150px，禁止用户手动拉伸变形
+    header->resizeSection(7, 150); // 强制覆盖 restoreState 带来的残留宽度
+
+    // 宽度守恒拦截逻辑 (解决递归与溢出)
+    connect(header, &QHeaderView::sectionResized, this, [this, header](int index, int oldSize, int newSize) {
+        Q_UNUSED(oldSize);
+        static bool guard = false; 
+        if (guard || index == 0 || index == 7) return; 
+        
+        guard = true;
+        
+        // 计算当前可见区域宽度
+        int maxAvailable = m_treeView->viewport()->width();
+        if (maxAvailable > 100) {
+            // 计算除了名称列以外的所有列宽度总和
+            int staticWidth = 0;
+            for(int i = 1; i <= 7; ++i) staticWidth += header->sectionSize(i);
+            
+            // 守恒红线：如果剩余给名称列的空间小于 220px，则强制回滚当前调整
+            if (maxAvailable - staticWidth < 220) {
+                int allowed = newSize - (staticWidth - (maxAvailable - 220));
+                header->resizeSection(index, qMax(header->minimumSectionSize(), allowed));
+            }
+        }
+        
+        // 持久化
         QSettings s("ArcMeta团队", "ArcMeta");
-        s.setValue("UI/ListHeaderState", m_treeView->header()->saveState());
+        s.setValue("UI/ListHeaderState", header->saveState());
+        
+        guard = false;
     });
  
     connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
@@ -1375,7 +1423,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     m_proxyModel->setDynamicSortFilter(false); 
  
     m_model->clear(); 
-    m_model->setHorizontalHeaderLabels({"名称", "状态", "星级", "颜色标记", "类型", "大小", "修改时间"}); 
+    m_model->setHorizontalHeaderLabels({"名称", "状态", "星级", "颜色标记", "标签", "类型", "大小", "修改日期"}); 
     for(int i=0; i<m_model->columnCount(); ++i) m_model->horizontalHeaderItem(i)->setTextAlignment(Qt::AlignCenter);
  
     if (path.isEmpty() || path == "computer://") { 
@@ -1408,6 +1456,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             QList<QStandardItem*> row; 
             row << item 
                 << new QStandardItem("") << new QStandardItem("") << new QStandardItem("")
+                << new QStandardItem("") // 标签列
                 << new QStandardItem("磁盘分区"); 
             
             auto* sizeItem = new QStandardItem("-");
@@ -1635,7 +1684,7 @@ void ContentPanel::loadCategory(int categoryId) {
     m_pathToIndexMap.clear(); 
  
     m_model->clear(); 
-    m_model->setHorizontalHeaderLabels({"名称", "状态", "星级", "颜色标记", "类型", "大小", "修改时间"}); 
+    m_model->setHorizontalHeaderLabels({"名称", "状态", "星级", "颜色标记", "标签", "类型", "大小", "修改日期"}); 
     for(int i=0; i<m_model->columnCount(); ++i) m_model->horizontalHeaderItem(i)->setTextAlignment(Qt::AlignCenter);
  
     // 2026-05-07 按照用户要求：添加统计数据结构，用于筛选器填充 
@@ -1658,6 +1707,7 @@ void ContentPanel::loadCategory(int categoryId) {
              
             row << item 
                 << new QStandardItem("") << new QStandardItem("") << new QStandardItem("")
+                << new QStandardItem("") // 标签列
                 << new QStandardItem("子分类"); 
             
             auto* sizeItem = new QStandardItem("-");
@@ -1720,6 +1770,7 @@ void ContentPanel::loadCategory(int categoryId) {
  
             row << nameItem; 
             row << new QStandardItem("") << new QStandardItem("") << new QStandardItem("");
+            row << new QStandardItem(rm.tags.join(", ")); // 标签列
             row << new QStandardItem(type == "folder" ? (isEmpty ? "文件夹 (空)" : "文件夹") : info.suffix().toUpper() + " 文件"); 
 
             auto* sizeItem = new QStandardItem(type == "folder" ? "-" : QString::number(size / 1024) + " KB");
@@ -1781,7 +1832,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     m_pathToIndexMap.clear(); 
  
     m_model->clear(); 
-    m_model->setHorizontalHeaderLabels({"名称", "状态", "星级", "颜色标记", "类型", "大小", "修改时间"}); 
+    m_model->setHorizontalHeaderLabels({"名称", "状态", "星级", "颜色标记", "标签", "类型", "大小", "修改日期"}); 
     for(int i=0; i<m_model->columnCount(); ++i) m_model->horizontalHeaderItem(i)->setTextAlignment(Qt::AlignCenter);
  
     // 2026-05-07 按照用户要求：添加统计数据结构，用于筛选器填充 
@@ -1825,6 +1876,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
  
         row << nameItem; 
         row << new QStandardItem("") << new QStandardItem("") << new QStandardItem("");
+        row << new QStandardItem(rm.tags.join(", ")); // 标签列
         row << new QStandardItem(info.isDir() ? (isEmpty ? "文件夹 (空)" : "文件夹") : info.suffix().toUpper() + " 文件"); 
 
         auto* sizeItem = new QStandardItem(info.isDir() ? "-" : QString::number(info.size() / 1024) + " KB");

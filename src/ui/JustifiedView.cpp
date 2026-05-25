@@ -176,6 +176,33 @@ QRegion JustifiedView::visualRegionForSelection(const QItemSelection& selection)
     return region;
 }
 
+void JustifiedView::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && (event->modifiers() & Qt::ShiftModifier)) {
+        QModelIndex current = indexAt(event->pos());
+        QModelIndex anchor = currentIndex();
+
+        if (current.isValid() && anchor.isValid()) {
+            int start = std::min(current.row(), anchor.row());
+            int end = std::max(current.row(), anchor.row());
+
+            QItemSelection selection;
+            selection.select(model()->index(start, 0), model()->index(end, 0));
+            
+            if (event->modifiers() & Qt::ControlModifier) {
+                selectionModel()->select(selection, QItemSelectionModel::Select);
+            } else {
+                selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect);
+            }
+            // 物理同步：保持 anchor 不动，更新当前焦点为点击项
+            selectionModel()->setCurrentIndex(current, QItemSelectionModel::NoUpdate);
+            viewport()->update();
+            event->accept();
+            return;
+        }
+    }
+    QAbstractItemView::mousePressEvent(event);
+}
+
 void JustifiedView::mouseDoubleClickEvent(QMouseEvent* event) {
     QModelIndex idx = indexAt(event->pos());
     if (!idx.isValid()) {

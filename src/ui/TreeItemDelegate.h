@@ -3,6 +3,7 @@
 #include <QStyledItemDelegate>
 #include <QPainter>
 #include <QApplication>
+#include <QMouseEvent>
 #include "ContentPanel.h"
 #include "UiHelper.h"
 
@@ -50,7 +51,7 @@ public:
             }
         }
 
-        // 2026-06-08 按照 7 列架构重构：第 1, 2, 3 列由代理独立绘制，其他列由基类处理
+        // 2026-06-16 按照 8 列架构重构：第 1, 2, 3 列由代理独立绘制
         int col = index.column();
         if (col == 1 || col == 2 || col == 3) {
             // 这三列不调用默认 paint，完全自定义
@@ -70,16 +71,40 @@ public:
                     }
                 }
             } else if (col == 2) { // 星级列
+                // 2026-06-16 按照方案 20 纠偏：仅在选中或评分 > 0 时显示图标，减少视觉干扰
                 int rating = index.model()->index(index.row(), 0).data(RatingRole).toInt();
-                if (rating > 0) {
+                bool isSelected = option.state & QStyle::State_Selected;
+
+                if (rating > 0 || isSelected) {
+                    // 绘制“禁止”图标
+                    QRect banRect(option.rect.left() + 5, option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
+                    UiHelper::getIcon("no_color", QColor("#888888"), 16).paint(painter, banRect);
+
                     int starSize = 14;
                     int spacing = 1;
-                    int totalW = 5 * starSize + 4 * spacing;
-                    int startX = option.rect.left() + (option.rect.width() - totalW) / 2;
-                    QPixmap star = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(starSize, starSize), QColor("#FECF0E"));
-                    for (int i = 0; i < rating; ++i) {
-                        painter->drawPixmap(startX + i * (starSize + spacing), 
-                                            option.rect.top() + (option.rect.height() - starSize) / 2, star);
+                    int startX = banRect.right() + 5;
+
+                    if (rating > 0) {
+                        QPixmap star = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(starSize, starSize), QColor("#FECF0E"));
+                        for (int i = 0; i < rating; ++i) {
+                            painter->drawPixmap(startX + i * (starSize + spacing), 
+                                                option.rect.top() + (option.rect.height() - starSize) / 2, star);
+                        }
+                        // 如果选中，补齐剩余的空心星
+                        if (isSelected && rating < 5) {
+                            QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(starSize, starSize), QColor("#555555"));
+                            for (int i = rating; i < 5; ++i) {
+                                painter->drawPixmap(startX + i * (starSize + spacing), 
+                                                    option.rect.top() + (option.rect.height() - starSize) / 2, emptyStar);
+                            }
+                        }
+                    } else {
+                        // 仅选中但无评分，显示 5 颗空心星
+                        QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(starSize, starSize), QColor("#555555"));
+                        for (int i = 0; i < 5; ++i) {
+                            painter->drawPixmap(startX + i * (starSize + spacing), 
+                                                option.rect.top() + (option.rect.height() - starSize) / 2, emptyStar);
+                        }
                     }
                 }
             } else if (col == 3) { // 颜色列
@@ -97,6 +122,40 @@ public:
         } else {
             QStyledItemDelegate::paint(painter, opt, index);
         }
+    }
+
+public:
+    bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) override {
+        // 2026-06-16 按照方案 20：星级清空逻辑 (运行逻辑闭环)
+        if (event->type() == QEvent::MouseButtonPress && index.column() == 2) {
+            QMouseEvent* me = static_cast<QMouseEvent*>(event);
+            
+            // 精准 Hitbox：禁止图标固定在列起始偏移 5px 处，大小 16px
+            QRect banHitbox(option.rect.left() + 5, option.rect.top() + (option.rect.height() - 16)/2, 16, 16);
+            
+            if (banHitbox.contains(me->pos())) {
+                QString path = index.model()->index(index.row(), 0).data(PathRole).toString();
+                // 核心意图：一键物理回滚
+                MetadataManager::instance().setRating(path.toStdWString(), 0);
+                model->setData(index.model()->index(index.row(), 0), 0, RatingRole);
+                return true;
+            }
+
+            // 处理点击星级评分
+            int starSize = 14;
+            int spacing = 1;
+            int startX = option.rect.left() + 5 + 16 + 5; // banRect.right() + 5
+            for (int i = 0; i < 5; ++i) {
+                QRect starRect(startX + i * (starSize + spacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
+                if (starRect.contains(me->pos())) {
+                    QString path = index.model()->index(index.row(), 0).data(PathRole).toString();
+                    MetadataManager::instance().setRating(path.toStdWString(), i + 1);
+                    model->setData(index.model()->index(index.row(), 0), i + 1, RatingRole);
+                    return true;
+                }
+            }
+        }
+        return QStyledItemDelegate::editorEvent(event, model, option, index);
     }
 
 private:
