@@ -47,7 +47,7 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     : QFrame(parent) {
     setObjectName("SidebarContainer");
     setAttribute(Qt::WA_StyledBackground, true);
-    setMinimumWidth(230);
+    setMinimumWidth(200);
     setStyleSheet("color: #EEEEEE;");
     
     m_mainLayout = new QVBoxLayout(this);

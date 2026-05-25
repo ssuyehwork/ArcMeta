@@ -144,7 +144,7 @@ void InlineHueSlider::mouseReleaseEvent(QMouseEvent* event) {
 FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     setObjectName("FilterContainer");
     setAttribute(Qt::WA_StyledBackground, true);
-    setMinimumWidth(230);
+    setMinimumWidth(200);
     
     // 核心修正：移除宽泛的 QWidget QSS，防止其屏蔽 MainWindow 赋予的 ID 边框样式
     // 统一将文字颜色设为 #EEEEEE
