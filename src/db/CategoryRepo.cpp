@@ -12,10 +12,6 @@
 
 namespace ArcMeta {
 
-bool CategoryRepo::m_isJsonMode = false;
-void CategoryRepo::setJsonMode(bool enabled) { m_isJsonMode = enabled; }
-bool CategoryRepo::isJsonMode() { return m_isJsonMode; }
-
 namespace JsonCategoryEngine {
 
 static QJsonObject loadCategoriesJson() {
@@ -325,10 +321,6 @@ static std::vector<std::string> getFileIdsRecursive(int categoryId) {
  */
 
 std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
-    if (m_isJsonMode) {
-        // 简化版 JSON 逻辑：暂按原序提取
-        return JsonCategoryEngine::getAll();
-    }
     std::vector<Category> results;
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
@@ -361,10 +353,7 @@ std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
 }
 
 bool CategoryRepo::add(Category& cat) {
-    // 1. 写入 JSON 并分配自增 ID
-    bool jsonOk = JsonCategoryEngine::add(cat);
-
-    // 2. 写入 SQLite (使用相同的自增 ID)
+    // 1. 写入 SQLite 并获取自增 ID
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     q.prepare("INSERT OR REPLACE INTO categories (id, parent_id, name, color, preset_tags, sort_order, pinned, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
@@ -381,19 +370,14 @@ bool CategoryRepo::add(Category& cat) {
     q.addBindValue(cat.pinned ? 1 : 0);
     q.addBindValue((double)QDateTime::currentMSecsSinceEpoch());
 
-    bool dbOk = q.exec();
-
-    return m_isJsonMode ? jsonOk : dbOk;
+    return q.exec();
 }
 
 bool CategoryRepo::reorderAll(bool ascending) {
-    bool jsonOk = JsonCategoryEngine::reorderAll(ascending);
-
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     q.prepare("SELECT id FROM categories ORDER BY name " + QString(ascending ? "ASC" : "DESC"));
     
-    bool dbOk = false;
     if (q.exec()) {
         int order = 0;
         db.transaction();
@@ -405,14 +389,12 @@ bool CategoryRepo::reorderAll(bool ascending) {
             upd.addBindValue(id);
             upd.exec();
         }
-        dbOk = db.commit();
+        return db.commit();
     }
-    return m_isJsonMode ? jsonOk : dbOk;
+    return false;
 }
 
 bool CategoryRepo::update(const Category& cat) {
-    bool jsonOk = JsonCategoryEngine::update(cat);
-
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     q.prepare("UPDATE categories SET parent_id = ?, name = ?, color = ?, sort_order = ?, pinned = ?, encrypted = ?, encrypt_hint = ? WHERE id = ?");
@@ -424,29 +406,20 @@ bool CategoryRepo::update(const Category& cat) {
     q.addBindValue(cat.encrypted ? 1 : 0);
     q.addBindValue(QString::fromStdWString(cat.encryptHint));
     q.addBindValue(cat.id);
-    bool dbOk = q.exec();
-
-    return m_isJsonMode ? jsonOk : dbOk;
+    return q.exec();
 }
 
 bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId128) {
-    bool jsonOk = JsonCategoryEngine::addItemToCategory(categoryId, fileId128);
-
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     q.prepare("INSERT OR IGNORE INTO category_items (category_id, file_id_128, added_at) VALUES (?, ?, ?)");
     q.addBindValue(categoryId);
     q.addBindValue(QString::fromStdString(fileId128));
     q.addBindValue((double)QDateTime::currentMSecsSinceEpoch());
-    bool dbOk = q.exec();
-
-    return m_isJsonMode ? jsonOk : dbOk;
+    return q.exec();
 }
 
 std::vector<Category> CategoryRepo::getAll() {
-    if (m_isJsonMode) {
-        return JsonCategoryEngine::getAll();
-    }
     std::vector<Category> results;
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     // 2026-06-xx 按照用户要求：彻底解耦置顶干扰，移除 pinned DESC，回归纯粹的 sort_order 排序
@@ -474,22 +447,15 @@ std::vector<Category> CategoryRepo::getAll() {
 }
 
 bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fileId128) {
-    bool jsonOk = JsonCategoryEngine::removeItemFromCategory(categoryId, fileId128);
-
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     q.prepare("DELETE FROM category_items WHERE category_id = ? AND file_id_128 = ?");
     q.addBindValue(categoryId);
     q.addBindValue(QString::fromStdString(fileId128));
-    bool dbOk = q.exec();
-
-    return m_isJsonMode ? jsonOk : dbOk;
+    return q.exec();
 }
 
 std::vector<std::string> CategoryRepo::getFileIdsInCategory(int categoryId) {
-    if (m_isJsonMode) {
-        return JsonCategoryEngine::getFileIdsInCategory(categoryId);
-    }
     std::vector<std::string> results;
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
@@ -504,9 +470,6 @@ std::vector<std::string> CategoryRepo::getFileIdsInCategory(int categoryId) {
 }
 
 std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
-    if (m_isJsonMode) {
-        return JsonCategoryEngine::getCounts();
-    }
     std::vector<std::pair<int, int>> counts;
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     // 2026-06-xx 物理修复：基于非空 Fallback ID 机制回归最高性能 SQL。
@@ -530,22 +493,6 @@ int CategoryRepo::getUniqueItemCount() {
 }
 
 int CategoryRepo::getUncategorizedItemCount() {
-    if (m_isJsonMode) {
-        QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
-        QJsonObject root = JsonCategoryEngine::loadCategoriesJson();
-        QJsonArray items = root["category_items"].toArray();
-        QStringList registeredFids;
-        for (const auto& val : items) {
-            registeredFids << QString("'%1'").arg(val.toObject()["file_id_128"].toString());
-        }
-        QString querySql = "SELECT COUNT(DISTINCT file_id_128) FROM items WHERE deleted = 0 AND type = 'file'";
-        if (!registeredFids.isEmpty()) {
-            querySql += QString(" AND file_id_128 NOT IN (%1)").arg(registeredFids.join(","));
-        }
-        QSqlQuery q(querySql, db);
-        if (q.exec() && q.next()) return q.value(0).toInt();
-        return 0;
-    }
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     // 2026-06-xx 物理修复：基于非空 Fallback ID 机制回归。
     QSqlQuery q("SELECT COUNT(DISTINCT i.file_id_128) FROM items i "
@@ -559,55 +506,6 @@ int CategoryRepo::getUncategorizedItemCount() {
 }
 
 QMap<QString, int> CategoryRepo::getSystemCounts() {
-    if (m_isJsonMode) {
-        QMap<QString, int> counts;
-        QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
-        double now = (double)QDateTime::currentMSecsSinceEpoch();
-        double startOfToday = (double)QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch();
-        double startOfYesterday = (double)QDateTime(QDate::currentDate().addDays(-1), QTime(0, 0)).toMSecsSinceEpoch();
-        
-        QSqlQuery qAll("SELECT COUNT(DISTINCT file_id_128) FROM items WHERE deleted=0 AND type='file'", db);
-        if (qAll.next()) counts["all"] = qAll.value(0).toInt();
-        
-        QSqlQuery qToday(db);
-        qToday.prepare("SELECT COUNT(DISTINCT file_id_128) FROM items WHERE deleted=0 AND type='file' AND (ctime >= ? OR mtime >= ?)");
-        qToday.addBindValue(startOfToday);
-        qToday.addBindValue(startOfToday);
-        if (qToday.exec() && qToday.next()) counts["today"] = qToday.value(0).toInt();
-        
-        QSqlQuery qYesterday(db);
-        qYesterday.prepare("SELECT COUNT(DISTINCT file_id_128) FROM items WHERE deleted=0 AND type='file' AND (ctime >= ? OR mtime >= ?) AND (ctime < ? OR mtime < ?)");
-        qYesterday.addBindValue(startOfYesterday);
-        qYesterday.addBindValue(startOfYesterday);
-        qYesterday.addBindValue(startOfToday);
-        qYesterday.addBindValue(startOfToday);
-        if (qYesterday.exec() && qYesterday.next()) counts["yesterday"] = qYesterday.value(0).toInt();
-        
-        QSqlQuery qRecent(db);
-        qRecent.prepare("SELECT COUNT(DISTINCT file_id_128) FROM items WHERE deleted=0 AND type='file' AND atime >= ?");
-        qRecent.addBindValue(now - 86400000.0);
-        if (qRecent.exec() && qRecent.next()) counts["recently_visited"] = qRecent.value(0).toInt();
-        
-        counts["uncategorized"] = getUncategorizedItemCount();
-        
-        QSqlQuery qFiles("SELECT path FROM items WHERE deleted=0 AND type='file'", db);
-        int untaggedCount = 0;
-        while (qFiles.next()) {
-            std::wstring path = qFiles.value(0).toString().toStdWString();
-            if (MetadataManager::instance().getMeta(path).tags.isEmpty()) {
-                untaggedCount++;
-            }
-        }
-        counts["untagged"] = untaggedCount;
-        
-        QSqlQuery qTags("SELECT COUNT(*) FROM tags", db);
-        if (qTags.next()) counts["tags"] = qTags.value(0).toInt();
-        
-        QSqlQuery qTrash("SELECT COUNT(DISTINCT file_id_128) FROM items WHERE deleted=1 AND type='file'", db);
-        if (qTrash.next()) counts["trash"] = qTrash.value(0).toInt();
-        
-        return counts;
-    }
     QMap<QString, int> counts;
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     double now = (double)QDateTime::currentMSecsSinceEpoch();
@@ -662,8 +560,6 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
 }
 
 bool CategoryRepo::remove(int id) {
-    bool jsonOk = JsonCategoryEngine::remove(id);
-
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     if (!db.transaction()) return false;
 
@@ -700,16 +596,14 @@ bool CategoryRepo::remove(int id) {
     
     bool dbOk = false;
     if (q2.exec()) {
-        dbOk = db.commit();
+        return db.commit();
     } else {
         db.rollback();
     }
-    return m_isJsonMode ? jsonOk : dbOk;
+    return false;
 }
 
 bool CategoryRepo::reorder(int parentId, bool ascending) {
-    bool jsonOk = JsonCategoryEngine::reorder(parentId, ascending);
-
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     // 逻辑：获取该父级下的所有分类，按名称排序，然后重新赋予 sort_order
     QSqlQuery q(db);
@@ -728,15 +622,12 @@ bool CategoryRepo::reorder(int parentId, bool ascending) {
             upd.addBindValue(id);
             upd.exec();
         }
-        dbOk = db.commit();
+        return db.commit();
     }
-    return m_isJsonMode ? jsonOk : dbOk;
+    return false;
 }
 
 std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
-    if (m_isJsonMode) {
-        return JsonCategoryEngine::getFileIdsRecursive(categoryId);
-    }
     std::vector<std::string> results = getFileIdsInCategory(categoryId);
     
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
@@ -757,154 +648,28 @@ std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
     return results;
 }
 
-void CategoryRepo::syncDatabaseAndJson() {
-    // 1. 获取 SQLite 数据库中的所有分类
-    std::vector<Category> dbCats;
-    {
-        QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
-        QSqlQuery q("SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint FROM categories", db);
-        while (q.next()) {
-            Category cat;
-            cat.id = q.value(0).toInt();
-            cat.parentId = q.value(1).toInt();
-            cat.name = q.value(2).toString().toStdWString();
-            cat.color = q.value(3).toString().toStdWString();
-            QJsonDocument doc = QJsonDocument::fromJson(q.value(4).toByteArray());
-            if (doc.isArray()) {
-                for (const auto& v : doc.array()) cat.presetTags.push_back(v.toString().toStdWString());
-            }
-            cat.sortOrder = q.value(5).toInt();
-            cat.pinned = q.value(6).toBool();
-            cat.encrypted = q.value(7).toBool();
-            cat.encryptHint = q.value(8).toString().toStdWString();
-            dbCats.push_back(cat);
-        }
-    }
-
-    // 2. 获取 arcmeta_categories.json 中的所有分类
-    QJsonObject root = JsonCategoryEngine::loadCategoriesJson();
-    QJsonArray jsonCats = root["categories"].toArray();
-    std::vector<Category> jsCats;
-    for (const auto& val : jsonCats) {
-        jsCats.push_back(JsonCategoryEngine::jsonToCategory(val.toObject()));
-    }
-
-    // 3. 双向合并分类
-    // A. 数据库中的分类合并/更新到 JSON
-    for (const auto& dbCat : dbCats) {
-        bool found = false;
-        for (const auto& jsCat : jsCats) {
-            if (jsCat.id == dbCat.id) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            jsonCats.append(JsonCategoryEngine::categoryToJson(dbCat));
-            jsCats.push_back(dbCat);
-        }
-    }
+void CategoryRepo::exportToJsonSnapshot() {
+    QJsonObject root;
+    QJsonArray jsonCats;
     
-    // B. JSON 中的分类合并/更新到 数据库
-    {
-        QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
-        for (const auto& jsCat : jsCats) {
-            bool found = false;
-            for (const auto& dbCat : dbCats) {
-                if (dbCat.id == jsCat.id) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                QSqlQuery q(db);
-                q.prepare("INSERT OR REPLACE INTO categories (id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, created_at) "
-                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                q.addBindValue(jsCat.id);
-                q.addBindValue(jsCat.parentId);
-                q.addBindValue(QString::fromStdWString(jsCat.name));
-                q.addBindValue(QString::fromStdWString(jsCat.color));
-                QJsonArray tagsArr;
-                for (const auto& t : jsCat.presetTags) tagsArr.append(QString::fromStdWString(t));
-                q.addBindValue(QJsonDocument(tagsArr).toJson(QJsonDocument::Compact));
-                q.addBindValue(jsCat.sortOrder);
-                q.addBindValue(jsCat.pinned ? 1 : 0);
-                q.addBindValue(jsCat.encrypted ? 1 : 0);
-                q.addBindValue(QString::fromStdWString(jsCat.encryptHint));
-                q.addBindValue((double)QDateTime::currentMSecsSinceEpoch());
-                q.exec();
-            }
-        }
+    auto categories = getAll();
+    for (const auto& cat : categories) {
+        jsonCats.append(JsonCategoryEngine::categoryToJson(cat));
     }
-
-    // 4. 获取 SQLite 中的所有关联条目
-    struct ItemMap {
-        int categoryId;
-        std::string fileId128;
-        double addedAt;
-    };
-    std::vector<ItemMap> dbItems;
-    {
-        QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
-        QSqlQuery q("SELECT category_id, file_id_128, added_at FROM category_items", db);
-        while (q.next()) {
-            dbItems.push_back({q.value(0).toInt(), q.value(1).toString().toStdString(), q.value(2).toDouble()});
-        }
-    }
-
-    // 5. 获取 arcmeta_categories.json 中的所有关联条目
-    QJsonArray jsonItems = root["category_items"].toArray();
-    std::vector<ItemMap> jsItems;
-    for (const auto& val : jsonItems) {
-        QJsonObject obj = val.toObject();
-        jsItems.push_back({obj["category_id"].toInt(), obj["file_id_128"].toString().toStdString(), obj["added_at"].toDouble()});
-    }
-
-    // 6. 双向合并关联条目
-    // A. 数据库关联合并到 JSON
-    for (const auto& dbItem : dbItems) {
-        bool found = false;
-        for (const auto& jsItem : jsItems) {
-            if (jsItem.categoryId == dbItem.categoryId && jsItem.fileId128 == dbItem.fileId128) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            QJsonObject obj;
-            obj["category_id"] = dbItem.categoryId;
-            obj["file_id_128"] = QString::fromStdString(dbItem.fileId128);
-            obj["added_at"] = dbItem.addedAt;
-            jsonItems.append(obj);
-            jsItems.push_back(dbItem);
-        }
-    }
-
-    // B. JSON 关联合并到 数据库
-    {
-        QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
-        for (const auto& jsItem : jsItems) {
-            bool found = false;
-            for (const auto& dbItem : dbItems) {
-                if (dbItem.categoryId == jsItem.categoryId && dbItem.fileId128 == jsItem.fileId128) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                QSqlQuery q(db);
-                q.prepare("INSERT OR IGNORE INTO category_items (category_id, file_id_128, added_at) VALUES (?, ?, ?)");
-                q.addBindValue(jsItem.categoryId);
-                q.addBindValue(QString::fromStdString(jsItem.fileId128));
-                q.addBindValue(jsItem.addedAt);
-                q.exec();
-            }
-        }
-    }
-
-    // 7. 保存更新后的 JSON
     root["categories"] = jsonCats;
+
+    QJsonArray jsonItems;
+    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlQuery q("SELECT category_id, file_id_128, added_at FROM category_items", db);
+    while (q.next()) {
+        QJsonObject obj;
+        obj["category_id"] = q.value(0).toInt();
+        obj["file_id_128"] = q.value(1).toString();
+        obj["added_at"] = q.value(2).toDouble();
+        jsonItems.append(obj);
+    }
     root["category_items"] = jsonItems;
+
     JsonCategoryEngine::saveCategoriesJson(root);
 }
 

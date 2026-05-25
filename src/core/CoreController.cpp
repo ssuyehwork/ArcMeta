@@ -73,15 +73,8 @@ void CoreController::startSystem() {
 QStringList CoreController::performSearch(const QString& keyword) {
     if (keyword.isEmpty()) return {};
 
-    QStringList paths;
-    if (CategoryRepo::isJsonMode()) {
-        // 模式 A: 纯 JSON 内存搜索
-        paths = MetadataManager::instance().searchInCache(keyword);
-    } else {
-        // 模式 B: 经典数据库搜索 (已包含路径+标签+备注检索)
-        paths = ItemRepo::searchByKeyword(keyword, "");
-    }
-    return paths;
+    // 经典数据库搜索 (已包含路径+标签+备注检索)
+    return ItemRepo::searchByKeyword(keyword, "");
 }
 
 void CoreController::setStatus(const QString& text, bool indexing) {

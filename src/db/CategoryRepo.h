@@ -23,12 +23,7 @@ struct Category {
  */
 class CategoryRepo {
 public:
-    static void setJsonMode(bool enabled);
-    static bool isJsonMode();
-    static void syncDatabaseAndJson();
-
-private:
-    static bool m_isJsonMode;
+    static void exportToJsonSnapshot();
 
 public:
     static bool add(Category& cat);

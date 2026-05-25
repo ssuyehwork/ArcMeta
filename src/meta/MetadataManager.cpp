@@ -528,8 +528,8 @@ void MetadataManager::persistAsync(const std::wstring& path) {
 
     RuntimeMeta rMeta = getMeta(nPath);
 
-    // 1. 同步到内存与数据库（在 JSON 模式下跳过对数据库的保存）
-    if (!CategoryRepo::isJsonMode()) {
+    // 1. 同步到内存与数据库
+    {
         if (info.isDir()) {
             FolderMeta fMeta;
             FolderRepo::get(vol, nPath, fMeta);

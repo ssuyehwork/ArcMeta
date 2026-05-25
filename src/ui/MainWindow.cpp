@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "MainWindow.h"
+#include "../meta/MetadataDefs.h"
 #include "TrayController.h"
 #include "HoverEventFilter.h"
 #include "ResizeEventFilter.h"
@@ -245,14 +246,14 @@ void MainWindow::initUi() {
                 info.lastModified().toString("yyyy-MM-dd"),
                 info.lastRead().toString("yyyy-MM-dd"),
                 info.absoluteFilePath(),
-                idx.data(EncryptedRole).toBool()
+                idx.data((int)ArcMetaRole::EncryptedRole).toBool()
             );
 
             // 应用缓存中的元数据状态
-            m_metaPanel->setRating(idx.data(RatingRole).toInt());
-            m_metaPanel->setColor(idx.data(ColorRole).toString().toStdWString());
-            m_metaPanel->setPinned(idx.data(IsLockedRole).toBool());
-            m_metaPanel->setTags(idx.data(TagsRole).toStringList());
+            m_metaPanel->setRating(idx.data((int)ArcMetaRole::RatingRole).toInt());
+            m_metaPanel->setColor(idx.data((int)ArcMetaRole::ColorRole).toString().toStdWString());
+            m_metaPanel->setPinned(idx.data((int)ArcMetaRole::IsLockedRole).toBool());
+            m_metaPanel->setTags(idx.data((int)ArcMetaRole::TagsRole).toStringList());
             
             // 加载备注和色板
             RuntimeMeta rm = MetadataManager::instance().getMeta(path.toStdWString());
@@ -309,8 +310,8 @@ void MainWindow::initUi() {
         auto* proxy = m_contentPanel->getProxyModel();
         for (int i = 0; i < proxy->rowCount(); ++i) {
             QModelIndex idx = proxy->index(i, 0);
-            if (idx.data(PathRole).toString() == m_currentQuickLookPath) {
-                proxy->setData(idx, rating, RatingRole);
+            if (idx.data((int)ArcMetaRole::PathRole).toString() == m_currentQuickLookPath) {
+                proxy->setData(idx, rating, (int)ArcMetaRole::RatingRole);
                 break;
             }
         }
@@ -331,8 +332,8 @@ void MainWindow::initUi() {
         auto* proxy = m_contentPanel->getProxyModel();
         for (int i = 0; i < proxy->rowCount(); ++i) {
             QModelIndex idx = proxy->index(i, 0);
-            if (idx.data(PathRole).toString() == m_currentQuickLookPath) {
-                proxy->setData(idx, color, ColorRole);
+            if (idx.data((int)ArcMetaRole::PathRole).toString() == m_currentQuickLookPath) {
+                proxy->setData(idx, color, (int)ArcMetaRole::ColorRole);
                 break;
             }
         }
@@ -442,16 +443,16 @@ void MainWindow::initUi() {
     connect(m_metaPanel, &MetaPanel::metadataChanged, this, [this](int rating, const std::wstring& color) {
         auto indexes = m_contentPanel->getSelectedIndexes();
         for (const auto& idx : indexes) {
-            QString path = idx.data(ItemRole::PathRole).toString(); 
+            QString path = idx.data((int)ArcMetaRole::PathRole).toString();
             if(path.isEmpty()) continue;
             
             if (rating != -1) {
                 // 2026-05-24 按照用户要求：彻底移除 JSON，改为中心化异步持久化
-                m_contentPanel->getProxyModel()->setData(idx, rating, RatingRole);
+                m_contentPanel->getProxyModel()->setData(idx, rating, (int)ArcMetaRole::RatingRole);
                 MetadataManager::instance().setRating(path.toStdWString(), rating);
             }
             if (color != L"__NO_CHANGE__") {
-                m_contentPanel->getProxyModel()->setData(idx, QString::fromStdWString(color), ColorRole);
+                m_contentPanel->getProxyModel()->setData(idx, QString::fromStdWString(color), (int)ArcMetaRole::ColorRole);
                 MetadataManager::instance().setColor(path.toStdWString(), color);
             }
         }
@@ -500,7 +501,7 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
         if (msg->wParam == DBT_DEVICEARRIVAL || msg->wParam == DBT_DEVICEREMOVECOMPLETE) {
             qDebug() << "[Main] 检测到磁盘硬件变更，触发全量 GLOB 对账对账...";
             // 异步触发扫描，防止阻塞 UI
-            (void)QtConcurrent::run([]() {
+            (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), []() {
                 SyncEngine::instance().runFullScan({}, nullptr);
             });
         }

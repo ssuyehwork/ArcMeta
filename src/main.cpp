@@ -17,6 +17,7 @@
 #include "ui/MainWindow.h"
 #include "db/Database.h"
 #include "db/SyncEngine.h"
+#include "db/CategoryRepo.h"
 #include "meta/MetadataManager.h"
 #include "mft/MftReader.h"
 #include "core/CoreController.h"
@@ -85,6 +86,12 @@ int main(int argc, char *argv[]) {
     ArcMeta::CoreController::instance().startSystem();
 
     int ret = a.exec();
+
+    // 6. 导出分类快照备份
+    ArcMeta::CategoryRepo::exportToJsonSnapshot();
+
+    // 7. 优雅关闭：确保所有后台任务完成
+    ArcMeta::CoreController::instance().backgroundPool().waitForDone();
 
     return ret;
 }

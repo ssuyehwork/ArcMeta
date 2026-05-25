@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QThreadPool>
 #include <memory>
 
 namespace ArcMeta {
@@ -38,6 +39,9 @@ signals:
     void statusTextChanged(const QString& text);
     void initializationFinished();
 
+public:
+    QThreadPool& backgroundPool() { return m_backgroundPool; }
+
 private:
     CoreController(QObject* parent = nullptr);
     ~CoreController() override;
@@ -46,6 +50,7 @@ private:
 
     bool m_isIndexing = false;
     QString m_statusText = "就绪";
+    QThreadPool m_backgroundPool;
 };
 
 } // namespace ArcMeta

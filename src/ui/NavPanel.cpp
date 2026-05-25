@@ -17,6 +17,8 @@
 #include <QPointer>
 #include <QtConcurrent>
 #include <QApplication>
+#include "../core/CoreController.h"
+
 
 namespace ArcMeta {
 
@@ -240,7 +242,7 @@ void NavPanel::fetchChildDirs(QStandardItem* parent) {
     // 2026-05-25 编译修复：QStandardItem 不继承自 QObject，严禁使用 QPointer。
     // 改用 QPersistentModelIndex 确保异步回调时索引的有效性。
     QPersistentModelIndex pIdx(parent->index());
-    (void)QtConcurrent::run([this, pIdx, path]() {
+    (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), [this, pIdx, path]() {
         QDir dir(path);
         // 执行耗时的物理磁盘读取
         QFileInfoList list = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);

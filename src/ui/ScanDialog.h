@@ -2,7 +2,6 @@
 
 #include "FramelessDialog.h"
 #include "../core/IndexedEntry.h"
-#include "../core/CacheManager.h"
 #include "../mft/UsnWatcher.h"
 #include <QListWidget>
 #include <QCheckBox>
@@ -29,6 +28,7 @@
 #include <QStackedWidget>
 #include <QListView>
 #include <QActionGroup>
+#include "../meta/MetadataDefs.h"
 #include <atomic>
 
 #include "ScanController.h"
@@ -171,7 +171,6 @@ private:
 
     int64_t m_lastSearchMs = 0;
 
-    std::unique_ptr<CacheManager> m_cacheManager;
     ScanConfig m_config;
 };
 

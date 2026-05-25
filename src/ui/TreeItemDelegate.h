@@ -2,6 +2,7 @@
 
 #include <QStyledItemDelegate>
 #include <QPainter>
+#include "../meta/MetadataDefs.h"
 #include <QApplication>
 #include <QMouseEvent>
 #include "ContentPanel.h"
@@ -45,7 +46,7 @@ public:
         } else if (m_showStatus) {
             // 2026-06-xx 按照视觉要求：未录入项文字半透明暗淡处理
             // 物理修复：校准作用域
-            bool isManaged = index.data(InDatabaseRole).toBool();
+            bool isManaged = index.data((int)ArcMetaRole::InDatabaseRole).toBool();
             if (!isManaged) {
                 opt.palette.setColor(QPalette::Text, QColor(238, 238, 238, 120));
             }
@@ -59,8 +60,8 @@ public:
             painter->setRenderHint(QPainter::Antialiasing);
 
             if (col == 1) { // 状态列
-                bool isPinned = index.model()->index(index.row(), 0).data(IsLockedRole).toBool();
-                bool isManaged = index.model()->index(index.row(), 0).data(InDatabaseRole).toBool();
+                bool isPinned = index.model()->index(index.row(), 0).data((int)ArcMetaRole::IsLockedRole).toBool();
+                bool isManaged = index.model()->index(index.row(), 0).data((int)ArcMetaRole::InDatabaseRole).toBool();
                 if (isPinned || isManaged) {
                     QRect iconRect(option.rect.left() + (option.rect.width() - 16) / 2,
                                    option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
@@ -72,7 +73,7 @@ public:
                 }
             } else if (col == 2) { // 星级列
                 // 2026-06-16 按照方案 20 纠偏：仅在选中或评分 > 0 时显示图标，减少视觉干扰
-                int rating = index.model()->index(index.row(), 0).data(RatingRole).toInt();
+                int rating = index.model()->index(index.row(), 0).data((int)ArcMetaRole::RatingRole).toInt();
                 bool isSelected = option.state & QStyle::State_Selected;
 
                 if (rating > 0 || isSelected) {
@@ -108,7 +109,7 @@ public:
                     }
                 }
             } else if (col == 3) { // 颜色列
-                QString colorHex = index.model()->index(index.row(), 0).data(ColorRole).toString();
+                QString colorHex = index.model()->index(index.row(), 0).data((int)ArcMetaRole::ColorRole).toString();
                 if (!colorHex.isEmpty()) {
                     QColor c = UiHelper::parseColorName(colorHex);
                     if (c.isValid()) {
@@ -135,7 +136,7 @@ public:
             
             if (banHitbox.contains(me->pos())) {
                 // 核心意图：统一由模型 setData 触发持久化，消除双写冲突
-                model->setData(index.model()->index(index.row(), 0), 0, RatingRole);
+                model->setData(index.model()->index(index.row(), 0), 0, (int)ArcMetaRole::RatingRole);
                 return true;
             }
 
@@ -146,7 +147,7 @@ public:
             for (int i = 0; i < 5; ++i) {
                 QRect starRect(startX + i * (starSize + spacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
                 if (starRect.contains(me->pos())) {
-                    model->setData(index.model()->index(index.row(), 0), i + 1, RatingRole);
+                    model->setData(index.model()->index(index.row(), 0), i + 1, (int)ArcMetaRole::RatingRole);
                     return true;
                 }
             }

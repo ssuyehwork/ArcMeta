@@ -41,9 +41,6 @@ class MftReader : public QObject {
 public:
     static MftReader& instance();
 
-    // 全局图标缓存管理 (解决 UAF 风险)
-    QIcon getCachedIcon(const QString& ext, bool isDir);
-
 signals:
     void dataChanged(int index = -1);
     void entryAdded(uint64_t key);   // 2026-06-xx 新增：实时增量信号
@@ -146,8 +143,6 @@ private:
     std::vector<UsnWatcher*> m_watchers;
 
     mutable QReadWriteLock m_dataLock;
-    mutable QReadWriteLock m_iconCacheLock;
-    QHash<QString, QIcon>  m_icon_cache;
 
     bool m_isInitialized = false;
     uint32_t m_dirty_count = 0;

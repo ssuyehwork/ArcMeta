@@ -27,6 +27,8 @@
 #include <chrono>
 #include <sstream>
 #include <iomanip>
+#include "../core/CoreController.h"
+
 
 namespace ArcMeta {
 
@@ -108,7 +110,7 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
     emit syncStatusChanged(true);
 
     // 2026-06-16 按照用户要求：从事务日志读取 FID -> 同步物理 JSON 到数据库 -> 核实后清空
-    (void)QtConcurrent::run([this, onFinished]() {
+    (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), [this, onFinished]() {
         auto& mgr = MetadataManager::instance();
         QStringList pendingFids = mgr.getPendingSyncDirs();
         QStringList remainingFids;

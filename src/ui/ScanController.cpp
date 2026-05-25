@@ -2,6 +2,8 @@
 #include "../mft/MftReader.h"
 #include <QtConcurrent/QtConcurrent>
 #include <QElapsedTimer>
+#include "../core/CoreController.h"
+
 
 namespace ArcMeta {
 
@@ -76,7 +78,7 @@ void ScanController::performSearch() {
     QElapsedTimer timer;
     timer.start();
 
-    auto future = QtConcurrent::run([text = m_searchText, state = m_filterState]() {
+    auto future = QtConcurrent::run(&CoreController::instance().backgroundPool(), [text = m_searchText, state = m_filterState]() {
         // 如果开启自动显示且查询为空，则执行全量搜索（带过滤）
         if (state.autoDisplay && text.isEmpty() && state.extensionList.isEmpty()) {
             return MftReader::instance().search("", state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem, state.includeDollar);
@@ -135,7 +137,7 @@ void ScanController::sort(int column, int order) {
         currentKeys = m_resultSet->keys;
     }
 
-    auto future = QtConcurrent::run([keys = std::move(currentKeys), column, order]() mutable {
+    auto future = QtConcurrent::run(&CoreController::instance().backgroundPool(), [keys = std::move(currentKeys), column, order]() mutable {
         std::sort(keys.begin(), keys.end(), [column, order](uint64_t a, uint64_t b) {
             return compareKeys(a, b, column, order);
         });

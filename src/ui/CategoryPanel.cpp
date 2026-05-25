@@ -32,6 +32,8 @@
 #include <QSqlQuery>
 #include "Logger.h"
 #include <QtConcurrent>
+#include "../core/CoreController.h"
+
 
 namespace ArcMeta {
 
@@ -709,7 +711,7 @@ void CategoryPanel::initUi() {
         }
 
         // 3. 启动后台文件与分布式 USN 对账扫描
-        (void)QtConcurrent::run([]() {
+        (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), []() {
             SyncEngine::instance().runFullScan({}, nullptr);
         });
     });

@@ -4,10 +4,34 @@
 #include <string>
 #include <vector>
 #include <QString>
-
+#include <Qt>
 #include <QColor>
 
 namespace ArcMeta {
+
+/**
+ * @brief 全局统一的 Model Role 枚举
+ */
+enum class ArcMetaRole : int {
+    TypeRole = Qt::UserRole + 100,
+    IdRole,
+    ColorRole,
+    NameRole,
+    PinnedRole,
+    PathRole,
+    EncryptedRole,
+    EncryptHintRole,
+    CountRole,
+    RatingRole,
+    IsLockedRole,
+    TagsRole,
+    IsEmptyRole,
+    CategoryIdRole,
+    InDatabaseRole,
+    PalettesRole,
+    AspectRatioRole,
+    HasThumbnailRole
+};
 
 struct PaletteEntry {
     QColor color;

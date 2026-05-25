@@ -27,6 +27,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileIconProvider>
+#include <QReadWriteLock>
 #include <algorithm>
 #include <cmath>
 
@@ -45,6 +46,8 @@
 #endif
 
 #include "SvgIcons.h"
+#include "../core/CoreController.h"
+
 
 namespace ArcMeta {
 
@@ -145,8 +148,13 @@ public:
         if (key.length() > 128) key = "unknown";
         
         static QMap<QString, QIcon> s_iconCache;
-        if (s_iconCache.contains(key)) {
-            return s_iconCache[key];
+        static QReadWriteLock s_iconCacheLock;
+
+        {
+            QReadLocker locker(&s_iconCacheLock);
+            if (s_iconCache.contains(key)) {
+                return s_iconCache[key];
+            }
         }
 
         QFileIconProvider provider;
@@ -166,7 +174,10 @@ public:
             }
         }
         
-        s_iconCache[key] = icon;
+        {
+            QWriteLocker locker(&s_iconCacheLock);
+            s_iconCache[key] = icon;
+        }
         return icon;
     }
 
@@ -220,6 +231,17 @@ public:
      */
     static inline QColor quantizeColor(const QColor& color) {
         return color;
+    }
+
+    /**
+     * @brief 物理对标：强制路径转换协议，确保 UI 显示与 DB 存储的一致性
+     */
+    static QString toDisplayPath(const std::wstring& path) {
+        return QDir::toNativeSeparators(QString::fromStdWString(path));
+    }
+
+    static std::wstring toStorePath(const QString& path) {
+        return QDir::toNativeSeparators(QDir::cleanPath(path)).toStdWString();
     }
 
 
@@ -426,7 +448,7 @@ public:
                     img = img.copy(); // 确保数据所有权
                     
                     // 异步存入磁盘缓存
-                    (void)QtConcurrent::run([img, cachePath]() {
+                    (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), [img, cachePath]() {
                         img.save(cachePath, "PNG");
                     });
 

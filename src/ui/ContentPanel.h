@@ -41,25 +41,6 @@ protected:
     bool lessThan(const QModelIndex& source_left, const QModelIndex& source_right) const override;
 };
 
-/**
- * @brief 自定义 Role 枚举，用于 QStandardItemModel 数据存取
- */
-enum ItemRole {
-    RatingRole = Qt::UserRole + 1,
-    ColorRole,
-    PinnedRole,
-    EncryptedRole,
-    PathRole,
-    IsLockedRole,
-    TagsRole,
-    TypeRole,
-    IsEmptyRole,
-    CategoryIdRole,
-    InDatabaseRole,
-    PalettesRole,
-    AspectRatioRole,
-    HasThumbnailRole
-};
 
 /**
  * @brief 内容面板（面板四）：核心业务展示区
@@ -99,6 +80,12 @@ public:
     enum ViewMode {
         GridView,
         ListView
+    };
+
+    enum class PanelState {
+        Idle,
+        SyncingData,
+        RefreshingView
     };
 
     /**
@@ -232,7 +219,7 @@ private:
     int m_zoomLevel = 64;
     QString m_currentPath;
     bool m_isRecursive = false;
-    bool m_isLoading = false; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
+    PanelState m_state = PanelState::Idle; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
     void updateGridSize();
     void updateStatusBarStats();
     void recalculateAndEmitStats();

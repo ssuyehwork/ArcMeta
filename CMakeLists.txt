@@ -45,8 +45,6 @@ set(SOURCES
     src/main.cpp
     src/core/CoreController.cpp
     src/core/CoreController.h
-    src/core/CacheManager.cpp
-    src/core/CacheManager.h
     src/core/IndexedEntry.h
     src/mft/UsnWatcher.cpp
     src/mft/UsnWatcher.h
@@ -110,8 +108,6 @@ set(SOURCES
     src/ui/JustifiedView.h
     src/ui/ThumbnailDelegate.cpp
     src/ui/ThumbnailDelegate.h
-    src/ui/LoadingWindow.cpp
-    src/ui/LoadingWindow.h
     src/ui/Logger.h
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h

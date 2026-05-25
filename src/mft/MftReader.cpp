@@ -20,6 +20,9 @@
 #include <QFuture>
 #include <QFileIconProvider>
 #include <QFileInfo>
+#include "../ui/UiHelper.h"
+#include "../core/CoreController.h"
+
 
 #ifdef min
 #undef min
@@ -92,10 +95,6 @@ void MftReader::clearInternal() {
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
         m_path_cache.clear();
-    }
-    {
-        QWriteLocker lock(&m_iconCacheLock);
-        m_icon_cache.clear();
     }
     m_next_usns.clear();
     m_isInitialized = false;
@@ -1041,7 +1040,7 @@ void MftReader::requestMetadata(int index) {
     std::wstring volume = m_drive_list[dIdx];
     writeLock.unlock();
 
-    (void)QtConcurrent::run([this, index, frn, volume]() {
+    (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), [this, index, frn, volume]() {
         // 2026-05-14 极致性能重构：对标 Rust 原版，采用 API 分级拉取策略
         // 1. 优先使用 GetFileAttributesExW (不涉及文件句柄，非侵入式，性能极高)
         QString fullPath = getFullPath(index);
@@ -1089,31 +1088,6 @@ void MftReader::requestMetadata(int index) {
         lock.unlock();
         emit dataChanged(index); 
     });
-}
-
-QIcon MftReader::getCachedIcon(const QString& ext, bool isDir) {
-    QString key = isDir ? "folder" : ext.toLower();
-    {
-        QReadLocker lock(&m_iconCacheLock);
-        auto it = m_icon_cache.find(key);
-        if (it != m_icon_cache.end()) return *it;
-    }
-
-    QFileIconProvider provider;
-    QIcon icon;
-    if (isDir) {
-        icon = provider.icon(QFileIconProvider::Folder);
-    } else {
-        if (key.length() > 12) key = "unknown";
-        icon = provider.icon(QFileInfo("dummy." + key));
-        if (icon.isNull()) icon = provider.icon(QFileIconProvider::File);
-    }
-
-    {
-        QWriteLocker lock(&m_iconCacheLock);
-        m_icon_cache[key] = icon;
-    }
-    return icon;
 }
 
 } // namespace ArcMeta

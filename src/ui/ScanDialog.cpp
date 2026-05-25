@@ -2,7 +2,6 @@
 #define NOMINMAX
 #endif
 #include "ScanDialog.h"
-#include "../core/CacheManager.h"
 #include <QPainter>
 #include <QTimer>
 #include <QIcon>
@@ -27,6 +26,8 @@
 #include <QStyle>
 #include <QDateTime>
 #include <algorithm>
+#include "../core/CoreController.h"
+
 #include <execution>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -54,8 +55,11 @@
 #include "ScanController.h"
 #include "JustifiedView.h"
 #include "ThumbnailDelegate.h"
+#include "../meta/MetadataDefs.h"
 #include <memory>
 #include <algorithm>
+#include "../core/CoreController.h"
+
 
 #ifdef min
 #undef min
@@ -271,7 +275,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
                 ScanDialog* dlg = qobject_cast<ScanDialog*>(parent());
                 int thumbSize = (dlg && dlg->m_viewStack->currentIndex() == 0) ? 24 : (dlg ? dlg->m_config.iconSize : 64);
 
-                (void)QtConcurrent::run([mutableThis, key, fullPath, cacheKey, thumbSize, ext]() {
+                (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), [mutableThis, key, fullPath, cacheKey, thumbSize, ext]() {
                     QImage img;
                     if (ext == "svg") {
                         QSvgRenderer renderer(fullPath);
@@ -307,7 +311,7 @@ QVariant ScanTableModel::data(const QModelIndex& index, int role) const {
                 });
             }
         }
-        return reader.getCachedIcon(ext, reader.isDirectory(actualIndex));
+        return UiHelper::getFileIcon(fullPath, thumbSize);
     } else if (role == Qt::ForegroundRole) {
         // 2026-05-16 视觉同步：从 MetadataManager 获取颜色标记并适配主界面高端色值
         // 2026-05-17 按照用户要求：使用 UiHelper::parseColorName 确保所有颜色（如黄色 #FECF0E）完全一致高雅
@@ -780,7 +784,7 @@ ScanDialog::ScanDialog(QWidget* parent)
     QTimer::singleShot(100, this, [this]() {
         updateStatus("正在载入本地快照...");
         QPointer<ScanDialog> weakThis(this);
-        (void)(QtConcurrent::run)([weakThis]() {
+        (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), [weakThis]() {
             bool ok = MftReader::instance().loadFromCache();
             QMetaObject::invokeMethod(weakThis.data(), [weakThis, ok]() {
                 if (!weakThis) return;
@@ -1089,7 +1093,7 @@ void ScanDialog::refreshDriveList(bool forceProbe) {
     showDriveLoading();
 
     QPointer<ScanDialog> weakThis(this);
-    (void)(QtConcurrent::run)([weakThis]() {
+    (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), [weakThis]() {
         if (!weakThis) return;
         QVector<DriveInfo> drives;
         DWORD driveMask = GetLogicalDrives();
@@ -1335,7 +1339,7 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                 labelMenu->addAction("解析颜色...", [this, path]() {
                     // 开启异步分析链，防止 UI 阻塞
                     QPointer<ScanDialog> weakThis(this);
-                    (void)QtConcurrent::run([weakThis, path]() {
+                    (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), [weakThis, path]() {
                         auto palette = UiHelper::extractPalette(QString::fromStdWString(path));
                         if (palette.isEmpty()) return;
                         
@@ -1524,7 +1528,7 @@ void ScanDialog::onStartScan() {
     updateStatus("正在扫描...", true);
 
     QPointer<ScanDialog> weakThis(this);
-    (void)(QtConcurrent::run)([weakThis, selectedDrives]() {
+    (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), [weakThis, selectedDrives]() {
         MftReader::instance().buildIndex(selectedDrives);
         QMetaObject::invokeMethod(weakThis.data(), [weakThis]() {
             if (!weakThis) return;

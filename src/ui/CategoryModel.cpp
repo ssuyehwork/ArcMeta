@@ -44,11 +44,11 @@ void CategoryModel::refresh() {
         auto addSystemItem = [&](const QString& name, const QString& type, const QString& icon, const QString& color, int sysId) {
             int count = counts.value(type, 0);
             QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
-            item->setData(type, TypeRole);
-            item->setData(name, NameRole);
-            item->setData(color, ColorRole); 
+            item->setData(type, (int)ArcMetaRole::TypeRole);
+            item->setData(name, (int)ArcMetaRole::NameRole);
+            item->setData(color, (int)ArcMetaRole::ColorRole);
             // 2026-06-xx 物理修复：为系统项分配负数 ID，彻底消除与数据库 ID (0/正数) 的歧义冲突
-            item->setData(sysId, IdRole);
+            item->setData(sysId, (int)ArcMetaRole::IdRole);
             item->setEditable(false); 
             item->setIcon(UiHelper::getIcon(icon, QColor(color), 16));
             root->appendRow(item);
@@ -85,9 +85,9 @@ void CategoryModel::refresh() {
         auto favorites = FavoritesRepo::getAll();
         for (const auto& fav : favorites) {
             QStandardItem* item = new QStandardItem(QString::fromStdWString(fav.name));
-            item->setData("bookmark", TypeRole);
-            item->setData(QString::fromStdWString(fav.path), PathRole);
-            item->setData(QString::fromStdWString(fav.name), NameRole);
+            item->setData("bookmark", (int)ArcMetaRole::TypeRole);
+            item->setData(QString::fromStdWString(fav.path), (int)ArcMetaRole::PathRole);
+            item->setData(QString::fromStdWString(fav.name), (int)ArcMetaRole::NameRole);
             item->setIcon(UiHelper::getIcon("folder_filled", QColor("#555555"), 16));
             favGroup->appendRow(item);
         }
@@ -126,13 +126,13 @@ void CategoryModel::refresh() {
             int count = counts.value(id, 0);
 
             QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
-            item->setData("category", TypeRole);
-            item->setData(id, IdRole);
-            item->setData(color, ColorRole);
-            item->setData(name, NameRole);
-            item->setData(cat.pinned, PinnedRole);
-            item->setData(cat.encrypted, EncryptedRole);
-            item->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
+            item->setData("category", (int)ArcMetaRole::TypeRole);
+            item->setData(id, (int)ArcMetaRole::IdRole);
+            item->setData(color, (int)ArcMetaRole::ColorRole);
+            item->setData(name, (int)ArcMetaRole::NameRole);
+            item->setData(cat.pinned, (int)ArcMetaRole::PinnedRole);
+            item->setData(cat.encrypted, (int)ArcMetaRole::EncryptedRole);
+            item->setData(QString::fromStdWString(cat.encryptHint), (int)ArcMetaRole::EncryptHintRole);
             item->setFlags(item->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
             
             if (cat.encrypted && !m_unlockedIds.contains(id)) {
@@ -168,11 +168,11 @@ void CategoryModel::refresh() {
                     QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
                     
                     QStandardItem* mirror = new QStandardItem(name);
-                    mirror->setData("category", TypeRole);
-                    mirror->setData(id, IdRole);
-                    mirror->setData(color, ColorRole);
-                    mirror->setData(name, NameRole);
-                    mirror->setData(true, PinnedRole);
+                    mirror->setData("category", (int)ArcMetaRole::TypeRole);
+                    mirror->setData(id, (int)ArcMetaRole::IdRole);
+                    mirror->setData(color, (int)ArcMetaRole::ColorRole);
+                    mirror->setData(name, (int)ArcMetaRole::NameRole);
+                    mirror->setData(true, (int)ArcMetaRole::PinnedRole);
                     
                     if (cat.encrypted && !m_unlockedIds.contains(id)) {
                         mirror->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
@@ -194,7 +194,7 @@ void CategoryModel::loadCategoryItems(const QModelIndex& parentIndex) {
 
 QVariant CategoryModel::data(const QModelIndex& index, int role) const {
     if (role == Qt::EditRole) {
-        return QStandardItemModel::data(index, NameRole);
+        return QStandardItemModel::data(index, (int)ArcMetaRole::NameRole);
     }
     return QStandardItemModel::data(index, role);
 }
@@ -204,8 +204,8 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
         QString newName = val.toString().trimmed();
         if (newName.isEmpty()) return false;
 
-        QString type = index.data(TypeRole).toString();
-        int id = index.data(IdRole).toInt();
+        QString type = index.data((int)ArcMetaRole::TypeRole).toString();
+        int id = index.data((int)ArcMetaRole::IdRole).toInt();
         
         if (type == "category" && id > 0) {
             auto categories = CategoryRepo::getAll();
@@ -246,8 +246,8 @@ bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction actio
         QStandardItem* parentItem = itemFromIndex(actualParent);
         if (!parentItem) return false;
         
-        QString type = parentItem->data(TypeRole).toString();
-        QString name = parentItem->data(NameRole).toString();
+        QString type = parentItem->data((int)ArcMetaRole::TypeRole).toString();
+        QString name = parentItem->data((int)ArcMetaRole::NameRole).toString();
         
         // 内部拖拽（Move）依然保持严格校验，仅允许移动到分类、书签或根组
         if (type != "category" && type != "bookmark" && name != "我的分类") {

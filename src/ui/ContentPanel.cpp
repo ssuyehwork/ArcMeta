@@ -61,7 +61,10 @@
 #include "CategoryLockDialog.h" 
 #include "BatchRenameDialog.h" 
 #include "UiHelper.h" 
- 
+#include "../meta/MetadataDefs.h"
+#include "../core/CoreController.h"
+
+
 namespace ArcMeta { 
  
 // --- FilterProxyModel 实现 --- 
@@ -83,14 +86,14 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
      
     // 1. 评级过滤 
     if (!currentFilter.ratings.isEmpty()) { 
-        int r = idx.data(RatingRole).toInt(); 
+        int r = idx.data((int)ArcMetaRole::RatingRole).toInt();
         if (!currentFilter.ratings.contains(r)) return false; 
     } 
  
     // 2. 颜色过滤 (变长物理多色板命中逻辑)
     if (!currentFilter.colors.isEmpty()) { 
-        QString path = idx.data(PathRole).toString();
-        QString dominantColor = idx.data(ColorRole).toString();
+        QString path = idx.data((int)ArcMetaRole::PathRole).toString();
+        QString dominantColor = idx.data((int)ArcMetaRole::ColorRole).toString();
         
         // 获取该项目的所有物理颜色 (变长色板)
         QVector<QColor> palettes = MetadataManager::instance().getPalettes(path.toStdWString());
@@ -135,7 +138,7 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
  
     // 3. 标签过滤 
     if (!currentFilter.tags.isEmpty()) { 
-        QStringList itemTags = idx.data(TagsRole).toStringList(); 
+        QStringList itemTags = idx.data((int)ArcMetaRole::TagsRole).toStringList();
         bool matchTag = false; 
         for (const QString& fTag : currentFilter.tags) { 
             if (fTag == "__none__") { 
@@ -149,8 +152,8 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
  
     // 4. 类型过滤 
     if (!currentFilter.types.isEmpty()) { 
-        QString type = idx.data(TypeRole).toString();  
-        QString ext = QFileInfo(idx.data(PathRole).toString()).suffix().toUpper(); 
+        QString type = idx.data((int)ArcMetaRole::TypeRole).toString();
+        QString ext = QFileInfo(idx.data((int)ArcMetaRole::PathRole).toString()).suffix().toUpper();
         bool matchType = false; 
         for (const QString& fType : currentFilter.types) { 
             if (fType == "folder") { 
@@ -164,7 +167,7 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
  
     // 5. 创建日期过滤 
     if (!currentFilter.createDates.isEmpty()) { 
-        QDate d = QFileInfo(idx.data(PathRole).toString()).birthTime().date(); 
+        QDate d = QFileInfo(idx.data((int)ArcMetaRole::PathRole).toString()).birthTime().date();
         QDate today = QDate::currentDate(); 
         QString dStr = d.toString("yyyy-MM-dd"); 
         bool matchDate = false; 
@@ -178,7 +181,7 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
  
     // 6. 修改日期过滤 
     if (!currentFilter.modifyDates.isEmpty()) { 
-        QDate d = QFileInfo(idx.data(PathRole).toString()).lastModified().date(); 
+        QDate d = QFileInfo(idx.data((int)ArcMetaRole::PathRole).toString()).lastModified().date();
         QDate today = QDate::currentDate(); 
         QString dStr = d.toString("yyyy-MM-dd"); 
         bool matchDate = false; 
@@ -199,8 +202,8 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
  
 bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelIndex& source_right) const { 
     // 核心红线：置顶优先规则 
-    bool leftPinned = source_left.data(IsLockedRole).toBool(); 
-    bool rightPinned = source_right.data(IsLockedRole).toBool(); 
+    bool leftPinned = source_left.data((int)ArcMetaRole::IsLockedRole).toBool();
+    bool rightPinned = source_right.data((int)ArcMetaRole::IsLockedRole).toBool();
  
     if (leftPinned != rightPinned) { 
         if (sortOrder() == Qt::AscendingOrder) return leftPinned;  
@@ -229,7 +232,7 @@ ContentPanel::ContentPanel(QWidget* parent)
     // 2026-05-17 新增：当模型数据发生改变时，自动触发统计重新计算并推送至 FilterPanel
     connect(m_model, &QStandardItemModel::dataChanged, this, [this](const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles) {
         Q_UNUSED(topLeft); Q_UNUSED(bottomRight);
-        if (roles.isEmpty() || roles.contains(ColorRole) || roles.contains(RatingRole) || roles.contains(TagsRole)) {
+        if (roles.isEmpty() || roles.contains((int)ArcMetaRole::ColorRole) || roles.contains((int)ArcMetaRole::RatingRole) || roles.contains((int)ArcMetaRole::TagsRole)) {
             recalculateAndEmitStats();
         }
     });
@@ -268,28 +271,28 @@ ContentPanel::ContentPanel(QWidget* parent)
             // 回归原生：停止对从系统获取的物理图标进行人工着色
             QIcon itemIcon = UiHelper::getFileIcon(data.fullPath, 128); 
             auto* nameItem = new QStandardItem(itemIcon, data.name); 
-            nameItem->setData(data.fullPath, PathRole); 
-            nameItem->setData(data.isDir ? "folder" : "file", TypeRole); 
-            nameItem->setData(data.meta.rating, RatingRole); 
-            nameItem->setData(QString::fromStdWString(data.meta.color), ColorRole); 
-            nameItem->setData(data.meta.pinned, PinnedRole); 
-            nameItem->setData(data.meta.pinned, IsLockedRole); 
-            nameItem->setData(data.meta.encrypted, EncryptedRole); 
-            nameItem->setData(data.meta.tags, TagsRole); 
-            nameItem->setData(data.isEmpty, IsEmptyRole); 
-            nameItem->setData(1.0, AspectRatioRole); // 默认 1.0
-            nameItem->setData(false, HasThumbnailRole);
+            nameItem->setData(data.fullPath, (int)ArcMetaRole::PathRole);
+            nameItem->setData(data.isDir ? "folder" : "file", (int)ArcMetaRole::TypeRole);
+            nameItem->setData(data.meta.rating, (int)ArcMetaRole::RatingRole);
+            nameItem->setData(QString::fromStdWString(data.meta.color), (int)ArcMetaRole::ColorRole);
+            nameItem->setData(data.meta.pinned, (int)ArcMetaRole::PinnedRole);
+            nameItem->setData(data.meta.pinned, (int)ArcMetaRole::IsLockedRole);
+            nameItem->setData(data.meta.encrypted, (int)ArcMetaRole::EncryptedRole);
+            nameItem->setData(data.meta.tags, (int)ArcMetaRole::TagsRole);
+            nameItem->setData(data.isEmpty, (int)ArcMetaRole::IsEmptyRole);
+            nameItem->setData(1.0, (int)ArcMetaRole::AspectRatioRole); // 默认 1.0
+            nameItem->setData(false, (int)ArcMetaRole::HasThumbnailRole);
             // 2026-06-xx 按照要求：注入物理色板，确保多色统计与过滤生效
             QVariantList palList;
             for (const auto& p : data.meta.palettes) {
                 QVariantMap m; m["color"] = p.color; m["ratio"] = p.ratio;
                 palList << m;
             }
-            nameItem->setData(palList, PalettesRole);
+            nameItem->setData(palList, (int)ArcMetaRole::PalettesRole);
              
             // 2026-06-xx 按照要求：基于 JSON 存在性注入已录入状态（判断逻辑已在扫描端完成） 
             // 物理修复：校准作用域 
-            nameItem->setData(data.meta.hasUserOperations(), InDatabaseRole); 
+            nameItem->setData(data.meta.hasUserOperations(), (int)ArcMetaRole::InDatabaseRole);
  
             QList<QStandardItem*> row; 
             row << nameItem; 
@@ -353,8 +356,8 @@ ContentPanel::ContentPanel(QWidget* parent)
                             painter.end(); 
                             icon = QIcon(svgPixmap); 
                             
-                            m_model->setData(pIdx, (double)svgPixmap.width() / svgPixmap.height(), AspectRatioRole);
-                            m_model->setData(pIdx, true, HasThumbnailRole);
+                            m_model->setData(pIdx, (double)svgPixmap.width() / svgPixmap.height(), (int)ArcMetaRole::AspectRatioRole);
+                            m_model->setData(pIdx, true, (int)ArcMetaRole::HasThumbnailRole);
                         } 
                     } else if (UiHelper::isGraphicsFile(ext)) { 
                         // 2026-04-11 按照用户要求：凡是图片/图形格式，物理强制提取内容缩略图 
@@ -362,8 +365,8 @@ ContentPanel::ContentPanel(QWidget* parent)
                         QImage img = UiHelper::getShellThumbnail(path, this->m_zoomLevel); 
                         if (!img.isNull()) { 
                             icon = QIcon(QPixmap::fromImage(img)); 
-                            m_model->setData(pIdx, (double)img.width() / img.height(), AspectRatioRole);
-                            m_model->setData(pIdx, true, HasThumbnailRole);
+                            m_model->setData(pIdx, (double)img.width() / img.height(), (int)ArcMetaRole::AspectRatioRole);
+                            m_model->setData(pIdx, true, (int)ArcMetaRole::HasThumbnailRole);
                         } 
                     } 
  
@@ -624,6 +627,11 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         if (qobject_cast<QLineEdit*>(QApplication::focusWidget())) { 
             return false; 
         } 
+
+        // 2026-06-xx 物理拦截：当正在同步数据时，拦截所有会导致 Model 结构变动的键盘操作
+        if (m_state == PanelState::SyncingData) {
+            return true;
+        }
  
         if (view) { 
             if ((keyEvent->modifiers() & Qt::ControlModifier) &&  
@@ -633,10 +641,10 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 for (const auto& idx : indexes) { 
                     if (idx.column() == 0) { 
-                        QString path = idx.data(PathRole).toString(); 
+                        QString path = idx.data((int)ArcMetaRole::PathRole).toString();
                         if (!path.isEmpty()) { 
                             MetadataManager::instance().setRating(path.toStdWString(), rating); 
-                            m_proxyModel->setData(idx, rating, RatingRole); 
+                            m_proxyModel->setData(idx, rating, (int)ArcMetaRole::RatingRole);
                         } 
                     } 
                 } 
@@ -648,11 +656,11 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 for (const QModelIndex& idx : indexes) { 
                     if (idx.column() == 0) { 
-                        QString itemPath = idx.data(PathRole).toString(); 
+                        QString itemPath = idx.data((int)ArcMetaRole::PathRole).toString();
                         if (!itemPath.isEmpty()) { 
-                            bool current = idx.data(IsLockedRole).toBool(); 
+                            bool current = idx.data((int)ArcMetaRole::IsLockedRole).toBool();
                             MetadataManager::instance().setPinned(itemPath.toStdWString(), !current); 
-                            m_proxyModel->setData(idx, !current, IsLockedRole); 
+                            m_proxyModel->setData(idx, !current, (int)ArcMetaRole::IsLockedRole);
                         } 
                     } 
                 } 
@@ -679,10 +687,10 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 for (const auto& idx : indexes) { 
                     if (idx.column() == 0) { 
-                        QString path = idx.data(PathRole).toString(); 
+                        QString path = idx.data((int)ArcMetaRole::PathRole).toString();
                         if (!path.isEmpty()) { 
                             MetadataManager::instance().setColor(path.toStdWString(), colorValue.toStdWString()); 
-                            m_proxyModel->setData(idx, colorValue, ColorRole); 
+                            m_proxyModel->setData(idx, colorValue, (int)ArcMetaRole::ColorRole);
  
                             // 2026-06-05 按照要求：快捷键设置颜色后立即重渲染图标，实现视觉同步 
                             QIcon coloredIcon = UiHelper::getFileIcon(path, 128); 
@@ -697,7 +705,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 if (keyEvent->key() == Qt::Key_C) { 
                     QStringList paths; 
                     auto indexes = view->selectionModel()->selectedIndexes(); 
-                    for (const auto& idx : indexes) if (idx.column() == 0) paths << QDir::toNativeSeparators(idx.data(PathRole).toString()); 
+                    for (const auto& idx : indexes) if (idx.column() == 0) paths << UiHelper::toDisplayPath(idx.data((int)ArcMetaRole::PathRole).toString().toStdWString());
                     if (!paths.isEmpty()) QApplication::clipboard()->setText(paths.join("\r\n")); 
                     return true; 
                 } 
@@ -737,7 +745,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
  
             if (keyEvent->key() == Qt::Key_Space) { 
                 QModelIndex idx = view->currentIndex(); 
-                if (idx.isValid()) emit requestQuickLook(idx.data(PathRole).toString()); 
+                if (idx.isValid()) emit requestQuickLook(idx.data((int)ArcMetaRole::PathRole).toString());
                 return true; 
             } 
             if (keyEvent->key() == Qt::Key_Backspace) { 
@@ -764,7 +772,7 @@ QString ContentPanel::getAdjacentFilePath(const QString& currentPath, int delta)
     int currentIndex = -1; 
     for (int i = 0; i < m_proxyModel->rowCount(); ++i) { 
         QModelIndex idx = m_proxyModel->index(i, 0); 
-        if (idx.data(PathRole).toString() == currentPath) { 
+        if (idx.data((int)ArcMetaRole::PathRole).toString() == currentPath) {
             currentIndex = i; 
             break; 
         } 
@@ -779,7 +787,7 @@ QString ContentPanel::getAdjacentFilePath(const QString& currentPath, int delta)
     } 
  
     QModelIndex targetIdx = m_proxyModel->index(targetIndex, 0); 
-    return targetIdx.data(PathRole).toString(); 
+    return targetIdx.data((int)ArcMetaRole::PathRole).toString();
 } 
  
 void ContentPanel::wheelEvent(QWheelEvent* event) { 
@@ -842,16 +850,16 @@ void ContentPanel::initGridView() {
 
     auto* justifiedView = qobject_cast<JustifiedView*>(m_gridView);
     if (justifiedView) {
-        justifiedView->setAspectRatioRole(AspectRatioRole);
+        justifiedView->setAspectRatioRole((int)ArcMetaRole::AspectRatioRole);
         auto* delegate = new ThumbnailDelegate(this);
-        delegate->setHasThumbnailRole(HasThumbnailRole);
-        delegate->setRatingRole(RatingRole);
-        delegate->setPathRole(PathRole);
-        delegate->setPinnedRole(PinnedRole);
-        delegate->setManagedRole(InDatabaseRole);
-        delegate->setTypeRole(TypeRole);
-        delegate->setIsEmptyRole(IsEmptyRole);
-        delegate->setColorRole(ColorRole);
+        delegate->setHasThumbnailRole((int)ArcMetaRole::HasThumbnailRole);
+        delegate->setRatingRole((int)ArcMetaRole::RatingRole);
+        delegate->setPathRole((int)ArcMetaRole::PathRole);
+        delegate->setPinnedRole((int)ArcMetaRole::PinnedRole);
+        delegate->setManagedRole((int)ArcMetaRole::InDatabaseRole);
+        delegate->setTypeRole((int)ArcMetaRole::TypeRole);
+        delegate->setIsEmptyRole((int)ArcMetaRole::IsEmptyRole);
+        delegate->setColorRole((int)ArcMetaRole::ColorRole);
         m_gridView->setItemDelegate(delegate);
     } else {
         m_gridView->setItemDelegate(new GridItemDelegate(this)); 
@@ -961,7 +969,7 @@ void ContentPanel::initListView() {
         }
         
         // 5. 持久化逻辑：仅在非加载状态下保存，防止启动抖动
-        if (!m_isLoading) {
+        if (m_state == PanelState::Idle) {
             QSettings s("ArcMeta团队", "ArcMeta");
             s.setValue("UI/ListHeaderState", header->saveState());
         }
@@ -980,8 +988,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
  
     QModelIndex currentIndex = view->indexAt(pos); 
     bool onItem = currentIndex.isValid(); 
-    bool isFolder = onItem && (currentIndex.data(TypeRole).toString() == "folder"); 
-    QString path = currentIndex.data(PathRole).toString(); 
+    bool isFolder = onItem && (currentIndex.data((int)ArcMetaRole::TypeRole).toString() == "folder");
+    QString path = currentIndex.data((int)ArcMetaRole::PathRole).toString();
  
     QMenu menu(this); 
     UiHelper::applyMenuStyle(&menu); 
@@ -1041,7 +1049,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             ca->setIcon(QIcon(pix)); 
         } 
  
-        bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
+        bool isPinned = currentIndex.data((int)ArcMetaRole::IsLockedRole).toBool();
         menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
  
         // --- 2026-05-16 图像分析：从图中提取主色调 ---
@@ -1107,7 +1115,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             break; 
         case ActionShowInExplorer: { 
             QString target = onItem ? path : m_currentPath; 
-            QStringList args; args << "/select," << QDir::toNativeSeparators(target); 
+            QStringList args; args << "/select," << UiHelper::toDisplayPath(target.toStdWString());
             QProcess::startDetached("explorer", args); 
             break; 
         } 
@@ -1120,7 +1128,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
              
             for (const auto& idx : indexes) { 
                 if (idx.column() == 0) { 
-                    QString itemPath = idx.data(PathRole).toString(); 
+                    QString itemPath = idx.data((int)ArcMetaRole::PathRole).toString();
                     // 2026-06-xx 物理同步：基于同步获取的 File ID 进行归类，解决新文件关联失败冲突。 
                     std::string fid = MetadataManager::instance().getFileIdSync(itemPath.toStdWString()); 
                     if (!fid.empty()) { 
@@ -1137,9 +1145,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             bool pin = (action == ActionPin); 
             for (const QModelIndex& idx : indexes) { 
                 if (idx.column() == 0) { 
-                    QString itemPath = idx.data(PathRole).toString(); 
+                    QString itemPath = idx.data((int)ArcMetaRole::PathRole).toString();
                     MetadataManager::instance().setPinned(itemPath.toStdWString(), pin); 
-                    m_proxyModel->setData(idx, pin, IsLockedRole); 
+                    m_proxyModel->setData(idx, pin, (int)ArcMetaRole::IsLockedRole);
                 } 
             } 
             break; 
@@ -1150,9 +1158,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             auto indexes = view->selectionModel()->selectedIndexes(); 
             for (const auto& idx : indexes) { 
                 if (idx.column() == 0) { 
-                    QString itemPath = idx.data(PathRole).toString(); 
+                    QString itemPath = idx.data((int)ArcMetaRole::PathRole).toString();
                     MetadataManager::instance().setColor(itemPath.toStdWString(), colorName.toStdWString()); 
-                    m_proxyModel->setData(idx, colorName, ColorRole); 
+                    m_proxyModel->setData(idx, colorName, (int)ArcMetaRole::ColorRole);
  
                     // 2026-06-05 按照要求：设置颜色后立即重新生成并应用图标，实现视觉同步 
                     // 2026-05-17 逻辑修复：针对图像格式，必须优先尝试提取缩略图，防止图标覆盖内容
@@ -1173,7 +1181,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         } 
         case ActionExtractColor: {
             QPointer<ContentPanel> weakThis(this);
-            (void)QtConcurrent::run([weakThis, path]() {
+            (void)QtConcurrent::run(&CoreController::instance().backgroundPool(), [weakThis, path]() {
                 auto palette = UiHelper::extractPalette(path);
                 if (palette.isEmpty()) return;
                 
@@ -1191,16 +1199,16 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         auto* model = weakThis->m_model;
                         for (int i = 0; i < model->rowCount(); ++i) {
                             auto* item = model->item(i, 0);
-                            if (item && item->data(PathRole).toString() == path) {
-                                item->setData(colorHex, ColorRole);
+                            if (item && item->data((int)ArcMetaRole::PathRole).toString() == path) {
+                                item->setData(colorHex, (int)ArcMetaRole::ColorRole);
                                 
-                                // 向下兼容注入 PalettesRole (用于当前视图即时搜索)
+                                // 向下兼容注入 (int)ArcMetaRole::PalettesRole (用于当前视图即时搜索)
                                 QVariantList palList;
                                 for (const auto& p : palette) {
                                     QVariantMap m; m["color"] = p.first; m["ratio"] = p.second;
                                     palList << m;
                                 }
-                                item->setData(palList, PalettesRole);
+                                item->setData(palList, (int)ArcMetaRole::PalettesRole);
                                 
                                 QIcon coloredIcon;
                                 QString suffix = QFileInfo(path).suffix().toLower();
@@ -1228,7 +1236,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (ok && !pwd.isEmpty()) { 
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 QStringList targets; 
-                for (const auto& idx : indexes) if (idx.column() == 0) targets << idx.data(PathRole).toString(); 
+                for (const auto& idx : indexes) if (idx.column() == 0) targets << idx.data((int)ArcMetaRole::PathRole).toString();
                  
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "加密任务已在后台启动...", 2000); 
                  
@@ -1274,7 +1282,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (SHFileOperationW(&fileOp) == 0) loadDirectory(m_currentPath); 
             break; 
         } 
-        case ActionCopyPath: QApplication::clipboard()->setText(QDir::toNativeSeparators(path)); break; 
+        case ActionCopyPath: QApplication::clipboard()->setText(UiHelper::toDisplayPath(path.toStdWString())); break;
         case ActionProperties: { 
             SHELLEXECUTEINFOW sei = { sizeof(sei) }; 
             sei.fMask = SEE_MASK_INVOKEIDLIST; 
@@ -1295,7 +1303,7 @@ void ContentPanel::performCopy(bool cutMode) {
     QList<QUrl> urls; 
     for (const auto& idx : indexes) { 
         if (idx.column() == 0) { 
-            QString path = idx.data(PathRole).toString(); 
+            QString path = idx.data((int)ArcMetaRole::PathRole).toString();
             if (!path.isEmpty()) urls << QUrl::fromLocalFile(path); 
         } 
     } 
@@ -1357,7 +1365,7 @@ void ContentPanel::performBatchRename() {
     std::vector<std::wstring> originalPaths; 
     for (const auto& idx : indexes) { 
         if (idx.column() == 0) { 
-            QString path = idx.data(PathRole).toString(); 
+            QString path = idx.data((int)ArcMetaRole::PathRole).toString();
             if (!path.isEmpty()) originalPaths.push_back(path.toStdWString()); 
         } 
     } 
@@ -1382,7 +1390,7 @@ void ContentPanel::onSelectionChanged() {
     QModelIndexList indices = selectionModel->selectedIndexes(); 
     for (const QModelIndex& index : indices) { 
         if (index.column() == 0) { 
-            QString path = index.data(PathRole).toString(); 
+            QString path = index.data((int)ArcMetaRole::PathRole).toString();
             if (!path.isEmpty()) selectedPaths.append(path); 
         } 
     } 
@@ -1393,13 +1401,13 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
     if (!index.isValid()) return; 
  
     // 2026-06-xx 重构逻辑：优先处理子分类跳转 
-    int catId = index.data(CategoryIdRole).toInt(); 
+    int catId = index.data((int)ArcMetaRole::CategoryIdRole).toInt();
     if (catId > 0) { 
         emit categoryClicked(catId); 
         return; 
     } 
  
-    QString path = index.data(PathRole).toString(); 
+    QString path = index.data((int)ArcMetaRole::PathRole).toString();
     if (path.isEmpty()) return; 
  
     QFileInfo info(path); 
@@ -1411,7 +1419,7 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
 } 
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
-    m_isLoading = true;
+    m_state = PanelState::SyncingData;
     qDebug() << "[Content] 开始物理递归扫描 ->" << path << (recursive ? "递归" : "单级"); 
     emit dataSourceChanged("nav"); // 2026-05-17 按照用户要求：发射数据源变更信号，高亮展示导航面板焦点线条
     if (m_viewStack) m_viewStack->show(); 
@@ -1453,14 +1461,14 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             // 回归原生：使用 QFileIconProvider 获取真实的磁盘分区图标，停止人工 SVG 着色
             QIcon driveIcon = provider.icon(drive); 
             auto* item = new QStandardItem(driveIcon, drivePath); 
-            item->setData(drivePath, PathRole); 
-            item->setData("folder", TypeRole); 
-            item->setData(rm.rating, RatingRole); 
-            item->setData(QString::fromStdWString(rm.color), ColorRole); 
-            item->setData(rm.pinned, PinnedRole); // 逻辑还原：使用 PinnedRole 存储原始置顶状态 
-            item->setData(rm.pinned, IsLockedRole); // 视觉还原：IsLockedRole 负责 UI 渲染 
-            item->setData(1.0, AspectRatioRole);
-            item->setData(false, HasThumbnailRole);
+            item->setData(drivePath, (int)ArcMetaRole::PathRole);
+            item->setData("folder", (int)ArcMetaRole::TypeRole);
+            item->setData(rm.rating, (int)ArcMetaRole::RatingRole);
+            item->setData(QString::fromStdWString(rm.color), (int)ArcMetaRole::ColorRole);
+            item->setData(rm.pinned, (int)ArcMetaRole::PinnedRole); // 逻辑还原：使用 (int)ArcMetaRole::PinnedRole 存储原始置顶状态
+            item->setData(rm.pinned, (int)ArcMetaRole::IsLockedRole); // 视觉还原：(int)ArcMetaRole::IsLockedRole 负责 UI 渲染
+            item->setData(1.0, (int)ArcMetaRole::AspectRatioRole);
+            item->setData(false, (int)ArcMetaRole::HasThumbnailRole);
  
             QList<QStandardItem*> row; 
             row << item 
@@ -1479,7 +1487,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             m_model->appendRow(row); 
             tyc["folder"]++; 
         } 
-        m_isLoading = false;
+        m_state = PanelState::Idle;
         emit directoryStatsReady(rc, cc, tc, tyc, cdc, mdc); 
         return; 
     } 
@@ -1537,7 +1545,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 data.name = info.fileName(); 
             // 2026-05-27 物理修复：在扫描端强制执行 normalizePath 逻辑（统一小写 + 磁盘补丁），确保 Key 匹配 
             // 此处 QDir::cleanPath 产生的碎片将交由 MetadataManager 内部再次归一化 
-                data.fullPath = QDir::toNativeSeparators(QDir::cleanPath(info.absoluteFilePath())); 
+                data.fullPath = QString::fromStdWString(UiHelper::toStorePath(info.absoluteFilePath()));
                 data.isDir = info.isDir(); 
                 data.suffix = info.suffix().toUpper(); 
                 data.size = info.size(); 
@@ -1580,7 +1588,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         // 最后发送全量统计结果供筛选面板使用 
         QMetaObject::invokeMethod(qApp, [panelPtr, path, globalStats]() { 
             if (panelPtr && panelPtr->m_currentPath == path) { 
-                panelPtr->m_isLoading = false;
+                panelPtr->m_state = PanelState::Idle;
                 emit panelPtr->directoryStatsReady(globalStats.ratingCounts, globalStats.colorCounts, globalStats.tagCounts,  
                                                   globalStats.typeCounts, globalStats.createDateCounts, globalStats.modifyDateCounts); 
             } 
@@ -1605,16 +1613,16 @@ void ContentPanel::search(const QString& query) {
         ScanStats stats;
         for (int i = 0; i < proxy->rowCount(); ++i) {
             QModelIndex idx = proxy->index(i, 0);
-            int rating = idx.data(RatingRole).toInt();
-            QString color = idx.data(ColorRole).toString();
-            QString type = idx.data(TypeRole).toString();
-            QStringList tags = idx.data(TagsRole).toStringList();
+            int rating = idx.data((int)ArcMetaRole::RatingRole).toInt();
+            QString color = idx.data((int)ArcMetaRole::ColorRole).toString();
+            QString type = idx.data((int)ArcMetaRole::TypeRole).toString();
+            QStringList tags = idx.data((int)ArcMetaRole::TagsRole).toStringList();
             
             stats.ratingCounts[rating]++;
             stats.colorCounts[color]++;
             if (type == "folder") stats.typeCounts["folder"]++;
             else {
-                QString path = idx.data(PathRole).toString();
+                QString path = idx.data((int)ArcMetaRole::PathRole).toString();
                 stats.typeCounts[QFileInfo(path).suffix().toUpper()]++;
             }
             
@@ -1685,7 +1693,7 @@ void ContentPanel::previewFile(const QString& path) {
 } 
  
 void ContentPanel::loadCategory(int categoryId) { 
-    m_isLoading = true;
+    m_state = PanelState::SyncingData;
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -1713,9 +1721,9 @@ void ContentPanel::loadCategory(int categoryId) {
             QIcon icon = provider.icon(QFileIconProvider::Folder); 
              
             auto* item = new QStandardItem(icon, QString::fromStdWString(cat.name)); 
-            item->setData("category", TypeRole); 
-            item->setData(cat.id, CategoryIdRole); 
-            item->setData(color, ColorRole); 
+            item->setData("category", (int)ArcMetaRole::TypeRole);
+            item->setData(cat.id, (int)ArcMetaRole::CategoryIdRole);
+            item->setData(color, (int)ArcMetaRole::ColorRole);
              
             row << item 
                 << new QStandardItem("") << new QStandardItem("") << new QStandardItem("")
@@ -1753,32 +1761,32 @@ void ContentPanel::loadCategory(int categoryId) {
             if (!info.exists()) continue; 
  
             QList<QStandardItem*> row; 
-            QString normPath = QDir::toNativeSeparators(QDir::cleanPath(itemPath)); 
+            QString normPath = QString::fromStdWString(UiHelper::toStorePath(itemPath));
             RuntimeMeta rm = MetadataManager::instance().getMeta(normPath.toStdWString()); 
             QString colorName = QString::fromStdWString(rm.color); 
  
             QIcon itemIcon = UiHelper::getFileIcon(itemPath, 128); 
             auto* nameItem = new QStandardItem(itemIcon, info.fileName()); 
-            nameItem->setData(itemPath, PathRole); 
-            nameItem->setData(type, TypeRole); 
-            nameItem->setData(rm.rating, RatingRole); 
-            nameItem->setData(colorName, ColorRole); 
-            nameItem->setData(rm.pinned, PinnedRole); 
-            nameItem->setData(rm.pinned, IsLockedRole); 
-            nameItem->setData(rm.tags, TagsRole); 
-            nameItem->setData(1.0, AspectRatioRole);
-            nameItem->setData(false, HasThumbnailRole);
+            nameItem->setData(itemPath, (int)ArcMetaRole::PathRole);
+            nameItem->setData(type, (int)ArcMetaRole::TypeRole);
+            nameItem->setData(rm.rating, (int)ArcMetaRole::RatingRole);
+            nameItem->setData(colorName, (int)ArcMetaRole::ColorRole);
+            nameItem->setData(rm.pinned, (int)ArcMetaRole::PinnedRole);
+            nameItem->setData(rm.pinned, (int)ArcMetaRole::IsLockedRole);
+            nameItem->setData(rm.tags, (int)ArcMetaRole::TagsRole);
+            nameItem->setData(1.0, (int)ArcMetaRole::AspectRatioRole);
+            nameItem->setData(false, (int)ArcMetaRole::HasThumbnailRole);
             // 2026-06-xx 注入物理色板
             QVariantList palList;
             for (const auto& p : rm.palettes) {
                 QVariantMap m; m["color"] = p.color; m["ratio"] = p.ratio;
                 palList << m;
             }
-            nameItem->setData(palList, PalettesRole);
+            nameItem->setData(palList, (int)ArcMetaRole::PalettesRole);
  
             bool isEmpty = false; 
             if (type == "folder") isEmpty = QDir(itemPath).isEmpty(); 
-            nameItem->setData(isEmpty, IsEmptyRole); 
+            nameItem->setData(isEmpty, (int)ArcMetaRole::IsEmptyRole);
  
             row << nameItem; 
             row << new QStandardItem("") << new QStandardItem("") << new QStandardItem("");
@@ -1826,7 +1834,7 @@ void ContentPanel::loadCategory(int categoryId) {
      
     // 2026-05-07 按照用户要求：发出统计数据信号，填充筛选器 
     if (stats.noTagCount > 0) stats.tagCounts["__none__"] = stats.noTagCount; 
-    m_isLoading = false;
+    m_state = PanelState::Idle;
     emit directoryStatsReady(stats.ratingCounts, stats.colorCounts, stats.tagCounts,  
                            stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts); 
      
@@ -1835,7 +1843,7 @@ void ContentPanel::loadCategory(int categoryId) {
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths) { 
-    m_isLoading = true;
+    m_state = PanelState::SyncingData;
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -1859,34 +1867,34 @@ void ContentPanel::loadPaths(const QStringList& paths) {
         QList<QStandardItem*> row; 
          
         // 回归原生：停止对从系统获取的物理图标进行人工着色
-        QString normPath = QDir::toNativeSeparators(QDir::cleanPath(path)); 
+        QString normPath = QString::fromStdWString(UiHelper::toStorePath(path));
         RuntimeMeta rm = MetadataManager::instance().getMeta(normPath.toStdWString()); 
         QString colorName = QString::fromStdWString(rm.color); 
  
         QIcon itemIcon = UiHelper::getFileIcon(path, 128); 
         auto* nameItem = new QStandardItem(itemIcon, info.fileName()); 
-        nameItem->setData(path, PathRole); 
-        nameItem->setData(info.isDir() ? "folder" : "file", TypeRole); 
+        nameItem->setData(path, (int)ArcMetaRole::PathRole);
+        nameItem->setData(info.isDir() ? "folder" : "file", (int)ArcMetaRole::TypeRole);
          
         // 2026-05-27 物理修复：复用已归一化的路径和元数据，解决重定义报错 
-        nameItem->setData(rm.rating, RatingRole); 
-        nameItem->setData(colorName, ColorRole); 
-        nameItem->setData(rm.pinned, PinnedRole); 
-        nameItem->setData(rm.pinned, IsLockedRole); 
-        nameItem->setData(rm.tags, TagsRole); 
-        nameItem->setData(1.0, AspectRatioRole);
-        nameItem->setData(false, HasThumbnailRole);
+        nameItem->setData(rm.rating, (int)ArcMetaRole::RatingRole);
+        nameItem->setData(colorName, (int)ArcMetaRole::ColorRole);
+        nameItem->setData(rm.pinned, (int)ArcMetaRole::PinnedRole);
+        nameItem->setData(rm.pinned, (int)ArcMetaRole::IsLockedRole);
+        nameItem->setData(rm.tags, (int)ArcMetaRole::TagsRole);
+        nameItem->setData(1.0, (int)ArcMetaRole::AspectRatioRole);
+        nameItem->setData(false, (int)ArcMetaRole::HasThumbnailRole);
         // 2026-06-xx 注入物理色板
         QVariantList palList;
         for (const auto& p : rm.palettes) {
             QVariantMap m; m["color"] = p.color; m["ratio"] = p.ratio;
             palList << m;
         }
-        nameItem->setData(palList, PalettesRole);
+        nameItem->setData(palList, (int)ArcMetaRole::PalettesRole);
  
         bool isEmpty = false; 
         if (info.isDir()) isEmpty = QDir(path).isEmpty(); 
-        nameItem->setData(isEmpty, IsEmptyRole); 
+        nameItem->setData(isEmpty, (int)ArcMetaRole::IsEmptyRole);
  
         row << nameItem; 
         row << new QStandardItem("") << new QStandardItem("") << new QStandardItem("");
@@ -1933,7 +1941,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
  
     // 2026-05-07 按照用户要求：发出统计数据信号，填充筛选器 
     if (stats.noTagCount > 0) stats.tagCounts["__none__"] = stats.noTagCount; 
-    m_isLoading = false;
+    m_state = PanelState::Idle;
     emit directoryStatsReady(stats.ratingCounts, stats.colorCounts, stats.tagCounts,  
                            stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts); 
      
@@ -2045,7 +2053,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     GridMetrics m = calculateMetrics(option); 
     bool isSelected = (option.state & QStyle::State_Selected); 
     bool isHovered = (option.state & QStyle::State_MouseOver); 
-    QString colorName = index.data(ColorRole).toString();
+    QString colorName = index.data((int)ArcMetaRole::ColorRole).toString();
      
     // 2026-06-05 按照用户要求：背景框仅限正方形区域，名称外置 
     QColor cardBg = isSelected ? QColor("#282828") : (isHovered ? QColor("#2A2A2A") : QColor("#2D2D2D")); 
@@ -2056,8 +2064,8 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     // [内容区绘制] - 均在正方形内 
     // 1. 状态位图标绘制 (置顶 vs. 已录入 互斥) 
     // 2026-06-xx 物理修复：校准 ItemRole 作用域，确保 GridItemDelegate 编译通过 
-    bool isPinned = index.data(IsLockedRole).toBool(); 
-    bool isManaged = index.data(InDatabaseRole).toBool(); 
+    bool isPinned = index.data((int)ArcMetaRole::IsLockedRole).toBool();
+    bool isManaged = index.data((int)ArcMetaRole::InDatabaseRole).toBool();
      
     if (isPinned || isManaged) { 
         QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16); 
@@ -2073,7 +2081,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     } 
  
     // 2. 扩展名角标 
-    QString path = index.data(PathRole).toString(); 
+    QString path = index.data((int)ArcMetaRole::PathRole).toString();
     QFileInfo info(path); 
     QString ext = info.isDir() ? "DIR" : info.suffix().toUpper(); 
     if (ext.isEmpty()) ext = "FILE"; 
@@ -2095,7 +2103,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     icon.paint(painter, m.iconRect); 
  
     // 4. 评级星级 
-    int rating = index.data(RatingRole).toInt(); 
+    int rating = index.data((int)ArcMetaRole::RatingRole).toInt();
      
     // 2026-06-xx 逻辑重构：彩色胶囊背景由 colorName 独立驱动，不与星级耦合
     if (!colorName.isEmpty()) {
@@ -2137,7 +2145,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     } 
      
     // [名称区绘制] - 在正方形下方 
-    bool isEmptyFolder = (index.data(TypeRole).toString() == "folder" && index.data(IsEmptyRole).toBool()); 
+    bool isEmptyFolder = (index.data((int)ArcMetaRole::TypeRole).toString() == "folder" && index.data((int)ArcMetaRole::IsEmptyRole).toBool());
  
     if (!isSelected && isEmptyFolder) { 
         // 2026-06-xx 物理优化：移除半透明蒙版，改为全透明刷子
@@ -2155,8 +2163,8 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     painter->setFont(textFont); 
  
     // 2026-06-xx 按照要求：未录入项文字半透明 
-    // 2026-06-xx 物理修复：校准 InDatabaseRole 作用域 
-    if (!isSelected && !index.data(InDatabaseRole).toBool()) { 
+    // 2026-06-xx 物理修复：校准 (int)ArcMetaRole::InDatabaseRole 作用域
+    if (!isSelected && !index.data((int)ArcMetaRole::InDatabaseRole).toBool()) {
         painter->setPen(QColor(238, 238, 238, 120)); 
     } 
  
@@ -2209,12 +2217,12 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
         if (mEvent->button() == Qt::LeftButton) { 
             // 2026-05-28 按照用户授权：废除本地硬编码判定，统一使用 calculateMetrics 保证 Hitbox 零偏差 
             GridMetrics m = calculateMetrics(option); 
-            QString path = index.data(PathRole).toString(); 
+            QString path = index.data((int)ArcMetaRole::PathRole).toString();
  
             if (m.banRect.contains(mEvent->pos())) { 
                 if (!path.isEmpty()) { 
                     MetadataManager::instance().setRating(path.toStdWString(), 0); 
-                    model->setData(index, 0, RatingRole); 
+                    model->setData(index, 0, (int)ArcMetaRole::RatingRole);
                 } 
                 // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器，防止清除星级时错误触发行内编辑
                 auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
@@ -2235,7 +2243,7 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
                     int r = i + 1; 
                     if (!path.isEmpty()) { 
                         MetadataManager::instance().setRating(path.toStdWString(), r); 
-                        model->setData(index, r, RatingRole); 
+                        model->setData(index, r, (int)ArcMetaRole::RatingRole);
                     } 
                     // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器，防止星级点击时错误触发行内编辑
                     auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
@@ -2262,7 +2270,7 @@ QWidget* GridItemDelegate::createEditor(QWidget* parent, const QStyleOptionViewI
     editor->setAlignment(Qt::AlignCenter); 
     editor->setFrame(false); 
      
-    QString tagColorStr = index.data(ColorRole).toString(); 
+    QString tagColorStr = index.data((int)ArcMetaRole::ColorRole).toString();
     QString bgColor = tagColorStr.isEmpty() ? "#3E3E42" : tagColorStr; 
     QString textColor = tagColorStr.isEmpty() ? "#FFFFFF" : "#000000"; 
  
@@ -2295,13 +2303,13 @@ void GridItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, 
     QString value = lineEdit->text(); 
     if(value.isEmpty() || value == index.data(Qt::DisplayRole).toString()) return; 
  
-    QString oldPath = index.data(PathRole).toString(); 
+    QString oldPath = index.data((int)ArcMetaRole::PathRole).toString();
     QFileInfo info(oldPath); 
     QString newPath = info.absolutePath() + "/" + value; 
      
     if (QFile::rename(oldPath, newPath)) { 
         model->setData(index, value, Qt::EditRole); 
-        model->setData(index, newPath, PathRole); 
+        model->setData(index, newPath, (int)ArcMetaRole::PathRole);
         // 2026-05-24 按照用户要求：彻底移除 JSON 逻辑，重命名后仅需同步更新内存与数据库索引 
         MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString()); 
     }  
@@ -2312,15 +2320,15 @@ void ContentPanel::recalculateAndEmitStats() {
     for (int i = 0; i < m_model->rowCount(); ++i) {
         QStandardItem* nameItem = m_model->item(i, 0);
         if (!nameItem) continue;
-        int rating = nameItem->data(RatingRole).toInt();
-        QString type = nameItem->data(TypeRole).toString();
-        QStringList tags = nameItem->data(TagsRole).toStringList();
+        int rating = nameItem->data((int)ArcMetaRole::RatingRole).toInt();
+        QString type = nameItem->data((int)ArcMetaRole::TypeRole).toString();
+        QStringList tags = nameItem->data((int)ArcMetaRole::TagsRole).toStringList();
         
         stats.ratingCounts[rating]++;
 
         // 2026-06-xx 物理占比统计：遍历所有色板颜色，而不仅仅是主色调
-        QVariant palVar = nameItem->data(PalettesRole);
-        QString dominantColor = nameItem->data(ColorRole).toString();
+        QVariant palVar = nameItem->data((int)ArcMetaRole::PalettesRole);
+        QString dominantColor = nameItem->data((int)ArcMetaRole::ColorRole).toString();
         
         if (palVar.isValid()) {
             QVariantList pal = palVar.toList();
@@ -2340,7 +2348,7 @@ void ContentPanel::recalculateAndEmitStats() {
         if (type == "folder") {
             stats.typeCounts["folder"]++;
         } else {
-            QString path = nameItem->data(PathRole).toString();
+            QString path = nameItem->data((int)ArcMetaRole::PathRole).toString();
             stats.typeCounts[QFileInfo(path).suffix().toUpper()]++;
         }
         
@@ -2349,7 +2357,7 @@ void ContentPanel::recalculateAndEmitStats() {
         }
         if (tags.isEmpty()) stats.noTagCount++;
         
-        QString path = nameItem->data(PathRole).toString();
+        QString path = nameItem->data((int)ArcMetaRole::PathRole).toString();
         QFileInfo info(path);
         if (info.exists()) {
             QDate cdate = info.birthTime().date();
