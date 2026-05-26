@@ -363,3 +363,250 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
 - 变更原因：放宽网格视图的编辑触发器，全面支持双击重命名等标准交互。
 - 影响范围：`ContentPanel::initGridView` 配置。
 - 是否在需求范围内：是
+
+---
+## [13] 变更时间：2026-05-26 15:28:04
+
+**文件路径：** `src/ui/FilterPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void InlineHueSlider::setHue(int h) {
+    m_h = qBound(0, h, 359);
+    update();
+}
+
+void InlineHueSlider::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    int margin = 10;
+    int barHeight = 12;
+    int barY = (height() - barHeight) / 2;
+    QRectF barRect(margin, barY, width() - 2 * margin, barHeight);
+
+    QLinearGradient grad(barRect.left(), 0, barRect.right(), 0);
+    // 2026-06-xx 按照代码审查建议：将饱和度和明度设为 220，与实际选色逻辑保持一致
+    grad.setColorAt(0.0/6.0, QColor::fromHsv(0, 220, 220));
+    grad.setColorAt(1.0/6.0, QColor::fromHsv(60, 220, 220));
+    grad.setColorAt(2.0/6.0, QColor::fromHsv(120, 220, 220));
+    grad.setColorAt(3.0/6.0, QColor::fromHsv(180, 220, 220));
+    grad.setColorAt(4.0/6.0, QColor::fromHsv(240, 220, 220));
+    grad.setColorAt(5.0/6.0, QColor::fromHsv(300, 220, 220));
+    grad.setColorAt(6.0/6.0, QColor::fromHsv(359, 220, 220));
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(grad);
+    painter.drawRoundedRect(barRect, 6, 6);
+
+    // Thumb: 16px white circle, 1px dark border
+    double ratio = m_h / 359.0;
+    int tx = margin + ratio * barRect.width();
+    int ty = height() / 2;
+
+    painter.setBrush(Qt::white);
+    painter.setPen(QPen(QColor(50, 50, 50), 1));
+    painter.drawEllipse(QPoint(tx, ty), 8, 8);
+}
+```
+
+### 修改后（After）
+```cpp
+void InlineHueSlider::setHue(int h) {
+    m_h = h;
+    update();
+}
+
+void InlineHueSlider::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    int margin = 10;
+    int bwgWidth = 42; // 黑白灰区域总宽
+    int gap = 6;
+    int barHeight = 12;
+    int barY = (height() - barHeight) / 2;
+
+    // 1. 绘制黑白灰特殊色块 (3个 14px 宽度的色块)
+    QRectF blackRect(margin, barY, 14, barHeight);
+    QRectF grayRect(margin + 14, barY, 14, barHeight);
+    QRectF whiteRect(margin + 28, barY, 14, barHeight);
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(Qt::black);
+    painter.drawRect(blackRect);
+    painter.setBrush(QColor("#808080"));
+    painter.drawRect(grayRect);
+    painter.setBrush(Qt::white);
+    painter.drawRect(whiteRect);
+
+    // 给无色系区域加一个极细的边框，防止白色溢出
+    painter.setPen(QPen(QColor(80, 80, 80, 100), 1));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(margin, barY, bwgWidth, barHeight);
+
+    // 2. 绘制色相渐变区
+    int hueStartX = margin + bwgWidth + gap;
+    int hueWidth = width() - hueStartX - margin;
+    if (hueWidth > 0) {
+        QRectF hueRect(hueStartX, barY, hueWidth, barHeight);
+        QLinearGradient grad(hueRect.left(), 0, hueRect.right(), 0);
+        grad.setColorAt(0.0/6.0, QColor::fromHsv(0, 220, 220));
+        grad.setColorAt(1.0/6.0, QColor::fromHsv(60, 220, 220));
+        grad.setColorAt(2.0/6.0, QColor::fromHsv(120, 220, 220));
+        grad.setColorAt(3.0/6.0, QColor::fromHsv(180, 220, 220));
+        grad.setColorAt(4.0/6.0, QColor::fromHsv(240, 220, 220));
+        grad.setColorAt(5.0/6.0, QColor::fromHsv(300, 220, 220));
+        grad.setColorAt(6.0/6.0, QColor::fromHsv(359, 220, 220));
+
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(grad);
+        painter.drawRoundedRect(hueRect, 2, 2);
+    }
+
+    // 3. 绘制游标 (Thumb)
+    int tx = 0;
+    if (m_h == 1000) tx = blackRect.center().x();
+    else if (m_h == 1001) tx = grayRect.center().x();
+    else if (m_h == 1002) tx = whiteRect.center().x();
+    else {
+        double ratio = qBound(0, m_h, 359) / 359.0;
+        tx = hueStartX + ratio * hueWidth;
+    }
+
+    painter.setBrush(Qt::white);
+    painter.setPen(QPen(QColor(50, 50, 50), 1));
+    painter.drawEllipse(QPoint(tx, height() / 2), 8, 8);
+}
+```
+
+### 变更说明
+- 变更原因：补全颜色滑块缺失的黑白灰筛选功能。在色相条左侧增加独立色块并重构坐标映射。
+- 影响范围：`InlineHueSlider`。
+- 是否在需求范围内：是
+
+---
+## [14] 变更时间：2026-05-26 15:28:04
+
+**文件路径：** `src/ui/FilterPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+        connect(hueSlider, &InlineHueSlider::sliderReleased, this, [this, hueSlider]() {
+            int h = hueSlider->hue();
+            if (h == 0) {
+                // 清除
+                if (!m_hueSliderColor.isEmpty()) {
+                    m_filter.colors.removeAll(m_hueSliderColor);
+                    m_hueSliderColor.clear();
+                    emit filterChanged(m_filter);
+                    rebuildGroups();
+                }
+            } else {
+                QColor c = QColor::fromHsv(h, 220, 220);
+                QString hex = c.name().toUpper();
+                if (!m_hueSliderColor.isEmpty()) {
+                    m_filter.colors.removeAll(m_hueSliderColor);
+                }
+                m_hueSliderColor = hex;
+                if (!m_filter.colors.contains(hex)) {
+                    m_filter.colors.append(hex);
+                }
+                m_filter.colorTolerance = 40;
+                emit filterChanged(m_filter);
+                rebuildGroups();
+            }
+        });
+```
+
+### 修改后（After）
+```cpp
+        connect(hueSlider, &InlineHueSlider::sliderReleased, this, [this, hueSlider]() {
+            int h = hueSlider->hue();
+            QColor c;
+            if (h == 1000) c = Qt::black;
+            else if (h == 1001) c = QColor("#808080");
+            else if (h == 1002) c = Qt::white;
+            else c = QColor::fromHsv(h, 220, 220);
+
+            QString hex = c.name().toUpper();
+            if (!m_hueSliderColor.isEmpty()) {
+                m_filter.colors.removeAll(m_hueSliderColor);
+            }
+            m_hueSliderColor = hex;
+            if (!m_filter.colors.contains(hex)) {
+                m_filter.colors.append(hex);
+            }
+            // 2026-06-xx 按照要求：滑块触发时默认给予 30 容差
+            m_filter.colorTolerance = 30;
+            emit filterChanged(m_filter);
+            rebuildGroups();
+        });
+```
+
+### 变更说明
+- 变更原因：适配黑白灰锚点值映射，并同步滑块筛选时的容差标准。
+- 影响范围：`FilterPanel::rebuildGroups`。
+- 是否在需求范围内：是
+
+---
+## [15] 变更时间：2026-05-26 15:28:04
+
+**文件路径：** `src/ui/ThumbnailDelegate.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+        painter->drawRoundedRect(extRect, 2, 2);
+        painter->setPen(QColor("#FFFFFF"));
+        QFont extFont = painter->font(); extFont.setPointSize(8); extFont.setBold(true);
+```
+
+### 修改后（After）
+```cpp
+        painter->drawRoundedRect(extRect, 2, 2);
+        painter->setPen(hasThumb ? QColor("#FFFFFF") : QColor(255, 255, 255, 180));
+        QFont extFont = painter->font(); extFont.setPointSize(8); extFont.setBold(true);
+```
+
+### 变更说明
+- 变更原因：优化占位模式下的视觉体验。将无缩略图项的文件名/角标进行适度半透明处理，减少筛选时的视觉跳跃感。
+- 影响范围：`ThumbnailDelegate::paint`。
+- 是否在需求范围内：是
+
+---
+## [16] 变更时间：2026-05-26 15:28:04
+
+**文件路径：** `src/ui/ContentPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+        QMetaObject::invokeMethod(qApp, [panelPtr, path, allItems]() {
+            if (panelPtr && panelPtr->m_currentPath == path) {
+                panelPtr->m_model->setRecords(allItems);
+                panelPtr->m_isLoading = false;
+                panelPtr->recalculateAndEmitStats();
+            }
+        }, Qt::QueuedConnection);
+```
+
+### 修改后（After）
+```cpp
+        QMetaObject::invokeMethod(qApp, [panelPtr, path, allItems]() {
+            if (panelPtr && panelPtr->m_currentPath == path) {
+                panelPtr->m_model->setRecords(allItems);
+                panelPtr->m_isLoading = false;
+                panelPtr->recalculateAndEmitStats();
+                // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
+                panelPtr->applyFilters();
+            }
+        }, Qt::QueuedConnection);
+```
+
+### 变更说明
+- 变更原因：物理修复数据加载后的高级筛选同步问题。确保新加载的项目立即遵循当前过滤规则，防止渲染出不该出现的占位项。
+- 影响范围：`ContentPanel::loadDirectory`。
+- 是否在需求范围内：是

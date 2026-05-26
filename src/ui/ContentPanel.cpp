@@ -1562,6 +1562,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
+                // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
+                panelPtr->applyFilters();
             } 
         }, Qt::QueuedConnection); 
     }); 
@@ -1581,6 +1583,8 @@ void ContentPanel::search(const QString& query) {
     m_model->setRecords(records);
     m_isLoading = false;
     recalculateAndEmitStats();
+    // 2026-06-xx 物理同步：搜索结果加载后同步应用高级筛选
+    applyFilters();
 } 
  
 void ContentPanel::applyFilters(const FilterState& state) { 
