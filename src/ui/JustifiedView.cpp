@@ -93,8 +93,12 @@ void JustifiedView::rowsInserted(const QModelIndex& parent, int start, int end) 
 }
 
 void JustifiedView::rowsAboutToBeRemoved(const QModelIndex& parent, int start, int end) {
-    doLayout();
     QAbstractItemView::rowsAboutToBeRemoved(parent, start, end);
+}
+
+void JustifiedView::rowsRemoved(const QModelIndex& parent, int start, int end) {
+    doLayout();
+    QAbstractItemView::rowsRemoved(parent, start, end);
 }
 
 QModelIndex JustifiedView::moveCursor(CursorAction cursorAction, Qt::KeyboardModifiers) {
