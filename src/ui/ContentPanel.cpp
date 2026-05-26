@@ -2035,10 +2035,18 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
  
     // 4. 评级星级 
     int rating = index.data(RatingRole).toInt(); 
+    bool isManaged = index.data(InDatabaseRole).toBool();
     bool isHoveringThis = (m_hoverIndex == index);
-    bool shouldShowRatingArea = (rating > 0) || isSelected || isHoveringThis;
+    bool isInteractive = isSelected || isHoveringThis;
+    // 2026-06-18 纠正逻辑：已录入项目（isManaged）即便未选中/未打分，也应始终显示评级占位区
+    bool shouldShowRatingArea = (rating > 0) || isInteractive || isManaged;
 
     if (shouldShowRatingArea) {
+        // 工业级交互规范：
+        // 1. 如果是交互状态 (Hover/Selected) 或者项目未打分 (Rating == 0)，显示完整 5 星位 + 禁止符。
+        // 2. 如果项目已打分 (Rating > 0) 且处于非交互状态，隐藏禁止符和空心星，胶囊背景动态收缩。
+        bool showFullInfo = isInteractive || (rating == 0);
+
         // 物理锁定：评级辅助图标使用中性灰色，严禁脑补红色
         QColor baseColor = QColor("#CCCCCC");
         QColor starColor = colorName.isEmpty() ? baseColor : UiHelper::parseColorName(colorName).darker(700);
@@ -2047,8 +2055,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), starColor); 
         QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor); 
 
-        // 2026-06-xx 逻辑重构：彩色胶囊背景由 colorName 独立驱动，不与星级耦合
-        // 2026-06-18 按照最新要求：胶囊宽度应根据当前显示的图标数量动态调整，避免右侧留白
+        // 2026-06-xx 逻辑重构：彩色胶囊背景宽度动态调整
         if (!colorName.isEmpty()) {
             QColor bgColor = UiHelper::parseColorName(colorName);
             if (bgColor.isValid()) {
@@ -2056,13 +2063,9 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
                 painter->setBrush(bgColor);
                 painter->setPen(Qt::NoPen);
 
-                int displayCount = 5;
-                bool showBan = (isSelected || isHoveringThis || rating == 0);
-                // 工业级排版：只有在非交互状态（未选中且未悬停）下且已打分时，才执行“隐藏多余空星”逻辑
-                if (!isSelected && !isHoveringThis && rating > 0) displayCount = rating;
-
+                int displayCount = showFullInfo ? 5 : rating;
                 QRect lastShownStarRect(m.starsStartX + (displayCount - 1) * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
-                QRect firstRect = showBan ? m.banRect : QRect(m.starsStartX, m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
+                QRect firstRect = showFullInfo ? m.banRect : QRect(m.starsStartX, m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
                 QRect totalRect = firstRect.united(lastShownStarRect);
                 painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
                 painter->restore();
@@ -2070,15 +2073,13 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         }
 
         // 物理绘制禁止符：仅在交互状态下或未打分时显示
-        if (isSelected || isHoveringThis || rating == 0) {
+        if (showFullInfo) {
             UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect);
         }
 
-        for (int i = 0; i < 5; ++i) { 
+        int displayCount = showFullInfo ? 5 : rating;
+        for (int i = 0; i < displayCount; ++i) {
             int level = i + 1;
-            // 工业级排版：只有在非交互状态下且已打分时，才执行“隐藏多余空星”逻辑
-            if (!isSelected && !isHoveringThis && rating > 0 && level > rating) break;
-
             bool fill = (level <= rating);
             if (isHoveringThis && m_hoverStar >= level) fill = true;
 
@@ -2162,10 +2163,16 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
         m_hoverStar = -1;
         m_hoverIndex = QPersistentModelIndex(index);
 
-        if (m.banRect.contains(mEvent->pos())) {
+        int rating = index.data(RatingRole).toInt();
+        bool isSelected = (option.state & QStyle::State_Selected);
+        bool isInteractive = isSelected || (m_hoverIndex == index);
+        bool showFullInfo = isInteractive || (rating == 0);
+
+        if (showFullInfo && m.banRect.contains(mEvent->pos())) {
             m_hoverStar = 0;
         } else {
-            for (int i = 0; i < 5; ++i) {
+            int displayCount = showFullInfo ? 5 : rating;
+            for (int i = 0; i < displayCount; ++i) {
                 QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
                 if (starRect.contains(mEvent->pos())) {
                     m_hoverStar = i + 1;
