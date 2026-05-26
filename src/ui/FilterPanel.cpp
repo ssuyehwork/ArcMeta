@@ -423,10 +423,10 @@ void FilterPanel::rebuildGroups() {
                     QColor c2 = UiHelper::parseColorName(it.key());
                     if (c2.isValid()) {
                         long rmean = (dotC.red() + c2.red()) / 2;
-                        long r = dotC.red() - c2.red();
-                        long g = dotC.green() - c2.green();
-                        long b = dotC.blue() - c2.blue();
-                        long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
+                        long dr = dotC.red() - c2.red();
+                        long dg = dotC.green() - c2.green();
+                        long db = dotC.blue() - c2.blue();
+                        long distSq = (((512 + rmean)*dr*dr) >> 8) + 4*dg*dg + (((767-rmean)*db*db) >> 8);
                         // 2026-06-xx 按照内核标准：容差 30 对应 15000 平方欧氏距离
                         if (distSq < 15000) simCount += it.value();
                     }

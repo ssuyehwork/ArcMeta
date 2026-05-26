@@ -610,3 +610,32 @@ void InlineHueSlider::paintEvent(QPaintEvent*) {
 - 变更原因：物理修复数据加载后的高级筛选同步问题。确保新加载的项目立即遵循当前过滤规则，防止渲染出不该出现的占位项。
 - 影响范围：`ContentPanel::loadDirectory`。
 - 是否在需求范围内：是
+
+---
+## [17] 变更时间：2026-05-26 15:37:02
+
+**文件路径：** `src/ui/FilterPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+                        long rmean = (dotC.red() + c2.red()) / 2;
+                        long r = dotC.red() - c2.red();
+                        long g = dotC.green() - c2.green();
+                        long b = dotC.blue() - c2.blue();
+                        long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
+```
+
+### 修改后（After）
+```cpp
+                        long rmean = (dotC.red() + c2.red()) / 2;
+                        long dr = dotC.red() - c2.red();
+                        long dg = dotC.green() - c2.green();
+                        long db = dotC.blue() - c2.blue();
+                        long distSq = (((512 + rmean)*dr*dr) >> 8) + 4*dg*dg + (((767-rmean)*db*db) >> 8);
+```
+
+### 变更说明
+- 变更原因：修复变量命名冲突警告（C4456）。在循环内部使用更具辨识度的变量名（dr, dg, db）替换原有的 (r, g, b)，避免隐藏外部作用域的同名变量。
+- 影响范围：`FilterPanel::rebuildGroups` 中的相近色统计逻辑。
+- 是否在需求范围内：是
