@@ -126,10 +126,9 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     painter->restore();
 
     // [新增] 状态位图标绘制 (置顶 vs. 已录入 互斥)
-    bool isManaged = false;
     if (m_pinnedRole != -1 && m_managedRole != -1) {
         bool isPinned = index.data(m_pinnedRole).toBool();
-        isManaged = index.data(m_managedRole).toBool();
+        bool isManaged = index.data(m_managedRole).toBool();
         if (isPinned || isManaged) {
             QRect statusRect(m.cardRect.right() - 22, m.cardRect.top() + 8, 16, 16);
             if (isPinned) {
@@ -162,35 +161,28 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         int rating = index.data(m_ratingRole).toInt();
         QString colorStr = (m_colorRole != -1) ? index.data(m_colorRole).toString() : "";
         
-        // 2026-06-xx 逻辑还原：彩色胶囊背景独立于星级显示
+        // 2026-06-xx 逻辑重构：彩色胶囊背景独立于星级显示
         if (!colorStr.isEmpty()) {
             QColor bgColor = UiHelper::parseColorName(colorStr);
             if (bgColor.isValid()) {
                 painter->save();
                 painter->setBrush(bgColor);
                 painter->setPen(Qt::NoPen);
-                // 彻底还原：胶囊始终为 6 图标固定宽度
-                QRect lastStarRect = m.starRect(4);
-                QRect totalRect = m.banRect.united(lastStarRect);
+                QRect totalRect = m.banRect.united(m.starRect(4));
                 painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
                 painter->restore();
             }
         }
 
-        // 2026-xx-xx 按照原版逻辑彻底还原
-        bool shouldShowRating = (rating > 0) || isSelected || isManaged;
-
+        bool shouldShowRating = (rating > 0) || isSelected;
         if (shouldShowRating) {
-            // 物理锁定：评级辅助图标使用中性灰色，严禁脑补红色
-            QColor baseColor = QColor("#CCCCCC");
-            QColor starColor = colorStr.isEmpty() ? QColor("#EF9F27") : UiHelper::parseColorName(colorStr).darker(700);
-            QColor emptyStarColor = QColor("#CCCCCC");
-            
-            UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect);
+            QColor starColor = colorStr.isEmpty() ? QColor("#CCCCCC") : UiHelper::parseColorName(colorStr).darker(700);
+            QColor emptyStarColor = colorStr.isEmpty() ? QColor("#888888") : UiHelper::parseColorName(colorStr).darker(400);
+            if (!colorStr.isEmpty()) emptyStarColor.setAlpha(180);
 
+            UiHelper::getIcon("no_color", starColor, m.banRect.width()).paint(painter, m.banRect);
             QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(m.starSize, m.starSize), starColor);
             QPixmap emptyStar = UiHelper::getPixmap("star", QSize(m.starSize, m.starSize), emptyStarColor);
-            
             for (int i = 0; i < 5; ++i) {
                 painter->drawPixmap(m.starRect(i), (i < rating) ? filledStar : emptyStar);
             }
@@ -300,25 +292,26 @@ bool ThumbnailDelegate::eventFilter(QObject* obj, QEvent* event) {
 } 
 
 bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) {
-    if (m_ratingRole == -1) return QStyledItemDelegate::editorEvent(event, model, option, index);
-
-    if (event->type() == QEvent::MouseButtonPress) {
-        QMouseEvent* mEvent = static_cast<QMouseEvent*>(event);
+    if (m_ratingRole != -1 && event->type() == QEvent::MouseButtonPress) {
+        QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event);
         if (mEvent->button() == Qt::LeftButton) {
             Metrics m = calculateMetrics(option);
+
             if (m.banRect.contains(mEvent->pos())) {
                 model->setData(index, 0, m_ratingRole);
+                event->accept();
                 return true;
             }
+
             for (int i = 0; i < 5; ++i) {
                 if (m.starRect(i).contains(mEvent->pos())) {
                     model->setData(index, i + 1, m_ratingRole);
+                    event->accept();
                     return true;
                 }
             }
         }
     }
-
     return QStyledItemDelegate::editorEvent(event, model, option, index);
 }
 
