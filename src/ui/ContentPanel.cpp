@@ -114,7 +114,15 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
 
     if (role == Qt::DisplayRole || role == Qt::EditRole) {
         switch (index.column()) {
-            case 0: return QFileInfo(path).fileName();
+            case 0: {
+                QFileInfo info(path);
+                QString name = info.fileName();
+                // 如果文件名为空且为根目录（磁盘），则返回完整路径作为显示名
+                if (name.isEmpty() && info.isRoot()) {
+                    return QDir::toNativeSeparators(info.absoluteFilePath());
+                }
+                return name;
+            }
             case 4: {
                 return getCachedMeta(path).tags.join(", ");
             }
