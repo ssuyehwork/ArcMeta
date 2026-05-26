@@ -2154,11 +2154,6 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
         m_hoverStar = -1;
         m_hoverIndex = QPersistentModelIndex(index);
 
-        int rating = index.data(RatingRole).toInt();
-        bool isSelected = (option.state & QStyle::State_Selected);
-        bool isInteractive = isSelected || (m_hoverIndex == index);
-        bool showFullInfo = isInteractive || (rating == 0);
-
         if (m.banRect.contains(mEvent->pos())) {
             m_hoverStar = 0;
         } else {
