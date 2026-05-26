@@ -93,12 +93,10 @@ void JustifiedView::rowsInserted(const QModelIndex& parent, int start, int end) 
 }
 
 void JustifiedView::rowsAboutToBeRemoved(const QModelIndex& parent, int start, int end) {
+    // 2026-06-xx 物理修复：在行即将被删除时，利用 singleShot(0) 将布局任务推迟到删除完成后。
+    // 这解决了在 rowsAboutToBeRemoved 中 rowCount() 依然包含待删除行，导致出现“幽灵卡片”的问题。
+    QTimer::singleShot(0, this, [this]() { doLayout(); });
     QAbstractItemView::rowsAboutToBeRemoved(parent, start, end);
-}
-
-void JustifiedView::rowsRemoved(const QModelIndex& parent, int start, int end) {
-    doLayout();
-    QAbstractItemView::rowsRemoved(parent, start, end);
 }
 
 QModelIndex JustifiedView::moveCursor(CursorAction cursorAction, Qt::KeyboardModifiers) {
