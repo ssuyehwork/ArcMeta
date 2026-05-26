@@ -386,6 +386,10 @@ public:
     void setEditorData(QWidget* editor, const QModelIndex& index) const override;
     void setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const override;
     void updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
+
+private:
+    mutable QPersistentModelIndex m_hoverIndex;
+    mutable int m_hoverStar = -1; // -1: 无, 0: 禁止符, 1-5: 星级
 };
 
 } // namespace ArcMeta

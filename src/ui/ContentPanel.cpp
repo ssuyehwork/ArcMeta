@@ -2035,45 +2035,57 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
  
     // 4. 评级星级 
     int rating = index.data(RatingRole).toInt(); 
-     
-    // 2026-06-xx 逻辑重构：彩色胶囊背景由 colorName 独立驱动，不与星级耦合
-    if (!colorName.isEmpty()) {
-        QColor bgColor = UiHelper::parseColorName(colorName);
-        if (bgColor.isValid()) {
-            painter->save();
-            painter->setBrush(bgColor);
-            painter->setPen(Qt::NoPen);
-            // 即使星级为0，也应根据占位计算胶囊区域并绘制
-            QRect lastStarRect(m.starsStartX + 4 * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
-            QRect totalRect = m.banRect.united(lastStarRect);
-            painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
-            painter->restore();
-        }
-    }
+    bool isHoveringThis = (m_hoverIndex == index);
+    bool shouldShowRatingArea = (rating > 0) || isSelected || isHoveringThis;
 
-    // 2026-xx-xx 按照最新要求： 
-    // 1. 如果已有打分 (rating > 0)，始终显示。 
-    // 2. 如果未打分但被选中，显示禁止图标和空心星。 
-    // 3. 如果未打分且未选中，不显示。 
-    bool shouldShowRating = (rating > 0) || isSelected; 
- 
-    if (shouldShowRating) { 
+    if (shouldShowRatingArea) {
         // 物理锁定：评级辅助图标使用中性灰色，严禁脑补红色
         QColor baseColor = QColor("#CCCCCC");
         QColor starColor = colorName.isEmpty() ? baseColor : UiHelper::parseColorName(colorName).darker(700);
         QColor emptyStarColor = QColor("#CCCCCC");
 
-        // 物理修复：移除禁止符的任何高亮逻辑，强制对齐中性灰色
-        UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect);
- 
         QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), starColor); 
         QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor); 
- 
+
+        // 2026-06-xx 逻辑重构：彩色胶囊背景由 colorName 独立驱动，不与星级耦合
+        // 2026-06-18 按照最新要求：胶囊宽度应根据当前显示的图标数量动态调整，避免右侧留白
+        if (!colorName.isEmpty()) {
+            QColor bgColor = UiHelper::parseColorName(colorName);
+            if (bgColor.isValid()) {
+                painter->save();
+                painter->setBrush(bgColor);
+                painter->setPen(Qt::NoPen);
+
+                int displayCount = 5;
+                bool showBan = (isSelected || isHoveringThis || rating == 0);
+                // 工业级排版：只有在非交互状态（未选中且未悬停）下且已打分时，才执行“隐藏多余空星”逻辑
+                if (!isSelected && !isHoveringThis && rating > 0) displayCount = rating;
+
+                QRect lastShownStarRect(m.starsStartX + (displayCount - 1) * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
+                QRect firstRect = showBan ? m.banRect : QRect(m.starsStartX, m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
+                QRect totalRect = firstRect.united(lastShownStarRect);
+                painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
+                painter->restore();
+            }
+        }
+
+        // 物理绘制禁止符：仅在交互状态下或未打分时显示
+        if (isSelected || isHoveringThis || rating == 0) {
+            UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect);
+        }
+
         for (int i = 0; i < 5; ++i) { 
+            int level = i + 1;
+            // 工业级排版：只有在非交互状态下且已打分时，才执行“隐藏多余空星”逻辑
+            if (!isSelected && !isHoveringThis && rating > 0 && level > rating) break;
+
+            bool fill = (level <= rating);
+            if (isHoveringThis && m_hoverStar >= level) fill = true;
+
             QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
-            painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar); 
+            painter->drawPixmap(starRect, fill ? filledStar : emptyStar);
         } 
-    } 
+    }
      
     // [名称区绘制] - 在正方形下方 
     bool isEmptyFolder = (index.data(TypeRole).toString() == "folder" && index.data(IsEmptyRole).toBool()); 
@@ -2142,55 +2154,56 @@ bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) {
 } 
  
 bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) { 
-    if (event->type() == QEvent::MouseButtonPress) { 
-        // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 子类转型歧义 
-        QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event); 
-        if (mEvent->button() == Qt::LeftButton) { 
-            // 2026-05-28 按照用户授权：废除本地硬编码判定，统一使用 calculateMetrics 保证 Hitbox 零偏差 
-            GridMetrics m = calculateMetrics(option); 
-            QString path = index.data(PathRole).toString(); 
- 
-            if (m.banRect.contains(mEvent->pos())) { 
-                if (!path.isEmpty()) { 
-                    MetadataManager::instance().setRating(path.toStdWString(), 0); 
-                    model->setData(index, 0, RatingRole); 
-                } 
-                // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器，防止清除星级时错误触发行内编辑
-                auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
-                if (view) {
-                    QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
-                    view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-                    QTimer::singleShot(0, [view, originalTriggers]() {
-                        view->setEditTriggers(originalTriggers);
-                    });
-                }
-                event->accept(); 
-                return true; 
-            } 
- 
-            for (int i = 0; i < 5; ++i) { 
+    // 2026-06-xx 工业级交互：实时追踪星级悬停状态
+    if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress) {
+        QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event);
+        GridMetrics m = calculateMetrics(option);
+        int oldHover = m_hoverStar;
+        m_hoverStar = -1;
+        m_hoverIndex = QPersistentModelIndex(index);
+
+        if (m.banRect.contains(mEvent->pos())) {
+            m_hoverStar = 0;
+        } else {
+            for (int i = 0; i < 5; ++i) {
                 QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
-                if (starRect.contains(mEvent->pos())) { 
-                    int r = i + 1; 
-                    if (!path.isEmpty()) { 
-                        MetadataManager::instance().setRating(path.toStdWString(), r); 
-                        model->setData(index, r, RatingRole); 
-                    } 
-                    // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器，防止星级点击时错误触发行内编辑
-                    auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
-                    if (view) {
-                        QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
-                        view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-                        QTimer::singleShot(0, [view, originalTriggers]() {
-                            view->setEditTriggers(originalTriggers);
-                        });
-                    }
-                    event->accept(); 
-                    return true; 
-                } 
-            } 
-        } 
-    } 
+                if (starRect.contains(mEvent->pos())) {
+                    m_hoverStar = i + 1;
+                    break;
+                }
+            }
+        }
+
+        // 如果鼠标点击，执行持久化
+        if (event->type() == QEvent::MouseButtonPress && mEvent->button() == Qt::LeftButton && m_hoverStar != -1) {
+            QString path = index.data(PathRole).toString();
+            if (!path.isEmpty()) {
+                MetadataManager::instance().setRating(path.toStdWString(), m_hoverStar);
+                model->setData(index, m_hoverStar, RatingRole);
+            }
+            // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器
+            auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
+            if (view) {
+                QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
+                view->setEditTriggers(QAbstractItemView::NoEditTriggers);
+                QTimer::singleShot(0, [view, originalTriggers]() {
+                    view->setEditTriggers(originalTriggers);
+                });
+            }
+            event->accept();
+            return true;
+        }
+
+        // 状态变更时强制触发重绘
+        if (oldHover != m_hoverStar) {
+            const_cast<QWidget*>(option.widget)->update();
+        }
+    } else if (event->type() == QEvent::Leave) {
+        m_hoverStar = -1;
+        m_hoverIndex = QModelIndex();
+        const_cast<QWidget*>(option.widget)->update();
+    }
+
     return QStyledItemDelegate::editorEvent(event, model, option, index); 
 } 
  

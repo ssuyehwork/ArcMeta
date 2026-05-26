@@ -25,6 +25,7 @@
 #include <QProcess>
 #include <QUuid>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileIconProvider>
 #include <algorithm>

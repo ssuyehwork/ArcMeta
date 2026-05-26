@@ -161,36 +161,50 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         int rating = index.data(m_ratingRole).toInt();
         QString colorStr = (m_colorRole != -1) ? index.data(m_colorRole).toString() : "";
         
-        // 2026-06-xx 逻辑重构：彩色胶囊背景独立于星级显示
-        if (!colorStr.isEmpty()) {
-            QColor bgColor = UiHelper::parseColorName(colorStr);
-            if (bgColor.isValid()) {
-                painter->save();
-                painter->setBrush(bgColor);
-                painter->setPen(Qt::NoPen);
-                QRect totalRect = m.banRect.united(m.starRect(4));
-                painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
-                painter->restore();
-            }
-        }
-
         bool isHoveringThis = (m_hoverIndex == index);
-        bool shouldShowRating = (rating > 0) || isSelected;
-        if (shouldShowRating) {
-            // 物理锁定：评级区辅助图标（禁止符、空心星）始终使用低调的中性灰色，严禁脑补红色高亮
+        bool shouldShowRatingArea = (rating > 0) || isSelected || isHoveringThis;
+
+        if (shouldShowRatingArea) {
+            // 物理锁定：评级辅助图标使用中性灰色，严禁脑补红色
             QColor baseColor = QColor("#CCCCCC");
             QColor starColor = colorStr.isEmpty() ? baseColor : UiHelper::parseColorName(colorStr).darker(700);
             QColor emptyStarColor = QColor("#CCCCCC");
 
-            // 物理修复：移除禁止符的红色高亮，使用修正后的 m.banRect 访问 Metrics 成员
-            UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect);
-
             QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(m.starSize, m.starSize), starColor);
             QPixmap emptyStar = UiHelper::getPixmap("star", QSize(m.starSize, m.starSize), emptyStarColor);
 
-            // 工业级高亮：如果正在悬停且已经处于显示状态，则显示“预测填充”状态
+            // 2026-06-xx 逻辑重构：彩色胶囊背景独立于星级显示
+            // 2026-06-18 按照最新要求：胶囊宽度应根据当前显示的图标数量动态调整，避免右侧留白
+            if (!colorStr.isEmpty()) {
+                QColor bgColor = UiHelper::parseColorName(colorStr);
+                if (bgColor.isValid()) {
+                    painter->save();
+                    painter->setBrush(bgColor);
+                    painter->setPen(Qt::NoPen);
+
+                    int displayCount = 5;
+                    bool showBan = (isSelected || isHoveringThis || rating == 0);
+                    // 工业级排版：只有在非交互状态（未选中且未悬停）下且已打分时，才执行“隐藏多余空星”逻辑
+                    if (!isSelected && !isHoveringThis && rating > 0) displayCount = rating;
+
+                    QRect lastShownStarRect = m.starRect(displayCount - 1);
+                    QRect firstRect = showBan ? m.banRect : m.starRect(0);
+                    QRect totalRect = firstRect.united(lastShownStarRect);
+                    painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
+                    painter->restore();
+                }
+            }
+
+            // 物理绘制禁止符：仅在交互状态下或未打分时显示
+            if (isSelected || isHoveringThis || rating == 0) {
+                UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect);
+            }
+
             for (int i = 0; i < 5; ++i) {
                 int level = i + 1;
+                // 工业级排版：只有在非交互状态下且已打分时，才执行“隐藏多余空星”逻辑
+                if (!isSelected && !isHoveringThis && rating > 0 && level > rating) break;
+
                 bool fill = (level <= rating);
                 if (isHoveringThis && m_hoverStar >= level) fill = true;
 
