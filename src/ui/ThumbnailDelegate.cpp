@@ -175,12 +175,12 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         }
 
         bool isHoveringThis = (m_hoverIndex == index);
-        bool shouldShowRating = (rating > 0) || isSelected || isHoveringThis;
+        bool shouldShowRating = (rating > 0) || isSelected;
         if (shouldShowRating) {
             // 物理锁定：评级区辅助图标（禁止符、空心星）始终使用低调的中性灰色，严禁脑补红色高亮
             QColor baseColor = QColor("#CCCCCC");
             QColor starColor = colorStr.isEmpty() ? baseColor : UiHelper::parseColorName(colorStr).darker(700);
-            QColor emptyStarColor = QColor("#888888");
+            QColor emptyStarColor = QColor("#CCCCCC");
 
             // 物理修复：移除禁止符的红色高亮，使用修正后的 m.banRect 访问 Metrics 成员
             UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect);
@@ -188,7 +188,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(m.starSize, m.starSize), starColor);
             QPixmap emptyStar = UiHelper::getPixmap("star", QSize(m.starSize, m.starSize), emptyStarColor);
 
-            // 工业级高亮：如果正在悬停，则悬停位置之前的星级均显示为“填充”状态
+            // 工业级高亮：如果正在悬停且已经处于显示状态，则显示“预测填充”状态
             for (int i = 0; i < 5; ++i) {
                 int level = i + 1;
                 bool fill = (level <= rating);

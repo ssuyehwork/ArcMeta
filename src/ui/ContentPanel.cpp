@@ -1662,10 +1662,20 @@ void ContentPanel::search(const QString& query) {
     if (m_imagePreview) m_imagePreview->hide(); 
  
     m_isLoading = true;
-    auto records = ItemRepo::searchRecordsByKeyword(query, m_currentPath);
-    m_model->setRecords(records);
-    m_isLoading = false;
-    recalculateAndEmitStats();
+    QString currentPath = m_currentPath;
+
+    QPointer<ContentPanel> weakThis(this);
+    (void)QtConcurrent::run([weakThis, query, currentPath]() {
+        auto records = ItemRepo::searchRecordsByKeyword(query, currentPath);
+
+        QMetaObject::invokeMethod(qApp, [weakThis, records]() {
+            if (weakThis) {
+                weakThis->m_model->setRecords(records);
+                weakThis->m_isLoading = false;
+                weakThis->recalculateAndEmitStats();
+            }
+        });
+    });
 } 
  
 void ContentPanel::applyFilters(const FilterState& state) { 
@@ -1732,34 +1742,40 @@ void ContentPanel::loadCategory(int categoryId) {
     emit dataSourceChanged("category");
      
     m_model->clear(); 
- 
-    std::vector<ArcMeta::ItemRepo::ItemRecord> allRecords;
 
-    // 1. 加载子分类
-    auto allCategories = CategoryRepo::getAll();
-    for (const auto& cat : allCategories) {
-        if (cat.parentId == categoryId) {
-            ItemRepo::ItemRecord r;
-            r.isCategory = true;
-            r.categoryId = cat.id;
-            allRecords.push_back(r);
+    QPointer<ContentPanel> weakThis(this);
+    (void)QtConcurrent::run([weakThis, categoryId]() {
+        std::vector<ArcMeta::ItemRepo::ItemRecord> allRecords;
+
+        // 1. 加载子分类
+        auto allCategories = CategoryRepo::getAll();
+        for (const auto& cat : allCategories) {
+            if (cat.parentId == categoryId) {
+                ItemRepo::ItemRecord r;
+                r.isCategory = true;
+                r.categoryId = cat.id;
+                allRecords.push_back(r);
+            }
         }
-    }
 
-    // 2. 加载文件
-    auto itemRecords = ItemRepo::getRecordsInCategory(categoryId);
-    allRecords.insert(allRecords.end(), itemRecords.begin(), itemRecords.end());
+        // 2. 加载文件
+        auto itemRecords = ItemRepo::getRecordsInCategory(categoryId);
+        allRecords.insert(allRecords.end(), itemRecords.begin(), itemRecords.end());
 
-    // 工业级预读：对分类下的所有物理路径执行预读
-    QStringList paths;
-    for(const auto& r : itemRecords) paths << r.path;
-    MetadataManager::instance().prefetchPaths(paths);
+        // 工业级预读：对分类下的所有物理路径执行预读
+        QStringList paths;
+        for(const auto& r : itemRecords) paths << r.path;
+        MetadataManager::instance().prefetchPaths(paths);
 
-    m_model->setRecords(allRecords);
-     
-    m_isLoading = false;
-    recalculateAndEmitStats();
-    applyFilters(); 
+        QMetaObject::invokeMethod(qApp, [weakThis, allRecords]() {
+            if (weakThis) {
+                weakThis->m_model->setRecords(allRecords);
+                weakThis->m_isLoading = false;
+                weakThis->recalculateAndEmitStats();
+                weakThis->applyFilters();
+            }
+        });
+    });
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths) { 
@@ -2045,7 +2061,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         // 物理锁定：评级辅助图标使用中性灰色，严禁脑补红色
         QColor baseColor = QColor("#CCCCCC");
         QColor starColor = colorName.isEmpty() ? baseColor : UiHelper::parseColorName(colorName).darker(700);
-        QColor emptyStarColor = QColor("#888888");
+        QColor emptyStarColor = QColor("#CCCCCC");
 
         // 物理修复：移除禁止符的任何高亮逻辑，强制对齐中性灰色
         UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect);
