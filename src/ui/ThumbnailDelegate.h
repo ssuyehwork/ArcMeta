@@ -41,6 +41,7 @@ private:
     mutable int m_hoverStar = -1; // -1: 无, 0: 禁止符, 1-5: 星级
 
     struct Metrics {
+        // [物理红线] 严禁随意调整以下布局常量，确保点击热区与视觉对齐
         QRect cardRect;
         QRect textRect;
         QRect banRect;
@@ -50,6 +51,7 @@ private:
         int ratingY;
         int ratingH;
 
+        // 物理锁定判定：统一绘图与点击热区
         QRect starRect(int index) const {
             return QRect(starsStartX + index * (starSize + starSpacing), 
                          ratingY + (ratingH - starSize) / 2, 

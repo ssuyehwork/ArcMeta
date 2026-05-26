@@ -171,8 +171,20 @@ QRegion JustifiedView::visualRegionForSelection(const QItemSelection& selection)
 
 void JustifiedView::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
+        QModelIndex clicked = indexAt(event->pos());
+        if (clicked.isValid()) {
+            // [关键修复] 物理转发事件至 Delegate
+            QStyleOptionViewItem option;
+            initViewItemOption(&option);
+            option.rect = visualRect(clicked);
+            // 调用 itemDelegateForIndex 确保多 Delegate 兼容性
+            if (itemDelegateForIndex(clicked)->editorEvent(event, model(), option, clicked)) {
+                viewport()->update();
+                return; // Delegate 已处理星级设定，拦截后续选择逻辑
+            }
+        }
+
         if (event->modifiers() & Qt::ShiftModifier) {
-            QModelIndex clicked = indexAt(event->pos());
             if (clicked.isValid() && m_anchorRow >= 0) {
                 // 2026-06-16 工业级修复：基于视觉位置进行流式选择
                 int anchorVisual = -1, clickedVisual = -1;
@@ -197,7 +209,6 @@ void JustifiedView::mousePressEvent(QMouseEvent* event) {
                 return;
             }
         } else if (event->modifiers() & Qt::ControlModifier) {
-            QModelIndex clicked = indexAt(event->pos());
             if (clicked.isValid()) {
                 selectionModel()->select(clicked, QItemSelectionModel::Toggle);
                 m_anchorRow = clicked.row(); // Ctrl+点击重置锚点
@@ -207,7 +218,6 @@ void JustifiedView::mousePressEvent(QMouseEvent* event) {
             viewport()->update();
             return;
         } else {
-            QModelIndex clicked = indexAt(event->pos());
             if (clicked.isValid()) {
                 selectionModel()->select(clicked, QItemSelectionModel::ClearAndSelect);
                 m_anchorRow = clicked.row(); // 普通单击重置锚点

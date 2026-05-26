@@ -183,7 +183,8 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         if (shouldShowRating) {
             // 物理锁定：评级辅助图标使用中性灰色，严禁脑补红色
             QColor baseColor = QColor("#CCCCCC");
-            QColor starColor = colorStr.isEmpty() ? QColor("#EF9F27") : UiHelper::parseColorName(colorStr).darker(700);
+            // 恢复夜色逻辑：严禁使用金色，统一回归中性灰
+            QColor starColor = QColor("#CCCCCC");
             QColor emptyStarColor = QColor("#CCCCCC");
             
             UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect);

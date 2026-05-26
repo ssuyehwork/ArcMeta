@@ -2060,7 +2060,8 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     if (shouldShowRating) { 
         // 物理锁定：评级辅助图标使用中性灰色，严禁脑补红色
         QColor baseColor = QColor("#CCCCCC");
-        QColor starColor = colorName.isEmpty() ? QColor("#EF9F27") : UiHelper::parseColorName(colorName).darker(700);
+        // 恢复夜色逻辑：严禁使用金色，统一回归中性灰
+        QColor starColor = QColor("#CCCCCC");
         QColor emptyStarColor = QColor("#CCCCCC");
 
         UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect); 
@@ -2069,8 +2070,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor); 
  
         for (int i = 0; i < 5; ++i) { 
-            QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
-            painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar); 
+            painter->drawPixmap(m.starRect(i), (i < rating) ? filledStar : emptyStar);
         } 
     } 
      
@@ -2157,8 +2157,7 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
             }
 
             for (int i = 0; i < 5; ++i) {
-                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
-                if (starRect.contains(mEvent->pos())) {
+                if (m.starRect(i).contains(mEvent->pos())) {
                     int r = i + 1;
                     if (!path.isEmpty()) {
                         MetadataManager::instance().setRating(path.toStdWString(), r);

@@ -373,6 +373,13 @@ public:
         int starSpacing;
         int nameY;
         QRect nameRect;
+
+        // 物理锁定判定：统一绘图与点击热区
+        QRect starRect(int index) const {
+            return QRect(starsStartX + index * (starSize + starSpacing),
+                         ratingY + (ratingH - starSize) / 2,
+                         starSize, starSize);
+        }
     };
 
     static GridMetrics calculateMetrics(const QStyleOptionViewItem& option);
