@@ -20,6 +20,7 @@ public:
 
     void reset() override;
     void doItemsLayout() override;
+    void setModel(QAbstractItemModel* model) override;
 
 protected slots:
     void dataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight, const QList<int>& roles = QList<int>()) override;

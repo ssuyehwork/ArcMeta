@@ -25,6 +25,7 @@ JustifiedView::JustifiedView(QWidget* parent) : QAbstractItemView(parent) {
     pal.setColor(QPalette::Window, QColor("#1E1E1E"));
     viewport()->setPalette(pal);
     setPalette(pal);
+
 }
 
 void JustifiedView::setTargetRowHeight(int h) {
@@ -48,6 +49,18 @@ void JustifiedView::reset() {
 
 void JustifiedView::doItemsLayout() {
     doLayout();
+}
+
+void JustifiedView::setModel(QAbstractItemModel* model) {
+    if (this->model()) {
+        disconnect(this->model(), &QAbstractItemModel::rowsRemoved, this, nullptr);
+    }
+    QAbstractItemView::setModel(model);
+    if (model) {
+        connect(model, &QAbstractItemModel::rowsRemoved, this, [this]() {
+            QTimer::singleShot(0, this, [this]() { doLayout(); });
+        });
+    }
 }
 
 QRect JustifiedView::visualRect(const QModelIndex& index) const {
@@ -93,9 +106,7 @@ void JustifiedView::rowsInserted(const QModelIndex& parent, int start, int end) 
 }
 
 void JustifiedView::rowsAboutToBeRemoved(const QModelIndex& parent, int start, int end) {
-    // 2026-06-xx 物理修复：在行即将被删除时，利用 singleShot(0) 将布局任务推迟到删除完成后。
-    // 这解决了在 rowsAboutToBeRemoved 中 rowCount() 依然包含待删除行，导致出现“幽灵卡片”的问题。
-    QTimer::singleShot(0, this, [this]() { doLayout(); });
+    // 直接转发给基类即可，实际重排由 setModel 中连接的 rowsRemoved 信号处理
     QAbstractItemView::rowsAboutToBeRemoved(parent, start, end);
 }
 
