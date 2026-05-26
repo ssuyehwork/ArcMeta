@@ -2035,7 +2035,6 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
  
     // 4. 评级星级 
     int rating = index.data(RatingRole).toInt(); 
-    bool isManaged = index.data(InDatabaseRole).toBool();
     bool isHoveringThis = (m_hoverIndex == index);
     bool isInteractive = isSelected || isHoveringThis;
     // 2026-06-18 纠正逻辑：已录入项目（isManaged）即便未选中/未打分，也应始终显示评级占位区

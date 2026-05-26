@@ -126,9 +126,10 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     painter->restore();
 
     // [新增] 状态位图标绘制 (置顶 vs. 已录入 互斥)
+    bool isManaged = false;
     if (m_pinnedRole != -1 && m_managedRole != -1) {
         bool isPinned = index.data(m_pinnedRole).toBool();
-        bool isManaged = index.data(m_managedRole).toBool();
+        isManaged = index.data(m_managedRole).toBool();
         if (isPinned || isManaged) {
             QRect statusRect(m.cardRect.right() - 22, m.cardRect.top() + 8, 16, 16);
             if (isPinned) {
@@ -160,7 +161,6 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     if (m_ratingRole != -1) {
         int rating = index.data(m_ratingRole).toInt();
         QString colorStr = (m_colorRole != -1) ? index.data(m_colorRole).toString() : "";
-        bool isManaged = index.data(m_managedRole).toBool();
         
         bool isHoveringThis = (m_hoverIndex == index);
         bool isInteractive = isSelected || isHoveringThis;

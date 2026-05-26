@@ -59,3 +59,14 @@
 ### 修改说明
 - 物理切除 `QStandardItemModel`，重构为虚拟化模型 `FerrexVirtualDbModel`，实现百万级不卡顿。
 - 全量实现数据加载与统计逻辑的异步化。
+
+
+---
+## [5] 变更时间：2026-06-18 12:15:22
+
+**文件路径：** `src/ui/ContentPanel.cpp` / `src/ui/ThumbnailDelegate.cpp`
+**变更类型：** 修复
+
+### 修改说明
+- 物理修复了 `isManaged` 变量的重定义错误。在 `paint` 函数中，移除了在局部作用域内对 `isManaged` 的二次定义，确保符合 MSVC 严苛的编译规范。
+- 优化了变量初始化逻辑，将通用状态判定提升至函数顶部。
