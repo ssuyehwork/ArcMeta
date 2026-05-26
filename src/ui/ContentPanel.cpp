@@ -135,7 +135,11 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
 
     if (role == Qt::DisplayRole || role == Qt::EditRole) {
         switch (index.column()) {
-            case 0: return QFileInfo(path).fileName();
+            case 0: {
+                QString name = QFileInfo(path).fileName();
+                if (name.isEmpty()) name = path; // 物理修复：针对磁盘根目录（如 H:\），fileName 为空，此时返回完整路径
+                return name;
+            }
             case 4: {
                 return getCachedMeta(path).tags.join(", ");
             }
@@ -1012,6 +1016,10 @@ void ContentPanel::initGridView() {
     // 2026-06-xx 物理修复：移除 SelectedClicked，防止选中卡片时意外触发重命名逻辑
     m_gridView->setEditTriggers(QAbstractItemView::EditKeyPressed); 
  
+    // 2026-06-xx 工业级增强：开启鼠标追踪，支撑星级悬停高亮逻辑
+    m_gridView->setMouseTracking(true);
+    m_gridView->viewport()->setMouseTracking(true);
+
     m_gridView->setModel(m_proxyModel); 
 
     auto* justifiedView = qobject_cast<JustifiedView*>(m_gridView);
@@ -1062,6 +1070,8 @@ void ContentPanel::initListView() {
     m_treeView->setItemDelegate(new TreeItemDelegate(this)); 
  
     m_treeView->setModel(m_proxyModel); 
+    m_treeView->setMouseTracking(true);
+    m_treeView->viewport()->setMouseTracking(true);
     m_treeView->viewport()->installEventFilter(this); 
  
     m_treeView->setStyleSheet( 
@@ -1760,23 +1770,30 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     emit dataSourceChanged("category");
      
     m_model->clear(); 
- 
-    std::vector<ArcMeta::ItemRepo::ItemRecord> records;
-    for (const QString& p : paths) {
-        ItemRepo::ItemRecord r;
-        r.path = QDir::toNativeSeparators(p);
-        r.isDir = QFileInfo(p).isDir();
-        records.push_back(r);
-    }
 
-    // 工业级预读
-    MetadataManager::instance().prefetchPaths(paths);
+    QPointer<ContentPanel> weakThis(this);
+    (void)QtConcurrent::run([weakThis, paths]() {
+        std::vector<ArcMeta::ItemRepo::ItemRecord> records;
+        for (const QString& p : paths) {
+            if (!weakThis) return;
+            ItemRepo::ItemRecord r;
+            r.path = QDir::toNativeSeparators(p);
+            r.isDir = QFileInfo(p).isDir();
+            records.push_back(r);
+        }
 
-    m_model->setRecords(records);
- 
-    m_isLoading = false;
-    recalculateAndEmitStats();
-    applyFilters(); 
+        // 工业级预读
+        MetadataManager::instance().prefetchPaths(paths);
+
+        QMetaObject::invokeMethod(qApp, [weakThis, records]() {
+            if (weakThis) {
+                weakThis->m_model->setRecords(records);
+                weakThis->m_isLoading = false;
+                weakThis->recalculateAndEmitStats();
+                weakThis->applyFilters();
+            }
+        });
+    });
 } 
  
 void ContentPanel::recalculateAndEmitStats() {
@@ -2025,13 +2042,13 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     bool shouldShowRating = (rating > 0) || isSelected; 
  
     if (shouldShowRating) { 
-        QColor starColor = colorName.isEmpty() ? QColor("#CCCCCC") : UiHelper::parseColorName(colorName).darker(700);
-        QColor emptyStarColor = colorName.isEmpty() ? QColor("#888888") : UiHelper::parseColorName(colorName).darker(400);
-        if (!colorName.isEmpty()) emptyStarColor.setAlpha(180);
+        // 物理锁定：评级辅助图标使用中性灰色，严禁脑补红色
+        QColor baseColor = QColor("#CCCCCC");
+        QColor starColor = colorName.isEmpty() ? baseColor : UiHelper::parseColorName(colorName).darker(700);
+        QColor emptyStarColor = QColor("#888888");
 
-        // 2026-xx-xx 深度修复：调高禁止图标与空心星亮度，确保在深色卡片背景下清晰可见 
-        QIcon banIcon = UiHelper::getIcon("no_color", starColor, m.banRect.width()); 
-        banIcon.paint(painter, m.banRect); 
+        // 物理修复：移除禁止符的任何高亮逻辑，强制对齐中性灰色
+        UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect);
  
         QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), starColor); 
         QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor); 

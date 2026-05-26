@@ -177,13 +177,13 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         bool isHoveringThis = (m_hoverIndex == index);
         bool shouldShowRating = (rating > 0) || isSelected || isHoveringThis;
         if (shouldShowRating) {
-            QColor starColor = colorStr.isEmpty() ? QColor("#CCCCCC") : UiHelper::parseColorName(colorStr).darker(700);
-            QColor emptyStarColor = colorStr.isEmpty() ? QColor("#888888") : UiHelper::parseColorName(colorStr).darker(400);
-            if (!colorStr.isEmpty()) emptyStarColor.setAlpha(180);
+            // 物理锁定：评级区辅助图标（禁止符、空心星）始终使用低调的中性灰色，严禁脑补红色高亮
+            QColor baseColor = QColor("#CCCCCC");
+            QColor starColor = colorStr.isEmpty() ? baseColor : UiHelper::parseColorName(colorStr).darker(700);
+            QColor emptyStarColor = QColor("#888888");
 
-            // 悬停高亮逻辑：如果鼠标正在禁止符上，应用高亮色
-            QColor banC = (isHoveringThis && m_hoverStar == 0) ? QColor("#FF551C") : starColor;
-            UiHelper::getIcon("no_color", banC, m.banRect.width()).paint(painter, m.banRect);
+            // 物理修复：移除禁止符的红色高亮，使用修正后的 m.banRect 访问 Metrics 成员
+            UiHelper::getIcon("no_color", baseColor, m.banRect.width()).paint(painter, m.banRect);
 
             QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(m.starSize, m.starSize), starColor);
             QPixmap emptyStar = UiHelper::getPixmap("star", QSize(m.starSize, m.starSize), emptyStarColor);
