@@ -79,6 +79,18 @@ int FerrexVirtualDbModel::columnCount(const QModelIndex&) const {
     return 8; // 名称, 状态, 星级, 颜色标记, 标签, 类型, 大小, 修改日期
 }
 
+Qt::ItemFlags FerrexVirtualDbModel::flags(const QModelIndex& index) const {
+    if (!index.isValid()) return Qt::NoItemFlags;
+    Qt::ItemFlags f = Qt::ItemIsSelectable | Qt::ItemIsEnabled;
+    // 仅允许第 0 列（名称列）且非“分类”项进行重命名
+    if (index.column() == 0) {
+        if (index.row() < (int)m_allRecords.size() && !m_allRecords[index.row()].isCategory) {
+            f |= Qt::ItemIsEditable;
+        }
+    }
+    return f;
+}
+
 QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     if (!index.isValid() || index.row() >= (int)m_allRecords.size()) return QVariant();
 
@@ -233,8 +245,25 @@ QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientati
 bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& value, int role) {
     if (!index.isValid()) return false;
 
-    // 虚拟模型中 setData 主要用于触发 UI 刷新，实际持久化由 MetadataManager 处理
-    // 或是用于 QSortFilterProxyModel 的 mapToSource 联动
+    if (role == Qt::EditRole && index.column() == 0) {
+        QString newName = value.toString();
+        if (newName.isEmpty()) return false;
+
+        auto& record = m_allRecords[index.row()];
+        QString oldPath = record.path;
+        QFileInfo info(oldPath);
+        QString newPath = info.absolutePath() + "/" + newName;
+
+        if (oldPath != newPath && QFile::rename(oldPath, newPath)) {
+            // 同步更新元数据索引
+            MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
+            // 物理同步：手动修改 m_allRecords 里的 path 以保持模型数据一致
+            record.path = QDir::toNativeSeparators(newPath);
+            emit dataChanged(index, index, {role, Qt::DisplayRole});
+            return true;
+        }
+    }
+
     emit dataChanged(index, index, {role});
     return true;
 }
@@ -908,8 +937,8 @@ void ContentPanel::initGridView() {
     m_gridView->setDragEnabled(true); 
     m_gridView->setDragDropMode(QAbstractItemView::DragOnly); 
  
-    // 2026-06-xx 物理修复：移除 SelectedClicked，防止选中卡片时意外触发重命名逻辑
-    m_gridView->setEditTriggers(QAbstractItemView::EditKeyPressed); 
+    // 放宽触发限制：支持双击、F2、以及点击选中项触发重命名
+    m_gridView->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
  
     m_gridView->setModel(m_proxyModel); 
 
