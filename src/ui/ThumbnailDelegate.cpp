@@ -177,9 +177,8 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             }
         }
 
-        bool isHoveringThis = (m_hoverIndex == index);
         // 2026-xx-xx 按照原版逻辑彻底还原
-        bool shouldShowRating = (rating > 0) || isSelected || isHoveringThis || isManaged;
+        bool shouldShowRating = (rating > 0) || isSelected || isManaged;
 
         if (shouldShowRating) {
             // 物理锁定：评级辅助图标使用中性灰色，严禁脑补红色
@@ -193,11 +192,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             QPixmap emptyStar = UiHelper::getPixmap("star", QSize(m.starSize, m.starSize), emptyStarColor);
 
             for (int i = 0; i < 5; ++i) {
-                int level = i + 1;
-                bool fill = (level <= rating);
-                if (isHoveringThis && m_hoverStar >= level) fill = true;
-
-                painter->drawPixmap(m.starRect(i), fill ? filledStar : emptyStar);
+                painter->drawPixmap(m.starRect(i), (i < rating) ? filledStar : emptyStar);
             }
         }
     }
@@ -307,39 +302,21 @@ bool ThumbnailDelegate::eventFilter(QObject* obj, QEvent* event) {
 bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) {
     if (m_ratingRole == -1) return QStyledItemDelegate::editorEvent(event, model, option, index);
 
-    // 2026-06-xx 工业级交互：实时追踪星级悬停状态
-    if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress) {
+    if (event->type() == QEvent::MouseButtonPress) {
         QMouseEvent* mEvent = static_cast<QMouseEvent*>(event);
-        Metrics m = calculateMetrics(option);
-        int oldHover = m_hoverStar;
-        m_hoverStar = -1;
-        m_hoverIndex = QPersistentModelIndex(index);
-
-        if (m.banRect.contains(mEvent->pos())) {
-            m_hoverStar = 0;
-        } else {
+        if (mEvent->button() == Qt::LeftButton) {
+            Metrics m = calculateMetrics(option);
+            if (m.banRect.contains(mEvent->pos())) {
+                model->setData(index, 0, m_ratingRole);
+                return true;
+            }
             for (int i = 0; i < 5; ++i) {
                 if (m.starRect(i).contains(mEvent->pos())) {
-                    m_hoverStar = i + 1;
-                    break;
+                    model->setData(index, i + 1, m_ratingRole);
+                    return true;
                 }
             }
         }
-
-        // 如果鼠标点击，执行持久化
-        if (event->type() == QEvent::MouseButtonPress && mEvent->button() == Qt::LeftButton && m_hoverStar != -1) {
-            model->setData(index, m_hoverStar, m_ratingRole);
-            return true;
-        }
-
-        // 状态变更时强制触发重绘
-        if (oldHover != m_hoverStar) {
-            const_cast<QWidget*>(option.widget)->update();
-        }
-    } else if (event->type() == QEvent::Leave) {
-        m_hoverStar = -1;
-        m_hoverIndex = QModelIndex();
-        const_cast<QWidget*>(option.widget)->update();
     }
 
     return QStyledItemDelegate::editorEvent(event, model, option, index);

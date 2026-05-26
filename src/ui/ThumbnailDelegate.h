@@ -36,10 +36,6 @@ private:
     int m_isEmptyRole = -1;
     int m_colorRole = -1;
 
-    // 2026-06-xx 工业级追踪：实现星级实时悬停高亮
-    mutable QPersistentModelIndex m_hoverIndex;
-    mutable int m_hoverStar = -1; // -1: 无, 0: 禁止符, 1-5: 星级
-
     struct Metrics {
         QRect cardRect;
         QRect textRect;

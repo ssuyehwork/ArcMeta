@@ -2051,12 +2051,11 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         }
     }
 
-    bool isHoveringThis = (m_hoverIndex == index);
     // 2026-xx-xx 按照原版逻辑彻底还原：
     // 1. 如果已有打分 (rating > 0)，始终显示。
-    // 2. 如果未打分但被选中或悬停，显示禁止图标和空心星。
+    // 2. 如果未打分但被选中，显示禁止图标和空心星。
     // 3. 如果项目已录入 (isManaged)，始终显示作为视觉反馈。
-    bool shouldShowRating = (rating > 0) || isSelected || isHoveringThis || isManaged;
+    bool shouldShowRating = (rating > 0) || isSelected || isManaged;
 
     if (shouldShowRating) {
         // 物理锁定：评级辅助图标使用中性灰色，严禁脑补红色
@@ -2070,12 +2069,8 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor); 
 
         for (int i = 0; i < 5; ++i) {
-            int level = i + 1;
-            bool fill = (level <= rating);
-            if (isHoveringThis && m_hoverStar >= level) fill = true;
-
             QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
-            painter->drawPixmap(starRect, fill ? filledStar : emptyStar);
+            painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
         } 
     }
      
@@ -2146,54 +2141,34 @@ bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) {
 } 
  
 bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) { 
-    // 2026-06-xx 工业级交互：实时追踪星级悬停状态
-    if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress) {
+    if (event->type() == QEvent::MouseButtonPress) {
         QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event);
-        GridMetrics m = calculateMetrics(option);
-        int oldHover = m_hoverStar;
-        m_hoverStar = -1;
-        m_hoverIndex = QPersistentModelIndex(index);
+        if (mEvent->button() == Qt::LeftButton) {
+            GridMetrics m = calculateMetrics(option);
+            QString path = index.data(PathRole).toString();
 
-        if (m.banRect.contains(mEvent->pos())) {
-            m_hoverStar = 0;
-        } else {
+            if (m.banRect.contains(mEvent->pos())) {
+                if (!path.isEmpty()) {
+                    MetadataManager::instance().setRating(path.toStdWString(), 0);
+                    model->setData(index, 0, RatingRole);
+                }
+                event->accept();
+                return true;
+            }
+
             for (int i = 0; i < 5; ++i) {
                 QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
                 if (starRect.contains(mEvent->pos())) {
-                    m_hoverStar = i + 1;
-                    break;
+                    int r = i + 1;
+                    if (!path.isEmpty()) {
+                        MetadataManager::instance().setRating(path.toStdWString(), r);
+                        model->setData(index, r, RatingRole);
+                    }
+                    event->accept();
+                    return true;
                 }
             }
         }
-
-        // 如果鼠标点击，执行持久化
-        if (event->type() == QEvent::MouseButtonPress && mEvent->button() == Qt::LeftButton && m_hoverStar != -1) {
-            QString path = index.data(PathRole).toString();
-            if (!path.isEmpty()) {
-                MetadataManager::instance().setRating(path.toStdWString(), m_hoverStar);
-                model->setData(index, m_hoverStar, RatingRole);
-            }
-            // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器
-            auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
-            if (view) {
-                QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
-                view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-                QTimer::singleShot(0, [view, originalTriggers]() {
-                    view->setEditTriggers(originalTriggers);
-                });
-            }
-            event->accept();
-            return true;
-        }
-
-        // 状态变更时强制触发重绘
-        if (oldHover != m_hoverStar) {
-            const_cast<QWidget*>(option.widget)->update();
-        }
-    } else if (event->type() == QEvent::Leave) {
-        m_hoverStar = -1;
-        m_hoverIndex = QModelIndex();
-        const_cast<QWidget*>(option.widget)->update();
     }
 
     return QStyledItemDelegate::editorEvent(event, model, option, index); 
