@@ -1669,6 +1669,14 @@ void ContentPanel::loadCategory(int categoryId) {
 
     // 2. 加载文件
     auto itemRecords = ItemRepo::getRecordsInCategory(categoryId);
+    // 2026-06-xx 物理过滤：排除数据库残留的失效路径，防止内容区出现空“FILE”占位符
+    for (auto it = itemRecords.begin(); it != itemRecords.end(); ) {
+        if (!it->path.isEmpty() && !QFileInfo::exists(it->path)) {
+            it = itemRecords.erase(it);
+        } else {
+            ++it;
+        }
+    }
     allRecords.insert(allRecords.end(), itemRecords.begin(), itemRecords.end());
 
     m_model->setRecords(allRecords);
@@ -1689,10 +1697,13 @@ void ContentPanel::loadPaths(const QStringList& paths) {
  
     std::vector<ArcMeta::ItemRepo::ItemRecord> records;
     for (const QString& p : paths) {
-        ItemRepo::ItemRecord r;
-        r.path = QDir::toNativeSeparators(p);
-        r.isDir = QFileInfo(p).isDir();
-        records.push_back(r);
+        // 2026-06-xx 物理过滤：系统分类加载时强制校验物理存在性
+        if (!p.isEmpty() && QFileInfo::exists(p)) {
+            ItemRepo::ItemRecord r;
+            r.path = QDir::toNativeSeparators(p);
+            r.isDir = QFileInfo(p).isDir();
+            records.push_back(r);
+        }
     }
     m_model->setRecords(records);
  

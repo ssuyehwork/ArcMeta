@@ -617,6 +617,29 @@ void InlineHueSlider::paintEvent(QPaintEvent*) {
 **文件路径：** `src/ui/FilterPanel.cpp`
 **变更类型：** 修改
 
+### 变更说明
+- 变更原因：修复变量命名冲突警告（C4456）。在循环内部使用更具辨识度的变量名（dr, dg, db）替换原有的 (r, g, b)，避免隐藏外部作用域的同名变量。
+- 影响范围：`FilterPanel::rebuildGroups` 中的相近色统计逻辑。
+- 是否在需求范围内：是
+
+---
+## [18] 变更时间：2026-05-26 16:15:44
+
+**文件路径：** `src/ui/JustifiedView.cpp` / `src/ui/JustifiedView.h`
+**变更类型：** 修改
+
+### 变更说明
+- 变更原因：彻底修复筛选导致的“幽灵卡片”渲染问题及编译错误。
+- 关键逻辑：
+  1. 移除错误的 `rowsRemoved` 虚函数重写声明。
+  2. 重写 `setModel`，在设置模型时连接 `rowsRemoved` 信号。
+  3. 采用信号驱动 + `QTimer::singleShot(0)` 方案，确保布局重排在 Model 行物理删除后执行，从而获得正确的 `rowCount()`。
+- 影响范围：`JustifiedView` 的布局稳定性。
+- 是否在需求范围内：是
+
+**文件路径：** `src/ui/FilterPanel.cpp`
+**变更类型：** 修改
+
 ### 修改前（Before）
 ```cpp
                         long rmean = (dotC.red() + c2.red()) / 2;

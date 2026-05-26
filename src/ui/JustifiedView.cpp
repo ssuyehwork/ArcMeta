@@ -25,6 +25,7 @@ JustifiedView::JustifiedView(QWidget* parent) : QAbstractItemView(parent) {
     pal.setColor(QPalette::Window, QColor("#1E1E1E"));
     viewport()->setPalette(pal);
     setPalette(pal);
+
 }
 
 void JustifiedView::setTargetRowHeight(int h) {
@@ -48,6 +49,18 @@ void JustifiedView::reset() {
 
 void JustifiedView::doItemsLayout() {
     doLayout();
+}
+
+void JustifiedView::setModel(QAbstractItemModel* model) {
+    if (this->model()) {
+        disconnect(this->model(), &QAbstractItemModel::rowsRemoved, this, nullptr);
+    }
+    QAbstractItemView::setModel(model);
+    if (model) {
+        connect(model, &QAbstractItemModel::rowsRemoved, this, [this]() {
+            QTimer::singleShot(0, this, [this]() { doLayout(); });
+        });
+    }
 }
 
 QRect JustifiedView::visualRect(const QModelIndex& index) const {
@@ -93,7 +106,7 @@ void JustifiedView::rowsInserted(const QModelIndex& parent, int start, int end) 
 }
 
 void JustifiedView::rowsAboutToBeRemoved(const QModelIndex& parent, int start, int end) {
-    doLayout();
+    // 直接转发给基类即可，实际重排由 setModel 中连接的 rowsRemoved 信号处理
     QAbstractItemView::rowsAboutToBeRemoved(parent, start, end);
 }
 
