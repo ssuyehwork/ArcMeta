@@ -248,15 +248,29 @@ QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientati
 }
 
 bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& value, int role) {
-    if (!index.isValid()) return false;
+    if (!index.isValid() || index.row() >= (int)m_allRecords.size()) return false;
 
-    // 针对 EditRole 的物理写入转发 (如重命名)
-    if (role == Qt::EditRole) {
-        // 更新本地 Record 缓存以提供即时视觉反馈
+    QString path = m_allRecords[index.row()].path;
+    if (path.isEmpty()) return false;
+
+    // 工业级同步：将 UI 变更物理转发至 MetadataManager 执行持久化
+    if (role == RatingRole) {
+        MetadataManager::instance().setRating(path.toStdWString(), value.toInt());
+    } else if (role == ColorRole) {
+        MetadataManager::instance().setColor(path.toStdWString(), value.toString().toStdWString());
+    } else if (role == PinnedRole || role == IsLockedRole) {
+        MetadataManager::instance().setPinned(path.toStdWString(), value.toBool());
+    } else if (role == TagsRole) {
+        MetadataManager::instance().setTags(path.toStdWString(), value.toStringList());
+    } else if (role == Qt::EditRole) {
+        // 针对重命名的特殊处理 (已经在 Delegate 中调用了 renameItem，此处同步 Record)
         m_allRecords[index.row()].path = value.toString();
-        // 失效元数据缓存，强制下一次读取时重查
-        m_metaCache.remove(m_allRecords[index.row()].path);
+        m_metaCache.remove(path);
+        m_metaCache.remove(value.toString());
     }
+
+    // 物理失效局部缓存，确保后续读取 (data()) 拿回的是真值
+    m_metaCache.remove(path);
 
     emit dataChanged(index, index, {role});
     return true;
@@ -322,10 +336,17 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ArcMeta::ItemRepo::ItemR
 
     // 工业级索引构建：为路径建立行号映射，支持 O(1) 反向查找
     m_pathToRows.clear();
+    QStringList pathsToPrefetch;
     for (int i = 0; i < (int)m_allRecords.size(); ++i) {
         if (!m_allRecords[i].path.isEmpty()) {
             m_pathToRows[m_allRecords[i].path].push_back(i);
+            pathsToPrefetch << m_allRecords[i].path;
         }
+    }
+
+    // 工业级修复：加载记录时同步触发元数据预读，确保内存命中
+    if (!pathsToPrefetch.isEmpty()) {
+        MetadataManager::instance().prefetchPaths(pathsToPrefetch);
     }
 
     endResetModel();

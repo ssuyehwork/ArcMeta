@@ -174,17 +174,27 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             }
         }
 
-        bool shouldShowRating = (rating > 0) || isSelected;
+        bool isHoveringThis = (m_hoverIndex == index);
+        bool shouldShowRating = (rating > 0) || isSelected || isHoveringThis;
         if (shouldShowRating) {
             QColor starColor = colorStr.isEmpty() ? QColor("#CCCCCC") : UiHelper::parseColorName(colorStr).darker(700);
             QColor emptyStarColor = colorStr.isEmpty() ? QColor("#888888") : UiHelper::parseColorName(colorStr).darker(400);
             if (!colorStr.isEmpty()) emptyStarColor.setAlpha(180);
 
-            UiHelper::getIcon("no_color", starColor, m.banRect.width()).paint(painter, m.banRect);
+            // 悬停高亮逻辑：如果鼠标正在禁止符上，应用高亮色
+            QColor banC = (isHoveringThis && m_hoverStar == 0) ? QColor("#FF551C") : starColor;
+            UiHelper::getIcon("no_color", banC, m.banRect.width()).paint(painter, m.banRect);
+
             QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(m.starSize, m.starSize), starColor);
             QPixmap emptyStar = UiHelper::getPixmap("star", QSize(m.starSize, m.starSize), emptyStarColor);
+
+            // 工业级高亮：如果正在悬停，则悬停位置之前的星级均显示为“填充”状态
             for (int i = 0; i < 5; ++i) {
-                painter->drawPixmap(m.starRect(i), (i < rating) ? filledStar : emptyStar);
+                int level = i + 1;
+                bool fill = (level <= rating);
+                if (isHoveringThis && m_hoverStar >= level) fill = true;
+
+                painter->drawPixmap(m.starRect(i), fill ? filledStar : emptyStar);
             }
         }
     }
@@ -292,26 +302,43 @@ bool ThumbnailDelegate::eventFilter(QObject* obj, QEvent* event) {
 } 
 
 bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) {
-    if (m_ratingRole != -1 && event->type() == QEvent::MouseButtonPress) {
-        QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event);
-        if (mEvent->button() == Qt::LeftButton) {
-            Metrics m = calculateMetrics(option);
+    if (m_ratingRole == -1) return QStyledItemDelegate::editorEvent(event, model, option, index);
 
-            if (m.banRect.contains(mEvent->pos())) {
-                model->setData(index, 0, m_ratingRole);
-                event->accept();
-                return true;
-            }
+    // 2026-06-xx 工业级交互：实时追踪星级悬停状态
+    if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress) {
+        QMouseEvent* mEvent = static_cast<QMouseEvent*>(event);
+        Metrics m = calculateMetrics(option);
+        int oldHover = m_hoverStar;
+        m_hoverStar = -1;
+        m_hoverIndex = QPersistentModelIndex(index);
 
+        if (m.banRect.contains(mEvent->pos())) {
+            m_hoverStar = 0;
+        } else {
             for (int i = 0; i < 5; ++i) {
                 if (m.starRect(i).contains(mEvent->pos())) {
-                    model->setData(index, i + 1, m_ratingRole);
-                    event->accept();
-                    return true;
+                    m_hoverStar = i + 1;
+                    break;
                 }
             }
         }
+
+        // 如果鼠标点击，执行持久化
+        if (event->type() == QEvent::MouseButtonPress && mEvent->button() == Qt::LeftButton && m_hoverStar != -1) {
+            model->setData(index, m_hoverStar, m_ratingRole);
+            return true;
+        }
+
+        // 状态变更时强制触发重绘
+        if (oldHover != m_hoverStar) {
+            const_cast<QWidget*>(option.widget)->update();
+        }
+    } else if (event->type() == QEvent::Leave) {
+        m_hoverStar = -1;
+        m_hoverIndex = QModelIndex();
+        const_cast<QWidget*>(option.widget)->update();
     }
+
     return QStyledItemDelegate::editorEvent(event, model, option, index);
 }
 
