@@ -62,8 +62,9 @@ int main(int argc, char *argv[]) {
     // 杜绝相对路径幻觉，强制使用 Qt 资源系统 (:/) 加载 app_icon.ico，确保托盘显示不失效
     a.setWindowIcon(QIcon(":/app_icon.ico"));
 
-    a.setApplicationName("ArcMeta");
-    a.setOrganizationName("ArcMetaTeam");
+    a.setApplicationName(ArcMeta::UiHelper::ApplicationName);
+    a.setOrganizationName(ArcMeta::UiHelper::OrganizationName);
+    a.setOrganizationDomain(ArcMeta::UiHelper::OrganizationDomain);
 
     // 2026-05-27 物理修复：在主线程预热元数据管理器单例
     // 确保其内部的 QTimer 等对象归属于主线程，避免跨线程创建导致的行为不确定性

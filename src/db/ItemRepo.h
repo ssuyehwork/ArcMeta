@@ -76,6 +76,20 @@ public:
     static std::vector<ItemRecord> getItemRecordsBySystemType(const QString& type);
     static std::vector<ItemRecord> searchRecordsByKeyword(const QString& keyword, const QString& parentPath = "");
     static std::vector<ItemRecord> getRecordsInCategory(int categoryId);
+
+    /**
+     * @brief 工业级架构：从数据库执行聚合统计 (取代主线程循环)
+     * @param type 系统项类型 (all, today, recently_visited 等)
+     */
+    struct AggregateStats {
+        QMap<int, int> ratingCounts;
+        QMap<QString, int> colorCounts;
+        QMap<QString, int> typeCounts;
+        int totalCount = 0;
+    };
+    static AggregateStats getAggregateStatsBySystemType(const QString& type);
+    static AggregateStats getAggregateStatsByKeyword(const QString& keyword, const QString& parentPath = "");
+    static AggregateStats getAggregateStatsInCategory(int categoryId);
 };
 
 } // namespace ArcMeta

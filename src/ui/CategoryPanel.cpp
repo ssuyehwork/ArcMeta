@@ -306,7 +306,7 @@ void CategoryPanel::onClassifyToCategory() {
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
-    QSettings settings("ArcMeta团队", "ArcMeta");
+    QSettings settings;
     settings.setValue("Category/ExtensionTargetId", id);
 
     QSet<int> expandedIds;
@@ -1078,7 +1078,7 @@ void CategoryPanel::saveExpandedStateToSettings() {
 
     qDebug() << "[CategoryPanel] 正在持久化展开状态到磁盘 - 记录总数:" << ids.size() + names.size();
 
-    QSettings settings("ArcMeta团队", "ArcMeta");
+    QSettings settings;
     QList<QVariant> idList;
     for (int id : ids) idList << id;
     settings.setValue("Category/ExpandedIds", idList);
@@ -1087,7 +1087,7 @@ void CategoryPanel::saveExpandedStateToSettings() {
 }
 
 void CategoryPanel::loadExpandedStateFromSettings() {
-    QSettings settings("ArcMeta团队", "ArcMeta");
+    QSettings settings;
     bool hasRecord = settings.contains("Category/ExpandedIds") || settings.contains("Category/ExpandedNames");
     
     QList<QVariant> idList = settings.value("Category/ExpandedIds").toList();

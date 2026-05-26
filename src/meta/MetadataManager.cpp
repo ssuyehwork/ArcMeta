@@ -271,57 +271,76 @@ void MetadataManager::initFromJsonMode() {
 }
 
 RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
+    // 2026-06-xx 工业级红线：getMeta 严禁触发任何同步 I/O。
+    // 必须由 prefetch 逻辑提前填充缓存。
     std::wstring nPath = normalizePath(path);
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    auto it = m_cache.find(nPath);
+    if (it != m_cache.end()) return it->second;
+    return RuntimeMeta();
+}
+
+void MetadataManager::prefetchDirectory(const std::wstring& dirPath) {
+    std::wstring nDir = normalizePath(dirPath);
+    QPointer<MetadataManager> weakThis(this);
     
-    // 2026-06-xx 物理同步逻辑：优先检查内存缓存（高性能）
-    {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end()) return it->second;
-    }
+    (void)QtConcurrent::run([weakThis, nDir]() {
+        AmMetaJson amJson(nDir);
+        if (!amJson.load()) return;
 
-    // 2026-06-xx 核心恢复：若内存未命中，尝试从本地离散 .am_meta.json 加载
-    // 理由：实现“目录导航”对本地管理文件的实时感应，即使数据库未同步
-    QFileInfo info(QString::fromStdWString(nPath));
-    std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-    std::wstring fileName = info.fileName().toStdWString();
+        std::unordered_map<std::wstring, RuntimeMeta> batch;
 
-    AmMetaJson amJson(parentDir);
-    if (amJson.load()) {
-        auto& items = amJson.items();
-        if (items.count(fileName)) {
-            const auto& item = items.at(fileName);
+        // 1. 预处理文件夹自身
+        if (!amJson.folder().isDefault()) {
+            RuntimeMeta rm;
+            const auto& f = amJson.folder();
+            rm.rating = f.rating; rm.color = f.color;
+            rm.pinned = f.pinned; rm.note = f.note;
+            rm.palettes = f.palettes;
+            for (const auto& t : f.tags) rm.tags << QString::fromStdWString(t);
+            batch[nDir] = std::move(rm);
+        }
+
+        // 2. 批量处理目录下所有项
+        for (const auto& [name, item] : amJson.items()) {
             RuntimeMeta rm;
             rm.rating = item.rating; rm.color = item.color;
-            rm.pinned = item.pinned; rm.encrypted = item.encrypted;
-            rm.note = item.note;
+            rm.pinned = item.pinned; rm.note = item.note;
+            rm.encrypted = item.encrypted;
             rm.palettes = item.palettes;
             for (const auto& t : item.tags) rm.tags << QString::fromStdWString(t);
             
-            // 写入缓存并返回
-            std::unique_lock<std::shared_mutex> lock(m_mutex);
-            m_cache[nPath] = rm;
-            return rm;
+            std::wstring fullPath = nDir;
+            if (fullPath.back() != L'\\' && fullPath.back() != L'/') fullPath += L'\\';
+            fullPath += name;
+            batch[normalizePath(fullPath)] = std::move(rm);
         }
 
-        // 如果是文件夹自身
-        if (info.isDir()) {
-            const auto& folder = amJson.folder();
-            if (!folder.isDefault()) {
-                RuntimeMeta rm;
-                rm.rating = folder.rating; rm.color = folder.color;
-                rm.pinned = folder.pinned; rm.note = folder.note;
-                rm.palettes = folder.palettes;
-                for (const auto& t : folder.tags) rm.tags << QString::fromStdWString(t);
-                
-                std::unique_lock<std::shared_mutex> lock(m_mutex);
-                m_cache[nPath] = rm;
-                return rm;
+        if (batch.empty()) return;
+
+        QMetaObject::invokeMethod(qApp, [weakThis, batch = std::move(batch)]() {
+            if (weakThis) {
+                std::unique_lock<std::shared_mutex> lock(weakThis->m_mutex);
+                for (auto& [p, m] : batch) {
+                    weakThis->m_cache[p] = std::move(m);
+                }
             }
-        }
+        });
+    });
+}
+
+void MetadataManager::prefetchPaths(const QStringList& paths) {
+    if (paths.isEmpty()) return;
+
+    // 逻辑：针对离散路径，首先识别它们分属哪些目录，然后执行目录级批量预读
+    QSet<QString> parentDirs;
+    for (const auto& p : paths) {
+        parentDirs.insert(QFileInfo(p).absolutePath());
     }
 
-    return RuntimeMeta();
+    for (const auto& dir : parentDirs) {
+        prefetchDirectory(dir.toStdWString());
+    }
 }
 
 void MetadataManager::setRating(const std::wstring& path, int rating) {

@@ -72,7 +72,7 @@ MainWindow::MainWindow(QWidget* parent)
     setWindowTitle("FERREX");
 
     // 从设置读取置顶状态
-    QSettings settings("ArcMeta团队", "ArcMeta");
+    QSettings settings;
     m_isPinned = settings.value("MainWindow/AlwaysOnTop", false).toBool();
     
     // 设置基础窗口标志 (保持无边框)
@@ -131,7 +131,7 @@ MainWindow::MainWindow(QWidget* parent)
     // 2026-03-xx 性能优化：严禁在构造函数中执行任何可能导致阻塞的同步加载 (如 navigateTo)。
     // 改为延迟 200ms 触发首次加载，确保 MainWindow 框架先瞬间弹出，提升用户感知的“秒开”响应速度。
     QTimer::singleShot(200, [this]() {
-        QSettings settings("ArcMeta团队", "ArcMeta");
+        QSettings settings;
         QString lastPath = settings.value("MainWindow/LastPath", "computer://").toString();
         
         // 2026-04-11 按照用户要求：物理还原最后一次开启的文件夹
@@ -161,7 +161,7 @@ void MainWindow::initUi() {
     m_mainSplitter->setStretchFactor(4, 0); // 筛选
 
     // 2026-04-11 按照用户要求：物理还原/记忆侧边栏宽度
-    QSettings settings("ArcMeta团队", "ArcMeta");
+    QSettings settings;
     QByteArray state = settings.value("MainWindow/SplitterState").toByteArray();
     if (!state.isEmpty()) {
         m_mainSplitter->restoreState(state);
@@ -398,7 +398,7 @@ void MainWindow::initUi() {
         m_searchHistory.removeAll(keyword);
         m_searchHistory.prepend(keyword);
         if (m_searchHistory.size() > 10) m_searchHistory.removeLast();
-        QSettings settings("ArcMeta", "ArcMeta");
+        QSettings settings;
         settings.setValue("Search/History", m_searchHistory);
         m_searchHistoryPanel->setHistory(m_searchHistory);
         m_searchHistoryPanel->hide();
@@ -423,14 +423,14 @@ void MainWindow::initUi() {
 
     connect(m_searchHistoryPanel, &SearchHistoryPanel::historyItemRemoved, this, [this](const QString& keyword) {
         m_searchHistory.removeAll(keyword);
-        QSettings settings("ArcMeta", "ArcMeta");
+        QSettings settings;
         settings.setValue("Search/History", m_searchHistory);
         m_searchHistoryPanel->setHistory(m_searchHistory);
     });
 
     connect(m_searchHistoryPanel, &SearchHistoryPanel::clearAllRequested, this, [this]() {
         m_searchHistory.clear();
-        QSettings settings("ArcMeta", "ArcMeta");
+        QSettings settings;
         settings.setValue("Search/History", m_searchHistory);
         m_searchHistoryPanel->setHistory(m_searchHistory);
     });
@@ -1207,7 +1207,7 @@ void MainWindow::onPinToggled(bool checked) {
     }
 
     // 持久化存储
-    QSettings settings("ArcMeta团队", "ArcMeta");
+    QSettings settings;
     settings.setValue("MainWindow/AlwaysOnTop", m_isPinned);
 }
 
@@ -1237,7 +1237,7 @@ void MainWindow::changeEvent(QEvent* event) {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-    QSettings settings("ArcMeta团队", "ArcMeta");
+    QSettings settings;
     settings.setValue("MainWindow/LastPath", m_currentPath);
     // 2026-04-11 按照用户要求：物理保存各容器宽度状态
     if (m_mainSplitter) {

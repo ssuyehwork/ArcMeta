@@ -408,4 +408,90 @@ std::vector<ItemRepo::ItemRecord> ItemRepo::getRecordsInCategory(int categoryId)
     return results;
 }
 
+static ItemRepo::AggregateStats executeAggregate(const QString& baseSql, const QVariantList& binds) {
+    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    ItemRepo::AggregateStats stats;
+
+    auto runCount = [&](const QString& col) {
+        QSqlQuery q(db);
+        QString sql = QString("SELECT %1, COUNT(*) FROM (%2) GROUP BY %1").arg(col, baseSql);
+        q.prepare(sql);
+        for(const auto& b : binds) q.addBindValue(b);
+        if (q.exec()) {
+            while(q.next()) {
+                if (col == "rating") stats.ratingCounts[q.value(0).toInt()] = q.value(1).toInt();
+                else if (col == "color") stats.colorCounts[q.value(0).toString().toUpper()] = q.value(1).toInt();
+                else if (col == "type") stats.typeCounts[q.value(0).toString().toUpper()] = q.value(1).toInt();
+            }
+        }
+    };
+
+    runCount("rating");
+    runCount("color");
+    runCount("type");
+
+    QSqlQuery qTotal(db);
+    qTotal.prepare(QString("SELECT COUNT(*) FROM (%1)").arg(baseSql));
+    for(const auto& b : binds) qTotal.addBindValue(b);
+    if (qTotal.exec() && qTotal.next()) stats.totalCount = qTotal.value(0).toInt();
+
+    return stats;
+}
+
+ItemRepo::AggregateStats ItemRepo::getAggregateStatsBySystemType(const QString& type) {
+    QString sql;
+    QVariantList binds;
+    qint64 startOfToday = QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch();
+    qint64 startOfYesterday = QDateTime(QDate::currentDate().addDays(-1), QTime(0, 0)).toMSecsSinceEpoch();
+
+    if (type == "all") {
+        sql = "SELECT rating, color, type FROM items WHERE deleted = 0 AND type = 'file' GROUP BY file_id_128";
+    } else if (type == "today") {
+        sql = "SELECT rating, color, type FROM items WHERE deleted = 0 AND type = 'file' AND (ctime >= ? OR mtime >= ?) GROUP BY file_id_128";
+        binds << startOfToday << startOfToday;
+    } else if (type == "yesterday") {
+        sql = "SELECT rating, color, type FROM items WHERE deleted = 0 AND type = 'file' AND (ctime >= ? OR mtime >= ?) AND (ctime < ? OR mtime < ?) GROUP BY file_id_128";
+        binds << startOfYesterday << startOfYesterday << startOfToday << startOfToday;
+    } else if (type == "uncategorized") {
+        sql = "SELECT rating, color, type FROM items i WHERE i.deleted = 0 AND i.type = 'file' AND NOT EXISTS (SELECT 1 FROM category_items ci WHERE ci.file_id_128 = i.file_id_128) GROUP BY i.file_id_128";
+    } else if (type == "untagged") {
+        sql = "SELECT rating, color, type FROM items WHERE deleted = 0 AND type = 'file' AND (tags IS NULL OR tags = '' OR tags = '[]') GROUP BY file_id_128";
+    } else {
+        return {};
+    }
+
+    return executeAggregate(sql, binds);
+}
+
+ItemRepo::AggregateStats ItemRepo::getAggregateStatsByKeyword(const QString& keyword, const QString& parentPath) {
+    QString sql;
+    QVariantList binds;
+    QString likePattern = "%" + keyword + "%";
+
+    if (parentPath.isEmpty()) {
+        if (keyword.isEmpty()) {
+            sql = "SELECT rating, color, type FROM items WHERE deleted = 0 AND type = 'file' GROUP BY file_id_128";
+        } else {
+            sql = "SELECT rating, color, type FROM items WHERE (path LIKE ? OR tags LIKE ? OR note LIKE ?) AND deleted = 0 AND type = 'file' GROUP BY file_id_128";
+            binds << likePattern << likePattern << likePattern;
+        }
+    } else {
+        binds << parentPath;
+        if (keyword.isEmpty()) {
+            sql = "SELECT rating, color, type FROM items WHERE parent_path = ? AND deleted = 0 AND type = 'file' GROUP BY file_id_128";
+        } else {
+            sql = "SELECT rating, color, type FROM items WHERE parent_path = ? AND (path LIKE ? OR tags LIKE ? OR note LIKE ?) AND deleted = 0 AND type = 'file' GROUP BY file_id_128";
+            binds << likePattern << likePattern << likePattern;
+        }
+    }
+
+    return executeAggregate(sql, binds);
+}
+
+ItemRepo::AggregateStats ItemRepo::getAggregateStatsInCategory(int categoryId) {
+    QString sql = "SELECT i.rating, i.color, i.type FROM items i JOIN category_items ci ON i.file_id_128 = ci.file_id_128 WHERE ci.category_id = ? AND i.deleted = 0 GROUP BY i.file_id_128";
+    QVariantList binds; binds << categoryId;
+    return executeAggregate(sql, binds);
+}
+
 } // namespace ArcMeta

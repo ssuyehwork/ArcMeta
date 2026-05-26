@@ -47,6 +47,16 @@ public:
     RuntimeMeta getMeta(const std::wstring& path);
 
     /**
+     * @brief 2026-06-xx 工业级架构：异步预读元数据 (针对目录)
+     */
+    void prefetchDirectory(const std::wstring& dirPath);
+
+    /**
+     * @brief 2026-06-xx 工业级架构：异步预读元数据 (针对离散路径列表)
+     */
+    void prefetchPaths(const QStringList& paths);
+
+    /**
      * @brief 2026-06-xx 按照用户要求：在 JSON 内存模式下执行多维搜索
      * @param keyword 关键词
      * @return 匹配的物理路径列表

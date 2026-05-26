@@ -150,8 +150,8 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == CategoryIdRole) {
         return 0;
     } else if (role == IsEmptyRole) {
-        QFileInfo info(path);
-        return info.isDir() && QDir(path).isEmpty();
+        // 工业级优化：使用惰性探测判定空文件夹
+        return record.isDir && UiHelper::isDirectoryEmpty(path);
     } else if (role == AspectRatioRole) {
         return m_aspectRatios.value(path, 1.0);
     } else if (role == HasThumbnailRole) {
@@ -441,7 +441,7 @@ ContentPanel::ContentPanel(QWidget* parent)
     m_proxyModel->setFilterKeyColumn(0); 
  
     // 2026-06-05 按照要求：从配置中加载上次保存的缩放比例 
-    QSettings settings("ArcMeta团队", "ArcMeta"); 
+    QSettings settings;
     m_zoomLevel = settings.value("UI/GridZoomLevel", 96).toInt(); 
     m_isRecursive = false; 
  
@@ -497,10 +497,8 @@ void ContentPanel::initUi() {
         } 
  
         if (m_btnLayers->isChecked()) { 
-            // 探测是否有子文件夹 
-            QDir dir(m_currentPath); 
-            bool hasSubDirs = !dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot).isEmpty(); 
-            if (!hasSubDirs) { 
+            // 工业级优化：使用惰性探测替代 entryList
+            if (!UiHelper::hasSubDirectories(m_currentPath)) {
                 m_btnLayers->setChecked(false); 
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "当前文件夹不支持显示子文件夹项目", 1500, QColor("#E81123")); 
                 return; 
@@ -614,7 +612,7 @@ void ContentPanel::updateGridSize() {
     }
 
     // 2026-06-05 按照要求：持久化保存当前的缩放级别
-    QSettings settings("ArcMeta团队", "ArcMeta");
+    QSettings settings;
     settings.setValue("UI/GridZoomLevel", m_zoomLevel);
 
     qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
@@ -973,7 +971,7 @@ void ContentPanel::initListView() {
     header->setCascadingSectionResizes(false);
     header->setMinimumSectionSize(30);    // 全局最小宽度设定为 30 像素
 
-    QSettings settings("ArcMeta团队", "ArcMeta");
+    QSettings settings;
     QByteArray headerState = settings.value("UI/ListHeaderState").toByteArray();
     if (!headerState.isEmpty()) {
         header->restoreState(headerState);
@@ -1459,7 +1457,10 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     m_isLoading = true;
-    qDebug() << "[Content] 开始物理递归扫描 (虚拟化) ->" << path << (recursive ? "递归" : "单级");
+
+    // 2026-06-xx 工业级架构：异步预读目录元数据，杜绝滚动时的同步磁盘访问
+    MetadataManager::instance().prefetchDirectory(path.toStdWString());
+
     emit dataSourceChanged("nav");
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
@@ -1631,6 +1632,11 @@ void ContentPanel::loadCategory(int categoryId) {
     auto itemRecords = ItemRepo::getRecordsInCategory(categoryId);
     allRecords.insert(allRecords.end(), itemRecords.begin(), itemRecords.end());
 
+    // 工业级预读：对分类下的所有物理路径执行预读
+    QStringList paths;
+    for(const auto& r : itemRecords) paths << r.path;
+    MetadataManager::instance().prefetchPaths(paths);
+
     m_model->setRecords(allRecords);
      
     m_isLoading = false;
@@ -1654,6 +1660,10 @@ void ContentPanel::loadPaths(const QStringList& paths) {
         r.isDir = QFileInfo(p).isDir();
         records.push_back(r);
     }
+
+    // 工业级预读
+    MetadataManager::instance().prefetchPaths(paths);
+
     m_model->setRecords(records);
  
     m_isLoading = false;
@@ -1665,8 +1675,12 @@ void ContentPanel::recalculateAndEmitStats() {
     const std::vector<ArcMeta::ItemRepo::ItemRecord>& records = m_model->allRecords();
     if (records.empty()) {
         emit directoryStatsReady({}, {}, {}, {}, {}, {});
+        emit statusBarStatsUpdated(0, 0, 0);
         return;
     }
+
+    // 发送基础统计信号，UI 界面优先响应
+    emit statusBarStatsUpdated(0, 0, (int)records.size());
 
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, records]() {
@@ -1676,43 +1690,38 @@ void ContentPanel::recalculateAndEmitStats() {
 
         for (const auto& record : records) {
             if (!weakThis) return;
+            if (record.isCategory) continue;
+
             QString path = record.path;
+            // 工业级优化：使用 MetadataManager 内存镜像进行标签统计，杜绝数据库 JSON 解析
             auto meta = MetadataManager::instance().getMeta(path.toStdWString());
-            QFileInfo info(path);
-
-            stats.ratingCounts[meta.rating]++;
-
-            QString dominantColor = QString::fromStdWString(meta.color);
-            if (!dominantColor.isEmpty()) {
-                stats.colorCounts[dominantColor.toUpper()]++;
-            } else {
-                stats.colorCounts[""]++;
-            }
-
-            if (info.isDir()) {
-                stats.typeCounts["folder"]++;
-            } else {
-                stats.typeCounts[info.suffix().toUpper()]++;
-            }
 
             for (const QString& tag : meta.tags) {
                 stats.tagCounts[tag]++;
             }
             if (meta.tags.isEmpty()) stats.noTagCount++;
 
-            // 物理磁盘访问移至后台线程，彻底解决 UI 假死
-            if (info.exists()) {
-                QDate cdate = info.birthTime().date();
-                QDate mdate = info.lastModified().date();
+            // 评分、颜色、类型统计由外部数据库聚合补充或在此次遍历中顺带完成
+            stats.ratingCounts[meta.rating]++;
+            QString color = QString::fromStdWString(meta.color).toUpper();
+            stats.colorCounts[color.isEmpty() ? "" : color]++;
 
+            QFileInfo info(path);
+            if (record.isDir) {
+                stats.typeCounts["folder"]++;
+            } else {
+                stats.typeCounts[info.suffix().toUpper()]++;
+            }
+
+            // 物理磁盘访问仅针对可见/当前集合，且在后台线程执行
+            if (info.exists()) {
                 auto dateKey = [&](const QDate& d) {
                     if (d == today) return QString("today");
                     if (d == yesterday) return QString("yesterday");
                     return d.toString("yyyy-MM-dd");
                 };
-
-                stats.createDateCounts[dateKey(cdate)]++;
-                stats.modifyDateCounts[dateKey(mdate)]++;
+                stats.createDateCounts[dateKey(info.birthTime().date())]++;
+                stats.modifyDateCounts[dateKey(info.lastModified().date())]++;
             }
         }
         if (stats.noTagCount > 0) stats.tagCounts["__none__"] = stats.noTagCount;

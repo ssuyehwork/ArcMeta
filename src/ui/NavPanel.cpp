@@ -248,8 +248,8 @@ void NavPanel::fetchChildDirs(QStandardItem* parent) {
         struct DirInfo { QString name; QString absPath; bool hasSub; };
         QList<DirInfo> results;
         for (const QFileInfo& info : list) {
-            QDir subDir(info.absoluteFilePath());
-            bool hasSub = !subDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot).isEmpty();
+            // 工业级优化：使用惰性探测替代 entryList 全量扫描
+            bool hasSub = UiHelper::hasSubDirectories(info.absoluteFilePath());
             results << DirInfo{info.fileName(), info.absoluteFilePath(), hasSub};
         }
 

@@ -53,6 +53,11 @@ namespace ArcMeta {
  */
 class UiHelper {
 public:
+    // 2026-06-xx 工业级配置中心：品牌元数据单点维护
+    static constexpr const char* OrganizationName = "ArcMetaTeam";
+    static constexpr const char* OrganizationDomain = "arcmeta.org";
+    static constexpr const char* ApplicationName = "ArcMeta";
+
     static QMap<QString, QPixmap>& iconPixmapCache() {
         static QMap<QString, QPixmap> cache;
         return cache;
@@ -199,7 +204,7 @@ public:
         if (upperExt.isEmpty()) return QColor(60, 60, 60, 180);
         if (s_cache.contains(upperExt)) return s_cache[upperExt];
 
-        QSettings settings("ArcMeta团队", "ArcMeta");
+        QSettings settings;
         QString settingKey = QString("ExtensionColors/%1").arg(upperExt);
         if (settings.contains(settingKey)) {
             QColor color = settings.value(settingKey).value<QColor>();
@@ -333,6 +338,22 @@ public:
     static inline QColor extractDominantColor(const QString& targetFile) {
         auto palette = extractPalette(targetFile);
         return palette.isEmpty() ? QColor() : palette.first().first;
+    }
+
+    /**
+     * @brief 工业级架构：高效判定文件夹是否存在子目录 (取代 entryList)
+     */
+    static bool hasSubDirectories(const QString& path) {
+        QDirIterator it(path, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::NoIteratorFlags);
+        return it.hasNext();
+    }
+
+    /**
+     * @brief 工业级架构：高效判定文件夹是否为空 (取代 entryList)
+     */
+    static bool isDirectoryEmpty(const QString& path) {
+        QDirIterator it(path, QDir::AllEntries | QDir::NoDotAndDotDot, QDirIterator::NoIteratorFlags);
+        return !it.hasNext();
     }
 
 private:
