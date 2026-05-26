@@ -146,11 +146,17 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         QString ext = info.isDir() ? "DIR" : info.suffix().toUpper();
         if (ext.isEmpty()) ext = "FILE";
         QColor badgeColor = UiHelper::getExtensionColor(ext);
+
+        // 2026-06-xx 物理优化：针对无缩略图项应用半透明角标，减少视觉冲击
+        if (!hasThumb) {
+            badgeColor.setAlpha(160);
+        }
+
         QRect extRect(m.cardRect.left() + 8, m.cardRect.top() + 8, 36, 18);
         painter->setPen(Qt::NoPen);
         painter->setBrush(badgeColor);
         painter->drawRoundedRect(extRect, 2, 2);
-        painter->setPen(QColor("#FFFFFF"));
+        painter->setPen(hasThumb ? QColor("#FFFFFF") : QColor(255, 255, 255, 180));
         QFont extFont = painter->font(); extFont.setPointSize(8); extFont.setBold(true);
         painter->setFont(extFont);
         painter->drawText(extRect, Qt::AlignCenter, ext);

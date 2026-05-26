@@ -81,7 +81,7 @@ InlineHueSlider::InlineHueSlider(QWidget* parent) : QWidget(parent) {
 }
 
 void InlineHueSlider::setHue(int h) {
-    m_h = qBound(0, h, 359);
+    m_h = h;
     update();
 }
 
@@ -90,40 +90,81 @@ void InlineHueSlider::paintEvent(QPaintEvent*) {
     painter.setRenderHint(QPainter::Antialiasing);
 
     int margin = 10; 
+    int bwgWidth = 42; // 黑白灰区域总宽
+    int gap = 6;
     int barHeight = 12;
     int barY = (height() - barHeight) / 2;
-    QRectF barRect(margin, barY, width() - 2 * margin, barHeight);
 
-    QLinearGradient grad(barRect.left(), 0, barRect.right(), 0);
-    // 2026-06-xx 按照代码审查建议：将饱和度和明度设为 220，与实际选色逻辑保持一致
-    grad.setColorAt(0.0/6.0, QColor::fromHsv(0, 220, 220));
-    grad.setColorAt(1.0/6.0, QColor::fromHsv(60, 220, 220));
-    grad.setColorAt(2.0/6.0, QColor::fromHsv(120, 220, 220));
-    grad.setColorAt(3.0/6.0, QColor::fromHsv(180, 220, 220));
-    grad.setColorAt(4.0/6.0, QColor::fromHsv(240, 220, 220));
-    grad.setColorAt(5.0/6.0, QColor::fromHsv(300, 220, 220));
-    grad.setColorAt(6.0/6.0, QColor::fromHsv(359, 220, 220));
+    // 1. 绘制黑白灰特殊色块 (3个 14px 宽度的色块)
+    QRectF blackRect(margin, barY, 14, barHeight);
+    QRectF grayRect(margin + 14, barY, 14, barHeight);
+    QRectF whiteRect(margin + 28, barY, 14, barHeight);
 
     painter.setPen(Qt::NoPen);
-    painter.setBrush(grad);
-    painter.drawRoundedRect(barRect, 6, 6);
+    painter.setBrush(Qt::black);
+    painter.drawRect(blackRect);
+    painter.setBrush(QColor("#808080"));
+    painter.drawRect(grayRect);
+    painter.setBrush(Qt::white);
+    painter.drawRect(whiteRect);
+    
+    // 给无色系区域加一个极细的边框，防止白色溢出
+    painter.setPen(QPen(QColor(80, 80, 80, 100), 1));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(margin, barY, bwgWidth, barHeight);
 
-    // Thumb: 16px white circle, 1px dark border
-    double ratio = m_h / 359.0;
-    int tx = margin + ratio * barRect.width();
-    int ty = height() / 2;
+    // 2. 绘制色相渐变区
+    int hueStartX = margin + bwgWidth + gap;
+    int hueWidth = width() - hueStartX - margin;
+    if (hueWidth > 0) {
+        QRectF hueRect(hueStartX, barY, hueWidth, barHeight);
+        QLinearGradient grad(hueRect.left(), 0, hueRect.right(), 0);
+        grad.setColorAt(0.0/6.0, QColor::fromHsv(0, 220, 220));
+        grad.setColorAt(1.0/6.0, QColor::fromHsv(60, 220, 220));
+        grad.setColorAt(2.0/6.0, QColor::fromHsv(120, 220, 220));
+        grad.setColorAt(3.0/6.0, QColor::fromHsv(180, 220, 220));
+        grad.setColorAt(4.0/6.0, QColor::fromHsv(240, 220, 220));
+        grad.setColorAt(5.0/6.0, QColor::fromHsv(300, 220, 220));
+        grad.setColorAt(6.0/6.0, QColor::fromHsv(359, 220, 220));
+
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(grad);
+        painter.drawRoundedRect(hueRect, 2, 2);
+    }
+
+    // 3. 绘制游标 (Thumb)
+    int tx = 0;
+    if (m_h == 1000) tx = blackRect.center().x();
+    else if (m_h == 1001) tx = grayRect.center().x();
+    else if (m_h == 1002) tx = whiteRect.center().x();
+    else {
+        double ratio = qBound(0, m_h, 359) / 359.0;
+        tx = hueStartX + ratio * hueWidth;
+    }
     
     painter.setBrush(Qt::white);
     painter.setPen(QPen(QColor(50, 50, 50), 1));
-    painter.drawEllipse(QPoint(tx, ty), 8, 8);
+    painter.drawEllipse(QPoint(tx, height() / 2), 8, 8);
 }
 
 void InlineHueSlider::updateFromPos(int x) {
     int margin = 10;
-    int barWidth = width() - 2 * margin;
-    if (barWidth <= 0) return;
-    int lx = qBound(0, x - margin, barWidth);
-    m_h = (lx * 359) / barWidth;
+    int bwgWidth = 42;
+    int gap = 6;
+    int hueStartX = margin + bwgWidth + gap;
+
+    if (x < margin + 14) {
+        m_h = 1000; // Black
+    } else if (x < margin + 28) {
+        m_h = 1001; // Gray
+    } else if (x < margin + 42) {
+        m_h = 1002; // White
+    } else {
+        int hueWidth = width() - hueStartX - margin;
+        if (hueWidth <= 0) return;
+        int lx = qBound(0, x - hueStartX, hueWidth);
+        m_h = (lx * 359) / hueWidth;
+    }
     update();
     emit hueChanged(m_h);
 }
@@ -349,42 +390,56 @@ void FilterPanel::rebuildGroups() {
         }
         connect(hueSlider, &InlineHueSlider::sliderReleased, this, [this, hueSlider]() {
             int h = hueSlider->hue();
-            if (h == 0) {
-                // 清除
-                if (!m_hueSliderColor.isEmpty()) {
-                    m_filter.colors.removeAll(m_hueSliderColor);
-                    m_hueSliderColor.clear();
-                    emit filterChanged(m_filter);
-                    rebuildGroups();
-                }
-            } else {
-                QColor c = QColor::fromHsv(h, 220, 220);
-                QString hex = c.name().toUpper();
-                if (!m_hueSliderColor.isEmpty()) {
-                    m_filter.colors.removeAll(m_hueSliderColor);
-                }
-                m_hueSliderColor = hex;
-                if (!m_filter.colors.contains(hex)) {
-                    m_filter.colors.append(hex);
-                }
-                m_filter.colorTolerance = 40;
-                emit filterChanged(m_filter);
-                rebuildGroups();
+            QColor c;
+            if (h == 1000) c = Qt::black;
+            else if (h == 1001) c = QColor("#808080");
+            else if (h == 1002) c = Qt::white;
+            else c = QColor::fromHsv(h, 220, 220);
+
+            QString hex = c.name().toUpper();
+            if (!m_hueSliderColor.isEmpty()) {
+                m_filter.colors.removeAll(m_hueSliderColor);
             }
+            m_hueSliderColor = hex;
+            if (!m_filter.colors.contains(hex)) {
+                m_filter.colors.append(hex);
+            }
+            // 2026-06-xx 按照要求：滑块触发时默认给予 30 容差
+            m_filter.colorTolerance = 30;
+            emit filterChanged(m_filter);
+            rebuildGroups();
         });
         gl->insertWidget(0, hueSlider);
         
         // 追加已被筛选但不在基础列表中的自定义颜色 (相近色)
         for (const QString& key : m_filter.colors) {
-            if (key.startsWith("#")) {
+            if (key.startsWith("#") && !m_colorCounts.contains(key)) {
                 QColor dotC = QColor(key);
-                QCheckBox* cb = addFilterRow(gl, "相近色: " + key, 0, dotC);
+                
+                // 2026-06-xx 物理修复：计算相近色项数，消除 (0) 误导
+                int simCount = 0;
+                for (auto it = m_colorCounts.begin(); it != m_colorCounts.end(); ++it) {
+                    if (it.key().isEmpty()) continue;
+                    QColor c2 = UiHelper::parseColorName(it.key());
+                    if (c2.isValid()) {
+                        long rmean = (dotC.red() + c2.red()) / 2;
+                        long dr = dotC.red() - c2.red();
+                        long dg = dotC.green() - c2.green();
+                        long db = dotC.blue() - c2.blue();
+                        long distSq = (((512 + rmean)*dr*dr) >> 8) + 4*dg*dg + (((767-rmean)*db*db) >> 8);
+                        // 2026-06-xx 按照内核标准：容差 30 对应 15000 平方欧氏距离
+                        if (distSq < 15000) simCount += it.value();
+                    }
+                }
+
+                QCheckBox* cb = addFilterRow(gl, "相近色: " + key, simCount, dotC);
                 cb->blockSignals(true);
                 cb->setChecked(true);
                 cb->blockSignals(false);
                 connect(cb, &QCheckBox::toggled, this, [this, key](bool on) {
                     if (!on) {
                         m_filter.colors.removeAll(key);
+                        if (m_hueSliderColor == key) m_hueSliderColor.clear();
                         emit filterChanged(m_filter);
                         rebuildGroups();
                     }
