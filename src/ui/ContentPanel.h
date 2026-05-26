@@ -58,6 +58,10 @@ public:
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
     bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
+    Qt::ItemFlags flags(const QModelIndex& index) const override;
+    QStringList mimeTypes() const override;
+    QMimeData* mimeData(const QModelIndexList& indexes) const override;
+    Qt::DropActions supportedDragActions() const override;
 
     // 虚拟化加载
     bool canFetchMore(const QModelIndex& parent) const override;
@@ -68,14 +72,20 @@ public:
 
     const std::vector<ArcMeta::ItemRepo::ItemRecord>& allRecords() const { return m_allRecords; }
 
+    void setZoomLevel(int level);
+
 private:
     std::vector<ArcMeta::ItemRepo::ItemRecord> m_allRecords;
     int m_displayCount = 0;
+    int m_zoomLevel = 128;
 
     mutable QCache<QString, QIcon> m_iconCache;
     mutable QSet<QString> m_requestedIcons;
     mutable QMap<QString, double> m_aspectRatios;
     mutable QCache<QString, ArcMeta::RuntimeMeta> m_metaCache;
+
+    // 工业级加速：路径到行号的映射
+    QHash<QString, QVector<int>> m_pathToRows;
 };
 
 /**

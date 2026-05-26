@@ -61,8 +61,9 @@ public:
         bool isDir = false;
         bool isCategory = false;
         int categoryId = 0;
-        QString categoryName;
-        QString categoryColor;
+        // 工业级精简：移除冗余字段，改为从 CategoryRepo 或 MetadataManager 动态获取
+        // QString categoryName;
+        // QString categoryColor;
     };
 
     /**

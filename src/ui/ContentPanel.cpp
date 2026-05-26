@@ -68,6 +68,25 @@ namespace ArcMeta {
 FerrexVirtualDbModel::FerrexVirtualDbModel(QObject* parent) : QAbstractTableModel(parent) {
     m_iconCache.setMaxCost(500);
     m_metaCache.setMaxCost(1000);
+
+    // 2026-06-xx 工业级修复：建立元数据变更的实时响应机制，确保缓存一致性
+    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
+        if (path == "__RELOAD_ALL__") {
+            m_metaCache.clear();
+            emit layoutChanged();
+            return;
+        }
+
+        // 2026-06-xx 工业级优化：使用哈希映射瞬间定位受影响的行，杜绝 O(N) 遍历
+        m_metaCache.remove(path);
+        if (m_pathToRows.contains(path)) {
+            for (int row : m_pathToRows.value(path)) {
+                if (row < m_displayCount) {
+                    emit dataChanged(index(row, 0), index(row, 7));
+                }
+            }
+        }
+    });
 }
 
 int FerrexVirtualDbModel::rowCount(const QModelIndex& parent) const {
@@ -86,19 +105,21 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     QString path = record.path;
 
     if (record.isCategory) {
-        if (role == Qt::DisplayRole || role == Qt::EditRole) {
-            switch (index.column()) {
-                case 0: return record.categoryName;
-                case 5: return "子分类";
-                default: return "";
+        // 工业级优化：分类信息动态获取，杜绝内存中的重复字符串
+        if (role == Qt::DisplayRole || role == Qt::EditRole || role == ColorRole) {
+            auto allCats = CategoryRepo::getAll();
+            for (const auto& c : allCats) {
+                if (c.id == record.categoryId) {
+                    if (role == ColorRole) return QString::fromStdWString(c.color);
+                    if (index.column() == 0) return QString::fromStdWString(c.name);
+                    if (index.column() == 5) return "子分类";
+                    return "";
+                }
             }
-        } else if (role == CategoryIdRole) {
-            return record.categoryId;
-        } else if (role == ColorRole) {
-            return record.categoryColor;
-        } else if (role == TypeRole) {
-            return "category";
-        } else if (role == Qt::DecorationRole && index.column() == 0) {
+        }
+        if (role == CategoryIdRole) return record.categoryId;
+        if (role == TypeRole) return "category";
+        if (role == Qt::DecorationRole && index.column() == 0) {
             static QIcon catIcon = QFileIconProvider().icon(QFileIconProvider::Folder);
             return catIcon;
         }
@@ -163,7 +184,9 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         if (!m_requestedIcons.contains(path)) {
             m_requestedIcons.insert(path);
             auto* mutableThis = const_cast<FerrexVirtualDbModel*>(this);
-            (void)QtConcurrent::run([mutableThis, path]() {
+            int iconSize = m_zoomLevel; // 物理对齐当前缩放级
+
+            (void)QtConcurrent::run([mutableThis, path, iconSize]() {
                 QFileInfo info(path);
                 QString ext = info.suffix().toLower();
                 QIcon icon;
@@ -173,7 +196,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                 if (ext == "svg") {
                     QSvgRenderer renderer(path);
                     if (renderer.isValid()) {
-                        QPixmap pix(128, 128);
+                        QPixmap pix(iconSize, iconSize);
                         pix.fill(Qt::transparent);
                         QPainter painter(&pix);
                         renderer.render(&painter);
@@ -182,7 +205,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                         hasThumb = true;
                     }
                 } else if (UiHelper::isGraphicsFile(ext)) {
-                    QImage img = UiHelper::getShellThumbnail(path, 128);
+                    QImage img = UiHelper::getShellThumbnail(path, iconSize);
                     if (!img.isNull()) {
                         icon = QIcon(QPixmap::fromImage(img));
                         ar = (double)img.width() / img.height();
@@ -191,18 +214,20 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                 }
 
                 if (icon.isNull()) {
-                    icon = UiHelper::getFileIcon(path, 128);
+                    icon = UiHelper::getFileIcon(path, iconSize);
                 }
 
                 QMetaObject::invokeMethod(mutableThis, [mutableThis, path, icon, ar, hasThumb]() {
                     mutableThis->m_iconCache.insert(path, new QIcon(icon));
                     if (hasThumb) mutableThis->m_aspectRatios[path] = ar;
 
-                    // 局部刷新，提高性能
-                    for (int i = 0; i < mutableThis->m_displayCount; ++i) {
-                        if (mutableThis->m_allRecords[i].path == path) {
-                            emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
-                            break;
+                    // 工业级优化：利用索引瞬间完成局部通知
+                    if (mutableThis->m_pathToRows.contains(path)) {
+                        for (int row : mutableThis->m_pathToRows.value(path)) {
+                            if (row < mutableThis->m_displayCount) {
+                                emit mutableThis->dataChanged(mutableThis->index(row, 0), mutableThis->index(row, 0),
+                                                            {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+                            }
                         }
                     }
                 });
@@ -223,13 +248,53 @@ QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientati
 }
 
 bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& value, int role) {
-    Q_UNUSED(value);
     if (!index.isValid()) return false;
 
-    // 虚拟模型中 setData 主要用于触发 UI 刷新，实际持久化由 MetadataManager 处理
-    // 或是用于 QSortFilterProxyModel 的 mapToSource 联动
+    // 针对 EditRole 的物理写入转发 (如重命名)
+    if (role == Qt::EditRole) {
+        // 更新本地 Record 缓存以提供即时视觉反馈
+        m_allRecords[index.row()].path = value.toString();
+        // 失效元数据缓存，强制下一次读取时重查
+        m_metaCache.remove(m_allRecords[index.row()].path);
+    }
+
     emit dataChanged(index, index, {role});
     return true;
+}
+
+Qt::ItemFlags FerrexVirtualDbModel::flags(const QModelIndex& index) const {
+    if (!index.isValid()) return Qt::NoItemFlags;
+    Qt::ItemFlags f = Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+    if (index.column() == 0) f |= Qt::ItemIsEditable; // 仅名称列可编辑
+    f |= Qt::ItemIsDragEnabled; // 工业级加固：恢复拖拽能力
+    return f;
+}
+
+QStringList FerrexVirtualDbModel::mimeTypes() const {
+    return {"text/uri-list"};
+}
+
+QMimeData* FerrexVirtualDbModel::mimeData(const QModelIndexList& indexes) const {
+    QMimeData* mime = new QMimeData();
+    QList<QUrl> urls;
+    QSet<int> rows;
+    for (const auto& idx : indexes) {
+        if (idx.isValid()) rows.insert(idx.row());
+    }
+    for (int row : rows) {
+        if (row < (int)m_allRecords.size()) {
+            QString path = m_allRecords[row].path;
+            if (!path.isEmpty() && path != "computer://") {
+                urls << QUrl::fromLocalFile(path);
+            }
+        }
+    }
+    mime->setUrls(urls);
+    return mime;
+}
+
+Qt::DropActions FerrexVirtualDbModel::supportedDragActions() const {
+    return Qt::CopyAction | Qt::MoveAction;
 }
 
 bool FerrexVirtualDbModel::canFetchMore(const QModelIndex& parent) const {
@@ -254,7 +319,26 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ArcMeta::ItemRepo::ItemR
     m_requestedIcons.clear();
     m_aspectRatios.clear();
     m_metaCache.clear();
+
+    // 工业级索引构建：为路径建立行号映射，支持 O(1) 反向查找
+    m_pathToRows.clear();
+    for (int i = 0; i < (int)m_allRecords.size(); ++i) {
+        if (!m_allRecords[i].path.isEmpty()) {
+            m_pathToRows[m_allRecords[i].path].push_back(i);
+        }
+    }
+
     endResetModel();
+}
+
+void FerrexVirtualDbModel::setZoomLevel(int level) {
+    if (m_zoomLevel != level) {
+        m_zoomLevel = level;
+        // 物理清理图标缓存，确保重新生成符合新尺寸的图标
+        m_iconCache.clear();
+        m_requestedIcons.clear();
+        emit layoutChanged();
+    }
 }
 
 void FerrexVirtualDbModel::clear() {
@@ -566,6 +650,11 @@ void ContentPanel::updateGridSize() {
     
     if (m_viewStack->currentWidget() == m_gridView) {
         m_zoomLevel = qBound(96, m_zoomLevel, 128);
+    }
+
+    // 工业级同步：将缩放状态实时注入模型
+    if (m_model) {
+        m_model->setZoomLevel(m_zoomLevel);
     }
 
     // 写入实时日志 
@@ -1622,8 +1711,6 @@ void ContentPanel::loadCategory(int categoryId) {
             ItemRepo::ItemRecord r;
             r.isCategory = true;
             r.categoryId = cat.id;
-            r.categoryName = QString::fromStdWString(cat.name);
-            r.categoryColor = QString::fromStdWString(cat.color).isEmpty() ? "#aaaaaa" : QString::fromStdWString(cat.color);
             allRecords.push_back(r);
         }
     }
