@@ -40,6 +40,11 @@ public:
     const std::map<std::wstring, ItemMeta>& items() const { return m_items; }
 
     /**
+     * @brief 移除指定文件名的元数据条目
+     */
+    void remove(const std::wstring& fileName) { m_items.erase(fileName); }
+
+    /**
      * @brief 静态辅助方法：重命名元数据条目
      */
     static bool renameItem(const QString& folderPath, const QString& oldName, const QString& newName);

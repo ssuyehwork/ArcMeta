@@ -8,6 +8,7 @@
 #include "DropTreeView.h" 
 #include "DropListView.h" 
 #include "DropJustifiedView.h"
+#include "ProgressDialog.h"
 #include "ThumbnailDelegate.h"
 #include "ToolTipOverlay.h" 
  
@@ -24,6 +25,7 @@
 #include <QMenu> 
 #include <QAbstractItemView> 
 #include <QStandardItem> 
+#include <QSettings>
 #include <QEvent> 
 #include <QKeyEvent> 
 #include <QMouseEvent> 
@@ -56,6 +58,7 @@
 #include <QSqlQuery> 
 #include <windows.h> 
 #include <shellapi.h> 
+#include <io.h>
 #include "../meta/MetadataManager.h" 
 #include "../meta/BatchRenameEngine.h" 
 #include "../db/CategoryRepo.h" 
@@ -1412,10 +1415,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 progress->show();
 
                 QPointer<ContentPanel> weakThis(this);
-                (void)QtConcurrent::run([weakThis, targetPaths, action, progress]() {
+                QPointer<ProgressDialog> weakProgress(progress);
+                (void)QtConcurrent::run([weakThis, targetPaths, action, weakProgress]() {
                     int count = 0;
                     for (const QString& p : targetPaths) {
-                        if (!weakThis) return;
+                        if (!weakThis || !weakProgress) return;
                         std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
 
                         // 1. 物理抹除
@@ -1448,6 +1452,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                                     written += toWrite;
                                                 }
                                                 file.flush();
+                                                // 2026-06-xx 物理对齐：调用 Windows API 强制落盘，确保覆写数据真实写入扇区
+                                                HANDLE hFile = (HANDLE)_get_osfhandle(file.handle());
+                                                if (hFile != INVALID_HANDLE_VALUE) {
+                                                    FlushFileBuffers(hFile);
+                                                }
                                             }
                                         }
                                         file.close();
@@ -1483,19 +1492,19 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         }
 
                         count++;
-                        QMetaObject::invokeMethod(progress, [progress, count, targetPaths]() {
-                            progress->setValue((int)((float)count / targetPaths.size() * 100));
+                        QMetaObject::invokeMethod(weakProgress.data(), [weakProgress, count, targetPaths]() {
+                            if (weakProgress) weakProgress->setValue((int)((float)count / targetPaths.size() * 100));
                         });
                     }
 
-                    QMetaObject::invokeMethod(qApp, [weakThis, progress]() {
+                    QMetaObject::invokeMethod(qApp, [weakThis, weakProgress]() {
+                        if (weakProgress) {
+                            weakProgress->accept();
+                            weakProgress->deleteLater();
+                        }
                         if (weakThis) {
-                            progress->accept();
-                            progress->deleteLater();
                             weakThis->loadDirectory(weakThis->m_currentPath);
                             ToolTipOverlay::instance()->showText(QCursor::pos(), "深层抹除已完成，关联记录已物理清空", 1500, QColor("#2ecc71"));
-                        } else {
-                            progress->deleteLater();
                         }
                     });
                 });

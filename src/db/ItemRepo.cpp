@@ -160,16 +160,26 @@ bool ItemRepo::physicalRemove(const std::wstring& path) {
 
     db.transaction();
 
-    // 1. 递归获取所有受影响项目的 File ID
+    // 1. 递归获取所有受影响项目的 File ID 和 标签
     QStringList fids;
+    QStringList allTags;
     QSqlQuery qf(db);
-    qf.prepare("SELECT file_id_128 FROM items WHERE path = ? OR path LIKE ?");
+    qf.prepare("SELECT file_id_128, tags FROM items WHERE path = ? OR path LIKE ?");
     qf.addBindValue(qPath);
     qf.addBindValue(pathPattern);
     if (qf.exec()) {
         while (qf.next()) {
             QString fid = qf.value(0).toString();
             if (!fid.isEmpty()) fids << fid;
+
+            QString tagsJson = qf.value(1).toString();
+            if (!tagsJson.isEmpty()) {
+                QJsonDocument doc = QJsonDocument::fromJson(tagsJson.toUtf8());
+                if (doc.isArray()) {
+                    QJsonArray arr = doc.array();
+                    for (const auto& v : arr) allTags << v.toString();
+                }
+            }
         }
     }
 
@@ -187,8 +197,10 @@ bool ItemRepo::physicalRemove(const std::wstring& path) {
         for (int i = 0; i < fids.size(); i += batchSize) {
             QStringList batch = fids.mid(i, batchSize);
             QSqlQuery q2(db);
+            QStringList placeholders;
+            for (int k = 0; k < batch.size(); ++k) placeholders << "?";
             QString sql = QString("DELETE FROM category_items WHERE file_id_128 IN (%1)")
-                          .arg(QStringList(batch.size(), "?").join(","));
+                          .arg(placeholders.join(","));
             q2.prepare(sql);
             for (const QString& fid : batch) q2.addBindValue(fid);
             if (!q2.exec()) {
@@ -205,7 +217,18 @@ bool ItemRepo::physicalRemove(const std::wstring& path) {
     q3.addBindValue(pathPattern);
     bool ok3 = q3.exec();
 
-    if (ok1 && ok2 && ok3) {
+    // 5. 修正标签计数
+    bool ok4 = true;
+    if (!allTags.isEmpty()) {
+        for (const QString& tag : allTags) {
+            QSqlQuery qt(db);
+            qt.prepare("UPDATE tags SET item_count = MAX(0, item_count - 1) WHERE tag = ?");
+            qt.addBindValue(tag);
+            if (!qt.exec()) { ok4 = false; break; }
+        }
+    }
+
+    if (ok1 && ok2 && ok3 && ok4) {
         db.commit();
         return true;
     } else {
