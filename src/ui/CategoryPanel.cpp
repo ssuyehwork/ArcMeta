@@ -1,3 +1,4 @@
+#include <functional>
 #include "CategoryPanel.h"
 #include "CategoryModel.h"
 #include "CategoryLockDialog.h"
@@ -958,8 +959,8 @@ void CategoryPanel::initUi() {
 
                     // 2026-06-xx 按照用户要求：针对特定格式文件，在拖拽导入时自动进行颜色解析
                     QString ext = info.suffix().toLower();
-                    static const QSet<QString> targetExts = {"psd", "ai", "eps", "png", "jpg", "jpeg"};
-                    if (targetExts.contains(ext)) {
+
+                    if (UiHelper::isGraphicsFile(ext)) {
                         // 1. 提取全量色板
                         auto palette = UiHelper::extractPalette(itemPath);
                         if (!palette.isEmpty()) {
@@ -1054,6 +1055,37 @@ void CategoryPanel::initUi() {
     // 2026-03-xx 物理记忆：连接展开/折叠信号，实时持久化
     connect(m_categoryTree, &QTreeView::expanded, this, &CategoryPanel::saveExpandedStateToSettings);
     connect(m_categoryTree, &QTreeView::collapsed, this, &CategoryPanel::saveExpandedStateToSettings);
+
+    // 2026-06-xx 物理同步：支持内部拖拽重排持久化
+    connect(m_categoryModel, &QAbstractItemModel::rowsMoved, this, [this](const QModelIndex&, int, int, const QModelIndex&, int) {
+        // 核心逻辑：深度优先遍历“我的分类”子树，根据 UI 层级物理同步 DB 中的 parent_id 与 sort_order
+        std::function<void(const QModelIndex&, int)> syncSubtree;
+        syncSubtree = [&](const QModelIndex& parentIdx, int parentIdInDb) {
+            for (int i = 0; i < m_categoryModel->rowCount(parentIdx); ++i) {
+                QModelIndex childIdx = m_categoryModel->index(i, 0, parentIdx);
+                int id = childIdx.data(CategoryModel::IdRole).toInt();
+                QString type = childIdx.data(CategoryModel::TypeRole).toString();
+
+                if (type == "category" && id > 0) {
+                    auto all = CategoryRepo::getAll();
+                    for (auto& cat : all) {
+                        if (cat.id == id) {
+                            if (cat.parentId != parentIdInDb || cat.sortOrder != i) {
+                                cat.parentId = parentIdInDb;
+                                cat.sortOrder = i;
+                                CategoryRepo::update(cat);
+                            }
+                            break;
+                        }
+                    }
+                    syncSubtree(childIdx, id);
+                } else if (childIdx.data(CategoryModel::NameRole).toString() == "我的分类") {
+                    syncSubtree(childIdx, 0);
+                }
+            }
+        };
+        syncSubtree(QModelIndex(), -1);
+    });
 }
 
 void CategoryPanel::saveExpandedStateToSettings() {
@@ -1166,4 +1198,3 @@ bool CategoryPanel::eventFilter(QObject* obj, QEvent* event) {
     return QFrame::eventFilter(obj, event);
 }
 
-} // namespace ArcMeta

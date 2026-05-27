@@ -206,7 +206,11 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                     if (!img.isNull()) {
                         icon = QIcon(QPixmap::fromImage(img));
                         ar = (double)img.width() / img.height();
-                        hasThumb = true;
+                        // 2026-06-xx 物理纠偏：仅当缩略图尺寸足够大时，才标记 HasThumbnailRole 为 true。
+                        // 这样 ThumbnailDelegate 在绘制时能正确区分“真实缩略图”与“回退图标”。
+                        if (img.width() >= 64 && img.height() >= 64) {
+                            hasThumb = true;
+                        }
                     }
                 }
 
@@ -1376,7 +1380,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionCut: performCopy(true); break; 
         case ActionPaste: performPaste(); break; 
         case ActionDelete: { 
-            std::wstring wpath = path.toStdWString() + L'\0' + L'\0'; 
+            std::wstring wpath = path.toStdWString(); wpath.push_back(L'\0'); wpath.push_back(L'\0');
             SHFILEOPSTRUCTW fileOp = { 0 }; 
             fileOp.wFunc = FO_DELETE; 
             fileOp.pFrom = wpath.c_str(); 

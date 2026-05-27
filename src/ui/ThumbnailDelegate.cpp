@@ -98,10 +98,25 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     painter->drawRect(m.cardRect);
 
     if (hasThumb && !thumb.isNull()) {
-        QPixmap scaled = thumb.scaled(m.cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        int x = m.cardRect.center().x() - scaled.width() / 2;
-        int y = m.cardRect.center().y() - scaled.height() / 2;
-        painter->drawPixmap(x, y, scaled);
+        // 2026-06-xx 物理纠偏：增加“真实缩略图”校验逻辑。
+        // 如果虽然标记为 hasThumb，但返回的 pixmap 尺寸极小（如 16x16）或者是标准的长宽比，
+        // 则很有可能是 Shell 引擎回退到了普通图标。此时严禁使用 KeepAspectRatioByExpanding 强行拉伸，
+        // 否则会出现严重的马赛克现象，应降级为居中绘制。
+        bool isRealThumbnail = (thumb.width() >= 64 && thumb.height() >= 64);
+
+        if (isRealThumbnail) {
+            QPixmap scaled = thumb.scaled(m.cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+            int x = m.cardRect.center().x() - scaled.width() / 2;
+            int y = m.cardRect.center().y() - scaled.height() / 2;
+            painter->drawPixmap(x, y, scaled);
+        } else {
+            // 降级：作为图标居中绘制
+            int iconSize = qMin(m.cardRect.width(), m.cardRect.height()) * 0.6;
+            QRect iconRect(m.cardRect.center().x() - iconSize / 2,
+                           m.cardRect.center().y() - iconSize / 2,
+                           iconSize, iconSize);
+            painter->drawPixmap(iconRect, thumb.scaled(iconRect.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        }
     } else {
         QIcon icon = qvariant_cast<QIcon>(decoData);
         if (!icon.isNull()) {

@@ -27,8 +27,9 @@ void DropTreeView::dragEnterEvent(QDragEnterEvent* event) {
 }
 
 void DropTreeView::dragMoveEvent(QDragMoveEvent* event) {
-    if (event->mimeData()->hasUrls()) {
-        // 2026-06-xx 按照用户要求：实现拖拽过程中的目标项实时高亮
+    // 2026-06-xx 按照用户要求：支持内部拖拽重排与外部拖拽入库共存
+    // 逻辑：如果是从本视图发起的拖拽，通常是内部重排逻辑
+    if (event->mimeData()->hasUrls() && event->source() != this) {
         QModelIndex idx = indexAt(event->position().toPoint());
         if (idx.isValid()) setCurrentIndex(idx);
         event->acceptProposedAction();
@@ -38,7 +39,9 @@ void DropTreeView::dragMoveEvent(QDragMoveEvent* event) {
 }
 
 void DropTreeView::dropEvent(QDropEvent* event) {
-    if (event->mimeData()->hasUrls()) {
+    // 2026-06-xx 物理纠偏：只有当拖拽源不是本视图时，才判定为“归类/导入”
+    // 理由：防止在侧边栏内部调整分类顺序时意外触发文件导入逻辑
+    if (event->mimeData()->hasUrls() && event->source() != this) {
         QStringList paths;
         for (const QUrl& url : event->mimeData()->urls()) {
             if (url.isLocalFile()) {
@@ -51,6 +54,7 @@ void DropTreeView::dropEvent(QDropEvent* event) {
         }
         event->acceptProposedAction();
     } else {
+        // 内部拖拽：转发给系统，触发 model->dropMimeData 处理重排，并通过 rowsMoved 信号同步 DB
         QTreeView::dropEvent(event);
     }
 }
@@ -70,11 +74,9 @@ void DropTreeView::startDrag(Qt::DropActions supportedActions) {
         // 2026-03-xx 物理还原：兼容性提取逻辑
         // NavPanel 使用 UserRole+1 (硬编码)，ContentPanel 使用 PathRole (枚举)
         QString path = idx.data(Qt::UserRole + 1).toString(); 
-        Logger::log(QString("[树形视图] 正在尝试提取 Role+1 (导航面板) 对于 %1 : %2").arg(idx.data().toString()).arg(path));
         
         if (path.isEmpty() || !QFileInfo::exists(path)) {
             path = idx.data(PathRole).toString(); 
-            Logger::log(QString("[树形视图] 正在尝试提取 PathRole (内容面板) 对于 %1 : %2").arg(idx.data().toString()).arg(path));
         }
         
         if (!path.isEmpty() && QFileInfo::exists(path)) {
@@ -82,10 +84,6 @@ void DropTreeView::startDrag(Qt::DropActions supportedActions) {
         }
     }
     
-    QStringList urlStrs;
-    for(const QUrl& u : urls) urlStrs << u.toString();
-    Logger::log(QString("[树形视图] 最终注入的物理路径列表: %1").arg(urlStrs.join(",")));
-
     if (!urls.isEmpty()) {
         mimeData->setUrls(urls);
     }
@@ -99,7 +97,6 @@ void DropTreeView::startDrag(Qt::DropActions supportedActions) {
     drag->setPixmap(pix);
     drag->setHotSpot(QPoint(0, 0));
     
-    Logger::log("[树形视图] 执行拖拽操作...");
     drag->exec(supportedActions, Qt::MoveAction);
 }
 

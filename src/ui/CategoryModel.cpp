@@ -231,8 +231,12 @@ Qt::DropActions CategoryModel::supportedDropActions() const {
 }
 
 bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction action, int row, int column, const QModelIndex& parent) {
-    // 2026-06-xx 物理修复：如果是外部 URL/路径拖入，放宽校验限制。
-    // 允许在侧边栏任意位置释放，由 CategoryPanel 处理具体的分类归属逻辑。
+    // 核心判定：如果是内部移动（MoveAction）且包含内部项数据，交由基类处理重排
+    if (action == Qt::MoveAction && mimeData->hasFormat("application/x-qabstractitemmodeldatalist")) {
+        return QStandardItemModel::dropMimeData(mimeData, action, row, column, parent);
+    }
+
+    // 允许外部 URL 或路径拖入（由 CategoryPanel 的信号处理）
     if (mimeData->hasUrls() || mimeData->hasFormat("text/plain")) {
         return true;
     }

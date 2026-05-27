@@ -341,8 +341,8 @@ public:
         QDir().mkpath(cacheDir);
 
         QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v13 标识，强制失效旧缓存
-        QString hashKey = QString("%1_%2_%3_%4_v13").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v14 标识，强制失效旧缓存
+        QString hashKey = QString("%1_%2_%3_%4_v14").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
         QString safeName = QString::number(qHash(hashKey), 16) + ".png";
         QString cachePath = cacheDir + safeName;
 
@@ -352,65 +352,79 @@ public:
         }
 
 #ifdef Q_OS_WIN
+        // 2026-06-xx 物理加固：确保 COM 环境初始化，解决异步线程中 Shell API 偶发性失效问题
+        HRESULT hrCo = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
         PIDLIST_ABSOLUTE pidl = nullptr;
         HRESULT hr = SHParseDisplayName(path.toStdWString().c_str(), nullptr, &pidl, 0, nullptr);
-        if (FAILED(hr)) return QImage();
-        IShellItem* pItem = nullptr;
-        hr = SHCreateItemFromIDList(pidl, IID_IShellItem, (void**)&pItem);
-        ILFree(pidl);
         if (SUCCEEDED(hr)) {
-            IShellItemImageFactory* pFactory = nullptr;
-            hr = pItem->QueryInterface(IID_IShellItemImageFactory, (void**)&pFactory);
+            IShellItem* pItem = nullptr;
+            hr = SHCreateItemFromIDList(pidl, IID_IShellItem, (void**)&pItem);
+            ILFree(pidl);
             if (SUCCEEDED(hr)) {
-                SIZE nativeSize = { size, size };
-                HBITMAP hBitmap = nullptr;
-                hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
-                if (SUCCEEDED(hr) && hBitmap) {
-                    BITMAP bmpInfo;
-                    GetObject(hBitmap, sizeof(bmpInfo), &bmpInfo);
-                    int w = bmpInfo.bmWidth;
-                    int h = std::abs(bmpInfo.bmHeight);
+                IShellItemImageFactory* pFactory = nullptr;
+                hr = pItem->QueryInterface(IID_IShellItemImageFactory, (void**)&pFactory);
+                if (SUCCEEDED(hr)) {
+                    SIZE nativeSize = { size, size };
+                    HBITMAP hBitmap = nullptr;
+                    // 2026-06-xx 物理纠偏：移除 SIIGBF_THUMBNAILONLY 限制，允许对不支持缩略图的格式回退到高质量图标
+                    hr = pFactory->GetImage(nativeSize, SIIGBF_RESIZETOFIT, &hBitmap);
+                    if (SUCCEEDED(hr) && hBitmap) {
+                        BITMAP bmpInfo;
+                        GetObject(hBitmap, sizeof(bmpInfo), &bmpInfo);
+                        int w = bmpInfo.bmWidth;
+                        int h = std::abs(bmpInfo.bmHeight);
 
-                    BITMAPINFOHEADER bi = {};
-                    bi.biSize        = sizeof(BITMAPINFOHEADER);
-                    bi.biWidth       = w;
-                    bi.biHeight      = -h;   // 负值 = top-down，方向永远正确
-                    bi.biPlanes      = 1;
-                    bi.biBitCount    = 32;
-                    bi.biCompression = BI_RGB;
+                        BITMAPINFOHEADER bi = {};
+                        bi.biSize        = sizeof(BITMAPINFOHEADER);
+                        bi.biWidth       = w;
+                        bi.biHeight      = -h;
+                        bi.biPlanes      = 1;
+                        bi.biBitCount    = 32;
+                        bi.biCompression = BI_RGB;
 
-                    QByteArray pixels(w * h * 4, 0);
-                    HDC hdc = GetDC(nullptr);
-                    GetDIBits(hdc, hBitmap, 0, h, pixels.data(),
-                              reinterpret_cast<BITMAPINFO*>(&bi), DIB_RGB_COLORS);
-                    ReleaseDC(nullptr, hdc);
+                        QByteArray pixels(w * h * 4, 0);
+                        HDC hdc = GetDC(nullptr);
+                        GetDIBits(hdc, hBitmap, 0, h, pixels.data(),
+                                  reinterpret_cast<BITMAPINFO*>(&bi), DIB_RGB_COLORS);
+                        ReleaseDC(nullptr, hdc);
 
-                    // Windows 返回 BGRA，Qt 需要 RGBA，交换 R/B 通道
-                    uint8_t* p = reinterpret_cast<uint8_t*>(pixels.data());
-                    for (int i = 0; i < w * h; ++i) {
-                        std::swap(p[i * 4 + 0], p[i * 4 + 2]);
+                        uint8_t* p = reinterpret_cast<uint8_t*>(pixels.data());
+                        for (int i = 0; i < w * h; ++i) {
+                            std::swap(p[i * 4 + 0], p[i * 4 + 2]);
+                        }
+
+                        QImage img(p, w, h, w * 4, QImage::Format_RGBA8888);
+                        img = img.copy();
+
+                        (void)QtConcurrent::run([img, cachePath]() {
+                            img.save(cachePath, "PNG");
+                        });
+
+                        DeleteObject(hBitmap);
+                        pFactory->Release();
+                        pItem->Release();
+                        if (SUCCEEDED(hrCo)) CoUninitialize();
+                        return img;
                     }
-
-                    QImage img(p, w, h, w * 4, QImage::Format_RGBA8888);
-                    img = img.copy(); // 确保数据所有权
-                    
-                    // 异步存入磁盘缓存
-                    (void)QtConcurrent::run([img, cachePath]() {
-                        img.save(cachePath, "PNG");
-                    });
-
-                    DeleteObject(hBitmap);
                     pFactory->Release();
-                    pItem->Release();
-                    return img;
                 }
-                pFactory->Release();
+                pItem->Release();
             }
-            pItem->Release();
         }
-#else
-        Q_UNUSED(path); Q_UNUSED(size);
+        if (SUCCEEDED(hrCo)) CoUninitialize();
 #endif
+
+        // 2026-06-xx 物理回退：如果 Shell 引擎失效（如 .ai 缺失扩展支持），尝试 Qt 原生加载
+        QImage fallback;
+        if (fallback.load(path)) {
+            QImage scaled = fallback.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            (void)QtConcurrent::run([scaled, cachePath]() {
+                scaled.save(cachePath, "PNG");
+            });
+            return scaled;
+        }
+
         return QImage();
     }
 };
