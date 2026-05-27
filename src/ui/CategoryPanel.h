@@ -3,6 +3,9 @@
 #include <QFrame>
 #include <QTreeView>
 #include <QVBoxLayout>
+#include <QPushButton>
+#include <QSet>
+#include <QModelIndex>
 
 namespace ArcMeta {
 
