@@ -85,6 +85,18 @@ void CategoryPanel::selectCategory(int id) {
 
 void CategoryPanel::deferredInit() {
     qDebug() << "[CategoryPanel] deferredInit 开始执行";
+
+    // 2026-06-xx 物理同步：根据持久化状态初始化底层引擎
+    QSettings settings("ArcMeta团队", "ArcMeta");
+    bool isJson = settings.value("Category/IsJsonMode", false).toBool();
+
+    CategoryRepo::setJsonMode(isJson);
+    if (isJson) {
+        MetadataManager::instance().initFromJsonMode();
+    } else {
+        MetadataManager::instance().initFromDatabase();
+    }
+
     // 2026-04-12 关键修复：延迟执行数据库数据加载
     if (m_categoryModel) {
         m_categoryModel->deferredRefresh();
@@ -649,27 +661,39 @@ void CategoryPanel::initUi() {
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
 
-    // 2026-05-17 按照用户要求：在“手动全量扫描与对账”按钮左侧新增一个开关切换按钮，暂时设为空壳
-    QPushButton* btnSwitch = new QPushButton(header);
-    btnSwitch->setFixedSize(24, 24);
-    btnSwitch->setCheckable(true);
-    btnSwitch->setFlat(true);
-    btnSwitch->setCursor(Qt::PointingHandCursor);
-    btnSwitch->setIcon(UiHelper::getIcon("switch_off", QColor("#B0B0B0")));
-    btnSwitch->setIconSize(QSize(16, 16));
-    btnSwitch->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }");
-    btnSwitch->setProperty("tooltipText", "工作模式切换：关闭采用数据库模式，开启采用JSON内存模式");
-    btnSwitch->installEventFilter(this);
-    connect(btnSwitch, &QPushButton::toggled, this, [this, btnSwitch](bool checked) {
+    // 2026-05-17 按照用户要求：在“手动全量扫描与对账”按钮左侧新增一个开关切换按钮
+    // 2026-06-xx 物理增强：实现状态持久化加载 (方案 A)
+    m_btnSwitch = new QPushButton(header);
+    m_btnSwitch->setFixedSize(24, 24);
+    m_btnSwitch->setCheckable(true);
+    m_btnSwitch->setFlat(true);
+    m_btnSwitch->setCursor(Qt::PointingHandCursor);
+    m_btnSwitch->setIconSize(QSize(16, 16));
+    m_btnSwitch->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }");
+    m_btnSwitch->installEventFilter(this);
+
+    // 回填初始状态
+    QSettings settings("ArcMeta团队", "ArcMeta");
+    bool isJsonMode = settings.value("Category/IsJsonMode", false).toBool();
+    m_btnSwitch->setChecked(isJsonMode);
+    if (isJsonMode) {
+        m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", QColor("#2ecc71")));
+        m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为JSON模式（内存）");
+    } else {
+        m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", QColor("#B0B0B0")));
+        m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
+    }
+
+    connect(m_btnSwitch, &QPushButton::toggled, this, [this](bool checked) {
         // 先发拉起物理对账同步，确保双轨数据一致、零数据落差平滑迁移！
         CategoryRepo::syncDatabaseAndJson();
 
         if (checked) {
-            btnSwitch->setIcon(UiHelper::getIcon("switch_on", QColor("#2ecc71")));
-            btnSwitch->setProperty("tooltipText", "工作模式切换：当前为JSON模式（内存）");
+            m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", QColor("#2ecc71")));
+            m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为JSON模式（内存）");
         } else {
-            btnSwitch->setIcon(UiHelper::getIcon("switch_off", QColor("#B0B0B0")));
-            btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
+            m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", QColor("#B0B0B0")));
+            m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
         }
 
         // 1. 设置底层分类库模式
@@ -682,12 +706,16 @@ void CategoryPanel::initUi() {
             MetadataManager::instance().initFromDatabase();
         }
 
-        // 3. 树模型重新拉取
+        // 3. 持久化状态
+        QSettings s("ArcMeta团队", "ArcMeta");
+        s.setValue("Category/IsJsonMode", checked);
+
+        // 4. 树模型重新拉取
         if (m_categoryModel) {
             m_categoryModel->refresh();
         }
     });
-    headerLayout->addWidget(btnSwitch, 0, Qt::AlignVCenter);
+    headerLayout->addWidget(m_btnSwitch, 0, Qt::AlignVCenter);
 
     // 2026-06-xx 按照用户要求：从状态栏迁移至此，执行手动全量扫描与对账
     QPushButton* btnRescan = new QPushButton(header);
