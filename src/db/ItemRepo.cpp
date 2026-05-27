@@ -153,6 +153,67 @@ bool ItemRepo::markAsDeleted(const std::wstring& volume, const std::wstring& frn
     return q.exec();
 }
 
+bool ItemRepo::physicalRemove(const std::wstring& path) {
+    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QString qPath = QString::fromStdWString(path);
+    QString pathPattern = qPath + "\\%";
+
+    db.transaction();
+
+    // 1. 递归获取所有受影响项目的 File ID
+    QStringList fids;
+    QSqlQuery qf(db);
+    qf.prepare("SELECT file_id_128 FROM items WHERE path = ? OR path LIKE ?");
+    qf.addBindValue(qPath);
+    qf.addBindValue(pathPattern);
+    if (qf.exec()) {
+        while (qf.next()) {
+            QString fid = qf.value(0).toString();
+            if (!fid.isEmpty()) fids << fid;
+        }
+    }
+
+    // 2. 清除 items 表记录
+    QSqlQuery q1(db);
+    q1.prepare("DELETE FROM items WHERE path = ? OR path LIKE ?");
+    q1.addBindValue(qPath);
+    q1.addBindValue(pathPattern);
+    bool ok1 = q1.exec();
+
+    // 3. 清除 category_items 表关联 (分批处理以规避 SQL 变量上限)
+    bool ok2 = true;
+    if (!fids.isEmpty()) {
+        const int batchSize = 500;
+        for (int i = 0; i < fids.size(); i += batchSize) {
+            QStringList batch = fids.mid(i, batchSize);
+            QSqlQuery q2(db);
+            QString sql = QString("DELETE FROM category_items WHERE file_id_128 IN (%1)")
+                          .arg(QStringList(batch.size(), "?").join(","));
+            q2.prepare(sql);
+            for (const QString& fid : batch) q2.addBindValue(fid);
+            if (!q2.exec()) {
+                ok2 = false;
+                break;
+            }
+        }
+    }
+
+    // 4. 清除 folders 表配置
+    QSqlQuery q3(db);
+    q3.prepare("DELETE FROM folders WHERE path = ? OR path LIKE ?");
+    q3.addBindValue(qPath);
+    q3.addBindValue(pathPattern);
+    bool ok3 = q3.exec();
+
+    if (ok1 && ok2 && ok3) {
+        db.commit();
+        return true;
+    } else {
+        db.rollback();
+        return false;
+    }
+}
+
 bool ItemRepo::removeByFrn(const std::wstring& volume, const std::wstring& frn) {
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db); q.prepare("DELETE FROM items WHERE volume = ? AND frn = ?");

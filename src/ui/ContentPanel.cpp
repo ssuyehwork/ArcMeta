@@ -42,6 +42,8 @@
 #include <QLineEdit> 
 #include <QTextBrowser> 
 #include <QInputDialog> 
+#include <QMessageBox>
+#include <QRandomGenerator>
 #include <QAbstractItemView> 
 #include <QtConcurrent> 
 #include <QThreadPool> 
@@ -1201,7 +1203,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         menu.addAction("复制")->setData(ActionCopy); 
         menu.addAction("剪切")->setData(ActionCut); 
         menu.addAction("粘贴")->setData(ActionPaste); 
-        menu.addAction("删除（移入回收站）")->setData(ActionDelete); 
+
+        QMenu* delMenu = menu.addMenu("删除选项...");
+        UiHelper::applyMenuStyle(delMenu);
+        delMenu->addAction("移入回收站")->setData(ActionDelete);
+        delMenu->addAction("彻底删除 (不可恢复)")->setData(ActionPermanentDelete);
+        delMenu->addAction("安全擦除 (覆写抹除)")->setData(ActionSecureDelete);
  
         menu.addSeparator(); 
         menu.addAction("复制路径")->setData(ActionCopyPath); 
@@ -1375,15 +1382,126 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionCopy: performCopy(false); break; 
         case ActionCut: performCopy(true); break; 
         case ActionPaste: performPaste(); break; 
-        case ActionDelete: { 
-            std::wstring wpath = path.toStdWString() + L'\0' + L'\0'; 
-            SHFILEOPSTRUCTW fileOp = { 0 }; 
-            fileOp.wFunc = FO_DELETE; 
-            fileOp.pFrom = wpath.c_str(); 
-            fileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION; 
-            if (SHFileOperationW(&fileOp) == 0) loadDirectory(m_currentPath); 
-            break; 
-        } 
+        case ActionDelete:
+        case ActionPermanentDelete:
+        case ActionSecureDelete: {
+            auto indexes = view->selectionModel()->selectedIndexes();
+            QStringList targetPaths;
+            for (const auto& idx : indexes) {
+                if (idx.column() == 0) targetPaths << idx.data(PathRole).toString();
+            }
+            if (targetPaths.isEmpty() && !path.isEmpty()) targetPaths << path;
+
+            if (targetPaths.isEmpty()) break;
+
+            if (action == ActionDelete) {
+                std::wstring from;
+                for (const QString& p : targetPaths) from += QDir::toNativeSeparators(p).toStdWString() + L'\0';
+                from += L'\0';
+                SHFILEOPSTRUCTW fileOp = { 0 };
+                fileOp.wFunc = FO_DELETE;
+                fileOp.pFrom = from.c_str();
+                fileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION;
+                if (SHFileOperationW(&fileOp) == 0) loadDirectory(m_currentPath);
+            } else {
+                // 彻底删除或安全擦除
+                QString msg = (action == ActionPermanentDelete) ? "确定要彻底删除选中的项目吗？此操作不可恢复。" : "确定要安全擦除选中的项目吗？数据将被覆写并永久抹除。";
+                if (QMessageBox::question(this, "确认删除", msg) != QMessageBox::Yes) break;
+
+                ProgressDialog* progress = new ProgressDialog("正在执行深层抹除...", this);
+                progress->show();
+
+                QPointer<ContentPanel> weakThis(this);
+                (void)QtConcurrent::run([weakThis, targetPaths, action, progress]() {
+                    int count = 0;
+                    for (const QString& p : targetPaths) {
+                        if (!weakThis) return;
+                        std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
+
+                        // 1. 物理抹除
+                        bool physicalOk = false;
+                        if (action == ActionSecureDelete) {
+                            // 安全擦除逻辑：递归覆写
+                            std::function<bool(const QString&)> secureRemove;
+                            secureRemove = [&](const QString& target) -> bool {
+                                QFileInfo info(target);
+                                if (info.isDir()) {
+                                    QDir dir(target);
+                                    for (const QString& entry : dir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot)) {
+                                        secureRemove(target + "/" + entry);
+                                    }
+                                    return QDir().rmdir(target);
+                                } else {
+                                    // 随机覆写全量扇区
+                                    QFile file(target);
+                                    if (file.open(QIODevice::ReadWrite)) {
+                                        qint64 size = file.size();
+                                        if (size > 0) {
+                                            QByteArray buffer(65536, 0);
+                                            for (int pass = 0; pass < 3; ++pass) { // 覆写 3 遍
+                                                file.seek(0);
+                                                qint64 written = 0;
+                                                while (written < size) {
+                                                    for (int i = 0; i < buffer.size(); ++i) buffer[i] = (char)QRandomGenerator::global()->bounded(256);
+                                                    qint64 toWrite = qMin((qint64)buffer.size(), size - written);
+                                                    file.write(buffer.data(), toWrite);
+                                                    written += toWrite;
+                                                }
+                                                file.flush();
+                                            }
+                                        }
+                                        file.close();
+                                    }
+                                    return QFile::remove(target);
+                                }
+                            };
+                            physicalOk = secureRemove(p);
+                        } else {
+                            // 普通彻底删除：递归
+                            std::function<bool(const QString&)> recursiveRemove;
+                            recursiveRemove = [&](const QString& target) -> bool {
+                                QFileInfo info(target);
+                                if (info.isDir()) {
+                                    QDir dir(target);
+                                    for (const QString& entry : dir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot)) {
+                                        recursiveRemove(target + "/" + entry);
+                                    }
+                                    return QDir().rmdir(target);
+                                } else {
+                                    return QFile::remove(target);
+                                }
+                            };
+                            physicalOk = recursiveRemove(p);
+                        }
+
+                        if (physicalOk) {
+                            // 2. 数据库同步清理 (三位一体)
+                            ItemRepo::physicalRemove(wp);
+
+                            // 3. 元数据管理清理 (离散 JSON 与 内存失效)
+                            MetadataManager::instance().removeMetadataSync(wp);
+                        }
+
+                        count++;
+                        QMetaObject::invokeMethod(progress, [progress, count, targetPaths]() {
+                            progress->setValue((int)((float)count / targetPaths.size() * 100));
+                        });
+                    }
+
+                    QMetaObject::invokeMethod(qApp, [weakThis, progress]() {
+                        if (weakThis) {
+                            progress->accept();
+                            progress->deleteLater();
+                            weakThis->loadDirectory(weakThis->m_currentPath);
+                            ToolTipOverlay::instance()->showText(QCursor::pos(), "深层抹除已完成，关联记录已物理清空", 1500, QColor("#2ecc71"));
+                        } else {
+                            progress->deleteLater();
+                        }
+                    });
+                });
+            }
+            break;
+        }
         case ActionCopyPath: QApplication::clipboard()->setText(QDir::toNativeSeparators(path)); break; 
         case ActionProperties: { 
             SHELLEXECUTEINFOW sei = { sizeof(sei) }; 

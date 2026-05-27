@@ -162,6 +162,8 @@ public:
         ActionCut,
         ActionPaste,
         ActionDelete,
+        ActionPermanentDelete,
+        ActionSecureDelete,
         ActionCopyPath,
         ActionProperties,
         ActionExtractColor

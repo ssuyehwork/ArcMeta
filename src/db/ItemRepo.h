@@ -21,6 +21,7 @@ public:
     static bool saveBasicInfo(const std::wstring& volume, const std::wstring& frn, const std::wstring& path, const std::wstring& parentPath, bool isDir, qint64 mtime, qint64 size, qint64 ctime = 0, const std::string& fileId128 = "");
 
     static bool removeByFrn(const std::wstring& volume, const std::wstring& frn);
+    static bool physicalRemove(const std::wstring& path);
     static bool markAsDeleted(const std::wstring& volume, const std::wstring& frn);
     
     /**
