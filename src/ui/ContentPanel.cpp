@@ -2077,36 +2077,34 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
             // 2026-05-28 按照用户授权：废除本地硬编码判定，统一使用 calculateMetrics 保证 Hitbox 零偏差 
             GridMetrics m = calculateMetrics(option); 
  
-            auto disableTriggers = [option]() {
-                // 2026-05-08 彻底阻止编辑触发：暂时禁用编辑触发器，防止点击评分区域时意外触发行内重命名
-                auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
+            // 1. 区域判定
+            bool isBanHit = m.banRect.contains(mEvent->pos());
+            int hitStar = -1;
+            for (int i = 0; i < 5; ++i) {
+                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
+                if (starRect.contains(mEvent->pos())) {
+                    hitStar = i + 1;
+                    break;
+                }
+            }
+
+            if (isBanHit || hitStar != -1) {
+                // 2. 执行数据更新 (禁止图标设为 0，否则设为星级)
+                model->setData(index, isBanHit ? 0 : hitStar, RatingRole);
+
+                // 3. 物理修复：直接执行禁用逻辑，杜绝 Lambda 嵌套导致的编译错误
+                QWidget* widget = const_cast<QWidget*>(option.widget);
+                QAbstractItemView* view = qobject_cast<QAbstractItemView*>(widget);
                 if (view) {
-                    QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
+                    QAbstractItemView::EditTriggers currentTriggers = view->editTriggers();
                     view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-                    QTimer::singleShot(0, [view, originalTriggers]() {
-                        view->setEditTriggers(originalTriggers);
+                    // 延迟恢复触发器
+                    QTimer::singleShot(0, view, [view, currentTriggers]() {
+                        view->setEditTriggers(currentTriggers);
                     });
                 }
-            };
-
-            if (m.banRect.contains(mEvent->pos())) {
-                // 2026-06-xx 架构简化：统一由 model->setData 处理持久化与缓存清理
-                model->setData(index, 0, RatingRole);
-                disableTriggers();
                 event->accept(); 
                 return true; 
-            } 
- 
-            for (int i = 0; i < 5; ++i) { 
-                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
-                if (starRect.contains(mEvent->pos())) { 
-                    int r = i + 1; 
-                    // 2026-06-xx 架构简化：统一由 model->setData 处理持久化与缓存清理
-                    model->setData(index, r, RatingRole);
-                    disableTriggers();
-                    event->accept(); 
-                    return true; 
-                } 
             } 
         } 
     } 
