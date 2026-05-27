@@ -687,3 +687,41 @@ void InlineHueSlider::paintEvent(QPaintEvent*) {
 - 变更原因：修复变量命名冲突警告（C4456）。在循环内部使用更具辨识度的变量名（dr, dg, db）替换原有的 (r, g, b)，避免隐藏外部作用域的同名变量。
 - 影响范围：`FilterPanel::rebuildGroups` 中的相近色统计逻辑。
 - 是否在需求范围内：是
+
+---
+## [30] 变更时间：2026-05-27 10:25:45
+
+**文件路径：** `src/ui/ContentPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+            case 0: {
+                QFileInfo info(path);
+                QString name = info.fileName();
+                // 如果文件名为空且为根目录（磁盘），则返回完整路径作为显示名
+                if (name.isEmpty() && info.isRoot()) {
+                    return QDir::toNativeSeparators(info.absoluteFilePath());
+                }
+                return name;
+            }
+```
+
+### 修改后（After）
+```cpp
+            case 0: {
+                QFileInfo info(path);
+                QString name = info.fileName();
+                // 如果文件名为空且为根目录（磁盘），则返回完整路径作为显示名
+                if (name.isEmpty() && info.isRoot()) {
+                    return QDir::toNativeSeparators(info.absoluteFilePath());
+                }
+                return name;
+            }
+```
+
+### 变更说明
+- 变更原因：物理加固“此电脑”盘符显示逻辑。当路径为磁盘根目录（如 C:/）时，QFileInfo::fileName() 返回空字符串，通过引入 isRoot() 判断并返回本地化绝对路径，解决硬盘项标签空白的 Bug。
+- 影响范围：FerrexVirtualDbModel::data 函数，内容区磁盘图标名称显示。
+- 是否在需求范围内：是
+---
