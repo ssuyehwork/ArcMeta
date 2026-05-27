@@ -230,16 +230,18 @@ public:
 
     /**
      * @brief 从图像中提取调色盘 (工业级优化版)
+     * 2026-06-xx 架构重构：彻底弃用外部工具链 (ImageMagick/Ghostscript)，全面转向原生 Shell 引擎
      */
     static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
-        // 优先从系统缩略图引擎获取数据，支持 PSD, AI, EPS, PDF 等格式
+        // 优先从系统缩略图引擎获取数据，支持 PSD, AI, EPS, PDF 等专业格式 (前提是系统有预览插件)
         QImage targetImg = getShellThumbnail(targetFile, 128);
 
-        // 回退：针对普通图片或无插件环境
+        // 回退：针对普通图片或无插件环境，直接通过 Qt 加载
         if (targetImg.isNull()) {
             targetImg.load(targetFile);
         }
 
+        // 核心防御：加载图像后必须立即进行空值检查，防止后续像素处理逻辑崩溃
         if (targetImg.isNull()) return {};
 
         // 1. 采样：使用 128x128 提高颜色覆盖度
