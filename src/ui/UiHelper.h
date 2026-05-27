@@ -124,7 +124,12 @@ public:
     }
 
     static bool isGraphicsFile(const QString& ext) {
-        static const QStringList graphicsExts = {"png", "jpg", "jpeg", "bmp", "gif", "webp", "ico", "tiff", "tif", "psd", "psb", "ai", "eps", "pdf", "svg", "cdr"};
+        // 2026-06-xx 工业级扩容：只要 Windows 能显示预览图，就允许进入解析流程
+        static const QStringList graphicsExts = {
+            "png", "jpg", "jpeg", "bmp", "gif", "webp", "ico", "tiff", "tif",
+            "psd", "psb", "ai", "eps", "pdf", "svg", "cdr",
+            "sketch", "xd", "fig", "dwg", "dxf", "heic", "raw"
+        };
         return graphicsExts.contains(ext.toLower());
     }
 
@@ -224,21 +229,14 @@ public:
 
 
     /**
-     * @brief 从图像中提取调色盘 (变长色板版)
+     * @brief 从图像中提取调色盘 (工业级优化版)
      */
     static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
-        QFileInfo fileInfo(targetFile);
-        QString suffix = fileInfo.suffix().toLower();
-        QImage targetImg;
-        QString temporaryPng;
+        // 优先从系统缩略图引擎获取数据，支持 PSD, AI, EPS, PDF 等格式
+        QImage targetImg = getShellThumbnail(targetFile, 128);
 
-        if (suffix == "psd" || suffix == "ai" || suffix == "eps") {
-            temporaryPng = convertDesignFileToPng(targetFile);
-            if (!temporaryPng.isEmpty()) {
-                targetImg.load(temporaryPng);
-                QFile::remove(temporaryPng);
-            }
-        } else {
+        // 回退：针对普通图片或无插件环境
+        if (targetImg.isNull()) {
             targetImg.load(targetFile);
         }
 
@@ -333,35 +331,6 @@ public:
     static inline QColor extractDominantColor(const QString& targetFile) {
         auto palette = extractPalette(targetFile);
         return palette.isEmpty() ? QColor() : palette.first().first;
-    }
-
-private:
-    static inline QString convertDesignFileToPng(const QString& srcPath) {
-        QString workDir = QCoreApplication::applicationDirPath() + "/Cache/tmp";
-        QDir().mkpath(workDir);
-        QString dstPath = workDir + "/" + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".png";
-        QString ext = QFileInfo(srcPath).suffix().toLower();
-
-        QProcess converter;
-        QString cmd;
-        QStringList params;
-
-        if (ext == "psd") {
-            cmd = "magick";
-            params << srcPath + "[0]" << "-flatten" << dstPath;
-        } else if (ext == "ai" || ext == "eps") {
-            cmd = "gs";
-            params << "-dNOPAUSE" << "-dBATCH" << "-dSAFER" << "-sDEVICE=png16m" << "-r72" << "-dFirstPage=1" << "-dLastPage=1" 
-                   << QString("-sOutputFile=%1").arg(dstPath) << srcPath;
-        }
-
-        converter.start(cmd, params);
-        if (converter.waitForFinished(15000)) {
-            if (QFile::exists(dstPath)) return dstPath;
-        } else {
-            converter.kill();
-        }
-        return "";
     }
 
 public:
