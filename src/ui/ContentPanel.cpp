@@ -937,8 +937,8 @@ void ContentPanel::initGridView() {
     m_gridView->setDragEnabled(true); 
     m_gridView->setDragDropMode(QAbstractItemView::DragOnly); 
  
-    // 放宽触发限制：支持双击、F2、以及点击选中项触发重命名
-    m_gridView->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
+    // 2026-06-xx 物理纠偏：移除 SelectedClicked，防止单击项目时意外触发重命名，确保交互稳健
+    m_gridView->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
  
     m_gridView->setModel(m_proxyModel); 
 

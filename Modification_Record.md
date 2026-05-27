@@ -629,6 +629,31 @@ void InlineHueSlider::paintEvent(QPaintEvent*) {
 **变更类型：** 修改
 
 ### 变更说明
+- 彻底修复筛选导致的“幽灵卡片”渲染问题及编译错误。
+- 关键逻辑：
+  1. 移除错误的 `rowsRemoved` 虚函数重写。
+  2. 重写 `setModel`，在设置模型时连接 `rowsRemoved` 信号。
+  3. 采用信号驱动 + `QTimer::singleShot(0)` 方案，确保布局重排在 Model 行物理删除后执行，获得正确的 `rowCount()`。
+
+---
+## [19] 变更时间：2026-05-26 16:45:12
+
+**文件路径：** `src/ui/ContentPanel.cpp` / `src/ui/JustifiedView.cpp`
+**变更类型：** 拨乱反正
+
+### 变更说明
+- 修复点击项目时意外触发多选及重命名的严重交互故障。
+- 关键逻辑：
+  1. **触发器回归**：从 `ContentPanel` 中移除 `SelectedClicked` 编辑触发器，重命名功能严格限定为双击或 F2。
+  2. **点击退避**：重构 `JustifiedView::mousePressEvent`，将非 Shift 组合键的点击行为完全交还给 `QAbstractItemView` 基类处理，确保原生单选/切换逻辑不被破坏。
+  3. **锚点同步**：在基类处理后动态更新 `m_anchorRow`，维持多选逻辑的一致性。
+- 影响范围：核心网格视图交互稳定性。
+- 是否在需求范围内：是
+
+**文件路径：** `src/ui/JustifiedView.cpp` / `src/ui/JustifiedView.h`
+**变更类型：** 修改
+
+### 变更说明
 - 变更原因：彻底修复筛选导致的“幽灵卡片”渲染问题及编译错误。
 - 关键逻辑：
   1. 移除错误的 `rowsRemoved` 虚函数重写声明。

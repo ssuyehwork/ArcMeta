@@ -183,58 +183,41 @@ QRegion JustifiedView::visualRegionForSelection(const QItemSelection& selection)
 }
 
 void JustifiedView::mousePressEvent(QMouseEvent* event) {
-    if (event->button() == Qt::LeftButton) {
-        if (event->modifiers() & Qt::ShiftModifier) {
-            QModelIndex clicked = indexAt(event->pos());
-            if (clicked.isValid() && m_anchorRow >= 0) {
-                // 2026-06-16 工业级修复：基于视觉位置进行流式选择
-                int anchorVisual = -1, clickedVisual = -1;
-                for (int i = 0; i < (int)m_geometries.size(); ++i) {
-                    if (m_geometries[i].index == m_anchorRow)      anchorVisual = i;
-                    if (m_geometries[i].index == clicked.row())    clickedVisual = i;
+    // 2026-06-xx 物理拨乱反正：仅在按下 Shift 时执行自定义“视觉顺序”选择逻辑
+    // 其余所有情况（普通单击、Ctrl、空白处）均退避并转发给基类处理，防止破坏 Model/View 原生多选状态
+    if (event->button() == Qt::LeftButton && (event->modifiers() & Qt::ShiftModifier)) {
+        QModelIndex clicked = indexAt(event->pos());
+        if (clicked.isValid() && m_anchorRow >= 0) {
+            int anchorVisual = -1, clickedVisual = -1;
+            for (int i = 0; i < (int)m_geometries.size(); ++i) {
+                if (m_geometries[i].index == m_anchorRow)      anchorVisual = i;
+                if (m_geometries[i].index == clicked.row())    clickedVisual = i;
+            }
+            if (anchorVisual >= 0 && clickedVisual >= 0) {
+                int vFrom = std::min(anchorVisual, clickedVisual);
+                int vTo   = std::max(anchorVisual, clickedVisual);
+                QItemSelection sel;
+                for (int v = vFrom; v <= vTo; ++v) {
+                    QModelIndex idx = model()->index(m_geometries[v].index, 0);
+                    sel.select(idx, idx);
                 }
-                if (anchorVisual >= 0 && clickedVisual >= 0) {
-                    int vFrom = std::min(anchorVisual, clickedVisual);
-                    int vTo   = std::max(anchorVisual, clickedVisual);
-                    QItemSelection sel;
-                    for (int v = vFrom; v <= vTo; ++v) {
-                        QModelIndex idx = model()->index(m_geometries[v].index, 0);
-                        sel.select(idx, idx);
-                    }
-                    selectionModel()->select(sel, QItemSelectionModel::ClearAndSelect);
-                    // 核心关键：不更新 m_anchorRow，锚点永远保持第一次点击的位置
-                    selectionModel()->setCurrentIndex(clicked, QItemSelectionModel::NoUpdate);
-                }
+                selectionModel()->select(sel, QItemSelectionModel::ClearAndSelect);
+                selectionModel()->setCurrentIndex(clicked, QItemSelectionModel::NoUpdate);
                 event->accept();
                 viewport()->update();
                 return;
             }
-        } else if (event->modifiers() & Qt::ControlModifier) {
-            QModelIndex clicked = indexAt(event->pos());
-            if (clicked.isValid()) {
-                selectionModel()->select(clicked, QItemSelectionModel::Toggle);
-                m_anchorRow = clicked.row(); // Ctrl+点击重置锚点
-                setCurrentIndex(clicked);
-            }
-            event->accept();
-            viewport()->update();
-            return;
-        } else {
-            QModelIndex clicked = indexAt(event->pos());
-            if (clicked.isValid()) {
-                selectionModel()->select(clicked, QItemSelectionModel::ClearAndSelect);
-                m_anchorRow = clicked.row(); // 普通单击重置锚点
-                setCurrentIndex(clicked);
-            } else {
-                selectionModel()->clearSelection();
-                m_anchorRow = -1;
-            }
-            event->accept();
-            viewport()->update();
-            return;
         }
     }
+
+    // 更新锚点：在每次有效点击（非 Shift 点击）时同步锚点，以便后续 Shift 多选定位
     QAbstractItemView::mousePressEvent(event);
+    QModelIndex current = currentIndex();
+    if (current.isValid()) {
+        m_anchorRow = current.row();
+    } else {
+        m_anchorRow = -1;
+    }
 }
 
 void JustifiedView::mouseDoubleClickEvent(QMouseEvent* event) {
