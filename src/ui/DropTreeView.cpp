@@ -67,14 +67,15 @@ void DropTreeView::startDrag(Qt::DropActions supportedActions) {
     for (const QModelIndex& idx : indexes) {
         if (idx.column() != 0) continue;
         
-        // 2026-03-xx 物理还原：兼容性提取逻辑
-        // NavPanel 使用 UserRole+1 (硬编码)，ContentPanel 使用 PathRole (枚举)
-        QString path = idx.data(Qt::UserRole + 1).toString(); 
-        Logger::log(QString("[树形视图] 正在尝试提取 Role+1 (导航面板) 对于 %1 : %2").arg(idx.data().toString()).arg(path));
-        
-        if (path.isEmpty() || !QFileInfo::exists(path)) {
-            path = idx.data(PathRole).toString(); 
-            Logger::log(QString("[树形视图] 正在尝试提取 PathRole (内容面板) 对于 %1 : %2").arg(idx.data().toString()).arg(path));
+        // 2026-06-xx 工业级增强：优先从 PathRole 提取以规避 ContentPanel 中的角色冲突 (UserRole+1 为 Rating)
+        QString path;
+        QVariant pathVar = idx.data(PathRole);
+        if (pathVar.isValid()) {
+            path = pathVar.toString();
+            Logger::log(QString("[树形视图] 优先从 PathRole 提取路径: %1").arg(path));
+        } else {
+            path = idx.data(Qt::UserRole + 1).toString();
+            Logger::log(QString("[树形视图] 从 UserRole+1 (导航面板兼容) 提取路径: %1").arg(path));
         }
         
         if (!path.isEmpty() && QFileInfo::exists(path)) {
@@ -100,7 +101,7 @@ void DropTreeView::startDrag(Qt::DropActions supportedActions) {
     drag->setHotSpot(QPoint(0, 0));
     
     Logger::log("[树形视图] 执行拖拽操作...");
-    drag->exec(supportedActions, Qt::MoveAction);
+    drag->exec(supportedActions | Qt::CopyAction, Qt::MoveAction);
 }
 
 void DropTreeView::keyboardSearch(const QString& search) {

@@ -81,7 +81,7 @@ int FerrexVirtualDbModel::columnCount(const QModelIndex&) const {
 
 Qt::ItemFlags FerrexVirtualDbModel::flags(const QModelIndex& index) const {
     if (!index.isValid()) return Qt::NoItemFlags;
-    Qt::ItemFlags f = Qt::ItemIsSelectable | Qt::ItemIsEnabled;
+    Qt::ItemFlags f = Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsDragEnabled;
     // 仅允许第 0 列（名称列）且非“分类”项进行重命名
     if (index.column() == 0) {
         if (index.row() < (int)m_allRecords.size() && !m_allRecords[index.row()].isCategory) {

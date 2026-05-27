@@ -874,13 +874,38 @@ void CategoryPanel::initUi() {
         // 2026-06-xx 彻底重构：物理递归遍历 + 分类镜像创建 + SHA-256 物理加固
         // 核心规则：文件夹拖入空白/分类均递归建树；文件入空白归未分类，入分类归该分类。
         int targetCatId = 0;
+        bool isBlankDrop = false;
 
         if (index.isValid()) {
             QString type = index.data(CategoryModel::TypeRole).toString();
+            QString name = index.data(CategoryModel::NameRole).toString();
             if (type == "category") {
                 targetCatId = index.data(CategoryModel::IdRole).toInt();
-            } else if (index.data(CategoryModel::NameRole).toString() == "我的分类") {
+            } else if (name == "我的分类") {
+                // 2026-06-xx 物理修复：拖拽到“我的分类”根节点，同样触发自动创建分类
                 targetCatId = 0;
+                isBlankDrop = true;
+            } else {
+                isBlankDrop = true;
+            }
+        } else {
+            isBlankDrop = true;
+        }
+
+        // 2026-06-xx 工业级 UX 优化：拖拽到空白处或根节点时，自动以第一个项目的名称创建新分类
+        if (isBlankDrop && !paths.isEmpty()) {
+            QString firstPath = paths.first();
+            QString newCatName = QFileInfo(firstPath).fileName();
+            
+            Category newCat;
+            newCat.name = newCatName.toStdWString();
+            newCat.parentId = 0;
+            newCat.color = getDefaultCategoryColor();
+            
+            if (CategoryRepo::add(newCat)) {
+                targetCatId = newCat.id;
+                m_categoryModel->refresh(); // 刷新模型以显示新分类
+                Logger::log(QString("[分类面板] 自动创建分类: %1 (ID: %2)").arg(newCatName).arg(targetCatId));
             }
         }
 
