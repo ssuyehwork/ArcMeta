@@ -303,8 +303,21 @@ bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, co
         if (mEvent->button() == Qt::LeftButton) {
             Metrics m = calculateMetrics(option);
 
+            auto disableTriggers = [option]() {
+                // 2026-05-08 彻底阻止编辑触发：暂时禁用编辑触发器，防止点击评分区域时意外触发行内重命名
+                auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
+                if (view) {
+                    QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
+                    view->setEditTriggers(QAbstractItemView::NoEditTriggers);
+                    QTimer::singleShot(0, [view, originalTriggers]() {
+                        view->setEditTriggers(originalTriggers);
+                    });
+                }
+            };
+
             if (m.banRect.contains(mEvent->pos())) {
                 model->setData(index, 0, m_ratingRole);
+                disableTriggers();
                 event->accept();
                 return true;
             }
@@ -312,6 +325,7 @@ bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, co
             for (int i = 0; i < 5; ++i) {
                 if (m.starRect(i).contains(mEvent->pos())) {
                     model->setData(index, i + 1, m_ratingRole);
+                    disableTriggers();
                     event->accept();
                     return true;
                 }

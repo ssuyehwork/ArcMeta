@@ -243,14 +243,17 @@ QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientati
 }
 
 bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& value, int role) {
-    if (!index.isValid()) return false;
+    if (!index.isValid() || index.row() >= (int)m_allRecords.size()) return false;
+
+    const auto& record = m_allRecords[index.row()];
+    QString path = record.path;
 
     if (role == Qt::EditRole && index.column() == 0) {
         QString newName = value.toString();
         if (newName.isEmpty()) return false;
 
-        auto& record = m_allRecords[index.row()];
-        QString oldPath = record.path;
+        auto& mutableRecord = m_allRecords[index.row()];
+        QString oldPath = mutableRecord.path;
         QFileInfo info(oldPath);
         QString newPath = info.absolutePath() + "/" + newName;
 
@@ -258,14 +261,40 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
             // 同步更新元数据索引
             MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
             // 物理同步：手动修改 m_allRecords 里的 path 以保持模型数据一致
-            record.path = QDir::toNativeSeparators(newPath);
-            emit dataChanged(index, index, {role, Qt::DisplayRole});
+            mutableRecord.path = QDir::toNativeSeparators(newPath);
+            m_metaCache.remove(oldPath);
+            emit dataChanged(index, index, {role, Qt::DisplayRole, PathRole});
             return true;
         }
+        return false;
     }
 
-    emit dataChanged(index, index, {role});
-    return true;
+    // 2026-06-xx 物理修复：支持星级、颜色、置顶等元数据的持久化设定
+    bool metaUpdated = false;
+    if (role == RatingRole) {
+        int rating = value.toInt();
+        MetadataManager::instance().setRating(path.toStdWString(), rating);
+        metaUpdated = true;
+    } else if (role == ColorRole) {
+        QString color = value.toString();
+        MetadataManager::instance().setColor(path.toStdWString(), color.toStdWString());
+        metaUpdated = true;
+    } else if (role == IsLockedRole || role == PinnedRole) {
+        bool pinned = value.toBool();
+        MetadataManager::instance().setPinned(path.toStdWString(), pinned);
+        metaUpdated = true;
+    }
+
+    if (metaUpdated) {
+        m_metaCache.remove(path);
+        // 2026-06-xx 物理同步：发送全行更新信号，确保不同列的代理（如星级列、颜色列）同步刷新
+        QModelIndex left = index.siblingAtColumn(0);
+        QModelIndex right = index.siblingAtColumn(columnCount() - 1);
+        emit dataChanged(left, right, {role});
+        return true;
+    }
+
+    return false;
 }
 
 bool FerrexVirtualDbModel::canFetchMore(const QModelIndex& parent) const {
@@ -1239,8 +1268,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             bool pin = (action == ActionPin); 
             for (const QModelIndex& idx : indexes) { 
                 if (idx.column() == 0) { 
-                    QString itemPath = idx.data(PathRole).toString(); 
-                    MetadataManager::instance().setPinned(itemPath.toStdWString(), pin); 
+                    // 2026-06-xx 架构简化：统一由 model->setData 处理持久化与缓存清理
                     m_proxyModel->setData(idx, pin, IsLockedRole); 
                 } 
             } 
@@ -1248,12 +1276,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         } 
         case ActionColorTag: { 
             QString colorName = selectedAction->property("colorName").toString(); 
-            QColor tagColor = UiHelper::parseColorName(colorName); 
             auto indexes = view->selectionModel()->selectedIndexes(); 
             for (const auto& idx : indexes) { 
                 if (idx.column() == 0) { 
                     QString itemPath = idx.data(PathRole).toString(); 
-                    MetadataManager::instance().setColor(itemPath.toStdWString(), colorName.toStdWString()); 
+                    // 2026-06-xx 架构简化：统一由 model->setData 处理持久化与缓存清理
                     m_proxyModel->setData(idx, colorName, ColorRole); 
  
                     // 2026-06-05 按照要求：设置颜色后立即重新生成并应用图标，实现视觉同步 
@@ -1285,16 +1312,16 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 
                 QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, colorHex, palette, dominant]() {
                     if (weakThis) {
-                        // 2. 物理双重存储：主色 + 全量变长色板
-                        MetadataManager::instance().setColor(path.toStdWString(), colorHex.toStdWString());
+                        // 2. 物理存储：全量变长色板 (主色通过 model->setData 持久化)
                         MetadataManager::instance().setPalettes(path.toStdWString(), palette);
                         
-                        // 3. 物理同步 UI 状态
+                        // 3. 物理同步 UI 状态并持久化主色
                         auto* model = weakThis->m_model;
                         const auto& records = model->allRecords();
                         for (size_t i = 0; i < records.size(); ++i) {
                             if (records[i].path == path) {
                                 QModelIndex srcIdx = model->index(static_cast<int>(i), 0);
+                                // 此处 setData 会触发 MetadataManager::setColor 和缓存清理
                                 model->setData(srcIdx, colorHex, ColorRole);
                                 break;
                             }
@@ -2049,14 +2076,9 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
         if (mEvent->button() == Qt::LeftButton) { 
             // 2026-05-28 按照用户授权：废除本地硬编码判定，统一使用 calculateMetrics 保证 Hitbox 零偏差 
             GridMetrics m = calculateMetrics(option); 
-            QString path = index.data(PathRole).toString(); 
  
-            if (m.banRect.contains(mEvent->pos())) { 
-                if (!path.isEmpty()) { 
-                    MetadataManager::instance().setRating(path.toStdWString(), 0); 
-                    model->setData(index, 0, RatingRole); 
-                } 
-                // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器，防止清除星级时错误触发行内编辑
+            auto disableTriggers = [option]() {
+                // 2026-05-08 彻底阻止编辑触发：暂时禁用编辑触发器，防止点击评分区域时意外触发行内重命名
                 auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
                 if (view) {
                     QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
@@ -2065,6 +2087,12 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
                         view->setEditTriggers(originalTriggers);
                     });
                 }
+            };
+
+            if (m.banRect.contains(mEvent->pos())) {
+                // 2026-06-xx 架构简化：统一由 model->setData 处理持久化与缓存清理
+                model->setData(index, 0, RatingRole);
+                disableTriggers();
                 event->accept(); 
                 return true; 
             } 
@@ -2073,19 +2101,9 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
                 QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
                 if (starRect.contains(mEvent->pos())) { 
                     int r = i + 1; 
-                    if (!path.isEmpty()) { 
-                        MetadataManager::instance().setRating(path.toStdWString(), r); 
-                        model->setData(index, r, RatingRole); 
-                    } 
-                    // 2026-05-08 彻底阻止编辑触发：临时禁用编辑触发器，防止星级点击时错误触发行内编辑
-                    auto* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
-                    if (view) {
-                        QAbstractItemView::EditTriggers originalTriggers = view->editTriggers();
-                        view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-                        QTimer::singleShot(0, [view, originalTriggers]() {
-                            view->setEditTriggers(originalTriggers);
-                        });
-                    }
+                    // 2026-06-xx 架构简化：统一由 model->setData 处理持久化与缓存清理
+                    model->setData(index, r, RatingRole);
+                    disableTriggers();
                     event->accept(); 
                     return true; 
                 } 
