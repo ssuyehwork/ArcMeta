@@ -224,12 +224,17 @@ void MetadataManager::initFromJsonMode() {
         
         // 物理路径自愈性校准：如果 MftReader 已经预热好，使用 FRN 在各盘符下寻找最新物理路径
         bool ok = false;
-        uint64_t frnVal = frnStr.toULongLong(&ok);
+        uint64_t frnVal = frnStr.toULongLong(&ok, 16);
         if (ok) {
             for (size_t d = 0; d < 26; ++d) {
                 std::wstring p = MftReader::instance().getPathFast(d, frnVal);
                 if (!p.empty()) {
-                    resolvedPath = p;
+                    // 2026-05-28 物理路径判定：FRN 现在指向的是 .am_meta.json 文件本身
+                    if (p.find(L".am_meta.json") != std::wstring::npos) {
+                        resolvedPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(p)).absolutePath()).toStdWString();
+                    } else {
+                        resolvedPath = p;
+                    }
                     break;
                 }
             }
@@ -631,11 +636,13 @@ void MetadataManager::persistAsync(const std::wstring& path) {
         amJson.save();
     }
 
-    // 2.5 提取该父文件夹的物理 FRN，安全、自动登记到根目录 All_FRN_am_meta.json 中
-    std::wstring folderFrn;
-    std::string folderFid;
-    if (fetchWinApiMetadataDirect(parentDir, folderFid, &folderFrn)) {
-        AllFrnManager::registerFrn(folderFrn, parentDir);
+    // 2.5 提取该 .am_meta.json 文件本身的物理 FRN，安全、自动登记到根目录 All_FRN_am_meta.json 中
+    // 按照用户 2026-05-28 最新逻辑：对账锚点应为 .am_meta.json 文件的 FRN
+    std::wstring metaPath = parentDir + L"\\.am_meta.json";
+    std::wstring fileFrn;
+    std::string fileFid;
+    if (fetchWinApiMetadataDirect(metaPath, fileFid, &fileFrn)) {
+        AllFrnManager::registerFrn(fileFrn, parentDir);
     }
 
     // 3. 提取侧挂 .am_meta.json 的物理 FID 并记入日志

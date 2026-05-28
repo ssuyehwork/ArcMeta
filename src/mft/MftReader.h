@@ -46,9 +46,9 @@ public:
 
 signals:
     void dataChanged(int index = -1);
-    void entryAdded(uint64_t key);   // 2026-06-xx 新增：实时增量信号
-    void entryRemoved(uint64_t key); // 2026-06-xx 新增：实时删除信号
-    void entryUpdated(uint64_t key); // 2026-06-xx 新增：实时更新信号
+    void entryAdded(uint32_t index);   // 2026-05-28 性能优化：改用索引直接定位
+    void entryRemoved(uint64_t key);   // 2026-06-xx 新增：实时删除信号
+    void entryUpdated(uint32_t index); // 2026-05-28 性能优化：改用索引直接定位
     void driveLoaded(const QString& drive, int count, int total); // 2026-05-14 新增：驱动器就绪信号
 
 public:

@@ -762,6 +762,10 @@ ScanDialog::ScanDialog(QWidget* parent)
         updateStatus(QString("正在加载快照 %1 (%2)...").arg(drive).arg(formatNumber(count)), true, total);
     });
 
+    // 2026-05-28 核心补丁：监听引擎增量信号，实现标题栏计数实时更新
+    connect(&MftReader::instance(), &MftReader::entryAdded, this, [this](uint32_t) { updateStatus("就绪"); });
+    connect(&MftReader::instance(), &MftReader::entryRemoved, this, [this](uint64_t) { updateStatus("就绪"); });
+
     // 2026-05-16 物理重载：断开基类 Qt 置顶逻辑，改用 Win32 原生 SetWindowPos 以实现无损切换
     if (m_pinBtn) {
         disconnect(m_pinBtn, &QPushButton::toggled, nullptr, nullptr);

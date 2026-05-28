@@ -7,6 +7,8 @@
 #include "FolderRepo.h"
 #include "../meta/MetadataDefs.h"
 #include "../meta/MetadataManager.h"
+#include "../meta/AllFrnManager.h"
+#include "../mft/MftReader.h"
 #include "../meta/AmMetaJson.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -198,14 +200,97 @@ bool SyncEngine::hasPendingTasks() const {
 }
 
 /**
- * @brief 全量扫描：2026-06-xx 架构变更
- * 彻底移除 .am_meta.json 之后，不再扫描物理文件。全量同步转为对已有关联数据的完整性校验。
+ * @brief 全量扫描与对账：2026-06-xx 物理回填实现
+ * 逻辑：全盘搜索 .am_meta.json 文件，登记其 FRN 到 All_FRN_am_meta.json，并同步数据至数据库。
  */
 void SyncEngine::runFullScan(const std::vector<std::wstring>& drivesToScanInput, 
                              std::function<void(int current, int total, const std::wstring& path)> onProgress) {
     Q_UNUSED(drivesToScanInput);
-    Q_UNUSED(onProgress);
-    qDebug() << "[Sync] 全量物理文件扫描功能已随 .am_meta.json 移除而废弃。";
+    auto& reader = MftReader::instance();
+    
+    // 1. 物理引擎预热与掩码激活
+    QStringList allDrives;
+    for (int i = 0; i < 26; ++i) {
+        QString d = QString(QChar('A' + i)) + ":";
+        if (QDir(d).exists()) allDrives << d;
+    }
+    // 强制激活所有在线驱动器，确保全量扫描不因掩码隔离而遗漏
+    reader.updateActiveDrives(allDrives);
+
+    if (reader.totalCount() == 0) {
+        qDebug() << "[Sync] MFT 索引尚未预热，正在加载缓存或执行扫描...";
+        if (!reader.loadFromCache()) {
+            reader.buildIndex(allDrives);
+        }
+    }
+
+    // 2. 全盘搜索所有离散元数据文件 (包含隐藏属性)
+    qDebug() << "[Sync] 正在启动全盘元数据文件扫描...";
+    std::vector<uint64_t> metaFileKeys = reader.search(".am_meta.json", false, false, {}, true, true, true);
+    int total = (int)metaFileKeys.size();
+    int current = 0;
+
+    qDebug() << "[Sync] 全盘扫描完成，发现" << total << "个 .am_meta.json 文件，准备对账...";
+
+    for (uint64_t key : metaFileKeys) {
+        int idx = reader.getIndexByKey(key);
+        if (idx == -1) continue;
+
+        QString fullPath = reader.getFullPath(idx);
+        if (onProgress) onProgress(current, total, fullPath.toStdWString());
+
+        QFileInfo fi(fullPath);
+        std::wstring folderPath = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
+        
+        // 3. 提取 .am_meta.json 文件本身的物理身份 (FRN) 并登记
+        // 按照用户要求：记录 .am_meta.json 文件的 FRN，作为物理对账锚点
+        wchar_t frnBuf[17];
+        uint64_t fileFrn = key & 0x0000FFFFFFFFFFFFull; // 提取 48 位原始 FRN
+        swprintf(frnBuf, 17, L"%016llX", fileFrn);
+        
+        AllFrnManager::registerFrn(frnBuf, folderPath);
+
+        // 4. 加载 .am_meta.json 并同步到数据库
+        AmMetaJson amJson(folderPath);
+        if (amJson.load()) {
+            std::wstring vol = MetadataManager::getVolumeSerialNumber(folderPath);
+            
+            // A. 同步文件夹元数据
+            if (!amJson.folder().isDefault()) {
+                FolderRepo::save(vol, folderPath, amJson.folder());
+            }
+
+            // B. 同步目录下所有条目的元数据
+            auto const& itemsMap = amJson.items();
+            for (auto itm = itemsMap.begin(); itm != itemsMap.end(); ++itm) {
+                const std::wstring& itemName = itm->first;
+                const ItemMeta& itemMeta = itm->second;
+
+                std::wstring itemFullPath = folderPath + L"\\" + itemName;
+                ItemMeta iMeta;
+                // 物理对齐：获取最新的物理身份
+                MetadataManager::instance().fetchWinApiMetadataDirect(itemFullPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
+                
+                // 业务对齐：以物理 JSON 里的数据为准
+                iMeta.rating = itemMeta.rating; 
+                iMeta.color = itemMeta.color;
+                iMeta.pinned = itemMeta.pinned; 
+                iMeta.note = itemMeta.note;
+                iMeta.encrypted = itemMeta.encrypted;
+                iMeta.tags = itemMeta.tags;
+                iMeta.palettes = itemMeta.palettes;
+                iMeta.volume = vol;
+                
+                ItemRepo::save(folderPath, itemName, iMeta);
+            }
+        }
+        current++;
+    }
+    
+    // 4. 同步完成后重构全局标签统计
+    rebuildTagStats();
+    
+    qDebug() << "[Sync] 全量对账扫描已完成，已同步" << total << "个物理节点的元数据。";
 }
 
 void SyncEngine::rebuildTagStats() {
