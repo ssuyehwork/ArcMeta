@@ -205,6 +205,7 @@ bool SyncEngine::hasPendingTasks() const {
  */
 void SyncEngine::runFullScan(const std::vector<std::wstring>& drivesToScanInput, 
                              std::function<void(int current, int total, const std::wstring& path)> onProgress) {
+    Q_UNUSED(drivesToScanInput);
     auto& reader = MftReader::instance();
 
     // 1. 物理引擎预热与掩码激活

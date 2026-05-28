@@ -213,10 +213,8 @@ bool MftReader::loadFromCache() {
     std::filesystem::path cacheDir = "ArcMeta/cache";
     if (!std::filesystem::exists(cacheDir)) return false;
 
-    {
-        QWriteLocker lock(&m_dataLock);
-        clearInternal();
-    }
+    // 2026-06-xx 物理修复：载入缓存前必须执行全量清理（含停止旧监听器），杜绝资源泄露与逻辑重叠
+    clear();
 
     struct DriveIndices {
         std::vector<uint32_t> sorted;
@@ -316,6 +314,22 @@ bool MftReader::loadFromCache() {
     }
 
     m_isInitialized = true;
+
+    // 2026-06-xx 核心修复：加载缓存后立即启动 USN 监听器
+    // 理由：确保系统在从快照恢复后，能通过 USN 锚点自动追平离线期间的磁盘变动，并开始实时监听。
+    std::vector<UsnWatcher*> newWatchers;
+    for (const auto& drive : m_drive_list) {
+        uint64_t lastUsn = m_next_usns.count(drive) ? m_next_usns[drive] : 0;
+        auto* w = new UsnWatcher(drive, lastUsn, nullptr);
+        m_watchers.push_back(w);
+        newWatchers.push_back(w);
+        qDebug() << "[MftReader] 从快照恢复监听驱动器:" << QString::fromStdWString(drive) << "起始 USN:" << lastUsn;
+    }
+
+    // 释放数据锁后启动线程，防止死锁
+    lock.unlock();
+    for (auto* w : newWatchers) w->start();
+
     return true;
 }
 
