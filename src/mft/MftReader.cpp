@@ -43,7 +43,7 @@ MftReader::~MftReader() {
 }
 
 void MftReader::clear() {
-    m_syncMgr->stopAll();
+    if (m_syncMgr) m_syncMgr->stopAll();
     QWriteLocker lock(&m_dataLock);
     m_data = std::make_shared<MftDataStore>();
     m_drive_list.clear();
@@ -62,10 +62,7 @@ void MftReader::updateActiveDrives(const QStringList& activeDrives) {
         std::wstring vol = d.toStdWString();
         if (vol.size() > 1 && (vol.back() == L'\\' || vol.back() == L'/')) vol.pop_back();
         for (size_t i = 0; i < m_drive_list.size(); ++i) {
-            if (_wcsicmp(m_drive_list[i].c_str(), vol.c_str()) == 0) {
-                mask |= (1 << i);
-                break;
-            }
+            if (_wcsicmp(m_drive_list[i].c_str(), vol.c_str()) == 0) { mask |= (1 << i); break; }
         }
     }
     m_drive_active_mask.store(mask, std::memory_order_relaxed);
@@ -207,9 +204,9 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     std::unordered_map<uint32_t, uint32_t> offsetMap;
     std::unordered_map<uint32_t, uint32_t> gToL;
     for (size_t i = 0; i < m_data->m_frns.size(); ++i) {
-        if (!m_data->m_frns[i].isZero() && m_data->m_drive_indices[i] == driveIdx) {
+        if (!m_data->m_frns[i].isZero() && m_data->m_drive_indices[i] == (uint32_t)driveIdx) {
             uint32_t lIdx = (uint32_t)f.size(); gToL[(uint32_t)i] = lIdx;
-            f.push_back(m_data->m_frns[i]); di.push_back(0); // 缓存内相对索引为0
+            f.push_back(m_data->m_frns[i]); di.push_back(0);
             pf.push_back(m_data->m_parent_frns[i]);
             s.push_back(m_data->m_sizes[i]); t.push_back(m_data->m_timestamps[i]);
             attr.push_back(m_data->m_attributes[i]); mf.push_back(m_data->m_metadata_fetched[i]);

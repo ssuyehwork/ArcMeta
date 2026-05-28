@@ -18,26 +18,25 @@
 #include <QIcon>
 #include <QHash>
 #include "MftDataStore.h"
+#include "ScchCache.h"
 
 namespace ArcMeta {
 
 class SyncManager;
 
 /**
- * @brief 高性能 MFT 索引引擎 (Facade 模式 + 分区锁定意识)
- * 2026-06-xx 按照审计要求：杜绝上帝类，职责下沉，支持真 128位 FRN。
+ * @brief 高性能 MFT 索引引擎 (Facade 模式)
  */
 class MftReader : public QObject {
     Q_OBJECT
 public:
     static MftReader& instance();
-
     QIcon getCachedIcon(const QString& ext, bool isDir);
 
 signals:
     void dataChanged(int index = -1);
     void entryAdded(uint32_t index);
-    void entryRemoved(uint64_t keyLow); // 简化信号，仅传递低位
+    void entryRemoved(uint64_t keyLow);
     void entryUpdated(uint32_t index);
     void driveLoaded(const QString& drive, int count, int total);
 
@@ -59,6 +58,7 @@ public:
     bool     matchEntry(int index, const QString& query, bool useRegex, bool caseSensitive, 
                         const QStringList& extensionList, bool includeHidden, bool includeSystem,
                         bool includeDollar = true) const;
+
     int      getIndexByKey(uint32_t driveIdx, Frn128 frn) const;
     QString  getName(int index) const;
     int64_t  getSize(int index) const;
@@ -83,19 +83,18 @@ private:
 
     void updateEntryFromUsnRecord(const QByteArray& recordData, const std::wstring& volume);
     void removeEntryByFrn(const std::wstring& volume, Frn128 frn);
+    bool saveDriveToCacheInternal(size_t driveIdx);
     void performBackgroundCompact();
 
-    // 双缓冲数据仓库
     std::shared_ptr<MftDataStore> m_data;
     mutable QReadWriteLock m_dataLock;
-
     SyncManager* m_syncMgr;
 
     std::vector<std::wstring> m_drive_list;
     std::atomic<uint32_t>     m_drive_active_mask{0};
     std::unordered_map<std::wstring, uint64_t> m_next_usns;
 
-    mutable std::unordered_map<uint64_t, std::wstring>  m_path_cache; // 简化为低位缓存
+    mutable std::unordered_map<uint64_t, std::wstring>  m_path_cache;
     mutable std::mutex m_pathCacheMutex;
 
     mutable QReadWriteLock m_iconCacheLock;
