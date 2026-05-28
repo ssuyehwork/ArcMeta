@@ -130,8 +130,16 @@ public:
     bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) override {
         // 2026-06-16 按照方案 20：交互逻辑闭环修正
         if (event->type() == QEvent::MouseButtonPress && index.column() == 2) {
+            QAbstractItemView* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
+
             // 物理加固：未选中项严禁直接通过 Delegate 修改元数据
-            if (!(option.state & QStyle::State_Selected)) return false;
+            // 2026-06-xx 稳健性增强：通过 View 获取实时的选中状态（检查整行是否被选中）
+            bool isSelected = (option.state & QStyle::State_Selected);
+            if (view && view->selectionModel()) {
+                // 在 TreeView 中，我们通常关心的是当前行是否被选中
+                isSelected = view->selectionModel()->isRowSelected(index.row(), index.parent());
+            }
+            if (!isSelected) return false;
 
             QMouseEvent* me = static_cast<QMouseEvent*>(event);
             

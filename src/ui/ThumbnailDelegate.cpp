@@ -301,12 +301,22 @@ bool ThumbnailDelegate::eventFilter(QObject* obj, QEvent* event) {
 
 bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) {
     if (m_ratingRole != -1 && event->type() == QEvent::MouseButtonPress) {
-        // 物理加固：未选中项严禁直接通过 Delegate 修改元数据
-        if (!(option.state & QStyle::State_Selected)) return false;
-
         QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event);
         if (mEvent->button() == Qt::LeftButton) {
-            Metrics m = calculateMetrics(option);
+            QAbstractItemView* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
+
+            // 物理加固：未选中项严禁直接通过 Delegate 修改元数据
+            // 2026-06-xx 稳健性增强：通过 View 获取实时的选中状态
+            bool isSelected = (option.state & QStyle::State_Selected);
+            if (view && view->selectionModel()) {
+                isSelected = view->selectionModel()->isSelected(index);
+            }
+            if (!isSelected) return false;
+
+            // 2026-06-xx 物理对齐：补全 decorationSize，确保计算出的星级区域与绘制时完全对齐
+            QStyleOptionViewItem opt = option;
+            if (opt.decorationSize.width() <= 0 && view) opt.decorationSize = view->iconSize();
+            Metrics m = calculateMetrics(opt);
 
             // 1. 区域判定
             bool isBanHit = m.banRect.contains(mEvent->pos());
