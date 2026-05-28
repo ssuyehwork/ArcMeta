@@ -48,6 +48,12 @@ set(SOURCES
     src/core/CacheManager.cpp
     src/core/CacheManager.h
     src/core/IndexedEntry.h
+    src/mft/MftDataStore.cpp
+    src/mft/MftDataStore.h
+    src/mft/NtfsEngine.cpp
+    src/mft/NtfsEngine.h
+    src/mft/SyncManager.cpp
+    src/mft/SyncManager.h
     src/mft/UsnWatcher.cpp
     src/mft/UsnWatcher.h
     src/crypto/EncryptionManager.cpp

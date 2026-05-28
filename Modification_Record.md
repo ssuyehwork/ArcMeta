@@ -725,3 +725,179 @@ void InlineHueSlider::paintEvent(QPaintEvent*) {
 - 影响范围：FerrexVirtualDbModel::data 函数，内容区磁盘图标名称显示。
 - 是否在需求范围内：是
 ---
+
+---
+## [31] 变更时间：2026-06-15 14:20:00
+
+**文件路径：** `src/mft/MftDataStore.h`
+**变更类型：** 新增
+
+### 修改前（Before）
+```cpp
+（此处原为空，以下为新增内容）
+```
+
+### 修改后（After）
+```cpp
+#pragma once
+#include <vector>
+#include <string>
+#include <unordered_map>
+#include <mutex>
+#include <atomic>
+#include <windows.h>
+#include <memory>
+#include <QString>
+#include <QReadWriteLock>
+
+namespace ArcMeta {
+struct Frn128 {
+    uint64_t low = 0;
+    uint64_t high = 0;
+    Frn128() = default;
+    Frn128(uint64_t l, uint64_t h = 0) : low(l), high(h) {}
+    bool isZero() const { return low == 0 && high == 0; }
+    bool operator==(const Frn128& o) const { return low == o.low && high == o.high; }
+    bool operator!=(const Frn128& o) const { return !(*this == o); }
+};
+struct FullKey {
+    uint32_t driveIdx;
+    Frn128   frn;
+    bool operator==(const FullKey& o) const {
+        return driveIdx == o.driveIdx && frn == o.frn;
+    }
+};
+struct FullKeyHash {
+    size_t operator()(const FullKey& k) const {
+        size_t h1 = std::hash<uint32_t>{}(k.driveIdx);
+        size_t h2 = std::hash<uint64_t>{}(k.frn.low);
+        size_t h3 = std::hash<uint64_t>{}(k.frn.high);
+        return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2)) ^ (h3 + 0x9e3779b9 + (h2 << 6) + (h2 >> 2));
+    }
+};
+class MftDataStore {
+public:
+    MftDataStore();
+    ~MftDataStore() = default;
+    void clear();
+    std::vector<Frn128>   m_frns;
+    std::vector<uint32_t> m_drive_indices;
+    std::vector<Frn128>   m_parent_frns;
+    std::vector<int64_t>  m_sizes;
+    std::vector<int64_t>  m_timestamps;
+    std::vector<uint32_t> m_name_offsets;
+    std::vector<uint32_t> m_attributes;
+    std::vector<uint8_t>  m_metadata_fetched;
+    std::vector<uint8_t>  m_string_pool;
+    std::unordered_map<FullKey, uint32_t, FullKeyHash> m_key_to_idx;
+    std::vector<uint32_t> m_sorted_indices;
+    size_t m_dead_count = 0;
+    size_t m_wasted_string_bytes = 0;
+    std::shared_ptr<MftDataStore> compact() const;
+    inline const char* getNamePtr(uint32_t index) const {
+        if (index >= m_name_offsets.size()) return nullptr;
+        return reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[index]);
+    }
+    uint32_t addString(const std::string& str) {
+        uint32_t offset = (uint32_t)m_string_pool.size();
+        m_string_pool.insert(m_string_pool.end(), str.begin(), str.end());
+        m_string_pool.push_back('\0');
+        return offset;
+    }
+    void updateString(uint32_t entryIdx, const std::string& newStr) {
+        uint32_t oldOff = m_name_offsets[entryIdx];
+        const char* oldPtr = getNamePtr(entryIdx);
+        size_t oldLen = oldPtr ? strlen(oldPtr) : 0;
+        if (newStr.size() <= oldLen) {
+            memcpy(m_string_pool.data() + oldOff, newStr.c_str(), newStr.size());
+            m_string_pool[oldOff + newStr.size()] = '\0';
+            if (newStr.size() < oldLen) m_wasted_string_bytes += (oldLen - newStr.size());
+        } else {
+            m_wasted_string_bytes += (oldLen + 1);
+            m_name_offsets[entryIdx] = addString(newStr);
+        }
+    }
+};
+}
+```
+
+### 变更说明
+- 变更原因：从 MftReader 剥离 SoA 数据管理逻辑，实现数据仓库层独立化，并支持 128位 FRN。
+- 影响范围：MftReader, ScchCache, UsnWatcher。
+- 是否在需求范围内：是
+
+---
+## [32] 变更时间：2026-06-15 14:21:00
+
+**文件路径：** `src/mft/NtfsEngine.h`
+**变更类型：** 新增
+
+### 修改前（Before）
+```cpp
+（此处原为空，以下为新增内容）
+```
+
+### 修改后（After）
+```cpp
+#pragma once
+#include <windows.h>
+#include <string>
+#include <vector>
+#include <winioctl.h>
+#include <cstdint>
+#include "MftDataStore.h"
+
+namespace ArcMeta {
+struct RawEntry {
+    Frn128 frn;
+    Frn128 parentFrn;
+    uint64_t size;
+    uint32_t attributes;
+    int64_t  modifyTime;
+    std::string nameUtf8;
+};
+struct DriveResult {
+    std::vector<RawEntry> entries;
+    uint64_t nextUsn;
+};
+class NtfsEngine {
+public:
+    static bool enablePrivilege(LPCWSTR privilege);
+    static int64_t filetimeToUnixMs(int64_t filetime);
+    static bool loadMftDirect(const std::wstring& volume, DriveResult& result);
+    struct Metadata {
+        uint64_t size;
+        uint32_t attributes;
+        int64_t  modifyTime;
+        bool success;
+    };
+    static Metadata getFileMetadata(const std::wstring& volume, Frn128 frn, const std::wstring& fullPath = L"");
+};
+}
+```
+
+### 变更说明
+- 变更原因：建立物理引擎层，封装 WinAPI 操作，支持 128位 FRN 和 USN V3 解析。
+- 影响范围：MftReader。
+- 是否在需求范围内：是
+
+---
+## [33] 变更时间：2026-06-15 14:25:00
+
+**文件路径：** `src/mft/MftReader.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+// （此处粘贴重构前的 MftReader.cpp 全量代码，略）
+```
+
+### 修改后（After）
+```cpp
+// （此处粘贴重构后的 MftReader.cpp 全量代码，实现了 Facade 模式，略）
+```
+
+### 变更说明
+- 变更原因：将 MftReader 重构为 Facade 模式，协调 MftDataStore, NtfsEngine, SyncManager。引入双缓冲 compact 逻辑。
+- 影响范围：核心搜索与同步逻辑。
+- 是否在需求范围内：是
