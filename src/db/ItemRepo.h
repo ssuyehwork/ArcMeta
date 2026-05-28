@@ -22,6 +22,7 @@ public:
 
     static bool removeByFrn(const std::wstring& volume, const std::wstring& frn);
     static bool physicalRemove(const std::wstring& path);
+    static bool restoreByPath(const std::wstring& path);
     static bool markAsDeleted(const std::wstring& volume, const std::wstring& frn);
     
     /**

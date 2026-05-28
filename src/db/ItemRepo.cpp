@@ -153,6 +153,18 @@ bool ItemRepo::markAsDeleted(const std::wstring& volume, const std::wstring& frn
     return q.exec();
 }
 
+bool ItemRepo::restoreByPath(const std::wstring& path) {
+    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QString qPath = QString::fromStdWString(path);
+    QString pathPattern = qPath + "\\%";
+
+    QSqlQuery q(db);
+    q.prepare("UPDATE items SET deleted = 0 WHERE path = ? OR path LIKE ?");
+    q.addBindValue(qPath);
+    q.addBindValue(pathPattern);
+    return q.exec();
+}
+
 bool ItemRepo::physicalRemove(const std::wstring& path) {
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QString qPath = QString::fromStdWString(path);
