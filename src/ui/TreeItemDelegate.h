@@ -7,10 +7,10 @@
 #include "ContentPanel.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 
 
 namespace ArcMeta {
-    using namespace Style;
 
 /**
  * @brief 通用树形视图代理，提供圆角高亮效果

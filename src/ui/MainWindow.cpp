@@ -38,6 +38,7 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
 #include <QDir>
@@ -52,8 +53,6 @@
 #include <QtConcurrent>
 
 namespace ArcMeta {
-    using namespace Style;
-    using namespace Style;
 
 MainWindow::~MainWindow() {
     if (m_resizeFilter) {

@@ -6,6 +6,7 @@
 #include "DropTreeView.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 #include "ToolTipOverlay.h"
 #include "FramelessDialog.h"
 #include "ProgressDialog.h"
@@ -35,8 +36,6 @@
 #include <QtConcurrent>
 
 namespace ArcMeta {
-    using namespace Style;
-    using namespace Style;
 
 /**
  * @brief 获取默认分类颜色：深灰色 (#555555)

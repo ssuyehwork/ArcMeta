@@ -53,6 +53,7 @@
 
 #include "ScanController.h"
 #include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include "JustifiedView.h"
 #include "ThumbnailDelegate.h"
@@ -71,7 +72,6 @@
 
 
 namespace ArcMeta {
-    using namespace Style;
 
 // --- ScanConfig Implementation ---
 

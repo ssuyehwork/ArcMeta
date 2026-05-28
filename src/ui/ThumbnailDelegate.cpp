@@ -10,9 +10,10 @@
 #include <QTimer>
 #include <QAbstractItemView>
 #include "UiHelper.h"
+#include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 
 namespace ArcMeta {
-    using namespace Style;
 
 ThumbnailDelegate::ThumbnailDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
 

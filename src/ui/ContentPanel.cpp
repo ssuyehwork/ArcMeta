@@ -67,11 +67,10 @@
 #include "BatchRenameDialog.h" 
 #include "UiHelper.h" 
 #include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
  
 namespace ArcMeta { 
-    using namespace Style;
-    using namespace Style;
  
 // --- FerrexVirtualDbModel 实现 ---
 FerrexVirtualDbModel::FerrexVirtualDbModel(QObject* parent) : QAbstractTableModel(parent) {
