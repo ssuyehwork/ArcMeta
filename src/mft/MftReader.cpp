@@ -766,9 +766,21 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
 
     QWriteLocker lock(&m_dataLock);
     QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(reinterpret_cast<uint8_t*>(record) + fileNameOffset), fileNameLength / 2);
-    size_t dIdx = 0;
-    for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
-    uint64_t encodedPf = makeKey(dIdx, parentFrn);
+
+    // 2026-05-28 物理修复：采用不区分大小写的盘符匹配，确保多盘符环境下 dIdx 绝对对齐
+    int dIdx = -1;
+    for (size_t i = 0; i < m_drive_list.size(); ++i) {
+        if (_wcsicmp(m_drive_list[i].c_str(), volume.c_str()) == 0) {
+            dIdx = (int)i;
+            break;
+        }
+    }
+    if (dIdx == -1) {
+        qDebug() << "[MftReader] 警告：接收到未索引驱动器的 USN 记录:" << QString::fromStdWString(volume);
+        return;
+    }
+
+    uint64_t encodedPf = makeKey((size_t)dIdx, parentFrn);
     uint64_t compositeKey = makeKey(dIdx, frn);
     auto it = m_frn_to_idx.find(compositeKey);
     uint32_t finalIdx = 0;
@@ -842,9 +854,18 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
 
 void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
     QWriteLocker lock(&m_dataLock);
-    size_t dIdx = 0;
-    for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
-    uint64_t compositeKey = makeKey(dIdx, frn);
+
+    // 2026-05-28 物理修复：采用不区分大小写的盘符匹配
+    int dIdx = -1;
+    for (size_t i = 0; i < m_drive_list.size(); ++i) {
+        if (_wcsicmp(m_drive_list[i].c_str(), volume.c_str()) == 0) {
+            dIdx = (int)i;
+            break;
+        }
+    }
+    if (dIdx == -1) return;
+
+    uint64_t compositeKey = makeKey((size_t)dIdx, frn);
 
     auto it = m_frn_to_idx.find(compositeKey);
     if (it != m_frn_to_idx.end()) {

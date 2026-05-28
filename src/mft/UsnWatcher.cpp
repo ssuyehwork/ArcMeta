@@ -20,7 +20,9 @@ UsnWatcher::UsnWatcher(const std::wstring& volume, uint64_t startUsn, QObject* p
                            NULL);
     
     if (m_hVolume == INVALID_HANDLE_VALUE) {
-        qDebug() << "[UsnWatcher] 错误：无法打开卷句柄" << QString::fromStdWString(devPath);
+        qDebug() << "[UsnWatcher] 严重错误：无法打开卷句柄" << QString::fromStdWString(devPath) << "错误码:" << GetLastError();
+    } else {
+        qDebug() << "[UsnWatcher] 成功打开卷句柄，准备监听:" << QString::fromStdWString(m_volume);
     }
 }
 
@@ -46,8 +48,10 @@ void UsnWatcher::run() {
     USN_JOURNAL_DATA_V0 journalData;
     DWORD bytesReturned;
     if (!DeviceIoControl(m_hVolume, FSCTL_QUERY_USN_JOURNAL, NULL, 0, &journalData, sizeof(journalData), &bytesReturned, NULL)) {
+        qDebug() << "[UsnWatcher] 错误：无法查询 Journal 状态" << QString::fromStdWString(m_volume) << "错误码:" << GetLastError();
         return;
     }
+    qDebug() << "[UsnWatcher] 正在启动实时监听循环，盘符:" << QString::fromStdWString(m_volume) << "起始 USN:" << m_lastUsn;
 
     // 2. 离线追平逻辑：若 m_lastUsn 为 0，从当前 NextUsn 开始
     if (m_lastUsn == 0) {
@@ -68,6 +72,11 @@ void UsnWatcher::run() {
 
     while (!m_stopRequested.load()) {
         if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL)) {
+            DWORD err = GetLastError();
+            if (err == ERROR_JOURNAL_DELETE_IN_PROGRESS || err == ERROR_JOURNAL_NOT_ACTIVE) {
+                qDebug() << "[UsnWatcher] 警告：Journal 失效，线程退出" << QString::fromStdWString(m_volume);
+                break;
+            }
             // 出错时小步长等待，确保可及时退出
             for (int i = 0; i < 10 && !m_stopRequested.load(); ++i) msleep(50);
             continue;
@@ -117,7 +126,9 @@ void UsnWatcher::handleRecord(USN_RECORD_V2* pRecord) {
         fileName = std::wstring(reinterpret_cast<wchar_t*>(reinterpret_cast<uint8_t*>(v3) + v3->FileNameOffset), v3->FileNameLength / 2);
     } else return;
 
-    // qDebug() << "[UsnWatcher] 接收到 USN 记录:" << QString::fromStdWString(fileName) << "Reason:" << QString::number(reason, 16);
+    if (reason & (USN_REASON_FILE_CREATE | USN_REASON_CLOSE | USN_REASON_RENAME_NEW_NAME)) {
+        qDebug() << "[UsnWatcher] " << QString::fromStdWString(m_volume) << "记录:" << QString::fromStdWString(fileName) << "原因:" << QString::number(reason, 16);
+    }
 
     // 2026-05-28 物理增强：监听 REASON_CLOSE。对于大文件或复制操作，CLOSE 是获取最终元数据的物理锚点
     if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE | USN_REASON_CLOSE)) {
