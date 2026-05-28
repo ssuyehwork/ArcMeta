@@ -334,8 +334,6 @@ bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, co
 
                 // 3. 物理修复：直接执行禁用逻辑，杜绝 Lambda 嵌套导致的编译错误
                 // 2026-06-xx 按照用户报错纠偏：改用更稳健的类型获取方式
-                QWidget* widget = const_cast<QWidget*>(option.widget);
-                QAbstractItemView* view = qobject_cast<QAbstractItemView*>(widget);
                 if (view) {
                     QAbstractItemView::EditTriggers currentTriggers = view->editTriggers();
                     view->setEditTriggers(QAbstractItemView::NoEditTriggers);

@@ -2235,8 +2235,6 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
                 model->setData(index, isBanHit ? 0 : hitStar, RatingRole); 
 
                 // 3. 物理修复：直接执行禁用逻辑，杜绝 Lambda 嵌套导致的编译错误
-                QWidget* widget = const_cast<QWidget*>(option.widget);
-                QAbstractItemView* view = qobject_cast<QAbstractItemView*>(widget);
                 if (view) {
                     QAbstractItemView::EditTriggers currentTriggers = view->editTriggers();
                     view->setEditTriggers(QAbstractItemView::NoEditTriggers);
