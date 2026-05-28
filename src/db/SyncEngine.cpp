@@ -7,6 +7,8 @@
 #include "FolderRepo.h"
 #include "../meta/MetadataDefs.h"
 #include "../meta/MetadataManager.h"
+#include "../meta/AllFrnManager.h"
+#include "../mft/MftReader.h"
 #include "../meta/AmMetaJson.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -199,88 +201,78 @@ bool SyncEngine::hasPendingTasks() const {
 
 /**
  * @brief 全量扫描与对账：2026-06-xx 物理回填实现
- * 逻辑：遍历 All_FRN_am_meta.json 记录的所有物理 FRN，读取对应的 .am_meta.json 并同步至数据库。
+ * 逻辑：全盘搜索 .am_meta.json 文件，登记其 FRN 到 All_FRN_am_meta.json，并同步数据至数据库。
  */
 void SyncEngine::runFullScan(const std::vector<std::wstring>& drivesToScanInput, 
                              std::function<void(int current, int total, const std::wstring& path)> onProgress) {
     Q_UNUSED(drivesToScanInput);
 
-    auto frnsMap = AllFrnManager::getAllFrns();
-    int total = frnsMap.size();
+    // 1. 全盘搜索所有离散元数据文件
+    qDebug() << "[Sync] 正在启动全盘元数据文件扫描...";
+    std::vector<uint64_t> metaFileKeys = MftReader::instance().search(".am_meta.json");
+    int total = (int)metaFileKeys.size();
     int current = 0;
 
-    qDebug() << "[Sync] 开始执行全量对账同步，总目录数:" << total;
+    qDebug() << "[Sync] 全盘扫描完成，发现" << total << "个 .am_meta.json 文件，准备对账...";
 
-    for (auto it = frnsMap.begin(); it != frnsMap.end(); ++it) {
-        QString frnStr = it.key();
-        QString lastKnownPath = it.value();
+    for (uint64_t key : metaFileKeys) {
+        int idx = MftReader::instance().getIndexByKey(key);
+        if (idx == -1) continue;
 
-        if (onProgress) onProgress(current, total, lastKnownPath.toStdWString());
+        QString fullPath = MftReader::instance().getFullPath(idx);
+        if (onProgress) onProgress(current, total, fullPath.toStdWString());
 
-        std::wstring resolvedPath = lastKnownPath.toStdWString();
+        QFileInfo fi(fullPath);
+        std::wstring folderPath = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
 
-        // 1. 物理路径自愈：如果原路径失效，尝试通过 FRN 反查最新物理位置
-        if (!QFile::exists(QString::fromStdWString(resolvedPath))) {
-            bool ok = false;
-            uint64_t frnVal = frnStr.toULongLong(&ok, 16);
-            if (ok) {
-                for (size_t d = 0; d < 26; ++d) {
-                    // 借用 MftReader 的快速反查能力
-                    std::wstring p = MftReader::instance().getPathFast(d, frnVal);
-                    if (!p.empty()) {
-                        resolvedPath = p;
-                        break;
-                    }
-                }
-            }
+        // 2. 提取父文件夹的物理身份并登记
+        std::string folderFid;
+        std::wstring folderFrn;
+        if (MetadataManager::instance().fetchWinApiMetadataDirect(folderPath, folderFid, &folderFrn)) {
+            AllFrnManager::registerFrn(folderFrn, folderPath);
         }
 
-        if (resolvedPath.empty() || !QFile::exists(QString::fromStdWString(resolvedPath))) {
-            current++;
-            continue;
-        }
-
-        // 2. 加载 .am_meta.json 并同步到数据库
-        AmMetaJson amJson(resolvedPath);
+        // 3. 加载 .am_meta.json 并同步到数据库
+        AmMetaJson amJson(folderPath);
         if (amJson.load()) {
-            std::wstring vol = MetadataManager::getVolumeSerialNumber(resolvedPath);
+            std::wstring vol = MetadataManager::getVolumeSerialNumber(folderPath);
 
             // A. 同步文件夹元数据
             if (!amJson.folder().isDefault()) {
-                FolderRepo::save(vol, resolvedPath, amJson.folder());
+                FolderRepo::save(vol, folderPath, amJson.folder());
             }
 
             // B. 同步目录下所有条目的元数据
             auto const& itemsMap = amJson.items();
             for (auto itm = itemsMap.begin(); itm != itemsMap.end(); ++itm) {
-                const std::wstring& name = itm->first;
-                const ItemMeta& item = itm->second;
+                const std::wstring& itemName = itm->first;
+                const ItemMeta& itemMeta = itm->second;
 
-                std::wstring fullPath = resolvedPath + L"\\" + name;
+                std::wstring itemFullPath = folderPath + L"\\" + itemName;
                 ItemMeta iMeta;
-                // 物理对齐：获取最新的文件身份（FID, Size, Times）
-                MetadataManager::instance().fetchWinApiMetadataDirect(fullPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
+                // 物理对齐：获取最新的物理身份
+                MetadataManager::instance().fetchWinApiMetadataDirect(itemFullPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
 
-                // 业务对齐：覆盖为来自 JSON 的元数据
-                iMeta.rating = item.rating;
-                iMeta.color = item.color;
-                iMeta.pinned = item.pinned;
-                iMeta.note = item.note;
-                iMeta.encrypted = item.encrypted;
-                iMeta.tags = item.tags;
-                iMeta.palettes = item.palettes;
+                // 业务对齐：以物理 JSON 里的数据为准
+                iMeta.rating = itemMeta.rating;
+                iMeta.color = itemMeta.color;
+                iMeta.pinned = itemMeta.pinned;
+                iMeta.note = itemMeta.note;
+                iMeta.encrypted = itemMeta.encrypted;
+                iMeta.tags = itemMeta.tags;
+                iMeta.palettes = itemMeta.palettes;
                 iMeta.volume = vol;
 
-                ItemRepo::save(resolvedPath, name, iMeta);
+                ItemRepo::save(folderPath, itemName, iMeta);
             }
         }
         current++;
     }
 
-    // 3. 同步完成后重构全局标签统计
+    // 4. 同步完成后重构全局标签统计
     rebuildTagStats();
 
-    qDebug() << "[Sync] 全量对账同步已完成，已恢复" << total << "个目录的物理索引。";
+    qDebug() << "[Sync] 全量对账扫描已完成，已同步" << total << "个物理节点的元数据。";
 }
 
 void SyncEngine::rebuildTagStats() {
