@@ -306,24 +306,18 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
 }
 
 bool FerrexVirtualDbModel::canFetchMore(const QModelIndex& parent) const {
-    if (parent.isValid()) return false;
-    return m_displayCount < (int)m_allRecords.size();
+    Q_UNUSED(parent);
+    return false;
 }
 
 void FerrexVirtualDbModel::fetchMore(const QModelIndex& parent) {
-    if (parent.isValid()) return;
-    int remainder = (int)m_allRecords.size() - m_displayCount;
-    int itemsToFetch = qMin(remainder, 100);
-
-    beginInsertRows(QModelIndex(), m_displayCount, m_displayCount + itemsToFetch - 1);
-    m_displayCount += itemsToFetch;
-    endInsertRows();
+    Q_UNUSED(parent);
 }
 
 void FerrexVirtualDbModel::setRecords(const std::vector<ArcMeta::ItemRepo::ItemRecord>& records) {
     beginResetModel();
     m_allRecords = records;
-    m_displayCount = qMin((int)m_allRecords.size(), 100);
+    m_displayCount = (int)m_allRecords.size();
     m_requestedIcons.clear();
     m_aspectRatios.clear();
     m_metaCache.clear();
