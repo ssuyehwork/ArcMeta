@@ -61,6 +61,7 @@ public:
 
     int      getIndexByKey(uint32_t driveIdx, Frn128 frn) const;
     int      getIndexByKey(uint64_t compositeKey) const;
+    uint64_t getKeyByIndex(int index) const;
     QString  getName(int index) const;
     int64_t  getSize(int index) const;
     int64_t  getModifyTime(int index) const;

@@ -327,6 +327,15 @@ int MftReader::getIndexByKey(uint64_t compositeKey) const {
     return getIndexByKey((uint32_t)(compositeKey >> 48), Frn128(compositeKey & 0x0000FFFFFFFFFFFFull));
 }
 
+uint64_t MftReader::getKeyByIndex(int index) const {
+    QReadLocker lock(&m_dataLock);
+    if (index < 0 || index >= (int)m_data->m_frns.size()) return 0;
+    // 2026-06-xx 同步：返回兼容旧版的 64 位复合主键 (driveIdx << 48 | 48位FRN)
+    uint64_t dIdx = static_cast<uint64_t>(m_data->m_drive_indices[index]);
+    uint64_t frnLow = m_data->m_frns[index].low & 0x0000FFFFFFFFFFFFull;
+    return (dIdx << 48) | frnLow;
+}
+
 QString MftReader::getFullPath(int i) const {
     QReadLocker l(&m_dataLock);
     if (i<0 || i>=(int)m_data->m_frns.size()) return QString();
