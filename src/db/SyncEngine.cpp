@@ -198,14 +198,89 @@ bool SyncEngine::hasPendingTasks() const {
 }
 
 /**
- * @brief 全量扫描：2026-06-xx 架构变更
- * 彻底移除 .am_meta.json 之后，不再扫描物理文件。全量同步转为对已有关联数据的完整性校验。
+ * @brief 全量扫描与对账：2026-06-xx 物理回填实现
+ * 逻辑：遍历 All_FRN_am_meta.json 记录的所有物理 FRN，读取对应的 .am_meta.json 并同步至数据库。
  */
 void SyncEngine::runFullScan(const std::vector<std::wstring>& drivesToScanInput, 
                              std::function<void(int current, int total, const std::wstring& path)> onProgress) {
     Q_UNUSED(drivesToScanInput);
-    Q_UNUSED(onProgress);
-    qDebug() << "[Sync] 全量物理文件扫描功能已随 .am_meta.json 移除而废弃。";
+
+    auto frnsMap = AllFrnManager::getAllFrns();
+    int total = frnsMap.size();
+    int current = 0;
+
+    qDebug() << "[Sync] 开始执行全量对账同步，总目录数:" << total;
+
+    for (auto it = frnsMap.begin(); it != frnsMap.end(); ++it) {
+        QString frnStr = it.key();
+        QString lastKnownPath = it.value();
+
+        if (onProgress) onProgress(current, total, lastKnownPath.toStdWString());
+
+        std::wstring resolvedPath = lastKnownPath.toStdWString();
+
+        // 1. 物理路径自愈：如果原路径失效，尝试通过 FRN 反查最新物理位置
+        if (!QFile::exists(QString::fromStdWString(resolvedPath))) {
+            bool ok = false;
+            uint64_t frnVal = frnStr.toULongLong(&ok, 16);
+            if (ok) {
+                for (size_t d = 0; d < 26; ++d) {
+                    // 借用 MftReader 的快速反查能力
+                    std::wstring p = MftReader::instance().getPathFast(d, frnVal);
+                    if (!p.empty()) {
+                        resolvedPath = p;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (resolvedPath.empty() || !QFile::exists(QString::fromStdWString(resolvedPath))) {
+            current++;
+            continue;
+        }
+
+        // 2. 加载 .am_meta.json 并同步到数据库
+        AmMetaJson amJson(resolvedPath);
+        if (amJson.load()) {
+            std::wstring vol = MetadataManager::getVolumeSerialNumber(resolvedPath);
+
+            // A. 同步文件夹元数据
+            if (!amJson.folder().isDefault()) {
+                FolderRepo::save(vol, resolvedPath, amJson.folder());
+            }
+
+            // B. 同步目录下所有条目的元数据
+            auto const& itemsMap = amJson.items();
+            for (auto itm = itemsMap.begin(); itm != itemsMap.end(); ++itm) {
+                const std::wstring& name = itm->first;
+                const ItemMeta& item = itm->second;
+
+                std::wstring fullPath = resolvedPath + L"\\" + name;
+                ItemMeta iMeta;
+                // 物理对齐：获取最新的文件身份（FID, Size, Times）
+                MetadataManager::instance().fetchWinApiMetadataDirect(fullPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
+
+                // 业务对齐：覆盖为来自 JSON 的元数据
+                iMeta.rating = item.rating;
+                iMeta.color = item.color;
+                iMeta.pinned = item.pinned;
+                iMeta.note = item.note;
+                iMeta.encrypted = item.encrypted;
+                iMeta.tags = item.tags;
+                iMeta.palettes = item.palettes;
+                iMeta.volume = vol;
+
+                ItemRepo::save(resolvedPath, name, iMeta);
+            }
+        }
+        current++;
+    }
+
+    // 3. 同步完成后重构全局标签统计
+    rebuildTagStats();
+
+    qDebug() << "[Sync] 全量对账同步已完成，已恢复" << total << "个目录的物理索引。";
 }
 
 void SyncEngine::rebuildTagStats() {
