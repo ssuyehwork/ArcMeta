@@ -6,6 +6,7 @@
 #include "DropTreeView.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 #include "ToolTipOverlay.h"
 #include "FramelessDialog.h"
 #include "ProgressDialog.h"
@@ -46,7 +47,7 @@ static std::wstring getDefaultCategoryColor() {
 
 CategoryPanel::CategoryPanel(QWidget* parent)
     : QFrame(parent) {
-    using namespace Style;
+
     setObjectName("SidebarContainer");
     setAttribute(Qt::WA_StyledBackground, true);
     setMinimumWidth(230);
@@ -139,7 +140,7 @@ void CategoryPanel::setupContextMenu() {
             
             // 只要不是系统根节点，都弹出完整菜单
             if (type == "category" || type == "file" || type == "folder") {
-                using namespace Style;
+
                 // 2026-06-xx 统一图标
                 menu.addAction(UiHelper::getIcon("folder_filled", PrimaryBlue, 18), "归类到此分类", this, &CategoryPanel::onClassifyToCategory);
                 
@@ -570,10 +571,9 @@ void CategoryPanel::onDeleteCategory() {
         
         // 删除完成后回到主线程刷新 UI
         QMetaObject::invokeMethod(this, [this, totalCount]() {
-            using namespace Style;
             m_categoryModel->refresh();
             ToolTipOverlay::instance()->showText(QCursor::pos(), 
-                QString("<b style='color:%1;'>已成功删除 %2 个分类</b>").arg(qssColor(ErrorRed)).arg(totalCount), 1500, ErrorRed);
+                QString("<b style='color:%1;'>已成功删除 %2 个分类</b>").arg(qssColor(ErrorRed)).arg(QString::number(totalCount)), 1500, ErrorRed);
         }, Qt::QueuedConnection);
     });
 }
@@ -686,7 +686,7 @@ void CategoryPanel::initUi() {
     }
 
     connect(m_btnSwitch, &QPushButton::toggled, this, [this](bool checked) {
-        using namespace Style;
+
         // 先发拉起物理对账同步，确保双轨数据一致、零数据落差平滑迁移！
         CategoryRepo::syncDatabaseAndJson();
 
@@ -770,7 +770,7 @@ void CategoryPanel::initUi() {
         QTreeView::branch:has-children:open:has-siblings   { image: url("%2"); }
 
         QTreeView::item { height: 26px; padding-left: 0px; }
-    )").arg(arrowRight, arrowDown);
+    )").arg(arrowRight).arg(arrowDown);
 
     // 物理还原：单树架构，合并系统项与用户分类
     m_categoryTree = new DropTreeView(this);

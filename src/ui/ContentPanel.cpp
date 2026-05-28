@@ -67,6 +67,7 @@
 #include "BatchRenameDialog.h" 
 #include "UiHelper.h" 
 #include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
  
 namespace ArcMeta { 
@@ -2258,8 +2259,8 @@ QWidget* GridItemDelegate::createEditor(QWidget* parent, const QStyleOptionViewI
  
     editor->setStyleSheet( 
         QString("QLineEdit { background-color: %1; color: %2; border-radius: 2px; " 
-                "border: 2px solid #3498db; font-weight: bold; font-size: 8pt; padding: 0px; }") 
-        .arg(bgColor, textColor) 
+                "border: 2px solid %3; font-weight: bold; font-size: 8pt; padding: 0px; }")
+        .arg(bgColor).arg(textColor).arg(qssColor(PrimaryBlue))
     ); 
     return editor; 
 } 

@@ -38,6 +38,7 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
 #include <QDir>
@@ -73,7 +74,7 @@ MainWindow::MainWindow(QWidget* parent)
     setMinimumSize(1180, 653); // 物理对齐：5x230px面板 + 20px分割手柄 + 10px全局边距
     setWindowTitle("FERREX");
 
-    using namespace Style;
+
 
     // 从设置读取置顶状态
     m_isPinned = AppConfig::instance().getValue("MainWindow/AlwaysOnTop", false).toBool();
@@ -766,7 +767,7 @@ void MainWindow::initToolbar() {
         "  border-radius: 6px;"
         "  color: %3; padding-left: 5px; }"
         "QLineEdit:focus { border: 1px solid %4; }"
-    ).arg(qssColor(BackgroundDeep), qssColor(BorderColor), qssColor(TextMain), qssColor(PrimaryBlue)));
+    ).arg(qssColor(BackgroundDeep)).arg(qssColor(BorderColor)).arg(qssColor(TextMain)).arg(qssColor(PrimaryBlue)));
 
     searchLayout->addWidget(m_searchEdit, 1);
 }
@@ -832,7 +833,7 @@ void MainWindow::setupSplitters() {
         "QSplitter { background: transparent; border: none; }"
         "QSplitter::handle { background-color: %1; width: 5px; }"
         "QSplitter::handle:hover { background-color: %2; }"
-    ).arg(qssColor(BackgroundDeep), qssColor(BackgroundHover)));
+    ).arg(qssColor(BackgroundDeep)).arg(qssColor(BackgroundHover)));
 
     m_categoryPanel = new CategoryPanel(this);
     m_categoryPanel->setObjectName("SidebarContainer");
@@ -1173,7 +1174,7 @@ void MainWindow::onStatusBarStatsUpdated(int fileCount, int folderCount, int tot
     }
     int selectedCount = uniqueRows.size();
     
-    m_statusLeft->setText(QString("%1 个项目, 已选中 %2 个").arg(totalCount).arg(selectedCount));
+    m_statusLeft->setText(QString("%1 个项目, 已选中 %2 个").arg(QString::number(totalCount)).arg(QString::number(selectedCount)));
     
     Q_UNUSED(fileCount);
     Q_UNUSED(folderCount);
