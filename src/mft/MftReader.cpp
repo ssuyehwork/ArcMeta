@@ -18,8 +18,14 @@
 #include <QtConcurrent/QtConcurrent>
 #include <QFileIconProvider>
 #include <QFileInfo>
+#include <queue>
 
 namespace ArcMeta {
+
+// 内部辅助：生成路径缓存 Key
+static inline uint64_t makePathKey(uint32_t driveIdx, Frn128 frn) {
+    return (static_cast<uint64_t>(driveIdx) << 48) | (frn.low & 0x0000FFFFFFFFFFFFull);
+}
 
 MftReader& MftReader::instance() {
     static MftReader inst;
@@ -130,17 +136,19 @@ void MftReader::buildIndex(const QStringList& drives) {
     m_data->m_sorted_indices.resize(m_data->m_frns.size());
     std::iota(m_data->m_sorted_indices.begin(), m_data->m_sorted_indices.end(), 0);
     std::sort((std::execution::par), m_data->m_sorted_indices.begin(), m_data->m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
-        const char* s1 = m_data->getNamePtr(a);
-        const char* s2 = m_data->getNamePtr(b);
-        return _stricmp(s1 ? s1 : "", s2 ? s2 : "") < 0;
+        return _stricmp(m_data->getNamePtr(a), m_data->getNamePtr(b)) < 0;
     });
     m_isInitialized = true;
+    emit dataChanged(-1);
 }
 
 bool MftReader::loadFromCache() {
     std::filesystem::path cacheDir = "ArcMeta/cache";
     if (!std::filesystem::exists(cacheDir)) return false;
     clear(); 
+    struct DriveIndices { std::vector<uint32_t> sorted; uint32_t baseIdx; };
+    std::vector<DriveIndices> allSortedIndices;
+
     for (auto const& entry : std::filesystem::directory_iterator{cacheDir}) {
         if (entry.path().extension() == ".scch") {
             std::vector<Frn128> f, pf; std::vector<uint32_t> di, si;
@@ -150,7 +158,7 @@ bool MftReader::loadFromCache() {
                 QWriteLocker lock(&m_dataLock);
                 uint32_t oldDCount = (uint32_t)m_drive_list.size();
                 size_t oldPoolSize = m_data->m_string_pool.size();
-                size_t baseIdx = m_data->m_frns.size();
+                uint32_t baseIdx = (uint32_t)m_data->m_frns.size();
                 m_data->m_frns.insert(m_data->m_frns.end(), f.begin(), f.end());
                 m_data->m_parent_frns.insert(m_data->m_parent_frns.end(), pf.begin(), pf.end());
                 m_data->m_sizes.insert(m_data->m_sizes.end(), s.begin(), s.end());
@@ -164,6 +172,7 @@ bool MftReader::loadFromCache() {
                     m_data->m_name_offsets.push_back(no[i] + (uint32_t)oldPoolSize);
                     m_data->m_key_to_idx[{dIdx, f[i]}] = (uint32_t)(baseIdx + i);
                 }
+                allSortedIndices.push_back({std::move(si), baseIdx});
                 std::wstring dName;
                 for (const auto& [drive, usn] : usnMap) {
                     dName = QString::fromStdString(drive).toStdWString();
@@ -178,14 +187,28 @@ bool MftReader::loadFromCache() {
     }
     QWriteLocker lock(&m_dataLock);
     if (m_data->m_frns.empty()) return false;
-    m_data->m_sorted_indices.resize(m_data->m_frns.size());
-    std::iota(m_data->m_sorted_indices.begin(), m_data->m_sorted_indices.end(), 0);
-    std::sort((std::execution::par), m_data->m_sorted_indices.begin(), m_data->m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
-        const char* s1 = m_data->getNamePtr(a);
-        const char* s2 = m_data->getNamePtr(b);
-        return _stricmp(s1 ? s1 : "", s2 ? s2 : "") < 0;
-    });
+    m_data->m_sorted_indices.clear(); m_data->m_sorted_indices.reserve(m_data->m_frns.size());
+    struct MergeNode { uint32_t globalIdx; size_t driveArrIdx; size_t innerIdx;
+        bool operator>(const MergeNode& o) const {
+            const char* s1 = MftReader::instance().m_data->getNamePtr(globalIdx);
+            const char* s2 = MftReader::instance().m_data->getNamePtr(o.globalIdx);
+            return _stricmp(s1 ? s1 : "", s2 ? s2 : "") > 0;
+        }
+    };
+    std::priority_queue<MergeNode, std::vector<MergeNode>, std::greater<MergeNode>> pq;
+    for (size_t i = 0; i < allSortedIndices.size(); ++i) {
+        if (!allSortedIndices[i].sorted.empty()) pq.push({allSortedIndices[i].sorted[0] + allSortedIndices[i].baseIdx, i, 0});
+    }
+    while (!pq.empty()) {
+        MergeNode top = pq.top(); pq.pop();
+        m_data->m_sorted_indices.push_back(top.globalIdx);
+        if (top.innerIdx + 1 < allSortedIndices[top.driveArrIdx].sorted.size()) {
+            size_t nIdx = top.innerIdx + 1;
+            pq.push({allSortedIndices[top.driveArrIdx].sorted[nIdx] + allSortedIndices[top.driveArrIdx].baseIdx, top.driveArrIdx, nIdx});
+        }
+    }
     m_isInitialized = true;
+    emit dataChanged(-1);
     return true;
 }
 
@@ -276,7 +299,7 @@ void MftReader::updateEntryFromUsnRecord(const QByteArray& recordData, const std
         m_data->m_name_offsets.push_back(m_data->addString(name.toUtf8().toStdString()));
         m_data->m_key_to_idx[key] = fIdx;
     }
-    { std::lock_guard<std::mutex> pcLock(m_pathCacheMutex); m_path_cache.erase(frn.low); }
+    { std::lock_guard<std::mutex> pcLock(m_pathCacheMutex); m_path_cache.erase(makePathKey((uint32_t)dIdx, frn)); }
     m_next_usns[volume] = usn;
     if (m_data->m_dead_count > 100000) performBackgroundCompact();
     lock.unlock();
@@ -295,6 +318,8 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, Frn128 frn) {
         m_data->m_key_to_idx.erase(it); m_data->m_dead_count++;
         auto itS = std::find(m_data->m_sorted_indices.begin(), m_data->m_sorted_indices.end(), idx);
         if (itS != m_data->m_sorted_indices.end()) m_data->m_sorted_indices.erase(itS);
+        { std::lock_guard<std::mutex> pcLock(m_pathCacheMutex); m_path_cache.erase(makePathKey((uint32_t)dIdx, frn)); }
+        if (m_data->m_dead_count > 50000) performBackgroundCompact();
         lock.unlock(); emit entryRemoved(frn.low); emit dataChanged(-1);
     }
 }
@@ -316,58 +341,61 @@ Frn128 MftReader::getFrn(int i) const { QReadLocker l(&m_dataLock); return (i>=0
 bool MftReader::isDirectory(int i) const { return (getAttributes(i) & FILE_ATTRIBUTE_DIRECTORY) != 0; }
 bool MftReader::isMetadataFetched(int i) const { QReadLocker l(&m_dataLock); return (i>=0 && i<(int)m_data->m_metadata_fetched.size())?(m_data->m_metadata_fetched[i]==2):true; }
 int MftReader::totalCount() const { QReadLocker l(&m_dataLock); return (int)m_data->m_frns.size(); }
-
-int MftReader::getIndexByKey(uint32_t dIdx, Frn128 frn) const {
-    QReadLocker l(&m_dataLock);
-    auto it = m_data->m_key_to_idx.find({dIdx, frn});
-    return (it != m_data->m_key_to_idx.end())?(int)it->second:-1;
-}
-
-int MftReader::getIndexByKey(uint64_t compositeKey) const {
-    return getIndexByKey((uint32_t)(compositeKey >> 48), Frn128(compositeKey & 0x0000FFFFFFFFFFFFull));
-}
-
-uint64_t MftReader::getKeyByIndex(int index) const {
-    QReadLocker lock(&m_dataLock);
-    if (index < 0 || index >= (int)m_data->m_frns.size()) return 0;
-    // 2026-06-xx 同步：返回兼容旧版的 64 位复合主键 (driveIdx << 48 | 48位FRN)
-    uint64_t dIdx = static_cast<uint64_t>(m_data->m_drive_indices[index]);
-    uint64_t frnLow = m_data->m_frns[index].low & 0x0000FFFFFFFFFFFFull;
-    return (dIdx << 48) | frnLow;
-}
-
-QString MftReader::getFullPath(int i) const {
-    QReadLocker l(&m_dataLock);
-    if (i<0 || i>=(int)m_data->m_frns.size()) return QString();
-    return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(m_data->m_drive_indices[i], m_data->m_frns[i]));
-}
+int MftReader::getIndexByKey(uint32_t dIdx, Frn128 frn) const { QReadLocker l(&m_dataLock); auto it = m_data->m_key_to_idx.find({dIdx, frn}); return (it != m_data->m_key_to_idx.end())?(int)it->second:-1; }
+int MftReader::getIndexByKey(uint64_t compositeKey) const { return getIndexByKey((uint32_t)(compositeKey >> 48), Frn128(compositeKey & 0x0000FFFFFFFFFFFFull)); }
+uint64_t MftReader::getKeyByIndex(int index) const { QReadLocker l(&m_dataLock); if (index < 0 || index >= (int)m_data->m_frns.size()) return 0; uint64_t dIdx = static_cast<uint64_t>(m_data->m_drive_indices[index]); return (dIdx << 48) | (m_data->m_frns[index].low & 0x0000FFFFFFFFFFFFull); }
+QString MftReader::getFullPath(int i) const { QReadLocker l(&m_dataLock); if (i<0 || i>=(int)m_data->m_frns.size()) return QString(); return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(m_data->m_drive_indices[i], m_data->m_frns[i])); }
 
 std::wstring MftReader::getPathFast(uint32_t driveIdx, Frn128 frn) {
-    uint64_t k = frn.low; { std::lock_guard<std::mutex> l(m_pathCacheMutex); auto it = m_path_cache.find(k); if (it != m_path_cache.end()) return it->second; }
+    uint64_t k = makePathKey(driveIdx, frn); { std::lock_guard<std::mutex> l(m_pathCacheMutex); auto it = m_path_cache.find(k); if (it != m_path_cache.end()) return it->second; }
     std::vector<std::wstring> segs; Frn128 cur = frn;
     while (true) {
         auto idxIt = m_data->m_key_to_idx.find({driveIdx, cur}); if (idxIt == m_data->m_key_to_idx.end()) break;
-        uint32_t idx = idxIt->second;
-        const char* namePtr = m_data->getNamePtr(idx);
-        if (namePtr) segs.push_back(QString::fromUtf8(namePtr).toStdWString());
-        Frn128 p = m_data->m_parent_frns[idx]; if (p.low == 5 || p == cur || p.isZero()) break; cur = p;
+        uint32_t idx = idxIt->second; const char* p = m_data->getNamePtr(idx);
+        if (p) segs.push_back(QString::fromUtf8(p).toStdWString());
+        Frn128 pfrn = m_data->m_parent_frns[idx]; if (pfrn.low == 5 || pfrn == cur || pfrn.isZero()) break; cur = pfrn;
     }
     if (segs.empty()) return L"";
     std::wstring path = (driveIdx < m_drive_list.size()) ? m_drive_list[driveIdx] : L"C:";
     for (auto it = segs.rbegin(); it != segs.rend(); ++it) path += L"\\" + *it;
-    { std::lock_guard<std::mutex> l(m_pathCacheMutex); if (m_path_cache.size() > 200000) m_path_cache.clear(); m_path_cache[k] = path; }
+    { std::lock_guard<std::mutex> l(m_pathCacheMutex); if (m_path_cache.size() > 200000) { auto itc = m_path_cache.begin(); for(int i=0; i<2000; ++i) itc = m_path_cache.erase(itc); } m_path_cache[k] = path; }
     return path;
 }
 
 std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, bool caseSensitive, const QStringList& extensionList, bool includeHidden, bool includeSystem, bool includeDollar) {
     QReadLocker lock(&m_dataLock); if (!m_isInitialized) return {};
-    std::vector<uint64_t> res; size_t total = m_data->m_frns.size();
-    for (size_t i = 0; i < total; ++i) {
-        if (matchEntry((int)i, query, useRegex, caseSensitive, extensionList, includeHidden, includeSystem, includeDollar)) {
-            res.push_back(m_data->m_frns[i].low);
+    bool hasQuery = !query.isEmpty(); QByteArray queryUtf8 = query.toUtf8(); std::vector<uint64_t> finalRes;
+    if (hasQuery && !useRegex && !caseSensitive && extensionList.isEmpty()) {
+        auto it_start = std::lower_bound(m_data->m_sorted_indices.begin(), m_data->m_sorted_indices.end(), queryUtf8.constData(), [this](uint32_t idx, const char* q) {
+            return _strnicmp(m_data->getNamePtr(idx), q, (size_t)strlen(q)) < 0;
+        });
+        for (auto it = it_start; it != m_data->m_sorted_indices.end(); ++it) {
+            uint32_t i = *it; const char* p = m_data->getNamePtr(i);
+            if (_strnicmp(p, queryUtf8.constData(), (size_t)queryUtf8.size()) != 0) break;
+            if (!includeDollar && p && p[0] == '$') continue;
+            uint32_t dIdx = m_data->m_drive_indices[i];
+            if (dIdx >= 32 || !(m_drive_active_mask.load(std::memory_order_relaxed) & (1 << dIdx))) continue;
+            if (!includeHidden && (m_data->m_attributes[i] & FILE_ATTRIBUTE_HIDDEN)) continue;
+            if (!includeSystem && (m_data->m_attributes[i] & FILE_ATTRIBUTE_SYSTEM)) continue;
+            finalRes.push_back((static_cast<uint64_t>(dIdx) << 48) | (m_data->m_frns[i].low & 0x0000FFFFFFFFFFFFull));
+            if (finalRes.size() > 200000) break;
         }
+    } else {
+        std::mutex mtx; size_t total = m_data->m_frns.size();
+        const size_t grainSize = 4096; size_t numChunks = (total + grainSize - 1) / grainSize;
+        std::vector<size_t> chunkIndices(numChunks); std::iota(chunkIndices.begin(), chunkIndices.end(), 0);
+        std::for_each((std::execution::par), chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
+            std::vector<uint64_t> localRes; size_t startPos = chunkIdx * grainSize; size_t endPos = (std::min)(startPos + grainSize, total);
+            for (size_t i = startPos; i < endPos; ++i) {
+                if (matchEntry((int)i, query, useRegex, caseSensitive, extensionList, includeHidden, includeSystem, includeDollar)) {
+                    uint64_t dIdx = static_cast<uint64_t>(m_data->m_drive_indices[i]);
+                    localRes.push_back((dIdx << 48) | (m_data->m_frns[i].low & 0x0000FFFFFFFFFFFFull));
+                }
+            }
+            if (!localRes.empty()) { std::lock_guard<std::mutex> l(mtx); finalRes.insert(finalRes.end(), localRes.begin(), localRes.end()); }
+        });
     }
-    return res;
+    return finalRes;
 }
 
 bool MftReader::matchEntry(int i, const QString& query, bool useRegex, bool caseSensitive, const QStringList& extensionList, bool includeHidden, bool includeSystem, bool includeDollar) const {

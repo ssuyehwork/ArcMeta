@@ -1,5 +1,4 @@
 #pragma once
-
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -14,18 +13,17 @@ namespace ArcMeta {
 
 /**
  * @brief 128位文件引用号 (支持 USN V3 / ReFS)
- * 杜绝 64 位截断，确保 GUID 级别唯一性。
+ * 杜绝 64 位截断，支持 GUID 级别唯一性。
  */
 struct Frn128 {
     uint64_t low = 0;
     uint64_t high = 0;
-
     Frn128() = default;
     Frn128(uint64_t l, uint64_t h = 0) : low(l), high(h) {}
-
     bool isZero() const { return low == 0 && high == 0; }
     bool operator==(const Frn128& o) const { return low == o.low && high == o.high; }
     bool operator!=(const Frn128& o) const { return !(*this == o); }
+    bool operator<(const Frn128& o) const { return high < o.high || (high == o.high && low < o.low); }
 };
 
 /**
@@ -34,10 +32,8 @@ struct Frn128 {
 struct FullKey {
     uint32_t driveIdx;
     Frn128   frn;
-
-    bool operator==(const FullKey& o) const {
-        return driveIdx == o.driveIdx && frn == o.frn;
-    }
+    bool operator==(const FullKey& o) const { return driveIdx == o.driveIdx && frn == o.frn; }
+    bool operator<(const FullKey& o) const { return driveIdx < o.driveIdx || (driveIdx == o.driveIdx && frn < o.frn); }
 };
 
 struct FullKeyHash {
@@ -45,7 +41,6 @@ struct FullKeyHash {
         size_t h1 = std::hash<uint32_t>{}(k.driveIdx);
         size_t h2 = std::hash<uint64_t>{}(k.frn.low);
         size_t h3 = std::hash<uint64_t>{}(k.frn.high);
-        // 改进的组合哈希，减少碰撞
         return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2)) ^ (h3 + 0x9e3779b9 + (h2 << 6) + (h2 >> 2));
     }
 };
@@ -57,10 +52,8 @@ class MftDataStore {
 public:
     MftDataStore();
     ~MftDataStore() = default;
-
     void clear();
 
-    // SoA (Structure of Arrays) 核心数据
     std::vector<Frn128>   m_frns;
     std::vector<uint32_t> m_drive_indices;
     std::vector<Frn128>   m_parent_frns;
@@ -68,21 +61,17 @@ public:
     std::vector<int64_t>  m_timestamps;
     std::vector<uint32_t> m_name_offsets;
     std::vector<uint32_t> m_attributes;
-    std::vector<uint8_t>  m_metadata_fetched; // 0:未获取, 1:获取中, 2:已完成
+    std::vector<uint8_t>  m_metadata_fetched;
     std::vector<uint8_t>  m_string_pool;
 
-    // 索引查找
     std::unordered_map<FullKey, uint32_t, FullKeyHash> m_key_to_idx;
     std::vector<uint32_t> m_sorted_indices;
 
-    // 统计
     size_t m_dead_count = 0;
     size_t m_wasted_string_bytes = 0;
 
-    // 核心操作
     std::shared_ptr<MftDataStore> compact() const;
 
-    // 内联辅助
     inline const char* getNamePtr(uint32_t index) const {
         if (index >= m_name_offsets.size()) return nullptr;
         return reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[index]);

@@ -46,7 +46,6 @@ bool NtfsEngine::loadMftDirect(const std::wstring& volume, DriveResult& result) 
             LARGE_INTEGER timestamp;
             uint32_t attr;
             WORD fileNameLength, fileNameOffset;
-
             if (header->MajorVersion == 2) {
                 USN_RECORD_V2* rec = reinterpret_cast<USN_RECORD_V2*>(p);
                 frn = Frn128(rec->FileReferenceNumber);
@@ -57,24 +56,14 @@ bool NtfsEngine::loadMftDirect(const std::wstring& volume, DriveResult& result) 
                 fileNameOffset = rec->FileNameOffset;
             } else if (header->MajorVersion == 3) {
                 USN_RECORD_V3* rec = reinterpret_cast<USN_RECORD_V3*>(p);
-                // 2026-06-xx 按照审计要求：直接读取 16 字节 GUID，不再进行 64 位截断
                 memcpy(&frn, &rec->FileReferenceNumber, 16);
                 memcpy(&parentFrn, &rec->ParentFileReferenceNumber, 16);
                 timestamp = rec->TimeStamp;
                 attr = rec->FileAttributes;
                 fileNameLength = rec->FileNameLength;
                 fileNameOffset = rec->FileNameOffset;
-            } else {
-                p += header->RecordLength; continue;
-            }
-
-            RawEntry e;
-            e.frn = frn;
-            e.parentFrn = parentFrn;
-            e.size = 0;
-            e.attributes = attr;
-            e.modifyTime = filetimeToUnixMs(timestamp.QuadPart);
-
+            } else { p += header->RecordLength; continue; }
+            RawEntry e; e.frn = frn; e.parentFrn = parentFrn; e.size = 0; e.attributes = attr; e.modifyTime = filetimeToUnixMs(timestamp.QuadPart);
             QString n = QString::fromUtf16(reinterpret_cast<const char16_t*>(p + fileNameOffset), fileNameLength / 2);
             e.nameUtf8 = n.toUtf8().toStdString();
             result.entries.push_back(std::move(e));
@@ -88,7 +77,6 @@ bool NtfsEngine::loadMftDirect(const std::wstring& volume, DriveResult& result) 
 
 NtfsEngine::Metadata NtfsEngine::getFileMetadata(const std::wstring& volume, Frn128 frn, const std::wstring& fullPath) {
     Metadata meta = {0, 0, 0, false};
-
     if (!fullPath.empty()) {
         WIN32_FILE_ATTRIBUTE_DATA attrData;
         if (GetFileAttributesExW(fullPath.c_str(), GetFileExInfoStandard, &attrData)) {
@@ -99,19 +87,12 @@ NtfsEngine::Metadata NtfsEngine::getFileMetadata(const std::wstring& volume, Frn
             return meta;
         }
     }
-
     std::wstring rootPath = volume + L"\\";
     HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (hHint != INVALID_HANDLE_VALUE) {
         FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR) };
-        if (frn.high == 0) {
-            id.Type = FileIdType;
-            id.FileId.QuadPart = frn.low;
-        } else {
-            id.Type = ExtendedFileIdType;
-            memcpy(&id.ExtendedFileId, &frn, 16);
-        }
-
+        if (frn.high == 0) { id.Type = FileIdType; id.FileId.QuadPart = frn.low; }
+        else { id.Type = ExtendedFileIdType; memcpy(&id.ExtendedFileId, &frn, 16); }
         HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
         if (hFile != INVALID_HANDLE_VALUE) {
             BY_HANDLE_FILE_INFORMATION bhfi;
