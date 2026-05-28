@@ -509,6 +509,20 @@ std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
     }
     std::vector<std::pair<int, int>> counts;
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+
+    // 2026-05-28 逻辑降级：针对 DB 模式且 items 表由于数据库被物理删除而导致为空的情况，
+    // 增加容错逻辑，允许从 category_items 直接提取基础计数，防止 UI 显示全为 (0)。
+    QSqlQuery qCheck("SELECT COUNT(*) FROM items WHERE deleted = 0", db);
+    bool itemsEmpty = (qCheck.next() && qCheck.value(0).toInt() == 0);
+
+    if (itemsEmpty) {
+        QSqlQuery qFallback("SELECT category_id, COUNT(DISTINCT file_id_128) FROM category_items GROUP BY category_id", db);
+        while (qFallback.next()) {
+            counts.push_back({qFallback.value(0).toInt(), qFallback.value(1).toInt()});
+        }
+        return counts;
+    }
+
     // 2026-06-xx 物理修复：基于非空 Fallback ID 机制回归最高性能 SQL。
     // 铁律：必须物理对齐 i.deleted = 0，基于唯一的 file_id_128 计数。
     QSqlQuery q("SELECT ci.category_id, COUNT(DISTINCT i.file_id_128) "
@@ -906,6 +920,16 @@ void CategoryRepo::syncDatabaseAndJson() {
     root["categories"] = jsonCats;
     root["category_items"] = jsonItems;
     JsonCategoryEngine::saveCategoriesJson(root);
+
+    // 2026-05-28 新增：对账后如果数据库被重置（items表为空），引导元数据恢复
+    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlQuery qCheck("SELECT COUNT(*) FROM items", db);
+    if (qCheck.next() && qCheck.value(0).toInt() == 0) {
+        qDebug() << "[Sync] 对账检测到数据库为空，正在引导 MetadataManager 恢复物理索引...";
+        // 逻辑：此时 category_items 已从 JSON 恢复，但 items 为空。
+        // 调用 initFromDatabase 将触发 MetadataManager 对数据库的再次感应或尝试回填基础记录。
+        MetadataManager::instance().initFromDatabase();
+    }
 }
 
 
