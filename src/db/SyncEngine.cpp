@@ -205,34 +205,51 @@ bool SyncEngine::hasPendingTasks() const {
  */
 void SyncEngine::runFullScan(const std::vector<std::wstring>& drivesToScanInput, 
                              std::function<void(int current, int total, const std::wstring& path)> onProgress) {
-    Q_UNUSED(drivesToScanInput);
+    auto& reader = MftReader::instance();
 
-    // 1. 全盘搜索所有离散元数据文件
+    // 1. 物理引擎预热与掩码激活
+    QStringList allDrives;
+    for (int i = 0; i < 26; ++i) {
+        QString d = QString(QChar('A' + i)) + ":";
+        if (QDir(d).exists()) allDrives << d;
+    }
+    // 强制激活所有在线驱动器，确保全量扫描不因掩码隔离而遗漏
+    reader.updateActiveDrives(allDrives);
+
+    if (reader.totalCount() == 0) {
+        qDebug() << "[Sync] MFT 索引尚未预热，正在加载缓存或执行扫描...";
+        if (!reader.loadFromCache()) {
+            reader.buildIndex(allDrives);
+        }
+    }
+
+    // 2. 全盘搜索所有离散元数据文件 (包含隐藏属性)
     qDebug() << "[Sync] 正在启动全盘元数据文件扫描...";
-    std::vector<uint64_t> metaFileKeys = MftReader::instance().search(".am_meta.json");
+    std::vector<uint64_t> metaFileKeys = reader.search(".am_meta.json", false, false, {}, true, true, true);
     int total = (int)metaFileKeys.size();
     int current = 0;
 
     qDebug() << "[Sync] 全盘扫描完成，发现" << total << "个 .am_meta.json 文件，准备对账...";
 
     for (uint64_t key : metaFileKeys) {
-        int idx = MftReader::instance().getIndexByKey(key);
+        int idx = reader.getIndexByKey(key);
         if (idx == -1) continue;
 
-        QString fullPath = MftReader::instance().getFullPath(idx);
+        QString fullPath = reader.getFullPath(idx);
         if (onProgress) onProgress(current, total, fullPath.toStdWString());
 
         QFileInfo fi(fullPath);
         std::wstring folderPath = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
 
-        // 2. 提取父文件夹的物理身份并登记
-        std::string folderFid;
-        std::wstring folderFrn;
-        if (MetadataManager::instance().fetchWinApiMetadataDirect(folderPath, folderFid, &folderFrn)) {
-            AllFrnManager::registerFrn(folderFrn, folderPath);
-        }
+        // 3. 提取 .am_meta.json 文件本身的物理身份 (FRN) 并登记
+        // 按照用户要求：记录 .am_meta.json 文件的 FRN，作为物理对账锚点
+        wchar_t frnBuf[17];
+        uint64_t fileFrn = key & 0x0000FFFFFFFFFFFFull; // 提取 48 位原始 FRN
+        swprintf(frnBuf, 17, L"%016llX", fileFrn);
 
-        // 3. 加载 .am_meta.json 并同步到数据库
+        AllFrnManager::registerFrn(frnBuf, folderPath);
+
+        // 4. 加载 .am_meta.json 并同步到数据库
         AmMetaJson amJson(folderPath);
         if (amJson.load()) {
             std::wstring vol = MetadataManager::getVolumeSerialNumber(folderPath);
