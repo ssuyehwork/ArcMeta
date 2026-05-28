@@ -226,8 +226,8 @@ void MetadataManager::initFromJsonMode() {
         bool ok = false;
         uint64_t frnVal = frnStr.toULongLong(&ok, 16);
         if (ok) {
-            for (size_t d = 0; d < 26; ++d) {
-                std::wstring p = MftReader::instance().getPathFast(d, frnVal);
+            for (uint32_t d = 0; d < 26; ++d) {
+                std::wstring p = MftReader::instance().getPathFast(d, Frn128(frnVal));
                 if (!p.empty()) {
                     // 2026-05-28 物理路径判定：FRN 现在指向的是 .am_meta.json 文件本身
                     if (p.find(L".am_meta.json") != std::wstring::npos) {
