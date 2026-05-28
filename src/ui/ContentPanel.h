@@ -164,6 +164,7 @@ public:
         ActionDelete,
         ActionPermanentDelete,
         ActionSecureDelete,
+        ActionRestore,
         ActionCopyPath,
         ActionProperties,
         ActionExtractColor
@@ -263,6 +264,7 @@ private:
 
     int m_zoomLevel = 64;
     QString m_currentPath;
+    QString m_currentCategoryType; // 用于驱动差异化右键菜单
     bool m_isRecursive = false;
     bool m_isLoading = false; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
     void updateGridSize();
@@ -318,6 +320,11 @@ public slots:
      * @brief 2026-06-xx 彻底重构：加载分类及其子项 (分类 ID 联动)
      */
     void loadCategory(int categoryId);
+
+    /**
+     * @brief 设置当前分类类型，用于驱动右键菜单差异化
+     */
+    void setCurrentCategoryType(const QString& type) { m_currentCategoryType = type; }
 
 signals:
     /**

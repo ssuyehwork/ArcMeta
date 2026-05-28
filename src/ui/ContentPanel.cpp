@@ -1123,6 +1123,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
     UiHelper::applyMenuStyle(&menu); 
  
     if (onItem) { 
+        // 2026-06-xx 物理修复：在回收站分类中，顶部增加“还原”选项
+        if (m_currentCategoryType == "trash") {
+            menu.addAction(UiHelper::getIcon("sync", QColor("#2ecc71"), 18), "还原")->setData(ActionRestore);
+            menu.addSeparator();
+        }
+
         // [核心操作区] 
         QAction* actOpen = menu.addAction(isFolder ? "打开文件夹" : "打开"); 
         actOpen->setData(ActionOpen); 
@@ -1207,15 +1213,26 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         menu.addAction("剪切")->setData(ActionCut); 
         menu.addAction("粘贴")->setData(ActionPaste); 
         
-        QMenu* delMenu = menu.addMenu("删除选项...");
-        UiHelper::applyMenuStyle(delMenu);
-        delMenu->addAction("移入回收站")->setData(ActionDelete);
-        delMenu->addAction("彻底删除 (不可恢复)")->setData(ActionPermanentDelete);
-        delMenu->addAction("安全擦除 (覆写抹除)")->setData(ActionSecureDelete);
+        // 2026-06-xx 按照用户要求：在回收站中不显示二级删除菜单
+        if (m_currentCategoryType != "trash") {
+            QMenu* delMenu = menu.addMenu("删除");
+            UiHelper::applyMenuStyle(delMenu);
+            delMenu->addAction("移入回收站")->setData(ActionDelete);
+            delMenu->addAction("彻底删除 (不可恢复)")->setData(ActionPermanentDelete);
+            delMenu->addAction("安全擦除 (覆写抹除)")->setData(ActionSecureDelete);
+        } else {
+            // 回收站模式下，原位置不显示删除
+        }
  
         menu.addSeparator(); 
         menu.addAction("复制路径")->setData(ActionCopyPath); 
         menu.addAction("属性")->setData(ActionProperties); 
+
+        // 2026-06-xx 按照用户要求：在回收站分类中，最底部增加“永久删除”选项
+        if (m_currentCategoryType == "trash") {
+            menu.addSeparator();
+            menu.addAction(UiHelper::getIcon("trash", QColor("#e81123"), 18), "永久删除")->setData(ActionPermanentDelete);
+        }
  
     } else { 
         // [空白处菜单] 
@@ -1385,6 +1402,18 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionCopy: performCopy(false); break; 
         case ActionCut: performCopy(true); break; 
         case ActionPaste: performPaste(); break; 
+        case ActionRestore: {
+            auto indexes = view->selectionModel()->selectedIndexes();
+            for (const auto& idx : indexes) {
+                if (idx.column() == 0) {
+                    QString itemPath = idx.data(PathRole).toString();
+                    ItemRepo::restoreByPath(itemPath.toStdWString());
+                }
+            }
+            loadDirectory(m_currentPath);
+            emit MetadataManager::instance().metaChanged(""); // 刷新侧边栏计数
+            break;
+        }
         case ActionDelete: 
         case ActionPermanentDelete:
         case ActionSecureDelete: {
@@ -1649,6 +1678,7 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     m_isLoading = true;
+    m_currentCategoryType = ""; // 物理导航模式下清除系统类型
     qDebug() << "[Content] 开始物理递归扫描 (虚拟化) ->" << path << (recursive ? "递归" : "单级"); 
     emit dataSourceChanged("nav"); 
     if (m_viewStack) m_viewStack->show(); 
@@ -1727,6 +1757,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
  
 void ContentPanel::search(const QString& query) { 
+    m_currentCategoryType = "search";
     qDebug() << "[Content] 物理检索 (DB模式) ->" << query; 
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
@@ -1799,6 +1830,7 @@ void ContentPanel::previewFile(const QString& path) {
  
 void ContentPanel::loadCategory(int categoryId) { 
     m_isLoading = true;
+    m_currentCategoryType = "user_category";
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
