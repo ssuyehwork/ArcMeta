@@ -57,6 +57,15 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_mainLayout->setSpacing(0);
 
+    // 2026-05-28 物理增强：提前从持久化状态初始化底层引擎模式
+    bool isJson = AppConfig::instance().getValue("Category/IsJsonMode", false).toBool();
+    CategoryRepo::setJsonMode(isJson);
+    if (isJson) {
+        MetadataManager::instance().initFromJsonMode();
+    } else {
+        MetadataManager::instance().initFromDatabase();
+    }
+
     initUi();
     setupContextMenu();
 }
@@ -88,16 +97,6 @@ void CategoryPanel::selectCategory(int id) {
 
 void CategoryPanel::deferredInit() {
     qDebug() << "[CategoryPanel] deferredInit 开始执行";
-
-    // 2026-06-xx 物理同步：根据持久化状态初始化底层引擎
-    bool isJson = AppConfig::instance().getValue("Category/IsJsonMode", false).toBool();
-    
-    CategoryRepo::setJsonMode(isJson);
-    if (isJson) {
-        MetadataManager::instance().initFromJsonMode();
-    } else {
-        MetadataManager::instance().initFromDatabase();
-    }
 
     // 2026-04-12 关键修复：延迟执行数据库数据加载
     if (m_categoryModel) {
@@ -710,6 +709,7 @@ void CategoryPanel::initUi() {
 
         // 3. 持久化状态
         AppConfig::instance().setValue("Category/IsJsonMode", checked);
+        AppConfig::instance().sync(); // 物理落盘，防止异常退出回滚
 
         // 4. 树模型重新拉取
         if (m_categoryModel) {
