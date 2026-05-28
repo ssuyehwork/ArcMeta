@@ -8,48 +8,39 @@
 #include <memory>
 #include <windows.h>
 #include <winioctl.h>
-#include <QString>
 #include <QThread>
-#include <QList>
+#include <QByteArray>
 
 namespace ArcMeta {
 
-// 变动记录结构
-struct UsnChange {
-    enum Type { Created, Deleted, Renamed, Modified };
-    Type type;
-    uint64_t frn;
-    uint64_t parentFrn;
-    QString name;
-    uint32_t attributes;
-    int64_t size;
-};
-
 /**
- * @brief 高性能 USN 日志监控器
- * 
- * 实时监控 NTFS 卷的文件变动，支持离线追平逻辑。
+ * @brief 重构后的 USN 监控器
+ * 使用 Overlapped I/O 配合事件通知，实现真正的异步非阻塞监听。
  */
 class UsnWatcher : public QThread {
     Q_OBJECT
 public:
-    // 构造函数接收 std::wstring 卷名和初始 USN
     explicit UsnWatcher(const std::wstring& volume, uint64_t startUsn = 0, QObject* parent = nullptr);
     virtual ~UsnWatcher();
 
     void stop();
 
+signals:
+    // 2026-06-xx 同步：确保信号在头文件中被正确声明
+    void recordReceived(const QByteArray& recordData);
+    void journalInvalidated();
+
 protected:
     void run() override;
 
 private:
-    // 处理单条 USN 记录并更新 MftReader
-    void handleRecord(USN_RECORD_V2* pRecord);
-
     std::wstring m_volume;
     uint64_t m_lastUsn;
     std::atomic<bool> m_stopRequested;
+
+    // 物理补全：Windows 事件句柄与卷句柄
     HANDLE m_hVolume = INVALID_HANDLE_VALUE;
+    HANDLE m_hEvent = NULL;
 };
 
 } // namespace ArcMeta

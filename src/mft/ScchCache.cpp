@@ -1,6 +1,9 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 #include "ScchCache.h"
 #include <windows.h>
 #include <filesystem>
@@ -67,7 +70,7 @@ bool ScchCache::save(
     HANDLE hFile = CreateFileW(wTmpPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) return false;
 
-    LARGE_INTEGER li; li.QuadPart = totalSize;
+    LARGE_INTEGER li; li.QuadPart = (LONGLONG)totalSize;
     if (!SetFilePointerEx(hFile, li, NULL, FILE_BEGIN) || !SetEndOfFile(hFile)) { CloseHandle(hFile); return false; }
 
     HANDLE hMap = CreateFileMappingW(hFile, NULL, PAGE_READWRITE, 0, 0, NULL);
@@ -108,7 +111,7 @@ bool ScchCache::save(
     header->pool_size = string_pool.size();
     header->usn_map_count = usn_map.size();
     header->sorted_indices_count = sorted_indices.size();
-    header->crc32 = computeCrc32(base + sizeof(ScchHeader), bodySize);
+    header->crc32 = computeCrc32(base + sizeof(ScchHeader), (size_t)bodySize);
     header->flags = 0;
 
     UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);

@@ -130,7 +130,9 @@ void MftReader::buildIndex(const QStringList& drives) {
     m_data->m_sorted_indices.resize(m_data->m_frns.size());
     std::iota(m_data->m_sorted_indices.begin(), m_data->m_sorted_indices.end(), 0);
     std::sort((std::execution::par), m_data->m_sorted_indices.begin(), m_data->m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
-        return _stricmp(m_data->getNamePtr(a), m_data->getNamePtr(b)) < 0;
+        const char* s1 = m_data->getNamePtr(a);
+        const char* s2 = m_data->getNamePtr(b);
+        return _stricmp(s1 ? s1 : "", s2 ? s2 : "") < 0;
     });
     m_isInitialized = true;
 }
@@ -179,7 +181,9 @@ bool MftReader::loadFromCache() {
     m_data->m_sorted_indices.resize(m_data->m_frns.size());
     std::iota(m_data->m_sorted_indices.begin(), m_data->m_sorted_indices.end(), 0);
     std::sort((std::execution::par), m_data->m_sorted_indices.begin(), m_data->m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
-        return _stricmp(m_data->getNamePtr(a), m_data->getNamePtr(b)) < 0;
+        const char* s1 = m_data->getNamePtr(a);
+        const char* s2 = m_data->getNamePtr(b);
+        return _stricmp(s1 ? s1 : "", s2 ? s2 : "") < 0;
     });
     m_isInitialized = true;
     return true;
@@ -214,7 +218,8 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
             if (offsetMap.find(oOff) == offsetMap.end()) {
                 uint32_t nOff = (uint32_t)sp.size();
                 const char* ptr = m_data->getNamePtr((uint32_t)i);
-                size_t len = strlen(ptr) + 1; sp.insert(sp.end(), ptr, ptr + len);
+                size_t len = ptr ? strlen(ptr) + 1 : 0;
+                if (len > 0) sp.insert(sp.end(), ptr, ptr + len);
                 offsetMap[oOff] = nOff;
             }
             no.push_back(offsetMap[oOff]);
@@ -296,7 +301,7 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, Frn128 frn) {
 
 void MftReader::performBackgroundCompact() {
     auto oldData = m_data;
-    QtConcurrent::run([this, oldData]() {
+    (void)QtConcurrent::run([this, oldData]() {
         auto newData = oldData->compact();
         QWriteLocker lock(&m_dataLock); m_data = newData; lock.unlock();
         emit dataChanged(-1);
@@ -311,15 +316,31 @@ Frn128 MftReader::getFrn(int i) const { QReadLocker l(&m_dataLock); return (i>=0
 bool MftReader::isDirectory(int i) const { return (getAttributes(i) & FILE_ATTRIBUTE_DIRECTORY) != 0; }
 bool MftReader::isMetadataFetched(int i) const { QReadLocker l(&m_dataLock); return (i>=0 && i<(int)m_data->m_metadata_fetched.size())?(m_data->m_metadata_fetched[i]==2):true; }
 int MftReader::totalCount() const { QReadLocker l(&m_dataLock); return (int)m_data->m_frns.size(); }
-int MftReader::getIndexByKey(uint32_t dIdx, Frn128 frn) const { QReadLocker l(&m_dataLock); auto it = m_data->m_key_to_idx.find({dIdx, frn}); return (it != m_data->m_key_to_idx.end())?(int)it->second:-1; }
-QString MftReader::getFullPath(int i) const { QReadLocker l(&m_dataLock); if (i<0 || i>=(int)m_data->m_frns.size()) return QString(); return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(m_data->m_drive_indices[i], m_data->m_frns[i])); }
+
+int MftReader::getIndexByKey(uint32_t dIdx, Frn128 frn) const {
+    QReadLocker l(&m_dataLock);
+    auto it = m_data->m_key_to_idx.find({dIdx, frn});
+    return (it != m_data->m_key_to_idx.end())?(int)it->second:-1;
+}
+
+int MftReader::getIndexByKey(uint64_t compositeKey) const {
+    return getIndexByKey((uint32_t)(compositeKey >> 48), Frn128(compositeKey & 0x0000FFFFFFFFFFFFull));
+}
+
+QString MftReader::getFullPath(int i) const {
+    QReadLocker l(&m_dataLock);
+    if (i<0 || i>=(int)m_data->m_frns.size()) return QString();
+    return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(m_data->m_drive_indices[i], m_data->m_frns[i]));
+}
 
 std::wstring MftReader::getPathFast(uint32_t driveIdx, Frn128 frn) {
     uint64_t k = frn.low; { std::lock_guard<std::mutex> l(m_pathCacheMutex); auto it = m_path_cache.find(k); if (it != m_path_cache.end()) return it->second; }
     std::vector<std::wstring> segs; Frn128 cur = frn;
     while (true) {
         auto idxIt = m_data->m_key_to_idx.find({driveIdx, cur}); if (idxIt == m_data->m_key_to_idx.end()) break;
-        uint32_t idx = idxIt->second; segs.push_back(QString::fromUtf8(m_data->getNamePtr(idx)).toStdWString());
+        uint32_t idx = idxIt->second;
+        const char* namePtr = m_data->getNamePtr(idx);
+        if (namePtr) segs.push_back(QString::fromUtf8(namePtr).toStdWString());
         Frn128 p = m_data->m_parent_frns[idx]; if (p.low == 5 || p == cur || p.isZero()) break; cur = p;
     }
     if (segs.empty()) return L"";
@@ -360,7 +381,7 @@ bool MftReader::matchEntry(int i, const QString& query, bool useRegex, bool case
     }
     if (query.isEmpty()) return true;
     if (useRegex) return QRegularExpression(query, caseSensitive ? QRegularExpression::NoPatternOption : QRegularExpression::CaseInsensitiveOption).match(QString::fromUtf8(p)).hasMatch();
-    QByteArray qU = query.toUtf8(); return caseSensitive ? (strstr(p, qU.constData()) != nullptr) : (StrStrIA(p, qU.constData()) != nullptr);
+    QByteArray qU = query.toUtf8(); return caseSensitive ? (p && strstr(p, qU.constData()) != nullptr) : (p && StrStrIA(p, qU.constData()) != nullptr);
 }
 
 void MftReader::requestMetadata(int i) {
@@ -369,7 +390,7 @@ void MftReader::requestMetadata(int i) {
     m_data->m_metadata_fetched[i] = 1;
     Frn128 frn = m_data->m_frns[i]; uint32_t dIdx = m_data->m_drive_indices[i];
     std::wstring vol = m_drive_list[dIdx]; QString fPath = getFullPath(i); wL.unlock();
-    QtConcurrent::run([this, i, frn, vol, fPath]() {
+    (void)QtConcurrent::run([this, i, frn, vol, fPath]() {
         auto meta = NtfsEngine::getFileMetadata(vol, frn, fPath.toStdWString());
         if (meta.success) {
             QWriteLocker l(&m_dataLock);
