@@ -708,7 +708,8 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     LARGE_INTEGER timestamp;
     WORD fileNameLength, fileNameOffset;
 
-    // 2026-05-14 核心排查：针对 V2 (64bit FRN) 和 V3 (128bit FRN) 进行严格的偏移匹配
+    // 2026-05-28 物理修复：针对 USN V3 (ReFS/最新Win11) 进行原子化布局匹配
+    // V3 采用 128位 FRN，文件名偏移量与 V2 截然不同。若不区分版本，将导致文件名解析成乱码，从而搜不到文件。
     if (header->MajorVersion == 2) {
         frn = record->FileReferenceNumber;
         parentFrn = record->ParentFileReferenceNumber;
@@ -717,15 +718,10 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         fileNameLength = record->FileNameLength;
         fileNameOffset = record->FileNameOffset;
     } else if (header->MajorVersion == 3) {
-        // 手动映射 V3 布局，避免 SDK 定义缺失导致的读取错误
-        struct V3_LAYOUT {
-            DWORD RecordLength; WORD MajorVersion; WORD MinorVersion;
-            BYTE FileReferenceNumber[16]; BYTE ParentFileReferenceNumber[16];
-            USN Usn; LARGE_INTEGER TimeStamp; DWORD Reason; DWORD SourceInfo;
-            DWORD SecurityId; DWORD FileAttributes; WORD FileNameLength; WORD FileNameOffset;
-        } *v3 = reinterpret_cast<V3_LAYOUT*>(record);
-        frn = *reinterpret_cast<uint64_t*>(v3->FileReferenceNumber);
-        parentFrn = *reinterpret_cast<uint64_t*>(v3->ParentFileReferenceNumber);
+        USN_RECORD_V3* v3 = reinterpret_cast<USN_RECORD_V3*>(record);
+        // 取低 64 位 FRN 兼容现有 SoA 架构 (Memories.md 物理铁律)
+        frn = *reinterpret_cast<uint64_t*>(&v3->FileReferenceNumber);
+        parentFrn = *reinterpret_cast<uint64_t*>(&v3->ParentFileReferenceNumber);
         attr = v3->FileAttributes;
         timestamp = v3->TimeStamp;
         fileNameLength = v3->FileNameLength;
@@ -890,7 +886,9 @@ void MftReader::compact() {
         if (m_frns[i] == 0) continue;
         
         uint32_t newIdx = (uint32_t)new_frns.size();
-        m_frn_to_idx[m_frns[i]] = newIdx;
+        // 2026-05-28 物理修复：在碎片整理重构索引时，必须维持驱动器复合 Key 映射，杜绝多盘符冲突
+        size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
+        m_frn_to_idx[makeKey(dIdx, m_frns[i])] = newIdx;
         
         new_frns.push_back(m_frns[i]);
         new_parent_frns.push_back(m_parent_frns[i]);
