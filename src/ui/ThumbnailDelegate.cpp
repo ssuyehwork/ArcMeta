@@ -303,7 +303,20 @@ bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, co
     if (m_ratingRole != -1 && event->type() == QEvent::MouseButtonPress) {
         QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event);
         if (mEvent->button() == Qt::LeftButton) {
-            Metrics m = calculateMetrics(option);
+            QAbstractItemView* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
+
+            // 物理加固：未选中项严禁直接通过 Delegate 修改元数据
+            // 2026-06-xx 稳健性增强：通过 View 获取实时的选中状态
+            bool isSelected = (option.state & QStyle::State_Selected);
+            if (view && view->selectionModel()) {
+                isSelected = view->selectionModel()->isSelected(index);
+            }
+            if (!isSelected) return false;
+
+            // 2026-06-xx 物理对齐：补全 decorationSize，确保计算出的星级区域与绘制时完全对齐
+            QStyleOptionViewItem opt = option;
+            if (opt.decorationSize.width() <= 0 && view) opt.decorationSize = view->iconSize();
+            Metrics m = calculateMetrics(opt);
 
             // 1. 区域判定
             bool isBanHit = m.banRect.contains(mEvent->pos());
@@ -321,8 +334,6 @@ bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, co
 
                 // 3. 物理修复：直接执行禁用逻辑，杜绝 Lambda 嵌套导致的编译错误
                 // 2026-06-xx 按照用户报错纠偏：改用更稳健的类型获取方式
-                QWidget* widget = const_cast<QWidget*>(option.widget);
-                QAbstractItemView* view = qobject_cast<QAbstractItemView*>(widget);
                 if (view) {
                     QAbstractItemView::EditTriggers currentTriggers = view->editTriggers();
                     view->setEditTriggers(QAbstractItemView::NoEditTriggers);

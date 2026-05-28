@@ -2203,8 +2203,21 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 子类转型歧义 
         QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event); 
         if (mEvent->button() == Qt::LeftButton) { 
+            QAbstractItemView* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
+            
+            // 物理加固：未选中项严禁直接通过 Delegate 修改元数据
+            // 2026-06-xx 稳健性增强：通过 View 获取实时的选中状态，防止 option.state 延迟或缺失
+            bool isSelected = (option.state & QStyle::State_Selected);
+            if (view && view->selectionModel()) {
+                isSelected = view->selectionModel()->isSelected(index);
+            }
+            if (!isSelected) return false;
+
             // 2026-05-28 按照用户授权：废除本地硬编码判定，统一使用 calculateMetrics 保证 Hitbox 零偏差 
-            GridMetrics m = calculateMetrics(option); 
+            // 2026-06-xx 物理对齐：补全 decorationSize，防止因 option 属性缺失导致 Hitbox 偏移
+            QStyleOptionViewItem opt = option;
+            if (opt.decorationSize.width() <= 0 && view) opt.decorationSize = view->iconSize();
+            GridMetrics m = calculateMetrics(opt); 
  
             // 1. 区域判定
             bool isBanHit = m.banRect.contains(mEvent->pos());
@@ -2222,8 +2235,6 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
                 model->setData(index, isBanHit ? 0 : hitStar, RatingRole); 
 
                 // 3. 物理修复：直接执行禁用逻辑，杜绝 Lambda 嵌套导致的编译错误
-                QWidget* widget = const_cast<QWidget*>(option.widget);
-                QAbstractItemView* view = qobject_cast<QAbstractItemView*>(widget);
                 if (view) {
                     QAbstractItemView::EditTriggers currentTriggers = view->editTriggers();
                     view->setEditTriggers(QAbstractItemView::NoEditTriggers);
