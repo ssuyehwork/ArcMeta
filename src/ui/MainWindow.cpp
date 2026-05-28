@@ -31,12 +31,14 @@
 #include <QKeyEvent>
 #include <QCursor>
 #include <QApplication>
-#include <QSettings>
+#include "../core/AppConfig.h"
 #include <QCloseEvent>
 #include <QMenu>
 #include <QAction>
 #include <QTimer>
 #include "UiHelper.h"
+#include "StyleLibrary.h"
+#include "../core/ModelContract.h"
 #include <QFileInfo>
 #include <QDir>
 #include "../meta/MetadataManager.h"
@@ -71,9 +73,10 @@ MainWindow::MainWindow(QWidget* parent)
     setMinimumSize(1180, 653); // 物理对齐：5x230px面板 + 20px分割手柄 + 10px全局边距
     setWindowTitle("FERREX");
 
+    using namespace Style;
+
     // 从设置读取置顶状态
-    QSettings settings("ArcMeta团队", "ArcMeta");
-    m_isPinned = settings.value("MainWindow/AlwaysOnTop", false).toBool();
+    m_isPinned = AppConfig::instance().getValue("MainWindow/AlwaysOnTop", false).toBool();
     
     // 设置基础窗口标志 (保持无边框)
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
@@ -91,29 +94,35 @@ MainWindow::MainWindow(QWidget* parent)
     if (file.open(QFile::ReadOnly)) {
         setStyleSheet(QLatin1String(file.readAll()));
     } else {
-        QString qss = R"(
-            QMainWindow { background-color: #1E1E1E; }
+        QString qss = QString(R"(
+            QMainWindow { background-color: %1; }
             #SidebarContainer, #ListContainer, #EditorContainer, #MetadataContainer, #FilterContainer {
-                background-color: #1E1E1E; border: 1px solid #333333; border-radius: 0px;
+                background-color: %1; border: 1px solid %2; border-radius: 0px;
             }
             #ContainerHeader {
-                background-color: #252526; border-bottom: 1px solid #333333;
+                background-color: %3; border-bottom: 1px solid %2;
             }
             QScrollBar:vertical { border: none; background: transparent; width: 4px; }
-            QScrollBar::handle:vertical { background: #333333; min-height: 20px; border-radius: 2px; }
-            QScrollBar::handle:vertical:hover { background: #444444; }
+            QScrollBar::handle:vertical { background: %2; min-height: 20px; border-radius: 2px; }
+            QScrollBar::handle:vertical:hover { background: %4; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
             QScrollBar:horizontal { border: none; background: transparent; height: 4px; }
-            QScrollBar::handle:horizontal { background: #333333; min-width: 20px; border-radius: 2px; }
-            QScrollBar::handle:horizontal:hover { background: #444444; }
+            QScrollBar::handle:horizontal { background: %2; min-width: 20px; border-radius: 2px; }
+            QScrollBar::handle:horizontal:hover { background: %4; }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
             QLineEdit, QPlainTextEdit, QTextEdit {
-                background: #1E1E1E; border: 1px solid #333333; border-radius: 6px; color: #EEEEEE; padding-left: 8px;
+                background: %1; border: 1px solid %2; border-radius: 6px; color: %5; padding-left: 8px;
             }
-            QLineEdit:focus { border: 1px solid #378ADD; }
-        )";
+            QLineEdit:focus { border: 1px solid %6; }
+        )")
+        .arg(qssColor(BackgroundDeep))
+        .arg(qssColor(BorderColor))
+        .arg(qssColor(BackgroundHeader))
+        .arg(qssColor(BorderDark))
+        .arg(qssColor(TextMain))
+        .arg(qssColor(PrimaryBlue));
         setStyleSheet(qss);
     }
 
@@ -131,8 +140,7 @@ MainWindow::MainWindow(QWidget* parent)
     // 2026-03-xx 性能优化：严禁在构造函数中执行任何可能导致阻塞的同步加载 (如 navigateTo)。
     // 改为延迟 200ms 触发首次加载，确保 MainWindow 框架先瞬间弹出，提升用户感知的“秒开”响应速度。
     QTimer::singleShot(200, [this]() {
-        QSettings settings("ArcMeta团队", "ArcMeta");
-        QString lastPath = settings.value("MainWindow/LastPath", "computer://").toString();
+        QString lastPath = AppConfig::instance().getValue("MainWindow/LastPath", "computer://").toString();
         
         // 2026-04-11 按照用户要求：物理还原最后一次开启的文件夹
         // 校验路径：如果是虚拟路径或真实存在的磁盘路径，则载入
@@ -161,8 +169,7 @@ void MainWindow::initUi() {
     m_mainSplitter->setStretchFactor(4, 0); // 筛选
 
     // 2026-04-11 按照用户要求：物理还原/记忆侧边栏宽度
-    QSettings settings("ArcMeta团队", "ArcMeta");
-    QByteArray state = settings.value("MainWindow/SplitterState").toByteArray();
+    QByteArray state = AppConfig::instance().getValue("MainWindow/SplitterState").toByteArray();
     if (!state.isEmpty()) {
         m_mainSplitter->restoreState(state);
     } else {
@@ -381,8 +388,7 @@ void MainWindow::initUi() {
     });
 
     // 7. 搜索框回车触发逻辑 (带历史记录和搜索模式分流)
-    QSettings searchSettings("ArcMeta", "ArcMeta");
-    m_searchHistory = searchSettings.value("Search/History").toStringList();
+    m_searchHistory = AppConfig::instance().getValue("Search/History").toStringList();
     
     m_searchHistoryPanel = new SearchHistoryPanel(this);
     m_searchHistoryPanel->setHistory(m_searchHistory);
@@ -399,8 +405,7 @@ void MainWindow::initUi() {
         m_searchHistory.removeAll(keyword);
         m_searchHistory.prepend(keyword);
         if (m_searchHistory.size() > 10) m_searchHistory.removeLast();
-        QSettings settings("ArcMeta", "ArcMeta");
-        settings.setValue("Search/History", m_searchHistory);
+        AppConfig::instance().setValue("Search/History", m_searchHistory);
         m_searchHistoryPanel->setHistory(m_searchHistory);
         m_searchHistoryPanel->hide();
 
@@ -424,15 +429,13 @@ void MainWindow::initUi() {
 
     connect(m_searchHistoryPanel, &SearchHistoryPanel::historyItemRemoved, this, [this](const QString& keyword) {
         m_searchHistory.removeAll(keyword);
-        QSettings settings("ArcMeta", "ArcMeta");
-        settings.setValue("Search/History", m_searchHistory);
+        AppConfig::instance().setValue("Search/History", m_searchHistory);
         m_searchHistoryPanel->setHistory(m_searchHistory);
     });
 
     connect(m_searchHistoryPanel, &SearchHistoryPanel::clearAllRequested, this, [this]() {
         m_searchHistory.clear();
-        QSettings settings("ArcMeta", "ArcMeta");
-        settings.setValue("Search/History", m_searchHistory);
+        AppConfig::instance().setValue("Search/History", m_searchHistory);
         m_searchHistoryPanel->setHistory(m_searchHistory);
     });
 
@@ -443,7 +446,7 @@ void MainWindow::initUi() {
     connect(m_metaPanel, &MetaPanel::metadataChanged, this, [this](int rating, const std::wstring& color) {
         auto indexes = m_contentPanel->getSelectedIndexes();
         for (const auto& idx : indexes) {
-            QString path = idx.data(ItemRole::PathRole).toString(); 
+            QString path = idx.data(PathRole).toString();
             if(path.isEmpty()) continue;
             
             if (rating != -1) {
@@ -756,14 +759,14 @@ void MainWindow::initToolbar() {
     m_searchEdit->setPlaceholderText("查找文件...");
     m_searchEdit->setMinimumWidth(180);
     m_searchEdit->setFixedHeight(32);
-    m_searchEdit->addAction(UiHelper::getIcon("search", QColor("#888888")), QLineEdit::LeadingPosition);
+    m_searchEdit->addAction(UiHelper::getIcon("search", TextMuted), QLineEdit::LeadingPosition);
     // 按照用户要求：移除局部/全局切换按钮，恢复搜索框 6px 完整圆角
-    m_searchEdit->setStyleSheet(
-        "QLineEdit { background: #1E1E1E; border: 1px solid #333333;"
+    m_searchEdit->setStyleSheet(QString(
+        "QLineEdit { background: %1; border: 1px solid %2;"
         "  border-radius: 6px;"
-        "  color: #EEEEEE; padding-left: 5px; }"
-        "QLineEdit:focus { border: 1px solid #378ADD; }"
-    );
+        "  color: %3; padding-left: 5px; }"
+        "QLineEdit:focus { border: 1px solid %4; }"
+    ).arg(qssColor(BackgroundDeep), qssColor(BorderColor), qssColor(TextMain), qssColor(PrimaryBlue)));
 
     searchLayout->addWidget(m_searchEdit, 1);
 }
@@ -787,7 +790,7 @@ void MainWindow::setupSplitters() {
     m_titleBarLayout->setSpacing(8);
 
     m_appNameLabel = new QLabel("FERREX", m_titleBarWidget);
-    m_appNameLabel->setStyleSheet("color: #AAAAAA; font-size: 12px; font-weight: bold;");
+    m_appNameLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-weight: bold;").arg(qssColor(TextDark)));
     m_titleBarLayout->addWidget(m_appNameLabel);
     m_titleBarLayout->addStretch();
 
@@ -825,11 +828,11 @@ void MainWindow::setupSplitters() {
     m_mainSplitter->setChildrenCollapsible(false);
     // 物理还原：显式设置手柄样式，增强物理切割感
     // 2026-06-xx 物理强化：手柄背景设为 #1E1E1E，并在两侧增加深色线条，强化“切割”视觉效果
-    m_mainSplitter->setStyleSheet(
+    m_mainSplitter->setStyleSheet(QString(
         "QSplitter { background: transparent; border: none; }"
-        "QSplitter::handle { background-color: #1E1E1E; width: 5px; }"
-        "QSplitter::handle:hover { background-color: #2D2D2D; }" 
-    );
+        "QSplitter::handle { background-color: %1; width: 5px; }"
+        "QSplitter::handle:hover { background-color: %2; }"
+    ).arg(qssColor(BackgroundDeep), qssColor(BackgroundHover)));
 
     m_categoryPanel = new CategoryPanel(this);
     m_categoryPanel->setObjectName("SidebarContainer");
@@ -878,25 +881,25 @@ void MainWindow::setupSplitters() {
     statusL->setSpacing(0);
 
     m_statusLeft = new QLabel("就绪中...", statusBar);
-    m_statusLeft->setStyleSheet("font-size: 11px; color: #B0B0B0; background: transparent;");
+    m_statusLeft->setStyleSheet(QString("font-size: 11px; color: %1; background: transparent;").arg(qssColor(TextDim)));
 
     statusL->addWidget(m_statusLeft);
     statusL->addStretch(1);
 
     // 绑定 CoreController 状态到状态栏
-    auto updateStatus = [this](const QString& text) {
-        m_statusLeft->setText(text);
+    auto updateStatus = [this]() {
+        m_statusLeft->setText(CoreController::instance().statusText());
         if (CoreController::instance().isIndexing()) {
-            m_statusLeft->setStyleSheet("font-size: 11px; color: #4FACFE; background: transparent; font-weight: bold;");
+            m_statusLeft->setStyleSheet(QString("font-size: 11px; color: %1; background: transparent; font-weight: bold;")
+                                      .arg(qssColor(PrimaryBlue)));
         } else {
-            m_statusLeft->setStyleSheet("font-size: 11px; color: #B0B0B0; background: transparent;");
+            m_statusLeft->setStyleSheet(QString("font-size: 11px; color: %1; background: transparent;")
+                                      .arg(qssColor(TextDim)));
         }
     };
     connect(&CoreController::instance(), &CoreController::statusTextChanged, this, updateStatus);
-    connect(&CoreController::instance(), &CoreController::isIndexingChanged, this, [this, updateStatus]() {
-        updateStatus(CoreController::instance().statusText());
-    });
-    updateStatus(CoreController::instance().statusText());
+    connect(&CoreController::instance(), &CoreController::isIndexingChanged, this, updateStatus);
+    updateStatus();
 
     mainL->addWidget(m_titleBarWidget);
     mainL->addWidget(m_navBarWidget);
@@ -934,7 +937,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     };
 
     m_btnSync = createTitleBtn("sync");
-    m_btnSync->setProperty("tooltipText", "无待同步任务");
+    m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
     m_btnSync->installEventFilter(m_hoverFilter);
 
     // 2026-06-15 按照用户要求：手动点击同步
@@ -946,10 +949,10 @@ void MainWindow::setupCustomTitleBarButtons() {
     // 联动同步按钮颜色状态 (红色预警)
     auto updateSyncBtnState = [this](bool hasPending) {
         if (hasPending) {
-            m_btnSync->setIcon(UiHelper::getIcon("sync", QColor("#E81123"))); // 强制红色
+            m_btnSync->setIcon(UiHelper::getIcon("sync", ErrorRed)); // 强制红色
             m_btnSync->setProperty("tooltipText", "存在待同步元数据，请点击或等待闲置同步");
         } else {
-            m_btnSync->setIcon(UiHelper::getIcon("sync", QColor("#EEEEEE"))); // 恢复正常
+            m_btnSync->setIcon(UiHelper::getIcon("sync", TextMain)); // 恢复正常
             m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
         }
     };
@@ -1013,7 +1016,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnPinTop->setCheckable(true);
     m_btnPinTop->setChecked(m_isPinned);
     if (m_isPinned) {
-        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", QColor("#FF551C")));
+        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", BrandOrange));
     }
 
     m_btnMin = createTitleBtn("minimize");
@@ -1024,13 +1027,13 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnMax->setProperty("tooltipText", "最大化/还原");
     m_btnMax->installEventFilter(m_hoverFilter);
 
-    m_btnClose = createTitleBtn("close", "#e81123"); // 初始创建
+    m_btnClose = createTitleBtn("close", qssColor(ErrorRed)); // 初始创建
     // 按照用户要求：关闭按钮持续显示红色高亮，不再仅悬停显示
-    m_btnClose->setStyleSheet(
-        "QPushButton { background-color: #E81123; border: none; border-radius: 4px; padding: 0; }"
+    m_btnClose->setStyleSheet(QString(
+        "QPushButton { background-color: %1; border: none; border-radius: 4px; padding: 0; }"
         "QPushButton:hover { background-color: #F1707A; }"
         "QPushButton:pressed { background-color: #A50000; }"
-    );
+    ).arg(qssColor(ErrorRed)));
     m_btnClose->setProperty("tooltipText", "关闭项目");
     m_btnClose->installEventFilter(m_hoverFilter);
 
@@ -1202,14 +1205,13 @@ void MainWindow::onPinToggled(bool checked) {
 
     // 更新图标和颜色 (按下置顶为品牌橙色)
     if (m_isPinned) {
-        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", QColor("#FF551C")));
+        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", BrandOrange));
     } else {
-        m_btnPinTop->setIcon(UiHelper::getIcon("pin_tilted", QColor("#EEEEEE")));
+        m_btnPinTop->setIcon(UiHelper::getIcon("pin_tilted", TextMain));
     }
 
     // 持久化存储
-    QSettings settings("ArcMeta团队", "ArcMeta");
-    settings.setValue("MainWindow/AlwaysOnTop", m_isPinned);
+    AppConfig::instance().setValue("MainWindow/AlwaysOnTop", m_isPinned);
 }
 
 void MainWindow::changeEvent(QEvent* event) {
@@ -1238,12 +1240,12 @@ void MainWindow::changeEvent(QEvent* event) {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-    QSettings settings("ArcMeta团队", "ArcMeta");
-    settings.setValue("MainWindow/LastPath", m_currentPath);
+    AppConfig::instance().setValue("MainWindow/LastPath", m_currentPath);
     // 2026-04-11 按照用户要求：物理保存各容器宽度状态
     if (m_mainSplitter) {
-        settings.setValue("MainWindow/SplitterState", m_mainSplitter->saveState());
+        AppConfig::instance().setValue("MainWindow/SplitterState", m_mainSplitter->saveState());
     }
+    AppConfig::instance().sync();
     QMainWindow::closeEvent(event);
 }
 

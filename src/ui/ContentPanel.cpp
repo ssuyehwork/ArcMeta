@@ -25,7 +25,7 @@
 #include <QMenu> 
 #include <QAbstractItemView> 
 #include <QStandardItem> 
-#include <QSettings>
+#include "../core/AppConfig.h"
 #include <QEvent> 
 #include <QKeyEvent> 
 #include <QMouseEvent> 
@@ -66,6 +66,8 @@
 #include "CategoryLockDialog.h" 
 #include "BatchRenameDialog.h" 
 #include "UiHelper.h" 
+#include "StyleLibrary.h"
+#include "../util/ShellHelper.h"
  
 namespace ArcMeta { 
  
@@ -511,8 +513,7 @@ ContentPanel::ContentPanel(QWidget* parent)
     m_proxyModel->setFilterKeyColumn(0); 
  
     // 2026-06-05 按照要求：从配置中加载上次保存的缩放比例 
-    QSettings settings("ArcMeta团队", "ArcMeta"); 
-    m_zoomLevel = settings.value("UI/GridZoomLevel", 96).toInt(); 
+    m_zoomLevel = AppConfig::instance().getValue("UI/GridZoomLevel", 96).toInt();
     m_isRecursive = false; 
  
     initUi(); 
@@ -684,8 +685,7 @@ void ContentPanel::updateGridSize() {
     }
 
     // 2026-06-05 按照要求：持久化保存当前的缩放级别
-    QSettings settings("ArcMeta团队", "ArcMeta");
-    settings.setValue("UI/GridZoomLevel", m_zoomLevel);
+    AppConfig::instance().setValue("UI/GridZoomLevel", m_zoomLevel);
 
     qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
 } 
@@ -1043,8 +1043,7 @@ void ContentPanel::initListView() {
     header->setCascadingSectionResizes(false);
     header->setMinimumSectionSize(30);    // 全局最小宽度设定为 30 像素
 
-    QSettings settings("ArcMeta团队", "ArcMeta");
-    QByteArray headerState = settings.value("UI/ListHeaderState").toByteArray();
+    QByteArray headerState = AppConfig::instance().getValue("UI/ListHeaderState").toByteArray();
     if (!headerState.isEmpty()) {
         header->restoreState(headerState);
     } 
@@ -1098,8 +1097,7 @@ void ContentPanel::initListView() {
         
         // 5. 持久化逻辑：仅在非加载状态下保存，防止启动抖动
         if (!m_isLoading) {
-            QSettings s("ArcMeta团队", "ArcMeta");
-            s.setValue("UI/ListHeaderState", header->saveState());
+            AppConfig::instance().setValue("UI/ListHeaderState", header->saveState());
         }
         
         guard = false;
@@ -1264,9 +1262,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             onDoubleClicked(currentIndex); 
             break; 
         case ActionShowInExplorer: { 
-            QString target = onItem ? path : m_currentPath; 
-            QStringList args; args << "/select," << QDir::toNativeSeparators(target); 
-            QProcess::startDetached("explorer", args); 
+            ShellHelper::openInExplorer(onItem ? path : m_currentPath);
             break; 
         } 
         case ActionNewFolder: createNewItem("folder"); break; 
@@ -1427,14 +1423,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (targetPaths.isEmpty()) break;
 
             if (action == ActionDelete) {
-                std::wstring from;
-                for (const QString& p : targetPaths) from += QDir::toNativeSeparators(p).toStdWString() + L'\0';
-                from += L'\0';
-                SHFILEOPSTRUCTW fileOp = { 0 };
-                fileOp.wFunc = FO_DELETE;
-                fileOp.pFrom = from.c_str();
-                fileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION;
-                if (SHFileOperationW(&fileOp) == 0) loadDirectory(m_currentPath);
+                if (ShellHelper::moveToTrash(targetPaths)) loadDirectory(m_currentPath);
             } else {
                 // 彻底删除或安全擦除
                 QString msg = (action == ActionPermanentDelete) ? "确定要彻底删除选中的项目吗？此操作不可恢复。" : "确定要安全擦除选中的项目吗？数据将被覆写并永久抹除。";
@@ -1542,13 +1531,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         }
         case ActionCopyPath: QApplication::clipboard()->setText(QDir::toNativeSeparators(path)); break; 
         case ActionProperties: { 
-            SHELLEXECUTEINFOW sei = { sizeof(sei) }; 
-            sei.fMask = SEE_MASK_INVOKEIDLIST; 
-            sei.lpVerb = L"properties"; 
-            std::wstring wpath = (onItem ? path : m_currentPath).toStdWString(); 
-            sei.lpFile = wpath.c_str(); 
-            sei.nShow = SW_SHOW; 
-            ShellExecuteExW(&sei); 
+            ShellHelper::showProperties(onItem ? path : m_currentPath);
             break; 
         } 
         default: break; 
@@ -1590,13 +1573,12 @@ void ContentPanel::performPaste() {
     if (!mime || !mime->hasUrls()) return; 
  
     QList<QUrl> urls = mime->urls(); 
-    std::wstring fromPaths; 
-    for (const QUrl& url : urls) { 
-        fromPaths += QDir::toNativeSeparators(url.toLocalFile()).toStdWString() + L'\0'; 
-    } 
+    QStringList fromPaths;
+    for (const QUrl& url : urls) {
+        fromPaths << url.toLocalFile();
+    }
      
-    if (fromPaths.empty()) return; 
-    fromPaths += L'\0'; 
+    if (fromPaths.isEmpty()) return;
  
     // 探测是否为剪切模式 
     bool isMove = false; 
@@ -1605,14 +1587,7 @@ void ContentPanel::performPaste() {
         if (!effect.isEmpty() && (effect.at(0) & 0x02)) isMove = true; 
     } 
  
-    std::wstring toPath = m_currentPath.toStdWString() + L'\0' + L'\0'; 
-    SHFILEOPSTRUCTW fileOp = { 0 }; 
-    fileOp.wFunc = isMove ? FO_MOVE : FO_COPY; 
-    fileOp.pFrom = fromPaths.c_str(); 
-    fileOp.pTo = toPath.c_str(); 
-    fileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION; 
- 
-    if (SHFileOperationW(&fileOp) == 0) { 
+    if (ShellHelper::copyOrMoveItems(fromPaths, m_currentPath, isMove)) {
         loadDirectory(m_currentPath, m_isRecursive); 
     } 
 } 
@@ -2074,8 +2049,8 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     QString colorName = index.data(ColorRole).toString();
      
     // 2026-06-05 按照用户要求：背景框仅限正方形区域，名称外置 
-    QColor cardBg = isSelected ? QColor("#282828") : (isHovered ? QColor("#2A2A2A") : QColor("#2D2D2D")); 
-    painter->setPen(isSelected ? QPen(QColor("#3498db"), 2) : QPen(QColor("#333333"), 1)); 
+    QColor cardBg = isSelected ? BackgroundSelected : (isHovered ? BackgroundHover : BackgroundDeep);
+    painter->setPen(isSelected ? QPen(PrimaryBlue, 2) : QPen(BorderColor, 1));
     painter->setBrush(cardBg); 
     painter->drawRoundedRect(m.squareRect, 8, 8); 
  
@@ -2089,11 +2064,11 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16); 
         if (isPinned) { 
             // 置顶优先 
-            QIcon pinIcon = UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16); 
+            QIcon pinIcon = UiHelper::getIcon("pin_vertical", BrandOrange, 16);
             pinIcon.paint(painter, statusRect); 
         } else { 
             // 已录入但未置顶，显示绿对勾 
-            QIcon checkIcon = UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16); 
+            QIcon checkIcon = UiHelper::getIcon("check_circle", SuccessGreen, 16);
             checkIcon.paint(painter, statusRect); 
         } 
     } 
@@ -2167,10 +2142,10 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
  
     if (!isSelected && isEmptyFolder) { 
         // 2026-06-xx 物理优化：移除半透明蒙版，改为全透明刷子
-        painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine)); 
+        painter->setPen(QPen(AccentCyan, 1, Qt::DashLine));
         painter->setBrush(Qt::NoBrush); // 直接将其透明 
         painter->drawRoundedRect(m.squareRect, 8, 8); 
-        painter->setPen(QColor("#41F2F2")); 
+        painter->setPen(AccentCyan);
     } 
  
     QString name = index.data(Qt::DisplayRole).toString(); 

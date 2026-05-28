@@ -5,6 +5,7 @@
 #include "CategoryDelegate.h"
 #include "DropTreeView.h"
 #include "UiHelper.h"
+#include "StyleLibrary.h"
 #include "ToolTipOverlay.h"
 #include "FramelessDialog.h"
 #include "ProgressDialog.h"
@@ -27,7 +28,7 @@
 #include <QSet>
 #include <QDirIterator>
 #include <QColorDialog>
-#include <QSettings>
+#include "../core/AppConfig.h"
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include "Logger.h"
@@ -45,10 +46,11 @@ static std::wstring getDefaultCategoryColor() {
 
 CategoryPanel::CategoryPanel(QWidget* parent)
     : QFrame(parent) {
+    using namespace Style;
     setObjectName("SidebarContainer");
     setAttribute(Qt::WA_StyledBackground, true);
     setMinimumWidth(230);
-    setStyleSheet("color: #EEEEEE;");
+    setStyleSheet(QString("color: %1;").arg(qssColor(TextMain)));
     
     m_mainLayout = new QVBoxLayout(this);
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
@@ -66,7 +68,7 @@ void CategoryPanel::selectCategory(int id) {
     findId = [&](const QModelIndex& parent) -> QModelIndex {
         for (int i = 0; i < m_categoryModel->rowCount(parent); ++i) {
             QModelIndex idx = m_categoryModel->index(i, 0, parent);
-            if (idx.data(CategoryModel::IdRole).toInt() == id) return idx;
+            if (idx.data(IdRole).toInt() == id) return idx;
             QModelIndex child = findId(idx);
             if (child.isValid()) return child;
         }
@@ -87,8 +89,7 @@ void CategoryPanel::deferredInit() {
     qDebug() << "[CategoryPanel] deferredInit 开始执行";
 
     // 2026-06-xx 物理同步：根据持久化状态初始化底层引擎
-    QSettings settings("ArcMeta团队", "ArcMeta");
-    bool isJson = settings.value("Category/IsJsonMode", false).toBool();
+    bool isJson = AppConfig::instance().getValue("Category/IsJsonMode", false).toBool();
 
     CategoryRepo::setJsonMode(isJson);
     if (isJson) {
@@ -117,14 +118,14 @@ void CategoryPanel::setupContextMenu() {
 
         QMenu menu(this);
         // [PHYSICAL RESTORATION] 8px radius for context menu
-        menu.setStyleSheet("QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid #444; padding: 4px; border-radius: 8px; } "
+    menu.setStyleSheet(QString("QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid %1; padding: 4px; border-radius: 8px; } "
                            "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; } "
                            "QMenu::icon { margin-left: 6px; } "
                            "QMenu::item:selected { background-color: #3E3E42; color: white; } "
-                           "QMenu::separator { height: 1px; background: #444; margin: 4px 8px; }");
+                       "QMenu::separator { height: 1px; background: %1; margin: 4px 8px; }").arg(qssColor(BorderDark)));
 
         // 基于规范逻辑：如果没有选中项，或者选中了“我的分类”根节点
-        QString itemName = index.data(CategoryModel::NameRole).toString();
+        QString itemName = index.data(NameRole).toString();
         if (!index.isValid() || itemName == "我的分类") {
             menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建分类", this, &CategoryPanel::onCreateCategory);
             
@@ -134,32 +135,33 @@ void CategoryPanel::setupContextMenu() {
             sortMenu->addAction("标题(全部) (Z→A)", this, &CategoryPanel::onSortAllByNameDesc);
         } else {
             // 2026-03-xx 按照用户要求：补全子层级（子分类、文件、文件夹）的右键菜单
-            QString type = index.data(CategoryModel::TypeRole).toString();
+            QString type = index.data(TypeRole).toString();
             
             // 只要不是系统根节点，都弹出完整菜单
             if (type == "category" || type == "file" || type == "folder") {
+                using namespace Style;
                 // 2026-06-xx 统一图标
-                menu.addAction(UiHelper::getIcon("folder_filled", QColor("#3498db"), 18), "归类到此分类", this, &CategoryPanel::onClassifyToCategory);
+                menu.addAction(UiHelper::getIcon("folder_filled", PrimaryBlue, 18), "归类到此分类", this, &CategoryPanel::onClassifyToCategory);
                 
                 menu.addSeparator();
                 
-                menu.addAction(UiHelper::getIcon("palette", QColor("#f39c12"), 18), "设置颜色", this, &CategoryPanel::onSetColor);
+                menu.addAction(UiHelper::getIcon("palette", WarningOrange, 18), "设置颜色", this, &CategoryPanel::onSetColor);
                 menu.addAction(UiHelper::getIcon("random_color", QColor("#e91e63"), 18), "随机颜色", this, &CategoryPanel::onRandomColor);
                 menu.addAction(UiHelper::getIcon("tag_filled", QColor("#9b59b6"), 18), "设置预设标签", this, &CategoryPanel::onSetPresetTags);
 
                 menu.addSeparator();
 
-                menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建分类", this, &CategoryPanel::onCreateCategory);
-                menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建子分类", this, &CategoryPanel::onCreateSubCategory);
+                menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建分类", this, &CategoryPanel::onCreateCategory);
+                menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建子分类", this, &CategoryPanel::onCreateSubCategory);
 
                 menu.addSeparator();
 
-                bool isPinned = index.data(CategoryModel::PinnedRole).toBool();
-                menu.addAction(UiHelper::getIcon("pin_vertical", isPinned ? QColor("#FF551C") : QColor("#aaaaaa"), 18), 
+                bool isPinned = index.data(PinnedRole).toBool();
+                menu.addAction(UiHelper::getIcon("pin_vertical", isPinned ? BrandOrange : TextMuted, 18),
                                isPinned ? "从“快速访问”中移除" : "添加至“快速访问”", this, &CategoryPanel::onTogglePin);
                                
-                menu.addAction(UiHelper::getIcon("edit", QColor("#aaaaaa"), 18), "重命名分类", this, &CategoryPanel::onRenameCategory);
-                menu.addAction(UiHelper::getIcon("trash", QColor("#e74c3c"), 18), "删除分类", this, &CategoryPanel::onDeleteCategory);
+                menu.addAction(UiHelper::getIcon("edit", TextMuted, 18), "重命名分类", this, &CategoryPanel::onRenameCategory);
+                menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "删除分类", this, &CategoryPanel::onDeleteCategory);
 
                 menu.addSeparator();
 
@@ -175,7 +177,7 @@ void CategoryPanel::setupContextMenu() {
                 pwdMenu->setStyleSheet(menu.styleSheet());
                 
                 // 2026-03-xx 按照用户要求：通过 EncryptedRole 动态判断显示“设置”或“清除”
-                bool isEncrypted = index.data(CategoryModel::EncryptedRole).toBool();
+                bool isEncrypted = index.data(EncryptedRole).toBool();
                 
                 if (!isEncrypted) {
                     pwdMenu->addAction("设置密码", this, &CategoryPanel::onSetPassword);
@@ -200,8 +202,8 @@ static void saveExpandedState(QTreeView* tree, const QModelIndex& parent, QSet<i
     for (int i = 0; i < rowCount; ++i) {
         QModelIndex idx = tree->model()->index(i, 0, parent);
         if (tree->isExpanded(idx)) {
-            int id = idx.data(CategoryModel::IdRole).toInt();
-            QString name = idx.data(CategoryModel::NameRole).toString();
+            int id = idx.data(IdRole).toInt();
+            QString name = idx.data(NameRole).toString();
             if (id != 0) {
                 expandedIds.insert(id);
                 qDebug() << "[CategoryPanel] 正在记录展开项: ID =" << id << "名称 =" << name;
@@ -226,9 +228,9 @@ static void restoreExpandedState(QTreeView* tree, const QModelIndex& parent, con
     
     for (int i = 0; i < rowCount; ++i) {
         QModelIndex idx = tree->model()->index(i, 0, parent);
-        int id = idx.data(CategoryModel::IdRole).toInt();
-        QString name = idx.data(CategoryModel::NameRole).toString();
-        bool isEncrypted = idx.data(CategoryModel::EncryptedRole).toBool();
+        int id = idx.data(IdRole).toInt();
+        QString name = idx.data(NameRole).toString();
+        bool isEncrypted = idx.data(EncryptedRole).toBool();
         
         bool shouldExpand = false;
         
@@ -245,7 +247,7 @@ static void restoreExpandedState(QTreeView* tree, const QModelIndex& parent, con
         // 3. 如果没有任何历史记录（首次运行），默认展开“我的分类”下的第一级子分类（红圈部分）
         else if (!hasHistory) {
             QModelIndex pIdx = idx.parent();
-            if (pIdx.isValid() && pIdx.data(CategoryModel::NameRole).toString() == "我的分类") {
+            if (pIdx.isValid() && pIdx.data(NameRole).toString() == "我的分类") {
                 shouldExpand = true;
             }
         }
@@ -318,8 +320,7 @@ void CategoryPanel::onClassifyToCategory() {
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
-    QSettings settings("ArcMeta团队", "ArcMeta");
-    settings.setValue("Category/ExtensionTargetId", id);
+    AppConfig::instance().setValue("Category/ExtensionTargetId", id);
 
     QSet<int> expandedIds;
     QStringList expandedNames;
@@ -329,7 +330,7 @@ void CategoryPanel::onClassifyToCategory() {
 
     restoreExpandedState(m_categoryTree, QModelIndex(), expandedIds, expandedNames, m_unlockedIds);
 
-    QString name = index.data(CategoryModel::NameRole).toString();
+    QString name = index.data(NameRole).toString();
     ToolTipOverlay::instance()->showText(QCursor::pos(), QString("已设为归类目标: %1").arg(name), 1000);
 }
 
@@ -429,7 +430,7 @@ void CategoryPanel::onTogglePin() {
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
     
-    bool isPinned = index.data(CategoryModel::PinnedRole).toBool();
+    bool isPinned = index.data(PinnedRole).toBool();
 
     auto all = CategoryRepo::getAll();
     for(auto& cat : all) {
@@ -486,7 +487,7 @@ void CategoryPanel::onClearPassword() {
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
-    QString hint = index.data(CategoryModel::EncryptHintRole).toString();
+    QString hint = index.data(EncryptHintRole).toString();
 
     // 2026-03-xx 物理级还原：清除密码需先通过旧版验证界面校验身份
     CategoryLockDialog dlg(hint, this);
@@ -516,7 +517,7 @@ void CategoryPanel::onClearPassword() {
 void CategoryPanel::onRenameCategory() {
     QModelIndex index = m_categoryTree->currentIndex();
     if (index.isValid()) {
-        QString type = index.data(CategoryModel::TypeRole).toString();
+        QString type = index.data(TypeRole).toString();
         // 2026-03-xx 物理兼容：允许重命名分类或文件项 (逻辑处理见 Model)
         if (type == "category" || type == "file" || type == "folder") {
             m_categoryTree->edit(index);
@@ -540,8 +541,8 @@ void CategoryPanel::onDeleteCategory() {
     // 递归收集分类及其所有子分类 ID 的辅助函数
     std::function<void(const QModelIndex&)> collectIds;
     collectIds = [&](const QModelIndex& index) {
-        QString type = index.data(CategoryModel::TypeRole).toString();
-        int id = index.data(CategoryModel::IdRole).toInt();
+        QString type = index.data(TypeRole).toString();
+        int id = index.data(IdRole).toInt();
         
         if (type == "category" && id > 0) {
             idsToDelete.insert(id);
@@ -569,9 +570,10 @@ void CategoryPanel::onDeleteCategory() {
         
         // 删除完成后回到主线程刷新 UI
         QMetaObject::invokeMethod(this, [this, totalCount]() {
+            using namespace Style;
             m_categoryModel->refresh();
             ToolTipOverlay::instance()->showText(QCursor::pos(), 
-                QString("<b style='color:#e74c3c;'>已成功删除 %1 个分类</b>").arg(totalCount), 1500, QColor("#e74c3c"));
+                QString("<b style='color:%1;'>已成功删除 %2 个分类</b>").arg(qssColor(ErrorRed)).arg(totalCount), 1500, ErrorRed);
         }, Qt::QueuedConnection);
     });
 }
@@ -579,7 +581,7 @@ void CategoryPanel::onDeleteCategory() {
 int CategoryPanel::getTargetCategoryId(const QModelIndex& index) {
     if (!index.isValid()) return 0;
     
-    int id = index.data(CategoryModel::IdRole).toInt();
+    int id = index.data(IdRole).toInt();
     // 2026-06-xx 物理修复：允许识别负数 ID（系统项），解除 ID > 0 的硬编码限制
     if (id != 0) return id;
     
@@ -592,7 +594,7 @@ void CategoryPanel::onSortByNameAsc() {
     // 逻辑：获取该项的父级分类 ID，执行重排
     int parentCatId = 0;
     QModelIndex pIdx = index.parent();
-    if (pIdx.isValid()) parentCatId = pIdx.data(CategoryModel::IdRole).toInt();
+    if (pIdx.isValid()) parentCatId = pIdx.data(IdRole).toInt();
 
     if (CategoryRepo::reorder(parentCatId, true)) {
         m_categoryModel->refresh();
@@ -604,7 +606,7 @@ void CategoryPanel::onSortByNameDesc() {
     QModelIndex index = m_categoryTree->currentIndex();
     int parentCatId = 0;
     QModelIndex pIdx = index.parent();
-    if (pIdx.isValid()) parentCatId = pIdx.data(CategoryModel::IdRole).toInt();
+    if (pIdx.isValid()) parentCatId = pIdx.data(IdRole).toInt();
 
     if (CategoryRepo::reorder(parentCatId, false)) {
         m_categoryModel->refresh();
@@ -634,7 +636,7 @@ void CategoryPanel::initUi() {
     // 2026-05-07 按照用户要求：修改焦点线颜色为蓝色
     m_focusLine = new QWidget(this);
     m_focusLine->setFixedHeight(1);
-    m_focusLine->setStyleSheet("background-color: #007ACC;");
+    m_focusLine->setStyleSheet(QString("background-color: %1;").arg(qssColor(PrimaryBlue)));
     m_focusLine->hide(); // 初始隐藏
     m_mainLayout->addWidget(m_focusLine);
 
@@ -653,11 +655,11 @@ void CategoryPanel::initUi() {
     headerLayout->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
 
     QLabel* iconLabel = new QLabel(header);
-    iconLabel->setPixmap(UiHelper::getIcon("folder_filled", QColor("#3498db"), 18).pixmap(18, 18));
+    iconLabel->setPixmap(UiHelper::getIcon("folder_filled", PrimaryBlue, 18).pixmap(18, 18));
     headerLayout->addWidget(iconLabel);
 
     QLabel* titleLabel = new QLabel("分类", header);
-    titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #3498db; background: transparent; border: none;");
+    titleLabel->setStyleSheet(QString("font-size: 13px; font-weight: bold; color: %1; background: transparent; border: none;").arg(qssColor(PrimaryBlue)));
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
 
@@ -673,26 +675,26 @@ void CategoryPanel::initUi() {
     m_btnSwitch->installEventFilter(this);
 
     // 回填初始状态
-    QSettings settings("ArcMeta团队", "ArcMeta");
-    bool isJsonMode = settings.value("Category/IsJsonMode", false).toBool();
+    bool isJsonMode = AppConfig::instance().getValue("Category/IsJsonMode", false).toBool();
     m_btnSwitch->setChecked(isJsonMode);
     if (isJsonMode) {
-        m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", QColor("#2ecc71")));
+        m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", SuccessGreen));
         m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为JSON模式（内存）");
     } else {
-        m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", QColor("#B0B0B0")));
+        m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", TextDim));
         m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
     }
 
     connect(m_btnSwitch, &QPushButton::toggled, this, [this](bool checked) {
+        using namespace Style;
         // 先发拉起物理对账同步，确保双轨数据一致、零数据落差平滑迁移！
         CategoryRepo::syncDatabaseAndJson();
 
         if (checked) {
-            m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", QColor("#2ecc71")));
+            m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", SuccessGreen));
             m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为JSON模式（内存）");
         } else {
-            m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", QColor("#B0B0B0")));
+            m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", TextDim));
             m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
         }
 
@@ -707,8 +709,7 @@ void CategoryPanel::initUi() {
         }
 
         // 3. 持久化状态
-        QSettings s("ArcMeta团队", "ArcMeta");
-        s.setValue("Category/IsJsonMode", checked);
+        AppConfig::instance().setValue("Category/IsJsonMode", checked);
 
         // 4. 树模型重新拉取
         if (m_categoryModel) {
@@ -720,7 +721,7 @@ void CategoryPanel::initUi() {
     // 2026-06-xx 按照用户要求：从状态栏迁移至此，执行手动全量扫描与对账
     QPushButton* btnRescan = new QPushButton(header);
     btnRescan->setFixedSize(24, 24); // 适当放大以适应标题栏高度
-    btnRescan->setIcon(UiHelper::getIcon("sync", QColor("#B0B0B0"))); 
+    btnRescan->setIcon(UiHelper::getIcon("sync", TextDim));
     btnRescan->setIconSize(QSize(16, 16));
     btnRescan->setFlat(true);
     btnRescan->setCursor(Qt::PointingHandCursor);
@@ -752,8 +753,8 @@ void CategoryPanel::initUi() {
     sbContentLayout->setContentsMargins(8, 8, 8, 8);
     sbContentLayout->setSpacing(0);
 
-    QString arrowRight = UiHelper::getSvgTempFilePath("arrow_right", QColor("#3498db"));
-    QString arrowDown  = UiHelper::getSvgTempFilePath("arrow_down",  QColor("#3498db"));
+    QString arrowRight = UiHelper::getSvgTempFilePath("arrow_right", PrimaryBlue);
+    QString arrowDown  = UiHelper::getSvgTempFilePath("arrow_down",  PrimaryBlue);
 
     QString treeStyle = QString(R"(
         QTreeView { background-color: transparent; border: none; color: #CCC; outline: none; }
@@ -804,8 +805,8 @@ void CategoryPanel::initUi() {
     // 2026-03-xx 物理拦截：严禁加密分类在未解锁时被展开
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_categoryTree, &QTreeView::expanded, this, [this](const QModelIndex& index) {
-        int id = index.data(CategoryModel::IdRole).toInt();
-        bool isEncrypted = index.data(CategoryModel::EncryptedRole).toBool();
+        int id = index.data(IdRole).toInt();
+        bool isEncrypted = index.data(EncryptedRole).toBool();
         
         // 物理修复：加密校验仅针对数据库分类（ID > 0），跳过系统项（ID < 0）
         if (isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
@@ -838,7 +839,7 @@ void CategoryPanel::initUi() {
         if (m_categoryModel->rowCount() > 1) {
             hasRealData = true;
         } else if (m_categoryModel->rowCount() == 1) {
-            QString type = m_categoryModel->index(0, 0).data(CategoryModel::TypeRole).toString();
+            QString type = m_categoryModel->index(0, 0).data(TypeRole).toString();
             if (type != "placeholder" && !m_categoryModel->index(0,0).data(Qt::DisplayRole).toString().contains("正在统计")) {
                 hasRealData = true;
             }
@@ -879,11 +880,11 @@ void CategoryPanel::initUi() {
     });
 
     connect(m_categoryTree, &QTreeView::clicked, this, [this](const QModelIndex& index) {
-        QString type = index.data(CategoryModel::TypeRole).toString();
-        QString name = index.data(CategoryModel::NameRole).toString();
-        int id = index.data(CategoryModel::IdRole).toInt();
-        QString path = index.data(CategoryModel::PathRole).toString();
-        bool isEncrypted = index.data(CategoryModel::EncryptedRole).toBool();
+        QString type = index.data(TypeRole).toString();
+        QString name = index.data(NameRole).toString();
+        int id = index.data(IdRole).toInt();
+        QString path = index.data(PathRole).toString();
+        bool isEncrypted = index.data(EncryptedRole).toBool();
 
         // 2026-03-xx 物理防御：加密分类点击时触发校验
         if (isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
@@ -905,10 +906,10 @@ void CategoryPanel::initUi() {
         bool isBlankDrop = false;
 
         if (index.isValid()) {
-            QString type = index.data(CategoryModel::TypeRole).toString();
-            QString name = index.data(CategoryModel::NameRole).toString();
+            QString type = index.data(TypeRole).toString();
+            QString name = index.data(NameRole).toString();
             if (type == "category") {
-                targetCatId = index.data(CategoryModel::IdRole).toInt();
+                targetCatId = index.data(IdRole).toInt();
             } else if (name == "我的分类") {
                 // 2026-06-xx 物理修复：拖拽到“我的分类”根节点，同样触发自动创建分类
                 targetCatId = 0;
@@ -1113,8 +1114,8 @@ void CategoryPanel::initUi() {
         syncSubtree = [&](const QModelIndex& parentIdx, int parentIdInDb) {
             for (int i = 0; i < m_categoryModel->rowCount(parentIdx); ++i) {
                 QModelIndex childIdx = m_categoryModel->index(i, 0, parentIdx);
-                int id = childIdx.data(CategoryModel::IdRole).toInt();
-                QString type = childIdx.data(CategoryModel::TypeRole).toString();
+                int id = childIdx.data(IdRole).toInt();
+                QString type = childIdx.data(TypeRole).toString();
 
                 if (type == "category" && id > 0) {
                     // 只有在数据真正发生位移时才触发数据库 UPDATE，优化性能
@@ -1131,7 +1132,7 @@ void CategoryPanel::initUi() {
                     }
                     // 递归同步子分类
                     syncSubtree(childIdx, id);
-                } else if (childIdx.data(CategoryModel::NameRole).toString() == "我的分类") {
+                } else if (childIdx.data(NameRole).toString() == "我的分类") {
                     // 进入“我的分类”根容器
                     syncSubtree(childIdx, 0);
                 }
@@ -1151,7 +1152,7 @@ void CategoryPanel::saveExpandedStateToSettings() {
     // 物理防御：如果只有一个项且是加载中占位符，严禁保存，防止清空用户的历史记忆
     if (m_categoryModel->rowCount() == 1) {
         QModelIndex first = m_categoryModel->index(0, 0);
-        QString type = first.data(CategoryModel::TypeRole).toString();
+        QString type = first.data(TypeRole).toString();
         if (type == "placeholder" || first.data(Qt::DisplayRole).toString().contains("正在统计")) {
             return;
         }
@@ -1163,22 +1164,20 @@ void CategoryPanel::saveExpandedStateToSettings() {
 
     qDebug() << "[CategoryPanel] 正在持久化展开状态到磁盘 - 记录总数:" << ids.size() + names.size();
 
-    QSettings settings("ArcMeta团队", "ArcMeta");
     QList<QVariant> idList;
     for (int id : ids) idList << id;
-    settings.setValue("Category/ExpandedIds", idList);
-    settings.setValue("Category/ExpandedNames", names);
-    settings.sync(); // 物理落盘
+    AppConfig::instance().setValue("Category/ExpandedIds", idList);
+    AppConfig::instance().setValue("Category/ExpandedNames", names);
+    AppConfig::instance().sync(); // 物理落盘
 }
 
 void CategoryPanel::loadExpandedStateFromSettings() {
-    QSettings settings("ArcMeta团队", "ArcMeta");
-    bool hasRecord = settings.contains("Category/ExpandedIds") || settings.contains("Category/ExpandedNames");
+    bool hasRecord = !AppConfig::instance().getValue("Category/ExpandedIds").isNull() || !AppConfig::instance().getValue("Category/ExpandedNames").isNull();
     
-    QList<QVariant> idList = settings.value("Category/ExpandedIds").toList();
-    QStringList names = settings.value("Category/ExpandedNames").toStringList();
+    QList<QVariant> idList = AppConfig::instance().getValue("Category/ExpandedIds").toList();
+    QStringList names = AppConfig::instance().getValue("Category/ExpandedNames").toStringList();
 
-    qDebug() << "[CategoryPanel] 从 QSettings 加载记忆 - 记录存在:" << hasRecord << "ID数:" << idList.size() << "系统项数:" << names.size();
+    qDebug() << "[CategoryPanel] 从 AppConfig 加载记忆 - 记录存在:" << hasRecord << "ID数:" << idList.size() << "系统项数:" << names.size();
 
     // 核心修复：将从设置读取的状态同步到 Tree 属性中，确保异步加载完成后 modelReset 能自动恢复
     m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idList));
@@ -1197,10 +1196,10 @@ void CategoryPanel::loadExpandedStateFromSettings() {
 }
 
 bool CategoryPanel::tryUnlockCategory(const QModelIndex& index) {
-    int id = index.data(CategoryModel::IdRole).toInt();
+    int id = index.data(IdRole).toInt();
     if (id <= 0) return false;
 
-    QString hint = index.data(CategoryModel::EncryptHintRole).toString();
+    QString hint = index.data(EncryptHintRole).toString();
 
     // 2026-03-xx 物理级还原：废弃通用输入框，改用 1:1 复刻的旧版验证界面
     CategoryLockDialog dlg(hint, this);
