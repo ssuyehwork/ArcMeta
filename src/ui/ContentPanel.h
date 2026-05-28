@@ -23,6 +23,7 @@
 #include "FilterPanel.h"
 #include "../meta/MetadataManager.h"
 #include "../db/ItemRepo.h"
+#include "../core/ModelContract.h"
 
 namespace ArcMeta {
 
@@ -79,25 +80,6 @@ private:
     mutable QCache<QString, ArcMeta::RuntimeMeta> m_metaCache;
 };
 
-/**
- * @brief 自定义 Role 枚举，用于 QStandardItemModel 数据存取
- */
-enum ItemRole {
-    RatingRole = Qt::UserRole + 1,
-    ColorRole,
-    PinnedRole,
-    EncryptedRole,
-    PathRole,
-    IsLockedRole,
-    TagsRole,
-    TypeRole,
-    IsEmptyRole,
-    CategoryIdRole,
-    InDatabaseRole,
-    PalettesRole,
-    AspectRatioRole,
-    HasThumbnailRole
-};
 
 /**
  * @brief 内容面板（面板四）：核心业务展示区

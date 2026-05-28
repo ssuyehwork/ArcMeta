@@ -9,7 +9,7 @@
 #include <QTimer>
 #include <QSet>
 #include <QMap>
-#include <QSettings>
+#include "../core/AppConfig.h"
 #include <QApplication>
 
 namespace ArcMeta {

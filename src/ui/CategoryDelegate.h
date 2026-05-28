@@ -5,6 +5,8 @@
 #include <QApplication>
 #include <QLineEdit>
 #include "CategoryModel.h"
+#include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 
 namespace ArcMeta {
 
@@ -28,7 +30,7 @@ public:
             painter->save();
             painter->setRenderHint(QPainter::Antialiasing);
 
-            QString colorHex = index.data(CategoryModel::ColorRole).toString();
+            QString colorHex = index.data(ColorRole).toString();
             QColor baseColor = colorHex.isEmpty() ? QColor("#3498db") : QColor(colorHex);
             QColor bg = selected ? baseColor : QColor("#2a2d2e");
             if (selected) bg.setAlphaF(0.2f); 

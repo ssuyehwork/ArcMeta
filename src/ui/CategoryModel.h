@@ -2,6 +2,7 @@
 
 #include <QStandardItemModel>
 #include <QSet>
+#include "../core/ModelContract.h"
 
 namespace ArcMeta {
 
@@ -9,17 +10,6 @@ class CategoryModel : public QStandardItemModel {
     Q_OBJECT
 public:
     enum Type { System, User, Both };
-    enum Roles {
-        TypeRole = Qt::UserRole,
-        IdRole,
-        ColorRole,
-        NameRole,
-        PinnedRole,
-        PathRole,
-        EncryptedRole,
-        EncryptHintRole,
-        CountRole
-    };
     explicit CategoryModel(Type type, QObject* parent = nullptr);
 
     void setUnlockedIds(const QSet<int>& ids);

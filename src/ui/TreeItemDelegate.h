@@ -6,6 +6,8 @@
 #include <QMouseEvent>
 #include "ContentPanel.h"
 #include "UiHelper.h"
+#include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 
 namespace ArcMeta {
 

@@ -11,7 +11,7 @@
 #include <QPixmap>
 #include <QMap>
 #include <QCache>
-#include <QSettings>
+#include "../core/AppConfig.h"
 #include <QFileInfo>
 #include <QImage>
 #include <QStringList>
@@ -204,10 +204,10 @@ public:
         if (upperExt.isEmpty()) return QColor(60, 60, 60, 180);
         if (s_cache.contains(upperExt)) return s_cache[upperExt];
 
-        QSettings settings("ArcMeta团队", "ArcMeta");
         QString settingKey = QString("ExtensionColors/%1").arg(upperExt);
-        if (settings.contains(settingKey)) {
-            QColor color = settings.value(settingKey).value<QColor>();
+        QVariant val = AppConfig::instance().getValue(settingKey);
+        if (val.isValid()) {
+            QColor color = val.value<QColor>();
             s_cache[upperExt] = color;
             return color;
         }
@@ -216,7 +216,7 @@ public:
         int hue = static_cast<int>(hash % 360);
         QColor color = QColor::fromHsl(hue, 160, 110, 200); 
         s_cache[upperExt] = color;
-        settings.setValue(settingKey, color);
+        AppConfig::instance().setValue(settingKey, color);
         return color;
     }
 
