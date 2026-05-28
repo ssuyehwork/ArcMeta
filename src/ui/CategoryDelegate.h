@@ -6,9 +6,10 @@
 #include <QLineEdit>
 #include "CategoryModel.h"
 #include "StyleLibrary.h"
-using namespace ArcMeta::Style;
+
 
 namespace ArcMeta {
+    using namespace Style;
 
 class CategoryDelegate : public QStyledItemDelegate {
 public:

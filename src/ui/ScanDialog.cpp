@@ -52,6 +52,8 @@
 #include <shellapi.h>
 
 #include "ScanController.h"
+#include "StyleLibrary.h"
+#include "../core/ModelContract.h"
 #include "JustifiedView.h"
 #include "ThumbnailDelegate.h"
 #include <memory>
@@ -69,6 +71,7 @@
 
 
 namespace ArcMeta {
+    using namespace Style;
 
 // --- ScanConfig Implementation ---
 
@@ -1611,8 +1614,8 @@ void ScanDialog::updateStatusBar() {
     auto selectedRows = view->selectionModel()->selectedRows();
     
     int totalMatch = m_controller->resultCount();
-    m_statLabelMain->setText(QString("共找到 %1 条项目").arg(formatNumber(totalMatch)));
-    m_statLabelTime->setText(QString("耗时 %1 ms").arg(m_lastSearchMs));
+    m_statLabelMain->setText(QString("共找到 %1 条项目").arg(QString::number(totalMatch)));
+    m_statLabelTime->setText(QString("耗时 %1 ms").arg(QString::number(m_lastSearchMs)));
 
     if (!selectedRows.isEmpty()) {
         m_selectionLabel->show();

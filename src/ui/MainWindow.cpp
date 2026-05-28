@@ -38,7 +38,6 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
-using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
 #include <QDir>
@@ -53,6 +52,8 @@ using namespace ArcMeta::Style;
 #include <QtConcurrent>
 
 namespace ArcMeta {
+    using namespace Style;
+    using namespace Style;
 
 MainWindow::~MainWindow() {
     if (m_resizeFilter) {
@@ -1174,7 +1175,7 @@ void MainWindow::onStatusBarStatsUpdated(int fileCount, int folderCount, int tot
     }
     int selectedCount = uniqueRows.size();
     
-    m_statusLeft->setText(QString("%1 个项目, 已选中 %2 个").arg(QString::number(totalCount)).arg(QString::number(selectedCount)));
+    m_statusLeft->setText(QString("%1 个项目, 已选中 %2 个").arg(totalCount).arg(selectedCount));
     
     Q_UNUSED(fileCount);
     Q_UNUSED(folderCount);

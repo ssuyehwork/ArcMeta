@@ -12,6 +12,7 @@
 #include "UiHelper.h"
 
 namespace ArcMeta {
+    using namespace Style;
 
 ThumbnailDelegate::ThumbnailDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
 
@@ -300,6 +301,10 @@ bool ThumbnailDelegate::eventFilter(QObject* obj, QEvent* event) {
 } 
 
 bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) {
+    // 2026-06-xx 物理修复傻逼逻辑：只有当项目已被选中时，才允许直接点击修改星级
+    // 理由：防止用户在只想选中项目时意外改变了元数据，确保交互符合逻辑直觉
+    bool isSelected = (option.state & QStyle::State_Selected);
+
     if (m_ratingRole != -1 && event->type() == QEvent::MouseButtonPress) {
         QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event);
         if (mEvent->button() == Qt::LeftButton) {
@@ -316,6 +321,8 @@ bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, co
             }
 
             if (isBanHit || hitStar != -1) {
+                if (!isSelected) return false; // 未选中时不响应点击，交还给 View 处理选中
+
                 // 2. 执行数据更新
                 model->setData(index, isBanHit ? 0 : hitStar, m_ratingRole);
 

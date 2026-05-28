@@ -6,7 +6,6 @@
 #include "DropTreeView.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
-using namespace ArcMeta::Style;
 #include "ToolTipOverlay.h"
 #include "FramelessDialog.h"
 #include "ProgressDialog.h"
@@ -36,6 +35,8 @@ using namespace ArcMeta::Style;
 #include <QtConcurrent>
 
 namespace ArcMeta {
+    using namespace Style;
+    using namespace Style;
 
 /**
  * @brief 获取默认分类颜色：深灰色 (#555555)
@@ -573,7 +574,7 @@ void CategoryPanel::onDeleteCategory() {
         QMetaObject::invokeMethod(this, [this, totalCount]() {
             m_categoryModel->refresh();
             ToolTipOverlay::instance()->showText(QCursor::pos(), 
-                QString("<b style='color:%1;'>已成功删除 %2 个分类</b>").arg(qssColor(ErrorRed)).arg(QString::number(totalCount)), 1500, ErrorRed);
+                QString("<b style='color:%1;'>已成功删除 %2 个分类</b>").arg(qssColor(ErrorRed)).arg(totalCount), 1500, ErrorRed);
         }, Qt::QueuedConnection);
     });
 }

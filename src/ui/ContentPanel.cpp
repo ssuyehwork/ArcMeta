@@ -67,10 +67,11 @@
 #include "BatchRenameDialog.h" 
 #include "UiHelper.h" 
 #include "StyleLibrary.h"
-using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
  
 namespace ArcMeta { 
+    using namespace Style;
+    using namespace Style;
  
 // --- FerrexVirtualDbModel 实现 ---
 FerrexVirtualDbModel::FerrexVirtualDbModel(QObject* parent) : QAbstractTableModel(parent) {
@@ -2205,6 +2206,9 @@ bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) {
 } 
  
 bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) { 
+    // 2026-06-xx 物理修复傻逼逻辑：只有当项目已被选中时，才允许直接点击修改星级
+    bool isSelected = (option.state & QStyle::State_Selected);
+
     if (event->type() == QEvent::MouseButtonPress) { 
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 子类转型歧义 
         QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event); 
@@ -2224,6 +2228,8 @@ bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, con
             }
 
             if (isBanHit || hitStar != -1) { 
+                if (!isSelected) return false;
+
                 // 2. 执行数据更新 (禁止图标设为 0，否则设为星级)
                 model->setData(index, isBanHit ? 0 : hitStar, RatingRole); 
 

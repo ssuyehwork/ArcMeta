@@ -7,9 +7,10 @@
 #include "ContentPanel.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
-using namespace ArcMeta::Style;
+
 
 namespace ArcMeta {
+    using namespace Style;
 
 /**
  * @brief 通用树形视图代理，提供圆角高亮效果
@@ -128,6 +129,9 @@ public:
 
 public:
     bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) override {
+        // 2026-06-xx 物理修复傻逼逻辑：只有当项目已被选中时，才允许直接点击修改星级
+        bool isSelected = (option.state & QStyle::State_Selected);
+
         // 2026-06-16 按照方案 20：交互逻辑闭环修正
         if (event->type() == QEvent::MouseButtonPress && index.column() == 2) {
             QMouseEvent* me = static_cast<QMouseEvent*>(event);
@@ -136,6 +140,7 @@ public:
             QRect banHitbox(option.rect.left() + 5, option.rect.top() + (option.rect.height() - 16)/2, 16, 16);
             
             if (banHitbox.contains(me->pos())) {
+                if (!isSelected) return false;
                 // 核心意图：统一由模型 setData 触发持久化，消除双写冲突
                 model->setData(index.model()->index(index.row(), 0), 0, RatingRole);
                 return true;
@@ -148,6 +153,7 @@ public:
             for (int i = 0; i < 5; ++i) {
                 QRect starRect(startX + i * (starSize + spacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
                 if (starRect.contains(me->pos())) {
+                    if (!isSelected) return false;
                     model->setData(index.model()->index(index.row(), 0), i + 1, RatingRole);
                     return true;
                 }
