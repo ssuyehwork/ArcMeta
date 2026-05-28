@@ -832,8 +832,10 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     
     lock.unlock(); // 2026-05-28 物理释放：信号发射前必须先解开写锁，防止槽函数重入死锁
     if (isNew) {
+        qDebug() << "[MftReader] 实时发现新文件:" << name << "Index:" << finalIdx;
         emit entryAdded(finalIdx);
     } else {
+        qDebug() << "[MftReader] 实时更新文件:" << name << "Index:" << finalIdx;
         emit entryUpdated(finalIdx);
     }
 }

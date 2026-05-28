@@ -84,7 +84,8 @@ void UsnWatcher::run() {
 
         while (pRecord < pEnd) {
             USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(pRecord);
-            
+            if (header->RecordLength == 0) break; // 物理隔离：防止 RecordLength 为 0 导致的死循环
+
             // 处理 V2 和 V3 版本记录
             if (header->MajorVersion == 2 || header->MajorVersion == 3) {
                 handleRecord(reinterpret_cast<USN_RECORD_V2*>(pRecord));
@@ -104,23 +105,29 @@ void UsnWatcher::handleRecord(USN_RECORD_V2* pRecord) {
     uint32_t reason;
     uint64_t frn;
 
+    std::wstring fileName;
     if (header->MajorVersion == 2) {
         reason = pRecord->Reason;
         frn = pRecord->FileReferenceNumber;
+        fileName = std::wstring(reinterpret_cast<wchar_t*>(reinterpret_cast<uint8_t*>(pRecord) + pRecord->FileNameOffset), pRecord->FileNameLength / 2);
     } else if (header->MajorVersion == 3) {
         USN_RECORD_V3* v3 = reinterpret_cast<USN_RECORD_V3*>(pRecord);
         reason = v3->Reason;
         frn = *reinterpret_cast<uint64_t*>(&v3->FileReferenceNumber);
+        fileName = std::wstring(reinterpret_cast<wchar_t*>(reinterpret_cast<uint8_t*>(v3) + v3->FileNameOffset), v3->FileNameLength / 2);
     } else return;
 
-    // 仅更新 MftReader 内存 SoA，不直接操作数据库
-    if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE)) {
+    // qDebug() << "[UsnWatcher] 接收到 USN 记录:" << QString::fromStdWString(fileName) << "Reason:" << QString::number(reason, 16);
+
+    // 2026-05-28 物理增强：监听 REASON_CLOSE。对于大文件或复制操作，CLOSE 是获取最终元数据的物理锚点
+    if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE | USN_REASON_CLOSE)) {
         MftReader::instance().updateEntryFromUsn(pRecord, m_volume);
     }
     else if (reason & USN_REASON_FILE_DELETE) {
         MftReader::instance().removeEntryByFrn(m_volume, frn);
     }
-    else if (reason & USN_REASON_RENAME_NEW_NAME) {
+    else if (reason & (USN_REASON_RENAME_NEW_NAME | USN_REASON_RENAME_OLD_NAME)) {
+        // 重命名时统一调用 update，MftReader 内部会根据 FRN 自动定位并更新名称
         MftReader::instance().updateEntryFromUsn(pRecord, m_volume);
     }
 }
