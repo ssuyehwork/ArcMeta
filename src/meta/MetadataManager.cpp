@@ -440,6 +440,34 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
     emit metaChanged(QString::fromStdWString(newPath));
 }
 
+void MetadataManager::removeMetadataSync(const std::wstring& path) {
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        // 1. 递归清理内存缓存
+        for (auto it = m_cache.begin(); it != m_cache.end(); ) {
+            if (it->first == path || it->first.find(path + L"\\") == 0 || it->first.find(path + L"/") == 0) {
+                it = m_cache.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    // 2. 清理离散 JSON 持久化
+    QFileInfo info(QString::fromStdWString(path));
+    if (info.isDir()) {
+        // 若是文件夹，整个单元删除，包括其内部的 .am_meta.json
+        QString metaPath = info.absoluteFilePath() + "/.am_meta.json";
+        QFile::remove(metaPath);
+    } else {
+        // 若是文件，从所在目录的 .am_meta.json 中移除条目
+        std::wstring dir = info.absolutePath().toStdWString();
+        AmMetaJson json(dir);
+        json.remove(info.fileName().toStdWString());
+        json.save();
+    }
+}
+
 std::wstring MetadataManager::getVolumeSerialNumber(const std::wstring& path) {
     if (path.length() < 2 || path[1] != L':') return L"UNKNOWN";
     wchar_t root[4] = { path[0], L':', L'\\', L'\0' };
