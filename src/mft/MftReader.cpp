@@ -259,14 +259,18 @@ bool MftReader::loadFromCache() {
                     allSortedIndices.push_back({std::move(ds), baseIdx});
 
                     for (const auto& [drive, usn] : usnMap) {
-                        driveName = QString::fromStdString(drive).toStdWString();
-                        m_drive_list.push_back(driveName);
-                        m_next_usns[driveName] = usn;
+                        std::wstring dName = QString::fromStdString(drive).toStdWString();
+                        m_drive_list.push_back(dName);
+                        m_next_usns[dName] = usn;
+
+                        // 2026-05-28 物理修复：在持有锁的状态下先记录当前驱动器名，准备发射信号
+                        driveName = dName;
                     }
                     currentTotal = m_frns.size();
                 }
                 
                 // 2026-05-14 启动流控优化：释放锁后发射信号，避免 UI 线程调用 totalCount() 时死锁
+                // 2026-05-28 修正：针对多盘符缓存，确保每个盘符载入后均发射信号（此处针对单文件内的逻辑对齐）
                 emit driveLoaded(QString::fromStdWString(driveName), (int)count, (int)currentTotal);
             }
         }
@@ -703,16 +707,17 @@ std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, boo
 
 void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& volume) {
     USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(record);
-    uint64_t frn, parentFrn;
+    uint64_t frn, parentFrn, usn;
     uint32_t attr;
     LARGE_INTEGER timestamp;
     WORD fileNameLength, fileNameOffset;
 
     // 2026-05-28 物理修复：针对 USN V3 (ReFS/最新Win11) 进行原子化布局匹配
-    // V3 采用 128位 FRN，文件名偏移量与 V2 截然不同。若不区分版本，将导致文件名解析成乱码，从而搜不到文件。
+    // V3 采用 128位 FRN，且 USN 字段偏移量 (40) 与 V2 (24) 截然不同。
     if (header->MajorVersion == 2) {
         frn = record->FileReferenceNumber;
         parentFrn = record->ParentFileReferenceNumber;
+        usn = record->Usn;
         attr = record->FileAttributes;
         timestamp = record->TimeStamp;
         fileNameLength = record->FileNameLength;
@@ -722,6 +727,7 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         // 取低 64 位 FRN 兼容现有 SoA 架构 (Memories.md 物理铁律)
         frn = *reinterpret_cast<uint64_t*>(&v3->FileReferenceNumber);
         parentFrn = *reinterpret_cast<uint64_t*>(&v3->ParentFileReferenceNumber);
+        usn = v3->Usn;
         attr = v3->FileAttributes;
         timestamp = v3->TimeStamp;
         fileNameLength = v3->FileNameLength;
@@ -765,18 +771,21 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     uint64_t encodedPf = makeKey(dIdx, parentFrn);
     uint64_t compositeKey = makeKey(dIdx, frn);
     auto it = m_frn_to_idx.find(compositeKey);
+    uint32_t finalIdx = 0;
+    bool isNew = false;
+
     if (it != m_frn_to_idx.end()) {
-        uint32_t idx = it->second;
-        m_parent_frns[idx] = encodedPf;
-        m_attributes[idx] = finalAttr;
-        m_metadata_fetched[idx] = fetchedSuccess ? 2 : 0;
+        finalIdx = it->second;
+        m_parent_frns[finalIdx] = encodedPf;
+        m_attributes[finalIdx] = finalAttr;
+        m_metadata_fetched[finalIdx] = fetchedSuccess ? 2 : 0;
         
         // 2026-05-14 逻辑加固：优先使用 API 获取的属性，若失败则回退至 USN 提供的时间戳
-        m_sizes[idx] = fileSize;
-        m_timestamps[idx] = (finalModifyTime > 0) ? finalModifyTime : filetimeToUnixMs(timestamp.QuadPart);
+        m_sizes[finalIdx] = fileSize;
+        m_timestamps[finalIdx] = (finalModifyTime > 0) ? finalModifyTime : filetimeToUnixMs(timestamp.QuadPart);
 
         QByteArray utf8 = name.toUtf8();
-        uint32_t oldOff = m_name_offsets[idx];
+        uint32_t oldOff = m_name_offsets[finalIdx];
         const char* oldPtr = reinterpret_cast<const char*>(m_string_pool.data() + oldOff);
         size_t oldLen = strlen(oldPtr);
         if ((size_t)utf8.size() <= oldLen) {
@@ -785,12 +794,13 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
             if ((size_t)utf8.size() < oldLen) m_wasted_string_bytes += (oldLen - utf8.size());
         } else {
             m_wasted_string_bytes += (oldLen + 1);
-            m_name_offsets[idx] = (uint32_t)m_string_pool.size();
+            m_name_offsets[finalIdx] = (uint32_t)m_string_pool.size();
             m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
             m_string_pool.push_back('\0');
         }
     } else {
-        uint32_t newIdx = (uint32_t)m_frns.size();
+        finalIdx = (uint32_t)m_frns.size();
+        isNew = true;
         m_frns.push_back(frn);
         m_parent_frns.push_back(encodedPf);
         m_sizes.push_back(fileSize);
@@ -801,16 +811,18 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         m_name_offsets.push_back((uint32_t)m_string_pool.size());
         m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
         m_string_pool.push_back('\0');
-        m_frn_to_idx[compositeKey] = newIdx;
+        m_frn_to_idx[compositeKey] = finalIdx;
     }
     { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
-    m_next_usns[volume] = record->Usn;
+    m_next_usns[volume] = usn;
     m_dirty_count++;
     
     // 2026-05-14 工业级内存加固：实时监控内存碎片率
     // 当浪费的字符串空间超过 20MB 或死亡条目过多时，强制执行 compact 碎片整理
     if (m_wasted_string_bytes > 20 * 1024 * 1024 || m_dead_count > 100000) {
         compact();
+        // 碎片整理后索引可能发生变化，需要重新从 map 获取
+        finalIdx = m_frn_to_idx[compositeKey];
     }
 
     if (m_dirty_count >= 1000) { 
@@ -818,19 +830,12 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         saveDriveToCacheInternal(dIdx); 
     }
     
-    int finalIdx = -1;
-    bool isNew = (it == m_frn_to_idx.end());
-    if (!isNew) finalIdx = (int)it->second;
-    else finalIdx = (int)m_frns.size() - 1;
-
-    lock.unlock(); // 2026-06-xx 物理安全：先解锁再发射信号，杜绝 DirectConnection 导致的跨模块死锁
-
+    lock.unlock(); // 2026-05-28 物理释放：信号发射前必须先解开写锁，防止槽函数重入死锁
     if (isNew) {
-        emit entryAdded(compositeKey);
+        emit entryAdded(finalIdx);
     } else {
-        emit entryUpdated(compositeKey);
+        emit entryUpdated(finalIdx);
     }
-    emit dataChanged(finalIdx);
 }
 
 void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
@@ -842,13 +847,21 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
     auto it = m_frn_to_idx.find(compositeKey);
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
-        m_frns[idx] = 0;
+        m_frns[idx] = 0; // 标记为死亡
         m_frn_to_idx.erase(it);
         m_dead_count++;
+
+        // 2026-05-28 物理修复：立即从排序索引中移除已删除项的引用
+        // 理由：如果不移除，二分搜索可能会撞上这个 frn=0 的死亡条目，导致提前 break 从而漏掉有效结果。
+        auto itSorted = std::find(m_sorted_indices.begin(), m_sorted_indices.end(), idx);
+        if (itSorted != m_sorted_indices.end()) {
+            m_sorted_indices.erase(itSorted);
+        }
+
         const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
         m_wasted_string_bytes += (strlen(p) + 1);
         
-        { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
+        { std::lock_guard<std::mutex> lockCache(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
         
         if (m_dead_count > 50000 || m_wasted_string_bytes > 10 * 1024 * 1024) {
             compact();
