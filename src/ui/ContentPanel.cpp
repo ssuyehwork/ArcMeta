@@ -2200,6 +2200,11 @@ bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) {
  
 bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) { 
     if (event->type() == QEvent::MouseButtonPress) { 
+        // 物理加固：未选中项严禁直接通过 Delegate 修改元数据
+        if (!(option.state & QStyle::State_Selected)) {
+            return false;
+        }
+
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 子类转型歧义 
         QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event); 
         if (mEvent->button() == Qt::LeftButton) { 

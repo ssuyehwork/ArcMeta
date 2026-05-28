@@ -130,6 +130,9 @@ public:
     bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) override {
         // 2026-06-16 按照方案 20：交互逻辑闭环修正
         if (event->type() == QEvent::MouseButtonPress && index.column() == 2) {
+            // 物理加固：未选中项严禁直接通过 Delegate 修改元数据
+            if (!(option.state & QStyle::State_Selected)) return false;
+
             QMouseEvent* me = static_cast<QMouseEvent*>(event);
             
             // 精准 Hitbox：禁止图标

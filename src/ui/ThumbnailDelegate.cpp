@@ -301,6 +301,9 @@ bool ThumbnailDelegate::eventFilter(QObject* obj, QEvent* event) {
 
 bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) {
     if (m_ratingRole != -1 && event->type() == QEvent::MouseButtonPress) {
+        // 物理加固：未选中项严禁直接通过 Delegate 修改元数据
+        if (!(option.state & QStyle::State_Selected)) return false;
+
         QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event);
         if (mEvent->button() == Qt::LeftButton) {
             Metrics m = calculateMetrics(option);
