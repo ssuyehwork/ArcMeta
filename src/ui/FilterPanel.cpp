@@ -54,6 +54,8 @@ public:
 protected:
     void mousePressEvent(QMouseEvent* e) override {
         if (e->button() == Qt::LeftButton) {
+            // 先切换状态，再处理连选逻辑
+            m_cb->setChecked(!m_cb->isChecked());
             m_panel->handleRowClicked(m_cb, e->modifiers());
         }
         QWidget::mousePressEvent(e);
@@ -717,8 +719,9 @@ QWidget* FilterPanel::buildGroup(const QString& title, QVBoxLayout*& outContentL
 QCheckBox* FilterPanel::addFilterRow(QVBoxLayout* layout, const QString& label, int count, const QColor& dotColor) {
     QCheckBox* cb = new QCheckBox();
     m_allCheckBoxes.append(cb);
-    // 2026-03-xx 按照用户要求，仅保留蓝色勾选标记 (#378ADD)，背景保持深色
-    cb->setStyleSheet(
+
+    // 视觉修复：使用 UiHelper 转换后的 PNG Base64 以确保 100% 兼容渲染
+    cb->setStyleSheet(QString(
         "QCheckBox { spacing: 0px; }"
         "QCheckBox::indicator { width: 15px; height: 15px; border: 1px solid #444;"
         "                       border-radius: 2px; background: #1E1E1E; }"
@@ -726,9 +729,14 @@ QCheckBox* FilterPanel::addFilterRow(QVBoxLayout* layout, const QString& label, 
         "QCheckBox::indicator:checked { "
         "   border: 1px solid #444; "
         "   background: #1E1E1E; "
-        "   image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzc4QUREIiBzdHJva2Utd2lkdGg9IjMuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIyMCA2IDkgMTcgNCAxMiI+PC9wb2x5bGluZT48L3N2Zz4=);"
+        "   image: url(%1); "
         "}"
-    );
+    ).arg(UiHelper::getSvgDataUrl("check", QColor("#378ADD"))));
+
+    // 支持直接点击复选框时的连选更新
+    connect(cb, &QCheckBox::clicked, this, [this, cb]() {
+        handleRowClicked(cb, QGuiApplication::keyboardModifiers());
+    });
 
     // 整行可点击容器
     // 增加高度至 24px 以适配各种系统缩放，避免文字截断
@@ -777,19 +785,20 @@ void FilterPanel::handleRowClicked(QCheckBox* cb, Qt::KeyboardModifiers mods) {
     int index = m_allCheckBoxes.indexOf(cb);
     if (index == -1) return;
 
+    // 逻辑修正：此时 cb 的状态已经完成切换（无论是 Row 点击还是 CB 自身点击）
     if (mods & Qt::ShiftModifier && m_lastSelectedIndex != -1) {
         int start = qMin(m_lastSelectedIndex, index);
         int end = qMax(m_lastSelectedIndex, index);
-        bool targetState = !cb->isChecked(); // 切换目标状态
+        bool targetState = cb->isChecked();
         for (int i = start; i <= end; ++i) {
-            m_allCheckBoxes[i]->setChecked(targetState);
+            if (m_allCheckBoxes[i] != cb) {
+                m_allCheckBoxes[i]->setChecked(targetState);
+            }
         }
-    } else if (mods & Qt::ControlModifier) {
-        cb->setChecked(!cb->isChecked());
-    } else {
-        // 普通点击：如果不按 Ctrl，则通常也是切换自身
-        cb->setChecked(!cb->isChecked());
     }
+    // Ctrl 连选已由 QCheckBox 自身或 ClickableRow 的 setChecked 切换完成，
+    // 连选逻辑仅需处理 Shift 范围同步。
+
     m_lastSelectedIndex = index;
 }
 
