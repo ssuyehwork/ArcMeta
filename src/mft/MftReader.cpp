@@ -103,6 +103,24 @@ void MftReader::clearInternal() {
 }
 
 void MftReader::clear() {
+    // 方案二：实现“关闭即存盘”的架构承诺
+    // 注意：只有在已经初始化的情况下才执行存盘，避免抹除现有缓存
+    {
+        QReadLocker lock(&m_dataLock);
+        if (m_isInitialized) {
+            // 工业级架构优化：仅当有脏数据时同步存盘，或者根据策略异步化
+            // 由于 clear() 通常由 UI 析构触发，同步 I/O 会导致关窗卡顿
+            // 这里我们仅在 m_dirty_count > 0 时才同步保存，且 saveToCacheInternal 内部已有 O(N) 遍历，
+            // 这是一个权衡点。为了彻底解决卡顿，我们应避免在析构路径上执行全量序列化。
+            if (m_dirty_count > 0) {
+                lock.unlock(); 
+                saveToCache();
+            } else {
+                lock.unlock();
+            }
+        }
+    }
+
     std::vector<UsnWatcher*> toStop;
     {
         QWriteLocker lock(&m_dataLock);
@@ -110,6 +128,7 @@ void MftReader::clear() {
         m_watchers.clear();
     }
     for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
+    
     QWriteLocker lock(&m_dataLock);
     clearInternal();
 }
@@ -213,6 +232,16 @@ bool MftReader::loadFromCache() {
     std::filesystem::path cacheDir = "ArcMeta/cache";
     if (!std::filesystem::exists(cacheDir)) return false;
 
+    // 物理优化：加载前先停止现有监控，避免句柄冲突
+    // 注意：这里手动执行清理逻辑，但不触发 saveToCache，防止覆盖磁盘缓存
+    std::vector<UsnWatcher*> toStop;
+    {
+        QWriteLocker lock(&m_dataLock);
+        toStop = std::move(m_watchers);
+        m_watchers.clear();
+    }
+    for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
+    
     {
         QWriteLocker lock(&m_dataLock);
         clearInternal();
@@ -316,6 +345,16 @@ bool MftReader::loadFromCache() {
     }
 
     m_isInitialized = true;
+
+    // 方案一：补完缓存加载后的监控链 (接管变动)
+    // 在缓存加载成功后，立即为所有已加载的驱动器启动 UsnWatcher
+    for (const auto& drive : m_drive_list) {
+        uint64_t lastUsn = m_next_usns[drive];
+        auto* w = new UsnWatcher(drive, lastUsn, nullptr);
+        m_watchers.push_back(w);
+        w->start();
+    }
+
     return true;
 }
 
@@ -803,9 +842,10 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         compact();
     }
 
+    bool shouldSave = false;
     if (m_dirty_count >= 1000) { 
         m_dirty_count = 0; 
-        saveDriveToCacheInternal(dIdx); 
+        shouldSave = true;
     }
     
     int finalIdx = -1;
@@ -814,6 +854,18 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     else finalIdx = (int)m_frns.size() - 1;
 
     lock.unlock(); // 2026-06-xx 物理安全：先解锁再发射信号，杜绝 DirectConnection 导致的跨模块死锁
+
+    if (shouldSave) {
+        // 工业级架构优化：将耗时 I/O 持久化逻辑异步执行，杜绝阻塞 USN 监控主循环与 UI 响应
+        // 增加 CAS 原子操作防止并发写盘竞争，确保单盘持久化原子性
+        bool expected = false;
+        if (m_is_saving.compare_exchange_strong(expected, true)) {
+            QtConcurrent::run([this, dIdx]() {
+                saveDriveToCache(dIdx); 
+                m_is_saving.store(false);
+            });
+        }
+    }
 
     if (isNew) {
         emit entryAdded(compositeKey);
