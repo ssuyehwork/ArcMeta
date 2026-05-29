@@ -82,15 +82,27 @@ void UsnWatcher::run() {
         uint8_t* pRecord = buffer.get() + sizeof(USN);
         uint8_t* pEnd = buffer.get() + bytesReturned;
 
+        std::vector<USN_RECORD_V2*> updateBatch;
         while (pRecord < pEnd) {
             USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(pRecord);
             
-            // 处理 V2 和 V3 版本记录
+            // 工业级优化：优先采用批量处理模式
             if (header->MajorVersion == 2 || header->MajorVersion == 3) {
-                handleRecord(reinterpret_cast<USN_RECORD_V2*>(pRecord));
+                USN_RECORD_V2* rec = reinterpret_cast<USN_RECORD_V2*>(pRecord);
+                uint32_t reason = (header->MajorVersion == 2) ? rec->Reason : reinterpret_cast<USN_RECORD_V3*>(pRecord)->Reason;
+                
+                if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE | USN_REASON_RENAME_NEW_NAME)) {
+                    updateBatch.push_back(rec);
+                } else if (reason & USN_REASON_FILE_DELETE) {
+                    uint64_t frn = (header->MajorVersion == 2) ? rec->FileReferenceNumber : *reinterpret_cast<uint64_t*>(&reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileReferenceNumber);
+                    MftReader::instance().removeEntryByFrn(m_volume, frn);
+                }
             }
-
             pRecord += header->RecordLength;
+        }
+
+        if (!updateBatch.empty()) {
+            MftReader::instance().updateEntriesFromUsnBatch(updateBatch, m_volume);
         }
 
         // 更新起始 USN 为本次读取后的 NextUsn
