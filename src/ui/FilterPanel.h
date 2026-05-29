@@ -70,6 +70,9 @@ public:
 
     FilterState currentFilter() const { return m_filter; }
 
+    // 处理行点击（支持多选）
+    void handleRowClicked(QCheckBox* cb, Qt::KeyboardModifiers mods);
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -91,8 +94,6 @@ private:
                             int count, const QColor& dotColor = Qt::transparent);
 
     static QMap<QString, QColor> s_colorMap();
-
-    void handleRowClicked(QCheckBox* cb, Qt::KeyboardModifiers mods);
 
     FilterState m_filter;
     QString     m_hueSliderColor;
