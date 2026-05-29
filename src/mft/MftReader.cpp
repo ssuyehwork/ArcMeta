@@ -661,15 +661,22 @@ uint64_t MftReader::getKeyByIndex(int index) const {
 }
 
 QString MftReader::getFullPath(int index) const {
+    // 2026-05-29 物理修复：重构锁顺序，先持有 m_dataLock，内部调用无锁版本的 getPathFastInternal
     QReadLocker lock(&m_dataLock);
     if (index < 0 || index >= (int)m_frns.size()) return QString();
     uint64_t frn = m_frns[index];
     size_t dIdx = static_cast<size_t>(m_parent_frns[index] >> 48);
-    return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFast(dIdx, frn));
+    return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFastInternal(dIdx, frn));
 }
 
 std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
-    // 2026-05-16 核心修正：使用复合 Key (driveIdx << 48 | 48位FRN) 解决多盘符冲突与序列号匹配失效
+    // 2026-05-29 物理修复：公开接口持有读锁，内部调用私有无锁逻辑，解决递归死锁。
+    QReadLocker readLock(&m_dataLock);
+    return getPathFastInternal(driveIdx, frn);
+}
+
+std::wstring MftReader::getPathFastInternal(size_t driveIdx, uint64_t frn) {
+    // 2026-05-29 物理修复：内部无锁实现。调用方必须已持有 m_dataLock。
     uint64_t compositeKey = (static_cast<uint64_t>(driveIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
 
     {
@@ -678,9 +685,6 @@ std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
         if (it != m_path_cache.end()) return it->second;
     }
 
-    // 2026-05-29 工业级加固：路径溯源期间必须持有读锁，防止 SoA 内存重分配导致 UAF
-    // 2026-05-29 物理修复：重命名局部锁变量为 readLock，消除 MSVC C4456 影子变量警告
-    QReadLocker readLock(&m_dataLock);
     if (!m_isInitialized) return L"";
 
     std::vector<std::wstring> segments;
@@ -709,7 +713,7 @@ std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
 
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
-        if (m_path_cache.size() > 200000) { // 2026-05-16 扩容路径缓存以提升深度目录渲染性能
+        if (m_path_cache.size() > 200000) {
             auto it_clear = m_path_cache.begin();
             for (int i = 0; i < 2000; ++i) it_clear = m_path_cache.erase(it_clear);
         }
@@ -999,7 +1003,11 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         if (m_is_saving.compare_exchange_strong(expected, true)) {
             // 2026-05-29 工业级警告消除：明确丢弃 QFuture 返回值，满足 MSVC C4858 规范
             (void)QtConcurrent::run([this, dIdx]() {
-                saveDriveToCache(dIdx); 
+                try {
+                    saveDriveToCache(dIdx);
+                } catch (...) {
+                    qWarning() << "[MftReader] 后台存盘发生未知异常";
+                }
                 m_is_saving.store(false);
             });
         }
@@ -1133,7 +1141,11 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
         bool expected = false;
         if (m_is_saving.compare_exchange_strong(expected, true)) {
             (void)QtConcurrent::run([this, dIdx]() {
-                saveDriveToCache(dIdx); 
+                try {
+                    saveDriveToCache(dIdx);
+                } catch (...) {
+                    qWarning() << "[MftReader] 批量更新后台存盘发生未知异常";
+                }
                 m_is_saving.store(false);
             });
         }

@@ -99,6 +99,9 @@ public:
     std::wstring getPathFast(size_t driveIdx, uint64_t frn);
 
 private:
+    // 2026-05-29 物理修复：提供无锁内部接口，解决嵌套调用引起的 QReadWriteLock 递归死锁
+    std::wstring getPathFastInternal(size_t driveIdx, uint64_t frn);
+
     MftReader();
     ~MftReader();
 
