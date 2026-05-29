@@ -2238,3 +2238,12 @@ bool MftReader::saveToCache() {
 - 是否在需求范围内：是
 
 ---
+
+---
+## [27] 变更时间：2026-05-29 07:45:00
+
+**文件路径：** `src/mft/MftReader.cpp`
+**变更类型：** 修改
+
+### 修改说明
+- 物理消除了 `updateEntriesFromUsnBatch` 函数中定义但未使用的变量 `fileSize` 和 `fetchedSuccess`，修复了 MSVC 编译器警告 C4189，确保代码达到零警告工业标准。

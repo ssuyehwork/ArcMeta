@@ -1062,10 +1062,8 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
             fileNameOffset = v3->FileNameOffset;
         } else continue;
 
-        uint64_t fileSize = 0;
         int64_t finalModifyTime = filetimeToUnixMs(timestamp.QuadPart);
         uint32_t finalAttr = attr;
-        bool fetchedSuccess = false;
 
         // 批量模式下暂不执行耗时的 OpenFileById 同步拉取，交由异步 Metadata 队列处理
         // 这样可以确保 USN 监控线程以最高速吞噬日志
