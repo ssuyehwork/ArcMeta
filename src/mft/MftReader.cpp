@@ -340,15 +340,11 @@ bool MftReader::loadFromCache() {
 
     // 方案一：补完缓存加载后的监控链 (接管变动)
     // 在缓存加载成功后，立即为所有已加载的驱动器启动 UsnWatcher
-    // 注意：需要加锁保护 m_watchers 的并发写入
-    {
-        QWriteLocker lock(&m_dataLock);
-        for (const auto& drive : m_drive_list) {
-            uint64_t lastUsn = m_next_usns[drive];
-            auto* w = new UsnWatcher(drive, lastUsn, nullptr);
-            m_watchers.push_back(w);
-            w->start();
-        }
+    for (const auto& drive : m_drive_list) {
+        uint64_t lastUsn = m_next_usns[drive];
+        auto* w = new UsnWatcher(drive, lastUsn, nullptr);
+        m_watchers.push_back(w);
+        w->start();
     }
 
     return true;
