@@ -92,8 +92,13 @@ private:
 
     static QMap<QString, QColor> s_colorMap();
 
+    void handleRowClicked(QCheckBox* cb, Qt::KeyboardModifiers mods);
+
     FilterState m_filter;
     QString     m_hueSliderColor;
+
+    QList<QCheckBox*>   m_allCheckBoxes;
+    int                 m_lastSelectedIndex = -1;
 
     QMap<int, int>      m_ratingCounts;
     QMap<QString, int>  m_colorCounts;
