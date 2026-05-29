@@ -2279,3 +2279,22 @@ bool MftReader::saveToCache() {
 ### 修改说明
 - **UI 组件扩展**：在 `FramelessDialog` 体系中新增 `FramelessConfirmDialog` 类，物理补齐了带确认/取消按钮的通用对话框组件。
 - **编译错误修复**：修正了 `CategoryPanel.cpp` 中对 `FramelessDialog` 构造函数的错误重载调用，通过引入专用的确认对话框解决了 3 参数构造函数缺失的问题。
+
+---
+## [31] 变更时间：2026-05-29 10:30:00
+
+**文件路径：** `src/mft/MftReader.h` / `src/mft/MftReader.cpp`
+**变更类型：** 修复 (Deadlock Fix)
+
+### 修改说明
+- **消除递归锁死锁**：识别并修复了 `MftReader::getFullPath` 通过公开接口 `getPathFast` 嵌套申请 `m_dataLock` 读锁导致的死锁陷阱。通过剥离出私有无锁逻辑 `getPathFastInternal`，确保锁的获取保持在调用栈的最外层，彻底解决了主界面在长时间运行后可能出现的点击无响应（Lock-up）问题。
+
+---
+## [32] 变更时间：2026-05-29 10:45:00
+
+**文件路径：** `src/ui/MainWindow.cpp`
+**变更类型：** 优化 (Performance)
+
+### 修改说明
+- **减轻事件总线压力**：将闲置检测过滤器与边缘缩放过滤器从 `qApp` 全局范围卸载，改为仅针对 `MainWindow` 局部实例安装。此举显著降低了鼠标移动时系统级的事件分发开销，提升了主界面的交互灵敏度。
+- **异步安全加固**：在后台存盘任务中引入异常保护，确保 `m_is_saving` 状态位在任何崩溃路径下都能正确释放，增强了系统的自愈能力。
