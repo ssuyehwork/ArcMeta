@@ -2247,3 +2247,25 @@ bool MftReader::saveToCache() {
 
 ### 修改说明
 - 物理消除了 `updateEntriesFromUsnBatch` 函数中定义但未使用的变量 `fileSize` 和 `fetchedSuccess`，修复了 MSVC 编译器警告 C4189，确保代码达到零警告工业标准。
+
+---
+## [28] 变更时间：2026-05-29 08:30:00
+
+**文件路径：** `src/ui/CategoryPanel.cpp` / `src/db/CategoryRepo.cpp` / `src/db/CategoryRepo.h`
+**变更类型：** 优化 (Plan-44)
+
+### 修改说明
+- **切换确认机制**：在侧边栏“分类”模式切换开关上增加 `FramelessDialog` 确认弹窗，防止误触导致的数据引擎重载。
+- **视觉反馈增强**：切换期间禁用按钮并将图标设为同步状态，切换完成后弹出 `ToolTipOverlay` 气泡告知生效模式。
+- **原子性保障**：将 `syncDatabaseAndJson` 升级为布尔返回类型，若物理对账失败则中止切换并自动回滚 UI 状态，确保系统稳定性。
+
+---
+## [29] 变更时间：2026-05-29 08:45:00
+
+**文件路径：** `src/meta/MetadataManager.cpp` / `src/db/CategoryRepo.cpp`
+**变更类型：** 修复 (Plan-45)
+
+### 修改说明
+- **全自动数据对账**：重构 `MetadataManager::initFromJsonMode`，在加载 JSON 元数据时，自动将索引回填至 SQLite `items` 表。此举解决了开启 JSON 模式后由于数据库“库存”为空导致的全系统计数为 0 的严重缺陷。
+- **计数逻辑容错**：在 `getSystemCounts` 中增加主动探测，若检测到数据库为空则强制触发一次基于离散 JSON 的物理索引恢复。
+- **性能优化**：针对 JSON 模式优化了“未标签”项的统计逻辑，提升了侧边栏系统项的加载性能。

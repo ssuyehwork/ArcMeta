@@ -25,7 +25,7 @@ class CategoryRepo {
 public:
     static void setJsonMode(bool enabled);
     static bool isJsonMode();
-    static void syncDatabaseAndJson();
+    static bool syncDatabaseAndJson();
 
 private:
     static bool m_isJsonMode;
