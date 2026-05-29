@@ -120,6 +120,12 @@ void MftReader::clear() {
         }
     }
 
+    // 工业级标准：在销毁数据前，必须确保所有异步存盘任务已停止
+    // 强制等待后台写盘任务结束，防止物理内存释放后发生 Use-After-Free 崩溃
+    while (m_is_saving.load(std::memory_order_acquire)) {
+        QThread::msleep(10);
+    }
+
     // 工业级标准：在销毁数据前，必须确保所有异步任务（如 requestMetadata）和 Watcher 已停止
     std::vector<UsnWatcher*> toStop;
     {
@@ -860,7 +866,8 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         // 增加 CAS 原子操作防止并发写盘竞争，确保单盘持久化原子性
         bool expected = false;
         if (m_is_saving.compare_exchange_strong(expected, true)) {
-            QtConcurrent::run([this, dIdx]() {
+            // 2026-06-xx 工业级警告消除：明确丢弃 QFuture 返回值，满足 MSVC C4858 规范
+            (void)QtConcurrent::run([this, dIdx]() {
                 saveDriveToCache(dIdx);
                 m_is_saving.store(false);
             });

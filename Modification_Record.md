@@ -1333,3 +1333,82 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
 - 是否在需求范围内：是
 
 ---
+
+---
+## [8] 变更时间：2026-05-29 05:25:00
+
+**文件路径：** `src/mft/MftReader.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+        bool expected = false;
+        if (m_is_saving.compare_exchange_strong(expected, true)) {
+            QtConcurrent::run([this, dIdx]() {
+                saveDriveToCache(dIdx);
+                m_is_saving.store(false);
+            });
+        }
+```
+
+### 修改后（After）
+```cpp
+        bool expected = false;
+        if (m_is_saving.compare_exchange_strong(expected, true)) {
+            // 2026-06-xx 工业级警告消除：明确丢弃 QFuture 返回值，满足 MSVC C4858 规范
+            (void)QtConcurrent::run([this, dIdx]() {
+                saveDriveToCache(dIdx);
+                m_is_saving.store(false);
+            });
+        }
+```
+
+### 变更说明
+- 变更原因：消除 MSVC 编译器警告 C4858（正在放弃返回值），提升代码工业级合规性。
+- 影响范围：`MftReader::updateEntryFromUsn`。
+- 是否在需求范围内：是
+
+---
+
+---
+## [9] 变更时间：2026-05-29 05:30:00
+
+**文件路径：** `src/mft/MftReader.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    // 工业级标准：在销毁数据前，必须确保所有异步任务（如 requestMetadata）和 Watcher 已停止
+    std::vector<UsnWatcher*> toStop;
+    {
+        QWriteLocker lock(&m_dataLock);
+        toStop = std::move(m_watchers);
+        m_watchers.clear();
+    }
+    for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
+```
+
+### 修改后（After）
+```cpp
+    // 工业级标准：在销毁数据前，必须确保所有异步存盘任务已停止
+    // 强制等待后台写盘任务结束，防止物理内存释放后发生 Use-After-Free 崩溃
+    while (m_is_saving.load(std::memory_order_acquire)) {
+        QThread::msleep(10);
+    }
+
+    // 工业级标准：在销毁数据前，必须确保所有异步任务（如 requestMetadata）和 Watcher 已停止
+    std::vector<UsnWatcher*> toStop;
+    {
+        QWriteLocker lock(&m_dataLock);
+        toStop = std::move(m_watchers);
+        m_watchers.clear();
+    }
+    for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
+```
+
+### 变更说明
+- 变更原因：解决异步存盘任务与物理内存释放之间的竞态条件。在执行 `clearInternal` 释放 SoA 向量前，强制等待所有后台持久化任务完成，杜绝程序关闭时的 UAF (Use-After-Free) 崩溃。
+- 影响范围：`MftReader::clear`，系统稳定性。
+- 是否在需求范围内：是
+
+---
