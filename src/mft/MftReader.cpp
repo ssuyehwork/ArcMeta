@@ -102,7 +102,10 @@ void MftReader::clearInternal() {
     }
     m_next_usns.clear();
     m_isInitialized = false;
-    m_dirty_count = 0;
+    for (int i = 0; i < 32; ++i) {
+        m_drive_dirty_counts[i] = 0;
+        m_drive_entry_indices[i].clear();
+    }
 }
 
 void MftReader::clear() {
@@ -132,7 +135,12 @@ void MftReader::clear() {
         }
 
         // C. 执行最后一次强制存盘 (持久化 USN 游标)
-        if (m_dirty_count > 0) {
+        // 方案一：盘符级状态隔离。检查所有盘符的脏计数
+        bool hasDirty = false;
+        for (int i = 0; i < 32; ++i) {
+            if (m_drive_dirty_counts[i].load() > 0) { hasDirty = true; break; }
+        }
+        if (hasDirty) {
             saveToCache();
         }
 
@@ -360,7 +368,7 @@ bool MftReader::loadFromCache() {
 
     // 方案一：补完缓存加载后的监控链 (接管变动)
     // 在缓存加载成功后，立即为所有已加载的驱动器启动 UsnWatcher
-    // 2026-06-xx 物理修复：移除此处冗余的 lock 声明（父作用域已持有 lock），消除 C4456 警告
+    // 2026-05-29 物理修复：移除此处冗余的 lock 声明（父作用域已持有 lock），消除 C4456 警告
     for (const auto& drive : m_drive_list) {
         uint64_t lastUsn = m_next_usns[drive];
         auto* w = new UsnWatcher(drive, lastUsn, nullptr);
@@ -397,34 +405,44 @@ bool MftReader::saveToCache() {
             snapshots[i].usn = m_next_usns[m_drive_list[i]];
         }
 
-        // 单次遍历全量 SoA 内存池
-        for (size_t i = 0; i < m_frns.size(); ++i) {
-            if (m_frns[i] == 0) continue;
-            size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
-            if (dIdx >= dCount) continue;
-
+        // 方案三：精准写入优化。不再执行全量 $O(N)$ 遍历，改为按驱动器索引遍历
+        for (size_t dIdx = 0; dIdx < dCount; ++dIdx) {
+            if (dIdx >= 32) continue;
             auto& snap = snapshots[dIdx];
-            uint32_t localIdx = (uint32_t)snap.f.size();
-            g2lMaps[dIdx][i] = localIdx;
+            const auto& indices = m_drive_entry_indices[dIdx];
+            snap.f.reserve(indices.size());
+            snap.pf.reserve(indices.size());
+            snap.s.reserve(indices.size());
+            snap.t.reserve(indices.size());
+            snap.attr.reserve(indices.size());
+            snap.mf.reserve(indices.size());
+            snap.no.reserve(indices.size());
 
-            snap.f.push_back(m_frns[i]);
-            snap.pf.push_back(m_parent_frns[i] & 0x0000FFFFFFFFFFFFull);
-            snap.s.push_back(m_sizes[i]);
-            snap.t.push_back(m_timestamps[i]);
-            snap.attr.push_back(m_attributes[i]);
-            snap.mf.push_back(m_metadata_fetched[i]);
+            for (uint32_t i : indices) {
+                if (m_frns[i] == 0) continue;
+                
+                uint32_t localIdx = (uint32_t)snap.f.size();
+                g2lMaps[dIdx][i] = localIdx;
 
-            uint32_t oldOff = m_name_offsets[i];
-            auto it = offsetMaps[dIdx].find(oldOff);
-            if (it == offsetMaps[dIdx].end()) {
-                uint32_t newOff = (uint32_t)snap.sp.size();
-                const char* ptr = reinterpret_cast<const char*>(m_string_pool.data() + oldOff);
-                size_t len = strlen(ptr) + 1;
-                snap.sp.insert(snap.sp.end(), ptr, ptr + len);
-                offsetMaps[dIdx][oldOff] = newOff;
-                snap.no.push_back(newOff);
-            } else {
-                snap.no.push_back(it->second);
+                snap.f.push_back(m_frns[i]);
+                snap.pf.push_back(m_parent_frns[i] & 0x0000FFFFFFFFFFFFull);
+                snap.s.push_back(m_sizes[i]);
+                snap.t.push_back(m_timestamps[i]);
+                snap.attr.push_back(m_attributes[i]);
+                snap.mf.push_back(m_metadata_fetched[i]);
+
+                uint32_t oldOff = m_name_offsets[i];
+                auto it = offsetMaps[dIdx].find(oldOff);
+                if (it == offsetMaps[dIdx].end()) {
+                    uint32_t newOff = (uint32_t)snap.sp.size();
+                    const char* ptr = reinterpret_cast<const char*>(m_string_pool.data() + oldOff);
+                    size_t len = strlen(ptr) + 1;
+                    snap.sp.insert(snap.sp.end(), ptr, ptr + len);
+                    offsetMaps[dIdx][oldOff] = newOff;
+                    snap.no.push_back(newOff);
+                } else {
+                    snap.no.push_back(it->second);
+                }
             }
         }
 
@@ -464,7 +482,7 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     uint64_t nextUsnVal = 0;
 
     {
-        // 2026-06-xx 物理加固：在采样阶段显式获取读锁，确保 SoA 容器在拷贝期间不被写线程重分配
+        // 2026-05-29 物理加固：在采样阶段显式获取读锁，确保 SoA 容器在拷贝期间不被写线程重分配
         QReadLocker lock(&m_dataLock);
         if (!m_isInitialized) return false;
         
@@ -475,8 +493,19 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
         std::unordered_map<uint32_t, uint32_t> offsetMap;
         std::unordered_map<size_t, uint32_t> globalToLocal;
 
-        for (size_t i = 0; i < m_frns.size(); ++i) {
-            if (m_frns[i] != 0 && (m_parent_frns[i] >> 48) == driveIdx) {
+        if (driveIdx < 32) {
+            const auto& indices = m_drive_entry_indices[driveIdx];
+            f.reserve(indices.size());
+            pf.reserve(indices.size());
+            s.reserve(indices.size());
+            t.reserve(indices.size());
+            attr.reserve(indices.size());
+            mf.reserve(indices.size());
+            no.reserve(indices.size());
+
+            for (uint32_t i : indices) {
+                if (m_frns[i] == 0) continue;
+                
                 uint32_t localIdx = (uint32_t)f.size();
                 globalToLocal[i] = localIdx;
 
@@ -493,15 +522,17 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
                     size_t len = strlen(ptr) + 1;
                     sp.insert(sp.end(), ptr, ptr + len);
                     offsetMap[oldOff] = newOff;
+                    no.push_back(newOff);
+                } else {
+                    no.push_back(offsetMap[oldOff]);
                 }
-                no.push_back(offsetMap[oldOff]);
             }
-        }
 
-        for (uint32_t gIdx : m_sorted_indices) {
-            auto it = globalToLocal.find(gIdx);
-            if (it != globalToLocal.end()) {
-                ds.push_back(it->second);
+            for (uint32_t gIdx : m_sorted_indices) {
+                auto it = globalToLocal.find(gIdx);
+                if (it != globalToLocal.end()) {
+                    ds.push_back(it->second);
+                }
             }
         }
     }
@@ -647,8 +678,8 @@ std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
         if (it != m_path_cache.end()) return it->second;
     }
 
-    // 2026-06-xx 工业级加固：路径溯源期间必须持有读锁，防止 SoA 内存重分配导致 UAF
-    // 2026-06-xx 物理修复：重命名局部锁变量为 readLock，消除 MSVC C4456 影子变量警告
+    // 2026-05-29 工业级加固：路径溯源期间必须持有读锁，防止 SoA 内存重分配导致 UAF
+    // 2026-05-29 物理修复：重命名局部锁变量为 readLock，消除 MSVC C4456 影子变量警告
     QReadLocker readLock(&m_dataLock);
     if (!m_isInitialized) return L"";
 
@@ -724,7 +755,7 @@ std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, boo
     std::vector<size_t> chunkIndices(numChunks);
     std::iota(chunkIndices.begin(), chunkIndices.end(), 0);
 
-    // 2026-06-xx 极致算法重构：返回稳定的复合 FRN 主键
+    // 2026-05-29 极致算法重构：返回稳定的复合 FRN 主键
     if (hasQuery && !useRegex && !caseSensitive && !hasExt) {
         auto it_start = std::lower_bound(m_sorted_indices.begin(), m_sorted_indices.end(), queryUtf8.constData(), 
             [this](uint32_t idx, const char* q) {
@@ -936,10 +967,11 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
         m_string_pool.push_back('\0');
         m_frn_to_idx[compositeKey] = newIdx;
+        if (dIdx < 32) m_drive_entry_indices[dIdx].push_back(newIdx);
     }
     { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
     m_next_usns[volume] = record->Usn;
-    m_dirty_count++;
+    if (dIdx < 32) m_drive_dirty_counts[dIdx]++;
     
     // 2026-05-14 工业级内存加固：实时监控内存碎片率
     // 当浪费的字符串空间超过 20MB 或死亡条目过多时，强制执行 compact 碎片整理
@@ -948,8 +980,8 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     }
 
     bool shouldSave = false;
-    if (m_dirty_count >= 1000) { 
-        m_dirty_count = 0; 
+    if (dIdx < 32 && m_drive_dirty_counts[dIdx].load() >= 1000) { 
+        m_drive_dirty_counts[dIdx] = 0; 
         shouldSave = true;
     }
     
@@ -958,14 +990,14 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     if (!isNew) finalIdx = (int)it->second;
     else finalIdx = (int)m_frns.size() - 1;
 
-    lock.unlock(); // 2026-06-xx 物理安全：先解锁再发射信号，杜绝 DirectConnection 导致的跨模块死锁
+    lock.unlock(); // 2026-05-29 物理安全：先解锁再发射信号，杜绝 DirectConnection 导致的跨模块死锁
 
     if (shouldSave) {
         // 工业级架构优化：将耗时 I/O 持久化逻辑异步执行，杜绝阻塞 USN 监控主循环与 UI 响应
         // 增加 CAS 原子操作防止并发写盘竞争，确保单盘持久化原子性
         bool expected = false;
         if (m_is_saving.compare_exchange_strong(expected, true)) {
-            // 2026-06-xx 工业级警告消除：明确丢弃 QFuture 返回值，满足 MSVC C4858 规范
+            // 2026-05-29 工业级警告消除：明确丢弃 QFuture 返回值，满足 MSVC C4858 规范
             (void)QtConcurrent::run([this, dIdx]() {
                 saveDriveToCache(dIdx); 
                 m_is_saving.store(false);
@@ -1030,10 +1062,8 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
             fileNameOffset = v3->FileNameOffset;
         } else continue;
 
-        uint64_t fileSize = 0;
         int64_t finalModifyTime = filetimeToUnixMs(timestamp.QuadPart);
         uint32_t finalAttr = attr;
-        bool fetchedSuccess = false;
 
         // 批量模式下暂不执行耗时的 OpenFileById 同步拉取，交由异步 Metadata 队列处理
         // 这样可以确保 USN 监控线程以最高速吞噬日志
@@ -1079,11 +1109,12 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
             m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
             m_string_pool.push_back('\0');
             m_frn_to_idx[compositeKey] = newIdx;
+            if (dIdx < 32) m_drive_entry_indices[dIdx].push_back(newIdx);
             addedKeys.push_back(compositeKey);
         }
         { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
         m_next_usns[volume] = record->Usn;
-        m_dirty_count++;
+        if (dIdx < 32) m_drive_dirty_counts[dIdx]++;
     }
 
     if (m_wasted_string_bytes > 20 * 1024 * 1024 || m_dead_count > 100000) {
@@ -1091,8 +1122,8 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
     }
 
     bool shouldSave = false;
-    if (m_dirty_count >= 1000) { 
-        m_dirty_count = 0; 
+    if (dIdx < 32 && m_drive_dirty_counts[dIdx].load() >= 1000) { 
+        m_drive_dirty_counts[dIdx] = 0; 
         shouldSave = true;
     }
 
@@ -1163,11 +1194,16 @@ void MftReader::compact() {
     new_string_pool.reserve(m_string_pool.size() - m_wasted_string_bytes);
 
     m_frn_to_idx.clear();
+    for (int i = 0; i < 32; ++i) m_drive_entry_indices[i].clear();
+
     for (size_t i = 0; i < count; ++i) {
         if (m_frns[i] == 0) continue;
         
         uint32_t newIdx = (uint32_t)new_frns.size();
-        m_frn_to_idx[m_frns[i]] = newIdx;
+        size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
+        uint64_t key = makeKey(dIdx, m_frns[i]);
+        m_frn_to_idx[key] = newIdx;
+        if (dIdx < 32) m_drive_entry_indices[dIdx].push_back(newIdx);
         
         new_frns.push_back(m_frns[i]);
         new_parent_frns.push_back(m_parent_frns[i]);
@@ -1287,7 +1323,14 @@ void MftReader::mergeDriveResult(const std::wstring& volume, const MftReader::Dr
     m_name_offsets.reserve(m_name_offsets.size() + count);
     m_attributes.reserve(m_attributes.size() + count);
     m_metadata_fetched.reserve(m_metadata_fetched.size() + count);
+    
+    // 方案三：精准写入优化
+    if (driveIdx < 32) {
+        m_drive_entry_indices[driveIdx].reserve(m_drive_entry_indices[driveIdx].size() + count);
+    }
+
     for (const auto& e : result.entries) {
+        uint32_t newIdx = (uint32_t)m_frns.size();
         m_frns.push_back(e.frn);
         m_parent_frns.push_back((static_cast<uint64_t>(driveIdx) << 48) | (e.parentFrn & 0x0000FFFFFFFFFFFFull));
         m_sizes.push_back(e.size); // 2026-05-14 修正：将扫描到的大小压入 SoA
@@ -1296,16 +1339,23 @@ void MftReader::mergeDriveResult(const std::wstring& volume, const MftReader::Dr
         m_name_offsets.push_back((uint32_t)m_string_pool.size());
         m_string_pool.insert(m_string_pool.end(), e.nameUtf8.begin(), e.nameUtf8.end());
         m_string_pool.push_back('\0');
+
+        if (driveIdx < 32) {
+            m_drive_entry_indices[driveIdx].push_back(newIdx);
+        }
     }
 }
 
 void MftReader::rebuildFrnToIndexMap() {
     m_frn_to_idx.clear();
+    for (int i = 0; i < 32; ++i) m_drive_entry_indices[i].clear();
+
     for (size_t i = 0; i < m_frns.size(); ++i) {
         if (m_frns[i] != 0) {
             size_t dIdx = static_cast<size_t>(m_parent_frns[i] >> 48);
             uint64_t key = makeKey(dIdx, m_frns[i]);
             m_frn_to_idx[key] = (uint32_t)i;
+            if (dIdx < 32) m_drive_entry_indices[dIdx].push_back((uint32_t)i);
         }
     }
 }

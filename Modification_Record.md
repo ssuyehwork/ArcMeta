@@ -2053,3 +2053,197 @@ bool MftReader::saveToCache() {
 - 是否在需求范围内：是
 
 ---
+
+---
+## [23] 变更时间：2026-05-29 07:15:00
+
+**文件路径：** `src/mft/MftReader.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    std::atomic<bool> m_is_clearing{false}; // 标识是否处于异步清理过程中
+    uint32_t m_dirty_count = 0;
+    size_t   m_dead_count = 0;
+```
+
+### 修改后（After）
+```cpp
+    std::atomic<bool> m_is_clearing{false}; // 标识是否处于异步清理过程中
+    
+    // 方案一：盘符级状态隔离 (隔离冲突)
+    std::atomic<uint32_t> m_drive_dirty_counts[32]{}; 
+
+    // 方案三：增量变更队列 (极致性能)
+    // 存储每个驱动器拥有的条目在主 SoA 数组中的索引
+    std::vector<uint32_t> m_drive_entry_indices[32];
+
+    size_t   m_dead_count = 0;
+```
+
+### 变更说明
+- 变更原因：引入按驱动器隔离的脏计数器和索引映射。解决多盘符共用全局计数器导致的存盘状态冲突，并为 $O(Drive\_Files)$ 级别的精准存盘提供数据结构支持。
+- 影响范围：`MftReader` 核心状态管理。
+- 是否在需求范围内：是
+
+---
+## [24] 变更时间：2026-05-29 07:16:00
+
+**文件路径：** `src/mft/MftReader.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    m_isInitialized = false;
+    m_dirty_count = 0;
+}
+
+// ... 
+
+        // C. 执行最后一次强制存盘 (持久化 USN 游标)
+        if (m_dirty_count > 0) {
+            saveToCache();
+        }
+```
+
+### 修改后（After）
+```cpp
+    m_isInitialized = false;
+    for (int i = 0; i < 32; ++i) {
+        m_drive_dirty_counts[i] = 0;
+        m_drive_entry_indices[i].clear();
+    }
+}
+
+// ...
+
+        // C. 执行最后一次强制存盘 (持久化 USN 游标)
+        bool hasDirty = false;
+        for (int i = 0; i < 32; ++i) {
+            if (m_drive_dirty_counts[i].load() > 0) { hasDirty = true; break; }
+        }
+        if (hasDirty) {
+            saveToCache();
+        }
+```
+
+### 变更说明
+- 变更原因：重构清理与持久化判断逻辑。通过遍历 32 个盘符的独立计数器，确保任何一个盘符存在未存盘变动时都能触发最终同步。
+- 影响范围：`MftReader::clearInternal` / `MftReader::clear`。
+- 是否在需求范围内：是
+
+---
+
+---
+## [25] 变更时间：2026-05-29 07:20:00
+
+**文件路径：** `src/mft/UsnWatcher.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    while (!m_stopRequested.load()) {
+        if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL)) {
+            // 出错时小步长等待，确保可及时退出
+            for (int i = 0; i < 10 && !m_stopRequested.load(); ++i) msleep(50);
+            continue;
+        }
+```
+
+### 修改后（After）
+```cpp
+    while (!m_stopRequested.load()) {
+        if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL)) {
+            DWORD err = GetLastError();
+            // 方案二：引入 USN 自愈探测。若 Journal 失效或被覆盖，执行重置
+            if (err == ERROR_JOURNAL_DELETE_IN_PROGRESS || err == ERROR_JOURNAL_NOT_ACTIVE || err == ERROR_INVALID_PARAMETER) {
+                qDebug() << "[UsnWatcher] 检测到 Journal 失效，执行自愈重置..." << QString::fromStdWString(m_volume);
+                readData.StartUsn = 0;
+                m_lastUsn = 0;
+            }
+            
+            // 出错时小步长等待，确保可及时退出
+            for (int i = 0; i < 10 && !m_stopRequested.load(); ++i) msleep(50);
+            continue;
+        }
+```
+
+### 变更说明
+- 变更原因：解决 USN Journal 溢出或失效导致的监控停滞。当检测到非法参数或日志已删除错误时，自动重置偏移量至 0，强制从当前时刻开始捕捉增量，提升系统在长时间关机后的自愈能力。
+- 影响范围：`UsnWatcher::run`。
+- 是否在需求范围内：是
+
+---
+
+---
+## [26] 变更时间：2026-05-29 07:25:00
+
+**文件路径：** `src/mft/MftReader.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void MftReader::mergeDriveResult(const std::wstring& volume, const MftReader::DriveResult& result, size_t driveIdx) {
+    // ...
+    for (const auto& e : result.entries) {
+        m_frns.push_back(e.frn);
+        // ...
+    }
+}
+
+// ... 
+
+bool MftReader::saveToCache() {
+    // ...
+        // 单次遍历全量 SoA 内存池
+        for (size_t i = 0; i < m_frns.size(); ++i) {
+            // ...
+        }
+    // ...
+}
+```
+
+### 修改后（After）
+```cpp
+void MftReader::mergeDriveResult(const std::wstring& volume, const MftReader::DriveResult& result, size_t driveIdx) {
+    // ...
+    if (driveIdx < 32) m_drive_entry_indices[driveIdx].reserve(m_drive_entry_indices[driveIdx].size() + count);
+
+    for (const auto& e : result.entries) {
+        uint32_t newIdx = (uint32_t)m_frns.size();
+        m_frns.push_back(e.frn);
+        // ...
+        if (driveIdx < 32) m_drive_entry_indices[driveIdx].push_back(newIdx);
+    }
+}
+
+// ...
+
+bool MftReader::saveToCache() {
+    // ...
+        // 方案三：精准写入优化。不再执行全量 $O(N)$ 遍历，改为按驱动器索引遍历
+        for (size_t dIdx = 0; dIdx < dCount; ++dIdx) {
+            if (dIdx >= 32) continue;
+            auto& snap = snapshots[dIdx];
+            const auto& indices = m_drive_entry_indices[dIdx];
+            // ... [遍历 indices 收集数据]
+        }
+    // ...
+}
+```
+
+### 变更说明
+- 变更原因：彻底消除存盘时的全量内存扫描瓶颈。通过在 `mergeDriveResult` 和 USN 更新期间动态维护 per-drive 的索引队列，使得 `saveToCache` 和 `saveDriveToCacheInternal` 仅需处理相关磁盘的文件条目，将时间复杂度从 O(Total_Files) 优化至 O(Drive_Files)，在大规模多盘挂载场景下极大降低了 CPU 负载。
+- 影响范围：`MftReader::saveToCache` / `MftReader::saveDriveToCacheInternal` / `MftReader::mergeDriveResult`。
+- 是否在需求范围内：是
+
+---
+
+---
+## [27] 变更时间：2026-05-29 07:45:00
+
+**文件路径：** `src/mft/MftReader.cpp`
+**变更类型：** 修改
+
+### 修改说明
+- 物理消除了 `updateEntriesFromUsnBatch` 函数中定义但未使用的变量 `fileSize` 和 `fetchedSuccess`，修复了 MSVC 编译器警告 C4189，确保代码达到零警告工业标准。

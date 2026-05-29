@@ -68,6 +68,14 @@ void UsnWatcher::run() {
 
     while (!m_stopRequested.load()) {
         if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL)) {
+            DWORD err = GetLastError();
+            // 方案二：引入 USN 自愈探测。若 Journal 失效或被覆盖，执行重置
+            if (err == ERROR_JOURNAL_DELETE_IN_PROGRESS || err == ERROR_JOURNAL_NOT_ACTIVE || err == ERROR_INVALID_PARAMETER) {
+                qDebug() << "[UsnWatcher] 检测到 Journal 失效，执行自愈重置..." << QString::fromStdWString(m_volume);
+                readData.StartUsn = 0;
+                m_lastUsn = 0;
+            }
+            
             // 出错时小步长等待，确保可及时退出
             for (int i = 0; i < 10 && !m_stopRequested.load(); ++i) msleep(50);
             continue;
