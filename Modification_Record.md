@@ -2279,3 +2279,32 @@ bool MftReader::saveToCache() {
 ### 修改说明
 - **UI 组件扩展**：在 `FramelessDialog` 体系中新增 `FramelessConfirmDialog` 类，物理补齐了带确认/取消按钮的通用对话框组件。
 - **编译错误修复**：修正了 `CategoryPanel.cpp` 中对 `FramelessDialog` 构造函数的错误重载调用，通过引入专用的确认对话框解决了 3 参数构造函数缺失的问题。
+
+---
+## [31] 变更时间：2026-05-29 10:30:00
+
+**文件路径：** `src/mft/MftReader.h` / `src/mft/MftReader.cpp`
+**变更类型：** 修复 (Deadlock Fix)
+
+### 修改说明
+- **消除递归锁死锁**：识别并修复了 `MftReader::getFullPath` 通过公开接口 `getPathFast` 嵌套申请 `m_dataLock` 读锁导致的死锁陷阱。通过剥离出私有无锁逻辑 `getPathFastInternal`，确保锁的获取保持在调用栈的最外层，彻底解决了主界面在长时间运行后可能出现的点击无响应（Lock-up）问题。
+
+---
+## [32] 变更时间：2026-05-29 10:45:00
+
+**文件路径：** `src/ui/MainWindow.cpp`
+**变更类型：** 优化 (Performance)
+
+### 修改说明
+- **减轻事件总线压力**：将闲置检测过滤器与边缘缩放过滤器从 `qApp` 全局范围卸载，改为仅针对 `MainWindow` 局部实例安装。此举显著降低了鼠标移动时系统级的事件分发开销，提升了主界面的交互灵敏度。
+- **异步安全加固**：在后台存盘任务中引入异常保护，确保 `m_is_saving` 状态位在任何崩溃路径下都能正确释放，增强了系统的自愈能力。
+
+---
+## [33] 变更时间：2026-05-29 11:15:00
+
+**文件路径：** `src/ui/ContentPanel.cpp`
+**变更类型：** 修复 (Sorting Logic)
+
+### 修改说明
+- **开启模型动态排序**：在 `ContentPanel` 初始化阶段，为 `FilterProxyModel` 显式开启了 `setDynamicSortFilter(true)`。此举确保了当底层元数据（如 Pinned 状态）发生变化，或数据重新加载时，视图能自动触发 `lessThan` 逻辑执行“置顶优先”排序。
+- **物理修复置顶硬盘排序**：在加载“此电脑” (`computer://`) 逻辑中，增加显式的 `m_proxyModel->sort(0)` 触发。解决了用户反馈的“置顶硬盘在点击此电脑后未排在首位”的问题，消除了数据定义与渲染上下文之间的逻辑断裂。

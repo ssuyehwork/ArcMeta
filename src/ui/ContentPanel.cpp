@@ -506,6 +506,9 @@ ContentPanel::ContentPanel(QWidget* parent)
      
     // 2026-04-12 深度修复：强制锁定过滤列为第 0 列（名称列），确保搜索逻辑不偏离 
     m_proxyModel->setFilterKeyColumn(0); 
+    // 2026-05-29 物理修复：开启动态排序，确保“置顶优先”逻辑能在数据加载后自动生效
+    m_proxyModel->setDynamicSortFilter(true);
+    m_proxyModel->sort(0, Qt::AscendingOrder);
  
     // 2026-06-05 按照要求：从配置中加载上次保存的缩放比例 
     m_zoomLevel = AppConfig::instance().getValue("UI/GridZoomLevel", 96).toInt(); 
@@ -1673,6 +1676,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             driveRecords.push_back(r);
         } 
         m_model->setRecords(driveRecords);
+        // 2026-05-29 物理对齐：在加载“此电脑”后显式触发一次排序，确保置顶硬盘排在首位
+        m_proxyModel->sort(0, Qt::AscendingOrder);
         m_isLoading = false;
         recalculateAndEmitStats();
         return; 
