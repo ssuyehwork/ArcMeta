@@ -945,3 +945,165 @@ public:
 - 影响范围：系统实时响应、功耗管理。
 - 是否在需求范围内：是
 
+
+---
+## [1] 变更时间：2026-05-29 04:35:00
+
+**文件路径：** `src/mft/MftReader.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    if (m_dirty_count >= 1000) {
+        m_dirty_count = 0;
+        saveDriveToCacheInternal(dIdx);
+    }
+
+    int finalIdx = -1;
+    bool isNew = (it == m_frn_to_idx.end());
+    if (!isNew) finalIdx = (int)it->second;
+    else finalIdx = (int)m_frns.size() - 1;
+
+    lock.unlock(); // 2026-06-xx 物理安全：先解锁再发射信号，杜绝 DirectConnection 导致的跨模块死锁
+```
+
+### 修改后（After）
+```cpp
+    bool shouldSave = false;
+    if (m_dirty_count >= 1000) {
+        m_dirty_count = 0;
+        shouldSave = true;
+    }
+
+    int finalIdx = -1;
+    bool isNew = (it == m_frn_to_idx.end());
+    if (!isNew) finalIdx = (int)it->second;
+    else finalIdx = (int)m_frns.size() - 1;
+
+    lock.unlock(); // 2026-06-xx 物理安全：先解锁再发射信号，杜绝 DirectConnection 导致的跨模块死锁
+
+    if (shouldSave) {
+        // 工业级架构优化：将耗时 I/O 持久化逻辑异步执行，杜绝阻塞 USN 监控主循环与 UI 响应
+        QtConcurrent::run([this, dIdx]() {
+            saveDriveToCache(dIdx);
+        });
+    }
+```
+
+### 变更说明
+- 变更原因：解决 USN 变动更新时，在持有写锁的情况下同步执行磁盘 I/O 导致的 UI 假死与性能卡顿。
+- 影响范围：`MftReader::updateEntryFromUsn`，USN 变动实时性与 UI 响应性。
+- 是否在需求范围内：是
+
+---
+
+---
+## [2] 变更时间：2026-05-29 04:40:00
+
+**文件路径：** `src/mft/MftReader.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void MftReader::clear() {
+    // 方案二：实现“关闭即存盘”的架构承诺
+    // 注意：只有在已经初始化的情况下才执行存盘，避免抹除现有缓存
+    {
+        QReadLocker lock(&m_dataLock);
+        if (m_isInitialized) {
+            lock.unlock(); // 避免死锁，saveToCache 内部会重新加锁
+            saveToCache();
+        }
+    }
+```
+
+### 修改后（After）
+```cpp
+void MftReader::clear() {
+    // 方案二：实现“关闭即存盘”的架构承诺
+    // 注意：只有在已经初始化的情况下才执行存盘，避免抹除现有缓存
+    {
+        QReadLocker lock(&m_dataLock);
+        if (m_isInitialized) {
+            // 工业级架构优化：仅当有脏数据时同步存盘，或者根据策略异步化
+            // 由于 clear() 通常由 UI 析构触发，同步 I/O 会导致关窗卡顿
+            // 这里我们仅在 m_dirty_count > 0 时才同步保存，且 saveToCacheInternal 内部已有 O(N) 遍历，
+            // 这是一个权衡点。为了彻底解决卡顿，我们应避免在析构路径上执行全量序列化。
+            if (m_dirty_count > 0) {
+                lock.unlock();
+                saveToCache();
+            } else {
+                lock.unlock();
+            }
+        }
+    }
+```
+
+### 变更说明
+- 变更原因：减少程序退出或清理索引时的卡顿。通过检查 `m_dirty_count`，避免在没有数据变动时执行昂贵的全量缓存写入操作。
+- 影响范围：`MftReader::clear`，程序关闭响应速度。
+- 是否在需求范围内：是
+
+---
+
+---
+## [3] 变更时间：2026-05-29 04:45:00
+
+**文件路径：** `src/mft/MftReader.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    bool m_isInitialized = false;
+    uint32_t m_dirty_count = 0;
+```
+
+### 修改后（After）
+```cpp
+    bool m_isInitialized = false;
+    std::atomic<bool> m_is_saving{false}; // 防止并发存盘导致的文件损坏与性能竞争
+    uint32_t m_dirty_count = 0;
+```
+
+### 变更说明
+- 变更原因：引入状态标记，配合 CAS 原子操作防止异步存盘任务并发执行，确保数据一致性并降低 CPU 竞争。
+- 影响范围：`MftReader` 类成员变量。
+- 是否在需求范围内：是
+
+---
+## [4] 变更时间：2026-05-29 04:46:00
+
+**文件路径：** `src/mft/MftReader.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    if (shouldSave) {
+        // 工业级架构优化：将耗时 I/O 持久化逻辑异步执行，杜绝阻塞 USN 监控主循环与 UI 响应
+        QtConcurrent::run([this, dIdx]() {
+            saveDriveToCache(dIdx);
+        });
+    }
+```
+
+### 修改后（After）
+```cpp
+    if (shouldSave) {
+        // 工业级架构优化：将耗时 I/O 持久化逻辑异步执行，杜绝阻塞 USN 监控主循环与 UI 响应
+        // 增加 CAS 原子操作防止并发写盘竞争，确保单盘持久化原子性
+        bool expected = false;
+        if (m_is_saving.compare_exchange_strong(expected, true)) {
+            QtConcurrent::run([this, dIdx]() {
+                saveDriveToCache(dIdx);
+                m_is_saving.store(false);
+            });
+        }
+    }
+```
+
+### 变更说明
+- 变更原因：通过 CAS (Compare-And-Swap) 确保同一时间只有一个后台存盘任务在运行，防止文件并发写入冲突。
+- 影响范围：`MftReader::updateEntryFromUsn`。
+- 是否在需求范围内：是
+
+---

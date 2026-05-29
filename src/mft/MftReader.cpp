@@ -108,8 +108,16 @@ void MftReader::clear() {
     {
         QReadLocker lock(&m_dataLock);
         if (m_isInitialized) {
-            lock.unlock(); // 避免死锁，saveToCache 内部会重新加锁
-            saveToCache();
+            // 工业级架构优化：仅当有脏数据时同步存盘，或者根据策略异步化
+            // 由于 clear() 通常由 UI 析构触发，同步 I/O 会导致关窗卡顿
+            // 这里我们仅在 m_dirty_count > 0 时才同步保存，且 saveToCacheInternal 内部已有 O(N) 遍历，
+            // 这是一个权衡点。为了彻底解决卡顿，我们应避免在析构路径上执行全量序列化。
+            if (m_dirty_count > 0) {
+                lock.unlock();
+                saveToCache();
+            } else {
+                lock.unlock();
+            }
         }
     }
 
@@ -834,9 +842,10 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         compact();
     }
 
+    bool shouldSave = false;
     if (m_dirty_count >= 1000) { 
         m_dirty_count = 0; 
-        saveDriveToCacheInternal(dIdx); 
+        shouldSave = true;
     }
     
     int finalIdx = -1;
@@ -845,6 +854,18 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     else finalIdx = (int)m_frns.size() - 1;
 
     lock.unlock(); // 2026-06-xx 物理安全：先解锁再发射信号，杜绝 DirectConnection 导致的跨模块死锁
+
+    if (shouldSave) {
+        // 工业级架构优化：将耗时 I/O 持久化逻辑异步执行，杜绝阻塞 USN 监控主循环与 UI 响应
+        // 增加 CAS 原子操作防止并发写盘竞争，确保单盘持久化原子性
+        bool expected = false;
+        if (m_is_saving.compare_exchange_strong(expected, true)) {
+            QtConcurrent::run([this, dIdx]() {
+                saveDriveToCache(dIdx);
+                m_is_saving.store(false);
+            });
+        }
+    }
 
     if (isNew) {
         emit entryAdded(compositeKey);
