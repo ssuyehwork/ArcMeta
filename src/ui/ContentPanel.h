@@ -152,7 +152,13 @@ public:
         ActionExtractColor,
         ActionSetRating,
         ActionEditTags,
-        ActionEditNote
+        ActionEditNote,
+        ActionViewGridView,
+        ActionViewListView,
+        ActionSortName,
+        ActionSortSize,
+        ActionSortTime,
+        ActionRefresh
     };
 
     explicit ContentPanel(QWidget* parent = nullptr);

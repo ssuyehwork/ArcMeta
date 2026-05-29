@@ -1259,6 +1259,27 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         QAction* actPaste = menu.addAction("粘贴"); 
         actPaste->setData(ActionPaste); 
         actPaste->setEnabled(!m_currentPath.isEmpty() && m_currentPath != "computer://"); 
+
+        menu.addSeparator();
+        QMenu* viewMenu = menu.addMenu("视图(V)");
+        UiHelper::applyMenuStyle(viewMenu);
+        QAction* gvAct = viewMenu->addAction("网格视图");
+        gvAct->setData(ActionViewGridView);
+        gvAct->setCheckable(true);
+        gvAct->setChecked(m_viewStack->currentIndex() == 0);
+
+        QAction* lvAct = viewMenu->addAction("列表视图");
+        lvAct->setData(ActionViewListView);
+        lvAct->setCheckable(true);
+        lvAct->setChecked(m_viewStack->currentIndex() == 1);
+
+        QMenu* sortMenu = menu.addMenu("排序(S)");
+        UiHelper::applyMenuStyle(sortMenu);
+        sortMenu->addAction("名称")->setData(ActionSortName);
+        sortMenu->addAction("大小")->setData(ActionSortSize);
+        sortMenu->addAction("修改日期")->setData(ActionSortTime);
+
+        menu.addAction("刷新(R)")->setData(ActionRefresh);
  
         menu.addSeparator(); 
         QAction* actProp = menu.addAction("当前文件夹属性"); 
@@ -1598,6 +1619,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             ShellHelper::showProperties(onItem ? path : m_currentPath); 
             break; 
         } 
+        case ActionViewGridView: setViewMode(GridView); break;
+        case ActionViewListView: setViewMode(ListView); break;
+        case ActionSortName: m_proxyModel->sort(0, m_proxyModel->sortOrder()); break;
+        case ActionSortSize: m_proxyModel->sort(6, m_proxyModel->sortOrder()); break;
+        case ActionSortTime: m_proxyModel->sort(7, m_proxyModel->sortOrder()); break;
+        case ActionRefresh: loadDirectory(m_currentPath, m_isRecursive); break;
         default: break; 
     } 
 } 
