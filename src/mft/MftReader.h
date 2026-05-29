@@ -150,7 +150,8 @@ private:
     QHash<QString, QIcon>  m_icon_cache;
 
     bool m_isInitialized = false;
-    std::atomic<bool> m_is_saving{false}; // 防止并发存盘导致的文件损坏与性能竞争
+    std::atomic<bool> m_is_saving{false};   // 防止并发存盘导致的文件损坏与性能竞争
+    std::atomic<bool> m_is_clearing{false}; // 标识是否处于异步清理过程中
     uint32_t m_dirty_count = 0;
     size_t   m_dead_count = 0;
     size_t   m_wasted_string_bytes = 0;
