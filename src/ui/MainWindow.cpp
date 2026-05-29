@@ -809,8 +809,8 @@ void MainWindow::setupSplitters() {
     m_navBarWidget->setFixedHeight(42); 
     
     m_navBarLayout = new QHBoxLayout(m_navBarWidget);
-    // 2026-06-xx 物理修正：增加底部 5px 间距，确保切割线与地址栏不重合
-    m_navBarLayout->setContentsMargins(5, 5, 5, 5); 
+    // 2026-06-xx 物理修正：右边距设为 0，确保 230px 搜索框与右侧面板物理对齐
+    m_navBarLayout->setContentsMargins(5, 5, 0, 5);
     m_navBarLayout->setSpacing(5);
     m_navBarLayout->setAlignment(Qt::AlignVCenter);
 

@@ -541,20 +541,20 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             });
         }
-        if (m_typeCounts.contains("__all_files__")) {
-            QCheckBox* cb = addFilterRow(gl, "文件", m_typeCounts["__all_files__"]);
+        if (m_typeCounts.contains("__file__")) {
+            QCheckBox* cb = addFilterRow(gl, "文件", m_typeCounts["__file__"]);
             cb->blockSignals(true);
-            cb->setChecked(m_filter.types.contains("__all_files__"));
+            cb->setChecked(m_filter.types.contains("__file__"));
             cb->blockSignals(false);
             connect(cb, &QCheckBox::toggled, this, [this](bool on) {
-                if (on) { if (!m_filter.types.contains("__all_files__")) m_filter.types.append("__all_files__"); }
-                else    m_filter.types.removeAll("__all_files__");
+                if (on) { if (!m_filter.types.contains("__file__")) m_filter.types.append("__file__"); }
+                else    m_filter.types.removeAll("__file__");
                 emit filterChanged(m_filter);
             });
         }
         QStringList exts = m_typeCounts.keys(); exts.sort();
         for (const QString& ext : exts) {
-            if (ext == "folder" || ext == "__all_files__") continue;
+            if (ext == "folder" || ext == "__file__") continue;
             QString label = ext.isEmpty() ? "无扩展名" : ext;
             QCheckBox* cb = addFilterRow(gl, label, m_typeCounts[ext]);
             cb->blockSignals(true);

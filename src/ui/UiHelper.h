@@ -87,6 +87,12 @@ public:
     static QPixmap renderIcon(const QString& key, const QSize& size, const QColor& color) {
         if (!SvgIcons::icons.contains(key)) return QPixmap();
         QString svgData = SvgIcons::icons[key];
+
+        // [SVG COMPATIBILITY] 自动注入缺失的 xmlns 命名空间，确保 QSvgRenderer 100% 渲染
+        if (!svgData.contains("xmlns=")) {
+            svgData.replace("<svg ", "<svg xmlns=\"http://www.w3.org/2000/svg\" ");
+        }
+
         svgData.replace("currentColor", color.name());
         QPixmap pixmap(size);
         pixmap.fill(Qt::transparent);
