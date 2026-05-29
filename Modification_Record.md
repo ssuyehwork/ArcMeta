@@ -2269,3 +2269,13 @@ bool MftReader::saveToCache() {
 - **全自动数据对账**：重构 `MetadataManager::initFromJsonMode`，在加载 JSON 元数据时，自动将索引回填至 SQLite `items` 表。此举解决了开启 JSON 模式后由于数据库“库存”为空导致的全系统计数为 0 的严重缺陷。
 - **计数逻辑容错**：在 `getSystemCounts` 中增加主动探测，若检测到数据库为空则强制触发一次基于离散 JSON 的物理索引恢复。
 - **性能优化**：针对 JSON 模式优化了“未标签”项的统计逻辑，提升了侧边栏系统项的加载性能。
+
+---
+## [30] 变更时间：2026-05-29 09:15:00
+
+**文件路径：** `src/ui/FramelessDialog.h` / `src/ui/FramelessDialog.cpp` / `src/ui/CategoryPanel.cpp`
+**变更类型：** 修复 (Plan-44)
+
+### 修改说明
+- **UI 组件扩展**：在 `FramelessDialog` 体系中新增 `FramelessConfirmDialog` 类，物理补齐了带确认/取消按钮的通用对话框组件。
+- **编译错误修复**：修正了 `CategoryPanel.cpp` 中对 `FramelessDialog` 构造函数的错误重载调用，通过引入专用的确认对话框解决了 3 参数构造函数缺失的问题。

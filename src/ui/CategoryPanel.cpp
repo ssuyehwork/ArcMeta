@@ -687,7 +687,7 @@ void CategoryPanel::initUi() {
     connect(m_btnSwitch, &QPushButton::clicked, this, [this](bool checked) {
         // 2026-05-29 优化点 1：增加切换确认机制 (Plan-44)
         QString modeName = checked ? "JSON 模式 (内存)" : "数据库模式";
-        FramelessDialog confirmDlg("模式切换确认", QString("切换到<b>%1</b>将重新加载数据引擎，是否继续？").arg(modeName), this);
+        FramelessConfirmDialog confirmDlg("模式切换确认", QString("切换到<b>%1</b>将重新加载数据引擎，是否继续？").arg(modeName), this);
         if (confirmDlg.exec() != QDialog::Accepted) {
             m_btnSwitch->blockSignals(true);
             m_btnSwitch->setChecked(!checked);
