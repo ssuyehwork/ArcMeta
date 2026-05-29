@@ -187,18 +187,21 @@ public:
         if (!menu) return;
         // 2026-06-xx 物理修复：开启透明背景属性，消除圆角外的直角溢出
         menu->setAttribute(Qt::WA_TranslucentBackground);
-        menu->setWindowFlag(Qt::FramelessWindowHint);
         menu->setStyleSheet(
-            "QMenu { background-color: #1A1A1A; color: #CCC; border: 1px solid #333; padding: 4px; border-radius: 8px; }"
+            "QMenu { background-color: #1A1A1A; color: #CCCCCC; border: 1px solid #333333; padding: 4px; border-radius: 8px; }"
             "QMenu::item { padding: 6px 30px 6px 10px; border-radius: 4px; font-size: 12px; }"
             "QMenu::item:selected { background-color: #232D37; color: white; }"
-            "QMenu::separator { height: 1px; background: #333; margin: 4px 8px; }"
+            "QMenu::item:disabled { color: #555555; }"
+            "QMenu::separator { height: 1px; background: #333333; margin: 4px 8px; }"
             "QMenu::right-arrow { "
-            "  image: url(\"data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMTAyNCAxMDI0IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxwYXRoIGQ9Ik0zNDEuMzMzIDUwLjY2N2w1MTIgNDYxLjMzMy01MTIgNDYxLjMzM3oiIGZpbGw9IiNGRkZGRkYiLz48L3N2Zz4=\"); "
-            "  width: 8px; height: 8px; "
-            "  subcontrol-origin: padding; "
+            "  image: url(\"data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMTAyNCAxMDI0IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxwYXRoIGQ9Ik0zNDEuMzMzIDUwLjY2N2w1MTIgNDYxLjMzMy01MTIgNDYxLjMzM3oiIGZpbGw9IiNDQ0NDQ0MiLz48L3N2Zz4=\"); "
+            "  width: 10px; height: 10px; "
+            "  subcontrol-origin: content; "
             "  subcontrol-position: center right; "
-            "  right: 10px; "
+            "  right: 4px; "
+            "}"
+            "QMenu::item:selected QMenu::right-arrow { "
+            "  image: url(\"data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMTAyNCAxMDI0IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxwYXRoIGQ9Ik0zNDEuMzMzIDUwLjY2N2w1MTIgNDYxLjMzMy01MTIgNDYxLjMzM3oiIGZpbGw9IiNGRkZGRkYiLz48L3N2Zz4=\"); "
             "}"
         );
     }
