@@ -425,6 +425,8 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         for (const QString& fType : currentFilter.types) { 
             if (fType == "folder") { 
                 if (type == "folder") { matchType = true; break; } 
+            } else if (fType == "__all_files__") {
+                if (type != "folder") { matchType = true; break; }
             } else { 
                 if (ext == fType.toUpper()) { matchType = true; break; } 
             } 
@@ -1998,6 +2000,7 @@ void ContentPanel::recalculateAndEmitStats() {
                 stats.typeCounts["folder"]++;
             } else {
                 stats.typeCounts[info.suffix().toUpper()]++;
+                stats.typeCounts["__all_files__"]++;
             }
             
             for (const QString& tag : meta.tags) {

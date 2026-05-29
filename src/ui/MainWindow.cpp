@@ -763,7 +763,7 @@ void MainWindow::initToolbar() {
 
     m_searchEdit = new QLineEdit(m_searchContainer);
     m_searchEdit->setPlaceholderText("查找文件...");
-    m_searchEdit->setMinimumWidth(180);
+    m_searchEdit->setFixedWidth(230);
     m_searchEdit->setFixedHeight(32);
     m_searchEdit->addAction(UiHelper::getIcon("search", TextMuted), QLineEdit::LeadingPosition);
     // 按照用户要求：移除局部/全局切换按钮，恢复搜索框 6px 完整圆角
@@ -774,7 +774,7 @@ void MainWindow::initToolbar() {
         "QLineEdit:focus { border: 1px solid %4; }"
     ).arg(qssColor(BackgroundDeep)).arg(qssColor(BorderColor)).arg(qssColor(TextMain)).arg(qssColor(PrimaryBlue)));
 
-    searchLayout->addWidget(m_searchEdit, 1);
+    searchLayout->addWidget(m_searchEdit);
 }
 
 
