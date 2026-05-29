@@ -103,6 +103,16 @@ void MftReader::clearInternal() {
 }
 
 void MftReader::clear() {
+    // 方案二：实现“关闭即存盘”的架构承诺
+    // 注意：只有在已经初始化的情况下才执行存盘，避免抹除现有缓存
+    {
+        QReadLocker lock(&m_dataLock);
+        if (m_isInitialized) {
+            lock.unlock(); // 避免死锁，saveToCache 内部会重新加锁
+            saveToCache();
+        }
+    }
+
     std::vector<UsnWatcher*> toStop;
     {
         QWriteLocker lock(&m_dataLock);
@@ -110,6 +120,7 @@ void MftReader::clear() {
         m_watchers.clear();
     }
     for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
+
     QWriteLocker lock(&m_dataLock);
     clearInternal();
 }
@@ -212,6 +223,16 @@ void MftReader::buildIndex(const QStringList& drives) {
 bool MftReader::loadFromCache() {
     std::filesystem::path cacheDir = "ArcMeta/cache";
     if (!std::filesystem::exists(cacheDir)) return false;
+
+    // 物理优化：加载前先停止现有监控，避免句柄冲突
+    // 注意：这里手动执行清理逻辑，但不触发 saveToCache，防止覆盖磁盘缓存
+    std::vector<UsnWatcher*> toStop;
+    {
+        QWriteLocker lock(&m_dataLock);
+        toStop = std::move(m_watchers);
+        m_watchers.clear();
+    }
+    for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
 
     {
         QWriteLocker lock(&m_dataLock);
@@ -316,6 +337,20 @@ bool MftReader::loadFromCache() {
     }
 
     m_isInitialized = true;
+
+    // 方案一：补完缓存加载后的监控链 (接管变动)
+    // 在缓存加载成功后，立即为所有已加载的驱动器启动 UsnWatcher
+    // 注意：需要加锁保护 m_watchers 的并发写入
+    {
+        QWriteLocker lock(&m_dataLock);
+        for (const auto& drive : m_drive_list) {
+            uint64_t lastUsn = m_next_usns[drive];
+            auto* w = new UsnWatcher(drive, lastUsn, nullptr);
+            m_watchers.push_back(w);
+            w->start();
+        }
+    }
+
     return true;
 }
 
