@@ -185,11 +185,12 @@ public:
 
     static void applyMenuStyle(QWidget* menu) {
         if (!menu) return;
-        // 2026-06-xx 物理修复：开启透明背景属性，消除圆角外的直角溢出
+        // 2026-06-xx 物理修复：开启透明背景并显式设置 Popup 标志，消除圆角外的“物理黑边”
         menu->setAttribute(Qt::WA_TranslucentBackground);
+        menu->setWindowFlags(Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
         menu->setStyleSheet(
             "QMenu { background-color: #1A1A1A; color: #CCCCCC; border: 1px solid #333333; padding: 4px; border-radius: 8px; }"
-            "QMenu::item { padding: 6px 30px 6px 10px; border-radius: 4px; font-size: 12px; }"
+            "QMenu::item { padding: 6px 30px 6px 10px; border-radius: 4px; font-size: 12px; background-color: transparent; }"
             "QMenu::item:selected { background-color: #232D37; color: white; }"
             "QMenu::item:disabled { color: #555555; }"
             "QMenu::separator { height: 1px; background: #333333; margin: 4px 8px; }"
