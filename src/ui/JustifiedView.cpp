@@ -347,18 +347,7 @@ void JustifiedView::doLayout() {
         if (numInRow <= 0) break;
 
         int actualHeight = m_targetRowHeight;
-        bool isLastRow = (i == count);
-        bool rowIsJustified = !isLastRow; // 2026-06-16 物理修正：非最后一行始终填满，杜绝空隙
-
-        int availableImageWidth = containerWidth - (spacing * (numInRow - 1)) - (6 * numInRow);
-
-        if (rowIsJustified) {
-            actualHeight = qRound(availableImageWidth / rowAspectRatioSum);
-            // 工业级纠偏：允许高度在一定范围内浮动以填满行宽，无论是否超出 targetRowHeight 范围均开启对齐
-            actualHeight = std::max(actualHeight, (int)(m_targetRowHeight * 0.75));
-            actualHeight = std::min(actualHeight, (int)(m_targetRowHeight * 1.5));
-            rowIsJustified = true; 
-        }
+        bool rowIsJustified = false; // 2026-06-25 物理加固：切换为 Fixed-Size Flow 布局，不再拉伸卡片
 
         int currentX = margin;
         const int textHeight = 36;
@@ -371,12 +360,7 @@ void JustifiedView::doLayout() {
             int itemIdx = rowStart + j;
             int itemWidth;
 
-            if (j == numInRow - 1 && rowIsJustified) {
-                // 最后一个 item 精确填满剩余宽度，消除舍入误差导致的空隙
-                itemWidth = (containerWidth + margin) - currentX;
-            } else {
-                itemWidth = qRound(aspectRatios[j] * actualHeight) + cardPadding;
-            }
+            itemWidth = qRound(aspectRatios[j] * actualHeight) + cardPadding;
 
             m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + extraHeight), itemIdx };
             currentX += itemWidth + spacing; 
