@@ -17,6 +17,18 @@
 namespace ArcMeta {
 
 /**
+ * @brief ElasticEdit: 弹性高度编辑框，内容自动撑开高度
+ */
+class ElasticEdit : public QPlainTextEdit {
+    Q_OBJECT
+public:
+    explicit ElasticEdit(QWidget* parent = nullptr);
+    void adjustHeight();
+protected:
+    void keyPressEvent(QKeyEvent* e) override;
+};
+
+/**
  * @brief Tag Pill 圆角标签组件 (22px height, 11px radius)
  */
 class TagPill : public QWidget {
@@ -162,7 +174,7 @@ private:
     QWidget* m_container = nullptr;
     QVBoxLayout* m_containerLayout = nullptr;
 
-    QLineEdit* m_nameEdit = nullptr;
+    ElasticEdit* m_nameEdit = nullptr;
     QLabel* lblType = nullptr, *lblSize = nullptr;
     QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
     QLabel* lblPath = nullptr, *lblEncrypted = nullptr;
@@ -174,10 +186,10 @@ private:
     FlowLayout* m_tagFlowLayout = nullptr;
     QLineEdit* m_tagEdit = nullptr;
 
-    QPlainTextEdit* m_noteEdit = nullptr;
-    QLineEdit* m_linkEdit = nullptr;
+    ElasticEdit* m_noteEdit = nullptr;
+    ElasticEdit* m_linkEdit = nullptr;
 
-    QLabel* lblCategory = nullptr;
+    ElasticEdit* m_categoryEdit = nullptr;
 
 private slots:
     void onTagAdded();

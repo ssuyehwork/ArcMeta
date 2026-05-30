@@ -13,31 +13,54 @@
 #include <QApplication>
 #include <QMenu>
 #include <QDir>
+#include <QAbstractTextDocumentLayout>
 #include "UiHelper.h"
 #include "../meta/MetadataManager.h"
 
 namespace ArcMeta {
 
+ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
+    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    document()->setDocumentMargin(0);
+    connect(this, &QPlainTextEdit::textChanged, this, &ElasticEdit::adjustHeight);
+}
+
+void ElasticEdit::adjustHeight() {
+    document()->documentLayout()->update();
+    int contentH = (int)document()->size().height();
+    int newH = qMax(20, contentH + 4);
+    if (this->height() != newH) {
+        setFixedHeight(newH);
+    }
+}
+
+void ElasticEdit::resizeEvent(QResizeEvent* e) {
+    QPlainTextEdit::resizeEvent(e);
+    adjustHeight();
+}
+
+void ElasticEdit::keyPressEvent(QKeyEvent* e) {
+    if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) && !(e->modifiers() & Qt::ShiftModifier)) {
+        clearFocus();
+        return;
+    }
+    QPlainTextEdit::keyPressEvent(e);
+}
+
 /**
- * @brief PaletteSwatch: 调色盘胶囊色块组件 (高度 24px)
- * 显示颜色并标注 #HEX (Ratio%)
+ * @brief PaletteSwatch: 调色盘色点组件 (16x16px)
+ * 鼠标悬停时显示 1px 白色边缘
  */
 class PaletteSwatch : public QWidget {
 public:
     explicit PaletteSwatch(const QColor& color, float ratio, const QString& path, QWidget* parent = nullptr)
         : QWidget(parent), m_color(color), m_ratio(ratio), m_path(path) {
-        setFixedHeight(24);
+        setFixedSize(16, 16);
         setCursor(Qt::PointingHandCursor);
-        QString hex = color.name().toUpper();
-        m_labelText = QString("%1 (%2%)").arg(hex).arg(qRound(ratio * 100));
-
-        QFont font = this->font();
-        font.setPointSize(9);
-        setFont(font);
-
-        QFontMetrics fm(font);
-        int textW = fm.horizontalAdvance(m_labelText);
-        setFixedWidth(12 + 10 + 6 + textW + 12); // 边距12 + 色点10 + 间距6 + 文字 + 边距12
+        setAttribute(Qt::WA_Hover);
+        setToolTip(QString("%1 (%2%)").arg(color.name().toUpper()).arg(qRound(ratio * 100)));
     }
 
     void setSelected(bool selected) {
@@ -50,27 +73,21 @@ protected:
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing);
         
-        // 绘制背景胶囊
-        painter.setPen(QPen(QColor("#444444"), 1));
-        painter.setBrush(QColor("#2B2B2B"));
-        painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 12, 12);
-
-        // 绘制色点
+        // 1. 绘制底色圆
         painter.setPen(Qt::NoPen);
         painter.setBrush(m_color);
-        painter.drawEllipse(12, (height() - 10) / 2, 10, 10);
+        painter.drawEllipse(rect().adjusted(1, 1, -1, -1));
 
-        // 绘制文字
-        painter.setPen(QColor("#EEEEEE"));
-        painter.drawText(QRect(12 + 10 + 6, 0, width() - (12 + 10 + 6 + 12), height()), Qt::AlignLeft | Qt::AlignVCenter, m_labelText);
-
-        // 选中态：高亮外环
-        if (m_selected) {
+        // 2. 悬停态或选中态：绘制 1px 白色边缘
+        if (underMouse() || m_selected) {
             painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(Qt::white, 1.5));
-            painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 12, 12);
+            painter.setPen(QPen(Qt::white, 1.0));
+            painter.drawEllipse(rect().adjusted(0, 0, -1, -1));
         }
     }
+
+    void enterEvent(QEnterEvent* e) override { update(); QWidget::enterEvent(e); }
+    void leaveEvent(QEvent* e) override { update(); QWidget::leaveEvent(e); }
 
     void mousePressEvent(QMouseEvent* event) override {
         setSelected(true);
@@ -271,41 +288,48 @@ void MetaPanel::initUi() {
     m_scrollArea->setWidgetResizable(true); m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
     m_container = new QWidget(m_scrollArea); m_containerLayout = new QVBoxLayout(m_container); m_containerLayout->setContentsMargins(10, 10, 10, 10); m_containerLayout->setSpacing(12);
     
-    // [Section 1] 调色盘胶囊 (Palette Capsules)
+    // [Section 1] 调色盘胶囊 (Palette Capsules) - 改为单容器包装多个色点
     m_paletteContainer = new QWidget(m_container);
+    m_paletteContainer->setFixedHeight(24);
+    m_paletteContainer->setStyleSheet("background: #1E1E1E; border-radius: 12px;");
     m_paletteLayout = new QHBoxLayout(m_paletteContainer);
-    m_paletteLayout->setContentsMargins(0, 0, 0, 0);
-    m_paletteLayout->setSpacing(6);
+    m_paletteLayout->setContentsMargins(8, 0, 8, 0);
+    m_paletteLayout->setSpacing(4);
     m_paletteLayout->addStretch();
-    m_containerLayout->addWidget(m_paletteContainer);
 
-    // [Section 2] 名称输入框 (Name Edit, 无边框暗色风格)
-    m_nameEdit = new QLineEdit(m_container);
-    m_nameEdit->setFixedHeight(32);
-    m_nameEdit->setStyleSheet("QLineEdit { background: #1E1E1E; border: none; border-radius: 4px; padding: 0 8px; font-size: 14px; font-weight: bold; color: #EEEEEE; } QLineEdit:focus { background: #2D2D2D; }");
+    // 包装器，用于控制调色盘容器的宽度
+    QWidget* palWrapper = new QWidget(m_container);
+    QHBoxLayout* palWrapperL = new QHBoxLayout(palWrapper);
+    palWrapperL->setContentsMargins(0, 0, 0, 0);
+    palWrapperL->addWidget(m_paletteContainer);
+    palWrapperL->addStretch();
+    m_containerLayout->addWidget(palWrapper);
+
+    // [Section 2] 名称输入框 (ElasticEdit)
+    m_nameEdit = new ElasticEdit(m_container);
+    m_nameEdit->setPlaceholderText("文件名称...");
+    m_nameEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 16px; font-weight: bold; color: #EEEEEE; padding: 0px; }");
     m_nameEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_nameEdit);
 
-    // [Section 3] 备注输入框 (Note Edit)
-    m_noteEdit = new QPlainTextEdit(m_container);
+    // [Section 3] 备注输入框 (ElasticEdit)
+    m_noteEdit = new ElasticEdit(m_container);
     m_noteEdit->setPlaceholderText("添加备注说明...");
-    m_noteEdit->setFixedHeight(80);
-    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #1E1E1E; border: none; border-radius: 4px; padding: 6px 8px; font-size: 12px; color: #CCCCCC; } QPlainTextEdit:focus { background: #2D2D2D; }");
+    m_noteEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 13px; color: #AAAAAA; padding: 0px; }");
     m_noteEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_noteEdit);
 
-    // [Section 4] 链接输入框 (Link Edit)
+    // [Section 4] 链接输入框 (ElasticEdit)
     QWidget* linkBox = new QWidget(m_container);
     QHBoxLayout* linkL = new QHBoxLayout(linkBox);
     linkL->setContentsMargins(0, 0, 0, 0);
     linkL->setSpacing(8);
     QLabel* linkIcon = new QLabel(linkBox);
     linkIcon->setPixmap(UiHelper::getIcon("link", QColor("#888888"), 16).pixmap(16, 16));
-    linkL->addWidget(linkIcon);
-    m_linkEdit = new QLineEdit(linkBox);
+    linkL->addWidget(linkIcon, 0, Qt::AlignTop);
+    m_linkEdit = new ElasticEdit(linkBox);
     m_linkEdit->setPlaceholderText("添加链接...");
-    m_linkEdit->setFixedHeight(26);
-    m_linkEdit->setStyleSheet("QLineEdit { background: transparent; border-bottom: 1px solid #333333; font-size: 12px; color: #4a90e2; } QLineEdit:focus { border-bottom-color: #4a90e2; }");
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 12px; color: #4a90e2; padding: 2px 0; }");
     m_linkEdit->installEventFilter(this);
     linkL->addWidget(m_linkEdit, 1);
     m_containerLayout->addWidget(linkBox);
@@ -356,10 +380,10 @@ void MetaPanel::initUi() {
     catHeader->addStretch();
     catL->addLayout(catHeader);
 
-    lblCategory = new QLabel("-", catBox);
-    lblCategory->setWordWrap(true);
-    lblCategory->setStyleSheet("font-size: 12px; color: #EEEEEE; padding: 4px 8px; background: #252526; border-radius: 4px;");
-    catL->addWidget(lblCategory);
+    m_categoryEdit = new ElasticEdit(catBox);
+    m_categoryEdit->setReadOnly(true);
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: none; border-radius: 4px; padding: 6px 8px; font-size: 12px; color: #EEEEEE; }");
+    catL->addWidget(m_categoryEdit);
     m_containerLayout->addWidget(catBox);
 
     m_containerLayout->addWidget(createSeparator());
@@ -425,7 +449,8 @@ void MetaPanel::onTagDeleted(const QString& text) {
 void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s, const QString& ct, const QString& mt, const QString& at, const QString& p, bool e) {
     m_nameEdit->blockSignals(true);
     QFileInfo info(n);
-    m_nameEdit->setText(info.completeBaseName());
+    m_nameEdit->setPlainText(info.completeBaseName());
+    m_nameEdit->adjustHeight();
     m_nameEdit->setProperty("oldPath", p);
     m_nameEdit->setProperty("suffix", info.suffix());
     m_nameEdit->blockSignals(false);
@@ -453,9 +478,24 @@ void MetaPanel::setTags(const QStringList& tags) {
     while (QLayoutItem* item = m_tagFlowLayout->takeAt(0)) { if (QWidget* w = item->widget()) w->deleteLater(); delete item; }
     for (const QString& tag : tags) { TagPill* pill = new TagPill(tag, m_tagContainer); connect(pill, &TagPill::deleteRequested, this, &MetaPanel::onTagDeleted); m_tagFlowLayout->addWidget(pill); }
 }
-void MetaPanel::setNote(const std::wstring& note) { m_noteEdit->blockSignals(true); m_noteEdit->setPlainText(QString::fromStdWString(note)); m_noteEdit->blockSignals(false); }
-void MetaPanel::setURL(const std::wstring& url) { m_linkEdit->blockSignals(true); m_linkEdit->setText(QString::fromStdWString(url)); m_linkEdit->blockSignals(false); }
-void MetaPanel::setCategory(const QString& category) { lblCategory->setText(category); }
+void MetaPanel::setNote(const std::wstring& note) {
+    m_noteEdit->blockSignals(true);
+    m_noteEdit->setPlainText(QString::fromStdWString(note));
+    m_noteEdit->adjustHeight();
+    m_noteEdit->blockSignals(false);
+}
+void MetaPanel::setURL(const std::wstring& url) {
+    m_linkEdit->blockSignals(true);
+    m_linkEdit->setPlainText(QString::fromStdWString(url));
+    m_linkEdit->adjustHeight();
+    m_linkEdit->blockSignals(false);
+}
+void MetaPanel::setCategory(const QString& category) {
+    m_categoryEdit->blockSignals(true);
+    m_categoryEdit->setPlainText(category);
+    m_categoryEdit->adjustHeight();
+    m_categoryEdit->blockSignals(false);
+}
 
 void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
     if (!m_paletteLayout) return;
@@ -475,15 +515,15 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_noteEdit && event->type() == QEvent::FocusOut) {
         QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setNote(currentPath.toStdWString(), m_noteEdit->toPlainText().toStdWString());
     } else if (watched == m_linkEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setURL(currentPath.toStdWString(), m_linkEdit->text().toStdWString());
+        QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setURL(currentPath.toStdWString(), m_linkEdit->toPlainText().toStdWString());
     } else if (watched == m_nameEdit && event->type() == QEvent::FocusOut) {
         QString oldPath = m_nameEdit->property("oldPath").toString();
-        QString newName = m_nameEdit->text().trimmed();
+        QString newName = m_nameEdit->toPlainText().trimmed();
 
         // 2026-06-xx 物理加固：过滤非法文件名字符，防止重命名失败或破坏路径
         static const QString illegalChars = "\\/:*?\"<>|";
         for (auto c : illegalChars) newName.remove(c);
-        m_nameEdit->setText(newName);
+        m_nameEdit->setPlainText(newName);
 
         QString suffix = m_nameEdit->property("suffix").toString();
         if (!oldPath.isEmpty() && !newName.isEmpty()) {
