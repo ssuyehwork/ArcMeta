@@ -536,7 +536,7 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
                     lblPath->setText(newPath);
                     m_nameEdit->setProperty("oldPath", newPath);
                 } else {
-                    m_nameEdit->setText(oldInfo.completeBaseName());
+                    m_nameEdit->setPlainText(oldInfo.completeBaseName());
                 }
             }
         }

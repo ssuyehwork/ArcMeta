@@ -26,6 +26,7 @@ public:
     void adjustHeight();
 protected:
     void keyPressEvent(QKeyEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override;
 };
 
 /**
