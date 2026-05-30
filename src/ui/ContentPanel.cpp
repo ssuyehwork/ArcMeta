@@ -649,8 +649,8 @@ void ContentPanel::updateGridSize() {
             jv->setTargetRowHeight(m_zoomLevel);
         } else if (auto* lv = qobject_cast<QListView*>(m_gridView)) {
             lv->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
-            int side = m_zoomLevel + 46; // 正方形边长
-            int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
+            int side = m_zoomLevel + 10; // 正方形边长
+            int ratingH = 24;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
             int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
             int gap = 6;                // 间距归一化
             

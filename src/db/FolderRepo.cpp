@@ -76,7 +76,7 @@ bool FolderRepo::get(const std::wstring& volume, const std::wstring& path, Folde
         meta.encryptVerifyHash = q.value(11).toString().toStdString();
         meta.fileId128 = q.value(12).toString().toStdString();
         
-        QJsonDocument palDoc = QJsonDocument::fromJson(q.value(12).toByteArray());
+        QJsonDocument palDoc = QJsonDocument::fromJson(q.value(13).toByteArray());
         meta.palettes.clear();
         if (palDoc.isArray()) {
             for (const auto& v : palDoc.array()) {
