@@ -775,14 +775,16 @@ void MainWindow::initToolbar() {
     m_searchEdit->setFixedHeight(32);
     m_searchEdit->addAction(UiHelper::getIcon("search", TextMuted), QLineEdit::LeadingPosition);
     // 按照用户要求：移除局部/全局切换按钮，恢复搜索框 6px 完整圆角
+    // 2026-06-xx 按照分析计划 #53：通过 QSS 物理锁定宽度，防止布局压缩
     m_searchEdit->setStyleSheet(QString(
         "QLineEdit { background: %1; border: 1px solid %2;"
         "  border-radius: 6px;"
+        "  min-width: 230px; max-width: 230px;"
         "  color: %3; padding-left: 5px; }"
         "QLineEdit:focus { border: 1px solid %4; }"
     ).arg(qssColor(BackgroundDeep)).arg(qssColor(BorderColor)).arg(qssColor(TextMain)).arg(qssColor(PrimaryBlue)));
 
-    searchLayout->addWidget(m_searchEdit, 1);
+    searchLayout->addWidget(m_searchEdit, 0);
 }
 
 
