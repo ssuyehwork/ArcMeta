@@ -53,16 +53,14 @@ protected:
 
         bool checked = isChecked();
 
-        // 1. 绘制背景与边框
-        QRect rect = this->rect().adjusted(0, 0, -1, -1);
-        QColor borderColor = checked ? QColor("#378ADD") : QColor("#444");
-        QColor bgColor = QColor("#1E1E1E");
+        // 使用 QRectF + 0.5px 内缩，确保笔触四边粗细完全一致
+        QRectF rect(0.5, 0.5, width() - 1.0, height() - 1.0);
+        QColor borderColor = checked ? QColor("#378ADD") : QColor("#444444");
 
-        painter.setPen(borderColor);
-        painter.setBrush(bgColor);
-        painter.drawRoundedRect(rect, 2, 2);
+        painter.setPen(QPen(borderColor, 1.0));
+        painter.setBrush(QColor("#1E1E1E"));
+        painter.drawRoundedRect(rect, 2.0, 2.0);
 
-        // 2. 绘制勾号
         if (checked) {
             QPen pen(QColor("#378ADD"), 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
             painter.setPen(pen);
