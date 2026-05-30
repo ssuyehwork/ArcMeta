@@ -241,6 +241,9 @@ void MainWindow::initUi() {
             m_metaPanel->setColor(L"");
             m_metaPanel->setPinned(false);
             m_metaPanel->setTags(QStringList());
+            m_metaPanel->setNote(L"");
+            m_metaPanel->setURL(L"");
+            m_metaPanel->setCategory("-");
         } else {
             // 2026-03-xx 高性能优化：优先从模型缓存中读取元数据，避免频繁磁盘访问
             auto indexes = m_contentPanel->getSelectedIndexes();
@@ -268,9 +271,14 @@ void MainWindow::initUi() {
             m_metaPanel->setPinned(idx.data(IsLockedRole).toBool());
             m_metaPanel->setTags(idx.data(TagsRole).toStringList());
             
-            // 加载备注和色板
+            // 加载备注、URL和色板
             RuntimeMeta rm = MetadataManager::instance().getMeta(path.toStdWString());
             m_metaPanel->setNote(rm.note);
+            m_metaPanel->setURL(rm.url);
+
+            // 设置分类显示 (根据当前 UI 状态或路径推导)
+            QString category = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+            m_metaPanel->setCategory(category);
 
             // 将色板数据转换为 QVector<QPair<QColor, float>>
             QVector<QPair<QColor, float>> pal;

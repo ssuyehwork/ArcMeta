@@ -1,5 +1,6 @@
 #include "MetaPanel.h"
 #include "SvgIcons.h"
+#include "ToolTipOverlay.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPainter>
@@ -13,98 +14,136 @@
 #include <QApplication>
 #include <QMenu>
 #include <QDir>
+#include <QAbstractTextDocumentLayout>
 #include "UiHelper.h"
 #include "../meta/MetadataManager.h"
 
 namespace ArcMeta {
 
-/**
- * @brief PaletteSwatch: 调色盘胶囊色块组件 (高度 24px)
- * 显示颜色并标注 #HEX (Ratio%)
- */
-class PaletteSwatch : public QWidget {
-public:
-    explicit PaletteSwatch(const QColor& color, float ratio, const QString& path, QWidget* parent = nullptr)
-        : QWidget(parent), m_color(color), m_ratio(ratio), m_path(path) {
-        setFixedHeight(24);
-        setCursor(Qt::PointingHandCursor);
-        QString hex = color.name().toUpper();
-        m_labelText = QString("%1 (%2%)").arg(hex).arg(qRound(ratio * 100));
-        
-        QFont font = this->font();
-        font.setPointSize(9);
-        setFont(font);
-        
-        QFontMetrics fm(font);
-        int textW = fm.horizontalAdvance(m_labelText);
-        setFixedWidth(12 + 10 + 6 + textW + 12); // 边距12 + 色点10 + 间距6 + 文字 + 边距12
+ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
+    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    document()->setDocumentMargin(0);
+    connect(this, &QPlainTextEdit::textChanged, this, &ElasticEdit::adjustHeight);
+}
+
+void ElasticEdit::adjustHeight() {
+    document()->documentLayout()->update();
+    int contentH = (int)document()->size().height();
+    int newH = qMax(20, contentH + 4); 
+    if (this->height() != newH) {
+        setFixedHeight(newH);
     }
+}
 
-    void setSelected(bool selected) {
-        m_selected = selected;
-        update();
+void ElasticEdit::resizeEvent(QResizeEvent* e) {
+    QPlainTextEdit::resizeEvent(e);
+    adjustHeight();
+}
+
+void ElasticEdit::keyPressEvent(QKeyEvent* e) {
+    if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) && !(e->modifiers() & Qt::ShiftModifier)) {
+        clearFocus();
+        return;
     }
+    QPlainTextEdit::keyPressEvent(e);
+}
 
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
-        
-        // 绘制背景胶囊
-        painter.setPen(QPen(QColor("#444444"), 1));
-        painter.setBrush(QColor("#2B2B2B"));
-        painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 12, 12);
+PaletteCapsule::PaletteCapsule(QWidget* parent) : QWidget(parent) {
+    setFixedHeight(24);
+    setMouseTracking(true);
+    setCursor(Qt::PointingHandCursor);
+}
 
-        // 绘制色点
+void PaletteCapsule::setPalette(const QVector<QPair<QColor, float>>& palette) {
+    m_palette = palette;
+    if (palette.isEmpty()) {
+        setFixedSize(0, 24);
+    } else {
+        int w = m_padding * 2 + (int)palette.size() * m_dotSize + ((int)palette.size() - 1) * m_spacing;
+        setFixedSize(w, 24);
+    }
+    update();
+}
+
+void PaletteCapsule::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // 1. 绘制总背景 (Capsule)
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor("#1E1E1E"));
+    painter.drawRoundedRect(rect(), 12, 12);
+
+    // 2. 绘制色点
+    for (int i = 0; i < m_palette.size(); ++i) {
+        int x = m_padding + i * (m_dotSize + m_spacing);
+        QRect dotRect(x, (height() - m_dotSize) / 2, m_dotSize, m_dotSize);
+
         painter.setPen(Qt::NoPen);
-        painter.setBrush(m_color);
-        painter.drawEllipse(12, (height() - 10) / 2, 10, 10);
+        painter.setBrush(m_palette[i].first);
+        painter.drawEllipse(dotRect.adjusted(1, 1, -1, -1));
 
-        // 绘制文字
-        painter.setPen(QColor("#EEEEEE"));
-        painter.drawText(QRect(12 + 10 + 6, 0, width() - (12 + 10 + 6 + 12), height()), Qt::AlignLeft | Qt::AlignVCenter, m_labelText);
-
-        // 选中态：高亮外环
-        if (m_selected) {
+        // 悬停反馈：1px 白色边缘
+        if (i == m_hoverIndex) {
             painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(Qt::white, 1.5));
-            painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 12, 12);
+            painter.setPen(QPen(Qt::white, 1.0));
+            painter.drawEllipse(dotRect.adjusted(0, 0, -1, -1));
+        }
+    }
+}
+
+void PaletteCapsule::mouseMoveEvent(QMouseEvent* event) {
+    int newHover = -1;
+    for (int i = 0; i < m_palette.size(); ++i) {
+        int x = m_padding + i * (m_dotSize + m_spacing);
+        QRect dotRect(x, 0, m_dotSize, height());
+        if (dotRect.contains(event->pos())) {
+            newHover = i;
+            break;
         }
     }
 
-    void mousePressEvent(QMouseEvent* event) override {
-        setSelected(true);
-        showMenu(event->globalPosition().toPoint());
+    if (newHover != m_hoverIndex) {
+        m_hoverIndex = newHover;
+        if (m_hoverIndex != -1) {
+            QString hex = m_palette[m_hoverIndex].first.name().toUpper();
+            int ratio = qRound(m_palette[m_hoverIndex].second * 100);
+            QString text = QString("%1 (%2%)").arg(hex).arg(ratio);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), text);
+        } else {
+            ToolTipOverlay::hideTip();
+        }
+        update();
     }
+    QWidget::mouseMoveEvent(event);
+}
 
-private:
-    void showMenu(const QPoint& pos) {
+void PaletteCapsule::leaveEvent(QEvent* event) {
+    m_hoverIndex = -1;
+    update();
+    QWidget::leaveEvent(event);
+}
+
+void PaletteCapsule::mousePressEvent(QMouseEvent* event) {
+    if (m_hoverIndex != -1) {
         QMenu menu(this);
         UiHelper::applyMenuStyle(&menu);
+        QColor color = m_palette[m_hoverIndex].first;
 
-        menu.addAction("搜索相似颜项目的项目", [this]() {
+        menu.addAction("搜索相似颜色的项目", [this, color]() {
             MetaPanel* panel = qobject_cast<MetaPanel*>(window()->findChild<MetaPanel*>("MetadataContainer"));
-            if (!panel) {
-                QWidget* p = this->parentWidget();
-                while (p && !qobject_cast<MetaPanel*>(p)) p = p->parentWidget();
-                panel = qobject_cast<MetaPanel*>(p);
-            }
-            if (panel) emit panel->searchByColor(m_color);
+            if (panel) emit panel->searchByColor(color);
         });
-
         menu.addSeparator();
-        QString hex = m_color.name().toUpper();
-        menu.addAction(QString("复制 %1").arg(hex), [this, hex]() { QApplication::clipboard()->setText(hex); });
-        menu.exec(pos);
-        setSelected(false);
+        QString hex = color.name().toUpper();
+        menu.addAction(QString("复制 %1").arg(hex), [hex]() { QApplication::clipboard()->setText(hex); });
+        
+        menu.exec(event->globalPosition().toPoint());
     }
-
-    QColor m_color;
-    float m_ratio;
-    QString m_path;
-    QString m_labelText;
-    bool m_selected = false;
-};
+    QWidget::mousePressEvent(event);
+}
 
 // --- TagPill ---
 TagPill::TagPill(const QString& text, QWidget* parent) 
@@ -272,40 +311,41 @@ void MetaPanel::initUi() {
     m_container = new QWidget(m_scrollArea); m_containerLayout = new QVBoxLayout(m_container); m_containerLayout->setContentsMargins(10, 10, 10, 10); m_containerLayout->setSpacing(12);
     
     // [Section 1] 调色盘胶囊 (Palette Capsules)
-    m_paletteContainer = new QWidget(m_container);
-    m_paletteLayout = new QHBoxLayout(m_paletteContainer);
-    m_paletteLayout->setContentsMargins(0, 0, 0, 0);
-    m_paletteLayout->setSpacing(6);
-    m_paletteLayout->addStretch();
-    m_containerLayout->addWidget(m_paletteContainer);
+    m_paletteCapsule = new PaletteCapsule(m_container);
+    
+    // 包装器，确保胶囊左对齐且不拉伸
+    QWidget* palWrapper = new QWidget(m_container);
+    QHBoxLayout* palWrapperL = new QHBoxLayout(palWrapper);
+    palWrapperL->setContentsMargins(0, 0, 0, 0);
+    palWrapperL->addWidget(m_paletteCapsule);
+    palWrapperL->addStretch();
+    m_containerLayout->addWidget(palWrapper);
 
-    // [Section 2] 名称输入框 (Name Edit, 无边框暗色风格)
-    m_nameEdit = new QLineEdit(m_container);
-    m_nameEdit->setFixedHeight(32);
-    m_nameEdit->setStyleSheet("QLineEdit { background: #1E1E1E; border: none; border-radius: 4px; padding: 0 8px; font-size: 14px; font-weight: bold; color: #EEEEEE; } QLineEdit:focus { background: #2D2D2D; }");
+    // [Section 2] 名称输入框 (ElasticEdit)
+    m_nameEdit = new ElasticEdit(m_container);
+    m_nameEdit->setPlaceholderText("文件名称...");
+    m_nameEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 16px; font-weight: bold; color: #EEEEEE; padding: 0px; }");
     m_nameEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_nameEdit);
 
-    // [Section 3] 备注输入框 (Note Edit)
-    m_noteEdit = new QPlainTextEdit(m_container);
+    // [Section 3] 备注输入框 (ElasticEdit)
+    m_noteEdit = new ElasticEdit(m_container);
     m_noteEdit->setPlaceholderText("添加备注说明...");
-    m_noteEdit->setFixedHeight(80);
-    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #1E1E1E; border: none; border-radius: 4px; padding: 6px 8px; font-size: 12px; color: #CCCCCC; } QPlainTextEdit:focus { background: #2D2D2D; }");
+    m_noteEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 13px; color: #AAAAAA; padding: 0px; }");
     m_noteEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_noteEdit);
 
-    // [Section 4] 链接输入框 (Link Edit)
+    // [Section 4] 链接输入框 (ElasticEdit)
     QWidget* linkBox = new QWidget(m_container);
     QHBoxLayout* linkL = new QHBoxLayout(linkBox);
     linkL->setContentsMargins(0, 0, 0, 0);
     linkL->setSpacing(8);
     QLabel* linkIcon = new QLabel(linkBox);
     linkIcon->setPixmap(UiHelper::getIcon("link", QColor("#888888"), 16).pixmap(16, 16));
-    linkL->addWidget(linkIcon);
-    m_linkEdit = new QLineEdit(linkBox);
+    linkL->addWidget(linkIcon, 0, Qt::AlignTop);
+    m_linkEdit = new ElasticEdit(linkBox);
     m_linkEdit->setPlaceholderText("添加链接...");
-    m_linkEdit->setFixedHeight(26);
-    m_linkEdit->setStyleSheet("QLineEdit { background: transparent; border-bottom: 1px solid #333333; font-size: 12px; color: #4a90e2; } QLineEdit:focus { border-bottom-color: #4a90e2; }");
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 12px; color: #4a90e2; padding: 2px 0; }");
     m_linkEdit->installEventFilter(this);
     linkL->addWidget(m_linkEdit, 1);
     m_containerLayout->addWidget(linkBox);
@@ -356,10 +396,10 @@ void MetaPanel::initUi() {
     catHeader->addStretch();
     catL->addLayout(catHeader);
 
-    lblCategory = new QLabel("-", catBox);
-    lblCategory->setWordWrap(true);
-    lblCategory->setStyleSheet("font-size: 12px; color: #EEEEEE; padding: 4px 8px; background: #252526; border-radius: 4px;");
-    catL->addWidget(lblCategory);
+    m_categoryEdit = new ElasticEdit(catBox);
+    m_categoryEdit->setReadOnly(true);
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: none; border-radius: 4px; padding: 6px 8px; font-size: 12px; color: #EEEEEE; }");
+    catL->addWidget(m_categoryEdit);
     m_containerLayout->addWidget(catBox);
 
     m_containerLayout->addWidget(createSeparator());
@@ -425,7 +465,8 @@ void MetaPanel::onTagDeleted(const QString& text) {
 void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s, const QString& ct, const QString& mt, const QString& at, const QString& p, bool e) {
     m_nameEdit->blockSignals(true);
     QFileInfo info(n);
-    m_nameEdit->setText(info.completeBaseName());
+    m_nameEdit->setPlainText(info.completeBaseName());
+    m_nameEdit->adjustHeight();
     m_nameEdit->setProperty("oldPath", p);
     m_nameEdit->setProperty("suffix", info.suffix());
     m_nameEdit->blockSignals(false);
@@ -444,6 +485,7 @@ void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s,
         }
         setPalettes(pal);
     }
+    if (m_container) m_container->adjustSize();
 }
 
 void MetaPanel::setRating(int rating) { Q_UNUSED(rating); }
@@ -453,37 +495,48 @@ void MetaPanel::setTags(const QStringList& tags) {
     while (QLayoutItem* item = m_tagFlowLayout->takeAt(0)) { if (QWidget* w = item->widget()) w->deleteLater(); delete item; }
     for (const QString& tag : tags) { TagPill* pill = new TagPill(tag, m_tagContainer); connect(pill, &TagPill::deleteRequested, this, &MetaPanel::onTagDeleted); m_tagFlowLayout->addWidget(pill); }
 }
-void MetaPanel::setNote(const std::wstring& note) { m_noteEdit->blockSignals(true); m_noteEdit->setPlainText(QString::fromStdWString(note)); m_noteEdit->blockSignals(false); }
-void MetaPanel::setURL(const std::wstring& url) { m_linkEdit->blockSignals(true); m_linkEdit->setText(QString::fromStdWString(url)); m_linkEdit->blockSignals(false); }
-void MetaPanel::setCategory(const QString& category) { lblCategory->setText(category); }
+void MetaPanel::setNote(const std::wstring& note) { 
+    m_noteEdit->blockSignals(true); 
+    m_noteEdit->setPlainText(QString::fromStdWString(note)); 
+    m_noteEdit->adjustHeight();
+    m_noteEdit->blockSignals(false); 
+    if (m_container) m_container->adjustSize();
+}
+void MetaPanel::setURL(const std::wstring& url) { 
+    m_linkEdit->blockSignals(true); 
+    m_linkEdit->setPlainText(QString::fromStdWString(url)); 
+    m_linkEdit->adjustHeight();
+    m_linkEdit->blockSignals(false); 
+    if (m_container) m_container->adjustSize();
+}
+void MetaPanel::setCategory(const QString& category) { 
+    m_categoryEdit->blockSignals(true);
+    m_categoryEdit->setPlainText(category); 
+    m_categoryEdit->adjustHeight();
+    m_categoryEdit->blockSignals(false);
+    if (m_container) m_container->adjustSize();
+}
 
 void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
-    if (!m_paletteLayout) return;
-    while (m_paletteLayout->count() > 1) {
-        QLayoutItem* item = m_paletteLayout->takeAt(0);
-        if (QWidget* w = item->widget()) w->deleteLater();
-        delete item;
+    if (m_paletteCapsule) {
+        m_paletteCapsule->setPalette(palette);
     }
-    QString currentPath = lblPath->text();
-    for (const auto& p : palette) {
-        PaletteSwatch* swatch = new PaletteSwatch(p.first, p.second, currentPath, m_paletteContainer);
-        m_paletteLayout->insertWidget(m_paletteLayout->count() - 1, swatch);
-    }
+    if (m_container) m_container->adjustSize();
 }
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_noteEdit && event->type() == QEvent::FocusOut) {
         QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setNote(currentPath.toStdWString(), m_noteEdit->toPlainText().toStdWString());
     } else if (watched == m_linkEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setURL(currentPath.toStdWString(), m_linkEdit->text().toStdWString());
+        QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setURL(currentPath.toStdWString(), m_linkEdit->toPlainText().toStdWString());
     } else if (watched == m_nameEdit && event->type() == QEvent::FocusOut) {
         QString oldPath = m_nameEdit->property("oldPath").toString();
-        QString newName = m_nameEdit->text().trimmed();
+        QString newName = m_nameEdit->toPlainText().trimmed();
         
         // 2026-06-xx 物理加固：过滤非法文件名字符，防止重命名失败或破坏路径
         static const QString illegalChars = "\\/:*?\"<>|";
         for (auto c : illegalChars) newName.remove(c);
-        m_nameEdit->setText(newName);
+        m_nameEdit->setPlainText(newName);
 
         QString suffix = m_nameEdit->property("suffix").toString();
         if (!oldPath.isEmpty() && !newName.isEmpty()) {
@@ -496,7 +549,7 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
                     lblPath->setText(newPath);
                     m_nameEdit->setProperty("oldPath", newPath);
                 } else {
-                    m_nameEdit->setText(oldInfo.completeBaseName());
+                    m_nameEdit->setPlainText(oldInfo.completeBaseName());
                 }
             }
         }

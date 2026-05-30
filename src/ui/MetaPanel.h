@@ -17,6 +17,19 @@
 namespace ArcMeta {
 
 /**
+ * @brief ElasticEdit: 弹性高度编辑框，内容自动撑开高度
+ */
+class ElasticEdit : public QPlainTextEdit {
+    Q_OBJECT
+public:
+    explicit ElasticEdit(QWidget* parent = nullptr);
+    void adjustHeight();
+protected:
+    void keyPressEvent(QKeyEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override;
+};
+
+/**
  * @brief Tag Pill 圆角标签组件 (22px height, 11px radius)
  */
 class TagPill : public QWidget {
@@ -101,6 +114,27 @@ private:
 };
 
 /**
+ * @brief PaletteCapsule: 单体胶囊化调色盘，包裹多个色点
+ */
+class PaletteCapsule : public QWidget {
+    Q_OBJECT
+public:
+    explicit PaletteCapsule(QWidget* parent = nullptr);
+    void setPalette(const QVector<QPair<QColor, float>>& palette);
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+private:
+    QVector<QPair<QColor, float>> m_palette;
+    int m_hoverIndex = -1;
+    const int m_dotSize = 16;
+    const int m_padding = 8;
+    const int m_spacing = 6;
+};
+
+/**
  * @brief 元数据面板（面板五）
  */
 class MetaPanel : public QFrame {
@@ -162,22 +196,21 @@ private:
     QWidget* m_container = nullptr;
     QVBoxLayout* m_containerLayout = nullptr;
     
-    QLineEdit* m_nameEdit = nullptr;
+    ElasticEdit* m_nameEdit = nullptr;
     QLabel* lblType = nullptr, *lblSize = nullptr;
     QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
     QLabel* lblPath = nullptr, *lblEncrypted = nullptr;
     
-    QWidget* m_paletteContainer = nullptr;
-    QHBoxLayout* m_paletteLayout = nullptr;
+    PaletteCapsule* m_paletteCapsule = nullptr;
     
     QWidget* m_tagContainer = nullptr;
     FlowLayout* m_tagFlowLayout = nullptr;
     QLineEdit* m_tagEdit = nullptr;
     
-    QPlainTextEdit* m_noteEdit = nullptr;
-    QLineEdit* m_linkEdit = nullptr;
+    ElasticEdit* m_noteEdit = nullptr;
+    ElasticEdit* m_linkEdit = nullptr;
     
-    QLabel* lblCategory = nullptr;
+    ElasticEdit* m_categoryEdit = nullptr;
 
 private slots:
     void onTagAdded();
