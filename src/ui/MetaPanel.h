@@ -114,6 +114,27 @@ private:
 };
 
 /**
+ * @brief PaletteCapsule: 单体胶囊化调色盘，包裹多个色点
+ */
+class PaletteCapsule : public QWidget {
+    Q_OBJECT
+public:
+    explicit PaletteCapsule(QWidget* parent = nullptr);
+    void setPalette(const QVector<QPair<QColor, float>>& palette);
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+private:
+    QVector<QPair<QColor, float>> m_palette;
+    int m_hoverIndex = -1;
+    const int m_dotSize = 16;
+    const int m_padding = 8;
+    const int m_spacing = 6;
+};
+
+/**
  * @brief 元数据面板（面板五）
  */
 class MetaPanel : public QFrame {
@@ -180,8 +201,7 @@ private:
     QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
     QLabel* lblPath = nullptr, *lblEncrypted = nullptr;
 
-    QWidget* m_paletteContainer = nullptr;
-    QHBoxLayout* m_paletteLayout = nullptr;
+    PaletteCapsule* m_paletteCapsule = nullptr;
 
     QWidget* m_tagContainer = nullptr;
     FlowLayout* m_tagFlowLayout = nullptr;

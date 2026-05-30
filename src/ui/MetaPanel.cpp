@@ -1,5 +1,6 @@
 #include "MetaPanel.h"
 #include "SvgIcons.h"
+#include "ToolTipOverlay.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPainter>
@@ -49,79 +50,100 @@ void ElasticEdit::keyPressEvent(QKeyEvent* e) {
     QPlainTextEdit::keyPressEvent(e);
 }
 
-/**
- * @brief PaletteSwatch: 调色盘色点组件 (16x16px)
- * 鼠标悬停时显示 1px 白色边缘
- */
-class PaletteSwatch : public QWidget {
-public:
-    explicit PaletteSwatch(const QColor& color, float ratio, const QString& path, QWidget* parent = nullptr)
-        : QWidget(parent), m_color(color), m_ratio(ratio), m_path(path) {
-        setFixedSize(16, 16);
-        setCursor(Qt::PointingHandCursor);
-        setAttribute(Qt::WA_Hover);
-        setToolTip(QString("%1 (%2%)").arg(color.name().toUpper()).arg(qRound(ratio * 100)));
-    }
+PaletteCapsule::PaletteCapsule(QWidget* parent) : QWidget(parent) {
+    setFixedHeight(24);
+    setMouseTracking(true);
+    setCursor(Qt::PointingHandCursor);
+}
 
-    void setSelected(bool selected) {
-        m_selected = selected;
-        update();
+void PaletteCapsule::setPalette(const QVector<QPair<QColor, float>>& palette) {
+    m_palette = palette;
+    if (palette.isEmpty()) {
+        setFixedSize(0, 24);
+    } else {
+        int w = m_padding * 2 + (int)palette.size() * m_dotSize + ((int)palette.size() - 1) * m_spacing;
+        setFixedSize(w, 24);
     }
+    update();
+}
 
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
-        
-        // 1. 绘制底色圆
+void PaletteCapsule::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // 1. 绘制总背景 (Capsule)
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor("#1E1E1E"));
+    painter.drawRoundedRect(rect(), 12, 12);
+
+    // 2. 绘制色点
+    for (int i = 0; i < m_palette.size(); ++i) {
+        int x = m_padding + i * (m_dotSize + m_spacing);
+        QRect dotRect(x, (height() - m_dotSize) / 2, m_dotSize, m_dotSize);
+
         painter.setPen(Qt::NoPen);
-        painter.setBrush(m_color);
-        painter.drawEllipse(rect().adjusted(1, 1, -1, -1));
+        painter.setBrush(m_palette[i].first);
+        painter.drawEllipse(dotRect.adjusted(1, 1, -1, -1));
 
-        // 2. 悬停态或选中态：绘制 1px 白色边缘
-        if (underMouse() || m_selected) {
+        // 悬停反馈：1px 白色边缘
+        if (i == m_hoverIndex) {
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(Qt::white, 1.0));
-            painter.drawEllipse(rect().adjusted(0, 0, -1, -1));
+            painter.drawEllipse(dotRect.adjusted(0, 0, -1, -1));
+        }
+    }
+}
+
+void PaletteCapsule::mouseMoveEvent(QMouseEvent* event) {
+    int newHover = -1;
+    for (int i = 0; i < m_palette.size(); ++i) {
+        int x = m_padding + i * (m_dotSize + m_spacing);
+        QRect dotRect(x, 0, m_dotSize, height());
+        if (dotRect.contains(event->pos())) {
+            newHover = i;
+            break;
         }
     }
 
-    void enterEvent(QEnterEvent* e) override { update(); QWidget::enterEvent(e); }
-    void leaveEvent(QEvent* e) override { update(); QWidget::leaveEvent(e); }
-
-    void mousePressEvent(QMouseEvent* event) override {
-        setSelected(true);
-        showMenu(event->globalPosition().toPoint());
+    if (newHover != m_hoverIndex) {
+        m_hoverIndex = newHover;
+        if (m_hoverIndex != -1) {
+            QString hex = m_palette[m_hoverIndex].first.name().toUpper();
+            int ratio = qRound(m_palette[m_hoverIndex].second * 100);
+            QString text = QString("%1 (%2%)").arg(hex).arg(ratio);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), text);
+        } else {
+            ToolTipOverlay::hideTip();
+        }
+        update();
     }
+    QWidget::mouseMoveEvent(event);
+}
 
-private:
-    void showMenu(const QPoint& pos) {
+void PaletteCapsule::leaveEvent(QEvent* event) {
+    m_hoverIndex = -1;
+    update();
+    QWidget::leaveEvent(event);
+}
+
+void PaletteCapsule::mousePressEvent(QMouseEvent* event) {
+    if (m_hoverIndex != -1) {
         QMenu menu(this);
         UiHelper::applyMenuStyle(&menu);
+        QColor color = m_palette[m_hoverIndex].first;
 
-        menu.addAction("搜索相似颜项目的项目", [this]() {
+        menu.addAction("搜索相似颜色的项目", [this, color]() {
             MetaPanel* panel = qobject_cast<MetaPanel*>(window()->findChild<MetaPanel*>("MetadataContainer"));
-            if (!panel) {
-                QWidget* p = this->parentWidget();
-                while (p && !qobject_cast<MetaPanel*>(p)) p = p->parentWidget();
-                panel = qobject_cast<MetaPanel*>(p);
-            }
-            if (panel) emit panel->searchByColor(m_color);
+            if (panel) emit panel->searchByColor(color);
         });
-
         menu.addSeparator();
-        QString hex = m_color.name().toUpper();
-        menu.addAction(QString("复制 %1").arg(hex), [this, hex]() { QApplication::clipboard()->setText(hex); });
-        menu.exec(pos);
-        setSelected(false);
-    }
+        QString hex = color.name().toUpper();
+        menu.addAction(QString("复制 %1").arg(hex), [hex]() { QApplication::clipboard()->setText(hex); });
 
-    QColor m_color;
-    float m_ratio;
-    QString m_path;
-    QString m_labelText;
-    bool m_selected = false;
-};
+        menu.exec(event->globalPosition().toPoint());
+    }
+    QWidget::mousePressEvent(event);
+}
 
 // --- TagPill ---
 TagPill::TagPill(const QString& text, QWidget* parent) 
@@ -288,20 +310,14 @@ void MetaPanel::initUi() {
     m_scrollArea->setWidgetResizable(true); m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
     m_container = new QWidget(m_scrollArea); m_containerLayout = new QVBoxLayout(m_container); m_containerLayout->setContentsMargins(10, 10, 10, 10); m_containerLayout->setSpacing(12);
     
-    // [Section 1] 调色盘胶囊 (Palette Capsules) - 改为单容器包装多个色点
-    m_paletteContainer = new QWidget(m_container);
-    m_paletteContainer->setFixedHeight(24);
-    m_paletteContainer->setStyleSheet("background: #1E1E1E; border-radius: 12px;");
-    m_paletteLayout = new QHBoxLayout(m_paletteContainer);
-    m_paletteLayout->setContentsMargins(8, 0, 8, 0);
-    m_paletteLayout->setSpacing(4);
-    m_paletteLayout->addStretch();
+    // [Section 1] 调色盘胶囊 (Palette Capsules)
+    m_paletteCapsule = new PaletteCapsule(m_container);
 
-    // 包装器，用于控制调色盘容器的宽度
+    // 包装器，确保胶囊左对齐且不拉伸
     QWidget* palWrapper = new QWidget(m_container);
     QHBoxLayout* palWrapperL = new QHBoxLayout(palWrapper);
     palWrapperL->setContentsMargins(0, 0, 0, 0);
-    palWrapperL->addWidget(m_paletteContainer);
+    palWrapperL->addWidget(m_paletteCapsule);
     palWrapperL->addStretch();
     m_containerLayout->addWidget(palWrapper);
 
@@ -469,6 +485,7 @@ void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s,
         }
         setPalettes(pal);
     }
+    if (m_container) m_container->adjustSize();
 }
 
 void MetaPanel::setRating(int rating) { Q_UNUSED(rating); }
@@ -483,32 +500,28 @@ void MetaPanel::setNote(const std::wstring& note) {
     m_noteEdit->setPlainText(QString::fromStdWString(note));
     m_noteEdit->adjustHeight();
     m_noteEdit->blockSignals(false);
+    if (m_container) m_container->adjustSize();
 }
 void MetaPanel::setURL(const std::wstring& url) {
     m_linkEdit->blockSignals(true);
     m_linkEdit->setPlainText(QString::fromStdWString(url));
     m_linkEdit->adjustHeight();
     m_linkEdit->blockSignals(false);
+    if (m_container) m_container->adjustSize();
 }
 void MetaPanel::setCategory(const QString& category) {
     m_categoryEdit->blockSignals(true);
     m_categoryEdit->setPlainText(category);
     m_categoryEdit->adjustHeight();
     m_categoryEdit->blockSignals(false);
+    if (m_container) m_container->adjustSize();
 }
 
 void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
-    if (!m_paletteLayout) return;
-    while (m_paletteLayout->count() > 1) {
-        QLayoutItem* item = m_paletteLayout->takeAt(0);
-        if (QWidget* w = item->widget()) w->deleteLater();
-        delete item;
+    if (m_paletteCapsule) {
+        m_paletteCapsule->setPalette(palette);
     }
-    QString currentPath = lblPath->text();
-    for (const auto& p : palette) {
-        PaletteSwatch* swatch = new PaletteSwatch(p.first, p.second, currentPath, m_paletteContainer);
-        m_paletteLayout->insertWidget(m_paletteLayout->count() - 1, swatch);
-    }
+    if (m_container) m_container->adjustSize();
 }
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
