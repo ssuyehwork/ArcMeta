@@ -425,6 +425,8 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         for (const QString& fType : currentFilter.types) { 
             if (fType == "folder") { 
                 if (type == "folder") { matchType = true; break; } 
+            } else if (fType == "file") {
+                if (type != "folder") { matchType = true; break; }
             } else { 
                 if (ext == fType.toUpper()) { matchType = true; break; } 
             } 
@@ -1904,6 +1906,7 @@ void ContentPanel::recalculateAndEmitStats() {
             if (info.isDir()) {
                 stats.typeCounts["folder"]++;
             } else {
+                stats.typeCounts["file"]++;
                 stats.typeCounts[info.suffix().toUpper()]++;
             }
             
