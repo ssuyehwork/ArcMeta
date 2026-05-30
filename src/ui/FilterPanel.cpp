@@ -64,8 +64,11 @@ protected:
 
         // 2. 绘制勾号
         if (checked) {
-            QIcon checkIcon = UiHelper::getIcon("checkmark", QColor("#378ADD"));
-            checkIcon.paint(&painter, this->rect().adjusted(2, 2, -2, -2));
+            QIcon icon = UiHelper::getIcon("checkmark", QColor("#378ADD"));
+            QPixmap pm = icon.pixmap(QSize(11, 11));
+            int ox = (width() - pm.width()) / 2;
+            int oy = (height() - pm.height()) / 2;
+            painter.drawPixmap(ox, oy, pm);
         }
     }
 };
