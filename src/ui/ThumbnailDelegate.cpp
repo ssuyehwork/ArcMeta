@@ -45,14 +45,14 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
     int zoom = option.decorationSize.width(); // 物理缩放级别
 
     m.starSize = 22;
-    m.starSpacing = -2; // 2026-06-08 优化：默认间距稍微拉开，提升呼吸感
+    m.starSpacing = -4; // 2026-06-08 优化：默认间距稍微拉开，提升呼吸感
     int banW = 14;
 
     // 2026-06-08 按照调试增强版 V2 优化：实现“动态比例星级”
     // 虽然底限是 96，但在接近极限 (100) 时提前缩小星级，确保视觉呼吸感
     if (zoom < 100) {
         m.starSize = 18;
-        m.starSpacing = -2;
+        m.starSpacing = -4;
         banW = 12;
     }
 
