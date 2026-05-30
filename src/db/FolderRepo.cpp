@@ -13,7 +13,7 @@ bool FolderRepo::save(const std::wstring& volume, const std::wstring& path, cons
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     
-    q.prepare("INSERT OR REPLACE INTO folders (volume, path, rating, color, tags, pinned, note, sort_by, sort_order, encrypted, encrypt_salt, encrypt_iv, encrypt_verify_hash, file_id_128, palettes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    q.prepare("INSERT OR REPLACE INTO folders (volume, path, rating, color, tags, pinned, note, url, sort_by, sort_order, encrypted, encrypt_salt, encrypt_iv, encrypt_verify_hash, file_id_128, palettes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     q.addBindValue(QString::fromStdWString(volume));
     q.addBindValue(QString::fromStdWString(path));
     q.addBindValue(meta.rating);
@@ -25,6 +25,7 @@ bool FolderRepo::save(const std::wstring& volume, const std::wstring& path, cons
     
     q.addBindValue(meta.pinned ? 1 : 0);
     q.addBindValue(QString::fromStdWString(meta.note));
+    q.addBindValue(QString::fromStdWString(meta.url));
     q.addBindValue(QString::fromStdWString(meta.sortBy));
     q.addBindValue(QString::fromStdWString(meta.sortOrder));
     q.addBindValue(meta.encrypted ? 1 : 0);
@@ -50,7 +51,7 @@ bool FolderRepo::save(const std::wstring& volume, const std::wstring& path, cons
 bool FolderRepo::get(const std::wstring& volume, const std::wstring& path, FolderMeta& meta) {
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
-    q.prepare("SELECT rating, color, tags, pinned, note, sort_by, sort_order, encrypted, encrypt_salt, encrypt_iv, encrypt_verify_hash, file_id_128, palettes FROM folders WHERE volume = ? AND path = ?");
+    q.prepare("SELECT rating, color, tags, pinned, note, url, sort_by, sort_order, encrypted, encrypt_salt, encrypt_iv, encrypt_verify_hash, file_id_128, palettes FROM folders WHERE volume = ? AND path = ?");
     q.addBindValue(QString::fromStdWString(volume));
     q.addBindValue(QString::fromStdWString(path));
     
@@ -66,13 +67,14 @@ bool FolderRepo::get(const std::wstring& volume, const std::wstring& path, Folde
 
         meta.pinned = q.value(3).toInt() != 0;
         meta.note = q.value(4).toString().toStdWString();
-        meta.sortBy = q.value(5).toString().toStdWString();
-        meta.sortOrder = q.value(6).toString().toStdWString();
-        meta.encrypted = q.value(7).toInt() != 0;
-        meta.encryptSalt = q.value(8).toString().toStdString();
-        meta.encryptIv = q.value(9).toString().toStdString();
-        meta.encryptVerifyHash = q.value(10).toString().toStdString();
-        meta.fileId128 = q.value(11).toString().toStdString();
+        meta.url = q.value(5).toString().toStdWString();
+        meta.sortBy = q.value(6).toString().toStdWString();
+        meta.sortOrder = q.value(7).toString().toStdWString();
+        meta.encrypted = q.value(8).toInt() != 0;
+        meta.encryptSalt = q.value(9).toString().toStdString();
+        meta.encryptIv = q.value(10).toString().toStdString();
+        meta.encryptVerifyHash = q.value(11).toString().toStdString();
+        meta.fileId128 = q.value(12).toString().toStdString();
         
         QJsonDocument palDoc = QJsonDocument::fromJson(q.value(12).toByteArray());
         meta.palettes.clear();

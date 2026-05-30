@@ -83,8 +83,8 @@ QSqlDatabase Database::getThreadDatabase() {
 
 void Database::createTables() {
     QSqlQuery q(m_impl->db);
-    q.exec("CREATE TABLE IF NOT EXISTS folders (volume TEXT, path TEXT, rating INTEGER DEFAULT 0, color TEXT DEFAULT '', tags TEXT DEFAULT '', pinned INTEGER DEFAULT 0, note TEXT DEFAULT '', sort_by TEXT DEFAULT 'name', sort_order TEXT DEFAULT 'asc', encrypted INTEGER DEFAULT 0, encrypt_salt TEXT DEFAULT '', encrypt_iv TEXT DEFAULT '', encrypt_verify_hash TEXT DEFAULT '', file_id_128 TEXT DEFAULT '', last_sync REAL, PRIMARY KEY (volume, path))");
-    q.exec("CREATE TABLE IF NOT EXISTS items (volume TEXT NOT NULL, frn TEXT NOT NULL, path TEXT, parent_path TEXT, type TEXT, rating INTEGER DEFAULT 0, color TEXT DEFAULT '', tags TEXT DEFAULT '', pinned INTEGER DEFAULT 0, note TEXT DEFAULT '', encrypted INTEGER DEFAULT 0, encrypt_salt TEXT DEFAULT '', encrypt_iv TEXT DEFAULT '', encrypt_verify_hash TEXT DEFAULT '', original_name TEXT DEFAULT '', file_id_128 TEXT DEFAULT '', size INTEGER DEFAULT 0, ctime REAL DEFAULT 0, mtime REAL DEFAULT 0, atime REAL DEFAULT 0, deleted INTEGER DEFAULT 0, PRIMARY KEY (volume, frn))");
+    q.exec("CREATE TABLE IF NOT EXISTS folders (volume TEXT, path TEXT, rating INTEGER DEFAULT 0, color TEXT DEFAULT '', tags TEXT DEFAULT '', pinned INTEGER DEFAULT 0, note TEXT DEFAULT '', url TEXT DEFAULT '', sort_by TEXT DEFAULT 'name', sort_order TEXT DEFAULT 'asc', encrypted INTEGER DEFAULT 0, encrypt_salt TEXT DEFAULT '', encrypt_iv TEXT DEFAULT '', encrypt_verify_hash TEXT DEFAULT '', file_id_128 TEXT DEFAULT '', last_sync REAL, PRIMARY KEY (volume, path))");
+    q.exec("CREATE TABLE IF NOT EXISTS items (volume TEXT NOT NULL, frn TEXT NOT NULL, path TEXT, parent_path TEXT, type TEXT, rating INTEGER DEFAULT 0, color TEXT DEFAULT '', tags TEXT DEFAULT '', pinned INTEGER DEFAULT 0, note TEXT DEFAULT '', url TEXT DEFAULT '', encrypted INTEGER DEFAULT 0, encrypt_salt TEXT DEFAULT '', encrypt_iv TEXT DEFAULT '', encrypt_verify_hash TEXT DEFAULT '', original_name TEXT DEFAULT '', file_id_128 TEXT DEFAULT '', size INTEGER DEFAULT 0, ctime REAL DEFAULT 0, mtime REAL DEFAULT 0, atime REAL DEFAULT 0, deleted INTEGER DEFAULT 0, PRIMARY KEY (volume, frn))");
     q.exec("CREATE TABLE IF NOT EXISTS tags (tag TEXT PRIMARY KEY, item_count INTEGER DEFAULT 0)");
     q.exec("CREATE TABLE IF NOT EXISTS favorites (path TEXT PRIMARY KEY, type TEXT, name TEXT, sort_order INTEGER DEFAULT 0, added_at REAL)");
     q.exec("CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, parent_id INTEGER DEFAULT 0, name TEXT NOT NULL, color TEXT DEFAULT '', preset_tags TEXT DEFAULT '', sort_order INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0, encrypted INTEGER DEFAULT 0, encrypt_salt TEXT DEFAULT '', encrypt_iv TEXT DEFAULT '', encrypt_verify_hash TEXT DEFAULT '', encrypt_hint TEXT DEFAULT '', created_at REAL)");
@@ -125,6 +125,7 @@ void Database::createTables() {
     addColumnIfNotExist("categories", "encrypt_hint", "TEXT DEFAULT ''");
 
     addColumnIfNotExist("folders", "volume", "TEXT DEFAULT ''");
+    addColumnIfNotExist("folders", "url", "TEXT DEFAULT ''");
     addColumnIfNotExist("folders", "encrypted", "INTEGER DEFAULT 0");
     addColumnIfNotExist("folders", "encrypt_salt", "TEXT DEFAULT ''");
     addColumnIfNotExist("folders", "encrypt_iv", "TEXT DEFAULT ''");
@@ -132,6 +133,7 @@ void Database::createTables() {
     addColumnIfNotExist("folders", "file_id_128", "TEXT DEFAULT ''");
     addColumnIfNotExist("folders", "palettes", "TEXT DEFAULT ''");
     addColumnIfNotExist("items", "file_id_128", "TEXT DEFAULT ''");
+    addColumnIfNotExist("items", "url", "TEXT DEFAULT ''");
     addColumnIfNotExist("items", "size", "INTEGER DEFAULT 0");
     addColumnIfNotExist("items", "palettes", "TEXT DEFAULT ''");
 

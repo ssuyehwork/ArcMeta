@@ -153,6 +153,7 @@ void MetadataManager::initFromDatabase() {
             rm.color = m["color"].toString().toStdWString();
             rm.pinned = m["pinned"].toBool();
             rm.note = m["note"].toString().toStdWString();
+            rm.url = m["url"].toString().toStdWString();
             QJsonArray tagsArr = m["tags"].toArray();
             for (const auto& t : tagsArr) rm.tags << t.toString();
             tempCache[nPath] = std::move(rm);
@@ -187,6 +188,9 @@ void MetadataManager::initFromDatabase() {
             meta.pinned = query.value(5).toBool();
             meta.encrypted = query.value(6).toBool();
             meta.note = query.value(7).toString().toStdWString();
+            if (query.record().indexOf("url") != -1) {
+                meta.url = query.value("url").toString().toStdWString();
+            }
             // 2026-06-xx 物理兼容：从数据库加载 palettes (若存在)
             if (query.record().indexOf("palettes") != -1) {
                 QByteArray palRaw = query.value("palettes").toByteArray();
@@ -254,7 +258,7 @@ void MetadataManager::initFromJsonMode() {
             RuntimeMeta fMeta;
             fMeta.rating = f.rating; fMeta.color = f.color;
             for (const auto& t : f.tags) fMeta.tags << QString::fromStdWString(t);
-            fMeta.pinned = f.pinned; fMeta.note = f.note; fMeta.encrypted = f.encrypted;
+            fMeta.pinned = f.pinned; fMeta.note = f.note; fMeta.url = f.url; fMeta.encrypted = f.encrypted;
             fMeta.palettes = f.palettes;
             tempCache[nResolvedPath] = std::move(fMeta);
 
@@ -267,7 +271,7 @@ void MetadataManager::initFromJsonMode() {
                 RuntimeMeta iMeta;
                 iMeta.rating = item.rating; iMeta.color = item.color;
                 for (const auto& t : item.tags) iMeta.tags << QString::fromStdWString(t);
-                iMeta.pinned = item.pinned; iMeta.note = item.note; iMeta.encrypted = item.encrypted;
+                iMeta.pinned = item.pinned; iMeta.note = item.note; iMeta.url = item.url; iMeta.encrypted = item.encrypted;
                 iMeta.palettes = item.palettes;
                 std::wstring itemPath = resolvedPath + L"\\" + name;
                 tempCache[normalizePath(itemPath)] = std::move(iMeta);
@@ -313,6 +317,7 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
             rm.rating = item.rating; rm.color = item.color;
             rm.pinned = item.pinned; rm.encrypted = item.encrypted;
             rm.note = item.note;
+            rm.url = item.url;
             rm.palettes = item.palettes;
             for (const auto& t : item.tags) rm.tags << QString::fromStdWString(t);
             
@@ -329,6 +334,7 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
                 RuntimeMeta rm;
                 rm.rating = folder.rating; rm.color = folder.color;
                 rm.pinned = folder.pinned; rm.note = folder.note;
+                rm.url = folder.url;
                 rm.palettes = folder.palettes;
                 for (const auto& t : folder.tags) rm.tags << QString::fromStdWString(t);
                 
@@ -373,6 +379,13 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags)
 void MetadataManager::setNote(const std::wstring& path, const std::wstring& note) {
     std::wstring nPath = normalizePath(path);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
+    emit metaChanged(QString::fromStdWString(nPath));
+    debouncePersist(nPath);
+}
+
+void MetadataManager::setURL(const std::wstring& path, const std::wstring& url) {
+    std::wstring nPath = normalizePath(path);
+    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
     emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
@@ -582,6 +595,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
             fetchWinApiMetadataDirect(nPath, fMeta.fileId128, nullptr);
             fMeta.rating = rMeta.rating; fMeta.color = rMeta.color;
             fMeta.pinned = rMeta.pinned; fMeta.note = rMeta.note;
+            fMeta.url = rMeta.url;
             fMeta.tags.clear();
             for (const auto& t : rMeta.tags) fMeta.tags.push_back(t.toStdWString());
             fMeta.palettes = rMeta.palettes;
@@ -592,6 +606,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
             fetchWinApiMetadataDirect(nPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
             iMeta.rating = rMeta.rating; iMeta.color = rMeta.color;
             iMeta.pinned = rMeta.pinned; iMeta.note = rMeta.note;
+            iMeta.url = rMeta.url;
             iMeta.encrypted = rMeta.encrypted;
             iMeta.tags.clear();
             for (const auto& t : rMeta.tags) iMeta.tags.push_back(t.toStdWString());
@@ -617,6 +632,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
         driveMeta["color"] = QString::fromStdWString(rMeta.color);
         driveMeta["pinned"] = rMeta.pinned;
         driveMeta["note"] = QString::fromStdWString(rMeta.note);
+        driveMeta["url"] = QString::fromStdWString(rMeta.url);
         QJsonArray tagsArr;
         for (const auto& t : rMeta.tags) tagsArr.append(t);
         driveMeta["tags"] = tagsArr;
@@ -634,6 +650,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
             FolderMeta& folder = amJson.folder();
             folder.rating = rMeta.rating; folder.color = rMeta.color;
             folder.pinned = rMeta.pinned; folder.note = rMeta.note;
+            folder.url = rMeta.url;
             folder.tags.clear();
             for (const auto& t : rMeta.tags) folder.tags.push_back(t.toStdWString());
             folder.palettes = rMeta.palettes;
@@ -642,6 +659,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
             item.rating = rMeta.rating; item.color = rMeta.color;
             item.pinned = rMeta.pinned; item.encrypted = rMeta.encrypted;
             item.note = rMeta.note;
+            item.url = rMeta.url;
             item.tags.clear();
             for (const auto& t : rMeta.tags) item.tags.push_back(t.toStdWString());
             item.palettes = rMeta.palettes;

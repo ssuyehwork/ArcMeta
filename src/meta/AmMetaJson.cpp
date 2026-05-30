@@ -106,6 +106,7 @@ QJsonObject AmMetaJson::folderToEntry(const FolderMeta& meta) {
     obj.insert("color", toQString(meta.color));
     obj.insert("pinned", meta.pinned);
     obj.insert("note", toQString(meta.note));
+    obj.insert("url", toQString(meta.url));
     obj.insert("encrypted", meta.encrypted);
     obj.insert("file_id_128", QString::fromStdString(meta.fileId128));
     QJsonArray tagsArr; for (const auto& t : meta.tags) tagsArr.append(toQString(t));
@@ -133,6 +134,7 @@ FolderMeta AmMetaJson::entryToFolder(const QJsonObject& obj) {
     meta.color = toStdWString(obj.value("color").toString());
     meta.pinned = obj.value("pinned").toBool();
     meta.note = toStdWString(obj.value("note").toString());
+    meta.url = toStdWString(obj.value("url").toString());
     meta.encrypted = obj.value("encrypted").toBool();
     meta.fileId128 = obj.value("file_id_128").toString().toStdString();
     if (obj.contains("tags") && obj.value("tags").isArray()) {
@@ -157,6 +159,7 @@ QJsonObject AmMetaJson::itemToEntry(const ItemMeta& meta) {
     obj.insert("color", toQString(meta.color));
     obj.insert("pinned", meta.pinned);
     obj.insert("note", toQString(meta.note));
+    obj.insert("url", toQString(meta.url));
     obj.insert("encrypted", meta.encrypted);
     obj.insert("encrypt_salt", QString::fromStdString(meta.encryptSalt));
     obj.insert("encrypt_iv", QString::fromLatin1(QByteArray::fromStdString(meta.encryptIv).toBase64()));
@@ -189,6 +192,7 @@ ItemMeta AmMetaJson::entryToItem(const QJsonObject& obj) {
     meta.color = toStdWString(obj.value("color").toString());
     meta.pinned = obj.value("pinned").toBool();
     meta.note = toStdWString(obj.value("note").toString());
+    meta.url = toStdWString(obj.value("url").toString());
     meta.encrypted = obj.value("encrypted").toBool();
     meta.encryptSalt = obj.value("encrypt_salt").toString().toStdString();
     meta.encryptIv = QByteArray::fromBase64(obj.value("encrypt_iv").toString().toLatin1()).toStdString();

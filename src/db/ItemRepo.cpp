@@ -43,18 +43,19 @@ bool ItemRepo::save(const std::wstring& parentPath, const std::wstring& name, co
     // 2026-06-xx 借鉴“旧版本-2”：废除 REPLACE INTO，改用 INSERT OR IGNORE + UPDATE。
     // 铁律：必须保护 ctime、mtime、deleted 等核心字段不被重置。
     QSqlQuery q(db);
-    q.prepare("INSERT OR IGNORE INTO items (volume, frn, path, parent_path, type) VALUES (?, ?, ?, ?, ?)");
+    q.prepare("INSERT OR IGNORE INTO items (volume, frn, path, parent_path, type, url) VALUES (?, ?, ?, ?, ?, ?)");
     q.addBindValue(QString::fromStdWString(volume));
     q.addBindValue(QString::fromStdWString(frn));
     q.addBindValue(QString::fromStdWString(fullPath));
     q.addBindValue(QString::fromStdWString(parentPath));
     q.addBindValue(QString::fromStdWString(meta.type));
+    q.addBindValue(QString::fromStdWString(meta.url));
     q.exec();
 
     QSqlQuery u(db);
     // 2026-06-15 按照审计建议：动态绑定 type 字段，杜绝文件夹被污染为文件。
     // 铁律：元数据更新即视为激活该物理文件。
-    u.prepare("UPDATE items SET rating = ?, color = ?, tags = ?, pinned = ?, note = ?, "
+    u.prepare("UPDATE items SET rating = ?, color = ?, tags = ?, pinned = ?, note = ?, url = ?, "
               "encrypted = ?, encrypt_salt = ?, encrypt_iv = ?, encrypt_verify_hash = ?, "
               "original_name = ?, file_id_128 = ?, size = ?, deleted = 0, type = ?, palettes = ? "
               "WHERE volume = ? AND frn = ?");
@@ -67,6 +68,7 @@ bool ItemRepo::save(const std::wstring& parentPath, const std::wstring& name, co
     
     u.addBindValue(meta.pinned ? 1 : 0);
     u.addBindValue(QString::fromStdWString(meta.note));
+    u.addBindValue(QString::fromStdWString(meta.url));
     u.addBindValue(meta.encrypted ? 1 : 0);
     u.addBindValue(QString::fromStdString(meta.encryptSalt));
     u.addBindValue(QString::fromStdString(meta.encryptIv));
