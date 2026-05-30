@@ -527,9 +527,20 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             });
         }
+        if (m_typeCounts.contains("file")) {
+            QCheckBox* cb = addFilterRow(gl, "文件", m_typeCounts["file"]);
+            cb->blockSignals(true);
+            cb->setChecked(m_filter.types.contains("file"));
+            cb->blockSignals(false);
+            connect(cb, &QCheckBox::toggled, this, [this](bool on) {
+                if (on) { if (!m_filter.types.contains("file")) m_filter.types.append("file"); }
+                else    m_filter.types.removeAll("file");
+                emit filterChanged(m_filter);
+            });
+        }
         QStringList exts = m_typeCounts.keys(); exts.sort();
         for (const QString& ext : exts) {
-            if (ext == "folder") continue;
+            if (ext == "folder" || ext == "file") continue;
             QString label = ext.isEmpty() ? "无扩展名" : ext;
             QCheckBox* cb = addFilterRow(gl, label, m_typeCounts[ext]);
             cb->blockSignals(true);
