@@ -241,9 +241,6 @@ void MainWindow::initUi() {
             m_metaPanel->setColor(L"");
             m_metaPanel->setPinned(false);
             m_metaPanel->setTags(QStringList());
-            m_metaPanel->setNote(L"");
-            m_metaPanel->setURL(L"");
-            m_metaPanel->setCategory("-");
         } else {
             // 2026-03-xx 高性能优化：优先从模型缓存中读取元数据，避免频繁磁盘访问
             auto indexes = m_contentPanel->getSelectedIndexes();
@@ -271,14 +268,9 @@ void MainWindow::initUi() {
             m_metaPanel->setPinned(idx.data(IsLockedRole).toBool());
             m_metaPanel->setTags(idx.data(TagsRole).toStringList());
             
-            // 加载备注、URL和色板
+            // 加载备注和色板
             RuntimeMeta rm = MetadataManager::instance().getMeta(path.toStdWString());
             m_metaPanel->setNote(rm.note);
-            m_metaPanel->setURL(rm.url);
-
-            // 设置分类显示 (根据当前 UI 状态或路径推导)
-            QString category = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
-            m_metaPanel->setCategory(category);
 
             // 将色板数据转换为 QVector<QPair<QColor, float>>
             QVector<QPair<QColor, float>> pal;
@@ -774,17 +766,15 @@ void MainWindow::initToolbar() {
     m_searchEdit->setFixedWidth(230);
     m_searchEdit->setFixedHeight(32);
     m_searchEdit->addAction(UiHelper::getIcon("search", TextMuted), QLineEdit::LeadingPosition);
-    // 按照用户要求：移除局部/全局切换按钮，恢复搜索框 6px 完整圆角
-    // 2026-06-xx 按照分析计划 #53：通过 QSS 物理锁定宽度，防止布局压缩
+    // 按照用户要求：全局搜索，搜索框 6px 完整圆角
     m_searchEdit->setStyleSheet(QString(
         "QLineEdit { background: %1; border: 1px solid %2;"
         "  border-radius: 6px;"
-        "  min-width: 230px; max-width: 230px;"
         "  color: %3; padding-left: 5px; }"
         "QLineEdit:focus { border: 1px solid %4; }"
     ).arg(qssColor(BackgroundDeep)).arg(qssColor(BorderColor)).arg(qssColor(TextMain)).arg(qssColor(PrimaryBlue)));
 
-    searchLayout->addWidget(m_searchEdit, 0);
+    searchLayout->addWidget(m_searchEdit, 1);
 }
 
 

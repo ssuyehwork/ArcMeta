@@ -425,8 +425,6 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         for (const QString& fType : currentFilter.types) { 
             if (fType == "folder") { 
                 if (type == "folder") { matchType = true; break; } 
-            } else if (fType == "file") {
-                if (type != "folder") { matchType = true; break; }
             } else { 
                 if (ext == fType.toUpper()) { matchType = true; break; } 
             } 
@@ -649,8 +647,8 @@ void ContentPanel::updateGridSize() {
             jv->setTargetRowHeight(m_zoomLevel);
         } else if (auto* lv = qobject_cast<QListView*>(m_gridView)) {
             lv->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
-            int side = m_zoomLevel + 10; // 正方形边长
-            int ratingH = 24;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
+            int side = m_zoomLevel + 46; // 正方形边长
+            int ratingH = 22;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
             int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
             int gap = 6;                // 间距归一化
             
@@ -1906,7 +1904,6 @@ void ContentPanel::recalculateAndEmitStats() {
             if (info.isDir()) {
                 stats.typeCounts["folder"]++;
             } else {
-                stats.typeCounts["file"]++;
                 stats.typeCounts[info.suffix().toUpper()]++;
             }
             
@@ -2011,7 +2008,7 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     m.squareRect = QRect(m.cardRect.left(), m.cardRect.top(), side, side); 
  
     m.iconDrawSize = (int)(zoom * 0.7); 
-    m.ratingH      = 24;  // 2026-05-17 物理锁定评分区高度 
+    m.ratingH      = 20;  // 2026-05-17 物理锁定评分区高度 
     m.nameH        = (int)(zoom * 0.25); 
  
     // 2026-05-17 按照用户要求：主图标在正方形内垂直居中
@@ -2023,8 +2020,8 @@ GridItemDelegate::GridMetrics GridItemDelegate::calculateMetrics(const QStyleOpt
     // 2026-06-xx 按照用户要求：下移 2 像素（从 +6 改为 +8）
     m.ratingY = m.squareRect.bottom() + 8; 
  
-    m.starSize    = 22; // 2026-05-17 尺寸微调以匹配外部布局
-    m.starSpacing = 0;   
+    m.starSize    = 18; // 2026-05-17 尺寸微调以匹配外部布局
+    m.starSpacing = 1;   
     int banW = 14;      // 2026-06-xx 物理对齐：将禁止图标缩减至 12px，使其与星级在视觉权重上保持一致
     int banGap = 2; 
  
