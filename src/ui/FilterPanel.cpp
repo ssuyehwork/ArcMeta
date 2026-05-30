@@ -64,11 +64,15 @@ protected:
 
         // 2. 绘制勾号
         if (checked) {
-            QIcon icon = UiHelper::getIcon("checkmark", QColor("#378ADD"));
-            QPixmap pm = icon.pixmap(QSize(11, 11));
-            int ox = (width() - pm.width()) / 2;
-            int oy = (height() - pm.height()) / 2;
-            painter.drawPixmap(ox, oy, pm);
+            QPen pen(QColor("#378ADD"), 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+            painter.setPen(pen);
+            painter.setBrush(Qt::NoBrush);
+            // 在 15x15 的区域内绘制对勾折线，坐标相对于 widget 自身
+            QPolygonF checkMark;
+            checkMark << QPointF(2.5, 7.5)
+                      << QPointF(5.5, 11.0)
+                      << QPointF(12.0, 3.5);
+            painter.drawPolyline(checkMark);
         }
     }
 };
