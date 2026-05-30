@@ -39,6 +39,37 @@ static QString ratingDisplayName(int r) {
     return r == 0 ? "无评级" : QString("★").repeated(r);
 }
 
+// ─── 自定义勾选框 ──────────────────────────────────────────────────
+class StyledCheckBox : public QCheckBox {
+public:
+    explicit StyledCheckBox(QWidget* parent = nullptr) : QCheckBox(parent) {
+        setFixedSize(15, 15);
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+
+        bool checked = isChecked();
+
+        // 1. 绘制背景与边框
+        QRect rect = this->rect().adjusted(0, 0, -1, -1);
+        QColor borderColor = checked ? QColor("#378ADD") : QColor("#444");
+        QColor bgColor = QColor("#1E1E1E");
+
+        painter.setPen(borderColor);
+        painter.setBrush(bgColor);
+        painter.drawRoundedRect(rect, 2, 2);
+
+        // 2. 绘制勾号
+        if (checked) {
+            QIcon checkIcon = UiHelper::getIcon("checkmark", QColor("#378ADD"));
+            checkIcon.paint(&painter, this->rect().adjusted(2, 2, -2, -2));
+        }
+    }
+};
+
 // ─── 可整行点击的行控件 ────────────────────────────────────────────
 /**
  * ClickableRow: 点击行内任意位置均触发关联 QCheckBox 的 toggle。
@@ -46,7 +77,7 @@ static QString ratingDisplayName(int r) {
  */
 class ClickableRow : public QWidget {
 public:
-    explicit ClickableRow(QCheckBox* cb, QWidget* parent = nullptr)
+    explicit ClickableRow(StyledCheckBox* cb, QWidget* parent = nullptr)
         : QWidget(parent), m_cb(cb) {
         setCursor(Qt::PointingHandCursor);
         setAttribute(Qt::WA_StyledBackground);
@@ -71,7 +102,7 @@ protected:
         QWidget::leaveEvent(e);
     }
 private:
-    QCheckBox* m_cb;
+    StyledCheckBox* m_cb;
 };
 
 // ─── InlineHueSlider ─────────────────────────────────────────────
@@ -703,19 +734,7 @@ QWidget* FilterPanel::buildGroup(const QString& title, QVBoxLayout*& outContentL
 
 // ─── addFilterRow ─────────────────────────────────────────────────
 QCheckBox* FilterPanel::addFilterRow(QVBoxLayout* layout, const QString& label, int count, const QColor& dotColor) {
-    QCheckBox* cb = new QCheckBox();
-    // 2026-03-xx 按照用户要求，仅保留蓝色勾选标记 (#378ADD)，背景保持深色
-    cb->setStyleSheet(
-        "QCheckBox { spacing: 0px; }"
-        "QCheckBox::indicator { width: 15px; height: 15px; border: 1px solid #444;"
-        "                       border-radius: 2px; background: #1E1E1E; }"
-        "QCheckBox::indicator:hover { border: 1px solid #666; }"
-        "QCheckBox::indicator:checked { "
-        "   border: 1px solid #378ADD; "
-        "   background: #1E1E1E; "
-        "   image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzc4QUREIiBzdHJva2Utd2lkdGg9IjMuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIyMCA2IDkgMTcgNCAxMiI+PC9wb2x5bGluZT48L3N2Zz4=);"
-        "}"
-    );
+    StyledCheckBox* cb = new StyledCheckBox();
 
     // 整行可点击容器
     // 增加高度至 24px 以适配各种系统缩放，避免文字截断
