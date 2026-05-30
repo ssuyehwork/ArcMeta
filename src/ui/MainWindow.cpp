@@ -763,7 +763,7 @@ void MainWindow::initToolbar() {
 
     m_searchEdit = new QLineEdit(m_searchContainer);
     m_searchEdit->setPlaceholderText("搜索...");
-    m_searchEdit->setMinimumWidth(180);
+    m_searchEdit->setFixedWidth(230);
     m_searchEdit->setFixedHeight(32);
     m_searchEdit->addAction(UiHelper::getIcon("search", TextMuted), QLineEdit::LeadingPosition);
     // 按照用户要求：移除局部/全局切换按钮，恢复搜索框 6px 完整圆角
