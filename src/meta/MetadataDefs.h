@@ -25,6 +25,7 @@ struct FolderMeta {
     std::vector<std::wstring> tags;
     bool pinned = false;
     std::wstring note = L"";
+    std::wstring url = L"";
     bool encrypted = false;
     std::string encryptSalt;
     std::string encryptIv;
@@ -34,7 +35,7 @@ struct FolderMeta {
 
     bool isDefault() const {
         return sortBy == L"name" && sortOrder == L"asc" && rating == 0 &&
-               color.empty() && tags.empty() && !pinned && note.empty() && !encrypted && fileId128.empty() && palettes.empty();
+               color.empty() && tags.empty() && !pinned && note.empty() && url.empty() && !encrypted && fileId128.empty() && palettes.empty();
     }
 };
 
@@ -48,6 +49,7 @@ struct ItemMeta {
     std::vector<std::wstring> tags;
     bool pinned = false;
     std::wstring note = L"";
+    std::wstring url = L"";
     bool encrypted = false;
     std::string encryptSalt;
     std::string encryptIv;
@@ -64,7 +66,7 @@ struct ItemMeta {
 
     bool hasUserOperations() const {
         return rating > 0 || !color.empty() || !tags.empty() || pinned ||
-               !note.empty() || encrypted || !fileId128.empty() || !palettes.empty();
+               !note.empty() || !url.empty() || encrypted || !fileId128.empty() || !palettes.empty();
     }
 };
 

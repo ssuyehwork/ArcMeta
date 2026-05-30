@@ -141,6 +141,8 @@ public:
     void setPinned(bool pinned);
     void setTags(const QStringList& tags);
     void setNote(const std::wstring& note);
+    void setURL(const std::wstring& url);
+    void setCategory(const QString& category);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -159,15 +161,23 @@ private:
     QScrollArea* m_scrollArea = nullptr;
     QWidget* m_container = nullptr;
     QVBoxLayout* m_containerLayout = nullptr;
-    QLabel* lblName = nullptr, *lblType = nullptr, *lblSize = nullptr;
+
+    QLineEdit* m_nameEdit = nullptr;
+    QLabel* lblType = nullptr, *lblSize = nullptr;
     QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
     QLabel* lblPath = nullptr, *lblEncrypted = nullptr;
+
     QWidget* m_paletteContainer = nullptr;
     QHBoxLayout* m_paletteLayout = nullptr;
+
     QWidget* m_tagContainer = nullptr;
     FlowLayout* m_tagFlowLayout = nullptr;
     QLineEdit* m_tagEdit = nullptr;
+
     QPlainTextEdit* m_noteEdit = nullptr;
+    QLineEdit* m_linkEdit = nullptr;
+
+    QLabel* lblCategory = nullptr;
 
 private slots:
     void onTagAdded();
