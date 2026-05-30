@@ -347,7 +347,6 @@ void JustifiedView::doLayout() {
         if (numInRow <= 0) break;
 
         int actualHeight = m_targetRowHeight;
-        bool rowIsJustified = false; // 2026-06-25 物理加固：切换为 Fixed-Size Flow 布局，不再拉伸卡片
 
         int currentX = margin;
         const int textHeight = 36;
