@@ -775,7 +775,7 @@ void MainWindow::initToolbar() {
     m_searchEdit->setFixedHeight(32);
     m_searchEdit->addAction(UiHelper::getIcon("search", TextMuted), QLineEdit::LeadingPosition);
     // 按照用户要求：移除局部/全局切换按钮，恢复搜索框 6px 完整圆角
-    // 2026-06-xx 按照分析计划 #53：通过 QSS 物理锁定宽度，防止布局压缩
+    // 2024-05-22 按照分析计划 #46：通过 setFixedWidth(230) 和 QSS 物理锁定宽度，确保宽度固定为 230px
     m_searchEdit->setStyleSheet(QString(
         "QLineEdit { background: %1; border: 1px solid %2;"
         "  border-radius: 6px;"
