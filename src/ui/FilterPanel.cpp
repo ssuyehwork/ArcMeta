@@ -46,44 +46,32 @@ static QString ratingDisplayName(int r) {
  */
 class ClickableRow : public QWidget {
 public:
-    explicit ClickableRow(QCheckBox* cb, FilterPanel* panel, QWidget* parent = nullptr)
-        : QWidget(parent), m_cb(cb), m_panel(panel) {
+    explicit ClickableRow(QCheckBox* cb, QWidget* parent = nullptr)
+        : QWidget(parent), m_cb(cb) {
         setCursor(Qt::PointingHandCursor);
         setAttribute(Qt::WA_StyledBackground);
     }
 protected:
     void mousePressEvent(QMouseEvent* e) override {
         if (e->button() == Qt::LeftButton) {
-            // 先切换状态，再处理连选逻辑
-            m_cb->setChecked(!m_cb->isChecked());
-            m_panel->handleRowClicked(m_cb, e->modifiers());
+            // 如果点击位置不在复选框上，手动 toggle，避免双重触发
+            QPoint local = m_cb->mapFromGlobal(e->globalPosition().toPoint());
+            if (!m_cb->rect().contains(local)) {
+                m_cb->setChecked(!m_cb->isChecked());
+            }
         }
         QWidget::mousePressEvent(e);
     }
     void enterEvent(QEnterEvent* e) override {
-        m_hovered = true;
-        update();
+        setStyleSheet("QWidget { background: #2A2A2A; border-radius: 4px; }");
         QWidget::enterEvent(e);
     }
     void leaveEvent(QEvent* e) override {
-        m_hovered = false;
-        update();
+        setStyleSheet("");
         QWidget::leaveEvent(e);
-    }
-    void paintEvent(QPaintEvent* e) override {
-        if (m_hovered) {
-            QPainter p(this);
-            p.setRenderHint(QPainter::Antialiasing);
-            p.setPen(Qt::NoPen);
-            p.setBrush(QColor("#2A2A2A"));
-            p.drawRoundedRect(rect(), 4, 4);
-        }
-        QWidget::paintEvent(e);
     }
 private:
     QCheckBox* m_cb;
-    FilterPanel* m_panel;
-    bool m_hovered = false;
 };
 
 // ─── InlineHueSlider ─────────────────────────────────────────────
@@ -308,8 +296,6 @@ void FilterPanel::rebuildGroups() {
         if (item->widget()) item->widget()->deleteLater();
         delete item;
     }
-    m_allCheckBoxes.clear();
-    m_lastSelectedIndex = -1;
 
     auto colorMap = s_colorMap();
 
@@ -541,20 +527,9 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             });
         }
-        if (m_typeCounts.contains("__all_files__")) {
-            QCheckBox* cb = addFilterRow(gl, "文件", m_typeCounts["__all_files__"]);
-            cb->blockSignals(true);
-            cb->setChecked(m_filter.types.contains("__all_files__"));
-            cb->blockSignals(false);
-            connect(cb, &QCheckBox::toggled, this, [this](bool on) {
-                if (on) { if (!m_filter.types.contains("__all_files__")) m_filter.types.append("__all_files__"); }
-                else    m_filter.types.removeAll("__all_files__");
-                emit filterChanged(m_filter);
-            });
-        }
         QStringList exts = m_typeCounts.keys(); exts.sort();
         for (const QString& ext : exts) {
-            if (ext == "folder" || ext == "__all_files__") continue;
+            if (ext == "folder") continue;
             QString label = ext.isEmpty() ? "无扩展名" : ext;
             QCheckBox* cb = addFilterRow(gl, label, m_typeCounts[ext]);
             cb->blockSignals(true);
@@ -718,29 +693,22 @@ QWidget* FilterPanel::buildGroup(const QString& title, QVBoxLayout*& outContentL
 // ─── addFilterRow ─────────────────────────────────────────────────
 QCheckBox* FilterPanel::addFilterRow(QVBoxLayout* layout, const QString& label, int count, const QColor& dotColor) {
     QCheckBox* cb = new QCheckBox();
-    m_allCheckBoxes.append(cb);
-
-    // 视觉修复：使用 UiHelper 转换后的 PNG Base64 以确保 100% 兼容渲染
-    cb->setStyleSheet(QString(
+    // 2026-03-xx 按照用户要求，仅保留蓝色勾选标记 (#378ADD)，背景保持深色
+    cb->setStyleSheet(
         "QCheckBox { spacing: 0px; }"
         "QCheckBox::indicator { width: 15px; height: 15px; border: 1px solid #444;"
         "                       border-radius: 2px; background: #1E1E1E; }"
         "QCheckBox::indicator:hover { border: 1px solid #666; }"
         "QCheckBox::indicator:checked { "
-        "   border: 1px solid #444; "
+        "   border: 1px solid #378ADD; "
         "   background: #1E1E1E; "
-        "   image: url(%1); "
+        "   image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzc4QUREIiBzdHJva2Utd2lkdGg9IjMuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIyMCA2IDkgMTcgNCAxMiI+PC9wb2x5bGluZT48L3N2Zz4=);"
         "}"
-    ).arg(UiHelper::getSvgDataUrl("check", QColor("#378ADD"))));
-
-    // 支持直接点击复选框时的连选更新
-    connect(cb, &QCheckBox::clicked, this, [this, cb]() {
-        handleRowClicked(cb, QGuiApplication::keyboardModifiers());
-    });
+    );
 
     // 整行可点击容器
     // 增加高度至 24px 以适配各种系统缩放，避免文字截断
-    ClickableRow* row = new ClickableRow(cb, this);
+    ClickableRow* row = new ClickableRow(cb);
     row->setFixedHeight(24);
 
     QHBoxLayout* rl = new QHBoxLayout(row);
@@ -779,27 +747,6 @@ void FilterPanel::clearAllFilters() {
     }
     emit filterChanged(m_filter);
     emit resetSearchRequested();
-}
-
-void FilterPanel::handleRowClicked(QCheckBox* cb, Qt::KeyboardModifiers mods) {
-    int index = m_allCheckBoxes.indexOf(cb);
-    if (index == -1) return;
-
-    // 逻辑修正：此时 cb 的状态已经完成切换（无论是 Row 点击还是 CB 自身点击）
-    if (mods & Qt::ShiftModifier && m_lastSelectedIndex != -1) {
-        int start = qMin(m_lastSelectedIndex, index);
-        int end = qMax(m_lastSelectedIndex, index);
-        bool targetState = cb->isChecked(); 
-        for (int i = start; i <= end; ++i) {
-            if (m_allCheckBoxes[i] != cb) {
-                m_allCheckBoxes[i]->setChecked(targetState);
-            }
-        }
-    }
-    // Ctrl 连选已由 QCheckBox 自身或 ClickableRow 的 setChecked 切换完成，
-    // 连选逻辑仅需处理 Shift 范围同步。
-    
-    m_lastSelectedIndex = index;
 }
 
 } // namespace ArcMeta

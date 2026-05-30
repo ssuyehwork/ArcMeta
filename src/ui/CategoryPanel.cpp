@@ -117,7 +117,12 @@ void CategoryPanel::setupContextMenu() {
         }
 
         QMenu menu(this);
-        UiHelper::applyMenuStyle(&menu);
+        // [PHYSICAL RESTORATION] 8px radius for context menu
+    menu.setStyleSheet(QString("QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid %1; padding: 4px; border-radius: 8px; } "
+                           "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; } "
+                           "QMenu::icon { margin-left: 6px; } "
+                           "QMenu::item:selected { background-color: #3E3E42; color: white; } "
+                       "QMenu::separator { height: 1px; background: %1; margin: 4px 8px; }").arg(qssColor(BorderDark)));
 
         // 基于规范逻辑：如果没有选中项，或者选中了“我的分类”根节点
         QString itemName = index.data(NameRole).toString();
@@ -125,7 +130,7 @@ void CategoryPanel::setupContextMenu() {
             menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建分类", this, &CategoryPanel::onCreateCategory);
             
             auto* sortMenu = menu.addMenu(UiHelper::getIcon("list_ul", QColor("#aaaaaa"), 18), "排列");
-            UiHelper::applyMenuStyle(sortMenu);
+            sortMenu->setStyleSheet(menu.styleSheet());
             sortMenu->addAction("标题(全部) (A→Z)", this, &CategoryPanel::onSortAllByNameAsc);
             sortMenu->addAction("标题(全部) (Z→A)", this, &CategoryPanel::onSortAllByNameDesc);
         } else {
@@ -162,14 +167,14 @@ void CategoryPanel::setupContextMenu() {
 
                 // 2026-03-xx 按照用户要求：补全排列与密码保护逻辑
                 auto* sortMenu = menu.addMenu(UiHelper::getIcon("list_ul", QColor("#aaaaaa"), 18), "排列");
-                UiHelper::applyMenuStyle(sortMenu);
+                sortMenu->setStyleSheet(menu.styleSheet());
                 sortMenu->addAction("标题(当前层级) (A→Z)", this, &CategoryPanel::onSortByNameAsc);
                 sortMenu->addAction("标题(当前层级) (Z→A)", this, &CategoryPanel::onSortByNameDesc);
                 sortMenu->addAction("标题(全部) (A→Z)", this, &CategoryPanel::onSortAllByNameAsc);
                 sortMenu->addAction("标题(全部) (Z→A)", this, &CategoryPanel::onSortAllByNameDesc);
 
                 auto* pwdMenu = menu.addMenu(UiHelper::getIcon("lock", QColor("#aaaaaa"), 18), "密码保护");
-                UiHelper::applyMenuStyle(pwdMenu);
+                pwdMenu->setStyleSheet(menu.styleSheet());
                 
                 // 2026-03-xx 按照用户要求：通过 EncryptedRole 动态判断显示“设置”或“清除”
                 bool isEncrypted = index.data(EncryptedRole).toBool();
