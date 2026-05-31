@@ -234,7 +234,7 @@ public:
      */
     static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
         // 优先从系统缩略图引擎获取数据，支持 PSD, AI, EPS, PDF 等专业格式 (前提是系统有预览插件)
-        QImage targetImg = getShellThumbnail(targetFile, 128);
+        QImage targetImg = getShellThumbnail(targetFile, 256);
 
         // 回退：针对普通图片或无插件环境，直接通过 Qt 加载
         if (targetImg.isNull()) {
@@ -429,8 +429,8 @@ public:
         QDir().mkpath(cacheDir);
 
         QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v13 标识，强制失效旧缓存
-        QString hashKey = QString("%1_%2_%3_%4_v13").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v14 标识，强制失效旧缓存
+        QString hashKey = QString("%1_%2_%3_%4_v14").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
         QString safeName = QString::number(qHash(hashKey), 16) + ".png";
         QString cachePath = cacheDir + safeName;
 

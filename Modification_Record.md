@@ -2989,3 +2989,36 @@ bool MftReader::saveToCache() {
 - 变更原因：根据需求优化颜色提取参数（采样率、降权系数、合并/过滤阈值），提升调色盘提取质量对标 Eagle。
 - 影响范围：`UiHelper::extractPalette`。
 - 是否在需求范围内：是
+
+---
+## [36] 变更时间：2026-05-31 05:10:00
+
+**文件路径：** `src/ui/UiHelper.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
+        // 优先从系统缩略图引擎获取数据，支持 PSD, AI, EPS, PDF 等专业格式 (前提是系统有预览插件)
+        QImage targetImg = getShellThumbnail(targetFile, 128);
+...
+        QFileInfo fi(path);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v13 标识，强制失效旧缓存
+        QString hashKey = QString("%1_%2_%3_%4_v13").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+```
+
+### 修改后（After）
+```cpp
+    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
+        // 优先从系统缩略图引擎获取数据，支持 PSD, AI, EPS, PDF 等专业格式 (前提是系统有预览插件)
+        QImage targetImg = getShellThumbnail(targetFile, 256);
+...
+        QFileInfo fi(path);
+        // 2026-06-xx 物理修复：在 hashKey 中加入 v14 标识，强制失效旧缓存
+        QString hashKey = QString("%1_%2_%3_%4_v14").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+```
+
+### 变更说明
+- 变更原因：修复缩略图分辨率不足导致的细节色丢失。将请求尺寸提升至 256 并更新缓存版本标识至 v14。
+- 影响范围：`UiHelper::extractPalette` 和 `UiHelper::getShellThumbnail`。
+- 是否在需求范围内：是

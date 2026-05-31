@@ -49,3 +49,29 @@
 **实际完成时间：** [2026-05-31 04:55:00]
 **对应 Modification_Record.md 变更序号：** #[35]
 **最终状态：** ✅ 完成
+
+---
+
+## 补充分析（2026-05-31 05:05:00）
+
+### § 0 需求原文
+> 任务：修复 `extractPalette` 缩略图分辨率不足导致细节色丢失的问题
+>
+> 在 `UiHelper.h` 的 `extractPalette` 函数中，`getShellThumbnail` 的请求尺寸从 `128` 改为 `256`，确保细线条、小面积特征色在缩略图中有足够像素覆盖：
+> QImage targetImg = getShellThumbnail(targetFile, 256);
+>
+> 同时 `getShellThumbnail` 的缓存 hashKey 中版本标识从 `v13` 改为 `v14`，强制失效旧的低分辨率缓存：
+> QString hashKey = QString("%1_%2_%3_%4_v14").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+
+### § 1 现状诊断
+**1.1 问题定位**
+- 根因：`getShellThumbnail` 的采样尺寸 (128) 低于后续 `extractPalette` 的处理尺寸 (200)。
+- 后果：细微特征色（如茎叶）在 128px 缩略图生成时因抗锯齿被背景色同化，导致即便提升算法精度也无法采样到原始色彩。
+
+### § 2 方案设计
+- 提升缩略图生成尺寸至 256px。
+- 更新缓存指纹版本至 v14，确保物理失效所有旧的低清晰度缓存。
+
+### § 9 执行结果
+**实际完成时间：** [2026-05-31 05:10:00]
+**对应 Modification_Record.md 变更序号：** #[36]
