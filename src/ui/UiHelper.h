@@ -400,7 +400,7 @@ public:
         for (int i = 0; i < (int)merged.size(); ++i) {
             if (result.size() >= 10) break;
             float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
-            if (ratio < 0.001f) continue;
+            if (ratio < 0.002f) continue;
 
             int h, s, l;
             merged[i].avgColor.getHsl(&h, &s, &l);

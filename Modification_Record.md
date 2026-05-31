@@ -3097,3 +3097,34 @@ bool MftReader::saveToCache() {
 - 变更原因：重构选色策略为色相均匀分布机制，确保每种独立色相都能在结果中获得展示席位，不被大面积背景色完全压制。
 - 影响范围：`UiHelper::extractPalette`。
 - 是否在需求范围内：是
+
+---
+## [38] 变更时间：2026-05-31 05:32:00
+
+**文件路径：** `src/ui/UiHelper.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+        for (int i = 0; i < (int)merged.size(); ++i) {
+            if (result.size() >= 10) break;
+            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
+            if (ratio < 0.001f) continue;
+
+            int h, s, l;
+```
+
+### 修改后（After）
+```cpp
+        for (int i = 0; i < (int)merged.size(); ++i) {
+            if (result.size() >= 10) break;
+            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
+            if (ratio < 0.002f) continue;
+
+            int h, s, l;
+```
+
+### 变更说明
+- 变更原因：根据用户指令微调最终过滤阈值，从 0.001f 调整为用户要求的 0.002f，以对标 Eagle 的过滤质量。
+- 影响范围：`UiHelper::extractPalette`。
+- 是否在需求范围内：是
