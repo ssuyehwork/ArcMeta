@@ -229,23 +229,23 @@ public:
 
 
     /**
-     * @brief 从图像中提取调色盘 (工业级优化版)
-     * 2026-06-xx 架构重构：彻底弃用外部工具链 (ImageMagick/Ghostscript)，全面转向原生 Shell 引擎
+     * @brief 从图像中提取调色盘 (对标 Eagle 质量版)
      */
-        static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
+    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
         QImage targetImg = getShellThumbnail(targetFile, 256);
         if (targetImg.isNull()) targetImg.load(targetFile);
         if (targetImg.isNull()) return {};
 
+        // 4. 采样分辨率从 128x128 提升到 200x200，增加低频特征色的采样覆盖
         QImage sampled = targetImg.scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         
         struct BucketInfo { 
             long long rSum = 0, gSum = 0, bSum = 0; 
-            double rankWeight = 0.0;
-            int count = 0;
+            double weightedCount = 0.0;
+            int absoluteCount = 0;
         };
         QMap<QRgb, BucketInfo> bucketStats;
-        int totalPixels = 0;
+        double totalWeightedPixels = 0.0;
 
         for (int row = 0; row < sampled.height(); ++row) {
             for (int col = 0; col < sampled.width(); ++col) {
@@ -257,31 +257,37 @@ public:
                 int h, s, l; color.getHsl(&h, &s, &l);
                 double sat = s / 255.0, lig = l / 255.0;
 
-                // 计算排序权重：鲜艳色、中性亮度色得分高
-                double vibrancy = sat * (1.0 - std::abs(lig - 0.5) * 2.0);
-                double weight = 0.2 + 10.0 * std::pow(vibrancy, 2.0);
+                // 问题1：过滤阈值过于激进 (对标 Eagle 基础过滤)
+                if (lig > 0.94 && sat < 0.08) continue; // 极白过滤
+                if (lig < 0.06) continue;               // 极黑过滤
 
-                // 极白/极黑不做过滤，但权重设低
-                if ((lig > 0.97 && sat < 0.05) || (lig < 0.03)) {
-                    weight = 0.01;
+                // 核心人眼感知权重计算
+                double perceptionWeight = 1.0;
+                if (sat > 0.08) {
+                    // 彩色像素权重：饱和度越高、亮度越处于中性(0.5)的色彩，视觉权重越大
+                    double base = sat * (1.0 - std::abs(lig - 0.5) * 2.0);
+                    perceptionWeight = 1.0 + 8.0 * base * base;
+                } else {
+                    // 问题2：无彩色降权幅度过猛，从 0.15 改为 0.4
+                    perceptionWeight = 0.4; // 原来是 0.15，过度压制导致少量彩色被淹没
                 }
 
-                // 5-bit 量化提高色彩区分度
-                QRgb rgbKey = qRgb(r & 0xF8, g & 0xF8, b & 0xF8);
+                // 4-bit 量化分组 (4096 桶)
+                QRgb rgbKey = qRgb(r & 0xF0, g & 0xF0, b & 0xF0);
                 auto& stat = bucketStats[rgbKey];
                 stat.rSum += r; stat.gSum += g; stat.bSum += b;
-                stat.rankWeight += weight;
-                stat.count++;
-                totalPixels++;
+                stat.weightedCount += perceptionWeight;
+                stat.absoluteCount++;
+                totalWeightedPixels += perceptionWeight;
             }
         }
-        if (totalPixels == 0) return {};
+        if (bucketStats.isEmpty()) return {};
 
-        struct FinalBucket { QColor avgColor; double rankWeight; int count; };
+        struct FinalBucket { QColor avgColor; double weightedCount; int absoluteCount; };
         QList<FinalBucket> buckets;
         for (auto it = bucketStats.begin(); it != bucketStats.end(); ++it) {
             const auto& s = it.value();
-            buckets.append({ QColor((int)(s.rSum / s.count), (int)(s.gSum / s.count), (int)(s.bSum / s.count)), s.rankWeight, s.count });
+            buckets.append({ QColor((int)(s.rSum / s.absoluteCount), (int)(s.gSum / s.absoluteCount), (int)(s.bSum / s.absoluteCount)), s.weightedCount, s.absoluteCount });
         }
 
         // 相似色合并
@@ -293,45 +299,30 @@ public:
                 int h2, s2, l2; m.avgColor.getHsl(&h2, &s2, &l2);
                 int dh = std::abs(h1 - h2); if (dh > 180) dh = 360 - dh;
                 int ds = std::abs(s1 - s2), dl = std::abs(l1 - l2);
-                if (dh < 15 && ds < 20 && dl < 15) { // 智能平衡阈值
-                    int total = m.count + b.count;
-                    m.avgColor = QColor((m.avgColor.red()*m.count + b.avgColor.red()*b.count)/total, (m.avgColor.green()*m.count + b.avgColor.green()*b.count)/total, (m.avgColor.blue()*m.count + b.avgColor.blue()*b.count)/total);
-                    m.rankWeight += b.rankWeight; m.count = total;
+                // 问题3：相似色合并阈值太宽松，收紧亮度阈值从 20 改为 12
+                if (dh < 18 && ds < 20 && dl < 12) {
+                    double totalWeight = m.weightedCount + b.weightedCount;
+                    int totalAbsolute = m.absoluteCount + b.absoluteCount;
+                    m.avgColor = QColor((m.avgColor.red()*m.weightedCount + b.avgColor.red()*b.weightedCount)/totalWeight, (m.avgColor.green()*m.weightedCount + b.avgColor.green()*b.weightedCount)/totalWeight, (m.avgColor.blue()*m.weightedCount + b.avgColor.blue()*b.weightedCount)/totalWeight);
+                    m.weightedCount = totalWeight; m.absoluteCount = totalAbsolute;
                     found = true; break;
                 }
             }
             if (!found) merged.append(b);
         }
 
-        // 智能选色：动态显著性排序 + 空间排斥
-        QVector<QPair<QColor, float>> result;
-        struct Candidate { QColor color; double score; int count; int h, s, l; };
-        QList<Candidate> candidates;
-        for (const auto& m : merged) {
-            int h, s, l; m.avgColor.getHsl(&h, &s, &l);
-            candidates.append({ m.avgColor, m.rankWeight, m.count, h, s, l });
-        }
+        // 根据感知加权数值降序排序
+        std::sort(merged.begin(), merged.end(), [](const FinalBucket& a, const FinalBucket& b) {
+            return a.weightedCount > b.weightedCount;
+        });
 
-        while (result.size() < 10 && !candidates.isEmpty()) {
-            int bestIdx = -1; double maxScore = -1e9;
-            for (int i = 0; i < candidates.size(); ++i) {
-                const auto& c = candidates[i];
-                double score = c.score;
-                for (const auto& r : result) {
-                    int h2, s2, l2; r.first.getHsl(&h2, &s2, &l2);
-                    if (c.s < 25 && s2 < 25) { if (std::abs(c.l - l2) < 40) score *= 0.1; }
-                    else {
-                        int dh = std::abs(c.h - h2); if (dh > 180) dh = 360 - dh;
-                        if (dh < 40) score *= (dh / 40.0);
-                        if (dh < 20 && std::abs(c.l - l2) < 30) score *= 0.2;
-                    }
-                }
-                if (score > maxScore) { maxScore = score; bestIdx = i; }
-            }
-            if (bestIdx != -1 && maxScore > 0) {
-                result.append({ candidates[bestIdx].color, (float)candidates[bestIdx].count / totalPixels });
-                candidates.removeAt(bestIdx);
-            } else break;
+        QVector<QPair<QColor, float>> result;
+        for (int i = 0; i < (int)merged.size(); ++i) {
+            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
+            // 问题4：最终过滤阈值误杀低占比特征色，从 0.005f 改为 0.002f
+            if (ratio < 0.002f) continue;
+            result.append({ merged[i].avgColor, ratio });
+            if (result.size() >= 10) break;
         }
         return result;
     }
