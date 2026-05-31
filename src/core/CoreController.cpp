@@ -43,20 +43,22 @@ void CoreController::startSystem() {
 
             // 2026-06-xx 架构升级：启动即全量静默入库
             // 不再跳过 MFT，改为后台自动唤醒索引引擎并触发数据库同步管线
-            qDebug() << "[Core] 正在后台静默唤醒 MFT 引擎以执行全量数据库入库...";
-            auto& reader = MftReader::instance();
-            if (!reader.loadFromCache()) {
-                // 如果没缓存，自动探测驱动器并扫描
-                QStringList drives;
-                DWORD mask = GetLogicalDrives();
-                for (int i = 0; i < 26; i++) {
-                    if (mask & (1 << i)) {
-                        QString d = QString(QChar('A' + i)) + ":";
-                        if (QDir(d).exists()) drives << d;
+            // 2026-06-xx 极致架构优化：将 MFT 引擎的唤醒与数据库全量入库彻底异步化，杜绝启动阻塞
+            (void)QtConcurrent::run([this]() {
+                qDebug() << "[Core] [Background] 正在静默唤醒 MFT 引擎以执行全量数据库对账...";
+                auto& reader = MftReader::instance();
+                if (!reader.loadFromCache()) {
+                    QStringList drives;
+                    DWORD mask = GetLogicalDrives();
+                    for (int i = 0; i < 26; i++) {
+                        if (mask & (1 << i)) {
+                            QString d = QString(QChar('A' + i)) + ":";
+                            if (QDir(d).exists()) drives << d;
+                        }
                     }
+                    reader.buildIndex(drives);
                 }
-                reader.buildIndex(drives);
-            }
+            });
 
             // 2. 执行一次增量对账
             // 2026-05-14 架构修正：消除“异步就绪幻觉”，确保对账完成后再宣告就绪

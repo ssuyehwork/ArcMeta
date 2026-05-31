@@ -76,6 +76,7 @@ public:
                         bool includeDollar = true) const;
     int      getIndexByKey(uint64_t compositeKey) const;
     int      getDriveIndex(const std::wstring& volume) const;
+    int      getDriveIndexBySerial(const std::wstring& serial) const;
     uint64_t getKeyByIndex(int index) const;
     QString  getName(int index) const;
     int64_t getSize(int index) const;
@@ -141,6 +142,7 @@ private:
     std::vector<uint8_t>   m_string_pool;
 
     std::vector<std::wstring> m_drive_list;
+    std::vector<std::wstring> m_drive_serials;
     std::atomic<uint32_t>     m_drive_active_mask{0}; // 驱动器过滤掩码 (位图)
 
     std::unordered_map<uint64_t, uint32_t>              m_frn_to_idx;
