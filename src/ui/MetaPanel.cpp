@@ -343,7 +343,8 @@ void MetaPanel::initUi() {
     m_containerLayout = new QVBoxLayout(m_container);
     // 2026-06-xx 工业级强制约束：严格保持左右 10px 边距，绝不溢出
     m_containerLayout->setContentsMargins(10, 10, 10, 10);
-    m_containerLayout->setSpacing(12);
+    // 2026-06-01 修正：降低全局间距，消除视觉断层 (原 12px -> 现 8px)
+    m_containerLayout->setSpacing(8);
     
     // [Section 1] 调色盘胶囊 (Palette Capsules)
     m_paletteCapsule = new PaletteCapsule(m_container);
@@ -459,8 +460,9 @@ void MetaPanel::initUi() {
 void MetaPanel::addInfoRow(const QString& label, QLabel*& valueLabel) {
     QWidget* row = new QWidget(m_container); 
     QHBoxLayout* rl = new QHBoxLayout(row); 
-    rl->setContentsMargins(0, 4, 0, 4); 
-    rl->setSpacing(12); // 增加呼吸感
+    // 2026-06-01 视觉密度优化：压缩行间距 (原 4px -> 现 2px)
+    rl->setContentsMargins(0, 2, 0, 2);
+    rl->setSpacing(8);
     
     QLabel* kl = new QLabel(label, row); 
     kl->setFixedWidth(80); // 适度增加宽度以支持长标签
@@ -515,6 +517,19 @@ void MetaPanel::onTagDeleted(const QString& text) {
             }
             return;
         }
+    }
+}
+
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+    // 工业级防御：强制约束子组件最大宽度，预留 20px 边距 (10px * 2)
+    int maxW = width() - 20;
+    if (maxW > 0) {
+        m_nameEdit->setMaximumWidth(maxW);
+        m_noteEdit->setMaximumWidth(maxW);
+        m_linkEdit->setMaximumWidth(maxW);
+        m_categoryEdit->setMaximumWidth(maxW);
+        lblPath->setMaximumWidth(maxW - 80); // 考虑左侧 Label 宽度
     }
 }
 
@@ -586,7 +601,12 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
     if (m_paletteCapsule) {
         m_paletteCapsule->setPalette(palette);
     }
-    if (m_container) m_container->adjustSize();
+    if (m_container) {
+        m_container->adjustSize();
+        // 强制触发一次 resize 逻辑以同步宽度约束
+        QResizeEvent re(size(), size());
+        resizeEvent(&re);
+    }
 }
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
