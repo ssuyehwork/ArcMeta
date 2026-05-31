@@ -1,5 +1,6 @@
 #include "ScanController.h"
 #include "../mft/MftReader.h"
+#include "../db/ItemRepo.h"
 #include <QtConcurrent/QtConcurrent>
 #include <QElapsedTimer>
 
@@ -77,15 +78,60 @@ void ScanController::performSearch() {
     timer.start();
 
     auto future = QtConcurrent::run([text = m_searchText, state = m_filterState]() {
+        // 2.2 控制层：混合搜索架构 (Hybrid Search)
+        // 方案 B：混合模式。关键词搜索优先尝试 SQL 引擎，由数据库处理复杂标签和元数据关联。
+        std::vector<uint64_t> results;
+
         // 如果开启自动显示且查询为空，则执行全量搜索（带过滤）
         if (state.autoDisplay && text.isEmpty() && state.extensionList.isEmpty()) {
-            return MftReader::instance().search("", state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem, state.includeDollar);
+            results = MftReader::instance().search("", state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem, state.includeDollar);
         }
-        // 否则，如果不是自动显示且查询为空，返回空结果
-        if (!state.autoDisplay && text.isEmpty() && state.extensionList.isEmpty()) {
+        else if (!state.autoDisplay && text.isEmpty() && state.extensionList.isEmpty()) {
             return std::vector<uint64_t>();
         }
-        return MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem, state.includeDollar);
+        else if (!state.useRegex && !text.isEmpty()) {
+            // 对于普通关键词搜索，尝试 SQL 接管
+            auto records = ItemRepo::searchRecordsByKeyword(text);
+            if (!records.empty()) {
+                auto& reader = MftReader::instance();
+                for (const auto& r : records) {
+                    // 将数据库记录映射回内存 SoA 的复合键
+                    uint64_t frn = std::stoull(r.frn.toStdString());
+
+                    // 2026-06-xx 效率优化：优先通过记录中的 volume 匹配驱动器索引
+                    int matchedDrive = reader.getDriveIndex(r.volume.toStdWString());
+
+                    // 如果通过名字没找着，则回退到暴力探测（处理卷标不一致的极端情况）
+                    if (matchedDrive == -1) {
+                        for (int d = 0; d < 32; ++d) {
+                            uint64_t key = MftReader::makeKey(d, frn);
+                            if (reader.getIndexByKey(key) != -1) {
+                                matchedDrive = d;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (matchedDrive != -1) {
+                        results.push_back(MftReader::makeKey(matchedDrive, frn));
+                    }
+                }
+                // 去重，因为可能从不同驱动器搜到同名文件（虽然可能性小但物理上存在）
+                std::sort(results.begin(), results.end());
+                results.erase(std::unique(results.begin(), results.end()), results.end());
+            }
+
+            // 如果 SQL 没搜到或我们需要联合 MFT 实时搜索（例如刚创建还没入库的文件）
+            // 将 MFT 搜索结果与 SQL 结果合并
+            auto mftRes = MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem, state.includeDollar);
+            results.insert(results.end(), mftRes.begin(), mftRes.end());
+            std::sort(results.begin(), results.end());
+            results.erase(std::unique(results.begin(), results.end()), results.end());
+        }
+        else {
+            results = MftReader::instance().search(text, state.useRegex, state.caseSensitive, state.extensionList, state.includeHidden, state.includeSystem, state.includeDollar);
+        }
+        return results;
     });
 
     disconnect(&m_watcher, &QFutureWatcher<std::vector<uint64_t>>::finished, this, nullptr);

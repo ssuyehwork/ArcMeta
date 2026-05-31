@@ -75,6 +75,7 @@ public:
                         const QStringList& extensionList, bool includeHidden, bool includeSystem,
                         bool includeDollar = true) const;
     int      getIndexByKey(uint64_t compositeKey) const;
+    int      getDriveIndex(const std::wstring& volume) const;
     uint64_t getKeyByIndex(int index) const;
     QString  getName(int index) const;
     int64_t getSize(int index) const;
@@ -126,7 +127,7 @@ private:
     void buildSortedIndices();
     
     bool loadMftDirect(const std::wstring& volume, DriveResult& result);
-    void mergeDriveResult(const std::wstring& volume, const DriveResult& result, size_t driveIdx);
+    void mergeDriveResult(const std::wstring& volume, DriveResult&& result, size_t driveIdx);
 
     // SoA 主数据
     std::vector<uint64_t>  m_frns;
