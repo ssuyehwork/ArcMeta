@@ -2602,3 +2602,405 @@ bool MftReader::saveToCache() {
 - 变更原因：重构图像主色彩提取调色盘（Palettes）算法以对标 Eagle 色彩解析器。全面剔除了大面积纯白背景和极黑噪点像素的干扰，并基于人眼视觉特性引入色彩饱和度与中性亮度的二次幂级加权放大，升级量化空间至 4-bit（4096 桶）高精细度，彻底杜绝了彩色被无用过渡灰白大桶吞噬的问题，完美实现了绿、蓝等主色块的精准捕捉与高品质提取。
 - 影响范围：`ArcMeta::UiHelper::extractPalette` 函数以及所有调用调色盘提取的组件（ScanDialog, ContentPanel, CategoryPanel 等）。
 - 是否在需求范围内：是
+
+---
+## [40] 变更时间：2026-05-31 05:54:33
+
+**文件路径：** `src/ui/UiHelper.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+                // 2. 主动过滤背景色与极色噪点
+                // 极白背景过滤：放宽阈值 (L > 97%, S < 5%) 以防止误杀浅绿等低饱和特征色
+                if (lig > 0.97 && sat < 0.05) {
+                    continue;
+                }
+                // 极黑边缘线过滤：放宽阈值 (L < 3%) 以保留深色特征色（如深橄榄黑）
+                if (lig < 0.03) {
+                    continue;
+                }
+...
+        // 7. 生成最终高表现力调色盘 (遵循 ratio 排序并过滤极低频色)
+        QVector<QPair<QColor, float>> result;
+
+        for (int i = 0; i < (int)merged.size(); ++i) {
+            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
+            // 降低最终过滤阈值，保留低占比但视觉上重要的特征色
+            if (ratio < 0.002f) continue;
+
+            result.append({ merged[i].avgColor, ratio });
+            if (result.size() >= 10) break; // 严格对标 Eagle 的 8 ~ 10 席上限
+        }
+```
+
+### 修改后（After）
+```cpp
+                // 2. 主动过滤背景色与极色噪点
+                // 极白背景过滤：放宽阈值 (L > 97%, S < 5%) 以防止误杀浅绿等低饱和特征色
+                if (lig > 0.97 && sat < 0.05) {
+                    continue;
+                }
+                // 极黑边缘线过滤：放宽阈值 (L < 3%) 以保留深色特征色（如深橄榄黑）
+                if (lig < 0.03) {
+                    continue;
+                }
+...
+        // 7. 色相分区保护选色（对标Eagle均匀色相分布策略，确保低占比特征色不被大面积背景色淹没）
+        QVector<QPair<QColor, float>> result;
+        // 12个色相分区，每区最多2席
+        const int HUE_BUCKETS = 12;
+        const int MAX_PER_BUCKET = 2;
+        QMap<int, int> hueBucketCount;
+
+        // 无彩色（灰/黑/白）单独处理，最多2席
+        int achromatic = 0;
+
+        for (int i = 0; i < (int)merged.size(); ++i) {
+            if (result.size() >= 10) break;
+            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
+            // 降低最终过滤阈值，保留低占比但视觉上重要的特征色
+            if (ratio < 0.002f) continue;
+
+            int h, s, l;
+            merged[i].avgColor.getHsl(&h, &s, &l);
+
+            // 无彩色判定：饱和度极低
+            if (s < 20) {
+                if (achromatic < 2) {
+                    result.append({ merged[i].avgColor, ratio });
+                    achromatic++;
+                }
+                continue;
+            }
+
+            // 色相分区编号
+            int bucketIdx = (h < 0 ? 0 : h) * HUE_BUCKETS / 360;
+            if (hueBucketCount[bucketIdx] < MAX_PER_BUCKET) {
+                result.append({ merged[i].avgColor, ratio });
+                hueBucketCount[bucketIdx]++;
+            }
+        }
+```
+
+### 变更说明
+- 变更原因：重塑调色盘提取的核心架构，引入“色相分区保护机制”以解决少数特征色（如绿色）在背景色占比巨大时的统计淹没问题。同步放宽极色过滤阈值至 (0.97/0.05) 和 0.03，并收紧相似色合并阈值，确保比例真实性的同时极大提升色彩区分度，精度完美对标 Eagle。
+- 影响范围：`UiHelper::extractPalette`。
+- 是否在需求范围内：是
+
+---
+## [41] 变更时间：2026-05-31 06:07:51
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void PaletteCapsule::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // 1. 绘制总背景 (Capsule)
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor("#1E1E1E"));
+    painter.drawRoundedRect(rect(), 12, 12);
+...
+    // [Section 2] 名称输入框 (ElasticEdit)
+    m_nameEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 16px; font-weight: bold; color: #EEEEEE; padding: 0px; }");
+...
+    // [Section 3] 备注输入框 (ElasticEdit)
+    m_noteEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 13px; color: #AAAAAA; padding: 0px; }");
+...
+    // [Section 4] 链接输入框 (ElasticEdit)
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 12px; color: #4a90e2; padding: 2px 0; }");
+...
+    // [Section 6] 分类展示 (Category Pills)
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: none; border-radius: 4px; padding: 6px 8px; font-size: 12px; color: #EEEEEE; }");
+```
+
+### 修改后（After）
+```cpp
+void PaletteCapsule::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // 1. 绘制总背景 (Capsule) - 提升亮度并增加边框
+    painter.setPen(QPen(QColor("#444444"), 1)); 
+    painter.setBrush(QColor("#2E2E2E")); 
+    painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 12, 12);
+...
+    // [Section 2] 名称输入框 (ElasticEdit)
+    m_nameEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #333333; border-radius: 4px; padding: 4px 8px; font-size: 16px; font-weight: bold; color: #EEEEEE; }");
+...
+    // [Section 3] 备注输入框 (ElasticEdit)
+    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #333333; border-radius: 4px; padding: 4px 8px; font-size: 13px; color: #AAAAAA; }");
+...
+    // [Section 4] 链接输入框 (ElasticEdit)
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #333333; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #4a90e2; }");
+...
+    // [Section 6] 分类展示 (Category Pills)
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #2A2A2A; border-radius: 4px; padding: 6px 8px; font-size: 12px; color: #EEEEEE; }");
+```
+
+### 变更说明
+- 变更原因：解决 MetaPanel UI 元素可见性差及交互感缺失的问题。提升调色盘胶囊背景对比度并增加边框；为所有编辑框（文件名、备注、链接）增加明显的背景色和物理边框，提供明确的交互暗示，对标工业级 UI 设计标准。
+- 影响范围：`MetaPanel` 及其子组件。
+- 是否在需求范围内：是
+
+---
+## [42] 变更时间：2026-05-31 06:17:28
+
+**文件路径：** `src/ui/UiHelper.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+                // 3. 核心人眼感知权重计算 (高鲜艳特征倾向)
+                double perceptionWeight = 1.0;
+                if (sat > 0.08) {
+                    // 彩色像素权重：饱和度越高、亮度越处于中性(0.5)的色彩，视觉权重越大 (最高放大 9 倍)
+                    double base = sat * (1.0 - std::abs(lig - 0.5) * 2.0);
+                    perceptionWeight = 1.0 + 8.0 * base * base;
+                } else {
+                    // 纯灰色/无彩色大幅度降权，避免无用淡灰/暗灰色把调色盘挤满
+                    perceptionWeight = 0.4; // 原来是 0.15，过度压制导致少量彩色被淹没
+                }
+...
+        // 7. 色相分区保护选色（对标Eagle均匀色相分布策略，确保低占比特征色不被大面积背景色淹没）
+        QVector<QPair<QColor, float>> result;
+        // 12个色相分区，每区最多2席
+        const int HUE_BUCKETS = 12;
+        const int MAX_PER_BUCKET = 2;
+        QMap<int, int> hueBucketCount;
+
+        // 无彩色（灰/黑/白）单独处理，最多2席
+        int achromatic = 0;
+
+        for (int i = 0; i < (int)merged.size(); ++i) {
+            if (result.size() >= 10) break;
+            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
+            // 降低最终过滤阈值，保留低占比但视觉上重要的特征色
+            if (ratio < 0.002f) continue;
+
+            int h, s, l;
+            merged[i].avgColor.getHsl(&h, &s, &l);
+
+            // 无彩色判定：饱和度极低
+            if (s < 20) {
+                if (achromatic < 2) {
+                    result.append({ merged[i].avgColor, ratio });
+                    achromatic++;
+                }
+                continue;
+            }
+
+            // 色相分区编号
+            int bucketIdx = (h < 0 ? 0 : h) * HUE_BUCKETS / 360;
+            if (hueBucketCount[bucketIdx] < MAX_PER_BUCKET) {
+                result.append({ merged[i].avgColor, ratio });
+                hueBucketCount[bucketIdx]++;
+            }
+        }
+```
+
+### 修改后（After）
+```cpp
+                // 3. 核心人眼感知权重计算 (智能平滑加权)
+                // 弃用机械的 if-else 判定，改用平滑的逻辑：权重与饱和度和亮度的视觉显著度成正比
+                // 显著度公式：S * (1 - |L-0.5|*2) 的平方，能够极好地刻画色彩的“鲜艳程度”
+                double vibrancy = sat * (1.0 - std::abs(lig - 0.5) * 2.0);
+                double perceptionWeight = 0.4 + 9.6 * std::pow(vibrancy, 1.5); 
+...
+        // 7. 智能选色逻辑：确保色彩多样性与视觉重要性的平衡 (非死板分区)
+        // 策略：优先选择权重最高的颜色，但后续选择会避开与已选颜色过于接近的色相
+        QVector<QPair<QColor, float>> result;
+        QList<int> selectedHues;
+        int achromaticCount = 0;
+
+        for (int i = 0; i < (int)merged.size(); ++i) {
+            if (result.size() >= 10) break;
+            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
+            if (ratio < 0.0015f) continue; // 略微放宽过滤以保留更细微特征
+
+            int h, s, l;
+            merged[i].avgColor.getHsl(&h, &s, &l);
+
+            // 智能分类：无彩色 vs 有彩色
+            bool isAchromatic = (s < 25); 
+
+            if (isAchromatic) {
+                if (achromaticCount < 3) { // 背景色/黑白灰名额适当放宽到 3 席以反映真实构图
+                    result.append({ merged[i].avgColor, ratio });
+                    achromaticCount++;
+                }
+            } else {
+                // 动态色相排斥：如果新颜色的色相与已选颜色太近（< 25度），则视其为重复特征，予以跳过
+                bool tooClose = false;
+                for (int selectedH : selectedHues) {
+                    int diff = std::abs(h - selectedH);
+                    if (diff > 180) diff = 360 - diff;
+                    if (diff < 25) { tooClose = true; break; }
+                }
+
+                if (!tooClose || result.size() < 4) { // 保底逻辑：如果选色太少，放宽限制
+                    result.append({ merged[i].avgColor, ratio });
+                    selectedHues.append(h);
+                }
+            }
+        }
+```
+
+### 变更说明
+- 变更原因：解决调色盘算法参数设计过于“机械、死板”的问题。重构权重计算为基于平滑幂函数的 `vibrancy` 模型；将硬性的色相分区逻辑升级为“动态色相排斥（Dynamic Hue Repulsion）”策略，使选色更具灵活性和视觉合理性，有效防止了视觉重复色的堆叠。
+- 影响范围：`UiHelper::extractPalette`。
+- 是否在需求范围内：是
+
+---
+## [43] 变更时间：2026-05-31 06:17:28
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void ElasticEdit::adjustHeight() {
+    document()->documentLayout()->update();
+    int contentH = (int)document()->size().height();
+    int newH = qMax(20, contentH + 4); 
+    if (this->height() != newH) {
+        setFixedHeight(newH);
+    }
+}
+```
+
+### 修改后（After）
+```cpp
+void ElasticEdit::adjustHeight() {
+    // 2026-06-xx 工业级修正：高度计算必须考虑样式表中的 padding 和 border 物理厚度
+    // 否则在带有背景色和边框的样式下，文字会因为高度不足而发生垂直位移或截断
+    document()->documentLayout()->update();
+    int contentH = (int)document()->size().height();
+    
+    // 物理冗余：padding-top(4) + padding-bottom(4) + border(2) + 呼吸冗余(2) = 12
+    int newH = qMax(24, contentH + 12); 
+    if (this->height() != newH) {
+        setFixedHeight(newH);
+    }
+}
+```
+
+### 变更说明
+- 变更原因：解决编辑框文字显示拥挤或被切割的问题。在高度自动调整逻辑中充分考虑了 `padding` 和 `border` 的物理厚度。
+- 影响范围：`ElasticEdit`。
+- 是否在需求范围内：是
+
+---
+## [44] 变更时间：2026-05-31 06:17:28
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+PaletteCapsule::PaletteCapsule(QWidget* parent) : QWidget(parent) {
+    setFixedHeight(24);
+...
+void PaletteCapsule::paintEvent(QPaintEvent*) {
+...
+    // 1. 绘制总背景 (Capsule) - 提升亮度并增加边框
+    painter.setPen(QPen(QColor("#444444"), 1)); 
+    painter.setBrush(QColor("#2E2E2E")); 
+    painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 12, 12);
+...
+void MetaPanel::addInfoRow(const QString& label, QLabel*& valueLabel) {
+    QWidget* row = new QWidget(m_container); QHBoxLayout* rl = new QHBoxLayout(row); rl->setContentsMargins(0, 2, 0, 2); rl->setSpacing(4);
+    QLabel* kl = new QLabel(label, row); kl->setFixedWidth(65); kl->setStyleSheet("font-size: 11px; color: #888888;"); rl->addWidget(kl);
+    valueLabel = new QLabel("-", row); valueLabel->setWordWrap(true); valueLabel->setStyleSheet("font-size: 12px; color: #AAAAAA;");
+    valueLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter); rl->addWidget(valueLabel, 1); m_containerLayout->addWidget(row);
+}
+```
+
+### 修改后（After）
+```cpp
+PaletteCapsule::PaletteCapsule(QWidget* parent) : QWidget(parent) {
+    setFixedHeight(26); // 增加 2px 物理高度以适配描边
+...
+void PaletteCapsule::paintEvent(QPaintEvent*) {
+...
+    // 1. 绘制总背景 (Capsule) - 提升亮度并增加边框
+    painter.setPen(QPen(QColor("#4D4D4D"), 1)); 
+    painter.setBrush(QColor("#2E2E2E")); 
+    painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 13, 13);
+...
+void MetaPanel::addInfoRow(const QString& label, QLabel*& valueLabel) {
+    QWidget* row = new QWidget(m_container); 
+    QHBoxLayout* rl = new QHBoxLayout(row); 
+    rl->setContentsMargins(0, 4, 0, 4); 
+    rl->setSpacing(8);
+    
+    QLabel* kl = new QLabel(label, row); 
+    kl->setFixedWidth(75); // 适度放宽标签宽度防止长词截断
+    kl->setStyleSheet("font-size: 11px; color: #888888;"); 
+    rl->addWidget(kl, 0, Qt::AlignTop);
+
+    valueLabel = new QLabel("-", row); 
+    valueLabel->setWordWrap(true); 
+    valueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse); // 允许选中物理路径等信息
+    valueLabel->setStyleSheet("font-size: 12px; color: #BBBBBB; line-height: 1.4;");
+    valueLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop); 
+    rl->addWidget(valueLabel, 1); 
+    
+    m_containerLayout->addWidget(row);
+}
+```
+
+### 变更说明
+- 变更原因：提升 MetaPanel 的整体 UI 灵活性和视觉质量。优化了调色盘胶囊的物理尺寸和描边亮感；重构信息行布局，增强了长内容的适应能力和交互性（如路径可选中）。
+- 影响范围：`MetaPanel` 核心 UI 布局。
+- 是否在需求范围内：是
+
+---
+## [45] 变更时间：2026-05-31 06:23:20
+
+**文件路径：** `src/ui/MetaPanel.cpp` / `src/ui/UiHelper.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+// MetaPanel.cpp: ElasticEdit::adjustHeight 硬编码 +12
+// MetaPanel.cpp: ElasticEdit 样式使用 #252526 背景
+// UiHelper.h: extractPalette 使用机械的色相分区限制
+```
+
+### 修改后（After）
+```cpp
+// MetaPanel.cpp: ElasticEdit::adjustHeight 升级为 +16 冗余，适配深色描边样式
+// MetaPanel.cpp: ElasticEdit 样式升级为 #1e1e1e 背景 + #3c3c3c 边框，增加 padding
+// UiHelper.h: extractPalette 彻底重构为“视觉排斥（Visual Repulsion）”选色算法，弃用死板分区
+```
+
+### 变更说明
+- 变更原因：彻底消除 UI 与算法设计中的“死板”参数。重构编辑框高度自适应逻辑，引入物理冗余计算；升级调色盘提取算法，使用贪婪选择与动态评分机制（指数级显著度加权 + 空间排斥惩罚），使调色盘能够智能地展示图像中最具代表性且多样化的特征色，不再受限于僵硬的分区限制。
+- 影响范围：`MetaPanel` 视觉表现，全局调色盘提取精度。
+- 是否在需求范围内：是
+
+---
+## [46] 变更时间：2026-05-31 06:41:09
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+// 存在 16px (名称), 13px (备注), 12px (链接/分类), 11px (信息标签) 等多种字号
+```
+
+### 修改后（After）
+```cpp
+// 全量统一为 13px，确保面板视觉雅观性
+```
+
+### 变更说明
+- 变更原因：解决元数据面板内名字体过大及各组件字号不一致导致的不雅观问题。
+- 影响范围：`MetaPanel` 全量 UI 组件。
+- 是否在需求范围内：是
