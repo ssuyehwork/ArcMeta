@@ -1487,11 +1487,12 @@ void MftReader::triggerDatabaseSync(size_t dIdx) {
     if (dIdx >= m_drive_list.size()) return;
     std::wstring volume = m_drive_list[dIdx];
 
-    // 2026-06-xx 性能加固：使用最底层的线程优先级执行静默入库，防止干扰 UI 操作
+    // 2026-06-xx 极致架构优化：采用“分片批处理 + 锁间隙释放”机制
+    // 理由：全量入库数百万条目时，长时间持有 m_dataLock 或高频申请锁会阻塞 UI 线程的搜索与路径反查。
     (void)QtConcurrent::run(QThreadPool::globalInstance(), [this, dIdx, volume]() {
         std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volume + L"\\");
         QSqlDatabase db = Database::instance().getThreadDatabase();
-        { QSqlQuery qtx(db); qtx.exec("BEGIN TRANSACTION"); }
+        std::wstring dbPath = Database::instance().getDbPath();
 
         std::vector<uint32_t> indices;
         {
@@ -1499,43 +1500,72 @@ void MftReader::triggerDatabaseSync(size_t dIdx) {
             if (dIdx < 32) indices = m_drive_entry_indices[dIdx];
         }
 
-        int count = 0;
-        for (uint32_t i : indices) {
-            uint64_t frn, parentFrn;
-            int64_t size, mtime;
-            uint32_t attr;
+        struct EntrySnapshot {
+            uint64_t frn;
             std::wstring path, parentPath;
+            bool isDir;
+            int64_t mtime, size;
+            std::string fid;
+        };
 
+        const size_t batchSize = 500; // 每批 500 条，兼顾 SQL 效率与响应性
+        int totalProcessed = 0;
+
+        for (size_t start = 0; start < indices.size(); start += batchSize) {
+            // 工业级防御：检查初始化状态，支持同步过程中安全退出
+            if (!m_isInitialized || m_is_clearing.load()) break;
+
+            // 工业级连接维护：若连接因 IO 压力过载而失效，执行物理重连
+            if (!db.isOpen()) {
+                db = QSqlDatabase::addDatabase("QSQLITE", QString::fromStdWString(volume + L"_sync_" + std::to_wstring(GetCurrentThreadId())));
+                db.setDatabaseName(QString::fromStdWString(dbPath));
+                if (!db.open()) break;
+            }
+
+            std::vector<EntrySnapshot> batch;
+            batch.reserve(batchSize);
+
+            // [阶段 1] 锁内采样（采样 500 个条目，耗时约 1-2ms）
             {
                 QReadLocker lock(&m_dataLock);
-                if (i >= m_frns.size() || m_frns[i] == 0) continue;
-                frn = m_frns[i];
-                parentFrn = m_parent_frns[i] & 0x0000FFFFFFFFFFFFull;
-                size = m_sizes[i];
-                mtime = m_timestamps[i];
-                attr = m_attributes[i];
-                // 此时索引已就绪，可以安全获取路径
-                path = getPathFastInternal(dIdx, frn);
-                parentPath = getPathFastInternal(dIdx, parentFrn);
-            }
+                size_t end = (std::min)(start + batchSize, indices.size());
+                for (size_t k = start; k < end; ++k) {
+                    uint32_t i = indices[k];
+                    if (i >= m_frns.size() || m_frns[i] == 0) continue;
 
-            if (path.empty()) continue;
+                    EntrySnapshot s;
+                    s.frn = m_frns[i];
+                    uint64_t parentFrn = m_parent_frns[i] & 0x0000FFFFFFFFFFFFull;
+                    s.path = getPathFastInternal(dIdx, s.frn);
+                    s.parentPath = getPathFastInternal(dIdx, parentFrn);
+                    s.isDir = (m_attributes[i] & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                    s.mtime = m_timestamps[i];
+                    s.size = m_sizes[i];
 
-            wchar_t frnBuf[17]; swprintf(frnBuf, 17, L"%016llX", frn);
-            std::wstring frnStr(frnBuf);
-            std::string fid = "FRN:" + QString::fromStdWString(volSerial).toUpper().toStdString() + ":" + QString::fromStdWString(frnStr).toUpper().toStdString();
+                    if (!s.path.empty()) {
+                        wchar_t frnBuf[17]; swprintf(frnBuf, 17, L"%016llX", s.frn);
+                        std::wstring frnStr(frnBuf);
+                        s.fid = "FRN:" + QString::fromStdWString(volSerial).toUpper().toStdString() + ":" + QString::fromStdWString(frnStr).toUpper().toStdString();
+                        batch.push_back(std::move(s));
+                    }
+                }
+            } // 释放锁，允许 UI 线程进入
 
-            ItemRepo::saveBasicInfo(volSerial, frnStr, path, parentPath,
-                                   (attr & FILE_ATTRIBUTE_DIRECTORY) != 0,
-                                   mtime, size, 0, fid, db);
-
-            if (++count % 5000 == 0) {
-                { QSqlQuery qtx(db); qtx.exec("COMMIT"); }
+            // [阶段 2] 锁外 SQL 写入
+            if (!batch.empty()) {
                 { QSqlQuery qtx(db); qtx.exec("BEGIN TRANSACTION"); }
+                for (const auto& s : batch) {
+                    wchar_t frnBuf[17]; swprintf(frnBuf, 17, L"%016llX", s.frn);
+                    ItemRepo::saveBasicInfo(volSerial, frnBuf, s.path, s.parentPath, s.isDir, s.mtime, s.size, 0, s.fid, db);
+                }
+                { QSqlQuery qtx(db); qtx.exec("COMMIT"); }
+                totalProcessed += (int)batch.size();
             }
+
+            // [阶段 3] 强制避让（毫秒级间隙，杜绝 CPU 100% 与锁积压）
+            QThread::msleep(5);
         }
-        { QSqlQuery qtx(db); qtx.exec("COMMIT"); }
-        qDebug() << "[MftReader] 驱动器" << QString::fromStdWString(volume) << "数据库同步完成，条目数:" << count;
+        qDebug() << "[MftReader] 驱动器" << QString::fromStdWString(volume) << "静默入库完成，总计:" << totalProcessed;
     });
 }
 
