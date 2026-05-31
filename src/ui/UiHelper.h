@@ -387,27 +387,39 @@ public:
             return a.weightedCount > b.weightedCount;
         });
 
-        // 7. 生成最终高表现力调色盘 (去噪、背景限制与 Eagle 席位对标)
+        // 7. 色相分区保护选色（对标Eagle均匀色相分布策略）
         QVector<QPair<QColor, float>> result;
-        int whiteBackgroundCount = 0; // 限制纯白/极淡色背景的名额，最多允许 1 个
+        // 12个色相分区，每区最多2席
+        const int HUE_BUCKETS = 12;
+        const int MAX_PER_BUCKET = 2;
+        QMap<int, int> hueBucketCount;
+
+        // 无彩色（灰/黑/白）单独处理，最多2席
+        int achromatic = 0;
 
         for (int i = 0; i < (int)merged.size(); ++i) {
+            if (result.size() >= 10) break;
             float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
-            if (ratio < 0.002f) continue; // 过滤极低频感知色
+            if (ratio < 0.001f) continue;
 
             int h, s, l;
             merged[i].avgColor.getHsl(&h, &s, &l);
 
-            // 背景特征白/极亮色检测：饱和度极低且亮度极高 (如大片空白画布)
-            if (l > 225 && s < 20) {
-                if (whiteBackgroundCount >= 1) {
-                    continue; // 忽略重复的多余亮白背景色块，保留特征彩色的珍贵位置
+            // 无彩色判定：饱和度极低
+            if (s < 20) {
+                if (achromatic < 2) {
+                    result.append({ merged[i].avgColor, ratio });
+                    achromatic++;
                 }
-                whiteBackgroundCount++;
+                continue;
             }
 
-            result.append({ merged[i].avgColor, ratio });
-            if (result.size() >= 10) break; // 严格对标 Eagle 的 8 ~ 10 席上限
+            // 色相分区编号
+            int bucketIdx = (h < 0 ? 0 : h) * HUE_BUCKETS / 360;
+            if (hueBucketCount[bucketIdx] < MAX_PER_BUCKET) {
+                result.append({ merged[i].avgColor, ratio });
+                hueBucketCount[bucketIdx]++;
+            }
         }
 
         return result;

@@ -3022,3 +3022,78 @@ bool MftReader::saveToCache() {
 - 变更原因：修复缩略图分辨率不足导致的细节色丢失。将请求尺寸提升至 256 并更新缓存版本标识至 v14。
 - 影响范围：`UiHelper::extractPalette` 和 `UiHelper::getShellThumbnail`。
 - 是否在需求范围内：是
+
+---
+## [37] 变更时间：2026-05-31 05:30:00
+
+**文件路径：** `src/ui/UiHelper.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+        // 7. 生成最终高表现力调色盘 (去噪、背景限制与 Eagle 席位对标)
+        QVector<QPair<QColor, float>> result;
+        int whiteBackgroundCount = 0; // 限制纯白/极淡色背景的名额，最多允许 1 个
+
+        for (int i = 0; i < (int)merged.size(); ++i) {
+            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
+            if (ratio < 0.002f) continue; // 过滤极低频感知色
+
+            int h, s, l;
+            merged[i].avgColor.getHsl(&h, &s, &l);
+
+            // 背景特征白/极亮色检测：饱和度极低且亮度极高 (如大片空白画布)
+            if (l > 225 && s < 20) {
+                if (whiteBackgroundCount >= 1) {
+                    continue; // 忽略重复的多余亮白背景色块，保留特征彩色的珍贵位置
+                }
+                whiteBackgroundCount++;
+            }
+
+            result.append({ merged[i].avgColor, ratio });
+            if (result.size() >= 10) break; // 严格对标 Eagle 的 8 ~ 10 席上限
+        }
+```
+
+### 修改后（After）
+```cpp
+        // 7. 色相分区保护选色（对标Eagle均匀色相分布策略）
+        QVector<QPair<QColor, float>> result;
+        // 12个色相分区，每区最多2席
+        const int HUE_BUCKETS = 12;
+        const int MAX_PER_BUCKET = 2;
+        QMap<int, int> hueBucketCount;
+
+        // 无彩色（灰/黑/白）单独处理，最多2席
+        int achromatic = 0;
+
+        for (int i = 0; i < (int)merged.size(); ++i) {
+            if (result.size() >= 10) break;
+            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
+            if (ratio < 0.001f) continue;
+
+            int h, s, l;
+            merged[i].avgColor.getHsl(&h, &s, &l);
+
+            // 无彩色判定：饱和度极低
+            if (s < 20) {
+                if (achromatic < 2) {
+                    result.append({ merged[i].avgColor, ratio });
+                    achromatic++;
+                }
+                continue;
+            }
+
+            // 色相分区编号
+            int bucketIdx = (h < 0 ? 0 : h) * HUE_BUCKETS / 360;
+            if (hueBucketCount[bucketIdx] < MAX_PER_BUCKET) {
+                result.append({ merged[i].avgColor, ratio });
+                hueBucketCount[bucketIdx]++;
+            }
+        }
+```
+
+### 变更说明
+- 变更原因：重构选色策略为色相均匀分布机制，确保每种独立色相都能在结果中获得展示席位，不被大面积背景色完全压制。
+- 影响范围：`UiHelper::extractPalette`。
+- 是否在需求范围内：是
