@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QAbstractTextDocumentLayout>
 #include "UiHelper.h"
+#include "StyleLibrary.h"
 #include "../meta/MetadataManager.h"
 
 namespace ArcMeta {
@@ -62,18 +63,40 @@ PaletteCapsule::PaletteCapsule(QWidget* parent) : QWidget(parent) {
 
 void PaletteCapsule::setPalette(const QVector<QPair<QColor, float>>& palette) {
     m_palette = palette;
-    if (palette.isEmpty()) {
-        setFixedSize(0, 26);
-    } else {
-        int w = m_padding * 2 + (int)palette.size() * m_dotSize + ((int)palette.size() - 1) * m_spacing;
-        setFixedSize(w, 28);
-    }
+    // 2026-06-xx 工业级重构：废弃 setFixedSize，改用 sizeHint 和自适应绘制
+    // 允许布局系统根据父容器宽度进行压缩
+    updateGeometry();
     update();
+}
+
+QSize PaletteCapsule::sizeHint() const {
+    if (m_palette.isEmpty()) return QSize(0, 28);
+    int w = m_padding * 2 + (int)m_palette.size() * m_dotSize + ((int)m_palette.size() - 1) * m_spacing;
+    return QSize(w, 28);
+}
+
+QSize PaletteCapsule::minimumSizeHint() const {
+    // 最小宽度：至少显示一个色点或 28px 高度的圆形
+    return QSize(28, 28);
 }
 
 void PaletteCapsule::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
+
+    // 2026-06-xx 响应式绘制：根据可用宽度动态调整间距
+    int availableW = width();
+    int totalDots = (int)m_palette.size();
+    float currentSpacing = m_spacing;
+    
+    // 如果宽度不足，尝试压缩间距 (最小间距 2px)
+    if (totalDots > 1) {
+        int contentW = m_padding * 2 + totalDots * m_dotSize + (totalDots - 1) * m_spacing;
+        if (contentW > availableW) {
+            currentSpacing = (float)(availableW - m_padding * 2 - totalDots * m_dotSize) / (totalDots - 1);
+            if (currentSpacing < 2.0f) currentSpacing = 2.0f;
+        }
+    }
 
     // 1. 绘制总背景 (Capsule) - 提升亮度并增加边框
     painter.setPen(QPen(QColor("#4D4D4D"), 1)); 
@@ -81,8 +104,12 @@ void PaletteCapsule::paintEvent(QPaintEvent*) {
     painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 14, 14);
 
     // 2. 绘制色点
-    for (int i = 0; i < m_palette.size(); ++i) {
-        int x = m_padding + i * (m_dotSize + m_spacing);
+    for (int i = 0; i < totalDots; ++i) {
+        int x = m_padding + i * (m_dotSize + currentSpacing);
+        
+        // 边界保护：不绘制超出范围的色点
+        if (x + m_dotSize > availableW - m_padding + 2) break;
+
         QRect dotRect(x, (height() - m_dotSize) / 2, m_dotSize, m_dotSize);
 
         painter.setPen(Qt::NoPen);
@@ -137,8 +164,8 @@ void PaletteCapsule::mousePressEvent(QMouseEvent* event) {
         QColor color = m_palette[m_hoverIndex].first;
 
         menu.addAction("搜索相似颜色的项目", [this, color]() {
-            MetaPanel* panel = qobject_cast<MetaPanel*>(window()->findChild<MetaPanel*>("MetadataContainer"));
-            if (panel) emit panel->searchByColor(color);
+            // 2026-06-xx 解耦重构：移除 findChild，通过信号通知
+            emit colorSelected(color);
         });
         menu.addSeparator();
         QString hex = color.name().toUpper();
@@ -312,13 +339,21 @@ void MetaPanel::initUi() {
 
     m_scrollArea = new QScrollArea(this); m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scrollArea->setWidgetResizable(true); m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
-    m_container = new QWidget(m_scrollArea); m_containerLayout = new QVBoxLayout(m_container); m_containerLayout->setContentsMargins(10, 10, 10, 10); m_containerLayout->setSpacing(12);
+    m_container = new QWidget(m_scrollArea); 
+    m_containerLayout = new QVBoxLayout(m_container); 
+    // 2026-06-xx 工业级强制约束：严格保持左右 10px 边距，绝不溢出
+    m_containerLayout->setContentsMargins(10, 10, 10, 10); 
+    m_containerLayout->setSpacing(12);
     
     // [Section 1] 调色盘胶囊 (Palette Capsules)
     m_paletteCapsule = new PaletteCapsule(m_container);
+    connect(m_paletteCapsule, &PaletteCapsule::colorSelected, this, &MetaPanel::searchByColor);
     
     // 包装器，确保胶囊左对齐且不拉伸
     QWidget* palWrapper = new QWidget(m_container);
+    // 限制包装器最大宽度，预留左右各 10px 边距
+    palWrapper->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    
     QHBoxLayout* palWrapperL = new QHBoxLayout(palWrapper);
     palWrapperL->setContentsMargins(0, 0, 0, 0);
     palWrapperL->addWidget(m_paletteCapsule);
@@ -328,7 +363,10 @@ void MetaPanel::initUi() {
     // [Section 2] 名称输入框 (ElasticEdit)
     m_nameEdit = new ElasticEdit(m_container);
     m_nameEdit->setPlaceholderText("文件名称...");
-    m_nameEdit->setStyleSheet("QPlainTextEdit { background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px; padding: 6px 10px; font-size: 13px; font-weight: bold; color: #EEEEEE; }");
+    m_nameEdit->setStyleSheet(QString("QPlainTextEdit { background: %1; border: 1px solid %2; border-radius: 4px; padding: 6px 10px; font-size: 13px; font-weight: bold; color: %3; }")
+        .arg(Style::qssColor(Style::BackgroundDeep))
+        .arg(Style::qssColor(Style::BorderColor))
+        .arg(Style::qssColor(Style::TextMain)));
     m_nameEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_nameEdit);
 
@@ -506,9 +544,18 @@ void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s,
     if (m_container) m_container->adjustSize();
 }
 
-void MetaPanel::setRating(int rating) { Q_UNUSED(rating); }
-void MetaPanel::setColor(const std::wstring& color) { Q_UNUSED(color); }
-void MetaPanel::setPinned(bool pinned) { Q_UNUSED(pinned); }
+void MetaPanel::setRating(int rating) { 
+    // 实现缺失的接口逻辑
+    emit metadataChanged(rating, L"__NO_CHANGE__");
+}
+void MetaPanel::setColor(const std::wstring& color) { 
+    // 实现缺失的接口逻辑
+    emit metadataChanged(-1, color);
+}
+void MetaPanel::setPinned(bool pinned) { 
+    Q_UNUSED(pinned); 
+    // 这里如果需要持久化 Pin 状态，应调用相关接口
+}
 void MetaPanel::setTags(const QStringList& tags) {
     while (QLayoutItem* item = m_tagFlowLayout->takeAt(0)) { if (QWidget* w = item->widget()) w->deleteLater(); delete item; }
     for (const QString& tag : tags) { TagPill* pill = new TagPill(tag, m_tagContainer); connect(pill, &TagPill::deleteRequested, this, &MetaPanel::onTagDeleted); m_tagFlowLayout->addWidget(pill); }
@@ -562,11 +609,19 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
             if (newName != oldInfo.completeBaseName()) {
                 QString newPath = oldInfo.absolutePath() + "/" + newName + (suffix.isEmpty() ? "" : "." + suffix);
                 newPath = QDir::toNativeSeparators(newPath);
+                
+                // 2026-06-xx 工业级改进：检查目标路径是否已存在
+                if (QFile::exists(newPath)) {
+                    m_nameEdit->setPlainText(oldInfo.completeBaseName());
+                    return true;
+                }
+
                 if (QFile::rename(oldPath, newPath)) {
                     MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
                     lblPath->setText(newPath);
                     m_nameEdit->setProperty("oldPath", newPath);
                 } else {
+                    // 重命名失败，回滚文本
                     m_nameEdit->setPlainText(oldInfo.completeBaseName());
                 }
             }

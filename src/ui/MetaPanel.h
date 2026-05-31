@@ -121,6 +121,10 @@ class PaletteCapsule : public QWidget {
 public:
     explicit PaletteCapsule(QWidget* parent = nullptr);
     void setPalette(const QVector<QPair<QColor, float>>& palette);
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
+signals:
+    void colorSelected(const QColor& color);
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
