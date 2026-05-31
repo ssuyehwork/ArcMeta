@@ -123,6 +123,7 @@ private:
     bool saveDriveToCacheInternal(size_t driveIdx); 
     void clearInternal(); 
     void rebuildFrnToIndexMap();
+    void triggerDatabaseSync(size_t driveIdx);
     void compact();
     void buildSortedIndices();
     

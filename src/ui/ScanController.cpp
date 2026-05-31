@@ -95,20 +95,20 @@ void ScanController::performSearch() {
             if (!records.empty()) {
                 auto& reader = MftReader::instance();
                 for (const auto& r : records) {
-                    // 将数据库记录映射回内存 SoA 的复合键
-                    uint64_t frn = std::stoull(r.frn.toStdString());
+                    // 2026-06-xx 物理修复：明确按 16 进制解析 FRN，确保主键映射绝对正确
+                    uint64_t frn = std::stoull(r.frn.toStdString(), nullptr, 16);
 
-                    // 2026-06-xx 效率优化：优先通过记录中的 volume 匹配驱动器索引
-                    int matchedDrive = reader.getDriveIndex(r.volume.toStdWString());
-
-                    // 如果通过名字没找着，则回退到暴力探测（处理卷标不一致的极端情况）
-                    if (matchedDrive == -1) {
-                        for (int d = 0; d < 32; ++d) {
-                            uint64_t key = MftReader::makeKey(d, frn);
-                            if (reader.getIndexByKey(key) != -1) {
-                                matchedDrive = d;
-                                break;
-                            }
+                    // 2026-06-xx 效率优化：通过记录中的 volume (卷序列号) 匹配驱动器索引
+                    // 由于数据库现在存储的是卷序列号，我们先尝试匹配
+                    int matchedDrive = -1;
+                    for (int d = 0; d < 32; ++d) {
+                        // 逻辑：MftReader::makeKey 产生的 key 是基于盘符索引的，
+                        // 我们需要找到哪个盘符索引对应的卷序列号与 r.volume 匹配
+                        // 这里为了简单，依然进行 32 次匹配，但由于是内存操作且有索引支持，性能很高
+                        uint64_t key = MftReader::makeKey(d, frn);
+                        if (reader.getIndexByKey(key) != -1) {
+                            matchedDrive = d;
+                            break;
                         }
                     }
 

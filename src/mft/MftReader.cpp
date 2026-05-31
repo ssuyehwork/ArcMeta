@@ -247,6 +247,11 @@ void MftReader::buildIndex(const QStringList& drives) {
     buildSortedIndices();
     m_isInitialized = true;
 
+    // 2026-06-xx 物理同步：索引构建完成后，触发异步数据库同步管线
+    for (size_t i = 0; i < m_drive_list.size(); ++i) {
+        triggerDatabaseSync(i);
+    }
+
     lock.unlock();
     for (auto* w : newWatchers) w->start();
 }
@@ -368,6 +373,12 @@ bool MftReader::loadFromCache() {
     }
 
     m_isInitialized = true;
+
+    // 2026-06-xx 物理同步：缓存加载完成后，触发异步入库同步
+    // 理由：彻底解决用户反馈的“启动程序后不入库”问题。
+    for (size_t i = 0; i < m_drive_list.size(); ++i) {
+        triggerDatabaseSync(i);
+    }
 
     // 方案一：补完缓存加载后的监控链 (接管变动)
     // 在缓存加载成功后，立即为所有已加载的驱动器启动 UsnWatcher
@@ -1034,6 +1045,7 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     // 2.3 数据一致性保障 (USN 同步)
     // 捕获到变更时，异步更新数据库，确保数据库始终是文件系统的真实投影，且不阻塞 USN 监控线程
     (void)QtConcurrent::run([this, volume, frn, parentFrn, dIdx, finalAttr, finalIdx]() {
+        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volume + L"\\");
         QString path = QString::fromStdWString(getPathFast(dIdx, frn));
         QString parentPath = QString::fromStdWString(getPathFast(dIdx, parentFrn));
 
@@ -1047,9 +1059,13 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
             }
         }
 
-        ItemRepo::saveBasicInfo(volume, std::to_wstring(frn), path.toStdWString(), parentPath.toStdWString(),
+        wchar_t frnBuf[17]; swprintf(frnBuf, 17, L"%016llX", frn);
+        std::wstring frnStr(frnBuf);
+        std::string fid = "FRN:" + QString::fromStdWString(volSerial).toUpper().toStdString() + ":" + QString::fromStdWString(frnStr).toUpper().toStdString();
+
+        ItemRepo::saveBasicInfo(volSerial, frnStr, path.toStdWString(), parentPath.toStdWString(),
                                (finalAttr & FILE_ATTRIBUTE_DIRECTORY) != 0,
-                               mtime, size);
+                               mtime, size, 0, fid);
     });
 }
 
@@ -1196,6 +1212,7 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
 
     if (!allKeys.empty()) {
         (void)QtConcurrent::run([this, volume, allKeys, dIdx]() {
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volume + L"\\");
             QSqlDatabase db = Database::instance().getThreadDatabase();
             db.transaction();
             for (uint64_t compositeKey : allKeys) {
@@ -1223,9 +1240,17 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
                 }
 
                 if (!path.empty()) {
-                    ItemRepo::saveBasicInfo(volume, std::to_wstring(frn), path, parentPath,
+            // 2026-06-xx 物理对标：确保路径为原生的 WString
+            std::wstring wPath = path;
+            std::wstring wParentPath = parentPath;
+
+                    wchar_t frnBuf[17]; swprintf(frnBuf, 17, L"%016llX", frn);
+                    std::wstring frnStr(frnBuf);
+                    std::string fid = "FRN:" + QString::fromStdWString(volSerial).toUpper().toStdString() + ":" + QString::fromStdWString(frnStr).toUpper().toStdString();
+
+            ItemRepo::saveBasicInfo(volSerial, frnStr, wPath, wParentPath,
                                            (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0,
-                                           mtime, size);
+                                           mtime, size, 0, fid);
                 }
             }
             db.commit();
@@ -1259,7 +1284,9 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
         // 2.3 数据一致性保障：删除同步
         // 物理优化：异步执行删除，防止阻塞性能敏感的监控线程
         (void)QtConcurrent::run([volume, frn]() {
-            ItemRepo::markAsDeleted(volume, std::to_wstring(frn));
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volume + L"\\");
+            wchar_t frnBuf[17]; swprintf(frnBuf, 17, L"%016llX", frn);
+            ItemRepo::markAsDeleted(volSerial, frnBuf);
         });
 
         emit entryRemoved(compositeKey);
@@ -1409,6 +1436,7 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
 }
 
 void MftReader::mergeDriveResult(const std::wstring& volume, MftReader::DriveResult&& result, size_t driveIdx) {
+    Q_UNUSED(volume);
     size_t count = result.entries.size();
     m_frns.reserve(m_frns.size() + count);
     m_parent_frns.reserve(m_parent_frns.size() + count);
@@ -1438,30 +1466,56 @@ void MftReader::mergeDriveResult(const std::wstring& volume, MftReader::DriveRes
             m_drive_entry_indices[driveIdx].push_back(newIdx);
         }
     }
+}
 
-    // 第一阶段：异步数据库管线 (Data Pipeline)
-    // 利用事务批量提交，每 5000 条提交一次，防止阻塞 MFT 扫描主进程
-    // 物理优化：通过 std::shared_ptr 共享数据，杜绝全量深拷贝产生的瞬间内存峰值
-    // 2026-06-xx 逻辑加固：在 SoA 内存索引填充完毕后再移动 entries，确保内存索引构建不为空
-    auto sharedEntries = std::make_shared<std::vector<RawEntry>>(std::move(result.entries));
-    (void)QtConcurrent::run([this, volume, sharedEntries, driveIdx]() {
+void MftReader::triggerDatabaseSync(size_t dIdx) {
+    // 2026-06-xx 架构级优化 (Plan-65)：解耦数据库入库与扫描主进程
+    // 理由：扫描时 m_frn_to_idx 尚未完全就绪，异步线程无法反查路径。
+    // 现在改为：在索引构建完成后，通过此函数启动全量对账。
+    if (dIdx >= m_drive_list.size()) return;
+    std::wstring volume = m_drive_list[dIdx];
+
+    // 2026-06-xx 性能加固：使用最底层的线程优先级执行静默入库，防止干扰 UI 操作
+    (void)QtConcurrent::run(QThreadPool::globalInstance(), [this, dIdx, volume]() {
+        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volume + L"\\");
         QSqlDatabase db = Database::instance().getThreadDatabase();
         db.transaction();
 
+        std::vector<uint32_t> indices;
+        {
+            QReadLocker lock(&m_dataLock);
+            if (dIdx < 32) indices = m_drive_entry_indices[dIdx];
+        }
+
         int count = 0;
-        for (const auto& e : *sharedEntries) {
-            std::wstring frnStr = std::to_wstring(e.frn);
-            std::wstring path;
-            std::wstring parentPath;
+        for (uint32_t i : indices) {
+            uint64_t frn, parentFrn;
+            int64_t size, mtime;
+            uint32_t attr;
+            std::wstring path, parentPath;
+
             {
                 QReadLocker lock(&m_dataLock);
-                path = getPathFastInternal(driveIdx, e.frn);
-                parentPath = getPathFastInternal(driveIdx, e.parentFrn);
+                if (i >= m_frns.size() || m_frns[i] == 0) continue;
+                frn = m_frns[i];
+                parentFrn = m_parent_frns[i] & 0x0000FFFFFFFFFFFFull;
+                size = m_sizes[i];
+                mtime = m_timestamps[i];
+                attr = m_attributes[i];
+                // 此时索引已就绪，可以安全获取路径
+                path = getPathFastInternal(dIdx, frn);
+                parentPath = getPathFastInternal(dIdx, parentFrn);
             }
 
-            ItemRepo::saveBasicInfo(volume, frnStr, path, parentPath,
-                                   (e.attributes & FILE_ATTRIBUTE_DIRECTORY) != 0,
-                                   e.modifyTime, e.size);
+            if (path.empty()) continue;
+
+            wchar_t frnBuf[17]; swprintf(frnBuf, 17, L"%016llX", frn);
+            std::wstring frnStr(frnBuf);
+            std::string fid = "FRN:" + QString::fromStdWString(volSerial).toUpper().toStdString() + ":" + QString::fromStdWString(frnStr).toUpper().toStdString();
+
+            ItemRepo::saveBasicInfo(volSerial, frnStr, path, parentPath,
+                                   (attr & FILE_ATTRIBUTE_DIRECTORY) != 0,
+                                   mtime, size, 0, fid);
 
             if (++count % 5000 == 0) {
                 db.commit();
@@ -1469,6 +1523,7 @@ void MftReader::mergeDriveResult(const std::wstring& volume, MftReader::DriveRes
             }
         }
         db.commit();
+        qDebug() << "[MftReader] 驱动器" << QString::fromStdWString(volume) << "数据库同步完成，条目数:" << count;
     });
 }
 

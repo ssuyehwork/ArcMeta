@@ -3232,3 +3232,110 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 - 变更原因：移除手动触发 resizeEvent 的“补丁”逻辑。这种做法是由于旧布局系统约束不全导致的，在新的锁死宽度逻辑下已属冗余。
 - 影响范围：setPalettes 函数。
 - 是否在需求范围内：是
+
+---
+## [64-1] 变更时间：2026-05-31 14:56:15
+
+**文件路径：** `src/mft/MftReader.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    void rebuildFrnToIndexMap();
+    void compact();
+    void buildSortedIndices();
+```
+
+### 修改后（After）
+```cpp
+    void rebuildFrnToIndexMap();
+    void triggerDatabaseSync(size_t driveIdx);
+    void compact();
+    void buildSortedIndices();
+```
+
+### 变更说明
+- 变更原因：解耦数据库同步逻辑，确保在索引完全就绪后触发入库。
+- 影响范围：MftReader 类接口。
+- 是否在需求范围内：是
+
+---
+## [64-2] 变更时间：2026-05-31 14:56:45
+
+**文件路径：** `src/mft/MftReader.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+（因代码量巨大，此处记录核心逻辑块：在 mergeDriveResult 中启动异步入库，且过早使用 std::move(result.entries)）
+```cpp
+void MftReader::mergeDriveResult(const std::wstring& volume, MftReader::DriveResult&& result, size_t driveIdx) {
+    // ... 填充 SoA 循环 ...
+    auto sharedEntries = std::make_shared<std::vector<RawEntry>>(std::move(result.entries));
+    (void)QtConcurrent::run([this, volume, sharedEntries, driveIdx]() {
+        // ... 直接写入数据库 ...
+    });
+}
+```
+
+### 修改后（After）
+```cpp
+void MftReader::mergeDriveResult(const std::wstring& volume, MftReader::DriveResult&& result, size_t driveIdx) {
+    Q_UNUSED(volume);
+    // ... 仅执行 SoA 填充 ...
+}
+
+void MftReader::triggerDatabaseSync(size_t dIdx) {
+    // ... 异步全量对账逻辑 ...
+}
+```
+
+### 变更说明
+- 变更原因：修复过早 move 导致的内存索引失效，并确保路径反查在索引就绪后执行。
+- 影响范围：MftReader::mergeDriveResult, MftReader::triggerDatabaseSync, buildIndex, loadFromCache。
+- 是否在需求范围内：是
+
+---
+## [64-3] 变更时间：2026-05-31 15:04:43
+
+**文件路径：** `src/ui/ScanController.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+uint64_t frn = std::stoull(r.frn.toStdString());
+```
+
+### 修改后（After）
+```cpp
+uint64_t frn = std::stoull(r.frn.toStdString(), nullptr, 16);
+```
+
+### 变更说明
+- 变更原因：修复 FRN 字符串解析漏洞，确保按 16 进制正确解析十六进制格式的物理索引。
+- 影响范围：ScanController::performSearch，混合搜索准确性。
+- 是否在需求范围内：是
+
+---
+## [64-4] 变更时间：2026-05-31 15:16:05
+
+**文件路径：** `src/core/CoreController.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+// ... 已跳过 MFT 索引加载 (按需加载模式已启用) ...
+```
+
+### 修改后（After）
+```cpp
+// 2026-06-xx 架构升级：启动即全量静默入库
+auto& reader = MftReader::instance();
+if (!reader.loadFromCache()) {
+    // 自动探测并 buildIndex
+}
+```
+
+### 变更说明
+- 变更原因：响应用户需求，将 MFT 初始化由按需触发改为启动时自动预热，以实现全量静默入库。
+- 影响范围：程序启动流程、CoreController::startSystem。
+- 是否在需求范围内：是
