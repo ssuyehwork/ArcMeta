@@ -3020,3 +3020,215 @@ void MetaPanel::addInfoRow(const QString& label, QLabel*& valueLabel) {
 - **逻辑回归**：根据用户反馈，回归至加权统计选色模型，并严格执行上述 4 项参数修正。
 
 ---
+
+---
+## [48] 变更时间：2026-05-31 10:49:49
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    // [Section 4] 链接输入框 (ElasticEdit)
+    QWidget* linkBox = new QWidget(m_container);
+    QHBoxLayout* linkL = new QHBoxLayout(linkBox);
+    linkL->setContentsMargins(0, 0, 0, 0);
+    linkL->setSpacing(8);
+    QLabel* linkIcon = new QLabel(linkBox);
+    linkIcon->setPixmap(UiHelper::getIcon("link", QColor("#888888"), 16).pixmap(16, 16));
+    linkL->addWidget(linkIcon, 0, Qt::AlignTop);
+    m_linkEdit = new ElasticEdit(linkBox);
+    m_linkEdit->setPlaceholderText("添加链接...");
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 13px; color: #4a90e2; }");
+    m_linkEdit->installEventFilter(this);
+    linkL->addWidget(m_linkEdit, 1);
+    m_containerLayout->addWidget(linkBox);
+
+    // [Section 5] 标签区域 (Tag Flow)
+    QWidget* tagBox = new QWidget(m_container);
+    QVBoxLayout* tagL = new QVBoxLayout(tagBox);
+    tagL->setContentsMargins(0, 0, 0, 0);
+    tagL->setSpacing(6);
+    
+    QHBoxLayout* tagHeader = new QHBoxLayout();
+    tagHeader->setSpacing(8);
+    QLabel* tagIcon = new QLabel(tagBox);
+    tagIcon->setPixmap(UiHelper::getIcon("tag", QColor("#888888"), 16).pixmap(16, 16));
+    tagHeader->addWidget(tagIcon);
+    QLabel* tagTitle = new QLabel("标签", tagBox);
+    tagTitle->setStyleSheet("font-size: 13px; font-weight: bold; color: #888888; text-transform: uppercase;");
+    tagHeader->addWidget(tagTitle);
+    tagHeader->addStretch();
+    tagL->addLayout(tagHeader);
+
+    m_tagContainer = new QWidget(tagBox);
+    m_tagFlowLayout = new FlowLayout(m_tagContainer, 0, 4, 4);
+    tagL->addWidget(m_tagContainer);
+
+    m_tagEdit = new QLineEdit(tagBox);
+    m_tagEdit->setPlaceholderText("输入标签...");
+    m_tagEdit->setFixedHeight(24);
+    m_tagEdit->setStyleSheet("QLineEdit { background: #252526; border: 1px solid #333333; border-radius: 3px; padding-left: 6px; font-size: 13px; color: #AAAAAA; }");
+    connect(m_tagEdit, &QLineEdit::returnPressed, this, &MetaPanel::onTagAdded);
+    tagL->addWidget(m_tagEdit);
+    m_containerLayout->addWidget(tagBox);
+
+    // [Section 6] 分类展示 (Category Pills)
+    QWidget* catBox = new QWidget(m_container);
+    QVBoxLayout* catL = new QVBoxLayout(catBox);
+    catL->setContentsMargins(0, 0, 0, 0);
+    catL->setSpacing(6);
+    
+    QHBoxLayout* catHeader = new QHBoxLayout();
+    catHeader->setSpacing(8);
+    QLabel* catIcon = new QLabel(catBox);
+    catIcon->setPixmap(UiHelper::getIcon("category", QColor("#888888"), 16).pixmap(16, 16));
+    catHeader->addWidget(catIcon);
+    QLabel* catTitle = new QLabel("分类 / 文件夹", catBox);
+    catTitle->setStyleSheet("font-size: 13px; font-weight: bold; color: #888888; text-transform: uppercase;");
+    catHeader->addWidget(catTitle);
+    catHeader->addStretch();
+    catL->addLayout(catHeader);
+
+    m_categoryEdit = new ElasticEdit(catBox);
+    m_categoryEdit->setReadOnly(true);
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #2A2A2A; border-radius: 4px; padding: 6px 8px; font-size: 13px; color: #EEEEEE; }");
+    catL->addWidget(m_categoryEdit);
+    m_containerLayout->addWidget(catBox);
+```
+
+### 修改后（After）
+```cpp
+    // [Section 4] 链接输入框 (ElasticEdit)
+    m_linkEdit = new ElasticEdit(m_container);
+    m_linkEdit->setPlaceholderText("添加链接...");
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px; padding: 6px 10px; font-size: 13px; color: #4a90e2; }");
+    m_linkEdit->installEventFilter(this);
+    m_containerLayout->addWidget(m_linkEdit);
+
+    // [Section 5] 标签区域 (Tag Flow)
+    QWidget* tagBox = new QWidget(m_container);
+    QVBoxLayout* tagL = new QVBoxLayout(tagBox);
+    tagL->setContentsMargins(0, 0, 0, 0);
+    tagL->setSpacing(8);
+    
+    m_tagContainer = new QWidget(tagBox);
+    m_tagFlowLayout = new FlowLayout(m_tagContainer, 0, 4, 4);
+    tagL->addWidget(m_tagContainer);
+
+    m_tagEdit = new QLineEdit(tagBox);
+    m_tagEdit->setPlaceholderText("输入标签...");
+    m_tagEdit->setFixedHeight(24);
+    m_tagEdit->setStyleSheet("QLineEdit { background: #252526; border: 1px solid #333333; border-radius: 3px; padding-left: 6px; font-size: 13px; color: #AAAAAA; }");
+    connect(m_tagEdit, &QLineEdit::returnPressed, this, &MetaPanel::onTagAdded);
+    tagL->addWidget(m_tagEdit);
+    m_containerLayout->addWidget(tagBox);
+
+    // [Section 6] 分类展示 (Category Pills)
+    m_categoryEdit = new ElasticEdit(m_container);
+    m_categoryEdit->setReadOnly(true);
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #2A2A2A; border-radius: 4px; padding: 6px 8px; font-size: 13px; color: #EEEEEE; }");
+    m_containerLayout->addWidget(m_categoryEdit);
+```
+
+### 变更说明
+- 变更原因：移除视觉冗余图标与标题，释放横向空间，并按照用户要求优化垂直密度。
+- 影响范围：MetaPanel UI 布局。
+- 是否在需求范围内：是
+
+---
+## [49] 变更时间：2026-05-31 10:50:55
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    m_scrollArea = new QScrollArea(this); m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_scrollArea->setWidgetResizable(true); m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
+
+...
+
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+    // 工业级防御：强制约束子组件最大宽度，预留 20px 边距 (10px * 2)
+    int maxW = width() - 20;
+    if (maxW > 0) {
+        m_nameEdit->setMaximumWidth(maxW);
+        m_noteEdit->setMaximumWidth(maxW);
+        m_linkEdit->setMaximumWidth(maxW);
+        m_categoryEdit->setMaximumWidth(maxW);
+        lblPath->setMaximumWidth(maxW - 80); // 考虑左侧 Label 宽度
+    }
+}
+```
+
+### 修改后（After）
+```cpp
+    m_scrollArea = new QScrollArea(this); m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded); m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_scrollArea->setWidgetResizable(true); m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
+
+...
+
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+    
+    // 2026-06-xx 工业级强制约束：锁死容器宽度等于视口宽度，彻底消除横向溢出
+    int viewportW = m_scrollArea->viewport()->width();
+    if (m_container && viewportW > 0) {
+        m_container->setFixedWidth(viewportW);
+    }
+
+    int maxW = viewportW - 20; // 预留左右各 10px 边距
+    if (maxW > 0) {
+        m_nameEdit->setMaximumWidth(maxW);
+        m_noteEdit->setMaximumWidth(maxW);
+        m_linkEdit->setMaximumWidth(maxW);
+        m_categoryEdit->setMaximumWidth(maxW);
+        if (lblPath) lblPath->setMaximumWidth(maxW - 80);
+    }
+}
+```
+
+### 变更说明
+- 变更原因：解决内容向左右两侧溢出的痛点。开启垂直滚动支持，同时通过 setFixedWidth 强行锁定容器宽度为视口宽度，杜绝横向滚动，并确保内容在任何宽度下都能待在 10px 边距内。
+- 影响范围：MetaPanel 全局布局与滚动行为。
+- 是否在需求范围内：是
+
+---
+## [50] 变更时间：2026-05-31 10:51:42
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
+    if (m_paletteCapsule) {
+        m_paletteCapsule->setPalette(palette);
+    }
+    if (m_container) {
+        m_container->adjustSize();
+        // 强制触发一次 resize 逻辑以同步宽度约束
+        QResizeEvent re(size(), size());
+        resizeEvent(&re);
+    }
+}
+```
+
+### 修改后（After）
+```cpp
+void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
+    if (m_paletteCapsule) {
+        m_paletteCapsule->setPalette(palette);
+    }
+    if (m_container) {
+        m_container->adjustSize();
+    }
+}
+```
+
+### 变更说明
+- 变更原因：移除手动触发 resizeEvent 的“补丁”逻辑。这种做法是由于旧布局系统约束不全导致的，在新的锁死宽度逻辑下已属冗余。
+- 影响范围：setPalettes 函数。
+- 是否在需求范围内：是

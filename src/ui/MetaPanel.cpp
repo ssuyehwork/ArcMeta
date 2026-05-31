@@ -337,13 +337,14 @@ void MetaPanel::initUi() {
     headerLayout->addWidget(closeBtn, 0, Qt::AlignVCenter);
     m_mainLayout->addWidget(header);
 
-    m_scrollArea = new QScrollArea(this); m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_scrollArea = new QScrollArea(this); m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded); m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scrollArea->setWidgetResizable(true); m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
     m_container = new QWidget(m_scrollArea); 
     m_containerLayout = new QVBoxLayout(m_container); 
     // 2026-06-xx 工业级强制约束：严格保持左右 10px 边距，绝不溢出
     m_containerLayout->setContentsMargins(10, 10, 10, 10); 
-    m_containerLayout->setSpacing(12);
+    // 2026-06-01 修正：降低全局间距，消除视觉断层 (原 12px -> 现 8px)
+    m_containerLayout->setSpacing(8);
     
     // [Section 1] 调色盘胶囊 (Palette Capsules)
     m_paletteCapsule = new PaletteCapsule(m_container);
@@ -378,37 +379,18 @@ void MetaPanel::initUi() {
     m_containerLayout->addWidget(m_noteEdit);
 
     // [Section 4] 链接输入框 (ElasticEdit)
-    QWidget* linkBox = new QWidget(m_container);
-    QHBoxLayout* linkL = new QHBoxLayout(linkBox);
-    linkL->setContentsMargins(0, 0, 0, 0);
-    linkL->setSpacing(8);
-    QLabel* linkIcon = new QLabel(linkBox);
-    linkIcon->setPixmap(UiHelper::getIcon("link", QColor("#888888"), 16).pixmap(16, 16));
-    linkL->addWidget(linkIcon, 0, Qt::AlignTop);
-    m_linkEdit = new ElasticEdit(linkBox);
+    m_linkEdit = new ElasticEdit(m_container);
     m_linkEdit->setPlaceholderText("添加链接...");
-    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 13px; color: #4a90e2; }");
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px; padding: 6px 10px; font-size: 13px; color: #4a90e2; }");
     m_linkEdit->installEventFilter(this);
-    linkL->addWidget(m_linkEdit, 1);
-    m_containerLayout->addWidget(linkBox);
+    m_containerLayout->addWidget(m_linkEdit);
 
     // [Section 5] 标签区域 (Tag Flow)
     QWidget* tagBox = new QWidget(m_container);
     QVBoxLayout* tagL = new QVBoxLayout(tagBox);
     tagL->setContentsMargins(0, 0, 0, 0);
-    tagL->setSpacing(6);
+    tagL->setSpacing(8);
     
-    QHBoxLayout* tagHeader = new QHBoxLayout();
-    tagHeader->setSpacing(8);
-    QLabel* tagIcon = new QLabel(tagBox);
-    tagIcon->setPixmap(UiHelper::getIcon("tag", QColor("#888888"), 16).pixmap(16, 16));
-    tagHeader->addWidget(tagIcon);
-    QLabel* tagTitle = new QLabel("标签", tagBox);
-    tagTitle->setStyleSheet("font-size: 13px; font-weight: bold; color: #888888; text-transform: uppercase;");
-    tagHeader->addWidget(tagTitle);
-    tagHeader->addStretch();
-    tagL->addLayout(tagHeader);
-
     m_tagContainer = new QWidget(tagBox);
     m_tagFlowLayout = new FlowLayout(m_tagContainer, 0, 4, 4);
     tagL->addWidget(m_tagContainer);
@@ -422,27 +404,10 @@ void MetaPanel::initUi() {
     m_containerLayout->addWidget(tagBox);
 
     // [Section 6] 分类展示 (Category Pills)
-    QWidget* catBox = new QWidget(m_container);
-    QVBoxLayout* catL = new QVBoxLayout(catBox);
-    catL->setContentsMargins(0, 0, 0, 0);
-    catL->setSpacing(6);
-    
-    QHBoxLayout* catHeader = new QHBoxLayout();
-    catHeader->setSpacing(8);
-    QLabel* catIcon = new QLabel(catBox);
-    catIcon->setPixmap(UiHelper::getIcon("category", QColor("#888888"), 16).pixmap(16, 16));
-    catHeader->addWidget(catIcon);
-    QLabel* catTitle = new QLabel("分类 / 文件夹", catBox);
-    catTitle->setStyleSheet("font-size: 13px; font-weight: bold; color: #888888; text-transform: uppercase;");
-    catHeader->addWidget(catTitle);
-    catHeader->addStretch();
-    catL->addLayout(catHeader);
-
-    m_categoryEdit = new ElasticEdit(catBox);
+    m_categoryEdit = new ElasticEdit(m_container);
     m_categoryEdit->setReadOnly(true);
     m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #2A2A2A; border-radius: 4px; padding: 6px 8px; font-size: 13px; color: #EEEEEE; }");
-    catL->addWidget(m_categoryEdit);
-    m_containerLayout->addWidget(catBox);
+    m_containerLayout->addWidget(m_categoryEdit);
 
     m_containerLayout->addWidget(createSeparator());
 
@@ -459,8 +424,9 @@ void MetaPanel::initUi() {
 void MetaPanel::addInfoRow(const QString& label, QLabel*& valueLabel) {
     QWidget* row = new QWidget(m_container); 
     QHBoxLayout* rl = new QHBoxLayout(row); 
-    rl->setContentsMargins(0, 4, 0, 4); 
-    rl->setSpacing(12); // 增加呼吸感
+    // 2026-06-01 视觉密度优化：压缩行间距 (原 4px -> 现 2px)
+    rl->setContentsMargins(0, 2, 0, 2); 
+    rl->setSpacing(8); 
     
     QLabel* kl = new QLabel(label, row); 
     kl->setFixedWidth(80); // 适度增加宽度以支持长标签
@@ -515,6 +481,25 @@ void MetaPanel::onTagDeleted(const QString& text) {
             }
             return;
         }
+    }
+}
+
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+    
+    // 2026-06-xx 工业级强制约束：锁死容器宽度等于视口宽度，彻底消除横向溢出
+    int viewportW = m_scrollArea->viewport()->width();
+    if (m_container && viewportW > 0) {
+        m_container->setFixedWidth(viewportW);
+    }
+
+    int maxW = viewportW - 20; // 预留左右各 10px 边距
+    if (maxW > 0) {
+        m_nameEdit->setMaximumWidth(maxW);
+        m_noteEdit->setMaximumWidth(maxW);
+        m_linkEdit->setMaximumWidth(maxW);
+        m_categoryEdit->setMaximumWidth(maxW);
+        if (lblPath) lblPath->setMaximumWidth(maxW - 80);
     }
 }
 
@@ -586,7 +571,9 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
     if (m_paletteCapsule) {
         m_paletteCapsule->setPalette(palette);
     }
-    if (m_container) m_container->adjustSize();
+    if (m_container) {
+        m_container->adjustSize();
+    }
 }
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {

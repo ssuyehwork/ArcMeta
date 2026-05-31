@@ -1,47 +1,46 @@
-# Analysis_Modification_Plan-62: MetaPanel 布局溢出诊断与重构方案
+# Analysis_Modification_Plan-62: MetaPanel 布局溢出与视觉体验深度优化方案
 
-## § 1 布局溢出根因诊断
+## § 1 布局溢出与间距异常根因诊断
 
-通过对 `MetaPanel` 源码的审计，确认视觉溢出是由以下非工业级布局逻辑导致的：
+### 1.1 约束失效导致的横向溢出
+- **诊断分析**：当 `MetaPanel` 被放置在 `QScrollArea` 中时，若内部组件（如 `lblPath` 或 `ElasticEdit`）的文本内容过长，布局管理器会倾向于扩张宽度而非折行，导致内容“刺破”面板边界。
+- **傻逼之处**：现有的 `resizeEvent` 试图手动设置 `maximumWidth`，但在 Qt 的布局刷新周期中，这种手动干预往往滞后或被布局引擎的 `sizeHint` 逻辑覆盖，导致无法实现真正的“绝对不溢出”。
 
-### 1.1 PaletteCapsule 的强制物理宽度
-- **代码位置**：`MetaPanel.cpp` (约行 69)
-```cpp
-int w = m_padding * 2 + (int)palette.size() * m_dotSize + ((int)palette.size() - 1) * m_spacing;
-setFixedSize(w, 28);
-```
-- **问题分析**：`PaletteCapsule` 根据色点数量计算出一个绝对像素宽度，并使用 `setFixedSize` 锁定。这种做法完全无视了 Qt 布局系统的弹性约束。当色点达到一定数量时，计算出的宽度会超过 `MetaPanel` 的容器宽度，导致组件横向“刺破”面板。
-
-### 1.2 容器约束失效
-- **代码位置**：`MetaPanel.cpp` (约行 324-328)
-- **问题分析**：虽然使用了 `QHBoxLayout` 和 `addStretch()`，但由于 `m_paletteCapsule` 内部设置了 `FixedSize`，布局管理器无法对其进行收缩或截断，导致包装器也随之溢出。
+### 1.2 视觉噪音与垂直间距冗余
+- **诊断分析**：
+    - **图标干扰**：在“链接”、“标签”、“分类”等小节中使用 SVG 图标占用了宝贵的横向空间，且在窄面板模式下显得过于拥挤。
+    - **间距累加效应**：全局布局的 `spacing(12)` 与子组件行内部的 `contentsMargins(4)` 产生了叠加效应，导致行与行之间的空隙高达 20px，视觉上产生了严重的断裂感。
 
 ---
 
-## § 2 工业级重构方案：永不溢出的自适应布局
+## § 2 工业级视觉与布局优化方案
 
-为了实现“无论多窄都不溢出”且“保持 10px 边距”的要求，必须废弃固定的物理尺寸计算，转而采用响应式布局或绘制逻辑。
-
-### 2.1 方案 A：引入流式布局（FlowLayout）封装调色盘
+### 2.1 彻底的宽度防御策略（强制响应式）
 - **修改建议**：
-    1. 将 `PaletteCapsule` 从单体组件改为容器组件，内部每个色点作为独立的子 Widget。
-    2. 使用 `MetaPanel.h` 中现有的 `FlowLayout` 来排列这些色点。
-- **优点**：当宽度不足时，色点会自动换行显示，绝对不会超出边界。
+    1. **锁定容器宽度**：在 `MetaPanel` 的 `resizeEvent` 中，强制将 `m_container` 的固定宽度设为 `m_scrollArea->viewport()->width()`。
+    2. **自动换行/省略逻辑**：
+        - 对于 `lblPath`：启用 `setWordWrap(true)` 并结合 `setMaximumWidth`。
+        - 对于 `ElasticEdit`：在 `adjustHeight` 时显式指定 `document()->setTextWidth(fixedWidth)`，确保高度计算完全基于锁定的宽度。
+    3. **杜绝横向滚动条**：明确设置 `m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff)`。
 
-### 2.2 方案 B：响应式缩略逻辑（视觉优化首选）
+### 2.2 视觉降噪与密度优化（响应用户特定需求）
 - **修改建议**：
-    1. **废弃 `setFixedSize`**：将 `PaletteCapsule` 的 `sizePolicy` 设置为 `Expanding`，并移除硬编码的宽度设置。
-    2. **重写 `paintEvent`**：
-        - 实时计算可用宽度：`int availableW = width() - m_padding * 2;`
-        - 动态调整绘制：如果总宽度超过 `availableW`，则通过缩减间距或仅绘制可见范围内的色点，并添加渐变消隐效果。
-    3. **确保边距**：确保 `m_containerLayout` 的 `setContentsMargins(10, 10, 10, 10)` 始终生效，且父容器不被子组件强行撑开。
+    1. **移除特定图标**：
+        - 移除 `m_linkEdit` 左侧的 `link` 图标。
+        - 移除 `tagL` 顶部的 `tag` 图标及标题头。
+        - 移除 `catL` 顶部的 `category` 图标及标题头。
+        - **优化理由**：通过占位符（PlaceholderText）即可明确输入框意图，移除图标可为文本内容腾出约 24px 的横向空间，并显著提升视觉简洁度。
+    2. **压缩垂直间距**：
+        - 将全局间距 `m_containerLayout->setSpacing(8)`。
+        - 将 `addInfoRow` 内部的垂直边距压至 `2px`。
+        - 最终实现行间距约 **12px** 的工业级紧凑视觉效果。
 
-### 2.3 方案 C：布局约束加固
+### 2.3 强制执行 10px 边距
 - **修改建议**：
-    1. 为 `MetaPanel` 内的所有 `ElasticEdit` 和自定义组件设置合理的 `maximumWidth` 或确保其能响应 `sizeHint` 的缩减。
-    2. 在 `MetaPanel` 的容器层级强制限制子组件的最大宽度不超过 `container->width() - 20`（双侧 10px 边距）。
+    1. 确保 `m_containerLayout` 的 `setContentsMargins(10, 10, 10, 10)` 是唯一的边距来源。
+    2. 移除所有子组件包装器（如 `palWrapper`）可能带有的额外边距。
 
 ---
 
 ## § 3 总结
-截图中的溢出是由于开发者为了视觉表现使用了硬编码的宽度计算，却忽略了 UI 的边界情况。典型的修复方案是**将控制权从组件自身移交给布局系统**。建议采用方案 A 或 B，以保证在任何宽度下调色盘都能优雅地待在 10px 边距之内。
+通过“锁定容器宽”+“移除视觉冗余”+“压缩间距”的三位一体方案，可以将 `MetaPanel` 从一个松散、易溢出的原型，提升为具备严谨工业美感的专业元数据面板。
