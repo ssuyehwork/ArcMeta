@@ -71,10 +71,10 @@ void PaletteCapsule::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    // 1. 绘制总背景 (Capsule)
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor("#1E1E1E"));
-    painter.drawRoundedRect(rect(), 12, 12);
+    // 1. 绘制总背景 (Capsule) - 提升亮度并增加边框
+    painter.setPen(QPen(QColor("#444444"), 1));
+    painter.setBrush(QColor("#2E2E2E"));
+    painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 12, 12);
 
     // 2. 绘制色点
     for (int i = 0; i < m_palette.size(); ++i) {
@@ -324,14 +324,14 @@ void MetaPanel::initUi() {
     // [Section 2] 名称输入框 (ElasticEdit)
     m_nameEdit = new ElasticEdit(m_container);
     m_nameEdit->setPlaceholderText("文件名称...");
-    m_nameEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 16px; font-weight: bold; color: #EEEEEE; padding: 0px; }");
+    m_nameEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #333333; border-radius: 4px; padding: 4px 8px; font-size: 16px; font-weight: bold; color: #EEEEEE; }");
     m_nameEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_nameEdit);
 
     // [Section 3] 备注输入框 (ElasticEdit)
     m_noteEdit = new ElasticEdit(m_container);
     m_noteEdit->setPlaceholderText("添加备注说明...");
-    m_noteEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 13px; color: #AAAAAA; padding: 0px; }");
+    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #333333; border-radius: 4px; padding: 4px 8px; font-size: 13px; color: #AAAAAA; }");
     m_noteEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_noteEdit);
 
@@ -345,7 +345,7 @@ void MetaPanel::initUi() {
     linkL->addWidget(linkIcon, 0, Qt::AlignTop);
     m_linkEdit = new ElasticEdit(linkBox);
     m_linkEdit->setPlaceholderText("添加链接...");
-    m_linkEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 12px; color: #4a90e2; padding: 2px 0; }");
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #333333; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #4a90e2; }");
     m_linkEdit->installEventFilter(this);
     linkL->addWidget(m_linkEdit, 1);
     m_containerLayout->addWidget(linkBox);
@@ -398,7 +398,7 @@ void MetaPanel::initUi() {
 
     m_categoryEdit = new ElasticEdit(catBox);
     m_categoryEdit->setReadOnly(true);
-    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: none; border-radius: 4px; padding: 6px 8px; font-size: 12px; color: #EEEEEE; }");
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #2A2A2A; border-radius: 4px; padding: 6px 8px; font-size: 12px; color: #EEEEEE; }");
     catL->addWidget(m_categoryEdit);
     m_containerLayout->addWidget(catBox);
 

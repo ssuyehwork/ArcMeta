@@ -2687,3 +2687,62 @@ bool MftReader::saveToCache() {
 - 变更原因：重塑调色盘提取的核心架构，引入“色相分区保护机制”以解决少数特征色（如绿色）在背景色占比巨大时的统计淹没问题。同步放宽极色过滤阈值至 (0.97/0.05) 和 0.03，并收紧相似色合并阈值，确保比例真实性的同时极大提升色彩区分度，精度完美对标 Eagle。
 - 影响范围：`UiHelper::extractPalette`。
 - 是否在需求范围内：是
+
+---
+## [41] 变更时间：2026-05-31 06:07:51
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void PaletteCapsule::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // 1. 绘制总背景 (Capsule)
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor("#1E1E1E"));
+    painter.drawRoundedRect(rect(), 12, 12);
+...
+    // [Section 2] 名称输入框 (ElasticEdit)
+    m_nameEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 16px; font-weight: bold; color: #EEEEEE; padding: 0px; }");
+...
+    // [Section 3] 备注输入框 (ElasticEdit)
+    m_noteEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 13px; color: #AAAAAA; padding: 0px; }");
+...
+    // [Section 4] 链接输入框 (ElasticEdit)
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: transparent; border: none; font-size: 12px; color: #4a90e2; padding: 2px 0; }");
+...
+    // [Section 6] 分类展示 (Category Pills)
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: none; border-radius: 4px; padding: 6px 8px; font-size: 12px; color: #EEEEEE; }");
+```
+
+### 修改后（After）
+```cpp
+void PaletteCapsule::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // 1. 绘制总背景 (Capsule) - 提升亮度并增加边框
+    painter.setPen(QPen(QColor("#444444"), 1));
+    painter.setBrush(QColor("#2E2E2E"));
+    painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 12, 12);
+...
+    // [Section 2] 名称输入框 (ElasticEdit)
+    m_nameEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #333333; border-radius: 4px; padding: 4px 8px; font-size: 16px; font-weight: bold; color: #EEEEEE; }");
+...
+    // [Section 3] 备注输入框 (ElasticEdit)
+    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #333333; border-radius: 4px; padding: 4px 8px; font-size: 13px; color: #AAAAAA; }");
+...
+    // [Section 4] 链接输入框 (ElasticEdit)
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #333333; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #4a90e2; }");
+...
+    // [Section 6] 分类展示 (Category Pills)
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #2A2A2A; border-radius: 4px; padding: 6px 8px; font-size: 12px; color: #EEEEEE; }");
+```
+
+### 变更说明
+- 变更原因：解决 MetaPanel UI 元素可见性差及交互感缺失的问题。提升调色盘胶囊背景对比度并增加边框；为所有编辑框（文件名、备注、链接）增加明显的背景色和物理边框，提供明确的交互暗示，对标工业级 UI 设计标准。
+- 影响范围：`MetaPanel` 及其子组件。
+- 是否在需求范围内：是
