@@ -1,47 +1,46 @@
-# Analysis_Modification_Plan-62: MetaPanel 布局溢出与间距异常深度诊断
+# Analysis_Modification_Plan-62: MetaPanel 布局溢出与视觉体验深度优化方案
 
-## § 1 布局溢出根因诊断 (2026-06-01 更新)
+## § 1 布局溢出与间距异常根因诊断
 
-根据最新的视觉反馈，即使实施了初步的 10px 边距限制，系统在加载长文本（如长路径或超长文件名）时仍会出现横向溢出。
+### 1.1 约束失效导致的横向溢出
+- **诊断分析**：当 `MetaPanel` 被放置在 `QScrollArea` 中时，若内部组件（如 `lblPath` 或 `ElasticEdit`）的文本内容过长，布局管理器会倾向于扩张宽度而非折行，导致内容“刺破”面板边界。
+- **傻逼之处**：现有的 `resizeEvent` 试图手动设置 `maximumWidth`，但在 Qt 的布局刷新周期中，这种手动干预往往滞后或被布局引擎的 `sizeHint` 逻辑覆盖，导致无法实现真正的“绝对不溢出”。
 
-### 1.1 ElasticEdit 的宽度扩张风险
-- **代码位置**：`MetaPanel.cpp` 中的 `ElasticEdit` 实现
-- **问题分析**：`ElasticEdit` 继承自 `QPlainTextEdit`。虽然开启了 `WidgetWidth` 换行模式，但在 `QScrollArea` 环境下，如果子组件的 `sizeHint` 报告了一个巨大的宽度，`QScrollArea` 的内容小部件会尝试扩张以匹配该宽度，导致横向滚动条出现或布局被刺破。
-
-### 1.2 QLabel (lblPath) 的换行失效
-- **代码位置**：`addInfoRow` 函数
-- **问题分析**：`lblPath` 虽然设置了 `setWordWrap(true)`，但在没有明确最大宽度约束的情况下，Qt 的布局引擎往往会优先选择增加宽度而非换行，尤其是当它处于一个高度可变的 `QVBoxLayout` 中时。
-
-### 1.3 标记 ① 处垂直间距过大的原因
-- **代码位置**：`initUi` (行 336) 与 `addInfoRow` (行 433)
-- **技术推演**：
-    1. `m_containerLayout` 设置了 `setSpacing(12)`。
-    2. `addInfoRow` 内部为每个 `row` 小部件设置了 `setContentsMargins(0, 4, 0, 4)`。
-    3. **累加效应**：两个相邻行之间的物理间距 = 行N底部边距(4px) + 布局间距(12px) + 行N+1顶部边距(4px) = **20px**。这在紧凑的元数据面板中显得过于空旷，产生了视觉上的断裂感。
+### 1.2 视觉噪音与垂直间距冗余
+- **诊断分析**：
+    - **图标干扰**：在“链接”、“标签”、“分类”等小节中使用 SVG 图标占用了宝贵的横向空间，且在窄面板模式下显得过于拥挤。
+    - **间距累加效应**：全局布局的 `spacing(12)` 与子组件行内部的 `contentsMargins(4)` 产生了叠加效应，导致行与行之间的空隙高达 20px，视觉上产生了严重的断裂感。
 
 ---
 
-## § 2 工业级重构方案：极致约束与视觉微调
+## § 2 工业级视觉与布局优化方案
 
-### 2.1 引入“硬性”宽度截断逻辑
+### 2.1 彻底的宽度防御策略（强制响应式）
 - **修改建议**：
-    1. 在 `MetaPanel` 中重写 `resizeEvent`。
-    2. 实时计算有效内容宽度：`int maxContentW = this->width() - 20;` (预留左右 10px)。
-    3. 强制遍历 `m_container` 的子组件，显式调用 `setMaximumWidth(maxContentW)`。
-    4. 特别针对 `ElasticEdit`：确保其在文本变化触发 `adjustHeight` 时，不会因为宽度过窄导致高度计算陷入死循环，应使用 `document()->setTextWidth(maxContentW)`。
+    1. **锁定容器宽度**：在 `MetaPanel` 的 `resizeEvent` 中，强制将 `m_container` 的固定宽度设为 `m_scrollArea->viewport()->width()`。
+    2. **自动换行/省略逻辑**：
+        - 对于 `lblPath`：启用 `setWordWrap(true)` 并结合 `setMaximumWidth`。
+        - 对于 `ElasticEdit`：在 `adjustHeight` 时显式指定 `document()->setTextWidth(fixedWidth)`，确保高度计算完全基于锁定的宽度。
+    3. **杜绝横向滚动条**：明确设置 `m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff)`。
 
-### 2.2 优化 addInfoRow 的视觉密度
+### 2.2 视觉降噪与密度优化（响应用户特定需求）
 - **修改建议**：
-    1. **压缩边距**：将 `addInfoRow` 中的 `rl->setContentsMargins(0, 2, 0, 2)`。
-    2. **按需间距**：将 `m_containerLayout->setSpacing(8)`。
-    3. **分组对齐**：为详情网格部分引入独立的子布局，并降低该子布局内的 `spacing`，使其在视觉上与上方的输入框区域形成区分。
+    1. **移除特定图标**：
+        - 移除 `m_linkEdit` 左侧的 `link` 图标。
+        - 移除 `tagL` 顶部的 `tag` 图标及标题头。
+        - 移除 `catL` 顶部的 `category` 图标及标题头。
+        - **优化理由**：通过占位符（PlaceholderText）即可明确输入框意图，移除图标可为文本内容腾出约 24px 的横向空间，并显著提升视觉简洁度。
+    2. **压缩垂直间距**：
+        - 将全局间距 `m_containerLayout->setSpacing(8)`。
+        - 将 `addInfoRow` 内部的垂直边距压至 `2px`。
+        - 最终实现行间距约 **12px** 的工业级紧凑视觉效果。
 
-### 2.3 路径显示方案优化
+### 2.3 强制执行 10px 边距
 - **修改建议**：
-    1. 对 `lblPath` 使用 `ElideMode`（省略号截断）而非强制换行，或者提供点击复制功能。
-    2. 在 `paintEvent` 中处理超长文本，确保其不会撑开容器。
+    1. 确保 `m_containerLayout` 的 `setContentsMargins(10, 10, 10, 10)` 是唯一的边距来源。
+    2. 移除所有子组件包装器（如 `palWrapper`）可能带有的额外边距。
 
 ---
 
 ## § 3 总结
-目前的布局问题属于 Qt 布局系统中典型的“约束传播失效”。当容器嵌套在 `QScrollArea` 中时，子组件必须具备主动感知并顺从父级宽度的意识。通过强制限制 `maximumWidth` 并微调复合间距，可以彻底解决溢出并消除标记 ① 处的视觉不适感。
+通过“锁定容器宽”+“移除视觉冗余”+“压缩间距”的三位一体方案，可以将 `MetaPanel` 从一个松散、易溢出的原型，提升为具备严谨工业美感的专业元数据面板。
