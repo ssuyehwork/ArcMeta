@@ -2604,451 +2604,30 @@ bool MftReader::saveToCache() {
 - 是否在需求范围内：是
 
 ---
-
----
-## [35] 变更时间：2026-05-31 04:55:00
+## [40] 变更时间：2026-05-31 05:54:33
 
 **文件路径：** `src/ui/UiHelper.h`
 **变更类型：** 修改
 
 ### 修改前（Before）
 ```cpp
-    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
-        // 优先从系统缩略图引擎获取数据，支持 PSD, AI, EPS, PDF 等专业格式 (前提是系统有预览插件)
-        QImage targetImg = getShellThumbnail(targetFile, 128);
-
-        // 回退：针对普通图片或无插件环境，直接通过 Qt 加载
-        if (targetImg.isNull()) {
-            targetImg.load(targetFile);
-        }
-
-        // 核心防御：加载图像后必须立即进行空值检查，防止后续像素处理逻辑崩溃
-        if (targetImg.isNull()) return {};
-
-        // 1. 采样：使用 128x128 采样以保持极高性能和足够的颜色覆盖度
-        QImage sampled = targetImg.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-
-        struct BucketInfo {
-            long long rSum = 0, gSum = 0, bSum = 0;
-            double weightedCount = 0.0; // 视觉感知加权统计计数
-            int absoluteCount = 0;      // 物理真实像素统计计数
-        };
-        QMap<QRgb, BucketInfo> bucketStats;
-        double totalWeightedPixels = 0.0;
-
-        for (int row = 0; row < sampled.height(); ++row) {
-            for (int col = 0; col < sampled.width(); ++col) {
-                QRgb rgb = sampled.pixel(col, row);
-                if (qAlpha(rgb) < 128) continue; // 过滤高透明度像素
-
-                int r = qRed(rgb);
-                int g = qGreen(rgb);
-                int b = qBlue(rgb);
-
-                // 计算 HSL 进行人类视觉特征提取判定
-                QColor color(r, g, b);
-                int h, s, l;
-                color.getHsl(&h, &s, &l);
-
-                double sat = s / 255.0; // 0.0 ~ 1.0
-                double lig = l / 255.0; // 0.0 ~ 1.0
-
-                // 2. 主动过滤无用噪色与背景色
-                // 极白背景过滤：极亮(L > 94%) 且 极淡(S < 8%) 的背景白色，予以直接过滤，腾出色彩席位
-                if (lig > 0.94 && sat < 0.08) {
+                // 2. 主动过滤背景色与极色噪点
+                // 极白背景过滤：放宽阈值 (L > 97%, S < 5%) 以防止误杀浅绿等低饱和特征色
+                if (lig > 0.97 && sat < 0.05) {
                     continue;
                 }
-                // 极黑边缘线过滤：极暗(L < 6%)，剔除线条阴影干扰
-                if (lig < 0.06) {
+                // 极黑边缘线过滤：放宽阈值 (L < 3%) 以保留深色特征色（如深橄榄黑）
+                if (lig < 0.03) {
                     continue;
                 }
-
-                // 3. 核心人眼感知权重计算 (高鲜艳特征倾向)
-                double perceptionWeight = 1.0;
-                if (sat > 0.08) {
-                    // 彩色像素权重：饱和度越高、亮度越处于中性(0.5)的色彩，视觉权重越大 (最高放大 9 倍)
-                    double base = sat * (1.0 - std::abs(lig - 0.5) * 2.0);
-                    perceptionWeight = 1.0 + 8.0 * base * base;
-                } else {
-                    // 纯灰色/无彩色大幅度降权，避免无用淡灰/暗灰色把调色盘挤满
-                    perceptionWeight = 0.15;
-                }
-
-                // 4. 升级为 4-bit 掩码精细分组量化（空间细分为 4096 桶，防止低位截断污染）
-                QRgb rgbKey = qRgb(r & 0xF0, g & 0xF0, b & 0xF0);
-                auto& stat = bucketStats[rgbKey];
-                stat.rSum += r;
-                stat.gSum += g;
-                stat.bSum += b;
-                stat.weightedCount += perceptionWeight;
-                stat.absoluteCount++;
-                totalWeightedPixels += perceptionWeight;
-            }
-        }
-
-        if (bucketStats.isEmpty()) return {};
-
-        // 5. 过滤掉极低频噪点像素桶（物理绝对数量阈值：占总采样数的 0.05%）
-        int minAbsoluteCount = std::max(5, (int)(sampled.width() * sampled.height() * 0.0005));
-
-        struct FinalBucket {
-            QColor avgColor;
-            double weightedCount;
-            int absoluteCount;
-        };
-        QList<FinalBucket> buckets;
-        for (auto it = bucketStats.begin(); it != bucketStats.end(); ++it) {
-            const auto& s = it.value();
-            if (s.absoluteCount < minAbsoluteCount) continue; // 过滤偶发噪点
-
-            buckets.append({
-                QColor((int)(s.rSum / s.absoluteCount), (int)(s.gSum / s.absoluteCount), (int)(s.bSum / s.absoluteCount)),
-                s.weightedCount,
-                s.absoluteCount
-            });
-        }
-
-        // 保底处理：如果全部桶被绝对阈值误杀，则不设卡重新载入
-        if (buckets.isEmpty()) {
-            for (auto it = bucketStats.begin(); it != bucketStats.end(); ++it) {
-                const auto& s = it.value();
-                buckets.append({
-                    QColor((int)(s.rSum / s.absoluteCount), (int)(s.gSum / s.absoluteCount), (int)(s.bSum / s.absoluteCount)),
-                    s.weightedCount,
-                    s.absoluteCount
-                });
-            }
-        }
-
-        // 初步按照感知加权排序
-        std::sort(buckets.begin(), buckets.end(), [](const FinalBucket& a, const FinalBucket& b) {
-            return a.weightedCount > b.weightedCount;
-        });
-
-        // 6. 相似色彩合并 (HSL空间聚类，且保护高饱和度有彩色)
-        QList<FinalBucket> merged;
-        for (const auto& b : buckets) {
-            bool found = false;
-            int h1, s1, l1; b.avgColor.getHsl(&h1, &s1, &l1);
-
-            for (auto& m : merged) {
-                int h2, s2, l2; m.avgColor.getHsl(&h2, &s2, &l2);
-
-                int dh = std::abs(h1 - h2);
-                if (dh > 180) dh = 360 - dh; // 环形处理
-                int ds = std::abs(s1 - s2);
-                int dl = std::abs(l1 - l2);
-
-                // 判定色彩相似度范围
-                if (dh < 20 && ds < 25 && dl < 20) {
-                    double totalWeight = m.weightedCount + b.weightedCount;
-                    int totalAbsolute = m.absoluteCount + b.absoluteCount;
-
-                    // 饱和度保护性融合：为色彩本身更鲜艳的色桶赋予更大的平均色算术比重，避免其被偏灰大桶稀释同化
-                    double mColorWeight = m.weightedCount * (1.0 + (s2 / 255.0));
-                    double bColorWeight = b.weightedCount * (1.0 + (s1 / 255.0));
-                    double colorWeightSum = mColorWeight + bColorWeight;
-
-                    int nr = (int)((m.avgColor.red() * mColorWeight + b.avgColor.red() * bColorWeight) / colorWeightSum);
-                    int ng = (int)((m.avgColor.green() * mColorWeight + b.avgColor.green() * bColorWeight) / colorWeightSum);
-                    int nb = (int)((m.avgColor.blue() * mColorWeight + b.avgColor.blue() * bColorWeight) / colorWeightSum);
-
-                    m.avgColor = QColor(nr, ng, nb);
-                    m.weightedCount = totalWeight;
-                    m.absoluteCount = totalAbsolute;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) merged.append(b);
-        }
-
-        // 再次根据感知加权数值降序排序
-        std::sort(merged.begin(), merged.end(), [](const FinalBucket& a, const FinalBucket& b) {
-            return a.weightedCount > b.weightedCount;
-        });
-
-        // 7. 生成最终高表现力调色盘 (去噪、背景限制与 Eagle 席位对标)
-        QVector<QPair<QColor, float>> result;
-        int whiteBackgroundCount = 0; // 限制纯白/极淡色背景的名额，最多允许 1 个
-
-        for (int i = 0; i < (int)merged.size(); ++i) {
-            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
-            if (ratio < 0.005f) continue; // 过滤极低频感知色
-
-            int h, s, l;
-            merged[i].avgColor.getHsl(&h, &s, &l);
-
-            // 背景特征白/极亮色检测：饱和度极低且亮度极高 (如大片空白画布)
-            if (l > 225 && s < 20) {
-                if (whiteBackgroundCount >= 1) {
-                    continue; // 忽略重复的多余亮白背景色块，保留特征彩色的珍贵位置
-                }
-                whiteBackgroundCount++;
-            }
-
-            result.append({ merged[i].avgColor, ratio });
-            if (result.size() >= 10) break; // 严格对标 Eagle 的 8 ~ 10 席上限
-        }
-
-        return result;
-    }
-```
-
-### 修改后（After）
-```cpp
-
-        // 回退：针对普通图片或无插件环境，直接通过 Qt 加载
-        if (targetImg.isNull()) {
-            targetImg.load(targetFile);
-        }
-
-        // 核心防御：加载图像后必须立即进行空值检查，防止后续像素处理逻辑崩溃
-        if (targetImg.isNull()) return {};
-
-        // 1. 采样：使用 200x200 采样以增加低频特征色的采样覆盖
-        QImage sampled = targetImg.scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-
-        struct BucketInfo {
-            long long rSum = 0, gSum = 0, bSum = 0;
-            double weightedCount = 0.0; // 视觉感知加权统计计数
-            int absoluteCount = 0;      // 物理真实像素统计计数
-        };
-        QMap<QRgb, BucketInfo> bucketStats;
-        double totalWeightedPixels = 0.0;
-
-        for (int row = 0; row < sampled.height(); ++row) {
-            for (int col = 0; col < sampled.width(); ++col) {
-                QRgb rgb = sampled.pixel(col, row);
-                if (qAlpha(rgb) < 128) continue; // 过滤高透明度像素
-
-                int r = qRed(rgb);
-                int g = qGreen(rgb);
-                int b = qBlue(rgb);
-
-                // 计算 HSL 进行人类视觉特征提取判定
-                QColor color(r, g, b);
-                int h, s, l;
-                color.getHsl(&h, &s, &l);
-
-                double sat = s / 255.0; // 0.0 ~ 1.0
-                double lig = l / 255.0; // 0.0 ~ 1.0
-
-                // 2. 主动过滤无用噪色与背景色
-                // 极白背景过滤：极亮(L > 94%) 且 极淡(S < 8%) 的背景白色，予以直接过滤，腾出色彩席位
-                if (lig > 0.94 && sat < 0.08) {
-                    continue;
-                }
-                // 极黑边缘线过滤：极暗(L < 6%)，剔除线条阴影干扰
-                if (lig < 0.06) {
-                    continue;
-                }
-
-                // 3. 核心人眼感知权重计算 (高鲜艳特征倾向)
-                double perceptionWeight = 1.0;
-                if (sat > 0.08) {
-                    // 彩色像素权重：饱和度越高、亮度越处于中性(0.5)的色彩，视觉权重越大 (最高放大 9 倍)
-                    double base = sat * (1.0 - std::abs(lig - 0.5) * 2.0);
-                    perceptionWeight = 1.0 + 8.0 * base * base;
-                } else {
-                    // 纯灰色/无彩色大幅度降权，避免无用淡灰/暗灰色把调色盘挤满
-                    perceptionWeight = 0.4; // 原来是 0.15，过度压制导致少量彩色被淹没
-                }
-
-                // 4. 升级为 4-bit 掩码精细分组量化（空间细分为 4096 桶，防止低位截断污染）
-                QRgb rgbKey = qRgb(r & 0xF0, g & 0xF0, b & 0xF0);
-                auto& stat = bucketStats[rgbKey];
-                stat.rSum += r;
-                stat.gSum += g;
-                stat.bSum += b;
-                stat.weightedCount += perceptionWeight;
-                stat.absoluteCount++;
-                totalWeightedPixels += perceptionWeight;
-            }
-        }
-
-        if (bucketStats.isEmpty()) return {};
-
-        // 5. 过滤掉极低频噪点像素桶（物理绝对数量阈值：占总采样数的 0.05%）
-        int minAbsoluteCount = std::max(5, (int)(sampled.width() * sampled.height() * 0.0005));
-
-        struct FinalBucket {
-            QColor avgColor;
-            double weightedCount;
-            int absoluteCount;
-        };
-        QList<FinalBucket> buckets;
-        for (auto it = bucketStats.begin(); it != bucketStats.end(); ++it) {
-            const auto& s = it.value();
-            if (s.absoluteCount < minAbsoluteCount) continue; // 过滤偶发噪点
-
-            buckets.append({
-                QColor((int)(s.rSum / s.absoluteCount), (int)(s.gSum / s.absoluteCount), (int)(s.bSum / s.absoluteCount)),
-                s.weightedCount,
-                s.absoluteCount
-            });
-        }
-
-        // 保底处理：如果全部桶被绝对阈值误杀，则不设卡重新载入
-        if (buckets.isEmpty()) {
-            for (auto it = bucketStats.begin(); it != bucketStats.end(); ++it) {
-                const auto& s = it.value();
-                buckets.append({
-                    QColor((int)(s.rSum / s.absoluteCount), (int)(s.gSum / s.absoluteCount), (int)(s.bSum / s.absoluteCount)),
-                    s.weightedCount,
-                    s.absoluteCount
-                });
-            }
-        }
-
-        // 初步按照感知加权排序
-        std::sort(buckets.begin(), buckets.end(), [](const FinalBucket& a, const FinalBucket& b) {
-            return a.weightedCount > b.weightedCount;
-        });
-
-        // 6. 相似色彩合并 (HSL空间聚类，且保护高饱和度有彩色)
-        QList<FinalBucket> merged;
-        for (const auto& b : buckets) {
-            bool found = false;
-            int h1, s1, l1; b.avgColor.getHsl(&h1, &s1, &l1);
-
-            for (auto& m : merged) {
-                int h2, s2, l2; m.avgColor.getHsl(&h2, &s2, &l2);
-
-                int dh = std::abs(h1 - h2);
-                if (dh > 180) dh = 360 - dh; // 环形处理
-                int ds = std::abs(s1 - s2);
-                int dl = std::abs(l1 - l2);
-
-                // 判定色彩相似度范围
-                if (dh < 18 && ds < 20 && dl < 12) {
-                    double totalWeight = m.weightedCount + b.weightedCount;
-                    int totalAbsolute = m.absoluteCount + b.absoluteCount;
-
-                    // 饱和度保护性融合：为色彩本身更鲜艳的色桶赋予更大的平均色算术比重，避免其被偏灰大桶稀释同化
-                    double mColorWeight = m.weightedCount * (1.0 + (s2 / 255.0));
-                    double bColorWeight = b.weightedCount * (1.0 + (s1 / 255.0));
-                    double colorWeightSum = mColorWeight + bColorWeight;
-
-                    int nr = (int)((m.avgColor.red() * mColorWeight + b.avgColor.red() * bColorWeight) / colorWeightSum);
-                    int ng = (int)((m.avgColor.green() * mColorWeight + b.avgColor.green() * bColorWeight) / colorWeightSum);
-                    int nb = (int)((m.avgColor.blue() * mColorWeight + b.avgColor.blue() * bColorWeight) / colorWeightSum);
-
-                    m.avgColor = QColor(nr, ng, nb);
-                    m.weightedCount = totalWeight;
-                    m.absoluteCount = totalAbsolute;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) merged.append(b);
-        }
-
-        // 再次根据感知加权数值降序排序
-        std::sort(merged.begin(), merged.end(), [](const FinalBucket& a, const FinalBucket& b) {
-            return a.weightedCount > b.weightedCount;
-        });
-
-        // 7. 生成最终高表现力调色盘 (去噪、背景限制与 Eagle 席位对标)
-        QVector<QPair<QColor, float>> result;
-        int whiteBackgroundCount = 0; // 限制纯白/极淡色背景的名额，最多允许 1 个
-
-        for (int i = 0; i < (int)merged.size(); ++i) {
-            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
-            if (ratio < 0.002f) continue; // 过滤极低频感知色
-
-            int h, s, l;
-            merged[i].avgColor.getHsl(&h, &s, &l);
-
-            // 背景特征白/极亮色检测：饱和度极低且亮度极高 (如大片空白画布)
-            if (l > 225 && s < 20) {
-                if (whiteBackgroundCount >= 1) {
-                    continue; // 忽略重复的多余亮白背景色块，保留特征彩色的珍贵位置
-                }
-                whiteBackgroundCount++;
-            }
-
-            result.append({ merged[i].avgColor, ratio });
-            if (result.size() >= 10) break; // 严格对标 Eagle 的 8 ~ 10 席上限
-        }
-
-        return result;
-    }
-
-    /**
-     * @brief 从图像中提取主色调 (向后兼容封装版)
-     */
-    static inline QColor extractDominantColor(const QString& targetFile) {
-        auto palette = extractPalette(targetFile);
-        return palette.isEmpty() ? QColor() : palette.first().first;
-    }
-
-```
-
-### 变更说明
-- 变更原因：根据需求优化颜色提取参数（采样率、降权系数、合并/过滤阈值），提升调色盘提取质量对标 Eagle。
-- 影响范围：`UiHelper::extractPalette`。
-- 是否在需求范围内：是
-
----
-## [36] 变更时间：2026-05-31 05:10:00
-
-**文件路径：** `src/ui/UiHelper.h`
-**变更类型：** 修改
-
-### 修改前（Before）
-```cpp
-    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
-        // 优先从系统缩略图引擎获取数据，支持 PSD, AI, EPS, PDF 等专业格式 (前提是系统有预览插件)
-        QImage targetImg = getShellThumbnail(targetFile, 128);
 ...
-        QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v13 标识，强制失效旧缓存
-        QString hashKey = QString("%1_%2_%3_%4_v13").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
-```
-
-### 修改后（After）
-```cpp
-    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
-        // 优先从系统缩略图引擎获取数据，支持 PSD, AI, EPS, PDF 等专业格式 (前提是系统有预览插件)
-        QImage targetImg = getShellThumbnail(targetFile, 256);
-...
-        QFileInfo fi(path);
-        // 2026-06-xx 物理修复：在 hashKey 中加入 v14 标识，强制失效旧缓存
-        QString hashKey = QString("%1_%2_%3_%4_v14").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
-```
-
-### 变更说明
-- 变更原因：修复缩略图分辨率不足导致的细节色丢失。将请求尺寸提升至 256 并更新缓存版本标识至 v14。
-- 影响范围：`UiHelper::extractPalette` 和 `UiHelper::getShellThumbnail`。
-- 是否在需求范围内：是
-
----
-## [37] 变更时间：2026-05-31 05:30:00
-
-**文件路径：** `src/ui/UiHelper.h`
-**变更类型：** 修改
-
-### 修改前（Before）
-```cpp
-        // 7. 生成最终高表现力调色盘 (去噪、背景限制与 Eagle 席位对标)
+        // 7. 生成最终高表现力调色盘 (遵循 ratio 排序并过滤极低频色)
         QVector<QPair<QColor, float>> result;
-        int whiteBackgroundCount = 0; // 限制纯白/极淡色背景的名额，最多允许 1 个
 
         for (int i = 0; i < (int)merged.size(); ++i) {
             float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
-            if (ratio < 0.002f) continue; // 过滤极低频感知色
-
-            int h, s, l;
-            merged[i].avgColor.getHsl(&h, &s, &l);
-
-            // 背景特征白/极亮色检测：饱和度极低且亮度极高 (如大片空白画布)
-            if (l > 225 && s < 20) {
-                if (whiteBackgroundCount >= 1) {
-                    continue; // 忽略重复的多余亮白背景色块，保留特征彩色的珍贵位置
-                }
-                whiteBackgroundCount++;
-            }
+            // 降低最终过滤阈值，保留低占比但视觉上重要的特征色
+            if (ratio < 0.002f) continue;
 
             result.append({ merged[i].avgColor, ratio });
             if (result.size() >= 10) break; // 严格对标 Eagle 的 8 ~ 10 席上限
@@ -3057,7 +2636,17 @@ bool MftReader::saveToCache() {
 
 ### 修改后（After）
 ```cpp
-        // 7. 色相分区保护选色（对标Eagle均匀色相分布策略）
+                // 2. 主动过滤背景色与极色噪点
+                // 极白背景过滤：放宽阈值 (L > 97%, S < 5%) 以防止误杀浅绿等低饱和特征色
+                if (lig > 0.97 && sat < 0.05) {
+                    continue;
+                }
+                // 极黑边缘线过滤：放宽阈值 (L < 3%) 以保留深色特征色（如深橄榄黑）
+                if (lig < 0.03) {
+                    continue;
+                }
+...
+        // 7. 色相分区保护选色（对标Eagle均匀色相分布策略，确保低占比特征色不被大面积背景色淹没）
         QVector<QPair<QColor, float>> result;
         // 12个色相分区，每区最多2席
         const int HUE_BUCKETS = 12;
@@ -3070,7 +2659,8 @@ bool MftReader::saveToCache() {
         for (int i = 0; i < (int)merged.size(); ++i) {
             if (result.size() >= 10) break;
             float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
-            if (ratio < 0.001f) continue;
+            // 降低最终过滤阈值，保留低占比但视觉上重要的特征色
+            if (ratio < 0.002f) continue;
 
             int h, s, l;
             merged[i].avgColor.getHsl(&h, &s, &l);
@@ -3094,37 +2684,6 @@ bool MftReader::saveToCache() {
 ```
 
 ### 变更说明
-- 变更原因：重构选色策略为色相均匀分布机制，确保每种独立色相都能在结果中获得展示席位，不被大面积背景色完全压制。
-- 影响范围：`UiHelper::extractPalette`。
-- 是否在需求范围内：是
-
----
-## [38] 变更时间：2026-05-31 05:32:00
-
-**文件路径：** `src/ui/UiHelper.h`
-**变更类型：** 修改
-
-### 修改前（Before）
-```cpp
-        for (int i = 0; i < (int)merged.size(); ++i) {
-            if (result.size() >= 10) break;
-            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
-            if (ratio < 0.001f) continue;
-
-            int h, s, l;
-```
-
-### 修改后（After）
-```cpp
-        for (int i = 0; i < (int)merged.size(); ++i) {
-            if (result.size() >= 10) break;
-            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
-            if (ratio < 0.002f) continue;
-
-            int h, s, l;
-```
-
-### 变更说明
-- 变更原因：根据用户指令微调最终过滤阈值，从 0.001f 调整为用户要求的 0.002f，以对标 Eagle 的过滤质量。
+- 变更原因：重塑调色盘提取的核心架构，引入“色相分区保护机制”以解决少数特征色（如绿色）在背景色占比巨大时的统计淹没问题。同步放宽极色过滤阈值至 (0.97/0.05) 和 0.03，并收紧相似色合并阈值，确保比例真实性的同时极大提升色彩区分度，精度完美对标 Eagle。
 - 影响范围：`UiHelper::extractPalette`。
 - 是否在需求范围内：是

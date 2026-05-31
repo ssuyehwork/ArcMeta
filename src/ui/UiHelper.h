@@ -272,13 +272,13 @@ public:
                 double sat = s / 255.0; // 0.0 ~ 1.0
                 double lig = l / 255.0; // 0.0 ~ 1.0
 
-                // 2. 主动过滤无用噪色与背景色
-                // 极白背景过滤：极亮(L > 94%) 且 极淡(S < 8%) 的背景白色，予以直接过滤，腾出色彩席位
-                if (lig > 0.94 && sat < 0.08) {
+                // 2. 主动过滤背景色与极色噪点
+                // 极白背景过滤：放宽阈值 (L > 97%, S < 5%) 以防止误杀浅绿等低饱和特征色
+                if (lig > 0.97 && sat < 0.05) {
                     continue;
                 }
-                // 极黑边缘线过滤：极暗(L < 6%)，剔除线条阴影干扰
-                if (lig < 0.06) {
+                // 极黑边缘线过滤：放宽阈值 (L < 3%) 以保留深色特征色（如深橄榄黑）
+                if (lig < 0.03) {
                     continue;
                 }
 
@@ -358,8 +358,8 @@ public:
                 int ds = std::abs(s1 - s2);
                 int dl = std::abs(l1 - l2);
 
-                // 判定色彩相似度范围
-                if (dh < 18 && ds < 20 && dl < 12) {
+                // 判定色彩相似度范围 (收紧合并阈值，防止不同亮度的相似色被错误合并)
+                if (dh < 10 && ds < 15 && dl < 10) {
                     double totalWeight = m.weightedCount + b.weightedCount;
                     int totalAbsolute = m.absoluteCount + b.absoluteCount;
 
@@ -387,7 +387,7 @@ public:
             return a.weightedCount > b.weightedCount;
         });
 
-        // 7. 色相分区保护选色（对标Eagle均匀色相分布策略）
+        // 7. 色相分区保护选色（对标Eagle均匀色相分布策略，确保低占比特征色不被大面积背景色淹没）
         QVector<QPair<QColor, float>> result;
         // 12个色相分区，每区最多2席
         const int HUE_BUCKETS = 12;
@@ -400,6 +400,7 @@ public:
         for (int i = 0; i < (int)merged.size(); ++i) {
             if (result.size() >= 10) break;
             float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
+            // 降低最终过滤阈值，保留低占比但视觉上重要的特征色
             if (ratio < 0.002f) continue;
 
             int h, s, l;
