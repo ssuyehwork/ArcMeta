@@ -244,46 +244,107 @@ public:
         // 核心防御：加载图像后必须立即进行空值检查，防止后续像素处理逻辑崩溃
         if (targetImg.isNull()) return {};
 
-        // 1. 采样：使用 128x128 提高颜色覆盖度
+        // 1. 采样：使用 128x128 采样以保持极高性能和足够的颜色覆盖度
         QImage sampled = targetImg.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         
         struct BucketInfo { 
             long long rSum = 0, gSum = 0, bSum = 0; 
-            int count = 0; 
+            double weightedCount = 0.0; // 视觉感知加权统计计数
+            int absoluteCount = 0;      // 物理真实像素统计计数
         };
         QMap<QRgb, BucketInfo> bucketStats;
-        int totalValidPixels = 0;
+        double totalWeightedPixels = 0.0;
 
         for (int row = 0; row < sampled.height(); ++row) {
             for (int col = 0; col < sampled.width(); ++col) {
                 QRgb rgb = sampled.pixel(col, row);
-                if (qAlpha(rgb) < 128) continue;
+                if (qAlpha(rgb) < 128) continue; // 过滤高透明度像素
 
-                // 2. 量化分组：使用 3-bit 建立桶
-                QRgb rgbKey = qRgb(qRed(rgb) & 0xE0, qGreen(rgb) & 0xE0, qBlue(rgb) & 0xE0);
+                int r = qRed(rgb);
+                int g = qGreen(rgb);
+                int b = qBlue(rgb);
+
+                // 计算 HSL 进行人类视觉特征提取判定
+                QColor color(r, g, b);
+                int h, s, l;
+                color.getHsl(&h, &s, &l);
+
+                double sat = s / 255.0; // 0.0 ~ 1.0
+                double lig = l / 255.0; // 0.0 ~ 1.0
+
+                // 2. 主动过滤无用噪色与背景色
+                // 极白背景过滤：极亮(L > 94%) 且 极淡(S < 8%) 的背景白色，予以直接过滤，腾出色彩席位
+                if (lig > 0.94 && sat < 0.08) {
+                    continue;
+                }
+                // 极黑边缘线过滤：极暗(L < 6%)，剔除线条阴影干扰
+                if (lig < 0.06) {
+                    continue;
+                }
+
+                // 3. 核心人眼感知权重计算 (高鲜艳特征倾向)
+                double perceptionWeight = 1.0;
+                if (sat > 0.08) {
+                    // 彩色像素权重：饱和度越高、亮度越处于中性(0.5)的色彩，视觉权重越大 (最高放大 9 倍)
+                    double base = sat * (1.0 - std::abs(lig - 0.5) * 2.0);
+                    perceptionWeight = 1.0 + 8.0 * base * base;
+                } else {
+                    // 纯灰色/无彩色大幅度降权，避免无用淡灰/暗灰色把调色盘挤满
+                    perceptionWeight = 0.15;
+                }
+
+                // 4. 升级为 4-bit 掩码精细分组量化（空间细分为 4096 桶，防止低位截断污染）
+                QRgb rgbKey = qRgb(r & 0xF0, g & 0xF0, b & 0xF0);
                 auto& stat = bucketStats[rgbKey];
-                stat.rSum += qRed(rgb);
-                stat.gSum += qGreen(rgb);
-                stat.bSum += qBlue(rgb);
-                stat.count++;
-                totalValidPixels++;
+                stat.rSum += r;
+                stat.gSum += g;
+                stat.bSum += b;
+                stat.weightedCount += perceptionWeight;
+                stat.absoluteCount++;
+                totalWeightedPixels += perceptionWeight;
             }
         }
 
         if (bucketStats.isEmpty()) return {};
 
-        // 3. 计算桶的平均真色并初步排序
-        struct FinalBucket { QColor avgColor; int count; };
+        // 5. 过滤掉极低频噪点像素桶（物理绝对数量阈值：占总采样数的 0.05%）
+        int minAbsoluteCount = std::max(5, (int)(sampled.width() * sampled.height() * 0.0005));
+        
+        struct FinalBucket { 
+            QColor avgColor; 
+            double weightedCount; 
+            int absoluteCount; 
+        };
         QList<FinalBucket> buckets;
         for (auto it = bucketStats.begin(); it != bucketStats.end(); ++it) {
             const auto& s = it.value();
-            buckets.append({ QColor((int)(s.rSum / s.count), (int)(s.gSum / s.count), (int)(s.bSum / s.count)), s.count });
+            if (s.absoluteCount < minAbsoluteCount) continue; // 过滤偶发噪点
+            
+            buckets.append({ 
+                QColor((int)(s.rSum / s.absoluteCount), (int)(s.gSum / s.absoluteCount), (int)(s.bSum / s.absoluteCount)), 
+                s.weightedCount, 
+                s.absoluteCount 
+            });
         }
+
+        // 保底处理：如果全部桶被绝对阈值误杀，则不设卡重新载入
+        if (buckets.isEmpty()) {
+            for (auto it = bucketStats.begin(); it != bucketStats.end(); ++it) {
+                const auto& s = it.value();
+                buckets.append({ 
+                    QColor((int)(s.rSum / s.absoluteCount), (int)(s.gSum / s.absoluteCount), (int)(s.bSum / s.absoluteCount)), 
+                    s.weightedCount, 
+                    s.absoluteCount 
+                });
+            }
+        }
+
+        // 初步按照感知加权排序
         std::sort(buckets.begin(), buckets.end(), [](const FinalBucket& a, const FinalBucket& b) {
-            return a.count > b.count;
+            return a.weightedCount > b.weightedCount;
         });
 
-        // 4. 相似合并 (HSL 空间比对：deltaH < 20, deltaS < 25, deltaL < 20)
+        // 6. 相似色彩合并 (HSL空间聚类，且保护高饱和度有彩色)
         QList<FinalBucket> merged;
         for (const auto& b : buckets) {
             bool found = false;
@@ -293,18 +354,27 @@ public:
                 int h2, s2, l2; m.avgColor.getHsl(&h2, &s2, &l2);
                 
                 int dh = std::abs(h1 - h2);
-                if (dh > 180) dh = 360 - dh; // 色相环循环处理
+                if (dh > 180) dh = 360 - dh; // 环形处理
                 int ds = std::abs(s1 - s2);
                 int dl = std::abs(l1 - l2);
 
+                // 判定色彩相似度范围
                 if (dh < 20 && ds < 25 && dl < 20) {
-                    // 重新计算加权平均色，确保最终 HEX 真值不偏离物理重心
-                    int total = m.count + b.count;
-                    int nr = (m.avgColor.red() * m.count + b.avgColor.red() * b.count) / total;
-                    int ng = (m.avgColor.green() * m.count + b.avgColor.green() * b.count) / total;
-                    int nb = (m.avgColor.blue() * m.count + b.avgColor.blue() * b.count) / total;
+                    double totalWeight = m.weightedCount + b.weightedCount;
+                    int totalAbsolute = m.absoluteCount + b.absoluteCount;
+
+                    // 饱和度保护性融合：为色彩本身更鲜艳的色桶赋予更大的平均色算术比重，避免其被偏灰大桶稀释同化
+                    double mColorWeight = m.weightedCount * (1.0 + (s2 / 255.0));
+                    double bColorWeight = b.weightedCount * (1.0 + (s1 / 255.0));
+                    double colorWeightSum = mColorWeight + bColorWeight;
+
+                    int nr = (int)((m.avgColor.red() * mColorWeight + b.avgColor.red() * bColorWeight) / colorWeightSum);
+                    int ng = (int)((m.avgColor.green() * mColorWeight + b.avgColor.green() * bColorWeight) / colorWeightSum);
+                    int nb = (int)((m.avgColor.blue() * mColorWeight + b.avgColor.blue() * bColorWeight) / colorWeightSum);
+
                     m.avgColor = QColor(nr, ng, nb);
-                    m.count = total;
+                    m.weightedCount = totalWeight;
+                    m.absoluteCount = totalAbsolute;
                     found = true;
                     break;
                 }
@@ -312,18 +382,34 @@ public:
             if (!found) merged.append(b);
         }
 
-        // 5. 再次排序并返回全量色板
+        // 再次根据感知加权数值降序排序
         std::sort(merged.begin(), merged.end(), [](const FinalBucket& a, const FinalBucket& b) {
-            return a.count > b.count;
+            return a.weightedCount > b.weightedCount;
         });
 
+        // 7. 生成最终高表现力调色盘 (去噪、背景限制与 Eagle 席位对标)
         QVector<QPair<QColor, float>> result;
+        int whiteBackgroundCount = 0; // 限制纯白/极淡色背景的名额，最多允许 1 个
+
         for (int i = 0; i < (int)merged.size(); ++i) {
-            float ratio = (float)merged[i].count / totalValidPixels;
-            // 物理过滤：占比不足 1% 的杂色直接丢弃，对标 Eagle 密度
-            if (ratio < 0.01f) continue;
+            float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
+            if (ratio < 0.005f) continue; // 过滤极低频感知色
+
+            int h, s, l;
+            merged[i].avgColor.getHsl(&h, &s, &l);
+
+            // 背景特征白/极亮色检测：饱和度极低且亮度极高 (如大片空白画布)
+            if (l > 225 && s < 20) {
+                if (whiteBackgroundCount >= 1) {
+                    continue; // 忽略重复的多余亮白背景色块，保留特征彩色的珍贵位置
+                }
+                whiteBackgroundCount++;
+            }
+
             result.append({ merged[i].avgColor, ratio });
+            if (result.size() >= 10) break; // 严格对标 Eagle 的 8 ~ 10 席上限
         }
+
         return result;
     }
 
