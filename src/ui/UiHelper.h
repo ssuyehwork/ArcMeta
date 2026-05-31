@@ -244,8 +244,8 @@ public:
         // 核心防御：加载图像后必须立即进行空值检查，防止后续像素处理逻辑崩溃
         if (targetImg.isNull()) return {};
 
-        // 1. 采样：使用 128x128 采样以保持极高性能和足够的颜色覆盖度
-        QImage sampled = targetImg.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        // 1. 采样：使用 200x200 采样以增加低频特征色的采样覆盖
+        QImage sampled = targetImg.scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         
         struct BucketInfo { 
             long long rSum = 0, gSum = 0, bSum = 0; 
@@ -290,7 +290,7 @@ public:
                     perceptionWeight = 1.0 + 8.0 * base * base;
                 } else {
                     // 纯灰色/无彩色大幅度降权，避免无用淡灰/暗灰色把调色盘挤满
-                    perceptionWeight = 0.15;
+                    perceptionWeight = 0.4; // 原来是 0.15，过度压制导致少量彩色被淹没
                 }
 
                 // 4. 升级为 4-bit 掩码精细分组量化（空间细分为 4096 桶，防止低位截断污染）
@@ -359,7 +359,7 @@ public:
                 int dl = std::abs(l1 - l2);
 
                 // 判定色彩相似度范围
-                if (dh < 20 && ds < 25 && dl < 20) {
+                if (dh < 18 && ds < 20 && dl < 12) {
                     double totalWeight = m.weightedCount + b.weightedCount;
                     int totalAbsolute = m.absoluteCount + b.absoluteCount;
 
@@ -393,7 +393,7 @@ public:
 
         for (int i = 0; i < (int)merged.size(); ++i) {
             float ratio = (float)merged[i].weightedCount / totalWeightedPixels;
-            if (ratio < 0.005f) continue; // 过滤极低频感知色
+            if (ratio < 0.002f) continue; // 过滤极低频感知色
 
             int h, s, l;
             merged[i].avgColor.getHsl(&h, &s, &l);
