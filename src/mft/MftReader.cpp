@@ -1442,6 +1442,7 @@ void MftReader::mergeDriveResult(const std::wstring& volume, MftReader::DriveRes
     // 第一阶段：异步数据库管线 (Data Pipeline)
     // 利用事务批量提交，每 5000 条提交一次，防止阻塞 MFT 扫描主进程
     // 物理优化：通过 std::shared_ptr 共享数据，杜绝全量深拷贝产生的瞬间内存峰值
+    // 2026-06-xx 逻辑加固：在 SoA 内存索引填充完毕后再移动 entries，确保内存索引构建不为空
     auto sharedEntries = std::make_shared<std::vector<RawEntry>>(std::move(result.entries));
     (void)QtConcurrent::run([this, volume, sharedEntries, driveIdx]() {
         QSqlDatabase db = Database::instance().getThreadDatabase();
