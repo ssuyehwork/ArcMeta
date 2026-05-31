@@ -24,6 +24,7 @@
 #include "../db/ItemRepo.h"
 #include "../db/Database.h"
 #include <QSqlDatabase>
+#include <QSqlQuery>
 
 #ifdef min
 #undef min
@@ -1076,7 +1077,7 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
 
         ItemRepo::saveBasicInfo(volSerial, frnStr, path.toStdWString(), parentPath.toStdWString(),
                                (finalAttr & FILE_ATTRIBUTE_DIRECTORY) != 0,
-                               mtime, size, 0, fid, QSqlDatabase());
+                               mtime, size, 0, fid);
     });
 }
 
@@ -1225,7 +1226,7 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
         (void)QtConcurrent::run([this, volume, allKeys, dIdx]() {
             std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volume + L"\\");
             QSqlDatabase db = Database::instance().getThreadDatabase();
-            { QSqlQuery q(db); q.exec("BEGIN TRANSACTION"); }
+            { QSqlQuery qtx(db); qtx.exec("BEGIN TRANSACTION"); }
             for (uint64_t compositeKey : allKeys) {
                 uint64_t frn = compositeKey & 0x0000FFFFFFFFFFFFull;
 
@@ -1264,7 +1265,7 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
                                            mtime, size, 0, fid, db);
                 }
             }
-            { QSqlQuery q(db); q.exec("COMMIT"); }
+            { QSqlQuery qtx(db); qtx.exec("COMMIT"); }
         });
     }
 }
@@ -1297,7 +1298,7 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
         (void)QtConcurrent::run([volume, frn]() {
             std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volume + L"\\");
             wchar_t frnBuf[17]; swprintf(frnBuf, 17, L"%016llX", frn);
-            ItemRepo::markAsDeleted(volSerial, frnBuf, QSqlDatabase());
+            ItemRepo::markAsDeleted(volSerial, frnBuf);
         });
 
         emit entryRemoved(compositeKey);
@@ -1490,7 +1491,7 @@ void MftReader::triggerDatabaseSync(size_t dIdx) {
     (void)QtConcurrent::run(QThreadPool::globalInstance(), [this, dIdx, volume]() {
         std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volume + L"\\");
         QSqlDatabase db = Database::instance().getThreadDatabase();
-        { QSqlQuery q(db); q.exec("BEGIN TRANSACTION"); }
+        { QSqlQuery qtx(db); qtx.exec("BEGIN TRANSACTION"); }
 
         std::vector<uint32_t> indices;
         {
@@ -1529,11 +1530,11 @@ void MftReader::triggerDatabaseSync(size_t dIdx) {
                                    mtime, size, 0, fid, db);
 
             if (++count % 5000 == 0) {
-                { QSqlQuery q(db); q.exec("COMMIT"); }
-                { QSqlQuery q(db); q.exec("BEGIN TRANSACTION"); }
+                { QSqlQuery qtx(db); qtx.exec("COMMIT"); }
+                { QSqlQuery qtx(db); qtx.exec("BEGIN TRANSACTION"); }
             }
         }
-        { QSqlQuery q(db); q.exec("COMMIT"); }
+        { QSqlQuery qtx(db); qtx.exec("COMMIT"); }
         qDebug() << "[MftReader] 驱动器" << QString::fromStdWString(volume) << "数据库同步完成，条目数:" << count;
     });
 }

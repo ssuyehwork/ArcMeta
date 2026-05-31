@@ -315,12 +315,12 @@ QStringList ItemRepo::searchByKeyword(const QString& keyword, const QString& par
     return results;
 }
 
-QStringList ItemRepo::getUncategorizedPaths(, QSqlDatabase db) {
-    return getPathsBySystemType("uncategorized");
+QStringList ItemRepo::getUncategorizedPaths(QSqlDatabase db) {
+    return getPathsBySystemType("uncategorized", db);
 }
 
-QStringList ItemRepo::getUntaggedPaths(, QSqlDatabase db) {
-    return getPathsBySystemType("untagged");
+QStringList ItemRepo::getUntaggedPaths(QSqlDatabase db) {
+    return getPathsBySystemType("untagged", db);
 }
 
 QStringList ItemRepo::getPathsBySystemType(const QString& type, QSqlDatabase db) {
