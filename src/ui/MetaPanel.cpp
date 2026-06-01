@@ -15,6 +15,9 @@
 #include <QMenu>
 #include <QDir>
 #include <QAbstractTextDocumentLayout>
+#include <QtMath>
+#include <QTimer>
+#include "Logger.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
 #include "../meta/MetadataManager.h"
@@ -36,32 +39,42 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
 }
 
 void ElasticEdit::adjustHeight() {
-    // 工业级加固：计算真实的文本可用宽度 (扣除 padding)
-    // 根据 MetaPanel 中的样式：padding: 4px 10px;
-    QMargins margins = contentsMargins();
-    int left = margins.left();
-    int right = margins.right();
+    // 2026-06-xx 工业级优化：实现精准的弹性高度
+    // 参照 MetaPanel 中的样式：padding: 4px 10px, border: 1px
+    int horizontalPadding = 20; // 10px * 2
+    int verticalPadding = 8;    // 4px * 2
+    int border = 2;             // 1px * 2
 
-    // QPlainTextEdit 的 contentRect 并不总是反映最新的布局，我们手动计算
     int w = width();
-    int textW = qMax(0, w - 20 - left - right); // 20 是 styleSheet 中的 padding-left + padding-right
+    int textW = qMax(0, w - horizontalPadding - border);
 
     if (textW > 0) {
         document()->setTextWidth(textW);
     }
 
-    // 获取文档布局的真实高度
+    // 获取文档布局的真实渲染高度
     qreal docHeight = document()->documentLayout()->documentSize().height();
 
-    // 计算目标高度：文档高度 + 上下 padding (4px * 2) + 边框 (1px * 2) + 2px 额外容差
-    int newHeight = qMax(28, (int)docHeight + 10);
+    // 计算目标高度：文档高度 + 上下边距 + 边框，并向上取整确保内容不被裁剪
+    int newHeight = qMax(28, (int)qCeil(docHeight + verticalPadding + border));
 
     if (this->height() != newHeight) {
+        Logger::log(QString("ElasticEdit [%1] Resizing: Width=%2, DocHeight=%3, NewHeight=%4")
+                    .arg(placeholderText()).arg(w).arg(docHeight).arg(newHeight));
         setFixedHeight(newHeight);
-        // 关键：通知布局管理器尺寸已变，并强制刷新父级布局
+        // 关键：通知布局管理器尺寸已变
         updateGeometry();
-        if (parentWidget() && parentWidget()->layout()) {
-            parentWidget()->layout()->activate();
+
+        // 级联通知所有父布局刷新，确保滚动区域能感知高度变化
+        QWidget* p = parentWidget();
+        while (p) {
+            if (p->layout()) {
+                p->layout()->activate();
+            }
+            if (qobject_cast<QScrollArea*>(p)) {
+                break;
+            }
+            p = p->parentWidget();
         }
     }
 }
@@ -438,24 +451,26 @@ void MetaPanel::onTagDeleted(const QString& text) {
 void MetaPanel::resizeEvent(QResizeEvent* event) {
     QFrame::resizeEvent(event);
     
-    // 工业级加固：将宽度锁定延迟到下一帧。
+    // 2026-06-xx 工业级加固：将宽度锁定延迟到下一帧，并强制刷新所有弹性控件高度
     QTimer::singleShot(0, this, [this]() {
         if (!m_scrollArea || !m_container) return;
 
         int viewportW = m_scrollArea->viewport()->width();
+        // 如果视图还未渲染，退而求其次使用父窗口宽度（扣除边距）
         if (viewportW < 50 && parentWidget()) {
-            viewportW = parentWidget()->width();
+            viewportW = parentWidget()->width() - 2;
         }
 
         if (viewportW > 30) {
-            // 2026-06-xx 工业级改进：移除固定宽度限制，改用布局自适应，但仍需同步重算高度
+            // 确保容器宽度填满视口，这是文本换行计算的基准
             if (m_container->width() != viewportW) {
                 m_container->setFixedWidth(viewportW);
             }
             
+            // 内部控件可用宽度（视口宽 - 左右外边距 10px * 2）
             int maxW = viewportW - 20;
             if (maxW > 0) {
-                // 关键：必须先设置子控件的宽度，才能让 adjustHeight 计算出正确的换行高度
+                // 关键：必须先同步子控件的物理宽度，随后立即触发高度重算
                 auto syncWidthAndHeight = [maxW](ElasticEdit* edit) {
                     if (edit) {
                         edit->setFixedWidth(maxW);
@@ -477,9 +492,11 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
                 
                 adjustFlowHeights();
 
-                // 强制容器根据新高度重新布局，确保滚动条正确显示
+                // 强制容器根据所有子控件的新尺寸重新撑开高度
                 m_container->adjustSize();
-                if (m_container->layout()) m_container->layout()->activate();
+                if (m_container->layout()) {
+                    m_container->layout()->activate();
+                }
             }
         }
     });
