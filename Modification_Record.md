@@ -3487,3 +3487,30 @@ private:
 - 变更原因：解决色块过多时的显示挤压问题，实现自动换行，并统一面板组件视觉风格。
 - 影响范围：MetaPanel 组件及其色彩展示功能。
 - 是否在需求范围内：是
+
+---
+## [67] 变更时间：2026-06-01 08:00:31
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    m_paletteBox = new QWidget(m_container);
+    m_paletteBox->setStyleSheet("QWidget { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; }");
+    m_paletteFlowLayout = new FlowLayout(m_paletteBox, 8, 6, 6);
+```
+
+### 修改后（After）
+```cpp
+    m_paletteBox = new QWidget(m_container);
+    m_paletteBox->setMinimumHeight(28);
+    m_paletteBox->setStyleSheet("QWidget { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; }");
+    m_paletteFlowLayout = new FlowLayout(m_paletteBox, 6, 6, 6);
+    m_paletteFlowLayout->setContentsMargins(10, 6, 10, 6);
+```
+
+### 变更说明
+- 变更原因：物理补齐调色盘容器的最小高度约束（28px），确保其在空状态或单行状态下的视觉表现与 ElasticEdit 编辑框严格一致。
+- 影响范围：MetaPanel 色彩展示区域。
+- 是否在需求范围内：是

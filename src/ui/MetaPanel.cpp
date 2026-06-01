@@ -277,10 +277,13 @@ void MetaPanel::initUi() {
     
     // [Section 1] 调色盘容器 (Palette Box - 模拟 ElasticEdit 样式且支持流式布局)
     m_paletteBox = new QWidget(m_container);
-    // 工业级视觉统一：1px 边框 (#3c3c3c)，深色背景 (#252526)，4px 圆角
+    // 工业级视觉统一：最小高度锁定为 28px，1px 边框 (#3c3c3c)，深色背景 (#252526)，4px 圆角
+    m_paletteBox->setMinimumHeight(28);
     m_paletteBox->setStyleSheet("QWidget { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; }");
     
-    m_paletteFlowLayout = new FlowLayout(m_paletteBox, 8, 6, 6);
+    // 内边距微调：左右 10px 保持对齐，上下 6px 确保在 28px 高度下色块垂直居中
+    m_paletteFlowLayout = new FlowLayout(m_paletteBox, 6, 6, 6);
+    m_paletteFlowLayout->setContentsMargins(10, 6, 10, 6);
     m_containerLayout->addWidget(m_paletteBox);
 
     // [Section 2] 名称输入框 (ElasticEdit)
