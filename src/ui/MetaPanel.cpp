@@ -30,12 +30,15 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
 }
 
 void ElasticEdit::adjustHeight() {
-    // 恢复弹性伸缩逻辑：最小 28px，随内容向下自动换行增长
-    qreal docHeight = document()->size().height();
-    // 加上适度的 padding 补偿，确保文本不被截断
-    int newHeight = qMax(28, (int)docHeight + 8); 
-    if (this->height() != newHeight) {
-        setFixedHeight(newHeight);
+    // 强制文档基于当前宽度重新计算布局
+    document()->setTextWidth(viewport()->width() > 0 ? viewport()->width() : width());
+    document()->documentLayout()->update();
+
+    int contentH = (int)document()->documentLayout()->documentSize().height();
+    int newH = qMax(28, contentH + 16);
+    if (this->height() != newH) {
+        setFixedHeight(newH);
+        updateGeometry();
     }
 }
 
