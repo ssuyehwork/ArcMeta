@@ -3466,3 +3466,31 @@ Qt::Orientations FlowLayout::expandingDirections() const { return Qt::Orientatio
 - 变更原因：解决持续报错 LNK2019。已通过物理扫描确认源码完全干净。报错为 Qt MOC 编译系统的强缓存导致。本次记录确认源码已完成对 showEvent 的彻底抹除。
 - 影响范围：MOC 与 链接阶段
 - 是否在需求范围内：是
+
+---
+## [62] 变更时间：2025-05-14 12:00:00
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void PaletteCapsule::leaveEvent(QEvent* event) { m_hoverIndex = -1; update(); }
+
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+```
+
+### 修改后（After）
+```cpp
+void PaletteCapsule::leaveEvent(QEvent* event) { Q_UNUSED(event); m_hoverIndex = -1; update(); }
+
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    Q_UNUSED(event);
+    QFrame::resizeEvent(event);
+```
+
+### 变更说明
+- 变更原因：消除 MSVC 编译器警告 C4100（未引用的形参）。确保 Release 模式下构建结果为 0 警告，符合工业级质量要求。
+- 影响范围：PaletteCapsule 和 MetaPanel 的事件处理实现
+- 是否在需求范围内：是

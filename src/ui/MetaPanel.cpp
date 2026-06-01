@@ -107,7 +107,7 @@ void PaletteCapsule::mouseMoveEvent(QMouseEvent* event) {
     }
 }
 
-void PaletteCapsule::leaveEvent(QEvent* event) { m_hoverIndex = -1; update(); }
+void PaletteCapsule::leaveEvent(QEvent* event) { Q_UNUSED(event); m_hoverIndex = -1; update(); }
 
 void PaletteCapsule::mousePressEvent(QMouseEvent* event) {
     if (m_hoverIndex != -1) {
@@ -310,6 +310,7 @@ void MetaPanel::onTagDeleted(const QString& text) {
 }
 
 void MetaPanel::resizeEvent(QResizeEvent* event) {
+    Q_UNUSED(event);
     QFrame::resizeEvent(event);
     int viewportW = m_scrollArea->viewport()->width();
     if (m_container && viewportW > 0) { m_container->setMaximumWidth(viewportW); }
