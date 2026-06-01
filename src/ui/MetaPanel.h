@@ -7,7 +7,7 @@
 #include <QScrollArea>
 #include <QPushButton>
 #include <QCheckBox>
-#include <QPlainTextEdit>
+#include <QTextEdit>
 #include <QLineEdit>
 #include <QFrame>
 #include <QStyle>
@@ -18,8 +18,9 @@ namespace ArcMeta {
 
 /**
  * @brief ElasticEdit: 弹性高度编辑框，内容自动撑开高度
+ * 2026-06-xx 工业级重构：基类切换为 QTextEdit 以获得精确的像素级渲染高度反馈
  */
-class ElasticEdit : public QPlainTextEdit {
+class ElasticEdit : public QTextEdit {
     Q_OBJECT
 public:
     explicit ElasticEdit(QWidget* parent = nullptr);
@@ -203,7 +204,8 @@ private:
     ElasticEdit* m_nameEdit = nullptr;
     QLabel* lblType = nullptr, *lblSize = nullptr;
     QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
-    QLabel* lblPath = nullptr, *lblEncrypted = nullptr;
+    ElasticEdit* m_pathEdit = nullptr;
+    QLabel* lblEncrypted = nullptr;
     
     QWidget* m_paletteBox = nullptr;
     FlowLayout* m_paletteFlowLayout = nullptr;

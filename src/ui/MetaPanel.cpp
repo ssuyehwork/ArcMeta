@@ -15,16 +15,19 @@
 #include <QMenu>
 #include <QDir>
 #include <QAbstractTextDocumentLayout>
+#include <QtMath>
+#include <QTimer>
+#include "Logger.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
 #include "../meta/MetadataManager.h"
 
 namespace ArcMeta {
 
-ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
+ElasticEdit::ElasticEdit(QWidget* parent) : QTextEdit(parent) {
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    setLineWrapMode(QTextEdit::WidgetWidth); // 恢复为窗口宽度换行，由布局控制外部宽度
     
     // 工业级修复：设置换行策略，确保长文本（如物理路径）在无空格时也能强制换行
     QTextOption opt = document()->defaultTextOption();
@@ -32,42 +35,55 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
     document()->setDefaultTextOption(opt);
 
     document()->setDocumentMargin(0);
-    connect(this, &QPlainTextEdit::textChanged, this, &ElasticEdit::adjustHeight);
+    // 关键：QTextEdit 相比 QPlainTextEdit 提供了更稳定的高度属性反馈
+    connect(this, &QTextEdit::textChanged, this, &ElasticEdit::adjustHeight);
 }
 
 void ElasticEdit::adjustHeight() {
-    // 工业级加固：计算真实的文本可用宽度 (扣除 padding)
-    // 根据 MetaPanel 中的样式：padding: 4px 10px;
-    QMargins margins = contentsMargins();
-    int left = margins.left();
-    int right = margins.right();
+    // 2026-06-xx 工业级重构：基类切换为 QTextEdit 后，使用渲染文档高度
+    int horizontalPadding = 20; // 对应 QSS padding: 4px 10px;
+    int verticalPadding = 8;    // 4px * 2;
+    int border = 2;             // 1px * 2;
     
-    // QPlainTextEdit 的 contentRect 并不总是反映最新的布局，我们手动计算
     int w = width();
-    int textW = qMax(0, w - 20 - left - right); // 20 是 styleSheet 中的 padding-left + padding-right
-
-    if (textW > 0) {
-        document()->setTextWidth(textW);
+    // 只有当宽度合理（>50）时才强行设置文档宽度，防止初始化阶段的 0 宽导致字符级换行
+    if (w > 50) {
+        int textW = w - horizontalPadding - border;
+        if (document()->textWidth() != textW) {
+            document()->setTextWidth(textW);
+        }
     }
 
-    // 获取文档布局的真实高度
-    qreal docHeight = document()->documentLayout()->documentSize().height();
+    // 获取文档的实际像素高度（QTextEdit 在内容改变后会自动更新此值）
+    qreal docHeight = document()->size().height();
     
-    // 计算目标高度：文档高度 + 上下 padding (4px * 2) + 边框 (1px * 2) + 2px 额外容差
-    int newHeight = qMax(28, (int)docHeight + 10); 
+    // 计算目标高度：像素高度 + 上下边距 + 边框
+    int newHeight = qMax(28, (int)qCeil(docHeight + verticalPadding + border)); 
     
+    // 工业级日志：记录换行与高度计算详情
+    Logger::log(QString("ElasticEdit [%1] Adjust: Width=%2, DocH=%3, TargetH=%4")
+                .arg(placeholderText()).arg(w).arg(docHeight).arg(newHeight));
+
     if (this->height() != newHeight) {
         setFixedHeight(newHeight);
-        // 关键：通知布局管理器尺寸已变，并强制刷新父级布局
         updateGeometry(); 
-        if (parentWidget() && parentWidget()->layout()) {
-            parentWidget()->layout()->activate();
+        
+        // 级联通知所有父布局刷新
+        QWidget* p = parentWidget();
+        while (p) {
+            if (p->layout()) {
+                p->layout()->activate();
+            }
+            if (qobject_cast<QScrollArea*>(p)) {
+                break;
+            }
+            p = p->parentWidget();
         }
     }
 }
 
 void ElasticEdit::resizeEvent(QResizeEvent* e) {
-    QPlainTextEdit::resizeEvent(e);
+    QTextEdit::resizeEvent(e);
     adjustHeight();
 }
 
@@ -77,7 +93,7 @@ void ElasticEdit::keyPressEvent(QKeyEvent* e) {
         clearFocus();
         return;
     }
-    QPlainTextEdit::keyPressEvent(e);
+    QTextEdit::keyPressEvent(e);
 }
 
 ColorPill::ColorPill(const QColor& color, float ratio, QWidget* parent) 
@@ -297,7 +313,8 @@ void MetaPanel::initUi() {
     m_scrollArea->setWidgetResizable(true); m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
     m_container = new QWidget(m_scrollArea); 
     m_containerLayout = new QVBoxLayout(m_container); 
-    // 2026-06-xx 工业级强制约束：严格保持左右 10px 边距，绝不溢出
+    // 2026-06-xx 工业级强制约束：启用 SetMinAndMaxSize，强制容器高度随子控件动态撑开
+    m_containerLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
     m_containerLayout->setContentsMargins(10, 10, 10, 10); 
     // 2026-06-01 修正：降低全局间距，消除视觉断层 (原 12px -> 现 8px)
     m_containerLayout->setSpacing(8);
@@ -316,22 +333,22 @@ void MetaPanel::initUi() {
     // [Section 2] 名称输入框 (ElasticEdit)
     m_nameEdit = new ElasticEdit(m_container);
     m_nameEdit->setPlaceholderText("文件名称...");
-    // 工业级视觉统一：1px 边框 (#3c3c3c)，深色背景 (#252526)，字体 12px，取消加粗
-    m_nameEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
+    // 2026-06-xx 视觉加固：使用通配符选择器确保基类重构为 QTextEdit 后样式依然生效
+    m_nameEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
     m_nameEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_nameEdit);
 
     // [Section 3] 备注输入框 (ElasticEdit)
     m_noteEdit = new ElasticEdit(m_container);
     m_noteEdit->setPlaceholderText("添加备注说明...");
-    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
+    m_noteEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
     m_noteEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_noteEdit);
 
     // [Section 4] 链接输入框 (ElasticEdit)
     m_linkEdit = new ElasticEdit(m_container);
     m_linkEdit->setPlaceholderText("添加链接...");
-    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #4a90e2; font-weight: normal; }");
+    m_linkEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #4a90e2; font-weight: normal; }");
     m_linkEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_linkEdit);
 
@@ -348,7 +365,7 @@ void MetaPanel::initUi() {
     m_tagEdit = new ElasticEdit(m_tagBox);
     m_tagEdit->setPlaceholderText("输入标签...");
     // 工业级宽度对齐：统一使用 4px 圆角和 4px 10px padding，彻底消除视觉缺口
-    m_tagEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
+    m_tagEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
     connect(m_tagEdit, &ElasticEdit::returnPressed, this, &MetaPanel::onTagAdded);
     tagL->addWidget(m_tagEdit);
     m_containerLayout->addWidget(m_tagBox);
@@ -356,7 +373,8 @@ void MetaPanel::initUi() {
     // [Section 6] 分类展示 (Category Pills)
     m_categoryEdit = new ElasticEdit(m_container);
     m_categoryEdit->setReadOnly(true);
-    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
+    m_categoryEdit->setPlaceholderText("所属分类...");
+    m_categoryEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
     m_containerLayout->addWidget(m_categoryEdit);
 
     m_containerLayout->addWidget(createSeparator());
@@ -364,7 +382,25 @@ void MetaPanel::initUi() {
     // [Section 7] 详情网格 (基本信息)
     addInfoRow("类型", lblType); addInfoRow("大小", lblSize);
     addInfoRow("创建时间", lblCtime); addInfoRow("修改时间", lblMtime); addInfoRow("访问时间", lblAtime);
-    addInfoRow("物理路径", lblPath); addInfoRow("加密状态", lblEncrypted);
+    
+    // 2026-06-xx 工业级重构：物理路径升级为只读 ElasticEdit，彻底解决超长路径不换行与截断问题
+    QWidget* pathRow = new QWidget(m_container); 
+    QHBoxLayout* pathL = new QHBoxLayout(pathRow);
+    pathL->setContentsMargins(0, 2, 0, 2); 
+    pathL->setSpacing(8);
+    QLabel* pathKey = new QLabel("物理路径", pathRow);
+    pathKey->setFixedWidth(80);
+    pathKey->setStyleSheet("font-size: 12px; color: #888888;");
+    pathL->addWidget(pathKey, 0, Qt::AlignTop);
+    
+    m_pathEdit = new ElasticEdit(pathRow);
+    m_pathEdit->setReadOnly(true);
+    // 视觉降权：去除背景和边框，使其融入信息列表，但保留强制换行特性
+    m_pathEdit->setStyleSheet("QTextEdit { background: transparent; border: none; padding: 0; font-size: 12px; color: #CCCCCC; }");
+    pathL->addWidget(m_pathEdit, 1);
+    m_containerLayout->addWidget(pathRow);
+
+    addInfoRow("加密状态", lblEncrypted);
 
     m_containerLayout->addStretch(1);
     m_scrollArea->setWidget(m_container);
@@ -407,7 +443,7 @@ QWidget* MetaPanel::createSectionBox(const QString& iconName, const QString& tit
 void MetaPanel::onTagAdded() {
     QString text = m_tagEdit->toPlainText().trimmed();
     if (!text.isEmpty()) {
-        QString currentPath = lblPath->text();
+        QString currentPath = m_pathEdit->toPlainText().trimmed();
         if (currentPath != "-" && !currentPath.isEmpty()) {
             std::wstring wPath = currentPath.toStdWString();
             RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
@@ -426,7 +462,7 @@ void MetaPanel::onTagDeleted(const QString& text) {
         QLayoutItem* item = m_tagFlowLayout->itemAt(i); TagPill* pill = qobject_cast<TagPill*>(item->widget());
         if (pill && pill->property("tagText").toString() == text) {
             m_tagFlowLayout->takeAt(i); pill->deleteLater(); delete item;
-            QString currentPath = lblPath->text();
+            QString currentPath = m_pathEdit->toPlainText().trimmed();
             if (currentPath != "-" && !currentPath.isEmpty()) {
                 std::wstring wPath = currentPath.toStdWString(); RuntimeMeta rm = MetadataManager::instance().getMeta(wPath); rm.tags.removeAll(text); MetadataManager::instance().setTags(wPath, rm.tags);
             }
@@ -438,49 +474,53 @@ void MetaPanel::onTagDeleted(const QString& text) {
 void MetaPanel::resizeEvent(QResizeEvent* event) {
     QFrame::resizeEvent(event);
     
-    // 工业级加固：将宽度锁定延迟到下一帧。
+    // 2026-06-xx 工业级加固：由于 ScrollArea 可能刚出现滚动条导致 Viewport 变化，
+    // 使用异步触发确保获取到的是最终稳定的物理宽度，防止因宽度抖动导致的错误换行。
     QTimer::singleShot(0, this, [this]() {
         if (!m_scrollArea || !m_container) return;
 
+        // 获取视口真实物理宽度
         int viewportW = m_scrollArea->viewport()->width();
-        if (viewportW < 50 && parentWidget()) {
-            viewportW = parentWidget()->width();
-        }
+        
+        // 如果视口过窄（通常发生在初始化或隐藏状态），则延迟处理，避免触发字符级换行
+        if (viewportW < 100) return;
 
-        if (viewportW > 30) {
-            // 2026-06-xx 工业级改进：移除固定宽度限制，改用布局自适应，但仍需同步重算高度
-            if (m_container->width() != viewportW) {
-                m_container->setFixedWidth(viewportW);
+        // 1. 同步容器宽度
+        if (m_container->width() != viewportW) {
+            m_container->setFixedWidth(viewportW);
+        }
+        
+        // 2. 内部控件可用宽度（视口宽 - 左右外边距 10px * 2）
+        int maxW = viewportW - 20; 
+        if (maxW > 50) {
+            auto syncWidthAndHeight = [maxW](ElasticEdit* edit) {
+                if (edit && edit->width() != maxW) {
+                    edit->setFixedWidth(maxW);
+                    edit->adjustHeight();
+                }
+            };
+
+            syncWidthAndHeight(m_nameEdit);
+            syncWidthAndHeight(m_noteEdit);
+            syncWidthAndHeight(m_linkEdit);
+            syncWidthAndHeight(m_tagEdit);
+            syncWidthAndHeight(m_categoryEdit);
+            
+            // 物理路径宽度：视口宽 - 边距(20) - 标签宽(80) - 间距(8)
+            int pathW = maxW - 88;
+            if (m_pathEdit && pathW > 0) {
+                m_pathEdit->setFixedWidth(pathW);
+                m_pathEdit->adjustHeight();
             }
             
-            int maxW = viewportW - 20; 
-            if (maxW > 0) {
-                // 关键：必须先设置子控件的宽度，才能让 adjustHeight 计算出正确的换行高度
-                auto syncWidthAndHeight = [maxW](ElasticEdit* edit) {
-                    if (edit) {
-                        edit->setFixedWidth(maxW);
-                        edit->adjustHeight();
-                    }
-                };
+            if (m_paletteBox) m_paletteBox->setFixedWidth(maxW);
+            if (m_tagBox) m_tagBox->setFixedWidth(maxW);
+            if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
+            
+            adjustFlowHeights();
 
-                syncWidthAndHeight(m_nameEdit);
-                syncWidthAndHeight(m_noteEdit);
-                syncWidthAndHeight(m_linkEdit);
-                syncWidthAndHeight(m_tagEdit);
-                syncWidthAndHeight(m_categoryEdit);
-                
-                if (m_paletteBox) m_paletteBox->setFixedWidth(maxW);
-                if (m_tagBox) m_tagBox->setFixedWidth(maxW);
-                if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
-                
-                if (lblPath) lblPath->setMaximumWidth(maxW - 80);
-                
-                adjustFlowHeights();
-
-                // 强制容器根据新高度重新布局，确保滚动条正确显示
-                m_container->adjustSize();
-                if (m_container->layout()) m_container->layout()->activate();
-            }
+            // 3. 强制容器重算高度以撑开滚动区域
+            m_container->adjustSize();
         }
     });
 }
@@ -511,6 +551,7 @@ void MetaPanel::showEvent(QShowEvent* event) {
 }
 
 void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s, const QString& ct, const QString& mt, const QString& at, const QString& p, bool e) {
+    Logger::log(QString("MetaPanel::updateInfo for Path: %1").arg(p));
     m_nameEdit->blockSignals(true);
     QFileInfo info(n);
     m_nameEdit->setPlainText(info.completeBaseName());
@@ -519,7 +560,14 @@ void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s,
     m_nameEdit->setProperty("suffix", info.suffix());
     m_nameEdit->blockSignals(false);
     
-    lblType->setText(t); lblSize->setText(s); lblCtime->setText(ct); lblMtime->setText(mt); lblAtime->setText(at); lblPath->setText(p); lblEncrypted->setText(e ? "已加密" : "未加密");
+    lblType->setText(t); lblSize->setText(s); lblCtime->setText(ct); lblMtime->setText(mt); lblAtime->setText(at); 
+    
+    m_pathEdit->blockSignals(true);
+    m_pathEdit->setPlainText(p);
+    m_pathEdit->adjustHeight();
+    m_pathEdit->blockSignals(false);
+
+    lblEncrypted->setText(e ? "已加密" : "未加密");
     
     if (p != "-" && !p.isEmpty()) {
         RuntimeMeta rm = MetadataManager::instance().getMeta(p.toStdWString());
@@ -601,9 +649,9 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_noteEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setNote(currentPath.toStdWString(), m_noteEdit->toPlainText().toStdWString());
+        QString currentPath = m_pathEdit->toPlainText().trimmed(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setNote(currentPath.toStdWString(), m_noteEdit->toPlainText().toStdWString());
     } else if (watched == m_linkEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setURL(currentPath.toStdWString(), m_linkEdit->toPlainText().toStdWString());
+        QString currentPath = m_pathEdit->toPlainText().trimmed(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setURL(currentPath.toStdWString(), m_linkEdit->toPlainText().toStdWString());
     } else if (watched == m_nameEdit && event->type() == QEvent::FocusOut) {
         QString oldPath = m_nameEdit->property("oldPath").toString();
         QString newName = m_nameEdit->toPlainText().trimmed();
@@ -628,7 +676,8 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
 
                 if (QFile::rename(oldPath, newPath)) {
                     MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
-                    lblPath->setText(newPath);
+                    m_pathEdit->setPlainText(newPath);
+                    m_pathEdit->adjustHeight();
                     m_nameEdit->setProperty("oldPath", newPath);
                 } else {
                     // 重命名失败，回滚文本
