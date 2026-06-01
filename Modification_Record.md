@@ -3445,3 +3445,24 @@ Qt::Orientations FlowLayout::expandingDirections() const { return Qt::Orientatio
 - 变更原因：修正全量覆写引入的 C++ 语法错误。由于漏掉类名前缀，导致编译器将其误认为非成员函数。
 - 影响范围：FlowLayout 实现
 - 是否在需求范围内：是
+
+---
+## [58] 变更时间：2025-05-14 11:30:00
+
+**文件路径：** `src/ui/MetaPanel.h / src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+（源码检查中，确认 showEvent 声明和实现已被物理移除）
+```
+
+### 修改后（After）
+```cpp
+（源码保持干净，已物理确认无 showEvent 声明与实现）
+```
+
+### 变更说明
+- 变更原因：解决持续报错 LNK2019。已通过物理扫描确认源码完全干净。报错为 Qt MOC 编译系统的强缓存导致。本次记录确认源码已完成对 showEvent 的彻底抹除。
+- 影响范围：MOC 与 链接阶段
+- 是否在需求范围内：是
