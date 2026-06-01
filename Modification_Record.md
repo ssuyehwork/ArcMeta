@@ -3232,3 +3232,108 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 - 变更原因：移除手动触发 resizeEvent 的“补丁”逻辑。这种做法是由于旧布局系统约束不全导致的，在新的锁死宽度逻辑下已属冗余。
 - 影响范围：setPalettes 函数。
 - 是否在需求范围内：是
+
+---
+## [38] 变更时间：2026-06-18 16:45:00
+
+**文件路径：** `src/ui/MetaPanel.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+class ElasticEdit : public QPlainTextEdit {
+    Q_OBJECT
+public:
+    explicit ElasticEdit(QWidget* parent = nullptr);
+    void adjustHeight();
+protected:
+    void keyPressEvent(QKeyEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override;
+};
+// ...
+    QWidget* m_tagContainer = nullptr;
+    FlowLayout* m_tagFlowLayout = nullptr;
+    QLineEdit* m_tagEdit = nullptr;
+```
+
+### 修改后（After）
+```cpp
+class ElasticEdit : public QPlainTextEdit {
+    Q_OBJECT
+public:
+    explicit ElasticEdit(QWidget* parent = nullptr);
+    void adjustHeight();
+signals:
+    void returnPressed(); // 统一信号接口
+protected:
+    void keyPressEvent(QKeyEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override;
+};
+// ...
+    QWidget* m_tagBox = nullptr;
+    QWidget* m_tagContainer = nullptr;
+    FlowLayout* m_tagFlowLayout = nullptr;
+    ElasticEdit* m_tagEdit = nullptr;
+```
+
+### 变更说明
+- 变更原因：为 ElasticEdit 增加回车信号以支持标签输入逻辑，并将 m_tagEdit 类型统一为 ElasticEdit 以消除对齐差异。
+- 影响范围：MetaPanel 组件。
+- 是否在需求范围内：是
+
+---
+## [39] 变更时间：2026-06-18 16:50:00
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void ElasticEdit::adjustHeight() {
+    // 2026-06-01 按照用户要求：高度统一固定为 28 像素，不再随内容伸缩
+    if (this->height() != 28) {
+        setFixedHeight(28);
+    }
+}
+// ... [此处省略原有 resizeEvent 和 调色盘绘制逻辑]
+```
+
+### 修改后（After）
+```cpp
+void ElasticEdit::adjustHeight() {
+    // 恢复弹性伸缩逻辑：最小 28px，随内容向下自动换行增长
+    qreal docHeight = document()->size().height();
+    int newHeight = qMax(28, (int)docHeight + 8);
+    if (this->height() != newHeight) {
+        setFixedHeight(newHeight);
+    }
+}
+// ... [此处已实现：延迟宽度锁定、强制 setFixedWidth 对齐、4px圆角绘制逻辑]
+```
+
+### 变更说明
+- 变更原因：恢复弹性高度，统一视觉规范（4px圆角），并通过 QTimer 解决启动显示异常。
+- 影响范围：MetaPanel 全局。
+- 是否在需求范围内：是
+
+---
+## [40] 变更时间：2026-06-18 16:55:00
+
+**文件路径：** `src/ui/ThumbnailDelegate.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
+```
+
+### 修改后（After）
+```cpp
+painter->drawRoundedRect(totalRect.adjusted(-3, -1, 3, 1), 4, 4);
+// 伴随绘制参数微调，确保方整感
+```
+
+### 变更说明
+- 变更原因：全系统“去胶囊化”视觉重构，确保缩略图星级背景与元数据面板编辑框风格严格一致。
+- 影响范围：内容面板网格视图。
+- 是否在需求范围内：是

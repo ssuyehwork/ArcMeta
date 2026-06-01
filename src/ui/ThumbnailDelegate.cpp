@@ -169,15 +169,17 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         int rating = index.data(m_ratingRole).toInt();
         QString colorStr = (m_colorRole != -1) ? index.data(m_colorRole).toString() : "";
         
-        // 2026-06-xx 逻辑重构：彩色胶囊背景独立于星级显示
+        // 2026-06-xx 视觉升级：彩色背景块统一采用编辑框 4px 圆角设计，杜绝胶囊感
         if (!colorStr.isEmpty()) {
             QColor bgColor = UiHelper::parseColorName(colorStr);
             if (bgColor.isValid()) {
                 painter->save();
                 painter->setBrush(bgColor);
                 painter->setPen(Qt::NoPen);
+                // 联合禁用图标与末尾星级的区域
                 QRect totalRect = m.banRect.united(m.starRect(4));
-                painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
+                // 使用严格的 4px 圆角矩形，宽度微调以保持严谨对齐
+                painter->drawRoundedRect(totalRect.adjusted(-3, -1, 3, 1), 4, 4);
                 painter->restore();
             }
         }

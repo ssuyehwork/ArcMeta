@@ -96,13 +96,13 @@ void PaletteCapsule::paintEvent(QPaintEvent*) {
         }
     }
 
-    // 1. 绘制总背景 (Capsule) - 提升亮度并增加边框
-    // 统一边框颜色为 #3c3c3c
+    // 1. 绘制总背景 - 采用编辑框 4px 圆角设计
+    // 统一边框颜色为 #3c3c3c，背景色统一为 #252526
     painter.setPen(QPen(QColor("#3c3c3c"), 1));
-    painter.setBrush(QColor("#2E2E2E")); 
-    painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 14, 14);
+    painter.setBrush(QColor("#252526"));
+    painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 4, 4);
 
-    // 2. 绘制色点
+    // 2. 绘制色点 - 统一采用 4px 圆角设计
     for (int i = 0; i < totalDots; ++i) {
         int x = m_padding + i * (m_dotSize + currentSpacing);
         
@@ -113,13 +113,14 @@ void PaletteCapsule::paintEvent(QPaintEvent*) {
 
         painter.setPen(Qt::NoPen);
         painter.setBrush(m_palette[i].first);
-        painter.drawEllipse(dotRect.adjusted(1, 1, -1, -1));
+        // 改为 4px 圆角矩形
+        painter.drawRoundedRect(dotRect.adjusted(1, 1, -1, -1), 4, 4);
 
         // 悬停反馈：1px 白色边缘
         if (i == m_hoverIndex) {
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(Qt::white, 1.0));
-            painter.drawEllipse(dotRect.adjusted(0, 0, -1, -1));
+            painter.drawRoundedRect(dotRect.adjusted(0, 0, -1, -1), 4, 4);
         }
     }
 }
@@ -300,8 +301,14 @@ void ColorPickerWidget::paintEvent(QPaintEvent*) {
     QPainter p(this); p.setRenderHint(QPainter::Antialiasing);
     for (int i = 0; i < (int)m_colors.size(); ++i) {
         QRect r(i * 24 + 3, 3, 18, 18);
-        if (m_colors[i].name == m_currentColor) { p.setPen(QPen(QColor("#FFFFFF"), 1.5)); p.drawEllipse(r.adjusted(-2, -2, 2, 2)); }
-        p.setPen(Qt::NoPen); p.setBrush(m_colors[i].value); p.drawEllipse(r);
+        // 统一采用 4px 圆角矩形设计
+        if (m_colors[i].name == m_currentColor) {
+            p.setPen(QPen(QColor("#FFFFFF"), 1.5));
+            p.drawRoundedRect(r.adjusted(-2, -2, 2, 2), 4, 4);
+        }
+        p.setPen(Qt::NoPen);
+        p.setBrush(m_colors[i].value);
+        p.drawRoundedRect(r, 4, 4);
     }
 }
 void ColorPickerWidget::mousePressEvent(QMouseEvent* e) {
@@ -346,20 +353,10 @@ void MetaPanel::initUi() {
     // 2026-06-01 修正：降低全局间距，消除视觉断层 (原 12px -> 现 8px)
     m_containerLayout->setSpacing(8);
     
-    // [Section 1] 调色盘胶囊 (Palette Capsules)
+    // [Section 1] 调色盘组件 - 采用与编辑框一致的工业级对齐设计
     m_paletteCapsule = new PaletteCapsule(m_container);
     connect(m_paletteCapsule, &PaletteCapsule::colorSelected, this, &MetaPanel::searchByColor);
-    
-    // 包装器，确保胶囊左对齐且不拉伸
-    QWidget* palWrapper = new QWidget(m_container);
-    // 限制包装器最大宽度，预留左右各 10px 边距
-    palWrapper->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    
-    QHBoxLayout* palWrapperL = new QHBoxLayout(palWrapper);
-    palWrapperL->setContentsMargins(0, 0, 0, 0);
-    palWrapperL->addWidget(m_paletteCapsule);
-    palWrapperL->addStretch();
-    m_containerLayout->addWidget(palWrapper);
+    m_containerLayout->addWidget(m_paletteCapsule);
 
     // [Section 2] 名称输入框 (ElasticEdit)
     m_nameEdit = new ElasticEdit(m_container);
@@ -507,7 +504,8 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
 
             int maxW = viewportW - 20; // 严格对齐左右 10px 边距
             if (maxW > 0) {
-                // 确保子控件宽度不溢出并严格对齐
+                // 确保所有子控件（包括调色盘）宽度不溢出并严格对齐
+                m_paletteCapsule->setFixedWidth(maxW);
                 m_nameEdit->setFixedWidth(maxW);
                 m_noteEdit->setFixedWidth(maxW);
                 m_linkEdit->setFixedWidth(maxW);
