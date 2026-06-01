@@ -30,9 +30,12 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
 }
 
 void ElasticEdit::adjustHeight() {
-    // 2026-06-01 按照用户要求：高度统一固定为 28 像素，不再随内容伸缩
-    if (this->height() != 28) {
-        setFixedHeight(28);
+    // 恢复弹性伸缩逻辑：最小 28px，随内容向下自动换行增长
+    qreal docHeight = document()->size().height();
+    // 加上适度的 padding 补偿，确保文本不被截断
+    int newHeight = qMax(28, (int)docHeight + 8);
+    if (this->height() != newHeight) {
+        setFixedHeight(newHeight);
     }
 }
 
@@ -93,7 +96,8 @@ void PaletteCapsule::paintEvent(QPaintEvent*) {
     }
 
     // 1. 绘制总背景 (Capsule) - 提升亮度并增加边框
-    painter.setPen(QPen(QColor("#4D4D4D"), 1)); 
+    // 统一边框颜色为 #3c3c3c
+    painter.setPen(QPen(QColor("#3c3c3c"), 1));
     painter.setBrush(QColor("#2E2E2E")); 
     painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 14, 14);
 
@@ -197,7 +201,8 @@ void TagPill::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setBrush(QColor("#2B2B2B"));
-    painter.setPen(QPen(QColor("#444444"), 1));
+    // 统一边框颜色
+    painter.setPen(QPen(QColor("#3c3c3c"), 1));
     painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 11, 11);
 }
 
@@ -358,24 +363,22 @@ void MetaPanel::initUi() {
     // [Section 2] 名称输入框 (ElasticEdit)
     m_nameEdit = new ElasticEdit(m_container);
     m_nameEdit->setPlaceholderText("文件名称...");
-    m_nameEdit->setStyleSheet(QString("QPlainTextEdit { background: %1; border: 1px solid %2; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: %3; }")
-        .arg(Style::qssColor(Style::BackgroundHeader))
-        .arg(Style::qssColor(Style::BorderColor))
-        .arg(Style::qssColor(Style::TextMain)));
+    // 工业级视觉统一：1px 边框 (#3c3c3c)，深色背景 (#252526)，字体 12px，取消加粗
+    m_nameEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
     m_nameEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_nameEdit);
 
     // [Section 3] 备注输入框 (ElasticEdit)
     m_noteEdit = new ElasticEdit(m_container);
     m_noteEdit->setPlaceholderText("添加备注说明...");
-    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; }");
+    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
     m_noteEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_noteEdit);
 
     // [Section 4] 链接输入框 (ElasticEdit)
     m_linkEdit = new ElasticEdit(m_container);
     m_linkEdit->setPlaceholderText("添加链接...");
-    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #4a90e2; }");
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #4a90e2; font-weight: normal; }");
     m_linkEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_linkEdit);
 
@@ -392,7 +395,7 @@ void MetaPanel::initUi() {
     m_tagEdit = new QLineEdit(tagBox);
     m_tagEdit->setPlaceholderText("输入标签...");
     m_tagEdit->setFixedHeight(28);
-    m_tagEdit->setStyleSheet("QLineEdit { background: #252526; border: 1px solid #333333; border-radius: 3px; padding-left: 6px; font-size: 12px; color: #AAAAAA; }");
+    m_tagEdit->setStyleSheet("QLineEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 3px; padding-left: 6px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
     connect(m_tagEdit, &QLineEdit::returnPressed, this, &MetaPanel::onTagAdded);
     tagL->addWidget(m_tagEdit);
     m_containerLayout->addWidget(tagBox);
@@ -400,7 +403,7 @@ void MetaPanel::initUi() {
     // [Section 6] 分类展示 (Category Pills)
     m_categoryEdit = new ElasticEdit(m_container);
     m_categoryEdit->setReadOnly(true);
-    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #2A2A2A; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #EEEEEE; }");
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
     m_containerLayout->addWidget(m_categoryEdit);
 
     m_containerLayout->addWidget(createSeparator());
@@ -481,24 +484,40 @@ void MetaPanel::onTagDeleted(const QString& text) {
 void MetaPanel::resizeEvent(QResizeEvent* event) {
     QFrame::resizeEvent(event);
     
-    // 2026-06-01 工业级加固：改用 QTimer::singleShot(0) 将宽度锁定延迟到布局计算之后
-    // 解决启动时 viewport()->width() 返回过时或无效值导致的“图一”坍塌问题
+    // 工业级加固：将宽度锁定延迟到下一帧。
+    // 启动时，初次 resizeEvent 触发时 viewport 宽度往往不可信。
     QTimer::singleShot(0, this, [this]() {
         if (!m_scrollArea || !m_container) return;
 
+        // 获取当前视口的真实物理宽度
         int viewportW = m_scrollArea->viewport()->width();
 
-        // 只有当宽度发生真实物理变化且有效时才更新，防止死循环
-        if (viewportW > 30 && m_container->width() != viewportW) {
-            m_container->setFixedWidth(viewportW);
+        // 容错处理：如果宽度过小（可能是系统正在初始化），尝试使用 parentWidget 的宽度作为参考
+        if (viewportW < 50 && parentWidget()) {
+            viewportW = parentWidget()->width();
+        }
+
+        if (viewportW > 30) {
+            // 只有当宽度发生真实变化时才重设，避免触发冗余的布局刷新
+            if (m_container->width() != viewportW) {
+                m_container->setFixedWidth(viewportW);
+            }
 
             int maxW = viewportW - 20; // 严格对齐左右 10px 边距
             if (maxW > 0) {
+                // 确保子控件宽度不溢出
                 m_nameEdit->setMaximumWidth(maxW);
                 m_noteEdit->setMaximumWidth(maxW);
                 m_linkEdit->setMaximumWidth(maxW);
                 m_categoryEdit->setMaximumWidth(maxW);
+                if (m_tagContainer) m_tagContainer->setMaximumWidth(maxW);
                 if (lblPath) lblPath->setMaximumWidth(maxW - 80);
+
+                // 核心修复：强制子控件重新计算高度，以适配新的宽度变化
+                m_nameEdit->adjustHeight();
+                m_noteEdit->adjustHeight();
+                m_linkEdit->adjustHeight();
+                m_categoryEdit->adjustHeight();
             }
         }
     });
