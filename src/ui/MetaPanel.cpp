@@ -31,9 +31,11 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
 
 void ElasticEdit::adjustHeight() {
     // 恢复弹性伸缩逻辑：最小 28px，随内容向下自动换行增长
-    qreal docHeight = document()->size().height();
+    // 2026-06-xx 工业级修正：使用 documentLayout()->documentSize().height()
+    // 以获得比 document()->size() 更实时且准确的换行后物理高度
+    qreal docHeight = document()->documentLayout()->documentSize().height();
     // 加上适度的 padding 补偿，确保文本不被截断
-    int newHeight = qMax(28, (int)docHeight + 8); 
+    int newHeight = qMax(28, (int)docHeight + 10);
     if (this->height() != newHeight) {
         setFixedHeight(newHeight);
     }
@@ -387,6 +389,7 @@ void MetaPanel::onTagAdded() {
             if (!rm.tags.contains(text)) {
                 rm.tags << text; MetadataManager::instance().setTags(wPath, rm.tags);
                 TagPill* pill = new TagPill(text, m_tagContainer); connect(pill, &TagPill::deleteRequested, this, &MetaPanel::onTagDeleted); m_tagFlowLayout->addWidget(pill);
+                adjustFlowHeights(); // 2026-06-xx 物理修复：添加标签后立即刷新容器高度
             }
         }
         m_tagEdit->clear();
@@ -403,6 +406,7 @@ void MetaPanel::onTagDeleted(const QString& text) {
             if (currentPath != "-" && !currentPath.isEmpty()) {
                 std::wstring wPath = currentPath.toStdWString(); RuntimeMeta rm = MetadataManager::instance().getMeta(wPath); rm.tags.removeAll(text); MetadataManager::instance().setTags(wPath, rm.tags);
             }
+            adjustFlowHeights(); // 2026-06-xx 物理修复：删除标签后立即刷新容器高度
             return;
         }
     }
@@ -466,6 +470,14 @@ void MetaPanel::adjustFlowHeights() {
         int newH = qMax(28, contentH);
         if (m_paletteBox->height() != newH) {
             m_paletteBox->setFixedHeight(newH);
+        }
+    }
+    // 2. 调整标签容器高度 (2026-06-xx 物理修复：解决标签换行时容器不伸展的问题)
+    if (m_tagContainer && m_tagFlowLayout) {
+        int contentH = m_tagFlowLayout->heightForWidth(m_tagContainer->width());
+        int newH = qMax(28, contentH);
+        if (m_tagContainer->height() != newH) {
+            m_tagContainer->setFixedHeight(newH);
         }
     }
 }
