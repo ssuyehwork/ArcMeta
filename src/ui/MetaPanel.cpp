@@ -38,8 +38,9 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
 void ElasticEdit::adjustHeight() {
     // 工业级加固：计算真实的文本可用宽度 (扣除 padding)
     // 根据 MetaPanel 中的样式：padding: 4px 10px;
-    int left, top, right, bottom;
-    getContentsMargins(&left, &top, &right, &bottom);
+    QMargins margins = contentsMargins();
+    int left = margins.left();
+    int right = margins.right();
 
     // QPlainTextEdit 的 contentRect 并不总是反映最新的布局，我们手动计算
     int w = width();
