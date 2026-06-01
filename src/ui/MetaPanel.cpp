@@ -432,16 +432,15 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
         // 获取当前视口的真实物理宽度
         int viewportW = m_scrollArea->viewport()->width();
         
-        // 容错处理：如果宽度过小（可能是系统正在初始化），尝试使用 parentWidget 的宽度作为参考
-        if (viewportW < 50 && parentWidget()) {
-            viewportW = parentWidget()->width();
+        // 2026-06-xx 工业级修正：启动初期 viewport 可能尚未就绪 (为0)，此时应使用面板自身的宽度
+        // 绝对严禁使用 parentWidget()->width()，因为 MainWindow 的宽度远大于面板，会导致计算溢出
+        if (viewportW <= 0) {
+            viewportW = this->width();
         }
 
-        if (viewportW > 30) {
-            // 只有当宽度发生真实变化时才重设，避免触发冗余的布局刷新
-            if (m_container->width() != viewportW) {
-                m_container->setFixedWidth(viewportW);
-            }
+        if (viewportW > 50) {
+            // 锁定容器宽度，确保 ElasticEdit 能正确计算换行
+            m_container->setFixedWidth(viewportW);
             
             int maxW = viewportW - 20; // 严格对齐左右 10px 边距
             if (maxW > 0) {
