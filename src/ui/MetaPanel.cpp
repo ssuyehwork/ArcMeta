@@ -37,7 +37,7 @@ void ElasticEdit::adjustHeight() {
     if (w <= 0) w = width();
 
     // 2026-06-xx 工业级算法：计算真实的可用文本宽度（需扣除 QSS 中的左右 Padding: 10px * 2）
-    // 如果不扣除 Padding，QTextDocument 会按全宽布局，导致换行临界点计算错误，引发截断
+    // 核心思想：宽度受限（空间冲突）是引发高度增长的唯一原因。
     int textW = w - 20;
     if (textW > 0) {
         document()->setTextWidth(textW);
@@ -46,12 +46,12 @@ void ElasticEdit::adjustHeight() {
     }
 
     int contentH = (int)document()->documentLayout()->documentSize().height();
-    // 补偿：深色边框及上下 Padding (4px*2) + 文本行间距冗余
+    // 补偿算法：(深色边框 1px * 2) + (上下 Padding 4px * 2) + 文本行间距冗余
     int newH = qMax(28, contentH + 16);
 
     if (this->height() != newH) {
         setFixedHeight(newH);
-        // 关键：通知父布局重新扫描几何尺寸，触发 QScrollArea 滚动条更新
+        // 关键：通知父布局重新扫描几何尺寸，确保滚动条响应内容增长
         updateGeometry();
     }
 }
@@ -461,17 +461,20 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
                 
                 if (lblPath) lblPath->setMaximumWidth(maxW - 80);
                 
-                // 第二帧：宽度生效后再计算高度
+                // 第二帧：宽度生效后统一解决所有组件的空间冲突
                 QTimer::singleShot(0, this, [this]() {
+                    // 5 个文本编辑框的弹性同步
                     m_nameEdit->adjustHeight();
                     m_noteEdit->adjustHeight();
                     m_linkEdit->adjustHeight();
                     m_tagEdit->adjustHeight();
                     m_categoryEdit->adjustHeight();
+
+                    // 1 个调色盘容器（离散组件流）的弹性同步
                     adjustFlowHeights();
 
                     if (m_container) {
-                        // 强制触发布局重算并同步调整容器大小，确保滚动条正确响应
+                        // 强制触发布局重算并同步调整容器大小，确保滚动条响应纵向释放
                         m_container->layout()->activate();
                         m_container->adjustSize();
                     }
