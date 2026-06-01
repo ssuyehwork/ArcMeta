@@ -222,7 +222,7 @@ int FlowLayout::verticalSpacing() const { return m_vSpace >= 0 ? m_vSpace : 4; }
 int FlowLayout::count() const { return itemList.size(); }
 QLayoutItem *FlowLayout::itemAt(int index) const { return itemList.value(index); }
 QLayoutItem *FlowLayout::takeAt(int index) { return (index >= 0 && index < itemList.size()) ? itemList.takeAt(index) : nullptr; }
-Qt::Orientations FlowLayout::expandingDirections() const { return Qt::Orientations(); }
+Qt::Orientations expandingDirections() const { return Qt::Orientations(); }
 bool FlowLayout::hasHeightForWidth() const { return true; }
 int FlowLayout::heightForWidth(int width) const { return doLayout(QRect(0, 0, width, 0), true); }
 void FlowLayout::setGeometry(const QRect &rect) { QLayout::setGeometry(rect); doLayout(rect, false); }
