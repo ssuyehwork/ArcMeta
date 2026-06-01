@@ -382,7 +382,25 @@ void MetaPanel::initUi() {
     // [Section 7] 详情网格 (基本信息)
     addInfoRow("类型", lblType); addInfoRow("大小", lblSize);
     addInfoRow("创建时间", lblCtime); addInfoRow("修改时间", lblMtime); addInfoRow("访问时间", lblAtime);
-    addInfoRow("物理路径", lblPath); addInfoRow("加密状态", lblEncrypted);
+
+    // 2026-06-xx 工业级重构：物理路径升级为只读 ElasticEdit，彻底解决超长路径不换行与截断问题
+    QWidget* pathRow = new QWidget(m_container);
+    QHBoxLayout* pathL = new QHBoxLayout(pathRow);
+    pathL->setContentsMargins(0, 2, 0, 2);
+    pathL->setSpacing(8);
+    QLabel* pathKey = new QLabel("物理路径", pathRow);
+    pathKey->setFixedWidth(80);
+    pathKey->setStyleSheet("font-size: 12px; color: #888888;");
+    pathL->addWidget(pathKey, 0, Qt::AlignTop);
+
+    m_pathEdit = new ElasticEdit(pathRow);
+    m_pathEdit->setReadOnly(true);
+    // 视觉降权：去除背景和边框，使其融入信息列表，但保留强制换行特性
+    m_pathEdit->setStyleSheet("QTextEdit { background: transparent; border: none; padding: 0; font-size: 12px; color: #CCCCCC; }");
+    pathL->addWidget(m_pathEdit, 1);
+    m_containerLayout->addWidget(pathRow);
+
+    addInfoRow("加密状态", lblEncrypted);
 
     m_containerLayout->addStretch(1);
     m_scrollArea->setWidget(m_container);
@@ -425,7 +443,7 @@ QWidget* MetaPanel::createSectionBox(const QString& iconName, const QString& tit
 void MetaPanel::onTagAdded() {
     QString text = m_tagEdit->toPlainText().trimmed();
     if (!text.isEmpty()) {
-        QString currentPath = lblPath->text();
+        QString currentPath = m_pathEdit->toPlainText().trimmed();
         if (currentPath != "-" && !currentPath.isEmpty()) {
             std::wstring wPath = currentPath.toStdWString();
             RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
@@ -444,7 +462,7 @@ void MetaPanel::onTagDeleted(const QString& text) {
         QLayoutItem* item = m_tagFlowLayout->itemAt(i); TagPill* pill = qobject_cast<TagPill*>(item->widget());
         if (pill && pill->property("tagText").toString() == text) {
             m_tagFlowLayout->takeAt(i); pill->deleteLater(); delete item;
-            QString currentPath = lblPath->text();
+            QString currentPath = m_pathEdit->toPlainText().trimmed();
             if (currentPath != "-" && !currentPath.isEmpty()) {
                 std::wstring wPath = currentPath.toStdWString(); RuntimeMeta rm = MetadataManager::instance().getMeta(wPath); rm.tags.removeAll(text); MetadataManager::instance().setTags(wPath, rm.tags);
             }
@@ -488,11 +506,16 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
             syncWidthAndHeight(m_tagEdit);
             syncWidthAndHeight(m_categoryEdit);
             
+            // 物理路径宽度：视口宽 - 边距(20) - 标签宽(80) - 间距(8)
+            int pathW = maxW - 88;
+            if (m_pathEdit && pathW > 0) {
+                m_pathEdit->setFixedWidth(pathW);
+                m_pathEdit->adjustHeight();
+            }
+
             if (m_paletteBox) m_paletteBox->setFixedWidth(maxW);
             if (m_tagBox) m_tagBox->setFixedWidth(maxW);
             if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
-
-            if (lblPath) lblPath->setMaximumWidth(maxW - 80);
 
             adjustFlowHeights();
 
@@ -537,7 +560,14 @@ void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s,
     m_nameEdit->setProperty("suffix", info.suffix());
     m_nameEdit->blockSignals(false);
     
-    lblType->setText(t); lblSize->setText(s); lblCtime->setText(ct); lblMtime->setText(mt); lblAtime->setText(at); lblPath->setText(p); lblEncrypted->setText(e ? "已加密" : "未加密");
+    lblType->setText(t); lblSize->setText(s); lblCtime->setText(ct); lblMtime->setText(mt); lblAtime->setText(at);
+
+    m_pathEdit->blockSignals(true);
+    m_pathEdit->setPlainText(p);
+    m_pathEdit->adjustHeight();
+    m_pathEdit->blockSignals(false);
+
+    lblEncrypted->setText(e ? "已加密" : "未加密");
     
     if (p != "-" && !p.isEmpty()) {
         RuntimeMeta rm = MetadataManager::instance().getMeta(p.toStdWString());
@@ -619,9 +649,9 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_noteEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setNote(currentPath.toStdWString(), m_noteEdit->toPlainText().toStdWString());
+        QString currentPath = m_pathEdit->toPlainText().trimmed(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setNote(currentPath.toStdWString(), m_noteEdit->toPlainText().toStdWString());
     } else if (watched == m_linkEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setURL(currentPath.toStdWString(), m_linkEdit->toPlainText().toStdWString());
+        QString currentPath = m_pathEdit->toPlainText().trimmed(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setURL(currentPath.toStdWString(), m_linkEdit->toPlainText().toStdWString());
     } else if (watched == m_nameEdit && event->type() == QEvent::FocusOut) {
         QString oldPath = m_nameEdit->property("oldPath").toString();
         QString newName = m_nameEdit->toPlainText().trimmed();
@@ -646,7 +676,8 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
 
                 if (QFile::rename(oldPath, newPath)) {
                     MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
-                    lblPath->setText(newPath);
+                    m_pathEdit->setPlainText(newPath);
+                    m_pathEdit->adjustHeight();
                     m_nameEdit->setProperty("oldPath", newPath);
                 } else {
                     // 重命名失败，回滚文本

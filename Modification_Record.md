@@ -3725,3 +3725,49 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
 - 是否在需求范围内：是
 
 ---
+
+---
+## [70] 变更时间：2026-06-01 15:11:38
+
+**文件路径：** `src/ui/MetaPanel.h` / `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+// MetaPanel.h
+    QLabel* lblPath = nullptr;
+...
+// MetaPanel.cpp
+    addInfoRow("物理路径", lblPath);
+...
+    lblPath->setText(p);
+...
+    lblPath->setMaximumWidth(maxW - 80);
+```
+
+### 修改后（After）
+```cpp
+// MetaPanel.h
+    ElasticEdit* m_pathEdit = nullptr;
+...
+// MetaPanel.cpp
+    m_pathEdit = new ElasticEdit(pathRow);
+    m_pathEdit->setReadOnly(true);
+    m_pathEdit->setStyleSheet("QTextEdit { background: transparent; border: none; padding: 0; font-size: 12px; color: #CCCCCC; }");
+...
+    m_pathEdit->setPlainText(p);
+    m_pathEdit->adjustHeight();
+...
+    int pathW = maxW - 88;
+    if (m_pathEdit && pathW > 0) {
+        m_pathEdit->setFixedWidth(pathW);
+        m_pathEdit->adjustHeight();
+    }
+```
+
+### 变更说明
+- 变更原因：修复物理路径长字符串不换行且溢出容器的问题。通过将 QLabel 升级为定制的只读 ElasticEdit，利用其强大的文本换行与高度感应机制，确保路径能随容器宽度自动折行并向下撑开高度。
+- 影响范围：MetaPanel 信息展示区，物理路径行。
+- 是否在需求范围内：是
+
+---

@@ -204,7 +204,8 @@ private:
     ElasticEdit* m_nameEdit = nullptr;
     QLabel* lblType = nullptr, *lblSize = nullptr;
     QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
-    QLabel* lblPath = nullptr, *lblEncrypted = nullptr;
+    ElasticEdit* m_pathEdit = nullptr;
+    QLabel* lblEncrypted = nullptr;
     
     QWidget* m_paletteBox = nullptr;
     FlowLayout* m_paletteFlowLayout = nullptr;
