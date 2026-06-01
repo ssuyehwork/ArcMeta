@@ -27,7 +27,7 @@ namespace ArcMeta {
 ElasticEdit::ElasticEdit(QWidget* parent) : QTextEdit(parent) {
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    setLineWrapMode(QTextEdit::FixedColumnWidth); // 配合文档宽度实现精准换行控制
+    setLineWrapMode(QTextEdit::WidgetWidth); // 恢复为窗口宽度换行，由布局控制外部宽度
 
     // 工业级修复：设置换行策略，确保长文本（如物理路径）在无空格时也能强制换行
     QTextOption opt = document()->defaultTextOption();
@@ -40,28 +40,29 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QTextEdit(parent) {
 }
 
 void ElasticEdit::adjustHeight() {
-    // 2026-06-xx 工业级重构：基类切换为 QTextEdit 后，不再依赖 documentSize
-    // 而是使用 document()->size().height()，它返回像素级渲染高度
-    int horizontalPadding = 20; // padding: 4px 10px;
+    // 2026-06-xx 工业级重构：基类切换为 QTextEdit 后，使用渲染文档高度
+    int horizontalPadding = 20; // 对应 QSS padding: 4px 10px;
     int verticalPadding = 8;    // 4px * 2;
     int border = 2;             // 1px * 2;
 
     int w = width();
-    int textW = qMax(0, w - horizontalPadding - border);
-
-    if (textW > 0) {
-        document()->setTextWidth(textW);
+    // 只有当宽度合理（>50）时才强行设置文档宽度，防止初始化阶段的 0 宽导致字符级换行
+    if (w > 50) {
+        int textW = w - horizontalPadding - border;
+        if (document()->textWidth() != textW) {
+            document()->setTextWidth(textW);
+        }
     }
 
-    // 获取文档的实际像素高度
+    // 获取文档的实际像素高度（QTextEdit 在内容改变后会自动更新此值）
     qreal docHeight = document()->size().height();
 
     // 计算目标高度：像素高度 + 上下边距 + 边框
     int newHeight = qMax(28, (int)qCeil(docHeight + verticalPadding + border));
 
-    // 详尽日志：记录基类切换后的真实像素高度
-    Logger::log(QString("ElasticEdit [%1] CalcPixelHeight: Width=%2, DocH=%3, TargetH=%4, CurrentH=%5")
-                .arg(placeholderText()).arg(w).arg(docHeight).arg(newHeight).arg(this->height()));
+    // 工业级日志：记录换行与高度计算详情
+    Logger::log(QString("ElasticEdit [%1] Adjust: Width=%2, DocH=%3, TargetH=%4")
+                .arg(placeholderText()).arg(w).arg(docHeight).arg(newHeight));
 
     if (this->height() != newHeight) {
         setFixedHeight(newHeight);
@@ -455,53 +456,48 @@ void MetaPanel::onTagDeleted(const QString& text) {
 void MetaPanel::resizeEvent(QResizeEvent* event) {
     QFrame::resizeEvent(event);
     
-    // 2026-06-xx 工业级加固：将宽度锁定延迟到下一帧，并强制刷新所有弹性控件高度
+    // 2026-06-xx 工业级加固：由于 ScrollArea 可能刚出现滚动条导致 Viewport 变化，
+    // 使用异步触发确保获取到的是最终稳定的物理宽度，防止因宽度抖动导致的错误换行。
     QTimer::singleShot(0, this, [this]() {
         if (!m_scrollArea || !m_container) return;
 
+        // 获取视口真实物理宽度
         int viewportW = m_scrollArea->viewport()->width();
-        // 如果视图还未渲染，退而求其次使用父窗口宽度（扣除边距）
-        if (viewportW < 50 && parentWidget()) {
-            viewportW = parentWidget()->width() - 2;
+
+        // 如果视口过窄（通常发生在初始化或隐藏状态），则延迟处理，避免触发字符级换行
+        if (viewportW < 100) return;
+
+        // 1. 同步容器宽度
+        if (m_container->width() != viewportW) {
+            m_container->setFixedWidth(viewportW);
         }
 
-        if (viewportW > 30) {
-            // 确保容器宽度填满视口，这是文本换行计算的基准
-            if (m_container->width() != viewportW) {
-                m_container->setFixedWidth(viewportW);
-            }
-            
-            // 内部控件可用宽度（视口宽 - 左右外边距 10px * 2）
-            int maxW = viewportW - 20;
-            if (maxW > 0) {
-                // 关键：必须先同步子控件的物理宽度，随后立即触发高度重算
-                auto syncWidthAndHeight = [maxW](ElasticEdit* edit) {
-                    if (edit) {
-                        edit->setFixedWidth(maxW);
-                        edit->adjustHeight();
-                    }
-                };
-
-                syncWidthAndHeight(m_nameEdit);
-                syncWidthAndHeight(m_noteEdit);
-                syncWidthAndHeight(m_linkEdit);
-                syncWidthAndHeight(m_tagEdit);
-                syncWidthAndHeight(m_categoryEdit);
-                
-                if (m_paletteBox) m_paletteBox->setFixedWidth(maxW);
-                if (m_tagBox) m_tagBox->setFixedWidth(maxW);
-                if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
-                
-                if (lblPath) lblPath->setMaximumWidth(maxW - 80);
-                
-                adjustFlowHeights();
-
-                // 强制容器根据所有子控件的新尺寸重新撑开高度
-                m_container->adjustSize();
-                if (m_container->layout()) {
-                    m_container->layout()->activate();
+        // 2. 内部控件可用宽度（视口宽 - 左右外边距 10px * 2）
+        int maxW = viewportW - 20;
+        if (maxW > 50) {
+            auto syncWidthAndHeight = [maxW](ElasticEdit* edit) {
+                if (edit && edit->width() != maxW) {
+                    edit->setFixedWidth(maxW);
+                    edit->adjustHeight();
                 }
-            }
+            };
+
+            syncWidthAndHeight(m_nameEdit);
+            syncWidthAndHeight(m_noteEdit);
+            syncWidthAndHeight(m_linkEdit);
+            syncWidthAndHeight(m_tagEdit);
+            syncWidthAndHeight(m_categoryEdit);
+            
+            if (m_paletteBox) m_paletteBox->setFixedWidth(maxW);
+            if (m_tagBox) m_tagBox->setFixedWidth(maxW);
+            if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
+
+            if (lblPath) lblPath->setMaximumWidth(maxW - 80);
+
+            adjustFlowHeights();
+
+            // 3. 强制容器重算高度以撑开滚动区域
+            m_container->adjustSize();
         }
     });
 }
