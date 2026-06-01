@@ -3398,3 +3398,141 @@ painter->drawRoundedRect(totalRect.adjusted(-3, -1, 3, 1), 4, 4);
 - 变更原因：彻底回滚调色盘、标签药丸以及卡片星级背景中的所有非授权视觉参数，确保仅保留“形状改为圆角矩形”这一核心变动。
 - 影响范围：全系统视觉绘制组件。
 - 是否在需求范围内：是
+
+---
+## [65] 变更时间：2026-06-01 07:53:31
+
+**文件路径：** `src/ui/MetaPanel.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+/**
+ * @brief PaletteCapsule: 单体胶囊化调色盘，包裹多个色点
+ */
+class PaletteCapsule : public QWidget {
+    Q_OBJECT
+public:
+    explicit PaletteCapsule(QWidget* parent = nullptr);
+    void setPalette(const QVector<QPair<QColor, float>>& palette);
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
+signals:
+    void colorSelected(const QColor& color);
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+private:
+    QVector<QPair<QColor, float>> m_palette;
+    int m_hoverIndex = -1;
+    const int m_dotSize = 16;
+    const int m_padding = 8;
+    const int m_spacing = 6;
+};
+// ...
+    PaletteCapsule* m_paletteCapsule = nullptr;
+```
+
+### 修改后（After）
+```cpp
+/**
+ * @brief ColorPill: 用于流式展示的单个颜色块 (16x16px, 4px 圆角)
+ */
+class ColorPill : public QWidget {
+    Q_OBJECT
+public:
+    explicit ColorPill(const QColor& color, float ratio, QWidget* parent = nullptr);
+signals:
+    void colorSelected(const QColor& color);
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void enterEvent(QEnterEvent* event) override;
+    void leaveEvent(QEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+private:
+    QColor m_color;
+    float m_ratio;
+    bool m_hovered = false;
+};
+// ...
+    QWidget* m_paletteBox = nullptr;
+    FlowLayout* m_paletteFlowLayout = nullptr;
+```
+
+### 变更说明
+- 变更原因：废弃原有的“线性挤压”胶囊色块组件，改为使用支持自动换行的流式容器。
+- 影响范围：MetaPanel UI 结构。
+- 是否在需求范围内：是
+
+---
+## [66] 变更时间：2026-06-01 07:53:31
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+// 包含了 PaletteCapsule 的完整实现，以及 MetaPanel::initUi 中对 m_paletteCapsule 的布局逻辑。
+```
+
+### 修改后（After）
+```cpp
+// 实现了 ColorPill 类，并在 MetaPanel::initUi 中创建了模拟 ElasticEdit 样式的 m_paletteBox 容器。
+// 重写了 setPalettes 逻辑，使用 FlowLayout 动态添加 ColorPill。
+```
+
+### 变更说明
+- 变更原因：解决色块过多时的显示挤压问题，实现自动换行，并统一面板组件视觉风格。
+- 影响范围：MetaPanel 组件及其色彩展示功能。
+- 是否在需求范围内：是
+
+---
+## [67] 变更时间：2026-06-01 08:00:31
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    m_paletteBox = new QWidget(m_container);
+    m_paletteBox->setStyleSheet("QWidget { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; }");
+    m_paletteFlowLayout = new FlowLayout(m_paletteBox, 8, 6, 6);
+```
+
+### 修改后（After）
+```cpp
+    m_paletteBox = new QWidget(m_container);
+    m_paletteBox->setMinimumHeight(28);
+    m_paletteBox->setStyleSheet("QWidget { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; }");
+    m_paletteFlowLayout = new FlowLayout(m_paletteBox, 6, 6, 6);
+    m_paletteFlowLayout->setContentsMargins(10, 6, 10, 6);
+```
+
+### 变更说明
+- 变更原因：物理补齐调色盘容器的最小高度约束（28px），确保其在空状态或单行状态下的视觉表现与 ElasticEdit 编辑框严格一致。
+- 影响范围：MetaPanel 色彩展示区域。
+- 是否在需求范围内：是
+
+---
+## [68] 变更时间：2026-06-01 08:05:29
+
+**文件路径：** `src/ui/MetaPanel.cpp` / `src/ui/MetaPanel.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+// 调色盘容器高度在初始化后未进行动态调整，存在被 28px 锁定导致内容截断的风险。
+```
+
+### 修改后（After）
+```cpp
+// 引入 adjustFlowHeights 函数，利用 FlowLayout::heightForWidth 根据当前宽度动态计算容器高度。
+// 在 resizeEvent 和 setPalettes 中同步触发，确保全面板组件（编辑框与容器）均实现弹性伸缩。
+```
+
+### 变更说明
+- 变更原因：落实“所有组件超长自动换行”的需求，彻底消除固定高度导致的视觉缺陷。
+- 影响范围：MetaPanel 全量展示组件。
+- 是否在需求范围内：是
