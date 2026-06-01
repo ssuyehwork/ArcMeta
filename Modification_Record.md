@@ -3424,3 +3424,24 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
 - 变更原因：致命错误 LNK2019。尽管源码中已无 showEvent，但 Qt 增量编译可能残留了旧的 MOC 信息。通过 write_file 全量覆写文件强制触碰时间戳，以期触发编译器重新生成 MOC。
 - 影响范围：MOC 自动生成阶段
 - 是否在需求范围内：是
+
+---
+## [57] 变更时间：2025-05-14 11:15:00
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+Qt::Orientations expandingDirections() const { return Qt::Orientations(); }
+```
+
+### 修改后（After）
+```cpp
+Qt::Orientations FlowLayout::expandingDirections() const { return Qt::Orientations(); }
+```
+
+### 变更说明
+- 变更原因：修正全量覆写引入的 C++ 语法错误。由于漏掉类名前缀，导致编译器将其误认为非成员函数。
+- 影响范围：FlowLayout 实现
+- 是否在需求范围内：是
