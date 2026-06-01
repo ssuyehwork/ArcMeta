@@ -58,9 +58,11 @@ void ElasticEdit::adjustHeight() {
     // 计算目标高度：文档高度 + 上下边距 + 边框，并向上取整确保内容不被裁剪
     int newHeight = qMax(28, (int)qCeil(docHeight + verticalPadding + border));
 
+    // 工业级详尽日志：无论是否变化，都记录计算结果，以便用户验证“弹性”状态
+    Logger::log(QString("ElasticEdit [%1] CalcHeight: Width=%2, DocHeight=%3, TargetHeight=%4, CurrentHeight=%5")
+                .arg(placeholderText()).arg(w).arg(docHeight).arg(newHeight).arg(this->height()));
+
     if (this->height() != newHeight) {
-        Logger::log(QString("ElasticEdit [%1] Resizing: Width=%2, DocHeight=%3, NewHeight=%4")
-                    .arg(placeholderText()).arg(w).arg(docHeight).arg(newHeight));
         setFixedHeight(newHeight);
         // 关键：通知布局管理器尺寸已变
         updateGeometry();
@@ -528,6 +530,7 @@ void MetaPanel::showEvent(QShowEvent* event) {
 }
 
 void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s, const QString& ct, const QString& mt, const QString& at, const QString& p, bool e) {
+    Logger::log(QString("MetaPanel::updateInfo for Path: %1").arg(p));
     m_nameEdit->blockSignals(true);
     QFileInfo info(n);
     m_nameEdit->setPlainText(info.completeBaseName());
