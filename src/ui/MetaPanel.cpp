@@ -484,25 +484,13 @@ void MetaPanel::onTagDeleted(const QString& text) {
     }
 }
 
-void MetaPanel::showEvent(QShowEvent* event) {
-    QFrame::showEvent(event);
-    // 2025-05-14 按照用户要求，首次显示时强制刷新滚动区域内容布局
-    if (m_container) {
-        m_container->updateGeometry();
-        m_container->adjustSize();
-    }
-    if (m_scrollArea) {
-        m_scrollArea->updateGeometry();
-    }
-}
-
 void MetaPanel::resizeEvent(QResizeEvent* event) {
     QFrame::resizeEvent(event);
     
     // 2026-06-xx 工业级强制约束：锁死容器宽度等于视口宽度，彻底消除横向溢出
     int viewportW = m_scrollArea->viewport()->width();
     if (m_container && viewportW > 0) {
-        m_container->setFixedWidth(viewportW);
+        m_container->setMaximumWidth(viewportW);
     }
 
     int maxW = viewportW - 20; // 预留左右各 10px 边距
