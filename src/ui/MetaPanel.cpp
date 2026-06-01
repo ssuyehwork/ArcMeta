@@ -25,19 +25,29 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    // 2026-06-xx 工业级增强：确保长路径（无空格）也能在边界强制折行，防止溢出或截断
+    setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
     document()->setDocumentMargin(0);
     connect(this, &QPlainTextEdit::textChanged, this, &ElasticEdit::adjustHeight);
 }
 
 void ElasticEdit::adjustHeight() {
-    // 强制文档基于当前宽度重新计算布局
-    document()->setTextWidth(viewport()->width() > 0 ? viewport()->width() : width());
-    document()->documentLayout()->update();
+    // 强制同步文档布局：锁定当前视口宽度，防止计算滞后
+    int w = viewport()->width();
+    if (w <= 0) w = width();
+    if (w > 0) {
+        document()->setTextWidth(w);
+        // 强制触发布局引擎即时计算，不再等待下一轮事件循环
+        document()->documentLayout()->update();
+    }
 
     int contentH = (int)document()->documentLayout()->documentSize().height();
+    // 补偿：深色边框及上下 Padding (4px*2) + 安全冗余
     int newH = qMax(28, contentH + 16);
+
     if (this->height() != newH) {
         setFixedHeight(newH);
+        // 关键：通知父布局重新扫描几何尺寸
         updateGeometry();
     }
 }
@@ -456,7 +466,12 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
                     m_tagEdit->adjustHeight();
                     m_categoryEdit->adjustHeight();
                     adjustFlowHeights();
-                    if (m_container) m_container->adjustSize();
+
+                    if (m_container) {
+                        // 强制触发布局重算并同步调整容器大小，确保滚动条正确响应
+                        m_container->layout()->activate();
+                        m_container->adjustSize();
+                    }
                 });
             }
         }
