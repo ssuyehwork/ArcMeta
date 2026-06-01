@@ -3536,3 +3536,162 @@ private:
 - 变更原因：落实“所有组件超长自动换行”的需求，彻底消除固定高度导致的视觉缺陷。
 - 影响范围：MetaPanel 全量展示组件。
 - 是否在需求范围内：是
+
+---
+## [43] 变更时间：2026-06-01 09:50:14
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
+    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    document()->setDocumentMargin(0);
+    connect(this, &QPlainTextEdit::textChanged, this, &ElasticEdit::adjustHeight);
+}
+
+void ElasticEdit::adjustHeight() {
+    // 强制文档基于当前宽度重新计算布局
+    document()->setTextWidth(viewport()->width() > 0 ? viewport()->width() : width());
+    document()->documentLayout()->update();
+    
+    int contentH = (int)document()->documentLayout()->documentSize().height();
+    int newH = qMax(28, contentH + 16);
+    if (this->height() != newH) {
+        setFixedHeight(newH);
+        updateGeometry();
+    }
+}
+// ... (resizeEvent 部分)
+        // 获取当前视口的真实物理宽度
+        int viewportW = m_scrollArea->viewport()->width();
+        
+        // 容错处理：如果宽度过小（可能是系统正在初始化），尝试使用 parentWidget 的宽度作为参考
+        if (viewportW < 50 && parentWidget()) {
+            viewportW = parentWidget()->width();
+        }
+
+        if (viewportW > 30) {
+            // 只有当宽度发生真实变化时才重设，避免触发冗余的布局刷新
+            if (m_container->width() != viewportW) {
+                m_container->setFixedWidth(viewportW);
+            }
+            
+            int maxW = viewportW - 20; // 严格对齐左右 10px 边距
+            if (maxW > 0) {
+                // 确保子控件宽度不溢出并严格对齐
+                m_nameEdit->setFixedWidth(maxW);
+                if (m_paletteBox) m_paletteBox->setFixedWidth(maxW);
+                m_noteEdit->setFixedWidth(maxW);
+                m_linkEdit->setFixedWidth(maxW);
+                m_categoryEdit->setFixedWidth(maxW);
+                
+                if (m_tagBox) m_tagBox->setFixedWidth(maxW);
+                if (m_tagEdit) m_tagEdit->setFixedWidth(maxW);
+                if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
+                
+                if (lblPath) lblPath->setMaximumWidth(maxW - 80);
+                
+                // 第二帧：宽度生效后再计算高度
+                QTimer::singleShot(0, this, [this]() {
+                    m_nameEdit->adjustHeight();
+                    m_noteEdit->adjustHeight();
+                    m_linkEdit->adjustHeight();
+                    m_tagEdit->adjustHeight();
+                    m_categoryEdit->adjustHeight();
+                    adjustFlowHeights();
+                    if (m_container) m_container->adjustSize();
+                });
+            }
+        }
+```
+
+### 修改后（After）
+```cpp
+ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
+    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    // 2026-06-xx 工业级增强：确保长路径（无空格）也能在边界强制折行，防止溢出或截断
+    setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    document()->setDocumentMargin(0);
+    connect(this, &QPlainTextEdit::textChanged, this, &ElasticEdit::adjustHeight);
+}
+
+void ElasticEdit::adjustHeight() {
+    // 强制同步文档布局：锁定当前视口宽度，防止计算滞后
+    int w = viewport()->width();
+    if (w <= 0) w = width();
+    if (w > 0) {
+        document()->setTextWidth(w);
+        // 强制触发布局引擎即时计算，不再等待下一轮事件循环
+        document()->documentLayout()->update();
+    }
+    
+    int contentH = (int)document()->documentLayout()->documentSize().height();
+    // 补偿：深色边框及上下 Padding (4px*2) + 安全冗余
+    int newH = qMax(28, contentH + 16);
+    
+    if (this->height() != newH) {
+        setFixedHeight(newH);
+        // 关键：通知父布局重新扫描几何尺寸
+        updateGeometry();
+    }
+}
+// ... (resizeEvent 部分)
+        // 获取当前视口的真实物理宽度
+        int viewportW = m_scrollArea->viewport()->width();
+        
+        // 2026-06-xx 工业级修正：启动初期 viewport 可能尚未就绪 (为0)，此时应使用面板自身的宽度
+        // 绝对严禁使用 parentWidget()->width()，因为 MainWindow 的宽度远大于面板，会导致计算溢出
+        if (viewportW <= 0) {
+            viewportW = this->width();
+        }
+
+        if (viewportW > 50) {
+            // 锁定容器宽度，确保 ElasticEdit 能正确计算换行
+            m_container->setFixedWidth(viewportW);
+            
+            int maxW = viewportW - 20; // 严格对齐左右 10px 边距
+            if (maxW > 0) {
+                // 确保子控件宽度不溢出并严格对齐
+                m_nameEdit->setFixedWidth(maxW);
+                if (m_paletteBox) m_paletteBox->setFixedWidth(maxW);
+                m_noteEdit->setFixedWidth(maxW);
+                m_linkEdit->setFixedWidth(maxW);
+                m_categoryEdit->setFixedWidth(maxW);
+                
+                if (m_tagBox) m_tagBox->setFixedWidth(maxW);
+                if (m_tagEdit) m_tagEdit->setFixedWidth(maxW);
+                if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
+                
+                if (lblPath) lblPath->setMaximumWidth(maxW - 80);
+                
+                // 第二帧：宽度生效后再计算高度
+                QTimer::singleShot(0, this, [this]() {
+                    m_nameEdit->adjustHeight();
+                    m_noteEdit->adjustHeight();
+                    m_linkEdit->adjustHeight();
+                    m_tagEdit->adjustHeight();
+                    m_categoryEdit->adjustHeight();
+                    adjustFlowHeights();
+                    
+                    if (m_container) {
+                        // 强制触发布局重算并同步调整容器大小，确保滚动条正确响应
+                        m_container->layout()->activate();
+                        m_container->adjustSize();
+                    }
+                });
+            }
+        }
+```
+
+### 变更说明
+- 变更原因：解决元数据面板内容截断及高度不自动伸缩的问题。排查发现 MainWindow 的宽度干扰了面板内部计算。
+- 影响范围：ElasticEdit 组件，MetaPanel 布局。
+- 是否在需求范围内：是
+
+---
