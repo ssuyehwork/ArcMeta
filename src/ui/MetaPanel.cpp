@@ -25,9 +25,6 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setLineWrapMode(QPlainTextEdit::WidgetWidth);
-    // 2026-06-xx 工业级增强：处理路径冲突的物理基础
-    // 强制开启任意字符折行，确保无空格的长路径在任何宽度下都能强制折行，化解横向空间冲突
-    setWordWrapMode(QTextOption::WrapAnywhere);
     document()->setDocumentMargin(0);
     connect(this, &QPlainTextEdit::textChanged, this, &ElasticEdit::adjustHeight);
 }
@@ -338,19 +335,12 @@ void MetaPanel::initUi() {
     m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
     m_containerLayout->addWidget(m_categoryEdit);
 
-    // [Section 6.5] 物理路径展示 (架构升级：独占全宽，解决空间冲突)
-    m_pathEdit = new ElasticEdit(m_container);
-    m_pathEdit->setReadOnly(true);
-    m_pathEdit->setPlaceholderText("物理路径...");
-    m_pathEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 11px; color: #888888; font-weight: normal; }");
-    m_containerLayout->addWidget(m_pathEdit);
-
     m_containerLayout->addWidget(createSeparator());
 
     // [Section 7] 详情网格 (基本信息)
     addInfoRow("类型", lblType); addInfoRow("大小", lblSize);
     addInfoRow("创建时间", lblCtime); addInfoRow("修改时间", lblMtime); addInfoRow("访问时间", lblAtime);
-    addInfoRow("加密状态", lblEncrypted);
+    addInfoRow("物理路径", lblPath); addInfoRow("加密状态", lblEncrypted);
 
     m_containerLayout->addStretch(1);
     m_scrollArea->setWidget(m_container);
@@ -393,7 +383,7 @@ QWidget* MetaPanel::createSectionBox(const QString& iconName, const QString& tit
 void MetaPanel::onTagAdded() {
     QString text = m_tagEdit->toPlainText().trimmed();
     if (!text.isEmpty()) {
-        QString currentPath = m_pathEdit->toPlainText();
+        QString currentPath = lblPath->text();
         if (currentPath != "-" && !currentPath.isEmpty()) {
             std::wstring wPath = currentPath.toStdWString();
             RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
@@ -412,7 +402,7 @@ void MetaPanel::onTagDeleted(const QString& text) {
         QLayoutItem* item = m_tagFlowLayout->itemAt(i); TagPill* pill = qobject_cast<TagPill*>(item->widget());
         if (pill && pill->property("tagText").toString() == text) {
             m_tagFlowLayout->takeAt(i); pill->deleteLater(); delete item;
-            QString currentPath = m_pathEdit->toPlainText();
+            QString currentPath = lblPath->text();
             if (currentPath != "-" && !currentPath.isEmpty()) {
                 std::wstring wPath = currentPath.toStdWString(); RuntimeMeta rm = MetadataManager::instance().getMeta(wPath); rm.tags.removeAll(text); MetadataManager::instance().setTags(wPath, rm.tags);
             }
@@ -456,7 +446,7 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
                 if (m_tagEdit) m_tagEdit->setFixedWidth(maxW);
                 if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
                 
-                if (m_pathEdit) m_pathEdit->setFixedWidth(maxW);
+                if (lblPath) lblPath->setMaximumWidth(maxW - 80);
 
                 // 核心修复：强制子控件重新计算高度，以适配新的宽度变化
                 m_nameEdit->adjustHeight();
@@ -464,7 +454,6 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
                 m_linkEdit->adjustHeight();
                 m_tagEdit->adjustHeight();
                 m_categoryEdit->adjustHeight();
-                m_pathEdit->adjustHeight();
                 
                 // 工业级补全：同时调整非 ElasticEdit 容器（流式布局容器）的高度
                 adjustFlowHeights();
@@ -500,12 +489,7 @@ void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s,
     m_nameEdit->setProperty("suffix", info.suffix());
     m_nameEdit->blockSignals(false);
     
-    m_pathEdit->blockSignals(true);
-    m_pathEdit->setPlainText(p);
-    m_pathEdit->adjustHeight();
-    m_pathEdit->blockSignals(false);
-
-    lblType->setText(t); lblSize->setText(s); lblCtime->setText(ct); lblMtime->setText(mt); lblAtime->setText(at); lblEncrypted->setText(e ? "已加密" : "未加密");
+    lblType->setText(t); lblSize->setText(s); lblCtime->setText(ct); lblMtime->setText(mt); lblAtime->setText(at); lblPath->setText(p); lblEncrypted->setText(e ? "已加密" : "未加密");
     
     if (p != "-" && !p.isEmpty()) {
         RuntimeMeta rm = MetadataManager::instance().getMeta(p.toStdWString());
@@ -587,9 +571,9 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_noteEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = m_pathEdit->toPlainText(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setNote(currentPath.toStdWString(), m_noteEdit->toPlainText().toStdWString());
+        QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setNote(currentPath.toStdWString(), m_noteEdit->toPlainText().toStdWString());
     } else if (watched == m_linkEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = m_pathEdit->toPlainText(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setURL(currentPath.toStdWString(), m_linkEdit->toPlainText().toStdWString());
+        QString currentPath = lblPath->text(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setURL(currentPath.toStdWString(), m_linkEdit->toPlainText().toStdWString());
     } else if (watched == m_nameEdit && event->type() == QEvent::FocusOut) {
         QString oldPath = m_nameEdit->property("oldPath").toString();
         QString newName = m_nameEdit->toPlainText().trimmed();
@@ -614,8 +598,7 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
 
                 if (QFile::rename(oldPath, newPath)) {
                     MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
-                    m_pathEdit->setPlainText(newPath);
-                    m_pathEdit->adjustHeight();
+                    lblPath->setText(newPath);
                     m_nameEdit->setProperty("oldPath", newPath);
                 } else {
                     // 重命名失败，回滚文本
