@@ -448,15 +448,16 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
                 
                 if (lblPath) lblPath->setMaximumWidth(maxW - 80);
                 
-                // 核心修复：强制子控件重新计算高度，以适配新的宽度变化
-                m_nameEdit->adjustHeight();
-                m_noteEdit->adjustHeight();
-                m_linkEdit->adjustHeight();
-                m_tagEdit->adjustHeight();
-                m_categoryEdit->adjustHeight();
-                
-                // 工业级补全：同时调整非 ElasticEdit 容器（流式布局容器）的高度
-                adjustFlowHeights();
+                // 第二帧：宽度生效后再计算高度
+                QTimer::singleShot(0, this, [this]() {
+                    m_nameEdit->adjustHeight();
+                    m_noteEdit->adjustHeight();
+                    m_linkEdit->adjustHeight();
+                    m_tagEdit->adjustHeight();
+                    m_categoryEdit->adjustHeight();
+                    adjustFlowHeights();
+                    if (m_container) m_container->adjustSize();
+                });
             }
         }
     });
