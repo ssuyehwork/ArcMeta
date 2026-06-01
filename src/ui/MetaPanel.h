@@ -24,6 +24,8 @@ class ElasticEdit : public QPlainTextEdit {
 public:
     explicit ElasticEdit(QWidget* parent = nullptr);
     void adjustHeight();
+signals:
+    void returnPressed(); // 统一信号接口
 protected:
     void keyPressEvent(QKeyEvent* e) override;
     void resizeEvent(QResizeEvent* e) override;
@@ -209,9 +211,10 @@ private:
     
     PaletteCapsule* m_paletteCapsule = nullptr;
     
+    QWidget* m_tagBox = nullptr;
     QWidget* m_tagContainer = nullptr;
     FlowLayout* m_tagFlowLayout = nullptr;
-    QLineEdit* m_tagEdit = nullptr;
+    ElasticEdit* m_tagEdit = nullptr;
     
     ElasticEdit* m_noteEdit = nullptr;
     ElasticEdit* m_linkEdit = nullptr;

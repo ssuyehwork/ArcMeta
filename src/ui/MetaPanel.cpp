@@ -46,6 +46,7 @@ void ElasticEdit::resizeEvent(QResizeEvent* e) {
 
 void ElasticEdit::keyPressEvent(QKeyEvent* e) {
     if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) && !(e->modifiers() & Qt::ShiftModifier)) {
+        emit returnPressed();
         clearFocus();
         return;
     }
@@ -383,22 +384,22 @@ void MetaPanel::initUi() {
     m_containerLayout->addWidget(m_linkEdit);
 
     // [Section 5] 标签区域 (Tag Flow)
-    QWidget* tagBox = new QWidget(m_container);
-    QVBoxLayout* tagL = new QVBoxLayout(tagBox);
+    m_tagBox = new QWidget(m_container);
+    QVBoxLayout* tagL = new QVBoxLayout(m_tagBox);
     tagL->setContentsMargins(0, 0, 0, 0);
     tagL->setSpacing(8);
     
-    m_tagContainer = new QWidget(tagBox);
+    m_tagContainer = new QWidget(m_tagBox);
     m_tagFlowLayout = new FlowLayout(m_tagContainer, 0, 4, 4);
     tagL->addWidget(m_tagContainer);
 
-    m_tagEdit = new QLineEdit(tagBox);
+    m_tagEdit = new ElasticEdit(m_tagBox);
     m_tagEdit->setPlaceholderText("输入标签...");
-    m_tagEdit->setFixedHeight(28);
-    m_tagEdit->setStyleSheet("QLineEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 3px; padding-left: 6px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
-    connect(m_tagEdit, &QLineEdit::returnPressed, this, &MetaPanel::onTagAdded);
+    // 工业级宽度对齐：统一使用 4px 圆角和 4px 10px padding，彻底消除视觉缺口
+    m_tagEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
+    connect(m_tagEdit, &ElasticEdit::returnPressed, this, &MetaPanel::onTagAdded);
     tagL->addWidget(m_tagEdit);
-    m_containerLayout->addWidget(tagBox);
+    m_containerLayout->addWidget(m_tagBox);
 
     // [Section 6] 分类展示 (Category Pills)
     m_categoryEdit = new ElasticEdit(m_container);
@@ -452,7 +453,7 @@ QWidget* MetaPanel::createSectionBox(const QString& iconName, const QString& tit
 }
 
 void MetaPanel::onTagAdded() {
-    QString text = m_tagEdit->text().trimmed();
+    QString text = m_tagEdit->toPlainText().trimmed();
     if (!text.isEmpty()) {
         QString currentPath = lblPath->text();
         if (currentPath != "-" && !currentPath.isEmpty()) {
@@ -464,6 +465,7 @@ void MetaPanel::onTagAdded() {
             }
         }
         m_tagEdit->clear();
+        m_tagEdit->adjustHeight();
     }
 }
 
@@ -505,18 +507,23 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
 
             int maxW = viewportW - 20; // 严格对齐左右 10px 边距
             if (maxW > 0) {
-                // 确保子控件宽度不溢出
-                m_nameEdit->setMaximumWidth(maxW);
-                m_noteEdit->setMaximumWidth(maxW);
-                m_linkEdit->setMaximumWidth(maxW);
-                m_categoryEdit->setMaximumWidth(maxW);
-                if (m_tagContainer) m_tagContainer->setMaximumWidth(maxW);
+                // 确保子控件宽度不溢出并严格对齐
+                m_nameEdit->setFixedWidth(maxW);
+                m_noteEdit->setFixedWidth(maxW);
+                m_linkEdit->setFixedWidth(maxW);
+                m_categoryEdit->setFixedWidth(maxW);
+
+                if (m_tagBox) m_tagBox->setFixedWidth(maxW);
+                if (m_tagEdit) m_tagEdit->setFixedWidth(maxW);
+                if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
+
                 if (lblPath) lblPath->setMaximumWidth(maxW - 80);
 
                 // 核心修复：强制子控件重新计算高度，以适配新的宽度变化
                 m_nameEdit->adjustHeight();
                 m_noteEdit->adjustHeight();
                 m_linkEdit->adjustHeight();
+                m_tagEdit->adjustHeight();
                 m_categoryEdit->adjustHeight();
             }
         }
