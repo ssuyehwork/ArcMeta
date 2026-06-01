@@ -484,6 +484,18 @@ void MetaPanel::onTagDeleted(const QString& text) {
     }
 }
 
+void MetaPanel::showEvent(QShowEvent* event) {
+    QFrame::showEvent(event);
+    // 2025-05-14 按照用户要求，首次显示时强制刷新滚动区域内容布局
+    if (m_container) {
+        m_container->updateGeometry();
+        m_container->adjustSize();
+    }
+    if (m_scrollArea) {
+        m_scrollArea->updateGeometry();
+    }
+}
+
 void MetaPanel::resizeEvent(QResizeEvent* event) {
     QFrame::resizeEvent(event);
     

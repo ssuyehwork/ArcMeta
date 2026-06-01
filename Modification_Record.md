@@ -3232,3 +3232,72 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 - 变更原因：移除手动触发 resizeEvent 的“补丁”逻辑。这种做法是由于旧布局系统约束不全导致的，在新的锁死宽度逻辑下已属冗余。
 - 影响范围：setPalettes 函数。
 - 是否在需求范围内：是
+
+---
+## [51] 变更时间：2025-05-14 10:10:00
+
+**文件路径：** `src/ui/MetaPanel.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+
+private:
+```
+
+### 修改后（After）
+```cpp
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+
+private:
+```
+
+### 变更说明
+- 变更原因：修复 MetaPanel 首次显示内容不渲染的问题，需要在 showEvent 中声明重写。
+- 影响范围：MetaPanel 类定义
+- 是否在需求范围内：是
+
+---
+## [52] 变更时间：2025-05-14 10:11:00
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+
+    // 2026-06-xx 工业级强制约束：锁死容器宽度等于视口宽度，彻底消除横向溢出
+```
+
+### 修改后（After）
+```cpp
+void MetaPanel::showEvent(QShowEvent* event) {
+    QFrame::showEvent(event);
+    // 2025-05-14 按照用户要求，首次显示时强制刷新滚动区域内容布局
+    if (m_container) {
+        m_container->updateGeometry();
+        m_container->adjustSize();
+    }
+    if (m_scrollArea) {
+        m_scrollArea->updateGeometry();
+    }
+}
+
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+
+    // 2026-06-xx 工业级强制约束：锁死容器宽度等于视口宽度，彻底消除横向溢出
+```
+
+### 变更说明
+- 变更原因：在 showEvent 中手动强制刷新布局，确保首次显示时内容正确计算尺寸并渲染。
+- 影响范围：MetaPanel::showEvent 实现
+- 是否在需求范围内：是
