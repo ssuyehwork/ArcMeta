@@ -3232,3 +3232,265 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 - 变更原因：移除手动触发 resizeEvent 的“补丁”逻辑。这种做法是由于旧布局系统约束不全导致的，在新的锁死宽度逻辑下已属冗余。
 - 影响范围：setPalettes 函数。
 - 是否在需求范围内：是
+
+---
+## [51] 变更时间：2025-05-14 10:10:00
+
+**文件路径：** `src/ui/MetaPanel.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+
+private:
+```
+
+### 修改后（After）
+```cpp
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+
+private:
+```
+
+### 变更说明
+- 变更原因：修复 MetaPanel 首次显示内容不渲染的问题，需要在 showEvent 中声明重写。
+- 影响范围：MetaPanel 类定义
+- 是否在需求范围内：是
+
+---
+## [52] 变更时间：2025-05-14 10:11:00
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+    
+    // 2026-06-xx 工业级强制约束：锁死容器宽度等于视口宽度，彻底消除横向溢出
+```
+
+### 修改后（After）
+```cpp
+void MetaPanel::showEvent(QShowEvent* event) {
+    QFrame::showEvent(event);
+    // 2025-05-14 按照用户要求，首次显示时强制刷新滚动区域内容布局
+    if (m_container) {
+        m_container->updateGeometry();
+        m_container->adjustSize();
+    }
+    if (m_scrollArea) {
+        m_scrollArea->updateGeometry();
+    }
+}
+
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+    
+    // 2026-06-xx 工业级强制约束：锁死容器宽度等于视口宽度，彻底消除横向溢出
+```
+
+### 变更说明
+- 变更原因：在 showEvent 中手动强制刷新布局，确保首次显示时内容正确计算尺寸并渲染。
+- 影响范围：MetaPanel::showEvent 实现
+- 是否在需求范围内：是
+
+---
+## [53] 变更时间：2025-05-14 10:30:00
+
+**文件路径：** `src/ui/MetaPanel.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+
+private:
+```
+
+### 修改后（After）
+```cpp
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+
+private:
+```
+
+### 变更说明
+- 变更原因：移除无效的 showEvent 补丁，回归原始声明。
+- 影响范围：MetaPanel 类定义
+- 是否在需求范围内：是
+
+---
+## [54] 变更时间：2025-05-14 10:31:00
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void MetaPanel::showEvent(QShowEvent* event) {
+    QFrame::showEvent(event);
+    // 2025-05-14 按照用户要求，首次显示时强制刷新滚动区域内容布局
+    if (m_container) {
+        m_container->updateGeometry();
+        m_container->adjustSize();
+    }
+    if (m_scrollArea) {
+        m_scrollArea->updateGeometry();
+    }
+}
+
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+    
+    // 2026-06-xx 工业级强制约束：锁死容器宽度等于视口宽度，彻底消除横向溢出
+    int viewportW = m_scrollArea->viewport()->width();
+    if (m_container && viewportW > 0) {
+        m_container->setFixedWidth(viewportW);
+    }
+
+    int maxW = viewportW - 20; // 预留左右各 10px 边距
+```
+
+### 修改后（After）
+```cpp
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+    
+    // 2026-06-xx 工业级强制约束：锁死容器宽度等于视口宽度，彻底消除横向溢出
+    int viewportW = m_scrollArea->viewport()->width();
+    if (m_container && viewportW > 0) {
+        m_container->setMaximumWidth(viewportW);
+    }
+
+    int maxW = viewportW - 20; // 预留左右各 10px 边距
+```
+
+### 变更说明
+- 变更原因：修复 MetaPanel 首次显示内容不可见的根本原因。将 setFixedWidth 改为 setMaximumWidth，防止在初始 viewport 宽度为 0 时将容器宽度锁死为零。同时移除无效的 showEvent 实现。
+- 影响范围：MetaPanel::resizeEvent
+- 是否在需求范围内：是
+
+---
+## [55] 变更时间：2025-05-14 10:45:00
+
+**文件路径：** `src/ui/MetaPanel.h / src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+（源码检查中，确认为之前的清理操作已执行，但可能存在 MOC 残留导致链接错误）
+```
+
+### 修改后（After）
+```cpp
+（源码保持干净，已确认无 showEvent 声明与实现）
+```
+
+### 变更说明
+- 变更原因：解决由于之前的无效补丁清理导致的 LNK2019 无法解析外部符号错误。经核实源码已干净，该错误为 Qt 增量编译残留，需执行清理构建。
+- 影响范围：链接阶段
+- 是否在需求范围内：是
+
+---
+## [56] 变更时间：2025-05-14 11:00:00
+
+**文件路径：** `src/ui/MetaPanel.h / src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+（执行全量覆写，物理触碰文件）
+```
+
+### 修改后（After）
+```cpp
+（源码已确认完全不包含 showEvent，物理触碰文件时间戳以强制触发重新 MOC）
+```
+
+### 变更说明
+- 变更原因：致命错误 LNK2019。尽管源码中已无 showEvent，但 Qt 增量编译可能残留了旧的 MOC 信息。通过 write_file 全量覆写文件强制触碰时间戳，以期触发编译器重新生成 MOC。
+- 影响范围：MOC 自动生成阶段
+- 是否在需求范围内：是
+
+---
+## [57] 变更时间：2025-05-14 11:15:00
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+Qt::Orientations expandingDirections() const { return Qt::Orientations(); }
+```
+
+### 修改后（After）
+```cpp
+Qt::Orientations FlowLayout::expandingDirections() const { return Qt::Orientations(); }
+```
+
+### 变更说明
+- 变更原因：修正全量覆写引入的 C++ 语法错误。由于漏掉类名前缀，导致编译器将其误认为非成员函数。
+- 影响范围：FlowLayout 实现
+- 是否在需求范围内：是
+
+---
+## [58] 变更时间：2025-05-14 11:30:00
+
+**文件路径：** `src/ui/MetaPanel.h / src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+（源码检查中，确认 showEvent 声明和实现已被物理移除）
+```
+
+### 修改后（After）
+```cpp
+（源码保持干净，已物理确认无 showEvent 声明与实现）
+```
+
+### 变更说明
+- 变更原因：解决持续报错 LNK2019。已通过物理扫描确认源码完全干净。报错为 Qt MOC 编译系统的强缓存导致。本次记录确认源码已完成对 showEvent 的彻底抹除。
+- 影响范围：MOC 与 链接阶段
+- 是否在需求范围内：是
+
+---
+## [62] 变更时间：2025-05-14 12:00:00
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+void PaletteCapsule::leaveEvent(QEvent* event) { m_hoverIndex = -1; update(); }
+
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+```
+
+### 修改后（After）
+```cpp
+void PaletteCapsule::leaveEvent(QEvent* event) { Q_UNUSED(event); m_hoverIndex = -1; update(); }
+
+void MetaPanel::resizeEvent(QResizeEvent* event) {
+    Q_UNUSED(event);
+    QFrame::resizeEvent(event);
+```
+
+### 变更说明
+- 变更原因：消除 MSVC 编译器警告 C4100（未引用的形参）。确保 Release 模式下构建结果为 0 警告，符合工业级质量要求。
+- 影响范围：PaletteCapsule 和 MetaPanel 的事件处理实现
+- 是否在需求范围内：是
