@@ -24,10 +24,10 @@
 
 namespace ArcMeta {
 
-ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
+ElasticEdit::ElasticEdit(QWidget* parent) : QTextEdit(parent) {
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    setLineWrapMode(QTextEdit::FixedColumnWidth); // 配合文档宽度实现精准换行控制
 
     // 工业级修复：设置换行策略，确保长文本（如物理路径）在无空格时也能强制换行
     QTextOption opt = document()->defaultTextOption();
@@ -35,15 +35,16 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
     document()->setDefaultTextOption(opt);
 
     document()->setDocumentMargin(0);
-    connect(this, &QPlainTextEdit::textChanged, this, &ElasticEdit::adjustHeight);
+    // 关键：QTextEdit 相比 QPlainTextEdit 提供了更稳定的高度属性反馈
+    connect(this, &QTextEdit::textChanged, this, &ElasticEdit::adjustHeight);
 }
 
 void ElasticEdit::adjustHeight() {
-    // 2026-06-xx 工业级优化：实现精准的弹性高度
-    // 参照 MetaPanel 中的样式：padding: 4px 10px, border: 1px
-    int horizontalPadding = 20; // 10px * 2
-    int verticalPadding = 8;    // 4px * 2
-    int border = 2;             // 1px * 2
+    // 2026-06-xx 工业级重构：基类切换为 QTextEdit 后，不再依赖 documentSize
+    // 而是使用 document()->size().height()，它返回像素级渲染高度
+    int horizontalPadding = 20; // padding: 4px 10px;
+    int verticalPadding = 8;    // 4px * 2;
+    int border = 2;             // 1px * 2;
 
     int w = width();
     int textW = qMax(0, w - horizontalPadding - border);
@@ -52,22 +53,21 @@ void ElasticEdit::adjustHeight() {
         document()->setTextWidth(textW);
     }
 
-    // 获取文档布局的真实渲染高度
-    qreal docHeight = document()->documentLayout()->documentSize().height();
+    // 获取文档的实际像素高度
+    qreal docHeight = document()->size().height();
 
-    // 计算目标高度：文档高度 + 上下边距 + 边框，并向上取整确保内容不被裁剪
+    // 计算目标高度：像素高度 + 上下边距 + 边框
     int newHeight = qMax(28, (int)qCeil(docHeight + verticalPadding + border));
 
-    // 工业级详尽日志：无论是否变化，都记录计算结果，以便用户验证“弹性”状态
-    Logger::log(QString("ElasticEdit [%1] CalcHeight: Width=%2, DocHeight=%3, TargetHeight=%4, CurrentHeight=%5")
+    // 详尽日志：记录基类切换后的真实像素高度
+    Logger::log(QString("ElasticEdit [%1] CalcPixelHeight: Width=%2, DocH=%3, TargetH=%4, CurrentH=%5")
                 .arg(placeholderText()).arg(w).arg(docHeight).arg(newHeight).arg(this->height()));
 
     if (this->height() != newHeight) {
         setFixedHeight(newHeight);
-        // 关键：通知布局管理器尺寸已变
         updateGeometry();
 
-        // 级联通知所有父布局刷新，确保滚动区域能感知高度变化
+        // 级联通知所有父布局刷新
         QWidget* p = parentWidget();
         while (p) {
             if (p->layout()) {
@@ -82,7 +82,7 @@ void ElasticEdit::adjustHeight() {
 }
 
 void ElasticEdit::resizeEvent(QResizeEvent* e) {
-    QPlainTextEdit::resizeEvent(e);
+    QTextEdit::resizeEvent(e);
     adjustHeight();
 }
 
@@ -92,7 +92,7 @@ void ElasticEdit::keyPressEvent(QKeyEvent* e) {
         clearFocus();
         return;
     }
-    QPlainTextEdit::keyPressEvent(e);
+    QTextEdit::keyPressEvent(e);
 }
 
 ColorPill::ColorPill(const QColor& color, float ratio, QWidget* parent) 
@@ -312,7 +312,8 @@ void MetaPanel::initUi() {
     m_scrollArea->setWidgetResizable(true); m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
     m_container = new QWidget(m_scrollArea); 
     m_containerLayout = new QVBoxLayout(m_container); 
-    // 2026-06-xx 工业级强制约束：严格保持左右 10px 边距，绝不溢出
+    // 2026-06-xx 工业级强制约束：启用 SetMinAndMaxSize，强制容器高度随子控件动态撑开
+    m_containerLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
     m_containerLayout->setContentsMargins(10, 10, 10, 10); 
     // 2026-06-01 修正：降低全局间距，消除视觉断层 (原 12px -> 现 8px)
     m_containerLayout->setSpacing(8);
@@ -331,22 +332,22 @@ void MetaPanel::initUi() {
     // [Section 2] 名称输入框 (ElasticEdit)
     m_nameEdit = new ElasticEdit(m_container);
     m_nameEdit->setPlaceholderText("文件名称...");
-    // 工业级视觉统一：1px 边框 (#3c3c3c)，深色背景 (#252526)，字体 12px，取消加粗
-    m_nameEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
+    // 2026-06-xx 视觉加固：使用通配符选择器确保基类重构为 QTextEdit 后样式依然生效
+    m_nameEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
     m_nameEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_nameEdit);
 
     // [Section 3] 备注输入框 (ElasticEdit)
     m_noteEdit = new ElasticEdit(m_container);
     m_noteEdit->setPlaceholderText("添加备注说明...");
-    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
+    m_noteEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
     m_noteEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_noteEdit);
 
     // [Section 4] 链接输入框 (ElasticEdit)
     m_linkEdit = new ElasticEdit(m_container);
     m_linkEdit->setPlaceholderText("添加链接...");
-    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #4a90e2; font-weight: normal; }");
+    m_linkEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #4a90e2; font-weight: normal; }");
     m_linkEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_linkEdit);
 
@@ -363,7 +364,7 @@ void MetaPanel::initUi() {
     m_tagEdit = new ElasticEdit(m_tagBox);
     m_tagEdit->setPlaceholderText("输入标签...");
     // 工业级宽度对齐：统一使用 4px 圆角和 4px 10px padding，彻底消除视觉缺口
-    m_tagEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
+    m_tagEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
     connect(m_tagEdit, &ElasticEdit::returnPressed, this, &MetaPanel::onTagAdded);
     tagL->addWidget(m_tagEdit);
     m_containerLayout->addWidget(m_tagBox);
@@ -371,7 +372,8 @@ void MetaPanel::initUi() {
     // [Section 6] 分类展示 (Category Pills)
     m_categoryEdit = new ElasticEdit(m_container);
     m_categoryEdit->setReadOnly(true);
-    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
+    m_categoryEdit->setPlaceholderText("所属分类...");
+    m_categoryEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
     m_containerLayout->addWidget(m_categoryEdit);
 
     m_containerLayout->addWidget(createSeparator());
