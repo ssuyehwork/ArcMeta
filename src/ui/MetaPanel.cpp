@@ -487,20 +487,34 @@ void MetaPanel::onTagDeleted(const QString& text) {
 void MetaPanel::resizeEvent(QResizeEvent* event) {
     QFrame::resizeEvent(event);
     
-    // 2026-06-xx 工业级强制约束：锁死容器宽度等于视口宽度，彻底消除横向溢出
-    int viewportW = m_scrollArea->viewport()->width();
-    if (m_container && viewportW > 0) {
-        m_container->setFixedWidth(viewportW);
-    }
+    // 2026-06-01 工业级加固：改用 QTimer::singleShot(0) 将宽度锁定延迟到布局计算之后
+    // 解决启动时 viewport()->width() 返回过时或无效值导致的“图一”坍塌问题
+    QTimer::singleShot(0, this, [this]() {
+        if (!m_scrollArea || !m_container) return;
 
-    int maxW = viewportW - 20; // 预留左右各 10px 边距
-    if (maxW > 0) {
-        m_nameEdit->setMaximumWidth(maxW);
-        m_noteEdit->setMaximumWidth(maxW);
-        m_linkEdit->setMaximumWidth(maxW);
-        m_categoryEdit->setMaximumWidth(maxW);
-        if (lblPath) lblPath->setMaximumWidth(maxW - 80);
-    }
+        int viewportW = m_scrollArea->viewport()->width();
+
+        // 只有当宽度发生真实物理变化且有效时才更新，防止死循环
+        if (viewportW > 30 && m_container->width() != viewportW) {
+            m_container->setFixedWidth(viewportW);
+
+            int maxW = viewportW - 20; // 严格对齐左右 10px 边距
+            if (maxW > 0) {
+                m_nameEdit->setMaximumWidth(maxW);
+                m_noteEdit->setMaximumWidth(maxW);
+                m_linkEdit->setMaximumWidth(maxW);
+                m_categoryEdit->setMaximumWidth(maxW);
+                if (lblPath) lblPath->setMaximumWidth(maxW - 80);
+            }
+        }
+    });
+}
+
+void MetaPanel::showEvent(QShowEvent* event) {
+    QFrame::showEvent(event);
+    // 初始显示时强制触发一次几何更新
+    QResizeEvent e(size(), size());
+    MetaPanel::resizeEvent(&e);
 }
 
 void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s, const QString& ct, const QString& mt, const QString& at, const QString& p, bool e) {
