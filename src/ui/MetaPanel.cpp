@@ -35,19 +35,23 @@ void ElasticEdit::adjustHeight() {
     // 强制同步文档布局：锁定当前视口宽度，防止计算滞后
     int w = viewport()->width();
     if (w <= 0) w = width();
-    if (w > 0) {
-        document()->setTextWidth(w);
+
+    // 2026-06-xx 工业级算法：计算真实的可用文本宽度（需扣除 QSS 中的左右 Padding: 10px * 2）
+    // 如果不扣除 Padding，QTextDocument 会按全宽布局，导致换行临界点计算错误，引发截断
+    int textW = w - 20;
+    if (textW > 0) {
+        document()->setTextWidth(textW);
         // 强制触发布局引擎即时计算，不再等待下一轮事件循环
         document()->documentLayout()->update();
     }
 
     int contentH = (int)document()->documentLayout()->documentSize().height();
-    // 补偿：深色边框及上下 Padding (4px*2) + 安全冗余
+    // 补偿：深色边框及上下 Padding (4px*2) + 文本行间距冗余
     int newH = qMax(28, contentH + 16);
 
     if (this->height() != newH) {
         setFixedHeight(newH);
-        // 关键：通知父布局重新扫描几何尺寸
+        // 关键：通知父布局重新扫描几何尺寸，触发 QScrollArea 滚动条更新
         updateGeometry();
     }
 }
@@ -432,17 +436,17 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
         // 获取当前视口的真实物理宽度
         int viewportW = m_scrollArea->viewport()->width();
         
-        // 2026-06-xx 工业级修正：启动初期 viewport 可能尚未就绪 (为0)，此时应使用面板自身的宽度
-        // 绝对严禁使用 parentWidget()->width()，因为 MainWindow 的宽度远大于面板，会导致计算溢出
-        if (viewportW <= 0) {
+        // 2026-06-xx 工业级修正：启动初期 viewport 可能尚未就绪 (为0)，此时应使用面板自身的真实宽度
+        // 绝对严禁使用 parentWidget()->width()，因为 MainWindow 的宽度远大于面板，会导致计算溢出并引发高度计算为单行。
+        if (viewportW <= 10) {
             viewportW = this->width();
         }
 
+        // 仅在宽度具有物理意义时执行刷新（锁定容器宽度，确保 ElasticEdit 能基于真实宽度计算换行）
         if (viewportW > 50) {
-            // 锁定容器宽度，确保 ElasticEdit 能正确计算换行
             m_container->setFixedWidth(viewportW);
             
-            int maxW = viewportW - 20; // 严格对齐左右 10px 边距
+            int maxW = viewportW - 20; // 严格对齐面板内 10px 的全局外边距
             if (maxW > 0) {
                 // 确保子控件宽度不溢出并严格对齐
                 m_nameEdit->setFixedWidth(maxW);
