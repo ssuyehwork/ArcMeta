@@ -30,12 +30,24 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
 }
 
 void ElasticEdit::adjustHeight() {
-    // 恢复弹性伸缩逻辑：最小 28px，随内容向下自动换行增长
-    qreal docHeight = document()->size().height();
-    // 加上适度的 padding 补偿，确保文本不被截断
-    int newHeight = qMax(28, (int)docHeight + 8); 
+    // 确保文档在当前视口宽度下进行布局，以获取正确的换行高度
+    int w = viewport()->width();
+    if (w <= 0) w = width();
+
+    if (w > 0) {
+        // 工业级修正：减去内部左右 padding (约 10px * 2) 以获得真实的文本可用宽度
+        int textW = qMax(0, w - 20);
+        document()->setTextWidth(textW);
+    }
+
+    // 获取文档布局的高度
+    qreal docHeight = document()->documentLayout()->documentSize().height();
+
+    // 加上适度的 padding 补偿 (上下 padding 各 4px + 2px 容差)
+    int newHeight = qMax(28, (int)docHeight + 10);
     if (this->height() != newHeight) {
         setFixedHeight(newHeight);
+        updateGeometry(); // 触发父布局重新排列
     }
 }
 
@@ -412,27 +424,21 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
     QFrame::resizeEvent(event);
     
     // 工业级加固：将宽度锁定延迟到下一帧。
-    // 启动时，初次 resizeEvent 触发时 viewport 宽度往往不可信。
     QTimer::singleShot(0, this, [this]() {
         if (!m_scrollArea || !m_container) return;
 
-        // 获取当前视口的真实物理宽度
         int viewportW = m_scrollArea->viewport()->width();
-        
-        // 容错处理：如果宽度过小（可能是系统正在初始化），尝试使用 parentWidget 的宽度作为参考
         if (viewportW < 50 && parentWidget()) {
             viewportW = parentWidget()->width();
         }
 
         if (viewportW > 30) {
-            // 只有当宽度发生真实变化时才重设，避免触发冗余的布局刷新
             if (m_container->width() != viewportW) {
                 m_container->setFixedWidth(viewportW);
             }
             
-            int maxW = viewportW - 20; // 严格对齐左右 10px 边距
+            int maxW = viewportW - 20;
             if (maxW > 0) {
-                // 确保子控件宽度不溢出并严格对齐
                 m_nameEdit->setFixedWidth(maxW);
                 if (m_paletteBox) m_paletteBox->setFixedWidth(maxW);
                 m_noteEdit->setFixedWidth(maxW);
@@ -445,15 +451,17 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
                 
                 if (lblPath) lblPath->setMaximumWidth(maxW - 80);
                 
-                // 核心修复：强制子控件重新计算高度，以适配新的宽度变化
+                // 核心修复：强制所有弹性控件重新计算高度
                 m_nameEdit->adjustHeight();
                 m_noteEdit->adjustHeight();
                 m_linkEdit->adjustHeight();
                 m_tagEdit->adjustHeight();
                 m_categoryEdit->adjustHeight();
                 
-                // 工业级补全：同时调整非 ElasticEdit 容器（流式布局容器）的高度
                 adjustFlowHeights();
+
+                // 强制容器根据新高度重新布局，确保滚动条正确显示
+                m_container->adjustSize();
             }
         }
     });
@@ -466,6 +474,13 @@ void MetaPanel::adjustFlowHeights() {
         int newH = qMax(28, contentH);
         if (m_paletteBox->height() != newH) {
             m_paletteBox->setFixedHeight(newH);
+        }
+    }
+    // 2. 调整标签展示容器高度
+    if (m_tagContainer && m_tagFlowLayout) {
+        int contentH = m_tagFlowLayout->heightForWidth(m_tagContainer->width());
+        if (m_tagContainer->height() != contentH) {
+            m_tagContainer->setFixedHeight(contentH);
         }
     }
 }
