@@ -116,28 +116,23 @@ private:
 };
 
 /**
- * @brief PaletteCapsule: 单体胶囊化调色盘，包裹多个色点
+ * @brief ColorPill: 用于流式展示的单个颜色块 (16x16px, 4px 圆角)
  */
-class PaletteCapsule : public QWidget {
+class ColorPill : public QWidget {
     Q_OBJECT
 public:
-    explicit PaletteCapsule(QWidget* parent = nullptr);
-    void setPalette(const QVector<QPair<QColor, float>>& palette);
-    QSize sizeHint() const override;
-    QSize minimumSizeHint() const override;
+    explicit ColorPill(const QColor& color, float ratio, QWidget* parent = nullptr);
 signals:
     void colorSelected(const QColor& color);
 protected:
     void paintEvent(QPaintEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event) override;
+    void enterEvent(QEnterEvent* event) override;
     void leaveEvent(QEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
 private:
-    QVector<QPair<QColor, float>> m_palette;
-    int m_hoverIndex = -1;
-    const int m_dotSize = 16;
-    const int m_padding = 8;
-    const int m_spacing = 6;
+    QColor m_color;
+    float m_ratio;
+    bool m_hovered = false;
 };
 
 /**
@@ -209,7 +204,8 @@ private:
     QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
     QLabel* lblPath = nullptr, *lblEncrypted = nullptr;
     
-    PaletteCapsule* m_paletteCapsule = nullptr;
+    QWidget* m_paletteBox = nullptr;
+    FlowLayout* m_paletteFlowLayout = nullptr;
     
     QWidget* m_tagBox = nullptr;
     QWidget* m_tagContainer = nullptr;

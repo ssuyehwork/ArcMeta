@@ -53,125 +53,54 @@ void ElasticEdit::keyPressEvent(QKeyEvent* e) {
     QPlainTextEdit::keyPressEvent(e);
 }
 
-PaletteCapsule::PaletteCapsule(QWidget* parent) : QWidget(parent) {
-    setFixedHeight(28); // 增加 2px 物理高度以适配描边
-    setMouseTracking(true);
+ColorPill::ColorPill(const QColor& color, float ratio, QWidget* parent)
+    : QWidget(parent), m_color(color), m_ratio(ratio) {
+    setFixedSize(16, 16);
     setCursor(Qt::PointingHandCursor);
 }
 
-void PaletteCapsule::setPalette(const QVector<QPair<QColor, float>>& palette) {
-    m_palette = palette;
-    // 2026-06-xx 工业级重构：废弃 setFixedSize，改用 sizeHint 和自适应绘制
-    // 允许布局系统根据父容器宽度进行压缩
-    updateGeometry();
-    update();
-}
-
-QSize PaletteCapsule::sizeHint() const {
-    if (m_palette.isEmpty()) return QSize(0, 28);
-    int w = m_padding * 2 + (int)m_palette.size() * m_dotSize + ((int)m_palette.size() - 1) * m_spacing;
-    return QSize(w, 28);
-}
-
-QSize PaletteCapsule::minimumSizeHint() const {
-    // 最小宽度：至少显示一个色点或 28px 高度的圆形
-    return QSize(28, 28);
-}
-
-void PaletteCapsule::paintEvent(QPaintEvent*) {
+void ColorPill::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
-
-    // 2026-06-xx 响应式绘制：根据可用宽度动态调整间距
-    int availableW = width();
-    int totalDots = (int)m_palette.size();
-    float currentSpacing = m_spacing;
     
-    // 如果宽度不足，尝试压缩间距 (最小间距 2px)
-    if (totalDots > 1) {
-        int contentW = m_padding * 2 + totalDots * m_dotSize + (totalDots - 1) * m_spacing;
-        if (contentW > availableW) {
-            currentSpacing = (float)(availableW - m_padding * 2 - totalDots * m_dotSize) / (totalDots - 1);
-            if (currentSpacing < 2.0f) currentSpacing = 2.0f;
-        }
-    }
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(m_color);
+    painter.drawRoundedRect(rect(), 4, 4);
 
-    // 1. 绘制总背景 (Capsule) - 提升亮度并增加边框
-    // 统一边框颜色为 #3c3c3c
-    painter.setPen(QPen(QColor("#3c3c3c"), 1)); 
-    painter.setBrush(QColor("#2E2E2E")); 
-    painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 14, 14);
-
-    // 2. 绘制色点
-    for (int i = 0; i < totalDots; ++i) {
-        int x = m_padding + i * (m_dotSize + currentSpacing);
-        
-        // 边界保护：不绘制超出范围的色点
-        if (x + m_dotSize > availableW - m_padding + 2) break;
-
-        QRect dotRect(x, (height() - m_dotSize) / 2, m_dotSize, m_dotSize);
-
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(m_palette[i].first);
-        painter.drawEllipse(dotRect.adjusted(1, 1, -1, -1));
-
-        // 悬停反馈：1px 白色边缘
-        if (i == m_hoverIndex) {
-            painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(Qt::white, 1.0));
-            painter.drawEllipse(dotRect.adjusted(0, 0, -1, -1));
-        }
+    if (m_hovered) {
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(Qt::white, 1.0));
+        painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 4, 4);
     }
 }
 
-void PaletteCapsule::mouseMoveEvent(QMouseEvent* event) {
-    int newHover = -1;
-    for (int i = 0; i < m_palette.size(); ++i) {
-        int x = m_padding + i * (m_dotSize + m_spacing);
-        QRect dotRect(x, 0, m_dotSize, height());
-        if (dotRect.contains(event->pos())) {
-            newHover = i;
-            break;
-        }
-    }
-
-    if (newHover != m_hoverIndex) {
-        m_hoverIndex = newHover;
-        if (m_hoverIndex != -1) {
-            QString hex = m_palette[m_hoverIndex].first.name().toUpper();
-            int ratio = qRound(m_palette[m_hoverIndex].second * 100);
-            QString text = QString("%1 (%2%)").arg(hex).arg(ratio);
-            ToolTipOverlay::instance()->showText(QCursor::pos(), text);
-        } else {
-            ToolTipOverlay::hideTip();
-        }
-        update();
-    }
-    QWidget::mouseMoveEvent(event);
-}
-
-void PaletteCapsule::leaveEvent(QEvent* event) {
-    m_hoverIndex = -1;
+void ColorPill::enterEvent(QEnterEvent*) {
+    m_hovered = true;
+    QString hex = m_color.name().toUpper();
+    int ratio = qRound(m_ratio * 100);
+    ToolTipOverlay::instance()->showText(QCursor::pos(), QString("%1 (%2%)").arg(hex).arg(ratio));
     update();
-    QWidget::leaveEvent(event);
 }
 
-void PaletteCapsule::mousePressEvent(QMouseEvent* event) {
-    if (m_hoverIndex != -1) {
-        QMenu menu(this);
-        UiHelper::applyMenuStyle(&menu);
-        QColor color = m_palette[m_hoverIndex].first;
+void ColorPill::leaveEvent(QEvent*) {
+    m_hovered = false;
+    ToolTipOverlay::hideTip();
+    update();
+}
 
-        menu.addAction("搜索相似颜色的项目", [this, color]() {
-            // 2026-06-xx 解耦重构：移除 findChild，通过信号通知
-            emit colorSelected(color);
-        });
-        menu.addSeparator();
-        QString hex = color.name().toUpper();
-        menu.addAction(QString("复制 %1").arg(hex), [hex]() { QApplication::clipboard()->setText(hex); });
-        
-        menu.exec(event->globalPosition().toPoint());
-    }
+void ColorPill::mousePressEvent(QMouseEvent* event) {
+    QMenu menu(this);
+    UiHelper::applyMenuStyle(&menu);
+    QColor color = m_color;
+
+    menu.addAction("搜索相似颜色的项目", [this, color]() {
+        emit colorSelected(color);
+    });
+    menu.addSeparator();
+    QString hex = color.name().toUpper();
+    menu.addAction(QString("复制 %1").arg(hex), [hex]() { QApplication::clipboard()->setText(hex); });
+
+    menu.exec(event->globalPosition().toPoint());
     QWidget::mousePressEvent(event);
 }
 
@@ -346,20 +275,13 @@ void MetaPanel::initUi() {
     // 2026-06-01 修正：降低全局间距，消除视觉断层 (原 12px -> 现 8px)
     m_containerLayout->setSpacing(8);
     
-    // [Section 1] 调色盘胶囊 (Palette Capsules)
-    m_paletteCapsule = new PaletteCapsule(m_container);
-    connect(m_paletteCapsule, &PaletteCapsule::colorSelected, this, &MetaPanel::searchByColor);
+    // [Section 1] 调色盘容器 (Palette Box - 模拟 ElasticEdit 样式且支持流式布局)
+    m_paletteBox = new QWidget(m_container);
+    // 工业级视觉统一：1px 边框 (#3c3c3c)，深色背景 (#252526)，4px 圆角
+    m_paletteBox->setStyleSheet("QWidget { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; }");
     
-    // 包装器，确保胶囊左对齐且不拉伸
-    QWidget* palWrapper = new QWidget(m_container);
-    // 限制包装器最大宽度，预留左右各 10px 边距
-    palWrapper->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    
-    QHBoxLayout* palWrapperL = new QHBoxLayout(palWrapper);
-    palWrapperL->setContentsMargins(0, 0, 0, 0);
-    palWrapperL->addWidget(m_paletteCapsule);
-    palWrapperL->addStretch();
-    m_containerLayout->addWidget(palWrapper);
+    m_paletteFlowLayout = new FlowLayout(m_paletteBox, 8, 6, 6);
+    m_containerLayout->addWidget(m_paletteBox);
 
     // [Section 2] 名称输入框 (ElasticEdit)
     m_nameEdit = new ElasticEdit(m_container);
@@ -509,6 +431,7 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
             if (maxW > 0) {
                 // 确保子控件宽度不溢出并严格对齐
                 m_nameEdit->setFixedWidth(maxW);
+                if (m_paletteBox) m_paletteBox->setFixedWidth(maxW);
                 m_noteEdit->setFixedWidth(maxW);
                 m_linkEdit->setFixedWidth(maxW);
                 m_categoryEdit->setFixedWidth(maxW);
@@ -602,9 +525,23 @@ void MetaPanel::setCategory(const QString& category) {
 }
 
 void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
-    if (m_paletteCapsule) {
-        m_paletteCapsule->setPalette(palette);
+    if (!m_paletteFlowLayout) return;
+
+    // 清空现有色块
+    while (QLayoutItem* item = m_paletteFlowLayout->takeAt(0)) {
+        if (QWidget* w = item->widget()) w->deleteLater();
+        delete item;
     }
+
+    // 动态添加新色块
+    for (const auto& entry : palette) {
+        ColorPill* pill = new ColorPill(entry.first, entry.second, m_paletteBox);
+        // 关键：子控件背景设为透明，否则会遮挡容器的圆角边框
+        pill->setStyleSheet("background: transparent; border: none;");
+        connect(pill, &ColorPill::colorSelected, this, &MetaPanel::searchByColor);
+        m_paletteFlowLayout->addWidget(pill);
+    }
+
     if (m_container) {
         m_container->adjustSize();
     }
