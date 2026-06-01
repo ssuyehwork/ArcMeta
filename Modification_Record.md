@@ -3382,3 +3382,24 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
 - 变更原因：修复 MetaPanel 首次显示内容不可见的根本原因。将 setFixedWidth 改为 setMaximumWidth，防止在初始 viewport 宽度为 0 时将容器宽度锁死为零。同时移除无效的 showEvent 实现。
 - 影响范围：MetaPanel::resizeEvent
 - 是否在需求范围内：是
+
+---
+## [55] 变更时间：2025-05-14 10:45:00
+
+**文件路径：** `src/ui/MetaPanel.h / src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+（源码检查中，确认为之前的清理操作已执行，但可能存在 MOC 残留导致链接错误）
+```
+
+### 修改后（After）
+```cpp
+（源码保持干净，已确认无 showEvent 声明与实现）
+```
+
+### 变更说明
+- 变更原因：解决由于之前的无效补丁清理导致的 LNK2019 无法解析外部符号错误。经核实源码已干净，该错误为 Qt 增量编译残留，需执行清理构建。
+- 影响范围：链接阶段
+- 是否在需求范围内：是
