@@ -96,10 +96,10 @@ void PaletteCapsule::paintEvent(QPaintEvent*) {
         }
     }
 
-    // 1. 绘制总背景 - 采用编辑框 4px 圆角设计
-    // 统一边框颜色为 #3c3c3c，背景色统一为 #252526
-    painter.setPen(QPen(QColor("#3c3c3c"), 1));
-    painter.setBrush(QColor("#252526"));
+    // 1. 绘制总背景 - 采用 4px 圆角设计 (去胶囊化)
+    // 物理参数回滚：恢复原有背景色 #2E2E2E 和边框色 #4D4D4D
+    painter.setPen(QPen(QColor("#4D4D4D"), 1));
+    painter.setBrush(QColor("#2E2E2E"));
     painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 4, 4);
 
     // 2. 绘制色点 - 统一采用 4px 圆角设计
@@ -203,8 +203,8 @@ void TagPill::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setBrush(QColor("#2B2B2B"));
-    // 统一边框颜色
-    painter.setPen(QPen(QColor("#3c3c3c"), 1));
+    // 物理参数回滚：恢复原有边框颜色 #444444
+    painter.setPen(QPen(QColor("#444444"), 1));
     painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 11, 11);
 }
 
@@ -301,9 +301,10 @@ void ColorPickerWidget::paintEvent(QPaintEvent*) {
     QPainter p(this); p.setRenderHint(QPainter::Antialiasing);
     for (int i = 0; i < (int)m_colors.size(); ++i) {
         QRect r(i * 24 + 3, 3, 18, 18);
-        // 统一采用 4px 圆角矩形设计
+        // 仅保留 4px 圆角形状变更，撤销其他参数调整
         if (m_colors[i].name == m_currentColor) {
             p.setPen(QPen(QColor("#FFFFFF"), 1.5));
+            // 形状从圆形改为 4px 圆角矩形
             p.drawRoundedRect(r.adjusted(-2, -2, 2, 2), 4, 4);
         }
         p.setPen(Qt::NoPen);
@@ -361,22 +362,27 @@ void MetaPanel::initUi() {
     // [Section 2] 名称输入框 (ElasticEdit)
     m_nameEdit = new ElasticEdit(m_container);
     m_nameEdit->setPlaceholderText("文件名称...");
-    // 工业级视觉统一：1px 边框 (#3c3c3c)，深色背景 (#252526)，字体 12px，取消加粗
-    m_nameEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
+    // 物理参数回滚：恢复使用 Style 系统动态颜色及初始内边距/字号，不再硬编码为 #3c3c3c
+    m_nameEdit->setStyleSheet(QString("QPlainTextEdit { background: %1; border: 1px solid %2; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: %3; }")
+        .arg(Style::qssColor(Style::BackgroundHeader))
+        .arg(Style::qssColor(Style::BorderColor))
+        .arg(Style::qssColor(Style::TextMain)));
     m_nameEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_nameEdit);
 
     // [Section 3] 备注输入框 (ElasticEdit)
     m_noteEdit = new ElasticEdit(m_container);
     m_noteEdit->setPlaceholderText("添加备注说明...");
-    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
+    // 物理参数回滚：撤销越权修改的 normal 字体权重，恢复初始样式
+    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; }");
     m_noteEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_noteEdit);
 
     // [Section 4] 链接输入框 (ElasticEdit)
     m_linkEdit = new ElasticEdit(m_container);
     m_linkEdit->setPlaceholderText("添加链接...");
-    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #4a90e2; font-weight: normal; }");
+    // 物理参数回滚：恢复初始颜色和权重
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #4a90e2; }");
     m_linkEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_linkEdit);
 
@@ -392,8 +398,8 @@ void MetaPanel::initUi() {
 
     m_tagEdit = new ElasticEdit(m_tagBox);
     m_tagEdit->setPlaceholderText("输入标签...");
-    // 工业级宽度对齐：统一使用 4px 圆角和 4px 10px padding，彻底消除视觉缺口
-    m_tagEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
+    // 物理参数回滚：恢复初始的 3px 圆角、#333333 边框及 6px 左内边距（仅保留 ElasticEdit 类型以解决宽度对齐）
+    m_tagEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #333333; border-radius: 3px; padding-left: 6px; font-size: 12px; color: #AAAAAA; }");
     connect(m_tagEdit, &ElasticEdit::returnPressed, this, &MetaPanel::onTagAdded);
     tagL->addWidget(m_tagEdit);
     m_containerLayout->addWidget(m_tagBox);
@@ -401,7 +407,8 @@ void MetaPanel::initUi() {
     // [Section 6] 分类展示 (Category Pills)
     m_categoryEdit = new ElasticEdit(m_container);
     m_categoryEdit->setReadOnly(true);
-    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
+    // 物理参数回滚：恢复初始的 #2A2A2A 边框颜色
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #2A2A2A; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #EEEEEE; }");
     m_containerLayout->addWidget(m_categoryEdit);
 
     m_containerLayout->addWidget(createSeparator());

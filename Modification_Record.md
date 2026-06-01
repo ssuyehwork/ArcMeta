@@ -3337,3 +3337,64 @@ painter->drawRoundedRect(totalRect.adjusted(-3, -1, 3, 1), 4, 4);
 - 变更原因：全系统“去胶囊化”视觉重构，确保缩略图星级背景与元数据面板编辑框风格严格一致。
 - 影响范围：内容面板网格视图。
 - 是否在需求范围内：是
+
+---
+## [41] 变更时间：2026-06-18 17:15:00
+
+**文件路径：** `src/ui/MetaPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    // 工业级视觉统一：1px 边框 (#3c3c3c)，深色背景 (#252526)，字体 12px，取消加粗
+    m_nameEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
+    // ... [以及其他硬编码的 12px normal 样式]
+```
+
+### 修改后（After）
+```cpp
+    // 物理参数回滚：恢复使用 Style 系统动态颜色及初始内边距/字号
+    m_nameEdit->setStyleSheet(QString("QPlainTextEdit { background: %1; border: 1px solid %2; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: %3; }")
+        .arg(Style::qssColor(Style::BackgroundHeader))
+        .arg(Style::qssColor(Style::BorderColor))
+        .arg(Style::qssColor(Style::TextMain)));
+    // ... [标签框回滚至 3px 圆角和 #333333 边框，分类框回滚至 #2A2A2A 边框]
+```
+
+### 变更说明
+- 变更原因：深度反思并撤销所有未获授权的视觉参数修改（颜色、字号、权重、边距等），仅保留明确要求的形状变更。
+- 影响范围：MetaPanel 全量编辑组件。
+- 是否在需求范围内：是 (修正越权操作)
+
+---
+## [42] 变更时间：2026-06-18 17:18:00
+
+**文件路径：** `src/ui/MetaPanel.cpp` / `src/ui/ThumbnailDelegate.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+// MetaPanel.cpp
+    painter.setPen(QPen(QColor("#3c3c3c"), 1));
+    painter.setBrush(QColor("#252526"));
+// TagPill paintEvent
+    painter.setPen(QPen(QColor("#3c3c3c"), 1));
+// ThumbnailDelegate.cpp
+    painter->drawRoundedRect(totalRect.adjusted(-3, -1, 3, 1), 4, 4);
+```
+
+### 修改后（After）
+```cpp
+// MetaPanel.cpp (回滚边框和背景色)
+    painter.setPen(QPen(QColor("#4D4D4D"), 1));
+    painter.setBrush(QColor("#2E2E2E"));
+// TagPill (回滚边框色)
+    painter.setPen(QPen(QColor("#444444"), 1));
+// ThumbnailDelegate.cpp (回滚绘制微调，仅保留4px圆角)
+    painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
+```
+
+### 变更说明
+- 变更原因：彻底回滚调色盘、标签药丸以及卡片星级背景中的所有非授权视觉参数，确保仅保留“形状改为圆角矩形”这一核心变动。
+- 影响范围：全系统视觉绘制组件。
+- 是否在需求范围内：是
