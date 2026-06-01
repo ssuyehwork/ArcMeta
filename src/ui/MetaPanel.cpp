@@ -30,15 +30,9 @@ ElasticEdit::ElasticEdit(QWidget* parent) : QPlainTextEdit(parent) {
 }
 
 void ElasticEdit::adjustHeight() {
-    // 2026-06-xx 工业级修正：高度计算必须考虑样式表中的 padding 和 border 物理厚度
-    // 否则在带有背景色和边框的样式下，文字会因为高度不足而发生垂直位移或截断
-    document()->documentLayout()->update();
-    int contentH = (int)document()->size().height();
-    
-    // 物理冗余：padding-top(4) + padding-bottom(4) + border(2) + 呼吸冗余(2) = 12
-    int newH = qMax(28, contentH + 16); 
-    if (this->height() != newH) {
-        setFixedHeight(newH);
+    // 2026-06-01 按照用户要求：高度统一固定为 28 像素，不再随内容伸缩
+    if (this->height() != 28) {
+        setFixedHeight(28);
     }
 }
 
@@ -185,7 +179,7 @@ TagPill::TagPill(const QString& text, QWidget* parent)
     layout->setContentsMargins(8, 0, 4, 0);
     layout->setSpacing(4);
     QLabel* lbl = new QLabel(text, this);
-    lbl->setStyleSheet("color: #EEEEEE; font-size: 13px; border: none; background: transparent;");
+    lbl->setStyleSheet("color: #EEEEEE; font-size: 12px; border: none; background: transparent;");
     m_closeBtn = new QPushButton(this);
     m_closeBtn->setFixedSize(14, 14);
     m_closeBtn->setCursor(Qt::PointingHandCursor);
@@ -329,7 +323,7 @@ void MetaPanel::initUi() {
     headerLayout->setContentsMargins(15, 0, 5, 0);
     headerLayout->setSpacing(5);
     QLabel* iconLabel = new QLabel(header); iconLabel->setPixmap(UiHelper::getIcon("all_data", QColor("#4a90e2"), 18).pixmap(18, 18)); headerLayout->addWidget(iconLabel);
-    QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);
+    QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 12px; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
     QPushButton* closeBtn = new QPushButton(header); closeBtn->setIcon(UiHelper::getIcon("close", QColor("#FFFFFF"), 14)); closeBtn->setFixedSize(24, 24); closeBtn->setCursor(Qt::PointingHandCursor);
     closeBtn->setStyleSheet("QPushButton { background-color: #E81123; border: none; border-radius: 4px; } QPushButton:hover { background-color: #F1707A; } QPushButton:pressed { background-color: #A50000; }");
@@ -364,8 +358,8 @@ void MetaPanel::initUi() {
     // [Section 2] 名称输入框 (ElasticEdit)
     m_nameEdit = new ElasticEdit(m_container);
     m_nameEdit->setPlaceholderText("文件名称...");
-    m_nameEdit->setStyleSheet(QString("QPlainTextEdit { background: %1; border: 1px solid %2; border-radius: 4px; padding: 6px 10px; font-size: 13px; font-weight: bold; color: %3; }")
-        .arg(Style::qssColor(Style::BackgroundDeep))
+    m_nameEdit->setStyleSheet(QString("QPlainTextEdit { background: %1; border: 1px solid %2; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: %3; }")
+        .arg(Style::qssColor(Style::BackgroundHeader))
         .arg(Style::qssColor(Style::BorderColor))
         .arg(Style::qssColor(Style::TextMain)));
     m_nameEdit->installEventFilter(this);
@@ -374,14 +368,14 @@ void MetaPanel::initUi() {
     // [Section 3] 备注输入框 (ElasticEdit)
     m_noteEdit = new ElasticEdit(m_container);
     m_noteEdit->setPlaceholderText("添加备注说明...");
-    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px; padding: 6px 10px; font-size: 13px; color: #AAAAAA; }");
+    m_noteEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; }");
     m_noteEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_noteEdit);
 
     // [Section 4] 链接输入框 (ElasticEdit)
     m_linkEdit = new ElasticEdit(m_container);
     m_linkEdit->setPlaceholderText("添加链接...");
-    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px; padding: 6px 10px; font-size: 13px; color: #4a90e2; }");
+    m_linkEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #4a90e2; }");
     m_linkEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_linkEdit);
 
@@ -397,8 +391,8 @@ void MetaPanel::initUi() {
 
     m_tagEdit = new QLineEdit(tagBox);
     m_tagEdit->setPlaceholderText("输入标签...");
-    m_tagEdit->setFixedHeight(24);
-    m_tagEdit->setStyleSheet("QLineEdit { background: #252526; border: 1px solid #333333; border-radius: 3px; padding-left: 6px; font-size: 13px; color: #AAAAAA; }");
+    m_tagEdit->setFixedHeight(28);
+    m_tagEdit->setStyleSheet("QLineEdit { background: #252526; border: 1px solid #333333; border-radius: 3px; padding-left: 6px; font-size: 12px; color: #AAAAAA; }");
     connect(m_tagEdit, &QLineEdit::returnPressed, this, &MetaPanel::onTagAdded);
     tagL->addWidget(m_tagEdit);
     m_containerLayout->addWidget(tagBox);
@@ -406,7 +400,7 @@ void MetaPanel::initUi() {
     // [Section 6] 分类展示 (Category Pills)
     m_categoryEdit = new ElasticEdit(m_container);
     m_categoryEdit->setReadOnly(true);
-    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #2A2A2A; border-radius: 4px; padding: 6px 8px; font-size: 13px; color: #EEEEEE; }");
+    m_categoryEdit->setStyleSheet("QPlainTextEdit { background: #252526; border: 1px solid #2A2A2A; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #EEEEEE; }");
     m_containerLayout->addWidget(m_categoryEdit);
 
     m_containerLayout->addWidget(createSeparator());
@@ -430,13 +424,13 @@ void MetaPanel::addInfoRow(const QString& label, QLabel*& valueLabel) {
     
     QLabel* kl = new QLabel(label, row); 
     kl->setFixedWidth(80); // 适度增加宽度以支持长标签
-    kl->setStyleSheet("font-size: 13px; color: #888888;"); 
+    kl->setStyleSheet("font-size: 12px; color: #888888;");
     rl->addWidget(kl, 0, Qt::AlignTop);
 
     valueLabel = new QLabel("-", row); 
     valueLabel->setWordWrap(true); 
     valueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse); // 允许复制路径等物理信息
-    valueLabel->setStyleSheet("font-size: 13px; color: #CCCCCC; line-height: 1.5;");
+    valueLabel->setStyleSheet("font-size: 12px; color: #CCCCCC; line-height: 1.5;");
     valueLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop); 
     rl->addWidget(valueLabel, 1); 
     
@@ -450,7 +444,7 @@ QWidget* MetaPanel::createSectionBox(const QString& iconName, const QString& tit
     QVBoxLayout* layout = new QVBoxLayout(box); layout->setContentsMargins(0, 0, 0, 0); layout->setSpacing(4);
     QHBoxLayout* header = new QHBoxLayout(); header->setSpacing(8);
     QLabel* iconLbl = new QLabel(box); iconLbl->setPixmap(UiHelper::getIcon(iconName, QColor("#888888"), 16).pixmap(16, 16)); header->addWidget(iconLbl);
-    QLabel* titleLbl = new QLabel(title, box); titleLbl->setStyleSheet("font-size: 13px; font-weight: bold; color: #888888; text-transform: uppercase;"); header->addWidget(titleLbl);
+    QLabel* titleLbl = new QLabel(title, box); titleLbl->setStyleSheet("font-size: 12px; color: #888888; text-transform: uppercase;"); header->addWidget(titleLbl);
     header->addStretch(); layout->addLayout(header); layout->addWidget(content); return box;
 }
 
