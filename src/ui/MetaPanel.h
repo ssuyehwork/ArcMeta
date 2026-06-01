@@ -1,5 +1,4 @@
 #pragma once
-
 #include <QWidget>
 #include <QLabel>
 #include <QVBoxLayout>
@@ -16,9 +15,6 @@
 
 namespace ArcMeta {
 
-/**
- * @brief ElasticEdit: 弹性高度编辑框，内容自动撑开高度
- */
 class ElasticEdit : public QPlainTextEdit {
     Q_OBJECT
 public:
@@ -29,9 +25,6 @@ protected:
     void resizeEvent(QResizeEvent* e) override;
 };
 
-/**
- * @brief Tag Pill 圆角标签组件 (22px height, 11px radius)
- */
 class TagPill : public QWidget {
     Q_OBJECT
 public:
@@ -45,9 +38,6 @@ private:
     QPushButton* m_closeBtn = nullptr;
 };
 
-/**
- * @brief 流式布局容器 (用于展示标签)
- */
 class FlowLayout : public QLayout {
 public:
     explicit FlowLayout(QWidget *parent, int margin = -1, int hSpacing = -1, int vSpacing = -1);
@@ -72,9 +62,6 @@ private:
     int m_vSpace;
 };
 
-/**
- * @brief 自定义星级打分器 (20x20px stars, 4px spacing)
- */
 class StarRatingWidget : public QWidget {
     Q_OBJECT
 public:
@@ -90,9 +77,6 @@ private:
     int m_rating = 0;
 };
 
-/**
- * @brief 自定义颜色选择器 (18x18px dots, 6px spacing)
- */
 class ColorPickerWidget : public QWidget {
     Q_OBJECT
 public:
@@ -113,9 +97,6 @@ private:
     std::vector<ColorEntry> m_colors;
 };
 
-/**
- * @brief PaletteCapsule: 单体胶囊化调色盘，包裹多个色点
- */
 class PaletteCapsule : public QWidget {
     Q_OBJECT
 public:
@@ -138,42 +119,20 @@ private:
     const int m_spacing = 6;
 };
 
-/**
- * @brief 元数据面板（面板五）
- */
 class MetaPanel : public QFrame {
     Q_OBJECT
 public:
     explicit MetaPanel(QWidget* parent = nullptr);
     ~MetaPanel() override = default;
 
-
     void updateInfo(const QString& name, const QString& type, const QString& size,
                     const QString& ctime, const QString& mtime, const QString& atime,
                     const QString& path, bool encrypted);
-
-    /**
-     * @brief 设置变长色板显示
-     */
     void setPalettes(const QVector<QPair<QColor, float>>& palette);
-    
 signals:
-    /**
-     * @brief 元数据面板向上通知的信号
-     * @param rating -1 表示未变，0..5 有效
-     * @param color L"__NO_CHANGE__" 表示未变
-     */
     void metadataChanged(int rating, const std::wstring& color);
-
-    /**
-     * @brief 根据颜色搜索项目
-     */
     void searchByColor(const QColor& color);
-
 public:
-    /**
-     * @brief 设置星级显示
-     */
     void setRating(int rating);
     void setColor(const std::wstring& color);
     void setPinned(bool pinned);
@@ -181,42 +140,25 @@ public:
     void setNote(const std::wstring& note);
     void setURL(const std::wstring& url);
     void setCategory(const QString& category);
-
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
-
 private:
     void initUi();
     void addInfoRow(const QString& label, QLabel*& valueLabel);
     QFrame* createSeparator();
-    
-    /**
-     * @brief 2026-04-12 物理还原：创建一个带图标、标题和边框的“小方盒”容器
-     */
     QWidget* createSectionBox(const QString& iconName, const QString& title, QWidget* content);
-
     QVBoxLayout* m_mainLayout = nullptr;
     QScrollArea* m_scrollArea = nullptr;
     QWidget* m_container = nullptr;
     QVBoxLayout* m_containerLayout = nullptr;
-    
     ElasticEdit* m_nameEdit = nullptr;
-    QLabel* lblType = nullptr, *lblSize = nullptr;
-    QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
-    QLabel* lblPath = nullptr, *lblEncrypted = nullptr;
-    
+    QLabel* lblType = nullptr, *lblSize = nullptr, *lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr, *lblPath = nullptr, *lblEncrypted = nullptr;
     PaletteCapsule* m_paletteCapsule = nullptr;
-    
     QWidget* m_tagContainer = nullptr;
     FlowLayout* m_tagFlowLayout = nullptr;
     QLineEdit* m_tagEdit = nullptr;
-    
-    ElasticEdit* m_noteEdit = nullptr;
-    ElasticEdit* m_linkEdit = nullptr;
-    
-    ElasticEdit* m_categoryEdit = nullptr;
-
+    ElasticEdit* m_noteEdit = nullptr, *m_linkEdit = nullptr, *m_categoryEdit = nullptr;
 private slots:
     void onTagAdded();
     void onTagDeleted(const QString& text);
