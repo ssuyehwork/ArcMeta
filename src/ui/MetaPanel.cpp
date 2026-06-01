@@ -451,9 +451,23 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
                 m_linkEdit->adjustHeight();
                 m_tagEdit->adjustHeight();
                 m_categoryEdit->adjustHeight();
+
+                // 工业级补全：同时调整非 ElasticEdit 容器（流式布局容器）的高度
+                adjustFlowHeights();
             }
         }
     });
+}
+
+void MetaPanel::adjustFlowHeights() {
+    // 1. 调整调色盘容器高度
+    if (m_paletteBox && m_paletteFlowLayout) {
+        int contentH = m_paletteFlowLayout->heightForWidth(m_paletteBox->width());
+        int newH = qMax(28, contentH);
+        if (m_paletteBox->height() != newH) {
+            m_paletteBox->setFixedHeight(newH);
+        }
+    }
 }
 
 void MetaPanel::showEvent(QShowEvent* event) {
@@ -547,6 +561,8 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 
     if (m_container) {
         m_container->adjustSize();
+        // 动态添加色块后，立即根据当前宽度计算容器高度，防止“死板”高度截断内容
+        adjustFlowHeights();
     }
 }
 

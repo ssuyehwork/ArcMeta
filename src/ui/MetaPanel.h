@@ -186,6 +186,7 @@ protected:
 
 private:
     void initUi();
+    void adjustFlowHeights();
     void addInfoRow(const QString& label, QLabel*& valueLabel);
     QFrame* createSeparator();
     
