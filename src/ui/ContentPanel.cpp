@@ -1688,9 +1688,23 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
     m_currentPath = path; 
     updateLayersButtonState(); 
+
+    // --- 2026-06-xx 性能优化：递归扫描指纹校验 ---
+    qint64 currentMtime = QFileInfo(path).lastModified().toMSecsSinceEpoch();
+    if (recursive && m_recursiveCache.contains(path)) {
+        const auto& entry = m_recursiveCache[path];
+        if (entry.lastModified == currentMtime) {
+            m_model->setRecords(entry.records);
+            m_isLoading = false;
+            recalculateAndEmitStats();
+            applyFilters();
+            qDebug() << "[Content] 递归扫描指纹匹配，加载缓存数据:" << path;
+            return;
+        }
+    }
      
     QPointer<ContentPanel> panelPtr(this); 
-    (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive]() { 
+    (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive, currentMtime]() {
         if (!panelPtr) return; 
          
         std::vector<ArcMeta::ItemRepo::ItemRecord> allItems;
@@ -1719,12 +1733,16 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         scanDir(path, recursive); 
         if (!panelPtr) return; 
  
-        QMetaObject::invokeMethod(qApp, [panelPtr, path, allItems]() { 
+        QMetaObject::invokeMethod(qApp, [panelPtr, path, allItems, recursive, currentMtime]() {
             if (panelPtr && panelPtr->m_currentPath == path) { 
+                // 写入缓存
+                if (recursive) {
+                    panelPtr->m_recursiveCache[path] = { currentMtime, allItems };
+                }
+
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
-                // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
                 panelPtr->applyFilters();
             } 
         }, Qt::QueuedConnection); 
