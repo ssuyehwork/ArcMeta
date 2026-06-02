@@ -212,13 +212,28 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     textFont.setPointSize(8);
     painter->setFont(textFont);
 
-    // 零宽空格注入以支持非标准断行（针对两行显示的潜在需求，虽然目前 elidedText 是单行）
-    QString displayName = name;
-    displayName.replace("_", "_\u200B");
-    displayName.replace(".", ".\u200B");
+    // 2026-06-05 按照用户要求：限制内容面板卡片文件名最多显示2行，超出用"..."省略
+    auto elidedName = [](const QString& name, const QFontMetrics& fm, int width) -> QString {
+        QString line1 = fm.elidedText(name, Qt::ElideRight, width);
+        if (line1 == name) return name; // 单行就够了
+        
+        // 尝试找到第一行断点，计算第二行
+        int breakPos = 0;
+        for (int i = 1; i <= name.length(); ++i) {
+            if (fm.horizontalAdvance(name.left(i)) > width) {
+                breakPos = i - 1;
+                break;
+            }
+        }
+        if (breakPos <= 0) return line1;
+        
+        QString remaining = name.mid(breakPos);
+        QString line2 = fm.elidedText(remaining, Qt::ElideRight, width);
+        return name.left(breakPos) + "\n" + line2;
+    };
 
-    painter->drawText(m.textRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap,
-        option.fontMetrics.elidedText(displayName, Qt::ElideMiddle, m.textRect.width() * 2));
+    QString displayName = elidedName(name, option.fontMetrics, m.textRect.width() - 8);
+    painter->drawText(m.textRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName);
     painter->restore();
 
     // ④ [新增] 空文件夹特殊标记 (ContentPanel 移植)

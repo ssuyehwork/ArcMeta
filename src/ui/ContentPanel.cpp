@@ -2165,20 +2165,28 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         painter->setPen(QColor(238, 238, 238, 120)); 
     } 
  
-    // 2026-06-05 按照用户要求：恢复自动换行逻辑，并在“实在太长”时使用省略号 
-    // 零宽空格注入以支持非标准断行（如下划线或点号） 
-    QString displayName = name; 
-    displayName.replace("_", "_\u200B"); 
-    displayName.replace(".", ".\u200B"); 
- 
-    // 首先尝试进行自动换行绘制，如果高度超出，则回退到省略号单行显示 
-    QRect boundingRect = painter->boundingRect(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName); 
-    if (boundingRect.height() > m.nameRect.height()) { 
-        QString elidedName = option.fontMetrics.elidedText(name, Qt::ElideRight, m.nameRect.width() - 8); 
-        painter->drawText(m.nameRect, Qt::AlignCenter, elidedName); 
-    } else { 
-        painter->drawText(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName); 
-    } 
+    // 2026-06-05 按照用户要求：限制内容面板卡片文件名最多显示2行，超出用"..."省略
+    auto elidedName = [](const QString& name, const QFontMetrics& fm, int width) -> QString {
+        QString line1 = fm.elidedText(name, Qt::ElideRight, width);
+        if (line1 == name) return name; // 单行就够了
+        
+        // 尝试找到第一行断点，计算第二行
+        int breakPos = 0;
+        for (int i = 1; i <= name.length(); ++i) {
+            if (fm.horizontalAdvance(name.left(i)) > width) {
+                breakPos = i - 1;
+                break;
+            }
+        }
+        if (breakPos <= 0) return line1;
+        
+        QString remaining = name.mid(breakPos);
+        QString line2 = fm.elidedText(remaining, Qt::ElideRight, width);
+        return name.left(breakPos) + "\n" + line2;
+    };
+
+    QString displayName = elidedName(name, option.fontMetrics, m.nameRect.width() - 8);
+    painter->drawText(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName);
  
     painter->restore(); 
 } 
