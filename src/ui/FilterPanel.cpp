@@ -232,6 +232,8 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     m_mainLayout->setSpacing(0);
 
     // 顶部标题栏
+    // 2026-06-xx 物理对齐：FilterPanel 标题栏必须位于 QScrollArea 之外，
+    // 确保滚动条仅在内容区显示（标题下方），符合规范 ②
     QWidget* topBar = new QWidget(this);
     topBar->setObjectName("ContainerHeader");
     topBar->setFixedHeight(32);
@@ -273,16 +275,16 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
 
     // 滚动内容区
     m_scrollArea = new QScrollArea(this);
-    m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
 
     m_container = new QWidget(m_scrollArea);
     m_container->setStyleSheet("QWidget { background: transparent; }");
     m_containerLayout = new QVBoxLayout(m_container);
-    // 恢复旧版边距：右侧和底部留出 10px 缓冲空间
-    m_containerLayout->setContentsMargins(0, 0, 0, 10); // 2026-05-17 按照用户要求：右侧由 10 改为 0，消除内容区右侧留白
+    // 恢复旧版边距：右侧和底部留出 0px 缓冲空间，确保滚动条贴边
+    m_containerLayout->setContentsMargins(0, 0, 0, 10); 
     m_containerLayout->setSpacing(0);
     m_containerLayout->addStretch();
 

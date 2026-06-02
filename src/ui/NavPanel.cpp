@@ -129,17 +129,18 @@ void NavPanel::initUi() {
 
     m_mainLayout->addWidget(header);
 
-    // 核心修正：为列表内容包裹容器，恢复旧版 (15, 8, 15, 8) 的呼吸边距
+    // 核心修正：为列表内容包裹容器，恢复旧版 (15, 8, 0, 8) 的呼吸边距
+    // 2026-06-xx 物理对齐：右侧边距设为 0，使滚动条贴合容器边缘，杜绝留白
     QWidget* contentWrapper = new QWidget(this);
     contentWrapper->setStyleSheet("background: transparent; border: none;");
     QVBoxLayout* contentLayout = new QVBoxLayout(contentWrapper);
-    contentLayout->setContentsMargins(15, 8, 15, 8);
+    contentLayout->setContentsMargins(15, 8, 0, 8);
     contentLayout->setSpacing(0);
 
     // 物理还原：使用自定义视图以支持无快照拖拽
     m_treeView = new DropTreeView(this);
-    m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_treeView->setHeaderHidden(true);
     m_treeView->setAnimated(true);
     
