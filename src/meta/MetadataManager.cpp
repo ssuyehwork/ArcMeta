@@ -22,7 +22,7 @@
 #include "../db/ItemRepo.h"
 #include "../db/FolderRepo.h"
 #include "MetadataDefs.h"
-#include "AmMetaJson.h"
+#include "AmMetaScch.h"
 #include "AllFrnManager.h"
 #include "../mft/MftReader.h"
 #include "../db/CategoryRepo.h"
@@ -140,8 +140,8 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
 void MetadataManager::initFromDatabase() {
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
 
-    // 2026-06-xx 架构修正：从 FERREX_drivers.json 加载磁盘根目录元数据
-    QString driversPath = QCoreApplication::applicationDirPath() + "/FERREX_drivers.json";
+    // 2026-06-xx 架构修正：从 FERREX_drivers.scch 加载磁盘根目录元数据
+    QString driversPath = QCoreApplication::applicationDirPath() + "/FERREX_drivers.scch";
     QFile dFile(driversPath);
     if (dFile.open(QIODevice::ReadOnly)) {
         QJsonObject root = QJsonDocument::fromJson(dFile.readAll()).object();
@@ -217,11 +217,11 @@ void MetadataManager::initFromDatabase() {
     emit metaChanged("__RELOAD_ALL__");
 }
 
-void MetadataManager::initFromJsonMode() {
+void MetadataManager::initFromScchMode() {
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
     auto frnsMap = AllFrnManager::getAllFrns();
     
-    // 2026-05-29 物理加固：在 JSON 模式初始化期间，利用已有索引回填 SQLite items 表 (Plan-45)
+    // 2026-05-29 物理加固：在 SCCH 模式初始化期间，利用已有索引回填 SQLite items 表 (Plan-45)
     // 理由：彻底解决用户反馈的“模式切换后计数为 0”的问题，实现全自动对账。
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     bool useDb = db.isOpen();
@@ -238,7 +238,7 @@ void MetadataManager::initFromJsonMode() {
             for (size_t d = 0; d < 26; ++d) {
                 std::wstring p = MftReader::instance().getPathFast(d, frnVal);
                 if (!p.empty()) {
-                    if (p.find(L".am_meta.json") != std::wstring::npos) {
+                    if (p.find(L"metadata.scch") != std::wstring::npos) {
                         resolvedPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(p)).absolutePath()).toStdWString();
                     } else {
                         resolvedPath = p;
@@ -248,13 +248,13 @@ void MetadataManager::initFromJsonMode() {
             }
         }
         
-        AmMetaJson amJson(resolvedPath);
-        if (amJson.load()) {
+        AmMetaScch amScch(resolvedPath);
+        if (amScch.load()) {
             std::wstring vol = getVolumeSerialNumber(resolvedPath);
             std::wstring nResolvedPath = normalizePath(resolvedPath);
 
             // 1. 加载文件夹本身的元数据
-            const auto& f = amJson.folder();
+            const auto& f = amScch.folder();
             RuntimeMeta fMeta;
             fMeta.rating = f.rating; fMeta.color = f.color;
             for (const auto& t : f.tags) fMeta.tags << QString::fromStdWString(t);
@@ -267,7 +267,7 @@ void MetadataManager::initFromJsonMode() {
             }
             
             // 2. 加载子项元数据
-            for (const auto& [name, item] : amJson.items()) {
+            for (const auto& [name, item] : amScch.items()) {
                 RuntimeMeta iMeta;
                 iMeta.rating = item.rating; iMeta.color = item.color;
                 for (const auto& t : item.tags) iMeta.tags << QString::fromStdWString(t);
@@ -302,15 +302,15 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
         if (it != m_cache.end()) return it->second;
     }
 
-    // 2026-06-xx 核心恢复：若内存未命中，尝试从本地离散 .am_meta.json 加载
+    // 2026-06-xx 核心恢复：若内存未命中，尝试从本地离散 metadata.scch 加载
     // 理由：实现“目录导航”对本地管理文件的实时感应，即使数据库未同步
     QFileInfo info(QString::fromStdWString(nPath));
     std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
     std::wstring fileName = info.fileName().toStdWString();
 
-    AmMetaJson amJson(parentDir);
-    if (amJson.load()) {
-        auto& items = amJson.items();
+    AmMetaScch amScch(parentDir);
+    if (amScch.load()) {
+        auto& items = amScch.items();
         if (items.count(fileName)) {
             const auto& item = items.at(fileName);
             RuntimeMeta rm;
@@ -329,7 +329,7 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
 
         // 如果是文件夹自身
         if (info.isDir()) {
-            const auto& folder = amJson.folder();
+            const auto& folder = amScch.folder();
             if (!folder.isDefault()) {
                 RuntimeMeta rm;
                 rm.rating = folder.rating; rm.color = folder.color;
@@ -410,19 +410,19 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
         m_cache[nPath].palettes = entries;
     }
 
-    // 2. 物理原子更新 .am_meta.json
+    // 2. 物理原子更新 metadata.scch
     QFileInfo info(QString::fromStdWString(nPath));
     std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
     std::wstring fileName = info.fileName().toStdWString();
     
-    AmMetaJson amJson(parentDir);
-    if (amJson.load()) {
+    AmMetaScch amScch(parentDir);
+    if (amScch.load()) {
         if (info.isDir()) {
-            amJson.folder().palettes = entries;
+            amScch.folder().palettes = entries;
         } else {
-            amJson.items()[fileName].palettes = entries;
+            amScch.items()[fileName].palettes = entries;
         }
-        amJson.save();
+        amScch.save();
     }
 
     emit metaChanged(QString::fromStdWString(nPath));
@@ -435,13 +435,13 @@ QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
     std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
     std::wstring fileName = info.fileName().toStdWString();
 
-    AmMetaJson amJson(parentDir);
-    if (amJson.load()) {
+    AmMetaScch amScch(parentDir);
+    if (amScch.load()) {
         std::vector<PaletteEntry> entries;
         if (info.isDir()) {
-            entries = amJson.folder().palettes;
+            entries = amScch.folder().palettes;
         } else {
-            auto& items = amJson.items();
+            auto& items = amScch.items();
             if (items.count(fileName)) {
                 entries = items.at(fileName).palettes;
             }
@@ -484,18 +484,18 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
         }
     }
 
-    // 2. 清理离散 JSON 持久化
+    // 2. 清理离散 SCCH 持久化
     QFileInfo info(QString::fromStdWString(path));
     if (info.isDir()) {
-        // 若是文件夹，整个单元删除，包括其内部的 .am_meta.json
-        QString metaPath = info.absoluteFilePath() + "/.am_meta.json";
+        // 若是文件夹，整个单元删除，包括其内部的 metadata.scch
+        QString metaPath = info.absoluteFilePath() + "/metadata.scch";
         QFile::remove(metaPath);
     } else {
-        // 若是文件，从所在目录的 .am_meta.json 中移除条目
+        // 若是文件，从所在目录的 metadata.scch 中移除条目
         std::wstring dir = info.absolutePath().toStdWString();
-        AmMetaJson json(dir);
-        json.remove(info.fileName().toStdWString());
-        json.save();
+        AmMetaScch scch(dir);
+        scch.remove(info.fileName().toStdWString());
+        scch.save();
     }
 }
 
@@ -578,7 +578,7 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
 }
 
 void MetadataManager::persistAsync(const std::wstring& path) {
-    // 2026-06-16 按照用户授权：物理侧挂 JSON 先行 -> FID 日志追踪 -> 同步对账。
+    // 2026-06-16 按照用户授权：物理侧挂 SCCH 先行 -> FID 日志追踪 -> 同步对账。
     std::wstring nPath = normalizePath(path);
     QFileInfo info(QString::fromStdWString(nPath));
     std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
@@ -587,8 +587,8 @@ void MetadataManager::persistAsync(const std::wstring& path) {
 
     RuntimeMeta rMeta = getMeta(nPath);
 
-    // 1. 同步到内存与数据库（在 JSON 模式下跳过对数据库的保存）
-    if (!CategoryRepo::isJsonMode()) {
+    // 1. 同步到内存与数据库（在 SCCH 模式下跳过对数据库的保存）
+    if (!CategoryRepo::isScchMode()) {
         if (info.isDir()) {
             FolderMeta fMeta;
             FolderRepo::get(vol, nPath, fMeta);
@@ -615,11 +615,11 @@ void MetadataManager::persistAsync(const std::wstring& path) {
         }
     }
 
-    // 2. 物理落地：写入 .am_meta.json (物理侧真值先行)
+    // 2. 物理落地：写入 metadata.scch (物理侧真值先行)
     // 2026-06-xx 架构修正：判断是否为磁盘根目录
     if (info.isDir() && info.isRoot()) {
-        // 磁盘根目录元数据应持久化到程序根目录下的 FERREX_drivers.json，防止权限冲突或物理损坏
-        QString driversPath = qApp->applicationDirPath() + "/FERREX_drivers.json";
+        // 磁盘根目录元数据应持久化到程序根目录下的 FERREX_drivers.scch，防止权限冲突或物理损坏
+        QString driversPath = qApp->applicationDirPath() + "/FERREX_drivers.scch";
         QFile file(driversPath);
         QJsonObject root;
         if (file.open(QIODevice::ReadOnly)) {
@@ -644,10 +644,10 @@ void MetadataManager::persistAsync(const std::wstring& path) {
             file.close();
         }
     } else {
-        AmMetaJson amJson(parentDir);
-        amJson.load();
+        AmMetaScch amScch(parentDir);
+        amScch.load();
         if (info.isDir()) {
-            FolderMeta& folder = amJson.folder();
+            FolderMeta& folder = amScch.folder();
             folder.rating = rMeta.rating; folder.color = rMeta.color;
             folder.pinned = rMeta.pinned; folder.note = rMeta.note;
             folder.url = rMeta.url;
@@ -655,7 +655,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
             for (const auto& t : rMeta.tags) folder.tags.push_back(t.toStdWString());
             folder.palettes = rMeta.palettes;
         } else {
-            ItemMeta& item = amJson.items()[fileName];
+            ItemMeta& item = amScch.items()[fileName];
             item.rating = rMeta.rating; item.color = rMeta.color;
             item.pinned = rMeta.pinned; item.encrypted = rMeta.encrypted;
             item.note = rMeta.note;
@@ -664,22 +664,22 @@ void MetadataManager::persistAsync(const std::wstring& path) {
             for (const auto& t : rMeta.tags) item.tags.push_back(t.toStdWString());
             item.palettes = rMeta.palettes;
         }
-        amJson.save();
+        amScch.save();
     }
 
-    // 2.5 提取该 .am_meta.json 文件本身的物理 FRN，安全、自动登记到根目录 All_FRN_am_meta.json 中
-    // 按照用户 2026-05-28 最新逻辑：对账锚点应为 .am_meta.json 文件的 FRN
-    std::wstring metaPath = parentDir + L"\\.am_meta.json";
+    // 2.5 提取该 metadata.scch 文件本身的物理 FRN，安全、自动登记到根目录 All_FRN_metadata.scch 中
+    // 按照用户 2026-05-28 最新逻辑：对账锚点应为 metadata.scch 文件的 FRN
+    std::wstring metaPath = parentDir + L"\\metadata.scch";
     std::wstring fileFrn;
     std::string fileFid;
     if (fetchWinApiMetadataDirect(metaPath, fileFid, &fileFrn)) {
         AllFrnManager::registerFrn(fileFrn, parentDir);
     }
 
-    // 3. 提取侧挂 .am_meta.json 的物理 FID 并记入日志
-    std::wstring amJsonPath = parentDir + L"\\.am_meta.json";
+    // 3. 提取侧挂 metadata.scch 的物理 FID 并记入日志
+    std::wstring amScchPath = parentDir + L"\\metadata.scch";
     std::string metaFid;
-    if (fetchWinApiMetadataDirect(amJsonPath, metaFid, nullptr)) {
+    if (fetchWinApiMetadataDirect(amScchPath, metaFid, nullptr)) {
         addToSyncLog(QString::fromStdString(metaFid).toStdWString());
     } else {
         // 退而求其次，若没拿到 FID 则记录目录路径（兼容性处理）
@@ -690,12 +690,12 @@ void MetadataManager::persistAsync(const std::wstring& path) {
 }
 
 bool MetadataManager::hasPendingSync() const {
-    QString logPath = qApp->applicationDirPath() + "/Synchronize.json";
+    QString logPath = qApp->applicationDirPath() + "/Synchronize.scch";
     return QFile::exists(logPath);
 }
 
 QStringList MetadataManager::getPendingSyncDirs() {
-    QString logPath = qApp->applicationDirPath() + "/Synchronize.json";
+    QString logPath = qApp->applicationDirPath() + "/Synchronize.scch";
     QFile file(logPath);
     if (!file.open(QIODevice::ReadOnly)) return {};
     
@@ -707,7 +707,7 @@ QStringList MetadataManager::getPendingSyncDirs() {
 void MetadataManager::removeFidsFromLog(const QStringList& fidsToRemove) {
     if (fidsToRemove.isEmpty()) return;
     
-    QString logPath = qApp->applicationDirPath() + "/Synchronize.json";
+    QString logPath = qApp->applicationDirPath() + "/Synchronize.scch";
     if (!QFile::exists(logPath)) return;
 
     QStringList current;
@@ -744,7 +744,7 @@ void MetadataManager::removeFidsFromLog(const QStringList& fidsToRemove) {
 
 void MetadataManager::addToSyncLog(const std::wstring& dirPath) {
     QString path = QString::fromStdWString(dirPath);
-    QString logPath = qApp->applicationDirPath() + "/Synchronize.json";
+    QString logPath = qApp->applicationDirPath() + "/Synchronize.scch";
 
     QStringList currentDirs;
     if (QFile::exists(logPath)) {

@@ -464,7 +464,7 @@ void MainWindow::initUi() {
             if(path.isEmpty()) continue;
             
             if (rating != -1) {
-                // 2026-05-24 按照用户要求：彻底移除 JSON，改为中心化异步持久化
+                // 2026-05-24 按照用户要求：彻底移除 SCCH，改为中心化异步持久化
                 m_contentPanel->getProxyModel()->setData(idx, rating, RatingRole);
                 MetadataManager::instance().setRating(path.toStdWString(), rating);
             }
