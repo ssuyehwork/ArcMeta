@@ -800,6 +800,8 @@ void CategoryPanel::initUi() {
 
     // 物理还原：单树架构，合并系统项与用户分类
     m_categoryTree = new DropTreeView(this);
+    m_categoryTree->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_categoryTree->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_categoryTree->setStyleSheet(treeStyle); 
     m_categoryTree->setItemDelegate(new CategoryDelegate(this));
     
