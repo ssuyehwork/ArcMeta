@@ -771,11 +771,12 @@ void CategoryPanel::initUi() {
 
     m_mainLayout->addWidget(header);
 
-    // 2. 内容区包裹容器 (物理还原 8, 8, 8, 8 呼吸边距)
+    // 2. 内容区包裹容器 (物理还原 8, 8, 0, 8 呼吸边距)
+    // 2026-06-xx 物理对齐：右侧边距设为 0，使滚动条贴合容器边缘
     QWidget* sbContent = new QWidget(this);
     sbContent->setStyleSheet("background: transparent; border: none;");
     auto* sbContentLayout = new QVBoxLayout(sbContent);
-    sbContentLayout->setContentsMargins(8, 8, 8, 8);
+    sbContentLayout->setContentsMargins(8, 8, 0, 8);
     sbContentLayout->setSpacing(0);
 
     QString arrowRight = UiHelper::getSvgTempFilePath("arrow_right", PrimaryBlue);

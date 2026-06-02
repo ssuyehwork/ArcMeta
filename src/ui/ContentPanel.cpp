@@ -598,7 +598,8 @@ void ContentPanel::initUi() {
     m_viewStack->setCurrentWidget(m_gridView); 
  
     QVBoxLayout* contentWrapper = new QVBoxLayout(); 
-    contentWrapper->setContentsMargins(4, 4, 4, 4); // 2026-05-08 按照用户要求：增加到4px使卡片到容器边缘达到10px
+    // 2026-06-xx 物理对齐：右侧边距设为 0，使滚动条贴合容器边缘
+    contentWrapper->setContentsMargins(4, 4, 0, 4);
     contentWrapper->setSpacing(0); 
     contentWrapper->addWidget(m_viewStack); 
      

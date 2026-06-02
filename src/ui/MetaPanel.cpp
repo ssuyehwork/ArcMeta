@@ -315,7 +315,8 @@ void MetaPanel::initUi() {
     m_containerLayout = new QVBoxLayout(m_container); 
     // 2026-06-xx 工业级强制约束：启用 SetMinAndMaxSize，强制容器高度随子控件动态撑开
     m_containerLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
-    m_containerLayout->setContentsMargins(10, 10, 10, 10); 
+    // 2026-06-xx 物理对齐：右侧边距设为 0，使滚动条贴合容器边缘
+    m_containerLayout->setContentsMargins(10, 10, 0, 10);
     // 2026-06-01 修正：降低全局间距，消除视觉断层 (原 12px -> 现 8px)
     m_containerLayout->setSpacing(8);
     
@@ -490,8 +491,8 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
             m_container->setFixedWidth(viewportW);
         }
         
-        // 2. 内部控件可用宽度（视口宽 - 左右外边距 10px * 2）
-        int maxW = viewportW - 20; 
+        // 2. 内部控件可用宽度（视口宽 - 左边距 10px - 右边距 0px）
+        int maxW = viewportW - 10;
         if (maxW > 50) {
             auto syncWidthAndHeight = [maxW](ElasticEdit* edit) {
                 if (edit && edit->width() != maxW) {
