@@ -4,7 +4,7 @@
 #include <QKeyEvent>
 #include <QApplication>
 
-namespace ArcMeta {
+namespace FERREX {
 
 CategoryLockDialog::CategoryLockDialog(const QString& hint, QWidget* parent) 
     : FramelessDialog("分类解锁", parent) 
@@ -81,4 +81,4 @@ void CategoryLockDialog::onVerify() {
     accept();
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

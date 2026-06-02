@@ -32,7 +32,7 @@
 #endif
 
 
-namespace ArcMeta {
+namespace FERREX {
 
 static int64_t filetimeToUnixMs(int64_t filetime) {
     // 2026-05-14 物理对标 Windows FILETIME 标准 (1601 Epoch to 1970 Unix)
@@ -249,7 +249,7 @@ void MftReader::buildIndex(const QStringList& drives) {
 }
 
 bool MftReader::loadFromCache() {
-    std::filesystem::path cacheDir = "ArcMeta/cache";
+    std::filesystem::path cacheDir = "FERREX/cache";
     if (!std::filesystem::exists(cacheDir)) return false;
 
     // 物理优化：加载前先停止现有监控，避免句柄冲突
@@ -460,7 +460,7 @@ bool MftReader::saveToCache() {
         if (snap.f.empty()) continue;
         std::unordered_map<std::string, uint64_t> usnMap;
         usnMap[QString::fromStdWString(snap.volume).toStdString()] = snap.usn;
-        QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(snap.volume).left(1));
+        QString path = QString("FERREX/cache/%1.scch").arg(QString::fromStdWString(snap.volume).left(1));
         ScchCache::save(path.toStdString().c_str(), snap.f, snap.pf, snap.s, snap.t, snap.no, snap.attr, snap.mf, snap.sp, snap.ds, usnMap);
     }
     return true;
@@ -541,7 +541,7 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     // 此时已释放 m_dataLock，UI 线程可以自由执行搜索、渲染等操作。
     std::unordered_map<std::string, uint64_t> usnMap;
     usnMap[QString::fromStdWString(volume).toStdString()] = nextUsnVal;
-    QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
+    QString path = QString("FERREX/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
     
     // 释放调用者的锁以允许并发（由于 saveToCache 等函数持有锁，这里需要特殊的逻辑处理）
     // 为了不破坏现有调用链，我们将 saveToCache 逻辑也进行重构。
@@ -1476,4 +1476,4 @@ QIcon MftReader::getCachedIcon(const QString& ext, bool isDir) {
     return icon;
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

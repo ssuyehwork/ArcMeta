@@ -5,7 +5,7 @@
 #include <QStackedWidget>
 #include "BreadcrumbBar.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 复合地址栏控件
@@ -36,4 +36,4 @@ private:
     QString         m_currentPath;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

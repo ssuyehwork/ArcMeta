@@ -32,7 +32,7 @@
 #include <atomic>
 
 #include "ScanController.h"
-namespace ArcMeta {
+namespace FERREX {
 
 class JustifiedView;
 class ThumbnailDelegate;
@@ -175,4 +175,4 @@ private:
     ScanConfig m_config;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

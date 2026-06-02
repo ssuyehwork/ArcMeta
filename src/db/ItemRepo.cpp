@@ -10,10 +10,10 @@
 #include "../meta/MetadataDefs.h"
 #include "../meta/MetadataManager.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 bool ItemRepo::save(const std::wstring& parentPath, const std::wstring& name, const ItemMeta& meta) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     std::wstring fullPath = parentPath;
     if (!fullPath.empty() && fullPath.back() != L'\\' && fullPath.back() != L'/') fullPath += L'\\';
     fullPath += name;
@@ -121,7 +121,7 @@ bool ItemRepo::save(const std::wstring& parentPath, const std::wstring& name, co
 }
 
 bool ItemRepo::saveBasicInfo(const std::wstring& volume, const std::wstring& frn, const std::wstring& path, const std::wstring& parentPath, bool isDir, qint64 mtime, qint64 size, qint64 ctime, const std::string& fileId128) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     
     // 2026-06-15 物理修复：统一 File ID 协议。
@@ -149,14 +149,14 @@ bool ItemRepo::saveBasicInfo(const std::wstring& volume, const std::wstring& frn
 }
 
 bool ItemRepo::markAsDeleted(const std::wstring& volume, const std::wstring& frn) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QSqlQuery q(db); q.prepare("UPDATE items SET deleted = 1 WHERE volume = ? AND frn = ?");
     q.addBindValue(QString::fromStdWString(volume)); q.addBindValue(QString::fromStdWString(frn));
     return q.exec();
 }
 
 bool ItemRepo::restoreByPath(const std::wstring& path) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QString qPath = QString::fromStdWString(path);
     QString pathPattern = qPath + "\\%";
     
@@ -168,7 +168,7 @@ bool ItemRepo::restoreByPath(const std::wstring& path) {
 }
 
 bool ItemRepo::physicalRemove(const std::wstring& path) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QString qPath = QString::fromStdWString(path);
     QString pathPattern = qPath + "\\%";
     
@@ -252,14 +252,14 @@ bool ItemRepo::physicalRemove(const std::wstring& path) {
 }
 
 bool ItemRepo::removeByFrn(const std::wstring& volume, const std::wstring& frn) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QSqlQuery q(db); q.prepare("DELETE FROM items WHERE volume = ? AND frn = ?");
     q.addBindValue(QString::fromStdWString(volume)); q.addBindValue(QString::fromStdWString(frn));
     return q.exec();
 }
 
 std::wstring ItemRepo::getPathByFrn(const std::wstring& volume, const std::wstring& frn) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QSqlQuery q(db); q.prepare("SELECT path FROM items WHERE volume = ? AND frn = ?");
     q.addBindValue(QString::fromStdWString(volume)); q.addBindValue(QString::fromStdWString(frn));
     if (q.exec() && q.next()) return q.value(0).toString().toStdWString();
@@ -267,7 +267,7 @@ std::wstring ItemRepo::getPathByFrn(const std::wstring& volume, const std::wstri
 }
 
 bool ItemRepo::updatePath(const std::wstring& volume, const std::wstring& frn, const std::wstring& newPath, const std::wstring& newParentPath) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QSqlQuery q(db); q.prepare("UPDATE items SET path = ?, parent_path = ? WHERE volume = ? AND frn = ?");
     q.addBindValue(QString::fromStdWString(newPath)); q.addBindValue(QString::fromStdWString(newParentPath));
     q.addBindValue(QString::fromStdWString(volume)); q.addBindValue(QString::fromStdWString(frn));
@@ -275,7 +275,7 @@ bool ItemRepo::updatePath(const std::wstring& volume, const std::wstring& frn, c
 }
 
 QStringList ItemRepo::searchByKeyword(const QString& keyword, const QString& parentPath) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     
     // 2026-06-xx 物理重构：多维搜索与模式自适应。
@@ -324,7 +324,7 @@ QStringList ItemRepo::getUntaggedPaths() {
 }
 
 QStringList ItemRepo::getPathsBySystemType(const QString& type) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     
     // 2026-06-15 按照审计意见：时间戳从 double 迁移至 qint64 以确保毫秒精度。
@@ -377,7 +377,7 @@ QStringList ItemRepo::getPathsBySystemType(const QString& type) {
 }
 
 std::vector<ItemRepo::ItemRecord> ItemRepo::getItemRecordsBySystemType(const QString& type) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     
     qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -437,7 +437,7 @@ std::vector<ItemRepo::ItemRecord> ItemRepo::getItemRecordsBySystemType(const QSt
 }
 
 std::vector<ItemRepo::ItemRecord> ItemRepo::searchRecordsByKeyword(const QString& keyword, const QString& parentPath) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     
     QString sql;
@@ -483,7 +483,7 @@ std::vector<ItemRepo::ItemRecord> ItemRepo::searchRecordsByKeyword(const QString
 }
 
 std::vector<ItemRepo::ItemRecord> ItemRepo::getRecordsInCategory(int categoryId) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     
     q.prepare("SELECT i.volume, i.frn, MIN(i.path) FROM items i "
@@ -506,4 +506,4 @@ std::vector<ItemRepo::ItemRecord> ItemRepo::getRecordsInCategory(int categoryId)
     return results;
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

@@ -7,7 +7,7 @@
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
 
-namespace ArcMeta {
+namespace FERREX {
 
 // ============================================================================
 // FramelessDialog 基类实现
@@ -327,4 +327,4 @@ FramelessConfirmDialog::FramelessConfirmDialog(const QString& title, const QStri
     layout->addLayout(btnLayout);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

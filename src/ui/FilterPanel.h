@@ -10,7 +10,7 @@
 #include <QMap>
 #include <QStringList>
 
-namespace ArcMeta {
+namespace FERREX {
 
 // ─── 色相滑块 (内嵌版) ─────────────────────────────────────────────
 class InlineHueSlider : public QWidget {
@@ -109,4 +109,4 @@ private:
     QPushButton*  m_btnClearAll     = nullptr;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

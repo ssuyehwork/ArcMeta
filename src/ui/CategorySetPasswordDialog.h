@@ -5,7 +5,7 @@
 #include <QLabel>
 #include <QPushButton>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 1:1 物理还原旧版“设置密码”对话框 (根据截图 PixPin_2026-04-03_11-39-19.png)
@@ -28,4 +28,4 @@ private:
     QLineEdit* m_hintEdit;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

@@ -68,12 +68,12 @@
 #endif
 
 
-namespace ArcMeta {
+namespace FERREX {
 
 // --- ScanConfig Implementation ---
 
 void ScanConfig::load() {
-    QFile file("arcmeta_scan_config.scch");
+    QFile file("ferrex_scan_config.scch");
     if (file.open(QIODevice::ReadOnly)) {
         QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
         QJsonObject obj = doc.object();
@@ -109,7 +109,7 @@ void ScanConfig::load() {
 }
 
 void ScanConfig::save() {
-    QFile file("arcmeta_scan_config.scch");
+    QFile file("ferrex_scan_config.scch");
     if (file.open(QIODevice::WriteOnly)) {
         QJsonObject obj;
         auto saveSet = [&](const QString& key, const QSet<QString>& set) {
@@ -1789,4 +1789,4 @@ bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
     return FramelessDialog::eventFilter(watched, event);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

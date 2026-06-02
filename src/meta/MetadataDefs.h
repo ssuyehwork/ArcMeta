@@ -7,7 +7,7 @@
 
 #include <QColor>
 
-namespace ArcMeta {
+namespace FERREX {
 
 struct PaletteEntry {
     QColor color;
@@ -70,6 +70,6 @@ struct ItemMeta {
     }
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 
 #endif // ARCMETA_METADATA_DEFS_H

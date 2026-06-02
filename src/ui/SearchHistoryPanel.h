@@ -7,7 +7,7 @@
 #include <QPushButton>
 #include <QStringList>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 2026-04-12 按照用户要求：搜索历史悬浮面板
@@ -49,4 +49,4 @@ private:
     QStringList  m_history;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

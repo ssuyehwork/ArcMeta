@@ -2,7 +2,7 @@
 #include <QHBoxLayout>
 #include <QDir>
 
-namespace ArcMeta {
+namespace FERREX {
 
 AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     QHBoxLayout* layout = new QHBoxLayout(this);
@@ -64,4 +64,4 @@ void AddressBar::onBreadcrumbClicked(const QString& path) {
     emit pathChanged(path);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

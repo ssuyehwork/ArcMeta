@@ -4,7 +4,7 @@
 #include <QSet>
 #include "../core/ModelContract.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 class CategoryModel : public QStandardItemModel {
     Q_OBJECT
@@ -37,4 +37,4 @@ private:
     QSet<int> m_unlockedIds;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

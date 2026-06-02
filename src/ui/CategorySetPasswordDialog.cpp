@@ -9,7 +9,7 @@
 #include "UiHelper.h"
 #include "ToolTipOverlay.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 CategorySetPasswordDialog::CategorySetPasswordDialog(QWidget* parent)
     : FramelessDialog("设置密码", parent) {
@@ -79,4 +79,4 @@ void CategorySetPasswordDialog::onSave() {
     accept();
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

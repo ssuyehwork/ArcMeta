@@ -9,7 +9,7 @@
 #include <QHBoxLayout>
 #include "../meta/BatchRenameEngine.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 批量重命名规则行组件
@@ -46,4 +46,4 @@ private:
     QPushButton* m_btnRemove = nullptr;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

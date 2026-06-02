@@ -5,7 +5,7 @@
 #include <QLabel>
 #include <QVBoxLayout>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 1:1 复刻旧版验证界面
@@ -33,4 +33,4 @@ private:
     QLineEdit* m_pwdEdit;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

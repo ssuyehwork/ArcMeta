@@ -22,7 +22,7 @@
 #include "StyleLibrary.h"
 #include "../meta/MetadataManager.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 ElasticEdit::ElasticEdit(QWidget* parent) : QTextEdit(parent) {
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
@@ -690,4 +690,4 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     return QFrame::eventFilter(watched, event);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

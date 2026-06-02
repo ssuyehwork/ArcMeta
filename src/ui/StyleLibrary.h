@@ -2,7 +2,7 @@
 #include <QColor>
 #include <QString>
 
-namespace ArcMeta {
+namespace FERREX {
 namespace Style {
 
 /**
@@ -48,4 +48,4 @@ const QColor PressedBackground = QColor(255, 255, 255, 50);
 inline QString qssColor(const QColor& color) { return color.name(); }
 
 } // namespace Style
-} // namespace ArcMeta
+} // namespace FERREX

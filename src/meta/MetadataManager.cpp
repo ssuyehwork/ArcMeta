@@ -42,7 +42,7 @@
 #include <mutex>
 #include <shared_mutex>
 
-namespace ArcMeta {
+namespace FERREX {
 
 // --- 内部静态工具函数 (必须在类成员函数前定义或前向声明) ---
 
@@ -161,7 +161,7 @@ void MetadataManager::initFromDatabase() {
     }
 
     auto volMap = getVolumeToDriveMap();
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     if (!db.isOpen()) return;
 
     auto loadTable = [&](const char* sql) {
@@ -223,7 +223,7 @@ void MetadataManager::initFromScchMode() {
     
     // 2026-05-29 物理加固：在 SCCH 模式初始化期间，利用已有索引回填 SQLite items 表 (Plan-45)
     // 理由：彻底解决用户反馈的“模式切换后计数为 0”的问题，实现全自动对账。
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     bool useDb = db.isOpen();
     if (useDb) db.transaction();
 
@@ -807,4 +807,4 @@ QStringList MetadataManager::searchInCache(const QString& keyword) {
     return results;
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

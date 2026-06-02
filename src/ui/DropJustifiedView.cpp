@@ -6,7 +6,7 @@
 #include <QUrl>
 #include <QFileInfo>
 
-namespace ArcMeta {
+namespace FERREX {
 
 DropJustifiedView::DropJustifiedView(QWidget* parent) : JustifiedView(parent) {
     setDragEnabled(true);
@@ -42,4 +42,4 @@ void DropJustifiedView::startDrag(Qt::DropActions supportedActions) {
     drag->exec(supportedActions, Qt::MoveAction);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

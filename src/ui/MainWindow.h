@@ -11,7 +11,7 @@
 #include <QSystemTrayIcon>
 #include <QSet>
 
-namespace ArcMeta {
+namespace FERREX {
 
 class TrayController;
 class HoverEventFilter;
@@ -155,4 +155,4 @@ private:
     void initIdleDetector();
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

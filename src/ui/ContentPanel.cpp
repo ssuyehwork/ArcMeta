@@ -67,10 +67,10 @@
 #include "BatchRenameDialog.h" 
 #include "UiHelper.h" 
 #include "StyleLibrary.h"
-using namespace ArcMeta::Style;
+using namespace FERREX::Style;
 #include "../util/ShellHelper.h"
  
-namespace ArcMeta { 
+namespace FERREX { 
  
 // --- FerrexVirtualDbModel 实现 ---
 FerrexVirtualDbModel::FerrexVirtualDbModel(QObject* parent) : QAbstractTableModel(parent) {
@@ -125,10 +125,10 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         return QVariant();
     }
 
-    auto getCachedMeta = [this](const QString& p) -> ArcMeta::RuntimeMeta {
+    auto getCachedMeta = [this](const QString& p) -> FERREX::RuntimeMeta {
         if (m_metaCache.contains(p)) return *m_metaCache.object(p);
-        ArcMeta::RuntimeMeta meta = MetadataManager::instance().getMeta(p.toStdWString());
-        m_metaCache.insert(p, new ArcMeta::RuntimeMeta(meta));
+        FERREX::RuntimeMeta meta = MetadataManager::instance().getMeta(p.toStdWString());
+        m_metaCache.insert(p, new FERREX::RuntimeMeta(meta));
         return meta;
     };
 
@@ -314,7 +314,7 @@ void FerrexVirtualDbModel::fetchMore(const QModelIndex& parent) {
     Q_UNUSED(parent);
 }
 
-void FerrexVirtualDbModel::setRecords(const std::vector<ArcMeta::ItemRepo::ItemRecord>& records) {
+void FerrexVirtualDbModel::setRecords(const std::vector<FERREX::ItemRepo::ItemRecord>& records) {
     beginResetModel();
     m_allRecords = records;
     m_displayCount = (int)m_allRecords.size();
@@ -643,7 +643,7 @@ void ContentPanel::updateGridSize() {
     }
 
     // 写入实时日志 
-    ArcMeta::Logger::log(QString("[UI_DEBUG] 卡片缩放级: %1").arg(m_zoomLevel));
+    FERREX::Logger::log(QString("[UI_DEBUG] 卡片缩放级: %1").arg(m_zoomLevel));
     
     if (m_viewStack->currentWidget() == m_gridView) {
         if (auto* jv = qobject_cast<JustifiedView*>(m_gridView)) {
@@ -1671,7 +1671,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         updateLayersButtonState(); 
  
         const auto drives = QDir::drives(); 
-        std::vector<ArcMeta::ItemRepo::ItemRecord> driveRecords;
+        std::vector<FERREX::ItemRepo::ItemRecord> driveRecords;
         for (const QFileInfo& drive : drives) { 
             ItemRepo::ItemRecord r;
             r.path = QDir::toNativeSeparators(drive.absolutePath());
@@ -1693,7 +1693,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive]() { 
         if (!panelPtr) return; 
          
-        std::vector<ArcMeta::ItemRepo::ItemRecord> allItems;
+        std::vector<FERREX::ItemRepo::ItemRecord> allItems;
  
         std::function<void(const QString&, bool)> scanDir; 
         scanDir = [&](const QString& p, bool rec) { 
@@ -1816,7 +1816,7 @@ void ContentPanel::loadCategory(int categoryId) {
      
     m_model->clear(); 
  
-    std::vector<ArcMeta::ItemRepo::ItemRecord> allRecords;
+    std::vector<FERREX::ItemRepo::ItemRecord> allRecords;
 
     // 1. 加载子分类
     auto allCategories = CategoryRepo::getAll();
@@ -1859,7 +1859,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
      
     m_model->clear(); 
  
-    std::vector<ArcMeta::ItemRepo::ItemRecord> records;
+    std::vector<FERREX::ItemRepo::ItemRecord> records;
     for (const QString& p : paths) {
         // 2026-06-xx 物理过滤：系统分类加载时强制校验物理存在性
         if (!p.isEmpty() && QFileInfo::exists(p)) {
@@ -1877,7 +1877,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
 } 
  
 void ContentPanel::recalculateAndEmitStats() {
-    const std::vector<ArcMeta::ItemRepo::ItemRecord>& records = m_model->allRecords();
+    const std::vector<FERREX::ItemRepo::ItemRecord>& records = m_model->allRecords();
     if (records.empty()) {
         emit directoryStatsReady({}, {}, {}, {}, {}, {});
         return;
@@ -1970,7 +1970,7 @@ void ContentPanel::createNewItem(const QString& type) {
     if (success) { 
         loadDirectory(m_currentPath, m_isRecursive); 
         // 虚拟模型中不再支持 findItems，需要手动寻找
-    const std::vector<ArcMeta::ItemRepo::ItemRecord>& records = m_model->allRecords();
+    const std::vector<FERREX::ItemRepo::ItemRecord>& records = m_model->allRecords();
         for (size_t i = 0; i < records.size(); ++i) {
             if (QFileInfo(records[i].path).fileName() == finalName) {
                 QModelIndex srcIdx = m_model->index(static_cast<int>(i), 0);
@@ -2328,5 +2328,5 @@ QSize GridItemDelegate::sizeHint(const QStyleOptionViewItem& option, const QMode
     return QStyledItemDelegate::sizeHint(option, index);
 }
  
-} // namespace ArcMeta
+} // namespace FERREX
 // Force recompile to apply SvgIcons.h changes 

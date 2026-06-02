@@ -2,7 +2,7 @@
 #include "UiHelper.h"
 #include <QLabel>
 
-namespace ArcMeta {
+namespace FERREX {
 
 RuleRow::RuleRow(QWidget* parent) : QWidget(parent) {
     initUi();
@@ -128,4 +128,4 @@ RenameRule RuleRow::getRule() const {
     return rule;
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

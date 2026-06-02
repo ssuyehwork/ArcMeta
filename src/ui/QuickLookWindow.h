@@ -7,7 +7,7 @@
 #include <QGraphicsScene>
 #include <QPlainTextEdit>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 专业快速预览窗口
@@ -58,4 +58,4 @@ private:
     QPlainTextEdit* m_textPreview = nullptr;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

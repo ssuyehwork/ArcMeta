@@ -12,7 +12,7 @@
 #include "../core/AppConfig.h"
 #include <QApplication>
 
-namespace ArcMeta {
+namespace FERREX {
 
 CategoryModel::CategoryModel(Type type, QObject* parent) 
     : QStandardItemModel(parent), m_type(type) 
@@ -257,4 +257,4 @@ bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction actio
     return QStandardItemModel::dropMimeData(mimeData, action, row, column, actualParent);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

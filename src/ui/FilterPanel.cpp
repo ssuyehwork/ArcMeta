@@ -10,7 +10,7 @@
 #include <QPainter>
 #include <QLinearGradient>
 
-namespace ArcMeta {
+namespace FERREX {
 
 // ─── 颜色映射表 ────────────────────────────────────────────────────
 QMap<QString, QColor> FilterPanel::s_colorMap() {
@@ -786,5 +786,5 @@ void FilterPanel::clearAllFilters() {
     emit resetSearchRequested();
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 

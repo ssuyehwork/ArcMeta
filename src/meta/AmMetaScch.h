@@ -9,11 +9,11 @@
 #include <QJsonArray>
 #include "MetadataDefs.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 处理 metadata.scch 的读写类
- * 2026-06-xx 按照用户要求：从 ArcMeta-1 恢复离散元数据管理逻辑，彻底改用 .scch 格式
+ * 2026-06-xx 按照用户要求：从 FERREX-1 恢复离散元数据管理逻辑，彻底改用 .scch 格式
  */
 class AmMetaScch {
 public:
@@ -66,4 +66,4 @@ private:
     static std::wstring toStdWString(const QString& qs) { return qs.toStdWString(); }
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

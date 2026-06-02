@@ -5,7 +5,7 @@
 #include <QPushButton>
 #include <QStringList>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 面包屑导航栏部件
@@ -46,4 +46,4 @@ private:
     QString m_currentPath;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

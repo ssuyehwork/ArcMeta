@@ -5,7 +5,7 @@
 #include <QLabel>
 #include "UiHelper.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 BreadcrumbBar::BreadcrumbBar(QWidget* parent) : QWidget(parent) {
     m_layout = new QHBoxLayout(this);
@@ -101,4 +101,4 @@ void BreadcrumbBar::mousePressEvent(QMouseEvent* event) {
     QWidget::mousePressEvent(event);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX

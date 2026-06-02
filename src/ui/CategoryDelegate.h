@@ -6,9 +6,9 @@
 #include <QLineEdit>
 #include "CategoryModel.h"
 #include "StyleLibrary.h"
-using namespace ArcMeta::Style;
+using namespace FERREX::Style;
 
-namespace ArcMeta {
+namespace FERREX {
 
 class CategoryDelegate : public QStyledItemDelegate {
 public:
@@ -96,4 +96,4 @@ public:
     }
 };
 
-} // namespace ArcMeta
+} // namespace FERREX

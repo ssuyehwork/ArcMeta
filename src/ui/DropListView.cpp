@@ -7,7 +7,7 @@
 #include <QFileInfo>
 #include "Logger.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 DropListView::DropListView(QWidget* parent) : QListView(parent) {}
 
@@ -50,4 +50,4 @@ void DropListView::startDrag(Qt::DropActions supportedActions) {
     drag->exec(supportedActions, Qt::MoveAction);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
