@@ -553,7 +553,7 @@ void ContentPanel::initUi() {
     m_btnLayers->setFixedSize(24, 24); 
     m_btnLayers->setIcon(UiHelper::getIcon("layers", QColor("#B0B0B0"), 18)); 
     // 2026-03-xx 按照宪法要求：禁绝原生 ToolTip，强制对接 ToolTipOverlay 
-    m_btnLayers->setProperty("tooltipText", "递归显示子目录所有文件"); 
+    m_btnLayers->setProperty("tooltipText", "显示子文件夹中的项目"); 
     m_btnLayers->installEventFilter(this); 
     m_btnLayers->setStyleSheet( 
         "QPushButton { background: transparent; border: none; border-radius: 4px; }" 
@@ -1996,7 +1996,7 @@ void ContentPanel::updateLayersButtonState() {
     } 
  
     m_btnLayers->setEnabled(true); 
-    m_btnLayers->setProperty("tooltipText", "递归显示子目录所有文件"); 
+    m_btnLayers->setProperty("tooltipText", "显示子文件夹中的项目"); 
 } 
  
 // --- Delegate --- 
