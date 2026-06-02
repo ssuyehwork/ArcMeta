@@ -46,7 +46,7 @@
     static std::vector<ItemRecord> getRecordsInCategory(int categoryId);
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ### 修改后（After）
@@ -64,7 +64,7 @@
     static bool saveBatch(const std::vector<ItemRecord>& records);
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ### 变更说明
@@ -83,7 +83,7 @@
     return results;
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ### 修改后（After）
@@ -92,7 +92,7 @@
 }
 
 std::vector<ItemRepo::ItemRecord> ItemRepo::getRecursiveItemRecords(const QString& parentPath) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
     
     // 工业级索引对齐：使用 LIKE 'P/%' 并利用索引 (idx_items_path)
@@ -120,7 +120,7 @@ std::vector<ItemRepo::ItemRecord> ItemRepo::getRecursiveItemRecords(const QStrin
 bool ItemRepo::saveBatch(const std::vector<ItemRecord>& records) {
     if (records.empty()) return true;
 
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = FERREX::Database::instance().getThreadDatabase();
     db.transaction();
 
     QSqlQuery q(db);
@@ -144,7 +144,7 @@ bool ItemRepo::saveBatch(const std::vector<ItemRecord>& records) {
     return db.commit();
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ### 变更说明
@@ -167,7 +167,7 @@ bool ItemRepo::saveBatch(const std::vector<ItemRecord>& records) {
     (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive]() { 
         if (!panelPtr) return; 
          
-        std::vector<ArcMeta::ItemRepo::ItemRecord> allItems;
+        std::vector<FERREX::ItemRepo::ItemRecord> allItems;
  
         std::function<void(const QString&, bool)> scanDir; 
         scanDir = [&](const QString& p, bool rec) { 
@@ -214,13 +214,13 @@ bool ItemRepo::saveBatch(const std::vector<ItemRecord>& records) {
     (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive]() { 
         if (!panelPtr) return; 
          
-        std::vector<ArcMeta::ItemRepo::ItemRecord> allItems;
+        std::vector<FERREX::ItemRepo::ItemRecord> allItems;
         QFileInfo dirInfo(path);
         qint64 mtime = dirInfo.lastModified().toMSecsSinceEpoch();
 
         // 2026-06-18 工业级缓存对齐：检查递归对账快照
         if (recursive) {
-            qint64 cachedMtime = ArcMeta::Database::instance().queryFolderCache(path.toStdWString());
+            qint64 cachedMtime = FERREX::Database::instance().queryFolderCache(path.toStdWString());
             if (cachedMtime == mtime) {
                 allItems = ItemRepo::getRecursiveItemRecords(path);
                 if (!allItems.empty()) {
@@ -272,7 +272,7 @@ bool ItemRepo::saveBatch(const std::vector<ItemRecord>& records) {
         // 2026-06-18 物理持久化：在递归模式下，将扫描结果镜像到数据库并更新快照时间
         if (recursive && !allItems.empty()) {
             ItemRepo::saveBatch(allItems);
-            ArcMeta::Database::instance().upsertFolderCache(path.toStdWString(), mtime);
+            FERREX::Database::instance().upsertFolderCache(path.toStdWString(), mtime);
         }
  
         QMetaObject::invokeMethod(qApp, [panelPtr, path, allItems]() { 
@@ -1007,7 +1007,7 @@ void InlineHueSlider::paintEvent(QPaintEvent*) {
 #include <QString>
 #include <QReadWriteLock>
 
-namespace ArcMeta {
+namespace FERREX {
 struct Frn128 {
     uint64_t low = 0;
     uint64_t high = 0;
@@ -1104,7 +1104,7 @@ public:
 #include <cstdint>
 #include "MftDataStore.h"
 
-namespace ArcMeta {
+namespace FERREX {
 struct RawEntry {
     Frn128 frn;
     Frn128 parentFrn;
@@ -1747,7 +1747,7 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
 
     std::unordered_map<std::string, uint64_t> usnMap;
     usnMap[QString::fromStdWString(volume).toStdString()] = m_next_usns[volume];
-    QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
+    QString path = QString("FERREX/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
     return ScchCache::save(path.toStdString().c_str(), f, pf, s, t, no, attr, mf, sp, ds, usnMap);
 }
 ```
@@ -1807,7 +1807,7 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     // 此时已释放 m_dataLock，UI 线程可以自由执行搜索、渲染等操作。
     std::unordered_map<std::string, uint64_t> usnMap;
     usnMap[QString::fromStdWString(volume).toStdString()] = nextUsnVal;
-    QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
+    QString path = QString("FERREX/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
     
     return ScchCache::save(path.toStdString().c_str(), f, pf, s, t, no, attr, mf, sp, ds, usnMap);
 }
@@ -2857,7 +2857,7 @@ bool MftReader::saveToCache() {
 
 ### 变更说明
 - 变更原因：重构图像主色彩提取调色盘（Palettes）算法以对标 Eagle 色彩解析器。全面剔除了大面积纯白背景和极黑噪点像素的干扰，并基于人眼视觉特性引入色彩饱和度与中性亮度的二次幂级加权放大，升级量化空间至 4-bit（4096 桶）高精细度，彻底杜绝了彩色被无用过渡灰白大桶吞噬的问题，完美实现了绿、蓝等主色块的精准捕捉与高品质提取。
-- 影响范围：`ArcMeta::UiHelper::extractPalette` 函数以及所有调用调色盘提取的组件（ScanDialog, ContentPanel, CategoryPanel 等）。
+- 影响范围：`FERREX::UiHelper::extractPalette` 函数以及所有调用调色盘提取的组件（ScanDialog, ContentPanel, CategoryPanel 等）。
 - 是否在需求范围内：是
 
 ---

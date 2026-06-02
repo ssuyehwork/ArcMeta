@@ -1,5 +1,5 @@
-#ifndef ARCMETA_METADATA_DEFS_H
-#define ARCMETA_METADATA_DEFS_H
+#ifndef FERREX_METADATA_DEFS_H
+#define FERREX_METADATA_DEFS_H
 
 #include <string>
 #include <vector>
@@ -72,4 +72,4 @@ struct ItemMeta {
 
 } // namespace FERREX
 
-#endif // ARCMETA_METADATA_DEFS_H
+#endif // FERREX_METADATA_DEFS_H

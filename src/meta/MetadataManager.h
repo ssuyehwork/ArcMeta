@@ -1,5 +1,5 @@
-#ifndef ARCMETA_METADATA_MANAGER_H
-#define ARCMETA_METADATA_MANAGER_H
+#ifndef FERREX_METADATA_MANAGER_H
+#define FERREX_METADATA_MANAGER_H
 
 #include "MetadataDefs.h"
 #include <QObject>
@@ -141,4 +141,4 @@ private:
 
 } // namespace FERREX
 
-#endif // ARCMETA_METADATA_MANAGER_H
+#endif // FERREX_METADATA_MANAGER_H

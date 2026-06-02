@@ -1,5 +1,5 @@
 bool MftReader::loadFromCache() {
-    std::filesystem::path cacheDir = "ArcMeta/cache";
+    std::filesystem::path cacheDir = "FERREX/cache";
     if (!std::filesystem::exists(cacheDir)) return false;
 
     QWriteLocker lock(&m_dataLock);

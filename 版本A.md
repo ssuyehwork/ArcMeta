@@ -1,6 +1,6 @@
 # 代码导出结果 - 20260329_231004
 
-**项目路径**: `G:\C++\ArcMeta\backups\Buk_20260329_220425`
+**项目路径**: `G:\C++\FERREX\backups\Buk_20260329_220425`
 
 **文件总数**: 47
 
@@ -23,7 +23,7 @@
 #include <vector>
 #include <type_traits>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 构造函数，确定目标元数据文件路径
@@ -285,7 +285,7 @@ ItemMeta AmMetaJson::entryToItem(const QJsonObject& obj) {
     return meta;
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/meta/AmMetaJson.h`
@@ -301,7 +301,7 @@ ItemMeta AmMetaJson::entryToItem(const QJsonObject& obj) {
 #include <QJsonDocument>
 #include <QJsonArray>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 文件夹级别的元数据
@@ -414,7 +414,7 @@ private:
     static std::wstring toStdWString(const QString& qs) { return qs.toStdWString(); }
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/meta/BatchRenameEngine.cpp`
@@ -425,7 +425,7 @@ private:
 #include <QDateTime>
 #include <filesystem>
 
-namespace ArcMeta {
+namespace FERREX {
 
 BatchRenameEngine& BatchRenameEngine::instance() {
     static BatchRenameEngine inst;
@@ -461,8 +461,8 @@ QString BatchRenameEngine::processOne(const std::wstring& path, int index, const
                 newName += QDateTime::currentDateTime().toString(rule.value.isEmpty() ? "yyyyMMdd" : rule.value);
                 break;
             case RenameComponentType::Metadata:
-                // 注入 ArcMeta 元数据标记（如评级星级）
-                newName += "[ArcMeta]"; 
+                // 注入 FERREX 元数据标记（如评级星级）
+                newName += "[FERREX]";
                 break;
         }
     }
@@ -495,7 +495,7 @@ bool BatchRenameEngine::execute(const std::vector<std::wstring>& originalPaths, 
     return true;
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/meta/BatchRenameEngine.h`
@@ -507,7 +507,7 @@ bool BatchRenameEngine::execute(const std::vector<std::wstring>& originalPaths, 
 #include <vector>
 #include <QString>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 批量重命名规则组件类型
@@ -555,7 +555,7 @@ private:
     QString processOne(const std::wstring& path, int index, const std::vector<RenameRule>& rules);
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/BreadcrumbBar.cpp`
@@ -568,7 +568,7 @@ private:
 #include <QLabel>
 #include "UiHelper.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 BreadcrumbBar::BreadcrumbBar(QWidget* parent) : QWidget(parent) {
     m_layout = new QHBoxLayout(this);
@@ -664,7 +664,7 @@ void BreadcrumbBar::mousePressEvent(QMouseEvent* event) {
     QWidget::mousePressEvent(event);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/BreadcrumbBar.h`
@@ -677,7 +677,7 @@ void BreadcrumbBar::mousePressEvent(QMouseEvent* event) {
 #include <QPushButton>
 #include <QStringList>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 面包屑导航栏部件
@@ -718,7 +718,7 @@ private:
     QString m_currentPath;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/CategoryPanel.cpp`
@@ -743,7 +743,7 @@ private:
 #include <QInputDialog>
 #include "UiHelper.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 构造函数，设置面板属性
@@ -1006,7 +1006,7 @@ void CategoryPanel::onCustomContextMenuRequested(const QPoint& pos) {
     menu.exec(m_treeView->viewport()->mapToGlobal(pos));
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/CategoryPanel.h`
@@ -1025,7 +1025,7 @@ void CategoryPanel::onCustomContextMenuRequested(const QPoint& pos) {
 #include <QMenu>
 #include <QAction>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 分类面板（面板一）
@@ -1093,7 +1093,7 @@ private slots:
     void onCustomContextMenuRequested(const QPoint& pos);
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/CategoryRepo.cpp`
@@ -1106,7 +1106,7 @@ private slots:
 #include <QJsonArray>
 #include <QDateTime>
 
-namespace ArcMeta {
+namespace FERREX {
 
 bool CategoryRepo::add(Category& cat, QSqlDatabase db) {
     QSqlQuery q(db);
@@ -1193,7 +1193,7 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::wstring& it
     return q.exec();
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/CategoryRepo.h`
@@ -1206,7 +1206,7 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::wstring& it
 #include <vector>
 #include <QSqlDatabase>
 
-namespace ArcMeta {
+namespace FERREX {
 
 struct Category {
     int id = 0;
@@ -1234,14 +1234,14 @@ public:
     static bool removeItemFromCategory(int categoryId, const std::wstring& itemPath, QSqlDatabase db = QSqlDatabase::database());
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `CMakeLists.txt`
 
 ```cmake
 cmake_minimum_required(VERSION 3.20)
-project(ArcMeta)
+project(FERREX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -1283,10 +1283,10 @@ list(APPEND SOURCES
 )
 
 # 可执行文件 (添加 WIN32 属性以消除控制台黑框)
-add_executable(ArcMeta WIN32 ${SOURCES} "ArcMeta.manifest")
+add_executable(FERREX WIN32 ${SOURCES} "FERREX.manifest")
 
 # 链接库 (文档红线列表: ntdll, ole32, bcrypt + QtSql)
-target_link_libraries(ArcMeta PRIVATE
+target_link_libraries(FERREX PRIVATE
     Qt6::Widgets
     Qt6::Svg
     Qt6::Sql
@@ -1295,7 +1295,7 @@ target_link_libraries(ArcMeta PRIVATE
     bcrypt
 )
 
-# 声明管理员权限 Manifest (现代 CMake 方式通过直接将 ArcMeta.manifest 加入 add_executable 处理)
+# 声明管理员权限 Manifest (现代 CMake 方式通过直接将 FERREX.manifest 加入 add_executable 处理)
 ```
 
 ## 文件: `src/ui/ContentPanel.cpp`
@@ -1346,7 +1346,7 @@ target_link_libraries(ArcMeta PRIVATE
 #include "../meta/AmMetaJson.h"
 #include "UiHelper.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 内部代理类：专门处理高级筛选逻辑
@@ -2611,7 +2611,7 @@ void GridItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionV
     editor->setGeometry(nameBoxRect);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/ContentPanel.h`
@@ -2634,7 +2634,7 @@ void GridItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionV
 #include "FilterPanel.h"
 #include "../meta/AmMetaJson.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 自定义 Role 枚举，用于 QStandardItemModel 数据存取
@@ -2848,7 +2848,7 @@ public:
     void updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/Database.cpp`
@@ -2861,7 +2861,7 @@ public:
 #include <QDir>
 #include <QStandardPaths>
 
-namespace ArcMeta {
+namespace FERREX {
 
 struct Database::Impl {
     QSqlDatabase db;
@@ -2916,7 +2916,7 @@ void Database::createIndexes() {
     q.exec("CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted)");
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/Database.h`
@@ -2928,7 +2928,7 @@ void Database::createIndexes() {
 #include <memory>
 #include <QSqlDatabase>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 数据库管理类 (原生 QtSql 实现，拒绝第三方 SQLiteCpp)
@@ -2955,7 +2955,7 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/crypto/EncryptionManager.cpp`
@@ -2970,7 +2970,7 @@ private:
 
 #pragma comment(lib, "bcrypt.lib")
 
-namespace ArcMeta {
+namespace FERREX {
 
 EncryptionManager& EncryptionManager::instance() {
     static EncryptionManager inst;
@@ -3107,7 +3107,7 @@ std::shared_ptr<DecryptedFileHandle> EncryptionManager::decryptToTemp(const std:
     return std::make_shared<DecryptedFileHandle>(hFile, outPath);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/crypto/EncryptionManager.h`
@@ -3121,7 +3121,7 @@ std::shared_ptr<DecryptedFileHandle> EncryptionManager::decryptToTemp(const std:
 #include <vector>
 #include <memory>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 临时解密文件句柄持有者 (RAII)
@@ -3169,7 +3169,7 @@ private:
     BCRYPT_ALG_HANDLE m_aesAlg = NULL;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/FavoritesRepo.cpp`
@@ -3180,7 +3180,7 @@ private:
 #include <QSqlError>
 #include <QDateTime>
 
-namespace ArcMeta {
+namespace FERREX {
 
 bool FavoritesRepo::add(const Favorite& fav, QSqlDatabase db) {
     QSqlQuery q(db);
@@ -3214,7 +3214,7 @@ std::vector<Favorite> FavoritesRepo::getAll(QSqlDatabase db) {
     return results;
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/FavoritesRepo.h`
@@ -3227,7 +3227,7 @@ std::vector<Favorite> FavoritesRepo::getAll(QSqlDatabase db) {
 #include <vector>
 #include <QSqlDatabase>
 
-namespace ArcMeta {
+namespace FERREX {
 
 struct Favorite {
     std::wstring path;
@@ -3246,7 +3246,7 @@ public:
     static std::vector<Favorite> getAll(QSqlDatabase db = QSqlDatabase::database());
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/FilterPanel.cpp`
@@ -3258,7 +3258,7 @@ public:
 #include <QMouseEvent>
 #include <QCursor>
 
-namespace ArcMeta {
+namespace FERREX {
 
 // ─── 颜色映射表 ────────────────────────────────────────────────────
 QMap<QString, QColor> FilterPanel::s_colorMap() {
@@ -3684,7 +3684,7 @@ void FilterPanel::clearAllFilters() {
     emit filterChanged(m_filter);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/FilterPanel.h`
@@ -3702,7 +3702,7 @@ void FilterPanel::clearAllFilters() {
 #include <QMap>
 #include <QStringList>
 
-namespace ArcMeta {
+namespace FERREX {
 
 struct FilterState {
     QList<int>   ratings;
@@ -3771,7 +3771,7 @@ private:
     QPushButton*  m_btnClearAll     = nullptr;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/FolderRepo.cpp`
@@ -3783,7 +3783,7 @@ private:
 #include <QJsonDocument>
 #include <QJsonArray>
 
-namespace ArcMeta {
+namespace FERREX {
 
 bool FolderRepo::save(const std::wstring& path, const FolderMeta& meta, QSqlDatabase db) {
     QSqlQuery q(db);
@@ -3835,7 +3835,7 @@ bool FolderRepo::remove(const std::wstring& path, QSqlDatabase db) {
     return q.exec();
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/FolderRepo.h`
@@ -3849,7 +3849,7 @@ bool FolderRepo::remove(const std::wstring& path, QSqlDatabase db) {
 #include <vector>
 #include <QSqlDatabase>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 文件夹元数据持久层
@@ -3872,7 +3872,7 @@ public:
     static bool remove(const std::wstring& path, QSqlDatabase db = QSqlDatabase::database());
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/ItemRepo.cpp`
@@ -3885,7 +3885,7 @@ public:
 #include <QJsonDocument>
 #include <QJsonArray>
 
-namespace ArcMeta {
+namespace FERREX {
 
 bool ItemRepo::save(const std::wstring& parentPath, const std::wstring& name, const ItemMeta& meta, QSqlDatabase db) {
     QSqlQuery q(db);
@@ -3997,7 +3997,7 @@ std::map<std::wstring, ItemMeta> ItemRepo::getMetadataBatch(const std::wstring& 
     return results;
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/ItemRepo.h`
@@ -4012,7 +4012,7 @@ std::map<std::wstring, ItemMeta> ItemRepo::getMetadataBatch(const std::wstring& 
 #include <map>
 #include <QSqlDatabase>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 文件条目持久层
@@ -4039,7 +4039,7 @@ public:
     static std::map<std::wstring, ItemMeta> getMetadataBatch(const std::wstring& parentPath, QSqlDatabase db = QSqlDatabase::database());
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/main.cpp`
@@ -4076,40 +4076,40 @@ int main(int argc, char *argv[]) {
     // 设置高 DPI 支持 (Qt 6 默认开启，此处显式设置)
     QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
     QApplication a(argc, argv);
-    a.setApplicationName("ArcMeta");
-    a.setOrganizationName("ArcMetaTeam");
+    a.setApplicationName("FERREX");
+    a.setOrganizationName("FERREXTeam");
 
     // 1. 权限检查逻辑
     if (!isRunningAsAdmin()) {
         QMessageBox::critical(nullptr, "权限不足", 
-            "ArcMeta 需要管理员权限以读取 MFT 数据及加速索引。\n请尝试“以管理员身份运行”。");
+            "FERREX 需要管理员权限以读取 MFT 数据及加速索引。\n请尝试“以管理员身份运行”。");
         // 文档规定：无权限时执行降级方案，但启动基础 UI 仍需进行
     }
 
     // 2. 初始化核心底层
-    std::wstring dbPath = L"arcmeta.db";
-    if (!ArcMeta::Database::instance().init(dbPath)) {
+    std::wstring dbPath = L"ferrex.db";
+    if (!FERREX::Database::instance().init(dbPath)) {
         QMessageBox::critical(nullptr, "错误", "无法初始化数据库，程序即将退出。");
         return -1;
     }
 
     // 3. 初始化文件索引
-    ArcMeta::MftReader::instance().buildIndex();
+    FERREX::MftReader::instance().buildIndex();
 
     // 4. 启动异步同步队列
-    ArcMeta::SyncQueue::instance().start();
+    FERREX::SyncQueue::instance().start();
 
     // 5. 执行增量同步
-    ArcMeta::SyncEngine::instance().runIncrementalSync();
+    FERREX::SyncEngine::instance().runIncrementalSync();
 
     // 6. 显示主窗口
-    ArcMeta::MainWindow w;
+    FERREX::MainWindow w;
     w.show();
 
     int ret = a.exec();
 
     // 6. 优雅退出：刷空队列并停止线程
-    ArcMeta::SyncQueue::instance().stop();
+    FERREX::SyncQueue::instance().stop();
 
     return ret;
 }
@@ -4153,16 +4153,16 @@ int main(int argc, char *argv[]) {
 #include <windows.h>
 #endif
 
-namespace ArcMeta {
+namespace FERREX {
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent) {
     resize(1600, 900);
     setMinimumSize(1280, 720);
-    setWindowTitle("ArcMeta");
+    setWindowTitle("FERREX");
 
     // 从设置读取置顶状态
-    QSettings settings("ArcMeta团队", "ArcMeta");
+    QSettings settings("FERREX团队", "FERREX");
     m_isPinned = settings.value("MainWindow/AlwaysOnTop", false).toBool();
     
     // 设置基础窗口标志 (保持无边框)
@@ -4303,25 +4303,25 @@ void MainWindow::initUi() {
             QFileInfo info(path);
             
             // 2026-03-xx 极致性能优化：Zero-IO UI，所有属性直接从模型 Role 读取，彻底禁绝 QFileInfo 系统调用
-            bool isDir = idx.data(ArcMeta::IsDirRole).toBool();
+            bool isDir = idx.data(FERREX::IsDirRole).toBool();
             QString name = idx.data(Qt::DisplayRole).toString();
-            QString typeStr = idx.data(ArcMeta::TypeRole).toString() == "folder" ? "文件夹" : QFileInfo(path).suffix().toUpper() + " 文件";
-            qlonglong sizeRaw = idx.data(ArcMeta::SizeRawRole).toLongLong();
+            QString typeStr = idx.data(FERREX::TypeRole).toString() == "folder" ? "文件夹" : QFileInfo(path).suffix().toUpper() + " 文件";
+            qlonglong sizeRaw = idx.data(FERREX::SizeRawRole).toLongLong();
             QString sizeStr = isDir ? "-" : QString::number(sizeRaw / 1024) + " KB";
             
-            QString ctimeStr = QDateTime::fromMSecsSinceEpoch((qint64)idx.data(ArcMeta::CTimeRawRole).toDouble()).toString("yyyy-MM-dd");
-            QString mtimeStr = QDateTime::fromMSecsSinceEpoch((qint64)idx.data(ArcMeta::MTimeRawRole).toDouble()).toString("yyyy-MM-dd");
+            QString ctimeStr = QDateTime::fromMSecsSinceEpoch((qint64)idx.data(FERREX::CTimeRawRole).toDouble()).toString("yyyy-MM-dd");
+            QString mtimeStr = QDateTime::fromMSecsSinceEpoch((qint64)idx.data(FERREX::MTimeRawRole).toDouble()).toString("yyyy-MM-dd");
 
             m_metaPanel->updateInfo(
                 name, typeStr, sizeStr, ctimeStr, mtimeStr, mtimeStr, path,
-                idx.data(ArcMeta::EncryptedRole).toBool()
+                idx.data(FERREX::EncryptedRole).toBool()
             );
 
             // 应用缓存中的元数据状态
-            m_metaPanel->setRating(idx.data(ArcMeta::RatingRole).toInt());
-            m_metaPanel->setColor(idx.data(ArcMeta::ColorRole).toString().toStdWString());
-            m_metaPanel->setPinned(idx.data(ArcMeta::IsLockedRole).toBool());
-            m_metaPanel->setTags(idx.data(ArcMeta::TagsRole).toStringList());
+            m_metaPanel->setRating(idx.data(FERREX::RatingRole).toInt());
+            m_metaPanel->setColor(idx.data(FERREX::ColorRole).toString().toStdWString());
+            m_metaPanel->setPinned(idx.data(FERREX::IsLockedRole).toBool());
+            m_metaPanel->setTags(idx.data(FERREX::TagsRole).toStringList());
         }
         // 状态栏右侧显示已选数量
         if (m_statusRight) {
@@ -4392,18 +4392,18 @@ void MainWindow::initUi() {
 
         // 2. 逐文件夹执行批量原子保存
         for (auto& [folderPath, items] : folderGroups) {
-            ArcMeta::AmMetaJson meta(folderPath);
+            FERREX::AmMetaJson meta(folderPath);
             meta.load();
             for (auto& itemPair : items) {
                 const auto& idx = itemPair.first;
                 const auto& fileName = itemPair.second;
 
                 if (rating != -1) {
-                    m_contentPanel->getProxyModel()->setData(idx, rating, ArcMeta::RatingRole);
+                    m_contentPanel->getProxyModel()->setData(idx, rating, FERREX::RatingRole);
                     meta.items()[fileName].rating = rating;
                 }
                 if (color != L"__NO_CHANGE__") {
-                    m_contentPanel->getProxyModel()->setData(idx, QString::fromStdWString(color), ArcMeta::ColorRole);
+                    m_contentPanel->getProxyModel()->setData(idx, QString::fromStdWString(color), FERREX::ColorRole);
                     meta.items()[fileName].color = color;
                 }
             }
@@ -4846,7 +4846,7 @@ void MainWindow::onPinToggled(bool checked) {
         saveTimer = new QTimer(this);
         saveTimer->setSingleShot(true);
         connect(saveTimer, &QTimer::timeout, [this]() {
-            QSettings settings("ArcMeta团队", "ArcMeta");
+            QSettings settings("FERREX团队", "FERREX");
             settings.setValue("MainWindow/AlwaysOnTop", m_isPinned);
         });
     }
@@ -4854,12 +4854,12 @@ void MainWindow::onPinToggled(bool checked) {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-    QSettings settings("ArcMeta团队", "ArcMeta");
+    QSettings settings("FERREX团队", "FERREX");
     settings.setValue("MainWindow/LastPath", m_currentPath);
     QMainWindow::closeEvent(event);
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/MainWindow.h`
@@ -4875,7 +4875,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 #include <QLabel>
 #include <QStackedWidget>
 
-namespace ArcMeta {
+namespace FERREX {
 
 class BreadcrumbBar;
 class CategoryPanel;
@@ -4964,7 +4964,7 @@ private:
     QPoint m_dragPosition;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/MetaPanel.cpp`
@@ -4984,7 +4984,7 @@ private:
 #include "UiHelper.h"
 #include "../meta/AmMetaJson.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 // --- TagPill ---
 TagPill::TagPill(const QString& text, QWidget* parent) 
@@ -5392,7 +5392,7 @@ void MetaPanel::setTags(const QStringList& tags) {
     }
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/MetaPanel.h`
@@ -5414,7 +5414,7 @@ void MetaPanel::setTags(const QStringList& tags) {
 #include <vector>
 #include <string>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief Tag Pill 圆角标签组件 (22px height, 11px radius)
@@ -5555,7 +5555,7 @@ private slots:
     void onTagDeleted(const QString& text);
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/mft/MftReader.cpp`
@@ -5572,7 +5572,7 @@ private slots:
 #include <functional>
 #include <thread>
 
-namespace ArcMeta {
+namespace FERREX {
 
 MftReader& MftReader::instance() {
     static MftReader inst;
@@ -5934,7 +5934,7 @@ void MftReader::removeEntry(const std::wstring& volume, DWORDLONG frn) {
     }
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/mft/MftReader.h`
@@ -5950,7 +5950,7 @@ void MftReader::removeEntry(const std::wstring& volume, DWORDLONG frn) {
 #include <cwctype>
 #include <windows.h>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 文件条目基础结构
@@ -6054,7 +6054,7 @@ private:
     std::unordered_map<std::wstring, bool> m_refreshPending;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/NavPanel.cpp`
@@ -6073,7 +6073,7 @@ private:
 #include <QIcon>
 #include <QStandardPaths>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 构造函数，设置面板属性
@@ -6212,7 +6212,7 @@ void NavPanel::fetchChildDirs(QStandardItem* parent) {
     }
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/NavPanel.h`
@@ -6227,7 +6227,7 @@ void NavPanel::fetchChildDirs(QStandardItem* parent) {
 #include <QVBoxLayout>
 #include <QDir>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 导航面板（面板二）
@@ -6268,7 +6268,7 @@ private slots:
     void onTreeClicked(const QModelIndex& index);
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/mft/PathBuilder.cpp`
@@ -6279,7 +6279,7 @@ private slots:
 #include <unordered_set>
 #include <type_traits>
 
-namespace ArcMeta {
+namespace FERREX {
 
 std::wstring PathBuilder::getPath(const std::wstring& volume, DWORDLONG frn) {
     std::unordered_set<DWORDLONG> visited;
@@ -6325,7 +6325,7 @@ std::wstring PathBuilder::resolveRecursive(const std::wstring& volume, DWORDLONG
     return parentPath + L"\\" + entry.name;
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/mft/PathBuilder.h`
@@ -6337,7 +6337,7 @@ std::wstring PathBuilder::resolveRecursive(const std::wstring& volume, DWORDLONG
 #include <string>
 #include <unordered_set>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 路径重建工具
@@ -6365,7 +6365,7 @@ private:
                                           std::unordered_set<DWORDLONG>& visited, int depth);
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/QuickLookWindow.cpp`
@@ -6378,7 +6378,7 @@ private:
 #include <QGraphicsPixmapItem>
 #include <QLabel>
 
-namespace ArcMeta {
+namespace FERREX {
 
 QuickLookWindow& QuickLookWindow::instance() {
     static QuickLookWindow inst;
@@ -6484,7 +6484,7 @@ void QuickLookWindow::keyPressEvent(QKeyEvent* event) {
     }
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/QuickLookWindow.h`
@@ -6499,7 +6499,7 @@ void QuickLookWindow::keyPressEvent(QKeyEvent* event) {
 #include <QGraphicsScene>
 #include <QPlainTextEdit>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 专业快速预览窗口
@@ -6546,7 +6546,7 @@ private:
     QLabel* m_titleLabel = nullptr;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/SyncEngine.cpp`
@@ -6567,7 +6567,7 @@ private:
 #include <filesystem>
 #include <map>
 
-namespace ArcMeta {
+namespace FERREX {
 
 SyncEngine& SyncEngine::instance() {
     static SyncEngine inst;
@@ -6691,7 +6691,7 @@ void SyncEngine::scanDirectory(const std::filesystem::path& root, std::vector<st
     }
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/db/SyncEngine.h`
@@ -6704,7 +6704,7 @@ void SyncEngine::scanDirectory(const std::filesystem::path& root, std::vector<st
 #include <functional>
 #include <filesystem>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 同步引擎
@@ -6737,7 +6737,7 @@ private:
     void scanDirectory(const std::filesystem::path& root, std::vector<std::wstring>& metaFiles);
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/meta/SyncQueue.cpp`
@@ -6755,7 +6755,7 @@ private:
 #include <QString>
 #include <QDateTime>
 
-namespace ArcMeta {
+namespace FERREX {
 
 SyncQueue& SyncQueue::instance() {
     static SyncQueue inst;
@@ -6881,7 +6881,7 @@ bool SyncQueue::processBatch() {
     }
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/meta/SyncQueue.h`
@@ -6896,7 +6896,7 @@ bool SyncQueue::processBatch() {
 #include <thread>
 #include <atomic>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief 懒更新队列
@@ -6944,7 +6944,7 @@ private:
     std::atomic<bool> m_running{false};
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/ToolTipOverlay.cpp`
@@ -6952,7 +6952,7 @@ private:
 ```cpp
 #include "ToolTipOverlay.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 ToolTipOverlay::ToolTipOverlay() : QWidget(nullptr) {
     // [CRITICAL] 彻底弃用 Qt::ToolTip，防止 OS 动画残留
@@ -7081,7 +7081,7 @@ void ToolTipOverlay::paintEvent(QPaintEvent*) {
     p.restore();
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/ui/ToolTipOverlay.h`
@@ -7108,7 +7108,7 @@ void ToolTipOverlay::paintEvent(QPaintEvent*) {
 #include <QBrush>
 #include <QRectF>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief ToolTipOverlay: 全局统一的自定义 Tooltip
@@ -7153,7 +7153,7 @@ private:
     QColor m_currentBorderColor = QColor("#B0B0B0");
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 
 #endif // TOOLTIPOVERLAY_H
 ```
@@ -7173,7 +7173,7 @@ private:
 #include <QSettings>
 #include "../../SvgIcons.h"
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief UI 辅助类
@@ -7230,7 +7230,7 @@ public:
         if (s_cache.contains(upperExt)) return s_cache[upperExt];
 
         // 3. 检查持久化存储 (QSettings)
-        QSettings settings("ArcMeta团队", "ArcMeta");
+        QSettings settings("FERREX团队", "FERREX");
         QString settingKey = QString("ExtensionColors/%1").arg(upperExt);
         if (settings.contains(settingKey)) {
             QColor color = settings.value(settingKey).value<QColor>();
@@ -7251,7 +7251,7 @@ public:
     }
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/mft/UsnWatcher.cpp`
@@ -7268,7 +7268,7 @@ public:
 #include <QVariant>
 #include <QString>
 
-namespace ArcMeta {
+namespace FERREX {
 
 UsnWatcher::UsnWatcher(const std::wstring& volume) : m_volume(volume) {}
 
@@ -7440,7 +7440,7 @@ void UsnWatcher::handleRecord(USN_RECORD_V2* pRecord, QSqlDatabase db) {
     }
 }
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 
 ## 文件: `src/mft/UsnWatcher.h`
@@ -7454,7 +7454,7 @@ void UsnWatcher::handleRecord(USN_RECORD_V2* pRecord, QSqlDatabase db) {
 #include <atomic>
 #include <QSqlDatabase>
 
-namespace ArcMeta {
+namespace FERREX {
 
 /**
  * @brief USN Journal 实时监听引擎
@@ -7495,6 +7495,6 @@ private:
     USN m_lastUsn = 0;
 };
 
-} // namespace ArcMeta
+} // namespace FERREX
 ```
 

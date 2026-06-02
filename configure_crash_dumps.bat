@@ -9,15 +9,15 @@ reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" /v 
 reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" /v DumpCount /t REG_DWORD /d 10 /f
 reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" /v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f
 
-REM 为ArcMeta.exe创建专用转储设置
-reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\ArcMeta.exe" /v DumpType /t REG_DWORD /d 2 /f
-reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\ArcMeta.exe" /v DumpCount /t REG_DWORD /d 10 /f
-reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\ArcMeta.exe" /v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f
+REM 为FERREX.exe创建专用转储设置
+reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\FERREX.exe" /v DumpType /t REG_DWORD /d 2 /f
+reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\FERREX.exe" /v DumpCount /t REG_DWORD /d 10 /f
+reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\FERREX.exe" /v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f
 
 echo.
 echo ✅ 崩溃转储配置完成！
 echo 📁 转储文件将保存到: %LOCALAPPDATA%\CrashDumps
 echo.
-echo 接下来请运行ArcMeta.exe触发崩溃，然后使用WinDbg分析转储文件
+echo 接下来请运行FERREX.exe触发崩溃，然后使用WinDbg分析转储文件
 echo.
 pause
