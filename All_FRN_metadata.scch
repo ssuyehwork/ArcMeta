@@ -1,0 +1,31 @@
+{
+    "folder": {
+        "color": "",
+        "note": "",
+        "pinned": false,
+        "rating": 0,
+        "sort_by": "name",
+        "sort_order": "asc",
+        "tags": [
+        ]
+    },
+    "items": {
+        "版本A.md": {
+            "color": "blue",
+            "encrypt_iv": "",
+            "encrypt_salt": "",
+            "encrypt_verify_hash": "",
+            "encrypted": false,
+            "frn": "",
+            "note": "",
+            "original_name": "",
+            "pinned": false,
+            "rating": 5,
+            "tags": [
+            ],
+            "type": "file",
+            "volume": ""
+        }
+    },
+    "version": "1"
+}

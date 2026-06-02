@@ -36,6 +36,263 @@
 - 是否在需求范围内：是
 
 ---
+## [71] 变更时间：2026-06-18 10:55:12
+
+**文件路径：** `src/db/ItemRepo.h`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    static std::vector<ItemRecord> getRecordsInCategory(int categoryId);
+};
+
+} // namespace ArcMeta
+```
+
+### 修改后（After）
+```cpp
+    static std::vector<ItemRecord> getRecordsInCategory(int categoryId);
+
+    /**
+     * @brief 2026-06-18 按照用户要求：从数据库镜像中递归获取指定路径下的所有子项
+     */
+    static std::vector<ItemRecord> getRecursiveItemRecords(const QString& parentPath);
+
+    /**
+     * @brief 2026-06-18 按照用户要求：批量保存扫描到的基础信息，提升持久化性能
+     */
+    static bool saveBatch(const std::vector<ItemRecord>& records);
+};
+
+} // namespace ArcMeta
+```
+
+### 变更说明
+- 变更原因：为实现可持久化递归缓存，新增批量保存及递归查询接口，提升大型目录加载性能。
+- 影响范围：`ItemRepo` 接口层。
+- 是否在需求范围内：是
+
+---
+## [72] 变更时间：2026-06-18 10:58:45
+
+**文件路径：** `src/db/ItemRepo.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    return results;
+}
+
+} // namespace ArcMeta
+```
+
+### 修改后（After）
+```cpp
+    return results;
+}
+
+std::vector<ItemRepo::ItemRecord> ItemRepo::getRecursiveItemRecords(const QString& parentPath) {
+    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlQuery q(db);
+    
+    // 工业级索引对齐：使用 LIKE 'P/%' 并利用索引 (idx_items_path)
+    QString pattern = parentPath;
+    if (!pattern.endsWith('\\') && !pattern.endsWith('/')) pattern += "\\";
+    pattern += "%";
+
+    q.prepare("SELECT volume, frn, path, type FROM items WHERE path LIKE ? AND deleted = 0");
+    q.addBindValue(pattern);
+    
+    std::vector<ItemRecord> results;
+    if (q.exec()) {
+        while (q.next()) {
+            ItemRecord r;
+            r.volume = q.value(0).toString();
+            r.frn = q.value(1).toString();
+            r.path = q.value(2).toString();
+            r.isDir = (q.value(3).toString() == "folder");
+            results.push_back(r);
+        }
+    }
+    return results;
+}
+
+bool ItemRepo::saveBatch(const std::vector<ItemRecord>& records) {
+    if (records.empty()) return true;
+
+    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    db.transaction();
+
+    QSqlQuery q(db);
+    // 采用 INSERT OR REPLACE 以保证扫描结果是磁盘最新镜像
+    q.prepare("INSERT OR REPLACE INTO items (volume, frn, path, parent_path, type, deleted) "
+              "VALUES (?, ?, ?, ?, ?, 0)");
+
+    for (const auto& r : records) {
+        QFileInfo info(r.path);
+        q.addBindValue(r.volume);
+        q.addBindValue(r.frn);
+        q.addBindValue(r.path);
+        q.addBindValue(QDir::toNativeSeparators(info.absolutePath()));
+        q.addBindValue(r.isDir ? "folder" : "file");
+        if (!q.exec()) {
+            db.rollback();
+            return false;
+        }
+    }
+
+    return db.commit();
+}
+
+} // namespace ArcMeta
+```
+
+### 变更说明
+- 变更原因：实现批量入库与递归 SQL 查询，对接工业级镜像索引逻辑。
+- 影响范围：`ItemRepo` 实现层。
+- 是否在需求范围内：是
+
+---
+## [73] 变更时间：2026-06-18 11:05:33
+
+**文件路径：** `src/ui/ContentPanel.cpp`
+**变更类型：** 修改
+
+### 修改前（Before）
+```cpp
+    m_currentPath = path; 
+    updateLayersButtonState(); 
+     
+    QPointer<ContentPanel> panelPtr(this); 
+    (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive]() { 
+        if (!panelPtr) return; 
+         
+        std::vector<ArcMeta::ItemRepo::ItemRecord> allItems;
+ 
+        std::function<void(const QString&, bool)> scanDir; 
+        scanDir = [&](const QString& p, bool rec) { 
+            QDir dir(p); 
+            if (!dir.exists()) return; 
+ 
+            QFileInfoList entries = dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name); 
+            for (const QFileInfo& info : entries) { 
+                if (!panelPtr) return; 
+                if (info.fileName() == ".am_meta.json" || info.fileName() == ".am_meta.json.tmp") continue; 
+ 
+                ItemRepo::ItemRecord r;
+                r.path = QDir::toNativeSeparators(info.absoluteFilePath());
+                r.isDir = info.isDir();
+                allItems.push_back(r);
+ 
+                if (rec && info.isDir()) { 
+                    scanDir(info.absoluteFilePath(), true); 
+                } 
+            } 
+        }; 
+ 
+        scanDir(path, recursive); 
+        if (!panelPtr) return; 
+ 
+        QMetaObject::invokeMethod(qApp, [panelPtr, path, allItems]() { 
+            if (panelPtr && panelPtr->m_currentPath == path) { 
+                panelPtr->m_model->setRecords(allItems);
+                panelPtr->m_isLoading = false;
+                panelPtr->recalculateAndEmitStats();
+                // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
+                panelPtr->applyFilters();
+            } 
+        }, Qt::QueuedConnection); 
+    }); 
+```
+
+### 修改后（After）
+```cpp
+    m_currentPath = path; 
+    updateLayersButtonState(); 
+     
+    QPointer<ContentPanel> panelPtr(this); 
+    (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive]() { 
+        if (!panelPtr) return; 
+         
+        std::vector<ArcMeta::ItemRepo::ItemRecord> allItems;
+        QFileInfo dirInfo(path);
+        qint64 mtime = dirInfo.lastModified().toMSecsSinceEpoch();
+
+        // 2026-06-18 工业级缓存对齐：检查递归对账快照
+        if (recursive) {
+            qint64 cachedMtime = ArcMeta::Database::instance().queryFolderCache(path.toStdWString());
+            if (cachedMtime == mtime) {
+                allItems = ItemRepo::getRecursiveItemRecords(path);
+                if (!allItems.empty()) {
+                    qDebug() << "[Content] 命中递归缓存快照，秒级加载项目数:" << allItems.size();
+                    QMetaObject::invokeMethod(qApp, [panelPtr, path, allItems]() {
+                        if (panelPtr && panelPtr->m_currentPath == path) {
+                            panelPtr->m_model->setRecords(allItems);
+                            panelPtr->m_isLoading = false;
+                            panelPtr->recalculateAndEmitStats();
+                            panelPtr->applyFilters();
+                        }
+                    });
+                    return;
+                }
+            }
+        }
+
+        std::function<void(const QString&, bool)> scanDir; 
+        scanDir = [&](const QString& p, bool rec) { 
+            QDir dir(p); 
+            if (!dir.exists()) return; 
+ 
+            QFileInfoList entries = dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name); 
+            for (const QFileInfo& info : entries) { 
+                if (!panelPtr) return; 
+                if (info.fileName() == ".am_meta.json" || info.fileName() == ".am_meta.json.tmp") continue; 
+ 
+                ItemRepo::ItemRecord r;
+                r.path = QDir::toNativeSeparators(info.absoluteFilePath());
+                r.isDir = info.isDir();
+                // 2026-06-18 物理对齐：补全卷标与 FRN 以支持批量入库
+                r.volume = QString::fromStdWString(MetadataManager::getVolumeSerialNumber(r.path.toStdWString()));
+                std::string dummyFid;
+                std::wstring frn;
+                MetadataManager::fetchWinApiMetadataDirect(r.path.toStdWString(), dummyFid, &frn);
+                r.frn = QString::fromStdWString(frn);
+
+                allItems.push_back(r);
+ 
+                if (rec && info.isDir()) { 
+                    scanDir(info.absoluteFilePath(), true); 
+                } 
+            } 
+        }; 
+ 
+        scanDir(path, recursive); 
+        if (!panelPtr) return; 
+
+        // 2026-06-18 物理持久化：在递归模式下，将扫描结果镜像到数据库并更新快照时间
+        if (recursive && !allItems.empty()) {
+            ItemRepo::saveBatch(allItems);
+            ArcMeta::Database::instance().upsertFolderCache(path.toStdWString(), mtime);
+        }
+ 
+        QMetaObject::invokeMethod(qApp, [panelPtr, path, allItems]() { 
+            if (panelPtr && panelPtr->m_currentPath == path) { 
+                panelPtr->m_model->setRecords(allItems);
+                panelPtr->m_isLoading = false;
+                panelPtr->recalculateAndEmitStats();
+                // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
+                panelPtr->applyFilters();
+            } 
+        }, Qt::QueuedConnection); 
+    }); 
+```
+
+### 变更说明
+- 变更原因：重构 `loadDirectory` 扫描逻辑，引入“工业级 SQLite 镜像索引”机制。通过 mtime 校验实现秒级秒开，彻底解决大型文件夹递归加载慢的痛点。
+- 影响范围：`ContentPanel` 核心加载逻辑。
+- 是否在需求范围内：是
+
+---
 ## [3] 变更时间：2026-06-18 14:25:00
 
 **文件路径：** `Memories.md`

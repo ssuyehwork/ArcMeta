@@ -18,7 +18,7 @@ void AllFrnManager::registerFrn(const std::wstring& frn, const std::wstring& pat
     std::unique_lock<std::shared_mutex> lock(s_frnMutex);
     
     QJsonObject root;
-    QFile file("All_FRN_am_meta.json");
+    QFile file("All_FRN_metadata.scch");
     if (file.exists() && file.open(QIODevice::ReadOnly)) {
         QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
         if (doc.isObject()) {
@@ -41,7 +41,7 @@ void AllFrnManager::registerFrn(const std::wstring& frn, const std::wstring& pat
         file.close();
         qDebug() << "[AllFrnManager] 成功登记 FRN:" << qFrn << "路径:" << qPath;
     } else {
-        qWarning() << "[AllFrnManager] 无法写入 All_FRN_am_meta.json";
+        qWarning() << "[AllFrnManager] 无法写入 All_FRN_metadata.scch";
     }
 }
 
@@ -49,7 +49,7 @@ QMap<QString, QString> AllFrnManager::getAllFrns() {
     QMap<QString, QString> result;
     std::shared_lock<std::shared_mutex> lock(s_frnMutex);
 
-    QFile file("All_FRN_am_meta.json");
+    QFile file("All_FRN_metadata.scch");
     if (file.exists() && file.open(QIODevice::ReadOnly)) {
         QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
         if (doc.isObject()) {

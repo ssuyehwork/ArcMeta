@@ -18,7 +18,7 @@ public:
     static SyncEngine& instance();
 
     /**
-     * @brief 启动增量同步：处理 Synchronize.json 中的待处理目录
+     * @brief 启动增量同步：处理 Synchronize.scch 中的待处理目录
      */
     void runIncrementalSync(std::function<void()> onFinished = nullptr);
 
