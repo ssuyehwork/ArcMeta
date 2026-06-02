@@ -142,12 +142,12 @@ set(SOURCES
     src/ui/ToolTipOverlay.h
     src/ui/TreeItemDelegate.h
     src/ui/UiHelper.h
-    FERREX.rc
+    ArcMeta.rc
     resources/resources.qrc
 )
 
 # 可执行文件 (添加 WIN32 属性以消除控制台黑框)
-# 修复：移除直接引用的 "FERREX.manifest"，改由 FERREX.rc 引入以杜绝 mt.exe 冲突
+# 修复：移除直接引用的 "ArcMeta.manifest"，改由 ArcMeta.rc 引入以杜绝 mt.exe 冲突
 add_executable(FERREX WIN32 ${SOURCES})
 
 # 链接库 (文档红线列表: ole32, bcrypt + QtSql)
@@ -166,7 +166,7 @@ target_link_libraries(FERREX PRIVATE
 )
 
 # 2026-03-xx 按照用户要求及《记忆碎片》规范：
-# 为避免 mt.exe 清单合并冲突，通过 FERREX.rc 嵌入清单并禁用链接器的默认清单生成
+# 为避免 mt.exe 清单合并冲突，通过 ArcMeta.rc 嵌入清单并禁用链接器的默认清单生成
 if(MSVC)
     target_link_options(FERREX PRIVATE "/MANIFEST:NO")
 endif()
