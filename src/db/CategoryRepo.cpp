@@ -12,14 +12,14 @@
 
 namespace ArcMeta {
 
-bool CategoryRepo::m_isScchMode = false;
-void CategoryRepo::setScchMode(bool enabled) { m_isScchMode = enabled; }
-bool CategoryRepo::isScchMode() { return m_isScchMode; }
+bool CategoryRepo::m_isJsonMode = false;
+void CategoryRepo::setJsonMode(bool enabled) { m_isJsonMode = enabled; }
+bool CategoryRepo::isJsonMode() { return m_isJsonMode; }
 
-namespace ScchCategoryEngine {
+namespace JsonCategoryEngine {
 
-static QJsonObject loadCategoriesScch() {
-    QFile file("arcmeta_categories.scch");
+static QJsonObject loadCategoriesJson() {
+    QFile file("arcmeta_categories.json");
     if (file.exists() && file.open(QIODevice::ReadOnly)) {
         QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
         file.close();
@@ -31,8 +31,8 @@ static QJsonObject loadCategoriesScch() {
     return root;
 }
 
-static bool saveCategoriesScch(const QJsonObject& root) {
-    QFile file("arcmeta_categories.scch");
+static bool saveCategoriesJson(const QJsonObject& root) {
+    QFile file("arcmeta_categories.json");
     if (file.open(QIODevice::WriteOnly)) {
         file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
         file.close();
@@ -41,7 +41,7 @@ static bool saveCategoriesScch(const QJsonObject& root) {
     return false;
 }
 
-static Category scchToCategory(const QJsonObject& obj) {
+static Category jsonToCategory(const QJsonObject& obj) {
     Category cat;
     cat.id = obj["id"].toInt();
     cat.parentId = obj["parent_id"].toInt();
@@ -58,7 +58,7 @@ static Category scchToCategory(const QJsonObject& obj) {
     return cat;
 }
 
-static QJsonObject categoryToScch(const Category& cat) {
+static QJsonObject categoryToJson(const Category& cat) {
     QJsonObject obj;
     obj["id"] = cat.id;
     obj["parent_id"] = cat.parentId;
@@ -78,10 +78,10 @@ static QJsonObject categoryToScch(const Category& cat) {
 
 static std::vector<Category> getAll() {
     std::vector<Category> results;
-    QJsonObject root = loadCategoriesScch();
+    QJsonObject root = loadCategoriesJson();
     QJsonArray cats = root["categories"].toArray();
     for (const auto& val : cats) {
-        results.push_back(scchToCategory(val.toObject()));
+        results.push_back(jsonToCategory(val.toObject()));
     }
     std::sort(results.begin(), results.end(), [](const Category& a, const Category& b) {
         return a.sortOrder < b.sortOrder;
@@ -90,7 +90,7 @@ static std::vector<Category> getAll() {
 }
 
 static bool add(Category& cat) {
-    QJsonObject root = loadCategoriesScch();
+    QJsonObject root = loadCategoriesJson();
     QJsonArray cats = root["categories"].toArray();
     int maxId = 0;
     for (const auto& val : cats) {
@@ -98,30 +98,30 @@ static bool add(Category& cat) {
         if (id > maxId) maxId = id;
     }
     cat.id = maxId + 1;
-    cats.append(categoryToScch(cat));
+    cats.append(categoryToJson(cat));
     root["categories"] = cats;
-    return saveCategoriesScch(root);
+    return saveCategoriesJson(root);
 }
 
 static bool update(const Category& cat) {
-    QJsonObject root = loadCategoriesScch();
+    QJsonObject root = loadCategoriesJson();
     QJsonArray cats = root["categories"].toArray();
     QJsonArray updatedCats;
     bool found = false;
     for (const auto& val : cats) {
         QJsonObject obj = val.toObject();
         if (obj["id"].toInt() == cat.id) {
-            updatedCats.append(categoryToScch(cat));
+            updatedCats.append(categoryToJson(cat));
             found = true;
         } else {
             updatedCats.append(obj);
         }
     }
     if (!found) {
-        updatedCats.append(categoryToScch(cat));
+        updatedCats.append(categoryToJson(cat));
     }
     root["categories"] = updatedCats;
-    return saveCategoriesScch(root);
+    return saveCategoriesJson(root);
 }
 
 static void collectSubCategoryIds(const QJsonArray& cats, int parentId, std::vector<int>& ids) {
@@ -136,7 +136,7 @@ static void collectSubCategoryIds(const QJsonArray& cats, int parentId, std::vec
 }
 
 static bool remove(int id) {
-    QJsonObject root = loadCategoriesScch();
+    QJsonObject root = loadCategoriesJson();
     QJsonArray cats = root["categories"].toArray();
     
     std::vector<int> removeIds;
@@ -176,16 +176,16 @@ static bool remove(int id) {
         qMark.exec(sql);
     }
 
-    return saveCategoriesScch(root);
+    return saveCategoriesJson(root);
 }
 
 static bool reorder(int parentId, bool ascending) {
-    QJsonObject root = loadCategoriesScch();
+    QJsonObject root = loadCategoriesJson();
     QJsonArray cats = root["categories"].toArray();
     
     std::vector<Category> targetCats;
     for (const auto& val : cats) {
-        Category c = scchToCategory(val.toObject());
+        Category c = jsonToCategory(val.toObject());
         if (c.parentId == parentId) {
             targetCats.push_back(c);
         }
@@ -211,16 +211,16 @@ static bool reorder(int parentId, bool ascending) {
         updatedCats.append(obj);
     }
     root["categories"] = updatedCats;
-    return saveCategoriesScch(root);
+    return saveCategoriesJson(root);
 }
 
 static bool reorderAll(bool ascending) {
-    QJsonObject root = loadCategoriesScch();
+    QJsonObject root = loadCategoriesJson();
     QJsonArray cats = root["categories"].toArray();
     
     std::vector<Category> targetCats;
     for (const auto& val : cats) {
-        targetCats.push_back(scchToCategory(val.toObject()));
+        targetCats.push_back(jsonToCategory(val.toObject()));
     }
 
     std::sort(targetCats.begin(), targetCats.end(), [ascending](const Category& a, const Category& b) {
@@ -232,14 +232,14 @@ static bool reorderAll(bool ascending) {
     for (size_t i = 0; i < targetCats.size(); ++i) {
         Category c = targetCats[i];
         c.sortOrder = (int)i;
-        updatedCats.append(categoryToScch(c));
+        updatedCats.append(categoryToJson(c));
     }
     root["categories"] = updatedCats;
-    return saveCategoriesScch(root);
+    return saveCategoriesJson(root);
 }
 
 static bool addItemToCategory(int categoryId, const std::string& fileId128) {
-    QJsonObject root = loadCategoriesScch();
+    QJsonObject root = loadCategoriesJson();
     QJsonArray items = root["category_items"].toArray();
     QString qFid = QString::fromStdString(fileId128);
     for (const auto& val : items) {
@@ -254,11 +254,11 @@ static bool addItemToCategory(int categoryId, const std::string& fileId128) {
     newItem["added_at"] = (double)QDateTime::currentMSecsSinceEpoch();
     items.append(newItem);
     root["category_items"] = items;
-    return saveCategoriesScch(root);
+    return saveCategoriesJson(root);
 }
 
 static bool removeItemFromCategory(int categoryId, const std::string& fileId128) {
-    QJsonObject root = loadCategoriesScch();
+    QJsonObject root = loadCategoriesJson();
     QJsonArray items = root["category_items"].toArray();
     QJsonArray remainingItems;
     QString qFid = QString::fromStdString(fileId128);
@@ -270,12 +270,12 @@ static bool removeItemFromCategory(int categoryId, const std::string& fileId128)
         remainingItems.append(obj);
     }
     root["category_items"] = remainingItems;
-    return saveCategoriesScch(root);
+    return saveCategoriesJson(root);
 }
 
 static std::vector<std::string> getFileIdsInCategory(int categoryId) {
     std::vector<std::string> results;
-    QJsonObject root = loadCategoriesScch();
+    QJsonObject root = loadCategoriesJson();
     QJsonArray items = root["category_items"].toArray();
     for (const auto& val : items) {
         QJsonObject obj = val.toObject();
@@ -288,7 +288,7 @@ static std::vector<std::string> getFileIdsInCategory(int categoryId) {
 
 static std::vector<std::pair<int, int>> getCounts() {
     std::vector<std::pair<int, int>> counts;
-    QJsonObject root = loadCategoriesScch();
+    QJsonObject root = loadCategoriesJson();
     QJsonArray items = root["category_items"].toArray();
     QMap<int, int> countMap;
     for (const auto& val : items) {
@@ -304,7 +304,7 @@ static std::vector<std::pair<int, int>> getCounts() {
 
 static std::vector<std::string> getFileIdsRecursive(int categoryId) {
     std::vector<std::string> results = getFileIdsInCategory(categoryId);
-    QJsonObject root = loadCategoriesScch();
+    QJsonObject root = loadCategoriesJson();
     QJsonArray cats = root["categories"].toArray();
     
     std::vector<int> subIds;
@@ -317,7 +317,7 @@ static std::vector<std::string> getFileIdsRecursive(int categoryId) {
     return results;
 }
 
-} // namespace ScchCategoryEngine
+} // namespace JsonCategoryEngine
 
 /**
  * @brief 分类持久层实现
@@ -325,9 +325,9 @@ static std::vector<std::string> getFileIdsRecursive(int categoryId) {
  */
 
 std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
-    if (m_isScchMode) {
-        // 简化版 SCCH 逻辑：暂按原序提取
-        return ScchCategoryEngine::getAll();
+    if (m_isJsonMode) {
+        // 简化版 JSON 逻辑：暂按原序提取
+        return JsonCategoryEngine::getAll();
     }
     std::vector<Category> results;
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
@@ -361,8 +361,8 @@ std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
 }
 
 bool CategoryRepo::add(Category& cat) {
-    // 1. 写入 SCCH 并分配自增 ID
-    bool scchOk = ScchCategoryEngine::add(cat);
+    // 1. 写入 JSON 并分配自增 ID
+    bool jsonOk = JsonCategoryEngine::add(cat);
 
     // 2. 写入 SQLite (使用相同的自增 ID)
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
@@ -383,11 +383,11 @@ bool CategoryRepo::add(Category& cat) {
 
     bool dbOk = q.exec();
 
-    return m_isScchMode ? scchOk : dbOk;
+    return m_isJsonMode ? jsonOk : dbOk;
 }
 
 bool CategoryRepo::reorderAll(bool ascending) {
-    bool scchOk = ScchCategoryEngine::reorderAll(ascending);
+    bool jsonOk = JsonCategoryEngine::reorderAll(ascending);
 
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
@@ -407,11 +407,11 @@ bool CategoryRepo::reorderAll(bool ascending) {
         }
         dbOk = db.commit();
     }
-    return m_isScchMode ? scchOk : dbOk;
+    return m_isJsonMode ? jsonOk : dbOk;
 }
 
 bool CategoryRepo::update(const Category& cat) {
-    bool scchOk = ScchCategoryEngine::update(cat);
+    bool jsonOk = JsonCategoryEngine::update(cat);
 
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
@@ -426,11 +426,11 @@ bool CategoryRepo::update(const Category& cat) {
     q.addBindValue(cat.id);
     bool dbOk = q.exec();
 
-    return m_isScchMode ? scchOk : dbOk;
+    return m_isJsonMode ? jsonOk : dbOk;
 }
 
 bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId128) {
-    bool scchOk = ScchCategoryEngine::addItemToCategory(categoryId, fileId128);
+    bool jsonOk = JsonCategoryEngine::addItemToCategory(categoryId, fileId128);
 
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
@@ -440,12 +440,12 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId12
     q.addBindValue((double)QDateTime::currentMSecsSinceEpoch());
     bool dbOk = q.exec();
 
-    return m_isScchMode ? scchOk : dbOk;
+    return m_isJsonMode ? jsonOk : dbOk;
 }
 
 std::vector<Category> CategoryRepo::getAll() {
-    if (m_isScchMode) {
-        return ScchCategoryEngine::getAll();
+    if (m_isJsonMode) {
+        return JsonCategoryEngine::getAll();
     }
     std::vector<Category> results;
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
@@ -474,7 +474,7 @@ std::vector<Category> CategoryRepo::getAll() {
 }
 
 bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fileId128) {
-    bool scchOk = ScchCategoryEngine::removeItemFromCategory(categoryId, fileId128);
+    bool jsonOk = JsonCategoryEngine::removeItemFromCategory(categoryId, fileId128);
 
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery q(db);
@@ -483,12 +483,12 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fil
     q.addBindValue(QString::fromStdString(fileId128));
     bool dbOk = q.exec();
 
-    return m_isScchMode ? scchOk : dbOk;
+    return m_isJsonMode ? jsonOk : dbOk;
 }
 
 std::vector<std::string> CategoryRepo::getFileIdsInCategory(int categoryId) {
-    if (m_isScchMode) {
-        return ScchCategoryEngine::getFileIdsInCategory(categoryId);
+    if (m_isJsonMode) {
+        return JsonCategoryEngine::getFileIdsInCategory(categoryId);
     }
     std::vector<std::string> results;
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
@@ -504,8 +504,8 @@ std::vector<std::string> CategoryRepo::getFileIdsInCategory(int categoryId) {
 }
 
 std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
-    if (m_isScchMode) {
-        return ScchCategoryEngine::getCounts();
+    if (m_isJsonMode) {
+        return JsonCategoryEngine::getCounts();
     }
     std::vector<std::pair<int, int>> counts;
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
@@ -544,9 +544,9 @@ int CategoryRepo::getUniqueItemCount() {
 }
 
 int CategoryRepo::getUncategorizedItemCount() {
-    if (m_isScchMode) {
+    if (m_isJsonMode) {
         QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
-        QJsonObject root = ScchCategoryEngine::loadCategoriesScch();
+        QJsonObject root = JsonCategoryEngine::loadCategoriesJson();
         QJsonArray items = root["category_items"].toArray();
         QStringList registeredFids;
         for (const auto& val : items) {
@@ -573,15 +573,15 @@ int CategoryRepo::getUncategorizedItemCount() {
 }
 
 QMap<QString, int> CategoryRepo::getSystemCounts() {
-    if (m_isScchMode) {
-        // 2026-05-29 逻辑优化 (Plan-45)：SCCH 模式下优先尝试从 MetadataManager 回填数据库缺失的计数
+    if (m_isJsonMode) {
+        // 2026-05-29 逻辑优化 (Plan-45)：JSON 模式下优先尝试从 MetadataManager 回填数据库缺失的计数
         QMap<QString, int> counts;
         QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
         
-        // 如果 items 表由于切换初始化未完成而为空，则触发一次基于 SCCH 离散文件的物理索引补全
+        // 如果 items 表由于切换初始化未完成而为空，则触发一次基于 JSON 离散文件的物理索引补全
         QSqlQuery qCheck("SELECT COUNT(*) FROM items", db);
         if (qCheck.next() && qCheck.value(0).toInt() == 0) {
-            MetadataManager::instance().initFromScchMode();
+            MetadataManager::instance().initFromJsonMode();
         }
 
         double now = (double)QDateTime::currentMSecsSinceEpoch();
@@ -612,7 +612,7 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
         
         counts["uncategorized"] = getUncategorizedItemCount();
         
-        // 2026-05-29 性能优化：在 SCCH 模式下，直接利用 MetadataManager 的 searchInCache 统计未标签项
+        // 2026-05-29 性能优化：在 JSON 模式下，直接利用 MetadataManager 的 searchInCache 统计未标签项
         // 杜绝 O(N) 的数据库全路径遍历查询，提升侧边栏加载速度。
         counts["untagged"] = 0;
         QSqlQuery qUntagged("SELECT COUNT(DISTINCT file_id_128) FROM items WHERE deleted=0 AND type='file' AND (tags IS NULL OR tags = '' OR tags = '[]')", db);
@@ -680,7 +680,7 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
 }
 
 bool CategoryRepo::remove(int id) {
-    bool scchOk = ScchCategoryEngine::remove(id);
+    bool jsonOk = JsonCategoryEngine::remove(id);
 
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     if (!db.transaction()) return false;
@@ -722,11 +722,11 @@ bool CategoryRepo::remove(int id) {
     } else {
         db.rollback();
     }
-    return m_isScchMode ? scchOk : dbOk;
+    return m_isJsonMode ? jsonOk : dbOk;
 }
 
 bool CategoryRepo::reorder(int parentId, bool ascending) {
-    bool scchOk = ScchCategoryEngine::reorder(parentId, ascending);
+    bool jsonOk = JsonCategoryEngine::reorder(parentId, ascending);
 
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     // 逻辑：获取该父级下的所有分类，按名称排序，然后重新赋予 sort_order
@@ -748,12 +748,12 @@ bool CategoryRepo::reorder(int parentId, bool ascending) {
         }
         dbOk = db.commit();
     }
-    return m_isScchMode ? scchOk : dbOk;
+    return m_isJsonMode ? jsonOk : dbOk;
 }
 
 std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
-    if (m_isScchMode) {
-        return ScchCategoryEngine::getFileIdsRecursive(categoryId);
+    if (m_isJsonMode) {
+        return JsonCategoryEngine::getFileIdsRecursive(categoryId);
     }
     std::vector<std::string> results = getFileIdsInCategory(categoryId);
     
@@ -775,7 +775,7 @@ std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
     return results;
 }
 
-bool CategoryRepo::syncDatabaseAndScch() {
+bool CategoryRepo::syncDatabaseAndJson() {
     // 1. 获取 SQLite 数据库中的所有分类
     std::vector<Category> dbCats;
     {
@@ -799,16 +799,16 @@ bool CategoryRepo::syncDatabaseAndScch() {
         }
     }
 
-    // 2. 获取 arcmeta_categories.scch 中的所有分类
-    QJsonObject root = ScchCategoryEngine::loadCategoriesScch();
-    QJsonArray scchCats = root["categories"].toArray();
+    // 2. 获取 arcmeta_categories.json 中的所有分类
+    QJsonObject root = JsonCategoryEngine::loadCategoriesJson();
+    QJsonArray jsonCats = root["categories"].toArray();
     std::vector<Category> jsCats;
-    for (const auto& val : scchCats) {
-        jsCats.push_back(ScchCategoryEngine::scchToCategory(val.toObject()));
+    for (const auto& val : jsonCats) {
+        jsCats.push_back(JsonCategoryEngine::jsonToCategory(val.toObject()));
     }
 
     // 3. 双向合并分类
-    // A. 数据库中的分类合并/更新到 SCCH
+    // A. 数据库中的分类合并/更新到 JSON
     for (const auto& dbCat : dbCats) {
         bool found = false;
         for (const auto& jsCat : jsCats) {
@@ -818,12 +818,12 @@ bool CategoryRepo::syncDatabaseAndScch() {
             }
         }
         if (!found) {
-            scchCats.append(ScchCategoryEngine::categoryToScch(dbCat));
+            jsonCats.append(JsonCategoryEngine::categoryToJson(dbCat));
             jsCats.push_back(dbCat);
         }
     }
     
-    // B. SCCH 中的分类合并/更新到 数据库
+    // B. JSON 中的分类合并/更新到 数据库
     {
         QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
         for (const auto& jsCat : jsCats) {
@@ -870,16 +870,16 @@ bool CategoryRepo::syncDatabaseAndScch() {
         }
     }
 
-    // 5. 获取 arcmeta_categories.scch 中的所有关联条目
-    QJsonArray scchItems = root["category_items"].toArray();
+    // 5. 获取 arcmeta_categories.json 中的所有关联条目
+    QJsonArray jsonItems = root["category_items"].toArray();
     std::vector<ItemMap> jsItems;
-    for (const auto& val : scchItems) {
+    for (const auto& val : jsonItems) {
         QJsonObject obj = val.toObject();
         jsItems.push_back({obj["category_id"].toInt(), obj["file_id_128"].toString().toStdString(), obj["added_at"].toDouble()});
     }
 
     // 6. 双向合并关联条目
-    // A. 数据库关联合并到 SCCH
+    // A. 数据库关联合并到 JSON
     for (const auto& dbItem : dbItems) {
         bool found = false;
         for (const auto& jsItem : jsItems) {
@@ -893,12 +893,12 @@ bool CategoryRepo::syncDatabaseAndScch() {
             obj["category_id"] = dbItem.categoryId;
             obj["file_id_128"] = QString::fromStdString(dbItem.fileId128);
             obj["added_at"] = dbItem.addedAt;
-            scchItems.append(obj);
+            jsonItems.append(obj);
             jsItems.push_back(dbItem);
         }
     }
 
-    // B. SCCH 关联合并到 数据库
+    // B. JSON 关联合并到 数据库
     {
         QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
         for (const auto& jsItem : jsItems) {
@@ -920,18 +920,18 @@ bool CategoryRepo::syncDatabaseAndScch() {
         }
     }
 
-    // 7. 保存更新后的 SCCH
-    root["categories"] = scchCats;
-    root["category_items"] = scchItems;
-    if (!ScchCategoryEngine::saveCategoriesScch(root)) return false;
+    // 7. 保存更新后的 JSON
+    root["categories"] = jsonCats;
+    root["category_items"] = jsonItems;
+    if (!JsonCategoryEngine::saveCategoriesJson(root)) return false;
 
     // 2026-05-28 新增：对账后如果数据库被重置（items表为空），引导元数据恢复
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     QSqlQuery qCheck("SELECT COUNT(*) FROM items", db);
     if (qCheck.next() && qCheck.value(0).toInt() == 0) {
-        qDebug() << "[Sync] 对账检测到数据库为空，正在引导 MetadataManager 从离散 SCCH 恢复物理索引...";
-        // 2026-05-29 物理修复：数据库为空时，应强制从 SCCH 离散元数据回填 items 表，否则计数必为 0
-        MetadataManager::instance().initFromScchMode();
+        qDebug() << "[Sync] 对账检测到数据库为空，正在引导 MetadataManager 从离散 JSON 恢复物理索引...";
+        // 2026-05-29 物理修复：数据库为空时，应强制从 JSON 离散元数据回填 items 表，否则计数必为 0
+        MetadataManager::instance().initFromJsonMode();
     }
     return true;
 }

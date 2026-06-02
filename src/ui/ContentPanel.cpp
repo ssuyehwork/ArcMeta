@@ -1506,7 +1506,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                             // 2. 数据库同步清理 (三位一体)
                             ItemRepo::physicalRemove(wp);
                             
-                            // 3. 元数据管理清理 (离散 SCCH 与 内存失效)
+                            // 3. 元数据管理清理 (离散 JSON 与 内存失效)
                             MetadataManager::instance().removeMetadataSync(wp);
                         }
 
@@ -1703,7 +1703,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             QFileInfoList entries = dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name); 
             for (const QFileInfo& info : entries) { 
                 if (!panelPtr) return; 
-                if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue;
+                if (info.fileName() == ".am_meta.json" || info.fileName() == ".am_meta.json.tmp") continue;
  
                 ItemRepo::ItemRecord r;
                 r.path = QDir::toNativeSeparators(info.absoluteFilePath());
@@ -2165,20 +2165,28 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         painter->setPen(QColor(238, 238, 238, 120)); 
     } 
  
-    // 2026-06-05 按照用户要求：恢复自动换行逻辑，并在“实在太长”时使用省略号
-    // 零宽空格注入以支持非标准断行（如下划线或点号）
-    QString displayName = name;
-    displayName.replace("_", "_\u200B");
-    displayName.replace(".", ".\u200B");
+    // 计算最多2行能显示的文本，超出部分用 ... 省略
+    auto elidedName = [](const QString& name, const QFontMetrics& fm, int width) -> QString {
+        QString line1 = fm.elidedText(name, Qt::ElideRight, width);
+        if (line1 == name) return name; // 单行就够了
 
-    // 首先尝试进行自动换行绘制，如果高度超出，则回退到省略号单行显示
-    QRect boundingRect = painter->boundingRect(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName);
-    if (boundingRect.height() > m.nameRect.height()) {
-        QString elidedName = option.fontMetrics.elidedText(name, Qt::ElideRight, m.nameRect.width() - 8);
-        painter->drawText(m.nameRect, Qt::AlignCenter, elidedName);
-    } else {
-        painter->drawText(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName);
-    }
+        // 尝试找到第一行断点，计算第二行
+        int breakPos = 0;
+        for (int i = 1; i <= name.length(); ++i) {
+            if (fm.horizontalAdvance(name.left(i)) > width) {
+                breakPos = i - 1;
+                break;
+            }
+        }
+        if (breakPos <= 0) return line1;
+
+        QString remaining = name.mid(breakPos);
+        QString line2 = fm.elidedText(remaining, Qt::ElideRight, width);
+        return name.left(breakPos) + "\n" + line2;
+    };
+
+    painter->drawText(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap,
+                      elidedName(name, option.fontMetrics, m.nameRect.width() - 8));
  
     painter->restore(); 
 } 

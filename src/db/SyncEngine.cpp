@@ -9,7 +9,7 @@
 #include "../meta/MetadataManager.h"
 #include "../meta/AllFrnManager.h"
 #include "../mft/MftReader.h"
-#include "../meta/AmMetaScch.h"
+#include "../meta/AmMetaJson.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winioctl.h>
@@ -109,7 +109,7 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
 
     emit syncStatusChanged(true);
 
-    // 2026-06-16 按照用户要求：从事务日志读取 FID -> 同步物理 SCCH 到数据库 -> 核实后清空
+    // 2026-06-16 按照用户要求：从事务日志读取 FID -> 同步物理 JSON 到数据库 -> 核实后清空
     (void)QtConcurrent::run([this, onFinished]() {
         auto& mgr = MetadataManager::instance();
         QStringList pendingFids = mgr.getPendingSyncDirs();
@@ -134,7 +134,7 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
                 continue;
             }
 
-            // 2. 执行物理 SCCH 到数据库的对账同步
+            // 2. 执行物理 JSON 到数据库的对账同步
             QFileInfo fi(QString::fromStdWString(targetPath));
             std::wstring syncDir;
             if (fi.isDir()) {
@@ -143,16 +143,16 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
                 syncDir = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
             }
 
-            AmMetaScch amScch(syncDir);
-            if (amScch.load()) {
+            AmMetaJson amJson(syncDir);
+            if (amJson.load()) {
                 bool ok = true;
                 // A. 同步文件夹自身元数据
-                if (!amScch.folder().isDefault()) {
-                    FolderRepo::save(MetadataManager::getVolumeSerialNumber(syncDir), syncDir, amScch.folder());
+                if (!amJson.folder().isDefault()) {
+                    FolderRepo::save(MetadataManager::getVolumeSerialNumber(syncDir), syncDir, amJson.folder());
                 }
 
                 // B. 同步目录下所有项
-                auto const& itemsMap = amScch.items();
+                auto const& itemsMap = amJson.items();
                 for (auto it = itemsMap.begin(); it != itemsMap.end(); ++it) {
                     const std::wstring& name = it->first;
                     const ItemMeta& item = it->second;
@@ -174,7 +174,7 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
                     remainingFids << fidItem;
                 }
             } else {
-                qDebug() << "[Sync] 找不到有效的 metadata.scch，清理冗余任务:" << fidItem;
+                qDebug() << "[Sync] 找不到有效的 .am_meta.json，清理冗余任务:" << fidItem;
                 // 无法加载通常意味着文件不存在或损坏，不再阻塞同步
             }
         }
@@ -201,7 +201,7 @@ bool SyncEngine::hasPendingTasks() const {
 
 /**
  * @brief 全量扫描与对账：2026-06-xx 物理回填实现
- * 逻辑：全盘搜索 metadata.scch 文件，登记其 FRN 到 All_FRN_metadata.scch，并同步数据至数据库。
+ * 逻辑：全盘搜索 .am_meta.json 文件，登记其 FRN 到 All_FRN_am_meta.json，并同步数据至数据库。
  */
 void SyncEngine::runFullScan(const std::vector<std::wstring>& drivesToScanInput, 
                              std::function<void(int current, int total, const std::wstring& path)> onProgress) {
@@ -226,11 +226,11 @@ void SyncEngine::runFullScan(const std::vector<std::wstring>& drivesToScanInput,
 
     // 2. 全盘搜索所有离散元数据文件 (包含隐藏属性)
     qDebug() << "[Sync] 正在启动全盘元数据文件扫描...";
-    std::vector<uint64_t> metaFileKeys = reader.search("metadata.scch", false, false, {}, true, true, true);
+    std::vector<uint64_t> metaFileKeys = reader.search(".am_meta.json", false, false, {}, true, true, true);
     int total = (int)metaFileKeys.size();
     int current = 0;
 
-    qDebug() << "[Sync] 全盘扫描完成，发现" << total << "个 metadata.scch 文件，准备对账...";
+    qDebug() << "[Sync] 全盘扫描完成，发现" << total << "个 .am_meta.json 文件，准备对账...";
 
     for (uint64_t key : metaFileKeys) {
         int idx = reader.getIndexByKey(key);
@@ -242,26 +242,26 @@ void SyncEngine::runFullScan(const std::vector<std::wstring>& drivesToScanInput,
         QFileInfo fi(fullPath);
         std::wstring folderPath = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
         
-        // 3. 提取 metadata.scch 文件本身的物理身份 (FRN) 并登记
-        // 按照用户要求：记录 metadata.scch 文件的 FRN，作为物理对账锚点
+        // 3. 提取 .am_meta.json 文件本身的物理身份 (FRN) 并登记
+        // 按照用户要求：记录 .am_meta.json 文件的 FRN，作为物理对账锚点
         wchar_t frnBuf[17];
         uint64_t fileFrn = key & 0x0000FFFFFFFFFFFFull; // 提取 48 位原始 FRN
         swprintf(frnBuf, 17, L"%016llX", fileFrn);
         
         AllFrnManager::registerFrn(frnBuf, folderPath);
 
-        // 4. 加载 metadata.scch 并同步到数据库
-        AmMetaScch amScch(folderPath);
-        if (amScch.load()) {
+        // 4. 加载 .am_meta.json 并同步到数据库
+        AmMetaJson amJson(folderPath);
+        if (amJson.load()) {
             std::wstring vol = MetadataManager::getVolumeSerialNumber(folderPath);
             
             // A. 同步文件夹元数据
-            if (!amScch.folder().isDefault()) {
-                FolderRepo::save(vol, folderPath, amScch.folder());
+            if (!amJson.folder().isDefault()) {
+                FolderRepo::save(vol, folderPath, amJson.folder());
             }
 
             // B. 同步目录下所有条目的元数据
-            auto const& itemsMap = amScch.items();
+            auto const& itemsMap = amJson.items();
             for (auto itm = itemsMap.begin(); itm != itemsMap.end(); ++itm) {
                 const std::wstring& itemName = itm->first;
                 const ItemMeta& itemMeta = itm->second;
@@ -271,7 +271,7 @@ void SyncEngine::runFullScan(const std::vector<std::wstring>& drivesToScanInput,
                 // 物理对齐：获取最新的物理身份
                 MetadataManager::instance().fetchWinApiMetadataDirect(itemFullPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
                 
-                // 业务对齐：以物理 SCCH 里的数据为准
+                // 业务对齐：以物理 JSON 里的数据为准
                 iMeta.rating = itemMeta.rating; 
                 iMeta.color = itemMeta.color;
                 iMeta.pinned = itemMeta.pinned; 
@@ -304,8 +304,8 @@ void SyncEngine::rebuildTagStats() {
     QSqlQuery query("SELECT tags FROM items WHERE tags != ''", db);
     std::map<std::string, int> tagCounts;
     while (query.next()) {
-        QByteArray scchData = query.value(0).toByteArray();
-        QJsonDocument doc = QJsonDocument::fromJson(scchData);
+        QByteArray jsonData = query.value(0).toByteArray();
+        QJsonDocument doc = QJsonDocument::fromJson(jsonData);
         if (doc.isArray()) {
             for (const auto& val : doc.array()) {
                 QString t = val.toString();

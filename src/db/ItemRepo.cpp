@@ -186,9 +186,9 @@ bool ItemRepo::physicalRemove(const std::wstring& path) {
             QString fid = qf.value(0).toString();
             if (!fid.isEmpty()) fids << fid;
             
-            QString tagsScch = qf.value(1).toString();
-            if (!tagsScch.isEmpty()) {
-                QJsonDocument doc = QJsonDocument::fromJson(tagsScch.toUtf8());
+            QString tagsJson = qf.value(1).toString();
+            if (!tagsJson.isEmpty()) {
+                QJsonDocument doc = QJsonDocument::fromJson(tagsJson.toUtf8());
                 if (doc.isArray()) {
                     QJsonArray arr = doc.array();
                     for (const auto& v : arr) allTags << v.toString();

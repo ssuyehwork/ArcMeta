@@ -8,21 +8,21 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include "AmMetaScch.h"
+#include "AmMetaJson.h"
 #include <windows.h>
 
 namespace ArcMeta {
 
-AmMetaScch::AmMetaScch(const std::wstring& folderPath)
+AmMetaJson::AmMetaJson(const std::wstring& folderPath)
     : m_folderPath(folderPath) {
     std::wstring path = folderPath;
     if (!path.empty() && path.back() != L'\\' && path.back() != L'/') {
         path += L'\\';
     }
-    m_filePath = path + L"metadata.scch";
+    m_filePath = path + L".am_meta.json";
 }
 
-bool AmMetaScch::load() {
+bool AmMetaJson::load() {
     QFile file(toQString(m_filePath));
     if (!file.exists()) {
         m_folder = FolderMeta();
@@ -52,7 +52,7 @@ bool AmMetaScch::load() {
     return true;
 }
 
-bool AmMetaScch::save() const {
+bool AmMetaJson::save() const {
     QJsonObject root;
     root.insert("version", "2"); // 2026-06-xx 物理加固：版本升至 2 以对齐 SHA-256
     root.insert("folder", folderToEntry(m_folder));
@@ -65,12 +65,12 @@ bool AmMetaScch::save() const {
     }
     root.insert("items", itemsObj);
 
-    QByteArray scchData = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    QByteArray jsonData = QJsonDocument(root).toJson(QJsonDocument::Indented);
     QString tmpPath = toQString(m_filePath) + ".tmp";
     
     QFile tmpFile(tmpPath);
     if (!tmpFile.open(QIODevice::WriteOnly)) return false;
-    tmpFile.write(scchData);
+    tmpFile.write(jsonData);
     tmpFile.close();
 
     // 2026-06-xx 按照用户要求：原子替换并设置隐藏属性
@@ -82,9 +82,9 @@ bool AmMetaScch::save() const {
     return true;
 }
 
-bool AmMetaScch::renameItem(const QString& folderPath, const QString& oldName, const QString& newName) {
+bool AmMetaJson::renameItem(const QString& folderPath, const QString& oldName, const QString& newName) {
     if (oldName == newName) return true;
-    AmMetaScch meta(folderPath.toStdWString());
+    AmMetaJson meta(folderPath.toStdWString());
     if (!meta.load()) return false;
     auto& items = meta.items();
     auto it = items.find(oldName.toStdWString());
@@ -98,7 +98,7 @@ bool AmMetaScch::renameItem(const QString& folderPath, const QString& oldName, c
 
 // --- 内部转换实现 ---
 
-QJsonObject AmMetaScch::folderToEntry(const FolderMeta& meta) {
+QJsonObject AmMetaJson::folderToEntry(const FolderMeta& meta) {
     QJsonObject obj;
     obj.insert("sort_by", toQString(meta.sortBy));
     obj.insert("sort_order", toQString(meta.sortOrder));
@@ -126,7 +126,7 @@ QJsonObject AmMetaScch::folderToEntry(const FolderMeta& meta) {
     return obj;
 }
 
-FolderMeta AmMetaScch::entryToFolder(const QJsonObject& obj) {
+FolderMeta AmMetaJson::entryToFolder(const QJsonObject& obj) {
     FolderMeta meta;
     meta.sortBy = toStdWString(obj.value("sort_by").toString("name"));
     meta.sortOrder = toStdWString(obj.value("sort_order").toString("asc"));
@@ -152,7 +152,7 @@ FolderMeta AmMetaScch::entryToFolder(const QJsonObject& obj) {
     return meta;
 }
 
-QJsonObject AmMetaScch::itemToEntry(const ItemMeta& meta) {
+QJsonObject AmMetaJson::itemToEntry(const ItemMeta& meta) {
     QJsonObject obj;
     obj.insert("type", toQString(meta.type));
     obj.insert("rating", meta.rating);
@@ -185,7 +185,7 @@ QJsonObject AmMetaScch::itemToEntry(const ItemMeta& meta) {
     return obj;
 }
 
-ItemMeta AmMetaScch::entryToItem(const QJsonObject& obj) {
+ItemMeta AmMetaJson::entryToItem(const QJsonObject& obj) {
     ItemMeta meta;
     meta.type = toStdWString(obj.value("type").toString("file"));
     meta.rating = obj.value("rating").toInt();

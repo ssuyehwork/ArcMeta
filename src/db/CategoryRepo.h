@@ -23,12 +23,12 @@ struct Category {
  */
 class CategoryRepo {
 public:
-    static void setScchMode(bool enabled);
-    static bool isScchMode();
-    static bool syncDatabaseAndScch();
+    static void setJsonMode(bool enabled);
+    static bool isJsonMode();
+    static bool syncDatabaseAndJson();
 
 private:
-    static bool m_isScchMode;
+    static bool m_isJsonMode;
 
 public:
     static bool add(Category& cat);

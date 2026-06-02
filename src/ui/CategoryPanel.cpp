@@ -58,10 +58,10 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     m_mainLayout->setSpacing(0);
 
     // 2026-05-28 物理增强：提前从持久化状态初始化底层引擎模式
-    bool isScch = AppConfig::instance().getValue("Category/IsScchMode", false).toBool();
-    CategoryRepo::setScchMode(isScch);
-    if (isScch) {
-        MetadataManager::instance().initFromScchMode();
+    bool isJson = AppConfig::instance().getValue("Category/IsJsonMode", false).toBool();
+    CategoryRepo::setJsonMode(isJson);
+    if (isJson) {
+        MetadataManager::instance().initFromJsonMode();
     } else {
         MetadataManager::instance().initFromDatabase();
     }
@@ -674,11 +674,11 @@ void CategoryPanel::initUi() {
     m_btnSwitch->installEventFilter(this);
 
     // 回填初始状态
-    bool isScchMode = AppConfig::instance().getValue("Category/IsScchMode", false).toBool();
-    m_btnSwitch->setChecked(isScchMode);
-    if (isScchMode) {
+    bool isJsonMode = AppConfig::instance().getValue("Category/IsJsonMode", false).toBool();
+    m_btnSwitch->setChecked(isJsonMode);
+    if (isJsonMode) {
         m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", SuccessGreen));
-        m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为SCCH模式（内存）");
+        m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为JSON模式（内存）");
     } else {
         m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", TextDim));
         m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
@@ -686,7 +686,7 @@ void CategoryPanel::initUi() {
 
     connect(m_btnSwitch, &QPushButton::clicked, this, [this](bool checked) {
         // 2026-05-29 优化点 1：增加切换确认机制 (Plan-44)
-        QString modeName = checked ? "SCCH 模式 (内存)" : "数据库模式";
+        QString modeName = checked ? "JSON 模式 (内存)" : "数据库模式";
         FramelessConfirmDialog confirmDlg("模式切换确认", QString("切换到<b>%1</b>将重新加载数据引擎，是否继续？").arg(modeName), this);
         if (confirmDlg.exec() != QDialog::Accepted) {
             m_btnSwitch->blockSignals(true);
@@ -700,7 +700,7 @@ void CategoryPanel::initUi() {
         m_btnSwitch->setIcon(UiHelper::getIcon("sync", WarningOrange)); // 临时旋转图标或等待图标
 
         // 2026-05-29 优化点 3：异常处理与原子性保证
-        if (!CategoryRepo::syncDatabaseAndScch()) {
+        if (!CategoryRepo::syncDatabaseAndJson()) {
             ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#E74C3C;'>[ERROR] 双轨同步失败，已中止切换</b>", 2000, ErrorRed);
             m_btnSwitch->blockSignals(true);
             m_btnSwitch->setChecked(!checked);
@@ -712,24 +712,24 @@ void CategoryPanel::initUi() {
 
         if (checked) {
             m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", SuccessGreen));
-            m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为SCCH模式（内存）");
+            m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为JSON模式（内存）");
         } else {
             m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", TextDim));
             m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
         }
 
         // 1. 设置底层分类库模式
-        CategoryRepo::setScchMode(checked);
+        CategoryRepo::setJsonMode(checked);
 
         // 2. 促使元数据管理器进行数据重载与重构
         if (checked) {
-            MetadataManager::instance().initFromScchMode();
+            MetadataManager::instance().initFromJsonMode();
         } else {
             MetadataManager::instance().initFromDatabase();
         }
 
         // 3. 持久化状态
-        AppConfig::instance().setValue("Category/IsScchMode", checked);
+        AppConfig::instance().setValue("Category/IsJsonMode", checked);
         AppConfig::instance().sync(); // 物理落盘，防止异常退出回滚
 
         // 4. 树模型重新拉取
@@ -755,7 +755,7 @@ void CategoryPanel::initUi() {
     btnRescan->installEventFilter(this); // 2026-06-xx 按照规范：安装过滤器以驱动自定义 ToolTip
     connect(btnRescan, &QPushButton::clicked, this, [this]() {
         // 1. 全量双向分类与项映射物理对账同步
-        CategoryRepo::syncDatabaseAndScch();
+        CategoryRepo::syncDatabaseAndJson();
 
         // 2. 瞬时刷新界面树展示
         if (m_categoryModel) {
@@ -978,7 +978,7 @@ void CategoryPanel::initUi() {
                     QDirIterator it(path, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
                     while (it.hasNext()) { 
                         QString p = it.next();
-                        if (QFileInfo(p).fileName() == "metadata.scch") continue; // 2026-06-xx 物理隔离
+                        if (QFileInfo(p).fileName() == ".am_meta.json") continue; // 2026-06-xx 物理隔离
                         totalItems++; 
                     }
                 }
@@ -1033,7 +1033,7 @@ void CategoryPanel::initUi() {
                         CategoryRepo::addItemToCategory(catId, fid);
                     }
 
-                    // 2026-06-xx 物理同步：触发元数据持久化以生成 metadata.scch，实现“目录导航”状态感应
+                    // 2026-06-xx 物理同步：触发元数据持久化以生成 .am_meta.json，实现“目录导航”状态感应
                     MetadataManager::instance().syncPhysicalMetadata(wPath);
 
                     // 2026-06-xx 按照用户要求：针对特定格式文件，在拖拽导入时自动进行颜色解析
@@ -1080,7 +1080,7 @@ void CategoryPanel::initUi() {
                             // 2026-06-xx 物理同步：文件夹入库后同样同步元数据
                             MetadataManager::instance().syncPhysicalMetadata(info.absoluteFilePath().toStdWString());
                         } else {
-                            if (info.fileName() == "metadata.scch") continue; // 2026-06-xx 物理隔离
+                            if (info.fileName() == ".am_meta.json") continue; // 2026-06-xx 物理隔离
                             // 文件入库并关联到当前层级分类
                             processItem(itemPath, currentParentId);
                         }

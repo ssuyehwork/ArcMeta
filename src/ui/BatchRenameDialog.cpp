@@ -238,7 +238,7 @@ void BatchRenameDialog::onExecute() {
         if (ok) {
             successCount++;
             if (!m_rbCopy->isChecked()) {
-                // 2026-05-24 按照用户要求：彻底移除 SCCH 逻辑
+                // 2026-05-24 按照用户要求：彻底移除 JSON 逻辑
                 MetadataManager::instance().renameItem(oldInfo.absoluteFilePath().toStdWString(), QDir(finalTargetDir).absoluteFilePath(QString::fromStdWString(newNames[i])).toStdWString());
             }
         }

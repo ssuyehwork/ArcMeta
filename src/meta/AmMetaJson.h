@@ -12,23 +12,23 @@
 namespace ArcMeta {
 
 /**
- * @brief 处理 metadata.scch 的读写类
- * 2026-06-xx 按照用户要求：从 ArcMeta-1 恢复离散元数据管理逻辑，彻底改用 .scch 格式
+ * @brief 处理 .am_meta.json 的读写类
+ * 2026-06-xx 按照用户要求：从 ArcMeta-1 恢复离散元数据管理逻辑，并适配 SHA-256 与物理 FRN 协议
  */
-class AmMetaScch {
+class AmMetaJson {
 public:
     /**
      * @param folderPath 目标文件夹的完整路径（不含文件名）
      */
-    explicit AmMetaScch(const std::wstring& folderPath);
+    explicit AmMetaJson(const std::wstring& folderPath);
 
     /**
-     * @brief 加载 metadata.scch 文件
+     * @brief 加载 .am_meta.json 文件
      */
     bool load();
 
     /**
-     * @brief 安全保存到 metadata.scch 文件
+     * @brief 安全保存到 .am_meta.json 文件
      */
     bool save() const;
 
