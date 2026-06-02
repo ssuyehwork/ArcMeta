@@ -4,7 +4,7 @@
 #include <QEvent>
 #include <QMainWindow>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 边缘缩放事件过滤器
@@ -32,4 +32,4 @@ private:
     void updateCursorShape(ResizeDirection dir);
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

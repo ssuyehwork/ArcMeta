@@ -2,7 +2,7 @@
 
 #include "JustifiedView.h"
 
-namespace FERREX {
+namespace ArcMeta {
 
 class DropJustifiedView : public JustifiedView {
     Q_OBJECT
@@ -13,4 +13,4 @@ protected:
     void startDrag(Qt::DropActions supportedActions) override;
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

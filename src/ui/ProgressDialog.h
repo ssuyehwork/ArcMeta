@@ -5,7 +5,7 @@
 #include <QLabel>
 #include <QVBoxLayout>
 
-namespace FERREX {
+namespace ArcMeta {
 
 class ProgressDialog : public FramelessDialog {
     Q_OBJECT
@@ -52,4 +52,4 @@ private:
     QProgressBar* m_progressBar = nullptr;
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

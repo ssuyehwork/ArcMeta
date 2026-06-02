@@ -11,7 +11,7 @@
 #include <QFileInfo>
 #include "Logger.h"
 
-namespace FERREX {
+namespace ArcMeta {
 
 DropTreeView::DropTreeView(QWidget* parent) : QTreeView(parent) {
     setAcceptDrops(true);
@@ -108,4 +108,4 @@ void DropTreeView::keyboardSearch(const QString& search) {
     Q_UNUSED(search);
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

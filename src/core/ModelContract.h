@@ -1,7 +1,7 @@
 #pragma once
 #include <Qt>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 工业级模型契约 (ModelContract)
@@ -33,4 +33,4 @@ enum CommonRole {
     CountRole           = Qt::UserRole + 204  // 子项数量
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

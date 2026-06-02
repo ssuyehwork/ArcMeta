@@ -14,7 +14,7 @@
 #include <string>
 #include "../meta/BatchRenameEngine.h"
 
-namespace FERREX {
+namespace ArcMeta {
 
 class RuleRow;
 
@@ -63,4 +63,4 @@ private:
     QPushButton* m_btnPreview = nullptr;
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

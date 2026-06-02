@@ -2,7 +2,7 @@
 
 #include <QString>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 紧凑型索引条目
@@ -32,4 +32,4 @@ struct IndexedEntry {
     }
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

@@ -11,7 +11,7 @@
 #include <shared_mutex>
 #include <string>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 内存元数据镜像结构
@@ -139,6 +139,6 @@ private:
     void saveSyncLog();
 };
 
-} // namespace FERREX
+} // namespace ArcMeta
 
 #endif // ARCMETA_METADATA_MANAGER_H

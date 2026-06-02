@@ -6,7 +6,7 @@
 #include <QLineEdit>
 #include <QSlider>
 
-namespace FERREX {
+namespace ArcMeta {
 
 // --- SV (饱和度/亮度) 拾取区域 ---
 class SvPicker : public QWidget {
@@ -79,4 +79,4 @@ private:
     QSlider*   m_toleranceSlider = nullptr; // 2026-05-17 按照用户要求：准确度（容差）滑条
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

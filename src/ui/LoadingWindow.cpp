@@ -12,14 +12,14 @@
 #include <QPalette>
 #include <QColor>
 
-namespace FERREX {
+namespace ArcMeta {
 
 LoadingWindow::LoadingWindow(QWidget* parent)
     : QWidget(parent), m_rotationAngle(0) {
     qDebug() << "[LoadingWindow] 开始构造";
     
     // 设置窗口属性
-    setWindowTitle("FERREX - 初始化中...");
+    setWindowTitle("ArcMeta - 初始化中...");
     setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint | Qt::FramelessWindowHint);
     setAttribute(Qt::WA_TranslucentBackground, false);
     
@@ -51,7 +51,7 @@ LoadingWindow::LoadingWindow(QWidget* parent)
     }
     
     // 标题标签
-    QLabel* titleLabel = new QLabel("FERREX", this);
+    QLabel* titleLabel = new QLabel("ArcMeta", this);
     titleLabel->setAlignment(Qt::AlignCenter);
     titleLabel->setStyleSheet("color: #4FACFE; font-size: 18px; font-weight: bold; background-color: transparent;");
     layout->addWidget(titleLabel);
@@ -157,4 +157,4 @@ void LoadingWindow::paintEvent(QPaintEvent* event) {
     painter.restore();
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

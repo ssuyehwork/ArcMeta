@@ -4,7 +4,7 @@
 #include <QString>
 #include <QMutex>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 工业级配置管理单例 (AppConfig)
@@ -33,7 +33,7 @@ public:
     }
 
 private:
-    AppConfig() : m_settings("FERREX团队", "FERREX") {}
+    AppConfig() : m_settings("ArcMeta团队", "ArcMeta") {}
     ~AppConfig() = default;
     AppConfig(const AppConfig&) = delete;
     AppConfig& operator=(const AppConfig&) = delete;
@@ -42,4 +42,4 @@ private:
     mutable QMutex m_mutex;
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

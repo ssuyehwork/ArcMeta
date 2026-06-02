@@ -4,7 +4,7 @@
 #include <QString>
 #include <memory>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 核心中控类
@@ -48,4 +48,4 @@ private:
     QString m_statusText = "就绪";
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

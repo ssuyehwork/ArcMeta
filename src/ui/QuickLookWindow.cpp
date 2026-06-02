@@ -7,7 +7,7 @@
 #include <QShortcut>
 #include "UiHelper.h"
 
-namespace FERREX {
+namespace ArcMeta {
 
 QuickLookWindow& QuickLookWindow::instance() {
     static QuickLookWindow inst;
@@ -216,4 +216,4 @@ void QuickLookWindow::keyPressEvent(QKeyEvent* event) {
     }
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

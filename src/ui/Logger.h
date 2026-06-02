@@ -6,7 +6,7 @@
 #include <QTextStream>
 #include <QDateTime>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 独立日志工具类，绕过 qDebug 直接写入本地文件
@@ -15,7 +15,7 @@ namespace FERREX {
 class Logger {
 public:
     static void log(const QString& msg) {
-        QFile file("ferrex_debug.log"); // 统一写入主日志文件
+        QFile file("arcmeta_debug.log"); // 统一写入主日志文件
         if (file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
             QTextStream out(&file);
             QString timeStr = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
@@ -26,6 +26,6 @@ public:
     }
 };
 
-} // namespace FERREX
+} // namespace ArcMeta
 
 #endif // LOGGER_H

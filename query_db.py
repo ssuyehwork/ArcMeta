@@ -3,8 +3,8 @@ import os
 import sys
 
 def run_diagnostic():
-    db_path = 'arcmeta.db'
-    print(f"--- ArcMeta 数据库深度诊断 [%s] ---" % db_path)
+    db_path = 'ferrex.db'
+    print(f"--- FERREX 数据库深度诊断 [%s] ---" % db_path)
     
     if not os.path.exists(db_path):
         print(f"错误: 数据库文件不存在。请确认主程序已启动并完成了初始化。")

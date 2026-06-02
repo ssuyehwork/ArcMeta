@@ -11,7 +11,7 @@
 #include <QAbstractItemView>
 #include "UiHelper.h"
 
-namespace FERREX {
+namespace ArcMeta {
 
 ThumbnailDelegate::ThumbnailDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
 
@@ -366,4 +366,4 @@ bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, co
     return QStyledItemDelegate::editorEvent(event, model, option, index);
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

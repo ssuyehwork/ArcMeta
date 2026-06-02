@@ -3,7 +3,7 @@
 #include <QCursor>
 #include <QVariant>
 
-namespace FERREX {
+namespace ArcMeta {
 
 HoverEventFilter::HoverEventFilter(QObject* parent) : QObject(parent) {}
 
@@ -19,4 +19,4 @@ bool HoverEventFilter::eventFilter(QObject* watched, QEvent* event) {
     return QObject::eventFilter(watched, event);
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

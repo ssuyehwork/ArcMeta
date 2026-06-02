@@ -4,7 +4,7 @@
 #include <QWindow>
 #include <QApplication>
 
-namespace FERREX {
+namespace ArcMeta {
 
 ResizeEventFilter::ResizeEventFilter(QMainWindow* window) 
     : QObject(window), m_window(window) {}
@@ -59,4 +59,4 @@ void ResizeEventFilter::updateCursorShape(ResizeDirection dir) {
     }
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

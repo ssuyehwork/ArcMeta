@@ -19,7 +19,7 @@
 #include <QBrush>
 #include <QRectF>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief ToolTipOverlay: 全局统一的自定义 Tooltip
@@ -64,6 +64,6 @@ private:
     QColor m_currentBorderColor = QColor("#B0B0B0");
 };
 
-} // namespace FERREX
+} // namespace ArcMeta
 
 #endif // TOOLTIPOVERLAY_H

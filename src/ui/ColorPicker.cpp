@@ -12,7 +12,7 @@
 #include <QScreen>
 #include "UiHelper.h"
 
-namespace FERREX {
+namespace ArcMeta {
 
 // --- SvPicker ---
 SvPicker::SvPicker(QWidget* parent) : QWidget(parent) {
@@ -334,4 +334,4 @@ int ColorPicker::currentTolerance() const {
     return m_toleranceSlider ? m_toleranceSlider->value() : 30;
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

@@ -18,10 +18,10 @@
 #include <QRadioButton>
 #include <QScrollArea>
 
-namespace FERREX {
+namespace ArcMeta {
 
 BatchRenameDialog::BatchRenameDialog(const std::vector<std::wstring>& originalPaths, QWidget* parent)
-    : FramelessDialog("批量重命名 - FERREX", parent), m_originalPaths(originalPaths) {
+    : FramelessDialog("批量重命名 - ArcMeta", parent), m_originalPaths(originalPaths) {
     resize(850, 600); // 2026-04-11 按照用户要求：给予窗口更多弹性空间，提高初始显示质量
     initContent();
     applyTheme();
@@ -248,4 +248,4 @@ void BatchRenameDialog::onExecute() {
     accept();
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

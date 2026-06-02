@@ -7,7 +7,7 @@
 #include <QMimeData>
 #include <QTimer>
 
-namespace FERREX {
+namespace ArcMeta {
 
 class DropTreeView : public QTreeView {
     Q_OBJECT
@@ -32,6 +32,6 @@ private:
     QModelIndex m_hoverIndex;
 };
 
-} // namespace FERREX
+} // namespace ArcMeta
 
 #endif // DROPTREEVIEW_H

@@ -1,17 +1,17 @@
 @echo off
 echo ========================================
-echo 检查ArcMeta依赖项完整性
+echo 检查FERREX依赖项完整性
 echo ========================================
 echo.
 
-set "PROGRAM_PATH=%~dp0ArcMeta\ArcMeta.exe"
+set "PROGRAM_PATH=%~dp0FERREX\FERREX.exe"
 set "QT_PATH=C:\Qt\6.10.2\msvc2022_64"
 
 echo 📋 正在检查程序文件...
 if exist "%PROGRAM_PATH%" (
-    echo ✅ ArcMeta.exe 存在
+    echo ✅ FERREX.exe 存在
 ) else (
-    echo ❌ ArcMeta.exe 不存在！
+    echo ❌ FERREX.exe 不存在！
     pause
     exit /b 1
 )

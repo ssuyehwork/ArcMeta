@@ -38,7 +38,7 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
-using namespace FERREX::Style;
+using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
 #include <QDir>
@@ -52,7 +52,7 @@ using namespace FERREX::Style;
 #include "../db/SyncEngine.h"
 #include <QtConcurrent>
 
-namespace FERREX {
+namespace ArcMeta {
 
 MainWindow::~MainWindow() {
     if (m_resizeFilter) {
@@ -1264,4 +1264,4 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     QMainWindow::closeEvent(event);
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

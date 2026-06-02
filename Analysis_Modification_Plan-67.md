@@ -60,7 +60,7 @@ void ElasticEdit::adjustHeight() {
 - **运行时验证**：
     - 输入多行文本，观察编辑框是否向下撑开。
     - 缩小窗口宽度，观察文本换行后编辑框高度是否自动增加。
-    - 检查 `arcmeta_debug.log` 中的高宽日志。
+    - 检查 `ferrex_debug.log` 中的高宽日志。
 
 ## 4. 后续操作
 - 申请执行代码修改。

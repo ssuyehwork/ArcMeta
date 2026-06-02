@@ -14,7 +14,7 @@
 #include <vector>
 #include <string>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief ElasticEdit: 弹性高度编辑框，内容自动撑开高度
@@ -225,4 +225,4 @@ private slots:
     void onTagDeleted(const QString& text);
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

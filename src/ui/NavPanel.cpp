@@ -18,7 +18,7 @@
 #include <QtConcurrent>
 #include <QApplication>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 构造函数，设置面板属性
@@ -276,4 +276,4 @@ void NavPanel::fetchChildDirs(QStandardItem* parent) {
     });
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

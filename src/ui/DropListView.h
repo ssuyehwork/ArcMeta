@@ -3,7 +3,7 @@
 
 #include <QListView>
 
-namespace FERREX {
+namespace ArcMeta {
 
 class DropListView : public QListView {
     Q_OBJECT
@@ -14,6 +14,6 @@ protected:
     void startDrag(Qt::DropActions supportedActions) override;
 };
 
-} // namespace FERREX
+} // namespace ArcMeta
 
 #endif // DROPLISTVIEW_H

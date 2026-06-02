@@ -3,7 +3,7 @@
 #include <QFileInfo>
 #include <QTableWidgetItem>
 
-namespace FERREX {
+namespace ArcMeta {
 
 BatchRenamePreviewDialog::BatchRenamePreviewDialog(QWidget* parent)
     : FramelessDialog("批量重命名预览 - 高清对比模式", parent) {
@@ -68,4 +68,4 @@ void BatchRenamePreviewDialog::applyTheme() {
     );
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

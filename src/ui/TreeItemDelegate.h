@@ -7,9 +7,9 @@
 #include "ContentPanel.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
-using namespace FERREX::Style;
+using namespace ArcMeta::Style;
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 通用树形视图代理，提供圆角高亮效果
@@ -171,4 +171,4 @@ private:
     bool m_showStatus;
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

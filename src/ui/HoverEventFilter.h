@@ -3,7 +3,7 @@
 #include <QObject>
 #include <QEvent>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 悬停事件过滤器
@@ -19,4 +19,4 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

@@ -3,7 +3,7 @@
 #include <QtConcurrent/QtConcurrent>
 #include <QElapsedTimer>
 
-namespace FERREX {
+namespace ArcMeta {
 
 ScanController::ScanController(QObject* parent) : QObject(parent) {
     m_resultSet = std::make_shared<ResultSet>();
@@ -260,4 +260,4 @@ void ScanController::onMftEntryUpdated(uint64_t key) {
     }
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

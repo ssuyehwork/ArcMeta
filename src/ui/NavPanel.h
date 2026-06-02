@@ -7,7 +7,7 @@
 #include <QVBoxLayout>
 #include <QDir>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 导航面板（面板二）
@@ -62,4 +62,4 @@ private slots:
     void onTreeClicked(const QModelIndex& index);
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

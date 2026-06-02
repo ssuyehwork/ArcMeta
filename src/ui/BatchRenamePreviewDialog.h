@@ -7,7 +7,7 @@
 #include <vector>
 #include <string>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 批量重命名独立预览对话框 (选项 A)
@@ -33,4 +33,4 @@ private:
     QPushButton* m_btnClose = nullptr;
 };
 
-} // namespace FERREX
+} // namespace ArcMeta

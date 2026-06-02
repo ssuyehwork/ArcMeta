@@ -7,7 +7,7 @@
 #include <QSvgRenderer>
 #include <memory>
 
-namespace FERREX {
+namespace ArcMeta {
 
 /**
  * @brief 全量扫描期间显示的加载动画窗口
@@ -51,6 +51,6 @@ private:
     std::unique_ptr<QSvgRenderer> m_svgRenderer;
 };
 
-} // namespace FERREX
+} // namespace ArcMeta
 
 #endif // LOADINGWINDOW_H

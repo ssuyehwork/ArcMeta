@@ -1,6 +1,6 @@
 #include "ToolTipOverlay.h"
 
-namespace FERREX {
+namespace ArcMeta {
 
 ToolTipOverlay::ToolTipOverlay() : QWidget(nullptr) {
     // [CRITICAL] 彻底弃用 Qt::ToolTip，防止 OS 动画残留
@@ -137,4 +137,4 @@ void ToolTipOverlay::paintEvent(QPaintEvent*) {
     p.restore();
 }
 
-} // namespace FERREX
+} // namespace ArcMeta

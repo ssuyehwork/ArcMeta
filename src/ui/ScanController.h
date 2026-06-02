@@ -13,7 +13,7 @@
 #include <unordered_set>
 #include <unordered_map>
 
-namespace FERREX {
+namespace ArcMeta {
 
 struct ScanFilterState {
     QStringList extensionList; 
@@ -91,4 +91,4 @@ private:
     QFutureWatcher<std::vector<uint64_t>> m_sortWatcher;
 };
 
-} // namespace FERREX
+} // namespace ArcMeta
