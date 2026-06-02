@@ -553,7 +553,7 @@ void ContentPanel::initUi() {
     m_btnLayers->setFixedSize(24, 24); 
     m_btnLayers->setIcon(UiHelper::getIcon("layers", QColor("#B0B0B0"), 18)); 
     // 2026-03-xx 按照宪法要求：禁绝原生 ToolTip，强制对接 ToolTipOverlay 
-    m_btnLayers->setProperty("tooltipText", "显示子文件夹中的项目");
+    m_btnLayers->setProperty("tooltipText", "递归显示子目录所有文件");
     m_btnLayers->installEventFilter(this); 
     m_btnLayers->setStyleSheet( 
         "QPushButton { background: transparent; border: none; border-radius: 4px; }" 
@@ -598,8 +598,7 @@ void ContentPanel::initUi() {
     m_viewStack->setCurrentWidget(m_gridView); 
  
     QVBoxLayout* contentWrapper = new QVBoxLayout(); 
-    // 2026-06-xx 物理对齐：右侧边距设为 0，使滚动条贴合容器边缘
-    contentWrapper->setContentsMargins(4, 4, 0, 4);
+    contentWrapper->setContentsMargins(4, 4, 0, 4); // 2026-05-08 按照用户要求：增加到4px使卡片到容器边缘达到10px
     contentWrapper->setSpacing(0); 
     contentWrapper->addWidget(m_viewStack); 
      
@@ -1996,7 +1995,7 @@ void ContentPanel::updateLayersButtonState() {
     } 
  
     m_btnLayers->setEnabled(true); 
-    m_btnLayers->setProperty("tooltipText", "显示子文件夹中的项目");
+    m_btnLayers->setProperty("tooltipText", "递归显示子目录所有文件");
 } 
  
 // --- Delegate --- 
@@ -2165,58 +2164,20 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         painter->setPen(QColor(238, 238, 238, 120)); 
     } 
  
-    // 2026-06-05 按照用户要求：限制最多显示两行，并在第二行末尾使用省略号
+    // 2026-06-05 按照用户要求：恢复自动换行逻辑，并在“实在太长”时使用省略号
     // 零宽空格注入以支持非标准断行（如下划线或点号）
     QString displayName = name;
     displayName.replace("_", "_\u200B");
     displayName.replace(".", ".\u200B");
 
-    int lineHeight = option.fontMetrics.lineSpacing();
-    QRect rect = m.nameRect.adjusted(4, 0, -4, 0);
-
-    // 使用 QTextLayout 进行精确的两行控制
-    QTextLayout layout(displayName, painter->font());
-    QTextOption textOption;
-    textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-    textOption.setAlignment(Qt::AlignCenter);
-    layout.setTextOption(textOption);
-
-    layout.beginLayout();
-    QTextLine line1 = layout.createLine();
-    bool hasSecondLine = false;
-    if (line1.isValid()) {
-        line1.setLineWidth(rect.width());
-        QTextLine line2 = layout.createLine();
-        if (line2.isValid()) {
-            line2.setLineWidth(rect.width());
-            hasSecondLine = true;
-
-            // 检查是否有第三行
-            QTextLine line3 = layout.createLine();
-            bool hasThirdLine = line3.isValid();
-
-            int totalH = lineHeight * 2;
-            int y = rect.top() + (rect.height() - totalH) / 2;
-
-            // 绘制第一行
-            line1.draw(painter, QPoint(rect.left(), y));
-
-            // 绘制第二行
-            if (hasThirdLine) {
-                // 如果有第三行，说明第二行需要省略
-                QString remainingText = displayName.mid(line2.textStart()).remove("\u200B");
-                QString elided = option.fontMetrics.elidedText(remainingText, Qt::ElideRight, rect.width());
-                painter->drawText(rect.left(), y + lineHeight + option.fontMetrics.ascent(), elided);
-            } else {
-                // 只有两行，直接绘制第二行
-                line2.draw(painter, QPoint(rect.left(), y + lineHeight));
-            }
-        } else {
-            // 只有一行
-            line1.draw(painter, QPoint(rect.left(), rect.top() + (rect.height() - lineHeight) / 2));
-        }
+    // 首先尝试进行自动换行绘制，如果高度超出，则回退到省略号单行显示
+    QRect boundingRect = painter->boundingRect(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName);
+    if (boundingRect.height() > m.nameRect.height()) {
+        QString elidedName = option.fontMetrics.elidedText(name, Qt::ElideRight, m.nameRect.width() - 8);
+        painter->drawText(m.nameRect, Qt::AlignCenter, elidedName);
+    } else {
+        painter->drawText(m.nameRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName);
     }
-    layout.endLayout();
  
     painter->restore(); 
 } 

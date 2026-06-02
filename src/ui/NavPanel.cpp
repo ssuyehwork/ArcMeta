@@ -129,8 +129,7 @@ void NavPanel::initUi() {
 
     m_mainLayout->addWidget(header);
 
-    // 核心修正：为列表内容包裹容器，恢复旧版 (15, 8, 0, 8) 的呼吸边距
-    // 2026-06-xx 物理对齐：右侧边距设为 0，使滚动条贴合容器边缘，杜绝留白
+    // 核心修正：为列表内容包裹容器，恢复旧版 (15, 8, 15, 8) 的呼吸边距
     QWidget* contentWrapper = new QWidget(this);
     contentWrapper->setStyleSheet("background: transparent; border: none;");
     QVBoxLayout* contentLayout = new QVBoxLayout(contentWrapper);

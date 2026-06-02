@@ -771,8 +771,7 @@ void CategoryPanel::initUi() {
 
     m_mainLayout->addWidget(header);
 
-    // 2. 内容区包裹容器 (物理还原 8, 8, 0, 8 呼吸边距)
-    // 2026-06-xx 物理对齐：右侧边距设为 0，使滚动条贴合容器边缘
+    // 2. 内容区包裹容器 (物理还原 8, 8, 8, 8 呼吸边距)
     QWidget* sbContent = new QWidget(this);
     sbContent->setStyleSheet("background: transparent; border: none;");
     auto* sbContentLayout = new QVBoxLayout(sbContent);
@@ -800,8 +799,6 @@ void CategoryPanel::initUi() {
 
     // 物理还原：单树架构，合并系统项与用户分类
     m_categoryTree = new DropTreeView(this);
-    m_categoryTree->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_categoryTree->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_categoryTree->setStyleSheet(treeStyle); 
     m_categoryTree->setItemDelegate(new CategoryDelegate(this));
     
@@ -810,6 +807,7 @@ void CategoryPanel::initUi() {
     m_categoryTree->setModel(m_categoryModel);
     
     m_categoryTree->setHeaderHidden(true);
+    m_categoryTree->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_categoryTree->setRootIsDecorated(true);
     m_categoryTree->setIndentation(20);
     m_categoryTree->setEditTriggers(QAbstractItemView::NoEditTriggers);
