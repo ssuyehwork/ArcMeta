@@ -138,8 +138,8 @@ void NavPanel::initUi() {
 
     // 物理还原：使用自定义视图以支持无快照拖拽
     m_treeView = new DropTreeView(this);
-    m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_treeView->setHeaderHidden(true);
     m_treeView->setAnimated(true);
     

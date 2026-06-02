@@ -963,8 +963,8 @@ void ContentPanel::setViewMode(ViewMode mode) {
  
 void ContentPanel::initGridView() { 
     m_gridView = new DropJustifiedView(this); 
-    m_gridView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
-    m_gridView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
+    m_gridView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_gridView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_gridView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
     m_gridView->setContextMenuPolicy(Qt::CustomContextMenu); 
  
@@ -1009,8 +1009,8 @@ void ContentPanel::initGridView() {
  
 void ContentPanel::initListView() { 
     m_treeView = new DropTreeView(this); 
-    m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
-    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); 
+    m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_treeView->setSortingEnabled(true); 
     m_treeView->setContextMenuPolicy(Qt::CustomContextMenu); 
     m_treeView->setSelectionMode(QAbstractItemView::ExtendedSelection); 

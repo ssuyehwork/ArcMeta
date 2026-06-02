@@ -25,8 +25,8 @@
 namespace ArcMeta {
 
 ElasticEdit::ElasticEdit(QWidget* parent) : QTextEdit(parent) {
-    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setLineWrapMode(QTextEdit::WidgetWidth); // 恢复为窗口宽度换行，由布局控制外部宽度
     
     // 工业级修复：设置换行策略，确保长文本（如物理路径）在无空格时也能强制换行
@@ -309,7 +309,7 @@ void MetaPanel::initUi() {
     headerLayout->addWidget(closeBtn, 0, Qt::AlignVCenter);
     m_mainLayout->addWidget(header);
 
-    m_scrollArea = new QScrollArea(this); m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded); m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_scrollArea = new QScrollArea(this); m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded); m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_scrollArea->setWidgetResizable(true); m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
     m_container = new QWidget(m_scrollArea); 
     m_containerLayout = new QVBoxLayout(m_container); 

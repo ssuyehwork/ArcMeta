@@ -273,8 +273,8 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
 
     // 滚动内容区
     m_scrollArea = new QScrollArea(this);
-    m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
 
