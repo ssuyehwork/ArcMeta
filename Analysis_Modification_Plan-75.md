@@ -33,9 +33,23 @@
     - 保留了 `getUniqueItemCount()` 和 `getUncategorizedItemCount()` 等接口，返回硬编码的 `0`。
     - **修改建议**: 检查 UI 层（如 `CategoryModel`）是否依然调用这些接口，若有则应一并移除对应的 UI 显示逻辑。
 
-## 4. JSON 方式残留说明
-- **底层格式**: 目前 `.scch` 文件内部依然使用 JSON 文本格式。如果“废除 JSON”包含格式升级，则应考虑将 `AmMetaScch` 的序列化改为二进制。
-- **配置/历史记录**: `ScanDialog.cpp` 使用 JSON 存储搜索历史。考虑到其体量极小且不涉及核心元数据，可暂时保留，或统一迁移至 `AppConfig`。
+## 4. JSON 方式残留说明与格式演进方案
+
+### 4.1 SCCH 底层格式现状
+虽然系统在文件名上已经废弃了 `.json`，但通过对 `src/meta/AmMetaScch.cpp` 的深度审计发现：
+- **序列化引擎**: 依然重度依赖 `QJsonDocument`, `QJsonObject` 和 `QJsonArray`。
+- **物理表现**: 磁盘上的 `.scch` 文件依然是 UTF-8 编码的明文 JSON 字符串。
+- **性能瓶颈**: 对于包含数万个条目的文件夹，JSON 的解析与字符串拼接开销（`toQString` / `toStdWString`）会随着元数据规模增加而呈线性增长。
+
+### 4.2 “完全废除 JSON”的演进路径
+若要彻底对齐用户“废除 JSON”的要求，建议执行以下重构：
+1. **引入二进制序列化**: 参考 `CacheManager.h` 中的 `CacheHeader` 结构，为 `.scch` 文件定义定长头部 + 紧凑型条目块 + 字符串偏移池的格式。
+2. **重构 AmMetaScch**: 移除所有 `QJson` 系列头文件引用，改用 `QDataStream` 或内存映射（MMap）进行原始字节流读写。
+3. **数据对齐**: 将 `PaletteEntry` 等结构体直接序列化为二进制，取消目前将其转换为 JSON 数组的低效中间环节。
+
+### 4.3 UI 辅助逻辑排查
+- **ScanDialog.cpp**:
+    - 依然在使用 `QJsonDocument` 处理搜索历史。这虽然不属于元数据核心，但也属于“JSON 逻辑残留”。建议将其存储逻辑迁移至 `AppConfig`（基于 `QSettings`），彻底清除 UI 层的 `QJson` 依赖。
 
 ## 5. 下一步行动建议
 1. **物理清理**: 删除 `src/db/SyncEngine.cpp/h` 和 `src/db/FolderRepo.h`。
