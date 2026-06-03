@@ -740,7 +740,14 @@ ScanDialog::ScanDialog(QWidget* parent)
                 if (ok) {
                     weakThis->updateStatus("就绪");
                     weakThis->m_controller->setSearchText("");
+
+                    // 2026-06-xx 逻辑校准：启动时必须同步驱动器掩码，否则“自动显示”会因为 Mask 为 0 而失效
+                    QStringList activeList;
+                    for (const QString& d : weakThis->m_config.activeDrives) activeList << d;
+                    MftReader::instance().updateActiveDrives(activeList);
+
                     weakThis->refreshDriveList(true); // 后台探测硬件
+
                     // 2026-06-xx 物理对标：如果开启了“自动显示”，加载快照后立即触发一次全量过滤显示
                     if (weakThis->m_config.autoDisplay) {
                         weakThis->onFilterOptionChanged();
@@ -1508,17 +1515,12 @@ void ScanDialog::onTriggerSearch() {
         if (changed) m_config.save();
     });
 
-    QStringList activeList;
-    for (const QString& drive : m_config.activeDrives) activeList << drive;
-    MftReader::instance().updateActiveDrives(activeList);
-
-    onFilterOptionChanged();
+    // 2026-06-xx 逻辑剥离：onTriggerSearch 仅负责提交搜索，不再重复同步 Mask
     m_controller->setSearchText(m_searchEdit->text());
-    m_controller->triggerSearch(true); // 按钮点击立即搜索
+    m_controller->triggerSearch(true);
 }
 
 void ScanDialog::onFilterOptionChanged() {
-    // 2026-06-xx 逻辑校准：同步所有复选框状态至配置项
     m_config.useRegex = m_checkRegex->isChecked();
     m_config.caseSensitive = m_checkCase->isChecked();
     m_config.includeHidden = m_checkHidden->isChecked();
@@ -1527,7 +1529,6 @@ void ScanDialog::onFilterOptionChanged() {
     m_config.autoDisplay = m_checkAuto->isChecked();
     m_config.save();
 
-    // 2026-06-xx 核心同步：构建过滤状态并通知控制器，实现视图实时刷新
     ScanFilterState state;
     state.useRegex = m_config.useRegex;
     state.caseSensitive = m_config.caseSensitive;
@@ -1543,7 +1544,7 @@ void ScanDialog::onFilterOptionChanged() {
     
     m_controller->setFilterState(state);
 
-    // 2026-06-xx 物理对对标：配置变更时触发立即搜索，特别是响应“自动显示”开关的即时切换
+    // 2026-06-xx 物理对标：复选框状态改变（如勾选“自动显示”）时，立即触发搜索以刷新结果，无需手动点击搜索按钮
     m_controller->triggerSearch(true);
 }
 
@@ -1712,43 +1713,48 @@ bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
             return true;
         }
     }
-    // 2026-06-xx 物理修复：双击搜索框或后缀框时弹出历史菜单
+    // 2026-06-xx 物理修复：双击输入框时弹出历史菜单。
+    // 使用 QTimer 异步弹出，并返回 false 允许 QLineEdit 执行默认的双击选词/全选逻辑，解决功能冲突。
     if (event->type() == QEvent::MouseButtonDblClick && (watched == m_searchEdit || watched == m_extEdit)) {
         bool isQuery = (watched == m_searchEdit);
         const QStringList& history = isQuery ? m_config.queryHistory : m_config.extHistory;
         
         if (!history.isEmpty()) {
-            QMenu menu(this);
-            menu.setStyleSheet(
-                "QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid #444; padding: 4px; border-radius: 8px; }"
-                "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; font-size: 12px; }"
-                "QMenu::item:selected { background-color: #3E3E42; color: white; }"
-            );
+            QPointer<ScanDialog> weakThis(this);
+            QPointer<QWidget> weakWatched(qobject_cast<QWidget*>(watched));
             
-            for (const QString& item : history) {
-                QAction* act = menu.addAction(item);
-                connect(act, &QAction::triggered, this, [this, isQuery, item]() {
-                    if (isQuery) {
-                        m_searchEdit->setText(item);
-                    } else {
-                        m_extEdit->setText(item);
-                    }
-                    onTriggerSearch();
+            QTimer::singleShot(0, [weakThis, weakWatched, history, isQuery]() {
+                if (!weakThis || !weakWatched) return;
+
+                QMenu* menu = new QMenu(weakThis);
+                menu->setAttribute(Qt::WA_DeleteOnClose);
+                menu->setStyleSheet(
+                    "QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid #444; padding: 4px; border-radius: 8px; }"
+                    "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; font-size: 12px; }"
+                    "QMenu::item:selected { background-color: #3E3E42; color: white; }"
+                );
+
+                for (const QString& item : history) {
+                    QAction* act = menu->addAction(item);
+                    weakThis->connect(act, &QAction::triggered, weakThis, [weakThis, isQuery, item]() {
+                        if (isQuery) weakThis->m_searchEdit->setText(item);
+                        else weakThis->m_extEdit->setText(item);
+                        weakThis->onTriggerSearch();
+                    });
+                }
+
+                menu->addSeparator();
+                QAction* clearAct = menu->addAction("清空历史记录");
+                weakThis->connect(clearAct, &QAction::triggered, weakThis, [weakThis, isQuery]() {
+                    if (isQuery) weakThis->m_config.queryHistory.clear();
+                    else weakThis->m_config.extHistory.clear();
+                    weakThis->m_config.save();
                 });
-            }
-            
-            menu.addSeparator();
-            QAction* clearAct = menu.addAction("清空历史记录");
-            connect(clearAct, &QAction::triggered, this, [this, isQuery]() {
-                if (isQuery) m_config.queryHistory.clear();
-                else m_config.extHistory.clear();
-                m_config.save();
+
+                menu->exec(weakWatched->mapToGlobal(QPoint(0, weakWatched->height())));
             });
-            
-            QWidget* widget = qobject_cast<QWidget*>(watched);
-            menu.exec(widget->mapToGlobal(QPoint(0, widget->height())));
-            return true;
         }
+        return false;
     }
     return FramelessDialog::eventFilter(watched, event);
 }
