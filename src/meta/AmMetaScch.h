@@ -54,9 +54,12 @@ private:
     std::map<std::wstring, ItemMeta> m_items;
 
     // 2026-06-xx 物理重构：二进制序列化辅助 (不再使用 QJson)
-    struct BinaryHeader;
-    struct BinaryItemRecord;
-    struct BinaryFolderRecord;
+    struct BinaryHeader {
+        char magic[4] = {'S', 'C', 'C', 'H'};
+        uint32_t version = 3;
+        uint32_t itemCount = 0;
+        uint32_t reserved = 0;
+    };
 
     static QString toQString(const std::wstring& ws) { return QString::fromStdWString(ws); }
     static std::wstring toStdWString(const QString& qs) { return qs.toStdWString(); }

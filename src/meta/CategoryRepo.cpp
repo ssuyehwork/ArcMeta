@@ -17,6 +17,15 @@ struct CategoryHeader {
     uint32_t itemCount = 0;
 };
 
+static QDataStream& operator<<(QDataStream& ds, const std::string& s) {
+    ds << QString::fromStdString(s);
+    return ds;
+}
+static QDataStream& operator>>(QDataStream& ds, std::string& s) {
+    QString qs; ds >> qs; s = qs.toStdString();
+    return ds;
+}
+
 static QDataStream& operator<<(QDataStream& ds, const Category& c) {
     ds << c.id << c.parentId << QString::fromStdWString(c.name) << QString::fromStdWString(c.color);
     ds << (int)c.presetTags.size();

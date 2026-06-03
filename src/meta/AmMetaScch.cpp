@@ -13,12 +13,6 @@ namespace ArcMeta {
 
 // 2026-06-xx 二进制协议 v3 定义
 #pragma pack(push, 1)
-struct BinaryHeader {
-    char magic[4] = {'S', 'C', 'C', 'H'};
-    uint32_t version = 3;
-    uint32_t itemCount = 0;
-    uint32_t reserved = 0;
-};
 
 // 紧凑型调色板数据 (24字节)
 struct BinaryPalette {
@@ -36,7 +30,16 @@ AmMetaScch::AmMetaScch(const std::wstring& folderPath)
     m_filePath = path + L"metadata.scch";
 }
 
-// 辅助：QDataStream 扩展支持 std::wstring
+// 辅助：QDataStream 扩展支持 std::string 和 std::wstring
+static QDataStream& operator<<(QDataStream& ds, const std::string& s) {
+    ds << QString::fromStdString(s);
+    return ds;
+}
+static QDataStream& operator>>(QDataStream& ds, std::string& s) {
+    QString qs; ds >> qs; s = qs.toStdString();
+    return ds;
+}
+
 static QDataStream& operator<<(QDataStream& ds, const std::wstring& ws) {
     ds << QString::fromStdWString(ws);
     return ds;
@@ -70,7 +73,7 @@ bool AmMetaScch::load() {
     QDataStream ds(&file);
     ds.setVersion(QDataStream::Qt_6_0);
 
-    BinaryHeader header;
+    AmMetaScch::BinaryHeader header;
     file.read((char*)&header, sizeof(header));
     if (memcmp(header.magic, "SCCH", 4) != 0 || header.version != 3) {
         // 2026-06-xx 物理清算：若检测到非二进制 v3 格式（如旧版 JSON），直接视为失效
@@ -114,7 +117,7 @@ bool AmMetaScch::save() const {
     QDataStream ds(&file);
     ds.setVersion(QDataStream::Qt_6_0);
 
-    BinaryHeader header;
+    AmMetaScch::BinaryHeader header;
     header.itemCount = (uint32_t)m_items.size();
     file.write((char*)&header, sizeof(header));
 
