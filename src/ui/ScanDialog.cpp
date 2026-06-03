@@ -1518,12 +1518,7 @@ void ScanDialog::onTriggerSearch() {
 }
 
 void ScanDialog::onFilterOptionChanged() {
-    // 2026-06-xx 物理修复：在过滤选项变更时强制同步驱动器掩码。
-    // 如果不在此处同步，当用户切换“自动显示”开关时，搜索引擎可能因为默认 Mask 为 0 而导致搜索结果为空。
-    QStringList activeList;
-    for (const QString& d : m_config.activeDrives) activeList << d;
-    MftReader::instance().updateActiveDrives(activeList);
-
+    // 2026-06-xx 逻辑校准：同步所有复选框状态至配置项
     m_config.useRegex = m_checkRegex->isChecked();
     m_config.caseSensitive = m_checkCase->isChecked();
     m_config.includeHidden = m_checkHidden->isChecked();
@@ -1532,6 +1527,7 @@ void ScanDialog::onFilterOptionChanged() {
     m_config.autoDisplay = m_checkAuto->isChecked();
     m_config.save();
 
+    // 2026-06-xx 核心同步：构建过滤状态并通知控制器，实现视图实时刷新
     ScanFilterState state;
     state.useRegex = m_config.useRegex;
     state.caseSensitive = m_config.caseSensitive;
@@ -1539,11 +1535,15 @@ void ScanDialog::onFilterOptionChanged() {
     state.includeSystem = m_config.includeSystem;
     state.includeDollar = m_config.includeDollar;
     state.autoDisplay = m_config.autoDisplay;
+    
     QString extText = m_extEdit->text().toLower();
-    if (!extText.isEmpty()) state.extensionList = extText.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
+    if (!extText.isEmpty()) {
+        state.extensionList = extText.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
+    }
     
     m_controller->setFilterState(state);
-    // 2026-06-xx 物理对标：配置变更时触发立即搜索，以响应“自动显示”等开关状态
+    
+    // 2026-06-xx 物理对对标：配置变更时触发立即搜索，特别是响应“自动显示”开关的即时切换
     m_controller->triggerSearch(true);
 }
 
@@ -1712,30 +1712,41 @@ bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
             return true;
         }
     }
-    if ((watched == m_searchEdit || watched == m_extEdit) && event->type() == QEvent::MouseButtonDblClick) {
+    // 2026-06-xx 物理修复：双击搜索框或后缀框时弹出历史菜单
+    if (event->type() == QEvent::MouseButtonDblClick && (watched == m_searchEdit || watched == m_extEdit)) {
         bool isQuery = (watched == m_searchEdit);
         const QStringList& history = isQuery ? m_config.queryHistory : m_config.extHistory;
         
         if (!history.isEmpty()) {
             QMenu menu(this);
-            menu.setStyleSheet("QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; } QMenu::item:selected { background: #232D37; color: #FFF; }");
+            menu.setStyleSheet(
+                "QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid #444; padding: 4px; border-radius: 8px; }"
+                "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; font-size: 12px; }"
+                "QMenu::item:selected { background-color: #3E3E42; color: white; }"
+            );
             
             for (const QString& item : history) {
-                menu.addAction(item, [this, isQuery, item]() {
-                    if (isQuery) m_searchEdit->setText(item);
-                    else m_extEdit->setText(item);
+                QAction* act = menu.addAction(item);
+                connect(act, &QAction::triggered, this, [this, isQuery, item]() {
+                    if (isQuery) {
+                        m_searchEdit->setText(item);
+                    } else {
+                        m_extEdit->setText(item);
+                    }
                     onTriggerSearch();
                 });
             }
             
             menu.addSeparator();
-            menu.addAction("清空历史记录", [this, isQuery]() {
+            QAction* clearAct = menu.addAction("清空历史记录");
+            connect(clearAct, &QAction::triggered, this, [this, isQuery]() {
                 if (isQuery) m_config.queryHistory.clear();
                 else m_config.extHistory.clear();
                 m_config.save();
             });
             
-            menu.exec(static_cast<QWidget*>(watched)->mapToGlobal(QPoint(0, static_cast<QWidget*>(watched)->height())));
+            QWidget* widget = qobject_cast<QWidget*>(watched);
+            menu.exec(widget->mapToGlobal(QPoint(0, widget->height())));
             return true;
         }
     }

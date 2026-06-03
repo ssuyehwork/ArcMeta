@@ -976,7 +976,8 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnScan = createTitleBtn("scan");
     m_btnScan->setProperty("tooltipText", "全盘扫描与对账");
     connect(m_btnScan, &QPushButton::clicked, this, [this]() {
-        ScanDialog* dlg = new ScanDialog(this);
+        // 2026-06-xx 物理隔离：不再挂载主窗口为父，使其拥有独立任务栏图标与层级
+        ScanDialog* dlg = new ScanDialog(nullptr);
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->show();
     });
