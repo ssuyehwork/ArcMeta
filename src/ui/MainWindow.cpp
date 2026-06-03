@@ -18,7 +18,7 @@
 #include "ScanDialog.h"
 #include "../mft/MftReader.h"
 #include "../db/CategoryRepo.h"
-#include "../db/ItemRepo.h"
+
 #include "SearchHistoryPanel.h"
 #include "SvgIcons.h"
 
@@ -49,7 +49,7 @@ using namespace ArcMeta::Style;
 #include <Dbt.h>
 #endif
 
-#include "../db/SyncEngine.h"
+
 #include <QtConcurrent>
 
 namespace ArcMeta {
@@ -219,7 +219,6 @@ void MainWindow::initUi() {
                    type == "today" || type == "yesterday" || type == "recently_visited" || type == "trash") {
             // 2026-06-xx 物理修复：所有系统项直接走数据库专用路径接口，彻底断开与搜索框的傻逼耦合
             m_contentPanel->setCurrentCategoryType(type);
-            m_contentPanel->loadPaths(ItemRepo::getPathsBySystemType(type));
         } else {
             // 其余系统项 (标签管理等) 维持搜索逻辑
             m_contentPanel->search(name); 
@@ -519,7 +518,6 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
             qDebug() << "[Main] 检测到磁盘硬件变更，触发全量 GLOB 对账对账...";
             // 异步触发扫描，防止阻塞 UI
             (void)QtConcurrent::run([]() {
-                SyncEngine::instance().runFullScan({}, nullptr);
             });
         }
     }
@@ -958,7 +956,7 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     // 2026-06-15 按照用户要求：手动点击同步
     connect(m_btnSync, &QPushButton::clicked, this, [this]() {
-        SyncEngine::instance().runIncrementalSync();
+        
         ToolTipOverlay::instance()->showText(m_btnSync->mapToGlobal(QPoint(0,0)), "正在启动延时同步...", 1500);
     });
 
@@ -974,25 +972,6 @@ void MainWindow::setupCustomTitleBarButtons() {
     };
     
     connect(&MetadataManager::instance(), &MetadataManager::pendingSyncChanged, this, updateSyncBtnState);
-    connect(&SyncEngine::instance(), &SyncEngine::syncStatusChanged, this, [this, updateSyncBtnState](bool running) {
-        if (!running) {
-            updateSyncBtnState(SyncEngine::instance().hasPendingTasks());
-        }
-    });
-
-    // 启动时初始化一次状态
-    QTimer::singleShot(500, this, [this, updateSyncBtnState]() {
-        updateSyncBtnState(SyncEngine::instance().hasPendingTasks());
-    });
-
-    m_btnScan = createTitleBtn("scan");
-    m_btnScan->setProperty("tooltipText", "实时扫描与查找...");
-    m_btnScan->installEventFilter(m_hoverFilter);
-    // 2026-05-09 按照用户要求：扫描窗口与主界面操作相互不干扰，去除父子关系
-    connect(m_btnScan, &QPushButton::clicked, this, [this]() {
-        auto* dlg = new ScanDialog(nullptr);
-        dlg->setAttribute(Qt::WA_DeleteOnClose); // 2026-05-27 物理修复：关闭后自动释放内存
-        dlg->setModal(false);
         dlg->show();
     });
 
@@ -1087,7 +1066,7 @@ void MainWindow::initIdleDetector() {
     
     connect(m_idleTimer, &QTimer::timeout, this, [this]() {
         qDebug() << "[Main] 检测到系统闲置超过30秒，触发自动对账同步...";
-        SyncEngine::instance().runIncrementalSync();
+        
     });
 
     // 启动闲置计时

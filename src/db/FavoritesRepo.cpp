@@ -1,39 +1,95 @@
 #include "FavoritesRepo.h"
-#include <QSqlQuery>
-#include <QSqlError>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QFile>
 #include <QDateTime>
+#include <algorithm>
 
 namespace ArcMeta {
 
+namespace ScchFavoritesEngine {
+
+static QJsonObject loadFavoritesScch() {
+    QFile file("arcmeta_favorites.scch");
+    if (file.exists() && file.open(QIODevice::ReadOnly)) {
+        QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+        file.close();
+        if (doc.isObject()) return doc.object();
+    }
+    QJsonObject root;
+    root["favorites"] = QJsonArray();
+    return root;
+}
+
+static bool saveFavoritesScch(const QJsonObject& root) {
+    QFile file("arcmeta_favorites.scch");
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+        file.close();
+        return true;
+    }
+    return false;
+}
+
+} // namespace ScchFavoritesEngine
+
 bool FavoritesRepo::add(const Favorite& fav) {
-    QSqlQuery q;
-    q.prepare("INSERT OR REPLACE INTO favorites (path, type, name, sort_order, added_at) VALUES (?, ?, ?, ?, ?)");
-    q.addBindValue(QString::fromStdWString(fav.path));
-    q.addBindValue(QString::fromStdWString(fav.type));
-    q.addBindValue(QString::fromStdWString(fav.name));
-    q.addBindValue(fav.sortOrder);
-    q.addBindValue((double)QDateTime::currentMSecsSinceEpoch());
-    return q.exec();
+    QJsonObject root = ScchFavoritesEngine::loadFavoritesScch();
+    QJsonArray favs = root["favorites"].toArray();
+    QJsonArray updatedFavs;
+    bool found = false;
+    QString targetPath = QString::fromStdWString(fav.path);
+    for (const auto& val : favs) {
+        QJsonObject obj = val.toObject();
+        if (obj["path"].toString() == targetPath) {
+            QJsonObject newObj;
+            newObj["path"] = targetPath;
+            newObj["type"] = QString::fromStdWString(fav.type);
+            newObj["name"] = QString::fromStdWString(fav.name);
+            newObj["sort_order"] = fav.sortOrder;
+            newObj["added_at"] = (double)QDateTime::currentMSecsSinceEpoch();
+            updatedFavs.append(newObj);
+            found = true;
+        } else updatedFavs.append(obj);
+    }
+    if (!found) {
+        QJsonObject newObj;
+        newObj["path"] = targetPath;
+        newObj["type"] = QString::fromStdWString(fav.type);
+        newObj["name"] = QString::fromStdWString(fav.name);
+        newObj["sort_order"] = fav.sortOrder;
+        newObj["added_at"] = (double)QDateTime::currentMSecsSinceEpoch();
+        updatedFavs.append(newObj);
+    }
+    root["favorites"] = updatedFavs;
+    return ScchFavoritesEngine::saveFavoritesScch(root);
 }
 
 bool FavoritesRepo::remove(const std::wstring& path) {
-    QSqlQuery q;
-    q.prepare("DELETE FROM favorites WHERE path = ?");
-    q.addBindValue(QString::fromStdWString(path));
-    return q.exec();
+    QJsonObject root = ScchFavoritesEngine::loadFavoritesScch();
+    QJsonArray favs = root["favorites"].toArray();
+    QJsonArray remainingFavs;
+    QString targetPath = QString::fromStdWString(path);
+    for (const auto& val : favs) if (val.toObject()["path"].toString() != targetPath) remainingFavs.append(val);
+    root["favorites"] = remainingFavs;
+    return ScchFavoritesEngine::saveFavoritesScch(root);
 }
 
 std::vector<Favorite> FavoritesRepo::getAll() {
     std::vector<Favorite> results;
-    QSqlQuery q("SELECT path, type, name, sort_order FROM favorites ORDER BY sort_order ASC");
-    while (q.next()) {
+    QJsonObject root = ScchFavoritesEngine::loadFavoritesScch();
+    QJsonArray favs = root["favorites"].toArray();
+    for (const auto& val : favs) {
+        QJsonObject obj = val.toObject();
         Favorite fav;
-        fav.path = q.value(0).toString().toStdWString();
-        fav.type = q.value(1).toString().toStdWString();
-        fav.name = q.value(2).toString().toStdWString();
-        fav.sortOrder = q.value(3).toInt();
+        fav.path = obj["path"].toString().toStdWString();
+        fav.type = obj["type"].toString().toStdWString();
+        fav.name = obj["name"].toString().toStdWString();
+        fav.sortOrder = obj["sort_order"].toInt();
         results.push_back(fav);
     }
+    std::sort(results.begin(), results.end(), [](const Favorite& a, const Favorite& b) { return a.sortOrder < b.sortOrder; });
     return results;
 }
 

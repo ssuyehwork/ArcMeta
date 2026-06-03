@@ -14,8 +14,8 @@ using namespace ArcMeta::Style;
 #include <QFileInfo>
 #include <QRegularExpression>
 #include "../db/CategoryRepo.h"
-#include "../db/ItemRepo.h"
-#include "../db/SyncEngine.h"
+
+
 #include "../meta/MetadataManager.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -30,8 +30,8 @@ using namespace ArcMeta::Style;
 #include <QDirIterator>
 #include <QColorDialog>
 #include "../core/AppConfig.h"
-#include <QSqlDatabase>
-#include <QSqlQuery>
+
+
 #include "Logger.h"
 #include <QtConcurrent>
 
@@ -57,14 +57,8 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_mainLayout->setSpacing(0);
 
-    // 2026-05-28 物理增强：提前从持久化状态初始化底层引擎模式
-    bool isScch = AppConfig::instance().getValue("Category/IsScchMode", false).toBool();
-    CategoryRepo::setScchMode(isScch);
-    if (isScch) {
-        MetadataManager::instance().initFromScchMode();
-    } else {
-        MetadataManager::instance().initFromDatabase();
-    }
+    // 2026-06-xx 按照用户要求：彻底废除数据库模式，强制永久启用 SCCH 模式
+    MetadataManager::instance().initFromScchMode();
 
     initUi();
     setupContextMenu();
@@ -662,87 +656,6 @@ void CategoryPanel::initUi() {
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
 
-    // 2026-05-17 按照用户要求：在“手动全量扫描与对账”按钮左侧新增一个开关切换按钮
-    // 2026-06-xx 物理增强：实现状态持久化加载 (方案 A)
-    m_btnSwitch = new QPushButton(header);
-    m_btnSwitch->setFixedSize(24, 24);
-    m_btnSwitch->setCheckable(true);
-    m_btnSwitch->setFlat(true);
-    m_btnSwitch->setCursor(Qt::PointingHandCursor);
-    m_btnSwitch->setIconSize(QSize(16, 16));
-    m_btnSwitch->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }");
-    m_btnSwitch->installEventFilter(this);
-
-    // 回填初始状态
-    bool isScchMode = AppConfig::instance().getValue("Category/IsScchMode", false).toBool();
-    m_btnSwitch->setChecked(isScchMode);
-    if (isScchMode) {
-        m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", SuccessGreen));
-        m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为SCCH模式（内存）");
-    } else {
-        m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", TextDim));
-        m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
-    }
-
-    connect(m_btnSwitch, &QPushButton::clicked, this, [this](bool checked) {
-        // 2026-05-29 优化点 1：增加切换确认机制 (Plan-44)
-        QString modeName = checked ? "SCCH 模式 (内存)" : "数据库模式";
-        FramelessConfirmDialog confirmDlg("模式切换确认", QString("切换到<b>%1</b>将重新加载数据引擎，是否继续？").arg(modeName), this);
-        if (confirmDlg.exec() != QDialog::Accepted) {
-            m_btnSwitch->blockSignals(true);
-            m_btnSwitch->setChecked(!checked);
-            m_btnSwitch->blockSignals(false);
-            return;
-        }
-
-        // 2026-05-29 优化点 2：增强切换时的视觉反馈 (UX)
-        m_btnSwitch->setEnabled(false);
-        m_btnSwitch->setIcon(UiHelper::getIcon("sync", WarningOrange)); // 临时旋转图标或等待图标
-
-        // 2026-05-29 优化点 3：异常处理与原子性保证
-        if (!CategoryRepo::syncDatabaseAndScch()) {
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#E74C3C;'>[ERROR] 双轨同步失败，已中止切换</b>", 2000, ErrorRed);
-            m_btnSwitch->blockSignals(true);
-            m_btnSwitch->setChecked(!checked);
-            m_btnSwitch->setIcon(UiHelper::getIcon(!checked ? "switch_on" : "switch_off", !checked ? SuccessGreen : TextDim));
-            m_btnSwitch->blockSignals(false);
-            m_btnSwitch->setEnabled(true);
-            return;
-        }
-
-        if (checked) {
-            m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", SuccessGreen));
-            m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为SCCH模式（内存）");
-        } else {
-            m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", TextDim));
-            m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
-        }
-
-        // 1. 设置底层分类库模式
-        CategoryRepo::setScchMode(checked);
-
-        // 2. 促使元数据管理器进行数据重载与重构
-        if (checked) {
-            MetadataManager::instance().initFromScchMode();
-        } else {
-            MetadataManager::instance().initFromDatabase();
-        }
-
-        // 3. 持久化状态
-        AppConfig::instance().setValue("Category/IsScchMode", checked);
-        AppConfig::instance().sync(); // 物理落盘，防止异常退出回滚
-
-        // 4. 树模型重新拉取
-        if (m_categoryModel) {
-            m_categoryModel->refresh();
-        }
-
-        m_btnSwitch->setEnabled(true);
-        // 2026-05-29 优化点 4：状态栏/气泡即时反馈
-        ToolTipOverlay::instance()->showText(QCursor::pos(), QString("<b style='color:#2ecc71;'>已切换至 %1</b>").arg(modeName), 1500, QColor("#2ecc71"));
-    });
-    headerLayout->addWidget(m_btnSwitch, 0, Qt::AlignVCenter);
-
     // 2026-06-xx 按照用户要求：从状态栏迁移至此，执行手动全量扫描与对账
     QPushButton* btnRescan = new QPushButton(header);
     btnRescan->setFixedSize(24, 24); // 适当放大以适应标题栏高度
@@ -755,7 +668,6 @@ void CategoryPanel::initUi() {
     btnRescan->installEventFilter(this); // 2026-06-xx 按照规范：安装过滤器以驱动自定义 ToolTip
     connect(btnRescan, &QPushButton::clicked, this, [this]() {
         // 1. 全量双向分类与项映射物理对账同步
-        CategoryRepo::syncDatabaseAndScch();
 
         // 2. 瞬时刷新界面树展示
         if (m_categoryModel) {
@@ -764,7 +676,7 @@ void CategoryPanel::initUi() {
 
         // 3. 启动后台文件与分布式 USN 对账扫描
         (void)QtConcurrent::run([]() {
-            SyncEngine::instance().runFullScan({}, nullptr);
+            
         });
     });
     headerLayout->addWidget(btnRescan, 0, Qt::AlignVCenter);
@@ -968,7 +880,6 @@ void CategoryPanel::initUi() {
         progress->show();
         
         (void)QThreadPool::globalInstance()->start([this, paths, targetCatId, progress]() {
-            QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
             
             // A. 第一阶段：快速物理统计总项数 (包含文件夹)
             int totalItems = 0;
@@ -992,7 +903,6 @@ void CategoryPanel::initUi() {
 
             auto allCats = CategoryRepo::getAll();
             int currentTask = 0;
-            db.transaction();
 
             // 辅助 Lambda：确保分类存在，不存在则创建
             auto ensureCategory = [&](const std::wstring& name, int parentId) -> int {
@@ -1026,7 +936,6 @@ void CategoryPanel::initUi() {
                     std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
                     
                     // 1. 物理入库（使用真实 FRN 杜绝冲突）
-                    ItemRepo::saveBasicInfo(vol, frn, wPath, parentDir, info.isDir(), (double)mtime, (double)size, (double)ctime, fid);
                     
                     // 2. 执行归类关联 (如果 catId > 0)
                     if (catId > 0) {
@@ -1087,7 +996,6 @@ void CategoryPanel::initUi() {
 
                         currentTask++;
                         if (currentTask % 100 == 0) {
-                            db.commit(); db.transaction();
                             QMetaObject::invokeMethod(progress, [progress, currentTask, nativePath]() {
                                 progress->setValue(currentTask);
                                 progress->setStatus("正在导入: " + QFileInfo(nativePath).fileName());
@@ -1100,8 +1008,6 @@ void CategoryPanel::initUi() {
                     currentTask++;
                 }
             }
-            
-            db.commit();
 
             QMetaObject::invokeMethod(this, [this, progress]() {
                 progress->accept();

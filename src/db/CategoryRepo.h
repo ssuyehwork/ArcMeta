@@ -1,8 +1,9 @@
 #pragma once
 
-#include "Database.h"
 #include <string>
 #include <vector>
+#include <QString>
+#include <QMap>
 
 namespace ArcMeta {
 
@@ -20,16 +21,9 @@ struct Category {
 
 /**
  * @brief 分类持久层
+ * 彻底废除数据库，全量转向 SCCH 架构
  */
 class CategoryRepo {
-public:
-    static void setScchMode(bool enabled);
-    static bool isScchMode();
-    static bool syncDatabaseAndScch();
-
-private:
-    static bool m_isScchMode;
-
 public:
     static bool add(Category& cat);
     static bool update(const Category& cat);

@@ -43,7 +43,7 @@ class MetadataManager : public QObject {
 public:
     static MetadataManager& instance();
 
-    void initFromDatabase();
+    
     void initFromScchMode();
     RuntimeMeta getMeta(const std::wstring& path);
 

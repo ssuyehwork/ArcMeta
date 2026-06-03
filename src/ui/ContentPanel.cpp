@@ -54,8 +54,8 @@
 #include <functional> 
 #include <QPointer> 
 #include <QPersistentModelIndex> 
-#include <QSqlDatabase> 
-#include <QSqlQuery> 
+ 
+ 
 #include <windows.h> 
 #include <shellapi.h> 
 #include <io.h>
@@ -67,6 +67,8 @@
 #include "BatchRenameDialog.h" 
 #include "UiHelper.h" 
 #include "StyleLibrary.h"
+#include "../core/CoreController.h"
+#include "../meta/AllFrnManager.h"
 using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
  
@@ -173,7 +175,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         return getCachedMeta(path).encrypted;
     } else if (role == TagsRole) {
         return getCachedMeta(path).tags;
-    } else if (role == InDatabaseRole) {
+    } else if (role == ManagedRole) {
         return getCachedMeta(path).hasUserOperations();
     } else if (role == CategoryIdRole) {
         return 0; 
@@ -314,7 +316,7 @@ void FerrexVirtualDbModel::fetchMore(const QModelIndex& parent) {
     Q_UNUSED(parent);
 }
 
-void FerrexVirtualDbModel::setRecords(const std::vector<ArcMeta::ItemRepo::ItemRecord>& records) {
+void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
     beginResetModel();
     m_allRecords = records;
     m_displayCount = (int)m_allRecords.size();
@@ -985,7 +987,7 @@ void ContentPanel::initGridView() {
         delegate->setRatingRole(RatingRole);
         delegate->setPathRole(PathRole);
         delegate->setPinnedRole(PinnedRole);
-        delegate->setManagedRole(InDatabaseRole);
+        delegate->setManagedRole(ManagedRole);
         delegate->setTypeRole(TypeRole);
         delegate->setIsEmptyRole(IsEmptyRole);
         delegate->setColorRole(ColorRole);
@@ -1404,7 +1406,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             for (const auto& idx : indexes) {
                 if (idx.column() == 0) {
                     QString itemPath = idx.data(PathRole).toString();
-                    ItemRepo::restoreByPath(itemPath.toStdWString());
                 }
             }
             loadDirectory(m_currentPath);
@@ -1504,7 +1505,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
                         if (physicalOk) {
                             // 2. 数据库同步清理 (三位一体)
-                            ItemRepo::physicalRemove(wp);
                             
                             // 3. 元数据管理清理 (离散 SCCH 与 内存失效)
                             MetadataManager::instance().removeMetadataSync(wp);
@@ -1671,9 +1671,9 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         updateLayersButtonState(); 
  
         const auto drives = QDir::drives(); 
-        std::vector<ArcMeta::ItemRepo::ItemRecord> driveRecords;
+        std::vector<ItemRecord> driveRecords;
         for (const QFileInfo& drive : drives) { 
-            ItemRepo::ItemRecord r;
+            ItemRecord r;
             r.path = QDir::toNativeSeparators(drive.absolutePath());
             r.isDir = true;
             driveRecords.push_back(r);
@@ -1693,7 +1693,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive]() { 
         if (!panelPtr) return; 
          
-        std::vector<ArcMeta::ItemRepo::ItemRecord> allItems;
+        std::vector<ItemRecord> allItems;
  
         std::function<void(const QString&, bool)> scanDir; 
         scanDir = [&](const QString& p, bool rec) { 
@@ -1705,7 +1705,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (!panelPtr) return; 
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
  
-                ItemRepo::ItemRecord r;
+                ItemRecord r;
                 r.path = QDir::toNativeSeparators(info.absoluteFilePath());
                 r.isDir = info.isDir();
                 allItems.push_back(r);
@@ -1736,13 +1736,26 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
 void ContentPanel::search(const QString& query) { 
     m_currentCategoryType = "search";
-    qDebug() << "[Content] 物理检索 (DB模式) ->" << query; 
+    qDebug() << "[Content] 物理检索 (SCCH模式) ->" << query; 
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
  
     m_isLoading = true;
-    auto records = ItemRepo::searchRecordsByKeyword(query, m_currentPath);
+    
+    // 彻底废除数据库搜索，强制使用 SCCH 内存搜索
+    QStringList paths = CoreController::instance().performSearch(query);
+    
+    std::vector<ItemRecord> records;
+    for (const QString& p : paths) {
+        if (!p.isEmpty() && QFileInfo::exists(p)) {
+            ItemRecord r;
+            r.path = QDir::toNativeSeparators(p);
+            r.isDir = QFileInfo(p).isDir();
+            records.push_back(r);
+        }
+    }
+
     m_model->setRecords(records);
     m_isLoading = false;
     recalculateAndEmitStats();
@@ -1816,13 +1829,13 @@ void ContentPanel::loadCategory(int categoryId) {
      
     m_model->clear(); 
  
-    std::vector<ArcMeta::ItemRepo::ItemRecord> allRecords;
+    std::vector<ItemRecord> allRecords;
 
     // 1. 加载子分类
     auto allCategories = CategoryRepo::getAll();
     for (const auto& cat : allCategories) {
         if (cat.parentId == categoryId) {
-            ItemRepo::ItemRecord r;
+            ItemRecord r;
             r.isCategory = true;
             r.categoryId = cat.id;
             r.categoryName = QString::fromStdWString(cat.name);
@@ -1831,17 +1844,22 @@ void ContentPanel::loadCategory(int categoryId) {
         }
     }
 
-    // 2. 加载文件
-    auto itemRecords = ItemRepo::getRecordsInCategory(categoryId);
-    // 2026-06-xx 物理过滤：排除数据库残留的失效路径，防止内容区出现空“FILE”占位符
-    for (auto it = itemRecords.begin(); it != itemRecords.end(); ) {
-        if (!it->path.isEmpty() && !QFileInfo::exists(it->path)) {
-            it = itemRecords.erase(it);
-        } else {
-            ++it;
+    // 2. 加载文件 (SCCH 分离模式)
+    std::vector<std::string> fids = CategoryRepo::getFileIdsInCategory(categoryId);
+    
+    // 2026-06-xx 彻底重构：分类加载不再依赖数据库，而是通过全 Frn 索引匹配物理路径
+    auto allFrns = AllFrnManager::instance().getAllFrns();
+    for (const auto& fid : fids) {
+        if (allFrns.contains(fid)) {
+            QString path = QString::fromStdWString(allFrns[fid]);
+            if (!path.isEmpty() && QFileInfo::exists(path)) {
+                ItemRecord r;
+                r.path = QDir::toNativeSeparators(path);
+                r.isDir = QFileInfo(path).isDir();
+                allRecords.push_back(r);
+            }
         }
     }
-    allRecords.insert(allRecords.end(), itemRecords.begin(), itemRecords.end());
 
     m_model->setRecords(allRecords);
      
@@ -1859,11 +1877,11 @@ void ContentPanel::loadPaths(const QStringList& paths) {
      
     m_model->clear(); 
  
-    std::vector<ArcMeta::ItemRepo::ItemRecord> records;
+    std::vector<ItemRecord> records;
     for (const QString& p : paths) {
         // 2026-06-xx 物理过滤：系统分类加载时强制校验物理存在性
         if (!p.isEmpty() && QFileInfo::exists(p)) {
-            ItemRepo::ItemRecord r;
+            ItemRecord r;
             r.path = QDir::toNativeSeparators(p);
             r.isDir = QFileInfo(p).isDir();
             records.push_back(r);
@@ -1877,7 +1895,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
 } 
  
 void ContentPanel::recalculateAndEmitStats() {
-    const std::vector<ArcMeta::ItemRepo::ItemRecord>& records = m_model->allRecords();
+    const std::vector<ItemRecord>& records = m_model->allRecords();
     if (records.empty()) {
         emit directoryStatsReady({}, {}, {}, {}, {}, {});
         return;
@@ -1970,7 +1988,7 @@ void ContentPanel::createNewItem(const QString& type) {
     if (success) { 
         loadDirectory(m_currentPath, m_isRecursive); 
         // 虚拟模型中不再支持 findItems，需要手动寻找
-    const std::vector<ArcMeta::ItemRepo::ItemRecord>& records = m_model->allRecords();
+    const std::vector<ItemRecord>& records = m_model->allRecords();
         for (size_t i = 0; i < records.size(); ++i) {
             if (QFileInfo(records[i].path).fileName() == finalName) {
                 QModelIndex srcIdx = m_model->index(static_cast<int>(i), 0);
@@ -2062,7 +2080,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     // 1. 状态位图标绘制 (置顶 vs. 已录入 互斥) 
     // 2026-06-xx 物理修复：校准 ItemRole 作用域，确保 GridItemDelegate 编译通过 
     bool isPinned = index.data(IsLockedRole).toBool(); 
-    bool isManaged = index.data(InDatabaseRole).toBool(); 
+    bool isManaged = index.data(ManagedRole).toBool(); 
      
     if (isPinned || isManaged) { 
         QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16); 
@@ -2160,8 +2178,8 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     painter->setFont(textFont); 
  
     // 2026-06-xx 按照要求：未录入项文字半透明 
-    // 2026-06-xx 物理修复：校准 InDatabaseRole 作用域 
-    if (!isSelected && !index.data(InDatabaseRole).toBool()) { 
+    // 2026-06-xx 物理修复：校准 ManagedRole 作用域 
+    if (!isSelected && !index.data(ManagedRole).toBool()) { 
         painter->setPen(QColor(238, 238, 238, 120)); 
     } 
  

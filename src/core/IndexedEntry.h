@@ -1,24 +1,38 @@
 #pragma once
-
 #include <QString>
+#include <vector>
+#include <cstdint>
+#include <QList>
 
 namespace ArcMeta {
 
 /**
- * @brief 紧凑型索引条目
- * 
- * 该结构用于存储文件系统条目的基本信息，
- * 设计为内存高效的结构，支持大规模文件索引。
+ * @brief 轻量级条目记录，用于虚拟化模型索引
+ */
+struct ItemRecord {
+    QString volume;
+    QString frn;
+    QString path; 
+    bool isDir = false;
+    bool isCategory = false;
+    int categoryId = 0;
+    QString categoryName;
+    QString categoryColor;
+};
+
+/**
+ * @brief 工业级索引条目
+ * 用于 MFT 扫描与高速缓存
  */
 struct IndexedEntry {
     QString name;           // 文件或目录名
     int64_t size = 0;       // 文件大小 (字节)
     int64_t modifyTime = 0; // 修改时间 (Unix 毫秒)
     int parentIndex = -1;   // 父条目索引，-1 表示根目录
-    unsigned __int64 parentFrn = 0; // 临时存储父条目的 FRN (用于两阶段绑定)
+    uint64_t parentFrn = 0; // 临时存储父条目的 FRN (用于两阶段绑定)
     bool isDir = false;     // 是否为目录
     uint32_t attributes = 0; // 文件属性 (FILE_ATTRIBUTE_XXX)
-    unsigned __int64 frn = 0; // 文件参考号 (File Reference Number)
+    uint64_t frn = 0; // 文件参考号 (File Reference Number)
 
     /**
      * @brief 获取文件后缀名
@@ -26,9 +40,9 @@ struct IndexedEntry {
      */
     QString suffix() const {
         if (isDir) return QString();
-        int pos = name.lastIndexOf('.');
-        if (pos == -1) return QString();
-        return name.mid(pos + 1).toLower();
+        int dotIdx = name.lastIndexOf('.');
+        if (dotIdx == -1) return QString();
+        return name.mid(dotIdx + 1).toLower();
     }
 };
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDateTime>
+#include "../core/IndexedEntry.h"
 #include <QMap>
 #include <deque>
 #include <vector>
@@ -22,7 +23,7 @@
 #include <QIcon>
 #include "FilterPanel.h"
 #include "../meta/MetadataManager.h"
-#include "../db/ItemRepo.h"
+
 #include "../core/ModelContract.h"
 
 namespace ArcMeta {
@@ -65,13 +66,13 @@ public:
     bool canFetchMore(const QModelIndex& parent) const override;
     void fetchMore(const QModelIndex& parent) override;
 
-    void setRecords(const std::vector<ArcMeta::ItemRepo::ItemRecord>& records);
+    void setRecords(const std::vector<ItemRecord>& records);
     void clear();
 
-    const std::vector<ArcMeta::ItemRepo::ItemRecord>& allRecords() const { return m_allRecords; }
+    const std::vector<ItemRecord>& allRecords() const { return m_allRecords; }
 
 private:
-    std::vector<ArcMeta::ItemRepo::ItemRecord> m_allRecords;
+    std::vector<ItemRecord> m_allRecords;
     int m_displayCount = 0;
 
     mutable QCache<QString, QIcon> m_iconCache;
@@ -253,7 +254,7 @@ private:
     // --- 2026-06-xx 性能优化：递归扫描指纹缓存 ---
     struct ScanCacheEntry {
         qint64 lastModified; // 根目录的时间戳
-        std::vector<ArcMeta::ItemRepo::ItemRecord> records;
+        std::vector<ItemRecord> records;
     };
     QMap<QString, ScanCacheEntry> m_recursiveCache; 
     void updateGridSize();
