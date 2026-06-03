@@ -1518,12 +1518,6 @@ void ScanDialog::onTriggerSearch() {
 }
 
 void ScanDialog::onFilterOptionChanged() {
-    // 2026-06-xx 物理修复：在过滤选项变更时强制同步驱动器掩码。
-    // 如果不在此处同步，当用户切换“自动显示”开关时，搜索引擎可能因为默认 Mask 为 0 而导致搜索结果为空。
-    QStringList activeList;
-    for (const QString& d : m_config.activeDrives) activeList << d;
-    MftReader::instance().updateActiveDrives(activeList);
-
     m_config.useRegex = m_checkRegex->isChecked();
     m_config.caseSensitive = m_checkCase->isChecked();
     m_config.includeHidden = m_checkHidden->isChecked();
