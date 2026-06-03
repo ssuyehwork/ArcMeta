@@ -972,6 +972,12 @@ void MainWindow::setupCustomTitleBarButtons() {
     };
     
     connect(&MetadataManager::instance(), &MetadataManager::pendingSyncChanged, this, updateSyncBtnState);
+
+    m_btnScan = createTitleBtn("scan");
+    m_btnScan->setProperty("tooltipText", "全盘扫描与对账");
+    connect(m_btnScan, &QPushButton::clicked, this, [this]() {
+        ScanDialog* dlg = new ScanDialog(this);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->show();
     });
 
