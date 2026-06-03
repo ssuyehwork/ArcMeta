@@ -107,20 +107,26 @@ void MetadataManager::initFromScchMode() {
     for (auto it = frnsMap.begin(); it != frnsMap.end(); ++it) {
         QString frnStr = it.key();
         QString lastKnownPath = it.value();
-        std::wstring resolvedPath = lastKnownPath.toStdWString();
+        std::wstring resolvedPath = QDir::toNativeSeparators(lastKnownPath).toStdWString();
         
-        bool ok = false;
-        uint64_t frnVal = frnStr.toULongLong(&ok, 16);
-        if (ok) {
-            for (size_t d = 0; d < 26; ++d) {
-                std::wstring p = MftReader::instance().getPathFast(d, frnVal);
-                if (!p.empty()) {
-                    if (p.find(L"metadata.scch") != std::wstring::npos) {
-                        resolvedPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(p)).absolutePath()).toStdWString();
-                    } else {
-                        resolvedPath = p;
+        // 2026-06-xx 性能优化：优先信任最后已知路径，避免盲目遍历 26 个盘符
+        if (!QDir(QString::fromStdWString(resolvedPath)).exists()) {
+            bool ok = false;
+            uint64_t frnVal = frnStr.toULongLong(&ok, 16);
+            if (ok) {
+                // 仅对失效路径进行 MFT 对账
+                for (size_t d = 0; d < 26; ++d) {
+                    std::wstring p = MftReader::instance().getPathFast(d, frnVal);
+                    if (!p.empty()) {
+                        if (p.find(L"metadata.scch") != std::wstring::npos) {
+                            resolvedPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(p)).absolutePath()).toStdWString();
+                        } else {
+                            resolvedPath = p;
+                        }
+                        // 更新注册表以供下次秒开
+                        AllFrnManager::registerFrn(frnStr.toStdWString(), resolvedPath);
+                        break;
                     }
-                    break;
                 }
             }
         }
