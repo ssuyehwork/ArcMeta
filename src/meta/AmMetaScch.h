@@ -4,16 +4,13 @@
 #include <vector>
 #include <map>
 #include <QString>
-#include <QJsonObject>
-#include <QJsonDocument>
-#include <QJsonArray>
 #include "MetadataDefs.h"
 
 namespace ArcMeta {
 
 /**
- * @brief 处理 metadata.scch 的读写类
- * 2026-06-xx 按照用户要求：从 ArcMeta-1 恢复离散元数据管理逻辑，彻底改用 .scch 格式
+ * @brief 处理 metadata.scch 的读写类 (Binary SCCH v3)
+ * 2026-06-xx 物理加固：彻底废除 JSON 格式，切换为全二进制流存储，对标工业级性能。
  */
 class AmMetaScch {
 public:
@@ -23,12 +20,12 @@ public:
     explicit AmMetaScch(const std::wstring& folderPath);
 
     /**
-     * @brief 加载 metadata.scch 文件
+     * @brief 加载 metadata.scch 二进制文件
      */
     bool load();
 
     /**
-     * @brief 安全保存到 metadata.scch 文件
+     * @brief 安全保存为 metadata.scch 二进制格式
      */
     bool save() const;
 
@@ -56,11 +53,13 @@ private:
     FolderMeta m_folder;
     std::map<std::wstring, ItemMeta> m_items;
 
-    // 内部转换辅助
-    static QJsonObject folderToEntry(const FolderMeta& meta);
-    static FolderMeta entryToFolder(const QJsonObject& obj);
-    static QJsonObject itemToEntry(const ItemMeta& meta);
-    static ItemMeta entryToItem(const QJsonObject& obj);
+    // 2026-06-xx 物理重构：二进制序列化辅助 (不再使用 QJson)
+    struct BinaryHeader {
+        char magic[4] = {'S', 'C', 'C', 'H'};
+        uint32_t version = 3;
+        uint32_t itemCount = 0;
+        uint32_t reserved = 0;
+    };
 
     static QString toQString(const std::wstring& ws) { return QString::fromStdWString(ws); }
     static std::wstring toStdWString(const QString& qs) { return qs.toStdWString(); }

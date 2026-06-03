@@ -61,7 +61,7 @@
 #include <io.h>
 #include "../meta/MetadataManager.h" 
 #include "../meta/BatchRenameEngine.h" 
-#include "../db/CategoryRepo.h" 
+#include "../meta/CategoryRepo.h" 
 #include "../crypto/EncryptionManager.h" 
 #include "CategoryLockDialog.h" 
 #include "BatchRenameDialog.h" 
@@ -1848,10 +1848,11 @@ void ContentPanel::loadCategory(int categoryId) {
     std::vector<std::string> fids = CategoryRepo::getFileIdsInCategory(categoryId);
     
     // 2026-06-xx 彻底重构：分类加载不再依赖数据库，而是通过全 Frn 索引匹配物理路径
-    auto allFrns = AllFrnManager::instance().getAllFrns();
+    auto allFrns = AllFrnManager::getAllFrns();
     for (const auto& fid : fids) {
-        if (allFrns.contains(fid)) {
-            QString path = QString::fromStdWString(allFrns[fid]);
+        QString qFid = QString::fromStdString(fid);
+        if (allFrns.contains(qFid)) {
+            QString path = allFrns[qFid];
             if (!path.isEmpty() && QFileInfo::exists(path)) {
                 ItemRecord r;
                 r.path = QDir::toNativeSeparators(path);

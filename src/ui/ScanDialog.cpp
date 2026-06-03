@@ -45,9 +45,7 @@
 #include <QReadLocker>
 #include <QWriteLocker>
 #include <numeric>
-#include <QJsonObject>
-#include <QJsonDocument>
-#include <QJsonArray>
+#include <QDataStream>
 #include <windows.h>
 #include <shellapi.h>
 
@@ -73,74 +71,29 @@ namespace ArcMeta {
 // --- ScanConfig Implementation ---
 
 void ScanConfig::load() {
-    QFile file("arcmeta_scan_config.scch");
+    // 2026-06-xx 彻底废除 JSON 配置，切换为二进制流
+    QFile file("arcmeta_scan_config.bin");
     if (file.open(QIODevice::ReadOnly)) {
-        QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-        QJsonObject obj = doc.object();
-        
-        auto loadSet = [&](const QString& key, QSet<QString>& set) {
-            set.clear();
-            QJsonArray arr = obj[key].toArray();
-            for (const auto& v : arr) set.insert(v.toString());
-        };
-        
-        loadSet("activeDrives", activeDrives);
-        loadSet("defaultDrives", defaultDrives);
-        loadSet("ignoredDrives", ignoredDrives);
-        
-        QJsonArray qArr = obj["queryHistory"].toArray();
-        for (const auto& v : qArr) queryHistory.append(v.toString());
-        QJsonArray eArr = obj["extHistory"].toArray();
-        for (const auto& v : eArr) extHistory.append(v.toString());
-        
-        // 2026-05-16 持久化加载：视图、图标尺寸与排序规则
-        if (obj.contains("viewMode")) viewMode = obj["viewMode"].toInt();
-        if (obj.contains("iconSize")) iconSize = obj["iconSize"].toInt();
-        if (obj.contains("sortColumn")) sortColumn = obj["sortColumn"].toInt();
-        if (obj.contains("sortOrder")) sortOrder = obj["sortOrder"].toInt();
-
-        if (obj.contains("useRegex")) useRegex = obj["useRegex"].toBool();
-        if (obj.contains("caseSensitive")) caseSensitive = obj["caseSensitive"].toBool();
-        if (obj.contains("includeHidden")) includeHidden = obj["includeHidden"].toBool();
-        if (obj.contains("includeSystem")) includeSystem = obj["includeSystem"].toBool();
-        if (obj.contains("includeDollar")) includeDollar = obj["includeDollar"].toBool();
-        if (obj.contains("autoDisplay")) autoDisplay = obj["autoDisplay"].toBool();
+        QDataStream ds(&file);
+        ds.setVersion(QDataStream::Qt_6_0);
+        uint32_t magic; ds >> magic;
+        if (magic == 0x53434647) { // "SCFG"
+            ds >> activeDrives >> defaultDrives >> ignoredDrives >> queryHistory >> extHistory;
+            ds >> viewMode >> iconSize >> sortColumn >> sortOrder;
+            ds >> useRegex >> caseSensitive >> includeHidden >> includeSystem >> includeDollar >> autoDisplay;
+        }
     }
 }
 
 void ScanConfig::save() {
-    QFile file("arcmeta_scan_config.scch");
+    QFile file("arcmeta_scan_config.bin");
     if (file.open(QIODevice::WriteOnly)) {
-        QJsonObject obj;
-        auto saveSet = [&](const QString& key, const QSet<QString>& set) {
-            QJsonArray arr;
-            for (const auto& v : set) arr.append(v);
-            obj[key] = arr;
-        };
-        
-        saveSet("activeDrives", activeDrives);
-        saveSet("defaultDrives", defaultDrives);
-        saveSet("ignoredDrives", ignoredDrives);
-        
-        QJsonArray qArr; for (const auto& v : queryHistory) qArr.append(v);
-        obj["queryHistory"] = qArr;
-        QJsonArray eArr; for (const auto& v : extHistory) eArr.append(v);
-        obj["extHistory"] = eArr;
-        
-        // 2026-05-16 持久化存盘
-        obj["viewMode"] = viewMode;
-        obj["iconSize"] = iconSize;
-        obj["sortColumn"] = sortColumn;
-        obj["sortOrder"] = sortOrder;
-
-        obj["useRegex"] = useRegex;
-        obj["caseSensitive"] = caseSensitive;
-        obj["includeHidden"] = includeHidden;
-        obj["includeSystem"] = includeSystem;
-        obj["includeDollar"] = includeDollar;
-        obj["autoDisplay"] = autoDisplay;
-        
-        file.write(QJsonDocument(obj).toJson());
+        QDataStream ds(&file);
+        ds.setVersion(QDataStream::Qt_6_0);
+        ds << (uint32_t)0x53434647; // "SCFG"
+        ds << activeDrives << defaultDrives << ignoredDrives << queryHistory << extHistory;
+        ds << viewMode << iconSize << sortColumn << sortOrder;
+        ds << useRegex << caseSensitive << includeHidden << includeSystem << includeDollar << autoDisplay;
     }
 }
 

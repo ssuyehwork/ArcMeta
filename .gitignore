@@ -63,6 +63,7 @@ Cache-*/
 *.creator.user
 *.creator
 *.user
+*.SCCH
 
 # 忽略临时文件
 *.obj

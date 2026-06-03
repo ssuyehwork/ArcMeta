@@ -80,28 +80,14 @@ public:
     std::string getFileIdSync(const std::wstring& path);
 
     /**
-     * @brief 检查是否存在待同步的元数据目录
-     */
-    bool hasPendingSync() const;
-
-    /**
-     * @brief 加载待同步清单
-     */
-    QStringList getPendingSyncDirs();
-
-    /**
-     * @brief 从日志中移除指定的 FID 条目
-     */
-    void removeFidsFromLog(const QStringList& fids);
-
-    /**
      * @brief 获取路径所在磁盘的卷序列号
      */
     static std::wstring getVolumeSerialNumber(const std::wstring& path);
 
-    /**
-     * @brief 记录事务日志 Synchronize.scch
-     */
+    // 2026-06-xx 废弃接口：保留为空实现以维持二进制/ABI兼容（若需要），或在完成清理后移除
+    bool hasPendingSync() const;
+    QStringList getPendingSyncDirs();
+    void removeFidsFromLog(const QStringList& fids);
     void addToSyncLog(const std::wstring& dirPath);
 
     /**
