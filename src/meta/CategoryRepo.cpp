@@ -12,7 +12,7 @@
 namespace ArcMeta {
 
 /**
- * @brief 内部记录结构：提升至顶级命名空间，确保跨作用域可见性
+ * @brief CategoryItemRecord Structure
  */
 struct CategoryItemRecord {
     int categoryId;
@@ -24,11 +24,58 @@ struct CategoryItemRecord {
         : categoryId(catId), fileId128(fid), addedAt(time) {}
 };
 
+/**
+ * @brief 匿名命名空间：放置序列化操作符，彻底解决 MSVC 的内部链接引用报错
+ */
+namespace {
+    QDataStream& operator<<(QDataStream& ds, const std::string& s) {
+        ds << QString::fromStdString(s);
+        return ds;
+    }
+    QDataStream& operator>>(QDataStream& ds, std::string& s) {
+        QString qs; ds >> qs; s = qs.toStdString();
+        return ds;
+    }
+
+    QDataStream& operator<<(QDataStream& ds, const Category& c) {
+        ds << c.id << c.parentId << QString::fromStdWString(c.name) << QString::fromStdWString(c.color);
+        ds << static_cast<int>(c.presetTags.size());
+        for (size_t i = 0; i < c.presetTags.size(); ++i) {
+            ds << QString::fromStdWString(c.presetTags[i]);
+        }
+        ds << c.sortOrder << c.pinned << c.encrypted << QString::fromStdWString(c.encryptHint);
+        return ds;
+    }
+
+    QDataStream& operator>>(QDataStream& ds, Category& c) {
+        QString name, color, hint;
+        ds >> c.id >> c.parentId >> name >> color;
+        c.name = name.toStdWString(); c.color = color.toStdWString();
+        int tagCount = 0; ds >> tagCount;
+        c.presetTags.clear();
+        for (int i = 0; i < tagCount; ++i) {
+            QString t; ds >> t; c.presetTags.push_back(t.toStdWString());
+        }
+        ds >> c.sortOrder >> c.pinned >> c.encrypted >> hint;
+        c.encryptHint = hint.toStdWString();
+        return ds;
+    }
+
+    QDataStream& operator<<(QDataStream& ds, const CategoryItemRecord& r) {
+        ds << r.categoryId << QString::fromStdString(r.fileId128) << r.addedAt;
+        return ds;
+    }
+
+    QDataStream& operator>>(QDataStream& ds, CategoryItemRecord& r) {
+        QString fid;
+        ds >> r.categoryId >> fid >> r.addedAt;
+        r.fileId128 = fid.toStdString();
+        return ds;
+    }
+}
+
 namespace ScchCategoryEngine {
 
-/**
- * @brief 二进制分类文件头
- */
 struct CategoryHeader {
     char magic[4];
     uint32_t version;
@@ -39,47 +86,6 @@ struct CategoryHeader {
         magic[0] = 'C'; magic[1] = 'A'; magic[2] = 'T'; magic[3] = 'S';
     }
 };
-
-static QDataStream& operator<<(QDataStream& ds, const std::string& s) {
-    ds << QString::fromStdString(s);
-    return ds;
-}
-static QDataStream& operator>>(QDataStream& ds, std::string& s) {
-    QString qs; ds >> qs; s = qs.toStdString();
-    return ds;
-}
-
-static QDataStream& operator<<(QDataStream& ds, const Category& c) {
-    ds << c.id << c.parentId << QString::fromStdWString(c.name) << QString::fromStdWString(c.color);
-    ds << static_cast<int>(c.presetTags.size());
-    for (size_t i = 0; i < c.presetTags.size(); ++i) ds << QString::fromStdWString(c.presetTags[i]);
-    ds << c.sortOrder << c.pinned << c.encrypted << QString::fromStdWString(c.encryptHint);
-    return ds;
-}
-
-static QDataStream& operator>>(QDataStream& ds, Category& c) {
-    QString name, color, hint;
-    ds >> c.id >> c.parentId >> name >> color;
-    c.name = name.toStdWString(); c.color = color.toStdWString();
-    int tagCount; ds >> tagCount;
-    c.presetTags.clear();
-    for (int i = 0; i < tagCount; ++i) { QString t; ds >> t; c.presetTags.push_back(t.toStdWString()); }
-    ds >> c.sortOrder >> c.pinned >> c.encrypted >> hint;
-    c.encryptHint = hint.toStdWString();
-    return ds;
-}
-
-static QDataStream& operator<<(QDataStream& ds, const CategoryItemRecord& r) {
-    ds << r.categoryId << QString::fromStdString(r.fileId128) << r.addedAt;
-    return ds;
-}
-
-static QDataStream& operator>>(QDataStream& ds, CategoryItemRecord& r) {
-    QString fid;
-    ds >> r.categoryId >> fid >> r.addedAt;
-    r.fileId128 = fid.toStdString();
-    return ds;
-}
 
 static bool loadAll(std::vector<Category>& cats, std::vector<CategoryItemRecord>& items) {
     QFile file("arcmeta_categories.scch");
@@ -92,9 +98,13 @@ static bool loadAll(std::vector<Category>& cats, std::vector<CategoryItemRecord>
     if (memcmp(header.magic, "CATS", 4) != 0) return false;
 
     cats.clear();
-    for (uint32_t i = 0; i < header.catCount; ++i) { Category c; ds >> c; cats.push_back(c); }
+    for (uint32_t i = 0; i < header.catCount; ++i) {
+        Category c; ds >> c; cats.push_back(c);
+    }
     items.clear();
-    for (uint32_t i = 0; i < header.itemCount; ++i) { CategoryItemRecord r; ds >> r; items.push_back(r); }
+    for (uint32_t i = 0; i < header.itemCount; ++i) {
+        CategoryItemRecord r; ds >> r; items.push_back(r);
+    }
     return true;
 }
 
@@ -123,8 +133,8 @@ std::vector<Category> getAll() {
         bool operator()(const Category& a, const Category& b) const {
             return a.sortOrder < b.sortOrder;
         }
-    } sorter;
-    std::sort(cats.begin(), cats.end(), sorter);
+    };
+    std::sort(cats.begin(), cats.end(), Sorter());
     return cats;
 }
 
@@ -351,7 +361,7 @@ int CategoryRepo::getUncategorizedItemCount() {
     }
 
     int count = 0;
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
         if (!meta.isFolder && categorizedIds.find(meta.fileId128) == categorizedIds.end()) {
             count++;
         }
