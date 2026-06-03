@@ -17,23 +17,25 @@ namespace ArcMeta {
  * @brief 内存元数据镜像结构
  */
 struct RuntimeMeta {
-    int rating = 0;
+    int rating;
     std::wstring color;
     QStringList tags;
     std::wstring note;
     std::wstring url;
-    bool pinned = false;
-    bool encrypted = false;
-    bool isFolder = false; // 2026-06-xx 物理标记：区分文件夹与文件，用于侧边栏精准统计
+    bool pinned;
+    bool encrypted;
+    bool isFolder; // 2026-06-xx 物理标记：区分文件夹与文件，用于侧边栏精准统计
     std::string fileId128; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
 
     // 2026-06-xx 物理对标：补充时间戳与大小字段
-    long long ctime = 0;
-    long long mtime = 0;
-    long long atime = 0;
-    long long fileSize = 0;
+    long long ctime;
+    long long mtime;
+    long long atime;
+    long long fileSize;
 
     std::vector<PaletteEntry> palettes;
+
+    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), ctime(0), mtime(0), atime(0), fileSize(0) {}
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
@@ -100,8 +102,8 @@ public:
     template<typename Func>
     void forEachCachedItem(Func&& fn) const {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
-        for (const auto& [path, meta] : m_cache) {
-            fn(path, meta);
+        for (std::unordered_map<std::wstring, RuntimeMeta>::const_iterator it = m_cache.begin(); it != m_cache.end(); ++it) {
+            fn(it->first, it->second);
         }
     }
 

@@ -130,14 +130,16 @@ bool AmMetaScch::save() const {
     for (const auto& p : m_folder.palettes) ds << p;
 
     // 2. 序列化项目元数据
-    for (const auto& [name, itm] : m_items) {
+    for (std::map<std::wstring, ItemMeta>::const_iterator it = m_items.begin(); it != m_items.end(); ++it) {
+        const std::wstring& name = it->first;
+        const ItemMeta& itm = it->second;
         ds << name << itm.type << itm.rating << itm.color;
         ds << (int)itm.tags.size();
-        for (const auto& t : itm.tags) ds << t;
+        for (size_t i = 0; i < itm.tags.size(); ++i) ds << itm.tags[i];
         ds << itm.pinned << itm.note << itm.url << itm.encrypted << itm.encryptSalt << itm.encryptIv << itm.encryptVerifyHash;
         ds << itm.originalName << itm.volume << itm.frn << itm.fileId128 << itm.size << itm.creationTime << itm.modificationTime << itm.accessTime;
         ds << (int)itm.palettes.size();
-        for (const auto& p : itm.palettes) ds << p;
+        for (size_t i = 0; i < itm.palettes.size(); ++i) ds << itm.palettes[i];
     }
 
     file.close();
