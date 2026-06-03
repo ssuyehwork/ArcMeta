@@ -78,7 +78,7 @@ void ScanConfig::load() {
         ds.setVersion(QDataStream::Qt_6_0);
         uint32_t magic; ds >> magic;
         if (magic == 0x53434647) { // "SCFG"
-            ds >> activeDrives >> defaultDrives >> ignoredDrives >> queryHistory >> extHistory;
+            ds >> activeDrives >> defaultDrives >> __unused_ignoredDrives >> queryHistory >> extHistory;
             ds >> viewMode >> iconSize >> sortColumn >> sortOrder;
             ds >> useRegex >> caseSensitive >> includeHidden >> includeSystem >> includeDollar >> autoDisplay;
         }
@@ -91,7 +91,7 @@ void ScanConfig::save() {
         QDataStream ds(&file);
         ds.setVersion(QDataStream::Qt_6_0);
         ds << (uint32_t)0x53434647; // "SCFG"
-        ds << activeDrives << defaultDrives << ignoredDrives << queryHistory << extHistory;
+        ds << activeDrives << defaultDrives << __unused_ignoredDrives << queryHistory << extHistory;
         ds << viewMode << iconSize << sortColumn << sortOrder;
         ds << useRegex << caseSensitive << includeHidden << includeSystem << includeDollar << autoDisplay;
     }
@@ -1093,7 +1093,6 @@ void ScanDialog::refreshDriveList(bool forceProbe) {
 
             for (const auto& info : drives) {
                 if (!info.hasMedia || !info.isNtfs) continue;
-                if (weakThis->m_config.ignoredDrives.contains(info.letter)) continue;
 
                 QString label = info.label.isEmpty() ? "本地磁盘" : info.label;
                 QString btnText = QString("%1 (%2)").arg(info.letter).arg(label);
@@ -1177,28 +1176,10 @@ void ScanDialog::onDriveContextMenu(const QString& drive, const QPoint& /*pos*/)
         updateDriveButtonStyles();
     });
     
-    menu.addAction("忽略此驱动器", [this, drive]() {
-        m_config.ignoredDrives.insert(drive);
-        m_config.activeDrives.remove(drive);
-        m_config.save();
-        refreshDriveList(true); // 重新生成按钮
-        onStartScan();
-    });
     
     menu.exec(QCursor::pos());
 }
 
-void ScanDialog::onIgnoredDriveContextMenu(const QString& drive, const QPoint& pos) {
-    Q_UNUSED(pos);
-    QMenu menu(this);
-    menu.setStyleSheet("QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; } QMenu::item:selected { background: #232D37; color: #FFF; }");
-    menu.addAction("恢复驱动器", [this, drive]() {
-        m_config.ignoredDrives.remove(drive);
-        m_config.save();
-        refreshDriveList(true);
-    });
-    menu.exec(QCursor::pos());
-}
 
 void ScanDialog::onCustomContextMenu(const QPoint& pos) {
     QAbstractItemView* activeView = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_resultView) : static_cast<QAbstractItemView*>(m_iconView);
