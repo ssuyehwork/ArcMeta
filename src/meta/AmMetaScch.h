@@ -42,6 +42,13 @@ public:
     void remove(const std::wstring& fileName) { m_items.erase(fileName); }
 
     /**
+     * @brief 设置条目颜色（物理同步）
+     */
+    void setItemColor(const std::wstring& fileName, const std::wstring& color) {
+        m_items[fileName].color = color;
+    }
+
+    /**
      * @brief 静态辅助方法：重命名元数据条目
      */
     static bool renameItem(const QString& folderPath, const QString& oldName, const QString& newName);

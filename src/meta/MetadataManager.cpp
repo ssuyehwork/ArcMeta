@@ -134,11 +134,20 @@ void MetadataManager::initFromScchMode() {
         AmMetaScch amScch(resolvedPath);
         if (amScch.load()) {
             std::wstring nResolvedPath = normalizePath(resolvedPath);
+
+            // 2026-06-xx 物理增强：启动时补全文件夹自身的基础元数据
+            long long fSize = 0, fCtime = 0, fMtime = 0, fAtime = 0;
+            std::string fId128; std::wstring fType;
+            fetchWinApiMetadataDirect(resolvedPath, fId128, nullptr, &fSize, &fType, &fCtime, &fMtime, &fAtime);
+
             const auto& f = amScch.folder();
             RuntimeMeta fMeta;
             fMeta.rating = f.rating; fMeta.color = f.color;
             for (const auto& t : f.tags) fMeta.tags << QString::fromStdWString(t);
             fMeta.pinned = f.pinned; fMeta.note = f.note; fMeta.url = f.url; fMeta.encrypted = f.encrypted;
+            fMeta.isFolder = true;
+            fMeta.fileId128 = fId128.empty() ? f.fileId128 : fId128;
+            fMeta.fileSize = fSize; fMeta.ctime = fCtime; fMeta.mtime = fMtime; fMeta.atime = fAtime;
             fMeta.palettes = f.palettes;
             tempCache[nResolvedPath] = std::move(fMeta);
 
@@ -147,8 +156,14 @@ void MetadataManager::initFromScchMode() {
                 iMeta.rating = item.rating; iMeta.color = item.color;
                 for (const auto& t : item.tags) iMeta.tags << QString::fromStdWString(t);
                 iMeta.pinned = item.pinned; iMeta.note = item.note; iMeta.url = item.url; iMeta.encrypted = item.encrypted;
-                iMeta.palettes = item.palettes;
+                iMeta.isFolder = (item.type == L"folder");
+                iMeta.fileId128 = item.fileId128;
+
+                // 2026-06-xx 物理增强：条目级时间戳补全
                 std::wstring itemPath = resolvedPath + L"\\" + name;
+                fetchWinApiMetadataDirect(itemPath, iMeta.fileId128, nullptr, &iMeta.fileSize, nullptr, &iMeta.ctime, &iMeta.mtime, &iMeta.atime);
+
+                iMeta.palettes = item.palettes;
                 tempCache[normalizePath(itemPath)] = std::move(iMeta);
             }
         }
@@ -182,6 +197,12 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
             rm.rating = item.rating; rm.color = item.color;
             rm.pinned = item.pinned; rm.encrypted = item.encrypted;
             rm.note = item.note; rm.url = item.url; rm.palettes = item.palettes;
+            rm.isFolder = (item.type == L"folder");
+            rm.fileId128 = item.fileId128;
+
+            // 2026-06-xx 物理同步：实时补全时间戳
+            fetchWinApiMetadataDirect(nPath, rm.fileId128, nullptr, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime);
+
             for (const auto& t : item.tags) rm.tags << QString::fromStdWString(t);
             std::unique_lock<std::shared_mutex> lock(m_mutex);
             m_cache[nPath] = rm;
@@ -193,6 +214,12 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
                 RuntimeMeta rm;
                 rm.rating = folder.rating; rm.color = folder.color;
                 rm.pinned = folder.pinned; rm.note = folder.note; rm.url = folder.url; rm.palettes = folder.palettes;
+                rm.isFolder = true;
+                rm.fileId128 = folder.fileId128;
+
+                // 2026-06-xx 物理同步：实时补全时间戳
+                fetchWinApiMetadataDirect(nPath, rm.fileId128, nullptr, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime);
+
                 for (const auto& t : folder.tags) rm.tags << QString::fromStdWString(t);
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
                 m_cache[nPath] = rm;

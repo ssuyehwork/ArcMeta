@@ -24,6 +24,15 @@ struct RuntimeMeta {
     std::wstring url;
     bool pinned = false;
     bool encrypted = false;
+    bool isFolder = false; // 2026-06-xx 物理标记：区分文件夹与文件，用于侧边栏精准统计
+    std::string fileId128; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
+
+    // 2026-06-xx 物理对标：补充时间戳与大小字段
+    long long ctime = 0;
+    long long mtime = 0;
+    long long atime = 0;
+    long long fileSize = 0;
+
     std::vector<PaletteEntry> palettes;
 
     /**
@@ -83,6 +92,18 @@ public:
      * @brief 获取路径所在磁盘的卷序列号
      */
     static std::wstring getVolumeSerialNumber(const std::wstring& path);
+
+    /**
+     * @brief 只读遍历内存缓存，用于统计等场景（持有读锁）
+     * 2026-06-xx 物理同步：回调参数包含 (path, RuntimeMeta)
+     */
+    template<typename Func>
+    void forEachCachedItem(Func&& fn) const {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        for (const auto& [path, meta] : m_cache) {
+            fn(path, meta);
+        }
+    }
 
     // 2026-06-xx 废弃接口：保留为空实现以维持二进制/ABI兼容（若需要），或在完成清理后移除
     bool hasPendingSync() const;

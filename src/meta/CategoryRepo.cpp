@@ -205,19 +205,45 @@ std::vector<std::string> getFileIdsInCategory(int categoryId) {
     std::vector<Category> cats;
     std::vector<CategoryItemRecord> items;
     loadAll(cats, items);
+
+    // 2026-06-xx 按照用户要求：仅获取文件 ID，排除文件夹
+    std::unordered_set<std::string> folderIds;
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
+        if (meta.isFolder) folderIds.insert(meta.fileId128);
+    });
+
     std::vector<std::string> results;
-    for (const auto& r : items) if (r.categoryId == categoryId) results.push_back(r.fileId128);
+    for (const auto& r : items) {
+        if (r.categoryId == categoryId && folderIds.find(r.fileId128) == folderIds.end()) {
+            results.push_back(r.fileId128);
+        }
+    }
     return results;
 }
 
 std::vector<std::pair<int, int>> getCounts() {
     std::vector<Category> cats;
-    std::vector<CategoryItemRecord> items;
-    loadAll(cats, items);
-    std::map<int, int> m;
-    for (const auto& r : items) m[r.categoryId]++;
+    std::vector<CategoryItemRecord> records;
+    loadAll(cats, records);
+
+    // 2026-06-xx 物理同步：获取所有已知的文件夹 ID，用于排除统计
+    std::unordered_set<std::string> folderIds;
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
+        if (meta.isFolder) folderIds.insert(meta.fileId128);
+    });
+
+    // 2026-06-xx 物理同步：按分类 ID 分组，使用 set 对 file_id_128 进行去重统计，并排除文件夹
+    QMap<int, std::unordered_set<std::string>> catFileSets;
+    for (const auto& r : records) {
+        if (!r.fileId128.empty() && folderIds.find(r.fileId128) == folderIds.end()) {
+            catFileSets[r.categoryId].insert(r.fileId128);
+        }
+    }
+
     std::vector<std::pair<int, int>> res;
-    for (auto const& [id, count] : m) res.push_back({id, count});
+    for (auto it = catFileSets.begin(); it != catFileSets.end(); ++it) {
+        res.push_back({it.key(), (int)it.value().size()});
+    }
     return res;
 }
 
@@ -225,11 +251,20 @@ std::vector<std::string> getFileIdsRecursive(int categoryId) {
     std::vector<Category> cats;
     std::vector<CategoryItemRecord> items;
     loadAll(cats, items);
+
+    std::unordered_set<std::string> folderIds;
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
+        if (meta.isFolder) folderIds.insert(meta.fileId128);
+    });
+
     std::vector<int> ids = {categoryId};
     collectSubIds(cats, categoryId, ids);
     std::vector<std::string> results;
     for (const auto& r : items) {
-        if (std::find(ids.begin(), ids.end(), r.categoryId) != ids.end()) results.push_back(r.fileId128);
+        if (std::find(ids.begin(), ids.end(), r.categoryId) != ids.end() &&
+            folderIds.find(r.fileId128) == folderIds.end()) {
+            results.push_back(r.fileId128);
+        }
     }
     return results;
 }
@@ -245,9 +280,76 @@ std::vector<Category> CategoryRepo::getAll() { return ScchCategoryEngine::getAll
 bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fileId128) { return ScchCategoryEngine::removeItemFromCategory(categoryId, fileId128); }
 std::vector<std::string> CategoryRepo::getFileIdsInCategory(int categoryId) { return ScchCategoryEngine::getFileIdsInCategory(categoryId); }
 std::vector<std::pair<int, int>> CategoryRepo::getCounts() { return ScchCategoryEngine::getCounts(); }
-int CategoryRepo::getUniqueItemCount() { return 0; }
-int CategoryRepo::getUncategorizedItemCount() { return 0; }
-QMap<QString, int> CategoryRepo::getSystemCounts() { return QMap<QString, int>(); }
+int CategoryRepo::getUniqueItemCount() {
+    std::vector<Category> cats;
+    std::vector<CategoryItemRecord> records;
+    ScchCategoryEngine::loadAll(cats, records);
+
+    std::unordered_set<std::string> folderIds;
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
+        if (meta.isFolder) folderIds.insert(meta.fileId128);
+    });
+
+    std::unordered_set<std::string> uniqueIds;
+    for (const auto& r : records) {
+        if (!r.fileId128.empty() && folderIds.find(r.fileId128) == folderIds.end()) {
+            uniqueIds.insert(r.fileId128);
+        }
+    }
+    return (int)uniqueIds.size();
+}
+
+int CategoryRepo::getUncategorizedItemCount() {
+    // 1. 收集所有已分类的 file_id_128
+    std::vector<Category> cats;
+    std::vector<CategoryItemRecord> records;
+    ScchCategoryEngine::loadAll(cats, records);
+    std::unordered_set<std::string> categorizedIds;
+    for (const auto& r : records) {
+        if (!r.fileId128.empty()) categorizedIds.insert(r.fileId128);
+    }
+
+    // 2. 遍历 MetadataManager 缓存，统计不在已分类集合中的“文件”
+    int count = 0;
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
+        if (!meta.isFolder && categorizedIds.find(meta.fileId128) == categorizedIds.end()) {
+            count++;
+        }
+    });
+    return count;
+}
+
+QMap<QString, int> CategoryRepo::getSystemCounts() {
+    QMap<QString, int> counts;
+    int all = 0, today = 0, yesterday = 0, recentlyVisited = 0, untagged = 0;
+
+    double now = (double)QDateTime::currentMSecsSinceEpoch();
+    double startOfToday = (double)QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch();
+    double startOfYesterday = startOfToday - 86400000.0;
+
+    // 2026-06-xx 物理同步：基于 MetadataManager 内存缓存进行纯文件模式统计
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
+        if (meta.isFolder) return; // 按照用户要求：仅统计文件数量，排除文件夹
+
+        all++;
+        if (meta.tags.isEmpty()) untagged++;
+
+        // 2026-06-xx 物理对账：利用补全的时间戳字段执行精准系统分类统计
+        if (meta.ctime >= startOfToday || meta.mtime >= startOfToday) today++;
+        if ((meta.ctime >= startOfYesterday || meta.mtime >= startOfYesterday) &&
+            (meta.ctime < startOfToday && meta.mtime < startOfToday)) yesterday++;
+        if (meta.atime >= now - 86400000.0) recentlyVisited++;
+    });
+
+    counts["all"] = all;
+    counts["today"] = today;
+    counts["yesterday"] = yesterday;
+    counts["recently_visited"] = recentlyVisited;
+    counts["untagged"] = untagged;
+    counts["uncategorized"] = getUncategorizedItemCount();
+    counts["trash"] = 0;
+    return counts;
+}
 bool CategoryRepo::remove(int id) { return ScchCategoryEngine::remove(id); }
 bool CategoryRepo::reorder(int parentId, bool ascending) { return ScchCategoryEngine::reorder(parentId, ascending); }
 std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) { return ScchCategoryEngine::getFileIdsRecursive(categoryId); }
