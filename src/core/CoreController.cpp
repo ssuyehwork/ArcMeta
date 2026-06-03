@@ -1,5 +1,5 @@
 #include "CoreController.h"
-#include "../db/CategoryRepo.h"
+#include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
 #include <QThreadPool>
 #include <QDebug>

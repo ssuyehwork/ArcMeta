@@ -52,10 +52,10 @@ set(SOURCES
     src/mft/UsnWatcher.h
     src/crypto/EncryptionManager.cpp
     src/crypto/EncryptionManager.h
-    src/db/CategoryRepo.cpp
-    src/db/CategoryRepo.h
-    src/db/FavoritesRepo.cpp
-    src/db/FavoritesRepo.h
+    src/meta/CategoryRepo.cpp
+    src/meta/CategoryRepo.h
+    src/meta/FavoritesRepo.cpp
+    src/meta/FavoritesRepo.h
     src/meta/AmMetaScch.cpp
     src/meta/AmMetaScch.h
     src/meta/AllFrnManager.cpp

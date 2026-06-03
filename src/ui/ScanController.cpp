@@ -1,5 +1,8 @@
 #include "ScanController.h"
 #include "../mft/MftReader.h"
+#include "../meta/MetadataManager.h"
+#include "../meta/AmMetaScch.h"
+#include "../meta/AllFrnManager.h"
 #include <QtConcurrent/QtConcurrent>
 #include <QElapsedTimer>
 
@@ -258,6 +261,52 @@ void ScanController::onMftEntryUpdated(uint64_t key) {
         m_resultSet = newSet;
         emit entryAdded(newSet, key, row);
     }
+}
+
+void ScanController::runFullScan(std::function<void(int current, int total, const std::wstring& path)> onProgress,
+                                 std::function<void()> onFinished) {
+    (void)QtConcurrent::run([onProgress, onFinished]() {
+        auto& reader = MftReader::instance();
+
+        // 1. 强制激活全盘扫描
+        QStringList allDrives;
+        for (int i = 0; i < 26; ++i) {
+            QString d = QString(QChar('A' + i)) + ":";
+            if (QDir(d).exists()) allDrives << d;
+        }
+        reader.updateActiveDrives(allDrives);
+        if (reader.totalCount() == 0) reader.buildIndex(allDrives);
+
+        // 2. 全盘检索 metadata.scch
+        std::vector<uint64_t> metaFileKeys = reader.search("metadata.scch", false, false, {}, true, true, true);
+        int total = (int)metaFileKeys.size();
+        int current = 0;
+
+        for (uint64_t key : metaFileKeys) {
+            int idx = reader.getIndexByKey(key);
+            if (idx == -1) continue;
+
+            QString fullPath = reader.getFullPath(idx);
+            if (onProgress) onProgress(current, total, fullPath.toStdWString());
+
+            QFileInfo fi(fullPath);
+            std::wstring folderPath = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
+
+            // 登记 FRN 锚点
+            wchar_t frnBuf[17];
+            uint64_t fileFrn = key & 0x0000FFFFFFFFFFFFull;
+            swprintf(frnBuf, 17, L"%016llX", fileFrn);
+            AllFrnManager::registerFrn(frnBuf, folderPath);
+
+            // 预加载元数据到内存（由于已经切换为全 SCCH 模式，此处加载即生效）
+            AmMetaScch amScch(folderPath);
+            amScch.load();
+
+            current++;
+        }
+
+        if (onFinished) onFinished();
+    });
 }
 
 } // namespace ArcMeta

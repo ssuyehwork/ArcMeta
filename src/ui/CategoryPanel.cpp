@@ -13,7 +13,7 @@ using namespace ArcMeta::Style;
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
-#include "../db/CategoryRepo.h"
+#include "../meta/CategoryRepo.h"
 
 
 #include "../meta/MetadataManager.h"

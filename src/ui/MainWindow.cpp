@@ -17,7 +17,7 @@
 #include "ToolTipOverlay.h"
 #include "ScanDialog.h"
 #include "../mft/MftReader.h"
-#include "../db/CategoryRepo.h"
+#include "../meta/CategoryRepo.h"
 
 #include "SearchHistoryPanel.h"
 #include "SvgIcons.h"

@@ -1,7 +1,7 @@
 #include "CategoryModel.h"
-#include "../db/CategoryRepo.h"
+#include "../meta/CategoryRepo.h"
 
-#include "../db/FavoritesRepo.h"
+#include "../meta/FavoritesRepo.h"
 #include "UiHelper.h"
 #include <QMimeData>
 #include <QFileInfo>

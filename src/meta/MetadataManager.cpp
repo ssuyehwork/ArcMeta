@@ -1,6 +1,3 @@
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
 #include <QFileInfo>
 #include <QCryptographicHash>
 #include <QRandomGenerator>
@@ -19,7 +16,7 @@
 #include "AmMetaScch.h"
 #include "AllFrnManager.h"
 #include "../mft/MftReader.h"
-#include "../db/CategoryRepo.h"
+#include "../meta/CategoryRepo.h"
 
 #include <windows.h>
 #include <fileapi.h>
@@ -370,20 +367,8 @@ void MetadataManager::persistAsync(const std::wstring& path) {
     RuntimeMeta rMeta = getMeta(nPath);
 
     if (info.isDir() && info.isRoot()) {
-        QString driversPath = qApp->applicationDirPath() + "/FERREX_drivers.scch";
-        QFile file(driversPath);
-        QJsonObject root;
-        if (file.open(QIODevice::ReadOnly)) { root = QJsonDocument::fromJson(file.readAll()).object(); file.close(); }
-        QJsonObject driveMeta;
-        driveMeta["rating"] = rMeta.rating;
-        driveMeta["color"] = QString::fromStdWString(rMeta.color);
-        driveMeta["pinned"] = rMeta.pinned;
-        driveMeta["note"] = QString::fromStdWString(rMeta.note);
-        driveMeta["url"] = QString::fromStdWString(rMeta.url);
-        QJsonArray tagsArr; for (const auto& t : rMeta.tags) tagsArr.append(t);
-        driveMeta["tags"] = tagsArr;
-        root[QString::fromStdWString(nPath)] = driveMeta;
-        if (file.open(QIODevice::WriteOnly)) { file.write(QJsonDocument(root).toJson()); file.close(); }
+        // 2026-06-xx 彻底废除驱动器根目录的 JSON 存储逻辑
+        // 此处应由二进制协议统一接管，暂不进行磁盘持久化，后续在 Binary-Snapshot 中统一实现
     } else {
         AmMetaScch amScch(parentDir);
         amScch.load();
@@ -407,54 +392,16 @@ void MetadataManager::persistAsync(const std::wstring& path) {
     std::wstring metaPath = parentDir + L"\\metadata.scch";
     std::wstring fileFrn; std::string fileFid;
     if (fetchWinApiMetadataDirect(metaPath, fileFid, &fileFrn)) AllFrnManager::registerFrn(fileFrn, parentDir);
-    std::string metaFid;
-    if (fetchWinApiMetadataDirect(metaPath, metaFid, nullptr)) addToSyncLog(QString::fromStdString(metaFid).toStdWString());
-    else addToSyncLog(parentDir);
+
+    // 2026-06-xx 彻底废除去数据库同步日志 (Synchronize.scch)
+    // 既然不再有数据库，就不再需要增量同步任务。
     emit metaChanged(QString::fromStdWString(nPath));
 }
 
-bool MetadataManager::hasPendingSync() const { return QFile::exists(qApp->applicationDirPath() + "/Synchronize.scch"); }
-QStringList MetadataManager::getPendingSyncDirs() {
-    QFile file(qApp->applicationDirPath() + "/Synchronize.scch");
-    if (!file.open(QIODevice::ReadOnly)) return {};
-    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-    if (doc.isArray()) return doc.toVariant().toStringList();
-    return {};
-}
-
-void MetadataManager::removeFidsFromLog(const QStringList& fidsToRemove) {
-    QString logPath = qApp->applicationDirPath() + "/Synchronize.scch";
-    if (!QFile::exists(logPath)) return;
-    QStringList current;
-    { QFile file(logPath); if (file.open(QIODevice::ReadOnly)) current = QJsonDocument::fromJson(file.readAll()).toVariant().toStringList(); }
-    bool changed = false;
-    for (const auto& f : fidsToRemove) { if (current.contains(f)) { current.removeAll(f); changed = true; } }
-    if (changed) {
-        if (current.isEmpty()) { QFile::remove(logPath); emit pendingSyncChanged(false); }
-        else {
-            QString tmpPath = logPath + ".tmp"; QFile tmpFile(tmpPath);
-            if (tmpFile.open(QIODevice::WriteOnly)) {
-                tmpFile.write(QJsonDocument(QJsonArray::fromStringList(current)).toJson()); tmpFile.close();
-                MoveFileExW(tmpPath.toStdWString().c_str(), logPath.toStdWString().c_str(), MOVEFILE_REPLACE_EXISTING);
-            }
-        }
-    }
-}
-
-void MetadataManager::addToSyncLog(const std::wstring& dirPath) {
-    QString path = QString::fromStdWString(dirPath);
-    QString logPath = qApp->applicationDirPath() + "/Synchronize.scch";
-    QStringList currentDirs;
-    if (QFile::exists(logPath)) { QFile file(logPath); if (file.open(QIODevice::ReadOnly)) currentDirs = QJsonDocument::fromJson(file.readAll()).toVariant().toStringList(); }
-    if (!currentDirs.contains(path)) {
-        currentDirs << path; QJsonArray arr = QJsonArray::fromStringList(currentDirs);
-        QString tmpPath = logPath + ".tmp"; QFile tmpFile(tmpPath);
-        if (tmpFile.open(QIODevice::WriteOnly)) {
-            tmpFile.write(QJsonDocument(arr).toJson()); tmpFile.close();
-            if (MoveFileExW(tmpPath.toStdWString().c_str(), logPath.toStdWString().c_str(), MOVEFILE_REPLACE_EXISTING)) emit pendingSyncChanged(true);
-        }
-    }
-}
+bool MetadataManager::hasPendingSync() const { return false; }
+QStringList MetadataManager::getPendingSyncDirs() { return {}; }
+void MetadataManager::removeFidsFromLog(const QStringList&) {}
+void MetadataManager::addToSyncLog(const std::wstring&) {}
 void MetadataManager::saveSyncLog() {}
 
 QStringList MetadataManager::searchInCache(const QString& keyword) {
