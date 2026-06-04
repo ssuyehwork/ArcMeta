@@ -1940,16 +1940,15 @@ void ContentPanel::loadCategory(int categoryId) {
     // 2. 加载文件 (SCCH 分离模式)
     std::vector<std::string> fids = CategoryRepo::getFileIdsInCategory(categoryId);
     
-    // 2026-06-xx 彻底重构：分类加载不再依赖数据库，而是通过全 Frn 索引匹配物理路径
-    auto allFrns = AllFrnManager::getAllFrns();
+    // 2026-06-xx 彻底重构：基于 MetadataManager 的秒级反向索引加载文件
     for (const auto& fid : fids) {
-        QString qFid = QString::fromStdString(fid);
-        if (allFrns.contains(qFid)) {
-            QString path = allFrns[qFid];
-            if (!path.isEmpty() && QFileInfo::exists(path)) {
+        std::wstring path = MetadataManager::instance().getPathByFid(fid);
+        if (!path.empty()) {
+            QString qPath = QString::fromStdWString(path);
+            if (QFileInfo::exists(qPath)) {
                 ItemRecord r;
-                r.path = QDir::toNativeSeparators(path);
-                r.isDir = QFileInfo(path).isDir();
+                r.path = QDir::toNativeSeparators(qPath);
+                r.isDir = QFileInfo(qPath).isDir();
                 allRecords.push_back(r);
             }
         }

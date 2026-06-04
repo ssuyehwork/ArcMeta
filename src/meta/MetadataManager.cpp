@@ -96,9 +96,13 @@ void MetadataManager::initFromScchMode() {
     qDebug() << "[PERF] 开始加载分布式 SCCH 缓存...";
     loadDriverMetadata();
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
+    std::unordered_map<std::string, std::wstring> tempFidToPath;
     {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
         tempCache = m_cache;
+        for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
+            if (!it->second.fileId128.empty()) tempFidToPath[it->second.fileId128] = it->first;
+        }
     }
 
     QMap<QString, QString> frnsMap = AllFrnManager::getAllFrns();
@@ -161,7 +165,9 @@ void MetadataManager::initFromScchMode() {
                 fetchWinApiMetadataDirect(itemPath, iMeta.fileId128, nullptr, &iMeta.fileSize, nullptr, &iMeta.ctime, &iMeta.mtime, &iMeta.atime);
 
                 iMeta.palettes = item.palettes;
-                tempCache[normalizePath(itemPath)] = iMeta;
+                std::wstring nItemPath = normalizePath(itemPath);
+                tempCache[nItemPath] = iMeta;
+                if (!iMeta.fileId128.empty()) tempFidToPath[iMeta.fileId128] = nItemPath;
             }
         }
     }
@@ -169,6 +175,7 @@ void MetadataManager::initFromScchMode() {
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache = tempCache;
+        m_fidToPath = tempFidToPath;
     }
     qDebug() << "[PERF] 分布式 SCCH 缓存加载完成，项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     emit metaChanged("__RELOAD_ALL__");
@@ -202,6 +209,7 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
             for (size_t i = 0; i < item.tags.size(); ++i) rm.tags << QString::fromStdWString(item.tags[i]);
             std::unique_lock<std::shared_mutex> lock(m_mutex);
             m_cache[nPath] = rm;
+            if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;
             return rm;
         }
         if (info.isDir()) {
@@ -216,11 +224,19 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
                 for (size_t i = 0; i < folder.tags.size(); ++i) rm.tags << QString::fromStdWString(folder.tags[i]);
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
                 m_cache[nPath] = rm;
+                if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;
                 return rm;
             }
         }
     }
     return RuntimeMeta();
+}
+
+std::wstring MetadataManager::getPathByFid(const std::string& fid) {
+    if (fid.empty()) return L"";
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    auto it = m_fidToPath.find(fid);
+    return (it != m_fidToPath.end()) ? it->second : L"";
 }
 
 void MetadataManager::setRating(const std::wstring& path, int rating) {
@@ -315,7 +331,12 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         std::unordered_map<std::wstring, RuntimeMeta>::iterator it = m_cache.find(oldPath);
-        if (it != m_cache.end()) { m_cache[newPath] = it->second; m_cache.erase(it); }
+        if (it != m_cache.end()) {
+            std::string fid = it->second.fileId128;
+            m_cache[newPath] = it->second;
+            m_cache.erase(it);
+            if (!fid.empty()) m_fidToPath[fid] = newPath;
+        }
     }
     emit metaChanged(QString::fromStdWString(newPath));
 }
@@ -324,7 +345,10 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         for (std::unordered_map<std::wstring, RuntimeMeta>::iterator it = m_cache.begin(); it != m_cache.end(); ) {
-            if (it->first == path || it->first.find(path + L"\\") == 0 || it->first.find(path + L"/") == 0) it = m_cache.erase(it);
+            if (it->first == path || it->first.find(path + L"\\") == 0 || it->first.find(path + L"/") == 0) {
+                if (!it->second.fileId128.empty()) m_fidToPath.erase(it->second.fileId128);
+                it = m_cache.erase(it);
+            }
             else ++it;
         }
     }

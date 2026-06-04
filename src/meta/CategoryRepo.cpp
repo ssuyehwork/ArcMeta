@@ -255,15 +255,14 @@ std::vector<std::string> getFileIdsInCategory(int categoryId) {
     std::vector<CategoryItemRecord> items;
     loadAll(cats, items);
 
-    std::unordered_set<std::string> folderIds;
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
-        if (meta.isFolder) folderIds.insert(meta.fileId128);
-    });
-
     std::vector<std::string> results;
     for (size_t i = 0; i < items.size(); ++i) {
-        if (items[i].categoryId == categoryId && folderIds.find(items[i].fileId128) == folderIds.end()) {
-            results.push_back(items[i].fileId128);
+        if (items[i].categoryId == categoryId) {
+            // 物理校验：只有当前缓存在内存中且物理可达的项目才计入显示列表
+            std::wstring path = MetadataManager::instance().getPathByFid(items[i].fileId128);
+            if (!path.empty()) {
+                results.push_back(items[i].fileId128);
+            }
         }
     }
     return results;
@@ -274,16 +273,18 @@ std::vector<std::pair<int, int> > getCounts() {
     std::vector<CategoryItemRecord> records;
     loadAll(cats, records);
 
-    std::unordered_set<std::string> folderIds;
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
-        if (meta.isFolder) folderIds.insert(meta.fileId128);
-    });
-
     QMap<int, std::unordered_set<std::string> > catFileSets;
     for (size_t i = 0; i < records.size(); ++i) {
         const CategoryItemRecord& r = records[i];
-        if (!r.fileId128.empty() && folderIds.find(r.fileId128) == folderIds.end()) {
-            catFileSets[r.categoryId].insert(r.fileId128);
+        if (!r.fileId128.empty()) {
+            // 物理校验：统计计数必须基于内存中已加载的有效路径，且排除文件夹
+            std::wstring path = MetadataManager::instance().getPathByFid(r.fileId128);
+            if (!path.empty()) {
+                RuntimeMeta meta = MetadataManager::instance().getMeta(path);
+                if (!meta.isFolder) {
+                    catFileSets[r.categoryId].insert(r.fileId128);
+                }
+            }
         }
     }
 
@@ -336,16 +337,15 @@ int CategoryRepo::getUniqueItemCount() {
     std::vector<CategoryItemRecord> records;
     ScchCategoryEngine::loadAll(cats, records);
 
-    std::unordered_set<std::string> folderIds;
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
-        if (meta.isFolder) folderIds.insert(meta.fileId128);
-    });
-
     std::unordered_set<std::string> uniqueIds;
     for (size_t i = 0; i < records.size(); ++i) {
         const CategoryItemRecord& r = records[i];
-        if (!r.fileId128.empty() && folderIds.find(r.fileId128) == folderIds.end()) {
-            uniqueIds.insert(r.fileId128);
+        if (!r.fileId128.empty()) {
+            std::wstring path = MetadataManager::instance().getPathByFid(r.fileId128);
+            if (!path.empty()) {
+                RuntimeMeta meta = MetadataManager::instance().getMeta(path);
+                if (!meta.isFolder) uniqueIds.insert(r.fileId128);
+            }
         }
     }
     return static_cast<int>(uniqueIds.size());
