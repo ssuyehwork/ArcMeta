@@ -2,6 +2,7 @@
 #include <QDataStream>
 #include <QDateTime>
 #include <QFile>
+#include <QTimer>
 #include <algorithm>
 #include <map>
 #include <set>
@@ -13,20 +14,21 @@ namespace ArcMeta {
 
 /**
  * @brief CategoryItemRecord Structure
+ * 2026-06-xx 物理加固：增加 pathHint 以便在 File ID 匹配失败时进行找回
  */
 struct CategoryItemRecord {
     int categoryId;
     std::string fileId128;
+    std::wstring pathHint; // 物理路径提示
     double addedAt;
 
     CategoryItemRecord() : categoryId(0), addedAt(0.0) {}
-    CategoryItemRecord(int catId, const std::string& fid, double time) 
-        : categoryId(catId), fileId128(fid), addedAt(time) {}
+    CategoryItemRecord(int catId, const std::string& fid, const std::wstring& path, double time)
+        : categoryId(catId), fileId128(fid), pathHint(path), addedAt(time) {}
 };
 
 /**
  * @brief Anonymous Namespace for Internal Operators
- * Resolve MSVC internal linkage issues and ADL lookup requirements.
  */
 namespace {
     QDataStream& operator<<(QDataStream& ds, const std::string& s) {
@@ -63,283 +65,453 @@ namespace {
     }
 
     QDataStream& operator<<(QDataStream& ds, const CategoryItemRecord& r) {
-        ds << r.categoryId << QString::fromStdString(r.fileId128) << r.addedAt;
-        return ds;
-    }
-
-    QDataStream& operator>>(QDataStream& ds, CategoryItemRecord& r) {
-        QString fid;
-        ds >> r.categoryId >> fid >> r.addedAt;
-        r.fileId128 = fid.toStdString();
+        // 版本 4 引入 pathHint
+        ds << r.categoryId << QString::fromStdString(r.fileId128) << QString::fromStdWString(r.pathHint) << r.addedAt;
         return ds;
     }
 }
+
+/**
+ * @brief 分类内存缓存管理器 (单例)
+ * 2026-06-xx 架构升级：引入增量缓存与延迟写入，彻底解决 IO 性能瓶颈
+ */
+class CategoryCacheManager : public QObject {
+    Q_OBJECT
+public:
+    static CategoryCacheManager& instance() {
+        static CategoryCacheManager inst;
+        return inst;
+    }
+
+    void ensureLoaded() {
+        if (m_loaded) return;
+        loadFromDisk();
+        m_loaded = true;
+    }
+
+    std::vector<Category>& categories() { ensureLoaded(); return m_categories; }
+    std::vector<CategoryItemRecord>& records() { ensureLoaded(); return m_records; }
+
+    void markDirty() {
+        m_dirty = true;
+        if (!m_saveTimer->isActive()) {
+            m_saveTimer->start(2000); // 2秒防抖写入
+        }
+    }
+
+    void markSysCountsDirty() {
+        m_sysCountsDirty = true;
+    }
+
+    QMap<QString, int> getSystemCounts() {
+        ensureLoaded();
+        if (!m_sysCountsDirty) return m_sysCountsCache;
+
+        QMap<QString, int> counts;
+        int all = 0, today = 0, yesterday = 0, recentlyVisited = 0, untagged = 0;
+
+        double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
+        double startOfToday = static_cast<double>(QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch());
+        double startOfYesterday = startOfToday - 86400000.0;
+
+        std::unordered_set<std::string> categorizedIds;
+        for (const auto& r : m_records) categorizedIds.insert(r.fileId128);
+
+        MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
+            if (meta.isFolder) return;
+            all++;
+            if (meta.tags.isEmpty()) untagged++;
+            if (meta.ctime >= startOfToday || meta.mtime >= startOfToday) today++;
+            if ((meta.ctime >= startOfYesterday || meta.mtime >= startOfYesterday) &&
+                (meta.ctime < startOfToday && meta.mtime < startOfToday)) yesterday++;
+            if (meta.atime >= now - 86400000.0) recentlyVisited++;
+        });
+
+        counts["all"] = all;
+        counts["today"] = today;
+        counts["yesterday"] = yesterday;
+        counts["recently_visited"] = recentlyVisited;
+        counts["untagged"] = untagged;
+
+        // 计算未分类
+        int uncategorizedCount = 0;
+        MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
+            if (!meta.isFolder && categorizedIds.find(meta.fileId128) == categorizedIds.end()) {
+                uncategorizedCount++;
+            }
+        });
+        counts["uncategorized"] = uncategorizedCount;
+        counts["trash"] = 0;
+
+        m_sysCountsCache = counts;
+        m_sysCountsDirty = false;
+        return counts;
+    }
+
+    void saveImmediately() {
+        if (m_dirty) {
+            saveToDisk();
+            m_saveTimer->stop();
+        }
+    }
+
+private:
+    CategoryCacheManager() : m_loaded(false), m_dirty(false) {
+        m_saveTimer = new QTimer(this);
+        m_saveTimer->setSingleShot(true);
+        connect(m_saveTimer, &QTimer::timeout, [this]() {
+            saveToDisk();
+        });
+
+        // 监听元数据变更以失效计数缓存
+        connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this]() {
+            markSysCountsDirty();
+        });
+    }
+
+    struct CategoryHeader {
+        char magic[4];
+        uint32_t version;
+        uint32_t catCount;
+        uint32_t itemCount;
+
+        CategoryHeader() : version(4), catCount(0), itemCount(0) {
+            magic[0] = 'C'; magic[1] = 'A'; magic[2] = 'T'; magic[3] = 'S';
+        }
+    };
+
+    void loadFromDisk() {
+        QFile file("arcmeta_categories.scch");
+        if (!file.exists() || !file.open(QIODevice::ReadOnly)) return;
+
+        QDataStream ds(&file);
+        ds.setVersion(QDataStream::Qt_6_0);
+        CategoryHeader header;
+        if (file.read(reinterpret_cast<char*>(&header), sizeof(header)) != sizeof(header)) return;
+        if (memcmp(header.magic, "CATS", 4) != 0) return;
+
+        m_categories.clear();
+        for (uint32_t i = 0; i < header.catCount; ++i) {
+            Category c; ds >> c; m_categories.push_back(c);
+        }
+
+        m_records.clear();
+        for (uint32_t i = 0; i < header.itemCount; ++i) {
+            CategoryItemRecord r;
+            if (header.version >= 4) {
+                QString fid, path;
+                ds >> r.categoryId >> fid >> path >> r.addedAt;
+                r.fileId128 = fid.toStdString();
+                r.pathHint = path.toStdWString();
+            } else {
+                // 兼容旧版 V3
+                QString fid;
+                ds >> r.categoryId >> fid >> r.addedAt;
+                r.fileId128 = fid.toStdString();
+            }
+            m_records.push_back(r);
+        }
+    }
+
+    void saveToDisk() {
+        if (!m_dirty) return;
+
+        QFile file("arcmeta_categories.scch.tmp");
+        if (!file.open(QIODevice::WriteOnly)) return;
+
+        QDataStream ds(&file);
+        ds.setVersion(QDataStream::Qt_6_0);
+        CategoryHeader header;
+        header.catCount = static_cast<uint32_t>(m_categories.size());
+        header.itemCount = static_cast<uint32_t>(m_records.size());
+        file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+
+        for (const auto& c : m_categories) ds << c;
+        for (const auto& r : m_records) ds << r;
+
+        file.close();
+        QFile::remove("arcmeta_categories.scch");
+        QFile::rename("arcmeta_categories.scch.tmp", "arcmeta_categories.scch");
+
+        m_dirty = false;
+    }
+
+    std::vector<Category> m_categories;
+    std::vector<CategoryItemRecord> m_records;
+    bool m_loaded;
+    bool m_dirty;
+    QTimer* m_saveTimer;
+
+    // 系统分类增量计数缓存
+    mutable QMap<QString, int> m_sysCountsCache;
+    mutable bool m_sysCountsDirty = true;
+};
 
 namespace ScchCategoryEngine {
 
-struct CategoryHeader {
-    char magic[4];
-    uint32_t version;
-    uint32_t catCount;
-    uint32_t itemCount;
-
-    CategoryHeader() : version(3), catCount(0), itemCount(0) {
-        magic[0] = 'C'; magic[1] = 'A'; magic[2] = 'T'; magic[3] = 'S';
-    }
-};
-
-static bool loadAll(std::vector<Category>& cats, std::vector<CategoryItemRecord>& items) {
-    QFile file("arcmeta_categories.scch");
-    if (!file.exists() || !file.open(QIODevice::ReadOnly)) return false;
-    
-    QDataStream ds(&file);
-    ds.setVersion(QDataStream::Qt_6_0);
-    CategoryHeader header;
-    if (file.read(reinterpret_cast<char*>(&header), sizeof(header)) != sizeof(header)) return false;
-    if (memcmp(header.magic, "CATS", 4) != 0) return false;
-
-    cats.clear();
-    for (uint32_t i = 0; i < header.catCount; ++i) {
-        Category c; ds >> c; cats.push_back(c);
-    }
-    items.clear();
-    for (uint32_t i = 0; i < header.itemCount; ++i) {
-        CategoryItemRecord r; ds >> r; items.push_back(r);
-    }
-    return true;
-}
-
-static bool saveAll(const std::vector<Category>& cats, const std::vector<CategoryItemRecord>& items) {
-    QFile file("arcmeta_categories.scch");
-    if (!file.open(QIODevice::WriteOnly)) return false;
-    
-    QDataStream ds(&file);
-    ds.setVersion(QDataStream::Qt_6_0);
-    CategoryHeader header;
-    header.catCount = static_cast<uint32_t>(cats.size());
-    header.itemCount = static_cast<uint32_t>(items.size());
-    file.write(reinterpret_cast<const char*>(&header), sizeof(header));
-
-    for (size_t i = 0; i < cats.size(); ++i) ds << cats[i];
-    for (size_t i = 0; i < items.size(); ++i) ds << items[i];
-    return true;
-}
-
 std::vector<Category> getAll() {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> items;
-    loadAll(cats, items);
-    
-    struct Sorter {
-        bool operator()(const Category& a, const Category& b) const {
-            return a.sortOrder < b.sortOrder;
-        }
-    };
-    std::sort(cats.begin(), cats.end(), Sorter());
-    return cats;
+    auto& cats = CategoryCacheManager::instance().categories();
+    std::vector<Category> results = cats;
+    std::sort(results.begin(), results.end(), [](const Category& a, const Category& b) {
+        return a.sortOrder < b.sortOrder;
+    });
+    return results;
 }
 
 bool add(Category& cat) {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> items;
-    loadAll(cats, items);
+    auto& cats = CategoryCacheManager::instance().categories();
     int maxId = 0;
-    for (size_t i = 0; i < cats.size(); ++i) if (cats[i].id > maxId) maxId = cats[i].id;
+    for (const auto& c : cats) if (c.id > maxId) maxId = c.id;
     cat.id = maxId + 1;
     cats.push_back(cat);
-    return saveAll(cats, items);
+    CategoryCacheManager::instance().markDirty();
+    return true;
 }
 
 bool update(const Category& cat) {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> items;
-    loadAll(cats, items);
+    auto& cats = CategoryCacheManager::instance().categories();
     bool found = false;
-    for (size_t i = 0; i < cats.size(); ++i) {
-        if (cats[i].id == cat.id) { cats[i] = cat; found = true; break; }
+    for (auto& c : cats) {
+        if (c.id == cat.id) { c = cat; found = true; break; }
     }
     if (!found) cats.push_back(cat);
-    return saveAll(cats, items);
+    CategoryCacheManager::instance().markDirty();
+    return true;
 }
 
 static void collectSubIds(const std::vector<Category>& all, int pid, std::vector<int>& ids) {
-    for (size_t i = 0; i < all.size(); ++i) {
-        if (all[i].parentId == pid) { ids.push_back(all[i].id); collectSubIds(all, all[i].id, ids); }
+    for (const auto& c : all) {
+        if (c.parentId == pid) { ids.push_back(c.id); collectSubIds(all, c.id, ids); }
     }
 }
 
 bool remove(int id) {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> items;
-    loadAll(cats, items);
+    auto& cats = CategoryCacheManager::instance().categories();
+    auto& records = CategoryCacheManager::instance().records();
+
     std::vector<int> removeIds;
     removeIds.push_back(id);
     collectSubIds(cats, id, removeIds);
 
-    for (std::vector<Category>::iterator it = cats.begin(); it != cats.end(); ) {
-        bool shouldRemove = false;
-        for (size_t i = 0; i < removeIds.size(); ++i) { if (removeIds[i] == it->id) { shouldRemove = true; break; } }
-        if (shouldRemove) it = cats.erase(it); else ++it;
+    auto itCat = std::remove_if(cats.begin(), cats.end(), [&](const Category& c) {
+        return std::find(removeIds.begin(), removeIds.end(), c.id) != removeIds.end();
+    });
+    if (itCat != cats.end()) {
+        cats.erase(itCat, cats.end());
+        CategoryCacheManager::instance().markDirty();
     }
 
-    for (std::vector<CategoryItemRecord>::iterator it = items.begin(); it != items.end(); ) {
-        bool shouldRemove = false;
-        for (size_t i = 0; i < removeIds.size(); ++i) { if (removeIds[i] == it->categoryId) { shouldRemove = true; break; } }
-        if (shouldRemove) it = items.erase(it); else ++it;
+    auto itRec = std::remove_if(records.begin(), records.end(), [&](const CategoryItemRecord& r) {
+        return std::find(removeIds.begin(), removeIds.end(), r.categoryId) != removeIds.end();
+    });
+    if (itRec != records.end()) {
+        records.erase(itRec, records.end());
+        CategoryCacheManager::instance().markDirty();
     }
 
-    return saveAll(cats, items);
+    return true;
 }
 
 bool reorder(int parentId, bool ascending) {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> items;
-    loadAll(cats, items);
+    auto& cats = CategoryCacheManager::instance().categories();
     std::vector<Category*> targets;
-    for (size_t i = 0; i < cats.size(); ++i) if (cats[i].parentId == parentId) targets.push_back(&cats[i]);
+    for (auto& c : cats) if (c.parentId == parentId) targets.push_back(&c);
     
-    struct Sorter {
-        bool asc;
-        bool operator()(Category* a, Category* b) const {
-            int cmp = a->name.compare(b->name);
-            return asc ? (cmp < 0) : (cmp > 0);
-        }
-    } sorter;
-    sorter.asc = ascending;
-    std::sort(targets.begin(), targets.end(), sorter);
+    std::sort(targets.begin(), targets.end(), [ascending](Category* a, Category* b) {
+        int cmp = a->name.compare(b->name);
+        return ascending ? (cmp < 0) : (cmp > 0);
+    });
 
     for (size_t i = 0; i < targets.size(); ++i) targets[i]->sortOrder = static_cast<int>(i);
-    return saveAll(cats, items);
+    CategoryCacheManager::instance().markDirty();
+    return true;
 }
 
 bool reorderAll(bool ascending) {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> items;
-    loadAll(cats, items);
-    
-    struct Sorter {
-        bool asc;
-        bool operator()(const Category& a, const Category& b) const {
-            int cmp = a.name.compare(b.name);
-            return asc ? (cmp < 0) : (cmp > 0);
-        }
-    } sorter;
-    sorter.asc = ascending;
-    std::sort(cats.begin(), cats.end(), sorter);
+    auto& cats = CategoryCacheManager::instance().categories();
+    std::sort(cats.begin(), cats.end(), [ascending](const Category& a, const Category& b) {
+        int cmp = a.name.compare(b.name);
+        return ascending ? (cmp < 0) : (cmp > 0);
+    });
 
     for (size_t i = 0; i < cats.size(); ++i) cats[i].sortOrder = static_cast<int>(i);
-    return saveAll(cats, items);
+    CategoryCacheManager::instance().markDirty();
+    return true;
 }
 
-bool addItemToCategory(int categoryId, const std::string& fileId128) {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> items;
-    loadAll(cats, items);
-    for (size_t i = 0; i < items.size(); ++i) if (items[i].categoryId == categoryId && items[i].fileId128 == fileId128) return true;
-    items.push_back(CategoryItemRecord(categoryId, fileId128, static_cast<double>(QDateTime::currentMSecsSinceEpoch())));
-    return saveAll(cats, items);
+bool addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint) {
+    auto& records = CategoryCacheManager::instance().records();
+    for (const auto& r : records) {
+        if (r.categoryId == categoryId && r.fileId128 == fileId128) return true;
+    }
+
+    std::wstring finalPathHint = pathHint;
+    if (finalPathHint.empty()) {
+        finalPathHint = MetadataManager::instance().getPathByFid(fileId128);
+    }
+
+    records.push_back(CategoryItemRecord(categoryId, fileId128, finalPathHint,
+        static_cast<double>(QDateTime::currentMSecsSinceEpoch())));
+
+    CategoryCacheManager::instance().markDirty();
+    CategoryCacheManager::instance().markSysCountsDirty();
+    return true;
 }
 
 bool removeItemFromCategory(int categoryId, const std::string& fileId128) {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> items;
-    loadAll(cats, items);
-    for (std::vector<CategoryItemRecord>::iterator it = items.begin(); it != items.end(); ) {
-        if (it->categoryId == categoryId && it->fileId128 == fileId128) it = items.erase(it); else ++it;
+    auto& records = CategoryCacheManager::instance().records();
+    auto it = std::remove_if(records.begin(), records.end(), [&](const CategoryItemRecord& r) {
+        return r.categoryId == categoryId && r.fileId128 == fileId128;
+    });
+    if (it != records.end()) {
+        records.erase(it, records.end());
+        CategoryCacheManager::instance().markDirty();
+        CategoryCacheManager::instance().markSysCountsDirty();
+        return true;
     }
-    return saveAll(cats, items);
+    return false;
 }
 
-std::vector<std::string> getFileIdsInCategory(int categoryId) {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> items;
-    loadAll(cats, items);
-
-    std::vector<std::string> results;
-    for (size_t i = 0; i < items.size(); ++i) {
-        if (items[i].categoryId == categoryId) {
-            // 物理校验：只有当前缓存在内存中且物理可达的项目才计入显示列表
-            std::wstring path = MetadataManager::instance().getPathByFid(items[i].fileId128);
-            if (!path.empty()) {
-                results.push_back(items[i].fileId128);
-            }
+std::vector<CategoryItem> getItemsInCategory(int categoryId) {
+    auto& records = CategoryCacheManager::instance().records();
+    std::vector<CategoryItem> results;
+    for (const auto& r : records) {
+        if (r.categoryId == categoryId) {
+            results.push_back({r.fileId128, r.pathHint});
         }
     }
     return results;
 }
 
-std::vector<std::pair<int, int> > getCounts() {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> records;
-    loadAll(cats, records);
+std::vector<CategoryItem> getItemsRecursive(int categoryId) {
+    auto& cats = CategoryCacheManager::instance().categories();
+    auto& records = CategoryCacheManager::instance().records();
 
-    QMap<int, std::unordered_set<std::string> > catFileSets;
-    for (size_t i = 0; i < records.size(); ++i) {
-        const CategoryItemRecord& r = records[i];
-        if (!r.fileId128.empty()) {
-            // 物理校验：统计计数必须基于内存中已加载的有效路径，且排除文件夹
-            std::wstring path = MetadataManager::instance().getPathByFid(r.fileId128);
-            if (!path.empty()) {
-                RuntimeMeta meta = MetadataManager::instance().getMeta(path);
-                if (!meta.isFolder) {
-                    catFileSets[r.categoryId].insert(r.fileId128);
-                }
+    std::vector<int> ids;
+    ids.push_back(categoryId);
+    collectSubIds(cats, categoryId, ids);
+
+    std::unordered_set<int> idSet(ids.begin(), ids.end());
+    std::map<std::string, std::wstring> resultsMap; // 用 map 去重且保留 pathHint
+
+    for (const auto& r : records) {
+        if (idSet.count(r.categoryId)) {
+            resultsMap[r.fileId128] = r.pathHint;
+        }
+    }
+
+    std::vector<CategoryItem> results;
+    for (auto const& [fid, path] : resultsMap) {
+        results.push_back({fid, path});
+    }
+    return results;
+}
+
+std::vector<std::pair<int, int>> getCounts() {
+    auto& records = CategoryCacheManager::instance().records();
+    QMap<int, std::unordered_set<std::string>> catFileSets;
+
+    for (const auto& r : records) {
+        if (r.fileId128.empty()) continue;
+
+        // 物理存在性校验
+        std::wstring path = MetadataManager::instance().getPathByFid(r.fileId128);
+        if (path.empty() && !r.pathHint.empty()) {
+            // 尝试通过 pathHint 找回（如果文件还在原位但 FRN 变了，MetadataManager 会在此之后同步）
+            path = r.pathHint;
+        }
+
+        if (!path.empty()) {
+            RuntimeMeta meta = MetadataManager::instance().getMeta(path);
+            if (!meta.isFolder) {
+                catFileSets[r.categoryId].insert(r.fileId128);
             }
         }
     }
 
-    std::vector<std::pair<int, int> > res;
-    for (QMap<int, std::unordered_set<std::string> >::const_iterator it = catFileSets.constBegin(); it != catFileSets.constEnd(); ++it) {
+    std::vector<std::pair<int, int>> res;
+    for (auto it = catFileSets.constBegin(); it != catFileSets.constEnd(); ++it) {
         res.push_back(std::make_pair(it.key(), static_cast<int>(it.value().size())));
     }
     return res;
 }
 
 std::vector<std::string> getFileIdsRecursive(int categoryId) {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> items;
-    loadAll(cats, items);
-
-    std::unordered_set<std::string> folderIds;
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
-        if (meta.isFolder) folderIds.insert(meta.fileId128);
-    });
+    auto& cats = CategoryCacheManager::instance().categories();
+    auto& records = CategoryCacheManager::instance().records();
 
     std::vector<int> ids;
     ids.push_back(categoryId);
     collectSubIds(cats, categoryId, ids);
-    std::vector<std::string> results;
-    for (size_t i = 0; i < items.size(); ++i) {
-        const CategoryItemRecord& r = items[i];
-        bool foundId = false;
-        for (size_t j = 0; j < ids.size(); ++j) { if (ids[j] == r.categoryId) { foundId = true; break; } }
-        if (foundId && folderIds.find(r.fileId128) == folderIds.end()) {
-            results.push_back(r.fileId128);
+
+    std::unordered_set<int> idSet(ids.begin(), ids.end());
+    std::unordered_set<std::string> resultsSet;
+
+    for (const auto& r : records) {
+        if (idSet.count(r.categoryId)) {
+            resultsSet.insert(r.fileId128);
         }
     }
-    return results;
+
+    return std::vector<std::string>(resultsSet.begin(), resultsSet.end());
 }
 
 } // namespace ScchCategoryEngine
 
-std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) { (void)limit; return ScchCategoryEngine::getAll(); }
-bool CategoryRepo::add(Category& cat) { return ScchCategoryEngine::add(cat); }
-bool CategoryRepo::reorderAll(bool ascending) { return ScchCategoryEngine::reorderAll(ascending); }
-bool CategoryRepo::update(const Category& cat) { return ScchCategoryEngine::update(cat); }
-bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId128) { return ScchCategoryEngine::addItemToCategory(categoryId, fileId128); }
+// CategoryRepo Implementation
 std::vector<Category> CategoryRepo::getAll() { return ScchCategoryEngine::getAll(); }
+std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
+    auto& records = CategoryCacheManager::instance().records();
+    auto& allCats = CategoryCacheManager::instance().categories();
+
+    // 1. 统计每个分类的最近使用时间 (基于关联记录的 addedAt)
+    std::map<int, double> lastUsedMap;
+    for (const auto& r : records) {
+        if (r.addedAt > lastUsedMap[r.categoryId]) {
+            lastUsedMap[r.categoryId] = r.addedAt;
+        }
+    }
+
+    // 2. 将全量分类进行排序
+    std::vector<Category> sortedCats = allCats;
+    std::sort(sortedCats.begin(), sortedCats.end(), [&](const Category& a, const Category& b) {
+        return lastUsedMap[a.id] > lastUsedMap[b.id];
+    });
+
+    if (sortedCats.size() > (size_t)limit) sortedCats.resize(limit);
+    return sortedCats;
+}
+bool CategoryRepo::add(Category& cat) { return ScchCategoryEngine::add(cat); }
+bool CategoryRepo::update(const Category& cat) { return ScchCategoryEngine::update(cat); }
+bool CategoryRepo::remove(int id) { return ScchCategoryEngine::remove(id); }
+bool CategoryRepo::reorder(int parentId, bool ascending) { return ScchCategoryEngine::reorder(parentId, ascending); }
+bool CategoryRepo::reorderAll(bool ascending) { return ScchCategoryEngine::reorderAll(ascending); }
+
+bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint) {
+    return ScchCategoryEngine::addItemToCategory(categoryId, fileId128, pathHint);
+}
 bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fileId128) { return ScchCategoryEngine::removeItemFromCategory(categoryId, fileId128); }
-std::vector<std::string> CategoryRepo::getFileIdsInCategory(int categoryId) { return ScchCategoryEngine::getFileIdsInCategory(categoryId); }
-std::vector<std::pair<int, int> > CategoryRepo::getCounts() { return ScchCategoryEngine::getCounts(); }
+std::vector<CategoryItem> CategoryRepo::getItemsInCategory(int categoryId) { return ScchCategoryEngine::getItemsInCategory(categoryId); }
+std::vector<CategoryItem> CategoryRepo::getItemsRecursive(int categoryId) { return ScchCategoryEngine::getItemsRecursive(categoryId); }
+
+std::vector<std::string> CategoryRepo::getFileIdsInCategory(int categoryId) {
+    auto items = ScchCategoryEngine::getItemsInCategory(categoryId);
+    std::vector<std::string> res;
+    for(auto& i : items) res.push_back(i.fileId128);
+    return res;
+}
+std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
+    auto items = ScchCategoryEngine::getItemsRecursive(categoryId);
+    std::vector<std::string> res;
+    for(auto& i : items) res.push_back(i.fileId128);
+    return res;
+}
+std::vector<std::pair<int, int>> CategoryRepo::getCounts() { return ScchCategoryEngine::getCounts(); }
 
 int CategoryRepo::getUniqueItemCount() {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> records;
-    ScchCategoryEngine::loadAll(cats, records);
-
+    auto& records = CategoryCacheManager::instance().records();
     std::unordered_set<std::string> uniqueIds;
-    for (size_t i = 0; i < records.size(); ++i) {
-        const CategoryItemRecord& r = records[i];
+    for (const auto& r : records) {
         if (!r.fileId128.empty()) {
             std::wstring path = MetadataManager::instance().getPathByFid(r.fileId128);
             if (!path.empty()) {
@@ -352,14 +524,9 @@ int CategoryRepo::getUniqueItemCount() {
 }
 
 int CategoryRepo::getUncategorizedItemCount() {
-    std::vector<Category> cats;
-    std::vector<CategoryItemRecord> records;
-    ScchCategoryEngine::loadAll(cats, records);
+    auto& records = CategoryCacheManager::instance().records();
     std::unordered_set<std::string> categorizedIds;
-    for (size_t i = 0; i < records.size(); ++i) {
-        const CategoryItemRecord& r = records[i];
-        if (!r.fileId128.empty()) categorizedIds.insert(r.fileId128);
-    }
+    for (const auto& r : records) categorizedIds.insert(r.fileId128);
 
     int count = 0;
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
@@ -371,44 +538,14 @@ int CategoryRepo::getUncategorizedItemCount() {
 }
 
 QMap<QString, int> CategoryRepo::getSystemCounts() {
-    QMap<QString, int> counts;
-    int all = 0, today = 0, yesterday = 0, recentlyVisited = 0, untagged = 0;
-
-    double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
-    double startOfToday = static_cast<double>(QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch());
-    double startOfYesterday = startOfToday - 86400000.0;
-
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
-        if (meta.isFolder) return;
-        all++;
-        if (meta.tags.isEmpty()) untagged++;
-        if (meta.ctime >= startOfToday || meta.mtime >= startOfToday) today++;
-        if ((meta.ctime >= startOfYesterday || meta.mtime >= startOfYesterday) &&
-            (meta.ctime < startOfToday && meta.mtime < startOfToday)) yesterday++;
-        if (meta.atime >= now - 86400000.0) recentlyVisited++;
-    });
-
-    counts["all"] = all;
-    counts["today"] = today;
-    counts["yesterday"] = yesterday;
-    counts["recently_visited"] = recentlyVisited;
-    counts["untagged"] = untagged;
-    counts["uncategorized"] = getUncategorizedItemCount();
-    counts["trash"] = 0;
-    return counts;
+    return CategoryCacheManager::instance().getSystemCounts();
 }
 
 QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
     QStringList paths;
-    
     std::unordered_set<std::string> categorizedIds;
     if (type == "uncategorized") {
-        std::vector<Category> cats;
-        std::vector<CategoryItemRecord> records;
-        ScchCategoryEngine::loadAll(cats, records);
-        for (size_t i = 0; i < records.size(); ++i) {
-            if (!records[i].fileId128.empty()) categorizedIds.insert(records[i].fileId128);
-        }
+        for (const auto& r : CategoryCacheManager::instance().records()) categorizedIds.insert(r.fileId128);
     }
 
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
@@ -417,35 +554,19 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
 
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
         if (meta.isFolder) return;
-        
         bool match = false;
-        if (type == "all") {
-            match = true;
-        } else if (type == "untagged") {
-            if (meta.tags.isEmpty()) match = true;
-        } else if (type == "today") {
-            if (meta.ctime >= startOfToday || meta.mtime >= startOfToday) match = true;
-        } else if (type == "yesterday") {
-            if ((meta.ctime >= startOfYesterday || meta.mtime >= startOfYesterday) &&
-                (meta.ctime < startOfToday && meta.mtime < startOfToday)) match = true;
-        } else if (type == "recently_visited") {
-            if (meta.atime >= now - 86400000.0) match = true;
-        } else if (type == "uncategorized") {
-            if (categorizedIds.find(meta.fileId128) == categorizedIds.end()) match = true;
-        } else if (type == "trash") {
-            // 目前垃圾桶逻辑尚未物理实现，保持空
-        }
+        if (type == "all") match = true;
+        else if (type == "untagged" && meta.tags.isEmpty()) match = true;
+        else if (type == "today" && (meta.ctime >= startOfToday || meta.mtime >= startOfToday)) match = true;
+        else if (type == "yesterday" && (meta.ctime >= startOfYesterday || meta.mtime >= startOfYesterday) && (meta.ctime < startOfToday && meta.mtime < startOfToday)) match = true;
+        else if (type == "recently_visited" && meta.atime >= now - 86400000.0) match = true;
+        else if (type == "uncategorized" && categorizedIds.find(meta.fileId128) == categorizedIds.end()) match = true;
 
-        if (match) {
-            paths << QString::fromStdWString(path);
-        }
+        if (match) paths << QString::fromStdWString(path);
     });
-
     return paths;
 }
 
-bool CategoryRepo::remove(int id) { return ScchCategoryEngine::remove(id); }
-bool CategoryRepo::reorder(int parentId, bool ascending) { return ScchCategoryEngine::reorder(parentId, ascending); }
-std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) { return ScchCategoryEngine::getFileIdsRecursive(categoryId); }
-
 } // namespace ArcMeta
+
+#include "CategoryRepo.moc"

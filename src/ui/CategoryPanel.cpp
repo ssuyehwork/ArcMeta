@@ -939,7 +939,7 @@ void CategoryPanel::initUi() {
                     
                     // 2. 执行归类关联 (如果 catId > 0)
                     if (catId > 0) {
-                        CategoryRepo::addItemToCategory(catId, fid);
+                        CategoryRepo::addItemToCategory(catId, fid, wPath);
                     }
 
                     // 2026-06-xx 物理同步：触发元数据持久化以生成 metadata.scch，实现“目录导航”状态感应
