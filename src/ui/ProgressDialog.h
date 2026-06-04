@@ -47,6 +47,20 @@ public:
         m_progressBar->setValue(value);
     }
 
+    Q_INVOKABLE void updateProgress(int current, int total, const QString& fileName) {
+        if (total <= 0) return;
+        m_progressBar->setRange(0, total);
+        m_progressBar->setValue(current);
+
+        double percent = (double)current / total * 100.0;
+        QString status = QString("[%1/%2] %3% - %4")
+                            .arg(current)
+                            .arg(total)
+                            .arg(QString::number(percent, 'f', 1))
+                            .arg(fileName);
+        m_statusLabel->setText(status);
+    }
+
 private:
     QLabel* m_statusLabel = nullptr;
     QProgressBar* m_progressBar = nullptr;
