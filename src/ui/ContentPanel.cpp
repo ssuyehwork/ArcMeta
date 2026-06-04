@@ -1280,10 +1280,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             for (const auto& idx : indexes) { 
                 if (idx.column() == 0) { 
                     QString itemPath = idx.data(PathRole).toString(); 
+                    std::wstring wPath = itemPath.toStdWString();
                     // 2026-06-xx 物理同步：基于同步获取的 File ID 进行归类，解决新文件关联失败冲突。 
-                    std::string fid = MetadataManager::instance().getFileIdSync(itemPath.toStdWString()); 
+                    std::string fid = MetadataManager::instance().getFileIdSync(wPath); 
                     if (!fid.empty()) { 
-                        CategoryRepo::addItemToCategory(catId, fid); 
+                        CategoryRepo::addItemToCategory(catId, fid, wPath); 
                     } 
                 } 
             } 
@@ -1938,11 +1939,15 @@ void ContentPanel::loadCategory(int categoryId) {
     }
 
     // 2. 加载文件 (SCCH 分离模式)
-    std::vector<std::string> fids = CategoryRepo::getFileIdsInCategory(categoryId);
+    std::vector<CategoryItem> items = CategoryRepo::getItemsInCategory(categoryId);
     
-    // 2026-06-xx 彻底重构：基于 MetadataManager 的秒级反向索引加载文件
-    for (const auto& fid : fids) {
-        std::wstring path = MetadataManager::instance().getPathByFid(fid);
+    // 2026-06-xx 彻底重构：基于 MetadataManager 的秒级反向索引加载文件，支持 pathHint 寻回幽灵项
+    for (const auto& item : items) {
+        std::wstring path = MetadataManager::instance().getPathByFid(item.fileId128);
+        if (path.empty() && !item.pathHint.empty()) {
+            path = item.pathHint; // 尝试使用路径提示寻回
+        }
+
         if (!path.empty()) {
             QString qPath = QString::fromStdWString(path);
             if (QFileInfo::exists(qPath)) {

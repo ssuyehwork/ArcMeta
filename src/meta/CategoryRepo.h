@@ -20,6 +20,14 @@ struct Category {
 };
 
 /**
+ * @brief 分类项记录（含路径提示）
+ */
+struct CategoryItem {
+    std::string fileId128;
+    std::wstring pathHint;
+};
+
+/**
  * @brief 分类持久层
  * 彻底废除数据库，全量转向 SCCH 架构
  */
@@ -39,8 +47,12 @@ public:
     static QStringList getSystemCategoryPaths(const QString& type);
 
     // 条目关联逻辑
-    static bool addItemToCategory(int categoryId, const std::string& fileId128);
+    static bool addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint = L"");
     static bool removeItemFromCategory(int categoryId, const std::string& fileId128);
+    static std::vector<CategoryItem> getItemsInCategory(int categoryId);
+    static std::vector<CategoryItem> getItemsRecursive(int categoryId);
+
+    // 废弃接口（保持兼容）
     static std::vector<std::string> getFileIdsInCategory(int categoryId);
     static std::vector<std::string> getFileIdsRecursive(int categoryId);
 };
