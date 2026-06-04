@@ -398,6 +398,52 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     return counts;
 }
 
+QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
+    QStringList paths;
+
+    std::unordered_set<std::string> categorizedIds;
+    if (type == "uncategorized") {
+        std::vector<Category> cats;
+        std::vector<CategoryItemRecord> records;
+        ScchCategoryEngine::loadAll(cats, records);
+        for (size_t i = 0; i < records.size(); ++i) {
+            if (!records[i].fileId128.empty()) categorizedIds.insert(records[i].fileId128);
+        }
+    }
+
+    double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
+    double startOfToday = static_cast<double>(QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch());
+    double startOfYesterday = startOfToday - 86400000.0;
+
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
+        if (meta.isFolder) return;
+
+        bool match = false;
+        if (type == "all") {
+            match = true;
+        } else if (type == "untagged") {
+            if (meta.tags.isEmpty()) match = true;
+        } else if (type == "today") {
+            if (meta.ctime >= startOfToday || meta.mtime >= startOfToday) match = true;
+        } else if (type == "yesterday") {
+            if ((meta.ctime >= startOfYesterday || meta.mtime >= startOfYesterday) &&
+                (meta.ctime < startOfToday && meta.mtime < startOfToday)) match = true;
+        } else if (type == "recently_visited") {
+            if (meta.atime >= now - 86400000.0) match = true;
+        } else if (type == "uncategorized") {
+            if (categorizedIds.find(meta.fileId128) == categorizedIds.end()) match = true;
+        } else if (type == "trash") {
+            // 目前垃圾桶逻辑尚未物理实现，保持空
+        }
+
+        if (match) {
+            paths << QString::fromStdWString(path);
+        }
+    });
+
+    return paths;
+}
+
 bool CategoryRepo::remove(int id) { return ScchCategoryEngine::remove(id); }
 bool CategoryRepo::reorder(int parentId, bool ascending) { return ScchCategoryEngine::reorder(parentId, ascending); }
 std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) { return ScchCategoryEngine::getFileIdsRecursive(categoryId); }

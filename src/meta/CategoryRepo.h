@@ -36,6 +36,7 @@ public:
     static int getUniqueItemCount();
     static int getUncategorizedItemCount();
     static QMap<QString, int> getSystemCounts();
+    static QStringList getSystemCategoryPaths(const QString& type);
 
     // 条目关联逻辑
     static bool addItemToCategory(int categoryId, const std::string& fileId128);
