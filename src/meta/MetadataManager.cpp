@@ -92,6 +92,8 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
 
 
 void MetadataManager::initFromScchMode() {
+    qint64 startTime = QDateTime::currentMSecsSinceEpoch();
+    qDebug() << "[PERF] 开始加载分布式 SCCH 缓存...";
     loadDriverMetadata();
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
     {
@@ -168,6 +170,7 @@ void MetadataManager::initFromScchMode() {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache = tempCache;
     }
+    qDebug() << "[PERF] 分布式 SCCH 缓存加载完成，项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     emit metaChanged("__RELOAD_ALL__");
 }
 
@@ -427,6 +430,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
 }
 
 void MetadataManager::loadDriverMetadata() {
+    qint64 start = QDateTime::currentMSecsSinceEpoch();
     std::vector<DriverEntry> drivers = DriverRepo::loadAll();
     std::unique_lock<std::shared_mutex> lock(m_mutex);
     for (const auto& de : drivers) {
@@ -444,6 +448,7 @@ void MetadataManager::loadDriverMetadata() {
         fetchWinApiMetadataDirect(nPath, rm.fileId128, nullptr, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime);
         m_cache[nPath] = rm;
     }
+    qDebug() << "[PERF] 驱动器根目录元数据加载耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
 }
 
 bool MetadataManager::hasPendingSync() const { return false; }

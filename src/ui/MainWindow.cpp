@@ -531,26 +531,32 @@ void MainWindow::showEvent(QShowEvent* event) {
     qDebug() << "[Main] showEvent 触发, m_panelsInitialized =" << m_panelsInitialized;
     if (!m_panelsInitialized) {
         m_panelsInitialized = true;
+        qint64 scheduleStart = QDateTime::currentMSecsSinceEpoch();
         qDebug() << "[Main] 正在排期延迟加载任务 (QTimer::singleShot(0))...";
-        QTimer::singleShot(0, [this]() {
-            qDebug() << "[Main] 延迟加载任务开始执行";
+        QTimer::singleShot(0, [this, scheduleStart]() {
+            qint64 taskStart = QDateTime::currentMSecsSinceEpoch();
+            qDebug() << "[Main] 延迟加载任务开始执行，排期等待耗时:" << (taskStart - scheduleStart) << "ms";
+
             if (m_categoryPanel) {
-                qDebug() << "[Main] 正在初始化 CategoryPanel...";
+                qint64 start = QDateTime::currentMSecsSinceEpoch();
                 m_categoryPanel->deferredInit();
+                qDebug() << "[PERF] CategoryPanel 初始化耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
             }
             if (m_navPanel) {
-                qDebug() << "[Main] 正在初始化 NavPanel...";
+                qint64 start = QDateTime::currentMSecsSinceEpoch();
                 m_navPanel->deferredInit();
+                qDebug() << "[PERF] NavPanel 初始化耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
             }
             if (m_contentPanel) {
-                qDebug() << "[Main] 正在初始化 ContentPanel...";
+                qint64 start = QDateTime::currentMSecsSinceEpoch();
                 m_contentPanel->deferredInit();
+                qDebug() << "[PERF] ContentPanel 初始化耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
             }
             // MetaPanel 和 FilterPanel 暂时不需要延迟数据加载，因为它们通常随选中项动态刷新
             
             // 2026-04-14 按照用户要求：物理禁用"最后一个窗口关闭时退出"逻辑
             // 确保程序只能通过托盘菜单显式退出，提高驻留稳定性
-            qDebug() << "[Main] 所有核心面板数据延迟初始化完成，UI 响应已恢复";
+            qDebug() << "[PERF] 所有核心面板数据延迟加载完成，总耗时:" << (QDateTime::currentMSecsSinceEpoch() - taskStart) << "ms";
         });
     }
     
