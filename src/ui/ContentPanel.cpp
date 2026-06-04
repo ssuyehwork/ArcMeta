@@ -1469,20 +1469,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     // B. 持久化当前目录元数据
                     scchLoader.save();
 
-                    // C. 获取并注册当前目录的 FRN
-                    uint64_t dirFrn = 0;
-                    HANDLE hDir = CreateFileW(wpath.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-                    if (hDir != INVALID_HANDLE_VALUE) {
-                        BY_HANDLE_FILE_INFORMATION fi;
-                        if (GetFileInformationByHandle(hDir, &fi)) {
-                            dirFrn = ((uint64_t)fi.nFileIndexHigh << 32) | fi.nFileIndexLow;
-                        }
-                        CloseHandle(hDir);
-                    }
-                    if (dirFrn > 0) {
-                        wchar_t frnBuf[17];
-                        swprintf(frnBuf, 17, L"%016llX", dirFrn);
-                        AllFrnManager::registerFrn(frnBuf, wpath);
+                    // C. 物理同步：将新创建的 metadata.scch 的 FRN 登记到全局索引中，确保再次启动能加载数据
+                    std::wstring metaPath = wpath + L"\\metadata.scch";
+                    std::wstring metaFrn; std::string metaFid;
+                    if (MetadataManager::fetchWinApiMetadataDirect(metaPath, metaFid, &metaFrn)) {
+                        AllFrnManager::registerFrn(metaFrn, p.toStdWString());
                     }
                 };
 
