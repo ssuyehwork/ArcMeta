@@ -60,6 +60,7 @@
 #include <shellapi.h> 
 #include <io.h>
 #include "../meta/MetadataManager.h" 
+#include "../meta/AmMetaScch.h"
 #include "../meta/BatchRenameEngine.h" 
 #include "../meta/CategoryRepo.h" 
 #include "../crypto/EncryptionManager.h" 
@@ -1415,8 +1416,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 std::wstring wpath = QDir::toNativeSeparators(path).toStdWString();
 
                 // A. 物理生成/加载 metadata.scch
-                AmMetaScch amScch(wpath);
-                amScch.load(); // 尝试加载现有，或初始化空
+                ArcMeta::AmMetaScch scchLoader(wpath);
+                scchLoader.load(); // 尝试加载现有，或初始化空
 
                 // B. 扫描目录下文件 (这里使用标准 QDir，因为是单目录操作)
                 QDir dir(path);
@@ -1435,7 +1436,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         auto palette = UiHelper::extractPalette(fullPath);
                         if (!palette.isEmpty()) {
                             QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                            amScch.setItemColor(fileName.toStdWString(), dominant.name().toUpper().toStdWString());
+                            scchLoader.setItemColor(fileName.toStdWString(), dominant.name().toUpper().toStdWString());
                             MetadataManager::instance().setPalettes(fullPath.toStdWString(), palette);
                         }
                     }
@@ -1445,7 +1446,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 }
 
                 // C. 持久化元数据并注册 FRN
-                amScch.save();
+                scchLoader.save();
 
                 // 获取目录的 FRN 并注册
                 uint64_t dirFrn = 0;
@@ -1471,7 +1472,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     }
                 });
 
-                QMetaObject::invokeMethod(weakProgress.data(), "close");
+                QMetaObject::invokeMethod(weakProgress.data(), "close", Qt::QueuedConnection);
             });
             break;
         }
