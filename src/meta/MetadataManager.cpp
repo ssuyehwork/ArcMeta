@@ -293,13 +293,6 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].palettes = entries; }
-    QFileInfo info(QString::fromStdWString(nPath));
-    ArcMeta::AmMetaScch loader(QDir::toNativeSeparators(info.absolutePath()).toStdWString());
-    if (loader.load()) {
-        if (info.isDir()) loader.folder().palettes = entries;
-        else loader.items()[info.fileName().toStdWString()].palettes = entries;
-        loader.save();
-    }
     emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
@@ -471,6 +464,7 @@ void MetadataManager::loadDriverMetadata() {
 
         fetchWinApiMetadataDirect(nPath, rm.fileId128, nullptr, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime);
         m_cache[nPath] = rm;
+        if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;
     }
     qDebug() << "[PERF] 驱动器根目录元数据加载耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
 }
