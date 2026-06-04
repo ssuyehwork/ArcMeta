@@ -414,6 +414,9 @@ QMimeData* ScanTableModel::mimeData(const QModelIndexList& indexes) const {
 ScanDialog::ScanDialog(QWidget* parent)
     : FramelessDialog("FERREX-META", parent) 
 {
+    // 2026-06-xx 物理加固：显式声明为顶级窗口，确保在任务栏拥有独立实体，彻底实现双窗口并行
+    setWindowFlags(windowFlags() | Qt::Window | Qt::WindowMinMaxButtonsHint | Qt::WindowSystemMenuHint);
+
     m_config.load();
     resize(1000, 700);
     setMinimumSize(800, 500);

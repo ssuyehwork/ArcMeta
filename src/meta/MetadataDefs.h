@@ -20,20 +20,28 @@ struct PaletteEntry {
  * @brief 文件夹级别的元数据
  */
 struct FolderMeta {
-    std::wstring sortBy = L"name";
-    std::wstring sortOrder = L"asc";
-    int rating = 0;
-    std::wstring color = L"";
+    std::wstring sortBy;
+    std::wstring sortOrder;
+    int rating;
+    std::wstring color;
     std::vector<std::wstring> tags;
-    bool pinned = false;
-    std::wstring note = L"";
-    std::wstring url = L"";
-    bool encrypted = false;
+    bool pinned;
+    std::wstring note;
+    std::wstring url;
+    bool encrypted;
     std::string encryptSalt;
     std::string encryptIv;
     std::string encryptVerifyHash;
     std::string fileId128; // 128-bit File ID (Hex string)
     std::vector<PaletteEntry> palettes;
+
+    FolderMeta()
+        : sortBy(L"name")
+        , sortOrder(L"asc")
+        , rating(0)
+        , pinned(false)
+        , encrypted(false)
+    {}
 
     bool isDefault() const {
         return sortBy == L"name" && sortOrder == L"asc" && rating == 0 &&
@@ -45,14 +53,14 @@ struct FolderMeta {
  * @brief 单个条目（文件或子文件夹）的元数据
  */
 struct ItemMeta {
-    std::wstring type = L"file"; // "file" | "folder"
-    int rating = 0;
-    std::wstring color = L"";
+    std::wstring type; // "file" | "folder"
+    int rating;
+    std::wstring color;
     std::vector<std::wstring> tags;
-    bool pinned = false;
-    std::wstring note = L"";
-    std::wstring url = L"";
-    bool encrypted = false;
+    bool pinned;
+    std::wstring note;
+    std::wstring url;
+    bool encrypted;
     std::string encryptSalt;
     std::string encryptIv;
     std::string encryptVerifyHash;
@@ -60,11 +68,22 @@ struct ItemMeta {
     std::wstring volume;
     std::wstring frn;
     std::string fileId128; // 128-bit File ID (Hex string)
-    long long size = 0;
-    long long creationTime = 0;   // ctime (毫秒)
-    long long modificationTime = 0; // mtime (毫秒)
-    long long accessTime = 0;     // atime (毫秒)
+    long long size;
+    long long creationTime;   // ctime (毫秒)
+    long long modificationTime; // mtime (毫秒)
+    long long accessTime;     // atime (毫秒)
     std::vector<PaletteEntry> palettes;
+
+    ItemMeta()
+        : type(L"file")
+        , rating(0)
+        , pinned(false)
+        , encrypted(false)
+        , size(0)
+        , creationTime(0)
+        , modificationTime(0)
+        , accessTime(0)
+    {}
 
     bool hasUserOperations() const {
         return rating > 0 || !color.empty() || !tags.empty() || pinned ||
