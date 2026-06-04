@@ -25,7 +25,8 @@ struct CategoryItemRecord {
 };
 
 /**
- * @brief 匿名命名空间：放置序列化操作符，彻底解决 MSVC 的内部链接引用报错
+ * @brief Anonymous Namespace for Internal Operators
+ * Resolve MSVC internal linkage issues and ADL lookup requirements.
  */
 namespace {
     QDataStream& operator<<(QDataStream& ds, const std::string& s) {

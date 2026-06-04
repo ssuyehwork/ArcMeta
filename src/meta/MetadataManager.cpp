@@ -35,7 +35,7 @@
 
 namespace ArcMeta {
 
-// --- 内部辅助函数 ---
+// --- Internal Helper Functions ---
 
 static std::wstring normalizePath(const std::wstring& path) {
     if (path.empty()) return L"";
@@ -65,7 +65,7 @@ static std::wstring generateDeterministicFrn(const std::wstring& path) {
     return QString(hash.left(8).toHex().toUpper()).toStdWString();
 }
 
-// --- MetadataManager 实现 ---
+// --- MetadataManager Implementation ---
 
 MetadataManager& MetadataManager::instance() {
     static MetadataManager inst;
@@ -118,14 +118,14 @@ void MetadataManager::initFromScchMode() {
             }
         }
         
-        ArcMeta::AmMetaScch scchLoader(resolvedPath);
-        if (scchLoader.load()) {
+        ArcMeta::AmMetaScch loader(resolvedPath);
+        if (loader.load()) {
             std::wstring nResolvedPath = normalizePath(resolvedPath);
             long long fSize = 0, fCtime = 0, fMtime = 0, fAtime = 0;
             std::string fId128;
             fetchWinApiMetadataDirect(resolvedPath, fId128, nullptr, &fSize, nullptr, &fCtime, &fMtime, &fAtime);
 
-            const FolderMeta& f = scchLoader.folder();
+            const FolderMeta& f = loader.folder();
             RuntimeMeta fMeta;
             fMeta.rating = f.rating; fMeta.color = f.color;
             for (size_t i = 0; i < f.tags.size(); ++i) fMeta.tags << QString::fromStdWString(f.tags[i]);
@@ -136,7 +136,7 @@ void MetadataManager::initFromScchMode() {
             fMeta.palettes = f.palettes;
             tempCache[nResolvedPath] = fMeta;
 
-            const std::map<std::wstring, ItemMeta>& scchItems = scchLoader.items();
+            const std::map<std::wstring, ItemMeta>& scchItems = loader.items();
             for (std::map<std::wstring, ItemMeta>::const_iterator itItem = scchItems.begin(); itItem != scchItems.end(); ++itItem) {
                 const std::wstring& name = itItem->first;
                 const ItemMeta& item = itItem->second;
@@ -176,9 +176,9 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
     std::wstring fileName = info.fileName().toStdWString();
 
-    ArcMeta::AmMetaScch scchLoader(parentDir);
-    if (scchLoader.load()) {
-        const std::map<std::wstring, ItemMeta>& its = scchLoader.items();
+    ArcMeta::AmMetaScch loader(parentDir);
+    if (loader.load()) {
+        const std::map<std::wstring, ItemMeta>& its = loader.items();
         std::map<std::wstring, ItemMeta>::const_iterator it = its.find(fileName);
         if (it != its.end()) {
             const ItemMeta& item = it->second;
@@ -195,7 +195,7 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
             return rm;
         }
         if (info.isDir()) {
-            const FolderMeta& folder = scchLoader.folder();
+            const FolderMeta& folder = loader.folder();
             if (!folder.isDefault()) {
                 RuntimeMeta rm;
                 rm.rating = folder.rating; rm.color = folder.color;
@@ -268,11 +268,11 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].palettes = entries; }
     QFileInfo info(QString::fromStdWString(nPath));
-    ArcMeta::AmMetaScch scchLoader(QDir::toNativeSeparators(info.absolutePath()).toStdWString());
-    if (scchLoader.load()) {
-        if (info.isDir()) scchLoader.folder().palettes = entries;
-        else scchLoader.items()[info.fileName().toStdWString()].palettes = entries;
-        scchLoader.save();
+    ArcMeta::AmMetaScch loader(QDir::toNativeSeparators(info.absolutePath()).toStdWString());
+    if (loader.load()) {
+        if (info.isDir()) loader.folder().palettes = entries;
+        else loader.items()[info.fileName().toStdWString()].palettes = entries;
+        loader.save();
     }
     emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
@@ -281,12 +281,12 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
 QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
     QFileInfo info(QString::fromStdWString(nPath));
-    ArcMeta::AmMetaScch scchLoader(QDir::toNativeSeparators(info.absolutePath()).toStdWString());
-    if (scchLoader.load()) {
+    ArcMeta::AmMetaScch loader(QDir::toNativeSeparators(info.absolutePath()).toStdWString());
+    if (loader.load()) {
         std::vector<PaletteEntry> entries;
-        if (info.isDir()) entries = scchLoader.folder().palettes;
+        if (info.isDir()) entries = loader.folder().palettes;
         else {
-            const std::map<std::wstring, ItemMeta>& its = scchLoader.items();
+            const std::map<std::wstring, ItemMeta>& its = loader.items();
             if (its.count(info.fileName().toStdWString())) entries = its.at(info.fileName().toStdWString()).palettes;
         }
         QVector<QColor> colors;
@@ -384,24 +384,24 @@ void MetadataManager::persistAsync(const std::wstring& path) {
 
     if (info.isDir() && info.isRoot()) {
     } else {
-        ArcMeta::AmMetaScch scchLoader(parentDir);
-        scchLoader.load();
+        ArcMeta::AmMetaScch loader(parentDir);
+        loader.load();
         if (info.isDir()) {
-            FolderMeta& folder = scchLoader.folder();
+            FolderMeta& folder = loader.folder();
             folder.rating = rMeta.rating; folder.color = rMeta.color;
             folder.pinned = rMeta.pinned; folder.note = rMeta.note;
             folder.url = rMeta.url;
             folder.tags.clear(); for (int i = 0; i < rMeta.tags.size(); ++i) folder.tags.push_back(rMeta.tags[i].toStdWString());
             folder.palettes = rMeta.palettes;
         } else {
-            ItemMeta& item = scchLoader.items()[fileName];
+            ItemMeta& item = loader.items()[fileName];
             item.rating = rMeta.rating; item.color = rMeta.color;
             item.pinned = rMeta.pinned; item.encrypted = rMeta.encrypted;
             item.note = rMeta.note; item.url = rMeta.url;
             item.tags.clear(); for (int i = 0; i < rMeta.tags.size(); ++i) item.tags.push_back(rMeta.tags[i].toStdWString());
             item.palettes = rMeta.palettes;
         }
-        scchLoader.save();
+        loader.save();
     }
     std::wstring metaPath = parentDir + L"\\metadata.scch";
     std::wstring fileFrn; std::string fileFid;
