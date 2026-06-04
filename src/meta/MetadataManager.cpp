@@ -15,6 +15,7 @@
 #include "MetadataDefs.h"
 #include "AmMetaScch.h"
 #include "AllFrnManager.h"
+#include "DriverRepo.h"
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 
@@ -91,7 +92,15 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
 
 
 void MetadataManager::initFromScchMode() {
+    qint64 startTime = QDateTime::currentMSecsSinceEpoch();
+    qDebug() << "[PERF] 开始加载分布式 SCCH 缓存...";
+    loadDriverMetadata();
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        tempCache = m_cache;
+    }
+
     QMap<QString, QString> frnsMap = AllFrnManager::getAllFrns();
     
     for (QMap<QString, QString>::const_iterator itMap = frnsMap.constBegin(); itMap != frnsMap.constEnd(); ++itMap) {
@@ -161,6 +170,7 @@ void MetadataManager::initFromScchMode() {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache = tempCache;
     }
+    qDebug() << "[PERF] 分布式 SCCH 缓存加载完成，项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     emit metaChanged("__RELOAD_ALL__");
 }
 
@@ -383,6 +393,16 @@ void MetadataManager::persistAsync(const std::wstring& path) {
     RuntimeMeta rMeta = getMeta(nPath);
 
     if (info.isDir() && info.isRoot()) {
+        DriverEntry de;
+        de.volumePath = nPath;
+        de.rating = rMeta.rating;
+        de.color = rMeta.color;
+        de.pinned = rMeta.pinned;
+        de.note = rMeta.note;
+        de.url = rMeta.url;
+        for (int i = 0; i < rMeta.tags.size(); ++i) de.tags.push_back(rMeta.tags[i].toStdWString());
+        de.palettes = rMeta.palettes;
+        DriverRepo::update(de);
     } else {
         ArcMeta::AmMetaScch loader(parentDir);
         loader.load();
@@ -407,6 +427,28 @@ void MetadataManager::persistAsync(const std::wstring& path) {
     std::wstring fileFrn; std::string fileFid;
     if (fetchWinApiMetadataDirect(metaPath, fileFid, &fileFrn)) AllFrnManager::registerFrn(fileFrn, parentDir);
     emit metaChanged(QString::fromStdWString(nPath));
+}
+
+void MetadataManager::loadDriverMetadata() {
+    qint64 start = QDateTime::currentMSecsSinceEpoch();
+    std::vector<DriverEntry> drivers = DriverRepo::loadAll();
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    for (const auto& de : drivers) {
+        std::wstring nPath = normalizePath(de.volumePath);
+        RuntimeMeta rm;
+        rm.rating = de.rating;
+        rm.color = de.color;
+        rm.pinned = de.pinned;
+        rm.note = de.note;
+        rm.url = de.url;
+        for (const auto& t : de.tags) rm.tags << QString::fromStdWString(t);
+        rm.palettes = de.palettes;
+        rm.isFolder = true;
+        
+        fetchWinApiMetadataDirect(nPath, rm.fileId128, nullptr, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime);
+        m_cache[nPath] = rm;
+    }
+    qDebug() << "[PERF] 驱动器根目录元数据加载耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
 }
 
 bool MetadataManager::hasPendingSync() const { return false; }
