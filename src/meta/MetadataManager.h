@@ -57,6 +57,7 @@ public:
     
     void initFromScchMode();
     RuntimeMeta getMeta(const std::wstring& path);
+    std::wstring getPathByFid(const std::string& fid);
 
     /**
      * @brief 2026-06-xx 按照用户要求：在 SCCH 内存模式下执行多维搜索
@@ -136,6 +137,7 @@ private:
     ~MetadataManager() override = default;
 
     std::unordered_map<std::wstring, RuntimeMeta> m_cache;
+    std::unordered_map<std::string, std::wstring> m_fidToPath;
     mutable std::shared_mutex m_mutex;
     
     // 2026-05-25 按照用户要求：改用单例计时器与脏路径集，彻底解决计时器风暴

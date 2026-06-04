@@ -217,8 +217,10 @@ void MainWindow::initUi() {
             }
         } else if (type == "all" || type == "uncategorized" || type == "untagged" || 
                    type == "today" || type == "yesterday" || type == "recently_visited" || type == "trash") {
-            // 2026-06-xx 物理修复：所有系统项直接走数据库专用路径接口，彻底断开与搜索框的傻逼耦合
+            // 2026-06-xx 物理修复：所有系统项直接通过 getSystemCategoryPaths 获取物理路径并加载
             m_contentPanel->setCurrentCategoryType(type);
+            QStringList paths = CategoryRepo::getSystemCategoryPaths(type);
+            m_contentPanel->loadPaths(paths);
         } else {
             // 其余系统项 (标签管理等) 维持搜索逻辑
             m_contentPanel->search(name); 
