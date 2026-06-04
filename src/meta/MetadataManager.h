@@ -17,14 +17,25 @@ namespace ArcMeta {
  * @brief 内存元数据镜像结构
  */
 struct RuntimeMeta {
-    int rating = 0;
+    int rating;
     std::wstring color;
     QStringList tags;
     std::wstring note;
     std::wstring url;
-    bool pinned = false;
-    bool encrypted = false;
+    bool pinned;
+    bool encrypted;
+    bool isFolder; // 2026-06-xx 物理标记：区分文件夹与文件，用于侧边栏精准统计
+    std::string fileId128; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
+    
+    // 2026-06-xx 物理对标：补充时间戳与大小字段
+    long long ctime;
+    long long mtime;
+    long long atime;
+    long long fileSize;
+
     std::vector<PaletteEntry> palettes;
+
+    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), ctime(0), mtime(0), atime(0), fileSize(0) {}
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
@@ -83,6 +94,18 @@ public:
      * @brief 获取路径所在磁盘的卷序列号
      */
     static std::wstring getVolumeSerialNumber(const std::wstring& path);
+
+    /**
+     * @brief 只读遍历内存缓存，用于统计等场景（持有读锁）
+     * 2026-06-xx 物理同步：回调参数包含 (path, RuntimeMeta)
+     */
+    template<typename Func>
+    void forEachCachedItem(Func&& fn) const {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        for (std::unordered_map<std::wstring, RuntimeMeta>::const_iterator it = m_cache.begin(); it != m_cache.end(); ++it) {
+            fn(it->first, it->second);
+        }
+    }
 
     // 2026-06-xx 废弃接口：保留为空实现以维持二进制/ABI兼容（若需要），或在完成清理后移除
     bool hasPendingSync() const;

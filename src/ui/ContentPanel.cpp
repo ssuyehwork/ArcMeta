@@ -1197,6 +1197,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
  
         // [批量与加密区] 
         if (isFolder) { 
+            menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "添加至分类")->setData(ActionAddToCategory);
             menu.addAction("批量重命名 (Ctrl+Shift+R)")->setData(ActionBatchRename); 
         } else { 
             QMenu* cryptoMenu = menu.addMenu("加密保护"); 
@@ -1397,6 +1398,83 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             break; 
         } 
         case ActionBatchRename: performBatchRename(); break; 
+        case ActionAddToCategory: {
+            if (path.isEmpty()) break;
+            // 2026-06-xx 物理对账逻辑实现：
+            // 1. 在目标目录下生成 metadata.scch (若不存在)
+            // 2. 提取目录下图像文件的颜色
+            // 3. 注册 FRN 至全局索引 All_FRN_metadata.scch
+            
+            ProgressDialog* progress = new ProgressDialog("正在添加至管理分类...", this);
+            progress->show();
+            
+            QPointer<ContentPanel> weakThis(this);
+            QPointer<ProgressDialog> weakProgress(progress);
+            
+            (void)QtConcurrent::run([weakThis, path, weakProgress]() {
+                std::wstring wpath = QDir::toNativeSeparators(path).toStdWString();
+                
+                // A. 物理生成/加载 metadata.scch
+                AmMetaScch amScch(wpath);
+                amScch.load(); // 尝试加载现有，或初始化空
+                
+                // B. 扫描目录下文件 (这里使用标准 QDir，因为是单目录操作)
+                QDir dir(path);
+                QStringList files = dir.entryList(QDir::Files | QDir::NoDotAndDotDot);
+                
+                int total = files.size();
+                int current = 0;
+                
+                for (const QString& fileName : files) {
+                    if (!weakProgress) break;
+                    QString fullPath = dir.absoluteFilePath(fileName);
+                    
+                    // 自动提取颜色 (针对图像)
+                    QString ext = QFileInfo(fullPath).suffix().toLower();
+                    if (UiHelper::isGraphicsFile(ext)) {
+                        auto palette = UiHelper::extractPalette(fullPath);
+                        if (!palette.isEmpty()) {
+                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                            amScch.setItemColor(fileName.toStdWString(), dominant.name().toUpper().toStdWString());
+                            MetadataManager::instance().setPalettes(fullPath.toStdWString(), palette);
+                        }
+                    }
+                    
+                    current++;
+                    QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Q_ARG(int, current), Q_ARG(int, total), Q_ARG(QString, fileName));
+                }
+                
+                // C. 持久化元数据并注册 FRN
+                amScch.save();
+                
+                // 获取目录的 FRN 并注册
+                uint64_t dirFrn = 0;
+                HANDLE hDir = CreateFileW(wpath.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+                if (hDir != INVALID_HANDLE_VALUE) {
+                    BY_HANDLE_FILE_INFORMATION info;
+                    if (GetFileInformationByHandle(hDir, &info)) {
+                        dirFrn = ((uint64_t)info.nFileIndexHigh << 32) | info.nFileIndexLow;
+                    }
+                    CloseHandle(hDir);
+                }
+                
+                if (dirFrn > 0) {
+                    wchar_t frnBuf[17];
+                    swprintf(frnBuf, 17, L"%016llX", dirFrn);
+                    AllFrnManager::registerFrn(frnBuf, wpath);
+                }
+
+                QMetaObject::invokeMethod(weakThis.data(), [weakThis, path]() {
+                    if (weakThis) {
+                        weakThis->loadDirectory(weakThis->m_currentPath);
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "已成功添加至分类并建立物理索引", 1500, QColor("#2ecc71"));
+                    }
+                });
+                
+                QMetaObject::invokeMethod(weakProgress.data(), "close");
+            });
+            break;
+        }
         case ActionRename: view->edit(currentIndex); break; 
         case ActionCopy: performCopy(false); break; 
         case ActionCut: performCopy(true); break; 

@@ -150,7 +150,8 @@ public:
         ActionRestore,
         ActionCopyPath,
         ActionProperties,
-        ActionExtractColor
+        ActionExtractColor,
+        ActionAddToCategory
     };
 
     explicit ContentPanel(QWidget* parent = nullptr);

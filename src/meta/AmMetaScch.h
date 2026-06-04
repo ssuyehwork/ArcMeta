@@ -10,40 +10,39 @@ namespace ArcMeta {
 
 /**
  * @brief 处理 metadata.scch 的读写类 (Binary SCCH v3)
- * 2026-06-xx 物理加固：彻底废除 JSON 格式，切换为全二进制流存储，对标工业级性能。
  */
 class AmMetaScch {
 public:
     /**
-     * @param folderPath 目标文件夹的完整路径（不含文件名）
+     * @brief 二进制头结构：显式初始化
      */
+    struct BinaryHeader {
+        char magic[4];
+        uint32_t version;
+        uint32_t itemCount;
+        uint32_t reserved;
+
+        BinaryHeader() : version(3), itemCount(0), reserved(0) {
+            magic[0] = 'S'; magic[1] = 'C'; magic[2] = 'C'; magic[3] = 'H';
+        }
+    };
+
     explicit AmMetaScch(const std::wstring& folderPath);
-
-    /**
-     * @brief 加载 metadata.scch 二进制文件
-     */
     bool load();
-
-    /**
-     * @brief 安全保存为 metadata.scch 二进制格式
-     */
     bool save() const;
 
-    // 数据访问接口
     FolderMeta& folder() { return m_folder; }
     const FolderMeta& folder() const { return m_folder; }
 
     std::map<std::wstring, ItemMeta>& items() { return m_items; }
     const std::map<std::wstring, ItemMeta>& items() const { return m_items; }
 
-    /**
-     * @brief 移除指定文件名的元数据条目
-     */
     void remove(const std::wstring& fileName) { m_items.erase(fileName); }
 
-    /**
-     * @brief 静态辅助方法：重命名元数据条目
-     */
+    void setItemColor(const std::wstring& fileName, const std::wstring& color) {
+        m_items[fileName].color = color;
+    }
+
     static bool renameItem(const QString& folderPath, const QString& oldName, const QString& newName);
 
 private:
@@ -53,16 +52,7 @@ private:
     FolderMeta m_folder;
     std::map<std::wstring, ItemMeta> m_items;
 
-    // 2026-06-xx 物理重构：二进制序列化辅助 (不再使用 QJson)
-    struct BinaryHeader {
-        char magic[4] = {'S', 'C', 'C', 'H'};
-        uint32_t version = 3;
-        uint32_t itemCount = 0;
-        uint32_t reserved = 0;
-    };
-
     static QString toQString(const std::wstring& ws) { return QString::fromStdWString(ws); }
-    static std::wstring toStdWString(const QString& qs) { return qs.toStdWString(); }
 };
 
 } // namespace ArcMeta

@@ -12,6 +12,8 @@ namespace ArcMeta {
 struct PaletteEntry {
     QColor color;
     float ratio;
+    PaletteEntry() : ratio(0.0f) {}
+    PaletteEntry(const QColor& c, float r) : color(c), ratio(r) {}
 };
 
 /**
