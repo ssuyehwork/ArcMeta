@@ -167,7 +167,10 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == PathRole) {
         return path;
     } else if (role == TypeRole) {
-        return record.isDir ? "folder" : "file";
+        // 2026-06-xx 物理对账加固：如果物理磁盘状态返回 false (如幽灵项)，则根据 MetadataManager 的历史记录进行二次判定
+        if (record.isDir) return "folder";
+        auto meta = getCachedMeta(path);
+        return meta.isFolder ? "folder" : "file";
     } else if (role == RatingRole) {
         return getCachedMeta(path).rating;
     } else if (role == ColorRole) {
@@ -1889,10 +1892,15 @@ void ContentPanel::search(const QString& query) {
     
     std::vector<ItemRecord> records;
     for (const QString& p : paths) {
-        if (!p.isEmpty() && QFileInfo::exists(p)) {
+        // 2026-06-xx 物理修复：搜索结果支持“幽灵项”展示，由 MetadataManager 补全 isDir 属性
+        if (!p.isEmpty()) {
             ItemRecord r;
             r.path = QDir::toNativeSeparators(p);
-            r.isDir = QFileInfo(p).isDir();
+            if (QFileInfo::exists(p)) {
+                r.isDir = QFileInfo(p).isDir();
+            } else {
+                r.isDir = MetadataManager::instance().getMeta(p.toStdWString()).isFolder;
+            }
             records.push_back(r);
         }
     }
@@ -1997,12 +2005,17 @@ void ContentPanel::loadCategory(int categoryId) {
 
         if (!path.empty()) {
             QString qPath = QString::fromStdWString(path);
-            if (QFileInfo::exists(qPath)) {
-                ItemRecord r;
-                r.path = QDir::toNativeSeparators(qPath);
+            bool exists = QFileInfo::exists(qPath);
+            // 2026-06-xx 物理加固：支持“幽灵项”展示，即便物理文件失效也载入记录，由 TypeRole 进行后续元数据判定
+            ItemRecord r;
+            r.path = QDir::toNativeSeparators(qPath);
+            if (exists) {
                 r.isDir = QFileInfo(qPath).isDir();
-                allRecords.push_back(r);
+            } else {
+                // 如果文件不存在，则从 MetadataManager 恢复其文件夹属性
+                r.isDir = MetadataManager::instance().getMeta(path).isFolder;
             }
+            allRecords.push_back(r);
         }
     }
 
@@ -2024,11 +2037,15 @@ void ContentPanel::loadPaths(const QStringList& paths) {
  
     std::vector<ItemRecord> records;
     for (const QString& p : paths) {
-        // 2026-06-xx 物理过滤：系统分类加载时强制校验物理存在性
-        if (!p.isEmpty() && QFileInfo::exists(p)) {
+        // 2026-06-xx 物理修复：系统分类加载时不再直接丢弃物理失效项，支持“幽灵项”显示以便用户对账
+        if (!p.isEmpty()) {
             ItemRecord r;
             r.path = QDir::toNativeSeparators(p);
-            r.isDir = QFileInfo(p).isDir();
+            if (QFileInfo::exists(p)) {
+                r.isDir = QFileInfo(p).isDir();
+            } else {
+                r.isDir = MetadataManager::instance().getMeta(p.toStdWString()).isFolder;
+            }
             records.push_back(r);
         }
     }
@@ -2245,8 +2262,8 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     QString path = index.data(PathRole).toString(); 
     QFileInfo info(path); 
     QString ext;
-    if (type == "category") {
-        ext = "DIR"; // 2026-06-xx 物理校准：子分类强制显示为文件夹徽章
+    if (type == "category" || type == "folder") {
+        ext = "DIR"; // 2026-06-xx 物理校准：分类与文件夹均强制显示为 "DIR" 徽章
     } else {
         ext = info.isDir() ? "DIR" : info.suffix().toUpper(); 
     }
