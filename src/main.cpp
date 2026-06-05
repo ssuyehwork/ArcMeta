@@ -18,6 +18,7 @@
 
 
 #include "meta/MetadataManager.h"
+#include "meta/CategoryRepo.h"
 #include "mft/MftReader.h"
 #include "core/CoreController.h"
 

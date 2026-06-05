@@ -1384,7 +1384,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                             MetadataManager::instance().setEncrypted(dest.toStdWString(), true); 
                         } 
                     } 
-                    QMetaObject::invokeMethod(qApp, [self, currentDir]() { 
+                    QMetaObject::invokeMethod(QCoreApplication::instance(), [self, currentDir]() {
                         if (self && self->m_currentPath == currentDir) self->loadDirectory(currentDir, self->m_isRecursive); 
                         ToolTipOverlay::instance()->showText(QCursor::pos(), "加密任务处理完成", 1500, QColor("#2ecc71")); 
                     }); 
@@ -1656,7 +1656,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         });
                     }
 
-                    QMetaObject::invokeMethod(qApp, [weakThis, weakProgress]() {
+                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, weakProgress]() {
                         if (weakProgress) {
                             weakProgress->accept();
                             weakProgress->deleteLater();
@@ -1859,7 +1859,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         scanDir(path, recursive); 
         if (!panelPtr) return; 
  
-        QMetaObject::invokeMethod(qApp, [panelPtr, path, allItems]() { 
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems]() {
             if (panelPtr && panelPtr->m_currentPath == path) { 
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_isLoading = false;
@@ -2117,7 +2117,7 @@ void ContentPanel::recalculateAndEmitStats() {
         }
         if (stats.noTagCount > 0) stats.tagCounts["__none__"] = stats.noTagCount;
 
-        QMetaObject::invokeMethod(qApp, [weakThis, stats]() {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, stats]() {
             if (weakThis) {
                 emit weakThis->directoryStatsReady(stats.ratingCounts, stats.colorCounts, stats.tagCounts,
                                                  stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts);

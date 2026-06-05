@@ -98,7 +98,7 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
     });
 
     // 2026-06-xx 物理加固：监听程序退出信号，确保内存中的元数据变更落盘
-    connect(qApp, &QCoreApplication::aboutToQuit, [this]() {
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, [this]() {
         qDebug() << "[Metadata] 程序退出前强制保存所有脏数据...";
         std::vector<std::wstring> paths;
         {

@@ -56,7 +56,7 @@ namespace ArcMeta {
 
 MainWindow::~MainWindow() {
     if (m_resizeFilter) {
-        qApp->removeEventFilter(m_resizeFilter);
+        QCoreApplication::instance()->removeEventFilter(m_resizeFilter);
     }
 }
 

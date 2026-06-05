@@ -3,6 +3,10 @@
 #include <QDataStream>
 #include <shared_mutex>
 #include <QDebug>
+#include <QTimer>
+#include <QCoreApplication>
+#include <QApplication>
+#include <QMetaObject>
 
 namespace ArcMeta {
 
@@ -73,13 +77,13 @@ void AllFrnManager::registerFrn(const std::wstring& frn, const std::wstring& pat
     // 2026-06-xx 性能优化：引入异步防抖保存，彻底解决高频注册时的 IO 假死
     if (!s_saveTimer) {
         // 在主线程初始化计时器
-        QMetaObject::invokeMethod(qApp, []() {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), []() {
             if (!s_saveTimer) {
-                s_saveTimer = new QTimer(qApp);
+                s_saveTimer = new QTimer(QCoreApplication::instance());
                 s_saveTimer->setSingleShot(true);
                 s_saveTimer->setInterval(3000);
                 QObject::connect(s_saveTimer, &QTimer::timeout, []() { saveToDisk(); });
-                QObject::connect(qApp, &QCoreApplication::aboutToQuit, []() { saveToDisk(); });
+                QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, []() { saveToDisk(); });
             }
             s_saveTimer->start();
         }, Qt::QueuedConnection);
