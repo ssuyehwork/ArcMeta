@@ -110,7 +110,18 @@ void UsnWatcher::run() {
         }
 
         if (!updateBatch.empty()) {
-            MftReader::instance().updateEntriesFromUsnBatch(updateBatch, m_volume);
+            // 2026-06-xx 工业级 UI 饥饿修复：
+            // 如果批次过大，进行分片处理，并在分片间强制释放写锁，给 GUI 线程留出渲染时间
+            const size_t chunkSize = 1000;
+            for (size_t i = 0; i < updateBatch.size(); i += chunkSize) {
+                if (m_stopRequested.load()) break;
+                size_t end = (std::min)(i + chunkSize, updateBatch.size());
+                std::vector<USN_RECORD_V2*> chunk(updateBatch.begin() + i, updateBatch.begin() + end);
+                MftReader::instance().updateEntriesFromUsnBatch(chunk, m_volume);
+                
+                // 强制释放 CPU 时间片，解决长时挂起（休眠）唤醒后的“未响应”现象
+                QThread::msleep(5); 
+            }
         }
 
         // 更新起始 USN 为本次读取后的 NextUsn

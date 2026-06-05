@@ -81,12 +81,32 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
         std::vector<std::wstring> paths;
         {
             std::unique_lock<std::shared_mutex> lock(m_mutex);
-            for (std::unordered_set<std::wstring>::const_iterator it = m_dirtyPaths.begin(); it != m_dirtyPaths.end(); ++it) {
-                paths.push_back(*it);
+            for (const auto& p : m_dirtyPaths) {
+                paths.push_back(p);
             }
             m_dirtyPaths.clear();
         }
-        for (size_t i = 0; i < paths.size(); ++i) persistAsync(paths[i]);
+        
+        // 2026-06-xx 性能优化：持久化任务切入后台线程池，杜绝主线程 I/O 挂起
+        if (!paths.empty()) {
+            (void)QtConcurrent::run([this, paths]() {
+                for (const auto& p : paths) {
+                    persistAsync(p);
+                }
+            });
+        }
+    });
+
+    // 2026-06-xx 物理加固：监听程序退出信号，确保内存中的元数据变更落盘
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, [this]() {
+        qDebug() << "[Metadata] 程序退出前强制保存所有脏数据...";
+        std::vector<std::wstring> paths;
+        {
+            std::unique_lock<std::shared_mutex> lock(m_mutex);
+            for (const auto& p : m_dirtyPaths) paths.push_back(p);
+            m_dirtyPaths.clear();
+        }
+        for (const auto& p : paths) persistAsync(p);
     });
 }
 

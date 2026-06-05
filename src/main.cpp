@@ -18,6 +18,7 @@
 
 
 #include "meta/MetadataManager.h"
+#include "meta/CategoryRepo.h"
 #include "mft/MftReader.h"
 #include "core/CoreController.h"
 
@@ -72,7 +73,9 @@ int main(int argc, char *argv[]) {
     // 确保其内部的 QTimer 等对象归属于主线程，避免跨线程创建导致的行为不确定性
     qint64 metaInitStart = QDateTime::currentMSecsSinceEpoch();
     ArcMeta::MetadataManager::instance();
-    qDebug() << "[PERF] MetadataManager 单例预热耗时:" << (QDateTime::currentMSecsSinceEpoch() - metaInitStart) << "ms";
+    // 2026-06-xx 物理修复：在主线程预热 CategoryRepo，解决 QTimer 跨线程启动导致的内存与磁盘不一致
+    ArcMeta::CategoryRepo::initialize();
+    qDebug() << "[PERF] MetadataManager/CategoryRepo 单例预热耗时:" << (QDateTime::currentMSecsSinceEpoch() - metaInitStart) << "ms";
 
     // 3. 简化启动：直接显示主窗口
     // 2026-04-13 按用户要求移除 LoadingWindow 和 initializeHotIcons()

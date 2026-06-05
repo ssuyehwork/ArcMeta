@@ -154,6 +154,7 @@ private:
     QHash<QString, QIcon>  m_icon_cache;
 
     bool m_isInitialized = false;
+    std::atomic<bool> m_is_compacting{false}; // 标识是否处于碎片整理中
     std::atomic<bool> m_is_saving{false};   // 防止并发存盘导致的文件损坏与性能竞争
     std::atomic<bool> m_is_clearing{false}; // 标识是否处于异步清理过程中
     
@@ -167,6 +168,17 @@ private:
     size_t   m_dead_count = 0;
     size_t   m_wasted_string_bytes = 0;
     std::vector<uint32_t> m_sorted_indices;
+
+    // 2026-06-xx 工业级元数据节流队列
+    struct MetadataTask {
+        int index;
+        uint64_t frn;
+        std::wstring volume;
+    };
+    std::vector<MetadataTask> m_metadata_queue;
+    std::mutex       m_queueMutex;
+    std::atomic<int> m_active_metadata_tasks{0};
+    void processMetadataQueue();
 };
 
 } // namespace ArcMeta

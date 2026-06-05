@@ -18,6 +18,12 @@ struct ItemRecord {
     int categoryId = 0;
     QString categoryName;
     QString categoryColor;
+
+    // 2026-06-xx 物理对标：注入核心元数据，杜绝 UI 渲染时的同步 I/O
+    int rating = 0;
+    QString color;
+    QStringList tags;
+    std::string fileId;
 };
 
 /**

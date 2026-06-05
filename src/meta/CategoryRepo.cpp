@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QTimer>
 #include <QRecursiveMutex>
+#include <QMetaObject>
 #include <algorithm>
 #include <map>
 #include <set>
@@ -652,6 +653,14 @@ std::vector<std::string> getFileIdsRecursive(int categoryId) {
 }
 
 } // namespace ScchCategoryEngine
+
+void CategoryRepo::saveImmediately() {
+    CategoryCacheManager::instance().saveImmediately();
+}
+
+void CategoryRepo::initialize() {
+    (void)CategoryCacheManager::instance();
+}
 
 // CategoryRepo Implementation
 std::vector<Category> CategoryRepo::getAll() { return ScchCategoryEngine::getAll(); }
