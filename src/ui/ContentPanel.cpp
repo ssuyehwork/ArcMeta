@@ -2310,9 +2310,27 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     bool shouldShowRating = (rating > 0) || isSelected; 
  
     if (shouldShowRating) { 
-        QColor starColor = colorName.isEmpty() ? QColor("#CCCCCC") : UiHelper::parseColorName(colorName).darker(700);
-        QColor emptyStarColor = colorName.isEmpty() ? QColor("#888888") : UiHelper::parseColorName(colorName).darker(400);
-        if (!colorName.isEmpty()) emptyStarColor.setAlpha(180);
+        QColor bgColor = colorName.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorName);
+        
+        // 2026-06-xx 物理修复：采用感知亮度对比色计算，确保在深色标记（如灰色/深蓝）下星星依然清晰可见
+        double luminance = 0.0;
+        if (bgColor.isValid() && bgColor.alpha() > 0) {
+            luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
+        }
+
+        QColor starColor, emptyStarColor;
+        if (colorName.isEmpty()) {
+            starColor      = QColor("#CCCCCC");
+            emptyStarColor = QColor("#888888");
+        } else if (luminance < 0.5) {
+            // 背景较暗 -> 使用亮色星
+            starColor      = QColor("#FFFFFF");
+            emptyStarColor = QColor(255, 255, 255, 160);
+        } else {
+            // 背景较亮 -> 使用暗色星
+            starColor      = QColor("#1A1A1A");
+            emptyStarColor = QColor(0, 0, 0, 140);
+        }
 
         // 2026-xx-xx 深度修复：调高禁止图标与空心星亮度，确保在深色卡片背景下清晰可见 
         QIcon banIcon = UiHelper::getIcon("no_color", starColor, m.banRect.width()); 

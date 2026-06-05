@@ -861,14 +861,32 @@ void CategoryPanel::initUi() {
         
         (void)QThreadPool::globalInstance()->start([this, paths, targetCatId, progress]() {
             
-            // 2026-06-xx 物理加固：路径预处理，排序并剔除属于其他路径子集的冗余路径，防止重复创建分类
-            QStringList sortedPaths = paths;
-            std::sort(sortedPaths.begin(), sortedPaths.end());
+            // 2026-06-xx 物理加固：路径清洗与归一化
+            auto cleanPath = [](const QString& p) {
+                QString cp = QDir::toNativeSeparators(QDir::cleanPath(p));
+                // 移除末尾斜杠，但保留盘符根目录（如 C:\）
+                if (cp.length() > 3 && (cp.endsWith('\\') || cp.endsWith('/'))) cp.chop(1);
+                else if (cp.length() == 2 && cp.endsWith(':')) cp += '\\'; // 盘符补全
+#ifdef Q_OS_WIN
+                return cp.toLower();
+#else
+                return cp;
+#endif
+            };
+
+            QStringList cleanedPaths;
+            for(const QString& p : paths) cleanedPaths << cleanPath(p);
+            cleanedPaths.removeDuplicates();
+            cleanedPaths.sort();
+
+            // 剔除冗余子路径
             QStringList filteredPaths;
-            for (const QString& p : sortedPaths) {
+            for (const QString& p : cleanedPaths) {
                 bool isSub = false;
                 for (const QString& existing : filteredPaths) {
-                    if (p.startsWith(existing + "/") || p.startsWith(existing + "\\") || p == existing) {
+                    QString prefix = existing;
+                    if (!prefix.endsWith('\\') && !prefix.endsWith('/')) prefix += '\\';
+                    if (p.startsWith(prefix) || p == existing) {
                         isSub = true;
                         break;
                     }
@@ -883,8 +901,8 @@ void CategoryPanel::initUi() {
                 if (info.isDir()) {
                     QDirIterator it(path, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
                     while (it.hasNext()) { 
-                        QString p = it.next();
-                        if (QFileInfo(p).fileName() == "metadata.scch") continue; // 2026-06-xx 物理隔离
+                        it.next();
+                        if (it.fileName() == "metadata.scch") continue;
                         totalItems++; 
                     }
                 }
@@ -896,27 +914,14 @@ void CategoryPanel::initUi() {
                 progress->setValue(0);
             });
 
-            auto allCats = CategoryRepo::getAll();
             int currentTask = 0;
-
-            // 2026-06-xx 物理加固：统一路径清洗函数，确保 Map 键名一致性
-            // 2026-06-xx 逻辑校准：Windows 下强制转换为小写，防止因驱动器盘符或路径大小写不一致导致的匹配失效
-            auto cleanNative = [](const QString& p) {
-                QString cp = QDir::toNativeSeparators(QDir::cleanPath(p));
-#ifdef Q_OS_WIN
-                return cp.toLower();
-#else
-                return cp;
-#endif
-            };
 
             // 辅助 Lambda：确保分类存在，不存在则创建
             auto ensureCategory = [&](const std::wstring& name, int parentId) -> int {
-                // 2026-06-xx 修复：不再信赖初始快照 allCats，改为直接通过 CategoryRepo::getAll() 执行实时双重校验，确保导入期间的幂等性
-                auto latestCats = CategoryRepo::getAll();
-                for (const auto& c : latestCats) {
-                    if (c.parentId == parentId && c.name == name) return c.id;
-                }
+                // 2026-06-xx 修复：不再信赖初始快照，通过 CategoryRepo 提供的线程安全高效查找接口执行实时校验
+                int existingId = CategoryRepo::findCategoryId(parentId, name);
+                if (existingId > 0) return existingId;
+
                 Category cat;
                 cat.name = name;
                 cat.parentId = parentId;
@@ -928,28 +933,6 @@ void CategoryPanel::initUi() {
             };
 
             QMap<QString, int> pathIdMap;
-
-            // 2026-06-xx 物理加固：增加向上递归查找 ParentId 的安全函数，杜绝因路径归一化偏差导致的“根部逃逸”
-            auto findParentId = [&](const QString& nativeParent, int rootId) -> int {
-                if (pathIdMap.contains(nativeParent)) return pathIdMap[nativeParent];
-                
-                // 尝试向上逐级查找，直到找到最近的已记录父分类
-                QString current = nativeParent;
-                while (true) {
-                    int lastSep = current.lastIndexOf(QDir::separator());
-                    // 2026-06-xx 修复：当触及根目录（如 C:\）时，lastIndexOf 仍可能返回 2，需判断缩减前后长度防止死循环
-                    if (lastSep <= 0) break;
-                    
-                    QString next = current.left(lastSep);
-                    if (next.endsWith(':')) next += QDir::separator();
-                    
-                    if (next.length() >= current.length()) break; // 长度不再缩减，安全退出
-                    current = next;
-
-                    if (pathIdMap.contains(current)) return pathIdMap[current];
-                }
-                return rootId;
-            };
 
             // 辅助：从文件夹中提取代表性颜色
             auto extractFolderColor = [&](const QString& dirPath) {
@@ -1017,11 +1000,16 @@ void CategoryPanel::initUi() {
 
             for (const QString& rootPath : filteredPaths) {
                 QFileInfo rootInfo(rootPath);
-                QString nativeRoot = cleanNative(rootPath);
+                QString nativeRoot = cleanPath(rootPath);
                 
                 if (rootInfo.isDir()) {
                     // 文件夹逻辑：自动创建分类节点
-                    int rootCatId = ensureCategory(rootInfo.fileName().toStdWString(), targetCatId);
+                    QString folderName = rootInfo.fileName();
+                    if (folderName.isEmpty()) {
+                        folderName = rootInfo.absolutePath();
+                        if (folderName.endsWith('\\') || folderName.endsWith('/')) folderName.chop(1);
+                    }
+                    int rootCatId = ensureCategory(folderName.toStdWString(), targetCatId);
                     pathIdMap[nativeRoot] = rootCatId;
                     
                     // 2026-06-xx 按照用户要求：顶层文件夹入库时同样执行颜色解析
@@ -1033,10 +1021,23 @@ void CategoryPanel::initUi() {
                     while (it.hasNext()) {
                         QString itemPath = it.next();
                         QFileInfo info = it.fileInfo();
-                        QString nativePath = cleanNative(itemPath);
-                        QString nativeParent = cleanNative(info.absolutePath());
+                        QString nativePath = cleanPath(itemPath);
+                        QString nativeParent = cleanPath(info.absolutePath());
                         
-                        int currentParentId = findParentId(nativeParent, rootCatId);
+                        // 向上递归查找最近的已注册父分类 ID，杜绝层级丢失
+                        int currentParentId = rootCatId;
+                        QString p = nativeParent;
+                        while (!p.isEmpty()) {
+                            if (pathIdMap.contains(p)) {
+                                currentParentId = pathIdMap[p];
+                                break;
+                            }
+                            int lastIdx = std::max(p.lastIndexOf('\\'), p.lastIndexOf('/'));
+                            if (lastIdx <= 0) break;
+                            p = p.left(lastIdx);
+                            // 如果回退到了盘符根部 (如 C:)，则补全斜杠
+                            if (p.length() == 2 && p.endsWith(':')) p += '\\';
+                        }
 
                         if (info.isDir()) {
                             // 创建子分类并记录 ID

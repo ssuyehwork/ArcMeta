@@ -35,6 +35,7 @@ class CategoryRepo {
 public:
     static bool add(Category& cat);
     static bool update(const Category& cat);
+    static int findCategoryId(int parentId, const std::wstring& name);
     static bool remove(int id);
     static bool reorder(int parentId, bool ascending);
     static bool reorderAll(bool ascending);
