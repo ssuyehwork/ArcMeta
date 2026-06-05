@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <QRecursiveMutex>
 #include <QMetaObject>
+#include <QCoreApplication>
 #include <algorithm>
 #include <map>
 #include <set>

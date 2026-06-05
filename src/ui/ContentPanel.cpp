@@ -38,6 +38,7 @@
 #include <QDesktopServices> 
 #include <QUrl> 
 #include <QApplication> 
+#include <QCoreApplication>
 #include <QProcess> 
 #include <QClipboard> 
 #include <QMimeData> 
