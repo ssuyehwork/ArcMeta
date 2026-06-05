@@ -902,6 +902,24 @@ void CategoryPanel::initUi() {
 
             QMap<QString, int> pathIdMap;
 
+            // 辅助：从文件夹中提取代表性颜色
+            auto extractFolderColor = [&](const QString& dirPath) {
+                QDir dir(dirPath);
+                QFileInfoList files = dir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                for (const auto& fi : files) {
+                    if (UiHelper::isGraphicsFile(fi.suffix().toLower())) {
+                        auto palette = UiHelper::extractPalette(fi.absoluteFilePath());
+                        if (!palette.isEmpty()) {
+                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                            std::wstring wPath = QDir::toNativeSeparators(dirPath).toStdWString();
+                            MetadataManager::instance().setColor(wPath, dominant.name().toUpper().toStdWString());
+                            MetadataManager::instance().setPalettes(wPath, palette);
+                            return;
+                        }
+                    }
+                }
+            };
+
             // 辅助处理函数：执行物理入库并归类
             auto processItem = [&](const QString& itemPath, int catId) {
                 QFileInfo info(itemPath);
@@ -952,6 +970,10 @@ void CategoryPanel::initUi() {
                     int rootCatId = ensureCategory(rootInfo.fileName().toStdWString(), targetCatId);
                     pathIdMap[nativeRoot] = rootCatId;
                     
+                    // 2026-06-xx 按照用户要求：顶层文件夹入库时同样执行颜色解析
+                    MetadataManager::instance().syncPhysicalMetadata(rootInfo.absoluteFilePath().toStdWString());
+                    extractFolderColor(rootPath);
+
                     // 物理递归：1:1 复刻文件夹层级到分类树
                     QDirIterator it(rootPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
                     while (it.hasNext()) {
@@ -968,6 +990,8 @@ void CategoryPanel::initUi() {
                             pathIdMap[nativePath] = newId;
                             // 2026-06-xx 物理同步：文件夹入库后同样同步元数据
                             MetadataManager::instance().syncPhysicalMetadata(info.absoluteFilePath().toStdWString());
+                            // 2026-06-xx 按照用户要求：文件夹同样需要自动执行颜色解析
+                            extractFolderColor(itemPath);
                         } else {
                             if (info.fileName() == "metadata.scch") continue; // 2026-06-xx 物理隔离
                             // 文件入库并关联到当前层级分类

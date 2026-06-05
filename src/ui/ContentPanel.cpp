@@ -1462,6 +1462,21 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                 }
                             }
                         } else if (info.isDir()) {
+                            // 2026-06-xx 按照用户要求：文件夹项在扫描时同样执行颜色解析 (基于内容)
+                            QDir subDir(fullPath);
+                            QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                            for (const auto& sf : subFiles) {
+                                if (UiHelper::isGraphicsFile(sf.suffix().toLower())) {
+                                    auto palette = UiHelper::extractPalette(sf.absoluteFilePath());
+                                    if (!palette.isEmpty()) {
+                                        QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                        scchLoader.setItemColor(fileName.toStdWString(), dominant.name().toUpper().toStdWString());
+                                        MetadataManager::instance().setPalettes(fullPath.toStdWString(), palette);
+                                        break;
+                                    }
+                                }
+                            }
+
                             // 递归处理子目录
                             scanTask(fullPath);
                         }
@@ -1477,6 +1492,21 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         AllFrnManager::registerFrn(metaFrn, p.toStdWString());
                     }
                 };
+
+                // 3. 处理起始文件夹自身的颜色解析
+                QDir startDir(path);
+                QFileInfoList startFiles = startDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                for (const auto& sf : startFiles) {
+                    if (UiHelper::isGraphicsFile(sf.suffix().toLower())) {
+                        auto palette = UiHelper::extractPalette(sf.absoluteFilePath());
+                        if (!palette.isEmpty()) {
+                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                            MetadataManager::instance().setColor(path.toStdWString(), dominant.name().toUpper().toStdWString());
+                            MetadataManager::instance().setPalettes(path.toStdWString(), palette);
+                            break;
+                        }
+                    }
+                }
 
                 scanTask(path);
 

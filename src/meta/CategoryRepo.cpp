@@ -1,6 +1,8 @@
 #include "CategoryRepo.h"
 #include <QDataStream>
 #include <QDateTime>
+#include <QDate>
+#include <QDir>
 #include <QFile>
 #include <QTimer>
 #include <algorithm>
@@ -11,6 +13,14 @@
 #include "MetadataManager.h"
 
 namespace ArcMeta {
+
+static std::wstring normalizePath(const std::wstring& path) {
+    if (path.empty()) return L"";
+    QString qp = QDir::toNativeSeparators(QDir::cleanPath(QString::fromStdWString(path)));
+    if (qp.length() == 2 && qp.endsWith(':')) qp += '\\';
+    if (qp.length() >= 2 && qp[1] == ':') qp[0] = qp[0].toUpper();
+    return qp.toStdWString();
+}
 
 /**
  * @brief CategoryItemRecord Structure
@@ -99,53 +109,122 @@ public:
         }
     }
 
-    void markSysCountsDirty() {
-        m_sysCountsDirty = true;
-    }
+    void markSysCountsDirty() { m_sysCountsDirty = true; }
+    void markCatCountsDirty() { m_catCountsDirty = true; }
 
     QMap<QString, int> getSystemCounts() {
         ensureLoaded();
-        if (!m_sysCountsDirty) return m_sysCountsCache;
+        if (m_sysCountsDirty || m_lastCountDate != QDate::currentDate()) {
+            fullRecount();
+        }
+        return m_sysCountsCache;
+    }
 
-        QMap<QString, int> counts;
-        int all = 0, today = 0, yesterday = 0, recentlyVisited = 0, untagged = 0;
+    void updateFidCategorized(const std::string& fid, int delta) {
+        if (fid.empty()) return;
+        int oldCount = m_fidCategorizedCount[fid];
+        int newCount = std::max(0, oldCount + delta);
+        m_fidCategorizedCount[fid] = newCount;
+
+        if ((oldCount == 0 && newCount > 0) || (oldCount > 0 && newCount == 0)) {
+            std::wstring path = MetadataManager::instance().getPathByFid(fid);
+            if (!path.empty()) {
+                updateIncremental(path);
+            }
+        }
+        markCatCountsDirty();
+    }
+
+    void fullRecount() {
+        m_sysCountsCache.clear();
+        m_membershipMap.clear();
+
+        int all = 0, today = 0, yesterday = 0, recently = 0, untagged = 0, uncategorized = 0;
 
         double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
         double startOfToday = static_cast<double>(QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch());
         double startOfYesterday = startOfToday - 86400000.0;
 
-        std::unordered_set<std::string> categorizedIds;
-        for (const auto& r : m_records) categorizedIds.insert(r.fileId128);
-
-        MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
+        MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
             if (meta.isFolder) return;
+
+            uint8_t bits = 0;
+            bits |= 1; // All
             all++;
-            if (meta.tags.isEmpty()) untagged++;
-            if (meta.ctime >= startOfToday || meta.mtime >= startOfToday) today++;
+
+            if (meta.tags.isEmpty()) { bits |= 16; untagged++; }
+            if (meta.ctime >= startOfToday || meta.mtime >= startOfToday) { bits |= 2; today++; }
             if ((meta.ctime >= startOfYesterday || meta.mtime >= startOfYesterday) &&
-                (meta.ctime < startOfToday && meta.mtime < startOfToday)) yesterday++;
-            if (meta.atime >= now - 86400000.0) recentlyVisited++;
+                (meta.ctime < startOfToday && meta.mtime < startOfToday)) { bits |= 4; yesterday++; }
+            if (meta.atime >= now - 86400000.0) { bits |= 8; recently++; }
+
+            if (m_fidCategorizedCount[meta.fileId128] == 0) { bits |= 32; uncategorized++; }
+
+            m_membershipMap[path] = bits;
         });
 
-        counts["all"] = all;
-        counts["today"] = today;
-        counts["yesterday"] = yesterday;
-        counts["recently_visited"] = recentlyVisited;
-        counts["untagged"] = untagged;
+        m_sysCountsCache["all"] = all;
+        m_sysCountsCache["today"] = today;
+        m_sysCountsCache["yesterday"] = yesterday;
+        m_sysCountsCache["recently_visited"] = recently;
+        m_sysCountsCache["untagged"] = untagged;
+        m_sysCountsCache["uncategorized"] = uncategorized;
+        m_sysCountsCache["trash"] = 0;
 
-        // 计算未分类
-        int uncategorizedCount = 0;
-        MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
-            if (!meta.isFolder && categorizedIds.find(meta.fileId128) == categorizedIds.end()) {
-                uncategorizedCount++;
-            }
-        });
-        counts["uncategorized"] = uncategorizedCount;
-        counts["trash"] = 0;
-
-        m_sysCountsCache = counts;
         m_sysCountsDirty = false;
-        return counts;
+        m_lastCountDate = QDate::currentDate();
+    }
+
+    void updateIncremental(const std::wstring& path) {
+        if (path == L"__RELOAD_ALL__") {
+            fullRecount();
+            return;
+        }
+
+        if (m_sysCountsDirty) return;
+
+        if (m_lastCountDate != QDate::currentDate()) {
+            fullRecount();
+            return;
+        }
+
+        RuntimeMeta meta = MetadataManager::instance().getMeta(path);
+
+        double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
+        double startOfToday = static_cast<double>(QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch());
+        double startOfYesterday = startOfToday - 86400000.0;
+
+        uint8_t newBits = 0;
+        if (!meta.isFolder) {
+            newBits |= 1;
+            if (meta.tags.isEmpty()) newBits |= 16;
+            if (meta.ctime >= startOfToday || meta.mtime >= startOfToday) newBits |= 2;
+            if ((meta.ctime >= startOfYesterday || meta.mtime >= startOfYesterday) &&
+                (meta.ctime < startOfToday && meta.mtime < startOfToday)) newBits |= 4;
+            if (meta.atime >= now - 86400000.0) newBits |= 8;
+            if (m_fidCategorizedCount[meta.fileId128] == 0) newBits |= 32;
+        }
+
+        uint8_t oldBits = 0;
+        auto it = m_membershipMap.find(path);
+        if (it != m_membershipMap.end()) oldBits = it->second;
+
+        if (newBits == oldBits) return;
+
+        auto updateCount = [&](uint8_t bit, const QString& key) {
+            if ((newBits & bit) && !(oldBits & bit)) m_sysCountsCache[key]++;
+            else if (!(newBits & bit) && (oldBits & bit)) m_sysCountsCache[key]--;
+        };
+
+        updateCount(1, "all");
+        updateCount(2, "today");
+        updateCount(4, "yesterday");
+        updateCount(8, "recently_visited");
+        updateCount(16, "untagged");
+        updateCount(32, "uncategorized");
+
+        if (newBits == 0) m_membershipMap.erase(path);
+        else m_membershipMap[path] = newBits;
     }
 
     void saveImmediately() {
@@ -163,9 +242,8 @@ private:
             saveToDisk();
         });
 
-        // 监听元数据变更以失效计数缓存
-        connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this]() {
-            markSysCountsDirty();
+        connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
+            updateIncremental(path.toStdWString());
         });
     }
 
@@ -196,6 +274,7 @@ private:
         }
 
         m_records.clear();
+        m_fidCategorizedCount.clear();
         for (uint32_t i = 0; i < header.itemCount; ++i) {
             CategoryItemRecord r;
             if (header.version >= 4) {
@@ -210,7 +289,10 @@ private:
                 r.fileId128 = fid.toStdString();
             }
             m_records.push_back(r);
+            if (!r.fileId128.empty()) m_fidCategorizedCount[r.fileId128]++;
         }
+        m_catCountsDirty = true;
+        m_sysCountsDirty = true;
     }
 
     void saveToDisk() {
@@ -242,9 +324,16 @@ private:
     bool m_dirty;
     QTimer* m_saveTimer;
 
-    // 系统分类增量计数缓存
+    // 系统分类增量计数缓存与状态
     mutable QMap<QString, int> m_sysCountsCache;
     mutable bool m_sysCountsDirty = true;
+    std::unordered_map<std::wstring, uint8_t> m_membershipMap;
+    std::unordered_map<std::string, int> m_fidCategorizedCount;
+    QDate m_lastCountDate;
+
+    // 用户分类计数缓存
+    mutable QMap<int, int> m_catCountsCache;
+    mutable bool m_catCountsDirty = true;
 };
 
 namespace ScchCategoryEngine {
@@ -301,11 +390,20 @@ bool remove(int id) {
         CategoryCacheManager::instance().markDirty();
     }
 
-    auto itRec = std::remove_if(records.begin(), records.end(), [&](const CategoryItemRecord& r) {
-        return std::find(removeIds.begin(), removeIds.end(), r.categoryId) != removeIds.end();
-    });
-    if (itRec != records.end()) {
-        records.erase(itRec, records.end());
+    std::vector<CategoryItemRecord> keptRecords;
+    bool changed = false;
+    std::unordered_set<int> removeIdSet(removeIds.begin(), removeIds.end());
+
+    for (auto& r : records) {
+        if (removeIdSet.count(r.categoryId)) {
+             CategoryCacheManager::instance().updateFidCategorized(r.fileId128, -1);
+             changed = true;
+        } else {
+             keptRecords.push_back(r);
+        }
+    }
+    if (changed) {
+        records = keptRecords;
         CategoryCacheManager::instance().markDirty();
     }
 
@@ -345,7 +443,7 @@ bool addItemToCategory(int categoryId, const std::string& fileId128, const std::
         if (r.categoryId == categoryId && r.fileId128 == fileId128) return true;
     }
 
-    std::wstring finalPathHint = pathHint;
+    std::wstring finalPathHint = normalizePath(pathHint);
     if (finalPathHint.empty()) {
         finalPathHint = MetadataManager::instance().getPathByFid(fileId128);
     }
@@ -353,20 +451,20 @@ bool addItemToCategory(int categoryId, const std::string& fileId128, const std::
     records.push_back(CategoryItemRecord(categoryId, fileId128, finalPathHint,
         static_cast<double>(QDateTime::currentMSecsSinceEpoch())));
 
+    CategoryCacheManager::instance().updateFidCategorized(fileId128, 1);
     CategoryCacheManager::instance().markDirty();
-    CategoryCacheManager::instance().markSysCountsDirty();
     return true;
 }
 
 bool removeItemFromCategory(int categoryId, const std::string& fileId128) {
     auto& records = CategoryCacheManager::instance().records();
-    auto it = std::remove_if(records.begin(), records.end(), [&](const CategoryItemRecord& r) {
+    auto it = std::find_if(records.begin(), records.end(), [&](const CategoryItemRecord& r) {
         return r.categoryId == categoryId && r.fileId128 == fileId128;
     });
     if (it != records.end()) {
-        records.erase(it, records.end());
+        records.erase(it);
+        CategoryCacheManager::instance().updateFidCategorized(fileId128, -1);
         CategoryCacheManager::instance().markDirty();
-        CategoryCacheManager::instance().markSysCountsDirty();
         return true;
     }
     return false;
@@ -408,30 +506,26 @@ std::vector<CategoryItem> getItemsRecursive(int categoryId) {
 }
 
 std::vector<std::pair<int, int>> getCounts() {
-    auto& records = CategoryCacheManager::instance().records();
-    QMap<int, std::unordered_set<std::string>> catFileSets;
+    auto& inst = CategoryCacheManager::instance();
+    inst.ensureLoaded();
 
-    for (const auto& r : records) {
-        if (r.fileId128.empty()) continue;
-
-        // 物理存在性校验
-        std::wstring path = MetadataManager::instance().getPathByFid(r.fileId128);
-        if (path.empty() && !r.pathHint.empty()) {
-            // 尝试通过 pathHint 找回（如果文件还在原位但 FRN 变了，MetadataManager 会在此之后同步）
-            path = r.pathHint;
+    if (inst.m_catCountsDirty) {
+        inst.m_catCountsCache.clear();
+        QMap<int, std::unordered_set<std::string>> catFileSets;
+        for (const auto& r : inst.records()) {
+            if (r.fileId128.empty()) continue;
+            // 2026-06-xx 物理脱钩：不再在计数时执行耗时的物理校验，支持幽灵项显示
+            catFileSets[r.categoryId].insert(r.fileId128);
         }
-
-        if (!path.empty()) {
-            RuntimeMeta meta = MetadataManager::instance().getMeta(path);
-            if (!meta.isFolder) {
-                catFileSets[r.categoryId].insert(r.fileId128);
-            }
+        for (auto it = catFileSets.constBegin(); it != catFileSets.constEnd(); ++it) {
+            inst.m_catCountsCache[it.key()] = static_cast<int>(it.value().size());
         }
+        inst.m_catCountsDirty = false;
     }
 
     std::vector<std::pair<int, int>> res;
-    for (auto it = catFileSets.constBegin(); it != catFileSets.constEnd(); ++it) {
-        res.push_back(std::make_pair(it.key(), static_cast<int>(it.value().size())));
+    for (auto it = inst.m_catCountsCache.constBegin(); it != inst.m_catCountsCache.constEnd(); ++it) {
+        res.push_back({it.key(), it.value()});
     }
     return res;
 }
