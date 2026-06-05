@@ -85,9 +85,14 @@ namespace {
  * @brief 分类内存缓存管理器 (单例)
  * 2026-06-xx 架构升级：引入增量缓存与延迟写入，彻底解决 IO 性能瓶颈
  */
+#include <QRecursiveMutex>
+#include <QMutexLocker>
+
 class CategoryCacheManager : public QObject {
     Q_OBJECT
 public:
+    mutable QRecursiveMutex m_mutex;
+
     // 统计加速层 (公开以允许同文件引擎函数直接访问)
     mutable QMap<QString, int> m_sysCountsCache;
     mutable bool m_sysCountsDirty = true;
@@ -103,7 +108,12 @@ public:
         return inst;
     }
 
+    ~CategoryCacheManager() {
+        saveImmediately();
+    }
+
     void ensureLoaded() {
+        QMutexLocker locker(&m_mutex);
         if (m_loaded) return;
         loadFromDisk();
         m_loaded = true;
@@ -130,8 +140,9 @@ public:
         return m_sysCountsCache;
     }
 
-    void updateFidCategorized(const std::string& fid, int delta) {
+    void updateFidCategorized(const std::string& fid, int delta, int categoryId) {
         if (fid.empty()) return;
+        QMutexLocker locker(&m_mutex);
         int oldCount = m_fidCategorizedCount[fid];
         int newCount = std::max(0, oldCount + delta);
         m_fidCategorizedCount[fid] = newCount;
@@ -142,7 +153,13 @@ public:
                 updateIncremental(path);
             }
         }
-        markCatCountsDirty();
+
+        // 增量更新特定分类计数
+        if (!m_catCountsDirty) {
+            m_catCountsCache[categoryId] = std::max(0, m_catCountsCache[categoryId] + delta);
+        } else {
+            markCatCountsDirty();
+        }
     }
 
     void fullRecount() {
@@ -451,7 +468,7 @@ bool addItemToCategory(int categoryId, const std::string& fileId128, const std::
     records.push_back(CategoryItemRecord(categoryId, fileId128, finalPathHint,
         static_cast<double>(QDateTime::currentMSecsSinceEpoch())));
 
-    CategoryCacheManager::instance().updateFidCategorized(fileId128, 1);
+    CategoryCacheManager::instance().updateFidCategorized(fileId128, 1, categoryId);
     CategoryCacheManager::instance().markDirty();
     return true;
 }
@@ -463,7 +480,7 @@ bool removeItemFromCategory(int categoryId, const std::string& fileId128) {
     });
     if (it != records.end()) {
         records.erase(it);
-        CategoryCacheManager::instance().updateFidCategorized(fileId128, -1);
+        CategoryCacheManager::instance().updateFidCategorized(fileId128, -1, categoryId);
         CategoryCacheManager::instance().markDirty();
         return true;
     }
@@ -603,32 +620,11 @@ std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
 std::vector<std::pair<int, int>> CategoryRepo::getCounts() { return ScchCategoryEngine::getCounts(); }
 
 int CategoryRepo::getUniqueItemCount() {
-    auto& records = CategoryCacheManager::instance().records();
-    std::unordered_set<std::string> uniqueIds;
-    for (const auto& r : records) {
-        if (!r.fileId128.empty()) {
-            std::wstring path = MetadataManager::instance().getPathByFid(r.fileId128);
-            if (!path.empty()) {
-                RuntimeMeta meta = MetadataManager::instance().getMeta(path);
-                if (!meta.isFolder) uniqueIds.insert(r.fileId128);
-            }
-        }
-    }
-    return static_cast<int>(uniqueIds.size());
+    return CategoryCacheManager::instance().getSystemCounts().value("all", 0);
 }
 
 int CategoryRepo::getUncategorizedItemCount() {
-    auto& records = CategoryCacheManager::instance().records();
-    std::unordered_set<std::string> categorizedIds;
-    for (const auto& r : records) categorizedIds.insert(r.fileId128);
-
-    int count = 0;
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
-        if (!meta.isFolder && categorizedIds.find(meta.fileId128) == categorizedIds.end()) {
-            count++;
-        }
-    });
-    return count;
+    return CategoryCacheManager::instance().getSystemCounts().value("uncategorized", 0);
 }
 
 QMap<QString, int> CategoryRepo::getSystemCounts() {
