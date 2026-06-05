@@ -900,14 +900,21 @@ void CategoryPanel::initUi() {
             int currentTask = 0;
 
             // 2026-06-xx 物理加固：统一路径清洗函数，确保 Map 键名一致性
+            // 2026-06-xx 逻辑校准：Windows 下强制转换为小写，防止因驱动器盘符或路径大小写不一致导致的匹配失效
             auto cleanNative = [](const QString& p) {
-                return QDir::toNativeSeparators(QDir::cleanPath(p));
+                QString cp = QDir::toNativeSeparators(QDir::cleanPath(p));
+#ifdef Q_OS_WIN
+                return cp.toLower();
+#else
+                return cp;
+#endif
             };
 
             // 辅助 Lambda：确保分类存在，不存在则创建
             auto ensureCategory = [&](const std::wstring& name, int parentId) -> int {
-                // 2026-06-xx 修复：创建前执行更严格的“路径+名称”实时双重校验，防止并发下的同名冗余
-                for (const auto& c : allCats) {
+                // 2026-06-xx 修复：不再信赖初始快照 allCats，改为直接通过 CategoryRepo::getAll() 执行实时双重校验，确保导入期间的幂等性
+                auto latestCats = CategoryRepo::getAll();
+                for (const auto& c : latestCats) {
                     if (c.parentId == parentId && c.name == name) return c.id;
                 }
                 Category cat;
@@ -915,7 +922,6 @@ void CategoryPanel::initUi() {
                 cat.parentId = parentId;
                 cat.color = getDefaultCategoryColor();
                 if (CategoryRepo::add(cat)) {
-                    allCats.push_back(cat);
                     return cat.id;
                 }
                 return 0;
@@ -931,9 +937,15 @@ void CategoryPanel::initUi() {
                 QString current = nativeParent;
                 while (true) {
                     int lastSep = current.lastIndexOf(QDir::separator());
+                    // 2026-06-xx 修复：当触及根目录（如 C:\）时，lastIndexOf 仍可能返回 2，需判断缩减前后长度防止死循环
                     if (lastSep <= 0) break;
-                    current = current.left(lastSep);
-                    if (current.endsWith(':')) current += QDir::separator();
+                    
+                    QString next = current.left(lastSep);
+                    if (next.endsWith(':')) next += QDir::separator();
+                    
+                    if (next.length() >= current.length()) break; // 长度不再缩减，安全退出
+                    current = next;
+
                     if (pathIdMap.contains(current)) return pathIdMap[current];
                 }
                 return rootId;
