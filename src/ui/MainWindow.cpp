@@ -1257,6 +1257,10 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         AppConfig::instance().setValue("MainWindow/SplitterState", m_mainSplitter->saveState());
     }
     AppConfig::instance().sync();
+
+    // 2026-06-xx 物理加固：退出前强制所有分类数据落盘，彻底解决因防抖计时器导致的重启回滚问题
+    CategoryRepo::saveImmediately();
+
     QMainWindow::closeEvent(event);
 }
 

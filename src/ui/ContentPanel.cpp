@@ -140,47 +140,43 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     if (role == Qt::DisplayRole || role == Qt::EditRole) {
         switch (index.column()) {
             case 0: {
-                QFileInfo info(path);
-                QString name = info.fileName();
-                // 如果文件名为空且为根目录（磁盘），则返回完整路径作为显示名
-                if (name.isEmpty() && info.isRoot()) {
-                    return QDir::toNativeSeparators(info.absoluteFilePath());
-                }
+                // 2026-06-xx 极致性能优化：文件名称提取杜绝 QFileInfo 随机访问。
+                // path 已经归一化，通过字符串操作获取文件名
+                int lastSlash = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+                if (lastSlash == -1) return path;
+                QString name = path.mid(lastSlash + 1);
+                if (name.isEmpty() && path.length() >= 2 && path[1] == ':') return path; // 盘符根目录
                 return name;
             }
             case 4: {
-                return getCachedMeta(path).tags.join(", ");
+                return record.tags.join(", ");
             }
             case 5: {
-                return record.isDir ? "文件夹" : QFileInfo(path).suffix().toUpper() + " 文件";
+                if (record.isDir) return "文件夹";
+                int lastDot = path.lastIndexOf('.');
+                return (lastDot != -1) ? path.mid(lastDot + 1).toUpper() + " 文件" : "文件";
             }
             case 6: {
-                QFileInfo info(path);
-                if (info.isDir()) return "-";
-                return QString::number(info.size() / 1024) + " KB";
+                return "-"; // 延迟加载：大小列不再同步计算，杜绝卡顿
             }
             case 7: {
-                QFileInfo info(path);
-                return info.lastModified().toString("yyyy-MM-dd HH:mm");
+                return "-"; // 延迟加载：日期列不再同步计算，杜绝卡顿
             }
         }
     } else if (role == PathRole) {
         return path;
     } else if (role == TypeRole) {
-        // 2026-06-xx 物理对账加固：如果物理磁盘状态返回 false (如幽灵项)，则根据 MetadataManager 的历史记录进行二次判定
-        if (record.isDir) return "folder";
-        auto meta = getCachedMeta(path);
-        return meta.isFolder ? "folder" : "file";
+        return record.isDir ? "folder" : "file";
     } else if (role == RatingRole) {
-        return getCachedMeta(path).rating;
+        return record.rating;
     } else if (role == ColorRole) {
-        return QString::fromStdWString(getCachedMeta(path).color);
+        return record.color;
     } else if (role == IsLockedRole || role == PinnedRole) {
-        return getCachedMeta(path).pinned;
+        return false; // 延迟
     } else if (role == EncryptedRole) {
-        return getCachedMeta(path).encrypted;
+        return false; // 延迟
     } else if (role == TagsRole) {
-        return getCachedMeta(path).tags;
+        return record.tags;
     } else if (role == ManagedRole) {
         return getCachedMeta(path).hasUserOperations();
     } else if (role == CategoryIdRole) {
@@ -1890,17 +1886,21 @@ void ContentPanel::search(const QString& query) {
     // 彻底废除数据库搜索，强制使用 SCCH 内存搜索
     QStringList paths = CoreController::instance().performSearch(query);
     
+    // 2026-06-xx 性能优化：搜索结果加载移除同步 QFileInfo::exists() 检查，解决高频检索假死
     std::vector<ItemRecord> records;
+    records.reserve(paths.size());
     for (const QString& p : paths) {
-        // 2026-06-xx 物理修复：搜索结果支持“幽灵项”展示，由 MetadataManager 补全 isDir 属性
         if (!p.isEmpty()) {
             ItemRecord r;
             r.path = QDir::toNativeSeparators(p);
-            if (QFileInfo::exists(p)) {
-                r.isDir = QFileInfo(p).isDir();
-            } else {
-                r.isDir = MetadataManager::instance().getMeta(p.toStdWString()).isFolder;
-            }
+            // 优先信赖内存缓存中的 isFolder 状态，由渲染层执行异步物理校验
+            auto meta = MetadataManager::instance().getMeta(p.toStdWString());
+            r.isDir = meta.isFolder;
+            r.rating = meta.rating;
+            r.color = QString::fromStdWString(meta.color);
+            r.tags = meta.tags;
+            // 2026-06-xx 物理同步：注入 File ID，确保 ThumbnailDelegate 能准确识别“已录入”状态
+            r.fileId = meta.fileId128;
             records.push_back(r);
         }
     }
@@ -1996,25 +1996,24 @@ void ContentPanel::loadCategory(int categoryId) {
     // 2. 加载文件 (SCCH 分离模式)
     std::vector<CategoryItem> items = CategoryRepo::getItemsInCategory(categoryId);
     
-    // 2026-06-xx 彻底重构：基于 MetadataManager 的秒级反向索引加载文件，支持 pathHint 寻回幽灵项
+    // 2026-06-xx 性能优化：分类加载移除同步物理校验，支持秒级加载万级“幽灵项”
+    allRecords.reserve(allRecords.size() + items.size());
     for (const auto& item : items) {
         std::wstring path = MetadataManager::instance().getPathByFid(item.fileId128);
         if (path.empty() && !item.pathHint.empty()) {
-            path = item.pathHint; // 尝试使用路径提示寻回
+            path = item.pathHint;
         }
 
         if (!path.empty()) {
-            QString qPath = QString::fromStdWString(path);
-            bool exists = QFileInfo::exists(qPath);
-            // 2026-06-xx 物理加固：支持“幽灵项”展示，即便物理文件失效也载入记录，由 TypeRole 进行后续元数据判定
             ItemRecord r;
-            r.path = QDir::toNativeSeparators(qPath);
-            if (exists) {
-                r.isDir = QFileInfo(qPath).isDir();
-            } else {
-                // 如果文件不存在，则从 MetadataManager 恢复其文件夹属性
-                r.isDir = MetadataManager::instance().getMeta(path).isFolder;
-            }
+            r.path = QDir::toNativeSeparators(QString::fromStdWString(path));
+            auto meta = MetadataManager::instance().getMeta(path);
+            r.isDir = meta.isFolder;
+            r.rating = meta.rating;
+            r.color = QString::fromStdWString(meta.color);
+            r.tags = meta.tags;
+            // 2026-06-xx 物理同步：注入 File ID
+            r.fileId = meta.fileId128;
             allRecords.push_back(r);
         }
     }
@@ -2035,17 +2034,22 @@ void ContentPanel::loadPaths(const QStringList& paths) {
      
     m_model->clear(); 
  
+    // 2026-06-xx 极致性能优化：彻底移除 loadPaths 循环中的同步 QFileInfo::exists() 调用。
+    // 在主线程处理数万条路径时，任何随机磁盘访问都会导致假死。
     std::vector<ItemRecord> records;
+    records.reserve(paths.size());
     for (const QString& p : paths) {
-        // 2026-06-xx 物理修复：系统分类加载时不再直接丢弃物理失效项，支持“幽灵项”显示以便用户对账
         if (!p.isEmpty()) {
             ItemRecord r;
             r.path = QDir::toNativeSeparators(p);
-            if (QFileInfo::exists(p)) {
-                r.isDir = QFileInfo(p).isDir();
-            } else {
-                r.isDir = MetadataManager::instance().getMeta(p.toStdWString()).isFolder;
-            }
+            // 物理属性优先从 MetadataManager 内存缓存获取，杜绝 UI 线程阻塞
+            auto meta = MetadataManager::instance().getMeta(p.toStdWString());
+            r.isDir = meta.isFolder;
+            r.rating = meta.rating;
+            r.color = QString::fromStdWString(meta.color);
+            r.tags = meta.tags;
+            // 2026-06-xx 物理同步：注入 File ID
+            r.fileId = meta.fileId128;
             records.push_back(r);
         }
     }

@@ -1083,6 +1083,9 @@ void CategoryPanel::initUi() {
 
                 m_categoryModel->refresh();
                 
+                // 2026-06-xx 物理加固：导入完成后立即强制物理落盘，防止断电或异常退出回滚
+                CategoryRepo::saveImmediately();
+
                 // 2026-06-xx 物理优化：批量导入完成后触发一次全局刷新，确保 UI 同步
                 emit MetadataManager::instance().metaChanged("__RELOAD_ALL__");
 

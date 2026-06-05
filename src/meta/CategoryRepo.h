@@ -56,6 +56,13 @@ public:
     // 废弃接口（保持兼容）
     static std::vector<std::string> getFileIdsInCategory(int categoryId);
     static std::vector<std::string> getFileIdsRecursive(int categoryId);
+
+    static void saveImmediately();
+
+    /**
+     * @brief 2026-06-xx 物理修复：在主线程预热缓存管理器，确保定时器线程归属正确
+     */
+    static void initialize();
 };
 
 } // namespace ArcMeta

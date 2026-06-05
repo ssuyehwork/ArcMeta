@@ -97,9 +97,16 @@ void ElasticEdit::keyPressEvent(QKeyEvent* e) {
 }
 
 ColorPill::ColorPill(const QColor& color, float ratio, QWidget* parent) 
-    : QWidget(parent), m_color(color), m_ratio(ratio) {
+    : QWidget(parent) {
     setFixedSize(16, 16);
     setCursor(Qt::PointingHandCursor);
+    setData(color, ratio);
+}
+
+void ColorPill::setData(const QColor& color, float ratio) {
+    m_color = color;
+    m_ratio = ratio;
+    update();
 }
 
 void ColorPill::paintEvent(QPaintEvent*) {
@@ -150,24 +157,30 @@ void ColorPill::mousePressEvent(QMouseEvent* event) {
 // --- TagPill ---
 TagPill::TagPill(const QString& text, QWidget* parent) 
     : QWidget(parent), m_text(text) {
-    setProperty("tagText", text);
     setFixedHeight(22);
     QHBoxLayout* layout = new QHBoxLayout(this);
     layout->setContentsMargins(8, 0, 4, 0);
     layout->setSpacing(4);
-    QLabel* lbl = new QLabel(text, this);
-    lbl->setStyleSheet("color: #EEEEEE; font-size: 12px; border: none; background: transparent;");
+    m_label = new QLabel(text, this);
+    m_label->setStyleSheet("color: #EEEEEE; font-size: 12px; border: none; background: transparent;");
     m_closeBtn = new QPushButton(this);
     m_closeBtn->setFixedSize(14, 14);
     m_closeBtn->setCursor(Qt::PointingHandCursor);
     m_closeBtn->setIcon(UiHelper::getIcon("close", QColor("#B0B0B0"), 12));
     m_closeBtn->setIconSize(QSize(10, 10));
     m_closeBtn->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255, 255, 255, 0.1); border-radius: 2px; }");
-    layout->addWidget(lbl);
+    layout->addWidget(m_label);
     layout->addWidget(m_closeBtn);
     connect(m_closeBtn, &QPushButton::clicked, [this]() { emit deleteRequested(m_text); });
-    QFontMetrics fm(lbl->font());
-    setFixedWidth(fm.horizontalAdvance(text) + 30); 
+    setData(text);
+}
+
+void TagPill::setData(const QString& text) {
+    m_text = text;
+    setProperty("tagText", text);
+    m_label->setText(text);
+    QFontMetrics fm(m_label->font());
+    setFixedWidth(fm.horizontalAdvance(text) + 30);
 }
 
 void TagPill::paintEvent(QPaintEvent*) {
@@ -291,6 +304,13 @@ MetaPanel::MetaPanel(QWidget* parent) : QFrame(parent) {
     setObjectName("MetadataContainer"); setAttribute(Qt::WA_StyledBackground, true); setMinimumWidth(230); 
     setStyleSheet("color: #EEEEEE;");
     m_mainLayout = new QVBoxLayout(this); m_mainLayout->setContentsMargins(0, 0, 0, 0); m_mainLayout->setSpacing(0);
+
+    // 2026-06-xx 性能优化：为布局计算引入防抖计时器
+    m_adjustTimer = new QTimer(this);
+    m_adjustTimer->setSingleShot(true);
+    m_adjustTimer->setInterval(50);
+    connect(m_adjustTimer, &QTimer::timeout, this, &MetaPanel::adjustFlowHeights);
+
     initUi();
 }
 
@@ -598,8 +618,32 @@ void MetaPanel::setPinned(bool pinned) {
     // 这里如果需要持久化 Pin 状态，应调用相关接口
 }
 void MetaPanel::setTags(const QStringList& tags) {
-    while (QLayoutItem* item = m_tagFlowLayout->takeAt(0)) { if (QWidget* w = item->widget()) w->deleteLater(); delete item; }
-    for (const QString& tag : tags) { TagPill* pill = new TagPill(tag, m_tagContainer); connect(pill, &TagPill::deleteRequested, this, &MetaPanel::onTagDeleted); m_tagFlowLayout->addWidget(pill); }
+    // 1. 将现有 Pill 回收到池
+    while (QLayoutItem* item = m_tagFlowLayout->takeAt(0)) {
+        TagPill* pill = qobject_cast<TagPill*>(item->widget());
+        if (pill) {
+            pill->hide();
+            m_tagPool.append(pill);
+        }
+        delete item;
+    }
+
+    // 2. 从池中复用或创建新 Pill
+    for (const QString& tag : tags) {
+        TagPill* pill = nullptr;
+        if (!m_tagPool.isEmpty()) {
+            pill = m_tagPool.takeFirst();
+            pill->setData(tag);
+        } else {
+            pill = new TagPill(tag, m_tagContainer);
+            connect(pill, &TagPill::deleteRequested, this, &MetaPanel::onTagDeleted);
+        }
+        pill->show();
+        m_tagFlowLayout->addWidget(pill);
+    }
+
+    // 3. 异步触发高度调整
+    m_adjustTimer->start();
 }
 void MetaPanel::setNote(const std::wstring& note) { 
     m_noteEdit->blockSignals(true); 
@@ -626,26 +670,32 @@ void MetaPanel::setCategory(const QString& category) {
 void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
     if (!m_paletteFlowLayout) return;
 
-    // 清空现有色块
+    // 1. 回收到池
     while (QLayoutItem* item = m_paletteFlowLayout->takeAt(0)) {
-        if (QWidget* w = item->widget()) w->deleteLater();
+        ColorPill* pill = qobject_cast<ColorPill*>(item->widget());
+        if (pill) {
+            pill->hide();
+            m_colorPool.append(pill);
+        }
         delete item;
     }
 
-    // 动态添加新色块
+    // 2. 复用或创建
     for (const auto& entry : palette) {
-        ColorPill* pill = new ColorPill(entry.first, entry.second, m_paletteBox);
-        // 关键：子控件背景设为透明，否则会遮挡容器的圆角边框
-        pill->setStyleSheet("background: transparent; border: none;");
-        connect(pill, &ColorPill::colorSelected, this, &MetaPanel::searchByColor);
+        ColorPill* pill = nullptr;
+        if (!m_colorPool.isEmpty()) {
+            pill = m_colorPool.takeFirst();
+            pill->setData(entry.first, entry.second);
+        } else {
+            pill = new ColorPill(entry.first, entry.second, m_paletteBox);
+            pill->setStyleSheet("background: transparent; border: none;");
+            connect(pill, &ColorPill::colorSelected, this, &MetaPanel::searchByColor);
+        }
+        pill->show();
         m_paletteFlowLayout->addWidget(pill);
     }
 
-    if (m_container) {
-        m_container->adjustSize();
-        // 动态添加色块后，立即根据当前宽度计算容器高度，防止“死板”高度截断内容
-        adjustFlowHeights();
-    }
+    m_adjustTimer->start();
 }
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {

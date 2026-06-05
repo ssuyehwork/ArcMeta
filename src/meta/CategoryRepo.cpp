@@ -653,6 +653,14 @@ std::vector<std::string> getFileIdsRecursive(int categoryId) {
 
 } // namespace ScchCategoryEngine
 
+void CategoryRepo::saveImmediately() {
+    CategoryCacheManager::instance().saveImmediately();
+}
+
+void CategoryRepo::initialize() {
+    (void)CategoryCacheManager::instance();
+}
+
 // CategoryRepo Implementation
 std::vector<Category> CategoryRepo::getAll() { return ScchCategoryEngine::getAll(); }
 std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) { 
