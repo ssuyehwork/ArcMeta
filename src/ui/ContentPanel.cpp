@@ -121,6 +121,8 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
             return record.categoryColor;
         } else if (role == TypeRole) {
             return "category";
+        } else if (role == PathRole) {
+            return ""; // 2026-06-xx 物理级补全：子分类无物理路径，返回空以防止逻辑溢出
         } else if (role == Qt::DecorationRole && index.column() == 0) {
             static QIcon catIcon = QFileIconProvider().icon(QFileIconProvider::Folder);
             return catIcon;
@@ -2239,9 +2241,15 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     } 
  
     // 2. 扩展名角标 
+    QString type = index.data(TypeRole).toString();
     QString path = index.data(PathRole).toString(); 
     QFileInfo info(path); 
-    QString ext = info.isDir() ? "DIR" : info.suffix().toUpper(); 
+    QString ext;
+    if (type == "category") {
+        ext = "DIR"; // 2026-06-xx 物理校准：子分类强制显示为文件夹徽章
+    } else {
+        ext = info.isDir() ? "DIR" : info.suffix().toUpper();
+    }
     if (ext.isEmpty()) ext = "FILE"; 
     QColor badgeColor = UiHelper::getExtensionColor(ext); 
  

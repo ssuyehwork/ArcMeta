@@ -230,6 +230,8 @@ void MainWindow::initUi() {
     // 1b. 内容面板内部跳转分类 (双击同步)
     connect(m_contentPanel, &ContentPanel::categoryClicked, this, [this](int id) {
         if (m_categoryPanel) m_categoryPanel->selectCategory(id);
+        // 2026-06-xx 物理补丁：双击子分类时，除联动侧边栏外，必须显式驱动内容区加载该 ID 数据
+        if (m_contentPanel) m_contentPanel->loadCategory(id);
     });
 
     // 2. 内容面板选中项改变 -> 元数据面板刷新 & 自动预览
