@@ -143,9 +143,15 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
 
     // [新增] 扩展名角标
     if (m_pathRole != -1) {
+        QString type = (m_typeRole != -1) ? index.data(m_typeRole).toString() : "";
         QString path = index.data(m_pathRole).toString();
         QFileInfo info(path);
-        QString ext = info.isDir() ? "DIR" : info.suffix().toUpper();
+        QString ext;
+        if (type == "category" || type == "folder") {
+            ext = "DIR"; // 2026-06-xx 物理校准：分类与文件夹均强制显示为 "DIR" 徽章，增强视觉一致性
+        } else {
+            ext = info.isDir() ? "DIR" : info.suffix().toUpper();
+        }
         if (ext.isEmpty()) ext = "FILE";
         QColor badgeColor = UiHelper::getExtensionColor(ext);
 
