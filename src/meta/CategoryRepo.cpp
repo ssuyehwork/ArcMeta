@@ -413,7 +413,7 @@ bool remove(int id) {
 
     for (auto& r : records) {
         if (removeIdSet.count(r.categoryId)) {
-             CategoryCacheManager::instance().updateFidCategorized(r.fileId128, -1);
+             CategoryCacheManager::instance().updateFidCategorized(r.fileId128, -1, r.categoryId);
              changed = true;
         } else {
              keptRecords.push_back(r);
