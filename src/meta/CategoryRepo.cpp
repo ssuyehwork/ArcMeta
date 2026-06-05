@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <QRecursiveMutex>
 #include <QMetaObject>
+#include <QCoreApplication>
 #include <algorithm>
 #include <map>
 #include <set>
@@ -280,6 +281,7 @@ public:
     }
 
     void markDirty() {
+        QMutexLocker locker(&m_mutex);
         m_dirty = true;
         // 2026-06-xx 修复：确保定时器在创建它的主线程中启动，解决后台线程直接调用导致的失效报警
         QMetaObject::invokeMethod(m_saveTimer, "start", Qt::QueuedConnection, Q_ARG(int, 2000));
@@ -343,11 +345,9 @@ public:
         m_sysCountsCache.clear();
         m_membershipMap.clear();
 
-        int all = 0, today = 0, yesterday = 0, recently = 0, untagged = 0, uncategorized = 0;
+        int all = 0, recently = 0, untagged = 0, uncategorized = 0;
 
         double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
-        double startOfToday = static_cast<double>(QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch());
-        double startOfYesterday = startOfToday - 86400000.0;
 
         MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
             if (meta.isFolder) return;
@@ -357,9 +357,6 @@ public:
             all++;
 
             if (meta.tags.isEmpty()) { bits |= 16; untagged++; }
-            if (meta.ctime >= startOfToday || meta.mtime >= startOfToday) { bits |= 2; today++; }
-            if ((meta.ctime >= startOfYesterday || meta.mtime >= startOfYesterday) &&
-                (meta.ctime < startOfToday && meta.mtime < startOfToday)) { bits |= 4; yesterday++; }
             if (meta.atime >= now - 86400000.0) { bits |= 8; recently++; }
 
             if (m_fidCategorizedCount[meta.fileId128] == 0) { bits |= 32; uncategorized++; }
@@ -368,8 +365,6 @@ public:
         });
 
         m_sysCountsCache["all"] = all;
-        m_sysCountsCache["today"] = today;
-        m_sysCountsCache["yesterday"] = yesterday;
         m_sysCountsCache["recently_visited"] = recently;
         m_sysCountsCache["untagged"] = untagged;
         m_sysCountsCache["uncategorized"] = uncategorized;
@@ -396,16 +391,11 @@ public:
         RuntimeMeta meta = MetadataManager::instance().getMeta(path);
 
         double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
-        double startOfToday = static_cast<double>(QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch());
-        double startOfYesterday = startOfToday - 86400000.0;
 
         uint8_t newBits = 0;
         if (!meta.isFolder) {
             newBits |= 1;
             if (meta.tags.isEmpty()) newBits |= 16;
-            if (meta.ctime >= startOfToday || meta.mtime >= startOfToday) newBits |= 2;
-            if ((meta.ctime >= startOfYesterday || meta.mtime >= startOfYesterday) &&
-                (meta.ctime < startOfToday && meta.mtime < startOfToday)) newBits |= 4;
             if (meta.atime >= now - 86400000.0) newBits |= 8;
             if (m_fidCategorizedCount[meta.fileId128] == 0) newBits |= 32;
         }
@@ -422,8 +412,6 @@ public:
         };
 
         updateCount(1, "all");
-        updateCount(2, "today");
-        updateCount(4, "yesterday");
         updateCount(8, "recently_visited");
         updateCount(16, "untagged");
         updateCount(32, "uncategorized");
@@ -445,12 +433,19 @@ private:
         m_saveTimer = new QTimer(this);
         m_saveTimer->setSingleShot(true);
         connect(m_saveTimer, &QTimer::timeout, [this]() {
+            QMutexLocker locker(&m_mutex);
             saveToDisk();
         });
 
         connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
             updateIncremental(path.toStdWString());
         });
+
+        if (QCoreApplication::instance()) {
+            connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [this]() {
+                saveImmediately();
+            });
+        }
     }
 
     struct CategoryHeader {
@@ -757,16 +752,12 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
     }
 
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
-    double startOfToday = static_cast<double>(QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch());
-    double startOfYesterday = startOfToday - 86400000.0;
 
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
         if (meta.isFolder) return;
         bool match = false;
         if (type == "all") match = true;
         else if (type == "untagged" && meta.tags.isEmpty()) match = true;
-        else if (type == "today" && (meta.ctime >= startOfToday || meta.mtime >= startOfToday)) match = true;
-        else if (type == "yesterday" && (meta.ctime >= startOfYesterday || meta.mtime >= startOfYesterday) && (meta.ctime < startOfToday && meta.mtime < startOfToday)) match = true;
         else if (type == "recently_visited" && meta.atime >= now - 86400000.0) match = true;
         else if (type == "uncategorized" && categorizedIds.find(meta.fileId128) == categorizedIds.end()) match = true;
 

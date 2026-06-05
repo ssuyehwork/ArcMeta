@@ -38,6 +38,7 @@
 #include <QDesktopServices> 
 #include <QUrl> 
 #include <QApplication> 
+#include <QCoreApplication> 
 #include <QProcess> 
 #include <QClipboard> 
 #include <QMimeData> 
@@ -441,12 +442,9 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     // 5. 创建日期过滤 
     if (!currentFilter.createDates.isEmpty()) { 
         QDate d = QFileInfo(idx.data(PathRole).toString()).birthTime().date(); 
-        QDate today = QDate::currentDate(); 
         QString dStr = d.toString("yyyy-MM-dd"); 
         bool matchDate = false; 
         for (const QString& fDate : currentFilter.createDates) { 
-            if (fDate == "today" && d == today) { matchDate = true; break; } 
-            if (fDate == "yesterday" && d == today.addDays(-1)) { matchDate = true; break; } 
             if (fDate == dStr) { matchDate = true; break; } 
         } 
         if (!matchDate) return false; 
@@ -455,12 +453,9 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     // 6. 修改日期过滤 
     if (!currentFilter.modifyDates.isEmpty()) { 
         QDate d = QFileInfo(idx.data(PathRole).toString()).lastModified().date(); 
-        QDate today = QDate::currentDate(); 
         QString dStr = d.toString("yyyy-MM-dd"); 
         bool matchDate = false; 
         for (const QString& fDate : currentFilter.modifyDates) { 
-            if (fDate == "today" && d == today) { matchDate = true; break; } 
-            if (fDate == "yesterday" && d == today.addDays(-1)) { matchDate = true; break; } 
             if (fDate == dStr) { matchDate = true; break; } 
         } 
         if (!matchDate) return false; 
@@ -2070,8 +2065,6 @@ void ContentPanel::recalculateAndEmitStats() {
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, records]() {
         ScanStats stats;
-        QDate today = QDate::currentDate();
-        QDate yesterday = today.addDays(-1);
 
         for (const auto& record : records) {
             if (!weakThis) return;
@@ -2106,8 +2099,6 @@ void ContentPanel::recalculateAndEmitStats() {
                 QDate mdate = info.lastModified().date();
                 
                 auto dateKey = [&](const QDate& d) {
-                    if (d == today) return QString("today");
-                    if (d == yesterday) return QString("yesterday");
                     return d.toString("yyyy-MM-dd");
                 };
 

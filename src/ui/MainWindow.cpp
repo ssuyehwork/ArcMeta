@@ -216,7 +216,7 @@ void MainWindow::initUi() {
                 m_contentPanel->search(name);
             }
         } else if (type == "all" || type == "uncategorized" || type == "untagged" || 
-                   type == "today" || type == "yesterday" || type == "recently_visited" || type == "trash") {
+                   type == "recently_visited" || type == "trash") {
             // 2026-06-xx 物理修复：所有系统项直接通过 getSystemCategoryPaths 获取物理路径并加载
             m_contentPanel->setCurrentCategoryType(type);
             QStringList paths = CategoryRepo::getSystemCategoryPaths(type);

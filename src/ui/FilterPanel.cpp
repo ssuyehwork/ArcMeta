@@ -597,23 +597,8 @@ void FilterPanel::rebuildGroups() {
     if (!m_createDateCounts.isEmpty()) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("创建日期", gl);
-        // "今天"/"昨天"置顶
-        for (const QString& key : QStringList{"today", "yesterday"}) {
-            if (!m_createDateCounts.contains(key)) continue;
-            QString label = (key == "today") ? "今天" : "昨天";
-            QCheckBox* cb = addFilterRow(gl, label, m_createDateCounts[key]);
-            cb->blockSignals(true);
-            cb->setChecked(m_filter.createDates.contains(key));
-            cb->blockSignals(false);
-            connect(cb, &QCheckBox::toggled, this, [this, key](bool on) {
-                if (on) { if (!m_filter.createDates.contains(key)) m_filter.createDates.append(key); }
-                else m_filter.createDates.removeAll(key);
-                emit filterChanged(m_filter);
-            });
-        }
         QStringList dates = m_createDateCounts.keys(); dates.sort(Qt::CaseInsensitive);
         for (const QString& d : dates) {
-            if (d == "today" || d == "yesterday") continue;
             QCheckBox* cb = addFilterRow(gl, d, m_createDateCounts[d]);
             cb->blockSignals(true);
             cb->setChecked(m_filter.createDates.contains(d));
@@ -631,22 +616,8 @@ void FilterPanel::rebuildGroups() {
     if (!m_modifyDateCounts.isEmpty()) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("修改日期", gl);
-        for (const QString& key : QStringList{"today", "yesterday"}) {
-            if (!m_modifyDateCounts.contains(key)) continue;
-            QString label = (key == "today") ? "今天" : "昨天";
-            QCheckBox* cb = addFilterRow(gl, label, m_modifyDateCounts[key]);
-            cb->blockSignals(true);
-            cb->setChecked(m_filter.modifyDates.contains(key));
-            cb->blockSignals(false);
-            connect(cb, &QCheckBox::toggled, this, [this, key](bool on) {
-                if (on) { if (!m_filter.modifyDates.contains(key)) m_filter.modifyDates.append(key); }
-                else m_filter.modifyDates.removeAll(key);
-                emit filterChanged(m_filter);
-            });
-        }
         QStringList dates = m_modifyDateCounts.keys(); dates.sort(Qt::CaseInsensitive);
         for (const QString& d : dates) {
-            if (d == "today" || d == "yesterday") continue;
             QCheckBox* cb = addFilterRow(gl, d, m_modifyDateCounts[d]);
             cb->blockSignals(true);
             cb->setChecked(m_filter.modifyDates.contains(d));
