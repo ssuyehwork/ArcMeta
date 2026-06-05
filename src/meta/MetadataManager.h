@@ -66,14 +66,21 @@ public:
      */
     QStringList searchInCache(const QString& keyword);
 
-    void setRating(const std::wstring& path, int rating);
-    void setColor(const std::wstring& path, const std::wstring& color);
-    void setPinned(const std::wstring& path, bool pinned);
-    void setTags(const std::wstring& path, const QStringList& tags);
-    void setNote(const std::wstring& path, const std::wstring& note);
-    void setURL(const std::wstring& path, const std::wstring& url);
-    void setEncrypted(const std::wstring& path, bool encrypted);
-    void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes);
+    void setRating(const std::wstring& path, int rating, bool notify = true);
+    void setColor(const std::wstring& path, const std::wstring& color, bool notify = true);
+    void setPinned(const std::wstring& path, bool pinned, bool notify = true);
+    void setTags(const std::wstring& path, const QStringList& tags, bool notify = true);
+    void setNote(const std::wstring& path, const std::wstring& note, bool notify = true);
+    void setURL(const std::wstring& path, const std::wstring& url, bool notify = true);
+    void setEncrypted(const std::wstring& path, bool encrypted, bool notify = true);
+    void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
+
+    /**
+     * @brief 原子化设置视觉元数据（颜色与色板），仅触发一次信号
+     * 2026-06-xx 物理优化：解决信号风暴
+     */
+    void setItemVisualMetadata(const std::wstring& path, const std::wstring& color, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
+
     QVector<QColor> getPalettes(const std::wstring& path);
 
     void renameItem(const std::wstring& oldPath, const std::wstring& newPath);

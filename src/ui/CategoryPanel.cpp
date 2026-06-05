@@ -904,6 +904,10 @@ void CategoryPanel::initUi() {
 
             // 辅助：从文件夹中提取代表性颜色
             auto extractFolderColor = [&](const QString& dirPath) {
+                std::wstring wPath = QDir::toNativeSeparators(dirPath).toStdWString();
+                // 2026-06-xx 物理优化：前置存在性检查，避免重复解析
+                if (!MetadataManager::instance().getMeta(wPath).color.empty()) return;
+
                 QDir dir(dirPath);
                 QFileInfoList files = dir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
                 for (const auto& fi : files) {
@@ -911,9 +915,8 @@ void CategoryPanel::initUi() {
                         auto palette = UiHelper::extractPalette(fi.absoluteFilePath());
                         if (!palette.isEmpty()) {
                             QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                            std::wstring wPath = QDir::toNativeSeparators(dirPath).toStdWString();
-                            MetadataManager::instance().setColor(wPath, dominant.name().toUpper().toStdWString());
-                            MetadataManager::instance().setPalettes(wPath, palette);
+                            // 2026-06-xx 物理优化：原子化视觉更新，静默更新避免信号风暴
+                            MetadataManager::instance().setItemVisualMetadata(wPath, dominant.name().toUpper().toStdWString(), palette, false);
                             return;
                         }
                     }
@@ -946,16 +949,18 @@ void CategoryPanel::initUi() {
                     // 2026-06-xx 按照用户要求：针对特定格式文件，在拖拽导入时自动进行颜色解析
                     QString ext = info.suffix().toLower();
                     if (UiHelper::isGraphicsFile(ext)) {
-                        // 1. 提取全量色板
-                        auto palette = UiHelper::extractPalette(itemPath);
-                        if (!palette.isEmpty()) {
-                            // 2. 提取第一个颜色作为主色调并量化
-                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                            QString colorHex = dominant.name().toUpper();
+                        // 2026-06-xx 物理优化：前置检查，避免对已有元数据的文件重复解析
+                        if (MetadataManager::instance().getMeta(wPath).color.empty()) {
+                            // 1. 提取全量色板
+                            auto palette = UiHelper::extractPalette(itemPath);
+                            if (!palette.isEmpty()) {
+                                // 2. 提取第一个颜色作为主色调并量化
+                                QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                QString colorHex = dominant.name().toUpper();
 
-                            // 3. 物理双重存储：主色 + 全量变长色板
-                            MetadataManager::instance().setColor(wPath, colorHex.toStdWString());
-                            MetadataManager::instance().setPalettes(wPath, palette);
+                                // 3. 物理双重存储：原子化视觉更新，静默更新避免信号风暴
+                                MetadataManager::instance().setItemVisualMetadata(wPath, colorHex.toStdWString(), palette, false);
+                            }
                         }
                     }
                 }
@@ -1028,6 +1033,9 @@ void CategoryPanel::initUi() {
 
                 m_categoryModel->refresh();
                 
+                // 2026-06-xx 物理优化：批量导入完成后触发一次全局刷新，确保 UI 同步
+                emit MetadataManager::instance().metaChanged("__RELOAD_ALL__");
+
                 ToolTipOverlay::instance()->showText(QCursor::pos(), 
                     "<b style='color:#2ecc71;'>已完成递归分类镜像导入</b>", 1500, QColor("#2ecc71"));
             }, Qt::QueuedConnection);
