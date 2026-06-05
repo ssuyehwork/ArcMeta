@@ -88,6 +88,16 @@ namespace {
 class CategoryCacheManager : public QObject {
     Q_OBJECT
 public:
+    // 统计加速层 (公开以允许同文件引擎函数直接访问)
+    mutable QMap<QString, int> m_sysCountsCache;
+    mutable bool m_sysCountsDirty = true;
+    std::unordered_map<std::wstring, uint8_t> m_membershipMap;
+    std::unordered_map<std::string, int> m_fidCategorizedCount;
+    QDate m_lastCountDate;
+
+    mutable QMap<int, int> m_catCountsCache;
+    mutable bool m_catCountsDirty = true;
+
     static CategoryCacheManager& instance() {
         static CategoryCacheManager inst;
         return inst;
@@ -324,16 +334,6 @@ private:
     bool m_dirty;
     QTimer* m_saveTimer;
 
-    // 系统分类增量计数缓存与状态
-    mutable QMap<QString, int> m_sysCountsCache;
-    mutable bool m_sysCountsDirty = true;
-    std::unordered_map<std::wstring, uint8_t> m_membershipMap;
-    std::unordered_map<std::string, int> m_fidCategorizedCount;
-    QDate m_lastCountDate;
-
-    // 用户分类计数缓存
-    mutable QMap<int, int> m_catCountsCache;
-    mutable bool m_catCountsDirty = true;
 };
 
 namespace ScchCategoryEngine {
