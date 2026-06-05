@@ -1041,7 +1041,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     // 按照用户要求：关闭按钮持续显示红色高亮，不再仅悬停显示
     m_btnClose->setStyleSheet(QString(
         "QPushButton { background-color: %1; border: none; border-radius: 4px; padding: 0; }"
-        "QPushButton:hover { background-color: #F1707A; }"
+        "QPushButton:hover { background-color: %1; }"
         "QPushButton:pressed { background-color: #A50000; }"
     ).arg(qssColor(ErrorRed)));
     m_btnClose->setProperty("tooltipText", "关闭项目");
