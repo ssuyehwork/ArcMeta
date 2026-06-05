@@ -11,6 +11,7 @@
 #include <utility>
 #include <unordered_set>
 #include "MetadataManager.h"
+#include <QMutex>
 
 namespace ArcMeta {
 
@@ -85,13 +86,10 @@ namespace {
  * @brief 分类内存缓存管理器 (单例)
  * 2026-06-xx 架构升级：引入增量缓存与延迟写入，彻底解决 IO 性能瓶颈
  */
-#include <QRecursiveMutex>
-#include <QMutexLocker>
-
 class CategoryCacheManager : public QObject {
     Q_OBJECT
 public:
-    mutable QRecursiveMutex m_mutex;
+    mutable QMutex m_mutex;
 
     // 统计加速层 (公开以允许同文件引擎函数直接访问)
     mutable QMap<QString, int> m_sysCountsCache;
@@ -113,10 +111,14 @@ public:
     }
 
     void ensureLoaded() {
-        QMutexLocker locker(&m_mutex);
-        if (m_loaded) return;
+        m_mutex.lock();
+        if (m_loaded) {
+            m_mutex.unlock();
+            return;
+        }
         loadFromDisk();
         m_loaded = true;
+        m_mutex.unlock();
     }
 
     std::vector<Category>& categories() { ensureLoaded(); return m_categories; }
@@ -142,7 +144,7 @@ public:
 
     void updateFidCategorized(const std::string& fid, int delta, int categoryId) {
         if (fid.empty()) return;
-        QMutexLocker locker(&m_mutex);
+        QMutexLocker<QMutex> locker(&m_mutex);
         int oldCount = m_fidCategorizedCount[fid];
         int newCount = std::max(0, oldCount + delta);
         m_fidCategorizedCount[fid] = newCount;
