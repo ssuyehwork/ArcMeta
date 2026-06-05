@@ -867,33 +867,39 @@ void CategoryPanel::initUi() {
             // 2026-06-xx 物理加固：路径清洗与归一化 (Windows 统一小写以防映射失效)
             auto cleanPath = [](const QString& p) {
                 if (p.isEmpty()) return QString();
+                // 方案 2 核心点：强制 cleanPath 并移除末尾斜杠
                 QString cp = QDir::toNativeSeparators(QDir::cleanPath(p));
 #ifdef Q_OS_WIN
-                cp = cp.toLower();
+                cp = cp.toLower(); // 解决大小写不统一导致的 Map 迷失
+                // 处理盘符根目录 (如 c: -> c:\)
                 if (cp.length() == 2 && cp.endsWith(':')) cp += '\\';
 #endif
+                // 确保非根目录路径不带尾部斜杠
                 if (cp.length() > 3 && (cp.endsWith('\\') || cp.endsWith('/'))) cp.chop(1);
                 return cp;
             };
 
             QStringList cleanedPaths;
-            for(const QString& p : paths) cleanedPaths << cleanPath(p);
+            for(const QString& p : paths) {
+                QString c = cleanPath(p);
+                if (!c.isEmpty()) cleanedPaths << c;
+            }
             cleanedPaths.removeDuplicates();
             cleanedPaths.sort();
 
-            // 剔除冗余子路径
+            // 方案 3 核心：剔除冗余子路径。如果拖拽了 A 文件夹及其子文件夹 B，只处理 A
             QStringList filteredPaths;
             for (const QString& p : cleanedPaths) {
-                bool isSub = false;
+                bool isRedundant = false;
                 for (const QString& existing : filteredPaths) {
                     QString prefix = existing;
                     if (!prefix.endsWith('\\') && !prefix.endsWith('/')) prefix += '\\';
-                    if (p.startsWith(prefix) || p == existing) {
-                        isSub = true;
+                    if (p.startsWith(prefix)) {
+                        isRedundant = true;
                         break;
                     }
                 }
-                if (!isSub) filteredPaths << p;
+                if (!isRedundant) filteredPaths << p;
             }
 
             // A. 第一阶段：快速物理统计总项数 (包含文件夹)
@@ -1026,21 +1032,23 @@ void CategoryPanel::initUi() {
                         QString nativePath = cleanPath(itemPath);
                         QString nativeParent = cleanPath(info.absolutePath());
                         
-                        // 2026-06-xx 物理优化：向上递归查找最近的已注册父分类 ID，杜绝层级丢失
-                        int currentParentId = rootCatId;
-                        QString p = nativeParent;
-                        while (!p.isEmpty() && p.length() >= 2) {
-                            if (pathIdMap.contains(p)) {
-                                currentParentId = pathIdMap[p];
+                        // 方案 2 增强：深度向上递归检索 parentId，杜绝“无家可归”导致的冗余顶层
+                        int currentParentId = targetCatId; // 默认挂载到释放位置
+                        QString pSearch = nativeParent;
+                        while (!pSearch.isEmpty()) {
+                            if (pathIdMap.contains(pSearch)) {
+                                currentParentId = pathIdMap[pSearch];
                                 break;
                             }
-                            int lastIdx = std::max(p.lastIndexOf('\\'), p.lastIndexOf('/'));
+                            // 如果 nativeParent 没命中，继续向上切割寻找已创建的父分类
+                            int lastIdx = std::max(pSearch.lastIndexOf('\\'), pSearch.lastIndexOf('/'));
                             if (lastIdx <= 0) break;
 
-                            QString nextP = p.left(lastIdx);
+                            QString nextP = pSearch.left(lastIdx);
+                            // 盘符保护
                             if (nextP.length() == 2 && nextP.endsWith(':')) nextP += '\\';
-                            if (nextP == p) break;
-                            p = nextP;
+                            if (nextP == pSearch) break;
+                            pSearch = nextP;
                         }
 
                         if (info.isDir()) {

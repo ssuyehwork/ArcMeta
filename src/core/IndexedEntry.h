@@ -24,6 +24,15 @@ struct ItemRecord {
     QString color;
     QStringList tags;
     std::string fileId;
+
+    // 2026-06-xx 极致优化：预取物理属性，实现渲染零 I/O
+    long long size = 0;
+    long long mtime = 0;
+    long long ctime = 0;
+    long long atime = 0;
+    bool isEmpty = false;
+    bool isManaged = false; // 预存受控状态
+    QString suffix;
 };
 
 /**
