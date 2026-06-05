@@ -845,35 +845,15 @@ void CategoryPanel::initUi() {
 
         if (index.isValid()) {
             QString type = index.data(TypeRole).toString();
-            QString name = index.data(NameRole).toString();
             if (type == "category") {
                 targetCatId = index.data(IdRole).toInt();
-            } else if (name == "我的分类") {
-                // 2026-06-xx 物理修复：拖拽到“我的分类”根节点，同样触发自动创建分类
-                targetCatId = 0;
-                isBlankDrop = true;
             } else {
+                targetCatId = 0;
                 isBlankDrop = true;
             }
         } else {
+            targetCatId = 0;
             isBlankDrop = true;
-        }
-
-        // 2026-06-xx 工业级 UX 优化：拖拽到空白处或根节点时，自动以第一个项目的名称创建新分类
-        if (isBlankDrop && !paths.isEmpty()) {
-            QString firstPath = paths.first();
-            QString newCatName = QFileInfo(firstPath).fileName();
-            
-            Category newCat;
-            newCat.name = newCatName.toStdWString();
-            newCat.parentId = 0;
-            newCat.color = getDefaultCategoryColor();
-            
-            if (CategoryRepo::add(newCat)) {
-                targetCatId = newCat.id;
-                m_categoryModel->refresh(); // 刷新模型以显示新分类
-                Logger::log(QString("[分类面板] 自动创建分类: %1 (ID: %2)").arg(newCatName).arg(targetCatId));
-            }
         }
 
         ProgressDialog* progress = new ProgressDialog("正在同步导入文件夹(递归)...", this);
