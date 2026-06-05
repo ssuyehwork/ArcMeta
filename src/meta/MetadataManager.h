@@ -146,6 +146,7 @@ private:
     std::unordered_map<std::wstring, RuntimeMeta> m_cache;
     std::unordered_map<std::string, std::wstring> m_fidToPath;
     mutable std::shared_mutex m_mutex;
+    bool m_loaded = false; // 2026-06-xx 物理加固：加载状态标记
     
     // 2026-05-25 按照用户要求：改用单例计时器与脏路径集，彻底解决计时器风暴
     QTimer* m_batchTimer = nullptr;

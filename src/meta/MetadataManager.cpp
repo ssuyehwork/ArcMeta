@@ -92,6 +92,15 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
 
 
 void MetadataManager::initFromScchMode() {
+    // 2026-06-xx 物理加固：防止重复初始化导致的 IO 风暴
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        if (m_loaded) {
+            qDebug() << "[PERF] SCCH 缓存已在内存中，跳过重复加载";
+            return;
+        }
+    }
+
     qint64 startTime = QDateTime::currentMSecsSinceEpoch();
     qDebug() << "[PERF] 开始加载分布式 SCCH 缓存...";
     loadDriverMetadata();
@@ -176,6 +185,7 @@ void MetadataManager::initFromScchMode() {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache = tempCache;
         m_fidToPath = tempFidToPath;
+        m_loaded = true;
     }
     qDebug() << "[PERF] 分布式 SCCH 缓存加载完成，项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     emit metaChanged("__RELOAD_ALL__");

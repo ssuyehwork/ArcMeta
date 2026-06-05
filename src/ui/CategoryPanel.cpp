@@ -57,8 +57,8 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_mainLayout->setSpacing(0);
 
-    // 2026-06-xx 按照用户要求：彻底废除数据库模式，强制永久启用 SCCH 模式
-    MetadataManager::instance().initFromScchMode();
+    // 2026-06-xx 物理优化：移除此处阻塞主线程的同步初始化。
+    // 元数据加载已由 CoreController 在异步线程统一接管。
 
     initUi();
     setupContextMenu();
