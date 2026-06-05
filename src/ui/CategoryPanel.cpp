@@ -845,35 +845,15 @@ void CategoryPanel::initUi() {
 
         if (index.isValid()) {
             QString type = index.data(TypeRole).toString();
-            QString name = index.data(NameRole).toString();
             if (type == "category") {
                 targetCatId = index.data(IdRole).toInt();
-            } else if (name == "我的分类") {
-                // 2026-06-xx 物理修复：拖拽到“我的分类”根节点，同样触发自动创建分类
-                targetCatId = 0;
-                isBlankDrop = true;
             } else {
+                targetCatId = 0;
                 isBlankDrop = true;
             }
         } else {
+            targetCatId = 0;
             isBlankDrop = true;
-        }
-
-        // 2026-06-xx 工业级 UX 优化：拖拽到空白处或根节点时，自动以第一个项目的名称创建新分类
-        if (isBlankDrop && !paths.isEmpty()) {
-            QString firstPath = paths.first();
-            QString newCatName = QFileInfo(firstPath).fileName();
-            
-            Category newCat;
-            newCat.name = newCatName.toStdWString();
-            newCat.parentId = 0;
-            newCat.color = getDefaultCategoryColor();
-            
-            if (CategoryRepo::add(newCat)) {
-                targetCatId = newCat.id;
-                m_categoryModel->refresh(); // 刷新模型以显示新分类
-                Logger::log(QString("[分类面板] 自动创建分类: %1 (ID: %2)").arg(newCatName).arg(targetCatId));
-            }
         }
 
         ProgressDialog* progress = new ProgressDialog("正在同步导入文件夹(递归)...", this);
@@ -922,6 +902,27 @@ void CategoryPanel::initUi() {
 
             QMap<QString, int> pathIdMap;
 
+            // 辅助：从文件夹中提取代表性颜色
+            auto extractFolderColor = [&](const QString& dirPath) {
+                std::wstring wPath = QDir::toNativeSeparators(dirPath).toStdWString();
+                // 2026-06-xx 物理优化：前置存在性检查，避免重复解析
+                if (!MetadataManager::instance().getMeta(wPath).color.empty()) return;
+
+                QDir dir(dirPath);
+                QFileInfoList files = dir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                for (const auto& fi : files) {
+                    if (UiHelper::isGraphicsFile(fi.suffix().toLower())) {
+                        auto palette = UiHelper::extractPalette(fi.absoluteFilePath());
+                        if (!palette.isEmpty()) {
+                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                            // 2026-06-xx 物理优化：原子化视觉更新，静默更新避免信号风暴
+                            MetadataManager::instance().setItemVisualMetadata(wPath, dominant.name().toUpper().toStdWString(), palette, false);
+                            return;
+                        }
+                    }
+                }
+            };
+
             // 辅助处理函数：执行物理入库并归类
             auto processItem = [&](const QString& itemPath, int catId) {
                 QFileInfo info(itemPath);
@@ -948,16 +949,18 @@ void CategoryPanel::initUi() {
                     // 2026-06-xx 按照用户要求：针对特定格式文件，在拖拽导入时自动进行颜色解析
                     QString ext = info.suffix().toLower();
                     if (UiHelper::isGraphicsFile(ext)) {
-                        // 1. 提取全量色板
-                        auto palette = UiHelper::extractPalette(itemPath);
-                        if (!palette.isEmpty()) {
-                            // 2. 提取第一个颜色作为主色调并量化
-                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                            QString colorHex = dominant.name().toUpper();
+                        // 2026-06-xx 物理优化：前置检查，避免对已有元数据的文件重复解析
+                        if (MetadataManager::instance().getMeta(wPath).color.empty()) {
+                            // 1. 提取全量色板
+                            auto palette = UiHelper::extractPalette(itemPath);
+                            if (!palette.isEmpty()) {
+                                // 2. 提取第一个颜色作为主色调并量化
+                                QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                QString colorHex = dominant.name().toUpper();
 
-                            // 3. 物理双重存储：主色 + 全量变长色板
-                            MetadataManager::instance().setColor(wPath, colorHex.toStdWString());
-                            MetadataManager::instance().setPalettes(wPath, palette);
+                                // 3. 物理双重存储：原子化视觉更新，静默更新避免信号风暴
+                                MetadataManager::instance().setItemVisualMetadata(wPath, colorHex.toStdWString(), palette, false);
+                            }
                         }
                     }
                 }
@@ -972,6 +975,10 @@ void CategoryPanel::initUi() {
                     int rootCatId = ensureCategory(rootInfo.fileName().toStdWString(), targetCatId);
                     pathIdMap[nativeRoot] = rootCatId;
                     
+                    // 2026-06-xx 按照用户要求：顶层文件夹入库时同样执行颜色解析
+                    MetadataManager::instance().syncPhysicalMetadata(rootInfo.absoluteFilePath().toStdWString());
+                    extractFolderColor(rootPath);
+
                     // 物理递归：1:1 复刻文件夹层级到分类树
                     QDirIterator it(rootPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
                     while (it.hasNext()) {
@@ -988,6 +995,8 @@ void CategoryPanel::initUi() {
                             pathIdMap[nativePath] = newId;
                             // 2026-06-xx 物理同步：文件夹入库后同样同步元数据
                             MetadataManager::instance().syncPhysicalMetadata(info.absoluteFilePath().toStdWString());
+                            // 2026-06-xx 按照用户要求：文件夹同样需要自动执行颜色解析
+                            extractFolderColor(itemPath);
                         } else {
                             if (info.fileName() == "metadata.scch") continue; // 2026-06-xx 物理隔离
                             // 文件入库并关联到当前层级分类
@@ -1024,6 +1033,9 @@ void CategoryPanel::initUi() {
 
                 m_categoryModel->refresh();
                 
+                // 2026-06-xx 物理优化：批量导入完成后触发一次全局刷新，确保 UI 同步
+                emit MetadataManager::instance().metaChanged("__RELOAD_ALL__");
+
                 ToolTipOverlay::instance()->showText(QCursor::pos(), 
                     "<b style='color:#2ecc71;'>已完成递归分类镜像导入</b>", 1500, QColor("#2ecc71"));
             }, Qt::QueuedConnection);

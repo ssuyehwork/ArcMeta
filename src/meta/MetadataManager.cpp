@@ -239,66 +239,92 @@ std::wstring MetadataManager::getPathByFid(const std::string& fid) {
     return (it != m_fidToPath.end()) ? it->second : L"";
 }
 
-void MetadataManager::setRating(const std::wstring& path, int rating) {
+void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
     std::wstring nPath = normalizePath(path);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].rating = rating; }
-    emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
-void MetadataManager::setColor(const std::wstring& path, const std::wstring& color) {
+void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
     std::wstring nPath = normalizePath(path);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].color = color; }
-    emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
-void MetadataManager::setPinned(const std::wstring& path, bool pinned) {
+void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool notify) {
     std::wstring nPath = normalizePath(path);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
-    emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
-void MetadataManager::setTags(const std::wstring& path, const QStringList& tags) {
+void MetadataManager::setTags(const std::wstring& path, const QStringList& tags, bool notify) {
     std::wstring nPath = normalizePath(path);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].tags = tags; }
-    emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
-void MetadataManager::setNote(const std::wstring& path, const std::wstring& note) {
+void MetadataManager::setNote(const std::wstring& path, const std::wstring& note, bool notify) {
     std::wstring nPath = normalizePath(path);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
-    emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
-void MetadataManager::setURL(const std::wstring& path, const std::wstring& url) {
+void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, bool notify) {
     std::wstring nPath = normalizePath(path);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
-    emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
-void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted) {
+void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, bool notify) {
     std::wstring nPath = normalizePath(path);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].encrypted = encrypted; }
-    emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
-void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes) {
+void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify) {
     std::wstring nPath = normalizePath(path);
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].palettes = entries; }
-    emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) emit metaChanged(QString::fromStdWString(nPath));
+    debouncePersist(nPath);
+}
+
+void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std::wstring& color, const QVector<QPair<QColor, float>>& palettes, bool notify) {
+    std::wstring nPath = normalizePath(path);
+    std::vector<PaletteEntry> entries;
+    for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
+    
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        RuntimeMeta& meta = m_cache[nPath];
+        meta.color = color;
+        meta.palettes = entries;
+    }
+    
+    if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
 QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        auto it = m_cache.find(nPath);
+        if (it != m_cache.end() && !it->second.palettes.empty()) {
+            QVector<QColor> colors;
+            for (const auto& entry : it->second.palettes) colors << entry.color;
+            return colors;
+        }
+    }
+
     QFileInfo info(QString::fromStdWString(nPath));
     ArcMeta::AmMetaScch loader(QDir::toNativeSeparators(info.absolutePath()).toStdWString());
     if (loader.load()) {
@@ -308,6 +334,12 @@ QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
             const std::map<std::wstring, ItemMeta>& its = loader.items();
             if (its.count(info.fileName().toStdWString())) entries = its.at(info.fileName().toStdWString()).palettes;
         }
+        
+        if (!entries.empty()) {
+            std::unique_lock<std::shared_mutex> lock(m_mutex);
+            m_cache[nPath].palettes = entries;
+        }
+
         QVector<QColor> colors;
         for (size_t i = 0; i < entries.size(); ++i) colors << entries[i].color;
         return colors;

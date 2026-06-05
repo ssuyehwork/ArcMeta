@@ -1454,14 +1454,40 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                             // 自动提取颜色 (针对图像)
                             QString ext = info.suffix().toLower();
                             if (UiHelper::isGraphicsFile(ext)) {
-                                auto palette = UiHelper::extractPalette(fullPath);
-                                if (!palette.isEmpty()) {
-                                    QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                                    scchLoader.setItemColor(fileName.toStdWString(), dominant.name().toUpper().toStdWString());
-                                    MetadataManager::instance().setPalettes(fullPath.toStdWString(), palette);
+                                std::wstring wfPath = QDir::toNativeSeparators(fullPath).toStdWString();
+                                // 2026-06-xx 物理优化：前置存在性检查
+                                if (MetadataManager::instance().getMeta(wfPath).color.empty()) {
+                                    auto palette = UiHelper::extractPalette(fullPath);
+                                    if (!palette.isEmpty()) {
+                                        QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                        std::wstring colorHex = dominant.name().toUpper().toStdWString();
+                                        scchLoader.setItemColor(fileName.toStdWString(), colorHex);
+                                        // 2026-06-xx 物理优化：原子化视觉更新，静默更新避免信号风暴
+                                        MetadataManager::instance().setItemVisualMetadata(wfPath, colorHex, palette, false);
+                                    }
                                 }
                             }
                         } else if (info.isDir()) {
+                            // 2026-06-xx 按照用户要求：文件夹项在扫描时同样执行颜色解析 (基于内容)
+                            std::wstring wfPath = QDir::toNativeSeparators(fullPath).toStdWString();
+                            if (MetadataManager::instance().getMeta(wfPath).color.empty()) {
+                                QDir subDir(fullPath);
+                                QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                                for (const auto& sf : subFiles) {
+                                    if (UiHelper::isGraphicsFile(sf.suffix().toLower())) {
+                                        auto palette = UiHelper::extractPalette(sf.absoluteFilePath());
+                                        if (!palette.isEmpty()) {
+                                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                            std::wstring colorHex = dominant.name().toUpper().toStdWString();
+                                            scchLoader.setItemColor(fileName.toStdWString(), colorHex);
+                                            // 2026-06-xx 物理优化：文件夹视觉元数据同步到全局缓存
+                                            MetadataManager::instance().setItemVisualMetadata(wfPath, colorHex, palette, false);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
                             // 递归处理子目录
                             scanTask(fullPath);
                         }
@@ -1478,10 +1504,29 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     }
                 };
 
+                // 3. 处理起始文件夹自身的颜色解析
+                std::wstring wStartPath = QDir::toNativeSeparators(path).toStdWString();
+                if (MetadataManager::instance().getMeta(wStartPath).color.empty()) {
+                    QDir startDir(path);
+                    QFileInfoList startFiles = startDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                    for (const auto& sf : startFiles) {
+                        if (UiHelper::isGraphicsFile(sf.suffix().toLower())) {
+                            auto palette = UiHelper::extractPalette(sf.absoluteFilePath());
+                            if (!palette.isEmpty()) {
+                                QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                MetadataManager::instance().setItemVisualMetadata(wStartPath, dominant.name().toUpper().toStdWString(), palette, false);
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 scanTask(path);
 
                 QMetaObject::invokeMethod(weakThis.data(), [weakThis, path]() {
                     if (weakThis) {
+                        // 2026-06-xx 物理优化：全量扫描完成后触发刷新信号
+                        emit MetadataManager::instance().metaChanged("__RELOAD_ALL__");
                         weakThis->loadDirectory(weakThis->m_currentPath);
                         ToolTipOverlay::instance()->showText(QCursor::pos(), "已成功完成递归扫描并建立物理索引", 1500, QColor("#2ecc71"));
                     }
