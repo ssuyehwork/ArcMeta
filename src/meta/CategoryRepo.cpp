@@ -114,9 +114,8 @@ public:
 
     void markDirty() {
         m_dirty = true;
-        if (!m_saveTimer->isActive()) {
-            m_saveTimer->start(2000); // 2秒防抖写入
-        }
+        // 2026-06-xx 修复：确保定时器在创建它的主线程中启动，解决后台线程直接调用导致的失效报警
+        QMetaObject::invokeMethod(m_saveTimer, "start", Qt::QueuedConnection, Q_ARG(int, 2000));
     }
 
     void markSysCountsDirty() { m_sysCountsDirty = true; }

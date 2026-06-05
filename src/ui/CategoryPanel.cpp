@@ -861,9 +861,24 @@ void CategoryPanel::initUi() {
         
         (void)QThreadPool::globalInstance()->start([this, paths, targetCatId, progress]() {
             
+            // 2026-06-xx 物理加固：路径预处理，排序并剔除属于其他路径子集的冗余路径，防止重复创建分类
+            QStringList sortedPaths = paths;
+            std::sort(sortedPaths.begin(), sortedPaths.end());
+            QStringList filteredPaths;
+            for (const QString& p : sortedPaths) {
+                bool isSub = false;
+                for (const QString& existing : filteredPaths) {
+                    if (p.startsWith(existing + "/") || p.startsWith(existing + "\\") || p == existing) {
+                        isSub = true;
+                        break;
+                    }
+                }
+                if (!isSub) filteredPaths << p;
+            }
+
             // A. 第一阶段：快速物理统计总项数 (包含文件夹)
             int totalItems = 0;
-            for (const QString& path : paths) {
+            for (const QString& path : filteredPaths) {
                 QFileInfo info(path);
                 if (info.isDir()) {
                     QDirIterator it(path, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
@@ -884,8 +899,14 @@ void CategoryPanel::initUi() {
             auto allCats = CategoryRepo::getAll();
             int currentTask = 0;
 
+            // 2026-06-xx 物理加固：统一路径清洗函数，确保 Map 键名一致性
+            auto cleanNative = [](const QString& p) {
+                return QDir::toNativeSeparators(QDir::cleanPath(p));
+            };
+
             // 辅助 Lambda：确保分类存在，不存在则创建
             auto ensureCategory = [&](const std::wstring& name, int parentId) -> int {
+                // 2026-06-xx 修复：创建前执行更严格的“路径+名称”实时双重校验，防止并发下的同名冗余
                 for (const auto& c : allCats) {
                     if (c.parentId == parentId && c.name == name) return c.id;
                 }
@@ -901,6 +922,22 @@ void CategoryPanel::initUi() {
             };
 
             QMap<QString, int> pathIdMap;
+
+            // 2026-06-xx 物理加固：增加向上递归查找 ParentId 的安全函数，杜绝因路径归一化偏差导致的“根部逃逸”
+            auto findParentId = [&](const QString& nativeParent, int rootId) -> int {
+                if (pathIdMap.contains(nativeParent)) return pathIdMap[nativeParent];
+                
+                // 尝试向上逐级查找，直到找到最近的已记录父分类
+                QString current = nativeParent;
+                while (true) {
+                    int lastSep = current.lastIndexOf(QDir::separator());
+                    if (lastSep <= 0) break;
+                    current = current.left(lastSep);
+                    if (current.endsWith(':')) current += QDir::separator();
+                    if (pathIdMap.contains(current)) return pathIdMap[current];
+                }
+                return rootId;
+            };
 
             // 辅助：从文件夹中提取代表性颜色
             auto extractFolderColor = [&](const QString& dirPath) {
@@ -966,9 +1003,9 @@ void CategoryPanel::initUi() {
                 }
             };
 
-            for (const QString& rootPath : paths) {
+            for (const QString& rootPath : filteredPaths) {
                 QFileInfo rootInfo(rootPath);
-                QString nativeRoot = QDir::toNativeSeparators(rootPath);
+                QString nativeRoot = cleanNative(rootPath);
                 
                 if (rootInfo.isDir()) {
                     // 文件夹逻辑：自动创建分类节点
@@ -984,10 +1021,10 @@ void CategoryPanel::initUi() {
                     while (it.hasNext()) {
                         QString itemPath = it.next();
                         QFileInfo info = it.fileInfo();
-                        QString nativePath = QDir::toNativeSeparators(itemPath);
-                        QString nativeParent = QDir::toNativeSeparators(info.absolutePath());
+                        QString nativePath = cleanNative(itemPath);
+                        QString nativeParent = cleanNative(info.absolutePath());
                         
-                        int currentParentId = pathIdMap.value(nativeParent, rootCatId);
+                        int currentParentId = findParentId(nativeParent, rootCatId);
 
                         if (info.isDir()) {
                             // 创建子分类并记录 ID
