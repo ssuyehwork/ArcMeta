@@ -845,8 +845,11 @@ void CategoryPanel::initUi() {
 
         if (index.isValid()) {
             QString type = index.data(TypeRole).toString();
-            if (type == "category") {
+            QString name = index.data(NameRole).toString();
+            if (type == "category" && index.data(IdRole).toInt() > 0) {
                 targetCatId = index.data(IdRole).toInt();
+            } else if (name == "我的分类") {
+                targetCatId = 0;
             } else {
                 targetCatId = 0;
                 isBlankDrop = true;
@@ -867,7 +870,10 @@ void CategoryPanel::initUi() {
                 // 移除末尾斜杠，但保留盘符根目录（如 C:\）
                 if (cp.length() > 3 && (cp.endsWith('\\') || cp.endsWith('/'))) cp.chop(1);
                 else if (cp.length() == 2 && cp.endsWith(':')) cp += '\\'; // 盘符补全
+
 #ifdef Q_OS_WIN
+                // Windows 下处理盘符大小写，并统一转小写以防映射失效
+                if (cp.length() >= 2 && cp[1] == ':') cp[0] = cp[0].toUpper();
                 return cp.toLower();
 #else
                 return cp;
@@ -1033,7 +1039,7 @@ void CategoryPanel::initUi() {
                                 break;
                             }
                             int lastIdx = std::max(p.lastIndexOf('\\'), p.lastIndexOf('/'));
-                            if (lastIdx <= 0) break;
+                            if (lastIdx < 0) break;
                             p = p.left(lastIdx);
                             // 如果回退到了盘符根部 (如 C:)，则补全斜杠
                             if (p.length() == 2 && p.endsWith(':')) p += '\\';
@@ -1113,6 +1119,13 @@ void CategoryPanel::initUi() {
                 QModelIndex childIdx = m_categoryModel->index(i, 0, parentIdx);
                 int id = childIdx.data(IdRole).toInt();
                 QString type = childIdx.data(TypeRole).toString();
+                bool isPinned = childIdx.data(PinnedRole).toBool();
+
+                // 物理阻断：严禁处理“镜像节点”（即 Pinned 为 true 且其父项不是“我的分类”的节点）。
+                // 理由：镜像节点仅作为 UI 快捷方式，其移动不应改写原始数据库中的 parentId 关系。
+                if (parentIdInDb != -1 && isPinned && parentIdx.data(NameRole).toString() != "我的分类" && parentIdx.data(TypeRole).toString() != "category") {
+                    continue;
+                }
 
                 if (type == "category" && id > 0) {
                     // 只有在数据真正发生位移时才触发数据库 UPDATE，优化性能

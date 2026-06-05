@@ -280,6 +280,7 @@ public:
     }
 
     void markDirty() {
+        QMutexLocker locker(&m_mutex);
         m_dirty = true;
         // 2026-06-xx 修复：确保定时器在创建它的主线程中启动，解决后台线程直接调用导致的失效报警
         QMetaObject::invokeMethod(m_saveTimer, "start", Qt::QueuedConnection, Q_ARG(int, 2000));
@@ -445,12 +446,19 @@ private:
         m_saveTimer = new QTimer(this);
         m_saveTimer->setSingleShot(true);
         connect(m_saveTimer, &QTimer::timeout, [this]() {
+            QMutexLocker locker(&m_mutex);
             saveToDisk();
         });
 
         connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
             updateIncremental(path.toStdWString());
         });
+
+        if (QCoreApplication::instance()) {
+            connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [this]() {
+                saveImmediately();
+            });
+        }
     }
 
     struct CategoryHeader {
