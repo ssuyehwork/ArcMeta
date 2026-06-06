@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "ScanDialog.h"
+#include "BatchProgressDialog.h"
 #include "../core/CacheManager.h"
 #include <QPainter>
 #include <QTimer>
@@ -360,25 +361,20 @@ QVariant ScanTableModel::headerData(int section, Qt::Orientation orientation, in
 void ScanTableModel::updateResults() {
     beginResetModel();
     m_currentResultSet = m_controller->snapshot();
-    m_displayCount = (std::min<int>)(static_cast<int>(m_currentResultSet->keys.size()), 100); 
+    // 2026-06-xx 物理对标：移除 100 条限制，直接显示全部结果以支持全选
+    m_displayCount = static_cast<int>(m_currentResultSet->keys.size()); 
     
     m_requestedThumbs.clear();
     endResetModel();
 }
 
 bool ScanTableModel::canFetchMore(const QModelIndex& parent) const {
-    if (parent.isValid()) return false;
-    return m_displayCount < (int)m_currentResultSet->keys.size();
+    Q_UNUSED(parent);
+    return false;
 }
 
 void ScanTableModel::fetchMore(const QModelIndex& parent) {
-    if (parent.isValid()) return;
-    int remainder = static_cast<int>(m_currentResultSet->keys.size()) - m_displayCount;
-    int itemsToFetch = (std::min<int>)(remainder, 100);
-    
-    beginInsertRows(QModelIndex(), m_displayCount, m_displayCount + itemsToFetch - 1);
-    m_displayCount += itemsToFetch;
-    endInsertRows();
+    Q_UNUSED(parent);
 }
 
 void ScanTableModel::sort(int column, Qt::SortOrder order) {
@@ -1242,14 +1238,72 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
         menu.addSeparator();
         
         menu.addAction(count > 1 ? "批量删除" : "删除", [this, selectedRows]() {
-            QString msg = (selectedRows.size() == 1) ? QString("确定要永久删除 %1 吗？").arg(m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 0)).toString())
-                                                   : QString("确定要永久删除选中的 %1 个项目吗？").arg(selectedRows.size());
+            // 2026-06-xx 物理防护：在弹窗前立即锁定路径与名称快照，彻底杜绝闪退
+            QStringList pathsToDelete;
+            QStringList namesToDelete;
+            for (const auto& idx : selectedRows) {
+                pathsToDelete << m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
+                namesToDelete << m_tableModel->data(m_tableModel->index(idx.row(), 0)).toString();
+            }
+
+            if (pathsToDelete.isEmpty()) return;
+
+            QString msg = (pathsToDelete.size() == 1) ? QString("确定要永久删除 %1 吗？").arg(namesToDelete.first())
+                                                      : QString("确定要永久删除选中的 %1 个项目吗？").arg(pathsToDelete.size());
+            
             if (QMessageBox::question(this, "确认删除", msg) == QMessageBox::Yes) {
-                for (const auto& idx : selectedRows) {
-                    QString path = m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
-                    QFile::remove(path);
+                int totalCount = pathsToDelete.size();
+                qDebug() << "[ScanDialog] 开始执行批量删除操作, 总数:" << totalCount;
+
+                // 2. 进度条策略：至少5条数据以上才弹出独立窗口
+                BatchProgressDialog* progressDlg = nullptr;
+                if (totalCount >= 5) {
+                    progressDlg = new BatchProgressDialog("正在删除文件...", this);
+                    progressDlg->setRange(0, totalCount);
+                    progressDlg->show();
                 }
-                m_controller->triggerSearch(true);
+
+                QPointer<ScanDialog> weakThis(this);
+                QPointer<BatchProgressDialog> weakProgress(progressDlg);
+
+                (void)QtConcurrent::run([weakThis, weakProgress, pathsToDelete, namesToDelete, totalCount]() {
+                    for (int i = 0; i < totalCount; ++i) {
+                        QString path = pathsToDelete[i];
+                        QString name = namesToDelete[i];
+                        
+                        qDebug() << "[ScanDialog] 正在删除 [" << (i + 1) << "/" << totalCount << "]:" << path;
+                        
+                        bool ok = false;
+                        QFileInfo fi(path);
+                        if (fi.isDir()) {
+                            ok = QDir(path).removeRecursively();
+                        } else {
+                            ok = QFile::remove(path);
+                        }
+
+                        if (!ok) {
+                            qWarning() << "[ScanDialog] 删除失败!" << path;
+                        }
+
+                        // 跨线程更新进度条
+                        if (weakProgress) {
+                            QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Qt::QueuedConnection, 
+                                Q_ARG(int, i + 1), Q_ARG(int, totalCount), Q_ARG(QString, name));
+                        }
+                    }
+
+                    // 批量删除后回到主线程收尾
+                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, weakProgress]() {
+                        if (weakProgress) {
+                            weakProgress->accept();
+                            weakProgress->deleteLater();
+                        }
+                        if (weakThis) {
+                            qDebug() << "[ScanDialog] 批量删除完成, 正在刷新搜索结果...";
+                            weakThis->m_controller->triggerSearch(true);
+                        }
+                    });
+                });
             }
         });
         

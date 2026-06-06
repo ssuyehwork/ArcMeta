@@ -8,7 +8,7 @@
 #include "DropTreeView.h" 
 #include "DropListView.h" 
 #include "DropJustifiedView.h"
-#include "ProgressDialog.h"
+#include "BatchProgressDialog.h"
 #include "ThumbnailDelegate.h"
 #include "ToolTipOverlay.h" 
  
@@ -1399,11 +1399,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (path.isEmpty()) break;
             // 2026-06-xx 物理对账逻辑增强：递归扫描 + 颜色提取 + FRN 注册
             
-            ProgressDialog* progress = new ProgressDialog("正在深度扫描数据并建立索引...", this);
+            BatchProgressDialog* progress = new BatchProgressDialog("正在深度扫描数据并建立索引...", this);
             progress->show();
             
             QPointer<ContentPanel> weakThis(this);
-            QPointer<ProgressDialog> weakProgress(progress);
+            QPointer<BatchProgressDialog> weakProgress(progress);
             
             (void)QtConcurrent::run([weakThis, path, weakProgress]() {
                 // 1. 预统计：递归获取所有待处理项目总数
@@ -1443,7 +1443,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         QString fullPath = info.absoluteFilePath();
                         QString fileName = info.fileName();
                         
-                        QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Q_ARG(int, currentHandled), Q_ARG(int, totalItems), Q_ARG(QString, fileName));
+                        QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Qt::QueuedConnection, Q_ARG(int, currentHandled), Q_ARG(int, totalItems), Q_ARG(QString, fileName));
 
                         if (info.isFile()) {
                             // 自动提取颜色 (针对图像)
@@ -1565,11 +1565,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 QString msg = (action == ActionPermanentDelete) ? "确定要彻底删除选中的项目吗？此操作不可恢复。" : "确定要安全擦除选中的项目吗？数据将被覆写并永久抹除。";
                 if (QMessageBox::question(this, "确认删除", msg) != QMessageBox::Yes) break;
 
-                ProgressDialog* progress = new ProgressDialog("正在执行深层抹除...", this);
+                BatchProgressDialog* progress = new BatchProgressDialog("正在执行深层抹除...", this);
                 progress->show();
 
                 QPointer<ContentPanel> weakThis(this);
-                QPointer<ProgressDialog> weakProgress(progress);
+                QPointer<BatchProgressDialog> weakProgress(progress);
                 (void)QtConcurrent::run([weakThis, targetPaths, action, weakProgress]() {
                     int count = 0;
                     for (const QString& p : targetPaths) {

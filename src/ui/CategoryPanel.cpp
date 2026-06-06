@@ -9,7 +9,7 @@
 using namespace ArcMeta::Style;
 #include "ToolTipOverlay.h"
 #include "FramelessDialog.h"
-#include "ProgressDialog.h"
+#include "BatchProgressDialog.h"
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -765,11 +765,11 @@ void CategoryPanel::initUi() {
     m_categoryTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
     
     // 2026-06-xx 按照用户要求：支持 Delete 键物理删除选中分类，使用 Action 提升快捷键响应等级
-    QAction* deleteAction = new QAction(this);
-    deleteAction->setShortcut(QKeySequence::Delete);
-    deleteAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    connect(deleteAction, &QAction::triggered, this, &CategoryPanel::onDeleteCategory);
-    m_categoryTree->addAction(deleteAction);
+    QAction* deleteCatAction = new QAction(this);
+    deleteCatAction->setShortcut(QKeySequence::Delete);
+    deleteCatAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(deleteCatAction, &QAction::triggered, this, &CategoryPanel::onDeleteCategory);
+    m_categoryTree->addAction(deleteCatAction);
 
     m_categoryTree->installEventFilter(this);
 
@@ -892,7 +892,7 @@ void CategoryPanel::initUi() {
             isBlankDrop = true;
         }
 
-        ProgressDialog* progress = new ProgressDialog("正在同步导入文件夹(递归)...", this);
+        BatchProgressDialog* progress = new BatchProgressDialog("正在同步导入文件夹(递归)...", this);
         progress->show();
         
         (void)QThreadPool::globalInstance()->start([this, paths, targetCatId, progress]() {

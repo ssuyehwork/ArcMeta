@@ -27,7 +27,7 @@ public:
         }
     };
 
-    explicit AmMetaScch(const std::wstring& folderPath, const std::wstring& fileName = L"");
+    explicit AmMetaScch(const std::wstring& folderPath, const std::wstring& fileName = L"__LEGACY__");
     bool load();
     bool save() const;
 

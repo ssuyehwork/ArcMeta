@@ -28,15 +28,9 @@ void CategoryModel::deferredRefresh() {
 }
 
 void CategoryModel::refresh() {
-    if (!m_isFirstLoad) {
-        // 后续刷新：只更新系统计数
-        auto sysCounts = CategoryRepo::getSystemCounts();
-        auto catCountsVec = CategoryRepo::getCounts();
-        QMap<int, int> catCounts;
-        for (const auto& p : catCountsVec) catCounts[p.first] = p.second;
-        updateStatistics(sysCounts, catCounts);
-        return;
-    }
+    // 2026-06-xx 物理修复：移除对 m_isFirstLoad 的强行拦截。
+    // 理由：refresh() 必须允许重建树结构，否则在应用期间增删改“分类”时 UI 无法感知。
+    // 异步高频刷新应由 CategoryPanel::requestRefresh 及其内部的 updateStatistics 承载。
     m_isFirstLoad = false;
 
     // 2026-06-xx 物理修复：废除破坏性的 clear()，改用 beginResetModel 手动管理。
