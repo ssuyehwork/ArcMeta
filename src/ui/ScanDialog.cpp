@@ -360,25 +360,20 @@ QVariant ScanTableModel::headerData(int section, Qt::Orientation orientation, in
 void ScanTableModel::updateResults() {
     beginResetModel();
     m_currentResultSet = m_controller->snapshot();
-    m_displayCount = (std::min<int>)(static_cast<int>(m_currentResultSet->keys.size()), 100); 
+    // 2026-06-xx 物理对标：移除 100 条限制，直接显示全部结果以支持全选
+    m_displayCount = static_cast<int>(m_currentResultSet->keys.size());
     
     m_requestedThumbs.clear();
     endResetModel();
 }
 
 bool ScanTableModel::canFetchMore(const QModelIndex& parent) const {
-    if (parent.isValid()) return false;
-    return m_displayCount < (int)m_currentResultSet->keys.size();
+    Q_UNUSED(parent);
+    return false;
 }
 
 void ScanTableModel::fetchMore(const QModelIndex& parent) {
-    if (parent.isValid()) return;
-    int remainder = static_cast<int>(m_currentResultSet->keys.size()) - m_displayCount;
-    int itemsToFetch = (std::min<int>)(remainder, 100);
-    
-    beginInsertRows(QModelIndex(), m_displayCount, m_displayCount + itemsToFetch - 1);
-    m_displayCount += itemsToFetch;
-    endInsertRows();
+    Q_UNUSED(parent);
 }
 
 void ScanTableModel::sort(int column, Qt::SortOrder order) {
@@ -1245,10 +1240,21 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
             QString msg = (selectedRows.size() == 1) ? QString("确定要永久删除 %1 吗？").arg(m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 0)).toString())
                                                    : QString("确定要永久删除选中的 %1 个项目吗？").arg(selectedRows.size());
             if (QMessageBox::question(this, "确认删除", msg) == QMessageBox::Yes) {
+                // 2026-06-xx 物理加固：先提取所有物理路径快照，杜绝因 USN 同步导致的索引移位
+                QStringList pathsToDelete;
                 for (const auto& idx : selectedRows) {
-                    QString path = m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
-                    QFile::remove(path);
+                    pathsToDelete << m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
                 }
+
+                for (const QString& path : pathsToDelete) {
+                    QFileInfo fi(path);
+                    if (fi.isDir()) {
+                        QDir(path).removeRecursively();
+                    } else {
+                        QFile::remove(path);
+                    }
+                }
+                // 批量删除后延迟触发一次搜索刷新，确保 UI 状态最终一致
                 m_controller->triggerSearch(true);
             }
         });
