@@ -123,7 +123,7 @@ set(SOURCES
     src/ui/MetaPanel.h
     src/ui/NavPanel.cpp
     src/ui/NavPanel.h
-    src/ui/ProgressDialog.h
+    src/ui/BatchProgressDialog.h
     src/ui/QuickLookWindow.cpp
     src/ui/QuickLookWindow.h
     src/ui/RuleRow.cpp

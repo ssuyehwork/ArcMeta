@@ -46,8 +46,8 @@ static void migrateLegacyScch(const std::wstring& folderPath) {
 
     if (!QFile::exists(legacyPath)) return;
 
-    // 读取旧格式
-    ArcMeta::AmMetaScch legacy(folderPath);
+    // 读取旧格式 (显式使用 __LEGACY__ 标记)
+    ArcMeta::AmMetaScch legacy(folderPath, L"__LEGACY__");
     if (!legacy.load()) return;
 
     // 拆分写入新格式
@@ -193,43 +193,55 @@ void MetadataManager::initFromScchMode() {
             }
         }
         
-        ArcMeta::AmMetaScch loader(resolvedPath);
-        if (loader.load()) {
+        // 2026-06-xx 重构：不再只加载 metadata.scch，而是扫描 .arcmeta/ 目录
+        // 1. 加载文件夹自身元数据
+        ArcMeta::AmMetaScch folderLoader(resolvedPath, L"");
+        if (folderLoader.load()) {
             std::wstring nResolvedPath = normalizePath(resolvedPath);
             long long fSize = 0, fCtime = 0, fMtime = 0, fAtime = 0;
             std::string fId128;
             fetchWinApiMetadataDirect(resolvedPath, fId128, nullptr, &fSize, nullptr, &fCtime, &fMtime, &fAtime);
 
-            const FolderMeta& f = loader.folder();
-            RuntimeMeta fMeta;
-            fMeta.rating = f.rating; fMeta.color = f.color;
-            for (size_t i = 0; i < f.tags.size(); ++i) fMeta.tags << QString::fromStdWString(f.tags[i]);
-            fMeta.pinned = f.pinned; fMeta.note = f.note; fMeta.url = f.url; fMeta.encrypted = f.encrypted;
-            fMeta.isFolder = true;
-            fMeta.fileId128 = fId128.empty() ? f.fileId128 : fId128;
-            fMeta.fileSize = fSize; fMeta.ctime = fCtime; fMeta.mtime = fMtime; fMeta.atime = fAtime;
-            fMeta.palettes = f.palettes;
-            tempCache[nResolvedPath] = fMeta;
+            const FolderMeta& f = folderLoader.folder();
+            if (!f.isDefault()) {
+                RuntimeMeta fMeta;
+                fMeta.rating = f.rating; fMeta.color = f.color;
+                for (size_t i = 0; i < f.tags.size(); ++i) fMeta.tags << QString::fromStdWString(f.tags[i]);
+                fMeta.pinned = f.pinned; fMeta.note = f.note; fMeta.url = f.url; fMeta.encrypted = f.encrypted;
+                fMeta.isFolder = true;
+                fMeta.fileId128 = fId128.empty() ? f.fileId128 : fId128;
+                fMeta.fileSize = fSize; fMeta.ctime = fCtime; fMeta.mtime = fMtime; fMeta.atime = fAtime;
+                fMeta.palettes = f.palettes;
+                tempCache[nResolvedPath] = fMeta;
+            }
+        }
 
-            const std::map<std::wstring, ItemMeta>& scchItems = loader.items();
-            for (std::map<std::wstring, ItemMeta>::const_iterator itItem = scchItems.begin(); itItem != scchItems.end(); ++itItem) {
-                const std::wstring& name = itItem->first;
-                const ItemMeta& item = itItem->second;
+        // 2. 加载该目录下所有文件的元数据 (.arcmeta/*.scch)
+        QDir arcmetaDir(QString::fromStdWString(resolvedPath) + "/.arcmeta");
+        QStringList scchFiles = arcmetaDir.entryList({"*.scch"}, QDir::Files);
+        for (const QString& scchFile : scchFiles) {
+            if (scchFile == "__folder__.scch") continue;
+            QString fileName = scchFile.left(scchFile.length() - 5); // 移除 .scch
 
-                RuntimeMeta iMeta;
-                iMeta.rating = item.rating; iMeta.color = item.color;
-                for (size_t tIdx = 0; tIdx < item.tags.size(); ++tIdx) iMeta.tags << QString::fromStdWString(item.tags[tIdx]);
-                iMeta.pinned = item.pinned; iMeta.note = item.note; iMeta.url = item.url; iMeta.encrypted = item.encrypted;
-                iMeta.isFolder = (item.type == L"folder");
-                iMeta.fileId128 = item.fileId128;
-                
-                std::wstring itemPath = resolvedPath + L"\\" + name;
-                fetchWinApiMetadataDirect(itemPath, iMeta.fileId128, nullptr, &iMeta.fileSize, nullptr, &iMeta.ctime, &iMeta.mtime, &iMeta.atime);
+            ArcMeta::AmMetaScch itemLoader(resolvedPath, fileName.toStdWString());
+            if (itemLoader.load()) {
+                const ItemMeta& item = itemLoader.item();
+                if (item.hasUserOperations()) {
+                    RuntimeMeta iMeta;
+                    iMeta.rating = item.rating; iMeta.color = item.color;
+                    for (size_t tIdx = 0; tIdx < item.tags.size(); ++tIdx) iMeta.tags << QString::fromStdWString(item.tags[tIdx]);
+                    iMeta.pinned = item.pinned; iMeta.note = item.note; iMeta.url = item.url; iMeta.encrypted = item.encrypted;
+                    iMeta.isFolder = (item.type == L"folder");
+                    iMeta.fileId128 = item.fileId128;
 
-                iMeta.palettes = item.palettes;
-                std::wstring nItemPath = normalizePath(itemPath);
-                tempCache[nItemPath] = iMeta;
-                if (!iMeta.fileId128.empty()) tempFidToPath[iMeta.fileId128] = nItemPath;
+                    std::wstring itemPath = resolvedPath + L"\\" + fileName.toStdWString();
+                    fetchWinApiMetadataDirect(itemPath, iMeta.fileId128, nullptr, &iMeta.fileSize, nullptr, &iMeta.ctime, &iMeta.mtime, &iMeta.atime);
+
+                    iMeta.palettes = item.palettes;
+                    std::wstring nItemPath = normalizePath(itemPath);
+                    tempCache[nItemPath] = iMeta;
+                    if (!iMeta.fileId128.empty()) tempFidToPath[iMeta.fileId128] = nItemPath;
+                }
             }
         }
     }
@@ -263,7 +275,7 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
     std::wstring fileName = info.fileName().toStdWString();
 
-    // 优先加载文件级或文件夹级 .scch
+    // 优先加载文件级或文件夹级 .scch (fileName为空代表 __folder__.scch)
     ArcMeta::AmMetaScch loader(parentDir, info.isDir() ? L"" : fileName);
     if (loader.load()) {
         bool hasMeta = false;
@@ -291,9 +303,9 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
             }
         }
 
-        // 兼容旧格式回退逻辑（如果新格式没找到）
+        // 兼容旧格式回退逻辑（如果新格式没找到，显式请求 __LEGACY__）
         if (!hasMeta) {
-            ArcMeta::AmMetaScch legacyLoader(parentDir);
+            ArcMeta::AmMetaScch legacyLoader(parentDir, L"__LEGACY__");
             if (legacyLoader.load()) {
                 if (info.isDir()) {
                     const FolderMeta& folder = legacyLoader.folder();
@@ -516,10 +528,11 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
 }
 
 void MetadataManager::removeMetadataSync(const std::wstring& path) {
+    std::wstring nPath = normalizePath(path);
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         for (std::unordered_map<std::wstring, RuntimeMeta>::iterator it = m_cache.begin(); it != m_cache.end(); ) {
-            if (it->first == path || it->first.find(path + L"\\") == 0 || it->first.find(path + L"/") == 0) {
+            if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
                 if (!it->second.isFolder) CategoryRepo::incrementTotalFileCount(-1);
                 if (!it->second.fileId128.empty()) m_fidToPath.erase(it->second.fileId128);
                 it = m_cache.erase(it);

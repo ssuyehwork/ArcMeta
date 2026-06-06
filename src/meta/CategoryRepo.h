@@ -72,7 +72,6 @@ public:
     static void incrementTotalFileCount(int delta);
     static void incrementCategorizedCount(int delta);
 
-private:
     static std::atomic<int> s_totalFileCount;
     static std::atomic<int> s_categorizedCount;
 };

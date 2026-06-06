@@ -4,14 +4,18 @@
 #include <QProgressBar>
 #include <QLabel>
 #include <QVBoxLayout>
+#include <QString>
 
 namespace ArcMeta {
 
-class ProgressDialog : public FramelessDialog {
+/**
+ * @brief 批量操作进度对话框
+ */
+class BatchProgressDialog : public FramelessDialog {
     Q_OBJECT
 
 public:
-    explicit ProgressDialog(const QString& title, QWidget* parent = nullptr)
+    explicit BatchProgressDialog(const QString& title, QWidget* parent = nullptr)
         : FramelessDialog(title, parent) {
         setFixedSize(400, 150);
         
@@ -47,12 +51,15 @@ public:
         m_progressBar->setValue(value);
     }
 
+    /**
+     * @brief 跨线程安全更新进度
+     */
     Q_INVOKABLE void updateProgress(int current, int total, const QString& fileName) {
         if (total <= 0) return;
         m_progressBar->setRange(0, total);
         m_progressBar->setValue(current);
         
-        double percent = (double)current / total * 100.0;
+        double percent = (double)current / (double)total * 100.0;
         QString status = QString("[%1/%2] %3% - %4")
                             .arg(current)
                             .arg(total)

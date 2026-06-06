@@ -53,20 +53,19 @@ AmMetaScch::AmMetaScch(const std::wstring& folderPath, const std::wstring& fileN
     }
     m_arcmetaDir += L".arcmeta";
 
-    if (fileName.empty()) {
-        // 过渡期：如果父目录直接存在 metadata.scch，优先兼容旧模式
+    if (fileName == L"__LEGACY__") {
+        // 过渡期：显式请求旧版 metadata.scch
         std::wstring legacyPath = folderPath;
         if (!legacyPath.empty() && legacyPath.back() != L'\\' && legacyPath.back() != L'/') legacyPath += L'\\';
         legacyPath += L"metadata.scch";
-
-        if (QFile::exists(toQString(legacyPath))) {
-            m_filePath = legacyPath;
-            m_isFileMode = false;
-        } else {
-            m_filePath = m_arcmetaDir + L"\\__folder__.scch";
-            m_isFileMode = false;
-        }
+        m_filePath = legacyPath;
+        m_isFileMode = false;
+    } else if (fileName.empty()) {
+        // 文件夹自身元数据模式
+        m_filePath = m_arcmetaDir + L"\\__folder__.scch";
+        m_isFileMode = false;
     } else {
+        // 文件级元数据模式
         m_filePath = m_arcmetaDir + L"\\" + fileName + L".scch";
         m_isFileMode = true;
     }

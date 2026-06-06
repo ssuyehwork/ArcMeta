@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "ScanDialog.h"
+#include "BatchProgressDialog.h"
 #include "../core/CacheManager.h"
 #include <QPainter>
 #include <QTimer>
@@ -1255,15 +1256,17 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                 qDebug() << "[ScanDialog] 开始执行批量删除操作, 总数:" << totalCount;
 
                 // 2. 进度条策略：至少5条数据以上才弹出独立窗口
-                ProgressDialog* progress = nullptr;
+                BatchProgressDialog* progressDlg = nullptr;
                 if (totalCount >= 5) {
-                    progress = new ProgressDialog("正在删除文件...", this);
-                    progress->setRange(0, totalCount);
-                    progress->show();
+                    progressDlg = new BatchProgressDialog("正在删除文件...", this);
+                    progressDlg->setRange(0, totalCount);
+                    progressDlg->show();
                 }
 
                 QPointer<ScanDialog> weakThis(this);
-                (void)QtConcurrent::run([weakThis, pathsToDelete, namesToDelete, progress, totalCount]() {
+                QPointer<BatchProgressDialog> weakProgress(progressDlg);
+
+                (void)QtConcurrent::run([weakThis, weakProgress, pathsToDelete, namesToDelete, totalCount]() {
                     for (int i = 0; i < totalCount; ++i) {
                         QString path = pathsToDelete[i];
                         QString name = namesToDelete[i];
@@ -1283,17 +1286,17 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
                         }
 
                         // 跨线程更新进度条
-                        if (progress) {
-                            QMetaObject::invokeMethod(progress, "updateProgress", Qt::QueuedConnection,
+                        if (weakProgress) {
+                            QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Qt::QueuedConnection,
                                 Q_ARG(int, i + 1), Q_ARG(int, totalCount), Q_ARG(QString, name));
                         }
                     }
 
                     // 批量删除后回到主线程收尾
-                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, progress]() {
-                        if (progress) {
-                            progress->accept();
-                            progress->deleteLater();
+                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, weakProgress]() {
+                        if (weakProgress) {
+                            weakProgress->accept();
+                            weakProgress->deleteLater();
                         }
                         if (weakThis) {
                             qDebug() << "[ScanDialog] 批量删除完成, 正在刷新搜索结果...";
