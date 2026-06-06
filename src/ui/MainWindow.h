@@ -151,6 +151,7 @@ private:
     TrayController* m_trayController = nullptr;
     HoverEventFilter* m_hoverFilter = nullptr;
     ResizeEventFilter* m_resizeFilter = nullptr;
+    QTimer* m_sidebarRefreshTimer = nullptr;
     // 2026-04-17 按照用户要求：修复 m_idleTimer 重定义，保留上方唯一成员声明
     void initIdleDetector();
 };

@@ -4,6 +4,7 @@
 #include <vector>
 #include <QString>
 #include <QMap>
+#include <atomic>
 
 namespace ArcMeta {
 
@@ -63,6 +64,16 @@ public:
      * @brief 2026-06-xx 物理修复：在主线程预热缓存管理器，确保定时器线程归属正确
      */
     static void initialize();
+
+    // 增量计数接口 (Part 4)
+    static int getUncategorizedCount();
+    static void setTotalFileCount(int count);
+    static void incrementTotalFileCount(int delta);
+    static void incrementCategorizedCount(int delta);
+
+private:
+    static std::atomic<int> s_totalFileCount;
+    static std::atomic<int> s_categorizedCount;
 };
 
 } // namespace ArcMeta

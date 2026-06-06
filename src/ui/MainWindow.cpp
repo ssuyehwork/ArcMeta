@@ -486,15 +486,24 @@ void MainWindow::initUi() {
     });
 
     // 9. 2026-03-xx 按照用户要求：响应元数据全局变更，同步刷新侧边栏计数
-    // 确保在内容面板收藏项目后，侧边栏的“收藏 (X)”数字能实时跳变
-    // 2026-05-27 物理修复：显式增加 this 上下文参数
-    // 理由：MetadataManager 可能在后台线程（如初始化扫描阶段）发射信号，
-    // 若无 context 参数，Lambda 将在发射信号的后台线程执行，导致非法线程操作 UI 引起崩溃。
-    // 2026-06-xx 架构级优化：对接 CategoryPanel::requestRefresh 物理削峰逻辑，消除侧边栏刷新卡顿
-    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this]() {
-        if (m_categoryPanel) {
+    // 引入 800ms 防抖，防止信号风暴导致的 UI 假死
+    m_sidebarRefreshTimer = new QTimer(this);
+    m_sidebarRefreshTimer->setInterval(800);
+    m_sidebarRefreshTimer->setSingleShot(true);
+
+    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
+        if (!m_categoryPanel) return;
+
+        // __RELOAD_ALL__ 信号立即刷新，其他信号防抖
+        if (path == "__RELOAD_ALL__") {
             m_categoryPanel->requestRefresh();
+        } else {
+            m_sidebarRefreshTimer->start(); // 重置计时器
         }
+    });
+
+    connect(m_sidebarRefreshTimer, &QTimer::timeout, this, [this]() {
+        if (m_categoryPanel) m_categoryPanel->requestRefresh();
     });
 
     // 10. 侧边栏点击物理项（文件预览或文件夹跳转）

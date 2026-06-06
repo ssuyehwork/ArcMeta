@@ -18,6 +18,9 @@
 
 namespace ArcMeta {
 
+std::atomic<int> CategoryRepo::s_totalFileCount{0};
+std::atomic<int> CategoryRepo::s_categorizedCount{0};
+
 static std::wstring normalizePath(const std::wstring& path) {
     if (path.empty()) return L"";
     QString qp = QDir::toNativeSeparators(QDir::cleanPath(QString::fromStdWString(path)));
@@ -322,12 +325,13 @@ public:
     void markCatCountsDirty() { QMutexLocker locker(&m_mutex); m_catCountsDirty = true; }
 
     QMap<QString, int> getSystemCounts() {
-        QMutexLocker locker(&m_mutex);
-        ensureLoaded();
-        if (m_sysCountsDirty || m_lastCountDate != QDate::currentDate()) {
-            fullRecount();
-        }
-        return m_sysCountsCache;
+        QMap<QString, int> counts;
+        counts["all"]            = CategoryRepo::s_totalFileCount.load();
+        counts["uncategorized"]  = CategoryRepo::getUncategorizedCount();
+        counts["untagged"]       = CategoryRepo::s_totalFileCount.load() - TagRepo::getTaggedFileCount();
+        counts["recently_visited"] = 0; // 维持原逻辑或后续实现
+        counts["trash"]          = 0;
+        return counts;
     }
 
     void updateFidCategorized(const std::string& fid, int delta) {
@@ -336,6 +340,12 @@ public:
         int oldCount = m_fidCategorizedCount[fid];
         int newCount = std::max(0, oldCount + delta);
         m_fidCategorizedCount[fid] = newCount;
+
+        if (oldCount == 0 && newCount > 0) {
+            CategoryRepo::incrementCategorizedCount(1);
+        } else if (oldCount > 0 && newCount == 0) {
+            CategoryRepo::incrementCategorizedCount(-1);
+        }
 
         if ((oldCount == 0 && newCount > 0) || (oldCount > 0 && newCount == 0)) {
             std::wstring path = MetadataManager::instance().getPathByFid(fid);
@@ -489,6 +499,7 @@ private:
         m_records.clear();
         m_itemLookup.clear();
         m_fidCategorizedCount.clear();
+        int catFidCount = 0;
         for (uint32_t i = 0; i < header.itemCount; ++i) {
             CategoryItemRecord r;
             if (header.version >= 4) {
@@ -504,8 +515,12 @@ private:
             }
             m_records.push_back(r);
             m_itemLookup.insert(std::to_string(r.categoryId) + "_" + r.fileId128);
-            if (!r.fileId128.empty()) m_fidCategorizedCount[r.fileId128]++;
+            if (!r.fileId128.empty()) {
+                if (m_fidCategorizedCount[r.fileId128] == 0) catFidCount++;
+                m_fidCategorizedCount[r.fileId128]++;
+            }
         }
+        CategoryRepo::incrementCategorizedCount(catFidCount);
         m_catCountsDirty = true;
         m_sysCountsDirty = true;
     }
@@ -663,6 +678,22 @@ void CategoryRepo::initialize() {
     (void)CategoryCacheManager::instance();
 }
 
+int CategoryRepo::getUncategorizedCount() {
+    return s_totalFileCount.load() - s_categorizedCount.load();
+}
+
+void CategoryRepo::setTotalFileCount(int count) {
+    s_totalFileCount.store(count);
+}
+
+void CategoryRepo::incrementTotalFileCount(int delta) {
+    s_totalFileCount += delta;
+}
+
+void CategoryRepo::incrementCategorizedCount(int delta) {
+    s_categorizedCount += delta;
+}
+
 // CategoryRepo Implementation
 std::vector<Category> CategoryRepo::getAll() { return ScchCategoryEngine::getAll(); }
 std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) { 
@@ -695,9 +726,17 @@ bool CategoryRepo::reorder(int parentId, bool ascending) { return ScchCategoryEn
 bool CategoryRepo::reorderAll(bool ascending) { return ScchCategoryEngine::reorderAll(ascending); }
 
 bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint) { 
-    return ScchCategoryEngine::addItemToCategory(categoryId, fileId128, pathHint); 
+    if (ScchCategoryEngine::addItemToCategory(categoryId, fileId128, pathHint)) {
+        // 增量计数逻辑由 CategoryCacheManager::updateFidCategorized 处理，
+        // 但我们需要手动触发增量计数以匹配 atomic。
+        // 为了简单，我们让 CategoryCacheManager 操作 atomic。
+        return true;
+    }
+    return false;
 }
-bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fileId128) { return ScchCategoryEngine::removeItemFromCategory(categoryId, fileId128); }
+bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fileId128) {
+    return ScchCategoryEngine::removeItemFromCategory(categoryId, fileId128);
+}
 std::vector<CategoryItem> CategoryRepo::getItemsInCategory(int categoryId) { return ScchCategoryEngine::getItemsInCategory(categoryId); }
 std::vector<CategoryItem> CategoryRepo::getItemsRecursive(int categoryId) { return ScchCategoryEngine::getItemsRecursive(categoryId); }
 

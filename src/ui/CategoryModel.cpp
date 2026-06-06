@@ -28,6 +28,17 @@ void CategoryModel::deferredRefresh() {
 }
 
 void CategoryModel::refresh() {
+    if (!m_isFirstLoad) {
+        // 后续刷新：只更新系统计数
+        auto sysCounts = CategoryRepo::getSystemCounts();
+        auto catCountsVec = CategoryRepo::getCounts();
+        QMap<int, int> catCounts;
+        for (const auto& p : catCountsVec) catCounts[p.first] = p.second;
+        updateStatistics(sysCounts, catCounts);
+        return;
+    }
+    m_isFirstLoad = false;
+
     // 2026-06-xx 物理修复：废除破坏性的 clear()，改用 beginResetModel 手动管理。
     // 理由：clear() 会提前发射重置信号，导致 UI 在数据还没填充时就尝试恢复展开状态，引发折叠。
     beginResetModel();
