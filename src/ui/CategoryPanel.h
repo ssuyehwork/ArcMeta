@@ -104,6 +104,7 @@ private:
 
     // 2026-04-15 物理锁：恢复状态期间严禁反向触发保存，防止信号回流污染 Settings
     bool m_isRestoringState = false;
+    bool m_isFirstLoad = true;
 };
 
 } // namespace ArcMeta

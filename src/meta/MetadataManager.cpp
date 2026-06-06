@@ -39,34 +39,6 @@ namespace ArcMeta {
 
 // --- Internal Helper Functions ---
 
-static void migrateLegacyScch(const std::wstring& folderPath) {
-    QString legacyPath = QString::fromStdWString(folderPath);
-    if (!legacyPath.endsWith('/') && !legacyPath.endsWith('\\')) legacyPath += '/';
-    legacyPath += "metadata.scch";
-
-    if (!QFile::exists(legacyPath)) return;
-
-    // 读取旧格式 (显式使用 __LEGACY__ 标记)
-    ArcMeta::AmMetaScch legacy(folderPath, L"__LEGACY__");
-    if (!legacy.load()) return;
-
-    // 拆分写入新格式
-    // 1. 文件夹自身
-    ArcMeta::AmMetaScch folderScch(folderPath, L"");
-    folderScch.folder() = legacy.folder();
-    folderScch.save();
-
-    // 2. 每个文件项
-    for (const auto& kv : legacy.items()) {
-        ArcMeta::AmMetaScch fileScch(folderPath, kv.first);
-        fileScch.setItem(kv.second);
-        fileScch.save();
-    }
-
-    // 3. 删除旧文件
-    QFile::remove(legacyPath);
-}
-
 static std::wstring normalizePath(const std::wstring& path) {
     if (path.empty()) return L"";
     QString qp = QDir::toNativeSeparators(QDir::cleanPath(QString::fromStdWString(path)));
@@ -171,9 +143,6 @@ void MetadataManager::initFromScchMode() {
         QString lastKnownPath = itMap.value();
         std::wstring resolvedPath = QDir::toNativeSeparators(lastKnownPath).toStdWString();
 
-        // 迁移旧格式（如果存在）
-        migrateLegacyScch(resolvedPath);
-        
         if (!QDir(QString::fromStdWString(resolvedPath)).exists()) {
             bool ok = false;
             unsigned long long frnVal = frnStr.toULongLong(&ok, 16);
@@ -303,36 +272,6 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
             }
         }
 
-        // 兼容旧格式回退逻辑（如果新格式没找到，显式请求 __LEGACY__）
-        if (!hasMeta) {
-            ArcMeta::AmMetaScch legacyLoader(parentDir, L"__LEGACY__");
-            if (legacyLoader.load()) {
-                if (info.isDir()) {
-                    const FolderMeta& folder = legacyLoader.folder();
-                    if (!folder.isDefault()) {
-                        rm.rating = folder.rating; rm.color = folder.color;
-                        rm.pinned = folder.pinned; rm.note = folder.note; rm.url = folder.url; rm.palettes = folder.palettes;
-                        rm.isFolder = true;
-                        rm.fileId128 = folder.fileId128;
-                        for (size_t i = 0; i < folder.tags.size(); ++i) rm.tags << QString::fromStdWString(folder.tags[i]);
-                        hasMeta = true;
-                    }
-                } else {
-                    const std::map<std::wstring, ItemMeta>& its = legacyLoader.items();
-                    auto it = its.find(fileName);
-                    if (it != its.end()) {
-                        const ItemMeta& item = it->second;
-                        rm.rating = item.rating; rm.color = item.color;
-                        rm.pinned = item.pinned; rm.encrypted = item.encrypted;
-                        rm.note = item.note; rm.url = item.url; rm.palettes = item.palettes;
-                        rm.isFolder = (item.type == L"folder");
-                        rm.fileId128 = item.fileId128;
-                        for (size_t i = 0; i < item.tags.size(); ++i) rm.tags << QString::fromStdWString(item.tags[i]);
-                        hasMeta = true;
-                    }
-                }
-            }
-        }
 
         if (hasMeta) {
             fetchWinApiMetadataDirect(nPath, rm.fileId128, nullptr, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime);
@@ -514,14 +453,21 @@ QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
     }
 
     QFileInfo info(QString::fromStdWString(nPath));
-    ArcMeta::AmMetaScch loader(QDir::toNativeSeparators(info.absolutePath()).toStdWString());
+    std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
+    std::wstring fileName = info.fileName().toStdWString();
+
+    ArcMeta::AmMetaScch loader(parentDir, info.isDir() ? L"" : fileName);
     if (loader.load()) {
         std::vector<PaletteEntry> entries;
-        if (info.isDir()) entries = loader.folder().palettes;
-        else {
-            const std::map<std::wstring, ItemMeta>& its = loader.items();
-            if (its.count(info.fileName().toStdWString())) entries = its.at(info.fileName().toStdWString()).palettes;
+        bool hasEntries = false;
+        if (info.isDir()) {
+            entries = loader.folder().palettes;
+            hasEntries = !entries.empty();
+        } else {
+            entries = loader.item().palettes;
+            hasEntries = !entries.empty();
         }
+
         
         if (!entries.empty()) {
             std::unique_lock<std::shared_mutex> lock(m_mutex);
@@ -569,22 +515,13 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
     }
     QFileInfo info(QString::fromStdWString(path));
     if (info.isDir()) {
-        // 1. 删除旧格式
-        QFile::remove(info.absoluteFilePath() + "/metadata.scch");
-        // 2. 删除新格式目录
+        // 删除新格式目录
         QDir arcmetaDir(info.absoluteFilePath() + "/.arcmeta");
         arcmetaDir.removeRecursively();
     } else {
-        // 1. 删除文件级 scch
+        // 删除文件级 scch
         QString scchPath = info.absolutePath() + "/.arcmeta/" + info.fileName() + ".scch";
         QFile::remove(scchPath);
-
-        // 2. 同时也尝试从旧格式中移除
-        ArcMeta::AmMetaScch scchLoader(info.absolutePath().toStdWString());
-        if (scchLoader.load()) {
-            scchLoader.remove(info.fileName().toStdWString());
-            scchLoader.save();
-        }
     }
 }
 

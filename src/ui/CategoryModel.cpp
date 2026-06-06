@@ -191,6 +191,18 @@ void CategoryModel::refresh() {
     endResetModel();
 }
 
+void CategoryModel::updateSystemCounts() {
+    auto counts = CategoryRepo::getSystemCounts();
+    for (int i = 0; i < invisibleRootItem()->rowCount(); ++i) {
+        QStandardItem* item = invisibleRootItem()->child(i);
+        QString type = item->data(TypeRole).toString();
+        if (counts.contains(type)) {
+            QString name = item->data(NameRole).toString();
+            item->setText(QString("%1 (%2)").arg(name).arg(counts[type]));
+        }
+    }
+}
+
 void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
     // 2026-06-xx 极致性能优化：采用深度遍历进行局部 setData 更新，杜绝 beginResetModel 引发视图抖动
     std::function<void(QStandardItem*)> updateItem;

@@ -66,24 +66,29 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     connect(m_refreshTimer, &QTimer::timeout, this, [this]() {
         if (!m_categoryModel) return;
         
-        // 2026-06-xx 物理分流：将耗时的统计计算（fullRecount）移出 UI 线程
-        // 采用 QPointer 确保线程安全性
-        QPointer<CategoryPanel> weakThis(this);
-        (void)QtConcurrent::run([weakThis]() {
-            auto sysCounts = CategoryRepo::getSystemCounts();
-            auto catCountsVec = CategoryRepo::getCounts();
-            
-            QMap<int, int> catCounts;
-            for (const auto& p : catCountsVec) catCounts[p.first] = p.second;
-            
-            // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
-            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, sysCounts, catCounts]() {
-                if (weakThis && weakThis->m_categoryModel) {
-                    // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
-                    weakThis->m_categoryModel->updateStatistics(sysCounts, catCounts);
-                }
+        if (m_isFirstLoad) {
+            m_categoryModel->refresh();
+            m_isFirstLoad = false;
+        } else {
+            // 2026-06-xx 物理分流：将耗时的统计计算（fullRecount）移出 UI 线程
+            // 采用 QPointer 确保线程安全性
+            QPointer<CategoryPanel> weakThis(this);
+            (void)QtConcurrent::run([weakThis]() {
+                auto sysCounts = CategoryRepo::getSystemCounts();
+                auto catCountsVec = CategoryRepo::getCounts();
+
+                QMap<int, int> catCounts;
+                for (const auto& p : catCountsVec) catCounts[p.first] = p.second;
+
+                // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
+                QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, sysCounts, catCounts]() {
+                    if (weakThis && weakThis->m_categoryModel) {
+                        // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
+                        weakThis->m_categoryModel->updateStatistics(sysCounts, catCounts);
+                    }
+                });
             });
-        });
+        }
     });
 
     initUi();

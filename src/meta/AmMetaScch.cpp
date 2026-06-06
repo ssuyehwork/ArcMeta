@@ -47,20 +47,9 @@ namespace {
 
 AmMetaScch::AmMetaScch(const std::wstring& folderPath, const std::wstring& fileName)
     : m_folderPath(folderPath) {
-    m_arcmetaDir = folderPath;
-    if (!m_arcmetaDir.empty() && m_arcmetaDir.back() != L'\\' && m_arcmetaDir.back() != L'/') {
-        m_arcmetaDir += L"\\";
-    }
-    m_arcmetaDir += L".arcmeta";
+    m_arcmetaDir = folderPath + L"\\.arcmeta";
 
-    if (fileName == L"__LEGACY__") {
-        // 过渡期：显式请求旧版 metadata.scch
-        std::wstring legacyPath = folderPath;
-        if (!legacyPath.empty() && legacyPath.back() != L'\\' && legacyPath.back() != L'/') legacyPath += L'\\';
-        legacyPath += L"metadata.scch";
-        m_filePath = legacyPath;
-        m_isFileMode = false;
-    } else if (fileName.empty()) {
+    if (fileName.empty()) {
         // 文件夹自身元数据模式
         m_filePath = m_arcmetaDir + L"\\__folder__.scch";
         m_isFileMode = false;
@@ -101,6 +90,9 @@ bool AmMetaScch::load() {
         int iPalCount = 0; ds >> iPalCount;
         m_item.palettes.clear();
         for (int k = 0; k < iPalCount; ++k) { PaletteEntry p; ds >> p; m_item.palettes.push_back(p); }
+
+        // 兼容性：如果加载的是旧版目录级 scch（通过构造函数误用），清空 items
+        m_items.clear();
     } else {
         ds >> m_folder.sortBy >> m_folder.sortOrder >> m_folder.rating >> m_folder.color;
         int tagCount = 0; ds >> tagCount;

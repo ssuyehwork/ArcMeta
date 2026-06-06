@@ -32,6 +32,7 @@ public slots:
      * @param catCounts 用户分类项计数映射
      */
     void updateStatistics(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts);
+    void updateSystemCounts();
 
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     bool setData(const QModelIndex& index, const QVariant& val, int role = Qt::EditRole) override;
