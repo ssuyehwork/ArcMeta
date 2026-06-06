@@ -250,6 +250,27 @@ QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientati
     return QVariant();
 }
 
+QStringList FerrexVirtualDbModel::mimeTypes() const {
+    return {"text/uri-list"};
+}
+
+QMimeData* FerrexVirtualDbModel::mimeData(const QModelIndexList& indexes) const {
+    QMimeData* mime = new QMimeData();
+    QList<QUrl> urls;
+    for (const auto& idx : indexes) {
+        if (idx.column() == 0) {
+            QString path = data(idx, PathRole).toString();
+            if (!path.isEmpty()) urls << QUrl::fromLocalFile(path);
+        }
+    }
+    if (urls.isEmpty()) {
+        delete mime;
+        return nullptr;
+    }
+    mime->setUrls(urls);
+    return mime;
+}
+
 bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& value, int role) {
     if (!index.isValid() || index.row() >= (int)m_allRecords.size()) return false;
 
