@@ -186,6 +186,43 @@ void CategoryModel::refresh() {
     endResetModel();
 }
 
+void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
+    // 2026-06-xx 极致性能优化：采用深度遍历进行局部 setData 更新，杜绝 beginResetModel 引发视图抖动
+    std::function<void(QStandardItem*)> updateItem;
+    updateItem = [&](QStandardItem* parent) {
+        for (int i = 0; i < parent->rowCount(); ++i) {
+            QStandardItem* item = parent->child(i);
+            QString type = item->data(TypeRole).toString();
+            QString name = item->data(NameRole).toString();
+            int id = item->data(IdRole).toInt();
+
+            bool changed = false;
+            if (id < 0) { // 系统项
+                int count = sysCounts.value(type, 0);
+                QString newText = QString("%1 (%2)").arg(name).arg(count);
+                if (item->text() != newText) {
+                    item->setText(newText);
+                    changed = true;
+                }
+            } else if (type == "category" && id > 0) { // 用户分类
+                int count = catCounts.value(id, 0);
+                QString newText = QString("%1 (%2)").arg(name).arg(count);
+                if (item->text() != newText) {
+                    item->setText(newText);
+                    changed = true;
+                }
+            }
+
+            // 递归处理子项
+            if (item->hasChildren()) {
+                updateItem(item);
+            }
+        }
+    };
+
+    updateItem(invisibleRootItem());
+}
+
 void CategoryModel::loadCategoryItems(const QModelIndex& parentIndex) {
     Q_UNUSED(parentIndex);
 }

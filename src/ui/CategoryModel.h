@@ -26,6 +26,13 @@ public slots:
     // 2026-05-27 物理修复：refresh 改为异步逻辑，不再直接执行数据库
     void refresh();
 
+    /**
+     * @brief 2026-06-xx 物理优化：执行局部统计更新，杜绝全量重置
+     * @param sysCounts 系统项计数映射
+     * @param catCounts 用户分类项计数映射
+     */
+    void updateStatistics(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts);
+
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     bool setData(const QModelIndex& index, const QVariant& val, int role = Qt::EditRole) override;
 
