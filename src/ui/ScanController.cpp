@@ -277,12 +277,18 @@ void ScanController::runFullScan(std::function<void(int current, int total, cons
         reader.updateActiveDrives(allDrives);
         if (reader.totalCount() == 0) reader.buildIndex(allDrives);
 
-        // 2. 全盘检索 metadata.scch
-        std::vector<uint64_t> metaFileKeys = reader.search("metadata.scch", false, false, {}, true, true, true);
-        int total = (int)metaFileKeys.size();
+        // 2. 全盘检索 .arcmeta 目录 (及兼容旧版 metadata.scch 以便迁移)
+        std::vector<uint64_t> arcmetaKeys = reader.search(".arcmeta", false, false, {}, true, true, true);
+        std::vector<uint64_t> legacyKeys = reader.search("metadata.scch", false, false, {}, true, true, true);
+
+        // 合并搜索结果
+        std::set<uint64_t> allKeys(arcmetaKeys.begin(), arcmetaKeys.end());
+        allKeys.insert(legacyKeys.begin(), legacyKeys.end());
+
+        int total = (int)allKeys.size();
         int current = 0;
 
-        for (uint64_t key : metaFileKeys) {
+        for (uint64_t key : allKeys) {
             int idx = reader.getIndexByKey(key);
             if (idx == -1) continue;
 
@@ -290,17 +296,18 @@ void ScanController::runFullScan(std::function<void(int current, int total, cons
             if (onProgress) onProgress(current, total, fullPath.toStdWString());
 
             QFileInfo fi(fullPath);
+            // 对于 metadata.scch，fi.absolutePath() 是所属目录
+            // 对于 .arcmeta，fi.absolutePath() 也是所属目录（因为 .arcmeta 是子目录）
             std::wstring folderPath = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
             
-            // 登记 FRN 锚点
+            // 登记 FRN 锚点 (使用 .arcmeta 目录或 metadata.scch 文件的 FRN 作为追踪凭据)
             wchar_t frnBuf[17];
-            uint64_t fileFrn = key & 0x0000FFFFFFFFFFFFull;
-            swprintf(frnBuf, 17, L"%016llX", fileFrn);
+            uint64_t anchorFrn = key & 0x0000FFFFFFFFFFFFull;
+            swprintf(frnBuf, 17, L"%016llX", anchorFrn);
             AllFrnManager::registerFrn(frnBuf, folderPath);
 
-            // 预加载元数据到内存（由于已经切换为全 SCCH 模式，此处加载即生效）
-            AmMetaScch amScch(folderPath);
-            amScch.load();
+            // 触发 MetadataManager 的加载/迁移逻辑
+            MetadataManager::instance().getMeta(folderPath);
 
             current++;
         }
