@@ -71,6 +71,11 @@ public:
 
     const std::vector<ItemRecord>& allRecords() const { return m_allRecords; }
 
+    /**
+     * @brief 2026-06-xx 物理同步：从 MetadataManager 重新拉取指定路径的元数据并刷新 UI
+     */
+    void updateRecordMetadata(const QString& path);
+
 private:
     std::vector<ItemRecord> m_allRecords;
     int m_displayCount = 0;
@@ -280,6 +285,16 @@ public slots:
      * @brief 加载并显示目录内容
      */
     void loadDirectory(const QString& path, bool recursive = false);
+
+    /**
+     * @brief 强制重新加载当前视图的所有内容
+     */
+    void refreshAll();
+
+    /**
+     * @brief 局部更新某项的元数据（星级、颜色、标签等）
+     */
+    void updateItemMetadata(const QString& path);
 
     /**
      * @brief 全局/本地搜索

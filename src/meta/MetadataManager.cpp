@@ -295,6 +295,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
     if (m_cache.find(nPath) != m_cache.end()) return;
 
+    qDebug() << "[Metadata] 正在激活路径元数据容器:" << QString::fromStdWString(nPath);
     // 激活操作
     RuntimeMeta rm;
     std::wstring frn;
@@ -318,6 +319,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
 
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] setRating ->" << QString::fromStdWString(nPath) << "Val:" << rating;
     ensureActivated(nPath);
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
@@ -329,6 +331,7 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
 
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] setColor ->" << QString::fromStdWString(nPath) << "Val:" << QString::fromStdWString(color);
     ensureActivated(nPath);
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
@@ -340,6 +343,7 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
 
 void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool notify) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] setPinned ->" << QString::fromStdWString(nPath) << "Val:" << pinned;
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
@@ -348,6 +352,7 @@ void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool noti
 
 void MetadataManager::setTags(const std::wstring& path, const QStringList& tags, bool notify) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] setTags ->" << QString::fromStdWString(nPath) << "Val:" << tags;
     ensureActivated(nPath);
 
     // 1. 获取旧标签
@@ -391,6 +396,7 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
 
 void MetadataManager::setNote(const std::wstring& path, const std::wstring& note, bool notify) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] setNote ->" << QString::fromStdWString(nPath);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
@@ -399,6 +405,7 @@ void MetadataManager::setNote(const std::wstring& path, const std::wstring& note
 
 void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, bool notify) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] setURL ->" << QString::fromStdWString(nPath);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
@@ -407,6 +414,7 @@ void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, 
 
 void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, bool notify) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] setEncrypted ->" << QString::fromStdWString(nPath) << "Val:" << encrypted;
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].encrypted = encrypted; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
@@ -415,6 +423,7 @@ void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, boo
 
 void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] setPalettes ->" << QString::fromStdWString(nPath) << "Count:" << palettes.size();
     ensureActivated(nPath);
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
@@ -425,6 +434,7 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
 
 void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std::wstring& color, const QVector<QPair<QColor, float>>& palettes, bool notify) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] setItemVisualMetadata ->" << QString::fromStdWString(nPath);
     ensureActivated(nPath);
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
@@ -576,6 +586,7 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
 
 void MetadataManager::persistAsync(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] 准备持久化元数据到磁盘:" << QString::fromStdWString(nPath);
     QFileInfo info(QString::fromStdWString(nPath));
     std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
     std::wstring fileName = info.fileName().toStdWString();
