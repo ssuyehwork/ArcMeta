@@ -352,37 +352,13 @@ std::wstring MetadataManager::getPathByFid(const std::string& fid) {
     return (it != m_fidToPath.end()) ? it->second : L"";
 }
 
-void MetadataManager::ensureActivated(const std::wstring& nPath) {
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
-    if (m_cache.find(nPath) != m_cache.end()) return;
-
-    // 激活操作
-    RuntimeMeta rm;
-    std::wstring frn;
-    if (fetchWinApiMetadataDirect(nPath, rm.fileId128, &frn, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime)) {
-        rm.isFolder = QFileInfo(QString::fromStdWString(nPath)).isDir();
-        m_cache[nPath] = rm;
-        if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;
-
-        // 注册到 AllFrnManager (锚点为所属目录的 .arcmeta)
-        QFileInfo info(QString::fromStdWString(nPath));
-        std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-        std::wstring arcmetaPath = parentDir + L"\\.arcmeta";
-        std::wstring arcmetaFrn; std::string arcmetaFid;
-        if (fetchWinApiMetadataDirect(arcmetaPath, arcmetaFid, &arcmetaFrn)) {
-            AllFrnManager::registerFrn(arcmetaFrn, parentDir);
-        }
-
-        if (!rm.isFolder) CategoryRepo::incrementTotalFileCount(1);
-    }
-}
-
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
     std::wstring nPath = normalizePath(path);
-    ensureActivated(nPath);
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
+        bool isNew = (m_cache.find(nPath) == m_cache.end());
         m_cache[nPath].rating = rating; 
+        if (isNew && !m_cache[nPath].isFolder) CategoryRepo::incrementTotalFileCount(1);
     }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
@@ -390,10 +366,11 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
 
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
     std::wstring nPath = normalizePath(path);
-    ensureActivated(nPath);
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
+        bool isNew = (m_cache.find(nPath) == m_cache.end());
         m_cache[nPath].color = color; 
+        if (isNew && !m_cache[nPath].isFolder) CategoryRepo::incrementTotalFileCount(1);
     }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
@@ -401,7 +378,6 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
 
 void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool notify) {
     std::wstring nPath = normalizePath(path);
-    ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
@@ -409,7 +385,6 @@ void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool noti
 
 void MetadataManager::setTags(const std::wstring& path, const QStringList& tags, bool notify) {
     std::wstring nPath = normalizePath(path);
-    ensureActivated(nPath);
 
     // 1. 获取旧标签
     QStringList oldTags;
@@ -424,10 +399,13 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
     }
 
     // 2. 更新内存缓存
+    bool isNewItem = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
+        if (m_cache.find(nPath) == m_cache.end()) isNewItem = true;
         m_cache[nPath].tags = tags;
-        if (fid.empty()) fid = m_cache[nPath].fileId128;
+        if (fid.empty()) fid = m_cache[nPath].fileId128; // 如果之前缓存没 FID，尝试在此刻获取
+        if (isNewItem && !m_cache[nPath].isFolder) CategoryRepo::incrementTotalFileCount(1);
     }
 
     // 3. 增量更新全局标签索引
@@ -452,7 +430,6 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
 
 void MetadataManager::setNote(const std::wstring& path, const std::wstring& note, bool notify) {
     std::wstring nPath = normalizePath(path);
-    ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
@@ -460,7 +437,6 @@ void MetadataManager::setNote(const std::wstring& path, const std::wstring& note
 
 void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, bool notify) {
     std::wstring nPath = normalizePath(path);
-    ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
@@ -468,7 +444,6 @@ void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, 
 
 void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, bool notify) {
     std::wstring nPath = normalizePath(path);
-    ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].encrypted = encrypted; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
@@ -476,7 +451,6 @@ void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, boo
 
 void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify) {
     std::wstring nPath = normalizePath(path);
-    ensureActivated(nPath);
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].palettes = entries; }
@@ -486,7 +460,6 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
 
 void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std::wstring& color, const QVector<QPair<QColor, float>>& palettes, bool notify) {
     std::wstring nPath = normalizePath(path);
-    ensureActivated(nPath);
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
     

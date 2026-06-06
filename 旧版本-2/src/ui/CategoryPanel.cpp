@@ -892,21 +892,63 @@ void CategoryPanel::initUi() {
             isBlankDrop = true;
         }
 
-        BatchProgressDialog* progress = new BatchProgressDialog("正在处理项目导入...", this);
+        BatchProgressDialog* progress = new BatchProgressDialog("正在同步导入文件夹(递归)...", this);
         progress->show();
         
-        (void)QtConcurrent::run([this, paths, targetCatId, progress]() {
-            // A. 第一阶段：快速统计总项数
-            int totalItems = 0;
-            std::function<void(const QString&)> countTask = [&](const QString& p) {
-                QDir dir(p);
-                QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-                totalItems += entries.size();
-                for (const QFileInfo& info : entries) {
-                    if (info.isDir()) countTask(info.absoluteFilePath());
-                }
+        (void)QThreadPool::globalInstance()->start([this, paths, targetCatId, progress]() {
+            
+            // 2026-06-xx 物理加固：路径清洗与归一化 (Windows 统一小写以防映射失效)
+            auto cleanPath = [](const QString& p) {
+                if (p.isEmpty()) return QString();
+                // 方案 2 核心点：强制 cleanPath 并移除末尾斜杠
+                QString cp = QDir::toNativeSeparators(QDir::cleanPath(p));
+#ifdef Q_OS_WIN
+                cp = cp.toLower(); // 解决大小写不统一导致的 Map 迷失
+                // 处理盘符根目录 (如 c: -> c:\)
+                if (cp.length() == 2 && cp.endsWith(':')) cp += '\\';
+#endif
+                // 确保非根目录路径不带尾部斜杠
+                if (cp.length() > 3 && (cp.endsWith('\\') || cp.endsWith('/'))) cp.chop(1);
+                return cp;
             };
-            for(const auto& p : paths) { countTask(p); totalItems++; }
+
+            QStringList cleanedPaths;
+            for(const QString& p : paths) {
+                QString c = cleanPath(p);
+                if (!c.isEmpty()) cleanedPaths << c;
+            }
+            cleanedPaths.removeDuplicates();
+            cleanedPaths.sort();
+
+            // 方案 3 核心：剔除冗余子路径。如果拖拽了 A 文件夹及其子文件夹 B，只处理 A
+            QStringList filteredPaths;
+            for (const QString& p : cleanedPaths) {
+                bool isRedundant = false;
+                for (const QString& existing : filteredPaths) {
+                    QString prefix = existing;
+                    if (!prefix.endsWith('\\') && !prefix.endsWith('/')) prefix += '\\';
+                    if (p.startsWith(prefix)) {
+                        isRedundant = true;
+                        break;
+                    }
+                }
+                if (!isRedundant) filteredPaths << p;
+            }
+
+            // A. 第一阶段：快速物理统计总项数 (包含文件夹)
+            int totalItems = 0;
+            for (const QString& path : filteredPaths) {
+                QFileInfo info(path);
+                if (info.isDir()) {
+                    QDirIterator it(path, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+                    while (it.hasNext()) { 
+                        it.next();
+                        if (it.fileName() == "metadata.scch") continue;
+                        totalItems++; 
+                    }
+                }
+                totalItems++;
+            }
 
             QMetaObject::invokeMethod(progress, [progress, totalItems]() {
                 progress->setRange(0, totalItems);
@@ -915,75 +957,160 @@ void CategoryPanel::initUi() {
 
             int currentTask = 0;
 
-            // 激活并归类的核心 Lambda
-            auto processItem = [&](const QString& itemPath, int catId) {
-                QFileInfo info(itemPath);
-                std::wstring wp = QDir::toNativeSeparators(itemPath).toStdWString();
-                
-                // 1. 如果是图像，解析颜色
-                if (info.isFile() && UiHelper::isGraphicsFile(info.suffix().toLower())) {
-                    if (MetadataManager::instance().getMeta(wp).color.empty()) {
-                        auto palette = UiHelper::extractPalette(itemPath);
+            // 辅助 Lambda：确保分类存在，不存在则创建
+            auto ensureCategory = [&](const std::wstring& name, int parentId) -> int {
+                // 2026-06-xx 修复：不再信赖初始快照，通过 CategoryRepo 提供的线程安全高效查找接口执行实时校验
+                int existingId = CategoryRepo::findCategoryId(parentId, name);
+                if (existingId > 0) return existingId;
+
+                Category cat;
+                cat.name = name;
+                cat.parentId = parentId;
+                cat.color = getDefaultCategoryColor();
+                if (CategoryRepo::add(cat)) {
+                    return cat.id;
+                }
+                return 0;
+            };
+
+            QMap<QString, int> pathIdMap;
+
+            // 辅助：从文件夹中提取代表性颜色
+            auto extractFolderColor = [&](const QString& dirPath) {
+                std::wstring wPath = QDir::toNativeSeparators(dirPath).toStdWString();
+                // 2026-06-xx 物理优化：前置存在性检查，避免重复解析
+                if (!MetadataManager::instance().getMeta(wPath).color.empty()) return;
+
+                QDir dir(dirPath);
+                QFileInfoList files = dir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                for (const auto& fi : files) {
+                    if (UiHelper::isGraphicsFile(fi.suffix().toLower())) {
+                        auto palette = UiHelper::extractPalette(fi.absoluteFilePath());
                         if (!palette.isEmpty()) {
                             QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                            MetadataManager::instance().setItemVisualMetadata(wp, dominant.name().toUpper().toStdWString(), palette, false);
+                            // 2026-06-xx 物理优化：原子化视觉更新，静默更新避免信号风暴
+                            MetadataManager::instance().setItemVisualMetadata(wPath, dominant.name().toUpper().toStdWString(), palette, false);
+                            return;
                         }
                     }
-                } 
-                // 2. 如果是文件夹，也要解析文件夹颜色 (基于内容)
-                else if (info.isDir()) {
-                    if (MetadataManager::instance().getMeta(wp).color.empty()) {
-                         QDir subDir(itemPath);
-                         QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-                         for (const auto& sf : subFiles) {
-                             if (UiHelper::isGraphicsFile(sf.suffix().toLower())) {
-                                 auto palette = UiHelper::extractPalette(sf.absoluteFilePath());
-                                 if (!palette.isEmpty()) {
-                                     QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                                     MetadataManager::instance().setItemVisualMetadata(wp, dominant.name().toUpper().toStdWString(), palette, false);
-                                     break;
-                                 }
-                             }
-                         }
-                    }
                 }
+            };
 
-                // 3. 激活：获取 FID/FRN, 注册 AllFrnManager, 写入 .arcmeta/
-                MetadataManager::instance().syncPhysicalMetadata(wp);
-                
-                // 4. 归类 (如果 targetCatId > 0)
-                if (catId > 0) {
-                    std::string fid = MetadataManager::instance().getFileIdSync(wp);
-                    if (!fid.empty()) {
-                        CategoryRepo::addItemToCategory(catId, fid, wp);
+            // 辅助处理函数：执行物理入库并归类
+            auto processItem = [&](const QString& itemPath, int catId) {
+                QFileInfo info(itemPath);
+                std::wstring wPath = QDir::toNativeSeparators(itemPath).toStdWString();
+                std::string fid;
+                std::wstring frn; // 物理身份 FRN (强制要求使用)
+                long long size = 0, ctime = 0, mtime = 0;
+
+                // 2026-06-xx 物理加固：调用 fetchWinApiMetadataDirect 提取 FRN 与 SHA-256 ID
+                if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid, &frn, &size, nullptr, &ctime, &mtime)) {
+                    std::wstring vol = MetadataManager::getVolumeSerialNumber(wPath);
+                    std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
+                    
+                    // 1. 物理入库（使用真实 FRN 杜绝冲突）
+                    
+                    // 2. 执行归类关联 (如果 catId > 0)
+                    if (catId > 0) {
+                        CategoryRepo::addItemToCategory(catId, fid, wPath);
+                    }
+
+                    // 2026-06-xx 物理同步：触发元数据持久化以生成 metadata.scch，实现“目录导航”状态感应
+                    MetadataManager::instance().syncPhysicalMetadata(wPath);
+
+                    // 2026-06-xx 按照用户要求：针对特定格式文件，在拖拽导入时自动进行颜色解析
+                    QString ext = info.suffix().toLower();
+                    if (UiHelper::isGraphicsFile(ext)) {
+                        // 2026-06-xx 物理优化：前置检查，避免对已有元数据的文件重复解析
+                        if (MetadataManager::instance().getMeta(wPath).color.empty()) {
+                            // 1. 提取全量色板
+                            auto palette = UiHelper::extractPalette(itemPath);
+                            if (!palette.isEmpty()) {
+                                // 2. 提取第一个颜色作为主色调并量化
+                                QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                QString colorHex = dominant.name().toUpper();
+
+                                // 3. 物理双重存储：原子化视觉更新，静默更新避免信号风暴
+                                MetadataManager::instance().setItemVisualMetadata(wPath, colorHex.toStdWString(), palette, false);
+                            }
+                        }
                     }
                 }
             };
 
-            // 递归激活并归类
-            std::function<void(const QString&, int)> activateAndCategorize = [&](const QString& p, int catId) {
-                QFileInfo info(p);
-                processItem(p, catId);
+            for (const QString& rootPath : filteredPaths) {
+                QFileInfo rootInfo(rootPath);
+                QString nativeRoot = cleanPath(rootPath);
                 
-                currentTask++;
-                if (currentTask % 50 == 0) {
-                    QMetaObject::invokeMethod(progress, [progress, currentTask, p]() {
-                        progress->setValue(currentTask);
-                        progress->setStatus("正在导入: " + QFileInfo(p).fileName());
-                    });
-                }
-
-                if (info.isDir()) {
-                    QDir dir(p);
-                    QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-                    for (const QFileInfo& subInfo : entries) {
-                        activateAndCategorize(subInfo.absoluteFilePath(), catId);
+                if (rootInfo.isDir()) {
+                    // 文件夹逻辑：自动创建分类节点
+                    QString folderName = rootInfo.fileName();
+                    if (folderName.isEmpty()) {
+                        folderName = rootInfo.absolutePath();
+                        if (folderName.endsWith('\\') || folderName.endsWith('/')) folderName.chop(1);
                     }
-                }
-            };
+                    int rootCatId = ensureCategory(folderName.toStdWString(), targetCatId);
+                    pathIdMap[nativeRoot] = rootCatId;
+                    
+                    // 2026-06-xx 按照用户要求：顶层文件夹入库时同样执行颜色解析
+                    MetadataManager::instance().syncPhysicalMetadata(rootInfo.absoluteFilePath().toStdWString());
+                    extractFolderColor(rootPath);
 
-            for (const QString& rootPath : paths) {
-                activateAndCategorize(rootPath, targetCatId);
+                    // 物理递归：1:1 复刻文件夹层级到分类树
+                    QDirIterator it(rootPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+                    while (it.hasNext()) {
+                        QString itemPath = it.next();
+                        QFileInfo info = it.fileInfo();
+                        QString nativePath = cleanPath(itemPath);
+                        QString nativeParent = cleanPath(info.absolutePath());
+                        
+                        // 方案 2 增强：深度向上递归检索 parentId，杜绝“无家可归”导致的冗余顶层
+                        int currentParentId = targetCatId; // 默认挂载到释放位置
+                        QString pSearch = nativeParent;
+                        while (!pSearch.isEmpty()) {
+                            if (pathIdMap.contains(pSearch)) {
+                                currentParentId = pathIdMap[pSearch];
+                                break;
+                            }
+                            // 如果 nativeParent 没命中，继续向上切割寻找已创建的父分类
+                            int lastIdx = std::max(pSearch.lastIndexOf('\\'), pSearch.lastIndexOf('/'));
+                            if (lastIdx <= 0) break; 
+                            
+                            QString nextP = pSearch.left(lastIdx);
+                            // 盘符保护
+                            if (nextP.length() == 2 && nextP.endsWith(':')) nextP += '\\';
+                            if (nextP == pSearch) break; 
+                            pSearch = nextP;
+                        }
+
+                        if (info.isDir()) {
+                            // 创建子分类并记录 ID
+                            int newId = ensureCategory(info.fileName().toStdWString(), currentParentId);
+                            pathIdMap[nativePath] = newId;
+                            // 2026-06-xx 物理同步：文件夹入库后同样同步元数据
+                            MetadataManager::instance().syncPhysicalMetadata(info.absoluteFilePath().toStdWString());
+                            // 2026-06-xx 按照用户要求：文件夹同样需要自动执行颜色解析
+                            extractFolderColor(itemPath);
+                        } else {
+                            if (info.fileName() == "metadata.scch") continue; // 2026-06-xx 物理隔离
+                            // 文件入库并关联到当前层级分类
+                            processItem(itemPath, currentParentId);
+                        }
+
+                        currentTask++;
+                        if (currentTask % 100 == 0) {
+                            QMetaObject::invokeMethod(progress, [progress, currentTask, nativePath]() {
+                                progress->setValue(currentTask);
+                                progress->setStatus("正在导入: " + QFileInfo(nativePath).fileName());
+                            });
+                        }
+                    }
+                } else {
+                    // 单个文件逻辑：入空白归未分类(catId=0)，入分类归该分类
+                    processItem(rootPath, targetCatId);
+                    currentTask++;
+                }
             }
 
             QMetaObject::invokeMethod(this, [this, progress]() {

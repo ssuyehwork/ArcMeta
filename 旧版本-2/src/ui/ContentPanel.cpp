@@ -1397,95 +1397,137 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionBatchRename: performBatchRename(); break; 
         case ActionAddToCategory: {
             if (path.isEmpty()) break;
+            // 2026-06-xx 物理对账逻辑增强：递归扫描 + 颜色提取 + FRN 注册
             
-            BatchProgressDialog* progress = new BatchProgressDialog("正在激活项目并建立索引...", this);
+            BatchProgressDialog* progress = new BatchProgressDialog("正在深度扫描数据并建立索引...", this);
             progress->show();
             
             QPointer<ContentPanel> weakThis(this);
             QPointer<BatchProgressDialog> weakProgress(progress);
             
             (void)QtConcurrent::run([weakThis, path, weakProgress]() {
-                // 1. 预统计
+                // 1. 预统计：递归获取所有待处理项目总数
+                QStringList allDirs;
+                allDirs << path;
                 int totalItems = 0;
-                std::function<void(const QString&)> countTask = [&](const QString& p) {
+                
+                std::function<void(const QString&)> countTask;
+                countTask = [&](const QString& p) {
                     QDir dir(p);
-                    QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+                    QStringList entries = dir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
                     totalItems += entries.size();
-                    for (const QFileInfo& info : entries) {
-                        if (info.isDir()) countTask(info.absoluteFilePath());
+                    for (const QString& entry : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+                        countTask(p + "/" + entry);
                     }
                 };
                 countTask(path);
-                totalItems++; // 包含起始目录自身
                 
                 int currentHandled = 0;
 
-                // 2. 递归激活逻辑
-                std::function<void(const QString&)> activateItem = [&](const QString& p) {
+                // 2. 递归扫描处理逻辑
+                std::function<void(const QString&)> scanTask;
+                scanTask = [&](const QString& p) {
                     if (!weakProgress) return;
-                    currentHandled++;
-                    QFileInfo info(p);
-                    QString fileName = info.fileName();
-                    QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Qt::QueuedConnection, 
-                        Q_ARG(int, currentHandled), Q_ARG(int, totalItems), Q_ARG(QString, fileName));
-
-                    std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
+                    std::wstring wpath = QDir::toNativeSeparators(p).toStdWString();
                     
-                    // A. 如果是图像，解析颜色
-                    if (info.isFile() && UiHelper::isGraphicsFile(info.suffix().toLower())) {
-                        if (MetadataManager::instance().getMeta(wp).color.empty()) {
-                            auto palette = UiHelper::extractPalette(p);
-                            if (!palette.isEmpty()) {
-                                QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                                MetadataManager::instance().setItemVisualMetadata(wp, dominant.name().toUpper().toStdWString(), palette, false);
+                    // A. 物理生成/加载该目录的 metadata.scch
+                    ArcMeta::AmMetaScch scchLoader(wpath);
+                    scchLoader.load();
+                    
+                    QDir dir(p);
+                    QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+                    
+                    for (const QFileInfo& info : entries) {
+                        if (!weakProgress) break;
+                        currentHandled++;
+                        QString fullPath = info.absoluteFilePath();
+                        QString fileName = info.fileName();
+                        
+                        QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Qt::QueuedConnection, Q_ARG(int, currentHandled), Q_ARG(int, totalItems), Q_ARG(QString, fileName));
+
+                        if (info.isFile()) {
+                            // 自动提取颜色 (针对图像)
+                            QString ext = info.suffix().toLower();
+                            if (UiHelper::isGraphicsFile(ext)) {
+                                std::wstring wfPath = QDir::toNativeSeparators(fullPath).toStdWString();
+                                // 2026-06-xx 物理优化：前置存在性检查
+                                if (MetadataManager::instance().getMeta(wfPath).color.empty()) {
+                                    auto palette = UiHelper::extractPalette(fullPath);
+                                    if (!palette.isEmpty()) {
+                                        QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                        std::wstring colorHex = dominant.name().toUpper().toStdWString();
+                                        scchLoader.setItemColor(fileName.toStdWString(), colorHex);
+                                        // 2026-06-xx 物理优化：原子化视觉更新，静默更新避免信号风暴
+                                        MetadataManager::instance().setItemVisualMetadata(wfPath, colorHex, palette, false);
+                                    }
+                                }
                             }
-                        }
-                    } 
-                    // B. 如果是文件夹，也要解析文件夹颜色 (基于内容)
-                    else if (info.isDir()) {
-                        if (MetadataManager::instance().getMeta(wp).color.empty()) {
-                             QDir subDir(p);
-                             QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-                             for (const auto& sf : subFiles) {
-                                 if (UiHelper::isGraphicsFile(sf.suffix().toLower())) {
-                                     auto palette = UiHelper::extractPalette(sf.absoluteFilePath());
-                                     if (!palette.isEmpty()) {
-                                         QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                                         MetadataManager::instance().setItemVisualMetadata(wp, dominant.name().toUpper().toStdWString(), palette, false);
-                                         break;
-                                     }
-                                 }
-                             }
+                        } else if (info.isDir()) {
+                            // 2026-06-xx 按照用户要求：文件夹项在扫描时同样执行颜色解析 (基于内容)
+                            std::wstring wfPath = QDir::toNativeSeparators(fullPath).toStdWString();
+                            if (MetadataManager::instance().getMeta(wfPath).color.empty()) {
+                                QDir subDir(fullPath);
+                                QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                                for (const auto& sf : subFiles) {
+                                    if (UiHelper::isGraphicsFile(sf.suffix().toLower())) {
+                                        auto palette = UiHelper::extractPalette(sf.absoluteFilePath());
+                                        if (!palette.isEmpty()) {
+                                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                            std::wstring colorHex = dominant.name().toUpper().toStdWString();
+                                            scchLoader.setItemColor(fileName.toStdWString(), colorHex);
+                                            // 2026-06-xx 物理优化：文件夹视觉元数据同步到全局缓存
+                                            MetadataManager::instance().setItemVisualMetadata(wfPath, colorHex, palette, false);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 递归处理子目录
+                            scanTask(fullPath);
                         }
                     }
-
-                    // C. 统一触发物理同步 (获取 FID/FRN, 注册 AllFrnManager, 写入 .arcmeta/)
-                    MetadataManager::instance().syncPhysicalMetadata(wp);
-
-                    // 递归子项
-                    if (info.isDir()) {
-                        QDir dir(p);
-                        QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-                        for (const QFileInfo& subInfo : entries) {
-                            activateItem(subInfo.absoluteFilePath());
-                        }
+                    
+                    // B. 持久化当前目录元数据
+                    scchLoader.save();
+                    
+                    // C. 物理同步：将新创建的 metadata.scch 的 FRN 登记到全局索引中，确保再次启动能加载数据
+                    std::wstring metaPath = wpath + L"\\metadata.scch";
+                    std::wstring metaFrn; std::string metaFid;
+                    if (MetadataManager::fetchWinApiMetadataDirect(metaPath, metaFid, &metaFrn)) {
+                        AllFrnManager::registerFrn(metaFrn, p.toStdWString());
                     }
                 };
 
-                activateItem(path);
-
-                QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, weakProgress, currentHandled]() {
-                    if (weakProgress) {
-                        weakProgress->accept();
-                        weakProgress->deleteLater();
+                // 3. 处理起始文件夹自身的颜色解析
+                std::wstring wStartPath = QDir::toNativeSeparators(path).toStdWString();
+                if (MetadataManager::instance().getMeta(wStartPath).color.empty()) {
+                    QDir startDir(path);
+                    QFileInfoList startFiles = startDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                    for (const auto& sf : startFiles) {
+                        if (UiHelper::isGraphicsFile(sf.suffix().toLower())) {
+                            auto palette = UiHelper::extractPalette(sf.absoluteFilePath());
+                            if (!palette.isEmpty()) {
+                                QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                                MetadataManager::instance().setItemVisualMetadata(wStartPath, dominant.name().toUpper().toStdWString(), palette, false);
+                                break;
+                            }
+                        }
                     }
+                }
+
+                scanTask(path);
+
+                QMetaObject::invokeMethod(weakThis.data(), [weakThis, path]() {
                     if (weakThis) {
-                         emit MetadataManager::instance().metaChanged("__RELOAD_ALL__");
-                         weakThis->loadDirectory(weakThis->m_currentPath);
-                         ToolTipOverlay::instance()->showText(QCursor::pos(), 
-                             QString("已激活 %1 个项目，可在侧边栏查看").arg(currentHandled), 2000, QColor("#2ecc71"));
+                        // 2026-06-xx 物理优化：全量扫描完成后触发刷新信号
+                        emit MetadataManager::instance().metaChanged("__RELOAD_ALL__");
+                        weakThis->loadDirectory(weakThis->m_currentPath);
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "已成功完成递归扫描并建立物理索引", 1500, QColor("#2ecc71"));
                     }
                 });
+                
+                QMetaObject::invokeMethod(weakProgress.data(), "close", Qt::QueuedConnection);
             });
             break;
         }
