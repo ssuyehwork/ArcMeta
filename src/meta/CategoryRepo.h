@@ -66,6 +66,7 @@ public:
     static void initialize();
 
     // 增量计数接口 (Part 4)
+    static int getTotalFileCount();
     static int getUncategorizedCount();
     static void setTotalFileCount(int count);
     static void incrementTotalFileCount(int delta);

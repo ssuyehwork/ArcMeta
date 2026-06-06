@@ -1,4 +1,6 @@
 #include "CategoryRepo.h"
+#include "TagRepo.h"
+#include "MetadataManager.h"
 #include <QDataStream>
 #include <QDateTime>
 #include <QDate>
@@ -14,7 +16,6 @@
 #include <set>
 #include <utility>
 #include <unordered_set>
-#include "MetadataManager.h"
 
 namespace ArcMeta {
 
@@ -326,9 +327,9 @@ public:
 
     QMap<QString, int> getSystemCounts() {
         QMap<QString, int> counts;
-        counts["all"]            = CategoryRepo::s_totalFileCount.load();
-        counts["uncategorized"]  = CategoryRepo::getUncategorizedCount();
-        counts["untagged"]       = CategoryRepo::s_totalFileCount.load() - TagRepo::getTaggedFileCount();
+        counts["all"]            = ArcMeta::CategoryRepo::getTotalFileCount();
+        counts["uncategorized"]  = ArcMeta::CategoryRepo::getUncategorizedCount();
+        counts["untagged"]       = ArcMeta::CategoryRepo::getTotalFileCount() - ArcMeta::TagRepo::getTaggedFileCount();
         counts["recently_visited"] = 0; // 维持原逻辑或后续实现
         counts["trash"]          = 0;
         return counts;
@@ -676,6 +677,10 @@ void CategoryRepo::saveImmediately() {
 
 void CategoryRepo::initialize() {
     (void)CategoryCacheManager::instance();
+}
+
+int CategoryRepo::getTotalFileCount() {
+    return s_totalFileCount.load();
 }
 
 int CategoryRepo::getUncategorizedCount() {
