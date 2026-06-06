@@ -489,10 +489,11 @@ void MainWindow::initUi() {
     // 确保在内容面板收藏项目后，侧边栏的“收藏 (X)”数字能实时跳变
     // 2026-05-27 物理修复：显式增加 this 上下文参数
     // 理由：MetadataManager 可能在后台线程（如初始化扫描阶段）发射信号，
-    // 若无 context 参数，Lambda 将在发射信号的后台线程执行，导致非法线程操作 UI (refresh()) 引起崩溃。
+    // 若无 context 参数，Lambda 将在发射信号的后台线程执行，导致非法线程操作 UI 引起崩溃。
+    // 2026-06-xx 架构级优化：对接 CategoryPanel::requestRefresh 物理削峰逻辑，消除侧边栏刷新卡顿
     connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this]() {
-        if (m_categoryPanel && m_categoryPanel->model()) {
-            m_categoryPanel->model()->refresh();
+        if (m_categoryPanel) {
+            m_categoryPanel->requestRefresh();
         }
     });
 

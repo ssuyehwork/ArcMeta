@@ -41,6 +41,12 @@ public:
      */
     void selectCategory(int id);
 
+    /**
+     * @brief 2026-06-xx 物理削峰：请求刷新侧边栏计数
+     * 采用 500ms 防抖逻辑，合并高频信号风暴
+     */
+    void requestRefresh();
+
 signals:
     void categorySelected(int id, const QString& name, const QString& type, const QString& path = "");
     void fileSelected(const QString& path);
@@ -91,6 +97,7 @@ private:
     
     DropTreeView* m_categoryTree = nullptr;
     CategoryModel* m_categoryModel = nullptr;
+    QTimer* m_refreshTimer = nullptr;
 
     // 2026-03-xx 会话级解锁列表：存储当前已验证通过的加密分类 ID
     QSet<int> m_unlockedIds;

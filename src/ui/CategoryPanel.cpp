@@ -60,8 +60,41 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     // 2026-06-xx 物理优化：移除此处阻塞主线程的同步初始化。
     // 元数据加载已由 CoreController 在异步线程统一接管。
 
+    // 2026-06-xx 物理削峰：初始化防抖定时器
+    m_refreshTimer = new QTimer(this);
+    m_refreshTimer->setSingleShot(true);
+    connect(m_refreshTimer, &QTimer::timeout, this, [this]() {
+        if (!m_categoryModel) return;
+
+        // 2026-06-xx 物理分流：将耗时的统计计算（fullRecount）移出 UI 线程
+        // 采用 QPointer 确保线程安全性
+        QPointer<CategoryPanel> weakThis(this);
+        (void)QtConcurrent::run([weakThis]() {
+            auto sysCounts = CategoryRepo::getSystemCounts();
+            auto catCountsVec = CategoryRepo::getCounts();
+
+            QMap<int, int> catCounts;
+            for (const auto& p : catCountsVec) catCounts[p.first] = p.second;
+
+            // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, sysCounts, catCounts]() {
+                if (weakThis && weakThis->m_categoryModel) {
+                    // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
+                    weakThis->m_categoryModel->updateStatistics(sysCounts, catCounts);
+                }
+            });
+        });
+    });
+
     initUi();
     setupContextMenu();
+}
+
+void CategoryPanel::requestRefresh() {
+    // 500ms 削峰填谷：合并高频发射的元数据变更信号
+    if (!m_refreshTimer->isActive()) {
+        m_refreshTimer->start(500);
+    }
 }
 
 void CategoryPanel::selectCategory(int id) {
