@@ -8,6 +8,7 @@
 #include <QRecursiveMutex>
 #include <QMetaObject>
 #include <QCoreApplication>
+#include <QThread>
 #include <algorithm>
 #include <map>
 #include <set>
@@ -283,8 +284,13 @@ public:
     void markDirty() {
         QMutexLocker locker(&m_mutex);
         m_dirty = true;
-        // 2026-06-xx 修复：确保定时器在创建它的主线程中启动，解决后台线程直接调用导致的失效报警
-        QMetaObject::invokeMethod(m_saveTimer, "start", Qt::QueuedConnection, Q_ARG(int, 2000));
+        // 2026-06-xx 物理修复：强制通过主线程的消息循环启动定时器
+        // 即使 CategoryCacheManager 在非主线程被意外初始化，invokeMethod 也能保证跨线程安全性
+        if (m_saveTimer->thread() == QThread::currentThread()) {
+            m_saveTimer->start(2000);
+        } else {
+            QMetaObject::invokeMethod(m_saveTimer, "start", Qt::QueuedConnection, Q_ARG(int, 2000));
+        }
     }
 
     std::vector<std::pair<int, int>> getCounts() {
