@@ -39,6 +39,35 @@ namespace ArcMeta {
 
 // --- Internal Helper Functions ---
 
+static void migrateLegacyScch(const std::wstring& folderPath) {
+    QString legacyPath = QString::fromStdWString(folderPath) + "/metadata.scch";
+    if (!QFile::exists(legacyPath)) return;
+
+    qDebug() << "[Metadata] 发现旧版元数据文件，正在迁移:" << legacyPath;
+
+    // 读取旧格式
+    ArcMeta::AmMetaScch legacy(folderPath, L"");
+    if (!legacy.load()) return;
+
+    // 拆分写入新格式
+    // 1. 文件夹自身
+    ArcMeta::AmMetaScch folderScch(folderPath, L"");
+    folderScch.folder() = legacy.folder();
+    folderScch.save();
+
+    // 2. 每个文件项
+    const std::map<std::wstring, ItemMeta>& items = legacy.items();
+    for (auto it = items.begin(); it != items.end(); ++it) {
+        ArcMeta::AmMetaScch fileScch(folderPath, it->first);
+        fileScch.setItem(it->second);
+        fileScch.save();
+    }
+
+    // 3. 删除旧文件
+    QFile::remove(legacyPath);
+    qDebug() << "[Metadata] 旧版元数据迁移完成，已移除:" << legacyPath;
+}
+
 static std::wstring normalizePath(const std::wstring& path) {
     if (path.empty()) return L"";
     QString qp = QDir::toNativeSeparators(QDir::cleanPath(QString::fromStdWString(path)));
@@ -123,6 +152,13 @@ void MetadataManager::initFromScchMode() {
     }
 
     qint64 startTime = QDateTime::currentMSecsSinceEpoch();
+
+    // 1.5 旧格式迁移
+    QMap<QString, QString> allFrns = AllFrnManager::getAllFrns();
+    for (auto it = allFrns.begin(); it != allFrns.end(); ++it) {
+        migrateLegacyScch(it.value().toStdWString());
+    }
+
     qDebug() << "[PERF] 开始加载分布式 SCCH 缓存...";
     TagRepo::load();
     loadDriverMetadata();
@@ -241,11 +277,19 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     }
 
     QFileInfo info(QString::fromStdWString(nPath));
-    std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-    std::wstring fileName = info.fileName().toStdWString();
+    std::wstring parentDir;
+    std::wstring fileName;
+
+    if (info.isDir()) {
+        parentDir = QDir::toNativeSeparators(info.absoluteFilePath()).toStdWString();
+        fileName = L""; // 文件夹模式
+    } else {
+        parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
+        fileName = info.fileName().toStdWString();
+    }
 
     // 优先加载文件级或文件夹级 .scch (fileName为空代表 __folder__.scch)
-    ArcMeta::AmMetaScch loader(parentDir, info.isDir() ? L"" : fileName);
+    ArcMeta::AmMetaScch loader(parentDir, fileName);
     if (loader.load()) {
         bool hasMeta = false;
         RuntimeMeta rm;
@@ -299,14 +343,21 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
     // 激活操作
     RuntimeMeta rm;
     std::wstring frn;
-    if (fetchWinApiMetadataDirect(nPath, rm.fileId128, &frn, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime)) {
-        rm.isFolder = QFileInfo(QString::fromStdWString(nPath)).isDir();
+    std::wstring type;
+    if (fetchWinApiMetadataDirect(nPath, rm.fileId128, &frn, &rm.fileSize, &type, &rm.ctime, &rm.mtime, &rm.atime)) {
+        rm.isFolder = (type == L"folder");
         m_cache[nPath] = rm;
         if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;
 
         // 注册到 AllFrnManager (锚点为所属目录的 .arcmeta)
         QFileInfo info(QString::fromStdWString(nPath));
-        std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
+        std::wstring parentDir;
+        if (rm.isFolder) {
+            parentDir = QDir::toNativeSeparators(info.absoluteFilePath()).toStdWString();
+        } else {
+            parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
+        }
+
         std::wstring arcmetaPath = parentDir + L"\\.arcmeta";
         std::wstring arcmetaFrn; std::string arcmetaFid;
         if (fetchWinApiMetadataDirect(arcmetaPath, arcmetaFid, &arcmetaFrn)) {
@@ -588,8 +639,17 @@ void MetadataManager::persistAsync(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
     qDebug() << "[Metadata] 准备持久化元数据到磁盘:" << QString::fromStdWString(nPath);
     QFileInfo info(QString::fromStdWString(nPath));
-    std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-    std::wstring fileName = info.fileName().toStdWString();
+
+    std::wstring parentDir;
+    std::wstring fileName;
+    if (info.isDir()) {
+        parentDir = QDir::toNativeSeparators(info.absoluteFilePath()).toStdWString();
+        fileName = L"";
+    } else {
+        parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
+        fileName = info.fileName().toStdWString();
+    }
+
     RuntimeMeta rMeta = getMeta(nPath);
 
     if (info.isDir() && info.isRoot()) {
@@ -605,7 +665,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
         DriverRepo::update(de);
     } else {
         // 直接写该文件的 scch (不再读整目录)
-        ArcMeta::AmMetaScch loader(parentDir, info.isDir() ? L"" : fileName);
+        ArcMeta::AmMetaScch loader(parentDir, fileName);
         if (info.isDir()) {
             FolderMeta& folder = loader.folder();
             folder.rating = rMeta.rating; folder.color = rMeta.color;
@@ -630,8 +690,9 @@ void MetadataManager::persistAsync(const std::wstring& path) {
     // 追踪目标改为 .arcmeta 目录的位置
     std::wstring arcmetaPath = parentDir + L"\\.arcmeta";
     std::wstring arcmetaFrn; std::string arcmetaFid;
-    if (fetchWinApiMetadataDirect(arcmetaPath, arcmetaFid, &arcmetaFrn))
+    if (fetchWinApiMetadataDirect(arcmetaPath, arcmetaFid, &arcmetaFrn)) {
         AllFrnManager::registerFrn(arcmetaFrn, parentDir);
+    }
 
     emit metaChanged(QString::fromStdWString(nPath));
 }

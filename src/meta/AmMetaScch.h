@@ -44,11 +44,6 @@ public:
 
     void remove(const std::wstring& fileName) { m_items.erase(fileName); }
 
-    void setItemColor(const std::wstring& fileName, const std::wstring& color) {
-        if (m_isFileMode) m_item.color = color;
-        else m_items[fileName].color = color;
-    }
-
     static bool renameItem(const QString& folderPath, const QString& oldName, const QString& newName);
 
 private:

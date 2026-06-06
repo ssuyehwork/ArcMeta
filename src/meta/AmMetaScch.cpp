@@ -62,11 +62,23 @@ AmMetaScch::AmMetaScch(const std::wstring& folderPath, const std::wstring& fileN
 
 bool AmMetaScch::load() {
     QFile file(toQString(m_filePath));
+    bool isLegacy = false;
     if (!file.exists()) {
-        m_folder = FolderMeta();
-        m_item = ItemMeta();
-        m_items.clear();
-        return true;
+        // 迁移支持：如果 __folder__.scch 不存在，尝试读取旧版 metadata.scch
+        if (!m_isFileMode) {
+            QString legacyPath = toQString(m_folderPath) + "/metadata.scch";
+            if (QFile::exists(legacyPath)) {
+                file.setFileName(legacyPath);
+                isLegacy = true;
+            }
+        }
+
+        if (!isLegacy) {
+            m_folder = FolderMeta();
+            m_item = ItemMeta();
+            m_items.clear();
+            return true;
+        }
     }
 
     if (!file.open(QIODevice::ReadOnly)) return false;
@@ -137,7 +149,7 @@ bool AmMetaScch::save() const {
     ds.setVersion(QDataStream::Qt_6_0);
 
     BinaryHeader header;
-    header.itemCount = m_isFileMode ? 1 : static_cast<uint32_t>(m_items.size());
+    header.itemCount = m_isFileMode ? 1 : 0; // 文件夹模式下不在此保存项目列表
     file.write(reinterpret_cast<const char*>(&header), sizeof(header));
 
     if (m_isFileMode) {
@@ -155,18 +167,6 @@ bool AmMetaScch::save() const {
         ds << m_folder.pinned << m_folder.note << m_folder.url << m_folder.encrypted << m_folder.fileId128;
         ds << static_cast<int>(m_folder.palettes.size());
         for (size_t i = 0; i < m_folder.palettes.size(); ++i) ds << m_folder.palettes[i];
-
-        for (std::map<std::wstring, ItemMeta>::const_iterator it = m_items.begin(); it != m_items.end(); ++it) {
-            const std::wstring& name = it->first;
-            const ItemMeta& itm = it->second;
-            ds << name << itm.type << itm.rating << itm.color;
-            ds << static_cast<int>(itm.tags.size());
-            for (size_t i = 0; i < itm.tags.size(); ++i) ds << itm.tags[i];
-            ds << itm.pinned << itm.note << itm.url << itm.encrypted << itm.encryptSalt << itm.encryptIv << itm.encryptVerifyHash;
-            ds << itm.originalName << itm.volume << itm.frn << itm.fileId128 << itm.size << itm.creationTime << itm.modificationTime << itm.accessTime;
-            ds << static_cast<int>(itm.palettes.size());
-            for (size_t i = 0; i < itm.palettes.size(); ++i) ds << itm.palettes[i];
-        }
     }
 
     file.close();
