@@ -8,6 +8,7 @@
 #include <QRecursiveMutex>
 #include <QMetaObject>
 #include <QCoreApplication>
+#include <QThread>
 #include <algorithm>
 #include <map>
 #include <set>
