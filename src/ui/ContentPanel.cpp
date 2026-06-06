@@ -1491,11 +1491,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     // B. 持久化当前目录元数据
                     scchLoader.save();
                     
-                    // C. 物理同步：将新创建的 metadata.scch 的 FRN 登记到全局索引中，确保再次启动能加载数据
-                    std::wstring metaPath = wpath + L"\\metadata.scch";
-                    std::wstring metaFrn; std::string metaFid;
-                    if (MetadataManager::fetchWinApiMetadataDirect(metaPath, metaFid, &metaFrn)) {
-                        AllFrnManager::registerFrn(metaFrn, p.toStdWString());
+                    // C. 物理同步：将 .arcmeta 目录的 FRN 登记到全局索引中，确保再次启动能加载数据
+                    std::wstring arcmetaPath = wpath + L"\\.arcmeta";
+                    std::wstring arcmetaFrn; std::string arcmetaFid;
+                    if (MetadataManager::fetchWinApiMetadataDirect(arcmetaPath, arcmetaFid, &arcmetaFrn)) {
+                        AllFrnManager::registerFrn(arcmetaFrn, p.toStdWString());
                     }
                 };
 
