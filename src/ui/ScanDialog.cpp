@@ -1237,25 +1237,70 @@ void ScanDialog::onCustomContextMenu(const QPoint& pos) {
         menu.addSeparator();
         
         menu.addAction(count > 1 ? "批量删除" : "删除", [this, selectedRows]() {
-            QString msg = (selectedRows.size() == 1) ? QString("确定要永久删除 %1 吗？").arg(m_tableModel->data(m_tableModel->index(selectedRows.first().row(), 0)).toString())
-                                                   : QString("确定要永久删除选中的 %1 个项目吗？").arg(selectedRows.size());
+            // 2026-06-xx 物理防护：在弹窗前立即锁定路径与名称快照，彻底杜绝闪退
+            QStringList pathsToDelete;
+            QStringList namesToDelete;
+            for (const auto& idx : selectedRows) {
+                pathsToDelete << m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
+                namesToDelete << m_tableModel->data(m_tableModel->index(idx.row(), 0)).toString();
+            }
+
+            if (pathsToDelete.isEmpty()) return;
+
+            QString msg = (pathsToDelete.size() == 1) ? QString("确定要永久删除 %1 吗？").arg(namesToDelete.first())
+                                                      : QString("确定要永久删除选中的 %1 个项目吗？").arg(pathsToDelete.size());
+
             if (QMessageBox::question(this, "确认删除", msg) == QMessageBox::Yes) {
-                // 2026-06-xx 物理加固：先提取所有物理路径快照，杜绝因 USN 同步导致的索引移位
-                QStringList pathsToDelete;
-                for (const auto& idx : selectedRows) {
-                    pathsToDelete << m_tableModel->data(m_tableModel->index(idx.row(), 1)).toString();
+                int totalCount = pathsToDelete.size();
+                qDebug() << "[ScanDialog] 开始执行批量删除操作, 总数:" << totalCount;
+
+                // 2. 进度条策略：至少5条数据以上才弹出独立窗口
+                ProgressDialog* progress = nullptr;
+                if (totalCount >= 5) {
+                    progress = new ProgressDialog("正在删除文件...", this);
+                    progress->setRange(0, totalCount);
+                    progress->show();
                 }
 
-                for (const QString& path : pathsToDelete) {
-                    QFileInfo fi(path);
-                    if (fi.isDir()) {
-                        QDir(path).removeRecursively();
-                    } else {
-                        QFile::remove(path);
+                QPointer<ScanDialog> weakThis(this);
+                (void)QtConcurrent::run([weakThis, pathsToDelete, namesToDelete, progress, totalCount]() {
+                    for (int i = 0; i < totalCount; ++i) {
+                        QString path = pathsToDelete[i];
+                        QString name = namesToDelete[i];
+
+                        qDebug() << "[ScanDialog] 正在删除 [" << (i + 1) << "/" << totalCount << "]:" << path;
+
+                        bool ok = false;
+                        QFileInfo fi(path);
+                        if (fi.isDir()) {
+                            ok = QDir(path).removeRecursively();
+                        } else {
+                            ok = QFile::remove(path);
+                        }
+
+                        if (!ok) {
+                            qWarning() << "[ScanDialog] 删除失败!" << path;
+                        }
+
+                        // 跨线程更新进度条
+                        if (progress) {
+                            QMetaObject::invokeMethod(progress, "updateProgress", Qt::QueuedConnection,
+                                Q_ARG(int, i + 1), Q_ARG(int, totalCount), Q_ARG(QString, name));
+                        }
                     }
-                }
-                // 批量删除后延迟触发一次搜索刷新，确保 UI 状态最终一致
-                m_controller->triggerSearch(true);
+
+                    // 批量删除后回到主线程收尾
+                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, progress]() {
+                        if (progress) {
+                            progress->accept();
+                            progress->deleteLater();
+                        }
+                        if (weakThis) {
+                            qDebug() << "[ScanDialog] 批量删除完成, 正在刷新搜索结果...";
+                            weakThis->m_controller->triggerSearch(true);
+                        }
+                    });
+                });
             }
         });
         
