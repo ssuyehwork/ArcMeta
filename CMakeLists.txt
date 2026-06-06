@@ -58,6 +58,8 @@ set(SOURCES
     src/meta/FavoritesRepo.h
     src/meta/AmMetaScch.cpp
     src/meta/AmMetaScch.h
+    src/meta/TagRepo.cpp
+    src/meta/TagRepo.h
     src/meta/DriverRepo.cpp
     src/meta/DriverRepo.h
     src/meta/AllFrnManager.cpp

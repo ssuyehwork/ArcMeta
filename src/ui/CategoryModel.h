@@ -42,6 +42,7 @@ public slots:
 private:
     Type m_type;
     QSet<int> m_unlockedIds;
+    bool m_isFirstLoad = true;
 };
 
 } // namespace ArcMeta
