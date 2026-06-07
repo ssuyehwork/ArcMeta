@@ -164,7 +164,9 @@ void MetadataManager::initFromScchMode() {
     // 1.5 旧格式迁移
     QMap<QString, QString> allFrns = AllFrnManager::getAllFrns();
     if (allFrns.isEmpty()) {
-        qDebug() << "[Metadata] AllFrnManager 数据为空，请检查 All_FRN_metadata.scch 是否加载成功";
+        qDebug() << "CRITICAL: AllFrnManager 数据为空！SCCH 分布式架构依赖此索引，请检查 All_FRN_metadata.scch";
+    } else {
+        qDebug() << "[Metadata] AllFrnManager 已就绪，登记项数:" << allFrns.size();
     }
 
     for (auto it = allFrns.begin(); it != allFrns.end(); ++it) {
