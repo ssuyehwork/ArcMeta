@@ -280,9 +280,12 @@ void MetadataManager::initFromScchMode() {
         }
         CategoryRepo::setTotalFileCount(totalFiles);
 
-        // 2026-06-xx 逻辑加固：由于元数据加载可能导致分类计数的逻辑变动，强制执行一次全量重计
-        CategoryRepo::fullRecount();
     }
+
+    // 2026-06-xx 逻辑加固：由于元数据加载可能导致分类计数的逻辑变动，强制执行一次全量重计
+    // 物理注意：必须在锁外执行，否则会因为 CategoryRepo 回调 forEachCachedItem 导致互斥锁递归死锁
+    CategoryRepo::fullRecount();
+
     qDebug() << "[PERF] 分布式 SCCH 缓存加载完成，项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     emit metaChanged("__RELOAD_ALL__");
 }
