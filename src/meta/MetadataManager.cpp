@@ -19,6 +19,7 @@
 #include "DriverRepo.h"
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
+#include "../ui/UiHelper.h"
 
 #include <windows.h>
 #include <fileapi.h>
@@ -56,7 +57,14 @@ static void migrateLegacyScch(const std::wstring& folderPath) {
     folderScch.save();
 
     // 2. 每个文件项
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#endif
     const std::map<std::wstring, ItemMeta>& items = legacy.items();
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
     for (auto it = items.begin(); it != items.end(); ++it) {
         ArcMeta::AmMetaScch fileScch(folderPath, it->first);
         fileScch.setItem(it->second);
@@ -661,10 +669,10 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
     QString qPath = QString::fromStdWString(nPath);
 
     if (info.isFile()) {
-        if (UiHelper::isGraphicsFile(info.suffix().toLower())) {
-            auto palette = UiHelper::extractPalette(qPath);
+        if (ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower())) {
+            auto palette = ArcMeta::UiHelper::extractPalette(qPath);
             if (!palette.isEmpty()) {
-                QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
                 instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
             }
         }
@@ -672,10 +680,10 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
         QDir subDir(qPath);
         QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
         for (const auto& sf : subFiles) {
-            if (UiHelper::isGraphicsFile(sf.suffix().toLower())) {
-                auto palette = UiHelper::extractPalette(sf.absoluteFilePath());
+            if (ArcMeta::UiHelper::isGraphicsFile(sf.suffix().toLower())) {
+                auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath());
                 if (!palette.isEmpty()) {
-                    QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                    QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
                     instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
                     break;
                 }

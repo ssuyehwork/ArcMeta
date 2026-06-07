@@ -413,11 +413,11 @@ void CategoryPanel::onRandomColor() {
     
     QSet<int> expandedIds;
     QStringList expandedNames;
-    saveExpandedState(m_categoryTree, QModelIndex(), expandedIds, expandedNames);
+    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
     m_categoryModel->refresh();
 
-    restoreExpandedState(m_categoryTree, QModelIndex(), expandedIds, expandedNames, m_unlockedIds);
+    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
 }
 
 void CategoryPanel::onSetPresetTags() {
