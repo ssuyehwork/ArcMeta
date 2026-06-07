@@ -62,6 +62,7 @@ AmMetaScch::AmMetaScch(const std::wstring& folderPath, const std::wstring& fileN
 
 bool AmMetaScch::load() {
     QFile file(toQString(m_filePath));
+    qDebug() << "[AmMetaScch] 尝试加载元数据文件:" << toQString(m_filePath);
     bool isLegacy = false;
     if (!file.exists()) {
         // 迁移支持：如果 __folder__.scch 不存在，尝试读取旧版 metadata.scch
@@ -81,7 +82,10 @@ bool AmMetaScch::load() {
         }
     }
 
-    if (!file.open(QIODevice::ReadOnly)) return false;
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "[AmMetaScch] 无法打开元数据文件进行读取:" << toQString(m_filePath);
+        return false;
+    }
     QDataStream ds(&file);
     ds.setVersion(QDataStream::Qt_6_0);
 

@@ -3,6 +3,7 @@
 #include "MetadataManager.h"
 #include <QDataStream>
 #include <QDateTime>
+#include <QDateTime>
 #include <QDate>
 #include <QDir>
 #include <QFile>
@@ -361,6 +362,7 @@ public:
         m_membershipMap.clear();
 
         int all = 0, recently = 0, untagged = 0, uncategorized = 0;
+        qDebug() << "[Category] 开始执行全量计数重计 (物理账本对账)...";
 
         double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
 
@@ -376,6 +378,10 @@ public:
 
             if (m_fidCategorizedCount[meta.fileId128] == 0) { bits |= 32; uncategorized++; }
 
+            if (all <= 10) {
+                qDebug() << "  [Recount] 计入项:" << QString::fromStdWString(path) << " (FID:" << QString::fromStdString(meta.fileId128) << ")";
+            }
+
             m_membershipMap[path] = bits;
         });
 
@@ -387,6 +393,7 @@ public:
 
         m_sysCountsDirty = false;
         m_lastCountDate = QDate::currentDate();
+        qDebug() << "[Category] 全量重计完成: 全部=" << all << " 未分类=" << uncategorized << " 未标签=" << untagged;
     }
 
     void updateIncremental(const std::wstring& path) {
@@ -498,6 +505,7 @@ private:
         m_records.clear();
         m_itemLookup.clear();
         m_fidCategorizedCount.clear();
+        qDebug() << "[Category] 从磁盘读入关联记录数:" << header.itemCount;
         int catFidCount = 0;
         for (uint32_t i = 0; i < header.itemCount; ++i) {
             CategoryItemRecord r;
@@ -703,6 +711,11 @@ void CategoryRepo::incrementCategorizedCount(int delta) {
     s_categorizedCount += delta;
 }
 
+void CategoryRepo::fullRecount() {
+    CategoryCacheManager::instance().markSysCountsDirty();
+    CategoryCacheManager::instance().getSystemCounts();
+}
+
 // CategoryRepo Implementation
 std::vector<Category> CategoryRepo::getAll() { return ScchCategoryEngine::getAll(); }
 std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) { 
@@ -764,33 +777,14 @@ std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
 std::vector<std::pair<int, int>> CategoryRepo::getCounts() { return ScchCategoryEngine::getCounts(); }
 
 int CategoryRepo::getUniqueItemCount() {
-    std::unordered_set<std::string> uniqueIds;
-    CategoryCacheManager::instance().forEachRecord([&](const CategoryItemRecord& r) {
-        if (!r.fileId128.empty()) {
-            std::wstring path = MetadataManager::instance().getPathByFid(r.fileId128);
-            if (!path.empty()) {
-                RuntimeMeta meta = MetadataManager::instance().getMeta(path);
-                if (!meta.isFolder) uniqueIds.insert(r.fileId128);
-            }
-        }
-    });
-    return static_cast<int>(uniqueIds.size());
+    // 2026-06-xx 物理脱钩：不再在查询时实时 getMeta 对账，而是信赖 CategoryCacheManager 维护的 fid 去重计数
+    // 2026-06-xx 逻辑修复：该函数代表“全部数据”，应当返回系统感知的总文件数 s_totalFileCount
+    return s_totalFileCount.load();
 }
 
 int CategoryRepo::getUncategorizedItemCount() {
-    std::unordered_set<std::string> categorizedIds;
-    CategoryCacheManager::instance().forEachRecord([&](const CategoryItemRecord& r) {
-        categorizedIds.insert(r.fileId128);
-    });
-
-    int count = 0;
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
-        if (meta.isFolder) return;
-        if (categorizedIds.find(meta.fileId128) == categorizedIds.end()) {
-            count++;
-        }
-    });
-    return count;
+    // 2026-06-xx 逻辑优化：直接从系统计数缓存读取，该值已由 updateIncremental 异步维持
+    return CategoryCacheManager::instance().getSystemCounts()["uncategorized"];
 }
 
 QMap<QString, int> CategoryRepo::getSystemCounts() {

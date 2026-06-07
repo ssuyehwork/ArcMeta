@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QDebug>
 #include <QTimer>
+#include <QDateTime>
 #include <QCoreApplication>
 
 #ifndef NOMINMAX
@@ -145,6 +146,9 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
             m_dirtyPaths.clear();
         }
         for (const auto& p : paths) persistAsync(p);
+        
+        // 2026-06-xx 物理加固：同步保存 FRN 索引表
+        AllFrnManager::saveImmediately();
     });
 }
 
@@ -185,11 +189,17 @@ void MetadataManager::initFromScchMode() {
     }
 
     QMap<QString, QString> frnsMap = AllFrnManager::getAllFrns();
+    qDebug() << "[Metadata] 从 All_FRN_metadata.scch 读入索引项数:" << frnsMap.size();
     
+    int folderCount = 0;
+    int fileCount = 0;
+
     for (QMap<QString, QString>::const_iterator itMap = frnsMap.constBegin(); itMap != frnsMap.constEnd(); ++itMap) {
         QString frnStr = itMap.key();
         QString lastKnownPath = itMap.value();
         std::wstring resolvedPath = QDir::toNativeSeparators(lastKnownPath).toStdWString();
+
+        qDebug() << "[Metadata] 正在处理 FRN 映射项 -> FRN:" << frnStr << "Path:" << lastKnownPath;
 
         if (!QDir(QString::fromStdWString(resolvedPath)).exists()) {
             bool ok = false;
@@ -234,16 +244,29 @@ void MetadataManager::initFromScchMode() {
         }
 
         // 2. 加载该目录下所有文件的元数据 (.arcmeta/*.scch)
+        // 2026-06-xx 物理修复：必须显式包含 Hidden 标志，因为 .scch 文件在保存时被标记为隐藏属性
         QDir arcmetaDir(QString::fromStdWString(resolvedPath) + "/.arcmeta");
-        QStringList scchFiles = arcmetaDir.entryList({"*.scch"}, QDir::Files);
+        QStringList scchFiles = arcmetaDir.entryList({"*.scch"}, QDir::Files | QDir::Hidden);
+        
+        qDebug() << "  [Scan] .arcmeta 目录存在状态:" << arcmetaDir.exists() << " 路径:" << arcmetaDir.absolutePath();
+        qDebug() << "  [Scan] 发现 .scch 文件数:" << scchFiles.size() << " 列表:" << scchFiles;
+
+        if (folderLoader.load()) {
+            folderCount++;
+            qDebug() << "  [OK] 加载文件夹元数据:" << lastKnownPath;
+        }
+
         for (const QString& scchFile : scchFiles) {
             if (scchFile == "__folder__.scch") continue;
             QString fileName = scchFile.left(scchFile.length() - 5); // 移除 .scch
             
             ArcMeta::AmMetaScch itemLoader(resolvedPath, fileName.toStdWString());
-            if (itemLoader.load()) {
+            bool ok = itemLoader.load();
+            if (ok) {
                 const ItemMeta& item = itemLoader.item();
-                if (item.hasUserOperations()) {
+                bool hasOps = item.hasUserOperations();
+                qDebug() << "    [Item] 加载" << scchFile << "成功? " << ok << "有元数据? " << hasOps;
+                if (hasOps) {
                     RuntimeMeta iMeta;
                     iMeta.rating = item.rating; iMeta.color = item.color;
                     for (size_t tIdx = 0; tIdx < item.tags.size(); ++tIdx) iMeta.tags << QString::fromStdWString(item.tags[tIdx]);
@@ -258,10 +281,12 @@ void MetadataManager::initFromScchMode() {
                     std::wstring nItemPath = normalizePath(itemPath);
                     tempCache[nItemPath] = iMeta;
                     if (!iMeta.fileId128.empty()) tempFidToPath[iMeta.fileId128] = nItemPath;
+                    fileCount++;
                 }
             }
         }
     }
+    qDebug() << "[Metadata] 分布式加载完成: 目录数=" << folderCount << " 文件数=" << fileCount;
 
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
@@ -276,7 +301,13 @@ void MetadataManager::initFromScchMode() {
             if (!it->second.isFolder) totalFiles++;
         }
         CategoryRepo::setTotalFileCount(totalFiles);
+
     }
+
+    // 2026-06-xx 逻辑加固：由于元数据加载可能导致分类计数的逻辑变动，强制执行一次全量重计
+    // 物理注意：必须在锁外执行，否则会因为 CategoryRepo 回调 forEachCachedItem 导致互斥锁递归死锁
+    CategoryRepo::fullRecount();
+
     qDebug() << "[PERF] 分布式 SCCH 缓存加载完成，项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     emit metaChanged("__RELOAD_ALL__");
 }
@@ -304,6 +335,7 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     // 优先加载文件级或文件夹级 .scch (fileName为空代表 __folder__.scch)
     ArcMeta::AmMetaScch loader(parentDir, fileName);
     if (loader.load()) {
+        qDebug() << "[Metadata] 从磁盘加载命中:" << QString::fromStdWString(nPath);
         bool hasMeta = false;
         RuntimeMeta rm;
         if (info.isDir()) {
@@ -332,6 +364,10 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
 
         if (hasMeta) {
             fetchWinApiMetadataDirect(nPath, rm.fileId128, nullptr, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime);
+            
+            // 2026-06-xx 物理加固：补全 FRN 登记，确保下次启动能通过 All_FRN_metadata.scch 找回分布式元数据
+            registerArcmetaFrn(parentDir);
+
             std::unique_lock<std::shared_mutex> lock(m_mutex);
             m_cache[nPath] = rm;
             if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;

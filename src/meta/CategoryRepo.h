@@ -72,6 +72,11 @@ public:
     static void setCategorizedCount(int count);
     static void incrementTotalFileCount(int delta);
     static void incrementCategorizedCount(int delta);
+    
+    /**
+     * @brief 强制执行全量计数重计 (物理账本对账)
+     */
+    static void fullRecount();
 
     static std::atomic<int> s_totalFileCount;
     static std::atomic<int> s_categorizedCount;

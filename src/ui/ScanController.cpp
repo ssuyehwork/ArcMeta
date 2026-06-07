@@ -300,14 +300,9 @@ void ScanController::runFullScan(std::function<void(int current, int total, cons
             // 对于 .arcmeta，fi.absolutePath() 也是所属目录（因为 .arcmeta 是子目录）
             std::wstring folderPath = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
             
-            // 登记 FRN 锚点 (使用 .arcmeta 目录或 metadata.scch 文件的 FRN 作为追踪凭据)
-            wchar_t frnBuf[17];
-            uint64_t anchorFrn = key & 0x0000FFFFFFFFFFFFull;
-            swprintf(frnBuf, 17, L"%016llX", anchorFrn);
-            AllFrnManager::registerFrn(frnBuf, folderPath);
-
-            // 触发 MetadataManager 的加载/迁移逻辑
-            MetadataManager::instance().getMeta(folderPath);
+            // 2026-06-xx 物理加固：使用 activateItem 代替手动的 register + getMeta
+            // activateItem 会自动处理 FRN 登记、内存激活及物理对账，并触发全量计数更新
+            MetadataManager::activateItem(folderPath);
 
             current++;
         }

@@ -23,6 +23,12 @@ public:
      * @brief 获取所有已登记的 FRN -> 物理路径映射表
      */
     static QMap<QString, QString> getAllFrns();
+
+    /**
+     * @brief 立即保存 FRN 映射表到磁盘
+     * 2026-06-xx 物理加固：支持手动触发持久化
+     */
+    static void saveImmediately();
 };
 
 } // namespace ArcMeta
