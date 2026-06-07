@@ -87,6 +87,16 @@ private:
     void loadExpandedStateFromSettings();
 
     /**
+     * @brief 递归保存 QTreeView 的展开状态
+     */
+    void saveExpandedState(const QModelIndex& parent, QSet<int>& expandedIds, QStringList& expandedNames);
+
+    /**
+     * @brief 递归恢复 QTreeView 的展开状态
+     */
+    void restoreExpandedState(const QModelIndex& parent, const QSet<int>& expandedIds, const QStringList& expandedNames);
+
+    /**
      * @brief 2026-03-xx 安全逻辑：尝试解锁分类
      * @return 是否解锁成功
      */

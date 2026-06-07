@@ -326,13 +326,11 @@ public:
     void markCatCountsDirty() { QMutexLocker locker(&m_mutex); m_catCountsDirty = true; }
 
     QMap<QString, int> getSystemCounts() {
-        QMap<QString, int> counts;
-        counts["all"]            = ArcMeta::CategoryRepo::getTotalFileCount();
-        counts["uncategorized"]  = ArcMeta::CategoryRepo::getUncategorizedCount();
-        counts["untagged"]       = ArcMeta::CategoryRepo::getTotalFileCount() - ArcMeta::TagRepo::getTaggedFileCount();
-        counts["recently_visited"] = 0; // 维持原逻辑或后续实现
-        counts["trash"]          = 0;
-        return counts;
+        QMutexLocker locker(&m_mutex);
+        if (m_sysCountsDirty || m_lastCountDate != QDate::currentDate()) {
+            fullRecount();
+        }
+        return m_sysCountsCache;
     }
 
     void updateFidCategorized(const std::string& fid, int delta) {
@@ -521,7 +519,7 @@ private:
                 m_fidCategorizedCount[r.fileId128]++;
             }
         }
-        CategoryRepo::incrementCategorizedCount(catFidCount);
+        CategoryRepo::setCategorizedCount(catFidCount);
         m_catCountsDirty = true;
         m_sysCountsDirty = true;
     }
@@ -686,11 +684,15 @@ int CategoryRepo::getTotalFileCount() {
 }
 
 int CategoryRepo::getUncategorizedCount() {
-    return s_totalFileCount.load() - s_categorizedCount.load();
+    return CategoryCacheManager::instance().getSystemCounts()["uncategorized"];
 }
 
 void CategoryRepo::setTotalFileCount(int count) {
     s_totalFileCount.store(count);
+}
+
+void CategoryRepo::setCategorizedCount(int count) {
+    s_categorizedCount.store(count);
 }
 
 void CategoryRepo::incrementTotalFileCount(int delta) {
@@ -783,7 +785,8 @@ int CategoryRepo::getUncategorizedItemCount() {
 
     int count = 0;
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
-        if (!meta.isFolder && categorizedIds.find(meta.fileId128) == categorizedIds.end()) {
+        if (meta.isFolder) return;
+        if (categorizedIds.find(meta.fileId128) == categorizedIds.end()) {
             count++;
         }
     });
@@ -807,6 +810,7 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
 
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
         if (meta.isFolder) return;
+
         bool match = false;
         if (type == "all") match = true;
         else if (type == "untagged" && meta.tags.isEmpty()) match = true;

@@ -95,6 +95,23 @@ public:
     void syncPhysicalMetadata(const std::wstring& path);
 
     /**
+     * @brief 激活并初始化项的元数据
+     * 2026-06-xx 提取公共逻辑：整合获取 FID、注册 FRN、物理同步及计数逻辑
+     */
+    static void activateItem(const std::wstring& path);
+
+    /**
+     * @brief 尝试提取视觉元数据（颜色与色板）
+     * 2026-06-xx 提取公共逻辑：封装颜色解析与文件夹代表色逻辑
+     */
+    static void tryExtractColor(const std::wstring& path);
+
+    /**
+     * @brief 统一注册 .arcmeta 目录的 FRN
+     */
+    static void registerArcmetaFrn(const std::wstring& parentDir);
+
+    /**
      * @brief 同步获取文件的 128-bit File ID (或 Fallback ID)
      * 2026-06-15 物理加固：确保在建立分类关联前指纹已就绪
      */

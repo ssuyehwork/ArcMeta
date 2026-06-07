@@ -69,6 +69,7 @@ public:
     static int getTotalFileCount();
     static int getUncategorizedCount();
     static void setTotalFileCount(int count);
+    static void setCategorizedCount(int count);
     static void incrementTotalFileCount(int delta);
     static void incrementCategorizedCount(int delta);
 
