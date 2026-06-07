@@ -19,6 +19,7 @@
 #include "DriverRepo.h"
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
+#include "../ui/UiHelper.h"
 
 #include <windows.h>
 #include <fileapi.h>
@@ -56,7 +57,14 @@ static void migrateLegacyScch(const std::wstring& folderPath) {
     folderScch.save();
 
     // 2. 每个文件项
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#endif
     const std::map<std::wstring, ItemMeta>& items = legacy.items();
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
     for (auto it = items.begin(); it != items.end(); ++it) {
         ArcMeta::AmMetaScch fileScch(folderPath, it->first);
         fileScch.setItem(it->second);
@@ -155,6 +163,10 @@ void MetadataManager::initFromScchMode() {
 
     // 1.5 旧格式迁移
     QMap<QString, QString> allFrns = AllFrnManager::getAllFrns();
+    if (allFrns.isEmpty()) {
+        qDebug() << "[Metadata] AllFrnManager 数据为空，请检查 All_FRN_metadata.scch 是否加载成功";
+    }
+
     for (auto it = allFrns.begin(); it != allFrns.end(); ++it) {
         migrateLegacyScch(it.value().toStdWString());
     }
@@ -258,9 +270,10 @@ void MetadataManager::initFromScchMode() {
         m_loaded = true;
 
         // 初始化增量计数器 (Part 4)
+        // 2026-06-xx 物理修复：已在 unique_lock 保护下，确保 s_totalFileCount 初始化不包含文件夹
         int totalFiles = 0;
-        for (const auto& kv : m_cache) {
-            if (!kv.second.isFolder) totalFiles++;
+        for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
+            if (!it->second.isFolder) totalFiles++;
         }
         CategoryRepo::setTotalFileCount(totalFiles);
     }
@@ -358,11 +371,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
         }
 
-        std::wstring arcmetaPath = parentDir + L"\\.arcmeta";
-        std::wstring arcmetaFrn; std::string arcmetaFid;
-        if (fetchWinApiMetadataDirect(arcmetaPath, arcmetaFid, &arcmetaFrn)) {
-            AllFrnManager::registerFrn(arcmetaFrn, parentDir);
-        }
+        registerArcmetaFrn(parentDir);
 
         if (!rm.isFolder) CategoryRepo::incrementTotalFileCount(1);
     }
@@ -409,12 +418,14 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
     // 1. 获取旧标签
     QStringList oldTags;
     std::string fid;
+    bool isFolder = false;
     {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
         auto it = m_cache.find(nPath);
         if (it != m_cache.end()) {
             oldTags = it->second.tags;
             fid = it->second.fileId128;
+            isFolder = it->second.isFolder;
         }
     }
 
@@ -423,10 +434,11 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache[nPath].tags = tags;
         if (fid.empty()) fid = m_cache[nPath].fileId128;
+        if (!isFolder) isFolder = m_cache[nPath].isFolder;
     }
 
-    // 3. 增量更新全局标签索引
-    if (!fid.empty()) {
+    // 3. 增量更新全局标签索引 (仅限文件)
+    if (!fid.empty() && !isFolder) {
         // 解绑已移除的标签
         for (const QString& t : oldTags) {
             if (!tags.contains(t)) {
@@ -629,6 +641,65 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
 
 void MetadataManager::syncPhysicalMetadata(const std::wstring& path) { persistAsync(path); }
 
+void MetadataManager::activateItem(const std::wstring& path) {
+    std::string fid; std::wstring frn;
+    if (fetchWinApiMetadataDirect(path, fid, &frn)) {
+        std::wstring nPath = normalizePath(path);
+        QFileInfo info(QString::fromStdWString(nPath));
+        std::wstring parentDir = info.isDir() ? QDir::toNativeSeparators(info.absoluteFilePath()).toStdWString()
+                                              : QDir::toNativeSeparators(info.absolutePath()).toStdWString();
+        
+        // 注册项自身的 FRN
+        AllFrnManager::registerFrn(frn, parentDir);
+        
+        // 注册所属目录的 .arcmeta FRN
+        registerArcmetaFrn(parentDir);
+        
+        // 激活并持久化
+        instance().ensureActivated(nPath);
+        instance().syncPhysicalMetadata(nPath);
+    }
+}
+
+void MetadataManager::tryExtractColor(const std::wstring& path) {
+    std::wstring nPath = normalizePath(path);
+    if (!instance().getMeta(nPath).color.empty()) return;
+    
+    QFileInfo info(QString::fromStdWString(nPath));
+    QString qPath = QString::fromStdWString(nPath);
+    
+    if (info.isFile()) {
+        if (ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower())) {
+            auto palette = ArcMeta::UiHelper::extractPalette(qPath);
+            if (!palette.isEmpty()) {
+                QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
+                instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
+            }
+        }
+    } else if (info.isDir()) {
+        QDir subDir(qPath);
+        QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+        for (const auto& sf : subFiles) {
+            if (ArcMeta::UiHelper::isGraphicsFile(sf.suffix().toLower())) {
+                auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath());
+                if (!palette.isEmpty()) {
+                    QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
+                    instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void MetadataManager::registerArcmetaFrn(const std::wstring& parentDir) {
+    std::wstring arcmetaPath = parentDir + L"\\.arcmeta";
+    std::wstring arcmetaFrn; std::string arcmetaFid;
+    if (fetchWinApiMetadataDirect(arcmetaPath, arcmetaFid, &arcmetaFrn)) {
+        AllFrnManager::registerFrn(arcmetaFrn, parentDir);
+    }
+}
+
 std::string MetadataManager::getFileIdSync(const std::wstring& path) {
     std::string fid;
     if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = generateDeterministicSha256Id(path);
@@ -688,11 +759,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
     }
     
     // 追踪目标改为 .arcmeta 目录的位置
-    std::wstring arcmetaPath = parentDir + L"\\.arcmeta";
-    std::wstring arcmetaFrn; std::string arcmetaFid;
-    if (fetchWinApiMetadataDirect(arcmetaPath, arcmetaFid, &arcmetaFrn)) {
-        AllFrnManager::registerFrn(arcmetaFrn, parentDir);
-    }
+    registerArcmetaFrn(parentDir);
         
     emit metaChanged(QString::fromStdWString(nPath));
 }
