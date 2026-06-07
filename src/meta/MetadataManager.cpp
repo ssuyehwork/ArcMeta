@@ -62,15 +62,16 @@ static void migrateLegacyScch(const std::wstring& folderPath) {
 #pragma warning(push)
 #pragma warning(disable: 4996)
 #endif
-    const std::map<std::wstring, ItemMeta>& items = legacy.items();
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
-    for (auto it = items.begin(); it != items.end(); ++it) {
+    // 2026-06-xx 物理修复：为了迁移兼容，必须暂时访问已弃用的 items() 接口
+    auto& itemsRef = legacy.items();
+    for (auto it = itemsRef.begin(); it != itemsRef.end(); ++it) {
         ArcMeta::AmMetaScch fileScch(folderPath, it->first);
         fileScch.setItem(it->second);
         fileScch.save();
     }
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
     // 3. 删除旧文件
     QFile::remove(legacyPath);
@@ -221,8 +222,10 @@ void MetadataManager::initFromScchMode() {
     }
 
     // 2026-06-xx 性能爆炸：引入并行加载，充分利用多核 CPU 处理海量 SCCH
-    auto results = QtConcurrent::blockingMapped<QList<QPair<std::wstring, RuntimeMeta>>>(tasks, [&](const LoadTask& task) {
-        QList<QPair<std::wstring, RuntimeMeta>> localResults;
+    // 物理注意：MSVC lambda 内部必须显式捕获所需的静态/局部变量，且尽量避免在 template 中使用复杂的隐式推导
+    typedef QList<QPair<std::wstring, RuntimeMeta>> LoadResult;
+    QList<LoadResult> results = QtConcurrent::blockingMapped(tasks, [&](const LoadTask& task) -> LoadResult {
+        LoadResult localResults;
         std::wstring resolvedPath = QDir::toNativeSeparators(task.path).toStdWString();
 
         if (!QFile::exists(task.path)) {
@@ -232,8 +235,11 @@ void MetadataManager::initFromScchMode() {
                 for (size_t d = 0; d < 26; ++d) {
                     std::wstring p = MftReader::instance().getPathFast(static_cast<int>(d), frnVal);
                     if (!p.empty()) {
-                        resolvedPath = (p.find(L"metadata.scch") != std::wstring::npos) ?
-                            QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(p)).absolutePath()).toStdWString() : p;
+                        if (p.find(L"metadata.scch") != std::wstring::npos) {
+                            resolvedPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(p)).absolutePath()).toStdWString();
+                        } else {
+                            resolvedPath = p;
+                        }
                         AllFrnManager::registerFrn(task.frn.toStdWString(), resolvedPath);
                         break;
                     }
@@ -260,7 +266,11 @@ void MetadataManager::initFromScchMode() {
             QStringList scchFiles = arcmetaDir.entryList({"*.scch"}, QDir::Files | QDir::Hidden);
             for (const QString& scchFile : scchFiles) {
                 if (scchFile == "__folder__.scch") continue;
-                ArcMeta::AmMetaScch itemLoader(resolvedPath, scchFile.left(scchFile.length() - 5).toStdWString());
+                // 物理修复：分步提取文件名，防止 MSVC 在表达式嵌套中丢失类型信息
+                QString baseName = scchFile.left(scchFile.length() - 5);
+                std::wstring wBaseName = baseName.toStdWString();
+
+                ArcMeta::AmMetaScch itemLoader(resolvedPath, wBaseName);
                 if (itemLoader.load()) {
                     const ItemMeta& item = itemLoader.item();
                     if (item.hasUserOperations()) {
@@ -270,7 +280,7 @@ void MetadataManager::initFromScchMode() {
                         iMeta.pinned = item.pinned; iMeta.note = item.note; iMeta.url = item.url; iMeta.encrypted = item.encrypted;
                         iMeta.isFolder = (item.type == L"folder"); iMeta.fileId128 = item.fileId128; iMeta.palettes = item.palettes;
                         iMeta.fileSize = item.size; iMeta.ctime = item.creationTime; iMeta.mtime = item.modificationTime; iMeta.atime = item.accessTime;
-                        localResults.append({fastNormalizePath(resolvedPath + L"\\" + scchFile.left(scchFile.length() - 5).toStdWString()), iMeta});
+                        localResults.append({fastNormalizePath(resolvedPath + L"\\" + wBaseName), iMeta});
                         fileCount++;
                     }
                 }
