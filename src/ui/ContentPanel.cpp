@@ -169,9 +169,9 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == ColorRole) {
         return record.color;
     } else if (role == IsLockedRole || role == PinnedRole) {
-        return false; // 延迟
+        return record.pinned;
     } else if (role == EncryptedRole) {
-        return false; // 延迟
+        return record.encrypted;
     } else if (role == TagsRole) {
         return record.tags;
     } else if (role == ManagedRole) {
@@ -250,6 +250,27 @@ QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientati
     return QVariant();
 }
 
+QStringList FerrexVirtualDbModel::mimeTypes() const {
+    return {"text/uri-list"};
+}
+
+QMimeData* FerrexVirtualDbModel::mimeData(const QModelIndexList& indexes) const {
+    QMimeData* mime = new QMimeData();
+    QList<QUrl> urls;
+    for (const auto& idx : indexes) {
+        if (idx.column() == 0) {
+            QString path = data(idx, PathRole).toString();
+            if (!path.isEmpty()) urls << QUrl::fromLocalFile(path);
+        }
+    }
+    if (urls.isEmpty()) {
+        delete mime;
+        return nullptr;
+    }
+    mime->setUrls(urls);
+    return mime;
+}
+
 bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& value, int role) {
     if (!index.isValid() || index.row() >= (int)m_allRecords.size()) return false;
 
@@ -322,6 +343,27 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
     m_aspectRatios.clear();
     m_metaCache.clear();
     endResetModel();
+}
+
+void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
+    QString nPath = QDir::toNativeSeparators(path);
+    for (int i = 0; i < (int)m_allRecords.size(); ++i) {
+        if (m_allRecords[i].path == nPath) {
+            auto meta = MetadataManager::instance().getMeta(nPath.toStdWString());
+            m_allRecords[i].rating = meta.rating;
+            m_allRecords[i].color = QString::fromStdWString(meta.color);
+            m_allRecords[i].tags = meta.tags;
+            m_allRecords[i].fileId = meta.fileId128;
+            m_allRecords[i].pinned = meta.pinned;
+            m_allRecords[i].encrypted = meta.encrypted;
+            
+            m_metaCache.remove(nPath);
+            QModelIndex left = index(i, 0);
+            QModelIndex right = index(i, columnCount() - 1);
+            emit dataChanged(left, right);
+            break;
+        }
+    }
 }
 
 void FerrexVirtualDbModel::clear() {
@@ -1723,6 +1765,21 @@ void ContentPanel::onSelectionChanged() {
     emit selectionChanged(selectedPaths); 
 } 
  
+void ContentPanel::refreshAll() {
+    if (m_currentCategoryType == "user_category") {
+        // 如果是从分类加载的，我们需要找到当前分类 ID。
+        // 由于 ContentPanel 没有保存 categoryId，暂时简单处理。
+    } else if (!m_currentPath.isEmpty()) {
+        loadDirectory(m_currentPath, m_isRecursive);
+    }
+}
+
+void ContentPanel::updateItemMetadata(const QString& path) {
+    if (m_model) {
+        m_model->updateRecordMetadata(path);
+    }
+}
+
 void ContentPanel::onDoubleClicked(const QModelIndex& index) { 
     if (!index.isValid()) return; 
  
@@ -1826,6 +1883,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 r.color = QString::fromStdWString(meta.color);
                 r.tags = meta.tags;
                 r.fileId = meta.fileId128;
+                r.pinned = meta.pinned;
+                r.encrypted = meta.encrypted;
 
                 allItems.push_back(r);
  
@@ -2024,6 +2083,8 @@ void ContentPanel::loadCategory(int categoryId) {
             r.color = QString::fromStdWString(meta.color);
             r.tags = meta.tags;
             r.fileId = meta.fileId128;
+            r.pinned = meta.pinned;
+            r.encrypted = meta.encrypted;
 
             if (r.isDir) {
                 QDir sub(p);
@@ -2079,6 +2140,8 @@ void ContentPanel::loadPaths(const QStringList& paths) {
             r.color = QString::fromStdWString(meta.color);
             r.tags = meta.tags;
             r.fileId = meta.fileId128;
+            r.pinned = meta.pinned;
+            r.encrypted = meta.encrypted;
 
             if (r.isDir) {
                 QDir sub(p);

@@ -578,6 +578,7 @@ std::vector<Category> getAll() {
 
 bool add(Category& cat) {
     CategoryCacheManager::instance().addCategory(cat);
+    qDebug() << "[CategoryRepo] Add Category -> Name:" << QString::fromStdWString(cat.name) << "ID:" << cat.id << "Parent:" << cat.parentId;
     return true;
 }
 
@@ -607,6 +608,7 @@ bool addItemToCategory(int categoryId, const std::string& fileId128, const std::
         finalPathHint = MetadataManager::instance().getPathByFid(fileId128);
     }
     CategoryCacheManager::instance().addItem(categoryId, fileId128, finalPathHint);
+    qDebug() << "[CategoryRepo] Bind Item -> CatId:" << categoryId << "Path:" << QString::fromStdWString(finalPathHint);
     return true;
 }
 

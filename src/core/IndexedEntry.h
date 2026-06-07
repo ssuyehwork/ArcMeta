@@ -24,6 +24,8 @@ struct ItemRecord {
     QString color;
     QStringList tags;
     std::string fileId;
+    bool pinned = false;
+    bool encrypted = false;
 
     // 2026-06-xx 极致优化：预取物理属性，实现渲染零 I/O
     long long size = 0;

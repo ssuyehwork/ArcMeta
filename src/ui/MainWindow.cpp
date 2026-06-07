@@ -330,16 +330,6 @@ void MainWindow::initUi() {
         // 2026-04-11 按照用户要求：补全物理持久化逻辑 (MetadataManager 直接入库)
         MetadataManager::instance().setRating(m_currentQuickLookPath.toStdWString(), rating);
 
-        // 物理同步：实时刷新 ContentPanel 列表模型，确保主界面同步变迁
-        auto* proxy = m_contentPanel->getProxyModel();
-        for (int i = 0; i < proxy->rowCount(); ++i) {
-            QModelIndex idx = proxy->index(i, 0);
-            if (idx.data(PathRole).toString() == m_currentQuickLookPath) {
-                proxy->setData(idx, rating, RatingRole);
-                break;
-            }
-        }
-
         m_metaPanel->setRating(rating);
         // 2026-04-11 按照用户要求：在预览窗设定星级时，左上方即时反馈
         QString msg = QString("已设定星级: <span style='color: #FECF0E;'>%1 星</span>").arg(rating);
@@ -351,16 +341,6 @@ void MainWindow::initUi() {
 
         // 2026-04-11 按照用户要求：补全物理持久化逻辑 (MetadataManager 直接入库)
         MetadataManager::instance().setColor(m_currentQuickLookPath.toStdWString(), color.toStdWString());
-
-        // 物理同步：实时刷新 ContentPanel 列表模型，确保主界面同步变迁
-        auto* proxy = m_contentPanel->getProxyModel();
-        for (int i = 0; i < proxy->rowCount(); ++i) {
-            QModelIndex idx = proxy->index(i, 0);
-            if (idx.data(PathRole).toString() == m_currentQuickLookPath) {
-                proxy->setData(idx, color, ColorRole);
-                break;
-            }
-        }
 
         m_metaPanel->setColor(color.toStdWString());
         
@@ -468,11 +448,9 @@ void MainWindow::initUi() {
             
             if (rating != -1) {
                 // 2026-05-24 按照用户要求：彻底移除 SCCH，改为中心化异步持久化
-                m_contentPanel->getProxyModel()->setData(idx, rating, RatingRole);
                 MetadataManager::instance().setRating(path.toStdWString(), rating);
             }
             if (color != L"__NO_CHANGE__") {
-                m_contentPanel->getProxyModel()->setData(idx, QString::fromStdWString(color), ColorRole);
                 MetadataManager::instance().setColor(path.toStdWString(), color);
             }
         }
@@ -485,8 +463,19 @@ void MainWindow::initUi() {
         }
     });
 
-    // 9. 2026-03-xx 按照用户要求：响应元数据全局变更，同步刷新侧边栏计数
-    // 引入 800ms 防抖，防止信号风暴导致的 UI 假死
+    // 9. 2026-03-xx 按照用户要求：响应元数据全局变更，同步刷新 UI
+    
+    // 9a. 全局内容区同步：只要元数据变了，通知内容面板刷新对应的行
+    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
+        if (path == "__RELOAD_ALL__") {
+            m_contentPanel->refreshAll();
+            return;
+        }
+        // 关键修复：通知 ContentPanel 局部更新该路径的数据
+        m_contentPanel->updateItemMetadata(path);
+    });
+
+    // 9b. 侧边栏刷新防抖
     m_sidebarRefreshTimer = new QTimer(this);
     m_sidebarRefreshTimer->setInterval(800);
     m_sidebarRefreshTimer->setSingleShot(true);

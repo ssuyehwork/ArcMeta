@@ -27,7 +27,7 @@ public:
         }
     };
 
-    explicit AmMetaScch(const std::wstring& folderPath, const std::wstring& fileName = L"__LEGACY__");
+    explicit AmMetaScch(const std::wstring& folderPath, const std::wstring& fileName = L"");
     bool load();
     bool save() const;
 
@@ -39,15 +39,10 @@ public:
     void setItem(const ItemMeta& item) { m_item = item; }
 
     // Deprecated: switch to file-mode for performance
-    std::map<std::wstring, ItemMeta>& items() { return m_items; }
-    const std::map<std::wstring, ItemMeta>& items() const { return m_items; }
+    [[deprecated]] std::map<std::wstring, ItemMeta>& items() { return m_items; }
+    [[deprecated]] const std::map<std::wstring, ItemMeta>& items() const { return m_items; }
 
     void remove(const std::wstring& fileName) { m_items.erase(fileName); }
-
-    void setItemColor(const std::wstring& fileName, const std::wstring& color) {
-        if (m_isFileMode) m_item.color = color;
-        else m_items[fileName].color = color;
-    }
 
     static bool renameItem(const QString& folderPath, const QString& oldName, const QString& newName);
 

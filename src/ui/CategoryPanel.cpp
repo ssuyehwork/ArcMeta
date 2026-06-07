@@ -66,24 +66,29 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     connect(m_refreshTimer, &QTimer::timeout, this, [this]() {
         if (!m_categoryModel) return;
         
-        // 2026-06-xx 物理分流：将耗时的统计计算（fullRecount）移出 UI 线程
-        // 采用 QPointer 确保线程安全性
-        QPointer<CategoryPanel> weakThis(this);
-        (void)QtConcurrent::run([weakThis]() {
-            auto sysCounts = CategoryRepo::getSystemCounts();
-            auto catCountsVec = CategoryRepo::getCounts();
-            
-            QMap<int, int> catCounts;
-            for (const auto& p : catCountsVec) catCounts[p.first] = p.second;
-            
-            // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
-            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, sysCounts, catCounts]() {
-                if (weakThis && weakThis->m_categoryModel) {
-                    // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
-                    weakThis->m_categoryModel->updateStatistics(sysCounts, catCounts);
-                }
+        if (m_isFirstLoad) {
+            m_categoryModel->refresh();
+            m_isFirstLoad = false;
+        } else {
+            // 2026-06-xx 物理分流：将耗时的统计计算（fullRecount）移出 UI 线程
+            // 采用 QPointer 确保线程安全性
+            QPointer<CategoryPanel> weakThis(this);
+            (void)QtConcurrent::run([weakThis]() {
+                auto sysCounts = CategoryRepo::getSystemCounts();
+                auto catCountsVec = CategoryRepo::getCounts();
+                
+                QMap<int, int> catCounts;
+                for (const auto& p : catCountsVec) catCounts[p.first] = p.second;
+                
+                // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
+                QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, sysCounts, catCounts]() {
+                    if (weakThis && weakThis->m_categoryModel) {
+                        // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
+                        weakThis->m_categoryModel->updateStatistics(sysCounts, catCounts);
+                    }
+                });
             });
-        });
+        }
     });
 
     initUi();
@@ -960,10 +965,30 @@ void CategoryPanel::initUi() {
                 }
             };
 
-            // 递归激活并归类
-            std::function<void(const QString&, int)> activateAndCategorize = [&](const QString& p, int catId) {
+            // 递归激活并归类 (2026-06-xx 物理对标：支持文件夹自动转分类节点)
+            std::function<void(const QString&, int)> activateAndCategorize = [&](const QString& p, int parentCatId) {
                 QFileInfo info(p);
-                processItem(p, catId);
+                int currentCatId = parentCatId;
+                
+                // 1. 如果是文件夹，自动创建分类节点
+                if (info.isDir()) {
+                    std::wstring name = info.fileName().toStdWString();
+                    // 检查是否已存在同名子分类，避免重复创建
+                    int existingId = CategoryRepo::findCategoryId(parentCatId, name);
+                    if (existingId == 0) {
+                        Category newCat;
+                        newCat.name = name;
+                        newCat.parentId = parentCatId;
+                        newCat.color = getDefaultCategoryColor();
+                        CategoryRepo::add(newCat);
+                        currentCatId = newCat.id;
+                        qDebug() << "[Drop] 自动创建分类节点:" << QString::fromStdWString(name) << "ID:" << currentCatId;
+                    } else {
+                        currentCatId = existingId;
+                    }
+                }
+
+                processItem(p, currentCatId);
                 
                 currentTask++;
                 if (currentTask % 50 == 0) {
@@ -977,7 +1002,8 @@ void CategoryPanel::initUi() {
                     QDir dir(p);
                     QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
                     for (const QFileInfo& subInfo : entries) {
-                        activateAndCategorize(subInfo.absoluteFilePath(), catId);
+                        // 物理级联：子文件夹挂载到当前创建的分类下
+                        activateAndCategorize(subInfo.absoluteFilePath(), currentCatId);
                     }
                 }
             };
