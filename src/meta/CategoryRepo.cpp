@@ -703,6 +703,11 @@ void CategoryRepo::incrementCategorizedCount(int delta) {
     s_categorizedCount += delta;
 }
 
+void CategoryRepo::fullRecount() {
+    CategoryCacheManager::instance().markSysCountsDirty();
+    CategoryCacheManager::instance().getSystemCounts();
+}
+
 // CategoryRepo Implementation
 std::vector<Category> CategoryRepo::getAll() { return ScchCategoryEngine::getAll(); }
 std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) { 
@@ -764,33 +769,14 @@ std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
 std::vector<std::pair<int, int>> CategoryRepo::getCounts() { return ScchCategoryEngine::getCounts(); }
 
 int CategoryRepo::getUniqueItemCount() {
-    std::unordered_set<std::string> uniqueIds;
-    CategoryCacheManager::instance().forEachRecord([&](const CategoryItemRecord& r) {
-        if (!r.fileId128.empty()) {
-            std::wstring path = MetadataManager::instance().getPathByFid(r.fileId128);
-            if (!path.empty()) {
-                RuntimeMeta meta = MetadataManager::instance().getMeta(path);
-                if (!meta.isFolder) uniqueIds.insert(r.fileId128);
-            }
-        }
-    });
-    return static_cast<int>(uniqueIds.size());
+    // 2026-06-xx 物理脱钩：不再在查询时实时 getMeta 对账，而是信赖 CategoryCacheManager 维护的 fid 去重计数
+    // 2026-06-xx 逻辑修复：该函数代表“全部数据”，应当返回系统感知的总文件数 s_totalFileCount
+    return s_totalFileCount.load();
 }
 
 int CategoryRepo::getUncategorizedItemCount() {
-    std::unordered_set<std::string> categorizedIds;
-    CategoryCacheManager::instance().forEachRecord([&](const CategoryItemRecord& r) {
-        categorizedIds.insert(r.fileId128);
-    });
-
-    int count = 0;
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
-        if (meta.isFolder) return;
-        if (categorizedIds.find(meta.fileId128) == categorizedIds.end()) {
-            count++;
-        }
-    });
-    return count;
+    // 2026-06-xx 逻辑优化：直接从系统计数缓存读取，该值已由 updateIncremental 异步维持
+    return CategoryCacheManager::instance().getSystemCounts()["uncategorized"];
 }
 
 QMap<QString, int> CategoryRepo::getSystemCounts() {

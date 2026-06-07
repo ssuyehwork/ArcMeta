@@ -145,6 +145,9 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
             m_dirtyPaths.clear();
         }
         for (const auto& p : paths) persistAsync(p);
+
+        // 2026-06-xx 物理加固：同步保存 FRN 索引表
+        AllFrnManager::saveImmediately();
     });
 }
 
@@ -276,6 +279,9 @@ void MetadataManager::initFromScchMode() {
             if (!it->second.isFolder) totalFiles++;
         }
         CategoryRepo::setTotalFileCount(totalFiles);
+
+        // 2026-06-xx 逻辑加固：由于元数据加载可能导致分类计数的逻辑变动，强制执行一次全量重计
+        CategoryRepo::fullRecount();
     }
     qDebug() << "[PERF] 分布式 SCCH 缓存加载完成，项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     emit metaChanged("__RELOAD_ALL__");
@@ -332,6 +338,10 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
 
         if (hasMeta) {
             fetchWinApiMetadataDirect(nPath, rm.fileId128, nullptr, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime);
+
+            // 2026-06-xx 物理加固：补全 FRN 登记，确保下次启动能通过 All_FRN_metadata.scch 找回分布式元数据
+            registerArcmetaFrn(parentDir);
+
             std::unique_lock<std::shared_mutex> lock(m_mutex);
             m_cache[nPath] = rm;
             if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;

@@ -26,6 +26,7 @@ struct AllFrnHeader {
 static void ensureLoaded() {
     if (s_loaded) return;
     
+    // 2026-06-xx 物理加固：加载逻辑必须受锁保护，防止多线程重复加载
     QFile file("All_FRN_metadata.scch");
     if (file.exists() && file.open(QIODevice::ReadOnly)) {
         QDataStream ds(&file);
@@ -42,9 +43,10 @@ static void ensureLoaded() {
 }
 
 static void saveToDisk() {
-    std::shared_lock<std::shared_mutex> lock(s_frnMutex);
+    std::unique_lock<std::shared_mutex> lock(s_frnMutex);
     if (!s_dirty) return;
 
+    qDebug() << "[AllFrnManager] 正在将 FRN 映射持久化到磁盘，项数:" << s_frnCache.size();
     QFile file("All_FRN_metadata.scch.tmp");
     if (file.open(QIODevice::WriteOnly)) {
         QDataStream ds(&file);
@@ -55,8 +57,14 @@ static void saveToDisk() {
         ds << s_frnCache;
         file.close();
         QFile::remove("All_FRN_metadata.scch");
-        QFile::rename("All_FRN_metadata.scch.tmp", "All_FRN_metadata.scch");
-        s_dirty = false;
+        if (QFile::rename("All_FRN_metadata.scch.tmp", "All_FRN_metadata.scch")) {
+            s_dirty = false;
+            qDebug() << "[AllFrnManager] FRN 持久化成功";
+        } else {
+            qCritical() << "[AllFrnManager] FRN 持久化重命名失败!";
+        }
+    } else {
+        qCritical() << "[AllFrnManager] 无法打开临时文件进行 FRN 持久化写入!";
     }
 }
 
@@ -93,9 +101,18 @@ void AllFrnManager::registerFrn(const std::wstring& frn, const std::wstring& pat
 }
 
 QMap<QString, QString> AllFrnManager::getAllFrns() {
-    std::shared_lock<std::shared_mutex> lock(s_frnMutex);
+    {
+        std::shared_lock<std::shared_mutex> lock(s_frnMutex);
+        if (s_loaded) return s_frnCache;
+    }
+
+    std::unique_lock<std::shared_mutex> lock(s_frnMutex);
     ensureLoaded();
     return s_frnCache;
+}
+
+void AllFrnManager::saveImmediately() {
+    saveToDisk();
 }
 
 } // namespace ArcMeta
