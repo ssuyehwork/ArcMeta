@@ -85,6 +85,23 @@ static std::wstring normalizePath(const std::wstring& path) {
     return qp.toStdWString();
 }
 
+/**
+ * @brief 极致性能版路径归一化，仅在启动加载循环中使用
+ * 避开昂贵的 QDir::cleanPath，仅处理盘符大写与分隔符统一
+ */
+static std::wstring fastNormalizePath(const std::wstring& path) {
+    if (path.empty()) return L"";
+    std::wstring res = path;
+    for (size_t i = 0; i < res.length(); ++i) {
+        if (res[i] == L'/') res[i] = L'\\';
+    }
+    if (res.length() >= 2 && res[1] == L':') {
+        if (res[0] >= L'a' && res[0] <= L'z') res[0] = (wchar_t)(res[0] - 32);
+    }
+    if (res.length() == 2 && res[1] == L':') res += L'\\';
+    return res;
+}
+
 static std::string generateFallbackFid(const std::wstring& vol, const std::wstring& frn) {
     if (vol.empty() || frn.empty()) return "";
     return "FRN:" + QString::fromStdWString(vol).toUpper().toStdString() + ":" + QString::fromStdWString(frn).toUpper().toStdString();
@@ -191,99 +208,83 @@ void MetadataManager::initFromScchMode() {
     QMap<QString, QString> frnsMap = AllFrnManager::getAllFrns();
     qDebug() << "[Metadata] 从 All_FRN_metadata.scch 读入索引项数:" << frnsMap.size();
     
-    int folderCount = 0;
-    int fileCount = 0;
+    std::atomic<int> folderCount(0);
+    std::atomic<int> fileCount(0);
 
-    for (QMap<QString, QString>::const_iterator itMap = frnsMap.constBegin(); itMap != frnsMap.constEnd(); ++itMap) {
-        QString frnStr = itMap.key();
-        QString lastKnownPath = itMap.value();
-        std::wstring resolvedPath = QDir::toNativeSeparators(lastKnownPath).toStdWString();
+    struct LoadTask {
+        QString frn;
+        QString path;
+    };
+    QList<LoadTask> tasks;
+    for (auto it = frnsMap.constBegin(); it != frnsMap.constEnd(); ++it) {
+        tasks.append({it.key(), it.value()});
+    }
 
-        qDebug() << "[Metadata] 正在处理 FRN 映射项 -> FRN:" << frnStr << "Path:" << lastKnownPath;
+    // 2026-06-xx 性能爆炸：引入并行加载，充分利用多核 CPU 处理海量 SCCH
+    auto results = QtConcurrent::blockingMapped<QList<QPair<std::wstring, RuntimeMeta>>>(tasks, [&](const LoadTask& task) {
+        QList<QPair<std::wstring, RuntimeMeta>> localResults;
+        std::wstring resolvedPath = QDir::toNativeSeparators(task.path).toStdWString();
 
-        if (!QDir(QString::fromStdWString(resolvedPath)).exists()) {
+        if (!QFile::exists(task.path)) {
             bool ok = false;
-            unsigned long long frnVal = frnStr.toULongLong(&ok, 16);
+            unsigned long long frnVal = task.frn.toULongLong(&ok, 16);
             if (ok) {
                 for (size_t d = 0; d < 26; ++d) {
                     std::wstring p = MftReader::instance().getPathFast(static_cast<int>(d), frnVal);
                     if (!p.empty()) {
-                        if (p.find(L"metadata.scch") != std::wstring::npos) {
-                            resolvedPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(p)).absolutePath()).toStdWString();
-                        } else {
-                            resolvedPath = p;
-                        }
-                        AllFrnManager::registerFrn(frnStr.toStdWString(), resolvedPath);
+                        resolvedPath = (p.find(L"metadata.scch") != std::wstring::npos) ?
+                            QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(p)).absolutePath()).toStdWString() : p;
+                        AllFrnManager::registerFrn(task.frn.toStdWString(), resolvedPath);
                         break;
                     }
                 }
             }
         }
-        
-        // 2026-06-xx 重构：不再只加载 metadata.scch，而是扫描 .arcmeta/ 目录
-        // 1. 加载文件夹自身元数据
+
         ArcMeta::AmMetaScch folderLoader(resolvedPath, L"");
         if (folderLoader.load()) {
-            std::wstring nResolvedPath = normalizePath(resolvedPath);
-            long long fSize = 0, fCtime = 0, fMtime = 0, fAtime = 0;
-            std::string fId128;
-            fetchWinApiMetadataDirect(resolvedPath, fId128, nullptr, &fSize, nullptr, &fCtime, &fMtime, &fAtime);
-
             const FolderMeta& f = folderLoader.folder();
             if (!f.isDefault()) {
                 RuntimeMeta fMeta;
                 fMeta.rating = f.rating; fMeta.color = f.color;
-                for (size_t i = 0; i < f.tags.size(); ++i) fMeta.tags << QString::fromStdWString(f.tags[i]);
+                for (const auto& t : f.tags) fMeta.tags << QString::fromStdWString(t);
                 fMeta.pinned = f.pinned; fMeta.note = f.note; fMeta.url = f.url; fMeta.encrypted = f.encrypted;
-                fMeta.isFolder = true;
-                fMeta.fileId128 = fId128.empty() ? f.fileId128 : fId128;
-                fMeta.fileSize = fSize; fMeta.ctime = fCtime; fMeta.mtime = fMtime; fMeta.atime = fAtime;
-                fMeta.palettes = f.palettes;
-                tempCache[nResolvedPath] = fMeta;
+                fMeta.isFolder = true; fMeta.fileId128 = f.fileId128; fMeta.palettes = f.palettes;
+                localResults.append({fastNormalizePath(resolvedPath), fMeta});
+                folderCount++;
             }
         }
 
-        // 2. 加载该目录下所有文件的元数据 (.arcmeta/*.scch)
-        // 2026-06-xx 物理修复：必须显式包含 Hidden 标志，因为 .scch 文件在保存时被标记为隐藏属性
         QDir arcmetaDir(QString::fromStdWString(resolvedPath) + "/.arcmeta");
-        QStringList scchFiles = arcmetaDir.entryList({"*.scch"}, QDir::Files | QDir::Hidden);
-        
-        qDebug() << "  [Scan] .arcmeta 目录存在状态:" << arcmetaDir.exists() << " 路径:" << arcmetaDir.absolutePath();
-        qDebug() << "  [Scan] 发现 .scch 文件数:" << scchFiles.size() << " 列表:" << scchFiles;
-
-        if (folderLoader.load()) {
-            folderCount++;
-            qDebug() << "  [OK] 加载文件夹元数据:" << lastKnownPath;
-        }
-
-        for (const QString& scchFile : scchFiles) {
-            if (scchFile == "__folder__.scch") continue;
-            QString fileName = scchFile.left(scchFile.length() - 5); // 移除 .scch
-            
-            ArcMeta::AmMetaScch itemLoader(resolvedPath, fileName.toStdWString());
-            bool ok = itemLoader.load();
-            if (ok) {
-                const ItemMeta& item = itemLoader.item();
-                bool hasOps = item.hasUserOperations();
-                qDebug() << "    [Item] 加载" << scchFile << "成功? " << ok << "有元数据? " << hasOps;
-                if (hasOps) {
-                    RuntimeMeta iMeta;
-                    iMeta.rating = item.rating; iMeta.color = item.color;
-                    for (size_t tIdx = 0; tIdx < item.tags.size(); ++tIdx) iMeta.tags << QString::fromStdWString(item.tags[tIdx]);
-                    iMeta.pinned = item.pinned; iMeta.note = item.note; iMeta.url = item.url; iMeta.encrypted = item.encrypted;
-                    iMeta.isFolder = (item.type == L"folder");
-                    iMeta.fileId128 = item.fileId128;
-                    
-                    std::wstring itemPath = resolvedPath + L"\\" + fileName.toStdWString();
-                    fetchWinApiMetadataDirect(itemPath, iMeta.fileId128, nullptr, &iMeta.fileSize, nullptr, &iMeta.ctime, &iMeta.mtime, &iMeta.atime);
-
-                    iMeta.palettes = item.palettes;
-                    std::wstring nItemPath = normalizePath(itemPath);
-                    tempCache[nItemPath] = iMeta;
-                    if (!iMeta.fileId128.empty()) tempFidToPath[iMeta.fileId128] = nItemPath;
-                    fileCount++;
+        if (arcmetaDir.exists()) {
+            QStringList scchFiles = arcmetaDir.entryList({"*.scch"}, QDir::Files | QDir::Hidden);
+            for (const QString& scchFile : scchFiles) {
+                if (scchFile == "__folder__.scch") continue;
+                ArcMeta::AmMetaScch itemLoader(resolvedPath, scchFile.left(scchFile.length() - 5).toStdWString());
+                if (itemLoader.load()) {
+                    const ItemMeta& item = itemLoader.item();
+                    if (item.hasUserOperations()) {
+                        RuntimeMeta iMeta;
+                        iMeta.rating = item.rating; iMeta.color = item.color;
+                        for (const auto& t : item.tags) iMeta.tags << QString::fromStdWString(t);
+                        iMeta.pinned = item.pinned; iMeta.note = item.note; iMeta.url = item.url; iMeta.encrypted = item.encrypted;
+                        iMeta.isFolder = (item.type == L"folder"); iMeta.fileId128 = item.fileId128; iMeta.palettes = item.palettes;
+                        iMeta.fileSize = item.size; iMeta.ctime = item.creationTime; iMeta.mtime = item.modificationTime; iMeta.atime = item.accessTime;
+                        localResults.append({fastNormalizePath(resolvedPath + L"\\" + scchFile.left(scchFile.length() - 5).toStdWString()), iMeta});
+                        fileCount++;
+                    }
                 }
             }
+        }
+        return localResults;
+    });
+
+    // 合并结果：预先分配内存，减少 rehash
+    tempCache.reserve(fileCount + folderCount);
+    for (const auto& localList : results) {
+        for (const auto& pair : localList) {
+            tempCache[pair.first] = pair.second;
+            if (!pair.second.fileId128.empty()) tempFidToPath[pair.second.fileId128] = pair.first;
         }
     }
     qDebug() << "[Metadata] 分布式加载完成: 目录数=" << folderCount << " 文件数=" << fileCount;
