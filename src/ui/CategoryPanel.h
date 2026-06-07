@@ -89,12 +89,12 @@ private:
     /**
      * @brief 递归保存 QTreeView 的展开状态
      */
-    void saveExpandedState(const QModelIndex& parent);
+    void saveExpandedState(const QModelIndex& parent, QSet<int>& expandedIds, QStringList& expandedNames);
 
     /**
      * @brief 递归恢复 QTreeView 的展开状态
      */
-    void restoreExpandedState(const QModelIndex& parent);
+    void restoreExpandedState(const QModelIndex& parent, const QSet<int>& expandedIds, const QStringList& expandedNames);
 
     /**
      * @brief 2026-03-xx 安全逻辑：尝试解锁分类
@@ -111,10 +111,6 @@ private:
 
     // 2026-03-xx 会话级解锁列表：存储当前已验证通过的加密分类 ID
     QSet<int> m_unlockedIds;
-
-    // 2026-03-xx 物理记忆：暂存展开状态以供恢复
-    QSet<int> m_tempExpandedIds;
-    QStringList m_tempExpandedNames;
 
     // 2026-04-15 物理锁：恢复状态期间严禁反向触发保存，防止信号回流污染 Settings
     bool m_isRestoringState = false;

@@ -228,7 +228,7 @@ void CategoryPanel::setupContextMenu() {
 /**
  * @brief 递归保存 QTreeView 的展开状态
  */
-void CategoryPanel::saveExpandedState(const QModelIndex& parent) {
+void CategoryPanel::saveExpandedState(const QModelIndex& parent, QSet<int>& expandedIds, QStringList& expandedNames) {
     if (!m_categoryTree || !m_categoryTree->model()) return;
     int rowCount = m_categoryTree->model()->rowCount(parent);
     for (int i = 0; i < rowCount; ++i) {
@@ -237,13 +237,13 @@ void CategoryPanel::saveExpandedState(const QModelIndex& parent) {
             int id = idx.data(IdRole).toInt();
             QString name = idx.data(NameRole).toString();
             if (id != 0) {
-                m_tempExpandedIds.insert(id);
+                expandedIds.insert(id);
                 qDebug() << "[CategoryPanel] 正在记录展开项: ID =" << id << "名称 =" << name;
             } else {
-                m_tempExpandedNames << name;
+                expandedNames << name;
                 qDebug() << "[CategoryPanel] 正在记录展开项: 系统项 =" << name;
             }
-            saveExpandedState(idx);
+            saveExpandedState(idx, expandedIds, expandedNames);
         }
     }
 }
@@ -252,7 +252,7 @@ void CategoryPanel::saveExpandedState(const QModelIndex& parent) {
  * @brief 递归恢复 QTreeView 的展开状态
  * 2026-03-xx 物理拦截：加密且未解锁的分类在恢复时强制跳过展开
  */
-void CategoryPanel::restoreExpandedState(const QModelIndex& parent) {
+void CategoryPanel::restoreExpandedState(const QModelIndex& parent, const QSet<int>& expandedIds, const QStringList& expandedNames) {
     if (!m_categoryTree || !m_categoryTree->model()) return;
     
     bool hasHistory = m_categoryTree->property("hasHistoryRecord").toBool();
@@ -266,7 +266,7 @@ void CategoryPanel::restoreExpandedState(const QModelIndex& parent) {
         
         bool shouldExpand = false;
         
-        if (m_tempExpandedNames.contains(name) || (id != 0 && m_tempExpandedIds.contains(id))) {
+        if (expandedNames.contains(name) || (id != 0 && expandedIds.contains(id))) {
             shouldExpand = true;
         }
         else if (name == "我的分类" || name == "快速访问") {
@@ -287,7 +287,7 @@ void CategoryPanel::restoreExpandedState(const QModelIndex& parent) {
         if (shouldExpand) {
             qDebug() << "[CategoryPanel] 正在执行展开动作:" << name;
             m_categoryTree->setExpanded(idx, true);
-            restoreExpandedState(idx);
+            restoreExpandedState(idx, expandedIds, expandedNames);
         }
     }
 }
@@ -302,14 +302,14 @@ void CategoryPanel::onCreateCategory() {
             cat.parentId = 0;
             cat.color = getDefaultCategoryColor();
             
-            m_tempExpandedIds.clear();
-            m_tempExpandedNames.clear();
-            saveExpandedState(QModelIndex());
+            QSet<int> expandedIds;
+            QStringList expandedNames;
+            saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
             CategoryRepo::add(cat);
             m_categoryModel->refresh();
 
-            restoreExpandedState(QModelIndex());
+            restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         }
     }
 }
@@ -328,15 +328,15 @@ void CategoryPanel::onCreateSubCategory() {
             cat.parentId = id;
             cat.color = getDefaultCategoryColor();
 
-            m_tempExpandedIds.clear();
-            m_tempExpandedNames.clear();
-            saveExpandedState(QModelIndex());
-            m_tempExpandedIds.insert(id);
+            QSet<int> expandedIds;
+            QStringList expandedNames;
+            saveExpandedState(QModelIndex(), expandedIds, expandedNames);
+            expandedIds.insert(id);
 
             CategoryRepo::add(cat);
             m_categoryModel->refresh();
 
-            restoreExpandedState(QModelIndex());
+            restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         }
     }
 }
@@ -348,17 +348,17 @@ void CategoryPanel::onClassifyToCategory() {
 
     AppConfig::instance().setValue("Category/ExtensionTargetId", id);
 
-    m_tempExpandedIds.clear();
-    m_tempExpandedNames.clear();
-    saveExpandedState(QModelIndex());
+    QSet<int> expandedIds;
+    QStringList expandedNames;
+    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
     m_categoryModel->refresh();
 
-    restoreExpandedState(QModelIndex());
+    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
+
     QString name = index.data(NameRole).toString();
     ToolTipOverlay::instance()->showText(QCursor::pos(), QString("已设为归类目标: %1").arg(name), 1000);
 }
-
 
 void CategoryPanel::onSetColor() {
     QModelIndex index = m_categoryTree->currentIndex();
@@ -378,13 +378,13 @@ void CategoryPanel::onSetColor() {
         }
     }
     
-    m_tempExpandedIds.clear();
-    m_tempExpandedNames.clear();
-    saveExpandedState(QModelIndex());
+    QSet<int> expandedIds;
+    QStringList expandedNames;
+    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
     m_categoryModel->refresh();
 
-    restoreExpandedState(QModelIndex());
+    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
     
     ToolTipOverlay::instance()->showText(QCursor::pos(), "分类颜色已更新", 1000);
 }
@@ -411,13 +411,13 @@ void CategoryPanel::onRandomColor() {
         }
     }
     
-    m_tempExpandedIds.clear();
-    m_tempExpandedNames.clear();
-    saveExpandedState(QModelIndex());
+    QSet<int> expandedIds;
+    QStringList expandedNames;
+    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
     m_categoryModel->refresh();
 
-    restoreExpandedState(QModelIndex());
+    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
 }
 
 void CategoryPanel::onSetPresetTags() {
@@ -439,15 +439,14 @@ void CategoryPanel::onSetPresetTags() {
         current.presetTags.clear();
         for(const QString& t : tags) current.presetTags.push_back(t.trimmed().toStdWString());
         
-        m_tempExpandedIds.clear();
-        m_tempExpandedNames.clear();
-        saveExpandedState(QModelIndex());
+        QSet<int> expandedIds;
+        QStringList expandedNames;
+        saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
         CategoryRepo::update(current);
         m_categoryModel->refresh();
 
-        restoreExpandedState(QModelIndex());
-}
+        restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         ToolTipOverlay::instance()->showText(QCursor::pos(), "预设标签已更新", 1000);
     }
 }
@@ -467,13 +466,14 @@ void CategoryPanel::onTogglePin() {
             break;
         }
     }
-    m_tempExpandedIds.clear();
-    m_tempExpandedNames.clear();
-    saveExpandedState(QModelIndex());
+
+    QSet<int> expandedIds;
+    QStringList expandedNames;
+    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
     m_categoryModel->refresh();
 
-    restoreExpandedState(QModelIndex());
+    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
 }
 
 void CategoryPanel::onSetPassword() {
@@ -487,9 +487,9 @@ void CategoryPanel::onSetPassword() {
         QString pwd = dlg.password();
         QString hint = dlg.hint();
 
-        m_tempExpandedIds.clear();
-        m_tempExpandedNames.clear();
-        saveExpandedState(QModelIndex());
+        QSet<int> expandedIds;
+        QStringList expandedNames;
+        saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
         auto all = CategoryRepo::getAll();
         for(auto& cat : all) {
@@ -503,7 +503,7 @@ void CategoryPanel::onSetPassword() {
         
         m_categoryModel->refresh();
 
-        restoreExpandedState(QModelIndex());
+        restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 分类已加密</b>", 1000, QColor("#00A650"));
     }
 }
@@ -519,9 +519,9 @@ void CategoryPanel::onClearPassword() {
     CategoryLockDialog dlg(hint, this);
     if (dlg.exec() == QDialog::Accepted) {
         // [SIMULATION] 校验成功
-        m_tempExpandedIds.clear();
-        m_tempExpandedNames.clear();
-        saveExpandedState(QModelIndex());
+        QSet<int> expandedIds;
+        QStringList expandedNames;
+        saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
         auto all = CategoryRepo::getAll();
         for(auto& cat : all) {
@@ -535,7 +535,7 @@ void CategoryPanel::onClearPassword() {
 
         m_categoryModel->refresh();
 
-        restoreExpandedState(QModelIndex());
+        restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 验证成功，分类已解除加密</b>", 1000, QColor("#00A650"));
     }
 }
@@ -817,14 +817,14 @@ void CategoryPanel::initUi() {
 
         if (hasRealData) {
             qDebug() << "[CategoryPanel] 模型即将重置，暂存当前有效展开状态...";
-            m_tempExpandedIds.clear();
-            m_tempExpandedNames.clear();
-            saveExpandedState(QModelIndex());
+            QSet<int> expandedIds;
+            QStringList expandedNames;
+            saveExpandedState(QModelIndex(), expandedIds, expandedNames);
             
             QList<int> idList;
-            for (int id : m_tempExpandedIds) idList << id;
+            for (int id : expandedIds) idList << id;
             m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idList));
-            m_categoryTree->setProperty("expandedNames", m_tempExpandedNames);
+            m_categoryTree->setProperty("expandedNames", expandedNames);
         } else {
             qDebug() << "[CategoryPanel] 当前模型处于加载态或为空，跳过暂存以保护既有恢复属性。";
         }
@@ -837,14 +837,12 @@ void CategoryPanel::initUi() {
             QList<int> idList = m_categoryTree->property("expandedIds").value<QList<int>>();
             QStringList expandedNames = m_categoryTree->property("expandedNames").toStringList();
             
-            m_tempExpandedIds.clear();
-            for (int id : idList) m_tempExpandedIds.insert(id);
-            m_tempExpandedNames = expandedNames;
+            QSet<int> expandedIds;
+            for (int id : idList) expandedIds.insert(id);
 
             m_isRestoringState = true;
             m_categoryTree->blockSignals(true); // 物理阻断：防止展开动作触发 saveExpandedStateToSettings
-            restoreExpandedState(QModelIndex());
-}
+            restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
             m_categoryTree->blockSignals(false);
             m_isRestoringState = false;
             qDebug() << "[CategoryPanel] 物理级展开状态恢复完成。";
@@ -986,14 +984,14 @@ void CategoryPanel::initUi() {
                 progress->accept();
                 progress->deleteLater();
                 
-                m_tempExpandedIds.clear();
-                m_tempExpandedNames.clear();
-                saveExpandedState(QModelIndex());
+                QSet<int> expandedIds;
+                QStringList expandedNames;
+                saveExpandedState(QModelIndex(), expandedIds, expandedNames);
                 
                 QList<int> idList;
-                for (int id : m_tempExpandedIds) idList << id;
+                for (int id : expandedIds) idList << id;
                 m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idList));
-                m_categoryTree->setProperty("expandedNames", m_tempExpandedNames);
+                m_categoryTree->setProperty("expandedNames", expandedNames);
 
                 m_categoryModel->refresh();
                 
@@ -1076,16 +1074,16 @@ void CategoryPanel::saveExpandedStateToSettings() {
         }
     }
 
-    m_tempExpandedIds.clear();
-    m_tempExpandedNames.clear();
-    saveExpandedState(QModelIndex());
+    QSet<int> ids;
+    QStringList names;
+    saveExpandedState(QModelIndex(), ids, names);
 
-    qDebug() << "[CategoryPanel] 正在持久化展开状态到磁盘 - 记录总数:" << m_tempExpandedIds.size() + m_tempExpandedNames.size();
+    qDebug() << "[CategoryPanel] 正在持久化展开状态到磁盘 - 记录总数:" << ids.size() + names.size();
 
     QList<QVariant> idList;
-    for (int id : m_tempExpandedIds) idList << id;
+    for (int id : ids) idList << id;
     AppConfig::instance().setValue("Category/ExpandedIds", idList);
-    AppConfig::instance().setValue("Category/ExpandedNames", m_tempExpandedNames);
+    AppConfig::instance().setValue("Category/ExpandedNames", names);
     AppConfig::instance().sync(); // 物理落盘
 }
 
@@ -1102,15 +1100,13 @@ void CategoryPanel::loadExpandedStateFromSettings() {
     m_categoryTree->setProperty("expandedNames", names);
     m_categoryTree->setProperty("hasHistoryRecord", hasRecord);
 
-    m_tempExpandedIds.clear();
-    for (const auto& v : idList) m_tempExpandedIds.insert(v.toInt());
-    m_tempExpandedNames = names;
+    QSet<int> ids;
+    for (const auto& v : idList) ids.insert(v.toInt());
 
     // 同时也尝试立即恢复一次（兼容同步加载场景）
     m_isRestoringState = true;
     m_categoryTree->blockSignals(true);
-    restoreExpandedState(QModelIndex());
-}
+    restoreExpandedState(QModelIndex(), ids, names);
     m_categoryTree->blockSignals(false);
     m_isRestoringState = false;
 }

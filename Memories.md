@@ -15,4 +15,8 @@
 
 8. 我期望应用可以预览“.SCCH”文件里的内容，不然都不知道是否成功将内容记录到文件里，甚至都不知道记录了什么？
 
-9. 
+9. 启动时必须正确初始化 s_totalFileCount 和 s_categorizedCount 计数器，确保侧边栏统计数值准确。
+
+10. 所有的初始化逻辑必须遵循严格的先后顺序：1. AllFrnManager 2. CategoryRepo 3. MetadataManager。
+
+11. 修复代码时必须保持语法严谨，杜绝括号不匹配导致的批量编译错误。
