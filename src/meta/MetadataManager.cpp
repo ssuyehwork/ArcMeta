@@ -188,11 +188,17 @@ void MetadataManager::initFromScchMode() {
     }
 
     QMap<QString, QString> frnsMap = AllFrnManager::getAllFrns();
+    qDebug() << "[Metadata] 从 All_FRN_metadata.scch 读入索引项数:" << frnsMap.size();
     
+    int folderCount = 0;
+    int fileCount = 0;
+
     for (QMap<QString, QString>::const_iterator itMap = frnsMap.constBegin(); itMap != frnsMap.constEnd(); ++itMap) {
         QString frnStr = itMap.key();
         QString lastKnownPath = itMap.value();
         std::wstring resolvedPath = QDir::toNativeSeparators(lastKnownPath).toStdWString();
+
+        qDebug() << "[Metadata] 正在处理 FRN 映射项 -> FRN:" << frnStr << "Path:" << lastKnownPath;
 
         if (!QDir(QString::fromStdWString(resolvedPath)).exists()) {
             bool ok = false;
@@ -239,6 +245,11 @@ void MetadataManager::initFromScchMode() {
         // 2. 加载该目录下所有文件的元数据 (.arcmeta/*.scch)
         QDir arcmetaDir(QString::fromStdWString(resolvedPath) + "/.arcmeta");
         QStringList scchFiles = arcmetaDir.entryList({"*.scch"}, QDir::Files);
+        if (folderLoader.load()) {
+            folderCount++;
+            qDebug() << "  [OK] 加载文件夹元数据:" << lastKnownPath;
+        }
+
         for (const QString& scchFile : scchFiles) {
             if (scchFile == "__folder__.scch") continue;
             QString fileName = scchFile.left(scchFile.length() - 5); // 移除 .scch
@@ -261,10 +272,12 @@ void MetadataManager::initFromScchMode() {
                     std::wstring nItemPath = normalizePath(itemPath);
                     tempCache[nItemPath] = iMeta;
                     if (!iMeta.fileId128.empty()) tempFidToPath[iMeta.fileId128] = nItemPath;
+                    fileCount++;
                 }
             }
         }
     }
+    qDebug() << "[Metadata] 分布式加载完成: 目录数=" << folderCount << " 文件数=" << fileCount;
 
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
@@ -313,6 +326,7 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     // 优先加载文件级或文件夹级 .scch (fileName为空代表 __folder__.scch)
     ArcMeta::AmMetaScch loader(parentDir, fileName);
     if (loader.load()) {
+        qDebug() << "[Metadata] 从磁盘加载命中:" << QString::fromStdWString(nPath);
         bool hasMeta = false;
         RuntimeMeta rm;
         if (info.isDir()) {

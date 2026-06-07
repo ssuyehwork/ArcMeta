@@ -78,6 +78,8 @@ void AllFrnManager::registerFrn(const std::wstring& frn, const std::wstring& pat
         std::unique_lock<std::shared_mutex> lock(s_frnMutex);
         ensureLoaded();
         if (s_frnCache.contains(qFrn) && s_frnCache[qFrn] == qPath) return;
+
+        qDebug() << "[AllFrnManager] 登记新 FRN ->" << qFrn << "Path:" << qPath;
         s_frnCache[qFrn] = qPath;
         s_dirty = true;
     }

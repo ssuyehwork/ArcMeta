@@ -361,6 +361,7 @@ public:
         m_membershipMap.clear();
 
         int all = 0, recently = 0, untagged = 0, uncategorized = 0;
+        qDebug() << "[Category] 开始执行全量计数重计 (物理账本对账)...";
 
         double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
 
@@ -387,6 +388,7 @@ public:
 
         m_sysCountsDirty = false;
         m_lastCountDate = QDate::currentDate();
+        qDebug() << "[Category] 全量重计完成: 全部=" << all << " 未分类=" << uncategorized << " 未标签=" << untagged;
     }
 
     void updateIncremental(const std::wstring& path) {
