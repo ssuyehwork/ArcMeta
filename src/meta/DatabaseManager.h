@@ -3,7 +3,7 @@
 
 #include <QString>
 #include <QObject>
-#include <sqlite3.h>
+#include "sqlite3.h"
 #include <map>
 #include <string>
 #include <mutex>

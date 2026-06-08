@@ -18,7 +18,7 @@
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 #include "../ui/UiHelper.h"
-#include <sqlite3.h>
+#include "sqlite3.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>

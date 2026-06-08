@@ -44,7 +44,7 @@ include_directories(3rdparty/sqlite)
 # 此举可确保构建系统在彻底移除 .am_meta.json 模块后不再包含冗余代码，符合《源码纯净》规范。
 set(SOURCES
     src/main.cpp
-    3rdparty/sqlite/sqlite3.c
+    src/meta/sqlite3.c
     src/core/CoreController.cpp
     src/core/CoreController.h
     src/core/CacheManager.cpp
