@@ -22,7 +22,6 @@
 #include "../db/ItemRepo.h"
 #include "../db/FolderRepo.h"
 #include "MetadataDefs.h"
-#include "AmMetaJson.h"
 #include "AllFrnManager.h"
 #include "../mft/MftReader.h"
 #include "../db/CategoryRepo.h"
@@ -140,26 +139,6 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
 void MetadataManager::initFromDatabase() {
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
 
-    // 2026-06-xx 架构修正：从 FERREX_drivers.json 加载磁盘根目录元数据
-    QString driversPath = QCoreApplication::applicationDirPath() + "/FERREX_drivers.json";
-    QFile dFile(driversPath);
-    if (dFile.open(QIODevice::ReadOnly)) {
-        QJsonObject root = QJsonDocument::fromJson(dFile.readAll()).object();
-        for (auto it = root.begin(); it != root.end(); ++it) {
-            std::wstring nPath = normalizePath(it.key().toStdWString());
-            QJsonObject m = it.value().toObject();
-            RuntimeMeta rm;
-            rm.rating = m["rating"].toInt();
-            rm.color = m["color"].toString().toStdWString();
-            rm.pinned = m["pinned"].toBool();
-            rm.note = m["note"].toString().toStdWString();
-            rm.url = m["url"].toString().toStdWString();
-            QJsonArray tagsArr = m["tags"].toArray();
-            for (const auto& t : tagsArr) rm.tags << t.toString();
-            tempCache[nPath] = std::move(rm);
-        }
-    }
-
     auto volMap = getVolumeToDriveMap();
     QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
     if (!db.isOpen()) return;
@@ -217,81 +196,6 @@ void MetadataManager::initFromDatabase() {
     emit metaChanged("__RELOAD_ALL__");
 }
 
-void MetadataManager::initFromJsonMode() {
-    std::unordered_map<std::wstring, RuntimeMeta> tempCache;
-    auto frnsMap = AllFrnManager::getAllFrns();
-    
-    // 2026-05-29 物理加固：在 JSON 模式初始化期间，利用已有索引回填 SQLite items 表 (Plan-45)
-    // 理由：彻底解决用户反馈的“模式切换后计数为 0”的问题，实现全自动对账。
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
-    bool useDb = db.isOpen();
-    if (useDb) db.transaction();
-
-    for (auto it = frnsMap.begin(); it != frnsMap.end(); ++it) {
-        QString frnStr = it.key();
-        QString lastKnownPath = it.value();
-        std::wstring resolvedPath = lastKnownPath.toStdWString();
-        
-        bool ok = false;
-        uint64_t frnVal = frnStr.toULongLong(&ok, 16);
-        if (ok) {
-            for (size_t d = 0; d < 26; ++d) {
-                std::wstring p = MftReader::instance().getPathFast(d, frnVal);
-                if (!p.empty()) {
-                    if (p.find(L".am_meta.json") != std::wstring::npos) {
-                        resolvedPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(p)).absolutePath()).toStdWString();
-                    } else {
-                        resolvedPath = p;
-                    }
-                    break;
-                }
-            }
-        }
-        
-        AmMetaJson amJson(resolvedPath);
-        if (amJson.load()) {
-            std::wstring vol = getVolumeSerialNumber(resolvedPath);
-            std::wstring nResolvedPath = normalizePath(resolvedPath);
-
-            // 1. 加载文件夹本身的元数据
-            const auto& f = amJson.folder();
-            RuntimeMeta fMeta;
-            fMeta.rating = f.rating; fMeta.color = f.color;
-            for (const auto& t : f.tags) fMeta.tags << QString::fromStdWString(t);
-            fMeta.pinned = f.pinned; fMeta.note = f.note; fMeta.url = f.url; fMeta.encrypted = f.encrypted;
-            fMeta.palettes = f.palettes;
-            tempCache[nResolvedPath] = std::move(fMeta);
-
-            if (useDb && !f.fileId128.empty()) {
-                FolderRepo::save(vol, nResolvedPath, f);
-            }
-            
-            // 2. 加载子项元数据
-            for (const auto& [name, item] : amJson.items()) {
-                RuntimeMeta iMeta;
-                iMeta.rating = item.rating; iMeta.color = item.color;
-                for (const auto& t : item.tags) iMeta.tags << QString::fromStdWString(t);
-                iMeta.pinned = item.pinned; iMeta.note = item.note; iMeta.url = item.url; iMeta.encrypted = item.encrypted;
-                iMeta.palettes = item.palettes;
-                std::wstring itemPath = resolvedPath + L"\\" + name;
-                tempCache[normalizePath(itemPath)] = std::move(iMeta);
-
-                if (useDb && !item.fileId128.empty()) {
-                    std::wstring parentDir = QDir::toNativeSeparators(QString::fromStdWString(resolvedPath)).toStdWString();
-                    ItemRepo::save(parentDir, name, item);
-                }
-            }
-        }
-    }
-    if (useDb) db.commit();
-
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache = std::move(tempCache);
-    }
-    emit metaChanged("__RELOAD_ALL__");
-}
-
 RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
     
@@ -300,49 +204,6 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
         auto it = m_cache.find(nPath);
         if (it != m_cache.end()) return it->second;
-    }
-
-    // 2026-06-xx 核心恢复：若内存未命中，尝试从本地离散 .am_meta.json 加载
-    // 理由：实现“目录导航”对本地管理文件的实时感应，即使数据库未同步
-    QFileInfo info(QString::fromStdWString(nPath));
-    std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-    std::wstring fileName = info.fileName().toStdWString();
-
-    AmMetaJson amJson(parentDir);
-    if (amJson.load()) {
-        auto& items = amJson.items();
-        if (items.count(fileName)) {
-            const auto& item = items.at(fileName);
-            RuntimeMeta rm;
-            rm.rating = item.rating; rm.color = item.color;
-            rm.pinned = item.pinned; rm.encrypted = item.encrypted;
-            rm.note = item.note;
-            rm.url = item.url;
-            rm.palettes = item.palettes;
-            for (const auto& t : item.tags) rm.tags << QString::fromStdWString(t);
-            
-            // 写入缓存并返回
-            std::unique_lock<std::shared_mutex> lock(m_mutex);
-            m_cache[nPath] = rm;
-            return rm;
-        }
-
-        // 如果是文件夹自身
-        if (info.isDir()) {
-            const auto& folder = amJson.folder();
-            if (!folder.isDefault()) {
-                RuntimeMeta rm;
-                rm.rating = folder.rating; rm.color = folder.color;
-                rm.pinned = folder.pinned; rm.note = folder.note;
-                rm.url = folder.url;
-                rm.palettes = folder.palettes;
-                for (const auto& t : folder.tags) rm.tags << QString::fromStdWString(t);
-                
-                std::unique_lock<std::shared_mutex> lock(m_mutex);
-                m_cache[nPath] = rm;
-                return rm;
-            }
-        }
     }
 
     return RuntimeMeta();
@@ -410,45 +271,17 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
         m_cache[nPath].palettes = entries;
     }
 
-    // 2. 物理原子更新 .am_meta.json
-    QFileInfo info(QString::fromStdWString(nPath));
-    std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-    std::wstring fileName = info.fileName().toStdWString();
-    
-    AmMetaJson amJson(parentDir);
-    if (amJson.load()) {
-        if (info.isDir()) {
-            amJson.folder().palettes = entries;
-        } else {
-            amJson.items()[fileName].palettes = entries;
-        }
-        amJson.save();
-    }
-
     emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
 QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
-    QFileInfo info(QString::fromStdWString(nPath));
-    std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-    std::wstring fileName = info.fileName().toStdWString();
-
-    AmMetaJson amJson(parentDir);
-    if (amJson.load()) {
-        std::vector<PaletteEntry> entries;
-        if (info.isDir()) {
-            entries = amJson.folder().palettes;
-        } else {
-            auto& items = amJson.items();
-            if (items.count(fileName)) {
-                entries = items.at(fileName).palettes;
-            }
-        }
-
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    auto it = m_cache.find(nPath);
+    if (it != m_cache.end()) {
         QVector<QColor> colors;
-        for (const auto& e : entries) colors << e.color;
+        for (const auto& e : it->second.palettes) colors << e.color;
         return colors;
     }
     return {};
@@ -484,19 +317,7 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
         }
     }
 
-    // 2. 清理离散 JSON 持久化
-    QFileInfo info(QString::fromStdWString(path));
-    if (info.isDir()) {
-        // 若是文件夹，整个单元删除，包括其内部的 .am_meta.json
-        QString metaPath = info.absoluteFilePath() + "/.am_meta.json";
-        QFile::remove(metaPath);
-    } else {
-        // 若是文件，从所在目录的 .am_meta.json 中移除条目
-        std::wstring dir = info.absolutePath().toStdWString();
-        AmMetaJson json(dir);
-        json.remove(info.fileName().toStdWString());
-        json.save();
-    }
+    // 2026-06-xx 物理同步：数据库层面删除逻辑由各自的 Repo 处理
 }
 
 std::wstring MetadataManager::getVolumeSerialNumber(const std::wstring& path) {
@@ -578,7 +399,7 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
 }
 
 void MetadataManager::persistAsync(const std::wstring& path) {
-    // 2026-06-16 按照用户授权：物理侧挂 JSON 先行 -> FID 日志追踪 -> 同步对账。
+    // 2026-06-xx 架构升级：彻底移除 .am_meta.json，全面转向“一盘一库” SQLite 分布式存储。
     std::wstring nPath = normalizePath(path);
     QFileInfo info(QString::fromStdWString(nPath));
     std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
@@ -587,104 +408,34 @@ void MetadataManager::persistAsync(const std::wstring& path) {
 
     RuntimeMeta rMeta = getMeta(nPath);
 
-    // 1. 同步到内存与数据库（在 JSON 模式下跳过对数据库的保存）
-    if (!CategoryRepo::isJsonMode()) {
-        if (info.isDir()) {
-            FolderMeta fMeta;
-            FolderRepo::get(vol, nPath, fMeta);
-            fetchWinApiMetadataDirect(nPath, fMeta.fileId128, nullptr);
-            fMeta.rating = rMeta.rating; fMeta.color = rMeta.color;
-            fMeta.pinned = rMeta.pinned; fMeta.note = rMeta.note;
-            fMeta.url = rMeta.url;
-            fMeta.tags.clear();
-            for (const auto& t : rMeta.tags) fMeta.tags.push_back(t.toStdWString());
-            fMeta.palettes = rMeta.palettes;
-            FolderRepo::save(vol, nPath, fMeta);
-        } else {
-            ItemMeta iMeta;
-            iMeta.volume = vol;
-            fetchWinApiMetadataDirect(nPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
-            iMeta.rating = rMeta.rating; iMeta.color = rMeta.color;
-            iMeta.pinned = rMeta.pinned; iMeta.note = rMeta.note;
-            iMeta.url = rMeta.url;
-            iMeta.encrypted = rMeta.encrypted;
-            iMeta.tags.clear();
-            for (const auto& t : rMeta.tags) iMeta.tags.push_back(t.toStdWString());
-            iMeta.palettes = rMeta.palettes;
-            ItemRepo::save(parentDir, fileName, iMeta);
-        }
-    }
-
-    // 2. 物理落地：写入 .am_meta.json (物理侧真值先行)
-    // 2026-06-xx 架构修正：判断是否为磁盘根目录
-    if (info.isDir() && info.isRoot()) {
-        // 磁盘根目录元数据应持久化到程序根目录下的 FERREX_drivers.json，防止权限冲突或物理损坏
-        QString driversPath = qApp->applicationDirPath() + "/FERREX_drivers.json";
-        QFile file(driversPath);
-        QJsonObject root;
-        if (file.open(QIODevice::ReadOnly)) {
-            root = QJsonDocument::fromJson(file.readAll()).object();
-            file.close();
-        }
-
-        QJsonObject driveMeta;
-        driveMeta["rating"] = rMeta.rating;
-        driveMeta["color"] = QString::fromStdWString(rMeta.color);
-        driveMeta["pinned"] = rMeta.pinned;
-        driveMeta["note"] = QString::fromStdWString(rMeta.note);
-        driveMeta["url"] = QString::fromStdWString(rMeta.url);
-        QJsonArray tagsArr;
-        for (const auto& t : rMeta.tags) tagsArr.append(t);
-        driveMeta["tags"] = tagsArr;
-        
-        root[QString::fromStdWString(nPath)] = driveMeta;
-
-        if (file.open(QIODevice::WriteOnly)) {
-            file.write(QJsonDocument(root).toJson());
-            file.close();
-        }
+    // 1. 同步到数据库
+    if (info.isDir()) {
+        FolderMeta fMeta;
+        FolderRepo::get(vol, nPath, fMeta);
+        fetchWinApiMetadataDirect(nPath, fMeta.fileId128, nullptr);
+        fMeta.rating = rMeta.rating; fMeta.color = rMeta.color;
+        fMeta.pinned = rMeta.pinned; fMeta.note = rMeta.note;
+        fMeta.url = rMeta.url;
+        fMeta.tags.clear();
+        for (const auto& t : rMeta.tags) fMeta.tags.push_back(t.toStdWString());
+        fMeta.palettes = rMeta.palettes;
+        FolderRepo::save(vol, nPath, fMeta);
     } else {
-        AmMetaJson amJson(parentDir);
-        amJson.load();
-        if (info.isDir()) {
-            FolderMeta& folder = amJson.folder();
-            folder.rating = rMeta.rating; folder.color = rMeta.color;
-            folder.pinned = rMeta.pinned; folder.note = rMeta.note;
-            folder.url = rMeta.url;
-            folder.tags.clear();
-            for (const auto& t : rMeta.tags) folder.tags.push_back(t.toStdWString());
-            folder.palettes = rMeta.palettes;
-        } else {
-            ItemMeta& item = amJson.items()[fileName];
-            item.rating = rMeta.rating; item.color = rMeta.color;
-            item.pinned = rMeta.pinned; item.encrypted = rMeta.encrypted;
-            item.note = rMeta.note;
-            item.url = rMeta.url;
-            item.tags.clear();
-            for (const auto& t : rMeta.tags) item.tags.push_back(t.toStdWString());
-            item.palettes = rMeta.palettes;
-        }
-        amJson.save();
+        ItemMeta iMeta;
+        iMeta.volume = vol;
+        fetchWinApiMetadataDirect(nPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
+        iMeta.rating = rMeta.rating; iMeta.color = rMeta.color;
+        iMeta.pinned = rMeta.pinned; iMeta.note = rMeta.note;
+        iMeta.url = rMeta.url;
+        iMeta.encrypted = rMeta.encrypted;
+        iMeta.tags.clear();
+        for (const auto& t : rMeta.tags) iMeta.tags.push_back(t.toStdWString());
+        iMeta.palettes = rMeta.palettes;
+        ItemRepo::save(parentDir, fileName, iMeta);
     }
 
-    // 2.5 提取该 .am_meta.json 文件本身的物理 FRN，安全、自动登记到根目录 All_FRN_am_meta.json 中
-    // 按照用户 2026-05-28 最新逻辑：对账锚点应为 .am_meta.json 文件的 FRN
-    std::wstring metaPath = parentDir + L"\\.am_meta.json";
-    std::wstring fileFrn;
-    std::string fileFid;
-    if (fetchWinApiMetadataDirect(metaPath, fileFid, &fileFrn)) {
-        AllFrnManager::registerFrn(fileFrn, parentDir);
-    }
-
-    // 3. 提取侧挂 .am_meta.json 的物理 FID 并记入日志
-    std::wstring amJsonPath = parentDir + L"\\.am_meta.json";
-    std::string metaFid;
-    if (fetchWinApiMetadataDirect(amJsonPath, metaFid, nullptr)) {
-        addToSyncLog(QString::fromStdString(metaFid).toStdWString());
-    } else {
-        // 退而求其次，若没拿到 FID 则记录目录路径（兼容性处理）
-        addToSyncLog(parentDir);
-    }
+    // 2. 移除原有的 .am_meta.json 与 FERREX_drivers.json 写入逻辑。
+    // 根目录元数据现在直接存入对应磁盘的 vol_XXXX.db。
 
     emit metaChanged(QString::fromStdWString(nPath));
 }

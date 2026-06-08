@@ -44,11 +44,10 @@ public:
     static MetadataManager& instance();
 
     void initFromDatabase();
-    void initFromJsonMode();
     RuntimeMeta getMeta(const std::wstring& path);
 
     /**
-     * @brief 2026-06-xx 按照用户要求：在 JSON 内存模式下执行多维搜索
+     * @brief 2026-06-xx 按照用户要求：在数据库缓存中执行多维搜索
      * @param keyword 关键词
      * @return 匹配的物理路径列表
      */

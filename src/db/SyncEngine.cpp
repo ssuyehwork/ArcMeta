@@ -9,7 +9,6 @@
 #include "../meta/MetadataManager.h"
 #include "../meta/AllFrnManager.h"
 #include "../mft/MftReader.h"
-#include "../meta/AmMetaJson.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winioctl.h>
@@ -118,65 +117,8 @@ void SyncEngine::runIncrementalSync(std::function<void()> onFinished) {
         qDebug() << "[Sync] 开始执行 FID 驱动型对账同步，任务数:" << pendingFids.size();
 
         for (const QString& fidItem : pendingFids) {
-            std::wstring targetPath;
-            std::string fidStr = fidItem.toStdString();
-            
-            // 1. 尝试解析 FID 为物理路径
-            if (fidStr.find('-') != std::string::npos && fidStr.length() > 30) {
-                targetPath = resolveFidToPath(fidStr);
-            } else {
-                targetPath = fidItem.toStdWString(); // 路径回退模式
-            }
-
-            if (targetPath.empty() || !QFile::exists(QString::fromStdWString(targetPath))) {
-                qDebug() << "[Sync] 物理路径已失效或不存在，自动清理任务:" << fidItem;
-                // 不加入 remainingFids，即视为“已处理”以便从日志移除
-                continue;
-            }
-
-            // 2. 执行物理 JSON 到数据库的对账同步
-            QFileInfo fi(QString::fromStdWString(targetPath));
-            std::wstring syncDir;
-            if (fi.isDir()) {
-                syncDir = QDir::toNativeSeparators(fi.absoluteFilePath()).toStdWString();
-            } else {
-                syncDir = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
-            }
-
-            AmMetaJson amJson(syncDir);
-            if (amJson.load()) {
-                bool ok = true;
-                // A. 同步文件夹自身元数据
-                if (!amJson.folder().isDefault()) {
-                    FolderRepo::save(MetadataManager::getVolumeSerialNumber(syncDir), syncDir, amJson.folder());
-                }
-
-                // B. 同步目录下所有项
-                auto const& itemsMap = amJson.items();
-                for (auto it = itemsMap.begin(); it != itemsMap.end(); ++it) {
-                    const std::wstring& name = it->first;
-                    const ItemMeta& item = it->second;
-
-                    std::wstring fullPath = syncDir + L"\\" + name;
-                    ItemMeta iMeta;
-                    MetadataManager::instance().fetchWinApiMetadataDirect(fullPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
-                    iMeta.rating = item.rating; iMeta.color = item.color;
-                    iMeta.pinned = item.pinned; iMeta.note = item.note;
-                    iMeta.encrypted = item.encrypted;
-                    iMeta.tags = item.tags;
-                    iMeta.volume = MetadataManager::getVolumeSerialNumber(syncDir);
-                    
-                    if (!ItemRepo::save(syncDir, name, iMeta)) ok = false;
-                }
-
-                if (!ok) {
-                    qWarning() << "[Sync] 部分条目入库失败，任务将重试:" << fidItem;
-                    remainingFids << fidItem;
-                }
-            } else {
-                qDebug() << "[Sync] 找不到有效的 .am_meta.json，清理冗余任务:" << fidItem;
-                // 无法加载通常意味着文件不存在或损坏，不再阻塞同步
-            }
+            // 2026-06-xx 架构升级：废除基于离散 JSON 的对账。
+            // 直接将该任务标记为成功，使其从 Synchronize.json 中移除。
         }
 
         // 3. 立即验证并原子化写回日志 (仅移除已成功的 FID)
@@ -233,57 +175,7 @@ void SyncEngine::runFullScan(const std::vector<std::wstring>& drivesToScanInput,
     qDebug() << "[Sync] 全盘扫描完成，发现" << total << "个 .am_meta.json 文件，准备对账...";
 
     for (uint64_t key : metaFileKeys) {
-        int idx = reader.getIndexByKey(key);
-        if (idx == -1) continue;
-
-        QString fullPath = reader.getFullPath(idx);
-        if (onProgress) onProgress(current, total, fullPath.toStdWString());
-
-        QFileInfo fi(fullPath);
-        std::wstring folderPath = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
-        
-        // 3. 提取 .am_meta.json 文件本身的物理身份 (FRN) 并登记
-        // 按照用户要求：记录 .am_meta.json 文件的 FRN，作为物理对账锚点
-        wchar_t frnBuf[17];
-        uint64_t fileFrn = key & 0x0000FFFFFFFFFFFFull; // 提取 48 位原始 FRN
-        swprintf(frnBuf, 17, L"%016llX", fileFrn);
-        
-        AllFrnManager::registerFrn(frnBuf, folderPath);
-
-        // 4. 加载 .am_meta.json 并同步到数据库
-        AmMetaJson amJson(folderPath);
-        if (amJson.load()) {
-            std::wstring vol = MetadataManager::getVolumeSerialNumber(folderPath);
-            
-            // A. 同步文件夹元数据
-            if (!amJson.folder().isDefault()) {
-                FolderRepo::save(vol, folderPath, amJson.folder());
-            }
-
-            // B. 同步目录下所有条目的元数据
-            auto const& itemsMap = amJson.items();
-            for (auto itm = itemsMap.begin(); itm != itemsMap.end(); ++itm) {
-                const std::wstring& itemName = itm->first;
-                const ItemMeta& itemMeta = itm->second;
-
-                std::wstring itemFullPath = folderPath + L"\\" + itemName;
-                ItemMeta iMeta;
-                // 物理对齐：获取最新的物理身份
-                MetadataManager::instance().fetchWinApiMetadataDirect(itemFullPath, iMeta.fileId128, &iMeta.frn, &iMeta.size, &iMeta.type, &iMeta.creationTime, &iMeta.modificationTime, &iMeta.accessTime);
-                
-                // 业务对齐：以物理 JSON 里的数据为准
-                iMeta.rating = itemMeta.rating; 
-                iMeta.color = itemMeta.color;
-                iMeta.pinned = itemMeta.pinned; 
-                iMeta.note = itemMeta.note;
-                iMeta.encrypted = itemMeta.encrypted;
-                iMeta.tags = itemMeta.tags;
-                iMeta.palettes = itemMeta.palettes;
-                iMeta.volume = vol;
-                
-                ItemRepo::save(folderPath, itemName, iMeta);
-            }
-        }
+        // 2026-06-xx 架构升级：废除对 .am_meta.json 的全盘扫描对账。
         current++;
     }
     

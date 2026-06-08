@@ -64,8 +64,6 @@ set(SOURCES
     src/db/ItemRepo.h
     src/db/SyncEngine.cpp
     src/db/SyncEngine.h
-    src/meta/AmMetaJson.cpp
-    src/meta/AmMetaJson.h
     src/meta/AllFrnManager.cpp
     src/meta/AllFrnManager.h
     src/meta/BatchRenameEngine.cpp
