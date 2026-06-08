@@ -1,202 +1,232 @@
 #include "Database.h"
+#include "../util/PathManager.h"
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
-#include <QDir>
-#include <QStandardPaths>
 #include <QThread>
+#include <QDebug>
+#include <QTimer>
+#include <sqlite3.h>
+#include <mutex>
 
 namespace ArcMeta {
-
-struct Database::Impl {
-    QSqlDatabase db;
-    std::wstring dbPath;
-};
 
 Database& Database::instance() {
     static Database inst;
     return inst;
 }
 
-Database::Database() : m_impl(std::make_unique<Impl>()) {}
-Database::~Database() = default;
+Database::Database(QObject* parent) : QObject(parent) {}
 
-bool Database::init(const std::wstring& dbPath) {
-    m_impl->dbPath = dbPath;
-    m_impl->db = QSqlDatabase::addDatabase("QSQLITE");
-    m_impl->db.setDatabaseName(QString::fromStdWString(dbPath));
-
-    if (!m_impl->db.open()) return false;
-
-    // 关键红线：防死锁配置
-    QSqlQuery query(m_impl->db);
-    query.exec("PRAGMA journal_mode=WAL;");
-    query.exec("PRAGMA synchronous=NORMAL;");
-    query.exec("PRAGMA busy_timeout=5000;");
-
-    createTables();
-    createIndexes();
-    return true;
-}
-
-std::wstring Database::getDbPath() const {
-    return m_impl->dbPath;
-}
-
-QSqlDatabase Database::getThreadDatabase() {
-    // 2026-03-xx 性能优化：通过线程本地变量缓存连接名称，减少字符串拼接开销
-    static thread_local QString threadConnectionName;
-    if (threadConnectionName.isEmpty()) {
-        threadConnectionName = QString("conn_%1").arg((quintptr)QThread::currentThreadId());
+Database::~Database() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& pair : m_instances) {
+        if (pair.second->isDirty) {
+            performBackupInternal(pair.second, true);
+        }
     }
+}
+
+bool Database::init() {
+    std::wstring globalDiskPath = PathManager::getGlobalDbPath();
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_instances.count(L"")) return true;
+
+    auto inst = std::make_shared<DbInstance>();
+    inst->volSerial = L"";
+    inst->diskPath = globalDiskPath;
+    inst->memoryUri = L"file:global_mem?mode=memory&cache=shared";
+    inst->backupTimer = new QTimer(this);
+    inst->backupTimer->setInterval(1500);
+    inst->backupTimer->setSingleShot(true);
+    inst->backupTimer->setProperty("volSerial", QString::fromStdWString(L""));
+    connect(inst->backupTimer, &QTimer::timeout, this, &Database::onBackupTimeout);
+
+    m_instances[L""] = inst;
+
+    // 1. 初始化磁盘库
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "init_global_disk");
+        db.setDatabaseName(QString::fromStdWString(globalDiskPath));
+        if (db.open()) {
+            createTables(db, true);
+            createIndexes(db, true);
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("init_global_disk");
+        PathManager::hideFile(globalDiskPath);
+    }
+
+    // 2. 加载到内存
+    return performBackupInternal(inst, false);
+}
+
+bool Database::mountVolume(const std::wstring& volSerial) {
+    if (volSerial.empty()) return false;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_instances.count(volSerial)) return true;
+
+    std::wstring diskPath = PathManager::getVolumeDbPath(volSerial);
     
-    // 如果该线程已经建立过连接，直接返回现有连接
-    if (QSqlDatabase::contains(threadConnectionName)) {
-        QSqlDatabase db = QSqlDatabase::database(threadConnectionName);
-        if (db.isOpen()) {
-            return db;
+    auto inst = std::make_shared<DbInstance>();
+    inst->volSerial = volSerial;
+    inst->diskPath = diskPath;
+    inst->memoryUri = L"file:mem_" + volSerial + L"?mode=memory&cache=shared";
+    inst->backupTimer = new QTimer(this);
+    inst->backupTimer->setInterval(1500);
+    inst->backupTimer->setSingleShot(true);
+    inst->backupTimer->setProperty("volSerial", QString::fromStdWString(volSerial));
+    connect(inst->backupTimer, &QTimer::timeout, this, &Database::onBackupTimeout);
+
+    m_instances[volSerial] = inst;
+
+    // 初始化磁盘库
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "init_vol_disk_" + QString::fromStdWString(volSerial));
+        db.setDatabaseName(QString::fromStdWString(diskPath));
+        if (db.open()) {
+            createTables(db, false);
+            createIndexes(db, false);
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("init_vol_disk_" + QString::fromStdWString(volSerial));
+        PathManager::hideFile(diskPath);
+    }
+
+    return performBackupInternal(inst, false);
+}
+
+void Database::unmountVolume(const std::wstring& volSerial) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_instances.count(volSerial)) return;
+
+    auto inst = m_instances[volSerial];
+    if (inst->isDirty) {
+        performBackupInternal(inst, true);
+    }
+    m_instances.erase(volSerial);
+}
+
+std::vector<std::wstring> Database::getMountedVolumes() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<std::wstring> result;
+    for (const auto& pair : m_instances) {
+        if (!pair.first.empty()) result.push_back(pair.first);
+    }
+    return result;
+}
+
+QSqlDatabase Database::getThreadDatabase(const std::wstring& volSerial) {
+    QString connName = QString("conn_%1_%2").arg((quintptr)QThread::currentThreadId()).arg(QString::fromStdWString(volSerial));
+    
+    if (QSqlDatabase::contains(connName)) {
+        QSqlDatabase db = QSqlDatabase::database(connName);
+        if (db.isOpen()) return db;
+    }
+
+    std::shared_ptr<DbInstance> inst;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_instances.find(volSerial);
+        if (it == m_instances.end()) {
+            // 简单容错：若是 global.db 但未初始化
+            if (volSerial.empty()) {
+                m_mutex.unlock();
+                init();
+                m_mutex.lock();
+                inst = m_instances[L""];
+            } else {
+                return QSqlDatabase();
+            }
+        } else {
+            inst = it->second;
         }
     }
 
-    // 否则，为新线程建立独立连接
-    // 2026-04-12 用户优化：添加异常处理，防止线程数据库连接失败导致程序闪退
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", threadConnectionName);
-    db.setDatabaseName(QString::fromStdWString(m_impl->dbPath));
-    
-    if (!db.open()) {
-        qCritical() << "[Database] 线程" << QThread::currentThreadId() << "无法打开数据库:"
-                    << db.lastError().text() << "，路径:" << QString::fromStdWString(m_impl->dbPath);
-        return db;  // 返回无效的数据库对象，调用方应检查 isOpen()
-    }
+    if (!inst) return QSqlDatabase();
 
-    // 对新连接同样应用 WAL 优化，防止写入锁死
-    QSqlQuery query(db);
-    if (!query.exec("PRAGMA journal_mode=WAL;")) {
-        qWarning() << "[Database] 设置 WAL 模式失败:" << query.lastError().text();
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+    db.setDatabaseName(QString::fromStdWString(inst->memoryUri));
+
+    if (!db.open()) {
+        qCritical() << "[Database] 无法打开内存库:" << db.lastError().text();
     }
-    query.exec("PRAGMA synchronous=NORMAL;");
-    query.exec("PRAGMA busy_timeout=5000;");
-    
-    qDebug() << "[Database] 线程" << QThread::currentThreadId() << "数据库连接已建立";
     return db;
 }
 
-void Database::createTables() {
-    QSqlQuery q(m_impl->db);
-    q.exec("CREATE TABLE IF NOT EXISTS folders (volume TEXT, path TEXT, rating INTEGER DEFAULT 0, color TEXT DEFAULT '', tags TEXT DEFAULT '', pinned INTEGER DEFAULT 0, note TEXT DEFAULT '', url TEXT DEFAULT '', sort_by TEXT DEFAULT 'name', sort_order TEXT DEFAULT 'asc', encrypted INTEGER DEFAULT 0, encrypt_salt TEXT DEFAULT '', encrypt_iv TEXT DEFAULT '', encrypt_verify_hash TEXT DEFAULT '', file_id_128 TEXT DEFAULT '', last_sync REAL, PRIMARY KEY (volume, path))");
-    q.exec("CREATE TABLE IF NOT EXISTS items (volume TEXT NOT NULL, frn TEXT NOT NULL, path TEXT, parent_path TEXT, type TEXT, rating INTEGER DEFAULT 0, color TEXT DEFAULT '', tags TEXT DEFAULT '', pinned INTEGER DEFAULT 0, note TEXT DEFAULT '', url TEXT DEFAULT '', encrypted INTEGER DEFAULT 0, encrypt_salt TEXT DEFAULT '', encrypt_iv TEXT DEFAULT '', encrypt_verify_hash TEXT DEFAULT '', original_name TEXT DEFAULT '', file_id_128 TEXT DEFAULT '', size INTEGER DEFAULT 0, ctime REAL DEFAULT 0, mtime REAL DEFAULT 0, atime REAL DEFAULT 0, deleted INTEGER DEFAULT 0, PRIMARY KEY (volume, frn))");
-    q.exec("CREATE TABLE IF NOT EXISTS tags (tag TEXT PRIMARY KEY, item_count INTEGER DEFAULT 0)");
-    q.exec("CREATE TABLE IF NOT EXISTS favorites (path TEXT PRIMARY KEY, type TEXT, name TEXT, sort_order INTEGER DEFAULT 0, added_at REAL)");
-    q.exec("CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, parent_id INTEGER DEFAULT 0, name TEXT NOT NULL, color TEXT DEFAULT '', preset_tags TEXT DEFAULT '', sort_order INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0, encrypted INTEGER DEFAULT 0, encrypt_salt TEXT DEFAULT '', encrypt_iv TEXT DEFAULT '', encrypt_verify_hash TEXT DEFAULT '', encrypt_hint TEXT DEFAULT '', created_at REAL)");
-    q.exec("CREATE TABLE IF NOT EXISTS category_items (category_id INTEGER, file_id_128 TEXT, added_at REAL, PRIMARY KEY (category_id, file_id_128))");
-    q.exec("CREATE TABLE IF NOT EXISTS sync_state (key TEXT PRIMARY KEY, value TEXT)");
-    
-    // 2026-04-12 按照用户要求：新增文件夹扫描缓存表，用于增量扫描剪枝
-    q.exec("CREATE TABLE IF NOT EXISTS folder_scan_cache ("
-           "path TEXT PRIMARY KEY, "
-           "mtime INTEGER NOT NULL, "
-           "scanned_at INTEGER NOT NULL)");
+void Database::markDirty(const std::wstring& volSerial) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_instances.count(volSerial)) {
+        auto inst = m_instances[volSerial];
+        inst->isDirty = true;
+        QMetaObject::invokeMethod(inst->backupTimer, "start", Qt::QueuedConnection);
+    }
+}
 
-    // 紧急补丁：由于 CREATE TABLE IF NOT EXISTS 不会修改已存在的表，
-    // 显式检查并添加缺失的字段。
-    auto addColumnIfNotExist = [&](const QString& table, const QString& column, const QString& type) {
-        QSqlQuery check(m_impl->db);
-        check.exec(QString("PRAGMA table_info(%1)").arg(table));
-        bool exists = false;
-        while (check.next()) {
-            if (check.value(1).toString() == column) {
-                exists = true;
-                break;
-            }
-        }
-        if (!exists) {
-            QSqlQuery q(m_impl->db);
-            q.exec(QString("ALTER TABLE %1 ADD COLUMN %2 %3").arg(table, column, type));
-        }
-    };
+void Database::onBackupTimeout() {
+    QTimer* timer = qobject_cast<QTimer*>(sender());
+    if (!timer) return;
+    std::wstring volSerial = timer->property("volSerial").toString().toStdWString();
 
-    addColumnIfNotExist("categories", "preset_tags", "TEXT DEFAULT ''");
-    addColumnIfNotExist("categories", "sort_order", "INTEGER DEFAULT 0");
-    addColumnIfNotExist("categories", "pinned", "INTEGER DEFAULT 0");
-    addColumnIfNotExist("categories", "encrypted", "INTEGER DEFAULT 0");
-    addColumnIfNotExist("categories", "encrypt_salt", "TEXT DEFAULT ''");
-    addColumnIfNotExist("categories", "encrypt_iv", "TEXT DEFAULT ''");
-    addColumnIfNotExist("categories", "encrypt_verify_hash", "TEXT DEFAULT ''");
-    addColumnIfNotExist("categories", "encrypt_hint", "TEXT DEFAULT ''");
-
-    addColumnIfNotExist("folders", "volume", "TEXT DEFAULT ''");
-    addColumnIfNotExist("folders", "url", "TEXT DEFAULT ''");
-    addColumnIfNotExist("folders", "encrypted", "INTEGER DEFAULT 0");
-    addColumnIfNotExist("folders", "encrypt_salt", "TEXT DEFAULT ''");
-    addColumnIfNotExist("folders", "encrypt_iv", "TEXT DEFAULT ''");
-    addColumnIfNotExist("folders", "encrypt_verify_hash", "TEXT DEFAULT ''");
-    addColumnIfNotExist("folders", "file_id_128", "TEXT DEFAULT ''");
-    addColumnIfNotExist("folders", "palettes", "TEXT DEFAULT ''");
-    addColumnIfNotExist("items", "file_id_128", "TEXT DEFAULT ''");
-    addColumnIfNotExist("items", "url", "TEXT DEFAULT ''");
-    addColumnIfNotExist("items", "size", "INTEGER DEFAULT 0");
-    addColumnIfNotExist("items", "palettes", "TEXT DEFAULT ''");
-
-    // 2026-06-xx 物理架构升级：检测并迁移 category_items 表结构
-    // 逻辑：如果表里还存在 item_path 字段，说明是旧版结构，执行“核平”式重建（因为旧路径关联已废弃）
+    std::shared_ptr<DbInstance> inst;
     {
-        QSqlQuery check(m_impl->db);
-        check.exec("PRAGMA table_info(category_items)");
-        bool hasItemPath = false;
-        while (check.next()) {
-            if (check.value(1).toString() == "item_path") {
-                hasItemPath = true;
-                break;
-            }
-        }
-        if (hasItemPath) {
-            qDebug() << "[Database] 检测到旧版 category_items 结构，正在执行 File ID 架构迁移...";
-            QSqlQuery drop(m_impl->db);
-            drop.exec("DROP TABLE category_items");
-            drop.exec("CREATE TABLE category_items (category_id INTEGER, file_id_128 TEXT, added_at REAL, PRIMARY KEY (category_id, file_id_128))");
-        }
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_instances.count(volSerial)) inst = m_instances[volSerial];
     }
+    if (inst) performBackupInternal(inst, true);
 }
 
-void Database::createIndexes() {
-    QSqlQuery q(m_impl->db);
-    q.exec("CREATE INDEX IF NOT EXISTS idx_items_path ON items(path)");
-    q.exec("CREATE INDEX IF NOT EXISTS idx_items_parent ON items(parent_path)");
-    q.exec("CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted)");
+bool Database::performBackupInternal(std::shared_ptr<DbInstance> inst, bool toDisk) {
+    sqlite3* pDisk = nullptr;
+    sqlite3* pMem = nullptr;
+
+    if (sqlite3_open16(inst->diskPath.c_str(), &pDisk) != SQLITE_OK) return false;
+    if (sqlite3_open16(inst->memoryUri.c_str(), &pMem) != SQLITE_OK) {
+        sqlite3_close(pDisk);
+        return false;
+    }
+
+    sqlite3* pFrom = toDisk ? pMem : pDisk;
+    sqlite3* pTo   = toDisk ? pDisk : pMem;
+
+    sqlite3_backup* pBackup = sqlite3_backup_init(pTo, "main", pFrom, "main");
+    if (pBackup) {
+        sqlite3_backup_step(pBackup, -1);
+        sqlite3_backup_finish(pBackup);
+    }
     
-    // 2026-06-xx 性能加固：按照用户要求，为元数据字段建立物理索引，实现工业级检索性能
-    q.exec("CREATE INDEX IF NOT EXISTS idx_items_rating ON items(rating)");
-    q.exec("CREATE INDEX IF NOT EXISTS idx_items_color ON items(color)");
-    q.exec("CREATE INDEX IF NOT EXISTS idx_items_pinned ON items(pinned)");
-    q.exec("CREATE INDEX IF NOT EXISTS idx_items_fid ON items(file_id_128)");
+    int rc = sqlite3_errcode(pTo);
 
-    // 2026-06-xx 性能加固：为 category_items 增加索引以加速 2.4M 数据量的统计逻辑
-    q.exec("CREATE INDEX IF NOT EXISTS idx_catitems_cid ON category_items(category_id)");
-    q.exec("CREATE INDEX IF NOT EXISTS idx_catitems_fid ON category_items(file_id_128)");
-}
+    sqlite3_close(pDisk);
+    sqlite3_close(pMem);
 
-qint64 Database::queryFolderCache(const std::wstring& path) {
-    QSqlDatabase db = getThreadDatabase();
-    QSqlQuery q(db);
-    q.prepare("SELECT mtime FROM folder_scan_cache WHERE path = ?");
-    q.addBindValue(QString::fromStdWString(path));
-    if (q.exec() && q.next()) {
-        return q.value(0).toLongLong();
+    if (toDisk && rc == SQLITE_OK) {
+        inst->isDirty = false;
+        PathManager::hideFile(inst->diskPath);
     }
-    return -1;
+
+    return rc == SQLITE_OK;
 }
 
-void Database::upsertFolderCache(const std::wstring& path, qint64 mtime) {
-    QSqlDatabase db = getThreadDatabase();
+void Database::createTables(QSqlDatabase& db, bool isGlobal) {
     QSqlQuery q(db);
-    // 2026-04-12 按照用户要求：使用 INSERT ... ON CONFLICT(path) DO UPDATE 语法
-    q.prepare("INSERT INTO folder_scan_cache (path, mtime, scanned_at) VALUES (?, ?, ?) "
-              "ON CONFLICT(path) DO UPDATE SET mtime = excluded.mtime, scanned_at = excluded.scanned_at");
-    q.addBindValue(QString::fromStdWString(path));
-    q.addBindValue(mtime);
-    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
-    if (!q.exec()) {
-        qCritical() << "[Database] upsertFolderCache 失败:" << q.lastError().text();
+    if (isGlobal) {
+        q.exec("CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, parent_id INTEGER DEFAULT 0, name TEXT NOT NULL, color TEXT DEFAULT '', preset_tags TEXT DEFAULT '', sort_order INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0, encrypted INTEGER DEFAULT 0, encrypt_hint TEXT DEFAULT '', created_at REAL)");
+        q.exec("CREATE TABLE IF NOT EXISTS category_items (category_id INTEGER, file_id_128 TEXT, vol_serial TEXT, added_at REAL, PRIMARY KEY (category_id, file_id_128, vol_serial))");
+        q.exec("CREATE TABLE IF NOT EXISTS tags (tag TEXT PRIMARY KEY, item_count INTEGER DEFAULT 0)");
+    } else {
+        q.exec("CREATE TABLE IF NOT EXISTS files (file_id_128 TEXT PRIMARY KEY, frn TEXT, path TEXT, parent_path TEXT, type TEXT, rating INTEGER DEFAULT 0, color TEXT DEFAULT '', tags TEXT DEFAULT '', pinned INTEGER DEFAULT 0, note TEXT DEFAULT '', url TEXT DEFAULT '', size INTEGER DEFAULT 0, ctime REAL DEFAULT 0, mtime REAL DEFAULT 0, atime REAL DEFAULT 0, deleted INTEGER DEFAULT 0)");
+        q.exec("CREATE TABLE IF NOT EXISTS palettes (file_id_128 TEXT, r INTEGER, g INTEGER, b INTEGER, ratio REAL)");
+    }
+}
+
+void Database::createIndexes(QSqlDatabase& db, bool isGlobal) {
+    QSqlQuery q(db);
+    if (!isGlobal) {
+        q.exec("CREATE INDEX IF NOT EXISTS idx_files_path ON files(path)");
+        q.exec("CREATE INDEX IF NOT EXISTS idx_files_frn ON files(frn)");
     }
 }
 
