@@ -484,7 +484,7 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
     return false;
 }
 
-void MetadataManager::syncPhysicalMetadata(const std::wstring& path) { persistAsync(path); }
+void MetadataManager::syncPhysicalMetadata(const std::wstring& path, bool notify) { persistAsync(path, notify); }
 
 void MetadataManager::activateItem(const std::wstring& path) {
     std::string fid; std::wstring frn;
@@ -536,7 +536,7 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
     return fid;
 }
 
-void MetadataManager::persistAsync(const std::wstring& path) {
+void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
     std::wstring nPath = normalizePath(path);
     qDebug() << "[Metadata] 准备持久化元数据到 SQLite 内存库:" << QString::fromStdWString(nPath);
     
@@ -575,7 +575,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
         sqlite3_finalize(stmt);
     }
         
-    emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) emit metaChanged(QString::fromStdWString(nPath));
 }
 
 

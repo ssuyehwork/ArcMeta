@@ -336,6 +336,10 @@ void FerrexVirtualDbModel::fetchMore(const QModelIndex& parent) {
 void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
     beginResetModel();
     m_allRecords = records;
+    m_pathToIndex.clear();
+    for (int i = 0; i < (int)m_allRecords.size(); ++i) {
+        m_pathToIndex[m_allRecords[i].path] = i;
+    }
     m_displayCount = (int)m_allRecords.size();
     m_requestedIcons.clear();
     m_aspectRatios.clear();
@@ -345,8 +349,10 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
 
 void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
     QString nPath = QDir::toNativeSeparators(path);
-    for (int i = 0; i < (int)m_allRecords.size(); ++i) {
-        if (m_allRecords[i].path == nPath) {
+    auto it = m_pathToIndex.find(nPath);
+    if (it != m_pathToIndex.end()) {
+        int i = it->second;
+        if (i < (int)m_allRecords.size()) {
             auto meta = MetadataManager::instance().getMeta(nPath.toStdWString());
             m_allRecords[i].rating = meta.rating;
             m_allRecords[i].color = QString::fromStdWString(meta.color);
@@ -359,7 +365,6 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             QModelIndex left = index(i, 0);
             QModelIndex right = index(i, columnCount() - 1);
             emit dataChanged(left, right);
-            break;
         }
     }
 }
@@ -367,6 +372,7 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
 void FerrexVirtualDbModel::clear() {
     beginResetModel();
     m_allRecords.clear();
+    m_pathToIndex.clear();
     m_displayCount = 0;
     m_requestedIcons.clear();
     m_aspectRatios.clear();
@@ -1499,8 +1505,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         }
                     }
 
-                    // C. 统一触发物理同步 (获取 FID/FRN)
-                    MetadataManager::instance().syncPhysicalMetadata(wp);
+                    // C. 统一触发物理同步 (获取 FID/FRN) - 批量模式禁用单条通知信号
+                    MetadataManager::instance().syncPhysicalMetadata(wp, false);
 
                     // 递归子项
                     if (info.isDir()) {
