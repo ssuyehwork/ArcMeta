@@ -223,6 +223,9 @@ private:
     
     ElasticEdit* m_categoryEdit = nullptr;
 
+    StarRatingWidget* m_ratingWidget = nullptr;
+    ColorPickerWidget* m_colorPicker = nullptr;
+
     // 2026-06-xx 性能优化：控件复用池
     QList<TagPill*> m_tagPool;
     QList<ColorPill*> m_colorPool;

@@ -55,23 +55,6 @@ static std::wstring normalizePath(const std::wstring& path) {
  * @brief 极致性能版路径归一化，仅在启动加载循环中使用
  * 避开昂贵的 QDir::cleanPath，仅处理盘符大写与分隔符统一
  */
-static std::wstring fastNormalizePath(const std::wstring& path) {
-    if (path.empty()) return L"";
-    std::wstring res = path;
-    for (size_t i = 0; i < res.length(); ++i) {
-        if (res[i] == L'/') res[i] = L'\\';
-    }
-    if (res.length() >= 2 && res[1] == L':') {
-        if (res[0] >= L'a' && res[0] <= L'z') res[0] = (wchar_t)(res[0] - 32);
-    }
-    if (res.length() == 2 && res[1] == L':') res += L'\\';
-    return res;
-}
-
-static std::string generateFallbackFid(const std::wstring& vol, const std::wstring& frn) {
-    if (vol.empty() || frn.empty()) return "";
-    return "FRN:" + QString::fromStdWString(vol).toUpper().toStdString() + ":" + QString::fromStdWString(frn).toUpper().toStdString();
-}
 
 static std::string generateDeterministicSha256Id(const std::wstring& path) {
     if (path.empty()) return "";
