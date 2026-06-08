@@ -14,13 +14,6 @@ namespace ArcMeta {
 std::atomic<int> CategoryRepo::s_totalFileCount{0};
 std::atomic<int> CategoryRepo::s_categorizedCount{0};
 
-static std::wstring normalizePath(const std::wstring& path) {
-    if (path.empty()) return L"";
-    QString qp = QDir::toNativeSeparators(QDir::cleanPath(QString::fromStdWString(path)));
-    if (qp.length() == 2 && qp.endsWith(':')) qp += '\\';
-    if (qp.length() >= 2 && qp[1] == ':') qp[0] = qp[0].toUpper();
-    return qp.toStdWString();
-}
 
 void CategoryRepo::initialize() {
     // SQLite 模式下，DatabaseManager::init() 已由 MetadataManager 调用
@@ -42,10 +35,12 @@ std::vector<Category> CategoryRepo::getAll() {
             Category c;
             c.id = sqlite3_column_int(stmt, 0);
             c.parentId = sqlite3_column_int(stmt, 1);
-            c.name = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
+            const wchar_t* wname = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
+            if (wname) c.name = wname;
             const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 3));
             if (color) c.color = color;
-            QString tags = QString::fromWCharArray(reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4)));
+            const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
+            QString tags = wtags ? QString::fromWCharArray(wtags) : "";
             for (const auto& t : tags.split(",", Qt::SkipEmptyParts)) c.presetTags.push_back(t.toStdWString());
             c.sortOrder = sqlite3_column_int(stmt, 5);
             c.pinned = sqlite3_column_int(stmt, 6) != 0;
@@ -204,7 +199,7 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId12
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return false;
 
-    std::wstring finalPath = normalizePath(pathHint);
+    std::wstring finalPath = MetadataManager::normalizePath(pathHint);
     if (finalPath.empty()) finalPath = MetadataManager::instance().getPathByFid(fileId128);
 
     sqlite3_stmt* stmt;
@@ -366,10 +361,12 @@ std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
             Category c;
             c.id = sqlite3_column_int(stmt, 0);
             c.parentId = sqlite3_column_int(stmt, 1);
-            c.name = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
+            const wchar_t* wname = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
+            if (wname) c.name = wname;
             const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 3));
             if (color) c.color = color;
-            QString tags = QString::fromWCharArray(reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4)));
+            const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
+            QString tags = wtags ? QString::fromWCharArray(wtags) : "";
             for (const auto& t : tags.split(",", Qt::SkipEmptyParts)) c.presetTags.push_back(t.toStdWString());
             c.sortOrder = sqlite3_column_int(stmt, 5);
             c.pinned = sqlite3_column_int(stmt, 6) != 0;

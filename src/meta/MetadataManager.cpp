@@ -40,10 +40,9 @@
 
 namespace ArcMeta {
 
-// --- Internal Helper Functions ---
+// --- Helper Functions ---
 
-
-static std::wstring normalizePath(const std::wstring& path) {
+std::wstring MetadataManager::normalizePath(const std::wstring& path) {
     if (path.empty()) return L"";
     QString qp = QDir::toNativeSeparators(QDir::cleanPath(QString::fromStdWString(path)));
     if (qp.length() == 2 && qp.endsWith(':')) qp += '\\';
@@ -51,21 +50,21 @@ static std::wstring normalizePath(const std::wstring& path) {
     return qp.toStdWString();
 }
 
-/**
- * @brief 极致性能版路径归一化，仅在启动加载循环中使用
- * 避开昂贵的 QDir::cleanPath，仅处理盘符大写与分隔符统一
- */
+std::string MetadataManager::generateFallbackFid(const std::wstring& vol, const std::wstring& frn) {
+    if (vol.empty() || frn.empty()) return "";
+    return "FRN:" + QString::fromStdWString(vol).toUpper().toStdString() + ":" + QString::fromStdWString(frn).toUpper().toStdString();
+}
 
-static std::string generateDeterministicSha256Id(const std::wstring& path) {
+std::string MetadataManager::generateDeterministicSha256Id(const std::wstring& path) {
     if (path.empty()) return "";
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     std::wstring vol = MetadataManager::getVolumeSerialNumber(nPath);
     QByteArray seed = QString::fromStdWString(vol + L":" + nPath).toUtf8();
     QByteArray hash = QCryptographicHash::hash(seed, QCryptographicHash::Sha256);
     return "PATHURL:" + hash.left(16).toHex().toUpper().toStdString();
 }
 
-static std::wstring generateDeterministicFrn(const std::wstring& path) {
+std::wstring MetadataManager::generateDeterministicFrn(const std::wstring& path) {
     if (path.empty()) return L"VIRTUAL_EMPTY";
     QByteArray hash = QCryptographicHash::hash(QString::fromStdWString(path).toUtf8(), QCryptographicHash::Sha256);
     return QString(hash.left(8).toHex().toUpper()).toStdWString();
@@ -151,14 +150,21 @@ void MetadataManager::initFromScchMode() {
             if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
                 while (sqlite3_step(stmt) == SQLITE_ROW) {
                     RuntimeMeta rm;
-                    rm.fileId128 = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                    std::wstring path = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
+                    const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                    if (fid) rm.fileId128 = fid;
+
+                    const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
+                    std::wstring path = wpath ? wpath : L"";
+
                     rm.isFolder = sqlite3_column_int(stmt, 2);
                     rm.rating = sqlite3_column_int(stmt, 3);
                     const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
                     if (color) rm.color = color;
-                    QString tags = QString::fromWCharArray(reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 5)));
+
+                    const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 5));
+                    QString tags = wtags ? QString::fromWCharArray(wtags) : "";
                     rm.tags = tags.split(",", Qt::SkipEmptyParts);
+
                     const wchar_t* note = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 6));
                     if (note) rm.note = note;
                     const wchar_t* url = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 7));
@@ -178,7 +184,7 @@ void MetadataManager::initFromScchMode() {
                             QJsonObject obj = v.toObject();
                             PaletteEntry pe;
                             pe.color = QColor(obj["color"].toString());
-                            pe.ratio = obj["ratio"].toDouble();
+                    pe.ratio = (float)obj["ratio"].toDouble();
                             rm.palettes.push_back(pe);
                         }
                     }
@@ -210,7 +216,7 @@ void MetadataManager::initFromScchMode() {
 }
 
 RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
         auto it = m_cache.find(nPath);
@@ -243,7 +249,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
 }
 
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
@@ -254,7 +260,7 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
 }
 
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
@@ -265,7 +271,7 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
 }
 
 void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool notify) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
@@ -273,7 +279,7 @@ void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool noti
 }
 
 void MetadataManager::setTags(const std::wstring& path, const QStringList& tags, bool notify) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
 
     {
@@ -286,7 +292,7 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
 }
 
 void MetadataManager::setNote(const std::wstring& path, const std::wstring& note, bool notify) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
@@ -294,7 +300,7 @@ void MetadataManager::setNote(const std::wstring& path, const std::wstring& note
 }
 
 void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, bool notify) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
@@ -302,7 +308,7 @@ void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, 
 }
 
 void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, bool notify) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].encrypted = encrypted; }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
@@ -310,7 +316,7 @@ void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, boo
 }
 
 void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
@@ -320,7 +326,7 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
 }
 
 void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std::wstring& color, const QVector<QPair<QColor, float>>& palettes, bool notify) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
@@ -337,7 +343,7 @@ void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std:
 }
 
 QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
         auto it = m_cache.find(nPath);
@@ -384,7 +390,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
 }
 
 void MetadataManager::removeMetadataSync(const std::wstring& path) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     std::wstring volSerial = getVolumeSerialNumber(nPath);
     sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
     
@@ -429,8 +435,8 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
     HANDLE hFile = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     std::wstring vol = getVolumeSerialNumber(path);
     if (hFile == INVALID_HANDLE_VALUE) {
-        if (outFrn) *outFrn = generateDeterministicFrn(path);
-        outId128 = generateDeterministicSha256Id(path);
+        if (outFrn) *outFrn = MetadataManager::generateDeterministicFrn(path);
+        outId128 = MetadataManager::generateDeterministicSha256Id(path);
         return false;
     }
     BY_HANDLE_FILE_INFORMATION basicInfo;
@@ -439,7 +445,7 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
         unsigned long long fullFrn = (static_cast<unsigned long long>(basicInfo.nFileIndexHigh) << 32) | basicInfo.nFileIndexLow;
         swprintf(frnBuf, 17, L"%016llX", fullFrn);
         if (outFrn) *outFrn = frnBuf;
-        outId128 = generateFallbackFid(vol, frnBuf);
+        outId128 = MetadataManager::generateFallbackFid(vol, frnBuf);
         if (outSize) *outSize = (static_cast<long long>(basicInfo.nFileSizeHigh) << 32) | basicInfo.nFileSizeLow;
         if (outType) *outType = (basicInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? L"folder" : L"file";
         auto toMS = [](const FILETIME& ft) {
@@ -461,7 +467,7 @@ void MetadataManager::syncPhysicalMetadata(const std::wstring& path, bool notify
 void MetadataManager::activateItem(const std::wstring& path) {
     std::string fid; std::wstring frn;
     if (fetchWinApiMetadataDirect(path, fid, &frn)) {
-        std::wstring nPath = normalizePath(path);
+        std::wstring nPath = MetadataManager::normalizePath(path);
         // 激活并持久化
         instance().ensureActivated(nPath);
         instance().syncPhysicalMetadata(nPath);
@@ -469,7 +475,7 @@ void MetadataManager::activateItem(const std::wstring& path) {
 }
 
 void MetadataManager::tryExtractColor(const std::wstring& path) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     if (!instance().getMeta(nPath).color.empty()) return;
     
     QFileInfo info(QString::fromStdWString(nPath));
@@ -504,12 +510,12 @@ void MetadataManager::registerArcmetaFrn(const std::wstring&) {
 
 std::string MetadataManager::getFileIdSync(const std::wstring& path) {
     std::string fid;
-    if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = generateDeterministicSha256Id(path);
+    if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = MetadataManager::generateDeterministicSha256Id(path);
     return fid;
 }
 
 void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
-    std::wstring nPath = normalizePath(path);
+    std::wstring nPath = MetadataManager::normalizePath(path);
     
     RuntimeMeta rMeta = getMeta(nPath);
     std::wstring volSerial = getVolumeSerialNumber(nPath);
@@ -546,7 +552,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
         for (const auto& pe : rMeta.palettes) {
             QJsonObject obj;
             obj["color"] = pe.color.name();
-            obj["ratio"] = pe.ratio;
+            obj["ratio"] = (double)pe.ratio;
             arr.append(obj);
         }
         QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
