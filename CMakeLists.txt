@@ -38,13 +38,14 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC OFF)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
-include_directories(3rdparty/sqlite)
+include_directories(BEFORE ${CMAKE_CURRENT_SOURCE_DIR}/src/meta)
 
 # 2026-06-xx 按照用户要求：彻底废除递归搜集 (GLOB)，改为显式列出所有有效源文件。
 # 此举可确保构建系统在彻底移除 .am_meta.json 模块后不再包含冗余代码，符合《源码纯净》规范。
 set(SOURCES
     src/main.cpp
     src/meta/sqlite3.c
+    src/meta/sqlite3.h
     src/core/CoreController.cpp
     src/core/CoreController.h
     src/core/CacheManager.cpp
