@@ -2,17 +2,24 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 
 namespace ArcMeta {
 
 constexpr char SCCH_MAGIC[4] = {'S','C','C','H'};
-constexpr uint16_t SCCH_VERSION = 2; // 升级版本号
+constexpr uint16_t SCCH_VERSION = 2;
 
 #pragma pack(push, 1)
 struct ScchAnchor {
-    char     magic[4];           // "SCCH"
+    char     magic[4];
     uint16_t version;
-    char     vol_serial[16];     // 存储该磁盘的卷序列号 e.g. "ABCD1234\0"
+    char     vol_serial[16];
 };
 #pragma pack(pop)
 
@@ -32,6 +39,7 @@ public:
         memcpy(anchor.vol_serial, serial.c_str(), len);
         anchor.vol_serial[len] = '\0';
 
+        // 使用 _wfopen 并抑制警告
         FILE* f = _wfopen(scchPath.c_str(), L"wb");
         if (!f) return false;
         fwrite(&anchor, sizeof(anchor), 1, f);

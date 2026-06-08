@@ -125,7 +125,6 @@ private:
     
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
     QPushButton* m_btnSync   = nullptr;
-    QPushButton* m_btnScan   = nullptr;
     QPushButton* m_btnCreate = nullptr;
     QPushButton* m_btnPinTop = nullptr;
     QPushButton* m_btnMin = nullptr;

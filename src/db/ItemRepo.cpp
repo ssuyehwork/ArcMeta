@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QDateTime>
 #include <QFileInfo>
+#include <QSqlDatabase>
 
 namespace ArcMeta {
 
@@ -197,12 +198,12 @@ QStringList ItemRepo::getPathsBySystemType(const QString& type) {
 }
 
 std::vector<ItemRepo::ItemRecord> ItemRepo::getItemRecordsBySystemType(const QString& type) {
-    std::vector<ItemRecord> results;
-    // 简略实现
-    return results;
+    Q_UNUSED(type);
+    return {};
 }
 
 std::vector<ItemRepo::ItemRecord> ItemRepo::searchRecordsByKeyword(const QString& keyword, const QString& parentPath) {
+    Q_UNUSED(keyword); Q_UNUSED(parentPath);
     return {};
 }
 

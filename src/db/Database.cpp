@@ -6,7 +6,6 @@
 #include <QThread>
 #include <QDebug>
 #include <QTimer>
-#include <sqlite3.h>
 #include <mutex>
 
 namespace ArcMeta {
@@ -45,16 +44,17 @@ bool Database::init() {
 
     m_instances[L""] = inst;
 
-    // 1. 初始化磁盘库
+    // 1. 初始化磁盘库（使用独立连接）
     {
-        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "init_global_disk");
+        QString initConn = "init_global_disk";
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", initConn);
         db.setDatabaseName(QString::fromStdWString(globalDiskPath));
         if (db.open()) {
             createTables(db, true);
             createIndexes(db, true);
             db.close();
         }
-        QSqlDatabase::removeDatabase("init_global_disk");
+        QSqlDatabase::removeDatabase(initConn);
         PathManager::hideFile(globalDiskPath);
     }
 
@@ -84,14 +84,15 @@ bool Database::mountVolume(const std::wstring& volSerial) {
 
     // 初始化磁盘库
     {
-        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "init_vol_disk_" + QString::fromStdWString(volSerial));
+        QString initConn = "init_vol_disk_" + QString::fromStdWString(volSerial);
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", initConn);
         db.setDatabaseName(QString::fromStdWString(diskPath));
         if (db.open()) {
             createTables(db, false);
             createIndexes(db, false);
             db.close();
         }
-        QSqlDatabase::removeDatabase("init_vol_disk_" + QString::fromStdWString(volSerial));
+        QSqlDatabase::removeDatabase(initConn);
         PathManager::hideFile(diskPath);
     }
 
@@ -131,7 +132,6 @@ QSqlDatabase Database::getThreadDatabase(const std::wstring& volSerial) {
         std::lock_guard<std::mutex> lock(m_mutex);
         auto it = m_instances.find(volSerial);
         if (it == m_instances.end()) {
-            // 简单容错：若是 global.db 但未初始化
             if (volSerial.empty()) {
                 m_mutex.unlock();
                 init();
@@ -179,35 +179,73 @@ void Database::onBackupTimeout() {
 }
 
 bool Database::performBackupInternal(std::shared_ptr<DbInstance> inst, bool toDisk) {
-    sqlite3* pDisk = nullptr;
-    sqlite3* pMem = nullptr;
+    // 由于环境缺少 sqlite3.h，改用 SQL 指令方式
+    // 逻辑：如果是 toDisk，则将内存库的内容写入磁盘库；如果是 fromDisk，则读取磁盘库内容到内存库
+    QString tempConn = QString("backup_op_%1").arg((quintptr)QThread::currentThreadId());
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", tempConn);
+    db.setDatabaseName(QString::fromStdWString(inst->memoryUri));
 
-    if (sqlite3_open16(inst->diskPath.c_str(), &pDisk) != SQLITE_OK) return false;
-    if (sqlite3_open16(inst->memoryUri.c_str(), &pMem) != SQLITE_OK) {
-        sqlite3_close(pDisk);
+    if (!db.open()) return false;
+
+    QSqlQuery q(db);
+    // 挂载磁盘库
+    QString attachSql = QString("ATTACH DATABASE '%1' AS disk").arg(QString::fromStdWString(inst->diskPath));
+    if (!q.exec(attachSql)) {
+        qCritical() << "[Database] 备份挂载失败:" << q.lastError().text();
+        QSqlDatabase::removeDatabase(tempConn);
         return false;
     }
 
-    sqlite3* pFrom = toDisk ? pMem : pDisk;
-    sqlite3* pTo   = toDisk ? pDisk : pMem;
-
-    sqlite3_backup* pBackup = sqlite3_backup_init(pTo, "main", pFrom, "main");
-    if (pBackup) {
-        sqlite3_backup_step(pBackup, -1);
-        sqlite3_backup_finish(pBackup);
+    bool ok = true;
+    if (toDisk) {
+        // Memory -> Disk: 清空磁盘表，插入内存表内容
+        // 这里需要针对 global 或 vol 库执行不同的同步指令
+        bool isGlobal = inst->volSerial.empty();
+        db.transaction();
+        if (isGlobal) {
+            q.exec("DELETE FROM disk.categories");
+            q.exec("INSERT INTO disk.categories SELECT * FROM main.categories");
+            q.exec("DELETE FROM disk.category_items");
+            q.exec("INSERT INTO disk.category_items SELECT * FROM main.category_items");
+            q.exec("DELETE FROM disk.tags");
+            q.exec("INSERT INTO disk.tags SELECT * FROM main.tags");
+        } else {
+            q.exec("DELETE FROM disk.files");
+            q.exec("INSERT INTO disk.files SELECT * FROM main.files");
+            q.exec("DELETE FROM disk.palettes");
+            q.exec("INSERT INTO disk.palettes SELECT * FROM main.palettes");
+        }
+        ok = db.commit();
+    } else {
+        // Disk -> Memory
+        bool isGlobal = inst->volSerial.empty();
+        db.transaction();
+        if (isGlobal) {
+            q.exec("DELETE FROM main.categories");
+            q.exec("INSERT INTO main.categories SELECT * FROM disk.categories");
+            q.exec("DELETE FROM main.category_items");
+            q.exec("INSERT INTO main.category_items SELECT * FROM disk.category_items");
+            q.exec("DELETE FROM main.tags");
+            q.exec("INSERT INTO main.tags SELECT * FROM disk.tags");
+        } else {
+            q.exec("DELETE FROM main.files");
+            q.exec("INSERT INTO main.files SELECT * FROM disk.files");
+            q.exec("DELETE FROM main.palettes");
+            q.exec("INSERT INTO main.palettes SELECT * FROM disk.palettes");
+        }
+        ok = db.commit();
     }
-    
-    int rc = sqlite3_errcode(pTo);
 
-    sqlite3_close(pDisk);
-    sqlite3_close(pMem);
+    q.exec("DETACH DATABASE disk");
+    db.close();
+    QSqlDatabase::removeDatabase(tempConn);
 
-    if (toDisk && rc == SQLITE_OK) {
+    if (toDisk && ok) {
         inst->isDirty = false;
         PathManager::hideFile(inst->diskPath);
     }
 
-    return rc == SQLITE_OK;
+    return ok;
 }
 
 void Database::createTables(QSqlDatabase& db, bool isGlobal) {
@@ -216,6 +254,7 @@ void Database::createTables(QSqlDatabase& db, bool isGlobal) {
         q.exec("CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, parent_id INTEGER DEFAULT 0, name TEXT NOT NULL, color TEXT DEFAULT '', preset_tags TEXT DEFAULT '', sort_order INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0, encrypted INTEGER DEFAULT 0, encrypt_hint TEXT DEFAULT '', created_at REAL)");
         q.exec("CREATE TABLE IF NOT EXISTS category_items (category_id INTEGER, file_id_128 TEXT, vol_serial TEXT, added_at REAL, PRIMARY KEY (category_id, file_id_128, vol_serial))");
         q.exec("CREATE TABLE IF NOT EXISTS tags (tag TEXT PRIMARY KEY, item_count INTEGER DEFAULT 0)");
+        q.exec("CREATE TABLE IF NOT EXISTS favorites (path TEXT PRIMARY KEY, type TEXT, name TEXT, sort_order INTEGER DEFAULT 0, added_at REAL)");
     } else {
         q.exec("CREATE TABLE IF NOT EXISTS files (file_id_128 TEXT PRIMARY KEY, frn TEXT, path TEXT, parent_path TEXT, type TEXT, rating INTEGER DEFAULT 0, color TEXT DEFAULT '', tags TEXT DEFAULT '', pinned INTEGER DEFAULT 0, note TEXT DEFAULT '', url TEXT DEFAULT '', size INTEGER DEFAULT 0, ctime REAL DEFAULT 0, mtime REAL DEFAULT 0, atime REAL DEFAULT 0, deleted INTEGER DEFAULT 0)");
         q.exec("CREATE TABLE IF NOT EXISTS palettes (file_id_128 TEXT, r INTEGER, g INTEGER, b INTEGER, ratio REAL)");

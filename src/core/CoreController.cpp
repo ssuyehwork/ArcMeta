@@ -41,10 +41,6 @@ void CoreController::startSystem() {
             MetadataManager::instance().initFromDatabase();
             qDebug() << "[Core] 数据库元数据缓存加载完成，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
 
-            // 2026-06-xx 按照用户要求：物理剥离 MFT 索引初始化。
-            // ".scch" 缓存仅在 ScanDialog 中按需加载，MainWindow 启动时不占用相关内存。
-            qDebug() << "[Core] 已跳过 MFT 索引加载 (按需加载模式已启用)";
-
             // 2. 执行一次增量对账
             // 2026-05-14 架构修正：消除“异步就绪幻觉”，确保对账完成后再宣告就绪
             SyncEngine::instance().runIncrementalSync([this, startTime]() {

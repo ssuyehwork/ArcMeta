@@ -13,12 +13,12 @@ public:
         QString path = QCoreApplication::applicationDirPath() + "/.arcmeta";
         std::wstring wPath = QDir::toNativeSeparators(path).toStdWString();
 
-        // 确保目录存在
-        QDir().mkpath(path);
+        QDir dir(path);
+        if (!dir.exists()) {
+            dir.mkpath(".");
+        }
 
-        // 设置隐藏属性
         SetFileAttributesW(wPath.c_str(), FILE_ATTRIBUTE_HIDDEN);
-
         return wPath;
     }
 
@@ -32,9 +32,10 @@ public:
 
     static void hideFile(const std::wstring& filePath) {
         SetFileAttributesW(filePath.c_str(), FILE_ATTRIBUTE_HIDDEN);
-        // 同时尝试隐藏 WAL 和 SHM 文件
+        // 尝试隐藏可能存在的临时文件
         SetFileAttributesW((filePath + L"-wal").c_str(), FILE_ATTRIBUTE_HIDDEN);
         SetFileAttributesW((filePath + L"-shm").c_str(), FILE_ATTRIBUTE_HIDDEN);
+        SetFileAttributesW((filePath + L"-journal").c_str(), FILE_ATTRIBUTE_HIDDEN);
     }
 };
 

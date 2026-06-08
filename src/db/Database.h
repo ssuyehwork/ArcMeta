@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 #include <map>
+#include <mutex>
 #include <QSqlDatabase>
 #include <QObject>
 #include <QTimer>
@@ -60,14 +61,14 @@ private:
     void createIndexes(QSqlDatabase& db, bool isGlobal);
 
     /**
-     * @brief 执行底层 sqlite3_backup
-     * @param volSerial 为空代表备份 global.db
+     * @brief 执行底层备份
      * @param toDisk true: Memory -> Disk, false: Disk -> Memory
      */
-    bool performBackup(const std::wstring& volSerial, bool toDisk);
+    struct DbInstance;
+    bool performBackupInternal(std::shared_ptr<DbInstance> inst, bool toDisk);
 
     struct DbInstance {
-        std::wstring volSerial; // 为空表示 global.db
+        std::wstring volSerial;
         std::wstring diskPath;
         std::wstring memoryUri;
         QTimer* backupTimer = nullptr;
@@ -75,12 +76,8 @@ private:
     };
 
     std::map<std::wstring, std::shared_ptr<DbInstance>> m_instances;
-    
-    // 全局锁，保护 m_instances
-    mutable std::mutex m_mutex;
 
-    // 辅助：获取或创建 DbInstance
-    std::shared_ptr<DbInstance> getInstance(const std::wstring& volSerial);
+    mutable std::mutex m_mutex;
 };
 
 } // namespace ArcMeta
