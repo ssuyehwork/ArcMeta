@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include "../core/IndexedEntry.h"
 #include <QMap>
+#include <unordered_map>
 #include <deque>
 #include <vector>
 #include <QCache>
@@ -27,6 +28,15 @@
 #include "../core/ModelContract.h"
 
 namespace ArcMeta {
+
+/**
+ * @brief 2026-06-xx 物理强化：针对 QString 优化 std::unordered_map 的哈希器
+ */
+struct QStringHash {
+    size_t operator()(const QString& key) const {
+        return qHash(key);
+    }
+};
 
 /**
  * @brief 内部代理类：专门处理高级筛选逻辑 (2026-05-25 物理化以修复 static_cast 编译报错)
@@ -82,6 +92,7 @@ public:
 
 private:
     std::vector<ItemRecord> m_allRecords;
+    std::unordered_map<QString, int, QStringHash> m_pathToIndex;
     int m_displayCount = 0;
 
     mutable QCache<QString, QIcon> m_iconCache;

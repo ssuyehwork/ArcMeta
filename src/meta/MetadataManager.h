@@ -92,7 +92,7 @@ public:
      * @brief 物理同步元数据
      * 2026-06-xx 按照用户要求：支持主动触发物理元数据（File ID 等）的获取与保存
      */
-    void syncPhysicalMetadata(const std::wstring& path);
+    void syncPhysicalMetadata(const std::wstring& path, bool notify = true);
 
     /**
      * @brief 激活并初始化项的元数据
@@ -171,7 +171,7 @@ private:
     QTimer* m_batchTimer = nullptr;
     std::unordered_set<std::wstring, std::hash<std::wstring>> m_dirtyPaths;
 
-    void persistAsync(const std::wstring& path);
+    void persistAsync(const std::wstring& path, bool notify = true);
     void debouncePersist(const std::wstring& path);
 
 };
