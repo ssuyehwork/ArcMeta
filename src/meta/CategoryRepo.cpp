@@ -1,5 +1,4 @@
 #include "CategoryRepo.h"
-#include "TagRepo.h"
 #include "MetadataManager.h"
 #include <QDataStream>
 #include <QDateTime>

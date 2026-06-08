@@ -3,7 +3,6 @@
 #include "TreeItemDelegate.h"
 #include "DropTreeView.h"
 #include "ContentPanel.h"
-#include "../meta/AmMetaScch.h"
 #include <QHeaderView>
 #include <QScrollBar>
 #include <QLabel>
