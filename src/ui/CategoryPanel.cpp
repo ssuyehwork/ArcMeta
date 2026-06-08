@@ -942,7 +942,7 @@ void CategoryPanel::initUi() {
                     
                     // 2. 执行归类关联 (如果 catId > 0)
                     if (catId > 0) {
-                        CategoryRepo::addItemToCategory(catId, fid);
+                        CategoryRepo::addItemToCategory(catId, fid, vol);
                     }
 
                     // 2026-06-xx 物理同步：触发元数据持久化到 SQLite 数据库。

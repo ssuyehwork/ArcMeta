@@ -242,7 +242,7 @@ bool CategoryRepo::reorder(int parentId, bool ascending) {
     return false;
 }
 
-std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
+std::vector<std::string> CategoryRepo::getFileIdsRecursive(int /*categoryId*/) {
     return {};
 }
 
