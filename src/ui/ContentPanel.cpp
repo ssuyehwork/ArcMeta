@@ -61,7 +61,6 @@
 #include <shellapi.h> 
 #include <io.h>
 #include "../meta/MetadataManager.h" 
-#include "../meta/AmMetaScch.h"
 #include "../meta/BatchRenameEngine.h" 
 #include "../meta/CategoryRepo.h" 
 #include "../crypto/EncryptionManager.h" 
@@ -70,7 +69,6 @@
 #include "UiHelper.h" 
 #include "StyleLibrary.h"
 #include "../core/CoreController.h"
-#include "../meta/AllFrnManager.h"
 using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
  
@@ -1501,7 +1499,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         }
                     }
 
-                    // C. 统一触发物理同步 (获取 FID/FRN, 注册 AllFrnManager, 写入 .arcmeta/)
+                    // C. 统一触发物理同步 (获取 FID/FRN)
                     MetadataManager::instance().syncPhysicalMetadata(wp);
 
                     // 递归子项

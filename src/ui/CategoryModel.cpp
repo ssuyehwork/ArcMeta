@@ -1,7 +1,6 @@
 #include "CategoryModel.h"
 #include "../meta/CategoryRepo.h"
 
-#include "../meta/FavoritesRepo.h"
 #include "UiHelper.h"
 #include <QMimeData>
 #include <QFileInfo>
@@ -84,16 +83,6 @@ void CategoryModel::refresh() {
         favGroup->setForeground(QColor("#FFFFFF"));
         root->appendRow(favGroup);
 
-        // A. 物理收藏路径 (FavoritesRepo)
-        auto favorites = FavoritesRepo::getAll();
-        for (const auto& fav : favorites) {
-            QStandardItem* item = new QStandardItem(QString::fromStdWString(fav.name));
-            item->setData("bookmark", TypeRole);
-            item->setData(QString::fromStdWString(fav.path), PathRole);
-            item->setData(QString::fromStdWString(fav.name), NameRole);
-            item->setIcon(UiHelper::getIcon("folder_filled", QColor("#555555"), 16));
-            favGroup->appendRow(item);
-        }
     }
 
     // 3. 我的分类模块

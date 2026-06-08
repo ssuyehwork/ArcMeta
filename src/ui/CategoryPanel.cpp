@@ -918,7 +918,7 @@ void CategoryPanel::initUi() {
             auto processItem = [&](const QString& itemPath, int catId) {
                 std::wstring wp = QDir::toNativeSeparators(itemPath).toStdWString();
                 
-                // 1. 激活：获取 FID/FRN, 注册 AllFrnManager, 写入 .arcmeta/ (物理加固)
+                // 1. 激活：获取 FID/FRN (物理加固)
                 MetadataManager::activateItem(wp);
 
                 // 2. 视觉解析：如果是图像或文件夹，解析代表色并设置视觉元数据

@@ -14,13 +14,14 @@
 #endif
 #include "MetadataManager.h"
 #include "MetadataDefs.h"
-#include "AmMetaScch.h"
-#include "AllFrnManager.h"
-#include "TagRepo.h"
-#include "DriverRepo.h"
+#include "DatabaseManager.h"
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 #include "../ui/UiHelper.h"
+#include "sqlite3.h"
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
 
 #include <windows.h>
 #include <fileapi.h>
@@ -41,42 +42,6 @@ namespace ArcMeta {
 
 // --- Internal Helper Functions ---
 
-static void migrateLegacyScch(const std::wstring& folderPath) {
-    QString legacyPath = QString::fromStdWString(folderPath) + "/metadata.scch";
-    if (!QFile::exists(legacyPath)) return;
-
-    qDebug() << "[Metadata] 发现旧版元数据文件，正在迁移:" << legacyPath;
-
-    // 读取旧格式
-    ArcMeta::AmMetaScch legacy(folderPath, L"");
-    if (!legacy.load()) return;
-
-    // 拆分写入新格式
-    // 1. 文件夹自身
-    ArcMeta::AmMetaScch folderScch(folderPath, L"");
-    folderScch.folder() = legacy.folder();
-    folderScch.save();
-
-    // 2. 每个文件项
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable: 4996)
-#endif
-    // 2026-06-xx 物理修复：为了迁移兼容，必须暂时访问已弃用的 items() 接口
-    auto& itemsRef = legacy.items();
-    for (auto it = itemsRef.begin(); it != itemsRef.end(); ++it) {
-        ArcMeta::AmMetaScch fileScch(folderPath, it->first);
-        fileScch.setItem(it->second);
-        fileScch.save();
-    }
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
-
-    // 3. 删除旧文件
-    QFile::remove(legacyPath);
-    qDebug() << "[Metadata] 旧版元数据迁移完成，已移除:" << legacyPath;
-}
 
 static std::wstring normalizePath(const std::wstring& path) {
     if (path.empty()) return L"";
@@ -165,161 +130,99 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
         }
         for (const auto& p : paths) persistAsync(p);
         
-        // 2026-06-xx 物理加固：同步保存 FRN 索引表
-        AllFrnManager::saveImmediately();
+        // 2026-06-xx 物理切换：强制刷新 SQLite 到磁盘
+        DatabaseManager::instance().flushAll();
     });
 }
 
 
 void MetadataManager::initFromScchMode() {
-    // 2026-06-xx 物理加固：防止重复初始化导致的 IO 风暴
+    // 2026-06-xx 物理加固：防止重复初始化
     {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
-        if (m_loaded) {
-            qDebug() << "[PERF] SCCH 缓存已在内存中，跳过重复加载";
-            return;
-        }
+        if (m_loaded) return;
     }
 
     qint64 startTime = QDateTime::currentMSecsSinceEpoch();
+    DatabaseManager::instance().init();
 
-    // 1.5 旧格式迁移
-    QMap<QString, QString> allFrns = AllFrnManager::getAllFrns();
-    if (allFrns.isEmpty()) {
-        qDebug() << "[Metadata] AllFrnManager 数据为空，请检查 All_FRN_metadata.scch 是否加载成功";
-    }
-
-    for (auto it = allFrns.begin(); it != allFrns.end(); ++it) {
-        migrateLegacyScch(it.value().toStdWString());
-    }
-
-    qDebug() << "[PERF] 开始加载分布式 SCCH 缓存...";
-    TagRepo::load();
-    loadDriverMetadata();
+    qDebug() << "[PERF] 正在从 SQLite 内存模式初始化元数据缓存...";
+    
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
     std::unordered_map<std::string, std::wstring> tempFidToPath;
-    {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        tempCache = m_cache;
-        for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
-            if (!it->second.fileId128.empty()) tempFidToPath[it->second.fileId128] = it->first;
-        }
-    }
 
-    QMap<QString, QString> frnsMap = AllFrnManager::getAllFrns();
-    qDebug() << "[Metadata] 从 All_FRN_metadata.scch 读入索引项数:" << frnsMap.size();
-    
-    std::atomic<int> folderCount(0);
-    std::atomic<int> fileCount(0);
+    // 扫描所有已加载的数据库
+    // 注意：这里需要遍历所有已知的驱动器数据库，目前逻辑是 MetadataManager 会在 getMeta 时按需加载，
+    // 但为了全局搜索和分类统计，我们在此预先加载所有 .arcmeta/*.db
+    QString metaDir = DatabaseManager::instance().getGlobalDb() ? QCoreApplication::applicationDirPath() + "/.arcmeta" : "";
+    if (!metaDir.isEmpty()) {
+        QDir dir(metaDir);
+        QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files);
+        for (const QString& dbFile : dbFiles) {
+            QString volSerial = dbFile.mid(8, dbFile.length() - 8 - 3);
+            sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial.toStdWString());
+            if (!db) continue;
 
-    struct LoadTask {
-        QString frn;
-        QString path;
-    };
-    QList<LoadTask> tasks;
-    for (auto it = frnsMap.constBegin(); it != frnsMap.constEnd(); ++it) {
-        tasks.append({it.key(), it.value()});
-    }
+            sqlite3_stmt* stmt;
+            const char* sql = "SELECT * FROM metadata";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                    RuntimeMeta rm;
+                    rm.fileId128 = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                    std::wstring path = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
+                    rm.isFolder = sqlite3_column_int(stmt, 2);
+                    rm.rating = sqlite3_column_int(stmt, 3);
+                    const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
+                    if (color) rm.color = color;
+                    QString tags = QString::fromWCharArray(reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 5)));
+                    rm.tags = tags.split(",", Qt::SkipEmptyParts);
+                    const wchar_t* note = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 6));
+                    if (note) rm.note = note;
+                    const wchar_t* url = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 7));
+                    if (url) rm.url = url;
+                    rm.ctime = sqlite3_column_int64(stmt, 8);
+                    rm.mtime = sqlite3_column_int64(stmt, 9);
+                    rm.atime = sqlite3_column_int64(stmt, 10);
+                    rm.fileSize = sqlite3_column_int64(stmt, 11);
 
-    // 2026-06-xx 性能爆炸：引入并行加载，充分利用多核 CPU 处理海量 SCCH
-    // 物理注意：MSVC lambda 内部必须显式捕获所需的静态/局部变量，且尽量避免在 template 中使用复杂的隐式推导
-    typedef QList<QPair<std::wstring, RuntimeMeta>> LoadResult;
-    QList<LoadResult> results = QtConcurrent::blockingMapped(tasks, [&](const LoadTask& task) -> LoadResult {
-        LoadResult localResults;
-        std::wstring resolvedPath = QDir::toNativeSeparators(task.path).toStdWString();
-
-        if (!QFile::exists(task.path)) {
-            bool ok = false;
-            unsigned long long frnVal = task.frn.toULongLong(&ok, 16);
-            if (ok) {
-                for (size_t d = 0; d < 26; ++d) {
-                    std::wstring p = MftReader::instance().getPathFast(static_cast<int>(d), frnVal);
-                    if (!p.empty()) {
-                        if (p.find(L"metadata.scch") != std::wstring::npos) {
-                            resolvedPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(p)).absolutePath()).toStdWString();
-                        } else {
-                            resolvedPath = p;
+                    const void* paletteBlob = sqlite3_column_blob(stmt, 12);
+                    int paletteSize = sqlite3_column_bytes(stmt, 12);
+                    if (paletteBlob && paletteSize > 0) {
+                        QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
+                        QJsonDocument doc = QJsonDocument::fromJson(ba);
+                        QJsonArray arr = doc.array();
+                        for (const auto& v : arr) {
+                            QJsonObject obj = v.toObject();
+                            PaletteEntry pe;
+                            pe.color = QColor(obj["color"].toString());
+                            pe.weight = obj["weight"].toDouble();
+                            rm.palettes.push_back(pe);
                         }
-                        AllFrnManager::registerFrn(task.frn.toStdWString(), resolvedPath);
-                        break;
                     }
+
+                    tempCache[path] = rm;
+                    tempFidToPath[rm.fileId128] = path;
                 }
+                sqlite3_finalize(stmt);
             }
-        }
-
-        ArcMeta::AmMetaScch folderLoader(resolvedPath, L"");
-        if (folderLoader.load()) {
-            const FolderMeta& f = folderLoader.folder();
-            if (!f.isDefault()) {
-                RuntimeMeta fMeta;
-                fMeta.rating = f.rating; fMeta.color = f.color;
-                for (const auto& t : f.tags) fMeta.tags << QString::fromStdWString(t);
-                fMeta.pinned = f.pinned; fMeta.note = f.note; fMeta.url = f.url; fMeta.encrypted = f.encrypted;
-                fMeta.isFolder = true; fMeta.fileId128 = f.fileId128; fMeta.palettes = f.palettes;
-                localResults.append({fastNormalizePath(resolvedPath), fMeta});
-                folderCount++;
-            }
-        }
-
-        QDir arcmetaDir(QString::fromStdWString(resolvedPath) + "/.arcmeta");
-        if (arcmetaDir.exists()) {
-            QStringList scchFiles = arcmetaDir.entryList({"*.scch"}, QDir::Files | QDir::Hidden);
-            for (const QString& scchFile : scchFiles) {
-                if (scchFile == "__folder__.scch") continue;
-                // 物理修复：分步提取文件名，防止 MSVC 在表达式嵌套中丢失类型信息
-                QString baseName = scchFile.left(scchFile.length() - 5);
-                std::wstring wBaseName = baseName.toStdWString();
-                
-                ArcMeta::AmMetaScch itemLoader(resolvedPath, wBaseName);
-                if (itemLoader.load()) {
-                    const ItemMeta& item = itemLoader.item();
-                    if (item.hasUserOperations()) {
-                        RuntimeMeta iMeta;
-                        iMeta.rating = item.rating; iMeta.color = item.color;
-                        for (const auto& t : item.tags) iMeta.tags << QString::fromStdWString(t);
-                        iMeta.pinned = item.pinned; iMeta.note = item.note; iMeta.url = item.url; iMeta.encrypted = item.encrypted;
-                        iMeta.isFolder = (item.type == L"folder"); iMeta.fileId128 = item.fileId128; iMeta.palettes = item.palettes;
-                        iMeta.fileSize = item.size; iMeta.ctime = item.creationTime; iMeta.mtime = item.modificationTime; iMeta.atime = item.accessTime;
-                        localResults.append({fastNormalizePath(resolvedPath + L"\\" + wBaseName), iMeta});
-                        fileCount++;
-                    }
-                }
-            }
-        }
-        return localResults;
-    });
-
-    // 合并结果：预先分配内存，减少 rehash
-    tempCache.reserve(fileCount + folderCount);
-    for (const auto& localList : results) {
-        for (const auto& pair : localList) {
-            tempCache[pair.first] = pair.second;
-            if (!pair.second.fileId128.empty()) tempFidToPath[pair.second.fileId128] = pair.first;
         }
     }
-    qDebug() << "[Metadata] 分布式加载完成: 目录数=" << folderCount << " 文件数=" << fileCount;
 
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache = tempCache;
         m_fidToPath = tempFidToPath;
         m_loaded = true;
-
-        // 初始化增量计数器 (Part 4)
-        // 2026-06-xx 物理修复：已在 unique_lock 保护下，确保 s_totalFileCount 初始化不包含文件夹
+        
         int totalFiles = 0;
         for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
             if (!it->second.isFolder) totalFiles++;
         }
         CategoryRepo::setTotalFileCount(totalFiles);
-
     }
 
-    // 2026-06-xx 逻辑加固：由于元数据加载可能导致分类计数的逻辑变动，强制执行一次全量重计
-    // 物理注意：必须在锁外执行，否则会因为 CategoryRepo 回调 forEachCachedItem 导致互斥锁递归死锁
     CategoryRepo::fullRecount();
-
-    qDebug() << "[PERF] 分布式 SCCH 缓存加载完成，项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
+    qDebug() << "[PERF] SQLite 元数据镜像构建完成，总项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     emit metaChanged("__RELOAD_ALL__");
 }
 
@@ -327,63 +230,8 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
     {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
-        std::unordered_map<std::wstring, RuntimeMeta>::const_iterator it = m_cache.find(nPath);
+        auto it = m_cache.find(nPath);
         if (it != m_cache.end()) return it->second;
-    }
-
-    QFileInfo info(QString::fromStdWString(nPath));
-    std::wstring parentDir;
-    std::wstring fileName;
-
-    if (info.isDir()) {
-        parentDir = QDir::toNativeSeparators(info.absoluteFilePath()).toStdWString();
-        fileName = L""; // 文件夹模式
-    } else {
-        parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-        fileName = info.fileName().toStdWString();
-    }
-
-    // 优先加载文件级或文件夹级 .scch (fileName为空代表 __folder__.scch)
-    ArcMeta::AmMetaScch loader(parentDir, fileName);
-    if (loader.load()) {
-        qDebug() << "[Metadata] 从磁盘加载命中:" << QString::fromStdWString(nPath);
-        bool hasMeta = false;
-        RuntimeMeta rm;
-        if (info.isDir()) {
-            const FolderMeta& folder = loader.folder();
-            if (!folder.isDefault()) {
-                rm.rating = folder.rating; rm.color = folder.color;
-                rm.pinned = folder.pinned; rm.note = folder.note; rm.url = folder.url; rm.palettes = folder.palettes;
-                rm.isFolder = true;
-                rm.fileId128 = folder.fileId128;
-                for (size_t i = 0; i < folder.tags.size(); ++i) rm.tags << QString::fromStdWString(folder.tags[i]);
-                hasMeta = true;
-            }
-        } else {
-            const ItemMeta& item = loader.item();
-            if (item.hasUserOperations()) {
-                rm.rating = item.rating; rm.color = item.color;
-                rm.pinned = item.pinned; rm.encrypted = item.encrypted;
-                rm.note = item.note; rm.url = item.url; rm.palettes = item.palettes;
-                rm.isFolder = (item.type == L"folder");
-                rm.fileId128 = item.fileId128;
-                for (size_t i = 0; i < item.tags.size(); ++i) rm.tags << QString::fromStdWString(item.tags[i]);
-                hasMeta = true;
-            }
-        }
-
-
-        if (hasMeta) {
-            fetchWinApiMetadataDirect(nPath, rm.fileId128, nullptr, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime);
-            
-            // 2026-06-xx 物理加固：补全 FRN 登记，确保下次启动能通过 All_FRN_metadata.scch 找回分布式元数据
-            registerArcmetaFrn(parentDir);
-
-            std::unique_lock<std::shared_mutex> lock(m_mutex);
-            m_cache[nPath] = rm;
-            if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;
-            return rm;
-        }
     }
     return RuntimeMeta();
 }
@@ -408,17 +256,6 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         rm.isFolder = (type == L"folder");
         m_cache[nPath] = rm;
         if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;
-
-        // 注册到 AllFrnManager (锚点为所属目录的 .arcmeta)
-        QFileInfo info(QString::fromStdWString(nPath));
-        std::wstring parentDir;
-        if (rm.isFolder) {
-            parentDir = QDir::toNativeSeparators(info.absoluteFilePath()).toStdWString();
-        } else {
-            parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-        }
-
-        registerArcmetaFrn(parentDir);
 
         if (!rm.isFolder) CategoryRepo::incrementTotalFileCount(1);
     }
@@ -462,42 +299,9 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
     qDebug() << "[Metadata] setTags ->" << QString::fromStdWString(nPath) << "Val:" << tags;
     ensureActivated(nPath);
 
-    // 1. 获取旧标签
-    QStringList oldTags;
-    std::string fid;
-    bool isFolder = false;
-    {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end()) {
-            oldTags = it->second.tags;
-            fid = it->second.fileId128;
-            isFolder = it->second.isFolder;
-        }
-    }
-
-    // 2. 更新内存缓存
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache[nPath].tags = tags;
-        if (fid.empty()) fid = m_cache[nPath].fileId128;
-        if (!isFolder) isFolder = m_cache[nPath].isFolder;
-    }
-
-    // 3. 增量更新全局标签索引 (仅限文件)
-    if (!fid.empty() && !isFolder) {
-        // 解绑已移除的标签
-        for (const QString& t : oldTags) {
-            if (!tags.contains(t)) {
-                TagRepo::unbindTag(fid, t.toStdWString());
-            }
-        }
-        // 绑定新增的标签
-        for (const QString& t : tags) {
-            if (!oldTags.contains(t)) {
-                TagRepo::bindTag(fid, t.toStdWString(), nPath);
-            }
-        }
     }
 
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
@@ -571,33 +375,6 @@ QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
             return colors;
         }
     }
-
-    QFileInfo info(QString::fromStdWString(nPath));
-    std::wstring parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-    std::wstring fileName = info.fileName().toStdWString();
-
-    ArcMeta::AmMetaScch loader(parentDir, info.isDir() ? L"" : fileName);
-    if (loader.load()) {
-        std::vector<PaletteEntry> entries;
-        bool hasEntries = false;
-        if (info.isDir()) {
-            entries = loader.folder().palettes;
-            hasEntries = !entries.empty();
-        } else {
-            entries = loader.item().palettes;
-            hasEntries = !entries.empty();
-        }
-
-        
-        if (!entries.empty()) {
-            std::unique_lock<std::shared_mutex> lock(m_mutex);
-            m_cache[nPath].palettes = entries;
-        }
-
-        QVector<QColor> colors;
-        for (size_t i = 0; i < entries.size(); ++i) colors << entries[i].color;
-        return colors;
-    }
     return {};
 }
 
@@ -615,6 +392,20 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             m_cache[newPath] = it->second; 
             m_cache.erase(it); 
             if (!fid.empty()) m_fidToPath[fid] = newPath;
+
+            // 物理同步：更新 SQLite 路径
+            std::wstring volSerial = getVolumeSerialNumber(newPath);
+            sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
+            if (db) {
+                sqlite3_stmt* stmt;
+                const char* sql = "UPDATE metadata SET path = ? WHERE file_id = ?";
+                if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_text16(stmt, 1, newPath.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(stmt, 2, fid.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(stmt);
+                    sqlite3_finalize(stmt);
+                }
+            }
         }
     }
     emit metaChanged(QString::fromStdWString(newPath));
@@ -622,26 +413,33 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
 
 void MetadataManager::removeMetadataSync(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
+    std::wstring volSerial = getVolumeSerialNumber(nPath);
+    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
+    
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         for (std::unordered_map<std::wstring, RuntimeMeta>::iterator it = m_cache.begin(); it != m_cache.end(); ) {
             if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
                 if (!it->second.isFolder) CategoryRepo::incrementTotalFileCount(-1);
                 if (!it->second.fileId128.empty()) m_fidToPath.erase(it->second.fileId128);
+                
+                // 从 SQLite 中删除
+                if (db) {
+                    sqlite3_stmt* stmt;
+                    const char* sql = "DELETE FROM metadata WHERE path = ? OR path LIKE ?";
+                    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                        sqlite3_bind_text16(stmt, 1, it->first.c_str(), -1, SQLITE_TRANSIENT);
+                        std::wstring pattern = it->first + L"\\%";
+                        sqlite3_bind_text16(stmt, 2, pattern.c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_step(stmt);
+                        sqlite3_finalize(stmt);
+                    }
+                }
+
                 it = m_cache.erase(it);
             }
             else ++it;
         }
-    }
-    QFileInfo info(QString::fromStdWString(path));
-    if (info.isDir()) {
-        // 删除新格式目录
-        QDir arcmetaDir(info.absoluteFilePath() + "/.arcmeta");
-        arcmetaDir.removeRecursively();
-    } else {
-        // 删除文件级 scch
-        QString scchPath = info.absolutePath() + "/.arcmeta/" + info.fileName() + ".scch";
-        QFile::remove(scchPath);
     }
 }
 
@@ -692,16 +490,6 @@ void MetadataManager::activateItem(const std::wstring& path) {
     std::string fid; std::wstring frn;
     if (fetchWinApiMetadataDirect(path, fid, &frn)) {
         std::wstring nPath = normalizePath(path);
-        QFileInfo info(QString::fromStdWString(nPath));
-        std::wstring parentDir = info.isDir() ? QDir::toNativeSeparators(info.absoluteFilePath()).toStdWString()
-                                              : QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-        
-        // 注册项自身的 FRN
-        AllFrnManager::registerFrn(frn, parentDir);
-        
-        // 注册所属目录的 .arcmeta FRN
-        registerArcmetaFrn(parentDir);
-        
         // 激活并持久化
         instance().ensureActivated(nPath);
         instance().syncPhysicalMetadata(nPath);
@@ -739,12 +527,7 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
     }
 }
 
-void MetadataManager::registerArcmetaFrn(const std::wstring& parentDir) {
-    std::wstring arcmetaPath = parentDir + L"\\.arcmeta";
-    std::wstring arcmetaFrn; std::string arcmetaFid;
-    if (fetchWinApiMetadataDirect(arcmetaPath, arcmetaFid, &arcmetaFrn)) {
-        AllFrnManager::registerFrn(arcmetaFrn, parentDir);
-    }
+void MetadataManager::registerArcmetaFrn(const std::wstring&) {
 }
 
 std::string MetadataManager::getFileIdSync(const std::wstring& path) {
@@ -755,90 +538,51 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
 
 void MetadataManager::persistAsync(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
-    qDebug() << "[Metadata] 准备持久化元数据到磁盘:" << QString::fromStdWString(nPath);
-    QFileInfo info(QString::fromStdWString(nPath));
-    
-    std::wstring parentDir;
-    std::wstring fileName;
-    if (info.isDir()) {
-        parentDir = QDir::toNativeSeparators(info.absoluteFilePath()).toStdWString();
-        fileName = L"";
-    } else {
-        parentDir = QDir::toNativeSeparators(info.absolutePath()).toStdWString();
-        fileName = info.fileName().toStdWString();
-    }
+    qDebug() << "[Metadata] 准备持久化元数据到 SQLite 内存库:" << QString::fromStdWString(nPath);
     
     RuntimeMeta rMeta = getMeta(nPath);
+    std::wstring volSerial = getVolumeSerialNumber(nPath);
+    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
+    if (!db) return;
 
-    if (info.isDir() && info.isRoot()) {
-        DriverEntry de;
-        de.volumePath = nPath;
-        de.rating = rMeta.rating;
-        de.color = rMeta.color;
-        de.pinned = rMeta.pinned;
-        de.note = rMeta.note;
-        de.url = rMeta.url;
-        for (int i = 0; i < rMeta.tags.size(); ++i) de.tags.push_back(rMeta.tags[i].toStdWString());
-        de.palettes = rMeta.palettes;
-        DriverRepo::update(de);
-    } else {
-        // 直接写该文件的 scch (不再读整目录)
-        ArcMeta::AmMetaScch loader(parentDir, fileName);
-        if (info.isDir()) {
-            FolderMeta& folder = loader.folder();
-            folder.rating = rMeta.rating; folder.color = rMeta.color;
-            folder.pinned = rMeta.pinned; folder.note = rMeta.note;
-            folder.url = rMeta.url;
-            folder.tags.clear(); for (int i = 0; i < rMeta.tags.size(); ++i) folder.tags.push_back(rMeta.tags[i].toStdWString());
-            folder.palettes = rMeta.palettes;
-            folder.fileId128 = rMeta.fileId128;
-        } else {
-            ItemMeta& item = loader.item();
-            item.rating = rMeta.rating; item.color = rMeta.color;
-            item.pinned = rMeta.pinned; item.encrypted = rMeta.encrypted;
-            item.note = rMeta.note; item.url = rMeta.url;
-            item.tags.clear(); for (int i = 0; i < rMeta.tags.size(); ++i) item.tags.push_back(rMeta.tags[i].toStdWString());
-            item.palettes = rMeta.palettes;
-            item.fileId128 = rMeta.fileId128;
-            item.type = L"file";
+    sqlite3_stmt* stmt;
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 2, nPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 3, rMeta.isFolder ? 1 : 0);
+        sqlite3_bind_int(stmt, 4, rMeta.rating);
+        sqlite3_bind_text16(stmt, 5, rMeta.color.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 6, rMeta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 7, rMeta.note.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 8, rMeta.url.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 9, rMeta.ctime);
+        sqlite3_bind_int64(stmt, 10, rMeta.mtime);
+        sqlite3_bind_int64(stmt, 11, rMeta.atime);
+        sqlite3_bind_int64(stmt, 12, rMeta.fileSize);
+
+        QJsonArray arr;
+        for (const auto& pe : rMeta.palettes) {
+            QJsonObject obj;
+            obj["color"] = pe.color.name();
+            obj["weight"] = pe.weight;
+            arr.append(obj);
         }
-        loader.save();
+        QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
+        sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
+
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
     }
-    
-    // 追踪目标改为 .arcmeta 目录的位置
-    registerArcmetaFrn(parentDir);
         
     emit metaChanged(QString::fromStdWString(nPath));
 }
 
-void MetadataManager::loadDriverMetadata() {
-    qint64 start = QDateTime::currentMSecsSinceEpoch();
-    std::vector<DriverEntry> drivers = DriverRepo::loadAll();
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
-    for (const auto& de : drivers) {
-        std::wstring nPath = normalizePath(de.volumePath);
-        RuntimeMeta rm;
-        rm.rating = de.rating;
-        rm.color = de.color;
-        rm.pinned = de.pinned;
-        rm.note = de.note;
-        rm.url = de.url;
-        for (const auto& t : de.tags) rm.tags << QString::fromStdWString(t);
-        rm.palettes = de.palettes;
-        rm.isFolder = true;
-        
-        fetchWinApiMetadataDirect(nPath, rm.fileId128, nullptr, &rm.fileSize, nullptr, &rm.ctime, &rm.mtime, &rm.atime);
-        m_cache[nPath] = rm;
-        if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;
-    }
-    qDebug() << "[PERF] 驱动器根目录元数据加载耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
-}
 
 bool MetadataManager::hasPendingSync() const { return false; }
 QStringList MetadataManager::getPendingSyncDirs() { return {}; }
 void MetadataManager::removeFidsFromLog(const QStringList&) {}
 void MetadataManager::addToSyncLog(const std::wstring&) {}
-void MetadataManager::saveSyncLog() {}
 
 QStringList MetadataManager::searchInCache(const QString& keyword) {
     QStringList results; if (keyword.isEmpty()) return results;
