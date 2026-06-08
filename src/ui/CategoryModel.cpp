@@ -1,7 +1,7 @@
 #include "CategoryModel.h"
-#include "../db/CategoryRepo.h"
-#include "../db/ItemRepo.h"
-#include "../db/FavoritesRepo.h"
+#include "../meta/CategoryRepo.h"
+
+#include "../meta/FavoritesRepo.h"
 #include "UiHelper.h"
 #include <QMimeData>
 #include <QFileInfo>
@@ -28,6 +28,11 @@ void CategoryModel::deferredRefresh() {
 }
 
 void CategoryModel::refresh() {
+    // 2026-06-xx 物理修复：移除对 m_isFirstLoad 的强行拦截。
+    // 理由：refresh() 必须允许重建树结构，否则在应用期间增删改“分类”时 UI 无法感知。
+    // 异步高频刷新应由 CategoryPanel::requestRefresh 及其内部的 updateStatistics 承载。
+    m_isFirstLoad = false;
+
     // 2026-06-xx 物理修复：废除破坏性的 clear()，改用 beginResetModel 手动管理。
     // 理由：clear() 会提前发射重置信号，导致 UI 在数据还没填充时就尝试恢复展开状态，引发折叠。
     beginResetModel();
@@ -59,8 +64,6 @@ void CategoryModel::refresh() {
         addSystemItem("全部数据", "all", "all_data", "#3498db", -1);
         addSystemItem("未分类", "uncategorized", "uncategorized", "#95a5a6", -2);
         addSystemItem("未标签", "untagged", "untagged", "#7f8c8d", -3);
-        addSystemItem("今日数据", "today", "today", "#2ecc71", -4);
-        addSystemItem("昨日数据", "yesterday", "today", "#f39c12", -5);
         addSystemItem("最近访问", "recently_visited", "clock", "#9b59b6", -6);
         addSystemItem("标签管理", "tags", "tag", "#1abc9c", -7);
         addSystemItem("回收站", "trash", "trash", "#e74c3c", -8);
@@ -186,6 +189,55 @@ void CategoryModel::refresh() {
     }
     
     endResetModel();
+}
+
+void CategoryModel::updateSystemCounts() {
+    auto counts = CategoryRepo::getSystemCounts();
+    for (int i = 0; i < invisibleRootItem()->rowCount(); ++i) {
+        QStandardItem* item = invisibleRootItem()->child(i);
+        QString type = item->data(TypeRole).toString();
+        if (counts.contains(type)) {
+            QString name = item->data(NameRole).toString();
+            item->setText(QString("%1 (%2)").arg(name).arg(counts[type]));
+        }
+    }
+}
+
+void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
+    // 2026-06-xx 极致性能优化：采用深度遍历进行局部 setData 更新，杜绝 beginResetModel 引发视图抖动
+    std::function<void(QStandardItem*)> updateItem;
+    updateItem = [&](QStandardItem* parent) {
+        for (int i = 0; i < parent->rowCount(); ++i) {
+            QStandardItem* item = parent->child(i);
+            QString type = item->data(TypeRole).toString();
+            QString name = item->data(NameRole).toString();
+            int id = item->data(IdRole).toInt();
+
+            bool changed = false;
+            if (id < 0) { // 系统项
+                int count = sysCounts.value(type, 0);
+                QString newText = QString("%1 (%2)").arg(name).arg(count);
+                if (item->text() != newText) {
+                    item->setText(newText);
+                    changed = true;
+                }
+            } else if (type == "category" && id > 0) { // 用户分类
+                int count = catCounts.value(id, 0);
+                QString newText = QString("%1 (%2)").arg(name).arg(count);
+                if (item->text() != newText) {
+                    item->setText(newText);
+                    changed = true;
+                }
+            }
+
+            // 递归处理子项
+            if (item->hasChildren()) {
+                updateItem(item);
+            }
+        }
+    };
+
+    updateItem(invisibleRootItem());
 }
 
 void CategoryModel::loadCategoryItems(const QModelIndex& parentIndex) {

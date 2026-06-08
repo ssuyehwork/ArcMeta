@@ -77,6 +77,10 @@ MftReader::~MftReader() {
 }
 
 void MftReader::clearInternal() {
+    {
+        std::lock_guard<std::mutex> qLock(m_queueMutex);
+        m_metadata_queue.clear();
+    }
     // 极致工业级优化方案 A：物理内存“强制归还”
     // 使用 Swap 技巧强制 STL 释放 Capacity 并归还堆内存给操作系统
     std::vector<uint64_t>().swap(m_frns);
@@ -1185,6 +1189,8 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
 }
 
 void MftReader::compact() {
+    // 2026-06-xx 状态标记：碎片整理期间阻止其他写操作
+    m_is_compacting.store(true);
     // 2026-05-14 内存管理优化：执行碎片整理，回收无效条目和字符串池空间
     std::vector<uint64_t>  new_frns;
     std::vector<uint64_t>  new_parent_frns;
@@ -1243,6 +1249,7 @@ void MftReader::compact() {
     m_wasted_string_bytes = 0;
     rebuildFrnToIndexMap();
     buildSortedIndices();
+    m_is_compacting.store(false);
 }
 
 bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult& result) {
@@ -1384,11 +1391,20 @@ void MftReader::buildSortedIndices() {
 }
 
 void MftReader::requestMetadata(int index) {
+    // 2026-06-xx 工业级 UI 响应优化：
+    // 在获取重型写锁前，先使用读锁进行状态预检。
+    // 这可以防止在列表快速滚动时，成千上万个 requestMetadata 任务因排队等待写锁而导致主线程假死。
+    {
+        QReadLocker readLock(&m_dataLock);
+        if (index < 0 || index >= (int)m_frns.size() || m_frns[index] == 0) return;
+        if (m_metadata_fetched[index] != 0) return; // 状态机检查 (读模式)
+    }
+
     // 2026-05-14 工业级异步补全架构：仅在 UI 可见区域按需拉取物理属性
     QWriteLocker writeLock(&m_dataLock);
     if (index < 0 || index >= (int)m_frns.size() || m_frns[index] == 0) return;
     
-    // 状态机：0-未获取, 1-拉取中, 2-已完成
+    // 二次检查 (写模式，确保原子性)
     if (m_metadata_fetched[index] != 0) return; 
     m_metadata_fetched[index] = 1; // 标记为拉取中，防止重复触发并发任务
 
@@ -1401,7 +1417,31 @@ void MftReader::requestMetadata(int index) {
     std::wstring volume = m_drive_list[dIdx];
     writeLock.unlock();
 
-    (void)QtConcurrent::run([this, index, frn, volume]() {
+    {
+        std::lock_guard<std::mutex> qLock(m_queueMutex);
+        m_metadata_queue.push_back({index, frn, volume});
+    }
+    processMetadataQueue();
+}
+
+void MftReader::processMetadataQueue() {
+    // 2026-06-xx 工业级节流：限制并发拉取元数据的线程数为 4
+    if (m_active_metadata_tasks.load() >= 4) return;
+
+    MetadataTask task;
+    {
+        std::lock_guard<std::mutex> qLock(m_queueMutex);
+        if (m_metadata_queue.empty()) return;
+        task = m_metadata_queue.back(); // 优先处理最新的请求 (LIFO，适配 UI 滚动)
+        m_metadata_queue.pop_back();
+    }
+
+    m_active_metadata_tasks.fetch_add(1);
+    (void)QtConcurrent::run([this, task]() {
+        int index = task.index;
+        uint64_t frn = task.frn;
+        std::wstring volume = task.volume;
+
         // 2026-05-14 极致性能重构：对标 Rust 原版，采用 API 分级拉取策略
         // 1. 优先使用 GetFileAttributesExW (不涉及文件句柄，非侵入式，性能极高)
         QString fullPath = getFullPath(index);
@@ -1448,6 +1488,9 @@ void MftReader::requestMetadata(int index) {
         }
         lock.unlock();
         emit dataChanged(index); 
+
+        m_active_metadata_tasks.fetch_sub(1);
+        processMetadataQueue(); // 递归触发下一个任务
     });
 }
 

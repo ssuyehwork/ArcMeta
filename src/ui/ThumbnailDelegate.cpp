@@ -143,9 +143,15 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
 
     // [新增] 扩展名角标
     if (m_pathRole != -1) {
+        QString type = (m_typeRole != -1) ? index.data(m_typeRole).toString() : "";
         QString path = index.data(m_pathRole).toString();
         QFileInfo info(path);
-        QString ext = info.isDir() ? "DIR" : info.suffix().toUpper();
+        QString ext;
+        if (type == "category" || type == "folder") {
+            ext = "DIR"; // 2026-06-xx 物理校准：分类与文件夹均强制显示为 "DIR" 徽章，增强视觉一致性
+        } else {
+            ext = info.isDir() ? "DIR" : info.suffix().toUpper();
+        }
         if (ext.isEmpty()) ext = "FILE";
         QColor badgeColor = UiHelper::getExtensionColor(ext);
 
@@ -184,9 +190,25 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
 
         bool shouldShowRating = (rating > 0) || isSelected;
         if (shouldShowRating) {
-            QColor starColor = colorStr.isEmpty() ? QColor("#CCCCCC") : UiHelper::parseColorName(colorStr).darker(700);
-            QColor emptyStarColor = colorStr.isEmpty() ? QColor("#888888") : UiHelper::parseColorName(colorStr).darker(400);
-            if (!colorStr.isEmpty()) emptyStarColor.setAlpha(180);
+            QColor bgColor = colorStr.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorStr);
+            
+            // 2026-06-xx 物理修复：采用感知亮度对比色计算
+            double luminance = 0.0;
+            if (bgColor.isValid() && bgColor.alpha() > 0) {
+                luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
+            }
+
+            QColor starColor, emptyStarColor;
+            if (colorStr.isEmpty()) {
+                starColor      = QColor("#CCCCCC");
+                emptyStarColor = QColor("#888888");
+            } else if (luminance < 0.5) {
+                starColor      = QColor("#FFFFFF");
+                emptyStarColor = QColor(255, 255, 255, 160);
+            } else {
+                starColor      = QColor("#1A1A1A");
+                emptyStarColor = QColor(0, 0, 0, 140);
+            }
 
             UiHelper::getIcon("no_color", starColor, m.banRect.width()).paint(painter, m.banRect);
             QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(m.starSize, m.starSize), starColor);

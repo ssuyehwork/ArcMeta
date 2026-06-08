@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDateTime>
+#include "../core/IndexedEntry.h"
 #include <QMap>
 #include <deque>
 #include <vector>
@@ -22,7 +23,7 @@
 #include <QIcon>
 #include "FilterPanel.h"
 #include "../meta/MetadataManager.h"
-#include "../db/ItemRepo.h"
+
 #include "../core/ModelContract.h"
 
 namespace ArcMeta {
@@ -61,17 +62,26 @@ public:
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
     bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
 
+    // 拖拽支持
+    QStringList mimeTypes() const override;
+    QMimeData* mimeData(const QModelIndexList& indexes) const override;
+
     // 虚拟化加载
     bool canFetchMore(const QModelIndex& parent) const override;
     void fetchMore(const QModelIndex& parent) override;
 
-    void setRecords(const std::vector<ArcMeta::ItemRepo::ItemRecord>& records);
+    void setRecords(const std::vector<ItemRecord>& records);
     void clear();
 
-    const std::vector<ArcMeta::ItemRepo::ItemRecord>& allRecords() const { return m_allRecords; }
+    const std::vector<ItemRecord>& allRecords() const { return m_allRecords; }
+
+    /**
+     * @brief 2026-06-xx 物理同步：从 MetadataManager 重新拉取指定路径的元数据并刷新 UI
+     */
+    void updateRecordMetadata(const QString& path);
 
 private:
-    std::vector<ArcMeta::ItemRepo::ItemRecord> m_allRecords;
+    std::vector<ItemRecord> m_allRecords;
     int m_displayCount = 0;
 
     mutable QCache<QString, QIcon> m_iconCache;
@@ -149,7 +159,8 @@ public:
         ActionRestore,
         ActionCopyPath,
         ActionProperties,
-        ActionExtractColor
+        ActionExtractColor,
+        ActionAddToCategory
     };
 
     explicit ContentPanel(QWidget* parent = nullptr);
@@ -249,6 +260,13 @@ private:
     QString m_currentCategoryType; // 用于驱动差异化右键菜单
     bool m_isRecursive = false;
     bool m_isLoading = false; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
+
+    // --- 2026-06-xx 性能优化：递归扫描指纹缓存 ---
+    struct ScanCacheEntry {
+        qint64 lastModified; // 根目录的时间戳
+        std::vector<ItemRecord> records;
+    };
+    QMap<QString, ScanCacheEntry> m_recursiveCache; 
     void updateGridSize();
     void updateStatusBarStats();
     void recalculateAndEmitStats();
@@ -271,6 +289,16 @@ public slots:
      * @brief 加载并显示目录内容
      */
     void loadDirectory(const QString& path, bool recursive = false);
+
+    /**
+     * @brief 强制重新加载当前视图的所有内容
+     */
+    void refreshAll();
+
+    /**
+     * @brief 局部更新某项的元数据（星级、颜色、标签等）
+     */
+    void updateItemMetadata(const QString& path);
 
     /**
      * @brief 全局/本地搜索

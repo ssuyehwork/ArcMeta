@@ -41,6 +41,12 @@ public:
      */
     void selectCategory(int id);
 
+    /**
+     * @brief 2026-06-xx 物理削峰：请求刷新侧边栏计数
+     * 采用 500ms 防抖逻辑，合并高频信号风暴
+     */
+    void requestRefresh();
+
 signals:
     void categorySelected(int id, const QString& name, const QString& type, const QString& path = "");
     void fileSelected(const QString& path);
@@ -81,6 +87,16 @@ private:
     void loadExpandedStateFromSettings();
 
     /**
+     * @brief 递归保存 QTreeView 的展开状态
+     */
+    void saveExpandedState(const QModelIndex& parent, QSet<int>& expandedIds, QStringList& expandedNames);
+
+    /**
+     * @brief 递归恢复 QTreeView 的展开状态
+     */
+    void restoreExpandedState(const QModelIndex& parent, const QSet<int>& expandedIds, const QStringList& expandedNames);
+
+    /**
      * @brief 2026-03-xx 安全逻辑：尝试解锁分类
      * @return 是否解锁成功
      */
@@ -88,16 +104,17 @@ private:
 
     QVBoxLayout* m_mainLayout = nullptr;
     QWidget* m_focusLine = nullptr;
-    QPushButton* m_btnSwitch = nullptr; // 2026-06-xx 物理持有：模式切换开关按钮
     
     DropTreeView* m_categoryTree = nullptr;
     CategoryModel* m_categoryModel = nullptr;
+    QTimer* m_refreshTimer = nullptr;
 
     // 2026-03-xx 会话级解锁列表：存储当前已验证通过的加密分类 ID
     QSet<int> m_unlockedIds;
 
     // 2026-04-15 物理锁：恢复状态期间严禁反向触发保存，防止信号回流污染 Settings
     bool m_isRestoringState = false;
+    bool m_isFirstLoad = true;
 };
 
 } // namespace ArcMeta

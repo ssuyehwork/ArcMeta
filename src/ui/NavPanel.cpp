@@ -3,7 +3,7 @@
 #include "TreeItemDelegate.h"
 #include "DropTreeView.h"
 #include "ContentPanel.h"
-#include "../meta/AmMetaJson.h"
+#include "../meta/AmMetaScch.h"
 #include <QHeaderView>
 #include <QScrollBar>
 #include <QLabel>
@@ -255,7 +255,7 @@ void NavPanel::fetchChildDirs(QStandardItem* parent) {
         }
 
         // 投递回主线程进行 UI 更新
-        QMetaObject::invokeMethod(qApp, [this, pIdx, results]() {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [this, pIdx, results]() {
             if (!pIdx.isValid()) return;
             QStandardItem* safeParent = m_model->itemFromIndex(pIdx);
             if (!safeParent) return;

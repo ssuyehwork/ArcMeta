@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Database.h"
 #include <string>
 #include <vector>
 
@@ -15,6 +14,7 @@ struct Favorite {
 
 /**
  * @brief 收藏夹持久层
+ * 彻底废除数据库，全量转向 SCCH 架构
  */
 class FavoritesRepo {
 public:

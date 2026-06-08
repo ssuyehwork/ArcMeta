@@ -1,5 +1,8 @@
 #include "ScanController.h"
 #include "../mft/MftReader.h"
+#include "../meta/MetadataManager.h"
+#include "../meta/AmMetaScch.h"
+#include "../meta/AllFrnManager.h"
 #include <QtConcurrent/QtConcurrent>
 #include <QElapsedTimer>
 
@@ -258,6 +261,54 @@ void ScanController::onMftEntryUpdated(uint64_t key) {
         m_resultSet = newSet;
         emit entryAdded(newSet, key, row);
     }
+}
+
+void ScanController::runFullScan(std::function<void(int current, int total, const std::wstring& path)> onProgress,
+                                 std::function<void()> onFinished) {
+    (void)QtConcurrent::run([onProgress, onFinished]() {
+        auto& reader = MftReader::instance();
+        
+        // 1. 强制激活全盘扫描
+        QStringList allDrives;
+        for (int i = 0; i < 26; ++i) {
+            QString d = QString(QChar('A' + i)) + ":";
+            if (QDir(d).exists()) allDrives << d;
+        }
+        reader.updateActiveDrives(allDrives);
+        if (reader.totalCount() == 0) reader.buildIndex(allDrives);
+
+        // 2. 全盘检索 .arcmeta 目录 (及兼容旧版 metadata.scch 以便迁移)
+        std::vector<uint64_t> arcmetaKeys = reader.search(".arcmeta", false, false, {}, true, true, true);
+        std::vector<uint64_t> legacyKeys = reader.search("metadata.scch", false, false, {}, true, true, true);
+        
+        // 合并搜索结果
+        std::set<uint64_t> allKeys(arcmetaKeys.begin(), arcmetaKeys.end());
+        allKeys.insert(legacyKeys.begin(), legacyKeys.end());
+
+        int total = (int)allKeys.size();
+        int current = 0;
+
+        for (uint64_t key : allKeys) {
+            int idx = reader.getIndexByKey(key);
+            if (idx == -1) continue;
+
+            QString fullPath = reader.getFullPath(idx);
+            if (onProgress) onProgress(current, total, fullPath.toStdWString());
+
+            QFileInfo fi(fullPath);
+            // 对于 metadata.scch，fi.absolutePath() 是所属目录
+            // 对于 .arcmeta，fi.absolutePath() 也是所属目录（因为 .arcmeta 是子目录）
+            std::wstring folderPath = QDir::toNativeSeparators(fi.absolutePath()).toStdWString();
+            
+            // 2026-06-xx 物理加固：使用 activateItem 代替手动的 register + getMeta
+            // activateItem 会自动处理 FRN 登记、内存激活及物理对账，并触发全量计数更新
+            MetadataManager::activateItem(folderPath);
+
+            current++;
+        }
+        
+        if (onFinished) onFinished();
+    });
 }
 
 } // namespace ArcMeta

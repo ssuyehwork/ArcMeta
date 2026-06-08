@@ -47,7 +47,7 @@ public:
         } else if (m_showStatus) {
             // 2026-06-xx 按照视觉要求：未录入项文字半透明暗淡处理
             // 物理修复：校准作用域
-            bool isManaged = index.data(InDatabaseRole).toBool();
+            bool isManaged = index.data(ManagedRole).toBool();
             if (!isManaged) {
                 opt.palette.setColor(QPalette::Text, QColor(238, 238, 238, 120));
             }
@@ -62,7 +62,7 @@ public:
 
             if (col == 1) { // 状态列
                 bool isPinned = index.model()->index(index.row(), 0).data(IsLockedRole).toBool();
-                bool isManaged = index.model()->index(index.row(), 0).data(InDatabaseRole).toBool();
+                bool isManaged = index.model()->index(index.row(), 0).data(ManagedRole).toBool();
                 if (isPinned || isManaged) {
                     QRect iconRect(option.rect.left() + (option.rect.width() - 16) / 2,
                                    option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);

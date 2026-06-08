@@ -18,7 +18,7 @@ endif()
 
 # Qt 6 基础组件
 # 2026-05-10 修复：添加缺失的Core和Gui组件
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Sql Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent)
 
 # 2026-03-xx 按照用户要求：禁用 Vulkan 探测以消除日志报错，并清理构建路径矛盾
 set(QT_NO_VULKAN ON)
@@ -52,20 +52,16 @@ set(SOURCES
     src/mft/UsnWatcher.h
     src/crypto/EncryptionManager.cpp
     src/crypto/EncryptionManager.h
-    src/db/CategoryRepo.cpp
-    src/db/CategoryRepo.h
-    src/db/Database.cpp
-    src/db/Database.h
-    src/db/FavoritesRepo.cpp
-    src/db/FavoritesRepo.h
-    src/db/FolderRepo.cpp
-    src/db/FolderRepo.h
-    src/db/ItemRepo.cpp
-    src/db/ItemRepo.h
-    src/db/SyncEngine.cpp
-    src/db/SyncEngine.h
-    src/meta/AmMetaJson.cpp
-    src/meta/AmMetaJson.h
+    src/meta/CategoryRepo.cpp
+    src/meta/CategoryRepo.h
+    src/meta/FavoritesRepo.cpp
+    src/meta/FavoritesRepo.h
+    src/meta/AmMetaScch.cpp
+    src/meta/AmMetaScch.h
+    src/meta/TagRepo.cpp
+    src/meta/TagRepo.h
+    src/meta/DriverRepo.cpp
+    src/meta/DriverRepo.h
     src/meta/AllFrnManager.cpp
     src/meta/AllFrnManager.h
     src/meta/BatchRenameEngine.cpp
@@ -127,7 +123,7 @@ set(SOURCES
     src/ui/MetaPanel.h
     src/ui/NavPanel.cpp
     src/ui/NavPanel.h
-    src/ui/ProgressDialog.h
+    src/ui/BatchProgressDialog.h
     src/ui/QuickLookWindow.cpp
     src/ui/QuickLookWindow.h
     src/ui/RuleRow.cpp
@@ -150,7 +146,7 @@ set(SOURCES
 # 修复：移除直接引用的 "ArcMeta.manifest"，改由 ArcMeta.rc 引入以杜绝 mt.exe 冲突
 add_executable(ArcMeta WIN32 ${SOURCES})
 
-# 链接库 (文档红线列表: ole32, bcrypt + QtSql)
+# 链接库 (文档红线列表: ole32, bcrypt)
 # 2026-04-14 按照用户要求：恢复 MFT 逻辑，重新引入 ntdll 依赖
 # 2026-05-10 修复：添加缺失的Qt6::Core和Qt6::Gui库
 target_link_libraries(ArcMeta PRIVATE
@@ -158,7 +154,7 @@ target_link_libraries(ArcMeta PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Svg
-    Qt6::Sql
+   
     Qt6::Concurrent
     ntdll
     ole32

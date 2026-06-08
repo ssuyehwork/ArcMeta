@@ -56,6 +56,10 @@ public:
     std::shared_ptr<ResultSet> snapshot() const;
     int resultCount() const;
 
+    // 2026-06-xx 物理对账：全盘搜索 metadata.scch 并登记
+    void runFullScan(std::function<void(int current, int total, const std::wstring& path)> onProgress,
+                     std::function<void()> onFinished);
+
     // 内部比较逻辑 (复用于二分插入与全局排序)
     static bool compareKeys(uint64_t a, uint64_t b, int column, int order);
 

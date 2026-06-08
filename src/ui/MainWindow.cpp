@@ -17,8 +17,8 @@
 #include "ToolTipOverlay.h"
 #include "ScanDialog.h"
 #include "../mft/MftReader.h"
-#include "../db/CategoryRepo.h"
-#include "../db/ItemRepo.h"
+#include "../meta/CategoryRepo.h"
+
 #include "SearchHistoryPanel.h"
 #include "SvgIcons.h"
 
@@ -49,14 +49,14 @@ using namespace ArcMeta::Style;
 #include <Dbt.h>
 #endif
 
-#include "../db/SyncEngine.h"
+
 #include <QtConcurrent>
 
 namespace ArcMeta {
 
 MainWindow::~MainWindow() {
     if (m_resizeFilter) {
-        qApp->removeEventFilter(m_resizeFilter);
+        QCoreApplication::instance()->removeEventFilter(m_resizeFilter);
     }
 }
 
@@ -216,10 +216,11 @@ void MainWindow::initUi() {
                 m_contentPanel->search(name);
             }
         } else if (type == "all" || type == "uncategorized" || type == "untagged" || 
-                   type == "today" || type == "yesterday" || type == "recently_visited" || type == "trash") {
-            // 2026-06-xx 物理修复：所有系统项直接走数据库专用路径接口，彻底断开与搜索框的傻逼耦合
+                   type == "recently_visited" || type == "trash") {
+            // 2026-06-xx 物理修复：所有系统项直接通过 getSystemCategoryPaths 获取物理路径并加载
             m_contentPanel->setCurrentCategoryType(type);
-            m_contentPanel->loadPaths(ItemRepo::getPathsBySystemType(type));
+            QStringList paths = CategoryRepo::getSystemCategoryPaths(type);
+            m_contentPanel->loadPaths(paths);
         } else {
             // 其余系统项 (标签管理等) 维持搜索逻辑
             m_contentPanel->search(name); 
@@ -229,6 +230,8 @@ void MainWindow::initUi() {
     // 1b. 内容面板内部跳转分类 (双击同步)
     connect(m_contentPanel, &ContentPanel::categoryClicked, this, [this](int id) {
         if (m_categoryPanel) m_categoryPanel->selectCategory(id);
+        // 2026-06-xx 物理补丁：双击子分类时，除联动侧边栏外，必须显式驱动内容区加载该 ID 数据
+        if (m_contentPanel) m_contentPanel->loadCategory(id);
     });
 
     // 2. 内容面板选中项改变 -> 元数据面板刷新 & 自动预览
@@ -327,16 +330,6 @@ void MainWindow::initUi() {
         // 2026-04-11 按照用户要求：补全物理持久化逻辑 (MetadataManager 直接入库)
         MetadataManager::instance().setRating(m_currentQuickLookPath.toStdWString(), rating);
 
-        // 物理同步：实时刷新 ContentPanel 列表模型，确保主界面同步变迁
-        auto* proxy = m_contentPanel->getProxyModel();
-        for (int i = 0; i < proxy->rowCount(); ++i) {
-            QModelIndex idx = proxy->index(i, 0);
-            if (idx.data(PathRole).toString() == m_currentQuickLookPath) {
-                proxy->setData(idx, rating, RatingRole);
-                break;
-            }
-        }
-
         m_metaPanel->setRating(rating);
         // 2026-04-11 按照用户要求：在预览窗设定星级时，左上方即时反馈
         QString msg = QString("已设定星级: <span style='color: #FECF0E;'>%1 星</span>").arg(rating);
@@ -348,16 +341,6 @@ void MainWindow::initUi() {
 
         // 2026-04-11 按照用户要求：补全物理持久化逻辑 (MetadataManager 直接入库)
         MetadataManager::instance().setColor(m_currentQuickLookPath.toStdWString(), color.toStdWString());
-
-        // 物理同步：实时刷新 ContentPanel 列表模型，确保主界面同步变迁
-        auto* proxy = m_contentPanel->getProxyModel();
-        for (int i = 0; i < proxy->rowCount(); ++i) {
-            QModelIndex idx = proxy->index(i, 0);
-            if (idx.data(PathRole).toString() == m_currentQuickLookPath) {
-                proxy->setData(idx, color, ColorRole);
-                break;
-            }
-        }
 
         m_metaPanel->setColor(color.toStdWString());
         
@@ -464,12 +447,10 @@ void MainWindow::initUi() {
             if(path.isEmpty()) continue;
             
             if (rating != -1) {
-                // 2026-05-24 按照用户要求：彻底移除 JSON，改为中心化异步持久化
-                m_contentPanel->getProxyModel()->setData(idx, rating, RatingRole);
+                // 2026-05-24 按照用户要求：彻底移除 SCCH，改为中心化异步持久化
                 MetadataManager::instance().setRating(path.toStdWString(), rating);
             }
             if (color != L"__NO_CHANGE__") {
-                m_contentPanel->getProxyModel()->setData(idx, QString::fromStdWString(color), ColorRole);
                 MetadataManager::instance().setColor(path.toStdWString(), color);
             }
         }
@@ -482,15 +463,36 @@ void MainWindow::initUi() {
         }
     });
 
-    // 9. 2026-03-xx 按照用户要求：响应元数据全局变更，同步刷新侧边栏计数
-    // 确保在内容面板收藏项目后，侧边栏的“收藏 (X)”数字能实时跳变
-    // 2026-05-27 物理修复：显式增加 this 上下文参数
-    // 理由：MetadataManager 可能在后台线程（如初始化扫描阶段）发射信号，
-    // 若无 context 参数，Lambda 将在发射信号的后台线程执行，导致非法线程操作 UI (refresh()) 引起崩溃。
-    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this]() {
-        if (m_categoryPanel && m_categoryPanel->model()) {
-            m_categoryPanel->model()->refresh();
+    // 9. 2026-03-xx 按照用户要求：响应元数据全局变更，同步刷新 UI
+    
+    // 9a. 全局内容区同步：只要元数据变了，通知内容面板刷新对应的行
+    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
+        if (path == "__RELOAD_ALL__") {
+            m_contentPanel->refreshAll();
+            return;
         }
+        // 关键修复：通知 ContentPanel 局部更新该路径的数据
+        m_contentPanel->updateItemMetadata(path);
+    });
+
+    // 9b. 侧边栏刷新防抖
+    m_sidebarRefreshTimer = new QTimer(this);
+    m_sidebarRefreshTimer->setInterval(800);
+    m_sidebarRefreshTimer->setSingleShot(true);
+
+    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
+        if (!m_categoryPanel) return;
+
+        // __RELOAD_ALL__ 信号立即刷新，其他信号防抖
+        if (path == "__RELOAD_ALL__") {
+            m_categoryPanel->requestRefresh();
+        } else {
+            m_sidebarRefreshTimer->start(); // 重置计时器
+        }
+    });
+
+    connect(m_sidebarRefreshTimer, &QTimer::timeout, this, [this]() {
+        if (m_categoryPanel) m_categoryPanel->requestRefresh();
     });
 
     // 10. 侧边栏点击物理项（文件预览或文件夹跳转）
@@ -519,7 +521,6 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
             qDebug() << "[Main] 检测到磁盘硬件变更，触发全量 GLOB 对账对账...";
             // 异步触发扫描，防止阻塞 UI
             (void)QtConcurrent::run([]() {
-                SyncEngine::instance().runFullScan({}, nullptr);
             });
         }
     }
@@ -533,26 +534,32 @@ void MainWindow::showEvent(QShowEvent* event) {
     qDebug() << "[Main] showEvent 触发, m_panelsInitialized =" << m_panelsInitialized;
     if (!m_panelsInitialized) {
         m_panelsInitialized = true;
+        qint64 scheduleStart = QDateTime::currentMSecsSinceEpoch();
         qDebug() << "[Main] 正在排期延迟加载任务 (QTimer::singleShot(0))...";
-        QTimer::singleShot(0, [this]() {
-            qDebug() << "[Main] 延迟加载任务开始执行";
+        QTimer::singleShot(0, [this, scheduleStart]() {
+            qint64 taskStart = QDateTime::currentMSecsSinceEpoch();
+            qDebug() << "[Main] 延迟加载任务开始执行，排期等待耗时:" << (taskStart - scheduleStart) << "ms";
+            
             if (m_categoryPanel) {
-                qDebug() << "[Main] 正在初始化 CategoryPanel...";
+                qint64 start = QDateTime::currentMSecsSinceEpoch();
                 m_categoryPanel->deferredInit();
+                qDebug() << "[PERF] CategoryPanel 初始化耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
             }
             if (m_navPanel) {
-                qDebug() << "[Main] 正在初始化 NavPanel...";
+                qint64 start = QDateTime::currentMSecsSinceEpoch();
                 m_navPanel->deferredInit();
+                qDebug() << "[PERF] NavPanel 初始化耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
             }
             if (m_contentPanel) {
-                qDebug() << "[Main] 正在初始化 ContentPanel...";
+                qint64 start = QDateTime::currentMSecsSinceEpoch();
                 m_contentPanel->deferredInit();
+                qDebug() << "[PERF] ContentPanel 初始化耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
             }
             // MetaPanel 和 FilterPanel 暂时不需要延迟数据加载，因为它们通常随选中项动态刷新
             
             // 2026-04-14 按照用户要求：物理禁用"最后一个窗口关闭时退出"逻辑
             // 确保程序只能通过托盘菜单显式退出，提高驻留稳定性
-            qDebug() << "[Main] 所有核心面板数据延迟初始化完成，UI 响应已恢复";
+            qDebug() << "[PERF] 所有核心面板数据延迟加载完成，总耗时:" << (QDateTime::currentMSecsSinceEpoch() - taskStart) << "ms";
         });
     }
     
@@ -958,7 +965,7 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     // 2026-06-15 按照用户要求：手动点击同步
     connect(m_btnSync, &QPushButton::clicked, this, [this]() {
-        SyncEngine::instance().runIncrementalSync();
+        
         ToolTipOverlay::instance()->showText(m_btnSync->mapToGlobal(QPoint(0,0)), "正在启动延时同步...", 1500);
     });
 
@@ -974,25 +981,13 @@ void MainWindow::setupCustomTitleBarButtons() {
     };
     
     connect(&MetadataManager::instance(), &MetadataManager::pendingSyncChanged, this, updateSyncBtnState);
-    connect(&SyncEngine::instance(), &SyncEngine::syncStatusChanged, this, [this, updateSyncBtnState](bool running) {
-        if (!running) {
-            updateSyncBtnState(SyncEngine::instance().hasPendingTasks());
-        }
-    });
-
-    // 启动时初始化一次状态
-    QTimer::singleShot(500, this, [this, updateSyncBtnState]() {
-        updateSyncBtnState(SyncEngine::instance().hasPendingTasks());
-    });
 
     m_btnScan = createTitleBtn("scan");
-    m_btnScan->setProperty("tooltipText", "实时扫描与查找...");
-    m_btnScan->installEventFilter(m_hoverFilter);
-    // 2026-05-09 按照用户要求：扫描窗口与主界面操作相互不干扰，去除父子关系
+    m_btnScan->setProperty("tooltipText", "全盘扫描与对账");
     connect(m_btnScan, &QPushButton::clicked, this, [this]() {
-        auto* dlg = new ScanDialog(nullptr);
-        dlg->setAttribute(Qt::WA_DeleteOnClose); // 2026-05-27 物理修复：关闭后自动释放内存
-        dlg->setModal(false);
+        // 2026-06-xx 物理隔离：不再挂载主窗口为父，使其拥有独立任务栏图标与层级
+        ScanDialog* dlg = new ScanDialog(nullptr);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->show();
     });
 
@@ -1047,7 +1042,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     // 按照用户要求：关闭按钮持续显示红色高亮，不再仅悬停显示
     m_btnClose->setStyleSheet(QString(
         "QPushButton { background-color: %1; border: none; border-radius: 4px; padding: 0; }"
-        "QPushButton:hover { background-color: #F1707A; }"
+        "QPushButton:hover { background-color: %1; }"
         "QPushButton:pressed { background-color: #A50000; }"
     ).arg(qssColor(ErrorRed)));
     m_btnClose->setProperty("tooltipText", "关闭项目");
@@ -1087,7 +1082,7 @@ void MainWindow::initIdleDetector() {
     
     connect(m_idleTimer, &QTimer::timeout, this, [this]() {
         qDebug() << "[Main] 检测到系统闲置超过30秒，触发自动对账同步...";
-        SyncEngine::instance().runIncrementalSync();
+        
     });
 
     // 启动闲置计时
@@ -1261,6 +1256,10 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         AppConfig::instance().setValue("MainWindow/SplitterState", m_mainSplitter->saveState());
     }
     AppConfig::instance().sync();
+
+    // 2026-06-xx 物理加固：退出前强制所有分类数据落盘，彻底解决因防抖计时器导致的重启回滚问题
+    CategoryRepo::saveImmediately();
+
     QMainWindow::closeEvent(event);
 }
 

@@ -39,12 +39,14 @@ class TagPill : public QWidget {
     Q_OBJECT
 public:
     explicit TagPill(const QString& text, QWidget* parent = nullptr);
+    void setData(const QString& text);
 signals:
     void deleteRequested(const QString& text);
 protected:
     void paintEvent(QPaintEvent* event) override;
 private:
     QString m_text;
+    QLabel* m_label = nullptr;
     QPushButton* m_closeBtn = nullptr;
 };
 
@@ -123,6 +125,7 @@ class ColorPill : public QWidget {
     Q_OBJECT
 public:
     explicit ColorPill(const QColor& color, float ratio, QWidget* parent = nullptr);
+    void setData(const QColor& color, float ratio);
 signals:
     void colorSelected(const QColor& color);
 protected:
@@ -219,6 +222,11 @@ private:
     ElasticEdit* m_linkEdit = nullptr;
     
     ElasticEdit* m_categoryEdit = nullptr;
+
+    // 2026-06-xx 性能优化：控件复用池
+    QList<TagPill*> m_tagPool;
+    QList<ColorPill*> m_colorPool;
+    QTimer* m_adjustTimer = nullptr;
 
 private slots:
     void onTagAdded();
