@@ -195,7 +195,7 @@ void MetadataManager::initFromScchMode() {
                             QJsonObject obj = v.toObject();
                             PaletteEntry pe;
                             pe.color = QColor(obj["color"].toString());
-                            pe.weight = obj["weight"].toDouble();
+                            pe.ratio = obj["ratio"].toDouble();
                             rm.palettes.push_back(pe);
                         }
                     }
@@ -565,7 +565,7 @@ void MetadataManager::persistAsync(const std::wstring& path) {
         for (const auto& pe : rMeta.palettes) {
             QJsonObject obj;
             obj["color"] = pe.color.name();
-            obj["weight"] = pe.weight;
+            obj["ratio"] = pe.ratio;
             arr.append(obj);
         }
         QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
