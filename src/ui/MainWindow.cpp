@@ -15,7 +15,6 @@
 #include "FilterPanel.h"
 #include "QuickLookWindow.h"
 #include "ToolTipOverlay.h"
-#include "ScanDialog.h"
 #include "../mft/MftReader.h"
 #include "../db/CategoryRepo.h"
 #include "../db/ItemRepo.h"
@@ -985,17 +984,6 @@ void MainWindow::setupCustomTitleBarButtons() {
         updateSyncBtnState(SyncEngine::instance().hasPendingTasks());
     });
 
-    m_btnScan = createTitleBtn("scan");
-    m_btnScan->setProperty("tooltipText", "实时扫描与查找...");
-    m_btnScan->installEventFilter(m_hoverFilter);
-    // 2026-05-09 按照用户要求：扫描窗口与主界面操作相互不干扰，去除父子关系
-    connect(m_btnScan, &QPushButton::clicked, this, [this]() {
-        auto* dlg = new ScanDialog(nullptr);
-        dlg->setAttribute(Qt::WA_DeleteOnClose); // 2026-05-27 物理修复：关闭后自动释放内存
-        dlg->setModal(false);
-        dlg->show();
-    });
-
     m_btnCreate = createTitleBtn("add"); // 2026-03-xx 规范化：“+”按钮图标修正
     m_btnCreate->setProperty("tooltipText", "新建...");
     QMenu* createMenu = new QMenu(m_btnCreate);
@@ -1055,7 +1043,6 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     m_btnCreate->installEventFilter(m_hoverFilter);
     layout->addWidget(m_btnSync);
-    layout->addWidget(m_btnScan);
     layout->addWidget(m_btnCreate);
     layout->addWidget(m_btnPinTop);
     layout->addWidget(m_btnMin);

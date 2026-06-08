@@ -1,21 +1,27 @@
-#include <QSqlDatabase>
+#include "FolderRepo.h"
+#include "Database.h"
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
-#include "FolderRepo.h"
+#include <QFileInfo>
+#include <QSqlDatabase>
 
 namespace ArcMeta {
 
 bool FolderRepo::save(const std::wstring& volume, const std::wstring& path, const FolderMeta& meta) {
-    // 2026-03-xx 修复：通过 getThreadDatabase 获取当前线程专属连接，确保在后台同步任务中正确持久化。
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = Database::instance().getThreadDatabase(volume);
+    if (!db.isOpen()) return false;
     QSqlQuery q(db);
     
-    q.prepare("INSERT OR REPLACE INTO folders (volume, path, rating, color, tags, pinned, note, url, sort_by, sort_order, encrypted, encrypt_salt, encrypt_iv, encrypt_verify_hash, file_id_128, palettes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    q.addBindValue(QString::fromStdWString(volume));
+    q.prepare("INSERT OR REPLACE INTO files (file_id_128, path, parent_path, type, rating, color, tags, pinned, note, url, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)");
+    q.addBindValue(QString::fromStdString(meta.fileId128));
     q.addBindValue(QString::fromStdWString(path));
+
+    QFileInfo fi(QString::fromStdWString(path));
+    q.addBindValue(QString::fromStdWString(fi.absolutePath().toStdWString()));
+    q.addBindValue("folder");
     q.addBindValue(meta.rating);
     q.addBindValue(QString::fromStdWString(meta.color));
     
@@ -26,79 +32,47 @@ bool FolderRepo::save(const std::wstring& volume, const std::wstring& path, cons
     q.addBindValue(meta.pinned ? 1 : 0);
     q.addBindValue(QString::fromStdWString(meta.note));
     q.addBindValue(QString::fromStdWString(meta.url));
-    q.addBindValue(QString::fromStdWString(meta.sortBy));
-    q.addBindValue(QString::fromStdWString(meta.sortOrder));
-    q.addBindValue(meta.encrypted ? 1 : 0);
-    q.addBindValue(QString::fromStdString(meta.encryptSalt));
-    q.addBindValue(QString::fromStdString(meta.encryptIv));
-    q.addBindValue(QString::fromStdString(meta.encryptVerifyHash));
-    q.addBindValue(QString::fromStdString(meta.fileId128));
     
-    QJsonArray palArr;
-    for (const auto& p : meta.palettes) {
-        QJsonObject pObj;
-        QJsonArray cArr;
-        cArr.append(p.color.red()); cArr.append(p.color.green()); cArr.append(p.color.blue());
-        pObj.insert("color", cArr);
-        pObj.insert("ratio", (double)p.ratio);
-        palArr.append(pObj);
-    }
-    q.addBindValue(QJsonDocument(palArr).toJson(QJsonDocument::Compact));
-
-    return q.exec();
+    bool ok = q.exec();
+    if (ok) Database::instance().markDirty(volume);
+    return ok;
 }
 
 bool FolderRepo::get(const std::wstring& volume, const std::wstring& path, FolderMeta& meta) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = Database::instance().getThreadDatabase(volume);
+    if (!db.isOpen()) return false;
     QSqlQuery q(db);
-    q.prepare("SELECT rating, color, tags, pinned, note, url, sort_by, sort_order, encrypted, encrypt_salt, encrypt_iv, encrypt_verify_hash, file_id_128, palettes FROM folders WHERE volume = ? AND path = ?");
-    q.addBindValue(QString::fromStdWString(volume));
+    q.prepare("SELECT file_id_128, rating, color, tags, pinned, note, url FROM files WHERE path = ? AND type = 'folder'");
     q.addBindValue(QString::fromStdWString(path));
     
     if (q.exec() && q.next()) {
-        meta.rating = q.value(0).toInt();
-        meta.color = q.value(1).toString().toStdWString();
+        meta.fileId128 = q.value(0).toString().toStdString();
+        meta.rating = q.value(1).toInt();
+        meta.color = q.value(2).toString().toStdWString();
         
-        QJsonDocument doc = QJsonDocument::fromJson(q.value(2).toByteArray());
+        QJsonDocument doc = QJsonDocument::fromJson(q.value(3).toByteArray());
         meta.tags.clear();
         if (doc.isArray()) {
             for (const auto& v : doc.array()) meta.tags.push_back(v.toString().toStdWString());
         }
 
-        meta.pinned = q.value(3).toInt() != 0;
-        meta.note = q.value(4).toString().toStdWString();
-        meta.url = q.value(5).toString().toStdWString();
-        meta.sortBy = q.value(6).toString().toStdWString();
-        meta.sortOrder = q.value(7).toString().toStdWString();
-        meta.encrypted = q.value(8).toInt() != 0;
-        meta.encryptSalt = q.value(9).toString().toStdString();
-        meta.encryptIv = q.value(10).toString().toStdString();
-        meta.encryptVerifyHash = q.value(11).toString().toStdString();
-        meta.fileId128 = q.value(12).toString().toStdString();
-        
-        QJsonDocument palDoc = QJsonDocument::fromJson(q.value(13).toByteArray());
-        meta.palettes.clear();
-        if (palDoc.isArray()) {
-            for (const auto& v : palDoc.array()) {
-                QJsonObject pObj = v.toObject();
-                QJsonArray cArr = pObj.value("color").toArray();
-                if (cArr.size() >= 3) {
-                    meta.palettes.push_back({QColor(cArr[0].toInt(), cArr[1].toInt(), cArr[2].toInt()), (float)pObj.value("ratio").toDouble()});
-                }
-            }
-        }
+        meta.pinned = q.value(4).toInt() != 0;
+        meta.note = q.value(5).toString().toStdWString();
+        meta.url = q.value(6).toString().toStdWString();
         return true;
     }
     return false;
 }
 
 bool FolderRepo::remove(const std::wstring& volume, const std::wstring& path) {
-    QSqlDatabase db = ArcMeta::Database::instance().getThreadDatabase();
+    QSqlDatabase db = Database::instance().getThreadDatabase(volume);
+    if (!db.isOpen()) return false;
     QSqlQuery q(db);
-    q.prepare("DELETE FROM folders WHERE volume = ? AND path = ?");
-    q.addBindValue(QString::fromStdWString(volume));
+    q.prepare("DELETE FROM files WHERE path = ? AND type = 'folder'");
     q.addBindValue(QString::fromStdWString(path));
-    return q.exec();
+    bool ok = q.exec();
+    if (ok) Database::instance().markDirty(volume);
+    return ok;
 }
 
 } // namespace ArcMeta

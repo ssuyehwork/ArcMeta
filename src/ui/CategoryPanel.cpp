@@ -57,14 +57,8 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_mainLayout->setSpacing(0);
 
-    // 2026-05-28 物理增强：提前从持久化状态初始化底层引擎模式
-    bool isJson = AppConfig::instance().getValue("Category/IsJsonMode", false).toBool();
-    CategoryRepo::setJsonMode(isJson);
-    if (isJson) {
-        MetadataManager::instance().initFromJsonMode();
-    } else {
-        MetadataManager::instance().initFromDatabase();
-    }
+    // 2026-06-xx 架构升级：彻底废除 JSON 模式，统一从数据库初始化元数据。
+    MetadataManager::instance().initFromDatabase();
 
     initUi();
     setupContextMenu();
@@ -662,86 +656,7 @@ void CategoryPanel::initUi() {
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
 
-    // 2026-05-17 按照用户要求：在“手动全量扫描与对账”按钮左侧新增一个开关切换按钮
-    // 2026-06-xx 物理增强：实现状态持久化加载 (方案 A)
-    m_btnSwitch = new QPushButton(header);
-    m_btnSwitch->setFixedSize(24, 24);
-    m_btnSwitch->setCheckable(true);
-    m_btnSwitch->setFlat(true);
-    m_btnSwitch->setCursor(Qt::PointingHandCursor);
-    m_btnSwitch->setIconSize(QSize(16, 16));
-    m_btnSwitch->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }");
-    m_btnSwitch->installEventFilter(this);
-
-    // 回填初始状态
-    bool isJsonMode = AppConfig::instance().getValue("Category/IsJsonMode", false).toBool();
-    m_btnSwitch->setChecked(isJsonMode);
-    if (isJsonMode) {
-        m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", SuccessGreen));
-        m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为JSON模式（内存）");
-    } else {
-        m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", TextDim));
-        m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
-    }
-
-    connect(m_btnSwitch, &QPushButton::clicked, this, [this](bool checked) {
-        // 2026-05-29 优化点 1：增加切换确认机制 (Plan-44)
-        QString modeName = checked ? "JSON 模式 (内存)" : "数据库模式";
-        FramelessConfirmDialog confirmDlg("模式切换确认", QString("切换到<b>%1</b>将重新加载数据引擎，是否继续？").arg(modeName), this);
-        if (confirmDlg.exec() != QDialog::Accepted) {
-            m_btnSwitch->blockSignals(true);
-            m_btnSwitch->setChecked(!checked);
-            m_btnSwitch->blockSignals(false);
-            return;
-        }
-
-        // 2026-05-29 优化点 2：增强切换时的视觉反馈 (UX)
-        m_btnSwitch->setEnabled(false);
-        m_btnSwitch->setIcon(UiHelper::getIcon("sync", WarningOrange)); // 临时旋转图标或等待图标
-
-        // 2026-05-29 优化点 3：异常处理与原子性保证
-        if (!CategoryRepo::syncDatabaseAndJson()) {
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#E74C3C;'>[ERROR] 双轨同步失败，已中止切换</b>", 2000, ErrorRed);
-            m_btnSwitch->blockSignals(true);
-            m_btnSwitch->setChecked(!checked);
-            m_btnSwitch->setIcon(UiHelper::getIcon(!checked ? "switch_on" : "switch_off", !checked ? SuccessGreen : TextDim));
-            m_btnSwitch->blockSignals(false);
-            m_btnSwitch->setEnabled(true);
-            return;
-        }
-
-        if (checked) {
-            m_btnSwitch->setIcon(UiHelper::getIcon("switch_on", SuccessGreen));
-            m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为JSON模式（内存）");
-        } else {
-            m_btnSwitch->setIcon(UiHelper::getIcon("switch_off", TextDim));
-            m_btnSwitch->setProperty("tooltipText", "工作模式切换：当前为数据库模式");
-        }
-
-        // 1. 设置底层分类库模式
-        CategoryRepo::setJsonMode(checked);
-
-        // 2. 促使元数据管理器进行数据重载与重构
-        if (checked) {
-            MetadataManager::instance().initFromJsonMode();
-        } else {
-            MetadataManager::instance().initFromDatabase();
-        }
-
-        // 3. 持久化状态
-        AppConfig::instance().setValue("Category/IsJsonMode", checked);
-        AppConfig::instance().sync(); // 物理落盘，防止异常退出回滚
-
-        // 4. 树模型重新拉取
-        if (m_categoryModel) {
-            m_categoryModel->refresh();
-        }
-
-        m_btnSwitch->setEnabled(true);
-        // 2026-05-29 优化点 4：状态栏/气泡即时反馈
-        ToolTipOverlay::instance()->showText(QCursor::pos(), QString("<b style='color:#2ecc71;'>已切换至 %1</b>").arg(modeName), 1500, QColor("#2ecc71"));
-    });
-    headerLayout->addWidget(m_btnSwitch, 0, Qt::AlignVCenter);
+    // 2026-06-xx 架构升级：移除工作模式切换开关按钮。
 
     // 2026-06-xx 按照用户要求：从状态栏迁移至此，执行手动全量扫描与对账
     QPushButton* btnRescan = new QPushButton(header);
@@ -754,15 +669,12 @@ void CategoryPanel::initUi() {
     btnRescan->setProperty("tooltipText", "手动全量扫描与对账");
     btnRescan->installEventFilter(this); // 2026-06-xx 按照规范：安装过滤器以驱动自定义 ToolTip
     connect(btnRescan, &QPushButton::clicked, this, [this]() {
-        // 1. 全量双向分类与项映射物理对账同步
-        CategoryRepo::syncDatabaseAndJson();
-
-        // 2. 瞬时刷新界面树展示
+        // 1. 瞬时刷新界面树展示
         if (m_categoryModel) {
             m_categoryModel->refresh();
         }
 
-        // 3. 启动后台文件与分布式 USN 对账扫描
+        // 2. 启动后台文件与分布式 USN 对账扫描
         (void)QtConcurrent::run([]() {
             SyncEngine::instance().runFullScan({}, nullptr);
         });
@@ -1033,7 +945,7 @@ void CategoryPanel::initUi() {
                         CategoryRepo::addItemToCategory(catId, fid);
                     }
 
-                    // 2026-06-xx 物理同步：触发元数据持久化以生成 .am_meta.json，实现“目录导航”状态感应
+                    // 2026-06-xx 物理同步：触发元数据持久化到 SQLite 数据库。
                     MetadataManager::instance().syncPhysicalMetadata(wPath);
 
                     // 2026-06-xx 按照用户要求：针对特定格式文件，在拖拽导入时自动进行颜色解析

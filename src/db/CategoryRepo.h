@@ -23,14 +23,6 @@ struct Category {
  */
 class CategoryRepo {
 public:
-    static void setJsonMode(bool enabled);
-    static bool isJsonMode();
-    static bool syncDatabaseAndJson();
-
-private:
-    static bool m_isJsonMode;
-
-public:
     static bool add(Category& cat);
     static bool update(const Category& cat);
     static bool remove(int id);
@@ -44,9 +36,9 @@ public:
     static QMap<QString, int> getSystemCounts();
 
     // 条目关联逻辑
-    static bool addItemToCategory(int categoryId, const std::string& fileId128);
-    static bool removeItemFromCategory(int categoryId, const std::string& fileId128);
-    static std::vector<std::string> getFileIdsInCategory(int categoryId);
+    static bool addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& volSerial);
+    static bool removeItemFromCategory(int categoryId, const std::string& fileId128, const std::wstring& volSerial);
+    static std::vector<std::pair<std::string, std::wstring>> getFileIdsInCategory(int categoryId);
     static std::vector<std::string> getFileIdsRecursive(int categoryId);
 };
 

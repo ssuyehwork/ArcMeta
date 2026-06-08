@@ -69,10 +69,9 @@ int main(int argc, char *argv[]) {
     // 确保其内部的 QTimer 等对象归属于主线程，避免跨线程创建导致的行为不确定性
     ArcMeta::MetadataManager::instance();
 
-    // 2. 初始化数据库 (仅核心表结构，必须同步完成)
-    std::wstring dbPath = L"arcmeta.db";
-    if (!ArcMeta::Database::instance().init(dbPath)) {
-        QMessageBox::critical(nullptr, "错误", "无法初始化数据库，程序即将退出。");
+    // 2. 初始化数据库 (极简隐藏式架构，必须同步完成)
+    if (!ArcMeta::Database::instance().init()) {
+        QMessageBox::critical(nullptr, "错误", "无法初始化数据库（权限不足或存储受限），程序即将退出。");
         return -1;
     }
 

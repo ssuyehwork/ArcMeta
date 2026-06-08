@@ -64,8 +64,6 @@ set(SOURCES
     src/db/ItemRepo.h
     src/db/SyncEngine.cpp
     src/db/SyncEngine.h
-    src/meta/AmMetaJson.cpp
-    src/meta/AmMetaJson.h
     src/meta/AllFrnManager.cpp
     src/meta/AllFrnManager.h
     src/meta/BatchRenameEngine.cpp
@@ -132,10 +130,6 @@ set(SOURCES
     src/ui/QuickLookWindow.h
     src/ui/RuleRow.cpp
     src/ui/RuleRow.h
-    src/ui/ScanController.cpp
-    src/ui/ScanController.h
-    src/ui/ScanDialog.cpp
-    src/ui/ScanDialog.h
     src/ui/SearchHistoryPanel.cpp
     src/ui/SearchHistoryPanel.h
     src/ui/ToolTipOverlay.cpp

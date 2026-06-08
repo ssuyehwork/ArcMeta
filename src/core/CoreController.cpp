@@ -41,10 +41,6 @@ void CoreController::startSystem() {
             MetadataManager::instance().initFromDatabase();
             qDebug() << "[Core] 数据库元数据缓存加载完成，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
 
-            // 2026-06-xx 按照用户要求：物理剥离 MFT 索引初始化。
-            // ".scch" 缓存仅在 ScanDialog 中按需加载，MainWindow 启动时不占用相关内存。
-            qDebug() << "[Core] 已跳过 MFT 索引加载 (按需加载模式已启用)";
-
             // 2. 执行一次增量对账
             // 2026-05-14 架构修正：消除“异步就绪幻觉”，确保对账完成后再宣告就绪
             SyncEngine::instance().runIncrementalSync([this, startTime]() {
@@ -73,15 +69,9 @@ void CoreController::startSystem() {
 QStringList CoreController::performSearch(const QString& keyword) {
     if (keyword.isEmpty()) return {};
 
-    QStringList paths;
-    if (CategoryRepo::isJsonMode()) {
-        // 模式 A: 纯 JSON 内存搜索
-        paths = MetadataManager::instance().searchInCache(keyword);
-    } else {
-        // 模式 B: 经典数据库搜索 (已包含路径+标签+备注检索)
-        paths = ItemRepo::searchByKeyword(keyword, "");
-    }
-    return paths;
+    // 2026-06-xx 架构升级：彻底废除 JSON 模式。
+    // 采用经典数据库搜索 (已包含路径+标签+备注检索)
+    return ItemRepo::searchByKeyword(keyword, "");
 }
 
 void CoreController::setStatus(const QString& text, bool indexing) {

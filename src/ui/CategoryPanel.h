@@ -88,7 +88,6 @@ private:
 
     QVBoxLayout* m_mainLayout = nullptr;
     QWidget* m_focusLine = nullptr;
-    QPushButton* m_btnSwitch = nullptr; // 2026-06-xx 物理持有：模式切换开关按钮
     
     DropTreeView* m_categoryTree = nullptr;
     CategoryModel* m_categoryModel = nullptr;
