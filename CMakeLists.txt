@@ -54,16 +54,8 @@ set(SOURCES
     src/crypto/EncryptionManager.h
     src/meta/CategoryRepo.cpp
     src/meta/CategoryRepo.h
-    src/meta/FavoritesRepo.cpp
-    src/meta/FavoritesRepo.h
-    src/meta/AmMetaScch.cpp
-    src/meta/AmMetaScch.h
-    src/meta/TagRepo.cpp
-    src/meta/TagRepo.h
-    src/meta/DriverRepo.cpp
-    src/meta/DriverRepo.h
-    src/meta/AllFrnManager.cpp
-    src/meta/AllFrnManager.h
+    src/meta/DatabaseManager.cpp
+    src/meta/DatabaseManager.h
     src/meta/BatchRenameEngine.cpp
     src/meta/BatchRenameEngine.h
     src/meta/MetadataDefs.h
@@ -128,10 +120,6 @@ set(SOURCES
     src/ui/QuickLookWindow.h
     src/ui/RuleRow.cpp
     src/ui/RuleRow.h
-    src/ui/ScanController.cpp
-    src/ui/ScanController.h
-    src/ui/ScanDialog.cpp
-    src/ui/ScanDialog.h
     src/ui/SearchHistoryPanel.cpp
     src/ui/SearchHistoryPanel.h
     src/ui/ToolTipOverlay.cpp
@@ -159,6 +147,7 @@ target_link_libraries(ArcMeta PRIVATE
     ntdll
     ole32
     bcrypt
+    sqlite3
 )
 
 # 2026-03-xx 按照用户要求及《记忆碎片》规范：

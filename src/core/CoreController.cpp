@@ -19,24 +19,24 @@ CoreController::~CoreController() {}
 
 /**
  * @brief 启动系统初始化链条
- * 彻底废除数据库模式，全面转向纯 SCCH 架构
+ * 彻底废除分布式文件模式，全面转向 SQLite 内存模式 (One-Drive-One-DB)
  */
 void CoreController::startSystem() {
     QThreadPool::globalInstance()->start([this]() {
         try {
             qint64 startTime = QDateTime::currentMSecsSinceEpoch();
-            qDebug() << "[Core] >>> 开始后台异步初始化 (SCCH 架构) <<<";
+            qDebug() << "[Core] >>> 开始后台异步初始化 (SQLite 内存模式) <<<";
             
             QMetaObject::invokeMethod(this, [this]() {
                 setStatus("正在载入元数据缓存...", true);
             }, Qt::QueuedConnection);
             
-            // 仅执行 SCCH 模式初始化
+            // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
             
             QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);
-                qDebug() << "[Core] !!! SCCH 架构初始化就绪，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
+                qDebug() << "[Core] !!! SQLite 内存模式初始化就绪，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
                 emit initializationFinished();
             }, Qt::QueuedConnection);
 

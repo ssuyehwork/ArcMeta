@@ -15,7 +15,6 @@
 #include "FilterPanel.h"
 #include "QuickLookWindow.h"
 #include "ToolTipOverlay.h"
-#include "ScanDialog.h"
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 
@@ -982,14 +981,6 @@ void MainWindow::setupCustomTitleBarButtons() {
     
     connect(&MetadataManager::instance(), &MetadataManager::pendingSyncChanged, this, updateSyncBtnState);
 
-    m_btnScan = createTitleBtn("scan");
-    m_btnScan->setProperty("tooltipText", "全盘扫描与对账");
-    connect(m_btnScan, &QPushButton::clicked, this, [this]() {
-        // 2026-06-xx 物理隔离：不再挂载主窗口为父，使其拥有独立任务栏图标与层级
-        ScanDialog* dlg = new ScanDialog(nullptr);
-        dlg->setAttribute(Qt::WA_DeleteOnClose);
-        dlg->show();
-    });
 
     m_btnCreate = createTitleBtn("add"); // 2026-03-xx 规范化：“+”按钮图标修正
     m_btnCreate->setProperty("tooltipText", "新建...");
@@ -1050,7 +1041,6 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     m_btnCreate->installEventFilter(m_hoverFilter);
     layout->addWidget(m_btnSync);
-    layout->addWidget(m_btnScan);
     layout->addWidget(m_btnCreate);
     layout->addWidget(m_btnPinTop);
     layout->addWidget(m_btnMin);

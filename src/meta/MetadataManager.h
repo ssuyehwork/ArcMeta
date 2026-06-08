@@ -174,8 +174,6 @@ private:
     void persistAsync(const std::wstring& path);
     void debouncePersist(const std::wstring& path);
 
-    void loadDriverMetadata();
-    void saveSyncLog();
 };
 
 } // namespace ArcMeta
