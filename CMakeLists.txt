@@ -38,11 +38,13 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC OFF)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
+include_directories(3rdparty/sqlite)
 
 # 2026-06-xx 按照用户要求：彻底废除递归搜集 (GLOB)，改为显式列出所有有效源文件。
 # 此举可确保构建系统在彻底移除 .am_meta.json 模块后不再包含冗余代码，符合《源码纯净》规范。
 set(SOURCES
     src/main.cpp
+    3rdparty/sqlite/sqlite3.c
     src/core/CoreController.cpp
     src/core/CoreController.h
     src/core/CacheManager.cpp
@@ -147,7 +149,6 @@ target_link_libraries(ArcMeta PRIVATE
     ntdll
     ole32
     bcrypt
-    sqlite3
 )
 
 # 2026-03-xx 按照用户要求及《记忆碎片》规范：
