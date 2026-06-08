@@ -47,7 +47,6 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         sqlite3_backup_step(backup, -1);
         sqlite3_backup_finish(backup);
     }
-
     // 初始化表结构 (Schema)
     const char* schema = R"(
         CREATE TABLE IF NOT EXISTS metadata (
@@ -66,6 +65,28 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             palettes BLOB
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
+
+        -- 分类定义表
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_id INTEGER DEFAULT 0,
+            name TEXT NOT NULL,
+            color TEXT,
+            preset_tags TEXT,
+            sort_order INTEGER DEFAULT 0,
+            pinned INTEGER DEFAULT 0,
+            encrypted INTEGER DEFAULT 0,
+            encrypt_hint TEXT
+        );
+
+        -- 分类与项目关联表
+        CREATE TABLE IF NOT EXISTS category_items (
+            category_id INTEGER,
+            file_id TEXT,
+            path_hint TEXT,
+            added_at REAL,
+            PRIMARY KEY (category_id, file_id)
+        );
     )";
     char* errMsg = nullptr;
     sqlite3_exec(conn.memDb, schema, nullptr, nullptr, &errMsg);

@@ -388,6 +388,7 @@ void MetaPanel::initUi() {
     // 工业级宽度对齐：统一使用 4px 圆角和 4px 10px padding，彻底消除视觉缺口
     m_tagEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
     connect(m_tagEdit, &ElasticEdit::returnPressed, this, &MetaPanel::onTagAdded);
+    m_tagEdit->installEventFilter(this); // 2026-06-xx 物理修复：安装拦截器以支持 FocusOut 自动保存标签（可选）
     tagL->addWidget(m_tagEdit);
     m_containerLayout->addWidget(m_tagBox);
 
@@ -606,12 +607,12 @@ void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s,
 }
 
 void MetaPanel::setRating(int rating) { 
-    // 实现缺失的接口逻辑
-    emit metadataChanged(rating, L"__NO_CHANGE__");
+    // 2026-06-xx 物理修复：设置函数仅更新 UI，严禁发出信号导致“点击即录入”傻逼逻辑
+    if (m_ratingWidget) m_ratingWidget->setRating(rating);
 }
 void MetaPanel::setColor(const std::wstring& color) { 
-    // 实现缺失的接口逻辑
-    emit metadataChanged(-1, color);
+    // 2026-06-xx 物理修复：设置函数仅更新 UI，严禁发出信号导致“点击即录入”傻逼逻辑
+    if (m_colorPicker) m_colorPicker->setColor(color);
 }
 void MetaPanel::setPinned(bool pinned) { 
     Q_UNUSED(pinned); 
@@ -700,9 +701,23 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_noteEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = m_pathEdit->toPlainText().trimmed(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setNote(currentPath.toStdWString(), m_noteEdit->toPlainText().toStdWString());
+        QString currentPath = m_pathEdit->toPlainText().trimmed();
+        if (currentPath != "-" && !currentPath.isEmpty()) {
+            std::wstring newNote = m_noteEdit->toPlainText().toStdWString();
+            // 2026-06-xx 物理加固：增加差异比对，只有真正修改内容才触发保存，防止点击触发激活
+            if (newNote != MetadataManager::instance().getMeta(currentPath.toStdWString()).note) {
+                MetadataManager::instance().setNote(currentPath.toStdWString(), newNote);
+            }
+        }
     } else if (watched == m_linkEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = m_pathEdit->toPlainText().trimmed(); if (currentPath != "-" && !currentPath.isEmpty()) MetadataManager::instance().setURL(currentPath.toStdWString(), m_linkEdit->toPlainText().toStdWString());
+        QString currentPath = m_pathEdit->toPlainText().trimmed();
+        if (currentPath != "-" && !currentPath.isEmpty()) {
+            std::wstring newUrl = m_linkEdit->toPlainText().toStdWString();
+            // 2026-06-xx 物理加固：增加差异比对，防止点击触发激活
+            if (newUrl != MetadataManager::instance().getMeta(currentPath.toStdWString()).url) {
+                MetadataManager::instance().setURL(currentPath.toStdWString(), newUrl);
+            }
+        }
     } else if (watched == m_nameEdit && event->type() == QEvent::FocusOut) {
         QString oldPath = m_nameEdit->property("oldPath").toString();
         QString newName = m_nameEdit->toPlainText().trimmed();
