@@ -64,7 +64,8 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             file_size INTEGER,
             palettes BLOB,
             is_trash INTEGER DEFAULT 0,
-            original_path TEXT
+            original_path TEXT,
+            is_invalid INTEGER DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
 
@@ -88,6 +89,12 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             path_hint TEXT,
             added_at REAL,
             PRIMARY KEY (category_id, file_id)
+        );
+
+        -- 系统统计表
+        CREATE TABLE IF NOT EXISTS system_stats (
+            key TEXT PRIMARY KEY,
+            value INTEGER DEFAULT 0
         );
     )";
     char* errMsg = nullptr;

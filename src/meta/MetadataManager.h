@@ -26,6 +26,7 @@ struct RuntimeMeta {
     bool encrypted;
     bool isFolder; // 2026-06-xx 物理标记：区分文件夹与文件，用于侧边栏精准统计
     bool isTrash;  // 2026-06-xx 状态标记：是否处于回收站
+    bool isInvalid; // 2026-06-xx 物理校验：是否为第三方删除导致的失效数据
     std::wstring originalPath; // 2026-06-xx 路径记忆：用于回收站还原
     std::string fileId128; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
     
@@ -37,7 +38,7 @@ struct RuntimeMeta {
 
     std::vector<PaletteEntry> palettes;
 
-    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), ctime(0), mtime(0), atime(0), fileSize(0) {}
+    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), ctime(0), mtime(0), atime(0), fileSize(0) {}
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
@@ -81,6 +82,7 @@ public:
     void setNote(const std::wstring& path, const std::wstring& note, bool notify = true);
     void setURL(const std::wstring& path, const std::wstring& url, bool notify = true);
     void setEncrypted(const std::wstring& path, bool encrypted, bool notify = true);
+    void setInvalid(const std::wstring& path, bool invalid, bool notify = true);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
     
     /**
