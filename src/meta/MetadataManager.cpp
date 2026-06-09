@@ -263,9 +263,21 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
 void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].isInvalid = invalid; }
-    if (notify) emit metaChanged(QString::fromStdWString(nPath));
-    debouncePersist(nPath);
+    bool changed = false;
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        if (m_cache[nPath].isInvalid != invalid) {
+            m_cache[nPath].isInvalid = invalid;
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        // 如果标记为失效，活跃总数减少；如果恢复，活跃总数增加
+        CategoryRepo::incrementTotalFileCount(invalid ? -1 : 1);
+        if (notify) emit metaChanged(QString::fromStdWString(nPath));
+        debouncePersist(nPath);
+    }
 }
 
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
@@ -409,7 +421,7 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
             if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
                 // 只有非失效且非文件夹的文件删除时才扣减总计数
                 // 因为失效数据已经从总数据中剥离统计了（或者说失效数据本身也是资产，用户手动删除时才真正减少）
-                if (!it->second.isFolder) {
+                if (!it->second.isFolder && !it->second.isTrash && !it->second.isInvalid) {
                     CategoryRepo::incrementTotalFileCount(-1);
                 }
                 if (!it->second.fileId128.empty()) m_fidToPath.erase(it->second.fileId128);
@@ -437,12 +449,21 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
 void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const std::wstring& origPath) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
+    bool changed = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nPath].isTrash = isTrash;
-        if (isTrash && !origPath.empty()) m_cache[nPath].originalPath = origPath;
+        if (m_cache[nPath].isTrash != isTrash) {
+            m_cache[nPath].isTrash = isTrash;
+            if (isTrash && !origPath.empty()) m_cache[nPath].originalPath = origPath;
+            changed = true;
+        }
     }
-    persistAsync(nPath);
+
+    if (changed) {
+        // 如果进入回收站，活跃总数减少；如果还原，活跃总数增加
+        CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
+        persistAsync(nPath);
+    }
 }
 
 void MetadataManager::deletePermanently(const std::wstring& path) {

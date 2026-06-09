@@ -5,6 +5,7 @@
 #include <QDebug>
 #include <QDateTime>
 #include <QDir>
+#include <QtConcurrent>
 #include <set>
 #include <unordered_set>
 #include <algorithm>
