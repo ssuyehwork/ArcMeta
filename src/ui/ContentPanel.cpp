@@ -188,8 +188,8 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
 
         if (!m_requestedIcons.contains(path)) {
             m_requestedIcons.insert(path);
-            auto* mutableThis = const_cast<FerrexVirtualDbModel*>(this);
-            (void)QtConcurrent::run([mutableThis, path]() {
+            QPointer<const FerrexVirtualDbModel> weakThis(this);
+            (void)QtConcurrent::run([weakThis, path]() {
                 QFileInfo info(path);
                 QString ext = info.suffix().toLower();
                 QIcon icon;
@@ -220,18 +220,20 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                     icon = UiHelper::getFileIcon(path, 128);
                 }
 
-                QMetaObject::invokeMethod(mutableThis, [mutableThis, path, icon, ar, hasThumb]() {
+                QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, icon, ar, hasThumb]() {
+                    if (!weakThis) return;
+                    auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
                     mutableThis->m_iconCache.insert(path, new QIcon(icon));
                     if (hasThumb) mutableThis->m_aspectRatios[path] = ar;
                     
                     // 局部刷新，提高性能
                     for (int i = 0; i < mutableThis->m_displayCount; ++i) {
-                        if (mutableThis->m_allRecords[i].path == path) {
+                        if (i < (int)mutableThis->m_allRecords.size() && mutableThis->m_allRecords[i].path == path) {
                             emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
                             break;
                         }
                     }
-                });
+                }, Qt::QueuedConnection);
             });
         }
         return UiHelper::getFileIcon(path, 128); // 占位
@@ -352,7 +354,7 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
     auto it = m_pathToIndex.find(nPath);
     if (it != m_pathToIndex.end()) {
         int i = it->second;
-        if (i < (int)m_allRecords.size()) {
+        if (i >= 0 && i < (int)m_allRecords.size()) {
             auto meta = MetadataManager::instance().getMeta(nPath.toStdWString());
             m_allRecords[i].rating = meta.rating;
             m_allRecords[i].color = QString::fromStdWString(meta.color);
@@ -2392,19 +2394,16 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     if (ext.isEmpty()) ext = "FILE"; 
 
     // 2026-06-xx 物理性能优化：优先从 record.suffix 中提取徽章文字，减少 QFileInfo 频率
-    if (index.row() >= 0) {
-        const auto* model = qobject_cast<const FerrexVirtualDbModel*>(index.model());
-        if (!model) {
-            // 如果是通过代理访问，向上追溯源模型
-            const auto* proxy = qobject_cast<const QSortFilterProxyModel*>(index.model());
-            if (proxy) model = qobject_cast<const FerrexVirtualDbModel*>(proxy->sourceModel());
-        }
+    // 2026-06-xx 物理加固：修复代理模型下的索引映射错误，杜绝数组越界 (c0000005)
+    QModelIndex srcIdx = index;
+    const auto* proxy = qobject_cast<const QSortFilterProxyModel*>(index.model());
+    if (proxy) srcIdx = proxy->mapToSource(index);
 
-        if (model && index.row() < (int)model->allRecords().size()) {
-            const auto& record = model->allRecords()[index.row()];
-            if (record.isCategory || record.isDir) ext = "DIR";
-            else if (!record.suffix.isEmpty()) ext = record.suffix.toUpper();
-        }
+    const auto* srcModel = qobject_cast<const FerrexVirtualDbModel*>(srcIdx.model());
+    if (srcModel && srcIdx.row() >= 0 && srcIdx.row() < (int)srcModel->allRecords().size()) {
+        const auto& record = srcModel->allRecords()[srcIdx.row()];
+        if (record.isCategory || record.isDir) ext = "DIR";
+        else if (!record.suffix.isEmpty()) ext = record.suffix.toUpper();
     }
 
     QColor badgeColor = UiHelper::getExtensionColor(ext); 
