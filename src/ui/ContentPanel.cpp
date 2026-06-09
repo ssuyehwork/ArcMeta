@@ -1562,10 +1562,19 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             for (const auto& idx : indexes) {
                 if (idx.column() == 0) {
                     QString itemPath = idx.data(PathRole).toString();
+                    auto meta = MetadataManager::instance().getMeta(itemPath.toStdWString());
+                    if (meta.isTrash && !meta.originalPath.empty()) {
+                        QString dest = QString::fromStdWString(meta.originalPath);
+                        QDir().mkpath(QFileInfo(dest).absolutePath());
+                        if (QFile::rename(itemPath, dest)) {
+                            MetadataManager::instance().markAsTrash(dest.toStdWString(), false);
+                            // 物理同步：由于原文件位置可能已被 MFT 逻辑自动识别，此处主要负责状态翻转
+                        }
+                    }
                 }
             }
             loadDirectory(m_currentPath);
-            emit MetadataManager::instance().metaChanged(""); // 刷新侧边栏计数
+            emit MetadataManager::instance().metaChanged("__RELOAD_ALL__"); // 刷新全量统计
             break;
         }
         case ActionDelete: 
@@ -1660,10 +1669,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         }
 
                         if (physicalOk) {
-                            // 2. 数据库同步清理 (三位一体)
-                            
-                            // 3. 元数据管理清理 (离散 SCCH 与 内存失效)
-                            MetadataManager::instance().removeMetadataSync(wp);
+                            // 2026-06-xx 按照用户要求：永久删除后从数据库彻底移除相应数据
+                            MetadataManager::instance().deletePermanently(wp);
                         }
 
                         count++;

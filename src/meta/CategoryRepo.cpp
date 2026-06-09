@@ -369,6 +369,7 @@ void CategoryRepo::incrementCategorizedCount(int delta) {
 void CategoryRepo::fullRecount() {
     // 1. 重新计算总文件数（基于 MetadataManager 缓存）
     // 2026-06-xx 按照核心共识：全部数据计数 = 物理总量 (metadata 表中的 File ID)，且排除文件夹
+    // 2026-06-xx 物理对账：回收站中的文件同样属于“数字资产”，应包含在“全部数据”中
     int totalFiles = 0;
     MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
         if (!meta.isFolder) totalFiles++;
@@ -468,17 +469,23 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
         }
     }
 
-    int recently = 0, untagged = 0, uncategorized = 0;
+    int recently = 0, untagged = 0, uncategorized = 0, trashCount = 0;
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
 
     MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
         // 核心红线：彻底排除文件夹计数
         if (meta.isFolder) return;
 
+        if (meta.isTrash) {
+            trashCount++;
+            return; // 2026-06-xx 物理隔离：回收站数据不参与“未分类”、“未标注”等统计
+        }
+
+        // 2026-06-xx 按照用户要求：“未标签”与“已标签”相互隔离
         if (meta.tags.isEmpty()) untagged++;
         if (meta.atime >= now - 86400000.0) recently++;
 
-        // “未分类”定义：存在于 metadata 表但不在 category_items 表中的有效文件
+        // “未分类”定义：存在于 metadata 表但不在 category_items 表中的有效文件（非回收站）
         if (categorizedFids.find(meta.fileId128) == categorizedFids.end()) {
             uncategorized++;
         }
@@ -487,7 +494,7 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     res["recently_visited"] = recently;
     res["untagged"] = untagged;
     res["uncategorized"] = uncategorized;
-    res["trash"] = 0;
+    res["trash"] = trashCount;
     return res;
 }
 
@@ -521,10 +528,17 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
         if (meta.isFolder) return;
 
         bool match = false;
-        if (type == "all") match = true;
-        else if (type == "untagged" && meta.tags.isEmpty()) match = true;
-        else if (type == "recently_visited" && meta.atime >= now - 86400000.0) match = true;
-        else if (type == "uncategorized" && categorizedIds.find(meta.fileId128) == categorizedIds.end()) match = true;
+        if (type == "trash") {
+            if (meta.isTrash) match = true;
+        } else {
+            // 非回收站视图下，严禁显示回收站数据
+            if (meta.isTrash) return;
+
+            if (type == "all") match = true;
+            else if (type == "untagged" && meta.tags.isEmpty()) match = true;
+            else if (type == "recently_visited" && meta.atime >= now - 86400000.0) match = true;
+            else if (type == "uncategorized" && categorizedIds.find(meta.fileId128) == categorizedIds.end()) match = true;
+        }
 
         if (match) paths << QString::fromStdWString(path);
     });

@@ -23,22 +23,36 @@ public:
      * @brief 移入回收站
      */
     static bool moveToTrash(const QStringList& paths) {
-#ifdef Q_OS_WIN
         if (paths.isEmpty()) return true;
-        std::wstring from;
-        for (const QString& p : paths) {
-            from += QDir::toNativeSeparators(p).toStdWString() + L'\0';
-        }
-        from += L'\0';
 
-        SHFILEOPSTRUCTW fileOp = { 0 };
-        fileOp.wFunc = FO_DELETE;
-        fileOp.pFrom = from.c_str();
-        fileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION;
-        return SHFileOperationW(&fileOp) == 0;
-#else
-        return false;
-#endif
+        bool allOk = true;
+        for (const QString& p : paths) {
+            QFileInfo info(p);
+            QString drive = info.absolutePath().left(3); // e.g. "C:/"
+            QString trashDir = drive + ".arcmeta/trash";
+            QDir().mkpath(trashDir);
+
+            // 确保 .arcmeta 目录隐藏
+            SetFileAttributesW((drive + ".arcmeta").toStdWString().c_str(), FILE_ATTRIBUTE_HIDDEN);
+
+            QString dest = trashDir + "/" + info.fileName();
+            // 冲突处理：如果回收站已有同名文件，增加时间戳后缀
+            if (QFile::exists(dest)) {
+                dest = trashDir + "/" + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_") + info.fileName();
+            }
+
+            // 1. 物理移动
+            if (QFile::rename(p, dest)) {
+                // 2. 数据库同步：标记为回收站，记忆原路径
+                MetadataManager::instance().markAsTrash(dest.toStdWString(), true, p.toStdWString());
+                // 3. 解除所有分类关联
+                std::string fid = MetadataManager::instance().getFileIdSync(dest.toStdWString());
+                CategoryRepo::removeAllCategories(fid);
+            } else {
+                allOk = false;
+            }
+        }
+        return allOk;
     }
 
     /**

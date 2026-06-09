@@ -25,6 +25,8 @@ struct RuntimeMeta {
     bool pinned;
     bool encrypted;
     bool isFolder; // 2026-06-xx 物理标记：区分文件夹与文件，用于侧边栏精准统计
+    bool isTrash;  // 2026-06-xx 状态标记：是否处于回收站
+    std::wstring originalPath; // 2026-06-xx 路径记忆：用于回收站还原
     std::string fileId128; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
     
     // 2026-06-xx 物理对标：补充时间戳与大小字段
@@ -35,7 +37,7 @@ struct RuntimeMeta {
 
     std::vector<PaletteEntry> palettes;
 
-    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), ctime(0), mtime(0), atime(0), fileSize(0) {}
+    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), ctime(0), mtime(0), atime(0), fileSize(0) {}
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
@@ -91,6 +93,8 @@ public:
 
     void renameItem(const std::wstring& oldPath, const std::wstring& newPath);
     void removeMetadataSync(const std::wstring& path);
+    void markAsTrash(const std::wstring& path, bool isTrash, const std::wstring& origPath = L"");
+    void deletePermanently(const std::wstring& path);
 
     /**
      * @brief 物理同步元数据

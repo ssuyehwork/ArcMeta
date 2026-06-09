@@ -62,7 +62,9 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             mtime INTEGER,
             atime INTEGER,
             file_size INTEGER,
-            palettes BLOB
+            palettes BLOB,
+            is_trash INTEGER DEFAULT 0,
+            original_path TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
 
