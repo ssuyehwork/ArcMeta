@@ -134,13 +134,14 @@ void MetadataManager::initFromScchMode() {
     std::unordered_map<std::string, std::wstring> tempFidToPath;
 
     // 扫描所有已加载的数据库
-    // 注意：这里需要遍历所有已知的驱动器数据库，目前逻辑是 MetadataManager 会在 getMeta 时按需加载，
-    // 但为了全局搜索和分类统计，我们在此预先加载所有 .arcmeta/*.db
-    QString metaDir = DatabaseManager::instance().getGlobalDb() ? QCoreApplication::applicationDirPath() + "/.arcmeta" : "";
-    if (!metaDir.isEmpty()) {
-        QDir dir(metaDir);
+    // 2026-06-xx 逻辑加固：由于驱动器序列号在不同机器上可能重复或变化，
+    // 我们必须确保启动时扫描 .arcmeta 目录下所有物理分库。
+    QString metaDir = QCoreApplication::applicationDirPath() + "/.arcmeta";
+    QDir dir(metaDir);
+    if (dir.exists()) {
         QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files);
         for (const QString& dbFile : dbFiles) {
+            // 文件名格式: Arcmeta_XXXX.db -> 提取 XXXX
             QString volSerial = dbFile.mid(8, dbFile.length() - 8 - 3);
             sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial.toStdWString());
             if (!db) continue;
@@ -190,7 +191,7 @@ void MetadataManager::initFromScchMode() {
                     }
 
                     tempCache[path] = rm;
-                    tempFidToPath[rm.fileId128] = path;
+                    if (!rm.fileId128.empty()) tempFidToPath[rm.fileId128] = path;
                 }
                 sqlite3_finalize(stmt);
             }
@@ -202,14 +203,9 @@ void MetadataManager::initFromScchMode() {
         m_cache = tempCache;
         m_fidToPath = tempFidToPath;
         m_loaded = true;
-        
-        int totalFiles = 0;
-        for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
-            if (!it->second.isFolder) totalFiles++;
-        }
-        CategoryRepo::setTotalFileCount(totalFiles);
     }
 
+    // 2026-06-xx 物理对账：在初始化结束前，执行一次完整的统计重计
     CategoryRepo::fullRecount();
     qDebug() << "[PERF] SQLite 元数据镜像构建完成，总项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     emit metaChanged("__RELOAD_ALL__");
