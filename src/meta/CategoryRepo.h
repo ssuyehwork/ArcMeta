@@ -52,6 +52,7 @@ public:
     static bool addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint = L"");
     static bool removeItemFromCategory(int categoryId, const std::string& fileId128);
     static bool removeAllCategories(const std::string& fileId128);
+    static bool removeAllCategoriesBatch(const std::vector<std::string>& fids);
     static std::vector<CategoryItem> getItemsInCategory(int categoryId);
     static std::vector<CategoryItem> getItemsRecursive(int categoryId);
 

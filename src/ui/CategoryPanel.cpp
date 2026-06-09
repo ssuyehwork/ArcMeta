@@ -82,7 +82,7 @@ CategoryPanel::CategoryPanel(QWidget* parent)
                 for (const auto& p : catCountsVec) catCounts[p.first] = p.second;
                 
                 // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
-                QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, sysCounts, catCounts]() {
+                QMetaObject::invokeMethod(weakThis.data(), [weakThis, sysCounts, catCounts]() {
                     if (weakThis && weakThis->m_categoryModel) {
                         // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
                         weakThis->m_categoryModel->updateStatistics(sysCounts, catCounts);
@@ -99,16 +99,21 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     // 理由：系统启动时的 initFromScchMode 是异步进行的，完成后必须强制刷新侧边栏
     // 以解决数据库加载延迟导致的系统项（如“全部数据”、“未分类”）显示为 0 的问题
     connect(&CoreController::instance(), &CoreController::initializationFinished, this, [this]() {
-        qDebug() << "[CategoryPanel] 检测到系统后台初始化完成，触发计数刷新...";
+        qDebug() << "[CategoryPanel] 检测到系统后台初始化完成，触发强制全量刷新...";
+        m_isFirstLoad = true; // 强制执行 refresh() 重建树结构并拉取最新计数
+        requestRefresh();
+    });
+
+    // 2026-06-xx 物理修复：监听元数据变更信号，确保删除项或标记状态后计数实时更新
+    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& /*path*/) {
         requestRefresh();
     });
 }
 
 void CategoryPanel::requestRefresh() {
-    // 500ms 削峰填谷：合并高频发射的元数据变更信号
-    if (!m_refreshTimer->isActive()) {
-        m_refreshTimer->start(500);
-    }
+    // 2026-06-xx 物理优化：恢复至 500ms 防抖时间。
+    // 理由：过短的防抖会导致批量操作（如上万个项的 MFT 扫描或删除）过程中产生大量的中间无效重刷。
+    m_refreshTimer->start(500);
 }
 
 void CategoryPanel::selectCategory(int id) {

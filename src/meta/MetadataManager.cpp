@@ -44,9 +44,10 @@ namespace ArcMeta {
 
 std::wstring MetadataManager::normalizePath(const std::wstring& path) {
     if (path.empty()) return L"";
-    QString qp = QDir::toNativeSeparators(QDir::cleanPath(QString::fromStdWString(path)));
+    // 2026-06-xx 物理对账优化：Windows 环境下路径不区分大小写，
+    // 统一转换为全小写以确保内存缓存 (std::unordered_map) 的 Key 匹配一致性，彻底消除“幽灵项”。
+    QString qp = QDir::toNativeSeparators(QDir::cleanPath(QString::fromStdWString(path))).toLower();
     if (qp.length() == 2 && qp.endsWith(':')) qp += '\\';
-    if (qp.length() >= 2 && qp[1] == ':') qp[0] = qp[0].toUpper();
     return qp.toStdWString();
 }
 
@@ -157,7 +158,7 @@ void MetadataManager::initFromScchMode() {
                     if (fid) rm.fileId128 = fid;
 
                     const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
-                    std::wstring path = wpath ? wpath : L"";
+                    std::wstring path = normalizePath(wpath ? wpath : L"");
 
                     rm.isFolder = sqlite3_column_int(stmt, 2);
                     rm.rating = sqlite3_column_int(stmt, 3);
@@ -387,23 +388,27 @@ void MetadataManager::debouncePersist(const std::wstring& nPath) {
 }
 
 void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring& newPath) {
+    std::wstring nOld = normalizePath(oldPath);
+    std::wstring nNew = normalizePath(newPath);
+    if (nOld == nNew) return;
+
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        std::unordered_map<std::wstring, RuntimeMeta>::iterator it = m_cache.find(oldPath);
+        auto it = m_cache.find(nOld);
         if (it != m_cache.end()) { 
             std::string fid = it->second.fileId128;
-            m_cache[newPath] = it->second; 
+            m_cache[nNew] = it->second; 
             m_cache.erase(it); 
-            if (!fid.empty()) m_fidToPath[fid] = newPath;
+            if (!fid.empty()) m_fidToPath[fid] = nNew;
 
             // 物理同步：更新 SQLite 路径
-            std::wstring volSerial = getVolumeSerialNumber(newPath);
+            std::wstring volSerial = getVolumeSerialNumber(nNew);
             sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
             if (db) {
                 sqlite3_stmt* stmt;
                 const char* sql = "UPDATE metadata SET path = ? WHERE file_id = ?";
                 if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                    sqlite3_bind_text16(stmt, 1, newPath.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(stmt, 1, nNew.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_text(stmt, 2, fid.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_step(stmt);
                     sqlite3_finalize(stmt);
@@ -411,7 +416,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             }
         }
     }
-    emit metaChanged(QString::fromStdWString(newPath));
+    emit metaChanged(QString::fromStdWString(nNew));
 }
 
 void MetadataManager::removeMetadataSync(const std::wstring& path) {
@@ -419,34 +424,47 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
     std::wstring volSerial = getVolumeSerialNumber(nPath);
     sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
     
+    int totalDelta = 0;
+    std::vector<std::string> fids;
+    
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        for (std::unordered_map<std::wstring, RuntimeMeta>::iterator it = m_cache.begin(); it != m_cache.end(); ) {
+        for (auto it = m_cache.begin(); it != m_cache.end(); ) {
             if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
                 // 只有非失效且非文件夹的文件删除时才扣减总计数
-                // 因为失效数据已经从总数据中剥离统计了（或者说失效数据本身也是资产，用户手动删除时才真正减少）
                 if (!it->second.isFolder && !it->second.isTrash && !it->second.isInvalid) {
-                    CategoryRepo::incrementTotalFileCount(-1);
+                    totalDelta--;
                 }
-                if (!it->second.fileId128.empty()) m_fidToPath.erase(it->second.fileId128);
-                
-                // 从 SQLite 中删除
-                if (db) {
-                    sqlite3_stmt* stmt;
-                    const char* sql = "DELETE FROM metadata WHERE path = ? OR path LIKE ?";
-                    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                        sqlite3_bind_text16(stmt, 1, it->first.c_str(), -1, SQLITE_TRANSIENT);
-                        std::wstring pattern = it->first + L"\\%";
-                        sqlite3_bind_text16(stmt, 2, pattern.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_step(stmt);
-                        sqlite3_finalize(stmt);
-                    }
+                if (!it->second.fileId128.empty()) {
+                    fids.push_back(it->second.fileId128);
+                    m_fidToPath.erase(it->second.fileId128);
                 }
-
                 it = m_cache.erase(it);
             }
             else ++it;
         }
+    }
+
+    // 2026-06-xx 物理级根除：基于 File ID (FRN) 批量清理，确保即使路径发生偏移（如在回收站中）也能彻底删除
+    if (db && !fids.empty()) {
+        sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(db, "DELETE FROM metadata WHERE file_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
+            for (const auto& fid : fids) {
+                sqlite3_bind_text(stmt, 1, fid.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(stmt);
+                sqlite3_reset(stmt);
+            }
+            sqlite3_finalize(stmt);
+        }
+        sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
+    }
+
+    if (totalDelta != 0) CategoryRepo::incrementTotalFileCount(totalDelta);
+    
+    // 2026-06-xx 物理级根除：基于 File ID (FRN) 批量清理所有分类关联，彻底杜绝“幽灵关联”
+    if (!fids.empty()) {
+        CategoryRepo::removeAllCategoriesBatch(fids);
     }
 }
 
@@ -472,18 +490,51 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
 
 void MetadataManager::deletePermanently(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    std::string fid = getFileIdSync(nPath);
     
-    // 1. 从关联表彻底删除
-    CategoryRepo::removeAllCategories(fid);
+    // 2026-06-xx 逻辑优化：遵循“按需根除”原则。
+    // 1. 首先检查内存缓存，判断该项目是否曾被记入数据库。
+    std::string fid;
+    bool existsInDb = false;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        auto it = m_cache.find(nPath);
+        if (it != m_cache.end()) {
+            fid = it->second.fileId128;
+            existsInDb = true;
+        }
+    }
+
+    // 2. 物理加固：如果路径匹配失败（常见于 OS 将文件移入回收站后路径发生偏移），尝试通过物理 FID 反查
+    if (!existsInDb) {
+        if (fetchWinApiMetadataDirect(nPath, fid)) {
+            std::shared_lock<std::shared_mutex> lock(m_mutex);
+            auto it = m_fidToPath.find(fid);
+            if (it != m_fidToPath.end()) {
+                nPath = it->second; // 修正为缓存中的原始路径，确保 removeMetadataSync 能正确匹配
+                existsInDb = true;
+                qDebug() << "[Metadata] 路径匹配失败，已通过 FID 校准原始路径:" << QString::fromStdWString(nPath);
+            }
+        }
+    }
+
+    // 3. 如果项目从未被记入数据库，则无需执行任何数据库清理逻辑。
+    if (!existsInDb) {
+        qDebug() << "[Metadata] 永久删除项不在数据库中，跳过清理动作:" << QString::fromStdWString(nPath);
+        emit metaChanged("__RELOAD_ALL__");
+        return;
+    }
     
-    // 2. 从物理元数据表彻底删除
+    // 4. 执行彻底根除。
     removeMetadataSync(nPath);
+
+    // 5. 物理修复：发射全量刷新信号，确保侧边栏计数立即同步
+    qDebug() << "[Metadata] 已执行永久删除清理，通知 UI 刷新:" << QString::fromStdWString(nPath);
+    emit metaChanged("__RELOAD_ALL__");
 }
 
 std::wstring MetadataManager::getVolumeSerialNumber(const std::wstring& path) {
     if (path.length() < 2 || path[1] != L':') return L"UNKNOWN";
-    wchar_t root[4] = { path[0], L':', L'\\', L'\0' };
+    wchar_t root[4] = { static_cast<wchar_t>(towupper(path[0])), L':', L'\\', L'\0' };
     DWORD serial = 0;
     if (GetVolumeInformationW(root, nullptr, 0, &serial, nullptr, nullptr, nullptr, 0)) {
         wchar_t buf[16]; swprintf(buf, 16, L"%08X", serial); return buf;
