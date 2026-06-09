@@ -104,6 +104,26 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         sqlite3_free(errMsg);
     }
 
+    // 2026-06-xx 物理加固：自动迁移旧版本数据库字段
+    // 检查 metadata 是否包含 is_invalid 字段
+    sqlite3_stmt* checkStmt;
+    bool hasInvalidColumn = false;
+    if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(checkStmt) == SQLITE_ROW) {
+            const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(checkStmt, 1));
+            if (colName && std::string(colName) == "is_invalid") {
+                hasInvalidColumn = true;
+                break;
+            }
+        }
+        sqlite3_finalize(checkStmt);
+    }
+
+    if (!hasInvalidColumn) {
+        qDebug() << "[DB] 检测到旧版数据库，正在添加 is_invalid 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN is_invalid INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+    }
+
     conn.diskPath = diskPath;
     return true;
 }

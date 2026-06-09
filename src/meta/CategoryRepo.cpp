@@ -436,6 +436,7 @@ void CategoryRepo::incrementCategorizedCount(int delta) {
 void CategoryRepo::fullRecount() {
     // 2026-06-xx 按照用户要求：从数据库加载持久化的计数
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
+    bool hasSavedCounts = false;
     if (db) {
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "SELECT key, value FROM system_stats", -1, &stmt, nullptr) == SQLITE_OK) {
@@ -444,21 +445,75 @@ void CategoryRepo::fullRecount() {
                 if (!keyPtr) continue;
                 std::string key = keyPtr;
                 int val = sqlite3_column_int(stmt, 1);
-                if (key == "total_file_count") s_totalFileCount.store(val);
+                if (key == "total_file_count") {
+                    s_totalFileCount.store(val);
+                    hasSavedCounts = true;
+                }
                 else if (key == "categorized_count") s_categorizedCount.store(val);
             }
             sqlite3_finalize(stmt);
         }
     }
 
+    // 2026-06-xx 物理修复：如果是旧版本升级（数据库无计数），或者数据库损坏导致计数为 0，
+    // 我们必须从内存镜像（MetadataManager 加载的数据）中初始化一次计数并落库。
+    // 否则，即使数据库里有数据，由于 key='total_file_count' 不存在，UI 也会显示 0。
+    if (!hasSavedCounts || s_totalFileCount.load() <= 0) {
+        int total = 0;
+        int categorized = 0;
+
+        // 获取所有已分类的 FID 用于计数
+        std::unordered_set<std::string> categorizedFids;
+        if (db) {
+            sqlite3_stmt* stmt;
+            if (sqlite3_prepare_v2(db, "SELECT DISTINCT file_id FROM category_items", -1, &stmt, nullptr) == SQLITE_OK) {
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                    const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                    if (fid) categorizedFids.insert(fid);
+                }
+                sqlite3_finalize(stmt);
+            }
+        }
+
+        MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
+            if (!meta.isFolder && !meta.isTrash && !meta.isInvalid) {
+                total++;
+                if (categorizedFids.count(meta.fileId128)) categorized++;
+            }
+        });
+
+        qDebug() << "[Recount] 盘点完成。总计:" << total << "已分类:" << categorized;
+        s_totalFileCount.store(total);
+        s_categorizedCount.store(categorized);
+
+        if (db) {
+            sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+            sqlite3_stmt* stmt;
+            const char* sql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?)";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(stmt, 1, "total_file_count", -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(stmt, 2, total);
+                sqlite3_step(stmt);
+                sqlite3_reset(stmt);
+                sqlite3_bind_text(stmt, 1, "categorized_count", -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(stmt, 2, categorized);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+            sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
+        }
+    }
+
     // 2026-06-xx 核心逻辑升级：物理有效性对账 (盘点 FRN)
     // 这一步在后台异步执行，验证文件是否被第三方删除。若失效，标记为 is_invalid 而非直接删除。
+    // 使用 [db] 显式捕获数据库指针，并增加错误检查
     QtConcurrent::run([db]() {
-        std::vector<std::pair<std::wstring, std::string>> itemsToCheck;
+        if (!db) return;
 
+        std::vector<std::pair<std::wstring, std::string>> itemsToCheck;
         MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
-            // 只对未标记失效的文件进行物理校验
-            if (!meta.isFolder && !meta.isInvalid) {
+            // 只对未标记失效且非回收站的文件进行物理校验
+            if (!meta.isFolder && !meta.isInvalid && !meta.isTrash) {
                 itemsToCheck.push_back({path, meta.fileId128});
             }
         });
@@ -477,6 +532,8 @@ void CategoryRepo::fullRecount() {
 
         if (invalidatedCount > 0) {
             qDebug() << "[Recount] 物理校验发现" << invalidatedCount << "个失效项，已归类至失效数据";
+            // 2026-06-xx 物理同步：强制将内存中的 is_invalid 变更刷入磁盘
+            DatabaseManager::instance().flushAll();
         }
     });
 }
