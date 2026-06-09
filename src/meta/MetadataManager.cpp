@@ -177,6 +177,10 @@ void MetadataManager::initFromScchMode() {
 
                     const void* paletteBlob = sqlite3_column_blob(stmt, 12);
                     int paletteSize = sqlite3_column_bytes(stmt, 12);
+
+                    rm.isTrash = sqlite3_column_int(stmt, 13) != 0;
+                    const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 14));
+                    if (wOrigPath) rm.originalPath = wOrigPath;
                     if (paletteBlob && paletteSize > 0) {
                         QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
                         QJsonDocument doc = QJsonDocument::fromJson(ba);
@@ -417,6 +421,28 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
     }
 }
 
+void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const std::wstring& origPath) {
+    std::wstring nPath = MetadataManager::normalizePath(path);
+    ensureActivated(nPath);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_cache[nPath].isTrash = isTrash;
+        if (isTrash && !origPath.empty()) m_cache[nPath].originalPath = origPath;
+    }
+    persistAsync(nPath);
+}
+
+void MetadataManager::deletePermanently(const std::wstring& path) {
+    std::wstring nPath = MetadataManager::normalizePath(path);
+    std::string fid = getFileIdSync(nPath);
+    
+    // 1. 从关联表彻底删除
+    CategoryRepo::removeAllCategories(fid);
+    
+    // 2. 从物理元数据表彻底删除
+    removeMetadataSync(nPath);
+}
+
 std::wstring MetadataManager::getVolumeSerialNumber(const std::wstring& path) {
     if (path.length() < 2 || path[1] != L':') return L"UNKNOWN";
     wchar_t root[4] = { path[0], L':', L'\\', L'\0' };
@@ -519,7 +545,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
     if (!db) return;
 
     sqlite3_stmt* stmt;
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     bool isNew = true;
     {
         sqlite3_stmt* checkStmt;
@@ -553,6 +579,8 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
         }
         QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
         sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 14, rMeta.isTrash ? 1 : 0);
+        sqlite3_bind_text16(stmt, 15, rMeta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
 
         if (sqlite3_step(stmt) == SQLITE_DONE) {
             if (isNew && !rMeta.isFolder) {

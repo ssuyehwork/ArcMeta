@@ -373,6 +373,19 @@ void MetaPanel::initUi() {
     m_linkEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_linkEdit);
 
+    // [Section 4.5] 星级与颜色选择器 (Part 5 Fix: 补全实例化)
+    m_ratingWidget = new StarRatingWidget(m_container);
+    connect(m_ratingWidget, &StarRatingWidget::ratingChanged, this, [this](int r) {
+        emit metadataChanged(r, L"__NO_CHANGE__");
+    });
+    m_containerLayout->addWidget(createSectionBox("star", "星级评定", m_ratingWidget));
+
+    m_colorPicker = new ColorPickerWidget(m_container);
+    connect(m_colorPicker, &ColorPickerWidget::colorChanged, this, [this](const std::wstring& c) {
+        emit metadataChanged(-1, c);
+    });
+    m_containerLayout->addWidget(createSectionBox("palette", "颜色标记", m_colorPicker));
+
     // [Section 5] 标签区域 (Tag Flow)
     m_tagBox = new QWidget(m_container);
     QVBoxLayout* tagL = new QVBoxLayout(m_tagBox);

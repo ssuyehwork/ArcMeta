@@ -938,8 +938,10 @@ void CategoryPanel::initUi() {
                 QFileInfo info(p);
                 int currentCatId = parentCatId;
                 
+                bool isDirectory = info.isDir();
+
                 // 1. 如果是文件夹，自动创建分类节点
-                if (info.isDir()) {
+                if (isDirectory) {
                     std::wstring name = info.fileName().toStdWString();
                     // 检查是否已存在同名子分类，避免重复创建
                     int existingId = CategoryRepo::findCategoryId(parentCatId, name);
@@ -956,7 +958,15 @@ void CategoryPanel::initUi() {
                     }
                 }
 
-                processItem(p, currentCatId);
+                // 2026-06-xx 按照用户要求：文件夹本身不计入文件数量，仅作为分类层级。
+                // 只有文件才执行 processItem (激活并关联到分类)
+                if (!isDirectory) {
+                    processItem(p, currentCatId);
+                } else {
+                    // 激活文件夹元数据（为了后续属性展示），但不建立 category_items 关联，
+                    // 这样文件夹就不会出现在任何分类的文件计数中。
+                    MetadataManager::activateItem(QDir::toNativeSeparators(p).toStdWString());
+                }
                 
                 currentTask++;
                 if (currentTask % 50 == 0) {
@@ -966,11 +976,11 @@ void CategoryPanel::initUi() {
                     });
                 }
 
-                if (info.isDir()) {
+                if (isDirectory) {
                     QDir dir(p);
                     QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
                     for (const QFileInfo& subInfo : entries) {
-                        // 物理级联：子文件夹挂载到当前创建的分类下
+                        // 物理级联：子文件夹/文件挂载到当前创建的分类下
                         activateAndCategorize(subInfo.absoluteFilePath(), currentCatId);
                     }
                 }

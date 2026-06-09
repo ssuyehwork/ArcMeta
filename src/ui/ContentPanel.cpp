@@ -1197,6 +1197,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         if (categories.empty()) categories = CategoryRepo::getAll();
         if (categories.size() > 15) categories.resize(15);
 
+        // 2026-06-xx 按照用户需求：增加“回归未分类”选项
+        QAction* actToUncat = categorizeMenu->addAction(UiHelper::getIcon("uncategorized", QColor("#95a5a6"), 16), "回归“未分类”");
+        actToUncat->setData(ActionCategorize);
+        actToUncat->setProperty("catId", -2); // 未分类的负数 ID
+        categorizeMenu->addSeparator();
+
         if (categories.empty()) { 
             categorizeMenu->addAction("（暂无分类）")->setEnabled(false); 
         } else { 
@@ -1332,7 +1338,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     // 2026-06-xx 物理同步：基于同步获取的 File ID 进行归类，解决新文件关联失败冲突。 
                     std::string fid = MetadataManager::instance().getFileIdSync(wPath); 
                     if (!fid.empty()) { 
-                        CategoryRepo::addItemToCategory(catId, fid, wPath); 
+                        // 2026-06-xx 按照用户需求：如果在系统层选择了“未分类”，则清除该项所有其他分类关联
+                        if (catId == -2) { // 未分类的负数 ID
+                             CategoryRepo::removeAllCategories(fid);
+                        } else if (catId > 0) {
+                             CategoryRepo::addItemToCategory(catId, fid, wPath); 
+                        }
                     } 
                 } 
             } 
@@ -1551,10 +1562,19 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             for (const auto& idx : indexes) {
                 if (idx.column() == 0) {
                     QString itemPath = idx.data(PathRole).toString();
+                    auto meta = MetadataManager::instance().getMeta(itemPath.toStdWString());
+                    if (meta.isTrash && !meta.originalPath.empty()) {
+                        QString dest = QString::fromStdWString(meta.originalPath);
+                        QDir().mkpath(QFileInfo(dest).absolutePath());
+                        if (QFile::rename(itemPath, dest)) {
+                            MetadataManager::instance().markAsTrash(dest.toStdWString(), false);
+                            // 物理同步：由于原文件位置可能已被 MFT 逻辑自动识别，此处主要负责状态翻转
+                        }
+                    }
                 }
             }
             loadDirectory(m_currentPath);
-            emit MetadataManager::instance().metaChanged(""); // 刷新侧边栏计数
+            emit MetadataManager::instance().metaChanged("__RELOAD_ALL__"); // 刷新全量统计
             break;
         }
         case ActionDelete: 
@@ -1649,10 +1669,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         }
 
                         if (physicalOk) {
-                            // 2. 数据库同步清理 (三位一体)
-                            
-                            // 3. 元数据管理清理 (离散 SCCH 与 内存失效)
-                            MetadataManager::instance().removeMetadataSync(wp);
+                            // 2026-06-xx 按照用户要求：永久删除后从数据库彻底移除相应数据
+                            MetadataManager::instance().deletePermanently(wp);
                         }
 
                         count++;
