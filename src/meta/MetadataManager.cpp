@@ -140,6 +140,7 @@ void MetadataManager::initFromScchMode() {
     QDir dir(metaDir);
     if (dir.exists()) {
         QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files);
+        qDebug() << "[Metadata] 发现物理分库数量:" << dbFiles.size();
         for (const QString& dbFile : dbFiles) {
             // 文件名格式: Arcmeta_XXXX.db -> 提取 XXXX
             QString volSerial = dbFile.mid(8, dbFile.length() - 8 - 3);
@@ -181,6 +182,7 @@ void MetadataManager::initFromScchMode() {
                     rm.isTrash = sqlite3_column_int(stmt, 13) != 0;
                     const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 14));
                     if (wOrigPath) rm.originalPath = wOrigPath;
+                    rm.isInvalid = sqlite3_column_int(stmt, 15) != 0;
                     if (paletteBlob && paletteSize > 0) {
                         QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
                         QJsonDocument doc = QJsonDocument::fromJson(ba);
@@ -211,7 +213,9 @@ void MetadataManager::initFromScchMode() {
 
     // 2026-06-xx 物理对账：在初始化结束前，执行一次完整的统计重计
     CategoryRepo::fullRecount();
-    qDebug() << "[PERF] SQLite 元数据镜像构建完成，总项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
+    qDebug() << "[PERF] SQLite 元数据镜像构建完成。内存映射数:" << tempCache.size()
+             << " ID索引数:" << tempFidToPath.size()
+             << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     emit metaChanged("__RELOAD_ALL__");
 }
 
@@ -257,6 +261,26 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
     }
     if (notify) emit metaChanged(QString::fromStdWString(nPath));
     debouncePersist(nPath);
+}
+
+void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool notify) {
+    std::wstring nPath = MetadataManager::normalizePath(path);
+    ensureActivated(nPath);
+    bool changed = false;
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        if (m_cache[nPath].isInvalid != invalid) {
+            m_cache[nPath].isInvalid = invalid;
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        // 如果标记为失效，活跃总数减少；如果恢复，活跃总数增加
+        CategoryRepo::incrementTotalFileCount(invalid ? -1 : 1);
+        if (notify) emit metaChanged(QString::fromStdWString(nPath));
+        debouncePersist(nPath);
+    }
 }
 
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
@@ -398,7 +422,11 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         for (std::unordered_map<std::wstring, RuntimeMeta>::iterator it = m_cache.begin(); it != m_cache.end(); ) {
             if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
-                if (!it->second.isFolder) CategoryRepo::incrementTotalFileCount(-1);
+                // 只有非失效且非文件夹的文件删除时才扣减总计数
+                // 因为失效数据已经从总数据中剥离统计了（或者说失效数据本身也是资产，用户手动删除时才真正减少）
+                if (!it->second.isFolder && !it->second.isTrash && !it->second.isInvalid) {
+                    CategoryRepo::incrementTotalFileCount(-1);
+                }
                 if (!it->second.fileId128.empty()) m_fidToPath.erase(it->second.fileId128);
                 
                 // 从 SQLite 中删除
@@ -424,12 +452,21 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
 void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const std::wstring& origPath) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
+    bool changed = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nPath].isTrash = isTrash;
-        if (isTrash && !origPath.empty()) m_cache[nPath].originalPath = origPath;
+        if (m_cache[nPath].isTrash != isTrash) {
+            m_cache[nPath].isTrash = isTrash;
+            if (isTrash && !origPath.empty()) m_cache[nPath].originalPath = origPath;
+            changed = true;
+        }
     }
-    persistAsync(nPath);
+
+    if (changed) {
+        // 如果进入回收站，活跃总数减少；如果还原，活跃总数增加
+        CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
+        persistAsync(nPath);
+    }
 }
 
 void MetadataManager::deletePermanently(const std::wstring& path) {
@@ -545,7 +582,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
     if (!db) return;
 
     sqlite3_stmt* stmt;
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     bool isNew = true;
     {
         sqlite3_stmt* checkStmt;
@@ -581,6 +618,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
         sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, 14, rMeta.isTrash ? 1 : 0);
         sqlite3_bind_text16(stmt, 15, rMeta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 16, rMeta.isInvalid ? 1 : 0);
 
         if (sqlite3_step(stmt) == SQLITE_DONE) {
             if (isNew && !rMeta.isFolder) {
