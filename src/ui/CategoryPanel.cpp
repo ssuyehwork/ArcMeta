@@ -17,6 +17,7 @@ using namespace ArcMeta::Style;
 
 
 #include "../meta/MetadataManager.h"
+#include "../core/CoreController.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -66,8 +67,7 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     connect(m_refreshTimer, &QTimer::timeout, this, [this]() {
         if (!m_categoryModel) return;
         
-        // 2026-06-xx 物理修复：如果模型当前为空（如启动初始化阶段），强制执行全量 refresh
-        if (m_isFirstLoad || m_categoryModel->rowCount() <= 1) {
+        if (m_isFirstLoad) {
             m_categoryModel->refresh();
             m_isFirstLoad = false;
         } else {
@@ -94,6 +94,14 @@ CategoryPanel::CategoryPanel(QWidget* parent)
 
     initUi();
     setupContextMenu();
+
+    // 2026-06-xx 物理修复：连接 CoreController 的初始化完成信号
+    // 理由：系统启动时的 initFromScchMode 是异步进行的，完成后必须强制刷新侧边栏
+    // 以解决数据库加载延迟导致的系统项（如“全部数据”、“未分类”）显示为 0 的问题
+    connect(&CoreController::instance(), &CoreController::initializationFinished, this, [this]() {
+        qDebug() << "[CategoryPanel] 检测到系统后台初始化完成，触发计数刷新...";
+        requestRefresh();
+    });
 }
 
 void CategoryPanel::requestRefresh() {
