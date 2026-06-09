@@ -139,7 +139,8 @@ void MetadataManager::initFromScchMode() {
     QString metaDir = QCoreApplication::applicationDirPath() + "/.arcmeta";
     QDir dir(metaDir);
     if (dir.exists()) {
-        QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files);
+        // 2026-06-xx 物理修复：必须包含 Hidden 和 System 标志，因为 DatabaseManager 会将数据库设为隐藏属性
+        QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files | QDir::Hidden | QDir::System);
         qDebug() << "[Metadata] 发现物理分库数量:" << dbFiles.size();
         for (const QString& dbFile : dbFiles) {
             // 文件名格式: Arcmeta_XXXX.db -> 提取 XXXX
@@ -211,7 +212,7 @@ void MetadataManager::initFromScchMode() {
         m_loaded = true;
     }
 
-    // 2026-06-xx 物理对账：在初始化结束前，执行一次完整的统计重计
+    // 2026-06-xx 物理对账：在初始化结束后（m_loaded 为 true 且缓存就绪），执行一次完整的统计重计
     CategoryRepo::fullRecount();
     qDebug() << "[PERF] SQLite 元数据镜像构建完成。内存映射数:" << tempCache.size() 
              << " ID索引数:" << tempFidToPath.size()

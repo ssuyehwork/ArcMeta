@@ -349,26 +349,30 @@ std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
     return res;
 }
 
+static std::mutex s_repoMutex;
+
 std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
     std::vector<std::pair<int, int>> res;
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return res;
 
-    // 2026-06-xx 按照用户要求：任何虚拟分类计数只可计数文件数量，绝不可包含文件夹数量
-    // 逻辑：从关联表获取所有项，并结合 MetadataManager 剔除文件夹
+    std::lock_guard<std::mutex> lock(s_repoMutex);
     std::map<int, int> countMap;
     sqlite3_stmt* stmt;
+    
+    // 2026-06-xx 按照用户要求：分类计数必须排除文件夹、回收站及失效数据
+    // 逻辑：获取所有关联关系，并交叉验证内存元数据缓存
     const char* sql = "SELECT category_id, file_id FROM category_items";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             int catId = sqlite3_column_int(stmt, 0);
             const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-            
             if (fid) {
+                // 通过 FID 反向查询路径并验证属性
                 std::wstring path = MetadataManager::instance().getPathByFid(fid);
                 if (!path.empty()) {
                     auto meta = MetadataManager::instance().getMeta(path);
-                    if (!meta.isFolder) {
+                    if (!meta.isFolder && !meta.isTrash && !meta.isInvalid) {
                         countMap[catId]++;
                     }
                 }
@@ -402,7 +406,7 @@ void CategoryRepo::setCategorizedCount(int count) {
 void CategoryRepo::incrementTotalFileCount(int delta) {
     s_totalFileCount += delta;
     
-    // 2026-06-xx 物理持久化：同步写入数据库
+    std::lock_guard<std::mutex> lock(s_repoMutex);
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (db) {
         sqlite3_stmt* stmt;
@@ -419,7 +423,7 @@ void CategoryRepo::incrementTotalFileCount(int delta) {
 void CategoryRepo::incrementCategorizedCount(int delta) {
     s_categorizedCount += delta;
     
-    // 2026-06-xx 物理持久化：同步写入数据库
+    std::lock_guard<std::mutex> lock(s_repoMutex);
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (db) {
         sqlite3_stmt* stmt;
@@ -438,6 +442,7 @@ void CategoryRepo::fullRecount() {
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     bool hasSavedCounts = false;
     if (db) {
+        std::lock_guard<std::mutex> lock(s_repoMutex);
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "SELECT key, value FROM system_stats", -1, &stmt, nullptr) == SQLITE_OK) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -461,14 +466,27 @@ void CategoryRepo::fullRecount() {
 
     // 2026-06-xx 物理修复：如果是旧版本升级（数据库无计数），或者数据库损坏导致计数为 0，
     // 我们必须从内存镜像（MetadataManager 加载的数据）中初始化一次计数并落库。
-    // 否则，即使数据库里有数据，由于 key='total_file_count' 不存在，UI 也会显示 0。
-    if (!hasSavedCounts || s_totalFileCount.load() <= 0) {
+    // 特别是：即使 total > 0，如果 categorized 为 0 且存在关联项，也要重新触发盘点。
+    bool needsInventory = !hasSavedCounts || s_totalFileCount.load() <= 0;
+    if (!needsInventory && s_categorizedCount.load() <= 0) {
+        // 快速检查数据库是否存在任何关联
+        if (db) {
+            sqlite3_stmt* checkStmt;
+            if (sqlite3_prepare_v2(db, "SELECT 1 FROM category_items LIMIT 1", -1, &checkStmt, nullptr) == SQLITE_OK) {
+                if (sqlite3_step(checkStmt) == SQLITE_ROW) needsInventory = true;
+                sqlite3_finalize(checkStmt);
+            }
+        }
+    }
+
+    if (needsInventory) {
         int total = 0;
         int categorized = 0;
         
         // 获取所有已分类的 FID 用于计数
         std::unordered_set<std::string> categorizedFids;
         if (db) {
+            std::lock_guard<std::mutex> lock(s_repoMutex);
             sqlite3_stmt* stmt;
             if (sqlite3_prepare_v2(db, "SELECT DISTINCT file_id FROM category_items", -1, &stmt, nullptr) == SQLITE_OK) {
                 while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -491,6 +509,7 @@ void CategoryRepo::fullRecount() {
         s_categorizedCount.store(categorized);
         
         if (db) {
+            std::lock_guard<std::mutex> lock(s_repoMutex);
             sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
             sqlite3_stmt* stmt;
             const char* sql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?)";
@@ -540,6 +559,8 @@ void CategoryRepo::fullRecount() {
             qDebug() << "[Recount] 物理校验发现" << invalidatedCount << "个失效项，已归类至失效数据";
             // 2026-06-xx 物理同步：强制将内存中的 is_invalid 变更刷入磁盘
             DatabaseManager::instance().flushAll();
+            // 触发 UI 全量对账刷新信号
+            emit MetadataManager::instance().metaChanged("__RELOAD_ALL__");
         }
     });
 }
@@ -590,28 +611,11 @@ int CategoryRepo::getUncategorizedItemCount() {
 QMap<QString, int> CategoryRepo::getSystemCounts() {
     QMap<QString, int> res;
     
-    // 获取已分类的有效文件 FID 集合以计算未分类
-    // 2026-06-xx 按照用户要求：任何虚拟分类计数只可计数文件数量
-    std::unordered_set<std::string> categorizedFids;
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (db) {
-        sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(db, "SELECT DISTINCT file_id FROM category_items", -1, &stmt, nullptr) == SQLITE_OK) {
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                if (fid) {
-                    std::wstring path = MetadataManager::instance().getPathByFid(fid);
-                    if (!path.empty()) {
-                         auto meta = MetadataManager::instance().getMeta(path);
-                         if (!meta.isFolder) categorizedFids.insert(fid);
-                    }
-                }
-            }
-            sqlite3_finalize(stmt);
-        }
-    }
+    // 2026-06-xx 物理加速：如果内存计数器已有值，直接作为基准
+    int totalSaved = s_totalFileCount.load();
+    int categorizedSaved = s_categorizedCount.load();
 
-    int activeTotal = 0, recently = 0, untagged = 0, uncategorized = 0, trashCount = 0, invalidCount = 0;
+    int recently = 0, untagged = 0, uncategorized = 0, trashCount = 0, invalidCount = 0;
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
 
     MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
@@ -620,30 +624,23 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
 
         if (meta.isInvalid) {
             invalidCount++;
-            return; // 2026-06-xx 物理隔离：失效数据不参与其他正常分类统计
+            return; 
         }
         
         if (meta.isTrash) {
             trashCount++;
-            return; // 2026-06-xx 物理隔离：回收站数据不参与“未分类”、“未标注”等统计
+            return; 
         }
-
-        activeTotal++;
 
         // 2026-06-xx 按照用户要求：“未标签”与“已标签”相互隔离
         if (meta.tags.isEmpty()) untagged++;
         if (meta.atime >= now - 86400000.0) recently++;
-        
-        // “未分类”定义：存在于 metadata 表但不在 category_items 表中的有效文件（非回收站）
-        if (categorizedFids.find(meta.fileId128) == categorizedFids.end()) {
-            uncategorized++;
-        }
     });
 
-    res["all"] = activeTotal;
+    res["all"] = totalSaved;
     res["recently_visited"] = recently;
     res["untagged"] = untagged;
-    res["uncategorized"] = uncategorized;
+    res["uncategorized"] = (totalSaved - categorizedSaved) > 0 ? (totalSaved - categorizedSaved) : 0;
     res["trash"] = trashCount;
     res["invalid_data"] = invalidCount;
     return res;
