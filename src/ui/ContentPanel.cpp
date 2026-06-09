@@ -401,19 +401,23 @@ void FilterProxyModel::setSearchQuery(const QString& query) {
 bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const { 
     QModelIndex idx = sourceModel()->index(sourceRow, 0, sourceParent); 
      
+    // 2026-06-xx 性能优化：提前获取 ItemRecord，避免重复查询并为下方过滤提供数据支撑
+    const auto* sourceModelPtr = qobject_cast<const FerrexVirtualDbModel*>(sourceModel());
+    if (!sourceModelPtr) return true;
+
+    const auto& records = sourceModelPtr->allRecords();
+    if (sourceRow < 0 || sourceRow >= (int)records.size()) return false;
+    const auto& record = records[sourceRow];
+
     // 1. 评级过滤 
     if (!currentFilter.ratings.isEmpty()) { 
-        int r = idx.data(RatingRole).toInt(); 
+        int r = record.rating; // 直接从烘焙好的 record 获取，消除 idx.data 虚拟调用开销
         if (!currentFilter.ratings.contains(r)) return false; 
     } 
  
     // 2. 颜色过滤 (变长物理多色板命中逻辑)
     if (!currentFilter.colors.isEmpty()) { 
-        QString path = idx.data(PathRole).toString();
-        QString dominantColor = idx.data(ColorRole).toString();
-        
-        // 获取该项目的所有物理颜色 (变长色板)
-        QVector<QColor> palettes = MetadataManager::instance().getPalettes(path.toStdWString());
+        QString dominantColor = record.color; // 直接从烘焙好的 record 获取
         
         bool matchColor = false;
         for (const QString& fc : currentFilter.colors) {
@@ -456,7 +460,7 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
  
     // 3. 标签过滤 
     if (!currentFilter.tags.isEmpty()) { 
-        QStringList itemTags = idx.data(TagsRole).toStringList(); 
+        const QStringList& itemTags = record.tags;
         bool matchTag = false; 
         for (const QString& fTag : currentFilter.tags) { 
             if (fTag == "__none__") { 
@@ -467,10 +471,6 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         } 
         if (!matchTag) return false; 
     } 
- 
-    const auto& records = static_cast<const FerrexVirtualDbModel*>(sourceModel())->allRecords();
-    if (sourceRow >= (int)records.size()) return false;
-    const auto& record = records[sourceRow];
 
     // 4. 类型过滤 
     if (!currentFilter.types.isEmpty()) { 
