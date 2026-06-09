@@ -1197,6 +1197,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         if (categories.empty()) categories = CategoryRepo::getAll();
         if (categories.size() > 15) categories.resize(15);
 
+        // 2026-06-xx 按照用户需求：增加“回归未分类”选项
+        QAction* actToUncat = categorizeMenu->addAction(UiHelper::getIcon("uncategorized", QColor("#95a5a6"), 16), "回归“未分类”");
+        actToUncat->setData(ActionCategorize);
+        actToUncat->setProperty("catId", -2); // 未分类的负数 ID
+        categorizeMenu->addSeparator();
+
         if (categories.empty()) { 
             categorizeMenu->addAction("（暂无分类）")->setEnabled(false); 
         } else { 
@@ -1332,7 +1338,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     // 2026-06-xx 物理同步：基于同步获取的 File ID 进行归类，解决新文件关联失败冲突。 
                     std::string fid = MetadataManager::instance().getFileIdSync(wPath); 
                     if (!fid.empty()) { 
-                        CategoryRepo::addItemToCategory(catId, fid, wPath); 
+                        // 2026-06-xx 按照用户需求：如果在系统层选择了“未分类”，则清除该项所有其他分类关联
+                        if (catId == -2) { // 未分类的负数 ID
+                             CategoryRepo::removeAllCategories(fid);
+                        } else if (catId > 0) {
+                             CategoryRepo::addItemToCategory(catId, fid, wPath);
+                        }
                     } 
                 } 
             } 
