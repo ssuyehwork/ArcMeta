@@ -211,7 +211,8 @@ void MetadataManager::initFromScchMode() {
         m_loaded = true;
     }
 
-    // 2026-06-xx 物理对账：在初始化结束前，执行一次完整的统计重计
+    // 2026-06-xx 物理对账：在镜像完全载入内存后，立即触发账本重计
+    // 必须确保 fullRecount 在 m_loaded = true 之后执行，因为盘点需要读取缓存
     CategoryRepo::fullRecount();
     qDebug() << "[PERF] SQLite 元数据镜像构建完成。内存映射数:" << tempCache.size()
              << " ID索引数:" << tempFidToPath.size()

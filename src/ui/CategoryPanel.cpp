@@ -66,7 +66,8 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     connect(m_refreshTimer, &QTimer::timeout, this, [this]() {
         if (!m_categoryModel) return;
         
-        if (m_isFirstLoad) {
+        // 2026-06-xx 物理修复：如果模型当前为空（如启动初始化阶段），强制执行全量 refresh
+        if (m_isFirstLoad || m_categoryModel->rowCount() <= 1) {
             m_categoryModel->refresh();
             m_isFirstLoad = false;
         } else {
