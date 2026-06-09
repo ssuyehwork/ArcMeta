@@ -615,7 +615,7 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     int totalSaved = s_totalFileCount.load();
     int categorizedSaved = s_categorizedCount.load();
 
-    int recently = 0, untagged = 0, uncategorized = 0, trashCount = 0, invalidCount = 0;
+    int recently = 0, untagged = 0, trashCount = 0, invalidCount = 0;
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
 
     MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
