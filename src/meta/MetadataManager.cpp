@@ -434,7 +434,7 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
 
 void MetadataManager::deletePermanently(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    std::wstring fid = getFileIdSync(nPath);
+    std::string fid = getFileIdSync(nPath);
 
     // 1. 从关联表彻底删除
     CategoryRepo::removeAllCategories(fid);
