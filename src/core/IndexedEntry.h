@@ -3,6 +3,8 @@
 #include <vector>
 #include <cstdint>
 #include <QList>
+#include <QColor>
+#include <utility>
 
 namespace ArcMeta {
 
