@@ -32,7 +32,9 @@ void DatabaseManager::ensureHidden(const std::wstring& path) {
 }
 
 bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
-    if (sqlite3_open_v2(reinterpret_cast<const char*>(QString::fromStdWString(diskPath).toUtf8().constData()), &conn.diskDb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
+    std::string utf8Path = QString::fromStdWString(diskPath).toUtf8().toStdString();
+    if (sqlite3_open_v2(utf8Path.c_str(), &conn.diskDb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
+        qDebug() << "[DB] Failed to open disk DB:" << QString::fromStdString(utf8Path);
         return false;
     }
     ensureHidden(diskPath);
@@ -64,7 +66,8 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             file_size INTEGER,
             palettes BLOB,
             is_trash INTEGER DEFAULT 0,
-            original_path TEXT
+            original_path TEXT,
+            is_invalid INTEGER DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
 
@@ -89,12 +92,38 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             added_at REAL,
             PRIMARY KEY (category_id, file_id)
         );
+
+        -- 系统统计表
+        CREATE TABLE IF NOT EXISTS system_stats (
+            key TEXT PRIMARY KEY,
+            value INTEGER DEFAULT 0
+        );
     )";
     char* errMsg = nullptr;
     sqlite3_exec(conn.memDb, schema, nullptr, nullptr, &errMsg);
     if (errMsg) {
         qDebug() << "[DB] Schema error:" << errMsg;
         sqlite3_free(errMsg);
+    }
+
+    // 2026-06-xx 物理加固：自动迁移旧版本数据库字段
+    // 检查 metadata 是否包含 is_invalid 字段
+    sqlite3_stmt* checkStmt;
+    bool hasInvalidColumn = false;
+    if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(checkStmt) == SQLITE_ROW) {
+            const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(checkStmt, 1));
+            if (colName && std::string(colName) == "is_invalid") {
+                hasInvalidColumn = true;
+                break;
+            }
+        }
+        sqlite3_finalize(checkStmt);
+    }
+
+    if (!hasInvalidColumn) {
+        qDebug() << "[DB] 检测到旧版数据库，正在添加 is_invalid 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN is_invalid INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
     }
 
     conn.diskPath = diskPath;
