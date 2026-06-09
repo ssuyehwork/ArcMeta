@@ -32,7 +32,9 @@ void DatabaseManager::ensureHidden(const std::wstring& path) {
 }
 
 bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
-    if (sqlite3_open_v2(reinterpret_cast<const char*>(QString::fromStdWString(diskPath).toUtf8().constData()), &conn.diskDb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
+    std::string utf8Path = QString::fromStdWString(diskPath).toUtf8().toStdString();
+    if (sqlite3_open_v2(utf8Path.c_str(), &conn.diskDb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
+        qDebug() << "[DB] Failed to open disk DB:" << QString::fromStdString(utf8Path);
         return false;
     }
     ensureHidden(diskPath);

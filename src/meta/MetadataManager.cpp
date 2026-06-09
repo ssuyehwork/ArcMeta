@@ -140,6 +140,7 @@ void MetadataManager::initFromScchMode() {
     QDir dir(metaDir);
     if (dir.exists()) {
         QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files);
+        qDebug() << "[Metadata] 发现物理分库数量:" << dbFiles.size();
         for (const QString& dbFile : dbFiles) {
             // 文件名格式: Arcmeta_XXXX.db -> 提取 XXXX
             QString volSerial = dbFile.mid(8, dbFile.length() - 8 - 3);
@@ -212,7 +213,9 @@ void MetadataManager::initFromScchMode() {
 
     // 2026-06-xx 物理对账：在初始化结束前，执行一次完整的统计重计
     CategoryRepo::fullRecount();
-    qDebug() << "[PERF] SQLite 元数据镜像构建完成，总项数:" << tempCache.size() << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
+    qDebug() << "[PERF] SQLite 元数据镜像构建完成。内存映射数:" << tempCache.size()
+             << " ID索引数:" << tempFidToPath.size()
+             << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     emit metaChanged("__RELOAD_ALL__");
 }
 

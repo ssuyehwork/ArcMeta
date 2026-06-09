@@ -448,8 +448,12 @@ void CategoryRepo::fullRecount() {
                 if (key == "total_file_count") {
                     s_totalFileCount.store(val);
                     hasSavedCounts = true;
+                    qDebug() << "[Recount] 从数据库加载历史计数: Total =" << val;
                 }
-                else if (key == "categorized_count") s_categorizedCount.store(val);
+                else if (key == "categorized_count") {
+                    s_categorizedCount.store(val);
+                    qDebug() << "[Recount] 从数据库加载历史计数: Categorized =" << val;
+                }
             }
             sqlite3_finalize(stmt);
         }
@@ -501,13 +505,15 @@ void CategoryRepo::fullRecount() {
                 sqlite3_finalize(stmt);
             }
             sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
+            // 物理落盘，确保初始化结果即刻生效
+            DatabaseManager::instance().flushAll();
         }
     }
 
     // 2026-06-xx 核心逻辑升级：物理有效性对账 (盘点 FRN)
     // 这一步在后台异步执行，验证文件是否被第三方删除。若失效，标记为 is_invalid 而非直接删除。
     // 使用 [db] 显式捕获数据库指针，并增加错误检查
-    QtConcurrent::run([db]() {
+    (void)QtConcurrent::run([db]() {
         if (!db) return;
 
         std::vector<std::pair<std::wstring, std::string>> itemsToCheck;
