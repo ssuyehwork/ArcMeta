@@ -470,8 +470,28 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
 
 void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const std::wstring& origPath) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    ensureActivated(nPath);
+    std::string fid;
+    fetchWinApiMetadataDirect(nPath, fid);
+
     bool changed = false;
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        
+        // 核心修复：防止内存中出现同一个 FID 的多条路径记录（物理偏移导致的重复计数）
+        if (!fid.empty() && m_fidToPath.count(fid)) {
+            std::wstring oldPath = m_fidToPath[fid];
+            if (oldPath != nPath) {
+                m_cache.erase(oldPath);
+                qDebug() << "[Metadata] 检测到路径偏移，已从内存清理旧条目以防止重复计数:" << QString::fromStdWString(oldPath);
+            }
+        }
+
+        // 2026-06-xx 物理加固：确保新路径条目已激活
+        // 注意：此处必须先释放锁或在 ensureActivated 内部不重复加锁
+    }
+    
+    ensureActivated(nPath); 
+
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         if (m_cache[nPath].isTrash != isTrash) {
@@ -479,12 +499,16 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
             if (isTrash && !origPath.empty()) m_cache[nPath].originalPath = origPath;
             changed = true;
         }
+        if (!fid.empty()) m_fidToPath[fid] = nPath;
     }
     
     if (changed) {
         // 如果进入回收站，活跃总数减少；如果还原，活跃总数增加
         CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
         persistAsync(nPath);
+        
+        // 2026-06-xx 物理修复：状态变更后必须强制发射信号，驱动侧边栏重数一遍
+        emit metaChanged("__RELOAD_ALL__");
     }
 }
 
