@@ -24,6 +24,8 @@
 !RapidNotes/**
 !Eagle/
 !Eagle/**
+!程序崩溃日志/
+!程序崩溃日志/**
 
 !.cargo/
 !.cargo/**
