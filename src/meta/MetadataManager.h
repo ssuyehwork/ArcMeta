@@ -54,6 +54,10 @@ class MetadataManager : public QObject {
 public:
     static MetadataManager& instance();
 
+    static std::string generateFallbackFid(const std::wstring& vol, const std::wstring& frn);
+    static std::string generateDeterministicSha256Id(const std::wstring& path);
+    static std::wstring generateDeterministicFrn(const std::wstring& path);
+    static std::wstring normalizePath(const std::wstring& path);
     
     void initFromScchMode();
     RuntimeMeta getMeta(const std::wstring& path);
@@ -146,11 +150,6 @@ public:
      * 2026-06-xx 物理补完：增加 outFrn 参数以获取物理索引，彻底杜绝数据库主键冲突
      */
     static bool fetchWinApiMetadataDirect(const std::wstring& path, std::string& outId128, std::wstring* outFrn = nullptr, long long* outSize = nullptr, std::wstring* outType = nullptr, long long* outCtime = nullptr, long long* outMtime = nullptr, long long* outAtime = nullptr);
-
-    static std::string generateFallbackFid(const std::wstring& vol, const std::wstring& frn);
-    static std::string generateDeterministicSha256Id(const std::wstring& path);
-    static std::wstring generateDeterministicFrn(const std::wstring& path);
-    static std::wstring normalizePath(const std::wstring& path);
 
 signals:
     // 2026-05-27 物理修复：信号参数由 std::wstring 改为 QString

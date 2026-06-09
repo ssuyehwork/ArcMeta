@@ -35,6 +35,7 @@ struct ItemRecord {
     bool isEmpty = false;
     bool isManaged = false; // 预存受控状态
     QString suffix;
+    std::vector<std::pair<QColor, float>> palettes; // 烘焙物理色板，消除 filterAcceptsRow 锁争抢
 };
 
 /**

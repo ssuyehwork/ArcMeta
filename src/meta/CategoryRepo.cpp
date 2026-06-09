@@ -334,7 +334,14 @@ void CategoryRepo::incrementCategorizedCount(int delta) {
 }
 
 void CategoryRepo::fullRecount() {
-    // 重新计算已分类项数
+    // 1. 重新计算总文件数（基于 MetadataManager 缓存）
+    int totalFiles = 0;
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
+        if (!meta.isFolder) totalFiles++;
+    });
+    s_totalFileCount.store(totalFiles);
+
+    // 2. 重新计算已分类项数
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (db) {
         sqlite3_stmt* stmt;
