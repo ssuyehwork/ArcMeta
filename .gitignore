@@ -1,4 +1,6 @@
-# 默认忽略所有文件夹
+
+!Eagle/
+!Eagle/**# 默认忽略所有文件夹
 */
 
 # 允许上传 resources 和 src 文件夹及其所有内容
@@ -18,6 +20,8 @@
 !jules_510/**
 !src - 副本/
 !src - 副本/**
+!RapidNotes/
+!RapidNotes/**
 !Eagle/
 !Eagle/**
 
