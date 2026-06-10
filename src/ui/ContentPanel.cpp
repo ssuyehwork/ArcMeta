@@ -1071,7 +1071,7 @@ void ContentPanel::initListView() {
     m_treeView->setContextMenuPolicy(Qt::CustomContextMenu); 
     m_treeView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
     // 2026-06-xx 按照用户要求：开启蓝色透明框选效果
-    m_treeView->setSelectionRectVisible(true);
+    // 物理修复：QTreeView 不支持 setSelectionRectVisible，通过 QPalette 高亮色实现视觉对齐
      
     m_treeView->setDragEnabled(true); 
     m_treeView->setDragDropMode(QAbstractItemView::DragOnly); 

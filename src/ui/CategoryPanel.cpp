@@ -172,9 +172,9 @@ void CategoryPanel::setupContextMenu() {
 
         // 基于规范逻辑：如果没有选中项，或者选中了“我的分类”根节点
         QString itemName = index.data(NameRole).toString();
-        QString type = index.data(TypeRole).toString();
+        QString itemType = index.data(TypeRole).toString();
 
-        if (type == "trash") {
+        if (itemType == "trash") {
             // 2026-06-xx 物理级 1:1 还原：回收站专属右键菜单
             menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "清空回收站", this, &CategoryPanel::onEmptyTrash);
             menu.addAction(UiHelper::getIcon("sync", PrimaryBlue, 18), "还原全部项目", this, &CategoryPanel::onRestoreAllFromTrash);
@@ -187,10 +187,10 @@ void CategoryPanel::setupContextMenu() {
             sortMenu->addAction("标题(全部) (Z→A)", this, &CategoryPanel::onSortAllByNameDesc);
         } else {
             // 2026-03-xx 按照用户要求：补全子层级（子分类、文件、文件夹）的右键菜单
-            QString type = index.data(TypeRole).toString();
+            // 物理修复：移除重复声明，使用统一的 itemType 变量
             
             // 只要不是系统根节点，都弹出完整菜单
-            if (type == "category" || type == "file" || type == "folder") {
+            if (itemType == "category" || itemType == "file" || itemType == "folder") {
                 
                 // 2026-06-xx 统一图标
                 menu.addAction(UiHelper::getIcon("folder_filled", PrimaryBlue, 18), "归类到此分类", this, &CategoryPanel::onClassifyToCategory);
@@ -675,7 +675,8 @@ void CategoryPanel::onSortAllByNameDesc() {
 
 void CategoryPanel::onEmptyTrash() {
     // 1. 获取回收站内所有 FID
-    auto trashItems = CategoryRepo::getFileIdsInCategory(TRASH_CATEGORY_ID);
+    // 物理修复：明确作用域标识符 CategoryRepo::TRASH_CATEGORY_ID
+    std::vector<std::string> trashItems = CategoryRepo::getFileIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
     if (trashItems.empty()) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站已空", 1000);
         return;
@@ -690,7 +691,8 @@ void CategoryPanel::onEmptyTrash() {
 
 void CategoryPanel::onRestoreAllFromTrash() {
     // 1. 获取回收站内所有 FID
-    auto trashItems = CategoryRepo::getFileIdsInCategory(TRASH_CATEGORY_ID);
+    // 物理修复：明确作用域标识符 CategoryRepo::TRASH_CATEGORY_ID
+    std::vector<std::string> trashItems = CategoryRepo::getFileIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
     if (trashItems.empty()) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站内无项目", 1000);
         return;
