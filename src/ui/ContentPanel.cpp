@@ -316,10 +316,8 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
 
     if (metaUpdated) {
         m_metaCache.remove(path);
-        // 2026-06-xx 物理同步：发送全行更新信号，确保不同列的代理（如星级列、颜色列）同步刷新
-        QModelIndex left = index.siblingAtColumn(0);
-        QModelIndex right = index.siblingAtColumn(columnCount() - 1);
-        emit dataChanged(left, right, {role});
+        // 2026-06-xx 物理同步：更新本地 Record 缓存，确保 UI 和排序逻辑立即可见最新状态
+        updateRecordMetadata(path);
         return true;
     }
 
@@ -522,13 +520,22 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
 } 
  
 bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelIndex& source_right) const { 
-    // 核心红线：置顶优先规则 
-    bool leftPinned = source_left.data(IsLockedRole).toBool(); 
-    bool rightPinned = source_right.data(IsLockedRole).toBool(); 
+    // 2026-06-xx 工业级纠偏：置顶优先规则 (物理排序第一权重)
+    // 必须确保 PinnedRole 或 IsLockedRole 的判定逻辑在排序中具有绝对优先级
+    QVariant leftPinnedVar = source_left.data(PinnedRole);
+    if (!leftPinnedVar.isValid()) leftPinnedVar = source_left.data(IsLockedRole);
+    
+    QVariant rightPinnedVar = source_right.data(PinnedRole);
+    if (!rightPinnedVar.isValid()) rightPinnedVar = source_right.data(IsLockedRole);
+
+    bool leftPinned = leftPinnedVar.toBool();
+    bool rightPinned = rightPinnedVar.toBool();
  
     if (leftPinned != rightPinned) { 
-        if (sortOrder() == Qt::AscendingOrder) return leftPinned;  
-        else return !leftPinned;  
+        // 2026-06-xx 物理修复：Qt 排序模型在 Descending 下会反转 lessThan 结果
+        // 为了确保置顶项在任何排序顺序下都位于顶部，必须结合 sortOrder 进行逻辑判定
+        if (sortOrder() == Qt::AscendingOrder) return leftPinned; // 升序：左置顶 -> 小 (true)
+        else return !leftPinned; // 降序：左置顶 -> 结果反转 -> 需要返回 false 以保持顶部
     } 
     return QSortFilterProxyModel::lessThan(source_left, source_right); 
 } 
@@ -1025,7 +1032,8 @@ void ContentPanel::initGridView() {
 
     // 2026-06-xx 物理对齐：通过 QPalette 设定全局蓝色透明框选视觉样式
     QPalette p = m_gridView->palette();
-    p.setColor(QPalette::Highlight, QColor(55, 138, 221, 100)); // #378ADD 带透明度
+    // 使用 #378ADD (QColor(55, 138, 221)) 并设定 Alpha 为 80 以确保框选内容清晰可见
+    p.setColor(QPalette::Highlight, QColor(55, 138, 221, 80)); 
     p.setColor(QPalette::HighlightedText, Qt::white);
     m_gridView->setPalette(p);
     m_gridView->setContextMenuPolicy(Qt::CustomContextMenu); 
@@ -1080,7 +1088,7 @@ void ContentPanel::initListView() {
     // 2026-06-xx 按照用户要求：开启蓝色透明框选效果
     // 物理修复：QTreeView 不支持 setSelectionRectVisible，通过 QPalette 高亮色实现视觉对齐
     QPalette tp = m_treeView->palette();
-    tp.setColor(QPalette::Highlight, QColor(55, 138, 221, 100));
+    tp.setColor(QPalette::Highlight, QColor(55, 138, 221, 80));
     tp.setColor(QPalette::HighlightedText, Qt::white);
     m_treeView->setPalette(tp);
      
@@ -1271,7 +1279,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
  
         // [批量与加密区] 
         if (isFolder) { 
-            menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "扫描数据")->setData(ActionAddToCategory);
+            menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "扫描入库")->setData(ActionAddToCategory);
             menu.addAction("批量重命名 (Ctrl+Shift+R)")->setData(ActionBatchRename); 
         } else { 
             QMenu* cryptoMenu = menu.addMenu("加密保护"); 

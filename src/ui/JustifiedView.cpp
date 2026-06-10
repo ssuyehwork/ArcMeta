@@ -314,12 +314,12 @@ void JustifiedView::paintEvent(QPaintEvent*) {
     if (m_isDraggingSelection && !m_selectionRect.isEmpty()) {
         painter.save();
         painter.setRenderHint(QPainter::Antialiasing, false);
-        // 2026-06-xx 物理对齐：使用标准蓝 (#3498db) 并增加透明度以达到预期效果
-        QColor highlightColor = QColor("#3498db");
+        // 2026-06-xx 物理对齐：使用标准高亮蓝 (#378ADD) 并增加透明度以达到预期效果
+        QColor highlightColor = QColor("#378ADD");
         QColor brushColor = highlightColor;
-        brushColor.setAlpha(60); // 调低透明度使其更通透
+        brushColor.setAlpha(80); // 适度提升透明度可见度 (Alpha 0-255)
         painter.setBrush(brushColor);
-        painter.setPen(QPen(highlightColor, 1));
+        painter.setPen(QPen(highlightColor, 1, Qt::SolidLine));
         painter.drawRect(m_selectionRect);
         painter.restore();
     }
