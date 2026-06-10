@@ -218,7 +218,33 @@ void MetadataManager::initFromScchMode() {
     qDebug() << "[PERF] SQLite 元数据镜像构建完成。内存映射数:" << tempCache.size() 
              << " ID索引数:" << tempFidToPath.size()
              << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
-    emit metaChanged("__RELOAD_ALL__");
+    notifyUI(RefreshLevel::FullRebuild);
+}
+
+void MetadataManager::notifyUI(RefreshLevel level, const QString& path) {
+    switch (level) {
+        case RefreshLevel::CountsOnly:
+            emit metaChanged("__RELOAD_COUNT__");
+            break;
+        case RefreshLevel::PathUpdate:
+            if (!path.isEmpty()) emit metaChanged(path);
+            break;
+        case RefreshLevel::FullRebuild:
+            emit metaChanged("__RELOAD_ALL__");
+            break;
+    }
+}
+
+void MetadataManager::registerItem(const std::wstring& path) {
+    std::wstring nPath = normalizePath(path);
+    // 1. 激活项目 (获取 FID/FRN 等物理属性)
+    ensureActivated(nPath);
+    // 2. 物理同步 (存入数据库)
+    syncPhysicalMetadata(nPath, false);
+    // 3. 视觉预热 (提取颜色)
+    tryExtractColor(nPath);
+    // 4. 通知 UI 刷新该路径
+    notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 }
 
 RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
@@ -261,7 +287,7 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
         m_cache[nPath].rating = rating; 
     }
-    if (notify) emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
@@ -280,7 +306,7 @@ void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool no
     if (changed) {
         // 如果标记为失效，活跃总数减少；如果恢复，活跃总数增加
         CategoryRepo::incrementTotalFileCount(invalid ? -1 : 1);
-        if (notify) emit metaChanged(QString::fromStdWString(nPath));
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
         debouncePersist(nPath);
     }
 }
@@ -292,7 +318,7 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
         m_cache[nPath].color = color; 
     }
-    if (notify) emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
@@ -300,7 +326,7 @@ void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool noti
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
-    if (notify) emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
@@ -313,7 +339,7 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
         m_cache[nPath].tags = tags;
     }
 
-    if (notify) emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
@@ -321,7 +347,7 @@ void MetadataManager::setNote(const std::wstring& path, const std::wstring& note
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
-    if (notify) emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
@@ -329,7 +355,7 @@ void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, 
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
-    if (notify) emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
@@ -337,7 +363,7 @@ void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, boo
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].encrypted = encrypted; }
-    if (notify) emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
@@ -347,7 +373,7 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].palettes = entries; }
-    if (notify) emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
@@ -364,7 +390,7 @@ void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std:
         meta.palettes = entries;
     }
     
-    if (notify) emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
 }
 
@@ -416,7 +442,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             }
         }
     }
-    emit metaChanged(QString::fromStdWString(nNew));
+    notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nNew));
 }
 
 void MetadataManager::removeMetadataSync(const std::wstring& path) {
@@ -514,7 +540,7 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
         persistAsync(nPath);
         
         // 2026-06-xx 物理修复：状态变更后必须强制发射信号，驱动侧边栏重数一遍
-        emit metaChanged("__RELOAD_ALL__");
+        notifyUI(RefreshLevel::FullRebuild);
     }
 }
 
@@ -564,7 +590,7 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
     // 3. 如果项目从未被记入数据库，则无需执行任何数据库清理逻辑。
     if (!existsInDb) {
         qDebug() << "[Metadata] 永久删除项不在数据库中，跳过清理动作:" << QString::fromStdWString(nPath);
-        emit metaChanged("__RELOAD_ALL__");
+        notifyUI(RefreshLevel::FullRebuild);
         return;
     }
     
@@ -573,7 +599,7 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
 
     // 5. 物理修复：发射全量刷新信号，确保侧边栏计数立即同步
     qDebug() << "[Metadata] 已执行永久删除清理，通知 UI 刷新:" << QString::fromStdWString(nPath);
-    emit metaChanged("__RELOAD_ALL__");
+    notifyUI(RefreshLevel::FullRebuild);
 }
 
 std::wstring MetadataManager::getVolumeSerialNumber(const std::wstring& path) {
@@ -620,13 +646,7 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
 void MetadataManager::syncPhysicalMetadata(const std::wstring& path, bool notify) { persistAsync(path, notify); }
 
 void MetadataManager::activateItem(const std::wstring& path) {
-    std::string fid; std::wstring frn;
-    if (fetchWinApiMetadataDirect(path, fid, &frn)) {
-        std::wstring nPath = MetadataManager::normalizePath(path);
-        // 激活并持久化
-        instance().ensureActivated(nPath);
-        instance().syncPhysicalMetadata(nPath);
-    }
+    instance().registerItem(path);
 }
 
 void MetadataManager::tryExtractColor(const std::wstring& path) {
@@ -724,7 +744,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
         sqlite3_finalize(stmt);
     }
         
-    if (notify) emit metaChanged(QString::fromStdWString(nPath));
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 }
 
 

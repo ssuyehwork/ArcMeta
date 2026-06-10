@@ -7,6 +7,35 @@
 
 namespace ArcMeta {
 
+SqlTransaction::SqlTransaction(sqlite3* db) : m_db(db) {
+    if (m_db) {
+        sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+    }
+}
+
+SqlTransaction::~SqlTransaction() {
+    if (m_db && !m_committed) {
+        sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
+    }
+}
+
+bool SqlTransaction::commit() {
+    if (m_db && !m_committed) {
+        if (sqlite3_exec(m_db, "COMMIT", nullptr, nullptr, nullptr) == SQLITE_OK) {
+            m_committed = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+void SqlTransaction::rollback() {
+    if (m_db && !m_committed) {
+        sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
+        m_committed = true; // Mark as "processed" to prevent dtor rollback
+    }
+}
+
 DatabaseManager& DatabaseManager::instance() {
     static DatabaseManager inst;
     return inst;

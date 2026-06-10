@@ -7,8 +7,26 @@
 #include <map>
 #include <string>
 #include <mutex>
+#include <functional>
 
 namespace ArcMeta {
+
+/**
+ * @brief 数据库事务 RAII 守卫
+ * 确保即使在逻辑分支提前返回时事务也能安全关闭。
+ */
+class SqlTransaction {
+public:
+    explicit SqlTransaction(sqlite3* db);
+    ~SqlTransaction();
+
+    bool commit();
+    void rollback();
+
+private:
+    sqlite3* m_db;
+    bool m_committed = false;
+};
 
 class DatabaseManager : public QObject {
     Q_OBJECT

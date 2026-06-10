@@ -1022,6 +1022,12 @@ void ContentPanel::initGridView() {
     // 2026-06-xx 按照用户要求：开启蓝色透明框选效果
     // 物理修复：对于 ListView/TreeView 使用 setSelectionRectVisible
     if (auto* lv = qobject_cast<QListView*>(m_gridView)) lv->setSelectionRectVisible(true);
+
+    // 2026-06-xx 物理对齐：通过 QPalette 设定全局蓝色透明框选视觉样式
+    QPalette p = m_gridView->palette();
+    p.setColor(QPalette::Highlight, QColor(55, 138, 221, 100)); // #378ADD 带透明度
+    p.setColor(QPalette::HighlightedText, Qt::white);
+    m_gridView->setPalette(p);
     m_gridView->setContextMenuPolicy(Qt::CustomContextMenu); 
  
     m_gridView->setDragEnabled(true); 
@@ -1073,6 +1079,10 @@ void ContentPanel::initListView() {
     m_treeView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
     // 2026-06-xx 按照用户要求：开启蓝色透明框选效果
     // 物理修复：QTreeView 不支持 setSelectionRectVisible，通过 QPalette 高亮色实现视觉对齐
+    QPalette tp = m_treeView->palette();
+    tp.setColor(QPalette::Highlight, QColor(55, 138, 221, 100));
+    tp.setColor(QPalette::HighlightedText, Qt::white);
+    m_treeView->setPalette(tp);
      
     m_treeView->setDragEnabled(true); 
     m_treeView->setDragDropMode(QAbstractItemView::DragOnly); 
@@ -1504,36 +1514,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
                     std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
                     
-                    // A. 如果是图像，解析颜色
-                    if (info.isFile() && UiHelper::isGraphicsFile(info.suffix().toLower())) {
-                        if (MetadataManager::instance().getMeta(wp).color.empty()) {
-                            auto palette = UiHelper::extractPalette(p);
-                            if (!palette.isEmpty()) {
-                                QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                                MetadataManager::instance().setItemVisualMetadata(wp, dominant.name().toUpper().toStdWString(), palette, false);
-                            }
-                        }
-                    } 
-                    // B. 如果是文件夹，也要解析文件夹颜色 (基于内容)
-                    else if (info.isDir()) {
-                        if (MetadataManager::instance().getMeta(wp).color.empty()) {
-                             QDir subDir(p);
-                             QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-                             for (const auto& sf : subFiles) {
-                                 if (UiHelper::isGraphicsFile(sf.suffix().toLower())) {
-                                     auto palette = UiHelper::extractPalette(sf.absoluteFilePath());
-                                     if (!palette.isEmpty()) {
-                                         QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                                         MetadataManager::instance().setItemVisualMetadata(wp, dominant.name().toUpper().toStdWString(), palette, false);
-                                         break;
-                                     }
-                                 }
-                             }
-                        }
-                    }
-
-                    // C. 统一触发物理同步 (获取 FID/FRN) - 批量模式禁用单条通知信号
-                    MetadataManager::instance().syncPhysicalMetadata(wp, false);
+                    // 一站式注册：整合 FID 获取、物理属性同步及视觉预热
+                    MetadataManager::instance().registerItem(wp);
 
                     // 递归子项
                     if (info.isDir()) {
@@ -1553,7 +1535,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         weakProgress->deleteLater();
                     }
                     if (weakThis) {
-                         emit MetadataManager::instance().metaChanged("__RELOAD_ALL__");
+                         MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
                          weakThis->loadDirectory(weakThis->m_currentPath);
                          ToolTipOverlay::instance()->showText(QCursor::pos(), 
                              QString("已激活 %1 个项目，可在侧边栏查看").arg(currentHandled), 2000, QColor("#2ecc71"));
@@ -1583,7 +1565,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 }
             }
             loadDirectory(m_currentPath);
-            emit MetadataManager::instance().metaChanged("__RELOAD_ALL__"); // 刷新全量统计
+            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild); // 刷新全量统计
             break;
         }
         case ActionDelete: 
