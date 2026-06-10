@@ -31,6 +31,11 @@ public:
     static void openInExplorer(const QString& path);
 
     /**
+     * @brief 重命名条目
+     */
+    static bool renameItem(const QString& oldPath, const QString& newPath);
+
+    /**
      * @brief 格式化字节大小
      */
     static QString formatSize(qint64 bytes);

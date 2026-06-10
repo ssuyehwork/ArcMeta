@@ -123,6 +123,11 @@ set(SOURCES
     src/ui/RuleRow.h
     src/ui/SearchHistoryPanel.cpp
     src/ui/SearchHistoryPanel.h
+    src/ui/AddressHistoryPanel.cpp
+    src/ui/AddressHistoryPanel.h
+    src/core/ActionCommand.h
+    src/core/UndoManager.h
+    src/core/BasicCommands.h
     src/ui/ToolTipOverlay.cpp
     src/ui/ToolTipOverlay.h
     src/ui/TreeItemDelegate.h
