@@ -172,7 +172,13 @@ void CategoryPanel::setupContextMenu() {
 
         // 基于规范逻辑：如果没有选中项，或者选中了“我的分类”根节点
         QString itemName = index.data(NameRole).toString();
-        if (!index.isValid() || itemName == "我的分类") {
+        QString itemType = index.data(TypeRole).toString();
+
+        if (itemType == "trash") {
+            // 2026-06-xx 物理级 1:1 还原：回收站专属右键菜单
+            menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "清空回收站", this, &CategoryPanel::onEmptyTrash);
+            menu.addAction(UiHelper::getIcon("sync", PrimaryBlue, 18), "还原全部项目", this, &CategoryPanel::onRestoreAllFromTrash);
+        } else if (!index.isValid() || itemName == "我的分类") {
             menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建分类", this, &CategoryPanel::onCreateCategory);
             
             auto* sortMenu = menu.addMenu(UiHelper::getIcon("list_ul", QColor("#aaaaaa"), 18), "排列");
@@ -181,10 +187,10 @@ void CategoryPanel::setupContextMenu() {
             sortMenu->addAction("标题(全部) (Z→A)", this, &CategoryPanel::onSortAllByNameDesc);
         } else {
             // 2026-03-xx 按照用户要求：补全子层级（子分类、文件、文件夹）的右键菜单
-            QString type = index.data(TypeRole).toString();
+            // 物理修复：移除重复声明，使用统一的 itemType 变量
             
             // 只要不是系统根节点，都弹出完整菜单
-            if (type == "category" || type == "file" || type == "folder") {
+            if (itemType == "category" || itemType == "file" || itemType == "folder") {
                 
                 // 2026-06-xx 统一图标
                 menu.addAction(UiHelper::getIcon("folder_filled", PrimaryBlue, 18), "归类到此分类", this, &CategoryPanel::onClassifyToCategory);
@@ -664,6 +670,38 @@ void CategoryPanel::onSortAllByNameDesc() {
     if (CategoryRepo::reorderAll(false)) {
         m_categoryModel->refresh();
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#2ecc71;'>[OK] 全部已按 Z→A 排列</b>");
+    }
+}
+
+void CategoryPanel::onEmptyTrash() {
+    // 1. 获取回收站内所有 FID
+    // 物理修复：明确作用域标识符 CategoryRepo::TRASH_CATEGORY_ID
+    std::vector<std::string> trashItems = CategoryRepo::getFileIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
+    if (trashItems.empty()) {
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站已空", 1000);
+        return;
+    }
+
+    // 2. 物理彻底删除
+    if (CategoryRepo::permanentlyDeleteBatch(trashItems)) {
+        m_categoryModel->refresh();
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e74c3c;'>[OK] 已清空回收站</b>", 1500, ErrorRed);
+    }
+}
+
+void CategoryPanel::onRestoreAllFromTrash() {
+    // 1. 获取回收站内所有 FID
+    // 物理修复：明确作用域标识符 CategoryRepo::TRASH_CATEGORY_ID
+    std::vector<std::string> trashItems = CategoryRepo::getFileIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
+    if (trashItems.empty()) {
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站内无项目", 1000);
+        return;
+    }
+
+    // 2. 物理还原至未分类
+    if (CategoryRepo::restoreFromTrashBatch(trashItems)) {
+        m_categoryModel->refresh();
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#2ecc71;'>[OK] 已还原全部项目</b>", 1500, QColor("#2ecc71"));
     }
 }
 
@@ -1172,6 +1210,11 @@ bool CategoryPanel::eventFilter(QObject* obj, QEvent* event) {
     if (event->type() == QEvent::KeyPress) {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
         
+        // 2026-06-xx 按照用户要求：禁用 Ctrl+A 全选
+        if (obj == m_categoryTree && keyEvent->modifiers() == Qt::ControlModifier && keyEvent->key() == Qt::Key_A) {
+            return true; 
+        }
+
         // 2026-06-xx 按照用户要求：支持 Delete 键物理删除选中分类
         if (obj == m_categoryTree && keyEvent->key() == Qt::Key_Delete) {
             onDeleteCategory();

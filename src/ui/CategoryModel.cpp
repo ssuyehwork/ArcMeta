@@ -46,7 +46,8 @@ void CategoryModel::refresh() {
         // 2026-06-xx 物理削峰：refresh 仅构建树结构，计数逻辑剥离至异步 updateStatistics
         // 理由：getSystemCounts() 涉及全量内存盘点，在 UI 线程执行会导致假死。
         auto addSystemItem = [&](const QString& name, const QString& type, const QString& icon, const QString& color, int sysId) {
-            QStandardItem* item = new QStandardItem(QString("%1 (...)").arg(name));
+            // 2026-06-xx 物理修复：杜绝采用“...”占位符，默认显示为 (0)
+            QStandardItem* item = new QStandardItem(QString("%1 (0)").arg(name));
             item->setData(type, TypeRole);
             item->setData(name, NameRole);
             item->setData(color, ColorRole); 
@@ -112,7 +113,8 @@ void CategoryModel::refresh() {
             QString name = QString::fromStdWString(cat.name);
             QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
 
-            QStandardItem* item = new QStandardItem(QString("%1 (...)").arg(name));
+            // 2026-06-xx 物理修复：杜绝采用“...”占位符，默认显示为 (0)
+            QStandardItem* item = new QStandardItem(QString("%1 (0)").arg(name));
             item->setData("category", TypeRole);
             item->setData(id, IdRole);
             item->setData(color, ColorRole);
