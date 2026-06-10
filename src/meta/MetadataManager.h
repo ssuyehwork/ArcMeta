@@ -27,6 +27,7 @@ struct RuntimeMeta {
     bool isFolder; // 2026-06-xx 物理标记：区分文件夹与文件，用于侧边栏精准统计
     bool isTrash;  // 2026-06-xx 状态标记：是否处于回收站
     bool isInvalid; // 2026-06-xx 物理校验：是否为第三方删除导致的失效数据
+    bool isManaged; // 2026-06-xx 物理对标：标记该项是否已在数据库中登记
     std::wstring originalPath; // 2026-06-xx 路径记忆：用于回收站还原
     std::string fileId128; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
     
@@ -38,14 +39,14 @@ struct RuntimeMeta {
 
     std::vector<PaletteEntry> palettes;
 
-    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), ctime(0), mtime(0), atime(0), fileSize(0) {}
+    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), ctime(0), mtime(0), atime(0), fileSize(0) {}
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
-     * 2026-06-xx 按照用户要求：只要有任何元数据修改，即视为数据库已录入项
+     * 2026-06-xx 按照用户要求：只要有任何元数据修改或已登记，即视为数据库已录入项
      */
     bool hasUserOperations() const {
-        return rating > 0 || !color.empty() || !tags.isEmpty() || !note.empty() || !url.empty() || pinned || encrypted;
+        return isManaged || rating > 0 || !color.empty() || !tags.isEmpty() || !note.empty() || !url.empty() || pinned || encrypted;
     }
 };
 
@@ -115,6 +116,7 @@ public:
     void setURL(const std::wstring& path, const std::wstring& url, bool notify = true);
     void setEncrypted(const std::wstring& path, bool encrypted, bool notify = true);
     void setInvalid(const std::wstring& path, bool invalid, bool notify = true);
+    void setManaged(const std::wstring& path, bool managed, bool notify = true);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
     
     /**

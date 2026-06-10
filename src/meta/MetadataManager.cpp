@@ -198,6 +198,7 @@ void MetadataManager::initFromScchMode() {
                         }
                     }
 
+                    rm.isManaged = true; // 2026-06-xx 物理同步：从数据库加载的项必然是已登记项
                     tempCache[path] = rm;
                     if (!rm.fileId128.empty()) tempFidToPath[rm.fileId128] = path;
                 }
@@ -377,6 +378,13 @@ void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, boo
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].encrypted = encrypted; }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
+}
+
+void MetadataManager::setManaged(const std::wstring& path, bool managed, bool notify) {
+    std::wstring nPath = MetadataManager::normalizePath(path);
+    ensureActivated(nPath);
+    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].isManaged = managed; }
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 }
 
 void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify) {
@@ -749,8 +757,10 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
         sqlite3_bind_int(stmt, 16, rMeta.isInvalid ? 1 : 0);
 
         if (sqlite3_step(stmt) == SQLITE_DONE) {
-            if (isNew && !rMeta.isFolder) {
-                CategoryRepo::incrementTotalFileCount(1);
+            if (isNew) {
+                if (!rMeta.isFolder) CategoryRepo::incrementTotalFileCount(1);
+                // 物理同步：写入数据库后，内存立即标记为已登记，驱动打勾显示
+                setManaged(nPath, true, false);
             }
         }
         sqlite3_finalize(stmt);

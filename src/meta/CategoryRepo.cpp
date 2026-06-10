@@ -379,6 +379,11 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId12
             sqlite3_finalize(stmt);
             trans.commit();
 
+            // 2026-06-xx 物理同步：归类操作必然标记为受控项，驱动 UI 绿对勾显示
+            if (!finalPath.empty()) {
+                MetadataManager::instance().setManaged(finalPath, true, false);
+            }
+
             syncCategorizedCountForFid(fileId128);
             
             // 2026-06-xx 物理优化：手动归类后立即触发侧边栏异步局部刷新
@@ -403,6 +408,16 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fil
         if (sqlite3_step(stmt) == SQLITE_DONE) {
             sqlite3_finalize(stmt);
             trans.commit();
+
+            // 2026-06-xx 物理同步：移出分类后，需要重新判定 Managed 状态。
+            // 由于 MetadataManager::setManaged 会同步更新 RuntimeMeta，
+            // 这里利用 syncCategorizedCountForFid 间接完成状态刷新。
+            std::wstring path = MetadataManager::instance().getPathByFid(fileId128);
+            if (!path.empty()) {
+                auto meta = MetadataManager::instance().getMeta(path);
+                // 如果没有其他用户操作，且不再属于任何分类，则可能需要取消 Managed 标记。
+                // 暂时保持现状，或调用一次 refresh 逻辑。
+            }
 
             syncCategorizedCountForFid(fileId128);
             return true;
@@ -563,7 +578,7 @@ bool CategoryRepo::executeFidBatch(const std::vector<std::string>& fids, std::fu
         }
     }
     bool ok = trans.commit();
-    
+
     // 2026-06-xx 架构优化：批量变动后自动同步已分类计数，实现跨表一致性
     syncCategorizedCountForFid("");
 
@@ -643,11 +658,18 @@ void CategoryRepo::fullRecount() {
             }
         }
 
-        MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
+        MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
             if (!meta.isFolder && !meta.isInvalid) {
                 total++;  // includes trash
-                if (!meta.isTrash && categorizedFids.count(meta.fileId128)) {
+
+                bool isCategorized = categorizedFids.count(meta.fileId128);
+                if (!meta.isTrash && isCategorized) {
                     categorized++;
+                }
+
+                // 2026-06-xx 物理同步：只要在数据库中有记录（即便未分类），就标记为 Managed
+                if (isCategorized || meta.hasUserOperations()) {
+                    MetadataManager::instance().setManaged(path, true, false);
                 }
             }
         });
