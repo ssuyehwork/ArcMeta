@@ -3,6 +3,7 @@
 #include <QWidget>
 #include <QLineEdit>
 #include <QStackedWidget>
+#include <QEvent>
 #include "BreadcrumbBar.h"
 #include "AddressHistoryPanel.h"
 
@@ -35,6 +36,9 @@ private slots:
     void onBreadcrumbBlankClicked();
     void onPathEditFinished();
     void onBreadcrumbClicked(const QString& path);
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override;
 
 private:
     QStackedWidget* m_pathStack = nullptr;
