@@ -1,4 +1,5 @@
 #include "TrayController.h"
+#include "UiHelper.h"
 #include <QApplication>
 #include <QIcon>
 #include <QDebug>
@@ -15,11 +16,7 @@ TrayController::TrayController(QMainWindow* mainWindow)
     m_trayIcon->setToolTip("ArcMeta");
 
     m_trayMenu = new QMenu(mainWindow);
-    m_trayMenu->setStyleSheet(
-        "QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid #444; padding: 4px; border-radius: 8px; }"
-        "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; font-size: 12px; }"
-        "QMenu::item:selected { background-color: #3E3E42; color: white; }"
-    );
+    UiHelper::applyMenuStyle(m_trayMenu);
 
     QAction* showAction = m_trayMenu->addAction("显示主界面");
     m_trayMenu->addSeparator();
