@@ -127,6 +127,8 @@ set(SOURCES
     src/ui/ToolTipOverlay.h
     src/ui/TreeItemDelegate.h
     src/ui/UiHelper.h
+    src/util/ShellHelper.cpp
+    src/util/ShellHelper.h
     ArcMeta.rc
     resources/resources.qrc
 )
