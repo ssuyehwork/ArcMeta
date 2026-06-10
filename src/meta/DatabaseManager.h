@@ -27,7 +27,7 @@ public:
 
 private:
     struct sqlite3* m_db;
-    bool m_committed = false;
+    bool m_finished = false;
 };
 
 class DatabaseManager : public QObject {

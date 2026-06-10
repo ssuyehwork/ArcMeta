@@ -1032,7 +1032,7 @@ void ContentPanel::initGridView() {
 
     // 2026-06-xx 物理对齐：通过 QPalette 设定全局蓝色透明框选视觉样式
     QPalette p = m_gridView->palette();
-    // 使用 #378ADD (QColor(55, 138, 221)) 并设定 Alpha 为 80 以确保框选内容清晰可见
+    // 核心视觉契约：使用预期的高亮蓝 #378ADD，设定 Alpha 80 以确保透射感
     p.setColor(QPalette::Highlight, QColor(55, 138, 221, 80)); 
     p.setColor(QPalette::HighlightedText, Qt::white);
     m_gridView->setPalette(p);
@@ -1085,7 +1085,7 @@ void ContentPanel::initListView() {
     m_treeView->setSortingEnabled(true); 
     m_treeView->setContextMenuPolicy(Qt::CustomContextMenu); 
     m_treeView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
-    // 2026-06-xx 按照用户要求：开启蓝色透明框选效果
+    // 2026-06-xx 按照用户要求：开启蓝色透明框选效果 (1.7 物理修复)
     // 物理修复：QTreeView 不支持 setSelectionRectVisible，通过 QPalette 高亮色实现视觉对齐
     QPalette tp = m_treeView->palette();
     tp.setColor(QPalette::Highlight, QColor(55, 138, 221, 80));
@@ -1906,6 +1906,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 }
 
                 // 3. 元数据注入
+                MetadataManager::instance().ensureActivated(wPath);
                 auto meta = MetadataManager::instance().getMeta(wPath);
                 r.rating = meta.rating;
                 r.color = QString::fromStdWString(meta.color);
@@ -1975,6 +1976,7 @@ void ContentPanel::search(const QString& query) {
                 r.mtime = mtime;
                 r.atime = atime;
                 
+                MetadataManager::instance().ensureActivated(wPath);
                 auto meta = MetadataManager::instance().getMeta(wPath);
                 r.isDir = meta.isFolder;
                 r.rating = meta.rating;

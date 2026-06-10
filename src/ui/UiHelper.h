@@ -193,7 +193,7 @@ public:
             "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; font-size: 12px; }"
             "QMenu::item:selected { background-color: #3E3E42; color: white; }"
             "QMenu::separator { height: 1px; background: #444; margin: 4px 8px; }"
-            "QMenu::right-arrow { image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRUVFRUVFIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iOSAxOCAxNSAxMiA5IDYiPjwvcG9seWxpbmU+PC9zdmc+); width: 12px; height: 12px; right: 8px; }"
+            "QMenu::right-arrow { width: 10px; height: 10px; right: 8px; }" 
         );
     }
 
