@@ -1278,8 +1278,15 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         menu.addSeparator(); 
  
         // [批量与加密区] 
+        // 2026-07-xx 按照用户要求：只要是文件夹，或者是“非图像文件”，都显示扫描入库选项
+        QString suffix = QFileInfo(path).suffix().toLower();
+        bool isGraphic = UiHelper::isGraphicsFile(suffix);
+
+        if (isFolder || !isGraphic) {
+            menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "扫描入库")->setData(ActionAddToCategory);
+        }
+
         if (isFolder) { 
-            menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "扫描数据")->setData(ActionAddToCategory);
             menu.addAction("批量重命名 (Ctrl+Shift+R)")->setData(ActionBatchRename); 
         } else { 
             QMenu* cryptoMenu = menu.addMenu("加密保护"); 
@@ -1302,8 +1309,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             QMenu* delMenu = menu.addMenu("删除");
             UiHelper::applyMenuStyle(delMenu);
             delMenu->addAction("移入回收站")->setData(ActionDelete);
-            delMenu->addAction("彻底删除 (不可恢复)")->setData(ActionPermanentDelete);
-            delMenu->addAction("安全擦除 (覆写抹除)")->setData(ActionSecureDelete);
+            // 2026-07-xx 物理级精简：移除普通彻底删除，仅保留并更名为“永久删除”（采用安全抹除逻辑）
+            delMenu->addAction("永久删除")->setData(ActionSecureDelete);
         } else {
             // 回收站模式下，原位置不显示删除
         }
@@ -1315,7 +1322,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         // 2026-06-xx 按照用户要求：在回收站分类中，最底部增加“永久删除”选项
         if (m_currentCategoryType == "trash") {
             menu.addSeparator();
-            menu.addAction(UiHelper::getIcon("trash", QColor("#e81123"), 18), "永久删除")->setData(ActionPermanentDelete);
+            // 2026-07-xx 物理一致性：回收站内的永久删除统一采用 ActionSecureDelete
+            menu.addAction(UiHelper::getIcon("trash", QColor("#e81123"), 18), "永久删除")->setData(ActionSecureDelete);
         }
  
     } else { 
@@ -1362,6 +1370,14 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 if (idx.column() == 0) { 
                     QString itemPath = idx.data(PathRole).toString(); 
                     std::wstring wPath = itemPath.toStdWString();
+
+                    // 2026-07-xx 按照用户要求：归类前先判断项目是否已经入库
+                    // 如果尚未入库（ManagedRole 为 false），则执行注册流程
+                    bool isManaged = idx.data(ManagedRole).toBool();
+                    if (!isManaged) {
+                        MetadataManager::instance().registerItem(wPath);
+                    }
+
                     // 2026-06-xx 物理同步：基于同步获取的 File ID 进行归类，解决新文件关联失败冲突。 
                     std::string fid = MetadataManager::instance().getFileIdSync(wPath); 
                     if (!fid.empty()) { 
@@ -1374,7 +1390,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     } 
                 } 
             } 
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "已成功归类 (基于 File ID)", 1500, QColor("#2ecc71")); 
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "已完成扫描并成功归类", 1500, QColor("#2ecc71"));
             break; 
         } 
         case ActionPin: 
@@ -1577,7 +1593,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             break;
         }
         case ActionDelete: 
-        case ActionPermanentDelete:
         case ActionSecureDelete: {
             auto indexes = view->selectionModel()->selectedIndexes();
             QStringList targetPaths;
@@ -1591,11 +1606,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (action == ActionDelete) {
                 if (ShellHelper::moveToTrash(targetPaths)) loadDirectory(m_currentPath);
             } else {
-                // 彻底删除或安全擦除
-                QString msg = (action == ActionPermanentDelete) ? "确定要彻底删除选中的项目吗？此操作不可恢复。" : "确定要安全擦除选中的项目吗？数据将被覆写并永久抹除。";
+                // 2026-07-xx 物理级同步：将逻辑收拢为“永久删除”（安全抹除）
+                QString msg = "确定要永久删除选中的项目吗？数据将被物理覆写并彻底抹除，此操作不可恢复。";
                 if (QMessageBox::question(this, "确认删除", msg) != QMessageBox::Yes) break;
 
-                BatchProgressDialog* progress = new BatchProgressDialog("正在执行深层抹除...", this);
+                BatchProgressDialog* progress = new BatchProgressDialog("正在执行永久删除（深层抹除）...", this);
                 progress->show();
 
                 QPointer<ContentPanel> weakThis(this);

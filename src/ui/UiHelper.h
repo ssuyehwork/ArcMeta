@@ -188,13 +188,25 @@ public:
         // 2026-06-xx 物理修复：开启透明背景属性，消除圆角外的直角溢出
         menu->setAttribute(Qt::WA_TranslucentBackground);
         menu->setWindowFlag(Qt::FramelessWindowHint);
-        menu->setStyleSheet(
+
+        // 2026-07-xx 物理级加固：改用实心三角形 (menu_triangle) 并通过临时物理文件保障渲染
+        // 理由：部分环境下 Data URL 可能因长度或特殊字符导致 QSS 加载失败，物理文件最稳健。
+        // 2026-07-xx 交互纠偏：将 subcontrol-origin 改回 padding 并增加 8px 右边距，使指示符靠边站。
+        QString arrowPath = getSvgTempFilePath("menu_triangle", QColor("#CCCCCC"));
+
+        menu->setStyleSheet(QString(
             "QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid #444; padding: 4px; border-radius: 8px; }"
             "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; font-size: 12px; }"
             "QMenu::item:selected { background-color: #3E3E42; color: white; }"
             "QMenu::separator { height: 1px; background: #444; margin: 4px 8px; }"
-            "QMenu::right-arrow { image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRUVFRUVFIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iOSAxOCAxNSAxMiA5IDYiPjwvcG9seWxpbmU+PC9zdmc+); width: 12px; height: 12px; right: 8px; }"
-        );
+            "QMenu::right-arrow { "
+            "  image: url(%1); "
+            "  width: 10px; height: 10px; "
+            "  subcontrol-origin: padding; "
+            "  subcontrol-position: center right; "
+            "  right: 8px; "
+            "}"
+        ).arg(arrowPath));
     }
 
     static QColor getExtensionColor(const QString& ext) {
