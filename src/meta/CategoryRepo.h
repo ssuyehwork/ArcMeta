@@ -5,6 +5,9 @@
 #include <QString>
 #include <QMap>
 #include <atomic>
+#include <functional>
+#include <map>
+#include "sqlite3.h"
 
 namespace ArcMeta {
 

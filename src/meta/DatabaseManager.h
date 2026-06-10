@@ -9,6 +9,8 @@
 #include <mutex>
 #include <functional>
 
+struct sqlite3;
+
 namespace ArcMeta {
 
 /**
@@ -17,14 +19,14 @@ namespace ArcMeta {
  */
 class SqlTransaction {
 public:
-    explicit SqlTransaction(sqlite3* db);
+    explicit SqlTransaction(struct sqlite3* db);
     ~SqlTransaction();
 
     bool commit();
     void rollback();
 
 private:
-    sqlite3* m_db;
+    struct sqlite3* m_db;
     bool m_committed = false;
 };
 

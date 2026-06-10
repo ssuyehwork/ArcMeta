@@ -547,7 +547,7 @@ void CategoryRepo::updatePersistentStat(const std::string& key, int delta) {
     }
 }
 
-bool CategoryRepo::executeFidBatch(const std::vector<std::string>& fids, std::function<bool(sqlite3*, const std::string&)> action) {
+bool CategoryRepo::executeFidBatch(const std::vector<std::string>& fids, std::function<bool(struct sqlite3*, const std::string&)> action) {
     if (fids.empty()) return true;
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return false;
@@ -566,7 +566,7 @@ bool CategoryRepo::executeFidBatch(const std::vector<std::string>& fids, std::fu
     return ok;
 }
 
-void CategoryRepo::syncCategorizedCountForFid(const std::string& fid) {
+void CategoryRepo::syncCategorizedCountForFid(const std::string& /*fid*/) {
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return;
 

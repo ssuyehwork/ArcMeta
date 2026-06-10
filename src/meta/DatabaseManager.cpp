@@ -7,7 +7,7 @@
 
 namespace ArcMeta {
 
-SqlTransaction::SqlTransaction(sqlite3* db) : m_db(db) {
+SqlTransaction::SqlTransaction(struct sqlite3* db) : m_db(db) {
     if (m_db) {
         sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
     }
