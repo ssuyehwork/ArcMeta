@@ -11,6 +11,8 @@
     - 使用未声明或未定义的标识符/宏（如 `TRASH_CATEGORY_ID`）。
     - 变量初始化顺序错误。
     - 函数参数类型不匹配（如将 `int` 传给 `std::vector` 类型的参数）。
+- **系统 ID 物理一致性**：侧边栏系统项 ID 与 `CategoryRepo` 常量必须物理对齐（如 Trash=-8, Uncategorized=-2）。
+- **UI 视觉规范**：右键菜单必须使用 `UiHelper::applyMenuStyle` 以确保样式统一，严禁圆角外出现直角溢出。
 
 请在修改代码时严格执行以上规
 

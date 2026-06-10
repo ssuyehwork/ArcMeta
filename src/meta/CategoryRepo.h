@@ -34,8 +34,9 @@ struct CategoryItem {
  */
 class CategoryRepo {
 public:
-    static constexpr int TRASH_CATEGORY_ID    = -2;
-    static constexpr int UNCATEGORIZED_CAT_ID = -1;
+    // 2026-06-xx 物理同步：与 CategoryModel.cpp 定义的系统项 ID 保持绝对一致
+    static constexpr int TRASH_CATEGORY_ID    = -8;
+    static constexpr int UNCATEGORIZED_CAT_ID = -2;
 
     static bool add(Category& cat);
     static bool update(const Category& cat);
