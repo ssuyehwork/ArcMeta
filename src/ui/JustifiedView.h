@@ -37,6 +37,8 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void updateGeometries() override;
 
@@ -52,6 +54,10 @@ private:
     int m_targetRowHeight = 128;
     int m_aspectRatioRole = Qt::UserRole + 2;
     int m_anchorRow = -1; // 2026-06-16 物理锚点：锁定 Shift 多选起始行
+    
+    QPoint m_dragStartPos;
+    bool m_isDraggingSelection = false;
+    QRect m_selectionRect;
 };
 
 } // namespace ArcMeta

@@ -183,6 +183,18 @@ QRegion JustifiedView::visualRegionForSelection(const QItemSelection& selection)
 }
 
 void JustifiedView::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier) {
+        QModelIndex idx = indexAt(event->pos());
+        if (!idx.isValid()) {
+            m_isDraggingSelection = true;
+            m_dragStartPos = event->pos();
+            m_selectionRect = QRect();
+            selectionModel()->clearSelection();
+            event->accept();
+            return;
+        }
+    }
+
     // 2026-06-xx 物理拨乱反正：仅在按下 Shift 时执行自定义“视觉顺序”选择逻辑
     // 其余所有情况（普通单击、Ctrl、空白处）均退避并转发给基类处理，防止破坏 Model/View 原生多选状态
     if (event->button() == Qt::LeftButton && (event->modifiers() & Qt::ShiftModifier)) {
@@ -220,6 +232,28 @@ void JustifiedView::mousePressEvent(QMouseEvent* event) {
     }
 }
 
+void JustifiedView::mouseMoveEvent(QMouseEvent* event) {
+    if (m_isDraggingSelection) {
+        m_selectionRect = QRect(m_dragStartPos, event->pos()).normalized();
+        setSelection(m_selectionRect, QItemSelectionModel::ClearAndSelect);
+        viewport()->update();
+        event->accept();
+        return;
+    }
+    QAbstractItemView::mouseMoveEvent(event);
+}
+
+void JustifiedView::mouseReleaseEvent(QMouseEvent* event) {
+    if (m_isDraggingSelection) {
+        m_isDraggingSelection = false;
+        m_selectionRect = QRect();
+        viewport()->update();
+        event->accept();
+        return;
+    }
+    QAbstractItemView::mouseReleaseEvent(event);
+}
+
 void JustifiedView::mouseDoubleClickEvent(QMouseEvent* event) {
     QModelIndex idx = indexAt(event->pos());
     if (!idx.isValid()) {
@@ -253,6 +287,7 @@ void JustifiedView::paintEvent(QPaintEvent*) {
     // 2026-06-xx 物理修复：在开启 TranslucentBackground 时手动填充坚实背景，防止透明穿透
     painter.fillRect(viewport()->rect(), QColor("#1E1E1E"));
     
+    painter.save();
     painter.translate(0, -verticalScrollBar()->value());
     
     for (int i = 0; i < (int)m_geometries.size(); ++i) {
@@ -272,6 +307,20 @@ void JustifiedView::paintEvent(QPaintEvent*) {
 
         // 2026-05-20 物理适配：使用接口推荐的 itemDelegateForIndex
         itemDelegateForIndex(idx)->paint(&painter, option, idx);
+    }
+    painter.restore();
+
+    // 2026-06-xx 按照 1.7 需求：绘制蓝色透明框选矩形
+    if (m_isDraggingSelection && !m_selectionRect.isEmpty()) {
+        painter.save();
+        painter.setRenderHint(QPainter::Antialiasing, false);
+        QColor highlightColor = palette().color(QPalette::Highlight);
+        QColor brushColor = highlightColor;
+        brushColor.setAlpha(100);
+        painter.setBrush(brushColor);
+        painter.setPen(QPen(highlightColor, 1));
+        painter.drawRect(m_selectionRect);
+        painter.restore();
     }
 }
 

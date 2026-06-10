@@ -5,6 +5,9 @@
 #include <QString>
 #include <QMap>
 #include <atomic>
+#include <functional>
+#include <map>
+#include "sqlite3.h"
 
 namespace ArcMeta {
 
@@ -90,6 +93,23 @@ public:
      * @brief 强制执行全量计数重计 (物理账本对账)
      */
     static void fullRecount();
+
+    /**
+     * @brief 统计指标更新原子化
+     * @param key 统计项 Key (total_file_count, categorized_count)
+     * @param delta 增量
+     */
+    static void updatePersistentStat(const std::string& key, int delta);
+
+    /**
+     * @brief 批量执行 FID 处理任务
+     */
+    static bool executeFidBatch(const std::vector<std::string>& fids, std::function<bool(sqlite3*, const std::string&)> action);
+
+    /**
+     * @brief 自动同步已分类计数
+     */
+    static void syncCategorizedCountForFid(const std::string& fid);
 
     static std::atomic<int> s_totalFileCount;
     static std::atomic<int> s_categorizedCount;
