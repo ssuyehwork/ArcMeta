@@ -523,12 +523,12 @@ void CategoryRepo::setCategorizedCount(int count) {
 
 void CategoryRepo::incrementTotalFileCount(int delta) {
     s_totalFileCount += delta;
-    updatePersistentStat("total_file_count", delta);
+    updatePersistentStat(STAT_TOTAL_FILES, delta);
 }
 
 void CategoryRepo::incrementCategorizedCount(int delta) {
     s_categorizedCount += delta;
-    updatePersistentStat("categorized_count", delta);
+    updatePersistentStat(STAT_CATEGORIZED, delta);
 }
 
 void CategoryRepo::updatePersistentStat(const std::string& key, int delta) {
@@ -599,12 +599,12 @@ void CategoryRepo::fullRecount() {
                 if (!keyPtr) continue;
                 std::string key = keyPtr;
                 int val = sqlite3_column_int(stmt, 1);
-                if (key == "total_file_count") {
+                if (key == STAT_TOTAL_FILES) {
                     s_totalFileCount.store(val);
                     if (val > 0) hasSavedCounts = true;
                     qDebug() << "[Recount] 从数据库加载历史计数: Total =" << val;
                 }
-                else if (key == "categorized_count") {
+                else if (key == STAT_CATEGORIZED) {
                     s_categorizedCount.store(val);
                     qDebug() << "[Recount] 从数据库加载历史计数: Categorized =" << val;
                 }
@@ -648,20 +648,20 @@ void CategoryRepo::fullRecount() {
         s_categorizedCount.store(categorized);
         
         if (db) {
-            sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+            SqlTransaction trans(db);
             sqlite3_stmt* stmt;
             const char* sql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?)";
             if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                sqlite3_bind_text(stmt, 1, "total_file_count", -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(stmt, 1, STAT_TOTAL_FILES, -1, SQLITE_TRANSIENT);
                 sqlite3_bind_int(stmt, 2, total);
                 sqlite3_step(stmt);
                 sqlite3_reset(stmt);
-                sqlite3_bind_text(stmt, 1, "categorized_count", -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(stmt, 1, STAT_CATEGORIZED, -1, SQLITE_TRANSIENT);
                 sqlite3_bind_int(stmt, 2, categorized);
                 sqlite3_step(stmt);
                 sqlite3_finalize(stmt);
             }
-            sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
+            trans.commit();
             // 物理落盘，确保初始化结果即刻生效
             DatabaseManager::instance().flushAll();
         }

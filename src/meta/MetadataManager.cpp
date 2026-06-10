@@ -224,15 +224,23 @@ void MetadataManager::initFromScchMode() {
 void MetadataManager::notifyUI(RefreshLevel level, const QString& path) {
     switch (level) {
         case RefreshLevel::CountsOnly:
-            emit metaChanged("__RELOAD_COUNT__");
+            notifyCategoryCountChanged();
             break;
         case RefreshLevel::PathUpdate:
             if (!path.isEmpty()) emit metaChanged(path);
             break;
         case RefreshLevel::FullRebuild:
-            emit metaChanged("__RELOAD_ALL__");
+            notifyFullUIRebuild();
             break;
     }
+}
+
+void MetadataManager::notifyCategoryCountChanged() {
+    emit metaChanged("__RELOAD_COUNT__");
+}
+
+void MetadataManager::notifyFullUIRebuild() {
+    emit metaChanged("__RELOAD_ALL__");
 }
 
 void MetadataManager::registerItem(const std::wstring& path) {

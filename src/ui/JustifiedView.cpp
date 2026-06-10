@@ -314,9 +314,10 @@ void JustifiedView::paintEvent(QPaintEvent*) {
     if (m_isDraggingSelection && !m_selectionRect.isEmpty()) {
         painter.save();
         painter.setRenderHint(QPainter::Antialiasing, false);
-        QColor highlightColor = palette().color(QPalette::Highlight);
+        // 2026-06-xx 物理对齐：使用标准蓝 (#3498db) 并增加透明度以达到预期效果
+        QColor highlightColor = QColor("#3498db");
         QColor brushColor = highlightColor;
-        brushColor.setAlpha(100);
+        brushColor.setAlpha(60); // 调低透明度使其更通透
         painter.setBrush(brushColor);
         painter.setPen(QPen(highlightColor, 1));
         painter.drawRect(m_selectionRect);

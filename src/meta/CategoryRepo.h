@@ -111,6 +111,10 @@ public:
      */
     static void syncCategorizedCountForFid(const std::string& fid);
 
+    // 2026-06-xx 逻辑收拢：系统指标键名常量
+    static constexpr const char* STAT_TOTAL_FILES = "total_file_count";
+    static constexpr const char* STAT_CATEGORIZED = "categorized_count";
+
     static std::atomic<int> s_totalFileCount;
     static std::atomic<int> s_categorizedCount;
 };
