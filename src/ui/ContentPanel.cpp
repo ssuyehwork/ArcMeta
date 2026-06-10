@@ -69,6 +69,8 @@
 #include "UiHelper.h" 
 #include "StyleLibrary.h"
 #include "../core/CoreController.h"
+#include "../core/UndoManager.h"
+#include "../core/BasicCommands.h"
 using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
  
@@ -286,14 +288,18 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
         QFileInfo info(oldPath);
         QString newPath = info.absolutePath() + "/" + newName;
 
-        if (oldPath != newPath && QFile::rename(oldPath, newPath)) {
-            // 同步更新元数据索引
-            MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
-            // 物理同步：手动修改 m_allRecords 里的 path 以保持模型数据一致
-            mutableRecord.path = QDir::toNativeSeparators(newPath);
-            m_metaCache.remove(oldPath);
-            emit dataChanged(index, index, {role, Qt::DisplayRole, PathRole});
-            return true;
+        if (oldPath != newPath) {
+            QString nativeNewPath = QDir::toNativeSeparators(newPath);
+            if (ShellHelper::renameItem(oldPath, nativeNewPath)) {
+                // 撤销支持
+                UndoManager::instance().pushCommand(std::make_unique<RenameCommand>(oldPath, nativeNewPath));
+
+                // 物理同步：手动修改 m_allRecords 里的 path 以保持模型数据一致
+                mutableRecord.path = nativeNewPath;
+                m_metaCache.remove(oldPath);
+                emit dataChanged(index, index, {role, Qt::DisplayRole, PathRole});
+                return true;
+            }
         }
         return false;
     }
@@ -301,13 +307,21 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
     // 2026-06-xx 物理修复：支持星级、颜色、置顶等元数据的持久化设定
     bool metaUpdated = false;
     if (role == RatingRole) {
-        int rating = value.toInt();
-        MetadataManager::instance().setRating(path.toStdWString(), rating);
-        metaUpdated = true;
+        int oldRating = index.data(RatingRole).toInt();
+        int newRating = value.toInt();
+        if (oldRating != newRating) {
+            MetadataManager::instance().setRating(path.toStdWString(), newRating);
+            UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Rating, oldRating, newRating));
+            metaUpdated = true;
+        }
     } else if (role == ColorRole) {
-        QString color = value.toString();
-        MetadataManager::instance().setColor(path.toStdWString(), color.toStdWString());
-        metaUpdated = true;
+        QString oldColor = index.data(ColorRole).toString();
+        QString newColor = value.toString();
+        if (oldColor != newColor) {
+            MetadataManager::instance().setColor(path.toStdWString(), newColor.toStdWString());
+            UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Color, oldColor, newColor));
+            metaUpdated = true;
+        }
     } else if (role == IsLockedRole || role == PinnedRole) {
         bool pinned = value.toBool();
         MetadataManager::instance().setPinned(path.toStdWString(), pinned);
@@ -829,11 +843,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 for (const auto& idx : indexes) { 
                     if (idx.column() == 0) { 
-                        QString path = idx.data(PathRole).toString(); 
-                        if (!path.isEmpty()) { 
-                            MetadataManager::instance().setRating(path.toStdWString(), rating); 
-                            m_proxyModel->setData(idx, rating, RatingRole); 
-                        } 
+                        m_proxyModel->setData(idx, rating, RatingRole); 
                     } 
                 } 
                 return true; 
@@ -844,12 +854,8 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 for (const QModelIndex& idx : indexes) { 
                     if (idx.column() == 0) { 
-                        QString itemPath = idx.data(PathRole).toString(); 
-                        if (!itemPath.isEmpty()) { 
-                            bool current = idx.data(IsLockedRole).toBool(); 
-                            MetadataManager::instance().setPinned(itemPath.toStdWString(), !current); 
-                            m_proxyModel->setData(idx, !current, IsLockedRole); 
-                        } 
+                        bool current = idx.data(IsLockedRole).toBool(); 
+                        m_proxyModel->setData(idx, !current, IsLockedRole); 
                     } 
                 } 
                 return true; 
@@ -871,19 +877,15 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                     case Qt::Key_9: colorValue = ""; break; 
                 } 
  
-                QColor tagColor = UiHelper::parseColorName(colorValue); 
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 for (const auto& idx : indexes) { 
                     if (idx.column() == 0) { 
-                        QString path = idx.data(PathRole).toString(); 
-                        if (!path.isEmpty()) { 
-                            MetadataManager::instance().setColor(path.toStdWString(), colorValue.toStdWString()); 
-                            m_proxyModel->setData(idx, colorValue, ColorRole); 
+                        m_proxyModel->setData(idx, colorValue, ColorRole); 
  
-                            // 2026-06-05 按照要求：快捷键设置颜色后立即重渲染图标，实现视觉同步 
-                            QIcon coloredIcon = UiHelper::getFileIcon(path, 128); 
-                            m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
-                        } 
+                        // 2026-06-05 按照要求：快捷键设置颜色后立即重渲染图标，实现视觉同步 
+                        QString path = idx.data(PathRole).toString(); 
+                        QIcon coloredIcon = UiHelper::getFileIcon(path, 128); 
+                        m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
                     } 
                 } 
                 return true; 
@@ -1384,8 +1386,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         // 2026-06-xx 按照用户需求：如果在系统层选择了“未分类”，则清除该项所有其他分类关联
                         if (catId == -2) { // 未分类的负数 ID
                              CategoryRepo::removeAllCategories(fid);
+                             // TODO: removeAllCategories 的撤销支持较为复杂，暂不加入 Command
                         } else if (catId > 0) {
-                             CategoryRepo::addItemToCategory(catId, fid, wPath); 
+                             if (CategoryRepo::addItemToCategory(catId, fid, wPath)) {
+                                 UndoManager::instance().pushCommand(std::make_unique<CategorizeCommand>(itemPath, fid, catId, true));
+                             }
                         }
                     } 
                 } 
@@ -1766,6 +1771,9 @@ void ContentPanel::performPaste() {
     } 
  
     if (ShellHelper::copyOrMoveItems(fromPaths, m_currentPath, isMove)) { 
+        if (isMove) {
+            UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), m_currentPath));
+        }
         loadDirectory(m_currentPath, m_isRecursive); 
     } 
 } 
@@ -1810,8 +1818,7 @@ void ContentPanel::onSelectionChanged() {
  
 void ContentPanel::refreshAll() {
     if (m_currentCategoryType == "user_category") {
-        // 如果是从分类加载的，我们需要找到当前分类 ID。
-        // 由于 ContentPanel 没有保存 categoryId，暂时简单处理。
+        if (m_currentCategoryId != -1) loadCategory(m_currentCategoryId);
     } else if (!m_currentPath.isEmpty()) {
         loadDirectory(m_currentPath, m_isRecursive);
     }
@@ -2082,6 +2089,7 @@ void ContentPanel::previewFile(const QString& path) {
 void ContentPanel::loadCategory(int categoryId) { 
     m_isLoading = true;
     m_currentCategoryType = "user_category";
+    m_currentCategoryId = categoryId;
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 

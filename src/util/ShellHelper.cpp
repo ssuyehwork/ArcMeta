@@ -67,7 +67,15 @@ bool ShellHelper::copyOrMoveItems(const QStringList& sourcePaths, const QString&
     fileOp.pFrom = from.c_str();
     fileOp.pTo = to.c_str();
     fileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR;
-    return SHFileOperationW(&fileOp) == 0;
+    bool ok = (SHFileOperationW(&fileOp) == 0);
+    if (ok && isMove) {
+        for (const QString& p : sourcePaths) {
+            QFileInfo info(p);
+            QString newPath = QDir(destDir).filePath(info.fileName());
+            MetadataManager::instance().renameItem(p.toStdWString(), newPath.toStdWString());
+        }
+    }
+    return ok;
 #else
     Q_UNUSED(sourcePaths);
     Q_UNUSED(destDir);
@@ -98,6 +106,15 @@ void ShellHelper::openInExplorer(const QString& path) {
 #else
     Q_UNUSED(path);
 #endif
+}
+
+bool ShellHelper::renameItem(const QString& oldPath, const QString& newPath) {
+    if (QFile::rename(oldPath, newPath)) {
+        // 同步数据库
+        MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
+        return true;
+    }
+    return false;
 }
 
 QString ShellHelper::formatSize(qint64 bytes) {
