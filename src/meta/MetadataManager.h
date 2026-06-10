@@ -88,6 +88,18 @@ public:
     void notifyUI(RefreshLevel level, const QString& path = "");
 
     /**
+     * @brief 2026-06-xx 架构重构：语义化通知接口
+     * 替代 emit metaChanged("__RELOAD_COUNT__")
+     */
+    void notifyCategoryCountChanged();
+
+    /**
+     * @brief 2026-06-xx 架构重构：语义化通知接口
+     * 替代 emit metaChanged("__RELOAD_ALL__")
+     */
+    void notifyFullUIRebuild();
+
+    /**
      * @brief 一站式项目注册流程
      * 整合 FID 获取、物理属性同步及视觉预热
      */

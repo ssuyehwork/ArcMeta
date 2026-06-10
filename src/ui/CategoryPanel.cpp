@@ -71,26 +71,29 @@ CategoryPanel::CategoryPanel(QWidget* parent)
         if (m_isFirstLoad) {
             m_categoryModel->refresh();
             m_isFirstLoad = false;
-        } else {
-            // 2026-06-xx 物理分流：将耗时的统计计算（fullRecount）移出 UI 线程
-            // 采用 QPointer 确保线程安全性
-            QPointer<CategoryPanel> weakThis(this);
-            (void)QtConcurrent::run([weakThis]() {
-                auto sysCounts = CategoryRepo::getSystemCounts();
-                auto catCountsVec = CategoryRepo::getCounts();
-                
-                QMap<int, int> catCounts;
-                for (const auto& p : catCountsVec) catCounts[p.first] = p.second;
-                
-                // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
-                QMetaObject::invokeMethod(weakThis.data(), [weakThis, sysCounts, catCounts]() {
-                    if (weakThis && weakThis->m_categoryModel) {
-                        // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
-                        weakThis->m_categoryModel->updateStatistics(sysCounts, catCounts);
-                    }
-                });
-            });
+            // 2026-06-xx 物理修正：首次刷新后必须立即触发计数盘点，防止界面显示 (0)
+            requestRefresh();
+            return;
         }
+
+        // 2026-06-xx 物理分流：将耗时的统计计算（fullRecount）移出 UI 线程
+        // 采用 QPointer 确保线程安全性
+        QPointer<CategoryPanel> weakThis(this);
+        (void)QtConcurrent::run([weakThis]() {
+            auto sysCounts = CategoryRepo::getSystemCounts();
+            auto catCountsVec = CategoryRepo::getCounts();
+            
+            QMap<int, int> catCounts;
+            for (const auto& p : catCountsVec) catCounts[p.first] = p.second;
+            
+            // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis, sysCounts, catCounts]() {
+                if (weakThis && weakThis->m_categoryModel) {
+                    // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
+                    weakThis->m_categoryModel->updateStatistics(sysCounts, catCounts);
+                }
+            });
+        });
     });
 
     initUi();
@@ -164,12 +167,7 @@ void CategoryPanel::setupContextMenu() {
         }
 
         QMenu menu(this);
-        // [PHYSICAL RESTORATION] 8px radius for context menu
-    menu.setStyleSheet(QString("QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid %1; padding: 4px; border-radius: 8px; } "
-                           "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; } "
-                           "QMenu::icon { margin-left: 6px; } "
-                           "QMenu::item:selected { background-color: #3E3E42; color: white; } "
-                       "QMenu::separator { height: 1px; background: %1; margin: 4px 8px; }").arg(qssColor(BorderDark)));
+        UiHelper::applyMenuStyle(&menu);
 
         // 基于规范逻辑：如果没有选中项，或者选中了“我的分类”根节点
         QString itemName = index.data(NameRole).toString();
