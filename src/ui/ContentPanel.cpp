@@ -1018,6 +1018,9 @@ void ContentPanel::initGridView() {
     m_gridView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded); 
     m_gridView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded); 
     m_gridView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
+    // 2026-06-xx 按照用户要求：开启蓝色透明框选效果
+    // 物理修复：对于 ListView/TreeView 使用 setSelectionRectVisible
+    if (auto* lv = qobject_cast<QListView*>(m_gridView)) lv->setSelectionRectVisible(true);
     m_gridView->setContextMenuPolicy(Qt::CustomContextMenu); 
  
     m_gridView->setDragEnabled(true); 
@@ -1053,6 +1056,7 @@ void ContentPanel::initGridView() {
         "QAbstractItemView { background-color: transparent; border: none; outline: none; }" 
         "QAbstractItemView::item { background: transparent; }" 
         "QAbstractItemView::item:selected { background-color: transparent; }" 
+        "QAbstractItemView::item:hover { background-color: transparent; }"
     ); 
  
     connect(m_gridView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
@@ -1066,6 +1070,8 @@ void ContentPanel::initListView() {
     m_treeView->setSortingEnabled(true); 
     m_treeView->setContextMenuPolicy(Qt::CustomContextMenu); 
     m_treeView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
+    // 2026-06-xx 按照用户要求：开启蓝色透明框选效果
+    // 物理修复：QTreeView 不支持 setSelectionRectVisible，通过 QPalette 高亮色实现视觉对齐
      
     m_treeView->setDragEnabled(true); 
     m_treeView->setDragDropMode(QAbstractItemView::DragOnly); 
@@ -1081,6 +1087,8 @@ void ContentPanel::initListView() {
     m_treeView->setStyleSheet( 
         "QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
         "QTreeView::item { height: 28px; color: #EEEEEE; padding-left: 0px; }" 
+        "QTreeView::item:selected { background-color: rgba(52, 152, 219, 0.2); border-left: 2px solid #3498db; }"
+        "QTreeView::item:hover { background-color: rgba(255, 255, 255, 0.05); }"
         "QTreeView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }" 
     ); 
  

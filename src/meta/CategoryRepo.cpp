@@ -811,15 +811,14 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
             return;
         }
 
-        // "全部数据" counts ALL known files — including trash.
-        // Only permanent deletion reduces this count.
-        activeTotal++;
-
         // Trash files: count for trash badge, excluded from all other virtual category stats
         if (meta.isTrash) {
             trashCount++;
             return;
         }
+
+        // 2026-06-xx 物理修复：规则 1.4，全部数据计数必须排除回收站文件
+        activeTotal++;
 
         // Active (non-trash, non-invalid, non-folder) files only from here
         if (meta.tags.isEmpty()) untagged++;
