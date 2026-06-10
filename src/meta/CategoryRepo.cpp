@@ -160,6 +160,9 @@ bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& fids) {
         if (!path.empty()) {
             MetadataManager::instance().setTrash(path, false);
         }
+
+        // 2026-06-xx 物理对账：恢复后触发全量统计重建
+        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
         return true;
     });
 }
@@ -561,6 +564,9 @@ bool CategoryRepo::executeFidBatch(const std::vector<std::string>& fids, std::fu
     }
     bool ok = trans.commit();
     
+    // 2026-06-xx 架构优化：批量变动后自动同步已分类计数，实现跨表一致性
+    syncCategorizedCountForFid("");
+
     // 批量处理后通知 UI 刷新
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
     return ok;
@@ -573,6 +579,7 @@ void CategoryRepo::syncCategorizedCountForFid(const std::string& /*fid*/) {
     // 2026-06-xx 物理对账：通过全局 DISTINCT 查询重新计算已分类总数
     // 这种做法比手动增减 delta 更稳健，能自动修正因程序崩溃导致的计数偏差
     sqlite3_stmt* stmt;
+    // 物理红线：分类计数必须排除回收站 (ID = -8) 和未分类 (ID = -2)
     const char* sql = "SELECT COUNT(DISTINCT file_id) FROM category_items WHERE category_id > 0";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -580,8 +587,10 @@ void CategoryRepo::syncCategorizedCountForFid(const std::string& /*fid*/) {
             int oldCount = s_categorizedCount.load();
             s_categorizedCount.store(count);
 
-            // 物理持久化
-            updatePersistentStat("categorized_count", count - oldCount);
+            // 物理持久化：直接更新增量
+            if (count != oldCount) {
+                updatePersistentStat(STAT_CATEGORIZED, count - oldCount);
+            }
         }
         sqlite3_finalize(stmt);
     }

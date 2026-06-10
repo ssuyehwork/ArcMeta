@@ -1025,7 +1025,8 @@ void ContentPanel::initGridView() {
 
     // 2026-06-xx 物理对齐：通过 QPalette 设定全局蓝色透明框选视觉样式
     QPalette p = m_gridView->palette();
-    p.setColor(QPalette::Highlight, QColor(55, 138, 221, 100)); // #378ADD 带透明度
+    // 使用 #378ADD (QColor(55, 138, 221)) 并设定 Alpha 为 80 以确保框选内容清晰可见
+    p.setColor(QPalette::Highlight, QColor(55, 138, 221, 80));
     p.setColor(QPalette::HighlightedText, Qt::white);
     m_gridView->setPalette(p);
     m_gridView->setContextMenuPolicy(Qt::CustomContextMenu); 
@@ -1080,7 +1081,7 @@ void ContentPanel::initListView() {
     // 2026-06-xx 按照用户要求：开启蓝色透明框选效果
     // 物理修复：QTreeView 不支持 setSelectionRectVisible，通过 QPalette 高亮色实现视觉对齐
     QPalette tp = m_treeView->palette();
-    tp.setColor(QPalette::Highlight, QColor(55, 138, 221, 100));
+    tp.setColor(QPalette::Highlight, QColor(55, 138, 221, 80));
     tp.setColor(QPalette::HighlightedText, Qt::white);
     m_treeView->setPalette(tp);
      
