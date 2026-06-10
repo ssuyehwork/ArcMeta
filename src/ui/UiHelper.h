@@ -191,18 +191,20 @@ public:
 
         // 2026-07-xx 物理级加固：改用实心三角形 (menu_triangle) 并通过临时物理文件保障渲染
         // 理由：部分环境下 Data URL 可能因长度或特殊字符导致 QSS 加载失败，物理文件最稳健。
-        // 同时采用 subcontrol-origin: content 配合 padding-right 确保指示符绝对可见。
+        // 2026-07-xx 交互纠偏：将 subcontrol-origin 改回 padding 并增加 8px 右边距，使指示符靠边站。
         QString arrowPath = getSvgTempFilePath("menu_triangle", QColor("#CCCCCC"));
 
         menu->setStyleSheet(QString(
             "QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid #444; padding: 4px; border-radius: 8px; }"
-            "QMenu::item { padding: 6px 28px 6px 10px; border-radius: 4px; font-size: 12px; }"
+            "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; font-size: 12px; }"
             "QMenu::item:selected { background-color: #3E3E42; color: white; }"
             "QMenu::separator { height: 1px; background: #444; margin: 4px 8px; }"
             "QMenu::right-arrow { "
             "  image: url(%1); "
-            "  subcontrol-origin: content; "
+            "  width: 10px; height: 10px; "
+            "  subcontrol-origin: padding; "
             "  subcontrol-position: center right; "
+            "  right: 8px; "
             "}"
         ).arg(arrowPath));
     }
