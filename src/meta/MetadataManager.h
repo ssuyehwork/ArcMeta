@@ -96,6 +96,7 @@ public:
     void renameItem(const std::wstring& oldPath, const std::wstring& newPath);
     void removeMetadataSync(const std::wstring& path);
     void markAsTrash(const std::wstring& path, bool isTrash, const std::wstring& origPath = L"");
+    void setTrash(const std::wstring& path, bool isTrash);
     void deletePermanently(const std::wstring& path);
 
     /**

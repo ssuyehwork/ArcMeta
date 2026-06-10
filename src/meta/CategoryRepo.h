@@ -34,6 +34,9 @@ struct CategoryItem {
  */
 class CategoryRepo {
 public:
+    static constexpr int TRASH_CATEGORY_ID    = -2;
+    static constexpr int UNCATEGORIZED_CAT_ID = -1;
+
     static bool add(Category& cat);
     static bool update(const Category& cat);
     static int findCategoryId(int parentId, const std::wstring& name);
@@ -53,6 +56,13 @@ public:
     static bool removeItemFromCategory(int categoryId, const std::string& fileId128);
     static bool removeAllCategories(const std::string& fileId128);
     static bool removeAllCategoriesBatch(const std::vector<std::string>& fids);
+    static bool moveToTrashBatch(const std::vector<std::string>& fids);
+
+    static bool restoreFromTrash(const std::string& fileId128);
+    static bool restoreFromTrashBatch(const std::vector<std::string>& fids);
+    static bool permanentlyDelete(const std::string& fileId128);
+    static bool permanentlyDeleteBatch(const std::vector<std::string>& fids);
+
     static std::vector<CategoryItem> getItemsInCategory(int categoryId);
     static std::vector<CategoryItem> getItemsRecursive(int categoryId);
 

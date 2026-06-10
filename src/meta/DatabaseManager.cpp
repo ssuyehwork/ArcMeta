@@ -104,6 +104,11 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     if (errMsg) {
         qDebug() << "[DB] Schema error:" << errMsg;
         sqlite3_free(errMsg);
+    } else {
+        // 2026-06-xx 按照用户要求：清理任何误入 categories 表的系统保留 ID。
+        // 系统分类 ID (-1, -2) 仅作为桶位标记存在于逻辑层，绝不可作为 UI 节点存储在 categories 表中。
+        const char* cleanup = "DELETE FROM categories WHERE id <= 0;";
+        sqlite3_exec(conn.memDb, cleanup, nullptr, nullptr, nullptr);
     }
 
     // 2026-06-xx 物理加固：自动迁移旧版本数据库字段

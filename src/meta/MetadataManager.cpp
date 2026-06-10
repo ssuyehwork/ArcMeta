@@ -431,8 +431,8 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         for (auto it = m_cache.begin(); it != m_cache.end(); ) {
             if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
-                // 只有非失效且非文件夹的文件删除时才扣减总计数
-                if (!it->second.isFolder && !it->second.isTrash && !it->second.isInvalid) {
+                // 2026-06-xx 物理对齐：回收站项也计入全部数据，因此删除时必须一并扣减
+                if (!it->second.isFolder && !it->second.isInvalid) {
                     totalDelta--;
                 }
                 if (!it->second.fileId128.empty()) {
@@ -503,13 +503,33 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
     }
     
     if (changed) {
-        // 如果进入回收站，活跃总数减少；如果还原，活跃总数增加
-        CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
+        // 2026-06-xx 按照用户要求：移入回收站时，必须和其他分类彻底隔离
+        if (isTrash && !fid.empty()) {
+            // 将文件移入“回收站”桶位（ID -2），这会自动解除所有现有分类关联
+            CategoryRepo::moveToTrashBatch({fid});
+        }
+
+        // 2026-06-xx 物理修正：移入回收站仅属于分类迁移，不应减少“全部数据”的计数。
+        // 只有永久删除才会导致总数减少。
         persistAsync(nPath);
         
         // 2026-06-xx 物理修复：状态变更后必须强制发射信号，驱动侧边栏重数一遍
         emit metaChanged("__RELOAD_ALL__");
     }
+}
+
+void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
+    std::wstring nPath = normalizePath(path);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto it = m_cache.find(nPath);
+        if (it == m_cache.end()) return;
+        it->second.isTrash = isTrash;
+        if (!isTrash) {
+            it->second.originalPath = L""; // Clear on restore
+        }
+    }
+    debouncePersist(nPath);
 }
 
 void MetadataManager::deletePermanently(const std::wstring& path) {

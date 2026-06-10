@@ -43,11 +43,10 @@ void CategoryModel::refresh() {
 
     // 1. 系统模块 (同步构建 - 8项)
     if (m_type == System || m_type == Both) {
-        auto counts = CategoryRepo::getSystemCounts();
-        
+        // 2026-06-xx 物理削峰：refresh 仅构建树结构，计数逻辑剥离至异步 updateStatistics
+        // 理由：getSystemCounts() 涉及全量内存盘点，在 UI 线程执行会导致假死。
         auto addSystemItem = [&](const QString& name, const QString& type, const QString& icon, const QString& color, int sysId) {
-            int count = counts.value(type, 0);
-            QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
+            QStandardItem* item = new QStandardItem(QString("%1 (...)").arg(name));
             item->setData(type, TypeRole);
             item->setData(name, NameRole);
             item->setData(color, ColorRole); 
@@ -103,10 +102,6 @@ void CategoryModel::refresh() {
         root->appendRow(userGroup);
 
         auto categories = CategoryRepo::getAll();
-        auto countsVec = CategoryRepo::getCounts();
-        QMap<int, int> counts;
-        for (const auto& p : countsVec) counts[p.first] = p.second;
-
         QMap<int, QStandardItem*> itemMap;
         QMap<int, Category> catMap;
 
@@ -116,9 +111,8 @@ void CategoryModel::refresh() {
             int id = cat.id;
             QString name = QString::fromStdWString(cat.name);
             QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
-            int count = counts.value(id, 0);
 
-            QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
+            QStandardItem* item = new QStandardItem(QString("%1 (...)").arg(name));
             item->setData("category", TypeRole);
             item->setData(id, IdRole);
             item->setData(color, ColorRole);
