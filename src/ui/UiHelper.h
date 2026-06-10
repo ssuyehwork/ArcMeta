@@ -185,8 +185,18 @@ public:
 
     static void applyMenuStyle(QWidget* menu) {
         if (!menu) return;
-        // 2026-07-xx 物理还原：根据用户期望回归原生右键菜单，以便正确显示子选项箭头 (▶)
-        // 移除自定义 QSS 样式、透明背景及无边框属性，恢复系统原生渲染
+        // 2026-07-xx 物理重构：借鉴 RapidNotes 风格实现精致深色菜单，并强制修复子菜单箭头 (▶) 不可见问题
+        menu->setAttribute(Qt::WA_TranslucentBackground);
+        menu->setWindowFlags(menu->windowFlags() | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+
+        menu->setStyleSheet(
+            "QMenu { background-color: #1A1A1A; color: #EEEEEE; border: 1px solid #3C3C3C; padding: 4px; border-radius: 8px; }"
+            "QMenu::item { padding: 6px 28px 6px 12px; border-radius: 4px; font-size: 12px; }"
+            "QMenu::item:selected { background-color: #3E3E42; color: #FFFFFF; }"
+            "QMenu::separator { height: 1px; background: #3C3C3C; margin: 4px 8px; }"
+            // 显式注入白色三角形 SVG 作为子菜单箭头，确保在深色背景下 100% 可见
+            "QMenu::right-arrow { image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMCAxN2w1LTUtNS01djEweiIvPjwvc3ZnPg==); width: 12px; height: 12px; right: 10px; }"
+        );
     }
 
     static QColor getExtensionColor(const QString& ext) {
