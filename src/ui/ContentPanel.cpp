@@ -69,6 +69,8 @@
 #include "UiHelper.h" 
 #include "StyleLibrary.h"
 #include "../core/CoreController.h"
+#include "../core/UndoManager.h"
+#include "../core/BasicCommands.h"
 using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
  
@@ -286,14 +288,18 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
         QFileInfo info(oldPath);
         QString newPath = info.absolutePath() + "/" + newName;
 
-        if (oldPath != newPath && QFile::rename(oldPath, newPath)) {
-            // 同步更新元数据索引
-            MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
-            // 物理同步：手动修改 m_allRecords 里的 path 以保持模型数据一致
-            mutableRecord.path = QDir::toNativeSeparators(newPath);
-            m_metaCache.remove(oldPath);
-            emit dataChanged(index, index, {role, Qt::DisplayRole, PathRole});
-            return true;
+        if (oldPath != newPath) {
+            QString nativeNewPath = QDir::toNativeSeparators(newPath);
+            if (ShellHelper::renameItem(oldPath, nativeNewPath)) {
+                // 撤销支持
+                UndoManager::instance().pushCommand(std::make_unique<RenameCommand>(oldPath, nativeNewPath));
+
+                // 物理同步：手动修改 m_allRecords 里的 path 以保持模型数据一致
+                mutableRecord.path = nativeNewPath;
+                m_metaCache.remove(oldPath);
+                emit dataChanged(index, index, {role, Qt::DisplayRole, PathRole});
+                return true;
+            }
         }
         return false;
     }
@@ -301,13 +307,21 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
     // 2026-06-xx 物理修复：支持星级、颜色、置顶等元数据的持久化设定
     bool metaUpdated = false;
     if (role == RatingRole) {
-        int rating = value.toInt();
-        MetadataManager::instance().setRating(path.toStdWString(), rating);
-        metaUpdated = true;
+        int oldRating = index.data(RatingRole).toInt();
+        int newRating = value.toInt();
+        if (oldRating != newRating) {
+            MetadataManager::instance().setRating(path.toStdWString(), newRating);
+            UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Rating, oldRating, newRating));
+            metaUpdated = true;
+        }
     } else if (role == ColorRole) {
-        QString color = value.toString();
-        MetadataManager::instance().setColor(path.toStdWString(), color.toStdWString());
-        metaUpdated = true;
+        QString oldColor = index.data(ColorRole).toString();
+        QString newColor = value.toString();
+        if (oldColor != newColor) {
+            MetadataManager::instance().setColor(path.toStdWString(), newColor.toStdWString());
+            UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Color, oldColor, newColor));
+            metaUpdated = true;
+        }
     } else if (role == IsLockedRole || role == PinnedRole) {
         bool pinned = value.toBool();
         MetadataManager::instance().setPinned(path.toStdWString(), pinned);
@@ -1384,8 +1398,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         // 2026-06-xx 按照用户需求：如果在系统层选择了“未分类”，则清除该项所有其他分类关联
                         if (catId == -2) { // 未分类的负数 ID
                              CategoryRepo::removeAllCategories(fid);
+                             // TODO: removeAllCategories 的撤销支持较为复杂，暂不加入 Command
                         } else if (catId > 0) {
-                             CategoryRepo::addItemToCategory(catId, fid, wPath); 
+                             if (CategoryRepo::addItemToCategory(catId, fid, wPath)) {
+                                 UndoManager::instance().pushCommand(std::make_unique<CategorizeCommand>(itemPath, fid, catId, true));
+                             }
                         }
                     } 
                 } 
@@ -1766,6 +1783,9 @@ void ContentPanel::performPaste() {
     } 
  
     if (ShellHelper::copyOrMoveItems(fromPaths, m_currentPath, isMove)) { 
+        if (isMove) {
+            UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), m_currentPath));
+        }
         loadDirectory(m_currentPath, m_isRecursive); 
     } 
 } 

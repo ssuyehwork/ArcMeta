@@ -2,6 +2,8 @@
 #define NOMINMAX
 #endif
 #include "MainWindow.h"
+#include "../core/UndoManager.h"
+#include "../core/BasicCommands.h"
 #include "TrayController.h"
 #include "HoverEventFilter.h"
 #include "ResizeEventFilter.h"
@@ -378,9 +380,13 @@ void MainWindow::initUi() {
         m_contentPanel->search("");
     });
 
-    // 6. 地址栏路径跳转
+    // 6. 地址栏路径跳转与刷新
     connect(m_addressBar, &AddressBar::pathChanged, this, [this](const QString& path) {
         navigateTo(path);
+    });
+
+    connect(m_addressBar, &AddressBar::refreshRequested, this, [this]() {
+        if (m_contentPanel) m_contentPanel->refreshAll();
     });
 
     // 7. 搜索框回车触发逻辑 (带历史记录和搜索模式分流)
@@ -683,6 +689,24 @@ void MainWindow::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void MainWindow::keyPressEvent(QKeyEvent* event) {
+    // 0. F5: 刷新当前目录
+    if (event->key() == Qt::Key_F5) {
+        if (m_contentPanel) m_contentPanel->refreshAll();
+        event->accept();
+        return;
+    }
+
+    // 0.1 Ctrl+Z / Ctrl+Shift+Z: 撤销与重做
+    if (event->key() == Qt::Key_Z && (event->modifiers() & Qt::ControlModifier)) {
+        if (event->modifiers() & Qt::ShiftModifier) {
+            UndoManager::instance().redo();
+        } else {
+            UndoManager::instance().undo();
+        }
+        event->accept();
+        return;
+    }
+
     // 1. Alt+Q: 切换窗口置顶状态
     if (event->key() == Qt::Key_Q && (event->modifiers() & Qt::AltModifier)) {
         m_btnPinTop->setChecked(!m_btnPinTop->isChecked());

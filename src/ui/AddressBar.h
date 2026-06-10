@@ -4,6 +4,7 @@
 #include <QLineEdit>
 #include <QStackedWidget>
 #include "BreadcrumbBar.h"
+#include "AddressHistoryPanel.h"
 
 namespace ArcMeta {
 
@@ -21,8 +22,14 @@ public:
     void setPath(const QString& path);
     QString currentPath() const { return m_currentPath; }
 
+    /**
+     * @brief 2026-06-xx 按照用户要求：持久化路径历史
+     */
+    void saveToHistory(const QString& path);
+
 signals:
     void pathChanged(const QString& path);
+    void refreshRequested();
 
 private slots:
     void onBreadcrumbBlankClicked();
@@ -33,6 +40,8 @@ private:
     QStackedWidget* m_pathStack = nullptr;
     BreadcrumbBar*  m_breadcrumbBar = nullptr;
     QLineEdit*      m_pathEdit = nullptr;
+    QPushButton*    m_btnRefresh = nullptr;
+    AddressHistoryPanel* m_historyPanel = nullptr;
     QString         m_currentPath;
 };
 
