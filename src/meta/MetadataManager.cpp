@@ -288,22 +288,6 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
     std::wstring type;
     if (fetchWinApiMetadataDirect(nPath, rm.fileId128, &frn, &rm.fileSize, &type, &rm.ctime, &rm.mtime, &rm.atime)) {
         rm.isFolder = (type == L"folder");
-        
-        // 2026-06-xx 物理同步：首次激活项时，执行一次数据库存在性检查。
-        // 如果该文件已在数据库中（不论属于哪个驱动器分库），标记为 isManaged，驱动 UI 绿对勾显示。
-        std::wstring volSerial = getVolumeSerialNumber(nPath);
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
-        if (db && !rm.fileId128.empty()) {
-            sqlite3_stmt* checkStmt;
-            if (sqlite3_prepare_v2(db, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
-                sqlite3_bind_text(checkStmt, 1, rm.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-                if (sqlite3_step(checkStmt) == SQLITE_ROW) {
-                    rm.isManaged = true;
-                }
-                sqlite3_finalize(checkStmt);
-            }
-        }
-
         m_cache[nPath] = rm;
         if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;
     }

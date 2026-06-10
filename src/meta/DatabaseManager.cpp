@@ -9,52 +9,30 @@ namespace ArcMeta {
 
 SqlTransaction::SqlTransaction(struct sqlite3* db) : m_db(db) {
     if (m_db) {
-        // 2026-06-xx 架构增强：引入重试机制应对 SQLITE_BUSY
-        int retry = 0;
-        while (retry < 5) {
-            int rc = sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
-            if (rc == SQLITE_OK) break;
-            if (rc != SQLITE_BUSY && rc != SQLITE_LOCKED) {
-                qDebug() << "[DB] BEGIN TRANSACTION failed with rc:" << rc;
-                break;
-            }
-            retry++;
-            Sleep(50); // 物理等待 I/O 繁忙期
-        }
+        sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
     }
 }
 
 SqlTransaction::~SqlTransaction() {
-    if (m_db && !m_finished) {
-        // 析构逻辑：如果既没有 commit 也没有手动 rollback，则执行安全回滚
+    if (m_db && !m_committed) {
         sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
     }
 }
 
 bool SqlTransaction::commit() {
-    if (m_db && !m_finished) {
-        int retry = 0;
-        while (retry < 5) {
-            int rc = sqlite3_exec(m_db, "COMMIT", nullptr, nullptr, nullptr);
-            if (rc == SQLITE_OK) {
-                m_finished = true;
-                return true;
-            }
-            if (rc != SQLITE_BUSY && rc != SQLITE_LOCKED) {
-                qDebug() << "[DB] COMMIT failed with rc:" << rc;
-                break;
-            }
-            retry++;
-            Sleep(50);
+    if (m_db && !m_committed) {
+        if (sqlite3_exec(m_db, "COMMIT", nullptr, nullptr, nullptr) == SQLITE_OK) {
+            m_committed = true;
+            return true;
         }
     }
     return false;
 }
 
 void SqlTransaction::rollback() {
-    if (m_db && !m_finished) {
+    if (m_db && !m_committed) {
         sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
-        m_finished = true; // 标记事务已完成，防止析构函数二次操作
+        m_committed = true; // Mark as "processed" to prevent dtor rollback
     }
 }
 

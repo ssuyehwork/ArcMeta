@@ -310,19 +310,16 @@ void JustifiedView::paintEvent(QPaintEvent*) {
     }
     painter.restore();
 
-    // 2026-06-xx 按照 1.7 需求：绘制蓝色透明框选矩形 (物理对齐预期效果)
+    // 2026-06-xx 按照 1.7 需求：绘制蓝色透明框选矩形
     if (m_isDraggingSelection && !m_selectionRect.isEmpty()) {
         painter.save();
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        
-        // 核心视觉契约：使用预期的高亮蓝 #378ADD，设定 Alpha 80 以确保透射感
-        QColor selectionBlue = QColor(55, 138, 221); // #378ADD
-        QColor fillColor = selectionBlue;
-        fillColor.setAlpha(80);
-        
-        painter.setBrush(fillColor);
-        // 边框使用不透明色值，增加轮廓清晰度
-        painter.setPen(QPen(selectionBlue, 1));
+        painter.setRenderHint(QPainter::Antialiasing, false);
+        // 2026-06-xx 物理对齐：使用标准高亮蓝 (#378ADD) 并增加透明度以达到预期效果
+        QColor highlightColor = QColor("#378ADD");
+        QColor brushColor = highlightColor;
+        brushColor.setAlpha(80); // 适度提升透明度可见度 (Alpha 0-255)
+        painter.setBrush(brushColor);
+        painter.setPen(QPen(highlightColor, 1, Qt::SolidLine));
         painter.drawRect(m_selectionRect);
         painter.restore();
     }
