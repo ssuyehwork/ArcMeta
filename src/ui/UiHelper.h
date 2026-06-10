@@ -189,16 +189,22 @@ public:
         menu->setAttribute(Qt::WA_TranslucentBackground);
         menu->setWindowFlag(Qt::FramelessWindowHint);
 
-        // 2026-07-xx 物理纠偏：将 SVG 替换为兼容性更好的 PNG Data URL 并优化指示符定位
-        QString arrowPng = getSvgDataUrl("nav_next", QColor("#EEEEEE"));
+        // 2026-07-xx 物理级加固：改用实心三角形 (menu_triangle) 并通过临时物理文件保障渲染
+        // 理由：部分环境下 Data URL 可能因长度或特殊字符导致 QSS 加载失败，物理文件最稳健。
+        // 同时采用 subcontrol-origin: content 配合 padding-right 确保指示符绝对可见。
+        QString arrowPath = getSvgTempFilePath("menu_triangle", QColor("#CCCCCC"));
 
         menu->setStyleSheet(QString(
             "QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid #444; padding: 4px; border-radius: 8px; }"
-            "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; font-size: 12px; }"
+            "QMenu::item { padding: 6px 28px 6px 10px; border-radius: 4px; font-size: 12px; }"
             "QMenu::item:selected { background-color: #3E3E42; color: white; }"
             "QMenu::separator { height: 1px; background: #444; margin: 4px 8px; }"
-            "QMenu::right-arrow { image: url(%1); width: 12px; height: 12px; }"
-        ).arg(arrowPng));
+            "QMenu::right-arrow { "
+            "  image: url(%1); "
+            "  subcontrol-origin: content; "
+            "  subcontrol-position: center right; "
+            "}"
+        ).arg(arrowPath));
     }
 
     static QColor getExtensionColor(const QString& ext) {
