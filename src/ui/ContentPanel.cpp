@@ -362,6 +362,7 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             m_allRecords[i].fileId = meta.fileId128;
             m_allRecords[i].pinned = meta.pinned;
             m_allRecords[i].encrypted = meta.encrypted;
+            m_allRecords[i].isManaged = meta.hasUserOperations();
             m_allRecords[i].palettes.clear();
             for (const auto& pe : meta.palettes) {
                 m_allRecords[i].palettes.push_back({pe.color, pe.ratio});
@@ -1922,6 +1923,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 r.fileId = meta.fileId128;
                 r.pinned = meta.pinned;
                 r.encrypted = meta.encrypted;
+                r.isManaged = meta.hasUserOperations();
                 for (const auto& pe : meta.palettes) {
                     r.palettes.push_back({pe.color, pe.ratio});
                 }
@@ -1989,6 +1991,7 @@ void ContentPanel::search(const QString& query) {
                 r.color = QString::fromStdWString(meta.color);
                 r.tags = meta.tags;
                 r.fileId = meta.fileId128;
+                r.isManaged = meta.hasUserOperations();
                 for (const auto& pe : meta.palettes) {
                     r.palettes.push_back({pe.color, pe.ratio});
                 }
@@ -2131,6 +2134,7 @@ void ContentPanel::loadCategory(int categoryId) {
                 r.fileId = meta.fileId128;
                 r.pinned = meta.pinned;
                 r.encrypted = meta.encrypted;
+                r.isManaged = meta.hasUserOperations();
                 for (const auto& pe : meta.palettes) {
                     r.palettes.push_back({pe.color, pe.ratio});
                 }
@@ -2194,6 +2198,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
                 r.fileId = meta.fileId128;
                 r.pinned = meta.pinned;
                 r.encrypted = meta.encrypted;
+                r.isManaged = meta.hasUserOperations();
                 for (const auto& pe : meta.palettes) {
                     r.palettes.push_back({pe.color, pe.ratio});
                 }
