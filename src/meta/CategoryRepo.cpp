@@ -587,27 +587,53 @@ bool CategoryRepo::executeFidBatch(const std::vector<std::string>& fids, std::fu
     return ok;
 }
 
-void CategoryRepo::syncCategorizedCountForFid(const std::string& /*fid*/) {
+void CategoryRepo::syncCategorizedCountForFid(const std::string& fid) {
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return;
 
-    // 2026-06-xx 物理对账：通过全局 DISTINCT 查询重新计算已分类总数
+    // 2026-06-xx 物理对账：通过全局扫描并结合元数据排除文件夹，重新计算已分类总数
     // 这种做法比手动增减 delta 更稳健，能自动修正因程序崩溃导致的计数偏差
+    std::unordered_set<std::string> uniqueFiles;
     sqlite3_stmt* stmt;
     // 物理红线：分类计数必须排除回收站 (ID = -8) 和未分类 (ID = -2)
-    const char* sql = "SELECT COUNT(DISTINCT file_id) FROM category_items WHERE category_id > 0";
+    const char* sql = "SELECT DISTINCT file_id FROM category_items WHERE category_id > 0";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        if (sqlite3_step(stmt) == SQLITE_ROW) {
-            int count = sqlite3_column_int(stmt, 0);
-            int oldCount = s_categorizedCount.load();
-            s_categorizedCount.store(count);
-
-            // 物理持久化：直接更新增量
-            if (count != oldCount) {
-                updatePersistentStat(STAT_CATEGORIZED, count - oldCount);
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char* fidPtr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+            if (fidPtr) {
+                std::string currentFid = fidPtr;
+                std::wstring path = MetadataManager::instance().getPathByFid(currentFid);
+                if (!path.empty()) {
+                    auto meta = MetadataManager::instance().getMeta(path);
+                    // 核心红线：不计入文件夹，不计入回收站
+                    if (!meta.isFolder && !meta.isTrash) {
+                        uniqueFiles.insert(currentFid);
+                    }
+                }
             }
         }
         sqlite3_finalize(stmt);
+    }
+
+    int count = (int)uniqueFiles.size();
+    int oldCount = s_categorizedCount.load();
+    s_categorizedCount.store(count);
+
+    // 物理持久化：校准数据库中的统计指标
+    if (count != oldCount) {
+        updatePersistentStat(STAT_CATEGORIZED, count - oldCount);
+    }
+
+    // 2026-06-xx 物理同步：针对特定变动的 FID，刷新其 Managed 状态
+    if (!fid.empty()) {
+        std::wstring path = MetadataManager::instance().getPathByFid(fid);
+        if (!path.empty()) {
+            auto meta = MetadataManager::instance().getMeta(path);
+            bool isCategorized = uniqueFiles.count(fid);
+            // 判定：只要属于任何自定义分类，或者有用户操作信息，即为 Managed
+            bool managed = isCategorized || meta.hasUserOperations();
+            MetadataManager::instance().setManaged(path, managed, false);
+        }
     }
 }
 
@@ -658,6 +684,7 @@ void CategoryRepo::fullRecount() {
             }
         }
 
+        std::vector<std::wstring> managedPaths;
         MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
             if (!meta.isFolder && !meta.isInvalid) {
                 total++;  // includes trash
@@ -669,10 +696,15 @@ void CategoryRepo::fullRecount() {
 
                 // 2026-06-xx 物理同步：只要在数据库中有记录（即便未分类），就标记为 Managed
                 if (isCategorized || meta.hasUserOperations()) {
-                    MetadataManager::instance().setManaged(path, true, false);
+                    managedPaths.push_back(path);
                 }
             }
         });
+
+        // 2026-06-xx 物理修复：在 forEach 外部执行 setManaged，防止迭代时死锁或触发写锁冲突
+        for (const auto& p : managedPaths) {
+            MetadataManager::instance().setManaged(p, true, false);
+        }
         
         qDebug() << "[Recount] 盘点完成。总计:" << total << "已分类:" << categorized;
         s_totalFileCount.store(total);
