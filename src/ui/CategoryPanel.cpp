@@ -163,8 +163,12 @@ void CategoryPanel::setupContextMenu() {
         }
 
         QMenu menu(this);
-        // 2026-06-xx 物理对齐：使用统一菜单样式引擎，强制开启 TranslucentBackground 消除圆角溢出
-        UiHelper::applyMenuStyle(&menu);
+        // [PHYSICAL RESTORATION] 8px radius for context menu
+    menu.setStyleSheet(QString("QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid %1; padding: 4px; border-radius: 8px; } "
+                           "QMenu::item { padding: 6px 25px 6px 10px; border-radius: 4px; } "
+                           "QMenu::icon { margin-left: 6px; } "
+                           "QMenu::item:selected { background-color: #3E3E42; color: white; } "
+                       "QMenu::separator { height: 1px; background: %1; margin: 4px 8px; }").arg(qssColor(BorderDark)));
 
         // 基于规范逻辑：如果没有选中项，或者选中了“我的分类”根节点
         QString itemName = index.data(NameRole).toString();
