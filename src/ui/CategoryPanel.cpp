@@ -936,7 +936,7 @@ void CategoryPanel::initUi() {
             if (type == "trash") {
                 if (ShellHelper::moveToTrash(paths)) {
                     m_categoryModel->refresh();
-                    emit MetadataManager::instance().metaChanged("__RELOAD_ALL__");
+                    MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
                     ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e74c3c;'>已成功移入回收站</b>", 1500, ErrorRed);
                 }
                 return;
@@ -982,11 +982,8 @@ void CategoryPanel::initUi() {
             auto processItem = [&](const QString& itemPath, int catId) {
                 std::wstring wp = QDir::toNativeSeparators(itemPath).toStdWString();
                 
-                // 1. 激活：获取 FID/FRN (物理加固)
-                MetadataManager::activateItem(wp);
-
-                // 2. 视觉解析：如果是图像或文件夹，解析代表色并设置视觉元数据
-                MetadataManager::tryExtractColor(wp);
+                // 1. 一站式注册：获取 FID/FRN、物理属性同步及视觉预热
+                MetadataManager::instance().registerItem(wp);
                 
                 // 3. 归类：建立 File ID 与分类的持久化关联 (如果 targetCatId > 0)
                 if (catId > 0) {
@@ -1029,7 +1026,7 @@ void CategoryPanel::initUi() {
                 } else {
                     // 激活文件夹元数据（为了后续属性展示），但不建立 category_items 关联，
                     // 这样文件夹就不会出现在任何分类的文件计数中。
-                    MetadataManager::activateItem(QDir::toNativeSeparators(p).toStdWString());
+                    MetadataManager::instance().registerItem(QDir::toNativeSeparators(p).toStdWString());
                 }
                 
                 currentTask++;
@@ -1073,7 +1070,7 @@ void CategoryPanel::initUi() {
                 CategoryRepo::saveImmediately();
 
                 // 2026-06-xx 物理优化：批量导入完成后触发一次全局刷新，确保 UI 同步
-                emit MetadataManager::instance().metaChanged("__RELOAD_ALL__");
+                MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
 
                 ToolTipOverlay::instance()->showText(QCursor::pos(), 
                     "<b style='color:#2ecc71;'>已完成递归分类镜像导入</b>", 1500, QColor("#2ecc71"));
