@@ -60,6 +60,12 @@ int main(int argc, char *argv[]) {
     QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
     QApplication a(argc, argv);
 
+    // 2026-06-xx 按照用户要求：全局统一设置蓝色透明框选样式
+    QPalette p = a.palette();
+    p.setColor(QPalette::Highlight, QColor(52, 152, 219));      // #3498db (蓝色)
+    p.setColor(QPalette::HighlightedText, Qt::white);
+    a.setPalette(p);
+
     a.setQuitOnLastWindowClosed(false);
     
     // 2026-04-14 按照用户要求：物理加固图标加载逻辑

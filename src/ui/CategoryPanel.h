@@ -71,6 +71,10 @@ private slots:
     void onSortAllByNameAsc();
     void onSortAllByNameDesc();
 
+    // 2026-06-xx 按照用户要求：补全回收站专属操作
+    void onEmptyTrash();
+    void onRestoreAllFromTrash();
+
 private:
     void initUi();
     void setupContextMenu();
