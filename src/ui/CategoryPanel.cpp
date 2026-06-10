@@ -14,6 +14,7 @@ using namespace ArcMeta::Style;
 #include <QFileInfo>
 #include <QRegularExpression>
 #include "../meta/CategoryRepo.h"
+#include "../util/ShellHelper.h"
 
 
 #include "../meta/MetadataManager.h"
@@ -930,6 +931,17 @@ void CategoryPanel::initUi() {
         if (index.isValid()) {
             QString type = index.data(TypeRole).toString();
             QString name = index.data(NameRole).toString();
+
+            // 2026-06-xx 物理联动：拖拽到回收站
+            if (type == "trash") {
+                if (ShellHelper::moveToTrash(paths)) {
+                    m_categoryModel->refresh();
+                    emit MetadataManager::instance().metaChanged("__RELOAD_ALL__");
+                    ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e74c3c;'>已成功移入回收站</b>", 1500, ErrorRed);
+                }
+                return;
+            }
+
             if (type == "category" && index.data(IdRole).toInt() > 0) {
                 targetCatId = index.data(IdRole).toInt();
             } else if (name == "我的分类") {
