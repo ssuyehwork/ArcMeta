@@ -1,4 +1,5 @@
 #include "TrayController.h"
+#include "UiHelper.h"
 #include <QApplication>
 #include <QIcon>
 #include <QDebug>
