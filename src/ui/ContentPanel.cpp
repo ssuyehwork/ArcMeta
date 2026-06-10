@@ -843,11 +843,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 for (const auto& idx : indexes) { 
                     if (idx.column() == 0) { 
-                        QString path = idx.data(PathRole).toString(); 
-                        if (!path.isEmpty()) { 
-                            MetadataManager::instance().setRating(path.toStdWString(), rating); 
-                            m_proxyModel->setData(idx, rating, RatingRole); 
-                        } 
+                        m_proxyModel->setData(idx, rating, RatingRole);
                     } 
                 } 
                 return true; 
@@ -858,12 +854,8 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 for (const QModelIndex& idx : indexes) { 
                     if (idx.column() == 0) { 
-                        QString itemPath = idx.data(PathRole).toString(); 
-                        if (!itemPath.isEmpty()) { 
-                            bool current = idx.data(IsLockedRole).toBool(); 
-                            MetadataManager::instance().setPinned(itemPath.toStdWString(), !current); 
-                            m_proxyModel->setData(idx, !current, IsLockedRole); 
-                        } 
+                        bool current = idx.data(IsLockedRole).toBool();
+                        m_proxyModel->setData(idx, !current, IsLockedRole);
                     } 
                 } 
                 return true; 
@@ -885,19 +877,15 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                     case Qt::Key_9: colorValue = ""; break; 
                 } 
  
-                QColor tagColor = UiHelper::parseColorName(colorValue); 
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 for (const auto& idx : indexes) { 
                     if (idx.column() == 0) { 
-                        QString path = idx.data(PathRole).toString(); 
-                        if (!path.isEmpty()) { 
-                            MetadataManager::instance().setColor(path.toStdWString(), colorValue.toStdWString()); 
-                            m_proxyModel->setData(idx, colorValue, ColorRole); 
- 
-                            // 2026-06-05 按照要求：快捷键设置颜色后立即重渲染图标，实现视觉同步 
-                            QIcon coloredIcon = UiHelper::getFileIcon(path, 128); 
-                            m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
-                        } 
+                        m_proxyModel->setData(idx, colorValue, ColorRole);
+
+                        // 2026-06-05 按照要求：快捷键设置颜色后立即重渲染图标，实现视觉同步
+                        QString path = idx.data(PathRole).toString();
+                        QIcon coloredIcon = UiHelper::getFileIcon(path, 128);
+                        m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole);
                     } 
                 } 
                 return true; 
@@ -1830,8 +1818,7 @@ void ContentPanel::onSelectionChanged() {
  
 void ContentPanel::refreshAll() {
     if (m_currentCategoryType == "user_category") {
-        // 如果是从分类加载的，我们需要找到当前分类 ID。
-        // 由于 ContentPanel 没有保存 categoryId，暂时简单处理。
+        if (m_currentCategoryId != -1) loadCategory(m_currentCategoryId);
     } else if (!m_currentPath.isEmpty()) {
         loadDirectory(m_currentPath, m_isRecursive);
     }
@@ -2102,6 +2089,7 @@ void ContentPanel::previewFile(const QString& path) {
 void ContentPanel::loadCategory(int categoryId) { 
     m_isLoading = true;
     m_currentCategoryType = "user_category";
+    m_currentCategoryId = categoryId;
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 

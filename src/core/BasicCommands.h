@@ -5,6 +5,9 @@
 #include "../util/ShellHelper.h"
 #include <QString>
 #include <QVariant>
+#include <QFileInfo>
+#include <QDir>
+#include <string>
 
 namespace ArcMeta {
 
@@ -22,9 +25,7 @@ public:
     }
 
     void undo() override {
-        if (ShellHelper::renameItem(m_newPath, m_oldPath)) {
-            MetadataManager::instance().notifyUI(m_oldPath); // 理想情况下 ShellHelper 应该处理，但这里为了保险显式通知
-        }
+        ShellHelper::renameItem(m_newPath, m_oldPath);
     }
 
     void redo() override {
@@ -100,9 +101,9 @@ public:
 private:
     void applyValue(const QVariant& val) {
         if (m_type == Rating) {
-            MetadataManager::instance().setRating(m_path.toStdWString(), val.toInt(), false);
+            MetadataManager::instance().setRating(m_path.toStdWString(), val.toInt(), true);
         } else {
-            MetadataManager::instance().setColor(m_path.toStdWString(), val.toString().toStdWString(), false);
+            MetadataManager::instance().setColor(m_path.toStdWString(), val.toString().toStdWString(), true);
         }
     }
 
@@ -128,6 +129,7 @@ public:
         } else {
             CategoryRepo::addItemToCategory(m_categoryId, m_fid, m_path.toStdWString());
         }
+        MetadataManager::instance().notifyCategoryCountChanged();
     }
 
     void redo() override {
@@ -136,6 +138,7 @@ public:
         } else {
             CategoryRepo::removeItemFromCategory(m_categoryId, m_fid);
         }
+        MetadataManager::instance().notifyCategoryCountChanged();
     }
 
     QString description() const override { return m_isAdd ? "添加分类" : "移除分类"; }
