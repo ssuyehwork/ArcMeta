@@ -10,7 +10,6 @@
 #include "DropJustifiedView.h"
 #include "BatchProgressDialog.h"
 #include "ThumbnailDelegate.h"
-#include "../util/ImportHelper.h"
 #include "ToolTipOverlay.h" 
  
 #include <QVBoxLayout> 
@@ -363,6 +362,9 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
 }
 
 void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
+    // 2026-06-xx 物理护栏：强制在主线程执行，防止多线程并发更新模型导致 QAbstractItemModel 内部状态损坏
+    Q_ASSERT(QThread::currentThread() == qApp->thread());
+
     QString nPath = QDir::toNativeSeparators(path);
     auto it = m_pathToIndex.find(nPath);
     if (it != m_pathToIndex.end()) {
@@ -1510,9 +1512,68 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionBatchRename: performBatchRename(); break; 
         case ActionAddToCategory: {
             if (path.isEmpty()) break;
-            // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
-            // 扫描入库时，镜像分类始终创建在“我的分类”根节点 (ID = 0)
-            ImportHelper::importPaths({path}, 0, this);
+            
+            BatchProgressDialog* progress = new BatchProgressDialog("正在激活项目并建立索引...", this);
+            progress->show();
+            
+            QPointer<ContentPanel> weakThis(this);
+            QPointer<BatchProgressDialog> weakProgress(progress);
+            
+            (void)QtConcurrent::run([weakThis, path, weakProgress]() {
+                // 1. 预统计
+                int totalItems = 0;
+                std::function<void(const QString&)> countTask = [&](const QString& p) {
+                    QDir dir(p);
+                    QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+                    totalItems += entries.size();
+                    for (const QFileInfo& info : entries) {
+                        if (info.isDir()) countTask(info.absoluteFilePath());
+                    }
+                };
+                countTask(path);
+                totalItems++; // 包含起始目录自身
+                
+                int currentHandled = 0;
+
+                // 2. 递归激活逻辑
+                std::function<void(const QString&)> activateItem = [&](const QString& p) {
+                    if (!weakProgress) return;
+                    currentHandled++;
+                    QFileInfo info(p);
+                    QString fileName = info.fileName();
+                    QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Qt::QueuedConnection, 
+                        Q_ARG(int, currentHandled), Q_ARG(int, totalItems), Q_ARG(QString, fileName));
+
+                    std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
+                    
+                    // 一站式注册：整合 FID 获取、物理属性同步及视觉预热
+                    MetadataManager::instance().registerItem(wp);
+
+                    // 递归子项
+                    if (info.isDir()) {
+                        QDir dir(p);
+                        QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+                        for (const QFileInfo& subInfo : entries) {
+                            activateItem(subInfo.absoluteFilePath());
+                        }
+                    }
+                };
+
+                activateItem(path);
+
+                QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, weakProgress, currentHandled]() {
+                    if (weakProgress) {
+                        weakProgress->accept();
+                        weakProgress->deleteLater();
+                    }
+                    if (weakThis) {
+                         MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                         weakThis->loadDirectory(weakThis->m_currentPath);
+                         ToolTipOverlay::instance()->showText(QCursor::pos(), 
+                             QString("已激活 %1 个项目，可在侧边栏查看").arg(currentHandled), 2000, QColor("#2ecc71"));
+                    }
+                });
+            });
             break;
         }
         case ActionRename: view->edit(currentIndex); break; 

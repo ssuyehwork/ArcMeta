@@ -119,7 +119,6 @@ void MftReader::clear() {
         QWriteLocker lock(&m_dataLock);
         if (!m_isInitialized || m_is_clearing.load()) return;
         m_is_clearing.store(true);
-        m_abort_scan.store(true); // 1.21：强制中断位
         m_isInitialized = false; 
     }
 
@@ -1279,7 +1278,6 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
     MFT_ENUM_DATA_V0 ed = {0}; ed.HighUsn = j.NextUsn;
     std::vector<uint8_t> buf(1024 * 1024);
     while (DeviceIoControl(h, FSCTL_ENUM_USN_DATA, &ed, sizeof(ed), buf.data(), (DWORD)buf.size(), &cb, NULL)) {
-        if (m_abort_scan.load()) break; // 1.21：强制中断
         if (cb < 8) break;
         uint8_t* p = buf.data() + 8; uint8_t* end = buf.data() + cb;
         while (p < end) {

@@ -12,7 +12,6 @@
 #include <QPainter>
 #include <QLockFile>
 #include <QDir>
-#include <QMutex>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -34,12 +33,7 @@
  */
 void customMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
     Q_UNUSED(context); 
-    static QMutex s_logMutex; // 2026-07-xx 物理加固：增加互斥锁，确保多线程扫描时日志不交织且不丢失
-    QMutexLocker locker(&s_logMutex);
-
     QFile logFile("arcmeta_debug.log");
-    // 2026-07-xx 按照用户要求 (1.18)：开启强力落盘模式
-    // 即使发生系统级闪退，也要确保最后一条日志已写入物理磁盘
     if (logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
         QTextStream textStream(&logFile);
         QString timeStr = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
@@ -52,25 +46,23 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext &context, con
             case QtFatalMsg:    level = "FATAL";    break;
         }
         textStream << QString("[%1][%2] %3").arg(timeStr, level, msg) << Qt::endl;
-        textStream.flush();
-        logFile.flush(); // 强制物理落盘
         logFile.close();
     }
 }
 
 int main(int argc, char *argv[]) {
-    // 2026-07-xx 按照用户要求 (1.20)：主程序限制单实例运行，防止无限打开
+    // 2026-06-xx 按照用户要求：主程序限制单实例运行，防止无限打开
 #ifdef Q_OS_WIN
     // Windows: 使用 Mutex 实现，确保程序异常退出后资源能被 OS 自动回收
     HANDLE hMutex = CreateMutexA(NULL, TRUE, "ArcMeta_SingleInstance_Mutex");
-    if (hMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
         if (hMutex) CloseHandle(hMutex);
         return 0;
     }
 #else
     // 非 Windows (Linux/macOS): 使用 QLockFile 确保单实例运行
     QString lockPath = QDir::tempPath() + "/ArcMeta_SingleInstance.lock";
-    static QLockFile lockFile(lockPath); // 必须静态或在 main 作用域持续存在
+    QLockFile lockFile(lockPath);
     if (!lockFile.tryLock(100)) { // 尝试等待 100ms
         return 0;
     }

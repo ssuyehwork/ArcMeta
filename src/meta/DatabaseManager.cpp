@@ -9,11 +9,7 @@ namespace ArcMeta {
 
 SqlTransaction::SqlTransaction(struct sqlite3* db) : m_db(db) {
     if (m_db) {
-        // 2026-06-xx 物理加固：内置针对 SQLITE_BUSY 的重试机制
-        int retry = 0;
-        while (sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr) == SQLITE_BUSY && retry++ < 5) {
-            Sleep(50);
-        }
+        sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
     }
 }
 
@@ -207,69 +203,6 @@ void DatabaseManager::flushAll() {
     for (auto& pair : m_driveDbs) {
         saveDb(pair.second);
     }
-}
-
-bool DatabaseManager::flushStep() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto stepConn = [](DbConnection& conn) -> bool {
-        if (!conn.memDb || !conn.diskDb) return true;
-        if (!conn.activeBackup) {
-            conn.activeBackup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-        }
-        if (conn.activeBackup) {
-            int rc = sqlite3_backup_step(conn.activeBackup, 50); // 1.21：每 50 页一跳
-            if (rc == SQLITE_DONE || rc != SQLITE_OK) {
-                sqlite3_backup_finish(conn.activeBackup);
-                conn.activeBackup = nullptr;
-                return true;
-            }
-            return false;
-        }
-        return true;
-    };
-
-    bool allDone = true;
-    if (!stepConn(m_globalDb)) allDone = false;
-    for (auto& pair : m_driveDbs) {
-        if (!stepConn(pair.second)) allDone = false;
-    }
-    return allDone;
-}
-
-void DatabaseManager::shutdown() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    // 强制完成所有挂起的备份
-    auto forceFinish = [](DbConnection& conn) {
-        if (conn.activeBackup) {
-            sqlite3_backup_step(conn.activeBackup, -1);
-            sqlite3_backup_finish(conn.activeBackup);
-            conn.activeBackup = nullptr;
-        } else {
-            // 如果没有活动备份，执行一次完整的同步
-            if (conn.memDb && conn.diskDb) {
-                sqlite3_backup* b = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-                if (b) {
-                    sqlite3_backup_step(b, -1);
-                    sqlite3_backup_finish(b);
-                }
-            }
-        }
-    };
-    
-    forceFinish(m_globalDb);
-    for (auto& pair : m_driveDbs) forceFinish(pair.second);
-
-    // 关闭所有句柄 (1.21：解除物理占用)
-    for (auto& pair : m_driveDbs) {
-        if (pair.second.memDb) sqlite3_close_v2(pair.second.memDb);
-        if (pair.second.diskDb) sqlite3_close_v2(pair.second.diskDb);
-        pair.second.memDb = nullptr;
-        pair.second.diskDb = nullptr;
-    }
-    if (m_globalDb.memDb) sqlite3_close_v2(m_globalDb.memDb);
-    if (m_globalDb.diskDb) sqlite3_close_v2(m_globalDb.diskDb);
-    m_globalDb.memDb = nullptr;
-    m_globalDb.diskDb = nullptr;
 }
 
 sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial) {

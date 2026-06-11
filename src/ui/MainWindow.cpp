@@ -48,7 +48,6 @@ using namespace ArcMeta::Style;
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <Dbt.h>
-#include <psapi.h>
 #endif
 
 
@@ -149,7 +148,6 @@ MainWindow::MainWindow(QWidget* parent)
     m_trayController->show();
 
     initIdleDetector();
-    initResourceMonitor();
     qDebug() << "[Main] MainWindow 构造函数 UI/托盘/闲置检测初始化完成";
 
     // 2026-03-xx 性能优化：严禁在构造函数中执行任何可能导致阻塞的同步加载 (如 navigateTo)。
@@ -505,7 +503,7 @@ void MainWindow::initUi() {
 
         // __RELOAD_ALL__ 信号立即刷新，其他信号防抖
         if (path == "__RELOAD_ALL__") {
-            m_categoryPanel->requestRefresh(true);
+            m_categoryPanel->requestRefresh();
         } else {
             m_sidebarRefreshTimer->start(); // 重置计时器
         }
@@ -1112,35 +1110,6 @@ void MainWindow::initIdleDetector() {
     
     // 2026-05-29 性能优化：事件过滤器仅安装在 MainWindow 实例上，减少 qApp 全局事件分发的 overhead。
     this->installEventFilter(this);
-}
-
-void MainWindow::initResourceMonitor() {
-    // 2026-06-xx 崩溃监控：每 5 秒记录一次核心资源指标
-    m_resourceMonitorTimer = new QTimer(this);
-    m_resourceMonitorTimer->setInterval(5000); 
-    
-    connect(m_resourceMonitorTimer, &QTimer::timeout, this, [this]() {
-#ifdef Q_OS_WIN
-        DWORD gdiCount = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
-        DWORD userCount = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
-        
-        PROCESS_MEMORY_COUNTERS_EX pmc;
-        SIZE_T privateBytes = 0;
-        if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
-            privateBytes = pmc.PrivateUsage;
-        }
-        
-        qDebug() << QString("[MONITOR] GDI: %1 | USER: %2 | PrivateBytes: %3 MB")
-                    .arg(gdiCount).arg(userCount).arg(privateBytes / 1024 / 1024);
-        
-        // 阈值预警：如果接近 Windows 默认限制 (10000)，输出警告
-        if (gdiCount > 8000 || userCount > 8000) {
-            qWarning() << "⚠️ [MONITOR] 句柄资源接近临界值，闪退风险极高！";
-        }
-#endif
-    });
-    
-    m_resourceMonitorTimer->start();
 }
 
 void MainWindow::navigateTo(const QString& path, bool record) {
