@@ -11,6 +11,7 @@
 #include "BatchProgressDialog.h"
 #include "ThumbnailDelegate.h"
 #include "ToolTipOverlay.h" 
+#include "../util/ImportHelper.h"
  
 #include <QVBoxLayout> 
 #include <QHBoxLayout> 
@@ -1516,63 +1517,10 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             BatchProgressDialog* progress = new BatchProgressDialog("正在激活项目并建立索引...", this);
             progress->show();
             
-            QPointer<ContentPanel> weakThis(this);
-            QPointer<BatchProgressDialog> weakProgress(progress);
-            
-            (void)QtConcurrent::run([weakThis, path, weakProgress]() {
-                // 1. 预统计
-                int totalItems = 0;
-                std::function<void(const QString&)> countTask = [&](const QString& p) {
-                    QDir dir(p);
-                    QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-                    totalItems += entries.size();
-                    for (const QFileInfo& info : entries) {
-                        if (info.isDir()) countTask(info.absoluteFilePath());
-                    }
-                };
-                countTask(path);
-                totalItems++; // 包含起始目录自身
-                
-                int currentHandled = 0;
+            ImportHelper::importPaths({path}, 0, progress, this);
 
-                // 2. 递归激活逻辑
-                std::function<void(const QString&)> activateItem = [&](const QString& p) {
-                    if (!weakProgress) return;
-                    currentHandled++;
-                    QFileInfo info(p);
-                    QString fileName = info.fileName();
-                    QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Qt::QueuedConnection, 
-                        Q_ARG(int, currentHandled), Q_ARG(int, totalItems), Q_ARG(QString, fileName));
-
-                    std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
-                    
-                    // 一站式注册：整合 FID 获取、物理属性同步及视觉预热
-                    MetadataManager::instance().registerItem(wp);
-
-                    // 递归子项
-                    if (info.isDir()) {
-                        QDir dir(p);
-                        QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-                        for (const QFileInfo& subInfo : entries) {
-                            activateItem(subInfo.absoluteFilePath());
-                        }
-                    }
-                };
-
-                activateItem(path);
-
-                QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, weakProgress, currentHandled]() {
-                    if (weakProgress) {
-                        weakProgress->accept();
-                        weakProgress->deleteLater();
-                    }
-                    if (weakThis) {
-                         MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
-                         weakThis->loadDirectory(weakThis->m_currentPath);
-                         ToolTipOverlay::instance()->showText(QCursor::pos(), 
-                             QString("已激活 %1 个项目，可在侧边栏查看").arg(currentHandled), 2000, QColor("#2ecc71"));
-                    }
-                });
+            connect(progress, &QDialog::accepted, this, [this]() {
+                loadDirectory(m_currentPath);
             });
             break;
         }

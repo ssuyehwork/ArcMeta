@@ -15,6 +15,7 @@ using namespace ArcMeta::Style;
 #include <QRegularExpression>
 #include "../meta/CategoryRepo.h"
 #include "../util/ShellHelper.h"
+#include "../util/ImportHelper.h"
 
 
 #include "../meta/MetadataManager.h"
@@ -956,123 +957,21 @@ void CategoryPanel::initUi() {
         BatchProgressDialog* progress = new BatchProgressDialog("正在处理项目导入...", this);
         progress->show();
         
-        (void)QtConcurrent::run([this, paths, targetCatId, progress]() {
-            // A. 第一阶段：快速统计总项数
-            int totalItems = 0;
-            std::function<void(const QString&)> countTask = [&](const QString& p) {
-                QDir dir(p);
-                QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-                totalItems += entries.size();
-                for (const QFileInfo& info : entries) {
-                    if (info.isDir()) countTask(info.absoluteFilePath());
-                }
-            };
-            for(const auto& p : paths) { countTask(p); totalItems++; }
+        ImportHelper::importPaths(paths, targetCatId, progress, this);
 
-            QMetaObject::invokeMethod(progress, [progress, totalItems]() {
-                progress->setRange(0, totalItems);
-                progress->setValue(0);
-            });
+        // 监控刷新逻辑：利用 QDialog::accepted 信号在导入完成后刷新分类树
+        connect(progress, &QDialog::accepted, this, [this]() {
+            QSet<int> expandedIds;
+            QStringList expandedNames;
+            saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
-            int currentTask = 0;
+            QList<int> idList;
+            for (int id : expandedIds) idList << id;
+            m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idList));
+            m_categoryTree->setProperty("expandedNames", expandedNames);
 
-            // 激活并归类的核心 Lambda
-            auto processItem = [&](const QString& itemPath, int catId) {
-                std::wstring wp = QDir::toNativeSeparators(itemPath).toStdWString();
-                
-                // 1. 一站式注册：获取 FID/FRN、物理属性同步及视觉预热
-                MetadataManager::instance().registerItem(wp);
-                
-                // 3. 归类：建立 File ID 与分类的持久化关联 (如果 targetCatId > 0)
-                if (catId > 0) {
-                    std::string fid = MetadataManager::instance().getFileIdSync(wp);
-                    if (!fid.empty()) {
-                        CategoryRepo::addItemToCategory(catId, fid, wp);
-                    }
-                }
-            };
-
-            // 递归激活并归类 (2026-06-xx 物理对标：支持文件夹自动转分类节点)
-            std::function<void(const QString&, int)> activateAndCategorize = [&](const QString& p, int parentCatId) {
-                QFileInfo info(p);
-                int currentCatId = parentCatId;
-                
-                bool isDirectory = info.isDir();
-
-                // 1. 如果是文件夹，自动创建分类节点
-                if (isDirectory) {
-                    std::wstring name = info.fileName().toStdWString();
-                    // 检查是否已存在同名子分类，避免重复创建
-                    int existingId = CategoryRepo::findCategoryId(parentCatId, name);
-                    if (existingId == 0) {
-                        Category newCat;
-                        newCat.name = name;
-                        newCat.parentId = parentCatId;
-                        newCat.color = getDefaultCategoryColor();
-                        CategoryRepo::add(newCat);
-                        currentCatId = newCat.id;
-                        qDebug() << "[Drop] 自动创建分类节点:" << QString::fromStdWString(name) << "ID:" << currentCatId;
-                    } else {
-                        currentCatId = existingId;
-                    }
-                }
-
-                // 2026-06-xx 按照用户要求：文件夹本身不计入文件数量，仅作为分类层级。
-                // 只有文件才执行 processItem (激活并关联到分类)
-                if (!isDirectory) {
-                    processItem(p, currentCatId);
-                } else {
-                    // 激活文件夹元数据（为了后续属性展示），但不建立 category_items 关联，
-                    // 这样文件夹就不会出现在任何分类的文件计数中。
-                    MetadataManager::instance().registerItem(QDir::toNativeSeparators(p).toStdWString());
-                }
-                
-                currentTask++;
-                if (currentTask % 50 == 0) {
-                    QMetaObject::invokeMethod(progress, [progress, currentTask, p]() {
-                        progress->setValue(currentTask);
-                        progress->setStatus("正在导入: " + QFileInfo(p).fileName());
-                    });
-                }
-
-                if (isDirectory) {
-                    QDir dir(p);
-                    QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-                    for (const QFileInfo& subInfo : entries) {
-                        // 物理级联：子文件夹/文件挂载到当前创建的分类下
-                        activateAndCategorize(subInfo.absoluteFilePath(), currentCatId);
-                    }
-                }
-            };
-
-            for (const QString& rootPath : paths) {
-                activateAndCategorize(rootPath, targetCatId);
-            }
-
-            QMetaObject::invokeMethod(this, [this, progress]() {
-                progress->accept();
-                progress->deleteLater();
-                
-                QSet<int> expandedIds;
-                QStringList expandedNames;
-                saveExpandedState(QModelIndex(), expandedIds, expandedNames);
-                
-                QList<int> idList;
-                for (int id : expandedIds) idList << id;
-                m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idList));
-                m_categoryTree->setProperty("expandedNames", expandedNames);
-
-                m_categoryModel->refresh();
-                
-                // 2026-06-xx 物理加固：导入完成后立即强制物理落盘，防止断电或异常退出回滚
-                CategoryRepo::saveImmediately();
-
-                // 2026-06-xx 物理优化：批量导入完成后触发一次全局刷新，确保 UI 同步
-                MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
-
-                ToolTipOverlay::instance()->showText(QCursor::pos(), 
-                    "<b style='color:#2ecc71;'>已完成递归分类镜像导入</b>", 1500, QColor("#2ecc71"));
-            }, Qt::QueuedConnection);
+            m_categoryModel->refresh();
+            CategoryRepo::saveImmediately();
         });
     });
     
