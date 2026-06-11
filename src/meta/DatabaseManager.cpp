@@ -9,22 +9,32 @@ namespace ArcMeta {
 
 SqlTransaction::SqlTransaction(struct sqlite3* db) : m_db(db) {
     if (m_db) {
-        // 2026-06-xx 物理加固：内置针对 SQLITE_BUSY 的重试机制
-        int retry = 0;
-        while (sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr) == SQLITE_BUSY && retry++ < 5) {
-            Sleep(50);
+        // 2026-07-xx 物理修复 (1.22)：通过检测 autocommit 状态支持伪嵌套事务。
+        // 如果 autocommit 为 0，说明已经处于外部事务中。
+        m_isNested = (sqlite3_get_autocommit(m_db) == 0);
+
+        if (!m_isNested) {
+            // 2026-06-xx 物理加固：内置针对 SQLITE_BUSY 的重试机制
+            int retry = 0;
+            while (sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr) == SQLITE_BUSY && retry++ < 5) {
+                Sleep(50);
+            }
         }
     }
 }
 
 SqlTransaction::~SqlTransaction() {
-    if (m_db && !m_committed) {
+    if (m_db && !m_committed && !m_isNested) {
         sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
     }
 }
 
 bool SqlTransaction::commit() {
     if (m_db && !m_committed) {
+        if (m_isNested) {
+            m_committed = true;
+            return true;
+        }
         if (sqlite3_exec(m_db, "COMMIT", nullptr, nullptr, nullptr) == SQLITE_OK) {
             m_committed = true;
             return true;
@@ -35,7 +45,9 @@ bool SqlTransaction::commit() {
 
 void SqlTransaction::rollback() {
     if (m_db && !m_committed) {
-        sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
+        if (!m_isNested) {
+            sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
+        }
         m_committed = true; // Mark as "processed" to prevent dtor rollback
     }
 }

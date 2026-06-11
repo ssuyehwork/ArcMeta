@@ -28,6 +28,7 @@ public:
 private:
     struct sqlite3* m_db;
     bool m_committed = false;
+    bool m_isNested = false;
 };
 
 class DatabaseManager : public QObject {
