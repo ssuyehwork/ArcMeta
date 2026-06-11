@@ -46,6 +46,17 @@ public:
     void flushAll();
 
     /**
+     * @brief 2026-07-xx 按照用户要求 (1.21)：步进式持久化接口
+     * @return 如果所有备份已完成，返回 true；否则返回 false。
+     */
+    bool flushStep();
+
+    /**
+     * @brief 显式关闭并释放所有数据库资源 (1.21)
+     */
+    void shutdown();
+
+    /**
      * @brief 获取指定磁盘卷序列号对应的内存连接
      * @param volumeSerial 磁盘卷序列号（如 A1B2C3D4）
      */
@@ -63,6 +74,7 @@ private:
     struct DbConnection {
         sqlite3* diskDb = nullptr;
         sqlite3* memDb = nullptr;
+        sqlite3_backup* activeBackup = nullptr;
         std::wstring diskPath;
     };
 
