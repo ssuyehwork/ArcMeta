@@ -801,11 +801,9 @@ void MainWindow::initToolbar() {
 
     m_searchEdit = new QLineEdit(m_searchContainer);
     m_searchEdit->setPlaceholderText("搜索...");
-    m_searchEdit->setFixedWidth(230);
-    m_searchEdit->setFixedHeight(32);
+    // 2026-06-xx 物理红线：强制锁定 230 像素，禁止脑补拉伸
+    m_searchEdit->setFixedSize(230, 32);
     m_searchEdit->addAction(UiHelper::getIcon("search", TextMuted), QLineEdit::LeadingPosition);
-    // 按照用户要求：移除局部/全局切换按钮，恢复搜索框 6px 完整圆角
-    // 2024-05-22 按照分析计划 #46：通过 setFixedWidth(230) 和 QSS 物理锁定宽度，确保宽度固定为 230px
     m_searchEdit->setStyleSheet(QString(
         "QLineEdit { background: %1; border: 1px solid %2;"
         "  border-radius: 6px;"
@@ -814,7 +812,8 @@ void MainWindow::initToolbar() {
         "QLineEdit:focus { border: 1px solid %4; }"
     ).arg(qssColor(BackgroundDeep)).arg(qssColor(BorderColor)).arg(qssColor(TextMain)).arg(qssColor(PrimaryBlue)));
 
-    searchLayout->addWidget(m_searchEdit, 0);
+    searchLayout->addWidget(m_searchEdit);
+    m_searchContainer->setFixedWidth(230);
 }
 
 
