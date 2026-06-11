@@ -46,6 +46,15 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext &context, con
 }
 
 int main(int argc, char *argv[]) {
+    // 2026-06-xx 按照用户要求：主程序限制单实例运行，防止无限打开
+    // 使用 Windows Mutex 实现，确保即便程序崩溃后 Mutex 也能被操作系统自动回收
+    HANDLE hMutex = CreateMutexA(NULL, TRUE, "ArcMeta_SingleInstance_Mutex");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        // 发现已有实例运行，直接退出
+        if (hMutex) CloseHandle(hMutex);
+        return 0;
+    }
+
     qint64 mainStartTime = QDateTime::currentMSecsSinceEpoch();
 
     // 初始化 COM 环境 (多媒体缩略图提取需要)
@@ -98,6 +107,12 @@ int main(int argc, char *argv[]) {
     qDebug() << "[PERF] main 函数逻辑执行完毕，进入事件循环。总耗时:" << (QDateTime::currentMSecsSinceEpoch() - mainStartTime) << "ms";
 
     int ret = a.exec();
+
+    // 程序退出前释放 Mutex
+    if (hMutex) {
+        ReleaseMutex(hMutex);
+        CloseHandle(hMutex);
+    }
 
     return ret;
 }
