@@ -13,17 +13,18 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     layout->setSpacing(0);
 
     // 2026-06-xx 按照用户图片：引入一体化容器 AddressContainer，包含路径与刷新按钮
-    QWidget* addressContainer = new QWidget(this);
-    addressContainer->setObjectName("AddressContainer");
-    addressContainer->setFixedHeight(32);
-    addressContainer->setStyleSheet(
+    m_addressContainer = new QWidget(this);
+    m_addressContainer->setObjectName("AddressContainer");
+    m_addressContainer->setFixedHeight(32);
+    m_addressContainer->setStyleSheet(
         "QWidget#AddressContainer { background: #1E1E1E; border: 1px solid #333333; border-radius: 6px; }"
+        "QWidget#AddressContainer[focused='true'] { border: 1px solid #3498db; }"
     );
-    QHBoxLayout* containerLayout = new QHBoxLayout(addressContainer);
+    QHBoxLayout* containerLayout = new QHBoxLayout(m_addressContainer);
     containerLayout->setContentsMargins(0, 0, 0, 0);
     containerLayout->setSpacing(0);
 
-    m_pathStack = new QStackedWidget(addressContainer);
+    m_pathStack = new QStackedWidget(m_addressContainer);
     m_pathStack->setFixedHeight(30); // 扣除上下边框
     m_pathStack->setStyleSheet("QStackedWidget { background: transparent; border: none; }");
 
@@ -36,7 +37,7 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     m_pathEdit->setStyleSheet("QLineEdit { background: transparent; border: none; color: #EEEEEE; padding-left: 8px; }");
     m_pathStack->addWidget(m_pathEdit);
 
-    m_btnRefresh = new QPushButton(addressContainer);
+    m_btnRefresh = new QPushButton(m_addressContainer);
     m_btnRefresh->setFixedSize(30, 30);
     m_btnRefresh->setIcon(UiHelper::getIcon("sync", QColor("#CCCCCC"), 16));
     m_btnRefresh->setToolTip("刷新 (F5)");
@@ -50,8 +51,7 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     containerLayout->addWidget(m_pathStack, 1);
     containerLayout->addWidget(m_btnRefresh);
 
-    layout->addWidget(addressContainer);
-    layout->addSpacing(5); // 2026-06-xx 物理间距：确保地址栏与右侧搜索框保持 5px 间距
+    layout->addWidget(m_addressContainer);
 
     connect(m_btnRefresh, &QPushButton::clicked, this, &AddressBar::refreshRequested);
     connect(m_breadcrumbBar, &BreadcrumbBar::blankAreaClicked, this, &AddressBar::onBreadcrumbBlankClicked);
@@ -136,6 +136,19 @@ bool AddressBar::eventFilter(QObject* obj, QEvent* event) {
             m_btnRefresh->setIcon(UiHelper::getIcon("sync", Qt::white, 16));
         } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::Leave) {
             m_btnRefresh->setIcon(UiHelper::getIcon("sync", QColor("#CCCCCC"), 16));
+        }
+    }
+
+    // 2026-06-xx 物理联动：由于 QSS 不支持 :focus-within，此处手动驱动容器焦点边框
+    if (obj == m_pathEdit) {
+        if (event->type() == QEvent::FocusIn) {
+            m_addressContainer->setProperty("focused", true);
+            m_addressContainer->style()->unpolish(m_addressContainer);
+            m_addressContainer->style()->polish(m_addressContainer);
+        } else if (event->type() == QEvent::FocusOut) {
+            m_addressContainer->setProperty("focused", false);
+            m_addressContainer->style()->unpolish(m_addressContainer);
+            m_addressContainer->style()->polish(m_addressContainer);
         }
     }
 
