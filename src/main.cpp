@@ -10,9 +10,14 @@
 #include <QDateTime>
 #include <QSvgRenderer>
 #include <QPainter>
+#include <QLockFile>
+#include <QDir>
+
+#ifdef Q_OS_WIN
 #include <windows.h>
 #include <objbase.h>
 #include <shellapi.h>
+#endif
 #include "ui/UiHelper.h"
 #include "ui/MainWindow.h"
 
@@ -47,18 +52,28 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext &context, con
 
 int main(int argc, char *argv[]) {
     // 2026-06-xx 按照用户要求：主程序限制单实例运行，防止无限打开
-    // 使用 Windows Mutex 实现，确保即便程序崩溃后 Mutex 也能被操作系统自动回收
+#ifdef Q_OS_WIN
+    // Windows: 使用 Mutex 实现，确保程序异常退出后资源能被 OS 自动回收
     HANDLE hMutex = CreateMutexA(NULL, TRUE, "ArcMeta_SingleInstance_Mutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        // 发现已有实例运行，直接退出
         if (hMutex) CloseHandle(hMutex);
         return 0;
     }
+#else
+    // 非 Windows (Linux/macOS): 使用 QLockFile 确保单实例运行
+    QString lockPath = QDir::tempPath() + "/ArcMeta_SingleInstance.lock";
+    QLockFile lockFile(lockPath);
+    if (!lockFile.tryLock(100)) { // 尝试等待 100ms
+        return 0;
+    }
+#endif
 
     qint64 mainStartTime = QDateTime::currentMSecsSinceEpoch();
 
     // 初始化 COM 环境 (多媒体缩略图提取需要)
+#ifdef Q_OS_WIN
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+#endif
 
     // 1. 安装自定义日志处理器：确保从程序启动的第一秒开始就能捕获所有调试信息
     qInstallMessageHandler(customMessageHandler);
@@ -108,11 +123,13 @@ int main(int argc, char *argv[]) {
 
     int ret = a.exec();
 
-    // 程序退出前释放 Mutex
+    // 程序退出前释放单实例锁
+#ifdef Q_OS_WIN
     if (hMutex) {
         ReleaseMutex(hMutex);
         CloseHandle(hMutex);
     }
+#endif
 
     return ret;
 }

@@ -56,6 +56,8 @@ using namespace ArcMeta::Style;
 namespace ArcMeta {
 
 MainWindow::~MainWindow() {
+    // 对应 initUi() 中 QCoreApplication::instance()->installEventFilter(m_resizeFilter)
+    // 安装位置和卸载位置必须严格一致，禁止改成 this->removeEventFilter(...)
     if (m_resizeFilter) {
         QCoreApplication::instance()->removeEventFilter(m_resizeFilter);
     }
@@ -75,7 +77,19 @@ MainWindow::MainWindow(QWidget* parent)
     setMinimumSize(1180, 653); // 物理对齐：5x230px面板 + 20px分割手柄 + 10px全局边距
     setWindowTitle("FERREX");
 
-    
+    // ============================================================
+    // 【物理护栏 - 禁止移动】事件过滤器必须在 initUi() 之前创建
+    // 原因：initUi() -> initToolbar()/setupCustomTitleBarButtons() 会调用
+    //       installEventFilter(m_hoverFilter)，setupCustomTitleBarButtons()
+    //       内部还依赖 m_resizeFilter 做全局安装。
+    //       若此处移到 initUi() 之后，installEventFilter 会收到 nullptr，
+    //       Qt 不会报错也不会崩溃，但功能（hover提示/边缘缩放）会静默失效，
+    //       极难排查。2026-06-xx 已踩坑一次。
+    // ============================================================
+    m_hoverFilter = new HoverEventFilter(this);
+    m_resizeFilter = new ResizeEventFilter(this);
+    Q_ASSERT(m_hoverFilter && m_resizeFilter);
+    // ============================================================
 
     // 从设置读取置顶状态
     m_isPinned = AppConfig::instance().getValue("MainWindow/AlwaysOnTop", false).toBool();
@@ -129,9 +143,6 @@ MainWindow::MainWindow(QWidget* parent)
     }
 
     initUi();
-    
-    m_hoverFilter = new HoverEventFilter(this);
-    m_resizeFilter = new ResizeEventFilter(this);
 
     m_trayController = new TrayController(this);
     m_trayController->show();
@@ -159,13 +170,15 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 void MainWindow::initUi() {
+    // 物理断言：确保过滤器已就绪，防止静默失效
+    Q_ASSERT(m_hoverFilter && m_resizeFilter && "事件过滤器必须在 initUi() 之前创建，见构造函数顶部注释");
+
     initToolbar();
     setupSplitters();
 
-    // 2026-05-29 性能优化：ResizeEventFilter 必须全局安装以拦截子控件边缘事件，确保边缘缩放可用
-    if (m_resizeFilter) {
-        QCoreApplication::instance()->installEventFilter(m_resizeFilter);
-    }
+    // 全局安装：拦截子控件边缘鼠标事件以支持无边框窗口缩放
+    QCoreApplication::instance()->installEventFilter(m_resizeFilter);
+
     setupCustomTitleBarButtons();
     
     // 2026-04-11 按照用户要求：物理锁定侧边栏宽度，最大化时仅“内容”区拉伸
