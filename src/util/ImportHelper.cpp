@@ -20,7 +20,7 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCatId, BatchP
     QPointer<QWidget> weakParent(parentView);
 
     (void)QtConcurrent::run([paths, targetCatId, weakProgress, weakParent]() {
-        // 1. 预统计总项数 (用于进度条范围)
+        // 1. 预统计总项数
         int totalItems = 0;
         std::function<void(const QString&)> countTask = [&](const QString& p) {
             QDir dir(p);
@@ -44,14 +44,9 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCatId, BatchP
 
         int currentHandled = 0;
 
-        // 2. 核心递归逻辑
         auto processItem = [&](const QString& itemPath, int catId) {
             std::wstring wp = QDir::toNativeSeparators(itemPath).toStdWString();
-
-            // 一站式注册：获取 FID/FRN、物理属性同步及视觉预热
             MetadataManager::instance().registerItem(wp);
-
-            // 归类：建立 File ID 与分类的持久化关联
             if (catId > 0) {
                 std::string fid = MetadataManager::instance().getFileIdSync(wp);
                 if (!fid.empty()) {
@@ -60,6 +55,7 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCatId, BatchP
             }
         };
 
+        // 递归逻辑修复：对所有文件夹均尝试创建分类节点，以保留完整层级
         std::function<void(const QString&, int)> activateAndCategorize = [&](const QString& p, int parentCatId) {
             if (!weakProgress) return;
 
@@ -67,7 +63,6 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCatId, BatchP
             int currentCatId = parentCatId;
             bool isDirectory = info.isDir();
 
-            // A. 如果是文件夹，自动创建分类节点
             if (isDirectory) {
                 std::wstring name = info.fileName().toStdWString();
                 int existingId = CategoryRepo::findCategoryId(parentCatId, name);
@@ -81,23 +76,21 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCatId, BatchP
                 } else {
                     currentCatId = existingId;
                 }
-            }
 
-            // B. 处理当前项
-            if (!isDirectory) {
-                processItem(p, currentCatId);
-            } else {
-                // 激活文件夹元数据，但不建立分类关联
+                // 激活文件夹元数据
                 MetadataManager::instance().registerItem(QDir::toNativeSeparators(p).toStdWString());
             }
 
-            // C. 精细化反馈：处理每个文件都更新 UI
+            if (!isDirectory) {
+                processItem(p, currentCatId);
+            }
+
+            // 精细化反馈
             currentHandled++;
             QString fileName = info.fileName();
             QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Qt::QueuedConnection,
                 Q_ARG(int, currentHandled), Q_ARG(int, totalItems), Q_ARG(QString, fileName));
 
-            // D. 递归子项
             if (isDirectory) {
                 QDir dir(p);
                 QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
@@ -107,13 +100,15 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCatId, BatchP
             }
         };
 
-        // 执行递归
         for (const QString& rootPath : paths) {
             activateAndCategorize(rootPath, targetCatId);
         }
 
-        // 3. 完成后的 UI 刷新
+        // 3. 完成后的 UI 刷新与持久化
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, weakParent, currentHandled]() {
+            // 物理加固：导入完成后立即强制物理落盘 (统一处理)
+            CategoryRepo::saveImmediately();
+
             if (weakProgress) {
                 weakProgress->accept();
                 weakProgress->deleteLater();
