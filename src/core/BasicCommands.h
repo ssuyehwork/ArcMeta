@@ -2,12 +2,16 @@
 #include "ActionCommand.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
+#include "../meta/DatabaseManager.h"
+#include "sqlite3.h"
 #include "../util/ShellHelper.h"
 #include <QString>
 #include <QVariant>
 #include <QFileInfo>
 #include <QDir>
 #include <string>
+#include <vector>
+#include <utility>
 
 namespace ArcMeta {
 
@@ -168,6 +172,67 @@ private:
     std::string m_fid;
     int m_categoryId;
     bool m_isAdd;
+};
+
+/**
+ * @brief 2026-07-xx 按照用户要求 (1.19)：导入任务指令
+ * 支持一键撤销整个导入任务产生的分类节点与关联
+ */
+class ImportCommand : public ActionCommand {
+public:
+    ImportCommand(const std::vector<int>& createdCatIds, 
+                  const std::vector<std::pair<int, std::string>>& createdAssociations,
+                  const std::vector<std::wstring>& registeredPaths)
+        : m_createdCatIds(createdCatIds), 
+          m_createdAssociations(createdAssociations),
+          m_registeredPaths(registeredPaths) {}
+
+    void execute() override {}
+
+    void undo() override {
+        // 1. 移除分类关联
+        for (const auto& assoc : m_createdAssociations) {
+            CategoryRepo::removeItemFromCategory(assoc.first, assoc.second);
+        }
+        // 2. 物理删除创建的分类节点 (逆序删除以处理父子关系)
+        for (auto it = m_createdCatIds.rbegin(); it != m_createdCatIds.rend(); ++it) {
+            // 此处直接操作 DB 物理删除，不走 CategoryRepo::remove 的移入回收站逻辑
+            sqlite3* db = DatabaseManager::instance().getGlobalDb();
+            if (db) {
+                sqlite3_stmt* stmt;
+                if (sqlite3_prepare_v2(db, "DELETE FROM categories WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_int(stmt, 1, *it);
+                    sqlite3_step(stmt);
+                    sqlite3_finalize(stmt);
+                }
+            }
+        }
+        // 3. 将新注册的项目标记回非受控状态 (Managed = false)
+        for (const auto& wp : m_registeredPaths) {
+            MetadataManager::instance().setManaged(wp, false, false);
+        }
+
+        // 4. 物理落盘并刷新 UI
+        CategoryRepo::saveImmediately();
+        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+    }
+
+    void redo() override {
+        // 由于导入涉及物理扫描，REDO 逻辑较为复杂，暂时保留空实现或提示用户重新导入
+    }
+
+    QString description() const override { return "撤销导入任务"; }
+
+    bool affectsPath(const QString& path) const override {
+        std::wstring wp = QDir::toNativeSeparators(path).toStdWString();
+        for (const auto& p : m_registeredPaths) if (p == wp) return true;
+        return false;
+    }
+
+private:
+    std::vector<int> m_createdCatIds;
+    std::vector<std::pair<int, std::string>> m_createdAssociations;
+    std::vector<std::wstring> m_registeredPaths;
 };
 
 } // namespace ArcMeta

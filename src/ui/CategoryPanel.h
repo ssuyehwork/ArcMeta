@@ -44,8 +44,9 @@ public:
     /**
      * @brief 2026-06-xx 物理削峰：请求刷新侧边栏计数
      * 采用 500ms 防抖逻辑，合并高频信号风暴
+     * @param fullRebuild 2026-07-xx: 是否强制重建树结构 (用于导入后即时显示新分类)
      */
-    void requestRefresh();
+    void requestRefresh(bool fullRebuild = false);
 
 signals:
     void categorySelected(int id, const QString& name, const QString& type, const QString& path = "");

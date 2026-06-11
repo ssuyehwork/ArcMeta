@@ -41,6 +41,11 @@ public:
     static constexpr int TRASH_CATEGORY_ID    = -8;
     static constexpr int UNCATEGORIZED_CAT_ID = -2;
 
+    /**
+     * @brief 获取默认分类颜色：深灰色 (#555555)
+     */
+    static std::wstring getDefaultColor() { return L"#555555"; }
+
     static bool add(Category& cat);
     static bool update(const Category& cat);
     static int findCategoryId(int parentId, const std::wstring& name);
