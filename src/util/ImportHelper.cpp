@@ -1,4 +1,5 @@
 #include "ImportHelper.h"
+#include "../ui/Logger.h"
 #include "../ui/BatchProgressDialog.h"
 #include "../ui/ToolTipOverlay.h"
 #include "../meta/MetadataManager.h"
@@ -41,10 +42,10 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
         if (!weakProgress) return;
 
         // 2026-07-xx 按照用户要求：弹出二次确认
-        QString msg = "导入尚未完成。您是希望【保留当前进度】并退出，还是【一键撤销】已录入的数据？";
+        QString msg = "导入尚未完成。您是希望【保留当前进度】并停止，还是【一键撤销】已录入的数据？";
         QMessageBox msgBox(QMessageBox::Question, "中断导入", msg, QMessageBox::NoButton, parent);
-        msgBox.addButton("保留进度并退出", QMessageBox::AcceptRole);
-        QPushButton* btnUndo = msgBox.addButton("一键撤销并退出", QMessageBox::DestructiveRole);
+        msgBox.addButton("保留进度并停止", QMessageBox::AcceptRole);
+        QPushButton* btnUndo = msgBox.addButton("一键撤销并停止", QMessageBox::DestructiveRole);
         msgBox.addButton("继续导入", QMessageBox::RejectRole);
         
         int ret = msgBox.exec();
@@ -73,10 +74,8 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
             }
             ImportCommand cmd(cats, assocs, paths);
             cmd.undo();
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "导入已取消并执行一键撤销，程序即将退出", 2000, QColor("#E81123"));
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "导入已取消并执行一键撤销", 2000, QColor("#E81123"));
             
-            // 2026-07-xx 按照用户要求：执行一键撤销后直接关闭程序
-            QCoreApplication::exit(0);
         } else {
             ToolTipOverlay::instance()->showText(QCursor::pos(), "导入已中断，进度已保留", 2000, QColor("#FF8C00"));
         }
@@ -122,6 +121,8 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
             std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
             QString fileName = info.fileName();
 
+            qDebug() << "[ImportHelper] Processing path:" << p << "isDir:" << isDir << "parentId:" << parentId;
+
             // 1. 详细进度反馈
             currentHandled++;
             if (weakProgress) {
@@ -135,6 +136,8 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
             if (isDir) {
                 std::wstring name = fileName.toStdWString();
                 int existingId = CategoryRepo::findCategoryId(parentId, name);
+                qDebug() << "[ImportHelper] Directory check:" << fileName << "Existing ID:" << existingId;
+
                 if (existingId == 0) {
                     Category newCat;
                     newCat.name = name;
@@ -142,8 +145,11 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
                     newCat.color = CategoryRepo::getDefaultColor();
                     if (CategoryRepo::add(newCat)) {
                         currentCatId = newCat.id;
-                    QMutexLocker locker(&context->mutex);
+                        qDebug() << "[ImportHelper] Created new category:" << fileName << "ID:" << currentCatId;
+                        QMutexLocker locker(&context->mutex);
                         context->createdCatIds.push_back(currentCatId);
+                    } else {
+                        qDebug() << "[ImportHelper] FAILED to create category:" << fileName;
                     }
                 } else {
                     currentCatId = existingId;

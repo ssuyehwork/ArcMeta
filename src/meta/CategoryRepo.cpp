@@ -57,11 +57,15 @@ std::vector<Category> CategoryRepo::getAll() {
 
 bool CategoryRepo::add(Category& cat) {
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return false;
+    if (!db) {
+        qDebug() << "[CategoryRepo] add FAILED: No DB connection";
+        return false;
+    }
 
     sqlite3_stmt* stmt;
     const char* sql = "INSERT INTO categories (parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
+    if (rc == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, cat.parentId);
         sqlite3_bind_text16(stmt, 2, cat.name.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text16(stmt, 3, cat.color.c_str(), -1, SQLITE_TRANSIENT);
@@ -75,12 +79,18 @@ bool CategoryRepo::add(Category& cat) {
         sqlite3_bind_int(stmt, 7, cat.encrypted ? 1 : 0);
         sqlite3_bind_text16(stmt, 8, cat.encryptHint.c_str(), -1, SQLITE_TRANSIENT);
 
-        if (sqlite3_step(stmt) == SQLITE_DONE) {
+        rc = sqlite3_step(stmt);
+        if (rc == SQLITE_DONE) {
             cat.id = static_cast<int>(sqlite3_last_insert_rowid(db));
+            qDebug() << "[CategoryRepo] add success: Name =" << QString::fromStdWString(cat.name) << "ID =" << cat.id << "Parent =" << cat.parentId;
             sqlite3_finalize(stmt);
             return true;
+        } else {
+            qDebug() << "[CategoryRepo] add FAILED during step:" << sqlite3_errmsg(db) << "Code:" << rc;
         }
         sqlite3_finalize(stmt);
+    } else {
+        qDebug() << "[CategoryRepo] add FAILED during prepare:" << sqlite3_errmsg(db) << "Code:" << rc;
     }
     return false;
 }
@@ -244,8 +254,13 @@ int CategoryRepo::findCategoryId(int parentId, const std::wstring& name) {
         sqlite3_bind_int(stmt, 1, parentId);
         sqlite3_bind_text16(stmt, 2, name.c_str(), -1, SQLITE_TRANSIENT);
         int id = 0;
-        if (sqlite3_step(stmt) == SQLITE_ROW) id = sqlite3_column_int(stmt, 0);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            id = sqlite3_column_int(stmt, 0);
+        }
         sqlite3_finalize(stmt);
+        if (id > 0) {
+            qDebug() << "[CategoryRepo] findCategoryId found:" << QString::fromStdWString(name) << "->" << id << "under parent" << parentId;
+        }
         return id;
     }
     return 0;
