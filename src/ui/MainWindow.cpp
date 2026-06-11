@@ -790,7 +790,7 @@ void MainWindow::initToolbar() {
 
     // --- 路径地址栏重构 (复合 AddressBar) ---
     m_addressBar = new AddressBar(this);
-
+    m_addressBar->setMinimumWidth(300); // 2026-06-xx 物理红线：地址栏最小宽度，防止被搜索框挤压
 
     // 2026-04-12 按照用户要求：搜索框容器（搜索框 + 模式切换按钮）
     m_searchContainer = new QWidget(this);
@@ -857,6 +857,7 @@ void MainWindow::setupSplitters() {
     m_navBarLayout->addWidget(m_btnForward);
     m_navBarLayout->addWidget(m_btnUp);
     m_navBarLayout->addWidget(m_addressBar, 1);
+    m_navBarLayout->addSpacing(5); // 2026-06-xx 物理间距：确保搜索框与地址栏有明确边界
     m_navBarLayout->addWidget(m_searchContainer);
 
     // --- 3. 主体核心容器 (物理还原：10px 全局边距包裹，确保边缘resize可用) ---
