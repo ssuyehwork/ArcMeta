@@ -11,33 +11,45 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    m_pathStack = new QStackedWidget(this);
-    m_pathStack->setFixedHeight(32); 
-    m_pathStack->setMinimumWidth(300);
-    m_pathStack->setStyleSheet("QStackedWidget { background: #1E1E1E; border: 1px solid #333333; border-radius: 6px; }");
+    // 2026-06-xx 按照用户图片：引入一体化容器 AddressContainer，包含路径与刷新按钮
+    QWidget* addressContainer = new QWidget(this);
+    addressContainer->setObjectName("AddressContainer");
+    addressContainer->setFixedHeight(32);
+    addressContainer->setStyleSheet(
+        "QWidget#AddressContainer { background: #1E1E1E; border: 1px solid #333333; border-radius: 6px; }"
+    );
+    QHBoxLayout* containerLayout = new QHBoxLayout(addressContainer);
+    containerLayout->setContentsMargins(0, 0, 0, 0);
+    containerLayout->setSpacing(0);
+
+    m_pathStack = new QStackedWidget(addressContainer);
+    m_pathStack->setFixedHeight(30); // 扣除上下边框
+    m_pathStack->setStyleSheet("QStackedWidget { background: transparent; border: none; }");
 
     m_breadcrumbBar = new BreadcrumbBar(m_pathStack);
     m_pathStack->addWidget(m_breadcrumbBar);
 
     m_pathEdit = new QLineEdit(m_pathStack);
     m_pathEdit->setPlaceholderText("输入路径...");
-    m_pathEdit->setFixedHeight(30); // 扣除上下各 1px 边框，确保背景不溢出圆角
+    m_pathEdit->setFixedHeight(30); 
     m_pathEdit->setStyleSheet("QLineEdit { background: transparent; border: none; color: #EEEEEE; padding-left: 8px; }");
     m_pathStack->addWidget(m_pathEdit);
 
-    layout->addWidget(m_pathStack);
-
-    m_btnRefresh = new QPushButton(this);
+    m_btnRefresh = new QPushButton(addressContainer);
     m_btnRefresh->setFixedSize(30, 30);
     m_btnRefresh->setIcon(UiHelper::getIcon("sync", QColor("#CCCCCC"), 16));
     m_btnRefresh->setToolTip("刷新 (F5)");
+    m_btnRefresh->setCursor(Qt::ArrowCursor);
     m_btnRefresh->setStyleSheet(
-        "QPushButton { background: transparent; border: none; border-radius: 4px; }"
+        "QPushButton { background: transparent; border: none; border-left: 1px solid #333333; border-top-right-radius: 6px; border-bottom-right-radius: 6px; }"
         "QPushButton:hover { background: #FFFFFF1A; }"
         "QPushButton:pressed { background: #FFFFFF33; }"
     );
-    layout->addSpacing(4);
-    layout->addWidget(m_btnRefresh);
+
+    containerLayout->addWidget(m_pathStack, 1);
+    containerLayout->addWidget(m_btnRefresh);
+
+    layout->addWidget(addressContainer);
 
     connect(m_btnRefresh, &QPushButton::clicked, this, &AddressBar::refreshRequested);
     connect(m_breadcrumbBar, &BreadcrumbBar::blankAreaClicked, this, &AddressBar::onBreadcrumbBlankClicked);
@@ -54,6 +66,8 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     connect(m_breadcrumbBar, &BreadcrumbBar::pathClicked, this, &AddressBar::onBreadcrumbClicked);
 
     m_pathStack->installEventFilter(this);
+    m_breadcrumbBar->installEventFilter(this);
+    m_pathEdit->installEventFilter(this);
 
     m_historyPanel = new AddressHistoryPanel(this);
     connect(m_historyPanel, &AddressHistoryPanel::historyItemClicked, this, [this](const QString& path) {
@@ -108,11 +122,17 @@ void AddressBar::onBreadcrumbClicked(const QString& path) {
 }
 
 bool AddressBar::eventFilter(QObject* obj, QEvent* event) {
-    if (obj == m_pathStack && event->type() == QEvent::MouseButtonDblClick) {
+    if ((obj == m_pathStack || obj == m_breadcrumbBar || obj == m_pathEdit) && 
+        event->type() == QEvent::MouseButtonDblClick) {
+        
+        // 2026-06-xx 物理拦截：双击时立即弹出历史面板，并防止文本编辑器吞掉事件
         QStringList history = AppConfig::instance().getValue("AddressBar/History").toStringList();
-        m_historyPanel->setHistory(history);
-        m_historyPanel->showBelow(m_pathStack);
-        return true;
+        if (!history.isEmpty()) {
+            m_historyPanel->setHistory(history);
+            // 锚定到整个 Stack 以获得正确的对齐
+            m_historyPanel->showBelow(m_pathStack);
+            return true;
+        }
     }
     return QWidget::eventFilter(obj, event);
 }

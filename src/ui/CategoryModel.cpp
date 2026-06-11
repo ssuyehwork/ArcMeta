@@ -64,7 +64,7 @@ void CategoryModel::refresh() {
         addSystemItem("未分类", "uncategorized", "uncategorized", "#95a5a6", -2);
         addSystemItem("未标签", "untagged", "untagged", "#7f8c8d", -3);
         addSystemItem("最近访问", "recently_visited", "clock", "#9b59b6", -6);
-        addSystemItem("失效数据", "invalid_data", "warning", "#f1c40f", -9);
+        addSystemItem("失效数据", "invalid_data", "invalid_data", "#f1c40f", -9);
         addSystemItem("标签管理", "tags", "tag", "#1abc9c", -7);
         addSystemItem("回收站", "trash", "trash", "#e74c3c", -8);
     }
