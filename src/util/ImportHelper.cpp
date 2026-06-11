@@ -33,7 +33,7 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCatId, BatchP
         // 用于存储路径与创建出的分类 ID 的映射，确保子项能找到父分类
         QMap<QString, int> pathToCatId;
 
-        std::function<void(const QString&, int, bool)> scanAndCreateTree = [&](const QString& p, int parentId, bool isRoot) {
+        std::function<void(const QString&, int)> scanAndCreateTree = [&](const QString& p, int parentId) {
             QFileInfo info(p);
             bool isDir = info.isDir();
             int currentCatId = parentId;
@@ -62,14 +62,14 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCatId, BatchP
                 QDir dir(p);
                 QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
                 for (const QFileInfo& subInfo : entries) {
-                    scanAndCreateTree(subInfo.absoluteFilePath(), currentCatId, false);
+                    scanAndCreateTree(subInfo.absoluteFilePath(), currentCatId);
                 }
             }
         };
 
         // 执行扫描与预创建
         for (const QString& rootPath : paths) {
-            scanAndCreateTree(rootPath, targetCatId, true);
+            scanAndCreateTree(rootPath, targetCatId);
         }
 
         // --- 2. 第二阶段：强制刷新 UI 侧边栏 ---
