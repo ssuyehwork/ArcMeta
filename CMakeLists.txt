@@ -154,6 +154,7 @@ target_link_libraries(ArcMeta PRIVATE
     ntdll
     ole32
     bcrypt
+    psapi
 )
 
 target_include_directories(ArcMeta PRIVATE

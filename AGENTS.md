@@ -35,6 +35,7 @@
 ## 1.15 边缘缩放机制：`ResizeEventFilter` 必须全局安装在 `QCoreApplication` 上，以拦截子控件上的鼠标事件并实现无边框窗口的边缘缩放。
 ## 1.16 初始化顺序护栏：`MainWindow` 的事件过滤器（`m_hoverFilter`, `m_resizeFilter`）必须在 `initUi()` 之前创建。严禁使用 `if` 静默保护，必须使用 `Q_ASSERT` 确保顺序正确，防止功能静默失效。
 ## 1.17 地址栏焦点反馈：由于 QSS 不支持 `:focus-within`，地址栏容器的焦点蓝色边框必须在 `AddressBar::eventFilter` 中通过监听子控件的 `FocusIn/FocusOut` 事件，并手动更新动态属性及样式（`unpolish/polish`）来实现。
+## 1.18 崩溃现场证据捕获机制：集成 WER 完整 Dump 配置脚本，确保日志处理器 (`customMessageHandler`) 执行 `flush` 强制落盘，并在 `MainWindow` 中实现自动化资源监控（每 5 秒记录 GDI/USER 句柄及内存占用），以便在不依赖外部工具的情况下精准锁定“罪证”。
 
 # 2. 交互与回复规范
 

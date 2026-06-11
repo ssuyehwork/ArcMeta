@@ -34,6 +34,8 @@
 void customMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
     Q_UNUSED(context); 
     QFile logFile("arcmeta_debug.log");
+    // 2026-06-xx 按照用户要求：开启强力落盘模式
+    // 即使发生系统级闪退，也要确保最后一条日志已写入物理磁盘
     if (logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
         QTextStream textStream(&logFile);
         QString timeStr = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
@@ -46,6 +48,8 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext &context, con
             case QtFatalMsg:    level = "FATAL";    break;
         }
         textStream << QString("[%1][%2] %3").arg(timeStr, level, msg) << Qt::endl;
+        textStream.flush();
+        logFile.flush();
         logFile.close();
     }
 }
