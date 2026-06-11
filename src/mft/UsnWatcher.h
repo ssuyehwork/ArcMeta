@@ -38,6 +38,7 @@ public:
     virtual ~UsnWatcher();
 
     void stop();
+    bool isStopped() const { return m_stopRequested.load(); }
 
 protected:
     void run() override;
