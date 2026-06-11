@@ -82,6 +82,28 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
     m_batchTimer = new QTimer(this);
     m_batchTimer->setInterval(1500);
     m_batchTimer->setSingleShot(true);
+
+    m_uiSignalTimer = new QTimer(this);
+    m_uiSignalTimer->setInterval(200); // 200ms 时间窗口
+    m_uiSignalTimer->setSingleShot(true);
+    connect(m_uiSignalTimer, &QTimer::timeout, [this]() {
+        std::vector<QString> paths;
+        {
+            std::unique_lock<std::shared_mutex> lock(m_mutex);
+            for (const auto& p : m_pendingUiPaths) paths.push_back(p);
+            m_pendingUiPaths.clear();
+        }
+
+        for (const auto& p : paths) {
+            // 语义化特殊信号依然直接发射以确保优先级
+            if (p.startsWith("__RELOAD_")) {
+                emit metaChanged(p);
+            } else {
+                emit metaChanged(p);
+            }
+        }
+    });
+
     connect(m_batchTimer, &QTimer::timeout, [this]() {
         std::vector<std::wstring> paths;
         {
@@ -228,7 +250,13 @@ void MetadataManager::notifyUI(RefreshLevel level, const QString& path) {
             notifyCategoryCountChanged();
             break;
         case RefreshLevel::PathUpdate:
-            if (!path.isEmpty()) emit metaChanged(path);
+            if (!path.isEmpty()) {
+                {
+                    std::unique_lock<std::shared_mutex> lock(m_mutex);
+                    m_pendingUiPaths.insert(path);
+                }
+                QMetaObject::invokeMethod(m_uiSignalTimer, "start", Qt::QueuedConnection);
+            }
             break;
         case RefreshLevel::FullRebuild:
             notifyFullUIRebuild();
@@ -239,13 +267,23 @@ void MetadataManager::notifyUI(RefreshLevel level, const QString& path) {
 void MetadataManager::notifyCategoryCountChanged() {
     // 2026-06-xx 物理对账：在发射信号前，触发一遍同步计数，确保 UI 获取的是最新数据库数值
     CategoryRepo::fullRecount();
-    emit metaChanged("__RELOAD_COUNT__");
+
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_pendingUiPaths.insert("__RELOAD_COUNT__");
+    }
+    QMetaObject::invokeMethod(m_uiSignalTimer, "start", Qt::QueuedConnection);
 }
 
 void MetadataManager::notifyFullUIRebuild() {
     // 2026-06-xx 物理对账：全量重建前必须确保计数器已对齐
     CategoryRepo::fullRecount();
-    emit metaChanged("__RELOAD_ALL__");
+
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_pendingUiPaths.insert("__RELOAD_ALL__");
+    }
+    QMetaObject::invokeMethod(m_uiSignalTimer, "start", Qt::QueuedConnection);
 }
 
 void MetadataManager::registerItem(const std::wstring& path) {

@@ -27,6 +27,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileIconProvider>
+#include <QMutex>
+#include <QMutexLocker>
 #include <algorithm>
 #include <cmath>
 
@@ -56,6 +58,11 @@ public:
     static QMap<QString, QPixmap>& iconPixmapCache() {
         static QMap<QString, QPixmap> cache;
         return cache;
+    }
+
+    static QMutex& iconMutex() {
+        static QMutex mutex;
+        return mutex;
     }
 
     static void initializeHotIcons() {
@@ -140,6 +147,11 @@ public:
         return icon;
     }
 
+    static QMutex& fileIconMutex() {
+        static QMutex mutex;
+        return mutex;
+    }
+
     static QIcon getFileIcon(const QString& filePath, int size = 18, const QColor& overrideColor = QColor()) {
         Q_UNUSED(overrideColor);
         Q_UNUSED(size);
@@ -149,11 +161,17 @@ public:
         QString key = info.isDir() ? (info.isRoot() ? filePath : "folder") : info.suffix().toLower();
         if (key.length() > 128) key = "unknown";
         
-        static QMap<QString, QIcon> s_iconCache;
-        if (s_iconCache.contains(key)) {
-            return s_iconCache[key];
+        static QMap<QString, QIcon> s_fileIconCache;
+
+        {
+            QMutexLocker locker(&fileIconMutex());
+            if (s_fileIconCache.contains(key)) {
+                return s_fileIconCache[key];
+            }
         }
 
+        // 2026-06-xx 性能警告：QFileIconProvider 在 Windows 下涉及 Shell API，
+        // 必须确保其操作的线程安全性。虽然 QIcon 引用计数安全，但 QMap 容器操作非线程安全。
         QFileIconProvider provider;
         QIcon icon;
         if (info.isDir()) {
@@ -171,15 +189,25 @@ public:
             }
         }
         
-        s_iconCache[key] = icon;
+        QMutexLocker locker(&fileIconMutex());
+        s_fileIconCache[key] = icon;
         return icon;
     }
 
     static QPixmap getPixmap(const QString& key, const QSize& size, const QColor& color) {
         QString cKey = QString("%1_%2_%3_%4").arg(key).arg(size.width()).arg(size.height()).arg(color.rgba());
-        if (iconPixmapCache().contains(cKey)) return iconPixmapCache()[cKey];
+
+        {
+            QMutexLocker locker(&iconMutex());
+            if (iconPixmapCache().contains(cKey)) return iconPixmapCache()[cKey];
+        }
+
+        // 2026-06-xx 物理加固：在锁外进行耗时的 SVG 渲染，减少锁竞争
         QPixmap rendered = renderIcon(key, size, color);
-        if (!rendered.isNull()) iconPixmapCache().insert(cKey, rendered);
+        if (rendered.isNull()) return rendered;
+
+        QMutexLocker locker(&iconMutex());
+        iconPixmapCache().insert(cKey, rendered);
         return rendered;
     }
 

@@ -362,6 +362,9 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
 }
 
 void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
+    // 2026-06-xx 物理护栏：强制在主线程执行，防止多线程并发更新模型导致 QAbstractItemModel 内部状态损坏
+    Q_ASSERT(QThread::currentThread() == qApp->thread());
+
     QString nPath = QDir::toNativeSeparators(path);
     auto it = m_pathToIndex.find(nPath);
     if (it != m_pathToIndex.end()) {

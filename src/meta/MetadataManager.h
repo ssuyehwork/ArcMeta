@@ -216,6 +216,10 @@ private:
     QTimer* m_batchTimer = nullptr;
     std::unordered_set<std::wstring, std::hash<std::wstring>> m_dirtyPaths;
 
+    // 2026-06-xx 性能加固：信号攒批机制，防止 5 万级数据扫描导致 UI 信号淹没
+    QTimer* m_uiSignalTimer = nullptr;
+    std::unordered_set<QString> m_pendingUiPaths;
+
     void persistAsync(const std::wstring& path, bool notify = true);
     void debouncePersist(const std::wstring& path);
 };
