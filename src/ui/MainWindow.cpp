@@ -859,6 +859,7 @@ void MainWindow::setupSplitters() {
     m_navBarLayout->addWidget(m_addressBar, 1);
     m_navBarLayout->addSpacing(5); // 2026-06-xx 物理间距：确保搜索框与地址栏有明确边界
     m_navBarLayout->addWidget(m_searchContainer);
+    m_navBarLayout->addSpacing(5); // 2026-06-xx 物理对齐：右侧留出 5px 边距，确保搜索框与右侧筛选面板垂直对齐
 
     // --- 3. 主体核心容器 (物理还原：10px 全局边距包裹，确保边缘resize可用) ---
     QWidget* bodyWrapper = new QWidget(centralC);

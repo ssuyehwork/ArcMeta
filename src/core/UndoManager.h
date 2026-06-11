@@ -5,6 +5,7 @@
 #include <memory>
 #include <QObject>
 #include <QMutex>
+#include <QMutexLocker>
 
 namespace ArcMeta {
 
@@ -61,6 +62,29 @@ public:
 
     bool canUndo() const { return !m_undoStack.empty(); }
     bool canRedo() const { return !m_redoStack.empty(); }
+
+    /**
+     * @brief 2026-06-xx 按照分析计划 #8：当文件被永久删除时，清理受影响的指令
+     */
+    void removeCommandsForPath(const QString& path) {
+        QMutexLocker lock(&m_mutex);
+        auto cleaner = [&](std::deque<std::unique_ptr<ActionCommand>>& stack) {
+            for (auto it = stack.begin(); it != stack.end(); ) {
+                // 这里需要一种方式判定 Command 是否涉及该路径
+                // 暂时通过 description 或其他元数据判定（在 BasicCommands 中补全）
+                // 简化处理：由于 std::unique_ptr 不能简单判定内容，我们在 ActionCommand 中增加接口
+                if ((*it)->affectsPath(path)) {
+                    it = stack.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        };
+        cleaner(m_undoStack);
+        cleaner(m_redoStack);
+        emit canUndoChanged(!m_undoStack.empty());
+        emit canRedoChanged(!m_redoStack.empty());
+    }
 
 signals:
     void canUndoChanged(bool canUndo);

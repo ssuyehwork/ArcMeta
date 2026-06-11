@@ -34,6 +34,10 @@ public:
 
     QString description() const override { return "重命名"; }
 
+    bool affectsPath(const QString& path) const override {
+        return m_oldPath == path || m_newPath == path;
+    }
+
 private:
     QString m_oldPath;
     QString m_newPath;
@@ -71,6 +75,14 @@ public:
 
     QString description() const override { return "移动文件"; }
 
+    bool affectsPath(const QString& path) const override {
+        if (path.startsWith(m_oldDir) || path.startsWith(m_newDir)) return true;
+        for (const QString& name : m_fileNames) {
+            if (QDir(m_oldDir).filePath(name) == path || QDir(m_newDir).filePath(name) == path) return true;
+        }
+        return false;
+    }
+
 private:
     QStringList m_fileNames;
     QString m_oldDir;
@@ -98,12 +110,16 @@ public:
 
     QString description() const override { return m_type == Rating ? "更改星级" : "更改颜色"; }
 
+    bool affectsPath(const QString& path) const override {
+        return m_path == path;
+    }
+
 private:
     void applyValue(const QVariant& val) {
         if (m_type == Rating) {
-            MetadataManager::instance().setRating(m_path.toStdWString(), val.toInt(), true);
+            MetadataManager::instance().setRating(m_path.toStdWString(), val.toInt());
         } else {
-            MetadataManager::instance().setColor(m_path.toStdWString(), val.toString().toStdWString(), true);
+            MetadataManager::instance().setColor(m_path.toStdWString(), val.toString().toStdWString());
         }
     }
 
@@ -142,6 +158,10 @@ public:
     }
 
     QString description() const override { return m_isAdd ? "添加分类" : "移除分类"; }
+
+    bool affectsPath(const QString& path) const override {
+        return m_path == path;
+    }
 
 private:
     QString m_path;

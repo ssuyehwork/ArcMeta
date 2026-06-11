@@ -3,6 +3,7 @@
 #include <QHBoxLayout>
 #include <QDir>
 #include <QPushButton>
+#include <QTimer>
 
 namespace ArcMeta {
 
