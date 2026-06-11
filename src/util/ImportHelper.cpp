@@ -54,6 +54,10 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
             context->future.waitForFinished();
         }
 
+        // 2026-07-xx 按照用户要求：中断后必须强制触发刷新，使已处理的数据在 UI 上可见
+        CategoryRepo::saveImmediately();
+        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+
         ToolTipOverlay::instance()->showText(QCursor::pos(), "导入已中断，进度已保留", 2000, QColor("#FF8C00"));
         weakProgress->deleteLater();
     });
