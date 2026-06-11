@@ -505,7 +505,7 @@ void MainWindow::initUi() {
 
         // __RELOAD_ALL__ 信号立即刷新，其他信号防抖
         if (path == "__RELOAD_ALL__") {
-            m_categoryPanel->requestRefresh();
+            m_categoryPanel->requestRefresh(true);
         } else {
             m_sidebarRefreshTimer->start(); // 重置计时器
         }
