@@ -41,6 +41,7 @@ protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
 
 private:
+    QWidget*        m_addressContainer = nullptr;
     QStackedWidget* m_pathStack = nullptr;
     BreadcrumbBar*  m_breadcrumbBar = nullptr;
     QLineEdit*      m_pathEdit = nullptr;
