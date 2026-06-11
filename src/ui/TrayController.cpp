@@ -63,9 +63,30 @@ void TrayController::onShowMainWindow() {
 }
 
 void TrayController::onQuitApp() {
-    // 2026-05-11 物理加固退出逻辑：在退出前显式隐藏托盘并释放核心引擎，确保 USN 线程安全停止
+    // 2026-06-xx 按照用户要求：重构退出逻辑，增加退出反馈并防止后台残留
     if (m_trayIcon) m_trayIcon->hide();
+
+    // 1. 创建临时的模态退出提示框（置顶）
+    QDialog quitDlg(nullptr, Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    quitDlg.setFixedSize(320, 100);
+    quitDlg.setStyleSheet("background-color: #1E1E1E; border: 1px solid #333; border-radius: 6px;");
+
+    auto* layout = new QVBoxLayout(&quitDlg);
+    auto* msgLbl = new QLabel("正在安全保存元数据并退出 ArcMeta...", &quitDlg);
+    msgLbl->setStyleSheet("color: #EEE; font-size: 13px;");
+    msgLbl->setAlignment(Qt::AlignCenter);
+    layout->addWidget(msgLbl);
+
+    quitDlg.show();
+    QApplication::processEvents();
+
+    // 2. 停止 MFT 扫描与 USN 监控 (异步转同步，确保资源释放)
     MftReader::instance().clear(); 
+
+    // 3. 执行分步式数据库存盘
+    DatabaseManager::instance().flushAll();
+
+    quitDlg.accept();
     QApplication::quit();
 }
 

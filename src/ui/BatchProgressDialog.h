@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QString>
+#include <atomic>
 
 namespace ArcMeta {
 
@@ -19,6 +20,11 @@ public:
         : FramelessDialog(title, parent) {
         setFixedSize(400, 150);
         
+        // 2026-06-xx 按照用户要求：彻底移除置顶、最小化、最大化按钮，仅保留关闭按钮
+        m_pinBtn->hide();
+        m_minBtn->hide();
+        m_maxBtn->hide();
+
         auto* layout = new QVBoxLayout(m_contentArea);
         layout->setContentsMargins(20, 20, 20, 20);
         layout->setSpacing(10);
@@ -37,6 +43,25 @@ public:
         layout->addWidget(m_progressBar);
         
         layout->addStretch();
+
+        m_aborted.store(false);
+    }
+
+    /**
+     * @brief 2026-06-xx 按照用户要求：点击关闭按钮（或触发 reject）即停止导入
+     */
+    void reject() override {
+        if (m_aborted.load()) return; // 防止重复触发
+
+        m_aborted.store(true);
+        m_statusLabel->setText("<b style='color:#e74c3c;'>正在停止操作...</b>");
+        m_closeBtn->setEnabled(false);
+
+        // 注意：不立即调用 QDialog::reject()，等待工作线程感知到 m_aborted 后自行结束并清理
+    }
+
+    bool isAborted() const {
+        return m_aborted.load();
     }
 
     void setStatus(const QString& text) {
@@ -71,6 +96,7 @@ public:
 private:
     QLabel* m_statusLabel = nullptr;
     QProgressBar* m_progressBar = nullptr;
+    std::atomic<bool> m_aborted;
 };
 
 } // namespace ArcMeta

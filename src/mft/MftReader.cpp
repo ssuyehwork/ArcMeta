@@ -113,48 +113,48 @@ void MftReader::clearInternal() {
 }
 
 void MftReader::clear() {
-    // 极致工业级重构：非阻塞异步清理链
-    // 1. 立即标记状态失效，让 UI 线程在 request_lock 时能快速感知并退出，实现“秒关”体验
+    // 2026-06-xx 按照用户要求 (Plan-14)：重构为同步清理逻辑。
+    // 配合退出时的模态提示框，确保所有后台线程与句柄在进程结束前完全释放，杜绝后台残留。
     {
         QWriteLocker lock(&m_dataLock);
-        if (!m_isInitialized || m_is_clearing.load()) return;
-        m_is_clearing.store(true);
-        m_isInitialized = false; 
+        if (!m_isInitialized) return;
+        m_isInitialized = false;
     }
 
-    // 2. 将耗时的停止、存盘、释放逻辑转移至后台线程
-    (void)QtConcurrent::run([this]() {
-        // A. 停止所有监控线程 (防止产生新的脏数据)
-        std::vector<UsnWatcher*> toStop;
-        {
-            QWriteLocker lock(&m_dataLock);
-            toStop = std::move(m_watchers);
-            m_watchers.clear();
+    // A. 停止所有监控线程
+    std::vector<UsnWatcher*> toStop;
+    {
+        QWriteLocker lock(&m_dataLock);
+        toStop = std::move(m_watchers);
+        m_watchers.clear();
+    }
+    for (auto* w : toStop) {
+        if (w) {
+            w->stop();
+            delete w;
         }
-        for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
+    }
 
-        // B. 等待正在进行的异步写盘任务结束
-        while (m_is_saving.load(std::memory_order_acquire)) {
-            QThread::msleep(10);
-        }
+    // B. 等待正在进行的异步写盘任务结束
+    while (m_is_saving.load(std::memory_order_acquire)) {
+        QThread::msleep(10);
+        QCoreApplication::processEvents();
+    }
 
-        // C. 执行最后一次强制存盘 (持久化 USN 游标)
-        // 方案一：盘符级状态隔离。检查所有盘符的脏计数
-        bool hasDirty = false;
-        for (int i = 0; i < 32; ++i) {
-            if (m_drive_dirty_counts[i].load() > 0) { hasDirty = true; break; }
-        }
-        if (hasDirty) {
-            saveToCache();
-        }
+    // C. 执行最后一次强制存盘
+    bool hasDirty = false;
+    for (int i = 0; i < 32; ++i) {
+        if (m_drive_dirty_counts[i].load() > 0) { hasDirty = true; break; }
+    }
+    if (hasDirty) {
+        saveToCache();
+    }
 
-        // D. 物理释放内存 (Swap 技巧)
-        {
-            QWriteLocker lock(&m_dataLock);
-            clearInternal();
-            m_is_clearing.store(false);
-        }
-    });
+    // D. 物理释放内存
+    {
+        QWriteLocker lock(&m_dataLock);
+        clearInternal();
+    }
 }
 
 void MftReader::updateActiveDrives(const QStringList& activeDrives) {

@@ -1514,7 +1514,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionAddToCategory: {
             if (path.isEmpty()) break;
             
-            BatchProgressDialog* progress = new BatchProgressDialog("正在激活项目并建立索引...", this);
+            BatchProgressDialog* progress = new BatchProgressDialog("正在处理项目导入...", this);
             progress->show();
             
             ImportHelper::importPaths({path}, 0, progress, this);
