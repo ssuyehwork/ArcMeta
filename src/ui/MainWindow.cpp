@@ -56,6 +56,8 @@ using namespace ArcMeta::Style;
 namespace ArcMeta {
 
 MainWindow::~MainWindow() {
+    // 对应 initUi() 中 QCoreApplication::instance()->installEventFilter(m_resizeFilter)
+    // 安装位置和卸载位置必须严格一致，禁止改成 this->removeEventFilter(...)
     if (m_resizeFilter) {
         QCoreApplication::instance()->removeEventFilter(m_resizeFilter);
     }
@@ -75,7 +77,19 @@ MainWindow::MainWindow(QWidget* parent)
     setMinimumSize(1180, 653); // 物理对齐：5x230px面板 + 20px分割手柄 + 10px全局边距
     setWindowTitle("FERREX");
 
-    
+    // ============================================================
+    // 【物理护栏 - 禁止移动】事件过滤器必须在 initUi() 之前创建
+    // 原因：initUi() -> initToolbar()/setupCustomTitleBarButtons() 会调用
+    //       installEventFilter(m_hoverFilter)，setupCustomTitleBarButtons()
+    //       内部还依赖 m_resizeFilter 做全局安装。
+    //       若此处移到 initUi() 之后，installEventFilter 会收到 nullptr，
+    //       Qt 不会报错也不会崩溃，但功能（hover提示/边缘缩放）会静默失效，
+    //       极难排查。2026-06-xx 已踩坑一次。
+    // ============================================================
+    m_hoverFilter = new HoverEventFilter(this);
+    m_resizeFilter = new ResizeEventFilter(this);
+    Q_ASSERT(m_hoverFilter && m_resizeFilter);
+    // ============================================================
 
     // 从设置读取置顶状态
     m_isPinned = AppConfig::instance().getValue("MainWindow/AlwaysOnTop", false).toBool();
@@ -129,9 +143,6 @@ MainWindow::MainWindow(QWidget* parent)
     }
 
     initUi();
-    
-    m_hoverFilter = new HoverEventFilter(this);
-    m_resizeFilter = new ResizeEventFilter(this);
 
     m_trayController = new TrayController(this);
     m_trayController->show();
@@ -159,13 +170,15 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 void MainWindow::initUi() {
+    // 物理断言：确保过滤器已就绪，防止静默失效
+    Q_ASSERT(m_hoverFilter && m_resizeFilter && "事件过滤器必须在 initUi() 之前创建，见构造函数顶部注释");
+
     initToolbar();
     setupSplitters();
 
-    // 2026-05-29 性能优化：ResizeEventFilter 仅针对 MainWindow 安装
-    if (m_resizeFilter) {
-        this->installEventFilter(m_resizeFilter);
-    }
+    // 全局安装：拦截子控件边缘鼠标事件以支持无边框窗口缩放
+    QCoreApplication::instance()->installEventFilter(m_resizeFilter);
+
     setupCustomTitleBarButtons();
     
     // 2026-04-11 按照用户要求：物理锁定侧边栏宽度，最大化时仅“内容”区拉伸
@@ -807,13 +820,11 @@ void MainWindow::initToolbar() {
     m_searchEdit->setStyleSheet(QString(
         "QLineEdit { background: %1; border: 1px solid %2;"
         "  border-radius: 6px;"
-        "  min-width: 230px; max-width: 230px;"
         "  color: %3; padding-left: 5px; }"
         "QLineEdit:focus { border: 1px solid %4; }"
     ).arg(qssColor(BackgroundDeep)).arg(qssColor(BorderColor)).arg(qssColor(TextMain)).arg(qssColor(PrimaryBlue)));
 
     searchLayout->addWidget(m_searchEdit);
-    m_searchContainer->setFixedWidth(230);
 }
 
 
@@ -857,9 +868,8 @@ void MainWindow::setupSplitters() {
     m_navBarLayout->addWidget(m_btnForward);
     m_navBarLayout->addWidget(m_btnUp);
     m_navBarLayout->addWidget(m_addressBar, 1);
-    m_navBarLayout->addSpacing(5); // 2026-06-xx 物理间距：确保搜索框与地址栏有明确边界
+    m_navBarLayout->addSpacing(5); // 2026-06-xx 物理间距：确保地址栏与右侧搜索框保持 5px 间距
     m_navBarLayout->addWidget(m_searchContainer);
-    m_navBarLayout->addSpacing(5); // 2026-06-xx 物理对齐：右侧留出 5px 边距，确保搜索框与右侧筛选面板垂直对齐
 
     // --- 3. 主体核心容器 (物理还原：10px 全局边距包裹，确保边缘resize可用) ---
     QWidget* bodyWrapper = new QWidget(centralC);
