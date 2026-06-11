@@ -16,6 +16,11 @@ public:
     virtual void redo() { execute(); }
     
     virtual QString description() const = 0;
+
+    /**
+     * @brief 判定该指令是否涉及指定路径（用于永久删除时的清理）
+     */
+    virtual bool affectsPath(const QString& path) const = 0;
 };
 
 } // namespace ArcMeta

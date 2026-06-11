@@ -3,6 +3,7 @@
 #include <QHBoxLayout>
 #include <QDir>
 #include <QPushButton>
+#include <QTimer>
 
 namespace ArcMeta {
 
@@ -56,6 +57,10 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     connect(m_pathEdit, &QLineEdit::editingFinished, this, &AddressBar::onPathEditFinished);
     connect(m_pathEdit, &QLineEdit::returnPressed, this, [this]() {
         QString input = m_pathEdit->text();
+        // 2026-06-xx 交互纠偏：跳转前先解除选中并失焦，防止干扰后续双击
+        m_pathEdit->deselect();
+        m_pathEdit->clearFocus();
+
         if (QDir(input).exists() || input == "computer://" || input == "此电脑") {
             emit pathChanged(input == "此电脑" ? "computer://" : input);
         } else {
@@ -108,7 +113,10 @@ void AddressBar::onBreadcrumbBlankClicked() {
     m_pathEdit->setText(QDir::toNativeSeparators(m_currentPath));
     m_pathStack->setCurrentWidget(m_pathEdit);
     m_pathEdit->setFocus();
-    m_pathEdit->selectAll();
+    
+    // 2026-06-xx 交互优化：使用 singleShot 延迟全选，防止双击事件的第一击触发全选后，
+    // 第二击被全选状态下的系统默认逻辑（取消全选）拦截，确保 eventFilter 能稳定捕获 DblClick。
+    QTimer::singleShot(50, m_pathEdit, &QLineEdit::selectAll);
 }
 
 void AddressBar::onPathEditFinished() {

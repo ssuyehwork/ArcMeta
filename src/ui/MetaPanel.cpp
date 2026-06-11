@@ -373,7 +373,6 @@ void MetaPanel::initUi() {
     m_linkEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_linkEdit);
 
-    // [Section 4.5] 星级与颜色选择器 (Part 5 Fix: 补全实例化)
     m_ratingWidget = new StarRatingWidget(m_container);
     connect(m_ratingWidget, &StarRatingWidget::ratingChanged, this, [this](int r) {
         emit metadataChanged(r, L"__NO_CHANGE__");

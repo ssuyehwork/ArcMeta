@@ -1690,6 +1690,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         if (physicalOk) {
                             // 2026-06-xx 按照用户要求：永久删除后从数据库彻底移除相应数据
                             MetadataManager::instance().deletePermanently(wp);
+                            // 2026-06-xx 按照分析计划 #8：清理撤销栈
+                            UndoManager::instance().removeCommandsForPath(p);
                         }
 
                         count++;
