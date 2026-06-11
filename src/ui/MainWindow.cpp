@@ -868,7 +868,6 @@ void MainWindow::setupSplitters() {
     m_navBarLayout->addWidget(m_btnForward);
     m_navBarLayout->addWidget(m_btnUp);
     m_navBarLayout->addWidget(m_addressBar, 1);
-    m_navBarLayout->addSpacing(5); // 2026-06-xx 物理间距：确保搜索框与地址栏有明确边界
     m_navBarLayout->addWidget(m_searchContainer);
 
     // --- 3. 主体核心容器 (物理还原：10px 全局边距包裹，确保边缘resize可用) ---

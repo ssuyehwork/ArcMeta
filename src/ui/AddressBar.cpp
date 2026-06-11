@@ -43,14 +43,15 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     m_btnRefresh->setCursor(Qt::ArrowCursor);
     m_btnRefresh->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-left: 1px solid #333333; border-top-right-radius: 6px; border-bottom-right-radius: 6px; }"
-        "QPushButton:hover { background: #FFFFFF1A; }"
-        "QPushButton:pressed { background: #FFFFFF33; }"
     );
+    m_btnRefresh->setAttribute(Qt::WA_Hover);
+    m_btnRefresh->installEventFilter(this);
 
     containerLayout->addWidget(m_pathStack, 1);
     containerLayout->addWidget(m_btnRefresh);
 
     layout->addWidget(addressContainer);
+    layout->addSpacing(5); // 2026-06-xx 物理间距：确保地址栏与右侧搜索框保持 5px 间距
 
     connect(m_btnRefresh, &QPushButton::clicked, this, &AddressBar::refreshRequested);
     connect(m_breadcrumbBar, &BreadcrumbBar::blankAreaClicked, this, &AddressBar::onBreadcrumbBlankClicked);
@@ -130,6 +131,14 @@ void AddressBar::onBreadcrumbClicked(const QString& path) {
 }
 
 bool AddressBar::eventFilter(QObject* obj, QEvent* event) {
+    if (obj == m_btnRefresh) {
+        if (event->type() == QEvent::HoverEnter || event->type() == QEvent::Enter) {
+            m_btnRefresh->setIcon(UiHelper::getIcon("sync", Qt::white, 16));
+        } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::Leave) {
+            m_btnRefresh->setIcon(UiHelper::getIcon("sync", QColor("#CCCCCC"), 16));
+        }
+    }
+
     if ((obj == m_pathStack || obj == m_breadcrumbBar || obj == m_pathEdit) && 
         event->type() == QEvent::MouseButtonDblClick) {
         
