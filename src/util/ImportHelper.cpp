@@ -39,7 +39,7 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
         // 2026-07-xx 按照用户要求：弹出二次确认
         QString msg = "导入尚未完成。您是希望【保留当前进度】并退出，还是【一键撤销】已录入的数据？";
         QMessageBox msgBox(QMessageBox::Question, "中断导入", msg, QMessageBox::NoButton, parent);
-        QPushButton* btnKeep = msgBox.addButton("保留进度并退出", QMessageBox::AcceptRole);
+        msgBox.addButton("保留进度并退出", QMessageBox::AcceptRole);
         QPushButton* btnUndo = msgBox.addButton("一键撤销并退出", QMessageBox::DestructiveRole);
         msgBox.addButton("继续导入", QMessageBox::RejectRole);
 
