@@ -12,6 +12,8 @@
 #include <QMetaObject>
 #include <QCoreApplication>
 #include <QMessageBox>
+#include <QMutex>
+#include <QFuture>
 #include <functional>
 
 namespace ArcMeta {
@@ -24,10 +26,12 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
 
     // 2026-07-xx 按照用户要求 (1.19)：建立导入任务的快照数据
     struct ImportContext {
+        QMutex mutex;
         std::vector<int> createdCatIds;
         std::vector<std::pair<int, std::string>> createdAssociations;
         std::vector<std::wstring> registeredPaths;
         std::atomic<bool> isCancelled{false};
+        QFuture<void> future;
     };
     auto context = std::make_shared<ImportContext>();
     QPointer<BatchProgressDialog> weakProgress(progress);
@@ -50,18 +54,36 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
         }
 
         context->isCancelled = true;
+
+        // 2026-07-xx 物理加固：等待后台线程安全停止，杜绝竞态导致的数据库损坏
+        if (context->future.isRunning()) {
+            context->future.waitForFinished();
+        }
+
         if (msgBox.clickedButton() == btnUndo) {
-            // 执行撤销
-            ImportCommand cmd(context->createdCatIds, context->createdAssociations, context->registeredPaths);
+            // 执行撤销 (需要锁保护以提取当前快照)
+            std::vector<int> cats;
+            std::vector<std::pair<int, std::string>> assocs;
+            std::vector<std::wstring> paths;
+            {
+                QMutexLocker locker(&context->mutex);
+                cats = context->createdCatIds;
+                assocs = context->createdAssociations;
+                paths = context->registeredPaths;
+            }
+            ImportCommand cmd(cats, assocs, paths);
             cmd.undo();
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "导入已取消并执行一键撤销", 2000, QColor("#E81123"));
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "导入已取消并执行一键撤销，程序即将退出", 2000, QColor("#E81123"));
+
+            // 2026-07-xx 按照用户要求：执行一键撤销后直接关闭程序
+            QCoreApplication::exit(0);
         } else {
             ToolTipOverlay::instance()->showText(QCursor::pos(), "导入已中断，进度已保留", 2000, QColor("#FF8C00"));
         }
         weakProgress->deleteLater();
     });
 
-    (void)QtConcurrent::run([paths, targetCategoryId, weakProgress, context]() {
+    context->future = QtConcurrent::run([paths, targetCategoryId, weakProgress, context]() {
         // A. 预统计阶段
         int totalItems = 0;
         std::function<void(const QString&)> countTask = [&](const QString& p) {
@@ -86,6 +108,10 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
 
         int currentHandled = 0;
         int batchCounter = 0;
+
+        // 2026-07-xx 按照用户要求 (1.19)：在大循环外开启显式事务，将寻道风暴降至最低
+        sqlite3* db = DatabaseManager::instance().getGlobalDb();
+        SqlTransaction* currentTrans = new SqlTransaction(db);
 
         // B. 递归导入逻辑
         std::function<void(const QString&, int)> processPath = [&](const QString& p, int parentId) {
@@ -113,9 +139,10 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
                     Category newCat;
                     newCat.name = name;
                     newCat.parentId = parentId;
-                    newCat.color = L"#555555"; // 统一默认深灰
+                    newCat.color = CategoryRepo::getDefaultColor();
                     if (CategoryRepo::add(newCat)) {
                         currentCatId = newCat.id;
+                    QMutexLocker locker(&context->mutex);
                         context->createdCatIds.push_back(currentCatId);
                     }
                 } else {
@@ -126,22 +153,29 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
             } else {
                 // 3. 文件处理
                 MetadataManager::instance().registerItem(wp);
-                context->registeredPaths.push_back(wp);
+                {
+                    QMutexLocker locker(&context->mutex);
+                    context->registeredPaths.push_back(wp);
+                }
 
                 if (currentCatId > 0) {
                     std::string fid = MetadataManager::instance().getFileIdSync(wp);
                     if (!fid.empty()) {
                         if (CategoryRepo::addItemToCategory(currentCatId, fid, wp)) {
+                            QMutexLocker locker(&context->mutex);
                             context->createdAssociations.push_back({currentCatId, fid});
                         }
                     }
                 }
             }
 
-            // 4. 500项大事务分批提交 (模拟，实际 CategoryRepo 已在 addItemToCategory 内部使用了事务)
-            // 但此处我们可以在此处强制 flush 物理磁盘
+            // 4. 500项大事务分批提交
             if (++batchCounter >= 500) {
+                currentTrans->commit();
+                delete currentTrans;
+
                 CategoryRepo::saveImmediately();
+                currentTrans = new SqlTransaction(db);
                 batchCounter = 0;
             }
 
@@ -159,14 +193,26 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
             processPath(root, targetCategoryId);
         }
 
+        // 提交最后一批并释放事务
+        currentTrans->commit();
+        delete currentTrans;
+
         // C. 完成阶段
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, currentHandled]() {
             if (context->isCancelled) return;
 
-            // 记录到撤销栈
-            auto importCmd = std::make_unique<ImportCommand>(context->createdCatIds,
-                                                            context->createdAssociations,
-                                                            context->registeredPaths);
+            // 记录到撤销栈 (需要锁保护)
+            std::vector<int> cats;
+            std::vector<std::pair<int, std::string>> assocs;
+            std::vector<std::wstring> paths;
+            {
+                QMutexLocker locker(&context->mutex);
+                cats = context->createdCatIds;
+                assocs = context->createdAssociations;
+                paths = context->registeredPaths;
+            }
+
+            auto importCmd = std::make_unique<ImportCommand>(cats, assocs, paths);
             UndoManager::instance().pushCommand(std::move(importCmd));
 
             if (weakProgress) {

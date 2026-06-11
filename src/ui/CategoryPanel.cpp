@@ -69,9 +69,13 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     connect(m_refreshTimer, &QTimer::timeout, this, [this]() {
         if (!m_categoryModel) return;
         
-        if (m_isFirstLoad) {
+        bool needsFullRebuild = m_refreshTimer->property("fullRebuild").toBool();
+
+        if (m_isFirstLoad || needsFullRebuild) {
             m_categoryModel->refresh();
             m_isFirstLoad = false;
+            m_refreshTimer->setProperty("fullRebuild", false); // 消费完重置
+
             // 2026-06-xx 物理修正：首次刷新后必须立即触发计数盘点，防止界面显示 (0)
             requestRefresh();
             return;
@@ -115,9 +119,12 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     });
 }
 
-void CategoryPanel::requestRefresh() {
+void CategoryPanel::requestRefresh(bool fullRebuild) {
     // 2026-06-xx 物理优化：恢复至 500ms 防抖时间。
     // 理由：过短的防抖会导致批量操作（如上万个项的 MFT 扫描或删除）过程中产生大量的中间无效重刷。
+    if (fullRebuild) {
+        m_refreshTimer->setProperty("fullRebuild", true);
+    }
     m_refreshTimer->start(500);
 }
 

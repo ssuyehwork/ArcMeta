@@ -10,6 +10,8 @@
 #include <QFileInfo>
 #include <QDir>
 #include <string>
+#include <vector>
+#include <utility>
 
 namespace ArcMeta {
 
@@ -210,6 +212,8 @@ public:
             MetadataManager::instance().setManaged(wp, false, false);
         }
 
+        // 4. 物理落盘并刷新 UI
+        CategoryRepo::saveImmediately();
         MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
     }
 
