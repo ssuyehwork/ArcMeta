@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QPushButton>
 #include <QTimer>
+#include <QStyle>
 
 namespace ArcMeta {
 
