@@ -162,9 +162,9 @@ void MainWindow::initUi() {
     initToolbar();
     setupSplitters();
 
-    // 2026-05-29 性能优化：ResizeEventFilter 仅针对 MainWindow 安装
+    // 2026-05-29 性能优化：ResizeEventFilter 必须全局安装以拦截子控件边缘事件，确保边缘缩放可用
     if (m_resizeFilter) {
-        this->installEventFilter(m_resizeFilter);
+        QCoreApplication::instance()->installEventFilter(m_resizeFilter);
     }
     setupCustomTitleBarButtons();
     
@@ -807,13 +807,11 @@ void MainWindow::initToolbar() {
     m_searchEdit->setStyleSheet(QString(
         "QLineEdit { background: %1; border: 1px solid %2;"
         "  border-radius: 6px;"
-        "  min-width: 230px; max-width: 230px;"
         "  color: %3; padding-left: 5px; }"
         "QLineEdit:focus { border: 1px solid %4; }"
     ).arg(qssColor(BackgroundDeep)).arg(qssColor(BorderColor)).arg(qssColor(TextMain)).arg(qssColor(PrimaryBlue)));
 
     searchLayout->addWidget(m_searchEdit);
-    m_searchContainer->setFixedWidth(230);
 }
 
 
@@ -859,7 +857,6 @@ void MainWindow::setupSplitters() {
     m_navBarLayout->addWidget(m_addressBar, 1);
     m_navBarLayout->addSpacing(5); // 2026-06-xx 物理间距：确保搜索框与地址栏有明确边界
     m_navBarLayout->addWidget(m_searchContainer);
-    m_navBarLayout->addSpacing(5); // 2026-06-xx 物理对齐：右侧留出 5px 边距，确保搜索框与右侧筛选面板垂直对齐
 
     // --- 3. 主体核心容器 (物理还原：10px 全局边距包裹，确保边缘resize可用) ---
     QWidget* bodyWrapper = new QWidget(centralC);
