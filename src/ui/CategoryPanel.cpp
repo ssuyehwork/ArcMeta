@@ -110,8 +110,19 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     });
 
     // 2026-06-xx 物理修复：监听元数据变更信号，确保删除项或标记状态后计数实时更新
-    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& /*path*/) {
-        requestRefresh();
+    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
+        if (path == "__RELOAD_ALL__") {
+            // 2026-06-xx 物理修复：收到全量重构信号时，立即执行模型刷新（重建树结构）。
+            // 这是为了确保在文件导入逻辑开始前，侧边栏已经显示出新创建的空分类节点。
+            if (m_categoryModel) {
+                m_categoryModel->refresh();
+                // 立即触发一次计数更新，防止显示为 (0)
+                m_refreshTimer->stop();
+                QTimer::singleShot(0, this, &CategoryPanel::requestRefresh);
+            }
+        } else {
+            requestRefresh();
+        }
     });
 }
 

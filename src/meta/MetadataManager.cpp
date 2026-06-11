@@ -279,11 +279,10 @@ void MetadataManager::notifyFullUIRebuild() {
     // 2026-06-xx 物理对账：全量重建前必须确保计数器已对齐
     CategoryRepo::fullRecount();
 
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_pendingUiPaths.insert("__RELOAD_ALL__");
-    }
-    QMetaObject::invokeMethod(m_uiSignalTimer, "start", Qt::QueuedConnection);
+    // 2026-06-xx 物理修复：全量重建请求必须具有最高优先级，绕过 200ms 的攒批定时器。
+    // 理由：在“导入”等关键操作中，用户期望先看到分类树结构。若进入攒批队列，
+    // 后续高频的 PathUpdate 信号会淹没该请求，导致 UI 刷新滞后。
+    emit metaChanged("__RELOAD_ALL__");
 }
 
 void MetadataManager::registerItem(const std::wstring& path) {
