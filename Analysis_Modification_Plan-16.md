@@ -29,11 +29,12 @@
 
 ## 3. 修改详细方案 (Modification Plan)
 
-### 第一阶段：封装核心入库模块
-1.  **新建 `src/util/ImportHelper.h/cpp`** (或在 `MetadataManager` 中扩展)：
-    *   定义 `static void importPaths(const QStringList& paths, int targetCatId, BatchProgressDialog* progress, QWidget* parent)`。
-    *   内置递归 Lambda `processRecursive`。
-    *   **关键点**：在递归内部，每处理一个文件即调用 `updateProgress`。
+### 第一阶段：封装核心入库模块 (三阶段执行流)
+1.  **新建 `src/util/ImportHelper.h/cpp`**：
+    *   **阶段 A (预建树)**：递归扫描路径，优先在数据库中创建完整的分类层级结构。
+    *   **阶段 B (UI 同步)**：强制主线程执行 `notifyUI(FullRebuild)`，确保侧边栏分类树在导入前可见。
+    *   **阶段 C (精细化导入)**：逐个处理文件注册与分类关联，每处理一个项即调用 `updateProgress`。
+    *   **格式要求**：`[当前/总数] 百分比% - 文件名`。
 
 ### 第二阶段：重构侧边栏拖拽逻辑
 1.  修改 `src/ui/CategoryPanel.cpp` 中的 `pathsDropped` 信号处理函数。
