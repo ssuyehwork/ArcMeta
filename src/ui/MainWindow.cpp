@@ -119,15 +119,15 @@ MainWindow::MainWindow(QWidget* parent)
             #ContainerHeader {
                 background-color: %3; border-bottom: 1px solid %2;
             }
-            QScrollBar:vertical { border: none; background: transparent; width: 7px; }
+            QScrollBar:vertical { border: none; background: transparent; width: 10px; }
             QScrollBar::handle:vertical { background: %2; min-height: 20px; border-radius: 3px; }
             QScrollBar::handle:vertical:hover { background: %4; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { width: 0px; height: 0px; }
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
-            QScrollBar:horizontal { border: none; background: transparent; height: 7px; }
+            QScrollBar:horizontal { border: none; background: transparent; height: 10px; }
             QScrollBar::handle:horizontal { background: %2; min-width: 20px; border-radius: 3px; }
             QScrollBar::handle:horizontal:hover { background: %4; }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; height: 0px; }
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
             QLineEdit, QPlainTextEdit, QTextEdit {
                 background: %1; border: 1px solid %2; border-radius: 6px; color: %5; padding-left: 8px;
@@ -778,10 +778,11 @@ void MainWindow::initToolbar() {
         btn->installEventFilter(this);
 
         // 极致精简样式：无边框，仅悬停可见背景
+        // 按照要求：杜绝 rgba 蒙版，普通按钮使用 #3E3E42
         btn->setStyleSheet(
             "QPushButton { background: transparent; border: none; border-radius: 4px; }"
-            "QPushButton:hover { background: rgba(255, 255, 255, 0.1); }"
-            "QPushButton:pressed { background: rgba(255, 255, 255, 0.2); }"
+            "QPushButton:hover { background: #3E3E42; }"
+            "QPushButton:pressed { background: #4E4E52; }"
             "QPushButton:disabled { opacity: 0.3; }"
         );
         return btn;
@@ -844,7 +845,8 @@ void MainWindow::setupSplitters() {
     m_titleBarWidget->setObjectName("TitleBar");
     m_titleBarWidget->setFixedHeight(32);
     m_titleBarLayout = new QHBoxLayout(m_titleBarWidget);
-    m_titleBarLayout->setContentsMargins(8, 0, 5, 0); // 右侧对齐 5px 物理边距
+    // 物理对齐：右边距设为 0px，确保滚动条/按钮贴合边缘
+    m_titleBarLayout->setContentsMargins(8, 0, 0, 0); 
     m_titleBarLayout->setSpacing(8);
 
     m_appNameLabel = new QLabel("FERREX", m_titleBarWidget);
@@ -861,8 +863,8 @@ void MainWindow::setupSplitters() {
     m_navBarWidget->setFixedHeight(42); 
     
     m_navBarLayout = new QHBoxLayout(m_navBarWidget);
-    // 2026-06-xx 物理修正：增加底部 5px 间距，确保切割线与地址栏不重合
-    m_navBarLayout->setContentsMargins(5, 5, 5, 5); 
+    // 物理对齐：右边距设为 0px
+    m_navBarLayout->setContentsMargins(5, 5, 0, 5); 
     m_navBarLayout->setSpacing(5);
     m_navBarLayout->setAlignment(Qt::AlignVCenter);
 
@@ -877,8 +879,8 @@ void MainWindow::setupSplitters() {
     QWidget* bodyWrapper = new QWidget(centralC);
     bodyWrapper->setStyleSheet("background: transparent;"); // 确保背景透明不遮挡阴影
     m_bodyLayout = new QVBoxLayout(bodyWrapper);
-    // 2026-06-xx 物理修正：顶部边距设为 0，使容器顶部边框作为切割线与地址栏保持 5px 间距
-    m_bodyLayout->setContentsMargins(5, 0, 5, 5); 
+    // 物理对齐：右边距设为 0px，确保滚动条物理贴合边缘
+    m_bodyLayout->setContentsMargins(5, 0, 0, 5); 
     m_bodyLayout->setSpacing(0);
 
     // --- 3. 主拆分条 (物理还原：5px 物理缝隙) ---
@@ -936,7 +938,7 @@ void MainWindow::setupSplitters() {
     statusBar->setObjectName("StatusBar");
     statusBar->setFixedHeight(28);
     QHBoxLayout* statusL = new QHBoxLayout(statusBar);
-    statusL->setContentsMargins(12, 0, 12, 0);
+    statusL->setContentsMargins(12, 0, 0, 0);
     statusL->setSpacing(0);
 
     m_statusLeft = new QLabel("就绪中...", statusBar);
@@ -977,7 +979,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(4);
 
-    auto createTitleBtn = [this](const QString& iconKey, const QString& hoverColor = "rgba(255, 255, 255, 0.1)") {
+    auto createTitleBtn = [this](const QString& iconKey, const QString& hoverColor = "#3E3E42") {
         QPushButton* btn = new QPushButton(this);
         btn->setAttribute(Qt::WA_Hover); // 2026-05-20 性能优化：必须开启 Hover 属性以触发悬停事件
         btn->setFixedSize(24, 24); // 固定 24x24px
@@ -990,7 +992,7 @@ void MainWindow::setupCustomTitleBarButtons() {
         btn->setStyleSheet(QString(
             "QPushButton { background: transparent; border: none; border-radius: 4px; padding: 0; }"
             "QPushButton:hover { background: %1; }"
-            "QPushButton:pressed { background: rgba(255, 255, 255, 0.2); }"
+            "QPushButton:pressed { background: #4E4E52; }"
         ).arg(hoverColor));
         return btn;
     };
@@ -1293,7 +1295,7 @@ void MainWindow::changeEvent(QEvent* event) {
             if (isMaximized()) {
                 m_bodyLayout->setContentsMargins(0, 0, 0, 0);
             } else {
-                m_bodyLayout->setContentsMargins(5, 0, 5, 5);
+                m_bodyLayout->setContentsMargins(5, 0, 0, 5);
             }
         }
     }

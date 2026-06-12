@@ -266,6 +266,54 @@ public:
         return color;
     }
 
+    struct LabColor { double l, a, b; };
+
+    /**
+     * @brief 将 RGB 颜色转换为 CIELAB 空间
+     * 2026-06-xx 物理级 1:1 实现：采用 D65 标准光源及 sRGB 伽马校正
+     */
+    static LabColor rgbToLab(const QColor& color) {
+        double r = color.red() / 255.0;
+        double g = color.green() / 255.0;
+        double b = color.blue() / 255.0;
+
+        r = (r > 0.04045) ? std::pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
+        g = (g > 0.04045) ? std::pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
+        b = (b > 0.04045) ? std::pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
+
+        r *= 100.0; g *= 100.0; b *= 100.0;
+
+        // D65 转换矩阵
+        double x = r * 0.4124 + g * 0.3576 + b * 0.1805;
+        double y = r * 0.2126 + g * 0.7152 + b * 0.0722;
+        double z = r * 0.0193 + g * 0.1192 + b * 0.9505;
+
+        x /= 95.047;
+        y /= 100.000;
+        z /= 108.883;
+
+        auto f = [](double t) {
+            return (t > 0.008856) ? std::pow(t, 1.0/3.0) : (7.787 * t) + (16.0/116.0);
+        };
+
+        double L = (116.0 * f(y)) - 16.0;
+        double A = 500.0 * (f(x) - f(y));
+        double B = 200.0 * (f(y) - f(z));
+
+        return {L, A, B};
+    }
+
+    /**
+     * @brief 计算两个颜色的感知距离 (CIE76 Delta E)
+     * 2026-06-xx 工业标准：由于 LAB 空间在感知上是均匀的，欧氏距离即代表视觉差异
+     */
+    static double calculateDeltaE(const QColor& c1, const QColor& c2) {
+        if (!c1.isValid() || !c2.isValid()) return 1000.0;
+        LabColor l1 = rgbToLab(c1);
+        LabColor l2 = rgbToLab(c2);
+        return std::sqrt(std::pow(l1.l - l2.l, 2) + std::pow(l1.a - l2.a, 2) + std::pow(l1.b - l2.b, 2));
+    }
+
 
     /**
      * @brief 从图像中提取调色盘 (工业级优化版)

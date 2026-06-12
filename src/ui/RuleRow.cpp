@@ -84,7 +84,7 @@ void RuleRow::initUi() {
         btn->setFixedSize(22, 22); // 回归紧凑尺寸
         btn->setStyleSheet(
             "QPushButton { background: transparent; border: 1px solid #434343; border-radius: 2px; color: #888; font-weight: bold; font-size: 14px; }"
-            "QPushButton:hover { background: rgba(255, 255, 255, 0.05); color: #EEE; border-color: #666; }"
+            "QPushButton:hover { background: #3E3E42; color: #EEE; border-color: #666; }"
         );
         return btn;
     };

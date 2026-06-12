@@ -76,12 +76,12 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
         return btn;
     };
 
-    m_pinBtn = createTitleBtn("pin_tilted", "置顶", "#333333");
+    m_pinBtn = createTitleBtn("pin_tilted", "置顶", "#3E3E42");
     // 2026-05-16 置顶按钮逻辑规范：移除内边距，改由全局 spacing 控制
     m_pinBtn->setCheckable(true);
     m_pinBtn->setStyleSheet(
         "QPushButton { background-color: transparent; border: none; border-radius: 4px; } "
-        "QPushButton:hover { background-color: #333333; } "
+        "QPushButton:hover { background-color: #3E3E42; } "
         "QPushButton:checked { background-color: rgba(255, 85, 28, 0.2); }" // 2026-05-16 品牌橙高亮
     );
     connect(m_pinBtn, &QPushButton::toggled, this, [this](bool checked) {
@@ -92,10 +92,10 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
         show();
     });
 
-    m_minBtn = createTitleBtn("minimize", "最小化", "#333333");
+    m_minBtn = createTitleBtn("minimize", "最小化", "#3E3E42");
     connect(m_minBtn, &QPushButton::clicked, this, &QWidget::showMinimized);
 
-    m_maxBtn = createTitleBtn("maximize", "最大化", "#333333");
+    m_maxBtn = createTitleBtn("maximize", "最大化", "#3E3E42");
     connect(m_maxBtn, &QPushButton::clicked, this, [this]() {
         if (isMaximized()) {
             showNormal();
@@ -115,7 +115,7 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
     m_closeBtn->setCursor(Qt::PointingHandCursor);
     m_closeBtn->setStyleSheet(
         "QPushButton { background-color: #E81123; border: none; border-radius: 4px; } "
-        "QPushButton:hover { background-color: #F1707A; } "
+        "QPushButton:hover { background-color: #E81123; } "
         "QPushButton:pressed { background-color: #A50000; }"
     );
     m_closeBtn->installEventFilter(this);
@@ -265,7 +265,7 @@ FramelessInputDialog::FramelessInputDialog(const QString& title, const QString& 
     btnOk->setCursor(Qt::PointingHandCursor);
     btnOk->setStyleSheet(
         "QPushButton { background-color: #3498db; color: white; border: none; border-radius: 4px; font-weight: bold; } "
-        "QPushButton:hover { background-color: #3E3E42; }" // 统一悬停色
+        "QPushButton:hover { background-color: #2980b9; }" // 统一蓝色按钮悬停色，避免与普通透明按钮混淆
     );
     connect(btnOk, &QPushButton::clicked, this, &QDialog::accept);
     btnLayout->addWidget(btnOk);
