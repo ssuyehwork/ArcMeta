@@ -480,27 +480,29 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         // 2.1 勾选框过滤 (如果存在勾选)
         if (!currentFilter.colors.isEmpty()) {
             matchColor = false;
-            // 特殊情况：无色标
-            if (fc.isEmpty() && dominantColorHex.isEmpty()) { matchColor = true; break; }
-            if (fc.isEmpty() || dominantColorHex.isEmpty()) continue;
+            for (const QString& fc : currentFilter.colors) {
+                // 特殊情况：无色标
+                if (fc.isEmpty() && dominantColorHex.isEmpty()) { matchColor = true; break; }
+                if (fc.isEmpty() || dominantColorHex.isEmpty()) continue;
 
-            QColor targetCol = UiHelper::parseColorName(fc);
-            
-            // 2.1 主色调感知匹配 (CIELAB Delta E < 10.0)
-            QColor recordCol = UiHelper::parseColorName(dominantColorHex);
-            if (UiHelper::calculateDeltaE(targetCol, recordCol) < 10.0) {
-                matchColor = true; break;
-            }
+                QColor targetCol = UiHelper::parseColorName(fc);
 
-            // 2.2 变长色板深度匹配 (多色命中)
-            if (!record.palettes.empty()) {
-                for (const auto& pe : record.palettes) {
-                    if (UiHelper::calculateDeltaE(targetCol, pe.first) < 10.0) {
-                        matchColor = true; break;
+                // 2.1 主色调感知匹配 (CIELAB Delta E < 10.0)
+                QColor recordCol = UiHelper::parseColorName(dominantColorHex);
+                if (UiHelper::calculateDeltaE(targetCol, recordCol) < 10.0) {
+                    matchColor = true; break;
+                }
+
+                // 2.2 变长色板深度匹配 (多色命中)
+                if (!record.palettes.empty()) {
+                    for (const auto& pe : record.palettes) {
+                        if (UiHelper::calculateDeltaE(targetCol, pe.first) < 10.0) {
+                            matchColor = true; break;
+                        }
                     }
                 }
+                if (matchColor) break;
             }
-            if (matchColor) break;
         }
         if (!matchColor) return false; 
     } 
