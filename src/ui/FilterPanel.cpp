@@ -2,6 +2,7 @@
 #include "ToolTipOverlay.h"
 #include "UiHelper.h"
 #include "ColorPicker.h"
+#include "SearchHistoryPanel.h"
 #include <QPushButton>
 #include <QMouseEvent>
 #include <QCursor>
@@ -345,10 +346,76 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
 
     // 2026-06-xx 物理对齐：从 AppConfig 加载持久化的最近筛选色
     m_recentColors = AppConfig::instance().getValue("Filter/RecentColors").toStringList();
+
+    m_historyPanel = new SearchHistoryPanel(this);
+}
+
+void FilterPanel::saveFilterHistory(const QString& key, const QString& text) {
+    if (text.trimmed().isEmpty()) return;
+    QString fullKey = "FilterHistory/" + key;
+    QStringList history = AppConfig::instance().getValue(fullKey).toStringList();
+    history.removeAll(text);
+    history.append(text);
+    if (history.size() > 10) history.removeFirst();
+    AppConfig::instance().setValue(fullKey, history);
+}
+
+QStringList FilterPanel::getFilterHistory(const QString& key) const {
+    return AppConfig::instance().getValue("FilterHistory/" + key).toStringList();
 }
 
 // 2026-03-xx 按照用户要求：物理拦截事件以实现自定义 ToolTipOverlay 的显隐控制
 bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
+    // 2026-xx-xx 按照用户要求：处理双击快速输入框显示历史记录
+    if (event->type() == QEvent::MouseButtonDblClick) {
+        QLineEdit* edit = qobject_cast<QLineEdit*>(watched);
+        if (edit && edit->objectName() == "FilterSearchEdit") {
+            QString key;
+            if (edit == m_editColor) key = "Color";
+            else if (edit == m_editTag) key = "Tag";
+            else if (edit == m_editType) key = "Type";
+            else if (edit == m_editCreateDate) key = "CreateDate";
+            else if (edit == m_editModifyDate) key = "ModifyDate";
+
+            if (!key.isEmpty()) {
+                QStringList history = getFilterHistory(key);
+                m_historyPanel->setHistory(history, "最近搜索");
+
+                // 断开之前的连接
+                m_historyPanel->disconnect(this);
+
+                connect(m_historyPanel, &SearchHistoryPanel::historyItemClicked, this, [this, edit, key](const QString& text) {
+                    edit->setText(text);
+                    if (edit == m_editColor) m_filter.colorFilterText = text;
+                    else if (edit == m_editTag) m_filter.tagFilterText = text;
+                    else if (edit == m_editType) m_filter.typeFilterText = text;
+                    else if (edit == m_editCreateDate) m_filter.createDateFilterText = text;
+                    else if (edit == m_editModifyDate) m_filter.modifyDateFilterText = text;
+
+                    saveFilterHistory(key, text);
+                    emit filterChanged(m_filter);
+                    m_historyPanel->hide();
+                });
+
+                connect(m_historyPanel, &SearchHistoryPanel::historyItemRemoved, this, [this, key](const QString& text) {
+                    QString fullKey = "FilterHistory/" + key;
+                    QStringList history = AppConfig::instance().getValue(fullKey).toStringList();
+                    history.removeAll(text);
+                    AppConfig::instance().setValue(fullKey, history);
+                    m_historyPanel->setHistory(history, "最近搜索");
+                });
+
+                connect(m_historyPanel, &SearchHistoryPanel::clearAllRequested, this, [this, key]() {
+                    AppConfig::instance().setValue("FilterHistory/" + key, QStringList());
+                    m_historyPanel->setHistory(QStringList(), "最近搜索");
+                });
+
+                m_historyPanel->showBelow(edit);
+                return true;
+            }
+        }
+    }
+
     if (event->type() == QEvent::HoverEnter) {
         QString text = watched->property("tooltipText").toString();
         if (!text.isEmpty()) {
@@ -372,9 +439,12 @@ void FilterPanel::populate(
     const QMap<QString, int>&   createDateCounts,
     const QMap<QString, int>&   modifyDateCounts)
 {
-    // 2026-06-xx 物理修复：若所有输入均为空，则判定为异步加载中间态，拒绝执行重绘以防止 UI 抖动
+    // 2026-06-xx 物理修复：若所有输入均为空，且当前没有活动的文本过滤，则判定为异步加载中间态，拒绝执行重绘以防止 UI 抖动
     if (ratingCounts.isEmpty() && colorCounts.isEmpty() && tagCounts.isEmpty() && 
-        typeCounts.isEmpty() && createDateCounts.isEmpty() && modifyDateCounts.isEmpty()) {
+        typeCounts.isEmpty() && createDateCounts.isEmpty() && modifyDateCounts.isEmpty() &&
+        m_filter.colorFilterText.isEmpty() && m_filter.tagFilterText.isEmpty() &&
+        m_filter.typeFilterText.isEmpty() && m_filter.createDateFilterText.isEmpty() &&
+        m_filter.modifyDateFilterText.isEmpty()) {
         return;
     }
 
@@ -422,6 +492,31 @@ void FilterPanel::rebuildGroups() {
         QVBoxLayout* gl = nullptr;
         QHBoxLayout* hdrLayout = nullptr;
         QWidget* g = buildGroup("颜色标记", gl, &hdrLayout);
+
+        // 新增快速输入框
+        m_editColor = new QLineEdit(g);
+        m_editColor->setPlaceholderText("快速过滤颜色 (如: 红 / #E24B4A / 无色标)");
+        m_editColor->setText(m_filter.colorFilterText);
+        m_editColor->setObjectName("FilterSearchEdit");
+        m_editColor->setStyleSheet(
+            "QLineEdit#FilterSearchEdit {"
+            "  background: #2D2D2D;"
+            "  color: #CCCCCC;"
+            "  border: 1px solid #444444;"
+            "  border-radius: 4px;"
+            "  padding: 4px 8px;"
+            "  margin: 4px 8px;"
+            "  font-size: 11px;"
+            "}"
+            "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
+        );
+        m_editColor->installEventFilter(this);
+        connect(m_editColor, &QLineEdit::returnPressed, this, [this]() {
+            m_filter.colorFilterText = m_editColor->text();
+            saveFilterHistory("Color", m_filter.colorFilterText);
+            emit filterChanged(m_filter);
+        });
+        gl->addWidget(m_editColor);
 
         // 2.1 顶部色相滑块
         // 2026-06-xx 物理对齐：滑块及其容器增加 4px 左右边距（相对于 gl 的 0 边距），实现视觉平衡
@@ -566,9 +661,26 @@ void FilterPanel::rebuildGroups() {
     }
 
     // ── 3. 标签 / 关键字 ─────────────────────────────────────
-    if (!m_tagCounts.isEmpty()) {
+    if (!m_tagCounts.isEmpty() || !m_filter.tagFilterText.isEmpty()) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("标签 / 关键字", gl);
+
+        m_editTag = new QLineEdit(g);
+        m_editTag->setPlaceholderText("快速过滤标签...");
+        m_editTag->setText(m_filter.tagFilterText);
+        m_editTag->setObjectName("FilterSearchEdit");
+        m_editTag->setStyleSheet(
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
+        );
+        m_editTag->installEventFilter(this);
+        connect(m_editTag, &QLineEdit::returnPressed, this, [this]() {
+            m_filter.tagFilterText = m_editTag->text();
+            saveFilterHistory("Tag", m_filter.tagFilterText);
+            emit filterChanged(m_filter);
+        });
+        gl->addWidget(m_editTag);
+
         if (m_tagCounts.contains("__none__")) {
             QCheckBox* cb = addFilterRow(gl, "无标签", m_tagCounts["__none__"]);
             cb->blockSignals(true);
@@ -598,9 +710,26 @@ void FilterPanel::rebuildGroups() {
     }
 
     // ── 4. 文件类型 ──────────────────────────────────────────
-    if (!m_typeCounts.isEmpty()) {
+    if (!m_typeCounts.isEmpty() || !m_filter.typeFilterText.isEmpty()) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("文件类型", gl);
+
+        m_editType = new QLineEdit(g);
+        m_editType->setPlaceholderText("快速过滤类型 (如: png / 文件夹)...");
+        m_editType->setText(m_filter.typeFilterText);
+        m_editType->setObjectName("FilterSearchEdit");
+        m_editType->setStyleSheet(
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
+        );
+        m_editType->installEventFilter(this);
+        connect(m_editType, &QLineEdit::returnPressed, this, [this]() {
+            m_filter.typeFilterText = m_editType->text();
+            saveFilterHistory("Type", m_filter.typeFilterText);
+            emit filterChanged(m_filter);
+        });
+        gl->addWidget(m_editType);
+
         if (m_typeCounts.contains("folder")) {
             QCheckBox* cb = addFilterRow(gl, "文件夹", m_typeCounts["folder"]);
             cb->blockSignals(true);
@@ -641,9 +770,26 @@ void FilterPanel::rebuildGroups() {
     }
 
     // ── 5. 创建日期 ──────────────────────────────────────────
-    if (!m_createDateCounts.isEmpty()) {
+    if (!m_createDateCounts.isEmpty() || !m_filter.createDateFilterText.isEmpty()) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("创建日期", gl);
+
+        m_editCreateDate = new QLineEdit(g);
+        m_editCreateDate->setPlaceholderText("快速过滤日期 (如: 2025 / 03-2025)...");
+        m_editCreateDate->setText(m_filter.createDateFilterText);
+        m_editCreateDate->setObjectName("FilterSearchEdit");
+        m_editCreateDate->setStyleSheet(
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
+        );
+        m_editCreateDate->installEventFilter(this);
+        connect(m_editCreateDate, &QLineEdit::returnPressed, this, [this]() {
+            m_filter.createDateFilterText = m_editCreateDate->text();
+            saveFilterHistory("CreateDate", m_filter.createDateFilterText);
+            emit filterChanged(m_filter);
+        });
+        gl->addWidget(m_editCreateDate);
+
         QStringList dates = m_createDateCounts.keys(); dates.sort(Qt::CaseInsensitive);
         for (const QString& d : dates) {
             QCheckBox* cb = addFilterRow(gl, d, m_createDateCounts[d]);
@@ -660,9 +806,26 @@ void FilterPanel::rebuildGroups() {
     }
 
     // ── 6. 修改日期 ──────────────────────────────────────────
-    if (!m_modifyDateCounts.isEmpty()) {
+    if (!m_modifyDateCounts.isEmpty() || !m_filter.modifyDateFilterText.isEmpty()) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("修改日期", gl);
+
+        m_editModifyDate = new QLineEdit(g);
+        m_editModifyDate->setPlaceholderText("快速过滤日期 (如: 2025 / 03-2025)...");
+        m_editModifyDate->setText(m_filter.modifyDateFilterText);
+        m_editModifyDate->setObjectName("FilterSearchEdit");
+        m_editModifyDate->setStyleSheet(
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
+        );
+        m_editModifyDate->installEventFilter(this);
+        connect(m_editModifyDate, &QLineEdit::returnPressed, this, [this]() {
+            m_filter.modifyDateFilterText = m_editModifyDate->text();
+            saveFilterHistory("ModifyDate", m_filter.modifyDateFilterText);
+            emit filterChanged(m_filter);
+        });
+        gl->addWidget(m_editModifyDate);
+
         QStringList dates = m_modifyDateCounts.keys(); dates.sort(Qt::CaseInsensitive);
         for (const QString& d : dates) {
             QCheckBox* cb = addFilterRow(gl, d, m_modifyDateCounts[d]);
@@ -796,6 +959,13 @@ void FilterPanel::clearAllFilters() {
     // 2026-06-xx 物理修复：重置所有筛选内存状态
     m_filter = FilterState{};
     m_hueSliderColor.clear();
+
+    // 2026-xx-xx 按照用户要求：清空这 5 个输入框的文字
+    if (m_editColor) m_editColor->clear();
+    if (m_editTag) m_editTag->clear();
+    if (m_editType) m_editType->clear();
+    if (m_editCreateDate) m_editCreateDate->clear();
+    if (m_editModifyDate) m_editModifyDate->clear();
     
     // 2026-06-xx 逻辑重构：由于 Plan-18 引入了色块矩阵，必须调用 rebuildGroups 
     // 以实现全量 UI 组件的选中态物理归零，杜绝手动遍历子控件的傻逼逻辑。
