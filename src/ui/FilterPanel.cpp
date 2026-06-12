@@ -2,6 +2,8 @@
 #include "ToolTipOverlay.h"
 #include "UiHelper.h"
 #include "ColorPicker.h"
+#include "SearchHistoryPanel.h"
+#include "../core/AppConfig.h"
 #include <QPushButton>
 #include <QMouseEvent>
 #include <QCursor>
@@ -345,6 +347,45 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
 
     // 2026-06-xx 物理对齐：从 AppConfig 加载持久化的最近筛选色
     m_recentColors = AppConfig::instance().getValue("Filter/RecentColors").toStringList();
+
+    // 初始化历史面板及其持久化配置
+    auto initFilterInput = [&](FilterInput& input, const QString& configKey, const QString& placeholder) {
+        input.configKey = configKey;
+        input.historyList = AppConfig::instance().getValue(configKey).toStringList();
+        input.history = new SearchHistoryPanel(this);
+        input.history->setHistory(input.historyList, "最近输入");
+    };
+
+    initFilterInput(m_colorInput, "Filter/History/Color", "输入色码 (如 #FF0000)...");
+    initFilterInput(m_tagInput,   "Filter/History/Tag",   "输入标签关键词...");
+    initFilterInput(m_typeInput,  "Filter/History/Type",  "输入扩展名 (如 png, jpg)...");
+    initFilterInput(m_ctimeInput, "Filter/History/Ctime", "输入创建日期 (DD-MM-YYYY)...");
+    initFilterInput(m_mtimeInput, "Filter/History/Mtime", "输入修改日期 (DD-MM-YYYY)...");
+
+    // 连接历史面板信号
+    auto connectHistory = [&](FilterInput& input) {
+        connect(input.history, &SearchHistoryPanel::historyItemClicked, this, [this, &input](const QString& val) {
+            input.edit->setText(val);
+            input.edit->clearFocus();
+            applyManualInput(input, val);
+        });
+        connect(input.history, &SearchHistoryPanel::historyItemRemoved, this, [this, &input](const QString& val) {
+            input.historyList.removeAll(val);
+            AppConfig::instance().setValue(input.configKey, input.historyList);
+            input.history->setHistory(input.historyList, "最近输入");
+        });
+        connect(input.history, &SearchHistoryPanel::clearAllRequested, this, [this, &input]() {
+            input.historyList.clear();
+            AppConfig::instance().setValue(input.configKey, input.historyList);
+            input.history->setHistory(input.historyList, "最近输入");
+        });
+    };
+
+    connectHistory(m_colorInput);
+    connectHistory(m_tagInput);
+    connectHistory(m_typeInput);
+    connectHistory(m_ctimeInput);
+    connectHistory(m_mtimeInput);
 }
 
 // 2026-03-xx 按照用户要求：物理拦截事件以实现自定义 ToolTipOverlay 的显隐控制
@@ -359,6 +400,25 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
         ToolTipOverlay::hideTip();
     }
     
+    // 2026-06-xx 物理集成：监听双击事件以弹出历史面板
+    if (event->type() == QEvent::MouseButtonDblClick) {
+        QLineEdit* edit = qobject_cast<QLineEdit*>(watched);
+        if (edit) {
+            FilterInput* target = nullptr;
+            if (edit == m_colorInput.edit) target = &m_colorInput;
+            else if (edit == m_tagInput.edit) target = &m_tagInput;
+            else if (edit == m_typeInput.edit) target = &m_typeInput;
+            else if (edit == m_ctimeInput.edit) target = &m_ctimeInput;
+            else if (edit == m_mtimeInput.edit) target = &m_mtimeInput;
+
+            if (target && target->history) {
+                target->history->setHistory(target->historyList, "最近输入");
+                target->history->showBelow(edit);
+                return true;
+            }
+        }
+    }
+
     // 2026-05-17 根因修复：已废除 Resize 监听逻辑（原用于绝对定位，现已改为内嵌布局）
     return QWidget::eventFilter(watched, event);
 }
@@ -753,8 +813,93 @@ QWidget* FilterPanel::buildGroup(const QString& title, QVBoxLayout*& outContentL
     connect(hdr, &QPushButton::toggled, content, &QWidget::setVisible);
 
     wl->addWidget(hdrRow);     // 加入 hdrRow，不再直接加 hdr
+
+    // 2026-06-xx 物理集成：在标题下方动态插入对应的输入框
+    FilterInput* targetInput = nullptr;
+    if (title == "颜色标记") targetInput = &m_colorInput;
+    else if (title == "标签 / 关键字") targetInput = &m_tagInput;
+    else if (title == "文件类型") targetInput = &m_typeInput;
+    else if (title == "创建日期") targetInput = &m_ctimeInput;
+    else if (title == "修改日期") targetInput = &m_mtimeInput;
+
+    if (targetInput) {
+        // 容器为了应用 8px 左边距
+        QWidget* inputContainer = new QWidget(wrapper);
+        QHBoxLayout* inputLayout = new QHBoxLayout(inputContainer);
+        inputLayout->setContentsMargins(8, 4, 8, 4);
+        inputLayout->setSpacing(0);
+
+        QLineEdit* edit = new QLineEdit(inputContainer);
+        edit->setFixedHeight(28);
+        edit->setPlaceholderText("直接输入以筛选...");
+        // 应用统一的 6px 圆角规范
+        edit->setStyleSheet(
+            "QLineEdit { background: #1E1E1E; border: 1px solid #333333; border-radius: 6px; color: #EEEEEE; padding-left: 8px; }"
+            "QLineEdit:focus { border: 1px solid #378ADD; }"
+        );
+        edit->installEventFilter(this);
+        inputLayout->addWidget(edit);
+        targetInput->edit = edit;
+
+        // 2026-06-xx 按照用户要求：回车键触发筛选，并支持逗号分隔多值
+        connect(edit, &QLineEdit::returnPressed, this, [this, targetInput, edit]() {
+            applyManualInput(*targetInput, edit->text().trimmed());
+        });
+
+        wl->addWidget(inputContainer);
+        connect(hdr, &QPushButton::toggled, inputContainer, &QWidget::setVisible);
+    }
+
     wl->addWidget(content);
     return wrapper;
+}
+
+// ─── applyManualInput ─────────────────────────────────────────────
+void FilterPanel::applyManualInput(FilterInput& input, const QString& text) {
+    if (text.isEmpty()) return;
+
+    // 1. 持久化历史记录
+    input.historyList.removeAll(text);
+    input.historyList.prepend(text);
+    if (input.historyList.size() > 10) input.historyList.removeLast();
+    AppConfig::instance().setValue(input.configKey, input.historyList);
+    input.history->setHistory(input.historyList, "最近输入");
+
+    // 2. 解析多值（逗号分隔，兼容中英文逗号）
+    QString cleanText = text;
+    cleanText.replace("，", ",");
+    QStringList values = cleanText.split(",", Qt::SkipEmptyParts);
+    for (QString& v : values) v = v.trimmed();
+
+    // 3. 更新内存筛选状态
+    if (&input == &m_colorInput) {
+        // 对于颜色，我们只处理合法的 Hex 色码
+        for (const QString& v : values) {
+            if (v.startsWith("#") && v.length() >= 4) {
+                if (!m_filter.colors.contains(v.toUpper())) m_filter.colors.append(v.toUpper());
+            }
+        }
+    } else if (&input == &m_tagInput) {
+        for (const QString& v : values) {
+            if (!m_filter.tags.contains(v)) m_filter.tags.append(v);
+        }
+    } else if (&input == &m_typeInput) {
+        for (const QString& v : values) {
+            if (!m_filter.types.contains(v.toLower())) m_filter.types.append(v.toLower());
+        }
+    } else if (&input == &m_ctimeInput) {
+        for (const QString& v : values) {
+            if (!m_filter.createDates.contains(v)) m_filter.createDates.append(v);
+        }
+    } else if (&input == &m_mtimeInput) {
+        for (const QString& v : values) {
+            if (!m_filter.modifyDates.contains(v)) m_filter.modifyDates.append(v);
+        }
+    }
+
+    // 4. 发射变化信号并重绘 UI 以同步勾选态
+    emit filterChanged(m_filter);
+    rebuildGroups();
 }
 
 // ─── addFilterRow ─────────────────────────────────────────────────
@@ -796,6 +941,13 @@ void FilterPanel::clearAllFilters() {
     // 2026-06-xx 物理修复：重置所有筛选内存状态
     m_filter = FilterState{};
     m_hueSliderColor.clear();
+
+    // 同时物理清空所有手动输入框的文本
+    if (m_colorInput.edit) m_colorInput.edit->clear();
+    if (m_tagInput.edit)   m_tagInput.edit->clear();
+    if (m_typeInput.edit)  m_typeInput.edit->clear();
+    if (m_ctimeInput.edit) m_ctimeInput.edit->clear();
+    if (m_mtimeInput.edit) m_mtimeInput.edit->clear();
 
     // 2026-06-xx 逻辑重构：由于 Plan-18 引入了色块矩阵，必须调用 rebuildGroups
     // 以实现全量 UI 组件的选中态物理归零，杜绝手动遍历子控件的傻逼逻辑。

@@ -31,8 +31,9 @@ SearchHistoryPanel::SearchHistoryPanel(QWidget* parent)
     hide();
 }
 
-void SearchHistoryPanel::setHistory(const QStringList& history) {
+void SearchHistoryPanel::setHistory(const QStringList& history, const QString& title) {
     m_history = history;
+    m_currentTitle = title;
     rebuild();
 }
 
@@ -45,7 +46,7 @@ void SearchHistoryPanel::rebuild() {
     }
 
     if (m_history.isEmpty()) {
-        QLabel* empty = new QLabel("暂无搜索记录", this);
+        QLabel* empty = new QLabel(QString("暂无%1").arg(m_currentTitle), this);
         empty->setStyleSheet("color: #666666; font-size: 12px; padding: 4px 8px;");
         m_layout->addWidget(empty);
     } else {
@@ -56,7 +57,7 @@ void SearchHistoryPanel::rebuild() {
         titleLayout->setContentsMargins(4, 0, 4, 0);
         titleLayout->setSpacing(0);
 
-        QLabel* titleLabel = new QLabel("最近搜索", titleRow);
+        QLabel* titleLabel = new QLabel(m_currentTitle, titleRow);
         titleLabel->setStyleSheet("color: #888888; font-size: 11px;");
 
         QPushButton* btnClearAll = new QPushButton("全部清除", titleRow);

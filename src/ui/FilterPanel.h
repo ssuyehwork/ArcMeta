@@ -7,11 +7,14 @@
 #include <QCheckBox>
 #include <QScrollArea>
 #include <QPushButton>
+#include <QLineEdit>
 #include <QMap>
 #include <QStringList>
 #include "MetaPanel.h" // 引用 FlowLayout
 
 namespace ArcMeta {
+
+class SearchHistoryPanel;
 
 // ─── 物理色块控件 (ColorBlock) ─────────────────────────────────────
 class ColorBlock : public QWidget {
@@ -107,6 +110,7 @@ public slots:
     void clearAllFilters();
 
 private:
+    void applyManualInput(FilterInput& input, const QString& text);
     void rebuildGroups();
 
     // 2026-05-17 根因修复：增加 outHdrLayout 参数，让调用方直接往标题行布局追加按钮
@@ -128,6 +132,19 @@ private:
     QMap<QString, int>  m_typeCounts;
     QMap<QString, int>  m_createDateCounts;
     QMap<QString, int>  m_modifyDateCounts;
+
+    // 2026-06-xx 各项筛选输入框及其对应的历史面板
+    struct FilterInput {
+        QLineEdit*          edit    = nullptr;
+        SearchHistoryPanel* history = nullptr;
+        QStringList         historyList;
+        QString             configKey;
+    };
+    FilterInput m_colorInput;
+    FilterInput m_tagInput;
+    FilterInput m_typeInput;
+    FilterInput m_ctimeInput;
+    FilterInput m_mtimeInput;
 
     QVBoxLayout*  m_mainLayout      = nullptr;
     QScrollArea*  m_scrollArea      = nullptr;

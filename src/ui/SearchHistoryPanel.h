@@ -22,7 +22,7 @@ public:
     /**
      * @brief 填充/刷新历史列表
      */
-    void setHistory(const QStringList& history);
+    void setHistory(const QStringList& history, const QString& title = "最近搜索");
 
     /**
      * @brief 定位并显示在指定锚点控件正下方
@@ -47,6 +47,7 @@ private:
 
     QVBoxLayout* m_layout   = nullptr;
     QStringList  m_history;
+    QString      m_currentTitle = "最近搜索";
 };
 
 } // namespace ArcMeta
