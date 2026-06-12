@@ -318,7 +318,8 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     m_btnClearAll->installEventFilter(this);
     m_btnClearAll->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
-        "QPushButton:hover { background: #3E3E42; }");
+        "QPushButton:hover { background: #3E3E42; }"
+        "QPushButton:pressed { background: #4E4E52; }");
     connect(m_btnClearAll, &QPushButton::clicked, this, &FilterPanel::clearAllFilters);
 
     topL->addWidget(title);
@@ -459,6 +460,13 @@ void FilterPanel::populate(
 
 // ─── rebuildGroups ────────────────────────────────────────────────
 void FilterPanel::rebuildGroups() {
+    // 2026-xx-xx 物理安全：重置快速输入框指针，防止 Directory 切换导致的野指针崩溃
+    m_editColor = nullptr;
+    m_editTag = nullptr;
+    m_editType = nullptr;
+    m_editCreateDate = nullptr;
+    m_editModifyDate = nullptr;
+
     // 清空旧内容（保留末尾 stretch）
     while (m_containerLayout->count() > 1) {
         QLayoutItem* item = m_containerLayout->takeAt(0);

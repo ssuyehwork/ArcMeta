@@ -201,7 +201,7 @@ FlowLayout::~FlowLayout() {
     QLayoutItem *item;
     while ((item = takeAt(0))) delete item;
 }
-void FlowLayout::addItem(QLayoutItem *item) { itemList.append(item); }
+void FlowLayout::addItem(QLayoutItem *item) { itemList.append(item); invalidate(); }
 int FlowLayout::horizontalSpacing() const { return m_hSpace >= 0 ? m_hSpace : 4; }
 int FlowLayout::verticalSpacing() const { return m_vSpace >= 0 ? m_vSpace : 4; }
 int FlowLayout::count() const { return itemList.size(); }
@@ -262,14 +262,14 @@ void MetaPanel::initUi() {
     QWidget* header = new QWidget(this); header->setObjectName("ContainerHeader"); header->setFixedHeight(32);
     header->setStyleSheet("QWidget#ContainerHeader { background-color: #252526; border-bottom: 1px solid #333; }");
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 0, 10, 0); // 恢复右侧边距
+    headerLayout->setContentsMargins(10, 0, 10, 0); // 恢复左右两侧边距 (10px)
     headerLayout->setSpacing(5);
     QLabel* iconLabel = new QLabel(header); iconLabel->setPixmap(UiHelper::getIcon("all_data", QColor("#4a90e2"), 18).pixmap(18, 18)); headerLayout->addWidget(iconLabel);
     QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 12px; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
     QPushButton* closeBtn = new QPushButton(header); closeBtn->setIcon(UiHelper::getIcon("close", QColor("#FFFFFF"), 14)); closeBtn->setFixedSize(24, 24); closeBtn->setCursor(Qt::PointingHandCursor);
-    // 物理对标 MainWindow：关闭按钮悬停不使用淡化色（蒙版感），直接保持红色
-    closeBtn->setStyleSheet("QPushButton { background-color: #E81123; border: none; border-radius: 4px; } QPushButton:hover { background-color: #E81123; } QPushButton:pressed { background-color: #A50000; }");
+    // 物理对标 MainWindow：关闭按钮悬停不使用淡化色（蒙版感），直接保持红色 (#E81123 -> #F1707A)
+    closeBtn->setStyleSheet("QPushButton { background-color: #E81123; border: none; border-radius: 4px; } QPushButton:hover { background-color: #F1707A; } QPushButton:pressed { background-color: #A50000; }");
     connect(closeBtn, &QPushButton::clicked, [this]() { this->hide(); });
     headerLayout->addWidget(closeBtn, 0, Qt::AlignVCenter);
     m_mainLayout->addWidget(header);
@@ -287,9 +287,11 @@ void MetaPanel::initUi() {
     
     // [Section 1] 调色盘容器 (Palette Box - 模拟 ElasticEdit 样式且支持流式布局)
     m_paletteBox = new QWidget(m_container);
+    m_paletteBox->setObjectName("PaletteBox");
     // 工业级视觉统一：最小高度锁定为 28px，1px 边框 (#3c3c3c)，深色背景 (#252526)，4px 圆角
     m_paletteBox->setMinimumHeight(28);
-    m_paletteBox->setStyleSheet("QWidget { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; }");
+    // 物理修复：使用 ID 选择器限制样式作用域，防止子控件 (ColorPill) 继承边框导致布局错位
+    m_paletteBox->setStyleSheet("QWidget#PaletteBox { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; }");
     
     // 内边距微调：左右 10px 保持对齐，上下 6px 确保在 28px 高度下色块垂直居中
     m_paletteFlowLayout = new FlowLayout(m_paletteBox, 6, 6, 6);
@@ -500,6 +502,8 @@ void MetaPanel::adjustFlowHeights() {
         if (m_paletteBox->height() != newH) {
             m_paletteBox->setFixedHeight(newH);
         }
+        // 物理加固：强制激活布局计算，确保即便高度未变，新加入的色块也能正确排布而非堆叠在 (0,0)
+        m_paletteFlowLayout->activate();
     }
     // 2. 调整标签展示容器高度
     if (m_tagContainer && m_tagFlowLayout) {
@@ -507,6 +511,7 @@ void MetaPanel::adjustFlowHeights() {
         if (m_tagContainer->height() != contentH) {
             m_tagContainer->setFixedHeight(contentH);
         }
+        m_tagFlowLayout->activate();
     }
 }
 
