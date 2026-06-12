@@ -31,7 +31,6 @@ using namespace ArcMeta::Style;
 #include <QRandomGenerator>
 #include <QSet>
 #include <QDirIterator>
-#include <QColorDialog>
 #include "../core/AppConfig.h"
 
 
@@ -392,8 +391,10 @@ void CategoryPanel::onSetColor() {
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
-    // 2026-03-xx 按照用户要求：使用 QColorDialog 弹出颜色选择
-    QColor color = QColorDialog::getColor(Qt::white, this, "选择分类颜色");
+    // 2026-03-xx 按照用户要求：使用 FramelessColorDialog 弹出颜色选择
+    FramelessColorDialog dlg(Qt::white, this);
+    if (dlg.exec() != QDialog::Accepted) return;
+    QColor color = dlg.selectedColor();
     if (!color.isValid()) return;
 
     auto all = CategoryRepo::getAll();
@@ -754,7 +755,7 @@ void CategoryPanel::initUi() {
     btnRescan->setIconSize(QSize(16, 16));
     btnRescan->setFlat(true);
     btnRescan->setCursor(Qt::PointingHandCursor);
-    btnRescan->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }");
+    btnRescan->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: #3E3E42; border-radius: 4px; }");
     btnRescan->setProperty("tooltipText", "手动全量扫描与对账");
     btnRescan->installEventFilter(this); // 2026-06-xx 按照规范：安装过滤器以驱动自定义 ToolTip
     connect(btnRescan, &QPushButton::clicked, this, [this]() {

@@ -5,8 +5,7 @@
 #include "../meta/BatchRenameEngine.h"
 #include "../meta/MetadataManager.h"
 #include <QHeaderView>
-#include <QFileDialog>
-#include <QMessageBox>
+#include "FramelessDialog.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QLabel>
@@ -199,9 +198,12 @@ void BatchRenameDialog::onPreview() {
 }
 
 void BatchRenameDialog::onBrowseTarget() {
-    QString dir = QFileDialog::getExistingDirectory(this, "选择目标文件夹");
-    if (!dir.isEmpty()) {
-        m_targetPathEdit->setText(dir);
+    FramelessFolderDialog dlg("选择目标文件夹", this);
+    if (dlg.exec() == QDialog::Accepted) {
+        QString dir = dlg.selectedPath();
+        if (!dir.isEmpty()) {
+            m_targetPathEdit->setText(dir);
+        }
     }
 }
 
@@ -213,7 +215,8 @@ void BatchRenameDialog::onExecute() {
     QString targetDir = m_targetPathEdit->text();
     
     if ((m_rbMove->isChecked() || m_rbCopy->isChecked()) && targetDir.isEmpty()) {
-        QMessageBox::warning(this, "错误", "请先选择目标文件夹");
+        FramelessConfirmDialog dlg("错误", "请先选择目标文件夹", this);
+        dlg.exec();
         return;
     }
 
@@ -244,7 +247,8 @@ void BatchRenameDialog::onExecute() {
         }
     }
 
-    QMessageBox::information(this, "操作完成", QString("成功处理 %1 个文件").arg(successCount));
+    FramelessConfirmDialog dlg("操作完成", QString("成功处理 %1 个文件").arg(successCount), this);
+    dlg.exec();
     accept();
 }
 

@@ -168,7 +168,7 @@ TagPill::TagPill(const QString& text, QWidget* parent)
     m_closeBtn->setCursor(Qt::PointingHandCursor);
     m_closeBtn->setIcon(UiHelper::getIcon("close", QColor("#B0B0B0"), 12));
     m_closeBtn->setIconSize(QSize(10, 10));
-    m_closeBtn->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255, 255, 255, 0.1); border-radius: 2px; }");
+    m_closeBtn->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: #F1707A; border-radius: 2px; }");
     layout->addWidget(m_label);
     layout->addWidget(m_closeBtn);
     connect(m_closeBtn, &QPushButton::clicked, [this]() { emit deleteRequested(m_text); });

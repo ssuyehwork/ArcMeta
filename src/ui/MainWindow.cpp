@@ -780,7 +780,7 @@ void MainWindow::initToolbar() {
         // 极致精简样式：无边框，仅悬停可见背景
         btn->setStyleSheet(
             "QPushButton { background: transparent; border: none; border-radius: 4px; }"
-            "QPushButton:hover { background: rgba(255, 255, 255, 0.1); }"
+            "QPushButton:hover { background: #3E3E42; }"
             "QPushButton:pressed { background: rgba(255, 255, 255, 0.2); }"
             "QPushButton:disabled { opacity: 0.3; }"
         );
@@ -977,7 +977,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(4);
 
-    auto createTitleBtn = [this](const QString& iconKey, const QString& hoverColor = "rgba(255, 255, 255, 0.1)") {
+    auto createTitleBtn = [this](const QString& iconKey, const QString& hoverColor = "#3E3E42") {
         QPushButton* btn = new QPushButton(this);
         btn->setAttribute(Qt::WA_Hover); // 2026-05-20 性能优化：必须开启 Hover 属性以触发悬停事件
         btn->setFixedSize(24, 24); // 固定 24x24px
@@ -1061,11 +1061,11 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnMax->setProperty("tooltipText", "最大化/还原");
     m_btnMax->installEventFilter(m_hoverFilter);
 
-    m_btnClose = createTitleBtn("close", qssColor(ErrorRed)); // 初始创建
+    m_btnClose = createTitleBtn("close", "#F1707A"); // 初始创建
     // 按照用户要求：关闭按钮持续显示红色高亮，不再仅悬停显示
     m_btnClose->setStyleSheet(QString(
         "QPushButton { background-color: %1; border: none; border-radius: 4px; padding: 0; }"
-        "QPushButton:hover { background-color: %1; }"
+        "QPushButton:hover { background-color: #F1707A; }"
         "QPushButton:pressed { background-color: #A50000; }"
     ).arg(qssColor(ErrorRed)));
     m_btnClose->setProperty("tooltipText", "关闭项目");
