@@ -265,9 +265,6 @@ void MetadataManager::notifyUI(RefreshLevel level, const QString& path) {
 }
 
 void MetadataManager::notifyCategoryCountChanged() {
-    // 2026-06-xx 物理对账：在发射信号前，触发一遍同步计数，确保 UI 获取的是最新数据库数值
-    CategoryRepo::fullRecount();
-    
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_pendingUiPaths.insert("__RELOAD_COUNT__");
@@ -276,9 +273,6 @@ void MetadataManager::notifyCategoryCountChanged() {
 }
 
 void MetadataManager::notifyFullUIRebuild() {
-    // 2026-06-xx 物理对账：全量重建前必须确保计数器已对齐
-    CategoryRepo::fullRecount();
-
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_pendingUiPaths.insert("__RELOAD_ALL__");
