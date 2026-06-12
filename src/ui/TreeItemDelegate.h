@@ -126,6 +126,38 @@ public:
         }
     }
 
+    void setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const override {
+        QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor);
+        if (!lineEdit) return;
+        QString value = lineEdit->text();
+        if (value.isEmpty() || value == index.data(Qt::DisplayRole).toString()) return;
+
+        QString oldPath = index.data(PathRole).toString();
+        QFileInfo info(oldPath);
+        QString newPath = info.absolutePath() + "/" + value;
+
+        if (QFile::rename(oldPath, newPath)) {
+            MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
+            model->setData(index, value, Qt::EditRole);
+
+            // 2026-xx-xx 按照用户要求：触发刷新信号
+            QAbstractItemView* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(editor->parent()->parent()));
+            if (view) {
+                // 对于 TreeView，editor 的 parent 是 viewport，viewport 的 parent 是 TreeView
+                // 向上寻找 ContentPanel 以调用 onSelectionChanged
+                QWidget* p = view->parentWidget();
+                while (p) {
+                    ContentPanel* cp = qobject_cast<ContentPanel*>(p);
+                    if (cp) {
+                        cp->onSelectionChanged();
+                        break;
+                    }
+                    p = p->parentWidget();
+                }
+            }
+        }
+    }
+
 public:
     bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) override {
         // 2026-06-16 按照方案 20：交互逻辑闭环修正
@@ -165,6 +197,31 @@ public:
             }
         }
         return QStyledItemDelegate::editorEvent(event, model, option, index);
+    }
+
+    QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        return QStyledItemDelegate::createEditor(parent, option, index);
+    }
+
+    void setEditorData(QWidget* editor, const QModelIndex& index) const override {
+        QString value = index.model()->data(index, Qt::EditRole).toString();
+        QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor);
+        if (!lineEdit) return;
+
+        lineEdit->setText(value);
+
+        // 2026-xx-xx 按照用户要求：仅选中不含扩展名的部分
+        bool isFolder = (index.data(TypeRole).toString() == "folder" || index.data(TypeRole).toString() == "category");
+        if (isFolder) {
+            lineEdit->selectAll();
+        } else {
+            int lastDot = value.lastIndexOf('.');
+            if (lastDot > 0) {
+                lineEdit->setSelection(0, lastDot);
+            } else {
+                lineEdit->selectAll();
+            }
+        }
     }
 
 private:
