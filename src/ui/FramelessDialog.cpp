@@ -284,7 +284,8 @@ void FramelessInputDialog::showEvent(QShowEvent* event) {
 // ============================================================================
 // FramelessConfirmDialog 实现
 // ============================================================================
-FramelessConfirmDialog::FramelessConfirmDialog(const QString& title, const QString& message, QWidget* parent)
+FramelessConfirmDialog::FramelessConfirmDialog(const QString& title, const QString& message,
+                                               Type type, QWidget* parent)
     : FramelessDialog(title, parent)
 {
     resize(420, 180);
@@ -295,7 +296,10 @@ FramelessConfirmDialog::FramelessConfirmDialog(const QString& title, const QStri
     layout->setSpacing(15);
 
     auto* lbl = new QLabel(message);
-    lbl->setStyleSheet("color: #DDDDDD; font-size: 14px;");
+    // 2026-07-xx 按照类型调整颜色，提升视觉警示级别
+    QString color = "#DDDDDD";
+    if (type == Warning) color = "#E81123";
+    lbl->setStyleSheet(QString("color: %1; font-size: 14px;").arg(color));
     lbl->setWordWrap(true);
     lbl->setAlignment(Qt::AlignCenter);
     layout->addWidget(lbl, 1);
@@ -304,17 +308,19 @@ FramelessConfirmDialog::FramelessConfirmDialog(const QString& title, const QStri
     btnLayout->setSpacing(12);
     btnLayout->addStretch();
     
-    auto* btnCancel = new QPushButton("取消");
-    btnCancel->setFixedSize(85, 30);
-    btnCancel->setCursor(Qt::PointingHandCursor);
-    btnCancel->setStyleSheet(
-        "QPushButton { background-color: transparent; color: #999; border: 1px solid #444; border-radius: 4px; } "
-        "QPushButton:hover { color: #EEE; background-color: #333; }"
-    );
-    connect(btnCancel, &QPushButton::clicked, this, &QDialog::reject);
-    btnLayout->addWidget(btnCancel);
+    if (type == Question) {
+        auto* btnCancel = new QPushButton("取消");
+        btnCancel->setFixedSize(85, 30);
+        btnCancel->setCursor(Qt::PointingHandCursor);
+        btnCancel->setStyleSheet(
+            "QPushButton { background-color: transparent; color: #999; border: 1px solid #444; border-radius: 4px; } "
+            "QPushButton:hover { color: #EEE; background-color: #333; }"
+        );
+        connect(btnCancel, &QPushButton::clicked, this, &QDialog::reject);
+        btnLayout->addWidget(btnCancel);
+    }
 
-    auto* btnOk = new QPushButton("确定");
+    auto* btnOk = new QPushButton(type == Question ? "确定" : "关闭");
     btnOk->setFixedSize(85, 30);
     btnOk->setCursor(Qt::PointingHandCursor);
     btnOk->setStyleSheet(
@@ -325,6 +331,116 @@ FramelessConfirmDialog::FramelessConfirmDialog(const QString& title, const QStri
     btnLayout->addWidget(btnOk);
 
     layout->addLayout(btnLayout);
+}
+
+bool FramelessConfirmDialog::showConfirm(const QString& title, const QString& message, Type type, QWidget* parent) {
+    FramelessConfirmDialog dlg(title, message, type, parent);
+    return dlg.exec() == QDialog::Accepted;
+}
+
+// ============================================================================
+// FramelessColorDialog 实现
+// ============================================================================
+#include "ColorPicker.h"
+
+FramelessColorDialog::FramelessColorDialog(const QColor& initial, QWidget* parent)
+    : FramelessDialog("选择颜色", parent)
+{
+    setFixedSize(240, 380); // 略大于 ColorPicker 原始尺寸以容纳标题栏
+    auto* layout = new QVBoxLayout(m_contentArea);
+    layout->setContentsMargins(10, 10, 10, 10);
+
+    m_picker = new ColorPicker(this);
+    // 强制修改 ColorPicker 的窗口属性，使其作为子控件存在
+    m_picker->setWindowFlags(Qt::Widget);
+    m_picker->setAttribute(Qt::WA_NoSystemBackground, false);
+    m_picker->setStyleSheet("background: transparent; border: none;");
+    m_picker->setCurrentColor(initial);
+    layout->addWidget(m_picker);
+
+    // ColorPicker 内部已经处理了确认按钮逻辑吗？
+    // 根据 ColorPicker.cpp 源码，它在点击预设或确定时会 emit colorSelected 并 close()。
+    // 我们需要拦截其 colorSelected 信号并让对话框 accept。
+    connect(m_picker, &ColorPicker::colorSelected, this, [this](const QColor& c, int) {
+        Q_UNUSED(c);
+        accept();
+    });
+}
+
+QColor FramelessColorDialog::selectedColor() const {
+    return m_picker->currentColor();
+}
+
+QColor FramelessColorDialog::getColor(const QColor& initial, QWidget* parent) {
+    FramelessColorDialog dlg(initial, parent);
+    if (dlg.exec() == QDialog::Accepted) {
+        return dlg.selectedColor();
+    }
+    return QColor();
+}
+
+// ============================================================================
+// FramelessFolderDialog 实现
+// ============================================================================
+#include <QTreeView>
+#include <QFileSystemModel>
+#include <QHeaderView>
+
+FramelessFolderDialog::FramelessFolderDialog(const QString& title, QWidget* parent)
+    : FramelessDialog(title, parent)
+{
+    resize(600, 500);
+    auto* layout = new QVBoxLayout(m_contentArea);
+    layout->setContentsMargins(15, 10, 15, 15);
+    layout->setSpacing(10);
+
+    m_model = new QFileSystemModel(this);
+    m_model->setFilter(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Drives);
+    m_model->setRootPath("");
+
+    m_tree = new QTreeView(this);
+    m_tree->setModel(m_model);
+    m_tree->setHeaderHidden(true);
+    // 隐藏除第一列以外的所有列（大小、类型、日期）
+    for (int i = 1; i < m_model->columnCount(); ++i) m_tree->hideColumn(i);
+
+    m_tree->setStyleSheet(
+        "QTreeView { background-color: #252526; color: #CCC; border: 1px solid #444; border-radius: 4px; }"
+        "QTreeView::item { height: 28px; }"
+        "QTreeView::item:selected { background-color: #378ADD; color: white; }"
+    );
+    layout->addWidget(m_tree, 1);
+
+    auto* btnLayout = new QHBoxLayout();
+    btnLayout->addStretch();
+
+    auto* btnCancel = new QPushButton("取消");
+    btnCancel->setFixedSize(80, 30);
+    btnCancel->setStyleSheet("QPushButton { background: transparent; color: #999; border: 1px solid #444; border-radius: 4px; }");
+    connect(btnCancel, &QPushButton::clicked, this, &QDialog::reject);
+    btnLayout->addWidget(btnCancel);
+
+    auto* btnOk = new QPushButton("确定");
+    btnOk->setFixedSize(80, 30);
+    btnOk->setStyleSheet("QPushButton { background: #3498db; color: white; border: none; border-radius: 4px; font-weight: bold; }");
+    connect(btnOk, &QPushButton::clicked, this, &QDialog::accept);
+    btnLayout->addWidget(btnOk);
+
+    layout->addLayout(btnLayout);
+}
+
+QString FramelessFolderDialog::selectedPath() const {
+    QModelIndex idx = m_tree->currentIndex();
+    if (idx.isValid()) return m_model->filePath(idx);
+    return "";
+}
+
+QString FramelessFolderDialog::getExistingDirectory(const QString& title, QWidget* parent) {
+    FramelessFolderDialog dlg(title, parent);
+    if (dlg.exec() == QDialog::Accepted) {
+        return dlg.selectedPath();
+    }
+    return "";
 }
 
 } // namespace ArcMeta

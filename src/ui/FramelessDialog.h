@@ -72,7 +72,43 @@ private:
 class FramelessConfirmDialog : public FramelessDialog {
     Q_OBJECT
 public:
-    explicit FramelessConfirmDialog(const QString& title, const QString& message, QWidget* parent = nullptr);
+    enum Type { Info, Warning, Question };
+    explicit FramelessConfirmDialog(const QString& title, const QString& message,
+                                    Type type = Info, QWidget* parent = nullptr);
+
+    // 2026-07-xx 静态快捷方法
+    static bool showConfirm(const QString& title, const QString& message, Type type = Info, QWidget* parent = nullptr);
+};
+
+/**
+ * @brief 无边框颜色选择对话框
+ */
+class FramelessColorDialog : public FramelessDialog {
+    Q_OBJECT
+public:
+    explicit FramelessColorDialog(const QColor& initial, QWidget* parent = nullptr);
+    QColor selectedColor() const;
+
+    static QColor getColor(const QColor& initial, QWidget* parent = nullptr);
+
+private:
+    class ColorPicker* m_picker;
+};
+
+/**
+ * @brief 无边框目录选择对话框
+ */
+class FramelessFolderDialog : public FramelessDialog {
+    Q_OBJECT
+public:
+    explicit FramelessFolderDialog(const QString& title, QWidget* parent = nullptr);
+    QString selectedPath() const;
+
+    static QString getExistingDirectory(const QString& title, QWidget* parent = nullptr);
+
+private:
+    class QTreeView* m_tree;
+    class QFileSystemModel* m_model;
 };
 
 } // namespace ArcMeta

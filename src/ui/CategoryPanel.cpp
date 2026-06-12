@@ -392,8 +392,8 @@ void CategoryPanel::onSetColor() {
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
-    // 2026-03-xx 按照用户要求：使用 QColorDialog 弹出颜色选择
-    QColor color = QColorDialog::getColor(Qt::white, this, "选择分类颜色");
+    // 2026-03-xx 按照用户要求：使用 FramelessColorDialog 弹出颜色选择
+    QColor color = FramelessColorDialog::getColor(Qt::white, this);
     if (!color.isValid()) return;
 
     auto all = CategoryRepo::getAll();

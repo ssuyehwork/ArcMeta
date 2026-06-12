@@ -67,6 +67,7 @@
 #include "../crypto/EncryptionManager.h" 
 #include "CategoryLockDialog.h" 
 #include "BatchRenameDialog.h" 
+#include "FramelessDialog.h"
 #include "UiHelper.h" 
 #include "StyleLibrary.h"
 #include "../core/CoreController.h"
@@ -1470,9 +1471,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             break;
         }
         case ActionEncrypt: { 
-            bool ok; 
-            QString pwd = QInputDialog::getText(this, "加密保护", "设置加密密码:", QLineEdit::Password, "", &ok); 
-            if (ok && !pwd.isEmpty()) { 
+            FramelessInputDialog dlg("加密保护", "设置加密密码:", "", this);
+            if (dlg.exec() == QDialog::Accepted && !dlg.text().isEmpty()) {
+                QString pwd = dlg.text();
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 QStringList targets; 
                 for (const auto& idx : indexes) if (idx.column() == 0) targets << idx.data(PathRole).toString(); 
@@ -1500,9 +1501,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             break; 
         } 
         case ActionDecrypt: { 
-            bool ok; 
-            QString pwd = QInputDialog::getText(this, "解除加密", "输入加密密码:", QLineEdit::Password, "", &ok); 
-            if (ok && !pwd.isEmpty()) { 
+            FramelessInputDialog dlg("解除加密", "输入加密密码:", "", this);
+            if (dlg.exec() == QDialog::Accepted && !dlg.text().isEmpty()) {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "解除加密逻辑已触发", 1500); 
             } 
             break; 
@@ -1555,7 +1555,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             } else {
                 // 2026-07-xx 物理级同步：将逻辑收拢为“永久删除”（安全抹除）
                 QString msg = "确定要永久删除选中的项目吗？数据将被物理覆写并彻底抹除，此操作不可恢复。";
-                if (QMessageBox::question(this, "确认删除", msg) != QMessageBox::Yes) break;
+                if (!FramelessConfirmDialog::showConfirm("确认删除", msg, FramelessConfirmDialog::Question, this)) break;
 
                 BatchProgressDialog* progress = new BatchProgressDialog("正在执行永久删除（深层抹除）...", this);
                 progress->show();
