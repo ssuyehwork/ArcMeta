@@ -41,8 +41,8 @@ const int TitleBarHeight    = 32;
 const int StatusBarHeight   = 28;
 
 // 交互反馈
-const QColor HoverBackground = QColor(255, 255, 255, 25);
-const QColor PressedBackground = QColor(255, 255, 255, 50);
+const QColor HoverBackground = QColor("#3E3E42");
+const QColor PressedBackground = QColor("#4E4E52");
 
 // QSS Helper
 inline QString qssColor(const QColor& color) { return color.name(); }

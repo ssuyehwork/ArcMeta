@@ -114,7 +114,7 @@ void NavPanel::initUi() {
         "}"
     );
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 2, 15, 0); // 严格还原 15px 左右边距，顶部 2px 偏移以垂直居中
+    headerLayout->setContentsMargins(15, 2, 0, 0); // 物理对齐：右侧边距 0px
     headerLayout->setSpacing(8);
 
     QLabel* iconLabel = new QLabel(header);

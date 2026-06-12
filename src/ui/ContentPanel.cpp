@@ -612,7 +612,7 @@ void ContentPanel::initUi() {
         "}" 
     ); 
     QHBoxLayout* titleL = new QHBoxLayout(titleBar); 
-    titleL->setContentsMargins(15, 0, 5, 0); // 2026-05-17 按照用户要求：右侧边距统一设为 5px，消除 15px 留白
+    titleL->setContentsMargins(15, 0, 0, 0); // 物理对齐：右侧边距 0px
     titleL->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
  
     QLabel* iconLabel = new QLabel(titleBar); 
@@ -631,7 +631,7 @@ void ContentPanel::initUi() {
     m_btnLayers->installEventFilter(this); 
     m_btnLayers->setStyleSheet( 
         "QPushButton { background: transparent; border: none; border-radius: 4px; }" 
-        "QPushButton:hover { background: rgba(255, 255, 255, 0.1); }" 
+        "QPushButton:hover { background: #3E3E42; }"
         "QPushButton:checked { background: rgba(52, 152, 219, 0.2); border: 1px solid #3498db; }" 
         "QPushButton:disabled { opacity: 0.3; }" 
     ); 
@@ -1110,7 +1110,7 @@ void ContentPanel::initListView() {
         "QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
         "QTreeView::item { height: 28px; color: #EEEEEE; padding-left: 0px; }" 
         "QTreeView::item:selected { background-color: rgba(52, 152, 219, 0.2); border-left: 2px solid #3498db; }"
-        "QTreeView::item:hover { background-color: rgba(255, 255, 255, 0.05); }"
+        "QTreeView::item:hover { background-color: #2A2A2A; }"
         "QTreeView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }" 
     ); 
  
