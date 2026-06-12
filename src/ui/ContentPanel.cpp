@@ -158,7 +158,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                 return QString::number(record.size / (1024.0 * 1024.0), 'f', 1) + " MB";
             }
             case 7: {
-                return QDateTime::fromMSecsSinceEpoch(record.mtime).toString("yyyy-MM-dd HH:mm");
+                return QDateTime::fromMSecsSinceEpoch(record.mtime).toString("dd-MM-yyyy HH:mm");
             }
         }
     } else if (role == PathRole) {
@@ -496,7 +496,7 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     // 5. 创建日期过滤 
     if (!currentFilter.createDates.isEmpty()) { 
         QDate d = QDateTime::fromMSecsSinceEpoch(record.ctime).date();
-        QString dStr = d.toString("yyyy-MM-dd"); 
+        QString dStr = d.toString("dd-MM-yyyy"); 
         bool matchDate = false; 
         for (const QString& fDate : currentFilter.createDates) { 
             if (fDate == dStr) { matchDate = true; break; } 
@@ -507,7 +507,7 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     // 6. 修改日期过滤 
     if (!currentFilter.modifyDates.isEmpty()) { 
         QDate d = QDateTime::fromMSecsSinceEpoch(record.mtime).date();
-        QString dStr = d.toString("yyyy-MM-dd"); 
+        QString dStr = d.toString("dd-MM-yyyy"); 
         bool matchDate = false; 
         for (const QString& fDate : currentFilter.modifyDates) { 
             if (fDate == dStr) { matchDate = true; break; } 
@@ -2215,7 +2215,7 @@ void ContentPanel::recalculateAndEmitStats() {
             if (record.tags.isEmpty()) stats.noTagCount++;
             
             auto dateKey = [&](long long ts) {
-                return QDateTime::fromMSecsSinceEpoch(ts).date().toString("yyyy-MM-dd");
+                return QDateTime::fromMSecsSinceEpoch(ts).date().toString("dd-MM-yyyy");
             };
 
             stats.createDateCounts[dateKey(record.ctime)]++;

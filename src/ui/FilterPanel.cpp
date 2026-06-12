@@ -342,6 +342,9 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
 
     m_scrollArea->setWidget(m_container);
     m_mainLayout->addWidget(m_scrollArea, 1);
+
+    // 2026-06-xx 物理对齐：从 AppConfig 加载持久化的最近筛选色
+    m_recentColors = AppConfig::instance().getValue("Filter/RecentColors").toStringList();
 }
 
 // 2026-03-xx 按照用户要求：物理拦截事件以实现自定义 ToolTipOverlay 的显隐控制
@@ -421,7 +424,14 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("颜色标记", gl, &hdrLayout);
 
         // 2.1 顶部色相滑块
-        InlineHueSlider* hueSlider = new InlineHueSlider(g);
+        // 2026-06-xx 物理对齐：滑块及其容器增加 4px 左右边距（相对于 gl 的 0 边距），实现视觉平衡
+        QWidget* hueContainer = new QWidget(g);
+        QHBoxLayout* hueLayout = new QHBoxLayout(hueContainer);
+        hueLayout->setContentsMargins(4, 0, 4, 0);
+        hueLayout->setSpacing(0);
+        
+        InlineHueSlider* hueSlider = new InlineHueSlider(hueContainer);
+        hueLayout->addWidget(hueSlider);
         connect(hueSlider, &InlineHueSlider::sliderReleased, this, [this, hueSlider]() {
             int h = hueSlider->hue();
             QColor c;
@@ -434,23 +444,27 @@ void FilterPanel::rebuildGroups() {
             m_filter.colors.clear();
             m_filter.colors.append(hex);
             
-            // LRU 更新
+            // LRU 更新 (2026-06-xx: 容量扩展至 50 个，且由左上向右下按时间排布)
             m_recentColors.removeAll(hex);
             m_recentColors.prepend(hex);
-            if (m_recentColors.size() > 8) m_recentColors.removeLast();
+            if (m_recentColors.size() > 50) m_recentColors.removeLast();
+            AppConfig::instance().setValue("Filter/RecentColors", m_recentColors);
 
             emit filterChanged(m_filter);
             rebuildGroups();
         });
-        gl->addWidget(hueSlider);
+        gl->addWidget(hueContainer);
 
         // 2.2 标准色矩阵 (12色)
+        // 2026-06-xx 物理对齐：设置左边距 8px 以对齐下方的复选框视觉线
         QLabel* lblStatic = new QLabel("标准色系", g);
-        lblStatic->setStyleSheet("color: #666; font-size: 10px; margin-top: 4px;");
+        lblStatic->setStyleSheet("color: #666; font-size: 10px; margin-top: 4px; margin-left: 8px;");
         gl->addWidget(lblStatic);
 
         QWidget* staticGrid = new QWidget(g);
-        FlowLayout* staticFlow = new FlowLayout(staticGrid, 0, 4, 4);
+        staticGrid->setContentsMargins(8, 0, 0, 0); 
+        // 2026-06-xx 物理微调：间距从 4px 缩减至 2px
+        FlowLayout* staticFlow = new FlowLayout(staticGrid, 0, 2, 2);
         staticGrid->setLayout(staticFlow);
         
         QStringList standardHex = {
@@ -473,10 +487,17 @@ void FilterPanel::rebuildGroups() {
             block->setCount(count);
 
             connect(block, &ColorBlock::clicked, this, [this, hex](const QColor& /*c*/) {
-                if (m_filter.colors.contains(hex)) m_filter.colors.removeAll(hex);
-                else {
+                if (m_filter.colors.contains(hex)) {
+                    m_filter.colors.removeAll(hex);
+                } else {
                     m_filter.colors.clear(); // 单选模式
                     m_filter.colors.append(hex);
+                    
+                    // LRU 更新
+                    m_recentColors.removeAll(hex);
+                    m_recentColors.prepend(hex);
+                    if (m_recentColors.size() > 50) m_recentColors.removeLast();
+                    AppConfig::instance().setValue("Filter/RecentColors", m_recentColors);
                 }
                 emit filterChanged(m_filter);
                 rebuildGroups();
@@ -488,11 +509,13 @@ void FilterPanel::rebuildGroups() {
         // 2.3 最近筛选 (LRU)
         if (!m_recentColors.isEmpty()) {
             QLabel* lblRecent = new QLabel("最近筛选", g);
-            lblRecent->setStyleSheet("color: #666; font-size: 10px; margin-top: 8px;");
+            lblRecent->setStyleSheet("color: #666; font-size: 10px; margin-top: 8px; margin-left: 8px;");
             gl->addWidget(lblRecent);
 
             QWidget* recentGrid = new QWidget(g);
-            FlowLayout* recentFlow = new FlowLayout(recentGrid, 0, 4, 4);
+            recentGrid->setContentsMargins(8, 0, 0, 0);
+            // 2026-06-xx 物理微调：间距从 4px 缩减至 2px
+            FlowLayout* recentFlow = new FlowLayout(recentGrid, 0, 2, 2);
             recentGrid->setLayout(recentFlow);
 
             for (const QString& hex : m_recentColors) {
@@ -508,8 +531,17 @@ void FilterPanel::rebuildGroups() {
                 block->setCount(count);
 
                 connect(block, &ColorBlock::clicked, this, [this, hex](const QColor& /*c*/) {
-                    m_filter.colors.clear();
-                    m_filter.colors.append(hex);
+                    if (m_filter.colors.contains(hex)) {
+                        m_filter.colors.removeAll(hex);
+                    } else {
+                        m_filter.colors.clear();
+                        m_filter.colors.append(hex);
+                        
+                        // 即使是在最近面板中点击，也应更新排序使其置顶
+                        m_recentColors.removeAll(hex);
+                        m_recentColors.prepend(hex);
+                        AppConfig::instance().setValue("Filter/RecentColors", m_recentColors);
+                    }
                     emit filterChanged(m_filter);
                     rebuildGroups();
                 });
