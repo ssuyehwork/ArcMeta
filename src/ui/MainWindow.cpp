@@ -494,6 +494,16 @@ void MainWindow::initUi() {
         }
         // 关键修复：通知 ContentPanel 局部更新该路径的数据
         m_contentPanel->updateItemMetadata(path);
+
+        // 2026-06-xx 物理修复：实时刷新联动
+        // 当元数据（如颜色、备注、标签）发生变更时，如果当前选中项正好是该文件，
+        // 则强制触发元数据面板刷新，确保 UI 与后台数据物理一致。
+        auto indexes = m_contentPanel->getSelectedIndexes();
+        if (!indexes.isEmpty()) {
+            if (indexes.first().data(PathRole).toString() == path) {
+                emit m_contentPanel->selectionChanged({path});
+            }
+        }
     });
 
     // 9b. 侧边栏刷新防抖
