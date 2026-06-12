@@ -432,11 +432,54 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     } 
  
     // 2. 颜色过滤 (Plan-18: 基于 CIELAB Delta E 的感知筛选逻辑)
-    if (!currentFilter.colors.isEmpty()) { 
+    if (!currentFilter.colors.isEmpty() || !currentFilter.colorFilterText.isEmpty()) {
         QString dominantColorHex = record.color; 
         bool matchColor = false;
 
-        for (const QString& fc : currentFilter.colors) {
+        // 2.0 文本过滤逻辑 (如果存在文本)
+        if (!currentFilter.colorFilterText.isEmpty()) {
+            QString searchText = currentFilter.colorFilterText.trimmed();
+            // 物理规则：支持名称、色值或“无色标”
+            if (searchText == "无色标") {
+                if (dominantColorHex.isEmpty()) matchColor = true;
+            } else if (searchText.startsWith("#")) {
+                QColor targetCol = UiHelper::parseColorName(searchText);
+                if (targetCol.isValid()) {
+                    QColor recordCol = UiHelper::parseColorName(dominantColorHex);
+                    if (UiHelper::calculateDeltaE(targetCol, recordCol) < 10.0) matchColor = true;
+                    if (!matchColor && !record.palettes.empty()) {
+                        for (const auto& pe : record.palettes) {
+                            if (UiHelper::calculateDeltaE(targetCol, pe.first) < 10.0) { matchColor = true; break; }
+                        }
+                    }
+                }
+            } else {
+                // 模糊匹配颜色名称 (通过反查 colorMap)
+                static const QMap<QString, QString> nameToHex = {
+                    {"红", "#E24B4A"}, {"橙", "#EF9F27"}, {"黄", "#FECF0E"}, {"绿", "#639922"},
+                    {"青", "#1D9E75"}, {"蓝", "#378ADD"}, {"紫", "#7F77DD"}, {"灰", "#5F5E5A"},
+                    {"黑", "#000000"}, {"白", "#FFFFFF"}
+                };
+                for (auto it = nameToHex.begin(); it != nameToHex.end(); ++it) {
+                    if (it.key().contains(searchText)) {
+                        QColor targetCol = QColor(it.value());
+                        QColor recordCol = UiHelper::parseColorName(dominantColorHex);
+                        if (UiHelper::calculateDeltaE(targetCol, recordCol) < 10.0) { matchColor = true; break; }
+                        if (!record.palettes.empty()) {
+                            for (const auto& pe : record.palettes) {
+                                if (UiHelper::calculateDeltaE(targetCol, pe.first) < 10.0) { matchColor = true; break; }
+                            }
+                        }
+                        if (matchColor) break;
+                    }
+                }
+            }
+            if (!matchColor) return false; // 文本过滤不通过
+        }
+
+        // 2.1 勾选框过滤 (如果存在勾选)
+        if (!currentFilter.colors.isEmpty()) {
+            matchColor = false;
             // 特殊情况：无色标
             if (fc.isEmpty() && dominantColorHex.isEmpty()) { matchColor = true; break; }
             if (fc.isEmpty() || dominantColorHex.isEmpty()) continue;
@@ -463,56 +506,100 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     } 
  
     // 3. 标签过滤 
-    if (!currentFilter.tags.isEmpty()) { 
+    if (!currentFilter.tags.isEmpty() || !currentFilter.tagFilterText.isEmpty()) {
         const QStringList& itemTags = record.tags; 
         bool matchTag = false; 
-        for (const QString& fTag : currentFilter.tags) { 
-            if (fTag == "__none__") { 
-                if (itemTags.isEmpty()) { matchTag = true; break; } 
-            } else { 
-                if (itemTags.contains(fTag)) { matchTag = true; break; } 
+
+        if (!currentFilter.tagFilterText.isEmpty()) {
+            QString searchText = currentFilter.tagFilterText.trimmed();
+            for (const QString& t : itemTags) {
+                if (t.contains(searchText, Qt::CaseInsensitive)) { matchTag = true; break; }
+            }
+            if (!matchTag) return false;
+        }
+
+        if (!currentFilter.tags.isEmpty()) {
+            matchTag = false;
+            for (const QString& fTag : currentFilter.tags) {
+                if (fTag == "__none__") {
+                    if (itemTags.isEmpty()) { matchTag = true; break; }
+                } else {
+                    if (itemTags.contains(fTag)) { matchTag = true; break; }
+                }
             } 
-        } 
-        if (!matchTag) return false; 
+            if (!matchTag) return false;
+        }
     } 
 
     // 4. 类型过滤 
-    if (!currentFilter.types.isEmpty()) { 
+    if (!currentFilter.types.isEmpty() || !currentFilter.typeFilterText.isEmpty()) {
         QString type = record.isDir ? "folder" : "file";
         QString ext = record.suffix.toUpper();
         bool matchType = false; 
-        for (const QString& fType : currentFilter.types) { 
-            if (fType == "folder") { 
-                if (type == "folder") { matchType = true; break; } 
-            } else if (fType == "file") {
-                if (type != "folder") { matchType = true; break; }
-            } else { 
-                if (ext == fType.toUpper()) { matchType = true; break; } 
+
+        if (!currentFilter.typeFilterText.isEmpty()) {
+            QString searchText = currentFilter.typeFilterText.trimmed();
+            if (searchText == "文件夹" || searchText.toLower() == "folder") {
+                if (type == "folder") matchType = true;
+            } else {
+                if (ext.contains(searchText.toUpper())) matchType = true;
+            }
+            if (!matchType) return false;
+        }
+
+        if (!currentFilter.types.isEmpty()) {
+            matchType = false;
+            for (const QString& fType : currentFilter.types) {
+                if (fType == "folder") {
+                    if (type == "folder") { matchType = true; break; }
+                } else if (fType == "file") {
+                    if (type != "folder") { matchType = true; break; }
+                } else {
+                    if (ext == fType.toUpper()) { matchType = true; break; }
+                }
             } 
-        } 
-        if (!matchType) return false; 
+            if (!matchType) return false;
+        }
     } 
  
     // 5. 创建日期过滤 
-    if (!currentFilter.createDates.isEmpty()) { 
+    if (!currentFilter.createDates.isEmpty() || !currentFilter.createDateFilterText.isEmpty()) {
         QDate d = QDateTime::fromMSecsSinceEpoch(record.ctime).date();
         QString dStr = d.toString("dd-MM-yyyy"); 
         bool matchDate = false; 
-        for (const QString& fDate : currentFilter.createDates) { 
-            if (fDate == dStr) { matchDate = true; break; } 
-        } 
-        if (!matchDate) return false; 
+
+        if (!currentFilter.createDateFilterText.isEmpty()) {
+            if (dStr.contains(currentFilter.createDateFilterText.trimmed())) matchDate = true;
+            if (!matchDate) return false;
+        }
+
+        if (!currentFilter.createDates.isEmpty()) {
+            matchDate = false;
+            for (const QString& fDate : currentFilter.createDates) {
+                if (fDate == dStr) { matchDate = true; break; }
+            }
+            if (!matchDate) return false;
+        }
     } 
  
     // 6. 修改日期过滤 
-    if (!currentFilter.modifyDates.isEmpty()) { 
+    if (!currentFilter.modifyDates.isEmpty() || !currentFilter.modifyDateFilterText.isEmpty()) {
         QDate d = QDateTime::fromMSecsSinceEpoch(record.mtime).date();
         QString dStr = d.toString("dd-MM-yyyy"); 
         bool matchDate = false; 
-        for (const QString& fDate : currentFilter.modifyDates) { 
-            if (fDate == dStr) { matchDate = true; break; } 
-        } 
-        if (!matchDate) return false; 
+
+        if (!currentFilter.modifyDateFilterText.isEmpty()) {
+            if (dStr.contains(currentFilter.modifyDateFilterText.trimmed())) matchDate = true;
+            if (!matchDate) return false;
+        }
+
+        if (!currentFilter.modifyDates.isEmpty()) {
+            matchDate = false;
+            for (const QString& fDate : currentFilter.modifyDates) {
+                if (fDate == dStr) { matchDate = true; break; }
+            }
+            if (!matchDate) return false;
+        }
     } 
  
     // 2026-04-12 深度修复：直接执行关键词包含检查 
