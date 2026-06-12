@@ -431,42 +431,30 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         if (!currentFilter.ratings.contains(r)) return false; 
     } 
  
-    // 2. 颜色过滤 (变长物理多色板命中逻辑)
+    // 2. 颜色过滤 (Plan-18: 基于 CIELAB Delta E 的感知筛选逻辑)
     if (!currentFilter.colors.isEmpty()) { 
-        QString dominantColor = record.color; // 直接从烘焙好的 record 获取
-        
+        QString dominantColorHex = record.color;
         bool matchColor = false;
-        for (const QString& fc : currentFilter.colors) {
-            // 物理修复：如果 HEX 完全一致（主色命中），直接通过
-            if (fc == dominantColor.toUpper()) { matchColor = true; break; }
 
-            // 2026-06-xx 性能优化：直接使用 ItemRecord 中烘焙好的 palettes
+        for (const QString& fc : currentFilter.colors) {
+            // 特殊情况：无色标
+            if (fc.isEmpty() && dominantColorHex.isEmpty()) { matchColor = true; break; }
+            if (fc.isEmpty() || dominantColorHex.isEmpty()) continue;
+
+            QColor targetCol = UiHelper::parseColorName(fc);
+
+            // 2.1 主色调感知匹配 (CIELAB Delta E < 10.0)
+            QColor recordCol = UiHelper::parseColorName(dominantColorHex);
+            if (UiHelper::calculateDeltaE(targetCol, recordCol) < 10.0) {
+                matchColor = true; break;
+            }
+
+            // 2.2 变长色板深度匹配 (多色命中)
             if (!record.palettes.empty()) {
                 for (const auto& pe : record.palettes) {
-                    const QColor& pc = pe.first;
-                    if (fc == pc.name().toUpper()) { matchColor = true; break; }
-                    
-                    QColor fCol = UiHelper::parseColorName(fc);
-                    if (fCol.isValid()) {
-                        long rmean = (fCol.red() + pc.red()) / 2;
-                        long r = (long)fCol.red() - pc.red();
-                        long g = (long)fCol.green() - pc.green();
-                        long b = (long)fCol.blue() - pc.blue();
-                        long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
-                        if (distSq < 15000) { matchColor = true; break; }
+                    if (UiHelper::calculateDeltaE(targetCol, pe.first) < 10.0) {
+                        matchColor = true; break;
                     }
-                }
-            } else {
-                // 向下兼容：若烘焙色板为空，回退到对主色调的容差检查
-                QColor dCol = UiHelper::parseColorName(dominantColor);
-                QColor fCol = UiHelper::parseColorName(fc);
-                if (dCol.isValid() && fCol.isValid()) {
-                    long rmean = (fCol.red() + dCol.red()) / 2;
-                    long r = (long)fCol.red() - dCol.red();
-                    long g = (long)fCol.green() - dCol.green();
-                    long b = (long)fCol.blue() - dCol.blue();
-                    long distSq = (((512 + rmean)*r*r) >> 8) + 4*g*g + (((767-rmean)*b*b) >> 8);
-                    if (distSq < 15000) { matchColor = true; break; }
                 }
             }
             if (matchColor) break;

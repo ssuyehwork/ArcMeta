@@ -9,8 +9,35 @@
 #include <QPushButton>
 #include <QMap>
 #include <QStringList>
+#include "MetaPanel.h" // 引用 FlowLayout
 
 namespace ArcMeta {
+
+// ─── 物理色块控件 (ColorBlock) ─────────────────────────────────────
+class ColorBlock : public QWidget {
+    Q_OBJECT
+public:
+    explicit ColorBlock(const QColor& color, QWidget* parent = nullptr);
+    void setCount(int count);
+    void setChecked(bool checked);
+    bool isChecked() const { return m_checked; }
+    QColor color() const { return m_color; }
+
+signals:
+    void clicked(const QColor& color);
+
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void enterEvent(QEnterEvent* event) override;
+    void leaveEvent(QEvent*) override;
+
+private:
+    QColor m_color;
+    int    m_count = 0;
+    bool   m_checked = false;
+    bool   m_hovered = false;
+};
 
 // ─── 色相滑块 (内嵌版) ─────────────────────────────────────────────
 class InlineHueSlider : public QWidget {
@@ -94,6 +121,7 @@ private:
 
     FilterState m_filter;
     QString     m_hueSliderColor;
+    QStringList m_recentColors; // LRU 缓存
 
     QMap<int, int>      m_ratingCounts;
     QMap<QString, int>  m_colorCounts;
