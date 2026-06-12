@@ -56,6 +56,12 @@ using namespace ArcMeta::Style;
 
 namespace ArcMeta {
 
+// 【物理护栏-禁止修改/禁止改为0】全局边缘留白基准值，统一应用于标题栏/导航栏/主体容器右侧
+// 及状态栏左右两侧。2026-06-xx 曾被错误改为0导致搜索框/元数据/筛选面板右侧被截断，
+// 任何"贴合边缘/滚动条对齐/物理修正"等理由都不能作为改动此常量或下方四处引用的依据。
+constexpr int kEdgeMargin = 5;
+constexpr int kStatusBarMargin = 12;
+
 MainWindow::~MainWindow() {
     // 对应 initUi() 中 QCoreApplication::instance()->installEventFilter(m_resizeFilter)
     // 安装位置和卸载位置必须严格一致，禁止改成 this->removeEventFilter(...)
@@ -840,8 +846,8 @@ void MainWindow::setupSplitters() {
     m_titleBarWidget->setObjectName("TitleBar");
     m_titleBarWidget->setFixedHeight(32);
     m_titleBarLayout = new QHBoxLayout(m_titleBarWidget);
-    // 物理对齐：右边距设为 0px，确保滚动条/按钮贴合边缘
-    m_titleBarLayout->setContentsMargins(8, 0, 0, 0); 
+    // 右边距使用 kEdgeMargin，与 navBar/body 保持统一基准线，禁止改为0
+    m_titleBarLayout->setContentsMargins(8, 0, kEdgeMargin, 0);
     m_titleBarLayout->setSpacing(8);
 
     m_appNameLabel = new QLabel("FERREX", m_titleBarWidget);
@@ -858,8 +864,8 @@ void MainWindow::setupSplitters() {
     m_navBarWidget->setFixedHeight(42); 
     
     m_navBarLayout = new QHBoxLayout(m_navBarWidget);
-    // 物理对齐：右边距设为 0px
-    m_navBarLayout->setContentsMargins(5, 5, 0, 5); 
+    // 右边距使用 kEdgeMargin，与 navBar/body 保持统一基准线，禁止改为0
+    m_navBarLayout->setContentsMargins(kEdgeMargin, kEdgeMargin, kEdgeMargin, kEdgeMargin);
     m_navBarLayout->setSpacing(5);
     m_navBarLayout->setAlignment(Qt::AlignVCenter);
 
@@ -874,8 +880,8 @@ void MainWindow::setupSplitters() {
     QWidget* bodyWrapper = new QWidget(centralC);
     bodyWrapper->setStyleSheet("background: transparent;"); // 确保背景透明不遮挡阴影
     m_bodyLayout = new QVBoxLayout(bodyWrapper);
-    // 物理对齐：右边距设为 0px，确保滚动条物理贴合边缘
-    m_bodyLayout->setContentsMargins(5, 0, 0, 5); 
+    // 必须与 setupSplitters() 中的初始值保持一致，禁止改为0，否则筛选面板/元数据面板右侧会贴边截断
+    m_bodyLayout->setContentsMargins(kEdgeMargin, 0, kEdgeMargin, kEdgeMargin);
     m_bodyLayout->setSpacing(0);
 
     // --- 3. 主拆分条 (物理还原：5px 物理缝隙) ---
@@ -933,7 +939,7 @@ void MainWindow::setupSplitters() {
     statusBar->setObjectName("StatusBar");
     statusBar->setFixedHeight(28);
     QHBoxLayout* statusL = new QHBoxLayout(statusBar);
-    statusL->setContentsMargins(12, 0, 0, 0);
+    statusL->setContentsMargins(kStatusBarMargin, 0, kStatusBarMargin, 0);
     statusL->setSpacing(0);
 
     m_statusLeft = new QLabel("就绪中...", statusBar);
@@ -1290,7 +1296,8 @@ void MainWindow::changeEvent(QEvent* event) {
             if (isMaximized()) {
                 m_bodyLayout->setContentsMargins(0, 0, 0, 0);
             } else {
-                m_bodyLayout->setContentsMargins(5, 0, 0, 5);
+                // 必须与 setupSplitters() 中的初始值保持一致，禁止改为0，否则筛选面板/元数据面板右侧会贴边截断
+                m_bodyLayout->setContentsMargins(kEdgeMargin, 0, kEdgeMargin, kEdgeMargin);
             }
         }
     }
