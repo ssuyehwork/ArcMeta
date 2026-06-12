@@ -1,4 +1,6 @@
 #include "ThumbnailDelegate.h"
+#include "ContentPanel.h"
+#include "../meta/MetadataManager.h"
 #include <QPainter>
 #include <QPainterPath>
 #include <QIcon>
@@ -9,6 +11,7 @@
 #include <QLineEdit>
 #include <QTimer>
 #include <QAbstractItemView>
+#include <QFile>
 #include "UiHelper.h"
 
 namespace ArcMeta {
@@ -304,12 +307,56 @@ void ThumbnailDelegate::setEditorData(QWidget* editor, const QModelIndex& index)
     QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor); 
     if (lineEdit) {
         lineEdit->setText(value); 
-        // 2026-06-xx 物理对标：重命名时仅选中主文件名，不含后缀
-        int lastDot = value.lastIndexOf('.'); 
-        if (lastDot > 0) { 
-            lineEdit->setSelection(0, lastDot); 
-        } else { 
-            lineEdit->selectAll(); 
+
+        // 2026-xx-xx 按照要求：如果是文件夹或分类，全选；如果是文件，仅选中名称部分
+        // 使用 QTimer::singleShot 确保在 Qt 内部默认全选逻辑之后执行，彻底解决失效问题
+        bool isFolder = (index.data(m_typeRole).toString() == "folder" || index.data(m_typeRole).toString() == "category");
+        
+        QTimer::singleShot(0, lineEdit, [lineEdit, value, isFolder]() {
+            if (!lineEdit) return;
+            if (isFolder) {
+                lineEdit->selectAll();
+            } else {
+                int lastDot = value.lastIndexOf('.'); 
+                if (lastDot > 0) { 
+                    lineEdit->setSelection(0, lastDot); 
+                } else { 
+                    lineEdit->selectAll(); 
+                }
+            }
+        });
+    }
+}
+
+void ThumbnailDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const {
+    QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor);
+    if (!lineEdit) return;
+    QString value = lineEdit->text();
+    if (value.isEmpty() || value == index.data(Qt::DisplayRole).toString()) return;
+
+    QString oldPath = index.data(m_pathRole).toString();
+    QFileInfo info(oldPath);
+    QString newPath = info.absolutePath() + "/" + value;
+
+    if (QFile::rename(oldPath, newPath)) {
+        // 物理同步：更新元数据管理器
+        MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
+        model->setData(index, value, Qt::EditRole);
+
+        // 2026-xx-xx 按照用户要求：触发刷新信号，驱动元数据面板同步
+        // 物理修复：编辑器挂在 viewport 上，需多跳一级 parent
+        QAbstractItemView* view = qobject_cast<QAbstractItemView*>(editor->parentWidget()->parentWidget());
+        if (view) {
+            // 向上寻找 ContentPanel
+            QWidget* p = view->parentWidget();
+            while (p) {
+                ContentPanel* cp = qobject_cast<ContentPanel*>(p);
+                if (cp) {
+                    cp->onSelectionChanged();
+                    break;
+                }
+                p = p->parentWidget();
+            }
         }
     }
 }

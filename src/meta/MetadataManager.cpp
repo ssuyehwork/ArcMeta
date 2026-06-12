@@ -37,6 +37,7 @@
 #include <iomanip>
 #include <mutex>
 #include <shared_mutex>
+#include <algorithm>
 
 namespace ArcMeta {
 
@@ -86,6 +87,10 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
     m_uiSignalTimer = new QTimer(this);
     m_uiSignalTimer->setInterval(200); // 200ms 时间窗口
     m_uiSignalTimer->setSingleShot(true);
+
+    m_retryTimer = new QTimer(this);
+    m_retryTimer->setInterval(5000); // 每 5 秒尝试一次补偿
+    connect(m_retryTimer, &QTimer::timeout, this, &MetadataManager::processVisualRetryQueue);
     connect(m_uiSignalTimer, &QTimer::timeout, [this]() {
         std::vector<QString> paths;
         {
@@ -509,8 +514,9 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         for (auto it = m_cache.begin(); it != m_cache.end(); ) {
             if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
-                // 2026-06-xx 物理对齐：回收站项也计入全部数据，因此删除时必须一并扣减
-                if (!it->second.isFolder && !it->second.isInvalid) {
+                // 2026-07-xx 物理修正：回收站项目已在移入时预扣减，
+                // 此处物理删除时，仅对“活跃”（非回收站且非失效）的项目执行扣减。
+                if (!it->second.isFolder && !it->second.isInvalid && !it->second.isTrash) {
                     totalDelta--;
                 }
                 if (!it->second.fileId128.empty()) {
@@ -587,8 +593,12 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
             CategoryRepo::moveToTrashBatch({fid});
         }
 
-        // 2026-06-xx 物理修正：移入回收站仅属于分类迁移，不应减少“全部数据”的计数。
-        // 只有永久删除才会导致总数减少。
+        // 2026-07-xx 架构修正：移入回收站应视为从活跃池移除。
+        // 仅当项目本身非失效状态时，才执行计数同步，避免双重扣减。
+        if (!m_cache[nPath].isInvalid) {
+            CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
+        }
+
         persistAsync(nPath);
         
         // 2026-06-xx 物理修复：状态变更后必须强制发射信号，驱动侧边栏重数一遍
@@ -602,6 +612,12 @@ void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         auto it = m_cache.find(nPath);
         if (it == m_cache.end()) return;
+
+        // 2026-07-xx 按照规则同步活跃计数
+        if (it->second.isTrash != isTrash && !it->second.isInvalid) {
+            CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
+        }
+
         it->second.isTrash = isTrash;
         if (!isTrash) {
             it->second.originalPath = L""; // Clear on restore
@@ -707,6 +723,7 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
     
     QFileInfo info(QString::fromStdWString(nPath));
     QString qPath = QString::fromStdWString(nPath);
+    bool success = false;
     
     if (info.isFile()) {
         if (ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower())) {
@@ -714,22 +731,107 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
             if (!palette.isEmpty()) {
                 QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
                 instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
+                success = true;
             }
         }
     } else if (info.isDir()) {
         QDir subDir(qPath);
+        // 2026-07-xx 按照建议：扫描前 5 个文件以增加成功率
         QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+        int checked = 0;
         for (const auto& sf : subFiles) {
             if (ArcMeta::UiHelper::isGraphicsFile(sf.suffix().toLower())) {
                 auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath());
                 if (!palette.isEmpty()) {
                     QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
                     instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
+                    success = true;
                     break;
                 }
+                if (++checked >= 5) break;
             }
         }
     }
+
+    // 2026-07-xx 按照建议：解析失败（且属于图像类型）时加入重试队列
+    if (!success && (info.isDir() || ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower()))) {
+        {
+            std::unique_lock<std::shared_mutex> lock(instance().m_mutex);
+            // 查重：避免队列膨胀
+            bool found = false;
+            for(const auto& p : instance().m_visualRetryQueue) if(p == nPath) { found = true; break; }
+            if (!found) {
+                instance().m_visualRetryQueue.push_back(nPath);
+                // 2026-07-xx 物理对齐：QTimer 非线程安全，必须通过元对象系统跨线程启动
+                QMetaObject::invokeMethod(instance().m_retryTimer, "start", Qt::QueuedConnection);
+            }
+        }
+    }
+}
+
+void MetadataManager::processVisualRetryQueue() {
+    std::vector<std::wstring> batch;
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        if (m_visualRetryQueue.empty()) {
+            m_retryTimer->stop();
+            return;
+        }
+        // 每次处理 5 个，防止阻塞
+        size_t count = std::min(m_visualRetryQueue.size(), (size_t)5);
+        for(size_t i = 0; i < count; ++i) batch.push_back(m_visualRetryQueue[i]);
+    }
+
+    // 异步执行，不阻塞 UI
+    (void)QtConcurrent::run([this, batch]() {
+        std::vector<std::wstring> finished;
+        for (const auto& path : batch) {
+            QFileInfo info(QString::fromStdWString(path));
+            QString qPath = QString::fromStdWString(path);
+            bool ok = false;
+
+            if (info.isFile()) {
+                auto palette = ArcMeta::UiHelper::extractPalette(qPath);
+                if (!palette.isEmpty()) {
+                    QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
+                    setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), palette, true);
+                    ok = true;
+                }
+            } else if (info.isDir()) {
+                QDir subDir(qPath);
+                QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                int checked = 0;
+                for (const auto& sf : subFiles) {
+                    if (ArcMeta::UiHelper::isGraphicsFile(sf.suffix().toLower())) {
+                        auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath());
+                        if (!palette.isEmpty()) {
+                            QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
+                            setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), palette, true);
+                            ok = true;
+                            break;
+                        }
+                        if (++checked >= 5) break;
+                    }
+                }
+            }
+            
+            // 即使本次仍然失败，如果是因非图像原因（例如文件夹内确实没图），也视为“处理过”，从队列移除
+            // 这里我们设定：只要尝试过了，就从队列移除，除非未来有更复杂的“按错误码重试”逻辑
+            finished.push_back(path);
+        }
+
+        // 从队列中移除已处理项
+        if (!finished.empty()) {
+            QMetaObject::invokeMethod(this, [this, finished]() {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                for (const auto& p : finished) {
+                    auto it = std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), p);
+                    if (it != m_visualRetryQueue.end()) m_visualRetryQueue.erase(it);
+                }
+                if (!m_visualRetryQueue.empty()) m_retryTimer->start();
+            });
+        }
+    });
 }
 
 void MetadataManager::registerArcmetaFrn(const std::wstring&) {
@@ -790,7 +892,10 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
 
         if (sqlite3_step(stmt) == SQLITE_DONE) {
             if (isNew) {
-                if (!rMeta.isFolder) CategoryRepo::incrementTotalFileCount(1);
+                // 2026-07-xx 物理修复：新项目入库时，若其状态为回收站或失效，则不增加总计数
+                if (!rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
+                    CategoryRepo::incrementTotalFileCount(1);
+                }
                 // 物理同步：写入数据库后，内存立即标记为已登记，驱动打勾显示
                 setManaged(nPath, true, false); 
             }

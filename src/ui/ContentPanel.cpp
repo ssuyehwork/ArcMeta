@@ -35,6 +35,7 @@
 #include <QItemSelectionModel> 
 #include <QFileInfo> 
 #include <QDir> 
+#include <QFile>
 #include <QDateTime> 
 #include <QDesktopServices> 
 #include <QUrl> 
@@ -1540,6 +1541,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                 break;
                             }
                         }
+                        // 2026-xx-xx 按照用户要求：解析颜色后触发 selectionChanged 信号，以驱动元数据面板刷新
+                        weakThis->onSelectionChanged();
                         ToolTipOverlay::instance()->showText(QCursor::pos(), "变长色板已物理提取并绑定", 1500, QColor("#2ecc71"));
                     }
                 });
@@ -2698,16 +2701,28 @@ QWidget* GridItemDelegate::createEditor(QWidget* parent, const QStyleOptionViewI
  
 void GridItemDelegate::setEditorData(QWidget* editor, const QModelIndex& index) const { 
     QString value = index.model()->data(index, Qt::EditRole).toString(); 
-    // 2026-05-25 物理修复：改用 qobject_cast 彻底根除 static_cast 类型无法识别的 Bug 
+    // 2026-05-25 物理修复：改用 qobject_cast 彻底根除 static_cast 类型无法识别 the Bug 
     QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor); 
-    if (lineEdit) lineEdit->setText(value); 
+    if (!lineEdit) return;
+
+    lineEdit->setText(value); 
      
-    int lastDot = value.lastIndexOf('.'); 
-    if (lastDot > 0) { 
-        lineEdit->setSelection(0, lastDot); 
-    } else { 
-        lineEdit->selectAll(); 
-    } 
+    // 2026-xx-xx 按照用户要求：如果是文件夹，全选；如果是文件，仅选中包含后缀名之前的部分
+    // 物理修复：使用 QTimer 确保在 Qt 默认 selectAll 之后执行，防止逻辑被覆盖
+    bool isFolder = (index.data(TypeRole).toString() == "folder" || index.data(TypeRole).toString() == "category");
+    QTimer::singleShot(0, lineEdit, [lineEdit, value, isFolder]() {
+        if (!lineEdit) return;
+        if (isFolder) {
+            lineEdit->selectAll();
+        } else {
+            int lastDot = value.lastIndexOf('.'); 
+            if (lastDot > 0) { 
+                lineEdit->setSelection(0, lastDot); 
+            } else { 
+                lineEdit->selectAll(); 
+            } 
+        }
+    });
 } 
  
 void GridItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const { 
@@ -2727,6 +2742,22 @@ void GridItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, 
         // 针对虚拟模型，我们由于 records 是只读的缓存，通常需要重新加载目录
         // 但为了即时反馈，可以尝试通过 setData 触发局部刷新
         model->setData(index, value, Qt::EditRole);
+
+        // 2026-xx-xx 按照用户要求：重命名后触发 selectionChanged 信号，以驱动元数据面板刷新
+        // 由于 setModelData 没有 option 参数，通过 parent 获取 View
+        QAbstractItemView* view = qobject_cast<QAbstractItemView*>(editor->parentWidget()->parentWidget());
+        if (view) {
+            // 向上寻找 ContentPanel 以调用 onSelectionChanged
+            QWidget* p = view->parentWidget();
+            while (p) {
+                ContentPanel* cp = qobject_cast<ContentPanel*>(p);
+                if (cp) {
+                    cp->onSelectionChanged();
+                    break;
+                }
+                p = p->parentWidget();
+            }
+        }
     }  
 } 
 
