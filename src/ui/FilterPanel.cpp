@@ -444,10 +444,10 @@ void FilterPanel::rebuildGroups() {
             m_filter.colors.clear();
             m_filter.colors.append(hex);
 
-            // LRU 更新 (2026-06-xx: 容量扩展至 20 个，且由左上向右下按时间排布)
+            // LRU 更新 (2026-06-xx: 容量扩展至 50 个，且由左上向右下按时间排布)
             m_recentColors.removeAll(hex);
             m_recentColors.prepend(hex);
-            if (m_recentColors.size() > 20) m_recentColors.removeLast();
+            if (m_recentColors.size() > 50) m_recentColors.removeLast();
             AppConfig::instance().setValue("Filter/RecentColors", m_recentColors);
 
             emit filterChanged(m_filter);
@@ -463,7 +463,8 @@ void FilterPanel::rebuildGroups() {
 
         QWidget* staticGrid = new QWidget(g);
         staticGrid->setContentsMargins(8, 0, 0, 0);
-        FlowLayout* staticFlow = new FlowLayout(staticGrid, 0, 4, 4);
+        // 2026-06-xx 物理微调：间距从 4px 缩减至 2px
+        FlowLayout* staticFlow = new FlowLayout(staticGrid, 0, 2, 2);
         staticGrid->setLayout(staticFlow);
         
         QStringList standardHex = {
@@ -495,7 +496,7 @@ void FilterPanel::rebuildGroups() {
                     // LRU 更新
                     m_recentColors.removeAll(hex);
                     m_recentColors.prepend(hex);
-                    if (m_recentColors.size() > 20) m_recentColors.removeLast();
+                    if (m_recentColors.size() > 50) m_recentColors.removeLast();
                     AppConfig::instance().setValue("Filter/RecentColors", m_recentColors);
                 }
                 emit filterChanged(m_filter);
@@ -513,7 +514,8 @@ void FilterPanel::rebuildGroups() {
 
             QWidget* recentGrid = new QWidget(g);
             recentGrid->setContentsMargins(8, 0, 0, 0);
-            FlowLayout* recentFlow = new FlowLayout(recentGrid, 0, 4, 4);
+            // 2026-06-xx 物理微调：间距从 4px 缩减至 2px
+            FlowLayout* recentFlow = new FlowLayout(recentGrid, 0, 2, 2);
             recentGrid->setLayout(recentFlow);
 
             for (const QString& hex : m_recentColors) {
