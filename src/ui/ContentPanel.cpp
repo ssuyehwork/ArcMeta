@@ -1749,10 +1749,19 @@ void ContentPanel::onSelectionChanged() {
 } 
  
 void ContentPanel::refreshAll() {
+    // 2026-06-xx 物理对标：完善刷新逻辑，支持所有上下文类型
     if (m_currentCategoryType == "user_category") {
         if (m_currentCategoryId != -1) loadCategory(m_currentCategoryId);
-    } else if (!m_currentPath.isEmpty()) {
+    } else if (m_currentCategoryType == "all" || m_currentCategoryType == "uncategorized" ||
+               m_currentCategoryType == "untagged" || m_currentCategoryType == "recently_visited" ||
+               m_currentCategoryType == "trash") {
+        QStringList paths = CategoryRepo::getSystemCategoryPaths(m_currentCategoryType);
+        loadPaths(paths);
+    } else if (!m_currentPath.isEmpty() && m_currentPath != "computer://") {
         loadDirectory(m_currentPath, m_isRecursive);
+    } else {
+        // 兜底逻辑：加载“此电脑”
+        loadDirectory("computer://");
     }
 }
 
@@ -2173,7 +2182,8 @@ void ContentPanel::loadPaths(const QStringList& paths) {
 void ContentPanel::recalculateAndEmitStats() {
     const std::vector<ItemRecord>& records = m_model->allRecords();
     if (records.empty()) {
-        emit directoryStatsReady({}, {}, {}, {}, {}, {});
+        // 2026-06-xx 物理修复：严禁向筛选面板发送“全空”统计信号，
+        // 防止在加载大目录或执行搜索切换的中间态强行清空筛选器界面。
         return;
     }
 

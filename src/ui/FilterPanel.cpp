@@ -369,6 +369,12 @@ void FilterPanel::populate(
     const QMap<QString, int>&   createDateCounts,
     const QMap<QString, int>&   modifyDateCounts)
 {
+    // 2026-06-xx 物理修复：若所有输入均为空，则判定为异步加载中间态，拒绝执行重绘以防止 UI 抖动
+    if (ratingCounts.isEmpty() && colorCounts.isEmpty() && tagCounts.isEmpty() &&
+        typeCounts.isEmpty() && createDateCounts.isEmpty() && modifyDateCounts.isEmpty()) {
+        return;
+    }
+
     m_ratingCounts     = ratingCounts;
     m_colorCounts      = colorCounts;
     m_tagCounts        = tagCounts;
@@ -755,15 +761,16 @@ QCheckBox* FilterPanel::addFilterRow(QVBoxLayout* layout, const QString& label, 
 
 // ─── clearAllFilters ──────────────────────────────────────────────
 void FilterPanel::clearAllFilters() {
+    // 2026-06-xx 物理修复：重置所有筛选内存状态
     m_filter = FilterState{};
-    const auto cbs = m_container->findChildren<QCheckBox*>();
-    for (QCheckBox* cb : cbs) {
-        cb->blockSignals(true);
-        cb->setChecked(false);
-        cb->blockSignals(false);
-    }
+    m_hueSliderColor.clear();
+
+    // 2026-06-xx 逻辑重构：由于 Plan-18 引入了色块矩阵，必须调用 rebuildGroups
+    // 以实现全量 UI 组件的选中态物理归零，杜绝手动遍历子控件的傻逼逻辑。
+    rebuildGroups();
+
+    // 2026-06-xx 按照用户铁律：点击“清除”仅重置筛选器内部状态，严禁干扰搜索框或上下文
     emit filterChanged(m_filter);
-    emit resetSearchRequested();
 }
 
 } // namespace ArcMeta

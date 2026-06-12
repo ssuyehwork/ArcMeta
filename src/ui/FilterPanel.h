@@ -102,7 +102,6 @@ protected:
 
 signals:
     void filterChanged(const FilterState& state);
-    void resetSearchRequested();
 
 public slots:
     void clearAllFilters();

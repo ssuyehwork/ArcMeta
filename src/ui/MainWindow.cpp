@@ -389,11 +389,6 @@ void MainWindow::initUi() {
         updateStatusBar(); // 筛选后立即更新底栏可见项目总数
     });
 
-    connect(m_filterPanel, &FilterPanel::resetSearchRequested, this, [this]() {
-        // 2026-04-12 关键同步：点击右侧“清除”时，同步清空顶部搜索框
-        if (m_searchEdit) m_searchEdit->clear();
-        m_contentPanel->search("");
-    });
 
     // 6. 地址栏路径跳转与刷新
     connect(m_addressBar, &AddressBar::pathChanged, this, [this](const QString& path) {
