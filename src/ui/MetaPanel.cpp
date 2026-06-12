@@ -262,7 +262,7 @@ void MetaPanel::initUi() {
     QWidget* header = new QWidget(this); header->setObjectName("ContainerHeader"); header->setFixedHeight(32);
     header->setStyleSheet("QWidget#ContainerHeader { background-color: #252526; border-bottom: 1px solid #333; }");
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 0, 0, 0); // 物理对齐：右侧边距 0px
+    headerLayout->setContentsMargins(15, 0, 10, 0); // 恢复右侧边距
     headerLayout->setSpacing(5);
     QLabel* iconLabel = new QLabel(header); iconLabel->setPixmap(UiHelper::getIcon("all_data", QColor("#4a90e2"), 18).pixmap(18, 18)); headerLayout->addWidget(iconLabel);
     QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 12px; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);
@@ -280,8 +280,8 @@ void MetaPanel::initUi() {
     m_containerLayout = new QVBoxLayout(m_container); 
     // 2026-06-xx 工业级强制约束：启用 SetMinAndMaxSize，强制容器高度随子控件动态撑开
     m_containerLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
-    // 2026-06-xx 物理对齐：右侧边距设为 0，使滚动条贴合容器边缘
-    m_containerLayout->setContentsMargins(10, 10, 0, 10); 
+    // 2026-06-xx 修复：恢复右侧间距，确保容器两侧对称
+    m_containerLayout->setContentsMargins(10, 10, 10, 10);
     // 2026-06-01 修正：降低全局间距，消除视觉断层 (原 12px -> 现 8px)
     m_containerLayout->setSpacing(8);
     
@@ -457,8 +457,8 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
             m_container->setFixedWidth(viewportW);
         }
         
-        // 2. 内部控件可用宽度（视口宽 - 左边距 10px - 右边距 0px）
-        int maxW = viewportW - 10; 
+        // 2. 内部控件可用宽度（视口宽 - 左边距 10px - 右边距 10px）
+        int maxW = viewportW - 20;
         if (maxW > 50) {
             auto syncWidthAndHeight = [maxW](ElasticEdit* edit) {
                 if (edit && edit->width() != maxW) {
