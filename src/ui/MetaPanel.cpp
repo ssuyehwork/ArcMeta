@@ -168,7 +168,7 @@ TagPill::TagPill(const QString& text, QWidget* parent)
     m_closeBtn->setCursor(Qt::PointingHandCursor);
     m_closeBtn->setIcon(UiHelper::getIcon("close", QColor("#B0B0B0"), 12));
     m_closeBtn->setIconSize(QSize(10, 10));
-    m_closeBtn->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255, 255, 255, 0.1); border-radius: 2px; }");
+    m_closeBtn->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: #3E3E42; border-radius: 2px; }");
     layout->addWidget(m_label);
     layout->addWidget(m_closeBtn);
     connect(m_closeBtn, &QPushButton::clicked, [this]() { emit deleteRequested(m_text); });
@@ -318,7 +318,7 @@ void MetaPanel::initUi() {
     QWidget* header = new QWidget(this); header->setObjectName("ContainerHeader"); header->setFixedHeight(32);
     header->setStyleSheet("QWidget#ContainerHeader { background-color: #252526; border-bottom: 1px solid #333; }");
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 0, 5, 0);
+    headerLayout->setContentsMargins(15, 0, 0, 0); // 物理对齐：右侧边距 0px
     headerLayout->setSpacing(5);
     QLabel* iconLabel = new QLabel(header); iconLabel->setPixmap(UiHelper::getIcon("all_data", QColor("#4a90e2"), 18).pixmap(18, 18)); headerLayout->addWidget(iconLabel);
     QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 12px; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);

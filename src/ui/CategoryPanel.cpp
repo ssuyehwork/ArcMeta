@@ -735,7 +735,7 @@ void CategoryPanel::initUi() {
         "}"
     );
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 0, 5, 0); // 2026-05-17 按照用户要求：右侧边距统一设为 5px，上下 0px 垂直居中
+    headerLayout->setContentsMargins(15, 0, 0, 0);
     headerLayout->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
 
     QLabel* iconLabel = new QLabel(header);
@@ -754,7 +754,7 @@ void CategoryPanel::initUi() {
     btnRescan->setIconSize(QSize(16, 16));
     btnRescan->setFlat(true);
     btnRescan->setCursor(Qt::PointingHandCursor);
-    btnRescan->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }");
+    btnRescan->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: #3E3E42; border-radius: 4px; }");
     btnRescan->setProperty("tooltipText", "手动全量扫描与对账");
     btnRescan->installEventFilter(this); // 2026-06-xx 按照规范：安装过滤器以驱动自定义 ToolTip
     connect(btnRescan, &QPushButton::clicked, this, [this]() {

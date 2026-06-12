@@ -30,7 +30,8 @@ QuickLookWindow::QuickLookWindow() : QWidget(nullptr) {
 
 void QuickLookWindow::initUi() {
     m_mainLayout = new QVBoxLayout(this);
-    m_mainLayout->setContentsMargins(10, 10, 10, 10);
+    // 物理对齐：右侧边距 0px，确保滚动条贴合边缘
+    m_mainLayout->setContentsMargins(10, 10, 0, 10);
 
     // 图片渲染层
     m_graphicsView = new QGraphicsView(this);
@@ -57,17 +58,17 @@ void QuickLookWindow::initUi() {
         "  padding: 16px;"
         "}"
         "QPlainTextEdit QScrollBar:vertical {"
-        "  border: none; background: transparent; width: 6px; margin: 0px;"
+        "  border: none; background: transparent; width: 10px; margin: 0px;"
         "}"
         "QPlainTextEdit QScrollBar::handle:vertical {"
-        "  background: #444444; min-height: 20px; border-radius: 3px;"
+        "  background: #333333; min-height: 20px; border-radius: 3px;"
         "}"
-        "QPlainTextEdit QScrollBar::handle:vertical:hover { background: #555555; }"
-        "QPlainTextEdit QScrollBar::add-line:vertical, QPlainTextEdit QScrollBar::sub-line:vertical { height: 0px; }"
-        "QPlainTextEdit QScrollBar:horizontal { height: 6px; background: transparent; border: none; margin: 0px; }"
-        "QPlainTextEdit QScrollBar::handle:horizontal { background: #444444; border-radius: 3px; min-width: 20px; }"
-        "QPlainTextEdit QScrollBar::handle:horizontal:hover { background: #555555; }"
-        "QPlainTextEdit QScrollBar::add-line:horizontal, QPlainTextEdit QScrollBar::sub-line:horizontal { width: 0px; }"
+        "QPlainTextEdit QScrollBar::handle:vertical:hover { background: #444444; }"
+        "QPlainTextEdit QScrollBar::add-line:vertical, QPlainTextEdit QScrollBar::sub-line:vertical { width: 0px; height: 0px; }"
+        "QPlainTextEdit QScrollBar:horizontal { height: 10px; background: transparent; border: none; margin: 0px; }"
+        "QPlainTextEdit QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; min-width: 20px; }"
+        "QPlainTextEdit QScrollBar::handle:horizontal:hover { background: #444444; }"
+        "QPlainTextEdit QScrollBar::add-line:horizontal, QPlainTextEdit QScrollBar::sub-line:horizontal { width: 0px; height: 0px; }"
         "QPlainTextEdit QScrollBar::add-page:vertical, QPlainTextEdit QScrollBar::sub-page:vertical, "
         "QPlainTextEdit QScrollBar::add-page:horizontal, QPlainTextEdit QScrollBar::sub-page:horizontal { background: none; }"
     );
