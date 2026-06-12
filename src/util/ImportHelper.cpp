@@ -55,7 +55,7 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
         }
 
         // 2026-07-xx 按照用户要求：中断后必须强制触发刷新，使已处理的数据在 UI 上可见
-        CategoryRepo::saveImmediately();
+        // 采用 semantic 通知，MetadataManager::notifyUI(FullRebuild) 会自动处理相关逻辑
         MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
 
         ToolTipOverlay::instance()->showText(QCursor::pos(), "导入已中断，进度已保留", 2000, QColor("#FF8C00"));
