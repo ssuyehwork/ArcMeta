@@ -20,7 +20,7 @@ SearchHistoryPanel::SearchHistoryPanel(QWidget* parent)
         "#SearchHistoryPanel {"
         "  background-color: #252526;"
         "  border: 1px solid #444444;"
-        "  border-radius: 8px;"
+        "  border-radius: 6px;"
         "}"
     );
 

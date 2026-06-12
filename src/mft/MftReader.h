@@ -12,8 +12,33 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
 #include <windows.h>
 #include <winioctl.h>
+
+#if defined(__MINGW32__) || defined(__MINGW64__)
+typedef USN_RECORD USN_RECORD_V2;
+typedef USN_JOURNAL_DATA USN_JOURNAL_DATA_V0;
+typedef MFT_ENUM_DATA MFT_ENUM_DATA_V0;
+typedef READ_USN_JOURNAL_DATA READ_USN_JOURNAL_DATA_V0;
+struct USN_RECORD_COMMON_HEADER {
+    DWORD RecordLength;
+    WORD  MajorVersion;
+    WORD  MinorVersion;
+};
+struct USN_RECORD_V3 {
+    DWORD RecordLength;
+    WORD  MajorVersion;
+    WORD  MinorVersion;
+    FILE_ID_128 FileReferenceNumber;
+    FILE_ID_128 ParentFileReferenceNumber;
+    USN   Usn;
+    LARGE_INTEGER TimeStamp;
+    DWORD Reason;
+};
+#endif
 #include <QIcon>
 #include <QHash>
 #include "ScchCache.h"

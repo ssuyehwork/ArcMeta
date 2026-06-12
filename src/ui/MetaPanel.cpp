@@ -242,80 +242,6 @@ int FlowLayout::doLayout(const QRect &rect, bool testOnly) const {
     return y + lineHeight - rect.y() + bottom;
 }
 
-// --- StarRatingWidget ---
-StarRatingWidget::StarRatingWidget(QWidget* parent) : QWidget(parent) { setFixedSize(5 * 18 + 4 * 1, 20); setCursor(Qt::PointingHandCursor); }
-void StarRatingWidget::setRating(int rating) { m_rating = rating; update(); }
-void StarRatingWidget::paintEvent(QPaintEvent*) {
-    QPainter painter(this); painter.setRenderHint(QPainter::Antialiasing); 
-    int starSize = 18; int spacing = 1;
-    QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(starSize, starSize), QColor("#EF9F27"));
-    QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(starSize, starSize), QColor("#444444"));
-    for (int i = 0; i < 5; ++i) { QRect r(i * (starSize + spacing), (height() - starSize) / 2, starSize, starSize); painter.drawPixmap(r, (i < m_rating) ? filledStar : emptyStar); }
-}
-void StarRatingWidget::mousePressEvent(QMouseEvent* e) {
-    e->accept();
-    int x = e->pos().x();
-    int starSize = 18;
-    int spacing = 1;
-    int index = x / (starSize + spacing);
-    if (index >= 0 && index < 5) {
-        int newRating = index + 1;
-        if (newRating == m_rating) newRating = 0;
-        setRating(newRating);
-        emit ratingChanged(newRating);
-    }
-}
-
-// --- ColorPickerWidget ---
-
-// 新增：统一管理几何参数，避免散落的魔法数字
-namespace {
-    constexpr int kDotDiameter = 14;
-    constexpr int kDotSpacing  = 4;
-    constexpr int kSidePadding = 5;
-    constexpr int kDotCell = kDotDiameter + kDotSpacing; // 18
-
-    int colorPickerWidth(int count) {
-        return kSidePadding * 2 + count * kDotDiameter + (count - 1) * kDotSpacing;
-    }
-}
-
-ColorPickerWidget::ColorPickerWidget(QWidget* parent) : QWidget(parent) {
-    m_colors = {{L"", QColor("#888780")}, {L"red", QColor("#E24B4A")}, {L"orange", QColor("#EF9F27")}, {L"yellow", QColor("#FECF0E")}, {L"green", QColor("#639922")}, {L"cyan", QColor("#1D9E75")}, {L"blue", QColor("#378ADD")}, {L"purple", QColor("#7F77DD")}, {L"gray", QColor("#5F5E5A")}};
-    setFixedSize(colorPickerWidth((int)m_colors.size()), kDotDiameter + 4); // 高度 = 直径 + 上下各2px描边余量
-    setCursor(Qt::PointingHandCursor);
-}
-
-void ColorPickerWidget::setColor(const std::wstring& name) {
-    m_currentColor = name;
-    if (m_colors.size() > 9) m_colors.resize(9);
-    if (!name.empty() && name[0] == L'#') {
-        QColor customColor(QString::fromStdWString(name));
-        if (customColor.isValid()) m_colors.push_back({name, customColor});
-    }
-    setFixedSize(colorPickerWidth((int)m_colors.size()), kDotDiameter + 4);
-    update();
-}
-
-void ColorPickerWidget::paintEvent(QPaintEvent*) {
-    QPainter p(this); p.setRenderHint(QPainter::Antialiasing);
-    for (int i = 0; i < (int)m_colors.size(); ++i) {
-        QRect r(kSidePadding + i * kDotCell, 2, kDotDiameter, kDotDiameter);
-        if (m_colors[i].name == m_currentColor) { p.setPen(QPen(QColor("#FFFFFF"), 1.5)); p.drawEllipse(r.adjusted(-2, -2, 2, 2)); }
-        p.setPen(Qt::NoPen); p.setBrush(m_colors[i].value); p.drawEllipse(r);
-    }
-}
-
-void ColorPickerWidget::mousePressEvent(QMouseEvent* e) {
-    e->accept();
-    int x = e->pos().x() - kSidePadding;
-    if (x < 0) return;
-    int index = x / kDotCell;
-    if (index >= 0 && index < (int)m_colors.size()) {
-        setColor(m_colors[index].name);
-        emit colorChanged(m_colors[index].name);
-    }
-}
 
 // --- MetaPanel ---
 MetaPanel::MetaPanel(QWidget* parent) : QFrame(parent) {
@@ -336,7 +262,7 @@ void MetaPanel::initUi() {
     QWidget* header = new QWidget(this); header->setObjectName("ContainerHeader"); header->setFixedHeight(32);
     header->setStyleSheet("QWidget#ContainerHeader { background-color: #252526; border-bottom: 1px solid #333; }");
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 0, 0, 0); // 物理对齐：右侧边距 0px
+    headerLayout->setContentsMargins(15, 0, 10, 0); // 恢复右侧边距
     headerLayout->setSpacing(5);
     QLabel* iconLabel = new QLabel(header); iconLabel->setPixmap(UiHelper::getIcon("all_data", QColor("#4a90e2"), 18).pixmap(18, 18)); headerLayout->addWidget(iconLabel);
     QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 12px; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);
@@ -354,8 +280,8 @@ void MetaPanel::initUi() {
     m_containerLayout = new QVBoxLayout(m_container); 
     // 2026-06-xx 工业级强制约束：启用 SetMinAndMaxSize，强制容器高度随子控件动态撑开
     m_containerLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
-    // 2026-06-xx 物理对齐：右侧边距设为 0，使滚动条贴合容器边缘
-    m_containerLayout->setContentsMargins(10, 10, 0, 10); 
+    // 2026-06-xx 修复：恢复右侧间距，确保容器两侧对称
+    m_containerLayout->setContentsMargins(10, 10, 10, 10); 
     // 2026-06-01 修正：降低全局间距，消除视觉断层 (原 12px -> 现 8px)
     m_containerLayout->setSpacing(8);
     
@@ -391,18 +317,6 @@ void MetaPanel::initUi() {
     m_linkEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #4a90e2; font-weight: normal; }");
     m_linkEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_linkEdit);
-
-    m_ratingWidget = new StarRatingWidget(m_container);
-    connect(m_ratingWidget, &StarRatingWidget::ratingChanged, this, [this](int r) {
-        emit metadataChanged(r, L"__NO_CHANGE__");
-    });
-    m_containerLayout->addWidget(createSectionBox("star", "星级评定", m_ratingWidget));
-
-    m_colorPicker = new ColorPickerWidget(m_container);
-    connect(m_colorPicker, &ColorPickerWidget::colorChanged, this, [this](const std::wstring& c) {
-        emit metadataChanged(-1, c);
-    });
-    m_containerLayout->addWidget(createSectionBox("palette", "颜色标记", m_colorPicker));
 
     // [Section 5] 标签区域 (Tag Flow)
     m_tagBox = new QWidget(m_container);
@@ -543,8 +457,8 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
             m_container->setFixedWidth(viewportW);
         }
         
-        // 2. 内部控件可用宽度（视口宽 - 左边距 10px - 右边距 0px）
-        int maxW = viewportW - 10; 
+        // 2. 内部控件可用宽度（视口宽 - 左边距 10px - 右边距 10px）
+        int maxW = viewportW - 20; 
         if (maxW > 50) {
             auto syncWidthAndHeight = [maxW](ElasticEdit* edit) {
                 if (edit && edit->width() != maxW) {
@@ -638,12 +552,12 @@ void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s,
 }
 
 void MetaPanel::setRating(int rating) { 
-    // 2026-06-xx 物理修复：设置函数仅更新 UI，严禁发出信号导致“点击即录入”傻逼逻辑
-    if (m_ratingWidget) m_ratingWidget->setRating(rating);
+    // 2026-06-xx 物理移除
+    Q_UNUSED(rating);
 }
 void MetaPanel::setColor(const std::wstring& color) { 
-    // 2026-06-xx 物理修复：设置函数仅更新 UI，严禁发出信号导致“点击即录入”傻逼逻辑
-    if (m_colorPicker) m_colorPicker->setColor(color);
+    // 2026-06-xx 物理移除
+    Q_UNUSED(color);
 }
 void MetaPanel::setPinned(bool pinned) { 
     Q_UNUSED(pinned); 

@@ -494,6 +494,16 @@ void MainWindow::initUi() {
         }
         // 关键修复：通知 ContentPanel 局部更新该路径的数据
         m_contentPanel->updateItemMetadata(path);
+
+        // 2026-06-xx 物理修复：实时刷新联动
+        // 当元数据（如颜色、备注、标签）发生变更时，如果当前选中项正好是该文件，
+        // 则强制触发元数据面板刷新，确保 UI 与后台数据物理一致。
+        auto indexes = m_contentPanel->getSelectedIndexes();
+        if (!indexes.isEmpty()) {
+            if (indexes.first().data(PathRole).toString() == path) {
+                emit m_contentPanel->selectionChanged({path});
+            }
+        }
     });
 
     // 9b. 侧边栏刷新防抖
@@ -873,7 +883,7 @@ void MainWindow::setupSplitters() {
     m_navBarLayout->addWidget(m_btnForward);
     m_navBarLayout->addWidget(m_btnUp);
     m_navBarLayout->addWidget(m_addressBar, 1);
-    m_navBarLayout->addSpacing(5); // 2026-06-xx 物理间距：确保地址栏与右侧搜索框保持 5px 间距
+    // 2026-06-xx 物理对标：移除额外 addSpacing，直接依赖 layout 默认 5px spacing 达到精准 5 像素间距
     m_navBarLayout->addWidget(m_searchContainer);
 
     // --- 3. 主体核心容器 (物理还原：10px 全局边距包裹，确保边缘resize可用) ---
@@ -1291,14 +1301,9 @@ void MainWindow::changeEvent(QEvent* event) {
             m_btnMax->setIcon(UiHelper::getIcon(iconKey, QColor("#EEEEEE")));
         }
 
-        // 2026-06-xx 按照用户要求：顶部始终为 0，确保容器顶部边框作为物理切割线
+        // 2026-06-xx 按照用户要求：顶部始终为 0，确保容器顶部边框作为物理切割线；无论是否最大化，左右和底部的 5px (kEdgeMargin) 留白均需保留
         if (m_bodyLayout) {
-            if (isMaximized()) {
-                m_bodyLayout->setContentsMargins(0, 0, 0, 0);
-            } else {
-                // 必须与 setupSplitters() 中的初始值保持一致，禁止改为0，否则筛选面板/元数据面板右侧会贴边截断
-                m_bodyLayout->setContentsMargins(kEdgeMargin, 0, kEdgeMargin, kEdgeMargin);
-            }
+            m_bodyLayout->setContentsMargins(kEdgeMargin, 0, kEdgeMargin, kEdgeMargin);
         }
     }
     QMainWindow::changeEvent(event);

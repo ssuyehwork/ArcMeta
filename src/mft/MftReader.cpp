@@ -20,6 +20,7 @@
 #include <QFuture>
 #include <QFileIconProvider>
 #include <QFileInfo>
+#include <queue>
 
 #ifdef min
 #undef min

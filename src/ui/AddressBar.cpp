@@ -107,7 +107,7 @@ void AddressBar::saveToHistory(const QString& path) {
     QStringList history = AppConfig::instance().getValue("AddressBar/History").toStringList();
     history.removeAll(path);
     history.prepend(path);
-    while (history.size() > 15) history.removeLast();
+    while (history.size() > 10) history.removeLast();
     AppConfig::instance().setValue("AddressBar/History", history);
 }
 

@@ -6,8 +6,7 @@
 #include <string>
 #include <atomic>
 #include <memory>
-#include <windows.h>
-#include <winioctl.h>
+#include "MftReader.h"
 #include <QString>
 #include <QThread>
 #include <QList>
