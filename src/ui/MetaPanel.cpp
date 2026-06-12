@@ -267,10 +267,25 @@ void StarRatingWidget::mousePressEvent(QMouseEvent* e) {
 }
 
 // --- ColorPickerWidget ---
+
+// 新增：统一管理几何参数，避免散落的魔法数字
+namespace {
+    constexpr int kDotDiameter = 14;
+    constexpr int kDotSpacing  = 4;
+    constexpr int kSidePadding = 5;
+    constexpr int kDotCell = kDotDiameter + kDotSpacing; // 18
+
+    int colorPickerWidth(int count) {
+        return kSidePadding * 2 + count * kDotDiameter + (count - 1) * kDotSpacing;
+    }
+}
+
 ColorPickerWidget::ColorPickerWidget(QWidget* parent) : QWidget(parent) {
     m_colors = {{L"", QColor("#888780")}, {L"red", QColor("#E24B4A")}, {L"orange", QColor("#EF9F27")}, {L"yellow", QColor("#FECF0E")}, {L"green", QColor("#639922")}, {L"cyan", QColor("#1D9E75")}, {L"blue", QColor("#378ADD")}, {L"purple", QColor("#7F77DD")}, {L"gray", QColor("#5F5E5A")}};
-    setFixedSize((int)m_colors.size() * 24, 24); setCursor(Qt::PointingHandCursor);
+    setFixedSize(colorPickerWidth((int)m_colors.size()), kDotDiameter + 4); // 高度 = 直径 + 上下各2px描边余量
+    setCursor(Qt::PointingHandCursor);
 }
+
 void ColorPickerWidget::setColor(const std::wstring& name) {
     m_currentColor = name;
     if (m_colors.size() > 9) m_colors.resize(9);
@@ -278,21 +293,24 @@ void ColorPickerWidget::setColor(const std::wstring& name) {
         QColor customColor(QString::fromStdWString(name));
         if (customColor.isValid()) m_colors.push_back({name, customColor});
     }
-    setFixedSize((int)m_colors.size() * 24, 24);
+    setFixedSize(colorPickerWidth((int)m_colors.size()), kDotDiameter + 4);
     update();
 }
+
 void ColorPickerWidget::paintEvent(QPaintEvent*) {
     QPainter p(this); p.setRenderHint(QPainter::Antialiasing);
     for (int i = 0; i < (int)m_colors.size(); ++i) {
-        QRect r(i * 24 + 3, 3, 18, 18);
+        QRect r(kSidePadding + i * kDotCell, 2, kDotDiameter, kDotDiameter);
         if (m_colors[i].name == m_currentColor) { p.setPen(QPen(QColor("#FFFFFF"), 1.5)); p.drawEllipse(r.adjusted(-2, -2, 2, 2)); }
         p.setPen(Qt::NoPen); p.setBrush(m_colors[i].value); p.drawEllipse(r);
     }
 }
+
 void ColorPickerWidget::mousePressEvent(QMouseEvent* e) {
     e->accept();
-    int x = e->pos().x();
-    int index = x / 24;
+    int x = e->pos().x() - kSidePadding;
+    if (x < 0) return;
+    int index = x / kDotCell;
     if (index >= 0 && index < (int)m_colors.size()) {
         setColor(m_colors[index].name);
         emit colorChanged(m_colors[index].name);
