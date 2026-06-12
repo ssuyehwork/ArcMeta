@@ -79,7 +79,7 @@ void BreadcrumbBar::addLevel(const QString& name, const QString& fullPath) {
     btn->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 6px; "
         "              color: #EEEEEE; font-size: 12px; padding: 0 6px; }"
-        "QPushButton:hover { background: rgba(255, 255, 255, 0.1); }"
+        "QPushButton:hover { background: #3E3E42; }"
         "QPushButton:pressed { background: rgba(255, 255, 255, 0.2); }"
     );
 

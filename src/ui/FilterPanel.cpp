@@ -265,7 +265,7 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     m_btnClearAll->installEventFilter(this);
     m_btnClearAll->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
-        "QPushButton:hover { background: rgba(255, 255, 255, 0.1); }");
+        "QPushButton:hover { background: #3E3E42; }");
     connect(m_btnClearAll, &QPushButton::clicked, this, &FilterPanel::clearAllFilters);
 
     topL->addWidget(title);
@@ -376,7 +376,7 @@ void FilterPanel::rebuildGroups() {
             btnCustomColor->setIcon(UiHelper::getIcon("paint_bucket", btnIconColor, 14));
             btnCustomColor->setStyleSheet(
                 "QPushButton { background: transparent; border: none; }"
-                "QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }"
+                "QPushButton:hover { background: #3E3E42; border-radius: 4px; }"
             );
             hdrLayout->addWidget(btnCustomColor); 
             

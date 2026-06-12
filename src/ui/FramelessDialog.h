@@ -11,6 +11,8 @@
 #include <QPoint>
 #include <QMouseEvent>
 #include <QKeyEvent>
+#include <QFileSystemModel>
+#include <QTreeView>
 
 namespace ArcMeta {
 
@@ -73,6 +75,34 @@ class FramelessConfirmDialog : public FramelessDialog {
     Q_OBJECT
 public:
     explicit FramelessConfirmDialog(const QString& title, const QString& message, QWidget* parent = nullptr);
+};
+
+/**
+ * @brief 无边框颜色选择对话框
+ */
+class FramelessColorDialog : public FramelessDialog {
+    Q_OBJECT
+public:
+    explicit FramelessColorDialog(const QColor& initial, QWidget* parent = nullptr);
+    QColor selectedColor() const { return m_selectedColor; }
+
+private:
+    QColor m_selectedColor;
+};
+
+/**
+ * @brief 无边框文件夹选择对话框
+ */
+class FramelessFolderDialog : public FramelessDialog {
+    Q_OBJECT
+public:
+    explicit FramelessFolderDialog(const QString& title, QWidget* parent = nullptr);
+    QString selectedPath() const { return m_selectedPath; }
+
+private:
+    QTreeView* m_treeView;
+    QFileSystemModel* m_model;
+    QString m_selectedPath;
 };
 
 } // namespace ArcMeta

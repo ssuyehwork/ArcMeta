@@ -234,7 +234,7 @@ ColorPicker::ColorPicker(QWidget* parent) : QWidget(parent, Qt::Popup | Qt::Fram
     btnConfirm->setFlat(true);
     btnConfirm->setCursor(Qt::PointingHandCursor);
     btnConfirm->setIcon(UiHelper::getIcon("color_wheel", QColor("#EEEEEE"), 16));
-    btnConfirm->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 2px; }");
+    btnConfirm->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: #3E3E42; border-radius: 2px; }");
     connect(btnConfirm, &QPushButton::clicked, this, [this]() {
         // 2026-05-17 按照用户要求：携带容差值发射
         emit colorSelected(m_color, m_toleranceSlider ? m_toleranceSlider->value() : 30);
