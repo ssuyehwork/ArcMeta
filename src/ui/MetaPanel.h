@@ -78,47 +78,6 @@ private:
 };
 
 /**
- * @brief 自定义星级打分器 (20x20px stars, 4px spacing)
- */
-class StarRatingWidget : public QWidget {
-    Q_OBJECT
-public:
-    explicit StarRatingWidget(QWidget* parent = nullptr);
-    void setRating(int rating);
-    int rating() const { return m_rating; }
-signals:
-    void ratingChanged(int rating);
-protected:
-    void paintEvent(QPaintEvent* event) override;
-    void mousePressEvent(QMouseEvent* event) override;
-private:
-    int m_rating = 0;
-};
-
-/**
- * @brief 自定义颜色选择器 (18x18px dots, 6px spacing)
- */
-class ColorPickerWidget : public QWidget {
-    Q_OBJECT
-public:
-    explicit ColorPickerWidget(QWidget* parent = nullptr);
-    void setColor(const std::wstring& colorName);
-    std::wstring color() const { return m_currentColor; }
-signals:
-    void colorChanged(const std::wstring& colorName);
-protected:
-    void paintEvent(QPaintEvent* event) override;
-    void mousePressEvent(QMouseEvent* event) override;
-private:
-    std::wstring m_currentColor = L"";
-    struct ColorEntry {
-        std::wstring name;
-        QColor value;
-    };
-    std::vector<ColorEntry> m_colors;
-};
-
-/**
  * @brief ColorPill: 用于流式展示的单个颜色块 (16x16px, 4px 圆角)
  */
 class ColorPill : public QWidget {
@@ -222,9 +181,6 @@ private:
     ElasticEdit* m_linkEdit = nullptr;
     
     ElasticEdit* m_categoryEdit = nullptr;
-
-    StarRatingWidget* m_ratingWidget = nullptr;
-    ColorPickerWidget* m_colorPicker = nullptr;
 
     // 2026-06-xx 性能优化：控件复用池
     QList<TagPill*> m_tagPool;
