@@ -4,7 +4,12 @@
 #include <QPainter>
 #include <QApplication>
 #include <QMouseEvent>
+#include <QLineEdit>
+#include <QTimer>
+#include <QFile>
+#include <QFileInfo>
 #include "ContentPanel.h"
+#include "../meta/MetadataManager.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
 using namespace ArcMeta::Style;
@@ -212,17 +217,21 @@ public:
         lineEdit->setText(value);
 
         // 2026-xx-xx 按照用户要求：仅选中不含扩展名的部分
+        // 物理修复：使用 QTimer 确保在 Qt 默认 selectAll 之后执行，防止逻辑被覆盖
         bool isFolder = (index.data(TypeRole).toString() == "folder" || index.data(TypeRole).toString() == "category");
-        if (isFolder) {
-            lineEdit->selectAll();
-        } else {
-            int lastDot = value.lastIndexOf('.');
-            if (lastDot > 0) {
-                lineEdit->setSelection(0, lastDot);
-            } else {
+        QTimer::singleShot(0, lineEdit, [lineEdit, value, isFolder]() {
+            if (!lineEdit) return;
+            if (isFolder) {
                 lineEdit->selectAll();
+            } else {
+                int lastDot = value.lastIndexOf('.');
+                if (lastDot > 0) {
+                    lineEdit->setSelection(0, lastDot);
+                } else {
+                    lineEdit->selectAll();
+                }
             }
-        }
+        });
     }
 
 private:
