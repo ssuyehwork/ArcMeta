@@ -674,11 +674,11 @@ void CategoryRepo::fullRecount() {
         }
 
         MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
-            if (!meta.isFolder && !meta.isInvalid) {
-                total++;  // includes trash
+            if (!meta.isFolder && !meta.isInvalid && !meta.isTrash) {
+                total++; // 2026-07-xx 物理对齐：总计数严禁包含回收站项目
                 
                 bool isCategorized = categorizedFids.count(meta.fileId128);
-                if (!meta.isTrash && isCategorized) {
+                if (isCategorized) {
                     categorized++;
                 }
 
@@ -879,7 +879,10 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
             // 非特殊视图下，严禁显示失效数据
             if (meta.isInvalid) return;
 
-            if (type == "all") match = true;
+            if (type == "all") {
+                if (meta.isTrash) return; // 2026-07-xx 物理隔离：全部数据视图必须排除回收站项目
+                match = true;
+            }
             else {
                 // 其他活跃视图（未标签、最近访问、未分类）必须排除回收站项
                 if (meta.isTrash) return;
