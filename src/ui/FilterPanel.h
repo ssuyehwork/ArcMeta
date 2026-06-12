@@ -7,11 +7,14 @@
 #include <QCheckBox>
 #include <QScrollArea>
 #include <QPushButton>
+#include <QLineEdit>
 #include <QMap>
 #include <QStringList>
 #include "MetaPanel.h" // 引用 FlowLayout
 
 namespace ArcMeta {
+
+class SearchHistoryPanel;
 
 // ─── 物理色块控件 (ColorBlock) ─────────────────────────────────────
 class ColorBlock : public QWidget {
@@ -70,6 +73,13 @@ struct FilterState {
     QStringList  createDates;   // "YYYY-MM-DD"
     QStringList  modifyDates;
     int          colorTolerance = 30; // 2026-05-17 按照用户要求：自定义颜色相近色容差（0~100），由 ColorPicker 准确度滑条驱动
+
+    // 2026-xx-xx 按照用户要求：新增 5 个主选项的快速文本过滤字段
+    QString colorFilterText;
+    QString tagFilterText;
+    QString typeFilterText;
+    QString createDateFilterText;
+    QString modifyDateFilterText;
 };
 
 /**
@@ -134,6 +144,19 @@ private:
     QWidget*      m_container       = nullptr;
     QVBoxLayout*  m_containerLayout = nullptr;
     QPushButton*  m_btnClearAll     = nullptr;
+
+    // 2026-xx-xx 新增快速输入框成员
+    QLineEdit*    m_editColor       = nullptr;
+    QLineEdit*    m_editTag         = nullptr;
+    QLineEdit*    m_editType        = nullptr;
+    QLineEdit*    m_editCreateDate  = nullptr;
+    QLineEdit*    m_editModifyDate  = nullptr;
+
+    SearchHistoryPanel* m_historyPanel = nullptr;
+    
+    // 辅助方法：处理历史记录
+    void saveFilterHistory(const QString& key, const QString& text);
+    QStringList getFilterHistory(const QString& key) const;
 };
 
 } // namespace ArcMeta
