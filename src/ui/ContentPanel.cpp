@@ -2739,11 +2739,19 @@ void GridItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, 
         model->setData(index, value, Qt::EditRole);
 
         // 2026-xx-xx 按照用户要求：重命名后触发 selectionChanged 信号，以驱动元数据面板刷新
-        QAbstractItemView* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
+        // 由于 setModelData 没有 option 参数，通过 parent 获取 View
+        QAbstractItemView* view = qobject_cast<QAbstractItemView*>(editor->parentWidget()->parentWidget());
         if (view) {
-            // 通过获取 parent (ContentPanel) 并手动触发其选中改变逻辑
-            ContentPanel* panel = qobject_cast<ContentPanel*>(view->parent()->parent());
-            if (panel) panel->onSelectionChanged();
+            // 向上寻找 ContentPanel 以调用 onSelectionChanged
+            QWidget* p = view->parentWidget();
+            while (p) {
+                ContentPanel* cp = qobject_cast<ContentPanel*>(p);
+                if (cp) {
+                    cp->onSelectionChanged();
+                    break;
+                }
+                p = p->parentWidget();
+            }
         }
     }  
 } 

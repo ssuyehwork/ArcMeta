@@ -141,7 +141,8 @@ public:
             model->setData(index, value, Qt::EditRole);
 
             // 2026-xx-xx 按照用户要求：触发刷新信号
-            QAbstractItemView* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(editor->parent()->parent()));
+            // 物理修复：editor->parent() 返回 QObject*，需先转为 QWidget*
+            QAbstractItemView* view = qobject_cast<QAbstractItemView*>(editor->parentWidget()->parentWidget());
             if (view) {
                 // 对于 TreeView，editor 的 parent 是 viewport，viewport 的 parent 是 TreeView
                 // 向上寻找 ContentPanel 以调用 onSelectionChanged
