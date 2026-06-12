@@ -324,7 +324,8 @@ void MetaPanel::initUi() {
     QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 12px; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
     QPushButton* closeBtn = new QPushButton(header); closeBtn->setIcon(UiHelper::getIcon("close", QColor("#FFFFFF"), 14)); closeBtn->setFixedSize(24, 24); closeBtn->setCursor(Qt::PointingHandCursor);
-    closeBtn->setStyleSheet("QPushButton { background-color: #E81123; border: none; border-radius: 4px; } QPushButton:hover { background-color: #F1707A; } QPushButton:pressed { background-color: #A50000; }");
+    // 物理对标 MainWindow：关闭按钮悬停不使用淡化色（蒙版感），直接保持红色
+    closeBtn->setStyleSheet("QPushButton { background-color: #E81123; border: none; border-radius: 4px; } QPushButton:hover { background-color: #E81123; } QPushButton:pressed { background-color: #A50000; }");
     connect(closeBtn, &QPushButton::clicked, [this]() { this->hide(); });
     headerLayout->addWidget(closeBtn, 0, Qt::AlignVCenter);
     m_mainLayout->addWidget(header);

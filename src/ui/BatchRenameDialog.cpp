@@ -125,7 +125,7 @@ void BatchRenameDialog::initContent() {
         if (primary) {
             btn->setStyleSheet("QPushButton { background: #444; color: #EEE; border: 1px solid #666; border-radius: 6px; } QPushButton:hover { background: #555; }");
         } else {
-            btn->setStyleSheet("QPushButton { background: transparent; color: #BBB; border: 1px solid #444; border-radius: 6px; } QPushButton:hover { background: rgba(255,255,255,0.05); }");
+            btn->setStyleSheet("QPushButton { background: transparent; color: #BBB; border: 1px solid #444; border-radius: 6px; } QPushButton:hover { background: #3E3E42; }");
         }
     };
 
