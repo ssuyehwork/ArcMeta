@@ -859,7 +859,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("链接", gl);
 
         QButtonGroup* linkGroup = new QButtonGroup(g);
-        linkGroup->setExclusive(true);
+        linkGroup->setExclusive(false); // 改为非排他性，允许取消勾选
         for (auto p : {FilterState::Yes, FilterState::No}) {
             QString label = (p == FilterState::Yes ? "有链接" : "无链接");
 
@@ -876,13 +876,19 @@ void FilterPanel::rebuildGroups() {
             gl->addWidget(row);
 
             if (m_filter.linkPresence == p) cb->setChecked(true);
-            connect(cb, &QCheckBox::toggled, this, [this, p, linkGroup](bool on) {
-                if (!on) {
-                    bool anyChecked = false;
-                    for (QAbstractButton* b : linkGroup->buttons()) { if (b->isChecked()) { anyChecked = true; break; } }
-                    if (!anyChecked) m_filter.linkPresence = FilterState::All;
-                } else {
+            connect(cb, &QCheckBox::toggled, this, [this, p, linkGroup, cb](bool on) {
+                if (on) {
+                    // 手动实现单选逻辑：勾选当前项时，取消同组其他项
+                    for (QAbstractButton* b : linkGroup->buttons()) {
+                        if (b != cb && b->isChecked()) {
+                            b->blockSignals(true);
+                            b->setChecked(false);
+                            b->blockSignals(false);
+                        }
+                    }
                     m_filter.linkPresence = p;
+                } else {
+                    m_filter.linkPresence = FilterState::All;
                 }
                 emit filterChanged(m_filter);
             });
@@ -897,7 +903,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("备注", gl);
 
         QButtonGroup* noteGroup = new QButtonGroup(g);
-        noteGroup->setExclusive(true);
+        noteGroup->setExclusive(false); // 改为非排他性
         for (auto p : {FilterState::Yes, FilterState::No}) {
             QString label = (p == FilterState::Yes ? "有备注" : "无备注");
 
@@ -914,13 +920,18 @@ void FilterPanel::rebuildGroups() {
             gl->addWidget(row);
 
             if (m_filter.notePresence == p) cb->setChecked(true);
-            connect(cb, &QCheckBox::toggled, this, [this, p, noteGroup](bool on) {
-                if (!on) {
-                    bool anyChecked = false;
-                    for (QAbstractButton* b : noteGroup->buttons()) { if (b->isChecked()) { anyChecked = true; break; } }
-                    if (!anyChecked) m_filter.notePresence = FilterState::All;
-                } else {
+            connect(cb, &QCheckBox::toggled, this, [this, p, noteGroup, cb](bool on) {
+                if (on) {
+                    for (QAbstractButton* b : noteGroup->buttons()) {
+                        if (b != cb && b->isChecked()) {
+                            b->blockSignals(true);
+                            b->setChecked(false);
+                            b->blockSignals(false);
+                        }
+                    }
                     m_filter.notePresence = p;
+                } else {
+                    m_filter.notePresence = FilterState::All;
                 }
                 emit filterChanged(m_filter);
             });
@@ -1002,7 +1013,7 @@ void FilterPanel::rebuildGroups() {
             {FilterState::Square, "方形"}, {FilterState::Ratio169, "16:9"}
         };
         QButtonGroup* ratioGroup = new QButtonGroup(g);
-        ratioGroup->setExclusive(true);
+        ratioGroup->setExclusive(false); // 改为非排他性
         for (const auto& pair : ratios) {
             StyledCheckBox* cb = new StyledCheckBox();
             ClickableRow* row = new ClickableRow(cb);
@@ -1017,13 +1028,18 @@ void FilterPanel::rebuildGroups() {
             gl->addWidget(row);
 
             if (m_filter.ratio == pair.first) cb->setChecked(true);
-            connect(cb, &QCheckBox::toggled, this, [this, pair, ratioGroup](bool on) {
-                if (!on) {
-                    bool anyChecked = false;
-                    for (QAbstractButton* b : ratioGroup->buttons()) { if (b->isChecked()) { anyChecked = true; break; } }
-                    if (!anyChecked) m_filter.ratio = FilterState::AspectAny;
-                } else {
+            connect(cb, &QCheckBox::toggled, this, [this, pair, ratioGroup, cb](bool on) {
+                if (on) {
+                    for (QAbstractButton* b : ratioGroup->buttons()) {
+                        if (b != cb && b->isChecked()) {
+                            b->blockSignals(true);
+                            b->setChecked(false);
+                            b->blockSignals(false);
+                        }
+                    }
                     m_filter.ratio = pair.first;
+                } else {
+                    m_filter.ratio = FilterState::AspectAny;
                 }
                 emit filterChanged(m_filter);
             });
