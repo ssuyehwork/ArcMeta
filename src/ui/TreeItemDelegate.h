@@ -32,14 +32,14 @@ public:
 
         if (selected || hover) {
             painter->save();
-            // 2026-06-xx 按照用户最新要求：消除“坑坑洼洼”感，改用全行贯穿式直角高亮，填满整个区域
+            // 物理恢复：带有圆角和边距的高亮效果
             QColor bg = selected ? QColor("#378ADD") : QColor("#2a2d2e");
             if (selected) bg.setAlphaF(0.15f); 
 
-            // 物理修复：直接使用 option.rect，不进行 adjust 缩进，不使用圆角，确保色块无缝对接
+            // 物理修复：使用 2px 缩进并开启 3px 圆角，恢复柔和视觉感
             painter->setBrush(bg);
             painter->setPen(Qt::NoPen);
-            painter->drawRect(option.rect);
+            painter->drawRoundedRect(option.rect.adjusted(2, 2, -2, -2), 3, 3);
             painter->restore();
         }
 

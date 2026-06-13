@@ -68,7 +68,10 @@ void NavPanel::deferredInit() {
     // 3. 磁盘列表 (逻辑异步预备：先填充基础文字路径)
     const auto drives = QDir::drives();
     for (const QFileInfo& drive : drives) {
-        QString driveName = drive.absolutePath();
+        // 物理对齐：路径规范化，确保 C:/ 转换为 C:\ 以符合 Windows API 预期
+        QString driveName = QDir::toNativeSeparators(drive.absolutePath());
+        if (!driveName.endsWith('\\')) driveName += '\\';
+
         QStandardItem* driveItem = new QStandardItem(driveName);
         driveItem->setData(driveName, Qt::UserRole + 1);
         driveItem->appendRow(new QStandardItem("Loading..."));

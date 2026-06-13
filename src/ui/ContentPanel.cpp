@@ -1988,7 +1988,10 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         std::vector<ItemRecord> driveRecords;
         for (const QFileInfo& drive : drives) { 
             ItemRecord r;
-            r.path = QDir::toNativeSeparators(drive.absolutePath());
+            // 物理对齐：盘符路径标准化，确保以反斜杠结尾以符合 Windows 惯例
+            QString dPath = QDir::toNativeSeparators(drive.absolutePath());
+            if (!dPath.endsWith('\\')) dPath += '\\';
+            r.path = dPath;
             r.isDir = true;
             driveRecords.push_back(r);
         } 
@@ -1996,6 +1999,9 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         // 2026-05-29 物理对齐：在加载“此电脑”后显式触发一次排序，确保置顶硬盘排在首位
         m_proxyModel->sort(0, Qt::AscendingOrder);
         m_isLoading = false;
+
+        // 物理修复：必须强制应用筛选，否则 ProxyModel 内部 rowCount 可能维持旧值 0
+        applyFilters();
         recalculateAndEmitStats();
         return; 
     } 
@@ -2371,9 +2377,9 @@ void ContentPanel::loadPaths(const QStringList& paths) {
  
 void ContentPanel::recalculateAndEmitStats() {
     const std::vector<ItemRecord>& records = m_model->allRecords();
-    if (records.empty()) {
-        // 2026-06-xx 物理修复：严禁向筛选面板发送“全空”统计信号，
-        // 防止在加载大目录或执行搜索切换的中间态强行清空筛选器界面。
+    // 2026-07-xx 物理纠偏：如果是加载“此电脑”（虚拟路径），允许发送空统计以重置筛选面板
+    if (records.empty() && m_currentPath != "computer://") {
+        // 2026-06-xx 物理修复：严禁在扫描中间态向筛选面板发送“全空”信号以防抖动
         return;
     }
 

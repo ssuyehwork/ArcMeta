@@ -87,6 +87,7 @@ public:
     void setData(const QColor& color, float ratio);
 signals:
     void colorSelected(const QColor& color);
+    void requestGlobalFilter(const QColor& color);
     void requestSetAsPrimary(const QColor& color);
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -130,6 +131,11 @@ signals:
      * @brief 根据颜色搜索项目
      */
     void searchByColor(const QColor& color);
+
+    /**
+     * @brief 更新元数据信号
+     */
+    void requestMetadataUpdate(const QString& key, const QVariant& value);
 
 public:
     /**

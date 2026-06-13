@@ -141,70 +141,12 @@ void ColorPill::leaveEvent(QEvent*) {
 }
 
 void ColorPill::mousePressEvent(QMouseEvent* event) {
-    if (event->button() == Qt::RightButton) {
-        emit colorSelected(m_color);
-        return;
-    }
-
     if (event->button() == Qt::LeftButton) {
-        QMenu menu(this);
-        UiHelper::applyMenuStyle(&menu);
-
-        // 顶部搜索框模拟
-        QWidgetAction* searchAction = new QWidgetAction(&menu);
-        QWidget* searchWidget = new QWidget(&menu);
-        QHBoxLayout* searchLayout = new QHBoxLayout(searchWidget);
-        searchLayout->setContentsMargins(8, 4, 8, 4);
-        searchLayout->setSpacing(8);
-        QLabel* searchIcon = new QLabel(searchWidget);
-        searchIcon->setPixmap(UiHelper::getIcon("search", QColor("#888888"), 14).pixmap(14, 14));
-        searchLayout->addWidget(searchIcon);
-        QLineEdit* searchEdit = new QLineEdit(searchWidget);
-        searchEdit->setPlaceholderText("搜索...");
-        searchEdit->setStyleSheet("QLineEdit { background: transparent; border: none; color: #EEEEEE; font-size: 12px; }");
-        searchLayout->addWidget(searchEdit);
-        searchAction->setDefaultWidget(searchWidget);
-        menu.addAction(searchAction);
-
-        QColor color = m_color;
-        menu.addAction("搜索相似颜色的项目", [this, color]() {
-            emit colorSelected(color);
-        });
-        menu.addSeparator();
-
-        // 各种颜色格式复制
-        QString hex = color.name().toUpper();
-        menu.addAction(QString("复制 %1").arg(hex), [hex]() { QApplication::clipboard()->setText(hex); });
-
-        QString rgb = QString("rgb(%1, %2, %3)").arg(color.red()).arg(color.green()).arg(color.blue());
-        menu.addAction(QString("复制 %1").arg(rgb), [rgb]() { QApplication::clipboard()->setText(rgb); });
-
-        QString rgba = QString("rgba(%1, %2, %3, 1)").arg(color.red()).arg(color.green()).arg(color.blue());
-        menu.addAction(QString("复制 %1").arg(rgba), [rgba]() { QApplication::clipboard()->setText(rgba); });
-
-        QString hsl = QString("hsl(%1, %2%, %3%)").arg(color.hslHue() < 0 ? 0 : color.hslHue()).arg(qRound(color.hslSaturationF() * 100)).arg(qRound(color.lightnessF() * 100));
-        menu.addAction(QString("复制 %1").arg(hsl), [hsl]() { QApplication::clipboard()->setText(hsl); });
-
-        QString hsv = QString("hsv(%1, %2%, %3%)").arg(color.hsvHue() < 0 ? 0 : color.hsvHue()).arg(qRound(color.hsvSaturationF() * 100)).arg(qRound(color.valueF() * 100));
-        menu.addAction(QString("复制 %1").arg(hsv), [hsv]() { QApplication::clipboard()->setText(hsv); });
-
-        // HWB (Hue, Whiteness, Blackness) - Qt 不直接支持，需要计算
-        double r = color.redF(), g = color.greenF(), b = color.blueF();
-        double w = qMin(r, qMin(g, b));
-        double v = qMax(r, qMax(g, b));
-        double bk = 1.0 - v;
-        QString hwb = QString("hwb(%1, %2%, %3%)").arg(color.hsvHue() < 0 ? 0 : color.hsvHue()).arg(qRound(w * 100)).arg(qRound(bk * 100));
-        menu.addAction(QString("复制 %1").arg(hwb), [hwb]() { QApplication::clipboard()->setText(hwb); });
-
-        QString cmyk = QString("cmyk(%1%, %2%, %3%, %4%)").arg(qRound(color.cyanF() * 100)).arg(qRound(color.magentaF() * 100)).arg(qRound(color.yellowF() * 100)).arg(qRound(color.blackF() * 100));
-        menu.addAction(QString("复制 %1").arg(cmyk), [cmyk]() { QApplication::clipboard()->setText(cmyk); });
-
-        menu.addSeparator();
-        menu.addAction("设置为自定义主色", [this, color]() {
-            emit requestSetAsPrimary(color);
-        });
-
-        menu.exec(event->globalPosition().toPoint());
+        // 物理还原：左键触发弹出图二所示的悬浮面板
+        emit colorSelected(m_color);
+    } else if (event->button() == Qt::RightButton) {
+        // 物理修复：右键触发全局筛选相近色
+        emit requestGlobalFilter(m_color);
     }
     QWidget::mousePressEvent(event);
 }
@@ -695,14 +637,34 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
         } else {
             pill = new ColorPill(entry.first, entry.second, m_paletteBox);
             pill->setStyleSheet("background: transparent; border: none;");
-            connect(pill, &ColorPill::colorSelected, [this](const QColor& c){ emit searchByColor(c); });
+
+            // 物理对账：左键 -> 弹出 ColorPicker；右键 -> 触发筛选
+            connect(pill, &ColorPill::colorSelected, this, [this](const QColor& c) {
+                // 弹出 ColorPicker
+                ColorPicker* picker = new ColorPicker(this);
+                picker->setAttribute(Qt::WA_DeleteOnClose);
+
+                // 物理对齐：在色块下方弹出
+                QPoint pos = QCursor::pos();
+                picker->move(pos);
+
+                connect(picker, &ColorPicker::colorSelected, this, [this](const QColor& newColor) {
+                    // 物理修复：发射正式的元数据变更信号，驱动全局同步
+                    emit metadataChanged(-1, newColor.name().toStdWString());
+                    this->setAsPrimaryColor(newColor);
+                });
+                picker->show();
+            });
+            connect(pill, &ColorPill::requestGlobalFilter, this, [this](const QColor& c) {
+                emit searchByColor(c);
+            });
             connect(pill, &ColorPill::requestSetAsPrimary, this, &MetaPanel::setAsPrimaryColor);
         }
         pill->show();
         m_paletteFlowLayout->addWidget(pill);
     }
 
-    // 2026-07-xx 物理修复：在色块添加完毕后显式调用重排，防止初始化阶段堆叠在左上角
+    // 2026-07-xx 物理修复：在色块添加完毕后显式调用重排
     m_paletteFlowLayout->invalidate();
     m_paletteBox->update();
     
