@@ -379,14 +379,16 @@ public:
         QList<FinalBucket> merged;
         for (const auto& b : buckets) {
             bool found = false;
-            int h1, s1, l1; b.avgColor.getHsl(&h1, &s1, &l1);
             for (auto& m : merged) {
-                int h2, s2, l2; m.avgColor.getHsl(&h2, &s2, &l2);
-                int dh = std::abs(h1 - h2); if (dh > 180) dh = 360 - dh;
-                int ds = std::abs(s1 - s2), dl = std::abs(l1 - l2);
-                if (dh < 15 && ds < 20 && dl < 15) { // 智能平衡阈值
+                // 2026-07-xx 按照 Plan-28：引入 DeltaE 感知合并，收紧合并阈值，确保灰阶细节
+                double de = calculateDeltaE(b.avgColor, m.avgColor);
+                if (de < 10.0) { // 感知极度相近则强制合并
                     int total = m.count + b.count;
-                    m.avgColor = QColor((m.avgColor.red()*m.count + b.avgColor.red()*b.count)/total, (m.avgColor.green()*m.count + b.avgColor.green()*b.count)/total, (m.avgColor.blue()*m.count + b.avgColor.blue()*b.count)/total);
+                    m.avgColor = QColor(
+                        (int)(m.avgColor.red() * m.count + b.avgColor.red() * b.count) / total,
+                        (int)(m.avgColor.green() * m.count + b.avgColor.green() * b.count) / total,
+                        (int)(m.avgColor.blue() * m.count + b.avgColor.blue() * b.count) / total
+                    );
                     m.rankWeight += b.rankWeight; m.count = total;
                     found = true; break;
                 }
@@ -396,11 +398,10 @@ public:
 
         // 智能选色：动态显著性排序 + 空间排斥
         QVector<QPair<QColor, float>> result;
-        struct Candidate { QColor color; double score; int count; int h, s, l; };
+        struct Candidate { QColor color; double score; int count; };
         QList<Candidate> candidates;
         for (const auto& m : merged) {
-            int h, s, l; m.avgColor.getHsl(&h, &s, &l);
-            candidates.append({ m.avgColor, m.rankWeight, m.count, h, s, l });
+            candidates.append({ m.avgColor, m.rankWeight, m.count });
         }
 
         while (result.size() < 10 && !candidates.isEmpty()) {
@@ -408,15 +409,17 @@ public:
             for (int i = 0; i < candidates.size(); ++i) {
                 const auto& c = candidates[i];
                 double score = c.score;
+                
+                // 2026-07-xx 按照 Plan-28：引入增强型 DeltaE 空间排斥逻辑，杜绝相似色霸屏，对齐 Eagle 精度
                 for (const auto& r : result) {
-                    int h2, s2, l2; r.first.getHsl(&h2, &s2, &l2);
-                    if (c.s < 25 && s2 < 25) { if (std::abs(c.l - l2) < 40) score *= 0.1; }
-                    else {
-                        int dh = std::abs(c.h - h2); if (dh > 180) dh = 360 - dh;
-                        if (dh < 40) score *= (dh / 40.0);
-                        if (dh < 20 && std::abs(c.l - l2) < 30) score *= 0.2;
+                    double de = calculateDeltaE(c.color, r.first);
+                    if (de < 20.0) {
+                        score *= 0.01; // 极度排斥感知相近色
+                    } else if (de < 45.0) {
+                        score *= (de / 45.0) * 0.5; // 中度排斥
                     }
                 }
+                
                 if (score > maxScore) { maxScore = score; bestIdx = i; }
             }
             if (bestIdx != -1 && maxScore > 0) {
