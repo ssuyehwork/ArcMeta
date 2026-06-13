@@ -10,6 +10,8 @@
 #include <QScreen>
 #include <QPainter>
 #include <QLinearGradient>
+#include <QComboBox>
+#include <QButtonGroup>
 
 namespace ArcMeta {
 
@@ -476,6 +478,7 @@ void FilterPanel::rebuildGroups() {
 
     auto colorMap = s_colorMap();
 
+
     // ── 1. 评级 ──────────────────────────────────────────────
     if (!m_ratingCounts.isEmpty()) {
         QVBoxLayout* gl = nullptr;
@@ -495,6 +498,7 @@ void FilterPanel::rebuildGroups() {
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
 
+
     // ── 2. 颜色标记 (Plan-18: 矩阵重构版) ─────────────────────────
     if (true) { // 始终显示颜色区域以保持 UI 稳定
         QVBoxLayout* gl = nullptr;
@@ -503,7 +507,7 @@ void FilterPanel::rebuildGroups() {
 
         // 新增快速输入框
         m_editColor = new QLineEdit(g);
-        m_editColor->setPlaceholderText("例： 红 / #E24B4A / 无色标)");
+        m_editColor->setPlaceholderText("例： 红 / #E24B4A / 无色标");
         m_editColor->setText(m_filter.colorFilterText);
         m_editColor->setObjectName("FilterSearchEdit");
         m_editColor->setStyleSheet(
@@ -846,6 +850,161 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             });
         }
+        m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
+    }
+
+    // ── 7. 链接 & 备注 & 大小 & 比例 (Plan-30, Plan-29) ─────────────────────────
+    {
+        QVBoxLayout* gl = nullptr;
+        QWidget* g = buildGroup("其他属性", gl);
+
+        // 0.1 链接筛选 (Yes, No)
+        QHBoxLayout* hl = new QHBoxLayout();
+        hl->setContentsMargins(8, 4, 8, 4);
+        QLabel* lblLink = new QLabel("链接:", g);
+        lblLink->setStyleSheet("color: #AAAAAA; font-size: 11px;");
+        hl->addWidget(lblLink);
+        
+        QButtonGroup* linkGroup = new QButtonGroup(g);
+        linkGroup->setExclusive(true);
+        for (auto p : {FilterState::Yes, FilterState::No}) {
+            QString label = (p == FilterState::Yes ? "有" : "无");
+            QCheckBox* cb = new QCheckBox(label, g);
+            cb->setStyleSheet("QCheckBox { color: #CCCCCC; font-size: 11px; } QCheckBox::indicator { width: 14px; height: 14px; }");
+            if (m_filter.linkPresence == p) cb->setChecked(true);
+            connect(cb, &QCheckBox::toggled, this, [this, p, linkGroup](bool on) {
+                // 如果取消勾选，则恢复为 All
+                if (!on) {
+                    bool anyChecked = false;
+                    for (QAbstractButton* b : linkGroup->buttons()) { if (b->isChecked()) { anyChecked = true; break; } }
+                    if (!anyChecked) m_filter.linkPresence = FilterState::All;
+                } else {
+                    m_filter.linkPresence = p;
+                }
+                emit filterChanged(m_filter);
+            });
+            linkGroup->addButton(cb);
+            hl->addWidget(cb);
+        }
+        hl->addStretch();
+        gl->addLayout(hl);
+
+        // 0.2 备注筛选
+        QHBoxLayout* hn = new QHBoxLayout();
+        hn->setContentsMargins(8, 4, 8, 4);
+        QLabel* lblNote = new QLabel("备注:", g);
+        lblNote->setStyleSheet("color: #AAAAAA; font-size: 11px;");
+        hn->addWidget(lblNote);
+        
+        QButtonGroup* noteGroup = new QButtonGroup(g);
+        noteGroup->setExclusive(true);
+        for (auto p : {FilterState::Yes, FilterState::No}) {
+            QString label = (p == FilterState::Yes ? "有" : "无");
+            QCheckBox* cb = new QCheckBox(label, g);
+            cb->setStyleSheet("QCheckBox { color: #CCCCCC; font-size: 11px; } QCheckBox::indicator { width: 14px; height: 14px; }");
+            if (m_filter.notePresence == p) cb->setChecked(true);
+            connect(cb, &QCheckBox::toggled, this, [this, p, noteGroup](bool on) {
+                if (!on) {
+                    bool anyChecked = false;
+                    for (QAbstractButton* b : noteGroup->buttons()) { if (b->isChecked()) { anyChecked = true; break; } }
+                    if (!anyChecked) m_filter.notePresence = FilterState::All;
+                } else {
+                    m_filter.notePresence = p;
+                }
+                emit filterChanged(m_filter);
+            });
+            noteGroup->addButton(cb);
+            hn->addWidget(cb);
+        }
+        hn->addStretch();
+        gl->addLayout(hn);
+
+        // 0.3 文件大小筛选
+        QLabel* lblSize = new QLabel("文件大小:", g);
+        lblSize->setStyleSheet("color: #AAAAAA; font-size: 11px; margin-left: 8px; margin-top: 4px;");
+        gl->addWidget(lblSize);
+
+        QHBoxLayout* hs = new QHBoxLayout();
+        hs->setContentsMargins(8, 4, 8, 4);
+        QLineEdit* minEdit = new QLineEdit(g);
+        QLineEdit* maxEdit = new QLineEdit(g);
+        QComboBox* unitCombo = new QComboBox(g);
+        unitCombo->addItems({"KB", "MB", "GB"});
+        unitCombo->setCurrentIndex(1); // Default MB
+
+        auto sizeEditStyle = "QLineEdit { background: #2D2D2D; color: #EEE; border: 1px solid #444; border-radius: 4px; padding: 2px; font-size: 11px; }";
+        minEdit->setStyleSheet(sizeEditStyle);
+        maxEdit->setStyleSheet(sizeEditStyle);
+        minEdit->setPlaceholderText("最小");
+        maxEdit->setPlaceholderText("最大");
+
+        // 优化 QComboBox 样式 (修复背景色及下拉框颜色)
+        unitCombo->setStyleSheet(
+            "QComboBox { background: #2D2D2D; color: #EEEEEE; border: 1px solid #444444; border-radius: 4px; font-size: 11px; padding: 1px 2px; }"
+            "QComboBox::drop-down { border: none; width: 20px; }"
+            "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #AAAAAA; margin-right: 4px; }"
+            "QComboBox QAbstractItemView { background-color: #252526; color: #EEEEEE; selection-background-color: #3E3E42; border: 1px solid #444444; outline: none; }"
+        );
+
+        hs->addWidget(minEdit);
+        QLabel* sep = new QLabel("-", g); sep->setStyleSheet("color: #AAA;"); hs->addWidget(sep);
+        hs->addWidget(maxEdit);
+        hs->addWidget(unitCombo);
+        gl->addLayout(hs);
+
+        auto updateSizeFilter = [this, minEdit, maxEdit, unitCombo]() {
+            auto toBytes = [](const QString& txt, const QString& unit) -> long long {
+                if (txt.isEmpty()) return -1;
+                bool ok;
+                double val = txt.toDouble(&ok);
+                if (!ok) return -1;
+                long long factor = 1024;
+                if (unit == "MB") factor = 1024 * 1024;
+                else if (unit == "GB") factor = 1024 * 1024 * 1024;
+                return (long long)(val * factor);
+            };
+            m_filter.minSize = toBytes(minEdit->text(), unitCombo->currentText());
+            m_filter.maxSize = toBytes(maxEdit->text(), unitCombo->currentText());
+            emit filterChanged(m_filter);
+        };
+
+        connect(minEdit, &QLineEdit::editingFinished, this, updateSizeFilter);
+        connect(maxEdit, &QLineEdit::editingFinished, this, updateSizeFilter);
+        connect(unitCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [updateSizeFilter](int){ updateSizeFilter(); });
+
+        // 0.4 图像比例筛选
+        QLabel* lblRatio = new QLabel("图像比例:", g);
+        lblRatio->setStyleSheet("color: #AAAAAA; font-size: 11px; margin-left: 8px; margin-top: 4px;");
+        gl->addWidget(lblRatio);
+
+        QHBoxLayout* hr = new QHBoxLayout();
+        hr->setContentsMargins(8, 4, 8, 4);
+        static const QList<QPair<FilterState::AspectRatio, QString>> ratios = {
+            {FilterState::Horizontal, "横图"}, {FilterState::Vertical, "竖图"},
+            {FilterState::Square, "方形"}, {FilterState::Ratio169, "16:9"}
+        };
+        QButtonGroup* ratioGroup = new QButtonGroup(g);
+        ratioGroup->setExclusive(true);
+        for (const auto& pair : ratios) {
+            QCheckBox* cb = new QCheckBox(pair.second, g);
+            cb->setStyleSheet("QCheckBox { color: #CCCCCC; font-size: 11px; } QCheckBox::indicator { width: 14px; height: 14px; }");
+            if (m_filter.ratio == pair.first) cb->setChecked(true);
+            connect(cb, &QCheckBox::toggled, this, [this, pair, ratioGroup](bool on) {
+                if (!on) {
+                    bool anyChecked = false;
+                    for (QAbstractButton* b : ratioGroup->buttons()) { if (b->isChecked()) { anyChecked = true; break; } }
+                    if (!anyChecked) m_filter.ratio = FilterState::AspectAny;
+                } else {
+                    m_filter.ratio = pair.first;
+                }
+                emit filterChanged(m_filter);
+            });
+            ratioGroup->addButton(cb);
+            hr->addWidget(cb);
+        }
+        hr->addStretch();
+        gl->addLayout(hr);
+
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
 }

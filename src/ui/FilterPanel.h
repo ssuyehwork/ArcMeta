@@ -74,6 +74,17 @@ struct FilterState {
     QStringList  modifyDates;
     int          colorTolerance = 30; // 2026-05-17 按照用户要求：自定义颜色相近色容差（0~100），由 ColorPicker 准确度滑条驱动
 
+    // 2026-07-xx 按照 Plan-30：链接、备注及大小筛选
+    enum Presence { All, Yes, No };
+    Presence linkPresence = All;
+    Presence notePresence = All;
+
+    enum AspectRatio { AspectAny, Horizontal, Vertical, Square, Ratio169 };
+    AspectRatio ratio = AspectAny;
+
+    long long minSize = -1; // 字节单位，-1 表示不限制
+    long long maxSize = -1;
+
     // 2026-xx-xx 按照用户要求：新增 5 个主选项的快速文本过滤字段
     QString colorFilterText;
     QString tagFilterText;
