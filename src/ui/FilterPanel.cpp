@@ -10,8 +10,8 @@
 #include <QScreen>
 #include <QPainter>
 #include <QLinearGradient>
-#include <QRadioButton>
 #include <QComboBox>
+#include <QButtonGroup>
 
 namespace ArcMeta {
 
@@ -858,22 +858,33 @@ void FilterPanel::rebuildGroups() {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("其他属性", gl);
 
-        // 0.1 链接筛选 (All, Yes, No)
+        // 0.1 链接筛选 (Yes, No)
         QHBoxLayout* hl = new QHBoxLayout();
         hl->setContentsMargins(8, 4, 8, 4);
         QLabel* lblLink = new QLabel("链接:", g);
         lblLink->setStyleSheet("color: #AAAAAA; font-size: 11px;");
         hl->addWidget(lblLink);
 
-        for (auto p : {FilterState::All, FilterState::Yes, FilterState::No}) {
-            QString label = (p == FilterState::All ? "全部" : (p == FilterState::Yes ? "有" : "无"));
-            QRadioButton* rb = new QRadioButton(label, g);
-            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
-            if (m_filter.linkPresence == p) rb->setChecked(true);
-            connect(rb, &QRadioButton::toggled, this, [this, p](bool on) {
-                if (on) { m_filter.linkPresence = p; emit filterChanged(m_filter); }
+        QButtonGroup* linkGroup = new QButtonGroup(g);
+        linkGroup->setExclusive(true);
+        for (auto p : {FilterState::Yes, FilterState::No}) {
+            QString label = (p == FilterState::Yes ? "有" : "无");
+            QCheckBox* cb = new QCheckBox(label, g);
+            cb->setStyleSheet("QCheckBox { color: #CCCCCC; font-size: 11px; } QCheckBox::indicator { width: 14px; height: 14px; }");
+            if (m_filter.linkPresence == p) cb->setChecked(true);
+            connect(cb, &QCheckBox::toggled, this, [this, p, linkGroup](bool on) {
+                // 如果取消勾选，则恢复为 All
+                if (!on) {
+                    bool anyChecked = false;
+                    for (QAbstractButton* b : linkGroup->buttons()) { if (b->isChecked()) { anyChecked = true; break; } }
+                    if (!anyChecked) m_filter.linkPresence = FilterState::All;
+                } else {
+                    m_filter.linkPresence = p;
+                }
+                emit filterChanged(m_filter);
             });
-            hl->addWidget(rb);
+            linkGroup->addButton(cb);
+            hl->addWidget(cb);
         }
         hl->addStretch();
         gl->addLayout(hl);
@@ -885,15 +896,25 @@ void FilterPanel::rebuildGroups() {
         lblNote->setStyleSheet("color: #AAAAAA; font-size: 11px;");
         hn->addWidget(lblNote);
 
-        for (auto p : {FilterState::All, FilterState::Yes, FilterState::No}) {
-            QString label = (p == FilterState::All ? "全部" : (p == FilterState::Yes ? "有" : "无"));
-            QRadioButton* rb = new QRadioButton(label, g);
-            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
-            if (m_filter.notePresence == p) rb->setChecked(true);
-            connect(rb, &QRadioButton::toggled, this, [this, p](bool on) {
-                if (on) { m_filter.notePresence = p; emit filterChanged(m_filter); }
+        QButtonGroup* noteGroup = new QButtonGroup(g);
+        noteGroup->setExclusive(true);
+        for (auto p : {FilterState::Yes, FilterState::No}) {
+            QString label = (p == FilterState::Yes ? "有" : "无");
+            QCheckBox* cb = new QCheckBox(label, g);
+            cb->setStyleSheet("QCheckBox { color: #CCCCCC; font-size: 11px; } QCheckBox::indicator { width: 14px; height: 14px; }");
+            if (m_filter.notePresence == p) cb->setChecked(true);
+            connect(cb, &QCheckBox::toggled, this, [this, p, noteGroup](bool on) {
+                if (!on) {
+                    bool anyChecked = false;
+                    for (QAbstractButton* b : noteGroup->buttons()) { if (b->isChecked()) { anyChecked = true; break; } }
+                    if (!anyChecked) m_filter.notePresence = FilterState::All;
+                } else {
+                    m_filter.notePresence = p;
+                }
+                emit filterChanged(m_filter);
             });
-            hn->addWidget(rb);
+            noteGroup->addButton(cb);
+            hn->addWidget(cb);
         }
         hn->addStretch();
         gl->addLayout(hn);
@@ -959,17 +980,27 @@ void FilterPanel::rebuildGroups() {
         QHBoxLayout* hr = new QHBoxLayout();
         hr->setContentsMargins(8, 4, 8, 4);
         static const QList<QPair<FilterState::AspectRatio, QString>> ratios = {
-            {FilterState::AspectAny, "全部"}, {FilterState::Horizontal, "横图"},
-            {FilterState::Vertical, "竖图"}, {FilterState::Square, "方形"}, {FilterState::Ratio169, "16:9"}
+            {FilterState::Horizontal, "横图"}, {FilterState::Vertical, "竖图"},
+            {FilterState::Square, "方形"}, {FilterState::Ratio169, "16:9"}
         };
+        QButtonGroup* ratioGroup = new QButtonGroup(g);
+        ratioGroup->setExclusive(true);
         for (const auto& pair : ratios) {
-            QRadioButton* rb = new QRadioButton(pair.second, g);
-            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
-            if (m_filter.ratio == pair.first) rb->setChecked(true);
-            connect(rb, &QRadioButton::toggled, this, [this, pair](bool on) {
-                if (on) { m_filter.ratio = pair.first; emit filterChanged(m_filter); }
+            QCheckBox* cb = new QCheckBox(pair.second, g);
+            cb->setStyleSheet("QCheckBox { color: #CCCCCC; font-size: 11px; } QCheckBox::indicator { width: 14px; height: 14px; }");
+            if (m_filter.ratio == pair.first) cb->setChecked(true);
+            connect(cb, &QCheckBox::toggled, this, [this, pair, ratioGroup](bool on) {
+                if (!on) {
+                    bool anyChecked = false;
+                    for (QAbstractButton* b : ratioGroup->buttons()) { if (b->isChecked()) { anyChecked = true; break; } }
+                    if (!anyChecked) m_filter.ratio = FilterState::AspectAny;
+                } else {
+                    m_filter.ratio = pair.first;
+                }
+                emit filterChanged(m_filter);
             });
-            hr->addWidget(rb);
+            ratioGroup->addButton(cb);
+            hr->addWidget(cb);
         }
         hr->addStretch();
         gl->addLayout(hr);
