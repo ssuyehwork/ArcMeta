@@ -15,6 +15,11 @@
 #include <QFuture>
 #include <functional>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <objbase.h>
+#endif
+
 namespace ArcMeta {
 
 void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, QWidget* parent) {
@@ -63,6 +68,10 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
     });
 
     context->future = QtConcurrent::run([paths, targetCategoryId, weakProgress, context]() {
+        #ifdef Q_OS_WIN
+        CoInitializeEx(NULL, COINIT_APARTMENTTHREADED); // 赋予后台线程 Shell 调用能力
+        #endif
+
         // A. 预统计阶段
         int totalItems = 0;
         std::function<void(const QString&)> countTask = [&](const QString& p) {
@@ -188,6 +197,10 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
             ToolTipOverlay::instance()->showText(QCursor::pos(), 
                 QString("已成功导入 %1 个项目并生成镜像").arg(currentHandled), 2000, QColor("#2ecc71"));
         });
+
+        #ifdef Q_OS_WIN
+        CoUninitialize();
+        #endif
     });
 }
 

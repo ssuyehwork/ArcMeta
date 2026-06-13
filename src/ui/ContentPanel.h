@@ -292,6 +292,8 @@ private:
                                QMap<QString, int>& modifyDateCounts,
                                int& noTagCount);
 
+    double calculateFolderProgress(const QString& folderPath);
+
 public slots:
     void onSelectionChanged();
     void onCustomContextMenuRequested(const QPoint& pos);
@@ -403,6 +405,7 @@ public:
     QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override;
     bool eventFilter(QObject* obj, QEvent* event) override;
     bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) override;
+    bool helpEvent(QHelpEvent* event, QAbstractItemView* view, const QStyleOptionViewItem& option, const QModelIndex& index) override;
 
     QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
     void setEditorData(QWidget* editor, const QModelIndex& index) const override;
