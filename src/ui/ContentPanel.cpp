@@ -74,6 +74,7 @@
 #include "../core/CoreController.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"
+#include <QDirIterator>
 using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
  
@@ -594,6 +595,26 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         }
     } 
 
+    // 6. 修改日期过滤
+    if (!currentFilter.modifyDates.isEmpty() || !currentFilter.modifyDateFilterText.isEmpty()) {
+        QDate d = QDateTime::fromMSecsSinceEpoch(record.mtime).date();
+        QString dStr = d.toString("dd-MM-yyyy");
+        bool matchDate = false;
+
+        if (!currentFilter.modifyDateFilterText.isEmpty()) {
+            if (dStr.contains(currentFilter.modifyDateFilterText.trimmed())) matchDate = true;
+            if (!matchDate) return false;
+        }
+
+        if (!currentFilter.modifyDates.isEmpty()) {
+            matchDate = false;
+            for (const QString& fDate : currentFilter.modifyDates) {
+                if (fDate == dStr) { matchDate = true; break; }
+            }
+            if (!matchDate) return false;
+        }
+    }
+
     // 7. 链接过滤 (Plan-30)
     if (currentFilter.linkPresence != FilterState::All) {
         bool hasLink = !record.url.isEmpty();
@@ -625,26 +646,6 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
             return false; // 无尺寸信息不匹配任何比例筛选
         }
     }
- 
-    // 6. 修改日期过滤 
-    if (!currentFilter.modifyDates.isEmpty() || !currentFilter.modifyDateFilterText.isEmpty()) { 
-        QDate d = QDateTime::fromMSecsSinceEpoch(record.mtime).date();
-        QString dStr = d.toString("dd-MM-yyyy"); 
-        bool matchDate = false; 
-
-        if (!currentFilter.modifyDateFilterText.isEmpty()) {
-            if (dStr.contains(currentFilter.modifyDateFilterText.trimmed())) matchDate = true;
-            if (!matchDate) return false;
-        }
-
-        if (!currentFilter.modifyDates.isEmpty()) {
-            matchDate = false;
-            for (const QString& fDate : currentFilter.modifyDates) { 
-                if (fDate == dStr) { matchDate = true; break; } 
-            } 
-            if (!matchDate) return false; 
-        }
-    } 
  
     // 2026-04-12 深度修复：直接执行关键词包含检查 
     if (m_searchQuery.isEmpty()) return true; 
@@ -2469,22 +2470,17 @@ double ContentPanel::calculateFolderProgress(const QString& folderPath) {
     long totalCount = 0;
     long managedCount = 0;
 
-    // 高效递归统计
-    std::function<void(const QString&)> scan;
-    scan = [&](const QString& p) {
-        QDir dir(p);
-        QFileInfoList entries = dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot);
-        for (const auto& info : entries) {
-            totalCount++;
-            // 穿透元数据缓存判定
-            if (MetadataManager::instance().getMeta(info.absoluteFilePath().toStdWString()).hasUserOperations()) {
-                managedCount++;
-            }
-            if (info.isDir()) scan(info.absoluteFilePath());
+    // 2026-07-xx 氢氧方案优化：采用 QDirIterator 迭代器替代递归以防栈溢出
+    QDirIterator it(folderPath, QDir::AllEntries | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        totalCount++;
+        // 穿透元数据缓存判定
+        if (MetadataManager::instance().getMeta(it.filePath().toStdWString()).hasUserOperations()) {
+            managedCount++;
         }
-    };
+    }
 
-    scan(folderPath);
     return (totalCount == 0) ? 0.0 : (double)managedCount / totalCount;
 }
 
