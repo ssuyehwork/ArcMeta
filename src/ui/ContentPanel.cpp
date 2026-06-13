@@ -54,7 +54,6 @@
 #include <QThreadPool> 
 #include <QTimer> 
 #include <QPointer> 
-#include <QPointer> 
 #include <QPersistentModelIndex> 
  
  
