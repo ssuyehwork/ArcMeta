@@ -334,7 +334,10 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_scrollArea->setWidgetResizable(true);
-    m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
+    m_scrollArea->setStyleSheet(
+        "QScrollArea { border: none; background: transparent; }"
+        "QScrollBar:vertical { border-left: 1px solid #333333; }"
+    );
 
     m_container = new QWidget(m_scrollArea);
     m_container->setStyleSheet("QWidget { background: transparent; }");
@@ -507,6 +510,7 @@ void FilterPanel::rebuildGroups() {
 
         // 新增快速输入框
         m_editColor = new QLineEdit(g);
+        m_editColor->setClearButtonEnabled(true);
         m_editColor->setPlaceholderText("例： 红 / #E24B4A / 无色标");
         m_editColor->setText(m_filter.colorFilterText);
         m_editColor->setObjectName("FilterSearchEdit");
@@ -527,6 +531,12 @@ void FilterPanel::rebuildGroups() {
             m_filter.colorFilterText = m_editColor->text();
             saveFilterHistory("Color", m_filter.colorFilterText);
             emit filterChanged(m_filter);
+        });
+        connect(m_editColor, &QLineEdit::textChanged, this, [this](const QString& text) {
+            if (text.isEmpty() && !m_filter.colorFilterText.isEmpty()) {
+                m_filter.colorFilterText = "";
+                emit filterChanged(m_filter);
+            }
         });
         gl->addWidget(m_editColor);
 
@@ -678,6 +688,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("标签 / 关键字", gl);
 
         m_editTag = new QLineEdit(g);
+        m_editTag->setClearButtonEnabled(true);
         m_editTag->setPlaceholderText("例：工作");
         m_editTag->setText(m_filter.tagFilterText);
         m_editTag->setObjectName("FilterSearchEdit");
@@ -690,6 +701,12 @@ void FilterPanel::rebuildGroups() {
             m_filter.tagFilterText = m_editTag->text();
             saveFilterHistory("Tag", m_filter.tagFilterText);
             emit filterChanged(m_filter);
+        });
+        connect(m_editTag, &QLineEdit::textChanged, this, [this](const QString& text) {
+            if (text.isEmpty() && !m_filter.tagFilterText.isEmpty()) {
+                m_filter.tagFilterText = "";
+                emit filterChanged(m_filter);
+            }
         });
         gl->addWidget(m_editTag);
 
@@ -727,6 +744,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("文件类型", gl);
 
         m_editType = new QLineEdit(g);
+        m_editType->setClearButtonEnabled(true);
         m_editType->setPlaceholderText("例： png / 文件夹)...");
         m_editType->setText(m_filter.typeFilterText);
         m_editType->setObjectName("FilterSearchEdit");
@@ -739,6 +757,12 @@ void FilterPanel::rebuildGroups() {
             m_filter.typeFilterText = m_editType->text();
             saveFilterHistory("Type", m_filter.typeFilterText);
             emit filterChanged(m_filter);
+        });
+        connect(m_editType, &QLineEdit::textChanged, this, [this](const QString& text) {
+            if (text.isEmpty() && !m_filter.typeFilterText.isEmpty()) {
+                m_filter.typeFilterText = "";
+                emit filterChanged(m_filter);
+            }
         });
         gl->addWidget(m_editType);
 
@@ -787,6 +811,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("创建日期", gl);
 
         m_editCreateDate = new QLineEdit(g);
+        m_editCreateDate->setClearButtonEnabled(true);
         m_editCreateDate->setPlaceholderText("例： 2025 / 03-2025)...");
         m_editCreateDate->setText(m_filter.createDateFilterText);
         m_editCreateDate->setObjectName("FilterSearchEdit");
@@ -799,6 +824,12 @@ void FilterPanel::rebuildGroups() {
             m_filter.createDateFilterText = m_editCreateDate->text();
             saveFilterHistory("CreateDate", m_filter.createDateFilterText);
             emit filterChanged(m_filter);
+        });
+        connect(m_editCreateDate, &QLineEdit::textChanged, this, [this](const QString& text) {
+            if (text.isEmpty() && !m_filter.createDateFilterText.isEmpty()) {
+                m_filter.createDateFilterText = "";
+                emit filterChanged(m_filter);
+            }
         });
         gl->addWidget(m_editCreateDate);
 
@@ -823,6 +854,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("修改日期", gl);
 
         m_editModifyDate = new QLineEdit(g);
+        m_editModifyDate->setClearButtonEnabled(true);
         m_editModifyDate->setPlaceholderText("例： 2025 / 03-2025)...");
         m_editModifyDate->setText(m_filter.modifyDateFilterText);
         m_editModifyDate->setObjectName("FilterSearchEdit");
@@ -835,6 +867,12 @@ void FilterPanel::rebuildGroups() {
             m_filter.modifyDateFilterText = m_editModifyDate->text();
             saveFilterHistory("ModifyDate", m_filter.modifyDateFilterText);
             emit filterChanged(m_filter);
+        });
+        connect(m_editModifyDate, &QLineEdit::textChanged, this, [this](const QString& text) {
+            if (text.isEmpty() && !m_filter.modifyDateFilterText.isEmpty()) {
+                m_filter.modifyDateFilterText = "";
+                emit filterChanged(m_filter);
+            }
         });
         gl->addWidget(m_editModifyDate);
 
@@ -950,7 +988,9 @@ void FilterPanel::rebuildGroups() {
         hs->setSpacing(8); // 增加间距
         
         QLineEdit* minEdit = new QLineEdit(g);
+        minEdit->setClearButtonEnabled(true);
         QLineEdit* maxEdit = new QLineEdit(g);
+        maxEdit->setClearButtonEnabled(true);
         QComboBox* unitCombo = new QComboBox(g);
         unitCombo->addItems({"KB", "MB", "GB"});
         unitCombo->setCurrentIndex(1); // Default MB
@@ -997,7 +1037,13 @@ void FilterPanel::rebuildGroups() {
         };
 
         connect(minEdit, &QLineEdit::editingFinished, this, updateSizeFilter);
+        connect(minEdit, &QLineEdit::textChanged, this, [updateSizeFilter](const QString& text) {
+            if (text.isEmpty()) updateSizeFilter();
+        });
         connect(maxEdit, &QLineEdit::editingFinished, this, updateSizeFilter);
+        connect(maxEdit, &QLineEdit::textChanged, this, [updateSizeFilter](const QString& text) {
+            if (text.isEmpty()) updateSizeFilter();
+        });
         connect(unitCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [updateSizeFilter](int){ updateSizeFilter(); });
 
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
