@@ -477,10 +477,10 @@ void MainWindow::initUi() {
         }
     });
 
-    // 2026-06-xx 调色盘搜索联动
+    // 2026-06-xx 调色盘搜索联动：将颜色喂给筛选器，由筛选器驱动过滤
     connect(m_metaPanel, &MetaPanel::searchByColor, this, [this](const QColor& color) {
-        if (m_contentPanel) {
-            m_contentPanel->search(color.name().toUpper());
+        if (m_filterPanel) {
+            m_filterPanel->selectColor(color);
         }
     });
 

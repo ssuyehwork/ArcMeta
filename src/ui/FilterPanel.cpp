@@ -1182,5 +1182,27 @@ void FilterPanel::clearAllFilters() {
     emit filterChanged(m_filter);
 }
 
+void FilterPanel::selectColor(const QColor& color) {
+    QString hex = color.name().toUpper();
+    
+    // 1. 设置当前过滤色（单选模式）
+    m_filter.colors.clear();
+    m_filter.colors.append(hex);
+
+    // 2. 更新“最近筛选”列表（置顶、去重、上限50）
+    m_recentColors.removeAll(hex);
+    m_recentColors.prepend(hex);
+    if (m_recentColors.size() > 50) m_recentColors.removeLast();
+
+    // 3. 持久化
+    AppConfig::instance().setValue("Filter/RecentColors", m_recentColors);
+
+    // 4. 刷新 UI 表现（同步复选框与最近筛选色块）
+    rebuildGroups();
+
+    // 5. 驱动数据过滤
+    emit filterChanged(m_filter);
+}
+
 } // namespace ArcMeta
 
