@@ -24,6 +24,7 @@
 #include <QJsonObject>
 
 #include <windows.h>
+#include <objbase.h>
 #include <fileapi.h>
 #include <winbase.h>
 #include <handleapi.h>
@@ -792,6 +793,10 @@ void MetadataManager::processVisualRetryQueue() {
 
     // 异步执行，不阻塞 UI
     (void)QtConcurrent::run([this, batch]() {
+        #ifdef Q_OS_WIN
+        CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+        #endif
+
         std::vector<std::wstring> finished;
         for (const auto& path : batch) {
             QFileInfo info(QString::fromStdWString(path));
@@ -823,9 +828,12 @@ void MetadataManager::processVisualRetryQueue() {
                 }
             }
             
-            // 即使本次仍然失败，如果是因非图像原因（例如文件夹内确实没图），也视为“处理过”，从队列移除
-            // 这里我们设定：只要尝试过了，就从队列移除，除非未来有更复杂的“按错误码重试”逻辑
-            finished.push_back(path);
+            // 2026-07-xx 按照 Plan-28：重构移除策略
+            // 只有成功，或者确定不是图像文件（无法提取）时，才从队列移除
+            bool isGraphics = ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower());
+            if (ok || (!isGraphics && !info.isDir())) {
+                finished.push_back(path);
+            }
         }
 
         // 从队列中移除已处理项
@@ -839,6 +847,10 @@ void MetadataManager::processVisualRetryQueue() {
                 if (!m_visualRetryQueue.empty()) m_retryTimer->start();
             });
         }
+
+        #ifdef Q_OS_WIN
+        CoUninitialize();
+        #endif
     });
 }
 

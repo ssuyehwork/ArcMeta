@@ -60,6 +60,7 @@
  
  
 #include <windows.h> 
+#include <objbase.h>
 #include <shellapi.h> 
 #include <io.h>
 #include "../meta/MetadataManager.h" 
@@ -178,6 +179,8 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         return record.tags;
     } else if (role == ManagedRole) {
         return record.isManaged;
+    } else if (role == RegistrationProgressRole) {
+        return record.registrationProgress;
     } else if (role == CategoryIdRole) {
         return 0; 
     } else if (role == IsEmptyRole) {
@@ -194,6 +197,9 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
             m_requestedIcons.insert(path);
             QPointer<const FerrexVirtualDbModel> weakThis(this);
             (void)QtConcurrent::run([weakThis, path]() {
+                #ifdef Q_OS_WIN
+                CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+                #endif
                 QFileInfo info(path);
                 QString ext = info.suffix().toLower();
                 QIcon icon;
@@ -238,6 +244,9 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                         }
                     }
                 }, Qt::QueuedConnection);
+                #ifdef Q_OS_WIN
+                CoUninitialize();
+                #endif
             });
         }
         return UiHelper::getFileIcon(path, 128); // 占位
@@ -1139,6 +1148,7 @@ void ContentPanel::initGridView() {
         delegate->setTypeRole(TypeRole);
         delegate->setIsEmptyRole(IsEmptyRole);
         delegate->setColorRole(ColorRole);
+        delegate->setRegistrationProgressRole(RegistrationProgressRole);
         m_gridView->setItemDelegate(delegate);
     } else {
         m_gridView->setItemDelegate(new GridItemDelegate(this)); 
@@ -1998,6 +2008,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (r.isDir) {
                     QDir sub(absPath);
                     r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
+                    r.registrationProgress = panelPtr->calculateFolderProgress(absPath);
                 }
 
                 // 3. 元数据注入
@@ -2084,6 +2095,7 @@ void ContentPanel::search(const QString& query) {
                 if (r.isDir) {
                     QDir sub(p);
                     r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
+                    r.registrationProgress = weakThis->calculateFolderProgress(p);
                 } else {
                     r.suffix = QFileInfo(p).suffix().toLower();
                 }
@@ -2228,6 +2240,7 @@ void ContentPanel::loadCategory(int categoryId) {
                 if (r.isDir) {
                     QDir sub(p);
                     r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
+                    r.registrationProgress = weakThis->calculateFolderProgress(p);
                 } else {
                     r.suffix = QFileInfo(p).suffix().toLower();
                 }
@@ -2292,6 +2305,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
                 if (r.isDir) {
                     QDir sub(p);
                     r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
+                    r.registrationProgress = weakThis->calculateFolderProgress(p);
                 } else {
                     r.suffix = QFileInfo(p).suffix().toLower();
                 }
@@ -2407,6 +2421,29 @@ void ContentPanel::createNewItem(const QString& type) {
     } 
 } 
  
+double ContentPanel::calculateFolderProgress(const QString& folderPath) {
+    long totalCount = 0;
+    long managedCount = 0;
+
+    // 高效递归统计
+    std::function<void(const QString&)> scan;
+    scan = [&](const QString& p) {
+        QDir dir(p);
+        QFileInfoList entries = dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot);
+        for (const auto& info : entries) {
+            totalCount++;
+            // 穿透元数据缓存判定
+            if (MetadataManager::instance().getMeta(info.absoluteFilePath().toStdWString()).hasUserOperations()) {
+                managedCount++;
+            }
+            if (info.isDir()) scan(info.absoluteFilePath());
+        }
+    };
+
+    scan(folderPath);
+    return (totalCount == 0) ? 0.0 : (double)managedCount / totalCount;
+}
+
 void ContentPanel::updateLayersButtonState() { 
     if (!m_btnLayers) return; 
  
@@ -2481,22 +2518,39 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     painter->drawRoundedRect(m.squareRect, 8, 8); 
  
     // [内容区绘制] - 均在正方形内 
-    // 1. 状态位图标绘制 (置顶 vs. 已录入 互斥) 
+    // 1. 状态位图标绘制 (置顶 vs. 进度环 vs. 已录入 互斥) 
     // 2026-06-xx 物理修复：校准 ItemRole 作用域，确保 GridItemDelegate 编译通过 
     bool isPinned = index.data(IsLockedRole).toBool(); 
     bool isManaged = index.data(ManagedRole).toBool(); 
+    bool isDir = index.data(TypeRole).toString() == "folder";
+    double progress = index.data(RegistrationProgressRole).toDouble();
      
-    if (isPinned || isManaged) { 
-        QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16); 
-        if (isPinned) { 
-            // 置顶优先 
-            QIcon pinIcon = UiHelper::getIcon("pin_vertical", BrandOrange, 16); 
-            pinIcon.paint(painter, statusRect); 
-        } else { 
-            // 已录入但未置顶，显示绿对勾 
-            QIcon checkIcon = UiHelper::getIcon("check_circle", SuccessGreen, 16); 
-            checkIcon.paint(painter, statusRect); 
-        } 
+    QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16);
+    if (isPinned) { 
+        // 置顶优先 
+        QIcon pinIcon = UiHelper::getIcon("pin_vertical", BrandOrange, 16); 
+        pinIcon.paint(painter, statusRect); 
+    } else if (isDir && progress >= 0.0 && progress < 1.0) {
+        // --- 绘制进度环 (开箱即用代码) --- 
+        painter->save(); 
+        painter->setRenderHint(QPainter::Antialiasing); 
+         
+        // 1. 底环 
+        painter->setPen(QPen(QColor(60, 60, 60, 180), 2)); 
+        painter->drawEllipse(statusRect.adjusted(1, 1, -1, -1)); 
+         
+        // 2. 进度弧 (品牌蓝 #3498db) 
+        QPen pPen(QColor("#3498db"), 2); 
+        pPen.setCapStyle(Qt::RoundCap); 
+        painter->setPen(pPen); 
+         
+        int spanAngle = -qRound(progress * 360 * 16); // 逆时针计算 
+        painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
+        painter->restore(); 
+    } else if (isManaged || progress >= 1.0) { 
+        // 已录入但未置顶，显示绿对勾 
+        QIcon checkIcon = UiHelper::getIcon("check_circle", SuccessGreen, 16); 
+        checkIcon.paint(painter, statusRect); 
     } 
  
     // 2. 扩展名角标 
@@ -2667,6 +2721,22 @@ bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) {
     return QStyledItemDelegate::eventFilter(obj, event); 
 } 
  
+bool GridItemDelegate::helpEvent(QHelpEvent* event, QAbstractItemView* view, 
+                                const QStyleOptionViewItem& option, const QModelIndex& index) {
+    GridMetrics m = calculateMetrics(option);
+    QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16);
+
+    if (statusRect.contains(event->pos())) {
+        double p = index.data(RegistrationProgressRole).toDouble();
+        if (p >= 0.0) {
+            ToolTipOverlay::instance()->showText(event->globalPos(), 
+                QString("登记进度: %1%").arg(qRound(p * 100)));
+            return true;
+        }
+    }
+    return QStyledItemDelegate::helpEvent(event, view, option, index);
+}
+
 bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) { 
     if (event->type() == QEvent::MouseButtonPress) { 
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 子类转型歧义 

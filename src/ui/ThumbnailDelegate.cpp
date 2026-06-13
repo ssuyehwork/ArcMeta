@@ -13,6 +13,7 @@
 #include <QAbstractItemView>
 #include <QFile>
 #include "UiHelper.h"
+#include "ToolTipOverlay.h"
 
 namespace ArcMeta {
 
@@ -26,6 +27,7 @@ void ThumbnailDelegate::setManagedRole(int role) { m_managedRole = role; }
 void ThumbnailDelegate::setTypeRole(int role) { m_typeRole = role; }
 void ThumbnailDelegate::setIsEmptyRole(int role) { m_isEmptyRole = role; }
 void ThumbnailDelegate::setColorRole(int role) { m_colorRole = role; }
+void ThumbnailDelegate::setRegistrationProgressRole(int role) { m_registrationProgressRole = role; }
 
 ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptionViewItem& option) const {
     Metrics m;
@@ -130,17 +132,35 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     painter->drawRoundedRect(m.cardRect, 6, 6);
     painter->restore();
 
-    // [新增] 状态位图标绘制 (置顶 vs. 已录入 互斥)
+    // [新增] 状态位图标绘制 (置顶 vs. 进度环 vs. 已录入 互斥)
     if (m_pinnedRole != -1 && m_managedRole != -1) {
         bool isPinned = index.data(m_pinnedRole).toBool();
         bool isManaged = index.data(m_managedRole).toBool();
-        if (isPinned || isManaged) {
-            QRect statusRect(m.cardRect.right() - 22, m.cardRect.top() + 8, 16, 16);
-            if (isPinned) {
-                UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, statusRect);
-            } else {
-                UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, statusRect);
-            }
+        bool isDir = index.data(m_typeRole).toString() == "folder";
+        double progress = (m_registrationProgressRole != -1) ? index.data(m_registrationProgressRole).toDouble() : -1.0;
+
+        QRect statusRect(m.cardRect.right() - 22, m.cardRect.top() + 8, 16, 16);
+        if (isPinned) {
+            UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, statusRect);
+        } else if (isDir && progress >= 0.0 && progress < 1.0) {
+            // --- 绘制进度环 (开箱即用代码) --- 
+            painter->save(); 
+            painter->setRenderHint(QPainter::Antialiasing); 
+             
+            // 1. 底环 
+            painter->setPen(QPen(QColor(60, 60, 60, 180), 2)); 
+            painter->drawEllipse(statusRect.adjusted(1, 1, -1, -1)); 
+             
+            // 2. 进度弧 (品牌蓝 #3498db) 
+            QPen pPen(QColor("#3498db"), 2); 
+            pPen.setCapStyle(Qt::RoundCap); 
+            painter->setPen(pPen); 
+             
+            int spanAngle = -qRound(progress * 360 * 16); // 逆时针计算 
+            painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
+            painter->restore(); 
+        } else if (isManaged || progress >= 1.0) {
+            UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, statusRect);
         }
     }
 
@@ -382,6 +402,22 @@ bool ThumbnailDelegate::eventFilter(QObject* obj, QEvent* event) {
     } 
     return QStyledItemDelegate::eventFilter(obj, event); 
 } 
+
+bool ThumbnailDelegate::helpEvent(QHelpEvent* event, QAbstractItemView* view, 
+                                const QStyleOptionViewItem& option, const QModelIndex& index) {
+    Metrics m = calculateMetrics(option);
+    QRect statusRect(m.cardRect.right() - 22, m.cardRect.top() + 8, 16, 16);
+
+    if (statusRect.contains(event->pos())) {
+        double p = (m_registrationProgressRole != -1) ? index.data(m_registrationProgressRole).toDouble() : -1.0;
+        if (p >= 0.0) {
+            ToolTipOverlay::instance()->showText(event->globalPos(), 
+                QString("登记进度: %1%").arg(qRound(p * 100)));
+            return true;
+        }
+    }
+    return QStyledItemDelegate::helpEvent(event, view, option, index);
+}
 
 bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) {
     if (m_ratingRole != -1 && event->type() == QEvent::MouseButtonPress) {

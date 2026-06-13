@@ -348,9 +348,13 @@ public:
                 double vibrancy = sat * (1.0 - std::abs(lig - 0.5) * 2.0);
                 double weight = 0.2 + 10.0 * std::pow(vibrancy, 2.0);
 
-                // 极白/极黑不做过滤，但权重设低
-                if ((lig > 0.97 && sat < 0.05) || (lig < 0.03)) {
-                    weight = 0.01; 
+                // 2026-07-xx 按照 Plan-28：感知显著性加权模型优化
+                if (lig > 0.95 && sat < 0.05) {
+                    // 强力惩罚近似白色背景
+                    weight = 0.001;
+                } else if (lig < 0.1) {
+                    // 暗部提权：黑色赋予基础对比权重
+                    weight = 0.5;
                 }
 
                 // 5-bit 量化提高色彩区分度
