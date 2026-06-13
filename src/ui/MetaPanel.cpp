@@ -1,4 +1,5 @@
 #include "MetaPanel.h"
+#include "ColorPicker.h"
 #include "SvgIcons.h"
 #include "ToolTipOverlay.h"
 #include <QVBoxLayout>
@@ -138,26 +139,26 @@ void ColorPill::leaveEvent(QEvent*) {
     update();
 }
 
-#include "ColorPicker.h"
-
 void ColorPill::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         // 左键：弹出拾色器 (Plan-32)
-        ColorPicker* picker = new ColorPicker(this->window());
-        picker->setAttribute(Qt::WA_DeleteOnClose);
-        picker->setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
-        picker->setCurrentColor(m_color);
+        // 使用完全限定名 ::ArcMeta::ColorPicker 并改名为 pColorPicker 彻底消除 MSVC 语法识别歧义
+        ::ArcMeta::ColorPicker* pColorPicker = new ::ArcMeta::ColorPicker(this->window());
+        pColorPicker->setAttribute(Qt::WA_DeleteOnClose);
+        pColorPicker->setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
+        pColorPicker->setCurrentColor(m_color);
 
         // 视觉纠偏：色块正下方弹出
         QPoint pos = mapToGlobal(QPoint(0, height()));
-        picker->move(pos);
+        pColorPicker->move(pos);
 
-        connect(picker, &ColorPicker::colorSelected, this, [this](const QColor& c, int /*tolerance*/) {
+        // 显式通过 QOverload 匹配信号签名，解决“绑定成员函数表达式上的非法操作”错误
+        QObject::connect(pColorPicker, QOverload<const QColor&, int>::of(&::ArcMeta::ColorPicker::colorSelected), this, [this](const QColor& c, int /*tol*/) {
             // Plan-32: 绑定到面板颜色更新逻辑 (通过 requestMetadataUpdate)
             emit requestMetadataUpdate(c);
         });
 
-        picker->show();
+        pColorPicker->show();
     } else if (event->button() == Qt::RightButton) {
         // 右键：触发全局筛选 (Plan-32)
         QMenu menu(this);

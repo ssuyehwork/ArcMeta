@@ -16,6 +16,8 @@
 
 namespace ArcMeta {
 
+class ColorPicker;
+
 /**
  * @brief ElasticEdit: 弹性高度编辑框，内容自动撑开高度
  * 2026-06-xx 工业级重构：基类切换为 QTextEdit 以获得精确的像素级渲染高度反馈
