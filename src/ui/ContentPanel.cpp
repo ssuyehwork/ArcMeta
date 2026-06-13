@@ -1516,36 +1516,71 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             break; 
         } 
         case ActionExtractColor: {
+            // 2026-07-xx 按照用户要求：支持多选批量解析颜色
+            QModelIndexList selectedRows = view->selectionModel()->selectedRows();
+            if (selectedRows.isEmpty() && index.isValid()) selectedRows << index;
+
+            QStringList pathsToProcess;
+            for (const auto& selIdx : selectedRows) {
+                QString p = selIdx.data(PathRole).toString();
+                if (!p.isEmpty()) pathsToProcess << p;
+            }
+            if (pathsToProcess.isEmpty()) break;
+
             QPointer<ContentPanel> weakThis(this);
-            (void)QtConcurrent::run([weakThis, path]() {
-                auto palette = UiHelper::extractPalette(path);
-                if (palette.isEmpty()) return;
+            int total = pathsToProcess.size();
+
+            // 只有当文件数多于 5 个时才显示进度条
+            BatchProgressDialog* progress = nullptr;
+            if (total > 5) {
+                progress = new BatchProgressDialog("解析颜色", this);
+                progress->show();
+            }
+
+            (void)QtConcurrent::run([weakThis, pathsToProcess, total, progress]() {
+                // 后台线程初始化 COM 环境以支持 Shell 缩略图/颜色提取
+                CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
                 
-                // 1. 提取第一个颜色作为主色调 (用于图标着色)
-                QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                QString colorHex = dominant.name().toUpper();
-                
-                QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, colorHex, palette, dominant]() {
-                    if (weakThis) {
-                        // 2. 物理存储：全量变长色板 (主色通过 model->setData 持久化)
-                        MetadataManager::instance().setPalettes(path.toStdWString(), palette);
-                        
-                        // 3. 物理同步 UI 状态并持久化主色
-                        auto* model = weakThis->m_model;
-                        const auto& records = model->allRecords();
-                        for (size_t i = 0; i < records.size(); ++i) {
-                            if (records[i].path == path) {
-                                QModelIndex srcIdx = model->index(static_cast<int>(i), 0);
-                                // 此处 setData 会触发 MetadataManager::setColor 和缓存清理
-                                model->setData(srcIdx, colorHex, ColorRole);
-                                break;
-                            }
-                        }
-                        // 2026-xx-xx 按照用户要求：解析颜色后触发 selectionChanged 信号，以驱动元数据面板刷新
-                        weakThis->onSelectionChanged();
-                        ToolTipOverlay::instance()->showText(QCursor::pos(), "变长色板已物理提取并绑定", 1500, QColor("#2ecc71"));
+                for (int i = 0; i < total; ++i) {
+                    QString itemPath = pathsToProcess[i];
+                    auto palette = UiHelper::extractPalette(itemPath);
+
+                    if (progress) {
+                        QMetaObject::invokeMethod(progress, "updateProgress", Qt::QueuedConnection,
+                                                  Q_ARG(int, i + 1), Q_ARG(int, total), Q_ARG(QString, QFileInfo(itemPath).fileName()));
                     }
-                });
+
+                    if (!palette.isEmpty()) {
+                        QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                        QString colorHex = dominant.name().toUpper();
+
+                        QMetaObject::invokeMethod(weakThis.data(), [weakThis, itemPath, colorHex, palette]() {
+                            if (weakThis) {
+                                MetadataManager::instance().setPalettes(itemPath.toStdWString(), palette);
+
+                                auto* model = weakThis->m_model;
+                                const auto& records = model->allRecords();
+                                for (size_t j = 0; j < records.size(); ++j) {
+                                    if (records[j].path == itemPath) {
+                                        QModelIndex srcIdx = model->index(static_cast<int>(j), 0);
+                                        model->setData(srcIdx, colorHex, ColorRole);
+                                        break;
+                                    }
+                                }
+                            }
+                        }, Qt::QueuedConnection);
+                    }
+                }
+
+                QMetaObject::invokeMethod(weakThis.data(), [weakThis, progress]() {
+                    if (weakThis) {
+                        weakThis->onSelectionChanged();
+                        if (progress) progress->close();
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "批量颜色解析完成", 1500, QColor("#2ecc71"));
+                    }
+                }, Qt::QueuedConnection);
+
+                CoUninitialize();
             });
             break;
         }

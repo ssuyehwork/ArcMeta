@@ -646,6 +646,10 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
         m_paletteFlowLayout->addWidget(pill);
     }
 
+    // 2026-07-xx 物理修复：在色块添加完毕后显式调用重排，防止初始化阶段堆叠在左上角
+    m_paletteFlowLayout->invalidate();
+    m_paletteBox->update();
+
     m_adjustTimer->start();
 }
 

@@ -345,17 +345,21 @@ void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool no
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     bool changed = false;
+    bool isManaged = false;
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
         if (m_cache[nPath].isInvalid != invalid) {
             m_cache[nPath].isInvalid = invalid; 
             changed = true;
+            isManaged = m_cache[nPath].isManaged;
         }
     }
     
     if (changed) {
-        // 如果标记为失效，活跃总数减少；如果恢复，活跃总数增加
-        CategoryRepo::incrementTotalFileCount(invalid ? -1 : 1);
+        // 2026-07-xx 物理修复：仅当项已登记 (isManaged) 时，其失效状态变更才影响活跃总数
+        if (isManaged) {
+            CategoryRepo::incrementTotalFileCount(invalid ? -1 : 1);
+        }
         if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
         debouncePersist(nPath);
     }
@@ -422,6 +426,9 @@ void MetadataManager::setManaged(const std::wstring& path, bool managed, bool no
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].isManaged = managed; }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    // 2026-07-xx 逻辑校准：isManaged 是由数据库持久化驱动的标记。
+    // 如果显式设为 true，则发起一次持久化以确保入库；如果是设为 false（罕见），无需特殊持久化。
+    if (managed) debouncePersist(nPath);
 }
 
 void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify) {
@@ -558,6 +565,8 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
     fetchWinApiMetadataDirect(nPath, fid);
 
     bool changed = false;
+    bool isManaged = false;
+    bool isInvalid = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         
@@ -569,9 +578,6 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
                 qDebug() << "[Metadata] 检测到路径偏移，已从内存清理旧条目以防止重复计数:" << QString::fromStdWString(oldPath);
             }
         }
-
-        // 2026-06-xx 物理加固：确保新路径条目已激活
-        // 注意：此处必须先释放锁或在 ensureActivated 内部不重复加锁
     }
     
     ensureActivated(nPath); 
@@ -582,6 +588,8 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
             m_cache[nPath].isTrash = isTrash;
             if (isTrash && !origPath.empty()) m_cache[nPath].originalPath = origPath;
             changed = true;
+            isManaged = m_cache[nPath].isManaged;
+            isInvalid = m_cache[nPath].isInvalid;
         }
         if (!fid.empty()) m_fidToPath[fid] = nPath;
     }
@@ -589,13 +597,13 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
     if (changed) {
         // 2026-06-xx 按照用户要求：移入回收站时，必须和其他分类彻底隔离
         if (isTrash && !fid.empty()) {
-            // 将文件移入“回收站”桶位（ID -2），这会自动解除所有现有分类关联
+            // 将文件移入“回收站”桶位（ID -8），这会自动解除所有现有分类关联
             CategoryRepo::moveToTrashBatch({fid});
         }
 
         // 2026-07-xx 架构修正：移入回收站应视为从活跃池移除。
-        // 仅当项目本身非失效状态时，才执行计数同步，避免双重扣减。
-        if (!m_cache[nPath].isInvalid) {
+        // 核心红线：仅当项已登记且非失效状态时，才执行计数同步。
+        if (isManaged && !isInvalid) {
             CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
         }
 
@@ -613,8 +621,8 @@ void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
         auto it = m_cache.find(nPath);
         if (it == m_cache.end()) return;
 
-        // 2026-07-xx 按照规则同步活跃计数
-        if (it->second.isTrash != isTrash && !it->second.isInvalid) {
+        // 2026-07-xx 按照规则同步活跃计数：仅对已登记项执行
+        if (it->second.isManaged && it->second.isTrash != isTrash && !it->second.isInvalid) {
             CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
         }
 
@@ -896,8 +904,12 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
                 if (!rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
                     CategoryRepo::incrementTotalFileCount(1);
                 }
-                // 物理同步：写入数据库后，内存立即标记为已登记，驱动打勾显示
-                setManaged(nPath, true, false); 
+            }
+            // 2026-07-xx 物理同步：只要 SQL 执行成功，即确保内存标记为已登记，不再区分 isNew
+            // 注意：此处不再调用 setManaged 以避免无限递归 debouncePersist
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                m_cache[nPath].isManaged = true;
             }
         }
         sqlite3_finalize(stmt);
