@@ -98,7 +98,7 @@ Qt::ItemFlags FerrexVirtualDbModel::flags(const QModelIndex& index) const {
     Qt::ItemFlags f = Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsDragEnabled;
     // 仅允许第 0 列（名称列）且非“分类”项进行重命名
     if (index.column() == 0) {
-        if (index.row() < (int)m_allRecords.size() && !m_allRecords[index.row()].isCategory) {
+        if (index.row() < static_cast<int>(m_allRecords.size()) && !m_allRecords[index.row()].isCategory) {
             f |= Qt::ItemIsEditable;
         }
     }
@@ -106,7 +106,7 @@ Qt::ItemFlags FerrexVirtualDbModel::flags(const QModelIndex& index) const {
 }
 
 QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
-    if (!index.isValid() || index.row() >= (int)m_allRecords.size()) return QVariant();
+    if (!index.isValid() || index.row() >= static_cast<int>(m_allRecords.size())) return QVariant();
 
     const auto& record = m_allRecords[index.row()];
     QString path = record.path;
@@ -249,7 +249,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
 QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientation, int role) const {
     if (orientation == Qt::Horizontal && role == Qt::DisplayRole) {
         static const QStringList headers = {"名称", "状态", "星级", "颜色标记", "标签", "类型", "大小", "修改日期"};
-        if (section < headers.size()) return headers[section];
+        if (section < static_cast<int>(headers.size())) return headers[section];
     }
     return QVariant();
 }
@@ -276,7 +276,7 @@ QMimeData* FerrexVirtualDbModel::mimeData(const QModelIndexList& indexes) const 
 }
 
 bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& value, int role) {
-    if (!index.isValid() || index.row() >= (int)m_allRecords.size()) return false;
+    if (!index.isValid() || index.row() >= static_cast<int>(m_allRecords.size())) return false;
 
     const auto& record = m_allRecords[index.row()];
     QString path = record.path;
@@ -353,10 +353,10 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
     beginResetModel();
     m_allRecords = records;
     m_pathToIndex.clear();
-    for (int i = 0; i < (int)m_allRecords.size(); ++i) {
+    for (int i = 0; i < static_cast<int>(m_allRecords.size()); ++i) {
         m_pathToIndex[m_allRecords[i].path] = i;
     }
-    m_displayCount = (int)m_allRecords.size();
+    m_displayCount = static_cast<int>(m_allRecords.size());
     m_requestedIcons.clear();
     m_aspectRatios.clear();
     m_metaCache.clear();
@@ -368,7 +368,7 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
     auto it = m_pathToIndex.find(nPath);
     if (it != m_pathToIndex.end()) {
         int i = it->second;
-        if (i >= 0 && i < (int)m_allRecords.size()) {
+        if (i >= 0 && i < static_cast<int>(m_allRecords.size())) {
             auto meta = MetadataManager::instance().getMeta(nPath.toStdWString());
             m_allRecords[i].rating = meta.rating;
             m_allRecords[i].color = QString::fromStdWString(meta.color);
@@ -1518,17 +1518,22 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionExtractColor: {
             // 2026-07-xx 按照用户要求：支持多选批量解析颜色
             QModelIndexList selectedRows = view->selectionModel()->selectedRows();
-            if (selectedRows.isEmpty() && index.isValid()) selectedRows << index;
+            // 物理对齐：仅保留选中行中的第 0 列项，防止重复计数
+            QModelIndexList filteredRows;
+            for (const auto& selIdx : selectedRows) {
+                if (selIdx.column() == 0) filteredRows << selIdx;
+            }
+            if (filteredRows.isEmpty() && currentIndex.isValid()) filteredRows << currentIndex;
 
             QStringList pathsToProcess;
-            for (const auto& selIdx : selectedRows) {
+            for (const auto& selIdx : filteredRows) {
                 QString p = selIdx.data(PathRole).toString();
                 if (!p.isEmpty()) pathsToProcess << p;
             }
             if (pathsToProcess.isEmpty()) break;
 
             QPointer<ContentPanel> weakThis(this);
-            int total = pathsToProcess.size();
+            int total = static_cast<int>(pathsToProcess.size());
 
             // 只有当文件数多于 5 个时才显示进度条
             BatchProgressDialog* progress = nullptr;
@@ -2048,7 +2053,7 @@ void ContentPanel::search(const QString& query) {
         QStringList paths = CoreController::instance().performSearch(query);
         
         std::vector<ItemRecord> records;
-        records.reserve(paths.size());
+        records.reserve(static_cast<int>(paths.size()));
         for (const QString& p : paths) {
             if (!weakThis) return;
             if (!p.isEmpty()) {
@@ -2254,7 +2259,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, paths]() {
         std::vector<ItemRecord> records;
-        records.reserve(paths.size());
+        records.reserve(static_cast<int>(paths.size()));
         for (const QString& p : paths) {
             if (!weakThis) return;
             if (!p.isEmpty()) {

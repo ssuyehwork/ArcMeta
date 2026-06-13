@@ -531,25 +531,22 @@ std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
     }
 
     std::map<int, std::unordered_set<std::string>> catToUniqueFids;
-    // 3. 遍历内存缓存，按 FID 去重并分发到各分类桶（含向上递归）
+    // 3. 遍历内存缓存，按 FID 去重并分发到各分类桶
+    // 2026-07-xx 回滚：仅计算直接关联的 FID，取消自动向上递归汇总
     MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
-        if (meta.isManaged && !meta.isFolder && !meta.isTrash && !meta.isInvalid) {
+        // 2026-07-xx 物理对齐：只要在关联表中且非文件夹/回收站，即计入分类总数
+        if (!meta.fileId128.empty() && !meta.isFolder && !meta.isTrash && !meta.isInvalid) {
             auto it = fidToCats.find(meta.fileId128);
             if (it != fidToCats.end()) {
                 for (int catId : it->second) {
-                    // 向上递归传播计数
-                    int curr = catId;
-                    while (curr > 0) {
-                        catToUniqueFids[curr].insert(meta.fileId128);
-                        curr = catParentMap.count(curr) ? catParentMap[curr] : 0;
-                    }
+                    catToUniqueFids[catId].insert(meta.fileId128);
                 }
             }
         }
     });
 
     for (auto const& [id, fids] : catToUniqueFids) {
-        res.push_back({id, (int)fids.size()});
+        res.push_back({id, static_cast<int>(fids.size())});
     }
     return res;
 }
@@ -856,7 +853,7 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
         if (meta.fileId128.empty()) return;
         if (meta.isFolder) return;
 
-        // 特殊：失效与回收站不受 isManaged 限制，它们反映的是物理存在状态
+        // 特殊：失效与回收站反映的是物理存在状态，始终计数
         if (meta.isInvalid) {
             seenInvalid.insert(meta.fileId128);
             return;
@@ -866,23 +863,23 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
             return;
         }
 
-        // 2026-07-xx 物理红线：非失效、非回收站的活跃计数依然遵循 Managed 准则
-        if (!meta.isManaged) return;
-
+        // 2026-07-xx 回滚：系统视图计数放宽 Managed 限制，显示所有已扫描到的有效项
         seenAll.insert(meta.fileId128);
+
         if (meta.tags.isEmpty()) seenUntagged.insert(meta.fileId128);
         if (meta.atime >= now - 86400000.0) seenRecent.insert(meta.fileId128);
+
         if (categorizedFids.find(meta.fileId128) == categorizedFids.end()) {
             seenUncategorized.insert(meta.fileId128);
         }
     });
 
-    res["all"] = (int)seenAll.size();
-    res["recently_visited"] = (int)seenRecent.size();
-    res["untagged"] = (int)seenUntagged.size();
-    res["uncategorized"] = (int)seenUncategorized.size();
-    res["trash"] = (int)seenTrash.size();
-    res["invalid_data"] = (int)seenInvalid.size();
+    res["all"] = static_cast<int>(seenAll.size());
+    res["recently_visited"] = static_cast<int>(seenRecent.size());
+    res["untagged"] = static_cast<int>(seenUntagged.size());
+    res["uncategorized"] = static_cast<int>(seenUncategorized.size());
+    res["trash"] = static_cast<int>(seenTrash.size());
+    res["invalid_data"] = static_cast<int>(seenInvalid.size());
     return res;
 }
 
@@ -915,8 +912,6 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
         } else if (type == "invalid_data") {
             if (meta.isInvalid) match = true;
         } else {
-            // 2026-07-xx 物理红线：非回收站/非失效视图下，严禁显示未入库项 (isManaged 为 false)
-            if (!meta.isManaged) return;
             // 严禁显示失效数据
             if (meta.isInvalid) return;
 
