@@ -87,6 +87,8 @@ public:
     void setData(const QColor& color, float ratio);
 signals:
     void colorSelected(const QColor& color);
+    void requestGlobalFilter(const QColor& color);
+    void requestMetadataUpdate(const QColor& color);
 protected:
     void paintEvent(QPaintEvent* event) override;
     void enterEvent(QEnterEvent* event) override;
@@ -164,6 +166,7 @@ private:
     QVBoxLayout* m_containerLayout = nullptr;
     
     ElasticEdit* m_nameEdit = nullptr;
+    ColorPill* m_colorPreview = nullptr;
     QLabel* lblType = nullptr, *lblSize = nullptr;
     QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
     ElasticEdit* m_pathEdit = nullptr;

@@ -117,6 +117,7 @@ public:
     );
 
     FilterState currentFilter() const { return m_filter; }
+    void setFilterColor(const QColor& color);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;

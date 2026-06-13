@@ -1161,6 +1161,21 @@ QCheckBox* FilterPanel::addFilterRow(QVBoxLayout* layout, const QString& label, 
     return cb;
 }
 
+void FilterPanel::setFilterColor(const QColor& color) {
+    QString hex = color.name().toUpper();
+    m_filter.colors.clear();
+    m_filter.colors.append(hex);
+
+    // 同步更新 LRU
+    m_recentColors.removeAll(hex);
+    m_recentColors.prepend(hex);
+    if (m_recentColors.size() > 50) m_recentColors.removeLast();
+    AppConfig::instance().setValue("Filter/RecentColors", m_recentColors);
+
+    rebuildGroups();
+    emit filterChanged(m_filter);
+}
+
 // ─── clearAllFilters ──────────────────────────────────────────────
 void FilterPanel::clearAllFilters() {
     // 2026-06-xx 物理修复：重置所有筛选内存状态

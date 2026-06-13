@@ -138,19 +138,41 @@ void ColorPill::leaveEvent(QEvent*) {
     update();
 }
 
-void ColorPill::mousePressEvent(QMouseEvent* event) {
-    QMenu menu(this);
-    UiHelper::applyMenuStyle(&menu);
-    QColor color = m_color;
+#include "ColorPicker.h"
 
-    menu.addAction("搜索相似颜色的项目", [this, color]() {
-        emit colorSelected(color);
-    });
-    menu.addSeparator();
-    QString hex = color.name().toUpper();
-    menu.addAction(QString("复制 %1").arg(hex), [hex]() { QApplication::clipboard()->setText(hex); });
-    
-    menu.exec(event->globalPosition().toPoint());
+void ColorPill::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        // 左键：弹出拾色器 (Plan-32)
+        ColorPicker* picker = new ColorPicker(this->window());
+        picker->setAttribute(Qt::WA_DeleteOnClose);
+        picker->setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
+        picker->setCurrentColor(m_color);
+
+        // 视觉纠偏：色块正下方弹出
+        QPoint pos = mapToGlobal(QPoint(0, height()));
+        picker->move(pos);
+
+        connect(picker, &ColorPicker::colorSelected, this, [this](const QColor& c, int /*tolerance*/) {
+            // Plan-32: 绑定到面板颜色更新逻辑 (通过 requestMetadataUpdate)
+            emit requestMetadataUpdate(c);
+        });
+
+        picker->show();
+    } else if (event->button() == Qt::RightButton) {
+        // 右键：触发全局筛选 (Plan-32)
+        QMenu menu(this);
+        UiHelper::applyMenuStyle(&menu);
+        QColor color = m_color;
+
+        menu.addAction("锁定为此颜色筛选", [this, color]() {
+            emit requestGlobalFilter(color);
+        });
+        menu.addSeparator();
+        QString hex = color.name().toUpper();
+        menu.addAction(QString("复制 HEX: " + hex), [hex]() { QApplication::clipboard()->setText(hex); });
+
+        menu.exec(event->globalPosition().toPoint());
+    }
     QWidget::mousePressEvent(event);
 }
 
@@ -266,6 +288,17 @@ void MetaPanel::initUi() {
     headerLayout->setSpacing(5);
     QLabel* iconLabel = new QLabel(header); iconLabel->setPixmap(UiHelper::getIcon("all_data", QColor("#4a90e2"), 18).pixmap(18, 18)); headerLayout->addWidget(iconLabel);
     QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 12px; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);
+
+    // 2026-07-xx Plan-32: 在标题栏增加颜色预览色块
+    m_colorPreview = new ColorPill(Qt::transparent, 1.0, header);
+    m_colorPreview->setFixedSize(14, 14);
+    m_colorPreview->hide();
+    connect(m_colorPreview, &ColorPill::requestGlobalFilter, this, &MetaPanel::searchByColor);
+    connect(m_colorPreview, &ColorPill::requestMetadataUpdate, this, [this](const QColor& c) {
+        emit metadataChanged(-1, c.name().toUpper().toStdWString());
+    });
+    headerLayout->addWidget(m_colorPreview);
+
     headerLayout->addStretch();
     QPushButton* closeBtn = new QPushButton(header); closeBtn->setIcon(UiHelper::getIcon("close", QColor("#FFFFFF"), 14)); closeBtn->setFixedSize(24, 24); closeBtn->setCursor(Qt::PointingHandCursor);
     // 物理对标 MainWindow：关闭按钮悬停不使用淡化色（蒙版感），直接保持红色 (#E81123 -> #F1707A)
@@ -561,8 +594,15 @@ void MetaPanel::setRating(int rating) {
     Q_UNUSED(rating);
 }
 void MetaPanel::setColor(const std::wstring& color) { 
-    // 2026-06-xx 物理移除
-    Q_UNUSED(color);
+    // 2026-07-xx Plan-32: 恢复颜色预览同步逻辑
+    if (color.empty()) {
+        if (m_colorPreview) m_colorPreview->hide();
+    } else {
+        if (m_colorPreview) {
+            m_colorPreview->setData(QColor(QString::fromStdWString(color)), 1.0);
+            m_colorPreview->show();
+        }
+    }
 }
 void MetaPanel::setPinned(bool pinned) { 
     Q_UNUSED(pinned); 
@@ -640,7 +680,11 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
         } else {
             pill = new ColorPill(entry.first, entry.second, m_paletteBox);
             pill->setStyleSheet("background: transparent; border: none;");
-            connect(pill, &ColorPill::colorSelected, this, &MetaPanel::searchByColor);
+            // Plan-32: 信号链路重构
+            connect(pill, &ColorPill::requestGlobalFilter, this, &MetaPanel::searchByColor);
+            connect(pill, &ColorPill::requestMetadataUpdate, this, [this](const QColor& c) {
+                emit metadataChanged(-1, c.name().toUpper().toStdWString());
+            });
         }
         pill->show();
         m_paletteFlowLayout->addWidget(pill);

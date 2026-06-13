@@ -477,10 +477,10 @@ void MainWindow::initUi() {
         }
     });
 
-    // 2026-06-xx 调色盘搜索联动
+    // 2026-06-xx 调色盘搜索联动 (Plan-32: 面板 -> 主窗体 -> 筛选器)
     connect(m_metaPanel, &MetaPanel::searchByColor, this, [this](const QColor& color) {
-        if (m_contentPanel) {
-            m_contentPanel->search(color.name().toUpper());
+        if (m_filterPanel) {
+            m_filterPanel->setFilterColor(color);
         }
     });
 
