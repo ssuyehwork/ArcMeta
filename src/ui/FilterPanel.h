@@ -118,6 +118,11 @@ public:
 
     FilterState currentFilter() const { return m_filter; }
 
+    /**
+     * @brief 外部驱动颜色选择（逻辑中枢：同步最近筛选与过滤状态）
+     */
+    void selectColor(const QColor& color);
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 

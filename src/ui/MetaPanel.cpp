@@ -14,6 +14,7 @@
 #include <QApplication>
 #include <QMenu>
 #include <QWidgetAction>
+#include <QLineEdit>
 #include <QDir>
 #include <QAbstractTextDocumentLayout>
 #include <QtMath>
