@@ -221,10 +221,18 @@ signals:
     void directorySelected(const QString& path);
 
     /**
-     * @brief 数据源变更信号，用于焦点线管理
-     * @param source 数据源标识
+     * @brief 数据源类型枚举
      */
-    void dataSourceChanged(const QString& source);
+    enum DataSource {
+        Logical,  // 分类
+        Physical  // 物理路径
+    };
+
+    /**
+     * @brief 数据源变更信号，用于焦点线管理
+     * @param type 数据源标识
+     */
+    void dataSourceChanged(DataSource type);
 
     /**
      * @brief 目录装载完成后发出，携带统计数据供 FilterPanel 填充
@@ -254,6 +262,7 @@ private:
     QVBoxLayout* m_mainLayout = nullptr;
     QStackedWidget* m_viewStack = nullptr;
     QPushButton* m_btnLayers = nullptr;
+    QPushButton* m_btnLogicalLayers = nullptr;
     QTextBrowser* m_textPreview = nullptr;
     QLabel* m_imagePreview = nullptr;
 

@@ -719,8 +719,8 @@ void CategoryPanel::setFocusHighlight(bool visible) {
 void CategoryPanel::initUi() {
     // 2026-05-07 按照用户要求：修改焦点线颜色为蓝色
     m_focusLine = new QWidget(this);
-    m_focusLine->setFixedHeight(1);
-    m_focusLine->setStyleSheet(QString("background-color: %1;").arg(qssColor(PrimaryBlue)));
+    m_focusLine->setFixedHeight(2);
+    m_focusLine->setStyleSheet("background-color: #3498db;");
     m_focusLine->hide(); // 初始隐藏
     m_mainLayout->addWidget(m_focusLine);
 

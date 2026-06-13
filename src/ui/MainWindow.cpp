@@ -922,18 +922,17 @@ void MainWindow::setupSplitters() {
     m_filterPanel->setObjectName("FilterContainer");
 
     // 2026-05-07 按照用户要求：焦点线持久化显示，基于数据来源而非焦点位置
-    connect(m_contentPanel, &ContentPanel::dataSourceChanged, this, [this](const QString& source) {
+    connect(m_contentPanel, &ContentPanel::dataSourceChanged, this, [this](ContentPanel::DataSource type) {
         // 重置所有面板高亮
         if (m_navPanel)      m_navPanel->setFocusHighlight(false);
         if (m_categoryPanel) m_categoryPanel->setFocusHighlight(false);
 
         // 根据数据来源显示焦点线
-        if (source == "category") {
+        if (type == ContentPanel::Logical) {
             if (m_categoryPanel) m_categoryPanel->setFocusHighlight(true);
-        } else if (source == "nav") {
+        } else if (type == ContentPanel::Physical) {
             if (m_navPanel) m_navPanel->setFocusHighlight(true);
         }
-        // 其他来源（搜索、筛选等）不显示焦点线
     });
 
     m_mainSplitter->addWidget(m_categoryPanel);

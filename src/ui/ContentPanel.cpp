@@ -739,20 +739,52 @@ void ContentPanel::initUi() {
     QLabel* titleLabel = new QLabel("内容", titleBar); 
     titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #41F2F2; background: transparent; border: none;"); 
      
+    // 蓝色按钮 (逻辑递归)
+    m_btnLogicalLayers = new QPushButton(titleBar);
+    m_btnLogicalLayers->setCheckable(true);
+    m_btnLogicalLayers->setFixedSize(24, 24);
+    m_btnLogicalLayers->setIcon(UiHelper::getIcon("layers", QColor("#3498db"), 18));
+    m_btnLogicalLayers->setProperty("tooltipText", "逻辑递归：自动加载子分类文件");
+    m_btnLogicalLayers->installEventFilter(this);
+    m_btnLogicalLayers->setStyleSheet(
+        "QPushButton { background: transparent; border: none; border-radius: 4px; }"
+        "QPushButton:hover { background: #3E3E42; }"
+        "QPushButton:checked { background: rgba(52, 152, 219, 0.2); border: 1px solid #3498db; }"
+    );
+    // 从 AppConfig 恢复状态
+    bool logicalRecursive = AppConfig::instance().getValue("ContentPanel/LogicalRecursive", false).toBool();
+    m_btnLogicalLayers->setChecked(logicalRecursive);
+
+    connect(m_btnLogicalLayers, &QPushButton::clicked, [this]() {
+        if (m_currentCategoryId == -1) {
+            m_btnLogicalLayers->setChecked(false);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "逻辑递归仅适用于“分类”视图，请使用右侧绿色按钮。", 2000, QColor("#E81123"));
+            return;
+        }
+        AppConfig::instance().setValue("ContentPanel/LogicalRecursive", m_btnLogicalLayers->isChecked());
+        loadCategory(m_currentCategoryId);
+    });
+
     m_btnLayers = new QPushButton(titleBar); 
     m_btnLayers->setCheckable(true); 
     m_btnLayers->setFixedSize(24, 24); 
     m_btnLayers->setIcon(UiHelper::getIcon("layers", QColor("#B0B0B0"), 18)); 
     // 2026-03-xx 按照宪法要求：禁绝原生 ToolTip，强制对接 ToolTipOverlay 
-    m_btnLayers->setProperty("tooltipText", "显示子文件夹中的项目"); 
+    m_btnLayers->setProperty("tooltipText", "物理递归：显示子文件夹中的项目");
     m_btnLayers->installEventFilter(this); 
     m_btnLayers->setStyleSheet( 
         "QPushButton { background: transparent; border: none; border-radius: 4px; }" 
         "QPushButton:hover { background: #3E3E42; }" 
-        "QPushButton:checked { background: rgba(52, 152, 219, 0.2); border: 1px solid #3498db; }" 
+        "QPushButton:checked { background: rgba(46, 204, 113, 0.2); border: 1px solid #2ecc71; }"
         "QPushButton:disabled { opacity: 0.3; }" 
     ); 
     connect(m_btnLayers, &QPushButton::clicked, [this]() { 
+        if (m_currentCategoryId != -1) {
+            m_btnLayers->setChecked(false);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "物理递归仅适用于“目录导航”，请使用左侧蓝色按钮。", 2000, QColor("#E81123"));
+            return;
+        }
+
         if (m_currentPath.isEmpty() || m_currentPath == "computer://") { 
             m_btnLayers->setChecked(false); 
             return; 
@@ -775,6 +807,8 @@ void ContentPanel::initUi() {
  
     titleL->addWidget(titleLabel); 
     titleL->addStretch(); 
+    titleL->addWidget(m_btnLogicalLayers, 0, Qt::AlignVCenter);
+    titleL->addSpacing(2);
     titleL->addWidget(m_btnLayers, 0, Qt::AlignVCenter); 
  
     m_mainLayout->addWidget(titleBar); 
@@ -1967,8 +2001,9 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     m_isLoading = true;
     m_currentCategoryType = ""; // 物理导航模式下清除系统类型
+    m_currentCategoryId = -1; // 物理导航模式下重置分类 ID
     qDebug() << "[Content] 开始物理递归扫描 (虚拟化) ->" << path << (recursive ? "递归" : "单级"); 
-    emit dataSourceChanged("nav"); 
+    emit dataSourceChanged(Physical);
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -2207,15 +2242,18 @@ void ContentPanel::loadCategory(int categoryId) {
     m_isLoading = true;
     m_currentCategoryType = "user_category";
     m_currentCategoryId = categoryId;
+    updateLayersButtonState();
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
-    emit dataSourceChanged("category"); 
+    emit dataSourceChanged(Logical);
      
     m_model->clear(); 
  
+    bool isLogicalRecursive = m_btnLogicalLayers->isChecked();
+
     QPointer<ContentPanel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, categoryId]() {
+    (void)QtConcurrent::run([weakThis, categoryId, isLogicalRecursive]() {
         std::vector<ItemRecord> allRecords;
 
         // 1. 加载子分类
@@ -2232,7 +2270,9 @@ void ContentPanel::loadCategory(int categoryId) {
         }
 
         // 2. 加载文件 (SCCH 分离模式)
-        std::vector<CategoryItem> items = CategoryRepo::getItemsInCategory(categoryId);
+        std::vector<CategoryItem> items = isLogicalRecursive ?
+            CategoryRepo::getItemsRecursive(categoryId) :
+            CategoryRepo::getItemsInCategory(categoryId);
         
         allRecords.reserve(allRecords.size() + items.size());
         for (const auto& item : items) {
@@ -2297,10 +2337,12 @@ void ContentPanel::loadCategory(int categoryId) {
  
 void ContentPanel::loadPaths(const QStringList& paths) { 
     m_isLoading = true;
+    m_currentCategoryId = -1; // 系统分类路径列表模式下重置分类 ID
+    updateLayersButtonState();
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
-    emit dataSourceChanged("category"); 
+    emit dataSourceChanged(Logical);
      
     m_model->clear(); 
  
@@ -2459,18 +2501,31 @@ void ContentPanel::createNewItem(const QString& type) {
     } 
 } 
  
-void ContentPanel::updateLayersButtonState() { 
-    if (!m_btnLayers) return; 
- 
-    if (m_currentPath.isEmpty() || m_currentPath == "computer://") { 
-        m_btnLayers->setEnabled(false); 
-        m_btnLayers->setChecked(false); 
-        m_btnLayers->setProperty("tooltipText", "“此电脑”不支持递归显示"); 
-        return; 
-    } 
- 
-    m_btnLayers->setEnabled(true); 
-    m_btnLayers->setProperty("tooltipText", "显示子文件夹中的项目"); 
+void ContentPanel::updateLayersButtonState() {
+    if (m_btnLayers) {
+        if (m_currentPath.isEmpty() || m_currentPath == "computer://" || m_currentCategoryId != -1) {
+            m_btnLayers->setEnabled(false);
+            m_btnLayers->setChecked(false);
+            m_btnLayers->setProperty("tooltipText", m_currentCategoryId != -1 ? "分类模式下物理递归不可用" : "“此电脑”不支持递归显示");
+        } else {
+            m_btnLayers->setEnabled(true);
+            m_btnLayers->setProperty("tooltipText", "物理递归：显示子文件夹中的项目");
+        }
+    }
+
+    if (m_btnLogicalLayers) {
+        if (m_currentCategoryId == -1) {
+            m_btnLogicalLayers->setEnabled(false);
+            m_btnLogicalLayers->setChecked(false);
+            m_btnLogicalLayers->setProperty("tooltipText", "物理目录模式下逻辑递归不可用");
+        } else {
+            m_btnLogicalLayers->setEnabled(true);
+            m_btnLogicalLayers->setProperty("tooltipText", "逻辑递归：自动加载子分类文件");
+            // 恢复持久化状态
+            bool logicalRecursive = AppConfig::instance().getValue("ContentPanel/LogicalRecursive", false).toBool();
+            m_btnLogicalLayers->setChecked(logicalRecursive);
+        }
+    }
 } 
  
 // --- Delegate --- 
