@@ -292,8 +292,6 @@ private:
                                QMap<QString, int>& modifyDateCounts,
                                int& noTagCount);
 
-    double calculateFolderProgress(const QString& folderPath);
-
 public slots:
     void onSelectionChanged();
     void onCustomContextMenuRequested(const QPoint& pos);
