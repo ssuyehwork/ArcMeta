@@ -1148,6 +1148,7 @@ void ContentPanel::initGridView() {
         delegate->setTypeRole(TypeRole);
         delegate->setIsEmptyRole(IsEmptyRole);
         delegate->setColorRole(ColorRole);
+        delegate->setRegistrationProgressRole(RegistrationProgressRole);
         m_gridView->setItemDelegate(delegate);
     } else {
         m_gridView->setItemDelegate(new GridItemDelegate(this)); 
