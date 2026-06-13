@@ -75,12 +75,9 @@ CategoryPanel::CategoryPanel(QWidget* parent)
             m_categoryModel->refresh();
             m_isFirstLoad = false;
             m_refreshTimer->setProperty("fullRebuild", false); // 消费完重置
-
-            // 2026-06-xx 物理修正：首次刷新后必须立即触发计数盘点，防止界面显示 (0)
-            requestRefresh();
-            return;
         }
 
+        // 2026-07-xx 性能优化：执行重建后立即继续统计计算，不再触发 requestRefresh 导致二次等待
         // 2026-06-xx 物理分流：将耗时的统计计算（fullRecount）移出 UI 线程
         // 采用 QPointer 确保线程安全性
         QPointer<CategoryPanel> weakThis(this);
@@ -94,6 +91,10 @@ CategoryPanel::CategoryPanel(QWidget* parent)
             // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
             QMetaObject::invokeMethod(weakThis.data(), [weakThis, sysCounts, catCounts]() {
                 if (weakThis && weakThis->m_categoryModel) {
+                    // 2026-07-xx 物理修复：若统计数据全空，且系统尚未加载完成，则拒绝执行 UI 更新以防止计数清零
+                    if (sysCounts.isEmpty() && catCounts.isEmpty()) {
+                        return;
+                    }
                     // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
                     weakThis->m_categoryModel->updateStatistics(sysCounts, catCounts);
                 }
@@ -120,12 +121,11 @@ CategoryPanel::CategoryPanel(QWidget* parent)
 }
 
 void CategoryPanel::requestRefresh(bool fullRebuild) {
-    // 2026-06-xx 物理优化：恢复至 500ms 防抖时间。
-    // 理由：过短的防抖会导致批量操作（如上万个项的 MFT 扫描或删除）过程中产生大量的中间无效重刷。
+    // 2026-07-xx 性能优化：缩短防抖时间至 200ms 以提升 UI 响应灵敏度
     if (fullRebuild) {
         m_refreshTimer->setProperty("fullRebuild", true);
     }
-    m_refreshTimer->start(500);
+    m_refreshTimer->start(200);
 }
 
 void CategoryPanel::selectCategory(int id) {

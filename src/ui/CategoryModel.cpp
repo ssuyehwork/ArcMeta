@@ -156,7 +156,8 @@ void CategoryModel::refresh() {
                     QString name = QString::fromStdWString(cat.name);
                     QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
                     
-                    QStandardItem* mirror = new QStandardItem(name);
+                    // 2026-07-xx 视觉对齐：镜像节点初始也应携带 (0) 占位符，符合《红线规范》
+                    QStandardItem* mirror = new QStandardItem(QString("%1 (0)").arg(name));
                     mirror->setData("category", TypeRole);
                     mirror->setData(id, IdRole);
                     mirror->setData(color, ColorRole);

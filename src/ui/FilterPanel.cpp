@@ -511,7 +511,7 @@ void FilterPanel::rebuildGroups() {
             "  background: #2D2D2D;"
             "  color: #CCCCCC;"
             "  border: 1px solid #444444;"
-            "  border-radius: 4px;"
+            "  border-radius: 6px;" // 2026-07-xx 按照《Plan-21》：输入框统一使用 6px 圆角
             "  padding: 4px 8px;"
             "  margin: 4px 8px;"
             "  font-size: 11px;"
@@ -678,7 +678,7 @@ void FilterPanel::rebuildGroups() {
         m_editTag->setText(m_filter.tagFilterText);
         m_editTag->setObjectName("FilterSearchEdit");
         m_editTag->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editTag->installEventFilter(this);
@@ -727,7 +727,7 @@ void FilterPanel::rebuildGroups() {
         m_editType->setText(m_filter.typeFilterText);
         m_editType->setObjectName("FilterSearchEdit");
         m_editType->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editType->installEventFilter(this);
@@ -787,7 +787,7 @@ void FilterPanel::rebuildGroups() {
         m_editCreateDate->setText(m_filter.createDateFilterText);
         m_editCreateDate->setObjectName("FilterSearchEdit");
         m_editCreateDate->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editCreateDate->installEventFilter(this);
@@ -823,7 +823,7 @@ void FilterPanel::rebuildGroups() {
         m_editModifyDate->setText(m_filter.modifyDateFilterText);
         m_editModifyDate->setObjectName("FilterSearchEdit");
         m_editModifyDate->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editModifyDate->installEventFilter(this);
