@@ -593,6 +593,39 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
             if (!matchDate) return false; 
         }
     } 
+
+    // 7. 链接过滤 (Plan-30)
+    if (currentFilter.linkPresence != FilterState::All) {
+        bool hasLink = !record.url.isEmpty();
+        if (currentFilter.linkPresence == FilterState::Yes && !hasLink) return false;
+        if (currentFilter.linkPresence == FilterState::No && hasLink) return false;
+    }
+
+    // 8. 备注过滤 (Plan-30)
+    if (currentFilter.notePresence != FilterState::All) {
+        bool hasNote = !record.note.isEmpty();
+        if (currentFilter.notePresence == FilterState::Yes && !hasNote) return false;
+        if (currentFilter.notePresence == FilterState::No && hasNote) return false;
+    }
+
+    // 9. 文件大小过滤 (Plan-30)
+    if (currentFilter.minSize != -1 && record.size < currentFilter.minSize) return false;
+    if (currentFilter.maxSize != -1 && record.size > currentFilter.maxSize) return false;
+
+    // 10. 图像比例过滤 (Plan-29)
+    if (currentFilter.ratio != FilterState::AspectAny) {
+        // 从 MetadataManager 获取实时尺寸信息
+        auto meta = MetadataManager::instance().getMeta(record.path.toStdWString());
+        if (meta.width > 0 && meta.height > 0) {
+            double r = (double)meta.width / meta.height;
+            if (currentFilter.ratio == FilterState::Horizontal && meta.width <= meta.height) return false;
+            if (currentFilter.ratio == FilterState::Vertical && meta.height <= meta.width) return false;
+            if (currentFilter.ratio == FilterState::Square && std::abs(r - 1.0) > 0.05) return false;
+            if (currentFilter.ratio == FilterState::Ratio169 && std::abs(r - 1.77) > 0.05) return false;
+        } else {
+            return false; // 无尺寸信息不匹配任何比例筛选
+        }
+    }
  
     // 6. 修改日期过滤 
     if (!currentFilter.modifyDates.isEmpty() || !currentFilter.modifyDateFilterText.isEmpty()) { 
@@ -2019,6 +2052,10 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 r.fileId = meta.fileId128;
                 r.pinned = meta.pinned;
                 r.encrypted = meta.encrypted;
+                r.url = QString::fromStdWString(meta.url);
+                r.note = QString::fromStdWString(meta.note);
+                r.width = meta.width;
+                r.height = meta.height;
                 r.isManaged = meta.hasUserOperations();
                 for (const auto& pe : meta.palettes) {
                     r.palettes.push_back({pe.color, pe.ratio});
@@ -2232,6 +2269,10 @@ void ContentPanel::loadCategory(int categoryId) {
                 r.fileId = meta.fileId128;
                 r.pinned = meta.pinned;
                 r.encrypted = meta.encrypted;
+                r.url = QString::fromStdWString(meta.url);
+                r.note = QString::fromStdWString(meta.note);
+                r.width = meta.width;
+                r.height = meta.height;
                 r.isManaged = meta.hasUserOperations();
                 for (const auto& pe : meta.palettes) {
                     r.palettes.push_back({pe.color, pe.ratio});
@@ -2297,6 +2338,10 @@ void ContentPanel::loadPaths(const QStringList& paths) {
                 r.fileId = meta.fileId128;
                 r.pinned = meta.pinned;
                 r.encrypted = meta.encrypted;
+                r.url = QString::fromStdWString(meta.url);
+                r.note = QString::fromStdWString(meta.note);
+                r.width = meta.width;
+                r.height = meta.height;
                 r.isManaged = meta.hasUserOperations();
                 for (const auto& pe : meta.palettes) {
                     r.palettes.push_back({pe.color, pe.ratio});

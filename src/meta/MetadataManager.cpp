@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QDateTime>
 #include <QCoreApplication>
+#include <QImageReader>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -213,6 +214,8 @@ void MetadataManager::initFromScchMode() {
                     const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 14));
                     if (wOrigPath) rm.originalPath = wOrigPath;
                     rm.isInvalid = sqlite3_column_int(stmt, 15) != 0;
+                    rm.width = sqlite3_column_int(stmt, 16);
+                    rm.height = sqlite3_column_int(stmt, 17);
                     if (paletteBlob && paletteSize > 0) {
                         QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
                         QJsonDocument doc = QJsonDocument::fromJson(ba);
@@ -290,11 +293,13 @@ void MetadataManager::registerItem(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
     // 1. 激活项目 (获取 FID/FRN 等物理属性)
     ensureActivated(nPath);
-    // 2. 物理同步 (存入数据库)
+    // 2. 提取图像尺寸 (Plan-29)
+    tryExtractDimensions(nPath);
+    // 3. 物理同步 (存入数据库)
     syncPhysicalMetadata(nPath, false);
-    // 3. 视觉预热 (提取颜色)
+    // 4. 视觉预热 (提取颜色)
     tryExtractColor(nPath);
-    // 4. 通知 UI 刷新该路径
+    // 5. 通知 UI 刷新该路径
     notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 }
 
@@ -726,9 +731,49 @@ void MetadataManager::activateItem(const std::wstring& path) {
     instance().registerItem(path);
 }
 
+void MetadataManager::tryExtractDimensions(const std::wstring& path) {
+    std::wstring nPath = normalizePath(path);
+    QFileInfo info(QString::fromStdWString(nPath));
+    if (!info.isFile()) return;
+
+    int w = 0, h = 0;
+
+    // 方案 A: 尝试通过 QImageReader 获取尺寸 (仅读取头部，极快)
+    QImageReader reader(info.absoluteFilePath());
+    QSize sz = reader.size();
+    if (sz.isValid()) {
+        w = sz.width();
+        h = sz.height();
+    }
+
+    // 2026-07-xx 按照 Plan-29：如果 QImageReader 失败且是图像类型，尝试 Windows Shell 属性
+#ifdef Q_OS_WIN
+    if (w <= 0 || h <= 0) {
+        // PSD/AI 等格式可能需要 Shell 接口
+        // TODO: 后续可集成 IPropertyStore 进一步增强专业格式识别
+    }
+#endif
+
+    if (w > 0 && h > 0) {
+        std::unique_lock<std::shared_mutex> lock(instance().m_mutex);
+        RuntimeMeta& meta = instance().m_cache[nPath];
+        meta.width = w;
+        meta.height = h;
+    }
+}
+
 void MetadataManager::tryExtractColor(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    if (!instance().getMeta(nPath).color.empty()) return;
+
+    // 2026-07-xx 按照 Plan-29：在提取颜色时同步校准尺寸
+    int currentW = 0, currentH = 0;
+    {
+        std::shared_lock<std::shared_mutex> lock(instance().m_mutex);
+        const auto& m = instance().m_cache[nPath];
+        currentW = m.width;
+        currentH = m.height;
+        if (!m.color.empty() && currentW > 0) return;
+    }
     
     QFileInfo info(QString::fromStdWString(nPath));
     QString qPath = QString::fromStdWString(nPath);
@@ -736,11 +781,24 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
     
     if (info.isFile()) {
         if (ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower())) {
-            auto palette = ArcMeta::UiHelper::extractPalette(qPath);
-            if (!palette.isEmpty()) {
-                QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
-                instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
-                success = true;
+            // 获取调色板及缩略图 (getShellThumbnail 内部已处理尺寸)
+            QImage img = ArcMeta::UiHelper::getShellThumbnail(qPath, 256);
+            if (img.isNull()) img.load(qPath);
+
+            if (!img.isNull()) {
+                // 如果之前没拿到尺寸，这里补救
+                if (currentW <= 0) {
+                    std::unique_lock<std::shared_mutex> lock(instance().m_mutex);
+                    instance().m_cache[nPath].width = img.width();
+                    instance().m_cache[nPath].height = img.height();
+                }
+
+                auto palette = ArcMeta::UiHelper::extractPalette(qPath);
+                if (!palette.isEmpty()) {
+                    QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
+                    instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
+                    success = true;
+                }
             }
         }
     } else if (info.isDir()) {
@@ -872,7 +930,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
     if (!db) return;
 
     sqlite3_stmt* stmt;
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     bool isNew = true;
     {
         sqlite3_stmt* checkStmt;
@@ -909,6 +967,8 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
         sqlite3_bind_int(stmt, 14, rMeta.isTrash ? 1 : 0);
         sqlite3_bind_text16(stmt, 15, rMeta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, 16, rMeta.isInvalid ? 1 : 0);
+        sqlite3_bind_int(stmt, 17, rMeta.width);
+        sqlite3_bind_int(stmt, 18, rMeta.height);
 
         if (sqlite3_step(stmt) == SQLITE_DONE) {
             if (isNew) {

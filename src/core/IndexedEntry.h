@@ -29,6 +29,10 @@ struct ItemRecord {
     bool pinned = false;
     bool encrypted = false;
     double registrationProgress = -1.0; // 初始为 -1.0 表示未计算
+    QString url;  // 2026-07-xx 支撑筛选：链接
+    QString note; // 2026-07-xx 支撑筛选：备注
+    int width = 0;
+    int height = 0;
 
     // 2026-06-xx 极致优化：预取物理属性，实现渲染零 I/O
     long long size = 0;

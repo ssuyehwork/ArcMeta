@@ -112,7 +112,9 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             palettes BLOB,
             is_trash INTEGER DEFAULT 0,
             original_path TEXT,
-            is_invalid INTEGER DEFAULT 0
+            is_invalid INTEGER DEFAULT 0,
+            width INTEGER DEFAULT 0,
+            height INTEGER DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
 
@@ -156,16 +158,20 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         sqlite3_exec(conn.memDb, cleanup, nullptr, nullptr, nullptr);
     }
 
-    // 2026-06-xx 物理加固：自动迁移旧版本数据库字段
-    // 检查 metadata 是否包含 is_invalid 字段
+    // 2026-07-xx 物理加固：自动迁移旧版本数据库字段 (Plan-29)
     sqlite3_stmt* checkStmt;
     bool hasInvalidColumn = false;
+    bool hasWidthColumn = false;
+    bool hasHeightColumn = false;
+
     if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(checkStmt) == SQLITE_ROW) {
             const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(checkStmt, 1));
-            if (colName && std::string(colName) == "is_invalid") {
-                hasInvalidColumn = true;
-                break;
+            if (colName) {
+                std::string name(colName);
+                if (name == "is_invalid") hasInvalidColumn = true;
+                if (name == "width") hasWidthColumn = true;
+                if (name == "height") hasHeightColumn = true;
             }
         }
         sqlite3_finalize(checkStmt);
@@ -174,6 +180,14 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     if (!hasInvalidColumn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 is_invalid 字段...";
         sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN is_invalid INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+    }
+    if (!hasWidthColumn) {
+        qDebug() << "[DB] 检测到旧版数据库，正在添加 width 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN width INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+    }
+    if (!hasHeightColumn) {
+        qDebug() << "[DB] 检测到旧版数据库，正在添加 height 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN height INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
     }
 
     conn.diskPath = diskPath;

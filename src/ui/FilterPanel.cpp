@@ -10,6 +10,8 @@
 #include <QScreen>
 #include <QPainter>
 #include <QLinearGradient>
+#include <QRadioButton>
+#include <QComboBox>
 
 namespace ArcMeta {
 
@@ -476,6 +478,123 @@ void FilterPanel::rebuildGroups() {
 
     auto colorMap = s_colorMap();
 
+    // ── 0. 链接 & 备注 & 大小 (Plan-30) ─────────────────────────
+    {
+        QVBoxLayout* gl = nullptr;
+        QWidget* g = buildGroup("其他属性", gl);
+
+        // 0.1 链接筛选 (All, Yes, No)
+        QHBoxLayout* hl = new QHBoxLayout();
+        hl->setContentsMargins(8, 4, 8, 4);
+        QLabel* lblLink = new QLabel("链接:", g);
+        lblLink->setStyleSheet("color: #AAAAAA; font-size: 11px;");
+        hl->addWidget(lblLink);
+
+        for (auto p : {FilterState::All, FilterState::Yes, FilterState::No}) {
+            QString label = (p == FilterState::All ? "全部" : (p == FilterState::Yes ? "有" : "无"));
+            QRadioButton* rb = new QRadioButton(label, g);
+            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
+            if (m_filter.linkPresence == p) rb->setChecked(true);
+            connect(rb, &QRadioButton::toggled, this, [this, p](bool on) {
+                if (on) { m_filter.linkPresence = p; emit filterChanged(m_filter); }
+            });
+            hl->addWidget(rb);
+        }
+        hl->addStretch();
+        gl->addLayout(hl);
+
+        // 0.2 备注筛选
+        QHBoxLayout* hn = new QHBoxLayout();
+        hn->setContentsMargins(8, 4, 8, 4);
+        QLabel* lblNote = new QLabel("备注:", g);
+        lblNote->setStyleSheet("color: #AAAAAA; font-size: 11px;");
+        hn->addWidget(lblNote);
+
+        for (auto p : {FilterState::All, FilterState::Yes, FilterState::No}) {
+            QString label = (p == FilterState::All ? "全部" : (p == FilterState::Yes ? "有" : "无"));
+            QRadioButton* rb = new QRadioButton(label, g);
+            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
+            if (m_filter.notePresence == p) rb->setChecked(true);
+            connect(rb, &QRadioButton::toggled, this, [this, p](bool on) {
+                if (on) { m_filter.notePresence = p; emit filterChanged(m_filter); }
+            });
+            hn->addWidget(rb);
+        }
+        hn->addStretch();
+        gl->addLayout(hn);
+
+        // 0.3 文件大小筛选
+        QLabel* lblSize = new QLabel("文件大小:", g);
+        lblSize->setStyleSheet("color: #AAAAAA; font-size: 11px; margin-left: 8px; margin-top: 4px;");
+        gl->addWidget(lblSize);
+
+        QHBoxLayout* hs = new QHBoxLayout();
+        hs->setContentsMargins(8, 4, 8, 4);
+        QLineEdit* minEdit = new QLineEdit(g);
+        QLineEdit* maxEdit = new QLineEdit(g);
+        QComboBox* unitCombo = new QComboBox(g);
+        unitCombo->addItems({"KB", "MB", "GB"});
+        unitCombo->setCurrentIndex(1); // Default MB
+
+        auto sizeEditStyle = "QLineEdit { background: #2D2D2D; color: #EEE; border: 1px solid #444; border-radius: 4px; padding: 2px; font-size: 11px; }";
+        minEdit->setStyleSheet(sizeEditStyle);
+        maxEdit->setStyleSheet(sizeEditStyle);
+        minEdit->setPlaceholderText("最小");
+        maxEdit->setPlaceholderText("最大");
+        unitCombo->setStyleSheet("QComboBox { background: #2D2D2D; color: #EEE; border: 1px solid #444; font-size: 11px; }");
+
+        hs->addWidget(minEdit);
+        QLabel* sep = new QLabel("-", g); sep->setStyleSheet("color: #AAA;"); hs->addWidget(sep);
+        hs->addWidget(maxEdit);
+        hs->addWidget(unitCombo);
+        gl->addLayout(hs);
+
+        auto updateSizeFilter = [this, minEdit, maxEdit, unitCombo]() {
+            auto toBytes = [](const QString& txt, const QString& unit) -> long long {
+                if (txt.isEmpty()) return -1;
+                bool ok;
+                double val = txt.toDouble(&ok);
+                if (!ok) return -1;
+                long long factor = 1024;
+                if (unit == "MB") factor = 1024 * 1024;
+                else if (unit == "GB") factor = 1024 * 1024 * 1024;
+                return (long long)(val * factor);
+            };
+            m_filter.minSize = toBytes(minEdit->text(), unitCombo->currentText());
+            m_filter.maxSize = toBytes(maxEdit->text(), unitCombo->currentText());
+            emit filterChanged(m_filter);
+        };
+
+        connect(minEdit, &QLineEdit::editingFinished, this, updateSizeFilter);
+        connect(maxEdit, &QLineEdit::editingFinished, this, updateSizeFilter);
+        connect(unitCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [updateSizeFilter](int){ updateSizeFilter(); });
+
+        // 0.4 图像比例筛选
+        QLabel* lblRatio = new QLabel("图像比例:", g);
+        lblRatio->setStyleSheet("color: #AAAAAA; font-size: 11px; margin-left: 8px; margin-top: 4px;");
+        gl->addWidget(lblRatio);
+
+        QHBoxLayout* hr = new QHBoxLayout();
+        hr->setContentsMargins(8, 4, 8, 4);
+        static const QList<QPair<FilterState::AspectRatio, QString>> ratios = {
+            {FilterState::AspectAny, "全部"}, {FilterState::Horizontal, "横图"},
+            {FilterState::Vertical, "竖图"}, {FilterState::Square, "方形"}, {FilterState::Ratio169, "16:9"}
+        };
+        for (const auto& pair : ratios) {
+            QRadioButton* rb = new QRadioButton(pair.second, g);
+            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
+            if (m_filter.ratio == pair.first) rb->setChecked(true);
+            connect(rb, &QRadioButton::toggled, this, [this, pair](bool on) {
+                if (on) { m_filter.ratio = pair.first; emit filterChanged(m_filter); }
+            });
+            hr->addWidget(rb);
+        }
+        hr->addStretch();
+        gl->addLayout(hr);
+
+        m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
+    }
+
     // ── 1. 评级 ──────────────────────────────────────────────
     if (!m_ratingCounts.isEmpty()) {
         QVBoxLayout* gl = nullptr;
@@ -503,7 +622,7 @@ void FilterPanel::rebuildGroups() {
 
         // 新增快速输入框
         m_editColor = new QLineEdit(g);
-        m_editColor->setPlaceholderText("快速过滤颜色 (如: 红 / #E24B4A / 无色标)");
+        m_editColor->setPlaceholderText("例： 红 / #E24B4A / 无色标");
         m_editColor->setText(m_filter.colorFilterText);
         m_editColor->setObjectName("FilterSearchEdit");
         m_editColor->setStyleSheet(
@@ -674,7 +793,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("标签 / 关键字", gl);
 
         m_editTag = new QLineEdit(g);
-        m_editTag->setPlaceholderText("快速过滤标签...");
+        m_editTag->setPlaceholderText("例：工作");
         m_editTag->setText(m_filter.tagFilterText);
         m_editTag->setObjectName("FilterSearchEdit");
         m_editTag->setStyleSheet(
@@ -723,7 +842,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("文件类型", gl);
 
         m_editType = new QLineEdit(g);
-        m_editType->setPlaceholderText("快速过滤类型 (如: png / 文件夹)...");
+        m_editType->setPlaceholderText("例： png / 文件夹)...");
         m_editType->setText(m_filter.typeFilterText);
         m_editType->setObjectName("FilterSearchEdit");
         m_editType->setStyleSheet(
@@ -783,7 +902,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("创建日期", gl);
 
         m_editCreateDate = new QLineEdit(g);
-        m_editCreateDate->setPlaceholderText("快速过滤日期 (如: 2025 / 03-2025)...");
+        m_editCreateDate->setPlaceholderText("例： 2025 / 03-2025)...");
         m_editCreateDate->setText(m_filter.createDateFilterText);
         m_editCreateDate->setObjectName("FilterSearchEdit");
         m_editCreateDate->setStyleSheet(
@@ -819,7 +938,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("修改日期", gl);
 
         m_editModifyDate = new QLineEdit(g);
-        m_editModifyDate->setPlaceholderText("快速过滤日期 (如: 2025 / 03-2025)...");
+        m_editModifyDate->setPlaceholderText("例： 2025 / 03-2025)...");
         m_editModifyDate->setText(m_filter.modifyDateFilterText);
         m_editModifyDate->setObjectName("FilterSearchEdit");
         m_editModifyDate->setStyleSheet(
