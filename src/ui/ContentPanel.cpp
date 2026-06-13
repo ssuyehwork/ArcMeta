@@ -54,8 +54,6 @@
 #include <QThreadPool> 
 #include <QTimer> 
 #include <QPointer> 
-#include <functional> 
-#include <QPointer> 
 #include <QPersistentModelIndex> 
  
  
@@ -2040,7 +2038,6 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (r.isDir) {
                     QDir sub(absPath);
                     r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                    r.registrationProgress = panelPtr->calculateFolderProgress(absPath);
                 }
 
                 // 3. 元数据注入
@@ -2131,7 +2128,6 @@ void ContentPanel::search(const QString& query) {
                 if (r.isDir) {
                     QDir sub(p);
                     r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                    r.registrationProgress = weakThis->calculateFolderProgress(p);
                 } else {
                     r.suffix = QFileInfo(p).suffix().toLower();
                 }
@@ -2280,7 +2276,6 @@ void ContentPanel::loadCategory(int categoryId) {
                 if (r.isDir) {
                     QDir sub(p);
                     r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                    r.registrationProgress = weakThis->calculateFolderProgress(p);
                 } else {
                     r.suffix = QFileInfo(p).suffix().toLower();
                 }
@@ -2349,7 +2344,6 @@ void ContentPanel::loadPaths(const QStringList& paths) {
                 if (r.isDir) {
                     QDir sub(p);
                     r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                    r.registrationProgress = weakThis->calculateFolderProgress(p);
                 } else {
                     r.suffix = QFileInfo(p).suffix().toLower();
                 }
@@ -2465,29 +2459,6 @@ void ContentPanel::createNewItem(const QString& type) {
     } 
 } 
  
-double ContentPanel::calculateFolderProgress(const QString& folderPath) {
-    long totalCount = 0;
-    long managedCount = 0;
-
-    // 高效递归统计
-    std::function<void(const QString&)> scan;
-    scan = [&](const QString& p) {
-        QDir dir(p);
-        QFileInfoList entries = dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot);
-        for (const auto& info : entries) {
-            totalCount++;
-            // 穿透元数据缓存判定
-            if (MetadataManager::instance().getMeta(info.absoluteFilePath().toStdWString()).hasUserOperations()) {
-                managedCount++;
-            }
-            if (info.isDir()) scan(info.absoluteFilePath());
-        }
-    };
-
-    scan(folderPath);
-    return (totalCount == 0) ? 0.0 : (double)managedCount / totalCount;
-}
-
 void ContentPanel::updateLayersButtonState() { 
     if (!m_btnLayers) return; 
  
