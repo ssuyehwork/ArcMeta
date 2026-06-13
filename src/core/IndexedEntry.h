@@ -28,6 +28,7 @@ struct ItemRecord {
     std::string fileId;
     bool pinned = false;
     bool encrypted = false;
+    double registrationProgress = -1.0; // 初始为 -1.0 表示未计算
 
     // 2026-06-xx 极致优化：预取物理属性，实现渲染零 I/O
     long long size = 0;

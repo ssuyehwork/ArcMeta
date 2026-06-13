@@ -25,6 +25,7 @@ enum CommonRole {
     ManagedRole         = Qt::UserRole + 105, // 是否受控 (已在 SCCH 中登记)
     IsEmptyRole         = Qt::UserRole + 106, // 是否为空目录
     CategoryIdRole      = Qt::UserRole + 107, // 所属分类 ID
+    RegistrationProgressRole = Qt::UserRole + 205, // 文件夹入库进度 (double, 0.0 ~ 1.0)
     
     // UI/渲染角色 (UserRole + 201..300)
     AspectRatioRole     = Qt::UserRole + 201, // 图像宽高比

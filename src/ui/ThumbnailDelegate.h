@@ -17,6 +17,7 @@ public:
     void setTypeRole(int role);
     void setIsEmptyRole(int role);
     void setColorRole(int role);
+    void setRegistrationProgressRole(int role);
 
     void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
     QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override;
@@ -26,6 +27,7 @@ public:
     void updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
     bool eventFilter(QObject* obj, QEvent* event) override;
     bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) override;
+    bool helpEvent(QHelpEvent* event, QAbstractItemView* view, const QStyleOptionViewItem& option, const QModelIndex& index) override;
 
 private:
     int m_hasThumbnailRole = Qt::UserRole + 1;
@@ -36,6 +38,7 @@ private:
     int m_typeRole = -1;
     int m_isEmptyRole = -1;
     int m_colorRole = -1;
+    int m_registrationProgressRole = -1;
 
     struct Metrics {
         QRect cardRect;
