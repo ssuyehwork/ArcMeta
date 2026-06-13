@@ -503,7 +503,7 @@ void FilterPanel::rebuildGroups() {
 
         // 新增快速输入框
         m_editColor = new QLineEdit(g);
-        m_editColor->setPlaceholderText("快速过滤颜色 (如: 红 / #E24B4A / 无色标)");
+        m_editColor->setPlaceholderText("例： 红 / #E24B4A / 无色标)");
         m_editColor->setText(m_filter.colorFilterText);
         m_editColor->setObjectName("FilterSearchEdit");
         m_editColor->setStyleSheet(
@@ -674,7 +674,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("标签 / 关键字", gl);
 
         m_editTag = new QLineEdit(g);
-        m_editTag->setPlaceholderText("快速过滤标签...");
+        m_editTag->setPlaceholderText("例：工作");
         m_editTag->setText(m_filter.tagFilterText);
         m_editTag->setObjectName("FilterSearchEdit");
         m_editTag->setStyleSheet(
@@ -723,7 +723,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("文件类型", gl);
 
         m_editType = new QLineEdit(g);
-        m_editType->setPlaceholderText("快速过滤类型 (如: png / 文件夹)...");
+        m_editType->setPlaceholderText("例： png / 文件夹)...");
         m_editType->setText(m_filter.typeFilterText);
         m_editType->setObjectName("FilterSearchEdit");
         m_editType->setStyleSheet(
@@ -783,7 +783,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("创建日期", gl);
 
         m_editCreateDate = new QLineEdit(g);
-        m_editCreateDate->setPlaceholderText("快速过滤日期 (如: 2025 / 03-2025)...");
+        m_editCreateDate->setPlaceholderText("例： 2025 / 03-2025)...");
         m_editCreateDate->setText(m_filter.createDateFilterText);
         m_editCreateDate->setObjectName("FilterSearchEdit");
         m_editCreateDate->setStyleSheet(
@@ -819,7 +819,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("修改日期", gl);
 
         m_editModifyDate = new QLineEdit(g);
-        m_editModifyDate->setPlaceholderText("快速过滤日期 (如: 2025 / 03-2025)...");
+        m_editModifyDate->setPlaceholderText("例： 2025 / 03-2025)...");
         m_editModifyDate->setText(m_filter.modifyDateFilterText);
         m_editModifyDate->setObjectName("FilterSearchEdit");
         m_editModifyDate->setStyleSheet(
