@@ -862,8 +862,19 @@ void FilterPanel::rebuildGroups() {
         linkGroup->setExclusive(true);
         for (auto p : {FilterState::Yes, FilterState::No}) {
             QString label = (p == FilterState::Yes ? "有链接" : "无链接");
-            QCheckBox* cb = new QCheckBox(label, g);
-            cb->setStyleSheet("QCheckBox { color: #CCCCCC; font-size: 11px; padding: 4px 8px; } QCheckBox::indicator { width: 14px; height: 14px; }");
+
+            StyledCheckBox* cb = new StyledCheckBox();
+            ClickableRow* row = new ClickableRow(cb);
+            row->setFixedHeight(24);
+            QHBoxLayout* rl = new QHBoxLayout(row);
+            rl->setContentsMargins(4, 0, 4, 0);
+            rl->setSpacing(5);
+            rl->addWidget(cb);
+            QLabel* lbl = new QLabel(label, row);
+            lbl->setStyleSheet("font-size: 12px; color: #CCCCCC; background: transparent;");
+            rl->addWidget(lbl, 1);
+            gl->addWidget(row);
+
             if (m_filter.linkPresence == p) cb->setChecked(true);
             connect(cb, &QCheckBox::toggled, this, [this, p, linkGroup](bool on) {
                 if (!on) {
@@ -876,7 +887,6 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             });
             linkGroup->addButton(cb);
-            gl->addWidget(cb);
         }
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
@@ -890,8 +900,19 @@ void FilterPanel::rebuildGroups() {
         noteGroup->setExclusive(true);
         for (auto p : {FilterState::Yes, FilterState::No}) {
             QString label = (p == FilterState::Yes ? "有备注" : "无备注");
-            QCheckBox* cb = new QCheckBox(label, g);
-            cb->setStyleSheet("QCheckBox { color: #CCCCCC; font-size: 11px; padding: 4px 8px; } QCheckBox::indicator { width: 14px; height: 14px; }");
+
+            StyledCheckBox* cb = new StyledCheckBox();
+            ClickableRow* row = new ClickableRow(cb);
+            row->setFixedHeight(24);
+            QHBoxLayout* rl = new QHBoxLayout(row);
+            rl->setContentsMargins(4, 0, 4, 0);
+            rl->setSpacing(5);
+            rl->addWidget(cb);
+            QLabel* lbl = new QLabel(label, row);
+            lbl->setStyleSheet("font-size: 12px; color: #CCCCCC; background: transparent;");
+            rl->addWidget(lbl, 1);
+            gl->addWidget(row);
+
             if (m_filter.notePresence == p) cb->setChecked(true);
             connect(cb, &QCheckBox::toggled, this, [this, p, noteGroup](bool on) {
                 if (!on) {
@@ -904,7 +925,6 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             });
             noteGroup->addButton(cb);
-            gl->addWidget(cb);
         }
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
@@ -984,8 +1004,18 @@ void FilterPanel::rebuildGroups() {
         QButtonGroup* ratioGroup = new QButtonGroup(g);
         ratioGroup->setExclusive(true);
         for (const auto& pair : ratios) {
-            QCheckBox* cb = new QCheckBox(pair.second, g);
-            cb->setStyleSheet("QCheckBox { color: #CCCCCC; font-size: 11px; padding: 4px 8px; } QCheckBox::indicator { width: 14px; height: 14px; }");
+            StyledCheckBox* cb = new StyledCheckBox();
+            ClickableRow* row = new ClickableRow(cb);
+            row->setFixedHeight(24);
+            QHBoxLayout* rl = new QHBoxLayout(row);
+            rl->setContentsMargins(4, 0, 4, 0);
+            rl->setSpacing(5);
+            rl->addWidget(cb);
+            QLabel* lbl = new QLabel(pair.second, row);
+            lbl->setStyleSheet("font-size: 12px; color: #CCCCCC; background: transparent;");
+            rl->addWidget(lbl, 1);
+            gl->addWidget(row);
+
             if (m_filter.ratio == pair.first) cb->setChecked(true);
             connect(cb, &QCheckBox::toggled, this, [this, pair, ratioGroup](bool on) {
                 if (!on) {
@@ -998,7 +1028,6 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             });
             ratioGroup->addButton(cb);
-            gl->addWidget(cb);
         }
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
