@@ -13,6 +13,7 @@
 #include <QClipboard>
 #include <QApplication>
 #include <QMenu>
+#include <QWidgetAction>
 #include <QDir>
 #include <QAbstractTextDocumentLayout>
 #include <QtMath>
@@ -139,18 +140,71 @@ void ColorPill::leaveEvent(QEvent*) {
 }
 
 void ColorPill::mousePressEvent(QMouseEvent* event) {
-    QMenu menu(this);
-    UiHelper::applyMenuStyle(&menu);
-    QColor color = m_color;
+    if (event->button() == Qt::RightButton) {
+        emit colorSelected(m_color);
+        return;
+    }
 
-    menu.addAction("搜索相似颜色的项目", [this, color]() {
-        emit colorSelected(color);
-    });
-    menu.addSeparator();
-    QString hex = color.name().toUpper();
-    menu.addAction(QString("复制 %1").arg(hex), [hex]() { QApplication::clipboard()->setText(hex); });
-    
-    menu.exec(event->globalPosition().toPoint());
+    if (event->button() == Qt::LeftButton) {
+        QMenu menu(this);
+        UiHelper::applyMenuStyle(&menu);
+
+        // 顶部搜索框模拟
+        QWidgetAction* searchAction = new QWidgetAction(&menu);
+        QWidget* searchWidget = new QWidget(&menu);
+        QHBoxLayout* searchLayout = new QHBoxLayout(searchWidget);
+        searchLayout->setContentsMargins(8, 4, 8, 4);
+        searchLayout->setSpacing(8);
+        QLabel* searchIcon = new QLabel(searchWidget);
+        searchIcon->setPixmap(UiHelper::getIcon("search", QColor("#888888"), 14).pixmap(14, 14));
+        searchLayout->addWidget(searchIcon);
+        QLineEdit* searchEdit = new QLineEdit(searchWidget);
+        searchEdit->setPlaceholderText("搜索...");
+        searchEdit->setStyleSheet("QLineEdit { background: transparent; border: none; color: #EEEEEE; font-size: 12px; }");
+        searchLayout->addWidget(searchEdit);
+        searchAction->setDefaultWidget(searchWidget);
+        menu.addAction(searchAction);
+
+        QColor color = m_color;
+        menu.addAction("搜索相似颜色的项目", [this, color]() {
+            emit colorSelected(color);
+        });
+        menu.addSeparator();
+
+        // 各种颜色格式复制
+        QString hex = color.name().toUpper();
+        menu.addAction(QString("复制 %1").arg(hex), [hex]() { QApplication::clipboard()->setText(hex); });
+
+        QString rgb = QString("rgb(%1, %2, %3)").arg(color.red()).arg(color.green()).arg(color.blue());
+        menu.addAction(QString("复制 %1").arg(rgb), [rgb]() { QApplication::clipboard()->setText(rgb); });
+
+        QString rgba = QString("rgba(%1, %2, %3, 1)").arg(color.red()).arg(color.green()).arg(color.blue());
+        menu.addAction(QString("复制 %1").arg(rgba), [rgba]() { QApplication::clipboard()->setText(rgba); });
+
+        QString hsl = QString("hsl(%1, %2%, %3%)").arg(color.hslHue() < 0 ? 0 : color.hslHue()).arg(qRound(color.hslSaturationF() * 100)).arg(qRound(color.lightnessF() * 100));
+        menu.addAction(QString("复制 %1").arg(hsl), [hsl]() { QApplication::clipboard()->setText(hsl); });
+
+        QString hsv = QString("hsv(%1, %2%, %3%)").arg(color.hsvHue() < 0 ? 0 : color.hsvHue()).arg(qRound(color.hsvSaturationF() * 100)).arg(qRound(color.valueF() * 100));
+        menu.addAction(QString("复制 %1").arg(hsv), [hsv]() { QApplication::clipboard()->setText(hsv); });
+
+        // HWB (Hue, Whiteness, Blackness) - Qt 不直接支持，需要计算
+        double r = color.redF(), g = color.greenF(), b = color.blueF();
+        double w = qMin(r, qMin(g, b));
+        double v = qMax(r, qMax(g, b));
+        double bk = 1.0 - v;
+        QString hwb = QString("hwb(%1, %2%, %3%)").arg(color.hsvHue() < 0 ? 0 : color.hsvHue()).arg(qRound(w * 100)).arg(qRound(bk * 100));
+        menu.addAction(QString("复制 %1").arg(hwb), [hwb]() { QApplication::clipboard()->setText(hwb); });
+
+        QString cmyk = QString("cmyk(%1%, %2%, %3%, %4%)").arg(qRound(color.cyanF() * 100)).arg(qRound(color.magentaF() * 100)).arg(qRound(color.yellowF() * 100)).arg(qRound(color.blackF() * 100));
+        menu.addAction(QString("复制 %1").arg(cmyk), [cmyk]() { QApplication::clipboard()->setText(cmyk); });
+
+        menu.addSeparator();
+        menu.addAction("设置为自定义主色", [this, color]() {
+            emit requestSetAsPrimary(color);
+        });
+
+        menu.exec(event->globalPosition().toPoint());
+    }
     QWidget::mousePressEvent(event);
 }
 
@@ -640,7 +694,8 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
         } else {
             pill = new ColorPill(entry.first, entry.second, m_paletteBox);
             pill->setStyleSheet("background: transparent; border: none;");
-            connect(pill, &ColorPill::colorSelected, this, &MetaPanel::searchByColor);
+            connect(pill, &ColorPill::colorSelected, [this](const QColor& c){ emit searchByColor(c); });
+            connect(pill, &ColorPill::requestSetAsPrimary, this, &MetaPanel::setAsPrimaryColor);
         }
         pill->show();
         m_paletteFlowLayout->addWidget(pill);
@@ -707,6 +762,13 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
         }
     }
     return QFrame::eventFilter(watched, event);
+}
+
+void MetaPanel::setAsPrimaryColor(const QColor& color) {
+    QString currentPath = m_pathEdit->toPlainText().trimmed();
+    if (currentPath != "-" && !currentPath.isEmpty()) {
+        MetadataManager::instance().setColor(currentPath.toStdWString(), color.name().toStdWString());
+    }
 }
 
 } // namespace ArcMeta

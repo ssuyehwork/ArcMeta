@@ -87,6 +87,7 @@ public:
     void setData(const QColor& color, float ratio);
 signals:
     void colorSelected(const QColor& color);
+    void requestSetAsPrimary(const QColor& color);
 protected:
     void paintEvent(QPaintEvent* event) override;
     void enterEvent(QEnterEvent* event) override;
@@ -190,6 +191,7 @@ private:
 private slots:
     void onTagAdded();
     void onTagDeleted(const QString& text);
+    void setAsPrimaryColor(const QColor& color);
 };
 
 } // namespace ArcMeta
