@@ -932,13 +932,16 @@ void FilterPanel::rebuildGroups() {
         minEdit->setFixedHeight(24);
         maxEdit->setFixedHeight(24);
 
-        // 优化 QComboBox 样式 (使用标准三角形图标并增加间距)
-        unitCombo->setStyleSheet(
-            "QComboBox { background: #2D2D2D; color: #EEEEEE; border: 1px solid #444444; border-radius: 4px; font-size: 11px; padding: 1px 24px 1px 4px; min-width: 45px; height: 24px; }"
-            "QComboBox::drop-down { border: none; width: 20px; }"
-            "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #AAAAAA; width: 0; height: 0; position: relative; top: 1px; }"
-            "QComboBox QAbstractItemView { background-color: #252526; color: #EEEEEE; selection-background-color: #3E3E42; border: 1px solid #444444; outline: none; padding: 4px; }"
-        );
+        // 优化 QComboBox 样式 (使用物理 SVG 三角形并紧凑布局)
+        QString arrowPath = UiHelper::getSvgTempFilePath("menu_triangle", QColor("#AAAAAA"));
+        unitCombo->setFixedHeight(24);
+        unitCombo->setFixedWidth(52);
+        unitCombo->setStyleSheet(QString(
+            "QComboBox { background: #2D2D2D; color: #EEEEEE; border: 1px solid #444444; border-radius: 4px; font-size: 11px; padding-left: 6px; }"
+            "QComboBox::drop-down { border: none; width: 18px; }"
+            "QComboBox::down-arrow { image: url(%1); width: 10px; height: 10px; }"
+            "QComboBox QAbstractItemView { background-color: #252526; color: #EEEEEE; selection-background-color: #3E3E42; border: 1px solid #444444; outline: none; }"
+        ).arg(arrowPath));
 
         hs->addWidget(minEdit);
         QLabel* sep = new QLabel("-", g); sep->setStyleSheet("color: #AAA;"); hs->addWidget(sep);
