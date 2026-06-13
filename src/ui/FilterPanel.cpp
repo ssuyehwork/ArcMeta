@@ -478,122 +478,6 @@ void FilterPanel::rebuildGroups() {
 
     auto colorMap = s_colorMap();
 
-    // ── 0. 链接 & 备注 & 大小 (Plan-30) ─────────────────────────
-    {
-        QVBoxLayout* gl = nullptr;
-        QWidget* g = buildGroup("其他属性", gl);
-
-        // 0.1 链接筛选 (All, Yes, No)
-        QHBoxLayout* hl = new QHBoxLayout();
-        hl->setContentsMargins(8, 4, 8, 4);
-        QLabel* lblLink = new QLabel("链接:", g);
-        lblLink->setStyleSheet("color: #AAAAAA; font-size: 11px;");
-        hl->addWidget(lblLink);
-
-        for (auto p : {FilterState::All, FilterState::Yes, FilterState::No}) {
-            QString label = (p == FilterState::All ? "全部" : (p == FilterState::Yes ? "有" : "无"));
-            QRadioButton* rb = new QRadioButton(label, g);
-            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
-            if (m_filter.linkPresence == p) rb->setChecked(true);
-            connect(rb, &QRadioButton::toggled, this, [this, p](bool on) {
-                if (on) { m_filter.linkPresence = p; emit filterChanged(m_filter); }
-            });
-            hl->addWidget(rb);
-        }
-        hl->addStretch();
-        gl->addLayout(hl);
-
-        // 0.2 备注筛选
-        QHBoxLayout* hn = new QHBoxLayout();
-        hn->setContentsMargins(8, 4, 8, 4);
-        QLabel* lblNote = new QLabel("备注:", g);
-        lblNote->setStyleSheet("color: #AAAAAA; font-size: 11px;");
-        hn->addWidget(lblNote);
-
-        for (auto p : {FilterState::All, FilterState::Yes, FilterState::No}) {
-            QString label = (p == FilterState::All ? "全部" : (p == FilterState::Yes ? "有" : "无"));
-            QRadioButton* rb = new QRadioButton(label, g);
-            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
-            if (m_filter.notePresence == p) rb->setChecked(true);
-            connect(rb, &QRadioButton::toggled, this, [this, p](bool on) {
-                if (on) { m_filter.notePresence = p; emit filterChanged(m_filter); }
-            });
-            hn->addWidget(rb);
-        }
-        hn->addStretch();
-        gl->addLayout(hn);
-
-        // 0.3 文件大小筛选
-        QLabel* lblSize = new QLabel("文件大小:", g);
-        lblSize->setStyleSheet("color: #AAAAAA; font-size: 11px; margin-left: 8px; margin-top: 4px;");
-        gl->addWidget(lblSize);
-
-        QHBoxLayout* hs = new QHBoxLayout();
-        hs->setContentsMargins(8, 4, 8, 4);
-        QLineEdit* minEdit = new QLineEdit(g);
-        QLineEdit* maxEdit = new QLineEdit(g);
-        QComboBox* unitCombo = new QComboBox(g);
-        unitCombo->addItems({"KB", "MB", "GB"});
-        unitCombo->setCurrentIndex(1); // Default MB
-
-        auto sizeEditStyle = "QLineEdit { background: #2D2D2D; color: #EEE; border: 1px solid #444; border-radius: 4px; padding: 2px; font-size: 11px; }";
-        minEdit->setStyleSheet(sizeEditStyle);
-        maxEdit->setStyleSheet(sizeEditStyle);
-        minEdit->setPlaceholderText("最小");
-        maxEdit->setPlaceholderText("最大");
-        unitCombo->setStyleSheet("QComboBox { background: #2D2D2D; color: #EEE; border: 1px solid #444; font-size: 11px; }");
-
-        hs->addWidget(minEdit);
-        QLabel* sep = new QLabel("-", g); sep->setStyleSheet("color: #AAA;"); hs->addWidget(sep);
-        hs->addWidget(maxEdit);
-        hs->addWidget(unitCombo);
-        gl->addLayout(hs);
-
-        auto updateSizeFilter = [this, minEdit, maxEdit, unitCombo]() {
-            auto toBytes = [](const QString& txt, const QString& unit) -> long long {
-                if (txt.isEmpty()) return -1;
-                bool ok;
-                double val = txt.toDouble(&ok);
-                if (!ok) return -1;
-                long long factor = 1024;
-                if (unit == "MB") factor = 1024 * 1024;
-                else if (unit == "GB") factor = 1024 * 1024 * 1024;
-                return (long long)(val * factor);
-            };
-            m_filter.minSize = toBytes(minEdit->text(), unitCombo->currentText());
-            m_filter.maxSize = toBytes(maxEdit->text(), unitCombo->currentText());
-            emit filterChanged(m_filter);
-        };
-
-        connect(minEdit, &QLineEdit::editingFinished, this, updateSizeFilter);
-        connect(maxEdit, &QLineEdit::editingFinished, this, updateSizeFilter);
-        connect(unitCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [updateSizeFilter](int){ updateSizeFilter(); });
-
-        // 0.4 图像比例筛选
-        QLabel* lblRatio = new QLabel("图像比例:", g);
-        lblRatio->setStyleSheet("color: #AAAAAA; font-size: 11px; margin-left: 8px; margin-top: 4px;");
-        gl->addWidget(lblRatio);
-
-        QHBoxLayout* hr = new QHBoxLayout();
-        hr->setContentsMargins(8, 4, 8, 4);
-        static const QList<QPair<FilterState::AspectRatio, QString>> ratios = {
-            {FilterState::AspectAny, "全部"}, {FilterState::Horizontal, "横图"},
-            {FilterState::Vertical, "竖图"}, {FilterState::Square, "方形"}, {FilterState::Ratio169, "16:9"}
-        };
-        for (const auto& pair : ratios) {
-            QRadioButton* rb = new QRadioButton(pair.second, g);
-            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
-            if (m_filter.ratio == pair.first) rb->setChecked(true);
-            connect(rb, &QRadioButton::toggled, this, [this, pair](bool on) {
-                if (on) { m_filter.ratio = pair.first; emit filterChanged(m_filter); }
-            });
-            hr->addWidget(rb);
-        }
-        hr->addStretch();
-        gl->addLayout(hr);
-
-        m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
-    }
 
     // ── 1. 评级 ──────────────────────────────────────────────
     if (!m_ratingCounts.isEmpty()) {
@@ -613,6 +497,7 @@ void FilterPanel::rebuildGroups() {
         }
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
+
 
     // ── 2. 颜色标记 (Plan-18: 矩阵重构版) ─────────────────────────
     if (true) { // 始终显示颜色区域以保持 UI 稳定
@@ -965,6 +850,130 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             });
         }
+        m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
+    }
+
+    // ── 7. 链接 & 备注 & 大小 & 比例 (Plan-30, Plan-29) ─────────────────────────
+    {
+        QVBoxLayout* gl = nullptr;
+        QWidget* g = buildGroup("其他属性", gl);
+
+        // 0.1 链接筛选 (All, Yes, No)
+        QHBoxLayout* hl = new QHBoxLayout();
+        hl->setContentsMargins(8, 4, 8, 4);
+        QLabel* lblLink = new QLabel("链接:", g);
+        lblLink->setStyleSheet("color: #AAAAAA; font-size: 11px;");
+        hl->addWidget(lblLink);
+
+        for (auto p : {FilterState::All, FilterState::Yes, FilterState::No}) {
+            QString label = (p == FilterState::All ? "全部" : (p == FilterState::Yes ? "有" : "无"));
+            QRadioButton* rb = new QRadioButton(label, g);
+            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
+            if (m_filter.linkPresence == p) rb->setChecked(true);
+            connect(rb, &QRadioButton::toggled, this, [this, p](bool on) {
+                if (on) { m_filter.linkPresence = p; emit filterChanged(m_filter); }
+            });
+            hl->addWidget(rb);
+        }
+        hl->addStretch();
+        gl->addLayout(hl);
+
+        // 0.2 备注筛选
+        QHBoxLayout* hn = new QHBoxLayout();
+        hn->setContentsMargins(8, 4, 8, 4);
+        QLabel* lblNote = new QLabel("备注:", g);
+        lblNote->setStyleSheet("color: #AAAAAA; font-size: 11px;");
+        hn->addWidget(lblNote);
+
+        for (auto p : {FilterState::All, FilterState::Yes, FilterState::No}) {
+            QString label = (p == FilterState::All ? "全部" : (p == FilterState::Yes ? "有" : "无"));
+            QRadioButton* rb = new QRadioButton(label, g);
+            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
+            if (m_filter.notePresence == p) rb->setChecked(true);
+            connect(rb, &QRadioButton::toggled, this, [this, p](bool on) {
+                if (on) { m_filter.notePresence = p; emit filterChanged(m_filter); }
+            });
+            hn->addWidget(rb);
+        }
+        hn->addStretch();
+        gl->addLayout(hn);
+
+        // 0.3 文件大小筛选
+        QLabel* lblSize = new QLabel("文件大小:", g);
+        lblSize->setStyleSheet("color: #AAAAAA; font-size: 11px; margin-left: 8px; margin-top: 4px;");
+        gl->addWidget(lblSize);
+
+        QHBoxLayout* hs = new QHBoxLayout();
+        hs->setContentsMargins(8, 4, 8, 4);
+        QLineEdit* minEdit = new QLineEdit(g);
+        QLineEdit* maxEdit = new QLineEdit(g);
+        QComboBox* unitCombo = new QComboBox(g);
+        unitCombo->addItems({"KB", "MB", "GB"});
+        unitCombo->setCurrentIndex(1); // Default MB
+
+        auto sizeEditStyle = "QLineEdit { background: #2D2D2D; color: #EEE; border: 1px solid #444; border-radius: 4px; padding: 2px; font-size: 11px; }";
+        minEdit->setStyleSheet(sizeEditStyle);
+        maxEdit->setStyleSheet(sizeEditStyle);
+        minEdit->setPlaceholderText("最小");
+        maxEdit->setPlaceholderText("最大");
+
+        // 优化 QComboBox 样式 (修复背景色及下拉框颜色)
+        unitCombo->setStyleSheet(
+            "QComboBox { background: #2D2D2D; color: #EEEEEE; border: 1px solid #444444; border-radius: 4px; font-size: 11px; padding: 1px 2px; }"
+            "QComboBox::drop-down { border: none; width: 20px; }"
+            "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #AAAAAA; margin-right: 4px; }"
+            "QComboBox QAbstractItemView { background-color: #252526; color: #EEEEEE; selection-background-color: #3E3E42; border: 1px solid #444444; outline: none; }"
+        );
+
+        hs->addWidget(minEdit);
+        QLabel* sep = new QLabel("-", g); sep->setStyleSheet("color: #AAA;"); hs->addWidget(sep);
+        hs->addWidget(maxEdit);
+        hs->addWidget(unitCombo);
+        gl->addLayout(hs);
+
+        auto updateSizeFilter = [this, minEdit, maxEdit, unitCombo]() {
+            auto toBytes = [](const QString& txt, const QString& unit) -> long long {
+                if (txt.isEmpty()) return -1;
+                bool ok;
+                double val = txt.toDouble(&ok);
+                if (!ok) return -1;
+                long long factor = 1024;
+                if (unit == "MB") factor = 1024 * 1024;
+                else if (unit == "GB") factor = 1024 * 1024 * 1024;
+                return (long long)(val * factor);
+            };
+            m_filter.minSize = toBytes(minEdit->text(), unitCombo->currentText());
+            m_filter.maxSize = toBytes(maxEdit->text(), unitCombo->currentText());
+            emit filterChanged(m_filter);
+        };
+
+        connect(minEdit, &QLineEdit::editingFinished, this, updateSizeFilter);
+        connect(maxEdit, &QLineEdit::editingFinished, this, updateSizeFilter);
+        connect(unitCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [updateSizeFilter](int){ updateSizeFilter(); });
+
+        // 0.4 图像比例筛选
+        QLabel* lblRatio = new QLabel("图像比例:", g);
+        lblRatio->setStyleSheet("color: #AAAAAA; font-size: 11px; margin-left: 8px; margin-top: 4px;");
+        gl->addWidget(lblRatio);
+
+        QHBoxLayout* hr = new QHBoxLayout();
+        hr->setContentsMargins(8, 4, 8, 4);
+        static const QList<QPair<FilterState::AspectRatio, QString>> ratios = {
+            {FilterState::AspectAny, "全部"}, {FilterState::Horizontal, "横图"},
+            {FilterState::Vertical, "竖图"}, {FilterState::Square, "方形"}, {FilterState::Ratio169, "16:9"}
+        };
+        for (const auto& pair : ratios) {
+            QRadioButton* rb = new QRadioButton(pair.second, g);
+            rb->setStyleSheet("QRadioButton { color: #CCCCCC; font-size: 11px; }");
+            if (m_filter.ratio == pair.first) rb->setChecked(true);
+            connect(rb, &QRadioButton::toggled, this, [this, pair](bool on) {
+                if (on) { m_filter.ratio = pair.first; emit filterChanged(m_filter); }
+            });
+            hr->addWidget(rb);
+        }
+        hr->addStretch();
+        gl->addLayout(hr);
+
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
 }

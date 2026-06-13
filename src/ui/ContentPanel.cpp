@@ -614,12 +614,11 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
 
     // 10. 图像比例过滤 (Plan-29)
     if (currentFilter.ratio != FilterState::AspectAny) {
-        // 从 MetadataManager 获取实时尺寸信息
-        auto meta = MetadataManager::instance().getMeta(record.path.toStdWString());
-        if (meta.width > 0 && meta.height > 0) {
-            double r = (double)meta.width / meta.height;
-            if (currentFilter.ratio == FilterState::Horizontal && meta.width <= meta.height) return false;
-            if (currentFilter.ratio == FilterState::Vertical && meta.height <= meta.width) return false;
+        // 直接使用 record 中缓存的尺寸信息 (Plan-30 优化：避免重复查询元数据管理器)
+        if (record.width > 0 && record.height > 0) {
+            double r = (double)record.width / record.height;
+            if (currentFilter.ratio == FilterState::Horizontal && record.width <= record.height) return false;
+            if (currentFilter.ratio == FilterState::Vertical && record.height <= record.width) return false;
             if (currentFilter.ratio == FilterState::Square && std::abs(r - 1.0) > 0.05) return false;
             if (currentFilter.ratio == FilterState::Ratio169 && std::abs(r - 1.77) > 0.05) return false;
         } else {
