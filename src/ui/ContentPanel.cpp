@@ -739,6 +739,17 @@ void ContentPanel::initUi() {
     QLabel* titleLabel = new QLabel("内容", titleBar); 
     titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #41F2F2; background: transparent; border: none;"); 
      
+    m_btnLayersBlue = new QPushButton(titleBar);
+    m_btnLayersBlue->setFixedSize(24, 24);
+    m_btnLayersBlue->setIcon(UiHelper::getIcon("layers", QColor("#3498db"), 18));
+    m_btnLayersBlue->setProperty("tooltipText", "TODO");
+    m_btnLayersBlue->installEventFilter(this);
+    m_btnLayersBlue->setStyleSheet(
+        "QPushButton { background: transparent; border: none; border-radius: 4px; }"
+        "QPushButton:hover { background: #3E3E42; }"
+        "QPushButton:disabled { opacity: 0.3; }"
+    );
+
     m_btnLayers = new QPushButton(titleBar); 
     m_btnLayers->setCheckable(true); 
     m_btnLayers->setFixedSize(24, 24); 
@@ -775,6 +786,7 @@ void ContentPanel::initUi() {
  
     titleL->addWidget(titleLabel); 
     titleL->addStretch(); 
+    titleL->addWidget(m_btnLayersBlue, 0, Qt::AlignVCenter);
     titleL->addWidget(m_btnLayers, 0, Qt::AlignVCenter); 
  
     m_mainLayout->addWidget(titleBar); 
