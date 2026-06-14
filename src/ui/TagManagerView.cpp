@@ -10,7 +10,6 @@
 #include <QFrame>
 #include <QEvent>
 #include <QContextMenuEvent>
-#include <QFlowLayout> // 假设已存在，否则使用自定义或网格
 #include <QGridLayout>
 #include <QLineEdit>
 #include <QInputDialog>
