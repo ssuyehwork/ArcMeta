@@ -108,6 +108,7 @@ private:
     ContentPanel* m_contentPanel = nullptr;
     MetaPanel* m_metaPanel = nullptr;
     FilterPanel* m_filterPanel = nullptr;
+    class TagManagerView* m_tagManagerView = nullptr;
 
     QSplitter* m_mainSplitter = nullptr;
 
@@ -133,6 +134,7 @@ private:
 
     // 状态管理
     bool m_isPinned = false;
+    bool m_isTagManagerMode = false;
     bool m_panelsInitialized = false; // 2026-04-12 状态锁：确保面板仅初始化一次
     QTimer* m_idleTimer = nullptr;
     QString m_currentPath;

@@ -15,6 +15,7 @@
 #include "ContentPanel.h"
 #include "MetaPanel.h"
 #include "FilterPanel.h"
+#include "TagManagerView.h"
 #include "QuickLookWindow.h"
 #include "ToolTipOverlay.h"
 #include "../mft/MftReader.h"
@@ -221,6 +222,29 @@ void MainWindow::initUi() {
     // 1a. 分类选择 -> 内容面板执行数据加载 (针对问题 2)
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_categoryPanel, &CategoryPanel::categorySelected, this, [this](int id, const QString& name, const QString& type, const QString& path) {
+        // 2026-07-xx 按照用户要求：实现"标签管理"专属视图模式切换
+        if (type == "tags") {
+            m_navPanel->hide();
+            m_contentPanel->hide();
+            m_metaPanel->hide();
+            m_filterPanel->hide();
+            
+            m_tagManagerView->refresh();
+            m_tagManagerView->show();
+            m_isTagManagerMode = true;
+            
+            if (m_addressBar) m_addressBar->setPath("标签管理");
+            return;
+        } else if (m_isTagManagerMode) {
+            // 恢复模式
+            m_tagManagerView->hide();
+            m_navPanel->show();
+            m_contentPanel->show();
+            m_metaPanel->show();
+            m_filterPanel->show();
+            m_isTagManagerMode = false;
+        }
+
         // 2026-04-12 关键修正：跳转分类时，物理重置搜索状态，防止逻辑锁死
         if (m_searchEdit) m_searchEdit->clear();
         m_contentPanel->search("");
@@ -940,6 +964,9 @@ void MainWindow::setupSplitters() {
     m_filterPanel = new FilterPanel(this);
     m_filterPanel->setObjectName("FilterContainer");
 
+    m_tagManagerView = new TagManagerView(this);
+    m_tagManagerView->hide();
+
     // 2026-05-07 按照用户要求：焦点线持久化显示，基于数据来源而非焦点位置
     connect(m_contentPanel, &ContentPanel::dataSourceChanged, this, [this](const QString& source) {
         // 重置所有面板高亮
@@ -960,6 +987,17 @@ void MainWindow::setupSplitters() {
     m_mainSplitter->addWidget(m_contentPanel);
     m_mainSplitter->addWidget(m_metaPanel);
     m_mainSplitter->addWidget(m_filterPanel);
+    m_mainSplitter->addWidget(m_tagManagerView);
+
+    // 2026-07-xx 按照用户要求：标签搜索联动
+    connect(m_tagManagerView, &TagManagerView::requestSearchTag, this, [this](const QString& tag) {
+        // 自动切回正常模式并搜索
+        if (m_categoryPanel) m_categoryPanel->selectCategory(-1); // 选中“全部数据”
+        if (m_searchEdit) m_searchEdit->setText(tag);
+        
+        QStringList paths = MetadataManager::instance().searchInCache(tag);
+        m_contentPanel->loadPaths(paths);
+    });
 
     m_bodyLayout->addWidget(m_mainSplitter);
 
