@@ -114,7 +114,7 @@ void NavPanel::initUi() {
         "}"
     );
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 2, 5, 0); // 2026-xx-xx 按照用户要求：右侧保留 5px 呼吸边距
+    headerLayout->setContentsMargins(15, 0, 5, 0); // 2026-xx-xx 按照用户要求：右侧保留 5px 呼吸边距
     headerLayout->setSpacing(5);                  // 2026-xx-xx 按照用户要求：间距统一为 5px
 
     QLabel* iconLabel = new QLabel(header);
@@ -125,6 +125,24 @@ void NavPanel::initUi() {
     titleLabel->setStyleSheet("color: #2ecc71; font-size: 13px; font-weight: bold; background: transparent; border: none;");
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
+
+    // 2026-06-xx 按照用户要求：新增刷新按钮
+    QPushButton* btnRefresh = new QPushButton(header);
+    btnRefresh->setFixedSize(24, 24);
+    btnRefresh->setIcon(UiHelper::getIcon("sync", QColor("#95a5a6")));
+    btnRefresh->setIconSize(QSize(16, 16));
+    btnRefresh->setFlat(true);
+    btnRefresh->setCursor(Qt::PointingHandCursor);
+    btnRefresh->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: #3E3E42; border-radius: 4px; }");
+    btnRefresh->setProperty("tooltipText", "刷新目录树");
+    btnRefresh->installEventFilter(this);
+    connect(btnRefresh, &QPushButton::clicked, this, [this]() {
+        if (m_model) {
+            m_model->clear();
+            deferredInit();
+        }
+    });
+    headerLayout->addWidget(btnRefresh, 0, Qt::AlignVCenter);
 
     m_mainLayout->addWidget(header);
 

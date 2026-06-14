@@ -114,6 +114,11 @@ public:
                     const QString& path, bool encrypted);
 
     /**
+     * @brief 设置当前选中的路径列表，用于多选批量操作
+     */
+    void setSelectedPaths(const QStringList& paths) { m_selectedPaths = paths; }
+
+    /**
      * @brief 设置变长色板显示
      */
     void setPalettes(const QVector<QPair<QColor, float>>& palette);
@@ -130,6 +135,11 @@ signals:
      * @brief 根据颜色搜索项目
      */
     void searchByColor(const QColor& color);
+
+    /**
+     * @brief 标签变更信号 (支持批量更新)
+     */
+    void tagsChanged(const QStringList& tags);
 
 public:
     /**
@@ -182,6 +192,8 @@ private:
     ElasticEdit* m_linkEdit = nullptr;
     
     ElasticEdit* m_categoryEdit = nullptr;
+
+    QStringList m_selectedPaths;
 
     // 2026-06-xx 性能优化：控件复用池
     QList<TagPill*> m_tagPool;

@@ -467,14 +467,27 @@ QWidget* MetaPanel::createSectionBox(const QString& iconName, const QString& tit
 void MetaPanel::onTagAdded() {
     QString text = m_tagEdit->toPlainText().trimmed();
     if (!text.isEmpty()) {
-        QString currentPath = m_pathEdit->toPlainText().trimmed();
-        if (currentPath != "-" && !currentPath.isEmpty()) {
-            std::wstring wPath = currentPath.toStdWString();
-            RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
-            if (!rm.tags.contains(text)) {
-                rm.tags << text; MetadataManager::instance().setTags(wPath, rm.tags);
-                TagPill* pill = new TagPill(text, m_tagContainer); connect(pill, &TagPill::deleteRequested, this, &MetaPanel::onTagDeleted); m_tagFlowLayout->addWidget(pill);
+        if (!m_selectedPaths.isEmpty()) {
+            QStringList currentTags;
+            for (const QString& path : m_selectedPaths) {
+                std::wstring wPath = path.toStdWString();
+                RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
+                
+                // 2026-07-xx 物理对齐：修改前先判断项目是否已经入库，若无则执行注册
+                if (!rm.isManaged) {
+                    MetadataManager::instance().registerItem(wPath);
+                    rm = MetadataManager::instance().getMeta(wPath);
+                }
+
+                if (!rm.tags.contains(text)) {
+                    rm.tags << text;
+                    MetadataManager::instance().setTags(wPath, rm.tags);
+                }
+                if (path == m_selectedPaths.first()) currentTags = rm.tags;
             }
+            // 重新刷新显示首个选中项的标签
+            setTags(currentTags);
+            emit tagsChanged(currentTags);
         }
         m_tagEdit->clear();
         m_tagEdit->adjustHeight();
@@ -482,17 +495,38 @@ void MetaPanel::onTagAdded() {
 }
 
 void MetaPanel::onTagDeleted(const QString& text) {
+    if (m_selectedPaths.isEmpty()) return;
+
+    QStringList currentTags;
+    for (const QString& path : m_selectedPaths) {
+        std::wstring wPath = path.toStdWString();
+        RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
+        
+        if (!rm.isManaged) {
+            MetadataManager::instance().registerItem(wPath);
+            rm = MetadataManager::instance().getMeta(wPath);
+        }
+
+        if (rm.tags.contains(text)) {
+            rm.tags.removeAll(text);
+            MetadataManager::instance().setTags(wPath, rm.tags);
+        }
+        if (path == m_selectedPaths.first()) currentTags = rm.tags;
+    }
+    
+    emit tagsChanged(currentTags);
+
     for (int i = 0; i < m_tagFlowLayout->count(); ++i) {
-        QLayoutItem* item = m_tagFlowLayout->itemAt(i); TagPill* pill = qobject_cast<TagPill*>(item->widget());
+        QLayoutItem* item = m_tagFlowLayout->itemAt(i);
+        TagPill* pill = qobject_cast<TagPill*>(item->widget());
         if (pill && pill->property("tagText").toString() == text) {
-            m_tagFlowLayout->takeAt(i); pill->deleteLater(); delete item;
-            QString currentPath = m_pathEdit->toPlainText().trimmed();
-            if (currentPath != "-" && !currentPath.isEmpty()) {
-                std::wstring wPath = currentPath.toStdWString(); RuntimeMeta rm = MetadataManager::instance().getMeta(wPath); rm.tags.removeAll(text); MetadataManager::instance().setTags(wPath, rm.tags);
-            }
-            return;
+            m_tagFlowLayout->takeAt(i);
+            pill->deleteLater();
+            delete item;
+            break;
         }
     }
+    m_adjustTimer->start();
 }
 
 void MetaPanel::resizeEvent(QResizeEvent* event) {
@@ -711,21 +745,37 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_noteEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = m_pathEdit->toPlainText().trimmed(); 
-        if (currentPath != "-" && !currentPath.isEmpty()) {
+        if (!m_selectedPaths.isEmpty()) {
             std::wstring newNote = m_noteEdit->toPlainText().toStdWString();
-            // 2026-06-xx 物理加固：增加差异比对，只有真正修改内容才触发保存，防止点击触发激活
-            if (newNote != MetadataManager::instance().getMeta(currentPath.toStdWString()).note) {
-                MetadataManager::instance().setNote(currentPath.toStdWString(), newNote);
+            for (const QString& path : m_selectedPaths) {
+                std::wstring wPath = path.toStdWString();
+                RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
+                
+                if (!rm.isManaged) {
+                    MetadataManager::instance().registerItem(wPath);
+                    rm = MetadataManager::instance().getMeta(wPath);
+                }
+
+                if (newNote != rm.note) {
+                    MetadataManager::instance().setNote(wPath, newNote);
+                }
             }
         }
     } else if (watched == m_linkEdit && event->type() == QEvent::FocusOut) {
-        QString currentPath = m_pathEdit->toPlainText().trimmed(); 
-        if (currentPath != "-" && !currentPath.isEmpty()) {
+        if (!m_selectedPaths.isEmpty()) {
             std::wstring newUrl = m_linkEdit->toPlainText().toStdWString();
-            // 2026-06-xx 物理加固：增加差异比对，防止点击触发激活
-            if (newUrl != MetadataManager::instance().getMeta(currentPath.toStdWString()).url) {
-                MetadataManager::instance().setURL(currentPath.toStdWString(), newUrl);
+            for (const QString& path : m_selectedPaths) {
+                std::wstring wPath = path.toStdWString();
+                RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
+
+                if (!rm.isManaged) {
+                    MetadataManager::instance().registerItem(wPath);
+                    rm = MetadataManager::instance().getMeta(wPath);
+                }
+
+                if (newUrl != rm.url) {
+                    MetadataManager::instance().setURL(wPath, newUrl);
+                }
             }
         }
     } else if (watched == m_nameEdit && event->type() == QEvent::FocusOut) {
