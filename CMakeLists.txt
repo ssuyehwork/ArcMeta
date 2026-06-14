@@ -59,6 +59,8 @@ set(SOURCES
     src/meta/DatabaseManager.h
     src/meta/BatchRenameEngine.cpp
     src/meta/BatchRenameEngine.h
+    src/meta/TagRepo.cpp
+    src/meta/TagRepo.h
     src/meta/MetadataDefs.h
     src/meta/MetadataManager.cpp
     src/meta/MetadataManager.h
@@ -125,6 +127,10 @@ set(SOURCES
     src/ui/SearchHistoryPanel.h
     src/ui/AddressHistoryPanel.cpp
     src/ui/AddressHistoryPanel.h
+    src/ui/FlowLayout.cpp
+    src/ui/FlowLayout.h
+    src/ui/TagManagementPanel.cpp
+    src/ui/TagManagementPanel.h
     src/core/ActionCommand.h
     src/core/UndoManager.h
     src/core/BasicCommands.h

@@ -68,6 +68,8 @@ public:
      */
     sqlite3* getGlobalDb();
 
+    QString getAppDir();
+
 private:
     DatabaseManager(QObject* parent = nullptr);
     ~DatabaseManager();
@@ -87,7 +89,6 @@ private:
     void saveDb(DbConnection& conn);
     void closeDb(DbConnection& conn);
 
-    QString getAppDir();
     void ensureHidden(const std::wstring& path);
 };
 

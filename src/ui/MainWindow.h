@@ -20,6 +20,7 @@ class AddressBar;
 class CategoryPanel;
 class NavPanel;
 class ContentPanel;
+class TagManagementPanel;
 class MetaPanel;
 class FilterPanel;
 class SearchHistoryPanel;
@@ -88,6 +89,7 @@ private:
     QVBoxLayout* m_bodyLayout = nullptr; // 2026-05-08 按照用户要求：提升为成员变量以支持动态边距切换
 
     void initUi();
+    void setTagManagementMode(bool enabled);
     void updateNavButtons();
     void updateStatusBar();
     void navigateTo(const QString& path, bool record = true);
@@ -105,7 +107,9 @@ private:
     
     // UI Panels
     NavPanel* m_navPanel = nullptr;
+    QStackedWidget* m_centerStack = nullptr; // 中央堆栈容器 (切换 Content/TagManagement)
     ContentPanel* m_contentPanel = nullptr;
+    TagManagementPanel* m_tagManagementPanel = nullptr;
     MetaPanel* m_metaPanel = nullptr;
     FilterPanel* m_filterPanel = nullptr;
 
