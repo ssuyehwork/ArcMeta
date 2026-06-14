@@ -20,6 +20,7 @@ class AddressBar;
 class CategoryPanel;
 class NavPanel;
 class ContentPanel;
+class TagManagementPanel;
 class MetaPanel;
 class FilterPanel;
 class SearchHistoryPanel;
@@ -105,7 +106,9 @@ private:
     
     // UI Panels
     NavPanel* m_navPanel = nullptr;
+    QStackedWidget* m_centerStack = nullptr; // 中央堆栈容器 (切换 Content/TagManagement)
     ContentPanel* m_contentPanel = nullptr;
+    TagManagementPanel* m_tagManagementPanel = nullptr;
     MetaPanel* m_metaPanel = nullptr;
     FilterPanel* m_filterPanel = nullptr;
 

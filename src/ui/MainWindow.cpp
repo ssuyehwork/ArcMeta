@@ -13,6 +13,7 @@
 #include "CategoryModel.h"
 #include "NavPanel.h"
 #include "ContentPanel.h"
+#include "TagManagementPanel.h"
 #include "MetaPanel.h"
 #include "FilterPanel.h"
 #include "QuickLookWindow.h"
@@ -228,9 +229,11 @@ void MainWindow::initUi() {
         if (m_addressBar) m_addressBar->setPath("分类: " + name);
         
         if (type == "category") {
+            m_centerStack->setCurrentWidget(m_contentPanel);
             // 2026-06-xx 重构逻辑：内容面板负责展示该分类下的子分类与绑定文件
             m_contentPanel->loadCategory(id);
         } else if (type == "bookmark") {
+            m_centerStack->setCurrentWidget(m_contentPanel);
             // 2026-06-xx 处理快速访问项跳转 (Favorite 路径加载)
             if (!path.isEmpty()) {
                 navigateTo(path);
@@ -239,12 +242,17 @@ void MainWindow::initUi() {
             }
         } else if (type == "all" || type == "uncategorized" || type == "untagged" || 
                    type == "recently_visited" || type == "trash") {
+            m_centerStack->setCurrentWidget(m_contentPanel);
             // 2026-06-xx 物理修复：所有系统项直接通过 getSystemCategoryPaths 获取物理路径并加载
             m_contentPanel->setCurrentCategoryType(type);
             QStringList paths = CategoryRepo::getSystemCategoryPaths(type);
             m_contentPanel->loadPaths(paths);
+        } else if (type == "tags") {
+            m_centerStack->setCurrentWidget(m_tagManagementPanel);
+            m_tagManagementPanel->refresh();
         } else {
-            // 其余系统项 (标签管理等) 维持搜索逻辑
+            m_centerStack->setCurrentWidget(m_contentPanel);
+            // 其余系统项维持搜索逻辑
             m_contentPanel->search(name); 
         }
     });
@@ -931,8 +939,14 @@ void MainWindow::setupSplitters() {
     m_navPanel = new NavPanel(this);
     m_navPanel->setObjectName("ListContainer");
     
+    m_centerStack = new QStackedWidget(this);
+    m_centerStack->setObjectName("EditorContainer");
+
     m_contentPanel = new ContentPanel(this);
-    m_contentPanel->setObjectName("EditorContainer");
+    m_tagManagementPanel = new TagManagementPanel(this);
+
+    m_centerStack->addWidget(m_contentPanel);
+    m_centerStack->addWidget(m_tagManagementPanel);
     
     m_metaPanel = new MetaPanel(this);
     m_metaPanel->setObjectName("MetadataContainer");
@@ -957,9 +971,27 @@ void MainWindow::setupSplitters() {
 
     m_mainSplitter->addWidget(m_categoryPanel);
     m_mainSplitter->addWidget(m_navPanel);
-    m_mainSplitter->addWidget(m_contentPanel);
+    m_mainSplitter->addWidget(m_centerStack);
     m_mainSplitter->addWidget(m_metaPanel);
     m_mainSplitter->addWidget(m_filterPanel);
+
+    // 标签管理面板信号连接
+    connect(m_tagManagementPanel, &TagManagementPanel::tagSearchRequested, this, [this](const QString& tag) {
+        m_centerStack->setCurrentWidget(m_contentPanel);
+        if (m_searchEdit) m_searchEdit->setText(tag);
+
+        // 模拟回车搜索逻辑
+        QStringList paths = CoreController::instance().performSearch(tag);
+        m_contentPanel->loadPaths(paths);
+
+        if (m_addressBar) m_addressBar->setPath("搜索标签: " + tag);
+    });
+
+    connect(m_tagManagementPanel, &TagManagementPanel::tagMetadataChanged, this, [this]() {
+        // 当标签重命名或删除后，刷新内容区和侧边栏
+        m_contentPanel->refreshAll();
+        if (m_categoryPanel) m_categoryPanel->requestRefresh(true);
+    });
 
     m_bodyLayout->addWidget(m_mainSplitter);
 
@@ -1178,6 +1210,8 @@ void MainWindow::initResourceMonitor() {
 void MainWindow::navigateTo(const QString& path, bool record) {
     if (path.isEmpty()) return;
     qDebug() << "[Main] 执行跳转 ->" << path << (record ? "(记录历史)" : "(不记录)");
+
+    if (m_centerStack) m_centerStack->setCurrentWidget(m_contentPanel);
 
     // 2026-04-12 关键协议：任何导航操作（手动输入、点击、后退、上级）都应强制重置搜索态与筛选态
     if (m_searchEdit && !m_searchEdit->text().isEmpty()) {
