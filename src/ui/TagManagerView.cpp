@@ -110,11 +110,11 @@ void TagManagerView::setupSidebar() {
     headerLayout->setContentsMargins(15, 0, 5, 0);
 
     QLabel* iconLabel = new QLabel(header);
-    iconLabel->setPixmap(UiHelper::getIcon("tag_filled", PrimaryBlue, 18).pixmap(18, 18));
+    iconLabel->setPixmap(UiHelper::getIcon("tag_filled", QColor("#1abc9c"), 18).pixmap(18, 18));
     headerLayout->addWidget(iconLabel);
 
     QLabel* titleLabel = new QLabel("标签管理", header);
-    titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #3498db;");
+    titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #1abc9c;");
     headerLayout->addWidget(titleLabel);
 
     m_tagCountLabel = new QLabel("(0)", header);
@@ -185,11 +185,11 @@ void TagManagerView::setupContentArea() {
     titleL->setSpacing(5);
 
     QLabel* iconLabel = new QLabel(titleBar);
-    iconLabel->setPixmap(UiHelper::getIcon("tag", AccentCyan, 18).pixmap(18, 18));
+    iconLabel->setPixmap(UiHelper::getIcon("tag", QColor("#1abc9c"), 18).pixmap(18, 18));
     titleL->addWidget(iconLabel);
 
     m_contentTitleLabel = new QLabel("标签", titleBar);
-    m_contentTitleLabel->setStyleSheet(QString("font-size: 13px; font-weight: bold; color: %1; background: transparent; border: none;").arg(qssColor(AccentCyan)));
+    m_contentTitleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #1abc9c; background: transparent; border: none;");
     titleL->addWidget(m_contentTitleLabel);
     titleL->addStretch();
 
