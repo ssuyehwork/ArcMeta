@@ -459,7 +459,10 @@ public:
 #ifdef Q_OS_WIN
         PIDLIST_ABSOLUTE pidl = nullptr;
         HRESULT hr = SHParseDisplayName(path.toStdWString().c_str(), nullptr, &pidl, 0, nullptr);
-        if (FAILED(hr)) return QImage();
+        if (FAILED(hr)) {
+            qDebug() << "[UiHelper] SHParseDisplayName 失败:" << path << "HRESULT:" << QString::number(hr, 16);
+            return QImage();
+        }
         IShellItem* pItem = nullptr;
         hr = SHCreateItemFromIDList(pidl, IID_IShellItem, (void**)&pItem);
         ILFree(pidl);
@@ -469,7 +472,11 @@ public:
             if (SUCCEEDED(hr)) {
                 SIZE nativeSize = { size, size };
                 HBITMAP hBitmap = nullptr;
-                hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
+                // 2026-07-xx 物理优化：移除 SIIGBF_THUMBNAILONLY 以允许即时生成，加入 BIGGERSIZEOK 提高成功率
+                hr = pFactory->GetImage(nativeSize, SIIGBF_RESIZETOFIT | SIIGBF_BIGGERSIZEOK, &hBitmap);
+                if (FAILED(hr)) {
+                    qDebug() << "[UiHelper] GetImage 失败:" << path << "HRESULT:" << QString::number(hr, 16);
+                }
                 if (SUCCEEDED(hr) && hBitmap) {
                     BITMAP bmpInfo;
                     GetObject(hBitmap, sizeof(bmpInfo), &bmpInfo);

@@ -30,6 +30,7 @@ struct RuntimeMeta {
     bool isManaged; // 2026-06-xx 物理对标：标记该项是否已在数据库中登记
     int width;      // 2026-07-xx 物理尺寸：宽 (像素)
     int height;     // 2026-07-xx 物理尺寸：高 (像素)
+    int colorRetryCount; // 2026-07-xx 视觉补偿：颜色提取重试计数
     std::wstring originalPath; // 2026-06-xx 路径记忆：用于回收站还原
     std::string fileId128; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
     
@@ -41,7 +42,7 @@ struct RuntimeMeta {
 
     std::vector<PaletteEntry> palettes;
 
-    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), width(0), height(0), ctime(0), mtime(0), atime(0), fileSize(0) {}
+    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), width(0), height(0), colorRetryCount(0), ctime(0), mtime(0), atime(0), fileSize(0) {}
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
@@ -230,6 +231,7 @@ private:
     // 2026-07-xx 按照用户要求：视觉元数据（解析颜色）异步补偿队列
     QTimer* m_retryTimer = nullptr;
     std::vector<std::wstring> m_visualRetryQueue;
+    static constexpr int kMaxColorRetry = 3; // 2026-07-xx 视觉补偿：最大重试次数
     void processVisualRetryQueue();
 
     void persistAsync(const std::wstring& path, bool notify = true);
