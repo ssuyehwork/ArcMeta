@@ -1,63 +1,34 @@
-# 技术架构与逻辑优化方案：逻辑递归机制增强 (Analysis_Modification_Plan-38.md)
+# Analysis_Modification_Plan-38.md
 
-## 1. 系统现状确认：焦点指示线
-经技术审计，确认 `MainWindow` 及其关联侧边栏已具备基于 `dataSourceChanged` 信号的“焦点指示线”机制：
-- **信号源**：`ContentPanel::dataSourceChanged(const QString& source)` 已在 `loadCategory` 和 `loadDirectory` 中触发。
-- **视觉实现**：`CategoryPanel` 与 `NavPanel` 均已实现 `setFocusHighlight(bool)`，且 `MainWindow` 已完成信号绑定。
-**结论**：指示线系统完整，无需重复添加。本次方案将聚焦于缺失的“逻辑递归”控制能力。
+## 元数据面板标签绑定失效与侧边栏计数异常排查分析
 
----
+针对用户提出的“多选项目绑定标签未持久化”以及“侧边栏标签管理计数为 0”的问题，经过深度逻辑排查，确认存在以下架构实现缺陷：
 
-## 2. 新增：双轨递归之“逻辑递归”按钮 (蓝色)
+### 1. MetaPanel 批量标签绑定逻辑缺失
+**缺陷表现**：在内容容器选中多个项目后，在元数据面板输入新标签，仅有面板当前显示的一个项目被绑定了标签，其余选中项无反应。
+*   **根因分析**：
+    *   `MetaPanel::onTagAdded` 函数硬编码为仅获取 `m_pathEdit`（即当前显示路径）并对其执行 `MetadataManager::instance().setTags`。
+    *   `MetaPanel` 缺乏像 `metadataChanged(rating, color)` 那样的语义化标签变更信号，导致 `MainWindow` 无法感知并扩散修改到其他选中项。
+*   **解决方案建议**：
+    1.  在 `MetaPanel.h` 中新增信号：`void tagsChanged(const QStringList& tags);`。
+    2.  在 `MetaPanel::onTagAdded` 和 `onTagDeleted` 中，不仅更新本地 UI，还需发射 `tagsChanged` 信号。
+    3.  在 `MainWindow.cpp` 中建立联动：连接 `m_metaPanel->tagsChanged`，在槽函数中遍历 `m_contentPanel->getSelectedIndexes()`，对所有选中路径执行 `MetadataManager::instance().setTags`。
 
-### 2.1 功能定义
-在 `ContentPanel` 标题栏现有的 `m_btnLayers`（绿色，负责物理路径递归）左侧，新增 `m_btnLogicalLayers`（蓝色图标，负责分类逻辑递归）。
+### 2. 侧边栏“标签管理”计数逻辑空缺
+**缺陷表现**：侧边栏系统项“标签管理”右侧的徽标计数始终显示为 (0)，即使大量文件已打标。
+*   **根因分析**：
+    *   `CategoryRepo::getSystemCounts` 方法中，虽然定义了 `seenUntagged`（未标签计数），但完全没有定义针对“已标签项目”的计数集合（如 `seenTags`）。
+    *   在返回的 `QMap<QString, int>` 中，缺少了键值为 `"tags"` 的条目。由于 `CategoryModel` 根据 `TypeRole`（值为 "tags"）查找计数，找不到键值则默认回退为 0。
+*   **解决方案建议**：
+    1.  在 `CategoryRepo::getSystemCounts` 内部新增 `std::unordered_set<std::string> seenTags;`。
+    2.  在 `forEachCachedItem` 遍历逻辑中，增加判定：`if (!meta.tags.isEmpty()) seenTags.insert(meta.fileId128);`。
+    3.  在结果映射中补全：`res["tags"] = static_cast<int>(seenTags.size());`。
 
-### 2.2 逻辑分工与持久化
-
-| 特性 | 蓝色按钮 (逻辑递归) | 绿色按钮 (物理递归) |
-| :--- | :--- | :--- |
-| **适用场景** | 仅限“分类”视图（Category View）。 | 仅限“目录导航”视图（Nav View）。 |
-| **持久化** | **是**：状态记录在 `AppConfig`。每次切换分类时，系统根据此状态决定是否执行深度递归查询。 | **否**：仅限当前物理会话，属于单次触发行为。 |
-| **递归深度** | 递归穿透所有子分类，提取所有层级的关联文件。 | 递归穿透所有子文件夹，提取磁盘物理文件。 |
-
-### 2.3 核心实现逻辑 (伪代码参考)
-
-#### A. 按钮集成 (src/ui/ContentPanel.cpp) [已物理实现]
-在 `initUi` 中，已在 `m_btnLayers` 之前成功插入新按钮：
-- **变量名**：`m_btnLogicalLayers`
-- **颜色**：`#3498db` (蓝色)
-- **图标**：`layers`
-- **位置**：`titleL->addWidget(m_btnLogicalLayers, 0, Qt::AlignVCenter);` 位于 `m_btnLayers` 之前。
-
-目前点击逻辑已占位：
-```cpp
-connect(m_btnLogicalLayers, &QPushButton::clicked, [this]() {
-    // TODO: 实现分类逻辑递归
-});
-```
-
-#### B. 数据加载逻辑增强 (`loadCategory`)
-在执行 `loadCategory(int categoryId)` 时，逻辑需根据蓝色按钮状态分支：
-1.  **非递归模式**：调用 `CategoryRepo::getItemsInCategory(categoryId)`，仅加载当前分类项。
-2.  **递归模式**：调用 `CategoryRepo::getItemsRecursive(categoryId)`，该接口已在底层实现，能够自动穿透加载所有子分类下的文件记录。
-
-```cpp
-// 2235 行附近逻辑改进建议
-std::vector<CategoryItem> items;
-if (m_btnLogicalLayers->isChecked()) {
-    items = CategoryRepo::getItemsRecursive(categoryId);
-} else {
-    items = CategoryRepo::getItemsInCategory(categoryId);
-}
-```
-
-### 2.4 互斥交互逻辑 (ToolTipOverlay 驱动)
-为避免用户混淆，必须严格执行模式锁定：
-- **逻辑模式点击绿色按钮**：弹出提示“物理递归不适用于分类视图”，并强制重置按钮状态。
-- **物理模式下点击蓝色按钮**：弹出提示“逻辑递归仅适用于分类视图”，并引导用户使用右侧绿色按钮。
+### 3. 逻辑闭环验证
+*   **持久化保障**：`MetadataManager::setTags` 内部已包含 `debouncePersist`，只要 `MainWindow` 成功分发了批量修改，数据库入库将由后台计时器自动完成。
+*   **UI 刷新保障**：`setTags` 成功后会发射 `metaChanged` 信号，`CategoryPanel` 监听此信号并触发 `requestRefresh`，从而驱动 `updateStatistics` 调用更新后的 `getSystemCounts`，使计数实时刷新。
 
 ---
 
-## 3. 总结
-本方案在保留现有成熟“焦点指示线”架构的基础上，通过引入持久化的“逻辑递归”控制位，填补了分类系统在大规模层级展示上的功能空白，实现了逻辑与物理导航体验的完全对称。
+### 总结
+本次缺陷属于**“单点操作未向群组扩散”**以及**“统计接口语义不完整”**导致的逻辑断层。通过补全 MetaPanel 的变更信号并完善 CategoryRepo 的统计维度，可彻底解决该问题。

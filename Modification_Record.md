@@ -4028,3 +4028,19 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
 - 是否在需求范围内：是
 
 ---
+
+## [2026-06-14 08:58:17]
+### 任务描述
+修复 MetaPanel 保存数据后 ContentPanel 不刷新问题（补发 metaChanged 信号）。
+
+### 修改的文件
+- `src/meta/MetadataManager.cpp`：在 setColor, setTags, setNote, setURL, renameItem 函数末尾添加 emit metaChanged 信号以触发局部刷新。
+
+### 未修改的文件
+- `src/ui/MetaPanel.cpp`：评估后无需修改。
+- `src/ui/ContentPanel.cpp`：评估后无需修改。
+- `src/ui/MainWindow.cpp`：评估后无需修改。
+- `src/meta/MetadataManager.h`：信号已声明，无需修改。
+
+### 潜在风险
+- 频繁修改元数据可能导致信号量增加，但在 current UI 架构下（带节流）风险极低。
