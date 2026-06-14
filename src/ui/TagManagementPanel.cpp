@@ -22,15 +22,21 @@ void TagManagementPanel::initUi() {
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_mainLayout->setSpacing(0);
 
-    // 标题栏
+    // 标题栏 (物理对标 MainWindow 32px)
     QWidget* titleBar = new QWidget(this);
-    titleBar->setFixedHeight(40);
-    titleBar->setStyleSheet("background-color: #252526; border-bottom: 1px solid #333;");
+    titleBar->setObjectName("ContainerHeader");
+    titleBar->setFixedHeight(32);
+    titleBar->setStyleSheet("QWidget#ContainerHeader { background-color: #252526; border-bottom: 1px solid #333; }");
     QHBoxLayout* titleL = new QHBoxLayout(titleBar);
     titleL->setContentsMargins(15, 0, 15, 0);
+    titleL->setSpacing(8);
+
+    QLabel* iconLabel = new QLabel(titleBar);
+    iconLabel->setPixmap(UiHelper::getIcon("tag", QColor("#41F2F2"), 16).pixmap(16, 16));
+    titleL->addWidget(iconLabel);
 
     QLabel* titleLabel = new QLabel("标签管理", titleBar);
-    titleLabel->setStyleSheet("font-size: 14px; font-weight: bold; color: #41F2F2;");
+    titleLabel->setStyleSheet("font-size: 12px; color: #41F2F2; background: transparent; border: none;");
     titleL->addWidget(titleLabel);
     titleL->addStretch();
 
@@ -94,7 +100,7 @@ void TagManagementPanel::renderAlphabeticalView() {
         sectionL->setSpacing(10);
 
         QLabel* header = new QLabel(it.key());
-        header->setStyleSheet("font-size: 18px; font-weight: bold; color: #888; border-bottom: 1px solid #333; padding-bottom: 5px;");
+        header->setStyleSheet("font-size: 14px; font-weight: normal; color: #888888; border-bottom: 1px solid #333333; padding-bottom: 3px;");
         sectionL->addWidget(header);
 
         FlowLayout* flow = new FlowLayout(nullptr, 0, 10, 10);
@@ -159,16 +165,16 @@ QWidget* TagManagementPanel::createTagWidget(const TagDef& tag) {
     QString displayText = QString("%1 (%2)").arg(tag.name).arg(tag.usageCount);
     btn->setText(displayText);
 
-    // 样式规范：符合整体 UI
+    // 样式规范：物理对标 image.png (无边框, #333333 背景)
     QString style = "QPushButton { "
                     "  background-color: #333333; "
                     "  color: #CCCCCC; "
-                    "  border: 1px solid #444; "
-                    "  padding: 5px 12px; "
+                    "  border: none; "
+                    "  padding: 4px 12px; "
                     "  border-radius: 4px; "
                     "  font-size: 12px; "
                     "} "
-                    "QPushButton:hover { background-color: #3E3E42; border-color: #555; color: white; }";
+                    "QPushButton:hover { background-color: #3E3E42; color: white; }";
 
     if (tag.isFavorite) {
         style += "QPushButton { border-left: 3px solid #f1c40f; }"; // 常用标签黄色边框
