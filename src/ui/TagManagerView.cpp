@@ -95,12 +95,6 @@ void TagManagerView::setupSidebar() {
     m_sidebarLayout->setContentsMargins(0, 0, 0, 0);
     m_sidebarLayout->setSpacing(0);
 
-    // 顶部蓝线 (物理对齐 NavPanel)
-    QWidget* focusLine = new QWidget(m_sidebar);
-    focusLine->setFixedHeight(1);
-    focusLine->setStyleSheet("background-color: #007ACC;");
-    m_sidebarLayout->addWidget(focusLine);
-
     // 标题栏
     QWidget* header = new QWidget(m_sidebar);
     header->setObjectName("ContainerHeader");
@@ -174,12 +168,6 @@ void TagManagerView::setupContentArea() {
     auto* mainL = new QVBoxLayout(m_contentContainer);
     mainL->setContentsMargins(0, 0, 0, 0);
     mainL->setSpacing(0);
-
-    // 顶部蓝线 (物理对齐 ContentPanel)
-    QWidget* focusLine = new QWidget(m_contentContainer);
-    focusLine->setFixedHeight(1);
-    focusLine->setStyleSheet("background-color: #007ACC;");
-    mainL->addWidget(focusLine);
 
     // 1. 标题栏 (物理对齐 ContentPanel)
     QWidget* titleBar = new QWidget(m_contentContainer);
