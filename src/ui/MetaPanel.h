@@ -13,6 +13,7 @@
 #include <QStyle>
 #include <vector>
 #include <string>
+#include "FlowLayout.h"
 
 namespace ArcMeta {
 
@@ -50,32 +51,6 @@ private:
     QPushButton* m_closeBtn = nullptr;
 };
 
-/**
- * @brief 流式布局容器 (用于展示标签)
- */
-class FlowLayout : public QLayout {
-public:
-    explicit FlowLayout(QWidget *parent, int margin = -1, int hSpacing = -1, int vSpacing = -1);
-    ~FlowLayout();
-    void addItem(QLayoutItem *item) override;
-    int horizontalSpacing() const;
-    int verticalSpacing() const;
-    Qt::Orientations expandingDirections() const override;
-    bool hasHeightForWidth() const override;
-    int heightForWidth(int) const override;
-    int count() const override;
-    QLayoutItem *itemAt(int index) const override;
-    QSize minimumSize() const override;
-    void setGeometry(const QRect &rect) override;
-    QSize sizeHint() const override;
-    QLayoutItem *takeAt(int index) override;
-private:
-    int doLayout(const QRect &rect, bool testOnly) const;
-    int smartSpacing(QStyle::PixelMetric pm) const;
-    QList<QLayoutItem *> itemList;
-    int m_hSpace;
-    int m_vSpace;
-};
 
 /**
  * @brief ColorPill: 用于流式展示的单个颜色块 (16x16px, 4px 圆角)

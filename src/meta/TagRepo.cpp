@@ -250,7 +250,7 @@ bool TagRepo::renameTagGlobal(const QString& oldName, const QString& newName) {
         trans.commit();
     };
 
-    QString metaDir = DatabaseManager::getAppDir() + "/.arcmeta";
+    QString metaDir = DatabaseManager::instance().getAppDir() + "/.arcmeta";
     QDir dir(metaDir);
     QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files | QDir::Hidden | QDir::System);
     for (const QString& dbFile : dbFiles) {
@@ -308,7 +308,7 @@ bool TagRepo::deleteTagGlobal(const QString& name) {
         trans.commit();
     };
 
-    QString metaDir = DatabaseManager::getAppDir() + "/.arcmeta";
+    QString metaDir = DatabaseManager::instance().getAppDir() + "/.arcmeta";
     QDir dir(metaDir);
     QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files | QDir::Hidden | QDir::System);
     for (const QString& dbFile : dbFiles) {
