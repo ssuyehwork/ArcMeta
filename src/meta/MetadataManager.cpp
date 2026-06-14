@@ -378,9 +378,8 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
         m_cache[nPath].color = color; 
     }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    if (notify) notifyFullUIRebuild();
     debouncePersist(nPath);
-    emit metaChanged(QString::fromStdWString(nPath));
 }
 
 void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool notify) {
@@ -400,27 +399,24 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
         m_cache[nPath].tags = tags;
     }
 
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    if (notify) notifyFullUIRebuild();
     debouncePersist(nPath);
-    emit metaChanged(QString::fromStdWString(nPath));
 }
 
 void MetadataManager::setNote(const std::wstring& path, const std::wstring& note, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    if (notify) notifyFullUIRebuild();
     debouncePersist(nPath);
-    emit metaChanged(QString::fromStdWString(nPath));
 }
 
 void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    if (notify) notifyFullUIRebuild();
     debouncePersist(nPath);
-    emit metaChanged(QString::fromStdWString(nPath));
 }
 
 void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, bool notify) {
@@ -516,8 +512,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             }
         }
     }
-    notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nNew));
-    emit metaChanged(QString::fromStdWString(nNew));
+    notifyFullUIRebuild();
 }
 
 void MetadataManager::removeMetadataSync(const std::wstring& path) {
