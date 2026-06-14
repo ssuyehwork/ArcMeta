@@ -26,14 +26,19 @@ void TagManagerView::initUi() {
     mainLayout->setSpacing(0);
 
     m_splitter = new QSplitter(Qt::Horizontal, this);
-    m_splitter->setHandleWidth(1);
-    m_splitter->setStyleSheet("QSplitter::handle { background-color: #333; }");
+    m_splitter->setHandleWidth(5);
+    m_splitter->setChildrenCollapsible(false);
+    m_splitter->setStyleSheet(QString(
+        "QSplitter { background: transparent; border: none; }"
+        "QSplitter::handle { background-color: %1; width: 5px; }"
+        "QSplitter::handle:hover { background-color: %2; }"
+    ).arg(qssColor(BackgroundDeep)).arg(qssColor(BackgroundHover)));
 
     setupSidebar();
     setupContentArea();
 
     m_splitter->addWidget(m_sidebar);
-    m_splitter->addWidget(m_scrollArea);
+    m_splitter->addWidget(m_contentContainer);
 
     // 侧边栏固定 230px
     m_splitter->setSizes({230, 1000});
@@ -82,9 +87,8 @@ QWidget* TagManagerView::createSidebarItem(const QString& icon, const QString& n
 
 void TagManagerView::setupSidebar() {
     m_sidebar = new QWidget(this);
-    m_sidebar->setObjectName("TagSidebar");
+    m_sidebar->setObjectName("ListContainer"); // 物理对标：复用导航栏样式 ID
     m_sidebar->setFixedWidth(230);
-    m_sidebar->setStyleSheet("QWidget#TagSidebar { background-color: #1E1E1E; border-right: 1px solid #333; }");
 
     m_sidebarLayout = new QVBoxLayout(m_sidebar);
     m_sidebarLayout->setContentsMargins(0, 0, 0, 0);
@@ -112,24 +116,33 @@ void TagManagerView::setupSidebar() {
 
     m_sidebarLayout->addWidget(header);
 
-    // 静态项
-    m_sidebarLayout->addWidget(createSidebarItem("all_data", "全部标签", "0", &m_allTagsCountLabel));
-    m_sidebarLayout->addWidget(createSidebarItem("uncategorized", "未分类", "0", &m_uncategorizedTagsCountLabel));
-    m_sidebarLayout->addWidget(createSidebarItem("star_filled", "常用标签", "0", &m_frequentTagsCountLabel));
+    // 2026-07-xx 按照用户要求：为列表内容包裹容器，恢复旧版 (15, 8, 0, 8) 的呼吸边距
+    QWidget* contentWrapper = new QWidget(m_sidebar);
+    contentWrapper->setStyleSheet("background: transparent; border: none;");
+    QVBoxLayout* sidebarContentLayout = new QVBoxLayout(contentWrapper);
+    sidebarContentLayout->setContentsMargins(0, 8, 0, 8); // 左右间距已由 item 内部 15px 处理，此处仅设 8px 顶部呼吸
+    sidebarContentLayout->setSpacing(0);
 
-    QFrame* line = new QFrame(m_sidebar);
+    // 静态项
+    sidebarContentLayout->addWidget(createSidebarItem("all_data", "全部标签", "0", &m_allTagsCountLabel));
+    sidebarContentLayout->addWidget(createSidebarItem("uncategorized", "未分类", "0", &m_uncategorizedTagsCountLabel));
+    sidebarContentLayout->addWidget(createSidebarItem("star_filled", "常用标签", "0", &m_frequentTagsCountLabel));
+
+    QFrame* line = new QFrame(contentWrapper);
     line->setFrameShape(QFrame::HLine);
     line->setStyleSheet("background-color: #333; margin: 10px 15px;");
-    m_sidebarLayout->addWidget(line);
+    sidebarContentLayout->addWidget(line);
 
     // 标签组容器
-    m_groupContainer = new QWidget(m_sidebar);
+    m_groupContainer = new QWidget(contentWrapper);
     auto* groupLayout = new QVBoxLayout(m_groupContainer);
     groupLayout->setContentsMargins(0, 0, 0, 0);
     groupLayout->setSpacing(0);
-    m_sidebarLayout->addWidget(m_groupContainer);
+    sidebarContentLayout->addWidget(m_groupContainer);
 
-    m_sidebarLayout->addStretch();
+    sidebarContentLayout->addStretch();
+
+    m_sidebarLayout->addWidget(contentWrapper, 1);
 
     QPushButton* btnNewGroup = new QPushButton("+ 新建标签组", m_sidebar);
     btnNewGroup->setFixedHeight(40);
@@ -141,19 +154,52 @@ void TagManagerView::setupSidebar() {
 }
 
 void TagManagerView::setupContentArea() {
-    m_scrollArea = new QScrollArea(this);
+    m_contentContainer = new QWidget(this);
+    m_contentContainer->setObjectName("EditorContainer"); // 物理对标：复用内容面板 ID
+    auto* mainL = new QVBoxLayout(m_contentContainer);
+    mainL->setContentsMargins(0, 0, 0, 0);
+    mainL->setSpacing(0);
+
+    // 1. 标题栏 (物理对齐 ContentPanel)
+    QWidget* titleBar = new QWidget(m_contentContainer);
+    titleBar->setObjectName("ContainerHeader");
+    titleBar->setFixedHeight(32);
+    titleBar->setStyleSheet(
+        "QWidget#ContainerHeader {"
+        "  background-color: #252526;"
+        "  border-bottom: 1px solid #333;"
+        "}"
+    );
+    QHBoxLayout* titleL = new QHBoxLayout(titleBar);
+    titleL->setContentsMargins(15, 0, 5, 0);
+    titleL->setSpacing(5);
+
+    QLabel* iconLabel = new QLabel(titleBar);
+    iconLabel->setPixmap(UiHelper::getIcon("tag", AccentCyan, 18).pixmap(18, 18));
+    titleL->addWidget(iconLabel);
+
+    m_contentTitleLabel = new QLabel("标签", titleBar);
+    m_contentTitleLabel->setStyleSheet(QString("font-size: 13px; font-weight: bold; color: %1; background: transparent; border: none;").arg(qssColor(AccentCyan)));
+    titleL->addWidget(m_contentTitleLabel);
+    titleL->addStretch();
+
+    mainL->addWidget(titleBar);
+
+    // 2. 滚动区
+    m_scrollArea = new QScrollArea(m_contentContainer);
     m_scrollArea->setWidgetResizable(true);
-    m_scrollArea->setStyleSheet("QScrollArea { border: none; background-color: #1E1E1E; }");
+    m_scrollArea->setStyleSheet("QScrollArea { border: none; background-color: transparent; }");
 
     m_contentWidget = new QWidget();
     m_contentWidget->setObjectName("TagContentContainer");
-    m_contentWidget->setStyleSheet("QWidget#TagContentContainer { background-color: #1E1E1E; }");
+    m_contentWidget->setStyleSheet("QWidget#TagContentContainer { background-color: transparent; }");
 
     auto* contentLayout = new QVBoxLayout(m_contentWidget);
     contentLayout->setContentsMargins(20, 20, 20, 20);
     contentLayout->setSpacing(20);
 
     m_scrollArea->setWidget(m_contentWidget);
+    mainL->addWidget(m_scrollArea, 1);
 }
 
 void TagManagerView::refresh() {
@@ -221,17 +267,7 @@ void TagManagerView::refresh() {
             delete child->widget();
             delete child;
         }
-
-        // 添加标题
-        QWidget* contentHeader = new QWidget(m_contentWidget);
-        contentHeader->setFixedHeight(40);
-        auto* hLayout = new QHBoxLayout(contentHeader);
-        hLayout->setContentsMargins(0, 0, 0, 0);
-        QLabel* lblTitle = new QLabel("标签", contentHeader);
-        lblTitle->setStyleSheet("font-size: 18px; font-weight: bold; color: #EEEEEE;");
-        hLayout->addWidget(lblTitle);
-        hLayout->addStretch();
-        contentLayout->addWidget(contentHeader);
+        // 物理对标：移除旧式内联标题，改用 top titleBar
     }
 
     // 按字母分组
@@ -272,6 +308,32 @@ void TagManagerView::refresh() {
             QString tagName = tagIt.key();
             connect(tagBtn, &QPushButton::clicked, this, [this, tagName]() {
                 emit requestSearchTag(tagName);
+            });
+
+            // 右键菜单
+            tagBtn->setContextMenuPolicy(Qt::CustomContextMenu);
+            connect(tagBtn, &QWidget::customContextMenuRequested, this, [this, tagName](const QPoint&) {
+                QMenu menu(this);
+                UiHelper::applyMenuStyle(&menu);
+                menu.addAction(UiHelper::getIcon("search", TextMain), "搜索含此标签的项目", this, [this, tagName](){ emit requestSearchTag(tagName); });
+                menu.addSeparator();
+                menu.addAction(UiHelper::getIcon("star_filled", WarningOrange), "设为常用标签");
+
+                auto* addToMenu = menu.addMenu(UiHelper::getIcon("add", SuccessGreen), "加入标签组");
+                for (const auto& group : m_tagGroups) {
+                    addToMenu->addAction(group.name);
+                }
+
+                auto* moveToMenu = menu.addMenu(UiHelper::getIcon("folder_filled", PrimaryBlue), "移动至标签组");
+                for (const auto& group : m_tagGroups) {
+                    moveToMenu->addAction(group.name);
+                }
+
+                menu.addAction(UiHelper::getIcon("close", ErrorRed), "从标签组中移除");
+                menu.addSeparator();
+                menu.addAction(UiHelper::getIcon("edit", TextMain), "重命名标签");
+                menu.addAction(UiHelper::getIcon("trash", ErrorRed), "删除标签");
+                menu.exec(QCursor::pos());
             });
 
             grid->addWidget(tagBtn, row, col);

@@ -48,6 +48,8 @@ private:
     QLabel* m_frequentTagsCountLabel = nullptr;
 
     // 内容区组件
+    QWidget* m_contentContainer = nullptr;
+    QLabel* m_contentTitleLabel = nullptr;
     QScrollArea* m_scrollArea = nullptr;
     QWidget* m_contentWidget = nullptr;
 
