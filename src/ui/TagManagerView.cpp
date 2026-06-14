@@ -77,28 +77,44 @@ void TagManagerView::setupSidebar() {
 
     m_sidebarLayout->addWidget(header);
 
-    // 2. 侧边栏列表内容 (简化版)
+    // 2. 侧边栏列表内容 (物理还原 CategoryPanel 规范)
     auto createSidebarItem = [this](const QString& icon, const QString& name, const QString& countText) {
-        QWidget* item = new QWidget(m_sidebar);
-        item->setFixedHeight(32);
+        QWidget* item = new QWidget();
+        // 2026-07-xx 物理对齐：行高统一为 26px
+        item->setFixedHeight(26);
         item->setCursor(Qt::PointingHandCursor);
+
         auto* layout = new QHBoxLayout(item);
-        layout->setContentsMargins(15, 0, 15, 0);
+        // 2026-07-xx 按照 CategoryDelegate 逻辑：高亮矩形左右边距 2px
+        layout->setContentsMargins(2, 1, 2, 1);
+        layout->setSpacing(0);
 
-        QLabel* iconLabel = new QLabel(item);
+        // 内部高亮容器
+        QWidget* inner = new QWidget(item);
+        inner->setObjectName("SidebarItemInner");
+        // 2026-07-xx 物理还原：悬停色 #2a2d2e, 4px 圆角
+        inner->setStyleSheet(
+            "QWidget#SidebarItemInner { background: transparent; border-radius: 4px; }"
+            "QWidget#SidebarItemInner:hover { background-color: #2a2d2e; }"
+        );
+        auto* innerLayout = new QHBoxLayout(inner);
+        innerLayout->setContentsMargins(13, 0, 13, 0); // 15px - 2px margin = 13px
+        innerLayout->setSpacing(6);
+
+        QLabel* iconLabel = new QLabel(inner);
         iconLabel->setPixmap(UiHelper::getIcon(icon, TextDim, 16).pixmap(16, 16));
-        layout->addWidget(iconLabel);
+        innerLayout->addWidget(iconLabel);
 
-        QLabel* nameLabel = new QLabel(name, item);
-        nameLabel->setStyleSheet("color: #CCC; font-size: 12px;");
-        layout->addWidget(nameLabel);
-        layout->addStretch();
+        QLabel* nameLabel = new QLabel(name, inner);
+        nameLabel->setStyleSheet("color: #CCC; font-size: 12px; background: transparent;");
+        innerLayout->addWidget(nameLabel);
+        innerLayout->addStretch();
 
-        QLabel* countLabel = new QLabel(countText, item);
-        countLabel->setStyleSheet("color: #666; font-size: 11px;");
-        layout->addWidget(countLabel);
+        QLabel* countLabel = new QLabel(countText, inner);
+        countLabel->setStyleSheet("color: #666; font-size: 11px; background: transparent;");
+        innerLayout->addWidget(countLabel);
 
-        item->setStyleSheet("QWidget:hover { background-color: #2A2A2A; }");
+        layout->addWidget(inner);
         return item;
     };
 
@@ -194,25 +210,37 @@ void TagManagerView::refresh() {
 
         auto createSidebarItem = [this](const QString& icon, const QString& name, const QString& countText) {
             QWidget* item = new QWidget();
-            item->setFixedHeight(32);
+            item->setFixedHeight(26);
             item->setCursor(Qt::PointingHandCursor);
+
             auto* layout = new QHBoxLayout(item);
-            layout->setContentsMargins(15, 0, 15, 0);
+            layout->setContentsMargins(2, 1, 2, 1);
+            layout->setSpacing(0);
 
-            QLabel* iconLabel = new QLabel(item);
+            QWidget* inner = new QWidget(item);
+            inner->setObjectName("SidebarItemInner");
+            inner->setStyleSheet(
+                "QWidget#SidebarItemInner { background: transparent; border-radius: 4px; }"
+                "QWidget#SidebarItemInner:hover { background-color: #2a2d2e; }"
+            );
+            auto* innerLayout = new QHBoxLayout(inner);
+            innerLayout->setContentsMargins(13, 0, 13, 0);
+            innerLayout->setSpacing(6);
+
+            QLabel* iconLabel = new QLabel(inner);
             iconLabel->setPixmap(UiHelper::getIcon(icon, TextDim, 16).pixmap(16, 16));
-            layout->addWidget(iconLabel);
+            innerLayout->addWidget(iconLabel);
 
-            QLabel* nameLabel = new QLabel(name, item);
-            nameLabel->setStyleSheet("color: #CCC; font-size: 12px;");
-            layout->addWidget(nameLabel);
-            layout->addStretch();
+            QLabel* nameLabel = new QLabel(name, inner);
+            nameLabel->setStyleSheet("color: #CCC; font-size: 12px; background: transparent;");
+            innerLayout->addWidget(nameLabel);
+            innerLayout->addStretch();
 
-            QLabel* countLabel = new QLabel(countText, item);
-            countLabel->setStyleSheet("color: #666; font-size: 11px;");
-            layout->addWidget(countLabel);
+            QLabel* countLabel = new QLabel(countText, inner);
+            countLabel->setStyleSheet("color: #666; font-size: 11px; background: transparent;");
+            innerLayout->addWidget(countLabel);
 
-            item->setStyleSheet("QWidget:hover { background-color: #2A2A2A; }");
+            layout->addWidget(inner);
             return item;
         };
 
