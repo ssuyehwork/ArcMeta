@@ -89,6 +89,7 @@ private:
     QVBoxLayout* m_bodyLayout = nullptr; // 2026-05-08 按照用户要求：提升为成员变量以支持动态边距切换
 
     void initUi();
+    void setTagManagementMode(bool enabled);
     void updateNavButtons();
     void updateStatusBar();
     void navigateTo(const QString& path, bool record = true);

@@ -248,9 +248,10 @@ void MainWindow::initUi() {
             QStringList paths = CategoryRepo::getSystemCategoryPaths(type);
             m_contentPanel->loadPaths(paths);
         } else if (type == "tags") {
-            m_centerStack->setCurrentWidget(m_tagManagementPanel);
+            setTagManagementMode(true);
             m_tagManagementPanel->refresh();
         } else {
+            setTagManagementMode(false);
             m_centerStack->setCurrentWidget(m_contentPanel);
             // 其余系统项维持搜索逻辑
             m_contentPanel->search(name); 
@@ -977,6 +978,7 @@ void MainWindow::setupSplitters() {
 
     // 标签管理面板信号连接
     connect(m_tagManagementPanel, &TagManagementPanel::tagSearchRequested, this, [this](const QString& tag) {
+        setTagManagementMode(false);
         m_centerStack->setCurrentWidget(m_contentPanel);
         if (m_searchEdit) m_searchEdit->setText(tag);
 
@@ -1278,6 +1280,44 @@ void MainWindow::onUpClicked() {
     QDir dir(m_currentPath);
     if (dir.cdUp()) {
         navigateTo(dir.absolutePath());
+    }
+}
+
+void MainWindow::setTagManagementMode(bool enabled) {
+    if (enabled) {
+        // 隐藏不需要的辅助面板
+        if (m_categoryPanel) m_categoryPanel->hide();
+        if (m_navPanel)      m_navPanel->hide();
+        if (m_metaPanel)     m_metaPanel->hide();
+        if (m_filterPanel)   m_filterPanel->hide();
+
+        // 隐藏标题栏和导航栏
+        if (m_titleBarWidget) m_titleBarWidget->hide();
+        if (m_navBarWidget)   m_navBarWidget->hide();
+
+        // 移除主布局边距，实现全屏贴合
+        if (m_bodyLayout) {
+            m_bodyLayout->setContentsMargins(0, 0, 0, 0);
+        }
+
+        if (m_centerStack && m_tagManagementPanel) {
+            m_centerStack->setCurrentWidget(m_tagManagementPanel);
+        }
+    } else {
+        // 恢复辅助面板
+        if (m_categoryPanel) m_categoryPanel->show();
+        if (m_navPanel)      m_navPanel->show();
+        if (m_metaPanel)     m_metaPanel->show();
+        if (m_filterPanel)   m_filterPanel->show();
+
+        // 恢复标题栏和导航栏
+        if (m_titleBarWidget) m_titleBarWidget->show();
+        if (m_navBarWidget)   m_navBarWidget->show();
+
+        // 恢复物理护栏边距 (5px)
+        if (m_bodyLayout) {
+            m_bodyLayout->setContentsMargins(kEdgeMargin, 0, kEdgeMargin, kEdgeMargin);
+        }
     }
 }
 

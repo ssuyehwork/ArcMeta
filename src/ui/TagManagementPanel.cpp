@@ -13,6 +13,73 @@
 
 namespace ArcMeta {
 
+TagChip::TagChip(const TagDef& tag, QWidget* parent) : QWidget(parent), m_tag(tag) {
+    setCursor(Qt::PointingHandCursor);
+    setFixedHeight(32);
+
+    QHBoxLayout* layout = new QHBoxLayout(this);
+    layout->setContentsMargins(12, 0, 8, 0);
+    layout->setSpacing(8);
+
+    m_nameLabel = new QLabel(tag.name, this);
+    m_nameLabel->setStyleSheet(QString("color: %1; font-size: 12px; background: transparent;").arg(Style::TextMain.name()));
+    layout->addWidget(m_nameLabel);
+
+    m_countLabel = new QLabel(QString::number(tag.usageCount), this);
+    m_countLabel->setStyleSheet(QString("color: %1; font-size: 10px; background: transparent;").arg(Style::TextMuted.name()));
+    layout->addWidget(m_countLabel);
+
+    m_btnDelete = new QPushButton(this);
+    m_btnDelete->setFixedSize(16, 16);
+    m_btnDelete->setIcon(UiHelper::getIcon("close", Style::TextMuted, 10));
+    m_btnDelete->setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: #E81123; border-radius: 2px; }");
+    m_btnDelete->hide();
+    connect(m_btnDelete, &QPushButton::clicked, [this]() { emit deleteRequested(m_tag.name); });
+    layout->addWidget(m_btnDelete);
+
+    // 初始样式
+    QString bg = Style::BackgroundHover.name();
+    if (tag.isFavorite) {
+        setStyleSheet(QString("TagChip { background-color: %1; border-radius: 16px; border: 1px solid %2; }")
+            .arg(bg).arg(Style::AccentCyan.name()));
+    } else {
+        setStyleSheet(QString("TagChip { background-color: %1; border-radius: 16px; border: 1px solid %2; }")
+            .arg(bg).arg(Style::BorderColor.name()));
+    }
+}
+
+void TagChip::enterEvent(QEnterEvent* event) {
+    m_btnDelete->show();
+    QWidget::enterEvent(event);
+}
+
+void TagChip::leaveEvent(QEvent* event) {
+    m_btnDelete->hide();
+    QWidget::leaveEvent(event);
+}
+
+void TagChip::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        emit clicked(m_tag.name);
+    } else if (event->button() == Qt::RightButton) {
+        QMenu menu(this);
+        UiHelper::applyMenuStyle(&menu);
+        menu.addAction(m_tag.isFavorite ? "取消常用" : "设为常用")->setData(1);
+        menu.addAction("重命名")->setData(2);
+        menu.addSeparator();
+        menu.addAction(UiHelper::getIcon("trash", Style::ErrorRed), "删除标签")->setData(3);
+
+        QAction* act = menu.exec(QCursor::pos());
+        if (act) {
+            int id = act->data().toInt();
+            if (id == 1) emit favoriteToggled(m_tag.name, !m_tag.isFavorite);
+            else if (id == 2) emit renameRequested(m_tag.name);
+            else if (id == 3) emit deleteRequested(m_tag.name);
+        }
+    }
+    QWidget::mouseReleaseEvent(event);
+}
+
 TagManagementPanel::TagManagementPanel(QWidget* parent) : QWidget(parent) {
     initUi();
     refresh();
@@ -22,128 +89,86 @@ void TagManagementPanel::initUi() {
     m_mainLayout = new QVBoxLayout(this);
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_mainLayout->setSpacing(0);
+    m_mainLayout->setAlignment(Qt::AlignTop);
 
-    // 标题栏 (物理对标 MainWindow 32px)
-    QWidget* titleBar = new QWidget(this);
-    titleBar->setObjectName("ContainerHeader");
-    titleBar->setFixedHeight(32);
-    titleBar->setStyleSheet("QWidget#ContainerHeader { background-color: #252526; border-bottom: 1px solid #333; }");
-    QHBoxLayout* titleL = new QHBoxLayout(titleBar);
-    titleL->setContentsMargins(15, 0, 15, 0);
-    titleL->setSpacing(8);
+    // 顶部全屏 Header (物理对标原型：居中大搜索框)
+    QWidget* header = new QWidget(this);
+    header->setFixedHeight(140);
+    header->setStyleSheet(QString("background-color: %1; border-bottom: 1px solid %2;")
+        .arg(Style::BackgroundDeep.name()).arg(Style::BorderColor.name()));
 
-    QLabel* iconLabel = new QLabel(titleBar);
-    iconLabel->setPixmap(UiHelper::getIcon("tag", Style::AccentCyan, 16).pixmap(16, 16));
-    titleL->addWidget(iconLabel);
+    QVBoxLayout* headerL = new QVBoxLayout(header);
+    headerL->setContentsMargins(50, 20, 50, 20);
 
-    QLabel* titleLabel = new QLabel("标签管理", titleBar);
-    titleLabel->setStyleSheet(QString("font-size: 12px; color: %1; background: transparent; border: none;").arg(Style::AccentCyan.name()));
-    titleL->addWidget(titleLabel);
-    titleL->addStretch();
+    // 第一行：标题与关闭按钮
+    QHBoxLayout* topRow = new QHBoxLayout();
+    QLabel* titleLabel = new QLabel("标签管理", header);
+    titleLabel->setStyleSheet(QString("font-size: 20px; font-weight: bold; color: %1;").arg(Style::TextMain.name()));
+    topRow->addWidget(titleLabel);
+    topRow->addStretch();
 
-    m_mainLayout->addWidget(titleBar);
+    QPushButton* btnClose = new QPushButton(header);
+    btnClose->setFixedSize(32, 32);
+    btnClose->setIcon(UiHelper::getIcon("close", Style::TextDim));
+    btnClose->setCursor(Qt::PointingHandCursor);
+    btnClose->setStyleSheet(
+        "QPushButton { background: transparent; border-radius: 4px; } "
+        "QPushButton:hover { background-color: #E81123; } "
+    );
+    connect(btnClose, &QPushButton::clicked, [this]() {
+        emit tagSearchRequested(""); // 触发 MainWindow 返回逻辑
+    });
+    topRow->addWidget(btnClose);
+    headerL->addLayout(topRow);
 
-    // 主体区域：使用 QSplitter 隔离导航和内容
-    QSplitter* splitter = new QSplitter(Qt::Horizontal, this);
-    splitter->setHandleWidth(1);
-    splitter->setStyleSheet("QSplitter::handle { background-color: #333; }");
+    headerL->addStretch();
 
-    setupSidebar();
-    splitter->addWidget(m_sidebar);
+    // 第二行：居中大搜索框
+    QHBoxLayout* searchRow = new QHBoxLayout();
+    searchRow->addStretch();
 
-    QWidget* rightContent = new QWidget();
-    setupMainArea();
-
-    // 把 setupMainArea 创建的组件放入 rightContent
-    QVBoxLayout* rightL = new QVBoxLayout(rightContent);
-    rightL->setContentsMargins(0, 0, 0, 0);
-    rightL->setSpacing(0);
-
-    // 顶部搜索栏
-    QWidget* searchBar = new QWidget();
-    searchBar->setFixedHeight(48);
-    searchBar->setStyleSheet("background-color: #1E1E1E; border-bottom: 1px solid #333;");
-    QHBoxLayout* searchL = new QHBoxLayout(searchBar);
-    searchL->setContentsMargins(20, 0, 20, 0);
-
-    m_searchEdit = new QLineEdit();
-    m_searchEdit->setPlaceholderText("搜索标签...");
-    m_searchEdit->setFixedWidth(300);
-    m_searchEdit->setFixedHeight(28);
-    m_searchEdit->setStyleSheet(
+    m_searchEdit = new QLineEdit(header);
+    m_searchEdit->setPlaceholderText("搜索或创建标签...");
+    m_searchEdit->setFixedWidth(500);
+    m_searchEdit->setFixedHeight(40);
+    m_searchEdit->setStyleSheet(QString(
         "QLineEdit { "
         "  background-color: #2D2D2D; "
-        "  border: 1px solid #333; "
-        "  border-radius: 4px; "
-        "  color: #EEE; "
-        "  padding-left: 8px; "
-        "  font-size: 12px; "
+        "  border: 1px solid %1; "
+        "  border-radius: 20px; "
+        "  color: %2; "
+        "  padding: 0 20px; "
+        "  font-size: 14px; "
         "} "
-        "QLineEdit:focus { border: 1px solid #3498db; }"
-    );
+        "QLineEdit:focus { border: 1px solid %3; }"
+    ).arg(Style::BorderColor.name()).arg(Style::TextMain.name()).arg(Style::PrimaryBlue.name()));
+
     connect(m_searchEdit, &QLineEdit::textChanged, [this](const QString& text) {
         m_currentSearch = text;
         renderFilteredTags();
     });
-    searchL->addWidget(m_searchEdit);
-    searchL->addStretch();
+    searchRow->addWidget(m_searchEdit);
+    searchRow->addStretch();
+    headerL->addLayout(searchRow);
 
-    rightL->addWidget(searchBar);
-    rightL->addWidget(m_scrollArea);
+    m_mainLayout->addWidget(header);
 
-    splitter->addWidget(rightContent);
-    splitter->setStretchFactor(1, 1);
-    splitter->setSizes({230, 800});
-
-    m_mainLayout->addWidget(splitter);
-}
-
-void TagManagementPanel::setupSidebar() {
-    m_sidebar = new QListWidget();
-    m_sidebar->setFixedWidth(230);
-    m_sidebar->setObjectName("NavPanel"); // 复用样式
-    m_sidebar->setFrameShape(QFrame::NoFrame);
-    m_sidebar->setStyleSheet(
-        "QListWidget { "
-        "  background-color: #252526; "
-        "  border-right: 1px solid #333; "
-        "  outline: none; "
-        "  padding-top: 10px; "
-        "} "
-        "QListWidget::item { "
-        "  height: 32px; "
-        "  color: #BBB; "
-        "  padding-left: 15px; "
-        "  border-left: 3px solid transparent; "
-        "} "
-        "QListWidget::item:hover { background-color: #2A2D2E; } "
-        "QListWidget::item:selected { "
-        "  background-color: #37373D; "
-        "  color: #FFF; "
-        "  border-left: 3px solid #3498db; "
-        "}"
-    );
-
-    connect(m_sidebar, &QListWidget::currentRowChanged, [this](int row) {
-        if (row < 0) return;
-        QListWidgetItem* item = m_sidebar->item(row);
-        m_currentFilterType = item->data(Qt::UserRole).toInt();
-        renderFilteredTags();
-    });
+    setupMainArea();
+    m_mainLayout->addWidget(m_scrollArea);
 }
 
 void TagManagementPanel::setupMainArea() {
     m_scrollArea = new QScrollArea();
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setFrameShape(QFrame::NoFrame);
-    m_scrollArea->setStyleSheet("background-color: #1E1E1E;");
+    m_scrollArea->setStyleSheet(QString("background-color: %1;").arg(Style::BackgroundDeep.name()));
 
     m_scrollContainer = new QWidget();
     m_scrollContainer->setObjectName("TagScrollContainer");
-    m_scrollContainer->setStyleSheet("QWidget#TagScrollContainer { background-color: #1E1E1E; }");
+    m_scrollContainer->setStyleSheet(QString("QWidget#TagScrollContainer { background-color: %1; }").arg(Style::BackgroundDeep.name()));
     m_containerLayout = new QVBoxLayout(m_scrollContainer);
-    m_containerLayout->setContentsMargins(20, 20, 20, 20);
-    m_containerLayout->setSpacing(30);
+    m_containerLayout->setContentsMargins(50, 40, 50, 40); // 增加全屏时的左右内边距
+    m_containerLayout->setSpacing(40);
 
     m_scrollArea->setWidget(m_scrollContainer);
 }
@@ -153,38 +178,7 @@ void TagManagementPanel::refresh() {
     m_allTags = TagRepo::getAllTags();
     m_groups = TagRepo::getGroups();
 
-    // 2. 更新侧边栏
-    m_sidebar->blockSignals(true);
-    m_sidebar->clear();
-
-    auto* allItem = new QListWidgetItem(UiHelper::getIcon("list_ul", Style::TextDim), "所有标签");
-    allItem->setData(Qt::UserRole, 0);
-    m_sidebar->addItem(allItem);
-
-    auto* favItem = new QListWidgetItem(UiHelper::getIcon("star", QColor("#f1c40f")), "常用标签");
-    favItem->setData(Qt::UserRole, 1);
-    m_sidebar->addItem(favItem);
-
-    if (!m_groups.empty()) {
-        auto* groupHeader = new QListWidgetItem(m_sidebar);
-        groupHeader->setFlags(Qt::NoItemFlags);
-        groupHeader->setData(Qt::UserRole, -1);
-        groupHeader->setSizeHint(QSize(0, 30));
-
-        QLabel* headerLabel = new QLabel(" 标签分组");
-        headerLabel->setStyleSheet("color: #666; font-size: 11px; padding-top: 10px; background: transparent;");
-        m_sidebar->setItemWidget(groupHeader, headerLabel);
-
-        for (const auto& g : m_groups) {
-            auto* item = new QListWidgetItem(UiHelper::getIcon("folder", Style::PrimaryBlue), g.name);
-            item->setData(Qt::UserRole, 100 + g.id);
-            m_sidebar->addItem(item);
-        }
-    }
-
-    m_sidebar->setCurrentRow(0);
-    m_sidebar->blockSignals(false);
-
+    // 2. 由于已移除侧边栏，直接进行全量渲染
     renderFilteredTags();
 }
 
@@ -260,100 +254,36 @@ void TagManagementPanel::renderFilteredTags() {
 }
 
 QWidget* TagManagementPanel::createTagWidget(const TagDef& tag) {
-    QPushButton* btn = new QPushButton();
-    QString displayText = QString("%1 (%2)").arg(tag.name).arg(tag.usageCount);
-    btn->setText(displayText);
+    TagChip* chip = new TagChip(tag, this);
 
-    // 样式规范：物理对标 image.png (无边框, #333333 背景)
-    QString style = "QPushButton { "
-                    "  background-color: #333333; "
-                    "  color: #CCCCCC; "
-                    "  border: none; "
-                    "  padding: 4px 12px; "
-                    "  border-radius: 4px; "
-                    "  font-size: 12px; "
-                    "} "
-                    "QPushButton:hover { background-color: #3E3E42; color: white; }";
-
-    if (tag.isFavorite) {
-        style += "QPushButton { border-left: 3px solid #f1c40f; }";
-    }
-
-    btn->setStyleSheet(style);
-    btn->setProperty("tagName", tag.name);
-
-    connect(btn, &QPushButton::clicked, [this, tag]() {
-        emit tagSearchRequested(tag.name);
+    connect(chip, &TagChip::clicked, this, [this](const QString& name) {
+        emit tagSearchRequested(name);
     });
 
-    // 右键菜单支持
-    btn->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(btn, &QPushButton::customContextMenuRequested, [this, btn](const QPoint& pos) {
-        QString tagName = btn->property("tagName").toString();
-
-        QMenu menu(this);
-        UiHelper::applyMenuStyle(&menu);
-
-        menu.addAction(UiHelper::getIcon("search", QColor("#EEE")), "搜索包含此标签的项目")->setData(1);
-
-        // 查找当前标签定义
-        TagDef currentDef;
-        for(const auto& t : m_allTags) if(t.name == tagName) { currentDef = t; break; }
-
-        menu.addAction(currentDef.isFavorite ? "取消常用标签" : "设为常用标签")->setData(2);
-        menu.addAction("重命名")->setData(3);
-
-        QMenu* groupMenu = menu.addMenu("添加至分组...");
-        UiHelper::applyMenuStyle(groupMenu);
-        for (const auto& g : m_groups) {
-            QAction* act = groupMenu->addAction(g.name);
-            act->setData(100 + g.id);
-        }
-        groupMenu->addSeparator();
-        groupMenu->addAction("新建分组...")->setData(4);
-
-        menu.addSeparator();
-        menu.addAction(UiHelper::getIcon("trash", QColor("#e81123")), "删除标签")->setData(5);
-
-        QAction* selected = menu.exec(btn->mapToGlobal(pos));
-        if (!selected) return;
-
-        int actionId = selected->data().toInt();
-        if (actionId == 1) {
-            emit tagSearchRequested(tagName);
-        } else if (actionId == 2) {
-            TagRepo::setTagFavorite(tagName, !currentDef.isFavorite);
+    connect(chip, &TagChip::deleteRequested, this, [this](const QString& name) {
+        if (QMessageBox::question(this, "删除标签", QString("确定要永久删除标签 \"%1\" 吗？").arg(name)) == QMessageBox::Yes) {
+            TagRepo::deleteTagGlobal(name);
             refresh();
-        } else if (actionId == 3) {
-            bool ok;
-            QString newName = QInputDialog::getText(this, "重命名标签", "请输入新标签名称:", QLineEdit::Normal, tagName, &ok);
-            if (ok && !newName.isEmpty() && newName != tagName) {
-                TagRepo::renameTagGlobal(tagName, newName);
-                refresh();
-                emit tagMetadataChanged();
-            }
-        } else if (actionId == 4) {
-            bool ok;
-            QString gName = QInputDialog::getText(this, "新建标签组", "分组名称:", QLineEdit::Normal, "", &ok);
-            if (ok && !gName.isEmpty()) {
-                int gid = TagRepo::addGroup(gName);
-                if (gid > 0) TagRepo::setTagGroup(tagName, gid);
-                refresh();
-            }
-        } else if (actionId == 5) {
-            if (QMessageBox::question(this, "删除标签", QString("确定要永久删除标签 \"%1\" 吗？此操作将从所有文件中移除该标签。").arg(tagName)) == QMessageBox::Yes) {
-                TagRepo::deleteTagGlobal(tagName);
-                refresh();
-                emit tagMetadataChanged();
-            }
-        } else if (actionId >= 100) {
-            int gid = actionId - 100;
-            TagRepo::setTagGroup(tagName, gid);
-            refresh();
+            emit tagMetadataChanged();
         }
     });
 
-    return btn;
+    connect(chip, &TagChip::favoriteToggled, this, [this](const QString& name, bool favorite) {
+        TagRepo::setTagFavorite(name, favorite);
+        refresh();
+    });
+
+    connect(chip, &TagChip::renameRequested, this, [this](const QString& name) {
+        bool ok;
+        QString newName = QInputDialog::getText(this, "重命名标签", "新名称:", QLineEdit::Normal, name, &ok);
+        if (ok && !newName.isEmpty() && newName != name) {
+            TagRepo::renameTagGlobal(name, newName);
+            refresh();
+            emit tagMetadataChanged();
+        }
+    });
+
+    return chip;
 }
 
 void TagManagementPanel::contextMenuEvent(QContextMenuEvent* event) {

@@ -20,6 +20,32 @@ namespace ArcMeta {
 /**
  * @brief 标签管理面板 (取代 ContentPanel 显示标签全景)
  */
+/**
+ * @brief 自定义标签芯片组件
+ */
+class TagChip : public QWidget {
+    Q_OBJECT
+public:
+    explicit TagChip(const TagDef& tag, QWidget* parent = nullptr);
+
+signals:
+    void clicked(const QString& name);
+    void deleteRequested(const QString& name);
+    void favoriteToggled(const QString& name, bool favorite);
+    void renameRequested(const QString& name);
+
+protected:
+    void enterEvent(QEnterEvent* event) override;
+    void leaveEvent(QEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+
+private:
+    TagDef m_tag;
+    QLabel* m_nameLabel = nullptr;
+    QLabel* m_countLabel = nullptr;
+    QPushButton* m_btnDelete = nullptr;
+};
+
 class TagManagementPanel : public QWidget {
     Q_OBJECT
 public:
@@ -46,7 +72,6 @@ protected:
 
 private:
     void initUi();
-    void setupSidebar();
     void setupMainArea();
 
     /**
@@ -61,7 +86,6 @@ private:
 
     // UI 组件
     QVBoxLayout* m_mainLayout = nullptr;
-    QListWidget* m_sidebar = nullptr;
     QLineEdit* m_searchEdit = nullptr;
 
     QScrollArea* m_scrollArea = nullptr;
