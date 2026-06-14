@@ -488,6 +488,7 @@ void MetaPanel::onTagAdded() {
             // 重新刷新显示首个选中项的标签
             setTags(currentTags);
             emit tagsChanged(currentTags);
+            emit metadataBatchUpdated(m_selectedPaths);
         }
         m_tagEdit->clear();
         m_tagEdit->adjustHeight();
@@ -515,6 +516,7 @@ void MetaPanel::onTagDeleted(const QString& text) {
     }
 
     emit tagsChanged(currentTags);
+    emit metadataBatchUpdated(m_selectedPaths);
 
     for (int i = 0; i < m_tagFlowLayout->count(); ++i) {
         QLayoutItem* item = m_tagFlowLayout->itemAt(i);
@@ -760,6 +762,7 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
                     MetadataManager::instance().setNote(wPath, newNote);
                 }
             }
+            emit metadataBatchUpdated(m_selectedPaths);
         }
     } else if (watched == m_linkEdit && event->type() == QEvent::FocusOut) {
         if (!m_selectedPaths.isEmpty()) {
@@ -777,6 +780,7 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
                     MetadataManager::instance().setURL(wPath, newUrl);
                 }
             }
+            emit metadataBatchUpdated(m_selectedPaths);
         }
     } else if (watched == m_nameEdit && event->type() == QEvent::FocusOut) {
         QString oldPath = m_nameEdit->property("oldPath").toString();
@@ -805,6 +809,7 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
                     m_pathEdit->setPlainText(newPath);
                     m_pathEdit->adjustHeight();
                     m_nameEdit->setProperty("oldPath", newPath);
+                    emit metadataBatchUpdated({newPath});
                 } else {
                     // 重命名失败，回滚文本
                     m_nameEdit->setPlainText(oldInfo.completeBaseName());
@@ -819,6 +824,7 @@ void MetaPanel::setAsPrimaryColor(const QColor& color) {
     QString currentPath = m_pathEdit->toPlainText().trimmed();
     if (currentPath != "-" && !currentPath.isEmpty()) {
         MetadataManager::instance().setColor(currentPath.toStdWString(), color.name().toStdWString());
+        emit metadataBatchUpdated({currentPath});
     }
 }
 

@@ -475,6 +475,8 @@ void MainWindow::initUi() {
             if (color != L"__NO_CHANGE__") {
                 MetadataManager::instance().setColor(path.toStdWString(), color);
             }
+            // 物理对齐：立即同步 UI 状态
+            m_contentPanel->updateItemMetadata(path);
         }
     });
 
@@ -493,6 +495,14 @@ void MainWindow::initUi() {
             }
 
             MetadataManager::instance().setTags(wPath, tags);
+            m_contentPanel->updateItemMetadata(path);
+        }
+    });
+
+    // 2026-07-xx 按照用户要求：元数据批量更新后，驱动内容容器执行刷新
+    connect(m_metaPanel, &MetaPanel::metadataBatchUpdated, this, [this](const QStringList& paths) {
+        for (const QString& path : paths) {
+            m_contentPanel->updateItemMetadata(path);
         }
     });
 

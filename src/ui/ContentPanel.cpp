@@ -188,13 +188,15 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == HasThumbnailRole) {
         return m_aspectRatios.contains(path);
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        QIcon* cached = m_iconCache.object(path);
+        // 2026-06-xx 物理修复：缓存查找统一使用小写路径，杜绝大小写差异导致的重复提取
+        QString lowerPath = path.toLower();
+        QIcon* cached = m_iconCache.object(lowerPath);
         if (cached) return *cached;
 
-        if (!m_requestedIcons.contains(path)) {
-            m_requestedIcons.insert(path);
+        if (!m_requestedIcons.contains(lowerPath)) {
+            m_requestedIcons.insert(lowerPath);
             QPointer<const FerrexVirtualDbModel> weakThis(this);
-            (void)QtConcurrent::run([weakThis, path]() {
+            (void)QtConcurrent::run([weakThis, path, lowerPath]() {
                 #ifdef Q_OS_WIN
                 CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
                 #endif
@@ -228,15 +230,15 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                     icon = UiHelper::getFileIcon(path, 128);
                 }
 
-                QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, icon, ar, hasThumb]() {
+                QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, lowerPath, icon, ar, hasThumb]() {
                     if (!weakThis) return;
                     auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
-                    mutableThis->m_iconCache.insert(path, new QIcon(icon));
-                    if (hasThumb) mutableThis->m_aspectRatios[path] = ar;
+                    mutableThis->m_iconCache.insert(lowerPath, new QIcon(icon));
+                    if (hasThumb) mutableThis->m_aspectRatios[lowerPath] = ar;
                     
                     // 局部刷新，提高性能
                     for (int i = 0; i < mutableThis->m_displayCount; ++i) {
-                        if (i < (int)mutableThis->m_allRecords.size() && mutableThis->m_allRecords[i].path == path) {
+                        if (i < (int)mutableThis->m_allRecords.size() && mutableThis->m_allRecords[i].path.toLower() == lowerPath) {
                             emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
                             break;
                         }
@@ -361,7 +363,8 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
     m_allRecords = records;
     m_pathToIndex.clear();
     for (int i = 0; i < static_cast<int>(m_allRecords.size()); ++i) {
-        m_pathToIndex[m_allRecords[i].path] = i;
+        // 2026-06-xx 物理修复：Windows 路径不区分大小写，统一转小写以确保 updateRecordMetadata 命中
+        m_pathToIndex[m_allRecords[i].path.toLower()] = i;
     }
     m_displayCount = static_cast<int>(m_allRecords.size());
     m_requestedIcons.clear();
@@ -371,7 +374,8 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
 }
 
 void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
-    QString nPath = QDir::toNativeSeparators(path);
+    // 2026-06-xx 物理修复：lookup 时统一使用小写路径，解决大小写不匹配导致的刷新失效
+    QString nPath = QDir::toNativeSeparators(path).toLower();
     auto it = m_pathToIndex.find(nPath);
     if (it != m_pathToIndex.end()) {
         int i = it->second;
@@ -2064,7 +2068,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 r.note = QString::fromStdWString(meta.note);
                 r.width = meta.width;
                 r.height = meta.height;
-                r.isManaged = meta.hasUserOperations();
+                r.isManaged = meta.isManaged;
                 for (const auto& pe : meta.palettes) {
                     r.palettes.push_back({pe.color, pe.ratio});
                 }

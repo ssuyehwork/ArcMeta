@@ -141,6 +141,11 @@ signals:
      */
     void tagsChanged(const QStringList& tags);
 
+    /**
+     * @brief 批量元数据更新信号 (用于驱动内容容器执行刷新)
+     */
+    void metadataBatchUpdated(const QStringList& paths);
+
 public:
     /**
      * @brief 设置星级显示
