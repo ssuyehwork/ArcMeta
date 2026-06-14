@@ -33,10 +33,14 @@ signals:
      */
     void requestSearchTag(const QString& tag);
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
 private:
     void initUi();
     void setupSidebar();
     void setupContentArea();
+    void adjustFlowHeights();
 
     // 侧边栏组件
     class QFrame* m_sidebar = nullptr;

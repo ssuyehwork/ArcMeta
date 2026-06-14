@@ -203,11 +203,54 @@ void TagManagerView::setupContentArea() {
     m_contentWidget->setStyleSheet("QWidget#TagContentContainer { background-color: transparent; }");
 
     auto* contentLayout = new QVBoxLayout(m_contentWidget);
-    contentLayout->setContentsMargins(20, 20, 20, 20);
-    contentLayout->setSpacing(20);
+    contentLayout->setContentsMargins(15, 0, 15, 0);
+    contentLayout->setSpacing(0);
 
     m_scrollArea->setWidget(m_contentWidget);
     mainL->addWidget(m_scrollArea, 1);
+}
+
+void TagManagerView::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    QTimer::singleShot(0, this, &TagManagerView::adjustFlowHeights);
+}
+
+void TagManagerView::adjustFlowHeights() {
+    if (!m_contentWidget || !m_scrollArea) return;
+
+    int availableW = m_scrollArea->viewport()->width();
+    if (availableW < 100) return;
+
+    int targetW = availableW - 30; // contentLayout margins (15+15)
+
+    auto* layout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
+    if (!layout) return;
+    layout->setSizeConstraint(QLayout::SetMinAndMaxSize);
+
+    for (int i = 0; i < layout->count(); ++i) {
+        QWidget* groupWidget = layout->itemAt(i)->widget();
+        if (!groupWidget) continue;
+
+        auto* vLayout = qobject_cast<QVBoxLayout*>(groupWidget->layout());
+        if (!vLayout || vLayout->count() < 2) continue;
+
+        QLabel* title = qobject_cast<QLabel*>(vLayout->itemAt(0)->widget());
+        QWidget* tagsContainer = vLayout->itemAt(1)->widget();
+        if (!title || !tagsContainer) continue;
+
+        FlowLayout* flow = qobject_cast<FlowLayout*>(tagsContainer->layout());
+        if (flow) {
+            int h = flow->heightForWidth(targetW);
+            tagsContainer->setFixedHeight(h);
+
+            QMargins m = vLayout->contentsMargins();
+            int titleH = title->sizeHint().height();
+            // 物理修复：必须包含所有内边距，否则会导致内容被裁剪或布局引擎二次干预
+            int gH = titleH + h + m.top() + m.bottom();
+            groupWidget->setFixedHeight(gH);
+        }
+    }
+    m_contentWidget->updateGeometry();
 }
 
 void TagManagerView::refresh() {
@@ -289,23 +332,25 @@ void TagManagerView::refresh() {
 
     for (auto it = groups.begin(); it != groups.end(); ++it) {
         QWidget* groupWidget = new QWidget(m_contentWidget);
+        groupWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         auto* vLayout = new QVBoxLayout(groupWidget);
-        vLayout->setContentsMargins(0, 10, 0, 10);
+        vLayout->setContentsMargins(0, 2, 0, 0);
+        vLayout->setSpacing(0);
 
         QLabel* groupTitle = new QLabel(QString(it.key()), groupWidget);
-        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #555; border-bottom: 1px solid #333; padding-bottom: 5px;");
+        groupTitle->setStyleSheet("font-size: 11px; font-weight: bold; color: #555; border-bottom: 1px solid #333; padding: 0;");
         vLayout->addWidget(groupTitle);
 
         QWidget* tagsContainer = new QWidget(groupWidget);
-        auto* flow = new FlowLayout(tagsContainer, 0, 10, 8);
+        auto* flow = new FlowLayout(tagsContainer, 0, 4, 0);
 
         auto tagsInGroup = it.value();
         for (auto tagIt = tagsInGroup.begin(); tagIt != tagsInGroup.end(); ++tagIt) {
             QPushButton* tagBtn = new QPushButton(QString("%1 (%2)").arg(tagIt.key()).arg(tagIt.value()), tagsContainer);
             tagBtn->setCursor(Qt::PointingHandCursor);
             tagBtn->setStyleSheet(
-                "QPushButton { background: transparent; border: none; color: #AAA; text-align: left; font-size: 13px; padding: 2px 5px; }"
-                "QPushButton:hover { color: #3498db; text-decoration: underline; }"
+                "QPushButton { background: transparent; border: none; color: #AAA; text-align: left; font-size: 13px; padding: 1px 4px; }"
+                "QPushButton:hover { color: #1abc9c; text-decoration: underline; }"
             );
 
             QString tagName = tagIt.key();
@@ -345,6 +390,8 @@ void TagManagerView::refresh() {
         if (contentLayout) contentLayout->addWidget(groupWidget);
     }
     if (contentLayout) contentLayout->addStretch();
+
+    QTimer::singleShot(10, this, &TagManagerView::adjustFlowHeights);
 }
 
 } // namespace ArcMeta
