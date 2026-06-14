@@ -317,7 +317,7 @@ void MetaPanel::initUi() {
     QWidget* header = new QWidget(this); header->setObjectName("ContainerHeader"); header->setFixedHeight(32);
     header->setStyleSheet("QWidget#ContainerHeader { background-color: #252526; border-bottom: 1px solid #333; }");
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(10, 0, 10, 0); // 恢复左右两侧边距 (10px)
+    headerLayout->setContentsMargins(15, 0, 5, 0); // 2026-xx-xx 按照用户要求：左侧 15px 对齐，右侧 5px 间距
     headerLayout->setSpacing(5);
     QLabel* iconLabel = new QLabel(header); iconLabel->setPixmap(UiHelper::getIcon("all_data", QColor("#4a90e2"), 18).pixmap(18, 18)); headerLayout->addWidget(iconLabel);
     QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 12px; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);
