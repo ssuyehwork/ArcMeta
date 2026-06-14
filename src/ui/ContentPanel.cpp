@@ -729,7 +729,7 @@ void ContentPanel::initUi() {
         "}" 
     ); 
     QHBoxLayout* titleL = new QHBoxLayout(titleBar); 
-    titleL->setContentsMargins(15, 0, 0, 0); // 物理对齐：右侧边距 0px
+    titleL->setContentsMargins(15, 0, 5, 0); // 2026-xx-xx 按照用户要求：右侧保留 5px 呼吸边距
     titleL->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
  
     QLabel* iconLabel = new QLabel(titleBar); 

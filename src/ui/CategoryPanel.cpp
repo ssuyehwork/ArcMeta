@@ -735,7 +735,7 @@ void CategoryPanel::initUi() {
         "}"
     );
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 0, 0, 0); 
+    headerLayout->setContentsMargins(15, 0, 5, 0); // 2026-xx-xx 按照用户要求：右侧保留 5px 呼吸边距
     headerLayout->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
 
     QLabel* iconLabel = new QLabel(header);

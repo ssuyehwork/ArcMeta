@@ -988,7 +988,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     QWidget* titleBarBtns = new QWidget(this);
     QHBoxLayout* layout = new QHBoxLayout(titleBarBtns);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(4);
+    layout->setSpacing(5); // 2026-xx-xx 按照用户要求：按钮高亮间距统一为 5px
 
     auto createTitleBtn = [this](const QString& iconKey, const QString& hoverColor = "#3E3E42") {
         QPushButton* btn = new QPushButton(this);

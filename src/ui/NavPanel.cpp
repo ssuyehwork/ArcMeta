@@ -114,8 +114,8 @@ void NavPanel::initUi() {
         "}"
     );
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 2, 0, 0); // 物理对齐：右侧边距 0px
-    headerLayout->setSpacing(8);
+    headerLayout->setContentsMargins(15, 2, 5, 0); // 2026-xx-xx 按照用户要求：右侧保留 5px 呼吸边距
+    headerLayout->setSpacing(5);                  // 2026-xx-xx 按照用户要求：间距统一为 5px
 
     QLabel* iconLabel = new QLabel(header);
     iconLabel->setPixmap(UiHelper::getIcon("list_ul", QColor("#2ecc71"), 18).pixmap(18, 18));
