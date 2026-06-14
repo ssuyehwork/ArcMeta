@@ -1,6 +1,7 @@
 #include "TagManagerView.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+#include "MetaPanel.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
 #include "sqlite3.h"
@@ -54,7 +55,7 @@ QWidget* TagManagerView::createSidebarItem(const QString& icon, const QString& n
     item->setCursor(Qt::PointingHandCursor);
     
     auto* layout = new QHBoxLayout(item);
-    layout->setContentsMargins(2, 1, 2, 1);
+    layout->setContentsMargins(0, 1, 0, 1);
     layout->setSpacing(0);
     
     QWidget* inner = new QWidget(item);
@@ -64,7 +65,7 @@ QWidget* TagManagerView::createSidebarItem(const QString& icon, const QString& n
         "QWidget#SidebarItemInner:hover { background-color: #2a2d2e; }"
     );
     auto* innerLayout = new QHBoxLayout(inner);
-    innerLayout->setContentsMargins(13, 0, 13, 0);
+    innerLayout->setContentsMargins(0, 0, 15, 0);
     innerLayout->setSpacing(6);
     
     QLabel* iconLabel = new QLabel(inner);
@@ -86,9 +87,10 @@ QWidget* TagManagerView::createSidebarItem(const QString& icon, const QString& n
 }
 
 void TagManagerView::setupSidebar() {
-    m_sidebar = new QWidget(this);
+    m_sidebar = new QFrame(this);
     m_sidebar->setObjectName("ListContainer"); // 物理对标：复用导航栏样式 ID
     m_sidebar->setFixedWidth(230);
+    m_sidebar->setAttribute(Qt::WA_StyledBackground, true);
     
     m_sidebarLayout = new QVBoxLayout(m_sidebar);
     m_sidebarLayout->setContentsMargins(0, 0, 0, 0);
@@ -96,22 +98,26 @@ void TagManagerView::setupSidebar() {
 
     // 标题栏
     QWidget* header = new QWidget(m_sidebar);
+    header->setObjectName("ContainerHeader");
     header->setFixedHeight(32);
-    header->setStyleSheet("background-color: #252526; border-bottom: 1px solid #333;");
+    header->setAttribute(Qt::WA_StyledBackground, true);
+    header->setStyleSheet(
+        "QWidget#ContainerHeader {"
+        "  background-color: #252526;"
+        "  border-bottom: 1px solid #333;"
+        "}"
+    );
     auto* headerLayout = new QHBoxLayout(header);
     headerLayout->setContentsMargins(15, 0, 5, 0);
     
     QLabel* iconLabel = new QLabel(header);
-    iconLabel->setPixmap(UiHelper::getIcon("tag_filled", PrimaryBlue, 18).pixmap(18, 18));
+    iconLabel->setPixmap(UiHelper::getIcon("tag_filled", QColor("#1abc9c"), 18).pixmap(18, 18));
     headerLayout->addWidget(iconLabel);
 
     QLabel* titleLabel = new QLabel("标签管理", header);
-    titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #3498db;");
+    titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #1abc9c;");
     headerLayout->addWidget(titleLabel);
     
-    m_tagCountLabel = new QLabel("(0)", header);
-    m_tagCountLabel->setStyleSheet("color: #888; font-size: 11px;");
-    headerLayout->addWidget(m_tagCountLabel);
     headerLayout->addStretch();
     
     m_sidebarLayout->addWidget(header);
@@ -120,7 +126,7 @@ void TagManagerView::setupSidebar() {
     QWidget* contentWrapper = new QWidget(m_sidebar);
     contentWrapper->setStyleSheet("background: transparent; border: none;");
     QVBoxLayout* sidebarContentLayout = new QVBoxLayout(contentWrapper);
-    sidebarContentLayout->setContentsMargins(0, 8, 0, 8); // 左右间距已由 item 内部 15px 处理，此处仅设 8px 顶部呼吸
+    sidebarContentLayout->setContentsMargins(15, 8, 0, 8);
     sidebarContentLayout->setSpacing(0);
 
     // 静态项
@@ -154,8 +160,9 @@ void TagManagerView::setupSidebar() {
 }
 
 void TagManagerView::setupContentArea() {
-    m_contentContainer = new QWidget(this);
+    m_contentContainer = new QFrame(this);
     m_contentContainer->setObjectName("EditorContainer"); // 物理对标：复用内容面板 ID
+    m_contentContainer->setAttribute(Qt::WA_StyledBackground, true);
     auto* mainL = new QVBoxLayout(m_contentContainer);
     mainL->setContentsMargins(0, 0, 0, 0);
     mainL->setSpacing(0);
@@ -164,6 +171,7 @@ void TagManagerView::setupContentArea() {
     QWidget* titleBar = new QWidget(m_contentContainer);
     titleBar->setObjectName("ContainerHeader");
     titleBar->setFixedHeight(32);
+    titleBar->setAttribute(Qt::WA_StyledBackground, true);
     titleBar->setStyleSheet(
         "QWidget#ContainerHeader {"
         "  background-color: #252526;"
@@ -175,11 +183,11 @@ void TagManagerView::setupContentArea() {
     titleL->setSpacing(5);
 
     QLabel* iconLabel = new QLabel(titleBar);
-    iconLabel->setPixmap(UiHelper::getIcon("tag", AccentCyan, 18).pixmap(18, 18));
+    iconLabel->setPixmap(UiHelper::getIcon("tag", QColor("#1abc9c"), 18).pixmap(18, 18));
     titleL->addWidget(iconLabel);
 
     m_contentTitleLabel = new QLabel("标签", titleBar);
-    m_contentTitleLabel->setStyleSheet(QString("font-size: 13px; font-weight: bold; color: %1; background: transparent; border: none;").arg(qssColor(AccentCyan)));
+    m_contentTitleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #1abc9c; background: transparent; border: none;");
     titleL->addWidget(m_contentTitleLabel);
     titleL->addStretch();
 
@@ -233,7 +241,6 @@ void TagManagerView::refresh() {
 
     // 更新侧边栏
     int allCount = m_tagCounts.size();
-    m_tagCountLabel->setText(QString("(%1)").arg(allCount));
     if (m_allTagsCountLabel) m_allTagsCountLabel->setText(QString::number(allCount));
     
     // 统计未分类 (此处逻辑：不在任何 TagGroup 中的标签)
@@ -290,18 +297,14 @@ void TagManagerView::refresh() {
         vLayout->addWidget(groupTitle);
         
         QWidget* tagsContainer = new QWidget(groupWidget);
-        auto* grid = new QGridLayout(tagsContainer);
-        grid->setContentsMargins(0, 10, 0, 10);
-        grid->setSpacing(15);
+        auto* flow = new FlowLayout(tagsContainer, 0, 10, 8);
         
-        int row = 0, col = 0;
-        int maxCols = 4;
         auto tagsInGroup = it.value();
         for (auto tagIt = tagsInGroup.begin(); tagIt != tagsInGroup.end(); ++tagIt) {
             QPushButton* tagBtn = new QPushButton(QString("%1 (%2)").arg(tagIt.key()).arg(tagIt.value()), tagsContainer);
             tagBtn->setCursor(Qt::PointingHandCursor);
             tagBtn->setStyleSheet(
-                "QPushButton { background: transparent; border: none; color: #AAA; text-align: left; font-size: 13px; }"
+                "QPushButton { background: transparent; border: none; color: #AAA; text-align: left; font-size: 13px; padding: 2px 5px; }"
                 "QPushButton:hover { color: #3498db; text-decoration: underline; }"
             );
             
@@ -336,9 +339,7 @@ void TagManagerView::refresh() {
                 menu.exec(QCursor::pos());
             });
             
-            grid->addWidget(tagBtn, row, col);
-            col++;
-            if (col >= maxCols) { col = 0; row++; }
+            flow->addWidget(tagBtn);
         }
         vLayout->addWidget(tagsContainer);
         if (contentLayout) contentLayout->addWidget(groupWidget);
