@@ -42,7 +42,6 @@ private:
     class QFrame* m_sidebar = nullptr;
     QVBoxLayout* m_sidebarLayout = nullptr;
     QWidget* m_groupContainer = nullptr;
-    QLabel* m_tagCountLabel = nullptr;
     QLabel* m_allTagsCountLabel = nullptr;
     QLabel* m_uncategorizedTagsCountLabel = nullptr;
     QLabel* m_frequentTagsCountLabel = nullptr;

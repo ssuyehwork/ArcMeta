@@ -1,6 +1,7 @@
 #include "TagManagerView.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+#include "MetaPanel.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
 #include "sqlite3.h"
@@ -117,9 +118,6 @@ void TagManagerView::setupSidebar() {
     titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #1abc9c;");
     headerLayout->addWidget(titleLabel);
 
-    m_tagCountLabel = new QLabel("(0)", header);
-    m_tagCountLabel->setStyleSheet("color: #888; font-size: 11px;");
-    headerLayout->addWidget(m_tagCountLabel);
     headerLayout->addStretch();
 
     m_sidebarLayout->addWidget(header);
@@ -243,7 +241,6 @@ void TagManagerView::refresh() {
 
     // 更新侧边栏
     int allCount = m_tagCounts.size();
-    m_tagCountLabel->setText(QString("(%1)").arg(allCount));
     if (m_allTagsCountLabel) m_allTagsCountLabel->setText(QString::number(allCount));
 
     // 统计未分类 (此处逻辑：不在任何 TagGroup 中的标签)
@@ -300,18 +297,14 @@ void TagManagerView::refresh() {
         vLayout->addWidget(groupTitle);
 
         QWidget* tagsContainer = new QWidget(groupWidget);
-        auto* grid = new QGridLayout(tagsContainer);
-        grid->setContentsMargins(0, 10, 0, 10);
-        grid->setSpacing(15);
+        auto* flow = new FlowLayout(tagsContainer, 0, 10, 8);
 
-        int row = 0, col = 0;
-        int maxCols = 4;
         auto tagsInGroup = it.value();
         for (auto tagIt = tagsInGroup.begin(); tagIt != tagsInGroup.end(); ++tagIt) {
             QPushButton* tagBtn = new QPushButton(QString("%1 (%2)").arg(tagIt.key()).arg(tagIt.value()), tagsContainer);
             tagBtn->setCursor(Qt::PointingHandCursor);
             tagBtn->setStyleSheet(
-                "QPushButton { background: transparent; border: none; color: #AAA; text-align: left; font-size: 13px; }"
+                "QPushButton { background: transparent; border: none; color: #AAA; text-align: left; font-size: 13px; padding: 2px 5px; }"
                 "QPushButton:hover { color: #3498db; text-decoration: underline; }"
             );
 
@@ -346,9 +339,7 @@ void TagManagerView::refresh() {
                 menu.exec(QCursor::pos());
             });
 
-            grid->addWidget(tagBtn, row, col);
-            col++;
-            if (col >= maxCols) { col = 0; row++; }
+            flow->addWidget(tagBtn);
         }
         vLayout->addWidget(tagsContainer);
         if (contentLayout) contentLayout->addWidget(groupWidget);
