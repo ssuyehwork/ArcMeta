@@ -383,7 +383,7 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             m_allRecords[i].fileId = meta.fileId128;
             m_allRecords[i].pinned = meta.pinned;
             m_allRecords[i].encrypted = meta.encrypted;
-            m_allRecords[i].isManaged = meta.hasUserOperations();
+            m_allRecords[i].isManaged = meta.isManaged;
             m_allRecords[i].palettes.clear();
             for (const auto& pe : meta.palettes) {
                 m_allRecords[i].palettes.push_back({pe.color, pe.ratio});
