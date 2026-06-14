@@ -769,10 +769,12 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
     int currentW = 0, currentH = 0;
     {
         std::shared_lock<std::shared_mutex> lock(instance().m_mutex);
-        const auto& m = instance().m_cache[nPath];
-        currentW = m.width;
-        currentH = m.height;
-        if (!m.color.empty() && currentW > 0) return; 
+        auto it = instance().m_cache.find(nPath);
+        if (it != instance().m_cache.end()) {
+            currentW = it->second.width;
+            currentH = it->second.height;
+            if (!it->second.color.empty() && currentW > 0) return;
+        }
     }
     
     QFileInfo info(QString::fromStdWString(nPath));
@@ -822,16 +824,21 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
 
     // 2026-07-xx 按照建议：解析失败（且属于图像类型）时加入重试队列
     if (!success && (info.isDir() || ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower()))) {
-        {
-            std::unique_lock<std::shared_mutex> lock(instance().m_mutex);
-            // 查重：避免队列膨胀
-            bool found = false;
-            for(const auto& p : instance().m_visualRetryQueue) if(p == nPath) { found = true; break; }
-            if (!found) {
-                instance().m_visualRetryQueue.push_back(nPath);
-                // 2026-07-xx 物理对齐：QTimer 非线程安全，必须通过元对象系统跨线程启动
-                QMetaObject::invokeMethod(instance().m_retryTimer, "start", Qt::QueuedConnection);
+        std::unique_lock<std::shared_mutex> lock(instance().m_mutex);
+        // 查重：避免队列膨胀
+        bool found = false;
+        for(const auto& p : instance().m_visualRetryQueue) if(p == nPath) { found = true; break; }
+
+        if (!found) {
+            qDebug() << "[Metadata] 颜色解析暂未就绪，加入重试队列:" << QString::fromStdWString(nPath);
+            // 2026-07-xx 物理修复：在锁保护下重置计数及入队，杜绝数据竞争
+            auto it = instance().m_cache.find(nPath);
+            if (it != instance().m_cache.end()) {
+                it->second.colorRetryCount = 0;
             }
+            instance().m_visualRetryQueue.push_back(nPath);
+            // 2026-07-xx 物理对齐：QTimer 非线程安全，必须通过元对象系统跨线程启动
+            QMetaObject::invokeMethod(instance().m_retryTimer, "start", Qt::QueuedConnection);
         }
     }
 }
@@ -860,6 +867,14 @@ void MetadataManager::processVisualRetryQueue() {
             QFileInfo info(QString::fromStdWString(path));
             QString qPath = QString::fromStdWString(path);
             bool ok = false;
+            int currentRetry = 0;
+
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                if (m_cache.count(path)) {
+                    currentRetry = ++m_cache[path].colorRetryCount;
+                }
+            }
 
             if (info.isFile()) {
                 auto palette = ArcMeta::UiHelper::extractPalette(qPath);
@@ -887,9 +902,12 @@ void MetadataManager::processVisualRetryQueue() {
             }
             
             // 2026-07-xx 按照 Plan-28：重构移除策略
-            // 只有成功，或者确定不是图像文件（无法提取）时，才从队列移除
+            // 只有成功，或者确定不是图像文件，或者已达到最大重试次数时，才从队列移除
             bool isGraphics = ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower());
-            if (ok || (!isGraphics && !info.isDir())) {
+            if (ok || (!isGraphics && !info.isDir()) || currentRetry >= kMaxColorRetry) {
+                if (!ok && currentRetry >= kMaxColorRetry) {
+                    qDebug() << "[Metadata] 颜色解析重试达到上限，放弃:" << qPath;
+                }
                 finished.push_back(path);
             }
         }
