@@ -928,9 +928,9 @@ void MainWindow::setupSplitters() {
         if (m_categoryPanel) m_categoryPanel->setFocusHighlight(false);
 
         // 根据数据来源显示焦点线
-        if (type == ContentPanel::Logical) {
+        if (type == ContentPanel::DataSourceLogical) {
             if (m_categoryPanel) m_categoryPanel->setFocusHighlight(true);
-        } else if (type == ContentPanel::Physical) {
+        } else if (type == ContentPanel::DataSourcePhysical) {
             if (m_navPanel) m_navPanel->setFocusHighlight(true);
         }
     });

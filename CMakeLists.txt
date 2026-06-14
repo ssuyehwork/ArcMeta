@@ -44,11 +44,14 @@ set(SOURCES
     src/main.cpp
     src/meta/sqlite3.c
     src/meta/sqlite3.h
+    src/meta/sqlite3ext.h
     src/core/CoreController.cpp
     src/core/CoreController.h
     src/core/CacheManager.cpp
     src/core/CacheManager.h
     src/core/IndexedEntry.h
+    src/core/AppConfig.h
+    src/core/ModelContract.h
     src/mft/UsnWatcher.cpp
     src/mft/UsnWatcher.h
     src/crypto/EncryptionManager.cpp
@@ -102,6 +105,8 @@ set(SOURCES
     src/ui/LoadingWindow.cpp
     src/ui/LoadingWindow.h
     src/ui/Logger.h
+    src/ui/StyleLibrary.h
+    src/ui/SvgIcons.h
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
     src/ui/TrayController.cpp
@@ -117,6 +122,7 @@ set(SOURCES
     src/ui/NavPanel.cpp
     src/ui/NavPanel.h
     src/ui/BatchProgressDialog.h
+    src/ui/ProgressDialog.h
     src/ui/QuickLookWindow.cpp
     src/ui/QuickLookWindow.h
     src/ui/RuleRow.cpp

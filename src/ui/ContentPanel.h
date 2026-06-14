@@ -224,9 +224,10 @@ signals:
      * @brief 数据源类型枚举
      */
     enum DataSource {
-        Logical,  // 分类
-        Physical  // 物理路径
+        DataSourceLogical,  // 分类
+        DataSourcePhysical  // 物理路径
     };
+    Q_ENUM(DataSource)
 
     /**
      * @brief 数据源变更信号，用于焦点线管理

@@ -2003,8 +2003,9 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     m_isLoading = true;
     m_currentCategoryType = ""; // 物理导航模式下清除系统类型
     m_currentCategoryId = -1; // 物理导航模式下重置分类 ID
+    updateLayersButtonState();
     qDebug() << "[Content] 开始物理递归扫描 (虚拟化) ->" << path << (recursive ? "递归" : "单级"); 
-    emit dataSourceChanged(Physical);
+    emit dataSourceChanged(DataSourcePhysical);
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -2247,7 +2248,7 @@ void ContentPanel::loadCategory(int categoryId) {
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
-    emit dataSourceChanged(Logical);
+    emit dataSourceChanged(DataSourceLogical);
      
     m_model->clear(); 
  
@@ -2343,7 +2344,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
-    emit dataSourceChanged(Logical);
+    emit dataSourceChanged(DataSourceLogical);
      
     m_model->clear(); 
  
