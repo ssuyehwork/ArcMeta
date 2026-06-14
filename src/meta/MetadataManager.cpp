@@ -378,7 +378,7 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
         m_cache[nPath].color = color; 
     }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    if (notify) notifyFullUIRebuild();
     debouncePersist(nPath);
 }
 
@@ -399,7 +399,7 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
         m_cache[nPath].tags = tags;
     }
 
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    if (notify) notifyFullUIRebuild();
     debouncePersist(nPath);
 }
 
@@ -407,7 +407,7 @@ void MetadataManager::setNote(const std::wstring& path, const std::wstring& note
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    if (notify) notifyFullUIRebuild();
     debouncePersist(nPath);
 }
 
@@ -415,7 +415,7 @@ void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, 
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    if (notify) notifyFullUIRebuild();
     debouncePersist(nPath);
 }
 
@@ -512,7 +512,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             }
         }
     }
-    notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nNew));
+    notifyFullUIRebuild();
 }
 
 void MetadataManager::removeMetadataSync(const std::wstring& path) {
