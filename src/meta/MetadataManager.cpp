@@ -1009,4 +1009,17 @@ QStringList MetadataManager::searchInCache(const QString& keyword) {
     return results;
 }
 
+QMap<QString, int> MetadataManager::getAllTags() const {
+    QMap<QString, int> tagCounts;
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
+        if (it->second.isManaged && !it->second.isInvalid && !it->second.isTrash) {
+            for (const QString& tag : it->second.tags) {
+                tagCounts[tag]++;
+            }
+        }
+    }
+    return tagCounts;
+}
+
 } // namespace ArcMeta

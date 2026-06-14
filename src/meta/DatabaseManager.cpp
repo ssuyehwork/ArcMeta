@@ -145,6 +145,21 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             key TEXT PRIMARY KEY,
             value INTEGER DEFAULT 0
         );
+
+        -- 标签组表
+        CREATE TABLE IF NOT EXISTS tag_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            color TEXT,
+            sort_order INTEGER DEFAULT 0
+        );
+
+        -- 标签与标签组关联表
+        CREATE TABLE IF NOT EXISTS tag_group_items (
+            group_id INTEGER,
+            tag_name TEXT,
+            PRIMARY KEY (group_id, tag_name)
+        );
     )";
     char* errMsg = nullptr;
     sqlite3_exec(conn.memDb, schema, nullptr, nullptr, &errMsg);
