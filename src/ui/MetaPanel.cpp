@@ -317,7 +317,8 @@ void MetaPanel::initUi() {
     QWidget* header = new QWidget(this); header->setObjectName("ContainerHeader"); header->setFixedHeight(32);
     header->setStyleSheet("QWidget#ContainerHeader { background-color: #252526; border-bottom: 1px solid #333; }");
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 0, 5, 0); // 2026-xx-xx 按照用户要求：左侧 15px 对齐，右侧 5px 间距
+    // 2026-xx-xx 按照用户要求：标题栏右侧保留 5px 呼吸边距（左侧保持 15px 以对齐），按钮间距统一为 5px
+    headerLayout->setContentsMargins(15, 0, 5, 0);
     headerLayout->setSpacing(5);
     QLabel* iconLabel = new QLabel(header); iconLabel->setPixmap(UiHelper::getIcon("all_data", QColor("#4a90e2"), 18).pixmap(18, 18)); headerLayout->addWidget(iconLabel);
     QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 12px; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);
@@ -467,28 +468,14 @@ QWidget* MetaPanel::createSectionBox(const QString& iconName, const QString& tit
 void MetaPanel::onTagAdded() {
     QString text = m_tagEdit->toPlainText().trimmed();
     if (!text.isEmpty()) {
-        if (!m_selectedPaths.isEmpty()) {
-            QStringList currentTags;
-            for (const QString& path : m_selectedPaths) {
-                std::wstring wPath = path.toStdWString();
-                RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
-
-                // 2026-07-xx 物理对齐：修改前先判断项目是否已经入库，若无则执行注册
-                if (!rm.isManaged) {
-                    MetadataManager::instance().registerItem(wPath);
-                    rm = MetadataManager::instance().getMeta(wPath);
-                }
-
-                if (!rm.tags.contains(text)) {
-                    rm.tags << text;
-                    MetadataManager::instance().setTags(wPath, rm.tags);
-                }
-                if (path == m_selectedPaths.first()) currentTags = rm.tags;
+        QString currentPath = m_pathEdit->toPlainText().trimmed();
+        if (currentPath != "-" && !currentPath.isEmpty()) {
+            std::wstring wPath = currentPath.toStdWString();
+            RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
+            if (!rm.tags.contains(text)) {
+                rm.tags << text; MetadataManager::instance().setTags(wPath, rm.tags);
+                TagPill* pill = new TagPill(text, m_tagContainer); connect(pill, &TagPill::deleteRequested, this, &MetaPanel::onTagDeleted); m_tagFlowLayout->addWidget(pill);
             }
-            // 重新刷新显示首个选中项的标签
-            setTags(currentTags);
-            emit tagsChanged(currentTags);
-            emit metadataBatchUpdated(m_selectedPaths);
         }
         m_tagEdit->clear();
         m_tagEdit->adjustHeight();
@@ -496,39 +483,17 @@ void MetaPanel::onTagAdded() {
 }
 
 void MetaPanel::onTagDeleted(const QString& text) {
-    if (m_selectedPaths.isEmpty()) return;
-
-    QStringList currentTags;
-    for (const QString& path : m_selectedPaths) {
-        std::wstring wPath = path.toStdWString();
-        RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
-
-        if (!rm.isManaged) {
-            MetadataManager::instance().registerItem(wPath);
-            rm = MetadataManager::instance().getMeta(wPath);
-        }
-
-        if (rm.tags.contains(text)) {
-            rm.tags.removeAll(text);
-            MetadataManager::instance().setTags(wPath, rm.tags);
-        }
-        if (path == m_selectedPaths.first()) currentTags = rm.tags;
-    }
-
-    emit tagsChanged(currentTags);
-    emit metadataBatchUpdated(m_selectedPaths);
-
     for (int i = 0; i < m_tagFlowLayout->count(); ++i) {
-        QLayoutItem* item = m_tagFlowLayout->itemAt(i);
-        TagPill* pill = qobject_cast<TagPill*>(item->widget());
+        QLayoutItem* item = m_tagFlowLayout->itemAt(i); TagPill* pill = qobject_cast<TagPill*>(item->widget());
         if (pill && pill->property("tagText").toString() == text) {
-            m_tagFlowLayout->takeAt(i);
-            pill->deleteLater();
-            delete item;
-            break;
+            m_tagFlowLayout->takeAt(i); pill->deleteLater(); delete item;
+            QString currentPath = m_pathEdit->toPlainText().trimmed();
+            if (currentPath != "-" && !currentPath.isEmpty()) {
+                std::wstring wPath = currentPath.toStdWString(); RuntimeMeta rm = MetadataManager::instance().getMeta(wPath); rm.tags.removeAll(text); MetadataManager::instance().setTags(wPath, rm.tags);
+            }
+            return;
         }
     }
-    m_adjustTimer->start();
 }
 
 void MetaPanel::resizeEvent(QResizeEvent* event) {
@@ -747,40 +712,22 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_noteEdit && event->type() == QEvent::FocusOut) {
-        if (!m_selectedPaths.isEmpty()) {
+        QString currentPath = m_pathEdit->toPlainText().trimmed();
+        if (currentPath != "-" && !currentPath.isEmpty()) {
             std::wstring newNote = m_noteEdit->toPlainText().toStdWString();
-            for (const QString& path : m_selectedPaths) {
-                std::wstring wPath = path.toStdWString();
-                RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
-
-                if (!rm.isManaged) {
-                    MetadataManager::instance().registerItem(wPath);
-                    rm = MetadataManager::instance().getMeta(wPath);
-                }
-
-                if (newNote != rm.note) {
-                    MetadataManager::instance().setNote(wPath, newNote);
-                }
+            // 2026-06-xx 物理加固：增加差异比对，只有真正修改内容才触发保存，防止点击触发激活
+            if (newNote != MetadataManager::instance().getMeta(currentPath.toStdWString()).note) {
+                MetadataManager::instance().setNote(currentPath.toStdWString(), newNote);
             }
-            emit metadataBatchUpdated(m_selectedPaths);
         }
     } else if (watched == m_linkEdit && event->type() == QEvent::FocusOut) {
-        if (!m_selectedPaths.isEmpty()) {
+        QString currentPath = m_pathEdit->toPlainText().trimmed();
+        if (currentPath != "-" && !currentPath.isEmpty()) {
             std::wstring newUrl = m_linkEdit->toPlainText().toStdWString();
-            for (const QString& path : m_selectedPaths) {
-                std::wstring wPath = path.toStdWString();
-                RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
-
-                if (!rm.isManaged) {
-                    MetadataManager::instance().registerItem(wPath);
-                    rm = MetadataManager::instance().getMeta(wPath);
-                }
-
-                if (newUrl != rm.url) {
-                    MetadataManager::instance().setURL(wPath, newUrl);
-                }
+            // 2026-06-xx 物理加固：增加差异比对，防止点击触发激活
+            if (newUrl != MetadataManager::instance().getMeta(currentPath.toStdWString()).url) {
+                MetadataManager::instance().setURL(currentPath.toStdWString(), newUrl);
             }
-            emit metadataBatchUpdated(m_selectedPaths);
         }
     } else if (watched == m_nameEdit && event->type() == QEvent::FocusOut) {
         QString oldPath = m_nameEdit->property("oldPath").toString();
@@ -809,7 +756,6 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
                     m_pathEdit->setPlainText(newPath);
                     m_pathEdit->adjustHeight();
                     m_nameEdit->setProperty("oldPath", newPath);
-                    emit metadataBatchUpdated({newPath});
                 } else {
                     // 重命名失败，回滚文本
                     m_nameEdit->setPlainText(oldInfo.completeBaseName());
@@ -824,7 +770,6 @@ void MetaPanel::setAsPrimaryColor(const QColor& color) {
     QString currentPath = m_pathEdit->toPlainText().trimmed();
     if (currentPath != "-" && !currentPath.isEmpty()) {
         MetadataManager::instance().setColor(currentPath.toStdWString(), color.name().toStdWString());
-        emit metadataBatchUpdated({currentPath});
     }
 }
 

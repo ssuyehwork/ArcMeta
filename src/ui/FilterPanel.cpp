@@ -300,8 +300,9 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
         "}"
     );
     QHBoxLayout* topL = new QHBoxLayout(topBar);
-    topL->setContentsMargins(15, 0, 5, 0); // 2026-xx-xx 按照用户要求：右侧保留 5px 呼吸边距
-    topL->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
+    // 2026-xx-xx 按照用户要求：标题栏右侧保留 5px 呼吸边距，按钮间距统一为 5px
+    topL->setContentsMargins(15, 0, 5, 0);
+    topL->setSpacing(5);
 
     QLabel* iconLabel = new QLabel(topBar);
     iconLabel->setPixmap(UiHelper::getIcon("filter", QColor("#f1c40f"), 18).pixmap(18, 18));
@@ -312,7 +313,7 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
 
     m_btnClearAll = new QPushButton(topBar);
     m_btnClearAll->setFixedSize(24, 24); // 2026-05-17 按照用户要求：统一为 24x24 规格以实现像素级对齐
-    m_btnClearAll->setIcon(UiHelper::getIcon("reset_filter", QColor("#B0B0B0"))); // 2026-xx-xx 按照用户要求：使用新的 reset_filter 图标
+    m_btnClearAll->setIcon(UiHelper::getIcon("trash", QColor("#B0B0B0"))); // 将文字重构为具有高度语义化的 trash SVG 图标
     m_btnClearAll->setIconSize(QSize(16, 16));
     m_btnClearAll->setFlat(true);
     m_btnClearAll->setCursor(Qt::PointingHandCursor);

@@ -188,15 +188,13 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == HasThumbnailRole) {
         return m_aspectRatios.contains(path);
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        // 2026-06-xx 物理修复：缓存查找统一使用小写路径，杜绝大小写差异导致的重复提取
-        QString lowerPath = path.toLower();
-        QIcon* cached = m_iconCache.object(lowerPath);
+        QIcon* cached = m_iconCache.object(path);
         if (cached) return *cached;
 
-        if (!m_requestedIcons.contains(lowerPath)) {
-            m_requestedIcons.insert(lowerPath);
+        if (!m_requestedIcons.contains(path)) {
+            m_requestedIcons.insert(path);
             QPointer<const FerrexVirtualDbModel> weakThis(this);
-            (void)QtConcurrent::run([weakThis, path, lowerPath]() {
+            (void)QtConcurrent::run([weakThis, path]() {
                 #ifdef Q_OS_WIN
                 CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
                 #endif
@@ -230,15 +228,15 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                     icon = UiHelper::getFileIcon(path, 128);
                 }
 
-                QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, lowerPath, icon, ar, hasThumb]() {
+                QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, icon, ar, hasThumb]() {
                     if (!weakThis) return;
                     auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
-                    mutableThis->m_iconCache.insert(lowerPath, new QIcon(icon));
-                    if (hasThumb) mutableThis->m_aspectRatios[lowerPath] = ar;
+                    mutableThis->m_iconCache.insert(path, new QIcon(icon));
+                    if (hasThumb) mutableThis->m_aspectRatios[path] = ar;
                     
                     // 局部刷新，提高性能
                     for (int i = 0; i < mutableThis->m_displayCount; ++i) {
-                        if (i < (int)mutableThis->m_allRecords.size() && mutableThis->m_allRecords[i].path.toLower() == lowerPath) {
+                        if (i < (int)mutableThis->m_allRecords.size() && mutableThis->m_allRecords[i].path == path) {
                             emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
                             break;
                         }
@@ -363,8 +361,7 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
     m_allRecords = records;
     m_pathToIndex.clear();
     for (int i = 0; i < static_cast<int>(m_allRecords.size()); ++i) {
-        // 2026-06-xx 物理修复：Windows 路径不区分大小写，统一转小写以确保 updateRecordMetadata 命中
-        m_pathToIndex[m_allRecords[i].path.toLower()] = i;
+        m_pathToIndex[m_allRecords[i].path] = i;
     }
     m_displayCount = static_cast<int>(m_allRecords.size());
     m_requestedIcons.clear();
@@ -374,8 +371,7 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
 }
 
 void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
-    // 2026-06-xx 物理修复：lookup 时统一使用小写路径，解决大小写不匹配导致的刷新失效
-    QString nPath = QDir::toNativeSeparators(path).toLower();
+    QString nPath = QDir::toNativeSeparators(path);
     auto it = m_pathToIndex.find(nPath);
     if (it != m_pathToIndex.end()) {
         int i = it->second;
@@ -387,7 +383,7 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             m_allRecords[i].fileId = meta.fileId128;
             m_allRecords[i].pinned = meta.pinned;
             m_allRecords[i].encrypted = meta.encrypted;
-            m_allRecords[i].isManaged = meta.isManaged;
+            m_allRecords[i].isManaged = meta.hasUserOperations();
             m_allRecords[i].palettes.clear();
             for (const auto& pe : meta.palettes) {
                 m_allRecords[i].palettes.push_back({pe.color, pe.ratio});
@@ -733,8 +729,9 @@ void ContentPanel::initUi() {
         "}" 
     ); 
     QHBoxLayout* titleL = new QHBoxLayout(titleBar); 
-    titleL->setContentsMargins(15, 0, 5, 0); // 2026-xx-xx 按照用户要求：右侧保留 5px 呼吸边距
-    titleL->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
+    // 2026-xx-xx 按照用户要求：标题栏右侧保留 5px 呼吸边距，按钮间距统一为 5px
+    titleL->setContentsMargins(15, 0, 5, 0);
+    titleL->setSpacing(5);
  
     QLabel* iconLabel = new QLabel(titleBar); 
     iconLabel->setPixmap(UiHelper::getIcon("eye", QColor("#41F2F2"), 18).pixmap(18, 18)); 
@@ -743,21 +740,10 @@ void ContentPanel::initUi() {
     QLabel* titleLabel = new QLabel("内容", titleBar); 
     titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #41F2F2; background: transparent; border: none;"); 
      
-    m_btnLayersBlue = new QPushButton(titleBar);
-    m_btnLayersBlue->setFixedSize(24, 24);
-    m_btnLayersBlue->setIcon(UiHelper::getIcon("layers", QColor("#3498db"), 18));
-    m_btnLayersBlue->setProperty("tooltipText", "TODO");
-    m_btnLayersBlue->installEventFilter(this);
-    m_btnLayersBlue->setStyleSheet(
-        "QPushButton { background: transparent; border: none; border-radius: 4px; }"
-        "QPushButton:hover { background: #3E3E42; }"
-        "QPushButton:disabled { opacity: 0.3; }"
-    );
-
     m_btnLayers = new QPushButton(titleBar); 
     m_btnLayers->setCheckable(true); 
     m_btnLayers->setFixedSize(24, 24); 
-    m_btnLayers->setIcon(UiHelper::getIcon("layers", QColor("#2ecc71"), 18)); // 2026-xx-xx 按照用户要求：图层按钮改为绿色，以匹配目录导航配色
+    m_btnLayers->setIcon(UiHelper::getIcon("layers", QColor("#B0B0B0"), 18));
     // 2026-03-xx 按照宪法要求：禁绝原生 ToolTip，强制对接 ToolTipOverlay 
     m_btnLayers->setProperty("tooltipText", "显示子文件夹中的项目"); 
     m_btnLayers->installEventFilter(this); 
@@ -790,7 +776,6 @@ void ContentPanel::initUi() {
  
     titleL->addWidget(titleLabel); 
     titleL->addStretch(); 
-    titleL->addWidget(m_btnLayersBlue, 0, Qt::AlignVCenter);
     titleL->addWidget(m_btnLayers, 0, Qt::AlignVCenter); 
  
     m_mainLayout->addWidget(titleBar); 
@@ -2068,7 +2053,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 r.note = QString::fromStdWString(meta.note);
                 r.width = meta.width;
                 r.height = meta.height;
-                r.isManaged = meta.isManaged;
+                r.isManaged = meta.hasUserOperations();
                 for (const auto& pe : meta.palettes) {
                     r.palettes.push_back({pe.color, pe.ratio});
                 }

@@ -254,7 +254,6 @@ private:
     QVBoxLayout* m_mainLayout = nullptr;
     QStackedWidget* m_viewStack = nullptr;
     QPushButton* m_btnLayers = nullptr;
-    QPushButton* m_btnLayersBlue = nullptr;
     QTextBrowser* m_textPreview = nullptr;
     QLabel* m_imagePreview = nullptr;
 

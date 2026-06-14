@@ -260,7 +260,6 @@ void MainWindow::initUi() {
     // 2026-03-xx 按照高性能要求，优先从模型 Role 读取元数据缓存，避免频繁磁盘 IO
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_contentPanel, &ContentPanel::selectionChanged, this, [this](const QStringList& paths) {
-        m_metaPanel->setSelectedPaths(paths);
         if (paths.isEmpty()) {
             m_metaPanel->updateInfo("-", "-", "-", "-", "-", "-", "-", false);
             m_metaPanel->setRating(0);
@@ -475,34 +474,6 @@ void MainWindow::initUi() {
             if (color != L"__NO_CHANGE__") {
                 MetadataManager::instance().setColor(path.toStdWString(), color);
             }
-            // 物理对齐：立即同步 UI 状态
-            m_contentPanel->updateItemMetadata(path);
-        }
-    });
-
-    // 2026-07-xx 按照用户要求：响应元数据面板标签批量变更信号
-    connect(m_metaPanel, &MetaPanel::tagsChanged, this, [this](const QStringList& tags) {
-        auto indexes = m_contentPanel->getSelectedIndexes();
-        for (const auto& idx : indexes) {
-            QString path = idx.data(PathRole).toString();
-            if (path.isEmpty()) continue;
-
-            std::wstring wPath = path.toStdWString();
-
-            // 物理对齐：确保修改前项目已入库
-            if (!idx.data(ManagedRole).toBool()) {
-                MetadataManager::instance().registerItem(wPath);
-            }
-
-            MetadataManager::instance().setTags(wPath, tags);
-            m_contentPanel->updateItemMetadata(path);
-        }
-    });
-
-    // 2026-07-xx 按照用户要求：元数据批量更新后，驱动内容容器执行刷新
-    connect(m_metaPanel, &MetaPanel::metadataBatchUpdated, this, [this](const QStringList& paths) {
-        for (const QString& path : paths) {
-            m_contentPanel->updateItemMetadata(path);
         }
     });
 
@@ -1017,7 +988,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     QWidget* titleBarBtns = new QWidget(this);
     QHBoxLayout* layout = new QHBoxLayout(titleBarBtns);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(5); // 2026-xx-xx 按照用户要求：按钮高亮间距统一为 5px
+    layout->setSpacing(4);
 
     auto createTitleBtn = [this](const QString& iconKey, const QString& hoverColor = "#3E3E42") {
         QPushButton* btn = new QPushButton(this);
@@ -1114,12 +1085,12 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
-    layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
-    layout->addWidget(m_btnCreate, 0, Qt::AlignVCenter);
-    layout->addWidget(m_btnPinTop, 0, Qt::AlignVCenter);
-    layout->addWidget(m_btnMin, 0, Qt::AlignVCenter);
-    layout->addWidget(m_btnMax, 0, Qt::AlignVCenter);
-    layout->addWidget(m_btnClose, 0, Qt::AlignVCenter);
+    layout->addWidget(m_btnSync);
+    layout->addWidget(m_btnCreate);
+    layout->addWidget(m_btnPinTop);
+    layout->addWidget(m_btnMin);
+    layout->addWidget(m_btnMax);
+    layout->addWidget(m_btnClose);
 
     // 绑定基础逻辑
     connect(m_btnMin, &QPushButton::clicked, this, &MainWindow::showMinimized);

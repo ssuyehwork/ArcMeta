@@ -846,7 +846,7 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     }
 
     // 2026-07-xx 物理加固：使用 Set 进行 FID 去重计数，彻底解决因路径偏移导致的幽灵计数
-    std::unordered_set<std::string> seenAll, seenRecent, seenUntagged, seenUncategorized, seenTrash, seenInvalid, seenTags;
+    std::unordered_set<std::string> seenAll, seenRecent, seenUntagged, seenUncategorized, seenTrash, seenInvalid;
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
 
     MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
@@ -866,13 +866,7 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
         // 2026-07-xx 回滚：系统视图计数放宽 Managed 限制，显示所有已扫描到的有效项
         seenAll.insert(meta.fileId128);
         
-        if (meta.tags.isEmpty()) {
-            seenUntagged.insert(meta.fileId128);
-        } else {
-            // 2026-07-xx 物理对账：统计所有受管/已扫描项中有标签的项目总数
-            seenTags.insert(meta.fileId128);
-        }
-
+        if (meta.tags.isEmpty()) seenUntagged.insert(meta.fileId128);
         if (meta.atime >= now - 86400000.0) seenRecent.insert(meta.fileId128);
         
         if (categorizedFids.find(meta.fileId128) == categorizedFids.end()) {
@@ -881,7 +875,6 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     });
 
     res["all"] = static_cast<int>(seenAll.size());
-    res["tags"] = static_cast<int>(seenTags.size());
     res["recently_visited"] = static_cast<int>(seenRecent.size());
     res["untagged"] = static_cast<int>(seenUntagged.size());
     res["uncategorized"] = static_cast<int>(seenUncategorized.size());
