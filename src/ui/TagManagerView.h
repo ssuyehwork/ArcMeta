@@ -39,7 +39,7 @@ private:
     void setupContentArea();
 
     // 侧边栏组件
-    QWidget* m_sidebar = nullptr;
+    class QFrame* m_sidebar = nullptr;
     QVBoxLayout* m_sidebarLayout = nullptr;
     QWidget* m_groupContainer = nullptr;
     QLabel* m_tagCountLabel = nullptr;
@@ -48,7 +48,7 @@ private:
     QLabel* m_frequentTagsCountLabel = nullptr;
 
     // 内容区组件
-    QWidget* m_contentContainer = nullptr;
+    class QFrame* m_contentContainer = nullptr;
     QLabel* m_contentTitleLabel = nullptr;
     QScrollArea* m_scrollArea = nullptr;
     QWidget* m_contentWidget = nullptr;

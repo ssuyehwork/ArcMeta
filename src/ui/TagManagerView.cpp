@@ -54,7 +54,7 @@ QWidget* TagManagerView::createSidebarItem(const QString& icon, const QString& n
     item->setCursor(Qt::PointingHandCursor);
 
     auto* layout = new QHBoxLayout(item);
-    layout->setContentsMargins(2, 1, 2, 1);
+    layout->setContentsMargins(0, 1, 0, 1);
     layout->setSpacing(0);
 
     QWidget* inner = new QWidget(item);
@@ -64,7 +64,7 @@ QWidget* TagManagerView::createSidebarItem(const QString& icon, const QString& n
         "QWidget#SidebarItemInner:hover { background-color: #2a2d2e; }"
     );
     auto* innerLayout = new QHBoxLayout(inner);
-    innerLayout->setContentsMargins(13, 0, 13, 0);
+    innerLayout->setContentsMargins(0, 0, 15, 0);
     innerLayout->setSpacing(6);
 
     QLabel* iconLabel = new QLabel(inner);
@@ -86,18 +86,32 @@ QWidget* TagManagerView::createSidebarItem(const QString& icon, const QString& n
 }
 
 void TagManagerView::setupSidebar() {
-    m_sidebar = new QWidget(this);
+    m_sidebar = new QFrame(this);
     m_sidebar->setObjectName("ListContainer"); // 物理对标：复用导航栏样式 ID
     m_sidebar->setFixedWidth(230);
+    m_sidebar->setAttribute(Qt::WA_StyledBackground, true);
 
     m_sidebarLayout = new QVBoxLayout(m_sidebar);
     m_sidebarLayout->setContentsMargins(0, 0, 0, 0);
     m_sidebarLayout->setSpacing(0);
 
+    // 顶部蓝线 (物理对齐 NavPanel)
+    QWidget* focusLine = new QWidget(m_sidebar);
+    focusLine->setFixedHeight(1);
+    focusLine->setStyleSheet("background-color: #007ACC;");
+    m_sidebarLayout->addWidget(focusLine);
+
     // 标题栏
     QWidget* header = new QWidget(m_sidebar);
+    header->setObjectName("ContainerHeader");
     header->setFixedHeight(32);
-    header->setStyleSheet("background-color: #252526; border-bottom: 1px solid #333;");
+    header->setAttribute(Qt::WA_StyledBackground, true);
+    header->setStyleSheet(
+        "QWidget#ContainerHeader {"
+        "  background-color: #252526;"
+        "  border-bottom: 1px solid #333;"
+        "}"
+    );
     auto* headerLayout = new QHBoxLayout(header);
     headerLayout->setContentsMargins(15, 0, 5, 0);
 
@@ -120,7 +134,7 @@ void TagManagerView::setupSidebar() {
     QWidget* contentWrapper = new QWidget(m_sidebar);
     contentWrapper->setStyleSheet("background: transparent; border: none;");
     QVBoxLayout* sidebarContentLayout = new QVBoxLayout(contentWrapper);
-    sidebarContentLayout->setContentsMargins(0, 8, 0, 8); // 左右间距已由 item 内部 15px 处理，此处仅设 8px 顶部呼吸
+    sidebarContentLayout->setContentsMargins(15, 8, 0, 8);
     sidebarContentLayout->setSpacing(0);
 
     // 静态项
@@ -154,16 +168,24 @@ void TagManagerView::setupSidebar() {
 }
 
 void TagManagerView::setupContentArea() {
-    m_contentContainer = new QWidget(this);
+    m_contentContainer = new QFrame(this);
     m_contentContainer->setObjectName("EditorContainer"); // 物理对标：复用内容面板 ID
+    m_contentContainer->setAttribute(Qt::WA_StyledBackground, true);
     auto* mainL = new QVBoxLayout(m_contentContainer);
     mainL->setContentsMargins(0, 0, 0, 0);
     mainL->setSpacing(0);
+
+    // 顶部蓝线 (物理对齐 ContentPanel)
+    QWidget* focusLine = new QWidget(m_contentContainer);
+    focusLine->setFixedHeight(1);
+    focusLine->setStyleSheet("background-color: #007ACC;");
+    mainL->addWidget(focusLine);
 
     // 1. 标题栏 (物理对齐 ContentPanel)
     QWidget* titleBar = new QWidget(m_contentContainer);
     titleBar->setObjectName("ContainerHeader");
     titleBar->setFixedHeight(32);
+    titleBar->setAttribute(Qt::WA_StyledBackground, true);
     titleBar->setStyleSheet(
         "QWidget#ContainerHeader {"
         "  background-color: #252526;"
