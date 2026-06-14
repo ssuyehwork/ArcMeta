@@ -281,7 +281,7 @@ void TagManagerView::refresh() {
 
             // 右键菜单
             tagBtn->setContextMenuPolicy(Qt::CustomContextMenu);
-            connect(tagBtn, &QWidget::customContextMenuRequested, this, [this, tagName](const QPoint& pos) {
+            connect(tagBtn, &QWidget::customContextMenuRequested, this, [this, tagName](const QPoint&) {
                 QMenu menu(this);
                 UiHelper::applyMenuStyle(&menu);
                 menu.addAction("搜索含此标签的项目", this, [this, tagName](){ emit requestSearchTag(tagName); });
