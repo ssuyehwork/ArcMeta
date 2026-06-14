@@ -12,6 +12,11 @@
 #include <QGridLayout>
 #include <QMenu>
 #include <QDebug>
+#include <QTimer>
+#include <QResizeEvent>
+#include <QSet>
+#include <QPoint>
+#include <QCursor>
 
 using namespace ArcMeta::Style;
 
@@ -215,11 +220,20 @@ void TagManagerView::resizeEvent(QResizeEvent* event) {
     QTimer::singleShot(0, this, &TagManagerView::adjustFlowHeights);
 }
 
+void TagManagerView::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    QTimer::singleShot(50, this, &TagManagerView::adjustFlowHeights);
+}
+
 void TagManagerView::adjustFlowHeights() {
     if (!m_contentWidget || !m_scrollArea) return;
 
     int availableW = m_scrollArea->viewport()->width();
-    if (availableW < 100) return;
+    if (availableW < 100) {
+        // 如果视口宽度尚未初始化，则稍微延迟后再试一次
+        QTimer::singleShot(50, this, &TagManagerView::adjustFlowHeights);
+        return;
+    }
 
     int targetW = availableW - 30; // contentLayout margins (15+15)
 
@@ -229,27 +243,23 @@ void TagManagerView::adjustFlowHeights() {
 
     for (int i = 0; i < layout->count(); ++i) {
         QWidget* groupWidget = layout->itemAt(i)->widget();
-        if (!groupWidget) continue;
+        if (!groupWidget || !groupWidget->objectName().startsWith("Group_")) continue;
 
         auto* vLayout = qobject_cast<QVBoxLayout*>(groupWidget->layout());
         if (!vLayout || vLayout->count() < 2) continue;
 
-        QLabel* title = qobject_cast<QLabel*>(vLayout->itemAt(0)->widget());
         QWidget* tagsContainer = vLayout->itemAt(1)->widget();
-        if (!title || !tagsContainer) continue;
+        if (!tagsContainer) continue;
 
         FlowLayout* flow = qobject_cast<FlowLayout*>(tagsContainer->layout());
         if (flow) {
             int h = flow->heightForWidth(targetW);
             tagsContainer->setFixedHeight(h);
-
-            QMargins m = vLayout->contentsMargins();
-            int titleH = title->sizeHint().height();
-            // 物理修复：必须包含所有内边距，否则会导致内容被裁剪或布局引擎二次干预
-            int gH = titleH + h + m.top() + m.bottom();
-            groupWidget->setFixedHeight(gH);
+            // 物理消除：header(16) + tags(h) + 最小组间隔(4)
+            groupWidget->setFixedHeight(16 + h + 4);
         }
     }
+    m_contentWidget->adjustSize();
     m_contentWidget->updateGeometry();
 }
 
@@ -332,24 +342,28 @@ void TagManagerView::refresh() {
 
     for (auto it = groups.begin(); it != groups.end(); ++it) {
         QWidget* groupWidget = new QWidget(m_contentWidget);
+        groupWidget->setObjectName("Group_" + QString(it.key()));
         groupWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         auto* vLayout = new QVBoxLayout(groupWidget);
-        vLayout->setContentsMargins(0, 2, 0, 0);
+        vLayout->setContentsMargins(0, 0, 0, 0);
         vLayout->setSpacing(0);
 
         QLabel* groupTitle = new QLabel(QString(it.key()), groupWidget);
-        groupTitle->setStyleSheet("font-size: 11px; font-weight: bold; color: #555; border-bottom: 1px solid #333; padding: 0;");
+        groupTitle->setFixedHeight(16);
+        groupTitle->setStyleSheet("font-size: 11px; font-weight: bold; color: #555; border-bottom: 1px solid #333; padding: 0; margin: 0;");
         vLayout->addWidget(groupTitle);
 
         QWidget* tagsContainer = new QWidget(groupWidget);
-        auto* flow = new FlowLayout(tagsContainer, 0, 4, 0);
+        // 关键参数微调：水平 10px，垂直 0px (依靠按钮自身高度留白)
+        auto* flow = new FlowLayout(tagsContainer, 0, 10, 0);
 
         auto tagsInGroup = it.value();
         for (auto tagIt = tagsInGroup.begin(); tagIt != tagsInGroup.end(); ++tagIt) {
             QPushButton* tagBtn = new QPushButton(QString("%1 (%2)").arg(tagIt.key()).arg(tagIt.value()), tagsContainer);
             tagBtn->setCursor(Qt::PointingHandCursor);
+            tagBtn->setFixedHeight(16);
             tagBtn->setStyleSheet(
-                "QPushButton { background: transparent; border: none; color: #AAA; text-align: left; font-size: 13px; padding: 1px 4px; }"
+                "QPushButton { background: transparent; border: none; color: #AAA; text-align: left; font-size: 11px; padding: 0; margin: 0; }"
                 "QPushButton:hover { color: #1abc9c; text-decoration: underline; }"
             );
 
