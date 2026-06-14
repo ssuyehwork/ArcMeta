@@ -742,7 +742,7 @@ void ContentPanel::initUi() {
     m_btnLayers = new QPushButton(titleBar); 
     m_btnLayers->setCheckable(true); 
     m_btnLayers->setFixedSize(24, 24); 
-    m_btnLayers->setIcon(UiHelper::getIcon("layers", QColor("#B0B0B0"), 18)); 
+    m_btnLayers->setIcon(UiHelper::getIcon("layers", QColor("#2ecc71"), 18)); // 2026-xx-xx 按照用户要求：图层按钮改为绿色，以匹配目录导航配色
     // 2026-03-xx 按照宪法要求：禁绝原生 ToolTip，强制对接 ToolTipOverlay 
     m_btnLayers->setProperty("tooltipText", "显示子文件夹中的项目"); 
     m_btnLayers->installEventFilter(this); 
