@@ -166,11 +166,14 @@ void TagManagementPanel::refresh() {
     m_sidebar->addItem(favItem);
 
     if (!m_groups.empty()) {
-        auto* groupHeader = new QListWidgetItem("标签分组");
+        auto* groupHeader = new QListWidgetItem(m_sidebar);
         groupHeader->setFlags(Qt::NoItemFlags);
         groupHeader->setData(Qt::UserRole, -1);
-        groupHeader->setStyleSheet("color: #666; font-size: 11px; margin-top: 10px;");
-        m_sidebar->addItem(groupHeader);
+        groupHeader->setSizeHint(QSize(0, 30));
+
+        QLabel* headerLabel = new QLabel(" 标签分组");
+        headerLabel->setStyleSheet("color: #666; font-size: 11px; padding-top: 10px; background: transparent;");
+        m_sidebar->setItemWidget(groupHeader, headerLabel);
 
         for (const auto& g : m_groups) {
             auto* item = new QListWidgetItem(UiHelper::getIcon("folder", Style::PrimaryBlue), g.name);
