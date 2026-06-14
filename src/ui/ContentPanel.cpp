@@ -55,6 +55,7 @@
 #include <QTimer> 
 #include <QPointer> 
 #include <QPersistentModelIndex> 
+#include <functional>
  
  
 #include <windows.h> 
