@@ -54,6 +54,7 @@ private:
  * @brief 流式布局容器 (用于展示标签)
  */
 class FlowLayout : public QLayout {
+    Q_OBJECT
 public:
     explicit FlowLayout(QWidget *parent, int margin = -1, int hSpacing = -1, int vSpacing = -1);
     ~FlowLayout();
