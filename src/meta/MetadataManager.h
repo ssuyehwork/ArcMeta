@@ -77,6 +77,12 @@ public:
     QStringList searchInCache(const QString& keyword);
 
     /**
+     * @brief 获取所有标签及其引用计数
+     * @return 标签名 -> 引用次数
+     */
+    QMap<QString, int> getAllTags() const;
+
+    /**
      * @brief 物理刷新级别
      */
     enum class RefreshLevel {
