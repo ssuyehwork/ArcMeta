@@ -2,11 +2,16 @@
 
 #include <QWidget>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QScrollArea>
 #include <QLabel>
 #include <QPushButton>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QSplitter>
 #include <QMap>
 #include <QStringList>
+#include <vector>
 #include "../meta/TagRepo.h"
 #include "FlowLayout.h"
 
@@ -41,30 +46,35 @@ protected:
 
 private:
     void initUi();
+    void setupSidebar();
+    void setupMainArea();
 
     /**
-     * @brief 渲染 A-Z 字母索引视图
+     * @brief 渲染过滤后的标签列表
      */
-    void renderAlphabeticalView();
-
-    /**
-     * @brief 渲染自定义分组视图
-     */
-    void renderGroupedView();
+    void renderFilteredTags();
 
     /**
      * @brief 创建一个标签按钮小部件
      */
     QWidget* createTagWidget(const TagDef& tag);
 
+    // UI 组件
     QVBoxLayout* m_mainLayout = nullptr;
+    QListWidget* m_sidebar = nullptr;
+    QLineEdit* m_searchEdit = nullptr;
+
     QScrollArea* m_scrollArea = nullptr;
     QWidget* m_scrollContainer = nullptr;
     QVBoxLayout* m_containerLayout = nullptr;
 
+    // 数据
     std::vector<TagDef> m_allTags;
     std::vector<TagGroup> m_groups;
-};
 
+    // 过滤状态
+    QString m_currentSearch;
+    int m_currentFilterType = 0; // 0: All, 1: Favorites, 100+: GroupId
+};
 
 } // namespace ArcMeta

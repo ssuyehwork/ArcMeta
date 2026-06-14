@@ -9,6 +9,7 @@
 #include <QMessageBox>
 #include <QApplication>
 #include <QStyle>
+#include <QSplitter>
 
 namespace ArcMeta {
 
@@ -32,18 +33,107 @@ void TagManagementPanel::initUi() {
     titleL->setSpacing(8);
 
     QLabel* iconLabel = new QLabel(titleBar);
-    iconLabel->setPixmap(UiHelper::getIcon("tag", QColor("#41F2F2"), 16).pixmap(16, 16));
+    iconLabel->setPixmap(UiHelper::getIcon("tag", Style::AccentCyan, 16).pixmap(16, 16));
     titleL->addWidget(iconLabel);
 
     QLabel* titleLabel = new QLabel("标签管理", titleBar);
-    titleLabel->setStyleSheet("font-size: 12px; color: #41F2F2; background: transparent; border: none;");
+    titleLabel->setStyleSheet(QString("font-size: 12px; color: %1; background: transparent; border: none;").arg(Style::AccentCyan.name()));
     titleL->addWidget(titleLabel);
     titleL->addStretch();
 
     m_mainLayout->addWidget(titleBar);
 
-    // 滚动区
-    m_scrollArea = new QScrollArea(this);
+    // 主体区域：使用 QSplitter 隔离导航和内容
+    QSplitter* splitter = new QSplitter(Qt::Horizontal, this);
+    splitter->setHandleWidth(1);
+    splitter->setStyleSheet("QSplitter::handle { background-color: #333; }");
+
+    setupSidebar();
+    splitter->addWidget(m_sidebar);
+
+    QWidget* rightContent = new QWidget();
+    setupMainArea();
+
+    // 把 setupMainArea 创建的组件放入 rightContent
+    QVBoxLayout* rightL = new QVBoxLayout(rightContent);
+    rightL->setContentsMargins(0, 0, 0, 0);
+    rightL->setSpacing(0);
+
+    // 顶部搜索栏
+    QWidget* searchBar = new QWidget();
+    searchBar->setFixedHeight(48);
+    searchBar->setStyleSheet("background-color: #1E1E1E; border-bottom: 1px solid #333;");
+    QHBoxLayout* searchL = new QHBoxLayout(searchBar);
+    searchL->setContentsMargins(20, 0, 20, 0);
+
+    m_searchEdit = new QLineEdit();
+    m_searchEdit->setPlaceholderText("搜索标签...");
+    m_searchEdit->setFixedWidth(300);
+    m_searchEdit->setFixedHeight(28);
+    m_searchEdit->setStyleSheet(
+        "QLineEdit { "
+        "  background-color: #2D2D2D; "
+        "  border: 1px solid #333; "
+        "  border-radius: 4px; "
+        "  color: #EEE; "
+        "  padding-left: 8px; "
+        "  font-size: 12px; "
+        "} "
+        "QLineEdit:focus { border: 1px solid #3498db; }"
+    );
+    connect(m_searchEdit, &QLineEdit::textChanged, [this](const QString& text) {
+        m_currentSearch = text;
+        renderFilteredTags();
+    });
+    searchL->addWidget(m_searchEdit);
+    searchL->addStretch();
+
+    rightL->addWidget(searchBar);
+    rightL->addWidget(m_scrollArea);
+
+    splitter->addWidget(rightContent);
+    splitter->setStretchFactor(1, 1);
+    splitter->setSizes({230, 800});
+
+    m_mainLayout->addWidget(splitter);
+}
+
+void TagManagementPanel::setupSidebar() {
+    m_sidebar = new QListWidget();
+    m_sidebar->setFixedWidth(230);
+    m_sidebar->setObjectName("NavPanel"); // 复用样式
+    m_sidebar->setFrameShape(QFrame::NoFrame);
+    m_sidebar->setStyleSheet(
+        "QListWidget { "
+        "  background-color: #252526; "
+        "  border-right: 1px solid #333; "
+        "  outline: none; "
+        "  padding-top: 10px; "
+        "} "
+        "QListWidget::item { "
+        "  height: 32px; "
+        "  color: #BBB; "
+        "  padding-left: 15px; "
+        "  border-left: 3px solid transparent; "
+        "} "
+        "QListWidget::item:hover { background-color: #2A2D2E; } "
+        "QListWidget::item:selected { "
+        "  background-color: #37373D; "
+        "  color: #FFF; "
+        "  border-left: 3px solid #3498db; "
+        "}"
+    );
+
+    connect(m_sidebar, &QListWidget::currentRowChanged, [this](int row) {
+        if (row < 0) return;
+        QListWidgetItem* item = m_sidebar->item(row);
+        m_currentFilterType = item->data(Qt::UserRole).toInt();
+        renderFilteredTags();
+    });
+}
+
+void TagManagementPanel::setupMainArea() {
+    m_scrollArea = new QScrollArea();
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setFrameShape(QFrame::NoFrame);
     m_scrollArea->setStyleSheet("background-color: #1E1E1E;");
@@ -56,7 +146,6 @@ void TagManagementPanel::initUi() {
     m_containerLayout->setSpacing(30);
 
     m_scrollArea->setWidget(m_scrollContainer);
-    m_mainLayout->addWidget(m_scrollArea);
 }
 
 void TagManagementPanel::refresh() {
@@ -64,31 +153,83 @@ void TagManagementPanel::refresh() {
     m_allTags = TagRepo::getAllTags();
     m_groups = TagRepo::getGroups();
 
-    // 2. 清理界面
+    // 2. 更新侧边栏
+    m_sidebar->blockSignals(true);
+    m_sidebar->clear();
+
+    auto* allItem = new QListWidgetItem(UiHelper::getIcon("list_ul", Style::TextDim), "所有标签");
+    allItem->setData(Qt::UserRole, 0);
+    m_sidebar->addItem(allItem);
+
+    auto* favItem = new QListWidgetItem(UiHelper::getIcon("star", QColor("#f1c40f")), "常用标签");
+    favItem->setData(Qt::UserRole, 1);
+    m_sidebar->addItem(favItem);
+
+    if (!m_groups.empty()) {
+        auto* groupHeader = new QListWidgetItem("标签分组");
+        groupHeader->setFlags(Qt::NoItemFlags);
+        groupHeader->setData(Qt::UserRole, -1);
+        groupHeader->setStyleSheet("color: #666; font-size: 11px; margin-top: 10px;");
+        m_sidebar->addItem(groupHeader);
+
+        for (const auto& g : m_groups) {
+            auto* item = new QListWidgetItem(UiHelper::getIcon("folder", Style::PrimaryBlue), g.name);
+            item->setData(Qt::UserRole, 100 + g.id);
+            m_sidebar->addItem(item);
+        }
+    }
+
+    m_sidebar->setCurrentRow(0);
+    m_sidebar->blockSignals(false);
+
+    renderFilteredTags();
+}
+
+void TagManagementPanel::renderFilteredTags() {
+    // 清理界面
     QLayoutItem* item;
     while ((item = m_containerLayout->takeAt(0)) != nullptr) {
         if (item->widget()) delete item->widget();
         delete item;
     }
 
-    // 3. 渲染视图 (目前默认渲染 A-Z 视图，后续可增加切换)
-    renderAlphabeticalView();
+    std::vector<TagDef> filtered;
+    for (const auto& tag : m_allTags) {
+        // 搜索过滤
+        if (!m_currentSearch.isEmpty() && !tag.name.contains(m_currentSearch, Qt::CaseInsensitive)) {
+            continue;
+        }
 
-    // 如果有自定义分组，也渲染出来
-    if (!m_groups.empty()) {
-        renderGroupedView();
+        // 类型过滤
+        if (m_currentFilterType == 1) { // Favorites
+            if (!tag.isFavorite) continue;
+        } else if (m_currentFilterType >= 100) { // Group
+            if (tag.groupId != m_currentFilterType - 100) continue;
+        }
+
+        filtered.push_back(tag);
     }
 
-    m_containerLayout->addStretch();
-}
+    if (filtered.empty()) {
+        QLabel* empty = new QLabel("未找到匹配的标签");
+        empty->setAlignment(Qt::AlignCenter);
+        empty->setStyleSheet("color: #666; font-size: 14px; margin-top: 100px;");
+        m_containerLayout->addWidget(empty);
+        m_containerLayout->addStretch();
+        return;
+    }
 
-void TagManagementPanel::renderAlphabeticalView() {
+    // 按字母分组渲染
     QMap<QString, std::vector<TagDef>> letterMap;
-    for (const auto& tag : m_allTags) {
+    for (const auto& tag : filtered) {
         QString letter = "#";
         if (!tag.name.isEmpty()) {
             QChar first = tag.name.at(0).toUpper();
             if (first >= 'A' && first <= 'Z') letter = QString(first);
+            else if (tag.name.at(0).unicode() >= 0x4E00 && tag.name.at(0).unicode() <= 0x9FA5) {
+                // 中文处理，这里简化，实际可引入拼音库
+                letter = "中";
+            }
         }
         letterMap[letter].push_back(tag);
     }
@@ -111,53 +252,8 @@ void TagManagementPanel::renderAlphabeticalView() {
 
         m_containerLayout->addWidget(section);
     }
-}
 
-void TagManagementPanel::renderGroupedView() {
-    // 建立 ID -> 分组名 映射
-    QMap<int, QString> groupNames;
-    for (const auto& g : m_groups) groupNames[g.id] = g.name;
-
-    // 建立 ID -> 标签列表 映射
-    QMap<int, std::vector<TagDef>> groupMap;
-    for (const auto& tag : m_allTags) {
-        if (tag.groupId > 0) {
-            groupMap[tag.groupId].push_back(tag);
-        }
-    }
-
-    if (groupMap.isEmpty()) return;
-
-    // 分隔线
-    QFrame* line = new QFrame();
-    line->setFrameShape(QFrame::HLine);
-    line->setFixedHeight(1);
-    line->setStyleSheet("background-color: #333; margin-top: 20px; margin-bottom: 20px;");
-    m_containerLayout->addWidget(line);
-
-    QLabel* groupTitle = new QLabel("按分组查看");
-    groupTitle->setStyleSheet("font-size: 22px; font-weight: bold; color: #EEE; margin-bottom: 10px;");
-    m_containerLayout->addWidget(groupTitle);
-
-    for (auto it = groupMap.begin(); it != groupMap.end(); ++it) {
-        QWidget* section = new QWidget();
-        QVBoxLayout* sectionL = new QVBoxLayout(section);
-        sectionL->setContentsMargins(0, 0, 0, 0);
-        sectionL->setSpacing(10);
-
-        QString gName = groupNames.value(it.key(), "未知分组");
-        QLabel* header = new QLabel(gName);
-        header->setStyleSheet("font-size: 18px; font-weight: bold; color: #3498db; border-bottom: 1px solid #333; padding-bottom: 5px;");
-        sectionL->addWidget(header);
-
-        FlowLayout* flow = new FlowLayout(nullptr, 0, 10, 10);
-        for (const auto& tag : it.value()) {
-            flow->addWidget(createTagWidget(tag));
-        }
-        sectionL->addLayout(flow);
-
-        m_containerLayout->addWidget(section);
-    }
+    m_containerLayout->addStretch();
 }
 
 QWidget* TagManagementPanel::createTagWidget(const TagDef& tag) {
@@ -177,7 +273,7 @@ QWidget* TagManagementPanel::createTagWidget(const TagDef& tag) {
                     "QPushButton:hover { background-color: #3E3E42; color: white; }";
 
     if (tag.isFavorite) {
-        style += "QPushButton { border-left: 3px solid #f1c40f; }"; // 常用标签黄色边框
+        style += "QPushButton { border-left: 3px solid #f1c40f; }";
     }
 
     btn->setStyleSheet(style);
