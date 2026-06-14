@@ -1013,7 +1013,6 @@ QMap<QString, int> MetadataManager::getAllTags() const {
     QMap<QString, int> tagCounts;
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
-        // 2026-07-xx 按照用户要求：仅统计已登记且非失效、非回收站项的标签
         if (it->second.isManaged && !it->second.isInvalid && !it->second.isTrash) {
             for (const QString& tag : it->second.tags) {
                 tagCounts[tag]++;

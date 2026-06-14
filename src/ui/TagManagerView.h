@@ -15,7 +15,7 @@ namespace ArcMeta {
 
 /**
  * @brief 标签管理专属视图
- * 包含左侧标签侧边栏和右侧标签内容区
+ * 按照 3 栏布局要求实现，逻辑独立于 NavPanel 和 ContentPanel
  */
 class TagManagerView : public QWidget {
     Q_OBJECT
@@ -33,9 +33,6 @@ signals:
      */
     void requestSearchTag(const QString& tag);
 
-protected:
-    bool eventFilter(QObject* obj, QEvent* event) override;
-
 private:
     void initUi();
     void setupSidebar();
@@ -46,17 +43,15 @@ private:
     QVBoxLayout* m_sidebarLayout = nullptr;
     QWidget* m_groupContainer = nullptr;
     QLabel* m_tagCountLabel = nullptr;
+    QLabel* m_allTagsCountLabel = nullptr;
+    QLabel* m_uncategorizedTagsCountLabel = nullptr;
+    QLabel* m_frequentTagsCountLabel = nullptr;
 
     // 内容区组件
     QScrollArea* m_scrollArea = nullptr;
     QWidget* m_contentWidget = nullptr;
 
     QSplitter* m_splitter = nullptr;
-
-    /**
-     * @brief 获取常用标签 (示例逻辑)
-     */
-    QStringList getFrequentTags() const;
 
     // 数据
     QMap<QString, int> m_tagCounts;
@@ -68,6 +63,8 @@ private:
         QStringList tags;
     };
     QList<TagGroup> m_tagGroups;
+
+    QWidget* createSidebarItem(const QString& icon, const QString& name, const QString& countText);
 };
 
 } // namespace ArcMeta

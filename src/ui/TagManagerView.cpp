@@ -8,11 +8,9 @@
 #include <QVBoxLayout>
 #include <QScrollArea>
 #include <QFrame>
-#include <QEvent>
-#include <QContextMenuEvent>
 #include <QGridLayout>
-#include <QLineEdit>
-#include <QInputDialog>
+#include <QMenu>
+#include <QDebug>
 
 using namespace ArcMeta::Style;
 
@@ -37,12 +35,49 @@ void TagManagerView::initUi() {
     m_splitter->addWidget(m_sidebar);
     m_splitter->addWidget(m_scrollArea);
 
-    // 设置初始宽度
+    // 侧边栏固定 230px
     m_splitter->setSizes({230, 1000});
     m_splitter->setStretchFactor(0, 0);
     m_splitter->setStretchFactor(1, 1);
 
     mainLayout->addWidget(m_splitter);
+}
+
+QWidget* TagManagerView::createSidebarItem(const QString& icon, const QString& name, const QString& countText, QLabel** outCountLabel) {
+    QWidget* item = new QWidget();
+    item->setFixedHeight(26);
+    item->setCursor(Qt::PointingHandCursor);
+
+    auto* layout = new QHBoxLayout(item);
+    layout->setContentsMargins(2, 1, 2, 1);
+    layout->setSpacing(0);
+
+    QWidget* inner = new QWidget(item);
+    inner->setObjectName("SidebarItemInner");
+    inner->setStyleSheet(
+        "QWidget#SidebarItemInner { background: transparent; border-radius: 4px; }"
+        "QWidget#SidebarItemInner:hover { background-color: #2a2d2e; }"
+    );
+    auto* innerLayout = new QHBoxLayout(inner);
+    innerLayout->setContentsMargins(13, 0, 13, 0);
+    innerLayout->setSpacing(6);
+
+    QLabel* iconLabel = new QLabel(inner);
+    iconLabel->setPixmap(UiHelper::getIcon(icon, TextDim, 16).pixmap(16, 16));
+    innerLayout->addWidget(iconLabel);
+
+    QLabel* nameLabel = new QLabel(name, inner);
+    nameLabel->setStyleSheet("color: #CCC; font-size: 12px; background: transparent;");
+    innerLayout->addWidget(nameLabel);
+    innerLayout->addStretch();
+
+    QLabel* countLabel = new QLabel(countText, inner);
+    countLabel->setStyleSheet("color: #666; font-size: 11px; background: transparent;");
+    innerLayout->addWidget(countLabel);
+    if (outCountLabel) *outCountLabel = countLabel;
+
+    layout->addWidget(inner);
+    return item;
 }
 
 void TagManagerView::setupSidebar() {
@@ -55,7 +90,7 @@ void TagManagerView::setupSidebar() {
     m_sidebarLayout->setContentsMargins(0, 0, 0, 0);
     m_sidebarLayout->setSpacing(0);
 
-    // 1. 顶部标题栏
+    // 标题栏
     QWidget* header = new QWidget(m_sidebar);
     header->setFixedHeight(32);
     header->setStyleSheet("background-color: #252526; border-bottom: 1px solid #333;");
@@ -77,61 +112,17 @@ void TagManagerView::setupSidebar() {
 
     m_sidebarLayout->addWidget(header);
 
-    // 2. 侧边栏列表内容 (物理还原 CategoryPanel 规范)
-    auto createSidebarItem = [this](const QString& icon, const QString& name, const QString& countText) {
-        QWidget* item = new QWidget();
-        // 2026-07-xx 物理对齐：行高统一为 26px
-        item->setFixedHeight(26);
-        item->setCursor(Qt::PointingHandCursor);
-
-        auto* layout = new QHBoxLayout(item);
-        // 2026-07-xx 按照 CategoryDelegate 逻辑：高亮矩形左右边距 2px
-        layout->setContentsMargins(2, 1, 2, 1);
-        layout->setSpacing(0);
-
-        // 内部高亮容器
-        QWidget* inner = new QWidget(item);
-        inner->setObjectName("SidebarItemInner");
-        // 2026-07-xx 物理还原：悬停色 #2a2d2e, 4px 圆角
-        inner->setStyleSheet(
-            "QWidget#SidebarItemInner { background: transparent; border-radius: 4px; }"
-            "QWidget#SidebarItemInner:hover { background-color: #2a2d2e; }"
-        );
-        auto* innerLayout = new QHBoxLayout(inner);
-        innerLayout->setContentsMargins(13, 0, 13, 0); // 15px - 2px margin = 13px
-        innerLayout->setSpacing(6);
-
-        QLabel* iconLabel = new QLabel(inner);
-        iconLabel->setPixmap(UiHelper::getIcon(icon, TextDim, 16).pixmap(16, 16));
-        innerLayout->addWidget(iconLabel);
-
-        QLabel* nameLabel = new QLabel(name, inner);
-        nameLabel->setStyleSheet("color: #CCC; font-size: 12px; background: transparent;");
-        innerLayout->addWidget(nameLabel);
-        innerLayout->addStretch();
-
-        QLabel* countLabel = new QLabel(countText, inner);
-        countLabel->setStyleSheet("color: #666; font-size: 11px; background: transparent;");
-        innerLayout->addWidget(countLabel);
-
-        layout->addWidget(inner);
-        return item;
-    };
-
-    auto* btnAll = createSidebarItem("all_data", "全部", "0");
-    auto* btnUncategorized = createSidebarItem("uncategorized", "未分类", "0");
-    auto* btnFrequent = createSidebarItem("star_filled", "常用标签", "0");
-
-    m_sidebarLayout->addWidget(btnAll);
-    m_sidebarLayout->addWidget(btnUncategorized);
-    m_sidebarLayout->addWidget(btnFrequent);
+    // 静态项
+    m_sidebarLayout->addWidget(createSidebarItem("all_data", "全部标签", "0", &m_allTagsCountLabel));
+    m_sidebarLayout->addWidget(createSidebarItem("uncategorized", "未分类", "0", &m_uncategorizedTagsCountLabel));
+    m_sidebarLayout->addWidget(createSidebarItem("star_filled", "常用标签", "0", &m_frequentTagsCountLabel));
 
     QFrame* line = new QFrame(m_sidebar);
     line->setFrameShape(QFrame::HLine);
     line->setStyleSheet("background-color: #333; margin: 10px 15px;");
     m_sidebarLayout->addWidget(line);
 
-    // 2026-07-xx 按照用户要求：标签组动态容器
+    // 标签组容器
     m_groupContainer = new QWidget(m_sidebar);
     auto* groupLayout = new QVBoxLayout(m_groupContainer);
     groupLayout->setContentsMargins(0, 0, 0, 0);
@@ -140,7 +131,6 @@ void TagManagerView::setupSidebar() {
 
     m_sidebarLayout->addStretch();
 
-    // 底部新建按钮
     QPushButton* btnNewGroup = new QPushButton("+ 新建标签组", m_sidebar);
     btnNewGroup->setFixedHeight(40);
     btnNewGroup->setStyleSheet(
@@ -156,8 +146,8 @@ void TagManagerView::setupContentArea() {
     m_scrollArea->setStyleSheet("QScrollArea { border: none; background-color: #1E1E1E; }");
 
     m_contentWidget = new QWidget();
-    m_contentWidget->setObjectName("TagContent");
-    m_contentWidget->setStyleSheet("QWidget#TagContent { background-color: #1E1E1E; }");
+    m_contentWidget->setObjectName("TagContentContainer");
+    m_contentWidget->setStyleSheet("QWidget#TagContentContainer { background-color: #1E1E1E; }");
 
     auto* contentLayout = new QVBoxLayout(m_contentWidget);
     contentLayout->setContentsMargins(20, 20, 20, 20);
@@ -169,9 +159,9 @@ void TagManagerView::setupContentArea() {
 void TagManagerView::refresh() {
     m_tagCounts = MetadataManager::instance().getAllTags();
 
-    // 2026-07-xx 物理同步：加载标签组数据
+    // 加载标签组
     m_tagGroups.clear();
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C"); // 默认系统分库
+    sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
     if (db) {
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "SELECT id, name, color FROM tag_groups ORDER BY sort_order ASC", -1, &stmt, nullptr) == SQLITE_OK) {
@@ -181,7 +171,6 @@ void TagManagerView::refresh() {
                 tg.name = QString::fromUtf8((const char*)sqlite3_column_text(stmt, 1));
                 tg.color = QString::fromUtf8((const char*)sqlite3_column_text(stmt, 2));
 
-                // 查询关联标签
                 sqlite3_stmt* itemStmt;
                 if (sqlite3_prepare_v2(db, "SELECT tag_name FROM tag_group_items WHERE group_id = ?", -1, &itemStmt, nullptr) == SQLITE_OK) {
                     sqlite3_bind_int(itemStmt, 1, tg.id);
@@ -196,79 +185,55 @@ void TagManagerView::refresh() {
         }
     }
 
-    // 更新侧边栏计数
-    m_tagCountLabel->setText(QString("(%1)").arg(m_tagCounts.size()));
+    // 更新侧边栏
+    int allCount = m_tagCounts.size();
+    m_tagCountLabel->setText(QString("(%1)").arg(allCount));
+    if (m_allTagsCountLabel) m_allTagsCountLabel->setText(QString::number(allCount));
 
-    // 2026-07-xx 按照用户要求：更新侧边栏标签组列表
-    if (m_groupContainer) {
-        QLayout* layout = m_groupContainer->layout();
-        QLayoutItem* item;
-        while ((item = layout->takeAt(0)) != nullptr) {
-            delete item->widget();
-            delete item;
-        }
+    // 统计未分类 (此处逻辑：不在任何 TagGroup 中的标签)
+    QSet<QString> groupedTags;
+    for (const auto& group : m_tagGroups) {
+        for (const auto& tag : group.tags) groupedTags.insert(tag);
+    }
+    int uncategorizedCount = 0;
+    for (auto it = m_tagCounts.begin(); it != m_tagCounts.end(); ++it) {
+        if (!groupedTags.contains(it.key())) uncategorizedCount++;
+    }
+    if (m_uncategorizedTagsCountLabel) m_uncategorizedTagsCountLabel->setText(QString::number(uncategorizedCount));
 
-        auto createSidebarItem = [this](const QString& icon, const QString& name, const QString& countText) {
-            QWidget* item = new QWidget();
-            item->setFixedHeight(26);
-            item->setCursor(Qt::PointingHandCursor);
-
-            auto* layout = new QHBoxLayout(item);
-            layout->setContentsMargins(2, 1, 2, 1);
-            layout->setSpacing(0);
-
-            QWidget* inner = new QWidget(item);
-            inner->setObjectName("SidebarItemInner");
-            inner->setStyleSheet(
-                "QWidget#SidebarItemInner { background: transparent; border-radius: 4px; }"
-                "QWidget#SidebarItemInner:hover { background-color: #2a2d2e; }"
-            );
-            auto* innerLayout = new QHBoxLayout(inner);
-            innerLayout->setContentsMargins(13, 0, 13, 0);
-            innerLayout->setSpacing(6);
-
-            QLabel* iconLabel = new QLabel(inner);
-            iconLabel->setPixmap(UiHelper::getIcon(icon, TextDim, 16).pixmap(16, 16));
-            innerLayout->addWidget(iconLabel);
-
-            QLabel* nameLabel = new QLabel(name, inner);
-            nameLabel->setStyleSheet("color: #CCC; font-size: 12px; background: transparent;");
-            innerLayout->addWidget(nameLabel);
-            innerLayout->addStretch();
-
-            QLabel* countLabel = new QLabel(countText, inner);
-            countLabel->setStyleSheet("color: #666; font-size: 11px; background: transparent;");
-            innerLayout->addWidget(countLabel);
-
-            layout->addWidget(inner);
-            return item;
-        };
-
-        for (const auto& group : m_tagGroups) {
-            layout->addWidget(createSidebarItem("folder_filled", group.name, QString::number(group.tags.size())));
-        }
+    QLayout* groupLayout = m_groupContainer->layout();
+    QLayoutItem* child;
+    while ((child = groupLayout->takeAt(0)) != nullptr) {
+        delete child->widget();
+        delete child;
+    }
+    for (const auto& group : m_tagGroups) {
+        groupLayout->addWidget(createSidebarItem("folder_filled", group.name, QString::number(group.tags.size())));
     }
 
     // 重建内容区
-    // 清理旧布局
-    QLayout* oldLayout = m_contentWidget->layout();
-    if (oldLayout) {
-        QLayoutItem* item;
-        while ((item = oldLayout->takeAt(0)) != nullptr) {
-            delete item->widget();
-            delete item;
-        }
-    } else {
-        oldLayout = new QVBoxLayout(m_contentWidget);
-        m_contentWidget->setLayout(oldLayout);
+    QLayout* contentLayout = m_contentWidget->layout();
+    while ((child = contentLayout->takeAt(0)) != nullptr) {
+        delete child->widget();
+        delete child;
     }
 
-    auto* contentLayout = static_cast<QVBoxLayout*>(oldLayout);
+    // 添加标题
+    QWidget* contentHeader = new QWidget(m_contentWidget);
+    contentHeader->setFixedHeight(40);
+    auto* hLayout = new QHBoxLayout(contentHeader);
+    hLayout->setContentsMargins(0, 0, 0, 0);
+    QLabel* lblTitle = new QLabel("标签", contentHeader);
+    lblTitle->setStyleSheet("font-size: 18px; font-weight: bold; color: #EEEEEE;");
+    hLayout->addWidget(lblTitle);
+    hLayout->addStretch();
+    contentLayout->addWidget(contentHeader);
 
     // 按字母分组
     QMap<QChar, QMap<QString, int>> groups;
     for (auto it = m_tagCounts.begin(); it != m_tagCounts.end(); ++it) {
         QString tag = it.key();
+        if (tag.isEmpty()) continue;
         QChar first = tag.at(0).toUpper();
         if (first < 'A' || first > 'Z') first = '#';
         groups[first][tag] = it.value();
@@ -276,23 +241,20 @@ void TagManagerView::refresh() {
 
     for (auto it = groups.begin(); it != groups.end(); ++it) {
         QWidget* groupWidget = new QWidget(m_contentWidget);
-        auto* groupLayout = new QVBoxLayout(groupWidget);
-        groupLayout->setContentsMargins(0, 0, 0, 0);
-        groupLayout->setSpacing(10);
+        auto* vLayout = new QVBoxLayout(groupWidget);
+        vLayout->setContentsMargins(0, 10, 0, 10);
 
         QLabel* groupTitle = new QLabel(QString(it.key()), groupWidget);
-        groupTitle->setStyleSheet("font-size: 18px; font-weight: bold; color: #555; border-bottom: 1px solid #333; padding-bottom: 5px;");
-        groupLayout->addWidget(groupTitle);
+        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #555; border-bottom: 1px solid #333; padding-bottom: 5px;");
+        vLayout->addWidget(groupTitle);
 
-        // 使用网格布局模拟分栏
         QWidget* tagsContainer = new QWidget(groupWidget);
         auto* grid = new QGridLayout(tagsContainer);
-        grid->setContentsMargins(0, 0, 0, 0);
+        grid->setContentsMargins(0, 10, 0, 10);
         grid->setSpacing(15);
 
         int row = 0, col = 0;
         int maxCols = 4;
-
         auto tagsInGroup = it.value();
         for (auto tagIt = tagsInGroup.begin(); tagIt != tagsInGroup.end(); ++tagIt) {
             QPushButton* tagBtn = new QPushButton(QString("%1 (%2)").arg(tagIt.key()).arg(tagIt.value()), tagsContainer);
@@ -307,54 +269,14 @@ void TagManagerView::refresh() {
                 emit requestSearchTag(tagName);
             });
 
-            // 右键菜单
-            tagBtn->setContextMenuPolicy(Qt::CustomContextMenu);
-            connect(tagBtn, &QWidget::customContextMenuRequested, this, [this, tagName](const QPoint&) {
-                QMenu menu(this);
-                UiHelper::applyMenuStyle(&menu);
-                menu.addAction("搜索含此标签的项目", this, [this, tagName](){ emit requestSearchTag(tagName); });
-                menu.addSeparator();
-                menu.addAction("设为常用标签");
-
-                auto* addToMenu = menu.addMenu("加入标签组");
-                for (const auto& group : m_tagGroups) {
-                    addToMenu->addAction(group.name);
-                }
-
-                auto* moveToMenu = menu.addMenu("移动至标签组");
-                for (const auto& group : m_tagGroups) {
-                    moveToMenu->addAction(group.name);
-                }
-
-                menu.addAction("从标签组中移除");
-                menu.addSeparator();
-                menu.addAction("重命名");
-                menu.addAction("删除标签");
-                menu.exec(QCursor::pos());
-            });
-
             grid->addWidget(tagBtn, row, col);
             col++;
-            if (col >= maxCols) {
-                col = 0;
-                row++;
-            }
+            if (col >= maxCols) { col = 0; row++; }
         }
-
-        groupLayout->addWidget(tagsContainer);
+        vLayout->addWidget(tagsContainer);
         contentLayout->addWidget(groupWidget);
     }
-
     contentLayout->addStretch();
-}
-
-QStringList TagManagerView::getFrequentTags() const {
-    // 2026-07-xx 示例逻辑：暂时返回空，后续可从 AppConfig 读取
-    return {};
-}
-
-bool TagManagerView::eventFilter(QObject* obj, QEvent* event) {
-    return QWidget::eventFilter(obj, event);
 }
 
 } // namespace ArcMeta
