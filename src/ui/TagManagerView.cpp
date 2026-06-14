@@ -201,33 +201,38 @@ void TagManagerView::refresh() {
     }
     if (m_uncategorizedTagsCountLabel) m_uncategorizedTagsCountLabel->setText(QString::number(uncategorizedCount));
 
-    QLayout* groupLayout = m_groupContainer->layout();
+    QVBoxLayout* groupLayout = qobject_cast<QVBoxLayout*>(m_groupContainer->layout());
     QLayoutItem* child;
-    while ((child = groupLayout->takeAt(0)) != nullptr) {
-        delete child->widget();
-        delete child;
-    }
-    for (const auto& group : m_tagGroups) {
-        groupLayout->addWidget(createSidebarItem("folder_filled", group.name, QString::number(group.tags.size())));
+    if (groupLayout) {
+        while ((child = groupLayout->takeAt(0)) != nullptr) {
+            delete child->widget();
+            delete child;
+        }
+        for (const auto& group : m_tagGroups) {
+            auto* item = createSidebarItem("folder_filled", group.name, QString::number(group.tags.size()));
+            groupLayout->addWidget(item);
+        }
     }
 
     // 重建内容区
-    QLayout* contentLayout = m_contentWidget->layout();
-    while ((child = contentLayout->takeAt(0)) != nullptr) {
-        delete child->widget();
-        delete child;
-    }
+    QVBoxLayout* contentLayout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
+    if (contentLayout) {
+        while ((child = contentLayout->takeAt(0)) != nullptr) {
+            delete child->widget();
+            delete child;
+        }
 
-    // 添加标题
-    QWidget* contentHeader = new QWidget(m_contentWidget);
-    contentHeader->setFixedHeight(40);
-    auto* hLayout = new QHBoxLayout(contentHeader);
-    hLayout->setContentsMargins(0, 0, 0, 0);
-    QLabel* lblTitle = new QLabel("标签", contentHeader);
-    lblTitle->setStyleSheet("font-size: 18px; font-weight: bold; color: #EEEEEE;");
-    hLayout->addWidget(lblTitle);
-    hLayout->addStretch();
-    contentLayout->addWidget(contentHeader);
+        // 添加标题
+        QWidget* contentHeader = new QWidget(m_contentWidget);
+        contentHeader->setFixedHeight(40);
+        auto* hLayout = new QHBoxLayout(contentHeader);
+        hLayout->setContentsMargins(0, 0, 0, 0);
+        QLabel* lblTitle = new QLabel("标签", contentHeader);
+        lblTitle->setStyleSheet("font-size: 18px; font-weight: bold; color: #EEEEEE;");
+        hLayout->addWidget(lblTitle);
+        hLayout->addStretch();
+        contentLayout->addWidget(contentHeader);
+    }
 
     // 按字母分组
     QMap<QChar, QMap<QString, int>> groups;
@@ -274,9 +279,9 @@ void TagManagerView::refresh() {
             if (col >= maxCols) { col = 0; row++; }
         }
         vLayout->addWidget(tagsContainer);
-        contentLayout->addWidget(groupWidget);
+        if (contentLayout) contentLayout->addWidget(groupWidget);
     }
-    contentLayout->addStretch();
+    if (contentLayout) contentLayout->addStretch();
 }
 
 } // namespace ArcMeta

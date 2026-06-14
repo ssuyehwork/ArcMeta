@@ -64,7 +64,7 @@ private:
     };
     QList<TagGroup> m_tagGroups;
 
-    QWidget* createSidebarItem(const QString& icon, const QString& name, const QString& countText);
+    QWidget* createSidebarItem(const QString& icon, const QString& name, const QString& countText, QLabel** outCountLabel = nullptr);
 };
 
 } // namespace ArcMeta
