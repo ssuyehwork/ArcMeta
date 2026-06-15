@@ -12,8 +12,6 @@
 #include <QGridLayout>
 #include <QMenu>
 #include <QDebug>
-#include <QInputDialog>
-#include <QMessageBox>
 
 using namespace ArcMeta::Style;
 
@@ -121,20 +119,6 @@ void TagManagerView::setupSidebar() {
     headerLayout->addWidget(titleLabel);
     
     headerLayout->addStretch();
-
-    // 2026-04-xx 按照用户要求：在标题栏新增“新建组”按钮
-    QPushButton* btnAddGroup = new QPushButton(header);
-    btnAddGroup->setFixedSize(24, 24);
-    btnAddGroup->setCursor(Qt::PointingHandCursor);
-    btnAddGroup->setIcon(UiHelper::getIcon("add", TextMain, 16));
-    btnAddGroup->setToolTip("新建标签组");
-    btnAddGroup->setStyleSheet(
-        "QPushButton { background: transparent; border: none; border-radius: 4px; }"
-        "QPushButton:hover { background-color: #3E3E42; }"
-        "QPushButton:pressed { background-color: #4E4E52; }"
-    );
-    connect(btnAddGroup, &QPushButton::clicked, this, &TagManagerView::createNewGroup);
-    headerLayout->addWidget(btnAddGroup);
     
     m_sidebarLayout->addWidget(header);
 
@@ -146,20 +130,14 @@ void TagManagerView::setupSidebar() {
     sidebarContentLayout->setSpacing(0);
 
     // 静态项
-    QWidget* allItem = createSidebarItem("all_data", "全部标签", "0", &m_allTagsCountLabel);
-    allItem->setProperty("sidebarAction", "all");
-    allItem->installEventFilter(this);
-    sidebarContentLayout->addWidget(allItem);
+    sidebarContentLayout->addWidget(createSidebarItem("all_data", "全部标签", "0", &m_allTagsCountLabel));
+    sidebarContentLayout->addWidget(createSidebarItem("uncategorized", "未分类", "0", &m_uncategorizedTagsCountLabel));
+    sidebarContentLayout->addWidget(createSidebarItem("star_filled", "常用标签", "0", &m_frequentTagsCountLabel));
 
-    QWidget* uncatItem = createSidebarItem("uncategorized", "未分类", "0", &m_uncategorizedTagsCountLabel);
-    uncatItem->setProperty("sidebarAction", "uncategorized");
-    uncatItem->installEventFilter(this);
-    sidebarContentLayout->addWidget(uncatItem);
-
-    QWidget* freqItem = createSidebarItem("star_filled", "常用标签", "0", &m_frequentTagsCountLabel);
-    freqItem->setProperty("sidebarAction", "frequent");
-    freqItem->installEventFilter(this);
-    sidebarContentLayout->addWidget(freqItem);
+    QFrame* line = new QFrame(contentWrapper);
+    line->setFrameShape(QFrame::HLine);
+    line->setStyleSheet("background-color: #333; margin: 10px 15px;");
+    sidebarContentLayout->addWidget(line);
 
     // 标签组容器
     m_groupContainer = new QWidget(contentWrapper);
@@ -171,6 +149,14 @@ void TagManagerView::setupSidebar() {
     sidebarContentLayout->addStretch();
     
     m_sidebarLayout->addWidget(contentWrapper, 1);
+
+    QPushButton* btnNewGroup = new QPushButton("+ 新建标签组", m_sidebar);
+    btnNewGroup->setFixedHeight(40);
+    btnNewGroup->setStyleSheet(
+        "QPushButton { background: transparent; border: none; color: #888; text-align: left; padding-left: 15px; }"
+        "QPushButton:hover { color: #3498db; background: #2A2A2A; }"
+    );
+    m_sidebarLayout->addWidget(btnNewGroup);
 }
 
 void TagManagerView::setupContentArea() {
@@ -222,233 +208,6 @@ void TagManagerView::setupContentArea() {
     
     m_scrollArea->setWidget(m_contentWidget);
     mainL->addWidget(m_scrollArea, 1);
-}
-
-void TagManagerView::resizeEvent(QResizeEvent* event) {
-    QWidget::resizeEvent(event);
-    adjustFlowHeights();
-}
-
-bool TagManagerView::eventFilter(QObject* watched, QEvent* event) {
-    if (event->type() == QEvent::MouseButtonPress) {
-        int gid = watched->property("groupId").toInt();
-        if (gid > 0) {
-            // 筛选属于该组的标签
-            QStringList groupTags;
-            for (const auto& group : m_tagGroups) {
-                if (group.id == gid) {
-                    groupTags = group.tags;
-                    break;
-                }
-            }
-
-            if (!m_contentWidget || !m_contentWidget->layout()) return false;
-            QVBoxLayout* contentLayout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
-            for (int i = 0; i < contentLayout->count(); ++i) {
-                QWidget* groupWidget = contentLayout->itemAt(i)->widget();
-                if (!groupWidget) continue;
-                bool groupHasVisibleTag = false;
-                const auto buttons = groupWidget->findChildren<QPushButton*>();
-                for (QPushButton* btn : buttons) {
-                    // 解析按钮文本中的标签名，例如 "测试 (4)" -> "测试"
-                    QString btnText = btn->text();
-                    int lastParen = btnText.lastIndexOf(" (");
-                    QString tagName = (lastParen != -1) ? btnText.left(lastParen) : btnText;
-
-                    bool visible = groupTags.contains(tagName);
-                    btn->setVisible(visible);
-                    if (visible) groupHasVisibleTag = true;
-                }
-                groupWidget->setVisible(groupHasVisibleTag);
-            }
-            QTimer::singleShot(0, this, &TagManagerView::adjustFlowHeights);
-            return true;
-        } else {
-            QString action = watched->property("sidebarAction").toString();
-            if (action == "all") {
-                search("");
-                return true;
-            } else if (action == "uncategorized") {
-                // 筛选未归组标签
-                QSet<QString> groupedTags;
-                for (const auto& group : m_tagGroups) {
-                    for (const auto& tag : group.tags) groupedTags.insert(tag);
-                }
-
-                QVBoxLayout* contentLayout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
-                for (int i = 0; i < contentLayout->count(); ++i) {
-                    QWidget* groupWidget = contentLayout->itemAt(i)->widget();
-                    if (!groupWidget) continue;
-                    bool groupHasVisibleTag = false;
-                    const auto buttons = groupWidget->findChildren<QPushButton*>();
-                    for (QPushButton* btn : buttons) {
-                        QString btnText = btn->text();
-                        int lastParen = btnText.lastIndexOf(" (");
-                        QString tagName = (lastParen != -1) ? btnText.left(lastParen) : btnText;
-                        bool visible = !groupedTags.contains(tagName);
-                        btn->setVisible(visible);
-                        if (visible) groupHasVisibleTag = true;
-                    }
-                    groupWidget->setVisible(groupHasVisibleTag);
-                }
-                QTimer::singleShot(0, this, &TagManagerView::adjustFlowHeights);
-                return true;
-            } else if (action == "frequent") {
-                // TODO: 常用标签逻辑（目前暂无权重统计，显示为空）
-                search("___NON_EXISTENT_TAG___");
-                return true;
-            }
-        }
-    }
-    return QWidget::eventFilter(watched, event);
-}
-
-void TagManagerView::addTagToGroup(const QString& tagName, int groupId) {
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-    if (!db) return;
-    sqlite3_stmt* stmt;
-    const char* sql = "INSERT INTO tag_group_items (group_id, tag_name) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM tag_group_items WHERE group_id = ? AND tag_name = ?)";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, groupId);
-        QByteArray tagUtf8 = tagName.toUtf8();
-        sqlite3_bind_text(stmt, 2, tagUtf8.constData(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 3, groupId);
-        sqlite3_bind_text(stmt, 4, tagUtf8.constData(), -1, SQLITE_TRANSIENT);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-        refresh();
-    }
-}
-
-void TagManagerView::removeTagFromGroup(const QString& tagName, int groupId) {
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-    if (!db) return;
-    sqlite3_stmt* stmt;
-    QString sql;
-    if (groupId == -1) {
-        sql = "DELETE FROM tag_group_items WHERE tag_name = ?";
-    } else {
-        sql = "DELETE FROM tag_group_items WHERE group_id = ? AND tag_name = ?";
-    }
-    if (sqlite3_prepare_v2(db, sql.toUtf8().constData(), -1, &stmt, nullptr) == SQLITE_OK) {
-        if (groupId == -1) {
-            sqlite3_bind_text(stmt, 1, tagName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-        } else {
-            sqlite3_bind_int(stmt, 1, groupId);
-            sqlite3_bind_text(stmt, 2, tagName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-        }
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-        refresh();
-    }
-}
-
-void TagManagerView::renameGroup(int groupId, const QString& newName) {
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-    if (!db) return;
-    sqlite3_stmt* stmt;
-    if (sqlite3_prepare_v2(db, "UPDATE tag_groups SET name = ? WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, newName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 2, groupId);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-        refresh();
-    }
-}
-
-void TagManagerView::deleteGroup(int groupId) {
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-    if (!db) return;
-    sqlite3_stmt* stmt;
-    sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
-    if (sqlite3_prepare_v2(db, "DELETE FROM tag_groups WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, groupId);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-    }
-    if (sqlite3_prepare_v2(db, "DELETE FROM tag_group_items WHERE group_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, groupId);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-    }
-    sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
-    refresh();
-}
-
-void TagManagerView::createNewGroup() {
-    bool ok;
-    QString name = QInputDialog::getText(this, "新建标签组", "标签组名称:", QLineEdit::Normal, "", &ok);
-    if (ok && !name.trimmed().isEmpty()) {
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-        if (db) {
-            sqlite3_stmt* stmt;
-            const char* sql = "INSERT INTO tag_groups (name, color, sort_order) VALUES (?, ?, (SELECT IFNULL(MAX(sort_order), 0) + 1 FROM tag_groups))";
-            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                QByteArray utf8Name = name.trimmed().toUtf8();
-                sqlite3_bind_text(stmt, 1, utf8Name.constData(), -1, SQLITE_TRANSIENT);
-                sqlite3_bind_text(stmt, 2, "#3498db", -1, SQLITE_TRANSIENT); // 默认蓝色
-                if (sqlite3_step(stmt) == SQLITE_DONE) {
-                    refresh();
-                } else {
-                    QMessageBox::warning(this, "错误", "创建标签组失败");
-                }
-                sqlite3_finalize(stmt);
-            }
-        }
-    }
-}
-
-void TagManagerView::adjustFlowHeights() {
-    if (!m_contentWidget || !m_contentWidget->layout()) return;
-
-    int contentWidth = m_contentWidget->width();
-    int sideMargin = 20 * 2; // contentLayout->setContentsMargins(20, 20, 20, 20)
-    int availableWidth = contentWidth - sideMargin;
-
-    QVBoxLayout* contentLayout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
-    if (!contentLayout) return;
-
-    for (int i = 0; i < contentLayout->count(); ++i) {
-        QWidget* groupWidget = contentLayout->itemAt(i)->widget();
-        if (!groupWidget || !groupWidget->isVisible() || groupWidget->objectName() == "Spacer") continue;
-
-        // 查找其中的 tagsContainer
-        QWidget* tagsContainer = groupWidget->findChild<QWidget*>("TagsFlowContainer");
-
-        if (tagsContainer && tagsContainer->layout()) {
-            FlowLayout* flow = static_cast<FlowLayout*>(tagsContainer->layout());
-            int h = flow->heightForWidth(availableWidth);
-            // 按照用户指令实施高度补正：16(标题) + h(流式内容高度) + 2(组间隔)
-            // 之前从 +4 改为 +2
-            groupWidget->setFixedHeight(16 + h + 2);
-        }
-    }
-}
-
-void TagManagerView::search(const QString& keyword) {
-    if (!m_contentWidget || !m_contentWidget->layout()) return;
-
-    QString kw = keyword.trimmed().toLower();
-    QVBoxLayout* contentLayout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
-    if (!contentLayout) return;
-
-    for (int i = 0; i < contentLayout->count(); ++i) {
-        QWidget* groupWidget = contentLayout->itemAt(i)->widget();
-        if (!groupWidget || groupWidget->objectName() == "Spacer") continue;
-
-        bool groupHasVisibleTag = false;
-        const auto buttons = groupWidget->findChildren<QPushButton*>();
-        for (QPushButton* btn : buttons) {
-            bool visible = kw.isEmpty() || btn->text().toLower().contains(kw);
-            btn->setVisible(visible);
-            if (visible) groupHasVisibleTag = true;
-        }
-
-        groupWidget->setVisible(groupHasVisibleTag);
-    }
-
-    // 重新调整高度
-    QTimer::singleShot(0, this, &TagManagerView::adjustFlowHeights);
 }
 
 void TagManagerView::refresh() {
@@ -504,31 +263,6 @@ void TagManagerView::refresh() {
         }
         for (const auto& group : m_tagGroups) {
             auto* item = createSidebarItem("folder_filled", group.name, QString::number(group.tags.size()));
-            int gid = group.id;
-            QString gname = group.name;
-
-            // 点击筛选
-            item->installEventFilter(this);
-            item->setProperty("groupId", gid);
-
-            // 右键菜单
-            item->setContextMenuPolicy(Qt::CustomContextMenu);
-            connect(item, &QWidget::customContextMenuRequested, this, [this, gid, gname](const QPoint& /*pos*/) {
-                QMenu menu(this);
-                UiHelper::applyMenuStyle(&menu);
-                menu.addAction(UiHelper::getIcon("edit", TextMain), "重命名组", [this, gid, gname]() {
-                    bool ok;
-                    QString newName = QInputDialog::getText(this, "重命名组", "组名称:", QLineEdit::Normal, gname, &ok);
-                    if (ok && !newName.trimmed().isEmpty()) renameGroup(gid, newName.trimmed());
-                });
-                menu.addAction(UiHelper::getIcon("trash", ErrorRed), "删除组", [this, gid]() {
-                    if (QMessageBox::question(this, "删除", "确定要删除该标签组吗？（不会删除标签本身）") == QMessageBox::Yes) {
-                        deleteGroup(gid);
-                    }
-                });
-                menu.exec(QCursor::pos());
-            });
-
             groupLayout->addWidget(item);
         }
     }
@@ -556,18 +290,14 @@ void TagManagerView::refresh() {
     for (auto it = groups.begin(); it != groups.end(); ++it) {
         QWidget* groupWidget = new QWidget(m_contentWidget);
         auto* vLayout = new QVBoxLayout(groupWidget);
-        vLayout->setContentsMargins(0, 0, 0, 0);
-        vLayout->setSpacing(0);
+        vLayout->setContentsMargins(0, 10, 0, 10);
         
         QLabel* groupTitle = new QLabel(QString(it.key()), groupWidget);
-        groupTitle->setFixedHeight(16);
-        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #1abc9c; border-bottom: 1px solid #333; padding: 0; margin: 0;");
+        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #555; border-bottom: 1px solid #333; padding-bottom: 5px;");
         vLayout->addWidget(groupTitle);
         
         QWidget* tagsContainer = new QWidget(groupWidget);
-        tagsContainer->setObjectName("TagsFlowContainer");
-        // margin=0, hSpacing=10, vSpacing=0
-        auto* flow = new FlowLayout(tagsContainer, 0, 10, 0);
+        auto* flow = new FlowLayout(tagsContainer, 0, 10, 8);
         
         auto tagsInGroup = it.value();
         for (auto tagIt = tagsInGroup.begin(); tagIt != tagsInGroup.end(); ++tagIt) {
@@ -594,43 +324,18 @@ void TagManagerView::refresh() {
                 
                 auto* addToMenu = menu.addMenu(UiHelper::getIcon("add", SuccessGreen), "加入标签组");
                 for (const auto& group : m_tagGroups) {
-                    int gid = group.id;
-                    addToMenu->addAction(group.name, [this, tagName, gid]() {
-                        addTagToGroup(tagName, gid);
-                    });
+                    addToMenu->addAction(group.name);
                 }
                 
                 auto* moveToMenu = menu.addMenu(UiHelper::getIcon("folder_filled", PrimaryBlue), "移动至标签组");
                 for (const auto& group : m_tagGroups) {
-                    int gid = group.id;
-                    moveToMenu->addAction(group.name, [this, tagName, gid]() {
-                        removeTagFromGroup(tagName, -1);
-                        addTagToGroup(tagName, gid);
-                    });
+                    moveToMenu->addAction(group.name);
                 }
 
-                menu.addAction(UiHelper::getIcon("close", ErrorRed), "从标签组中移除", [this, tagName]() {
-                    removeTagFromGroup(tagName);
-                });
+                menu.addAction(UiHelper::getIcon("close", ErrorRed), "从标签组中移除");
                 menu.addSeparator();
-
-                menu.addAction(UiHelper::getIcon("edit", TextMain), "重命名标签", [this, tagName]() {
-                    bool ok;
-                    QString newName = QInputDialog::getText(this, "重命名标签", "新标签名称:", QLineEdit::Normal, tagName, &ok);
-                    if (ok && !newName.trimmed().isEmpty() && newName != tagName) {
-                        MetadataManager::instance().renameTag(tagName, newName.trimmed());
-                        refresh();
-                    }
-                });
-
-                menu.addAction(UiHelper::getIcon("trash", ErrorRed), "删除标签", [this, tagName]() {
-                    auto res = QMessageBox::question(this, "删除标签", QString("确定要全局删除标签 \"%1\" 吗？此操作不可撤销。").arg(tagName));
-                    if (res == QMessageBox::Yes) {
-                        MetadataManager::instance().removeTag(tagName);
-                        refresh();
-                    }
-                });
-
+                menu.addAction(UiHelper::getIcon("edit", TextMain), "重命名标签");
+                menu.addAction(UiHelper::getIcon("trash", ErrorRed), "删除标签");
                 menu.exec(QCursor::pos());
             });
             
@@ -639,12 +344,7 @@ void TagManagerView::refresh() {
         vLayout->addWidget(tagsContainer);
         if (contentLayout) contentLayout->addWidget(groupWidget);
     }
-    if (contentLayout) {
-        contentLayout->addStretch();
-    }
-
-    // 数据刷新后立即同步一次高度
-    QTimer::singleShot(0, this, &TagManagerView::adjustFlowHeights);
+    if (contentLayout) contentLayout->addStretch();
 }
 
 } // namespace ArcMeta

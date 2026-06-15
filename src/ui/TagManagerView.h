@@ -27,30 +27,6 @@ public:
      */
     void refresh();
 
-    /**
-     * @brief 对标签进行实时搜索/筛选
-     */
-    void search(const QString& keyword);
-
-    /**
-     * @brief [TODO实现] 创建新的标签组
-     */
-    void createNewGroup();
-
-    void addTagToGroup(const QString& tagName, int groupId);
-    void removeTagFromGroup(const QString& tagName, int groupId = -1);
-    void renameGroup(int groupId, const QString& newName);
-    void deleteGroup(int groupId);
-
-    /**
-     * @brief 动态调整流式布局容器高度
-     */
-    void adjustFlowHeights();
-
-protected:
-    void resizeEvent(QResizeEvent* event) override;
-    bool eventFilter(QObject* watched, QEvent* event) override;
-
 signals:
     /**
      * @brief 请求搜索含此标签的项目
