@@ -9,6 +9,7 @@
 #include <QLineEdit>
 #include <QFrame>
 #include <QPoint>
+#include <QColor>
 #include <QMouseEvent>
 #include <QKeyEvent>
 

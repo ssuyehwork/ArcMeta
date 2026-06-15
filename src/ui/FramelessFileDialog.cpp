@@ -4,6 +4,12 @@
 #include <QStorageInfo>
 #include <QDir>
 #include <QRegularExpression>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QItemSelectionModel>
+#include <QFile>
 
 namespace ArcMeta {
 
