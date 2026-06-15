@@ -981,6 +981,27 @@ void InlineHueSlider::paintEvent(QPaintEvent*) {
 - 变更原因：物理加固“此电脑”盘符显示逻辑。当路径为磁盘根目录（如 C:/）时，QFileInfo::fileName() 返回空字符串，通过引入 isRoot() 判断并返回本地化绝对路径，解决硬盘项标签空白的 Bug。
 - 影响范围：FerrexVirtualDbModel::data 函数，内容区磁盘图标名称显示。
 - 是否在需求范围内：是
+
+---
+## [74] 变更时间：2026-06-15 04:16:36
+
+**文件路径：** `src/ui/FilterPanel.cpp`
+**变更类型：** 逻辑分析与方案设计
+
+### 修改方案摘要
+- **间距标准化**：除顶部标题栏外，将筛选面板所有组件的水平间距统一重构为 **5 像素 (5px)**。
+- **具体调整**：
+  1. `ClickableRow` 布局边距：`4px` -> `5px`。
+  2. `FilterSearchEdit` QSS 边距：`margin: 4px 8px` -> `4px 5px`。
+  3. 分组标题 `padding-left`：`8px` -> `5px`。
+  4. 颜色色块及滑块布局：统一校准至 `5px`。
+  5. 文件大小布局：修正为 `5px` 水平间距。
+
+### 变更说明
+- 变更原因：按照用户要求实现筛选面板视觉上的美观与统一，并引入严格的“禁止顺手修改”及“强制申报备案”规范（通过 `Declaration_Log.md` 记录）。
+- 影响范围：`FilterPanel` 视觉对齐架构。
+- 是否在需求范围内：是
+- 关联文档：`Analysis_Modification_Plan/Analysis_Modification_Plan-39.md`
 ---
 
 ---
