@@ -418,9 +418,8 @@ void TagManagerView::adjustFlowHeights() {
         if (tagsContainer && tagsContainer->layout()) {
             FlowLayout* flow = static_cast<FlowLayout*>(tagsContainer->layout());
             int h = flow->heightForWidth(availableWidth);
-            // 按照用户指令实施高度补正：16(标题) + h(流式内容高度) + 2(组间隔)
-            // 之前从 +4 改为 +2
-            groupWidget->setFixedHeight(16 + h + 2);
+            // 2026-04-xx 按照用户指令实施标准化高度计算：16(标题) + 20(Spacing) + h(内容) + 20(Margin)
+            groupWidget->setFixedHeight(16 + 20 + h + 20);
         }
     }
 }
@@ -555,13 +554,14 @@ void TagManagerView::refresh() {
 
     for (auto it = groups.begin(); it != groups.end(); ++it) {
         QWidget* groupWidget = new QWidget(m_contentWidget);
+        groupWidget->setStyleSheet("QWidget { border-bottom: 1px solid #333; }");
         auto* vLayout = new QVBoxLayout(groupWidget);
-        vLayout->setContentsMargins(0, 0, 0, 0);
-        vLayout->setSpacing(0);
+        vLayout->setContentsMargins(0, 0, 0, 20);
+        vLayout->setSpacing(20);
         
         QLabel* groupTitle = new QLabel(QString(it.key()), groupWidget);
         groupTitle->setFixedHeight(16);
-        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #1abc9c; border-bottom: 1px solid #333; padding: 0; margin: 0;");
+        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #1abc9c; border: none; padding: 0; margin: 0;");
         vLayout->addWidget(groupTitle);
         
         QWidget* tagsContainer = new QWidget(groupWidget);
