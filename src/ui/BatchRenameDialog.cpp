@@ -7,6 +7,7 @@
 #include <QHeaderView>
 #include "FramelessFileDialog.h"
 #include "FramelessDialog.h"
+#include "ToolTipOverlay.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QLabel>
@@ -20,7 +21,6 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
-#include <QFile>
 #include "../core/AppConfig.h"
 
 namespace ArcMeta {

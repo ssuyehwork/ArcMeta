@@ -228,4 +228,10 @@ QString FramelessFileDialog::getOpenFileName(QWidget* parent, const QString& cap
     return "";
 }
 
+QString FramelessFileDialog::getSaveFileName(QWidget* parent, const QString& caption, const QString& dir, const QString& filter) {
+    FramelessFileDialog dlg(caption, dir, AnyFile, filter, parent);
+    if (dlg.exec() == QDialog::Accepted) return dlg.selectedPath();
+    return "";
+}
+
 } // namespace ArcMeta
