@@ -223,6 +223,8 @@ void TagManagerView::adjustFlowHeights() {
     int availableWidth = contentWidth - sideMargin;
 
     QVBoxLayout* contentLayout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
+    if (!contentLayout) return;
+
     for (int i = 0; i < contentLayout->count(); ++i) {
         QWidget* groupWidget = contentLayout->itemAt(i)->widget();
         if (!groupWidget || groupWidget->objectName() == "Spacer") continue;
@@ -325,7 +327,7 @@ void TagManagerView::refresh() {
         
         QLabel* groupTitle = new QLabel(QString(it.key()), groupWidget);
         groupTitle->setFixedHeight(16);
-        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #555; border-bottom: 1px solid #333; padding: 0; margin: 0;");
+        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #1abc9c; border-bottom: 1px solid #333; padding: 0; margin: 0;");
         vLayout->addWidget(groupTitle);
         
         QWidget* tagsContainer = new QWidget(groupWidget);
