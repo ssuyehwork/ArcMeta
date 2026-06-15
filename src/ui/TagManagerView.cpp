@@ -12,7 +12,6 @@
 #include <QGridLayout>
 #include <QMenu>
 #include <QDebug>
-#include <QInputDialog>
 #include "FramelessDialog.h"
 
 using namespace ArcMeta::Style;
@@ -376,9 +375,11 @@ void TagManagerView::deleteGroup(int groupId) {
 }
 
 void TagManagerView::createNewGroup() {
-    bool ok;
-    QString name = QInputDialog::getText(this, "新建标签组", "标签组名称:", QLineEdit::Normal, "", &ok);
-    if (ok && !name.trimmed().isEmpty()) {
+    FramelessInputDialog dlg("新建标签组", "标签组名称:", "", this);
+    if (dlg.exec() == QDialog::Accepted) {
+        QString name = dlg.text();
+        if (name.isEmpty()) return;
+
         sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
         if (db) {
             sqlite3_stmt* stmt;
@@ -516,9 +517,11 @@ void TagManagerView::refresh() {
                 QMenu menu(this);
                 UiHelper::applyMenuStyle(&menu);
                 menu.addAction(UiHelper::getIcon("edit", TextMain), "重命名组", [this, gid, gname]() {
-                    bool ok;
-                    QString newName = QInputDialog::getText(this, "重命名组", "组名称:", QLineEdit::Normal, gname, &ok);
-                    if (ok && !newName.trimmed().isEmpty()) renameGroup(gid, newName.trimmed());
+                    FramelessInputDialog dlg("重命名组", "组名称:", gname, this);
+                    if (dlg.exec() == QDialog::Accepted) {
+                        QString newName = dlg.text();
+                        if (!newName.isEmpty()) renameGroup(gid, newName);
+                    }
                 });
                 menu.addAction(UiHelper::getIcon("trash", ErrorRed), "删除组", [this, gid]() {
                     if (FramelessMessageBox::question(this, "删除", "确定要删除该标签组吗？（不会删除标签本身）")) {
@@ -620,11 +623,13 @@ void TagManagerView::refresh() {
                 menu.addSeparator();
                 
                 menu.addAction(UiHelper::getIcon("edit", TextMain), "重命名标签", [this, tagName]() {
-                    bool ok;
-                    QString newName = QInputDialog::getText(this, "重命名标签", "新标签名称:", QLineEdit::Normal, tagName, &ok);
-                    if (ok && !newName.trimmed().isEmpty() && newName != tagName) {
-                        MetadataManager::instance().renameTag(tagName, newName.trimmed());
-                        refresh();
+                    FramelessInputDialog dlg("重命名标签", "新标签名称:", tagName, this);
+                    if (dlg.exec() == QDialog::Accepted) {
+                        QString newName = dlg.text();
+                        if (!newName.isEmpty() && newName != tagName) {
+                            MetadataManager::instance().renameTag(tagName, newName);
+                            refresh();
+                        }
                     }
                 });
 
