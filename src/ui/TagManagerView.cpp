@@ -554,13 +554,18 @@ void TagManagerView::refresh() {
 
     for (auto it = groups.begin(); it != groups.end(); ++it) {
         QWidget* groupWidget = new QWidget(m_contentWidget);
-        groupWidget->setStyleSheet("QWidget { border-bottom: 1px solid #333; }");
+        groupWidget->setObjectName("TagGroupWidget");
+        groupWidget->setAttribute(Qt::WA_StyledBackground, true);
+        // 使用 ID 选择器锁定边框，防止子 QWidget (如标签按钮) 误继承下划线
+        groupWidget->setStyleSheet("QWidget#TagGroupWidget { border-bottom: 1px solid #333; }");
+
         auto* vLayout = new QVBoxLayout(groupWidget);
         vLayout->setContentsMargins(0, 0, 0, 20);
         vLayout->setSpacing(20);
         
         QLabel* groupTitle = new QLabel(QString(it.key()), groupWidget);
         groupTitle->setFixedHeight(16);
+        // 彻底移除标题底线，确保其下方为纯净留白
         groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #1abc9c; border: none; padding: 0; margin: 0;");
         vLayout->addWidget(groupTitle);
         
