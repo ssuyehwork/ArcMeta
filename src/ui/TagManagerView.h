@@ -27,6 +27,14 @@ public:
      */
     void refresh();
 
+    /**
+     * @brief 动态调整流式布局容器高度
+     */
+    void adjustFlowHeights();
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
 signals:
     /**
      * @brief 请求搜索含此标签的项目

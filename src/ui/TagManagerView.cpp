@@ -210,6 +210,38 @@ void TagManagerView::setupContentArea() {
     mainL->addWidget(m_scrollArea, 1);
 }
 
+void TagManagerView::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    adjustFlowHeights();
+}
+
+void TagManagerView::adjustFlowHeights() {
+    if (!m_contentWidget || !m_contentWidget->layout()) return;
+    
+    int contentWidth = m_contentWidget->width();
+    int sideMargin = 20 * 2; // contentLayout->setContentsMargins(20, 20, 20, 20)
+    int availableWidth = contentWidth - sideMargin;
+
+    QVBoxLayout* contentLayout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
+    if (!contentLayout) return;
+
+    for (int i = 0; i < contentLayout->count(); ++i) {
+        QWidget* groupWidget = contentLayout->itemAt(i)->widget();
+        if (!groupWidget || groupWidget->objectName() == "Spacer") continue;
+        
+        // 查找其中的 tagsContainer
+        QWidget* tagsContainer = groupWidget->findChild<QWidget*>("TagsFlowContainer");
+        
+        if (tagsContainer && tagsContainer->layout()) {
+            FlowLayout* flow = static_cast<FlowLayout*>(tagsContainer->layout());
+            int h = flow->heightForWidth(availableWidth);
+            // 按照用户指令实施高度补正：16(标题) + h(流式内容高度) + 2(组间隔)
+            // 之前从 +4 改为 +2
+            groupWidget->setFixedHeight(16 + h + 2);
+        }
+    }
+}
+
 void TagManagerView::refresh() {
     m_tagCounts = MetadataManager::instance().getAllTags();
     
@@ -290,14 +322,18 @@ void TagManagerView::refresh() {
     for (auto it = groups.begin(); it != groups.end(); ++it) {
         QWidget* groupWidget = new QWidget(m_contentWidget);
         auto* vLayout = new QVBoxLayout(groupWidget);
-        vLayout->setContentsMargins(0, 10, 0, 10);
+        vLayout->setContentsMargins(0, 0, 0, 0);
+        vLayout->setSpacing(0);
         
         QLabel* groupTitle = new QLabel(QString(it.key()), groupWidget);
-        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #555; border-bottom: 1px solid #333; padding-bottom: 5px;");
+        groupTitle->setFixedHeight(16);
+        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #1abc9c; border-bottom: 1px solid #333; padding: 0; margin: 0;");
         vLayout->addWidget(groupTitle);
         
         QWidget* tagsContainer = new QWidget(groupWidget);
-        auto* flow = new FlowLayout(tagsContainer, 0, 10, 8);
+        tagsContainer->setObjectName("TagsFlowContainer");
+        // margin=0, hSpacing=10, vSpacing=0
+        auto* flow = new FlowLayout(tagsContainer, 0, 10, 0);
         
         auto tagsInGroup = it.value();
         for (auto tagIt = tagsInGroup.begin(); tagIt != tagsInGroup.end(); ++tagIt) {
@@ -344,7 +380,12 @@ void TagManagerView::refresh() {
         vLayout->addWidget(tagsContainer);
         if (contentLayout) contentLayout->addWidget(groupWidget);
     }
-    if (contentLayout) contentLayout->addStretch();
+    if (contentLayout) {
+        contentLayout->addStretch();
+    }
+    
+    // 数据刷新后立即同步一次高度
+    QTimer::singleShot(0, this, &TagManagerView::adjustFlowHeights);
 }
 
 } // namespace ArcMeta
