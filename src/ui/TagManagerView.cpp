@@ -12,6 +12,8 @@
 #include <QGridLayout>
 #include <QMenu>
 #include <QDebug>
+#include <QTimer>
+#include <QResizeEvent>
 
 using namespace ArcMeta::Style;
 
@@ -134,10 +136,7 @@ void TagManagerView::setupSidebar() {
     sidebarContentLayout->addWidget(createSidebarItem("uncategorized", "未分类", "0", &m_uncategorizedTagsCountLabel));
     sidebarContentLayout->addWidget(createSidebarItem("star_filled", "常用标签", "0", &m_frequentTagsCountLabel));
 
-    QFrame* line = new QFrame(contentWrapper);
-    line->setFrameShape(QFrame::HLine);
-    line->setStyleSheet("background-color: #333; margin: 10px 15px;");
-    sidebarContentLayout->addWidget(line);
+    // 2026-07-xx 按照用户要求：移除多余分割线 (标记 ①)
 
     // 标签组容器
     m_groupContainer = new QWidget(contentWrapper);
@@ -208,6 +207,64 @@ void TagManagerView::setupContentArea() {
     
     m_scrollArea->setWidget(m_contentWidget);
     mainL->addWidget(m_scrollArea, 1);
+}
+
+void TagManagerView::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    adjustFlowHeights();
+}
+
+void TagManagerView::adjustFlowHeights() {
+    if (!m_contentWidget || !m_contentWidget->layout()) return;
+
+    int contentWidth = m_contentWidget->width();
+    int sideMargin = 20 * 2; // contentLayout->setContentsMargins(20, 20, 20, 20)
+    int availableWidth = contentWidth - sideMargin;
+
+    QVBoxLayout* contentLayout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
+    if (!contentLayout) return;
+
+    for (int i = 0; i < contentLayout->count(); ++i) {
+        QWidget* groupWidget = contentLayout->itemAt(i)->widget();
+        if (!groupWidget || !groupWidget->isVisible() || groupWidget->objectName() == "Spacer") continue;
+
+        // 查找其中的 tagsContainer
+        QWidget* tagsContainer = groupWidget->findChild<QWidget*>("TagsFlowContainer");
+
+        if (tagsContainer && tagsContainer->layout()) {
+            FlowLayout* flow = static_cast<FlowLayout*>(tagsContainer->layout());
+            int h = flow->heightForWidth(availableWidth);
+            // 按照用户指令实施高度补正：16(标题) + h(流式内容高度) + 2(组间隔)
+            // 之前的 +4 改为 +2，实现垂直间距减半
+            groupWidget->setFixedHeight(16 + h + 2);
+        }
+    }
+}
+
+void TagManagerView::search(const QString& keyword) {
+    if (!m_contentWidget || !m_contentWidget->layout()) return;
+
+    QString kw = keyword.trimmed().toLower();
+    QVBoxLayout* contentLayout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
+    if (!contentLayout) return;
+
+    for (int i = 0; i < contentLayout->count(); ++i) {
+        QWidget* groupWidget = contentLayout->itemAt(i)->widget();
+        if (!groupWidget || groupWidget->objectName() == "Spacer") continue;
+
+        bool groupHasVisibleTag = false;
+        const auto buttons = groupWidget->findChildren<QPushButton*>();
+        for (QPushButton* btn : buttons) {
+            bool visible = kw.isEmpty() || btn->text().toLower().contains(kw);
+            btn->setVisible(visible);
+            if (visible) groupHasVisibleTag = true;
+        }
+
+        groupWidget->setVisible(groupHasVisibleTag);
+    }
+
+    // 重新调整高度
+    QTimer::singleShot(0, this, &TagManagerView::adjustFlowHeights);
 }
 
 void TagManagerView::refresh() {
@@ -290,14 +347,19 @@ void TagManagerView::refresh() {
     for (auto it = groups.begin(); it != groups.end(); ++it) {
         QWidget* groupWidget = new QWidget(m_contentWidget);
         auto* vLayout = new QVBoxLayout(groupWidget);
-        vLayout->setContentsMargins(0, 10, 0, 10);
+        // 按照用户建议：显式设为 0 以消除多余间距
+        vLayout->setContentsMargins(0, 0, 0, 0);
+        vLayout->setSpacing(0);
         
         QLabel* groupTitle = new QLabel(QString(it.key()), groupWidget);
-        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #555; border-bottom: 1px solid #333; padding-bottom: 5px;");
+        groupTitle->setFixedHeight(16);
+        groupTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #1abc9c; border-bottom: 1px solid #333; padding: 0; margin: 0;");
         vLayout->addWidget(groupTitle);
         
         QWidget* tagsContainer = new QWidget(groupWidget);
-        auto* flow = new FlowLayout(tagsContainer, 0, 10, 8);
+        tagsContainer->setObjectName("TagsFlowContainer");
+        // 按照用户提示：FlowLayout(margin=0, hSpacing=10, vSpacing=0)
+        auto* flow = new FlowLayout(tagsContainer, 0, 10, 0);
         
         auto tagsInGroup = it.value();
         for (auto tagIt = tagsInGroup.begin(); tagIt != tagsInGroup.end(); ++tagIt) {
@@ -344,7 +406,14 @@ void TagManagerView::refresh() {
         vLayout->addWidget(tagsContainer);
         if (contentLayout) contentLayout->addWidget(groupWidget);
     }
-    if (contentLayout) contentLayout->addStretch();
+    if (contentLayout) {
+        QWidget* spacer = new QWidget(m_contentWidget);
+        spacer->setObjectName("Spacer");
+        contentLayout->addWidget(spacer, 1);
+    }
+
+    // 数据刷新后立即同步一次高度
+    QTimer::singleShot(0, this, &TagManagerView::adjustFlowHeights);
 }
 
 } // namespace ArcMeta

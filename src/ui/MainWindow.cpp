@@ -874,6 +874,15 @@ void MainWindow::initToolbar() {
     // 2026-06-xx 物理红线：强制锁定 230 像素，禁止脑补拉伸
     m_searchEdit->setFixedSize(230, 32);
     m_searchEdit->addAction(UiHelper::getIcon("search", TextMuted), QLineEdit::LeadingPosition);
+
+    // 2026-07-xx 按照用户要求：添加统一风格的“清除”按钮 (×)
+    QAction* clearAction = m_searchEdit->addAction(UiHelper::getIcon("close", TextMuted), QLineEdit::TrailingPosition);
+    clearAction->setVisible(false); // 初始隐藏
+    connect(clearAction, &QAction::triggered, m_searchEdit, &QLineEdit::clear);
+    connect(m_searchEdit, &QLineEdit::textChanged, [clearAction](const QString& text) {
+        clearAction->setVisible(!text.isEmpty());
+    });
+
     m_searchEdit->setStyleSheet(QString(
         "QLineEdit { background: %1; border: 1px solid %2;"
         "  border-radius: 6px;"
@@ -995,8 +1004,20 @@ void MainWindow::setupSplitters() {
         if (m_categoryPanel) m_categoryPanel->selectCategory(-1); // 选中“全部数据”
         if (m_searchEdit) m_searchEdit->setText(tag);
         
-        QStringList paths = MetadataManager::instance().searchInCache(tag);
-        m_contentPanel->loadPaths(paths);
+        // 2026-07-xx 物理同步：标签管理视图中的搜索需要支持实时反馈
+        if (m_isTagManagerMode && m_tagManagerView) {
+            m_tagManagerView->search(tag);
+        } else {
+            QStringList paths = MetadataManager::instance().searchInCache(tag);
+            m_contentPanel->loadPaths(paths);
+        }
+    });
+
+    // 2026-07-xx 物理联动：主搜索框在标签管理模式下应执行标签筛选
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+        if (m_isTagManagerMode && m_tagManagerView) {
+            m_tagManagerView->search(text);
+        }
     });
 
     m_bodyLayout->addWidget(m_mainSplitter);

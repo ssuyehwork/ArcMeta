@@ -27,6 +27,14 @@ public:
      */
     void refresh();
 
+    /**
+     * @brief 搜索标签
+     */
+    void search(const QString& keyword);
+
+protected:
+    void resizeEvent(class QResizeEvent* event) override;
+
 signals:
     /**
      * @brief 请求搜索含此标签的项目
@@ -66,6 +74,7 @@ private:
     QList<TagGroup> m_tagGroups;
 
     QWidget* createSidebarItem(const QString& icon, const QString& name, const QString& countText, QLabel** outCountLabel = nullptr);
+    void adjustFlowHeights();
 };
 
 } // namespace ArcMeta
