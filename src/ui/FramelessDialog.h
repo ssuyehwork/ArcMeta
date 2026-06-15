@@ -59,12 +59,29 @@ public:
     explicit FramelessInputDialog(const QString& title, const QString& label, 
                                   const QString& initial = "", QWidget* parent = nullptr);
     QString text() const { return m_edit->text().trimmed(); }
+    void setEchoMode(QLineEdit::EchoMode mode);
 
 protected:
     void showEvent(QShowEvent* event) override;
 
 private:
     QLineEdit* m_edit;
+};
+
+/**
+ * @brief 无边框颜色选择对话框
+ */
+class ColorPicker;
+class FramelessColorPicker : public FramelessDialog {
+    Q_OBJECT
+public:
+    explicit FramelessColorPicker(const QString& title, QWidget* parent = nullptr);
+    void setCurrentColor(const QColor& color);
+    QColor selectedColor() const { return m_selectedColor; }
+
+private:
+    ColorPicker* m_picker;
+    QColor m_selectedColor;
 };
 
 /**
