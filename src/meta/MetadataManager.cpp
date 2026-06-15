@@ -347,6 +347,32 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
     debouncePersist(nPath);
 }
 
+void MetadataManager::renameTag(const QString& oldName, const QString& newName) {
+    if (oldName == newName) return;
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    for (auto& pair : m_cache) {
+        if (pair.second.tags.contains(oldName)) {
+            pair.second.tags.removeAll(oldName);
+            if (!newName.isEmpty() && !pair.second.tags.contains(newName)) {
+                pair.second.tags.append(newName);
+            }
+            debouncePersist(pair.first);
+        }
+    }
+    notifyFullUIRebuild();
+}
+
+void MetadataManager::removeTag(const QString& tagName) {
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    for (auto& pair : m_cache) {
+        if (pair.second.tags.contains(tagName)) {
+            pair.second.tags.removeAll(tagName);
+            debouncePersist(pair.first);
+        }
+    }
+    notifyFullUIRebuild();
+}
+
 void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);

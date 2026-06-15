@@ -126,6 +126,16 @@ public:
     void setInvalid(const std::wstring& path, bool invalid, bool notify = true);
     void setManaged(const std::wstring& path, bool managed, bool notify = true);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
+
+    /**
+     * @brief 全局重命名标签
+     */
+    void renameTag(const QString& oldName, const QString& newName);
+
+    /**
+     * @brief 全局删除标签
+     */
+    void removeTag(const QString& tagName);
     
     /**
      * @brief 原子化设置视觉元数据（颜色与色板），仅触发一次信号
