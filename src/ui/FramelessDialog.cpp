@@ -5,8 +5,11 @@
 #include <QKeyEvent>
 #include <QTimer>
 #include <QApplication>
+#ifdef Q_OS_WIN
+#include <windows.h>
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
+#endif
 
 namespace ArcMeta {
 
@@ -88,9 +91,15 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
     connect(m_pinBtn, &QPushButton::toggled, this, [this](bool checked) {
         m_pinBtn->setIcon(UiHelper::getIcon(checked ? "pin_vertical" : "pin_tilted", 
                                             checked ? QColor("#FF551C") : QColor("#CCCCCC"), 18));
-        // 设置/取消置顶
+        // 2026-06-xx 物理修复：废弃 Qt 标志位操作，改用 Win32 原生 API 以防止窗口重建消失 Bug
+#ifdef Q_OS_WIN
+        HWND hwnd = reinterpret_cast<HWND>(winId());
+        SetWindowPos(hwnd, checked ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+#else
         setWindowFlag(Qt::WindowStaysOnTopHint, checked);
         show();
+#endif
     });
 
     m_minBtn = createTitleBtn("minimize", "最小化", "#3E3E42");
