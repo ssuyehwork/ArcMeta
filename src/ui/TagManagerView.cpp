@@ -513,7 +513,7 @@ void TagManagerView::refresh() {
 
             // 右键菜单
             item->setContextMenuPolicy(Qt::CustomContextMenu);
-            connect(item, &QWidget::customContextMenuRequested, this, [this, gid, gname](const QPoint& /*pos*/) {
+            connect(item, &QWidget::customContextMenuRequested, this, [this, gid, gname](const QPoint& pos) {
                 QMenu menu(this);
                 UiHelper::applyMenuStyle(&menu);
                 menu.addAction(UiHelper::getIcon("edit", TextMain), "重命名组", [this, gid, gname]() {
