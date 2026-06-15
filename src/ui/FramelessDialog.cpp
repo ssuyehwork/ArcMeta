@@ -284,7 +284,9 @@ void FramelessInputDialog::showEvent(QShowEvent* event) {
 // ============================================================================
 // FramelessConfirmDialog 实现
 // ============================================================================
-FramelessConfirmDialog::FramelessConfirmDialog(const QString& title, const QString& message, QWidget* parent)
+FramelessConfirmDialog::FramelessConfirmDialog(const QString& title, const QString& message, 
+                                               ButtonType type, const QString& iconName, 
+                                               const QColor& iconColor, QWidget* parent)
     : FramelessDialog(title, parent)
 {
     resize(420, 180);
@@ -294,25 +296,38 @@ FramelessConfirmDialog::FramelessConfirmDialog(const QString& title, const QStri
     layout->setContentsMargins(25, 20, 25, 20);
     layout->setSpacing(15);
 
+    auto* msgLayout = new QHBoxLayout();
+    msgLayout->setSpacing(15);
+
+    if (!iconName.isEmpty()) {
+        auto* iconLbl = new QLabel();
+        iconLbl->setPixmap(UiHelper::getIcon(iconName, iconColor, 32).pixmap(32, 32));
+        msgLayout->addWidget(iconLbl, 0, Qt::AlignTop);
+    }
+
     auto* lbl = new QLabel(message);
     lbl->setStyleSheet("color: #DDDDDD; font-size: 14px;");
     lbl->setWordWrap(true);
-    lbl->setAlignment(Qt::AlignCenter);
-    layout->addWidget(lbl, 1);
+    lbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    msgLayout->addWidget(lbl, 1);
+    
+    layout->addLayout(msgLayout, 1);
 
     auto* btnLayout = new QHBoxLayout();
     btnLayout->setSpacing(12);
     btnLayout->addStretch();
     
-    auto* btnCancel = new QPushButton("取消");
-    btnCancel->setFixedSize(85, 30);
-    btnCancel->setCursor(Qt::PointingHandCursor);
-    btnCancel->setStyleSheet(
-        "QPushButton { background-color: transparent; color: #999; border: 1px solid #444; border-radius: 4px; } "
-        "QPushButton:hover { color: #EEE; background-color: #333; }"
-    );
-    connect(btnCancel, &QPushButton::clicked, this, &QDialog::reject);
-    btnLayout->addWidget(btnCancel);
+    if (type == OkCancel) {
+        auto* btnCancel = new QPushButton("取消");
+        btnCancel->setFixedSize(85, 30);
+        btnCancel->setCursor(Qt::PointingHandCursor);
+        btnCancel->setStyleSheet(
+            "QPushButton { background-color: transparent; color: #999; border: 1px solid #444; border-radius: 4px; } "
+            "QPushButton:hover { color: #EEE; background-color: #333; }"
+        );
+        connect(btnCancel, &QPushButton::clicked, this, &QDialog::reject);
+        btnLayout->addWidget(btnCancel);
+    }
 
     auto* btnOk = new QPushButton("确定");
     btnOk->setFixedSize(85, 30);
@@ -325,6 +340,29 @@ FramelessConfirmDialog::FramelessConfirmDialog(const QString& title, const QStri
     btnLayout->addWidget(btnOk);
 
     layout->addLayout(btnLayout);
+}
+
+// ============================================================================
+// FramelessMessageBox 实现
+// ============================================================================
+void FramelessMessageBox::information(QWidget* parent, const QString& title, const QString& text) {
+    FramelessConfirmDialog dlg(title, text, FramelessConfirmDialog::OkOnly, "info", QColor("#3498db"), parent);
+    dlg.exec();
+}
+
+void FramelessMessageBox::warning(QWidget* parent, const QString& title, const QString& text) {
+    FramelessConfirmDialog dlg(title, text, FramelessConfirmDialog::OkOnly, "warning", QColor("#f1c40f"), parent);
+    dlg.exec();
+}
+
+bool FramelessMessageBox::question(QWidget* parent, const QString& title, const QString& text) {
+    FramelessConfirmDialog dlg(title, text, FramelessConfirmDialog::OkCancel, "help", QColor("#3498db"), parent);
+    return dlg.exec() == QDialog::Accepted;
+}
+
+void FramelessMessageBox::critical(QWidget* parent, const QString& title, const QString& text) {
+    FramelessConfirmDialog dlg(title, text, FramelessConfirmDialog::OkOnly, "error", QColor("#e81123"), parent);
+    dlg.exec();
 }
 
 } // namespace ArcMeta

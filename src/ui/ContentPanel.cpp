@@ -47,7 +47,7 @@
 #include <QLineEdit> 
 #include <QTextBrowser> 
 #include <QInputDialog> 
-#include <QMessageBox>
+#include "FramelessDialog.h"
 #include <QRandomGenerator>
 #include <QAbstractItemView> 
 #include <QtConcurrent> 
@@ -1727,7 +1727,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             } else {
                 // 2026-07-xx 物理级同步：将逻辑收拢为“永久删除”（安全抹除）
                 QString msg = "确定要永久删除选中的项目吗？数据将被物理覆写并彻底抹除，此操作不可恢复。";
-                if (QMessageBox::question(this, "确认删除", msg) != QMessageBox::Yes) break;
+                if (!FramelessMessageBox::question(this, "确认删除", msg)) break;
 
                 BatchProgressDialog* progress = new BatchProgressDialog("正在执行永久删除（深层抹除）...", this);
                 progress->show();

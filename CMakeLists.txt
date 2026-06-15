@@ -95,6 +95,8 @@ set(SOURCES
     src/ui/FilterPanel.h
     src/ui/FramelessDialog.cpp
     src/ui/FramelessDialog.h
+    src/ui/FramelessFileDialog.cpp
+    src/ui/FramelessFileDialog.h
     src/ui/JustifiedView.cpp
     src/ui/JustifiedView.h
     src/ui/ThumbnailDelegate.cpp

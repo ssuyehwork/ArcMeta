@@ -10,7 +10,7 @@
 #include <QtConcurrent>
 #include <QMetaObject>
 #include <QCoreApplication>
-#include <QMessageBox>
+#include "FramelessDialog.h"
 #include <QMutex>
 #include <QFuture>
 #include <functional>
@@ -42,12 +42,8 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
 
         // 2026-07-xx 按照用户要求：弹出确认停止
         QString msg = "导入尚未完成。确定要停止当前导入任务吗？已处理的数据将保留。";
-        QMessageBox msgBox(QMessageBox::Question, "中断导入", msg, QMessageBox::NoButton, parent);
-        msgBox.addButton("确定停止", QMessageBox::AcceptRole);
-        msgBox.addButton("继续导入", QMessageBox::RejectRole);
-        
-        int ret = msgBox.exec();
-        if (ret == QMessageBox::RejectRole) {
+        // 使用 FramelessMessageBox::question 替代，映射按钮逻辑
+        if (!FramelessMessageBox::question(parent, "中断导入", msg)) {
             weakProgress->show(); // 恢复显示
             return;
         }

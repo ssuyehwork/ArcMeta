@@ -892,18 +892,8 @@ void MainWindow::initToolbar() {
     m_searchEdit->setFixedSize(230, 32);
     m_searchEdit->addAction(UiHelper::getIcon("search", TextMuted), QLineEdit::LeadingPosition);
     
-    // 2026-04-xx 按照用户要求：在搜索框右侧新增清除按钮
-    QAction* clearAction = m_searchEdit->addAction(UiHelper::getIcon("close", TextMuted), QLineEdit::TrailingPosition);
-    clearAction->setToolTip("清空搜索内容");
-    clearAction->setVisible(false);
-    connect(clearAction, &QAction::triggered, [this]() {
-        m_searchEdit->clear();
-        m_searchEdit->setFocus();
-    });
-
-    connect(m_searchEdit, &QLineEdit::textChanged, [clearAction](const QString& text) {
-        clearAction->setVisible(!text.isEmpty());
-    });
+    // 2026-xx-xx 工业级拨乱反正：废除手动 Action 模拟，回归原生清除按钮以确保项目视觉一致性
+    m_searchEdit->setClearButtonEnabled(true);
 
     m_searchEdit->setStyleSheet(QString(
         "QLineEdit { background: %1; border: 1px solid %2;"

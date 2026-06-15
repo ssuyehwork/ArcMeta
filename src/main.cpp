@@ -3,7 +3,7 @@
 #endif
 //2813583 main 禁止删除此行
 #include <QApplication>
-#include <QMessageBox>
+#include "FramelessDialog.h"
 #include <QDebug>
 #include <QFile>
 #include <QTextStream>
@@ -65,6 +65,7 @@ int main(int argc, char *argv[]) {
     HANDLE hMutex = CreateMutexA(NULL, TRUE, "ArcMeta_SingleInstance_Mutex");
     if (hMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
         if (hMutex) CloseHandle(hMutex);
+        // 单实例检测失败，由于此时 QApplication 尚未启动，直接退出
         return 0;
     }
 #else
