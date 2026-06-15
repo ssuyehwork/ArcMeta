@@ -521,7 +521,7 @@ void FilterPanel::rebuildGroups() {
             "  border: 1px solid #444444;"
             "  border-radius: 6px;" // 2026-07-xx 按照《Plan-21》：输入框统一使用 6px 圆角
             "  padding: 4px 8px;"
-            "  margin: 4px 8px;"
+            "  margin: 4px 5px;"
             "  font-size: 11px;"
             "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
@@ -544,7 +544,7 @@ void FilterPanel::rebuildGroups() {
         // 2026-06-xx 物理对齐：滑块及其容器增加 4px 左右边距（相对于 gl 的 0 边距），实现视觉平衡
         QWidget* hueContainer = new QWidget(g);
         QHBoxLayout* hueLayout = new QHBoxLayout(hueContainer);
-        hueLayout->setContentsMargins(4, 0, 4, 0);
+        hueLayout->setContentsMargins(5, 0, 5, 0);
         hueLayout->setSpacing(0);
         
         InlineHueSlider* hueSlider = new InlineHueSlider(hueContainer);
@@ -575,11 +575,11 @@ void FilterPanel::rebuildGroups() {
         // 2.2 标准色矩阵 (12色)
         // 2026-06-xx 物理对齐：设置左边距 8px 以对齐下方的复选框视觉线
         QLabel* lblStatic = new QLabel("标准色系", g);
-        lblStatic->setStyleSheet("color: #666; font-size: 10px; margin-top: 4px; margin-left: 8px;");
+        lblStatic->setStyleSheet("color: #666; font-size: 10px; margin-top: 4px; margin-left: 5px;");
         gl->addWidget(lblStatic);
 
         QWidget* staticGrid = new QWidget(g);
-        staticGrid->setContentsMargins(8, 0, 0, 0); 
+        staticGrid->setContentsMargins(5, 0, 5, 0); 
         // 2026-06-xx 物理微调：间距从 4px 缩减至 2px
         FlowLayout* staticFlow = new FlowLayout(staticGrid, 0, 2, 2);
         staticGrid->setLayout(staticFlow);
@@ -626,11 +626,11 @@ void FilterPanel::rebuildGroups() {
         // 2.3 最近筛选 (LRU)
         if (!m_recentColors.isEmpty()) {
             QLabel* lblRecent = new QLabel("最近筛选", g);
-            lblRecent->setStyleSheet("color: #666; font-size: 10px; margin-top: 8px; margin-left: 8px;");
+            lblRecent->setStyleSheet("color: #666; font-size: 10px; margin-top: 8px; margin-left: 5px;");
             gl->addWidget(lblRecent);
 
             QWidget* recentGrid = new QWidget(g);
-            recentGrid->setContentsMargins(8, 0, 0, 0);
+            recentGrid->setContentsMargins(5, 0, 5, 0);
             // 2026-06-xx 物理微调：间距从 4px 缩减至 2px
             FlowLayout* recentFlow = new FlowLayout(recentGrid, 0, 2, 2);
             recentGrid->setLayout(recentFlow);
@@ -693,7 +693,7 @@ void FilterPanel::rebuildGroups() {
         m_editTag->setText(m_filter.tagFilterText);
         m_editTag->setObjectName("FilterSearchEdit");
         m_editTag->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 5px; font-size: 11px; }"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editTag->installEventFilter(this);
@@ -749,7 +749,7 @@ void FilterPanel::rebuildGroups() {
         m_editType->setText(m_filter.typeFilterText);
         m_editType->setObjectName("FilterSearchEdit");
         m_editType->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 5px; font-size: 11px; }"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editType->installEventFilter(this);
@@ -816,7 +816,7 @@ void FilterPanel::rebuildGroups() {
         m_editCreateDate->setText(m_filter.createDateFilterText);
         m_editCreateDate->setObjectName("FilterSearchEdit");
         m_editCreateDate->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 5px; font-size: 11px; }"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editCreateDate->installEventFilter(this);
@@ -859,7 +859,7 @@ void FilterPanel::rebuildGroups() {
         m_editModifyDate->setText(m_filter.modifyDateFilterText);
         m_editModifyDate->setObjectName("FilterSearchEdit");
         m_editModifyDate->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 8px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 5px; font-size: 11px; }"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editModifyDate->installEventFilter(this);
@@ -905,7 +905,7 @@ void FilterPanel::rebuildGroups() {
             ClickableRow* row = new ClickableRow(cb);
             row->setFixedHeight(24);
             QHBoxLayout* rl = new QHBoxLayout(row);
-            rl->setContentsMargins(4, 0, 4, 0);
+            rl->setContentsMargins(5, 0, 5, 0);
             rl->setSpacing(5);
             rl->addWidget(cb);
             QLabel* lbl = new QLabel(label, row);
@@ -949,7 +949,7 @@ void FilterPanel::rebuildGroups() {
             ClickableRow* row = new ClickableRow(cb);
             row->setFixedHeight(24);
             QHBoxLayout* rl = new QHBoxLayout(row);
-            rl->setContentsMargins(4, 0, 4, 0);
+            rl->setContentsMargins(5, 0, 5, 0);
             rl->setSpacing(5);
             rl->addWidget(cb);
             QLabel* lbl = new QLabel(label, row);
@@ -984,7 +984,7 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("文件大小", gl);
 
         QHBoxLayout* hs = new QHBoxLayout();
-        hs->setContentsMargins(8, 4, 8, 8);
+        hs->setContentsMargins(5, 4, 5, 8);
         hs->setSpacing(8); // 增加间距
         
         QLineEdit* minEdit = new QLineEdit(g);
@@ -1065,7 +1065,7 @@ void FilterPanel::rebuildGroups() {
             ClickableRow* row = new ClickableRow(cb);
             row->setFixedHeight(24);
             QHBoxLayout* rl = new QHBoxLayout(row);
-            rl->setContentsMargins(4, 0, 4, 0);
+            rl->setContentsMargins(5, 0, 5, 0);
             rl->setSpacing(5);
             rl->addWidget(cb);
             QLabel* lbl = new QLabel(pair.second, row);
@@ -1147,8 +1147,8 @@ QWidget* FilterPanel::buildGroup(const QString& title, QVBoxLayout*& outContentL
         "  font-size: 11px;"
         "  font-weight: 600;"
         "  text-align: left;"
-        "  padding-left: 8px;"
-        "  padding-right: 4px;"
+        "  padding-left: 5px;"
+        "  padding-right: 5px;"
         "  padding-top: 0px;"
         "  padding-bottom: 0px;"
         "  margin: 0px;"
@@ -1183,7 +1183,7 @@ QCheckBox* FilterPanel::addFilterRow(QVBoxLayout* layout, const QString& label, 
     row->setFixedHeight(24);
 
     QHBoxLayout* rl = new QHBoxLayout(row);
-    rl->setContentsMargins(4, 0, 4, 0);
+    rl->setContentsMargins(5, 0, 5, 0);
     rl->setSpacing(5);
     rl->addWidget(cb);
 
