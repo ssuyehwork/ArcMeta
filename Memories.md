@@ -38,3 +38,8 @@
 - 所有标题栏按钮必须开启 `Qt::WA_Hover` 属性以触发悬停事件。
 - 必须安装 `m_hoverFilter` 事件过滤器以支持全局 ToolTip 悬浮提醒。
 - 新建按钮 (+) 采用手动 `popup` 菜单模式，严禁使用 `setMenu` 以免破坏图标的绝对居中对齐。
+
+// ===================|===================
+
+# 6. 关于“清除”按钮
+## 6.1 每个可编辑的输入框必须配置上“Qt 原生的 setClearButtonEnabled(true)”，而且只可采用“Qt 原生的 setClearButtonEnabled(true)”，杜绝脑补另创 
