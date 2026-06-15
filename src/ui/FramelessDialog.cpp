@@ -147,6 +147,13 @@ FramelessDialog::FramelessDialog(const QString& title, QWidget* parent)
     m_mainLayout->addWidget(m_contentArea, 1);
 }
 
+void FramelessDialog::setVisibleButtons(int flags) {
+    if (m_pinBtn) m_pinBtn->setVisible(flags & Pin);
+    if (m_minBtn) m_minBtn->setVisible(flags & Min);
+    if (m_maxBtn) m_maxBtn->setVisible(flags & Max);
+    if (m_closeBtn) m_closeBtn->setVisible(flags & Close);
+}
+
 void FramelessDialog::showEvent(QShowEvent* event) {
     QDialog::showEvent(event);
 }
@@ -219,6 +226,7 @@ FramelessInputDialog::FramelessInputDialog(const QString& title, const QString& 
                                            const QString& initial, QWidget* parent)
     : FramelessDialog(title, parent) 
 {
+    setVisibleButtons(Close);
     // 按照用户最新要求：高度减去 50 像素 (260 -> 210)
     resize(500, 210);
     setMinimumSize(400, 190);
@@ -294,6 +302,7 @@ void FramelessInputDialog::setEchoMode(QLineEdit::EchoMode mode) {
 FramelessColorPicker::FramelessColorPicker(const QString& title, QWidget* parent)
     : FramelessDialog(title, parent)
 {
+    setVisibleButtons(Close);
     resize(360, 480);
     setMinimumSize(320, 400);
 
@@ -346,6 +355,7 @@ FramelessConfirmDialog::FramelessConfirmDialog(const QString& title, const QStri
                                                const QColor& iconColor, QWidget* parent)
     : FramelessDialog(title, parent)
 {
+    setVisibleButtons(Close);
     resize(420, 180);
     setMinimumSize(380, 160);
 

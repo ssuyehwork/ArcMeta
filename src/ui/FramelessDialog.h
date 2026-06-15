@@ -22,10 +22,12 @@ namespace ArcMeta {
 class FramelessDialog : public QDialog {
     Q_OBJECT
 public:
+    enum DialogButton { Pin = 1, Min = 2, Max = 4, Close = 8, All = 15 };
     explicit FramelessDialog(const QString& title, QWidget* parent = nullptr);
     virtual ~FramelessDialog() = default;
 
     QWidget* getContentArea() const { return m_contentArea; }
+    void setVisibleButtons(int flags);
 
 protected:
     void showEvent(QShowEvent* event) override;

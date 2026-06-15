@@ -299,6 +299,9 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
         if (oldPath != newPath) {
             QString nativeNewPath = QDir::toNativeSeparators(newPath);
             if (ShellHelper::renameItem(oldPath, nativeNewPath)) {
+                // 2026-06-xx 物理同步：重命名后必须更新 MetadataManager
+                MetadataManager::instance().renameItem(oldPath.toStdWString(), nativeNewPath.toStdWString());
+
                 // 撤销支持
                 UndoManager::instance().pushCommand(std::make_unique<RenameCommand>(oldPath, nativeNewPath));
 
@@ -1418,9 +1421,20 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "扫描入库")->setData(ActionAddToCategory);
         }
 
-        if (isFolder) { 
+        // 2026-06-xx 逻辑解耦修复：解除批量重命名的类型硬编码锁定 (架构升级)。
+        // 核心规则：多选有效项目 (PathRole 不为空) 或 单选文件夹时，均解锁批量重命名入口。
+        int selectedCount = 0;
+        for (const auto& selIdx : view->selectionModel()->selectedIndexes()) {
+            if (selIdx.column() == 0 && !selIdx.data(PathRole).toString().isEmpty()) {
+                selectedCount++;
+            }
+        }
+
+        if (isFolder || selectedCount > 1) { 
             menu.addAction("批量重命名 (Ctrl+Shift+R)")->setData(ActionBatchRename); 
-        } else { 
+        }
+
+        if (!isFolder) { 
             QMenu* cryptoMenu = menu.addMenu("加密保护"); 
             UiHelper::applyMenuStyle(cryptoMenu); 
             cryptoMenu->addAction("执行加密保护")->setData(ActionEncrypt); 
@@ -2872,18 +2886,9 @@ void GridItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, 
     QString value = lineEdit->text(); 
     if(value.isEmpty() || value == index.data(Qt::DisplayRole).toString()) return; 
  
-    QString oldPath = index.data(PathRole).toString(); 
-    QFileInfo info(oldPath); 
-    QString newPath = info.absolutePath() + "/" + value; 
-     
-    if (QFile::rename(oldPath, newPath)) { 
-        // 2026-06-xx 物理同步：重命名后直接更新 MetadataManager 并通知模型刷新
-        MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString()); 
-        
-        // 针对虚拟模型，我们由于 records 是只读的缓存，通常需要重新加载目录
-        // 但为了即时反馈，可以尝试通过 setData 触发局部刷新
-        model->setData(index, value, Qt::EditRole);
-
+    // 2026-06-xx 架构解耦修复：物理重命名职责已彻底移至 Model 层的 setData。
+    // Delegate 仅负责触发数据变更。这消除了“重复重命名”导致的静默失败 Bug。
+    if (model->setData(index, value, Qt::EditRole)) {
         // 2026-xx-xx 按照用户要求：重命名后触发 selectionChanged 信号，以驱动元数据面板刷新
         // 由于 setModelData 没有 option 参数，通过 parent 获取 View
         QAbstractItemView* view = qobject_cast<QAbstractItemView*>(editor->parentWidget()->parentWidget());
@@ -2899,7 +2904,7 @@ void GridItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, 
                 p = p->parentWidget();
             }
         }
-    }  
+    }
 } 
 
  

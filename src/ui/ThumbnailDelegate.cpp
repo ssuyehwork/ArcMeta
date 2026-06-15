@@ -354,15 +354,9 @@ void ThumbnailDelegate::setModelData(QWidget* editor, QAbstractItemModel* model,
     QString value = lineEdit->text();
     if (value.isEmpty() || value == index.data(Qt::DisplayRole).toString()) return;
 
-    QString oldPath = index.data(m_pathRole).toString();
-    QFileInfo info(oldPath);
-    QString newPath = info.absolutePath() + "/" + value;
-
-    if (QFile::rename(oldPath, newPath)) {
-        // 物理同步：更新元数据管理器
-        MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
-        model->setData(index, value, Qt::EditRole);
-
+    // 2026-06-xx 架构解耦修复：物理重命名职责已彻底移至 Model 层的 setData。
+    // Delegate 仅负责触发数据变更。这消除了“重复重命名”导致的静默失败 Bug。
+    if (model->setData(index, value, Qt::EditRole)) {
         // 2026-xx-xx 按照用户要求：触发刷新信号，驱动元数据面板同步
         // 物理修复：编辑器挂在 viewport 上，需多跳一级 parent
         QAbstractItemView* view = qobject_cast<QAbstractItemView*>(editor->parentWidget()->parentWidget());
