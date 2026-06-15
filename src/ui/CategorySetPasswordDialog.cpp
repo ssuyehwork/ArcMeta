@@ -13,6 +13,7 @@ namespace ArcMeta {
 
 CategorySetPasswordDialog::CategorySetPasswordDialog(QWidget* parent)
     : FramelessDialog("设置密码", parent) {
+    setVisibleButtons(Close);
     
     setFixedSize(320, 420); // 根据截图 PixPin_2026-04-03_11-39-19.png 调整比例
 

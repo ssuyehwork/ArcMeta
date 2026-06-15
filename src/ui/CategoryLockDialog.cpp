@@ -9,6 +9,7 @@ namespace ArcMeta {
 CategoryLockDialog::CategoryLockDialog(const QString& hint, QWidget* parent) 
     : FramelessDialog("分类解锁", parent) 
 {
+    setVisibleButtons(Close);
     setFixedSize(300, 240); // 紧凑尺寸
 
     auto* layout = new QVBoxLayout(m_contentArea);

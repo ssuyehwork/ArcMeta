@@ -17,6 +17,7 @@ class BatchProgressDialog : public FramelessDialog {
 public:
     explicit BatchProgressDialog(const QString& title, QWidget* parent = nullptr)
         : FramelessDialog(title, parent) {
+        setVisibleButtons(Close);
         setFixedSize(400, 150);
         
         auto* layout = new QVBoxLayout(m_contentArea);
