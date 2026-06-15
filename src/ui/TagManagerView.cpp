@@ -336,6 +336,7 @@ void TagManagerView::refresh() {
         vLayout->addWidget(groupTitle);
         
         QWidget* tagsContainer = new QWidget(groupWidget);
+        tagsContainer->setObjectName("TagsFlowContainer");
         // margin=0, hSpacing=10, vSpacing=0
         auto* flow = new FlowLayout(tagsContainer, 0, 10, 0);
         
