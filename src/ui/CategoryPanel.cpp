@@ -31,7 +31,6 @@ using namespace ArcMeta::Style;
 #include <QRandomGenerator>
 #include <QSet>
 #include <QDirIterator>
-#include <QColorDialog>
 #include "../core/AppConfig.h"
 
 
@@ -392,14 +391,25 @@ void CategoryPanel::onSetColor() {
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
-    // 2026-03-xx 按照用户要求：使用 QColorDialog 弹出颜色选择
-    QColor color = QColorDialog::getColor(Qt::white, this, "选择分类颜色");
-    if (!color.isValid()) return;
+    QColor originalColor = Qt::white;
+    auto all_cats = CategoryRepo::getAll();
+    for(const auto& c : all_cats) {
+        if(c.id == id) {
+            originalColor = QColor(QString::fromStdWString(c.color));
+            break;
+        }
+    }
+
+    FramelessColorPicker dlg("选择分类颜色", this);
+    dlg.setCurrentColor(originalColor);
+    if (dlg.exec() != QDialog::Accepted) return;
+    
+    QColor color = dlg.selectedColor();
 
     auto all = CategoryRepo::getAll();
     for(auto& cat : all) {
         if(cat.id == id) {
-            cat.color = color.name().toStdWString();
+            cat.color = color.name().toUpper().toStdWString();
             CategoryRepo::update(cat);
             break;
         }

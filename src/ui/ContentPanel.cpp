@@ -46,7 +46,6 @@
 #include <QMimeData> 
 #include <QLineEdit> 
 #include <QTextBrowser> 
-#include <QInputDialog> 
 #include "FramelessDialog.h"
 #include <QRandomGenerator>
 #include <QAbstractItemView> 
@@ -1642,9 +1641,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             break;
         }
         case ActionEncrypt: { 
-            bool ok; 
-            QString pwd = QInputDialog::getText(this, "加密保护", "设置加密密码:", QLineEdit::Password, "", &ok); 
-            if (ok && !pwd.isEmpty()) { 
+            FramelessInputDialog dlg("加密保护", "设置加密密码:", "", this);
+            dlg.setEchoMode(QLineEdit::Password);
+            if (dlg.exec() == QDialog::Accepted) { 
+                QString pwd = dlg.text();
+                if (pwd.isEmpty()) break;
                 auto indexes = view->selectionModel()->selectedIndexes(); 
                 QStringList targets; 
                 for (const auto& idx : indexes) if (idx.column() == 0) targets << idx.data(PathRole).toString(); 
@@ -1672,10 +1673,13 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             break; 
         } 
         case ActionDecrypt: { 
-            bool ok; 
-            QString pwd = QInputDialog::getText(this, "解除加密", "输入加密密码:", QLineEdit::Password, "", &ok); 
-            if (ok && !pwd.isEmpty()) { 
-                ToolTipOverlay::instance()->showText(QCursor::pos(), "解除加密逻辑已触发", 1500); 
+            FramelessInputDialog dlg("解除加密", "输入加密密码:", "", this);
+            dlg.setEchoMode(QLineEdit::Password);
+            if (dlg.exec() == QDialog::Accepted) { 
+                QString pwd = dlg.text();
+                if (!pwd.isEmpty()) { 
+                    ToolTipOverlay::instance()->showText(QCursor::pos(), "解除加密逻辑已触发", 1500); 
+                }
             } 
             break; 
         } 
