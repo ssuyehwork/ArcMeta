@@ -1421,9 +1421,14 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "扫描入库")->setData(ActionAddToCategory);
         }
 
-        if (isFolder) { 
+        // 2026-06-xx 逻辑解耦修复：解除批量重命名的类型硬编码锁定。
+        // 当多选时，或者选中的是文件夹时，均显示批量重命名。
+        int selectedCount = view->selectionModel()->selectedRows().size();
+        if (isFolder || selectedCount > 1) {
             menu.addAction("批量重命名 (Ctrl+Shift+R)")->setData(ActionBatchRename); 
-        } else { 
+        }
+
+        if (!isFolder) {
             QMenu* cryptoMenu = menu.addMenu("加密保护"); 
             UiHelper::applyMenuStyle(cryptoMenu); 
             cryptoMenu->addAction("执行加密保护")->setData(ActionEncrypt); 
