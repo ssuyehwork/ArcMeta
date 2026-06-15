@@ -13,7 +13,7 @@
 #include <QMenu>
 #include <QDebug>
 #include <QInputDialog>
-#include <QMessageBox>
+#include "FramelessDialog.h"
 
 using namespace ArcMeta::Style;
 
@@ -390,7 +390,7 @@ void TagManagerView::createNewGroup() {
                 if (sqlite3_step(stmt) == SQLITE_DONE) {
                     refresh();
                 } else {
-                    QMessageBox::warning(this, "错误", "创建标签组失败");
+                    FramelessMessageBox::warning(this, "错误", "创建标签组失败");
                 }
                 sqlite3_finalize(stmt);
             }
@@ -522,7 +522,7 @@ void TagManagerView::refresh() {
                     if (ok && !newName.trimmed().isEmpty()) renameGroup(gid, newName.trimmed());
                 });
                 menu.addAction(UiHelper::getIcon("trash", ErrorRed), "删除组", [this, gid]() {
-                    if (QMessageBox::question(this, "删除", "确定要删除该标签组吗？（不会删除标签本身）") == QMessageBox::Yes) {
+                    if (FramelessMessageBox::question(this, "删除", "确定要删除该标签组吗？（不会删除标签本身）")) {
                         deleteGroup(gid);
                     }
                 });
@@ -624,8 +624,7 @@ void TagManagerView::refresh() {
                 });
 
                 menu.addAction(UiHelper::getIcon("trash", ErrorRed), "删除标签", [this, tagName]() {
-                    auto res = QMessageBox::question(this, "删除标签", QString("确定要全局删除标签 \"%1\" 吗？此操作不可撤销。").arg(tagName));
-                    if (res == QMessageBox::Yes) {
+                    if (FramelessMessageBox::question(this, "删除标签", QString("确定要全局删除标签 \"%1\" 吗？此操作不可撤销。").arg(tagName))) {
                         MetadataManager::instance().removeTag(tagName);
                         refresh();
                     }

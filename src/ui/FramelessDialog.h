@@ -72,7 +72,21 @@ private:
 class FramelessConfirmDialog : public FramelessDialog {
     Q_OBJECT
 public:
-    explicit FramelessConfirmDialog(const QString& title, const QString& message, QWidget* parent = nullptr);
+    enum ButtonType { OkOnly, OkCancel };
+    explicit FramelessConfirmDialog(const QString& title, const QString& message,
+                                   ButtonType type = OkCancel, const QString& iconName = "",
+                                   const QColor& iconColor = Qt::white, QWidget* parent = nullptr);
+};
+
+/**
+ * @brief 静态工具类，提供类似 QMessageBox 的便捷调用
+ */
+class FramelessMessageBox {
+public:
+    static void information(QWidget* parent, const QString& title, const QString& text);
+    static void warning(QWidget* parent, const QString& title, const QString& text);
+    static bool question(QWidget* parent, const QString& title, const QString& text);
+    static void critical(QWidget* parent, const QString& title, const QString& text);
 };
 
 } // namespace ArcMeta
