@@ -227,18 +227,11 @@ void TagManagerView::adjustFlowHeights() {
         QWidget* groupWidget = contentLayout->itemAt(i)->widget();
         if (!groupWidget || groupWidget->objectName() == "Spacer") continue;
 
-        // 查找其中的 tagsContainer 和 flowLayout
-        QWidget* tagsContainer = nullptr;
-        const auto children = groupWidget->findChildren<QWidget*>();
-        for (QWidget* child : children) {
-            if (child->layout() && qobject_cast<FlowLayout*>(child->layout())) {
-                tagsContainer = child;
-                break;
-            }
-        }
+        // 查找其中的 tagsContainer
+        QWidget* tagsContainer = groupWidget->findChild<QWidget*>("TagsFlowContainer");
 
-        if (tagsContainer) {
-            FlowLayout* flow = qobject_cast<FlowLayout*>(tagsContainer->layout());
+        if (tagsContainer && tagsContainer->layout()) {
+            FlowLayout* flow = static_cast<FlowLayout*>(tagsContainer->layout());
             int h = flow->heightForWidth(availableWidth);
             // 按照用户指令实施高度补正：16(标题) + h(流式内容高度) + 2(组间隔)
             // 之前从 +4 改为 +2
