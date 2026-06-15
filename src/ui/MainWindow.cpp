@@ -234,6 +234,11 @@ void MainWindow::initUi() {
             m_isTagManagerMode = true;
             
             if (m_addressBar) m_addressBar->setPath("标签管理");
+
+            // 2026-04-xx 补充：进入时立即应用当前搜索框内容（针对标签筛选）
+            if (m_searchEdit && !m_searchEdit->text().isEmpty()) {
+                m_tagManagerView->search(m_searchEdit->text().trimmed());
+            }
             return;
         } else if (m_isTagManagerMode) {
             // 恢复模式
@@ -438,6 +443,11 @@ void MainWindow::initUi() {
 
     // 回车搜索核心逻辑
     auto doSearch = [this](const QString& keyword) {
+        if (m_isTagManagerMode) {
+            m_tagManagerView->search(keyword);
+            return;
+        }
+
         if (keyword.isEmpty()) {
             m_contentPanel->loadDirectory(m_currentPath);
             m_searchHistoryPanel->hide();
@@ -460,6 +470,13 @@ void MainWindow::initUi() {
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_searchEdit, &QLineEdit::returnPressed, this, [this, doSearch]() {
         doSearch(m_searchEdit->text().trimmed());
+    });
+
+    // 2026-04-xx 按照用户要求：支持标签管理模式下的实时搜索
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+        if (m_isTagManagerMode) {
+            m_tagManagerView->search(text.trimmed());
+        }
     });
     
     m_searchEdit->installEventFilter(this); // 拦截 FocusIn 事件展示历史面板
@@ -874,10 +891,24 @@ void MainWindow::initToolbar() {
     // 2026-06-xx 物理红线：强制锁定 230 像素，禁止脑补拉伸
     m_searchEdit->setFixedSize(230, 32);
     m_searchEdit->addAction(UiHelper::getIcon("search", TextMuted), QLineEdit::LeadingPosition);
+
+    // 2026-04-xx 按照用户要求：在搜索框右侧新增清除按钮
+    QAction* clearAction = m_searchEdit->addAction(UiHelper::getIcon("close", TextMuted), QLineEdit::TrailingPosition);
+    clearAction->setToolTip("清空搜索内容");
+    clearAction->setVisible(false);
+    connect(clearAction, &QAction::triggered, [this]() {
+        m_searchEdit->clear();
+        m_searchEdit->setFocus();
+    });
+
+    connect(m_searchEdit, &QLineEdit::textChanged, [clearAction](const QString& text) {
+        clearAction->setVisible(!text.isEmpty());
+    });
+
     m_searchEdit->setStyleSheet(QString(
         "QLineEdit { background: %1; border: 1px solid %2;"
         "  border-radius: 6px;"
-        "  color: %3; padding-left: 5px; }"
+        "  color: %3; padding-left: 5px; padding-right: 5px; }"
         "QLineEdit:focus { border: 1px solid %4; }"
     ).arg(qssColor(BackgroundDeep)).arg(qssColor(BorderColor)).arg(qssColor(TextMain)).arg(qssColor(PrimaryBlue)));
 
