@@ -43,6 +43,12 @@ struct ItemRecord {
     bool isManaged = false; // 预存受控状态
     QString suffix;
     std::vector<std::pair<QColor, float>> palettes; // 烘焙物理色板，消除 filterAcceptsRow 锁争抢
+
+    /**
+     * @brief 统一条目构建中枢 (2026-07-xx 物理重构)
+     * 将业务逻辑从 UI 层剥离至数据层，确保线程安全且符合分层规范
+     */
+    static ItemRecord create(const QString& path);
 };
 
 /**
