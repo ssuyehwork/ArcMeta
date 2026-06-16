@@ -1,5 +1,7 @@
 #include "NavPanel.h"
 #include "UiHelper.h"
+#include "StyleLibrary.h"
+using namespace ArcMeta::Style;
 #include "TreeItemDelegate.h"
 #include "DropTreeView.h"
 #include "ContentPanel.h"
@@ -51,7 +53,7 @@ void NavPanel::deferredInit() {
 
     // 1. 新增：桌面入口 (使用 SVG 语义图标替代原生图标)
     QString desktopPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
-    QIcon desktopIcon = UiHelper::getIcon("home", QColor("#3498db"), 18);
+    QIcon desktopIcon = UiHelper::getIcon("home", PrimaryBlue, 18);
     QStandardItem* desktopItem = new QStandardItem(desktopIcon, "桌面");
     desktopItem->setData(desktopPath, Qt::UserRole + 1);
     // 增加虚拟子项以便显示展开箭头
@@ -60,7 +62,7 @@ void NavPanel::deferredInit() {
 
     // 2. 新增：此电脑入口 (使用 SVG 语义图标替代原生图标)
     // 2026-03-xx 物理加速：先展示文字项，图标通过延时加载或在主线程空闲时补全，防止磁盘休眠导致启动假死
-    QIcon computerIcon = UiHelper::getIcon("monitor", QColor("#3498db"), 18);
+    QIcon computerIcon = UiHelper::getIcon("monitor", PrimaryBlue, 18);
     QStandardItem* computerItem = new QStandardItem(computerIcon, "此电脑");
     computerItem->setData("computer://", Qt::UserRole + 1);
     m_model->appendRow(computerItem);
@@ -81,7 +83,7 @@ void NavPanel::deferredInit() {
         qDebug() << "[NavPanel] 开始异步填充磁盘图标 (SVG 版)...";
         for (int i = 0; i < drives.size(); ++i) {
             if (i + 2 < m_model->rowCount()) {
-                QIcon driveIcon = UiHelper::getIcon("hard_drive", QColor("#95a5a6"), 18);
+                QIcon driveIcon = UiHelper::getIcon("hard_drive", TextDim, 18);
                 m_model->item(i + 2)->setIcon(driveIcon);
             }
         }
@@ -98,7 +100,7 @@ void NavPanel::initUi() {
     // 2026-05-07 按照用户要求：修改焦点线颜色为蓝色
     m_focusLine = new QWidget(this);
     m_focusLine->setFixedHeight(1);
-    m_focusLine->setStyleSheet("background-color: #007ACC;");
+    m_focusLine->setStyleSheet(QString("background-color: %1;").arg(qssColor(PrimaryBlue)));
     m_focusLine->hide(); // 初始隐藏
     m_mainLayout->addWidget(m_focusLine);
 
@@ -118,18 +120,18 @@ void NavPanel::initUi() {
     headerLayout->setSpacing(5);                  // 2026-xx-xx 按照用户要求：间距统一为 5px
 
     QLabel* iconLabel = new QLabel(header);
-    iconLabel->setPixmap(UiHelper::getIcon("list_ul", QColor("#2ecc71"), 18).pixmap(18, 18));
+    iconLabel->setPixmap(UiHelper::getIcon("list_ul", SuccessGreen, 18).pixmap(18, 18));
     headerLayout->addWidget(iconLabel);
 
     QLabel* titleLabel = new QLabel("目录导航", header);
-    titleLabel->setStyleSheet("color: #2ecc71; font-size: 13px; font-weight: bold; background: transparent; border: none;");
+    titleLabel->setStyleSheet(QString("color: %1; font-size: 13px; font-weight: bold; background: transparent; border: none;").arg(qssColor(SuccessGreen)));
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
 
     // 2026-06-xx 按照用户要求：新增刷新按钮
     QPushButton* btnRefresh = new QPushButton(header);
     btnRefresh->setFixedSize(24, 24);
-    btnRefresh->setIcon(UiHelper::getIcon("sync", QColor("#95a5a6")));
+    btnRefresh->setIcon(UiHelper::getIcon("sync", TextDim));
     btnRefresh->setIconSize(QSize(16, 16));
     btnRefresh->setFlat(true);
     btnRefresh->setCursor(Qt::PointingHandCursor);
@@ -183,8 +185,8 @@ void NavPanel::initUi() {
 
     // 树形控件样式美化
     // 2026-03-xx 按照用户要求：同步左侧“数据分类”样式，为三角形图标添加 padding 以实现清秀感，杜绝粗大感
-    QString arrowRight = UiHelper::getSvgTempFilePath("arrow_right", QColor("#3498db"));
-    QString arrowDown  = UiHelper::getSvgTempFilePath("arrow_down",  QColor("#3498db"));
+    QString arrowRight = UiHelper::getSvgTempFilePath("arrow_right", PrimaryBlue);
+    QString arrowDown  = UiHelper::getSvgTempFilePath("arrow_down",  PrimaryBlue);
 
     m_treeView->setStyleSheet(QString(
         "QTreeView { background-color: transparent; border: none; font-size: 12px; outline: none; }"
