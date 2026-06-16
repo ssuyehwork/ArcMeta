@@ -1050,6 +1050,12 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
     // 增加尾部斜杠确保目录边界匹配，防止 C:\Temp 匹配到 C:\Temp2
     if (hasRoot && nRoot.back() != L'\\') nRoot += L'\\';
 
+    qDebug() << "[Search] ----------------------------------------";
+    qDebug() << "[Search] 关键词:" << keyword;
+    qDebug() << "[Search] 原始根路径:" << rootPath;
+    qDebug() << "[Search] 归一化根路径:" << QString::fromStdWString(nRoot);
+    qDebug() << "[Search] 是否锁定路径:" << (hasRoot ? "是" : "否");
+
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     for (std::unordered_map<std::wstring, RuntimeMeta>::const_iterator it = m_cache.begin(); it != m_cache.end(); ++it) {
         const std::wstring& path = it->first; const RuntimeMeta& meta = it->second;
@@ -1069,6 +1075,8 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
         if (!match) { for (int i = 0; i < meta.tags.size(); ++i) { if (meta.tags[i].contains(keyword, Qt::CaseInsensitive)) { match = true; break; } } }
         if (match) results << qPath;
     }
+    qDebug() << "[Search] 匹配结果数:" << results.size();
+    qDebug() << "[Search] ----------------------------------------";
     return results;
 }
 

@@ -1038,6 +1038,7 @@ void MainWindow::setupSplitters() {
     connect(m_contentPanel, &ContentPanel::dataSourceChanged, this, [this](const QString& source) {
         // 2026-07-xx 按照方案计划：记录状态以供搜索和刷新逻辑分流
         m_lastDataSource = source;
+        qDebug() << "[Main] 活跃数据源变更 ->" << source;
 
         // 重置所有面板高亮
         if (m_navPanel)      m_navPanel->setFocusHighlight(false);
