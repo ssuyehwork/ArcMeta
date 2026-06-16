@@ -263,7 +263,11 @@ void MainWindow::initUi() {
 
         // 2026-04-12 关键修正：跳转分类时，物理重置搜索状态，防止逻辑锁死
         // 2026-07-xx 逻辑优化：移除冗余的 search("") 调用，防止双重加载导致的界面闪烁
-        if (m_searchEdit) m_searchEdit->clear();
+        if (m_searchEdit) {
+            m_searchEdit->blockSignals(true);
+            m_searchEdit->clear();
+            m_searchEdit->blockSignals(false);
+        }
 
         if (m_addressBar) m_addressBar->setPath("分类: " + name);
         
@@ -1264,7 +1268,9 @@ void MainWindow::navigateTo(const QString& path, bool record) {
     // 2026-04-12 关键协议：任何导航操作（手动输入、点击、后退、上级）都应强制重置搜索态与筛选态
     if (m_searchEdit && !m_searchEdit->text().isEmpty()) {
         qDebug() << "[Main] 检测到导航操作，物理清空搜索关键词残留:" << m_searchEdit->text();
+        m_searchEdit->blockSignals(true);
         m_searchEdit->clear();
+        m_searchEdit->blockSignals(false);
         m_contentPanel->search("");
     }
     

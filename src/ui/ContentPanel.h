@@ -350,8 +350,9 @@ public slots:
     void loadCategory(int categoryId);
 
     /**
-     * @brief 设置当前分类类型，用于驱动右键菜单差异化
+     * @brief 获取/设置当前分类类型，用于驱动右键菜单差异化
      */
+    QString getCurrentCategoryType() const { return m_currentCategoryType; }
     void setCurrentCategoryType(const QString& type) { m_currentCategoryType = type; }
 
 signals:

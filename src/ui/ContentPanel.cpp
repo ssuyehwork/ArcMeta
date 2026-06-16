@@ -724,6 +724,7 @@ ItemRecord ContentPanel::createItemRecord(const QString& path) {
     ItemRecord r;
     QString nPath = QDir::toNativeSeparators(path);
     std::wstring wPath = nPath.toStdWString();
+    QFileInfo info(nPath);
 
     // 1. 物理属性采样 (零 I/O 核心)
     std::string fid;
@@ -738,7 +739,7 @@ ItemRecord ContentPanel::createItemRecord(const QString& path) {
 
     // 2. 核心元数据注入 (确保 width/height/palettes 物理对齐)
     auto meta = MetadataManager::instance().getMeta(wPath);
-    r.isDir = meta.isFolder;
+    r.isDir = info.isDir(); // 物理属性优先，确保未索引目录显示正常
     r.rating = meta.rating;
     r.color = QString::fromStdWString(meta.color);
     r.tags = meta.tags;
@@ -2267,7 +2268,7 @@ void ContentPanel::loadCategory(int categoryId) {
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths) { 
-    // 2026-07-xx 物理防护：防重入机制
+    // 2026-07-xx 物理防护：防重入机制 (路径列表通常用于系统项，暂不进行深度内容比对)
     if (m_isLoading && m_currentCategoryType == "path_list") {
         return;
     }
