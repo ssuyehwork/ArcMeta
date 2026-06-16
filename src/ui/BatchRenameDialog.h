@@ -49,8 +49,8 @@ private:
     // 预设相关
     QComboBox* m_presetCombo = nullptr;
     QPushButton* m_btnQuickDelete = nullptr;
-    QPushButton* m_btnImport = nullptr;
-    QPushButton* m_btnExport = nullptr;
+    QPushButton* m_btnSavePreset = nullptr;   // 映射为“导出”
+    QPushButton* m_btnDeletePreset = nullptr; // 映射为“导入”
 
     QTimer* m_autoSaveTimer = nullptr;
 

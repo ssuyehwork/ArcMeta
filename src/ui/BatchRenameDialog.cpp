@@ -76,34 +76,41 @@ void BatchRenameDialog::initContent() {
     // 1. 预设区
     QGroupBox* presetGroup = new QGroupBox("预设", this);
     QHBoxLayout* presetL = new QHBoxLayout(presetGroup);
-    presetL->setSpacing(0); // 为 ComboBox 和 QuickDelete 之间预留紧凑间距
+    presetL->setContentsMargins(10, 5, 10, 5);
+    presetL->setSpacing(0); // 开启紧凑模式，由 addSpacing 精确控制
 
     m_presetCombo = new QComboBox(presetGroup);
     m_presetCombo->addItem("默认设置");
     m_presetCombo->setFixedHeight(25); 
     presetL->addWidget(m_presetCombo, 1);
 
+    presetL->addSpacing(2); // 2px 物理贴边
+
+    // 标记 ③：快速删除 "×" 按钮
     m_btnQuickDelete = new QPushButton("×", presetGroup);
     m_btnQuickDelete->setFixedSize(20, 20);
     m_btnQuickDelete->setCursor(Qt::PointingHandCursor);
     m_btnQuickDelete->setStyleSheet(
-        "QPushButton { background: transparent; color: #888; border: none; border-radius: 4px; font-size: 14px; font-weight: bold; margin-left: 2px; }"
+        "QPushButton { background: transparent; color: #888; border: none; border-radius: 4px; font-size: 14px; font-weight: bold; }"
         "QPushButton:hover { background: #e81123; color: white; }"
     );
     connect(m_btnQuickDelete, &QPushButton::clicked, this, &BatchRenameDialog::onDeleteCurrentPreset);
     presetL->addWidget(m_btnQuickDelete);
 
-    presetL->addSpacing(8); // 快速删除与导入按钮之间的标准间距
+    presetL->addSpacing(8); // 8px 间距
 
-    m_btnImport = new QPushButton("导入...", presetGroup);
-    m_btnExport = new QPushButton("导出...", presetGroup);
-    m_btnImport->setFixedHeight(25);
-    m_btnExport->setFixedHeight(25);
-    m_btnImport->setFixedWidth(80);
-    m_btnExport->setFixedWidth(80);
+    // 标记 ②：导入/导出按钮重构
+    // 映射关系修正：m_btnSavePreset(原存储) -> 导出，m_btnDeletePreset(原删除) -> 导入
+    m_btnDeletePreset = new QPushButton("导入...", presetGroup);
+    m_btnSavePreset = new QPushButton("导出...", presetGroup);
+    m_btnDeletePreset->setFixedHeight(25);
+    m_btnSavePreset->setFixedHeight(25);
+    m_btnDeletePreset->setFixedWidth(80);
+    m_btnSavePreset->setFixedWidth(80);
     
-    presetL->addWidget(m_btnImport);
-    presetL->addWidget(m_btnExport);
+    presetL->addWidget(m_btnDeletePreset);
+    presetL->addSpacing(4); // 4px 间距
+    presetL->addWidget(m_btnSavePreset);
     configL->addWidget(presetGroup);
 
     // 2. 目标文件夹
@@ -200,8 +207,8 @@ void BatchRenameDialog::initContent() {
     connect(m_btnCancel, &QPushButton::clicked, this, &QDialog::reject);
     connect(m_btnExecute, &QPushButton::clicked, this, &BatchRenameDialog::onExecute);
     connect(m_btnPreview, &QPushButton::clicked, this, &BatchRenameDialog::onPreview);
-    connect(m_btnImport, &QPushButton::clicked, this, &BatchRenameDialog::onImportPreset);
-    connect(m_btnExport, &QPushButton::clicked, this, &BatchRenameDialog::onExportPreset);
+    connect(m_btnDeletePreset, &QPushButton::clicked, this, &BatchRenameDialog::onImportPreset);
+    connect(m_btnSavePreset, &QPushButton::clicked, this, &BatchRenameDialog::onExportPreset);
 }
 
 void BatchRenameDialog::applyTheme() {
