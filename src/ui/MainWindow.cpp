@@ -262,8 +262,8 @@ void MainWindow::initUi() {
         }
 
         // 2026-04-12 关键修正：跳转分类时，物理重置搜索状态，防止逻辑锁死
+        // 2026-07-xx 逻辑优化：移除冗余的 search("") 调用，防止双重加载导致的界面闪烁
         if (m_searchEdit) m_searchEdit->clear();
-        m_contentPanel->search("");
 
         if (m_addressBar) m_addressBar->setPath("分类: " + name);
         
@@ -285,7 +285,9 @@ void MainWindow::initUi() {
             m_contentPanel->loadPaths(paths);
         } else {
             // 其余系统项 (标签管理等) 维持搜索逻辑
-            m_contentPanel->search(name); 
+            if (!name.isEmpty()) {
+                m_contentPanel->search(name); 
+            }
         }
     });
 
