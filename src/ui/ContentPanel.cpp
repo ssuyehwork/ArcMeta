@@ -2234,6 +2234,14 @@ void ContentPanel::previewFile(const QString& path) {
 } 
  
 void ContentPanel::loadCategory(int categoryId) { 
+    // 【物理护栏】防止相同分类被重复加载导致闪烁
+    // 原因：MainWindow 里 categorySelected 和 categoryClicked 两个信号
+    // 在某些路径下会同时触发 loadCategory，两次 beginResetModel 交替造成 View 闪烁
+    if (m_isLoading && m_currentCategoryId == categoryId
+        && m_currentCategoryType == "user_category") {
+        return;
+    }
+
     m_isLoading = true;
     m_currentCategoryType = "user_category";
     m_currentCategoryId = categoryId;
