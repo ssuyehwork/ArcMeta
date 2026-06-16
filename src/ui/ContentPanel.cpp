@@ -183,17 +183,25 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == IsEmptyRole) {
         return record.isDir && record.isEmpty;
     } else if (role == AspectRatioRole) {
+        // 2026-07-xx 性能优化：优先使用 ItemRecord 中已注入的尺寸信息，实现渲染零延迟
+        if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
         return m_aspectRatios.value(path, 1.0);
     } else if (role == HasThumbnailRole) {
+        // 2026-07-xx 逻辑修复：只要有预存尺寸或缓存比例，即判定为拥有缩略图
+        if (record.width > 0 && record.height > 0) return true;
         return m_aspectRatios.contains(path);
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        QIcon* cached = m_iconCache.object(path);
+        // 2026-07-xx 架构优化：使用 File ID 作为缓存 Key。
+        // 理由：这允许位于不同文件夹下的相同文件（FID 相同）共享同一个缩略图缓存，
+        // 彻底解决用户反馈的“同一文件在不同文件夹显示不一致”及重复加载问题。
+        QString cacheKey = record.fileId.empty() ? path : QString::fromStdString(record.fileId);
+        QIcon* cached = m_iconCache.object(cacheKey);
         if (cached) return *cached;
 
-        if (!m_requestedIcons.contains(path)) {
-            m_requestedIcons.insert(path);
+        if (!m_requestedIcons.contains(cacheKey)) {
+            m_requestedIcons.insert(cacheKey);
             QPointer<const FerrexVirtualDbModel> weakThis(this);
-            (void)QtConcurrent::run([weakThis, path]() {
+            (void)QtConcurrent::run([weakThis, path, cacheKey]() {
                 #ifdef Q_OS_WIN
                 CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
                 #endif
@@ -227,15 +235,17 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                     icon = UiHelper::getFileIcon(path, 128);
                 }
 
-                QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, icon, ar, hasThumb]() {
+                QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, cacheKey, icon, ar, hasThumb]() {
                     if (!weakThis) return;
                     auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
-                    mutableThis->m_iconCache.insert(path, new QIcon(icon));
+                    mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
                     if (hasThumb) mutableThis->m_aspectRatios[path] = ar;
                     
-                    // 局部刷新，提高性能
+                    // 局部刷新，提高性能 (扫描所有匹配该 Key 的路径)
                     for (int i = 0; i < mutableThis->m_displayCount; ++i) {
-                        if (i < (int)mutableThis->m_allRecords.size() && mutableThis->m_allRecords[i].path == path) {
+                        const auto& rec = mutableThis->m_allRecords[i];
+                        bool match = (rec.path == path) || (!rec.fileId.empty() && QString::fromStdString(rec.fileId) == cacheKey);
+                        if (match) {
                             emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
                             break;
                         }
