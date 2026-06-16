@@ -77,27 +77,23 @@ void BatchRenameDialog::initContent() {
     QGroupBox* presetGroup = new QGroupBox("预设", this);
     QHBoxLayout* presetL = new QHBoxLayout(presetGroup);
     presetL->setContentsMargins(10, 5, 10, 5);
-    presetL->setSpacing(0); // 开启紧凑模式，由 addSpacing 精确控制
+    presetL->setSpacing(5); // 2026-07-xx 按照用户要求：间距统一保持 5px
 
     m_presetCombo = new QComboBox(presetGroup);
     m_presetCombo->addItem("默认设置");
     m_presetCombo->setFixedHeight(25); 
     presetL->addWidget(m_presetCombo, 1);
 
-    presetL->addSpacing(2); // 2px 物理贴边
-
     // 标记 ③：快速删除 "×" 按钮
     m_btnQuickDelete = new QPushButton("×", presetGroup);
     m_btnQuickDelete->setFixedSize(20, 20);
     m_btnQuickDelete->setCursor(Qt::PointingHandCursor);
     m_btnQuickDelete->setStyleSheet(
-        "QPushButton { background: transparent; color: #888; border: none; border-radius: 4px; font-size: 14px; font-weight: bold; }"
-        "QPushButton:hover { background: #e81123; color: white; }"
+        "QPushButton { background: #3E3E42; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold; }" // 2026-07-xx 按照用户要求：持续显示灰色高亮
+        "QPushButton:hover { background: #4E4E52; }"
     );
     connect(m_btnQuickDelete, &QPushButton::clicked, this, &BatchRenameDialog::onDeleteCurrentPreset);
     presetL->addWidget(m_btnQuickDelete);
-
-    presetL->addSpacing(8); // 8px 间距
 
     // 标记 ②：导入/导出按钮重构
     // 映射关系修正：m_btnSavePreset(原存储) -> 导出，m_btnDeletePreset(原删除) -> 导入
@@ -109,7 +105,6 @@ void BatchRenameDialog::initContent() {
     m_btnSavePreset->setFixedWidth(80);
     
     presetL->addWidget(m_btnDeletePreset);
-    presetL->addSpacing(4); // 4px 间距
     presetL->addWidget(m_btnSavePreset);
     configL->addWidget(presetGroup);
 
@@ -212,7 +207,12 @@ void BatchRenameDialog::initContent() {
 }
 
 void BatchRenameDialog::applyTheme() {
-    setStyleSheet(
+    // 2026-07-xx 按照用户要求：升级下拉框 UI，圆角设计 + 实心三角形箭头
+    // 性能优化：使用静态变量快取路径
+    // 修正：改用紧凑型 dropdown_triangle 图标，并重算参数确保清晰可见
+    static const QString arrowPath = UiHelper::getSvgTempFilePath("dropdown_triangle", QColor("#AAAAAA"));
+
+    setStyleSheet(QString(
         "QDialog { background-color: #1E1E1E; color: #BBB; }"
         "QGroupBox { border: 1px solid #333; border-radius: 4px; margin-top: 10px; font-weight: bold; font-size: 11px; color: #888; }" // 还原全局 10px 边距
         "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; }"
@@ -220,9 +220,11 @@ void BatchRenameDialog::applyTheme() {
         "QRadioButton { color: #BBB; spacing: 5px; }"
         "QPushButton { background: #333; color: #EEE; border-radius: 4px; }"
         "QComboBox { background: #252526; border: 1px solid #444; border-radius: 4px; padding: 1px 4px; color: #EEE; }"
-        "QComboBox QAbstractItemView { background-color: #2D2D2D; border: 1px solid #444; selection-background-color: #378ADD; selection-color: white; color: #EEE; outline: 0; }"
+        "QComboBox::drop-down { border: none; width: 24px; }"
+        "QComboBox::down-arrow { image: url(%1); width: 12px; height: 12px; }"
+        "QComboBox QAbstractItemView { background-color: #2D2D2D; border: 1px solid #444; selection-background-color: #3E3E42; selection-color: white; color: #EEE; outline: 0; }"
         "QComboBox QAbstractItemView::item { height: 22px; padding: 2px; }" 
-    );
+    ).arg(arrowPath));
 }
 
 void BatchRenameDialog::onAddRow() {
