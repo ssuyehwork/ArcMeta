@@ -2113,8 +2113,11 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         scanDir(path, recursive); 
         if (!panelPtr) return; 
  
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems]() { 
-            if (panelPtr && panelPtr->m_currentPath == path) { 
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, recursive, allItems]() {
+            // 2026-07-xx 物理安全性：补全 recursive 校验，防止在切换递归模式时旧任务覆盖新任务
+            if (panelPtr && panelPtr->m_currentPath == path &&
+                panelPtr->m_currentCategoryType == "" &&
+                panelPtr->m_isRecursive == recursive) {
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
@@ -2128,8 +2131,47 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
  
  
+void ContentPanel::cancelSearch() {
+    if (!m_preSearchViewState.isValid) {
+        // 如果没有备份，默认回滚到主目录
+        loadDirectory(m_currentPath, m_isRecursive);
+        return;
+    }
+
+    m_isLoading = false; // 重置加载位以允许新加载
+    m_currentCategoryType = m_preSearchViewState.type;
+    m_currentCategoryId = m_preSearchViewState.categoryId;
+    m_currentPath = m_preSearchViewState.path;
+    m_isRecursive = m_preSearchViewState.recursive;
+    m_currentPaths = m_preSearchViewState.paths;
+
+    m_preSearchViewState.isValid = false; // 消耗掉备份
+
+    if (m_currentCategoryType == "user_category") {
+        loadCategory(m_currentCategoryId);
+    } else if (m_currentCategoryType == "path_list" || m_currentCategoryType == "all" ||
+               m_currentCategoryType == "uncategorized" || m_currentCategoryType == "untagged" ||
+               m_currentCategoryType == "recently_visited" || m_currentCategoryType == "trash") {
+        loadPaths(m_currentPaths);
+    } else {
+        loadDirectory(m_currentPath, m_isRecursive);
+    }
+}
+
 void ContentPanel::search(const QString& query) { 
+    // 2026-07-xx 按照物理方案：搜索前备份当前视图状态，用于后续“取消搜索”回滚
+    if (m_currentCategoryType != "search") {
+        m_preSearchViewState.type = m_currentCategoryType;
+        m_preSearchViewState.categoryId = m_currentCategoryId;
+        m_preSearchViewState.path = m_currentPath;
+        m_preSearchViewState.recursive = m_isRecursive;
+        m_preSearchViewState.paths = m_currentPaths;
+        m_preSearchViewState.isValid = true;
+    }
+
     m_currentCategoryType = "search";
+    m_currentSearchQuery = query; // 记录当前搜索词，用于回调校验
+
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -2150,8 +2192,9 @@ void ContentPanel::search(const QString& query) {
             }
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records]() {
-            if (weakThis) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, query, records]() {
+            // 2026-07-xx 物理安全性：双重校验类型与关键词，确保最终渲染的一定是用户最后一次搜索的结果
+            if (weakThis && weakThis->m_currentCategoryType == "search" && weakThis->m_currentSearchQuery == query) {
                 weakThis->m_model->setRecords(records);
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
@@ -2223,6 +2266,7 @@ void ContentPanel::loadCategory(int categoryId) {
         return;
     }
 
+    // 2026-07-xx 逻辑优化：如果正在进行异步任务，则先取消它们
     m_isLoading = true;
     m_currentCategoryType = "user_category";
     m_currentCategoryId = categoryId;
@@ -2266,8 +2310,8 @@ void ContentPanel::loadCategory(int categoryId) {
             }
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, allRecords]() {
-            if (weakThis) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, categoryId, allRecords]() {
+            if (weakThis && weakThis->m_currentCategoryId == categoryId && weakThis->m_currentCategoryType == "user_category") {
                 weakThis->m_model->setRecords(allRecords);
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
@@ -2284,7 +2328,16 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     }
 
     m_isLoading = true;
-    m_currentCategoryType = "path_list";
+    m_currentPaths = paths; // 2026-07-xx 物理同步：保存路径列表以便搜索回滚
+
+    // 2026-07-xx 逻辑优化：如果当前已设定了特定的系统分类类型，则保留它，否则降级为通用 path_list
+    if (m_currentCategoryType != "all" && m_currentCategoryType != "uncategorized" &&
+        m_currentCategoryType != "untagged" && m_currentCategoryType != "recently_visited" &&
+        m_currentCategoryType != "trash") {
+        m_currentCategoryType = "path_list";
+    }
+    QString typeAtStart = m_currentCategoryType;
+
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -2303,8 +2356,9 @@ void ContentPanel::loadPaths(const QStringList& paths) {
             }
         }
         
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records]() {
-            if (weakThis) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, typeAtStart, paths, records]() {
+            // 2026-07-xx 物理安全性：补全路径列表内容校验，防止相同类型的不同路径集异步竞态
+            if (weakThis && weakThis->m_currentCategoryType == typeAtStart && weakThis->m_currentPaths == paths) {
                 weakThis->m_model->setRecords(records);
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();

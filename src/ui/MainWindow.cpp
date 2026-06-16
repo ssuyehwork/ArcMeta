@@ -479,9 +479,8 @@ void MainWindow::initUi() {
         m_searchHistoryPanel->setHistory(m_searchHistory);
         m_searchHistoryPanel->hide();
 
-        // 使用 CoreController 的中枢搜索接口
-        QStringList paths = CoreController::instance().performSearch(keyword);
-        m_contentPanel->loadPaths(paths);
+        // 2026-07-xx 纠偏：直接调用 ContentPanel 的 search 接口，以维护正确的视图上下文状态
+        m_contentPanel->search(keyword);
     };
 
     // 2026-05-27 物理加固：补全 this 上下文
@@ -500,8 +499,8 @@ void MainWindow::initUi() {
         if (text.isEmpty() && m_contentPanel) {
             // 仅在当前处于搜索结果视图时才触发回滚，防止在普通导航时造成二次刷新
             if (m_contentPanel->getCurrentCategoryType() == "search") {
-                qDebug() << "[Main] 搜索框已清空，正在回滚至前序目录视图:" << m_currentPath;
-                navigateTo(m_currentPath);
+                qDebug() << "[Main] 搜索框已清空，触发搜索取消与视图回滚";
+                m_contentPanel->cancelSearch();
             }
         }
     });
@@ -1271,7 +1270,9 @@ void MainWindow::navigateTo(const QString& path, bool record) {
         m_searchEdit->blockSignals(true);
         m_searchEdit->clear();
         m_searchEdit->blockSignals(false);
-        m_contentPanel->search("");
+        // 2026-07-xx 纠偏：移除冗余的 search("") 调用。
+        // 因为后续的 loadDirectory 或 navigateTo 均会重新加载数据模型，
+        // 此处仅需重置 UI 状态即可，避免双重异步加载导致的界面闪烁。
     }
     
     if (m_filterPanel) {

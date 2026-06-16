@@ -276,8 +276,20 @@ private:
     QString m_currentPath;
     int m_currentCategoryId = -1;
     QString m_currentCategoryType; // 用于驱动差异化右键菜单
+    QString m_currentSearchQuery;   // 2026-07-xx 物理安全性：校验搜索回调一致性
     bool m_isRecursive = false;
     bool m_isLoading = false; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
+    QStringList m_currentPaths;    // 当前加载的路径列表 (用于 path_list 模式回滚)
+
+    // 2026-07-xx 搜索回滚状态备份
+    struct ViewState {
+        QString type;
+        int categoryId = -1;
+        QString path;
+        bool recursive = false;
+        QStringList paths;
+        bool isValid = false;
+    } m_preSearchViewState;
 
     // --- 2026-06-xx 性能优化：递归扫描指纹缓存 ---
     struct ScanCacheEntry {
@@ -322,6 +334,11 @@ public slots:
      * @brief 全局/本地搜索
      */
     void search(const QString& query);
+
+    /**
+     * @brief 取消搜索并回滚到之前的视图
+     */
+    void cancelSearch();
 
     /**
      * @brief 应用当前筛选器
