@@ -49,6 +49,7 @@ set(SOURCES
     src/core/CacheManager.cpp
     src/core/CacheManager.h
     src/core/IndexedEntry.h
+    src/core/IndexedEntry.cpp
     src/mft/UsnWatcher.cpp
     src/mft/UsnWatcher.h
     src/crypto/EncryptionManager.cpp

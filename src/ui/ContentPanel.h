@@ -90,6 +90,11 @@ public:
      */
     void updateRecordMetadata(const QString& path);
 
+    /**
+     * @brief 2026-07-xx 物理追加：增量添加记录（用于异步搜索结果推送）
+     */
+    void appendRecords(const std::vector<ItemRecord>& records);
+
 private:
     std::vector<ItemRecord> m_allRecords;
     std::unordered_map<QString, int, QStringHash> m_pathToIndex;
@@ -180,11 +185,6 @@ public:
     // 2026-04-12 关键修复：延迟初始化
     void deferredInit();
 
-    /**
-     * @brief 统一条目构建中枢
-     * 2026-07-xx 架构优化：收拢物理属性采样与元数据注入逻辑，确保渲染一致性
-     */
-    static ItemRecord createItemRecord(const QString& path);
 
     /**
      * @brief 切换视图模式
@@ -319,9 +319,19 @@ public slots:
     void updateItemMetadata(const QString& path);
 
     /**
+     * @brief 2026-07-xx 物理追加：增量添加记录（用于异步搜索结果推送）
+     */
+    void appendRecords(const std::vector<ItemRecord>& records);
+
+    /**
+     * @brief 获取当前活跃的搜索 ID (2026-07-xx 物理封装)
+     */
+    int activeSearchId() const { return m_activeSearchId; }
+
+    /**
      * @brief 全局/本地搜索
      */
-    void search(const QString& query);
+    void search(const QString& query, int searchId = 0);
 
     /**
      * @brief 应用当前筛选器

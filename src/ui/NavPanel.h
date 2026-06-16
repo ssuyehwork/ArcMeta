@@ -49,6 +49,12 @@ signals:
      */
     void directorySelected(const QString& path);
 
+    /**
+     * @brief 数据源变更信号，用于同步主窗口上下文状态
+     * @param source 来源标识 ("nav")
+     */
+    void dataSourceChanged(const QString& source);
+
 private:
     void initUi();
     void fetchChildDirs(QStandardItem* parent);

@@ -229,6 +229,9 @@ void NavPanel::selectPath(const QString& path) {
  * @brief 当用户点击目录时，发出信号告知外部组件（如内容面板）
  */
 void NavPanel::onTreeClicked(const QModelIndex& index) {
+    // 2026-07-xx 按照 Plan-53：明确切换上下文状态为物理导航
+    emit dataSourceChanged("nav");
+
     QString path = index.data(Qt::UserRole + 1).toString();
     if (!path.isEmpty() && path != "computer://") {
         emit directorySelected(path);
@@ -238,6 +241,9 @@ void NavPanel::onTreeClicked(const QModelIndex& index) {
 }
 
 void NavPanel::onItemExpanded(const QModelIndex& index) {
+    // 2026-07-xx 按照 Plan-53：展开时也视为激活物理导航上下文
+    emit dataSourceChanged("nav");
+
     QStandardItem* item = m_model->itemFromIndex(index);
     if (!item) return;
 
