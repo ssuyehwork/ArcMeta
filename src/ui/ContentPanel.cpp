@@ -2137,8 +2137,13 @@ void ContentPanel::search(const QString& query) {
     m_isLoading = true;
     m_model->clear();
     
+    // 2026-07-xx 物理修复：在搜索模式下，ContentPanel 自身也应发射 search 信号，确保上下文不被错误切换为 category
+    emit dataSourceChanged("search");
+
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, query]() {
+        // 由于 ContentPanel::search 通常由 MainWindow::doSearch 包装，
+        // MainWindow 会自行处理 performSearch，但此处仍需保留底层支持。
         QStringList paths = CoreController::instance().performSearch(query);
         
         std::vector<ItemRecord> records;
@@ -2277,7 +2282,7 @@ void ContentPanel::loadCategory(int categoryId) {
     });
 } 
  
-void ContentPanel::loadPaths(const QStringList& paths) { 
+void ContentPanel::loadPaths(const QStringList& paths, const QString& source) {
     // 2026-07-xx 物理防护：防重入机制 (路径列表通常用于系统项，暂不进行深度内容比对)
     if (m_isLoading && m_currentCategoryType == "path_list") {
         return;
@@ -2288,7 +2293,9 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
-    emit dataSourceChanged("category"); 
+
+    // 2026-07-xx 按照方案要求：透传数据来源，不再硬编码 category
+    emit dataSourceChanged(source);
      
     m_model->clear(); 
  

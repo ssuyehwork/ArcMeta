@@ -500,7 +500,9 @@ void MainWindow::initUi() {
 
         // 使用 CoreController 的中枢搜索接口
         QStringList paths = CoreController::instance().performSearch(keyword, rootPath);
-        m_contentPanel->loadPaths(paths);
+
+        // 2026-07-xx 物理修复：搜索结果加载时必须传入 "search" 数据源标识，防止触发蓝线跳变
+        m_contentPanel->loadPaths(paths, "search");
     };
 
     // 2026-05-27 物理加固：补全 this 上下文
@@ -1036,6 +1038,12 @@ void MainWindow::setupSplitters() {
 
     // 2026-05-07 按照用户要求：焦点线持久化显示，基于数据来源而非焦点位置
     connect(m_contentPanel, &ContentPanel::dataSourceChanged, this, [this](const QString& source) {
+        // 2026-07-xx 物理护栏：搜索结果加载时不切换上下文状态，保持“看哪搜哪”的上下文记忆
+        if (source == "search") {
+            qDebug() << "[Main] 收到搜索信号，保持当前上下文状态:" << m_lastDataSource;
+            return;
+        }
+
         // 2026-07-xx 按照方案计划：记录状态以供搜索和刷新逻辑分流
         m_lastDataSource = source;
         qDebug() << "[Main] 活跃数据源变更 ->" << source;
