@@ -489,6 +489,16 @@ void MainWindow::initUi() {
     connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
         if (m_isTagManagerMode) {
             m_tagManagerView->search(text.trimmed());
+            return;
+        }
+
+        // 2026-07-xx 按照方案计划：当点击清除按钮或手动清空时，执行视图回滚
+        if (text.isEmpty() && m_contentPanel) {
+            // 仅在当前处于搜索结果视图时才触发回滚，防止在普通导航时造成二次刷新
+            if (m_contentPanel->getCurrentCategoryType() == "search") {
+                qDebug() << "[Main] 搜索框已清空，正在回滚至前序目录视图:" << m_currentPath;
+                navigateTo(m_currentPath);
+            }
         }
     });
     

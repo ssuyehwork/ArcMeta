@@ -719,6 +719,49 @@ void ContentPanel::deferredInit() {
     // 2026-04-12 按照用户要求：补全延迟初始化逻辑，此处可处理模型预热或首屏数据对齐 
     qDebug() << "[ContentPanel] deferredInit 执行完毕"; 
 } 
+
+ItemRecord ContentPanel::createItemRecord(const QString& path) {
+    ItemRecord r;
+    QString nPath = QDir::toNativeSeparators(path);
+    std::wstring wPath = nPath.toStdWString();
+
+    // 1. 物理属性采样 (零 I/O 核心)
+    std::string fid;
+    long long size = 0, ctime = 0, mtime = 0, atime = 0;
+    MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
+
+    r.path = nPath;
+    r.size = size;
+    r.ctime = ctime;
+    r.mtime = mtime;
+    r.atime = atime;
+
+    // 2. 核心元数据注入 (确保 width/height/palettes 物理对齐)
+    auto meta = MetadataManager::instance().getMeta(wPath);
+    r.isDir = meta.isFolder;
+    r.rating = meta.rating;
+    r.color = QString::fromStdWString(meta.color);
+    r.tags = meta.tags;
+    r.fileId = meta.fileId128;
+    r.pinned = meta.pinned;
+    r.encrypted = meta.encrypted;
+    r.url = QString::fromStdWString(meta.url);
+    r.note = QString::fromStdWString(meta.note);
+    r.width = meta.width;
+    r.height = meta.height;
+    r.isManaged = meta.hasUserOperations();
+    for (const auto& pe : meta.palettes) {
+        r.palettes.push_back({pe.color, pe.ratio});
+    }
+
+    if (r.isDir) {
+        QDir sub(nPath);
+        r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
+    } else {
+        r.suffix = QFileInfo(nPath).suffix().toLower();
+    }
+    return r;
+}
  
 void ContentPanel::initUi() { 
     QWidget* titleBar = new QWidget(this); 
@@ -2047,47 +2090,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (!panelPtr) return; 
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
  
-                ItemRecord r;
                 QString absPath = info.absoluteFilePath();
-                std::wstring wPath = QDir::toNativeSeparators(absPath).toStdWString();
-                
-                // 1. 物理属性先行 (零 I/O 渲染核心)
-                std::string fid;
-                long long size = 0, ctime = 0, mtime = 0, atime = 0;
-                MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
-                
-                r.path = QDir::toNativeSeparators(absPath);
-                r.isDir = info.isDir();
-                r.size = size;
-                r.ctime = ctime;
-                r.mtime = mtime;
-                r.atime = atime;
-                r.suffix = info.suffix().toLower();
-                
-                // 2. 文件夹空检查 (优化：非递归)
-                if (r.isDir) {
-                    QDir sub(absPath);
-                    r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                }
-
-                // 3. 元数据注入
-                auto meta = MetadataManager::instance().getMeta(wPath);
-                r.rating = meta.rating;
-                r.color = QString::fromStdWString(meta.color);
-                r.tags = meta.tags;
-                r.fileId = meta.fileId128;
-                r.pinned = meta.pinned;
-                r.encrypted = meta.encrypted;
-                r.url = QString::fromStdWString(meta.url);
-                r.note = QString::fromStdWString(meta.note);
-                r.width = meta.width;
-                r.height = meta.height;
-                r.isManaged = meta.hasUserOperations();
-                for (const auto& pe : meta.palettes) {
-                    r.palettes.push_back({pe.color, pe.ratio});
-                }
-
-                allItems.push_back(r);
+                allItems.push_back(ContentPanel::createItemRecord(absPath));
  
                 if (rec && info.isDir()) { 
                     scanDir(absPath, true); 
@@ -2131,38 +2135,7 @@ void ContentPanel::search(const QString& query) {
         for (const QString& p : paths) {
             if (!weakThis) return;
             if (!p.isEmpty()) {
-                ItemRecord r;
-                std::wstring wPath = QDir::toNativeSeparators(p).toStdWString();
-                
-                std::string fid;
-                long long size = 0, ctime = 0, mtime = 0, atime = 0;
-                MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
-
-                r.path = QDir::toNativeSeparators(p);
-                r.size = size;
-                r.ctime = ctime;
-                r.mtime = mtime;
-                r.atime = atime;
-                
-                auto meta = MetadataManager::instance().getMeta(wPath);
-                r.isDir = meta.isFolder;
-                r.rating = meta.rating;
-                r.color = QString::fromStdWString(meta.color);
-                r.tags = meta.tags;
-                r.fileId = meta.fileId128;
-                r.isManaged = meta.hasUserOperations();
-                for (const auto& pe : meta.palettes) {
-                    r.palettes.push_back({pe.color, pe.ratio});
-                }
-                
-                if (r.isDir) {
-                    QDir sub(p);
-                    r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                } else {
-                    r.suffix = QFileInfo(p).suffix().toLower();
-                }
-
-                records.push_back(r);
+                records.push_back(ContentPanel::createItemRecord(p));
             }
         }
 
@@ -2278,44 +2251,7 @@ void ContentPanel::loadCategory(int categoryId) {
             }
 
             if (!wPath.empty()) {
-                ItemRecord r;
-                QString p = QString::fromStdWString(wPath);
-                
-                std::string fid;
-                long long size = 0, ctime = 0, mtime = 0, atime = 0;
-                MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
-
-                r.path = QDir::toNativeSeparators(p);
-                r.size = size;
-                r.ctime = ctime;
-                r.mtime = mtime;
-                r.atime = atime;
-
-                auto meta = MetadataManager::instance().getMeta(wPath);
-                r.isDir = meta.isFolder;
-                r.rating = meta.rating;
-                r.color = QString::fromStdWString(meta.color);
-                r.tags = meta.tags;
-                r.fileId = meta.fileId128;
-                r.pinned = meta.pinned;
-                r.encrypted = meta.encrypted;
-                r.url = QString::fromStdWString(meta.url);
-                r.note = QString::fromStdWString(meta.note);
-                r.width = meta.width;
-                r.height = meta.height;
-                r.isManaged = meta.hasUserOperations();
-                for (const auto& pe : meta.palettes) {
-                    r.palettes.push_back({pe.color, pe.ratio});
-                }
-
-                if (r.isDir) {
-                    QDir sub(p);
-                    r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                } else {
-                    r.suffix = QFileInfo(p).suffix().toLower();
-                }
-
-                allRecords.push_back(r);
+                allRecords.push_back(ContentPanel::createItemRecord(QString::fromStdWString(wPath)));
             }
         }
 
@@ -2352,44 +2288,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
         for (const QString& p : paths) {
             if (!weakThis) return;
             if (!p.isEmpty()) {
-                ItemRecord r;
-                std::wstring wPath = QDir::toNativeSeparators(p).toStdWString();
-                
-                std::string fid;
-                long long size = 0, ctime = 0, mtime = 0, atime = 0;
-                MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
-
-                r.path = QDir::toNativeSeparators(p);
-                r.size = size;
-                r.ctime = ctime;
-                r.mtime = mtime;
-                r.atime = atime;
-
-                auto meta = MetadataManager::instance().getMeta(wPath);
-                r.isDir = meta.isFolder;
-                r.rating = meta.rating;
-                r.color = QString::fromStdWString(meta.color);
-                r.tags = meta.tags;
-                r.fileId = meta.fileId128;
-                r.pinned = meta.pinned;
-                r.encrypted = meta.encrypted;
-                r.url = QString::fromStdWString(meta.url);
-                r.note = QString::fromStdWString(meta.note);
-                r.width = meta.width;
-                r.height = meta.height;
-                r.isManaged = meta.hasUserOperations();
-                for (const auto& pe : meta.palettes) {
-                    r.palettes.push_back({pe.color, pe.ratio});
-                }
-
-                if (r.isDir) {
-                    QDir sub(p);
-                    r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                } else {
-                    r.suffix = QFileInfo(p).suffix().toLower();
-                }
-
-                records.push_back(r);
+                records.push_back(ContentPanel::createItemRecord(p));
             }
         }
         
