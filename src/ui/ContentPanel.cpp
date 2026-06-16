@@ -748,6 +748,9 @@ ItemRecord ContentPanel::createItemRecord(const QString& path) {
     r.atime = atime;
 
     // 2. 核心元数据注入 (确保 width/height/palettes 物理对齐)
+    // 2026-07-xx 物理修复：在采样时强制激活缓存，确保物理导航模式下的文件“即看即搜”生效
+    MetadataManager::instance().ensureActivated(wPath);
+
     auto meta = MetadataManager::instance().getMeta(wPath);
     r.isDir = info.isDir(); // 物理属性优先，确保未索引目录显示正常
     r.rating = meta.rating;

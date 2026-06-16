@@ -1057,6 +1057,8 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
     qDebug() << "[Search] 是否锁定路径:" << (hasRoot ? "是" : "否");
 
     std::shared_lock<std::shared_mutex> lock(m_mutex);
+    qDebug() << "[Search] 当前内存缓存总条目数:" << m_cache.size();
+
     for (std::unordered_map<std::wstring, RuntimeMeta>::const_iterator it = m_cache.begin(); it != m_cache.end(); ++it) {
         const std::wstring& path = it->first; const RuntimeMeta& meta = it->second;
 
@@ -1070,8 +1072,14 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
             }
         }
 
-        QString qPath = QString::fromStdWString(path); QString qNote = QString::fromStdWString(meta.note);
-        bool match = qPath.contains(keyword, Qt::CaseInsensitive) || qNote.contains(keyword, Qt::CaseInsensitive);
+        QString qPath = QString::fromStdWString(path);
+        QString qFileName = QFileInfo(qPath).fileName(); // 2026-07-xx 物理修复：显式匹配文件名
+        QString qNote = QString::fromStdWString(meta.note);
+
+        bool match = qFileName.contains(keyword, Qt::CaseInsensitive) ||
+                     qPath.contains(keyword, Qt::CaseInsensitive) ||
+                     qNote.contains(keyword, Qt::CaseInsensitive);
+
         if (!match) { for (int i = 0; i < meta.tags.size(); ++i) { if (meta.tags[i].contains(keyword, Qt::CaseInsensitive)) { match = true; break; } } }
         if (match) results << qPath;
     }
