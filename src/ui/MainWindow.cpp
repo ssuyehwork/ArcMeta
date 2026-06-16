@@ -263,7 +263,11 @@ void MainWindow::initUi() {
 
         // 2026-04-12 关键修正：跳转分类时，物理重置搜索状态，防止逻辑锁死
         // 2026-07-xx 逻辑优化：移除冗余的 search("") 调用，防止双重加载导致的界面闪烁
-        if (m_searchEdit) m_searchEdit->clear();
+        if (m_searchEdit) {
+            m_searchEdit->blockSignals(true);
+            m_searchEdit->clear();
+            m_searchEdit->blockSignals(false);
+        }
 
         if (m_addressBar) m_addressBar->setPath("分类: " + name);
         
@@ -489,6 +493,16 @@ void MainWindow::initUi() {
     connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
         if (m_isTagManagerMode) {
             m_tagManagerView->search(text.trimmed());
+            return;
+        }
+
+        // 2026-07-xx 按照方案计划：当点击清除按钮或手动清空时，执行视图回滚
+        if (text.isEmpty() && m_contentPanel) {
+            // 仅在当前处于搜索结果视图时才触发回滚，防止在普通导航时造成二次刷新
+            if (m_contentPanel->getCurrentCategoryType() == "search") {
+                qDebug() << "[Main] 搜索框已清空，正在回滚至前序目录视图:" << m_currentPath;
+                navigateTo(m_currentPath);
+            }
         }
     });
     
@@ -1254,7 +1268,9 @@ void MainWindow::navigateTo(const QString& path, bool record) {
     // 2026-04-12 关键协议：任何导航操作（手动输入、点击、后退、上级）都应强制重置搜索态与筛选态
     if (m_searchEdit && !m_searchEdit->text().isEmpty()) {
         qDebug() << "[Main] 检测到导航操作，物理清空搜索关键词残留:" << m_searchEdit->text();
+        m_searchEdit->blockSignals(true);
         m_searchEdit->clear();
+        m_searchEdit->blockSignals(false);
         m_contentPanel->search("");
     }
     

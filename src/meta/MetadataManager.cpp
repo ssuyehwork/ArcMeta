@@ -331,6 +331,24 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
     std::wstring type;
     if (fetchWinApiMetadataDirect(nPath, rm.fileId128, &frn, &rm.fileSize, &type, &rm.ctime, &rm.mtime, &rm.atime)) {
         rm.isFolder = (type == L"folder");
+        
+        // 2026-07-xx 物理级同步优化：共享元数据。
+        // 理由：如果该文件的 FID 已经在缓存中存在（说明在其他文件夹有相同文件），
+        // 自动借用其已有的用户元数据（星级、标签、颜色、尺寸、色板等），
+        // 彻底解决用户反馈的“同一文件在不同位置显示不一致”的问题。
+        if (!rm.fileId128.empty() && m_fidToPath.count(rm.fileId128)) {
+            const RuntimeMeta& existing = m_cache[m_fidToPath[rm.fileId128]];
+            rm.rating    = existing.rating;
+            rm.color     = existing.color;
+            rm.tags      = existing.tags;
+            rm.note      = existing.note;
+            rm.url       = existing.url;
+            rm.width     = existing.width;
+            rm.height    = existing.height;
+            rm.palettes  = existing.palettes;
+            rm.isManaged = existing.isManaged;
+        }
+
         m_cache[nPath] = rm;
         if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = nPath;
     }

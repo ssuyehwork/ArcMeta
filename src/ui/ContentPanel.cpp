@@ -183,17 +183,25 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == IsEmptyRole) {
         return record.isDir && record.isEmpty;
     } else if (role == AspectRatioRole) {
+        // 2026-07-xx 性能优化：优先使用 ItemRecord 中已注入的尺寸信息，实现渲染零延迟
+        if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
         return m_aspectRatios.value(path, 1.0);
     } else if (role == HasThumbnailRole) {
+        // 2026-07-xx 逻辑修复：只要有预存尺寸或缓存比例，即判定为拥有缩略图
+        if (record.width > 0 && record.height > 0) return true;
         return m_aspectRatios.contains(path);
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        QIcon* cached = m_iconCache.object(path);
+        // 2026-07-xx 架构优化：使用 File ID 作为缓存 Key。
+        // 理由：这允许位于不同文件夹下的相同文件（FID 相同）共享同一个缩略图缓存，
+        // 彻底解决用户反馈的“同一文件在不同文件夹显示不一致”及重复加载问题。
+        QString cacheKey = record.fileId.empty() ? path : QString::fromStdString(record.fileId);
+        QIcon* cached = m_iconCache.object(cacheKey);
         if (cached) return *cached;
 
-        if (!m_requestedIcons.contains(path)) {
-            m_requestedIcons.insert(path);
+        if (!m_requestedIcons.contains(cacheKey)) {
+            m_requestedIcons.insert(cacheKey);
             QPointer<const FerrexVirtualDbModel> weakThis(this);
-            (void)QtConcurrent::run([weakThis, path]() {
+            (void)QtConcurrent::run([weakThis, path, cacheKey]() {
                 #ifdef Q_OS_WIN
                 CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
                 #endif
@@ -227,15 +235,17 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                     icon = UiHelper::getFileIcon(path, 128);
                 }
 
-                QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, icon, ar, hasThumb]() {
+                QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, cacheKey, icon, ar, hasThumb]() {
                     if (!weakThis) return;
                     auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
-                    mutableThis->m_iconCache.insert(path, new QIcon(icon));
+                    mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
                     if (hasThumb) mutableThis->m_aspectRatios[path] = ar;
                     
-                    // 局部刷新，提高性能
+                    // 局部刷新，提高性能 (扫描所有匹配该 Key 的路径)
                     for (int i = 0; i < mutableThis->m_displayCount; ++i) {
-                        if (i < (int)mutableThis->m_allRecords.size() && mutableThis->m_allRecords[i].path == path) {
+                        const auto& rec = mutableThis->m_allRecords[i];
+                        bool match = (rec.path == path) || (!rec.fileId.empty() && QString::fromStdString(rec.fileId) == cacheKey);
+                        if (match) {
                             emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
                             break;
                         }
@@ -719,6 +729,50 @@ void ContentPanel::deferredInit() {
     // 2026-04-12 按照用户要求：补全延迟初始化逻辑，此处可处理模型预热或首屏数据对齐 
     qDebug() << "[ContentPanel] deferredInit 执行完毕"; 
 } 
+
+ItemRecord ContentPanel::createItemRecord(const QString& path) {
+    ItemRecord r;
+    QString nPath = QDir::toNativeSeparators(path);
+    std::wstring wPath = nPath.toStdWString();
+    QFileInfo info(nPath);
+
+    // 1. 物理属性采样 (零 I/O 核心)
+    std::string fid;
+    long long size = 0, ctime = 0, mtime = 0, atime = 0;
+    MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
+
+    r.path = nPath;
+    r.size = size;
+    r.ctime = ctime;
+    r.mtime = mtime;
+    r.atime = atime;
+
+    // 2. 核心元数据注入 (确保 width/height/palettes 物理对齐)
+    auto meta = MetadataManager::instance().getMeta(wPath);
+    r.isDir = info.isDir(); // 物理属性优先，确保未索引目录显示正常
+    r.rating = meta.rating;
+    r.color = QString::fromStdWString(meta.color);
+    r.tags = meta.tags;
+    r.fileId = meta.fileId128;
+    r.pinned = meta.pinned;
+    r.encrypted = meta.encrypted;
+    r.url = QString::fromStdWString(meta.url);
+    r.note = QString::fromStdWString(meta.note);
+    r.width = meta.width;
+    r.height = meta.height;
+    r.isManaged = meta.hasUserOperations();
+    for (const auto& pe : meta.palettes) {
+        r.palettes.push_back({pe.color, pe.ratio});
+    }
+
+    if (r.isDir) {
+        QDir sub(nPath);
+        r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
+    } else {
+        r.suffix = QFileInfo(nPath).suffix().toLower();
+    }
+    return r;
+}
  
 void ContentPanel::initUi() { 
     QWidget* titleBar = new QWidget(this); 
@@ -2047,47 +2101,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (!panelPtr) return; 
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
  
-                ItemRecord r;
                 QString absPath = info.absoluteFilePath();
-                std::wstring wPath = QDir::toNativeSeparators(absPath).toStdWString();
-                
-                // 1. 物理属性先行 (零 I/O 渲染核心)
-                std::string fid;
-                long long size = 0, ctime = 0, mtime = 0, atime = 0;
-                MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
-                
-                r.path = QDir::toNativeSeparators(absPath);
-                r.isDir = info.isDir();
-                r.size = size;
-                r.ctime = ctime;
-                r.mtime = mtime;
-                r.atime = atime;
-                r.suffix = info.suffix().toLower();
-                
-                // 2. 文件夹空检查 (优化：非递归)
-                if (r.isDir) {
-                    QDir sub(absPath);
-                    r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                }
-
-                // 3. 元数据注入
-                auto meta = MetadataManager::instance().getMeta(wPath);
-                r.rating = meta.rating;
-                r.color = QString::fromStdWString(meta.color);
-                r.tags = meta.tags;
-                r.fileId = meta.fileId128;
-                r.pinned = meta.pinned;
-                r.encrypted = meta.encrypted;
-                r.url = QString::fromStdWString(meta.url);
-                r.note = QString::fromStdWString(meta.note);
-                r.width = meta.width;
-                r.height = meta.height;
-                r.isManaged = meta.hasUserOperations();
-                for (const auto& pe : meta.palettes) {
-                    r.palettes.push_back({pe.color, pe.ratio});
-                }
-
-                allItems.push_back(r);
+                allItems.push_back(ContentPanel::createItemRecord(absPath));
  
                 if (rec && info.isDir()) { 
                     scanDir(absPath, true); 
@@ -2131,38 +2146,7 @@ void ContentPanel::search(const QString& query) {
         for (const QString& p : paths) {
             if (!weakThis) return;
             if (!p.isEmpty()) {
-                ItemRecord r;
-                std::wstring wPath = QDir::toNativeSeparators(p).toStdWString();
-                
-                std::string fid;
-                long long size = 0, ctime = 0, mtime = 0, atime = 0;
-                MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
-
-                r.path = QDir::toNativeSeparators(p);
-                r.size = size;
-                r.ctime = ctime;
-                r.mtime = mtime;
-                r.atime = atime;
-                
-                auto meta = MetadataManager::instance().getMeta(wPath);
-                r.isDir = meta.isFolder;
-                r.rating = meta.rating;
-                r.color = QString::fromStdWString(meta.color);
-                r.tags = meta.tags;
-                r.fileId = meta.fileId128;
-                r.isManaged = meta.hasUserOperations();
-                for (const auto& pe : meta.palettes) {
-                    r.palettes.push_back({pe.color, pe.ratio});
-                }
-                
-                if (r.isDir) {
-                    QDir sub(p);
-                    r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                } else {
-                    r.suffix = QFileInfo(p).suffix().toLower();
-                }
-
-                records.push_back(r);
+                records.push_back(ContentPanel::createItemRecord(p));
             }
         }
 
@@ -2278,44 +2262,7 @@ void ContentPanel::loadCategory(int categoryId) {
             }
 
             if (!wPath.empty()) {
-                ItemRecord r;
-                QString p = QString::fromStdWString(wPath);
-                
-                std::string fid;
-                long long size = 0, ctime = 0, mtime = 0, atime = 0;
-                MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
-
-                r.path = QDir::toNativeSeparators(p);
-                r.size = size;
-                r.ctime = ctime;
-                r.mtime = mtime;
-                r.atime = atime;
-
-                auto meta = MetadataManager::instance().getMeta(wPath);
-                r.isDir = meta.isFolder;
-                r.rating = meta.rating;
-                r.color = QString::fromStdWString(meta.color);
-                r.tags = meta.tags;
-                r.fileId = meta.fileId128;
-                r.pinned = meta.pinned;
-                r.encrypted = meta.encrypted;
-                r.url = QString::fromStdWString(meta.url);
-                r.note = QString::fromStdWString(meta.note);
-                r.width = meta.width;
-                r.height = meta.height;
-                r.isManaged = meta.hasUserOperations();
-                for (const auto& pe : meta.palettes) {
-                    r.palettes.push_back({pe.color, pe.ratio});
-                }
-
-                if (r.isDir) {
-                    QDir sub(p);
-                    r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                } else {
-                    r.suffix = QFileInfo(p).suffix().toLower();
-                }
-
-                allRecords.push_back(r);
+                allRecords.push_back(ContentPanel::createItemRecord(QString::fromStdWString(wPath)));
             }
         }
 
@@ -2331,7 +2278,7 @@ void ContentPanel::loadCategory(int categoryId) {
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths) { 
-    // 2026-07-xx 物理防护：防重入机制
+    // 2026-07-xx 物理防护：防重入机制 (路径列表通常用于系统项，暂不进行深度内容比对)
     if (m_isLoading && m_currentCategoryType == "path_list") {
         return;
     }
@@ -2352,44 +2299,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
         for (const QString& p : paths) {
             if (!weakThis) return;
             if (!p.isEmpty()) {
-                ItemRecord r;
-                std::wstring wPath = QDir::toNativeSeparators(p).toStdWString();
-                
-                std::string fid;
-                long long size = 0, ctime = 0, mtime = 0, atime = 0;
-                MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
-
-                r.path = QDir::toNativeSeparators(p);
-                r.size = size;
-                r.ctime = ctime;
-                r.mtime = mtime;
-                r.atime = atime;
-
-                auto meta = MetadataManager::instance().getMeta(wPath);
-                r.isDir = meta.isFolder;
-                r.rating = meta.rating;
-                r.color = QString::fromStdWString(meta.color);
-                r.tags = meta.tags;
-                r.fileId = meta.fileId128;
-                r.pinned = meta.pinned;
-                r.encrypted = meta.encrypted;
-                r.url = QString::fromStdWString(meta.url);
-                r.note = QString::fromStdWString(meta.note);
-                r.width = meta.width;
-                r.height = meta.height;
-                r.isManaged = meta.hasUserOperations();
-                for (const auto& pe : meta.palettes) {
-                    r.palettes.push_back({pe.color, pe.ratio});
-                }
-
-                if (r.isDir) {
-                    QDir sub(p);
-                    r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-                } else {
-                    r.suffix = QFileInfo(p).suffix().toLower();
-                }
-
-                records.push_back(r);
+                records.push_back(ContentPanel::createItemRecord(p));
             }
         }
         

@@ -180,6 +180,11 @@ public:
     // 2026-04-12 关键修复：延迟初始化
     void deferredInit();
 
+    /**
+     * @brief 统一条目构建中枢
+     * 2026-07-xx 架构优化：收拢物理属性采样与元数据注入逻辑，确保渲染一致性
+     */
+    static ItemRecord createItemRecord(const QString& path);
 
     /**
      * @brief 切换视图模式
@@ -345,8 +350,9 @@ public slots:
     void loadCategory(int categoryId);
 
     /**
-     * @brief 设置当前分类类型，用于驱动右键菜单差异化
+     * @brief 获取/设置当前分类类型，用于驱动右键菜单差异化
      */
+    QString getCurrentCategoryType() const { return m_currentCategoryType; }
     void setCurrentCategoryType(const QString& type) { m_currentCategoryType = type; }
 
 signals:
