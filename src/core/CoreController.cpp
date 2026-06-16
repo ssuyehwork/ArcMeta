@@ -95,7 +95,7 @@ QStringList CoreController::performSearch(const QString& keyword, const QString&
                 if (count >= 10000) break;
             }
 
-            if (!batch.empty() && weakThis && weakThis->m_currentSearchId == searchId) {
+            if (!batch.empty() && weakThis && (int)weakThis->m_currentSearchId == searchId) {
                 QMetaObject::invokeMethod(weakThis.data(), "searchResultFound", Qt::QueuedConnection, Q_ARG(int, searchId), Q_ARG(std::vector<ArcMeta::ItemRecord>, batch));
             }
             if (weakThis && weakThis->m_currentSearchId == searchId) {

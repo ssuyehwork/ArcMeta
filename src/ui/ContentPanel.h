@@ -185,7 +185,6 @@ public:
     // 2026-04-12 关键修复：延迟初始化
     void deferredInit();
 
-
     /**
      * @brief 切换视图模式
      */
@@ -241,62 +240,6 @@ signals:
         const QMap<QString, int>& typeCounts,
         const QMap<QString, int>& createDateCounts,
         const QMap<QString, int>& modifyDateCounts);
-
-private:
-    void initUi();
-    void initGridView();
-    void initListView();
-    void setupContextMenu();
-    void updateLayersButtonState();
-
-    /**
-     * @brief 内部业务辅助逻辑
-     */
-    void performCopy(bool cutMode);
-    void performPaste();
-    void performBatchRename();
-
-    QVBoxLayout* m_mainLayout = nullptr;
-    QStackedWidget* m_viewStack = nullptr;
-    QPushButton* m_btnLayers = nullptr;
-    QPushButton* m_btnLayersBlue = nullptr;
-    QTextBrowser* m_textPreview = nullptr;
-    QLabel* m_imagePreview = nullptr;
-
-    // 视图组件
-    QAbstractItemView* m_gridView = nullptr;
-    QTreeView* m_treeView = nullptr;
-    FerrexVirtualDbModel* m_model = nullptr;
-    QSortFilterProxyModel* m_proxyModel = nullptr;
-
-
-    FilterState m_currentFilter;
-
-    int m_zoomLevel = 64;
-    QString m_currentPath;
-    int m_currentCategoryId = -1;
-    QString m_currentCategoryType; // 用于驱动差异化右键菜单
-    bool m_isRecursive = false;
-    bool m_isLoading = false; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
-
-    // --- 2026-06-xx 性能优化：递归扫描指纹缓存 ---
-    struct ScanCacheEntry {
-        qint64 lastModified; // 根目录的时间戳
-        std::vector<ItemRecord> records;
-    };
-    QMap<QString, ScanCacheEntry> m_recursiveCache; 
-    void updateGridSize();
-    void updateStatusBarStats();
-    void recalculateAndEmitStats();
-
-    void addItemsFromDirectory(const QString& path, bool recursive,
-                               QMap<int, int>& ratingCounts,
-                               QMap<QString, int>& colorCounts,
-                               QMap<QString, int>& tagCounts,
-                               QMap<QString, int>& typeCounts,
-                               QMap<QString, int>& createDateCounts,
-                               QMap<QString, int>& modifyDateCounts,
-                               int& noTagCount);
 
 public slots:
     void onSelectionChanged();
@@ -380,6 +323,61 @@ signals:
      */
     void statusBarStatsUpdated(int fileCount, int folderCount, int totalCount);
 
+private:
+    void initUi();
+    void initGridView();
+    void initListView();
+    void setupContextMenu();
+    void updateLayersButtonState();
+
+    /**
+     * @brief 内部业务辅助逻辑
+     */
+    void performCopy(bool cutMode);
+    void performPaste();
+    void performBatchRename();
+
+    QVBoxLayout* m_mainLayout = nullptr;
+    QStackedWidget* m_viewStack = nullptr;
+    QPushButton* m_btnLayers = nullptr;
+    QPushButton* m_btnLayersBlue = nullptr;
+    QTextBrowser* m_textPreview = nullptr;
+    QLabel* m_imagePreview = nullptr;
+
+    // 视图组件
+    QAbstractItemView* m_gridView = nullptr;
+    QTreeView* m_treeView = nullptr;
+    FerrexVirtualDbModel* m_model = nullptr;
+    QSortFilterProxyModel* m_proxyModel = nullptr;
+
+    FilterState m_currentFilter;
+
+    int m_activeSearchId = 0;
+    int m_zoomLevel = 64;
+    QString m_currentPath;
+    int m_currentCategoryId = -1;
+    QString m_currentCategoryType; // 用于驱动差异化右键菜单
+    bool m_isRecursive = false;
+    bool m_isLoading = false; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
+
+    // --- 2026-06-xx 性能优化：递归扫描指纹缓存 ---
+    struct ScanCacheEntry {
+        qint64 lastModified; // 根目录的时间戳
+        std::vector<ItemRecord> records;
+    };
+    QMap<QString, ScanCacheEntry> m_recursiveCache;
+    void updateGridSize();
+    void updateStatusBarStats();
+    void recalculateAndEmitStats();
+
+    void addItemsFromDirectory(const QString& path, bool recursive,
+                               QMap<int, int>& ratingCounts,
+                               QMap<QString, int>& colorCounts,
+                               QMap<QString, int>& tagCounts,
+                               QMap<QString, int>& typeCounts,
+                               QMap<QString, int>& createDateCounts,
+                               QMap<QString, int>& modifyDateCounts,
+                               int& noTagCount);
 
 protected:
     void wheelEvent(QWheelEvent* event) override;
