@@ -1040,16 +1040,43 @@ QStringList MetadataManager::getPendingSyncDirs() { return {}; }
 void MetadataManager::removeFidsFromLog(const QStringList&) {}
 void MetadataManager::addToSyncLog(const std::wstring&) {}
 
-QStringList MetadataManager::searchInCache(const QString& keyword) {
+QStringList MetadataManager::searchInCache(const QString& keyword, const QString& rootPath) {
     QStringList results; if (keyword.isEmpty()) return results;
+    
+    // 2026-07-xx 物理修复：强制执行路径归一化（小写化+分隔符统一），解决盘符大小写导致的匹配失效
+    std::wstring nRoot = MetadataManager::normalizePath(rootPath.toStdWString());
+    bool hasRoot = !nRoot.empty();
+    
+    // 增加尾部斜杠确保目录边界匹配，防止 C:\Temp 匹配到 C:\Temp2
+    if (hasRoot && nRoot.back() != L'\\') nRoot += L'\\';
+
+    qDebug() << "[Search] ----------------------------------------";
+    qDebug() << "[Search] 关键词:" << keyword;
+    qDebug() << "[Search] 原始根路径:" << rootPath;
+    qDebug() << "[Search] 归一化根路径:" << QString::fromStdWString(nRoot);
+    qDebug() << "[Search] 是否锁定路径:" << (hasRoot ? "是" : "否");
+    
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     for (std::unordered_map<std::wstring, RuntimeMeta>::const_iterator it = m_cache.begin(); it != m_cache.end(); ++it) {
         const std::wstring& path = it->first; const RuntimeMeta& meta = it->second;
+        
+        // 如果开启了路径锁定，执行严格的目录前缀校验
+        if (hasRoot) {
+            // 如果路径不以 nRoot 开头
+            if (path.find(nRoot) != 0) {
+                 // 额外校验：检查是否恰好是根目录本身（不带斜杠）
+                 std::wstring rootNoSlash = nRoot.substr(0, nRoot.length() - 1);
+                 if (path != rootNoSlash) continue;
+            }
+        }
+
         QString qPath = QString::fromStdWString(path); QString qNote = QString::fromStdWString(meta.note);
         bool match = qPath.contains(keyword, Qt::CaseInsensitive) || qNote.contains(keyword, Qt::CaseInsensitive);
         if (!match) { for (int i = 0; i < meta.tags.size(); ++i) { if (meta.tags[i].contains(keyword, Qt::CaseInsensitive)) { match = true; break; } } }
         if (match) results << qPath;
     }
+    qDebug() << "[Search] 匹配结果数:" << results.size();
+    qDebug() << "[Search] ----------------------------------------";
     return results;
 }
 

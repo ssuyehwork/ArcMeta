@@ -341,8 +341,9 @@ public slots:
 
     /**
      * @brief 加载指定路径列表 (分类联动使用)
+     * @param source 明确指定数据来源（category/nav/search），默认为 category
      */
-    void loadPaths(const QStringList& paths);
+    void loadPaths(const QStringList& paths, const QString& source = "category");
 
     /**
      * @brief 2026-06-xx 彻底重构：加载分类及其子项 (分类 ID 联动)

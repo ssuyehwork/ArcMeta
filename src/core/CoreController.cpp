@@ -50,10 +50,12 @@ void CoreController::startSystem() {
     });
 }
 
-QStringList CoreController::performSearch(const QString& keyword) {
+QStringList CoreController::performSearch(const QString& keyword, const QString& rootPath) {
     if (keyword.isEmpty()) return {};
+    qDebug() << "[Core] 触发核心搜索接口, Keyword:" << keyword << "RootPath:" << rootPath;
     // 彻底废除数据库搜索，强制使用 SCCH 内存搜索
-    return MetadataManager::instance().searchInCache(keyword);
+    // 2026-07-xx 按照用户要求：透传 rootPath 以支持局部搜索
+    return MetadataManager::instance().searchInCache(keyword, rootPath);
 }
 
 void CoreController::setStatus(const QString& text, bool indexing) {
