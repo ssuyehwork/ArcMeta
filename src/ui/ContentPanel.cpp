@@ -2234,6 +2234,11 @@ void ContentPanel::previewFile(const QString& path) {
 } 
  
 void ContentPanel::loadCategory(int categoryId) { 
+    // 2026-07-xx 物理防护：防重入机制。如果已经在加载同一个分类，则直接拦截，防止重复 clear() 导致的闪烁
+    if (m_isLoading && m_currentCategoryId == categoryId && m_currentCategoryType == "user_category") {
+        return;
+    }
+
     m_isLoading = true;
     m_currentCategoryType = "user_category";
     m_currentCategoryId = categoryId;
@@ -2326,7 +2331,13 @@ void ContentPanel::loadCategory(int categoryId) {
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths) { 
+    // 2026-07-xx 物理防护：防重入机制
+    if (m_isLoading && m_currentCategoryType == "path_list") {
+        return;
+    }
+
     m_isLoading = true;
+    m_currentCategoryType = "path_list";
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
