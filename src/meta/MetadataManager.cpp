@@ -1040,11 +1040,20 @@ QStringList MetadataManager::getPendingSyncDirs() { return {}; }
 void MetadataManager::removeFidsFromLog(const QStringList&) {}
 void MetadataManager::addToSyncLog(const std::wstring&) {}
 
-QStringList MetadataManager::searchInCache(const QString& keyword) {
+QStringList MetadataManager::searchInCache(const QString& keyword, const QString& rootPath) {
     QStringList results; if (keyword.isEmpty()) return results;
+
+    // 2026-07-xx 按照用户要求：支持路径锁定
+    std::wstring wRoot = rootPath.toStdWString();
+    bool hasRoot = !wRoot.empty();
+
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     for (std::unordered_map<std::wstring, RuntimeMeta>::const_iterator it = m_cache.begin(); it != m_cache.end(); ++it) {
         const std::wstring& path = it->first; const RuntimeMeta& meta = it->second;
+
+        // 如果开启了路径锁定，优先执行前缀校验
+        if (hasRoot && path.find(wRoot) != 0) continue;
+
         QString qPath = QString::fromStdWString(path); QString qNote = QString::fromStdWString(meta.note);
         bool match = qPath.contains(keyword, Qt::CaseInsensitive) || qNote.contains(keyword, Qt::CaseInsensitive);
         if (!match) { for (int i = 0; i < meta.tags.size(); ++i) { if (meta.tags[i].contains(keyword, Qt::CaseInsensitive)) { match = true; break; } } }

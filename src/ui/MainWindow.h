@@ -133,6 +133,7 @@ private:
     QPushButton* m_btnClose = nullptr;
 
     // 状态管理
+    QString m_lastDataSource; // 2026-07-xx 按照用户要求：记录当前活跃的数据来源（category/nav）
     bool m_isPinned = false;
     bool m_isTagManagerMode = false;
     bool m_panelsInitialized = false; // 2026-04-12 状态锁：确保面板仅初始化一次

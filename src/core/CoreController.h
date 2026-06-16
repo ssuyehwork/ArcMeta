@@ -29,9 +29,10 @@ public:
     /**
      * @brief 统一搜索接口
      * @param keyword 关键词
+     * @param rootPath 锁定根路径（可选）
      * @return 匹配的文件路径列表
      */
-    QStringList performSearch(const QString& keyword);
+    QStringList performSearch(const QString& keyword, const QString& rootPath = "");
 
 signals:
     void isIndexingChanged(bool indexing);
