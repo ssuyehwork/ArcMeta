@@ -20,6 +20,7 @@ public:
     explicit RuleRow(QWidget* parent = nullptr);
     
     RenameRule getRule() const;
+    void setRule(const RenameRule& rule);
 
 signals:
     void changed();

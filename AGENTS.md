@@ -17,3 +17,8 @@
 - **唯一标准**：所有可编辑输入框（QLineEdit）如需清除功能，必须且只能使用 Qt 原生的 `setClearButtonEnabled(true)`。
 - **严禁脑补**：严禁通过 `addAction`、手动绘图或创建自定义按钮等方式模拟清除逻辑。
 - **杜绝另创**：任何此类“创新”均被视为违反项目一致性红线，必须立即回归原生方案。
+
+## 5.2 窗口置顶实现规范
+- **唯一标准**：所有窗口（包括主窗口、对话框、悬浮窗）的置顶/取消置顶功能，必须且只能使用 **Win32 原生 `SetWindowPos`** API（配合 `HWND_TOPMOST` / `HWND_NOTOPMOST` 标志）。
+- **严禁使用**：禁止使用 `setWindowFlag(Qt::WindowStaysOnTopHint)` 或任何会导致窗口重建的标志位操作。
+- **性能优化**：调用时必须配合 `SWP_NOSENDCHANGING` 标志，以拦截冗余消息风暴，确保置顶切换无卡顿、无闪烁。

@@ -22,6 +22,7 @@ public:
 
     static QString getExistingDirectory(QWidget* parent, const QString& caption = "", const QString& dir = "");
     static QString getOpenFileName(QWidget* parent, const QString& caption = "", const QString& dir = "", const QString& filter = "");
+    static QString getSaveFileName(QWidget* parent, const QString& caption = "", const QString& dir = "", const QString& filter = "");
 
     QString selectedPath() const { return m_selectedPath; }
 

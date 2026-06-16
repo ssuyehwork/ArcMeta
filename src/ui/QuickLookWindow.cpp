@@ -7,6 +7,10 @@
 #include <QShortcut>
 #include "UiHelper.h"
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
 namespace ArcMeta {
 
 QuickLookWindow& QuickLookWindow::instance() {
@@ -16,8 +20,18 @@ QuickLookWindow& QuickLookWindow::instance() {
 
 QuickLookWindow::QuickLookWindow() : QWidget(nullptr) {
     // 强制赋予全屏及最高层级，禁绝系统装饰
-    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     setStyleSheet("QWidget { background-color: rgba(30, 30, 30, 0.95); border: 1px solid #444; border-radius: 12px; }");
+
+    // 2026-06-xx 物理修复：通过原生 API 实现置顶，避免标志位导致的重建问题
+#ifdef Q_OS_WIN
+    QTimer::singleShot(0, this, [this]() {
+        HWND hwnd = reinterpret_cast<HWND>(winId());
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+    });
+#else
+    setWindowFlag(Qt::WindowStaysOnTopHint, true);
+#endif
     
     resize(800, 600);
     initUi();

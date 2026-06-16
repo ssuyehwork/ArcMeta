@@ -12,6 +12,10 @@
 #include <QPalette>
 #include <QColor>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
 namespace ArcMeta {
 
 LoadingWindow::LoadingWindow(QWidget* parent)
@@ -20,8 +24,18 @@ LoadingWindow::LoadingWindow(QWidget* parent)
     
     // 设置窗口属性
     setWindowTitle("ArcMeta - 初始化中...");
-    setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint | Qt::FramelessWindowHint);
+    setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     setAttribute(Qt::WA_TranslucentBackground, false);
+
+    // 2026-06-xx 物理修复：通过原生 API 实现置顶，避免标志位导致的重建问题
+#ifdef Q_OS_WIN
+    QTimer::singleShot(0, this, [this]() {
+        HWND hwnd = reinterpret_cast<HWND>(winId());
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+    });
+#else
+    setWindowFlag(Qt::WindowStaysOnTopHint, true);
+#endif
     
     // 固定大小
     setFixedSize(350, 250);

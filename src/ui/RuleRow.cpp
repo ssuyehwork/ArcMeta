@@ -128,4 +128,31 @@ RenameRule RuleRow::getRule() const {
     return rule;
 }
 
+void RuleRow::setRule(const RenameRule& rule) {
+    blockSignals(true);
+    for (int i = 0; i < m_typeCombo->count(); ++i) {
+        if (m_typeCombo->itemData(i).toInt() == static_cast<int>(rule.type)) {
+            m_typeCombo->setCurrentIndex(i);
+            m_paramStack->setCurrentIndex(i);
+            break;
+        }
+    }
+
+    if (rule.type == RenameComponentType::Text) {
+        m_textEdit->setText(rule.value);
+    } else if (rule.type == RenameComponentType::Sequence) {
+        m_startSpin->setValue(rule.start);
+        for (int i = 0; i < m_paddingCombo->count(); ++i) {
+            if (m_paddingCombo->itemData(i).toInt() == rule.padding) {
+                m_paddingCombo->setCurrentIndex(i);
+                break;
+            }
+        }
+    } else if (rule.type == RenameComponentType::Date) {
+        m_dateFormatCombo->setCurrentText(rule.value);
+    }
+    blockSignals(false);
+    emit changed();
+}
+
 } // namespace ArcMeta

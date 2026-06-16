@@ -10,6 +10,7 @@
 #include <QScrollArea>
 #include <QGroupBox>
 #include <QList>
+#include <QTimer>
 #include <vector>
 #include <string>
 #include "../meta/BatchRenameEngine.h"
@@ -33,6 +34,11 @@ private slots:
     void onExecute();
     void onPreview();
     void onBrowseTarget();
+    void onImportPreset();
+    void onExportPreset();
+    void onDeleteCurrentPreset();
+    void scheduleAutoSave();
+    void doAutoSave();
 
 private:
     void initContent();
@@ -42,8 +48,11 @@ private:
     
     // 预设相关
     QComboBox* m_presetCombo = nullptr;
-    QPushButton* m_btnSavePreset = nullptr;
-    QPushButton* m_btnDeletePreset = nullptr;
+    QPushButton* m_btnQuickDelete = nullptr;
+    QPushButton* m_btnImport = nullptr;
+    QPushButton* m_btnExport = nullptr;
+
+    QTimer* m_autoSaveTimer = nullptr;
 
     // 目标操作
     QRadioButton* m_rbRename = nullptr;
