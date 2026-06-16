@@ -320,7 +320,12 @@ std::wstring MetadataManager::getPathByFid(const std::string& fid) {
     return (it != m_fidToPath.end()) ? it->second : L"";
 }
 
-void MetadataManager::ensureActivated(const std::wstring& nPath) {
+void MetadataManager::ensureActivated(const std::wstring& path) {
+    // 2026-07-xx 物理级加固：强制进行归一化处理。
+    // 理由：如果不强制转小写，ContentPanel 传入的大写路径会导致缓存 Key 冲突，
+    // 使得搜索算法（全小写匹配）无法在内存中找到这些项目。
+    std::wstring nPath = MetadataManager::normalizePath(path);
+
     std::unique_lock<std::shared_mutex> lock(m_mutex);
     if (m_cache.find(nPath) != m_cache.end()) return;
 
@@ -1072,15 +1077,17 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
             }
         }
 
-        QString qPath = QString::fromStdWString(path);
-        QString qFileName = QFileInfo(qPath).fileName(); // 2026-07-xx 物理修复：显式匹配文件名
-        QString qNote = QString::fromStdWString(meta.note);
+        // 2026-07-xx 逻辑加固：全小写化匹配，彻底解决 Windows 环境下的字符偏差
+        QString qPath = QString::fromStdWString(path).toLower();
+        QString qFileName = QFileInfo(qPath).fileName().toLower();
+        QString qNote = QString::fromStdWString(meta.note).toLower();
+        QString qKeyword = keyword.toLower();
 
-        bool match = qFileName.contains(keyword, Qt::CaseInsensitive) ||
-                     qPath.contains(keyword, Qt::CaseInsensitive) ||
-                     qNote.contains(keyword, Qt::CaseInsensitive);
+        bool match = qFileName.contains(qKeyword) ||
+                     qPath.contains(qKeyword) ||
+                     qNote.contains(qKeyword);
 
-        if (!match) { for (int i = 0; i < meta.tags.size(); ++i) { if (meta.tags[i].contains(keyword, Qt::CaseInsensitive)) { match = true; break; } } }
+        if (!match) { for (int i = 0; i < meta.tags.size(); ++i) { if (meta.tags[i].contains(qKeyword, Qt::CaseInsensitive)) { match = true; break; } } }
         if (match) results << qPath;
     }
     qDebug() << "[Search] 匹配结果数:" << results.size();
