@@ -456,6 +456,11 @@ void MainWindow::initUi() {
             return;
         }
 
+        // 2026-07-xx 按照 Plan-57：发起搜索前物理清除现有筛选器，防止搜索结果被拦截
+        if (m_filterPanel) {
+            m_filterPanel->clearAllFilters();
+        }
+
         if (keyword.isEmpty()) {
             unifiedNavigateTo(m_currentPath);
             m_searchHistoryPanel->hide();

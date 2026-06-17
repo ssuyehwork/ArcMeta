@@ -2324,6 +2324,7 @@ void ContentPanel::appendPaths(const QStringList& paths) {
                 all.insert(all.end(), newRecords.begin(), newRecords.end());
                 weakThis->m_model->setRecords(all);
 
+                weakThis->m_isLoading = false; // 物理释放状态锁
                 // 异步流式追加时，每批次都尝试更新一次统计与筛选
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters();
