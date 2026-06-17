@@ -90,7 +90,18 @@ private:
     void initUi();
     void updateNavButtons();
     void updateStatusBar();
-    void navigateTo(const QString& path, bool record = true);
+
+    // 2026-07-xx 导航协议常量
+    static inline const QString kProtocolFile     = "file://";
+    static inline const QString kProtocolCategory = "category://";
+    static inline const QString kProtocolSystem   = "system://";
+
+    /**
+     * @brief 2026-07-xx 按照 Plan-56：统一导航调度中心
+     * 支持 file://, category://, system:// 等协议
+     */
+    void unifiedNavigateTo(const QString& url, bool record = true);
+
     void initToolbar();
     void setupSplitters();
     void setupCustomTitleBarButtons();

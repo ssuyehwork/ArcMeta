@@ -152,6 +152,30 @@ void CategoryPanel::selectCategory(int id) {
     }
 }
 
+void CategoryPanel::selectCategoryByType(const QString& type) {
+    if (!m_categoryModel) return;
+
+    // 递归查找匹配类型的索引
+    std::function<QModelIndex(const QModelIndex&)> findType;
+    findType = [&](const QModelIndex& parent) -> QModelIndex {
+        for (int i = 0; i < m_categoryModel->rowCount(parent); ++i) {
+            QModelIndex idx = m_categoryModel->index(i, 0, parent);
+            if (idx.data(TypeRole).toString() == type) return idx;
+            QModelIndex child = findType(idx);
+            if (child.isValid()) return child;
+        }
+        return QModelIndex();
+    };
+
+    QModelIndex target = findType(QModelIndex());
+    if (target.isValid()) {
+        m_categoryTree->blockSignals(true);
+        m_categoryTree->setCurrentIndex(target);
+        m_categoryTree->scrollTo(target);
+        m_categoryTree->blockSignals(false);
+    }
+}
+
 void CategoryPanel::deferredInit() {
     qDebug() << "[CategoryPanel] deferredInit 开始执行";
 
