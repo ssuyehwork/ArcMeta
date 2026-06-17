@@ -816,7 +816,7 @@ void ContentPanel::initUi() {
     m_btnLayers->setStyleSheet( 
         "QPushButton { background: transparent; border: none; border-radius: 4px; }" 
         "QPushButton:hover { background: #3E3E42; }" 
-        "QPushButton:checked { background: rgba(52, 152, 219, 0.2); border: 1px solid #3498db; }" 
+        "QPushButton:checked { background: #3E3E42; }"
         "QPushButton:disabled { opacity: 0.3; }" 
     ); 
     connect(m_btnLayers, &QPushButton::clicked, [this]() { 
