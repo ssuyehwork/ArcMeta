@@ -3,8 +3,6 @@
 #include <QObject>
 #include <QString>
 #include <memory>
-#include <atomic>
-#include "IndexedEntry.h"
 
 namespace ArcMeta {
 
@@ -27,30 +25,15 @@ public:
 
     bool isIndexing() const { return m_isIndexing; }
     QString statusText() const { return m_statusText; }
-    int getCurrentSearchId() const { return m_currentSearchId; }
 
     /**
      * @brief 统一搜索接口
      * @param keyword 关键词
-     * @param rootPath 锁定根路径（可选）
      * @return 匹配的文件路径列表
      */
-    QStringList performSearch(const QString& keyword, const QString& rootPath = "");
+    QStringList performSearch(const QString& keyword);
 
 signals:
-    /**
-     * @brief 异步搜索结果分批推送信号
-     * @param searchId 搜索会话 ID
-     * @param records 搜到的 ItemRecord 列表
-     */
-    void searchResultFound(int searchId, const std::vector<ItemRecord>& records);
-
-    /**
-     * @brief 异步搜索完成信号
-     * @param searchId 搜索会话 ID
-     */
-    void searchFinished(int searchId);
-
     void isIndexingChanged(bool indexing);
     void statusTextChanged(const QString& text);
     void initializationFinished();
@@ -63,7 +46,6 @@ private:
 
     bool m_isIndexing = false;
     QString m_statusText = "就绪";
-    std::atomic<int> m_currentSearchId{0};
 };
 
 } // namespace ArcMeta

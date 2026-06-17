@@ -90,11 +90,6 @@ public:
      */
     void updateRecordMetadata(const QString& path);
 
-    /**
-     * @brief 2026-07-xx 物理追加：增量添加记录（用于异步搜索结果推送）
-     */
-    void appendRecords(const std::vector<ItemRecord>& records);
-
 private:
     std::vector<ItemRecord> m_allRecords;
     std::unordered_map<QString, int, QStringHash> m_pathToIndex;
@@ -186,6 +181,12 @@ public:
     void deferredInit();
 
     /**
+     * @brief 统一条目构建中枢
+     * 2026-07-xx 架构优化：收拢物理属性采样与元数据注入逻辑，确保渲染一致性
+     */
+    static ItemRecord createItemRecord(const QString& path);
+
+    /**
      * @brief 切换视图模式
      */
     void setViewMode(ViewMode mode);
@@ -241,88 +242,6 @@ signals:
         const QMap<QString, int>& createDateCounts,
         const QMap<QString, int>& modifyDateCounts);
 
-public slots:
-    void onSelectionChanged();
-    void onCustomContextMenuRequested(const QPoint& pos);
-    void onDoubleClicked(const QModelIndex& index);
-
-    /**
-     * @brief 加载并显示目录内容
-     */
-    void loadDirectory(const QString& path, bool recursive = false);
-
-    /**
-     * @brief 强制重新加载当前视图的所有内容
-     */
-    void refreshAll();
-
-    /**
-     * @brief 局部更新某项的元数据（星级、颜色、标签等）
-     */
-    void updateItemMetadata(const QString& path);
-
-    /**
-     * @brief 2026-07-xx 物理追加：增量添加记录（用于异步搜索结果推送）
-     */
-    void appendRecords(const std::vector<ItemRecord>& records);
-
-    /**
-     * @brief 获取当前活跃的搜索 ID (2026-07-xx 物理封装)
-     */
-    int activeSearchId() const { return m_activeSearchId; }
-
-    /**
-     * @brief 全局/本地搜索
-     */
-    void search(const QString& query, int searchId = 0);
-
-    /**
-     * @brief 应用当前筛选器
-     */
-    void applyFilters(const FilterState& state);
-    void applyFilters(); // 使用保存的状态重新应用
-
-    /**
-     * @brief 创建新条目（文件夹/Markdown/Txt）
-     */
-    void createNewItem(const QString& type);
-
-    /**
-     * @brief 预览文件内容 (支持文本、Markdown、图片等)
-     */
-    void previewFile(const QString& path);
-
-    /**
-     * @brief 加载指定路径列表 (分类联动使用)
-     * @param source 明确指定数据来源（category/nav/search），默认为 category
-     */
-    void loadPaths(const QStringList& paths, const QString& source = "category");
-
-    /**
-     * @brief 2026-06-xx 彻底重构：加载分类及其子项 (分类 ID 联动)
-     */
-    void loadCategory(int categoryId);
-
-    /**
-     * @brief 获取/设置当前分类类型，用于驱动右键菜单差异化
-     */
-    QString getCurrentCategoryType() const { return m_currentCategoryType; }
-    void setCurrentCategoryType(const QString& type) { m_currentCategoryType = type; }
-
-signals:
-    /**
-     * @brief 当在内容区点击子分类时触发，告知 MainWindow 切换侧边栏选中状态
-     */
-    void categoryClicked(int categoryId);
-
-    /**
-     * @brief 状态栏统计信息信号
-     * @param fileCount 文件数量
-     * @param folderCount 文件夹数量
-     * @param totalCount 总项目数量
-     */
-    void statusBarStatsUpdated(int fileCount, int folderCount, int totalCount);
-
 private:
     void initUi();
     void initGridView();
@@ -350,9 +269,9 @@ private:
     FerrexVirtualDbModel* m_model = nullptr;
     QSortFilterProxyModel* m_proxyModel = nullptr;
 
+
     FilterState m_currentFilter;
 
-    int m_activeSearchId = 0;
     int m_zoomLevel = 64;
     QString m_currentPath;
     int m_currentCategoryId = -1;
@@ -378,6 +297,78 @@ private:
                                QMap<QString, int>& createDateCounts,
                                QMap<QString, int>& modifyDateCounts,
                                int& noTagCount);
+
+public slots:
+    void onSelectionChanged();
+    void onCustomContextMenuRequested(const QPoint& pos);
+    void onDoubleClicked(const QModelIndex& index);
+
+    /**
+     * @brief 加载并显示目录内容
+     */
+    void loadDirectory(const QString& path, bool recursive = false);
+
+    /**
+     * @brief 强制重新加载当前视图的所有内容
+     */
+    void refreshAll();
+
+    /**
+     * @brief 局部更新某项的元数据（星级、颜色、标签等）
+     */
+    void updateItemMetadata(const QString& path);
+
+    /**
+     * @brief 全局/本地搜索
+     */
+    void search(const QString& query);
+
+    /**
+     * @brief 应用当前筛选器
+     */
+    void applyFilters(const FilterState& state);
+    void applyFilters(); // 使用保存的状态重新应用
+
+    /**
+     * @brief 创建新条目（文件夹/Markdown/Txt）
+     */
+    void createNewItem(const QString& type);
+
+    /**
+     * @brief 预览文件内容 (支持文本、Markdown、图片等)
+     */
+    void previewFile(const QString& path);
+
+    /**
+     * @brief 加载指定路径列表 (分类联动使用)
+     */
+    void loadPaths(const QStringList& paths);
+
+    /**
+     * @brief 2026-06-xx 彻底重构：加载分类及其子项 (分类 ID 联动)
+     */
+    void loadCategory(int categoryId);
+
+    /**
+     * @brief 获取/设置当前分类类型，用于驱动右键菜单差异化
+     */
+    QString getCurrentCategoryType() const { return m_currentCategoryType; }
+    void setCurrentCategoryType(const QString& type) { m_currentCategoryType = type; }
+
+signals:
+    /**
+     * @brief 当在内容区点击子分类时触发，告知 MainWindow 切换侧边栏选中状态
+     */
+    void categoryClicked(int categoryId);
+
+    /**
+     * @brief 状态栏统计信息信号
+     * @param fileCount 文件数量
+     * @param folderCount 文件夹数量
+     * @param totalCount 总项目数量
+     */
+    void statusBarStatsUpdated(int fileCount, int folderCount, int totalCount);
+
 
 protected:
     void wheelEvent(QWheelEvent* event) override;

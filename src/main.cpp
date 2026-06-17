@@ -93,9 +93,6 @@ int main(int argc, char *argv[]) {
     QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
     QApplication a(argc, argv);
 
-    // 2026-07-xx 按照 Plan-53：注册自定义元类型以支持跨线程搜索结果推送
-    qRegisterMetaType<std::vector<ArcMeta::ItemRecord>>("std::vector<ArcMeta::ItemRecord>");
-
     // 2026-06-xx 按照用户要求：全局统一设置蓝色透明框选样式
     QPalette p = a.palette();
     p.setColor(QPalette::Highlight, QColor(52, 152, 219));      // #3498db (蓝色)

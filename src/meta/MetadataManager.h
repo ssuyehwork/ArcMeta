@@ -72,10 +72,9 @@ public:
     /**
      * @brief 2026-06-xx 按照用户要求：在 SCCH 内存模式下执行多维搜索
      * @param keyword 关键词
-     * @param rootPath 锁定根路径（可选，若为空则全局搜索）
      * @return 匹配的物理路径列表
      */
-    QStringList searchInCache(const QString& keyword, const QString& rootPath = "");
+    QStringList searchInCache(const QString& keyword);
 
     /**
      * @brief 获取所有标签及其引用计数

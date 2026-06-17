@@ -382,30 +382,6 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
     endResetModel();
 }
 
-void FerrexVirtualDbModel::appendRecords(const std::vector<ItemRecord>& records) {
-    if (records.empty()) return;
-
-    // 过滤掉已存在的路径，防止重复
-    std::vector<ItemRecord> newUniqueRecords;
-    for (const auto& r : records) {
-        if (m_pathToIndex.find(r.path) == m_pathToIndex.end()) {
-            newUniqueRecords.push_back(r);
-        }
-    }
-    if (newUniqueRecords.empty()) return;
-
-    int firstRow = static_cast<int>(m_allRecords.size());
-    int lastRow = firstRow + static_cast<int>(newUniqueRecords.size()) - 1;
-
-    beginInsertRows(QModelIndex(), firstRow, lastRow);
-    for (const auto& r : newUniqueRecords) {
-        m_pathToIndex[r.path] = static_cast<int>(m_allRecords.size());
-        m_allRecords.push_back(r);
-    }
-    m_displayCount = static_cast<int>(m_allRecords.size());
-    endInsertRows();
-}
-
 void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
     QString nPath = QDir::toNativeSeparators(path);
     auto it = m_pathToIndex.find(nPath);
@@ -754,6 +730,49 @@ void ContentPanel::deferredInit() {
     qDebug() << "[ContentPanel] deferredInit 执行完毕"; 
 } 
 
+ItemRecord ContentPanel::createItemRecord(const QString& path) {
+    ItemRecord r;
+    QString nPath = QDir::toNativeSeparators(path);
+    std::wstring wPath = nPath.toStdWString();
+    QFileInfo info(nPath);
+
+    // 1. 物理属性采样 (零 I/O 核心)
+    std::string fid;
+    long long size = 0, ctime = 0, mtime = 0, atime = 0;
+    MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
+
+    r.path = nPath;
+    r.size = size;
+    r.ctime = ctime;
+    r.mtime = mtime;
+    r.atime = atime;
+
+    // 2. 核心元数据注入 (确保 width/height/palettes 物理对齐)
+    auto meta = MetadataManager::instance().getMeta(wPath);
+    r.isDir = info.isDir(); // 物理属性优先，确保未索引目录显示正常
+    r.rating = meta.rating;
+    r.color = QString::fromStdWString(meta.color);
+    r.tags = meta.tags;
+    r.fileId = meta.fileId128;
+    r.pinned = meta.pinned;
+    r.encrypted = meta.encrypted;
+    r.url = QString::fromStdWString(meta.url);
+    r.note = QString::fromStdWString(meta.note);
+    r.width = meta.width;
+    r.height = meta.height;
+    r.isManaged = meta.hasUserOperations();
+    for (const auto& pe : meta.palettes) {
+        r.palettes.push_back({pe.color, pe.ratio});
+    }
+
+    if (r.isDir) {
+        QDir sub(nPath);
+        r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
+    } else {
+        r.suffix = QFileInfo(nPath).suffix().toLower();
+    }
+    return r;
+}
  
 void ContentPanel::initUi() { 
     QWidget* titleBar = new QWidget(this); 
@@ -2083,7 +2102,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
  
                 QString absPath = info.absoluteFilePath();
-                allItems.push_back(ItemRecord::create(absPath));
+                allItems.push_back(ContentPanel::createItemRecord(absPath));
  
                 if (rec && info.isDir()) { 
                     scanDir(absPath, true); 
@@ -2109,11 +2128,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
  
  
-void ContentPanel::search(const QString& query, int searchId) { 
-    // 2026-07-xx 按照 Plan-53 重构：ContentPanel 不再主动执行搜索扫描，
-    // 而是作为 CoreController 的信号消费者，此处仅负责重置 UI 状态。
+void ContentPanel::search(const QString& query) { 
     m_currentCategoryType = "search";
-    m_activeSearchId = searchId;
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -2121,15 +2137,28 @@ void ContentPanel::search(const QString& query, int searchId) {
     m_isLoading = true;
     m_model->clear();
     
-    // 发射信号以同步焦点线状态
-    emit dataSourceChanged("search");
+    QPointer<ContentPanel> weakThis(this);
+    (void)QtConcurrent::run([weakThis, query]() {
+        QStringList paths = CoreController::instance().performSearch(query);
+        
+        std::vector<ItemRecord> records;
+        records.reserve(static_cast<int>(paths.size()));
+        for (const QString& p : paths) {
+            if (!weakThis) return;
+            if (!p.isEmpty()) {
+                records.push_back(ContentPanel::createItemRecord(p));
+            }
+        }
 
-    // 如果提供了初始关键词且 searchId 为 0（即非 MainWindow 调用的重置），
-    // 则通过 CoreController 启动标准搜索流。
-    if (!query.isEmpty() && searchId == 0) {
-        QStringList initialPaths = CoreController::instance().performSearch(query);
-        loadPaths(initialPaths, "search");
-    }
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records]() {
+            if (weakThis) {
+                weakThis->m_model->setRecords(records);
+                weakThis->m_isLoading = false;
+                weakThis->recalculateAndEmitStats();
+                weakThis->applyFilters();
+            }
+        });
+    });
 } 
  
 void ContentPanel::applyFilters(const FilterState& state) { 
@@ -2233,7 +2262,7 @@ void ContentPanel::loadCategory(int categoryId) {
             }
 
             if (!wPath.empty()) {
-                allRecords.push_back(ItemRecord::create(QString::fromStdWString(wPath)));
+                allRecords.push_back(ContentPanel::createItemRecord(QString::fromStdWString(wPath)));
             }
         }
 
@@ -2248,15 +2277,7 @@ void ContentPanel::loadCategory(int categoryId) {
     });
 } 
  
-
-void ContentPanel::appendRecords(const std::vector<ItemRecord>& records) {
-    if (m_model) {
-        m_model->appendRecords(records);
-        recalculateAndEmitStats();
-    }
-}
-
-void ContentPanel::loadPaths(const QStringList& paths, const QString& source) { 
+void ContentPanel::loadPaths(const QStringList& paths) { 
     // 2026-07-xx 物理防护：防重入机制 (路径列表通常用于系统项，暂不进行深度内容比对)
     if (m_isLoading && m_currentCategoryType == "path_list") {
         return;
@@ -2267,9 +2288,7 @@ void ContentPanel::loadPaths(const QStringList& paths, const QString& source) {
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
-    
-    // 2026-07-xx 按照方案要求：透传数据来源，不再硬编码 category
-    emit dataSourceChanged(source); 
+    emit dataSourceChanged("category"); 
      
     m_model->clear(); 
  
@@ -2280,7 +2299,7 @@ void ContentPanel::loadPaths(const QStringList& paths, const QString& source) {
         for (const QString& p : paths) {
             if (!weakThis) return;
             if (!p.isEmpty()) {
-                records.push_back(ItemRecord::create(p));
+                records.push_back(ContentPanel::createItemRecord(p));
             }
         }
         

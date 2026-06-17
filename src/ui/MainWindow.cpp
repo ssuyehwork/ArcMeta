@@ -226,10 +226,6 @@ void MainWindow::initUi() {
         navigateTo(path);
     });
 
-    connect(m_navPanel, &NavPanel::dataSourceChanged, this, [this](const QString& source) {
-        if (m_contentPanel) emit m_contentPanel->dataSourceChanged(source);
-    });
-
     connect(m_contentPanel, &ContentPanel::directorySelected, this, [this](const QString& path) {
         navigateTo(path);
     });
@@ -452,37 +448,8 @@ void MainWindow::initUi() {
         navigateTo(path);
     });
 
-    // 10. 响应异步搜索结果追加
-    connect(&CoreController::instance(), &CoreController::searchResultFound, this, [this](int searchId, const std::vector<ItemRecord>& records) {
-        if (m_contentPanel && m_contentPanel->getCurrentCategoryType() == "search" && m_contentPanel->activeSearchId() == searchId) {
-            m_contentPanel->appendRecords(records);
-            if (m_statusLeft) {
-                int visibleCount = m_contentPanel->getProxyModel()->rowCount();
-                m_statusLeft->setText(QString("正在扫描物理路径... 已找到 %1 个项目").arg(visibleCount));
-            }
-        }
-    });
-
-    connect(&CoreController::instance(), &CoreController::searchFinished, this, [this](int searchId) {
-        if (m_contentPanel && m_contentPanel->getCurrentCategoryType() == "search" && m_contentPanel->activeSearchId() == searchId) {
-            if (m_statusLeft) {
-                int visibleCount = m_contentPanel->getProxyModel()->rowCount();
-                m_statusLeft->setText(QString("搜索完成，共找到 %1 个项目").arg(visibleCount));
-            }
-        }
-    });
-
     connect(m_addressBar, &AddressBar::refreshRequested, this, [this]() {
-        // 2026-07-xx 按照方案计划：实现上下文敏感刷新 (Context-Sensitive Refresh)
-        if (m_lastDataSource == "category") {
-            // 分类模式：执行全局数据库扫描与对账
-            if (m_categoryPanel) m_categoryPanel->requestRefresh(true);
-            qDebug() << "[Refresh] 分类模式：触发全局数据库扫描对账";
-        } else {
-            // 物理导航模式：刷新当前物理目录
-            if (m_contentPanel) m_contentPanel->refreshAll();
-            qDebug() << "[Refresh] 物理导航模式：刷新当前目录" << m_currentPath;
-        }
+        if (m_contentPanel) m_contentPanel->refreshAll();
     });
 
     // 7. 搜索框回车触发逻辑 (带历史记录和搜索模式分流)
@@ -512,37 +479,9 @@ void MainWindow::initUi() {
         m_searchHistoryPanel->setHistory(m_searchHistory);
         m_searchHistoryPanel->hide();
 
-        // 2026-07-xx 按照方案计划：实现上下文敏感搜索 (Context-Sensitive Search)
-        QString rootPath = "";
-        if (m_lastDataSource == "nav") {
-            // 物理导航模式：锁定当前显示的文件夹
-            rootPath = m_currentPath;
-            qDebug() << "[Search] 物理导航模式，锁定路径:" << rootPath;
-            if (m_statusLeft) m_statusLeft->setText("正在扫描物理路径...");
-        } else {
-            qDebug() << "[Search] 分类模式，执行全局检索";
-            if (m_statusLeft) m_statusLeft->setText("正在从数据库检索...");
-        }
-
-        // 2026-07-xx 按照 Plan-53：执行上下文敏感搜索
-        // 先重置 ContentPanel 状态为搜索模式，并获取新的搜索 ID
-        int nextId = CoreController::instance().getCurrentSearchId() + 1;
-        m_contentPanel->search("", nextId); // 清空并设置 ID
-
-        // 使用 CoreController 的中枢搜索接口（内部会递增 ID 并触发异步扫描）
-        QStringList initialPaths = CoreController::instance().performSearch(keyword, rootPath);
-        
-        // 加载同步检索到的初始结果 (数据库/缓存)
-        m_contentPanel->loadPaths(initialPaths, "search");
-
-        if (m_statusLeft) {
-            if (m_lastDataSource == "nav") {
-                // 状态保持在“扫描中”，直到 searchFinished 触发
-            } else {
-                int visibleCount = m_contentPanel->getProxyModel()->rowCount();
-                m_statusLeft->setText(QString("搜索完成，找到 %1 个项目").arg(visibleCount));
-            }
-        }
+        // 使用 CoreController 的中枢搜索接口
+        QStringList paths = CoreController::instance().performSearch(keyword);
+        m_contentPanel->loadPaths(paths);
     };
 
     // 2026-05-27 物理加固：补全 this 上下文
@@ -1078,16 +1017,6 @@ void MainWindow::setupSplitters() {
 
     // 2026-05-07 按照用户要求：焦点线持久化显示，基于数据来源而非焦点位置
     connect(m_contentPanel, &ContentPanel::dataSourceChanged, this, [this](const QString& source) {
-        // 2026-07-xx 物理护栏：搜索结果加载时不切换上下文状态，保持“看哪搜哪”的上下文记忆
-        if (source == "search") {
-            qDebug() << "[Main] 收到搜索信号，保持当前上下文状态:" << m_lastDataSource;
-            return;
-        }
-
-        // 2026-07-xx 按照方案计划：记录状态以供搜索和刷新逻辑分流
-        m_lastDataSource = source;
-        qDebug() << "[Main] 活跃数据源变更 ->" << source;
-
         // 重置所有面板高亮
         if (m_navPanel)      m_navPanel->setFocusHighlight(false);
         if (m_categoryPanel) m_categoryPanel->setFocusHighlight(false);
