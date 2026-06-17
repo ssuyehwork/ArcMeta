@@ -1114,6 +1114,9 @@ void MetadataManager::persistBatch(const std::vector<std::wstring>& paths) {
         SqlTransaction trans(scopedDb);
         for (const auto& p : paths) {
             persistAsync(p, false); // notify = false 以提高性能
+            // 2026-07-xx 按照用户要求：Scoped 模式也必须执行解析颜色
+            // 理由：防止后期重复解析。此处调用异步接口，不阻塞持久化事务。
+            tryExtractColor(p);
         }
         trans.commit();
         DatabaseManager::instance().flushAll(); // 确保写入磁盘

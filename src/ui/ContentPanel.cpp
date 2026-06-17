@@ -2137,16 +2137,18 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
         scanDir(path, recursive); 
         if (!panelPtr) return; 
+
+        // 2026-07-xx Scoped DB 物理补完：在子线程完成扫描后立即执行批量持久化与颜色解析预热
+        // 理由：避免在 GUI 线程调用 persistBatch 导致主循环阻塞。
+        if (recursive) {
+            std::vector<std::wstring> paths;
+            paths.reserve(allItems.size());
+            for (const auto& r : allItems) paths.push_back(r.path.toStdWString());
+            MetadataManager::instance().persistBatch(paths);
+        }
  
         QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, reqId]() { 
             if (panelPtr && panelPtr->m_loadRequestId == reqId) { 
-                // 2026-07-xx Scoped DB 物理补完：递归扫描完成后，如果处于 Scoped 模式，执行批量持久化
-                if (panelPtr->m_isRecursive) {
-                    std::vector<std::wstring> paths;
-                    for (const auto& r : allItems) paths.push_back(r.path.toStdWString());
-                    MetadataManager::instance().persistBatch(paths);
-                }
-
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
