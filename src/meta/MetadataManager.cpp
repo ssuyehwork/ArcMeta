@@ -406,6 +406,121 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
     debouncePersist(nPath);
 }
 
+void MetadataManager::setScopedMode(const std::string& folderFid) {
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    m_activeScopedFid = folderFid;
+    if (!folderFid.empty()) {
+        qDebug() << "[Metadata] Scoped mode active for FID:" << QString::fromStdString(folderFid);
+    } else {
+        qDebug() << "[Metadata] Scoped mode deactivated.";
+    }
+}
+
+void MetadataManager::loadFromScopedDb(const std::string& folderFid) {
+    if (folderFid.empty()) return;
+    sqlite3* db = DatabaseManager::instance().getScopedDb(folderFid);
+    if (!db) return;
+
+    qDebug() << "[Metadata] Loading from Scoped DB:" << QString::fromStdString(folderFid);
+
+    sqlite3_stmt* stmt;
+    const char* sql = "SELECT * FROM metadata";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            RuntimeMeta rm;
+            const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+            if (fid) rm.fileId128 = fid;
+
+            const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
+            std::wstring path = normalizePath(wpath ? wpath : L"");
+
+            // 物理校验：如果磁盘路径已在主缓存存在，则跳过（主缓存优先级更高）
+            if (m_cache.find(path) != m_cache.end()) continue;
+
+            rm.isFolder = sqlite3_column_int(stmt, 2);
+            rm.rating = sqlite3_column_int(stmt, 3);
+            const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
+            if (color) rm.color = color;
+
+            const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 5));
+            QString tags = wtags ? QString::fromWCharArray(wtags) : "";
+            rm.tags = tags.split(",", Qt::SkipEmptyParts);
+
+            const wchar_t* note = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 6));
+            if (note) rm.note = note;
+            const wchar_t* url = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 7));
+            if (url) rm.url = url;
+            rm.ctime = sqlite3_column_int64(stmt, 8);
+            rm.mtime = sqlite3_column_int64(stmt, 9);
+            rm.atime = sqlite3_column_int64(stmt, 10);
+            rm.fileSize = sqlite3_column_int64(stmt, 11);
+
+            const void* paletteBlob = sqlite3_column_blob(stmt, 12);
+            int paletteSize = sqlite3_column_bytes(stmt, 12);
+
+            rm.isTrash = sqlite3_column_int(stmt, 13) != 0;
+            const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 14));
+            if (wOrigPath) rm.originalPath = wOrigPath;
+            rm.isInvalid = sqlite3_column_int(stmt, 15) != 0;
+            rm.width = sqlite3_column_int(stmt, 16);
+            rm.height = sqlite3_column_int(stmt, 17);
+            if (paletteBlob && paletteSize > 0) {
+                QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
+                QJsonDocument doc = QJsonDocument::fromJson(ba);
+                QJsonArray arr = doc.array();
+                for (const auto& v : arr) {
+                    QJsonObject obj = v.toObject();
+                    PaletteEntry pe;
+                    pe.color = QColor(obj["color"].toString());
+                    pe.ratio = (float)obj["ratio"].toDouble();
+                    rm.palettes.push_back(pe);
+                }
+            }
+
+            // 局部库的数据通常不被视为全局 Managed
+            rm.isManaged = false;
+            m_cache[path] = rm;
+            if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = path;
+        }
+        sqlite3_finalize(stmt);
+    }
+}
+
+void MetadataManager::migrateScopedData(const std::string& folderFid) {
+    if (folderFid.empty()) return;
+    sqlite3* scopedDb = DatabaseManager::instance().getScopedDb(folderFid);
+    if (!scopedDb) return;
+
+    qDebug() << "[Metadata] Migrating Scoped Data to volume DBs...";
+
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(scopedDb, "SELECT * FROM metadata", -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
+            if (wpath) {
+                std::wstring path = normalizePath(wpath);
+                // 触发物理持久化到卷库
+                persistAsync(path, false);
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    // 同时迁移分类关联 (如果有)
+    if (sqlite3_prepare_v2(scopedDb, "SELECT * FROM category_items", -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            int catId = sqlite3_column_int(stmt, 0);
+            const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+            const wchar_t* hint = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
+            if (fid) {
+                CategoryRepo::addItemToCategory(catId, fid, hint ? hint : L"");
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+}
+
 void MetadataManager::renameTag(const QString& oldName, const QString& newName) {
     if (oldName == newName) return;
     std::unique_lock<std::shared_mutex> lock(m_mutex);
@@ -1094,8 +1209,55 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
 
 void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    
     RuntimeMeta rMeta = getMeta(nPath);
+
+    // 1. 持久化到局部数据库 (Scoped DB) - 如果处于 Scoped 模式
+    std::string scopedFid;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        scopedFid = m_activeScopedFid;
+    }
+
+    if (!scopedFid.empty()) {
+        sqlite3* sdb = DatabaseManager::instance().getScopedDb(scopedFid);
+        if (sdb) {
+            sqlite3_stmt* sstmt;
+            const char* ssql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            if (sqlite3_prepare_v2(sdb, ssql, -1, &sstmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(sstmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(sstmt, 2, nPath.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(sstmt, 3, rMeta.isFolder ? 1 : 0);
+                sqlite3_bind_int(sstmt, 4, rMeta.rating);
+                sqlite3_bind_text16(sstmt, 5, rMeta.color.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(sstmt, 6, rMeta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(sstmt, 7, rMeta.note.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(sstmt, 8, rMeta.url.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int64(sstmt, 9, rMeta.ctime);
+                sqlite3_bind_int64(sstmt, 10, rMeta.mtime);
+                sqlite3_bind_int64(sstmt, 11, rMeta.atime);
+                sqlite3_bind_int64(sstmt, 12, rMeta.fileSize);
+                QJsonArray arr;
+                for (const auto& pe : rMeta.palettes) { QJsonObject obj; obj["color"] = pe.color.name(); obj["ratio"] = (double)pe.ratio; arr.append(obj); }
+                QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
+                sqlite3_bind_blob(sstmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
+                sqlite3_bind_int(sstmt, 14, rMeta.isTrash ? 1 : 0);
+                sqlite3_bind_text16(sstmt, 15, rMeta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(sstmt, 16, rMeta.isInvalid ? 1 : 0);
+                sqlite3_bind_int(sstmt, 17, rMeta.width);
+                sqlite3_bind_int(sstmt, 18, rMeta.height);
+                sqlite3_step(sstmt);
+                sqlite3_finalize(sstmt);
+            }
+        }
+    }
+
+    // 2. 持久化到物理卷数据库 - 仅当项已登记 (Managed)
+    if (!rMeta.isManaged && rMeta.rating == 0 && rMeta.color.empty() && rMeta.tags.isEmpty() && rMeta.note.empty() && rMeta.url.empty() && !rMeta.pinned && !rMeta.encrypted) {
+        // 如果没有用户元数据且未登记，不写入物理卷库，以保持其整洁
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+        return;
+    }
+
     std::wstring volSerial = getVolumeSerialNumber(nPath);
     sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
     if (!db) return;

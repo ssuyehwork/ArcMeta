@@ -131,6 +131,22 @@ public:
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
 
     /**
+     * @brief 2026-07-xx 按照用户要求：开启 Scoped 模式，后续持久化将同时写入局部库
+     * @param folderFid 局部库对应的文件夹 FID
+     */
+    void setScopedMode(const std::string& folderFid);
+
+    /**
+     * @brief 从 Scoped DB 批量恢复元数据到内存缓存
+     */
+    void loadFromScopedDb(const std::string& folderFid);
+
+    /**
+     * @brief 2026-07-xx 按照用户要求：迁移局部库数据到卷库/全局库
+     */
+    void migrateScopedData(const std::string& folderFid);
+
+    /**
      * @brief 全局重命名标签
      */
     void renameTag(const QString& oldName, const QString& newName);
@@ -266,6 +282,7 @@ private:
 
     std::unordered_map<std::wstring, RuntimeMeta> m_cache;
     std::unordered_map<std::string, std::wstring> m_fidToPath;
+    std::string m_activeScopedFid; // 当前激活的局部库 FID
 
     // 2026-07-xx 隔离式倒排索引：物理隔离文件、文件夹及后缀
     // 1. 仅文件 (Key: L"resume.pdf", Value: file_ids)

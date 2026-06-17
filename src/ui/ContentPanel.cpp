@@ -1754,6 +1754,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionBatchRename: performBatchRename(); break; 
         case ActionAddToCategory: {
             if (path.isEmpty()) break;
+
+            // 2026-07-xx 按照用户要求：如果当前有 Scoped DB，则在入库前先执行数据迁移
+            if (!m_currentScopedFid.empty()) {
+                MetadataManager::instance().migrateScopedData(m_currentScopedFid);
+            }
+
             // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
             // 扫描入库时，镜像分类始终创建在“我的分类”根节点 (ID = 0)
             ImportHelper::importPaths({path}, 0, this);
@@ -2063,6 +2069,13 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     if (m_btnLayers) m_btnLayers->setChecked(recursive); 
  
     m_model->clear(); 
+
+    // 2026-07-xx 按照用户要求：清理上一个局部库
+    if (!m_currentScopedFid.empty()) {
+        MetadataManager::instance().setScopedMode("");
+        DatabaseManager::instance().unmountScopedDb(m_currentScopedFid);
+        m_currentScopedFid = "";
+    }
  
     if (path.isEmpty() || path == "computer://") { 
         m_currentPath = "computer://"; 
@@ -2087,8 +2100,24 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     m_currentPath = path; 
     updateLayersButtonState(); 
      
+    // 2026-07-xx 按照用户要求：如果开启递归，则尝试挂载 Scoped DB
+    std::string folderFid;
+    bool hasScopedDb = false;
+    if (recursive) {
+        folderFid = MetadataManager::instance().getFileIdSync(path.toStdWString());
+        if (!folderFid.empty()) {
+            if (DatabaseManager::instance().mountScopedDb(path.toStdWString(), folderFid)) {
+                m_currentScopedFid = folderFid;
+                MetadataManager::instance().setScopedMode(folderFid);
+                // 预加载已有的局部元数据到内存
+                MetadataManager::instance().loadFromScopedDb(folderFid);
+                hasScopedDb = true;
+            }
+        }
+    }
+
     QPointer<ContentPanel> panelPtr(this); 
-    (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive, reqId]() { 
+    (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive, reqId, hasScopedDb]() {
         if (!panelPtr) return; 
          
         std::vector<ItemRecord> allItems;
@@ -2102,6 +2131,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             for (const QFileInfo& info : entries) { 
                 if (!panelPtr) return; 
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
+                if (info.fileName() == ".arcmeta") continue;
  
                 QString absPath = info.absoluteFilePath();
                 allItems.push_back(ContentPanel::createItemRecord(absPath));
