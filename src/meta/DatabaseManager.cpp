@@ -65,6 +65,9 @@ DatabaseManager::~DatabaseManager() {
     for (auto& pair : m_driveDbs) {
         closeDb(pair.second);
     }
+    for (auto& pair : m_scopedDbs) {
+        closeDb(pair.second);
+    }
     closeDb(m_globalDb);
 }
 
@@ -248,6 +251,9 @@ void DatabaseManager::flushAll() {
     for (auto& pair : m_driveDbs) {
         saveDb(pair.second);
     }
+    for (auto& pair : m_scopedDbs) {
+        saveDb(pair.second);
+    }
 }
 
 bool DatabaseManager::flushStep() {
@@ -299,9 +305,16 @@ void DatabaseManager::shutdown() {
     
     forceFinish(m_globalDb);
     for (auto& pair : m_driveDbs) forceFinish(pair.second);
+    for (auto& pair : m_scopedDbs) forceFinish(pair.second);
 
     // 关闭所有句柄 (1.21：解除物理占用)
     for (auto& pair : m_driveDbs) {
+        if (pair.second.memDb) sqlite3_close_v2(pair.second.memDb);
+        if (pair.second.diskDb) sqlite3_close_v2(pair.second.diskDb);
+        pair.second.memDb = nullptr;
+        pair.second.diskDb = nullptr;
+    }
+    for (auto& pair : m_scopedDbs) {
         if (pair.second.memDb) sqlite3_close_v2(pair.second.memDb);
         if (pair.second.diskDb) sqlite3_close_v2(pair.second.diskDb);
         pair.second.memDb = nullptr;
@@ -329,6 +342,52 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial) {
 
 sqlite3* DatabaseManager::getGlobalDb() {
     return m_globalDb.memDb;
+}
+
+sqlite3* DatabaseManager::mountScopedDb(const std::wstring& folderPath, const std::string& folderFid) {
+    if (folderFid.empty()) return nullptr;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_scopedDbs.find(folderFid) != m_scopedDbs.end()) {
+        return m_scopedDbs[folderFid].memDb;
+    }
+
+    QString scopedMetaDir = QString::fromStdWString(folderPath) + "/.arcmeta";
+    QDir().mkpath(scopedMetaDir);
+    ensureHidden(scopedMetaDir.toStdWString());
+
+    QString dbPath = scopedMetaDir + "/" + QString::fromStdString(folderFid) + ".db";
+
+    DbConnection conn;
+    if (loadDb(dbPath.toStdWString(), conn)) {
+        m_scopedDbs[folderFid] = conn;
+        qDebug() << "[DB] Mounted Scoped DB:" << dbPath;
+        return conn.memDb;
+    }
+    return nullptr;
+}
+
+void DatabaseManager::unmountScopedDb(const std::string& folderFid) {
+    if (folderFid.empty()) return;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_scopedDbs.find(folderFid);
+    if (it != m_scopedDbs.end()) {
+        qDebug() << "[DB] Unmounting Scoped DB for FID:" << QString::fromStdString(folderFid);
+        closeDb(it->second);
+        m_scopedDbs.erase(it);
+    }
+}
+
+sqlite3* DatabaseManager::getScopedDb(const std::string& folderFid) {
+    if (folderFid.empty()) return nullptr;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_scopedDbs.find(folderFid);
+    if (it != m_scopedDbs.end()) {
+        return it->second.memDb;
+    }
+    return nullptr;
 }
 
 } // namespace ArcMeta

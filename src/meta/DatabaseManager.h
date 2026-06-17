@@ -68,6 +68,24 @@ public:
      */
     sqlite3* getGlobalDb();
 
+    /**
+     * @brief 挂载局部数据库 (Scoped DB)
+     * @param folderPath 文件夹物理路径
+     * @param folderFid 文件夹的 File ID
+     */
+    sqlite3* mountScopedDb(const std::wstring& folderPath, const std::string& folderFid);
+
+    /**
+     * @brief 卸载局部数据库
+     * @param folderFid 文件夹的 File ID
+     */
+    void unmountScopedDb(const std::string& folderFid);
+
+    /**
+     * @brief 获取已挂载的局部数据库句柄
+     */
+    sqlite3* getScopedDb(const std::string& folderFid);
+
 private:
     DatabaseManager(QObject* parent = nullptr);
     ~DatabaseManager();
@@ -80,6 +98,7 @@ private:
     };
 
     std::map<std::wstring, DbConnection> m_driveDbs;
+    std::map<std::string, DbConnection> m_scopedDbs; // 2026-07-xx: FID -> Scoped DB
     DbConnection m_globalDb;
     std::mutex m_mutex;
 
