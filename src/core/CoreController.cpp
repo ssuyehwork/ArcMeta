@@ -1,6 +1,7 @@
 #include "CoreController.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
+#include "../ui/Logger.h"
 #include <QThreadPool>
 #include <QDebug>
 #include <QDateTime>
@@ -54,13 +55,21 @@ void CoreController::startSystem() {
 }
 
 void CoreController::performSearch(const QString& keyword, const QString& scopeSource, int categoryId, const QString& parentPath) {
-    if (keyword.isEmpty()) return;
-    
-    // 1. 中止旧任务
+    // 1. 物理中止旧任务：无论新词是否为空，只要发起 performSearch 就必须清理前序任务
     abortSearch();
+
+    ArcMeta::Logger::log(QString("[Core] performSearch 触发 -> 词: %1 | 来源: %2 | 路径: %3")
+                        .arg(keyword).arg(scopeSource).arg(parentPath));
+
+    if (keyword.isEmpty()) {
+        ArcMeta::Logger::log("[Core] 关键词为空，跳过执行检索流程");
+        return;
+    }
+
     m_isSearchAborted = false;
     m_isSearching = true;
 
+    ArcMeta::Logger::log("[Core] 搜索任务已启动，正在发射 searchStarted 信号...");
     emit searchStarted();
 
     // 2. 异步启动双轨搜索任务
@@ -78,6 +87,7 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
 
         // 发射第一批缓存结果
         if (!m_isSearchAborted) {
+            ArcMeta::Logger::log(QString("[Core] 缓存阶段发现 %1 条结果，正在流式传输...").arg(cacheResults.size()));
             emit searchResultsAvailable(cacheResults, false);
         }
 
@@ -117,7 +127,10 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
 
         m_isSearching = false;
         if (!m_isSearchAborted) {
+            ArcMeta::Logger::log(QString("[Core] 搜索总计发现 %1 项，发送 searchFinished 信号").arg(totalFound));
             emit searchFinished(totalFound);
+        } else {
+            ArcMeta::Logger::log("[Core] 搜索任务被中途中止");
         }
     });
 }

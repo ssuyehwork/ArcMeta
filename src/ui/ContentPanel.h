@@ -277,7 +277,8 @@ private:
     int m_currentCategoryId = -1;
     QString m_currentCategoryType; // 用于驱动差异化右键菜单
     bool m_isRecursive = false;
-    bool m_isLoading = false; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
+    std::atomic<bool> m_isLoading{false}; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
+    std::atomic<int> m_loadRequestId{0}; // 2026-07-xx 物理请求 ID：防止异步回调导致的视图内容乱跳
 
     // --- 2026-06-xx 性能优化：递归扫描指纹缓存 ---
     struct ScanCacheEntry {

@@ -2050,8 +2050,10 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     m_isLoading = true;
+    int reqId = ++m_loadRequestId;
     m_currentCategoryType = ""; // 物理导航模式下清除系统类型
-    qDebug() << "[Content] 开始物理递归扫描 (虚拟化) ->" << path << (recursive ? "递归" : "单级"); 
+    ArcMeta::Logger::log(QString("[Content] 开始物理递归扫描 (虚拟化) [%1] -> %2 (%3)")
+                        .arg(reqId).arg(path).arg(recursive ? "递归" : "单级"));
     emit dataSourceChanged("nav"); 
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
@@ -2113,14 +2115,17 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         scanDir(path, recursive); 
         if (!panelPtr) return; 
  
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems]() { 
-            if (panelPtr && panelPtr->m_currentPath == path) { 
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, reqId]() {
+            if (panelPtr && panelPtr->m_loadRequestId == reqId) {
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
                 // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
                 panelPtr->applyFilters();
-            } 
+                ArcMeta::Logger::log(QString("[Content] 目录扫描完成并已应用到 UI [%1]").arg(reqId));
+            } else if (panelPtr) {
+                ArcMeta::Logger::log(QString("[Content] 拦截到过期的目录扫描回调 [%1], 当前 ID: %2").arg(reqId).arg(panelPtr->m_loadRequestId.load()));
+            }
         }, Qt::QueuedConnection); 
     }); 
 } 
@@ -2141,7 +2146,17 @@ void ContentPanel::search(const QString& query) {
         proxy->setSearchQuery(query);
     }
 
+    // 2026-07-xx 物理补全：如果关键词为空，执行显式重置并停止后续执行
+    if (query.isEmpty()) {
+        m_isLoading = false;
+        m_model->clear();
+        CoreController::instance().abortSearch();
+        recalculateAndEmitStats();
+        return;
+    }
+
     m_isLoading = true;
+    int reqId = ++m_loadRequestId;
     m_model->clear();
     
     // 核心逻辑：发起异步搜索。此处参数采用默认值，因为特定的范围感知搜索
@@ -2254,12 +2269,15 @@ void ContentPanel::loadCategory(int categoryId) {
             }
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, allRecords]() {
-            if (weakThis) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, allRecords, reqId]() {
+            if (weakThis && weakThis->m_loadRequestId == reqId) {
                 weakThis->m_model->setRecords(allRecords);
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
+                ArcMeta::Logger::log(QString("[Content] 分类加载完成 [%1]").arg(reqId));
+            } else if (weakThis) {
+                ArcMeta::Logger::log(QString("[Content] 拦截到过期的分类加载回调 [%1]").arg(reqId));
             }
         });
     });
@@ -2269,20 +2287,30 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     // 2026-07-xx 物理强化：如果路径列表为空，直接执行同步清理并返回
     // 理由：这防止了搜索启动时的清空动作（异步）与随后到达的结果加载（异步）发生竞态。
     if (paths.isEmpty()) {
+        ArcMeta::Logger::log("[Content] loadPaths 收到空路径，执行同步清空");
+        m_loadRequestId++; // 增加 ID 以作废之前的异步加载
         m_model->clear();
         m_isLoading = false;
         recalculateAndEmitStats();
         return;
     }
 
-    // 2026-07-xx 物理防护：防重入机制 (路径列表通常用于系统项，暂不进行深度内容比对)
+    // 2026-07-xx 物理防护：防重入机制。注意：如果是搜索结果加载，则不应被 isLoading 拦截，
+    // 因为搜索信号是由 searchStarted 异步驱动的，其本身也会设置 isLoading。
     if (m_isLoading && m_currentCategoryType == "path_list") {
         return;
     }
 
     m_isLoading = true;
-    // 2026-07-xx 逻辑校准：如果当前是搜索态，则保持搜索态，否则标记为路径列表
-    if (m_currentCategoryType != "search") {
+    int reqId = ++m_loadRequestId;
+    // 2026-07-xx 逻辑校准：保持既有的系统分类类型（如 trash/recently_visited），
+    // 仅在明确不是这些特殊类型且不是 search 时，才将其降级为通用的 path_list。
+    if (m_currentCategoryType != "search" &&
+        m_currentCategoryType != "trash" &&
+        m_currentCategoryType != "recently_visited" &&
+        m_currentCategoryType != "untagged" &&
+        m_currentCategoryType != "uncategorized" &&
+        m_currentCategoryType != "all") {
         m_currentCategoryType = "path_list";
     }
     
@@ -2308,12 +2336,15 @@ void ContentPanel::loadPaths(const QStringList& paths) {
             }
         }
         
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records]() {
-            if (weakThis) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records, reqId]() {
+            if (weakThis && weakThis->m_loadRequestId == reqId) {
                 weakThis->m_model->setRecords(records);
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
+                ArcMeta::Logger::log(QString("[Content] 路径列表加载完成 [%1]").arg(reqId));
+            } else if (weakThis) {
+                ArcMeta::Logger::log(QString("[Content] 拦截到过期的路径列表加载回调 [%1]").arg(reqId));
             }
         });
     });

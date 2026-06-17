@@ -67,7 +67,7 @@ private:
     
     // 2026-07-xx 按照 Plan-57：搜索状态管理
     std::atomic<bool> m_isSearchAborted{false};
-    bool m_isSearching = false;
+    std::atomic<bool> m_isSearching{false};
 };
 
 } // namespace ArcMeta
