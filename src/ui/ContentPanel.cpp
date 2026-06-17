@@ -2088,7 +2088,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     updateLayersButtonState(); 
      
     QPointer<ContentPanel> panelPtr(this); 
-    (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive]() { 
+    (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive, reqId]() {
         if (!panelPtr) return; 
          
         std::vector<ItemRecord> allItems;
@@ -2227,6 +2227,7 @@ void ContentPanel::loadCategory(int categoryId) {
     }
 
     m_isLoading = true;
+    int reqId = ++m_loadRequestId;
     m_currentCategoryType = "user_category";
     m_currentCategoryId = categoryId;
     m_viewStack->show(); 
@@ -2237,7 +2238,7 @@ void ContentPanel::loadCategory(int categoryId) {
     m_model->clear(); 
  
     QPointer<ContentPanel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, categoryId]() {
+    (void)QtConcurrent::run([weakThis, categoryId, reqId]() {
         std::vector<ItemRecord> allRecords;
 
         // 1. 加载子分类
@@ -2326,7 +2327,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     m_model->clear(); 
  
     QPointer<ContentPanel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, paths]() {
+    (void)QtConcurrent::run([weakThis, paths, reqId]() {
         std::vector<ItemRecord> records;
         records.reserve(static_cast<int>(paths.size()));
         for (const QString& p : paths) {

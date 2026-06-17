@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "MainWindow.h"
+#include "Logger.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"
 #include "TrayController.h"
