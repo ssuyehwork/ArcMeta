@@ -2,6 +2,9 @@
 #include <QDir>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <windows.h>
 #include "MetadataManager.h"
 
@@ -329,6 +332,116 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial) {
 
 sqlite3* DatabaseManager::getGlobalDb() {
     return m_globalDb.memDb;
+}
+
+sqlite3* DatabaseManager::openScopedDb(const std::wstring& dbPath) {
+    // 2026-07-xx 按照 Plan-58：文件夹专属数据库加载。
+    // 注意：此类数据库不进入全局 m_driveDbs 管理，由调用方负责生命周期。
+    sqlite3* db = nullptr;
+    std::string utf8Path = QString::fromStdWString(dbPath).toUtf8().toStdString();
+
+    if (sqlite3_open_v2(utf8Path.c_str(), &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) == SQLITE_OK) {
+        // 物理同步：初始化 Scoped DB 表结构（复用主库 Schema 定义）
+        const char* schema = R"(
+            CREATE TABLE IF NOT EXISTS metadata (
+                file_id TEXT PRIMARY KEY,
+                path TEXT NOT NULL,
+                is_folder INTEGER DEFAULT 0,
+                rating INTEGER DEFAULT 0,
+                color TEXT,
+                tags TEXT,
+                note TEXT,
+                url TEXT,
+                ctime INTEGER,
+                mtime INTEGER,
+                atime INTEGER,
+                file_size INTEGER,
+                palettes BLOB,
+                is_trash INTEGER DEFAULT 0,
+                original_path TEXT,
+                is_invalid INTEGER DEFAULT 0,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
+
+            -- 系统统计表，用于记录 Scan_Timestamp
+            CREATE TABLE IF NOT EXISTS system_stats (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
+        )";
+        sqlite3_exec(db, schema, nullptr, nullptr, nullptr);
+        return db;
+    }
+
+    if (db) sqlite3_close(db);
+    return nullptr;
+}
+
+void DatabaseManager::closeScopedDb(sqlite3* db) {
+    if (db) {
+        sqlite3_close(db);
+    }
+}
+
+bool DatabaseManager::exportToScopedDb(const std::wstring& dbPath, const std::vector<ItemRecord>& records, long long scanTimestamp) {
+    sqlite3* db = openScopedDb(dbPath);
+    if (!db) return false;
+
+    char* errMsg = nullptr;
+    sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, &errMsg);
+
+    // 1. 写入元数据记录
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        for (const auto& r : records) {
+            sqlite3_bind_text(stmt, 1, r.fileId.toStdString().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text16(stmt, 2, r.path.toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 3, r.isDir ? 1 : 0);
+            sqlite3_bind_int(stmt, 4, r.rating);
+            sqlite3_bind_text16(stmt, 5, r.color.toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text16(stmt, 6, r.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text16(stmt, 7, r.note.toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text16(stmt, 8, r.url.toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(stmt, 9, r.ctime);
+            sqlite3_bind_int64(stmt, 10, r.mtime);
+            sqlite3_bind_int64(stmt, 11, r.atime);
+            sqlite3_bind_int64(stmt, 12, r.size);
+
+            QJsonArray arr;
+            for (const auto& pe : r.palettes) {
+                QJsonObject obj;
+                obj["color"] = pe.color.name();
+                obj["ratio"] = (double)pe.ratio;
+                arr.append(obj);
+            }
+            QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
+            sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 14, r.isTrash ? 1 : 0);
+            sqlite3_bind_text16(stmt, 15, r.originalPath.toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 16, r.isInvalid ? 1 : 0);
+            sqlite3_bind_int(stmt, 17, r.width);
+            sqlite3_bind_int(stmt, 18, r.height);
+
+            sqlite3_step(stmt);
+            sqlite3_reset(stmt);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    // 2. 写入扫描时间戳
+    const char* tsSql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES ('Scan_Timestamp', ?)";
+    if (sqlite3_prepare_v2(db, tsSql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, QString::number(scanTimestamp).toStdString().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+
+    sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
+    sqlite3_close(db);
+    return true;
 }
 
 } // namespace ArcMeta

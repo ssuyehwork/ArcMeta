@@ -866,6 +866,8 @@ std::wstring MetadataManager::getVolumeSerialNumber(const std::wstring& path) {
 }
 
 bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::string& outId128, std::wstring* outFrn, long long* outSize, std::wstring* outType, long long* outCtime, long long* outMtime, long long* outAtime) {
+    // 2026-07-xx 按照 Plan-58：物理升级至 128 位 File ID 提取。
+    // 理由：GetFileInformationByHandle 仅提供 64 位 Index，在现代大规模文件系统（如 ReFS）下存在碰撞风险。
     HANDLE hFile = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     std::wstring vol = getVolumeSerialNumber(path);
     if (hFile == INVALID_HANDLE_VALUE) {
@@ -873,27 +875,57 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
         outId128 = MetadataManager::generateDeterministicSha256Id(path);
         return false;
     }
-    BY_HANDLE_FILE_INFORMATION basicInfo;
-    if (GetFileInformationByHandle(hFile, &basicInfo)) {
-        wchar_t frnBuf[17];
-        unsigned long long fullFrn = (static_cast<unsigned long long>(basicInfo.nFileIndexHigh) << 32) | basicInfo.nFileIndexLow;
-        swprintf(frnBuf, 17, L"%016llX", fullFrn);
-        if (outFrn) *outFrn = frnBuf;
-        outId128 = MetadataManager::generateFallbackFid(vol, frnBuf);
-        if (outSize) *outSize = (static_cast<long long>(basicInfo.nFileSizeHigh) << 32) | basicInfo.nFileSizeLow;
-        if (outType) *outType = (basicInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? L"folder" : L"file";
-        auto toMS = [](const FILETIME& ft) {
-            ULARGE_INTEGER ull; ull.LowPart = ft.dwLowDateTime; ull.HighPart = ft.dwHighDateTime;
-            return static_cast<long long>((ull.QuadPart - 116444736000000000ULL) / 10000ULL);
-        };
-        if (outCtime) *outCtime = toMS(basicInfo.ftCreationTime);
-        if (outMtime) *outMtime = toMS(basicInfo.ftLastWriteTime);
-        if (outAtime) *outAtime = toMS(basicInfo.ftLastAccessTime);
-        CloseHandle(hFile);
-        return true;
+
+    FILE_ID_INFO idInfo;
+    bool success = false;
+    if (GetFileInformationByHandleEx(hFile, FileIdInfo, &idInfo, sizeof(idInfo))) {
+        // 提取 128-bit 物理 ID
+        char hex[33];
+        for (int i = 0; i < 16; ++i) {
+            sprintf(hex + i * 2, "%02X", idInfo.FileId.Identifier[i]);
+        }
+        std::string fid128(hex);
+        outId128 = fid128;
+        if (outFrn) *outFrn = QString::fromStdString(fid128).toStdWString();
+
+        // 补充其他基础属性
+        BY_HANDLE_FILE_INFORMATION basicInfo;
+        if (GetFileInformationByHandle(hFile, &basicInfo)) {
+            if (outSize) *outSize = (static_cast<long long>(basicInfo.nFileSizeHigh) << 32) | basicInfo.nFileSizeLow;
+            if (outType) *outType = (basicInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? L"folder" : L"file";
+            auto toMS = [](const FILETIME& ft) {
+                ULARGE_INTEGER ull; ull.LowPart = ft.dwLowDateTime; ull.HighPart = ft.dwHighDateTime;
+                return static_cast<long long>((ull.QuadPart - 116444736000000000ULL) / 10000ULL);
+            };
+            if (outCtime) *outCtime = toMS(basicInfo.ftCreationTime);
+            if (outMtime) *outMtime = toMS(basicInfo.ftLastWriteTime);
+            if (outAtime) *outAtime = toMS(basicInfo.ftLastAccessTime);
+        }
+        success = true;
+    } else {
+        // 回退逻辑：如果系统不支持 FileIdInfo，则使用传统的 64 位 Index 模拟
+        BY_HANDLE_FILE_INFORMATION basicInfo;
+        if (GetFileInformationByHandle(hFile, &basicInfo)) {
+            wchar_t frnBuf[17];
+            unsigned long long fullFrn = (static_cast<unsigned long long>(basicInfo.nFileIndexHigh) << 32) | basicInfo.nFileIndexLow;
+            swprintf(frnBuf, 17, L"%016llX", fullFrn);
+            if (outFrn) *outFrn = frnBuf;
+            outId128 = MetadataManager::generateFallbackFid(vol, frnBuf);
+            if (outSize) *outSize = (static_cast<long long>(basicInfo.nFileSizeHigh) << 32) | basicInfo.nFileSizeLow;
+            if (outType) *outType = (basicInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? L"folder" : L"file";
+            auto toMS = [](const FILETIME& ft) {
+                ULARGE_INTEGER ull; ull.LowPart = ft.dwLowDateTime; ull.HighPart = ft.dwHighDateTime;
+                return static_cast<long long>((ull.QuadPart - 116444736000000000ULL) / 10000ULL);
+            };
+            if (outCtime) *outCtime = toMS(basicInfo.ftCreationTime);
+            if (outMtime) *outMtime = toMS(basicInfo.ftLastWriteTime);
+            if (outAtime) *outAtime = toMS(basicInfo.ftLastAccessTime);
+            success = true;
+        }
     }
+
     CloseHandle(hFile);
-    return false;
+    return success;
 }
 
 void MetadataManager::syncPhysicalMetadata(const std::wstring& path, bool notify) { persistAsync(path, notify); }

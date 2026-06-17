@@ -179,7 +179,53 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
         currentTrans->commit();
         delete currentTrans;
 
-        // C. 完成阶段
+        // C. 导出阶段 (Plan-58: Scoped DB 物理落地)
+        if (!context->isCancelled && !paths.isEmpty()) {
+            QString rootPath = paths.first(); // 简化逻辑：仅对第一个导入根目录尝试导出
+            std::wstring wRoot = QDir::toNativeSeparators(rootPath).toStdWString();
+            std::string fid;
+            MetadataManager::fetchWinApiMetadataDirect(wRoot, fid);
+            if (!fid.empty()) {
+                QString dbPath = rootPath + "/.arcmeta/" + QString::fromStdString(fid) + ".db";
+                QDir().mkpath(rootPath + "/.arcmeta");
+
+                // 从内存拉取该目录下所有已加载记录
+                std::vector<ItemRecord> exportRecords;
+                MetadataManager::instance().forEachCachedItem([&](const std::wstring& p, const RuntimeMeta& rm) {
+                    QString qp = QString::fromStdWString(p);
+                    if (qp.startsWith(rootPath)) {
+                        ItemRecord r;
+                        r.fileId = QString::fromStdString(rm.fileId128);
+                        r.path = qp;
+                        r.isDir = rm.isFolder;
+                        r.rating = rm.rating;
+                        r.color = QString::fromStdWString(rm.color);
+                        r.tags = rm.tags;
+                        r.note = QString::fromStdWString(rm.note);
+                        r.url = QString::fromStdWString(rm.url);
+                        r.ctime = rm.ctime;
+                        r.mtime = rm.mtime;
+                        r.atime = rm.atime;
+                        r.size = rm.fileSize;
+                        r.width = rm.width;
+                        r.height = rm.height;
+                        r.isTrash = rm.isTrash;
+                        r.isInvalid = rm.isInvalid;
+                        r.originalPath = QString::fromStdWString(rm.originalPath);
+                        r.palettes.clear();
+                        for (const auto& pe : rm.palettes) r.palettes.push_back({pe.color, pe.ratio});
+                        exportRecords.push_back(r);
+                    }
+                });
+
+                if (!exportRecords.empty()) {
+                    DatabaseManager::instance().exportToScopedDb(dbPath.toStdWString(), exportRecords, QDateTime::currentMSecsSinceEpoch());
+                    ArcMeta::Logger::log(QString("[Import] 已完成 Scoped DB 物理落地: %1").arg(dbPath));
+                }
+            }
+        }
+
+        // D. 完成阶段
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, currentHandled]() {
             if (context->isCancelled) return;
 

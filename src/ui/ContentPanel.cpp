@@ -839,6 +839,11 @@ void ContentPanel::initUi() {
             loadDirectory(m_currentPath, false); 
         } 
     }); 
+
+    connect(m_btnLayersBlue, &QPushButton::clicked, [this]() {
+        if (m_currentPath.isEmpty() || m_currentPath == "computer://") return;
+        loadDirectoryScoped(m_currentPath);
+    });
  
     titleL->addWidget(titleLabel); 
     titleL->addStretch(); 
@@ -2048,6 +2053,121 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
     } 
 } 
  
+void ContentPanel::loadDirectoryScoped(const QString& path) {
+    m_isLoading = true;
+    int reqId = ++m_loadRequestId;
+    m_currentCategoryType = "scoped_load";
+    ArcMeta::Logger::log(QString("[Content] 发起 Scoped 瞬时加载 [%1] -> %2").arg(reqId).arg(path));
+
+    QPointer<ContentPanel> weakThis(this);
+    (void)QtConcurrent::run([weakThis, path, reqId]() {
+        #ifdef Q_OS_WIN
+        CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+        #endif
+
+        std::wstring wPath = QDir::toNativeSeparators(path).toStdWString();
+        std::string fid;
+        MetadataManager::fetchWinApiMetadataDirect(wPath, fid);
+
+        if (fid.empty()) {
+            ArcMeta::Logger::log(QString("[Content] Scoped 加载失败：无法提取 FID [%1]").arg(reqId));
+            return;
+        }
+
+        // 构造 Scoped DB 物理路径: {Folder}/.arcmeta/{FID}.db
+        QString dbDir = path + "/.arcmeta";
+        QString dbPath = dbDir + "/" + QString::fromStdString(fid) + ".db";
+        std::wstring wDbPath = QDir::toNativeSeparators(dbPath).toStdWString();
+
+        sqlite3* db = DatabaseManager::instance().openScopedDb(wDbPath);
+        if (!db) {
+            ArcMeta::Logger::log(QString("[Content] Scoped 加载失败：DB 无法打开 [%1]").arg(reqId));
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis]() { if(weakThis) weakThis->m_isLoading = false; });
+            return;
+        }
+
+        // 1. 校验时效性 (Scan_Timestamp vs Folder_MTime)
+        bool expired = true;
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(db, "SELECT value FROM system_stats WHERE key = 'Scan_Timestamp'", -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                long long cachedTs = QString::fromUtf8((const char*)sqlite3_column_text(stmt, 0)).toLongLong();
+                QFileInfo folderInfo(path);
+                if (cachedTs >= folderInfo.lastModified().toMSecsSinceEpoch()) {
+                    expired = false;
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+
+        if (expired) {
+            ArcMeta::Logger::log(QString("[Content] Scoped DB 已过期，需要重新扫描 [%1]").arg(reqId));
+            DatabaseManager::instance().closeScopedDb(db);
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis]() {
+                if(weakThis) {
+                    weakThis->m_isLoading = false;
+                    ToolTipOverlay::instance()->showText(QCursor::pos(), "缓存数据可能已过期，请执行“重新扫描”", 2000, QColor("#E24B4A"));
+                }
+            });
+            return;
+        }
+
+        // 2. 加载记录
+        std::vector<ItemRecord> records;
+        if (sqlite3_prepare_v2(db, "SELECT * FROM metadata", -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                ItemRecord r;
+                r.fileId = (const char*)sqlite3_column_text(stmt, 0);
+                r.path = QString::fromWCharArray((const wchar_t*)sqlite3_column_text16(stmt, 1));
+                r.isDir = sqlite3_column_int(stmt, 2) != 0;
+                r.rating = sqlite3_column_int(stmt, 3);
+                r.color = QString::fromWCharArray((const wchar_t*)sqlite3_column_text16(stmt, 4));
+                QString tagsStr = QString::fromWCharArray((const wchar_t*)sqlite3_column_text16(stmt, 5));
+                r.tags = tagsStr.split(",", Qt::SkipEmptyParts);
+                r.note = QString::fromWCharArray((const wchar_t*)sqlite3_column_text16(stmt, 6));
+                r.url = QString::fromWCharArray((const wchar_t*)sqlite3_column_text16(stmt, 7));
+                r.ctime = sqlite3_column_int64(stmt, 8);
+                r.mtime = sqlite3_column_int64(stmt, 9);
+                r.atime = sqlite3_column_int64(stmt, 10);
+                r.size = sqlite3_column_int64(stmt, 11);
+
+                const void* palBlob = sqlite3_column_blob(stmt, 12);
+                int palSize = sqlite3_column_bytes(stmt, 12);
+                if (palBlob && palSize > 0) {
+                    QJsonDocument doc = QJsonDocument::fromJson(QByteArray((const char*)palBlob, palSize));
+                    for (const auto& v : doc.array()) {
+                        QJsonObject o = v.toObject();
+                        r.palettes.push_back({QColor(o["color"].toString()), (float)o["ratio"].toDouble()});
+                    }
+                }
+
+                r.width = sqlite3_column_int(stmt, 16);
+                r.height = sqlite3_column_int(stmt, 17);
+                r.isManaged = true; // Scoped 出来的项必定是登记项
+                records.push_back(r);
+            }
+            sqlite3_finalize(stmt);
+        }
+
+        DatabaseManager::instance().closeScopedDb(db);
+
+        // 2026-07-xx 按照规则：若 Scoped 加载成功，则物理更新当前路径的时间戳缓存，防止重复扫描
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records, reqId, path]() {
+            if (weakThis && weakThis->m_loadRequestId == reqId) {
+                weakThis->m_model->setRecords(records);
+                weakThis->m_isLoading = false;
+                weakThis->recalculateAndEmitStats();
+                weakThis->applyFilters();
+                ArcMeta::Logger::log(QString("[Content] Scoped 瞬时加载完成 [%1]").arg(reqId));
+            }
+        });
+
+        #ifdef Q_OS_WIN
+        CoUninitialize();
+        #endif
+    });
+}
+
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     m_isLoading = true;
     int reqId = ++m_loadRequestId;

@@ -310,6 +310,12 @@ public slots:
     void loadDirectory(const QString& path, bool recursive = false);
 
     /**
+     * @brief 2026-07-xx 按照 Plan-58：挂载文件夹专属数据库 (Scoped DB) 模式加载
+     * 理由：此模式允许系统在递归显示深层目录时，通过文件夹内的 .arcmeta/FID.db 实现“瞬时加载”。
+     */
+    void loadDirectoryScoped(const QString& path);
+
+    /**
      * @brief 强制重新加载当前视图的所有内容
      */
     void refreshAll();

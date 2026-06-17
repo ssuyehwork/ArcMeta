@@ -8,6 +8,8 @@
 #include <string>
 #include <mutex>
 #include <functional>
+#include <vector>
+#include "../core/IndexedEntry.h"
 
 struct sqlite3;
 
@@ -67,6 +69,27 @@ public:
      * @brief 获取全局数据库内存连接
      */
     sqlite3* getGlobalDb();
+
+    /**
+     * @brief 2026-07-xx 按照 Plan-58：打开文件夹专属数据库 (Scoped DB)
+     * @param dbPath 物理数据库路径 (通常位于 {Folder}/.arcmeta/{FID}.db)
+     * @return 成功返回 sqlite3 句柄，失败返回 nullptr
+     */
+    sqlite3* openScopedDb(const std::wstring& dbPath);
+
+    /**
+     * @brief 关闭指定的 Scoped DB
+     */
+    void closeScopedDb(sqlite3* db);
+
+    /**
+     * @brief 2026-07-xx 按照 Plan-58：将元数据记录导出到 Scoped DB
+     * @param dbPath 目标 Scoped DB 路径
+     * @param records 待导出的记录列表
+     * @param scanTimestamp 扫描时间戳（用于时效性校验）
+     * @return 成功返回 true
+     */
+    bool exportToScopedDb(const std::wstring& dbPath, const std::vector<ItemRecord>& records, long long scanTimestamp);
 
 private:
     DatabaseManager(QObject* parent = nullptr);
