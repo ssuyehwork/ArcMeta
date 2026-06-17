@@ -834,11 +834,23 @@ void ContentPanel::initUi() {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "当前文件夹不支持显示子文件夹项目", 1500, QColor("#E81123")); 
                 return; 
             } 
+
+            // 2026-07-xx 按照 Scoped DB 方案：开启递归时，尝试加载 Scoped 数据库实现秒开
+            MetadataManager::instance().loadScopedDb(m_currentPath.toStdWString());
             loadDirectory(m_currentPath, true); 
         } else { 
+            // 退出递归模式，卸载 Scoped DB
+            MetadataManager::instance().unloadScopedDb();
             loadDirectory(m_currentPath, false); 
         } 
     }); 
+
+    connect(m_btnLayersBlue, &QPushButton::clicked, [this]() {
+        // 2026-07-xx 按照内存规格：蓝色按钮关联 Scoped DB 瞬时加载
+        m_btnLayers->setChecked(true);
+        MetadataManager::instance().loadScopedDb(m_currentPath.toStdWString());
+        loadDirectory(m_currentPath, true);
+    });
  
     titleL->addWidget(titleLabel); 
     titleL->addStretch(); 
@@ -1754,6 +1766,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionBatchRename: performBatchRename(); break; 
         case ActionAddToCategory: {
             if (path.isEmpty()) break;
+
+            // 2026-07-xx 按照 Scoped DB 方案：入库前迁移 Scoped 数据到全局库
+            if (m_isRecursive) {
+                MetadataManager::instance().migrateScopedData(m_currentPath.toStdWString());
+            }
+
             // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
             // 扫描入库时，镜像分类始终创建在“我的分类”根节点 (ID = 0)
             ImportHelper::importPaths({path}, 0, this);
@@ -2084,6 +2102,11 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         return; 
     } 
  
+    // 2026-07-xx 物理修复：切换目录时，如果开启了 Scoped 模式且路径发生变化，必须先卸载旧 Scoped DB
+    if (m_currentPath != path && !m_currentPath.isEmpty()) {
+        MetadataManager::instance().unloadScopedDb();
+    }
+
     m_currentPath = path; 
     updateLayersButtonState(); 
      

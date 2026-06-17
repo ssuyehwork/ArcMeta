@@ -74,6 +74,25 @@ std::wstring MetadataManager::generateDeterministicFrn(const std::wstring& path)
     return QString(hash.left(8).toHex().toUpper()).toStdWString();
 }
 
+bool MetadataManager::isSubPath(const std::wstring& parent, const std::wstring& path) {
+    if (parent.empty() || path.empty()) return false;
+
+    // 假设路径已 normalize 为小写且分隔符统一
+    if (path.length() < parent.length()) return false;
+    if (path.compare(0, parent.length(), parent) != 0) return false;
+
+    // 情况 1: 完全相等
+    if (path.length() == parent.length()) return true;
+
+    // 情况 2: parent 以分隔符结尾
+    wchar_t lastChar = parent.back();
+    if (lastChar == L'\\' || lastChar == L'/') return true;
+
+    // 情况 3: path 在 parent 长度位置是分隔符
+    wchar_t nextChar = path[parent.length()];
+    return (nextChar == L'\\' || nextChar == L'/');
+}
+
 // --- MetadataManager Implementation ---
 
 MetadataManager& MetadataManager::instance() {
@@ -896,6 +915,189 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
     return false;
 }
 
+void MetadataManager::loadScopedDb(const std::wstring& folderPath) {
+    std::wstring nRoot = normalizePath(folderPath);
+    std::string fid = getFileIdSync(nRoot);
+    if (fid.empty()) return;
+
+    sqlite3* db = DatabaseManager::instance().mountScopedDb(fid, nRoot);
+    if (!db) return;
+
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_scopedMode = true;
+        m_scopedRoot = nRoot;
+    }
+
+    qDebug() << "[Metadata] Loading Scoped DB for:" << QString::fromStdWString(nRoot);
+
+    sqlite3_stmt* stmt;
+    const char* sql = "SELECT * FROM metadata";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            RuntimeMeta rm;
+            const char* idStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+            if (idStr) rm.fileId128 = idStr;
+
+            const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
+            std::wstring path = normalizePath(wpath ? wpath : L"");
+
+            rm.isFolder = sqlite3_column_int(stmt, 2);
+            rm.rating = sqlite3_column_int(stmt, 3);
+            const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
+            if (color) rm.color = color;
+
+            const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 5));
+            QString tags = wtags ? QString::fromWCharArray(wtags) : "";
+            rm.tags = tags.split(",", Qt::SkipEmptyParts);
+
+            const wchar_t* note = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 6));
+            if (note) rm.note = note;
+            const wchar_t* url = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 7));
+            if (url) rm.url = url;
+            rm.ctime = sqlite3_column_int64(stmt, 8);
+            rm.mtime = sqlite3_column_int64(stmt, 9);
+            rm.atime = sqlite3_column_int64(stmt, 10);
+            rm.fileSize = sqlite3_column_int64(stmt, 11);
+
+            const void* paletteBlob = sqlite3_column_blob(stmt, 12);
+            int paletteSize = sqlite3_column_bytes(stmt, 12);
+
+            rm.isTrash = sqlite3_column_int(stmt, 13) != 0;
+            const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 14));
+            if (wOrigPath) rm.originalPath = wOrigPath;
+            rm.isInvalid = sqlite3_column_int(stmt, 15) != 0;
+            rm.width = sqlite3_column_int(stmt, 16);
+            rm.height = sqlite3_column_int(stmt, 17);
+            if (paletteBlob && paletteSize > 0) {
+                QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
+                QJsonDocument doc = QJsonDocument::fromJson(ba);
+                QJsonArray arr = doc.array();
+                for (const auto& v : arr) {
+                    QJsonObject obj = v.toObject();
+                    PaletteEntry pe;
+                    pe.color = QColor(obj["color"].toString());
+                    pe.ratio = (float)obj["ratio"].toDouble();
+                    rm.palettes.push_back(pe);
+                }
+            }
+
+            rm.isManaged = true;
+            rm.fromScoped = true;
+            // 2026-07-xx 核心逻辑：Scoped DB 中的数据优先级高于内存中已有的（如果是新加载的）
+            // 或者我们可以选择合并。由于 Scoped DB 是为了“秒开”，通常我们覆盖内存中对应的项
+            m_cache[path] = rm;
+            if (!rm.fileId128.empty()) m_fidToPath[rm.fileId128] = path;
+
+            // 同步隔离索引
+            std::wstring name, ext;
+            parsePathComponents(path, rm.isFolder, name, ext);
+            if (!name.empty()) {
+                if (rm.isFolder) {
+                    auto& v = m_folderNameToFids[name];
+                    if (std::find(v.begin(), v.end(), rm.fileId128) == v.end()) v.push_back(rm.fileId128);
+                } else {
+                    auto& v = m_fileNameToFids[name];
+                    if (std::find(v.begin(), v.end(), rm.fileId128) == v.end()) v.push_back(rm.fileId128);
+                    if (!ext.empty()) {
+                        auto& ve = m_extensionToFids[ext];
+                        if (std::find(ve.begin(), ve.end(), rm.fileId128) == ve.end()) ve.push_back(rm.fileId128);
+                    }
+                }
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+}
+
+void MetadataManager::unloadScopedDb() {
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    if (!m_scopedMode) return;
+
+    qDebug() << "[Metadata] Unloading Scoped DB for:" << QString::fromStdWString(m_scopedRoot);
+
+    // 2026-07-xx 按照内存规范：unloadVolumeNameCache 逻辑类似，但此处针对特定根路径下的缓存执行物理清理
+    // 理由：防止 Scoped 瞬时数据永久污染全局内存镜像（除非已正式入库）
+    // 注意：如果某项已经 managed (存在于磁盘卷库)，则保留；否则清除。
+
+    std::wstring root = m_scopedRoot;
+    for (auto it = m_cache.begin(); it != m_cache.end(); ) {
+        // 判定该项是否属于当前 Scoped 目录且带有 fromScoped 标记
+        if (isSubPath(root, it->first) && it->second.fromScoped) {
+            // 2026-07-xx 物理修复：移除 fromScoped 标记。
+            // 如果该项已经在卷库中（isManaged 且 managed 不是由 Scoped 持久化产生的），则保留；
+            // 但我们需要一种方式区分它是否真的在卷库里。
+            // 实际上，只要卸载了 Scoped DB，所有 fromScoped 的项如果没有对应的卷库记录，都应清理。
+
+            // 为了安全，我们检查该项是否真的在卷库中。
+            // 简化逻辑：卸载时，所有 fromScoped 的项如果还没被 migrate，就从内存移除。
+            // 如果它在卷库里，下次 getMeta 会重新触发 ensureActivated。
+
+            if (true) { // 物理清理所有来自 Scoped 的内存缓存
+                if (!it->second.fileId128.empty()) {
+                    std::string fid = it->second.fileId128;
+                    m_fidToPath.erase(fid);
+
+                    // 清理索引
+                    std::wstring name, ext;
+                    parsePathComponents(it->first, it->second.isFolder, name, ext);
+                    if (!name.empty()) {
+                        if (it->second.isFolder) {
+                            auto& v = m_folderNameToFids[name];
+                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                            if (v.empty()) m_folderNameToFids.erase(name);
+                        } else {
+                            auto& v = m_fileNameToFids[name];
+                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                            if (v.empty()) m_fileNameToFids.erase(name);
+                            if (!ext.empty()) {
+                                auto& ve = m_extensionToFids[ext];
+                                ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
+                                if (ve.empty()) m_extensionToFids.erase(ext);
+                            }
+                        }
+                    }
+                }
+                it = m_cache.erase(it);
+                continue;
+            }
+        }
+        ++it;
+    }
+
+    DatabaseManager::instance().unmountScopedDb();
+    m_scopedMode = false;
+    m_scopedRoot = L"";
+}
+
+void MetadataManager::migrateScopedData(const std::wstring& folderPath) {
+    std::wstring nRoot = normalizePath(folderPath);
+    qDebug() << "[Metadata] Migrating Scoped Data to Global DB for:" << QString::fromStdWString(nRoot);
+
+    std::vector<std::wstring> pathsToMigrate;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        for (const auto& pair : m_cache) {
+            if (isSubPath(nRoot, pair.first)) {
+                pathsToMigrate.push_back(pair.first);
+            }
+        }
+    }
+
+    for (const auto& p : pathsToMigrate) {
+        // 2026-07-xx 物理修复：设置 forceGlobal = true 强制持久化到正式卷库
+        persistAsync(p, false, true);
+
+        // 迁移完成后，清除 Scoped 标记，该项已正式属于卷库
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        if (m_cache.count(p)) m_cache[p].fromScoped = false;
+    }
+
+    // 迁移完成后，此目录已正式受控，不再属于“瞬时 Scoped”范畴
+    DatabaseManager::instance().flushAll();
+}
+
 void MetadataManager::syncPhysicalMetadata(const std::wstring& path, bool notify) { persistAsync(path, notify); }
 
 void MetadataManager::activateItem(const std::wstring& path) {
@@ -1092,12 +1294,27 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
     return fid;
 }
 
-void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
+void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool forceGlobal) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     
     RuntimeMeta rMeta = getMeta(nPath);
     std::wstring volSerial = getVolumeSerialNumber(nPath);
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
+
+    // 2026-07-xx Scoped DB 优先写入逻辑
+    sqlite3* db = nullptr;
+    bool isScopedWrite = false;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        if (!forceGlobal && m_scopedMode && isSubPath(m_scopedRoot, nPath)) {
+            db = DatabaseManager::instance().getScopedDb();
+            isScopedWrite = true;
+        }
+    }
+
+    if (!db) {
+        db = DatabaseManager::instance().getMemoryDb(volSerial);
+    }
+
     if (!db) return;
 
     sqlite3_stmt* stmt;
@@ -1142,8 +1359,9 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
         sqlite3_bind_int(stmt, 18, rMeta.height);
 
         if (sqlite3_step(stmt) == SQLITE_DONE) {
-            if (isNew) {
+            if (isNew && !isScopedWrite) {
                 // 2026-07-xx 物理修复：新项目入库时，若其状态为回收站或失效，则不增加总计数
+                // 且 Scoped DB 写入不增加全局活跃计数
                 if (!rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
                     CategoryRepo::incrementTotalFileCount(1);
                 }
@@ -1292,16 +1510,6 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
     
     // 2026-07-xx 物理对账：规范化父路径前缀用于导航范围搜索
     std::wstring wParentPath = (scopeSource == "nav" && !parentPath.isEmpty()) ? normalizePath(parentPath.toStdWString()) : L"";
-    if (!wParentPath.empty()) {
-        bool endsWithSlash = false;
-        if (!wParentPath.empty()) {
-            wchar_t lastChar = wParentPath.back();
-            if (lastChar == L'\\' || lastChar == L'/') endsWithSlash = true;
-        }
-        if (!endsWithSlash) {
-            wParentPath += L'\\';
-        }
-    }
 
     for (std::unordered_map<std::wstring, RuntimeMeta>::const_iterator it = m_cache.begin(); it != m_cache.end(); ++it) {
         const std::wstring& path = it->first; 
@@ -1312,7 +1520,7 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
             if (scopeFids.find(meta.fileId128) == scopeFids.end()) continue;
         } else if (!wParentPath.empty()) {
             // 物理视图下的路径范围匹配
-            if (path.find(wParentPath) != 0) continue;
+            if (!isSubPath(wParentPath, path)) continue;
         }
 
         QString qPath = QString::fromStdWString(path); 

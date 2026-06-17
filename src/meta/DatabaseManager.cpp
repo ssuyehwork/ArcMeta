@@ -66,6 +66,7 @@ DatabaseManager::~DatabaseManager() {
         closeDb(pair.second);
     }
     closeDb(m_globalDb);
+    closeDb(m_scopedDb);
 }
 
 QString DatabaseManager::getAppDir() {
@@ -206,6 +207,10 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     }
 
     conn.diskPath = diskPath;
+
+    // 2026-07-xx 物理同步：如果是新创建的数据库，立即同步一次以写入表结构，防止程序异常退出导致空库
+    saveDb(conn);
+
     return true;
 }
 
@@ -245,6 +250,7 @@ bool DatabaseManager::init() {
 void DatabaseManager::flushAll() {
     std::lock_guard<std::mutex> lock(m_mutex);
     saveDb(m_globalDb);
+    saveDb(m_scopedDb);
     for (auto& pair : m_driveDbs) {
         saveDb(pair.second);
     }
@@ -271,6 +277,7 @@ bool DatabaseManager::flushStep() {
 
     bool allDone = true;
     if (!stepConn(m_globalDb)) allDone = false;
+    if (!stepConn(m_scopedDb)) allDone = false;
     for (auto& pair : m_driveDbs) {
         if (!stepConn(pair.second)) allDone = false;
     }
@@ -298,6 +305,7 @@ void DatabaseManager::shutdown() {
     };
     
     forceFinish(m_globalDb);
+    forceFinish(m_scopedDb);
     for (auto& pair : m_driveDbs) forceFinish(pair.second);
 
     // 关闭所有句柄 (1.21：解除物理占用)
@@ -311,6 +319,11 @@ void DatabaseManager::shutdown() {
     if (m_globalDb.diskDb) sqlite3_close_v2(m_globalDb.diskDb);
     m_globalDb.memDb = nullptr;
     m_globalDb.diskDb = nullptr;
+
+    if (m_scopedDb.memDb) sqlite3_close_v2(m_scopedDb.memDb);
+    if (m_scopedDb.diskDb) sqlite3_close_v2(m_scopedDb.diskDb);
+    m_scopedDb.memDb = nullptr;
+    m_scopedDb.diskDb = nullptr;
 }
 
 sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial) {
@@ -329,6 +342,45 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial) {
 
 sqlite3* DatabaseManager::getGlobalDb() {
     return m_globalDb.memDb;
+}
+
+sqlite3* DatabaseManager::mountScopedDb(const std::string& folderFid, const std::wstring& folderPath) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    // 1. 如果已有挂载的 Scoped DB，先卸载
+    if (m_scopedDb.memDb || m_scopedDb.diskDb) {
+        closeDb(m_scopedDb);
+    }
+
+    // 2. 构造路径: {folderPath}/.arcmeta/{folderFid}.db
+    QString scopedMetaDir = QString::fromStdWString(folderPath) + "/.arcmeta";
+    QDir().mkpath(scopedMetaDir);
+    ensureHidden(scopedMetaDir.toStdWString());
+
+    QString dbName = QString::fromStdString(folderFid);
+    // 移除非法字符 (虽然 FID 通常是安全的)
+    dbName.replace(":", "_");
+    QString dbPath = scopedMetaDir + "/" + dbName + ".db";
+
+    qDebug() << "[DB] Mounting Scoped DB:" << dbPath;
+
+    if (loadDb(dbPath.toStdWString(), m_scopedDb)) {
+        return m_scopedDb.memDb;
+    }
+    return nullptr;
+}
+
+void DatabaseManager::unmountScopedDb() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_scopedDb.memDb || m_scopedDb.diskDb) {
+        qDebug() << "[DB] Unmounting Scoped DB:" << QString::fromStdWString(m_scopedDb.diskPath);
+        closeDb(m_scopedDb);
+    }
+}
+
+sqlite3* DatabaseManager::getScopedDb() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_scopedDb.memDb;
 }
 
 } // namespace ArcMeta

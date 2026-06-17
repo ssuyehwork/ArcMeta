@@ -28,6 +28,7 @@ struct RuntimeMeta {
     bool isTrash;  // 2026-06-xx 状态标记：是否处于回收站
     bool isInvalid; // 2026-06-xx 物理校验：是否为第三方删除导致的失效数据
     bool isManaged; // 2026-06-xx 物理对标：标记该项是否已在数据库中登记
+    bool fromScoped; // 2026-07-xx Scoped 标记：标记该项元数据是否是从 Scoped DB 加载的
     int width;      // 2026-07-xx 物理尺寸：宽 (像素)
     int height;     // 2026-07-xx 物理尺寸：高 (像素)
     std::wstring originalPath; // 2026-06-xx 路径记忆：用于回收站还原
@@ -41,7 +42,7 @@ struct RuntimeMeta {
 
     std::vector<PaletteEntry> palettes;
 
-    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), width(0), height(0), ctime(0), mtime(0), atime(0), fileSize(0) {}
+    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), fromScoped(false), width(0), height(0), ctime(0), mtime(0), atime(0), fileSize(0) {}
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
@@ -64,6 +65,11 @@ public:
     static std::string generateDeterministicSha256Id(const std::wstring& path);
     static std::wstring generateDeterministicFrn(const std::wstring& path);
     static std::wstring normalizePath(const std::wstring& path);
+
+    /**
+     * @brief 判定 path 是否为 parent 的子项或其自身 (物理路径精确匹配)
+     */
+    static bool isSubPath(const std::wstring& parent, const std::wstring& path);
     
     void initFromScchMode();
     RuntimeMeta getMeta(const std::wstring& path);
@@ -218,6 +224,21 @@ public:
     void loadVolumeNameCache(const std::wstring& volSerial);
 
     /**
+     * @brief 加载 Scoped DB 数据到内存
+     */
+    void loadScopedDb(const std::wstring& folderPath);
+
+    /**
+     * @brief 卸载内存中的 Scoped 数据
+     */
+    void unloadScopedDb();
+
+    /**
+     * @brief 迁移 Scoped 数据到全局/卷库 (扫描入库时使用)
+     */
+    void migrateScopedData(const std::wstring& folderPath);
+
+    /**
      * @brief 隔离查询 API
      */
     std::vector<std::string> getFileFidsByName(const std::wstring& filename);
@@ -277,6 +298,8 @@ private:
 
     mutable std::shared_mutex m_mutex;
     bool m_loaded = false; // 2026-06-xx 物理加固：加载状态标记
+    bool m_scopedMode = false; // 2026-07-xx Scoped 模式标记
+    std::wstring m_scopedRoot; // 当前 Scoped 根路径
     
     // 2026-05-25 按照用户要求：改用单例计时器与脏路径集，彻底解决计时器风暴
     QTimer* m_batchTimer = nullptr;
@@ -291,7 +314,7 @@ private:
     std::vector<std::wstring> m_visualRetryQueue;
     void processVisualRetryQueue();
 
-    void persistAsync(const std::wstring& path, bool notify = true);
+    void persistAsync(const std::wstring& path, bool notify = true, bool forceGlobal = false);
     void debouncePersist(const std::wstring& path);
 };
 
