@@ -43,3 +43,18 @@
 
 # 6. 关于“清除”按钮
 ## 6.1 每个可编辑的输入框必须配置上“Qt 原生的 setClearButtonEnabled(true)”，而且只可采用“Qt 原生的 setClearButtonEnabled(true)”，杜绝脑补另创 
+
+// ===================|===================
+
+# 7. 元数据管理与搜索规范
+## 7.1 隔离式多维关联索引
+- **机制**：`MetadataManager` 通过 `m_fileNameToFids`（仅文件）、`m_folderNameToFids`（仅文件夹）及 `m_extensionToFids`（仅后缀，小写，不含点）三个隔离的倒排索引管理名称关联。
+- **一致性**：在项目激活（`ensureActivated`）、重命名（`renameItem`）及删除（`removeMetadataSync`）时，必须同步维护上述三个索引映射。
+- **去重**：注册索引时须执行 `std::find` 检查，防止同一 FID 在同一键下重复注。
+
+## 7.2 “范围感知 (Scope-Aware)” 搜索
+- **核心逻辑**：搜索行为必须实时对标 UI 顶部的 **蓝色提示线 (Focus Line)** 位置。
+- **数据流**：搜索请求必须通过 `CoreController::performSearch` 转发，并携带当前的数据源范围参数（"category" 或 "nav"）。
+- **过滤准则**：
+    - **侧边栏模式**：限定在当前分类及其子类范围内（利用 `CategoryRepo::getItemsRecursive`）。
+    - **目录导航模式**：限定在当前物理磁盘路径及其子目录范围内（通过路径前缀匹配）。

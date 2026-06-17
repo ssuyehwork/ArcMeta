@@ -233,6 +233,7 @@ void MainWindow::initUi() {
     // 1a. 分类选择 -> 内容面板执行数据加载 (针对问题 2)
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_categoryPanel, &CategoryPanel::categorySelected, this, [this](int id, const QString& name, const QString& type, const QString& path) {
+        m_currentCategoryId = id;
         // 2026-07-xx 按照用户要求：实现"标签管理"专属视图模式切换
         if (type == "tags") {
             m_navPanel->hide();
@@ -479,8 +480,8 @@ void MainWindow::initUi() {
         m_searchHistoryPanel->setHistory(m_searchHistory);
         m_searchHistoryPanel->hide();
 
-        // 使用 CoreController 的中枢搜索接口
-        QStringList paths = CoreController::instance().performSearch(keyword);
+        // 使用 CoreController 的中枢搜索接口 (范围感知)
+        QStringList paths = CoreController::instance().performSearch(keyword, m_currentDataSource, m_currentCategoryId, m_currentPath);
         m_contentPanel->loadPaths(paths);
     };
 
@@ -1017,6 +1018,7 @@ void MainWindow::setupSplitters() {
 
     // 2026-05-07 按照用户要求：焦点线持久化显示，基于数据来源而非焦点位置
     connect(m_contentPanel, &ContentPanel::dataSourceChanged, this, [this](const QString& source) {
+        m_currentDataSource = source;
         // 重置所有面板高亮
         if (m_navPanel)      m_navPanel->setFocusHighlight(false);
         if (m_categoryPanel) m_categoryPanel->setFocusHighlight(false);
@@ -1043,6 +1045,7 @@ void MainWindow::setupSplitters() {
         if (m_categoryPanel) m_categoryPanel->selectCategory(-1); // 选中“全部数据”
         if (m_searchEdit) m_searchEdit->setText(tag);
         
+        // 标签跳转默认作为全局搜索处理 (不限范围)
         QStringList paths = MetadataManager::instance().searchInCache(tag);
         m_contentPanel->loadPaths(paths);
     });

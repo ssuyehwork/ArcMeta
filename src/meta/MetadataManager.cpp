@@ -1270,14 +1270,56 @@ QStringList MetadataManager::getPendingSyncDirs() { return {}; }
 void MetadataManager::removeFidsFromLog(const QStringList&) {}
 void MetadataManager::addToSyncLog(const std::wstring&) {}
 
-QStringList MetadataManager::searchInCache(const QString& keyword) {
+QStringList MetadataManager::searchInCache(const QString& keyword, const QString& scopeSource, int categoryId, const QString& parentPath) {
     QStringList results; if (keyword.isEmpty()) return results;
+
+    // 2026-07-xx 按照方案计划：实现范围感知搜索
+    std::unordered_set<std::string> scopeFids;
+    bool hasScope = false;
+
+    if (scopeSource == "category" && categoryId != 0) {
+        // 1. 分类范围搜索：获取该分类及其子分类下的所有 FID
+        auto items = CategoryRepo::getItemsRecursive(categoryId);
+        for (const auto& item : items) scopeFids.insert(item.fileId128);
+        hasScope = true;
+    }
+
     std::shared_lock<std::shared_mutex> lock(m_mutex);
+
+    // 2026-07-xx 物理对账：规范化父路径前缀用于导航范围搜索
+    std::wstring wParentPath = (scopeSource == "nav" && !parentPath.isEmpty()) ? normalizePath(parentPath.toStdWString()) : L"";
+    if (!wParentPath.empty()) {
+        bool endsWithSlash = false;
+        if (!wParentPath.empty()) {
+            wchar_t lastChar = wParentPath.back();
+            if (lastChar == L'\\' || lastChar == L'/') endsWithSlash = true;
+        }
+        if (!endsWithSlash) {
+            wParentPath += L'\\';
+        }
+    }
+
     for (std::unordered_map<std::wstring, RuntimeMeta>::const_iterator it = m_cache.begin(); it != m_cache.end(); ++it) {
-        const std::wstring& path = it->first; const RuntimeMeta& meta = it->second;
-        QString qPath = QString::fromStdWString(path); QString qNote = QString::fromStdWString(meta.note);
+        const std::wstring& path = it->first;
+        const RuntimeMeta& meta = it->second;
+
+        // 范围检查 (Scope Check)
+        if (hasScope) {
+            if (scopeFids.find(meta.fileId128) == scopeFids.end()) continue;
+        } else if (!wParentPath.empty()) {
+            // 物理视图下的路径范围匹配
+            if (path.find(wParentPath) != 0) continue;
+        }
+
+        QString qPath = QString::fromStdWString(path);
+        QString qNote = QString::fromStdWString(meta.note);
+
         bool match = qPath.contains(keyword, Qt::CaseInsensitive) || qNote.contains(keyword, Qt::CaseInsensitive);
-        if (!match) { for (int i = 0; i < meta.tags.size(); ++i) { if (meta.tags[i].contains(keyword, Qt::CaseInsensitive)) { match = true; break; } } }
+        if (!match) {
+            for (int i = 0; i < meta.tags.size(); ++i) {
+                if (meta.tags[i].contains(keyword, Qt::CaseInsensitive)) { match = true; break; }
+            }
+        }
         if (match) results << qPath;
     }
     return results;

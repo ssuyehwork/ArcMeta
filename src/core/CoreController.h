@@ -29,9 +29,12 @@ public:
     /**
      * @brief 统一搜索接口
      * @param keyword 关键词
+     * @param scopeSource 范围来源 ("category" 或 "nav")
+     * @param categoryId 分类 ID (当 scopeSource 为 "category" 时有效)
+     * @param parentPath 物理路径 (当 scopeSource 为 "nav" 时有效)
      * @return 匹配的文件路径列表
      */
-    QStringList performSearch(const QString& keyword);
+    QStringList performSearch(const QString& keyword, const QString& scopeSource = "", int categoryId = 0, const QString& parentPath = "");
 
 signals:
     void isIndexingChanged(bool indexing);
