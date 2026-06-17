@@ -90,6 +90,11 @@ public:
      */
     void updateRecordMetadata(const QString& path);
 
+    /**
+     * @brief 2026-07-xx 物理追加：增量添加记录（用于异步搜索结果推送）
+     */
+    void appendRecords(const std::vector<ItemRecord>& records);
+
 private:
     std::vector<ItemRecord> m_allRecords;
     std::unordered_map<QString, int, QStringHash> m_pathToIndex;
@@ -181,12 +186,6 @@ public:
     void deferredInit();
 
     /**
-     * @brief 统一条目构建中枢
-     * 2026-07-xx 架构优化：收拢物理属性采样与元数据注入逻辑，确保渲染一致性
-     */
-    static ItemRecord createItemRecord(const QString& path);
-
-    /**
      * @brief 切换视图模式
      */
     void setViewMode(ViewMode mode);
@@ -242,62 +241,6 @@ signals:
         const QMap<QString, int>& createDateCounts,
         const QMap<QString, int>& modifyDateCounts);
 
-private:
-    void initUi();
-    void initGridView();
-    void initListView();
-    void setupContextMenu();
-    void updateLayersButtonState();
-
-    /**
-     * @brief 内部业务辅助逻辑
-     */
-    void performCopy(bool cutMode);
-    void performPaste();
-    void performBatchRename();
-
-    QVBoxLayout* m_mainLayout = nullptr;
-    QStackedWidget* m_viewStack = nullptr;
-    QPushButton* m_btnLayers = nullptr;
-    QPushButton* m_btnLayersBlue = nullptr;
-    QTextBrowser* m_textPreview = nullptr;
-    QLabel* m_imagePreview = nullptr;
-
-    // 视图组件
-    QAbstractItemView* m_gridView = nullptr;
-    QTreeView* m_treeView = nullptr;
-    FerrexVirtualDbModel* m_model = nullptr;
-    QSortFilterProxyModel* m_proxyModel = nullptr;
-
-
-    FilterState m_currentFilter;
-
-    int m_zoomLevel = 64;
-    QString m_currentPath;
-    int m_currentCategoryId = -1;
-    QString m_currentCategoryType; // 用于驱动差异化右键菜单
-    bool m_isRecursive = false;
-    bool m_isLoading = false; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
-
-    // --- 2026-06-xx 性能优化：递归扫描指纹缓存 ---
-    struct ScanCacheEntry {
-        qint64 lastModified; // 根目录的时间戳
-        std::vector<ItemRecord> records;
-    };
-    QMap<QString, ScanCacheEntry> m_recursiveCache; 
-    void updateGridSize();
-    void updateStatusBarStats();
-    void recalculateAndEmitStats();
-
-    void addItemsFromDirectory(const QString& path, bool recursive,
-                               QMap<int, int>& ratingCounts,
-                               QMap<QString, int>& colorCounts,
-                               QMap<QString, int>& tagCounts,
-                               QMap<QString, int>& typeCounts,
-                               QMap<QString, int>& createDateCounts,
-                               QMap<QString, int>& modifyDateCounts,
-                               int& noTagCount);
-
 public slots:
     void onSelectionChanged();
     void onCustomContextMenuRequested(const QPoint& pos);
@@ -319,9 +262,19 @@ public slots:
     void updateItemMetadata(const QString& path);
 
     /**
+     * @brief 2026-07-xx 物理追加：增量添加记录（用于异步搜索结果推送）
+     */
+    void appendRecords(const std::vector<ItemRecord>& records);
+
+    /**
+     * @brief 获取当前活跃的搜索 ID (2026-07-xx 物理封装)
+     */
+    int activeSearchId() const { return m_activeSearchId; }
+
+    /**
      * @brief 全局/本地搜索
      */
-    void search(const QString& query);
+    void search(const QString& query, int searchId = 0);
 
     /**
      * @brief 应用当前筛选器
@@ -370,6 +323,61 @@ signals:
      */
     void statusBarStatsUpdated(int fileCount, int folderCount, int totalCount);
 
+private:
+    void initUi();
+    void initGridView();
+    void initListView();
+    void setupContextMenu();
+    void updateLayersButtonState();
+
+    /**
+     * @brief 内部业务辅助逻辑
+     */
+    void performCopy(bool cutMode);
+    void performPaste();
+    void performBatchRename();
+
+    QVBoxLayout* m_mainLayout = nullptr;
+    QStackedWidget* m_viewStack = nullptr;
+    QPushButton* m_btnLayers = nullptr;
+    QPushButton* m_btnLayersBlue = nullptr;
+    QTextBrowser* m_textPreview = nullptr;
+    QLabel* m_imagePreview = nullptr;
+
+    // 视图组件
+    QAbstractItemView* m_gridView = nullptr;
+    QTreeView* m_treeView = nullptr;
+    FerrexVirtualDbModel* m_model = nullptr;
+    QSortFilterProxyModel* m_proxyModel = nullptr;
+
+    FilterState m_currentFilter;
+
+    int m_activeSearchId = 0;
+    int m_zoomLevel = 64;
+    QString m_currentPath;
+    int m_currentCategoryId = -1;
+    QString m_currentCategoryType; // 用于驱动差异化右键菜单
+    bool m_isRecursive = false;
+    bool m_isLoading = false; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
+
+    // --- 2026-06-xx 性能优化：递归扫描指纹缓存 ---
+    struct ScanCacheEntry {
+        qint64 lastModified; // 根目录的时间戳
+        std::vector<ItemRecord> records;
+    };
+    QMap<QString, ScanCacheEntry> m_recursiveCache; 
+    void updateGridSize();
+    void updateStatusBarStats();
+    void recalculateAndEmitStats();
+
+    void addItemsFromDirectory(const QString& path, bool recursive,
+                               QMap<int, int>& ratingCounts,
+                               QMap<QString, int>& colorCounts,
+                               QMap<QString, int>& tagCounts,
+                               QMap<QString, int>& typeCounts,
+                               QMap<QString, int>& createDateCounts,
+                               QMap<QString, int>& modifyDateCounts,
+                               int& noTagCount);
 
 protected:
     void wheelEvent(QWheelEvent* event) override;
