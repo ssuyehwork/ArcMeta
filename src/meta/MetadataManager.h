@@ -72,9 +72,12 @@ public:
     /**
      * @brief 2026-06-xx 按照用户要求：在 SCCH 内存模式下执行多维搜索
      * @param keyword 关键词
+     * @param scopeSource 范围来源 ("category" 或 "nav")
+     * @param categoryId 分类 ID (当 scopeSource 为 "category" 时有效)
+     * @param parentPath 物理路径 (当 scopeSource 为 "nav" 时有效)
      * @return 匹配的物理路径列表
      */
-    QStringList searchInCache(const QString& keyword);
+    QStringList searchInCache(const QString& keyword, const QString& scopeSource = "", int categoryId = 0, const QString& parentPath = "");
 
     /**
      * @brief 获取所有标签及其引用计数

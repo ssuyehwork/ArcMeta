@@ -76,7 +76,7 @@ MainWindow::~MainWindow() {
 }
 
 MainWindow::MainWindow(QWidget* parent)
-    : QMainWindow(parent) {
+    : QMainWindow(parent), m_currentDataSource("nav"), m_currentCategoryId(0) {
     // 2026-04-12 关键修复：显式初始化面板加载状态锁，防止未定义行为导致闪退
     m_panelsInitialized = false;
     qDebug() << "[Main] MainWindow 构造开始执行";
@@ -170,21 +170,20 @@ MainWindow::MainWindow(QWidget* parent)
     initResourceMonitor();
     qDebug() << "[Main] MainWindow 构造函数 UI/托盘/闲置检测初始化完成";
 
-    // 2026-03-xx 性能优化：严禁在构造函数中执行任何可能导致阻塞的同步加载 (如 navigateTo)。
+    // 2026-03-xx 性能优化：严禁在构造函数中执行任何可能导致阻塞的同步加载 (如 unifiedNavigateTo)。
     // 改为延迟 200ms 触发首次加载，确保 MainWindow 框架先瞬间弹出，提升用户感知的“秒开”响应速度。
     QTimer::singleShot(200, [this]() {
         QString lastPath = AppConfig::instance().getValue("MainWindow/LastPath", "computer://").toString();
         
-        // 2026-04-11 按照用户要求：物理还原最后一次开启的文件夹
-        // 校验路径：如果是虚拟路径或真实存在的磁盘路径，则载入
-        if (lastPath == "computer://" || QDir(lastPath).exists()) {
-            qDebug() << "[Main] 执行延迟首次加载: 恢复历史路径 ->" << lastPath;
-            navigateTo(lastPath);
-            m_navPanel->selectPath(lastPath);
+        // 2026-04-11 按照用户要求：物理还原最后一次开启的内容 (Plan-56)
+        // 校验：如果是协议路径或存在的磁盘路径，则载入
+        bool isValid = lastPath.contains("://") || QDir(lastPath).exists();
+        if (isValid) {
+            qDebug() << "[Main] 执行延迟首次加载: 恢复历史状态 ->" << lastPath;
+            unifiedNavigateTo(lastPath);
         } else {
             qDebug() << "[Main] 历史路径无效，回退至: 此电脑";
-            navigateTo("computer://");
-            m_navPanel->selectPath("computer://");
+            unifiedNavigateTo("computer://");
         }
     });
 }
@@ -221,85 +220,55 @@ void MainWindow::initUi() {
 
     // 核心红线：建立各面板间的信号联动 (Data Linkage)
     
-    // 1. 导航/收藏/内容面板 双击跳转 -> 统一路径调度
+    // 1. 导航/收藏/内容面板 双击跳转 -> 统一导航中枢 (Plan-56)
     connect(m_navPanel, &NavPanel::directorySelected, this, [this](const QString& path) {
-        navigateTo(path);
+        unifiedNavigateTo(path);
     });
 
     connect(m_contentPanel, &ContentPanel::directorySelected, this, [this](const QString& path) {
-        navigateTo(path);
+        unifiedNavigateTo(path);
     });
 
-    // 1a. 分类选择 -> 内容面板执行数据加载 (针对问题 2)
-    // 2026-05-27 物理加固：补全 this 上下文
+    // 1a. 分类选择 -> 统一导航中枢 (Plan-56)
     connect(m_categoryPanel, &CategoryPanel::categorySelected, this, [this](int id, const QString& name, const QString& type, const QString& path) {
-        // 2026-07-xx 按照用户要求：实现"标签管理"专属视图模式切换
+        m_currentCategoryId = id;
+        
+        // 标签管理模式属于特殊 UI 模式，暂时保持独立
         if (type == "tags") {
-            m_navPanel->hide();
-            m_contentPanel->hide();
-            m_metaPanel->hide();
-            m_filterPanel->hide();
-            
-            m_tagManagerView->refresh();
-            m_tagManagerView->show();
+            m_navPanel->hide(); m_contentPanel->hide(); m_metaPanel->hide(); m_filterPanel->hide();
+            m_tagManagerView->refresh(); m_tagManagerView->show();
             m_isTagManagerMode = true;
-            
             if (m_addressBar) m_addressBar->setPath("标签管理");
-
-            // 2026-04-xx 补充：进入时立即应用当前搜索框内容（针对标签筛选）
-            if (m_searchEdit && !m_searchEdit->text().isEmpty()) {
-                m_tagManagerView->search(m_searchEdit->text().trimmed());
-            }
+            if (m_searchEdit && !m_searchEdit->text().isEmpty()) m_tagManagerView->search(m_searchEdit->text().trimmed());
             return;
         } else if (m_isTagManagerMode) {
-            // 恢复模式
-            m_tagManagerView->hide();
-            m_navPanel->show();
-            m_contentPanel->show();
-            m_metaPanel->show();
-            m_filterPanel->show();
+            m_tagManagerView->hide(); m_navPanel->show(); m_contentPanel->show(); m_metaPanel->show(); m_filterPanel->show();
             m_isTagManagerMode = false;
         }
 
-        // 2026-04-12 关键修正：跳转分类时，物理重置搜索状态，防止逻辑锁死
-        // 2026-07-xx 逻辑优化：移除冗余的 search("") 调用，防止双重加载导致的界面闪烁
-        if (m_searchEdit) {
-            m_searchEdit->blockSignals(true);
-            m_searchEdit->clear();
-            m_searchEdit->blockSignals(false);
-        }
-
-        if (m_addressBar) m_addressBar->setPath("分类: " + name);
-        
+        // 构建协议 URL 并跳转
         if (type == "category") {
-            // 2026-06-xx 重构逻辑：内容面板负责展示该分类下的子分类与绑定文件
-            m_contentPanel->loadCategory(id);
-        } else if (type == "bookmark") {
-            // 2026-06-xx 处理快速访问项跳转 (Favorite 路径加载)
-            if (!path.isEmpty()) {
-                navigateTo(path);
-            } else {
-                m_contentPanel->search(name);
-            }
+            unifiedNavigateTo(kProtocolCategory + QString::number(id) + "?name=" + name);
+        } else if (type == "bookmark" && !path.isEmpty()) {
+            unifiedNavigateTo(path);
         } else if (type == "all" || type == "uncategorized" || type == "untagged" || 
                    type == "recently_visited" || type == "trash") {
-            // 2026-06-xx 物理修复：所有系统项直接通过 getSystemCategoryPaths 获取物理路径并加载
-            m_contentPanel->setCurrentCategoryType(type);
-            QStringList paths = CategoryRepo::getSystemCategoryPaths(type);
-            m_contentPanel->loadPaths(paths);
+            unifiedNavigateTo(kProtocolSystem + type);
         } else {
-            // 其余系统项 (标签管理等) 维持搜索逻辑
-            if (!name.isEmpty()) {
-                m_contentPanel->search(name); 
-            }
+            // 回滚：对于未识别的系统项，仅执行搜索展示
+            if (m_searchEdit) { m_searchEdit->blockSignals(true); m_searchEdit->clear(); m_searchEdit->blockSignals(false); }
+            if (m_addressBar) m_addressBar->setPath("分类: " + name);
+            if (!name.isEmpty()) m_contentPanel->search(name);
         }
     });
 
-    // 1b. 内容面板内部跳转分类 (双击同步)
+    // 1b. 内容面板内部跳转分类 (双击同步) -> 统一导航中枢 (Plan-56)
     connect(m_contentPanel, &ContentPanel::categoryClicked, this, [this](int id) {
-        if (m_categoryPanel) m_categoryPanel->selectCategory(id);
-        // 2026-06-xx 物理补丁：双击子分类时，除联动侧边栏外，必须显式驱动内容区加载该 ID 数据
-        if (m_contentPanel) m_contentPanel->loadCategory(id);
+        // 通过 Repo 获取分类名称以构建完整的协议 URL
+        auto all = CategoryRepo::getAll();
+        QString name = QString::number(id);
+        for(const auto& cat : all) if(cat.id == id) { name = QString::fromStdWString(cat.name); break; }
+        unifiedNavigateTo(kProtocolCategory + QString::number(id) + "?name=" + name);
     });
 
     // 2. 内容面板选中项改变 -> 元数据面板刷新 & 自动预览
@@ -443,9 +412,9 @@ void MainWindow::initUi() {
     });
 
 
-    // 6. 地址栏路径跳转与刷新
+    // 6. 地址栏路径跳转与刷新 -> 统一导航中枢 (Plan-56)
     connect(m_addressBar, &AddressBar::pathChanged, this, [this](const QString& path) {
-        navigateTo(path);
+        unifiedNavigateTo(path);
     });
 
     connect(m_addressBar, &AddressBar::refreshRequested, this, [this]() {
@@ -479,8 +448,8 @@ void MainWindow::initUi() {
         m_searchHistoryPanel->setHistory(m_searchHistory);
         m_searchHistoryPanel->hide();
 
-        // 使用 CoreController 的中枢搜索接口
-        QStringList paths = CoreController::instance().performSearch(keyword);
+        // 使用 CoreController 的中枢搜索接口 (范围感知)
+        QStringList paths = CoreController::instance().performSearch(keyword, m_currentDataSource, m_currentCategoryId, m_currentPath);
         m_contentPanel->loadPaths(paths);
     };
 
@@ -501,7 +470,7 @@ void MainWindow::initUi() {
             // 仅在当前处于搜索结果视图时才触发回滚，防止在普通导航时造成二次刷新
             if (m_contentPanel->getCurrentCategoryType() == "search") {
                 qDebug() << "[Main] 搜索框已清空，正在回滚至前序目录视图:" << m_currentPath;
-                navigateTo(m_currentPath);
+                unifiedNavigateTo(m_currentPath);
             }
         }
     });
@@ -619,7 +588,7 @@ void MainWindow::initUi() {
         QFileInfo fi(path);
         if (fi.isDir()) {
             // 如果是文件夹，执行界面跳转联动
-            navigateTo(path);
+            unifiedNavigateTo(path);
         } else {
             // 2026-03-xx 按照用户要求：侧边栏选中任何物理文件，立即执行即时全能预览
             m_contentPanel->previewFile(path);
@@ -1017,6 +986,7 @@ void MainWindow::setupSplitters() {
 
     // 2026-05-07 按照用户要求：焦点线持久化显示，基于数据来源而非焦点位置
     connect(m_contentPanel, &ContentPanel::dataSourceChanged, this, [this](const QString& source) {
+        m_currentDataSource = source;
         // 重置所有面板高亮
         if (m_navPanel)      m_navPanel->setFocusHighlight(false);
         if (m_categoryPanel) m_categoryPanel->setFocusHighlight(false);
@@ -1043,6 +1013,7 @@ void MainWindow::setupSplitters() {
         if (m_categoryPanel) m_categoryPanel->selectCategory(-1); // 选中“全部数据”
         if (m_searchEdit) m_searchEdit->setText(tag);
         
+        // 标签跳转默认作为全局搜索处理 (不限范围)
         QStringList paths = MetadataManager::instance().searchInCache(tag);
         m_contentPanel->loadPaths(paths);
     });
@@ -1261,55 +1232,81 @@ void MainWindow::initResourceMonitor() {
     m_resourceMonitorTimer->start();
 }
 
-void MainWindow::navigateTo(const QString& path, bool record) {
-    if (path.isEmpty()) return;
-    qDebug() << "[Main] 执行跳转 ->" << path << (record ? "(记录历史)" : "(不记录)");
+void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
+    if (url.isEmpty()) return;
+    qDebug() << "[Main] 统一导航调度 ->" << url << (record ? "(记录历史)" : "(不记录)");
 
-    // 2026-04-12 关键协议：任何导航操作（手动输入、点击、后退、上级）都应强制重置搜索态与筛选态
+    // 1. 物理重置搜索与筛选状态
     if (m_searchEdit && !m_searchEdit->text().isEmpty()) {
-        qDebug() << "[Main] 检测到导航操作，物理清空搜索关键词残留:" << m_searchEdit->text();
         m_searchEdit->blockSignals(true);
         m_searchEdit->clear();
         m_searchEdit->blockSignals(false);
-        m_contentPanel->search("");
+        if (m_contentPanel) m_contentPanel->search("");
     }
-    
-    if (m_filterPanel) {
-        m_filterPanel->clearAllFilters();
-    }
-    
-    // 处理虚拟路径 "computer://" —— 此电脑（磁盘分区列表）
-    if (path == "computer://") {
-        m_currentPath = "computer://";
-        if (record) {
-            if (m_history.isEmpty() || m_history.last() != path) {
-                m_history.append(path);
-                m_historyIndex = static_cast<int>(m_history.size()) - 1;
-            }
-        }
-        if (m_addressBar) m_addressBar->setPath("computer://");
-        m_contentPanel->loadDirectory(""); 
-        int driveCount = static_cast<int>(QDir::drives().count());
-        m_statusLeft->setText(QString("%1 个分区").arg(driveCount));
-        updateNavButtons();
-        return;
-    }
+    if (m_filterPanel) m_filterPanel->clearAllFilters();
 
-    QString normPath = QDir::toNativeSeparators(path);
-    m_currentPath = normPath;
-
+    // 2. 压栈逻辑 (原子化)
     if (record) {
-            if (m_historyIndex < static_cast<int>(m_history.size()) - 1) {
+        if (m_historyIndex < static_cast<int>(m_history.size()) - 1) {
             m_history = m_history.mid(0, m_historyIndex + 1);
         }
-        if (m_history.isEmpty() || m_history.last() != normPath) {
-            m_history.append(normPath);
-                m_historyIndex = static_cast<int>(m_history.size()) - 1;
+        if (m_history.isEmpty() || m_history.last() != url) {
+            m_history.append(url);
+            m_historyIndex = static_cast<int>(m_history.size()) - 1;
         }
     }
-    
-    if (m_addressBar) m_addressBar->setPath(normPath);
-    m_contentPanel->loadDirectory(normPath);
+
+    // 3. 协议分流加载
+    if (url.startsWith(kProtocolCategory)) {
+        // category://{id}?name={name}
+        QString params = url.mid(kProtocolCategory.length());
+        int qMark = params.indexOf('?');
+        int id = params.left(qMark == -1 ? params.length() : qMark).toInt();
+        QString name = (qMark != -1) ? params.mid(qMark + 6) : QString::number(id);
+
+        if (m_categoryPanel) {
+            m_categoryPanel->blockSignals(true);
+            m_categoryPanel->selectCategory(id);
+            m_categoryPanel->blockSignals(false);
+        }
+        if (m_contentPanel) m_contentPanel->loadCategory(id);
+        if (m_addressBar) m_addressBar->setPath("分类: " + name);
+        m_currentPath = url; // 逻辑路径
+    }
+    else if (url.startsWith(kProtocolSystem)) {
+        // system://all | trash | etc.
+        QString type = url.mid(kProtocolSystem.length());
+        if (m_categoryPanel) {
+            m_categoryPanel->blockSignals(true);
+            m_categoryPanel->selectCategoryByType(type);
+            m_categoryPanel->blockSignals(false);
+        }
+        if (m_contentPanel) {
+            m_contentPanel->setCurrentCategoryType(type);
+            m_contentPanel->loadPaths(CategoryRepo::getSystemCategoryPaths(type));
+        }
+        if (m_addressBar) m_addressBar->setPath("系统: " + type);
+        m_currentPath = url;
+    }
+    else {
+        // 物理路径 (file:// 或 原生路径)
+        QString path = url;
+        if (path.startsWith(kProtocolFile)) path = path.mid(kProtocolFile.length());
+        
+        if (path == "computer://") {
+            if (m_addressBar) m_addressBar->setPath("computer://");
+            if (m_contentPanel) m_contentPanel->loadDirectory("");
+            if (m_navPanel) m_navPanel->selectPath("computer://");
+            m_currentPath = "computer://";
+        } else {
+            QString normPath = QDir::toNativeSeparators(path);
+            if (m_addressBar) m_addressBar->setPath(normPath);
+            if (m_contentPanel) m_contentPanel->loadDirectory(normPath);
+            if (m_navPanel) m_navPanel->selectPath(normPath);
+            m_currentPath = normPath;
+        }
+    }
+
     updateNavButtons();
     updateStatusBar();
 }
@@ -1317,21 +1314,27 @@ void MainWindow::navigateTo(const QString& path, bool record) {
 void MainWindow::onBackClicked() {
     if (m_historyIndex > 0) {
         m_historyIndex--;
-        navigateTo(m_history[m_historyIndex], false);
+        unifiedNavigateTo(m_history[m_historyIndex], false);
     }
 }
 
 void MainWindow::onForwardClicked() {
     if (m_historyIndex < m_history.size() - 1) {
         m_historyIndex++;
-        navigateTo(m_history[m_historyIndex], false);
+        unifiedNavigateTo(m_history[m_historyIndex], false);
     }
 }
 
 void MainWindow::onUpClicked() {
+    // 物理路径支持向上，逻辑路径默认回退至“此电脑”
+    if (m_currentPath.contains("://") && m_currentPath != "computer://") {
+        unifiedNavigateTo("computer://");
+        return;
+    }
+
     QDir dir(m_currentPath);
     if (dir.cdUp()) {
-        navigateTo(dir.absolutePath());
+        unifiedNavigateTo(dir.absolutePath());
     }
 }
 
@@ -1339,7 +1342,8 @@ void MainWindow::updateNavButtons() {
     m_btnBack->setEnabled(m_historyIndex > 0);
     m_btnForward->setEnabled(m_historyIndex < m_history.size() - 1);
     
-    bool atRoot = (m_currentPath == "computer://" || (QDir(m_currentPath).isRoot()));
+    bool isLogic = m_currentPath.contains("://");
+    bool atRoot = (m_currentPath == "computer://" || (!isLogic && QDir(m_currentPath).isRoot()));
     m_btnUp->setEnabled(!atRoot && !m_currentPath.isEmpty());
 }
 

@@ -90,7 +90,18 @@ private:
     void initUi();
     void updateNavButtons();
     void updateStatusBar();
-    void navigateTo(const QString& path, bool record = true);
+
+    // 2026-07-xx 导航协议常量
+    static inline const QString kProtocolFile     = "file://";
+    static inline const QString kProtocolCategory = "category://";
+    static inline const QString kProtocolSystem   = "system://";
+
+    /**
+     * @brief 2026-07-xx 按照 Plan-56：统一导航调度中心
+     * 支持 file://, category://, system:// 等协议
+     */
+    void unifiedNavigateTo(const QString& url, bool record = true);
+
     void initToolbar();
     void setupSplitters();
     void setupCustomTitleBarButtons();
@@ -135,6 +146,8 @@ private:
     // 状态管理
     bool m_isPinned = false;
     bool m_isTagManagerMode = false;
+    QString m_currentDataSource; // "category" or "nav"
+    int m_currentCategoryId = 0;
     bool m_panelsInitialized = false; // 2026-04-12 状态锁：确保面板仅初始化一次
     QTimer* m_idleTimer = nullptr;
     QString m_currentPath;

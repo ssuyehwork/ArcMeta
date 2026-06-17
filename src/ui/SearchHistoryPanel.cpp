@@ -81,7 +81,8 @@ void SearchHistoryPanel::rebuild() {
         m_layout->addWidget(sep);
 
         // 历史条目（最新的显示在最上方）
-        for (int i = m_history.size() - 1; i >= 0; --i) {
+        // 2026-06-xx 逻辑纠偏：m_history 索引 0 为最新，应正向遍历以确保最新项在布局顶端
+        for (int i = 0; i < m_history.size(); ++i) {
             const QString& keyword = m_history[i];
 
             QWidget* row = new QWidget(this);

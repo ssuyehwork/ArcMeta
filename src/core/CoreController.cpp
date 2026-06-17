@@ -50,10 +50,10 @@ void CoreController::startSystem() {
     });
 }
 
-QStringList CoreController::performSearch(const QString& keyword) {
+QStringList CoreController::performSearch(const QString& keyword, const QString& scopeSource, int categoryId, const QString& parentPath) {
     if (keyword.isEmpty()) return {};
-    // 彻底废除数据库搜索，强制使用 SCCH 内存搜索
-    return MetadataManager::instance().searchInCache(keyword);
+    // 彻底废除数据库搜索，强制使用 SCCH 内存搜索 (支持范围感知)
+    return MetadataManager::instance().searchInCache(keyword, scopeSource, categoryId, parentPath);
 }
 
 void CoreController::setStatus(const QString& text, bool indexing) {
