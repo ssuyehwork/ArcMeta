@@ -434,7 +434,10 @@ void MainWindow::initUi() {
         if (m_contentPanel) {
             m_contentPanel->setCurrentCategoryType("search");
             m_contentPanel->loadPaths({}); // 先清空界面进入搜索态
+            m_activeSearchReqId = m_contentPanel->currentLoadRequestId(); // 保存当前搜索会话 ID
+
             if (m_addressBar) m_addressBar->setPath("搜索: " + m_searchEdit->text().trimmed());
+            ArcMeta::Logger::log(QString("[Main] 搜索会话已锁定 ID: %1").arg(m_activeSearchReqId));
         }
     });
 
@@ -442,14 +445,13 @@ void MainWindow::initUi() {
         [this](const QStringList& results, bool isIncremental) {
         if (m_contentPanel) {
             // 2026-07-xx 物理对账：仅当内容面板仍处于搜索态时才接受异步返回的结果
-            // 理由：这防止了用户在搜索未完成时点击了侧边栏导航，导致迟到的异步搜索结果覆盖正常的目录内容。
             if (m_contentPanel->getCurrentCategoryType() != "search") {
                 ArcMeta::Logger::log("[Main] 拦截到过期的异步搜索结果，当前视图已切换");
                 return;
             }
 
-            if (isIncremental) m_contentPanel->appendPaths(results);
-            else m_contentPanel->loadPaths(results);
+            if (isIncremental) m_contentPanel->appendPaths(results, m_activeSearchReqId);
+            else m_contentPanel->loadPaths(results, m_activeSearchReqId);
         }
     });
 

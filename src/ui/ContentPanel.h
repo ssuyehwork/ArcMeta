@@ -342,13 +342,20 @@ public slots:
 
     /**
      * @brief 加载指定路径列表 (分类联动使用)
+     * @param reqId 可选的请求 ID。若为 0，则自动生成新 ID。
      */
-    void loadPaths(const QStringList& paths);
+    void loadPaths(const QStringList& paths, int reqId = 0);
 
     /**
      * @brief 2026-07-xx 按照 Plan-57：增量追加路径列表 (异步搜索流式返回使用)
+     * @param reqId 可选的请求 ID。只有当 ID 与当前 ID 一致时才会执行追加。
      */
-    void appendPaths(const QStringList& paths);
+    void appendPaths(const QStringList& paths, int reqId = 0);
+
+    /**
+     * @brief 获取当前最新的加载请求 ID
+     */
+    int currentLoadRequestId() const { return m_loadRequestId.load(); }
 
     /**
      * @brief 2026-06-xx 彻底重构：加载分类及其子项 (分类 ID 联动)
