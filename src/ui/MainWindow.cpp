@@ -472,6 +472,10 @@ void MainWindow::initUi() {
             // 物理同步：由于屏蔽了信号，需要手动重置内容面板的筛选状态
             if (m_contentPanel) {
                 m_contentPanel->applyFilters(FilterState());
+                // 2026-07-xx 物理同步：显式同步搜索词到代理模型，防止首帧逻辑判定失步
+                if (auto* proxy = qobject_cast<FilterProxyModel*>(m_contentPanel->getProxyModel())) {
+                    proxy->setSearchQuery(keyword);
+                }
             }
         }
 
@@ -1271,12 +1275,18 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
     qDebug() << "[Main] 统一导航调度 ->" << url << (record ? "(记录历史)" : "(不记录)");
 
     // 1. 物理重置搜索与筛选状态
-    if (m_searchEdit && !m_searchEdit->text().isEmpty()) {
+    if (m_searchEdit) {
         m_searchEdit->blockSignals(true);
         m_searchEdit->clear();
         m_searchEdit->blockSignals(false);
-        if (m_contentPanel) m_contentPanel->search("");
     }
+
+    // 2026-07-xx 物理强化：无论搜索框原先是否为空，在导航行为发生时都必须强制重置内容面板的搜索词，
+    // 防止因代理模型中残留的旧搜索词导致新加载的目录内容被错误过滤。
+    if (m_contentPanel) {
+        m_contentPanel->search("");
+    }
+
     if (m_filterPanel) m_filterPanel->clearAllFilters();
 
     // 2. 压栈逻辑 (原子化)

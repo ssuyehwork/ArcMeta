@@ -2266,6 +2266,15 @@ void ContentPanel::loadCategory(int categoryId) {
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths) { 
+    // 2026-07-xx 物理强化：如果路径列表为空，直接执行同步清理并返回
+    // 理由：这防止了搜索启动时的清空动作（异步）与随后到达的结果加载（异步）发生竞态。
+    if (paths.isEmpty()) {
+        m_model->clear();
+        m_isLoading = false;
+        recalculateAndEmitStats();
+        return;
+    }
+
     // 2026-07-xx 物理防护：防重入机制 (路径列表通常用于系统项，暂不进行深度内容比对)
     if (m_isLoading && m_currentCategoryType == "path_list") {
         return;
