@@ -2050,8 +2050,10 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     m_isLoading = true;
+    int reqId = ++m_loadRequestId;
     m_currentCategoryType = ""; // 物理导航模式下清除系统类型
-    qDebug() << "[Content] 开始物理递归扫描 (虚拟化) ->" << path << (recursive ? "递归" : "单级"); 
+    ArcMeta::Logger::log(QString("[Content] 开始物理递归扫描 (虚拟化) [%1] -> %2 (%3)")
+                        .arg(reqId).arg(path).arg(recursive ? "递归" : "单级"));
     emit dataSourceChanged("nav"); 
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
@@ -2086,7 +2088,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     updateLayersButtonState(); 
      
     QPointer<ContentPanel> panelPtr(this); 
-    (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive]() { 
+    (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive, reqId]() { 
         if (!panelPtr) return; 
          
         std::vector<ItemRecord> allItems;
@@ -2113,14 +2115,17 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         scanDir(path, recursive); 
         if (!panelPtr) return; 
  
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems]() { 
-            if (panelPtr && panelPtr->m_currentPath == path) { 
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, reqId]() { 
+            if (panelPtr && panelPtr->m_loadRequestId == reqId) { 
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
                 // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
                 panelPtr->applyFilters();
-            } 
+                ArcMeta::Logger::log(QString("[Content] 目录扫描完成并已应用到 UI [%1]").arg(reqId));
+            } else if (panelPtr) {
+                ArcMeta::Logger::log(QString("[Content] 拦截到过期的目录扫描回调 [%1], 当前 ID: %2").arg(reqId).arg(panelPtr->m_loadRequestId.load()));
+            }
         }, Qt::QueuedConnection); 
     }); 
 } 
@@ -2141,7 +2146,17 @@ void ContentPanel::search(const QString& query) {
         proxy->setSearchQuery(query);
     }
 
+    // 2026-07-xx 物理补全：如果关键词为空，执行显式重置并停止后续执行
+    if (query.isEmpty()) {
+        m_isLoading = false;
+        m_model->clear();
+        CoreController::instance().abortSearch();
+        recalculateAndEmitStats();
+        return;
+    }
+
     m_isLoading = true;
+    ++m_loadRequestId; // 增加 ID 以作废之前的异步加载
     m_model->clear();
     
     // 核心逻辑：发起异步搜索。此处参数采用默认值，因为特定的范围感知搜索
@@ -2212,6 +2227,7 @@ void ContentPanel::loadCategory(int categoryId) {
     }
 
     m_isLoading = true;
+    int reqId = ++m_loadRequestId;
     m_currentCategoryType = "user_category";
     m_currentCategoryId = categoryId;
     m_viewStack->show(); 
@@ -2222,7 +2238,7 @@ void ContentPanel::loadCategory(int categoryId) {
     m_model->clear(); 
  
     QPointer<ContentPanel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, categoryId]() {
+    (void)QtConcurrent::run([weakThis, categoryId, reqId]() {
         std::vector<ItemRecord> allRecords;
 
         // 1. 加载子分类
@@ -2254,26 +2270,57 @@ void ContentPanel::loadCategory(int categoryId) {
             }
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, allRecords]() {
-            if (weakThis) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, allRecords, reqId]() {
+            if (weakThis && weakThis->m_loadRequestId == reqId) {
                 weakThis->m_model->setRecords(allRecords);
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
+                ArcMeta::Logger::log(QString("[Content] 分类加载完成 [%1]").arg(reqId));
+            } else if (weakThis) {
+                ArcMeta::Logger::log(QString("[Content] 拦截到过期的分类加载回调 [%1]").arg(reqId));
             }
         });
     });
 } 
  
-void ContentPanel::loadPaths(const QStringList& paths) { 
-    // 2026-07-xx 物理防护：防重入机制 (路径列表通常用于系统项，暂不进行深度内容比对)
-    if (m_isLoading && m_currentCategoryType == "path_list") {
+void ContentPanel::loadPaths(const QStringList& paths, int reqId) { 
+    // 2026-07-xx 物理强化：如果路径列表为空，直接执行同步清理并返回
+    // 理由：这防止了搜索启动时的清空动作（异步）与随后到达的结果加载（异步）发生竞态。
+    if (paths.isEmpty()) {
+        ArcMeta::Logger::log("[Content] loadPaths 收到空路径，执行同步清空");
+        if (reqId == 0) m_loadRequestId++; // 若未指定 ID，则自增以作废前序加载
+        else m_loadRequestId = reqId;      // 若指定了 ID，则强制对其
+        
+        m_model->clear();
+        m_isLoading = false;
+        recalculateAndEmitStats();
+        return;
+    }
+
+    // 校验：如果传入了明确的 reqId，且与当前 ID 不符，则直接拦截。
+    // 这对于搜索结果的流式加载至关重要。
+    if (reqId != 0 && m_loadRequestId != reqId) {
+        ArcMeta::Logger::log(QString("[Content] loadPaths 拦截到过期的同步请求 [%1], 当前 ID: %2")
+                            .arg(reqId).arg(m_loadRequestId.load()));
+        return;
+    }
+
+    // 2026-07-xx 物理防护：防重入机制
+    if (m_isLoading && m_currentCategoryType == "path_list" && reqId == 0) {
         return;
     }
 
     m_isLoading = true;
-    // 2026-07-xx 逻辑校准：如果当前是搜索态，则保持搜索态，否则标记为路径列表
-    if (m_currentCategoryType != "search") {
+    if (reqId == 0) reqId = ++m_loadRequestId;
+    // 2026-07-xx 逻辑校准：保持既有的系统分类类型（如 trash/recently_visited），
+    // 仅在明确不是这些特殊类型且不是 search 时，才将其降级为通用的 path_list。
+    if (m_currentCategoryType != "search" && 
+        m_currentCategoryType != "trash" && 
+        m_currentCategoryType != "recently_visited" &&
+        m_currentCategoryType != "untagged" &&
+        m_currentCategoryType != "uncategorized" &&
+        m_currentCategoryType != "all") {
         m_currentCategoryType = "path_list";
     }
     
@@ -2289,7 +2336,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     m_model->clear(); 
  
     QPointer<ContentPanel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, paths]() {
+    (void)QtConcurrent::run([weakThis, paths, reqId]() {
         std::vector<ItemRecord> records;
         records.reserve(static_cast<int>(paths.size()));
         for (const QString& p : paths) {
@@ -2299,22 +2346,32 @@ void ContentPanel::loadPaths(const QStringList& paths) {
             }
         }
         
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records]() {
-            if (weakThis) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records, reqId]() {
+            if (weakThis && weakThis->m_loadRequestId == reqId) {
                 weakThis->m_model->setRecords(records);
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
+                ArcMeta::Logger::log(QString("[Content] 路径列表加载完成 [%1]").arg(reqId));
+            } else if (weakThis) {
+                ArcMeta::Logger::log(QString("[Content] 拦截到过期的路径列表加载回调 [%1]").arg(reqId));
             }
         });
     });
 }
 
-void ContentPanel::appendPaths(const QStringList& paths) {
+void ContentPanel::appendPaths(const QStringList& paths, int reqId) {
     if (paths.isEmpty()) return;
 
+    // 物理校验：如果指定了请求 ID，则必须与当前 ID 匹配，否则视为过期搜索结果
+    if (reqId != 0 && m_loadRequestId != reqId) {
+        ArcMeta::Logger::log(QString("[Content] appendPaths 拦截到过期的异步追加请求 [%1], 当前 ID: %2")
+                            .arg(reqId).arg(m_loadRequestId.load()));
+        return;
+    }
+
     QPointer<ContentPanel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, paths]() {
+    (void)QtConcurrent::run([weakThis, paths, reqId]() {
         std::vector<ItemRecord> newRecords;
         newRecords.reserve(static_cast<int>(paths.size()));
         for (const QString& p : paths) {
@@ -2322,8 +2379,8 @@ void ContentPanel::appendPaths(const QStringList& paths) {
             newRecords.push_back(ContentPanel::createItemRecord(p));
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, newRecords]() {
-            if (weakThis) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, newRecords, reqId]() {
+            if (weakThis && (reqId == 0 || weakThis->m_loadRequestId == reqId)) {
                 // 获取当前已有记录并追加
                 std::vector<ItemRecord> all = weakThis->m_model->allRecords();
                 all.insert(all.end(), newRecords.begin(), newRecords.end());
@@ -2332,6 +2389,9 @@ void ContentPanel::appendPaths(const QStringList& paths) {
                 // 异步流式追加时，每批次都尝试更新一次统计与筛选
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters();
+                ArcMeta::Logger::log(QString("[Content] 异步追加了 %1 条路径 [%2]").arg(newRecords.size()).arg(reqId));
+            } else if (weakThis) {
+                ArcMeta::Logger::log(QString("[Content] appendPaths 在回调阶段拦截到过期结果 [%1]").arg(reqId));
             }
         });
     });

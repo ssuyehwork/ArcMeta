@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "MainWindow.h"
+#include "Logger.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"
 #include "TrayController.h"
@@ -429,34 +430,47 @@ void MainWindow::initUi() {
 
     // 搜索信号对接
     connect(&CoreController::instance(), &CoreController::searchStarted, this, [this]() {
+        ArcMeta::Logger::log("[Main] 收到 searchStarted 信号，正在配置搜索视图...");
         if (m_contentPanel) {
             m_contentPanel->setCurrentCategoryType("search");
             m_contentPanel->loadPaths({}); // 先清空界面进入搜索态
+            m_activeSearchReqId = m_contentPanel->currentLoadRequestId(); // 保存当前搜索会话 ID
+            
             if (m_addressBar) m_addressBar->setPath("搜索: " + m_searchEdit->text().trimmed());
+            ArcMeta::Logger::log(QString("[Main] 搜索会话已锁定 ID: %1").arg(m_activeSearchReqId));
         }
     });
 
     connect(&CoreController::instance(), &CoreController::searchResultsAvailable, this, 
         [this](const QStringList& results, bool isIncremental) {
         if (m_contentPanel) {
-            if (isIncremental) m_contentPanel->appendPaths(results);
-            else m_contentPanel->loadPaths(results);
+            // 2026-07-xx 物理对账：仅当内容面板仍处于搜索态时才接受异步返回的结果
+            if (m_contentPanel->getCurrentCategoryType() != "search") {
+                ArcMeta::Logger::log("[Main] 拦截到过期的异步搜索结果，当前视图已切换");
+                return;
+            }
+
+            if (isIncremental) m_contentPanel->appendPaths(results, m_activeSearchReqId);
+            else m_contentPanel->loadPaths(results, m_activeSearchReqId);
         }
     });
 
     connect(&CoreController::instance(), &CoreController::searchFinished, this, [this](int total) {
-        qDebug() << "[Main] 搜索完成，共发现项目:" << total;
+        if (m_contentPanel && m_contentPanel->getCurrentCategoryType() != "search") return;
+        ArcMeta::Logger::log(QString("[Main] 搜索完成，共发现项目: %1").arg(total));
         updateStatusBar();
     });
 
     // 回车搜索核心逻辑
     auto doSearch = [this](const QString& keyword) {
+        ArcMeta::Logger::log(QString("[Main] doSearch 被触发 -> %1").arg(keyword));
         if (m_isTagManagerMode) {
             m_tagManagerView->search(keyword);
             return;
         }
 
         if (keyword.isEmpty()) {
+            ArcMeta::Logger::log("[Main] 搜索词为空，执行视图回滚操作");
             unifiedNavigateTo(m_currentPath);
             m_searchHistoryPanel->hide();
             return;
@@ -472,6 +486,10 @@ void MainWindow::initUi() {
             // 物理同步：由于屏蔽了信号，需要手动重置内容面板的筛选状态
             if (m_contentPanel) {
                 m_contentPanel->applyFilters(FilterState());
+                // 2026-07-xx 物理同步：显式同步搜索词到代理模型，防止首帧逻辑判定失步
+                if (auto* proxy = qobject_cast<FilterProxyModel*>(m_contentPanel->getProxyModel())) {
+                    proxy->setSearchQuery(keyword);
+                }
             }
         }
 
@@ -503,7 +521,7 @@ void MainWindow::initUi() {
         if (text.isEmpty() && m_contentPanel) {
             // 仅在当前处于搜索结果视图时才触发回滚，防止在普通导航时造成二次刷新
             if (m_contentPanel->getCurrentCategoryType() == "search") {
-                qDebug() << "[Main] 搜索框已清空，正在回滚至前序目录视图:" << m_currentPath;
+                ArcMeta::Logger::log(QString("[Main] 搜索框已清空，正在回滚至前序目录视图: %1").arg(m_currentPath));
                 unifiedNavigateTo(m_currentPath);
             }
         }
@@ -1268,15 +1286,21 @@ void MainWindow::initResourceMonitor() {
 
 void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
     if (url.isEmpty()) return;
-    qDebug() << "[Main] 统一导航调度 ->" << url << (record ? "(记录历史)" : "(不记录)");
+    ArcMeta::Logger::log(QString("[Main] 统一导航调度 -> %1 %2").arg(url).arg(record ? "(记录历史)" : "(不记录)"));
 
     // 1. 物理重置搜索与筛选状态
-    if (m_searchEdit && !m_searchEdit->text().isEmpty()) {
+    if (m_searchEdit) {
         m_searchEdit->blockSignals(true);
         m_searchEdit->clear();
         m_searchEdit->blockSignals(false);
-        if (m_contentPanel) m_contentPanel->search("");
     }
+    
+    // 2026-07-xx 物理强化：无论搜索框原先是否为空，在导航行为发生时都必须强制重置内容面板的搜索词，
+    // 防止因代理模型中残留的旧搜索词导致新加载的目录内容被错误过滤。
+    if (m_contentPanel) {
+        m_contentPanel->search("");
+    }
+
     if (m_filterPanel) m_filterPanel->clearAllFilters();
 
     // 2. 压栈逻辑 (原子化)

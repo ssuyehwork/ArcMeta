@@ -1,6 +1,7 @@
 #include "CoreController.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
+#include "../ui/Logger.h"
 #include <QThreadPool>
 #include <QDebug>
 #include <QDateTime>
@@ -54,17 +55,26 @@ void CoreController::startSystem() {
 }
 
 void CoreController::performSearch(const QString& keyword, const QString& scopeSource, int categoryId, const QString& parentPath) {
-    if (keyword.isEmpty()) return;
-    
-    // 1. 中止旧任务
+    // 1. 物理中止旧任务：无论新词是否为空，只要发起 performSearch 就必须清理前序任务
     abortSearch();
+    
+    ArcMeta::Logger::log(QString("[Core] performSearch 触发 -> 词: %1 | 来源: %2 | 路径: %3")
+                        .arg(keyword).arg(scopeSource).arg(parentPath));
+
+    if (keyword.isEmpty()) {
+        ArcMeta::Logger::log("[Core] 关键词为空，跳过执行检索流程");
+        return;
+    }
+    
     m_isSearchAborted = false;
     m_isSearching = true;
+    int searchId = ++m_currentSearchId;
 
+    ArcMeta::Logger::log(QString("[Core] 搜索任务已启动 [%1]，正在发射 searchStarted 信号...").arg(searchId));
     emit searchStarted();
 
     // 2. 异步启动双轨搜索任务
-    (void)QtConcurrent::run([this, keyword, scopeSource, categoryId, parentPath]() {
+    (void)QtConcurrent::run([this, keyword, scopeSource, categoryId, parentPath, searchId]() {
         QStringList cacheResults;
         std::unordered_set<std::wstring> seenPaths;
         int totalFound = 0;
@@ -77,17 +87,23 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
         totalFound = static_cast<int>(cacheResults.size());
 
         // 发射第一批缓存结果
-        if (!m_isSearchAborted) {
-            emit searchResultsAvailable(cacheResults, true);
+        if (!m_isSearchAborted && m_currentSearchId == searchId) {
+            ArcMeta::Logger::log(QString("[Core] 缓存阶段发现 %1 条结果 [%2]，正在流式传输...").arg(cacheResults.size()).arg(searchId));
+            emit searchResultsAvailable(cacheResults, false);
         }
 
         // --- 第二阶段：如果是物理导航模式，执行 I/O 扫描补全 (Plan-57) ---
-        if (scopeSource == "nav" && !parentPath.isEmpty() && !m_isSearchAborted) {
+        if (scopeSource == "nav" && !parentPath.isEmpty() && !m_isSearchAborted && m_currentSearchId == searchId) {
             QDirIterator it(parentPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
             QStringList batch;
+            int scanCount = 0;
             
             while (it.hasNext()) {
-                if (m_isSearchAborted) break;
+                if (m_isSearchAborted || m_currentSearchId != searchId) break;
+                scanCount++;
+                if (scanCount % 2000 == 0) {
+                     ArcMeta::Logger::log(QString("[Core] I/O 扫描进度: 已检查 %1 个项目 [%2]").arg(scanCount).arg(searchId));
+                }
                 
                 QString fullPath = it.next();
                 QString fileName = it.fileName();
@@ -116,8 +132,11 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
         }
 
         m_isSearching = false;
-        if (!m_isSearchAborted) {
+        if (!m_isSearchAborted && m_currentSearchId == searchId) {
+            ArcMeta::Logger::log(QString("[Core] 搜索总计发现 %1 项 [%2]，发送 searchFinished 信号").arg(totalFound).arg(searchId));
             emit searchFinished(totalFound);
+        } else {
+            ArcMeta::Logger::log(QString("[Core] 搜索任务被中途中止或作废 [%1]").arg(searchId));
         }
     });
 }
