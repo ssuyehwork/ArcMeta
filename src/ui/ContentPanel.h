@@ -345,6 +345,11 @@ public slots:
     void loadPaths(const QStringList& paths);
 
     /**
+     * @brief 2026-07-xx 按照 Plan-57：增量追加路径列表 (异步搜索流式返回使用)
+     */
+    void appendPaths(const QStringList& paths);
+
+    /**
      * @brief 2026-06-xx 彻底重构：加载分类及其子项 (分类 ID 联动)
      */
     void loadCategory(int categoryId);
