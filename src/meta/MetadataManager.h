@@ -191,6 +191,37 @@ public:
     static std::wstring getVolumeSerialNumber(const std::wstring& path);
 
     /**
+     * @brief 安全解析路径组件
+     * @param normalizedPath 标准化后的路径
+     * @param isFolder 是否为文件夹
+     * @param outName 输出名称（文件含后缀，文件夹仅名称）
+     * @param outExt 输出后缀（仅文件，统一小写）
+     */
+    void parsePathComponents(const std::wstring& normalizedPath, bool isFolder, std::wstring& outName, std::wstring& outExt);
+
+    /**
+     * @brief 从 FID 中提取卷序列号
+     */
+    std::wstring getVolumeFromFid(const std::string& fid);
+
+    /**
+     * @brief 卸载指定卷的名称/后缀索引映射（驱动器拔出时）
+     */
+    void unloadVolumeNameCache(const std::wstring& volSerial);
+
+    /**
+     * @brief 加载指定卷的名称/后缀索引映射（驱动器插入或初始化时）
+     */
+    void loadVolumeNameCache(const std::wstring& volSerial);
+
+    /**
+     * @brief 隔离查询 API
+     */
+    std::vector<std::string> getFileFidsByName(const std::wstring& filename);
+    std::vector<std::string> getFolderFidsByName(const std::wstring& foldername);
+    std::vector<std::string> getFidsByExtension(const std::wstring& extension);
+
+    /**
      * @brief 只读遍历内存缓存，用于统计等场景（持有读锁）
      * 2026-06-xx 物理同步：回调参数包含 (path, RuntimeMeta)
      */
@@ -232,6 +263,15 @@ private:
 
     std::unordered_map<std::wstring, RuntimeMeta> m_cache;
     std::unordered_map<std::string, std::wstring> m_fidToPath;
+
+    // 2026-07-xx 隔离式倒排索引：物理隔离文件、文件夹及后缀
+    // 1. 仅文件 (Key: L"resume.pdf", Value: file_ids)
+    std::unordered_map<std::wstring, std::vector<std::string>> m_fileNameToFids;
+    // 2. 仅文件夹 (Key: L"projects", Value: folder_ids)
+    std::unordered_map<std::wstring, std::vector<std::string>> m_folderNameToFids;
+    // 3. 仅后缀 (Key: L"pdf", Value: file_ids)
+    std::unordered_map<std::wstring, std::vector<std::string>> m_extensionToFids;
+
     mutable std::shared_mutex m_mutex;
     bool m_loaded = false; // 2026-06-xx 物理加固：加载状态标记
     
