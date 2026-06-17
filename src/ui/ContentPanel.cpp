@@ -2284,11 +2284,19 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     }
 
     m_isLoading = true;
-    m_currentCategoryType = "path_list";
+    // 2026-07-xx 逻辑校准：如果当前是搜索态，则保持搜索态，否则标记为路径列表
+    if (m_currentCategoryType != "search") {
+        m_currentCategoryType = "path_list";
+    }
+
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
-    emit dataSourceChanged("category"); 
+
+    // 如果不是搜索结果，则通常属于分类数据源
+    if (m_currentCategoryType != "search") {
+        emit dataSourceChanged("category");
+    }
      
     m_model->clear(); 
  
@@ -2312,7 +2320,34 @@ void ContentPanel::loadPaths(const QStringList& paths) {
             }
         });
     });
-} 
+}
+
+void ContentPanel::appendPaths(const QStringList& paths) {
+    if (paths.isEmpty()) return;
+
+    QPointer<ContentPanel> weakThis(this);
+    (void)QtConcurrent::run([weakThis, paths]() {
+        std::vector<ItemRecord> newRecords;
+        newRecords.reserve(static_cast<int>(paths.size()));
+        for (const QString& p : paths) {
+            if (!weakThis) return;
+            newRecords.push_back(ContentPanel::createItemRecord(p));
+        }
+
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, newRecords]() {
+            if (weakThis) {
+                // 获取当前已有记录并追加
+                std::vector<ItemRecord> all = weakThis->m_model->allRecords();
+                all.insert(all.end(), newRecords.begin(), newRecords.end());
+                weakThis->m_model->setRecords(all);
+
+                // 异步流式追加时，每批次都尝试更新一次统计与筛选
+                weakThis->recalculateAndEmitStats();
+                weakThis->applyFilters();
+            }
+        });
+    });
+}
  
 void ContentPanel::recalculateAndEmitStats() {
     const std::vector<ItemRecord>& records = m_model->allRecords();

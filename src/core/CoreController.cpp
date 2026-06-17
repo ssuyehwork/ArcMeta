@@ -4,6 +4,9 @@
 #include <QThreadPool>
 #include <QDebug>
 #include <QDateTime>
+#include <QDirIterator>
+#include <QtConcurrent>
+#include <unordered_set>
 
 namespace ArcMeta {
 
@@ -50,10 +53,78 @@ void CoreController::startSystem() {
     });
 }
 
-QStringList CoreController::performSearch(const QString& keyword, const QString& scopeSource, int categoryId, const QString& parentPath) {
-    if (keyword.isEmpty()) return {};
-    // 彻底废除数据库搜索，强制使用 SCCH 内存搜索 (支持范围感知)
-    return MetadataManager::instance().searchInCache(keyword, scopeSource, categoryId, parentPath);
+void CoreController::performSearch(const QString& keyword, const QString& scopeSource, int categoryId, const QString& parentPath) {
+    if (keyword.isEmpty()) return;
+
+    // 1. 中止旧任务
+    abortSearch();
+    m_isSearchAborted = false;
+    m_isSearching = true;
+
+    emit searchStarted();
+
+    // 2. 异步启动双轨搜索任务
+    (void)QtConcurrent::run([this, keyword, scopeSource, categoryId, parentPath]() {
+        QStringList cacheResults;
+        std::unordered_set<std::wstring> seenPaths;
+        int totalFound = 0;
+
+        // --- 第一阶段：内存缓存检索 (极速响应) ---
+        cacheResults = MetadataManager::instance().searchInCache(keyword, scopeSource, categoryId, parentPath);
+        for (const auto& p : cacheResults) {
+            seenPaths.insert(p.toStdWString());
+        }
+        totalFound = static_cast<int>(cacheResults.size());
+
+        // 发射第一批缓存结果
+        if (!m_isSearchAborted) {
+            emit searchResultsAvailable(cacheResults, false);
+        }
+
+        // --- 第二阶段：如果是物理导航模式，执行 I/O 扫描补全 (Plan-57) ---
+        if (scopeSource == "nav" && !parentPath.isEmpty() && !m_isSearchAborted) {
+            QDirIterator it(parentPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+            QStringList batch;
+
+            while (it.hasNext()) {
+                if (m_isSearchAborted) break;
+
+                QString fullPath = it.next();
+                QString fileName = it.fileName();
+
+                // 关键词匹配逻辑 (简单文件名包含，未来可扩展为更复杂匹配)
+                if (fileName.contains(keyword, Qt::CaseInsensitive)) {
+                    std::wstring wPath = MetadataManager::normalizePath(fullPath.toStdWString());
+                    // 去重：如果已经在缓存中搜到了，则跳过
+                    if (seenPaths.find(wPath) == seenPaths.end()) {
+                        batch << fullPath;
+                        seenPaths.insert(wPath);
+                        totalFound++;
+
+                        // 攒批发射，防止 UI 信号淹没
+                        if (batch.size() >= 50) {
+                            emit searchResultsAvailable(batch, true);
+                            batch.clear();
+                        }
+                    }
+                }
+            }
+
+            if (!batch.isEmpty() && !m_isSearchAborted) {
+                emit searchResultsAvailable(batch, true);
+            }
+        }
+
+        m_isSearching = false;
+        if (!m_isSearchAborted) {
+            emit searchFinished(totalFound);
+        }
+    });
+}
+
+void CoreController::abortSearch() {
+    m_isSearchAborted = true;
+    // 等待现有搜索任务退出的轻量化处理（实际生产环境可能需要更复杂的等待机制）
 }
 
 void CoreController::setStatus(const QString& text, bool indexing) {

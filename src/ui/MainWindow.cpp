@@ -421,11 +421,33 @@ void MainWindow::initUi() {
         if (m_contentPanel) m_contentPanel->refreshAll();
     });
 
-    // 7. 搜索框回车触发逻辑 (带历史记录和搜索模式分流)
+    // 7. 搜索框回车触发逻辑 (2026-07-xx 按照 Plan-57 升级为异步流式展示)
     m_searchHistory = AppConfig::instance().getValue("Search/History").toStringList();
     
     m_searchHistoryPanel = new SearchHistoryPanel(this);
     m_searchHistoryPanel->setHistory(m_searchHistory);
+
+    // 搜索信号对接
+    connect(&CoreController::instance(), &CoreController::searchStarted, this, [this]() {
+        if (m_contentPanel) {
+            m_contentPanel->setCurrentCategoryType("search");
+            m_contentPanel->loadPaths({}); // 先清空界面进入搜索态
+            if (m_addressBar) m_addressBar->setPath("搜索: " + m_searchEdit->text().trimmed());
+        }
+    });
+
+    connect(&CoreController::instance(), &CoreController::searchResultsAvailable, this,
+        [this](const QStringList& results, bool isIncremental) {
+        if (m_contentPanel) {
+            if (isIncremental) m_contentPanel->appendPaths(results);
+            else m_contentPanel->loadPaths(results);
+        }
+    });
+
+    connect(&CoreController::instance(), &CoreController::searchFinished, this, [this](int total) {
+        qDebug() << "[Main] 搜索完成，共发现项目:" << total;
+        updateStatusBar();
+    });
 
     // 回车搜索核心逻辑
     auto doSearch = [this](const QString& keyword) {
@@ -435,12 +457,12 @@ void MainWindow::initUi() {
         }
 
         if (keyword.isEmpty()) {
-            m_contentPanel->loadDirectory(m_currentPath);
+            unifiedNavigateTo(m_currentPath);
             m_searchHistoryPanel->hide();
             return;
         }
 
-        // 维护历史记录（去重，置顶，最多保持10条）
+        // 维护历史记录
         m_searchHistory.removeAll(keyword);
         m_searchHistory.prepend(keyword);
         if (m_searchHistory.size() > 10) m_searchHistory.removeLast();
@@ -448,9 +470,8 @@ void MainWindow::initUi() {
         m_searchHistoryPanel->setHistory(m_searchHistory);
         m_searchHistoryPanel->hide();
 
-        // 使用 CoreController 的中枢搜索接口 (范围感知)
-        QStringList paths = CoreController::instance().performSearch(keyword, m_currentDataSource, m_currentCategoryId, m_currentPath);
-        m_contentPanel->loadPaths(paths);
+        // 异步发起搜索 (范围感知 + 物理补全)
+        CoreController::instance().performSearch(keyword, m_currentDataSource, m_currentCategoryId, m_currentPath);
     };
 
     // 2026-05-27 物理加固：补全 this 上下文
