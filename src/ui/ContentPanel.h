@@ -274,6 +274,7 @@ private:
 
     int m_zoomLevel = 64;
     QString m_currentPath;
+    int m_currentLoadToken = 0; // 2026-07-xx 物理防重入令牌：杜绝过期异步加载覆盖新任务
     int m_currentCategoryId = -1;
     QString m_currentCategoryType; // 用于驱动差异化右键菜单
     bool m_isRecursive = false;

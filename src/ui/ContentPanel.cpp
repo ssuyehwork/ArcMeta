@@ -2050,8 +2050,9 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     m_isLoading = true;
+    int token = ++m_currentLoadToken;
     m_currentCategoryType = ""; // 物理导航模式下清除系统类型
-    qDebug() << "[Content] 开始物理递归扫描 (虚拟化) ->" << path << (recursive ? "递归" : "单级"); 
+    qDebug() << "[Content] 开始物理递归扫描 (虚拟化) ->" << path << (recursive ? "递归" : "单级") << " Token:" << token;
     emit dataSourceChanged("nav"); 
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
@@ -2113,8 +2114,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         scanDir(path, recursive); 
         if (!panelPtr) return; 
  
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems]() { 
-            if (panelPtr && panelPtr->m_currentPath == path) { 
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, token]() {
+            if (panelPtr && panelPtr->m_currentPath == path && panelPtr->m_currentLoadToken == token) {
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
@@ -2207,6 +2208,7 @@ void ContentPanel::loadCategory(int categoryId) {
     }
 
     m_isLoading = true;
+    int token = ++m_currentLoadToken;
     m_currentCategoryType = "user_category";
     m_currentCategoryId = categoryId;
     m_viewStack->show(); 
@@ -2249,8 +2251,8 @@ void ContentPanel::loadCategory(int categoryId) {
             }
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, allRecords]() {
-            if (weakThis) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, allRecords, token]() {
+            if (weakThis && weakThis->m_currentLoadToken == token) {
                 weakThis->m_model->setRecords(allRecords);
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
@@ -2267,6 +2269,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
     }
 
     m_isLoading = true;
+    int token = ++m_currentLoadToken;
     // 2026-07-xx 逻辑校准：如果当前是搜索态，则保持搜索态，否则标记为路径列表
     if (m_currentCategoryType != "search") {
         m_currentCategoryType = "path_list";
@@ -2283,6 +2286,13 @@ void ContentPanel::loadPaths(const QStringList& paths) {
      
     m_model->clear(); 
  
+    if (paths.isEmpty()) {
+        m_isLoading = false;
+        recalculateAndEmitStats();
+        applyFilters();
+        return;
+    }
+
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, paths]() {
         std::vector<ItemRecord> records;
@@ -2294,8 +2304,8 @@ void ContentPanel::loadPaths(const QStringList& paths) {
             }
         }
         
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records]() {
-            if (weakThis) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records, token]() {
+            if (weakThis && weakThis->m_currentLoadToken == token) {
                 weakThis->m_model->setRecords(records);
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
@@ -2307,6 +2317,7 @@ void ContentPanel::loadPaths(const QStringList& paths) {
 
 void ContentPanel::appendPaths(const QStringList& paths) {
     if (paths.isEmpty()) return;
+    int token = m_currentLoadToken;
 
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, paths]() {
@@ -2317,8 +2328,8 @@ void ContentPanel::appendPaths(const QStringList& paths) {
             newRecords.push_back(ContentPanel::createItemRecord(p));
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, newRecords]() {
-            if (weakThis) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, newRecords, token]() {
+            if (weakThis && weakThis->m_currentLoadToken == token) {
                 // 获取当前已有记录并追加
                 std::vector<ItemRecord> all = weakThis->m_model->allRecords();
                 all.insert(all.end(), newRecords.begin(), newRecords.end());
