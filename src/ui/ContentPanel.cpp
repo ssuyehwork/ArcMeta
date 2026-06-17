@@ -2136,6 +2136,11 @@ void ContentPanel::search(const QString& query) {
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
  
+    // 2026-07-xx 物理同步：必须将搜索词同步给代理模型，防止旧搜索词干扰新结果判定
+    if (auto* proxy = qobject_cast<FilterProxyModel*>(m_proxyModel)) {
+        proxy->setSearchQuery(query);
+    }
+
     m_isLoading = true;
     m_model->clear();
     
