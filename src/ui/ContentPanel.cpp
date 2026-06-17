@@ -2129,6 +2129,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
  
 void ContentPanel::search(const QString& query) { 
+    // 2026-07-xx 按照 Plan-57：ContentPanel::search 仅作为搜索发起的代理。
+    // 实际结果处理已在 MainWindow 中通过 CoreController 的信号进行流式对接。
     m_currentCategoryType = "search";
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
@@ -2137,28 +2139,9 @@ void ContentPanel::search(const QString& query) {
     m_isLoading = true;
     m_model->clear();
     
-    QPointer<ContentPanel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, query]() {
-        QStringList paths = CoreController::instance().performSearch(query);
-        
-        std::vector<ItemRecord> records;
-        records.reserve(static_cast<int>(paths.size()));
-        for (const QString& p : paths) {
-            if (!weakThis) return;
-            if (!p.isEmpty()) {
-                records.push_back(ContentPanel::createItemRecord(p));
-            }
-        }
-
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records]() {
-            if (weakThis) {
-                weakThis->m_model->setRecords(records);
-                weakThis->m_isLoading = false;
-                weakThis->recalculateAndEmitStats();
-                weakThis->applyFilters();
-            }
-        });
-    });
+    // 核心逻辑：发起异步搜索。此处参数采用默认值，因为特定的范围感知搜索
+    // 通常由搜索框（MainWindow）直接驱动。此处保留作为通用接口。
+    CoreController::instance().performSearch(query);
 } 
  
 void ContentPanel::applyFilters(const FilterState& state) { 
