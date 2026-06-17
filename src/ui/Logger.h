@@ -5,6 +5,8 @@
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>
+#include <QMutex>
+#include <QMutexLocker>
 
 namespace ArcMeta {
 
@@ -15,6 +17,9 @@ namespace ArcMeta {
 class Logger {
 public:
     static void log(const QString& msg) {
+        static QMutex mutex;
+        QMutexLocker locker(&mutex);
+
         QFile file("arcmeta_debug.log"); // 统一写入主日志文件
         if (file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
             QTextStream out(&file);

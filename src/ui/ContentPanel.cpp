@@ -2156,7 +2156,7 @@ void ContentPanel::search(const QString& query) {
     }
 
     m_isLoading = true;
-    int reqId = ++m_loadRequestId;
+    ++m_loadRequestId; // 增加 ID 以作废之前的异步加载
     m_model->clear();
     
     // 核心逻辑：发起异步搜索。此处参数采用默认值，因为特定的范围感知搜索
