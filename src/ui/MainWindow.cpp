@@ -470,7 +470,7 @@ void MainWindow::initUi() {
             // 仅在当前处于搜索结果视图时才触发回滚，防止在普通导航时造成二次刷新
             if (m_contentPanel->getCurrentCategoryType() == "search") {
                 qDebug() << "[Main] 搜索框已清空，正在回滚至前序目录视图:" << m_currentPath;
-                navigateTo(m_currentPath);
+                unifiedNavigateTo(m_currentPath);
             }
         }
     });
@@ -588,7 +588,7 @@ void MainWindow::initUi() {
         QFileInfo fi(path);
         if (fi.isDir()) {
             // 如果是文件夹，执行界面跳转联动
-            navigateTo(path);
+            unifiedNavigateTo(path);
         } else {
             // 2026-03-xx 按照用户要求：侧边栏选中任何物理文件，立即执行即时全能预览
             m_contentPanel->previewFile(path);
