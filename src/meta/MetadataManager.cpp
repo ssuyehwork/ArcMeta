@@ -1247,13 +1247,17 @@ void MetadataManager::loadVolumeNameCache(const std::wstring& volSerial) {
 
 std::vector<std::string> MetadataManager::getFileFidsByName(const std::wstring& filename) {
     std::shared_lock<std::shared_mutex> lock(m_mutex);
-    auto it = m_fileNameToFids.find(filename);
+    std::wstring lowerName = filename;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::towlower);
+    auto it = m_fileNameToFids.find(lowerName);
     return (it != m_fileNameToFids.end()) ? it->second : std::vector<std::string>();
 }
 
 std::vector<std::string> MetadataManager::getFolderFidsByName(const std::wstring& foldername) {
     std::shared_lock<std::shared_mutex> lock(m_mutex);
-    auto it = m_folderNameToFids.find(foldername);
+    std::wstring lowerName = foldername;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::towlower);
+    auto it = m_folderNameToFids.find(lowerName);
     return (it != m_folderNameToFids.end()) ? it->second : std::vector<std::string>();
 }
 

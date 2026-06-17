@@ -462,6 +462,19 @@ void MainWindow::initUi() {
             return;
         }
 
+        // 2026-07-xx 物理拦截：发起搜索前必须清空筛选面板的所有过滤条件，
+        // 防止因旧有的“评级/颜色/标签”勾选导致搜索结果被拦截不可见。
+        if (m_filterPanel) {
+            m_filterPanel->blockSignals(true);
+            m_filterPanel->clearAllFilters();
+            m_filterPanel->blockSignals(false);
+            
+            // 物理同步：由于屏蔽了信号，需要手动重置内容面板的筛选状态
+            if (m_contentPanel) {
+                m_contentPanel->applyFilters(FilterState());
+            }
+        }
+
         // 维护历史记录
         m_searchHistory.removeAll(keyword);
         m_searchHistory.prepend(keyword);

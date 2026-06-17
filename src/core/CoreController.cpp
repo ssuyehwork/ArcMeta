@@ -78,7 +78,7 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
 
         // 发射第一批缓存结果
         if (!m_isSearchAborted) {
-            emit searchResultsAvailable(cacheResults, false);
+            emit searchResultsAvailable(cacheResults, true);
         }
 
         // --- 第二阶段：如果是物理导航模式，执行 I/O 扫描补全 (Plan-57) ---
