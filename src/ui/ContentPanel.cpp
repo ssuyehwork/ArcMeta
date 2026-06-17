@@ -2140,6 +2140,13 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
         QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, reqId]() { 
             if (panelPtr && panelPtr->m_loadRequestId == reqId) { 
+                // 2026-07-xx Scoped DB 物理补完：递归扫描完成后，如果处于 Scoped 模式，执行批量持久化
+                if (panelPtr->m_isRecursive) {
+                    std::vector<std::wstring> paths;
+                    for (const auto& r : allItems) paths.push_back(r.path.toStdWString());
+                    MetadataManager::instance().persistBatch(paths);
+                }
+
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();

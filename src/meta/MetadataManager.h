@@ -239,6 +239,11 @@ public:
     void migrateScopedData(const std::wstring& folderPath);
 
     /**
+     * @brief 批量持久化项目元数据到数据库 (用于 Scoped DB 初始化等场景)
+     */
+    void persistBatch(const std::vector<std::wstring>& paths);
+
+    /**
      * @brief 隔离查询 API
      */
     std::vector<std::string> getFileFidsByName(const std::wstring& filename);

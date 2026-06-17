@@ -1098,6 +1098,31 @@ void MetadataManager::migrateScopedData(const std::wstring& folderPath) {
     DatabaseManager::instance().flushAll();
 }
 
+void MetadataManager::persistBatch(const std::vector<std::wstring>& paths) {
+    if (paths.empty()) return;
+    qDebug() << "[Metadata] Batch persisting" << paths.size() << "items";
+
+    // 2026-07-xx 按照用户要求 (1.19)：在大循环外开启显式事务，将寻道风暴降至最低
+    // 我们需要区分写入哪些数据库。为简化，如果是 Scoped 模式且路径在 ScopedRoot 下，统一写 Scoped DB。
+    sqlite3* scopedDb = nullptr;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        if (m_scopedMode) scopedDb = DatabaseManager::instance().getScopedDb();
+    }
+
+    if (scopedDb) {
+        SqlTransaction trans(scopedDb);
+        for (const auto& p : paths) {
+            persistAsync(p, false); // notify = false 以提高性能
+        }
+        trans.commit();
+        DatabaseManager::instance().flushAll(); // 确保写入磁盘
+        return;
+    }
+
+    // 非 Scoped 模式下，按卷分批持久化 (暂略，通常由 debouncePersist 驱动)
+}
+
 void MetadataManager::syncPhysicalMetadata(const std::wstring& path, bool notify) { persistAsync(path, notify); }
 
 void MetadataManager::activateItem(const std::wstring& path) {

@@ -353,8 +353,15 @@ sqlite3* DatabaseManager::mountScopedDb(const std::string& folderFid, const std:
     }
 
     // 2. 构造路径: {folderPath}/.arcmeta/{folderFid}.db
-    QString scopedMetaDir = QString::fromStdWString(folderPath) + "/.arcmeta";
-    QDir().mkpath(scopedMetaDir);
+    // 物理加固：处理根目录情况 (如 D:\)，防止拼接出 D:\/.arcmeta
+    QString root = QString::fromStdWString(folderPath);
+    if (!root.endsWith('/') && !root.endsWith('\\')) root += '/';
+    QString scopedMetaDir = root + ".arcmeta";
+
+    if (!QDir().mkpath(scopedMetaDir)) {
+        qDebug() << "[DB] CRITICAL: Failed to create .arcmeta directory at:" << scopedMetaDir;
+        return nullptr;
+    }
     ensureHidden(scopedMetaDir.toStdWString());
 
     QString dbName = QString::fromStdString(folderFid);
@@ -365,8 +372,11 @@ sqlite3* DatabaseManager::mountScopedDb(const std::string& folderFid, const std:
     qDebug() << "[DB] Mounting Scoped DB:" << dbPath;
 
     if (loadDb(dbPath.toStdWString(), m_scopedDb)) {
+        qDebug() << "[DB] Scoped DB mounted successfully.";
         return m_scopedDb.memDb;
     }
+
+    qDebug() << "[DB] Failed to mount Scoped DB at:" << dbPath;
     return nullptr;
 }
 
