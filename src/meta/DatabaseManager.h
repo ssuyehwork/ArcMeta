@@ -68,40 +68,6 @@ public:
      */
     sqlite3* getGlobalDb();
 
-    /**
-     * @brief 挂载卷级递归数据库 (Recursion DB)
-     * @param volumeSerial 磁盘卷序列号
-     */
-    sqlite3* mountRecursionDb(const std::wstring& volumeSerial);
-
-    /**
-     * @brief 卸载卷级递归数据库
-     * @param volumeSerial 磁盘卷序列号
-     */
-    void unmountRecursionDb(const std::wstring& volumeSerial);
-
-    /**
-     * @brief 获取指定卷的递归数据库连接
-     */
-    sqlite3* getRecursionDb(const std::wstring& volumeSerial);
-
-    /**
-     * @brief 挂载文件夹专属数据库 (Scoped DB) - 已废弃，内部转向 Recursion DB
-     * @param folderFid 文件夹的 File ID (用于数据库命名)
-     * @param folderPath 文件夹物理路径
-     */
-    sqlite3* mountScopedDb(const std::string& folderFid, const std::wstring& folderPath);
-
-    /**
-     * @brief 卸载当前的 Scoped DB
-     */
-    void unmountScopedDb();
-
-    /**
-     * @brief 获取当前挂载的 Scoped DB 连接
-     */
-    sqlite3* getScopedDb();
-
 private:
     DatabaseManager(QObject* parent = nullptr);
     ~DatabaseManager();
@@ -114,10 +80,7 @@ private:
     };
 
     std::map<std::wstring, DbConnection> m_driveDbs;
-    std::map<std::wstring, DbConnection> m_recursionDbs;
-    std::map<std::wstring, int> m_recursionRefCount;
     DbConnection m_globalDb;
-    DbConnection m_scopedDb;
     std::mutex m_mutex;
 
     bool loadDb(const std::wstring& diskPath, DbConnection& conn);
@@ -126,7 +89,6 @@ private:
 
     QString getAppDir();
     void ensureHidden(const std::wstring& path);
-    void initRecursionSchema(sqlite3* db);
 };
 
 } // namespace ArcMeta

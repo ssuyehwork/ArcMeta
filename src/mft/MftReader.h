@@ -124,33 +124,6 @@ public:
     void removeEntryByFrn(const std::wstring& volume, uint64_t frn);
     std::wstring getPathFast(size_t driveIdx, uint64_t frn);
 
-    /**
-     * @brief 获取卷名称 (如 L"C:")
-     */
-    std::wstring getVolumeName(size_t driveIdx) const;
-
-    /**
-     * @brief 获取卷索引
-     */
-    size_t getVolumeIndex(const std::wstring& volume) const;
-
-    /**
-     * @brief 获取指定卷的当前 NextUsn
-     */
-    uint64_t getNextUsn(const std::wstring& volume) const;
-
-    /**
-     * @brief 按需启动指定卷的 USN 监控
-     * @param volume 卷路径
-     * @param startUsn 起始 USN，若为 0 则使用内部记录或当前 NextUsn
-     */
-    void startUsnWatcher(const std::wstring& volume, uint64_t startUsn = 0);
-
-    /**
-     * @brief 停止指定卷的 USN 监控
-     */
-    void stopUsnWatcher(const std::wstring& volume);
-
 private:
     // 2026-05-29 物理修复：提供无锁内部接口，解决嵌套调用引起的 QReadWriteLock 递归死锁
     std::wstring getPathFastInternal(size_t driveIdx, uint64_t frn);

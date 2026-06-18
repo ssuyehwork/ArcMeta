@@ -816,7 +816,7 @@ void ContentPanel::initUi() {
     m_btnLayers->setStyleSheet( 
         "QPushButton { background: transparent; border: none; border-radius: 4px; }" 
         "QPushButton:hover { background: #3E3E42; }" 
-        "QPushButton:checked { background: #3E3E42; }" 
+        "QPushButton:checked { background: rgba(52, 152, 219, 0.2); border: 1px solid #3498db; }" 
         "QPushButton:disabled { opacity: 0.3; }" 
     ); 
     connect(m_btnLayers, &QPushButton::clicked, [this]() { 
@@ -834,23 +834,11 @@ void ContentPanel::initUi() {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "当前文件夹不支持显示子文件夹项目", 1500, QColor("#E81123")); 
                 return; 
             } 
-            
-            // 2026-07-xx 按照重构方案：开启递归时，尝试加载卷级 Recursion 数据库实现秒开
-            MetadataManager::instance().loadScopedDb(m_currentPath.toStdWString());
             loadDirectory(m_currentPath, true); 
         } else { 
-            // 退出递归模式，卸载卷级 Recursion DB
-            MetadataManager::instance().unloadScopedDb();
             loadDirectory(m_currentPath, false); 
         } 
     }); 
-
-    connect(m_btnLayersBlue, &QPushButton::clicked, [this]() {
-        // 2026-07-xx 按照内存规格：蓝色按钮关联 Recursion DB 瞬时加载
-        m_btnLayers->setChecked(true);
-        MetadataManager::instance().loadScopedDb(m_currentPath.toStdWString());
-        loadDirectory(m_currentPath, true);
-    });
  
     titleL->addWidget(titleLabel); 
     titleL->addStretch(); 
@@ -1766,12 +1754,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionBatchRename: performBatchRename(); break; 
         case ActionAddToCategory: {
             if (path.isEmpty()) break;
-
-            // 2026-07-xx 按照 Scoped DB 方案：入库前迁移 Scoped 数据到全局库
-            if (m_isRecursive) {
-                MetadataManager::instance().migrateScopedData(m_currentPath.toStdWString());
-            }
-
             // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
             // 扫描入库时，镜像分类始终创建在“我的分类”根节点 (ID = 0)
             ImportHelper::importPaths({path}, 0, this);
@@ -2102,24 +2084,6 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         return; 
     } 
  
-    // 2026-07-xx 物理修复：如果当前处于递归模式，但本次 load 请求 recursive 为 false (即退出递归)，执行资源卸载
-    if (m_isRecursive && !recursive) {
-        MetadataManager::instance().unloadScopedDb();
-    }
-    // 2026-07-xx 物理修复：切换目录时，如果开启了递归模式且路径发生变化，检查是否跨卷
-    else if (m_currentPath != path && !m_currentPath.isEmpty() && m_isRecursive) {
-        std::wstring oldVol = MetadataManager::getVolumeSerialNumber(m_currentPath.toStdWString());
-        std::wstring newVol = MetadataManager::getVolumeSerialNumber(path.toStdWString());
-        
-        // 极致性能优化：仅当跨卷切换时才彻底卸载，同卷切换保留库挂载以消除 IO 抖动
-        if (oldVol != newVol) {
-            MetadataManager::instance().unloadScopedDb();
-        } else {
-            // 同卷切换，仅更新 MetadataManager 内部的根路径标记，不触发 DB 卸载
-            MetadataManager::instance().switchScopedRoot(path.toStdWString());
-        }
-    }
-
     m_currentPath = path; 
     updateLayersButtonState(); 
      
@@ -2127,13 +2091,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive, reqId]() { 
         if (!panelPtr) return; 
          
-        qint64 startTime = QDateTime::currentMSecsSinceEpoch();
-        if (recursive) {
-            QMetaObject::invokeMethod(panelPtr, "scanStarted", Qt::QueuedConnection);
-        }
-
         std::vector<ItemRecord> allItems;
-        int lastEmittedCount = 0;
  
         std::function<void(const QString&, bool)> scanDir; 
         scanDir = [&](const QString& p, bool rec) { 
@@ -2147,13 +2105,6 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
                 QString absPath = info.absoluteFilePath();
                 allItems.push_back(ContentPanel::createItemRecord(absPath));
-
-                // 2026-07-xx 按照用户要求：每发现 50 个文件通过信号反馈一次进度（防抖）
-                if (recursive && (allItems.size() - lastEmittedCount >= 50)) {
-                    lastEmittedCount = static_cast<int>(allItems.size());
-                    QMetaObject::invokeMethod(panelPtr, "scanProgress", Qt::QueuedConnection, 
-                                             Q_ARG(int, static_cast<int>(allItems.size())), Q_ARG(QString, absPath));
-                }
  
                 if (rec && info.isDir()) { 
                     scanDir(absPath, true); 
@@ -2163,34 +2114,14 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
         scanDir(path, recursive); 
         if (!panelPtr) return; 
-
-        // 2026-07-xx Scoped DB 物理补完：在子线程完成扫描后立即执行批量持久化与颜色解析预热
-        // 理由：避免在 GUI 线程调用 persistBatch 导致主循环阻塞。
-        if (recursive) {
-            std::vector<std::wstring> paths;
-            paths.reserve(allItems.size());
-            for (const auto& r : allItems) paths.push_back(r.path.toStdWString());
-            MetadataManager::instance().persistBatch(paths);
-        }
  
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, reqId, startTime, recursive]() { 
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, reqId]() { 
             if (panelPtr && panelPtr->m_loadRequestId == reqId) { 
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
                 // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
                 panelPtr->applyFilters();
-                panelPtr->updateStatusBarStats(); // 显式同步底栏项目总数
-
-                // 2026-07-xx 按照用户要求：耗时统计必须包含数据应用到内容容器后的总时长。
-                // 物理加固：使用 QueuedConnection 确保状态栏在 UI 列表刷新帧渲染完成后才更新。
-                if (recursive) {
-                    qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - startTime;
-                    QMetaObject::invokeMethod(panelPtr, [panelPtr, allItems, elapsed]() {
-                        if (panelPtr) emit panelPtr->scanFinished(static_cast<int>(allItems.size()), elapsed);
-                    }, Qt::QueuedConnection);
-                }
-
                 ArcMeta::Logger::log(QString("[Content] 目录扫描完成并已应用到 UI [%1]").arg(reqId));
             } else if (panelPtr) {
                 ArcMeta::Logger::log(QString("[Content] 拦截到过期的目录扫描回调 [%1], 当前 ID: %2").arg(reqId).arg(panelPtr->m_loadRequestId.load()));
@@ -2290,13 +2221,6 @@ void ContentPanel::previewFile(const QString& path) {
 } 
  
 void ContentPanel::loadCategory(int categoryId) { 
-    // 2026-07-xx 物理对账：切换至分类模式时，必须强制卸载递归资源 (资源回收红线)
-    if (m_isRecursive) {
-        MetadataManager::instance().unloadScopedDb();
-        m_isRecursive = false;
-        if (m_btnLayers) m_btnLayers->setChecked(false);
-    }
-
     // 2026-07-xx 物理防护：防重入机制。如果已经在加载同一个分类，则直接拦截，防止重复 clear() 导致的闪烁
     if (m_isLoading && m_currentCategoryId == categoryId && m_currentCategoryType == "user_category") {
         return;
@@ -2361,13 +2285,6 @@ void ContentPanel::loadCategory(int categoryId) {
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths, int reqId) { 
-    // 2026-07-xx 物理对账：路径列表加载通常由逻辑分类驱动，执行资源卸载
-    if (m_isRecursive) {
-        MetadataManager::instance().unloadScopedDb();
-        m_isRecursive = false;
-        if (m_btnLayers) m_btnLayers->setChecked(false);
-    }
-
     // 2026-07-xx 物理强化：如果路径列表为空，直接执行同步清理并返回
     // 理由：这防止了搜索启动时的清空动作（异步）与随后到达的结果加载（异步）发生竞态。
     if (paths.isEmpty()) {

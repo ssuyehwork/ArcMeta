@@ -230,6 +230,7 @@ void MftReader::buildIndex(const QStringList& drives) {
     });
 
     QWriteLocker lock(&m_dataLock);
+    std::vector<UsnWatcher*> newWatchers;
     for (auto& sr : scannedResults) {
         if (!sr.success || sr.res.entries.empty()) continue;
         
@@ -239,6 +240,10 @@ void MftReader::buildIndex(const QStringList& drives) {
         m_next_usns[sr.volume] = sr.res.nextUsn;
         mergeDriveResult(sr.volume, sr.res, dIdx);
         saveDriveToCacheInternal(dIdx);
+        
+        auto* w = new UsnWatcher(sr.volume, sr.res.nextUsn, nullptr);
+        m_watchers.push_back(w);
+        newWatchers.push_back(w);
     }
 
     rebuildFrnToIndexMap();
@@ -246,67 +251,7 @@ void MftReader::buildIndex(const QStringList& drives) {
     m_isInitialized = true;
 
     lock.unlock();
-}
-
-std::wstring MftReader::getVolumeName(size_t driveIdx) const {
-    QReadLocker lock(&m_dataLock);
-    if (driveIdx < m_drive_list.size()) return m_drive_list[driveIdx];
-    return L"";
-}
-
-size_t MftReader::getVolumeIndex(const std::wstring& volume) const {
-    QReadLocker lock(&m_dataLock);
-    for (size_t i = 0; i < m_drive_list.size(); ++i) {
-        if (m_drive_list[i] == volume) return i;
-    }
-    return static_cast<size_t>(-1);
-}
-
-uint64_t MftReader::getNextUsn(const std::wstring& volume) const {
-    QReadLocker lock(&m_dataLock);
-    auto it = m_next_usns.find(volume);
-    if (it != m_next_usns.end()) return it->second;
-    return 0;
-}
-
-void MftReader::startUsnWatcher(const std::wstring& volume, uint64_t startUsn) {
-    QWriteLocker lock(&m_dataLock);
-    // 检查是否已经存在
-    QString volStr = QString::fromStdWString(volume);
-    for (auto* w : m_watchers) {
-        if (w->property("volume_path").toString() == volStr) return;
-    }
-
-    uint64_t lastUsn = startUsn;
-    if (lastUsn == 0 && m_next_usns.find(volume) != m_next_usns.end()) {
-        lastUsn = m_next_usns[volume];
-    }
-
-    auto* w = new UsnWatcher(volume, lastUsn, nullptr);
-    w->setProperty("volume_path", volStr);
-    m_watchers.push_back(w);
-    w->start();
-    qDebug() << "[Mft] Started on-demand UsnWatcher for:" << QString::fromStdWString(volume) << "at USN:" << lastUsn;
-}
-
-void MftReader::stopUsnWatcher(const std::wstring& volume) {
-    QString volStr = QString::fromStdWString(volume);
-    std::vector<UsnWatcher*> toStop;
-    {
-        QWriteLocker lock(&m_dataLock);
-        for (auto it = m_watchers.begin(); it != m_watchers.end(); ) {
-            if ((*it)->property("volume_path").toString() == volStr) {
-                toStop.push_back(*it);
-                it = m_watchers.erase(it);
-            } else ++it;
-        }
-    }
-
-    for (auto* w : toStop) {
-        w->stop();
-        w->deleteLater();
-    }
-    qDebug() << "[Mft] Stopped on-demand UsnWatcher for:" << QString::fromStdWString(volume);
+    for (auto* w : newWatchers) w->start();
 }
 
 bool MftReader::loadFromCache() {
@@ -427,8 +372,16 @@ bool MftReader::loadFromCache() {
 
     m_isInitialized = true;
 
-    // 2026-07-xx 按照重构方案：USN 监控改为按需启动（由 RecursionSyncEngine 驱动），
-    // 不再在启动时全量加载所有卷的监控。
+    // 方案一：补完缓存加载后的监控链 (接管变动)
+    // 在缓存加载成功后，立即为所有已加载的驱动器启动 UsnWatcher
+    // 2026-05-29 物理修复：移除此处冗余的 lock 声明（父作用域已持有 lock），消除 C4456 警告
+    for (const auto& drive : m_drive_list) {
+        uint64_t lastUsn = m_next_usns[drive];
+        auto* w = new UsnWatcher(drive, lastUsn, nullptr);
+        m_watchers.push_back(w);
+        w->start();
+    }
+
     return true;
 }
 

@@ -745,7 +745,7 @@ void FilterPanel::rebuildGroups() {
 
         m_editType = new QLineEdit(g);
         m_editType->setClearButtonEnabled(true);
-        m_editType->setPlaceholderText("例： png / 文件夹...");
+        m_editType->setPlaceholderText("例： png / 文件夹)...");
         m_editType->setText(m_filter.typeFilterText);
         m_editType->setObjectName("FilterSearchEdit");
         m_editType->setStyleSheet(
@@ -812,7 +812,7 @@ void FilterPanel::rebuildGroups() {
 
         m_editCreateDate = new QLineEdit(g);
         m_editCreateDate->setClearButtonEnabled(true);
-        m_editCreateDate->setPlaceholderText("例： 2025 / 03-2025...");
+        m_editCreateDate->setPlaceholderText("例： 2025 / 03-2025)...");
         m_editCreateDate->setText(m_filter.createDateFilterText);
         m_editCreateDate->setObjectName("FilterSearchEdit");
         m_editCreateDate->setStyleSheet(
@@ -855,7 +855,7 @@ void FilterPanel::rebuildGroups() {
 
         m_editModifyDate = new QLineEdit(g);
         m_editModifyDate->setClearButtonEnabled(true);
-        m_editModifyDate->setPlaceholderText("例： 2025 / 03-2025...");
+        m_editModifyDate->setPlaceholderText("例： 2025 / 03-2025)...");
         m_editModifyDate->setText(m_filter.modifyDateFilterText);
         m_editModifyDate->setObjectName("FilterSearchEdit");
         m_editModifyDate->setStyleSheet(

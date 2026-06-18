@@ -11,8 +11,6 @@
 #include <QSystemTrayIcon>
 #include <QSet>
 
-class QProgressBar;
-
 namespace ArcMeta {
 
 class TrayController;
@@ -158,7 +156,6 @@ private:
 
     // 底部状态栏
     QLabel* m_statusLeft = nullptr;
-    QProgressBar* m_scanProgressBar = nullptr;
 
     // 窗口拖动
     bool m_isDragging = false;

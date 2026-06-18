@@ -43,7 +43,6 @@
 #include <QMenu>
 #include <QAction>
 #include <QTimer>
-#include <QProgressBar>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
 using namespace ArcMeta::Style;
@@ -344,38 +343,6 @@ void MainWindow::initUi() {
     // 4. 内容面板统计信息更新 -> 状态栏
     // 2026-05-08 按照用户要求：连接状态栏统计信号
     connect(m_contentPanel, &ContentPanel::statusBarStatsUpdated, this, &MainWindow::onStatusBarStatsUpdated);
-
-    // 2026-07-xx 按照用户要求：递归扫描进度对接 (位于 5px 物理间隙)
-    connect(m_contentPanel, &ContentPanel::scanStarted, this, [this]() {
-        if (m_scanProgressBar) {
-            m_scanProgressBar->setRange(0, 0); // 繁忙动画
-            m_scanProgressBar->show();
-        }
-        if (m_statusLeft) {
-            m_statusLeft->setText("正在执行物理递归扫描...");
-            m_statusLeft->setStyleSheet(QString("font-size: 11px; color: %1; background: transparent; font-weight: bold;")
-                                      .arg(qssColor(SuccessGreen)));
-        }
-    });
-
-    connect(m_contentPanel, &ContentPanel::scanProgress, this, [this](int count, const QString& currentPath) {
-        if (m_statusLeft) {
-            m_statusLeft->setText(QString("正在递归扫描: 已发现 %1 个项目 | %2").arg(count).arg(currentPath));
-        }
-    });
-
-    connect(m_contentPanel, &ContentPanel::scanFinished, this, [this](int total, qint64 elapsed) {
-        if (m_scanProgressBar) m_scanProgressBar->hide();
-        if (m_statusLeft) {
-            m_statusLeft->setText(QString("扫描完成: 共 %1 个项目, 耗时 %2 ms").arg(total).arg(elapsed));
-            m_statusLeft->setStyleSheet(QString("font-size: 11px; color: %1; background: transparent;")
-                                      .arg(qssColor(TextDim)));
-            
-            // 2026-07-xx 物理对账：将扫描耗时记录至核心日志
-            ArcMeta::Logger::log(QString("[PERF] 物理递归扫描结束: 路径=%1, 数量=%2, 耗时=%3ms")
-                                .arg(m_currentPath).arg(total).arg(elapsed));
-        }
-    });
 
     // 2026-04-11 按照用户要求：双向联动，实现预览窗内方向键切图导航
     // 2026-05-27 物理加固：补全 this 上下文
@@ -1035,9 +1002,8 @@ void MainWindow::setupSplitters() {
     QWidget* bodyWrapper = new QWidget(centralC);
     bodyWrapper->setStyleSheet("background: transparent;"); // 确保背景透明不遮挡阴影
     m_bodyLayout = new QVBoxLayout(bodyWrapper);
-    // 2026-07-xx 按照用户要求：利用底部的 5px 间隙显示进度条。
-    // 物理护栏：左右边距必须维持 kEdgeMargin 以防截断，底部改为 0 并由 m_scanProgressBar 容器补齐间隙。
-    m_bodyLayout->setContentsMargins(kEdgeMargin, 0, kEdgeMargin, 0); 
+    // 必须与 setupSplitters() 中的初始值保持一致，禁止改为0，否则筛选面板/元数据面板右侧会贴边截断
+    m_bodyLayout->setContentsMargins(kEdgeMargin, 0, kEdgeMargin, kEdgeMargin); 
     m_bodyLayout->setSpacing(0);
 
     // --- 3. 主拆分条 (物理还原：5px 物理缝隙) ---
@@ -1105,28 +1071,6 @@ void MainWindow::setupSplitters() {
     });
 
     m_bodyLayout->addWidget(m_mainSplitter);
-
-    // --- 3.5 扫描进度条 (物理填充：利用 5px 间隙) ---
-    // 创建一个固定高度为 5px 的容器，作为 splitter 与 statusBar 之间的物理缝隙
-    QWidget* gapContainer = new QWidget(bodyWrapper);
-    gapContainer->setFixedHeight(kEdgeMargin);
-    gapContainer->setStyleSheet("background: transparent;");
-    QVBoxLayout* gapL = new QVBoxLayout(gapContainer);
-    gapL->setContentsMargins(0, 0, 0, 0);
-    gapL->setSpacing(0);
-
-    m_scanProgressBar = new QProgressBar(gapContainer);
-    m_scanProgressBar->setFixedHeight(kEdgeMargin);
-    m_scanProgressBar->setTextVisible(false);
-    m_scanProgressBar->setRange(0, 0); 
-    m_scanProgressBar->setStyleSheet(QString(
-        "QProgressBar { background: transparent; border: none; }"
-        "QProgressBar::chunk { background-color: %1; }"
-    ).arg(qssColor(SuccessGreen)));
-    m_scanProgressBar->hide();
-    gapL->addWidget(m_scanProgressBar);
-
-    m_bodyLayout->addWidget(gapContainer);
 
     // --- 4. 底部状态栏 (0 边距) ---
     QWidget* statusBar = new QWidget(centralC);
