@@ -377,6 +377,27 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         // 理由：如果该文件的 FID 已经在缓存中存在（说明在其他文件夹有相同文件），
         // 自动借用其已有的用户元数据（星级、标签、颜色、尺寸、色板等），
         // 彻底解决用户反馈的“同一文件在不同位置显示不一致”的问题。
+        // 2026-07-xx 物理级同步优化：查询全局库状态。
+        if (!rm.fileId128.empty()) {
+            std::wstring vol = getVolumeSerialNumber(nPath);
+            sqlite3* db = DatabaseManager::instance().getMemoryDb(vol);
+            if (!db) db = DatabaseManager::instance().getGlobalDb();
+            if (db) {
+                sqlite3_stmt* checkStmt;
+                if (sqlite3_prepare_v2(db, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_text(checkStmt, 1, rm.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+                    if (sqlite3_step(checkStmt) == SQLITE_ROW) {
+                        rm.isManagedGlobal = true;
+                    }
+                    sqlite3_finalize(checkStmt);
+                }
+            }
+        }
+
+        // 2026-07-xx 物理级同步优化：共享元数据。
+        // 理由：如果该文件的 FID 已经在缓存中存在（说明在其他文件夹有相同文件），
+        // 自动借用其已有的用户元数据（星级、标签、颜色、尺寸、色板等），
+        // 彻底解决用户反馈的“同一文件在不同位置显示不一致”的问题。
         if (!rm.fileId128.empty() && m_fidToPath.count(rm.fileId128)) {
             const RuntimeMeta& existing = m_cache[m_fidToPath[rm.fileId128]];
             rm.rating    = existing.rating;
@@ -388,6 +409,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             rm.height    = existing.height;
             rm.palettes  = existing.palettes;
             rm.isManaged = existing.isManaged;
+            rm.isManagedGlobal = existing.isManagedGlobal;
         }
 
         m_cache[nPath] = rm;
@@ -985,6 +1007,25 @@ void MetadataManager::loadScopedDb(const std::wstring& folderPath) {
 
             rm.isManaged = true; 
             rm.fromScoped = true; 
+
+            // 2026-07-xx 物理同步：在从 Scoped DB 加载时，也要检查该项是否已在正式卷库中存在
+            if (!rm.fileId128.empty()) {
+                std::wstring vol = getVolumeSerialNumber(path);
+                sqlite3* gdb = DatabaseManager::instance().getMemoryDb(vol);
+                if (!gdb) gdb = DatabaseManager::instance().getGlobalDb();
+                if (gdb) {
+                    sqlite3_stmt* checkStmt;
+                    if (sqlite3_prepare_v2(gdb, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
+                        sqlite3_bind_text(checkStmt, 1, rm.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+                        if (sqlite3_step(checkStmt) == SQLITE_ROW) {
+                            rm.isManagedGlobal = true;
+                            rm.fromScoped = false; // 如果已在正式库，则不应被视为纯 Scoped 数据
+                        }
+                        sqlite3_finalize(checkStmt);
+                    }
+                }
+            }
+
             // 2026-07-xx 核心逻辑：Scoped DB 中的数据优先级高于内存中已有的（如果是新加载的）
             // 或者我们可以选择合并。由于 Scoped DB 是为了“秒开”，通常我们覆盖内存中对应的项
             m_cache[path] = rm;
@@ -1034,7 +1075,7 @@ void MetadataManager::unloadScopedDb() {
             // 简化逻辑：卸载时，所有 fromScoped 的项如果还没被 migrate，就从内存移除。
             // 如果它在卷库里，下次 getMeta 会重新触发 ensureActivated。
             
-            if (true) { // 物理清理所有来自 Scoped 的内存缓存
+            if (!it->second.isManagedGlobal) { // 物理清理所有来自 Scoped 且不在全局库的内存缓存
                 if (!it->second.fileId128.empty()) {
                     std::string fid = it->second.fileId128;
                     m_fidToPath.erase(fid);
@@ -1091,7 +1132,10 @@ void MetadataManager::migrateScopedData(const std::wstring& folderPath) {
         
         // 迁移完成后，清除 Scoped 标记，该项已正式属于卷库
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        if (m_cache.count(p)) m_cache[p].fromScoped = false;
+        if (m_cache.count(p)) {
+            m_cache[p].fromScoped = false;
+            m_cache[p].isManagedGlobal = true;
+        }
     }
     
     // 迁移完成后，此目录已正式受控，不再属于“瞬时 Scoped”范畴
@@ -1399,8 +1443,13 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool f
             {
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
                 m_cache[nPath].isManaged = true;
-                if (isScopedWrite && !m_cache[nPath].isManagedGlobal) {
-                    m_cache[nPath].fromScoped = true;
+                if (isScopedWrite) {
+                    if (!m_cache[nPath].isManagedGlobal) {
+                        m_cache[nPath].fromScoped = true;
+                    }
+                } else {
+                    m_cache[nPath].isManagedGlobal = true;
+                    m_cache[nPath].fromScoped = false;
                 }
             }
         }
