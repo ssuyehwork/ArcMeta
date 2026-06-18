@@ -388,6 +388,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
                     sqlite3_bind_text(checkStmt, 1, rm.fileId128.c_str(), -1, SQLITE_TRANSIENT);
                     if (sqlite3_step(checkStmt) == SQLITE_ROW) {
                         rm.isManagedGlobal = true;
+                        rm.isManaged = true; // 2026-07-xx 逻辑同步：既然全局库有记录，说明已受控
                     }
                     sqlite3_finalize(checkStmt);
                 }
@@ -1377,7 +1378,8 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool f
     bool isScopedWrite = false;
     {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
-        if (!forceGlobal && m_scopedMode && isSubPath(m_scopedRoot, nPath)) {
+        // 2026-07-xx 物理红线：如果该项已存在于正式卷库 (isManagedGlobal)，严禁写入 Scoped DB，直接跳至卷库持久化
+        if (!forceGlobal && m_scopedMode && isSubPath(m_scopedRoot, nPath) && !rMeta.isManagedGlobal) {
             db = DatabaseManager::instance().getScopedDb();
             isScopedWrite = true;
         }
