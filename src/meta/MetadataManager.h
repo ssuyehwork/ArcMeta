@@ -29,6 +29,7 @@ struct RuntimeMeta {
     bool isInvalid; // 2026-06-xx 物理校验：是否为第三方删除导致的失效数据
     bool isManaged; // 2026-06-xx 物理对标：标记该项是否已在数据库中登记
     bool fromScoped; // 2026-07-xx Scoped 标记：标记该项元数据是否是从 Scoped DB 加载的
+    bool isManagedGlobal; // 2026-07-xx 物理同步标记：标记该项是否已在正式卷库中持久化
     int width;      // 2026-07-xx 物理尺寸：宽 (像素)
     int height;     // 2026-07-xx 物理尺寸：高 (像素)
     std::wstring originalPath; // 2026-06-xx 路径记忆：用于回收站还原
@@ -42,7 +43,7 @@ struct RuntimeMeta {
 
     std::vector<PaletteEntry> palettes;
 
-    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), fromScoped(false), width(0), height(0), ctime(0), mtime(0), atime(0), fileSize(0) {}
+    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), fromScoped(false), isManagedGlobal(false), width(0), height(0), ctime(0), mtime(0), atime(0), fileSize(0) {}
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
