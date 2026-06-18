@@ -156,6 +156,7 @@ private:
 
     // 底部状态栏
     QLabel* m_statusLeft = nullptr;
+    class QProgressBar* m_scanProgressBar = nullptr;
 
     // 窗口拖动
     bool m_isDragging = false;

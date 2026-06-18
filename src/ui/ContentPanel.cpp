@@ -2114,7 +2114,13 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive, reqId]() { 
         if (!panelPtr) return; 
          
+        qint64 startTime = QDateTime::currentMSecsSinceEpoch();
+        if (recursive) {
+            QMetaObject::invokeMethod(panelPtr, "scanStarted", Qt::QueuedConnection);
+        }
+
         std::vector<ItemRecord> allItems;
+        int lastEmittedCount = 0;
  
         std::function<void(const QString&, bool)> scanDir; 
         scanDir = [&](const QString& p, bool rec) { 
@@ -2128,6 +2134,13 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
                 QString absPath = info.absoluteFilePath();
                 allItems.push_back(ContentPanel::createItemRecord(absPath));
+
+                // 2026-07-xx 按照用户要求：每发现 50 个文件通过信号反馈一次进度（防抖）
+                if (recursive && (allItems.size() - lastEmittedCount >= 50)) {
+                    lastEmittedCount = allItems.size();
+                    QMetaObject::invokeMethod(panelPtr, "scanProgress", Qt::QueuedConnection,
+                                             Q_ARG(int, allItems.size()), Q_ARG(QString, absPath));
+                }
  
                 if (rec && info.isDir()) { 
                     scanDir(absPath, true); 
@@ -2137,6 +2150,12 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
         scanDir(path, recursive); 
         if (!panelPtr) return; 
+
+        qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - startTime;
+        if (recursive) {
+            QMetaObject::invokeMethod(panelPtr, "scanFinished", Qt::QueuedConnection,
+                                     Q_ARG(int, allItems.size()), Q_ARG(qint64, elapsed));
+        }
 
         // 2026-07-xx Scoped DB 物理补完：在子线程完成扫描后立即执行批量持久化与颜色解析预热
         // 理由：避免在 GUI 线程调用 persistBatch 导致主循环阻塞。
