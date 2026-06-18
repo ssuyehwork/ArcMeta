@@ -777,7 +777,7 @@ ItemRecord ContentPanel::createItemRecord(const QString& path) {
 void ContentPanel::initUi() { 
     QWidget* titleBar = new QWidget(this); 
     titleBar->setObjectName("ContainerHeader"); 
-    titleBar->setFixedHeight(32); 
+    titleBar->setFixedHeight(34);
     titleBar->setStyleSheet( 
         "QWidget#ContainerHeader {" 
         "  background-color: #252526;" 
@@ -1314,7 +1314,7 @@ void ContentPanel::initListView() {
  
     m_treeView->header()->setDefaultAlignment(Qt::AlignCenter);
     m_treeView->header()->setStyleSheet( 
-        "QHeaderView::section { background-color: #252525; color: #B0B0B0; border: none; border-right: 1px solid #333333; height: 32px; font-size: 11px; }" 
+        "QHeaderView::section { background-color: #252525; color: #B0B0B0; border: none; border-right: 1px solid #333333; height: 34px; font-size: 11px; }"
     ); 
     
     // 2026-06-16 工业级 UI 架构重构 (Plan-21)：名称 Stretch + 日期可调且 Min 150px
@@ -2120,7 +2120,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         }
 
         std::vector<ItemRecord> allItems;
-        int lastEmittedCount = 0;
+        size_t lastEmittedCount = 0;
  
         std::function<void(const QString&, bool)> scanDir; 
         scanDir = [&](const QString& p, bool rec) { 
@@ -2139,7 +2139,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (recursive && (allItems.size() - lastEmittedCount >= 50)) {
                     lastEmittedCount = allItems.size();
                     QMetaObject::invokeMethod(panelPtr, "scanProgress", Qt::QueuedConnection, 
-                                             Q_ARG(int, allItems.size()), Q_ARG(QString, absPath));
+                                             Q_ARG(int, (int)allItems.size()), Q_ARG(QString, absPath));
                 }
  
                 if (rec && info.isDir()) { 
@@ -2174,7 +2174,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (recursive) {
                     qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - startTime;
                     QMetaObject::invokeMethod(panelPtr, [panelPtr, allItems, elapsed]() {
-                        if (panelPtr) emit panelPtr->scanFinished(allItems.size(), elapsed);
+                        if (panelPtr) emit panelPtr->scanFinished((int)allItems.size(), elapsed);
                     }, Qt::QueuedConnection);
                 }
 

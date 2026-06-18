@@ -16,7 +16,7 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     // 2026-06-xx 按照用户图片：引入一体化容器 AddressContainer，包含路径与刷新按钮
     m_addressContainer = new QWidget(this);
     m_addressContainer->setObjectName("AddressContainer");
-    m_addressContainer->setFixedHeight(32);
+    m_addressContainer->setFixedHeight(34);
     m_addressContainer->setStyleSheet(
         "QWidget#AddressContainer { background: #1E1E1E; border: 1px solid #333333; border-radius: 6px; }"
         "QWidget#AddressContainer[focused='true'] { border: 1px solid #3498db; }"
@@ -26,7 +26,7 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     containerLayout->setSpacing(0);
 
     m_pathStack = new QStackedWidget(m_addressContainer);
-    m_pathStack->setFixedHeight(30); // 扣除上下边框
+    m_pathStack->setFixedHeight(32); // 扣除上下边框
     m_pathStack->setStyleSheet("QStackedWidget { background: transparent; border: none; }");
 
     m_breadcrumbBar = new BreadcrumbBar(m_pathStack);
@@ -34,13 +34,13 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
 
     m_pathEdit = new QLineEdit(m_pathStack);
     m_pathEdit->setPlaceholderText("输入路径...");
-    m_pathEdit->setFixedHeight(30); 
+    m_pathEdit->setFixedHeight(32);
     m_pathEdit->setClearButtonEnabled(true);
     m_pathEdit->setStyleSheet("QLineEdit { background: transparent; border: none; color: #EEEEEE; padding-left: 8px; }");
     m_pathStack->addWidget(m_pathEdit);
 
     m_btnRefresh = new QPushButton(m_addressContainer);
-    m_btnRefresh->setFixedSize(30, 30);
+    m_btnRefresh->setFixedSize(32, 32);
     m_btnRefresh->setIcon(UiHelper::getIcon("sync", QColor("#CCCCCC"), 16));
     m_btnRefresh->setToolTip("刷新 (F5)");
     m_btnRefresh->setCursor(Qt::ArrowCursor);

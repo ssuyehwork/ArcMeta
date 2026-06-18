@@ -761,7 +761,7 @@ void CategoryPanel::initUi() {
     // 1. 标题栏
     QWidget* header = new QWidget(this);
     header->setObjectName("ContainerHeader");
-    header->setFixedHeight(32);
+    header->setFixedHeight(34);
     header->setStyleSheet(
         "QWidget#ContainerHeader {"
         "  background-color: #252526;"

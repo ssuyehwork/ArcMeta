@@ -65,7 +65,7 @@ void BatchRenamePreviewDialog::applyTheme() {
     setStyleSheet(
         "QDialog { background-color: #1E1E1E; color: #EEEEEE; }"
         "QTableWidget { background-color: #252526; border: 1px solid #333; gridline-color: transparent; selection-background-color: rgba(55, 138, 221, 0.2); }"
-        "QHeaderView::section { background-color: #2D2D2D; color: #888; border: none; height: 32px; font-weight: bold; font-size: 11px; }"
+        "QHeaderView::section { background-color: #2D2D2D; color: #888; border: none; height: 34px; font-weight: bold; font-size: 11px; }"
     );
 }
 

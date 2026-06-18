@@ -344,7 +344,7 @@ sqlite3* DatabaseManager::getGlobalDb() {
     return m_globalDb.memDb;
 }
 
-sqlite3* DatabaseManager::mountScopedDb(const std::string& folderFid, const std::wstring& folderPath) {
+sqlite3* DatabaseManager::mountScopedDb(const std::string& folderFid, const std::wstring& /*folderPath*/) {
     std::lock_guard<std::mutex> lock(m_mutex);
     
     // 1. 如果已有挂载的 Scoped DB，先卸载

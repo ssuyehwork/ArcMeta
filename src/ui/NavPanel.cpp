@@ -105,7 +105,7 @@ void NavPanel::initUi() {
     // 面板标题 (还原旧版架构：Layout + Icon + Text)
     QWidget* header = new QWidget(this);
     header->setObjectName("ContainerHeader");
-    header->setFixedHeight(32);
+    header->setFixedHeight(34);
     // 重新注入标题栏样式，确保背景色和边框还原
     header->setStyleSheet(
         "QWidget#ContainerHeader {"
