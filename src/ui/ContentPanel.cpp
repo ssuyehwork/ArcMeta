@@ -2120,7 +2120,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         }
 
         std::vector<ItemRecord> allItems;
-        int lastEmittedCount = 0;
+        size_t lastEmittedCount = 0;
  
         std::function<void(const QString&, bool)> scanDir; 
         scanDir = [&](const QString& p, bool rec) { 
@@ -2139,7 +2139,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (recursive && (allItems.size() - lastEmittedCount >= 50)) {
                     lastEmittedCount = allItems.size();
                     QMetaObject::invokeMethod(panelPtr, "scanProgress", Qt::QueuedConnection, 
-                                             Q_ARG(int, allItems.size()), Q_ARG(QString, absPath));
+                                             Q_ARG(int, (int)allItems.size()), Q_ARG(QString, absPath));
                 }
  
                 if (rec && info.isDir()) { 
@@ -2174,7 +2174,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (recursive) {
                     qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - startTime;
                     QMetaObject::invokeMethod(panelPtr, [panelPtr, allItems, elapsed]() {
-                        if (panelPtr) emit panelPtr->scanFinished(allItems.size(), elapsed);
+                        if (panelPtr) emit panelPtr->scanFinished((int)allItems.size(), elapsed);
                     }, Qt::QueuedConnection);
                 }
 
