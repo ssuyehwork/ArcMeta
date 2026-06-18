@@ -2109,6 +2109,21 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
 
     m_currentPath = path; 
     updateLayersButtonState(); 
+
+    // 2026-07-xx 按照 Plan-57：“秒开”路径重构。
+    // 如果是递归模式且 Scoped DB 已就绪，直接从内存缓存提取并展示，跳过阻塞式的物理扫描。
+    if (recursive && MetadataManager::instance().isScopedAvailable(path)) {
+        std::vector<ItemRecord> cachedItems = MetadataManager::instance().getRecordsUnderPath(path);
+        if (!cachedItems.empty()) {
+            m_model->setRecords(cachedItems);
+            m_isLoading = false;
+            recalculateAndEmitStats();
+            ArcMeta::Logger::log(QString("[Content] Scoped DB 命中，实现递归“秒开”加载: %1 项").arg(cachedItems.size()));
+
+            // 依然可以启动一个静默的异步任务去检查物理变化（可选，此处暂略以保持最高性能）
+            return;
+        }
+    }
      
     QPointer<ContentPanel> panelPtr(this); 
     (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive, reqId]() { 

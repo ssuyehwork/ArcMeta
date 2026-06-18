@@ -144,7 +144,8 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
         if (!paths.empty()) {
             (void)QtConcurrent::run([this, paths]() {
                 for (const auto& p : paths) {
-                    persistAsync(p);
+                    // 2026-07-xx 物理级修复：由脏数据计时器触发的持久化，属于用户操作产生的变更，必须强制写入磁盘
+                    persistAsync(p, true, false, true);
                 }
             });
         }
@@ -1113,6 +1114,59 @@ void MetadataManager::unloadScopedDb() {
     m_scopedRoot = L"";
 }
 
+bool MetadataManager::isScopedAvailable(const QString& path) {
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    if (!m_scopedMode) return false;
+    std::wstring nPath = normalizePath(path.toStdWString());
+    return nPath == m_scopedRoot;
+}
+
+std::vector<ItemRecord> MetadataManager::getRecordsUnderPath(const QString& path) {
+    std::vector<ItemRecord> records;
+    std::wstring nPath = normalizePath(path.toStdWString());
+
+    // 2026-07-xx 性能优化：在外部统一加锁，减少循环内的加锁开销并确保数据一致性
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+
+    for (const auto& pair : m_cache) {
+        // 排除根路径自身
+        if (pair.first != nPath && isSubPath(nPath, pair.first)) {
+            const auto& meta = pair.second;
+
+            ItemRecord r;
+            r.path = QString::fromStdWString(pair.first);
+            r.isDir = meta.isFolder;
+            r.rating = meta.rating;
+            r.color = QString::fromStdWString(meta.color);
+            r.tags = meta.tags;
+            r.fileId = meta.fileId128;
+            r.pinned = meta.pinned;
+            r.encrypted = meta.encrypted;
+            r.url = QString::fromStdWString(meta.url);
+            r.note = QString::fromStdWString(meta.note);
+            r.width = meta.width;
+            r.height = meta.height;
+            r.size = meta.fileSize;
+            r.ctime = meta.ctime;
+            r.mtime = meta.mtime;
+            r.atime = meta.atime;
+            r.isManaged = meta.hasUserOperations();
+            for (const auto& pe : meta.palettes) {
+                r.palettes.push_back({pe.color, pe.ratio});
+            }
+
+            // 补充后缀
+            if (!r.isDir) {
+                int dotIdx = r.path.lastIndexOf('.');
+                if (dotIdx != -1) r.suffix = r.path.mid(dotIdx + 1).toLower();
+            }
+
+            records.push_back(r);
+        }
+    }
+    return records;
+}
+
 void MetadataManager::migrateScopedData(const std::wstring& folderPath) {
     std::wstring nRoot = normalizePath(folderPath);
     qDebug() << "[Metadata] Migrating Scoped Data to Global DB for:" << QString::fromStdWString(nRoot);
@@ -1397,7 +1451,7 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
     return fid;
 }
 
-void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool forceGlobal) {
+void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool forceGlobal, bool forceWrite) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     
     RuntimeMeta rMeta = getMeta(nPath);
@@ -1424,16 +1478,33 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool f
     sqlite3_stmt* stmt;
     const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     bool isNew = true;
+    bool needsWrite = forceWrite;
     {
+        // 2026-07-xx 增量持久化优化：在执行 SQL 写入前，先对比物理属性。
+        // 只有当物理属性发生变更，或数据库中不存在该 FID 时，才执行写入。
+        // 物理修复：如果 forceWrite 为 true（用户手动修改了元数据），则跳过对比直接写入。
         sqlite3_stmt* checkStmt;
-        if (sqlite3_prepare_v2(db, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
+        if (!needsWrite && sqlite3_prepare_v2(db, "SELECT mtime, file_size FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
             sqlite3_bind_text(checkStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-            if (sqlite3_step(checkStmt) == SQLITE_ROW) isNew = false;
+            if (sqlite3_step(checkStmt) == SQLITE_ROW) {
+                isNew = false;
+                long long dbMtime = sqlite3_column_int64(checkStmt, 0);
+                long long dbSize = sqlite3_column_int64(checkStmt, 1);
+
+                // 只有当时间戳、大小或元数据核心标志发生变化时才写入
+                if (dbMtime == rMeta.mtime && dbSize == rMeta.fileSize && rMeta.isManaged) {
+                    needsWrite = false;
+                } else {
+                    needsWrite = true;
+                }
+            } else {
+                needsWrite = true;
+            }
             sqlite3_finalize(checkStmt);
         }
     }
 
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+    if (needsWrite && sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text16(stmt, 2, nPath.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, 3, rMeta.isFolder ? 1 : 0);

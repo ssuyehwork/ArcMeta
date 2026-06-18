@@ -10,6 +10,7 @@
 #include <unordered_set>
 #include <shared_mutex>
 #include <string>
+#include "../core/IndexedEntry.h"
 
 namespace ArcMeta {
 
@@ -235,6 +236,16 @@ public:
     void unloadScopedDb();
 
     /**
+     * @brief 检查指定路径的 Scoped 缓存是否已激活
+     */
+    bool isScopedAvailable(const QString& path);
+
+    /**
+     * @brief 批量从内存中提取指定路径下的所有条目
+     */
+    std::vector<ItemRecord> getRecordsUnderPath(const QString& path);
+
+    /**
      * @brief 迁移 Scoped 数据到全局/卷库 (扫描入库时使用)
      */
     void migrateScopedData(const std::wstring& folderPath);
@@ -321,7 +332,7 @@ private:
     std::unordered_map<std::wstring, int> m_visualRetryCounts; // 重试计数器
     void processVisualRetryQueue();
 
-    void persistAsync(const std::wstring& path, bool notify = true, bool forceGlobal = false);
+    void persistAsync(const std::wstring& path, bool notify = true, bool forceGlobal = false, bool forceWrite = false);
     void debouncePersist(const std::wstring& path);
 };
 
