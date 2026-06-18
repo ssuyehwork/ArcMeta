@@ -498,6 +498,17 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             });
         }
+        if (m_typeCounts.contains("empty_folder")) {
+            QCheckBox* cb = addFilterRow(gl, "空文件夹", m_typeCounts["empty_folder"]);
+            cb->blockSignals(true);
+            cb->setChecked(m_filter.types.contains("empty_folder"));
+            cb->blockSignals(false);
+            connect(cb, &QCheckBox::toggled, this, [this](bool on) {
+                if (on) { if (!m_filter.types.contains("empty_folder")) m_filter.types.append("empty_folder"); }
+                else    m_filter.types.removeAll("empty_folder");
+                emit filterChanged(m_filter);
+            });
+        }
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
 
