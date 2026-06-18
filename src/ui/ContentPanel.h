@@ -382,6 +382,13 @@ signals:
      */
     void statusBarStatsUpdated(int fileCount, int folderCount, int totalCount);
 
+    /**
+     * @brief 2026-07-xx 按照用户要求：扫描进度信号
+     */
+    void scanStarted();
+    void scanProgress(int count, const QString& currentPath);
+    void scanFinished(int totalCount, qint64 elapsedMs);
+
 
 protected:
     void wheelEvent(QWheelEvent* event) override;

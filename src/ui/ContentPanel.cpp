@@ -816,7 +816,7 @@ void ContentPanel::initUi() {
     m_btnLayers->setStyleSheet( 
         "QPushButton { background: transparent; border: none; border-radius: 4px; }" 
         "QPushButton:hover { background: #3E3E42; }" 
-        "QPushButton:checked { background: rgba(52, 152, 219, 0.2); border: 1px solid #3498db; }" 
+        "QPushButton:checked { background: #3E3E42; }" 
         "QPushButton:disabled { opacity: 0.3; }" 
     ); 
     connect(m_btnLayers, &QPushButton::clicked, [this]() { 
@@ -2114,7 +2114,13 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive, reqId]() { 
         if (!panelPtr) return; 
          
+        qint64 startTime = QDateTime::currentMSecsSinceEpoch();
+        if (recursive) {
+            QMetaObject::invokeMethod(panelPtr, "scanStarted", Qt::QueuedConnection);
+        }
+
         std::vector<ItemRecord> allItems;
+        int lastEmittedCount = 0;
  
         std::function<void(const QString&, bool)> scanDir; 
         scanDir = [&](const QString& p, bool rec) { 
@@ -2128,6 +2134,13 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
                 QString absPath = info.absoluteFilePath();
                 allItems.push_back(ContentPanel::createItemRecord(absPath));
+
+                // 2026-07-xx 按照用户要求：每发现 50 个文件通过信号反馈一次进度（防抖）
+                if (recursive && (allItems.size() - lastEmittedCount >= 50)) {
+                    lastEmittedCount = allItems.size();
+                    QMetaObject::invokeMethod(panelPtr, "scanProgress", Qt::QueuedConnection, 
+                                             Q_ARG(int, allItems.size()), Q_ARG(QString, absPath));
+                }
  
                 if (rec && info.isDir()) { 
                     scanDir(absPath, true); 
@@ -2147,13 +2160,24 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             MetadataManager::instance().persistBatch(paths);
         }
  
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, reqId]() { 
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, reqId, startTime, recursive]() { 
             if (panelPtr && panelPtr->m_loadRequestId == reqId) { 
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
                 // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
                 panelPtr->applyFilters();
+                panelPtr->updateStatusBarStats(); // 显式同步底栏项目总数
+
+                // 2026-07-xx 按照用户要求：耗时统计必须包含数据应用到内容容器后的总时长。
+                // 物理加固：使用 QueuedConnection 确保状态栏在 UI 列表刷新帧渲染完成后才更新。
+                if (recursive) {
+                    qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - startTime;
+                    QMetaObject::invokeMethod(panelPtr, [panelPtr, allItems, elapsed]() {
+                        if (panelPtr) emit panelPtr->scanFinished(allItems.size(), elapsed);
+                    }, Qt::QueuedConnection);
+                }
+
                 ArcMeta::Logger::log(QString("[Content] 目录扫描完成并已应用到 UI [%1]").arg(reqId));
             } else if (panelPtr) {
                 ArcMeta::Logger::log(QString("[Content] 拦截到过期的目录扫描回调 [%1], 当前 ID: %2").arg(reqId).arg(panelPtr->m_loadRequestId.load()));

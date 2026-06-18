@@ -1399,6 +1399,9 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool f
             {
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
                 m_cache[nPath].isManaged = true;
+                if (isScopedWrite && !m_cache[nPath].isManagedGlobal) {
+                    m_cache[nPath].fromScoped = true;
+                }
             }
         }
         sqlite3_finalize(stmt);
