@@ -100,7 +100,7 @@ void TagManagerView::setupSidebar() {
     // 标题栏
     QWidget* header = new QWidget(m_sidebar);
     header->setObjectName("ContainerHeader");
-    header->setFixedHeight(32);
+    header->setFixedHeight(34);
     header->setAttribute(Qt::WA_StyledBackground, true);
     header->setStyleSheet(
         "QWidget#ContainerHeader {"
@@ -183,7 +183,7 @@ void TagManagerView::setupContentArea() {
     // 1. 标题栏 (物理对齐 ContentPanel)
     QWidget* titleBar = new QWidget(m_contentContainer);
     titleBar->setObjectName("ContainerHeader");
-    titleBar->setFixedHeight(32);
+    titleBar->setFixedHeight(34);
     titleBar->setAttribute(Qt::WA_StyledBackground, true);
     titleBar->setStyleSheet(
         "QWidget#ContainerHeader {"

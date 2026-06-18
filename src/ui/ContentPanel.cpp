@@ -777,7 +777,7 @@ ItemRecord ContentPanel::createItemRecord(const QString& path) {
 void ContentPanel::initUi() { 
     QWidget* titleBar = new QWidget(this); 
     titleBar->setObjectName("ContainerHeader"); 
-    titleBar->setFixedHeight(32); 
+    titleBar->setFixedHeight(34);
     titleBar->setStyleSheet( 
         "QWidget#ContainerHeader {" 
         "  background-color: #252526;" 
@@ -1314,7 +1314,7 @@ void ContentPanel::initListView() {
  
     m_treeView->header()->setDefaultAlignment(Qt::AlignCenter);
     m_treeView->header()->setStyleSheet( 
-        "QHeaderView::section { background-color: #252525; color: #B0B0B0; border: none; border-right: 1px solid #333333; height: 32px; font-size: 11px; }" 
+        "QHeaderView::section { background-color: #252525; color: #B0B0B0; border: none; border-right: 1px solid #333333; height: 34px; font-size: 11px; }"
     ); 
     
     // 2026-06-16 工业级 UI 架构重构 (Plan-21)：名称 Stretch + 日期可调且 Min 150px

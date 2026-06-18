@@ -291,7 +291,7 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     // 确保滚动条仅在内容区显示（标题下方），符合规范 ②
     QWidget* topBar = new QWidget(this);
     topBar->setObjectName("ContainerHeader");
-    topBar->setFixedHeight(32);
+    topBar->setFixedHeight(34);
     // 重新注入标题栏样式，确保背景色和边框还原
     topBar->setStyleSheet(
         "QWidget#ContainerHeader {"

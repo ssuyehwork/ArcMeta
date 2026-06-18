@@ -314,7 +314,7 @@ MetaPanel::MetaPanel(QWidget* parent) : QFrame(parent) {
 }
 
 void MetaPanel::initUi() {
-    QWidget* header = new QWidget(this); header->setObjectName("ContainerHeader"); header->setFixedHeight(32);
+    QWidget* header = new QWidget(this); header->setObjectName("ContainerHeader"); header->setFixedHeight(34);
     header->setStyleSheet("QWidget#ContainerHeader { background-color: #252526; border-bottom: 1px solid #333; }");
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
     headerLayout->setContentsMargins(15, 0, 5, 0); // 2026-xx-xx 按照用户要求：左侧 15px 对齐，右侧 5px 间距

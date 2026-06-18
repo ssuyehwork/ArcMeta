@@ -770,7 +770,7 @@ void MainWindow::mousePressEvent(QMouseEvent* event) {
     }
 
     // 原有拖动逻辑：仅标题栏区域
-    if (localPos.y() <= 32) {
+    if (localPos.y() <= 34) {
         m_isDragging = true;
         m_dragPosition = event->globalPosition().toPoint() - frameGeometry().topLeft();
         event->accept();
@@ -999,7 +999,7 @@ void MainWindow::setupSplitters() {
     // --- 1. 自定义标题栏 (第一行) ---
     m_titleBarWidget = new QWidget(centralC);
     m_titleBarWidget->setObjectName("TitleBar");
-    m_titleBarWidget->setFixedHeight(32);
+    m_titleBarWidget->setFixedHeight(34);
     m_titleBarLayout = new QHBoxLayout(m_titleBarWidget);
     // 2026-xx-xx 按照用户要求：标题栏左侧与右侧均保持 5px 呼吸边距
     m_titleBarLayout->setContentsMargins(5, 0, kEdgeMargin, 0); 
@@ -1131,7 +1131,7 @@ void MainWindow::setupSplitters() {
     // --- 4. 底部状态栏 (0 边距) ---
     QWidget* statusBar = new QWidget(centralC);
     statusBar->setObjectName("StatusBar");
-    statusBar->setFixedHeight(28);
+    statusBar->setFixedHeight(34);
     QHBoxLayout* statusL = new QHBoxLayout(statusBar);
     statusL->setContentsMargins(kStatusBarMargin, 0, kStatusBarMargin, 0);
     statusL->setSpacing(0);
