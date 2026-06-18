@@ -1239,8 +1239,7 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
                     instance().m_cache[nPath].height = img.height();
                 }
 
-                // 2026-07-xx 物理对齐：透传已提取的缩略图以消除重复 Shell 调用
-                auto palette = ArcMeta::UiHelper::extractPalette(qPath, img);
+                auto palette = ArcMeta::UiHelper::extractPalette(qPath);
                 if (!palette.isEmpty()) {
                     QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
                     instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
@@ -1255,9 +1254,7 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
         int checked = 0;
         for (const auto& sf : subFiles) {
             if (ArcMeta::UiHelper::isGraphicsFile(sf.suffix().toLower())) {
-                // 2026-07-xx 物理对齐：利用改进后的 Shell 引擎进行提取，确保文件夹也能正确获取代表色
-                QImage img = ArcMeta::UiHelper::getShellThumbnail(sf.absoluteFilePath(), 256);
-                auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath(), img);
+                auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath());
                 if (!palette.isEmpty()) {
                     QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
                     instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
@@ -1293,30 +1290,25 @@ void MetadataManager::processVisualRetryQueue() {
             m_retryTimer->stop();
             return;
         }
-        // 2026-07-xx 补偿机制算法优化：将重试步进提升至 50 个以增强大任务吞吐量
-        size_t count = std::min(m_visualRetryQueue.size(), (size_t)50);
+        // 每次处理 5 个，防止阻塞
+        size_t count = std::min(m_visualRetryQueue.size(), (size_t)5);
         for(size_t i = 0; i < count; ++i) batch.push_back(m_visualRetryQueue[i]);
     }
 
     // 异步执行，不阻塞 UI
     (void)QtConcurrent::run([this, batch]() {
         #ifdef Q_OS_WIN
-        // 2026-07-xx COM 环境加固：确保 CoInitializeEx 覆盖完整的提取生命周期
         CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
         #endif
 
         std::vector<std::wstring> finished;
-        std::vector<std::wstring> failed;
-
         for (const auto& path : batch) {
             QFileInfo info(QString::fromStdWString(path));
             QString qPath = QString::fromStdWString(path);
             bool ok = false;
 
             if (info.isFile()) {
-                // 2026-07-xx 物理对齐：利用改进后的 Shell 引擎（不再依赖预缓存）进行提取
-                QImage img = ArcMeta::UiHelper::getShellThumbnail(qPath, 256);
-                auto palette = ArcMeta::UiHelper::extractPalette(qPath, img);
+                auto palette = ArcMeta::UiHelper::extractPalette(qPath);
                 if (!palette.isEmpty()) {
                     QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
                     setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), palette, true);
@@ -1328,8 +1320,7 @@ void MetadataManager::processVisualRetryQueue() {
                 int checked = 0;
                 for (const auto& sf : subFiles) {
                     if (ArcMeta::UiHelper::isGraphicsFile(sf.suffix().toLower())) {
-                        QImage img = ArcMeta::UiHelper::getShellThumbnail(sf.absoluteFilePath(), 256);
-                        auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath(), img);
+                        auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath());
                         if (!palette.isEmpty()) {
                             QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
                             setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), palette, true);
@@ -1342,45 +1333,24 @@ void MetadataManager::processVisualRetryQueue() {
             }
             
             // 2026-07-xx 按照 Plan-28：重构移除策略
+            // 只有成功，或者确定不是图像文件（无法提取）时，才从队列移除
             bool isGraphics = ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower());
             if (ok || (!isGraphics && !info.isDir())) {
                 finished.push_back(path);
-            } else {
-                failed.push_back(path);
             }
         }
 
-        // 处理结果
-        QMetaObject::invokeMethod(this, [this, finished, failed]() {
-            std::unique_lock<std::shared_mutex> lock(m_mutex);
-            for (const auto& p : finished) {
-                auto it = std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), p);
-                if (it != m_visualRetryQueue.end()) m_visualRetryQueue.erase(it);
-                m_visualRetryCounts.erase(p);
-            }
-
-            for (const auto& p : failed) {
-                // 指数退避与丢弃策略：重试 3 次后若依然失败，判定为永久失败
-                int& count = m_visualRetryCounts[p];
-                count++;
-                if (count >= 3) {
+        // 从队列中移除已处理项
+        if (!finished.empty()) {
+            QMetaObject::invokeMethod(this, [this, finished]() {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                for (const auto& p : finished) {
                     auto it = std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), p);
                     if (it != m_visualRetryQueue.end()) m_visualRetryQueue.erase(it);
-                    m_visualRetryCounts.erase(p);
-                    qDebug() << "[Metadata] 颜色解析永久失效，已移出队列:" << QString::fromStdWString(p);
-                } else {
-                    // 将失败项移到队尾，实现轮转重试
-                    auto it = std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), p);
-                    if (it != m_visualRetryQueue.end()) {
-                        std::wstring item = *it;
-                        m_visualRetryQueue.erase(it);
-                        m_visualRetryQueue.push_back(item);
-                    }
                 }
-            }
-
-            if (!m_visualRetryQueue.empty()) m_retryTimer->start();
-        });
+                if (!m_visualRetryQueue.empty()) m_retryTimer->start();
+            });
+        }
 
         #ifdef Q_OS_WIN
         CoUninitialize();
