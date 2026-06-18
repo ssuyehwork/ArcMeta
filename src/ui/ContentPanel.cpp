@@ -835,18 +835,18 @@ void ContentPanel::initUi() {
                 return; 
             } 
             
-            // 2026-07-xx 按照 Scoped DB 方案：开启递归时，尝试加载 Scoped 数据库实现秒开
+            // 2026-07-xx 按照重构方案：开启递归时，尝试加载卷级 Recursion 数据库实现秒开
             MetadataManager::instance().loadScopedDb(m_currentPath.toStdWString());
             loadDirectory(m_currentPath, true); 
         } else { 
-            // 退出递归模式，卸载 Scoped DB
+            // 退出递归模式，卸载卷级 Recursion DB
             MetadataManager::instance().unloadScopedDb();
             loadDirectory(m_currentPath, false); 
         } 
     }); 
 
     connect(m_btnLayersBlue, &QPushButton::clicked, [this]() {
-        // 2026-07-xx 按照内存规格：蓝色按钮关联 Scoped DB 瞬时加载
+        // 2026-07-xx 按照内存规格：蓝色按钮关联 Recursion DB 瞬时加载
         m_btnLayers->setChecked(true);
         MetadataManager::instance().loadScopedDb(m_currentPath.toStdWString());
         loadDirectory(m_currentPath, true);
@@ -2102,9 +2102,22 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         return; 
     } 
  
-    // 2026-07-xx 物理修复：切换目录时，如果开启了 Scoped 模式且路径发生变化，必须先卸载旧 Scoped DB
-    if (m_currentPath != path && !m_currentPath.isEmpty()) {
+    // 2026-07-xx 物理修复：如果当前处于递归模式，但本次 load 请求 recursive 为 false (即退出递归)，执行资源卸载
+    if (m_isRecursive && !recursive) {
         MetadataManager::instance().unloadScopedDb();
+    }
+    // 2026-07-xx 物理修复：切换目录时，如果开启了递归模式且路径发生变化，检查是否跨卷
+    else if (m_currentPath != path && !m_currentPath.isEmpty() && m_isRecursive) {
+        std::wstring oldVol = MetadataManager::getVolumeSerialNumber(m_currentPath.toStdWString());
+        std::wstring newVol = MetadataManager::getVolumeSerialNumber(path.toStdWString());
+        
+        // 极致性能优化：仅当跨卷切换时才彻底卸载，同卷切换保留库挂载以消除 IO 抖动
+        if (oldVol != newVol) {
+            MetadataManager::instance().unloadScopedDb();
+        } else {
+            // 同卷切换，仅更新 MetadataManager 内部的根路径标记，不触发 DB 卸载
+            MetadataManager::instance().switchScopedRoot(path.toStdWString());
+        }
     }
 
     m_currentPath = path; 
@@ -2277,6 +2290,13 @@ void ContentPanel::previewFile(const QString& path) {
 } 
  
 void ContentPanel::loadCategory(int categoryId) { 
+    // 2026-07-xx 物理对账：切换至分类模式时，必须强制卸载递归资源 (资源回收红线)
+    if (m_isRecursive) {
+        MetadataManager::instance().unloadScopedDb();
+        m_isRecursive = false;
+        if (m_btnLayers) m_btnLayers->setChecked(false);
+    }
+
     // 2026-07-xx 物理防护：防重入机制。如果已经在加载同一个分类，则直接拦截，防止重复 clear() 导致的闪烁
     if (m_isLoading && m_currentCategoryId == categoryId && m_currentCategoryType == "user_category") {
         return;
@@ -2341,6 +2361,13 @@ void ContentPanel::loadCategory(int categoryId) {
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths, int reqId) { 
+    // 2026-07-xx 物理对账：路径列表加载通常由逻辑分类驱动，执行资源卸载
+    if (m_isRecursive) {
+        MetadataManager::instance().unloadScopedDb();
+        m_isRecursive = false;
+        if (m_btnLayers) m_btnLayers->setChecked(false);
+    }
+
     // 2026-07-xx 物理强化：如果路径列表为空，直接执行同步清理并返回
     // 理由：这防止了搜索启动时的清空动作（异步）与随后到达的结果加载（异步）发生竞态。
     if (paths.isEmpty()) {

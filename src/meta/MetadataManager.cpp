@@ -940,10 +940,11 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
 
 void MetadataManager::loadScopedDb(const std::wstring& folderPath) {
     std::wstring nRoot = normalizePath(folderPath);
-    std::string fid = getFileIdSync(nRoot);
-    if (fid.empty()) return;
+    std::wstring volSerial = getVolumeSerialNumber(nRoot);
+    if (volSerial == L"UNKNOWN") return;
 
-    sqlite3* db = DatabaseManager::instance().mountScopedDb(fid, nRoot);
+    // 2026-07-xx 架构重构：废弃文件夹级 Scoped DB，挂载卷级 Recursion DB
+    sqlite3* db = DatabaseManager::instance().mountRecursionDb(volSerial);
     if (!db) return;
 
     {
@@ -952,7 +953,7 @@ void MetadataManager::loadScopedDb(const std::wstring& folderPath) {
         m_scopedRoot = nRoot;
     }
 
-    qDebug() << "[Metadata] Loading Scoped DB for:" << QString::fromStdWString(nRoot);
+    qDebug() << "[Metadata] Loading Volume Recursion DB for:" << QString::fromStdWString(volSerial) << " (Root:" << QString::fromStdWString(nRoot) << ")";
 
     sqlite3_stmt* stmt;
     const char* sql = "SELECT * FROM metadata";
@@ -1053,11 +1054,32 @@ void MetadataManager::loadScopedDb(const std::wstring& folderPath) {
     }
 }
 
+void MetadataManager::switchScopedRoot(const std::wstring& newRoot) {
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    if (!m_scopedMode) return;
+
+    // 2026-07-xx 物理修复：在切换同卷根路径前，清理旧路径下的非持久化缓存
+    // 理由：防止内存中驻留大量不再可见的瞬时递归数据
+    std::wstring oldRoot = m_scopedRoot;
+    for (auto it = m_cache.begin(); it != m_cache.end(); ) {
+        if (isSubPath(oldRoot, it->first) && it->second.fromScoped && !it->second.isManagedGlobal) {
+            if (!it->second.fileId128.empty()) m_fidToPath.erase(it->second.fileId128);
+            it = m_cache.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    m_scopedRoot = normalizePath(newRoot);
+    qDebug() << "[Metadata] Switched Scoped Root to:" << QString::fromStdWString(m_scopedRoot);
+}
+
 void MetadataManager::unloadScopedDb() {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
     if (!m_scopedMode) return;
 
-    qDebug() << "[Metadata] Unloading Scoped DB for:" << QString::fromStdWString(m_scopedRoot);
+    std::wstring volSerial = getVolumeSerialNumber(m_scopedRoot);
+    qDebug() << "[Metadata] Unloading Volume Recursion DB for:" << QString::fromStdWString(volSerial);
 
     // 2026-07-xx 按照内存规范：unloadVolumeNameCache 逻辑类似，但此处针对特定根路径下的缓存执行物理清理
     // 理由：防止 Scoped 瞬时数据永久污染全局内存镜像（除非已正式入库）
@@ -1108,7 +1130,7 @@ void MetadataManager::unloadScopedDb() {
         ++it;
     }
 
-    DatabaseManager::instance().unmountScopedDb();
+    DatabaseManager::instance().unmountRecursionDb(volSerial);
     m_scopedMode = false;
     m_scopedRoot = L"";
 }
@@ -1148,15 +1170,18 @@ void MetadataManager::persistBatch(const std::vector<std::wstring>& paths) {
     qDebug() << "[Metadata] Batch persisting" << paths.size() << "items";
     
     // 2026-07-xx 按照用户要求 (1.19)：在大循环外开启显式事务，将寻道风暴降至最低
-    // 我们需要区分写入哪些数据库。为简化，如果是 Scoped 模式且路径在 ScopedRoot 下，统一写 Scoped DB。
-    sqlite3* scopedDb = nullptr;
+    // 2026-07-xx 架构重构：写入卷级 Recursion DB
+    sqlite3* recursionDb = nullptr;
     {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
-        if (m_scopedMode) scopedDb = DatabaseManager::instance().getScopedDb();
+        if (m_scopedMode) {
+            std::wstring volSerial = getVolumeSerialNumber(m_scopedRoot);
+            recursionDb = DatabaseManager::instance().getRecursionDb(volSerial);
+        }
     }
 
-    if (scopedDb) {
-        SqlTransaction trans(scopedDb);
+    if (recursionDb) {
+        SqlTransaction trans(recursionDb);
         for (const auto& p : paths) {
             persistAsync(p, false); // notify = false 以提高性能
             // 2026-07-xx 按照用户要求：Scoped 模式也必须执行解析颜色
@@ -1373,14 +1398,15 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool f
     RuntimeMeta rMeta = getMeta(nPath);
     std::wstring volSerial = getVolumeSerialNumber(nPath);
     
-    // 2026-07-xx Scoped DB 优先写入逻辑
+    // 2026-07-xx Recursion DB 优先写入逻辑
     sqlite3* db = nullptr;
     bool isScopedWrite = false;
     {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
-        // 2026-07-xx 物理红线：如果该项已存在于正式卷库 (isManagedGlobal)，严禁写入 Scoped DB，直接跳至卷库持久化
+        // 2026-07-xx 物理红线：如果该项已存在于正式卷库 (isManagedGlobal) ，严禁写入 Recursion DB，直接跳至卷库持久化
         if (!forceGlobal && m_scopedMode && isSubPath(m_scopedRoot, nPath) && !rMeta.isManagedGlobal) {
-            db = DatabaseManager::instance().getScopedDb();
+            std::wstring currentVolSerial = getVolumeSerialNumber(m_scopedRoot);
+            db = DatabaseManager::instance().getRecursionDb(currentVolSerial);
             isScopedWrite = true;
         }
     }

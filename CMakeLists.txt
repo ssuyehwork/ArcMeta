@@ -62,6 +62,8 @@ set(SOURCES
     src/meta/MetadataDefs.h
     src/meta/MetadataManager.cpp
     src/meta/MetadataManager.h
+    src/meta/RecursionSyncEngine.cpp
+    src/meta/RecursionSyncEngine.h
     src/mft/MftReader.cpp
     src/mft/MftReader.h
     src/mft/ScchCache.cpp

@@ -235,6 +235,11 @@ public:
     void unloadScopedDb();
 
     /**
+     * @brief 轻量级切换 Scoped 根路径 (同卷切换优化)
+     */
+    void switchScopedRoot(const std::wstring& newRoot);
+
+    /**
      * @brief 迁移 Scoped 数据到全局/卷库 (扫描入库时使用)
      */
     void migrateScopedData(const std::wstring& folderPath);

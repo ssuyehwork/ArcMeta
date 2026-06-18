@@ -4,6 +4,7 @@
 #include <QDebug>
 #include <windows.h>
 #include "MetadataManager.h"
+#include "RecursionSyncEngine.h"
 
 namespace ArcMeta {
 
@@ -63,6 +64,9 @@ DatabaseManager::DatabaseManager(QObject* parent) : QObject(parent) {
 DatabaseManager::~DatabaseManager() {
     flushAll();
     for (auto& pair : m_driveDbs) {
+        closeDb(pair.second);
+    }
+    for (auto& pair : m_recursionDbs) {
         closeDb(pair.second);
     }
     closeDb(m_globalDb);
@@ -214,6 +218,38 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     return true;
 }
 
+void DatabaseManager::initRecursionSchema(sqlite3* db) {
+    if (!db) return;
+    const char* schema = R"(
+        CREATE TABLE IF NOT EXISTS metadata (
+            file_id TEXT PRIMARY KEY,
+            path TEXT NOT NULL,
+            is_folder INTEGER DEFAULT 0,
+            rating INTEGER DEFAULT 0,
+            color TEXT,
+            tags TEXT,
+            note TEXT,
+            url TEXT,
+            ctime INTEGER,
+            mtime INTEGER,
+            atime INTEGER,
+            file_size INTEGER,
+            palettes BLOB,
+            is_trash INTEGER DEFAULT 0,
+            original_path TEXT,
+            is_invalid INTEGER DEFAULT 0,
+            width INTEGER DEFAULT 0,
+            height INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
+        CREATE TABLE IF NOT EXISTS system_stats (
+            key TEXT PRIMARY KEY,
+            value INTEGER DEFAULT 0
+        );
+    )";
+    sqlite3_exec(db, schema, nullptr, nullptr, nullptr);
+}
+
 void DatabaseManager::saveDb(DbConnection& conn) {
     if (!conn.memDb || !conn.diskDb) return;
     sqlite3_backup* backup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
@@ -252,6 +288,9 @@ void DatabaseManager::flushAll() {
     saveDb(m_globalDb);
     saveDb(m_scopedDb);
     for (auto& pair : m_driveDbs) {
+        saveDb(pair.second);
+    }
+    for (auto& pair : m_recursionDbs) {
         saveDb(pair.second);
     }
 }
@@ -307,8 +346,12 @@ void DatabaseManager::shutdown() {
     forceFinish(m_globalDb);
     forceFinish(m_scopedDb);
     for (auto& pair : m_driveDbs) forceFinish(pair.second);
+    for (auto& pair : m_recursionDbs) forceFinish(pair.second);
 
     // 关闭所有句柄 (1.21：解除物理占用)
+    for (auto& pair : m_recursionDbs) {
+        closeDb(pair.second);
+    }
     for (auto& pair : m_driveDbs) {
         if (pair.second.memDb) sqlite3_close_v2(pair.second.memDb);
         if (pair.second.diskDb) sqlite3_close_v2(pair.second.diskDb);
@@ -342,6 +385,85 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial) {
 
 sqlite3* DatabaseManager::getGlobalDb() {
     return m_globalDb.memDb;
+}
+
+sqlite3* DatabaseManager::mountRecursionDb(const std::wstring& volumeSerial) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (volumeSerial.empty()) return nullptr;
+
+    m_recursionRefCount[volumeSerial]++;
+    if (m_recursionRefCount[volumeSerial] > 1) {
+        return m_recursionDbs[volumeSerial].memDb;
+    }
+
+    // 首次加载
+    QString recursionMetaDir = getAppDir() + "/.arcmeta/scoped";
+    if (!QDir().mkpath(recursionMetaDir)) {
+        qDebug() << "[DB] CRITICAL: Failed to create recursion directory at:" << recursionMetaDir;
+        m_recursionRefCount[volumeSerial]--;
+        return nullptr;
+    }
+    ensureHidden(recursionMetaDir.toStdWString());
+
+    QString dbPath = recursionMetaDir + "/Recursion_" + QString::fromStdWString(volumeSerial) + ".db";
+    qDebug() << "[DB] Mounting Volume Recursion DB:" << dbPath;
+
+    DbConnection conn;
+    if (loadDb(dbPath.toStdWString(), conn)) {
+        // 2026-07-xx 物理修复：确保递归库的 Schema 已就绪
+        initRecursionSchema(conn.memDb);
+
+        m_recursionDbs[volumeSerial] = conn;
+        
+        // 2026-07-xx 按照重构方案：启动 USN 增量驱动
+        // 物理对账：通过反查获取当前挂载点对应的盘符根目录 (如 C:)
+        std::wstring volRoot = L"";
+        for (const auto& drive : QDir::drives()) {
+            std::wstring dPath = drive.absolutePath().toStdWString();
+            if (MetadataManager::getVolumeSerialNumber(dPath) == volumeSerial) {
+                volRoot = dPath;
+                if (volRoot.size() > 2 && volRoot.back() == L'/') volRoot.pop_back(); // 统一格式
+                if (volRoot.size() > 2 && volRoot.back() == L'\\') volRoot.pop_back();
+                break;
+            }
+        }
+        
+        if (!volRoot.empty()) {
+            RecursionSyncEngine::instance().startSync(volRoot, volumeSerial, conn.memDb);
+        } else {
+            qDebug() << "[DB] Warning: Could not find drive letter for serial:" << QString::fromStdWString(volumeSerial);
+        }
+        
+        return conn.memDb;
+    }
+
+    m_recursionRefCount[volumeSerial]--;
+    return nullptr;
+}
+
+void DatabaseManager::unmountRecursionDb(const std::wstring& volumeSerial) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_recursionRefCount.find(volumeSerial) == m_recursionRefCount.end()) return;
+
+    m_recursionRefCount[volumeSerial]--;
+    if (m_recursionRefCount[volumeSerial] <= 0) {
+        qDebug() << "[DB] Unmounting Recursion DB (Ref Count 0):" << QString::fromStdWString(volumeSerial);
+        
+        // 2026-07-xx 按照重构方案：停止并同步 USN 驱动
+        RecursionSyncEngine::instance().stopSync(volumeSerial);
+        
+        closeDb(m_recursionDbs[volumeSerial]);
+        m_recursionDbs.erase(volumeSerial);
+        m_recursionRefCount.erase(volumeSerial);
+    }
+}
+
+sqlite3* DatabaseManager::getRecursionDb(const std::wstring& volumeSerial) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_recursionDbs.find(volumeSerial) != m_recursionDbs.end()) {
+        return m_recursionDbs[volumeSerial].memDb;
+    }
+    return nullptr;
 }
 
 sqlite3* DatabaseManager::mountScopedDb(const std::string& folderFid, const std::wstring& folderPath) {
