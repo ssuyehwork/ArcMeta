@@ -318,10 +318,14 @@ public:
     /**
      * @brief 从图像中提取调色盘 (工业级优化版)
      * 2026-06-xx 架构重构：彻底弃用外部工具链 (ImageMagick/Ghostscript)，全面转向原生 Shell 引擎
+     * 2026-07-xx 物理对齐：支持透传已提取的缩略图以消除重复 Shell 调用
      */
-        static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
-        QImage targetImg = getShellThumbnail(targetFile, 256);
-        if (targetImg.isNull()) targetImg.load(targetFile);
+    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile, const QImage& preloadedImg = QImage()) {
+        QImage targetImg = preloadedImg;
+        if (targetImg.isNull()) {
+            targetImg = getShellThumbnail(targetFile, 256);
+            if (targetImg.isNull()) targetImg.load(targetFile);
+        }
         if (targetImg.isNull()) return {};
 
         QImage sampled = targetImg.scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
@@ -469,7 +473,8 @@ public:
             if (SUCCEEDED(hr)) {
                 SIZE nativeSize = { size, size };
                 HBITMAP hBitmap = nullptr;
-                hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
+                // 2026-07-xx 纠偏：移除 SIIGBF_THUMBNAILONLY 标志，强制 Shell 在缓存缺失时实时渲染，确保新文件解析率
+                hr = pFactory->GetImage(nativeSize, SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
                     BITMAP bmpInfo;
                     GetObject(hBitmap, sizeof(bmpInfo), &bmpInfo);
