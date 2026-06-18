@@ -46,15 +46,31 @@ static int64_t filetimeToUnixMs(int64_t filetime) {
 
 static bool enablePrivilege(LPCWSTR privilege) {
     HANDLE hToken;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) return false;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
+        qDebug() << "[MftReader] OpenProcessToken 失败，无法提升权限:" << QString::fromWCharArray(privilege);
+        return false;
+    }
     LUID luid;
-    if (!LookupPrivilegeValue(NULL, privilege, &luid)) { CloseHandle(hToken); return false; }
+    if (!LookupPrivilegeValue(NULL, privilege, &luid)) {
+        qDebug() << "[MftReader] LookupPrivilegeValue 失败:" << QString::fromWCharArray(privilege);
+        CloseHandle(hToken);
+        return false;
+    }
     TOKEN_PRIVILEGES tp;
     tp.PrivilegeCount = 1;
     tp.Privileges[0].Luid = luid;
     tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-    if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), NULL, NULL)) { CloseHandle(hToken); return false; }
+    if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), NULL, NULL)) {
+        qDebug() << "[MftReader] AdjustTokenPrivileges 失败:" << QString::fromWCharArray(privilege);
+        CloseHandle(hToken);
+        return false;
+    }
     bool ok = (GetLastError() == ERROR_SUCCESS);
+    if (!ok) {
+        qDebug() << "[MftReader] 权限提升失败 (可能由于非管理员运行):" << QString::fromWCharArray(privilege);
+    } else {
+        qDebug() << "[MftReader] 权限提升成功:" << QString::fromWCharArray(privilege);
+    }
     CloseHandle(hToken);
     return ok;
 }
