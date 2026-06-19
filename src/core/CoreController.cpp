@@ -1,4 +1,5 @@
 #include "CoreController.h"
+#include "AutoImportManager.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
 #include "../ui/Logger.h"
@@ -38,6 +39,9 @@ void CoreController::startSystem() {
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
             
+            // 2026-07-xx 按照 Plan-67/68：启动自动入库监听
+            AutoImportManager::instance().startListening();
+
             QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);
                 qDebug() << "[Core] !!! SQLite 内存模式初始化就绪，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
@@ -144,6 +148,23 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
 void CoreController::abortSearch() {
     m_isSearchAborted = true;
     // 等待现有搜索任务退出的轻量化处理（实际生产环境可能需要更复杂的等待机制）
+}
+
+void CoreController::startScan(const QString& drive) {
+    if (drive.isEmpty()) return;
+    
+    // 2026-07-xx 按照 Plan-68：启动 MFT 扫描流程
+    (void)QtConcurrent::run([this, drive]() {
+        QMetaObject::invokeMethod(this, [this, drive]() {
+            setStatus(QString("正在扫描 %1 ...").arg(drive), true);
+        });
+
+        MftReader::instance().buildIndex({drive});
+        
+        QMetaObject::invokeMethod(this, [this]() {
+            setStatus("扫描完成", false);
+        });
+    });
 }
 
 void CoreController::setStatus(const QString& text, bool indexing) {

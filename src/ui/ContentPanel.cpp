@@ -2157,11 +2157,15 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                             QModelIndex srcIdx = panelPtr->m_model->index(static_cast<int>(i), 0);
                             QModelIndex proxyIdx = panelPtr->m_proxyModel->mapFromSource(srcIdx);
                             if (proxyIdx.isValid()) {
-                                auto* view = (panelPtr->m_viewStack->currentWidget() == panelPtr->m_gridView) ? 
-                                             panelPtr->m_gridView : (QAbstractItemView*)panelPtr->m_treeView;
-                                view->scrollTo(proxyIdx);
-                                view->setCurrentIndex(proxyIdx);
-                                view->edit(proxyIdx);
+                                if (panelPtr->m_viewStack->currentWidget() == panelPtr->m_gridView) {
+                                    panelPtr->m_gridView->scrollTo(proxyIdx);
+                                    panelPtr->m_gridView->setCurrentIndex(proxyIdx);
+                                    panelPtr->m_gridView->edit(proxyIdx);
+                                } else {
+                                    panelPtr->m_treeView->scrollTo(proxyIdx);
+                                    panelPtr->m_treeView->setCurrentIndex(proxyIdx);
+                                    panelPtr->m_treeView->edit(proxyIdx);
+                                }
                             }
                             break;
                         }
