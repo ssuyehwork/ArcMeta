@@ -1244,13 +1244,18 @@ void FilterPanel::clearAllFilters() {
 }
 
 void FilterPanel::updateHeaderStatus() {
-    if (!m_iconLabel || !m_titleLabel) return;
+    if (!m_iconLabel || !m_titleLabel || !m_btnClearAll) return;
 
     bool active = !m_filter.isEmpty();
-    QColor color = active ? QColor("#f1c40f") : QColor("#B0B0B0");
 
-    m_iconLabel->setPixmap(UiHelper::getIcon("filter_funnel_outline", color, 18).pixmap(18, 18));
-    m_titleLabel->setStyleSheet(QString("font-size: 13px; font-weight: bold; color: %1; background: transparent; border: none;").arg(color.name()));
+    // 标记 ①：始终保持彩色
+    QColor brandYellow = QColor("#f1c40f");
+    m_iconLabel->setPixmap(UiHelper::getIcon("filter_funnel_outline", brandYellow, 18).pixmap(18, 18));
+    m_titleLabel->setStyleSheet(QString("font-size: 13px; font-weight: bold; color: %1; background: transparent; border: none;").arg(brandYellow.name()));
+
+    // 标记 ②：根据筛选状态动态切换颜色（激活为彩色，空闲为灰色）
+    QColor btnColor = active ? brandYellow : QColor("#B0B0B0");
+    m_btnClearAll->setIcon(UiHelper::getIcon("reset_filter", btnColor));
 }
 
 void FilterPanel::selectColor(const QColor& color) {
