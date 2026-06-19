@@ -1061,19 +1061,19 @@ void MainWindow::setupSplitters() {
     m_mainSplitter->addWidget(m_filterPanel);
     m_mainSplitter->addWidget(m_tagManagerView);
 
-    // 2026-07-xx 按照 Plan-63：对接 MetaPanel 的右键菜单请求
-    connect(m_metaPanel, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
-        showPanelContextMenu(m_metaPanel->mapToGlobal(pos));
-    });
+    // 2026-07-xx 按照 Plan-63：对接所有面板容器级的右键菜单请求
+    // 这确保了在标题栏、空白边缘处点击右键也能弹出布局控制菜单
+    auto connectPanelMenu = [&](QWidget* panel) {
+        connect(panel, &QWidget::customContextMenuRequested, this, [this, panel](const QPoint& pos) {
+            showPanelContextMenu(panel->mapToGlobal(pos));
+        });
+    };
 
-    // 2026-07-xx 按照 Plan-63：对接 NavPanel 和 FilterPanel 的右键菜单请求
-    connect(m_navPanel, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
-        showPanelContextMenu(m_navPanel->mapToGlobal(pos));
-    });
-
-    connect(m_filterPanel, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
-        showPanelContextMenu(m_filterPanel->mapToGlobal(pos));
-    });
+    connectPanelMenu(m_categoryPanel);
+    connectPanelMenu(m_navPanel);
+    connectPanelMenu(m_contentPanel);
+    connectPanelMenu(m_metaPanel);
+    connectPanelMenu(m_filterPanel);
 
     // 2026-07-xx 按照用户要求：标签搜索联动
     connect(m_tagManagerView, &TagManagerView::requestSearchTag, this, [this](const QString& tag) {
