@@ -2148,6 +2148,27 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 panelPtr->recalculateAndEmitStats();
                 // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
                 panelPtr->applyFilters();
+
+                // 2026-07-xx 按照 Plan-66：处理新建项后的自动定位与编辑
+                if (!panelPtr->m_pendingSelectName.isEmpty()) {
+                    const auto& records = panelPtr->m_model->allRecords();
+                    for (size_t i = 0; i < records.size(); ++i) {
+                        if (QFileInfo(records[i].path).fileName() == panelPtr->m_pendingSelectName) {
+                            QModelIndex srcIdx = panelPtr->m_model->index(static_cast<int>(i), 0);
+                            QModelIndex proxyIdx = panelPtr->m_proxyModel->mapFromSource(srcIdx);
+                            if (proxyIdx.isValid()) {
+                                auto* view = (panelPtr->m_viewStack->currentWidget() == panelPtr->m_gridView) ?
+                                             panelPtr->m_gridView : (QAbstractItemView*)panelPtr->m_treeView;
+                                view->scrollTo(proxyIdx);
+                                view->setCurrentIndex(proxyIdx);
+                                view->edit(proxyIdx);
+                            }
+                            break;
+                        }
+                    }
+                    panelPtr->m_pendingSelectName = ""; // 必须物理清空状态
+                }
+
                 ArcMeta::Logger::log(QString("[Content] 目录扫描完成并已应用到 UI [%1]").arg(reqId));
             } else if (panelPtr) {
                 ArcMeta::Logger::log(QString("[Content] 拦截到过期的目录扫描回调 [%1], 当前 ID: %2").arg(reqId).arg(panelPtr->m_loadRequestId.load()));
@@ -2505,20 +2526,8 @@ void ContentPanel::createNewItem(const QString& type) {
     } 
  
     if (success) { 
+        m_pendingSelectName = finalName;
         loadDirectory(m_currentPath, m_isRecursive); 
-        // 虚拟模型中不再支持 findItems，需要手动寻找
-    const std::vector<ItemRecord>& records = m_model->allRecords();
-        for (size_t i = 0; i < records.size(); ++i) {
-            if (QFileInfo(records[i].path).fileName() == finalName) {
-                QModelIndex srcIdx = m_model->index(static_cast<int>(i), 0);
-                QModelIndex proxyIdx = m_proxyModel->mapFromSource(srcIdx);
-                if (proxyIdx.isValid()) {
-                    m_gridView->setCurrentIndex(proxyIdx);
-                    m_gridView->edit(proxyIdx);
-                }
-                break;
-            }
-        }
     } 
 } 
  
