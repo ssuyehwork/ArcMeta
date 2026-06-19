@@ -172,8 +172,8 @@ target_include_directories(ArcMeta PRIVATE
 )
 
 # 2026-03-xx 按照用户要求及《记忆碎片》规范：
-# 为避免 mt.exe 清单合并冲突，通过 ArcMeta.rc 嵌入清单并禁用链接器的默认清单生成
+# 强制要求管理员权限 (requireAdministrator)
 if(MSVC)
-    target_link_options(ArcMeta PRIVATE "/MANIFEST:NO")
+    target_link_options(ArcMeta PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
 endif()
 # Force Refresh CMake: 2026-06-xx 11:30 (Removed AmMetaJson & SyncQueue, switched to DB-only)
