@@ -131,6 +131,7 @@ void ToolTipOverlay::showText(const QPoint& globalPos, const QString& text, int 
     if (timeout > 0) {
         m_hideTimer.start(timeout);
     } else {
+        // 2026-07-xx 按照 Plan-65：如果 timeout 为 0 或负数，停止计时器以支持持续显示
         m_hideTimer.stop();
     }
 }

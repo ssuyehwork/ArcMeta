@@ -42,7 +42,8 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
     m_btnRefresh = new QPushButton(m_addressContainer);
     m_btnRefresh->setFixedSize(30, 30);
     m_btnRefresh->setIcon(UiHelper::getIcon("sync", QColor("#CCCCCC"), 16));
-    m_btnRefresh->setToolTip("刷新 (F5)");
+    // 2026-07-xx 按照宪法规范：禁绝原生 ToolTip，对接 ToolTipOverlay
+    m_btnRefresh->setProperty("tooltipText", "刷新 (F5)");
     m_btnRefresh->setCursor(Qt::ArrowCursor);
     m_btnRefresh->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-left: 1px solid #333333; border-top-right-radius: 6px; border-bottom-right-radius: 6px; }"
@@ -136,8 +137,14 @@ bool AddressBar::eventFilter(QObject* obj, QEvent* event) {
     if (obj == m_btnRefresh) {
         if (event->type() == QEvent::HoverEnter || event->type() == QEvent::Enter) {
             m_btnRefresh->setIcon(UiHelper::getIcon("sync", Qt::white, 16));
+            // 2026-07-xx 按照 Plan-65：悬停触发，timeout = 0
+            QString text = m_btnRefresh->property("tooltipText").toString();
+            if (!text.isEmpty()) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), text, 0);
+            }
         } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::Leave) {
             m_btnRefresh->setIcon(UiHelper::getIcon("sync", QColor("#CCCCCC"), 16));
+            ToolTipOverlay::hideTip();
         }
     }
 

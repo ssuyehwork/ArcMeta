@@ -88,7 +88,7 @@ CategoryPanel::CategoryPanel(QWidget* parent)
             auto catCountsVec = CategoryRepo::getCounts();
             
             QMap<int, int> catCounts;
-            for (const auto& p : catCountsVec) catCounts[p.first] = p.second;
+            for (const auto& entry : catCountsVec) catCounts[entry.first] = entry.second;
             
             // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
             QMetaObject::invokeMethod(weakThis.data(), [weakThis, sysCounts, catCounts]() {
@@ -280,10 +280,10 @@ void CategoryPanel::setupContextMenu() {
 
             // 通过向上寻道获取 MainWindow 实例以复用菜单逻辑
             MainWindow* mw = nullptr;
-            QWidget* p = window();
-            while (p) {
-                if ((mw = qobject_cast<MainWindow*>(p))) break;
-                p = p->parentWidget();
+            QWidget* parentWin = window();
+            while (parentWin) {
+                if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
+                parentWin = parentWin->parentWidget();
             }
             if (mw) {
                 mw->populatePanelMenu(layoutMenu);

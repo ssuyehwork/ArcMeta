@@ -1562,10 +1562,10 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
     // 通过向上寻道获取 MainWindow 实例以复用菜单逻辑
     MainWindow* mw = nullptr;
-    QWidget* p = window();
-    while (p) {
-        if ((mw = qobject_cast<MainWindow*>(p))) break;
-        p = p->parentWidget();
+    QWidget* parentWin = window();
+    while (parentWin) {
+        if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
+        parentWin = parentWin->parentWidget();
     }
     if (mw) {
         mw->populatePanelMenu(layoutMenu);
@@ -1672,8 +1672,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             
             QStringList pathsToProcess;
             for (const auto& selIdx : filteredRows) {
-                QString p = selIdx.data(PathRole).toString();
-                if (!p.isEmpty()) pathsToProcess << p;
+                QString pathItem = selIdx.data(PathRole).toString();
+                if (!pathItem.isEmpty()) pathsToProcess << pathItem;
             }
             if (pathsToProcess.isEmpty()) break;
 
@@ -2807,8 +2807,9 @@ bool GridItemDelegate::helpEvent(QHelpEvent* event, QAbstractItemView* view,
     if (statusRect.contains(event->pos())) {
         double p = index.data(RegistrationProgressRole).toDouble();
         if (p >= 0.0) {
+            // 2026-07-xx 按照 Plan-65：悬停触发，timeout = 0
             ToolTipOverlay::instance()->showText(event->globalPos(), 
-                QString("登记进度: %1%").arg(qRound(p * 100)));
+                QString("登记进度: %1%").arg(qRound(p * 100)), 0);
             return true;
         }
     }

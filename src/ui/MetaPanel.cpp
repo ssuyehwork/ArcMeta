@@ -130,7 +130,8 @@ void ColorPill::enterEvent(QEnterEvent*) {
     m_hovered = true;
     QString hex = m_color.name().toUpper();
     int ratio = qRound(m_ratio * 100);
-    ToolTipOverlay::instance()->showText(QCursor::pos(), QString("%1 (%2%)").arg(hex).arg(ratio));
+    // 2026-07-xx 按照 Plan-65：悬停触发，timeout = 0
+    ToolTipOverlay::instance()->showText(QCursor::pos(), QString("%1 (%2%)").arg(hex).arg(ratio), 0);
     update();
 }
 
