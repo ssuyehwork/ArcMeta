@@ -310,6 +310,8 @@ MetaPanel::MetaPanel(QWidget* parent) : QFrame(parent) {
     m_adjustTimer->setInterval(50);
     connect(m_adjustTimer, &QTimer::timeout, this, &MetaPanel::adjustFlowHeights);
 
+    // 2026-07-xx 按照 Plan-63：启用右键菜单
+    setContextMenuPolicy(Qt::CustomContextMenu);
     initUi();
 }
 
@@ -322,11 +324,7 @@ void MetaPanel::initUi() {
     QLabel* iconLabel = new QLabel(header); iconLabel->setPixmap(UiHelper::getIcon("all_data", QColor("#4a90e2"), 18).pixmap(18, 18)); headerLayout->addWidget(iconLabel);
     QLabel* titleLabel = new QLabel("元数据", header); titleLabel->setStyleSheet("font-size: 12px; color: #4a90e2; background: transparent; border: none;"); headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
-    QPushButton* closeBtn = new QPushButton(header); closeBtn->setIcon(UiHelper::getIcon("close", QColor("#FFFFFF"), 14)); closeBtn->setFixedSize(24, 24); closeBtn->setCursor(Qt::PointingHandCursor);
-    // 物理对标 MainWindow：关闭按钮悬停不使用淡化色（蒙版感），直接保持红色 (#E81123 -> #F1707A)
-    closeBtn->setStyleSheet("QPushButton { background-color: #E81123; border: none; border-radius: 4px; } QPushButton:hover { background-color: #F1707A; } QPushButton:pressed { background-color: #A50000; }");
-    connect(closeBtn, &QPushButton::clicked, [this]() { this->hide(); });
-    headerLayout->addWidget(closeBtn, 0, Qt::AlignVCenter);
+    // 2026-07-xx 按照 Plan-63：移除标题栏物理关闭按钮，改为全局右键菜单统一控制
     m_mainLayout->addWidget(header);
 
     m_scrollArea = new QScrollArea(this); m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded); m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);

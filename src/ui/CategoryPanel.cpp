@@ -1,4 +1,5 @@
 #include "CategoryPanel.h"
+#include "MainWindow.h"
 #include "CategoryModel.h"
 #include "CategoryLockDialog.h"
 #include "CategorySetPasswordDialog.h"
@@ -270,6 +271,22 @@ void CategoryPanel::setupContextMenu() {
         }
         
         if (!menu.isEmpty()) {
+            // 2026-07-xx 按照 Plan-63：注入布局显示控制菜单
+            menu.addSeparator();
+            QMenu* layoutMenu = menu.addMenu("布局显示");
+            UiHelper::applyMenuStyle(layoutMenu);
+
+            // 通过向上寻道获取 MainWindow 实例以复用菜单逻辑
+            MainWindow* mw = nullptr;
+            QWidget* p = window();
+            while (p) {
+                if ((mw = qobject_cast<MainWindow*>(p))) break;
+                p = p->parentWidget();
+            }
+            if (mw) {
+                mw->populatePanelMenu(layoutMenu);
+            }
+
             menu.exec(m_categoryTree->viewport()->mapToGlobal(pos));
         }
     });
