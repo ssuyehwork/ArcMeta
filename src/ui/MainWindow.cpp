@@ -23,7 +23,7 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
-#include "../mft/MftReader.h"
+#include "mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 
 #include "SearchHistoryPanel.h"
@@ -51,7 +51,7 @@ using namespace ArcMeta::Style;
 #include <QDir>
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
-#include "FramelessFileDialog.h"
+#include "ui/FramelessFileDialog.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -1674,10 +1674,14 @@ void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
     
     QAction* chosen = menu.exec(m_driveButtonMap[letter]->mapToGlobal(pos));
     if (chosen == setFolderAct) {
-        FramelessFileDialog dialog(this);
-        dialog.setFileMode(QFileDialog::Directory);
-        if (dialog.exec() == QDialog::Accepted) {
-            QString selectedDir = dialog.selectedFiles().first();
+        // 1. 直接调起无边框文件夹选择静态方法
+        QString selectedDir = FramelessFileDialog::getExistingDirectory(
+            this,
+            "设置托管文件夹",
+            letter + "\\"
+        );
+
+        if (!selectedDir.isEmpty()) {
             if (!selectedDir.startsWith(letter, Qt::CaseInsensitive)) {
                 qWarning() << "[MainWindow] 错误：托管文件夹必须位于当前磁盘分区";
                 return;
@@ -1685,6 +1689,7 @@ void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
             QString root = letter + "\\";
             QString relativePath = selectedDir.mid(root.length());
             std::wstring volSerial = MetadataManager::getVolumeSerialNumber(selectedDir.toStdWString());
+
             QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
             AppConfig::instance().setValue(key, relativePath);
             AppConfig::instance().sync();

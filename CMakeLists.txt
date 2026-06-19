@@ -38,6 +38,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC OFF)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
+include_directories(src)
 # 2026-06-xx 按照用户要求：彻底废除递归搜集 (GLOB)，改为显式列出所有有效源文件。
 # 此举可确保构建系统在彻底移除 .am_meta.json 模块后不再包含冗余代码，符合《源码纯净》规范。
 set(SOURCES
@@ -46,9 +47,14 @@ set(SOURCES
     src/meta/sqlite3.h
     src/core/CoreController.cpp
     src/core/CoreController.h
+    src/core/AutoImportManager.cpp
+    src/core/AutoImportManager.h
+    src/core/AppConfig.h
     src/core/CacheManager.cpp
     src/core/CacheManager.h
+    src/core/IndexedEntry.cpp
     src/core/IndexedEntry.h
+    src/core/ModelContract.h
     src/mft/UsnWatcher.cpp
     src/mft/UsnWatcher.h
     src/crypto/EncryptionManager.cpp
