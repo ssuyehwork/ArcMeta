@@ -12,6 +12,7 @@
 #include "ThumbnailDelegate.h"
 #include "../util/ImportHelper.h"
 #include "ToolTipOverlay.h" 
+#include "MainWindow.h"
  
 #include <QVBoxLayout> 
 #include <QHBoxLayout> 
@@ -691,6 +692,9 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
  
 ContentPanel::ContentPanel(QWidget* parent) 
     : QFrame(parent) { 
+    // 2026-07-xx 按照 Plan-63：启用右键菜单策略（容器级）
+    setContextMenuPolicy(Qt::CustomContextMenu);
+
     setObjectName("EditorContainer"); 
     setAttribute(Qt::WA_StyledBackground, true); 
     setMinimumWidth(230); 
@@ -1547,7 +1551,25 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         QAction* actProp = menu.addAction("当前文件夹属性"); 
         actProp->setData(ActionProperties); 
         actProp->setEnabled(!m_currentPath.isEmpty() && m_currentPath != "computer://"); 
+
+        // 2026-07-xx 按照 Plan-63：如果是空白处点击，直接在这里注入并在下方 exec
     } 
+
+    // 2026-07-xx 按照 Plan-63：注入布局显示控制菜单
+    menu.addSeparator();
+    QMenu* layoutMenu = menu.addMenu("布局显示");
+    UiHelper::applyMenuStyle(layoutMenu);
+
+    // 通过向上寻道获取 MainWindow 实例以复用菜单逻辑
+    MainWindow* mw = nullptr;
+    QWidget* p = window();
+    while (p) {
+        if ((mw = qobject_cast<MainWindow*>(p))) break;
+        p = p->parentWidget();
+    }
+    if (mw) {
+        mw->populatePanelMenu(layoutMenu);
+    }
  
     QAction* selectedAction = menu.exec(view->viewport()->mapToGlobal(pos)); 
     if (!selectedAction || !selectedAction->data().isValid()) return; 
