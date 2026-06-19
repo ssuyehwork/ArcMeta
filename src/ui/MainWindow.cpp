@@ -23,7 +23,7 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
-#include "../mft/MftReader.h"
+#include "mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 
 #include "SearchHistoryPanel.h"
@@ -51,7 +51,7 @@ using namespace ArcMeta::Style;
 #include <QDir>
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
-#include "FramelessFileDialog.h"
+#include "ui/FramelessFileDialog.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
