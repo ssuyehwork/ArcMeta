@@ -966,7 +966,7 @@ void MainWindow::setupSplitters() {
     // --- 1. 自定义标题栏 (第一行) ---
     m_titleBarWidget = new QWidget(centralC);
     m_titleBarWidget->setObjectName("TitleBar");
-    m_titleBarWidget->setFixedHeight(34);
+    m_titleBarWidget->setFixedHeight(32);
     m_titleBarLayout = new QHBoxLayout(m_titleBarWidget);
     // 2026-xx-xx 按照用户要求：标题栏左侧与右侧均保持 5px 呼吸边距
     m_titleBarLayout->setContentsMargins(5, 0, kEdgeMargin, 0); 
@@ -1198,7 +1198,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnMin->setProperty("tooltipText", "最小化");
     m_btnMin->installEventFilter(m_hoverFilter);
 
-    m_btnMax = createTitleBtn(isMaximized() ? "restore_line" : "maximize");
+    m_btnMax = createTitleBtn(isMaximized() ? "restore_window" : "maximize");
     m_btnMax->setProperty("tooltipText", "最大化/还原");
     m_btnMax->installEventFilter(m_hoverFilter);
 
@@ -1466,7 +1466,7 @@ void MainWindow::changeEvent(QEvent* event) {
 
         // 2026-04-11 按照用户要求：物理识别窗口状态，精准切换最大化/还原图标
         if (m_btnMax) {
-            QString iconKey = isMaximized() ? "restore_line" : "maximize";
+            QString iconKey = isMaximized() ? "restore_window" : "maximize";
             m_btnMax->setIcon(UiHelper::getIcon(iconKey, QColor("#EEEEEE")));
         }
 
