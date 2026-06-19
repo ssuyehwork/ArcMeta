@@ -410,7 +410,7 @@ public:
                 const auto& c = candidates[i];
                 double score = c.score;
                 
-                // 2026-07-xx 按照 Plan-28：引入增强型 DeltaE 空间排斥逻辑，杜绝相似色霸屏，对齐 Eagle 精度
+                // 2026-07-xx 按照 Plan-28：引入增强型 DeltaE 空间排斥逻辑，杜绝相似色霸屏，对齐精度
                 for (const auto& r : result) {
                     double de = calculateDeltaE(c.color, r.first);
                     if (de < 20.0) {

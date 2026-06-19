@@ -91,6 +91,16 @@ struct FilterState {
     QString typeFilterText;
     QString createDateFilterText;
     QString modifyDateFilterText;
+
+    bool isEmpty() const {
+        return ratings.isEmpty() && colors.isEmpty() && tags.isEmpty() && types.isEmpty() &&
+               createDates.isEmpty() && modifyDates.isEmpty() &&
+               linkPresence == All && notePresence == All && ratio == AspectAny &&
+               minSize == -1 && maxSize == -1 &&
+               colorFilterText.trimmed().isEmpty() && tagFilterText.trimmed().isEmpty() &&
+               typeFilterText.trimmed().isEmpty() && createDateFilterText.trimmed().isEmpty() &&
+               modifyDateFilterText.trimmed().isEmpty();
+    }
 };
 
 /**
@@ -134,6 +144,7 @@ public slots:
 
 private:
     void rebuildGroups();
+    void updateHeaderStatus();
 
     // 2026-05-17 根因修复：增加 outHdrLayout 参数，让调用方直接往标题行布局追加按钮
     // 彻底替代绝对定位方案，消除非布局子控件撑高 wrapper 导致的留白
@@ -160,6 +171,8 @@ private:
     QWidget*      m_container       = nullptr;
     QVBoxLayout*  m_containerLayout = nullptr;
     QPushButton*  m_btnClearAll     = nullptr;
+    QLabel*       m_iconLabel       = nullptr;
+    QLabel*       m_titleLabel      = nullptr;
 
     // 2026-xx-xx 新增快速输入框成员
     QLineEdit*    m_editColor       = nullptr;

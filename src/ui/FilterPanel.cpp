@@ -303,12 +303,11 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     topL->setContentsMargins(15, 0, 5, 0); // 2026-xx-xx 按照用户要求：右侧保留 5px 呼吸边距
     topL->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
 
-    QLabel* iconLabel = new QLabel(topBar);
-    iconLabel->setPixmap(UiHelper::getIcon("filter", QColor("#f1c40f"), 18).pixmap(18, 18));
-    topL->addWidget(iconLabel);
+    m_iconLabel = new QLabel(topBar);
+    topL->addWidget(m_iconLabel);
 
-    QLabel* title = new QLabel("筛选", topBar);
-    title->setStyleSheet("font-size: 13px; font-weight: bold; color: #f1c40f; background: transparent; border: none;");
+    m_titleLabel = new QLabel("筛选", topBar);
+    topL->addWidget(m_titleLabel);
 
     m_btnClearAll = new QPushButton(topBar);
     m_btnClearAll->setFixedSize(24, 24); // 2026-05-17 按照用户要求：统一为 24x24 规格以实现像素级对齐
@@ -324,10 +323,11 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
         "QPushButton:pressed { background: #4E4E52; }");
     connect(m_btnClearAll, &QPushButton::clicked, this, &FilterPanel::clearAllFilters);
 
-    topL->addWidget(title);
     topL->addStretch();
     topL->addWidget(m_btnClearAll, 0, Qt::AlignVCenter);
     m_mainLayout->addWidget(topBar);
+
+    updateHeaderStatus();
 
     // 滚动内容区
     m_scrollArea = new QScrollArea(this);
@@ -354,6 +354,9 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     m_recentColors = AppConfig::instance().getValue("Filter/RecentColors").toStringList();
 
     m_historyPanel = new SearchHistoryPanel(this);
+
+    // 2026-xx-xx 按照用户要求：当筛选状态改变时，同步更新标题栏图标颜色
+    connect(this, &FilterPanel::filterChanged, this, &FilterPanel::updateHeaderStatus);
 }
 
 void FilterPanel::saveFilterHistory(const QString& key, const QString& text) {
@@ -465,6 +468,7 @@ void FilterPanel::populate(
 
 // ─── rebuildGroups ────────────────────────────────────────────────
 void FilterPanel::rebuildGroups() {
+    updateHeaderStatus();
     // 2026-xx-xx 物理安全：重置快速输入框指针，防止 Directory 切换导致的野指针崩溃
     m_editColor = nullptr;
     m_editTag = nullptr;
@@ -495,6 +499,17 @@ void FilterPanel::rebuildGroups() {
             connect(cb, &QCheckBox::toggled, this, [this, r](bool on) {
                 if (on) { if (!m_filter.ratings.contains(r)) m_filter.ratings.append(r); }
                 else m_filter.ratings.removeAll(r);
+                emit filterChanged(m_filter);
+            });
+        }
+        if (m_typeCounts.contains("空文件夹")) {
+            QCheckBox* cb = addFilterRow(gl, "空文件夹", m_typeCounts["空文件夹"]);
+            cb->blockSignals(true);
+            cb->setChecked(m_filter.types.contains("空文件夹"));
+            cb->blockSignals(false);
+            connect(cb, &QCheckBox::toggled, this, [this](bool on) {
+                if (on) { if (!m_filter.types.contains("空文件夹")) m_filter.types.append("空文件夹"); }
+                else    m_filter.types.removeAll("空文件夹");
                 emit filterChanged(m_filter);
             });
         }
@@ -1226,6 +1241,21 @@ void FilterPanel::clearAllFilters() {
     
     // 2026-06-xx 按照用户铁律：点击“清除”仅重置筛选器内部状态，严禁干扰搜索框或上下文
     emit filterChanged(m_filter);
+}
+
+void FilterPanel::updateHeaderStatus() {
+    if (!m_iconLabel || !m_titleLabel || !m_btnClearAll) return;
+    
+    bool active = !m_filter.isEmpty();
+    
+    // 标记 ①：始终保持彩色
+    QColor brandYellow = QColor("#f1c40f");
+    m_iconLabel->setPixmap(UiHelper::getIcon("filter_funnel_outline", brandYellow, 18).pixmap(18, 18));
+    m_titleLabel->setStyleSheet(QString("font-size: 13px; font-weight: bold; color: %1; background: transparent; border: none;").arg(brandYellow.name()));
+
+    // 标记 ②：根据筛选状态动态切换颜色（激活为彩色，空闲为灰色）
+    QColor btnColor = active ? brandYellow : QColor("#B0B0B0");
+    m_btnClearAll->setIcon(UiHelper::getIcon("reset_filter", btnColor));
 }
 
 void FilterPanel::selectColor(const QColor& color) {

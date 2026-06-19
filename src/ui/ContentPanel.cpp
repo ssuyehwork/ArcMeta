@@ -563,6 +563,8 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
             QString searchText = currentFilter.typeFilterText.trimmed();
             if (searchText == "文件夹" || searchText.toLower() == "folder") {
                 if (type == "folder") matchType = true;
+            } else if (searchText == "空文件夹") {
+                if (type == "folder" && record.isEmpty) matchType = true;
             } else {
                 if (ext.contains(searchText.toUpper())) matchType = true;
             }
@@ -576,6 +578,8 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
                     if (type == "folder") { matchType = true; break; } 
                 } else if (fType == "file") {
                     if (type != "folder") { matchType = true; break; }
+                } else if (fType == "空文件夹") {
+                    if (type == "folder" && record.isEmpty) { matchType = true; break; }
                 } else { 
                     if (ext == fType.toUpper()) { matchType = true; break; } 
                 } 
@@ -2422,6 +2426,9 @@ void ContentPanel::recalculateAndEmitStats() {
             
             if (record.isDir) {
                 stats.typeCounts["folder"]++;
+                if (record.isEmpty) {
+                    stats.typeCounts["空文件夹"]++;
+                }
             } else {
                 stats.typeCounts["file"]++;
                 stats.typeCounts[record.suffix.toUpper()]++;
