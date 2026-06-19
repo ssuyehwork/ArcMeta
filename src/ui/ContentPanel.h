@@ -274,6 +274,7 @@ private:
 
     int m_zoomLevel = 64;
     QString m_currentPath;
+    QString m_pendingSelectName;
     int m_currentCategoryId = -1;
     QString m_currentCategoryType; // 用于驱动差异化右键菜单
     bool m_isRecursive = false;
