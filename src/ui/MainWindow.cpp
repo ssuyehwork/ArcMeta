@@ -50,6 +50,8 @@ using namespace ArcMeta::Style;
 #include <QFileInfo>
 #include <QDir>
 #include "../meta/MetadataManager.h"
+#include "../meta/DatabaseManager.h"
+#include "FramelessFileDialog.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -1118,6 +1120,65 @@ void MainWindow::setupSplitters() {
     updateStatus();
 
     mainL->addWidget(m_titleBarWidget);
+
+    // --- 1.5 盘符管理栏 (Plan-68) ---
+    m_driveBarWidget = new QWidget(centralC);
+    m_driveBarWidget->setObjectName("DriveBar");
+    m_driveBarWidget->setFixedHeight(45);
+    m_driveBarWidget->setStyleSheet("QWidget#DriveBar { background: #252526; border-bottom: 1px solid #333333; }");
+    m_driveBarLayout = new QHBoxLayout(m_driveBarWidget);
+    m_driveBarLayout->setContentsMargins(10, 0, 10, 0);
+    m_driveBarLayout->setSpacing(8);
+    m_driveBarWidget->setVisible(false); // 默认折叠
+
+    // 2026-07-xx 按照 Plan-68：初始化磁盘列表与挂载状态
+    QStringList activeDrives = AppConfig::instance().getValue("Drives/ActiveDrives").toStringList();
+
+    DWORD driveMask = GetLogicalDrives();
+    for (int i = 0; i < 26; ++i) {
+        if (driveMask & (1 << i)) {
+            QString letter = QString(QChar('A' + i)) + ":";
+            WCHAR fsName[MAX_PATH + 1] = {0};
+            QString driveRoot = letter + "\\";
+            if (GetVolumeInformationW((LPCWSTR)driveRoot.utf16(), NULL, 0, NULL, NULL, NULL, fsName, MAX_PATH + 1)) {
+                if (QString::fromWCharArray(fsName).contains("NTFS", Qt::CaseInsensitive)) {
+                    QPushButton* btn = new QPushButton(letter, m_driveBarWidget);
+                    btn->setCheckable(true);
+                    btn->setFixedSize(60, 28);
+                    btn->setContextMenuPolicy(Qt::CustomContextMenu);
+                    btn->setStyleSheet(
+                        "QPushButton { background: #333333; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; font-size: 11px; }"
+                        "QPushButton:hover { background: #3E3E42; border: 1px solid #555555; }"
+                        "QPushButton:checked { background: #094771; color: white; border: 1px solid #3498db; }"
+                    );
+
+                    bool isActive = activeDrives.contains(letter);
+                    btn->setChecked(isActive);
+                    m_driveButtonMap[letter] = btn;
+                    m_driveBarLayout->addWidget(btn);
+
+                    connect(btn, &QPushButton::clicked, this, [this, letter](bool checked) {
+                        onDriveButtonClicked(letter, checked);
+                    });
+                    connect(btn, &QWidget::customContextMenuRequested, this, [this, letter](const QPoint& pos) {
+                        onDriveContextMenu(letter, pos);
+                    });
+
+                    // 通道 1：启动自动加载
+                    if (isActive) {
+                        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(driveRoot.toStdWString());
+                        DatabaseManager::instance().getMemoryDb(volSerial);
+                    }
+                }
+            }
+        }
+    }
+    m_driveBarLayout->addStretch();
+    // 同步一次 MFT 过滤器
+    MftReader::instance().updateActiveDrives(activeDrives);
+
+    mainL->addWidget(m_driveBarWidget);
+
     mainL->addWidget(m_navBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
@@ -1151,6 +1212,11 @@ void MainWindow::setupCustomTitleBarButtons() {
         ).arg(hoverColor));
         return btn;
     };
+
+    m_btnToggleDrives = createTitleBtn("chevrons_up");
+    m_btnToggleDrives->setProperty("tooltipText", "展开/折叠盘符管理");
+    m_btnToggleDrives->installEventFilter(m_hoverFilter);
+    connect(m_btnToggleDrives, &QPushButton::clicked, this, &MainWindow::toggleDriveBar);
 
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
@@ -1229,6 +1295,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
+    layout->addWidget(m_btnToggleDrives, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnCreate, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnPinTop, 0, Qt::AlignVCenter);
@@ -1555,6 +1622,74 @@ void MainWindow::savePanelVisibility() {
     if (!m_filterPanel->isVisible())   hiddenPanels << "filter";
     
     AppConfig::instance().setValue("MainWindow/PanelVisibility", hiddenPanels);
+}
+
+void MainWindow::toggleDriveBar() {
+    bool isVisible = m_driveBarWidget->isVisible();
+    m_driveBarWidget->setVisible(!isVisible);
+    m_btnToggleDrives->setIcon(UiHelper::getIcon(isVisible ? "chevrons_up" : "chevrons_down", QColor("#FFFFFF"), 18));
+}
+
+void MainWindow::onDriveButtonClicked(const QString& letter, bool checked) {
+    std::wstring volSerial = MetadataManager::getVolumeSerialNumber((letter + "\\").toStdWString());
+    if (volSerial.empty()) return;
+
+    auto getActiveDrivesFromUI = [this]() {
+        QStringList active;
+        for (auto it = m_driveButtonMap.begin(); it != m_driveButtonMap.end(); ++it) {
+            if (it.value()->isChecked()) active << it.key();
+        }
+        return active;
+    };
+
+    if (checked) {
+        sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
+        if (db) {
+            QStringList active = getActiveDrivesFromUI();
+            MftReader::instance().updateActiveDrives(active);
+            if (!MftReader::instance().isDriveIndexed(letter)) {
+                CoreController::instance().startScan(letter);
+            }
+        }
+    } else {
+        if (getActiveDrivesFromUI().isEmpty()) {
+            m_driveButtonMap[letter]->blockSignals(true);
+            m_driveButtonMap[letter]->setChecked(true);
+            m_driveButtonMap[letter]->blockSignals(false);
+            return;
+        }
+        MetadataManager::instance().unloadVolumeNameCache(volSerial);
+        MftReader::instance().updateActiveDrives(getActiveDrivesFromUI());
+    }
+
+    AppConfig::instance().setValue("Drives/ActiveDrives", getActiveDrivesFromUI());
+    AppConfig::instance().sync();
+    MetadataManager::instance().notifyCategoryCountChanged();
+}
+
+void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
+    QMenu menu(this);
+    UiHelper::applyMenuStyle(&menu);
+    QAction* setFolderAct = menu.addAction(UiHelper::getIcon("folder_filled", QColor("#EEEEEE")), "设置托管文件夹...");
+
+    QAction* chosen = menu.exec(m_driveButtonMap[letter]->mapToGlobal(pos));
+    if (chosen == setFolderAct) {
+        FramelessFileDialog dialog(this);
+        dialog.setFileMode(QFileDialog::Directory);
+        if (dialog.exec() == QDialog::Accepted) {
+            QString selectedDir = dialog.selectedFiles().first();
+            if (!selectedDir.startsWith(letter, Qt::CaseInsensitive)) {
+                qWarning() << "[MainWindow] 错误：托管文件夹必须位于当前磁盘分区";
+                return;
+            }
+            QString root = letter + "\\";
+            QString relativePath = selectedDir.mid(root.length());
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(selectedDir.toStdWString());
+            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+            AppConfig::instance().setValue(key, relativePath);
+            AppConfig::instance().sync();
+        }
+    }
 }
 
 } // namespace ArcMeta

@@ -59,6 +59,17 @@ private slots:
     void onUpClicked();
     void onStatusBarStatsUpdated(int fileCount, int folderCount, int totalCount);
 
+    /**
+     * @brief 2026-07-xx 按照 Plan-68：切换盘符栏显隐
+     */
+    void toggleDriveBar();
+
+    /**
+     * @brief 2026-07-xx 按照 Plan-68：刷新并挂载磁盘数据库
+     */
+    void onDriveButtonClicked(const QString& letter, bool checked);
+    void onDriveContextMenu(const QString& letter, const QPoint& pos);
+
 protected:
     void closeEvent(QCloseEvent* event) override;
 
@@ -83,6 +94,11 @@ private:
     QWidget* m_titleBarWidget = nullptr;
     QHBoxLayout* m_titleBarLayout = nullptr;
     QLabel* m_appNameLabel = nullptr;
+
+    QWidget* m_driveBarWidget = nullptr;
+    QHBoxLayout* m_driveBarLayout = nullptr;
+    QMap<QString, QPushButton*> m_driveButtonMap;
+
     QWidget* m_navBarWidget = nullptr;
     QHBoxLayout* m_navBarLayout = nullptr;
     QVBoxLayout* m_bodyLayout = nullptr; // 2026-05-08 按照用户要求：提升为成员变量以支持动态边距切换
@@ -136,6 +152,7 @@ private:
     QStringList  m_searchHistory;             // 最近 10 条关键词
     
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
+    QPushButton* m_btnToggleDrives = nullptr;
     QPushButton* m_btnSync   = nullptr;
     QPushButton* m_btnCreate = nullptr;
     QPushButton* m_btnPinTop = nullptr;
