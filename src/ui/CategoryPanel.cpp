@@ -800,31 +800,6 @@ void CategoryPanel::initUi() {
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
 
-    // 2026-06-xx 按照用户要求：从状态栏迁移至此，执行手动全量扫描与对账
-    QPushButton* btnRescan = new QPushButton(header);
-    btnRescan->setFixedSize(24, 24); // 适当放大以适应标题栏高度
-    btnRescan->setIcon(UiHelper::getIcon("sync", TextDim)); 
-    btnRescan->setIconSize(QSize(16, 16));
-    btnRescan->setFlat(true);
-    btnRescan->setCursor(Qt::PointingHandCursor);
-    btnRescan->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: #3E3E42; border-radius: 4px; }");
-    btnRescan->setProperty("tooltipText", "手动全量扫描与对账");
-    btnRescan->installEventFilter(this); // 2026-06-xx 按照规范：安装过滤器以驱动自定义 ToolTip
-    connect(btnRescan, &QPushButton::clicked, this, [this]() {
-        // 1. 全量双向分类与项映射物理对账同步
-
-        // 2. 瞬时刷新界面树展示
-        if (m_categoryModel) {
-            m_categoryModel->refresh();
-        }
-
-        // 3. 启动后台文件与分布式 USN 对账扫描
-        (void)QtConcurrent::run([]() {
-            
-        });
-    });
-    headerLayout->addWidget(btnRescan, 0, Qt::AlignVCenter);
-
     m_mainLayout->addWidget(header);
 
     // 2. 内容区包裹容器 (物理还原 8, 8, 0, 8 呼吸边距)
