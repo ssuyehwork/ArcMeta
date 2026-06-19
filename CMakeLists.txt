@@ -46,9 +46,14 @@ set(SOURCES
     src/meta/sqlite3.h
     src/core/CoreController.cpp
     src/core/CoreController.h
+    src/core/AutoImportManager.cpp
+    src/core/AutoImportManager.h
+    src/core/AppConfig.h
     src/core/CacheManager.cpp
     src/core/CacheManager.h
+    src/core/IndexedEntry.cpp
     src/core/IndexedEntry.h
+    src/core/ModelContract.h
     src/mft/UsnWatcher.cpp
     src/mft/UsnWatcher.h
     src/crypto/EncryptionManager.cpp
