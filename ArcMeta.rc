@@ -1,2 +1,5 @@
 IDI_ICON1 ICON "resources/app_icon.ico"
-1 24 "ArcMeta.manifest"
+
+// 2026-06-xx：清单加载已迁移至 CMakeLists.txt 中通过链接器选项 (/MANIFESTUAC) 实现，
+// 以便更稳健地恢复管理员权限并避免 mt.exe 合并冲突。
+// 1 24 "ArcMeta.manifest"
