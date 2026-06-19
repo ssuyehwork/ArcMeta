@@ -212,6 +212,8 @@ void MainWindow::initUi() {
     QByteArray state = AppConfig::instance().getValue("MainWindow/SplitterState").toByteArray();
     if (!state.isEmpty()) {
         m_mainSplitter->restoreState(state);
+        // 2026-07-xx 按照 Plan-63：恢复面板显隐状态 (必须在 restoreState 之后以防布局错乱)
+        loadPanelVisibility();
     } else {
         // 初始默认分配: 230 | 230 | 600 | 230 | 230
         QList<int> sizes;
@@ -1059,6 +1061,20 @@ void MainWindow::setupSplitters() {
     m_mainSplitter->addWidget(m_filterPanel);
     m_mainSplitter->addWidget(m_tagManagerView);
 
+    // 2026-07-xx 按照 Plan-63：对接所有面板容器级的右键菜单请求
+    // 这确保了在标题栏、空白边缘处点击右键也能弹出布局控制菜单
+    auto connectPanelMenu = [&](QWidget* panel) {
+        connect(panel, &QWidget::customContextMenuRequested, this, [this, panel](const QPoint& pos) {
+            showPanelContextMenu(panel->mapToGlobal(pos));
+        });
+    };
+
+    connectPanelMenu(m_categoryPanel);
+    connectPanelMenu(m_navPanel);
+    connectPanelMenu(m_contentPanel);
+    connectPanelMenu(m_metaPanel);
+    connectPanelMenu(m_filterPanel);
+
     // 2026-07-xx 按照用户要求：标签搜索联动
     connect(m_tagManagerView, &TagManagerView::requestSearchTag, this, [this](const QString& tag) {
         // 自动切回正常模式并搜索
@@ -1483,6 +1499,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     // 2026-04-11 按照用户要求：物理保存各容器宽度状态
     if (m_mainSplitter) {
         AppConfig::instance().setValue("MainWindow/SplitterState", m_mainSplitter->saveState());
+        // 2026-07-xx 按照 Plan-63：保存面板显隐状态
+        savePanelVisibility();
     }
     AppConfig::instance().sync();
 
@@ -1490,6 +1508,53 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     CategoryRepo::saveImmediately();
 
     QMainWindow::closeEvent(event);
+}
+
+void MainWindow::showPanelContextMenu(const QPoint& globalPos) {
+    QMenu menu(this);
+    UiHelper::applyMenuStyle(&menu);
+    populatePanelMenu(&menu);
+    menu.exec(globalPos);
+}
+
+void MainWindow::populatePanelMenu(QMenu* menu) {
+    auto addToggleAction = [&](const QString& text, QWidget* panel, bool canHide = true) {
+        QAction* action = menu->addAction(text);
+        action->setCheckable(true);
+        action->setChecked(panel->isVisible());
+        action->setEnabled(canHide);
+        // 使用 Lambda 捕获成员变量，确保连接有效
+        connect(action, &QAction::toggled, panel, [panel](bool visible) {
+            panel->setVisible(visible);
+        });
+    };
+
+    addToggleAction("显示分类栏", m_categoryPanel);
+    addToggleAction("显示目录导航", m_navPanel);
+    addToggleAction("显示内容区", m_contentPanel, false); // 核心区锁定不可隐藏
+    addToggleAction("显示元数据栏", m_metaPanel);
+    addToggleAction("显示筛选栏", m_filterPanel);
+}
+
+void MainWindow::loadPanelVisibility() {
+    QVariant val = AppConfig::instance().getValue("MainWindow/PanelVisibility");
+    if (!val.isValid()) return;
+
+    QStringList hiddenPanels = val.toStringList();
+    if (hiddenPanels.contains("category")) m_categoryPanel->hide();
+    if (hiddenPanels.contains("nav"))      m_navPanel->hide();
+    if (hiddenPanels.contains("meta"))     m_metaPanel->hide();
+    if (hiddenPanels.contains("filter"))   m_filterPanel->hide();
+}
+
+void MainWindow::savePanelVisibility() {
+    QStringList hiddenPanels;
+    if (!m_categoryPanel->isVisible()) hiddenPanels << "category";
+    if (!m_navPanel->isVisible())      hiddenPanels << "nav";
+    if (!m_metaPanel->isVisible())     hiddenPanels << "meta";
+    if (!m_filterPanel->isVisible())   hiddenPanels << "filter";
+    
+    AppConfig::instance().setValue("MainWindow/PanelVisibility", hiddenPanels);
 }
 
 } // namespace ArcMeta

@@ -156,7 +156,8 @@ void ColorBlock::enterEvent(QEnterEvent*) {
     m_hovered = true;
     update();
     QString tip = QString("颜色: %1\n匹配项: %2").arg(m_color.name().toUpper()).arg(m_count);
-    ToolTipOverlay::instance()->showText(QCursor::pos(), tip);
+    // 2026-07-xx 按照 Plan-65：悬停触发，timeout = 0
+    ToolTipOverlay::instance()->showText(QCursor::pos(), tip, 0);
 }
 
 void ColorBlock::leaveEvent(QEvent*) {
@@ -274,6 +275,9 @@ void InlineHueSlider::mouseReleaseEvent(QMouseEvent* event) {
 
 // ─── FilterPanel ──────────────────────────────────────────────────
 FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
+    // 2026-07-xx 按照 Plan-63：启用右键菜单
+    setContextMenuPolicy(Qt::CustomContextMenu);
+
     setObjectName("FilterContainer");
     setAttribute(Qt::WA_StyledBackground, true);
     setMinimumWidth(230);
@@ -428,8 +432,8 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
     if (event->type() == QEvent::HoverEnter) {
         QString text = watched->property("tooltipText").toString();
         if (!text.isEmpty()) {
-            // 物理级别禁绝原生 ToolTip，强制调用 ToolTipOverlay
-            ToolTipOverlay::instance()->showText(QCursor::pos(), text);
+            // 2026-07-xx 按照 Plan-65：悬停触发，timeout = 0
+            ToolTipOverlay::instance()->showText(QCursor::pos(), text, 0);
         }
     } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::MouseButtonPress) {
         ToolTipOverlay::hideTip();

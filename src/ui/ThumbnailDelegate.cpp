@@ -405,8 +405,9 @@ bool ThumbnailDelegate::helpEvent(QHelpEvent* event, QAbstractItemView* view,
     if (statusRect.contains(event->pos())) {
         double p = (m_registrationProgressRole != -1) ? index.data(m_registrationProgressRole).toDouble() : -1.0;
         if (p >= 0.0) {
+            // 2026-07-xx 按照 Plan-65：悬停触发，timeout = 0
             ToolTipOverlay::instance()->showText(event->globalPos(), 
-                QString("登记进度: %1%").arg(qRound(p * 100)));
+                QString("登记进度: %1%").arg(qRound(p * 100)), 0);
             return true;
         }
     }

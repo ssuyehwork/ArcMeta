@@ -171,6 +171,21 @@ private:
     // 2026-04-17 按照用户要求：修复 m_idleTimer 重定义，保留上方唯一成员声明
     void initIdleDetector();
     void initResourceMonitor(); // 2026-06-xx 崩溃监控：初始化资源监控
+
+public slots:
+    /**
+     * @brief 2026-07-xx 按照 Plan-63：显示统一的面板显隐控制菜单
+     */
+    void showPanelContextMenu(const QPoint& globalPos);
+
+    /**
+     * @brief 2026-07-xx 按照 Plan-63：为已有菜单填充面板显隐 Action
+     */
+    void populatePanelMenu(QMenu* menu);
+
+private:
+    void loadPanelVisibility();
+    void savePanelVisibility();
 };
 
 } // namespace ArcMeta
