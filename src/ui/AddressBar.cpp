@@ -1,5 +1,6 @@
 #include "AddressBar.h"
 #include "UiHelper.h"
+#include "ToolTipOverlay.h"
 #include <QHBoxLayout>
 #include <QDir>
 #include <QPushButton>
