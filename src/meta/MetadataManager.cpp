@@ -185,13 +185,6 @@ void MetadataManager::initFromScchMode() {
     notifyUI(RefreshLevel::FullRebuild);
 }
 
-void MetadataManager::loadVolumeNameCache(const std::wstring&) {
-    // 接口已废弃，兼容 Plan-73 重构
-}
-
-void MetadataManager::unloadVolumeNameCache(const std::wstring&) {
-    // 接口已废弃，兼容 Plan-73 重构
-}
 
 
 void MetadataManager::notifyUI(RefreshLevel level, const QString& path) {
