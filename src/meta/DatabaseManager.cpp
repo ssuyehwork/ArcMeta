@@ -337,6 +337,16 @@ bool DatabaseManager::hasDatabase(const std::wstring& volumeSerial) {
     return QFile::exists(dbPath);
 }
 
+void DatabaseManager::unloadDb(const std::wstring& volumeSerial) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_driveDbs.find(volumeSerial);
+    if (it != m_driveDbs.end()) {
+        qDebug() << "[DB] Unloading database for volume:" << QString::fromStdWString(volumeSerial);
+        closeDb(it->second);
+        m_driveDbs.erase(it);
+    }
+}
+
 QString DatabaseManager::getDriveLetter(const std::wstring& volumeSerial) {
     if (volumeSerial.length() == 1) {
         return QString::fromStdWString(volumeSerial).toUpper();

@@ -44,6 +44,7 @@
 #include <QAction>
 #include <QTimer>
 #include <QStyle>
+#include <QFutureWatcher>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
 using namespace ArcMeta::Style;
@@ -1136,8 +1137,9 @@ void MainWindow::setupSplitters() {
     m_driveBarLayout->setSpacing(8);
     m_driveBarWidget->setVisible(false); // 默认折叠
 
-    // 2026-07-xx 按照 Plan-68：初始化磁盘列表与挂载状态
-    QStringList activeDrives = AppConfig::instance().getValue("Drives/ActiveDrives").toStringList();
+    // 2026-07-xx 按照 Plan-73：初始化磁盘列表。
+    // 注意：不再从 ActiveDrives 读取，而是仅将“默认盘”设为初始选中并加载。
+    QStringList defaultDrives = AppConfig::instance().getValue("Drives/DefaultDrives").toStringList();
     QStringList actualActiveDrives;
     
     DWORD driveMask = GetLogicalDrives();
@@ -1171,7 +1173,7 @@ void MainWindow::setupSplitters() {
                         );
                     }
                     
-                    bool isActive = activeDrives.contains(letter) && hasDb;
+                    bool isActive = defaultDrives.contains(letter) && hasDb;
                     btn->setChecked(isActive);
                     m_driveButtonMap[letter] = btn;
                     m_driveBarLayout->addWidget(btn);
@@ -1183,10 +1185,9 @@ void MainWindow::setupSplitters() {
                         onDriveContextMenu(letter, pos);
                     });
 
-                    // 通道 1：启动自动加载
                     if (isActive) {
                         actualActiveDrives << letter;
-                        DatabaseManager::instance().getMemoryDb(volSerial);
+                        // 注意：MetadataManager::initFromScchMode 内部已经根据 DefaultDrives 调用了 loadScopedDb
                     }
                 }
             }
@@ -1671,11 +1672,12 @@ void MainWindow::onDriveButtonClicked(const QString& letter, bool checked) {
     std::wstring volSerial = MetadataManager::getVolumeSerialNumber((letter + "\\").toStdWString());
     if (volSerial.empty()) return;
 
-    bool hasDb = DatabaseManager::instance().hasDatabase(volSerial);
+    QPushButton* btn = m_driveButtonMap[letter];
+    bool hasDb = btn->property("hasDb").toBool();
     if (!hasDb) {
-        m_driveButtonMap[letter]->blockSignals(true);
-        m_driveButtonMap[letter]->setChecked(false);
-        m_driveButtonMap[letter]->blockSignals(false);
+        btn->blockSignals(true);
+        btn->setChecked(false);
+        btn->blockSignals(false);
         FramelessMessageBox::information(this, "提示", "此盘暂无数据入库");
         return;
     }
@@ -1688,29 +1690,57 @@ void MainWindow::onDriveButtonClicked(const QString& letter, bool checked) {
         return active;
     };
 
-    if (checked) {
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
-        if (db) {
-            QStringList active = getActiveDrivesFromUI();
-            MftReader::instance().updateActiveDrives(active);
+    // 物理隔离：禁止卸载最后一个盘符（至少保留一个活跃库）
+    if (!checked && getActiveDrivesFromUI().isEmpty()) {
+        btn->blockSignals(true);
+        btn->setChecked(true);
+        btn->blockSignals(false);
+        return;
+    }
+
+    // 1. 禁用盘符栏，防止并发冲突 (Plan-74)
+    m_driveBarWidget->setEnabled(false);
+    btn->setText("..."); 
+
+    QStringList activeDrives = getActiveDrivesFromUI();
+
+    // 2. 异步执行数据库加载与重计 (Plan-74)
+    QFutureWatcher<void>* watcher = new QFutureWatcher<void>(this);
+    connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher, btn, letter, checked]() {
+        // 回到主线程恢复 UI
+        m_driveBarWidget->setEnabled(true);
+        updateDriveButtonStyles(); // 确保 ★ 标识刷新
+
+        if (checked) {
+            // 检查并启动 MFT 扫描（如果尚未索引）
             if (!MftReader::instance().isDriveIndexed(letter)) {
                 CoreController::instance().startScan(letter); 
             }
         }
-    } else {
-        if (getActiveDrivesFromUI().isEmpty()) {
-            m_driveButtonMap[letter]->blockSignals(true);
-            m_driveButtonMap[letter]->setChecked(true);
-            m_driveButtonMap[letter]->blockSignals(false);
-            return;
-        }
-        MetadataManager::instance().unloadVolumeNameCache(volSerial);
-        MftReader::instance().updateActiveDrives(getActiveDrivesFromUI());
-    }
 
-    AppConfig::instance().setValue("Drives/ActiveDrives", getActiveDrivesFromUI());
+        MetadataManager::instance().notifyFullUIRebuild();
+        watcher->deleteLater();
+    });
+
+    auto future = QtConcurrent::run([volSerial, checked, activeDrives]() {
+        if (checked) {
+            MetadataManager::instance().loadScopedDb(volSerial);
+        } else {
+            MetadataManager::instance().unloadScopedDb(volSerial);
+        }
+        
+        // 同步活跃磁盘到 MFT 阅读器
+        MftReader::instance().updateActiveDrives(activeDrives);
+        
+        // 物理重计：元数据池已变，后台执行账本盘点
+        CategoryRepo::fullRecount();
+    });
+
+    watcher->setFuture(future);
+
+    // 持久化活跃状态
+    AppConfig::instance().setValue("Drives/ActiveDrives", activeDrives);
     AppConfig::instance().sync();
-    MetadataManager::instance().notifyCategoryCountChanged();
 }
 
 void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
@@ -1773,6 +1803,7 @@ void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
                 "QPushButton:checked { background: #094771; color: white; border: 1px solid #3498db; }"
             );
             btn->setChecked(true);
+            m_driveBarWidget->setEnabled(false);
 
             auto getActiveDrivesFromUI = [this]() {
                 QStringList active;
@@ -1782,14 +1813,25 @@ void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
                 return active;
             };
             QStringList active = getActiveDrivesFromUI();
-            MftReader::instance().updateActiveDrives(active);
-            CoreController::instance().startScan(letter);
+
+            QFutureWatcher<void>* watcher = new QFutureWatcher<void>(this);
+            connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher, letter]() {
+                m_driveBarWidget->setEnabled(true);
+                updateDriveButtonStyles();
+                CoreController::instance().startScan(letter);
+                MetadataManager::instance().notifyFullUIRebuild();
+                FramelessMessageBox::information(this, "提示", "此盘已成功加载并开始扫描！");
+                watcher->deleteLater();
+            });
+
+            auto future = QtConcurrent::run([active]() {
+                MftReader::instance().updateActiveDrives(active);
+                CategoryRepo::fullRecount();
+            });
+            watcher->setFuture(future);
 
             AppConfig::instance().setValue("Drives/ActiveDrives", active);
             AppConfig::instance().sync();
-            MetadataManager::instance().notifyCategoryCountChanged();
-
-            FramelessMessageBox::information(this, "提示", "此盘已成功加载并开始扫描！");
         }
     }
 }

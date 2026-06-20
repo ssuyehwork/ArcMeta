@@ -73,6 +73,11 @@ public:
      */
     bool hasDatabase(const std::wstring& volumeSerial);
 
+    /**
+     * @brief 卸载指定磁盘卷的数据库连接 (Plan-73)
+     */
+    void unloadDb(const std::wstring& volumeSerial);
+
 private:
     DatabaseManager(QObject* parent = nullptr);
     ~DatabaseManager();
