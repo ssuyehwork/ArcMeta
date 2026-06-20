@@ -275,9 +275,6 @@ void InlineHueSlider::mouseReleaseEvent(QMouseEvent* event) {
 
 // ─── FilterPanel ──────────────────────────────────────────────────
 FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
-    // 2026-07-xx 按照 Plan-63：启用右键菜单
-    setContextMenuPolicy(Qt::CustomContextMenu);
-
     setObjectName("FilterContainer");
     setAttribute(Qt::WA_StyledBackground, true);
     setMinimumWidth(230);

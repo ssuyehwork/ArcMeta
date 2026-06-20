@@ -36,8 +36,6 @@ NavPanel::NavPanel(QWidget* parent)
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_mainLayout->setSpacing(0);
 
-    // 2026-07-xx 按照 Plan-63：启用右键菜单
-    setContextMenuPolicy(Qt::CustomContextMenu);
     initUi();
 }
 
