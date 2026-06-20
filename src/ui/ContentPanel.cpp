@@ -726,6 +726,8 @@ ContentPanel::ContentPanel(QWidget* parent)
     // 2026-06-05 按照要求：从配置中加载上次保存的缩放比例 
     m_zoomLevel = AppConfig::instance().getValue("UI/GridZoomLevel", 96).toInt(); 
     m_isRecursive = false; 
+    // 2026-07-xx 物理同步：从配置中加载分类递归显示状态
+    m_isCategoryRecursive = AppConfig::instance().getValue("ContentPanel/IsCategoryRecursive", false).toBool();
  
     initUi(); 
     // 2026-05-27 按照用户要求：构造函数末尾强行对齐初始网格尺寸，废除 initGridView 中的旧硬编码值 
@@ -804,16 +806,25 @@ void ContentPanel::initUi() {
     titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #41F2F2; background: transparent; border: none;"); 
      
     m_btnLayersBlue = new QPushButton(titleBar);
+    m_btnLayersBlue->setCheckable(true);
     m_btnLayersBlue->setFixedSize(24, 24);
     m_btnLayersBlue->setIcon(UiHelper::getIcon("layers", QColor("#3498db"), 18));
-    m_btnLayersBlue->setProperty("tooltipText", "TODO");
+    m_btnLayersBlue->setProperty("tooltipText", "显示子分类中的项目");
     m_btnLayersBlue->installEventFilter(this);
     m_btnLayersBlue->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
         "QPushButton:hover { background: #3E3E42; }"
+        "QPushButton:checked { background: #3E3E42; }"
         "QPushButton:pressed { background: #4E4E52; }"
         "QPushButton:disabled { opacity: 0.3; }"
     );
+    connect(m_btnLayersBlue, &QPushButton::clicked, [this]() {
+        m_isCategoryRecursive = m_btnLayersBlue->isChecked();
+        AppConfig::instance().setValue("ContentPanel/IsCategoryRecursive", m_isCategoryRecursive);
+        if (m_currentCategoryId != -1) {
+            loadCategory(m_currentCategoryId);
+        }
+    });
 
     m_btnLayers = new QPushButton(titleBar); 
     m_btnLayers->setCheckable(true); 
@@ -2311,7 +2322,12 @@ void ContentPanel::loadCategory(int categoryId) {
         }
 
         // 2. 加载文件 (SCCH 分离模式)
-        std::vector<CategoryItem> items = CategoryRepo::getItemsInCategory(categoryId);
+        std::vector<CategoryItem> items;
+        if (weakThis->m_isCategoryRecursive) {
+            items = CategoryRepo::getItemsRecursive(categoryId);
+        } else {
+            items = CategoryRepo::getItemsInCategory(categoryId);
+        }
         
         allRecords.reserve(allRecords.size() + items.size());
         for (const auto& item : items) {
@@ -2542,8 +2558,20 @@ void ContentPanel::createNewItem(const QString& type) {
 } 
  
 void ContentPanel::updateLayersButtonState() { 
-    if (!m_btnLayers) return; 
+    if (!m_btnLayers || !m_btnLayersBlue) return;
  
+    // 2026-07-xx 互斥逻辑：分类视图下显示蓝按钮，物理路径下显示绿按钮
+    bool isCategoryMode = (m_currentCategoryType == "user_category");
+    m_btnLayers->setVisible(!isCategoryMode);
+    m_btnLayersBlue->setVisible(isCategoryMode);
+
+    if (isCategoryMode) {
+        m_btnLayersBlue->setEnabled(true);
+        m_btnLayersBlue->setChecked(m_isCategoryRecursive);
+        m_btnLayersBlue->setProperty("tooltipText", "显示子分类中的项目");
+        return;
+    }
+
     if (m_currentPath.isEmpty() || m_currentPath == "computer://") { 
         m_btnLayers->setEnabled(false); 
         m_btnLayers->setChecked(false); 
@@ -2551,7 +2579,7 @@ void ContentPanel::updateLayersButtonState() {
         return; 
     } 
 
-    // 2026-07-xx 逻辑增强：若处于分类/列表模式，禁用递归功能
+    // 2026-07-xx 逻辑增强：若处于搜索或其他路径列表模式，禁用递归功能
     if (!m_currentCategoryType.isEmpty()) {
         m_btnLayers->setEnabled(false);
         m_btnLayers->setChecked(false);
