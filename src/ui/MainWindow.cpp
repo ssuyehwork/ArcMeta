@@ -43,6 +43,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QTimer>
+#include <QStyle>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
 using namespace ArcMeta::Style;
@@ -1188,6 +1189,7 @@ void MainWindow::setupSplitters() {
             }
         }
     }
+    updateDriveButtonStyles();
     m_driveBarLayout->addStretch();
     // 同步一次 MFT 过滤器
     MftReader::instance().updateActiveDrives(actualActiveDrives);
@@ -1528,6 +1530,23 @@ void MainWindow::updateStatusBar() {
     m_statusLeft->setText(QString("%1 个项目").arg(visibleCount));
 }
 
+void MainWindow::updateDriveButtonStyles() {
+    QStringList defaultDrives = AppConfig::instance().getValue("Drives/DefaultDrives").toStringList();
+    for (auto it = m_driveButtonMap.begin(); it != m_driveButtonMap.end(); ++it) {
+        QString letter = it.key();
+        QPushButton* btn = it.value();
+        bool isDefault = defaultDrives.contains(letter);
+
+        // 更新文本：★ + 盘符 (如 ★ C:)
+        btn->setText(QString("%1%2").arg(isDefault ? "★ " : "").arg(letter));
+
+        // 触发属性刷新（用于潜在的 QSS 样式联动）
+        btn->setProperty("isDefault", isDefault);
+        btn->style()->unpolish(btn);
+        btn->style()->polish(btn);
+    }
+}
+
 void MainWindow::onPinToggled(bool checked) {
     // 2026-03-xx 按照用户要求优化置顶逻辑：
     // 避免重复调用导致卡顿，并优化 WinAPI 标志位以减少冗余消息推送
@@ -1694,6 +1713,14 @@ void MainWindow::onDriveButtonClicked(const QString& letter, bool checked) {
 void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
     QMenu menu(this);
     UiHelper::applyMenuStyle(&menu);
+
+    // --- 新增：默认选项控制 ---
+    QStringList defaultDrives = AppConfig::instance().getValue("Drives/DefaultDrives").toStringList();
+    bool isDefault = defaultDrives.contains(letter);
+    QAction* defaultAct = menu.addAction(isDefault ? "取消默认选项" : "设为默认选项");
+    menu.addSeparator();
+    // ------------------------
+
     QAction* setFolderAct = menu.addAction(UiHelper::getIcon("folder_filled", QColor("#EEEEEE")), "设置托管文件夹...");
     
     std::wstring volSerial = MetadataManager::getVolumeSerialNumber((letter + "\\").toStdWString());
@@ -1704,7 +1731,14 @@ void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
     }
     
     QAction* chosen = menu.exec(m_driveButtonMap[letter]->mapToGlobal(pos));
-    if (chosen == setFolderAct) {
+    if (chosen == defaultAct) {
+        if (isDefault) defaultDrives.removeAll(letter);
+        else if (!defaultDrives.contains(letter)) defaultDrives.append(letter);
+
+        AppConfig::instance().setValue("Drives/DefaultDrives", defaultDrives);
+        AppConfig::instance().sync();
+        updateDriveButtonStyles();
+    } else if (chosen == setFolderAct) {
         // 1. 直接调起无边框文件夹选择静态方法
         QString selectedDir = FramelessFileDialog::getExistingDirectory(
             this, 

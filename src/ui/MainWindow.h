@@ -106,6 +106,7 @@ private:
     void initUi();
     void updateNavButtons();
     void updateStatusBar();
+    void updateDriveButtonStyles();
 
     // 2026-07-xx 导航协议常量
     static inline const QString kProtocolFile     = "file://";
