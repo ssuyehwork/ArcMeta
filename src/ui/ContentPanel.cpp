@@ -811,6 +811,7 @@ void ContentPanel::initUi() {
     m_btnLayersBlue->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
         "QPushButton:hover { background: #3E3E42; }"
+        "QPushButton:pressed { background: #4E4E52; }"
         "QPushButton:disabled { opacity: 0.3; }"
     );
 
@@ -824,7 +825,8 @@ void ContentPanel::initUi() {
     m_btnLayers->setStyleSheet( 
         "QPushButton { background: transparent; border: none; border-radius: 4px; }" 
         "QPushButton:hover { background: #3E3E42; }" 
-        "QPushButton:checked { background: rgba(52, 152, 219, 0.2); border: 1px solid #3498db; }" 
+        "QPushButton:checked { background: #3E3E42; }"
+        "QPushButton:pressed { background: #4E4E52; }"
         "QPushButton:disabled { opacity: 0.3; }" 
     ); 
     connect(m_btnLayers, &QPushButton::clicked, [this]() { 
@@ -964,7 +966,8 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
     if (event->type() == QEvent::HoverEnter || event->type() == QEvent::Enter) { 
         QString text = obj->property("tooltipText").toString(); 
         if (!text.isEmpty()) { 
-            ToolTipOverlay::instance()->showText(QCursor::pos(), text); 
+            int timeout = (obj == m_btnLayers || obj == m_btnLayersBlue) ? 0 : 700;
+            ToolTipOverlay::instance()->showText(QCursor::pos(), text, timeout);
         } 
     } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::Leave || event->type() == QEvent::MouseButtonPress) { 
         ToolTipOverlay::hideTip(); 
@@ -2188,6 +2191,7 @@ void ContentPanel::search(const QString& query) {
     // 2026-07-xx 按照 Plan-57：ContentPanel::search 仅作为搜索发起的代理。
     // 实际结果处理已在 MainWindow 中通过 CoreController 的信号进行流式对接。
     m_currentCategoryType = "search";
+    updateLayersButtonState();
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -2281,6 +2285,7 @@ void ContentPanel::loadCategory(int categoryId) {
     int reqId = ++m_loadRequestId;
     m_currentCategoryType = "user_category";
     m_currentCategoryId = categoryId;
+    updateLayersButtonState();
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
@@ -2374,6 +2379,7 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
         m_currentCategoryType != "all") {
         m_currentCategoryType = "path_list";
     }
+    updateLayersButtonState();
     
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
@@ -2544,6 +2550,14 @@ void ContentPanel::updateLayersButtonState() {
         m_btnLayers->setProperty("tooltipText", "“此电脑”不支持递归显示"); 
         return; 
     } 
+
+    // 2026-07-xx 逻辑增强：若处于分类/列表模式，禁用递归功能
+    if (!m_currentCategoryType.isEmpty()) {
+        m_btnLayers->setEnabled(false);
+        m_btnLayers->setChecked(false);
+        m_btnLayers->setProperty("tooltipText", "当前视图不支持递归显示");
+        return;
+    }
  
     m_btnLayers->setEnabled(true); 
     m_btnLayers->setProperty("tooltipText", "显示子文件夹中的项目"); 
