@@ -102,8 +102,7 @@ struct FilterState {
                minSize == -1 && maxSize == -1 &&
                colorFilterText.trimmed().isEmpty() && tagFilterText.trimmed().isEmpty() &&
                typeFilterText.trimmed().isEmpty() && createDateFilterText.trimmed().isEmpty() &&
-               modifyDateFilterText.trimmed().isEmpty() &&
-               showFolders == true && showFiles == true;
+               modifyDateFilterText.trimmed().isEmpty();
     }
 };
 
