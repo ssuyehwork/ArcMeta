@@ -669,7 +669,19 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
 } 
  
 bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelIndex& source_right) const { 
-    // 2026-06-xx 工业级纠偏：置顶优先规则 (物理排序第一权重)
+    // 2026-07-xx 物理强制：文件夹与子分类始终置顶 (绝对第一权重)
+    QString leftType = source_left.data(TypeRole).toString();
+    QString rightType = source_right.data(TypeRole).toString();
+    bool leftIsDir = (leftType == "folder" || leftType == "category");
+    bool rightIsDir = (rightType == "folder" || rightType == "category");
+
+    if (leftIsDir != rightIsDir) {
+        // 文件夹 vs 文件：文件夹永远被视为“更小”（在升序中排在前）
+        if (sortOrder() == Qt::AscendingOrder) return leftIsDir;
+        else return !leftIsDir;
+    }
+
+    // 2026-06-xx 工业级纠偏：置顶优先规则 (物理排序第二权重)
     // 必须确保 PinnedRole 或 IsLockedRole 的判定逻辑在排序中具有绝对优先级
     QVariant leftPinnedVar = source_left.data(PinnedRole);
     if (!leftPinnedVar.isValid()) leftPinnedVar = source_left.data(IsLockedRole);
@@ -814,7 +826,7 @@ void ContentPanel::initUi() {
     m_btnLayersBlue->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
         "QPushButton:hover { background: #3E3E42; }"
-        "QPushButton:checked { background: #3E3E42; }"
+        "QPushButton:checked { background: #4E4E52; }"
         "QPushButton:pressed { background: #4E4E52; }"
         "QPushButton:disabled { opacity: 0.3; }"
     );
@@ -836,7 +848,7 @@ void ContentPanel::initUi() {
     m_btnLayers->setStyleSheet( 
         "QPushButton { background: transparent; border: none; border-radius: 4px; }" 
         "QPushButton:hover { background: #3E3E42; }" 
-        "QPushButton:checked { background: #3E3E42; }"
+        "QPushButton:checked { background: #4E4E52; }"
         "QPushButton:pressed { background: #4E4E52; }"
         "QPushButton:disabled { opacity: 0.3; }" 
     ); 
