@@ -1,4 +1,5 @@
 #include "CoreController.h"
+#include "../mft/MftReader.h"
 #include "AutoImportManager.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
