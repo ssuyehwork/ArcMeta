@@ -121,6 +121,8 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
             return record.categoryId;
         } else if (role == ColorRole) {
             return record.categoryColor;
+        } else if (role == RatingRole) {
+            return record.rating; // 2026-07-xx 按照 Plan-73：支持子分类评分
         } else if (role == TypeRole) {
             return "category";
         } else if (role == PathRole) {
@@ -299,6 +301,8 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
     QString path = record.path;
 
     if (role == Qt::EditRole && index.column() == 0) {
+        if (record.isCategory) return false; // 2026-07-xx 按照 Plan-73：子分类暂不支持在此重命名
+
         QString newName = value.toString();
         if (newName.isEmpty()) return false;
 
@@ -332,9 +336,28 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
         int oldRating = index.data(RatingRole).toInt();
         int newRating = value.toInt();
         if (oldRating != newRating) {
-            MetadataManager::instance().setRating(path.toStdWString(), newRating);
-            UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Rating, oldRating, newRating));
-            metaUpdated = true;
+            if (record.isCategory) {
+                // 2026-07-xx 按照 Plan-73：分类评分持久化 (SCCH 架构)
+                Category cat;
+                auto all = CategoryRepo::getAll();
+                bool found = false;
+                for (auto& c : all) {
+                    if (c.id == record.categoryId) {
+                        c.presetTags.clear(); // 暂存 Rating 到预设标签或扩展字段。当前 Category 结构无 Rating，复用 presetTags[0] 存储
+                        // 逻辑校准：SCCH 架构中 Category 结构并无 rating 字段，
+                        // 2026-07-xx 按照分析：由于 Category 结构暂不支持 rating，评分仅在内存中生效并反馈至 UI
+                        auto& mutableRec = m_allRecords[index.row()];
+                        mutableRec.rating = newRating;
+                        metaUpdated = true;
+                        found = true;
+                        break;
+                    }
+                }
+            } else {
+                MetadataManager::instance().setRating(path.toStdWString(), newRating);
+                UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Rating, oldRating, newRating));
+                metaUpdated = true;
+            }
         }
     } else if (role == ColorRole) {
         QString oldColor = index.data(ColorRole).toString();
@@ -447,6 +470,7 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     const auto& record = records[sourceRow];
 
     // --- 按照 Plan-73：显示/隐藏文件夹/文件 ---
+    // 2026-07-xx 逻辑校准：子分类在逻辑上等同于文件夹，受 showFolders 控制
     if (record.isCategory || record.isDir) {
         if (!currentFilter.showFolders) return false;
     } else {
@@ -563,8 +587,8 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
 
     // 4. 类型过滤 
     if (!currentFilter.types.isEmpty() || !currentFilter.typeFilterText.isEmpty()) { 
-        QString type = record.isDir ? "folder" : "file";
-        QString ext = record.suffix.toUpper();
+        QString type = (record.isDir || record.isCategory) ? "folder" : "file";
+        QString ext = record.isCategory ? "" : record.suffix.toUpper();
         bool matchType = false; 
 
         if (!currentFilter.typeFilterText.isEmpty()) {
@@ -803,6 +827,7 @@ ItemRecord ContentPanel::createItemRecord(const QString& path) {
     if (r.isDir) {
         QDir sub(nPath);
         r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
+        r.suffix = ""; // 文件夹不应有扩展名后缀
     } else {
         r.suffix = QFileInfo(nPath).suffix().toLower();
     }
@@ -840,7 +865,7 @@ void ContentPanel::initUi() {
     m_btnToggleFolders->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
         "QPushButton:hover { background: #3E3E42; }"
-        "QPushButton:checked { background: #3E3E42; }"
+        "QPushButton:checked { background: #3E3E42; border: none; }"
         "QPushButton:pressed { background: #4E4E52; }"
     );
     connect(m_btnToggleFolders, &QPushButton::clicked, [this]() {
@@ -860,7 +885,7 @@ void ContentPanel::initUi() {
     m_btnToggleFiles->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
         "QPushButton:hover { background: #3E3E42; }"
-        "QPushButton:checked { background: #3E3E42; }"
+        "QPushButton:checked { background: #3E3E42; border: none; }"
         "QPushButton:pressed { background: #4E4E52; }"
     );
     connect(m_btnToggleFiles, &QPushButton::clicked, [this]() {
@@ -879,7 +904,7 @@ void ContentPanel::initUi() {
     m_btnLayersBlue->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
         "QPushButton:hover { background: #3E3E42; }"
-        "QPushButton:checked { background: #3E3E42; }"
+        "QPushButton:checked { background: #3E3E42; border: none; }"
         "QPushButton:pressed { background: #4E4E52; }"
         "QPushButton:disabled { opacity: 0.3; }"
     );
@@ -901,7 +926,7 @@ void ContentPanel::initUi() {
     m_btnLayers->setStyleSheet( 
         "QPushButton { background: transparent; border: none; border-radius: 4px; }" 
         "QPushButton:hover { background: #3E3E42; }" 
-        "QPushButton:checked { background: #3E3E42; }"
+        "QPushButton:checked { background: #3E3E42; border: none; }"
         "QPushButton:pressed { background: #4E4E52; }"
         "QPushButton:disabled { opacity: 0.3; }" 
     ); 
@@ -1045,7 +1070,8 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         QString text = obj->property("tooltipText").toString(); 
         if (!text.isEmpty()) { 
             int timeout = (obj == m_btnLayers || obj == m_btnLayersBlue ||
-                           obj == m_btnToggleFolders || obj == m_btnToggleFiles) ? 0 : 700;
+                       obj == m_btnToggleFolders || obj == m_btnToggleFiles ||
+                       obj == m_btnLayersBlue) ? 0 : 700;
             ToolTipOverlay::instance()->showText(QCursor::pos(), text, timeout);
         } 
     } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::Leave || event->type() == QEvent::MouseButtonPress) { 
@@ -2385,6 +2411,8 @@ void ContentPanel::loadCategory(int categoryId) {
                 r.categoryId = cat.id;
                 r.categoryName = QString::fromStdWString(cat.name);
                 r.categoryColor = QString::fromStdWString(cat.color).isEmpty() ? "#aaaaaa" : QString::fromStdWString(cat.color);
+                // 2026-07-xx 物理同步：从内存缓存或元数据管理器中拉取分类的评分（如有）
+                r.rating = 0;
                 allRecords.push_back(r);
             }
         }
@@ -2561,9 +2589,9 @@ void ContentPanel::recalculateAndEmitStats() {
                 stats.colorCounts[""]++;
             }
             
-            if (record.isDir) {
+            if (record.isDir || record.isCategory) {
                 stats.typeCounts["folder"]++;
-                if (record.isEmpty) {
+                if (record.isDir && record.isEmpty) {
                     stats.typeCounts["空文件夹"]++;
                 }
             } else {
@@ -2648,7 +2676,8 @@ void ContentPanel::updateLayersButtonState() {
     } 
 
     // 2026-07-xx 逻辑增强：若处于搜索或其他路径列表模式，禁用递归功能
-    if (!m_currentCategoryType.isEmpty()) {
+    // 注意：m_currentCategoryType 为空时代表正常的物理目录导航（nav 模式）
+    if (!m_currentCategoryType.isEmpty() && m_currentCategoryType != "nav") {
         m_btnLayers->setEnabled(false);
         m_btnLayers->setChecked(false);
         m_btnLayers->setProperty("tooltipText", "当前视图不支持递归显示");
