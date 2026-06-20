@@ -1136,8 +1136,9 @@ void MainWindow::setupSplitters() {
     m_driveBarLayout->setSpacing(8);
     m_driveBarWidget->setVisible(false); // 默认折叠
 
-    // 2026-07-xx 按照 Plan-68：初始化磁盘列表与挂载状态
-    QStringList activeDrives = AppConfig::instance().getValue("Drives/ActiveDrives").toStringList();
+    // 2026-07-xx 按照 Plan-73：初始化磁盘列表。
+    // 注意：不再从 ActiveDrives 读取，而是仅将“默认盘”设为初始选中并加载。
+    QStringList defaultDrives = AppConfig::instance().getValue("Drives/DefaultDrives").toStringList();
     QStringList actualActiveDrives;
     
     DWORD driveMask = GetLogicalDrives();
@@ -1171,7 +1172,7 @@ void MainWindow::setupSplitters() {
                         );
                     }
                     
-                    bool isActive = activeDrives.contains(letter) && hasDb;
+                    bool isActive = defaultDrives.contains(letter) && hasDb;
                     btn->setChecked(isActive);
                     m_driveButtonMap[letter] = btn;
                     m_driveBarLayout->addWidget(btn);
@@ -1183,10 +1184,9 @@ void MainWindow::setupSplitters() {
                         onDriveContextMenu(letter, pos);
                     });
 
-                    // 通道 1：启动自动加载
                     if (isActive) {
                         actualActiveDrives << letter;
-                        DatabaseManager::instance().getMemoryDb(volSerial);
+                        // 注意：MetadataManager::initFromScchMode 内部已经根据 DefaultDrives 调用了 loadScopedDb
                     }
                 }
             }
@@ -1689,28 +1689,36 @@ void MainWindow::onDriveButtonClicked(const QString& letter, bool checked) {
     };
 
     if (checked) {
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
-        if (db) {
-            QStringList active = getActiveDrivesFromUI();
-            MftReader::instance().updateActiveDrives(active);
-            if (!MftReader::instance().isDriveIndexed(letter)) {
-                CoreController::instance().startScan(letter); 
-            }
+        // 1. 物理加载数据库元数据 (Plan-73)
+        MetadataManager::instance().loadScopedDb(volSerial);
+
+        QStringList active = getActiveDrivesFromUI();
+        MftReader::instance().updateActiveDrives(active);
+
+        // 2. 检查并启动 MFT 扫描（如果尚未索引）
+        if (!MftReader::instance().isDriveIndexed(letter)) {
+            CoreController::instance().startScan(letter);
         }
     } else {
+        // 物理隔离：禁止卸载最后一个盘符（至少保留一个活跃库）
         if (getActiveDrivesFromUI().isEmpty()) {
             m_driveButtonMap[letter]->blockSignals(true);
             m_driveButtonMap[letter]->setChecked(true);
             m_driveButtonMap[letter]->blockSignals(false);
             return;
         }
-        MetadataManager::instance().unloadVolumeNameCache(volSerial);
+
+        // 3. 物理卸载数据库及内存缓存 (Plan-73)
+        MetadataManager::instance().unloadScopedDb(volSerial);
         MftReader::instance().updateActiveDrives(getActiveDrivesFromUI());
     }
 
+    // 4. 持久化活跃状态并强制侧边栏重计
     AppConfig::instance().setValue("Drives/ActiveDrives", getActiveDrivesFromUI());
     AppConfig::instance().sync();
-    MetadataManager::instance().notifyCategoryCountChanged();
+
+    CategoryRepo::fullRecount(); // 物理重计：元数据池已变，必须重计
+    MetadataManager::instance().notifyFullUIRebuild();
 }
 
 void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
@@ -1787,7 +1795,9 @@ void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
 
             AppConfig::instance().setValue("Drives/ActiveDrives", active);
             AppConfig::instance().sync();
-            MetadataManager::instance().notifyCategoryCountChanged();
+
+            CategoryRepo::fullRecount();
+            MetadataManager::instance().notifyFullUIRebuild();
 
             FramelessMessageBox::information(this, "提示", "此盘已成功加载并开始扫描！");
         }

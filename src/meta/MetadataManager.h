@@ -208,14 +208,14 @@ public:
     std::wstring getVolumeFromFid(const std::string& fid);
 
     /**
-     * @brief 卸载指定卷的名称/后缀索引映射（驱动器拔出时）
+     * @brief 卸载指定卷的元数据及索引映射 (Plan-73)
      */
-    void unloadVolumeNameCache(const std::wstring& volSerial);
+    void unloadScopedDb(const std::wstring& volSerial);
 
     /**
-     * @brief 加载指定卷的名称/后缀索引映射（驱动器插入或初始化时）
+     * @brief 加载指定卷的数据库元数据到内存 (Plan-73)
      */
-    void loadVolumeNameCache(const std::wstring& volSerial);
+    void loadScopedDb(const std::wstring& volSerial);
 
     /**
      * @brief 隔离查询 API
