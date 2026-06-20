@@ -446,6 +446,13 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     if (sourceRow < 0 || sourceRow >= (int)records.size()) return false;
     const auto& record = records[sourceRow];
 
+    // --- 按照 Plan-73：显示/隐藏文件夹/文件 ---
+    if (record.isCategory || record.isDir) {
+        if (!currentFilter.showFolders) return false;
+    } else {
+        if (!currentFilter.showFiles) return false;
+    }
+
     // 1. 评级过滤 
     if (!currentFilter.ratings.isEmpty()) { 
         int r = record.rating; // 直接从烘焙好的 record 获取，消除 idx.data 虚拟调用开销
@@ -740,6 +747,12 @@ ContentPanel::ContentPanel(QWidget* parent)
     m_isRecursive = false; 
     // 2026-07-xx 物理同步：从配置中加载分类递归显示状态
     m_isCategoryRecursive = AppConfig::instance().getValue("ContentPanel/IsCategoryRecursive", false).toBool();
+    m_showFolders = AppConfig::instance().getValue("ContentPanel/ShowFolders", true).toBool();
+    m_showFiles = AppConfig::instance().getValue("ContentPanel/ShowFiles", true).toBool();
+
+    // 同步到当前 FilterState
+    m_currentFilter.showFolders = m_showFolders;
+    m_currentFilter.showFiles = m_showFiles;
  
     initUi(); 
     // 2026-05-27 按照用户要求：构造函数末尾强行对齐初始网格尺寸，废除 initGridView 中的旧硬编码值 
@@ -817,6 +830,46 @@ void ContentPanel::initUi() {
     QLabel* titleLabel = new QLabel("内容", titleBar); 
     titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #41F2F2; background: transparent; border: none;"); 
      
+    m_btnToggleFolders = new QPushButton(titleBar);
+    m_btnToggleFolders->setCheckable(true);
+    m_btnToggleFolders->setFixedSize(24, 24);
+    m_btnToggleFolders->setIcon(UiHelper::getIcon("folder_filled", QColor("#EEEEEE"), 16));
+    m_btnToggleFolders->setProperty("tooltipText", "显示/隐藏文件夹");
+    m_btnToggleFolders->setChecked(m_showFolders);
+    m_btnToggleFolders->installEventFilter(this);
+    m_btnToggleFolders->setStyleSheet(
+        "QPushButton { background: transparent; border: none; border-radius: 4px; }"
+        "QPushButton:hover { background: #3E3E42; }"
+        "QPushButton:checked { background: #3E3E42; }"
+        "QPushButton:pressed { background: #4E4E52; }"
+    );
+    connect(m_btnToggleFolders, &QPushButton::clicked, [this]() {
+        m_showFolders = m_btnToggleFolders->isChecked();
+        AppConfig::instance().setValue("ContentPanel/ShowFolders", m_showFolders);
+        m_currentFilter.showFolders = m_showFolders;
+        applyFilters();
+    });
+
+    m_btnToggleFiles = new QPushButton(titleBar);
+    m_btnToggleFiles->setCheckable(true);
+    m_btnToggleFiles->setFixedSize(24, 24);
+    m_btnToggleFiles->setIcon(UiHelper::getIcon("file_filled", QColor("#EEEEEE"), 16));
+    m_btnToggleFiles->setProperty("tooltipText", "显示/隐藏文件");
+    m_btnToggleFiles->setChecked(m_showFiles);
+    m_btnToggleFiles->installEventFilter(this);
+    m_btnToggleFiles->setStyleSheet(
+        "QPushButton { background: transparent; border: none; border-radius: 4px; }"
+        "QPushButton:hover { background: #3E3E42; }"
+        "QPushButton:checked { background: #3E3E42; }"
+        "QPushButton:pressed { background: #4E4E52; }"
+    );
+    connect(m_btnToggleFiles, &QPushButton::clicked, [this]() {
+        m_showFiles = m_btnToggleFiles->isChecked();
+        AppConfig::instance().setValue("ContentPanel/ShowFiles", m_showFiles);
+        m_currentFilter.showFiles = m_showFiles;
+        applyFilters();
+    });
+
     m_btnLayersBlue = new QPushButton(titleBar);
     m_btnLayersBlue->setCheckable(true);
     m_btnLayersBlue->setFixedSize(24, 24);
@@ -826,7 +879,7 @@ void ContentPanel::initUi() {
     m_btnLayersBlue->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
         "QPushButton:hover { background: #3E3E42; }"
-        "QPushButton:checked { background: #4E4E52; }"
+        "QPushButton:checked { background: #3E3E42; }"
         "QPushButton:pressed { background: #4E4E52; }"
         "QPushButton:disabled { opacity: 0.3; }"
     );
@@ -848,7 +901,7 @@ void ContentPanel::initUi() {
     m_btnLayers->setStyleSheet( 
         "QPushButton { background: transparent; border: none; border-radius: 4px; }" 
         "QPushButton:hover { background: #3E3E42; }" 
-        "QPushButton:checked { background: #4E4E52; }"
+        "QPushButton:checked { background: #3E3E42; }"
         "QPushButton:pressed { background: #4E4E52; }"
         "QPushButton:disabled { opacity: 0.3; }" 
     ); 
@@ -875,6 +928,8 @@ void ContentPanel::initUi() {
  
     titleL->addWidget(titleLabel); 
     titleL->addStretch(); 
+    titleL->addWidget(m_btnToggleFolders, 0, Qt::AlignVCenter);
+    titleL->addWidget(m_btnToggleFiles, 0, Qt::AlignVCenter);
     titleL->addWidget(m_btnLayersBlue, 0, Qt::AlignVCenter);
     titleL->addWidget(m_btnLayers, 0, Qt::AlignVCenter); 
  
@@ -989,7 +1044,8 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
     if (event->type() == QEvent::HoverEnter || event->type() == QEvent::Enter) { 
         QString text = obj->property("tooltipText").toString(); 
         if (!text.isEmpty()) { 
-            int timeout = (obj == m_btnLayers || obj == m_btnLayersBlue) ? 0 : 700;
+            int timeout = (obj == m_btnLayers || obj == m_btnLayersBlue ||
+                           obj == m_btnToggleFolders || obj == m_btnToggleFiles) ? 0 : 700;
             ToolTipOverlay::instance()->showText(QCursor::pos(), text, timeout);
         } 
     } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::Leave || event->type() == QEvent::MouseButtonPress) { 
