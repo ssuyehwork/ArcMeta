@@ -42,11 +42,6 @@ public:
      */
     void abortSearch();
 
-    /**
-     * @brief 2026-07-xx 按照 Plan-68：启动指定驱动器的 MFT 扫描与索引构建
-     */
-    void startScan(const QString& drive);
-
 signals:
     /**
      * @brief 搜索结果流式返回

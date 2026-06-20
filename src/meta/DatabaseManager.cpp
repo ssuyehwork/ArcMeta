@@ -1,6 +1,5 @@
 #include "DatabaseManager.h"
 #include <QDir>
-#include <QFile>
 #include <QCoreApplication>
 #include <QDebug>
 #include <windows.h>
@@ -317,7 +316,7 @@ void DatabaseManager::shutdown() {
 sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial) {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_driveDbs.find(volumeSerial) == m_driveDbs.end()) {
-        QString dbPath = getDbPath(volumeSerial);
+        QString dbPath = getAppDir() + "/.arcmeta/Arcmeta_" + QString::fromStdWString(volumeSerial) + ".db";
         DbConnection conn;
         if (loadDb(dbPath.toStdWString(), conn)) {
             m_driveDbs[volumeSerial] = conn;
@@ -330,56 +329,6 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial) {
 
 sqlite3* DatabaseManager::getGlobalDb() {
     return m_globalDb.memDb;
-}
-
-bool DatabaseManager::hasDatabase(const std::wstring& volumeSerial) {
-    QString dbPath = getDbPath(volumeSerial);
-    return QFile::exists(dbPath);
-}
-
-void DatabaseManager::unloadDb(const std::wstring& volumeSerial) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_driveDbs.find(volumeSerial);
-    if (it != m_driveDbs.end()) {
-        qDebug() << "[DB] Unloading database for volume:" << QString::fromStdWString(volumeSerial);
-        closeDb(it->second);
-        m_driveDbs.erase(it);
-    }
-}
-
-QString DatabaseManager::getDriveLetter(const std::wstring& volumeSerial) {
-    if (volumeSerial.length() == 1) {
-        return QString::fromStdWString(volumeSerial).toUpper();
-    }
-    
-    DWORD driveMask = GetLogicalDrives();
-    for (int i = 0; i < 26; ++i) {
-        if (driveMask & (1 << i)) {
-            QString letter = QString(QChar('A' + i));
-            QString driveRoot = letter + ":\\";
-            std::wstring serial = MetadataManager::getVolumeSerialNumber(driveRoot.toStdWString());
-            if (serial == volumeSerial) {
-                return letter;
-            }
-        }
-    }
-    return "";
-}
-
-QString DatabaseManager::getDbPath(const std::wstring& volumeSerial) {
-    QString letter = getDriveLetter(volumeSerial);
-    QString baseDir = getAppDir() + "/.arcmeta/";
-    QString serialStr = QString::fromStdWString(volumeSerial);
-    if (!letter.isEmpty()) {
-        QString newPath = baseDir + "Arcmeta_" + serialStr + "_" + letter + ".db";
-        QString oldPath = baseDir + "Arcmeta_" + serialStr + ".db";
-        if (!QFile::exists(newPath) && QFile::exists(oldPath)) {
-            QFile::rename(oldPath, newPath);
-            qDebug() << "[DB] Migrated database file from" << oldPath << "to" << newPath;
-        }
-        return newPath;
-    }
-    return baseDir + "Arcmeta_" + serialStr + ".db";
 }
 
 } // namespace ArcMeta

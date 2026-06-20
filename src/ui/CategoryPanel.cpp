@@ -50,6 +50,9 @@ static std::wstring getDefaultCategoryColor() {
 
 CategoryPanel::CategoryPanel(QWidget* parent)
     : QFrame(parent) {
+    // 2026-07-xx 按照 Plan-63：启用右键菜单策略（容器级）
+    setContextMenuPolicy(Qt::CustomContextMenu);
+
     setObjectName("SidebarContainer");
     setAttribute(Qt::WA_StyledBackground, true);
     setMinimumWidth(230);

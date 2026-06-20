@@ -68,16 +68,6 @@ public:
      */
     sqlite3* getGlobalDb();
 
-    /**
-     * @brief 判断物理磁盘对应的数据库文件是否存在
-     */
-    bool hasDatabase(const std::wstring& volumeSerial);
-
-    /**
-     * @brief 卸载指定磁盘卷的数据库连接 (Plan-73)
-     */
-    void unloadDb(const std::wstring& volumeSerial);
-
 private:
     DatabaseManager(QObject* parent = nullptr);
     ~DatabaseManager();
@@ -99,8 +89,6 @@ private:
 
     QString getAppDir();
     void ensureHidden(const std::wstring& path);
-    QString getDriveLetter(const std::wstring& volumeSerial);
-    QString getDbPath(const std::wstring& volumeSerial);
 };
 
 } // namespace ArcMeta
