@@ -858,9 +858,9 @@ void ContentPanel::initUi() {
     m_btnToggleFolders = new QPushButton(titleBar);
     m_btnToggleFolders->setCheckable(true);
     m_btnToggleFolders->setFixedSize(24, 24);
-    m_btnToggleFolders->setIcon(UiHelper::getIcon("folder_filled", QColor("#EEEEEE"), 16));
-    m_btnToggleFolders->setProperty("tooltipText", "显示/隐藏文件夹");
     m_btnToggleFolders->setChecked(m_showFolders);
+    m_btnToggleFolders->setIcon(UiHelper::getIcon("folder_filled", m_showFolders ? QColor("#FDB70A") : QColor("#B0B0B0"), 16));
+    m_btnToggleFolders->setProperty("tooltipText", "显示/隐藏文件夹");
     m_btnToggleFolders->installEventFilter(this);
     m_btnToggleFolders->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
@@ -870,6 +870,7 @@ void ContentPanel::initUi() {
     );
     connect(m_btnToggleFolders, &QPushButton::clicked, [this]() {
         m_showFolders = m_btnToggleFolders->isChecked();
+        m_btnToggleFolders->setIcon(UiHelper::getIcon("folder_filled", m_showFolders ? QColor("#FDB70A") : QColor("#B0B0B0"), 16));
         AppConfig::instance().setValue("ContentPanel/ShowFolders", m_showFolders);
         m_currentFilter.showFolders = m_showFolders;
         applyFilters();
@@ -878,9 +879,9 @@ void ContentPanel::initUi() {
     m_btnToggleFiles = new QPushButton(titleBar);
     m_btnToggleFiles->setCheckable(true);
     m_btnToggleFiles->setFixedSize(24, 24);
-    m_btnToggleFiles->setIcon(UiHelper::getIcon("file_filled", QColor("#EEEEEE"), 16));
-    m_btnToggleFiles->setProperty("tooltipText", "显示/隐藏文件");
     m_btnToggleFiles->setChecked(m_showFiles);
+    m_btnToggleFiles->setIcon(UiHelper::getIcon("file", m_showFiles ? QColor("#2ecc71") : QColor("#B0B0B0"), 16));
+    m_btnToggleFiles->setProperty("tooltipText", "显示/隐藏文件");
     m_btnToggleFiles->installEventFilter(this);
     m_btnToggleFiles->setStyleSheet(
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
@@ -890,6 +891,7 @@ void ContentPanel::initUi() {
     );
     connect(m_btnToggleFiles, &QPushButton::clicked, [this]() {
         m_showFiles = m_btnToggleFiles->isChecked();
+        m_btnToggleFiles->setIcon(UiHelper::getIcon("file", m_showFiles ? QColor("#2ecc71") : QColor("#B0B0B0"), 16));
         AppConfig::instance().setValue("ContentPanel/ShowFiles", m_showFiles);
         m_currentFilter.showFiles = m_showFiles;
         applyFilters();
