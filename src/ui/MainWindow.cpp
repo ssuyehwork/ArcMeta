@@ -52,6 +52,7 @@ using namespace ArcMeta::Style;
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
 #include "FramelessFileDialog.h"
+#include "FramelessDialog.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -1133,6 +1134,7 @@ void MainWindow::setupSplitters() {
 
     // 2026-07-xx 按照 Plan-68：初始化磁盘列表与挂载状态
     QStringList activeDrives = AppConfig::instance().getValue("Drives/ActiveDrives").toStringList();
+    QStringList actualActiveDrives;
     
     DWORD driveMask = GetLogicalDrives();
     for (int i = 0; i < 26; ++i) {
@@ -1142,17 +1144,30 @@ void MainWindow::setupSplitters() {
             QString driveRoot = letter + "\\";
             if (GetVolumeInformationW((LPCWSTR)driveRoot.utf16(), NULL, 0, NULL, NULL, NULL, fsName, MAX_PATH + 1)) {
                 if (QString::fromWCharArray(fsName).contains("NTFS", Qt::CaseInsensitive)) {
+                    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(driveRoot.toStdWString());
+                    bool hasDb = DatabaseManager::instance().hasDatabase(volSerial);
+
                     QPushButton* btn = new QPushButton(letter, m_driveBarWidget);
                     btn->setCheckable(true);
                     btn->setFixedSize(60, 28);
                     btn->setContextMenuPolicy(Qt::CustomContextMenu);
-                    btn->setStyleSheet(
-                        "QPushButton { background: #333333; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; font-size: 11px; }"
-                        "QPushButton:hover { background: #3E3E42; border: 1px solid #555555; }"
-                        "QPushButton:checked { background: #094771; color: white; border: 1px solid #3498db; }"
-                    );
+                    btn->setProperty("hasDb", hasDb);
+
+                    if (!hasDb) {
+                        btn->setStyleSheet(
+                            "QPushButton { background: #222222; color: #555555; border: 1px solid #333333; border-radius: 4px; font-size: 11px; }"
+                            "QPushButton:hover { background: #222222; color: #555555; border: 1px solid #333333; }"
+                            "QPushButton:checked { background: #222222; color: #555555; border: 1px solid #333333; }"
+                        );
+                    } else {
+                        btn->setStyleSheet(
+                            "QPushButton { background: #333333; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; font-size: 11px; }"
+                            "QPushButton:hover { background: #3E3E42; border: 1px solid #555555; }"
+                            "QPushButton:checked { background: #094771; color: white; border: 1px solid #3498db; }"
+                        );
+                    }
                     
-                    bool isActive = activeDrives.contains(letter);
+                    bool isActive = activeDrives.contains(letter) && hasDb;
                     btn->setChecked(isActive);
                     m_driveButtonMap[letter] = btn;
                     m_driveBarLayout->addWidget(btn);
@@ -1166,7 +1181,7 @@ void MainWindow::setupSplitters() {
 
                     // 通道 1：启动自动加载
                     if (isActive) {
-                        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(driveRoot.toStdWString());
+                        actualActiveDrives << letter;
                         DatabaseManager::instance().getMemoryDb(volSerial);
                     }
                 }
@@ -1175,7 +1190,7 @@ void MainWindow::setupSplitters() {
     }
     m_driveBarLayout->addStretch();
     // 同步一次 MFT 过滤器
-    MftReader::instance().updateActiveDrives(activeDrives);
+    MftReader::instance().updateActiveDrives(actualActiveDrives);
 
     mainL->addWidget(m_driveBarWidget);
 
@@ -1634,10 +1649,19 @@ void MainWindow::onDriveButtonClicked(const QString& letter, bool checked) {
     std::wstring volSerial = MetadataManager::getVolumeSerialNumber((letter + "\\").toStdWString());
     if (volSerial.empty()) return;
 
+    bool hasDb = DatabaseManager::instance().hasDatabase(volSerial);
+    if (!hasDb) {
+        m_driveButtonMap[letter]->blockSignals(true);
+        m_driveButtonMap[letter]->setChecked(false);
+        m_driveButtonMap[letter]->blockSignals(false);
+        FramelessMessageBox::information(this, "提示", "此盘暂无数据入库");
+        return;
+    }
+
     auto getActiveDrivesFromUI = [this]() {
         QStringList active;
         for (auto it = m_driveButtonMap.begin(); it != m_driveButtonMap.end(); ++it) {
-            if (it.value()->isChecked()) active << it.key();
+            if (it.value()->isChecked() && it.value()->property("hasDb").toBool()) active << it.key();
         }
         return active;
     };
@@ -1672,6 +1696,13 @@ void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
     UiHelper::applyMenuStyle(&menu);
     QAction* setFolderAct = menu.addAction(UiHelper::getIcon("folder_filled", QColor("#EEEEEE")), "设置托管文件夹...");
     
+    std::wstring volSerial = MetadataManager::getVolumeSerialNumber((letter + "\\").toStdWString());
+    bool hasDb = DatabaseManager::instance().hasDatabase(volSerial);
+    QAction* scanAct = nullptr;
+    if (!hasDb) {
+        scanAct = menu.addAction(UiHelper::getIcon("sync", QColor("#EEEEEE")), "扫描并初始化此盘...");
+    }
+    
     QAction* chosen = menu.exec(m_driveButtonMap[letter]->mapToGlobal(pos));
     if (chosen == setFolderAct) {
         // 1. 直接调起无边框文件夹选择静态方法
@@ -1688,11 +1719,40 @@ void MainWindow::onDriveContextMenu(const QString& letter, const QPoint& pos) {
             }
             QString root = letter + "\\";
             QString relativePath = selectedDir.mid(root.length());
-            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(selectedDir.toStdWString());
+            std::wstring volSerialSel = MetadataManager::getVolumeSerialNumber(selectedDir.toStdWString());
             
-            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerialSel));
             AppConfig::instance().setValue(key, relativePath);
             AppConfig::instance().sync();
+        }
+    } else if (scanAct && chosen == scanAct) {
+        sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
+        if (db) {
+            QPushButton* btn = m_driveButtonMap[letter];
+            btn->setProperty("hasDb", true);
+            btn->setStyleSheet(
+                "QPushButton { background: #333333; color: #CCCCCC; border: 1px solid #444444; border-radius: 4px; font-size: 11px; }"
+                "QPushButton:hover { background: #3E3E42; border: 1px solid #555555; }"
+                "QPushButton:checked { background: #094771; color: white; border: 1px solid #3498db; }"
+            );
+            btn->setChecked(true);
+
+            auto getActiveDrivesFromUI = [this]() {
+                QStringList active;
+                for (auto it = m_driveButtonMap.begin(); it != m_driveButtonMap.end(); ++it) {
+                    if (it.value()->isChecked() && it.value()->property("hasDb").toBool()) active << it.key();
+                }
+                return active;
+            };
+            QStringList active = getActiveDrivesFromUI();
+            MftReader::instance().updateActiveDrives(active);
+            CoreController::instance().startScan(letter);
+
+            AppConfig::instance().setValue("Drives/ActiveDrives", active);
+            AppConfig::instance().sync();
+            MetadataManager::instance().notifyCategoryCountChanged();
+
+            FramelessMessageBox::information(this, "提示", "此盘已成功加载并开始扫描！");
         }
     }
 }
