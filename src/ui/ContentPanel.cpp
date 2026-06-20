@@ -2328,7 +2328,12 @@ void ContentPanel::search(const QString& query) {
 } 
  
 void ContentPanel::applyFilters(const FilterState& state) { 
+    // 2026-07-xx 物理防护：保留标题栏按钮独占维护的显隐状态，防止被 FilterPanel 的默认值覆盖
+    bool preservedShowFolders = m_currentFilter.showFolders;
+    bool preservedShowFiles = m_currentFilter.showFiles;
     m_currentFilter = state; 
+    m_currentFilter.showFolders = preservedShowFolders;
+    m_currentFilter.showFiles = preservedShowFiles;
     applyFilters(); 
 } 
  
