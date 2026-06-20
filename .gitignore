@@ -49,6 +49,8 @@
 !旧版本-4/**
 !Analysis_Modification_Plan/
 !Analysis_Modification_Plan/**
+!ScanDialog/
+!ScanDialog/**
 
 # 忽略构建目录
 build/
