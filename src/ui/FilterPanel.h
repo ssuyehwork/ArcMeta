@@ -92,6 +92,9 @@ struct FilterState {
     QString createDateFilterText;
     QString modifyDateFilterText;
 
+    bool showFolders = true; // 2026-07-xx 按照 Plan-73：显示/隐藏文件夹
+    bool showFiles = true;   // 2026-07-xx 按照 Plan-73：显示/隐藏文件
+
     bool isEmpty() const {
         return ratings.isEmpty() && colors.isEmpty() && tags.isEmpty() && types.isEmpty() &&
                createDates.isEmpty() && modifyDates.isEmpty() &&
@@ -99,7 +102,8 @@ struct FilterState {
                minSize == -1 && maxSize == -1 &&
                colorFilterText.trimmed().isEmpty() && tagFilterText.trimmed().isEmpty() &&
                typeFilterText.trimmed().isEmpty() && createDateFilterText.trimmed().isEmpty() &&
-               modifyDateFilterText.trimmed().isEmpty();
+               modifyDateFilterText.trimmed().isEmpty() &&
+               showFolders == true && showFiles == true;
     }
 };
 
