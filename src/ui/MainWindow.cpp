@@ -1065,12 +1065,15 @@ void MainWindow::setupSplitters() {
     m_mainSplitter->addWidget(m_filterPanel);
     m_mainSplitter->addWidget(m_tagManagerView);
 
-    // 2026-07-xx 按照 Plan-63：对接所有面板容器级的右键菜单请求
-    // 这确保了在标题栏、空白边缘处点击右键也能弹出布局控制菜单
+    // 2026-07-xx 按照 Plan-72：仅在面板标题栏（ContainerHeader）右键时弹出布局控制菜单
     auto connectPanelMenu = [&](QWidget* panel) {
-        connect(panel, &QWidget::customContextMenuRequested, this, [this, panel](const QPoint& pos) {
-            showPanelContextMenu(panel->mapToGlobal(pos));
-        });
+        QWidget* header = panel->findChild<QWidget*>("ContainerHeader");
+        if (header) {
+            header->setContextMenuPolicy(Qt::CustomContextMenu);
+            connect(header, &QWidget::customContextMenuRequested, this, [this, header](const QPoint& pos) {
+                showPanelContextMenu(header->mapToGlobal(pos));
+            });
+        }
     };
 
     connectPanelMenu(m_categoryPanel);

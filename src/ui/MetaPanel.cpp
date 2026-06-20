@@ -311,8 +311,6 @@ MetaPanel::MetaPanel(QWidget* parent) : QFrame(parent) {
     m_adjustTimer->setInterval(50);
     connect(m_adjustTimer, &QTimer::timeout, this, &MetaPanel::adjustFlowHeights);
 
-    // 2026-07-xx 按照 Plan-63：启用右键菜单
-    setContextMenuPolicy(Qt::CustomContextMenu);
     initUi();
 }
 
