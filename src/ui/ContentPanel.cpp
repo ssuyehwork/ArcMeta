@@ -771,7 +771,8 @@ ContentPanel::ContentPanel(QWidget* parent)
     m_isRecursive = false; 
     // 2026-07-xx 物理同步：从配置中加载分类递归显示状态
     m_isCategoryRecursive = AppConfig::instance().getValue("ContentPanel/IsCategoryRecursive", false).toBool();
-    m_showFolders = AppConfig::instance().getValue("ContentPanel/ShowFolders", true).toBool();
+    // 2026-07-xx 按照用户要求：文件夹默认设为隐藏 (false)
+    m_showFolders = AppConfig::instance().getValue("ContentPanel/ShowFolders", false).toBool();
     m_showFiles = AppConfig::instance().getValue("ContentPanel/ShowFiles", true).toBool();
     
     // 同步到当前 FilterState
