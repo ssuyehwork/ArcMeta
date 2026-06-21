@@ -316,12 +316,34 @@ public:
 
 
     /**
+     * @brief 获取用于分析的图像 (SVG 强制渲染，位图走 Shell 缩略图)
+     */
+    static QImage getImageForAnalysis(const QString& path, int size = 256) {
+        QFileInfo fi(path);
+        if (fi.suffix().toLower() == "svg") {
+            // SVG 必须用矢量渲染器直接栅格化，禁止走 Shell 缩略图以防止获取到彩色应用图标
+            QSvgRenderer renderer(path);
+            if (renderer.isValid()) {
+                QImage img(size, size, QImage::Format_ARGB32);
+                img.fill(Qt::transparent);
+                QPainter painter(&img);
+                renderer.render(&painter);
+                return img;
+            }
+        }
+
+        QImage img = getShellThumbnail(path, size);
+        // 2026-07-xx 按照建议：Shell 失败后回退到 Qt 原生加载
+        if (img.isNull()) img.load(path);
+        return img;
+    }
+
+    /**
      * @brief 从图像中提取调色盘 (工业级优化版)
      * 2026-06-xx 架构重构：彻底弃用外部工具链 (ImageMagick/Ghostscript)，全面转向原生 Shell 引擎
      */
-        static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
-        QImage targetImg = getShellThumbnail(targetFile, 256);
-        if (targetImg.isNull()) targetImg.load(targetFile);
+    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
+        QImage targetImg = getImageForAnalysis(targetFile, 256);
         if (targetImg.isNull()) return {};
 
         QImage sampled = targetImg.scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
@@ -344,17 +366,25 @@ public:
                 int h, s, l; color.getHsl(&h, &s, &l);
                 double sat = s / 255.0, lig = l / 255.0;
 
+                // 空间感知权重：给图像中心区域更高权重，避开边角角标区
+                double centerX = sampled.width() / 2.0;
+                double centerY = sampled.height() / 2.0;
+                double maxDist = std::sqrt(centerX * centerX + centerY * centerY);
+                double dist = std::sqrt(std::pow(col - centerX, 2) + std::pow(row - centerY, 2));
+                double spatialWeight = 1.0 + (1.0 - dist / maxDist) * 0.5;
+
                 // 计算排序权重：鲜艳色、中性亮度色得分高
                 double vibrancy = sat * (1.0 - std::abs(lig - 0.5) * 2.0);
-                double weight = 0.2 + 10.0 * std::pow(vibrancy, 2.0);
+                // 降低 vibrancy 幂次，使权重增长更平滑
+                double weight = (0.5 + 4.0 * std::pow(vibrancy, 1.5)) * spatialWeight;
 
                 // 2026-07-xx 按照 Plan-28：感知显著性加权模型优化
                 if (lig > 0.95 && sat < 0.05) {
                     // 强力惩罚近似白色背景
                     weight = 0.001;
-                } else if (lig < 0.1) {
-                    // 暗部提权：黑色赋予基础对比权重
-                    weight = 0.5;
+                } else if (lig < 0.15) {
+                    // 提升暗部基准权重 (从 0.5 提升至 2.0)，确保黑色背景在统计中具有话语权
+                    weight = 2.0 * spatialWeight;
                 }
 
                 // 5-bit 量化提高色彩区分度
@@ -469,7 +499,8 @@ public:
             if (SUCCEEDED(hr)) {
                 SIZE nativeSize = { size, size };
                 HBITMAP hBitmap = nullptr;
-                hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY | SIIGBF_RESIZETOFIT, &hBitmap);
+                // 移除 SIIGBF_THUMBNAILONLY，允许 Shell 在缓存失效时强制提取真实内容
+                hr = pFactory->GetImage(nativeSize, SIIGBF_RESIZETOFIT, &hBitmap);
                 if (SUCCEEDED(hr) && hBitmap) {
                     BITMAP bmpInfo;
                     GetObject(hBitmap, sizeof(bmpInfo), &bmpInfo);
