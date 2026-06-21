@@ -977,19 +977,43 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
         }
     } else if (info.isDir()) {
         QDir subDir(qPath);
-        // 2026-07-xx 按照建议：扫描前 5 个文件以增加成功率
+        // 2026-07-xx 按照计划：扫描前 10 个图像文件并执行多样本一致性校验
         QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-        int checked = 0;
+
+        struct Sample { QColor dominant; QVector<QPair<QColor, float>> palette; };
+        QVector<Sample> samples;
+
         for (const auto& sf : subFiles) {
             if (ArcMeta::UiHelper::isGraphicsFile(sf.suffix().toLower())) {
                 auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath());
                 if (!palette.isEmpty()) {
-                    QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
-                    instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
-                    success = true;
-                    break;
+                    samples.append({palette.first().first, palette});
                 }
-                if (++checked >= 5) break;
+                if (samples.size() >= 10) break;
+            }
+        }
+
+        if (!samples.isEmpty()) {
+            int bestIdx = 0;
+            int maxVotes = 0;
+            for (int i = 0; i < samples.size(); ++i) {
+                int votes = 0;
+                for (int j = 0; j < samples.size(); ++j) {
+                    if (ArcMeta::UiHelper::calculateDeltaE(samples[i].dominant, samples[j].dominant) < 20.0) {
+                        votes++;
+                    }
+                }
+                if (votes > maxVotes) {
+                    maxVotes = votes;
+                    bestIdx = i;
+                }
+            }
+
+            // 聚合决策：若只有一个样本直接采纳；若多个样本，最强簇必须占据 30% 以上权重且至少有 2 个成员
+            if (samples.size() == 1 || (maxVotes >= 2 && maxVotes >= samples.size() * 0.3)) {
+                QColor dominant = ArcMeta::UiHelper::quantizeColor(samples[bestIdx].dominant);
+                instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), samples[bestIdx].palette, false);
+                success = true;
             }
         }
     }
@@ -1045,17 +1069,40 @@ void MetadataManager::processVisualRetryQueue() {
             } else if (info.isDir()) {
                 QDir subDir(qPath);
                 QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-                int checked = 0;
+
+                struct Sample { QColor dominant; QVector<QPair<QColor, float>> palette; };
+                QVector<Sample> samples;
+
                 for (const auto& sf : subFiles) {
                     if (ArcMeta::UiHelper::isGraphicsFile(sf.suffix().toLower())) {
                         auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath());
                         if (!palette.isEmpty()) {
-                            QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
-                            setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), palette, true);
-                            ok = true;
-                            break;
+                            samples.append({palette.first().first, palette});
                         }
-                        if (++checked >= 5) break;
+                        if (samples.size() >= 10) break;
+                    }
+                }
+
+                if (!samples.isEmpty()) {
+                    int bestIdx = 0;
+                    int maxVotes = 0;
+                    for (int i = 0; i < samples.size(); ++i) {
+                        int votes = 0;
+                        for (int j = 0; j < samples.size(); ++j) {
+                            if (ArcMeta::UiHelper::calculateDeltaE(samples[i].dominant, samples[j].dominant) < 20.0) {
+                                votes++;
+                            }
+                        }
+                        if (votes > maxVotes) {
+                            maxVotes = votes;
+                            bestIdx = i;
+                        }
+                    }
+
+                    if (samples.size() == 1 || (maxVotes >= 2 && maxVotes >= samples.size() * 0.3)) {
+                        QColor dominant = ArcMeta::UiHelper::quantizeColor(samples[bestIdx].dominant);
+                        setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), samples[bestIdx].palette, true);
+                        ok = true;
                     }
                 }
             }
