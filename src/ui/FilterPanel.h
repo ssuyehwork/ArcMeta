@@ -8,6 +8,7 @@
 #include <QScrollArea>
 #include <QPushButton>
 #include <QLineEdit>
+#include <QSlider>
 #include <QMap>
 #include <QStringList>
 #include "MetaPanel.h" // 引用 FlowLayout
@@ -176,8 +177,11 @@ private:
     QWidget*      m_container       = nullptr;
     QVBoxLayout*  m_containerLayout = nullptr;
     QPushButton*  m_btnClearAll     = nullptr;
+    QPushButton*  m_btnToggleGroups = nullptr; // 2026-07-xx 按照 Plan-77：全局折叠/展开按钮
     QLabel*       m_iconLabel       = nullptr;
     QLabel*       m_titleLabel      = nullptr;
+
+    QList<QPushButton*> m_groupHeaders; // 跟踪所有分组标题以支持全局控制
 
     // 2026-xx-xx 新增快速输入框成员
     QLineEdit*    m_editColor       = nullptr;
@@ -185,12 +189,16 @@ private:
     QLineEdit*    m_editType        = nullptr;
     QLineEdit*    m_editCreateDate  = nullptr;
     QLineEdit*    m_editModifyDate  = nullptr;
+    QSlider*      m_accuracySlider  = nullptr; // 2026-07-xx 按照用户要求：还原颜色准确度控制条
 
     SearchHistoryPanel* m_historyPanel = nullptr;
     
     // 辅助方法：处理历史记录
     void saveFilterHistory(const QString& key, const QString& text);
     QStringList getFilterHistory(const QString& key) const;
+
+private slots:
+    void onToggleAllGroupsClicked();
 };
 
 } // namespace ArcMeta

@@ -1,4 +1,5 @@
 #include "FilterPanel.h"
+#include "../core/AppConfig.h"
 #include "ToolTipOverlay.h"
 #include "UiHelper.h"
 #include "ColorPicker.h"
@@ -327,7 +328,19 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
         "QPushButton:pressed { background: #4E4E52; }");
     connect(m_btnClearAll, &QPushButton::clicked, this, &FilterPanel::clearAllFilters);
 
+    m_btnToggleGroups = new QPushButton(topBar);
+    m_btnToggleGroups->setFixedSize(24, 24);
+    m_btnToggleGroups->setFlat(true);
+    m_btnToggleGroups->setCursor(Qt::PointingHandCursor);
+    m_btnToggleGroups->installEventFilter(this);
+    m_btnToggleGroups->setStyleSheet(
+        "QPushButton { background: transparent; border: none; border-radius: 4px; }"
+        "QPushButton:hover { background: #3E3E42; }"
+        "QPushButton:pressed { background: #4E4E52; }");
+    connect(m_btnToggleGroups, &QPushButton::clicked, this, &FilterPanel::onToggleAllGroupsClicked);
+
     topL->addStretch();
+    topL->addWidget(m_btnToggleGroups, 0, Qt::AlignVCenter);
     topL->addWidget(m_btnClearAll, 0, Qt::AlignVCenter);
     m_mainLayout->addWidget(topBar);
 
@@ -476,12 +489,15 @@ void FilterPanel::populate(
 // ─── rebuildGroups ────────────────────────────────────────────────
 void FilterPanel::rebuildGroups() {
     updateHeaderStatus();
+    m_groupHeaders.clear();
+
     // 2026-xx-xx 物理安全：重置快速输入框指针，防止 Directory 切换导致的野指针崩溃
     m_editColor = nullptr;
     m_editTag = nullptr;
     m_editType = nullptr;
     m_editCreateDate = nullptr;
     m_editModifyDate = nullptr;
+    m_accuracySlider = nullptr;
 
     // 清空旧内容（保留末尾 stretch）
     while (m_containerLayout->count() > 1) {
@@ -582,6 +598,35 @@ void FilterPanel::rebuildGroups() {
             rebuildGroups();
         });
         gl->addWidget(hueContainer);
+
+        // 2.1.5 颜色准确度 (容差) 滑块 ─────────────────────────
+        // 2026-07-xx 按照用户要求：还原此前被误删的准确度控制条
+        QWidget* accContainer = new QWidget(g);
+        QHBoxLayout* accLayout = new QHBoxLayout(accContainer);
+        accLayout->setContentsMargins(10, 4, 10, 4);
+        accLayout->setSpacing(8);
+
+        QLabel* lblAcc = new QLabel("准确度:", accContainer);
+        lblAcc->setStyleSheet("color: #AAAAAA; font-size: 11px;");
+        accLayout->addWidget(lblAcc);
+
+        m_accuracySlider = new QSlider(Qt::Horizontal, accContainer);
+        m_accuracySlider->setRange(0, 100);
+        m_accuracySlider->setValue(m_filter.colorTolerance);
+        m_accuracySlider->setCursor(Qt::PointingHandCursor);
+        m_accuracySlider->setStyleSheet(
+            "QSlider::groove:horizontal { height: 2px; background: #444; border-radius: 1px; }"
+            "QSlider::handle:horizontal { background: #EEE; border: 1px solid #777; width: 10px; height: 10px; margin: -4px 0; border-radius: 5px; }"
+            "QSlider::handle:horizontal:hover { background: #FFF; border-color: #378ADD; }"
+        );
+        accLayout->addWidget(m_accuracySlider, 1);
+
+        connect(m_accuracySlider, &QSlider::valueChanged, this, [this](int val) {
+            m_filter.colorTolerance = val;
+            emit filterChanged(m_filter);
+        });
+
+        gl->addWidget(accContainer);
 
         // 2.2 标准色矩阵 (12色)
         // 2026-06-xx 物理对齐：设置左边距 8px 以对齐下方的复选框视觉线
@@ -1196,6 +1241,13 @@ QWidget* FilterPanel::buildGroup(const QString& title, QVBoxLayout*& outContentL
 
     connect(hdr, &QPushButton::toggled, content, &QWidget::setVisible);
 
+    m_groupHeaders.append(hdr);
+    // 2026-07-xx 按照 Plan-77：应用全局持久化折叠状态
+    bool allCollapsed = AppConfig::instance().getValue("FilterPanel/AllGroupsCollapsed", false).toBool();
+    if (allCollapsed) {
+        hdr->setChecked(false);
+    }
+
     wl->addWidget(hdrRow);     // 加入 hdrRow，不再直接加 hdr
     wl->addWidget(content);
     return wrapper;
@@ -1257,7 +1309,7 @@ void FilterPanel::clearAllFilters() {
 }
 
 void FilterPanel::updateHeaderStatus() {
-    if (!m_iconLabel || !m_titleLabel || !m_btnClearAll) return;
+    if (!m_iconLabel || !m_titleLabel || !m_btnClearAll || !m_btnToggleGroups) return;
     
     bool active = !m_filter.isEmpty();
     
@@ -1269,6 +1321,24 @@ void FilterPanel::updateHeaderStatus() {
     // 标记 ②：根据筛选状态动态切换颜色（激活为彩色，空闲为灰色）
     QColor btnColor = active ? brandYellow : QColor("#B0B0B0");
     m_btnClearAll->setIcon(UiHelper::getIcon("reset_filter", btnColor));
+
+    // 标记 ③：全局折叠按钮状态
+    // 2026-07-xx 按照评审意见：校准图标映射。要求：展开状态(false)显示 down，折叠状态(true)显示 up
+    bool allCollapsed = AppConfig::instance().getValue("FilterPanel/AllGroupsCollapsed", false).toBool();
+    m_btnToggleGroups->setIcon(UiHelper::getIcon(allCollapsed ? "chevrons_up" : "chevrons_down", QColor("#B0B0B0"), 16));
+    m_btnToggleGroups->setProperty("tooltipText", allCollapsed ? "展开所有分组" : "折叠所有分组");
+}
+
+void FilterPanel::onToggleAllGroupsClicked() {
+    bool currentlyCollapsed = AppConfig::instance().getValue("FilterPanel/AllGroupsCollapsed", false).toBool();
+    bool targetCollapsed = !currentlyCollapsed;
+
+    for (QPushButton* hdr : m_groupHeaders) {
+        if (hdr) hdr->setChecked(!targetCollapsed);
+    }
+
+    AppConfig::instance().setValue("FilterPanel/AllGroupsCollapsed", targetCollapsed);
+    updateHeaderStatus();
 }
 
 void FilterPanel::selectColor(const QColor& color) {

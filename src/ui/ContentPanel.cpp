@@ -518,10 +518,10 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
                 QColor targetCol = UiHelper::parseColorName(searchText);
                 if (targetCol.isValid()) {
                     QColor recordCol = UiHelper::parseColorName(dominantColorHex);
-                    if (UiHelper::calculateDeltaE(targetCol, recordCol) < 10.0) matchColor = true;
+                    if (UiHelper::calculateDeltaE(targetCol, recordCol) < currentFilter.colorTolerance) matchColor = true;
                     if (!matchColor && !record.palettes.empty()) {
                         for (const auto& pe : record.palettes) {
-                            if (UiHelper::calculateDeltaE(targetCol, pe.first) < 10.0) { matchColor = true; break; }
+                            if (UiHelper::calculateDeltaE(targetCol, pe.first) < currentFilter.colorTolerance) { matchColor = true; break; }
                         }
                     }
                 }
@@ -536,10 +536,10 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
                     if (it.key().contains(searchText)) {
                         QColor targetCol = QColor(it.value());
                         QColor recordCol = UiHelper::parseColorName(dominantColorHex);
-                        if (UiHelper::calculateDeltaE(targetCol, recordCol) < 10.0) { matchColor = true; break; }
+                        if (UiHelper::calculateDeltaE(targetCol, recordCol) < currentFilter.colorTolerance) { matchColor = true; break; }
                         if (!record.palettes.empty()) {
                             for (const auto& pe : record.palettes) {
-                                if (UiHelper::calculateDeltaE(targetCol, pe.first) < 10.0) { matchColor = true; break; }
+                                if (UiHelper::calculateDeltaE(targetCol, pe.first) < currentFilter.colorTolerance) { matchColor = true; break; }
                             }
                         }
                         if (matchColor) break;
@@ -559,16 +559,16 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
 
                 QColor targetCol = UiHelper::parseColorName(fc);
                 
-                // 2.1 主色调感知匹配 (CIELAB Delta E < 10.0)
+                // 2.1 主色调感知匹配 (CIELAB Delta E < colorTolerance)
                 QColor recordCol = UiHelper::parseColorName(dominantColorHex);
-                if (UiHelper::calculateDeltaE(targetCol, recordCol) < 10.0) {
+                if (UiHelper::calculateDeltaE(targetCol, recordCol) < currentFilter.colorTolerance) {
                     matchColor = true; break;
                 }
 
                 // 2.2 变长色板深度匹配 (多色命中)
                 if (!record.palettes.empty()) {
                     for (const auto& pe : record.palettes) {
-                        if (UiHelper::calculateDeltaE(targetCol, pe.first) < 10.0) {
+                        if (UiHelper::calculateDeltaE(targetCol, pe.first) < currentFilter.colorTolerance) {
                             matchColor = true; break;
                         }
                     }
