@@ -126,7 +126,8 @@ public:
         const QMap<QString, int>&    tagCounts,
         const QMap<QString, int>&    typeCounts,
         const QMap<QString, int>&    createDateCounts,
-        const QMap<QString, int>&    modifyDateCounts
+        const QMap<QString, int>&    modifyDateCounts,
+        int                          emptyFolderCount
     );
 
     FilterState currentFilter() const { return m_filter; }
@@ -168,6 +169,7 @@ private:
     QMap<QString, int>  m_typeCounts;
     QMap<QString, int>  m_createDateCounts;
     QMap<QString, int>  m_modifyDateCounts;
+    int                 m_emptyFolderCount = 0;
 
     QVBoxLayout*  m_mainLayout      = nullptr;
     QScrollArea*  m_scrollArea      = nullptr;
