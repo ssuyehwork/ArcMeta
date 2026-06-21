@@ -450,11 +450,13 @@ void FilterPanel::populate(
     const QMap<QString, int>&   tagCounts,
     const QMap<QString, int>&   typeCounts,
     const QMap<QString, int>&   createDateCounts,
-    const QMap<QString, int>&   modifyDateCounts)
+    const QMap<QString, int>&   modifyDateCounts,
+    int                         emptyFolderCount)
 {
     // 2026-06-xx 物理修复：若所有输入均为空，且当前没有活动的文本过滤，则判定为异步加载中间态，拒绝执行重绘以防止 UI 抖动
     if (ratingCounts.isEmpty() && colorCounts.isEmpty() && tagCounts.isEmpty() && 
         typeCounts.isEmpty() && createDateCounts.isEmpty() && modifyDateCounts.isEmpty() &&
+        emptyFolderCount == 0 &&
         m_filter.colorFilterText.isEmpty() && m_filter.tagFilterText.isEmpty() &&
         m_filter.typeFilterText.isEmpty() && m_filter.createDateFilterText.isEmpty() &&
         m_filter.modifyDateFilterText.isEmpty()) {
@@ -467,6 +469,7 @@ void FilterPanel::populate(
     m_typeCounts       = typeCounts;
     m_createDateCounts = createDateCounts;
     m_modifyDateCounts = modifyDateCounts;
+    m_emptyFolderCount = emptyFolderCount;
     rebuildGroups();
 }
 
@@ -503,17 +506,6 @@ void FilterPanel::rebuildGroups() {
             connect(cb, &QCheckBox::toggled, this, [this, r](bool on) {
                 if (on) { if (!m_filter.ratings.contains(r)) m_filter.ratings.append(r); }
                 else m_filter.ratings.removeAll(r);
-                emit filterChanged(m_filter);
-            });
-        }
-        if (m_typeCounts.contains("空文件夹")) {
-            QCheckBox* cb = addFilterRow(gl, "空文件夹", m_typeCounts["空文件夹"]);
-            cb->blockSignals(true);
-            cb->setChecked(m_filter.types.contains("空文件夹"));
-            cb->blockSignals(false);
-            connect(cb, &QCheckBox::toggled, this, [this](bool on) {
-                if (on) { if (!m_filter.types.contains("空文件夹")) m_filter.types.append("空文件夹"); }
-                else    m_filter.types.removeAll("空文件夹");
                 emit filterChanged(m_filter);
             });
         }
@@ -758,7 +750,7 @@ void FilterPanel::rebuildGroups() {
     }
 
     // ── 4. 文件类型 ──────────────────────────────────────────
-    if (!m_typeCounts.isEmpty() || !m_filter.typeFilterText.isEmpty()) {
+    if (!m_typeCounts.isEmpty() || !m_filter.typeFilterText.isEmpty() || m_emptyFolderCount > 0) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("文件类型", gl);
 
@@ -809,7 +801,7 @@ void FilterPanel::rebuildGroups() {
         }
         QStringList exts = m_typeCounts.keys(); exts.sort();
         for (const QString& ext : exts) {
-            if (ext == "folder" || ext == "file") continue;
+            if (ext == "folder" || ext == "file" || ext == "空文件夹") continue;
             QString label = ext.isEmpty() ? "无扩展名" : ext;
             QCheckBox* cb = addFilterRow(gl, label, m_typeCounts[ext]);
             cb->blockSignals(true);
@@ -1068,7 +1060,24 @@ void FilterPanel::rebuildGroups() {
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
 
-    // ── 10. 图像比例 (独立主选项) ──────────────────────────────────────────
+    // ── 10. 属性 (特殊状态) ──────────────────────────────────────────────
+    if (m_emptyFolderCount > 0) {
+        QVBoxLayout* gl = nullptr;
+        QWidget* g = buildGroup("属性", gl);
+
+        QCheckBox* cb = addFilterRow(gl, "空文件夹", m_emptyFolderCount);
+        cb->blockSignals(true);
+        cb->setChecked(m_filter.types.contains("空文件夹"));
+        cb->blockSignals(false);
+        connect(cb, &QCheckBox::toggled, this, [this](bool on) {
+            if (on) { if (!m_filter.types.contains("空文件夹")) m_filter.types.append("空文件夹"); }
+            else    m_filter.types.removeAll("空文件夹");
+            emit filterChanged(m_filter);
+        });
+        m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
+    }
+
+    // ── 11. 图像比例 (独立主选项) ──────────────────────────────────────────
     {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("图像比例", gl);

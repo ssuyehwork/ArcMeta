@@ -2624,7 +2624,7 @@ void ContentPanel::recalculateAndEmitStats() {
             if (record.isDir || record.isCategory) {
                 stats.typeCounts["folder"]++;
                 if (record.isDir && record.isEmpty) {
-                    stats.typeCounts["空文件夹"]++;
+                    stats.emptyFolderCount++;
                 }
             } else {
                 stats.typeCounts["file"]++;
@@ -2648,7 +2648,8 @@ void ContentPanel::recalculateAndEmitStats() {
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, stats]() {
             if (weakThis) {
                 emit weakThis->directoryStatsReady(stats.ratingCounts, stats.colorCounts, stats.tagCounts,
-                                                 stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts);
+                                                 stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts,
+                                                 stats.emptyFolderCount);
             }
         });
     });

@@ -135,6 +135,7 @@ public:
         QMap<QString, int> createDateCounts;
         QMap<QString, int> modifyDateCounts;
         int noTagCount = 0;
+        int emptyFolderCount = 0;
     };
 
     enum ViewMode {
@@ -240,7 +241,8 @@ signals:
         const QMap<QString, int>& tagCounts,
         const QMap<QString, int>& typeCounts,
         const QMap<QString, int>& createDateCounts,
-        const QMap<QString, int>& modifyDateCounts);
+        const QMap<QString, int>& modifyDateCounts,
+        int emptyFolderCount);
 
 private:
     void initUi();
