@@ -704,13 +704,24 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
 } 
  
 bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelIndex& source_right) const { 
+    // 2026-07-xx 调试日志：确认 lessThan 是否在执行
+    static int logCounter = 0;
+    if (++logCounter % 50 == 0) Logger::log(QString("[Sort_Debug] lessThan is running. SortColumn: %1").arg(sortColumn()));
+
     // 2026-07-xx 物理排序重构 (Plan-74)：显式权重逻辑
     auto getWeight = [&](const QModelIndex& idx) -> int {
         QString type = idx.data(TypeRole).toString();
-        if (type == "folder" || type == "category") return 0;
-        // 注意：IsLockedRole 与 PinnedRole 在模型中均指向 record.pinned
-        if (idx.data(PinnedRole).toBool() || idx.data(IsLockedRole).toBool()) return 1;
-        return 2;
+        bool isPinned = idx.data(PinnedRole).toBool() || idx.data(IsLockedRole).toBool();
+
+        // 2026-07-xx 物理排序权重体系：
+        // 权重 0：置顶的文件夹/分类 (最高优先级)
+        // 权重 1：普通文件夹/分类
+        // 权重 2：置顶的文件
+        // 权重 3：普通文件 (最低优先级)
+        if (type == "folder" || type == "category") {
+            return isPinned ? 0 : 1;
+        }
+        return isPinned ? 2 : 3;
     };
 
     int leftWeight = getWeight(source_left);
@@ -718,14 +729,12 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
 
     // 2026-07-xx 调试日志：追踪权重比较
     if (leftWeight != rightWeight) {
-        if (leftWeight == 1 || rightWeight == 1) {
-            Logger::log(QString("[Sort_Debug] Pinned comparison: %1 (W:%2) vs %3 (W:%4) Result: %5")
-                .arg(source_left.data(Qt::DisplayRole).toString())
-                .arg(leftWeight)
-                .arg(source_right.data(Qt::DisplayRole).toString())
-                .arg(rightWeight)
-                .arg(sortOrder() == Qt::AscendingOrder ? (leftWeight < rightWeight) : (leftWeight > rightWeight)));
-        }
+        Logger::log(QString("[Sort_Debug] Weighted comparison: %1 (W:%2) vs %3 (W:%4) Result: %5")
+            .arg(source_left.data(Qt::DisplayRole).toString())
+            .arg(leftWeight)
+            .arg(source_right.data(Qt::DisplayRole).toString())
+            .arg(rightWeight)
+            .arg(sortOrder() == Qt::AscendingOrder ? (leftWeight < rightWeight) : (leftWeight > rightWeight)));
         // 核心规则：权重小的项（文件夹 > 置顶 > 普通）始终排在顶部。
         // 由于 Qt 在 Descending 模式下会反转 lessThan 的返回值，
         // 为了对抗这种反转并保持顶部锁定，必须根据 sortOrder 进行差异化返回。
@@ -763,7 +772,15 @@ ContentPanel::ContentPanel(QWidget* parent)
     // 2026-05-17 新增：当模型数据发生改变时，自动触发统计重新计算并推送至 FilterPanel
     connect(m_model, &FerrexVirtualDbModel::dataChanged, this, [this](const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles) {
         Q_UNUSED(topLeft); Q_UNUSED(bottomRight);
-        if (roles.isEmpty() || roles.contains(ColorRole) || roles.contains(RatingRole) || roles.contains(TagsRole)) {
+        // 2026-07-xx 物理强化：当元数据（颜色、评分、置顶、标签）发生变化时，强制代理模型重新排序与过滤
+        // 理由：dynamicSortFilter 在某些 Qt 版本中对非排序列的 DataChanged 响应不及时，invalidate 可确保物理位置立即更新。
+        if (roles.isEmpty() || roles.contains(ColorRole) || roles.contains(RatingRole) ||
+            roles.contains(TagsRole) || roles.contains(IsLockedRole) || roles.contains(PinnedRole)) {
+
+            if (m_proxyModel) {
+                Logger::log("[UI_Debug] Metadata change detected, invalidating proxy model to force re-sort...");
+                m_proxyModel->invalidate();
+            }
             recalculateAndEmitStats();
         }
     });
@@ -793,9 +810,9 @@ ContentPanel::ContentPanel(QWidget* parent)
 } 
  
 void ContentPanel::deferredInit() { 
-    qDebug() << "[ContentPanel] deferredInit 开始执行"; 
+    Logger::log("[ContentPanel] deferredInit 开始执行");
     // 2026-04-12 按照用户要求：补全延迟初始化逻辑，此处可处理模型预热或首屏数据对齐 
-    qDebug() << "[ContentPanel] deferredInit 执行完毕"; 
+    Logger::log("[ContentPanel] deferredInit 执行完毕");
 } 
 
 ItemRecord ContentPanel::createItemRecord(const QString& path) {
@@ -1071,7 +1088,7 @@ void ContentPanel::updateGridSize() {
     // 2026-06-05 按照要求：持久化保存当前的缩放级别
     AppConfig::instance().setValue("UI/GridZoomLevel", m_zoomLevel);
 
-    qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
+    Logger::log(QString("[GridSize] Zoom: %1").arg(m_zoomLevel));
 } 
  
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 

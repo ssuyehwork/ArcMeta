@@ -388,8 +388,10 @@ void JustifiedView::doLayout() {
             
             // 2026-07-xx 物理分离逻辑：如果当前项是文件，但行首是文件夹（或反之），强制换行
             QString type = model()->data(idx, TypeRole).toString();
-            if (i < 10) Logger::log(QString("  [Layout_Debug] Processing item %1: %2 Type: %3")
-                                   .arg(i).arg(model()->data(idx, Qt::DisplayRole).toString()).arg(type));
+            bool isPinned = model()->data(idx, PinnedRole).toBool() || model()->data(idx, IsLockedRole).toBool();
+            if (i < 15) Logger::log(QString("  [Layout_Debug] Item %1: %2 | Type: %3 | Pinned: %4")
+                                   .arg(i).arg(model()->data(idx, Qt::DisplayRole).toString())
+                                   .arg(type).arg(isPinned ? "Yes" : "No"));
             bool isCurrentDir = (type == "folder" || type == "category");
 
             if (i > rowStart) {
