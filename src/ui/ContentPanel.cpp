@@ -1073,7 +1073,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         QString text = obj->property("tooltipText").toString(); 
         if (!text.isEmpty()) { 
             int timeout = (obj == m_btnLayers || obj == m_btnLayersBlue ||
-                       obj == m_btnToggleFolders || obj == m_btnToggleFiles) ? 0 : 700;
+                           obj == m_btnToggleFolders || obj == m_btnToggleFiles) ? 0 : 700;
             ToolTipOverlay::instance()->showText(QCursor::pos(), text, timeout);
         } 
     } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::Leave || event->type() == QEvent::MouseButtonPress) { 
@@ -2298,6 +2298,7 @@ void ContentPanel::search(const QString& query) {
     // 2026-07-xx 按照 Plan-57：ContentPanel::search 仅作为搜索发起的代理。
     // 实际结果处理已在 MainWindow 中通过 CoreController 的信号进行流式对接。
     m_currentCategoryType = "search";
+    m_currentPath = ""; // 2026-07-xx 按照 Plan-73：逻辑视图下清除物理路径，防止“新建”功能误操作
     updateLayersButtonState();
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
@@ -2397,6 +2398,7 @@ void ContentPanel::loadCategory(int categoryId) {
     int reqId = ++m_loadRequestId;
     m_currentCategoryType = "user_category";
     m_currentCategoryId = categoryId;
+    m_currentPath = ""; // 2026-07-xx 按照 Plan-73：逻辑视图下清除物理路径
     updateLayersButtonState();
     m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
@@ -2498,6 +2500,7 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
         m_currentCategoryType != "all") {
         m_currentCategoryType = "path_list";
     }
+    m_currentPath = ""; // 2026-07-xx 按照 Plan-73：逻辑视图下清除物理路径
     updateLayersButtonState();
     
     m_viewStack->show(); 

@@ -92,8 +92,8 @@ struct FilterState {
     QString createDateFilterText;
     QString modifyDateFilterText;
 
-    bool showFolders = true; // 2026-07-xx 按照 Plan-73：显示/隐藏文件夹
-    bool showFiles = true;   // 2026-07-xx 按照 Plan-73：显示/隐藏文件
+    bool showFolders = false; // 2026-07-xx 按照 Plan-73：显示/隐藏文件夹 (默认隐藏)
+    bool showFiles = true;    // 2026-07-xx 按照 Plan-73：显示/隐藏文件
 
     bool isEmpty() const {
         return ratings.isEmpty() && colors.isEmpty() && tags.isEmpty() && types.isEmpty() &&
