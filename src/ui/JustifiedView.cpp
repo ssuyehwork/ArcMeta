@@ -111,6 +111,12 @@ void JustifiedView::rowsAboutToBeRemoved(const QModelIndex& parent, int start, i
     QAbstractItemView::rowsAboutToBeRemoved(parent, start, end);
 }
 
+void JustifiedView::layoutChanged() {
+    // 2026-07-xx 物理修复：当模型重排序（发出 layoutChanged）时，强制重新计算几何布局
+    QTimer::singleShot(0, this, [this]() { doLayout(); });
+    QAbstractItemView::layoutChanged();
+}
+
 QModelIndex JustifiedView::moveCursor(CursorAction cursorAction, Qt::KeyboardModifiers) {
     QModelIndex current = currentIndex();
     if (!current.isValid()) return model()->index(0, 0);

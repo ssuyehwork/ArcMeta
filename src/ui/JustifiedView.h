@@ -26,6 +26,7 @@ protected slots:
     void dataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight, const QList<int>& roles = QList<int>()) override;
     void rowsInserted(const QModelIndex& parent, int start, int end) override;
     void rowsAboutToBeRemoved(const QModelIndex& parent, int start, int end) override;
+    void layoutChanged() override;
 
 protected:
     QModelIndex moveCursor(CursorAction cursorAction, Qt::KeyboardModifiers modifiers) override;
