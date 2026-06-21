@@ -82,6 +82,7 @@ private:
 
     QWidget* m_titleBarWidget = nullptr;
     QHBoxLayout* m_titleBarLayout = nullptr;
+    QLabel* m_logoLabel = nullptr;
     QLabel* m_appNameLabel = nullptr;
     QWidget* m_navBarWidget = nullptr;
     QHBoxLayout* m_navBarLayout = nullptr;

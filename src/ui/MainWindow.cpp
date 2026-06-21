@@ -975,6 +975,12 @@ void MainWindow::setupSplitters() {
     m_titleBarLayout->setContentsMargins(5, 0, kEdgeMargin, 0); 
     m_titleBarLayout->setSpacing(5);
 
+    m_logoLabel = new QLabel(m_titleBarWidget);
+    m_logoLabel->setFixedSize(18, 18);
+    m_logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#EEEEEE")).pixmap(18, 18));
+    m_logoLabel->setStyleSheet("background: transparent; border: none;");
+    m_titleBarLayout->addWidget(m_logoLabel);
+
     m_appNameLabel = new QLabel("FERREX", m_titleBarWidget);
     m_appNameLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-weight: bold;").arg(qssColor(TextDark)));
     m_titleBarLayout->addWidget(m_appNameLabel);
