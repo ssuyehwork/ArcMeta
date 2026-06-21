@@ -1607,15 +1607,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
         menu.addSeparator(); 
  
-        // [批量与加密区] 
-        // 2026-07-xx 按照用户要求：只要是文件夹，或者是“非图像文件”，都显示扫描入库选项
-        QString suffix = QFileInfo(path).suffix().toLower();
-        bool isGraphic = UiHelper::isGraphicsFile(suffix);
-
-        if (isFolder || !isGraphic) { 
-            menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "扫描入库")->setData(ActionAddToCategory);
-        }
-
         // 2026-06-xx 逻辑解耦修复：解除批量重命名的类型硬编码锁定 (架构升级)。
         // 核心规则：多选有效项目 (PathRole 不为空) 或 单选文件夹时，均解锁批量重命名入口。
         int selectedCount = 0;
@@ -1623,6 +1614,17 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (selIdx.column() == 0 && !selIdx.data(PathRole).toString().isEmpty()) {
                 selectedCount++;
             }
+        }
+
+        // [批量与加密区]
+        // 2026-07-xx 按照用户要求：只要是文件夹，或者是“非图像文件”，都显示扫描入库选项
+        QString suffix = QFileInfo(path).suffix().toLower();
+        bool isGraphic = UiHelper::isGraphicsFile(suffix);
+
+        if (isFolder || !isGraphic) {
+            bool isManaged = currentIndex.data(ManagedRole).toBool();
+            QString scanText = isManaged ? "重新扫描入库" : "扫描入库";
+            menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), scanText)->setData(ActionAddToCategory);
         }
 
         if (isFolder || selectedCount > 1) { 
@@ -1640,7 +1642,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         menu.addSeparator(); 
  
         // [通用编辑区] 
-        menu.addAction("重命名")->setData(ActionRename); 
+        if (selectedCount <= 1) {
+            menu.addAction("重命名")->setData(ActionRename);
+        }
         menu.addAction("复制")->setData(ActionCopy); 
         menu.addAction("剪切")->setData(ActionCut); 
         menu.addAction("粘贴")->setData(ActionPaste); 
@@ -1930,10 +1934,23 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         } 
         case ActionBatchRename: performBatchRename(); break; 
         case ActionAddToCategory: {
-            if (path.isEmpty()) break;
-            // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
-            // 扫描入库时，镜像分类始终创建在“我的分类”根节点 (ID = 0)
-            ImportHelper::importPaths({path}, 0, this);
+            QStringList paths;
+            auto indexes = view->selectionModel()->selectedIndexes();
+            for (const auto& idx : indexes) {
+                if (idx.column() == 0) {
+                    QString p = idx.data(PathRole).toString();
+                    if (!p.isEmpty()) paths << p;
+                }
+            }
+
+            // 降级保护：如果由于某种原因 paths 为空，则回退到当前点击项
+            if (paths.isEmpty() && !path.isEmpty()) paths << path;
+
+            if (!paths.isEmpty()) {
+                // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
+                // 扫描入库时，镜像分类始终创建在“我的分类”根节点 (ID = 0)
+                ImportHelper::importPaths(paths, 0, this);
+            }
             break;
         }
         case ActionRename: view->edit(currentIndex); break; 
