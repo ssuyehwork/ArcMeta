@@ -316,12 +316,34 @@ public:
 
 
     /**
+     * @brief 获取用于分析的图像 (SVG 强制渲染，位图走 Shell 缩略图)
+     */
+    static QImage getImageForAnalysis(const QString& path, int size = 256) {
+        QFileInfo fi(path);
+        if (fi.suffix().toLower() == "svg") {
+            // SVG 必须用矢量渲染器直接栅格化，禁止走 Shell 缩略图以防止获取到彩色应用图标
+            QSvgRenderer renderer(path);
+            if (renderer.isValid()) {
+                QImage img(size, size, QImage::Format_ARGB32);
+                img.fill(Qt::transparent);
+                QPainter painter(&img);
+                renderer.render(&painter);
+                return img;
+            }
+        }
+
+        QImage img = getShellThumbnail(path, size);
+        // 2026-07-xx 按照建议：Shell 失败后回退到 Qt 原生加载
+        if (img.isNull()) img.load(path);
+        return img;
+    }
+
+    /**
      * @brief 从图像中提取调色盘 (工业级优化版)
      * 2026-06-xx 架构重构：彻底弃用外部工具链 (ImageMagick/Ghostscript)，全面转向原生 Shell 引擎
      */
-        static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
-        QImage targetImg = getShellThumbnail(targetFile, 256);
-        if (targetImg.isNull()) targetImg.load(targetFile);
+    static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
+        QImage targetImg = getImageForAnalysis(targetFile, 256);
         if (targetImg.isNull()) return {};
 
         QImage sampled = targetImg.scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);

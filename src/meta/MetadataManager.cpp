@@ -9,6 +9,7 @@
 #include <QDateTime>
 #include <QCoreApplication>
 #include <QImageReader>
+#include <QSvgRenderer>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -912,12 +913,22 @@ void MetadataManager::tryExtractDimensions(const std::wstring& path) {
 
     int w = 0, h = 0;
     
-    // 方案 A: 尝试通过 QImageReader 获取尺寸 (仅读取头部，极快)
-    QImageReader reader(info.absoluteFilePath());
-    QSize sz = reader.size();
-    if (sz.isValid()) {
-        w = sz.width();
-        h = sz.height();
+    // 2026-07-xx 按照计划：SVG 需特殊处理，防止 QImageReader 获取到错误的默认尺寸
+    if (info.suffix().toLower() == "svg") {
+        QSvgRenderer renderer(info.absoluteFilePath());
+        if (renderer.isValid()) {
+            QSize sz = renderer.defaultSize();
+            w = sz.width();
+            h = sz.height();
+        }
+    } else {
+        // 方案 A: 尝试通过 QImageReader 获取尺寸 (仅读取头部，极快)
+        QImageReader reader(info.absoluteFilePath());
+        QSize sz = reader.size();
+        if (sz.isValid()) {
+            w = sz.width();
+            h = sz.height();
+        }
     }
     
     // 2026-07-xx 按照 Plan-29：如果 QImageReader 失败且是图像类型，尝试 Windows Shell 属性
@@ -955,9 +966,8 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
     
     if (info.isFile()) {
         if (ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower())) {
-            // 获取调色板及缩略图 (getShellThumbnail 内部已处理尺寸)
-            QImage img = ArcMeta::UiHelper::getShellThumbnail(qPath, 256);
-            if (img.isNull()) img.load(qPath);
+            // 2026-07-xx 按照建议：统一使用 getImageForAnalysis 以确保 SVG 正确栅格化
+            QImage img = ArcMeta::UiHelper::getImageForAnalysis(qPath, 256);
             
             if (!img.isNull()) {
                 // 如果之前没拿到尺寸，这里补救
@@ -1060,6 +1070,7 @@ void MetadataManager::processVisualRetryQueue() {
             bool ok = false;
 
             if (info.isFile()) {
+                // 2026-07-xx 按照建议：extractPalette 内部已通过 getImageForAnalysis 解决了 SVG 渲染问题
                 auto palette = ArcMeta::UiHelper::extractPalette(qPath);
                 if (!palette.isEmpty()) {
                     QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
