@@ -1073,8 +1073,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         QString text = obj->property("tooltipText").toString(); 
         if (!text.isEmpty()) { 
             int timeout = (obj == m_btnLayers || obj == m_btnLayersBlue ||
-                       obj == m_btnToggleFolders || obj == m_btnToggleFiles ||
-                       obj == m_btnLayersBlue) ? 0 : 700;
+                       obj == m_btnToggleFolders || obj == m_btnToggleFiles) ? 0 : 700;
             ToolTipOverlay::instance()->showText(QCursor::pos(), text, timeout);
         } 
     } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::Leave || event->type() == QEvent::MouseButtonPress) { 

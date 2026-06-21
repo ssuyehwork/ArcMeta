@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "JustifiedView.h"
+#include "../core/ModelContract.h"
 #include <QPainter>
 #include <QScrollBar>
 #include <QResizeEvent>
@@ -368,10 +369,27 @@ void JustifiedView::doLayout() {
         double rowAspectRatioSum = 0;
         std::vector<double> aspectRatios;
 
+        bool forceBreak = false;
         while (i < count) {
-            double ar = model()->data(model()->index(i, 0), m_aspectRatioRole).toDouble();
+            QModelIndex idx = model()->index(i, 0);
+            double ar = model()->data(idx, m_aspectRatioRole).toDouble();
             if (ar <= 0) ar = 1.0;
             
+            // 2026-07-xx 物理分离逻辑：如果当前项是文件，但行首是文件夹（或反之），强制换行
+            QString type = model()->data(idx, TypeRole).toString();
+            bool isCurrentDir = (type == "folder" || type == "category");
+
+            if (i > rowStart) {
+                QModelIndex prevIdx = model()->index(i - 1, 0);
+                QString prevType = model()->data(prevIdx, TypeRole).toString();
+                bool isPrevDir = (prevType == "folder" || prevType == "category");
+
+                if (isCurrentDir != isPrevDir) {
+                    forceBreak = true;
+                    break;
+                }
+            }
+
             aspectRatios.push_back(ar);
             rowAspectRatioSum += ar;
             
@@ -398,7 +416,8 @@ void JustifiedView::doLayout() {
 
         int actualHeight = m_targetRowHeight;
         bool isLastRow = (i == count);
-        bool rowIsJustified = !isLastRow; // 2026-06-16 物理修正：非最后一行始终填满，杜绝空隙
+        // 2026-07-xx 物理对齐修正：若因类型差异导致的强制换行，该行不执行两端对齐，防止图标拉伸变形
+        bool rowIsJustified = !isLastRow && !forceBreak;
 
         int availableImageWidth = containerWidth - (spacing * (numInRow - 1)) - (6 * numInRow);
 

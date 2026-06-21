@@ -1045,11 +1045,16 @@ void MainWindow::setupSplitters() {
         if (m_navPanel)      m_navPanel->setFocusHighlight(false);
         if (m_categoryPanel) m_categoryPanel->setFocusHighlight(false);
 
-        // 根据数据来源显示焦点线
+        // 根据数据来源显示焦点线并联动标题栏按钮状态
         if (source == "category") {
             if (m_categoryPanel) m_categoryPanel->setFocusHighlight(true);
+            if (m_btnCreate) m_btnCreate->setEnabled(false);
         } else if (source == "nav") {
             if (m_navPanel) m_navPanel->setFocusHighlight(true);
+            if (m_btnCreate) m_btnCreate->setEnabled(true);
+        } else {
+            // 搜索结果或其他数据源，同样禁用新建
+            if (m_btnCreate) m_btnCreate->setEnabled(false);
         }
         // 其他来源（搜索、筛选等）不显示焦点线
     });
@@ -1148,6 +1153,7 @@ void MainWindow::setupCustomTitleBarButtons() {
             "QPushButton { background: transparent; border: none; border-radius: 4px; padding: 0; }"
             "QPushButton:hover { background: %1; }"
             "QPushButton:pressed { background: #4E4E52; }"
+            "QPushButton:disabled { opacity: 0.3; }"
         ).arg(hoverColor));
         return btn;
     };
@@ -1332,6 +1338,7 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
 
     // 3. 协议分流加载
     if (url.startsWith(kProtocolCategory)) {
+        if (m_btnCreate) m_btnCreate->setEnabled(false);
         // category://{id}?name={name}
         QString params = url.mid(kProtocolCategory.length());
         int qMark = params.indexOf('?');
@@ -1348,6 +1355,7 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
         m_currentPath = url; // 逻辑路径
     }
     else if (url.startsWith(kProtocolSystem)) {
+        if (m_btnCreate) m_btnCreate->setEnabled(false);
         // system://all | trash | etc.
         QString type = url.mid(kProtocolSystem.length());
         if (m_categoryPanel) {
@@ -1368,11 +1376,13 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
         if (path.startsWith(kProtocolFile)) path = path.mid(kProtocolFile.length());
         
         if (path == "computer://") {
+            if (m_btnCreate) m_btnCreate->setEnabled(false);
             if (m_addressBar) m_addressBar->setPath("computer://");
             if (m_contentPanel) m_contentPanel->loadDirectory("");
             if (m_navPanel) m_navPanel->selectPath("computer://");
             m_currentPath = "computer://";
         } else {
+            if (m_btnCreate) m_btnCreate->setEnabled(true);
             QString normPath = QDir::toNativeSeparators(path);
             if (m_addressBar) m_addressBar->setPath(normPath);
             if (m_contentPanel) m_contentPanel->loadDirectory(normPath);
