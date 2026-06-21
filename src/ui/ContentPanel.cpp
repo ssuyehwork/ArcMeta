@@ -2231,10 +2231,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         const auto drives = QDir::drives(); 
         std::vector<ItemRecord> driveRecords;
         for (const QFileInfo& drive : drives) { 
-            ItemRecord r;
-            r.path = QDir::toNativeSeparators(drive.absolutePath());
-            r.isDir = true;
-            driveRecords.push_back(r);
+            driveRecords.push_back(ContentPanel::createItemRecord(drive.absolutePath()));
         } 
         m_model->setRecords(driveRecords);
         // 2026-05-29 物理对齐：在加载“此电脑”后显式触发一次排序，确保置顶硬盘排在首位
