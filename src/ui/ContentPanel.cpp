@@ -1746,8 +1746,13 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     if (!fid.empty()) { 
                         // 2026-06-xx 按照用户需求：如果在系统层选择了“未分类”，则清除该项所有其他分类关联
                         if (catId == -2) { // 未分类的负数 ID
-                             CategoryRepo::removeAllCategories(fid);
-                             // TODO: removeAllCategories 的撤销支持较为复杂，暂不加入 Command
+                             // 2026-07-xx 按照 Plan-83：实现撤销支持
+                             std::vector<int> oldCatIds = CategoryRepo::getItemCategoryIds(fid);
+                             if (!oldCatIds.empty()) {
+                                 if (CategoryRepo::removeAllCategories(fid)) {
+                                     UndoManager::instance().pushCommand(std::make_unique<BulkUncategorizeCommand>(itemPath, fid, oldCatIds));
+                                 }
+                             }
                         } else if (catId > 0) {
                              if (CategoryRepo::addItemToCategory(catId, fid, wPath)) {
                                  UndoManager::instance().pushCommand(std::make_unique<CategorizeCommand>(itemPath, fid, catId, true));

@@ -888,8 +888,8 @@ std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, boo
     return finalRes;
 }
 
-void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& volume) {
-    USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(record);
+void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volume) {
+    USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(recordPtr);
     uint64_t frn, parentFrn;
     uint32_t attr;
     LARGE_INTEGER timestamp;
@@ -897,6 +897,7 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
 
     // 2026-05-14 核心排查：针对 V2 (64bit FRN) 和 V3 (128bit FRN) 进行严格的偏移匹配
     if (header->MajorVersion == 2) {
+        USN_RECORD_V2* record = reinterpret_cast<USN_RECORD_V2*>(recordPtr);
         frn = record->FileReferenceNumber;
         parentFrn = record->ParentFileReferenceNumber;
         attr = record->FileAttributes;
@@ -950,11 +951,18 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
     }
 
     QWriteLocker lock(&m_dataLock);
-    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(reinterpret_cast<uint8_t*>(record) + fileNameOffset), fileNameLength / 2);
+    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(recordPtr + fileNameOffset), fileNameLength / 2);
     size_t dIdx = 0;
     for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
     uint64_t encodedPf = makeKey(dIdx, parentFrn);
     uint64_t compositeKey = makeKey(dIdx, frn);
+
+    // 2026-07-xx 按照 Plan-84：物理对账优化
+    // 1. 通过路径反查，检测是否发生了同名覆盖（即路径没变但 FRN 变了）
+    std::wstring currentPath = getPathFastInternal(dIdx, frn);
+    bool identityMatch = true;
+
+    // 如果该 FID 之前关联在其他路径，或者该路径现在被新 FID 占用，则判定为变动
     auto it = m_frn_to_idx.find(compositeKey);
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
@@ -996,7 +1004,7 @@ void MftReader::updateEntryFromUsn(USN_RECORD_V2* record, const std::wstring& vo
         if (dIdx < 32) m_drive_entry_indices[dIdx].push_back(newIdx);
     }
     { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
-    m_next_usns[volume] = record->Usn;
+    m_next_usns[volume] = usn;
     if (dIdx < 32) m_drive_dirty_counts[dIdx]++;
     
     // 2026-05-14 工业级内存加固：实时监控内存碎片率
@@ -1063,33 +1071,37 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
     std::vector<uint64_t> addedKeys;
     std::vector<uint64_t> updatedKeys;
 
-    for (USN_RECORD_V2* record : records) {
-        USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(record);
+    for (uint8_t* recordPtr : records) {
+        USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(recordPtr);
         uint64_t frn, parentFrn;
         uint32_t attr;
         LARGE_INTEGER timestamp;
         WORD fileNameLength, fileNameOffset;
+        USN usn;
 
         if (header->MajorVersion == 2) {
+            USN_RECORD_V2* record = reinterpret_cast<USN_RECORD_V2*>(recordPtr);
             frn = record->FileReferenceNumber;
             parentFrn = record->ParentFileReferenceNumber;
             attr = record->FileAttributes;
             timestamp = record->TimeStamp;
             fileNameLength = record->FileNameLength;
             fileNameOffset = record->FileNameOffset;
+            usn = record->Usn;
         } else if (header->MajorVersion == 3) {
             struct V3_LAYOUT {
                 DWORD RecordLength; WORD MajorVersion; WORD MinorVersion;
                 BYTE FileReferenceNumber[16]; BYTE ParentFileReferenceNumber[16];
                 USN Usn; LARGE_INTEGER TimeStamp; DWORD Reason; DWORD SourceInfo;
                 DWORD SecurityId; DWORD FileAttributes; WORD FileNameLength; WORD FileNameOffset;
-            } *v3 = reinterpret_cast<V3_LAYOUT*>(record);
+            } *v3 = reinterpret_cast<V3_LAYOUT*>(recordPtr);
             frn = *reinterpret_cast<uint64_t*>(v3->FileReferenceNumber);
             parentFrn = *reinterpret_cast<uint64_t*>(v3->ParentFileReferenceNumber);
             attr = v3->FileAttributes;
             timestamp = v3->TimeStamp;
             fileNameLength = v3->FileNameLength;
             fileNameOffset = v3->FileNameOffset;
+            usn = v3->Usn;
         } else continue;
 
         int64_t finalModifyTime = filetimeToUnixMs(timestamp.QuadPart);
@@ -1098,7 +1110,7 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
         // 批量模式下暂不执行耗时的 OpenFileById 同步拉取，交由异步 Metadata 队列处理
         // 这样可以确保 USN 监控线程以最高速吞噬日志
         
-        QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(reinterpret_cast<uint8_t*>(record) + fileNameOffset), fileNameLength / 2);
+        QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(recordPtr + fileNameOffset), fileNameLength / 2);
         uint64_t encodedPf = makeKey(dIdx, parentFrn);
         uint64_t compositeKey = makeKey(dIdx, frn);
         
@@ -1143,7 +1155,7 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& rec
             addedKeys.push_back(compositeKey);
         }
         { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
-        m_next_usns[volume] = record->Usn;
+        m_next_usns[volume] = usn;
         if (dIdx < 32) m_drive_dirty_counts[dIdx]++;
     }
 

@@ -86,6 +86,11 @@ public:
     QMap<QString, int> getAllTags() const;
 
     /**
+     * @brief 获取权重最高的前 N 个标签 (Plan-82)
+     */
+    QList<QPair<QString, int>> getTopTags(int limit = 20) const;
+
+    /**
      * @brief 物理刷新级别
      */
     enum class RefreshLevel {
