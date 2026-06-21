@@ -973,16 +973,17 @@ void MainWindow::setupSplitters() {
     m_titleBarLayout = new QHBoxLayout(m_titleBarWidget);
     // 2026-xx-xx 按照用户要求：标题栏左侧与右侧均保持 5px 呼吸边距
     m_titleBarLayout->setContentsMargins(5, 0, kEdgeMargin, 0); 
-    m_titleBarLayout->setSpacing(5);
+    m_titleBarLayout->setSpacing(8);
 
     m_logoLabel = new QLabel(m_titleBarWidget);
     m_logoLabel->setFixedSize(18, 18);
-    m_logoLabel->setPixmap(UiHelper::getIcon("ferrex", QColor("#EEEEEE")).pixmap(18, 18));
+    m_logoLabel->setPixmap(UiHelper::getIcon("ferrex", BrandOrange).pixmap(16, 16));
+    m_logoLabel->setAlignment(Qt::AlignCenter);
     m_logoLabel->setStyleSheet("background: transparent; border: none;");
     m_titleBarLayout->addWidget(m_logoLabel);
 
     m_appNameLabel = new QLabel("FERREX", m_titleBarWidget);
-    m_appNameLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-weight: bold;").arg(qssColor(TextDark)));
+    m_appNameLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-weight: bold;").arg(BrandOrange.name()));
     m_titleBarLayout->addWidget(m_appNameLabel);
     m_titleBarLayout->addStretch();
 
