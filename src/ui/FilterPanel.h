@@ -138,6 +138,11 @@ public:
      */
     void selectColor(const QColor& color);
 
+    /**
+     * @brief 获取当前筛选锁定状态
+     */
+    bool isFilterLocked() const { return m_isFilterLocked; }
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -145,7 +150,11 @@ signals:
     void filterChanged(const FilterState& state);
 
 public slots:
-    void clearAllFilters();
+    /**
+     * @brief 清除所有筛选条件
+     * @param force 若为 true，则无视锁定状态强制清除
+     */
+    void clearAllFilters(bool force = false);
 
 private:
     void rebuildGroups();
@@ -177,9 +186,12 @@ private:
     QWidget*      m_container       = nullptr;
     QVBoxLayout*  m_containerLayout = nullptr;
     QPushButton*  m_btnClearAll     = nullptr;
+    QPushButton*  m_btnLockFilter   = nullptr; // 2026-07-xx 按照 Plan-75：筛选锁定按钮
     QPushButton*  m_btnToggleGroups = nullptr; // 2026-07-xx 按照 Plan-77：全局折叠/展开按钮
     QLabel*       m_iconLabel       = nullptr;
     QLabel*       m_titleLabel      = nullptr;
+
+    bool          m_isFilterLocked  = false;
 
     QList<QPushButton*> m_groupHeaders; // 跟踪所有分组标题以支持全局控制
 

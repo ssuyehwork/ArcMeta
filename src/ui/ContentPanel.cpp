@@ -733,7 +733,7 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
     }
 
     // 2026-06-xx 工业级纠偏：置顶优先规则 (物理排序第二权重)
-    // 必须确保 PinnedRole 或 IsLockedRole 的判定逻辑在排序中具有绝对优先级
+    // 必须确保 PinnedRole 或 IsLockedRole 的判定逻辑在各类型区域内部具有绝对优先级
     QVariant leftPinnedVar = source_left.data(PinnedRole);
     if (!leftPinnedVar.isValid()) leftPinnedVar = source_left.data(IsLockedRole);
     
@@ -745,9 +745,9 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
  
     if (leftPinned != rightPinned) { 
         // 2026-06-xx 物理修复：Qt 排序模型在 Descending 下会反转 lessThan 结果
-        // 为了确保置顶项在任何排序顺序下都位于顶部，必须结合 sortOrder 进行逻辑判定
-        if (sortOrder() == Qt::AscendingOrder) return leftPinned; // 升序：左置顶 -> 小 (true)
-        else return !leftPinned; // 降序：左置顶 -> 结果反转 -> 需要返回 false 以保持顶部
+        // 为了确保置顶项在任何排序顺序下都位于顶部（区域最前端），必须结合 sortOrder 进行逻辑判定
+        if (sortOrder() == Qt::AscendingOrder) return leftPinned; // 升序：左置顶项被视为“小”（即排在前面）
+        else return !leftPinned; // 降序：结果会被反转，因此需要调整返回值以确保置顶项依然在顶部
     } 
     return QSortFilterProxyModel::lessThan(source_left, source_right); 
 } 

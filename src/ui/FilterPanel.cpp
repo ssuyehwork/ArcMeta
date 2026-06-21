@@ -326,7 +326,22 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
         "QPushButton:hover { background: #3E3E42; }"
         "QPushButton:pressed { background: #4E4E52; }");
-    connect(m_btnClearAll, &QPushButton::clicked, this, &FilterPanel::clearAllFilters);
+    // 2026-07-xx 按照用户要求：手动点击“清除”按钮必须强制生效
+    connect(m_btnClearAll, &QPushButton::clicked, this, [this]() { clearAllFilters(true); });
+
+    m_btnLockFilter = new QPushButton(topBar);
+    m_btnLockFilter->setFixedSize(24, 24);
+    m_btnLockFilter->setFlat(true);
+    m_btnLockFilter->setCursor(Qt::PointingHandCursor);
+    m_btnLockFilter->installEventFilter(this);
+    m_btnLockFilter->setStyleSheet(
+        "QPushButton { background: transparent; border: none; border-radius: 4px; }"
+        "QPushButton:hover { background: #3E3E42; }"
+        "QPushButton:pressed { background: #4E4E52; }");
+    connect(m_btnLockFilter, &QPushButton::clicked, this, [this]() {
+        m_isFilterLocked = !m_isFilterLocked;
+        updateHeaderStatus();
+    });
 
     m_btnToggleGroups = new QPushButton(topBar);
     m_btnToggleGroups->setFixedSize(24, 24);
@@ -340,6 +355,7 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     connect(m_btnToggleGroups, &QPushButton::clicked, this, &FilterPanel::onToggleAllGroupsClicked);
 
     topL->addStretch();
+    topL->addWidget(m_btnLockFilter, 0, Qt::AlignVCenter);
     topL->addWidget(m_btnToggleGroups, 0, Qt::AlignVCenter);
     topL->addWidget(m_btnClearAll, 0, Qt::AlignVCenter);
     m_mainLayout->addWidget(topBar);
@@ -1288,7 +1304,10 @@ QCheckBox* FilterPanel::addFilterRow(QVBoxLayout* layout, const QString& label, 
 }
 
 // ─── clearAllFilters ──────────────────────────────────────────────
-void FilterPanel::clearAllFilters() {
+void FilterPanel::clearAllFilters(bool force) {
+    // 2026-07-xx 按照 Plan-75：如果已锁定且非强制，则跳过重置逻辑
+    if (m_isFilterLocked && !force) return;
+
     // 2026-06-xx 物理修复：重置所有筛选内存状态
     m_filter = FilterState{};
     m_hueSliderColor.clear();
@@ -1309,7 +1328,7 @@ void FilterPanel::clearAllFilters() {
 }
 
 void FilterPanel::updateHeaderStatus() {
-    if (!m_iconLabel || !m_titleLabel || !m_btnClearAll || !m_btnToggleGroups) return;
+    if (!m_iconLabel || !m_titleLabel || !m_btnClearAll || !m_btnToggleGroups || !m_btnLockFilter) return;
     
     bool active = !m_filter.isEmpty();
     
@@ -1322,7 +1341,12 @@ void FilterPanel::updateHeaderStatus() {
     QColor btnColor = active ? brandYellow : QColor("#B0B0B0");
     m_btnClearAll->setIcon(UiHelper::getIcon("reset_filter", btnColor));
 
-    // 标记 ③：全局折叠按钮状态
+    // 标记 ③：筛选锁定按钮状态
+    // 2026-07-xx 按照用户要求：锁定使用 pin.svg，彩色提示；未锁定使用 pin_tilted.svg，灰色提示
+    m_btnLockFilter->setIcon(UiHelper::getIcon(m_isFilterLocked ? "pin" : "pin_tilted", m_isFilterLocked ? brandYellow : QColor("#B0B0B0"), 16));
+    m_btnLockFilter->setProperty("tooltipText", m_isFilterLocked ? "筛选已锁定：导航时将保持当前条件" : "筛选未锁定：切换目录时将重置条件");
+
+    // 标记 ④：全局折叠按钮状态
     // 2026-07-xx 按照评审意见：校准图标映射。要求：展开状态(false)显示 down，折叠状态(true)显示 up
     bool allCollapsed = AppConfig::instance().getValue("FilterPanel/AllGroupsCollapsed", false).toBool();
     m_btnToggleGroups->setIcon(UiHelper::getIcon(allCollapsed ? "chevrons_up" : "chevrons_down", QColor("#B0B0B0"), 16));

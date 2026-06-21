@@ -203,6 +203,7 @@ void MetadataManager::initFromScchMode() {
                 rm.isInvalid = sqlite3_column_int(stmt, 15) != 0;
                 rm.width = sqlite3_column_int(stmt, 16);
                 rm.height = sqlite3_column_int(stmt, 17);
+                rm.pinned = sqlite3_column_int(stmt, 18) != 0;
                 if (paletteBlob && paletteSize > 0) {
                     QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
                     QJsonDocument doc = QJsonDocument::fromJson(ba);
@@ -1112,7 +1113,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
     if (!db) return;
 
     sqlite3_stmt* stmt;
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     bool isNew = true;
     {
         sqlite3_stmt* checkStmt;
@@ -1151,6 +1152,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
         sqlite3_bind_int(stmt, 16, rMeta.isInvalid ? 1 : 0);
         sqlite3_bind_int(stmt, 17, rMeta.width);
         sqlite3_bind_int(stmt, 18, rMeta.height);
+        sqlite3_bind_int(stmt, 19, rMeta.pinned ? 1 : 0);
 
         if (sqlite3_step(stmt) == SQLITE_DONE) {
             if (isNew) {

@@ -114,7 +114,8 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             original_path TEXT,
             is_invalid INTEGER DEFAULT 0,
             width INTEGER DEFAULT 0,
-            height INTEGER DEFAULT 0
+            height INTEGER DEFAULT 0,
+            pinned INTEGER DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
 
@@ -178,6 +179,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     bool hasInvalidColumn = false;
     bool hasWidthColumn = false;
     bool hasHeightColumn = false;
+    bool hasPinnedColumn = false;
 
     if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(checkStmt) == SQLITE_ROW) {
@@ -187,6 +189,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
                 if (name == "is_invalid") hasInvalidColumn = true;
                 if (name == "width") hasWidthColumn = true;
                 if (name == "height") hasHeightColumn = true;
+                if (name == "pinned") hasPinnedColumn = true;
             }
         }
         sqlite3_finalize(checkStmt);
@@ -203,6 +206,10 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     if (!hasHeightColumn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 height 字段...";
         sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN height INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+    }
+    if (!hasPinnedColumn) {
+        qDebug() << "[DB] 检测到旧版数据库，正在添加 pinned 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN pinned INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
     }
 
     conn.diskPath = diskPath;
