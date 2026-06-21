@@ -82,6 +82,7 @@ private:
 
     QWidget* m_titleBarWidget = nullptr;
     QHBoxLayout* m_titleBarLayout = nullptr;
+    QLabel* m_logoLabel = nullptr;
     QLabel* m_appNameLabel = nullptr;
     QWidget* m_navBarWidget = nullptr;
     QHBoxLayout* m_navBarLayout = nullptr;
@@ -105,6 +106,7 @@ private:
     void initToolbar();
     void setupSplitters();
     void setupCustomTitleBarButtons();
+    void resetSplitterLayout();
 
     // 复合地址栏
     AddressBar* m_addressBar = nullptr;
@@ -137,6 +139,7 @@ private:
     
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
     QPushButton* m_btnSync   = nullptr;
+    QPushButton* m_btnLayout = nullptr;
     QPushButton* m_btnCreate = nullptr;
     QPushButton* m_btnPinTop = nullptr;
     QPushButton* m_btnMin = nullptr;
