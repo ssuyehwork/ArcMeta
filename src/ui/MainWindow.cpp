@@ -1062,19 +1062,6 @@ void MainWindow::setupSplitters() {
     m_mainSplitter->addWidget(m_filterPanel);
     m_mainSplitter->addWidget(m_tagManagerView);
 
-    // 2026-07-xx 按照 Plan-63：对接所有面板容器级的右键菜单请求
-    // 这确保了在标题栏、空白边缘处点击右键也能弹出布局控制菜单
-    auto connectPanelMenu = [&](QWidget* panel) {
-        connect(panel, &QWidget::customContextMenuRequested, this, [this, panel](const QPoint& pos) {
-            showPanelContextMenu(panel->mapToGlobal(pos));
-        });
-    };
-
-    connectPanelMenu(m_categoryPanel);
-    connectPanelMenu(m_navPanel);
-    connectPanelMenu(m_contentPanel);
-    connectPanelMenu(m_metaPanel);
-    connectPanelMenu(m_filterPanel);
 
     // 2026-07-xx 按照用户要求：标签搜索联动
     connect(m_tagManagerView, &TagManagerView::requestSearchTag, this, [this](const QString& tag) {
@@ -1176,6 +1163,15 @@ void MainWindow::setupCustomTitleBarButtons() {
     
     connect(&MetadataManager::instance(), &MetadataManager::pendingSyncChanged, this, updateSyncBtnState);
 
+    m_btnLayout = createTitleBtn("layout");
+    m_btnLayout->setProperty("tooltipText", "布局管理与重置");
+    m_btnLayout->installEventFilter(m_hoverFilter);
+    connect(m_btnLayout, &QPushButton::clicked, this, [this]() {
+        QMenu menu(this);
+        UiHelper::applyMenuStyle(&menu);
+        populatePanelMenu(&menu);
+        menu.exec(m_btnLayout->mapToGlobal(QPoint(0, m_btnLayout->height())));
+    });
 
     m_btnCreate = createTitleBtn("add"); // 2026-03-xx 规范化：“+”按钮图标修正
     m_btnCreate->setProperty("tooltipText", "新建...");
@@ -1231,6 +1227,7 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     m_btnCreate->installEventFilter(m_hoverFilter);
     layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
+    layout->addWidget(m_btnLayout, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnCreate, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnPinTop, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnMin, 0, Qt::AlignVCenter);
@@ -1535,6 +1532,38 @@ void MainWindow::populatePanelMenu(QMenu* menu) {
     addToggleAction("显示内容区", m_contentPanel, false); // 核心区锁定不可隐藏
     addToggleAction("显示元数据栏", m_metaPanel);
     addToggleAction("显示筛选栏", m_filterPanel);
+
+    // 2. 新增重置选项
+    menu->addSeparator();
+    QAction* resetAct = menu->addAction("重置分栏");
+    connect(resetAct, &QAction::triggered, this, &MainWindow::resetSplitterLayout);
+}
+
+void MainWindow::resetSplitterLayout() {
+    // 1. 物理恢复可见性并退出特殊模式
+    m_isTagManagerMode = false;
+    m_tagManagerView->hide();
+
+    m_categoryPanel->show();
+    m_navPanel->show();
+    m_contentPanel->show();
+    m_metaPanel->show();
+    m_filterPanel->show();
+
+    // 2. 物理恢复尺寸比例 (索引 0-4)
+    QList<int> sizes;
+    sizes << 230 << 230 << 600 << 230 << 230;
+    // 如果 TagManagerView 在索引 5，需确保其 size 为 0 或处于 hide 状态
+    if (m_mainSplitter->count() > 5) sizes << 0;
+
+    m_mainSplitter->setSizes(sizes);
+
+    // 3. 清除持久化状态，防止重启后回滚旧布局
+    AppConfig::instance().remove("MainWindow/SplitterState");
+    AppConfig::instance().remove("MainWindow/PanelVisibility");
+    AppConfig::instance().sync();
+
+    ToolTipOverlay::instance()->showText(QCursor::pos(), "布局已重置为默认值", 1500);
 }
 
 void MainWindow::loadPanelVisibility() {
