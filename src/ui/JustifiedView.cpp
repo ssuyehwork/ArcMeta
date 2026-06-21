@@ -55,10 +55,15 @@ void JustifiedView::doItemsLayout() {
 void JustifiedView::setModel(QAbstractItemModel* model) {
     if (this->model()) {
         disconnect(this->model(), &QAbstractItemModel::rowsRemoved, this, nullptr);
+        disconnect(this->model(), &QAbstractItemModel::layoutChanged, this, nullptr);
     }
     QAbstractItemView::setModel(model);
     if (model) {
         connect(model, &QAbstractItemModel::rowsRemoved, this, [this]() {
+            QTimer::singleShot(0, this, [this]() { doLayout(); });
+        });
+        // 2026-07-xx 物理修复：监听模型重排序信号，强制重新计算几何布局
+        connect(model, &QAbstractItemModel::layoutChanged, this, [this]() {
             QTimer::singleShot(0, this, [this]() { doLayout(); });
         });
     }
@@ -109,12 +114,6 @@ void JustifiedView::rowsInserted(const QModelIndex& parent, int start, int end) 
 void JustifiedView::rowsAboutToBeRemoved(const QModelIndex& parent, int start, int end) {
     // 直接转发给基类即可，实际重排由 setModel 中连接的 rowsRemoved 信号处理
     QAbstractItemView::rowsAboutToBeRemoved(parent, start, end);
-}
-
-void JustifiedView::layoutChanged() {
-    // 2026-07-xx 物理修复：当模型重排序（发出 layoutChanged）时，强制重新计算几何布局
-    QTimer::singleShot(0, this, [this]() { doLayout(); });
-    QAbstractItemView::layoutChanged();
 }
 
 QModelIndex JustifiedView::moveCursor(CursorAction cursorAction, Qt::KeyboardModifiers) {
