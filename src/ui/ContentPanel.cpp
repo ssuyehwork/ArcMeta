@@ -371,6 +371,7 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
         }
     } else if (role == IsLockedRole || role == PinnedRole) {
         bool pinned = value.toBool();
+        Logger::log(QString("[Model_Debug] setPinned for: %1 Value: %2").arg(path).arg(pinned));
         MetadataManager::instance().setPinned(path.toStdWString(), pinned);
         metaUpdated = true;
     }
@@ -420,6 +421,7 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             m_allRecords[i].tags = meta.tags;
             m_allRecords[i].fileId = meta.fileId128;
             m_allRecords[i].pinned = meta.pinned;
+            Logger::log(QString("[Model_Debug] Record updated. Path: %1 Pinned: %2").arg(nPath).arg(m_allRecords[i].pinned));
             m_allRecords[i].encrypted = meta.encrypted;
             m_allRecords[i].isManaged = meta.hasUserOperations();
             m_allRecords[i].palettes.clear();
@@ -714,7 +716,16 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
     int leftWeight = getWeight(source_left);
     int rightWeight = getWeight(source_right);
 
+    // 2026-07-xx 调试日志：追踪权重比较
     if (leftWeight != rightWeight) {
+        if (leftWeight == 1 || rightWeight == 1) {
+            Logger::log(QString("[Sort_Debug] Pinned comparison: %1 (W:%2) vs %3 (W:%4) Result: %5")
+                .arg(source_left.data(Qt::DisplayRole).toString())
+                .arg(leftWeight)
+                .arg(source_right.data(Qt::DisplayRole).toString())
+                .arg(rightWeight)
+                .arg(sortOrder() == Qt::AscendingOrder ? (leftWeight < rightWeight) : (leftWeight > rightWeight)));
+        }
         // 核心规则：权重小的项（文件夹 > 置顶 > 普通）始终排在顶部。
         // 由于 Qt 在 Descending 模式下会反转 lessThan 的返回值，
         // 为了对抗这种反转并保持顶部锁定，必须根据 sortOrder 进行差异化返回。

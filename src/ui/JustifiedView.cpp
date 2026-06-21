@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "JustifiedView.h"
+#include "Logger.h"
 #include "../core/ModelContract.h"
 #include <QPainter>
 #include <QScrollBar>
@@ -116,6 +117,7 @@ void JustifiedView::rowsAboutToBeRemoved(const QModelIndex& parent, int start, i
 
 void JustifiedView::onLayoutChanged() {
     // 2026-07-xx 物理修复：当模型重排序（发出 layoutChanged）时，强制重新计算几何布局
+    Logger::log("[UI_Debug] onLayoutChanged triggered, re-calculating geometries...");
     QTimer::singleShot(0, this, [this]() { doLayout(); });
 }
 
@@ -371,6 +373,7 @@ void JustifiedView::doLayout() {
 
     int currentY = margin; 
     int i = 0;
+    Logger::log(QString("[UI_Debug] doLayout start. Total count: %1").arg(count));
     
     while (i < count) {
         int rowStart = i;
@@ -385,6 +388,8 @@ void JustifiedView::doLayout() {
             
             // 2026-07-xx 物理分离逻辑：如果当前项是文件，但行首是文件夹（或反之），强制换行
             QString type = model()->data(idx, TypeRole).toString();
+            if (i < 10) Logger::log(QString("  [Layout_Debug] Processing item %1: %2 Type: %3")
+                                   .arg(i).arg(model()->data(idx, Qt::DisplayRole).toString()).arg(type));
             bool isCurrentDir = (type == "folder" || type == "category");
 
             if (i > rowStart) {
