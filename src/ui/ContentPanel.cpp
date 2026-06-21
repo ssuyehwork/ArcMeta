@@ -127,6 +127,8 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
             return "category";
         } else if (role == PathRole) {
             return ""; // 2026-06-xx 物理级补全：子分类无物理路径，返回空以防止逻辑溢出
+        } else if (role == IsLockedRole || role == PinnedRole) {
+            return false; // 2026-07-xx 物理规避：子分类暂不支持置顶，强制返回 false 以免排序混乱
         } else if (role == Qt::DecorationRole && index.column() == 0) {
             static QIcon catIcon = QFileIconProvider().icon(QFileIconProvider::Folder);
             return catIcon;
@@ -700,35 +702,30 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
 } 
  
 bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelIndex& source_right) const { 
-    // 2026-07-xx 物理强制：文件夹与子分类始终置顶 (绝对第一权重)
-    QString leftType = source_left.data(TypeRole).toString();
-    QString rightType = source_right.data(TypeRole).toString();
-    bool leftIsDir = (leftType == "folder" || leftType == "category");
-    bool rightIsDir = (rightType == "folder" || rightType == "category");
+    // 2026-07-xx 物理排序重构 (Plan-74)：显式权重逻辑
+    auto getWeight = [&](const QModelIndex& idx) -> int {
+        QString type = idx.data(TypeRole).toString();
+        if (type == "folder" || type == "category") return 0;
+        // 注意：IsLockedRole 与 PinnedRole 在模型中均指向 record.pinned
+        if (idx.data(PinnedRole).toBool() || idx.data(IsLockedRole).toBool()) return 1;
+        return 2;
+    };
 
-    if (leftIsDir != rightIsDir) {
-        // 文件夹 vs 文件：文件夹永远被视为“更小”（在升序中排在前）
-        if (sortOrder() == Qt::AscendingOrder) return leftIsDir;
-        else return !leftIsDir;
+    int leftWeight = getWeight(source_left);
+    int rightWeight = getWeight(source_right);
+
+    if (leftWeight != rightWeight) {
+        // 核心规则：权重小的项（文件夹 > 置顶 > 普通）始终排在顶部。
+        // 由于 Qt 在 Descending 模式下会反转 lessThan 的返回值，
+        // 为了对抗这种反转并保持顶部锁定，必须根据 sortOrder 进行差异化返回。
+        if (sortOrder() == Qt::AscendingOrder) {
+            return leftWeight < rightWeight; // 升序：左小右大 -> true
+        } else {
+            return leftWeight > rightWeight; // 降序：左大右小 -> false (反转后排在前面)
+        }
     }
 
-    // 2026-06-xx 工业级纠偏：置顶优先规则 (物理排序第二权重)
-    // 必须确保 PinnedRole 或 IsLockedRole 的判定逻辑在排序中具有绝对优先级
-    QVariant leftPinnedVar = source_left.data(PinnedRole);
-    if (!leftPinnedVar.isValid()) leftPinnedVar = source_left.data(IsLockedRole);
-    
-    QVariant rightPinnedVar = source_right.data(PinnedRole);
-    if (!rightPinnedVar.isValid()) rightPinnedVar = source_right.data(IsLockedRole);
-
-    bool leftPinned = leftPinnedVar.toBool();
-    bool rightPinned = rightPinnedVar.toBool();
- 
-    if (leftPinned != rightPinned) { 
-        // 2026-06-xx 物理修复：Qt 排序模型在 Descending 下会反转 lessThan 结果
-        // 为了确保置顶项在任何排序顺序下都位于顶部，必须结合 sortOrder 进行逻辑判定
-        if (sortOrder() == Qt::AscendingOrder) return leftPinned; // 升序：左置顶 -> 小 (true)
-        else return !leftPinned; // 降序：左置顶 -> 结果反转 -> 需要返回 false 以保持顶部
-    } 
+    // 权重相同（同为文件夹或同为普通文件）时，执行默认排序逻辑
     return QSortFilterProxyModel::lessThan(source_left, source_right); 
 } 
  
