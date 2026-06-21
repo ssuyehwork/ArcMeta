@@ -497,6 +497,7 @@ void FilterPanel::rebuildGroups() {
     m_editType = nullptr;
     m_editCreateDate = nullptr;
     m_editModifyDate = nullptr;
+    m_accuracySlider = nullptr;
 
     // 清空旧内容（保留末尾 stretch）
     while (m_containerLayout->count() > 1) {
@@ -597,6 +598,35 @@ void FilterPanel::rebuildGroups() {
             rebuildGroups();
         });
         gl->addWidget(hueContainer);
+
+        // 2.1.5 颜色准确度 (容差) 滑块 ─────────────────────────
+        // 2026-07-xx 按照用户要求：还原此前被误删的准确度控制条
+        QWidget* accContainer = new QWidget(g);
+        QHBoxLayout* accLayout = new QHBoxLayout(accContainer);
+        accLayout->setContentsMargins(10, 4, 10, 4);
+        accLayout->setSpacing(8);
+
+        QLabel* lblAcc = new QLabel("准确度:", accContainer);
+        lblAcc->setStyleSheet("color: #AAAAAA; font-size: 11px;");
+        accLayout->addWidget(lblAcc);
+
+        m_accuracySlider = new QSlider(Qt::Horizontal, accContainer);
+        m_accuracySlider->setRange(0, 100);
+        m_accuracySlider->setValue(m_filter.colorTolerance);
+        m_accuracySlider->setCursor(Qt::PointingHandCursor);
+        m_accuracySlider->setStyleSheet(
+            "QSlider::groove:horizontal { height: 2px; background: #444; border-radius: 1px; }"
+            "QSlider::handle:horizontal { background: #EEE; border: 1px solid #777; width: 10px; height: 10px; margin: -4px 0; border-radius: 5px; }"
+            "QSlider::handle:horizontal:hover { background: #FFF; border-color: #378ADD; }"
+        );
+        accLayout->addWidget(m_accuracySlider, 1);
+
+        connect(m_accuracySlider, &QSlider::valueChanged, this, [this](int val) {
+            m_filter.colorTolerance = val;
+            emit filterChanged(m_filter);
+        });
+
+        gl->addWidget(accContainer);
 
         // 2.2 标准色矩阵 (12色)
         // 2026-06-xx 物理对齐：设置左边距 8px 以对齐下方的复选框视觉线

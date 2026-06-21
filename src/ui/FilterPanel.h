@@ -8,6 +8,7 @@
 #include <QScrollArea>
 #include <QPushButton>
 #include <QLineEdit>
+#include <QSlider>
 #include <QMap>
 #include <QStringList>
 #include "MetaPanel.h" // 引用 FlowLayout
@@ -188,6 +189,7 @@ private:
     QLineEdit*    m_editType        = nullptr;
     QLineEdit*    m_editCreateDate  = nullptr;
     QLineEdit*    m_editModifyDate  = nullptr;
+    QSlider*      m_accuracySlider  = nullptr; // 2026-07-xx 按照用户要求：还原颜色准确度控制条
 
     SearchHistoryPanel* m_historyPanel = nullptr;
     
