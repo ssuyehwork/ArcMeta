@@ -66,10 +66,11 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
         m_pathEdit->deselect();
         m_pathEdit->clearFocus();
 
-        if (QDir(input).exists() || input == "computer://" || input == "此电脑") {
-            emit pathChanged(input == "此电脑" ? "computer://" : input);
+        if (QDir(input).exists() || input == "computer://" || input == tr("此电脑")) {
+            emit pathChanged(input == tr("此电脑") ? "computer://" : input);
         } else {
-            m_pathEdit->setText(QDir::toNativeSeparators(m_currentPath));
+            QString rollback = (m_currentPath == "computer://") ? tr("此电脑") : QDir::toNativeSeparators(m_currentPath);
+            m_pathEdit->setText(rollback);
             m_pathStack->setCurrentWidget(m_breadcrumbBar);
         }
     });
@@ -98,7 +99,7 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
 
 void AddressBar::setPath(const QString& path) {
     m_currentPath = path;
-    QString displayPath = (path == "computer://") ? "此电脑" : QDir::toNativeSeparators(path);
+    QString displayPath = (path == "computer://") ? tr("此电脑") : QDir::toNativeSeparators(path);
     m_pathEdit->setText(displayPath);
     m_breadcrumbBar->setPath(path);
     m_pathStack->setCurrentWidget(m_breadcrumbBar);
@@ -115,7 +116,8 @@ void AddressBar::saveToHistory(const QString& path) {
 }
 
 void AddressBar::onBreadcrumbBlankClicked() {
-    m_pathEdit->setText(QDir::toNativeSeparators(m_currentPath));
+    QString displayPath = (m_currentPath == "computer://") ? tr("此电脑") : QDir::toNativeSeparators(m_currentPath);
+    m_pathEdit->setText(displayPath);
     m_pathStack->setCurrentWidget(m_pathEdit);
     m_pathEdit->setFocus();
     

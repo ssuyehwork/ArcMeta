@@ -127,6 +127,8 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
             return "category";
         } else if (role == PathRole) {
             return ""; // 2026-06-xx 物理级补全：子分类无物理路径，返回空以防止逻辑溢出
+        } else if (role == IsLockedRole || role == PinnedRole) {
+            return record.pinned;
         } else if (role == Qt::DecorationRole && index.column() == 0) {
             static QIcon catIcon = QFileIconProvider().icon(QFileIconProvider::Folder);
             return catIcon;
@@ -369,14 +371,32 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
         }
     } else if (role == IsLockedRole || role == PinnedRole) {
         bool pinned = value.toBool();
-        MetadataManager::instance().setPinned(path.toStdWString(), pinned);
-        metaUpdated = true;
+        if (record.isCategory) {
+            auto all = CategoryRepo::getAll();
+            for (auto& c : all) {
+                if (c.id == record.categoryId) {
+                    c.pinned = pinned;
+                    CategoryRepo::update(c);
+                    auto& mutableRec = m_allRecords[index.row()];
+                    mutableRec.pinned = pinned;
+                    metaUpdated = true;
+                    break;
+                }
+            }
+        } else {
+            MetadataManager::instance().setPinned(path.toStdWString(), pinned);
+            metaUpdated = true;
+        }
     }
 
     if (metaUpdated) {
-        m_metaCache.remove(path);
-        // 2026-06-xx 物理同步：更新本地 Record 缓存，确保 UI 和排序逻辑立即可见最新状态
-        updateRecordMetadata(path);
+        if (!record.isCategory) {
+            m_metaCache.remove(path);
+            // 2026-06-xx 物理同步：更新本地 Record 缓存，确保 UI 和排序逻辑立即可见最新状态
+            updateRecordMetadata(path);
+        } else {
+            emit dataChanged(index, index, {role});
+        }
         return true;
     }
 
@@ -1743,6 +1763,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     m_proxyModel->setData(idx, pin, IsLockedRole); 
                 } 
             } 
+            // 2026-06-xx 物理修复：强制刷新代理模型排序，确保置顶项立即重排至顶部
+            m_proxyModel->invalidate();
+            m_proxyModel->sort(0, m_proxyModel->sortOrder());
             break; 
         } 
         case ActionColorTag: { 
@@ -2208,10 +2231,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         const auto drives = QDir::drives(); 
         std::vector<ItemRecord> driveRecords;
         for (const QFileInfo& drive : drives) { 
-            ItemRecord r;
-            r.path = QDir::toNativeSeparators(drive.absolutePath());
-            r.isDir = true;
-            driveRecords.push_back(r);
+            driveRecords.push_back(ContentPanel::createItemRecord(drive.absolutePath()));
         } 
         m_model->setRecords(driveRecords);
         // 2026-05-29 物理对齐：在加载“此电脑”后显式触发一次排序，确保置顶硬盘排在首位
@@ -2255,6 +2275,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, reqId]() { 
             if (panelPtr && panelPtr->m_loadRequestId == reqId) { 
                 panelPtr->m_model->setRecords(allItems);
+                panelPtr->m_proxyModel->sort(0, Qt::AscendingOrder);
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
                 // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
@@ -2421,6 +2442,7 @@ void ContentPanel::loadCategory(int categoryId) {
                 r.categoryColor = QString::fromStdWString(cat.color).isEmpty() ? "#aaaaaa" : QString::fromStdWString(cat.color);
                 // 2026-07-xx 物理同步：从内存缓存或元数据管理器中拉取分类的评分（如有）
                 r.rating = 0; 
+                r.pinned = cat.pinned;
                 allRecords.push_back(r);
             }
         }
@@ -2449,6 +2471,7 @@ void ContentPanel::loadCategory(int categoryId) {
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, allRecords, reqId]() {
             if (weakThis && weakThis->m_loadRequestId == reqId) {
                 weakThis->m_model->setRecords(allRecords);
+                weakThis->m_proxyModel->sort(0, Qt::AscendingOrder);
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
@@ -2526,6 +2549,7 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, records, reqId]() {
             if (weakThis && weakThis->m_loadRequestId == reqId) {
                 weakThis->m_model->setRecords(records);
+                weakThis->m_proxyModel->sort(0, Qt::AscendingOrder);
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 

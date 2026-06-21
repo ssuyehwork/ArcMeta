@@ -163,78 +163,81 @@ void MetadataManager::initFromScchMode() {
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
     std::unordered_map<std::string, std::wstring> tempFidToPath;
 
-    // 扫描所有已加载的数据库
+    auto loadFromDb = [&](sqlite3* db) {
+        if (!db) return;
+        sqlite3_stmt* stmt;
+        const char* sql = "SELECT * FROM metadata";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                RuntimeMeta rm;
+                const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                if (fid) rm.fileId128 = fid;
+
+                const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
+                std::wstring path = normalizePath(wpath ? wpath : L"");
+
+                rm.isFolder = sqlite3_column_int(stmt, 2);
+                rm.rating = sqlite3_column_int(stmt, 3);
+                const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
+                if (color) rm.color = color;
+                
+                const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 5));
+                QString tags = wtags ? QString::fromWCharArray(wtags) : "";
+                rm.tags = tags.split(",", Qt::SkipEmptyParts);
+
+                const wchar_t* note = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 6));
+                if (note) rm.note = note;
+                const wchar_t* url = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 7));
+                if (url) rm.url = url;
+                rm.ctime = sqlite3_column_int64(stmt, 8);
+                rm.mtime = sqlite3_column_int64(stmt, 9);
+                rm.atime = sqlite3_column_int64(stmt, 10);
+                rm.fileSize = sqlite3_column_int64(stmt, 11);
+
+                const void* paletteBlob = sqlite3_column_blob(stmt, 12);
+                int paletteSize = sqlite3_column_bytes(stmt, 12);
+
+                rm.isTrash = sqlite3_column_int(stmt, 13) != 0;
+                const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 14));
+                if (wOrigPath) rm.originalPath = wOrigPath;
+                rm.isInvalid = sqlite3_column_int(stmt, 15) != 0;
+                rm.width = sqlite3_column_int(stmt, 16);
+                rm.height = sqlite3_column_int(stmt, 17);
+                if (paletteBlob && paletteSize > 0) {
+                    QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
+                    QJsonDocument doc = QJsonDocument::fromJson(ba);
+                    QJsonArray arr = doc.array();
+                    for (const auto& v : arr) {
+                        QJsonObject obj = v.toObject();
+                        PaletteEntry pe;
+                        pe.color = QColor(obj["color"].toString());
+                        pe.ratio = (float)obj["ratio"].toDouble();
+                        rm.palettes.push_back(pe);
+                    }
+                }
+
+                rm.isManaged = true;
+                tempCache[path] = rm;
+                if (!rm.fileId128.empty()) tempFidToPath[rm.fileId128] = path;
+            }
+            sqlite3_finalize(stmt);
+        }
+    };
+
+    // 0. 加载全局库 (盘符置顶等全局元数据)
+    loadFromDb(DatabaseManager::instance().getGlobalDb());
+
+    // 1. 扫描所有已加载的数据库
     // 2026-06-xx 逻辑加固：由于驱动器序列号在不同机器上可能重复或变化，
     // 我们必须确保启动时扫描 .arcmeta 目录下所有物理分库。
     QString metaDir = QCoreApplication::applicationDirPath() + "/.arcmeta";
     QDir dir(metaDir);
     if (dir.exists()) {
-        // 2026-06-xx 物理修复：必须包含 Hidden 和 System 标志，因为 DatabaseManager 会将数据库设为隐藏属性
         QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files | QDir::Hidden | QDir::System);
         qDebug() << "[Metadata] 发现物理分库数量:" << dbFiles.size();
         for (const QString& dbFile : dbFiles) {
-            // 文件名格式: Arcmeta_XXXX.db -> 提取 XXXX
             QString volSerial = dbFile.mid(8, dbFile.length() - 8 - 3);
-            sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial.toStdWString());
-            if (!db) continue;
-
-            sqlite3_stmt* stmt;
-            const char* sql = "SELECT * FROM metadata";
-            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                while (sqlite3_step(stmt) == SQLITE_ROW) {
-                    RuntimeMeta rm;
-                    const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                    if (fid) rm.fileId128 = fid;
-
-                    const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
-                    std::wstring path = normalizePath(wpath ? wpath : L"");
-
-                    rm.isFolder = sqlite3_column_int(stmt, 2);
-                    rm.rating = sqlite3_column_int(stmt, 3);
-                    const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
-                    if (color) rm.color = color;
-                    
-                    const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 5));
-                    QString tags = wtags ? QString::fromWCharArray(wtags) : "";
-                    rm.tags = tags.split(",", Qt::SkipEmptyParts);
-
-                    const wchar_t* note = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 6));
-                    if (note) rm.note = note;
-                    const wchar_t* url = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 7));
-                    if (url) rm.url = url;
-                    rm.ctime = sqlite3_column_int64(stmt, 8);
-                    rm.mtime = sqlite3_column_int64(stmt, 9);
-                    rm.atime = sqlite3_column_int64(stmt, 10);
-                    rm.fileSize = sqlite3_column_int64(stmt, 11);
-
-                    const void* paletteBlob = sqlite3_column_blob(stmt, 12);
-                    int paletteSize = sqlite3_column_bytes(stmt, 12);
-
-                    rm.isTrash = sqlite3_column_int(stmt, 13) != 0;
-                    const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 14));
-                    if (wOrigPath) rm.originalPath = wOrigPath;
-                    rm.isInvalid = sqlite3_column_int(stmt, 15) != 0;
-                    rm.width = sqlite3_column_int(stmt, 16);
-                    rm.height = sqlite3_column_int(stmt, 17);
-                    if (paletteBlob && paletteSize > 0) {
-                        QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
-                        QJsonDocument doc = QJsonDocument::fromJson(ba);
-                        QJsonArray arr = doc.array();
-                        for (const auto& v : arr) {
-                            QJsonObject obj = v.toObject();
-                            PaletteEntry pe;
-                            pe.color = QColor(obj["color"].toString());
-                    pe.ratio = (float)obj["ratio"].toDouble();
-                            rm.palettes.push_back(pe);
-                        }
-                    }
-
-                    rm.isManaged = true; // 2026-06-xx 物理同步：从数据库加载的项必然是已登记项
-                    tempCache[path] = rm;
-                    if (!rm.fileId128.empty()) tempFidToPath[rm.fileId128] = path;
-                }
-                sqlite3_finalize(stmt);
-            }
+            loadFromDb(DatabaseManager::instance().getMemoryDb(volSerial.toStdWString()));
         }
     }
 
@@ -1096,8 +1099,16 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     
     RuntimeMeta rMeta = getMeta(nPath);
-    std::wstring volSerial = getVolumeSerialNumber(nPath);
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
+    sqlite3* db = nullptr;
+    
+    // 2026-06-xx 架构重定向：判定是否为物理磁盘根目录（如 C:\）。
+    // 理由：盘符置顶等元数据属于全应用级全局元数据，必须存入全局库以解决物理分库未挂载或盘符漂移冲突。
+    if (nPath.length() == 3 && nPath[1] == L':' && (nPath[2] == L'\\' || nPath[2] == L'/')) {
+        db = DatabaseManager::instance().getGlobalDb();
+    } else {
+        std::wstring volSerial = getVolumeSerialNumber(nPath);
+        db = DatabaseManager::instance().getMemoryDb(volSerial);
+    }
     if (!db) return;
 
     sqlite3_stmt* stmt;
