@@ -27,6 +27,11 @@ public:
         return m_settings.value(key, defaultValue);
     }
 
+    void remove(const QString& key) {
+        QMutexLocker lock(&m_mutex);
+        m_settings.remove(key);
+    }
+
     void sync() {
         QMutexLocker lock(&m_mutex);
         m_settings.sync();
