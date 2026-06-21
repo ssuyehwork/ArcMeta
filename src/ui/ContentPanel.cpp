@@ -1600,7 +1600,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         // --- 2026-05-16 图像分析：从图中提取主色调 ---
         QString ext = QFileInfo(path).suffix().toLower();
         if (UiHelper::isGraphicsFile(ext)) {
-            menu.addAction("解析颜色...")->setData(ActionExtractColor);
+            // 2026-07-xx 逻辑增强：根据是否已入库，动态切换菜单文本
+            bool isManaged = currentIndex.data(ManagedRole).toBool();
+            menu.addAction(isManaged ? "重新解析颜色..." : "解析颜色...")->setData(ActionExtractColor);
         }
 
         menu.addSeparator(); 
@@ -1804,15 +1806,18 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
             if (filteredRows.isEmpty() && currentIndex.isValid()) filteredRows << currentIndex;
             
-            QStringList pathsToProcess;
+            struct ProcessItem { QString path; bool isManaged; };
+            QVector<ProcessItem> itemsToProcess;
             for (const auto& selIdx : filteredRows) {
                 QString pathItem = selIdx.data(PathRole).toString();
-                if (!pathItem.isEmpty()) pathsToProcess << pathItem;
+                if (!pathItem.isEmpty()) {
+                    itemsToProcess.append({pathItem, selIdx.data(ManagedRole).toBool()});
+                }
             }
-            if (pathsToProcess.isEmpty()) break;
+            if (itemsToProcess.isEmpty()) break;
 
             QPointer<ContentPanel> weakThis(this);
-            int total = static_cast<int>(pathsToProcess.size());
+            int total = static_cast<int>(itemsToProcess.size());
 
             // 只有当文件数多于 5 个时才显示进度条
             BatchProgressDialog* progress = nullptr;
@@ -1821,38 +1826,50 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 progress->show();
             }
 
-            (void)QtConcurrent::run([weakThis, pathsToProcess, total, progress]() {
+            (void)QtConcurrent::run([weakThis, itemsToProcess, total, progress]() {
                 // 后台线程初始化 COM 环境以支持 Shell 缩略图/颜色提取
                 CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
                 
                 for (int i = 0; i < total; ++i) {
-                    QString itemPath = pathsToProcess[i];
-                    auto palette = UiHelper::extractPalette(itemPath);
+                    const auto& item = itemsToProcess[i];
+                    QString itemPath = item.path;
                     
                     if (progress) {
                         QMetaObject::invokeMethod(progress, "updateProgress", Qt::QueuedConnection, 
                                                   Q_ARG(int, i + 1), Q_ARG(int, total), Q_ARG(QString, QFileInfo(itemPath).fileName()));
                     }
 
-                    if (!palette.isEmpty()) {
-                        QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                        QString colorHex = dominant.name().toUpper();
+                    // 2026-07-xx 逻辑校准：针对未入库项目，执行完整注册流程（内部会自动提取颜色）
+                    if (!item.isManaged) {
+                        MetadataManager::instance().registerItem(itemPath.toStdWString());
+                        
+                        // 注册后通知 UI 刷新单项状态
+                        QMetaObject::invokeMethod(weakThis.data(), [weakThis, itemPath]() {
+                            if (weakThis) weakThis->updateItemMetadata(itemPath);
+                        }, Qt::QueuedConnection);
+                    } else {
+                        // 针对已入库项目，执行强制重新解析逻辑
+                        auto palette = UiHelper::extractPalette(itemPath);
+                        if (!palette.isEmpty()) {
+                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
+                            QString colorHex = dominant.name().toUpper();
 
-                        QMetaObject::invokeMethod(weakThis.data(), [weakThis, itemPath, colorHex, palette]() {
-                            if (weakThis) {
-                                MetadataManager::instance().setPalettes(itemPath.toStdWString(), palette);
-                                
-                                auto* model = weakThis->m_model;
-                                const auto& records = model->allRecords();
-                                for (size_t j = 0; j < records.size(); ++j) {
-                                    if (records[j].path == itemPath) {
-                                        QModelIndex srcIdx = model->index(static_cast<int>(j), 0);
-                                        model->setData(srcIdx, colorHex, ColorRole);
-                                        break;
+                            QMetaObject::invokeMethod(weakThis.data(), [weakThis, itemPath, colorHex, palette]() {
+                                if (weakThis) {
+                                    MetadataManager::instance().setPalettes(itemPath.toStdWString(), palette);
+                                    
+                                    auto* model = weakThis->m_model;
+                                    const auto& records = model->allRecords();
+                                    for (size_t j = 0; j < records.size(); ++j) {
+                                        if (records[j].path == itemPath) {
+                                            QModelIndex srcIdx = model->index(static_cast<int>(j), 0);
+                                            model->setData(srcIdx, colorHex, ColorRole);
+                                            break;
+                                        }
                                     }
                                 }
-                            }
-                        }, Qt::QueuedConnection);
+                            }, Qt::QueuedConnection);
+                        }
                     }
                 }
 
