@@ -68,6 +68,44 @@ public:
         }
         
         QStyledItemDelegate::paint(painter, opt, index);
+
+        // 2026-07-xx 物理绘制：实现分类名称高亮 (Plan-96)
+        const auto* proxy = qobject_cast<const QSortFilterProxyModel*>(index.model());
+        if (proxy && !proxy->filterRegularExpression().pattern().isEmpty()) {
+            QString filterText = proxy->filterRegularExpression().pattern();
+            QString fullText = index.data(Qt::DisplayRole).toString();
+            int startIdx = fullText.indexOf(filterText, 0, Qt::CaseInsensitive);
+
+            if (startIdx >= 0) {
+                painter->save();
+                painter->setRenderHint(QPainter::Antialiasing);
+
+                QStyle* style = opt.widget ? opt.widget->style() : QApplication::style();
+                QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget);
+                textRect.adjust(2, 0, 0, 0);
+
+                QFont font = opt.font;
+                painter->setFont(font);
+                QFontMetrics fm(font);
+
+                QString matchPart = fullText.mid(startIdx, filterText.length());
+                QString prePart = fullText.left(startIdx);
+                int preWidth = fm.horizontalAdvance(prePart);
+                int matchWidth = fm.horizontalAdvance(matchPart);
+
+                // 绘制逻辑：仅对匹配部分应用蓝色前景
+                painter->setPen(QColor("#00a2ff")); // 亮蓝色高亮
+                if (selected) {
+                    painter->setPen(QColor("#ffffff")); // 选中时保持白色
+                    painter->setBrush(QColor("#007acc")); // 但增加深色背景背景
+                    QRect hRect(textRect.left() + preWidth, textRect.top() + (textRect.height() - fm.height())/2 + 2, matchWidth, fm.height() - 2);
+                    painter->drawRoundedRect(hRect, 2, 2);
+                }
+
+                painter->drawText(textRect.left() + preWidth, textRect.top(), matchWidth, textRect.height(), Qt::AlignVCenter, matchPart);
+                painter->restore();
+            }
+        }
     }
 
     QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override {

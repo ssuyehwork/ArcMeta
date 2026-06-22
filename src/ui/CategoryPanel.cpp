@@ -41,6 +41,47 @@ using namespace ArcMeta::Style;
 namespace ArcMeta {
 
 /**
+ * @brief 分类过滤代理模型 (Plan-96)
+ */
+class CategoryFilterProxyModel : public QSortFilterProxyModel {
+public:
+    explicit CategoryFilterProxyModel(QObject* parent = nullptr) : QSortFilterProxyModel(parent) {
+        setRecursiveFilteringEnabled(true);
+        setFilterCaseSensitivity(Qt::CaseInsensitive);
+    }
+
+    bool hideEmpty = false;
+
+protected:
+    bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override {
+        QModelIndex index = sourceModel()->index(sourceRow, 0, sourceParent);
+
+        // 1. 文本过滤
+        QString filterText = filterRegularExpression().pattern();
+        bool textMatch = true;
+        if (!filterText.isEmpty()) {
+            QString name = sourceModel()->data(index, NameRole).toString();
+            textMatch = name.contains(filterText, Qt::CaseInsensitive);
+        }
+
+        // 2. 空项过滤 (仅针对分类项目)
+        bool emptyMatch = true;
+        if (hideEmpty) {
+            QString type = sourceModel()->data(index, TypeRole).toString();
+            if (type == "category") {
+                QString display = sourceModel()->data(index, Qt::DisplayRole).toString();
+                // 匹配 "(0)" 结尾的项
+                if (display.endsWith("(0)")) {
+                    emptyMatch = false;
+                }
+            }
+        }
+
+        return textMatch && emptyMatch;
+    }
+};
+
+/**
  * @brief 获取默认分类颜色：深灰色 (#555555)
  * 2026-06-xx 按照用户要求：废除随机色，统一默认使用深灰色
  */
@@ -147,11 +188,14 @@ void CategoryPanel::selectCategory(int id) {
 
     QModelIndex target = findId(QModelIndex());
     if (target.isValid()) {
-        // 2026-03-xx 物理阻断：通过代码强制选中时，必须锁定信号发射，防止与 ContentPanel 形成回环死循环
-        m_categoryTree->blockSignals(true);
-        m_categoryTree->setCurrentIndex(target);
-        m_categoryTree->scrollTo(target);
-        m_categoryTree->blockSignals(false);
+        QModelIndex proxyTarget = m_proxyModel->mapFromSource(target);
+        if (proxyTarget.isValid()) {
+            // 2026-03-xx 物理阻断：通过代码强制选中时，必须锁定信号发射，防止与 ContentPanel 形成回环死循环
+            m_categoryTree->blockSignals(true);
+            m_categoryTree->setCurrentIndex(proxyTarget);
+            m_categoryTree->scrollTo(proxyTarget);
+            m_categoryTree->blockSignals(false);
+        }
     }
 }
 
@@ -172,10 +216,13 @@ void CategoryPanel::selectCategoryByType(const QString& type) {
 
     QModelIndex target = findType(QModelIndex());
     if (target.isValid()) {
-        m_categoryTree->blockSignals(true);
-        m_categoryTree->setCurrentIndex(target);
-        m_categoryTree->scrollTo(target);
-        m_categoryTree->blockSignals(false);
+        QModelIndex proxyTarget = m_proxyModel->mapFromSource(target);
+        if (proxyTarget.isValid()) {
+            m_categoryTree->blockSignals(true);
+            m_categoryTree->setCurrentIndex(proxyTarget);
+            m_categoryTree->scrollTo(proxyTarget);
+            m_categoryTree->blockSignals(false);
+        }
     }
 }
 
@@ -645,6 +692,7 @@ void CategoryPanel::onDeleteCategory() {
     QSet<int> idsToDelete;
     
     // 递归收集分类及其所有子分类 ID 的辅助函数
+    // 2026-07-xx 物理修正：使用 proxy model 进行遍历，确保 index 对应关系正确 (Plan-96)
     std::function<void(const QModelIndex&)> collectIds;
     collectIds = [&](const QModelIndex& index) {
         QString type = index.data(TypeRole).toString();
@@ -653,8 +701,8 @@ void CategoryPanel::onDeleteCategory() {
         if (type == "category" && id > 0) {
             idsToDelete.insert(id);
             // 递归收集子分类
-            for (int i = 0; i < m_categoryModel->rowCount(index); ++i) {
-                collectIds(m_categoryModel->index(i, 0, index));
+            for (int i = 0; i < m_proxyModel->rowCount(index); ++i) {
+                collectIds(m_proxyModel->index(i, 0, index));
             }
         }
     };
@@ -780,7 +828,7 @@ void CategoryPanel::initUi() {
     // 1. 标题栏
     QWidget* header = new QWidget(this);
     header->setObjectName("ContainerHeader");
-    header->setFixedHeight(32);
+    header->setFixedHeight(34);
     header->setStyleSheet(
         "QWidget#ContainerHeader {"
         "  background-color: #252526;"
@@ -788,8 +836,8 @@ void CategoryPanel::initUi() {
         "}"
     );
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 0, 5, 0); // 2026-xx-xx 按照用户要求：右侧保留 5px 呼吸边距
-    headerLayout->setSpacing(5);                  // 2026-05-17 按照用户要求：间距统一为 5px
+    headerLayout->setContentsMargins(15, 0, 8, 0); // 2026-xx-xx 按照全局规范：右侧保留 8px 呼吸边距
+    headerLayout->setSpacing(8);                  // 2026-05-17 按照全局规范：间距统一为 8px
 
     QLabel* iconLabel = new QLabel(header);
     iconLabel->setPixmap(UiHelper::getIcon("folder_filled", PrimaryBlue, 18).pixmap(18, 18));
@@ -836,7 +884,11 @@ void CategoryPanel::initUi() {
     
     // 2026-04-12 关键修复：延迟初始化模型数据（仅构造空壳）
     m_categoryModel = new CategoryModel(CategoryModel::Both, this);
-    m_categoryTree->setModel(m_categoryModel);
+
+    // 2026-07-xx 引入代理模型支持筛选 (Plan-96)
+    m_proxyModel = new CategoryFilterProxyModel(this);
+    m_proxyModel->setSourceModel(m_categoryModel);
+    m_categoryTree->setModel(m_proxyModel);
     
     m_categoryTree->setHeaderHidden(true);
     m_categoryTree->setRootIsDecorated(true);
@@ -995,6 +1047,66 @@ void CategoryPanel::initUi() {
     
     sbContentLayout->addWidget(m_categoryTree);
     m_mainLayout->addWidget(sbContent, 1);
+
+    // 3. 底部搜索与筛选区 (Plan-96)
+    QWidget* footer = new QWidget(this);
+    footer->setObjectName("CategoryFooter");
+    footer->setFixedHeight(34);
+    footer->setStyleSheet(
+        "QWidget#CategoryFooter {"
+        "  background-color: #252526;"
+        "  border-top: 1px solid #333;"
+        "}"
+    );
+    QHBoxLayout* footerLayout = new QHBoxLayout(footer);
+    footerLayout->setContentsMargins(10, 0, 10, 0);
+    footerLayout->setSpacing(8);
+
+    m_filterEdit = new QLineEdit(footer);
+    m_filterEdit->setPlaceholderText("筛选分类...");
+    m_filterEdit->setFixedHeight(24);
+    m_filterEdit->setStyleSheet(R"(
+        QLineEdit {
+            background-color: #1e1e1e;
+            border: 1px solid #3e3e42;
+            border-radius: 12px;
+            padding: 0 10px;
+            color: #ccc;
+            font-size: 11px;
+        }
+        QLineEdit:focus { border-color: #007acc; }
+    )");
+    footerLayout->addWidget(m_filterEdit);
+
+    m_emptyFolderCheck = new QCheckBox("空", footer);
+    m_emptyFolderCheck->setToolTip("隐藏空项");
+    m_emptyFolderCheck->setStyleSheet(
+        "QCheckBox { color: #888; font-size: 11px; }"
+        "QCheckBox::indicator { width: 14px; height: 14px; }"
+    );
+    footerLayout->addWidget(m_emptyFolderCheck);
+
+    m_mainLayout->addWidget(footer);
+
+    // 2026-07-xx 物理连接：分类过滤逻辑 (Plan-96)
+    connect(m_filterEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+        m_proxyModel->setFilterFixedString(text);
+        if (!text.isEmpty()) {
+            m_categoryTree->expandAll();
+        } else {
+            // 2026-07-xx 逻辑回滚：清空搜索时恢复用户之前的展开状态
+            loadExpandedStateFromSettings();
+        }
+    });
+
+    connect(m_emptyFolderCheck, &QCheckBox::stateChanged, this, [this](int state) {
+        auto* proxy = qobject_cast<CategoryFilterProxyModel*>(m_proxyModel);
+        if (proxy) {
+            proxy->hideEmpty = (state == Qt::Checked);
+            proxy->invalidateFilter();
+            if (state == Qt::Checked) m_categoryTree->expandAll();
+        }
+    });
 
     // 2026-03-xx 物理记忆：初始化后加载持久化的展开状态
     QTimer::singleShot(100, this, &CategoryPanel::loadExpandedStateFromSettings);

@@ -6,6 +6,9 @@
 #include <QPushButton>
 #include <QSet>
 #include <QModelIndex>
+#include <QSortFilterProxyModel>
+#include <QLineEdit>
+#include <QCheckBox>
 
 namespace ArcMeta {
 
@@ -117,7 +120,11 @@ private:
     
     DropTreeView* m_categoryTree = nullptr;
     CategoryModel* m_categoryModel = nullptr;
+    QSortFilterProxyModel* m_proxyModel = nullptr;
     QTimer* m_refreshTimer = nullptr;
+
+    QLineEdit* m_filterEdit = nullptr;
+    QCheckBox* m_emptyFolderCheck = nullptr;
 
     // 2026-03-xx 会话级解锁列表：存储当前已验证通过的加密分类 ID
     QSet<int> m_unlockedIds;
