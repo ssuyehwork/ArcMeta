@@ -429,7 +429,6 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
         if (edit && edit->objectName() == "FilterSearchEdit") {
             QString key;
             if (edit == m_editColor) key = "Color";
-            else if (edit == m_editTag) key = "Tag";
             else if (edit == m_editType) key = "Type";
             else if (edit == m_editCreateDate) key = "CreateDate";
             else if (edit == m_editModifyDate) key = "ModifyDate";
@@ -444,7 +443,6 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
                 connect(m_historyPanel, &SearchHistoryPanel::historyItemClicked, this, [this, edit, key](const QString& text) {
                     edit->setText(text);
                     if (edit == m_editColor) m_filter.colorFilterText = text;
-                    else if (edit == m_editTag) m_filter.tagFilterText = text;
                     else if (edit == m_editType) m_filter.typeFilterText = text;
                     else if (edit == m_editCreateDate) m_filter.createDateFilterText = text;
                     else if (edit == m_editModifyDate) m_filter.modifyDateFilterText = text;
@@ -523,7 +521,6 @@ void FilterPanel::rebuildGroups() {
     returnAllRowsToPool(); // 2026-07-xx 按照 Plan-89：使用复用池替代 deleteLater
 
     m_editColor = nullptr;
-    m_editTag = nullptr;
     m_editType = nullptr;
     m_editCreateDate = nullptr;
     m_editModifyDate = nullptr;
@@ -1319,7 +1316,6 @@ void FilterPanel::clearAllFilters() {
 
     // 2026-xx-xx 按照用户要求：清空这 5 个输入框的文字
     if (m_editColor) m_editColor->clear();
-    if (m_editTag) m_editTag->clear();
     if (m_editType) m_editType->clear();
     if (m_editCreateDate) m_editCreateDate->clear();
     if (m_editModifyDate) m_editModifyDate->clear();

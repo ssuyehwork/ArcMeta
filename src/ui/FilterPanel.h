@@ -197,7 +197,6 @@ private:
 
     // 2026-xx-xx 新增快速输入框成员
     QLineEdit*    m_editColor       = nullptr;
-    QLineEdit*    m_editTag         = nullptr;
     QLineEdit*    m_editType        = nullptr;
     QLineEdit*    m_editCreateDate  = nullptr;
     QLineEdit*    m_editModifyDate  = nullptr;
