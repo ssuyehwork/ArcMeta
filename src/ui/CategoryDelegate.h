@@ -13,6 +13,10 @@ namespace ArcMeta {
 class CategoryDelegate : public QStyledItemDelegate {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
+
+    void setSearchKeyword(const QString& keyword) {
+        m_searchKeyword = keyword;
+    }
     
     void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
         if (!index.isValid()) return;
@@ -67,7 +71,58 @@ public:
             opt.palette.setColor(QPalette::HighlightedText, Qt::white);
         }
         
-        QStyledItemDelegate::paint(painter, opt, index);
+        // 2026-07-18 按照 Plan-96：支持搜索高亮渲染
+        if (m_searchKeyword.isEmpty()) {
+            QStyledItemDelegate::paint(painter, opt, index);
+        } else {
+            // 1. 先让基类画图标 (不画文字)
+            QStyleOptionViewItem optNoText = opt;
+            optNoText.text = "";
+            QStyledItemDelegate::paint(painter, optNoText, index);
+
+            // 2. 获取文字区域并自行绘制高亮
+            QString text = index.data(Qt::DisplayRole).toString();
+            QStyle* style = opt.widget ? opt.widget->style() : QApplication::style();
+            QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget);
+            textRect.adjust(0, 0, -5, 0); // 右侧呼吸
+
+            painter->save();
+            painter->setRenderHint(QPainter::TextAntialiasing);
+
+            // 计算匹配位置 (不区分大小写)
+            int index_match = text.indexOf(m_searchKeyword, 0, Qt::CaseInsensitive);
+            if (index_match >= 0) {
+                QFont font = opt.font;
+                painter->setFont(font);
+
+                QFontMetrics fm(font);
+                QString preText = text.left(index_match);
+                QString midText = text.mid(index_match, m_searchKeyword.length());
+                QString postText = text.mid(index_match + m_searchKeyword.length());
+
+                // 绘制逻辑
+                int x = textRect.left();
+                int y = textRect.top() + (textRect.height() + fm.ascent() - fm.descent()) / 2;
+
+                // 绘制前段
+                painter->setPen(opt.palette.color(QPalette::Text));
+                painter->drawText(x, y, preText);
+                x += fm.horizontalAdvance(preText);
+
+                // 绘制匹配段 (高亮)
+                painter->setPen(QColor("#3498db")); // 按照 PrimaryBlue 规范高亮
+                painter->drawText(x, y, midText);
+                x += fm.horizontalAdvance(midText);
+
+                // 绘制后段
+                painter->setPen(opt.palette.color(QPalette::Text));
+                painter->drawText(x, y, postText);
+            } else {
+                // 虽然有搜索词但此项可能因为是父项被显示而本身没匹配
+                QStyledItemDelegate::paint(painter, opt, index);
+            }
+            painter->restore();
+        }
     }
 
     QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
@@ -94,6 +149,9 @@ public:
         textRect.adjust(0, -1, 0, 1);
         editor->setGeometry(textRect);
     }
+
+private:
+    QString m_searchKeyword;
 };
 
 } // namespace ArcMeta

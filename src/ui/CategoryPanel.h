@@ -6,11 +6,15 @@
 #include <QPushButton>
 #include <QSet>
 #include <QModelIndex>
+#include <QSortFilterProxyModel>
+#include <QLineEdit>
 
 namespace ArcMeta {
 
 class CategoryModel;
 class DropTreeView;
+class CategoryDelegate;
+class CategoryFilterProxyModel;
 
 /**
  * @brief 分类面板（面板一）
@@ -117,6 +121,10 @@ private:
     
     DropTreeView* m_categoryTree = nullptr;
     CategoryModel* m_categoryModel = nullptr;
+    CategoryFilterProxyModel* m_proxyModel = nullptr;
+    CategoryDelegate* m_delegate = nullptr;
+    QLineEdit* m_searchEdit = nullptr;
+
     QTimer* m_refreshTimer = nullptr;
 
     // 2026-03-xx 会话级解锁列表：存储当前已验证通过的加密分类 ID
