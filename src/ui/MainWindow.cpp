@@ -412,7 +412,10 @@ void MainWindow::initUi() {
     // 5b. FilterPanel 勾选变化 -> 内容面板过滤
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_filterPanel, &FilterPanel::filterChanged, this, [this](const FilterState& state) {
-        m_contentPanel->applyFilters(state);
+        // 2026-07-xx 按照 Plan-90：动态合并搜索框文本
+        FilterState merged = state;
+        merged.keyword = m_searchEdit ? m_searchEdit->text().trimmed() : QString();
+        m_contentPanel->applyFilters(merged);
         updateStatusBar(); // 筛选后立即更新底栏可见项目总数
     });
 
@@ -480,21 +483,9 @@ void MainWindow::initUi() {
             return;
         }
 
-        // 2026-07-xx 物理拦截：发起搜索前必须清空筛选面板的所有过滤条件，
-        // 防止因旧有的“评级/颜色/标签”勾选导致搜索结果被拦截不可见。
+        // 2026-07-xx 按照 Plan-90：发起搜索前重置筛选器，利用统一信号链同步关键词
         if (m_filterPanel) {
-            m_filterPanel->blockSignals(true);
             m_filterPanel->clearAllFilters();
-            m_filterPanel->blockSignals(false);
-            
-            // 物理同步：由于屏蔽了信号，需要手动重置内容面板的筛选状态
-            if (m_contentPanel) {
-                m_contentPanel->applyFilters(FilterState());
-                // 2026-07-xx 物理同步：显式同步搜索词到代理模型，防止首帧逻辑判定失步
-                if (auto* proxy = qobject_cast<FilterProxyModel*>(m_contentPanel->getProxyModel())) {
-                    proxy->setSearchQuery(keyword);
-                }
-            }
         }
 
         // 维护历史记录

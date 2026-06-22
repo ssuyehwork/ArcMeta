@@ -473,7 +473,7 @@ void FilterProxyModel::updateFilter() {
 } 
  
 void FilterProxyModel::setSearchQuery(const QString& query) { 
-    m_searchQuery = query; 
+    currentFilter.keyword = query;
     beginFilterChange(); 
     endFilterChange(); 
 } 
@@ -579,31 +579,6 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         if (!matchColor) return false; 
     } 
  
-    // 3. 标签过滤 
-    if (!currentFilter.tags.isEmpty() || !currentFilter.tagFilterText.isEmpty()) { 
-        const QStringList& itemTags = record.tags; 
-        bool matchTag = false; 
-        
-        if (!currentFilter.tagFilterText.isEmpty()) {
-            QString searchText = currentFilter.tagFilterText.trimmed();
-            for (const QString& t : itemTags) {
-                if (t.contains(searchText, Qt::CaseInsensitive)) { matchTag = true; break; }
-            }
-            if (!matchTag) return false;
-        }
-
-        if (!currentFilter.tags.isEmpty()) {
-            matchTag = false;
-            for (const QString& fTag : currentFilter.tags) { 
-                if (fTag == "__none__") { 
-                    if (itemTags.isEmpty()) { matchTag = true; break; } 
-                } else { 
-                    if (itemTags.contains(fTag)) { matchTag = true; break; } 
-                } 
-            } 
-            if (!matchTag) return false; 
-        }
-    } 
 
     // 4. 类型过滤 
     if (!currentFilter.types.isEmpty() || !currentFilter.typeFilterText.isEmpty()) { 
@@ -712,11 +687,11 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         }
     } 
  
-    // 2026-04-12 深度修复：直接执行关键词包含检查 
-    if (m_searchQuery.isEmpty()) return true; 
+    // 2026-07-xx 按照 Plan-90：统一执行关键词判定 (已合并至 FilterState)
+    if (currentFilter.keyword.isEmpty()) return true;
  
     QString fileName = idx.data(Qt::DisplayRole).toString(); 
-    return fileName.contains(m_searchQuery, Qt::CaseInsensitive); 
+    return fileName.contains(currentFilter.keyword, Qt::CaseInsensitive);
 } 
  
 bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelIndex& source_right) const { 

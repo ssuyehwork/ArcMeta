@@ -69,7 +69,6 @@ private:
 struct FilterState {
     QList<int>   ratings;
     QStringList  colors;
-    QStringList  tags;
     QStringList  types;
     QStringList  createDates;   // "YYYY-MM-DD"
     QStringList  modifyDates;
@@ -86,24 +85,25 @@ struct FilterState {
     long long minSize = -1; // 字节单位，-1 表示不限制
     long long maxSize = -1;
 
-    // 2026-xx-xx 按照用户要求：新增 5 个主选项的快速文本过滤字段
+    // 2026-xx-xx 按照用户要求：新增主选项的快速文本过滤字段
     QString colorFilterText;
-    QString tagFilterText;
     QString typeFilterText;
     QString createDateFilterText;
     QString modifyDateFilterText;
+
+    QString keyword; // 2026-07-xx 按照 Plan-90：统一搜索关键词至过滤状态
 
     bool showFolders = true; // 2026-07-xx 按照 Plan-73：显示/隐藏文件夹
     bool showFiles = true;   // 2026-07-xx 按照 Plan-73：显示/隐藏文件
 
     bool isEmpty() const {
-        return ratings.isEmpty() && colors.isEmpty() && tags.isEmpty() && types.isEmpty() &&
+        return ratings.isEmpty() && colors.isEmpty() && types.isEmpty() &&
                createDates.isEmpty() && modifyDates.isEmpty() &&
                linkPresence == All && notePresence == All && ratio == AspectAny &&
                minSize == -1 && maxSize == -1 &&
-               colorFilterText.trimmed().isEmpty() && tagFilterText.trimmed().isEmpty() &&
+               colorFilterText.trimmed().isEmpty() &&
                typeFilterText.trimmed().isEmpty() && createDateFilterText.trimmed().isEmpty() &&
-               modifyDateFilterText.trimmed().isEmpty();
+               modifyDateFilterText.trimmed().isEmpty() && keyword.trimmed().isEmpty();
     }
 };
 
@@ -151,12 +151,24 @@ private:
     void rebuildGroups();
     void updateHeaderStatus();
 
+    // 2026-07-xx 按照 Plan-91：日期排序重构
+    enum DateType { CreateDate, ModifyDate };
+    bool m_createDateDesc = true;
+    bool m_modifyDateDesc = true;
+    void rebuildDateCheckboxes(DateType type, bool descending);
+
     // 2026-05-17 根因修复：增加 outHdrLayout 参数，让调用方直接往标题行布局追加按钮
     // 彻底替代绝对定位方案，消除非布局子控件撑高 wrapper 导致的留白
     QWidget*   buildGroup(const QString& title, QVBoxLayout*& outContentLayout,
                           QHBoxLayout** outHdrLayout = nullptr);
     QCheckBox* addFilterRow(QVBoxLayout* layout, const QString& label,
                             int count, const QColor& dotColor = Qt::transparent);
+
+    // 2026-07-xx 按照 Plan-89：UI 复用池
+    class ClickableRow* getRowFromPool(QVBoxLayout* layout);
+    void returnAllRowsToPool();
+    QList<class ClickableRow*> m_rowPool;
+    int m_poolIndex = 0;
 
     static QMap<QString, QColor> s_colorMap();
 
