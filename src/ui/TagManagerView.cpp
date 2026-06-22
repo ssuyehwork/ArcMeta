@@ -206,6 +206,34 @@ void TagManagerView::setupContentArea() {
 
     mainL->addWidget(titleBar);
 
+    // 1.5 常用标签区 (Plan-82)
+    QWidget* popularTagsBox = new QWidget(m_contentContainer);
+    popularTagsBox->setObjectName("PopularTagsBox");
+    popularTagsBox->setFixedHeight(110); // 固定高度，防止晃动
+    popularTagsBox->setStyleSheet(
+        "QWidget#PopularTagsBox { background-color: #1e1e1e; border-bottom: 1px solid #333; }"
+    );
+    QVBoxLayout* popularL = new QVBoxLayout(popularTagsBox);
+    popularL->setContentsMargins(20, 10, 20, 10);
+    popularL->setSpacing(8);
+
+    QHBoxLayout* popTitleL = new QHBoxLayout();
+    QLabel* popIcon = new QLabel(popularTagsBox);
+    popIcon->setPixmap(UiHelper::getIcon("sparkles", QColor("#f1c40f"), 16).pixmap(16, 16));
+    popTitleL->addWidget(popIcon);
+    QLabel* popTitle = new QLabel("常用标签", popularTagsBox);
+    popTitle->setStyleSheet("font-size: 12px; font-weight: bold; color: #f1c40f;");
+    popTitleL->addWidget(popTitle);
+    popTitleL->addStretch();
+    popularL->addLayout(popTitleL);
+
+    QWidget* popFlowContainer = new QWidget(popularTagsBox);
+    popFlowContainer->setObjectName("PopularTagsFlowContainer");
+    new FlowLayout(popFlowContainer, 0, 10, 8);
+    popularL->addWidget(popFlowContainer, 1);
+
+    mainL->addWidget(popularTagsBox);
+
     // 2. 滚动区
     m_scrollArea = new QScrollArea(m_contentContainer);
     m_scrollArea->setWidgetResizable(true);
@@ -406,6 +434,13 @@ void TagManagerView::adjustFlowHeights() {
     int sideMargin = 20 * 2; // contentLayout->setContentsMargins(20, 20, 20, 20)
     int availableWidth = contentWidth - sideMargin;
 
+    // 调整常用标签高度 (Plan-82)
+    QWidget* popFlow = findChild<QWidget*>("PopularTagsFlowContainer");
+    if (popFlow && popFlow->layout()) {
+        int h = static_cast<FlowLayout*>(popFlow->layout())->heightForWidth(availableWidth);
+        popFlow->parentWidget()->setFixedHeight(std::max(60, 16 + 10 + h + 20));
+    }
+
     QVBoxLayout* contentLayout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
     if (!contentLayout) return;
 
@@ -453,6 +488,34 @@ void TagManagerView::search(const QString& keyword) {
 
 void TagManagerView::refresh() {
     m_tagCounts = MetadataManager::instance().getAllTags();
+
+    // 渲染常用标签 (Plan-82)
+    QWidget* popFlow = findChild<QWidget*>("PopularTagsFlowContainer");
+    if (popFlow && popFlow->layout()) {
+        QLayoutItem* child;
+        while ((child = popFlow->layout()->takeAt(0)) != nullptr) {
+            delete child->widget();
+            delete child;
+        }
+
+        auto topTags = MetadataManager::instance().getTopTags(20);
+        if (topTags.isEmpty()) {
+            popFlow->parentWidget()->hide();
+        } else {
+            popFlow->parentWidget()->show();
+            for (const auto& pair : topTags) {
+                QPushButton* btn = new QPushButton(QString("%1 (%2)").arg(pair.first).arg(pair.second), popFlow);
+                btn->setCursor(Qt::PointingHandCursor);
+                btn->setStyleSheet(
+                    "QPushButton { background: #2d2d30; border: 1px solid #3e3e42; color: #EEE; border-radius: 4px; padding: 4px 10px; font-size: 12px; }"
+                    "QPushButton:hover { background: #3e3e42; border-color: #f1c40f; color: #f1c40f; }"
+                );
+                QString tagName = pair.first;
+                connect(btn, &QPushButton::clicked, this, [this, tagName]() { emit requestSearchTag(tagName); });
+                popFlow->layout()->addWidget(btn);
+            }
+        }
+    }
     
     // 加载标签组
     m_tagGroups.clear();

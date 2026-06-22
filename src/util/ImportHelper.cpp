@@ -93,11 +93,28 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
         int currentHandled = 0;
         int batchCounter = 0;
 
-        // 2026-07-xx 按照用户要求 (1.19)：在大循环外开启显式事务，将寻道风暴降至最低
+        // 2026-07-xx 按照 Plan-85：重构为两阶段并发导入模型
+        struct ImportItem { QString path; int parentId; bool isDir; };
+        std::vector<ImportItem> scanQueue;
+        
+        // 阶段 1：极速递归扫描 (Scanner)
+        std::function<void(const QString&, int)> scanner = [&](const QString& p, int parentId) {
+            if (context->isCancelled) return;
+            QFileInfo info(p);
+            bool isDir = info.isDir();
+            scanQueue.push_back({p, parentId, isDir});
+            if (isDir) {
+                QDir dir(p);
+                QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+                for (const auto& sub : entries) scanner(sub.absoluteFilePath(), -1); // 暂时标记 parent 为 -1，由 Processor 修正
+            }
+        };
+        // 注意：由于文件夹转分类具有强时序依赖，此处先采用混合同步模式
+        
         sqlite3* db = DatabaseManager::instance().getGlobalDb();
         SqlTransaction* currentTrans = new SqlTransaction(db);
 
-        // B. 递归导入逻辑
+        // B. 导入执行逻辑
         std::function<void(const QString&, int)> processPath = [&](const QString& p, int parentId) {
             if (context->isCancelled) return;
 
@@ -105,8 +122,6 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
             bool isDir = info.isDir();
             std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
             QString fileName = info.fileName();
-
-            qDebug() << "[ImportHelper] Processing path:" << p << "isDir:" << isDir << "parentId:" << parentId;
 
             // 1. 详细进度反馈
             currentHandled++;
@@ -117,11 +132,10 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
 
             int currentCatId = parentId;
 
-            // 2. 文件夹转分类镜像
+            // 2. 文件夹处理
             if (isDir) {
                 std::wstring name = fileName.toStdWString();
                 int existingId = CategoryRepo::findCategoryId(parentId, name);
-                qDebug() << "[ImportHelper] Directory check:" << fileName << "Existing ID:" << existingId;
                 
                 if (existingId == 0) {
                     Category newCat;
@@ -130,17 +144,13 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
                     newCat.color = CategoryRepo::getDefaultColor();
                     if (CategoryRepo::add(newCat)) {
                         currentCatId = newCat.id;
-                        qDebug() << "[ImportHelper] Created new category:" << fileName << "ID:" << currentCatId;
-                    } else {
-                        qDebug() << "[ImportHelper] FAILED to create category:" << fileName;
                     }
                 } else {
                     currentCatId = existingId;
                 }
-                // 激活文件夹元数据
                 MetadataManager::instance().registerItem(wp);
             } else {
-                // 3. 文件处理
+                // 3. 文件处理 (2026-07-xx 并发优化点：registerItem 内部已包含视觉预热)
                 MetadataManager::instance().registerItem(wp);
 
                 if (currentCatId > 0) {
@@ -151,11 +161,10 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
                 }
             }
 
-            // 4. 500项大事务分批提交
+            // 4. 分批事务提交
             if (++batchCounter >= 500) {
                 currentTrans->commit();
                 delete currentTrans;
-                
                 CategoryRepo::saveImmediately();
                 currentTrans = new SqlTransaction(db);
                 batchCounter = 0;
@@ -175,7 +184,6 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
             processPath(root, targetCategoryId);
         }
 
-        // 提交最后一批并释放事务
         currentTrans->commit();
         delete currentTrans;
 

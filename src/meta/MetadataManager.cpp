@@ -1352,7 +1352,12 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
 
     if (scopeSource == "category" && categoryId != 0) {
         // 1. 分类范围搜索：获取该分类及其子分类下的所有 FID
-        auto items = CategoryRepo::getItemsRecursive(categoryId);
+        // 2026-07-xx 按照 Plan-81：支持递归搜索
+        std::vector<int> targetIds = { categoryId };
+        if (categoryId > 0) {
+            targetIds = CategoryRepo::getSubtreeIds(categoryId);
+        }
+        auto items = CategoryRepo::getItemsInCategories(targetIds);
         for (const auto& item : items) scopeFids.insert(item.fileId128);
         hasScope = true;
     }
@@ -1409,6 +1414,24 @@ QMap<QString, int> MetadataManager::getAllTags() const {
         }
     }
     return tagCounts;
+}
+
+QList<QPair<QString, int>> MetadataManager::getTopTags(int limit) const {
+    QMap<QString, int> counts = getAllTags();
+    QList<QPair<QString, int>> list;
+    for (auto it = counts.begin(); it != counts.end(); ++it) {
+        list.append({it.key(), it.value()});
+    }
+
+    std::sort(list.begin(), list.end(), [](const QPair<QString, int>& a, const QPair<QString, int>& b) {
+        if (a.second != b.second) return a.second > b.second;
+        return a.first < b.first;
+    });
+
+    if (list.size() > limit) {
+        return list.mid(0, limit);
+    }
+    return list;
 }
 
 } // namespace ArcMeta

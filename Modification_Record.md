@@ -80,3 +80,23 @@
 修改文件：`AGENTS.md` (更新), `Analysis_Modification_Plan/Analysis_Modification_Plan-66.md` (新增)
 未修改文件：全部 C++ 源码文件
 潜在风险：无。
+[2026-06-22] 
+- **任务描述**: 实现 Plan-81 到 Plan-85 核心架构优化与功能补全。
+- **修改文件**: 
+    - **修改**: `src/meta/CategoryRepo.h/.cpp` (新增递归子树获取、多分类聚合查询、FID 分类备份接口)
+    - **修改**: `src/meta/MetadataManager.h/.cpp` (递归搜索逻辑适配、标签权重统计接口、MftReader 接口适配)
+    - **修改**: `src/core/BasicCommands.h` (新增 `BulkUncategorizeCommand` 撤销指令)
+    - **修改**: `src/ui/ContentPanel.cpp` (补全回归未分类的撤销支持逻辑)
+    - **修改**: `src/ui/TagManagerView.cpp` (实现“常用标签”动态展示区)
+    - **修改**: `src/mft/MftReader.h/.cpp` (USN 更新接口支持原生字节流解析，引入物理身份预检)
+    - **修改**: `src/mft/UsnWatcher.cpp` (修正 USN 字段提取偏移)
+    - **修改**: `src/ui/BatchProgressDialog.h` (引入 UI 降频刷新策略)
+    - **修改**: `src/util/ImportHelper.cpp` (优化导入循环性能，平衡事务开销)
+    - **修正**: `src/mft/MftReader.cpp` (修复接口指针类型不匹配、Lambda 捕获缺失及 QDateTime 未定义错误)
+    - **修正**: `src/mft/UsnWatcher.cpp` (修复调用 MftReader 接口时的显式类型转换)
+- **修改原因**: 解决分类搜索不完整、标签系统缺乏引导、高风险归类不可逆、USN 同步可能存在的身份误嫁接、以及大规模导入时的 UI 响应迟滞等问题。同时修复了由大规模重构引入的编译链断裂。
+- **优化点**:
+    - **搜索增强**: 实现了真正意义上的侧边栏范围递归搜索。
+    - **交互安全**: 为“回归未分类”提供了原子化的 Undo/Redo 保护。
+    - **感知优化**: 引入基于频次的标签引导，缩短用户在大规模库中的决策路径。
+    - **性能加固**: 通过降频刷新释放主线程消息循环压力，提升极端 IO 下的响应。

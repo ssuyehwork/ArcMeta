@@ -65,6 +65,7 @@ public:
     static bool removeItemFromCategory(int categoryId, const std::string& fileId128);
     static bool removeAllCategories(const std::string& fileId128);
     static bool removeAllCategoriesBatch(const std::vector<std::string>& fids);
+    static std::vector<int> getItemCategoryIds(const std::string& fid);
     static bool moveToTrashBatch(const std::vector<std::string>& fids);
 
     static bool restoreFromTrash(const std::string& fileId128);
@@ -73,7 +74,9 @@ public:
     static bool permanentlyDeleteBatch(const std::vector<std::string>& fids);
 
     static std::vector<CategoryItem> getItemsInCategory(int categoryId);
+    static std::vector<CategoryItem> getItemsInCategories(const std::vector<int>& categoryIds);
     static std::vector<CategoryItem> getItemsRecursive(int categoryId);
+    static std::vector<int> getSubtreeIds(int categoryId);
 
     // 废弃接口（保持兼容）
     static std::vector<std::string> getFileIdsInCategory(int categoryId);

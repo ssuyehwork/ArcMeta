@@ -111,6 +111,24 @@ bool CategoryRepo::removeAllCategoriesBatch(const std::vector<std::string>& fids
     });
 }
 
+std::vector<int> CategoryRepo::getItemCategoryIds(const std::string& fid) {
+    std::vector<int> ids;
+    if (fid.empty()) return ids;
+    sqlite3* db = DatabaseManager::instance().getGlobalDb();
+    if (!db) return ids;
+
+    sqlite3_stmt* stmt;
+    const char* sql = "SELECT category_id FROM category_items WHERE file_id = ? AND category_id > 0";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, fid.c_str(), -1, SQLITE_TRANSIENT);
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            ids.push_back(sqlite3_column_int(stmt, 0));
+        }
+        sqlite3_finalize(stmt);
+    }
+    return ids;
+}
+
 bool CategoryRepo::moveToTrashBatch(const std::vector<std::string>& fids) {
     return executeFidBatch(fids, [](sqlite3* db, const std::string& fid) {
         // 1. Remove all existing category associations
@@ -444,14 +462,24 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fil
 }
 
 std::vector<CategoryItem> CategoryRepo::getItemsInCategory(int categoryId) {
+    return getItemsInCategories({categoryId});
+}
+
+std::vector<CategoryItem> CategoryRepo::getItemsInCategories(const std::vector<int>& categoryIds) {
     std::vector<CategoryItem> results;
+    if (categoryIds.empty()) return results;
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return results;
 
+    QStringList placeholders;
+    for (int i = 0; i < categoryIds.size(); ++i) placeholders << "?";
+    QString sql = QString("SELECT DISTINCT file_id, path_hint FROM category_items WHERE category_id IN (%1)").arg(placeholders.join(","));
+
     sqlite3_stmt* stmt;
-    const char* sql = "SELECT file_id, path_hint FROM category_items WHERE category_id = ?";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, categoryId);
+    if (sqlite3_prepare_v2(db, sql.toUtf8().constData(), -1, &stmt, nullptr) == SQLITE_OK) {
+        for (int i = 0; i < categoryIds.size(); ++i) {
+            sqlite3_bind_int(stmt, i + 1, categoryIds[i]);
+        }
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             results.push_back({
                 sqlite3_column_text(stmt, 0) ? reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)) : "",
@@ -463,10 +491,10 @@ std::vector<CategoryItem> CategoryRepo::getItemsInCategory(int categoryId) {
     return results;
 }
 
-std::vector<CategoryItem> CategoryRepo::getItemsRecursive(int categoryId) {
+std::vector<int> CategoryRepo::getSubtreeIds(int categoryId) {
     std::vector<int> ids = {categoryId};
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return {};
+    if (!db) return ids;
 
     size_t i = 0;
     while (i < ids.size()) {
@@ -474,10 +502,20 @@ std::vector<CategoryItem> CategoryRepo::getItemsRecursive(int categoryId) {
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "SELECT id FROM categories WHERE parent_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, pid);
-            while (sqlite3_step(stmt) == SQLITE_ROW) ids.push_back(sqlite3_column_int(stmt, 0));
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                int childId = sqlite3_column_int(stmt, 0);
+                if (std::find(ids.begin(), ids.end(), childId) == ids.end()) {
+                    ids.push_back(childId);
+                }
+            }
             sqlite3_finalize(stmt);
         }
     }
+    return ids;
+}
+
+std::vector<CategoryItem> CategoryRepo::getItemsRecursive(int categoryId) {
+    std::vector<int> ids = getSubtreeIds(categoryId);
 
     std::map<std::string, std::wstring> resultsMap;
     for (int cid : ids) {
