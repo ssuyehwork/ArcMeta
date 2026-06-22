@@ -894,6 +894,7 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
     uint32_t attr;
     LARGE_INTEGER timestamp;
     WORD fileNameLength, fileNameOffset;
+    USN usn;
 
     // 2026-05-14 核心排查：针对 V2 (64bit FRN) 和 V3 (128bit FRN) 进行严格的偏移匹配
     if (header->MajorVersion == 2) {
@@ -904,6 +905,7 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
         timestamp = record->TimeStamp;
         fileNameLength = record->FileNameLength;
         fileNameOffset = record->FileNameOffset;
+        usn = record->Usn;
     } else if (header->MajorVersion == 3) {
         // 手动映射 V3 布局，避免 SDK 定义缺失导致的读取错误
         struct V3_LAYOUT {
@@ -911,9 +913,10 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
             BYTE FileReferenceNumber[16]; BYTE ParentFileReferenceNumber[16];
             USN Usn; LARGE_INTEGER TimeStamp; DWORD Reason; DWORD SourceInfo;
             DWORD SecurityId; DWORD FileAttributes; WORD FileNameLength; WORD FileNameOffset;
-        } *v3 = reinterpret_cast<V3_LAYOUT*>(record);
+        } *v3 = reinterpret_cast<V3_LAYOUT*>(recordPtr);
         frn = *reinterpret_cast<uint64_t*>(v3->FileReferenceNumber);
         parentFrn = *reinterpret_cast<uint64_t*>(v3->ParentFileReferenceNumber);
+        usn = v3->Usn;
         attr = v3->FileAttributes;
         timestamp = v3->TimeStamp;
         fileNameLength = v3->FileNameLength;

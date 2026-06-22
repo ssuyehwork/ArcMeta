@@ -100,3 +100,15 @@
     - **交互安全**: 为“回归未分类”提供了原子化的 Undo/Redo 保护。
     - **感知优化**: 引入基于频次的标签引导，缩短用户在大规模库中的决策路径。
     - **性能加固**: 通过降频刷新释放主线程消息循环压力，提升极端 IO 下的响应。
+
+[2026-06-22 04:10:00]
+- **任务描述**: 修复 MFT 引擎与缓存管理器中的关键编译错误（彻底版）。
+- **修改文件**:
+    - **修改**: `src/mft/MftReader.cpp` (修正 `updateEntryFromUsn` 函数中的 `usn` 未定义及 `record` 错误引用)
+    - **修改**: `src/core/CacheManager.cpp` (补全 `QDateTime` 引用)
+    - **修改**: `src/ui/MainWindow.cpp` (补全 `QDateTime` 引用)
+    - **修改**: `src/ui/BatchProgressDialog.h` (补全 `QDateTime` 引用)
+- **修改原因**: 解决由重构引起的“currentMSecsSinceEpoch 找不到标识符”、“record/usn 未声明”以及“使用了未定义类型 QDateTime”等编译阻塞。
+- **优化点**:
+    - **作用域修正**: 确保 V3 布局解析正确使用 `recordPtr`，解决了由于 V2 分支变量遮蔽导致的 V3 逻辑无法识别 `record` 的问题。
+    - **类型安全**: 正确声明 `USN` 类型变量并补全 V2/V3 全路径赋值，确保 USN 游标持久化数据不丢失。
