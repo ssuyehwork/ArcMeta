@@ -962,8 +962,6 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
 
     // 2026-07-xx 按照 Plan-84：物理对账优化
     // 1. 通过路径反查，检测是否发生了同名覆盖（即路径没变但 FRN 变了）
-    std::wstring currentPath = getPathFastInternal(dIdx, frn);
-    bool identityMatch = true;
     
     // 如果该 FID 之前关联在其他路径，或者该路径现在被新 FID 占用，则判定为变动
     auto it = m_frn_to_idx.find(compositeKey);
