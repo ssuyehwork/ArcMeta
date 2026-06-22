@@ -799,6 +799,18 @@ void FilterPanel::rebuildGroups() {
         });
         gl->addWidget(m_editType);
 
+        if (m_emptyFolderCount > 0) {
+            QCheckBox* cb = addFilterRow(gl, "空文件夹", m_emptyFolderCount);
+            cb->blockSignals(true);
+            cb->setChecked(m_filter.types.contains("空文件夹"));
+            cb->blockSignals(false);
+            connect(cb, &QCheckBox::toggled, this, [this](bool on) {
+                if (on) { if (!m_filter.types.contains("空文件夹")) m_filter.types.append("空文件夹"); }
+                else    m_filter.types.removeAll("空文件夹");
+                emit filterChanged(m_filter);
+            });
+        }
+
         if (m_typeCounts.contains("folder")) {
             QCheckBox* cb = addFilterRow(gl, "文件夹", m_typeCounts["folder"]);
             cb->blockSignals(true);
@@ -818,17 +830,6 @@ void FilterPanel::rebuildGroups() {
             connect(cb, &QCheckBox::toggled, this, [this](bool on) {
                 if (on) { if (!m_filter.types.contains("file")) m_filter.types.append("file"); }
                 else    m_filter.types.removeAll("file");
-                emit filterChanged(m_filter);
-            });
-        }
-        if (m_emptyFolderCount > 0) {
-            QCheckBox* cb = addFilterRow(gl, "空文件夹", m_emptyFolderCount);
-            cb->blockSignals(true);
-            cb->setChecked(m_filter.types.contains("空文件夹"));
-            cb->blockSignals(false);
-            connect(cb, &QCheckBox::toggled, this, [this](bool on) {
-                if (on) { if (!m_filter.types.contains("空文件夹")) m_filter.types.append("空文件夹"); }
-                else    m_filter.types.removeAll("空文件夹");
                 emit filterChanged(m_filter);
             });
         }

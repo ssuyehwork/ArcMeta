@@ -483,10 +483,17 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     if (sourceRow < 0 || sourceRow >= (int)records.size()) return false;
     const auto& record = records[sourceRow];
 
-    // --- 按照 Plan-73：显示/隐藏文件夹/文件 ---
+    // --- 按照 Plan-73 & Plan-94：显示/隐藏文件夹/文件与筛选联动 ---
     // 2026-07-xx 逻辑校准：子分类在逻辑上等同于文件夹，受 showFolders 控制
     if (record.isCategory || record.isDir) {
-        if (!currentFilter.showFolders) return false;
+        // 2026-07-xx Plan-94: 判定用户是否在筛选面板中显式勾选了“文件夹”或匹配的“空文件夹”
+        bool isFolderExplicitlySelected = currentFilter.types.contains("folder") || 
+                                         (record.isEmpty && currentFilter.types.contains("空文件夹"));
+        
+        // 只有当“顶栏全局开关为隐藏”且“筛选器未显式勾选文件夹”时，才执行拦截
+        if (!currentFilter.showFolders && !isFolderExplicitlySelected) {
+            return false;
+        }
     } else {
         if (!currentFilter.showFiles) return false;
     }
