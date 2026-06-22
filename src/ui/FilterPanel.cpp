@@ -398,7 +398,6 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
         if (edit && edit->objectName() == "FilterSearchEdit") {
             QString key;
             if (edit == m_editColor) key = "Color";
-            else if (edit == m_editTag) key = "Tag";
             else if (edit == m_editType) key = "Type";
             else if (edit == m_editCreateDate) key = "CreateDate";
             else if (edit == m_editModifyDate) key = "ModifyDate";
@@ -413,7 +412,6 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
                 connect(m_historyPanel, &SearchHistoryPanel::historyItemClicked, this, [this, edit, key](const QString& text) {
                     edit->setText(text);
                     if (edit == m_editColor) m_filter.colorFilterText = text;
-                    else if (edit == m_editTag) m_filter.tagFilterText = text;
                     else if (edit == m_editType) m_filter.typeFilterText = text;
                     else if (edit == m_editCreateDate) m_filter.createDateFilterText = text;
                     else if (edit == m_editModifyDate) m_filter.modifyDateFilterText = text;
@@ -460,17 +458,16 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
 void FilterPanel::populate(
     const QMap<int, int>&       ratingCounts,
     const QMap<QString, int>&   colorCounts,
-    const QMap<QString, int>&   tagCounts,
     const QMap<QString, int>&   typeCounts,
     const QMap<QString, int>&   createDateCounts,
     const QMap<QString, int>&   modifyDateCounts,
     int                         emptyFolderCount)
 {
     // 2026-06-xx 物理修复：若所有输入均为空，且当前没有活动的文本过滤，则判定为异步加载中间态，拒绝执行重绘以防止 UI 抖动
-    if (ratingCounts.isEmpty() && colorCounts.isEmpty() && tagCounts.isEmpty() && 
+    if (ratingCounts.isEmpty() && colorCounts.isEmpty() &&
         typeCounts.isEmpty() && createDateCounts.isEmpty() && modifyDateCounts.isEmpty() &&
         emptyFolderCount == 0 &&
-        m_filter.colorFilterText.isEmpty() && m_filter.tagFilterText.isEmpty() &&
+        m_filter.colorFilterText.isEmpty() &&
         m_filter.typeFilterText.isEmpty() && m_filter.createDateFilterText.isEmpty() &&
         m_filter.modifyDateFilterText.isEmpty()) {
         return;
@@ -478,12 +475,44 @@ void FilterPanel::populate(
 
     m_ratingCounts     = ratingCounts;
     m_colorCounts      = colorCounts;
-    m_tagCounts        = tagCounts;
     m_typeCounts       = typeCounts;
     m_createDateCounts = createDateCounts;
     m_modifyDateCounts = modifyDateCounts;
     m_emptyFolderCount = emptyFolderCount;
     rebuildGroups();
+}
+
+void FilterPanel::rebuildDateCheckboxes(bool isCreateDate, bool descending) {
+    QVBoxLayout* layout = isCreateDate ? m_createDateLayout : m_modifyDateLayout;
+    if (!layout) return;
+
+    // 清除现有的复选框行 (保留 QLineEdit)
+    while (layout->count() > 1) {
+        QLayoutItem* item = layout->takeAt(1);
+        if (item->widget()) item->widget()->deleteLater();
+        delete item;
+    }
+
+    const QMap<QString, int>& counts = isCreateDate ? m_createDateCounts : m_modifyDateCounts;
+    // 2026-07-xx Plan-92: 通过引用访问当前筛选状态中的日期列表，确保勾选状态保留
+    QStringList& selected = isCreateDate ? m_filter.createDates : m_filter.modifyDates;
+
+    QStringList dates = counts.keys();
+    std::sort(dates.begin(), dates.end(), [descending](const QString& a, const QString& b) {
+        return descending ? (a > b) : (a < b);
+    });
+
+    for (const QString& d : dates) {
+        QCheckBox* cb = addFilterRow(layout, d, counts[d]);
+        cb->blockSignals(true);
+        cb->setChecked(selected.contains(d));
+        cb->blockSignals(false);
+        connect(cb, &QCheckBox::toggled, this, [this, &selected, d](bool on) {
+            if (on) { if (!selected.contains(d)) selected.append(d); }
+            else selected.removeAll(d);
+            emit filterChanged(m_filter);
+        });
+    }
 }
 
 // ─── rebuildGroups ────────────────────────────────────────────────
@@ -493,10 +522,11 @@ void FilterPanel::rebuildGroups() {
 
     // 2026-xx-xx 物理安全：重置快速输入框指针，防止 Directory 切换导致的野指针崩溃
     m_editColor = nullptr;
-    m_editTag = nullptr;
     m_editType = nullptr;
     m_editCreateDate = nullptr;
     m_editModifyDate = nullptr;
+    m_createDateLayout = nullptr;
+    m_modifyDateLayout = nullptr;
     m_accuracySlider = nullptr;
 
     // 清空旧内容（保留末尾 stretch）
@@ -738,61 +768,6 @@ void FilterPanel::rebuildGroups() {
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
 
-    // ── 3. 标签 / 关键字 ─────────────────────────────────────
-    if (!m_tagCounts.isEmpty() || !m_filter.tagFilterText.isEmpty()) {
-        QVBoxLayout* gl = nullptr;
-        QWidget* g = buildGroup("标签 / 关键字", gl);
-
-        m_editTag = new QLineEdit(g);
-        m_editTag->setClearButtonEnabled(true);
-        m_editTag->setPlaceholderText("例：工作");
-        m_editTag->setText(m_filter.tagFilterText);
-        m_editTag->setObjectName("FilterSearchEdit");
-        m_editTag->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 5px; font-size: 11px; }"
-            "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
-        );
-        m_editTag->installEventFilter(this);
-        connect(m_editTag, &QLineEdit::returnPressed, this, [this]() {
-            m_filter.tagFilterText = m_editTag->text();
-            saveFilterHistory("Tag", m_filter.tagFilterText);
-            emit filterChanged(m_filter);
-        });
-        connect(m_editTag, &QLineEdit::textChanged, this, [this](const QString& text) {
-            if (text.isEmpty() && !m_filter.tagFilterText.isEmpty()) {
-                m_filter.tagFilterText = "";
-                emit filterChanged(m_filter);
-            }
-        });
-        gl->addWidget(m_editTag);
-
-        if (m_tagCounts.contains("__none__")) {
-            QCheckBox* cb = addFilterRow(gl, "无标签", m_tagCounts["__none__"]);
-            cb->blockSignals(true);
-            cb->setChecked(m_filter.tags.contains("__none__"));
-            cb->blockSignals(false);
-            connect(cb, &QCheckBox::toggled, this, [this](bool on) {
-                if (on) { if (!m_filter.tags.contains("__none__")) m_filter.tags.append("__none__"); }
-                else    m_filter.tags.removeAll("__none__");
-                emit filterChanged(m_filter);
-            });
-        }
-        QStringList sorted = m_tagCounts.keys();
-        sorted.sort(Qt::CaseInsensitive);
-        for (const QString& tag : sorted) {
-            if (tag == "__none__") continue;
-            QCheckBox* cb = addFilterRow(gl, tag, m_tagCounts[tag]);
-            cb->blockSignals(true);
-            cb->setChecked(m_filter.tags.contains(tag));
-            cb->blockSignals(false);
-            connect(cb, &QCheckBox::toggled, this, [this, tag](bool on) {
-                if (on) { if (!m_filter.tags.contains(tag)) m_filter.tags.append(tag); }
-                else m_filter.tags.removeAll(tag);
-                emit filterChanged(m_filter);
-            });
-        }
-        m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
-    }
 
     // ── 4. 文件类型 ──────────────────────────────────────────
     if (!m_typeCounts.isEmpty() || !m_filter.typeFilterText.isEmpty() || m_emptyFolderCount > 0) {
@@ -861,10 +836,25 @@ void FilterPanel::rebuildGroups() {
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
 
-    // ── 5. 创建日期 ──────────────────────────────────────────
+    // ── 5. 创建日期 (Plan-92: 排序支持) ──────────────────────────
     if (!m_createDateCounts.isEmpty() || !m_filter.createDateFilterText.isEmpty()) {
         QVBoxLayout* gl = nullptr;
-        QWidget* g = buildGroup("创建日期", gl);
+        QHBoxLayout* hdrLayout = nullptr;
+        QWidget* g = buildGroup("创建日期", gl, &hdrLayout);
+        m_createDateLayout = gl;
+
+        QPushButton* btnSort = new QPushButton(g);
+        btnSort->setFixedSize(16, 16);
+        btnSort->setIcon(UiHelper::getIcon(m_createDateDesc ? "arrow_down" : "arrow_up", QColor("#B0B0B0")));
+        btnSort->setFlat(true);
+        btnSort->setCursor(Qt::PointingHandCursor);
+        btnSort->setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: #3E3E42; border-radius: 2px; }");
+        hdrLayout->addWidget(btnSort);
+        connect(btnSort, &QPushButton::clicked, this, [this, btnSort]() {
+            m_createDateDesc = !m_createDateDesc;
+            btnSort->setIcon(UiHelper::getIcon(m_createDateDesc ? "arrow_down" : "arrow_up", QColor("#B0B0B0")));
+            rebuildDateCheckboxes(true, m_createDateDesc);
+        });
 
         m_editCreateDate = new QLineEdit(g);
         m_editCreateDate->setClearButtonEnabled(true);
@@ -889,25 +879,29 @@ void FilterPanel::rebuildGroups() {
         });
         gl->addWidget(m_editCreateDate);
 
-        QStringList dates = m_createDateCounts.keys(); dates.sort(Qt::CaseInsensitive);
-        for (const QString& d : dates) {
-            QCheckBox* cb = addFilterRow(gl, d, m_createDateCounts[d]);
-            cb->blockSignals(true);
-            cb->setChecked(m_filter.createDates.contains(d));
-            cb->blockSignals(false);
-            connect(cb, &QCheckBox::toggled, this, [this, d](bool on) {
-                if (on) { if (!m_filter.createDates.contains(d)) m_filter.createDates.append(d); }
-                else m_filter.createDates.removeAll(d);
-                emit filterChanged(m_filter);
-            });
-        }
+        rebuildDateCheckboxes(true, m_createDateDesc);
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
 
-    // ── 6. 修改日期 ──────────────────────────────────────────
+    // ── 6. 修改日期 (Plan-92: 排序支持) ──────────────────────────
     if (!m_modifyDateCounts.isEmpty() || !m_filter.modifyDateFilterText.isEmpty()) {
         QVBoxLayout* gl = nullptr;
-        QWidget* g = buildGroup("修改日期", gl);
+        QHBoxLayout* hdrLayout = nullptr;
+        QWidget* g = buildGroup("修改日期", gl, &hdrLayout);
+        m_modifyDateLayout = gl;
+
+        QPushButton* btnSort = new QPushButton(g);
+        btnSort->setFixedSize(16, 16);
+        btnSort->setIcon(UiHelper::getIcon(m_modifyDateDesc ? "arrow_down" : "arrow_up", QColor("#B0B0B0")));
+        btnSort->setFlat(true);
+        btnSort->setCursor(Qt::PointingHandCursor);
+        btnSort->setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: #3E3E42; border-radius: 2px; }");
+        hdrLayout->addWidget(btnSort);
+        connect(btnSort, &QPushButton::clicked, this, [this, btnSort]() {
+            m_modifyDateDesc = !m_modifyDateDesc;
+            btnSort->setIcon(UiHelper::getIcon(m_modifyDateDesc ? "arrow_down" : "arrow_up", QColor("#B0B0B0")));
+            rebuildDateCheckboxes(false, m_modifyDateDesc);
+        });
 
         m_editModifyDate = new QLineEdit(g);
         m_editModifyDate->setClearButtonEnabled(true);
@@ -932,18 +926,7 @@ void FilterPanel::rebuildGroups() {
         });
         gl->addWidget(m_editModifyDate);
 
-        QStringList dates = m_modifyDateCounts.keys(); dates.sort(Qt::CaseInsensitive);
-        for (const QString& d : dates) {
-            QCheckBox* cb = addFilterRow(gl, d, m_modifyDateCounts[d]);
-            cb->blockSignals(true);
-            cb->setChecked(m_filter.modifyDates.contains(d));
-            cb->blockSignals(false);
-            connect(cb, &QCheckBox::toggled, this, [this, d](bool on) {
-                if (on) { if (!m_filter.modifyDates.contains(d)) m_filter.modifyDates.append(d); }
-                else m_filter.modifyDates.removeAll(d);
-                emit filterChanged(m_filter);
-            });
-        }
+        rebuildDateCheckboxes(false, m_modifyDateDesc);
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
 
@@ -1293,9 +1276,8 @@ void FilterPanel::clearAllFilters() {
     m_filter = FilterState{};
     m_hueSliderColor.clear();
 
-    // 2026-xx-xx 按照用户要求：清空这 5 个输入框的文字
+    // 2026-xx-xx 按照用户要求：清空剩余输入框的文字
     if (m_editColor) m_editColor->clear();
-    if (m_editTag) m_editTag->clear();
     if (m_editType) m_editType->clear();
     if (m_editCreateDate) m_editCreateDate->clear();
     if (m_editModifyDate) m_editModifyDate->clear();

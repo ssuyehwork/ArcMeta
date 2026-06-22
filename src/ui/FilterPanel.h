@@ -69,7 +69,7 @@ private:
 struct FilterState {
     QList<int>   ratings;
     QStringList  colors;
-    QStringList  tags;
+    QString      keyword; // 2026-07-xx 按照 Plan-92：合并搜索关键词入 FilterState
     QStringList  types;
     QStringList  createDates;   // "YYYY-MM-DD"
     QStringList  modifyDates;
@@ -88,7 +88,6 @@ struct FilterState {
 
     // 2026-xx-xx 按照用户要求：新增 5 个主选项的快速文本过滤字段
     QString colorFilterText;
-    QString tagFilterText;
     QString typeFilterText;
     QString createDateFilterText;
     QString modifyDateFilterText;
@@ -97,11 +96,11 @@ struct FilterState {
     bool showFiles = true;   // 2026-07-xx 按照 Plan-73：显示/隐藏文件
 
     bool isEmpty() const {
-        return ratings.isEmpty() && colors.isEmpty() && tags.isEmpty() && types.isEmpty() &&
+        return ratings.isEmpty() && colors.isEmpty() && keyword.isEmpty() && types.isEmpty() &&
                createDates.isEmpty() && modifyDates.isEmpty() &&
                linkPresence == All && notePresence == All && ratio == AspectAny &&
                minSize == -1 && maxSize == -1 &&
-               colorFilterText.trimmed().isEmpty() && tagFilterText.trimmed().isEmpty() &&
+               colorFilterText.trimmed().isEmpty() &&
                typeFilterText.trimmed().isEmpty() && createDateFilterText.trimmed().isEmpty() &&
                modifyDateFilterText.trimmed().isEmpty();
     }
@@ -124,7 +123,6 @@ public:
     void populate(
         const QMap<int, int>&        ratingCounts,
         const QMap<QString, int>&    colorCounts,
-        const QMap<QString, int>&    tagCounts,
         const QMap<QString, int>&    typeCounts,
         const QMap<QString, int>&    createDateCounts,
         const QMap<QString, int>&    modifyDateCounts,
@@ -150,6 +148,7 @@ public slots:
 private:
     void rebuildGroups();
     void updateHeaderStatus();
+    void rebuildDateCheckboxes(bool isCreateDate, bool descending); // 2026-07-xx Plan-92: 日期重排支持
 
     // 2026-05-17 根因修复：增加 outHdrLayout 参数，让调用方直接往标题行布局追加按钮
     // 彻底替代绝对定位方案，消除非布局子控件撑高 wrapper 导致的留白
@@ -166,11 +165,13 @@ private:
 
     QMap<int, int>      m_ratingCounts;
     QMap<QString, int>  m_colorCounts;
-    QMap<QString, int>  m_tagCounts;
     QMap<QString, int>  m_typeCounts;
     QMap<QString, int>  m_createDateCounts;
     QMap<QString, int>  m_modifyDateCounts;
     int                 m_emptyFolderCount = 0;
+
+    bool m_createDateDesc = true; // 2026-07-xx Plan-92: 日期降序标记
+    bool m_modifyDateDesc = true;
 
     QVBoxLayout*  m_mainLayout      = nullptr;
     QScrollArea*  m_scrollArea      = nullptr;
@@ -185,10 +186,11 @@ private:
 
     // 2026-xx-xx 新增快速输入框成员
     QLineEdit*    m_editColor       = nullptr;
-    QLineEdit*    m_editTag         = nullptr;
     QLineEdit*    m_editType        = nullptr;
     QLineEdit*    m_editCreateDate  = nullptr;
     QLineEdit*    m_editModifyDate  = nullptr;
+    QVBoxLayout*  m_createDateLayout = nullptr; // 2026-07-xx Plan-92: 日期布局指针
+    QVBoxLayout*  m_modifyDateLayout = nullptr;
     QSlider*      m_accuracySlider  = nullptr; // 2026-07-xx 按照用户要求：还原颜色准确度控制条
 
     SearchHistoryPanel* m_historyPanel = nullptr;

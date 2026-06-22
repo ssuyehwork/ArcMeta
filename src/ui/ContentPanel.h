@@ -47,10 +47,8 @@ public:
     explicit FilterProxyModel(QObject* parent = nullptr);
 
     FilterState currentFilter;
-    QString m_searchQuery;
 
     void updateFilter();
-    void setSearchQuery(const QString& query);
 
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override;
