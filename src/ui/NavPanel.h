@@ -41,6 +41,9 @@ public:
 
 private slots:
     void onItemExpanded(const QModelIndex& index);
+    void onFavoritePathsDropped(const QStringList& paths, const QModelIndex& targetIndex);
+    void onFavoriteClicked(const QModelIndex& index);
+    void showFavoriteContextMenu(const QPoint& pos);
 
 signals:
     /**
@@ -49,12 +52,24 @@ signals:
      */
     void directorySelected(const QString& path);
 
+    /**
+     * @brief 当点击收藏的文件时发出
+     */
+    void favoriteFileSelected(const QString& path);
+
 private:
     void initUi();
     void fetchChildDirs(QStandardItem* parent);
+    void loadFavorites();
+    void saveFavorites();
     
     QTreeView* m_treeView = nullptr;
     QStandardItemModel* m_model = nullptr;
+
+    // 2026-07-xx 按照 Plan-95：收藏夹组件
+    class DropTreeView* m_favoriteView = nullptr;
+    QStandardItemModel* m_favoriteModel = nullptr;
+
     QVBoxLayout* m_mainLayout = nullptr;
     QWidget* m_focusLine = nullptr;
 

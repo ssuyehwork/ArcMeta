@@ -361,6 +361,11 @@ public slots:
     int currentLoadRequestId() const { return m_loadRequestId.load(); }
 
     /**
+     * @brief 2026-07-xx 按照 Plan-95：设置待定位的项目名称
+     */
+    void setPendingSelection(const QString& name, bool edit = false);
+
+    /**
      * @brief 2026-06-xx 彻底重构：加载分类及其子项 (分类 ID 联动)
      */
     void loadCategory(int categoryId);

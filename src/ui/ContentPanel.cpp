@@ -2299,7 +2299,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
                 panelPtr->applyFilters();
 
-                // 2026-07-xx 按照 Plan-66：处理新建项后的自动定位与编辑
+                // 2026-07-xx 按照 Plan-66 & Plan-95：处理新建或收藏项后的自动定位与编辑
                 if (!panelPtr->m_pendingSelectName.isEmpty()) {
                     const auto& records = panelPtr->m_model->allRecords();
                     for (size_t i = 0; i < records.size(); ++i) {
@@ -2307,20 +2307,22 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                             QModelIndex srcIdx = panelPtr->m_model->index(static_cast<int>(i), 0);
                             QModelIndex proxyIdx = panelPtr->m_proxyModel->mapFromSource(srcIdx);
                             if (proxyIdx.isValid()) {
+                                bool edit = panelPtr->property("pendingEdit").toBool();
                                 if (panelPtr->m_viewStack->currentWidget() == panelPtr->m_gridView) {
                                     panelPtr->m_gridView->scrollTo(proxyIdx);
                                     panelPtr->m_gridView->setCurrentIndex(proxyIdx);
-                                    panelPtr->m_gridView->edit(proxyIdx);
+                                    if (edit) panelPtr->m_gridView->edit(proxyIdx);
                                 } else {
                                     panelPtr->m_treeView->scrollTo(proxyIdx);
                                     panelPtr->m_treeView->setCurrentIndex(proxyIdx);
-                                    panelPtr->m_treeView->edit(proxyIdx);
+                                    if (edit) panelPtr->m_treeView->edit(proxyIdx);
                                 }
                             }
                             break;
                         }
                     }
                     panelPtr->m_pendingSelectName = ""; // 必须物理清空状态
+                    panelPtr->setProperty("pendingEdit", false);
                 }
 
                 ArcMeta::Logger::log(QString("[Content] 目录扫描完成并已应用到 UI [%1]").arg(reqId));
@@ -2666,6 +2668,11 @@ void ContentPanel::recalculateAndEmitStats() {
     });
 }
 
+void ContentPanel::setPendingSelection(const QString& name, bool edit) {
+    m_pendingSelectName = name;
+    setProperty("pendingEdit", edit);
+}
+
 void ContentPanel::createNewItem(const QString& type) { 
     if (m_currentPath.isEmpty() || m_currentPath == "computer://") return; 
  
@@ -2692,7 +2699,7 @@ void ContentPanel::createNewItem(const QString& type) {
     } 
  
     if (success) { 
-        m_pendingSelectName = finalName;
+        setPendingSelection(finalName, true);
         loadDirectory(m_currentPath, m_isRecursive); 
     } 
 } 

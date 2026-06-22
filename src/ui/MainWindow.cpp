@@ -229,6 +229,16 @@ void MainWindow::initUi() {
         unifiedNavigateTo(path);
     });
 
+    // 2026-07-xx 按照 Plan-95：收藏文件点击处理 (跳转父目录 + 自动定位)
+    connect(m_navPanel, &NavPanel::favoriteFileSelected, this, [this](const QString& path) {
+        QFileInfo info(path);
+        QString parentDir = info.absolutePath();
+        if (m_contentPanel) {
+            m_contentPanel->setPendingSelection(info.fileName(), false);
+        }
+        unifiedNavigateTo(parentDir);
+    });
+
     connect(m_contentPanel, &ContentPanel::directorySelected, this, [this](const QString& path) {
         unifiedNavigateTo(path);
     });
