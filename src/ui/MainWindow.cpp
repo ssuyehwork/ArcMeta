@@ -436,72 +436,30 @@ void MainWindow::initUi() {
     m_searchHistoryPanel = new SearchHistoryPanel(this);
     m_searchHistoryPanel->setHistory(m_searchHistory);
 
-    // 搜索信号对接
-    connect(&CoreController::instance(), &CoreController::searchStarted, this, [this]() {
-        ArcMeta::Logger::log("[Main] 收到 searchStarted 信号，正在配置搜索视图...");
-        if (m_contentPanel) {
-            m_contentPanel->setCurrentCategoryType("search");
-            m_contentPanel->loadPaths({}); // 先清空界面进入搜索态
-            m_activeSearchReqId = m_contentPanel->currentLoadRequestId(); // 保存当前搜索会话 ID
-            
-            if (m_addressBar) m_addressBar->setPath("搜索: " + m_searchEdit->text().trimmed());
-            ArcMeta::Logger::log(QString("[Main] 搜索会话已锁定 ID: %1").arg(m_activeSearchReqId));
-        }
-    });
-
-    connect(&CoreController::instance(), &CoreController::searchResultsAvailable, this, 
-        [this](const QStringList& results, bool isIncremental) {
-        if (m_contentPanel) {
-            // 2026-07-xx 物理对账：仅当内容面板仍处于搜索态时才接受异步返回的结果
-            if (m_contentPanel->getCurrentCategoryType() != "search") {
-                ArcMeta::Logger::log("[Main] 拦截到过期的异步搜索结果，当前视图已切换");
-                return;
-            }
-
-            if (isIncremental) m_contentPanel->appendPaths(results, m_activeSearchReqId);
-            else m_contentPanel->loadPaths(results, m_activeSearchReqId);
-        }
-    });
-
-    connect(&CoreController::instance(), &CoreController::searchFinished, this, [this](int total) {
-        if (m_contentPanel && m_contentPanel->getCurrentCategoryType() != "search") return;
-        ArcMeta::Logger::log(QString("[Main] 搜索完成，共发现项目: %1").arg(total));
-        updateStatusBar();
-    });
-
-    // 回车搜索核心逻辑 (Plan-92: 信号链统一化，不再 blockSignals)
+    // 回车搜索核心逻辑 (2026-07-xx 定点修复：搜索框作为筛选器的一个输入组件，走本地过滤引擎)
     auto doSearch = [this](const QString& keyword) {
-        ArcMeta::Logger::log(QString("[Main] doSearch 被触发 -> %1").arg(keyword));
         if (m_isTagManagerMode) {
             m_tagManagerView->search(keyword);
             return;
         }
 
-        if (keyword.isEmpty()) {
-            ArcMeta::Logger::log("[Main] 搜索词为空，执行视图回滚操作");
-            unifiedNavigateTo(m_currentPath);
-            m_searchHistoryPanel->hide();
-            return;
-        }
+        // keyword 为空时重置 keyword 条件，其他筛选条件保持不变
+        FilterState fs = m_filterPanel->currentFilter();
+        fs.keyword = keyword;
 
-        // 2026-07-xx 按照 Plan-92：由于关键词已合并入 FilterState，发起异步搜索时不再需要重置面板，
-        // 而是将当前搜索词作为过滤条件之一。
-        if (m_contentPanel) {
-            FilterState fs = m_filterPanel->currentFilter();
-            fs.keyword = keyword;
-            m_contentPanel->applyFilters(fs);
-        }
+        // 通过统一路径触发过滤，与筛选器完全一致 (不清空模型，不切换视图)
+        m_contentPanel->applyFilters(fs);
+        updateStatusBar();
 
         // 维护历史记录
-        m_searchHistory.removeAll(keyword);
-        m_searchHistory.prepend(keyword);
-        if (m_searchHistory.size() > 10) m_searchHistory.removeLast();
-        AppConfig::instance().setValue("Search/History", m_searchHistory);
-        m_searchHistoryPanel->setHistory(m_searchHistory);
+        if (!keyword.isEmpty()) {
+            m_searchHistory.removeAll(keyword);
+            m_searchHistory.prepend(keyword);
+            if (m_searchHistory.size() > 10) m_searchHistory.removeLast();
+            AppConfig::instance().setValue("Search/History", m_searchHistory);
+            m_searchHistoryPanel->setHistory(m_searchHistory);
+        }
         m_searchHistoryPanel->hide();
-
-        // 异步发起搜索 (范围感知 + 物理补全)
-        CoreController::instance().performSearch(keyword, m_currentDataSource, m_currentCategoryId, m_currentPath);
     };
 
     // 2026-05-27 物理加固：补全 this 上下文
@@ -510,19 +468,15 @@ void MainWindow::initUi() {
     });
 
     // 2026-04-xx 按照用户要求：支持标签管理模式下的实时搜索
-    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this, doSearch](const QString& text) {
         if (m_isTagManagerMode) {
             m_tagManagerView->search(text.trimmed());
             return;
         }
 
-        // 2026-07-xx 按照方案计划：当点击清除按钮或手动清空时，执行视图回滚
+        // 2026-07-xx 定点修复：搜索框清空时直接触发 doSearch("") 重置本地 keyword 过滤，不做视图回滚
         if (text.isEmpty() && m_contentPanel) {
-            // 仅在当前处于搜索结果视图时才触发回滚，防止在普通导航时造成二次刷新
-            if (m_contentPanel->getCurrentCategoryType() == "search") {
-                ArcMeta::Logger::log(QString("[Main] 搜索框已清空，正在回滚至前序目录视图: %1").arg(m_currentPath));
-                unifiedNavigateTo(m_currentPath);
-            }
+            doSearch("");
         }
     });
     

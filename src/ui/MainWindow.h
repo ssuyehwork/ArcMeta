@@ -170,7 +170,6 @@ private:
     ResizeEventFilter* m_resizeFilter = nullptr;
     QTimer* m_sidebarRefreshTimer = nullptr;
     QTimer* m_resourceMonitorTimer = nullptr; // 2026-06-xx 崩溃监控：资源监控定时器
-    int m_activeSearchReqId = 0; // 2026-07-xx 活跃搜索 ID：将当前搜索与 ContentPanel 的 Request ID 物理绑定
     // 2026-04-17 按照用户要求：修复 m_idleTimer 重定义，保留上方唯一成员声明
     void initIdleDetector();
     void initResourceMonitor(); // 2026-06-xx 崩溃监控：初始化资源监控
