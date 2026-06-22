@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QString>
+#include <QDateTime>
 
 namespace ArcMeta {
 
