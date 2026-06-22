@@ -1051,7 +1051,7 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
     emit dataChanged(finalIdx);
 }
 
-void MftReader::updateEntriesFromUsnBatch(const std::vector<USN_RECORD_V2*>& records, const std::wstring& volume) {
+void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, const std::wstring& volume) {
     if (records.empty()) return;
     
     // 工业级重构：批量更新模式，大幅降低 QWriteLocker 的竞争频率

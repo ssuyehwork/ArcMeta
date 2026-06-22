@@ -149,13 +149,13 @@ void UsnWatcher::handleRecord(USN_RECORD_V2* pRecord) {
 
     // 仅更新 MftReader 内存 SoA，不直接操作数据库
     if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE)) {
-        MftReader::instance().updateEntryFromUsn(pRecord, m_volume);
+        MftReader::instance().updateEntryFromUsn(reinterpret_cast<uint8_t*>(pRecord), m_volume);
     }
     else if (reason & USN_REASON_FILE_DELETE) {
         MftReader::instance().removeEntryByFrn(m_volume, frn);
     }
     else if (reason & USN_REASON_RENAME_NEW_NAME) {
-        MftReader::instance().updateEntryFromUsn(pRecord, m_volume);
+        MftReader::instance().updateEntryFromUsn(reinterpret_cast<uint8_t*>(pRecord), m_volume);
     }
 }
 
