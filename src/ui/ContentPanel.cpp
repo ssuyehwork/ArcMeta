@@ -1728,18 +1728,22 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionCategorize: { 
             int catId = selectedAction->property("catId").toInt(); 
             auto indexes = view->selectionModel()->selectedIndexes(); 
+            
+            // 2026-07-xx 按照 Plan-88：批量注册异步化，杜绝主线程 I/O 阻塞
+            QStringList toRegister;
+            for (const auto& idx : indexes) {
+                if (idx.column() == 0 && !idx.data(ManagedRole).toBool()) {
+                    toRegister << idx.data(PathRole).toString();
+                }
+            }
+            if (!toRegister.isEmpty()) {
+                MetadataManager::instance().registerItemsAsync(toRegister);
+            }
              
             for (const auto& idx : indexes) { 
                 if (idx.column() == 0) { 
                     QString itemPath = idx.data(PathRole).toString(); 
                     std::wstring wPath = itemPath.toStdWString();
-
-                    // 2026-07-xx 按照用户要求：归类前先判断项目是否已经入库
-                    // 如果尚未入库（ManagedRole 为 false），则执行注册流程
-                    bool isManaged = idx.data(ManagedRole).toBool();
-                    if (!isManaged) {
-                        MetadataManager::instance().registerItem(wPath);
-                    }
 
                     // 2026-06-xx 物理同步：基于同步获取的 File ID 进行归类，解决新文件关联失败冲突。 
                     std::string fid = MetadataManager::instance().getFileIdSync(wPath); 

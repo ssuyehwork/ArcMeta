@@ -12,6 +12,8 @@
 #include <QGridLayout>
 #include <QMenu>
 #include <QDebug>
+#include <QPointer>
+#include <QtConcurrent>
 #include "FramelessDialog.h"
 
 using namespace ArcMeta::Style;
@@ -331,75 +333,87 @@ bool TagManagerView::eventFilter(QObject* watched, QEvent* event) {
 }
 
 void TagManagerView::addTagToGroup(const QString& tagName, int groupId) {
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-    if (!db) return;
-    sqlite3_stmt* stmt;
-    const char* sql = "INSERT INTO tag_group_items (group_id, tag_name) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM tag_group_items WHERE group_id = ? AND tag_name = ?)";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, groupId);
-        QByteArray tagUtf8 = tagName.toUtf8();
-        sqlite3_bind_text(stmt, 2, tagUtf8.constData(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 3, groupId);
-        sqlite3_bind_text(stmt, 4, tagUtf8.constData(), -1, SQLITE_TRANSIENT);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-        refresh();
-    }
+    QPointer<TagManagerView> weakThis(this);
+    (void)QtConcurrent::run([weakThis, tagName, groupId]() {
+        sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
+        if (!db) return;
+        sqlite3_stmt* stmt;
+        const char* sql = "INSERT INTO tag_group_items (group_id, tag_name) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM tag_group_items WHERE group_id = ? AND tag_name = ?)";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, groupId);
+            QByteArray tagUtf8 = tagName.toUtf8();
+            sqlite3_bind_text(stmt, 2, tagUtf8.constData(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 3, groupId);
+            sqlite3_bind_text(stmt, 4, tagUtf8.constData(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+            if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
+        }
+    });
 }
 
 void TagManagerView::removeTagFromGroup(const QString& tagName, int groupId) {
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-    if (!db) return;
-    sqlite3_stmt* stmt;
-    QString sql;
-    if (groupId == -1) {
-        sql = "DELETE FROM tag_group_items WHERE tag_name = ?";
-    } else {
-        sql = "DELETE FROM tag_group_items WHERE group_id = ? AND tag_name = ?";
-    }
-    if (sqlite3_prepare_v2(db, sql.toUtf8().constData(), -1, &stmt, nullptr) == SQLITE_OK) {
+    QPointer<TagManagerView> weakThis(this);
+    (void)QtConcurrent::run([weakThis, tagName, groupId]() {
+        sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
+        if (!db) return;
+        sqlite3_stmt* stmt;
+        QString sql;
         if (groupId == -1) {
-            sqlite3_bind_text(stmt, 1, tagName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
+            sql = "DELETE FROM tag_group_items WHERE tag_name = ?";
         } else {
-            sqlite3_bind_int(stmt, 1, groupId);
-            sqlite3_bind_text(stmt, 2, tagName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
+            sql = "DELETE FROM tag_group_items WHERE group_id = ? AND tag_name = ?";
         }
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-        refresh();
-    }
+        if (sqlite3_prepare_v2(db, sql.toUtf8().constData(), -1, &stmt, nullptr) == SQLITE_OK) {
+            if (groupId == -1) {
+                sqlite3_bind_text(stmt, 1, tagName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
+            } else {
+                sqlite3_bind_int(stmt, 1, groupId);
+                sqlite3_bind_text(stmt, 2, tagName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
+            }
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+            if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
+        }
+    });
 }
 
 void TagManagerView::renameGroup(int groupId, const QString& newName) {
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-    if (!db) return;
-    sqlite3_stmt* stmt;
-    if (sqlite3_prepare_v2(db, "UPDATE tag_groups SET name = ? WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, newName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 2, groupId);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-        refresh();
-    }
+    QPointer<TagManagerView> weakThis(this);
+    (void)QtConcurrent::run([weakThis, groupId, newName]() {
+        sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
+        if (!db) return;
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(db, "UPDATE tag_groups SET name = ? WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, newName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 2, groupId);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+            if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
+        }
+    });
 }
 
 void TagManagerView::deleteGroup(int groupId) {
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-    if (!db) return;
-    sqlite3_stmt* stmt;
-    sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
-    if (sqlite3_prepare_v2(db, "DELETE FROM tag_groups WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, groupId);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-    }
-    if (sqlite3_prepare_v2(db, "DELETE FROM tag_group_items WHERE group_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, groupId);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-    }
-    sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
-    refresh();
+    QPointer<TagManagerView> weakThis(this);
+    (void)QtConcurrent::run([weakThis, groupId]() {
+        sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
+        if (!db) return;
+        sqlite3_stmt* stmt;
+        sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+        if (sqlite3_prepare_v2(db, "DELETE FROM tag_groups WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, groupId);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+        if (sqlite3_prepare_v2(db, "DELETE FROM tag_group_items WHERE group_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, groupId);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+        sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
+        if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
+    });
 }
 
 void TagManagerView::createNewGroup() {

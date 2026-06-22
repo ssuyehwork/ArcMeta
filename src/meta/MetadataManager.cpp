@@ -10,6 +10,9 @@
 #include <QCoreApplication>
 #include <QImageReader>
 #include <QSvgRenderer>
+#ifdef Q_OS_WIN
+#include <objbase.h>
+#endif
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -329,6 +332,34 @@ void MetadataManager::registerItem(const std::wstring& path) {
     notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 }
 
+void MetadataManager::registerItemsAsync(const QStringList& paths) {
+    if (paths.isEmpty()) return;
+    
+    // 2026-07-xx 按照 Plan-88：全异步批量注册链
+    (void)QtConcurrent::run([this, paths]() {
+#ifdef Q_OS_WIN
+        CoInitializeEx(NULL, COINIT_APARTMENTTHREADED); // 赋予 Shell/图像分析能力
+#endif
+        for (const auto& qp : paths) {
+            std::wstring nPath = normalizePath(qp.toStdWString());
+            
+            // 1. 激活 (优化版，内含锁分离 I/O)
+            ensureActivated(nPath);
+            
+            // 2. 物理与视觉属性提取 (耗时操作)
+            tryExtractDimensions(nPath);
+            syncPhysicalMetadata(nPath, false); // 内部已异步化
+            tryExtractColor(nPath);
+            
+            // 3. 增量通知 UI
+            notifyUI(RefreshLevel::PathUpdate, qp);
+        }
+#ifdef Q_OS_WIN
+        CoUninitialize();
+#endif
+    });
+}
+
 RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     {
@@ -347,21 +378,25 @@ std::wstring MetadataManager::getPathByFid(const std::string& fid) {
 }
 
 void MetadataManager::ensureActivated(const std::wstring& nPath) {
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
-    if (m_cache.find(nPath) != m_cache.end()) return;
+    // 1. 读锁检查 (快速路径)
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        if (m_cache.find(nPath) != m_cache.end()) return;
+    }
 
-    // 2026-06-xx 逻辑修复：点击/激活文件不应导致“全部数据”计数增加。
-    // 计数应仅反映数据库中已持久化的项目总数。
+    // 2. 锁外同步获取物理属性 (耗时 I/O 操作)
+    // 2026-07-xx 按照 Plan-88：杜绝在 unique_lock 期间执行 Win32 API 访问
     RuntimeMeta rm;
     std::wstring frn;
     std::wstring type;
     if (fetchWinApiMetadataDirect(nPath, rm.fileId128, &frn, &rm.fileSize, &type, &rm.ctime, &rm.mtime, &rm.atime)) {
         rm.isFolder = (type == L"folder");
         
-        // 2026-07-xx 物理级同步优化：共享元数据。
-        // 理由：如果该文件的 FID 已经在缓存中存在（说明在其他文件夹有相同文件），
-        // 自动借用其已有的用户元数据（星级、标签、颜色、尺寸、色板等），
-        // 彻底解决用户反馈的“同一文件在不同位置显示不一致”的问题。
+        // 3. 写锁写入缓存
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        if (m_cache.count(nPath)) return; // 二次检查防止竞态
+
+        // 共享元数据逻辑 (FID 关联)
         if (!rm.fileId128.empty() && m_fidToPath.count(rm.fileId128)) {
             const RuntimeMeta& existing = m_cache[m_fidToPath[rm.fileId128]];
             rm.rating    = existing.rating;
@@ -379,7 +414,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         if (!rm.fileId128.empty()) {
             m_fidToPath[rm.fileId128] = nPath;
 
-            // 2026-07-xx 隔离索引同步：新项目激活时立即注册
+            // 索引同步逻辑
             std::wstring name, ext;
             parsePathComponents(nPath, rm.isFolder, name, ext);
             if (!name.empty()) {
@@ -419,9 +454,10 @@ void MetadataManager::renameTag(const QString& oldName, const QString& newName) 
             if (!newName.isEmpty() && !pair.second.tags.contains(newName)) {
                 pair.second.tags.append(newName);
             }
-            debouncePersist(pair.first);
+            pushToDirty_NoLock(pair.first);
         }
     }
+    QMetaObject::invokeMethod(m_batchTimer, "start", Qt::QueuedConnection);
     notifyFullUIRebuild();
 }
 
@@ -430,9 +466,10 @@ void MetadataManager::removeTag(const QString& tagName) {
     for (auto& pair : m_cache) {
         if (pair.second.tags.contains(tagName)) {
             pair.second.tags.removeAll(tagName);
-            debouncePersist(pair.first);
+            pushToDirty_NoLock(pair.first);
         }
     }
+    QMetaObject::invokeMethod(m_batchTimer, "start", Qt::QueuedConnection);
     notifyFullUIRebuild();
 }
 
@@ -570,6 +607,10 @@ QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
 void MetadataManager::debouncePersist(const std::wstring& nPath) {
     { std::unique_lock<std::shared_mutex> lock(m_mutex); m_dirtyPaths.insert(nPath); }
     QMetaObject::invokeMethod(m_batchTimer, "start", Qt::QueuedConnection);
+}
+
+void MetadataManager::pushToDirty_NoLock(const std::wstring& nPath) {
+    m_dirtyPaths.insert(nPath);
 }
 
 void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring& newPath) {
