@@ -1303,6 +1303,8 @@ void FilterPanel::returnAllRowsToPool() {
 }
 
 void FilterPanel::rebuildDateCheckboxes(DateType type, bool descending) {
+    Q_UNUSED(type);
+    Q_UNUSED(descending);
     // 物理对账：此函数专门用于日期排序切换，不全量 rebuildGroups 以提升性能
     // TODO: 实现局部布局刷新逻辑
     rebuildGroups();
