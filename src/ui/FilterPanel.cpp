@@ -507,9 +507,11 @@ void FilterPanel::rebuildDateCheckboxes(bool isCreateDate, bool descending) {
         cb->blockSignals(true);
         cb->setChecked(selected.contains(d));
         cb->blockSignals(false);
-        connect(cb, &QCheckBox::toggled, this, [this, &selected, d](bool on) {
-            if (on) { if (!selected.contains(d)) selected.append(d); }
-            else selected.removeAll(d);
+        // 2026-07-xx 物理修复：禁止捕获局部引用以防止悬空指针崩溃，改为按值捕获 isCreateDate
+        connect(cb, &QCheckBox::toggled, this, [this, isCreateDate, d](bool on) {
+            QStringList& targetList = isCreateDate ? m_filter.createDates : m_filter.modifyDates;
+            if (on) { if (!targetList.contains(d)) targetList.append(d); }
+            else targetList.removeAll(d);
             emit filterChanged(m_filter);
         });
     }
@@ -819,6 +821,17 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             });
         }
+        if (m_emptyFolderCount > 0) {
+            QCheckBox* cb = addFilterRow(gl, "空文件夹", m_emptyFolderCount);
+            cb->blockSignals(true);
+            cb->setChecked(m_filter.types.contains("空文件夹"));
+            cb->blockSignals(false);
+            connect(cb, &QCheckBox::toggled, this, [this](bool on) {
+                if (on) { if (!m_filter.types.contains("空文件夹")) m_filter.types.append("空文件夹"); }
+                else    m_filter.types.removeAll("空文件夹");
+                emit filterChanged(m_filter);
+            });
+        }
         QStringList exts = m_typeCounts.keys(); exts.sort();
         for (const QString& ext : exts) {
             if (ext == "folder" || ext == "file" || ext == "空文件夹") continue;
@@ -1088,22 +1101,6 @@ void FilterPanel::rebuildGroups() {
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
 
-    // ── 10. 属性 (特殊状态) ──────────────────────────────────────────────
-    if (m_emptyFolderCount > 0) {
-        QVBoxLayout* gl = nullptr;
-        QWidget* g = buildGroup("属性", gl);
-
-        QCheckBox* cb = addFilterRow(gl, "空文件夹", m_emptyFolderCount);
-        cb->blockSignals(true);
-        cb->setChecked(m_filter.types.contains("空文件夹"));
-        cb->blockSignals(false);
-        connect(cb, &QCheckBox::toggled, this, [this](bool on) {
-            if (on) { if (!m_filter.types.contains("空文件夹")) m_filter.types.append("空文件夹"); }
-            else    m_filter.types.removeAll("空文件夹");
-            emit filterChanged(m_filter);
-        });
-        m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
-    }
 
     // ── 11. 图像比例 (独立主选项) ──────────────────────────────────────────
     {
