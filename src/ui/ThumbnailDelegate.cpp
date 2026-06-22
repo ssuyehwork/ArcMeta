@@ -444,8 +444,19 @@ bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, co
             }
 
             if (isBanHit || hitStar != -1) {
-                // 2. 执行数据更新
-                model->setData(index, isBanHit ? 0 : hitStar, m_ratingRole);
+                // 2. 执行数据更新 (支持选区感知批量操作)
+                int newValue = isBanHit ? 0 : hitStar;
+                if (view && view->selectionModel() && view->selectionModel()->isSelected(index)) {
+                    auto selectedIndexes = view->selectionModel()->selectedIndexes();
+                    // 2026-07-xx 按照 Plan-86：遍历选区实现批量评分
+                    for (const auto& selIdx : selectedIndexes) {
+                        if (selIdx.column() == 0) {
+                            model->setData(selIdx, newValue, m_ratingRole);
+                        }
+                    }
+                } else {
+                    model->setData(index, newValue, m_ratingRole);
+                }
 
                 // 3. 物理修复：直接执行禁用逻辑，杜绝 Lambda 嵌套导致的编译错误
                 // 2026-06-xx 按照用户报错纠偏：改用更稳健的类型获取方式
