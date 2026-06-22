@@ -400,13 +400,13 @@ void MainWindow::initUi() {
         ToolTipOverlay::instance()->showText(QPoint(50, 50), msg, 1500, QColor("#41F2F2"));
     });
 
-    // 5a. 目录装载完成 -> FilterPanel 动态填充 (七参数版本)
+    // 5a. 目录装载完成 -> FilterPanel 动态填充 (六参数版本: 移除标签统计)
     connect(m_contentPanel, &ContentPanel::directoryStatsReady, this,
         [this](const QMap<int,int>& r, const QMap<QString,int>& c,
-               const QMap<QString,int>& t, const QMap<QString,int>& tp,
+               const QMap<QString,int>& tp,
                const QMap<QString,int>& cd, const QMap<QString,int>& md,
                int ef) {
-            m_filterPanel->populate(r, c, t, tp, cd, md, ef);
+            m_filterPanel->populate(r, c, tp, cd, md, ef);
         });
 
     // 5b. FilterPanel 状态变化 -> 内容面板过滤 (Plan-92: 统一搜索词合并)

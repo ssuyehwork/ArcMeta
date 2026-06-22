@@ -2641,11 +2641,6 @@ void ContentPanel::recalculateAndEmitStats() {
                 stats.typeCounts[record.suffix.toUpper()]++;
             }
             
-            for (const QString& tag : record.tags) {
-                stats.tagCounts[tag]++;
-            }
-            if (record.tags.isEmpty()) stats.noTagCount++;
-            
             auto dateKey = [&](long long ts) {
                 return QDateTime::fromMSecsSinceEpoch(ts).date().toString("dd-MM-yyyy");
             };
@@ -2653,11 +2648,10 @@ void ContentPanel::recalculateAndEmitStats() {
             stats.createDateCounts[dateKey(record.ctime)]++;
             stats.modifyDateCounts[dateKey(record.mtime)]++;
         }
-        if (stats.noTagCount > 0) stats.tagCounts["__none__"] = stats.noTagCount;
 
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, stats]() {
             if (weakThis) {
-                emit weakThis->directoryStatsReady(stats.ratingCounts, stats.colorCounts, stats.tagCounts,
+                emit weakThis->directoryStatsReady(stats.ratingCounts, stats.colorCounts,
                                                  stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts,
                                                  stats.emptyFolderCount);
             }
