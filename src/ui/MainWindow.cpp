@@ -400,19 +400,23 @@ void MainWindow::initUi() {
         ToolTipOverlay::instance()->showText(QPoint(50, 50), msg, 1500, QColor("#41F2F2"));
     });
 
-    // 5a. 目录装载完成 -> FilterPanel 动态填充 (七参数版本)
+    // 5a. 目录装载完成 -> FilterPanel 动态填充 (六参数版本: 移除标签统计)
     connect(m_contentPanel, &ContentPanel::directoryStatsReady, this,
         [this](const QMap<int,int>& r, const QMap<QString,int>& c,
-               const QMap<QString,int>& t, const QMap<QString,int>& tp,
+               const QMap<QString,int>& tp,
                const QMap<QString,int>& cd, const QMap<QString,int>& md,
                int ef) {
-            m_filterPanel->populate(r, c, t, tp, cd, md, ef);
+            m_filterPanel->populate(r, c, tp, cd, md, ef);
         });
 
-    // 5b. FilterPanel 勾选变化 -> 内容面板过滤
+    // 5b. FilterPanel 状态变化 -> 内容面板过滤 (Plan-92: 统一搜索词合并)
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_filterPanel, &FilterPanel::filterChanged, this, [this](const FilterState& state) {
-        m_contentPanel->applyFilters(state);
+        FilterState mergedState = state;
+        if (m_searchEdit) {
+            mergedState.keyword = m_searchEdit->text().trimmed();
+        }
+        m_contentPanel->applyFilters(mergedState);
         updateStatusBar(); // 筛选后立即更新底栏可见项目总数
     });
 
@@ -465,7 +469,7 @@ void MainWindow::initUi() {
         updateStatusBar();
     });
 
-    // 回车搜索核心逻辑
+    // 回车搜索核心逻辑 (Plan-92: 信号链统一化，不再 blockSignals)
     auto doSearch = [this](const QString& keyword) {
         ArcMeta::Logger::log(QString("[Main] doSearch 被触发 -> %1").arg(keyword));
         if (m_isTagManagerMode) {
@@ -480,21 +484,12 @@ void MainWindow::initUi() {
             return;
         }
 
-        // 2026-07-xx 物理拦截：发起搜索前必须清空筛选面板的所有过滤条件，
-        // 防止因旧有的“评级/颜色/标签”勾选导致搜索结果被拦截不可见。
-        if (m_filterPanel) {
-            m_filterPanel->blockSignals(true);
-            m_filterPanel->clearAllFilters();
-            m_filterPanel->blockSignals(false);
-            
-            // 物理同步：由于屏蔽了信号，需要手动重置内容面板的筛选状态
-            if (m_contentPanel) {
-                m_contentPanel->applyFilters(FilterState());
-                // 2026-07-xx 物理同步：显式同步搜索词到代理模型，防止首帧逻辑判定失步
-                if (auto* proxy = qobject_cast<FilterProxyModel*>(m_contentPanel->getProxyModel())) {
-                    proxy->setSearchQuery(keyword);
-                }
-            }
+        // 2026-07-xx 按照 Plan-92：由于关键词已合并入 FilterState，发起异步搜索时不再需要重置面板，
+        // 而是将当前搜索词作为过滤条件之一。
+        if (m_contentPanel) {
+            FilterState fs = m_filterPanel->currentFilter();
+            fs.keyword = keyword;
+            m_contentPanel->applyFilters(fs);
         }
 
         // 维护历史记录

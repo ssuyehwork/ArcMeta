@@ -47,10 +47,8 @@ public:
     explicit FilterProxyModel(QObject* parent = nullptr);
 
     FilterState currentFilter;
-    QString m_searchQuery;
 
     void updateFilter();
-    void setSearchQuery(const QString& query);
 
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override;
@@ -130,11 +128,9 @@ public:
     struct ScanStats {
         QMap<int, int> ratingCounts;
         QMap<QString, int> colorCounts;
-        QMap<QString, int> tagCounts;
         QMap<QString, int> typeCounts;
         QMap<QString, int> createDateCounts;
         QMap<QString, int> modifyDateCounts;
-        int noTagCount = 0;
         int emptyFolderCount = 0;
     };
 
@@ -238,7 +234,6 @@ signals:
     void directoryStatsReady(
         const QMap<int, int>&     ratingCounts,
         const QMap<QString, int>& colorCounts,
-        const QMap<QString, int>& tagCounts,
         const QMap<QString, int>& typeCounts,
         const QMap<QString, int>& createDateCounts,
         const QMap<QString, int>& modifyDateCounts,
