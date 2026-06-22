@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "MainWindow.h"
+#include <QDateTime>
 #include "Logger.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"

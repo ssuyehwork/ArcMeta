@@ -3,6 +3,7 @@
 #endif
 #include "CacheManager.h"
 #include "IndexedEntry.h"
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
