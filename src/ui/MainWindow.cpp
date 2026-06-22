@@ -444,7 +444,6 @@ void MainWindow::initUi() {
             m_contentPanel->loadPaths({}); // 先清空界面进入搜索态
             m_activeSearchReqId = m_contentPanel->currentLoadRequestId(); // 保存当前搜索会话 ID
             
-            if (m_addressBar) m_addressBar->setPath("搜索: " + m_searchEdit->text().trimmed());
             ArcMeta::Logger::log(QString("[Main] 搜索会话已锁定 ID: %1").arg(m_activeSearchReqId));
         }
     });
