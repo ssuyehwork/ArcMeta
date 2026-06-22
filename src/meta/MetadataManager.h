@@ -122,6 +122,12 @@ public:
      */
     void registerItem(const std::wstring& path);
 
+    /**
+     * @brief 异步批量注册项目 (Plan-88 性能重构)
+     * 将耗时的 Win32 I/O 与视觉分析移至后台线程
+     */
+    void registerItemsAsync(const QStringList& paths);
+
     void ensureActivated(const std::wstring& nPath);
 
     void setRating(const std::wstring& path, int rating, bool notify = true);
@@ -298,6 +304,9 @@ private:
 
     void persistAsync(const std::wstring& path, bool notify = true);
     void debouncePersist(const std::wstring& path);
+
+    // 2026-07-xx 按照 Plan-88：无锁版脏路径推送，解决递归死锁
+    void pushToDirty_NoLock(const std::wstring& nPath);
 };
 
 } // namespace ArcMeta
