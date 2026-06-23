@@ -446,7 +446,13 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
             // 2026-07-xx 按照 Plan-65：悬停触发，timeout = 0
             ToolTipOverlay::instance()->showText(QCursor::pos(), text, 0);
         }
-    } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::MouseButtonPress) {
+    } else if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress) {
+        // 2026-06-23 按照用户要求：滑杆滑动/悬停显示百分比数值
+        if (watched == m_areaSlider) {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), QString("%1%").arg(m_areaSlider->value()), 0);
+        }
+    } else if (event->type() == QEvent::HoverLeave || event->type() == QEvent::MouseButtonRelease || (event->type() == QEvent::MouseButtonPress && watched != m_areaSlider)) {
+        // 2026-06-23 逻辑修正：滑杆按下时不隐藏（以便滑动回显），离开或释放时隐藏
         ToolTipOverlay::hideTip();
     }
     
@@ -676,6 +682,8 @@ void FilterPanel::rebuildGroups() {
         m_areaSlider->setRange(0, 100);
         m_areaSlider->setValue(m_filter.minColorArea);
         m_areaSlider->setCursor(Qt::PointingHandCursor);
+        m_areaSlider->setMouseTracking(true); // 2026-06-23 按照用户要求：支持悬停/滑动实时回显百分比
+        m_areaSlider->installEventFilter(this);
         m_areaSlider->setStyleSheet(
             "QSlider::groove:horizontal { height: 2px; background: #444; border-radius: 1px; }"
             "QSlider::handle:horizontal { background: #EEE; border: 1px solid #777; width: 10px; height: 10px; margin: -4px 0; border-radius: 5px; }"
