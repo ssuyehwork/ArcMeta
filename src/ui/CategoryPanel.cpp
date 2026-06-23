@@ -70,15 +70,19 @@ protected:
         int id = sourceIndex.data(IdRole).toInt();
         QString name = sourceIndex.data(NameRole).toString();
 
-        // 1. 豁免权 (Plan-97 补充要求)：
-        // 系统项 (ID < 0) 以及顶级结构组 ("快速访问", "我的分类") 始终显示，不参与过滤。
-        if (id < 0 || name == "快速访问" || name == "我的分类") {
-            qDebug() << "[CategoryFilter] 豁免项常驻: " << name;
-            return true;
+        // 1. 顶级结构过滤 (Plan-97 补充要求：仅过滤“我的分类”)
+        if (!sourceParent.isValid()) {
+            // 系统项 (ID < 0) 和 “快速访问” 在搜索时直接隐藏
+            if (id < 0 || name == "快速访问") {
+                return false;
+            }
+            // “我的分类” 顶级组必须保留，以便显示其下的匹配子项
+            if (name == "我的分类") {
+                return true;
+            }
         }
 
-        // 2. 匹配逻辑 (针对用户分类 ID > 0)：
-        // 检查自身名称是否匹配关键词
+        // 2. 用户分类匹配逻辑 (ID > 0)：
         if (name.contains(m_filterText, Qt::CaseInsensitive)) {
             qDebug() << "[CategoryFilter] 用户分类匹配成功: " << name;
             return true;
