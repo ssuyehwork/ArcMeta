@@ -6,10 +6,12 @@
 #include <QPushButton>
 #include <QSet>
 #include <QModelIndex>
+#include <QLineEdit>
 
 namespace ArcMeta {
 
 class CategoryModel;
+class CategoryFilterProxyModel;
 class DropTreeView;
 
 /**
@@ -81,6 +83,9 @@ private slots:
     void onEmptyTrash();
     void onRestoreAllFromTrash();
 
+    // 2026-xx-xx 按照 Plan-98：搜索过滤
+    void onSearchTextChanged(const QString& text);
+
 private:
     void initUi();
     void setupContextMenu();
@@ -117,6 +122,8 @@ private:
     
     DropTreeView* m_categoryTree = nullptr;
     CategoryModel* m_categoryModel = nullptr;
+    CategoryFilterProxyModel* m_proxyModel = nullptr;
+    QLineEdit* m_searchEdit = nullptr;
     QTimer* m_refreshTimer = nullptr;
 
     // 2026-03-xx 会话级解锁列表：存储当前已验证通过的加密分类 ID

@@ -70,6 +70,7 @@ set(SOURCES
     src/ui/BatchRenameDialog.h
     src/ui/BatchRenamePreviewDialog.cpp
     src/ui/BatchRenamePreviewDialog.h
+    src/ui/CategoryFilterProxyModel.h
     src/ui/BreadcrumbBar.cpp
     src/ui/BreadcrumbBar.h
     src/ui/CategoryDelegate.h
