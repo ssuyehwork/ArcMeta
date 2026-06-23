@@ -2,6 +2,7 @@
 #include "../core/AppConfig.h"
 #include "ToolTipOverlay.h"
 #include "UiHelper.h"
+#include "StyleLibrary.h"
 #include "ColorPicker.h"
 #include "SearchHistoryPanel.h"
 #include <QPushButton>
@@ -13,6 +14,8 @@
 #include <QLinearGradient>
 #include <QComboBox>
 #include <QButtonGroup>
+
+using namespace ArcMeta::Style;
 
 namespace ArcMeta {
 
@@ -343,7 +346,7 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     connect(m_btnPin, &QPushButton::clicked, this, [this]() {
         m_isFilterPinned = !m_isFilterPinned;
         if (m_isFilterPinned) {
-            m_btnPin->setIcon(UiHelper::getIcon("pin", ActiveOrange)); // 使用物理标准激活色
+            m_btnPin->setIcon(UiHelper::getIcon("pin", Style::ActiveOrange)); // 使用物理标准激活色
             m_btnPin->setProperty("tooltipText", "当前筛选条件已锁定（目录切换不重置）");
         } else {
             m_btnPin->setIcon(UiHelper::getIcon("pin_tilted", QColor("#B0B0B0")));
