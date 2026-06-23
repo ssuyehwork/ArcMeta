@@ -1,5 +1,6 @@
 #include "NavPanel.h"
 #include "UiHelper.h"
+#include "Logger.h"
 #include "TreeItemDelegate.h"
 #include "DropTreeView.h"
 #include "ContentPanel.h"
@@ -295,7 +296,7 @@ void NavPanel::onFavoriteContextMenu(const QPoint& pos) {
 }
 
 void NavPanel::onPathsDroppedToFavorite(const QStringList& paths, const QModelIndex& target) {
-    Logger::log(QString("[NavPanel] onPathsDroppedToFavorite: count=%1, targetValid=%2").arg(paths.size()).arg(target.isValid()));
+    ArcMeta::Logger::log(QString("[NavPanel] onPathsDroppedToFavorite: count=%1, targetValid=%2").arg(paths.size()).arg(target.isValid() ? "true" : "false"));
     Q_UNUSED(target);
     for (const QString& path : paths) {
         addFavoriteItem(path);
@@ -341,18 +342,18 @@ void NavPanel::saveFavorites() {
 }
 
 void NavPanel::addFavoriteItem(const QString& path) {
-    Logger::log(QString("[NavPanel] addFavoriteItem: %1").arg(path));
+    ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: %1").arg(path));
     // 检查重复
     for (int i = 0; i < m_favoriteModel->rowCount(); ++i) {
         if (m_favoriteModel->item(i)->data(Qt::UserRole + 1).toString() == path) {
-            Logger::log(QString("[NavPanel] addFavoriteItem: path already exists, skip."));
+            ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: path already exists, skip."));
             return;
         }
     }
 
     QFileInfo fi(path);
     if (!fi.exists()) {
-        Logger::log(QString("[NavPanel] addFavoriteItem: path not exists on disk!"));
+        ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: path not exists on disk!"));
         return;
     }
 
@@ -362,7 +363,7 @@ void NavPanel::addFavoriteItem(const QString& path) {
     
     // 物理红线：收藏项不再显示子节点（扁平化展示）
     m_favoriteModel->appendRow(item);
-    Logger::log(QString("[NavPanel] addFavoriteItem: success, current count=%1").arg(m_favoriteModel->rowCount()));
+    ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: success, current count=%1").arg(m_favoriteModel->rowCount()));
 }
 
 void NavPanel::onItemExpanded(const QModelIndex& index) {
