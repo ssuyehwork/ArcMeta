@@ -229,6 +229,18 @@ void MainWindow::initUi() {
         unifiedNavigateTo(path);
     });
 
+    // 2026-xx-xx 按照 Plan-95：实现收藏文件定位逻辑
+    connect(m_navPanel, &NavPanel::requestLocateFile, this, [this](const QString& path) {
+        QFileInfo fi(path);
+        QString parentDir = fi.absolutePath();
+
+        // 1. 设置待定位的文件名 (不开启编辑模式)
+        m_contentPanel->setPendingSelectName(fi.fileName(), false);
+
+        // 2. 跳转到父目录
+        unifiedNavigateTo(parentDir);
+    });
+
     connect(m_contentPanel, &ContentPanel::directorySelected, this, [this](const QString& path) {
         unifiedNavigateTo(path);
     });
