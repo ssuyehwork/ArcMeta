@@ -183,7 +183,7 @@ void NavPanel::initUi() {
     m_favoriteView->setAcceptDrops(true);
     m_favoriteView->setDropIndicatorShown(true);
     m_favoriteView->setDefaultDropAction(Qt::MoveAction);
-    m_favoriteView->setDragDropMode(QAbstractItemView::InternalMove);
+    m_favoriteView->setDragDropMode(QAbstractItemView::DragDrop); // 修改为允许外部拖放
     m_favoriteView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // 禁止内部滚动
     m_favoriteView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
@@ -295,6 +295,7 @@ void NavPanel::onFavoriteContextMenu(const QPoint& pos) {
 }
 
 void NavPanel::onPathsDroppedToFavorite(const QStringList& paths, const QModelIndex& target) {
+    Logger::log(QString("[NavPanel] onPathsDroppedToFavorite: count=%1, targetValid=%2").arg(paths.size()).arg(target.isValid()));
     Q_UNUSED(target);
     for (const QString& path : paths) {
         addFavoriteItem(path);
@@ -340,15 +341,20 @@ void NavPanel::saveFavorites() {
 }
 
 void NavPanel::addFavoriteItem(const QString& path) {
+    Logger::log(QString("[NavPanel] addFavoriteItem: %1").arg(path));
     // 检查重复
     for (int i = 0; i < m_favoriteModel->rowCount(); ++i) {
         if (m_favoriteModel->item(i)->data(Qt::UserRole + 1).toString() == path) {
+            Logger::log(QString("[NavPanel] addFavoriteItem: path already exists, skip."));
             return;
         }
     }
 
     QFileInfo fi(path);
-    if (!fi.exists()) return;
+    if (!fi.exists()) {
+        Logger::log(QString("[NavPanel] addFavoriteItem: path not exists on disk!"));
+        return;
+    }
 
     QIcon icon = UiHelper::getFileIcon(path, 18);
     QStandardItem* item = new QStandardItem(icon, fi.fileName().isEmpty() ? path : fi.fileName());
@@ -356,6 +362,7 @@ void NavPanel::addFavoriteItem(const QString& path) {
     
     // 物理红线：收藏项不再显示子节点（扁平化展示）
     m_favoriteModel->appendRow(item);
+    Logger::log(QString("[NavPanel] addFavoriteItem: success, current count=%1").arg(m_favoriteModel->rowCount()));
 }
 
 void NavPanel::onItemExpanded(const QModelIndex& index) {

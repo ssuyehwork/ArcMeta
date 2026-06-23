@@ -19,6 +19,7 @@ DropTreeView::DropTreeView(QWidget* parent) : QTreeView(parent) {
 }
 
 void DropTreeView::dragEnterEvent(QDragEnterEvent* event) {
+    Logger::log(QString("[DropTreeView] dragEnter: hasUrls=%1").arg(event->mimeData()->hasUrls()));
     if (event->mimeData()->hasUrls()) {
         event->acceptProposedAction();
     } else {
@@ -30,7 +31,10 @@ void DropTreeView::dragMoveEvent(QDragMoveEvent* event) {
     if (event->mimeData()->hasUrls()) {
         // 2026-06-xx 按照用户要求：实现拖拽过程中的目标项实时高亮
         QModelIndex idx = indexAt(event->position().toPoint());
-        if (idx.isValid()) setCurrentIndex(idx);
+        if (idx.isValid()) {
+            setCurrentIndex(idx);
+            Logger::log(QString("[DropTreeView] dragMove: targetIdx=%1").arg(idx.data().toString()));
+        }
 
         // 物理同步：显式调用基类逻辑以激活放置指示器 (Drop Indicator)
         QTreeView::dragMoveEvent(event);
@@ -41,6 +45,7 @@ void DropTreeView::dragMoveEvent(QDragMoveEvent* event) {
 }
 
 void DropTreeView::dropEvent(QDropEvent* event) {
+    Logger::log(QString("[DropTreeView] dropEvent: hasUrls=%1").arg(event->mimeData()->hasUrls()));
     if (event->mimeData()->hasUrls()) {
         QStringList paths;
         for (const QUrl& url : event->mimeData()->urls()) {
@@ -49,6 +54,7 @@ void DropTreeView::dropEvent(QDropEvent* event) {
             }
         }
         QModelIndex idx = indexAt(event->position().toPoint());
+        Logger::log(QString("[DropTreeView] dropEvent: pathsCount=%1, targetIdx=%2").arg(paths.size()).arg(idx.isValid()));
         if (!paths.isEmpty()) {
             emit pathsDropped(paths, idx);
         }
