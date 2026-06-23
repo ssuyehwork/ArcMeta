@@ -63,11 +63,12 @@ protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override {
         QModelIndex index = sourceModel()->index(sourceRow, 0, sourceParent);
 
-        // 1. 文本过滤
+        // 1. 文本过滤 (Plan-97: 排除计数部分)
         QString keyword = filterRegularExpression().pattern();
         bool matchText = true;
         if (!keyword.isEmpty()) {
-            QString name = index.data(Qt::DisplayRole).toString();
+            // 使用 NameRole 仅针对纯文本名称过滤，排除 (n) 计数后缀
+            QString name = index.data(NameRole).toString();
             matchText = name.contains(keyword, Qt::CaseInsensitive);
         }
 
@@ -1073,54 +1074,39 @@ void CategoryPanel::initUi() {
     sbContentLayout->addWidget(m_categoryTree);
     m_mainLayout->addWidget(sbContent, 1);
 
-    // 3. 底部搜索栏 (Plan-96)
-    // 2026-07-18 按照最新 Plan-96 规范：移除顶部边框，复刻系统既有标准
+    // 3. 底部搜索栏 (Plan-97)
+    // 2026-07-18 按照最新 Plan-97 规范：侧边栏本地搜索
     QWidget* searchContainer = new QWidget(this);
-    searchContainer->setFixedHeight(44);
+    searchContainer->setFixedHeight(36); // 26px + 10px 边距
     searchContainer->setStyleSheet("background: transparent; border: none;");
 
     QHBoxLayout* searchLayout = new QHBoxLayout(searchContainer);
-    searchLayout->setContentsMargins(8, 4, 8, 8);
-    searchLayout->setSpacing(5);
+    searchLayout->setContentsMargins(8, 5, 8, 5);
+    searchLayout->setSpacing(0);
 
     m_searchEdit = new QLineEdit(searchContainer);
     m_searchEdit->setPlaceholderText("搜索分类...");
     m_searchEdit->setClearButtonEnabled(true);
 
-    // 1:1 复刻系统既有标准：图标注入
+    // 1:1 复刻系统标准：使用 select 图标
     m_searchEdit->addAction(UiHelper::getIcon("select", TextMuted, 14), QLineEdit::LeadingPosition);
 
-    m_searchEdit->setStyleSheet(QString(R"(
+    m_searchEdit->setStyleSheet(R"(
         QLineEdit {
-            background-color: %1;
-            color: %2;
-            border: 1px solid %3;
+            background-color: #2D2D2D;
+            color: #EEE;
+            border: 1px solid #444;
             border-radius: 6px;
             padding-left: 5px;
             font-size: 12px;
             height: 26px;
         }
         QLineEdit:focus {
-            border: 1px solid %4;
+            border: 1px solid #3498db;
         }
-    )").arg(qssColor(BackgroundDeep), qssColor(TextMain), qssColor(BorderColor), qssColor(PrimaryBlue)));
+    )");
 
     searchLayout->addWidget(m_searchEdit);
-
-    // 右侧独立按钮 (复刻 Plan-96)
-    QPushButton* btnAction = new QPushButton(searchContainer);
-    btnAction->setFixedSize(24, 24);
-    btnAction->setCheckable(true);
-    btnAction->setIcon(UiHelper::getIcon("menu_dots", TextMuted, 16));
-    btnAction->setStyleSheet(QString(R"(
-        QPushButton { background: transparent; border: 1px solid #444; border-radius: 4px; }
-        QPushButton:hover { background: #3E3E42; }
-        QPushButton:checked { background: %1; }
-    )").arg(qssColor(PrimaryBlue)));
-    btnAction->setProperty("tooltipText", "隐藏空分类");
-    btnAction->installEventFilter(this);
-    searchLayout->addWidget(btnAction);
-
     m_mainLayout->addWidget(searchContainer);
 
     // 逻辑连接
@@ -1133,10 +1119,6 @@ void CategoryPanel::initUi() {
         if (!text.isEmpty()) {
             m_categoryTree->expandAll();
         }
-    });
-
-    connect(btnAction, &QPushButton::toggled, this, [this](bool checked) {
-        m_proxyModel->setHideEmpty(checked);
     });
 
     // 2026-03-xx 物理记忆：初始化后加载持久化的展开状态

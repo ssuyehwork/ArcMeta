@@ -81,7 +81,11 @@ public:
             QStyledItemDelegate::paint(painter, optNoText, index);
 
             // 2. 获取文字区域并自行绘制高亮
-            QString text = index.data(Qt::DisplayRole).toString();
+            // Plan-97: 仅高亮 Name 部分，不包含 (n) 计数器
+            QString fullText = index.data(Qt::DisplayRole).toString();
+            QString nameText = index.data(NameRole).toString();
+            QString counterText = fullText.mid(nameText.length());
+
             QStyle* style = opt.widget ? opt.widget->style() : QApplication::style();
             QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget);
             textRect.adjust(0, 0, -5, 0); // 右侧呼吸
@@ -89,16 +93,16 @@ public:
             painter->save();
             painter->setRenderHint(QPainter::TextAntialiasing);
 
-            // 计算匹配位置 (不区分大小写)
-            int index_match = text.indexOf(m_searchKeyword, 0, Qt::CaseInsensitive);
+            // 仅在 Name 部分计算匹配位置
+            int index_match = nameText.indexOf(m_searchKeyword, 0, Qt::CaseInsensitive);
             if (index_match >= 0) {
                 QFont font = opt.font;
                 painter->setFont(font);
 
                 QFontMetrics fm(font);
-                QString preText = text.left(index_match);
-                QString midText = text.mid(index_match, m_searchKeyword.length());
-                QString postText = text.mid(index_match + m_searchKeyword.length());
+                QString preText = nameText.left(index_match);
+                QString midText = nameText.mid(index_match, m_searchKeyword.length());
+                QString postText = nameText.mid(index_match + m_searchKeyword.length()) + counterText;
 
                 // 绘制逻辑
                 int x = textRect.left();
@@ -110,11 +114,11 @@ public:
                 x += fm.horizontalAdvance(preText);
 
                 // 绘制匹配段 (高亮)
-                painter->setPen(QColor("#3498db")); // 按照 PrimaryBlue 规范高亮
+                painter->setPen(QColor("#41F2F2")); // 按照 Plan-97 规范使用亮蓝色
                 painter->drawText(x, y, midText);
                 x += fm.horizontalAdvance(midText);
 
-                // 绘制后段
+                // 绘制后段 (含计数器)
                 painter->setPen(opt.palette.color(QPalette::Text));
                 painter->drawText(x, y, postText);
             } else {
