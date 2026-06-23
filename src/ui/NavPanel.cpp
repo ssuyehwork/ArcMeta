@@ -177,19 +177,26 @@ void NavPanel::initUi() {
     favLayout->setContentsMargins(0, 5, 0, 0); // 与上方区域留一点间距
     favLayout->setSpacing(0);
 
-    // 快捷收藏标题
+    // 快捷收藏标题 (Plan-95: 对齐主标题栏高度与样式)
     QWidget* favHeader = new QWidget(this);
-    favHeader->setFixedHeight(24);
+    favHeader->setObjectName("ContainerHeader");
+    favHeader->setFixedHeight(32);
+    favHeader->setStyleSheet(
+        "QWidget#ContainerHeader {"
+        "  background-color: #252526;"
+        "  border-bottom: 1px solid #333;"
+        "}"
+    );
     QHBoxLayout* favHeaderLayout = new QHBoxLayout(favHeader);
-    favHeaderLayout->setContentsMargins(0, 0, 0, 0);
+    favHeaderLayout->setContentsMargins(0, 0, 5, 0); // 由于父容器已有 15px 边距，此处设为 0 以保持物理对齐
     favHeaderLayout->setSpacing(5);
 
     QLabel* favIcon = new QLabel(this);
-    favIcon->setPixmap(UiHelper::getIcon("star_filled", QColor("#FDB70A"), 14).pixmap(14, 14));
+    favIcon->setPixmap(UiHelper::getIcon("star_filled", QColor("#FDB70A"), 18).pixmap(18, 18));
     favHeaderLayout->addWidget(favIcon);
 
     QLabel* favTitle = new QLabel("快捷收藏", this);
-    favTitle->setStyleSheet("color: #FDB70A; font-size: 11px; font-weight: bold;");
+    favTitle->setStyleSheet("color: #FDB70A; font-size: 13px; font-weight: bold; background: transparent; border: none;");
     favHeaderLayout->addWidget(favTitle);
     favHeaderLayout->addStretch();
     favLayout->addWidget(favHeader);
