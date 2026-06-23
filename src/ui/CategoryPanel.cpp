@@ -1026,7 +1026,8 @@ void CategoryPanel::initUi() {
     // 2026-xx-xx 按照 Plan-98：新增底部搜索过滤框
     QWidget* searchContainer = new QWidget(this);
     searchContainer->setFixedHeight(40);
-    searchContainer->setStyleSheet("background: transparent; border-top: 1px solid #333;");
+    // 2026-06-xx 视觉优化：移除冗余 border-top 分割线
+    searchContainer->setStyleSheet("background: transparent; border-top: none;");
     QHBoxLayout* searchLayout = new QHBoxLayout(searchContainer);
     searchLayout->setContentsMargins(10, 0, 10, 0);
 
