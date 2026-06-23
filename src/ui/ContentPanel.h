@@ -274,6 +274,7 @@ private:
     int m_zoomLevel = 64;
     QString m_currentPath;
     QString m_pendingSelectName;
+    bool m_isPendingEdit = false;
     int m_currentCategoryId = -1;
     QString m_currentCategoryType; // 用于驱动差异化右键菜单
     bool m_isRecursive = false;
@@ -311,6 +312,16 @@ public slots:
      * @brief 加载并显示目录内容
      */
     void loadDirectory(const QString& path, bool recursive = false);
+
+    /**
+     * @brief 设置待选中的项名称，并在下次加载完成后自动定位
+     * @param name 文件名
+     * @param edit 是否进入编辑模式
+     */
+    void setPendingSelectName(const QString& name, bool edit = false) { 
+        m_pendingSelectName = name; 
+        m_isPendingEdit = edit;
+    }
 
     /**
      * @brief 强制重新加载当前视图的所有内容

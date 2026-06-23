@@ -2310,11 +2310,11 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                                 if (panelPtr->m_viewStack->currentWidget() == panelPtr->m_gridView) {
                                     panelPtr->m_gridView->scrollTo(proxyIdx);
                                     panelPtr->m_gridView->setCurrentIndex(proxyIdx);
-                                    panelPtr->m_gridView->edit(proxyIdx);
+                                    if (panelPtr->m_isPendingEdit) panelPtr->m_gridView->edit(proxyIdx);
                                 } else {
                                     panelPtr->m_treeView->scrollTo(proxyIdx);
                                     panelPtr->m_treeView->setCurrentIndex(proxyIdx);
-                                    panelPtr->m_treeView->edit(proxyIdx);
+                                    if (panelPtr->m_isPendingEdit) panelPtr->m_treeView->edit(proxyIdx);
                                 }
                             }
                             break;
@@ -2693,6 +2693,7 @@ void ContentPanel::createNewItem(const QString& type) {
  
     if (success) { 
         m_pendingSelectName = finalName;
+        m_isPendingEdit = true;
         loadDirectory(m_currentPath, m_isRecursive); 
     } 
 } 
