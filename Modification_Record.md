@@ -259,3 +259,4 @@
 2026-06-23: 优化自适应高度下的 DND 兼容性：收藏夹改为 Expanding 策略填充余白；禁用滚动区 viewport 接收以透传拖拽事件。 (修改)
 2026-06-23: 实施日志滚动治理 (Plan-97)：引入 4MB 容量哨兵与双文件滚动机制；优化 Logger 与 main 启动自检逻辑，限制日志总量。 (修改)
 2026-06-23: 实现侧边栏“我的分类”专属过滤搜索 (Plan-98)：引入 CategoryFilterProxyModel 递归代理模型；底部新增 8px 圆角搜索框；Delegate 补全 PrimaryBlue 匹配高亮逻辑。 (新增)
+2026-06-23: 修复侧边栏搜索代理模型编译错误：在 CMakeLists.txt 中注册 CategoryFilterProxyModel.h 以触发 MOC 生成。 (修改)
