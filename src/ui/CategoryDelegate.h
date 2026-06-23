@@ -4,6 +4,7 @@
 #include <QPainter>
 #include <QApplication>
 #include <QLineEdit>
+#include <QSortFilterProxyModel>
 #include "CategoryModel.h"
 #include "StyleLibrary.h"
 using namespace ArcMeta::Style;
@@ -66,8 +67,72 @@ public:
             opt.palette.setColor(QPalette::Text, Qt::white);
             opt.palette.setColor(QPalette::HighlightedText, Qt::white);
         }
-        
-        QStyledItemDelegate::paint(painter, opt, index);
+
+        // Plan-97: 搜索关键词高亮逻辑
+        const QAbstractProxyModel* proxy = qobject_cast<const QAbstractProxyModel*>(index.model());
+        QString filterText;
+        if (proxy) {
+            // 通过 property 获取 CategoryFilterProxyModel 的 filterText
+            filterText = proxy->property("filterText").toString();
+        }
+
+        if (filterText.isEmpty()) {
+            QStyledItemDelegate::paint(painter, opt, index);
+        } else {
+            // 物理渲染：三段式高亮绘制
+            painter->save();
+
+            // 调用原始 paint 绘制图标等，但要屏蔽文字
+            QString fullText = index.data(Qt::DisplayRole).toString();
+            opt.text = "";
+            QStyledItemDelegate::paint(painter, opt, index);
+
+            // 计算文字位置
+            QStyle* style = opt.widget ? opt.widget->style() : QApplication::style();
+            QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget);
+            textRect.adjust(2, 0, 0, 0); // 微调对齐
+
+            // 提取分类名称（去掉末尾计数器）
+            QString catName = index.data(NameRole).toString();
+            QString countPart = fullText.mid(catName.length());
+
+            painter->setFont(opt.font);
+            int startIdx = catName.indexOf(filterText, 0, Qt::CaseInsensitive);
+
+            if (startIdx >= 0) {
+                QString pre = catName.left(startIdx);
+                QString match = catName.mid(startIdx, filterText.length());
+                QString post = catName.mid(startIdx + filterText.length());
+
+                int x = textRect.left();
+                int y = textRect.top() + opt.fontMetrics.ascent() + (textRect.height() - opt.fontMetrics.height())/2;
+
+                // 绘制前缀
+                painter->setPen(selected ? Qt::white : QColor("#CCC"));
+                painter->drawText(x, y, pre);
+                x += opt.fontMetrics.horizontalAdvance(pre);
+
+                // 绘制匹配高亮
+                painter->setPen(qssColor(PrimaryBlue));
+                painter->drawText(x, y, match);
+                x += opt.fontMetrics.horizontalAdvance(match);
+
+                // 绘制后缀
+                painter->setPen(selected ? Qt::white : QColor("#CCC"));
+                painter->drawText(x, y, post);
+                x += opt.fontMetrics.horizontalAdvance(post);
+
+                // 绘制计数器 (暗淡处理)
+                painter->setPen(selected ? QColor("#DDD") : QColor("#888"));
+                painter->drawText(x, y, countPart);
+            } else {
+                // 如果是父节点因为子节点匹配而显示，本身不匹配，则正常绘制
+                painter->setPen(selected ? Qt::white : QColor("#CCC"));
+                painter->drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, fullText);
+            }
+
+            painter->restore();
+        }
     }
 
     QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override {

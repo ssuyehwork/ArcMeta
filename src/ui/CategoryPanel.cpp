@@ -1,5 +1,6 @@
 #include "CategoryPanel.h"
 #include "MainWindow.h"
+#include <QSortFilterProxyModel>
 #include "CategoryModel.h"
 #include "CategoryLockDialog.h"
 #include "CategorySetPasswordDialog.h"
@@ -39,6 +40,56 @@ using namespace ArcMeta::Style;
 #include <QtConcurrent>
 
 namespace ArcMeta {
+
+/**
+ * @brief 递归过滤代理模型 (Plan-97)
+ */
+class CategoryFilterProxyModel : public QSortFilterProxyModel {
+public:
+    explicit CategoryFilterProxyModel(QObject* parent = nullptr) : QSortFilterProxyModel(parent) {
+        setFilterCaseSensitivity(Qt::CaseInsensitive);
+        setFilterRole(NameRole);
+    }
+
+    void setFilterText(const QString& text) {
+        m_filterText = text;
+        // 同步到属性，供 Delegate 使用
+        setProperty("filterText", text);
+        invalidateFilter();
+    }
+
+    Q_INVOKABLE QString filterText() const { return m_filterText; }
+
+protected:
+    bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override {
+        if (m_filterText.isEmpty()) return true;
+
+        QModelIndex sourceIndex = sourceModel()->index(sourceRow, 0, sourceParent);
+        if (!sourceIndex.isValid()) return false;
+
+        // 1. 系统项与分组标题的处理：
+        // 傻逼逻辑规避：如果父节点匹配或者任何递归子节点匹配，父节点必须保持可见。
+        // 但如果系统项（ID < 0）本身不匹配，且其下没有任何匹配分类，则隐藏。
+
+        // 检查当前节点是否匹配
+        QString name = sourceIndex.data(NameRole).toString();
+        if (name.contains(m_filterText, Qt::CaseInsensitive)) {
+            qDebug() << "[CategoryFilter] 匹配成功: " << name << "(Row:" << sourceRow << ")";
+            return true;
+        }
+
+        // 2. 递归检查子节点
+        int childCount = sourceModel()->rowCount(sourceIndex);
+        for (int i = 0; i < childCount; ++i) {
+            if (filterAcceptsRow(i, sourceIndex)) return true;
+        }
+
+        return false;
+    }
+
+private:
+    QString m_filterText;
+};
 
 /**
  * @brief 获取默认分类颜色：深灰色 (#555555)
@@ -189,15 +240,21 @@ void CategoryPanel::deferredInit() {
     qDebug() << "[CategoryPanel] deferredInit 执行完毕";
 }
 
+QModelIndex CategoryPanel::currentSourceIndex() const {
+    if (!m_categoryTree || !m_proxyModel) return QModelIndex();
+    return m_proxyModel->mapToSource(m_categoryTree->currentIndex());
+}
+
 void CategoryPanel::setupContextMenu() {
     m_categoryTree->setContextMenuPolicy(Qt::CustomContextMenu);
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_categoryTree, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
-        QModelIndex index = m_categoryTree->indexAt(pos);
+        QModelIndex proxyIndex = m_categoryTree->indexAt(pos);
+        QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         
         // 2026-03-xx 按照用户要求：实现右键点击即选中，解决“分类与其子分类”交互一致性问题
-        if (index.isValid()) {
-            m_categoryTree->setCurrentIndex(index);
+        if (proxyIndex.isValid()) {
+            m_categoryTree->setCurrentIndex(proxyIndex);
         }
 
         QMenu menu(this);
@@ -384,7 +441,7 @@ void CategoryPanel::onCreateCategory() {
 }
 
 void CategoryPanel::onCreateSubCategory() {
-    QModelIndex index = m_categoryTree->currentIndex();
+    QModelIndex index = currentSourceIndex();
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
@@ -411,7 +468,7 @@ void CategoryPanel::onCreateSubCategory() {
 }
 
 void CategoryPanel::onClassifyToCategory() {
-    QModelIndex index = m_categoryTree->currentIndex();
+    QModelIndex index = currentSourceIndex();
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
@@ -430,7 +487,7 @@ void CategoryPanel::onClassifyToCategory() {
 }
 
 void CategoryPanel::onSetColor() {
-    QModelIndex index = m_categoryTree->currentIndex();
+    QModelIndex index = currentSourceIndex();
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
@@ -470,7 +527,7 @@ void CategoryPanel::onSetColor() {
 }
 
 void CategoryPanel::onRandomColor() {
-    QModelIndex index = m_categoryTree->currentIndex();
+    QModelIndex index = currentSourceIndex();
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
     
@@ -501,7 +558,7 @@ void CategoryPanel::onRandomColor() {
 }
 
 void CategoryPanel::onSetPresetTags() {
-    QModelIndex index = m_categoryTree->currentIndex();
+    QModelIndex index = currentSourceIndex();
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
@@ -532,7 +589,7 @@ void CategoryPanel::onSetPresetTags() {
 }
 
 void CategoryPanel::onTogglePin() {
-    QModelIndex index = m_categoryTree->currentIndex();
+    QModelIndex index = currentSourceIndex();
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
     
@@ -557,7 +614,7 @@ void CategoryPanel::onTogglePin() {
 }
 
 void CategoryPanel::onSetPassword() {
-    QModelIndex index = m_categoryTree->currentIndex();
+    QModelIndex index = currentSourceIndex();
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
@@ -589,7 +646,7 @@ void CategoryPanel::onSetPassword() {
 }
 
 void CategoryPanel::onClearPassword() {
-    QModelIndex index = m_categoryTree->currentIndex();
+    QModelIndex index = currentSourceIndex();
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
@@ -621,22 +678,24 @@ void CategoryPanel::onClearPassword() {
 }
 
 void CategoryPanel::onRenameCategory() {
-    QModelIndex index = m_categoryTree->currentIndex();
-    if (index.isValid()) {
-        QString type = index.data(TypeRole).toString();
+    QModelIndex proxyIndex = m_categoryTree->currentIndex();
+    if (proxyIndex.isValid()) {
+        QString type = proxyIndex.data(TypeRole).toString();
         // 2026-03-xx 物理兼容：允许重命名分类或文件项 (逻辑处理见 Model)
         if (type == "category" || type == "file" || type == "folder") {
-            m_categoryTree->edit(index);
+            m_categoryTree->edit(proxyIndex);
         }
     }
 }
 
 void CategoryPanel::onDeleteCategory() {
     // 2026-06-xx 彻底重构：支持多选批量删除分类，杜绝单项操作的低效
-    QModelIndexList selectedRows = m_categoryTree->selectionModel()->selectedRows();
+    QModelIndexList proxyRows = m_categoryTree->selectionModel()->selectedRows();
+    QModelIndexList selectedRows;
+    for (const auto& pIdx : proxyRows) selectedRows << m_proxyModel->mapToSource(pIdx);
     if (selectedRows.isEmpty()) {
         // 如果没有整行选中，尝试回退到 currentIndex
-        QModelIndex current = m_categoryTree->currentIndex();
+        QModelIndex current = currentSourceIndex();
         if (current.isValid()) selectedRows << current;
     }
 
@@ -695,7 +754,7 @@ int CategoryPanel::getTargetCategoryId(const QModelIndex& index) {
 }
 
 void CategoryPanel::onSortByNameAsc() {
-    QModelIndex index = m_categoryTree->currentIndex();
+    QModelIndex index = currentSourceIndex();
     // 逻辑：获取该项的父级分类 ID，执行重排
     int parentCatId = 0;
     QModelIndex pIdx = index.parent();
@@ -708,7 +767,7 @@ void CategoryPanel::onSortByNameAsc() {
 }
 
 void CategoryPanel::onSortByNameDesc() {
-    QModelIndex index = m_categoryTree->currentIndex();
+    QModelIndex index = currentSourceIndex();
     int parentCatId = 0;
     QModelIndex pIdx = index.parent();
     if (pIdx.isValid()) parentCatId = pIdx.data(IdRole).toInt();
@@ -836,7 +895,11 @@ void CategoryPanel::initUi() {
     
     // 2026-04-12 关键修复：延迟初始化模型数据（仅构造空壳）
     m_categoryModel = new CategoryModel(CategoryModel::Both, this);
-    m_categoryTree->setModel(m_categoryModel);
+
+    // Plan-97: 引入过滤代理模型
+    m_proxyModel = new CategoryFilterProxyModel(this);
+    m_proxyModel->setSourceModel(m_categoryModel);
+    m_categoryTree->setModel(m_proxyModel);
     
     m_categoryTree->setHeaderHidden(true);
     m_categoryTree->setRootIsDecorated(true);
@@ -861,21 +924,22 @@ void CategoryPanel::initUi() {
 
     // 2026-03-xx 物理拦截：严禁加密分类在未解锁时被展开
     // 2026-05-27 物理加固：补全 this 上下文
-    connect(m_categoryTree, &QTreeView::expanded, this, [this](const QModelIndex& index) {
+    connect(m_categoryTree, &QTreeView::expanded, this, [this](const QModelIndex& proxyIndex) {
+        QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         int id = index.data(IdRole).toInt();
         bool isEncrypted = index.data(EncryptedRole).toBool();
         
         // 物理修复：加密校验仅针对数据库分类（ID > 0），跳过系统项（ID < 0）
         if (isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
             // 物理阻断：立即折叠，防止闪烁
-            m_categoryTree->collapse(index);
+            m_categoryTree->collapse(proxyIndex);
             // 异步触发校验，避免在信号回调中处理复杂 UI
-            QTimer::singleShot(0, [this, index]() {
+            QTimer::singleShot(0, [this, index, proxyIndex]() {
                 if (tryUnlockCategory(index)) {
                     // 解锁成功后刷新状态并重新展开
                     m_categoryModel->setUnlockedIds(m_unlockedIds);
                     m_categoryModel->refresh();
-                    m_categoryTree->expand(index);
+                    m_categoryTree->expand(proxyIndex);
                 }
             });
         } else {
@@ -936,7 +1000,8 @@ void CategoryPanel::initUi() {
         });
     });
 
-    connect(m_categoryTree, &QTreeView::clicked, this, [this](const QModelIndex& index) {
+    connect(m_categoryTree, &QTreeView::clicked, this, [this](const QModelIndex& proxyIndex) {
+        QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         QString type = index.data(TypeRole).toString();
         QString name = index.data(NameRole).toString();
         int id = index.data(IdRole).toInt();
@@ -956,7 +1021,8 @@ void CategoryPanel::initUi() {
         }
     });
 
-    connect(m_categoryTree, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& index) {
+    connect(m_categoryTree, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& proxyIndex) {
+        QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         // 2026-06-xx 彻底重构：物理递归遍历 + 分类镜像创建 + SHA-256 物理加固
         // 核心规则：文件夹拖入空白/分类均递归建树；文件入空白归未分类，入分类归该分类。
         int targetCatId = 0;
@@ -994,6 +1060,53 @@ void CategoryPanel::initUi() {
     });
     
     sbContentLayout->addWidget(m_categoryTree);
+
+    // Plan-97: 底部搜索过滤栏 (1:1 复刻 MainWindow 样式)
+    QWidget* bottomBar = new QWidget(this);
+    bottomBar->setObjectName("CategoryBottomBar");
+    bottomBar->setStyleSheet("background: transparent; border: none;");
+    QHBoxLayout* bottomLayout = new QHBoxLayout(bottomBar);
+    bottomLayout->setContentsMargins(8, 4, 8, 8); // 左右 8px, 上 4px, 下 8px
+    bottomLayout->setSpacing(5);
+
+    m_searchEdit = new QLineEdit(this);
+    m_searchEdit->setPlaceholderText("搜索分类...");
+    m_searchEdit->setClearButtonEnabled(true);
+    // 1:1 复刻系统图标
+    m_searchEdit->addAction(UiHelper::getIcon("select", TextMuted, 14), QLineEdit::LeadingPosition);
+    m_searchEdit->setStyleSheet(QString(R"(
+        QLineEdit {
+            background: %1; border: 1px solid %2; border-radius: 6px;
+            color: %3; padding-left: 5px; font-size: 12px; height: 26px;
+        }
+        QLineEdit:focus { border: 1px solid %4; }
+    )").arg(qssColor(BackgroundDeep), qssColor(BorderColor), qssColor(TextMain), qssColor(PrimaryBlue)));
+
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+        m_proxyModel->setFilterText(text);
+        // 自动展开匹配项 (UX 优化)
+        if (!text.isEmpty()) {
+            // 傻逼逻辑规避：一定要使用 blockSignals 防止反向触发保存
+            m_categoryTree->blockSignals(true);
+            m_categoryTree->expandAll();
+            m_categoryTree->blockSignals(false);
+        }
+    });
+
+    bottomLayout->addWidget(m_searchEdit, 1);
+
+    // 右侧独立功能按钮
+    QPushButton* btnMore = new QPushButton(this);
+    btnMore->setFixedSize(24, 24);
+    btnMore->setIcon(UiHelper::getIcon("menu_dots", TextMuted, 16));
+    btnMore->setStyleSheet(R"(
+        QPushButton { background: transparent; border: 1px solid #444; border-radius: 4px; }
+        QPushButton:hover { background-color: #3e3e42; }
+    )");
+    bottomLayout->addWidget(btnMore);
+
+    sbContentLayout->addWidget(bottomBar);
+
     m_mainLayout->addWidget(sbContent, 1);
 
     // 2026-03-xx 物理记忆：初始化后加载持久化的展开状态

@@ -4,6 +4,8 @@
 #include <QTreeView>
 #include <QVBoxLayout>
 #include <QPushButton>
+#include <QLineEdit>
+#include <QSortFilterProxyModel>
 #include <QSet>
 #include <QModelIndex>
 
@@ -11,6 +13,7 @@ namespace ArcMeta {
 
 class CategoryModel;
 class DropTreeView;
+class CategoryFilterProxyModel;
 
 /**
  * @brief 分类面板（面板一）
@@ -86,6 +89,11 @@ private:
     void setupContextMenu();
     
     /**
+     * @brief 获取当前选中的源模型索引 (Plan-97 索引映射辅助)
+     */
+    QModelIndex currentSourceIndex() const;
+
+    /**
      * @brief 2026-03-xx 物理寻址辅助：递归向上查找有效的分类 ID
      */
     int getTargetCategoryId(const QModelIndex& index);
@@ -117,6 +125,8 @@ private:
     
     DropTreeView* m_categoryTree = nullptr;
     CategoryModel* m_categoryModel = nullptr;
+    CategoryFilterProxyModel* m_proxyModel = nullptr;
+    QLineEdit* m_searchEdit = nullptr;
     QTimer* m_refreshTimer = nullptr;
 
     // 2026-03-xx 会话级解锁列表：存储当前已验证通过的加密分类 ID
