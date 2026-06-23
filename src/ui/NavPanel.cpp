@@ -184,7 +184,6 @@ void NavPanel::initUi() {
     favHeader->setStyleSheet(
         "QWidget#ContainerHeader {"
         "  background-color: #252526;"
-        "  border-top: 1px solid #333;"    // 增加顶部边框强化分割
         "  border-bottom: 1px solid #333;"
         "}"
     );
