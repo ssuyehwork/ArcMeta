@@ -144,7 +144,7 @@ signals:
     void filterChanged(const FilterState& state);
 
 public slots:
-    void clearAllFilters();
+    void clearAllFilters(bool force = false);
 
 private:
     void rebuildGroups();
@@ -178,6 +178,7 @@ private:
     QScrollArea*  m_scrollArea      = nullptr;
     QWidget*      m_container       = nullptr;
     QVBoxLayout*  m_containerLayout = nullptr;
+    QPushButton*  m_btnPin          = nullptr; // 2026-06-23 按照用户要求：新增筛选器锁定按钮
     QPushButton*  m_btnClearAll     = nullptr;
     QPushButton*  m_btnToggleGroups = nullptr; // 2026-07-xx 按照 Plan-77：全局折叠/展开按钮
     QLabel*       m_iconLabel       = nullptr;
@@ -194,6 +195,8 @@ private:
     QVBoxLayout*  m_modifyDateLayout = nullptr;
     QSlider*      m_accuracySlider  = nullptr; // 2026-07-xx 按照用户要求：还原颜色准确度控制条
     QSlider*      m_areaSlider      = nullptr; // 2026-06-23 按照用户要求：新增颜色面积占比滑条
+
+    bool          m_isFilterPinned = false;    // 2026-06-23 按照用户要求：筛选器锁定状态
 
     SearchHistoryPanel* m_historyPanel = nullptr;
     
