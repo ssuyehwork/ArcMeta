@@ -251,3 +251,4 @@
     - **线程安全**: 为 `TagManagerView` 引入 `QPointer` 保护，确保异步数据库任务完成后能安全刷新 UI。
     - **原子推送**: 通过 `pushToDirty_NoLock` 机制解决了批量重命名标签时的锁递归问题。
 2026-06-23: 重构 NavPanel 架构，引入 QScrollArea 全局滚动与流式布局，实现高度自适应的磁盘树与收藏夹分组。 (修改)
+2026-06-23: 修复 NavPanel 编译错误：通过 DropTreeView 暴露 rowHeight 接口以支持跨类高度计算。 (修改)

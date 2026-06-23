@@ -14,6 +14,7 @@
 #include <QIcon>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QPushButton>
 #include <QPointer>
 #include <QMenu>
 #include <QJsonArray>
@@ -215,7 +216,6 @@ void NavPanel::initUi() {
 
     // 信号连接
     connect(m_treeView, &QTreeView::expanded, this, &NavPanel::onItemExpanded);
-    connect(m_treeView, &QTreeView::expanded, this, &NavPanel::updateTreeHeight);
     connect(m_treeView, &QTreeView::collapsed, this, &NavPanel::updateTreeHeight);
     connect(m_treeView, &QTreeView::clicked, this, &NavPanel::onTreeClicked);
 
@@ -379,7 +379,7 @@ void NavPanel::updateTreeHeight() {
         int height = 0;
         QModelIndex index = m_model->index(0, 0);
         while (index.isValid()) {
-            height += m_treeView->rowHeight(index);
+            height += static_cast<DropTreeView*>(m_treeView)->rowHeight(index);
             index = m_treeView->indexBelow(index);
         }
         if (height > 0) height += 2;
@@ -393,7 +393,7 @@ void NavPanel::updateFavoriteHeight() {
         int height = 0;
         QModelIndex index = m_favoriteModel->index(0, 0);
         while (index.isValid()) {
-            height += m_favoriteView->rowHeight(index);
+            height += static_cast<DropTreeView*>(m_favoriteView)->rowHeight(index);
             index = m_favoriteView->indexBelow(index);
         }
         if (height > 0) height += 2;
