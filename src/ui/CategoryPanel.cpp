@@ -1032,7 +1032,7 @@ void CategoryPanel::initUi() {
     searchLayout->setContentsMargins(10, 0, 10, 0);
 
     m_searchEdit = new QLineEdit(this);
-    m_searchEdit->setPlaceholderText("过滤分类...");
+    m_searchEdit->setPlaceholderText("筛选分类...");
     m_searchEdit->setClearButtonEnabled(true);
     m_searchEdit->setFixedHeight(32); // 2026-06-xx 物理归一化：与主搜索框对齐至 32px
     
@@ -1048,8 +1048,8 @@ void CategoryPanel::initUi() {
         "QLineEdit:focus { border-color: %1; }"
     ).arg(qssColor(PrimaryBlue)));
 
-    // 注入 select.svg 图标
-    QAction* leadingIcon = m_searchEdit->addAction(UiHelper::getIcon("select", QColor("#888888"), 16), QLineEdit::LeadingPosition);
+    // 2026-06-xx 视觉优化：将 select 图标替换为更符合语境的 filter_funnel_outline
+    QAction* leadingIcon = m_searchEdit->addAction(UiHelper::getIcon("filter_funnel_outline", QColor("#888888"), 16), QLineEdit::LeadingPosition);
     Q_UNUSED(leadingIcon);
 
     searchLayout->addWidget(m_searchEdit);
