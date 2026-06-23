@@ -1340,6 +1340,15 @@ void FilterPanel::clearAllFilters(bool force) {
         return;
     }
 
+    // 2026-06-23 按照用户要求：若按下“重置”按钮，则同步解除锁定状态
+    if (force && m_isFilterPinned) {
+        m_isFilterPinned = false;
+        if (m_btnPin) {
+            m_btnPin->setIcon(UiHelper::getIcon("pin_tilted", QColor("#B0B0B0")));
+            m_btnPin->setProperty("tooltipText", "锁定当前筛选条件");
+        }
+    }
+
     // 2026-06-xx 物理修复：重置所有筛选内存状态
     m_filter = FilterState{};
     m_hueSliderColor.clear();
