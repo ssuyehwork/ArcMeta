@@ -264,3 +264,4 @@
 2026-06-23: 修复编译警告：在 Logger.h 中显式忽略 QFile::open 返回值 (C4834)；在 CategoryFilterProxyModel.h 中将 invalidateFilter 替换为 begin/endFilterChange (C4996)。 (修改)
 2026-06-23: 分类面板搜索框 UI 归一化与间距修正 (Plan-97)：高度调整为 32px，圆角回归至 6px，修正 padding-left 以实现 8px 视觉间距，移除冗余顶部分割线，并将 select 图标替换为 filter_funnel_outline。 (修改)
 2026-06-23: 全局颜色规范修正与解耦 (Plan-98)：在 StyleLibrary 中分离品牌色 BrandOrange (#cb7208) 与置顶激活色 ActiveOrange (#ff551c)，解耦 UI 组件引用，同步更新 Memories.md 物理标准。 (修改)
+2026-06-23: 颜色筛选增强：引入“面积占比”双轴过滤逻辑 (Plan-97)：在 FilterPanel 中新增“占比”滑杆，并重构 FilterProxyModel 颜色判定算法，支持按符合色差要求的色块累计面积占比进行高精度过滤。 (修改)

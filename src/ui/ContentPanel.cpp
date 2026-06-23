@@ -509,6 +509,28 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         QString dominantColorHex = record.color; 
         bool matchColor = false;
 
+        // 2026-06-23 按照用户要求：颜色筛选引入“面积占比”双轴过滤逻辑
+        auto calculateMatchedArea = [&](const QColor& targetCol) -> float {
+            if (!targetCol.isValid()) return 0.0f;
+            float totalMatchedArea = 0.0f;
+
+            // Case A: 有调色盘数据，累加所有符合色差要求的色块占比
+            if (!record.palettes.empty()) {
+                for (const auto& pe : record.palettes) {
+                    if (UiHelper::calculateDeltaE(targetCol, pe.first) < currentFilter.colorTolerance) {
+                        totalMatchedArea += pe.second;
+                    }
+                }
+            } else {
+                // Case B: 仅有主色调数据，若主色匹配则占比视为 100% (降级处理)
+                QColor recordCol = UiHelper::parseColorName(dominantColorHex);
+                if (UiHelper::calculateDeltaE(targetCol, recordCol) < currentFilter.colorTolerance) {
+                    totalMatchedArea = 1.0f;
+                }
+            }
+            return totalMatchedArea;
+        };
+
         // 2.0 文本过滤逻辑 (如果存在文本)
         if (!currentFilter.colorFilterText.isEmpty()) {
             QString searchText = currentFilter.colorFilterText.trimmed();
@@ -517,15 +539,8 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
                 if (dominantColorHex.isEmpty()) matchColor = true;
             } else if (searchText.startsWith("#")) {
                 QColor targetCol = UiHelper::parseColorName(searchText);
-                if (targetCol.isValid()) {
-                    QColor recordCol = UiHelper::parseColorName(dominantColorHex);
-                    if (UiHelper::calculateDeltaE(targetCol, recordCol) < currentFilter.colorTolerance) matchColor = true;
-                    if (!matchColor && !record.palettes.empty()) {
-                        for (const auto& pe : record.palettes) {
-                            if (UiHelper::calculateDeltaE(targetCol, pe.first) < currentFilter.colorTolerance) { matchColor = true; break; }
-                        }
-                    }
-                }
+                float area = calculateMatchedArea(targetCol);
+                if (area > 0.0f && area * 100.0f >= (float)currentFilter.minColorArea) matchColor = true;
             } else {
                 // 模糊匹配颜色名称 (通过反查 colorMap)
                 static const QMap<QString, QString> nameToHex = {
@@ -536,14 +551,8 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
                 for (auto it = nameToHex.begin(); it != nameToHex.end(); ++it) {
                     if (it.key().contains(searchText)) {
                         QColor targetCol = QColor(it.value());
-                        QColor recordCol = UiHelper::parseColorName(dominantColorHex);
-                        if (UiHelper::calculateDeltaE(targetCol, recordCol) < currentFilter.colorTolerance) { matchColor = true; break; }
-                        if (!record.palettes.empty()) {
-                            for (const auto& pe : record.palettes) {
-                                if (UiHelper::calculateDeltaE(targetCol, pe.first) < currentFilter.colorTolerance) { matchColor = true; break; }
-                            }
-                        }
-                        if (matchColor) break;
+                        float area = calculateMatchedArea(targetCol);
+                        if (area > 0.0f && area * 100.0f >= (float)currentFilter.minColorArea) { matchColor = true; break; }
                     }
                 }
             }
@@ -554,27 +563,18 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         if (!currentFilter.colors.isEmpty()) {
             matchColor = false;
             for (const QString& fc : currentFilter.colors) {
-                // 特殊情况：无色标
-                if (fc.isEmpty() && dominantColorHex.isEmpty()) { matchColor = true; break; }
-                if (fc.isEmpty() || dominantColorHex.isEmpty()) continue;
+                // 特殊情况：无色标 (不涉及占比逻辑)
+                if (fc.isEmpty()) {
+                    if (dominantColorHex.isEmpty()) { matchColor = true; break; }
+                    continue;
+                }
 
                 QColor targetCol = UiHelper::parseColorName(fc);
-                
-                // 2.1 主色调感知匹配 (CIELAB Delta E < colorTolerance)
-                QColor recordCol = UiHelper::parseColorName(dominantColorHex);
-                if (UiHelper::calculateDeltaE(targetCol, recordCol) < currentFilter.colorTolerance) {
-                    matchColor = true; break;
+                float area = calculateMatchedArea(targetCol);
+                if (area > 0.0f && area * 100.0f >= (float)currentFilter.minColorArea) {
+                    matchColor = true;
+                    break;
                 }
-
-                // 2.2 变长色板深度匹配 (多色命中)
-                if (!record.palettes.empty()) {
-                    for (const auto& pe : record.palettes) {
-                        if (UiHelper::calculateDeltaE(targetCol, pe.first) < currentFilter.colorTolerance) {
-                            matchColor = true; break;
-                        }
-                    }
-                }
-                if (matchColor) break;
             }
         }
         if (!matchColor) return false; 

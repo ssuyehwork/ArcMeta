@@ -530,6 +530,7 @@ void FilterPanel::rebuildGroups() {
     m_createDateLayout = nullptr;
     m_modifyDateLayout = nullptr;
     m_accuracySlider = nullptr;
+    m_areaSlider = nullptr;
 
     // 清空旧内容（保留末尾 stretch）
     while (m_containerLayout->count() > 1) {
@@ -659,6 +660,35 @@ void FilterPanel::rebuildGroups() {
         });
 
         gl->addWidget(accContainer);
+
+        // 2.1.6 颜色占比滑块 ─────────────────────────────────
+        // 2026-06-23 按照用户要求：新增颜色面积占比过滤逻辑
+        QWidget* areaContainer = new QWidget(g);
+        QHBoxLayout* areaLayout = new QHBoxLayout(areaContainer);
+        areaLayout->setContentsMargins(10, 4, 10, 4);
+        areaLayout->setSpacing(8);
+
+        QLabel* lblArea = new QLabel("占比:", areaContainer);
+        lblArea->setStyleSheet("color: #AAAAAA; font-size: 11px;");
+        areaLayout->addWidget(lblArea);
+
+        m_areaSlider = new QSlider(Qt::Horizontal, areaContainer);
+        m_areaSlider->setRange(0, 100);
+        m_areaSlider->setValue(m_filter.minColorArea);
+        m_areaSlider->setCursor(Qt::PointingHandCursor);
+        m_areaSlider->setStyleSheet(
+            "QSlider::groove:horizontal { height: 2px; background: #444; border-radius: 1px; }"
+            "QSlider::handle:horizontal { background: #EEE; border: 1px solid #777; width: 10px; height: 10px; margin: -4px 0; border-radius: 5px; }"
+            "QSlider::handle:horizontal:hover { background: #FFF; border-color: #378ADD; }"
+        );
+        areaLayout->addWidget(m_areaSlider, 1);
+
+        connect(m_areaSlider, &QSlider::valueChanged, this, [this](int val) {
+            m_filter.minColorArea = val;
+            emit filterChanged(m_filter);
+        });
+
+        gl->addWidget(areaContainer);
 
         // 2.2 标准色矩阵 (12色)
         // 2026-06-xx 物理对齐：设置左边距 8px 以对齐下方的复选框视觉线

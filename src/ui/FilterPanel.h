@@ -74,6 +74,7 @@ struct FilterState {
     QStringList  createDates;   // "YYYY-MM-DD"
     QStringList  modifyDates;
     int          colorTolerance = 30; // 2026-05-17 按照用户要求：自定义颜色相近色容差（0~100），由 ColorPicker 准确度滑条驱动
+    int          minColorArea = 0;   // 2026-06-23 按照用户要求：颜色面积最小占比阈值 (0-100)
 
     // 2026-07-xx 按照 Plan-30：链接、备注及大小筛选
     enum Presence { All, Yes, No };
@@ -99,7 +100,7 @@ struct FilterState {
         return ratings.isEmpty() && colors.isEmpty() && keyword.isEmpty() && types.isEmpty() &&
                createDates.isEmpty() && modifyDates.isEmpty() &&
                linkPresence == All && notePresence == All && ratio == AspectAny &&
-               minSize == -1 && maxSize == -1 &&
+               minSize == -1 && maxSize == -1 && minColorArea == 0 &&
                colorFilterText.trimmed().isEmpty() &&
                typeFilterText.trimmed().isEmpty() && createDateFilterText.trimmed().isEmpty() &&
                modifyDateFilterText.trimmed().isEmpty();
@@ -192,6 +193,7 @@ private:
     QVBoxLayout*  m_createDateLayout = nullptr; // 2026-07-xx Plan-92: 日期布局指针
     QVBoxLayout*  m_modifyDateLayout = nullptr;
     QSlider*      m_accuracySlider  = nullptr; // 2026-07-xx 按照用户要求：还原颜色准确度控制条
+    QSlider*      m_areaSlider      = nullptr; // 2026-06-23 按照用户要求：新增颜色面积占比滑条
 
     SearchHistoryPanel* m_historyPanel = nullptr;
     
