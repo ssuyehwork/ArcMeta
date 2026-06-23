@@ -20,6 +20,7 @@
 #include <shellapi.h>
 #endif
 #include "ui/UiHelper.h"
+#include "ui/Logger.h"
 #include "ui/MainWindow.h"
 
 
@@ -37,7 +38,16 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext &context, con
     static QMutex s_logMutex; // 2026-07-xx 物理加固：增加互斥锁，确保多线程扫描时日志不交织且不丢失
     QMutexLocker locker(&s_logMutex);
 
-    QFile logFile("arcmeta_debug.log");
+    static int writeCount = 0;
+    QString fileName = "arcmeta_debug.log";
+
+    // 2026-xx-xx 按照 Plan-97：同步容量哨兵逻辑
+    if (++writeCount >= 100) {
+        ArcMeta::Logger::rotateLogFiles(fileName);
+        writeCount = 0;
+    }
+
+    QFile logFile(fileName);
     // 2026-07-xx 按照用户要求 (1.18)：开启强力落盘模式
     // 即使发生系统级闪退，也要确保最后一条日志已写入物理磁盘
     if (logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
@@ -59,6 +69,9 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext &context, con
 }
 
 int main(int argc, char *argv[]) {
+    // 2026-xx-xx 按照 Plan-97：启动自检，容量哨兵立即执行
+    ArcMeta::Logger::rotateLogFiles("arcmeta_debug.log");
+
     // 2026-07-xx 按照用户要求 (1.20)：主程序限制单实例运行，防止无限打开
 #ifdef Q_OS_WIN
     // Windows: 使用 Mutex 实现，确保程序异常退出后资源能被 OS 自动回收
