@@ -1,6 +1,7 @@
 #include "CategoryPanel.h"
 #include "MainWindow.h"
 #include "CategoryModel.h"
+#include "CategoryFilterProxyModel.h"
 #include "CategoryLockDialog.h"
 #include "CategorySetPasswordDialog.h"
 #include "CategoryDelegate.h"
@@ -147,11 +148,15 @@ void CategoryPanel::selectCategory(int id) {
 
     QModelIndex target = findId(QModelIndex());
     if (target.isValid()) {
-        // 2026-03-xx 物理阻断：通过代码强制选中时，必须锁定信号发射，防止与 ContentPanel 形成回环死循环
-        m_categoryTree->blockSignals(true);
-        m_categoryTree->setCurrentIndex(target);
-        m_categoryTree->scrollTo(target);
-        m_categoryTree->blockSignals(false);
+        // 2026-xx-xx 按照 Plan-98：映射至代理模型索引
+        QModelIndex proxyIdx = m_proxyModel->mapFromSource(target);
+        if (proxyIdx.isValid()) {
+            // 2026-03-xx 物理阻断：通过代码强制选中时，必须锁定信号发射，防止与 ContentPanel 形成回环死循环
+            m_categoryTree->blockSignals(true);
+            m_categoryTree->setCurrentIndex(proxyIdx);
+            m_categoryTree->scrollTo(proxyIdx);
+            m_categoryTree->blockSignals(false);
+        }
     }
 }
 
@@ -172,10 +177,13 @@ void CategoryPanel::selectCategoryByType(const QString& type) {
 
     QModelIndex target = findType(QModelIndex());
     if (target.isValid()) {
-        m_categoryTree->blockSignals(true);
-        m_categoryTree->setCurrentIndex(target);
-        m_categoryTree->scrollTo(target);
-        m_categoryTree->blockSignals(false);
+        QModelIndex proxyIdx = m_proxyModel->mapFromSource(target);
+        if (proxyIdx.isValid()) {
+            m_categoryTree->blockSignals(true);
+            m_categoryTree->setCurrentIndex(proxyIdx);
+            m_categoryTree->scrollTo(proxyIdx);
+            m_categoryTree->blockSignals(false);
+        }
     }
 }
 
@@ -193,11 +201,12 @@ void CategoryPanel::setupContextMenu() {
     m_categoryTree->setContextMenuPolicy(Qt::CustomContextMenu);
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_categoryTree, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
-        QModelIndex index = m_categoryTree->indexAt(pos);
+        QModelIndex proxyIndex = m_categoryTree->indexAt(pos);
+        QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         
         // 2026-03-xx 按照用户要求：实现右键点击即选中，解决“分类与其子分类”交互一致性问题
-        if (index.isValid()) {
-            m_categoryTree->setCurrentIndex(index);
+        if (proxyIndex.isValid()) {
+            m_categoryTree->setCurrentIndex(proxyIndex);
         }
 
         QMenu menu(this);
@@ -313,6 +322,18 @@ void CategoryPanel::saveExpandedState(const QModelIndex& parent, QSet<int>& expa
                 qDebug() << "[CategoryPanel] 正在记录展开项: 系统项 =" << name;
             }
             saveExpandedState(idx, expandedIds, expandedNames);
+        }
+    }
+}
+
+void CategoryPanel::onSearchTextChanged(const QString& text) {
+    if (m_proxyModel) {
+        m_proxyModel->setFilterText(text);
+        if (!text.isEmpty()) {
+            m_categoryTree->expandAll();
+        } else {
+            // 搜索清除时，恢复常规展开状态
+            loadExpandedStateFromSettings();
         }
     }
 }
@@ -836,7 +857,11 @@ void CategoryPanel::initUi() {
     
     // 2026-04-12 关键修复：延迟初始化模型数据（仅构造空壳）
     m_categoryModel = new CategoryModel(CategoryModel::Both, this);
-    m_categoryTree->setModel(m_categoryModel);
+
+    // 2026-xx-xx 按照 Plan-98：注入代理模型
+    m_proxyModel = new CategoryFilterProxyModel(this);
+    m_proxyModel->setSourceModel(m_categoryModel);
+    m_categoryTree->setModel(m_proxyModel);
     
     m_categoryTree->setHeaderHidden(true);
     m_categoryTree->setRootIsDecorated(true);
@@ -936,7 +961,8 @@ void CategoryPanel::initUi() {
         });
     });
 
-    connect(m_categoryTree, &QTreeView::clicked, this, [this](const QModelIndex& index) {
+    connect(m_categoryTree, &QTreeView::clicked, this, [this](const QModelIndex& proxyIndex) {
+        QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         QString type = index.data(TypeRole).toString();
         QString name = index.data(NameRole).toString();
         int id = index.data(IdRole).toInt();
@@ -956,7 +982,8 @@ void CategoryPanel::initUi() {
         }
     });
 
-    connect(m_categoryTree, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& index) {
+    connect(m_categoryTree, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& proxyIndex) {
+        QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         // 2026-06-xx 彻底重构：物理递归遍历 + 分类镜像创建 + SHA-256 物理加固
         // 核心规则：文件夹拖入空白/分类均递归建树；文件入空白归未分类，入分类归该分类。
         int targetCatId = 0;
@@ -995,6 +1022,39 @@ void CategoryPanel::initUi() {
     
     sbContentLayout->addWidget(m_categoryTree);
     m_mainLayout->addWidget(sbContent, 1);
+
+    // 2026-xx-xx 按照 Plan-98：新增底部搜索过滤框
+    QWidget* searchContainer = new QWidget(this);
+    searchContainer->setFixedHeight(40);
+    searchContainer->setStyleSheet("background: transparent; border-top: 1px solid #333;");
+    QHBoxLayout* searchLayout = new QHBoxLayout(searchContainer);
+    searchLayout->setContentsMargins(10, 0, 10, 0);
+
+    m_searchEdit = new QLineEdit(this);
+    m_searchEdit->setPlaceholderText("过滤分类...");
+    m_searchEdit->setClearButtonEnabled(true);
+    m_searchEdit->setFixedHeight(28);
+    // 物理还原：圆角 8px
+    m_searchEdit->setStyleSheet(QString(
+        "QLineEdit {"
+        "  background: #1E1E1E;"
+        "  color: #EEEEEE;"
+        "  border: 1px solid #444;"
+        "  border-radius: 8px;"
+        "  padding: 0 8px 0 28px;"
+        "  font-size: 12px;"
+        "}"
+        "QLineEdit:focus { border-color: %1; }"
+    ).arg(qssColor(PrimaryBlue)));
+
+    // 注入 select.svg 图标
+    QAction* leadingIcon = m_searchEdit->addAction(UiHelper::getIcon("select", QColor("#888888"), 16), QLineEdit::LeadingPosition);
+    Q_UNUSED(leadingIcon);
+
+    searchLayout->addWidget(m_searchEdit);
+    m_mainLayout->addWidget(searchContainer);
+
+    connect(m_searchEdit, &QLineEdit::textChanged, this, &CategoryPanel::onSearchTextChanged);
 
     // 2026-03-xx 物理记忆：初始化后加载持久化的展开状态
     QTimer::singleShot(100, this, &CategoryPanel::loadExpandedStateFromSettings);

@@ -4,7 +4,9 @@
 #include <QPainter>
 #include <QApplication>
 #include <QLineEdit>
+#include <QAbstractProxyModel>
 #include "CategoryModel.h"
+#include "CategoryFilterProxyModel.h"
 #include "StyleLibrary.h"
 using namespace ArcMeta::Style;
 
@@ -67,6 +69,58 @@ public:
             opt.palette.setColor(QPalette::HighlightedText, Qt::white);
         }
         
+        // 2026-xx-xx 按照 Plan-98：实现关键词高亮渲染
+        QString filterText;
+        const QAbstractProxyModel* proxy = qobject_cast<const QAbstractProxyModel*>(index.model());
+        if (proxy) {
+            const CategoryFilterProxyModel* filterProxy = qobject_cast<const CategoryFilterProxyModel*>(proxy);
+            if (filterProxy) filterText = filterProxy->filterText();
+        }
+
+        if (!filterText.isEmpty()) {
+            QString fullText = index.data(Qt::DisplayRole).toString();
+            int start = fullText.indexOf(filterText, 0, Qt::CaseInsensitive);
+            if (start >= 0) {
+                // 执行自定义绘制
+                painter->save();
+                QStyle* style = option.widget ? option.widget->style() : QApplication::style();
+
+                // 绘制图标 (Decoration)
+                style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, option.widget);
+
+                QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, option.widget);
+                textRect.adjust(2, 0, 0, 0); // 微调
+
+                // 计算文本布局
+                QFont font = opt.font;
+                painter->setFont(font);
+
+                QString pre = fullText.left(start);
+                QString mid = fullText.mid(start, filterText.length());
+                QString post = fullText.mid(start + filterText.length());
+
+                int x = textRect.left();
+                int y = textRect.center().y() + painter->fontMetrics().ascent() / 2 - 1;
+
+                // 绘制前缀
+                painter->setPen(selected ? Qt::white : QColor("#CCCCCC"));
+                painter->drawText(x, y, pre);
+                x += painter->fontMetrics().horizontalAdvance(pre);
+
+                // 绘制高亮中缀 (PrimaryBlue)
+                painter->setPen(QColor("#3498db"));
+                painter->drawText(x, y, mid);
+                x += painter->fontMetrics().horizontalAdvance(mid);
+
+                // 绘制后缀
+                painter->setPen(selected ? Qt::white : QColor("#CCCCCC"));
+                painter->drawText(x, y, post);
+
+                painter->restore();
+                return;
+            }
+        }
+
         QStyledItemDelegate::paint(painter, opt, index);
     }
 
