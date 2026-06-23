@@ -171,13 +171,13 @@ void NavPanel::initUi() {
     connect(m_treeView, &QTreeView::expanded, this, &NavPanel::onItemExpanded);
     connect(m_treeView, &QTreeView::clicked, this, &NavPanel::onTreeClicked);
 
-    // --- 下方区：快捷收藏 ---
+    // --- 下方区：收藏夹 ---
     QWidget* favContainer = new QWidget(this);
     QVBoxLayout* favLayout = new QVBoxLayout(favContainer);
     favLayout->setContentsMargins(0, 0, 0, 0); // 移除顶部留白
     favLayout->setSpacing(0);
 
-    // 快捷收藏标题 (Plan-95: 对齐主标题栏高度与样式)
+    // 收藏夹标题 (Plan-95: 对齐主标题栏高度与样式)
     QWidget* favHeader = new QWidget(this);
     favHeader->setObjectName("ContainerHeader");
     favHeader->setFixedHeight(32);
@@ -195,7 +195,7 @@ void NavPanel::initUi() {
     favIcon->setPixmap(UiHelper::getIcon("star_filled", QColor("#FDB70A"), 18).pixmap(18, 18));
     favHeaderLayout->addWidget(favIcon);
     
-    QLabel* favTitle = new QLabel("快捷收藏", this);
+    QLabel* favTitle = new QLabel("收藏夹", this);
     favTitle->setStyleSheet("color: #FDB70A; font-size: 13px; font-weight: bold; background: transparent; border: none;");
     favHeaderLayout->addWidget(favTitle);
     favHeaderLayout->addStretch();

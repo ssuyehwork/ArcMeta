@@ -77,7 +77,7 @@ private:
     QTreeView* m_treeView = nullptr;
     QStandardItemModel* m_model = nullptr;
 
-    // 下方：快捷收藏
+    // 下方：收藏夹
     DropTreeView* m_favoriteView = nullptr;
     QStandardItemModel* m_favoriteModel = nullptr;
 
