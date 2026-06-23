@@ -54,8 +54,9 @@ public:
 
     void setHideEmpty(bool hide) {
         if (m_hideEmpty != hide) {
+            beginFilterChange();
             m_hideEmpty = hide;
-            invalidateFilter();
+            endFilterChange();
         }
     }
 
@@ -64,11 +65,11 @@ protected:
         QModelIndex index = sourceModel()->index(sourceRow, 0, sourceParent);
 
         int id = index.data(IdRole).toInt();
-        QString name = index.data(NameRole).toString();
+        QString sourceName = index.data(NameRole).toString();
 
         // 2026-07-18 按照用户要求优化：实现“搜索豁免权”
         // 1. 系统项 (ID < 0) 和 分组标题 (我的分类/快速访问) 始终显示，不参与文本过滤
-        if (id < 0 || name == "我的分类" || name == "快速访问") {
+        if (id < 0 || sourceName == "我的分类" || sourceName == "快速访问") {
             return true;
         }
 
@@ -76,15 +77,15 @@ protected:
         QString keyword = filterRegularExpression().pattern();
         bool matchText = true;
         if (!keyword.isEmpty()) {
-            matchText = name.contains(keyword, Qt::CaseInsensitive);
+            matchText = sourceName.contains(keyword, Qt::CaseInsensitive);
         }
 
         // 3. 空项过滤 (基于计数后缀 "(0)")
         bool notEmpty = true;
         if (m_hideEmpty) {
-            QString name = index.data(Qt::DisplayRole).toString();
+            QString displayText = index.data(Qt::DisplayRole).toString();
             // 只有系统项和分类项有计数，且 "(0)" 表示为空
-            if (name.endsWith("(0)")) {
+            if (displayText.endsWith("(0)")) {
                 notEmpty = false;
             }
         }
