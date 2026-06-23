@@ -63,16 +63,23 @@ protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override {
         QModelIndex index = sourceModel()->index(sourceRow, 0, sourceParent);
 
-        // 1. 文本过滤 (Plan-97: 排除计数部分)
+        int id = index.data(IdRole).toInt();
+        QString name = index.data(NameRole).toString();
+
+        // 2026-07-18 按照用户要求优化：实现“搜索豁免权”
+        // 1. 系统项 (ID < 0) 和 分组标题 (我的分类/快速访问) 始终显示，不参与文本过滤
+        if (id < 0 || name == "我的分类" || name == "快速访问") {
+            return true;
+        }
+
+        // 2. 文本过滤 (Plan-97: 仅针对 NameRole)
         QString keyword = filterRegularExpression().pattern();
         bool matchText = true;
         if (!keyword.isEmpty()) {
-            // 使用 NameRole 仅针对纯文本名称过滤，排除 (n) 计数后缀
-            QString name = index.data(NameRole).toString();
             matchText = name.contains(keyword, Qt::CaseInsensitive);
         }
 
-        // 2. 空项过滤 (基于计数后缀 "(0)")
+        // 3. 空项过滤 (基于计数后缀 "(0)")
         bool notEmpty = true;
         if (m_hideEmpty) {
             QString name = index.data(Qt::DisplayRole).toString();
