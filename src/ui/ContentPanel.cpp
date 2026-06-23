@@ -2803,7 +2803,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16);
     if (isPinned) { 
         // 置顶优先 
-        QIcon pinIcon = UiHelper::getIcon("pin_vertical", BrandOrange, 16); 
+        QIcon pinIcon = UiHelper::getIcon("pin_vertical", ActiveOrange, 16);
         pinIcon.paint(painter, statusRect); 
     } else if (isDir && progress >= 0.0 && progress < 1.0) {
         // --- 绘制进度环 (开箱即用代码) --- 

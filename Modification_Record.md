@@ -263,4 +263,4 @@
 2026-06-23: 优化侧边栏搜索框视觉样式：移除冗余容器与分割线；缩减左侧图标间距至 24px；设置 margin 实现紧凑布局。 (修改)
 2026-06-23: 修复编译警告：在 Logger.h 中显式忽略 QFile::open 返回值 (C4834)；在 CategoryFilterProxyModel.h 中将 invalidateFilter 替换为 begin/endFilterChange (C4996)。 (修改)
 2026-06-23: 分类面板搜索框 UI 归一化与间距修正 (Plan-97)：高度调整为 32px，圆角回归至 6px，修正 padding-left 以实现 8px 视觉间距，移除冗余顶部分割线，并将 select 图标替换为 filter_funnel_outline。 (修改)
-2026-06-23: 全局置顶颜色规范修正与标准落库 (Plan-98)：修正 BrandOrange 常量色值为 #ff551c，同步更新 Memories.md 全局品牌色规范，确保全应用置顶激活色唯一合法性。 (修改)
+2026-06-23: 全局颜色规范修正与解耦 (Plan-98)：在 StyleLibrary 中分离品牌色 BrandOrange (#cb7208) 与置顶激活色 ActiveOrange (#ff551c)，解耦 UI 组件引用，同步更新 Memories.md 物理标准。 (修改)
