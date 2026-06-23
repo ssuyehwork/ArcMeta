@@ -1033,15 +1033,15 @@ void CategoryPanel::initUi() {
     m_searchEdit = new QLineEdit(this);
     m_searchEdit->setPlaceholderText("过滤分类...");
     m_searchEdit->setClearButtonEnabled(true);
-    m_searchEdit->setFixedHeight(28);
-    // 物理还原：圆角 8px
+    m_searchEdit->setFixedHeight(32); // 2026-06-xx 物理归一化：与主搜索框对齐至 32px
+
     m_searchEdit->setStyleSheet(QString(
         "QLineEdit {"
         "  background: #1E1E1E;"
         "  color: #EEEEEE;"
         "  border: 1px solid #444;"
-        "  border-radius: 8px;"
-        "  padding: 0 8px 0 28px;"
+        "  border-radius: 6px;"        // 2026-06-xx 规范修正：从 8px 回归至全局 6px 规范
+        "  padding: 0 8px 0 1px;"     // 2026-06-xx 物理修正：1px Padding + 约 7px 系统预留 = 8px 视觉间距
         "  font-size: 12px;"
         "}"
         "QLineEdit:focus { border-color: %1; }"
