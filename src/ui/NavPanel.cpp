@@ -394,8 +394,8 @@ void NavPanel::updateFavoriteHeight() {
             visibleRows++;
             index = m_favoriteView->indexBelow(index);
         }
-        int height = visibleRows * 28;
-        if (height > 0) height += 4;
+        // 2026-xx-xx 按照 Plan-96：即使为空也保留 28px 高度以接收拖拽，并增加少量缓冲
+        int height = qMax(1, visibleRows) * 28 + 4;
         m_favoriteView->setFixedHeight(height);
     });
 }

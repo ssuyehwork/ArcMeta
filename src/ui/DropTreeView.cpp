@@ -31,6 +31,9 @@ void DropTreeView::dragMoveEvent(QDragMoveEvent* event) {
         // 2026-06-xx 按照用户要求：实现拖拽过程中的目标项实时高亮
         QModelIndex idx = indexAt(event->position().toPoint());
         if (idx.isValid()) setCurrentIndex(idx);
+
+        // 物理同步：显式调用基类逻辑以激活放置指示器 (Drop Indicator)
+        QTreeView::dragMoveEvent(event);
         event->acceptProposedAction();
     } else {
         QTreeView::dragMoveEvent(event);
