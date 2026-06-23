@@ -147,6 +147,7 @@ void NavPanel::initUi() {
     m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_scrollArea->viewport()->setStyleSheet("background: transparent;");
     m_scrollArea->setStyleSheet("QScrollArea { background: transparent; border: none; }");
+    m_scrollArea->viewport()->setAcceptDrops(false); // 2026-xx-xx 按照 Plan-96：使拖拽事件透传至下层视图
 
     m_container = new QWidget(m_scrollArea);
     m_container->setStyleSheet("background: transparent;");
@@ -187,13 +188,12 @@ void NavPanel::initUi() {
     m_favoriteView->setDragDropMode(QAbstractItemView::DragDrop); // 修改为允许外部拖放
     m_favoriteView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // 禁止内部滚动
     m_favoriteView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_favoriteView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding); // 2026-xx-xx 按照 Plan-96：向底填充，作为 DND 靶场
 
     m_favoriteModel = new QStandardItemModel(this);
     m_favoriteView->setModel(m_favoriteModel);
-    favLayout->addWidget(m_favoriteView);
-    m_containerLayout->addWidget(favGroup);
-
-    m_containerLayout->addStretch();
+    favLayout->addWidget(m_favoriteView, 1); // 占据全域
+    m_containerLayout->addWidget(favGroup, 1); // 占据剩余全域
     m_scrollArea->setWidget(m_container);
     m_mainLayout->addWidget(m_scrollArea, 1);
 
@@ -221,12 +221,10 @@ void NavPanel::initUi() {
     connect(m_favoriteView, &DropTreeView::pathsDropped, this, &NavPanel::onPathsDroppedToFavorite);
     
     // 收藏夹模型监听
-    auto updateFavAndSave = [this](){ updateFavoriteHeight(); saveFavorites(); };
+    auto updateFavAndSave = [this](){ saveFavorites(); };
     connect(m_favoriteModel, &QStandardItemModel::rowsMoved, this, updateFavAndSave);
     connect(m_favoriteModel, &QStandardItemModel::rowsInserted, this, updateFavAndSave);
     connect(m_favoriteModel, &QStandardItemModel::rowsRemoved, this, updateFavAndSave);
-    connect(m_favoriteModel, &QStandardItemModel::modelReset, this, &NavPanel::updateFavoriteHeight);
-    connect(m_favoriteModel, &QStandardItemModel::layoutChanged, this, &NavPanel::updateFavoriteHeight);
 
     // 磁盘树模型监听 (异步加载完成后触发)
     connect(m_model, &QStandardItemModel::rowsInserted, this, &NavPanel::updateTreeHeight);
@@ -296,7 +294,6 @@ void NavPanel::onFavoriteContextMenu(const QPoint& pos) {
 }
 
 void NavPanel::onPathsDroppedToFavorite(const QStringList& paths, const QModelIndex& target) {
-    ArcMeta::Logger::log(QString("[NavPanel] onPathsDroppedToFavorite: count=%1, targetValid=%2").arg(paths.size()).arg(target.isValid() ? "true" : "false"));
     Q_UNUSED(target);
     for (const QString& path : paths) {
         addFavoriteItem(path);
@@ -342,20 +339,15 @@ void NavPanel::saveFavorites() {
 }
 
 void NavPanel::addFavoriteItem(const QString& path) {
-    ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: %1").arg(path));
     // 检查重复
     for (int i = 0; i < m_favoriteModel->rowCount(); ++i) {
         if (m_favoriteModel->item(i)->data(Qt::UserRole + 1).toString() == path) {
-            ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: path already exists, skip."));
             return;
         }
     }
 
     QFileInfo fi(path);
-    if (!fi.exists()) {
-        ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: path not exists on disk!"));
-        return;
-    }
+    if (!fi.exists()) return;
 
     QIcon icon = UiHelper::getFileIcon(path, 18);
     QStandardItem* item = new QStandardItem(icon, fi.fileName().isEmpty() ? path : fi.fileName());
@@ -363,7 +355,6 @@ void NavPanel::addFavoriteItem(const QString& path) {
     
     // 物理红线：收藏项不再显示子节点（扁平化展示）
     m_favoriteModel->appendRow(item);
-    ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: success, current count=%1").arg(m_favoriteModel->rowCount()));
 }
 
 void NavPanel::onItemExpanded(const QModelIndex& index) {
@@ -394,18 +385,7 @@ void NavPanel::updateTreeHeight() {
 }
 
 void NavPanel::updateFavoriteHeight() {
-    QTimer::singleShot(0, this, [this]() {
-        if (!m_favoriteView || !m_favoriteModel) return;
-        int visibleRows = 0;
-        QModelIndex index = m_favoriteModel->index(0, 0);
-        while (index.isValid()) {
-            visibleRows++;
-            index = m_favoriteView->indexBelow(index);
-        }
-        // 2026-xx-xx 按照 Plan-96：即使为空也保留 28px 高度以接收拖拽，并增加少量缓冲
-        int height = qMax(1, visibleRows) * 28 + 4;
-        m_favoriteView->setFixedHeight(height);
-    });
+    // 2026-xx-xx 按照 Plan-96：收藏夹严禁设置 setFixedHeight，以确保其填充余白接收 DND
 }
 
 QWidget* NavPanel::buildGroup(const QString& title, const QIcon& icon, const QColor& color, QVBoxLayout*& outContentLayout) {
@@ -466,7 +446,7 @@ QWidget* NavPanel::buildGroup(const QString& title, const QIcon& icon, const QCo
     connect(hdrBtn, &QPushButton::toggled, content, &QWidget::setVisible);
 
     wl->addWidget(hdrRow);
-    wl->addWidget(content);
+    wl->addWidget(content, 1);
     return wrapper;
 }
 
