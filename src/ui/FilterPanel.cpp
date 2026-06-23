@@ -326,7 +326,30 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
         "QPushButton { background: transparent; border: none; border-radius: 4px; }"
         "QPushButton:hover { background: #3E3E42; }"
         "QPushButton:pressed { background: #4E4E52; }");
-    connect(m_btnClearAll, &QPushButton::clicked, this, &FilterPanel::clearAllFilters);
+    connect(m_btnClearAll, &QPushButton::clicked, this, [this]() { clearAllFilters(true); });
+
+    m_btnPin = new QPushButton(topBar);
+    m_btnPin->setFixedSize(24, 24);
+    m_btnPin->setIcon(UiHelper::getIcon("pin_tilted", QColor("#B0B0B0")));
+    m_btnPin->setIconSize(QSize(18, 18));
+    m_btnPin->setFlat(true);
+    m_btnPin->setCursor(Qt::PointingHandCursor);
+    m_btnPin->setProperty("tooltipText", "锁定当前筛选条件");
+    m_btnPin->installEventFilter(this);
+    m_btnPin->setStyleSheet(
+        "QPushButton { background: transparent; border: none; border-radius: 4px; }"
+        "QPushButton:hover { background: #3E3E42; }"
+        "QPushButton:pressed { background: #4E4E52; }");
+    connect(m_btnPin, &QPushButton::clicked, this, [this]() {
+        m_isFilterPinned = !m_isFilterPinned;
+        if (m_isFilterPinned) {
+            m_btnPin->setIcon(UiHelper::getIcon("pin", ActiveOrange)); // 使用物理标准激活色
+            m_btnPin->setProperty("tooltipText", "当前筛选条件已锁定（目录切换不重置）");
+        } else {
+            m_btnPin->setIcon(UiHelper::getIcon("pin_tilted", QColor("#B0B0B0")));
+            m_btnPin->setProperty("tooltipText", "锁定当前筛选条件");
+        }
+    });
 
     m_btnToggleGroups = new QPushButton(topBar);
     m_btnToggleGroups->setFixedSize(24, 24);
@@ -340,6 +363,7 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     connect(m_btnToggleGroups, &QPushButton::clicked, this, &FilterPanel::onToggleAllGroupsClicked);
 
     topL->addStretch();
+    topL->addWidget(m_btnPin, 0, Qt::AlignVCenter);
     topL->addWidget(m_btnToggleGroups, 0, Qt::AlignVCenter);
     topL->addWidget(m_btnClearAll, 0, Qt::AlignVCenter);
     m_mainLayout->addWidget(topBar);
@@ -1307,7 +1331,12 @@ QCheckBox* FilterPanel::addFilterRow(QVBoxLayout* layout, const QString& label, 
 }
 
 // ─── clearAllFilters ──────────────────────────────────────────────
-void FilterPanel::clearAllFilters() {
+void FilterPanel::clearAllFilters(bool force) {
+    // 2026-06-23 按照用户要求：若处于锁定状态且非强制重置，则拒绝清理
+    if (!force && m_isFilterPinned) {
+        return;
+    }
+
     // 2026-06-xx 物理修复：重置所有筛选内存状态
     m_filter = FilterState{};
     m_hueSliderColor.clear();
