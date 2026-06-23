@@ -14,6 +14,11 @@ class DropTreeView : public QTreeView {
 public:
     explicit DropTreeView(QWidget* parent = nullptr);
 
+    /**
+     * @brief 物理辅助：暴露内部 rowHeight 接口以支持外部布局高度计算
+     */
+    int rowHeight(const QModelIndex& index) const { return QTreeView::rowHeight(index); }
+
 signals:
     void notesDropped(const QList<int>& noteIds, const QModelIndex& targetIndex);
     void pathsDropped(const QStringList& paths, const QModelIndex& targetIndex);

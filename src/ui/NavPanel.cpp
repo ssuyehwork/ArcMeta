@@ -1,5 +1,6 @@
 #include "NavPanel.h"
 #include "UiHelper.h"
+#include "Logger.h"
 #include "TreeItemDelegate.h"
 #include "DropTreeView.h"
 #include "ContentPanel.h"
@@ -14,6 +15,7 @@
 #include <QIcon>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QPushButton>
 #include <QPointer>
 #include <QMenu>
 #include <QJsonArray>
@@ -113,11 +115,10 @@ void NavPanel::initUi() {
     m_focusLine->hide(); // 初始隐藏
     m_mainLayout->addWidget(m_focusLine);
 
-    // 面板标题 (还原旧版架构：Layout + Icon + Text)
+    // 面板标题 (2026-xx-xx 按照 Plan-96：作为顶层固定标题)
     QWidget* header = new QWidget(this);
     header->setObjectName("ContainerHeader");
     header->setFixedHeight(32);
-    // 重新注入标题栏样式，确保背景色和边框还原
     header->setStyleSheet(
         "QWidget#ContainerHeader {"
         "  background-color: #252526;"
@@ -125,8 +126,8 @@ void NavPanel::initUi() {
         "}"
     );
     QHBoxLayout* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(15, 0, 5, 0); // 2026-xx-xx 按照用户要求：右侧保留 5px 呼吸边距
-    headerLayout->setSpacing(5);                  // 2026-xx-xx 按照用户要求：间距统一为 5px
+    headerLayout->setContentsMargins(15, 0, 5, 0);
+    headerLayout->setSpacing(5);
 
     QLabel* iconLabel = new QLabel(header);
     iconLabel->setPixmap(UiHelper::getIcon("list_ul", QColor("#2ecc71"), 18).pixmap(18, 18));
@@ -136,27 +137,25 @@ void NavPanel::initUi() {
     titleLabel->setStyleSheet("color: #2ecc71; font-size: 13px; font-weight: bold; background: transparent; border: none;");
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
-
     m_mainLayout->addWidget(header);
 
-    // 核心修正：为列表内容包裹容器，恢复旧版 (15, 8, 0, 8) 的呼吸边距
-    // 2026-06-xx 物理对齐：右侧边距设为 0，使滚动条贴合容器边缘，杜绝留白
-    QWidget* contentWrapper = new QWidget(this);
-    contentWrapper->setStyleSheet("background: transparent; border: none;");
-    QVBoxLayout* contentLayout = new QVBoxLayout(contentWrapper);
-    contentLayout->setContentsMargins(0, 0, 0, 0); // 物理对齐：移除容器边距，确保背景满宽
-    contentLayout->setSpacing(0);
+    // 2026-xx-xx 按照 Plan-96：引入全局滚动区
+    m_scrollArea = new QScrollArea(this);
+    m_scrollArea->setWidgetResizable(true);
+    m_scrollArea->setFrameShape(QFrame::NoFrame);
+    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_scrollArea->viewport()->setStyleSheet("background: transparent;");
+    m_scrollArea->setStyleSheet("QScrollArea { background: transparent; border: none; }");
 
-    // 物理还原：使用自定义视图以支持无快照拖拽
-    // 引入 QSplitter 划分上下区 (显式拆分)
-    m_splitter = new QSplitter(Qt::Vertical, contentWrapper);
-    m_splitter->setHandleWidth(1);
-    m_splitter->setStyleSheet("QSplitter::handle { background: #333333; }"); // 还原分割线
+    m_container = new QWidget(m_scrollArea);
+    m_container->setStyleSheet("background: transparent;");
+    m_containerLayout = new QVBoxLayout(m_container);
+    m_containerLayout->setContentsMargins(0, 0, 0, 0);
+    m_containerLayout->setSpacing(0);
 
-    // --- 上方区：磁盘目录树 ---
+    // --- 磁盘树 (2026-xx-xx 按照 Plan-96：移除“本地磁盘”多余标题) ---
     m_treeView = new DropTreeView(this);
-    m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_treeView->setHeaderHidden(true);
     m_treeView->setAnimated(true);
     m_treeView->setIndentation(20);
@@ -165,74 +164,44 @@ void NavPanel::initUi() {
     m_treeView->setDragEnabled(true);
     m_treeView->setDragDropMode(QAbstractItemView::DragOnly);
     m_treeView->setItemDelegate(new TreeItemDelegate(this, false));
+    m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // 禁止内部滚动
+    m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     m_model = new QStandardItemModel(this);
     m_treeView->setModel(m_model);
-    connect(m_treeView, &QTreeView::expanded, this, &NavPanel::onItemExpanded);
-    connect(m_treeView, &QTreeView::clicked, this, &NavPanel::onTreeClicked);
+    m_containerLayout->addWidget(m_treeView);
 
-    // --- 下方区：收藏夹 ---
-    QWidget* favContainer = new QWidget(this);
-    QVBoxLayout* favLayout = new QVBoxLayout(favContainer);
-    favLayout->setContentsMargins(0, 0, 0, 0); // 移除顶部留白
-    favLayout->setSpacing(0);
-
-    // 收藏夹标题 (Plan-95: 对齐主标题栏高度与样式)
-    QWidget* favHeader = new QWidget(this);
-    favHeader->setObjectName("ContainerHeader");
-    favHeader->setFixedHeight(32);
-    favHeader->setStyleSheet(
-        "QWidget#ContainerHeader {"
-        "  background-color: #252526;"
-        "  border-bottom: 1px solid #333;"
-        "}"
-    );
-    QHBoxLayout* favHeaderLayout = new QHBoxLayout(favHeader);
-    favHeaderLayout->setContentsMargins(15, 0, 5, 0); // 15px 物理对齐
-    favHeaderLayout->setSpacing(5);
-    
-    QLabel* favIcon = new QLabel(this);
-    favIcon->setPixmap(UiHelper::getIcon("star_filled", QColor("#FDB70A"), 18).pixmap(18, 18));
-    favHeaderLayout->addWidget(favIcon);
-    
-    QLabel* favTitle = new QLabel("收藏夹", this);
-    favTitle->setStyleSheet("color: #FDB70A; font-size: 13px; font-weight: bold; background: transparent; border: none;");
-    favHeaderLayout->addWidget(favTitle);
-    favHeaderLayout->addStretch();
-    favLayout->addWidget(favHeader);
+    // --- 分组：收藏夹 ---
+    QVBoxLayout* favLayout = nullptr;
+    QWidget* favGroup = buildGroup("收藏夹", UiHelper::getIcon("star_filled", QColor("#FDB70A"), 18), QColor("#FDB70A"), favLayout);
 
     m_favoriteView = new DropTreeView(this);
     m_favoriteView->setHeaderHidden(true);
     m_favoriteView->setIndentation(0);
     m_favoriteView->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_favoriteView->setContextMenuPolicy(Qt::CustomContextMenu);
-    
-    // 启用内部移动和接受拖入
     m_favoriteView->setDragEnabled(true);
     m_favoriteView->setAcceptDrops(true);
     m_favoriteView->setDropIndicatorShown(true);
     m_favoriteView->setDefaultDropAction(Qt::MoveAction);
-    m_favoriteView->setDragDropMode(QAbstractItemView::InternalMove);
+    m_favoriteView->setDragDropMode(QAbstractItemView::DragDrop); // 修改为允许外部拖放
+    m_favoriteView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // 禁止内部滚动
+    m_favoriteView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     m_favoriteModel = new QStandardItemModel(this);
     m_favoriteView->setModel(m_favoriteModel);
-    
-    connect(m_favoriteView, &QTreeView::clicked, this, &NavPanel::onFavoriteClicked);
-    connect(m_favoriteView, &QWidget::customContextMenuRequested, this, &NavPanel::onFavoriteContextMenu);
-    connect(m_favoriteView, &DropTreeView::pathsDropped, this, &NavPanel::onPathsDroppedToFavorite);
-    
-    // 监听模型移动以保存排序
-    connect(m_favoriteModel, &QStandardItemModel::rowsMoved, this, [this](){ saveFavorites(); });
-    connect(m_favoriteModel, &QStandardItemModel::rowsInserted, this, [this](){ saveFavorites(); });
-    connect(m_favoriteModel, &QStandardItemModel::rowsRemoved, this, [this](){ saveFavorites(); });
-
     favLayout->addWidget(m_favoriteView);
+    m_containerLayout->addWidget(favGroup);
 
-    // 样式美化 (复用磁盘树样式)
+    m_containerLayout->addStretch();
+    m_scrollArea->setWidget(m_container);
+    m_mainLayout->addWidget(m_scrollArea, 1);
+
+    // 样式美化
     QString arrowRight = UiHelper::getSvgTempFilePath("arrow_right", QColor("#3498db"));
     QString arrowDown  = UiHelper::getSvgTempFilePath("arrow_down",  QColor("#3498db"));
     QString treeStyle = QString(
-        "QTreeView { background-color: transparent; border: none; font-size: 12px; outline: none; padding-left: 15px; }" // 增加 15px 填充
+        "QTreeView { background-color: transparent; border: none; font-size: 12px; outline: none; padding-left: 15px; }"
         "QTreeView::item { height: 28px; padding-left: 0px; color: #EEEEEE; }"
         "QTreeView::branch { width: 20px; }"
         "QTreeView::branch:has-children:closed { image: url(\"%1\"); }"
@@ -242,14 +211,28 @@ void NavPanel::initUi() {
     m_treeView->setStyleSheet(treeStyle);
     m_favoriteView->setStyleSheet(treeStyle);
 
-    m_splitter->addWidget(m_treeView);
-    m_splitter->addWidget(favContainer);
-    
-    // 默认分配比例：上方 70%，下方 30%
-    m_splitter->setSizes({700, 300});
+    // 信号连接
+    connect(m_treeView, &QTreeView::expanded, this, &NavPanel::onItemExpanded);
+    connect(m_treeView, &QTreeView::collapsed, this, &NavPanel::updateTreeHeight);
+    connect(m_treeView, &QTreeView::clicked, this, &NavPanel::onTreeClicked);
 
-    contentLayout->addWidget(m_splitter);
-    m_mainLayout->addWidget(contentWrapper, 1);
+    connect(m_favoriteView, &QTreeView::clicked, this, &NavPanel::onFavoriteClicked);
+    connect(m_favoriteView, &QWidget::customContextMenuRequested, this, &NavPanel::onFavoriteContextMenu);
+    connect(m_favoriteView, &DropTreeView::pathsDropped, this, &NavPanel::onPathsDroppedToFavorite);
+    
+    // 收藏夹模型监听
+    auto updateFavAndSave = [this](){ updateFavoriteHeight(); saveFavorites(); };
+    connect(m_favoriteModel, &QStandardItemModel::rowsMoved, this, updateFavAndSave);
+    connect(m_favoriteModel, &QStandardItemModel::rowsInserted, this, updateFavAndSave);
+    connect(m_favoriteModel, &QStandardItemModel::rowsRemoved, this, updateFavAndSave);
+    connect(m_favoriteModel, &QStandardItemModel::modelReset, this, &NavPanel::updateFavoriteHeight);
+    connect(m_favoriteModel, &QStandardItemModel::layoutChanged, this, &NavPanel::updateFavoriteHeight);
+
+    // 磁盘树模型监听 (异步加载完成后触发)
+    connect(m_model, &QStandardItemModel::rowsInserted, this, &NavPanel::updateTreeHeight);
+    connect(m_model, &QStandardItemModel::rowsRemoved, this, &NavPanel::updateTreeHeight);
+    connect(m_model, &QStandardItemModel::modelReset, this, &NavPanel::updateTreeHeight);
+    connect(m_model, &QStandardItemModel::layoutChanged, this, &NavPanel::updateTreeHeight);
 }
 
 /**
@@ -313,6 +296,7 @@ void NavPanel::onFavoriteContextMenu(const QPoint& pos) {
 }
 
 void NavPanel::onPathsDroppedToFavorite(const QStringList& paths, const QModelIndex& target) {
+    ArcMeta::Logger::log(QString("[NavPanel] onPathsDroppedToFavorite: count=%1, targetValid=%2").arg(paths.size()).arg(target.isValid() ? "true" : "false"));
     Q_UNUSED(target);
     for (const QString& path : paths) {
         addFavoriteItem(path);
@@ -358,15 +342,20 @@ void NavPanel::saveFavorites() {
 }
 
 void NavPanel::addFavoriteItem(const QString& path) {
+    ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: %1").arg(path));
     // 检查重复
     for (int i = 0; i < m_favoriteModel->rowCount(); ++i) {
         if (m_favoriteModel->item(i)->data(Qt::UserRole + 1).toString() == path) {
+            ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: path already exists, skip."));
             return;
         }
     }
 
     QFileInfo fi(path);
-    if (!fi.exists()) return;
+    if (!fi.exists()) {
+        ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: path not exists on disk!"));
+        return;
+    }
 
     QIcon icon = UiHelper::getFileIcon(path, 18);
     QStandardItem* item = new QStandardItem(icon, fi.fileName().isEmpty() ? path : fi.fileName());
@@ -374,6 +363,7 @@ void NavPanel::addFavoriteItem(const QString& path) {
     
     // 物理红线：收藏项不再显示子节点（扁平化展示）
     m_favoriteModel->appendRow(item);
+    ArcMeta::Logger::log(QString("[NavPanel] addFavoriteItem: success, current count=%1").arg(m_favoriteModel->rowCount()));
 }
 
 void NavPanel::onItemExpanded(const QModelIndex& index) {
@@ -384,6 +374,100 @@ void NavPanel::onItemExpanded(const QModelIndex& index) {
     if (item->rowCount() == 1 && item->child(0)->text() == "Loading...") {
         fetchChildDirs(item);
     }
+    updateTreeHeight();
+}
+
+void NavPanel::updateTreeHeight() {
+    QTimer::singleShot(0, this, [this]() {
+        if (!m_treeView || !m_model) return;
+        // 2026-xx-xx 按照 Plan-96：采用固定行高 28px 快速计算真实高度
+        int visibleRows = 0;
+        QModelIndex index = m_model->index(0, 0);
+        while (index.isValid()) {
+            visibleRows++;
+            index = m_treeView->indexBelow(index);
+        }
+        int height = visibleRows * 28;
+        if (height > 0) height += 4; // 微量缓冲
+        m_treeView->setFixedHeight(height);
+    });
+}
+
+void NavPanel::updateFavoriteHeight() {
+    QTimer::singleShot(0, this, [this]() {
+        if (!m_favoriteView || !m_favoriteModel) return;
+        int visibleRows = 0;
+        QModelIndex index = m_favoriteModel->index(0, 0);
+        while (index.isValid()) {
+            visibleRows++;
+            index = m_favoriteView->indexBelow(index);
+        }
+        // 2026-xx-xx 按照 Plan-96：即使为空也保留 28px 高度以接收拖拽，并增加少量缓冲
+        int height = qMax(1, visibleRows) * 28 + 4;
+        m_favoriteView->setFixedHeight(height);
+    });
+}
+
+QWidget* NavPanel::buildGroup(const QString& title, const QIcon& icon, const QColor& color, QVBoxLayout*& outContentLayout) {
+    QWidget* wrapper = new QWidget(m_container);
+    wrapper->setAttribute(Qt::WA_StyledBackground, true);
+    wrapper->setStyleSheet("background: transparent;");
+    QVBoxLayout* wl = new QVBoxLayout(wrapper);
+    wl->setContentsMargins(0, 0, 0, 0);
+    wl->setSpacing(0);
+
+    QWidget* hdrRow = new QWidget(wrapper);
+    hdrRow->setObjectName("GroupHdrRow");
+    hdrRow->setFixedHeight(32);
+    hdrRow->setAttribute(Qt::WA_StyledBackground, true);
+    hdrRow->setStyleSheet(
+        "QWidget#GroupHdrRow {"
+        "  background: #252526;"
+        "  border-bottom: 1px solid #333333;"
+        "  border-top: 1px solid #333333;"
+        "}");
+
+    QHBoxLayout* hdrLayout = new QHBoxLayout(hdrRow);
+    hdrLayout->setContentsMargins(15, 0, 5, 0);
+    hdrLayout->setSpacing(5);
+
+    QLabel* iconLabel = new QLabel(hdrRow);
+    iconLabel->setPixmap(icon.pixmap(18, 18));
+    hdrLayout->addWidget(iconLabel);
+
+    QPushButton* hdrBtn = new QPushButton(title, hdrRow);
+    hdrBtn->setCheckable(true);
+    hdrBtn->setChecked(true);
+    hdrBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    hdrBtn->setFixedHeight(32);
+    hdrBtn->setCursor(Qt::PointingHandCursor);
+    hdrBtn->setStyleSheet(QString(
+        "QPushButton {"
+        "  background: transparent;"
+        "  border: none;"
+        "  color: %1;"
+        "  font-size: 13px;"
+        "  font-weight: bold;"
+        "  text-align: left;"
+        "  padding: 0px;"
+        "  margin: 0px;"
+        "}"
+        "QPushButton:hover { color: #EEEEEE; }"
+    ).arg(color.name()));
+    hdrLayout->addWidget(hdrBtn);
+
+    QWidget* content = new QWidget(wrapper);
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    content->setStyleSheet("background: transparent;");
+    outContentLayout = new QVBoxLayout(content);
+    outContentLayout->setContentsMargins(0, 0, 0, 0);
+    outContentLayout->setSpacing(0);
+
+    connect(hdrBtn, &QPushButton::toggled, content, &QWidget::setVisible);
+
+    wl->addWidget(hdrRow);
+    wl->addWidget(content);
+    return wrapper;
 }
 
 /**

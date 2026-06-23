@@ -250,3 +250,9 @@
     - **锁外 I/O**: 重构 `ensureActivated` 逻辑，确保 Win32 API 访问在释放锁后执行，极大提升了并发性能。
     - **线程安全**: 为 `TagManagerView` 引入 `QPointer` 保护，确保异步数据库任务完成后能安全刷新 UI。
     - **原子推送**: 通过 `pushToDirty_NoLock` 机制解决了批量重命名标签时的锁递归问题。
+2026-06-23: 重构 NavPanel 架构，引入 QScrollArea 全局滚动与流式布局，实现高度自适应的磁盘树与收藏夹分组。 (修改)
+2026-06-23: 修复 NavPanel 编译错误：通过 DropTreeView 暴露 rowHeight 接口以支持跨类高度计算。 (修改)
+2026-06-23: 优化 NavPanel 自适应布局：移除冗余的“本地磁盘”标题，磁盘树直挂主标题；采用 28px 固定行高算法重构高度同步逻辑。 (修改)
+2026-06-23: 修复收藏夹拖拽失效问题：为自适应高度视图设置最小 28px 物理接收区；优化 DropTreeView 视觉反馈，恢复放置指示器。 (修改)
+2026-06-23: 深度排查收藏夹拖拽问题：1. 将收藏夹 DragDropMode 提升为 DragDrop 以支持跨视图拖放；2. 在 DropTreeView 与 NavPanel 注入全量拖拽调试日志。 (修改)
+2026-06-23: 修复 Logger 编译错误：添加头文件引用，并统一使用 ArcMeta::Logger::log 全路径调用。 (修改)
