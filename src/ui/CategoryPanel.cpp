@@ -1023,25 +1023,20 @@ void CategoryPanel::initUi() {
     sbContentLayout->addWidget(m_categoryTree);
     m_mainLayout->addWidget(sbContent, 1);
 
-    // 2026-xx-xx 按照 Plan-98：新增底部搜索过滤框
-    QWidget* searchContainer = new QWidget(this);
-    searchContainer->setFixedHeight(40);
-    searchContainer->setStyleSheet("background: transparent; border-top: 1px solid #333;");
-    QHBoxLayout* searchLayout = new QHBoxLayout(searchContainer);
-    searchLayout->setContentsMargins(10, 0, 10, 0);
-
+    // 2026-xx-xx 按照 Plan-98：新增底部搜索过滤框 (Mark 2: 移除冗余切割线与容器，实现更紧凑布局)
     m_searchEdit = new QLineEdit(this);
     m_searchEdit->setPlaceholderText("过滤分类...");
     m_searchEdit->setClearButtonEnabled(true);
     m_searchEdit->setFixedHeight(28);
-    // 物理还原：圆角 8px
+    // 物理还原：圆角 8px；Mark 1: 缩减左内边距与外边距
     m_searchEdit->setStyleSheet(QString(
         "QLineEdit {"
         "  background: #1E1E1E;"
         "  color: #EEEEEE;"
         "  border: 1px solid #444;"
         "  border-radius: 8px;"
-        "  padding: 0 8px 0 28px;"
+        "  padding: 0 8px 0 24px;"
+        "  margin: 0 8px 8px 8px;"
         "  font-size: 12px;"
         "}"
         "QLineEdit:focus { border-color: %1; }"
@@ -1051,8 +1046,7 @@ void CategoryPanel::initUi() {
     QAction* leadingIcon = m_searchEdit->addAction(UiHelper::getIcon("select", QColor("#888888"), 16), QLineEdit::LeadingPosition);
     Q_UNUSED(leadingIcon);
 
-    searchLayout->addWidget(m_searchEdit);
-    m_mainLayout->addWidget(searchContainer);
+    m_mainLayout->addWidget(m_searchEdit);
 
     connect(m_searchEdit, &QLineEdit::textChanged, this, &CategoryPanel::onSearchTextChanged);
 
