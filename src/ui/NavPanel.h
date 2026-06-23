@@ -6,7 +6,7 @@
 #include <QStandardItem>
 #include <QVBoxLayout>
 #include <QDir>
-#include <QSplitter>
+#include <QScrollArea>
 
 namespace ArcMeta {
 
@@ -61,6 +61,8 @@ private slots:
     void onFavoriteClicked(const QModelIndex& index);
     void onFavoriteContextMenu(const QPoint& pos);
     void onPathsDroppedToFavorite(const QStringList& paths, const QModelIndex& target);
+    void updateTreeHeight();
+    void updateFavoriteHeight();
 
 private:
     void initUi();
@@ -71,7 +73,11 @@ private:
     void saveFavorites();
     void addFavoriteItem(const QString& path);
 
-    QSplitter* m_splitter = nullptr;
+    QWidget* buildGroup(const QString& title, const QIcon& icon, const QColor& color, QVBoxLayout*& outContentLayout);
+
+    QScrollArea* m_scrollArea = nullptr;
+    QWidget*     m_container = nullptr;
+    QVBoxLayout* m_containerLayout = nullptr;
     
     // 上方：磁盘树
     QTreeView* m_treeView = nullptr;
