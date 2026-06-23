@@ -15,7 +15,7 @@ const QColor PrimaryBlue   = QColor("#3498db");
 const QColor SuccessGreen   = QColor("#2ecc71");
 const QColor WarningOrange  = QColor("#f39c12");
 const QColor ErrorRed       = QColor("#e81123");
-const QColor BrandOrange    = QColor("#cb7208");
+const QColor BrandOrange    = QColor("#ff551c"); // 2026-06-23 物理级拨乱反正：全局置顶激活色唯一合法值
 const QColor AccentCyan     = QColor("#41F2F2");
 
 // 面板背景色
