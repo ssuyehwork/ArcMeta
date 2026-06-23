@@ -261,3 +261,4 @@
 2026-06-23: 实现侧边栏“我的分类”专属过滤搜索 (Plan-98)：引入 CategoryFilterProxyModel 递归代理模型；底部新增 8px 圆角搜索框；Delegate 补全 PrimaryBlue 匹配高亮逻辑。 (新增)
 2026-06-23: 修复侧边栏搜索代理模型编译错误：在 CMakeLists.txt 中注册 CategoryFilterProxyModel.h 以触发 MOC 生成。 (修改)
 2026-06-23: 优化侧边栏搜索框视觉样式：移除冗余容器与分割线；缩减左侧图标间距至 24px；设置 margin 实现紧凑布局。 (修改)
+2026-06-23: 修复编译警告：在 Logger.h 中显式忽略 QFile::open 返回值 (C4834)；在 CategoryFilterProxyModel.h 中将 invalidateFilter 替换为 begin/endFilterChange (C4996)。 (修改)

@@ -30,7 +30,7 @@ public:
             if (!QFile::rename(fileName, oldFile)) {
                 // 若被占用导致重命名失败，则物理清空
                 QFile file(fileName);
-                file.open(QIODevice::WriteOnly | QIODevice::Truncate);
+                (void)file.open(QIODevice::WriteOnly | QIODevice::Truncate);
                 file.close();
             }
         }

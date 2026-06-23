@@ -18,7 +18,8 @@ public:
 
     void setFilterText(const QString& text) {
         m_filterText = text;
-        invalidateFilter();
+        beginFilterChange();
+        endFilterChange();
     }
 
     QString filterText() const { return m_filterText; }
