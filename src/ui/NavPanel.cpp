@@ -153,10 +153,7 @@ void NavPanel::initUi() {
     m_containerLayout->setContentsMargins(0, 0, 0, 0);
     m_containerLayout->setSpacing(0);
 
-    // --- 分组一：本地磁盘 ---
-    QVBoxLayout* diskLayout = nullptr;
-    QWidget* diskGroup = buildGroup("本地磁盘", UiHelper::getIcon("monitor", QColor("#3498db"), 18), QColor("#3498db"), diskLayout);
-
+    // --- 磁盘树 (2026-xx-xx 按照 Plan-96：移除“本地磁盘”多余标题) ---
     m_treeView = new DropTreeView(this);
     m_treeView->setHeaderHidden(true);
     m_treeView->setAnimated(true);
@@ -171,10 +168,9 @@ void NavPanel::initUi() {
 
     m_model = new QStandardItemModel(this);
     m_treeView->setModel(m_model);
-    diskLayout->addWidget(m_treeView);
-    m_containerLayout->addWidget(diskGroup);
+    m_containerLayout->addWidget(m_treeView);
 
-    // --- 分组二：收藏夹 ---
+    // --- 分组：收藏夹 ---
     QVBoxLayout* favLayout = nullptr;
     QWidget* favGroup = buildGroup("收藏夹", UiHelper::getIcon("star_filled", QColor("#FDB70A"), 18), QColor("#FDB70A"), favLayout);
 
@@ -376,13 +372,15 @@ void NavPanel::onItemExpanded(const QModelIndex& index) {
 void NavPanel::updateTreeHeight() {
     QTimer::singleShot(0, this, [this]() {
         if (!m_treeView || !m_model) return;
-        int height = 0;
+        // 2026-xx-xx 按照 Plan-96：采用固定行高 28px 快速计算真实高度
+        int visibleRows = 0;
         QModelIndex index = m_model->index(0, 0);
         while (index.isValid()) {
-            height += static_cast<DropTreeView*>(m_treeView)->rowHeight(index);
+            visibleRows++;
             index = m_treeView->indexBelow(index);
         }
-        if (height > 0) height += 2;
+        int height = visibleRows * 28;
+        if (height > 0) height += 4; // 微量缓冲
         m_treeView->setFixedHeight(height);
     });
 }
@@ -390,13 +388,14 @@ void NavPanel::updateTreeHeight() {
 void NavPanel::updateFavoriteHeight() {
     QTimer::singleShot(0, this, [this]() {
         if (!m_favoriteView || !m_favoriteModel) return;
-        int height = 0;
+        int visibleRows = 0;
         QModelIndex index = m_favoriteModel->index(0, 0);
         while (index.isValid()) {
-            height += static_cast<DropTreeView*>(m_favoriteView)->rowHeight(index);
+            visibleRows++;
             index = m_favoriteView->indexBelow(index);
         }
-        if (height > 0) height += 2;
+        int height = visibleRows * 28;
+        if (height > 0) height += 4;
         m_favoriteView->setFixedHeight(height);
     });
 }
