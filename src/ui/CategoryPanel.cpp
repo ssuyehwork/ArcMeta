@@ -251,7 +251,7 @@ void CategoryPanel::setupContextMenu() {
                 menu.addSeparator();
 
                 bool isPinned = index.data(PinnedRole).toBool();
-                menu.addAction(UiHelper::getIcon("pin_vertical", isPinned ? ActiveOrange : TextMuted, 18), 
+                menu.addAction(UiHelper::getIcon("pin_vertical", isPinned ? Style::ActiveOrange : TextMuted, 18), 
                                isPinned ? "从“快速访问”中移除" : "添加至“快速访问”", this, &CategoryPanel::onTogglePin);
                                
                 menu.addAction(UiHelper::getIcon("edit", TextMuted, 18), "重命名分类", this, &CategoryPanel::onRenameCategory);

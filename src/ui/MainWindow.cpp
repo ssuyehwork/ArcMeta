@@ -1173,7 +1173,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnPinTop->setCheckable(true);
     m_btnPinTop->setChecked(m_isPinned);
     if (m_isPinned) {
-        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", ActiveOrange));
+        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", Style::ActiveOrange));
     }
 
     m_btnMin = createTitleBtn("minimize");
@@ -1431,7 +1431,7 @@ void MainWindow::onPinToggled(bool checked) {
 
     // 更新图标和颜色 (按下置顶为品牌橙色)
     if (m_isPinned) {
-        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", ActiveOrange));
+        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", Style::ActiveOrange));
     } else {
         m_btnPinTop->setIcon(UiHelper::getIcon("pin_tilted", TextMain));
     }
