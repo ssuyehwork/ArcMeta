@@ -67,21 +67,29 @@ protected:
         QModelIndex sourceIndex = sourceModel()->index(sourceRow, 0, sourceParent);
         if (!sourceIndex.isValid()) return false;
 
-        // 1. 系统项与分组标题的处理：
-        // 傻逼逻辑规避：如果父节点匹配或者任何递归子节点匹配，父节点必须保持可见。
-        // 但如果系统项（ID < 0）本身不匹配，且其下没有任何匹配分类，则隐藏。
-
-        // 检查当前节点是否匹配
+        int id = sourceIndex.data(IdRole).toInt();
         QString name = sourceIndex.data(NameRole).toString();
-        if (name.contains(m_filterText, Qt::CaseInsensitive)) {
-            qDebug() << "[CategoryFilter] 匹配成功: " << name << "(Row:" << sourceRow << ")";
+
+        // 1. 豁免权 (Plan-97 补充要求)：
+        // 系统项 (ID < 0) 以及顶级结构组 ("快速访问", "我的分类") 始终显示，不参与过滤。
+        if (id < 0 || name == "快速访问" || name == "我的分类") {
+            qDebug() << "[CategoryFilter] 豁免项常驻: " << name;
             return true;
         }
 
-        // 2. 递归检查子节点
+        // 2. 匹配逻辑 (针对用户分类 ID > 0)：
+        // 检查自身名称是否匹配关键词
+        if (name.contains(m_filterText, Qt::CaseInsensitive)) {
+            qDebug() << "[CategoryFilter] 用户分类匹配成功: " << name;
+            return true;
+        }
+
+        // 3. 递归检查子节点 (Plan-97: 保持树形路径显现)
         int childCount = sourceModel()->rowCount(sourceIndex);
         for (int i = 0; i < childCount; ++i) {
-            if (filterAcceptsRow(i, sourceIndex)) return true;
+            if (filterAcceptsRow(i, sourceIndex)) {
+                return true;
+            }
         }
 
         return false;
