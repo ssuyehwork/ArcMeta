@@ -144,14 +144,14 @@ void NavPanel::initUi() {
     QWidget* contentWrapper = new QWidget(this);
     contentWrapper->setStyleSheet("background: transparent; border: none;");
     QVBoxLayout* contentLayout = new QVBoxLayout(contentWrapper);
-    contentLayout->setContentsMargins(15, 8, 0, 8);
+    contentLayout->setContentsMargins(0, 0, 0, 0); // 物理对齐：移除容器边距，确保背景满宽
     contentLayout->setSpacing(0);
 
     // 物理还原：使用自定义视图以支持无快照拖拽
-    // 引入 QSplitter 划分上下区 (隐式拆分)
+    // 引入 QSplitter 划分上下区 (显式拆分)
     m_splitter = new QSplitter(Qt::Vertical, contentWrapper);
     m_splitter->setHandleWidth(1);
-    m_splitter->setStyleSheet("QSplitter::handle { background: transparent; }");
+    m_splitter->setStyleSheet("QSplitter::handle { background: #333333; }"); // 还原分割线
 
     // --- 上方区：磁盘目录树 ---
     m_treeView = new DropTreeView(this);
@@ -174,7 +174,7 @@ void NavPanel::initUi() {
     // --- 下方区：快捷收藏 ---
     QWidget* favContainer = new QWidget(this);
     QVBoxLayout* favLayout = new QVBoxLayout(favContainer);
-    favLayout->setContentsMargins(0, 5, 0, 0); // 与上方区域留一点间距
+    favLayout->setContentsMargins(0, 0, 0, 0); // 移除顶部留白
     favLayout->setSpacing(0);
 
     // 快捷收藏标题 (Plan-95: 对齐主标题栏高度与样式)
@@ -184,11 +184,12 @@ void NavPanel::initUi() {
     favHeader->setStyleSheet(
         "QWidget#ContainerHeader {"
         "  background-color: #252526;"
+        "  border-top: 1px solid #333;"    // 增加顶部边框强化分割
         "  border-bottom: 1px solid #333;"
         "}"
     );
     QHBoxLayout* favHeaderLayout = new QHBoxLayout(favHeader);
-    favHeaderLayout->setContentsMargins(0, 0, 5, 0); // 由于父容器已有 15px 边距，此处设为 0 以保持物理对齐
+    favHeaderLayout->setContentsMargins(15, 0, 5, 0); // 15px 物理对齐
     favHeaderLayout->setSpacing(5);
 
     QLabel* favIcon = new QLabel(this);
@@ -232,7 +233,7 @@ void NavPanel::initUi() {
     QString arrowRight = UiHelper::getSvgTempFilePath("arrow_right", QColor("#3498db"));
     QString arrowDown  = UiHelper::getSvgTempFilePath("arrow_down",  QColor("#3498db"));
     QString treeStyle = QString(
-        "QTreeView { background-color: transparent; border: none; font-size: 12px; outline: none; }"
+        "QTreeView { background-color: transparent; border: none; font-size: 12px; outline: none; padding-left: 15px; }" // 增加 15px 填充
         "QTreeView::item { height: 28px; padding-left: 0px; color: #EEEEEE; }"
         "QTreeView::branch { width: 20px; }"
         "QTreeView::branch:has-children:closed { image: url(\"%1\"); }"
