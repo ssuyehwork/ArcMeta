@@ -550,7 +550,7 @@ void MainWindow::initUi() {
         }
     });
 
-    // 2026-06-xx 调色盘搜索联动：将颜色喂给筛选器，由筛选器驱动过滤
+    // 2026-06-xx调色盘搜索联动：将颜色喂给筛选器，由筛选器驱动过滤
     connect(m_metaPanel, &MetaPanel::searchByColor, this, [this](const QColor& color) {
         if (m_filterPanel) {
             m_filterPanel->selectColor(color);
@@ -1173,7 +1173,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnPinTop->setCheckable(true);
     m_btnPinTop->setChecked(m_isPinned);
     if (m_isPinned) {
-        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", BrandOrange));
+        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", ActiveOrange));
     }
 
     m_btnMin = createTitleBtn("minimize");
@@ -1431,7 +1431,7 @@ void MainWindow::onPinToggled(bool checked) {
 
     // 更新图标和颜色 (按下置顶为品牌橙色)
     if (m_isPinned) {
-        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", BrandOrange));
+        m_btnPinTop->setIcon(UiHelper::getIcon("pin_vertical", ActiveOrange));
     } else {
         m_btnPinTop->setIcon(UiHelper::getIcon("pin_tilted", TextMain));
     }
