@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QDateTime>
 #include <windows.h>
 #include "MetadataManager.h"
 
@@ -238,9 +239,15 @@ bool DatabaseManager::init() {
     std::wstring globalPath = (metaDir + "/global.db").toStdWString();
     loadDb(globalPath, m_globalDb);
 
-    // 为每个驱动器加载数据库
-    // 注意：此处实际应遍历当前在线的驱动器，这里先简化逻辑
-    // 实际运行时，MetadataManager 会按需通过 getMemoryDb 触发加载或由 init 调用
+    // 2026-07-xx 按照 Plan-97：主动探测当前挂载的物理驱动器并触发纠偏加载
+    const auto drives = QDir::drives();
+    for (const QFileInfo& d : drives) {
+        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(d.absolutePath().toStdWString());
+        if (volSerial != L"UNKNOWN") {
+            QString letter = d.absolutePath().at(0).toUpper();
+            getMemoryDbInternal(volSerial, letter);
+        }
+    }
     return true;
 }
 
@@ -317,7 +324,10 @@ void DatabaseManager::shutdown() {
 
 sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QString& driveLetter) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    
+    return getMemoryDbInternal(volumeSerial, driveLetter);
+}
+
+sqlite3* DatabaseManager::getMemoryDbInternal(const std::wstring& volumeSerial, const QString& driveLetter) {
     QString cleanLetter = "";
     if (!driveLetter.isEmpty()) {
         cleanLetter = driveLetter.at(0).toUpper();
@@ -345,13 +355,16 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
                 
                 // 如果目标已存在且不是自己，先将其移走（按用户规则重命名为无效）
                 if (QFile::exists(targetPath) && targetPath != currentDiskPath) {
-                    QString invalidBase = QString("%1/Arcmeta_%2_无效").arg(metaDir).arg(QString::fromStdWString(volumeSerial).toUpper());
+                    QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+                    QString invalidBase = QString("%1/Arcmeta_%2_无效_%3").arg(metaDir).arg(QString::fromStdWString(volumeSerial).toUpper()).arg(ts);
                     QString invalidPath = invalidBase + ".db";
                     int counter = 1;
                     while (QFile::exists(invalidPath)) {
                         invalidPath = QString("%1_%2.db").arg(invalidBase).arg(counter++);
                     }
-                    QFile::rename(targetPath, invalidPath);
+                    if (QFile::rename(targetPath, invalidPath)) {
+                        qDebug() << "[DB] 检测到命名冲突，历史数据已备份:" << QFileInfo(invalidPath).fileName();
+                    }
                 }
 
                 if (QFile::rename(currentDiskPath, targetPath)) {
@@ -396,14 +409,15 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
                 // 处理冲突的其他旧文件 (Plan-97 补充要求)
                 for (int i = 1; i < list.size(); ++i) {
                     QString conflictPath = list.at(i).absoluteFilePath();
-                    QString invalidBase = QString("%1/Arcmeta_%2_无效").arg(metaDir).arg(serialStr);
+                    QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+                    QString invalidBase = QString("%1/Arcmeta_%2_无效_%3").arg(metaDir).arg(serialStr).arg(ts);
                     QString invalidPath = invalidBase + ".db";
                     int counter = 1;
                     while (QFile::exists(invalidPath)) {
                         invalidPath = QString("%1_%2.db").arg(invalidBase).arg(counter++);
                     }
                     if (QFile::rename(conflictPath, invalidPath)) {
-                        qDebug() << "[DB] 冲突处理：将冗余数据库标记为无效" << list.at(i).fileName() << "->" << QFileInfo(invalidPath).fileName();
+                        qDebug() << "[DB] 检测到命名冲突，历史数据已备份:" << QFileInfo(invalidPath).fileName();
                     }
                 }
             }

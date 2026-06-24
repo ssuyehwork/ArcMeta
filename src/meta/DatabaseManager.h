@@ -90,6 +90,8 @@ private:
 
     QString getAppDir();
     void ensureHidden(const std::wstring& path);
+
+    sqlite3* getMemoryDbInternal(const std::wstring& volumeSerial, const QString& driveLetter = "");
 };
 
 } // namespace ArcMeta
