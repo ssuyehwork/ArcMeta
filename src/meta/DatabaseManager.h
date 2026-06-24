@@ -60,8 +60,9 @@ public:
     /**
      * @brief 获取指定磁盘卷序列号对应的内存连接
      * @param volumeSerial 磁盘卷序列号（如 A1B2C3D4）
+     * @param driveLetter 盘符（如 "D" 或 "D:"），可选。若提供则触发数据库文件名自适应重命名。
      */
-    sqlite3* getMemoryDb(const std::wstring& volumeSerial);
+    sqlite3* getMemoryDb(const std::wstring& volumeSerial, const QString& driveLetter = "");
 
     /**
      * @brief 获取全局数据库内存连接
