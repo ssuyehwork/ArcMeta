@@ -933,6 +933,57 @@ void MainWindow::setupSplitters() {
     m_titleBarWidget->setObjectName("TitleBar");
     m_titleBarWidget->setFixedHeight(34);
     m_titleBarLayout = new QHBoxLayout(m_titleBarWidget);
+
+    // --- 1.1 盘符管理栏 (Plan-98, 位于标题栏下方) ---
+    m_driveBarWidget = new QWidget(centralC);
+    m_driveBarWidget->setObjectName("DriveBarContainer");
+    m_driveBarWidget->setFixedHeight(45);
+    m_driveBarWidget->setVisible(false); // 初始隐藏
+    m_driveBarWidget->setAttribute(Qt::WA_StyledBackground, true);
+    m_driveBarWidget->setStyleSheet(
+        "QWidget#DriveBarContainer {"
+        "  background-color: #252526;"
+        "  border-bottom: 1px solid #333333;"
+        "}"
+    );
+    m_driveBarLayout = new QHBoxLayout(m_driveBarWidget);
+    m_driveBarLayout->setContentsMargins(15, 0, 15, 0);
+    m_driveBarLayout->setSpacing(10);
+    m_driveBarLayout->addStretch(); // 默认推至左侧
+
+    // 2026-07-xx 按照 Plan-99：动态探测物理磁盘并创建按钮
+#ifdef Q_OS_WIN
+    const auto drives = QDir::drives();
+    for (const QFileInfo& d : drives) {
+        QString path = d.absolutePath();
+        std::wstring wPath = path.toStdWString();
+        
+        // 判定 NTFS (GetVolumeInformationW)
+        wchar_t fsName[MAX_PATH];
+        if (GetVolumeInformationW(reinterpret_cast<LPCWSTR>(wPath.c_str()), nullptr, 0, nullptr, nullptr, nullptr, fsName, MAX_PATH)) {
+            if (wcscmp(fsName, L"NTFS") == 0) {
+                QString letter = path.left(2).toUpper(); // "C:"
+                QPushButton* btn = new QPushButton(letter, m_driveBarWidget);
+                btn->setCheckable(true);
+                btn->setFixedSize(50, 26);
+                btn->setCursor(Qt::PointingHandCursor);
+                
+                btn->setStyleSheet(QString(
+                    "QPushButton { background-color: #333333; border: 1px solid #444; border-radius: 4px; color: #CCC; font-size: 11px; font-weight: bold; }"
+                    "QPushButton:hover { background-color: #3E3E42; border-color: %1; }"
+                    "QPushButton:checked { background-color: %1; color: #FFF; border-color: %1; }"
+                ).arg(qssColor(PrimaryBlue)));
+                
+                connect(btn, &QPushButton::toggled, this, [this, letter](bool checked) {
+                    onDriveButtonClicked(letter, checked);
+                });
+                
+                m_driveBarLayout->insertWidget(m_driveBarLayout->count() - 1, btn);
+                m_driveButtonMap[letter] = btn;
+            }
+        }
+    }
+#endif
     // 2026-xx-xx 按照用户要求：标题栏左侧与右侧均保持 5px 呼吸边距
     m_titleBarLayout->setContentsMargins(5, 0, kEdgeMargin, 0); 
     m_titleBarLayout->setSpacing(8);
@@ -947,6 +998,7 @@ void MainWindow::setupSplitters() {
     m_appNameLabel = new QLabel("FERREX", m_titleBarWidget);
     m_appNameLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-weight: bold;").arg(BrandOrange.name()));
     m_titleBarLayout->addWidget(m_appNameLabel);
+
     m_titleBarLayout->addStretch();
 
     // --- 2. 统一导航栏 (第二行) ---
@@ -1075,6 +1127,7 @@ void MainWindow::setupSplitters() {
     updateStatus();
 
     mainL->addWidget(m_titleBarWidget);
+    mainL->addWidget(m_driveBarWidget);
     mainL->addWidget(m_navBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
@@ -1108,6 +1161,13 @@ void MainWindow::setupCustomTitleBarButtons() {
         ).arg(hoverColor));
         return btn;
     };
+
+
+    m_btnToggleDrives = createTitleBtn("chevrons_up");
+    m_btnToggleDrives->setProperty("tooltipText", "展开/折叠盘符管理");
+    m_btnToggleDrives->installEventFilter(m_hoverFilter);
+    connect(m_btnToggleDrives, &QPushButton::clicked, this, &MainWindow::toggleDriveBar);
+    layout->addWidget(m_btnToggleDrives, 0, Qt::AlignVCenter);
 
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
@@ -1554,6 +1614,20 @@ void MainWindow::savePanelVisibility() {
     if (!m_filterPanel->isVisible())   hiddenPanels << "filter";
     
     AppConfig::instance().setValue("MainWindow/PanelVisibility", hiddenPanels);
+}
+
+void MainWindow::toggleDriveBar() {
+    bool isVisible = m_driveBarWidget->isVisible();
+    m_driveBarWidget->setVisible(!isVisible);
+    
+    // 图标联动：当前可见则切换为向上图标（准备收起），反之向下
+    QString iconKey = (!isVisible) ? "chevrons_down" : "chevrons_up";
+    m_btnToggleDrives->setIcon(UiHelper::getIcon(iconKey, QColor("#FFFFFF"), 18));
+}
+
+void MainWindow::onDriveButtonClicked(const QString& letter, bool checked) {
+    // TODO: 物理磁盘数据库挂载、MFT 掩码更新及实时扫描启动逻辑待后续实现
+    qDebug() << "[TODO] 盘符被点击:" << letter << " 选中状态:" << checked;
 }
 
 } // namespace ArcMeta

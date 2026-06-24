@@ -390,7 +390,15 @@ sqlite3* DatabaseManager::getMemoryDbInternal(const std::wstring& volumeSerial, 
             QDir dir(metaDir);
             QStringList filters;
             filters << QString("Arcmeta_%1*.db").arg(serialStr);
-            QFileInfoList list = dir.entryInfoList(filters, QDir::Files | QDir::Hidden | QDir::System, QDir::Time);
+            QFileInfoList allFiles = dir.entryInfoList(filters, QDir::Files | QDir::Hidden | QDir::System, QDir::Time);
+            
+            // 2026-07-xx 按照审计意见：排除标记为“无效”的备份文件，防止错误加载主库
+            QFileInfoList list;
+            for (const auto& info : allFiles) {
+                if (!info.fileName().contains("无效")) {
+                    list.append(info);
+                }
+            }
 
             if (!list.isEmpty()) {
                 // Case A: 有旧文件。选择最近修改的一个作为目标进行重命名。
