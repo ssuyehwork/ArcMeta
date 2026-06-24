@@ -40,6 +40,7 @@ AutoImportManager::~AutoImportManager() {
 void AutoImportManager::startListening() {
     if (m_isListening) return;
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
+    connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
     connect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved, Qt::QueuedConnection);
     m_isListening = true;
 }
@@ -47,6 +48,7 @@ void AutoImportManager::startListening() {
 void AutoImportManager::stopListening() {
     if (!m_isListening) return;
     disconnect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded);
+    disconnect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryAdded);
     disconnect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved);
     m_isListening = false;
 }

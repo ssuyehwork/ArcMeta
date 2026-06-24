@@ -94,13 +94,23 @@ int FerrexVirtualDbModel::columnCount(const QModelIndex&) const {
 
 Qt::ItemFlags FerrexVirtualDbModel::flags(const QModelIndex& index) const {
     if (!index.isValid()) return Qt::NoItemFlags;
+
     Qt::ItemFlags f = Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsDragEnabled;
-    // 仅允许第 0 列（名称列）且非“分类”项进行重命名
-    if (index.column() == 0) {
-        if (index.row() < static_cast<int>(m_allRecords.size()) && !m_allRecords[index.row()].isCategory) {
+
+    if (index.row() < static_cast<int>(m_allRecords.size())) {
+        const auto& record = m_allRecords[index.row()];
+
+        // 2026-07-xx 按照用户要求：文件夹与分类支持接收拖放 (ItemIsDropEnabled)
+        if (record.isDir || record.isCategory) {
+            f |= Qt::ItemIsDropEnabled;
+        }
+
+        // 仅允许第 0 列（名称列）且非“分类”项进行重命名
+        if (index.column() == 0 && !record.isCategory) {
             f |= Qt::ItemIsEditable;
         }
     }
+
     return f;
 }
 
@@ -2268,8 +2278,9 @@ void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& t
 
     // 2026-07-xx 物理加固：防止同目录拖拽触发冗余操作
     bool allInSameDir = true;
+    QString cleanDest = QDir::cleanPath(destDir);
     for (const QString& p : paths) {
-        if (QFileInfo(p).absolutePath() != QDir::toNativeSeparators(destDir)) {
+        if (QDir::cleanPath(QFileInfo(p).absolutePath()) != cleanDest) {
             allInSameDir = false;
             break;
         }
