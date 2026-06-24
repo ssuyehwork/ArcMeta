@@ -1369,7 +1369,23 @@ void ContentPanel::initGridView() {
     m_gridView->viewport()->installEventFilter(this); 
  
     connect(m_gridView, &QAbstractItemView::doubleClicked, this, &ContentPanel::onDoubleClicked); 
- 
+
+    // 2026-07-xx 按照用户要求：修复拖拽信号连接 (pathsDropped)
+    if (auto* dropView = qobject_cast<DropJustifiedView*>(m_gridView)) {
+        connect(dropView, &DropJustifiedView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& target) {
+            if (m_currentPath.isEmpty() || m_currentPath == "computer://") return;
+
+            QString destDir = m_currentPath;
+            if (target.isValid() && target.data(TypeRole).toString() == "folder") {
+                destDir = target.data(PathRole).toString();
+            }
+
+            if (ShellHelper::copyOrMoveItems(paths, destDir, true)) {
+                loadDirectory(m_currentPath, m_isRecursive);
+            }
+        });
+    }
+
     m_gridView->setStyleSheet( 
         "QAbstractItemView { background-color: transparent; border: none; outline: none; }" 
         "QAbstractItemView::item { background: transparent; }" 
@@ -1405,7 +1421,21 @@ void ContentPanel::initListView() {
  
     m_treeView->setModel(m_proxyModel); 
     m_treeView->viewport()->installEventFilter(this); 
- 
+
+    // 2026-07-xx 按照用户要求：修复拖拽信号连接 (pathsDropped)
+    connect(m_treeView, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& target) {
+        if (m_currentPath.isEmpty() || m_currentPath == "computer://") return;
+
+        QString destDir = m_currentPath;
+        if (target.isValid() && target.data(TypeRole).toString() == "folder") {
+            destDir = target.data(PathRole).toString();
+        }
+
+        if (ShellHelper::copyOrMoveItems(paths, destDir, true)) {
+            loadDirectory(m_currentPath, m_isRecursive);
+        }
+    });
+
     m_treeView->setStyleSheet( 
         "QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
         "QTreeView::item { height: 28px; color: #EEEEEE; padding-left: 0px; }" 
