@@ -955,6 +955,8 @@ void MainWindow::setupSplitters() {
 
     // 2026-07-xx 按照 Plan-99：动态探测物理磁盘并创建按钮
 #ifdef Q_OS_WIN
+    QStringList defaultDrives = AppConfig::instance().getValue("Drives/DefaultDrives").toStringList();
+
     const auto drives = QDir::drives();
     for (const QFileInfo& d : drives) {
         QString path = d.absolutePath();
@@ -965,7 +967,17 @@ void MainWindow::setupSplitters() {
         if (GetVolumeInformationW(reinterpret_cast<LPCWSTR>(wPath.c_str()), nullptr, 0, nullptr, nullptr, nullptr, fsName, MAX_PATH)) {
             if (wcscmp(fsName, L"NTFS") == 0) {
                 QString letter = path.left(2).toUpper(); // "C:"
-                DriveButton* btn = new DriveButton(letter, m_driveBarWidget);
+
+                // 2026-07-xx 按照用户要求：为默认盘符添加 ★ 前缀 (考古发现)
+                QString displayName = letter;
+                if (defaultDrives.contains(letter)) {
+                    displayName = "★ " + letter;
+                }
+
+                DriveButton* btn = new DriveButton(displayName, m_driveBarWidget);
+                if (defaultDrives.contains(letter)) {
+                    btn->setProperty("isDefault", true);
+                }
                 
                 connect(btn, &QPushButton::toggled, this, [this, letter](bool checked) {
                     onDriveButtonClicked(letter, checked);
@@ -1289,6 +1301,7 @@ void MainWindow::setupCustomTitleBarButtons() {
         }
     });
     connect(&AutoImportManager::instance(), &AutoImportManager::allTasksCompleted, this, [this]() {
+        // 2026-07-xx 按照用户要求：所有任务完成后，优先级归零，盘符恢复默认排列顺序
         m_priorityDrives.clear();
         reorderDriveButtons();
     });
@@ -1649,10 +1662,14 @@ void MainWindow::showDriveContextMenu(const QString& letter, const QPoint& globa
     UiHelper::applyMenuStyle(&menu);
 
     QString managedPath = letter + "\\ArcMeta.FERREX";
-    bool exists = QDir(managedPath).exists();
+    QFileInfo info(managedPath);
+    bool exists = info.exists() && info.isDir();
 
     if (!exists) {
         menu.addAction("创建托管文件夹", [this, managedPath]() {
+            // 物理红线：严禁重复创建，检查是否因并发操作已存在
+            if (QFileInfo(managedPath).exists()) return;
+
             if (QDir().mkpath(managedPath)) {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "ArcMeta.FERREX 创建成功", 1500, QColor("#2ecc71"));
             } else {
@@ -1660,8 +1677,8 @@ void MainWindow::showDriveContextMenu(const QString& letter, const QPoint& globa
             }
         });
     } else {
-        menu.addAction("打开托管文件夹", [managedPath]() {
-            QDesktopServices::openUrl(QUrl::fromLocalFile(managedPath));
+        menu.addAction("打开托管文件夹", [this, managedPath]() {
+            unifiedNavigateTo(managedPath);
         });
     }
 
@@ -1669,10 +1686,12 @@ void MainWindow::showDriveContextMenu(const QString& letter, const QPoint& globa
     
     QAction* actPriority = menu.addAction("优先任务");
     connect(actPriority, &QAction::triggered, this, [this, letter]() {
-        if (!m_priorityDrives.contains(letter)) {
-            m_priorityDrives.prepend(letter);
-            reorderDriveButtons();
-        }
+        // 1. 立即插队到最左侧 (物理重排)
+        m_priorityDrives.removeAll(letter);
+        m_priorityDrives.prepend(letter);
+        reorderDriveButtons();
+
+        // 2. 调度优先级
         AutoImportManager::instance().setPriorityDrive(letter);
     });
 
