@@ -40,7 +40,9 @@ void DropListView::dropEvent(QDropEvent* event) {
                 paths << QDir::toNativeSeparators(url.toLocalFile());
             }
         }
-        QModelIndex idx = indexAt(event->position().toPoint());
+        // 物理修复：映射坐标至视口
+        QPoint viewportPos = viewport()->mapFrom(this, event->position().toPoint());
+        QModelIndex idx = indexAt(viewportPos);
         if (!paths.isEmpty()) {
             emit pathsDropped(paths, idx);
         }
