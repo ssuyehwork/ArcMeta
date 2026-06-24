@@ -1653,8 +1653,17 @@ void MainWindow::toggleDriveBar() {
 }
 
 void MainWindow::onDriveButtonClicked(const QString& letter, bool checked) {
-    // TODO: 物理磁盘数据库挂载、MFT 掩码更新及实时扫描启动逻辑待后续实现
-    qDebug() << "[TODO] 盘符被点击:" << letter << " 选中状态:" << checked;
+    qDebug() << "[Drive] 盘符被点击:" << letter << " 选中状态:" << checked;
+    
+    if (checked) {
+        // 2026-07-xx 按照 Plan-98：点击盘符按钮时，立即启动该磁盘的 MFT 扫描与 USN 监控
+        // 这会触发 MftReader::entryAdded 信号，进而由 AutoImportManager 捕获 ArcMeta.FERREX 变动
+        (void)QtConcurrent::run([letter]() {
+            MftReader::instance().buildIndex({letter});
+        });
+    } else {
+        // 卸载逻辑：暂时保持索引，仅通过掩码隔离。未来可根据内存压力执行卸载。
+    }
 }
 
 void MainWindow::showDriveContextMenu(const QString& letter, const QPoint& globalPos) {

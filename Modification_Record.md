@@ -299,8 +299,9 @@
     - **任务调度**: 引入 TaskScheduler 逻辑，确保多盘符并行变动时的 IO 串行化与优先级保障。
     - **交互反馈**: 盘符按钮实时动画展示入库进度，支持右键“一键置顶”任务优先级。
     - **路径过滤**: 修正 AutoImportManager 逻辑，仅对 ArcMeta.FERREX 内部子项执行自动入库，排除了文件夹自身的干扰。
-    - **拖拽修复**: 补全了 ContentPanel 中各视图组件的拖拽信号连接，将视图组件的 DragDropMode 提升为 DragDrop 以启用接收功能。修复了拖拽坐标映射偏差（映射至 viewport），恢复了文件/文件夹移动至目标文件夹的功能。修正了 connect 调用中的类型转换错误并补充了缺失的头文件包含。
-    - **自动化**: 归一化识别 ArcMeta.FERREX 目录，实现免配置的实时镜像同步。修正了 AutoImportManager 的串行调度信号连接，确保任务流程闭环。
+    - **拖拽修复**: 补全了 ContentPanel 中各视图组件的拖拽信号连接，将视图组件的 DragDropMode 提升为 DragDrop 以启用接收功能。修复了拖拽坐标映射偏差（映射至 viewport），恢复了文件/文件夹移动至目标文件夹的功能。为模型项补充了 ItemIsDropEnabled 标志以解锁目标判定。修正了 connect 调用中的类型转换错误并补充了缺失的头文件包含。
+    - **自动化**: 归一化识别 ArcMeta.FERREX 目录，实现免配置的实时镜像同步。修正了 AutoImportManager 的串行调度信号连接与监听信号范围（增加 entryUpdated 捕获），确保任务流程闭环且能感知路径变动。
+    - **监听修复**: 修正了 AutoImportManager 监听未启动的问题。在 CoreController 中补全了 startListening 调用，并实现了 MainWindow 盘符按钮点击时自动激活磁盘 MFT 扫描与 USN 监控。
 
 [2026-07-21 补丁]
 - **修改文件**: src/ui/MainWindow.cpp
