@@ -1,6 +1,8 @@
 #pragma once
 
 #include "JustifiedView.h"
+#include <QStringList>
+#include <QModelIndex>
 
 namespace ArcMeta {
 

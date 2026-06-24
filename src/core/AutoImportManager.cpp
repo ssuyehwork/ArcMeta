@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QMetaObject>
+#include <QTimer>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -26,7 +27,10 @@ AutoImportManager::AutoImportManager(QObject* parent) : QObject(parent) {
     m_debounceTimer->setSingleShot(true);
     connect(m_debounceTimer, &QTimer::timeout, this, &AutoImportManager::processImportQueue);
 
-    connect(&m_taskWatcher, &QFutureWatcher<void>::finished, this, &AutoImportManager::scheduleNextTask);
+    // 2026-07-xx 按照 Plan-97：连接任务完成信号以驱动串行调度
+    connect(&m_taskWatcher, &QFutureWatcherBase::finished, this, [this]() {
+        scheduleNextTask();
+    });
 }
 
 AutoImportManager::~AutoImportManager() {

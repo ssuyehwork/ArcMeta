@@ -1423,18 +1423,20 @@ void ContentPanel::initListView() {
     m_treeView->viewport()->installEventFilter(this); 
 
     // 2026-07-xx 按照用户要求：修复拖拽信号连接 (pathsDropped)
-    connect(m_treeView, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& target) {
-        if (m_currentPath.isEmpty() || m_currentPath == "computer://") return;
+    if (auto* dropTreeView = qobject_cast<DropTreeView*>(m_treeView)) {
+        connect(dropTreeView, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& target) {
+            if (m_currentPath.isEmpty() || m_currentPath == "computer://") return;
 
-        QString destDir = m_currentPath;
-        if (target.isValid() && target.data(TypeRole).toString() == "folder") {
-            destDir = target.data(PathRole).toString();
-        }
+            QString destDir = m_currentPath;
+            if (target.isValid() && target.data(TypeRole).toString() == "folder") {
+                destDir = target.data(PathRole).toString();
+            }
 
-        if (ShellHelper::copyOrMoveItems(paths, destDir, true)) {
-            loadDirectory(m_currentPath, m_isRecursive);
-        }
-    });
+            if (ShellHelper::copyOrMoveItems(paths, destDir, true)) {
+                loadDirectory(m_currentPath, m_isRecursive);
+            }
+        });
+    }
 
     m_treeView->setStyleSheet( 
         "QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 

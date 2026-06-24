@@ -2,6 +2,8 @@
 #define DROPLISTVIEW_H
 
 #include <QListView>
+#include <QStringList>
+#include <QModelIndex>
 
 namespace ArcMeta {
 
