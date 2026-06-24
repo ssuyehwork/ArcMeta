@@ -317,13 +317,57 @@ void DatabaseManager::shutdown() {
 
 sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QString& driveLetter) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    
+    QString cleanLetter = "";
+    if (!driveLetter.isEmpty()) {
+        cleanLetter = driveLetter.at(0).toUpper();
+    }
+
+    // 2026-07-xx 按照用户要求：若数据库已加载但盘符发生变化，触发“关闭-重命名-重新打开”
+    if (m_driveDbs.find(volumeSerial) != m_driveDbs.end()) {
+        if (!cleanLetter.isEmpty()) {
+            QString currentDiskPath = QString::fromStdWString(m_driveDbs[volumeSerial].diskPath);
+            QString expectedFileName = QString("Arcmeta_%1_%2.db").arg(QString::fromStdWString(volumeSerial).toUpper()).arg(cleanLetter);
+            if (!currentDiskPath.endsWith(expectedFileName)) {
+                qDebug() << "[DB] 检测到盘符漂移，执行动态迁移:" << currentDiskPath << " -> " << expectedFileName;
+                
+                DbConnection& conn = m_driveDbs[volumeSerial];
+                saveDb(conn); // 先持久化
+                
+                // 关闭句柄以解除占用
+                if (conn.memDb) sqlite3_close_v2(conn.memDb);
+                if (conn.diskDb) sqlite3_close_v2(conn.diskDb);
+                conn.memDb = nullptr;
+                conn.diskDb = nullptr;
+
+                QString metaDir = getAppDir() + "/.arcmeta";
+                QString targetPath = metaDir + "/" + expectedFileName;
+                
+                // 如果目标已存在且不是自己，先将其移走（按用户规则重命名为无效）
+                if (QFile::exists(targetPath) && targetPath != currentDiskPath) {
+                    QString invalidBase = QString("%1/Arcmeta_%2_无效").arg(metaDir).arg(QString::fromStdWString(volumeSerial).toUpper());
+                    QString invalidPath = invalidBase + ".db";
+                    int counter = 1;
+                    while (QFile::exists(invalidPath)) {
+                        invalidPath = QString("%1_%2.db").arg(invalidBase).arg(counter++);
+                    }
+                    QFile::rename(targetPath, invalidPath);
+                }
+
+                if (QFile::rename(currentDiskPath, targetPath)) {
+                    conn.diskPath = targetPath.toStdWString();
+                }
+                
+                // 重新加载到内存
+                loadDb(conn.diskPath, conn);
+            }
+        }
+        return m_driveDbs[volumeSerial].memDb;
+    }
+
     if (m_driveDbs.find(volumeSerial) == m_driveDbs.end()) {
         QString metaDir = getAppDir() + "/.arcmeta";
         QString serialStr = QString::fromStdWString(volumeSerial).toUpper();
-        QString cleanLetter = "";
-        if (!driveLetter.isEmpty()) {
-            cleanLetter = driveLetter.at(0).toUpper();
-        }
 
         QString targetFileName = QString("Arcmeta_%1%2.db").arg(serialStr).arg(cleanLetter.isEmpty() ? "" : "_" + cleanLetter);
         QString targetPath = metaDir + "/" + targetFileName;
