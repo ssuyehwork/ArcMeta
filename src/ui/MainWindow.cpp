@@ -955,6 +955,8 @@ void MainWindow::setupSplitters() {
 
     // 2026-07-xx 按照 Plan-99：动态探测物理磁盘并创建按钮
 #ifdef Q_OS_WIN
+    QStringList defaultDrives = AppConfig::instance().getValue("Drives/DefaultDrives").toStringList();
+
     const auto drives = QDir::drives();
     for (const QFileInfo& d : drives) {
         QString path = d.absolutePath();
@@ -965,7 +967,17 @@ void MainWindow::setupSplitters() {
         if (GetVolumeInformationW(reinterpret_cast<LPCWSTR>(wPath.c_str()), nullptr, 0, nullptr, nullptr, nullptr, fsName, MAX_PATH)) {
             if (wcscmp(fsName, L"NTFS") == 0) {
                 QString letter = path.left(2).toUpper(); // "C:"
-                DriveButton* btn = new DriveButton(letter, m_driveBarWidget);
+
+                // 2026-07-xx 按照用户要求：为默认盘符添加 ★ 前缀 (考古发现)
+                QString displayName = letter;
+                if (defaultDrives.contains(letter)) {
+                    displayName = "★ " + letter;
+                }
+
+                DriveButton* btn = new DriveButton(displayName, m_driveBarWidget);
+                if (defaultDrives.contains(letter)) {
+                    btn->setProperty("isDefault", true);
+                }
                 
                 connect(btn, &QPushButton::toggled, this, [this, letter](bool checked) {
                     onDriveButtonClicked(letter, checked);

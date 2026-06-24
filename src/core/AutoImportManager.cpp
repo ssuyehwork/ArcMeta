@@ -77,7 +77,8 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
 
     if (checkAndGetManagedPath(fullPath, managedFolder)) {
         // 2026-07-xx 按照 Plan-97：联动执行出库/失效逻辑
-        MetadataManager::instance().deletePermanently(fullPath);
+        // 按照用户要求：不再使用误删除 API，改为执行出库或设为失效
+        MetadataManager::instance().removeMetadataSync(fullPath);
     }
 }
 

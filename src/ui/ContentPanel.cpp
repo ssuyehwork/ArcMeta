@@ -1372,18 +1372,7 @@ void ContentPanel::initGridView() {
 
     // 2026-07-xx 按照用户要求：修复拖拽信号连接 (pathsDropped)
     if (auto* dropView = qobject_cast<DropJustifiedView*>(m_gridView)) {
-        connect(dropView, &DropJustifiedView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& target) {
-            if (m_currentPath.isEmpty() || m_currentPath == "computer://") return;
-
-            QString destDir = m_currentPath;
-            if (target.isValid() && target.data(TypeRole).toString() == "folder") {
-                destDir = target.data(PathRole).toString();
-            }
-
-            if (ShellHelper::copyOrMoveItems(paths, destDir, true)) {
-                loadDirectory(m_currentPath, m_isRecursive);
-            }
-        });
+        connect(dropView, &DropJustifiedView::pathsDropped, this, &ContentPanel::onPathsDropped);
     }
 
     m_gridView->setStyleSheet( 
@@ -1424,18 +1413,7 @@ void ContentPanel::initListView() {
 
     // 2026-07-xx 按照用户要求：修复拖拽信号连接 (pathsDropped)
     if (auto* dropTreeView = qobject_cast<DropTreeView*>(m_treeView)) {
-        connect(dropTreeView, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& target) {
-            if (m_currentPath.isEmpty() || m_currentPath == "computer://") return;
-
-            QString destDir = m_currentPath;
-            if (target.isValid() && target.data(TypeRole).toString() == "folder") {
-                destDir = target.data(PathRole).toString();
-            }
-
-            if (ShellHelper::copyOrMoveItems(paths, destDir, true)) {
-                loadDirectory(m_currentPath, m_isRecursive);
-            }
-        });
+        connect(dropTreeView, &DropTreeView::pathsDropped, this, &ContentPanel::onPathsDropped);
     }
 
     m_treeView->setStyleSheet( 
@@ -2258,6 +2236,34 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
     } 
 } 
  
+void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& targetIndex) {
+    if (m_currentPath.isEmpty() || m_currentPath == "computer://") return;
+
+    // 逻辑：
+    // 1. 若 targetIndex 有效且指向文件夹：将 paths 移动至该文件夹下。
+    // 2. 若 targetIndex 无效或指向空白：将 paths 移动至当前 m_currentPath。
+    QString destDir = m_currentPath;
+    if (targetIndex.isValid()) {
+        QString type = targetIndex.data(TypeRole).toString();
+        if (type == "folder") {
+            destDir = targetIndex.data(PathRole).toString();
+        }
+    }
+
+    // 物理同步：调用 ShellHelper 或 MoveCommand 执行物理移动
+    // 按照用户要求对齐“旧版本-7”，优先使用 MoveAction (即 isMove=true)
+    if (ShellHelper::copyOrMoveItems(paths, destDir, true)) {
+        // 撤销支持
+        UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
+
+        // 元数据物理同步由 MoveCommand 或系统 USN 自动处理，此处刷新 UI
+        loadDirectory(m_currentPath, m_isRecursive);
+
+        ToolTipOverlay::instance()->showText(QCursor::pos(),
+            QString("成功移动 %1 个项目到 %2").arg(paths.size()).arg(QFileInfo(destDir).fileName()), 1500, QColor("#2ecc71"));
+    }
+}
+
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     m_isLoading = true;
     int reqId = ++m_loadRequestId;
