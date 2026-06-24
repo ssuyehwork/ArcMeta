@@ -25,8 +25,8 @@ public:
     void setPriorityDrive(const QString& letter);
 
 signals:
-    void taskStarted(QString letter);
-    void taskFinished(QString letter);
+    void taskStarted(const QString& letter);
+    void taskFinished(const QString& letter);
     void allTasksCompleted();
 
 private slots:
@@ -60,7 +60,7 @@ private:
     std::deque<DriveTask> m_taskQueue; // 待处理的盘符任务列表
     DriveTask m_activeTask;            // 当前正在处理的任务
     QFutureWatcher<void> m_taskWatcher;
-    std::mutex m_schedulerMutex;
+    std::recursive_mutex m_schedulerMutex;
 };
 
 } // namespace ArcMeta

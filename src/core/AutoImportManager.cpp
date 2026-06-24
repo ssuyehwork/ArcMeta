@@ -137,12 +137,12 @@ void AutoImportManager::processImportQueue() {
     if (pathsToProcess.empty()) return;
 
     // 按照盘符归类任务
-    std::lock_guard<std::mutex> lock(m_schedulerMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_schedulerMutex);
     for (const auto& p : pathsToProcess) {
-        // 提取盘符
+        // 提取盘符 (统一为 "C:" 格式以对齐 UI Map)
         size_t colonPos = p.find(L":");
         if (colonPos == std::string::npos || colonPos == 0) continue;
-        QString letter = QString::fromWCharArray(&p[colonPos - 1], 1).toUpper();
+        QString letter = QString::fromWCharArray(&p[colonPos - 1], 2).toUpper();
 
         auto it = std::find_if(m_taskQueue.begin(), m_taskQueue.end(), [&](const DriveTask& t) { return t.letter == letter; });
         if (it != m_taskQueue.end()) {
@@ -158,7 +158,7 @@ void AutoImportManager::processImportQueue() {
 }
 
 void AutoImportManager::setPriorityDrive(const QString& letter) {
-    std::lock_guard<std::mutex> lock(m_schedulerMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_schedulerMutex);
     auto it = std::find_if(m_taskQueue.begin(), m_taskQueue.end(), [&](const DriveTask& t) { return t.letter == letter; });
     if (it != m_taskQueue.end()) {
         DriveTask task = *it;
@@ -176,7 +176,7 @@ void AutoImportManager::setPriorityDrive(const QString& letter) {
 }
 
 void AutoImportManager::scheduleNextTask() {
-    std::lock_guard<std::mutex> lock(m_schedulerMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_schedulerMutex);
 
     if (!m_activeTask.letter.isEmpty()) {
         emit taskFinished(m_activeTask.letter);

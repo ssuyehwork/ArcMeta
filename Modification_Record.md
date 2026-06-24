@@ -307,3 +307,15 @@
 - **修改文件**: CMakeLists.txt
 - **修改原因**: 修复由于未在 SOURCES 中显式列出 AutoImportManager.cpp/h 导致的链接错误。
     - **布局修正**: 撤销了将 m_btnToggleDrives 错误移至左侧的改动，将其归位至标题栏右侧按钮组。
+
+[2026-07-21 补丁3]
+- **修改文件**: src/core/AutoImportManager.h
+- **修改原因**: 修复点击“优先任务”时触发的死锁闪退（Recursive Mutex 缺失）。
+
+[2026-07-21 补丁4]
+- **修改文件**: src/core/AutoImportManager.cpp
+- **修改原因**: 修复由于 std::lock_guard 模板参数与递归锁类型不匹配导致的编译错误。
+
+[2026-07-21 补丁5]
+- **修改文件**: src/core/AutoImportManager.cpp
+- **修改原因**: 统一盘符格式为 "C:" 以修正 UI 映射失效；修复 std::lock_guard 导致的多重加锁闪退问题。

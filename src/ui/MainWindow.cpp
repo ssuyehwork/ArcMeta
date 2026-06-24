@@ -972,8 +972,8 @@ void MainWindow::setupSplitters() {
                 });
 
                 btn->setContextMenuPolicy(Qt::CustomContextMenu);
-                connect(btn, &QWidget::customContextMenuRequested, this, [this, letter](const QPoint& pos) {
-                    showDriveContextMenu(letter, static_cast<QWidget*>(sender())->mapToGlobal(pos));
+                connect(btn, &QWidget::customContextMenuRequested, this, [this, letter, btn](const QPoint& pos) {
+                    showDriveContextMenu(letter, btn->mapToGlobal(pos));
                 });
 
                 m_driveBarLayout->insertWidget(m_driveBarLayout->count() - 1, btn);
@@ -1278,12 +1278,12 @@ void MainWindow::setupCustomTitleBarButtons() {
     connect(m_btnPinTop, &QPushButton::toggled, this, &MainWindow::onPinToggled);
 
     // 2026-07-xx 按照 Plan-97：连接 AutoImportManager 任务信号
-    connect(&AutoImportManager::instance(), &AutoImportManager::taskStarted, this, [this](QString letter) {
+    connect(&AutoImportManager::instance(), &AutoImportManager::taskStarted, this, [this](const QString& letter) {
         if (m_driveButtonMap.contains(letter)) {
             m_driveButtonMap[letter]->setLoading(true);
         }
     });
-    connect(&AutoImportManager::instance(), &AutoImportManager::taskFinished, this, [this](QString letter) {
+    connect(&AutoImportManager::instance(), &AutoImportManager::taskFinished, this, [this](const QString& letter) {
         if (m_driveButtonMap.contains(letter)) {
             m_driveButtonMap[letter]->setLoading(false);
         }
