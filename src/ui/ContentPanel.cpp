@@ -1341,7 +1341,7 @@ void ContentPanel::initGridView() {
     m_gridView->setContextMenuPolicy(Qt::CustomContextMenu); 
  
     m_gridView->setDragEnabled(true); 
-    m_gridView->setDragDropMode(QAbstractItemView::DragOnly); 
+    m_gridView->setDragDropMode(QAbstractItemView::DragDrop); 
  
     // 2026-06-xx 物理纠偏：移除 SelectedClicked，防止单击项目时意外触发重命名，确保交互稳健
     m_gridView->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed); 
@@ -1369,7 +1369,12 @@ void ContentPanel::initGridView() {
     m_gridView->viewport()->installEventFilter(this); 
  
     connect(m_gridView, &QAbstractItemView::doubleClicked, this, &ContentPanel::onDoubleClicked); 
- 
+    
+    // 2026-07-xx 按照用户要求：修复拖拽信号连接 (pathsDropped)
+    if (auto* dropView = qobject_cast<DropJustifiedView*>(m_gridView)) {
+        connect(dropView, &DropJustifiedView::pathsDropped, this, &ContentPanel::onPathsDropped);
+    }
+
     m_gridView->setStyleSheet( 
         "QAbstractItemView { background-color: transparent; border: none; outline: none; }" 
         "QAbstractItemView::item { background: transparent; }" 
@@ -1396,7 +1401,7 @@ void ContentPanel::initListView() {
     m_treeView->setPalette(tp);
      
     m_treeView->setDragEnabled(true); 
-    m_treeView->setDragDropMode(QAbstractItemView::DragOnly); 
+    m_treeView->setDragDropMode(QAbstractItemView::DragDrop); 
  
     m_treeView->setExpandsOnDoubleClick(false); 
     m_treeView->setRootIsDecorated(false); 
@@ -1405,7 +1410,12 @@ void ContentPanel::initListView() {
  
     m_treeView->setModel(m_proxyModel); 
     m_treeView->viewport()->installEventFilter(this); 
- 
+    
+    // 2026-07-xx 按照用户要求：修复拖拽信号连接 (pathsDropped)
+    if (auto* dropTreeView = qobject_cast<DropTreeView*>(m_treeView)) {
+        connect(dropTreeView, &DropTreeView::pathsDropped, this, &ContentPanel::onPathsDropped);
+    }
+
     m_treeView->setStyleSheet( 
         "QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
         "QTreeView::item { height: 28px; color: #EEEEEE; padding-left: 0px; }" 
@@ -2226,6 +2236,60 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
     } 
 } 
  
+void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& targetIndex) {
+    if (m_currentPath.isEmpty() || m_currentPath == "computer://") return;
+
+    // 逻辑：
+    // 1. 若 targetIndex 有效且指向文件夹：将 paths 移动至该文件夹下。
+    // 2. 若 targetIndex 无效或指向空白：将 paths 移动至当前 m_currentPath。
+    QString destDir = m_currentPath;
+    if (targetIndex.isValid()) {
+        QString type = targetIndex.data(TypeRole).toString();
+        if (type == "folder") {
+            destDir = targetIndex.data(PathRole).toString();
+        } else if (type == "category") {
+            // 2026-07-xx 按照 Plan-88：如果是拖拽到分类项上，执行归类逻辑而非移动物理文件
+            int catId = targetIndex.data(CategoryIdRole).toInt();
+            if (catId > 0) {
+                // 执行归类逻辑 (复用 ActionCategorize 的核心部分)
+                for (const QString& path : paths) {
+                    std::string fid = MetadataManager::instance().getFileIdSync(path.toStdWString());
+                    if (!fid.empty()) {
+                        if (CategoryRepo::addItemToCategory(catId, fid, path.toStdWString())) {
+                            UndoManager::instance().pushCommand(std::make_unique<CategorizeCommand>(path, fid, catId, true));
+                        }
+                    }
+                }
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "已成功归类至选中分类", 1500, QColor("#2ecc71"));
+                return;
+            }
+        }
+    }
+
+    // 2026-07-xx 物理加固：防止同目录拖拽触发冗余操作
+    bool allInSameDir = true;
+    for (const QString& p : paths) {
+        if (QFileInfo(p).absolutePath() != QDir::toNativeSeparators(destDir)) {
+            allInSameDir = false;
+            break;
+        }
+    }
+    if (allInSameDir) return;
+
+    // 物理同步：调用 ShellHelper 或 MoveCommand 执行物理移动
+    // 按照用户要求对齐“旧版本-7”，优先使用 MoveAction (即 isMove=true)
+    if (ShellHelper::copyOrMoveItems(paths, destDir, true)) {
+        // 撤销支持
+        UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
+        
+        // 元数据物理同步由 MoveCommand 或系统 USN 自动处理，此处刷新 UI
+        loadDirectory(m_currentPath, m_isRecursive);
+        
+        ToolTipOverlay::instance()->showText(QCursor::pos(), 
+            QString("成功移动 %1 个项目到 %2").arg(paths.size()).arg(QFileInfo(destDir).fileName()), 1500, QColor("#2ecc71"));
+    }
+}
+
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     m_isLoading = true;
     int reqId = ++m_loadRequestId;

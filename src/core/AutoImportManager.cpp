@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QMetaObject>
+#include <QTimer>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -26,7 +27,10 @@ AutoImportManager::AutoImportManager(QObject* parent) : QObject(parent) {
     m_debounceTimer->setSingleShot(true);
     connect(m_debounceTimer, &QTimer::timeout, this, &AutoImportManager::processImportQueue);
 
-    connect(&m_taskWatcher, &QFutureWatcher<void>::finished, this, &AutoImportManager::scheduleNextTask);
+    // 2026-07-xx 按照 Plan-97：连接任务完成信号以驱动串行调度
+    connect(&m_taskWatcher, &QFutureWatcherBase::finished, this, [this]() {
+        scheduleNextTask();
+    });
 }
 
 AutoImportManager::~AutoImportManager() {
@@ -73,21 +77,24 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
 
     if (checkAndGetManagedPath(fullPath, managedFolder)) {
         // 2026-07-xx 按照 Plan-97：联动执行出库/失效逻辑
-        MetadataManager::instance().deletePermanently(fullPath);
+        // 按照用户要求：不再使用误删除 API，改为执行出库或设为失效
+        MetadataManager::instance().removeMetadataSync(fullPath);
     }
 }
 
 bool AutoImportManager::checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder) {
     // 逻辑一：匹配 ArcMeta.FERREX (Plan-97)
-    // 判定路径是否包含 \ArcMeta.FERREX 且位于根目录
+    // 判定路径是否位于 \ArcMeta.FERREX 内部
     // 适配 C:\ArcMeta.FERREX (pos=2) 或 \\?\C:\ArcMeta.FERREX (pos=6)
+    // 注意：如果是 ArcMeta.FERREX 本身（pos + 15 == path.length()），则不作为托管内容处理，
+    // 只有其内部子项才触发自动入库。
     size_t pos = path.find(L"\\ArcMeta.FERREX");
     if (pos != std::string::npos) {
         bool isRoot = false;
         if (pos == 2 && path[1] == L':') isRoot = true; // C:\...
         else if (pos == 6 && path.find(L"\\\\?\\") == 0) isRoot = true; // \\?\C:\...
         
-        if (isRoot) {
+        if (isRoot && path.length() > pos + 15) {
             outManagedFolder = path.substr(0, pos + 15);
             return true;
         }
@@ -178,32 +185,38 @@ void AutoImportManager::setPriorityDrive(const QString& letter) {
 void AutoImportManager::scheduleNextTask() {
     std::lock_guard<std::recursive_mutex> lock(m_schedulerMutex);
     
+    // 1. 如果当前有正在执行的任务，说明是刚结束，触发结束信号并清理
     if (!m_activeTask.letter.isEmpty()) {
-        emit taskFinished(m_activeTask.letter);
+        QString finishedLetter = m_activeTask.letter;
         m_activeTask = DriveTask();
+        emit taskFinished(finishedLetter);
     }
 
+    // 2. 如果队列也空了，触发全部完成信号
     if (m_taskQueue.empty()) {
         emit allTasksCompleted();
         return;
     }
 
+    // 3. 取出下一个任务
     m_activeTask = m_taskQueue.front();
     m_taskQueue.pop_front();
 
+    // 4. 触发开始信号（驱动 UI 转圈）
     emit taskStarted(m_activeTask.letter);
 
-    // 2026-07-xx 按照审计意见：精准导入变更路径，杜绝全量重扫
+    // 5. 执行任务
     QStringList qPaths;
     for (const auto& wp : m_activeTask.paths) {
         qPaths << QString::fromStdWString(wp);
     }
 
     if (!qPaths.isEmpty()) {
+        // 串行执行导入任务
         m_taskWatcher.setFuture(ImportHelper::importPaths(qPaths, 0, nullptr));
     } else {
-        // 如果是空路径任务（由优先任务指令产生），直接跳过
-        QMetaObject::invokeMethod(this, "scheduleNextTask", Qt::QueuedConnection);
+        // 如果是空路径任务（仅为了置顶展示），延迟触发下一步以确保信号已被 UI 处理
+        QTimer::singleShot(500, this, &AutoImportManager::scheduleNextTask);
     }
 }
 
