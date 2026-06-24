@@ -130,6 +130,8 @@ set(SOURCES
     src/ui/AddressHistoryPanel.h
     src/ui/TagManagerView.cpp
     src/ui/TagManagerView.h
+    src/ui/DriveButton.cpp
+    src/ui/DriveButton.h
     src/core/ActionCommand.h
     src/core/UndoManager.h
     src/core/BasicCommands.h

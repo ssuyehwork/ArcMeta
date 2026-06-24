@@ -2,6 +2,7 @@
 
 #include <QStringList>
 #include <QWidget>
+#include <QFuture>
 
 namespace ArcMeta {
 
@@ -15,9 +16,10 @@ public:
      * @brief 执行统一导入流程
      * @param paths 待导入的物理路径列表
      * @param targetCategoryId 目标父分类 ID (0 表示“我的分类”根目录)
-     * @param parent UI 父窗口，用于显示进度框
+     * @param parent UI 父窗口，用于显示进度框。若为 nullptr 则进入静默模式 (Plan-97)
+     * @return 任务 Future 对象
      */
-    static void importPaths(const QStringList& paths, int targetCategoryId = 0, QWidget* parent = nullptr);
+    static QFuture<void> importPaths(const QStringList& paths, int targetCategoryId = 0, QWidget* parent = nullptr);
 };
 
 } // namespace ArcMeta
