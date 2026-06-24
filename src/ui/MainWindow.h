@@ -137,6 +137,11 @@ private:
     SearchHistoryPanel* m_searchHistoryPanel = nullptr;
     QStringList  m_searchHistory;             // 最近 10 条关键词
     
+    // 盘符管理栏 (Plan-98)
+    QPushButton* m_btnToggleDrives = nullptr;
+    QWidget*     m_driveBarWidget  = nullptr;
+    QHBoxLayout* m_driveBarLayout  = nullptr;
+
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
     QPushButton* m_btnSync   = nullptr;
     QPushButton* m_btnLayout = nullptr;
@@ -184,6 +189,12 @@ public slots:
      * @brief 2026-07-xx 按照 Plan-63：为已有菜单填充面板显隐 Action
      */
     void populatePanelMenu(QMenu* menu);
+
+private slots:
+    /**
+     * @brief 2026-07-xx 按照 Plan-98：切换盘符管理栏显隐
+     */
+    void toggleDriveBar();
 
 private:
     void loadPanelVisibility();

@@ -933,6 +933,23 @@ void MainWindow::setupSplitters() {
     m_titleBarWidget->setObjectName("TitleBar");
     m_titleBarWidget->setFixedHeight(34);
     m_titleBarLayout = new QHBoxLayout(m_titleBarWidget);
+
+    // --- 1.1 盘符管理栏 (Plan-98, 位于标题栏下方) ---
+    m_driveBarWidget = new QWidget(centralC);
+    m_driveBarWidget->setObjectName("DriveBarContainer");
+    m_driveBarWidget->setFixedHeight(45);
+    m_driveBarWidget->setVisible(false); // 初始隐藏
+    m_driveBarWidget->setAttribute(Qt::WA_StyledBackground, true);
+    m_driveBarWidget->setStyleSheet(
+        "QWidget#DriveBarContainer {"
+        "  background-color: #252526;"
+        "  border-bottom: 1px solid #333333;"
+        "}"
+    );
+    m_driveBarLayout = new QHBoxLayout(m_driveBarWidget);
+    m_driveBarLayout->setContentsMargins(15, 0, 15, 0);
+    m_driveBarLayout->setSpacing(10);
+    // TODO: 盘符管理栏占位，后续在此填充物理驱动器按钮
     // 2026-xx-xx 按照用户要求：标题栏左侧与右侧均保持 5px 呼吸边距
     m_titleBarLayout->setContentsMargins(5, 0, kEdgeMargin, 0); 
     m_titleBarLayout->setSpacing(8);
@@ -1075,6 +1092,7 @@ void MainWindow::setupSplitters() {
     updateStatus();
 
     mainL->addWidget(m_titleBarWidget);
+    mainL->addWidget(m_driveBarWidget);
     mainL->addWidget(m_navBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
@@ -1108,6 +1126,12 @@ void MainWindow::setupCustomTitleBarButtons() {
         ).arg(hoverColor));
         return btn;
     };
+
+    m_btnToggleDrives = createTitleBtn("chevrons_up");
+    m_btnToggleDrives->setProperty("tooltipText", "展开/折叠盘符管理");
+    m_btnToggleDrives->installEventFilter(m_hoverFilter);
+    connect(m_btnToggleDrives, &QPushButton::clicked, this, &MainWindow::toggleDriveBar);
+    layout->addWidget(m_btnToggleDrives, 0, Qt::AlignVCenter);
 
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
@@ -1554,6 +1578,15 @@ void MainWindow::savePanelVisibility() {
     if (!m_filterPanel->isVisible())   hiddenPanels << "filter";
     
     AppConfig::instance().setValue("MainWindow/PanelVisibility", hiddenPanels);
+}
+
+void MainWindow::toggleDriveBar() {
+    bool isVisible = m_driveBarWidget->isVisible();
+    m_driveBarWidget->setVisible(!isVisible);
+
+    // 图标联动：当前可见则切换为向上图标（准备收起），反之向下
+    QString iconKey = (!isVisible) ? "chevrons_down" : "chevrons_up";
+    m_btnToggleDrives->setIcon(UiHelper::getIcon(iconKey, QColor("#FFFFFF"), 18));
 }
 
 } // namespace ArcMeta
