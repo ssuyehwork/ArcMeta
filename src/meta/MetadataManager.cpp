@@ -245,15 +245,26 @@ void MetadataManager::initFromScchMode() {
         QRegularExpression re("^Arcmeta_([0-9A-F]{8})(?:_([A-Z]))?\\.db$", QRegularExpression::CaseInsensitiveOption);
         std::set<std::wstring> loadedSerials;
 
+        // 构建当前在线磁盘的 序列号 -> 盘符 映射，用于初始化时的自适应重命名
+        QMap<std::wstring, QString> serialToLetter;
+        const auto drives = QDir::drives();
+        for (const QFileInfo& d : drives) {
+            std::wstring s = getVolumeSerialNumber(d.absolutePath().toStdWString());
+            if (s != L"UNKNOWN") {
+                serialToLetter[s] = d.absolutePath().at(0).toUpper();
+            }
+        }
+
         for (const QString& dbFile : dbFiles) {
             QRegularExpressionMatch match = re.match(dbFile);
             if (match.hasMatch()) {
-                QString volSerial = match.captured(1).toUpper();
-                std::wstring wSerial = volSerial.toStdWString();
+                QString volSerialStr = match.captured(1).toUpper();
+                std::wstring wSerial = volSerialStr.toStdWString();
 
                 if (loadedSerials.find(wSerial) == loadedSerials.end()) {
-                    // 调用 getMemoryDb 时不传盘符，让其加载现有的最匹配文件
-                    loadFromDb(DatabaseManager::instance().getMemoryDb(wSerial));
+                    // 启动阶段：若检测到该序列号的磁盘当前在线，则传入盘符触发自适应重命名
+                    QString currentLetter = serialToLetter.value(wSerial, "");
+                    loadFromDb(DatabaseManager::instance().getMemoryDb(wSerial, currentLetter));
                     loadedSerials.insert(wSerial);
                 }
             }
