@@ -232,28 +232,21 @@ void MetadataManager::initFromScchMode() {
     // 0. 加载全局库 (盘符置顶等全局元数据)
     loadFromDb(DatabaseManager::instance().getGlobalDb());
 
-    // 1. 扫描所有已加载的数据库
-    // 2026-06-xx 逻辑加固：由于驱动器序列号在不同机器上可能重复或变化，
-    // 我们必须确保启动时扫描 .arcmeta 目录下所有物理分库。
+    // 阶段一：物理感知加载
+    // 调用 DatabaseManager::instance().init()。此时所有当前在线的物理盘对应的数据库都会被加载且自动纠正名称后缀。
+    DatabaseManager::instance().init();
+
+    // 阶段二：文件兜底加载
+    // 遍历 .arcmeta 目录下的 Arcmeta_*.db 文件。
+    // 如果发现某些数据库文件（可能来自当前未挂载的硬盘）尚未被阶段一加载，则执行静默加载（不传盘符参数），确保离线数据的可见性。
     QString metaDir = QCoreApplication::applicationDirPath() + "/.arcmeta";
     QDir dir(metaDir);
     if (dir.exists()) {
         QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files | QDir::Hidden | QDir::System);
-        qDebug() << "[Metadata] 发现物理分库数量:" << dbFiles.size();
+        qDebug() << "[Metadata] 扫描物理目录下的分库数量:" << dbFiles.size();
 
         // 使用正则解析：^Arcmeta_([0-9A-F]{8})(?:_([A-Z]))?\.db$
         QRegularExpression re("^Arcmeta_([0-9A-F]{8})(?:_([A-Z]))?\\.db$", QRegularExpression::CaseInsensitiveOption);
-        std::set<std::wstring> loadedSerials;
-
-        // 构建当前在线磁盘的 序列号 -> 盘符 映射，用于初始化时的自适应重命名
-        QMap<std::wstring, QString> serialToLetter;
-        const auto drives = QDir::drives();
-        for (const QFileInfo& d : drives) {
-            std::wstring s = getVolumeSerialNumber(d.absolutePath().toStdWString());
-            if (s != L"UNKNOWN") {
-                serialToLetter[s] = d.absolutePath().at(0).toUpper();
-            }
-        }
 
         for (const QString& dbFile : dbFiles) {
             QRegularExpressionMatch match = re.match(dbFile);
@@ -261,12 +254,8 @@ void MetadataManager::initFromScchMode() {
                 QString volSerialStr = match.captured(1).toUpper();
                 std::wstring wSerial = volSerialStr.toStdWString();
 
-                if (loadedSerials.find(wSerial) == loadedSerials.end()) {
-                    // 启动阶段：若检测到该序列号的磁盘当前在线，则传入盘符触发自适应重命名
-                    QString currentLetter = serialToLetter.value(wSerial, "");
-                    loadFromDb(DatabaseManager::instance().getMemoryDb(wSerial, currentLetter));
-                    loadedSerials.insert(wSerial);
-                }
+                // 执行静默加载：DatabaseManager 内部会检查是否已加载，若未加载则进行离线加载
+                loadFromDb(DatabaseManager::instance().getMemoryDb(wSerial));
             }
         }
     }
