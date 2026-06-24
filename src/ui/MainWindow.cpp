@@ -999,24 +999,6 @@ void MainWindow::setupSplitters() {
     m_appNameLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-weight: bold;").arg(BrandOrange.name()));
     m_titleBarLayout->addWidget(m_appNameLabel);
 
-    // 2026-07-xx 按照 Plan-99：在 AppName 之后紧跟切换按钮
-    m_titleBarLayout->addSpacing(5);
-
-    m_btnToggleDrives = new QPushButton(m_titleBarWidget);
-    m_btnToggleDrives->setAttribute(Qt::WA_Hover);
-    m_btnToggleDrives->setFixedSize(24, 24);
-    m_btnToggleDrives->setIcon(UiHelper::getIcon("chevrons_up", QColor("#EEEEEE")));
-    m_btnToggleDrives->setIconSize(QSize(18, 18));
-    m_btnToggleDrives->setStyleSheet(
-        "QPushButton { background: transparent; border: none; border-radius: 4px; padding: 0; }"
-        "QPushButton:hover { background: #3E3E42; }"
-        "QPushButton:pressed { background: #4E4E52; }"
-    );
-    m_btnToggleDrives->setProperty("tooltipText", "展开/折叠盘符管理");
-    m_btnToggleDrives->installEventFilter(m_hoverFilter);
-    connect(m_btnToggleDrives, &QPushButton::clicked, this, &MainWindow::toggleDriveBar);
-    m_titleBarLayout->addWidget(m_btnToggleDrives);
-
     m_titleBarLayout->addStretch();
 
     // --- 2. 统一导航栏 (第二行) ---
@@ -1180,6 +1162,12 @@ void MainWindow::setupCustomTitleBarButtons() {
         return btn;
     };
 
+
+    m_btnToggleDrives = createTitleBtn("chevrons_up");
+    m_btnToggleDrives->setProperty("tooltipText", "展开/折叠盘符管理");
+    m_btnToggleDrives->installEventFilter(m_hoverFilter);
+    connect(m_btnToggleDrives, &QPushButton::clicked, this, &MainWindow::toggleDriveBar);
+    layout->addWidget(m_btnToggleDrives, 0, Qt::AlignVCenter);
 
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
