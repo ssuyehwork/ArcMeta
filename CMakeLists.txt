@@ -49,6 +49,8 @@ set(SOURCES
     src/core/CacheManager.cpp
     src/core/CacheManager.h
     src/core/IndexedEntry.h
+    src/core/AutoImportManager.cpp
+    src/core/AutoImportManager.h
     src/mft/UsnWatcher.cpp
     src/mft/UsnWatcher.h
     src/crypto/EncryptionManager.cpp
@@ -130,6 +132,8 @@ set(SOURCES
     src/ui/AddressHistoryPanel.h
     src/ui/TagManagerView.cpp
     src/ui/TagManagerView.h
+    src/ui/DriveButton.cpp
+    src/ui/DriveButton.h
     src/core/ActionCommand.h
     src/core/UndoManager.h
     src/core/BasicCommands.h

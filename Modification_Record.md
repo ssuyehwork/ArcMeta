@@ -284,3 +284,38 @@
     - **物理感知 UI**: 通过 Q_OS_WIN 包裹的 Win32 API 动态展示 NTFS 分区，支持可折叠的磁盘工具栏。
     - **性能与安全**: 分离 getMemoryDbInternal 预防死锁；在重命名前强制释放句柄防止文件锁定。
     - **按钮对齐**: 修复了 m_btnToggleDrives 的位置偏移，确保其位于标题栏右侧按钮组的最左侧，符合系统交互规范。
+
+[2026-07-21] (终版)
+- **任务描述**: 盘符右键菜单及托管文件夹自动化增强 (Plan-97)。
+- **修改文件**:
+    - **新增**: src/ui/DriveButton.h/.cpp (封装支持加载动画的盘符按钮)
+    - **修改**: src/ui/MainWindow.h/.cpp (实现右键菜单逻辑：创建/打开托管文件夹、优先任务及按钮重排)
+    - **修改**: src/core/AutoImportManager.h/.cpp (升级为任务调度中心，支持串行队列、优先级插队及出库联动)
+    - **修改**: src/util/ImportHelper.h/.cpp (增强支持静默入库模式与 Future 任务跟踪)
+- **修改原因**: 深度集成“托管文件夹”功能，实现基于 USN Journal 的全自动入库/出库，并提供直观的任务优先级调度交互。
+- **优化点**:
+    - **任务调度**: 引入 TaskScheduler 逻辑，确保多盘符并行变动时的 IO 串行化与优先级保障。
+    - **交互反馈**: 盘符按钮实时动画展示入库进度，支持右键“一键置顶”任务优先级。
+    - **自动化**: 归一化识别 ArcMeta.FERREX 目录，实现免配置的实时镜像同步。
+    - **性能优化**: 修正了 USN 监听逻辑，将全量重扫优化为基于变更路径的精准导入，大幅降低高频变动下的 IO 负载。
+
+[2026-07-21 补丁]
+- **修改文件**: src/ui/MainWindow.cpp
+- **修改原因**: 修复由于缺失 AutoImportManager.h 头文件导致的编译错误。
+
+[2026-07-21 补丁2]
+- **修改文件**: CMakeLists.txt
+- **修改原因**: 修复由于未在 SOURCES 中显式列出 AutoImportManager.cpp/h 导致的链接错误。
+    - **布局修正**: 撤销了将 m_btnToggleDrives 错误移至左侧的改动，将其归位至标题栏右侧按钮组。
+
+[2026-07-21 补丁3]
+- **修改文件**: src/core/AutoImportManager.h
+- **修改原因**: 修复点击“优先任务”时触发的死锁闪退（Recursive Mutex 缺失）。
+
+[2026-07-21 补丁4]
+- **修改文件**: src/core/AutoImportManager.cpp
+- **修改原因**: 修复由于 std::lock_guard 模板参数与递归锁类型不匹配导致的编译错误。
+
+[2026-07-21 补丁5]
+- **修改文件**: src/core/AutoImportManager.cpp
+- **修改原因**: 统一盘符格式为 "C:" 以修正 UI 映射失效；修复 std::lock_guard 导致的多重加锁闪退问题。
