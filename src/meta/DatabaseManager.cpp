@@ -368,10 +368,6 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
     if (m_driveDbs.find(volumeSerial) == m_driveDbs.end()) {
         QString metaDir = getAppDir() + "/.arcmeta";
         QString serialStr = QString::fromStdWString(volumeSerial).toUpper();
-        QString cleanLetter = "";
-        if (!driveLetter.isEmpty()) {
-            cleanLetter = driveLetter.at(0).toUpper();
-        }
 
         QString targetFileName = QString("Arcmeta_%1%2.db").arg(serialStr).arg(cleanLetter.isEmpty() ? "" : "_" + cleanLetter);
         QString targetPath = metaDir + "/" + targetFileName;
