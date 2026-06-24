@@ -48,7 +48,7 @@ void DropListView::dropEvent(QDropEvent* event) {
                 paths << QDir::toNativeSeparators(url.toLocalFile());
             }
         }
-        // 物理修复：坐标映射
+        // 物理修复：映射坐标至视口
         QPoint viewportPos = viewport()->mapFrom(this, event->position().toPoint());
         QModelIndex idx = indexAt(viewportPos);
         if (!paths.isEmpty()) {

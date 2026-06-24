@@ -73,6 +73,8 @@ public:
     // 拖拽支持
     QStringList mimeTypes() const override;
     QMimeData* mimeData(const QModelIndexList& indexes) const override;
+    Qt::DropActions supportedDropActions() const override { return Qt::CopyAction | Qt::MoveAction | Qt::LinkAction; }
+    Qt::DropActions supportedDragActions() const override { return Qt::CopyAction | Qt::MoveAction; }
 
     // 虚拟化加载
     bool canFetchMore(const QModelIndex& parent) const override;

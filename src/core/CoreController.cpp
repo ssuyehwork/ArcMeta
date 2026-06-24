@@ -45,6 +45,18 @@ void CoreController::startSystem() {
 
             // 3. 开启自动入库监听
             AutoImportManager::instance().startListening();
+
+            // 4. 启动时自动对账：若存在托管文件夹则激活监控 (Plan-98 加固)
+            const auto drives = QDir::drives();
+            QStringList toScan;
+            for (const QFileInfo& d : drives) {
+                if (QDir(d.absolutePath() + "ArcMeta.FERREX").exists()) {
+                    toScan << d.absolutePath().left(2).toUpper();
+                }
+            }
+            if (!toScan.isEmpty()) {
+                MftReader::instance().buildIndex(toScan);
+            }
             
             QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);

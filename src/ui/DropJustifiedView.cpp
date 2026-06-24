@@ -27,12 +27,14 @@ void DropJustifiedView::dragEnterEvent(QDragEnterEvent* event) {
 void DropJustifiedView::dragMoveEvent(QDragMoveEvent* event) {
     if (event->mimeData()->hasUrls()) {
         // 2026-07-xx 按照用户要求：实现拖拽过程中的目标项实时高亮
-        // 物理修复：坐标映射
+        // 物理修复：映射坐标
         QPoint viewportPos = viewport()->mapFrom(this, event->position().toPoint());
         QModelIndex idx = indexAt(viewportPos);
         if (idx.isValid()) {
             setCurrentIndex(idx);
         }
+
+        JustifiedView::dragMoveEvent(event);
         event->acceptProposedAction();
     } else {
         JustifiedView::dragMoveEvent(event);
@@ -47,7 +49,7 @@ void DropJustifiedView::dropEvent(QDropEvent* event) {
                 paths << QDir::toNativeSeparators(url.toLocalFile());
             }
         }
-        // 物理修复：坐标映射
+        // 物理修复：映射坐标至视口
         QPoint viewportPos = viewport()->mapFrom(this, event->position().toPoint());
         QModelIndex idx = indexAt(viewportPos);
         if (!paths.isEmpty()) {

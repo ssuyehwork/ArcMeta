@@ -52,7 +52,7 @@ void DropTreeView::dropEvent(QDropEvent* event) {
                 paths << QDir::toNativeSeparators(url.toLocalFile());
             }
         }
-        // 物理修复：坐标映射
+        // 物理修复：必须显式映射坐标到视口，以确保 indexAt 能在滚动状态下准确识别目标文件夹
         QPoint viewportPos = viewport()->mapFrom(this, event->position().toPoint());
         QModelIndex idx = indexAt(viewportPos);
         if (!paths.isEmpty()) {
