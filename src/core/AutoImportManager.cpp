@@ -111,8 +111,17 @@ void AutoImportManager::processImportQueue() {
         const std::wstring& vol = pair.first;
         if (vol.empty()) continue;
 
+        // 提取其中一个路径的盘符用于重命名纠偏
+        QString letter = "";
+        if (!pair.second.empty()) {
+            const std::wstring& firstPath = pair.second.front();
+            if (firstPath.length() >= 2 && firstPath[1] == L':') {
+                letter = QString::fromWCharArray(&firstPath[0], 1);
+            }
+        }
+
         // 静默强制挂载数据库
-        DatabaseManager::instance().getMemoryDb(vol);
+        DatabaseManager::instance().getMemoryDb(vol, letter);
 
         for (const auto& path : pair.second) {
             MetadataManager::instance().registerItem(path);
