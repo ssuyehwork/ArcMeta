@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QDateTime>
 #include <QCoreApplication>
+#include <QRegularExpression>
 #include <QImageReader>
 #include <QSvgRenderer>
 #ifdef Q_OS_WIN
@@ -239,9 +240,23 @@ void MetadataManager::initFromScchMode() {
     if (dir.exists()) {
         QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files | QDir::Hidden | QDir::System);
         qDebug() << "[Metadata] 发现物理分库数量:" << dbFiles.size();
+
+        // 使用正则解析：^Arcmeta_([0-9A-F]{8})(?:_([A-Z]))?\.db$
+        QRegularExpression re("^Arcmeta_([0-9A-F]{8})(?:_([A-Z]))?\\.db$", QRegularExpression::CaseInsensitiveOption);
+        std::set<std::wstring> loadedSerials;
+
         for (const QString& dbFile : dbFiles) {
-            QString volSerial = dbFile.mid(8, dbFile.length() - 8 - 3);
-            loadFromDb(DatabaseManager::instance().getMemoryDb(volSerial.toStdWString()));
+            QRegularExpressionMatch match = re.match(dbFile);
+            if (match.hasMatch()) {
+                QString volSerial = match.captured(1).toUpper();
+                std::wstring wSerial = volSerial.toStdWString();
+
+                if (loadedSerials.find(wSerial) == loadedSerials.end()) {
+                    // 调用 getMemoryDb 时不传盘符，让其加载现有的最匹配文件
+                    loadFromDb(DatabaseManager::instance().getMemoryDb(wSerial));
+                    loadedSerials.insert(wSerial);
+                }
+            }
         }
     }
 
@@ -670,7 +685,8 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
 
             // 物理同步：更新 SQLite 路径
             std::wstring volSerial = getVolumeSerialNumber(nNew);
-            sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
+            QString letter = (nNew.length() >= 2 && nNew[1] == L':') ? QString::fromWCharArray(&nNew[0], 1) : "";
+            sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
             if (db) {
                 sqlite3_stmt* stmt;
                 const char* sql = "UPDATE metadata SET path = ? WHERE file_id = ?";
@@ -689,7 +705,8 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
 void MetadataManager::removeMetadataSync(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     std::wstring volSerial = getVolumeSerialNumber(nPath);
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial);
+    QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
+    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
     
     int totalDelta = 0;
     std::vector<std::string> fids;
@@ -1206,7 +1223,8 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
         db = DatabaseManager::instance().getGlobalDb();
     } else {
         std::wstring volSerial = getVolumeSerialNumber(nPath);
-        db = DatabaseManager::instance().getMemoryDb(volSerial);
+        QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
+        db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
     }
     if (!db) return;
 
