@@ -11,6 +11,7 @@
 #include "ResizeEventFilter.h"
 #include "AddressBar.h"
 #include "../core/CoreController.h"
+#include "../core/AutoImportManager.h"
 #include "CategoryPanel.h"
 #include "CategoryModel.h"
 #include "NavPanel.h"
