@@ -15,27 +15,36 @@ class AutoImportManager : public QObject {
 public:
     static AutoImportManager& instance();
 
-    // 启动/停止监听
-    void startListening();
-    void stopListening();
+    // 针对特定盘符的监听开关
+    void setDriveListening(const QString& drive, bool active);
+    // 任务队列的暂停与恢复
+    void setDrivePaused(const QString& drive, bool paused);
+    bool isDrivePaused(const QString& drive) const;
+
+signals:
+    // 当某个盘符有新任务进入队列时触发
+    void tasksStarted(const QString& drive);
+    // 当某个盘符的任务队列处理完成时触发
+    void tasksCompleted(const QString& drive);
 
 private slots:
-    // 订阅 MftReader 发现的新增条目
     void onEntryAdded(uint64_t key);
-    // 去抖超时，合并写入数据库
+    void onEntryRemoved(uint64_t key);
+    void onEntryUpdated(uint64_t key);
     void processImportQueue();
 
 private:
     AutoImportManager(QObject* parent = nullptr);
     ~AutoImportManager() override;
 
-    bool checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder);
-    std::wstring getManagedFolderAbsolutePath(const std::wstring& volSerial);
+    bool isPathInManagedLibrary(const std::wstring& path, QString& outDrive);
 
     QTimer* m_debounceTimer = nullptr;
     std::vector<std::wstring> m_pendingPaths;
-    std::mutex m_queueMutex;
-    bool m_isListening = false;
+    mutable std::mutex m_mutex;
+
+    std::unordered_set<QString> m_activeDrives;
+    std::unordered_map<QString, bool> m_drivePausedMap;
 };
 
 } // namespace ArcMeta

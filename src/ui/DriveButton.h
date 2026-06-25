@@ -14,8 +14,14 @@ namespace ArcMeta {
 class DriveButton : public QPushButton {
     Q_OBJECT
 public:
+    enum State { Inactive, Active, Running, Paused };
+
     explicit DriveButton(const QString& letter, QWidget* parent = nullptr);
 
+    void setState(State state);
+    State state() const { return m_state; }
+
+    // 兼容旧接口 (Plan-97)
     void setLoading(bool loading);
     bool isLoading() const { return m_isLoading; }
     QString letter() const { return m_letter; }
@@ -27,11 +33,15 @@ private slots:
     void onAnimationTimeout();
 
 private:
+    void updateStyle();
+
     QString m_letter;
+    State m_state = Inactive;
     bool m_isLoading = false;
     int m_rotationAngle = 0;
     QTimer* m_animationTimer = nullptr;
-    std::unique_ptr<QSvgRenderer> m_svgRenderer;
+    std::unique_ptr<QSvgRenderer> m_refreshRenderer;
+    std::unique_ptr<QSvgRenderer> m_pauseRenderer;
 };
 
 } // namespace ArcMeta
