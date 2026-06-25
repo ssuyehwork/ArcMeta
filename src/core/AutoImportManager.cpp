@@ -11,6 +11,11 @@
 #include "../util/ImportHelper.h"
 #include "../ui/Logger.h"
 #include "AppConfig.h"
+#include <QtConcurrent>
+
+#ifdef run
+#undef run
+#endif
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -150,7 +155,7 @@ void AutoImportManager::scanManagedLibrary(const QString& drive) {
         QStringList pathsToImport;
 
         // 基于 MFT 内存索引遍历 (秒级完成)
-        int count = MftReader::instance().getEntryCount();
+        int count = MftReader::instance().totalCount();
         for (int i = 0; i < count; ++i) {
             QString fullPath = MftReader::instance().getFullPath(i);
             if (fullPath.startsWith(targetPrefix, Qt::CaseInsensitive)) {

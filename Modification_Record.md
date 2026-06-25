@@ -4,9 +4,9 @@
 - **任务描述**: 托管文件夹命名规范化与存量自动化扫描优化 (Plan-105)。
 - **修改文件**:
     - **修改**: `src/ui/DriveButton.h/.cpp` (新增 `Missing` 状态及其对应的置灰视觉样式，优化 `updateStyle` 逻辑)
-    - **修改**: `src/core/AutoImportManager.h/.cpp` (实现 `scanManagedLibrary` 存量扫描接口；更新 `isPathInManagedLibrary` 以适配 `ArcMeta.Library_X` 命名规范)
-    - **修改**: `src/ui/MainWindow.cpp` (统一托管路径构造逻辑；在 `onDriveButtonClicked` 中集成目录探测与 `scanManagedLibrary` 触发；修复右键菜单创建目录后的状态刷新)
-- **修改原因**: 统一托管文件夹命名标准以增强物理识别度，解决盘符激活后“存量文件”无法自动感应入库的问题，并为缺失托管库的磁盘提供直观的 UI 状态反馈。
+    - **修改**: `src/core/AutoImportManager.h/.cpp` (实现 `scanManagedLibrary` 存量扫描接口；更新 `isPathInManagedLibrary` 以适配 `ArcMeta.Library_X` 命名规范；修复 `QtConcurrent` 缺失及宏冲突)
+    - **修改**: `src/ui/MainWindow.cpp` (统一托管路径构造逻辑；在 `onDriveButtonClicked` 中集成目录探测与 `scanManagedLibrary` 触发；修复右键菜单创建目录后的状态刷新；处理 `#undef run` 宏冲突)
+- **修改原因**: 统一托管文件夹命名标准以增强物理识别度，解决盘符激活后“存量文件”无法自动感应入库的问题，并为缺失托管库的磁盘提供直观的 UI 状态反馈。修复了由宏定义及接口不匹配导致的编译障碍。
 - **优化点**:
     - **命名规范**: 托管库路径由 `ArcMeta.Library` 升级为 `ArcMeta.Library_[Drive]`（如 `D:\ArcMeta.Library_D`）。
     - **自动化对账**: 盘符激活后自动启动后台 MFT 存量扫描，确保托管库内已有文件秒级同步至数据库。

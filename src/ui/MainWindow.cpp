@@ -67,6 +67,10 @@ using namespace ArcMeta::Style;
 #include <QtConcurrent>
 #include <QSet>
 
+#ifdef run
+#undef run
+#endif
+
 namespace ArcMeta {
 
 // 【物理护栏-禁止修改/禁止改为0】全局边缘留白基准值，统一应用于标题栏/导航栏/主体容器右侧
