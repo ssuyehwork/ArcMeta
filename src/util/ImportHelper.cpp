@@ -22,11 +22,14 @@
 
 namespace ArcMeta {
 
-void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, QWidget* parent) {
-    if (paths.isEmpty()) return;
+QFuture<void> ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, QWidget* parent, bool showProgress) {
+    if (paths.isEmpty()) return {};
 
-    BatchProgressDialog* progress = new BatchProgressDialog("正在处理项目导入...", parent);
-    progress->show();
+    BatchProgressDialog* progress = nullptr;
+    if (showProgress) {
+        progress = new BatchProgressDialog("正在处理项目导入...", parent);
+        progress->show();
+    }
 
     // 2026-07-xx 建立导入任务的上下文
     struct ImportContext {
@@ -37,7 +40,7 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
     QPointer<BatchProgressDialog> weakProgress(progress);
 
     // 处理用户关闭进度框的操作 (中断保护)
-    QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent]() {
+    if (progress) QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent]() {
         if (!weakProgress) return;
 
         // 2026-07-xx 按照用户要求：弹出确认停止
@@ -206,6 +209,8 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
         CoUninitialize();
         #endif
     });
+
+    return context->future;
 }
 
 } // namespace ArcMeta
