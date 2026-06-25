@@ -1,6 +1,16 @@
 # Modification Record
 
 ## 2026-10-29
+- **任务描述**: 盘符激活异步化重构与判定逻辑标识符规范化 (Plan-104)。
+- **修改文件**:
+    - **修改**: `src/ui/MainWindow.cpp` (重构 `onDriveButtonClicked` 为异步模式，引入 `QtConcurrent::run` 后台激活物理层；添加 `<QtConcurrent>` 与 `<QSet>` 头文件；优化 `loadActiveDrives` 启动恢复逻辑；规范右键菜单 `targetPath` 声明)
+    - **修改**: `src/core/AutoImportManager.cpp` (重构 `isPathInManagedLibrary` 判定函数，补全 `QString` 类型定义并统一使用 `targetPath` 标识符；同步更新 `onEntryAdded/Removed` 变量命名)
+- **修改原因**: 解决点击盘符导致 UI 线程阻塞假死的问题，修复因标识符未声明、类型缺失或命名不一致导致的编译及监听失效故障。
+- **优化点**:
+    - **异步响应**: 磁盘扫描与数据库挂载移至后台，彻底消除 UI 线程阻塞。
+    - **状态闭环**: 引入 `s_activatingDrives` 静态锁，确保初始激活期间逻辑原子性，防止重复触发。
+    - **判定逻辑加固**: 规范化托管路径判定算法，统一基于 `QString` 进行高效前缀匹配。
+
 - **任务描述**: 启动监听失效修复、变量作用域补完及冗余日志清理 (Plan-103)。
 - **修改文件**:
     - **修改**: `src/ui/MainWindow.h/.cpp` (补全 `m_activeDrives` 等成员变量；在 `onDriveButtonClicked` 中显式触发数据库挂载与 `MftReader::buildIndex` 以激活物理监听；统一右键菜单中的 `targetPath` 标识符及 Lambda 捕获；移除 `[MONITOR]` 资源监控日志)

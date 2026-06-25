@@ -72,13 +72,14 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
 
     QString drive;
     std::wstring path = MftReader::instance().getFullPath(idx).toStdWString();
-    QString qPath = QString::fromStdWString(path);
+    // 2026-10-29 按照 Plan-104：统一标识符为 targetPath
+    QString targetPath = QString::fromStdWString(path);
 
     // 工业级排查：记录所有被捕获到的变更，确定 MFT 引擎是否断路
-    // Logger::log(QString("[AutoImport] USN 捕获原始路径: %1").arg(qPath));
+    // Logger::log(QString("[AutoImport] USN 捕获原始路径: %1").arg(targetPath));
 
     if (isPathInManagedLibrary(path, drive)) {
-        Logger::log(QString("[AutoImport] >>> 判定通过：属于托管库路径: %1").arg(qPath));
+        Logger::log(QString("[AutoImport] >>> 判定通过：属于托管库路径: %1").arg(targetPath));
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_pendingPaths.push_back(path);
@@ -98,27 +99,31 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
 
     QString drive;
     std::wstring path = MftReader::instance().getFullPath(idx).toStdWString();
+    // 2026-10-29 按照 Plan-104：统一标识符为 targetPath
+    QString targetPath = QString::fromStdWString(path);
+
     if (isPathInManagedLibrary(path, drive)) {
-        Logger::log(QString("[AutoImport] 捕获到移除项: %1").arg(QString::fromStdWString(path)));
+        Logger::log(QString("[AutoImport] 捕获到移除项: %1").arg(targetPath));
         MetadataManager::instance().setInvalid(path, true);
     }
 }
 
 bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString& outDrive) {
-    if (path.length() < 3 || path[1] != L':' || path[2] != L'\\') return false;
+    // 2026-10-29 按照 Plan-104：重构判定逻辑并补全类型定义
+    QString targetPath = QString::fromStdWString(path);
+
+    if (targetPath.length() < 3 || targetPath[1] != ':' || targetPath[2] != '\\') return false;
     
-    QString dStr = QString::fromWCharArray(&path[0], 2).toUpper();
+    QString dStr = targetPath.left(2).toUpper();
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (!m_activeDrives.contains(dStr)) {
-            // Logger::log(QString("[AutoImport] 判定拦截：盘符 %1 未处于激活状态. 路径: %2").arg(dStr, QString::fromStdWString(path)));
+            // Logger::log(QString("[AutoImport] 判定拦截：盘符 %1 未处于激活状态. 路径: %2").arg(dStr, targetPath));
             return false;
         }
     }
 
-    // 补全类型说明符 (对应报错：缺少类型说明符)
-    QString targetPath = QString::fromStdWString(path);
     QString libraryPrefixStr = dStr + "\\ArcMeta.Library\\";
     
     if (targetPath.startsWith(libraryPrefixStr, Qt::CaseInsensitive)) {

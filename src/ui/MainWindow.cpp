@@ -65,6 +65,7 @@ using namespace ArcMeta::Style;
 
 
 #include <QtConcurrent>
+#include <QSet>
 
 namespace ArcMeta {
 
@@ -1649,24 +1650,51 @@ void MainWindow::onDriveButtonClicked(const QString& letter) {
 
     DriveButton::State currentState = btn->state();
 
+    // 2026-10-29 按照 Plan-104：使用静态 Set 追踪正在初始激活的盘符
+    static QSet<QString> s_activatingDrives;
+
     if (currentState == DriveButton::Inactive) {
-        // 状态A -> 状态B
-        btn->setState(DriveButton::Active);
+        if (s_activatingDrives.contains(letter)) return;
 
-        // --- 核心修复：激活物理层 (对应用户原话：“纹丝不动”) ---
-        // 1. 静默挂载该盘数据库
-        std::wstring vol = MetadataManager::getVolumeSerialNumber(letter.toStdWString() + L"\\");
-        DatabaseManager::instance().getMemoryDb(vol, letter.left(1));
+        btn->setState(DriveButton::Running);
+        s_activatingDrives.insert(letter);
 
-        // 2. 显式启动 USN 监听 (对应用户原话：“USN Journal 没有工作？”)
-        MftReader::instance().buildIndex({letter});
+        (void)QtConcurrent::run([this, letter, btn]() {
+            // 1. 获取卷序列号并挂载数据库 (耗时操作 A)
+            std::wstring vol = MetadataManager::getVolumeSerialNumber(letter.toStdWString() + L"\\");
+            DatabaseManager::instance().getMemoryDb(vol, letter.left(1));
 
-        AutoImportManager::instance().setDriveListening(letter, true);
+            // 2. 索引构建与 USN Journal 激活 (耗时操作 B)
+            MftReader::instance().buildIndex({letter});
+
+            // 3. 回到主线程更新 UI 与 开启监听
+            QMetaObject::invokeMethod(this, [this, letter, btn]() {
+                s_activatingDrives.remove(letter);
+
+                // 确保按钮状态依然符合预期（未在激活期间被强制关闭）
+                if (btn->state() == DriveButton::Running) {
+                    btn->setState(DriveButton::Active);
+                    AutoImportManager::instance().setDriveListening(letter, true);
+
+                    // 同步持久化状态
+                    QStringList activeDrives = AppConfig::instance().getValue("DriveBar/ActiveDrives").toStringList();
+                    if (!activeDrives.contains(letter)) {
+                        activeDrives.append(letter);
+                        AppConfig::instance().setValue("DriveBar/ActiveDrives", activeDrives);
+                        AppConfig::instance().sync();
+                    }
+                }
+            }, Qt::QueuedConnection);
+        });
+        return;
     } else if (currentState == DriveButton::Active) {
         // 状态B -> 状态A
         btn->setState(DriveButton::Inactive);
         AutoImportManager::instance().setDriveListening(letter, false);
     } else if (currentState == DriveButton::Running) {
+        // 正在初始激活中的盘符禁止切换暂停，防止逻辑断路
+        if (s_activatingDrives.contains(letter)) return;
+
         // 状态C -> 状态D
         btn->setState(DriveButton::Paused);
         AutoImportManager::instance().setDrivePaused(letter, true);
@@ -1693,13 +1721,12 @@ void MainWindow::onDriveButtonContextMenu(const QString& letter) {
     QMenu menu(this);
     UiHelper::applyMenuStyle(&menu);
 
-    // 统一并显式声明 targetPath (对应报错：“targetPath”: 未声明的标识符)
+    // 2026-10-29 按照 Plan-104：统一标识符命名并显式声明 targetPath
     QString targetPath = letter + "\\ArcMeta.Library";
     bool exists = QDir(targetPath).exists();
 
     if (!exists) {
         QAction* actCreate = menu.addAction(UiHelper::getIcon("add", Style::TextMain), "创建托管文件夹");
-        // 修正捕获列表，确保与定义名一致
         connect(actCreate, &QAction::triggered, this, [targetPath, letter, this]() {
             if (QDir().mkpath(targetPath)) {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "托管文件夹创建成功", 1500);
@@ -1721,10 +1748,8 @@ void MainWindow::loadActiveDrives() {
     QStringList activeDrives = AppConfig::instance().getValue("DriveBar/ActiveDrives").toStringList();
     for (const QString& letter : activeDrives) {
         if (m_driveButtonMap.contains(letter)) {
-            // 恢复监听状态
-            DriveButton* btn = m_driveButtonMap[letter];
-            btn->setState(DriveButton::Active);
-            AutoImportManager::instance().setDriveListening(letter, true);
+            // 2026-10-29 按照 Plan-104：启动时也应走异步激活链路，确保物理层就绪
+            onDriveButtonClicked(letter);
         }
     }
 }
