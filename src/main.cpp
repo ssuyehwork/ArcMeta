@@ -90,8 +90,6 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-    qint64 mainStartTime = QDateTime::currentMSecsSinceEpoch();
-
     // 初始化 COM 环境 (多媒体缩略图提取需要)
 #ifdef Q_OS_WIN
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -121,7 +119,6 @@ int main(int argc, char *argv[]) {
 
     // 2026-05-27 物理修复：在主线程预热元数据管理器单例
     // 确保其内部的 QTimer 等对象归属于主线程，避免跨线程创建导致的行为不确定性
-    qint64 metaInitStart = QDateTime::currentMSecsSinceEpoch();
     ArcMeta::MetadataManager::instance();
     // 2026-06-xx 物理修复：在主线程预热 CategoryRepo，解决 QTimer 跨线程启动导致的内存与磁盘不一致
     ArcMeta::CategoryRepo::initialize();
