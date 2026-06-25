@@ -86,7 +86,6 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent), m_currentDataSource("nav"), m_currentCategoryId(0) {
     // 2026-04-12 关键修复：显式初始化面板加载状态锁，防止未定义行为导致闪退
     m_panelsInitialized = false;
-    qDebug() << "[Main] MainWindow 构造开始执行";
 
     // 2026-04-11 按照用户要求：在程序启动的最顶端预初始化 ToolTipOverlay
     // 配合 ToolTipOverlay 内部的 winId() 强行预热，消除初次显示延迟

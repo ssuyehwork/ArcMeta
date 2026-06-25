@@ -99,8 +99,6 @@ int main(int argc, char *argv[]) {
 
     // 1. 安装自定义日志处理器：确保从程序启动的第一秒开始就能捕获所有调试信息
     qInstallMessageHandler(customMessageHandler);
-    qDebug() << "================ ArcMeta 启动加载 ================";
-    qDebug() << "[PERF] 程序入口点计时开始";
 
     // 设置高 DPI 支持：Qt 6 默认行为，此处显式设置 PassThrough 以防旧设备缩放模糊
     QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
@@ -127,21 +125,15 @@ int main(int argc, char *argv[]) {
     ArcMeta::MetadataManager::instance();
     // 2026-06-xx 物理修复：在主线程预热 CategoryRepo，解决 QTimer 跨线程启动导致的内存与磁盘不一致
     ArcMeta::CategoryRepo::initialize();
-    qDebug() << "[PERF] MetadataManager/CategoryRepo 单例预热耗时:" << (QDateTime::currentMSecsSinceEpoch() - metaInitStart) << "ms";
 
     // 3. 简化启动：直接显示主窗口
     // 2026-04-13 按用户要求移除 LoadingWindow 和 initializeHotIcons()
-    qint64 windowCreateStart = QDateTime::currentMSecsSinceEpoch();
     ArcMeta::MainWindow* w = new ArcMeta::MainWindow();
-    qDebug() << "[PERF] MainWindow 构造耗时:" << (QDateTime::currentMSecsSinceEpoch() - windowCreateStart) << "ms";
     
     w->show();
-    qDebug() << "[PERF] MainWindow->show() 调用耗时（至首帧渲染前）:" << (QDateTime::currentMSecsSinceEpoch() - windowCreateStart) << "ms";
 
     // 5. 启动异步系统扫描（后台初始化，UI 可响应）
     ArcMeta::CoreController::instance().startSystem();
-
-    qDebug() << "[PERF] main 函数逻辑执行完毕，进入事件循环。总耗时:" << (QDateTime::currentMSecsSinceEpoch() - mainStartTime) << "ms";
 
     int ret = a.exec();
 

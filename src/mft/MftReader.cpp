@@ -69,8 +69,6 @@ static bool enablePrivilege(LPCWSTR privilege) {
     bool ok = (GetLastError() == ERROR_SUCCESS);
     if (!ok) {
         qDebug() << "[MftReader] 权限提升失败 (可能由于非管理员运行):" << QString::fromWCharArray(privilege);
-    } else {
-        qDebug() << "[MftReader] 权限提升成功:" << QString::fromWCharArray(privilege);
     }
     CloseHandle(hToken);
     return ok;

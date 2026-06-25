@@ -1012,9 +1012,6 @@ void ContentPanel::updateGridSize() {
         m_zoomLevel = qBound(96, m_zoomLevel, 128);
     }
 
-    // 写入实时日志 
-    ArcMeta::Logger::log(QString("[UI_DEBUG] 卡片缩放级: %1").arg(m_zoomLevel));
-    
     if (m_viewStack->currentWidget() == m_gridView) {
         if (auto* jv = qobject_cast<JustifiedView*>(m_gridView)) {
             jv->setTargetRowHeight(m_zoomLevel);
@@ -1057,8 +1054,6 @@ void ContentPanel::updateGridSize() {
 
     // 2026-06-05 按照要求：持久化保存当前的缩放级别
     AppConfig::instance().setValue("UI/GridZoomLevel", m_zoomLevel);
-
-    qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
 } 
  
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 
