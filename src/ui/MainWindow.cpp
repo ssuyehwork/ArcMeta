@@ -1654,19 +1654,19 @@ void MainWindow::onDriveButtonClicked(const QString& letter) {
     DriveButton::State currentState = btn->state();
 
     if (currentState == DriveButton::Inactive) {
-        // Inactive -> Active: 开启监听
+        // 状态A -> 状态B
         btn->setState(DriveButton::Active);
         AutoImportManager::instance().setDriveListening(letter, true);
     } else if (currentState == DriveButton::Active) {
-        // Active -> Inactive: 关闭监听
+        // 状态B -> 状态A
         btn->setState(DriveButton::Inactive);
         AutoImportManager::instance().setDriveListening(letter, false);
     } else if (currentState == DriveButton::Running) {
-        // Running -> Paused: 暂停任务
+        // 状态C -> 状态D
         btn->setState(DriveButton::Paused);
         AutoImportManager::instance().setDrivePaused(letter, true);
     } else if (currentState == DriveButton::Paused) {
-        // Paused -> Running: 恢复任务
+        // 状态D -> 状态C
         btn->setState(DriveButton::Running);
         AutoImportManager::instance().setDrivePaused(letter, false);
     }
@@ -1692,12 +1692,12 @@ void MainWindow::onDriveButtonContextMenu(const QString& letter) {
     bool exists = QDir(libraryPath).exists();
 
     if (!exists) {
-        QAction* actCreate = menu.addAction(UiHelper::getIcon("add", TextMain), "创建托管文件夹");
+        QAction* actCreate = menu.addAction(UiHelper::getIcon("add", Style::TextMain), "创建托管文件夹");
         connect(actCreate, &QAction::triggered, this, [libraryPath, letter, this]() {
             if (QDir().mkpath(libraryPath)) {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "托管文件夹创建成功", 1500);
             } else {
-                ToolTipOverlay::instance()->showText(QCursor::pos(), "创建失败，请检查权限", 1500, ErrorRed);
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "创建失败，请检查权限", 1500, Style::ErrorRed);
             }
         });
     } else {

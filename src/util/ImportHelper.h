@@ -2,6 +2,7 @@
 
 #include <QStringList>
 #include <QWidget>
+#include <QFuture>
 
 namespace ArcMeta {
 
@@ -16,8 +17,9 @@ public:
      * @param paths 待导入的物理路径列表
      * @param targetCategoryId 目标父分类 ID (0 表示“我的分类”根目录)
      * @param parent UI 父窗口，用于显示进度框
+     * @param showProgress 是否显示进度对话框 (2026-07-21 按照 Plan-102 扩展：支持后台静默入库)
      */
-    static void importPaths(const QStringList& paths, int targetCategoryId = 0, QWidget* parent = nullptr);
+    static QFuture<void> importPaths(const QStringList& paths, int targetCategoryId = 0, QWidget* parent = nullptr, bool showProgress = true);
 };
 
 } // namespace ArcMeta
