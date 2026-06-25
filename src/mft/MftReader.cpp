@@ -706,7 +706,7 @@ QString MftReader::getPathByUsn(uint64_t key) {
     std::wstring dev = L"\\\\.\\" + volume;
     HANDLE hVol = CreateFileW(dev.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (hVol == INVALID_HANDLE_VALUE) {
-        qDebug() << "[MftReader] getPathByUsn 失败: 无法打开卷句柄" << QString::fromStdWString(dev) << "Error:" << GetLastError();
+        Logger::log(QString("[MFT] getPathByUsn 失败: 无法打开卷句柄 %1 Error: %2").arg(QString::fromStdWString(dev)).arg(GetLastError()));
         return QString();
     }
 
@@ -717,7 +717,7 @@ QString MftReader::getPathByUsn(uint64_t key) {
     id.FileId.QuadPart = frn;
     HANDLE hFile = OpenFileById(hVol, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
     if (hFile == INVALID_HANDLE_VALUE) {
-        qDebug() << "[MftReader] getPathByUsn 失败: OpenFileById 失败, FRN:" << frn << "Error:" << GetLastError();
+        Logger::log(QString("[MFT] getPathByUsn 失败: OpenFileById 失败, FRN: %1 Error: %2").arg(frn).arg(GetLastError()));
         CloseHandle(hVol);
         return QString();
     }
@@ -736,7 +736,7 @@ QString MftReader::getPathByUsn(uint64_t key) {
             if (result.startsWith("\\\\?\\")) result = result.mid(4);
         }
     } else {
-        qDebug() << "[MftReader] getPathByUsn 失败: GetFinalPathNameByHandleW 失败, FRN:" << frn << "Error:" << GetLastError();
+        Logger::log(QString("[MFT] getPathByUsn 失败: GetFinalPathNameByHandleW 失败, FRN: %1 Error: %2").arg(frn).arg(GetLastError()));
     }
 
     // 5. 安全释放

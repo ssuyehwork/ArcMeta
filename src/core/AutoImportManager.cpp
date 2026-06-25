@@ -94,7 +94,6 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
     // 1. 从 USN 事件直接获取完整路径 (对应用户要求：彻底移除 getIndexByKey 调用)
     QString targetPath = MftReader::instance().getPathByUsn(key);
     if (targetPath.isEmpty()) {
-        // qDebug() << "[AutoImport] 无法获取路径, Key:" << key;
         return;
     }
 
@@ -107,8 +106,6 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
         }
         emit tasksStarted(drive);
         QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
-    } else {
-        // Logger::log(QString("[AutoImport] 路径不在托管库内: %1").arg(targetPath));
     }
 }
 
@@ -120,7 +117,7 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
     // 1. 从 USN 事件直接获取完整路径 (对应用户要求：同步修复 onEntryRemoved)
     QString targetPath = MftReader::instance().getPathByUsn(key);
     if (targetPath.isEmpty()) {
-        // qDebug() << "[AutoImport] (移除) 无法获取路径, Key:" << key;
+        // 对于彻底删除的文件，此处获取路径会失败，符合 Win32 API 行为
         return;
     }
 
@@ -128,8 +125,6 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
     if (isPathInManagedLibrary(targetPath, drive)) {
         Logger::log(QString("[AutoImport] 捕获到移除项: %1").arg(targetPath));
         MetadataManager::instance().setInvalid(targetPath.toStdWString(), true);
-    } else {
-        // Logger::log(QString("[AutoImport] (移除) 路径不在托管库内: %1").arg(targetPath));
     }
 }
 
