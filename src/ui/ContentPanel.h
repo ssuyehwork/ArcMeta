@@ -307,6 +307,7 @@ public slots:
     void onSelectionChanged();
     void onCustomContextMenuRequested(const QPoint& pos);
     void onDoubleClicked(const QModelIndex& index);
+    void onPathsDropped(const QStringList& paths, const QModelIndex& targetIndex);
 
     /**
      * @brief 加载并显示目录内容
