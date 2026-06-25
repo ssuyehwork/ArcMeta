@@ -8,6 +8,7 @@
 #include "../mft/MftReader.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
+#include "../util/ImportHelper.h"
 #include "AppConfig.h"
 
 #ifdef Q_OS_WIN
@@ -85,10 +86,7 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
     QString drive;
     std::wstring path = MftReader::instance().getFullPath(idx).toStdWString();
     if (isPathInManagedLibrary(path, drive)) {
-        RuntimeMeta rm = MetadataManager::instance().getMeta(path);
-        if (rm.hasUserOperations()) {
-            MetadataManager::instance().setInvalid(path, true);
-        }
+        MetadataManager::instance().setInvalid(path, true);
     }
 }
 
@@ -146,12 +144,24 @@ void AutoImportManager::processImportQueue() {
 
     for (auto& pair : pathsByDrive) {
         const QString& drive = pair.first;
-        std::wstring vol = MetadataManager::getVolumeSerialNumber(drive.toStdWString() + L"\\");
-        DatabaseManager::instance().getMemoryDb(vol, drive.left(1));
+        QStringList paths;
         for (const auto& p : pair.second) {
-            MetadataManager::instance().registerItem(p);
+            paths << QString::fromStdWString(p);
         }
-        emit tasksCompleted(drive);
+
+        if (!paths.isEmpty()) {
+            QFuture<void> future = ImportHelper::importPaths(paths, 0, nullptr, false);
+            
+            // 2026-07-21 按照 Plan-102：使用 Watcher 追踪任务完成状态，确保 UI 状态同步
+            QFutureWatcher<void>* watcher = new QFutureWatcher<void>(this);
+            connect(watcher, &QFutureWatcher<void>::finished, this, [this, drive, watcher]() {
+                emit tasksCompleted(drive);
+                watcher->deleteLater();
+            });
+            watcher->setFuture(future);
+        } else {
+            emit tasksCompleted(drive);
+        }
     }
 
     MetadataManager::instance().notifyFullUIRebuild();
