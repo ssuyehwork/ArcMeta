@@ -9,6 +9,7 @@
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
 #include "../util/ImportHelper.h"
+#include "../ui/Logger.h"
 #include "AppConfig.h"
 
 #ifdef Q_OS_WIN
@@ -65,7 +66,10 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
 
     QString drive;
     std::wstring path = MftReader::instance().getFullPath(idx).toStdWString();
+    QString qPath = QString::fromStdWString(path);
+
     if (isPathInManagedLibrary(path, drive)) {
+        Logger::log(QString("[AutoImport] 捕获到新增项: %1").arg(qPath));
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_pendingPaths.push_back(path);
@@ -86,6 +90,7 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
     QString drive;
     std::wstring path = MftReader::instance().getFullPath(idx).toStdWString();
     if (isPathInManagedLibrary(path, drive)) {
+        Logger::log(QString("[AutoImport] 捕获到移除项: %1").arg(QString::fromStdWString(path)));
         MetadataManager::instance().setInvalid(path, true);
     }
 }
@@ -107,6 +112,10 @@ bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString
         outDrive = dStr;
         return true;
     }
+
+    // 调试：如果不是以 libPrefix 开头，记录一下正在判定的路径（可选，防止日志过载只记录潜在的盘符内路径）
+    // Logger::log(QString("[AutoImport] 路径非托管库成员: %1").arg(pStr));
+    
     return false;
 }
 
@@ -150,11 +159,13 @@ void AutoImportManager::processImportQueue() {
         }
 
         if (!paths.isEmpty()) {
+            Logger::log(QString("[AutoImport] 启动批量入库，盘符: %1, 数量: %2").arg(drive).arg(paths.size()));
             QFuture<void> future = ImportHelper::importPaths(paths, 0, nullptr, false);
             
             // 2026-07-21 按照 Plan-102：使用 Watcher 追踪任务完成状态，确保 UI 状态同步
             QFutureWatcher<void>* watcher = new QFutureWatcher<void>(this);
             connect(watcher, &QFutureWatcher<void>::finished, this, [this, drive, watcher]() {
+                Logger::log(QString("[AutoImport] 批量入库完成，盘符: %1").arg(drive));
                 emit tasksCompleted(drive);
                 watcher->deleteLater();
             });
