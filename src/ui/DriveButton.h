@@ -8,9 +8,6 @@
 
 namespace ArcMeta {
 
-/**
- * @brief 增强型盘符按钮，支持加载动画 (Plan-97)
- */
 class DriveButton : public QPushButton {
     Q_OBJECT
 public:
@@ -21,7 +18,6 @@ public:
     void setState(State state);
     State state() const { return m_state; }
 
-    // 兼容旧接口 (Plan-97)
     void setLoading(bool loading);
     bool isLoading() const { return m_isLoading; }
     QString letter() const { return m_letter; }
