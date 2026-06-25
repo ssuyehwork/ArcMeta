@@ -1,10 +1,11 @@
 # Modification Record
 
 ## 2026-10-29
-- **任务描述**: 启动监听失效修复与变量作用域全量补完 (Plan-103)。
+- **任务描述**: 启动监听失效修复、变量作用域补完及冗余日志清理 (Plan-103)。
 - **修改文件**:
-    - **修改**: `src/ui/MainWindow.h/.cpp` (补全 `m_activeDrives` 等成员变量；在 `onDriveButtonClicked` 中显式触发数据库挂载与 `MftReader::buildIndex` 以激活物理监听；统一右键菜单中的 `targetPath` 标识符及 Lambda 捕获)
+    - **修改**: `src/ui/MainWindow.h/.cpp` (补全 `m_activeDrives` 等成员变量；在 `onDriveButtonClicked` 中显式触发数据库挂载与 `MftReader::buildIndex` 以激活物理监听；统一右键菜单中的 `targetPath` 标识符及 Lambda 捕获；移除 `[MONITOR]` 资源监控日志)
     - **修改**: `src/core/AutoImportManager.cpp` (补全 `isPathInManagedLibrary` 函数中的 `QString` 类型定义及变量名统一)
+    - **修改**: `src/ui/MetaPanel.cpp` (彻底移除 `ElasticEdit` 的高度调整调试日志)
 - **修改原因**: 解决物理监听引擎未实际启动导致的 UI “纹丝不动”问题，并修复因标识符命名冲突、类型定义缺失导致的编译报错。
 - **优化点**:
     - **驱动链闭环**: 打通了从 UI 点击到物理 MFT 引擎启动的断层，确保文件变动能即时被感知。

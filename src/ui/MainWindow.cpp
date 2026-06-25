@@ -1332,13 +1332,9 @@ void MainWindow::initResourceMonitor() {
         DWORD userCount = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
         
         PROCESS_MEMORY_COUNTERS_EX pmc;
-        SIZE_T privateBytes = 0;
         if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
-            privateBytes = pmc.PrivateUsage;
+            // 物理预留：静默记录，不再输出调试日志
         }
-        
-        qDebug() << QString("[MONITOR] GDI: %1 | USER: %2 | PrivateBytes: %3 MB")
-                    .arg(gdiCount).arg(userCount).arg(privateBytes / 1024 / 1024);
         
         // 阈值预警：如果接近 Windows 默认限制 (10000)，输出警告
         if (gdiCount > 8000 || userCount > 8000) {
