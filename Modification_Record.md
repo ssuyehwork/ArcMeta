@@ -1,5 +1,17 @@
 # Modification Record
 
+## 2026-11-14
+- **任务描述**: 内容面板交互与刷新逻辑优化 (Plan-105)。
+- **修改文件**:
+    - **修改**: `src/ui/DropTreeView.cpp` (移除 `dragMoveEvent` 中的 `setCurrentIndex` 调用)
+    - **修改**: `src/ui/DropJustifiedView.cpp` (移除 `dragMoveEvent` 中的 `setCurrentIndex` 调用)
+    - **修改**: `src/meta/MetadataManager.h/.cpp` (引入 `m_isInternalOperating` 标志位并拦截 `notify` 信号)
+    - **修改**: `src/ui/ContentPanel.cpp` (在 `onPathsDropped` 期间启用信号抑制锁并手动执行单次刷新)
+- **修改原因**: 解决拖拽过程中元数据面板频繁更新导致的假死、竞争问题，并修复操作完成后触发两次刷新的冗余逻辑。
+- **优化点**:
+    - **交互解耦**: 彻底隔离了拖拽反馈与选择信号，释放主线程。
+    - **智能刷新**: 通过抑制锁机制合并了同步与异步刷新，提升了 UI 稳定性。
+
 ## 2026-10-29
 - **任务描述**: 内容面板拖拽投放功能修复 (Plan-104)。
 - **修改文件**:

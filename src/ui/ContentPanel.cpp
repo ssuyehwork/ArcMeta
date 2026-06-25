@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "ContentPanel.h" 
+#include "../meta/MetadataManager.h"
 #include "Logger.h"
 #include "SvgIcons.h" 
 #include "TreeItemDelegate.h" 
@@ -2238,12 +2239,21 @@ void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& t
 
     bool isMove = !(QApplication::keyboardModifiers() & Qt::ControlModifier);
     
+    // 2026-xx-xx 按照 Plan-105：在拖拽入库操作期间抑制 AutoImportManager 产生的冗余刷新信号
+    MetadataManager::instance().setInternalOperating(true);
+
     if (ShellHelper::copyOrMoveItems(paths, destDir, isMove)) {
         if (isMove) {
             UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
         }
+        // 显式执行一次刷新，确保用户操作立即反馈
         loadDirectory(m_currentPath, m_isRecursive);
     }
+
+    // 2000ms 后释放抑制锁，足以覆盖 MFT 变更探测与 AutoImportManager 的 3s 防抖窗口冲突期
+    QTimer::singleShot(2000, []() {
+        MetadataManager::instance().setInternalOperating(false);
+    });
 }
 
 void ContentPanel::onDoubleClicked(const QModelIndex& index) { 
