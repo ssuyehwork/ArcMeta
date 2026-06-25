@@ -2,6 +2,9 @@
 #include "CategoryModel.h"
 #include "ContentPanel.h"
 #include <QDrag>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QPixmap>
 #include <QAbstractProxyModel>
 #include <QMimeData>

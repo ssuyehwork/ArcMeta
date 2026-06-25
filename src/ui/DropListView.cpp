@@ -4,6 +4,7 @@
 #include <QPixmap>
 #include <QMimeData>
 #include <QUrl>
+#include <QDir>
 #include <QFileInfo>
 #include "Logger.h"
 

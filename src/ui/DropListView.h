@@ -2,6 +2,11 @@
 #define DROPLISTVIEW_H
 
 #include <QListView>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QStringList>
+#include <QModelIndex>
 
 namespace ArcMeta {
 
