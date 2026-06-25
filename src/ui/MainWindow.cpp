@@ -990,8 +990,8 @@ void MainWindow::setupSplitters() {
     // 连接任务队列信号
     connect(&AutoImportManager::instance(), &AutoImportManager::tasksStarted, this, [this](const QString& drive) {
         if (m_driveButtonMap.contains(drive)) {
-            DriveButton* btn = dynamic_cast<DriveButton*>(m_driveButtonMap[drive]);
-            if (btn && btn->state() == DriveButton::Active) {
+            DriveButton* btn = m_driveButtonMap[drive];
+            if (btn->state() == DriveButton::Active) {
                 btn->setState(DriveButton::Running);
             }
         }
@@ -999,8 +999,8 @@ void MainWindow::setupSplitters() {
 
     connect(&AutoImportManager::instance(), &AutoImportManager::tasksCompleted, this, [this](const QString& drive) {
         if (m_driveButtonMap.contains(drive)) {
-            DriveButton* btn = dynamic_cast<DriveButton*>(m_driveButtonMap[drive]);
-            if (btn && btn->state() == DriveButton::Running) {
+            DriveButton* btn = m_driveButtonMap[drive];
+            if (btn->state() == DriveButton::Running) {
                 btn->setState(DriveButton::Active);
             }
         }
@@ -1649,8 +1649,7 @@ void MainWindow::toggleDriveBar() {
 
 void MainWindow::onDriveButtonClicked(const QString& letter) {
     if (!m_driveButtonMap.contains(letter)) return;
-    DriveButton* btn = dynamic_cast<DriveButton*>(m_driveButtonMap[letter]);
-    if (!btn) return;
+    DriveButton* btn = m_driveButtonMap[letter];
 
     DriveButton::State currentState = btn->state();
 
@@ -1685,8 +1684,7 @@ void MainWindow::onDriveButtonClicked(const QString& letter) {
 
 void MainWindow::onDriveButtonContextMenu(const QString& letter) {
     if (!m_driveButtonMap.contains(letter)) return;
-    DriveButton* btn = dynamic_cast<DriveButton*>(m_driveButtonMap[letter]);
-    if (!btn) return;
+    DriveButton* btn = m_driveButtonMap[letter];
 
     QMenu menu(this);
     UiHelper::applyMenuStyle(&menu);
@@ -1718,11 +1716,9 @@ void MainWindow::loadActiveDrives() {
     for (const QString& letter : activeDrives) {
         if (m_driveButtonMap.contains(letter)) {
             // 恢复监听状态
-            DriveButton* btn = dynamic_cast<DriveButton*>(m_driveButtonMap[letter]);
-            if (btn) {
-                btn->setState(DriveButton::Active);
-                AutoImportManager::instance().setDriveListening(letter, true);
-            }
+            DriveButton* btn = m_driveButtonMap[letter];
+            btn->setState(DriveButton::Active);
+            AutoImportManager::instance().setDriveListening(letter, true);
         }
     }
 }

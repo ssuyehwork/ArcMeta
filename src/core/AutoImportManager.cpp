@@ -99,19 +99,19 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
 bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString& outDrive) {
     if (path.length() < 3 || path[1] != L':' || path[2] != L'\\') return false;
 
-    QString drive = QString::fromWCharArray(&path[0], 2).toUpper();
+    QString driveStr = QString::fromWCharArray(&path[0], 2).toUpper();
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (!m_activeDrives.contains(drive)) return false;
+        if (!m_activeDrives.contains(driveStr)) return false;
     }
 
     // 精准过滤: [Drive]:\ArcMeta.Library\
-    QString qPath = QString::fromStdWString(path);
-    QString libPrefix = drive + "\\ArcMeta.Library\\";
+    QString targetPath = QString::fromStdWString(path);
+    QString libraryPrefixStr = driveStr + "\\ArcMeta.Library\\";
 
-    if (qPath.startsWith(libPrefix, Qt::CaseInsensitive)) {
-        outDrive = drive;
+    if (targetPath.startsWith(libraryPrefixStr, Qt::CaseInsensitive)) {
+        outDrive = driveStr;
         return true;
     }
     return false;
