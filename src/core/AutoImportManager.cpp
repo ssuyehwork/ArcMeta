@@ -12,13 +12,15 @@
 #include "../ui/Logger.h"
 #include "AppConfig.h"
 #include <QtConcurrent>
-
-#ifdef run
-#undef run
-#endif
+#include <QFuture>
+#include <QFutureWatcher>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
+#endif
+
+#ifdef run
+#undef run
 #endif
 
 namespace ArcMeta {
@@ -129,16 +131,19 @@ bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString
     }
 
     // 动态拼接新规范路径: D:\ArcMeta.Library_D\
-    QString libraryPrefixStr = dStr + "\\ArcMeta.Library_" + dStr.at(0).toUpper() + "\\";
+    const QString managedLibraryPrefix = QString("%1\\ArcMeta.Library_%2\\")
+                                        .arg(dStr)
+                                        .arg(dStr.at(0).toUpper());
     
-    if (targetPath.startsWith(libraryPrefixStr, Qt::CaseInsensitive)) {
+    if (targetPath.startsWith(managedLibraryPrefix, Qt::CaseInsensitive)) {
         outDrive = dStr;
         return true;
     }
 
     // 协助定位路径标准化问题 (带盘符后缀的新版)
     if (targetPath.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
-         Logger::log(QString("[AutoImport] 判定拦截：路径包含关键字但前缀匹配失败. 预期前缀: %1, 实际路径: %2").arg(libraryPrefixStr, targetPath));
+         Logger::log(QString("[AutoImport] 判定拦截：路径包含关键字但前缀匹配失败. 预期前缀: %1, 实际路径: %2")
+                    .arg(managedLibraryPrefix, targetPath));
     }
     
     return false;
