@@ -989,8 +989,8 @@ void MainWindow::setupSplitters() {
                 m_driveBarLayout->insertWidget(m_driveBarLayout->count() - 1, btn);
                 m_driveButtonMap[letter] = btn;
 
-                // 2026-10-29 按照 Plan-105：初始化时检测托管库是否存在
-                QString targetPath = letter + "\\ArcMeta.Library_" + letter.at(0).toUpper();
+                // 2026-10-29 按照用户最新要求：初始化时检测托管库是否存在 (适配数据库式命名)
+                QString targetPath = AutoImportManager::getManagedLibraryPath(letter);
                 if (!QDir(targetPath).exists()) {
                     btn->setState(DriveButton::Missing);
                 }
@@ -1660,8 +1660,8 @@ void MainWindow::onDriveButtonClicked(const QString& letter) {
 
     DriveButton::State currentState = btn->state();
     
-    // 2026-10-29 按照 Plan-105：路径规范化
-    QString targetPath = letter + "\\ArcMeta.Library_" + letter.at(0).toUpper();
+    // 2026-10-29 按照用户最新要求：路径规范化 (适配数据库式命名)
+    QString targetPath = AutoImportManager::getManagedLibraryPath(letter);
 
     // 2026-10-29 按照 Plan-104：使用静态 Set 追踪正在初始激活的盘符
     static QSet<QString> s_activatingDrives;
@@ -1751,8 +1751,8 @@ void MainWindow::onDriveButtonContextMenu(const QString& letter) {
     QMenu menu(this);
     UiHelper::applyMenuStyle(&menu);
 
-    // 2026-10-29 按照 Plan-105：统一路径规范 ArcMeta.Library_X
-    QString targetPath = letter + "\\ArcMeta.Library_" + letter.at(0).toUpper();
+    // 2026-10-29 按照用户最新要求：统一路径规范 Arcmeta_SERIAL_LETTER
+    QString targetPath = AutoImportManager::getManagedLibraryPath(letter);
     bool exists = QDir(targetPath).exists();
 
     if (!exists) {

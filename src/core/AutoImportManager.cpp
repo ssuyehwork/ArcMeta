@@ -12,13 +12,15 @@
 #include "../ui/Logger.h"
 #include "AppConfig.h"
 #include <QtConcurrent>
-
-#ifdef run
-#undef run
-#endif
+#include <QFuture>
+#include <QFutureWatcher>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
+#endif
+
+#ifdef run
+#undef run
 #endif
 
 namespace ArcMeta {
@@ -48,11 +50,31 @@ void AutoImportManager::setDriveListening(const QString& drive, bool active) {
     QString d = drive.toUpper();
     if (active) {
         m_activeDrives.insert(d);
-        Logger::log(QString("[AutoImport] 盘符监听已【开启】: %1").arg(d));
+        // 2026-10-29 缓存路径前缀，确保判定逻辑高效且符合最新命名规范
+        QString prefix = getManagedLibraryPath(d);
+        if (!prefix.endsWith("\\")) prefix += "\\";
+        m_activeDrivePrefixes[d] = prefix;
+
+        Logger::log(QString("[AutoImport] 盘符监听已【开启】: %1 (托管区: %2)").arg(d, prefix));
     } else {
         m_activeDrives.remove(d);
+        m_activeDrivePrefixes.remove(d);
         Logger::log(QString("[AutoImport] 盘符监听已【关闭】: %1").arg(d));
     }
+}
+
+QString AutoImportManager::getManagedLibraryPath(const QString& driveLetter) {
+    if (driveLetter.isEmpty()) return "";
+    
+    QString cleanLetter = driveLetter.at(0).toUpper();
+    QString root = cleanLetter + ":\\";
+    
+    // 获取卷序列号 (如 4DFFAF5E)
+    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(root.toStdWString());
+    QString serialStr = QString::fromStdWString(volSerial).toUpper();
+
+    // 格式：Arcmeta_4DFFAF5E_I (注意：I 是盘符)
+    return QString("%1Arcmeta_%2_%3").arg(root).arg(serialStr).arg(cleanLetter);
 }
 
 void AutoImportManager::setDrivePaused(const QString& drive, bool paused) {
@@ -83,7 +105,7 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
     // 工业级排查：记录所有被捕获到的变更，确定 MFT 引擎是否断路
     // Logger::log(QString("[AutoImport] USN 捕获原始路径: %1").arg(targetPath));
 
-    if (isPathInManagedLibrary(path, drive)) {
+    if (isPathInManagedLibrary(targetPath, drive)) {
         Logger::log(QString("[AutoImport] >>> 判定通过：属于托管库路径: %1").arg(targetPath));
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -107,38 +129,34 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
     // 2026-10-29 按照 Plan-104：统一标识符为 targetPath
     QString targetPath = QString::fromStdWString(path);
 
-    if (isPathInManagedLibrary(path, drive)) {
+    if (isPathInManagedLibrary(targetPath, drive)) {
         Logger::log(QString("[AutoImport] 捕获到移除项: %1").arg(targetPath));
         MetadataManager::instance().setInvalid(path, true);
     }
 }
 
-bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString& outDrive) {
-    // 2026-10-29 按照 Plan-105：适配 ArcMeta.Library_X 命名规范
-    QString targetPath = QString::fromStdWString(path);
-
+bool AutoImportManager::isPathInManagedLibrary(const QString& targetPath, QString& outDrive) {
+    // 2026-10-29 按照用户要求：适配 Arcmeta_SERIAL_LETTER 命名规范
     if (targetPath.length() < 3 || targetPath[1] != ':' || targetPath[2] != '\\') return false;
     
     QString dStr = targetPath.left(2).toUpper();
 
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (!m_activeDrives.contains(dStr)) {
-            return false;
-        }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_activeDrivePrefixes.contains(dStr)) {
+        return false;
     }
 
-    // 动态拼接新规范路径: D:\ArcMeta.Library_D\
-    QString libraryPrefixStr = dStr + "\\ArcMeta.Library_" + dStr.at(0).toUpper() + "\\";
+    const QString& managedLibraryPrefix = m_activeDrivePrefixes[dStr];
     
-    if (targetPath.startsWith(libraryPrefixStr, Qt::CaseInsensitive)) {
+    if (targetPath.startsWith(managedLibraryPrefix, Qt::CaseInsensitive)) {
         outDrive = dStr;
         return true;
     }
 
-    // 协助定位路径标准化问题 (带盘符后缀的新版)
-    if (targetPath.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
-         Logger::log(QString("[AutoImport] 判定拦截：路径包含关键字但前缀匹配失败. 预期前缀: %1, 实际路径: %2").arg(libraryPrefixStr, targetPath));
+    // 协助定位路径标准化问题 (带序列号的新版)
+    if (targetPath.contains("Arcmeta_", Qt::CaseInsensitive)) {
+         Logger::log(QString("[AutoImport] 判定拦截：路径包含关键字但前缀匹配失败. 预期前缀: %1, 实际路径: %2")
+                    .arg(managedLibraryPrefix, targetPath));
     }
     
     return false;
@@ -146,8 +164,8 @@ bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString
 
 void AutoImportManager::scanManagedLibrary(const QString& drive) {
     QString d = drive.toUpper();
-    // 2026-10-29 按照 Plan-105：存量扫描逻辑
-    QString targetPrefix = d + "\\ArcMeta.Library_" + d.at(0).toUpper();
+    // 2026-10-29 按照用户要求：存量扫描逻辑 (适配新命名规范)
+    QString targetPrefix = getManagedLibraryPath(d);
     
     Logger::log(QString("[AutoImport] 开始存量扫描托管库: %1").arg(targetPrefix));
 

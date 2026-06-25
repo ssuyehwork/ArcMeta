@@ -21,6 +21,13 @@ public:
 
     // 针对特定盘符的监听开关
     void setDriveListening(const QString& drive, bool active);
+
+    /**
+     * @brief 2026-10-29 按照用户最新要求：采用数据库命名规范构造托管文件夹路径
+     * 格式：Arcmeta_[SERIAL]_[LETTER] (例如: D:\Arcmeta_4DFFAF5E_D)
+     */
+    static QString getManagedLibraryPath(const QString& driveLetter);
+
     // 任务队列的暂停与恢复
     void setDrivePaused(const QString& drive, bool paused);
     bool isDrivePaused(const QString& drive) const;
@@ -47,13 +54,15 @@ private:
     AutoImportManager(QObject* parent = nullptr);
     ~AutoImportManager() override;
 
-    bool isPathInManagedLibrary(const std::wstring& path, QString& outDrive);
+    bool isPathInManagedLibrary(const QString& targetPath, QString& outDrive);
 
     QTimer* m_debounceTimer = nullptr;
     std::vector<std::wstring> m_pendingPaths;
     mutable std::mutex m_mutex;
     
     QSet<QString> m_activeDrives;
+    // 缓存已激活盘符的托管库路径前缀 (如 "D:\Arcmeta_4DFFAF5E_D\")，用于秒级前缀匹配
+    QHash<QString, QString> m_activeDrivePrefixes; 
     QHash<QString, bool> m_drivePausedMap;
 };
 

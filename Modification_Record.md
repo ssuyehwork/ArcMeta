@@ -1,21 +1,17 @@
 # Modification Record
 
 ## 2026-10-29
-- **任务描述**: 托管文件夹命名规范化与存量自动化扫描优化 (Plan-105)。
+- **任务描述**: 托管文件夹命名规范化（卷序列号模式）与存量自动化扫描优化 (Plan-105)。
 - **修改文件**:
-    - **修改**: `src/ui/DriveButton.h/.cpp` (新增 `Missing` 状态及其对应的置灰视觉样式，优化 `updateStyle` 逻辑)
-    - **修改**: `src/core/AutoImportManager.h/.cpp` (实现 `scanManagedLibrary` 存量扫描接口；更新 `isPathInManagedLibrary` 以适配 `ArcMeta.Library_X` 命名规范；补全 `QtConcurrent` 依赖并加固宏防御)
-    - **修改**: `src/ui/MainWindow.cpp` (统一托管路径构造逻辑；集成目录探测与存量扫描触发；处理 `#undef run` 宏冲突)
-    - **修改**: `src/util/ImportHelper.cpp` (引入 `#undef run` 宏防御，确保异步任务稳定性)
-- **修改原因**: 统一托管文件夹命名标准以增强物理识别度，解决盘符激活后“存量文件”无法自动感应入库的问题。
+    - **修改**: `src/ui/DriveButton.h/.cpp` (新增 `Missing` 状态及其对应的置灰视觉样式)
+    - **修改**: `src/core/AutoImportManager.h/.cpp` (实现 `getManagedLibraryPath` 接口；引入路径前缀缓存 `m_activeDrivePrefixes`；重构判定与扫描逻辑以支持 `Arcmeta_[SERIAL]_[LETTER]` 规范；补全 `QtConcurrent` 依赖并加固宏防御)
+    - **修改**: `src/ui/MainWindow.cpp` (全量切换至基于卷序列号的动态路径构造逻辑；集成目录探测与存量扫描触发；处理 `#undef run` 宏冲突)
+    - **修改**: `src/util/ImportHelper.cpp` (引入 `#undef run` 宏防御)
+- **修改原因**: 统一托管文件夹命名标准与数据库对齐（卷序列号模式），增强物理识别度，解决盘符激活后“存量文件”自动入库问题。
 - **优化点**:
-    - **编译加固**: 彻底消除了 Windows 环境下 `run` 宏冲突导致的构建障碍，补全了 `QtConcurrent` 及其相关组件的头文件引用。
-    - **接口校准**: 修正了对 `MftReader` 接口的错误调用，将已废弃或错误的 `getEntryCount` 归一化为 `totalCount`。
-    - **健壮性**: 利用 `.arg()` 重构路径构造逻辑，规避字符串拼接风险；引入 `Missing` 状态增强交互指引。
-- **优化点**:
-    - **命名规范**: 托管库路径由 `ArcMeta.Library` 升级为 `ArcMeta.Library_[Drive]`（如 `D:\ArcMeta.Library_D`）。
-    - **自动化对账**: 盘符激活后自动启动后台 MFT 存量扫描，确保托管库内已有文件秒级同步至数据库。
-    - **交互增强**: 引入 `Missing` 状态，对未配置托管库的磁盘执行置灰显示并提供创建指引，提升用户体验。
+    - **命名规范升级**: 托管库路径由 `ArcMeta.Library_X` 升级为 `Arcmeta_[SERIAL]_[LETTER]`（如 `D:\Arcmeta_4DFFAF5E_D`），实现托管文件夹与特定物理卷的强绑定，防止盘符漂移导致的识别错误。
+    - **性能加固**: 引入路径前缀缓存机制，使 USN 增量判定的时间复杂度降低至 O(1)，且通过 MFT 内存索引实现存量秒级扫描。
+    - **编译稳固**: 彻底消除了 Windows 环境下 `run` 宏冲突导致的构建障碍，并将 `getEntryCount` 归一化为 `totalCount`。
 
 - **任务描述**: 盘符激活异步化重构与判定逻辑标识符规范化 (Plan-104)。
 - **修改文件**:
