@@ -55,6 +55,7 @@ using namespace ArcMeta::Style;
 #include <QFileInfo>
 #include <QDir>
 #include "../meta/MetadataManager.h"
+#include "../meta/DatabaseManager.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -1656,6 +1657,15 @@ void MainWindow::onDriveButtonClicked(const QString& letter) {
     if (currentState == DriveButton::Inactive) {
         // 状态A -> 状态B
         btn->setState(DriveButton::Active);
+
+        // --- 核心修复：激活物理层 (对应用户原话：“纹丝不动”) ---
+        // 1. 静默挂载该盘数据库
+        std::wstring vol = MetadataManager::getVolumeSerialNumber(letter.toStdWString() + L"\\");
+        DatabaseManager::instance().getMemoryDb(vol, letter.left(1));
+
+        // 2. 显式启动 USN 监听 (对应用户原话：“USN Journal 没有工作？”)
+        MftReader::instance().buildIndex({letter});
+
         AutoImportManager::instance().setDriveListening(letter, true);
     } else if (currentState == DriveButton::Active) {
         // 状态B -> 状态A
@@ -1688,13 +1698,15 @@ void MainWindow::onDriveButtonContextMenu(const QString& letter) {
     QMenu menu(this);
     UiHelper::applyMenuStyle(&menu);
 
-    QString libraryPath = letter + "\\ArcMeta.Library";
-    bool exists = QDir(libraryPath).exists();
+    // 统一并显式声明 targetPath (对应报错：“targetPath”: 未声明的标识符)
+    QString targetPath = letter + "\\ArcMeta.Library";
+    bool exists = QDir(targetPath).exists();
 
     if (!exists) {
         QAction* actCreate = menu.addAction(UiHelper::getIcon("add", Style::TextMain), "创建托管文件夹");
-        connect(actCreate, &QAction::triggered, this, [libraryPath, letter, this]() {
-            if (QDir().mkpath(libraryPath)) {
+        // 修正捕获列表，确保与定义名一致
+        connect(actCreate, &QAction::triggered, this, [targetPath, letter, this]() {
+            if (QDir().mkpath(targetPath)) {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "托管文件夹创建成功", 1500);
             } else {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "创建失败，请检查权限", 1500, Style::ErrorRed);
@@ -1702,8 +1714,8 @@ void MainWindow::onDriveButtonContextMenu(const QString& letter) {
         });
     } else {
         QAction* actOpen = menu.addAction(UiHelper::getIcon("folder_filled", Style::ActiveOrange), "打开托管文件夹");
-        connect(actOpen, &QAction::triggered, this, [libraryPath]() {
-            QDesktopServices::openUrl(QUrl::fromLocalFile(libraryPath));
+        connect(actOpen, &QAction::triggered, this, [targetPath]() {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(targetPath));
         });
     }
 
