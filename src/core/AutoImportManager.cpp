@@ -117,17 +117,18 @@ bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString
         }
     }
 
-    const QString pStr = QString::fromStdWString(path);
-    const QString libPrefix = dStr + "\\ArcMeta.Library\\";
+    // 补全类型说明符 (对应报错：缺少类型说明符)
+    QString targetPath = QString::fromStdWString(path);
+    QString libraryPrefixStr = dStr + "\\ArcMeta.Library\\";
     
-    if (pStr.startsWith(libPrefix, Qt::CaseInsensitive)) {
+    if (targetPath.startsWith(libraryPrefixStr, Qt::CaseInsensitive)) {
         outDrive = dStr;
         return true;
     }
 
     // 仅在路径确实包含 ArcMeta.Library 关键字但前缀匹配失败时记录，协助定位路径标准化问题
-    if (pStr.contains("ArcMeta.Library", Qt::CaseInsensitive)) {
-         Logger::log(QString("[AutoImport] 判定拦截：路径包含关键字但前缀匹配失败. 预期前缀: %1, 实际路径: %2").arg(libPrefix, pStr));
+    if (targetPath.contains("ArcMeta.Library", Qt::CaseInsensitive)) {
+         Logger::log(QString("[AutoImport] 判定拦截：路径包含关键字但前缀匹配失败. 预期前缀: %1, 实际路径: %2").arg(libraryPrefixStr, targetPath));
     }
     
     return false;

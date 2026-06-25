@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QSystemTrayIcon>
 #include <QSet>
+#include <unordered_map>
 
 namespace ArcMeta {
 
@@ -156,6 +157,8 @@ private:
     // 状态管理
     bool m_isPinned = false;
     bool m_isTagManagerMode = false;
+    QStringList m_activeDrives; // 对应用户原话：“已激活盘符列表”
+    std::unordered_map<QString, bool> m_drivePausedMap; // 追踪各盘任务暂停状态
     QString m_currentDataSource; // "category" or "nav"
     int m_currentCategoryId = 0;
     bool m_panelsInitialized = false; // 2026-04-12 状态锁：确保面板仅初始化一次

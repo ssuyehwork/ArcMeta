@@ -55,6 +55,7 @@ using namespace ArcMeta::Style;
 #include <QFileInfo>
 #include <QDir>
 #include "../meta/MetadataManager.h"
+#include "../meta/DatabaseManager.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -85,7 +86,6 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent), m_currentDataSource("nav"), m_currentCategoryId(0) {
     // 2026-04-12 关键修复：显式初始化面板加载状态锁，防止未定义行为导致闪退
     m_panelsInitialized = false;
-    qDebug() << "[Main] MainWindow 构造开始执行";
 
     // 2026-04-11 按照用户要求：在程序启动的最顶端预初始化 ToolTipOverlay
     // 配合 ToolTipOverlay 内部的 winId() 强行预热，消除初次显示延迟
@@ -1331,13 +1331,9 @@ void MainWindow::initResourceMonitor() {
         DWORD userCount = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
         
         PROCESS_MEMORY_COUNTERS_EX pmc;
-        SIZE_T privateBytes = 0;
         if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
-            privateBytes = pmc.PrivateUsage;
+            // 物理预留：静默记录，不再输出调试日志
         }
-        
-        qDebug() << QString("[MONITOR] GDI: %1 | USER: %2 | PrivateBytes: %3 MB")
-                    .arg(gdiCount).arg(userCount).arg(privateBytes / 1024 / 1024);
         
         // 阈值预警：如果接近 Windows 默认限制 (10000)，输出警告
         if (gdiCount > 8000 || userCount > 8000) {
@@ -1656,6 +1652,15 @@ void MainWindow::onDriveButtonClicked(const QString& letter) {
     if (currentState == DriveButton::Inactive) {
         // 状态A -> 状态B
         btn->setState(DriveButton::Active);
+
+        // --- 核心修复：激活物理层 (对应用户原话：“纹丝不动”) ---
+        // 1. 静默挂载该盘数据库
+        std::wstring vol = MetadataManager::getVolumeSerialNumber(letter.toStdWString() + L"\\");
+        DatabaseManager::instance().getMemoryDb(vol, letter.left(1));
+
+        // 2. 显式启动 USN 监听 (对应用户原话：“USN Journal 没有工作？”)
+        MftReader::instance().buildIndex({letter});
+
         AutoImportManager::instance().setDriveListening(letter, true);
     } else if (currentState == DriveButton::Active) {
         // 状态B -> 状态A
@@ -1688,13 +1693,15 @@ void MainWindow::onDriveButtonContextMenu(const QString& letter) {
     QMenu menu(this);
     UiHelper::applyMenuStyle(&menu);
 
-    QString libraryPath = letter + "\\ArcMeta.Library";
-    bool exists = QDir(libraryPath).exists();
+    // 统一并显式声明 targetPath (对应报错：“targetPath”: 未声明的标识符)
+    QString targetPath = letter + "\\ArcMeta.Library";
+    bool exists = QDir(targetPath).exists();
 
     if (!exists) {
         QAction* actCreate = menu.addAction(UiHelper::getIcon("add", Style::TextMain), "创建托管文件夹");
-        connect(actCreate, &QAction::triggered, this, [libraryPath, letter, this]() {
-            if (QDir().mkpath(libraryPath)) {
+        // 修正捕获列表，确保与定义名一致
+        connect(actCreate, &QAction::triggered, this, [targetPath, letter, this]() {
+            if (QDir().mkpath(targetPath)) {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "托管文件夹创建成功", 1500);
             } else {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "创建失败，请检查权限", 1500, Style::ErrorRed);
@@ -1702,8 +1709,8 @@ void MainWindow::onDriveButtonContextMenu(const QString& letter) {
         });
     } else {
         QAction* actOpen = menu.addAction(UiHelper::getIcon("folder_filled", Style::ActiveOrange), "打开托管文件夹");
-        connect(actOpen, &QAction::triggered, this, [libraryPath]() {
-            QDesktopServices::openUrl(QUrl::fromLocalFile(libraryPath));
+        connect(actOpen, &QAction::triggered, this, [targetPath]() {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(targetPath));
         });
     }
 
