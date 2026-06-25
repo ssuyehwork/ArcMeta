@@ -1,13 +1,9 @@
 #pragma once
 #include <QObject>
-#include <QString>
 #include <QTimer>
-#include <QSet>
-#include <QHash>
 #include <vector>
 #include <string>
 #include <mutex>
-#include <QFutureWatcher>
 
 namespace ArcMeta {
 
@@ -19,51 +15,27 @@ class AutoImportManager : public QObject {
 public:
     static AutoImportManager& instance();
 
-    // 针对特定盘符的监听开关
-    void setDriveListening(const QString& drive, bool active);
-
-    /**
-     * @brief 2026-10-29 按照用户最新要求：采用数据库命名规范构造托管文件夹路径
-     * 格式：Arcmeta_[SERIAL]_[LETTER] (例如: D:\Arcmeta_4DFFAF5E_D)
-     */
-    static QString getManagedLibraryPath(const QString& driveLetter);
-
-    // 任务队列的暂停与恢复
-    void setDrivePaused(const QString& drive, bool paused);
-    bool isDrivePaused(const QString& drive) const;
-
-    /**
-     * @brief 2026-10-29 按照 Plan-105：存量托管文件扫描
-     * 基于 MFT 内存索引快速收集路径并批量入库
-     */
-    void scanManagedLibrary(const QString& drive);
-
-signals:
-    // 当某个盘符有新任务进入队列时触发
-    void tasksStarted(const QString& drive);
-    // 当某个盘符的任务队列处理完成时触发
-    void tasksCompleted(const QString& drive);
+    // 启动/停止监听
+    void startListening();
+    void stopListening();
 
 private slots:
+    // 订阅 MftReader 发现的新增条目
     void onEntryAdded(uint64_t key);
-    void onEntryRemoved(uint64_t key);
-    void onEntryUpdated(uint64_t key);
+    // 去抖超时，合并写入数据库
     void processImportQueue();
 
 private:
     AutoImportManager(QObject* parent = nullptr);
     ~AutoImportManager() override;
 
-    bool isPathInManagedLibrary(const QString& targetPath, QString& outDrive);
+    bool checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder);
+    std::wstring getManagedFolderAbsolutePath(const std::wstring& volSerial);
 
     QTimer* m_debounceTimer = nullptr;
     std::vector<std::wstring> m_pendingPaths;
-    mutable std::mutex m_mutex;
-    
-    QSet<QString> m_activeDrives;
-    // 缓存已激活盘符的托管库路径前缀 (如 "D:\Arcmeta_4DFFAF5E_D\")，用于秒级前缀匹配
-    QHash<QString, QString> m_activeDrivePrefixes; 
-    QHash<QString, bool> m_drivePausedMap;
+    std::mutex m_queueMutex;
+    bool m_isListening = false;
 };
 
 } // namespace ArcMeta

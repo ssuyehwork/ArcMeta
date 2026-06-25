@@ -3,7 +3,6 @@
 #endif
 #include "MftReader.h"
 #include "UsnWatcher.h"
-#include "../ui/Logger.h"
 #include <winioctl.h>
 #include <Shlwapi.h>
 #pragma comment(lib, "Shlwapi.lib")
@@ -69,6 +68,8 @@ static bool enablePrivilege(LPCWSTR privilege) {
     bool ok = (GetLastError() == ERROR_SUCCESS);
     if (!ok) {
         qDebug() << "[MftReader] 权限提升失败 (可能由于非管理员运行):" << QString::fromWCharArray(privilege);
+    } else {
+        qDebug() << "[MftReader] 权限提升成功:" << QString::fromWCharArray(privilege);
     }
     CloseHandle(hToken);
     return ok;
@@ -690,55 +691,6 @@ QString MftReader::getFullPath(int index) const {
     return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFastInternal(dIdx, frn));
 }
 
-QString MftReader::getPathByUsn(uint64_t key) {
-    // 1. 解析主键
-    size_t driveIdx = (key >> 48);
-    uint64_t frn = (key & 0x0000FFFFFFFFFFFFull);
-
-    // 2. 获取卷句柄
-    std::wstring volume;
-    {
-        QReadLocker lock(&m_dataLock);
-        if (driveIdx >= m_drive_list.size()) return QString();
-        volume = m_drive_list[driveIdx];
-    }
-
-    std::wstring dev = L"\\\\.\\" + volume;
-    HANDLE hVol = CreateFileW(dev.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    if (hVol == INVALID_HANDLE_VALUE) return QString();
-
-    // 3. 打开文件句柄
-    FILE_ID_DESCRIPTOR id = {0};
-    id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
-    id.Type = FileIdType;
-    id.FileId.QuadPart = frn;
-    HANDLE hFile = OpenFileById(hVol, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
-    if (hFile == INVALID_HANDLE_VALUE) {
-        CloseHandle(hVol);
-        return QString();
-    }
-
-    // 4. 获取路径
-    wchar_t pathBuf[MAX_PATH];
-    DWORD len = GetFinalPathNameByHandleW(hFile, pathBuf, MAX_PATH, FILE_NAME_NORMALIZED);
-    QString result;
-    if (len > 0 && len < MAX_PATH) {
-        result = QString::fromWCharArray(pathBuf);
-        if (result.startsWith("\\\\?\\")) result = result.mid(4);
-    } else if (len >= MAX_PATH) {
-        std::vector<wchar_t> longBuf(len + 1);
-        if (GetFinalPathNameByHandleW(hFile, longBuf.data(), len + 1, FILE_NAME_NORMALIZED) > 0) {
-            result = QString::fromWCharArray(longBuf.data());
-            if (result.startsWith("\\\\?\\")) result = result.mid(4);
-        }
-    }
-
-    // 5. 安全释放
-    CloseHandle(hFile);
-    CloseHandle(hVol);
-    return result;
-}
-
 std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
     // 2026-05-29 物理修复：公开接口持有读锁，内部调用私有无锁逻辑，解决递归死锁。
     QReadLocker readLock(&m_dataLock);
@@ -1093,10 +1045,8 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
     }
 
     if (isNew) {
-        Logger::log(QString("[MFT] 单条新增 Key: %1").arg(compositeKey));
         emit entryAdded(compositeKey);
     } else {
-        Logger::log(QString("[MFT] 单条更新 Key: %1").arg(compositeKey));
         emit entryUpdated(compositeKey);
     }
     emit dataChanged(finalIdx);
@@ -1237,9 +1187,6 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
     }
 
     // 发射批量信号 (UI 侧可以根据需要合并处理)
-    if (!addedKeys.empty() || !updatedKeys.empty()) {
-        Logger::log(QString("[MFT] 发射批量信号: Added=%1, Updated=%2").arg(addedKeys.size()).arg(updatedKeys.size()));
-    }
     for (uint64_t key : addedKeys) emit entryAdded(key);
     for (uint64_t key : updatedKeys) emit entryUpdated(key);
     emit dataChanged(-1);
@@ -1267,7 +1214,6 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
         }
         
         lock.unlock(); // 物理安全：解锁后再发射信号
-        Logger::log(QString("[MFT] 发射移除信号 Key: %1").arg(compositeKey));
         emit entryRemoved(compositeKey);
         emit dataChanged(-1);
     }

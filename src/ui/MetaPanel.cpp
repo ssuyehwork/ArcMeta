@@ -61,6 +61,10 @@ void ElasticEdit::adjustHeight() {
     
     // 计算目标高度：像素高度 + 上下边距 + 边框
     int newHeight = qMax(28, (int)qCeil(docHeight + verticalPadding + border)); 
+    
+    // 工业级日志：记录换行与高度计算详情
+    Logger::log(QString("ElasticEdit [%1] Adjust: Width=%2, DocH=%3, TargetH=%4")
+                .arg(placeholderText()).arg(w).arg(docHeight).arg(newHeight));
 
     if (this->height() != newHeight) {
         setFixedHeight(newHeight);

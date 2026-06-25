@@ -1,6 +1,5 @@
 #include "UsnWatcher.h"
 #include "MftReader.h"
-#include "../ui/Logger.h"
 #include <QDebug>
 #include <winioctl.h>
 
@@ -47,10 +46,8 @@ void UsnWatcher::run() {
     USN_JOURNAL_DATA_V0 journalData;
     DWORD bytesReturned;
     if (!DeviceIoControl(m_hVolume, FSCTL_QUERY_USN_JOURNAL, NULL, 0, &journalData, sizeof(journalData), &bytesReturned, NULL)) {
-        Logger::log(QString("[UsnWatcher] 无法查询 USN Journal: %1").arg(QString::fromStdWString(m_volume)));
         return;
     }
-    Logger::log(QString("[UsnWatcher] 监控已启动: %1, StartUsn: %2").arg(QString::fromStdWString(m_volume)).arg(m_lastUsn));
 
     // 2. 离线追平逻辑：若 m_lastUsn 为 0，从当前 NextUsn 开始
     if (m_lastUsn == 0) {
@@ -116,7 +113,6 @@ void UsnWatcher::run() {
         }
 
         if (!updateBatch.empty()) {
-            Logger::log(QString("[UsnWatcher] %1 捕获到变更批次, 数量: %2").arg(QString::fromStdWString(m_volume)).arg(updateBatch.size()));
             // 2026-06-xx 工业级 UI 饥饿修复：
             // 如果批次过大，进行分片处理，并在分片间强制释放写锁，给 GUI 线程留出渲染时间
             const size_t chunkSize = 1000;

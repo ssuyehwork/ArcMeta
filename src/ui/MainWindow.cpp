@@ -15,13 +15,11 @@
 #include "CategoryModel.h"
 #include "NavPanel.h"
 #include "ContentPanel.h"
-#include "DriveButton.h"
 #include "MetaPanel.h"
 #include "FilterPanel.h"
 #include "TagManagerView.h"
 #include "QuickLookWindow.h"
 #include "ToolTipOverlay.h"
-#include "../core/AutoImportManager.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -41,8 +39,6 @@
 #include <QKeyEvent>
 #include <QCursor>
 #include <QApplication>
-#include <QDesktopServices>
-#include <QUrl>
 #include "../core/AppConfig.h"
 #include <QCloseEvent>
 #include <QMenu>
@@ -55,7 +51,6 @@ using namespace ArcMeta::Style;
 #include <QFileInfo>
 #include <QDir>
 #include "../meta/MetadataManager.h"
-#include "../meta/DatabaseManager.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -65,11 +60,6 @@ using namespace ArcMeta::Style;
 
 
 #include <QtConcurrent>
-#include <QSet>
-
-#ifdef run
-#undef run
-#endif
 
 namespace ArcMeta {
 
@@ -91,6 +81,7 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent), m_currentDataSource("nav"), m_currentCategoryId(0) {
     // 2026-04-12 关键修复：显式初始化面板加载状态锁，防止未定义行为导致闪退
     m_panelsInitialized = false;
+    qDebug() << "[Main] MainWindow 构造开始执行";
 
     // 2026-04-11 按照用户要求：在程序启动的最顶端预初始化 ToolTipOverlay
     // 配合 ToolTipOverlay 内部的 winId() 强行预热，消除初次显示延迟
@@ -173,9 +164,6 @@ MainWindow::MainWindow(QWidget* parent)
     }
 
     initUi();
-
-    // 2026-07-xx 按照 Plan-99：恢复激活的托管磁盘状态
-    loadActiveDrives();
 
     m_trayController = new TrayController(this);
     m_trayController->show();
@@ -945,78 +933,6 @@ void MainWindow::setupSplitters() {
     m_titleBarWidget->setObjectName("TitleBar");
     m_titleBarWidget->setFixedHeight(34);
     m_titleBarLayout = new QHBoxLayout(m_titleBarWidget);
-
-    // --- 1.1 盘符管理栏 (Plan-98, 位于标题栏下方) ---
-    m_driveBarWidget = new QWidget(centralC);
-    m_driveBarWidget->setObjectName("DriveBarContainer");
-    m_driveBarWidget->setFixedHeight(45);
-    m_driveBarWidget->setVisible(false); // 初始隐藏
-    m_driveBarWidget->setAttribute(Qt::WA_StyledBackground, true);
-    m_driveBarWidget->setStyleSheet(
-        "QWidget#DriveBarContainer {"
-        "  background-color: #252526;"
-        "  border-bottom: 1px solid #333333;"
-        "}"
-    );
-    m_driveBarLayout = new QHBoxLayout(m_driveBarWidget);
-    m_driveBarLayout->setContentsMargins(15, 0, 15, 0);
-    m_driveBarLayout->setSpacing(10);
-    m_driveBarLayout->addStretch(); // 默认推至左侧
-
-    // 2026-07-xx 按照 Plan-99：动态探测物理磁盘并创建按钮 (替换为 DriveButton)
-#ifdef Q_OS_WIN
-    const auto drives = QDir::drives();
-    for (const QFileInfo& d : drives) {
-        QString path = d.absolutePath();
-        std::wstring wPath = path.toStdWString();
-        
-        // 判定 NTFS (GetVolumeInformationW)
-        wchar_t fsName[MAX_PATH];
-        if (GetVolumeInformationW(reinterpret_cast<LPCWSTR>(wPath.c_str()), nullptr, 0, nullptr, nullptr, nullptr, fsName, MAX_PATH)) {
-            if (wcscmp(fsName, L"NTFS") == 0) {
-                QString letter = path.left(2).toUpper(); // "C:"
-                DriveButton* btn = new DriveButton(letter, m_driveBarWidget);
-                btn->setContextMenuPolicy(Qt::CustomContextMenu);
-                
-                connect(btn, &QPushButton::clicked, this, [this, letter]() {
-                    onDriveButtonClicked(letter);
-                });
-                
-                connect(btn, &QWidget::customContextMenuRequested, this, [this, letter]() {
-                    onDriveButtonContextMenu(letter);
-                });
-                
-                m_driveBarLayout->insertWidget(m_driveBarLayout->count() - 1, btn);
-                m_driveButtonMap[letter] = btn;
-
-                // 2026-10-29 按照用户最新要求：初始化时检测托管库是否存在 (适配数据库式命名)
-                QString targetPath = AutoImportManager::getManagedLibraryPath(letter);
-                if (!QDir(targetPath).exists()) {
-                    btn->setState(DriveButton::Missing);
-                }
-            }
-        }
-    }
-
-    // 连接任务队列信号
-    connect(&AutoImportManager::instance(), &AutoImportManager::tasksStarted, this, [this](const QString& drive) {
-        if (m_driveButtonMap.contains(drive)) {
-            DriveButton* btn = m_driveButtonMap[drive];
-            if (btn->state() == DriveButton::Active) {
-                btn->setState(DriveButton::Running);
-            }
-        }
-    });
-
-    connect(&AutoImportManager::instance(), &AutoImportManager::tasksCompleted, this, [this](const QString& drive) {
-        if (m_driveButtonMap.contains(drive)) {
-            DriveButton* btn = m_driveButtonMap[drive];
-            if (btn->state() == DriveButton::Running) {
-                btn->setState(DriveButton::Active);
-            }
-        }
-    });
-#endif
     // 2026-xx-xx 按照用户要求：标题栏左侧与右侧均保持 5px 呼吸边距
     m_titleBarLayout->setContentsMargins(5, 0, kEdgeMargin, 0); 
     m_titleBarLayout->setSpacing(8);
@@ -1031,7 +947,6 @@ void MainWindow::setupSplitters() {
     m_appNameLabel = new QLabel("FERREX", m_titleBarWidget);
     m_appNameLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-weight: bold;").arg(BrandOrange.name()));
     m_titleBarLayout->addWidget(m_appNameLabel);
-
     m_titleBarLayout->addStretch();
 
     // --- 2. 统一导航栏 (第二行) ---
@@ -1160,7 +1075,6 @@ void MainWindow::setupSplitters() {
     updateStatus();
 
     mainL->addWidget(m_titleBarWidget);
-    mainL->addWidget(m_driveBarWidget);
     mainL->addWidget(m_navBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
@@ -1194,13 +1108,6 @@ void MainWindow::setupCustomTitleBarButtons() {
         ).arg(hoverColor));
         return btn;
     };
-
-
-    m_btnToggleDrives = createTitleBtn("chevrons_up");
-    m_btnToggleDrives->setProperty("tooltipText", "展开/折叠盘符管理");
-    m_btnToggleDrives->installEventFilter(m_hoverFilter);
-    connect(m_btnToggleDrives, &QPushButton::clicked, this, &MainWindow::toggleDriveBar);
-    layout->addWidget(m_btnToggleDrives, 0, Qt::AlignVCenter);
 
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
@@ -1342,9 +1249,13 @@ void MainWindow::initResourceMonitor() {
         DWORD userCount = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
         
         PROCESS_MEMORY_COUNTERS_EX pmc;
+        SIZE_T privateBytes = 0;
         if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
-            // 物理预留：静默记录，不再输出调试日志
+            privateBytes = pmc.PrivateUsage;
         }
+        
+        qDebug() << QString("[MONITOR] GDI: %1 | USER: %2 | PrivateBytes: %3 MB")
+                    .arg(gdiCount).arg(userCount).arg(privateBytes / 1024 / 1024);
         
         // 阈值预警：如果接近 Windows 默认限制 (10000)，输出警告
         if (gdiCount > 8000 || userCount > 8000) {
@@ -1643,152 +1554,6 @@ void MainWindow::savePanelVisibility() {
     if (!m_filterPanel->isVisible())   hiddenPanels << "filter";
     
     AppConfig::instance().setValue("MainWindow/PanelVisibility", hiddenPanels);
-}
-
-void MainWindow::toggleDriveBar() {
-    bool isVisible = m_driveBarWidget->isVisible();
-    m_driveBarWidget->setVisible(!isVisible);
-    
-    // 图标联动：当前可见则切换为向上图标（准备收起），反之向下
-    QString iconKey = (!isVisible) ? "chevrons_down" : "chevrons_up";
-    m_btnToggleDrives->setIcon(UiHelper::getIcon(iconKey, QColor("#FFFFFF"), 18));
-}
-
-void MainWindow::onDriveButtonClicked(const QString& letter) {
-    if (!m_driveButtonMap.contains(letter)) return;
-    DriveButton* btn = m_driveButtonMap[letter];
-
-    DriveButton::State currentState = btn->state();
-    
-    // 2026-10-29 按照用户最新要求：路径规范化 (适配数据库式命名)
-    QString targetPath = AutoImportManager::getManagedLibraryPath(letter);
-
-    // 2026-10-29 按照 Plan-104：使用静态 Set 追踪正在初始激活的盘符
-    static QSet<QString> s_activatingDrives;
-
-    if (currentState == DriveButton::Inactive || currentState == DriveButton::Missing) {
-        if (s_activatingDrives.contains(letter)) return;
-
-        // 2026-10-29 按照 Plan-105：探测目录是否存在，若不存在则设为 Missing 并拦截激活
-        if (!QDir(targetPath).exists()) {
-            btn->setState(DriveButton::Missing);
-            ToolTipOverlay::instance()->showText(QCursor::pos(), 
-                QString("未发现托管文件夹: %1\n请右键创建后再激活").arg(targetPath), 3000, Style::ErrorRed);
-            return;
-        }
-
-        btn->setState(DriveButton::Running);
-        s_activatingDrives.insert(letter);
-
-        (void)QtConcurrent::run([this, letter, btn]() {
-            // 1. 获取卷序列号并挂载数据库 (耗时操作 A)
-            std::wstring vol = MetadataManager::getVolumeSerialNumber(letter.toStdWString() + L"\\");
-            DatabaseManager::instance().getMemoryDb(vol, letter.left(1));
-
-            // 2. 索引构建与 USN Journal 激活 (耗时操作 B)
-            MftReader::instance().buildIndex({letter});
-
-            // 3. 回到主线程更新 UI 与 开启监听
-            QMetaObject::invokeMethod(this, [this, letter, btn]() {
-                s_activatingDrives.remove(letter);
-                
-                // 确保按钮状态依然符合预期（未在激活期间被强制关闭）
-                if (btn->state() == DriveButton::Running) {
-                    btn->setState(DriveButton::Active);
-                    AutoImportManager::instance().setDriveListening(letter, true);
-                    
-                    // 2026-10-29 按照 Plan-105：触发存量扫描
-                    AutoImportManager::instance().scanManagedLibrary(letter);
-
-                    // 同步持久化状态
-                    QStringList activeDrives = AppConfig::instance().getValue("DriveBar/ActiveDrives").toStringList();
-                    if (!activeDrives.contains(letter)) {
-                        activeDrives.append(letter);
-                        AppConfig::instance().setValue("DriveBar/ActiveDrives", activeDrives);
-                        AppConfig::instance().sync();
-                    }
-                }
-            }, Qt::QueuedConnection);
-        });
-        return; 
-    } else if (currentState == DriveButton::Active) {
-        // 状态B -> 状态A
-        btn->setState(DriveButton::Inactive);
-        AutoImportManager::instance().setDriveListening(letter, false);
-
-        // 2026-10-29 按照 Plan-105：关闭时同步移除持久化激活状态
-        QStringList activeDrives = AppConfig::instance().getValue("DriveBar/ActiveDrives").toStringList();
-        activeDrives.removeAll(letter);
-        AppConfig::instance().setValue("DriveBar/ActiveDrives", activeDrives);
-        AppConfig::instance().sync();
-    } else if (currentState == DriveButton::Running) {
-        // 正在初始激活中的盘符禁止切换暂停，防止逻辑断路
-        if (s_activatingDrives.contains(letter)) return;
-
-        // 状态C -> 状态D
-        btn->setState(DriveButton::Paused);
-        AutoImportManager::instance().setDrivePaused(letter, true);
-    } else if (currentState == DriveButton::Paused) {
-        // 状态D -> 状态C
-        btn->setState(DriveButton::Running);
-        AutoImportManager::instance().setDrivePaused(letter, false);
-    }
-
-    // 持久化激活状态
-    QStringList activeDrives = AppConfig::instance().getValue("DriveBar/ActiveDrives").toStringList();
-    if (btn->state() != DriveButton::Inactive) {
-        if (!activeDrives.contains(letter)) activeDrives.append(letter);
-    } else {
-        activeDrives.removeAll(letter);
-    }
-    AppConfig::instance().setValue("DriveBar/ActiveDrives", activeDrives);
-    AppConfig::instance().sync();
-}
-
-void MainWindow::onDriveButtonContextMenu(const QString& letter) {
-    if (!m_driveButtonMap.contains(letter)) return;
-
-    QMenu menu(this);
-    UiHelper::applyMenuStyle(&menu);
-
-    // 2026-10-29 按照用户最新要求：统一路径规范 Arcmeta_SERIAL_LETTER
-    QString targetPath = AutoImportManager::getManagedLibraryPath(letter);
-    bool exists = QDir(targetPath).exists();
-
-    if (!exists) {
-        QAction* actCreate = menu.addAction(UiHelper::getIcon("add", Style::TextMain), "创建托管文件夹");
-        connect(actCreate, &QAction::triggered, this, [targetPath, letter, this]() {
-            if (QDir().mkpath(targetPath)) {
-                ToolTipOverlay::instance()->showText(QCursor::pos(), "托管文件夹创建成功", 1500);
-                // 创建成功后，如果按钮处于 Missing 状态，尝试刷新样式
-                if (m_driveButtonMap.contains(letter)) {
-                    DriveButton* btn = m_driveButtonMap[letter];
-                    if (btn->state() == DriveButton::Missing) {
-                        btn->setState(DriveButton::Inactive);
-                    }
-                }
-            } else {
-                ToolTipOverlay::instance()->showText(QCursor::pos(), "创建失败，请检查权限", 1500, Style::ErrorRed);
-            }
-        });
-    } else {
-        QAction* actOpen = menu.addAction(UiHelper::getIcon("folder_filled", Style::ActiveOrange), "打开托管文件夹");
-        connect(actOpen, &QAction::triggered, this, [targetPath]() {
-            QDesktopServices::openUrl(QUrl::fromLocalFile(targetPath));
-        });
-    }
-
-    menu.exec(QCursor::pos());
-}
-
-void MainWindow::loadActiveDrives() {
-    QStringList activeDrives = AppConfig::instance().getValue("DriveBar/ActiveDrives").toStringList();
-    for (const QString& letter : activeDrives) {
-        if (m_driveButtonMap.contains(letter)) {
-            // 2026-10-29 按照 Plan-104：启动时也应走异步激活链路，确保物理层就绪
-            onDriveButtonClicked(letter);
-        }
-    }
 }
 
 } // namespace ArcMeta

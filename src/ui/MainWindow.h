@@ -10,7 +10,6 @@
 #include <QHBoxLayout>
 #include <QSystemTrayIcon>
 #include <QSet>
-#include <unordered_map>
 
 namespace ArcMeta {
 
@@ -24,7 +23,6 @@ class ContentPanel;
 class MetaPanel;
 class FilterPanel;
 class SearchHistoryPanel;
-class DriveButton;
 
 /**
  * @brief 主窗口类
@@ -139,12 +137,6 @@ private:
     SearchHistoryPanel* m_searchHistoryPanel = nullptr;
     QStringList  m_searchHistory;             // 最近 10 条关键词
     
-    // 盘符管理栏 (Plan-98/99)
-    QPushButton* m_btnToggleDrives = nullptr;
-    QWidget*     m_driveBarWidget  = nullptr;
-    QHBoxLayout* m_driveBarLayout  = nullptr;
-    QMap<QString, DriveButton*> m_driveButtonMap;
-
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
     QPushButton* m_btnSync   = nullptr;
     QPushButton* m_btnLayout = nullptr;
@@ -157,8 +149,6 @@ private:
     // 状态管理
     bool m_isPinned = false;
     bool m_isTagManagerMode = false;
-    QStringList m_activeDrives; // 对应用户原话：“已激活盘符列表”
-    std::unordered_map<QString, bool> m_drivePausedMap; // 追踪各盘任务暂停状态
     QString m_currentDataSource; // "category" or "nav"
     int m_currentCategoryId = 0;
     bool m_panelsInitialized = false; // 2026-04-12 状态锁：确保面板仅初始化一次
@@ -194,19 +184,6 @@ public slots:
      * @brief 2026-07-xx 按照 Plan-63：为已有菜单填充面板显隐 Action
      */
     void populatePanelMenu(QMenu* menu);
-
-private slots:
-    /**
-     * @brief 2026-07-xx 按照 Plan-98：切换盘符管理栏显隐
-     */
-    void toggleDriveBar();
-
-    /**
-     * @brief 2026-07-xx 按照 Plan-99：盘符按钮点击处理
-     */
-    void onDriveButtonClicked(const QString& letter);
-    void onDriveButtonContextMenu(const QString& letter);
-    void loadActiveDrives();
 
 private:
     void loadPanelVisibility();

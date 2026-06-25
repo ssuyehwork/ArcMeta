@@ -20,22 +20,13 @@
 #include <objbase.h>
 #endif
 
-#ifdef run
-#undef run
-#endif
-
 namespace ArcMeta {
 
-QFuture<void> ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, QWidget* parent, bool showProgress) {
-    if (paths.isEmpty()) return {};
+void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, QWidget* parent) {
+    if (paths.isEmpty()) return;
 
-    Logger::log(QString("[ImportHelper] 开始导入路径，数量: %1, 是否显示进度: %2").arg(paths.size()).arg(showProgress));
-
-    BatchProgressDialog* progress = nullptr;
-    if (showProgress) {
-        progress = new BatchProgressDialog("正在处理项目导入...", parent);
-        progress->show();
-    }
+    BatchProgressDialog* progress = new BatchProgressDialog("正在处理项目导入...", parent);
+    progress->show();
 
     // 2026-07-xx 建立导入任务的上下文
     struct ImportContext {
@@ -46,7 +37,7 @@ QFuture<void> ImportHelper::importPaths(const QStringList& paths, int targetCate
     QPointer<BatchProgressDialog> weakProgress(progress);
 
     // 处理用户关闭进度框的操作 (中断保护)
-    if (progress) QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent]() {
+    QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent]() {
         if (!weakProgress) return;
 
         // 2026-07-xx 按照用户要求：弹出确认停止
@@ -207,7 +198,6 @@ QFuture<void> ImportHelper::importPaths(const QStringList& paths, int targetCate
             CategoryRepo::saveImmediately();
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
             
-            Logger::log(QString("[ImportHelper] 导入任务结束，成功处理: %1").arg(currentHandled));
             ToolTipOverlay::instance()->showText(QCursor::pos(), 
                 QString("已成功导入 %1 个项目并生成镜像").arg(currentHandled), 2000, QColor("#2ecc71"));
         });
@@ -216,8 +206,6 @@ QFuture<void> ImportHelper::importPaths(const QStringList& paths, int targetCate
         CoUninitialize();
         #endif
     });
-
-    return context->future;
 }
 
 } // namespace ArcMeta
