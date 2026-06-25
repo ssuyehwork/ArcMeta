@@ -105,6 +105,14 @@ CategoryPanel::CategoryPanel(QWidget* parent)
         });
     });
 
+    // 2026-xx-xx 按照 Plan-106：初始化搜索防抖计时器
+    m_searchTimer = new QTimer(this);
+    m_searchTimer->setSingleShot(true);
+    m_searchTimer->setInterval(300);
+    connect(m_searchTimer, &QTimer::timeout, this, [this]() {
+        if (m_searchEdit) onSearchTextChanged(m_searchEdit->text());
+    });
+
     initUi();
     setupContextMenu();
 
@@ -1055,7 +1063,15 @@ void CategoryPanel::initUi() {
     searchLayout->addWidget(m_searchEdit);
     m_mainLayout->addWidget(searchContainer);
 
-    connect(m_searchEdit, &QLineEdit::textChanged, this, &CategoryPanel::onSearchTextChanged);
+    // 2026-xx-xx 按照 Plan-106：防抖处理
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+        if (text.isEmpty()) {
+            m_searchTimer->stop();
+            onSearchTextChanged(""); // 清空时立即响应
+            return;
+        }
+        m_searchTimer->start();
+    });
 
     // 2026-03-xx 物理记忆：初始化后加载持久化的展开状态
     QTimer::singleShot(100, this, &CategoryPanel::loadExpandedStateFromSettings);

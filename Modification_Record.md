@@ -1,6 +1,19 @@
 # Modification Record
 
 ## 2026-11-14
+- **任务描述**: 全局信号风暴治理与增量 UI 刷新 (Plan-106)。
+- **修改文件**:
+    - **修改**: `src/meta/MetadataManager.cpp` ( Setter 通知由 Rebuild 降级为 PathUpdate)
+    - **修改**: `src/ui/MainWindow.h/.cpp` (集成 300ms 搜索防抖计时器)
+    - **修改**: `src/ui/CategoryPanel.h/.cpp` (集成 300ms 分类过滤防抖计时器)
+    - **修改**: `src/mft/MftReader.cpp` (引入批量 USN 信号整形，阈值 50 项)
+    - **修改**: `src/ui/FilterPanel.h/.cpp` (实现 `syncUIFromFilterState` 增量刷新逻辑)
+- **修改原因**: 解决高频交互导致的 UI 假死、搜索卡顿及批量入库时的信号洪流问题。
+- **优化点**:
+    - **按需刷新**: 元数据变更不再触发全量重建，仅重绘对应行。
+    - **防抖处理**: 搜索输入引入 300ms 缓冲区，大幅降低 CPU 瞬时负载。
+    - **增量渲染**: 过滤器面板实现原地状态同步，杜绝暴力销毁重建导致的视觉闪烁与内存抖动。
+
 - **任务描述**: 内容面板交互与刷新逻辑优化 (Plan-105)。
 - **修改文件**:
     - **修改**: `src/ui/DropTreeView.cpp` (移除 `dragMoveEvent` 中的 `setCurrentIndex` 调用)

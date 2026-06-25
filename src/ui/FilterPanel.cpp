@@ -41,75 +41,64 @@ static QString ratingDisplayName(int r) {
 }
 
 // ─── 自定义勾选框 ──────────────────────────────────────────────────
-class StyledCheckBox : public QCheckBox {
-public:
-    explicit StyledCheckBox(QWidget* parent = nullptr) : QCheckBox(parent) {
-        setFixedSize(15, 15);
+StyledCheckBox::StyledCheckBox(QWidget* parent) : QCheckBox(parent) {
+    setFixedSize(15, 15);
+}
+
+void StyledCheckBox::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    bool checked = isChecked();
+    
+    // 使用 QRectF + 0.5px 内缩，确保笔触四边粗细完全一致
+    QRectF rect(0.5, 0.5, width() - 1.0, height() - 1.0);
+    QColor borderColor = checked ? QColor("#378ADD") : QColor("#444444");
+    
+    painter.setPen(QPen(borderColor, 1.0));
+    painter.setBrush(QColor("#1E1E1E"));
+    painter.drawRoundedRect(rect, 2.0, 2.0);
+
+    if (checked) {
+        QPen pen(QColor("#378ADD"), 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        // 在 15x15 的区域内绘制对勾折线，坐标相对于 widget 自身
+        QPolygonF checkMark;
+        checkMark << QPointF(2.5, 7.5)
+                  << QPointF(5.5, 11.0)
+                  << QPointF(12.0, 3.5);
+        painter.drawPolyline(checkMark);
     }
-
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
-
-        bool checked = isChecked();
-        
-        // 使用 QRectF + 0.5px 内缩，确保笔触四边粗细完全一致
-        QRectF rect(0.5, 0.5, width() - 1.0, height() - 1.0);
-        QColor borderColor = checked ? QColor("#378ADD") : QColor("#444444");
-        
-        painter.setPen(QPen(borderColor, 1.0));
-        painter.setBrush(QColor("#1E1E1E"));
-        painter.drawRoundedRect(rect, 2.0, 2.0);
-
-        if (checked) {
-            QPen pen(QColor("#378ADD"), 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
-            painter.setPen(pen);
-            painter.setBrush(Qt::NoBrush);
-            // 在 15x15 的区域内绘制对勾折线，坐标相对于 widget 自身
-            QPolygonF checkMark;
-            checkMark << QPointF(2.5, 7.5)
-                      << QPointF(5.5, 11.0)
-                      << QPointF(12.0, 3.5);
-            painter.drawPolyline(checkMark);
-        }
-    }
-};
+}
 
 // ─── 可整行点击的行控件 ────────────────────────────────────────────
-/**
- * ClickableRow: 点击行内任意位置均触发关联 QCheckBox 的 toggle。
- * 复选框本身的点击事件不需要额外处理，它会自然传播。
- */
-class ClickableRow : public QWidget {
-public:
-    explicit ClickableRow(StyledCheckBox* cb, QWidget* parent = nullptr)
-        : QWidget(parent), m_cb(cb) {
-        setCursor(Qt::PointingHandCursor);
-        setAttribute(Qt::WA_StyledBackground);
-    }
-protected:
-    void mousePressEvent(QMouseEvent* e) override {
-        if (e->button() == Qt::LeftButton) {
-            // 如果点击位置不在复选框上，手动 toggle，避免双重触发
-            QPoint local = m_cb->mapFromGlobal(e->globalPosition().toPoint());
-            if (!m_cb->rect().contains(local)) {
-                m_cb->setChecked(!m_cb->isChecked());
-            }
+ClickableRow::ClickableRow(StyledCheckBox* cb, QWidget* parent)
+    : QWidget(parent), m_cb(cb) {
+    setCursor(Qt::PointingHandCursor);
+    setAttribute(Qt::WA_StyledBackground);
+}
+
+void ClickableRow::mousePressEvent(QMouseEvent* e) {
+    if (e->button() == Qt::LeftButton) {
+        // 如果点击位置不在复选框上，手动 toggle，避免双重触发
+        QPoint local = m_cb->mapFromGlobal(e->globalPosition().toPoint());
+        if (!m_cb->rect().contains(local)) {
+            m_cb->setChecked(!m_cb->isChecked());
         }
-        QWidget::mousePressEvent(e);
     }
-    void enterEvent(QEnterEvent* e) override {
-        setStyleSheet("QWidget { background: #2A2A2A; border-radius: 4px; }");
-        QWidget::enterEvent(e);
-    }
-    void leaveEvent(QEvent* e) override {
-        setStyleSheet("");
-        QWidget::leaveEvent(e);
-    }
-private:
-    StyledCheckBox* m_cb;
-};
+    QWidget::mousePressEvent(e);
+}
+
+void ClickableRow::enterEvent(QEnterEvent* e) {
+    setStyleSheet("QWidget { background: #2A2A2A; border-radius: 4px; }");
+    QWidget::enterEvent(e);
+}
+
+void ClickableRow::leaveEvent(QEvent* e) {
+    setStyleSheet("");
+    QWidget::leaveEvent(e);
+}
 
 // ─── ColorBlock ──────────────────────────────────────────────────
 ColorBlock::ColorBlock(const QColor& color, QWidget* parent) 
@@ -278,6 +267,59 @@ void InlineHueSlider::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 // ─── FilterPanel ──────────────────────────────────────────────────
+
+void FilterPanel::syncUIFromFilterState() {
+    updateHeaderStatus();
+    
+    // 遍历所有 StyledCheckBox 及其对应的 ClickableRow
+    QList<StyledCheckBox*> allCheckBoxes = findChildren<StyledCheckBox*>();
+    for (auto* cb : allCheckBoxes) {
+        // 根据 checkbox 所在的上下文寻找对应的标识符
+        ClickableRow* row = qobject_cast<ClickableRow*>(cb->parentWidget());
+        if (!row) continue;
+        
+        QLabel* labelWidget = row->findChild<QLabel*>();
+        if (!labelWidget) continue;
+        
+        QString text = labelWidget->text();
+        bool shouldCheck = false;
+        
+        // 1. 评级匹配
+        if (text == "无评级") shouldCheck = m_filter.ratings.contains(0);
+        else if (text.contains("★")) shouldCheck = m_filter.ratings.contains(text.count("★"));
+        
+        // 2. 颜色匹配 (无色标)
+        else if (text == "无色标") shouldCheck = m_filter.colors.contains("");
+        
+        // 3. 类型/日期匹配
+        else if (m_filter.types.contains(text)) shouldCheck = true;
+        else if (m_filter.createDates.contains(text)) shouldCheck = true;
+        else if (m_filter.modifyDates.contains(text)) shouldCheck = true;
+        
+        // 4. 链接/备注/比例匹配
+        else if (text == "有链接") shouldCheck = (m_filter.linkPresence == FilterState::Yes);
+        else if (text == "无链接") shouldCheck = (m_filter.linkPresence == FilterState::No);
+        else if (text == "有备注") shouldCheck = (m_filter.notePresence == FilterState::Yes);
+        else if (text == "无备注") shouldCheck = (m_filter.notePresence == FilterState::No);
+        else if (text == "横图") shouldCheck = (m_filter.ratio == FilterState::Horizontal);
+        else if (text == "竖图") shouldCheck = (m_filter.ratio == FilterState::Vertical);
+        else if (text == "方形") shouldCheck = (m_filter.ratio == FilterState::Square);
+        else if (text == "16:9") shouldCheck = (m_filter.ratio == FilterState::Ratio169);
+
+        cb->blockSignals(true);
+        cb->setChecked(shouldCheck);
+        cb->blockSignals(false);
+    }
+
+    // 5. 颜色色块同步
+    QList<ColorBlock*> allColorBlocks = findChildren<ColorBlock*>();
+    for (auto* block : allColorBlocks) {
+        block->blockSignals(true);
+        block->setChecked(m_filter.colors.contains(block->color().name().toUpper()));
+        block->blockSignals(false);
+    }
+}
+
 FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     // 2026-07-xx 按照 Plan-63：启用右键菜单
     setContextMenuPolicy(Qt::CustomContextMenu);
@@ -506,13 +548,49 @@ void FilterPanel::populate(
         return;
     }
 
+    // 2026-xx-xx 按照 Plan-106：增量更新判定
+    // 判定依据：如果各项的数量（Keys）没有发生物理变动，仅执行增量同步，不重建 UI
+    bool structureChanged = (m_ratingCounts.keys() != ratingCounts.keys() ||
+                             m_colorCounts.keys() != colorCounts.keys() ||
+                             m_typeCounts.keys() != typeCounts.keys() ||
+                             m_createDateCounts.keys() != createDateCounts.keys() ||
+                             m_modifyDateCounts.keys() != modifyDateCounts.keys() ||
+                             m_emptyFolderCount != emptyFolderCount);
+
     m_ratingCounts     = ratingCounts;
     m_colorCounts      = colorCounts;
     m_typeCounts       = typeCounts;
     m_createDateCounts = createDateCounts;
     m_modifyDateCounts = modifyDateCounts;
     m_emptyFolderCount = emptyFolderCount;
-    rebuildGroups();
+
+    if (structureChanged) {
+        rebuildGroups();
+    } else {
+        syncUIFromFilterState();
+        // 更新现有行中的计数 Label (Cnt)
+        QList<ClickableRow*> rows = m_container->findChildren<ClickableRow*>();
+        for (auto* row : rows) {
+             QList<QLabel*> labels = row->findChildren<QLabel*>();
+             if (labels.size() >= 2) {
+                 QLabel* cntLabel = labels.last(); // 计数 Label 在末尾
+                 QLabel* nameLabel = labels.at(labels.size() - 2);
+                 QString name = nameLabel->text();
+                 
+                 int count = 0;
+                 if (name == "无评级") count = m_ratingCounts[0];
+                 else if (name.contains("★")) count = m_ratingCounts[name.count("★")];
+                 else if (name == "空文件夹") count = m_emptyFolderCount;
+                 else if (name == "文件夹") count = m_typeCounts["folder"];
+                 else if (name == "文件") count = m_typeCounts["file"];
+                 else if (m_typeCounts.contains(name)) count = m_typeCounts[name];
+                 else if (m_createDateCounts.contains(name)) count = m_createDateCounts[name];
+                 else if (m_modifyDateCounts.contains(name)) count = m_modifyDateCounts[name];
+                 
+                 cntLabel->setText(QString::number(count));
+             }
+        }
+    }
 }
 
 void FilterPanel::rebuildDateCheckboxes(bool isCreateDate, bool descending) {

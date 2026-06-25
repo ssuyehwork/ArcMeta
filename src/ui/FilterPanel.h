@@ -17,6 +17,28 @@ namespace ArcMeta {
 
 class SearchHistoryPanel;
 
+// ─── 自定义勾选框 ──────────────────────────────────────────────────
+class StyledCheckBox : public QCheckBox {
+    Q_OBJECT
+public:
+    explicit StyledCheckBox(QWidget* parent = nullptr);
+protected:
+    void paintEvent(QPaintEvent* event) override;
+};
+
+// ─── 可整行点击的行控件 ────────────────────────────────────────────
+class ClickableRow : public QWidget {
+    Q_OBJECT
+public:
+    explicit ClickableRow(StyledCheckBox* cb, QWidget* parent = nullptr);
+protected:
+    void mousePressEvent(QMouseEvent* e) override;
+    void enterEvent(QEnterEvent* e) override;
+    void leaveEvent(QEvent* e) override;
+private:
+    StyledCheckBox* m_cb;
+};
+
 // ─── 物理色块控件 (ColorBlock) ─────────────────────────────────────
 class ColorBlock : public QWidget {
     Q_OBJECT
@@ -131,6 +153,11 @@ public:
     );
 
     FilterState currentFilter() const { return m_filter; }
+
+    /**
+     * @brief 增量同步 UI 状态，避免 rebuildGroups 导致的暴力重构
+     */
+    void syncUIFromFilterState();
 
     /**
      * @brief 外部驱动颜色选择（逻辑中枢：同步最近筛选与过滤状态）
