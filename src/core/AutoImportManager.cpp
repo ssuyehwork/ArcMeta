@@ -39,7 +39,7 @@ void AutoImportManager::setDriveListening(const QString& drive, bool active) {
     if (active) {
         m_activeDrives.insert(drive.toUpper());
     } else {
-        m_activeDrives.erase(drive.toUpper());
+        m_activeDrives.remove(drive.toUpper());
     }
     qDebug() << "[AutoImport] 盘符监听状态变更:" << drive << "->" << active;
 }
@@ -55,8 +55,7 @@ void AutoImportManager::setDrivePaused(const QString& drive, bool paused) {
 
 bool AutoImportManager::isDrivePaused(const QString& drive) const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_drivePausedMap.find(drive.toUpper());
-    return it != m_drivePausedMap.end() && it->second;
+    return m_drivePausedMap.value(drive.toUpper(), false);
 }
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
@@ -104,12 +103,14 @@ bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_activeDrives.find(drive) == m_activeDrives.end()) return false;
+        if (!m_activeDrives.contains(drive)) return false;
     }
 
     // 精准过滤: [Drive]:\ArcMeta.Library\
-    std::wstring libraryPrefix = drive.toStdWString() + L"\\ArcMeta.Library\\";
-    if (_wcsnicmp(path.c_str(), libraryPrefix.c_str(), libraryPrefix.size()) == 0) {
+    QString qPath = QString::fromStdWString(path);
+    QString libPrefix = drive + "\\ArcMeta.Library\\";
+
+    if (qPath.startsWith(libPrefix, Qt::CaseInsensitive)) {
         outDrive = drive;
         return true;
     }
@@ -123,10 +124,10 @@ void AutoImportManager::processImportQueue() {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         for (const auto& p : m_pendingPaths) {
+            if (p.length() < 2) continue;
             QString drive = QString::fromWCharArray(&p[0], 2).toUpper();
 
-            auto it = m_drivePausedMap.find(drive);
-            bool isPaused = (it != m_drivePausedMap.end() && it->second);
+            bool isPaused = m_drivePausedMap.value(drive, false);
 
             if (isPaused) {
                 stillPending.push_back(p);

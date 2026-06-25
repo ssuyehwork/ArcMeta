@@ -12,6 +12,10 @@
     - **任务隔离**: 支持对不同物理磁盘独立设置监听与暂停状态，互不干扰。
     - **静默入库**: 自动感应 USN 变更并执行去抖批量入库，确保 I/O 效率。
     - **持久化**: 盘符激活状态记录于 `AppConfig`，应用重启后自动恢复监听。
+- **紧急修复**:
+    - **编译纠偏**: 修复了 `MainWindow.cpp` 缺失 `DriveButton.h` 导致的类型未定义错误。
+    - **容器替换**: 将 `AutoImportManager` 中的 `std::unordered_set/map` 替换为 `QSet/QHash`，解决了命名空间冲突与 MSVC 语法错误。
+    - **路径逻辑**: 重构 `isPathInManagedLibrary`，将宽字符 API 比较改为 `QString` 比较，消除了 `_wcsnicmp` 参数不匹配及变量未声明问题。
 
 ## 2026-10-27
 - **任务描述**: 目录导航面板隐式双区拆分及收藏功能实现 (Plan-95)。

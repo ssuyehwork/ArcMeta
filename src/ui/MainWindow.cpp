@@ -15,6 +15,7 @@
 #include "CategoryModel.h"
 #include "NavPanel.h"
 #include "ContentPanel.h"
+#include "DriveButton.h"
 #include "MetaPanel.h"
 #include "FilterPanel.h"
 #include "TagManagerView.h"

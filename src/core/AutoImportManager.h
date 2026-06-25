@@ -4,6 +4,8 @@
 #include <vector>
 #include <string>
 #include <mutex>
+#include <QSet>
+#include <QHash>
 
 namespace ArcMeta {
 
@@ -43,8 +45,8 @@ private:
     std::vector<std::wstring> m_pendingPaths;
     mutable std::mutex m_mutex;
 
-    std::unordered_set<QString> m_activeDrives;
-    std::unordered_map<QString, bool> m_drivePausedMap;
+    QSet<QString> m_activeDrives;
+    QHash<QString, bool> m_drivePausedMap;
 };
 
 } // namespace ArcMeta
