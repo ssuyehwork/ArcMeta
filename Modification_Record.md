@@ -1,13 +1,21 @@
 # Modification Record
 
 ## 2026-11-14
+- **任务描述**: 导航面板布局还原与收藏夹修复 (Plan-107)。
+- **修改文件**:
+    - **修改**: `src/ui/NavPanel.h/.cpp` (物理还原 `QSplitter` 架构，移除 `QScrollArea`)
+- **修改原因**: 修复导航面板无法拖拽调节比例、收藏夹展示位置异常及高度锁死问题。
+- **优化点**:
+    - **架构回归**: 恢复 `QSplitter` 弹性布局，允许用户手动调节磁盘树与收藏夹比例。
+    - **逻辑解锁**: 彻底废弃不稳定的手动像素高度计算，将空间分配交还给布局引擎。
+
 - **任务描述**: 全局信号风暴治理与增量 UI 刷新 (Plan-106)。
 - **修改文件**:
     - **修改**: `src/meta/MetadataManager.cpp` ( Setter 通知由 Rebuild 降级为 PathUpdate)
     - **修改**: `src/ui/MainWindow.h/.cpp` (集成 300ms 搜索防抖计时器)
     - **修改**: `src/ui/CategoryPanel.h/.cpp` (集成 300ms 分类过滤防抖计时器)
     - **修改**: `src/mft/MftReader.cpp` (引入批量 USN 信号整形，阈值 50 项)
-    - **修改**: `src/ui/FilterPanel.h/.cpp` (实现 `syncUIFromFilterState` 增量刷新逻辑)
+    - **修改**: `src/ui/FilterPanel.h/.cpp` (实现 `syncUIFromFilterState` 增量刷新逻辑，修复 `Q_OBJECT` 缺失编译错误)
 - **修改原因**: 解决高频交互导致的 UI 假死、搜索卡顿及批量入库时的信号洪流问题。
 - **优化点**:
     - **按需刷新**: 元数据变更不再触发全量重建，仅重绘对应行。
