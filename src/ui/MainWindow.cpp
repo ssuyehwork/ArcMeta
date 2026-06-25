@@ -1684,7 +1684,6 @@ void MainWindow::onDriveButtonClicked(const QString& letter) {
 
 void MainWindow::onDriveButtonContextMenu(const QString& letter) {
     if (!m_driveButtonMap.contains(letter)) return;
-    DriveButton* btn = m_driveButtonMap[letter];
 
     QMenu menu(this);
     UiHelper::applyMenuStyle(&menu);
