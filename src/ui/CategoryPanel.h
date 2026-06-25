@@ -125,6 +125,7 @@ private:
     CategoryFilterProxyModel* m_proxyModel = nullptr;
     QLineEdit* m_searchEdit = nullptr;
     QTimer* m_refreshTimer = nullptr;
+    QTimer* m_searchTimer = nullptr; // 2026-xx-xx 按照 Plan-106：搜索防抖计时器
 
     // 2026-03-xx 会话级解锁列表：存储当前已验证通过的加密分类 ID
     QSet<int> m_unlockedIds;

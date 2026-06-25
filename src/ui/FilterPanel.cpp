@@ -278,6 +278,59 @@ void InlineHueSlider::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 // ─── FilterPanel ──────────────────────────────────────────────────
+
+void FilterPanel::syncUIFromFilterState() {
+    updateHeaderStatus();
+
+    // 遍历所有 StyledCheckBox 及其对应的 ClickableRow
+    QList<StyledCheckBox*> allCheckBoxes = findChildren<StyledCheckBox*>();
+    for (auto* cb : allCheckBoxes) {
+        // 根据 checkbox 所在的上下文寻找对应的标识符
+        ClickableRow* row = qobject_cast<ClickableRow*>(cb->parentWidget());
+        if (!row) continue;
+
+        QLabel* labelWidget = row->findChild<QLabel*>();
+        if (!labelWidget) continue;
+
+        QString text = labelWidget->text();
+        bool shouldCheck = false;
+
+        // 1. 评级匹配
+        if (text == "无评级") shouldCheck = m_filter.ratings.contains(0);
+        else if (text.contains("★")) shouldCheck = m_filter.ratings.contains(text.count("★"));
+
+        // 2. 颜色匹配 (无色标)
+        else if (text == "无色标") shouldCheck = m_filter.colors.contains("");
+
+        // 3. 类型/日期匹配
+        else if (m_filter.types.contains(text)) shouldCheck = true;
+        else if (m_filter.createDates.contains(text)) shouldCheck = true;
+        else if (m_filter.modifyDates.contains(text)) shouldCheck = true;
+
+        // 4. 链接/备注/比例匹配
+        else if (text == "有链接") shouldCheck = (m_filter.linkPresence == FilterState::Yes);
+        else if (text == "无链接") shouldCheck = (m_filter.linkPresence == FilterState::No);
+        else if (text == "有备注") shouldCheck = (m_filter.notePresence == FilterState::Yes);
+        else if (text == "无备注") shouldCheck = (m_filter.notePresence == FilterState::No);
+        else if (text == "横图") shouldCheck = (m_filter.ratio == FilterState::Horizontal);
+        else if (text == "竖图") shouldCheck = (m_filter.ratio == FilterState::Vertical);
+        else if (text == "方形") shouldCheck = (m_filter.ratio == FilterState::Square);
+        else if (text == "16:9") shouldCheck = (m_filter.ratio == FilterState::Ratio169);
+
+        cb->blockSignals(true);
+        cb->setChecked(shouldCheck);
+        cb->blockSignals(false);
+    }
+
+    // 5. 颜色色块同步
+    QList<ColorBlock*> allColorBlocks = findChildren<ColorBlock*>();
+    for (auto* block : allColorBlocks) {
+        block->blockSignals(true);
+        block->setChecked(m_filter.colors.contains(block->color().name().toUpper()));
+        block->blockSignals(false);
+    }
+}
+
 FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     // 2026-07-xx 按照 Plan-63：启用右键菜单
     setContextMenuPolicy(Qt::CustomContextMenu);
@@ -506,13 +559,49 @@ void FilterPanel::populate(
         return;
     }
 
+    // 2026-xx-xx 按照 Plan-106：增量更新判定
+    // 判定依据：如果各项的数量（Keys）没有发生物理变动，仅执行增量同步，不重建 UI
+    bool structureChanged = (m_ratingCounts.keys() != ratingCounts.keys() ||
+                             m_colorCounts.keys() != colorCounts.keys() ||
+                             m_typeCounts.keys() != typeCounts.keys() ||
+                             m_createDateCounts.keys() != createDateCounts.keys() ||
+                             m_modifyDateCounts.keys() != modifyDateCounts.keys() ||
+                             m_emptyFolderCount != emptyFolderCount);
+
     m_ratingCounts     = ratingCounts;
     m_colorCounts      = colorCounts;
     m_typeCounts       = typeCounts;
     m_createDateCounts = createDateCounts;
     m_modifyDateCounts = modifyDateCounts;
     m_emptyFolderCount = emptyFolderCount;
-    rebuildGroups();
+
+    if (structureChanged) {
+        rebuildGroups();
+    } else {
+        syncUIFromFilterState();
+        // 更新现有行中的计数 Label (Cnt)
+        QList<ClickableRow*> rows = m_container->findChildren<ClickableRow*>();
+        for (auto* row : rows) {
+             QList<QLabel*> labels = row->findChildren<QLabel*>();
+             if (labels.size() >= 2) {
+                 QLabel* cntLabel = labels.last(); // 计数 Label 在末尾
+                 QLabel* nameLabel = labels.at(labels.size() - 2);
+                 QString name = nameLabel->text();
+
+                 int count = 0;
+                 if (name == "无评级") count = m_ratingCounts[0];
+                 else if (name.contains("★")) count = m_ratingCounts[name.count("★")];
+                 else if (name == "空文件夹") count = m_emptyFolderCount;
+                 else if (name == "文件夹") count = m_typeCounts["folder"];
+                 else if (name == "文件") count = m_typeCounts["file"];
+                 else if (m_typeCounts.contains(name)) count = m_typeCounts[name];
+                 else if (m_createDateCounts.contains(name)) count = m_createDateCounts[name];
+                 else if (m_modifyDateCounts.contains(name)) count = m_modifyDateCounts[name];
+
+                 cntLabel->setText(QString::number(count));
+             }
+        }
+    }
 }
 
 void FilterPanel::rebuildDateCheckboxes(bool isCreateDate, bool descending) {

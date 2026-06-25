@@ -1186,10 +1186,14 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
         }
     }
 
-    // 发射批量信号 (UI 侧可以根据需要合并处理)
-    for (uint64_t key : addedKeys) emit entryAdded(key);
-    for (uint64_t key : updatedKeys) emit entryUpdated(key);
-    emit dataChanged(-1);
+    // 2026-xx-xx 按照 Plan-106：策略：小批量发送单体信号（保证实时性），大批量发送宏观信号（保护 UI）
+    if (addedKeys.size() + updatedKeys.size() < 50) {
+        for (uint64_t key : addedKeys) emit entryAdded(key);
+        for (uint64_t key : updatedKeys) emit entryUpdated(key);
+    } else {
+        // 超过 50 项视为“洪流”，仅发射一次全局变动信号
+        emit dataChanged(-1);
+    }
 }
 
 void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {

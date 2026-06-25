@@ -448,6 +448,11 @@ void MainWindow::initUi() {
     m_searchHistoryPanel = new SearchHistoryPanel(this);
     m_searchHistoryPanel->setHistory(m_searchHistory);
 
+    // 2026-xx-xx 按照 Plan-106：初始化搜索防抖计时器
+    m_searchTimer = new QTimer(this);
+    m_searchTimer->setSingleShot(true);
+    m_searchTimer->setInterval(300);
+
     // 回车搜索核心逻辑 (2026-07-xx 定点修复：搜索框作为筛选器的一个输入组件，走本地过滤引擎)
     auto doSearch = [this](const QString& keyword) {
         if (m_isTagManagerMode) {
@@ -480,16 +485,18 @@ void MainWindow::initUi() {
     });
 
     // 2026-04-xx 按照用户要求：支持标签管理模式下的实时搜索
+    // 2026-xx-xx 按照 Plan-106：防抖处理
     connect(m_searchEdit, &QLineEdit::textChanged, this, [this, doSearch](const QString& text) {
-        if (m_isTagManagerMode) {
-            m_tagManagerView->search(text.trimmed());
+        if (text.isEmpty()) {
+            m_searchTimer->stop();
+            doSearch(""); // 清空时立即响应
             return;
         }
+        m_searchTimer->start();
+    });
 
-        // 2026-07-xx 定点修复：搜索框清空时直接触发 doSearch("") 重置本地 keyword 过滤，不做视图回滚
-        if (text.isEmpty() && m_contentPanel) {
-            doSearch("");
-        }
+    connect(m_searchTimer, &QTimer::timeout, this, [this, doSearch]() {
+        doSearch(m_searchEdit->text().trimmed());
     });
     
     m_searchEdit->installEventFilter(this); // 拦截 FocusIn 事件展示历史面板
