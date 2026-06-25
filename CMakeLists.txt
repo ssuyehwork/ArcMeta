@@ -46,6 +46,8 @@ set(SOURCES
     src/meta/sqlite3.h
     src/core/CoreController.cpp
     src/core/CoreController.h
+    src/core/AutoImportManager.cpp
+    src/core/AutoImportManager.h
     src/core/CacheManager.cpp
     src/core/CacheManager.h
     src/core/IndexedEntry.h
@@ -86,6 +88,8 @@ set(SOURCES
     src/ui/ColorPicker.h
     src/ui/ContentPanel.cpp
     src/ui/ContentPanel.h
+    src/ui/DriveButton.cpp
+    src/ui/DriveButton.h
     src/ui/DropJustifiedView.cpp
     src/ui/DropJustifiedView.h
     src/ui/DropListView.cpp

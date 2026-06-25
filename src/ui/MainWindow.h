@@ -23,6 +23,7 @@ class ContentPanel;
 class MetaPanel;
 class FilterPanel;
 class SearchHistoryPanel;
+class DriveButton;
 
 /**
  * @brief 主窗口类
@@ -141,7 +142,7 @@ private:
     QPushButton* m_btnToggleDrives = nullptr;
     QWidget*     m_driveBarWidget  = nullptr;
     QHBoxLayout* m_driveBarLayout  = nullptr;
-    QMap<QString, QPushButton*> m_driveButtonMap;
+    QMap<QString, DriveButton*> m_driveButtonMap;
 
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
     QPushButton* m_btnSync   = nullptr;
@@ -200,7 +201,9 @@ private slots:
     /**
      * @brief 2026-07-xx 按照 Plan-99：盘符按钮点击处理
      */
-    void onDriveButtonClicked(const QString& letter, bool checked);
+    void onDriveButtonClicked(const QString& letter);
+    void onDriveButtonContextMenu(const QString& letter);
+    void loadActiveDrives();
 
 private:
     void loadPanelVisibility();

@@ -15,11 +15,13 @@
 #include "CategoryModel.h"
 #include "NavPanel.h"
 #include "ContentPanel.h"
+#include "DriveButton.h"
 #include "MetaPanel.h"
 #include "FilterPanel.h"
 #include "TagManagerView.h"
 #include "QuickLookWindow.h"
 #include "ToolTipOverlay.h"
+#include "../core/AutoImportManager.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -39,6 +41,8 @@
 #include <QKeyEvent>
 #include <QCursor>
 #include <QApplication>
+#include <QDesktopServices>
+#include <QUrl>
 #include "../core/AppConfig.h"
 #include <QCloseEvent>
 #include <QMenu>
@@ -164,6 +168,9 @@ MainWindow::MainWindow(QWidget* parent)
     }
 
     initUi();
+
+    // 2026-07-xx 按照 Plan-99：恢复激活的托管磁盘状态
+    loadActiveDrives();
 
     m_trayController = new TrayController(this);
     m_trayController->show();
@@ -951,7 +958,7 @@ void MainWindow::setupSplitters() {
     m_driveBarLayout->setSpacing(10);
     m_driveBarLayout->addStretch(); // 默认推至左侧
 
-    // 2026-07-xx 按照 Plan-99：动态探测物理磁盘并创建按钮
+    // 2026-07-xx 按照 Plan-99：动态探测物理磁盘并创建按钮 (替换为 DriveButton)
 #ifdef Q_OS_WIN
     const auto drives = QDir::drives();
     for (const QFileInfo& d : drives) {
@@ -963,19 +970,15 @@ void MainWindow::setupSplitters() {
         if (GetVolumeInformationW(reinterpret_cast<LPCWSTR>(wPath.c_str()), nullptr, 0, nullptr, nullptr, nullptr, fsName, MAX_PATH)) {
             if (wcscmp(fsName, L"NTFS") == 0) {
                 QString letter = path.left(2).toUpper(); // "C:"
-                QPushButton* btn = new QPushButton(letter, m_driveBarWidget);
-                btn->setCheckable(true);
-                btn->setFixedSize(50, 26);
-                btn->setCursor(Qt::PointingHandCursor);
+                DriveButton* btn = new DriveButton(letter, m_driveBarWidget);
+                btn->setContextMenuPolicy(Qt::CustomContextMenu);
                 
-                btn->setStyleSheet(QString(
-                    "QPushButton { background-color: #333333; border: 1px solid #444; border-radius: 4px; color: #CCC; font-size: 11px; font-weight: bold; }"
-                    "QPushButton:hover { background-color: #3E3E42; border-color: %1; }"
-                    "QPushButton:checked { background-color: %1; color: #FFF; border-color: %1; }"
-                ).arg(qssColor(PrimaryBlue)));
+                connect(btn, &QPushButton::clicked, this, [this, letter]() {
+                    onDriveButtonClicked(letter);
+                });
                 
-                connect(btn, &QPushButton::toggled, this, [this, letter](bool checked) {
-                    onDriveButtonClicked(letter, checked);
+                connect(btn, &QWidget::customContextMenuRequested, this, [this, letter]() {
+                    onDriveButtonContextMenu(letter);
                 });
                 
                 m_driveBarLayout->insertWidget(m_driveBarLayout->count() - 1, btn);
@@ -983,6 +986,25 @@ void MainWindow::setupSplitters() {
             }
         }
     }
+
+    // 连接任务队列信号
+    connect(&AutoImportManager::instance(), &AutoImportManager::tasksStarted, this, [this](const QString& drive) {
+        if (m_driveButtonMap.contains(drive)) {
+            DriveButton* btn = m_driveButtonMap[drive];
+            if (btn->state() == DriveButton::Active) {
+                btn->setState(DriveButton::Running);
+            }
+        }
+    });
+
+    connect(&AutoImportManager::instance(), &AutoImportManager::tasksCompleted, this, [this](const QString& drive) {
+        if (m_driveButtonMap.contains(drive)) {
+            DriveButton* btn = m_driveButtonMap[drive];
+            if (btn->state() == DriveButton::Running) {
+                btn->setState(DriveButton::Active);
+            }
+        }
+    });
 #endif
     // 2026-xx-xx 按照用户要求：标题栏左侧与右侧均保持 5px 呼吸边距
     m_titleBarLayout->setContentsMargins(5, 0, kEdgeMargin, 0); 
@@ -1625,9 +1647,80 @@ void MainWindow::toggleDriveBar() {
     m_btnToggleDrives->setIcon(UiHelper::getIcon(iconKey, QColor("#FFFFFF"), 18));
 }
 
-void MainWindow::onDriveButtonClicked(const QString& letter, bool checked) {
-    // TODO: 物理磁盘数据库挂载、MFT 掩码更新及实时扫描启动逻辑待后续实现
-    qDebug() << "[TODO] 盘符被点击:" << letter << " 选中状态:" << checked;
+void MainWindow::onDriveButtonClicked(const QString& letter) {
+    if (!m_driveButtonMap.contains(letter)) return;
+    DriveButton* btn = m_driveButtonMap[letter];
+
+    DriveButton::State currentState = btn->state();
+
+    if (currentState == DriveButton::Inactive) {
+        // Inactive -> Active: 开启监听
+        btn->setState(DriveButton::Active);
+        AutoImportManager::instance().setDriveListening(letter, true);
+    } else if (currentState == DriveButton::Active) {
+        // Active -> Inactive: 关闭监听
+        btn->setState(DriveButton::Inactive);
+        AutoImportManager::instance().setDriveListening(letter, false);
+    } else if (currentState == DriveButton::Running) {
+        // Running -> Paused: 暂停任务
+        btn->setState(DriveButton::Paused);
+        AutoImportManager::instance().setDrivePaused(letter, true);
+    } else if (currentState == DriveButton::Paused) {
+        // Paused -> Running: 恢复任务
+        btn->setState(DriveButton::Running);
+        AutoImportManager::instance().setDrivePaused(letter, false);
+    }
+
+    // 持久化激活状态
+    QStringList activeDrives = AppConfig::instance().getValue("DriveBar/ActiveDrives").toStringList();
+    if (btn->state() != DriveButton::Inactive) {
+        if (!activeDrives.contains(letter)) activeDrives.append(letter);
+    } else {
+        activeDrives.removeAll(letter);
+    }
+    AppConfig::instance().setValue("DriveBar/ActiveDrives", activeDrives);
+    AppConfig::instance().sync();
+}
+
+void MainWindow::onDriveButtonContextMenu(const QString& letter) {
+    if (!m_driveButtonMap.contains(letter)) return;
+    DriveButton* btn = m_driveButtonMap[letter];
+
+    QMenu menu(this);
+    UiHelper::applyMenuStyle(&menu);
+
+    QString libraryPath = letter + "\\ArcMeta.Library";
+    bool exists = QDir(libraryPath).exists();
+
+    if (!exists) {
+        QAction* actCreate = menu.addAction(UiHelper::getIcon("add", TextMain), "创建托管文件夹");
+        connect(actCreate, &QAction::triggered, this, [libraryPath, letter, this]() {
+            if (QDir().mkpath(libraryPath)) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "托管文件夹创建成功", 1500);
+            } else {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "创建失败，请检查权限", 1500, ErrorRed);
+            }
+        });
+    } else {
+        QAction* actOpen = menu.addAction(UiHelper::getIcon("folder_filled", Style::ActiveOrange), "打开托管文件夹");
+        connect(actOpen, &QAction::triggered, this, [libraryPath]() {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(libraryPath));
+        });
+    }
+
+    menu.exec(QCursor::pos());
+}
+
+void MainWindow::loadActiveDrives() {
+    QStringList activeDrives = AppConfig::instance().getValue("DriveBar/ActiveDrives").toStringList();
+    for (const QString& letter : activeDrives) {
+        if (m_driveButtonMap.contains(letter)) {
+            // 恢复监听状态
+            DriveButton* btn = m_driveButtonMap[letter];
+            btn->setState(DriveButton::Active);
+            AutoImportManager::instance().setDriveListening(letter, true);
+        }
+    }
 }
 
 } // namespace ArcMeta
