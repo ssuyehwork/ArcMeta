@@ -17,6 +17,28 @@ namespace ArcMeta {
 
 class SearchHistoryPanel;
 
+// ─── 自定义勾选框 ──────────────────────────────────────────────────
+class StyledCheckBox : public QCheckBox {
+    Q_OBJECT
+public:
+    explicit StyledCheckBox(QWidget* parent = nullptr);
+protected:
+    void paintEvent(QPaintEvent* event) override;
+};
+
+// ─── 可整行点击的行控件 ────────────────────────────────────────────
+class ClickableRow : public QWidget {
+    Q_OBJECT
+public:
+    explicit ClickableRow(StyledCheckBox* cb, QWidget* parent = nullptr);
+protected:
+    void mousePressEvent(QMouseEvent* e) override;
+    void enterEvent(QEnterEvent* e) override;
+    void leaveEvent(QEvent* e) override;
+private:
+    StyledCheckBox* m_cb;
+};
+
 // ─── 物理色块控件 (ColorBlock) ─────────────────────────────────────
 class ColorBlock : public QWidget {
     Q_OBJECT

@@ -42,9 +42,9 @@ void DropTreeView::dragMoveEvent(QDragMoveEvent* event) {
 void DropTreeView::dropEvent(QDropEvent* event) {
     if (event->mimeData()->hasUrls()) {
         QStringList paths;
-        for (const QUrl& url : event->mimeData()->urls()) {
-            if (url.isLocalFile()) {
-                paths << QDir::toNativeSeparators(url.toLocalFile());
+        for (const QUrl& u : event->mimeData()->urls()) {
+            if (u.isLocalFile()) {
+                paths << QDir::toNativeSeparators(u.toLocalFile());
             }
         }
         QModelIndex idx = indexAt(event->position().toPoint());
