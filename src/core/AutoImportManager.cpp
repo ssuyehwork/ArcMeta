@@ -91,25 +91,16 @@ bool AutoImportManager::isDrivePaused(const QString& drive) const {
 }
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
-    int idx = MftReader::instance().getIndexByKey(key);
-    if (idx < 0) {
-        // Logger::log(QString("[AutoImport] 收到无效 Entry Key: %1").arg(key));
-        return;
-    }
+    // 1. 从 USN 事件直接获取完整路径 (对应用户要求：彻底移除 getIndexByKey 调用)
+    QString targetPath = MftReader::instance().getPathByUsn(key);
+    if (targetPath.isEmpty()) return;
 
     QString drive;
-    std::wstring path = MftReader::instance().getFullPath(idx).toStdWString();
-    // 2026-10-29 按照 Plan-104：统一标识符为 targetPath
-    QString targetPath = QString::fromStdWString(path);
-
-    // 工业级排查：记录所有被捕获到的变更，确定 MFT 引擎是否断路
-    // Logger::log(QString("[AutoImport] USN 捕获原始路径: %1").arg(targetPath));
-
     if (isPathInManagedLibrary(targetPath, drive)) {
         Logger::log(QString("[AutoImport] >>> 判定通过：属于托管库路径: %1").arg(targetPath));
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            m_pendingPaths.push_back(path);
+            m_pendingPaths.push_back(targetPath.toStdWString());
         }
         emit tasksStarted(drive);
         QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
@@ -121,17 +112,14 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
 }
 
 void AutoImportManager::onEntryRemoved(uint64_t key) {
-    int idx = MftReader::instance().getIndexByKey(key);
-    if (idx < 0) return;
+    // 1. 从 USN 事件直接获取完整路径 (对应用户要求：同步修复 onEntryRemoved)
+    QString targetPath = MftReader::instance().getPathByUsn(key);
+    if (targetPath.isEmpty()) return;
 
     QString drive;
-    std::wstring path = MftReader::instance().getFullPath(idx).toStdWString();
-    // 2026-10-29 按照 Plan-104：统一标识符为 targetPath
-    QString targetPath = QString::fromStdWString(path);
-
     if (isPathInManagedLibrary(targetPath, drive)) {
         Logger::log(QString("[AutoImport] 捕获到移除项: %1").arg(targetPath));
-        MetadataManager::instance().setInvalid(path, true);
+        MetadataManager::instance().setInvalid(targetPath.toStdWString(), true);
     }
 }
 
