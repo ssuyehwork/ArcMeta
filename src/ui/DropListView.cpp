@@ -4,12 +4,52 @@
 #include <QPixmap>
 #include <QMimeData>
 #include <QUrl>
+#include <QDir>
 #include <QFileInfo>
 #include "Logger.h"
 
 namespace ArcMeta {
 
-DropListView::DropListView(QWidget* parent) : QListView(parent) {}
+DropListView::DropListView(QWidget* parent) : QListView(parent) {
+    setAcceptDrops(true);
+}
+
+void DropListView::dragEnterEvent(QDragEnterEvent* event) {
+    if (event->mimeData()->hasUrls()) {
+        event->acceptProposedAction();
+    } else {
+        QListView::dragEnterEvent(event);
+    }
+}
+
+void DropListView::dragMoveEvent(QDragMoveEvent* event) {
+    if (event->mimeData()->hasUrls()) {
+        // 物理隔离：不调用 setCurrentIndex(idx)
+        // 物理同步：显式调用基类逻辑以激活放置指示器 (Drop Indicator)
+        QListView::dragMoveEvent(event);
+        event->acceptProposedAction();
+    } else {
+        QListView::dragMoveEvent(event);
+    }
+}
+
+void DropListView::dropEvent(QDropEvent* event) {
+    if (event->mimeData()->hasUrls()) {
+        QStringList paths;
+        for (const QUrl& url : event->mimeData()->urls()) {
+            if (url.isLocalFile()) {
+                paths << QDir::toNativeSeparators(url.toLocalFile());
+            }
+        }
+        QModelIndex idx = indexAt(event->position().toPoint());
+        if (!paths.isEmpty()) {
+            emit pathsDropped(paths, idx);
+        }
+        event->acceptProposedAction();
+    } else {
+        QListView::dropEvent(event);
+    }
+}
 
 void DropListView::startDrag(Qt::DropActions supportedActions) {
     QModelIndexList indexes = selectedIndexes();

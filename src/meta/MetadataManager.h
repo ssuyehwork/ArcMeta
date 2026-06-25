@@ -10,6 +10,7 @@
 #include <unordered_set>
 #include <shared_mutex>
 #include <string>
+#include <atomic>
 
 namespace ArcMeta {
 
@@ -205,6 +206,12 @@ public:
     static std::wstring getVolumeSerialNumber(const std::wstring& path);
 
     /**
+     * @brief 设置内部操作标志位，用于抑制冗余信号刷新
+     */
+    void setInternalOperating(bool operating) { m_isInternalOperating = operating; }
+    bool isInternalOperating() const { return m_isInternalOperating; }
+
+    /**
      * @brief 安全解析路径组件
      * @param normalizedPath 标准化后的路径
      * @param isFolder 是否为文件夹
@@ -288,6 +295,7 @@ private:
 
     mutable std::shared_mutex m_mutex;
     bool m_loaded = false; // 2026-06-xx 物理加固：加载状态标记
+    std::atomic<bool> m_isInternalOperating{false}; // 2026-xx-xx 按照 Plan-105：信号抑制标志位
     
     // 2026-05-25 按照用户要求：改用单例计时器与脏路径集，彻底解决计时器风暴
     QTimer* m_batchTimer = nullptr;

@@ -1,6 +1,9 @@
 #include "DropJustifiedView.h"
 #include "ContentPanel.h"
 #include <QDrag>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QPixmap>
 #include <QMimeData>
 #include <QUrl>
@@ -24,10 +27,9 @@ void DropJustifiedView::dragEnterEvent(QDragEnterEvent* event) {
 
 void DropJustifiedView::dragMoveEvent(QDragMoveEvent* event) {
     if (event->mimeData()->hasUrls()) {
-        QModelIndex idx = indexAt(event->position().toPoint());
-        if (idx.isValid()) {
-            setCurrentIndex(idx);
-        }
+        // 物理隔离：不调用 setCurrentIndex(idx)
+        // 物理同步：显式调用基类逻辑以激活放置指示器 (Drop Indicator)
+        JustifiedView::dragMoveEvent(event);
         event->acceptProposedAction();
     } else {
         JustifiedView::dragMoveEvent(event);

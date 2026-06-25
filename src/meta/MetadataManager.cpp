@@ -329,6 +329,7 @@ void MetadataManager::notifyUI(RefreshLevel level, const QString& path) {
 }
 
 void MetadataManager::notifyCategoryCountChanged() {
+    if (m_isInternalOperating) return; // 2026-xx-xx 按照 Plan-105：操作期间拦截冗余刷新信号
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_pendingUiPaths.insert("__RELOAD_COUNT__");
@@ -337,6 +338,7 @@ void MetadataManager::notifyCategoryCountChanged() {
 }
 
 void MetadataManager::notifyFullUIRebuild() {
+    if (m_isInternalOperating) return; // 2026-xx-xx 按照 Plan-105：操作期间拦截冗余刷新信号
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_pendingUiPaths.insert("__RELOAD_ALL__");
