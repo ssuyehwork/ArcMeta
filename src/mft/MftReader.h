@@ -110,6 +110,8 @@ public:
     bool isDirectory(int index) const;
     int totalCount() const;
     QString getFullPath(int index) const;
+    // 对应用户原话：“在 MftReader 中新增一个方法 getPathByUsn(uint64_t key)”
+    QString getPathByUsn(uint64_t key);
     void requestMetadata(int index);
     bool isMetadataFetched(int index) const;
 
