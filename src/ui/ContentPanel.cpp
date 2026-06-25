@@ -48,6 +48,7 @@
 #include <QLineEdit> 
 #include <QTextBrowser> 
 #include "FramelessDialog.h"
+#include <memory>
 #include <QRandomGenerator>
 #include <QAbstractItemView> 
 #include <QtConcurrent> 
@@ -1341,12 +1342,15 @@ void ContentPanel::initGridView() {
     m_gridView->setContextMenuPolicy(Qt::CustomContextMenu); 
  
     m_gridView->setDragEnabled(true); 
-    m_gridView->setDragDropMode(QAbstractItemView::DragOnly); 
+    m_gridView->setAcceptDrops(true);
+    m_gridView->setDragDropMode(QAbstractItemView::DragDrop); 
  
     // 2026-06-xx 物理纠偏：移除 SelectedClicked，防止单击项目时意外触发重命名，确保交互稳健
     m_gridView->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed); 
  
     m_gridView->setModel(m_proxyModel); 
+
+    connect(m_gridView, SIGNAL(pathsDropped(QStringList,QModelIndex)), this, SLOT(onPathsDropped(QStringList,QModelIndex)));
 
     auto* justifiedView = qobject_cast<JustifiedView*>(m_gridView);
     if (justifiedView) {
@@ -1396,7 +1400,8 @@ void ContentPanel::initListView() {
     m_treeView->setPalette(tp);
      
     m_treeView->setDragEnabled(true); 
-    m_treeView->setDragDropMode(QAbstractItemView::DragOnly); 
+    m_treeView->setAcceptDrops(true);
+    m_treeView->setDragDropMode(QAbstractItemView::DragDrop); 
  
     m_treeView->setExpandsOnDoubleClick(false); 
     m_treeView->setRootIsDecorated(false); 
@@ -1405,6 +1410,8 @@ void ContentPanel::initListView() {
  
     m_treeView->setModel(m_proxyModel); 
     m_treeView->viewport()->installEventFilter(this); 
+
+    connect(m_treeView, SIGNAL(pathsDropped(QStringList,QModelIndex)), this, SLOT(onPathsDropped(QStringList,QModelIndex)));
  
     m_treeView->setStyleSheet( 
         "QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
@@ -2202,6 +2209,40 @@ void ContentPanel::refreshAll() {
 void ContentPanel::updateItemMetadata(const QString& path) {
     if (m_model) {
         m_model->updateRecordMetadata(path);
+    }
+}
+
+void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& targetIndex) {
+    if (paths.isEmpty() || m_currentPath.isEmpty() || m_currentPath == "computer://") return;
+
+    QString destDir = m_currentPath;
+    if (targetIndex.isValid()) {
+        QModelIndex srcIdx = m_proxyModel->mapToSource(targetIndex);
+        if (srcIdx.isValid()) {
+            QString targetPath = srcIdx.data(PathRole).toString();
+            if (!targetPath.isEmpty() && QFileInfo(targetPath).isDir()) {
+                destDir = targetPath;
+            }
+        }
+    }
+
+    // 检查是否在原地投放
+    bool sameDir = true;
+    for (const QString& p : paths) {
+        if (QDir::toNativeSeparators(QFileInfo(p).absolutePath()) != QDir::toNativeSeparators(destDir)) {
+            sameDir = false;
+            break;
+        }
+    }
+    if (sameDir && destDir == m_currentPath) return;
+
+    bool isMove = !(QApplication::keyboardModifiers() & Qt::ControlModifier);
+    
+    if (ShellHelper::copyOrMoveItems(paths, destDir, isMove)) {
+        if (isMove) {
+            UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
+        }
+        loadDirectory(m_currentPath, m_isRecursive);
     }
 }
 
