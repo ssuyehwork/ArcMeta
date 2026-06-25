@@ -348,7 +348,7 @@
     - **修改**: src/ui/MainWindow.h/.cpp (集成磁盘管理栏；实现 Win32 磁盘动态探测与按钮生成；支持跨平台编译；纠正按钮布局至右侧组)
     - **修改**: src/core/AutoImportManager.cpp (补全自动入库盘符感知)
 - **优化点**:
-    - **自适应重命名**: 实现 Arcmeta_SERIAL_LETTER.db 格式自动更名，支持运行时盘符漂移热迁移。
+    - **自适应重命名**: 实现 Arcmeta_[SERIAL]_[LETTER].db 格式自动更名，支持运行时盘符漂移热迁移。
     - **数据安全**: 冲突时自动备份为 Arcmeta_SERIAL_无效_TIMESTAMP.db，且在纠偏加载时自动忽略此类备份文件。
     - **物理感知 UI**: 通过 Q_OS_WIN 包裹的 Win32 API 动态展示 NTFS 分区，支持可折叠的磁盘工具栏。
     - **性能与安全**: 分离 getMemoryDbInternal 预防死锁；在重命名前强制释放句柄防止文件锁定。
