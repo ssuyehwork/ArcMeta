@@ -1,6 +1,17 @@
 # Modification Record
 
 ## 2026-10-29
+- **任务描述**: 内容面板拖拽投放功能修复 (Plan-104)。
+- **修改文件**:
+    - **修改**: `src/ui/DropJustifiedView.h/.cpp` (补全 `pathsDropped` 信号及 `dragEnter/Move/Drop` 事件处理逻辑)
+    - **修改**: `src/ui/DropListView.h/.cpp` (补全 `pathsDropped` 信号及事件处理逻辑)
+    - **修改**: `src/ui/ContentPanel.h/.cpp` (启用视图 `DragDrop` 模式；连接投放信号；实现 `onPathsDropped` 槽函数处理物理移动/复制逻辑；补全缺失头文件)
+- **修改原因**: 修复内容面板无法拖拽投放的问题，恢复“拖拽文件/文件夹到目标文件夹”的核心交互功能。
+- **优化点**:
+    - **交互增强**: 实现了拖拽过程中的目标项实时高亮反馈。
+    - **逻辑闭环**: 打通了从 UI 投放信号到物理 `ShellHelper` 操作及 `UndoManager` 撤销栈的完整链路。
+    - **健壮性**: 补全了 `QFileInfo`、`QDir`、`QApplication`、`UndoManager` 等依赖，修正了信号连接语法。
+
 - **任务描述**: 托管文件夹命名规范化（卷序列号模式）与存量自动化扫描优化 (Plan-105)。
 - **修改文件**:
     - **修改**: `src/ui/DriveButton.h/.cpp` (新增 `Missing` 状态及其对应的置灰视觉样式)
