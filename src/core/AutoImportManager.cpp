@@ -109,7 +109,7 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
 }
 
 bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString& outDrive) {
-    // 2026-10-29 按照 Plan-104：重构判定逻辑并补全类型定义
+    // 2026-10-29 按照 Plan-105：适配 ArcMeta.Library_X 命名规范
     QString targetPath = QString::fromStdWString(path);
 
     if (targetPath.length() < 3 || targetPath[1] != ':' || targetPath[2] != '\\') return false;
@@ -119,24 +119,68 @@ bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (!m_activeDrives.contains(dStr)) {
-            // Logger::log(QString("[AutoImport] 判定拦截：盘符 %1 未处于激活状态. 路径: %2").arg(dStr, targetPath));
             return false;
         }
     }
 
-    QString libraryPrefixStr = dStr + "\\ArcMeta.Library\\";
+    // 动态拼接新规范路径: D:\ArcMeta.Library_D\
+    QString libraryPrefixStr = dStr + "\\ArcMeta.Library_" + dStr.at(0).toUpper() + "\\";
     
     if (targetPath.startsWith(libraryPrefixStr, Qt::CaseInsensitive)) {
         outDrive = dStr;
         return true;
     }
 
-    // 仅在路径确实包含 ArcMeta.Library 关键字但前缀匹配失败时记录，协助定位路径标准化问题
-    if (targetPath.contains("ArcMeta.Library", Qt::CaseInsensitive)) {
+    // 协助定位路径标准化问题 (带盘符后缀的新版)
+    if (targetPath.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
          Logger::log(QString("[AutoImport] 判定拦截：路径包含关键字但前缀匹配失败. 预期前缀: %1, 实际路径: %2").arg(libraryPrefixStr, targetPath));
     }
     
     return false;
+}
+
+void AutoImportManager::scanManagedLibrary(const QString& drive) {
+    QString d = drive.toUpper();
+    // 2026-10-29 按照 Plan-105：存量扫描逻辑
+    QString targetPrefix = d + "\\ArcMeta.Library_" + d.at(0).toUpper();
+
+    Logger::log(QString("[AutoImport] 开始存量扫描托管库: %1").arg(targetPrefix));
+
+    (void)QtConcurrent::run([this, d, targetPrefix]() {
+        QStringList pathsToImport;
+
+        // 基于 MFT 内存索引遍历 (秒级完成)
+        int count = MftReader::instance().getEntryCount();
+        for (int i = 0; i < count; ++i) {
+            QString fullPath = MftReader::instance().getFullPath(i);
+            if (fullPath.startsWith(targetPrefix, Qt::CaseInsensitive)) {
+                // 仅入库文件，文件夹由 ImportHelper 递归处理或单独登记
+                QFileInfo fi(fullPath);
+                if (fi.isFile()) {
+                    pathsToImport << fullPath;
+                }
+            }
+        }
+
+        if (!pathsToImport.isEmpty()) {
+            Logger::log(QString("[AutoImport] 存量扫描完成，发现 %1 个待入库文件").arg(pathsToImport.size()));
+            emit tasksStarted(d);
+
+            // 调用归一化入库接口
+            QFuture<void> future = ImportHelper::importPaths(pathsToImport, 0, nullptr, false);
+
+            QFutureWatcher<void>* watcher = new QFutureWatcher<void>(this);
+            connect(watcher, &QFutureWatcher<void>::finished, this, [this, d, watcher]() {
+                Logger::log(QString("[AutoImport] 存量入库完成，盘符: %1").arg(d));
+                emit tasksCompleted(d);
+                watcher->deleteLater();
+                MetadataManager::instance().notifyFullUIRebuild();
+            });
+            watcher->setFuture(future);
+        } else {
+            Logger::log(QString("[AutoImport] 托管库 %1 下未发现存量文件").arg(targetPrefix));
+        }
+    });
 }
 
 void AutoImportManager::processImportQueue() {
