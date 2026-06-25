@@ -57,16 +57,31 @@ void DriveButton::setLoading(bool loading) {
 void DriveButton::updateStyle() {
     // 强制设置 checked 状态以匹配 QSS
     blockSignals(true);
-    setChecked(m_state != Inactive);
+    setChecked(m_state != Inactive && m_state != Missing);
     blockSignals(false);
 
-    QString color = (m_state == Inactive) ? "#333333" : Style::qssColor(Style::PrimaryBlue);
+    // 2026-10-29 按照 Plan-105：处理 Missing 状态置灰逻辑
+    QString bgColor = "#333333";
+    QString textColor = "#CCC";
+    QString borderColor = "#444";
+
+    if (m_state == Missing) {
+        bgColor = "#2D2D2D";
+        textColor = "#666666";
+        borderColor = "#333";
+    } else if (m_state != Inactive) {
+        bgColor = Style::qssColor(Style::PrimaryBlue);
+        textColor = "#FFF";
+        borderColor = bgColor;
+    }
     
     setStyleSheet(QString(
-        "QPushButton { background-color: %1; border: 1px solid #444; border-radius: 4px; color: #CCC; font-size: 11px; font-weight: bold; padding-left: 5px; }"
-        "QPushButton:hover { background-color: #3E3E42; border-color: %2; }"
-        "QPushButton:checked { background-color: %3; color: #FFF; border-color: %3; }"
-    ).arg(color).arg(Style::qssColor(Style::PrimaryBlue)).arg(Style::qssColor(Style::PrimaryBlue)));
+        "QPushButton { background-color: %1; border: 1px solid %2; border-radius: 4px; color: %3; font-size: 11px; font-weight: bold; padding-left: 5px; }"
+        "QPushButton:hover { background-color: #3E3E42; border-color: %4; }"
+        "QPushButton:checked { background-color: %5; color: #FFF; border-color: %5; }"
+    ).arg(bgColor).arg(borderColor).arg(textColor)
+     .arg(Style::qssColor(Style::PrimaryBlue))
+     .arg(Style::qssColor(Style::PrimaryBlue)));
 }
 
 void DriveButton::onAnimationTimeout() {

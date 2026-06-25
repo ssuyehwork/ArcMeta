@@ -11,7 +11,7 @@ namespace ArcMeta {
 class DriveButton : public QPushButton {
     Q_OBJECT
 public:
-    enum State { Inactive, Active, Running, Paused };
+    enum State { Inactive, Active, Running, Paused, Missing };
 
     explicit DriveButton(const QString& letter, QWidget* parent = nullptr);
 

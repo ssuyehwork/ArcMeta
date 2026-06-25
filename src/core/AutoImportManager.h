@@ -25,6 +25,12 @@ public:
     void setDrivePaused(const QString& drive, bool paused);
     bool isDrivePaused(const QString& drive) const;
 
+    /**
+     * @brief 2026-10-29 按照 Plan-105：存量托管文件扫描
+     * 基于 MFT 内存索引快速收集路径并批量入库
+     */
+    void scanManagedLibrary(const QString& drive);
+
 signals:
     // 当某个盘符有新任务进入队列时触发
     void tasksStarted(const QString& drive);

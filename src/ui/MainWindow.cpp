@@ -67,6 +67,10 @@ using namespace ArcMeta::Style;
 #include <QtConcurrent>
 #include <QSet>
 
+#ifdef run
+#undef run
+#endif
+
 namespace ArcMeta {
 
 // 【物理护栏-禁止修改/禁止改为0】全局边缘留白基准值，统一应用于标题栏/导航栏/主体容器右侧
@@ -984,6 +988,12 @@ void MainWindow::setupSplitters() {
                 
                 m_driveBarLayout->insertWidget(m_driveBarLayout->count() - 1, btn);
                 m_driveButtonMap[letter] = btn;
+
+                // 2026-10-29 按照 Plan-105：初始化时检测托管库是否存在
+                QString targetPath = letter + "\\ArcMeta.Library_" + letter.at(0).toUpper();
+                if (!QDir(targetPath).exists()) {
+                    btn->setState(DriveButton::Missing);
+                }
             }
         }
     }
@@ -1650,11 +1660,22 @@ void MainWindow::onDriveButtonClicked(const QString& letter) {
 
     DriveButton::State currentState = btn->state();
     
+    // 2026-10-29 按照 Plan-105：路径规范化
+    QString targetPath = letter + "\\ArcMeta.Library_" + letter.at(0).toUpper();
+
     // 2026-10-29 按照 Plan-104：使用静态 Set 追踪正在初始激活的盘符
     static QSet<QString> s_activatingDrives;
 
-    if (currentState == DriveButton::Inactive) {
+    if (currentState == DriveButton::Inactive || currentState == DriveButton::Missing) {
         if (s_activatingDrives.contains(letter)) return;
+
+        // 2026-10-29 按照 Plan-105：探测目录是否存在，若不存在则设为 Missing 并拦截激活
+        if (!QDir(targetPath).exists()) {
+            btn->setState(DriveButton::Missing);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), 
+                QString("未发现托管文件夹: %1\n请右键创建后再激活").arg(targetPath), 3000, Style::ErrorRed);
+            return;
+        }
 
         btn->setState(DriveButton::Running);
         s_activatingDrives.insert(letter);
@@ -1676,6 +1697,9 @@ void MainWindow::onDriveButtonClicked(const QString& letter) {
                     btn->setState(DriveButton::Active);
                     AutoImportManager::instance().setDriveListening(letter, true);
                     
+                    // 2026-10-29 按照 Plan-105：触发存量扫描
+                    AutoImportManager::instance().scanManagedLibrary(letter);
+
                     // 同步持久化状态
                     QStringList activeDrives = AppConfig::instance().getValue("DriveBar/ActiveDrives").toStringList();
                     if (!activeDrives.contains(letter)) {
@@ -1691,6 +1715,12 @@ void MainWindow::onDriveButtonClicked(const QString& letter) {
         // 状态B -> 状态A
         btn->setState(DriveButton::Inactive);
         AutoImportManager::instance().setDriveListening(letter, false);
+
+        // 2026-10-29 按照 Plan-105：关闭时同步移除持久化激活状态
+        QStringList activeDrives = AppConfig::instance().getValue("DriveBar/ActiveDrives").toStringList();
+        activeDrives.removeAll(letter);
+        AppConfig::instance().setValue("DriveBar/ActiveDrives", activeDrives);
+        AppConfig::instance().sync();
     } else if (currentState == DriveButton::Running) {
         // 正在初始激活中的盘符禁止切换暂停，防止逻辑断路
         if (s_activatingDrives.contains(letter)) return;
@@ -1721,8 +1751,8 @@ void MainWindow::onDriveButtonContextMenu(const QString& letter) {
     QMenu menu(this);
     UiHelper::applyMenuStyle(&menu);
 
-    // 2026-10-29 按照 Plan-104：统一标识符命名并显式声明 targetPath
-    QString targetPath = letter + "\\ArcMeta.Library";
+    // 2026-10-29 按照 Plan-105：统一路径规范 ArcMeta.Library_X
+    QString targetPath = letter + "\\ArcMeta.Library_" + letter.at(0).toUpper();
     bool exists = QDir(targetPath).exists();
 
     if (!exists) {
@@ -1730,6 +1760,13 @@ void MainWindow::onDriveButtonContextMenu(const QString& letter) {
         connect(actCreate, &QAction::triggered, this, [targetPath, letter, this]() {
             if (QDir().mkpath(targetPath)) {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "托管文件夹创建成功", 1500);
+                // 创建成功后，如果按钮处于 Missing 状态，尝试刷新样式
+                if (m_driveButtonMap.contains(letter)) {
+                    DriveButton* btn = m_driveButtonMap[letter];
+                    if (btn->state() == DriveButton::Missing) {
+                        btn->setState(DriveButton::Inactive);
+                    }
+                }
             } else {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "创建失败，请检查权限", 1500, Style::ErrorRed);
             }

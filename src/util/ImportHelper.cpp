@@ -20,6 +20,10 @@
 #include <objbase.h>
 #endif
 
+#ifdef run
+#undef run
+#endif
+
 namespace ArcMeta {
 
 QFuture<void> ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, QWidget* parent, bool showProgress) {
