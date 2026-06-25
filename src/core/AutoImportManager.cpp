@@ -93,7 +93,10 @@ bool AutoImportManager::isDrivePaused(const QString& drive) const {
 void AutoImportManager::onEntryAdded(uint64_t key) {
     // 1. 从 USN 事件直接获取完整路径 (对应用户要求：彻底移除 getIndexByKey 调用)
     QString targetPath = MftReader::instance().getPathByUsn(key);
-    if (targetPath.isEmpty()) return;
+    if (targetPath.isEmpty()) {
+        // qDebug() << "[AutoImport] 无法获取路径, Key:" << key;
+        return;
+    }
 
     QString drive;
     if (isPathInManagedLibrary(targetPath, drive)) {
@@ -104,6 +107,8 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
         }
         emit tasksStarted(drive);
         QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+    } else {
+        // Logger::log(QString("[AutoImport] 路径不在托管库内: %1").arg(targetPath));
     }
 }
 
@@ -114,12 +119,17 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
 void AutoImportManager::onEntryRemoved(uint64_t key) {
     // 1. 从 USN 事件直接获取完整路径 (对应用户要求：同步修复 onEntryRemoved)
     QString targetPath = MftReader::instance().getPathByUsn(key);
-    if (targetPath.isEmpty()) return;
+    if (targetPath.isEmpty()) {
+        // qDebug() << "[AutoImport] (移除) 无法获取路径, Key:" << key;
+        return;
+    }
 
     QString drive;
     if (isPathInManagedLibrary(targetPath, drive)) {
         Logger::log(QString("[AutoImport] 捕获到移除项: %1").arg(targetPath));
         MetadataManager::instance().setInvalid(targetPath.toStdWString(), true);
+    } else {
+        // Logger::log(QString("[AutoImport] (移除) 路径不在托管库内: %1").arg(targetPath));
     }
 }
 
