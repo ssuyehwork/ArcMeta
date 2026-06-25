@@ -22,11 +22,11 @@
 
 namespace ArcMeta {
 
-QFuture<void> ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, QWidget* parent) {
-    if (paths.isEmpty()) return QFuture<void>();
+void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, QWidget* parent) {
+    if (paths.isEmpty()) return;
 
-    BatchProgressDialog* progress = parent ? new BatchProgressDialog("正在处理项目导入...", parent) : nullptr;
-    if (progress) progress->show();
+    BatchProgressDialog* progress = new BatchProgressDialog("正在处理项目导入...", parent);
+    progress->show();
 
     // 2026-07-xx 建立导入任务的上下文
     struct ImportContext {
@@ -37,35 +37,33 @@ QFuture<void> ImportHelper::importPaths(const QStringList& paths, int targetCate
     QPointer<BatchProgressDialog> weakProgress(progress);
 
     // 处理用户关闭进度框的操作 (中断保护)
-    if (progress) {
-        QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent]() {
-            if (!weakProgress) return;
+    QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent]() {
+        if (!weakProgress) return;
 
-            // 2026-07-xx 按照用户要求：弹出确认停止
-            QString msg = "导入尚未完成。确定要停止当前导入任务吗？已处理的数据将保留。";
-            // 使用 FramelessMessageBox::question 替代，映射按钮逻辑
-            if (!FramelessMessageBox::question(parent, "中断导入", msg)) {
-                weakProgress->show(); // 恢复显示
-                return;
-            }
+        // 2026-07-xx 按照用户要求：弹出确认停止
+        QString msg = "导入尚未完成。确定要停止当前导入任务吗？已处理的数据将保留。";
+        // 使用 FramelessMessageBox::question 替代，映射按钮逻辑
+        if (!FramelessMessageBox::question(parent, "中断导入", msg)) {
+            weakProgress->show(); // 恢复显示
+            return;
+        }
 
-            context->isCancelled = true;
-            
-            // 2026-07-xx 物理加固：等待后台线程安全停止，杜绝竞态导致的数据库损坏
-            if (context->future.isRunning()) {
-                context->future.waitForFinished();
-            }
+        context->isCancelled = true;
+        
+        // 2026-07-xx 物理加固：等待后台线程安全停止，杜绝竞态导致的数据库损坏
+        if (context->future.isRunning()) {
+            context->future.waitForFinished();
+        }
 
-            // 2026-07-xx 按照用户要求：中断后必须强制触发刷新，使已处理的数据在 UI 上可见
-            // 采用 semantic 通知，MetadataManager::notifyUI(FullRebuild) 会自动处理相关逻辑
-            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+        // 2026-07-xx 按照用户要求：中断后必须强制触发刷新，使已处理的数据在 UI 上可见
+        // 采用 semantic 通知，MetadataManager::notifyUI(FullRebuild) 会自动处理相关逻辑
+        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
 
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "导入已中断，进度已保留", 2000, QColor("#FF8C00"));
-            weakProgress->deleteLater();
-        });
-    }
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "导入已中断，进度已保留", 2000, QColor("#FF8C00"));
+        weakProgress->deleteLater();
+    });
 
-    context->future = QtConcurrent::run([paths, targetCategoryId, weakProgress, context, parent]() {
+    context->future = QtConcurrent::run([paths, targetCategoryId, weakProgress, context]() {
         #ifdef Q_OS_WIN
         CoInitializeEx(NULL, COINIT_APARTMENTTHREADED); // 赋予后台线程 Shell 调用能力
         #endif
@@ -190,7 +188,7 @@ QFuture<void> ImportHelper::importPaths(const QStringList& paths, int targetCate
         delete currentTrans;
 
         // C. 完成阶段
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, currentHandled, parent]() {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, currentHandled]() {
             if (context->isCancelled) return;
 
             if (weakProgress) {
@@ -200,18 +198,14 @@ QFuture<void> ImportHelper::importPaths(const QStringList& paths, int targetCate
             CategoryRepo::saveImmediately();
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
             
-            // 静默模式下不显示气泡提示
-            if (parent) {
-                ToolTipOverlay::instance()->showText(QCursor::pos(), 
-                    QString("已成功导入 %1 个项目并生成镜像").arg(currentHandled), 2000, QColor("#2ecc71"));
-            }
+            ToolTipOverlay::instance()->showText(QCursor::pos(), 
+                QString("已成功导入 %1 个项目并生成镜像").arg(currentHandled), 2000, QColor("#2ecc71"));
         });
 
         #ifdef Q_OS_WIN
         CoUninitialize();
         #endif
     });
-    return context->future;
 }
 
 } // namespace ArcMeta

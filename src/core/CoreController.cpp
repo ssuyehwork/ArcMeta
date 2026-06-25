@@ -1,8 +1,6 @@
 #include "CoreController.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
-#include "../mft/MftReader.h"
-#include "AutoImportManager.h"
 #include "../ui/Logger.h"
 #include <QThreadPool>
 #include <QDebug>
@@ -37,14 +35,8 @@ void CoreController::startSystem() {
                 setStatus("正在载入元数据缓存...", true);
             }, Qt::QueuedConnection);
             
-            // 1. 初始化元数据缓存
+            // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
-
-            // 2. 恢复 MFT 索引与 USN 游标 (2026-07-xx 按照 Plan-98 修复监听失效)
-            MftReader::instance().loadFromCache();
-
-            // 3. 开启自动入库监听
-            AutoImportManager::instance().startListening();
             
             QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);

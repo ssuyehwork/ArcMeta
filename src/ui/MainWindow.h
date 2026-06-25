@@ -10,7 +10,6 @@
 #include <QHBoxLayout>
 #include <QSystemTrayIcon>
 #include <QSet>
-#include "DriveButton.h"
 
 namespace ArcMeta {
 
@@ -142,8 +141,7 @@ private:
     QPushButton* m_btnToggleDrives = nullptr;
     QWidget*     m_driveBarWidget  = nullptr;
     QHBoxLayout* m_driveBarLayout  = nullptr;
-    QMap<QString, DriveButton*> m_driveButtonMap;
-    QStringList  m_priorityDrives;
+    QMap<QString, QPushButton*> m_driveButtonMap;
 
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
     QPushButton* m_btnSync   = nullptr;
@@ -203,12 +201,6 @@ private slots:
      * @brief 2026-07-xx 按照 Plan-99：盘符按钮点击处理
      */
     void onDriveButtonClicked(const QString& letter, bool checked);
-
-    /**
-     * @brief 2026-07-xx 按照 Plan-97：盘符右键菜单及优先级重排
-     */
-    void showDriveContextMenu(const QString& letter, const QPoint& globalPos);
-    void reorderDriveButtons();
 
 private:
     void loadPanelVisibility();

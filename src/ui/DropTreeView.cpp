@@ -29,9 +29,7 @@ void DropTreeView::dragEnterEvent(QDragEnterEvent* event) {
 void DropTreeView::dragMoveEvent(QDragMoveEvent* event) {
     if (event->mimeData()->hasUrls()) {
         // 2026-06-xx 按照用户要求：实现拖拽过程中的目标项实时高亮
-        // 物理修复：必须显式映射坐标到视口，以确保 indexAt 能在滚动状态下准确识别目标文件夹
-        QPoint viewportPos = viewport()->mapFrom(this, event->position().toPoint());
-        QModelIndex idx = indexAt(viewportPos);
+        QModelIndex idx = indexAt(event->position().toPoint());
         if (idx.isValid()) {
             setCurrentIndex(idx);
         }
@@ -52,9 +50,7 @@ void DropTreeView::dropEvent(QDropEvent* event) {
                 paths << QDir::toNativeSeparators(url.toLocalFile());
             }
         }
-        // 物理修复：坐标映射
-        QPoint viewportPos = viewport()->mapFrom(this, event->position().toPoint());
-        QModelIndex idx = indexAt(viewportPos);
+        QModelIndex idx = indexAt(event->position().toPoint());
         if (!paths.isEmpty()) {
             emit pathsDropped(paths, idx);
         }

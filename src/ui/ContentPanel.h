@@ -314,11 +314,6 @@ public slots:
     void loadDirectory(const QString& path, bool recursive = false);
 
     /**
-     * @brief 处理视图组件发出的拖放路径信号 (Plan-98 修复)
-     */
-    void onPathsDropped(const QStringList& paths, const QModelIndex& targetIndex);
-
-    /**
      * @brief 设置待选中的项名称，并在下次加载完成后自动定位
      * @param name 文件名
      * @param edit 是否进入编辑模式

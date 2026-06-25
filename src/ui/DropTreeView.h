@@ -6,8 +6,6 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QTimer>
-#include <QStringList>
-#include <QModelIndex>
 
 namespace ArcMeta {
 

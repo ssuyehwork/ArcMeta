@@ -11,7 +11,6 @@
 #include "ResizeEventFilter.h"
 #include "AddressBar.h"
 #include "../core/CoreController.h"
-#include "../core/AutoImportManager.h"
 #include "CategoryPanel.h"
 #include "CategoryModel.h"
 #include "NavPanel.h"
@@ -45,7 +44,6 @@
 #include <QMenu>
 #include <QAction>
 #include <QTimer>
-#include <QDesktopServices>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
 using namespace ArcMeta::Style;
@@ -955,8 +953,6 @@ void MainWindow::setupSplitters() {
 
     // 2026-07-xx 按照 Plan-99：动态探测物理磁盘并创建按钮
 #ifdef Q_OS_WIN
-    QStringList defaultDrives = AppConfig::instance().getValue("Drives/DefaultDrives").toStringList();
-
     const auto drives = QDir::drives();
     for (const QFileInfo& d : drives) {
         QString path = d.absolutePath();
@@ -967,25 +963,19 @@ void MainWindow::setupSplitters() {
         if (GetVolumeInformationW(reinterpret_cast<LPCWSTR>(wPath.c_str()), nullptr, 0, nullptr, nullptr, nullptr, fsName, MAX_PATH)) {
             if (wcscmp(fsName, L"NTFS") == 0) {
                 QString letter = path.left(2).toUpper(); // "C:"
+                QPushButton* btn = new QPushButton(letter, m_driveBarWidget);
+                btn->setCheckable(true);
+                btn->setFixedSize(50, 26);
+                btn->setCursor(Qt::PointingHandCursor);
                 
-                // 2026-07-xx 按照用户要求：为默认盘符添加 ★ 前缀 (考古发现)
-                QString displayName = letter;
-                if (defaultDrives.contains(letter)) {
-                    displayName = "★ " + letter;
-                }
-
-                DriveButton* btn = new DriveButton(displayName, m_driveBarWidget);
-                if (defaultDrives.contains(letter)) {
-                    btn->setProperty("isDefault", true);
-                }
+                btn->setStyleSheet(QString(
+                    "QPushButton { background-color: #333333; border: 1px solid #444; border-radius: 4px; color: #CCC; font-size: 11px; font-weight: bold; }"
+                    "QPushButton:hover { background-color: #3E3E42; border-color: %1; }"
+                    "QPushButton:checked { background-color: %1; color: #FFF; border-color: %1; }"
+                ).arg(qssColor(PrimaryBlue)));
                 
                 connect(btn, &QPushButton::toggled, this, [this, letter](bool checked) {
                     onDriveButtonClicked(letter, checked);
-                });
-
-                btn->setContextMenuPolicy(Qt::CustomContextMenu);
-                connect(btn, &QWidget::customContextMenuRequested, this, [this, letter, btn](const QPoint& pos) {
-                    showDriveContextMenu(letter, btn->mapToGlobal(pos));
                 });
                 
                 m_driveBarLayout->insertWidget(m_driveBarLayout->count() - 1, btn);
@@ -1288,23 +1278,6 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     // 逻辑：置顶切换
     connect(m_btnPinTop, &QPushButton::toggled, this, &MainWindow::onPinToggled);
-
-    // 2026-07-xx 按照 Plan-97：连接 AutoImportManager 任务信号
-    connect(&AutoImportManager::instance(), &AutoImportManager::taskStarted, this, [this](const QString& letter) {
-        if (m_driveButtonMap.contains(letter)) {
-            m_driveButtonMap[letter]->setLoading(true);
-        }
-    });
-    connect(&AutoImportManager::instance(), &AutoImportManager::taskFinished, this, [this](const QString& letter) {
-        if (m_driveButtonMap.contains(letter)) {
-            m_driveButtonMap[letter]->setLoading(false);
-        }
-    });
-    connect(&AutoImportManager::instance(), &AutoImportManager::allTasksCompleted, this, [this]() {
-        // 2026-07-xx 按照用户要求：所有任务完成后，优先级归零，盘符恢复默认排列顺序
-        m_priorityDrives.clear();
-        reorderDriveButtons();
-    });
 }
 
 void MainWindow::initIdleDetector() {
@@ -1653,84 +1626,8 @@ void MainWindow::toggleDriveBar() {
 }
 
 void MainWindow::onDriveButtonClicked(const QString& letter, bool checked) {
-    qDebug() << "[Drive] 盘符被点击:" << letter << " 选中状态:" << checked;
-    
-    if (checked) {
-        // 2026-07-xx 按照 Plan-98：点击盘符按钮时，立即启动该磁盘的 MFT 扫描与 USN 监控
-        // 这会触发 MftReader::entryAdded 信号，进而由 AutoImportManager 捕获 ArcMeta.FERREX 变动
-        (void)QtConcurrent::run([letter]() {
-            MftReader::instance().buildIndex({letter});
-        });
-    } else {
-        // 卸载逻辑：暂时保持索引，仅通过掩码隔离。未来可根据内存压力执行卸载。
-    }
-}
-
-void MainWindow::showDriveContextMenu(const QString& letter, const QPoint& globalPos) {
-    QMenu menu(this);
-    UiHelper::applyMenuStyle(&menu);
-
-    QString managedPath = letter + "\\ArcMeta.FERREX";
-    QFileInfo info(managedPath);
-    bool exists = info.exists() && info.isDir();
-
-    if (!exists) {
-        menu.addAction("创建托管文件夹", [this, managedPath]() {
-            // 物理红线：严禁重复创建，检查是否因并发操作已存在
-            if (QFileInfo(managedPath).exists()) return;
-            
-            if (QDir().mkpath(managedPath)) {
-                ToolTipOverlay::instance()->showText(QCursor::pos(), "ArcMeta.FERREX 创建成功", 1500, QColor("#2ecc71"));
-            } else {
-                ToolTipOverlay::instance()->showText(QCursor::pos(), "创建失败，请检查权限", 2000, QColor("#e74c3c"));
-            }
-        });
-    } else {
-        menu.addAction("打开托管文件夹", [this, managedPath]() {
-            unifiedNavigateTo(managedPath);
-        });
-    }
-
-    menu.addSeparator();
-    
-    QAction* actPriority = menu.addAction("优先任务");
-    connect(actPriority, &QAction::triggered, this, [this, letter]() {
-        // 1. 立即插队到最左侧 (物理重排)
-        m_priorityDrives.removeAll(letter);
-        m_priorityDrives.prepend(letter);
-        reorderDriveButtons();
-        
-        // 2. 调度优先级
-        AutoImportManager::instance().setPriorityDrive(letter);
-    });
-
-    menu.exec(globalPos);
-}
-
-void MainWindow::reorderDriveButtons() {
-    // 1. 获取所有在线盘符列表并按字母排序 (默认顺序)
-    QStringList allDrives = m_driveButtonMap.keys();
-    allDrives.sort();
-
-    // 2. 构建新的顺序：[优先级盘符] + [其余普通盘符]
-    QStringList newOrder;
-    for (const auto& p : m_priorityDrives) {
-        if (allDrives.contains(p)) newOrder << p;
-    }
-    for (const auto& d : allDrives) {
-        if (!newOrder.contains(d)) newOrder << d;
-    }
-
-    // 3. 物理重排 layout
-    // 先移除所有按钮（不销毁）
-    for (auto btn : m_driveButtonMap) {
-        m_driveBarLayout->removeWidget(btn);
-    }
-    
-    // 按照新顺序重新插入
-    for (int i = 0; i < newOrder.size(); ++i) {
-        m_driveBarLayout->insertWidget(i, m_driveButtonMap[newOrder[i]]);
-    }
+    // TODO: 物理磁盘数据库挂载、MFT 掩码更新及实时扫描启动逻辑待后续实现
+    qDebug() << "[TODO] 盘符被点击:" << letter << " 选中状态:" << checked;
 }
 
 } // namespace ArcMeta
