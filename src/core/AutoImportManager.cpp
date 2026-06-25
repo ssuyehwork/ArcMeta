@@ -40,10 +40,13 @@ AutoImportManager::~AutoImportManager() {
 
 void AutoImportManager::setDriveListening(const QString& drive, bool active) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    QString d = drive.toUpper();
     if (active) {
-        m_activeDrives.insert(drive.toUpper());
+        m_activeDrives.insert(d);
+        Logger::log(QString("[AutoImport] 盘符监听已【开启】: %1").arg(d));
     } else {
-        m_activeDrives.remove(drive.toUpper());
+        m_activeDrives.remove(d);
+        Logger::log(QString("[AutoImport] 盘符监听已【关闭】: %1").arg(d));
     }
 }
 
@@ -62,14 +65,20 @@ bool AutoImportManager::isDrivePaused(const QString& drive) const {
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
     int idx = MftReader::instance().getIndexByKey(key);
-    if (idx < 0) return;
+    if (idx < 0) {
+        // Logger::log(QString("[AutoImport] 收到无效 Entry Key: %1").arg(key));
+        return;
+    }
 
     QString drive;
     std::wstring path = MftReader::instance().getFullPath(idx).toStdWString();
     QString qPath = QString::fromStdWString(path);
 
+    // 工业级排查：记录所有被捕获到的变更，确定 MFT 引擎是否断路
+    // Logger::log(QString("[AutoImport] USN 捕获原始路径: %1").arg(qPath));
+
     if (isPathInManagedLibrary(path, drive)) {
-        Logger::log(QString("[AutoImport] 捕获到新增项: %1").arg(qPath));
+        Logger::log(QString("[AutoImport] >>> 判定通过：属于托管库路径: %1").arg(qPath));
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_pendingPaths.push_back(path);
@@ -102,7 +111,10 @@ bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (!m_activeDrives.contains(dStr)) return false;
+        if (!m_activeDrives.contains(dStr)) {
+            // Logger::log(QString("[AutoImport] 判定拦截：盘符 %1 未处于激活状态. 路径: %2").arg(dStr, QString::fromStdWString(path)));
+            return false;
+        }
     }
 
     const QString pStr = QString::fromStdWString(path);
@@ -113,8 +125,10 @@ bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path, QString
         return true;
     }
 
-    // 调试：如果不是以 libPrefix 开头，记录一下正在判定的路径（可选，防止日志过载只记录潜在的盘符内路径）
-    // Logger::log(QString("[AutoImport] 路径非托管库成员: %1").arg(pStr));
+    // 仅在路径确实包含 ArcMeta.Library 关键字但前缀匹配失败时记录，协助定位路径标准化问题
+    if (pStr.contains("ArcMeta.Library", Qt::CaseInsensitive)) {
+         Logger::log(QString("[AutoImport] 判定拦截：路径包含关键字但前缀匹配失败. 预期前缀: %1, 实际路径: %2").arg(libPrefix, pStr));
+    }
     
     return false;
 }

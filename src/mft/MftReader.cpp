@@ -3,6 +3,7 @@
 #endif
 #include "MftReader.h"
 #include "UsnWatcher.h"
+#include "../ui/Logger.h"
 #include <winioctl.h>
 #include <Shlwapi.h>
 #pragma comment(lib, "Shlwapi.lib")
@@ -1045,8 +1046,10 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
     }
 
     if (isNew) {
+        Logger::log(QString("[MFT] 单条新增 Key: %1").arg(compositeKey));
         emit entryAdded(compositeKey);
     } else {
+        Logger::log(QString("[MFT] 单条更新 Key: %1").arg(compositeKey));
         emit entryUpdated(compositeKey);
     }
     emit dataChanged(finalIdx);
@@ -1187,6 +1190,9 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
     }
 
     // 发射批量信号 (UI 侧可以根据需要合并处理)
+    if (!addedKeys.empty() || !updatedKeys.empty()) {
+        Logger::log(QString("[MFT] 发射批量信号: Added=%1, Updated=%2").arg(addedKeys.size()).arg(updatedKeys.size()));
+    }
     for (uint64_t key : addedKeys) emit entryAdded(key);
     for (uint64_t key : updatedKeys) emit entryUpdated(key);
     emit dataChanged(-1);
@@ -1214,6 +1220,7 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
         }
         
         lock.unlock(); // 物理安全：解锁后再发射信号
+        Logger::log(QString("[MFT] 发射移除信号 Key: %1").arg(compositeKey));
         emit entryRemoved(compositeKey);
         emit dataChanged(-1);
     }
