@@ -174,6 +174,10 @@ private:
     mutable std::unordered_map<uint64_t, std::wstring>  m_path_cache;
     mutable std::mutex m_pathCacheMutex;
 
+    // 卷句柄缓存：避免 getPathByUsn 频繁开关驱动器导致卡顿
+    std::unordered_map<size_t, HANDLE>                  m_volume_handles;
+    mutable std::mutex                                  m_volumeHandleMutex;
+
     std::unordered_map<std::wstring, uint64_t>          m_next_usns;
     std::vector<UsnWatcher*> m_watchers;
 

@@ -37,9 +37,11 @@ AutoImportManager::AutoImportManager(QObject* parent) : QObject(parent) {
     connect(m_debounceTimer, &QTimer::timeout, this, &AutoImportManager::processImportQueue);
     
     // 全局订阅 USN 变更
-    connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
-    connect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved, Qt::QueuedConnection);
-    connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
+    // 2026-xx-xx 按照 Plan-106：切换为 DirectConnection。
+    // 由于信号由 UsnWatcher 后台线程发射，使用 DirectConnection 可确保回调直接在后台线程执行，彻底剥离 GUI 线程压力。
+    connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::DirectConnection);
+    connect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved, Qt::DirectConnection);
+    connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::DirectConnection);
 }
 
 AutoImportManager::~AutoImportManager() {
@@ -103,8 +105,11 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_pendingPaths.push_back(targetPath.toStdWString());
+            if (!m_driveTasksStartedEmitted.value(drive, false)) {
+                emit tasksStarted(drive);
+                m_driveTasksStartedEmitted[drive] = true;
+            }
         }
-        emit tasksStarted(drive);
         QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
     }
 }
@@ -246,11 +251,19 @@ void AutoImportManager::processImportQueue() {
             QFutureWatcher<void>* watcher = new QFutureWatcher<void>(this);
             connect(watcher, &QFutureWatcher<void>::finished, this, [this, drive, watcher]() {
                 Logger::log(QString("[AutoImport] 批量入库完成，盘符: %1").arg(drive));
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    m_driveTasksStartedEmitted[drive] = false;
+                }
                 emit tasksCompleted(drive);
                 watcher->deleteLater();
             });
             watcher->setFuture(future);
         } else {
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_driveTasksStartedEmitted[drive] = false;
+            }
             emit tasksCompleted(drive);
         }
     }

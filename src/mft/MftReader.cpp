@@ -117,6 +117,13 @@ void MftReader::clearInternal() {
         m_path_cache.clear();
     }
     {
+        std::lock_guard<std::mutex> lock(m_volumeHandleMutex);
+        for (auto& pair : m_volume_handles) {
+            if (pair.second != INVALID_HANDLE_VALUE) CloseHandle(pair.second);
+        }
+        m_volume_handles.clear();
+    }
+    {
         QWriteLocker lock(&m_iconCacheLock);
         m_icon_cache.clear();
     }
@@ -695,19 +702,29 @@ QString MftReader::getPathByUsn(uint64_t key) {
     size_t driveIdx = (key >> 48);
     uint64_t frn = (key & 0x0000FFFFFFFFFFFFull);
 
-    // 2. 获取卷句柄
-    std::wstring volume;
+    // 2. 获取卷句柄 (带缓存)
+    HANDLE hVol = INVALID_HANDLE_VALUE;
     {
-        QReadLocker lock(&m_dataLock);
-        if (driveIdx >= m_drive_list.size()) return QString();
-        volume = m_drive_list[driveIdx];
-    }
-
-    std::wstring dev = L"\\\\.\\" + volume;
-    HANDLE hVol = CreateFileW(dev.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    if (hVol == INVALID_HANDLE_VALUE) {
-        Logger::log(QString("[MFT] getPathByUsn 失败: 无法打开卷句柄 %1 Error: %2").arg(QString::fromStdWString(dev)).arg(GetLastError()));
-        return QString();
+        std::lock_guard<std::mutex> lock(m_volumeHandleMutex);
+        auto it = m_volume_handles.find(driveIdx);
+        if (it != m_volume_handles.end()) {
+            hVol = it->second;
+        } else {
+            std::wstring volume;
+            {
+                QReadLocker dataLock(&m_dataLock);
+                if (driveIdx >= m_drive_list.size()) return QString();
+                volume = m_drive_list[driveIdx];
+            }
+            std::wstring dev = L"\\\\.\\" + volume;
+            hVol = CreateFileW(dev.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+            if (hVol != INVALID_HANDLE_VALUE) {
+                m_volume_handles[driveIdx] = hVol;
+            } else {
+                Logger::log(QString("[MFT] getPathByUsn 失败: 无法打开卷句柄 %1 Error: %2").arg(QString::fromStdWString(dev)).arg(GetLastError()));
+                return QString();
+            }
+        }
     }
 
     // 3. 打开文件句柄
@@ -718,7 +735,6 @@ QString MftReader::getPathByUsn(uint64_t key) {
     HANDLE hFile = OpenFileById(hVol, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
     if (hFile == INVALID_HANDLE_VALUE) {
         Logger::log(QString("[MFT] getPathByUsn 失败: OpenFileById 失败, FRN: %1 Error: %2").arg(frn).arg(GetLastError()));
-        CloseHandle(hVol);
         return QString();
     }
 
@@ -739,9 +755,8 @@ QString MftReader::getPathByUsn(uint64_t key) {
         Logger::log(QString("[MFT] getPathByUsn 失败: GetFinalPathNameByHandleW 失败, FRN: %1 Error: %2").arg(frn).arg(GetLastError()));
     }
 
-    // 5. 安全释放
+    // 5. 安全释放 (卷句柄由于被缓存，此处不关闭)
     CloseHandle(hFile);
-    CloseHandle(hVol);
     return result;
 }
 

@@ -64,6 +64,8 @@ private:
     // 缓存已激活盘符的托管库路径前缀 (如 "D:\Arcmeta_4DFFAF5E_D\")，用于秒级前缀匹配
     QHash<QString, QString> m_activeDrivePrefixes; 
     QHash<QString, bool> m_drivePausedMap;
+    // 记录每个盘符的任务开始信号是否已发射，防止信号风暴
+    QHash<QString, bool> m_driveTasksStartedEmitted;
 };
 
 } // namespace ArcMeta
