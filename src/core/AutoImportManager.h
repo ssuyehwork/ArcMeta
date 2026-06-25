@@ -1,11 +1,12 @@
 #pragma once
 #include <QObject>
+#include <QString>
 #include <QTimer>
+#include <QSet>
+#include <QHash>
 #include <vector>
 #include <string>
 #include <mutex>
-#include <QSet>
-#include <QHash>
 
 namespace ArcMeta {
 
