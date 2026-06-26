@@ -3,6 +3,7 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QSet>
+#include <QSvgRenderer>
 #include <QImageReader>
 #include <QGraphicsPixmapItem>
 #include <QLabel>
@@ -180,7 +181,7 @@ void QuickLookWindow::renderImage(const QString& path) {
 }
 
 /**
- * @brief 使用 Shell 引擎渲染高清专业预览图 (PSD/AI/EPS/PDF)
+ * @brief 使用 Shell 引擎渲染高清专业预览图 (PSD/AI/EPS/PDF/SVG)
  */
 void QuickLookWindow::renderProfessionalImage(const QString& path) {
     m_textPreview->hide();
@@ -188,8 +189,28 @@ void QuickLookWindow::renderProfessionalImage(const QString& path) {
     m_scene->clear();
     m_graphicsView->resetTransform();
 
-    // 2026-11-14 物理画质增强：请求 2560 级超清缩略图
-    QImage img = UiHelper::getShellThumbnail(path, 2560);
+    QImage img;
+    QFileInfo info(path);
+    QString ext = info.suffix().toLower();
+
+    // 2026-11-14 按照用户反馈：针对 SVG 实施专属矢量渲染
+    // 理由：Shell 引擎可能返回第三方应用图标而非真实内容，使用 QSvgRenderer 强制 1:1 矢量加载。
+    if (ext == "svg") {
+        QSvgRenderer renderer(path);
+        if (renderer.isValid()) {
+            // 请求 2048 级别的高清渲染，确保缩放后依然细腻
+            img = QImage(2048, 2048, QImage::Format_ARGB32);
+            img.fill(Qt::transparent);
+            QPainter painter(&img);
+            renderer.render(&painter);
+        }
+    }
+
+    if (img.isNull()) {
+        // 2026-11-14 物理画质增强：请求 2560 级超清缩略图
+        img = UiHelper::getShellThumbnail(path, 2560);
+    }
+
     if (img.isNull()) {
         img.load(path);
     }
