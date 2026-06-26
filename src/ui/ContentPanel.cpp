@@ -190,6 +190,18 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         return 0; 
     } else if (role == IsEmptyRole) {
         return record.isDir && record.isEmpty;
+    } else if (role == IsDirRole) {
+        return record.isDir;
+    } else if (role == FileSizeRole) {
+        return record.size;
+    } else if (role == MtimeRole) {
+        return record.mtime;
+    } else if (role == CtimeRole) {
+        return record.ctime;
+    } else if (role == AtimeRole) {
+        return record.atime;
+    } else if (role == SuffixRole) {
+        return record.suffix;
     } else if (role == AspectRatioRole) {
         // 2026-07-xx 性能优化：优先使用 ItemRecord 中已注入的尺寸信息，实现渲染零延迟
         if (record.width > 0 && record.height > 0) return (double)record.width / record.height;

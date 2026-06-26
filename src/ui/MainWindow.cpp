@@ -310,17 +310,40 @@ void MainWindow::initUi() {
             
             QModelIndex idx = indexes.first();
             QString path = paths.first();
-            QFileInfo info(path);
             
+            // 2026-11-15 按照 Plan-110：彻底消除主线程 QFileInfo 磁盘访问，改用模型缓存 Role
+            bool      isDir  = idx.data(IsDirRole).toBool();
+            long long size   = idx.data(FileSizeRole).toLongLong();
+            long long ctime  = idx.data(CtimeRole).toLongLong();
+            long long mtime  = idx.data(MtimeRole).toLongLong();
+            long long atime  = idx.data(AtimeRole).toLongLong();
+            QString   suffix = idx.data(SuffixRole).toString();
+
+            // 文件名截取逻辑（零磁盘 I/O）
+            int lastSlash = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+            QString fileName = (lastSlash == -1) ? path : path.mid(lastSlash + 1);
+            if (fileName.isEmpty()) fileName = path;
+
+            // 属性格式化
+            QString typeStr = isDir ? "文件夹" : (suffix.isEmpty() ? "文件" : suffix.toUpper() + " 文件");
+            QString sizeStr = isDir ? "-" :
+                (size < 1024 ? QString::number(size) + " B" :
+                 size < 1024 * 1024 ? QString::number(size / 1024.0, 'f', 1) + " KB" :
+                 QString::number(size / (1024.0 * 1024.0), 'f', 1) + " MB");
+
+            auto formatTime = [](long long ms) {
+                return (ms > 0) ? QDateTime::fromMSecsSinceEpoch(ms).toString("yyyy-MM-dd") : "-";
+            };
+
             // 基础信息展示
             m_metaPanel->updateInfo(
-                info.fileName().isEmpty() ? path : info.fileName(), 
-                info.isDir() ? "文件夹" : info.suffix().toUpper() + " 文件",
-                info.isDir() ? "-" : QString::number(info.size() / 1024) + " KB",
-                info.birthTime().toString("yyyy-MM-dd"),
-                info.lastModified().toString("yyyy-MM-dd"),
-                info.lastRead().toString("yyyy-MM-dd"),
-                info.absoluteFilePath(),
+                fileName,
+                typeStr,
+                sizeStr,
+                formatTime(ctime),
+                formatTime(mtime),
+                formatTime(atime),
+                path,
                 idx.data(EncryptedRole).toBool()
             );
 
@@ -336,7 +359,8 @@ void MainWindow::initUi() {
             m_metaPanel->setURL(rm.url);
 
             // 设置分类显示 (根据当前 UI 状态或路径推导)
-            QString category = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+            int lastSep = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+            QString category = isDir ? path : (lastSep > 0 ? path.left(lastSep) : path);
             m_metaPanel->setCategory(category);
 
             // 将色板数据转换为 QVector<QPair<QColor, float>>
