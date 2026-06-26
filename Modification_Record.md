@@ -423,3 +423,11 @@
         3. 实现了标准图像与专业格式（EPS/AI）画质链路的同步强化。
     - **布局修正**: 将 `QuickLookWindow` 主布局边距由 (10,10,0,10) 修正为 (0,0,0,0)，彻底解决了图片预览不居中的视觉偏差。
     - **SVG 矢量渲染**: 针对 SVG 格式引入了 `QSvgRenderer` 专属渲染路径，绕过系统图标干扰，实现 1:1 矢量内容还原。
+
+## 2026-11-15
+- **任务描述**: 修复 AutoImportManager 链接错误。
+- **修改文件**:
+    - **修改**: `CMakeLists.txt` (在 SOURCES 中添加 `src/core/AutoImportManager.cpp` 和 `src/core/AutoImportManager.h`)
+- **修改原因**: 解决由于 `AutoImportManager` 源文件未包含在编译目标中导致的“无法解析的外部符号”链接错误。
+- **优化点**:
+    - **构建稳定性**: 确保项目所有核心模块均被正确编译与链接，消除 main 函数及 MainWindow 引用失效问题。
