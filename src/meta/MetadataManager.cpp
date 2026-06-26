@@ -525,6 +525,29 @@ void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool no
     }
 }
 
+void MetadataManager::setInvalidByFidPrefix(const std::string& fidPrefix, bool invalid) {
+    // 2026-06-26 按照 Plan-108：基于 FID 前缀批量标记失效
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    std::vector<std::wstring> affectedPaths;
+
+    for (auto& pair : m_cache) {
+        if (pair.second.fileId128.find(fidPrefix) == 0) {
+            if (pair.second.isInvalid != invalid) {
+                pair.second.isInvalid = invalid;
+                if (pair.second.isManaged) {
+                    CategoryRepo::incrementTotalFileCount(invalid ? -1 : 1);
+                }
+                affectedPaths.push_back(pair.first);
+            }
+        }
+    }
+
+    lock.unlock();
+    for (const auto& p : affectedPaths) {
+        debouncePersist(p);
+    }
+}
+
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
