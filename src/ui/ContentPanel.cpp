@@ -1245,11 +1245,25 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 if (idx.isValid()) {
                     QString path = idx.data(PathRole).toString();
                     if (!path.isEmpty()) {
-                        // 2026-11-14 按照 Plan-109：预览前置过滤，拦截文件夹及不可预览文件
+                        // 2026-11-14 按照 Plan-109：全口径预览属性过滤（白名单优先策略）
                         QFileInfo info(path);
+                        if (info.isDir()) return true; // 拦截文件夹
+
                         QString ext = info.suffix().toLower();
-                        static const QStringList blackList = {"exe", "dll", "zip", "rar", "7z", "tar", "gz"};
-                        if (!info.isDir() && !blackList.contains(ext)) {
+                        // 1. 系统级不可预览黑名单 (包含压缩包、二进制文件及系统库)
+                        static const QSet<QString> blackList = {
+                            "exe", "dll", "sys", "bin", "dat", "lib", "obj", "msi", "com",
+                            "zip", "rar", "7z", "iso", "tar", "gz", "bz2", "dmg", "pkg"
+                        };
+                        if (blackList.contains(ext)) return true;
+
+                        // 2. 预览准入白名单 (仅限受支持的图像类及文本/代码类文件)
+                        static const QSet<QString> whiteList = {
+                            "jpg", "jpeg", "png", "bmp", "webp", "gif", "ico", "psd", "ai", "eps", "pdf", "svg",
+                            "txt", "md", "markdown", "log", "cpp", "h", "hpp", "c", "py", "js", "css", "html", "json", "xml", "ini", "conf", "yaml", "yml"
+                        };
+
+                        if (whiteList.contains(ext)) {
                             emit requestQuickLook(path);
                         }
                     }

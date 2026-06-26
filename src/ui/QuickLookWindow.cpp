@@ -60,6 +60,7 @@ void QuickLookWindow::initUi() {
     m_textPreview = new QPlainTextEdit(this);
     m_textPreview->setReadOnly(true);
     // 2026-11-14 按照 Plan-109：废除硬编码样式，引入对齐 Memories.md 规范的标准滚动条样式
+    // 物理引用标准色值：BorderColor (#333333) 与 BorderDark (#444444)
     m_textPreview->setStyleSheet(
         "QPlainTextEdit {"
         "  background-color: #1E1E1E;"
@@ -100,14 +101,16 @@ void QuickLookWindow::previewFile(const QString& path) {
 
     QFileInfo info(path);
     QString ext = info.suffix().toLower();
-    if (UiHelper::isGraphicsFile(ext)) {
-        // 2026-11-14 按照 Plan-109：区分渲染链路以优化画质。
-        // 标准图像采用全分辨率加载，专业格式继续采用 Shell 缩略图引擎。
-        if (UiHelper::isStandardImage(ext)) {
-            renderImage(path);
-        } else {
-            renderProfessionalImage(path);
-        }
+
+    // 2026-11-14 按照 Plan-109：全口径属性过滤分流渲染
+    // 标准图像采用全分辨率加载，专业格式继续采用高清缩略图引擎。
+    static const QSet<QString> standardImages = {"jpg", "jpeg", "png", "bmp", "webp", "gif", "ico"};
+    static const QSet<QString> professionalImages = {"psd", "ai", "eps", "pdf", "svg"};
+
+    if (standardImages.contains(ext)) {
+        renderImage(path);
+    } else if (professionalImages.contains(ext)) {
+        renderProfessionalImage(path);
     } else {
         renderText(path);
     }
@@ -127,7 +130,7 @@ void QuickLookWindow::resizeEvent(QResizeEvent* event) {
 }
 
 /**
- * @brief 硬件加速图片渲染
+ * @brief 硬件加速图片渲染 (全分辨率原图)
  */
 void QuickLookWindow::renderImage(const QString& path) {
     m_textPreview->hide();
@@ -136,9 +139,17 @@ void QuickLookWindow::renderImage(const QString& path) {
     // 2026-04-11 按照用户要求：切图时强制重置缩放矩阵，确保初始为 1:1 或满屏适配态
     m_graphicsView->resetTransform();
 
+    // 2026-11-14 按照 Plan-109：性能优化。若图片物理大小超过 50MB，降级调用高清缩略图以防 UI 挂起
+    QFileInfo info(path);
+    if (info.size() > 50 * 1024 * 1024) {
+        renderProfessionalImage(path);
+        return;
+    }
+
     QPixmap pix(path);
     if (!pix.isNull()) {
         // 2026-04-11 按照用户要求：回归标准图片加载逻辑，Qt 自动处理正向扫描线
+        // 2026-11-14 物理加固：m_graphicsView 已在 initUi 开启 SmoothPixmapTransform，确保高清无锯齿
         auto item = m_scene->addPixmap(pix);
         m_graphicsView->fitInView(item, Qt::KeepAspectRatio);
     }
