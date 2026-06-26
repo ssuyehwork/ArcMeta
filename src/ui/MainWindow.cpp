@@ -46,6 +46,8 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+#include "DriveButton.h"
+#include "../core/AutoImportManager.h"
 using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
@@ -1081,8 +1083,11 @@ void MainWindow::setupSplitters() {
     connect(&CoreController::instance(), &CoreController::isIndexingChanged, this, updateStatus);
     updateStatus();
 
+    initDriveBar();
+
     mainL->addWidget(m_titleBarWidget);
     mainL->addWidget(m_navBarWidget);
+    mainL->addWidget(m_driveBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
 
@@ -1115,6 +1120,16 @@ void MainWindow::setupCustomTitleBarButtons() {
         ).arg(hoverColor));
         return btn;
     };
+
+    m_btnToggleDriveBar = createTitleBtn("chevrons_down");
+    m_btnToggleDriveBar->setProperty("tooltipText", "展开/收起盘符管理栏");
+    m_btnToggleDriveBar->installEventFilter(m_hoverFilter);
+    m_btnToggleDriveBar->setCheckable(true);
+    m_btnToggleDriveBar->setChecked(true);
+    connect(m_btnToggleDriveBar, &QPushButton::toggled, this, [this](bool checked) {
+        m_driveBarWidget->setVisible(checked);
+        m_btnToggleDriveBar->setIcon(UiHelper::getIcon(checked ? "chevrons_down" : "chevrons_up", QColor("#EEEEEE")));
+    });
 
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
@@ -1202,6 +1217,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
+    layout->addWidget(m_btnToggleDriveBar, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnLayout, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnCreate, 0, Qt::AlignVCenter);
@@ -1225,6 +1241,102 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     // 逻辑：置顶切换
     connect(m_btnPinTop, &QPushButton::toggled, this, &MainWindow::onPinToggled);
+}
+
+void MainWindow::initDriveBar() {
+    connect(&AutoImportManager::instance(), &AutoImportManager::taskFinished, this, [this](const QString& drive) {
+        if (m_driveButtons.contains(drive)) {
+            m_driveButtons[drive]->setState(DriveButton::Active);
+        }
+    });
+
+    m_driveBarWidget = new QWidget(this);
+    m_driveBarWidget->setObjectName("DriveBar");
+    m_driveBarWidget->setFixedHeight(42);
+    m_driveBarWidget->setStyleSheet(QString(
+        "QWidget#DriveBar { background-color: %1; border-bottom: 1px solid %2; }"
+    ).arg(qssColor(BackgroundHeader)).arg(qssColor(BorderColor)));
+
+    m_driveBarLayout = new QHBoxLayout(m_driveBarWidget);
+    m_driveBarLayout->setContentsMargins(15, 0, 15, 0);
+    m_driveBarLayout->setSpacing(8);
+
+    auto drives = QDir::drives();
+    for (const QFileInfo& drive : drives) {
+        QString letter = drive.absolutePath().left(2);
+        DriveButton* btn = new DriveButton(letter, m_driveBarWidget);
+        m_driveButtons[letter] = btn;
+        m_driveBarLayout->addWidget(btn);
+
+        connect(btn, &QPushButton::clicked, this, &MainWindow::onDriveButtonClicked);
+        btn->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(btn, &QWidget::customContextMenuRequested, this, &MainWindow::onDriveButtonContextMenu);
+        
+        QString managedPath = drive.absolutePath() + "ArcMeta.Library_" + letter.left(1);
+        if (QDir(managedPath).exists()) {
+            btn->setState(DriveButton::Active);
+        } else {
+            btn->setState(DriveButton::Inactive);
+        }
+    }
+    m_driveBarLayout->addStretch();
+}
+
+void MainWindow::onDriveButtonClicked() {
+    DriveButton* btn = qobject_cast<DriveButton*>(sender());
+    if (!btn) return;
+    QString letter = btn->driveLetter();
+    DriveButton::State currentState = btn->state();
+
+    if (currentState == DriveButton::Inactive) {
+        QString managedPath = letter + "/ArcMeta.Library_" + letter.left(1);
+        if (!QDir(managedPath).exists()) {
+             ToolTipOverlay::instance()->showText(QCursor::pos(), "请右键创建托管库后再激活", 2000, Style::WarningOrange);
+             return;
+        }
+        btn->setState(DriveButton::Running);
+        AutoImportManager::instance().startTask(letter);
+    } else if (currentState == DriveButton::Active) {
+        btn->setState(DriveButton::Running);
+        AutoImportManager::instance().startTask(letter);
+    } else if (currentState == DriveButton::Running) {
+        btn->setState(DriveButton::Paused);
+        AutoImportManager::instance().pauseTask(letter);
+    } else if (currentState == DriveButton::Paused) {
+        btn->setState(DriveButton::Running);
+        AutoImportManager::instance().startTask(letter);
+    }
+}
+
+void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
+    DriveButton* btn = qobject_cast<DriveButton*>(sender());
+    if (!btn) return;
+    QString letter = btn->driveLetter();
+    QString managedPath = letter + "/ArcMeta.Library_" + letter.left(1);
+
+    QMenu menu(this);
+    UiHelper::applyMenuStyle(&menu);
+    if (!QDir(managedPath).exists()) {
+        menu.addAction("创建托管文件夹")->setData(1);
+    } else {
+        menu.addAction("打开托管文件夹")->setData(2);
+        menu.addAction("重新扫描该盘")->setData(3);
+    }
+
+    QAction* act = menu.exec(btn->mapToGlobal(pos));
+    if (!act) return;
+    int val = act->data().toInt();
+    if (val == 1) {
+        if (QDir().mkpath(managedPath)) {
+            btn->setState(DriveButton::Active);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建成功", 1500, Style::SuccessGreen);
+        }
+    } else if (val == 2) {
+        ShellHelper::openInExplorer(managedPath);
+    } else if (val == 3) {
+        btn->setState(DriveButton::Running);
+        AutoImportManager::instance().startTask(letter);
+    }
 }
 
 void MainWindow::initIdleDetector() {

@@ -44,6 +44,22 @@ static int64_t filetimeToUnixMs(int64_t filetime) {
     return (filetime - 116444736000000000LL) / 10000LL;
 }
 
+// 2026-06-26 按照 Plan-108：NtQueryInformationFile 所需定义
+typedef struct _FILE_NAME_INFORMATION {
+    ULONG FileNameLength;
+    WCHAR FileName[1];
+} FILE_NAME_INFORMATION, *PFILE_NAME_INFORMATION;
+
+extern "C" {
+    __declspec(dllimport) LONG __stdcall NtQueryInformationFile(
+        HANDLE FileHandle,
+        PVOID IoStatusBlock,
+        PVOID FileInformation,
+        ULONG Length,
+        ULONG FileInformationClass
+    );
+}
+
 static bool enablePrivilege(LPCWSTR privilege) {
     HANDLE hToken;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
@@ -695,6 +711,33 @@ std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
     // 2026-05-29 物理修复：公开接口持有读锁，内部调用私有无锁逻辑，解决递归死锁。
     QReadLocker readLock(&m_dataLock);
     return getPathFastInternal(driveIdx, frn);
+}
+
+QString MftReader::getPathByFrn(HANDLE hVol, DWORDLONG frn) {
+    // 2026-06-26 按照 Plan-108：物理级路径实时反查 (NtQueryInformationFile)
+    enablePrivilege(SE_BACKUP_NAME);
+    FILE_ID_DESCRIPTOR id;
+    id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
+    id.Type = FileIdType;
+    id.FileId.QuadPart = frn;
+
+    HANDLE hFile = OpenFileById(hVol, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, 0);
+    if (hFile == INVALID_HANDLE_VALUE) return "";
+
+    struct {
+        ULONG_PTR Status;
+        ULONG_PTR Information;
+    } ioStatus;
+    
+    BYTE buffer[1024];
+    LONG status = NtQueryInformationFile(hFile, &ioStatus, buffer, sizeof(buffer), 9); // 9 = FileNameInformation
+    CloseHandle(hFile);
+
+    if (status >= 0) {
+        PFILE_NAME_INFORMATION pInfo = (PFILE_NAME_INFORMATION)buffer;
+        return QString::fromWCharArray(pInfo->FileName, pInfo->FileNameLength / sizeof(WCHAR));
+    }
+    return "";
 }
 
 std::wstring MftReader::getPathFastInternal(size_t driveIdx, uint64_t frn) {

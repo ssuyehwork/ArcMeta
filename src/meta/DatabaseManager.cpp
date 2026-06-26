@@ -162,6 +162,15 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             tag_name TEXT,
             PRIMARY KEY (group_id, tag_name)
         );
+
+        -- 托管库待处理任务表 (Plan-108)
+        CREATE TABLE IF NOT EXISTS pending_imports (
+            frn INTEGER PRIMARY KEY,
+            drive TEXT,
+            path TEXT,
+            status INTEGER DEFAULT 1, -- 1: 待入库, 2: 已处理, -1: 待出库
+            timestamp INTEGER
+        );
     )";
     char* errMsg = nullptr;
     sqlite3_exec(conn.memDb, schema, nullptr, nullptr, &errMsg);

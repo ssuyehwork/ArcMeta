@@ -86,9 +86,17 @@ private:
     QLabel* m_appNameLabel = nullptr;
     QWidget* m_navBarWidget = nullptr;
     QHBoxLayout* m_navBarLayout = nullptr;
+
+    // 2026-06-26 按照 Plan-108：盘符管理栏成员
+    QWidget* m_driveBarWidget = nullptr;
+    QHBoxLayout* m_driveBarLayout = nullptr;
+    QPushButton* m_btnToggleDriveBar = nullptr;
+    QMap<QString, class DriveButton*> m_driveButtons;
+
     QVBoxLayout* m_bodyLayout = nullptr; // 2026-05-08 按照用户要求：提升为成员变量以支持动态边距切换
 
     void initUi();
+    void initDriveBar();
     void updateNavButtons();
     void updateStatusBar();
 
@@ -106,6 +114,8 @@ private:
     void initToolbar();
     void setupSplitters();
     void setupCustomTitleBarButtons();
+    void onDriveButtonClicked();
+    void onDriveButtonContextMenu(const QPoint& pos);
     void resetSplitterLayout();
 
     // 复合地址栏

@@ -139,6 +139,7 @@ public:
     void setURL(const std::wstring& path, const std::wstring& url, bool notify = true);
     void setEncrypted(const std::wstring& path, bool encrypted, bool notify = true);
     void setInvalid(const std::wstring& path, bool invalid, bool notify = true);
+    void setInvalidByFidPrefix(const std::string& fidPrefix, bool invalid);
     void setManaged(const std::wstring& path, bool managed, bool notify = true);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
 
