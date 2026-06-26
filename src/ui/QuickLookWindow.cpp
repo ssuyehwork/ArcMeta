@@ -62,8 +62,8 @@ QuickLookWindow::QuickLookWindow() : QWidget(nullptr) {
 
 void QuickLookWindow::initUi() {
     m_mainLayout = new QVBoxLayout(this);
-    // 物理对齐：右侧边距 0px，确保滚动条贴合边缘
-    m_mainLayout->setContentsMargins(10, 10, 0, 10); 
+    // 2026-11-14 物理修正：全屏预览窗边距置零，确保 fitInView 居中计算绝对精确
+    m_mainLayout->setContentsMargins(0, 0, 0, 0);
 
     // 图片渲染层
     m_graphicsView = new QGraphicsView(this);

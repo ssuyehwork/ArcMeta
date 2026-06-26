@@ -421,3 +421,4 @@
         1. 移除了 `setDevicePixelRatio` 调用，消除了由 DPI 适配诱发的二次插值锯齿。
         2. 引入了基于 `m_graphicsView` 尺寸的 `QImage::scaled(SmoothTransformation)` 预缩放机制，利用面积平均采样算法确保渲染前图片像素已与显示器逻辑点完美契合。
         3. 实现了标准图像与专业格式（EPS/AI）画质链路的同步强化。
+    - **布局修正**: 将 `QuickLookWindow` 主布局边距由 (10,10,0,10) 修正为 (0,0,0,0)，彻底解决了图片预览不居中的视觉偏差。
