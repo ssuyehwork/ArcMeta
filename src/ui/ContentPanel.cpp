@@ -1242,7 +1242,18 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
  
             if (keyEvent->key() == Qt::Key_Space) { 
                 QModelIndex idx = view->currentIndex(); 
-                if (idx.isValid()) emit requestQuickLook(idx.data(PathRole).toString()); 
+                if (idx.isValid()) {
+                    QString path = idx.data(PathRole).toString();
+                    if (!path.isEmpty()) {
+                        // 2026-11-14 按照 Plan-109：预览前置过滤，拦截文件夹及不可预览文件
+                        QFileInfo info(path);
+                        QString ext = info.suffix().toLower();
+                        static const QStringList blackList = {"exe", "dll", "zip", "rar", "7z", "tar", "gz"};
+                        if (!info.isDir() && !blackList.contains(ext)) {
+                            emit requestQuickLook(path);
+                        }
+                    }
+                }
                 return true; 
             } 
             if (keyEvent->key() == Qt::Key_Backspace) { 

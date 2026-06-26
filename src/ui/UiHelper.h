@@ -140,6 +140,14 @@ public:
         return graphicsExts.contains(ext.toLower());
     }
 
+    static bool isStandardImage(const QString& ext) {
+        // 2026-11-14 按照 Plan-109：区分标准图像与专业图形格式，以便在预览时选择最优渲染链路
+        static const QStringList standardExts = {
+            "png", "jpg", "jpeg", "bmp", "gif", "webp", "ico"
+        };
+        return standardExts.contains(ext.toLower());
+    }
+
     static QIcon getIcon(const QString& key, const QColor& color, int size = 18) {
         QIcon icon;
         QPixmap pix = getPixmap(key, QSize(size, size), color);

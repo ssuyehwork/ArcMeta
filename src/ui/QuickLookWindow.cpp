@@ -59,9 +59,7 @@ void QuickLookWindow::initUi() {
     // 文本渲染层
     m_textPreview = new QPlainTextEdit(this);
     m_textPreview->setReadOnly(true);
-    // 2026-04-11 按照用户要求：彻底修正原生样式污染问题
-    // transparent 会穿透至系统合成层（白色）而非深色背景，必须显式指定 #1E1E1E
-    // 同时完整覆盖 viewport、滚动条以及边框，确保与全局风格一致
+    // 2026-11-14 按照 Plan-109：废除硬编码样式，引入对齐 Memories.md 规范的标准滚动条样式
     m_textPreview->setStyleSheet(
         "QPlainTextEdit {"
         "  background-color: #1E1E1E;"
@@ -71,20 +69,20 @@ void QuickLookWindow::initUi() {
         "  font-size: 13px;"
         "  padding: 16px;"
         "}"
-        "QPlainTextEdit QScrollBar:vertical {"
+        "QScrollBar:vertical {"
         "  border: none; background: transparent; width: 10px; margin: 0px;"
         "}"
-        "QPlainTextEdit QScrollBar::handle:vertical {"
+        "QScrollBar::handle:vertical {"
         "  background: #333333; min-height: 20px; border-radius: 3px;"
         "}"
-        "QPlainTextEdit QScrollBar::handle:vertical:hover { background: #444444; }"
-        "QPlainTextEdit QScrollBar::add-line:vertical, QPlainTextEdit QScrollBar::sub-line:vertical { width: 0px; height: 0px; }"
-        "QPlainTextEdit QScrollBar:horizontal { height: 10px; background: transparent; border: none; margin: 0px; }"
-        "QPlainTextEdit QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; min-width: 20px; }"
-        "QPlainTextEdit QScrollBar::handle:horizontal:hover { background: #444444; }"
-        "QPlainTextEdit QScrollBar::add-line:horizontal, QPlainTextEdit QScrollBar::sub-line:horizontal { width: 0px; height: 0px; }"
-        "QPlainTextEdit QScrollBar::add-page:vertical, QPlainTextEdit QScrollBar::sub-page:vertical, "
-        "QPlainTextEdit QScrollBar::add-page:horizontal, QPlainTextEdit QScrollBar::sub-page:horizontal { background: none; }"
+        "QScrollBar::handle:vertical:hover { background: #444444; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { width: 0px; height: 0px; }"
+        "QScrollBar:horizontal { height: 10px; background: transparent; border: none; margin: 0px; }"
+        "QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; min-width: 20px; }"
+        "QScrollBar::handle:horizontal:hover { background: #444444; }"
+        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; height: 0px; }"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical, "
+        "QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }"
     );
     
     m_mainLayout->addWidget(m_graphicsView);
@@ -103,7 +101,13 @@ void QuickLookWindow::previewFile(const QString& path) {
     QFileInfo info(path);
     QString ext = info.suffix().toLower();
     if (UiHelper::isGraphicsFile(ext)) {
-        renderProfessionalImage(path);
+        // 2026-11-14 按照 Plan-109：区分渲染链路以优化画质。
+        // 标准图像采用全分辨率加载，专业格式继续采用 Shell 缩略图引擎。
+        if (UiHelper::isStandardImage(ext)) {
+            renderImage(path);
+        } else {
+            renderProfessionalImage(path);
+        }
     } else {
         renderText(path);
     }
