@@ -97,9 +97,20 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     clipPath.addRoundedRect(m.cardRect, 6, 6);
     painter->setClipPath(clipPath);
 
-    // 绘制卡片背景 (填充整个矩形)
+    // 绘制卡片背景
     painter->setPen(Qt::NoPen);
-    painter->setBrush(QColor("#2d2d2d"));
+
+    // 2026-11-14 执行第三步：图形文件等待缩略图时，绘制轻量灰色占位背景
+    bool isWaitingThumb = false;
+    if (m_pathRole != -1 && thumb.isNull()) {
+        QString path = index.data(m_pathRole).toString();
+        QString ext = QFileInfo(path).suffix().toLower();
+        if (UiHelper::isGraphicsFile(ext) || ext == "svg") {
+            isWaitingThumb = true;
+        }
+    }
+
+    painter->setBrush(isWaitingThumb ? QColor("#3A3A3A") : QColor("#2d2d2d"));
     painter->drawRect(m.cardRect);
 
     if (hasThumb && !thumb.isNull()) {

@@ -205,15 +205,17 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         QIcon* cached = m_iconCache.object(cacheKey);
         if (cached) return *cached;
 
+        QFileInfo info(path);
+        QString ext = info.suffix().toLower();
+        bool isGraphic = UiHelper::isGraphicsFile(ext) || ext == "svg";
+
         if (!m_requestedIcons.contains(cacheKey)) {
             m_requestedIcons.insert(cacheKey);
             QPointer<const FerrexVirtualDbModel> weakThis(this);
-            (void)QtConcurrent::run([weakThis, path, cacheKey]() {
+            (void)QtConcurrent::run([weakThis, path, cacheKey, ext]() {
                 #ifdef Q_OS_WIN
                 CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
                 #endif
-                QFileInfo info(path);
-                QString ext = info.suffix().toLower();
                 QIcon icon;
                 double ar = 1.0;
                 bool hasThumb = false;
@@ -263,7 +265,10 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                 #endif
             });
         }
-        return UiHelper::getFileIcon(path, 128); // 占位
+        
+        // 2026-11-14 执行第二步：图形文件等待缩略图时返回空图标，由 Delegate 绘制占位背景，消除抖动
+        if (isGraphic) return QIcon(); 
+        return UiHelper::getFileIcon(path, 128); // 非图形文件直接显示系统图标
     }
 
     return QVariant();
