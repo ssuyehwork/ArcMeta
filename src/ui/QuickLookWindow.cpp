@@ -2,6 +2,7 @@
 #include <QKeyEvent>
 #include <QFileInfo>
 #include <QFile>
+#include <QSet>
 #include <QImageReader>
 #include <QGraphicsPixmapItem>
 #include <QLabel>
@@ -162,14 +163,16 @@ void QuickLookWindow::renderImage(const QString& path) {
         return;
     }
 
-    // 若图片尺寸远超主流显示器，执行高质量预缩放。4096px 可覆盖 4K 屏幕 1:1 预览。
-    if (img.width() > 4096 || img.height() > 4096) {
-        img = img.scaled(4096, 4096, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    // 2026-11-14 物理画质补丁：预缩放到视图尺寸以确保 SmoothTransformation 生效
+    // 理由：fitInView 的默认插值质量较低，先通过 QImage 面积平均采样缩放到大致尺寸
+    QSize viewSize = m_graphicsView->size();
+    if (!viewSize.isEmpty() && (img.width() > viewSize.width() || img.height() > viewSize.height())) {
+        img = img.scaled(viewSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
 
     QPixmap pix = QPixmap::fromImage(img);
-    // 2026-11-14 物理加固：注入 DevicePixelRatio 以支持 Retina/4K 屏的高精度渲染
-    pix.setDevicePixelRatio(this->devicePixelRatioF());
+    // 2026-11-14 物理修正：移除 setDevicePixelRatio 调用。不做人为逻辑尺寸缩放，
+    // 让 Qt 以原始像素渲染，防止由于 DPI 插值导致的二次锯齿。
 
     auto item = m_scene->addPixmap(pix);
     item->setTransformationMode(Qt::SmoothTransformation);
@@ -185,16 +188,21 @@ void QuickLookWindow::renderProfessionalImage(const QString& path) {
     m_scene->clear();
     m_graphicsView->resetTransform();
 
-    // 2026-11-14 物理画质增强：请求 2560 级超清缩略图以适配 2K/4K 预览需求，杜绝低像素插值锯齿
+    // 2026-11-14 物理画质增强：请求 2560 级超清缩略图
     QImage img = UiHelper::getShellThumbnail(path, 2560);
     if (img.isNull()) {
-        // 2026-11-14 物理保底：若 Shell 引擎失效，尝试原生 QImage 加载
         img.load(path);
     }
 
     if (!img.isNull()) {
+        // 2026-11-14 物理画质补丁：预缩放到视图尺寸
+        QSize viewSize = m_graphicsView->size();
+        if (!viewSize.isEmpty() && (img.width() > viewSize.width() || img.height() > viewSize.height())) {
+            img = img.scaled(viewSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
+
         QPixmap pix = QPixmap::fromImage(img);
-        pix.setDevicePixelRatio(this->devicePixelRatioF());
+        // 移除 setDevicePixelRatio
 
         auto item = m_scene->addPixmap(pix);
         item->setTransformationMode(Qt::SmoothTransformation);

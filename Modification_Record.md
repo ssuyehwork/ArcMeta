@@ -417,4 +417,7 @@
     - **分流降级机制**: 为标准图像加载引入“原生 -> Shell 引擎”降级链路，为专业格式引入“Shell -> 原生”保底链路，确保 PNG/EPS 100% 可视。
     - **样式全局化**: 滚动条 QSS 样式（10px, 3px radius）提升至窗口级，消除子组件样式碎片化，确保图像与文本预览视觉高度统一。
     - **精准选择器**: 引入 `#QuickLookWindow` 标识符，防止样式污染其他 UI 组件。
-    - **极致画质 (抗锯齿)**: 引入 `QImageReader` 高质量预缩放（4096px）及 `SmoothTransformation` 面积平均采样，根治了超大图预览时的莫尔纹锯齿；注入 `DevicePixelRatio` 完美适配 4K 高分屏渲染。
+    - **极致画质 (抗锯齿优化)**:
+        1. 移除了 `setDevicePixelRatio` 调用，消除了由 DPI 适配诱发的二次插值锯齿。
+        2. 引入了基于 `m_graphicsView` 尺寸的 `QImage::scaled(SmoothTransformation)` 预缩放机制，利用面积平均采样算法确保渲染前图片像素已与显示器逻辑点完美契合。
+        3. 实现了标准图像与专业格式（EPS/AI）画质链路的同步强化。
