@@ -169,7 +169,13 @@ std::wstring AutoImportManager::getManagedFolderAbsolutePath(const std::wstring&
 
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
     QString relPath = AppConfig::instance().getValue(key, "").toString();
-    if (relPath.isEmpty()) return L"";
+
+    // 2026-11-15 按照 Plan-108：若配置不存在，尝试使用默认托管路径 ArcMeta.Library_[DriveLetter]
+    if (relPath.isEmpty()) {
+        QString letter = drive.left(1);
+        relPath = "ArcMeta.Library_" + letter;
+        if (!QDir(drive + relPath).exists()) return L"";
+    }
 
     return MetadataManager::normalizePath((drive.toStdWString() + relPath.toStdWString()));
 }

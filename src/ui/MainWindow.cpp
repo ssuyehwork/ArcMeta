@@ -1352,6 +1352,11 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
     int val = act->data().toInt();
     if (val == 1) {
         if (QDir().mkpath(managedPath)) {
+            // 2026-11-15 按照 Plan-108：创建成功后将配置同步至 AppConfig
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(letter.toStdWString());
+            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+            AppConfig::instance().setValue(key, "ArcMeta.Library_" + letter.left(1));
+
             btn->setState(DriveButton::Active);
             ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建成功", 1500, Style::SuccessGreen);
         }
@@ -1359,7 +1364,40 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
         ShellHelper::openInExplorer(managedPath);
     } else if (val == 3) {
         btn->setState(DriveButton::Running);
-        AutoImportManager::instance().startTask(letter);
+        // 2026-11-15 按照 Plan-108：执行物理全量扫描并注入 pending_imports
+        QtConcurrent::run([this, letter, managedPath]() {
+            QDir dir(managedPath);
+            QStringList filters; filters << "*" << "*.*";
+            QDirIterator it(managedPath, filters, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+
+            sqlite3* db = DatabaseManager::instance().getGlobalDb();
+            const char* sql = "REPLACE INTO pending_imports (frn, drive, path, status, timestamp) VALUES (?, ?, ?, 1, ?)";
+            sqlite3_stmt* stmt;
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                while (it.hasNext()) {
+                    QString fullPath = it.next();
+                    std::string fid;
+                    long long size = 0, ctime = 0, mtime = 0, atime = 0;
+                    std::wstring type;
+                    std::wstring frnStr;
+                    // 通过物理 API 实时反查 FRN
+                    if (MetadataManager::instance().fetchWinApiMetadataDirect(fullPath.toStdWString(), fid, &frnStr, &size, &type, &ctime, &mtime, &atime)) {
+                        unsigned long long frn = std::stoull(frnStr, nullptr, 16);
+                        sqlite3_bind_int64(stmt, 1, frn);
+                        sqlite3_bind_text(stmt, 2, letter.toUtf8().constData(), -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_text(stmt, 3, fullPath.toUtf8().constData(), -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_int64(stmt, 4, QDateTime::currentMSecsSinceEpoch());
+                        sqlite3_step(stmt);
+                        sqlite3_reset(stmt);
+                    }
+                }
+                sqlite3_finalize(stmt);
+            }
+            // 扫描完成后触发 AutoImportManager 消费任务
+            QMetaObject::invokeMethod(this, [letter]() {
+                AutoImportManager::instance().startTask(letter);
+            }, Qt::QueuedConnection);
+        });
     }
 }
 
