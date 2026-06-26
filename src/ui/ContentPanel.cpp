@@ -37,6 +37,7 @@
 #include <QItemSelectionModel> 
 #include <QFileInfo> 
 #include <QDir> 
+#include <QSet>
 #include <QFile>
 #include <QDateTime> 
 #include <QDesktopServices> 
