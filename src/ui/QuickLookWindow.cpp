@@ -19,9 +19,25 @@ QuickLookWindow& QuickLookWindow::instance() {
 }
 
 QuickLookWindow::QuickLookWindow() : QWidget(nullptr) {
+    setObjectName("QuickLookWindow");
     // 强制赋予全屏及最高层级，禁绝系统装饰
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
-    setStyleSheet("QWidget { background-color: rgba(30, 30, 30, 0.95); border: 1px solid #444; border-radius: 12px; }");
+
+    // 2026-11-14 按照 Plan-109：全口径样式覆盖。将滚动条规范（10px, 3px radius）提升至窗口级。
+    // 物理引用标准色值：BorderColor (#333333) 与 BorderDark (#444444)
+    setStyleSheet(
+        "#QuickLookWindow { background-color: rgba(30, 30, 30, 0.95); border: 1px solid #444; border-radius: 12px; }"
+        "QScrollBar:vertical { border: none; background: transparent; width: 10px; margin: 0px; }"
+        "QScrollBar::handle:vertical { background: #333333; min-height: 20px; border-radius: 3px; }"
+        "QScrollBar::handle:vertical:hover { background: #444444; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { width: 0px; height: 0px; }"
+        "QScrollBar:horizontal { height: 10px; background: transparent; border: none; margin: 0px; }"
+        "QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; min-width: 20px; }"
+        "QScrollBar::handle:horizontal:hover { background: #444444; }"
+        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; height: 0px; }"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical, "
+        "QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }"
+    );
 
     // 2026-06-xx 物理修复：通过原生 API 实现置顶，避免标志位导致的重建问题
 #ifdef Q_OS_WIN
@@ -59,8 +75,7 @@ void QuickLookWindow::initUi() {
     // 文本渲染层
     m_textPreview = new QPlainTextEdit(this);
     m_textPreview->setReadOnly(true);
-    // 2026-11-14 按照 Plan-109：废除硬编码样式，引入对齐 Memories.md 规范的标准滚动条样式
-    // 物理引用标准色值：BorderColor (#333333) 与 BorderDark (#444444)
+    // 2026-11-14 按照 Plan-109：移除局部样式，改由窗口全局样式统一控制
     m_textPreview->setStyleSheet(
         "QPlainTextEdit {"
         "  background-color: #1E1E1E;"
@@ -70,20 +85,6 @@ void QuickLookWindow::initUi() {
         "  font-size: 13px;"
         "  padding: 16px;"
         "}"
-        "QScrollBar:vertical {"
-        "  border: none; background: transparent; width: 10px; margin: 0px;"
-        "}"
-        "QScrollBar::handle:vertical {"
-        "  background: #333333; min-height: 20px; border-radius: 3px;"
-        "}"
-        "QScrollBar::handle:vertical:hover { background: #444444; }"
-        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { width: 0px; height: 0px; }"
-        "QScrollBar:horizontal { height: 10px; background: transparent; border: none; margin: 0px; }"
-        "QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; min-width: 20px; }"
-        "QScrollBar::handle:horizontal:hover { background: #444444; }"
-        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; height: 0px; }"
-        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical, "
-        "QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }"
     );
     
     m_mainLayout->addWidget(m_graphicsView);
@@ -147,12 +148,16 @@ void QuickLookWindow::renderImage(const QString& path) {
     }
 
     QPixmap pix(path);
-    if (!pix.isNull()) {
-        // 2026-04-11 按照用户要求：回归标准图片加载逻辑，Qt 自动处理正向扫描线
-        // 2026-11-14 物理加固：m_graphicsView 已在 initUi 开启 SmoothPixmapTransform，确保高清无锯齿
-        auto item = m_scene->addPixmap(pix);
-        m_graphicsView->fitInView(item, Qt::KeepAspectRatio);
+    if (pix.isNull()) {
+        // 2026-11-14 物理降级：若 Qt 原生 Pixmap 加载失败（常见于锁死或特殊色深），则降级调用 Shell 引擎
+        renderProfessionalImage(path);
+        return;
     }
+
+    // 2026-04-11 按照用户要求：回归标准图片加载逻辑，Qt 自动处理正向扫描线
+    // 2026-11-14 物理加固：m_graphicsView 已在 initUi 开启 SmoothPixmapTransform，确保高清无锯齿
+    auto item = m_scene->addPixmap(pix);
+    m_graphicsView->fitInView(item, Qt::KeepAspectRatio);
 }
 
 /**
@@ -167,6 +172,11 @@ void QuickLookWindow::renderProfessionalImage(const QString& path) {
 
     // 2026-04-11 按照用户要求：请求 1024 级高清缩略图以支持 PSD/AI 快速预览
     QImage img = UiHelper::getShellThumbnail(path, 1024);
+    if (img.isNull()) {
+        // 2026-11-14 物理保底：若 Shell 引擎失效（常见于未安装编码器），尝试原生 QImage 加载
+        img.load(path);
+    }
+
     if (!img.isNull()) {
         QPixmap pix = QPixmap::fromImage(img);
         auto item = m_scene->addPixmap(pix);
