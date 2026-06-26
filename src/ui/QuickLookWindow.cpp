@@ -2,6 +2,7 @@
 #include <QKeyEvent>
 #include <QFileInfo>
 #include <QFile>
+#include <QImageReader>
 #include <QGraphicsPixmapItem>
 #include <QLabel>
 #include <QShortcut>
@@ -65,8 +66,10 @@ void QuickLookWindow::initUi() {
 
     // 图片渲染层
     m_graphicsView = new QGraphicsView(this);
-    m_graphicsView->setRenderHint(QPainter::Antialiasing);
-    m_graphicsView->setRenderHint(QPainter::SmoothPixmapTransform);
+    // 2026-11-14 物理画质增强：开启全口径抗锯齿与平滑缩放提示
+    m_graphicsView->setRenderHint(QPainter::Antialiasing, true);
+    m_graphicsView->setRenderHint(QPainter::TextAntialiasing, true);
+    m_graphicsView->setRenderHint(QPainter::SmoothPixmapTransform, true);
     m_graphicsView->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
     m_graphicsView->setStyleSheet("background: transparent; border: none;");
     m_scene = new QGraphicsScene(this);
@@ -131,32 +134,45 @@ void QuickLookWindow::resizeEvent(QResizeEvent* event) {
 }
 
 /**
- * @brief 硬件加速图片渲染 (全分辨率原图)
+ * @brief 硬件加速图片渲染 (全分辨率原图 + 高质量预缩放)
  */
 void QuickLookWindow::renderImage(const QString& path) {
     m_textPreview->hide();
     m_graphicsView->show();
     m_scene->clear();
-    // 2026-04-11 按照用户要求：切图时强制重置缩放矩阵，确保初始为 1:1 或满屏适配态
     m_graphicsView->resetTransform();
 
-    // 2026-11-14 按照 Plan-109：性能优化。若图片物理大小超过 50MB，降级调用高清缩略图以防 UI 挂起
+    // 2026-11-14 性能哨兵：超大文件直接降级到 Shell 缩略图引擎，保护 UI 响应
     QFileInfo info(path);
     if (info.size() > 50 * 1024 * 1024) {
         renderProfessionalImage(path);
         return;
     }
 
-    QPixmap pix(path);
-    if (pix.isNull()) {
-        // 2026-11-14 物理降级：若 Qt 原生 Pixmap 加载失败（常见于锁死或特殊色深），则降级调用 Shell 引擎
+    // 2026-11-14 物理画质增强：使用 QImageReader 实施高质量预缩放
+    // 理由：直接加载超大 Pixmap 会导致 QGraphicsView 在大幅缩小时因双线性过滤算法极限产生锯齿（Moiré 纹）。
+    // 通过 QImage::scaled(SmoothTransformation) 实施面积平均采样，可根治高频细节锯齿。
+    QImageReader reader(path);
+    reader.setAutoTransform(true);
+    QImage img = reader.read();
+
+    if (img.isNull()) {
+        // 2026-11-14 物理降级：若加载失败，尝试调用系统 Shell 引擎
         renderProfessionalImage(path);
         return;
     }
 
-    // 2026-04-11 按照用户要求：回归标准图片加载逻辑，Qt 自动处理正向扫描线
-    // 2026-11-14 物理加固：m_graphicsView 已在 initUi 开启 SmoothPixmapTransform，确保高清无锯齿
+    // 若图片尺寸远超主流显示器，执行高质量预缩放。4096px 可覆盖 4K 屏幕 1:1 预览。
+    if (img.width() > 4096 || img.height() > 4096) {
+        img = img.scaled(4096, 4096, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+
+    QPixmap pix = QPixmap::fromImage(img);
+    // 2026-11-14 物理加固：注入 DevicePixelRatio 以支持 Retina/4K 屏的高精度渲染
+    pix.setDevicePixelRatio(this->devicePixelRatioF());
+
     auto item = m_scene->addPixmap(pix);
+    item->setTransformationMode(Qt::SmoothTransformation);
     m_graphicsView->fitInView(item, Qt::KeepAspectRatio);
 }
 
@@ -167,19 +183,21 @@ void QuickLookWindow::renderProfessionalImage(const QString& path) {
     m_textPreview->hide();
     m_graphicsView->show();
     m_scene->clear();
-    // 2026-04-11 按照用户要求：切图时强制重置缩放矩阵
     m_graphicsView->resetTransform();
 
-    // 2026-04-11 按照用户要求：请求 1024 级高清缩略图以支持 PSD/AI 快速预览
-    QImage img = UiHelper::getShellThumbnail(path, 1024);
+    // 2026-11-14 物理画质增强：请求 2560 级超清缩略图以适配 2K/4K 预览需求，杜绝低像素插值锯齿
+    QImage img = UiHelper::getShellThumbnail(path, 2560);
     if (img.isNull()) {
-        // 2026-11-14 物理保底：若 Shell 引擎失效（常见于未安装编码器），尝试原生 QImage 加载
+        // 2026-11-14 物理保底：若 Shell 引擎失效，尝试原生 QImage 加载
         img.load(path);
     }
 
     if (!img.isNull()) {
         QPixmap pix = QPixmap::fromImage(img);
+        pix.setDevicePixelRatio(this->devicePixelRatioF());
+
         auto item = m_scene->addPixmap(pix);
+        item->setTransformationMode(Qt::SmoothTransformation);
         m_graphicsView->fitInView(item, Qt::KeepAspectRatio);
     }
 }
