@@ -100,6 +100,11 @@ void NavPanel::deferredInit() {
     // 延迟加载收藏夹
     QTimer::singleShot(100, this, &NavPanel::loadFavorites);
 
+    // 2026-xx-xx 按照 Plan-107：设置 Splitter 初始比例 (6:4)
+    if (m_splitter) {
+        m_splitter->setSizes({600, 400});
+    }
+
     qDebug() << "[NavPanel] deferredInit 同步部分执行完毕";
 }
 
@@ -139,24 +144,14 @@ void NavPanel::initUi() {
     headerLayout->addStretch();
     m_mainLayout->addWidget(header);
 
-    // 2026-xx-xx 按照 Plan-96：引入全局滚动区
-    m_scrollArea = new QScrollArea(this);
-    m_scrollArea->setWidgetResizable(true);
-    m_scrollArea->setFrameShape(QFrame::NoFrame);
-    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_scrollArea->viewport()->setStyleSheet("background: transparent;");
-    m_scrollArea->setStyleSheet("QScrollArea { background: transparent; border: none; }");
-    m_scrollArea->viewport()->setAcceptDrops(false); // 2026-xx-xx 按照 Plan-96：使拖拽事件透传至下层视图
+    // 2026-xx-xx 按照 Plan-107：物理还原 QSplitter 弹性架构
+    m_splitter = new QSplitter(Qt::Vertical, this);
+    m_splitter->setHandleWidth(1);
+    m_splitter->setStyleSheet("QSplitter::handle { background: #333333; }");
 
-    m_container = new QWidget(m_scrollArea);
-    m_container->setStyleSheet("background: transparent;");
-    m_containerLayout = new QVBoxLayout(m_container);
-    m_containerLayout->setContentsMargins(0, 0, 0, 0);
-    m_containerLayout->setSpacing(0);
-
-    // --- 磁盘树 (2026-xx-xx 按照 Plan-96：移除“本地磁盘”多余标题) ---
+    // --- 磁盘树 ---
     m_treeView = new DropTreeView(this);
+    m_treeView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_treeView->setHeaderHidden(true);
     m_treeView->setAnimated(true);
     m_treeView->setIndentation(20);
@@ -165,12 +160,12 @@ void NavPanel::initUi() {
     m_treeView->setDragEnabled(true);
     m_treeView->setDragDropMode(QAbstractItemView::DragOnly);
     m_treeView->setItemDelegate(new TreeItemDelegate(this, false));
-    m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // 禁止内部滚动
+    // 物理恢复：允许内部滚动
+    m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     m_model = new QStandardItemModel(this);
     m_treeView->setModel(m_model);
-    m_containerLayout->addWidget(m_treeView);
 
     // --- 分组：收藏夹 ---
     QVBoxLayout* favLayout = nullptr;
@@ -185,17 +180,21 @@ void NavPanel::initUi() {
     m_favoriteView->setAcceptDrops(true);
     m_favoriteView->setDropIndicatorShown(true);
     m_favoriteView->setDefaultDropAction(Qt::MoveAction);
-    m_favoriteView->setDragDropMode(QAbstractItemView::DragDrop); // 修改为允许外部拖放
-    m_favoriteView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // 禁止内部滚动
+    m_favoriteView->setDragDropMode(QAbstractItemView::DragDrop);
+    // 物理恢复：允许内部滚动
+    m_favoriteView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_favoriteView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_favoriteView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding); // 2026-xx-xx 按照 Plan-96：向底填充，作为 DND 靶场
+    m_favoriteView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     m_favoriteModel = new QStandardItemModel(this);
     m_favoriteView->setModel(m_favoriteModel);
-    favLayout->addWidget(m_favoriteView, 1); // 占据全域
-    m_containerLayout->addWidget(favGroup, 1); // 占据剩余全域
-    m_scrollArea->setWidget(m_container);
-    m_mainLayout->addWidget(m_scrollArea, 1);
+    favLayout->addWidget(m_favoriteView);
+
+    // 将各组件加入 Splitter
+    m_splitter->addWidget(m_treeView);
+    m_splitter->addWidget(favGroup);
+
+    m_mainLayout->addWidget(m_splitter, 1);
 
     // 样式美化
     QString arrowRight = UiHelper::getSvgTempFilePath("arrow_right", QColor("#3498db"));
@@ -213,7 +212,6 @@ void NavPanel::initUi() {
 
     // 信号连接
     connect(m_treeView, &QTreeView::expanded, this, &NavPanel::onItemExpanded);
-    connect(m_treeView, &QTreeView::collapsed, this, &NavPanel::updateTreeHeight);
     connect(m_treeView, &QTreeView::clicked, this, &NavPanel::onTreeClicked);
 
     connect(m_favoriteView, &QTreeView::clicked, this, &NavPanel::onFavoriteClicked);
@@ -225,12 +223,6 @@ void NavPanel::initUi() {
     connect(m_favoriteModel, &QStandardItemModel::rowsMoved, this, updateFavAndSave);
     connect(m_favoriteModel, &QStandardItemModel::rowsInserted, this, updateFavAndSave);
     connect(m_favoriteModel, &QStandardItemModel::rowsRemoved, this, updateFavAndSave);
-
-    // 磁盘树模型监听 (异步加载完成后触发)
-    connect(m_model, &QStandardItemModel::rowsInserted, this, &NavPanel::updateTreeHeight);
-    connect(m_model, &QStandardItemModel::rowsRemoved, this, &NavPanel::updateTreeHeight);
-    connect(m_model, &QStandardItemModel::modelReset, this, &NavPanel::updateTreeHeight);
-    connect(m_model, &QStandardItemModel::layoutChanged, this, &NavPanel::updateTreeHeight);
 }
 
 /**
@@ -365,31 +357,18 @@ void NavPanel::onItemExpanded(const QModelIndex& index) {
     if (item->rowCount() == 1 && item->child(0)->text() == "Loading...") {
         fetchChildDirs(item);
     }
-    updateTreeHeight();
 }
 
 void NavPanel::updateTreeHeight() {
-    QTimer::singleShot(0, this, [this]() {
-        if (!m_treeView || !m_model) return;
-        // 2026-xx-xx 按照 Plan-96：采用固定行高 28px 快速计算真实高度
-        int visibleRows = 0;
-        QModelIndex index = m_model->index(0, 0);
-        while (index.isValid()) {
-            visibleRows++;
-            index = m_treeView->indexBelow(index);
-        }
-        int height = visibleRows * 28;
-        if (height > 0) height += 4; // 微量缓冲
-        m_treeView->setFixedHeight(height);
-    });
+    // 2026-xx-xx 按照 Plan-107：废弃手动高度计算，解锁 Splitter 自由拉伸
 }
 
 void NavPanel::updateFavoriteHeight() {
-    // 2026-xx-xx 按照 Plan-96：收藏夹严禁设置 setFixedHeight，以确保其填充余白接收 DND
+    // 2026-xx-xx 按照 Plan-107：废弃手动高度计算
 }
 
 QWidget* NavPanel::buildGroup(const QString& title, const QIcon& icon, const QColor& color, QVBoxLayout*& outContentLayout) {
-    QWidget* wrapper = new QWidget(m_container);
+    QWidget* wrapper = new QWidget(this);
     wrapper->setAttribute(Qt::WA_StyledBackground, true);
     wrapper->setStyleSheet("background: transparent;");
     QVBoxLayout* wl = new QVBoxLayout(wrapper);

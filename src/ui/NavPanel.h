@@ -6,7 +6,7 @@
 #include <QStandardItem>
 #include <QVBoxLayout>
 #include <QDir>
-#include <QScrollArea>
+#include <QSplitter>
 
 namespace ArcMeta {
 
@@ -75,9 +75,7 @@ private:
 
     QWidget* buildGroup(const QString& title, const QIcon& icon, const QColor& color, QVBoxLayout*& outContentLayout);
 
-    QScrollArea* m_scrollArea = nullptr;
-    QWidget*     m_container = nullptr;
-    QVBoxLayout* m_containerLayout = nullptr;
+    QSplitter* m_splitter = nullptr;
     
     // 上方：磁盘树
     QTreeView* m_treeView = nullptr;
