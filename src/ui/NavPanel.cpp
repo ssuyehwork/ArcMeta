@@ -151,6 +151,7 @@ void NavPanel::initUi() {
 
     // --- 磁盘树 ---
     m_treeView = new DropTreeView(this);
+    m_treeView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_treeView->setHeaderHidden(true);
     m_treeView->setAnimated(true);
     m_treeView->setIndentation(20);
