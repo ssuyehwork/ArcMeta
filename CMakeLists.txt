@@ -46,6 +46,8 @@ set(SOURCES
     src/meta/sqlite3.h
     src/core/CoreController.cpp
     src/core/CoreController.h
+    src/core/AutoImportManager.cpp
+    src/core/AutoImportManager.h
     src/core/CacheManager.cpp
     src/core/CacheManager.h
     src/core/IndexedEntry.h
