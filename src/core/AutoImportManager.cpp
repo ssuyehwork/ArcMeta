@@ -102,7 +102,7 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
 }
 
 void AutoImportManager::startTask(const QString& drive) {
-    QtConcurrent::run([this, drive]() {
+    (void)QtConcurrent::run([this, drive]() {
         sqlite3* db = DatabaseManager::instance().getGlobalDb();
         struct TaskItem { uint64_t frn; QString path; };
         QVector<TaskItem> toImport;

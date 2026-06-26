@@ -428,8 +428,8 @@
 - **任务描述**: 修复 AutoImportManager 链接与编译错误。
 - **修改文件**:
     - **修改**: `CMakeLists.txt` (在 SOURCES 中添加 `src/core/AutoImportManager.cpp` 和 `src/core/AutoImportManager.h`)
-    - **修改**: `src/core/AutoImportManager.cpp` (补全头文件并修复宏冲突)
-- **修改原因**: 解决由于 `AutoImportManager` 源文件缺失及 Windows 环境宏冲突导致的编译链接失败。
+    - **修改**: `src/core/AutoImportManager.cpp` (补全头文件、修复宏冲突及消除 C4858 警告)
+- **修改原因**: 解决由于 `AutoImportManager` 源文件缺失、Windows 环境宏冲突及 `[[nodiscard]]` 返回值被丢弃导致的编译链接失败与警告。
 - **优化点**:
-    - **构建稳定性**: 确保项目核心模块被正确编译链接。
+    - **构建稳定性**: 确保项目核心模块被正确编译链接，并实现“零警告”构建。
     - **环境兼容性**: 引入 `#undef run` 防御 Windows SDK 宏污染，并补全 `QtConcurrent` 与 `QDateTime` 依赖。
