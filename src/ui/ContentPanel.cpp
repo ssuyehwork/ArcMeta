@@ -2291,8 +2291,6 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     m_isRecursive = recursive; 
     if (m_btnLayers) m_btnLayers->setChecked(recursive); 
  
-    m_model->clear(); 
- 
     if (path.isEmpty() || path == "computer://") { 
         m_currentPath = "computer://"; 
         updateLayersButtonState(); 
@@ -2493,8 +2491,6 @@ void ContentPanel::loadCategory(int categoryId) {
     if (m_imagePreview) m_imagePreview->hide(); 
     emit dataSourceChanged("category"); 
      
-    m_model->clear(); 
- 
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, categoryId, reqId]() {
         std::vector<ItemRecord> allRecords;
@@ -2601,8 +2597,6 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
         emit dataSourceChanged("category"); 
     }
      
-    m_model->clear(); 
- 
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, paths, reqId]() {
         std::vector<ItemRecord> records;
