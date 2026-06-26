@@ -7,9 +7,12 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QMetaObject>
+#include <QtConcurrent>
+#include <QDateTime>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
+#undef run
 #endif
 
 namespace ArcMeta {

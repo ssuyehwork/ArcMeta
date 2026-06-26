@@ -425,9 +425,11 @@
     - **SVG 矢量渲染**: 针对 SVG 格式引入了 `QSvgRenderer` 专属渲染路径，绕过系统图标干扰，实现 1:1 矢量内容还原。
 
 ## 2026-11-15
-- **任务描述**: 修复 AutoImportManager 链接错误。
+- **任务描述**: 修复 AutoImportManager 链接与编译错误。
 - **修改文件**:
     - **修改**: `CMakeLists.txt` (在 SOURCES 中添加 `src/core/AutoImportManager.cpp` 和 `src/core/AutoImportManager.h`)
-- **修改原因**: 解决由于 `AutoImportManager` 源文件未包含在编译目标中导致的“无法解析的外部符号”链接错误。
+    - **修改**: `src/core/AutoImportManager.cpp` (补全头文件并修复宏冲突)
+- **修改原因**: 解决由于 `AutoImportManager` 源文件缺失及 Windows 环境宏冲突导致的编译链接失败。
 - **优化点**:
-    - **构建稳定性**: 确保项目所有核心模块均被正确编译与链接，消除 main 函数及 MainWindow 引用失效问题。
+    - **构建稳定性**: 确保项目核心模块被正确编译链接。
+    - **环境兼容性**: 引入 `#undef run` 防御 Windows SDK 宏污染，并补全 `QtConcurrent` 与 `QDateTime` 依赖。
