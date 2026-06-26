@@ -100,9 +100,17 @@ void NavPanel::deferredInit() {
     // 延迟加载收藏夹
     QTimer::singleShot(100, this, &NavPanel::loadFavorites);
 
-    // 2026-xx-xx 按照 Plan-107：设置 Splitter 初始比例 (6:4)
+    // 2026-xx-xx 按照 Plan-107：按内容自适应 + 从 AppConfig 恢复持久化比例
     if (m_splitter) {
-        m_splitter->setSizes({600, 400});
+        QByteArray splitterState = AppConfig::instance()
+            .getValue("NavPanel/SplitterState").toByteArray();
+        if (!splitterState.isEmpty()) {
+            m_splitter->restoreState(splitterState);
+        } else {
+            // 默认：磁盘树占 2/3，收藏夹占 1/3
+            m_splitter->setStretchFactor(0, 2);
+            m_splitter->setStretchFactor(1, 1);
+        }
     }
 
     qDebug() << "[NavPanel] deferredInit 同步部分执行完毕";
@@ -223,6 +231,13 @@ void NavPanel::initUi() {
     connect(m_favoriteModel, &QStandardItemModel::rowsMoved, this, updateFavAndSave);
     connect(m_favoriteModel, &QStandardItemModel::rowsInserted, this, updateFavAndSave);
     connect(m_favoriteModel, &QStandardItemModel::rowsRemoved, this, updateFavAndSave);
+
+    // 监听 Splitter 变化并持久化
+    connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
+        AppConfig::instance().setValue(
+            "NavPanel/SplitterState",
+            m_splitter->saveState());
+    });
 }
 
 /**
@@ -395,8 +410,7 @@ QWidget* NavPanel::buildGroup(const QString& title, const QIcon& icon, const QCo
     hdrLayout->addWidget(iconLabel);
 
     QPushButton* hdrBtn = new QPushButton(title, hdrRow);
-    hdrBtn->setCheckable(true);
-    hdrBtn->setChecked(true);
+    hdrBtn->setCheckable(false);
     hdrBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     hdrBtn->setFixedHeight(32);
     hdrBtn->setCursor(Qt::PointingHandCursor);
@@ -411,7 +425,6 @@ QWidget* NavPanel::buildGroup(const QString& title, const QIcon& icon, const QCo
         "  padding: 0px;"
         "  margin: 0px;"
         "}"
-        "QPushButton:hover { color: #EEEEEE; }"
     ).arg(color.name()));
     hdrLayout->addWidget(hdrBtn);
 
@@ -421,8 +434,6 @@ QWidget* NavPanel::buildGroup(const QString& title, const QIcon& icon, const QCo
     outContentLayout = new QVBoxLayout(content);
     outContentLayout->setContentsMargins(0, 0, 0, 0);
     outContentLayout->setSpacing(0);
-
-    connect(hdrBtn, &QPushButton::toggled, content, &QWidget::setVisible);
 
     wl->addWidget(hdrRow);
     wl->addWidget(content, 1);
