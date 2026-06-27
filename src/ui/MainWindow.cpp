@@ -1368,7 +1368,7 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
     } else if (val == 3) {
         btn->setState(DriveButton::Running);
         // 2026-11-15 按照 Plan-108：执行物理全量扫描并注入 pending_imports
-        QtConcurrent::run([this, letter, managedPath]() {
+        (void)QtConcurrent::run([this, letter, managedPath]() {
             QDir dir(managedPath);
             QStringList filters; filters << "*" << "*.*";
             QDirIterator it(managedPath, filters, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
