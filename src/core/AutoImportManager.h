@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <mutex>
+#include <atomic>
 
 namespace ArcMeta {
 
@@ -44,6 +45,7 @@ private:
     std::vector<std::wstring> m_pendingPaths;
     std::mutex m_queueMutex;
     bool m_isListening = false;
+    std::atomic<bool> m_globalPaused{false};
 };
 
 } // namespace ArcMeta

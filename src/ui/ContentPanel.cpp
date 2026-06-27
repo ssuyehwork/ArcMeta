@@ -37,7 +37,9 @@
 #include <QItemSelectionModel> 
 #include <QFileInfo> 
 #include <QDir> 
+#include <QDirIterator>
 #include <QSet>
+#include <QMutexLocker>
 #include <QFile>
 #include <QDateTime> 
 #include <QDesktopServices> 
@@ -473,6 +475,17 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
     }
 }
 
+void FerrexVirtualDbModel::updateRegistrationProgress(const QString& path, double progress) {
+    auto it = m_pathToIndex.find(path);
+    if (it != m_pathToIndex.end()) {
+        int row = it->second;
+        m_allRecords[row].registrationProgress = progress;
+        // 触发局部重绘
+        QModelIndex idx = index(row, 0);
+        emit dataChanged(idx, idx, {RegistrationProgressRole});
+    }
+}
+
 void FerrexVirtualDbModel::clear() {
     beginResetModel();
     m_allRecords.clear();
@@ -750,6 +763,8 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
  
 ContentPanel::ContentPanel(QWidget* parent) 
     : QFrame(parent) { 
+    m_progressThreadPool.setMaxThreadCount(1); // 物理防御：串行 I/O 任务
+
     // 2026-07-xx 按照 Plan-63：启用右键菜单策略（容器级）
     setContextMenuPolicy(Qt::CustomContextMenu);
 
@@ -799,6 +814,10 @@ ContentPanel::ContentPanel(QWidget* parent)
     updateGridSize(); 
 } 
  
+ContentPanel::~ContentPanel() {
+    m_progressThreadPool.waitForDone();
+}
+
 void ContentPanel::deferredInit() { 
     qDebug() << "[ContentPanel] deferredInit 开始执行"; 
     // 2026-04-12 按照用户要求：补全延迟初始化逻辑，此处可处理模型预热或首屏数据对齐 
@@ -2386,6 +2405,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             if (panelPtr && panelPtr->m_loadRequestId == reqId) { 
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_proxyModel->sort(0, Qt::AscendingOrder);
+                panelPtr->startAsyncProgressCalculation(); // 触发异步进度扫描
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
                 // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
@@ -2579,6 +2599,7 @@ void ContentPanel::loadCategory(int categoryId) {
             if (weakThis && weakThis->m_loadRequestId == reqId) {
                 weakThis->m_model->setRecords(allRecords);
                 weakThis->m_proxyModel->sort(0, Qt::AscendingOrder);
+                weakThis->startAsyncProgressCalculation(); // 触发异步进度扫描
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
@@ -2655,6 +2676,7 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
             if (weakThis && weakThis->m_loadRequestId == reqId) {
                 weakThis->m_model->setRecords(records);
                 weakThis->m_proxyModel->sort(0, Qt::AscendingOrder);
+                weakThis->startAsyncProgressCalculation(); // 触发异步进度扫描
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
@@ -2703,6 +2725,64 @@ void ContentPanel::appendPaths(const QStringList& paths, int reqId) {
     });
 }
  
+void ContentPanel::startAsyncProgressCalculation() {
+    int reqId = m_loadRequestId.load();
+    std::vector<QString> dirsToCalculate;
+
+    // 主线程只读遍历
+    for (const auto& r : m_model->allRecords()) {
+        // 仅处理真实的文件夹，且之前没有计算过进度（初始值为 -1.0）
+        if (r.isDir && !r.isCategory && r.registrationProgress < -0.5) {
+            dirsToCalculate.push_back(r.path);
+        }
+    }
+
+    if (dirsToCalculate.empty()) return;
+
+    for (const auto& dirPath : dirsToCalculate) {
+        {
+            QMutexLocker lock(&m_calcMutex);
+            if (m_activeCalculations.contains(dirPath)) continue;
+            m_activeCalculations.insert(dirPath);
+        }
+
+        // 使用 QThreadPool 异步提交
+        m_progressThreadPool.start([this, dirPath, reqId]() {
+            double progress = calculateFolderProgressInternal(dirPath);
+
+            // 回调主线程
+            QMetaObject::invokeMethod(this, [this, dirPath, progress, reqId]() {
+                // 检查请求 ID 是否一致，防止由于用户切换了文件夹导致过期回调错误写入
+                if (reqId == m_loadRequestId.load()) {
+                    m_model->updateRegistrationProgress(dirPath, progress);
+                }
+                
+                QMutexLocker lock(&m_calcMutex);
+                m_activeCalculations.remove(dirPath);
+            }, Qt::QueuedConnection);
+        });
+    }
+}
+
+double ContentPanel::calculateFolderProgressInternal(const QString& folderPath) {
+    long long totalCount = 0;
+    long long managedCount = 0;
+
+    // 高效底层的扫描器：仅枚举文件与文件夹，使用 Subdirectories 递归
+    QDirIterator it(folderPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        QString childPath = it.next();
+        totalCount++;
+
+        // 访问元数据读锁缓存
+        if (MetadataManager::instance().getMeta(childPath.toStdWString()).hasUserOperations()) {
+            managedCount++;
+        }
+    }
+
+    return (totalCount == 0) ? 0.0 : (double)managedCount / totalCount;
+}
+
 void ContentPanel::recalculateAndEmitStats() {
     const std::vector<ItemRecord>& records = m_model->allRecords();
     if (records.empty()) {
