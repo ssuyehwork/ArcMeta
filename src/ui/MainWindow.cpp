@@ -34,7 +34,9 @@
 #include <QHBoxLayout>
 #include <QSvgRenderer>
 #include <QPainter>
+#include <QDirIterator>
 #include <QIcon>
+#include <string>
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QCursor>
