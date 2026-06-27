@@ -481,9 +481,17 @@
     - **高效枚举**: 使用 `QDirIterator` 替代传统递归，极大降低了内存分配开销并提升了扫描速度。
     - **增量刷新**: 任务完成后通过 `RegistrationProgressRole` 触发局部重绘，确保 UI 更新丝滑无抖动。
 
+## 2026-11-16
 - **任务描述**: 修复 ContentPanel.h 缺少头文件导致的编译错误。
 - **修改文件**:
     - **修改**: `src/ui/ContentPanel.h` (补全 `<atomic>`, `<QSet>`, `<QMutex>`, `<QThreadPool>`)
 - **修改原因**: 修复“缺少类型说明符”、“未知重写说明符”以及“未声明的标识符”等编译错误。
 - **优化点**:
     - **编译稳固**: 确保 `ContentPanel` 内部使用的异步进度扫描组件类型被正确识别，实现了全量构建通过。
+
+- **任务描述**: 修复 QuickLookWindow 预览图片居中偏置问题。
+- **修改文件**:
+    - **修改**: `src/ui/QuickLookWindow.cpp` (重构锚点管理逻辑)
+- **修改原因**: 修复因缩放操作后 `TransformationAnchor` 保持为 `AnchorUnderMouse` 导致 `fitInView` 计算偏置的问题。
+- **优化点**:
+    - **居中稳定性**: 确保在加载新图片前及缩放结束后，锚点强制归位至 `AnchorViewCenter`，保证预览始终居中。
