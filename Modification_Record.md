@@ -502,3 +502,10 @@
 - **修改原因**: 修复因使用 `frn` 而非主键 `path` 作为 `UPDATE/DELETE` 条件导致的状态同步失效。
 - **优化点**:
     - **数据一致性**: 确保 `pending_imports` 状态能正确流转至已完成 (2)，防止重复入库任务的无效执行。
+
+- **任务描述**: 修复托管库自动入库 `startTask` 死锁问题。
+- **修改文件**:
+    - **修改**: `src/core/AutoImportManager.cpp` (移除 `invokeMethod` 对 `importPaths` 的包裹)
+- **修改原因**: 修复 `Qt::BlockingQueuedConnection` 导致后台线程与主线程循环等待引发的界面假死。
+- **优化点**:
+    - **并发稳定性**: 消除死锁隐患，恢复“扫描该盘”功能的响应性，确保自动入库任务能平滑执行。
