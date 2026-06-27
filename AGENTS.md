@@ -94,7 +94,7 @@ Jules 收到分析委托类消息后，必须按以下顺序执行，**不得跳
 
 ### Step 3 — 创建方案文档
 
-收到授权后，按第三节规范创建 `Analysis_Modification_Plan-N.md`。
+收到授权后，按第三节规范创建 `implementation_plan-N.md`。
 
 ### 违规后的强制恢复行为
 
@@ -117,29 +117,29 @@ Jules 收到分析委托类消息后，必须按以下顺序执行，**不得跳
 
 ---
 
-## 三、Analysis_Modification_Plan 文档规范
+## 三、implementation_plan 文档规范
 
 ### 3.1 文件命名与存放
 
 - 每个话题 / 独立任务对应一个独立文件
-- 命名规则：`Analysis_Modification_Plan-N.md`，N 为自增整数，只可取当前最大值 + 1
-- 统一存放于项目根目录下的 `Analysis_Modification_Plan/` 文件夹
+- 命名规则：`implementation_plan-N.md`，N 为自增整数，只可取当前最大值 + 1
+- 统一存放于项目根目录下的 `implementation_plan/` 文件夹
 
 ### 3.2 文件首行格式（强制）
 
 ```
-# <任务核心话题> —— Analysis_Modification_Plan-N.md
+# <任务核心话题> —— implementation_plan-N.md
 ```
 
 示例：
 ```
-# SQLite 内存模式初始化崩溃分析 —— Analysis_Modification_Plan-7.md
+# SQLite 内存模式初始化崩溃分析 —— implementation_plan-7.md
 ```
 
 ### 3.3 文档必含章节（缺一不可）
 
 ```markdown
-# <任务核心话题> —— Analysis_Modification_Plan-N.md
+# <任务核心话题> —— implementation_plan-N.md
 
 ## 1. 任务背景
 <!-- 简述本次分析的触发原因与上下文 -->
@@ -305,7 +305,7 @@ Jules 收到分析委托类消息后，必须按以下顺序执行，**不得跳
 |---|----------|------|
 | 1 | 修改任何 `.cpp` / `.h` / `.qml` / `.pro` / `.cmake` 等代码文件 | 角色边界 |
 | 2 | 在未收到"理解正确"/"授权创建"前输出分析委托类方案 | 防止理解偏差 |
-| 3 | 创建编号非最大值的 `Analysis_Modification_Plan-N.md` | 文档管理规范 |
+| 3 | 创建编号非最大值的 `implementation_plan-N.md` | 文档管理规范 |
 | 4 | 在方案中省略"强制对照表"章节 | 方案完整性 |
 | 5 | 擅自扩大方案覆盖范围 | 修改边界红线 |
 | 6 | 新增组件前跳过 `Memories.md` 检查 | 规范合规性 |
@@ -328,8 +328,8 @@ Jules 收到分析委托类消息后，必须按以下顺序执行，**不得跳
 - [ ] 若为分析委托：我已逐句审视用户消息并自述理解（Step 1）
 - [ ] 若为分析委托：我已收到"理解正确"或"授权创建"指令（Step 2）
 - [ ] 若发现自己跳步：我已回溯到最近完成的步骤，从下一步继续，而不是停下来
-- [ ] 文件命名为 `Analysis_Modification_Plan-N.md`，N 是当前最大值
-- [ ] 文件存放于 `Analysis_Modification_Plan/` 文件夹
+- [ ] 文件命名为 `implementation_plan-N.md`，N 是当前最大值
+- [ ] 文件存放于 `implementation_plan/` 文件夹
 - [ ] 文件首行格式符合规范
 - [ ] 文档包含全部 7 个必含章节
 - [ ] 强制对照表已逐条填写，无遗漏
