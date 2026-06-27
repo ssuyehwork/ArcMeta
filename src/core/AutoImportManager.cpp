@@ -146,10 +146,9 @@ void AutoImportManager::startTask(const QString& drive) {
             QStringList paths;
             for (const auto& item : toImport) paths << item.path;
             
-            // 必须在 GUI 线程调用 ImportHelper，因为它涉及 UI 进度条
-            QMetaObject::invokeMethod(QCoreApplication::instance(), [paths]() {
-                ImportHelper::importPaths(paths, 0, nullptr);
-            }, Qt::BlockingQueuedConnection);
+            // 2026-11-16 按照定点修复：移除 BlockingQueuedConnection 包裹，彻底消除死锁。
+            // 理由：ImportHelper::importPaths 内部会自动处理线程切换与异步进度反馈。
+            ImportHelper::importPaths(paths, 0, nullptr);
             
             const char* updateSql = "UPDATE pending_imports SET status=2 WHERE path=?";
             sqlite3_stmt* updateStmt;
