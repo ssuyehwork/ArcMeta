@@ -423,3 +423,23 @@
         3. 实现了标准图像与专业格式（EPS/AI）画质链路的同步强化。
     - **布局修正**: 将 `QuickLookWindow` 主布局边距由 (10,10,0,10) 修正为 (0,0,0,0)，彻底解决了图片预览不居中的视觉偏差。
     - **SVG 矢量渲染**: 针对 SVG 格式引入了 `QSvgRenderer` 专属渲染路径，绕过系统图标干扰，实现 1:1 矢量内容还原。
+
+## 2026-11-15
+- **任务描述**: 修复 AutoImportManager 链接与编译错误。
+- **修改文件**:
+    - **修改**: `CMakeLists.txt` (在 SOURCES 中添加 `src/core/AutoImportManager.cpp` 和 `src/core/AutoImportManager.h`)
+    - **修改**: `src/core/AutoImportManager.cpp` (补全头文件、修复宏冲突及消除 C4858 警告)
+- **修改原因**: 解决由于 `AutoImportManager` 源文件缺失、Windows 环境宏冲突及 `[[nodiscard]]` 返回值被丢弃导致的编译链接失败与警告。
+- **优化点**:
+    - **构建稳定性**: 确保项目核心模块被正确编译链接，并实现“零警告”构建。
+    - **环境兼容性**: 引入 `#undef run` 防御 Windows SDK 宏污染，并补全 `QtConcurrent` 与 `QDateTime` 依赖。
+
+- **任务描述**: 消除选中项目时的磁盘访问延迟 (Plan-110)。
+- **修改文件**:
+    - **修改**: `src/core/ModelContract.h` (新增 FileSize/Mtime/Ctime/Atime/IsDir/SuffixRole 扩展角色)
+    - **修改**: `src/ui/ContentPanel.cpp` (在 `data()` 中补全对新增扩展角色的缓存数据支持)
+    - **修改**: `src/ui/MainWindow.cpp` (重构 `selectionChanged` 回调，彻底废除 `QFileInfo` 同步磁盘调用)
+- **修改原因**: 解决点击选中项目时由于主线程同步调用 `QFileInfo` 导致的 UI 卡顿或冻结问题。
+- **优化点**:
+    - **零磁盘 I/O**: 属性面板所需的所有物理元数据（大小、时间、类型等）现在全部从内存模型缓存中读取，点击响应从“磁盘级”提升至“内存级”。
+    - **性能倍增**: 即使在 HDD 或网络共享路径上，选中操作也能保持丝滑响应，彻底消除了连续 8 次系统 API 调用带来的主线程阻塞。

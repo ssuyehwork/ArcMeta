@@ -31,7 +31,15 @@ enum CommonRole {
     AspectRatioRole     = Qt::UserRole + 201, // 图像宽高比
     HasThumbnailRole    = Qt::UserRole + 202, // 是否拥有物理缩略图
     PalettesRole        = Qt::UserRole + 203, // 物理色板数据
-    CountRole           = Qt::UserRole + 204  // 子项数量
+    CountRole           = Qt::UserRole + 204, // 子项数量
+    
+    // 扩展角色 (UserRole + 206..215)：用于消除主线程磁盘访问
+    FileSizeRole        = Qt::UserRole + 206, // 文件大小 (long long)
+    MtimeRole           = Qt::UserRole + 207, // 修改时间 (long long)
+    CtimeRole           = Qt::UserRole + 208, // 创建时间 (long long)
+    AtimeRole           = Qt::UserRole + 209, // 访问时间 (long long)
+    IsDirRole           = Qt::UserRole + 210, // 是否为文件夹 (bool)
+    SuffixRole          = Qt::UserRole + 211  // 后缀名 (QString)
 };
 
 } // namespace ArcMeta
