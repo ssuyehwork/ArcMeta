@@ -495,3 +495,10 @@
 - **修改原因**: 修复因缩放操作后 `TransformationAnchor` 保持为 `AnchorUnderMouse` 导致 `fitInView` 计算偏置的问题。
 - **优化点**:
     - **居中稳定性**: 确保在加载新图片前及缩放结束后，锚点强制归位至 `AnchorViewCenter`，保证预览始终居中。
+
+- **任务描述**: 修复托管库自动入库状态更新失效问题。
+- **修改文件**:
+    - **修改**: `src/core/AutoImportManager.cpp` (重构 `startTask` 中的 SQL 更新逻辑)
+- **修改原因**: 修复因使用 `frn` 而非主键 `path` 作为 `UPDATE/DELETE` 条件导致的状态同步失效。
+- **优化点**:
+    - **数据一致性**: 确保 `pending_imports` 状态能正确流转至已完成 (2)，防止重复入库任务的无效执行。
