@@ -61,7 +61,6 @@ void CategoryModel::refresh() {
         // [还原] 还原原始设计的语义化图标与配色
         // 物理分配负值 ID 空间
         addSystemItem("全部数据", "all", "all_data", "#3498db", -1);
-        addSystemItem("未分类", "uncategorized", "uncategorized", "#95a5a6", -2);
         addSystemItem("未标签", "untagged", "untagged", "#7f8c8d", -3);
         addSystemItem("最近访问", "recently_visited", "clock", "#9b59b6", -6);
         addSystemItem("失效数据", "invalid_data", "invalid_data", "#f1c40f", -9);
@@ -250,6 +249,25 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
             auto categories = CategoryRepo::getAll();
             for (auto& cat : categories) {
                 if (cat.id == id) {
+                    // 2026-11-xx 按照 Plan-113：双向重命名同步 (逻辑 -> 物理)
+                    // 核心逻辑：若该分类是顶级分类且其名称与某个托管库对应，则同步修改物理文件夹
+                    if (cat.parentId == 0) {
+                        const auto drives = QDir::drives();
+                        for (const auto& drive : drives) {
+                            QString driveRoot = drive.absolutePath();
+                            QString oldName = QString::fromStdWString(cat.name);
+                            QString oldPath = driveRoot + oldName;
+                            QString newPath = driveRoot + newName;
+
+                            // 仅当物理文件夹确实存在且符合 ArcMeta.Library_ 规范时执行
+                            if (oldName.startsWith("ArcMeta.Library_") && QDir(oldPath).exists()) {
+                                ShellHelper::renameItem(oldPath, newPath);
+                                // 注意：物理重命名成功后，USN 会捕获变动并由物理层反向更新逻辑名
+                                // 此处先更新 DB 以确保即时性
+                            }
+                        }
+                    }
+
                     cat.name = newName.toStdWString();
                     CategoryRepo::update(cat);
                     break;

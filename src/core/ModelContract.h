@@ -39,7 +39,8 @@ enum CommonRole {
     CtimeRole           = Qt::UserRole + 208, // 创建时间 (long long)
     AtimeRole           = Qt::UserRole + 209, // 访问时间 (long long)
     IsDirRole           = Qt::UserRole + 210, // 是否为文件夹 (bool)
-    SuffixRole          = Qt::UserRole + 211  // 后缀名 (QString)
+    SuffixRole          = Qt::UserRole + 211, // 后缀名 (QString)
+    IngestionStatusRole = Qt::UserRole + 212  // 2026-11-xx 按照 Plan-113：入库状态 (int)
 };
 
 } // namespace ArcMeta

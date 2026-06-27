@@ -787,7 +787,7 @@ void CategoryPanel::onRestoreAllFromTrash() {
         return;
     }
 
-    // 2. 物理还原至未分类
+    // 2. 物理还原
     if (CategoryRepo::restoreFromTrashBatch(trashItems)) {
         m_categoryModel->refresh();
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#2ecc71;'>[OK] 已还原全部项目</b>", 1500, QColor("#2ecc71"));
@@ -993,7 +993,7 @@ void CategoryPanel::initUi() {
     connect(m_categoryTree, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& proxyIndex) {
         QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         // 2026-06-xx 彻底重构：物理递归遍历 + 分类镜像创建 + SHA-256 物理加固
-        // 核心规则：文件夹拖入空白/分类均递归建树；文件入空白归未分类，入分类归该分类。
+        // 核心规则：文件夹拖入空白/分类均递归建树；文件入分类归该分类。
         int targetCatId = 0;
         bool isBlankDrop = false;
 

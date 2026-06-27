@@ -171,19 +171,9 @@ bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& fids) {
             sqlite3_step(delStmt);
             sqlite3_finalize(delStmt);
         }
-        // 2. Add to "未分类" bucket
+        // 2. 按照 Plan-113：还原即清除所有分类关联，回归“自由态”（受控但未分类）
         std::wstring path = MetadataManager::instance().getPathByFid(fid);
-        sqlite3_stmt* insStmt;
-        if (sqlite3_prepare_v2(db,
-            "INSERT OR REPLACE INTO category_items (category_id, file_id, path_hint, added_at) VALUES (?, ?, ?, ?)",
-            -1, &insStmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(insStmt, 1, UNCATEGORIZED_CAT_ID);
-            sqlite3_bind_text(insStmt, 2, fid.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text16(insStmt, 3, path.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_double(insStmt, 4, static_cast<double>(QDateTime::currentMSecsSinceEpoch()));
-            sqlite3_step(insStmt);
-            sqlite3_finalize(insStmt);
-        }
+
         // 3. Clear is_trash flag in metadata cache + persist
         if (!path.empty()) {
             MetadataManager::instance().setTrash(path, false);
@@ -594,7 +584,7 @@ int CategoryRepo::getTotalFileCount() {
 }
 
 int CategoryRepo::getUncategorizedCount() {
-    return getSystemCounts()["uncategorized"];
+    return getSystemCounts()["all"] - s_categorizedCount.load();
 }
 
 void CategoryRepo::setTotalFileCount(int count) {
@@ -884,7 +874,7 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     }
 
     // 2026-07-xx 物理加固：使用 Set 进行 FID 去重计数，彻底解决因路径偏移导致的幽灵计数
-    std::unordered_set<std::string> seenAll, seenRecent, seenUntagged, seenUncategorized, seenTrash, seenInvalid;
+    std::unordered_set<std::string> seenAll, seenRecent, seenUntagged, seenTrash, seenInvalid;
     QSet<QString> uniqueTags;
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
 
@@ -913,17 +903,12 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
         }
 
         if (meta.atime >= now - 86400000.0) seenRecent.insert(meta.fileId128);
-        
-        if (categorizedFids.find(meta.fileId128) == categorizedFids.end()) {
-            seenUncategorized.insert(meta.fileId128);
-        }
     });
 
     res["all"] = static_cast<int>(seenAll.size());
     res["tags"] = static_cast<int>(uniqueTags.size());
     res["recently_visited"] = static_cast<int>(seenRecent.size());
     res["untagged"] = static_cast<int>(seenUntagged.size());
-    res["uncategorized"] = static_cast<int>(seenUncategorized.size());
     res["trash"] = static_cast<int>(seenTrash.size());
     res["invalid_data"] = static_cast<int>(seenInvalid.size());
     return res;
@@ -932,18 +917,16 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
 QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
     QStringList paths;
     std::unordered_set<std::string> categorizedIds;
-    if (type == "uncategorized") {
-        sqlite3* db = DatabaseManager::instance().getGlobalDb();
-        if (db) {
-            sqlite3_stmt* stmt;
-            // 2026-06-xx 性能优化：查询“未分类”路径时，排除掉已在自定义分类 (ID > 0) 中的文件
-            if (sqlite3_prepare_v2(db, "SELECT DISTINCT file_id FROM category_items WHERE category_id > 0", -1, &stmt, nullptr) == SQLITE_OK) {
-                while (sqlite3_step(stmt) == SQLITE_ROW) {
-                    const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                    if (fid) categorizedIds.insert(fid);
-                }
-                sqlite3_finalize(stmt);
+    sqlite3* db = DatabaseManager::instance().getGlobalDb();
+    if (db) {
+        sqlite3_stmt* stmt;
+        // 2026-06-xx 性能优化：查询时，排除掉已在自定义分类 (ID > 0) 中的文件
+        if (sqlite3_prepare_v2(db, "SELECT DISTINCT file_id FROM category_items WHERE category_id > 0", -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                if (fid) categorizedIds.insert(fid);
             }
+            sqlite3_finalize(stmt);
         }
     }
 
@@ -970,7 +953,6 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
 
                 if (type == "untagged" && meta.tags.isEmpty()) match = true;
                 else if (type == "recently_visited" && meta.atime >= now - 86400000.0) match = true;
-                else if (type == "uncategorized" && !meta.fileId128.empty() && categorizedIds.find(meta.fileId128) == categorizedIds.end()) match = true;
             }
         }
         

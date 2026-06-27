@@ -116,7 +116,8 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             original_path TEXT,
             is_invalid INTEGER DEFAULT 0,
             width INTEGER DEFAULT 0,
-            height INTEGER DEFAULT 0
+            height INTEGER DEFAULT 0,
+            ingestion_status INTEGER DEFAULT 1 -- 0: Registered (占坑), 1: Ingested (受控), -1: Invalid (物理移出)
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
 
@@ -163,14 +164,6 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             PRIMARY KEY (group_id, tag_name)
         );
 
-        -- 托管库待处理任务表 (Plan-108)
-        CREATE TABLE IF NOT EXISTS pending_imports (
-            frn INTEGER PRIMARY KEY,
-            drive TEXT,
-            path TEXT,
-            status INTEGER DEFAULT 1, -- 1: 待入库, 2: 已处理, -1: 待出库
-            timestamp INTEGER
-        );
     )";
     char* errMsg = nullptr;
     sqlite3_exec(conn.memDb, schema, nullptr, nullptr, &errMsg);
@@ -184,11 +177,12 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         sqlite3_exec(conn.memDb, cleanup, nullptr, nullptr, nullptr);
     }
 
-    // 2026-07-xx 物理加固：自动迁移旧版本数据库字段 (Plan-29)
+    // 2026-11-xx 物理加固：自动迁移旧版本数据库字段 (Plan-113)
     sqlite3_stmt* checkStmt;
     bool hasInvalidColumn = false;
     bool hasWidthColumn = false;
     bool hasHeightColumn = false;
+    bool hasIngestionStatusColumn = false;
 
     if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(checkStmt) == SQLITE_ROW) {
@@ -198,6 +192,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
                 if (name == "is_invalid") hasInvalidColumn = true;
                 if (name == "width") hasWidthColumn = true;
                 if (name == "height") hasHeightColumn = true;
+                if (name == "ingestion_status") hasIngestionStatusColumn = true;
             }
         }
         sqlite3_finalize(checkStmt);
@@ -215,6 +210,13 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 height 字段...";
         sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN height INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
     }
+    if (!hasIngestionStatusColumn) {
+        qDebug() << "[DB] 按照 Plan-113：正在添加 ingestion_status 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN ingestion_status INTEGER DEFAULT 1", nullptr, nullptr, nullptr);
+    }
+
+    // 彻底废除旧有的任务表
+    sqlite3_exec(conn.memDb, "DROP TABLE IF EXISTS pending_imports;", nullptr, nullptr, nullptr);
 
     conn.diskPath = diskPath;
     return true;
