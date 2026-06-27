@@ -1,6 +1,10 @@
 #pragma once
 
 #include <QDateTime>
+#include <atomic>
+#include <QSet>
+#include <QMutex>
+#include <QThreadPool>
 #include "../core/IndexedEntry.h"
 #include <QMap>
 #include <unordered_map>
