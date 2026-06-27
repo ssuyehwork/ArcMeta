@@ -151,9 +151,15 @@ void AutoImportManager::startTask(const QString& drive) {
                 ImportHelper::importPaths(paths, 0, nullptr);
             }, Qt::BlockingQueuedConnection);
             
+            const char* updateSql = "UPDATE pending_imports SET status=2 WHERE path=?";
+            sqlite3_stmt* updateStmt;
             for (const auto& item : toImport) {
                 if (m_globalPaused.load()) break; // 任务中断检测
-                sqlite3_exec(db, QString("UPDATE pending_imports SET status=2 WHERE frn=%1").arg(item.frn).toUtf8().constData(), nullptr, nullptr, nullptr);
+                if (sqlite3_prepare_v2(db, updateSql, -1, &updateStmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_text(updateStmt, 1, item.path.toUtf8().constData(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(updateStmt);
+                    sqlite3_finalize(updateStmt);
+                }
             }
         }
 
@@ -162,19 +168,27 @@ void AutoImportManager::startTask(const QString& drive) {
             return;
         }
 
-        QVector<uint64_t> toRemove;
-        const char* delSql = "SELECT frn FROM pending_imports WHERE drive=? AND status=-1";
+        QVector<TaskItem> toRemove;
+        const char* delSql = "SELECT frn, path FROM pending_imports WHERE drive=? AND status=-1";
         if (sqlite3_prepare_v2(db, delSql, -1, &stmt, nullptr) == SQLITE_OK) {
             sqlite3_bind_text(stmt, 1, drive.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-            while (sqlite3_step(stmt) == SQLITE_ROW) toRemove.append((uint64_t)sqlite3_column_int64(stmt, 0));
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                toRemove.append({(uint64_t)sqlite3_column_int64(stmt, 0), QString::fromUtf8((const char*)sqlite3_column_text(stmt, 1))});
+            }
             sqlite3_finalize(stmt);
         }
         if (!toRemove.isEmpty()) {
             std::wstring volSerial = MetadataManager::getVolumeSerialNumber((drive + "\\").toStdWString());
-            for (uint64_t frn : toRemove) {
-                std::string fidPrefix = QString::fromStdWString(volSerial).toStdString() + "_" + std::to_string(frn);
+            const char* deleteSql = "DELETE FROM pending_imports WHERE path=?";
+            sqlite3_stmt* deleteStmt;
+            for (const auto& item : toRemove) {
+                std::string fidPrefix = QString::fromStdWString(volSerial).toStdString() + "_" + std::to_string(item.frn);
                 MetadataManager::instance().setInvalidByFidPrefix(fidPrefix, true);
-                sqlite3_exec(db, QString("DELETE FROM pending_imports WHERE frn=%1").arg(frn).toUtf8().constData(), nullptr, nullptr, nullptr);
+                if (sqlite3_prepare_v2(db, deleteSql, -1, &deleteStmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_text(deleteStmt, 1, item.path.toUtf8().constData(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(deleteStmt);
+                    sqlite3_finalize(deleteStmt);
+                }
             }
         }
         MetadataManager::instance().notifyFullUIRebuild();
