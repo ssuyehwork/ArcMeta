@@ -463,3 +463,10 @@
     - **规范重构**: `startTask` 现在批量调用 `ImportHelper::importPaths`，且通过 `QMetaObject::invokeMethod` 保证跨线程 UI 调用安全。
     - **监听瘦身**: 落实“单层级监听”红线，仅标记托管文件夹直属项，大幅降低缓冲区条目密度。
     - **中断可控**: 实现了基于原子标志位的 `pauseTask` 逻辑，支持入库循环的即时响应与中断恢复。
+
+- **任务描述**: 修复 MainWindow.cpp 磁盘对账逻辑编译错误。
+- **修改文件**:
+    - **修改**: `src/ui/MainWindow.cpp` (补全 `#include "sqlite3.h"`)
+- **修改原因**: 解决在执行磁盘托管库物理对账扫描时，由于未包含 SQLite 头文件导致原生 API 无法解析的问题。
+- **优化点**:
+    - **接口完整性**: 确保 `MainWindow` 的磁盘对账 Lambda 任务能正确操作 `pending_imports` 缓冲区。

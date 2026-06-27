@@ -55,6 +55,7 @@ using namespace ArcMeta::Style;
 #include <QFileInfo>
 #include <QDir>
 #include "../meta/MetadataManager.h"
+#include "sqlite3.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>

@@ -2,8 +2,10 @@
 #include "../mft/MftReader.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
+#include "../util/ImportHelper.h"
 #include "AppConfig.h"
 #include <QDebug>
+#include <string>
 #include <QCoreApplication>
 #include <QDir>
 #include <QMetaObject>
