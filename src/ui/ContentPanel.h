@@ -8,6 +8,10 @@
 #include <vector>
 #include <QCache>
 #include <QStringList>
+#include <QThreadPool>
+#include <QMutex>
+#include <QSet>
+#include <atomic>
 #include <QTimer>
 #include <QWidget>
 #include <QListView>

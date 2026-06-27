@@ -39,6 +39,8 @@
 #include <QDir> 
 #include <QDirIterator>
 #include <QSet>
+#include <QThreadPool>
+#include <QMutex>
 #include <QMutexLocker>
 #include <QFile>
 #include <QDateTime> 
@@ -2741,7 +2743,7 @@ void ContentPanel::startAsyncProgressCalculation() {
 
     for (const auto& dirPath : dirsToCalculate) {
         {
-            QMutexLocker lock(&m_calcMutex);
+            QMutexLocker<QMutex> lock(&m_calcMutex);
             if (m_activeCalculations.contains(dirPath)) continue;
             m_activeCalculations.insert(dirPath);
         }
@@ -2757,7 +2759,7 @@ void ContentPanel::startAsyncProgressCalculation() {
                     m_model->updateRegistrationProgress(dirPath, progress);
                 }
 
-                QMutexLocker lock(&m_calcMutex);
+                QMutexLocker<QMutex> lock(&m_calcMutex);
                 m_activeCalculations.remove(dirPath);
             }, Qt::QueuedConnection);
         });

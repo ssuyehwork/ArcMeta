@@ -480,3 +480,5 @@
     - **串行 I/O 防御**: 采用 `maxThreadCount = 1` 的专属线程池，避免多目录同时扫描引起的磁盘寻道竞争。
     - **高效枚举**: 使用 `QDirIterator` 替代传统递归，极大降低了内存分配开销并提升了扫描速度。
     - **增量刷新**: 任务完成后通过 `RegistrationProgressRole` 触发局部重绘，确保 UI 更新丝滑无抖动。
+    - **健壮性**: 补全了 `ContentPanel.h` 及 `.cpp` 中缺失的并发编程头文件，解决了 `QThreadPool` 与 `QMutex` 未定义导致的构建障碍。
+    - **兼容性加固**: 针对 MSVC 环境显式指定了 `QMutexLocker<QMutex>` 模板参数，消除了类型推导失败导致的编译错误。
