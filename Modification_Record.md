@@ -511,9 +511,9 @@
     - **并发稳定性**: 消除死锁隐患，恢复“扫描该盘”功能的响应性，确保自动入库任务能平滑执行。
 
 [2026-11-16 11:30:00]
-- **任务描述**: 规范化“收揽入库”右键菜单职责，品牌化优化菜单文本，修复路径匹配 Bug 并补全 USN 同步逻辑。
+- **任务描述**: 规范化“收揽入库”右键菜单职责与判定逻辑，品牌化优化菜单文本，修复路径匹配 Bug 并补全 USN 同步逻辑。
 - **修改文件**:
-    - **修改**: `src/ui/ContentPanel.cpp` (重构 `ActionAddToCategory` 逻辑；优化菜单文本为“收揽入库”与“重新收揽”；删除未使用变量)
+    - **修改**: `src/ui/ContentPanel.cpp` (重构 `ActionAddToCategory` 逻辑；修正右键菜单“收揽入库/重新扫描”判定逻辑为物理准入判定；删除未使用变量)
     - **修改**: `src/ui/TreeItemDelegate.h` (修复变量隐藏警告)
     - **修改**: `src/core/AutoImportManager.cpp` (修复 `isPathInManagedLibrary` 匹配；补全 `onEntryUpdated` 登记逻辑)
 - **修改原因**:
