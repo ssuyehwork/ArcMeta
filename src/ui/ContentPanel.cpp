@@ -1975,6 +1975,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         } 
         case ActionBatchRename: performBatchRename(); break; 
         case ActionAddToCategory: {
+            // 获取选中项路径
             QStringList paths;
             auto indexes = view->selectionModel()->selectedIndexes();
             for (const auto& idx : indexes) {
@@ -1983,18 +1984,33 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     if (!p.isEmpty()) paths << p;
                 }
             }
-            
-            // 降级保护：如果由于某种原因 paths 为空，则回退到当前点击项
             if (paths.isEmpty() && !path.isEmpty()) paths << path;
+            if (paths.isEmpty()) break;
 
-            if (!paths.isEmpty()) {
-                // 2026-11-xx 按照 Plan-113：库外项目执行“扫描入库”或“拖拽”时，系统强制执行同盘 Move 操作至托管库
-                QStringList finalPaths = ImportHelper::validateAndMigrate(paths);
+            // 唯一职责：Move 到同盘托管库
+            // 取第一个路径的盘符确定目标托管库
+            QString driveLetter = QDir::toNativeSeparators(paths.first()).left(2).toUpper();
+            QString managedFolder = driveLetter + "\\ArcMeta.Library_" + driveLetter.left(1);
 
-                if (!finalPaths.isEmpty()) {
-                    ImportHelper::importPaths(finalPaths, 0, this);
+            // 若托管库不存在则自动创建
+            QDir().mkpath(managedFolder);
+
+            // 逐一执行 Move
+            for (const QString& srcPath : paths) {
+                // 跨盘检测
+                QString srcDrive = QDir::toNativeSeparators(srcPath).left(2).toUpper();
+                if (srcDrive.compare(driveLetter, Qt::CaseInsensitive) != 0) {
+                    ToolTipOverlay::instance()->showText(QCursor::pos(),
+                        "该文件与目标托管库不在同一磁盘，请手动移动后再执行入库", 2000,
+                        QColor("#E81123"));
+                    continue;
                 }
+                QString fileName = QFileInfo(srcPath).fileName();
+                QString destPath = managedFolder + "\\" + fileName;
+                ShellHelper::renameItem(srcPath, destPath);
             }
+            // Move 完成，USN Journal 自动感知并触发登记注册
+            // 此处禁止调用 ImportHelper、MetadataManager 或任何入库逻辑
             break;
         }
         case ActionRename: view->edit(currentIndex); break; 
