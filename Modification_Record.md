@@ -561,7 +561,7 @@
     - **修改**: `src/meta/MetadataManager.h/.cpp` (修正 `RuntimeMeta` 初始状态为 -1；强制登记初值为 0；实现非图像项的状态流转晋升)
     - **修改**: `src/core/IndexedEntry.h` (修正 `ItemRecord` 初始状态为 -1)
     - **修改**: `src/core/AutoImportManager.cpp` (实现移入文件夹的异步递归扫描登记；移除不合规的状态强制设置)
-    - **修改**: `src/ui/ContentPanel.cpp` (补全 `updateRecordMetadata` 的状态映射；强化 Grid 代理标识绘制逻辑)
+    - **修改**: `src/ui/ContentPanel.cpp` (补全 `updateRecordMetadata` 的状态映射；强化 Grid 代理标识绘制逻辑；统一 `inManagedLib` 标识符定义并修复编译错误)
     - **修改**: `src/ui/ThumbnailDelegate.cpp` (修正状态 Role 默认取值；强化缩略图标识绘制逻辑；修复 `inManagedLib` 标识符未定义编译错误)
     - **修改**: `src/ui/TreeItemDelegate.h` (强化列表状态标识绘制逻辑)
 - **修改原因**: 解决手动移入项目至托管库后感知失效、视觉状态欺诈（未入库显对勾）以及入库流程不完整的问题。
@@ -580,3 +580,17 @@
     - **信号闭环**: 在处理 USN 事件后，根据事件类型（新建、重命名、删除）实时发射 `entryAdded`、`entryUpdated`、`entryRemoved` 信号。
     - **职责清晰**: 物理删除死代码 `handleRecord`，将逻辑收拢至 `run` 函数的批量处理循环中。
     - **索引一致**: 确保发射信号时携带的 `key` 严格遵循 MFT 引擎的复合键编码规则，保证 `AutoImportManager` 的路径反查成功率。
+
+[2026-11-16 18:00:00]
+- **任务描述**: 感知链路重构与信号失效深度修复 (Plan-4)。
+- **修改文件**:
+    - **修改**: `src/meta/DatabaseManager.h/.cpp` (新增 `system_stats` 表存取接口)
+    - **修改**: `src/meta/MetadataManager.h/.cpp` (实现 `last_usn` 指针的持久化绑定接口)
+    - **修改**: `src/mft/MftReader.h/.cpp` (新增 `entriesBatchUpdated` 信号，完善批量信号发射逻辑)
+    - **修改**: `src/mft/UsnWatcher.cpp` (实现 USN 离线追平与指针实时持久化；撤销冗余的手动信号发射)
+    - **修改**: `src/core/AutoImportManager.h/.cpp` (连接并处理批量更新信号；优化文件夹移入后的深度递归登记处理链)
+- **修改原因**: 解决托管库入库感知失效、大批量信号丢失以及离线变动无法追踪的问题。
+- **优化点**:
+    - **离线感知**: 通过持久化 USN 指针，实现了应用关闭期间物理变动的可靠追平。
+    - **洪流防御**: 补全了批量更新信号感知，确保在极端 I/O 场景下数据不丢失。
+    - **精准递归**: 确立了文件夹变动触发的异步递归补全逻辑，解决了“降维感知”导致的子项入库遗漏。

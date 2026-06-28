@@ -41,6 +41,7 @@ void AutoImportManager::startListening() {
     if (m_isListening) return;
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
     connect(&MftReader::instance(), &MftReader::entriesBatchAdded, this, &AutoImportManager::onEntriesBatchAdded, Qt::QueuedConnection);
+    connect(&MftReader::instance(), &MftReader::entriesBatchUpdated, this, &AutoImportManager::onEntriesBatchUpdated, Qt::QueuedConnection);
     connect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved, Qt::QueuedConnection);
     connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
     m_isListening = true;
@@ -50,6 +51,7 @@ void AutoImportManager::stopListening() {
     if (!m_isListening) return;
     disconnect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded);
     disconnect(&MftReader::instance(), &MftReader::entriesBatchAdded, this, &AutoImportManager::onEntriesBatchAdded);
+    disconnect(&MftReader::instance(), &MftReader::entriesBatchUpdated, this, &AutoImportManager::onEntriesBatchUpdated);
     disconnect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved);
     disconnect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated);
     m_isListening = false;
@@ -101,6 +103,51 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
 }
 
 void AutoImportManager::onEntriesBatchAdded(int driveIdx, const QList<uint64_t>& frns) {
+    QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
+    if (driveLetter.isEmpty()) return;
+
+    HANDLE hVol = CreateFileW((L"\\\\.\\" + driveLetter.toStdWString()).c_str(), 
+                              GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
+                              NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (hVol == INVALID_HANDLE_VALUE) return;
+
+    std::vector<std::wstring> toAdd;
+    for (uint64_t frn : frns) {
+        QString relPath = MftReader::getPathByFrn(hVol, frn);
+        if (!relPath.isEmpty()) {
+            QString fullPath = driveLetter + relPath;
+            std::wstring wPath = fullPath.toStdWString();
+            if (isPathInManagedLibrary(wPath)) {
+                MetadataManager::instance().registerItem(wPath);
+                toAdd.push_back(wPath);
+
+                if (QFileInfo(fullPath).isDir()) {
+                    (void)QtConcurrent::run([fullPath]() {
+                        QStringList toRegister;
+                        QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+                        while (it.hasNext()) {
+                            toRegister << it.next();
+                            if (toRegister.size() >= 100) {
+                                MetadataManager::instance().registerItemsAsync(toRegister);
+                                toRegister.clear();
+                            }
+                        }
+                        if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
+                    });
+                }
+            }
+        }
+    }
+    CloseHandle(hVol);
+
+    if (!toAdd.empty()) {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        for (const auto& p : toAdd) m_pendingPaths.push_back(p);
+        QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+    }
+}
+
+void AutoImportManager::onEntriesBatchUpdated(int driveIdx, const QList<uint64_t>& frns) {
     QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
     if (driveLetter.isEmpty()) return;
 

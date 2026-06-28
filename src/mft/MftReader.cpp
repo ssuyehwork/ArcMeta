@@ -127,6 +127,7 @@ void MftReader::clearInternal() {
     std::vector<uint32_t>().swap(m_sorted_indices);
 
     m_drive_list.clear();
+    m_drive_serials.clear();
     m_drive_active_mask = 0;
     m_frn_to_idx.clear();
     {
@@ -268,6 +269,7 @@ void MftReader::buildIndex(const QStringList& drives) {
         
         size_t dIdx = m_drive_list.size();
         m_drive_list.push_back(sr.volume);
+        m_drive_serials.push_back(MetadataManager::getVolumeSerialNumber(sr.volume));
         if (dIdx < 32) m_drive_active_mask.fetch_or(1 << dIdx);
         m_next_usns[sr.volume] = sr.res.nextUsn;
         mergeDriveResult(sr.volume, sr.res, dIdx);
@@ -350,6 +352,7 @@ bool MftReader::loadFromCache() {
                     for (const auto& [drive, usn] : usnMap) {
                         driveName = QString::fromStdString(drive).toStdWString();
                         m_drive_list.push_back(driveName);
+                        m_drive_serials.push_back(MetadataManager::getVolumeSerialNumber(driveName));
                         m_next_usns[driveName] = usn;
                     }
                     currentTotal = m_frns.size();
@@ -613,6 +616,16 @@ uint32_t MftReader::getAttributes(int index) const {
 QString MftReader::getDriveLetter(int driveIdx) const {
     QReadLocker lock(&m_dataLock);
     if (driveIdx < 0 || static_cast<size_t>(driveIdx) >= m_drive_list.size()) return "";
+    
+    // 2026-11-xx 按照 Plan-4：增加卷序列号动态反查，解决盘符漂移导致的映射失效
+    std::wstring serial = m_drive_serials[driveIdx];
+    const auto drives = QDir::drives();
+    for (const QFileInfo& d : drives) {
+        if (MetadataManager::getVolumeSerialNumber(d.absolutePath().toStdWString()) == serial) {
+            return d.absolutePath().left(2).toUpper();
+        }
+    }
+
     std::wstring vol = m_drive_list[driveIdx];
     return QString::fromStdWString(vol).left(2).toUpper();
 }
@@ -1236,7 +1249,7 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
         }
     }
 
-    // 2026-xx-xx 按照 Plan-106：策略：小批量发送单体信号（保证实时性），大批量发送宏观信号（保护 UI）
+    // 2026-11-xx 按照 Plan-4：完善信号感知链，确保大批量更新信号不丢失
     if (addedKeys.size() + updatedKeys.size() < 50) {
         for (uint64_t key : addedKeys) emit entryAdded(key);
         for (uint64_t key : updatedKeys) emit entryUpdated(key);
@@ -1246,6 +1259,11 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
             QList<uint64_t> frns;
             for (uint64_t key : addedKeys) frns.append(key & 0x0000FFFFFFFFFFFFull);
             emit entriesBatchAdded(static_cast<int>(dIdx), frns);
+        }
+        if (!updatedKeys.empty()) {
+            QList<uint64_t> frns;
+            for (uint64_t key : updatedKeys) frns.append(key & 0x0000FFFFFFFFFFFFull);
+            emit entriesBatchUpdated(static_cast<int>(dIdx), frns);
         }
         // 仅发射一次全局变动信号以刷新 UI 列表
         emit dataChanged(-1); 

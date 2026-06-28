@@ -1667,8 +1667,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         bool isGraphic = UiHelper::isGraphicsFile(suffix);
 
         if (isFolder || !isGraphic) { 
-            bool inManagedLibrary = AutoImportManager::isPathInManagedLibrary(path.toStdWString());
-            QString scanText = inManagedLibrary ? "重新扫描" : "收揽入库";
+            bool inManagedLib = AutoImportManager::isPathInManagedLibrary(path.toStdWString());
+            QString scanText = inManagedLib ? "重新扫描" : "收揽入库";
             menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), scanText)->setData(ActionAddToCategory);
         }
 

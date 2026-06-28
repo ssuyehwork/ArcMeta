@@ -514,6 +514,22 @@ QString MetadataManager::getDriveLetterByMftIndex(int driveIdx) {
     return MftReader::instance().getDriveLetter(driveIdx);
 }
 
+uint64_t MetadataManager::getLastUsn(const std::wstring& volume) {
+    std::wstring serial = getVolumeSerialNumber(volume);
+    if (serial == L"UNKNOWN") return 0;
+    
+    sqlite3* db = DatabaseManager::instance().getMemoryDb(serial);
+    return (uint64_t)DatabaseManager::instance().getSystemStat(db, "last_usn", 0);
+}
+
+void MetadataManager::setLastUsn(const std::wstring& volume, uint64_t usn) {
+    std::wstring serial = getVolumeSerialNumber(volume);
+    if (serial == L"UNKNOWN") return;
+
+    sqlite3* db = DatabaseManager::instance().getMemoryDb(serial);
+    DatabaseManager::instance().setSystemStat(db, "last_usn", (long long)usn);
+}
+
 void MetadataManager::renameTag(const QString& oldName, const QString& newName) {
     if (oldName == newName) return;
     std::unique_lock<std::shared_mutex> lock(m_mutex);

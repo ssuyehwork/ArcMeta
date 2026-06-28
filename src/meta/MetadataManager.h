@@ -148,6 +148,10 @@ public:
     // 2026-11-xx 新增：盘符还原服务 (供 AutoImportManager 使用)
     QString getDriveLetterByMftIndex(int driveIdx);
 
+    // 2026-11-xx 新增：USN 指针存取接口 (2026-11-xx 按照 Plan-4)
+    uint64_t getLastUsn(const std::wstring& volume);
+    void setLastUsn(const std::wstring& volume, uint64_t usn);
+
     /**
      * @brief 全局重命名标签
      */

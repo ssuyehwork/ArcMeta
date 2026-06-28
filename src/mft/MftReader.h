@@ -73,6 +73,7 @@ signals:
     void dataChanged(int index = -1);
     void entryAdded(uint64_t key);   // 2026-05-29 新增：实时增量信号
     void entriesBatchAdded(int driveIdx, const QList<uint64_t>& frns); // 2026-11-xx 新增：批量增量信号
+    void entriesBatchUpdated(int driveIdx, const QList<uint64_t>& frns); // 2026-11-xx 新增：批量更新信号 (按照 Plan-4)
     void entryRemoved(uint64_t key); // 2026-05-29 新增：实时删除信号
     void entryUpdated(uint64_t key); // 2026-05-29 新增：实时更新信号
     void driveLoaded(const QString& drive, int count, int total); // 2026-05-14 新增：驱动器就绪信号
@@ -170,6 +171,7 @@ private:
     std::vector<uint8_t>   m_string_pool;
 
     std::vector<std::wstring> m_drive_list;
+    std::vector<std::wstring> m_drive_serials; // 2026-11-xx 按照 Plan-4：记录各卷序列号以实现稳定映射
     std::atomic<uint32_t>     m_drive_active_mask{0}; // 驱动器过滤掩码 (位图)
 
     std::unordered_map<uint64_t, uint32_t>              m_frn_to_idx;

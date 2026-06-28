@@ -434,4 +434,29 @@ sqlite3* DatabaseManager::getGlobalDb() {
     return m_globalDb.memDb;
 }
 
+long long DatabaseManager::getSystemStat(sqlite3* db, const std::string& key, long long defaultValue) {
+    if (!db) return defaultValue;
+    sqlite3_stmt* stmt;
+    long long value = defaultValue;
+    if (sqlite3_prepare_v2(db, "SELECT value FROM system_stats WHERE key = ?", -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            value = sqlite3_column_int64(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+    }
+    return value;
+}
+
+void DatabaseManager::setSystemStat(sqlite3* db, const std::string& key, long long value) {
+    if (!db) return;
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?)", -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 2, value);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+}
+
 } // namespace ArcMeta

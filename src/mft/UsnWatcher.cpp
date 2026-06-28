@@ -50,9 +50,16 @@ void UsnWatcher::run() {
         return;
     }
 
-    // 2. 离线追平逻辑：若 m_lastUsn 为 0，从当前 NextUsn 开始
+    // 2. 离线追平逻辑：从 MetadataManager 获取上次持久化的 USN
+    uint64_t savedUsn = MetadataManager::instance().getLastUsn(m_volume);
     if (m_lastUsn == 0) {
-        m_lastUsn = journalData.NextUsn;
+        m_lastUsn = (savedUsn > 0) ? savedUsn : journalData.NextUsn;
+    }
+
+    // 检查 USN 空隙：若 savedUsn 比当前 FirstUsn 还小，说明 Journal 记录已被覆盖
+    if (savedUsn > 0 && savedUsn < journalData.FirstUsn) {
+        qDebug() << "[UsnWatcher] 检测到离线期间 USN 记录被覆盖，建议执行全量扫描补偿:" << QString::fromStdWString(m_volume);
+        // 此处可触发存量自愈信号，本 Plan 侧重于感知链路修复
     }
 
     READ_USN_JOURNAL_DATA_V0 readData{};
@@ -95,7 +102,6 @@ void UsnWatcher::run() {
         while (pRecord < pEnd) {
             USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(pRecord);
             
-            // 工业级优化：优先采用批量处理模式
             if (header->MajorVersion == 2 || header->MajorVersion == 3) {
                 uint32_t reason = (header->MajorVersion == 2) ? 
                     reinterpret_cast<USN_RECORD_V2*>(pRecord)->Reason : 
@@ -107,79 +113,32 @@ void UsnWatcher::run() {
                     uint64_t frn = (header->MajorVersion == 2) ? 
                         reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileReferenceNumber : 
                         *reinterpret_cast<uint64_t*>(&reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileReferenceNumber);
-                    MftReader::instance().removeEntryByFrn(m_volume, frn);
                     
-                    int driveIdx = 0;
-                    const auto drives = QDir::drives();
-                    for (int i = 0; i < drives.size(); ++i) {
-                        QString d = drives[i].absolutePath().left(2).toUpper();
-                        if (QString::fromStdWString(m_volume).toUpper().startsWith(d)) {
-                            driveIdx = i;
-                            break;
-                        }
-                    }
-                    uint64_t key = ((uint64_t)driveIdx << 48) | (frn & 0x0000FFFFFFFFFFFFull);
-                    emit MftReader::instance().entryRemoved(key);
+                    // 2026-11-xx 按照 Plan-4：物理删除时立即移除内存记录并通知外部感应
+                    MftReader::instance().removeEntryByFrn(m_volume, frn);
                 }
             }
             pRecord += header->RecordLength;
         }
 
         if (!updateBatch.empty()) {
-            // 2026-06-xx 工业级 UI 饥饿修复：
-            // 如果批次过大，进行分片处理，并在分片间强制释放写锁，给 GUI 线程留出渲染时间
             const size_t chunkSize = 1000;
             for (size_t i = 0; i < updateBatch.size(); i += chunkSize) {
                 if (m_stopRequested.load()) break;
                 size_t end = (std::min)(i + chunkSize, updateBatch.size());
                 std::vector<uint8_t*> chunk(updateBatch.begin() + i, updateBatch.begin() + end);
+                
+                // MftReader::updateEntriesFromUsnBatch 内部已负责信号发射
                 MftReader::instance().updateEntriesFromUsnBatch(chunk, m_volume);
                 
-                for (uint8_t* pRaw : chunk) {
-                    USN_RECORD_COMMON_HEADER* header =
-                        reinterpret_cast<USN_RECORD_COMMON_HEADER*>(pRaw);
-                    uint32_t reason = 0;
-                    uint64_t frn = 0;
-                    int driveIdx = 0;
-
-                    if (header->MajorVersion == 2) {
-                        auto* r = reinterpret_cast<USN_RECORD_V2*>(pRaw);
-                        reason = r->Reason;
-                        frn = r->FileReferenceNumber;
-                    } else if (header->MajorVersion == 3) {
-                        auto* r = reinterpret_cast<USN_RECORD_V3*>(pRaw);
-                        reason = r->Reason;
-                        frn = *reinterpret_cast<uint64_t*>(&r->FileReferenceNumber);
-                    }
-
-                    const auto drives = QDir::drives();
-                    for (int j = 0; j < drives.size(); ++j) {
-                        QString d = drives[j].absolutePath().left(2).toUpper();
-                        if (QString::fromStdWString(m_volume).toUpper().startsWith(d)) {
-                            driveIdx = j;
-                            break;
-                        }
-                    }
-
-                    uint64_t key = ((uint64_t)driveIdx << 48) | (frn & 0x0000FFFFFFFFFFFFull);
-
-                    if (reason & USN_REASON_FILE_DELETE) {
-                        emit MftReader::instance().entryRemoved(key);
-                    } else if (reason & USN_REASON_RENAME_NEW_NAME) {
-                        emit MftReader::instance().entryUpdated(key);
-                    } else if (reason & USN_REASON_FILE_CREATE) {
-                        emit MftReader::instance().entryAdded(key);
-                    }
-                }
-
-                // 强制释放 CPU 时间片，解决长时挂起（休眠）唤醒后的“未响应”现象
                 QThread::msleep(5); 
             }
         }
 
-        // 更新起始 USN 为本次读取后的 NextUsn
+        // 3. 更新起始 USN 并持久化 (2026-11-xx 按照 Plan-4)
         readData.StartUsn = *reinterpret_cast<USN*>(buffer.get());
         m_lastUsn = readData.StartUsn;
+        MetadataManager::instance().setLastUsn(m_volume, m_lastUsn);
     }
 }
 
