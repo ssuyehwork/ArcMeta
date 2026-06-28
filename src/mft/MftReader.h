@@ -72,6 +72,7 @@ public:
 signals:
     void dataChanged(int index = -1);
     void entryAdded(uint64_t key);   // 2026-05-29 新增：实时增量信号
+    void entriesBatchAdded(int driveIdx, const QList<uint64_t>& frns); // 2026-11-xx 新增：批量增量信号
     void entryRemoved(uint64_t key); // 2026-05-29 新增：实时删除信号
     void entryUpdated(uint64_t key); // 2026-05-29 新增：实时更新信号
     void driveLoaded(const QString& drive, int count, int total); // 2026-05-14 新增：驱动器就绪信号
@@ -110,6 +111,7 @@ public:
     bool isDirectory(int index) const;
     int totalCount() const;
     QString getFullPath(int index) const;
+    QString getDriveLetter(int driveIdx) const;
     void requestMetadata(int index);
     bool isMetadataFetched(int index) const;
 

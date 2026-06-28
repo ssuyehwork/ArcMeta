@@ -148,7 +148,6 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     // [新增] 状态位图标绘制 (置顶 vs. 进度环 vs. 已录入 互斥)
     if (m_pinnedRole != -1 && m_managedRole != -1) {
         bool isPinned = index.data(m_pinnedRole).toBool();
-        bool isManaged = index.data(m_managedRole).toBool();
         bool isDir = index.data(m_typeRole).toString() == "folder";
         double progress = (m_registrationProgressRole != -1) ? index.data(m_registrationProgressRole).toDouble() : -1.0;
         int ingestionStatus = (m_ingestionStatusRole != -1) ? index.data(m_ingestionStatusRole).toInt() : 1;

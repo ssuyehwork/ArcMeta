@@ -610,6 +610,13 @@ uint32_t MftReader::getAttributes(int index) const {
     return m_attributes[index];
 }
 
+QString MftReader::getDriveLetter(int driveIdx) const {
+    QReadLocker lock(&m_dataLock);
+    if (driveIdx < 0 || static_cast<size_t>(driveIdx) >= m_drive_list.size()) return "";
+    std::wstring vol = m_drive_list[driveIdx];
+    return QString::fromStdWString(vol).left(2).toUpper();
+}
+
 uint64_t MftReader::getFrn(int index) const {
     QReadLocker lock(&m_dataLock);
     if (index < 0 || index >= (int)m_frns.size()) return 0;
@@ -1234,7 +1241,13 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
         for (uint64_t key : addedKeys) emit entryAdded(key);
         for (uint64_t key : updatedKeys) emit entryUpdated(key);
     } else {
-        // 超过 50 项视为“洪流”，仅发射一次全局变动信号
+        // 超过 50 项视为“洪流”，发射批量信号供 AutoImportManager 感知
+        if (!addedKeys.empty()) {
+            QList<uint64_t> frns;
+            for (uint64_t key : addedKeys) frns.append(key & 0x0000FFFFFFFFFFFFull);
+            emit entriesBatchAdded(static_cast<int>(dIdx), frns);
+        }
+        // 仅发射一次全局变动信号以刷新 UI 列表
         emit dataChanged(-1); 
     }
 }
