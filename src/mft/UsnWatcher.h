@@ -43,9 +43,6 @@ protected:
     void run() override;
 
 private:
-    // 处理单条 USN 记录并更新 MftReader
-    void handleRecord(USN_RECORD_V2* pRecord);
-
     std::wstring m_volume;
     uint64_t m_lastUsn;
     std::atomic<bool> m_stopRequested;
