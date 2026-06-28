@@ -511,15 +511,15 @@
     - **并发稳定性**: 消除死锁隐患，恢复“扫描该盘”功能的响应性，确保自动入库任务能平滑执行。
 
 [2026-11-16 11:30:00]
-- **任务描述**: 规范化“扫描入库”右键菜单职责，实现物理 Move 与逻辑登记的职责分离，修复托管库路径匹配 Bug 并补全 `onEntryUpdated` 准入检查。
+- **任务描述**: 规范化“扫描入库”右键菜单职责，优化菜单文本描述，修复路径匹配 Bug 并补全 USN 同步逻辑。
 - **修改文件**:
-    - **修改**: `src/ui/ContentPanel.cpp` (重构 `ActionAddToCategory` 处理逻辑；删除未使用变量 `isManaged`)
-    - **修改**: `src/ui/TreeItemDelegate.h` (修复变量隐藏警告 `ingStatus`)
-    - **修改**: `src/core/AutoImportManager.cpp` (修复 `isPathInManagedLibrary` 边界匹配；在 `onEntryUpdated` 补全移入登记逻辑)
+    - **修改**: `src/ui/ContentPanel.cpp` (重构 `ActionAddToCategory` 逻辑；优化菜单文本为“重新扫描”；删除未使用变量)
+    - **修改**: `src/ui/TreeItemDelegate.h` (修复变量隐藏警告)
+    - **修改**: `src/core/AutoImportManager.cpp` (修复 `isPathInManagedLibrary` 匹配；补全 `onEntryUpdated` 登记逻辑)
 - **修改原因**:
-    1. 解决右键菜单错误调用 `ImportHelper::importPaths` 的问题，确保菜单仅负责物理迁移，由 USN Journal 异步触发登记。
-    2. 修复托管库路径前缀匹配误判 Bug（如 `Library_Z` 误匹配 `Library_ZOther`）。
-    3. 修复同盘 Move 到托管库时不触发自动入库的问题。
+    1. 解决右键菜单职责混淆问题，实现物理 Move 与逻辑登记分离。
+    2. 优化 UI 文本冗余，将已入库项的“重新扫描入库”精简为“重新扫描”。
+    3. 修复托管库路径匹配 Bug 与移入项目自动感应失效问题。
 - **优化点**:
     - **职责归位**: “扫描入库”动作现在仅执行物理移动，不再越权干涉入库流程。
     - **跨盘保护**: 增加物理卷校验，防止跨盘移动导致的数据损坏或耗时操作，并通过 `ToolTipOverlay` 提供错误反馈。

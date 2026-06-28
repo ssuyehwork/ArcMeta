@@ -1664,7 +1664,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
         if (isFolder || !isGraphic) { 
             bool isManaged = currentIndex.data(ManagedRole).toBool();
-            QString scanText = isManaged ? "重新扫描入库" : "扫描入库";
+            QString scanText = isManaged ? "重新扫描" : "扫描入库";
             menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), scanText)->setData(ActionAddToCategory);
         }
 
