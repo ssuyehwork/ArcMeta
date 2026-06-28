@@ -187,6 +187,8 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         return record.tags;
     } else if (role == ManagedRole) {
         return record.isManaged;
+    } else if (role == IngestionStatusRole) {
+        return record.ingestionStatus;
     } else if (role == RegistrationProgressRole) {
         return record.registrationProgress;
     } else if (role == CategoryIdRole) {
@@ -855,6 +857,7 @@ ItemRecord ContentPanel::createItemRecord(const QString& path) {
     r.note = QString::fromStdWString(meta.note);
     r.width = meta.width;
     r.height = meta.height;
+    r.ingestionStatus = meta.ingestionStatus;
     r.isManaged = meta.hasUserOperations();
     for (const auto& pe : meta.palettes) {
         r.palettes.push_back({pe.color, pe.ratio});
@@ -2986,7 +2989,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         // 置顶优先 
         QIcon pinIcon = UiHelper::getIcon("pin_vertical", Style::ActiveOrange, 16); 
         pinIcon.paint(painter, statusRect); 
-    } else if (inManagedLib && (ingStatus == 0 || (isDir && progress >= 0.0 && progress < 1.0))) {
+    } else if (ingStatus > -2 && inManagedLib && (ingStatus == 0 || (isDir && progress >= 0.0 && progress < 1.0))) {
         // 2026-11-xx 按照 Plan-113：Registered (0) 状态或递归进度均显示进度环，仅对库内文件夹生效
         painter->save(); 
         painter->setRenderHint(QPainter::Antialiasing); 
@@ -3000,7 +3003,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         int spanAngle = -qRound(pVal * 360 * 16); 
         painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
         painter->restore(); 
-    } else if (inManagedLib && ingStatus == 1) { 
+    } else if (ingStatus > -2 && inManagedLib && ingStatus == 1) {
         // 2026-11-xx 按照 Plan-113：仅对托管库内 Ingested(1) 的项目显示对勾
         QIcon checkIcon = UiHelper::getIcon("check_circle", SuccessGreen, 16); 
         checkIcon.paint(painter, statusRect); 

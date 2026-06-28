@@ -81,7 +81,7 @@ public:
 
                 if (isPinned) {
                     UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, iconRect);
-                } else if (inManagedLib && ingStatus == 0) {
+                } else if (ingStatus > -2 && inManagedLib && ingStatus == 0) {
                     // Registered (0) 状态绘制进度弧 (30% 占位)
                     painter->save();
                     painter->setPen(QPen(QColor(60, 60, 60, 180), 2));
@@ -91,7 +91,7 @@ public:
                     painter->setPen(pPen);
                     painter->drawArc(iconRect.adjusted(1, 1, -1, -1), 90 * 16, -qRound(0.3 * 360 * 16));
                     painter->restore();
-                } else if (inManagedLib && ingStatus == 1) {
+                } else if (ingStatus > -2 && inManagedLib && ingStatus == 1) {
                     UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, iconRect);
                 }
             } else if (col == 2) { // 星级列

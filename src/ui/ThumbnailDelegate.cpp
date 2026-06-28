@@ -161,7 +161,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         QRect statusRect(m.cardRect.right() - 22, m.cardRect.top() + 8, 16, 16);
         if (isPinned) {
             UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, statusRect);
-        } else if (isDir && progress >= 0.0 && progress < 1.0 && AutoImportManager::isPathInManagedLibrary(path.toStdWString())) {
+        } else if (ingestionStatus > -2 && isDir && progress >= 0.0 && progress < 1.0 && AutoImportManager::isPathInManagedLibrary(path.toStdWString())) {
             // --- 绘制进度环 (Plan-113：仅对托管库内文件夹生效) --- 
             painter->save(); 
             painter->setRenderHint(QPainter::Antialiasing); 
@@ -178,7 +178,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             int spanAngle = -qRound(progress * 360 * 16); // 逆时针计算 
             painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
             painter->restore(); 
-        } else if (ingestionStatus == 1 && AutoImportManager::isPathInManagedLibrary(path.toStdWString())) {
+        } else if (ingestionStatus > -2 && ingestionStatus == 1 && AutoImportManager::isPathInManagedLibrary(path.toStdWString())) {
             // 2026-11-xx 按照 Plan-113：仅对托管库内 Ingested(1) 的项目显示对勾
             UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, statusRect);
         }

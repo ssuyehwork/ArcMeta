@@ -511,19 +511,21 @@
     - **并发稳定性**: 消除死锁隐患，恢复“扫描该盘”功能的响应性，确保自动入库任务能平滑执行。
 
 [2026-11-16 11:30:00]
-- **任务描述**: 规范化“收揽入库”右键菜单职责与判定逻辑，品牌化优化菜单文本，重构自动入库感知链路，修复路径匹配与状态流转 Bug。
+- **任务描述**: 规范化“收揽入库”右键菜单职责与判定逻辑，品牌化优化菜单文本，重构自动入库感知链路，修复路径匹配、状态流转与标识显示 Bug。
 - **修改文件**:
-    - **修改**: `src/ui/ContentPanel.cpp` (重构 `ActionAddToCategory` 逻辑；修正右键菜单判定逻辑；删除未使用变量)
-    - **修改**: `src/ui/TreeItemDelegate.h` (修复变量隐藏警告)
+    - **修改**: `src/ui/ContentPanel.cpp` (重构 `ActionAddToCategory` 逻辑；修正右键菜单判定逻辑；补全入库状态数据映射；强化 Grid 代理标识绘制逻辑；删除未使用变量)
+    - **修改**: `src/ui/TreeItemDelegate.h` (修复变量隐藏警告；强化列表标识绘制逻辑)
+    - **修改**: `src/ui/ThumbnailDelegate.cpp` (强化缩略图标识绘制逻辑；删除多余变量 `isManaged` 与头文件依赖)
+    - **修改**: `src/core/IndexedEntry.h` (修正 `ItemRecord` 默认状态位为 -2)
     - **修改**: `src/core/AutoImportManager.h/.cpp` (对齐 MFT 盘符索引；新增批量信号监听；补全递归登记链路)
     - **修改**: `src/mft/MftReader.h/.cpp` (新增 `getDriveLetter` 接口；实现 `entriesBatchAdded` 批量信号触发)
-    - **修改**: `src/meta/MetadataManager.h/.cpp` (修正 `registerItem` 状态位初值；实现 `getDriveLetterByMftIndex` 服务；补全视觉解析后的状态流转；删除未使用变量 `pathHint`；修正 `RuntimeMeta` 构造函数默认状态位)
-    - **修改**: `src/ui/ThumbnailDelegate.cpp` (删除未使用变量 `isManaged`)
+    - **修改**: `src/meta/MetadataManager.h/.cpp` (修正 `registerItem` 状态位初值；实现 `getDriveLetterByMftIndex` 服务；补全视觉解析后的状态流转；删除未使用变量 `pathHint`；修正 `RuntimeMeta` 构造函数默认状态位为 -2)
     - **修改**: `src/meta/DatabaseManager.cpp` (修正 `ingestion_status` 数据库默认值为 0)
 - **修改原因**:
     1. 解决右键菜单职责混淆问题，实现物理 Move 与逻辑登记分离。
-    2. 优化 UI 文本冗余，将已入库项的“重新收揽入库”精简为“重新扫描”。
-    3. 修复托管库路径匹配 Bug 与移入项目自动感应失效问题。
+    2. 彻底解决未登记项目错误显示“已入库”标识的问题：通过引入 `-2 (Unregistered)` 状态位，并将其设为元数据及模型记录的初值，配合 UI 代理层的准入判断，实现了标识显示的逻辑严密性。
+    3. 优化 UI 文本冗余，将已入库项的“重新收揽入库”精简为“重新扫描”。
+    4. 修复托管库路径匹配 Bug 与移入项目自动感应失效问题。
 - **优化点**:
     - **职责归位**: “收揽入库”动作现在仅执行物理移动，不再越权干涉入库流程。
     - **跨盘保护**: 增加物理卷校验，防止跨盘移动导致的数据损坏或耗时操作，并通过 `ToolTipOverlay` 提供错误反馈。
