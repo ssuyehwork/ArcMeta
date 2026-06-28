@@ -511,18 +511,21 @@
     - **并发稳定性**: 消除死锁隐患，恢复“扫描该盘”功能的响应性，确保自动入库任务能平滑执行。
 
 [2026-11-16 11:30:00]
-- **任务描述**: 规范化“收揽入库”右键菜单职责与判定逻辑，品牌化优化菜单文本，重构自动入库感知链路，修复路径匹配与状态流转 Bug。
+- **任务描述**: 规范化“收揽入库”右键菜单职责与判定逻辑，品牌化优化菜单文本，重构自动入库感知链路，修复路径匹配、状态流转与标识显示 Bug。
 - **修改文件**:
-    - **修改**: `src/ui/ContentPanel.cpp` (重构 `ActionAddToCategory` 逻辑；修正右键菜单判定逻辑；删除未使用变量)
-    - **修改**: `src/ui/TreeItemDelegate.h` (修复变量隐藏警告)
+    - **修改**: `src/ui/ContentPanel.cpp` (重构 `ActionAddToCategory` 逻辑；修正右键菜单判定逻辑；补全入库状态数据映射；强化 Grid 代理标识绘制逻辑；删除未使用变量)
+    - **修改**: `src/ui/TreeItemDelegate.h` (修复变量隐藏警告；强化列表标识绘制逻辑)
+    - **修改**: `src/ui/ThumbnailDelegate.cpp` (强化缩略图标识绘制逻辑；删除多余变量 `isManaged` 与头文件依赖)
+    - **修改**: `src/core/IndexedEntry.h` (修正 `ItemRecord` 默认状态位为 -2)
     - **修改**: `src/core/AutoImportManager.h/.cpp` (对齐 MFT 盘符索引；新增批量信号监听；补全递归登记链路)
     - **修改**: `src/mft/MftReader.h/.cpp` (新增 `getDriveLetter` 接口；实现 `entriesBatchAdded` 批量信号触发)
-    - **修改**: `src/meta/MetadataManager.h/.cpp` (修正 `registerItem` 状态位初值；实现 `getDriveLetterByMftIndex` 服务；补全视觉解析后的状态流转；删除未使用变量 `pathHint`)
-    - **修改**: `src/ui/ThumbnailDelegate.cpp` (删除未使用变量 `isManaged`)
+    - **修改**: `src/meta/MetadataManager.h/.cpp` (修正 `registerItem` 状态位初值；实现 `getDriveLetterByMftIndex` 服务；补全视觉解析后的状态流转；删除未使用变量 `pathHint`；修正 `RuntimeMeta` 构造函数默认状态位为 -2)
+    - **修改**: `src/meta/DatabaseManager.cpp` (修正 `ingestion_status` 数据库默认值为 0)
 - **修改原因**: 
     1. 解决右键菜单职责混淆问题，实现物理 Move 与逻辑登记分离。
-    2. 优化 UI 文本冗余，将已入库项的“重新收揽入库”精简为“重新扫描”。
-    3. 修复托管库路径匹配 Bug 与移入项目自动感应失效问题。
+    2. 彻底解决未登记项目错误显示“已入库”标识的问题：通过引入 `-2 (Unregistered)` 状态位，并将其设为元数据及模型记录的初值，配合 UI 代理层的准入判断，实现了标识显示的逻辑严密性。
+    3. 优化 UI 文本冗余，将已入库项的“重新收揽入库”精简为“重新扫描”。
+    4. 修复托管库路径匹配 Bug 与移入项目自动感应失效问题。
 - **优化点**:
     - **职责归位**: “收揽入库”动作现在仅执行物理移动，不再越权干涉入库流程。
     - **跨盘保护**: 增加物理卷校验，防止跨盘移动导致的数据损坏或耗时操作，并通过 `ToolTipOverlay` 提供错误反馈。
@@ -551,3 +554,29 @@
     - **物理强准入**: 实现库外项目导入时的自动物理迁移，确保管理入口唯一性。
     - **冗余根除**: 物理清理“未分类”虚拟逻辑，实现侧边栏分类名与物理磁盘目录名的实时双向同步。
     - **失效保护**: 采用半透明灰度样式保留失效项目元数据，支持 FRN 启发式重识别与自愈。
+
+[2026-11-16 14:30:00]
+- **任务描述**: 自动入库感知链路深度矫正与架构重构 (Plan-3)。
+- **修改文件**:
+    - **修改**: `src/meta/MetadataManager.h/.cpp` (修正 `RuntimeMeta` 初始状态为 -1；强制登记初值为 0；实现非图像项的状态流转晋升)
+    - **修改**: `src/core/IndexedEntry.h` (修正 `ItemRecord` 初始状态为 -1)
+    - **修改**: `src/core/AutoImportManager.cpp` (实现移入文件夹的异步递归扫描登记；移除不合规的状态强制设置)
+    - **修改**: `src/ui/ContentPanel.cpp` (补全 `updateRecordMetadata` 的状态映射；强化 Grid 代理标识绘制逻辑)
+    - **修改**: `src/ui/ThumbnailDelegate.cpp` (修正状态 Role 默认取值；强化缩略图标识绘制逻辑；修复 `inManagedLib` 标识符未定义编译错误)
+    - **修改**: `src/ui/TreeItemDelegate.h` (强化列表状态标识绘制逻辑)
+- **修改原因**: 解决手动移入项目至托管库后感知失效、视觉状态欺诈（未入库显对勾）以及入库流程不完整的问题。
+- **优化点**:
+    - **根除视觉欺诈**: 通过将初始状态修正为 -1 并严控 UI 准入，确保只有真正解析完成的项目才会显示对勾。
+    - **全量感知**: 补全了文件夹移入后的深度递归登记机制，确保子项不遗漏。
+    - **状态闭环**: 确立了从“登记 (0)”到“解析完成 (1)”的强制晋升链路，实现逻辑严密性。
+
+[2026-11-16 16:30:00]
+- **任务描述**: 补全 USN 事件感知信号发射链路。
+- **修改文件**:
+    - **修改**: `src/mft/UsnWatcher.h` (删除 `handleRecord` 声明)
+    - **修改**: `src/mft/UsnWatcher.cpp` (实现 `run` 函数中的实时信号发射；删除 `handleRecord` 实现；补全盘符索引反查逻辑)
+- **修改原因**: 解决 `UsnWatcher` 仅更新 `MftReader` 内部数据而未通知外部的问题，打通自动入库感知的最后一步。
+- **优化点**:
+    - **信号闭环**: 在处理 USN 事件后，根据事件类型（新建、重命名、删除）实时发射 `entryAdded`、`entryUpdated`、`entryRemoved` 信号。
+    - **职责清晰**: 物理删除死代码 `handleRecord`，将逻辑收拢至 `run` 函数的批量处理循环中。
+    - **索引一致**: 确保发射信号时携带的 `key` 严格遵循 MFT 引擎的复合键编码规则，保证 `AutoImportManager` 的路径反查成功率。

@@ -1,6 +1,7 @@
 #include "UsnWatcher.h"
 #include "MftReader.h"
 #include <QDebug>
+#include <QDir>
 #include <winioctl.h>
 
 namespace ArcMeta {
@@ -107,6 +108,18 @@ void UsnWatcher::run() {
                         reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileReferenceNumber : 
                         *reinterpret_cast<uint64_t*>(&reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileReferenceNumber);
                     MftReader::instance().removeEntryByFrn(m_volume, frn);
+                    
+                    int driveIdx = 0;
+                    const auto drives = QDir::drives();
+                    for (int i = 0; i < drives.size(); ++i) {
+                        QString d = drives[i].absolutePath().left(2).toUpper();
+                        if (QString::fromStdWString(m_volume).toUpper().startsWith(d)) {
+                            driveIdx = i;
+                            break;
+                        }
+                    }
+                    uint64_t key = ((uint64_t)driveIdx << 48) | (frn & 0x0000FFFFFFFFFFFFull);
+                    emit MftReader::instance().entryRemoved(key);
                 }
             }
             pRecord += header->RecordLength;
@@ -122,6 +135,43 @@ void UsnWatcher::run() {
                 std::vector<uint8_t*> chunk(updateBatch.begin() + i, updateBatch.begin() + end);
                 MftReader::instance().updateEntriesFromUsnBatch(chunk, m_volume);
                 
+                for (uint8_t* pRaw : chunk) {
+                    USN_RECORD_COMMON_HEADER* header =
+                        reinterpret_cast<USN_RECORD_COMMON_HEADER*>(pRaw);
+                    uint32_t reason = 0;
+                    uint64_t frn = 0;
+                    int driveIdx = 0;
+
+                    if (header->MajorVersion == 2) {
+                        auto* r = reinterpret_cast<USN_RECORD_V2*>(pRaw);
+                        reason = r->Reason;
+                        frn = r->FileReferenceNumber;
+                    } else if (header->MajorVersion == 3) {
+                        auto* r = reinterpret_cast<USN_RECORD_V3*>(pRaw);
+                        reason = r->Reason;
+                        frn = *reinterpret_cast<uint64_t*>(&r->FileReferenceNumber);
+                    }
+
+                    const auto drives = QDir::drives();
+                    for (int j = 0; j < drives.size(); ++j) {
+                        QString d = drives[j].absolutePath().left(2).toUpper();
+                        if (QString::fromStdWString(m_volume).toUpper().startsWith(d)) {
+                            driveIdx = j;
+                            break;
+                        }
+                    }
+
+                    uint64_t key = ((uint64_t)driveIdx << 48) | (frn & 0x0000FFFFFFFFFFFFull);
+
+                    if (reason & USN_REASON_FILE_DELETE) {
+                        emit MftReader::instance().entryRemoved(key);
+                    } else if (reason & USN_REASON_RENAME_NEW_NAME) {
+                        emit MftReader::instance().entryUpdated(key);
+                    } else if (reason & USN_REASON_FILE_CREATE) {
+                        emit MftReader::instance().entryAdded(key);
+                    }
+                }
+
                 // 强制释放 CPU 时间片，解决长时挂起（休眠）唤醒后的“未响应”现象
                 QThread::msleep(5); 
             }
@@ -130,32 +180,6 @@ void UsnWatcher::run() {
         // 更新起始 USN 为本次读取后的 NextUsn
         readData.StartUsn = *reinterpret_cast<USN*>(buffer.get());
         m_lastUsn = readData.StartUsn;
-    }
-}
-
-void UsnWatcher::handleRecord(USN_RECORD_V2* pRecord) {
-    USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(pRecord);
-    uint32_t reason;
-    uint64_t frn;
-
-    if (header->MajorVersion == 2) {
-        reason = pRecord->Reason;
-        frn = pRecord->FileReferenceNumber;
-    } else if (header->MajorVersion == 3) {
-        USN_RECORD_V3* v3 = reinterpret_cast<USN_RECORD_V3*>(pRecord);
-        reason = v3->Reason;
-        frn = *reinterpret_cast<uint64_t*>(&v3->FileReferenceNumber);
-    } else return;
-
-    // 仅更新 MftReader 内存 SoA，不直接操作数据库
-    if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE)) {
-        MftReader::instance().updateEntryFromUsn(reinterpret_cast<uint8_t*>(pRecord), m_volume);
-    }
-    else if (reason & USN_REASON_FILE_DELETE) {
-        MftReader::instance().removeEntryByFrn(m_volume, frn);
-    }
-    else if (reason & USN_REASON_RENAME_NEW_NAME) {
-        MftReader::instance().updateEntryFromUsn(reinterpret_cast<uint8_t*>(pRecord), m_volume);
     }
 }
 

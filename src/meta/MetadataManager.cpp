@@ -383,12 +383,18 @@ void MetadataManager::registerItemsAsync(const QStringList& paths) {
             // 1. 激活 (优化版，内含锁分离 I/O)
             ensureActivated(nPath);
             
-            // 2. 物理与视觉属性提取 (耗时操作)
+            // 2. 标记为 Registered (0)
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                m_cache[nPath].ingestionStatus = 0;
+            }
+
+            // 3. 物理与视觉属性提取 (耗时操作)
             tryExtractDimensions(nPath);
             syncPhysicalMetadata(nPath, false); // 内部已异步化
             tryExtractColor(nPath);
             
-            // 3. 增量通知 UI
+            // 4. 增量通知 UI
             notifyUI(RefreshLevel::PathUpdate, qp);
         }
 #ifdef Q_OS_WIN
@@ -1131,6 +1137,10 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
                     success = true;
                 }
             }
+        } else {
+            // 2026-11-xx 按照 Plan-3：非图像文件直接晋升
+            instance().setItemVisualMetadata(nPath, L"", {}, false);
+            success = true;
         }
     } else if (info.isDir()) {
         QDir subDir(qPath);
@@ -1172,6 +1182,10 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
                 instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), samples[bestIdx].palette, false);
                 success = true;
             }
+        } else {
+            // 2026-11-xx 按照 Plan-3：文件夹内无图像，直接晋升
+            instance().setItemVisualMetadata(nPath, L"", {}, false);
+            success = true;
         }
     }
 
@@ -1217,11 +1231,15 @@ void MetadataManager::processVisualRetryQueue() {
             bool ok = false;
 
             if (info.isFile()) {
-                // 2026-07-xx 按照建议：extractPalette 内部已通过 getImageForAnalysis 解决了 SVG 渲染问题
-                auto palette = ArcMeta::UiHelper::extractPalette(qPath);
-                if (!palette.isEmpty()) {
-                    QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
-                    setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), palette, true);
+                if (ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower())) {
+                    auto palette = ArcMeta::UiHelper::extractPalette(qPath);
+                    if (!palette.isEmpty()) {
+                        QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
+                        setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), palette, true);
+                        ok = true;
+                    }
+                } else {
+                    setItemVisualMetadata(path, L"", {}, true);
                     ok = true;
                 }
             } else if (info.isDir()) {
@@ -1262,6 +1280,9 @@ void MetadataManager::processVisualRetryQueue() {
                         setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), samples[bestIdx].palette, true);
                         ok = true;
                     }
+                } else {
+                    setItemVisualMetadata(path, L"", {}, true);
+                    ok = true;
                 }
             }
             

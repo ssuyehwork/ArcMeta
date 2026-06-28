@@ -187,6 +187,8 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         return record.tags;
     } else if (role == ManagedRole) {
         return record.isManaged;
+    } else if (role == IngestionStatusRole) {
+        return record.ingestionStatus;
     } else if (role == RegistrationProgressRole) {
         return record.registrationProgress;
     } else if (role == CategoryIdRole) {
@@ -462,6 +464,7 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             m_allRecords[i].fileId = meta.fileId128;
             m_allRecords[i].pinned = meta.pinned;
             m_allRecords[i].encrypted = meta.encrypted;
+            m_allRecords[i].ingestionStatus = meta.ingestionStatus;
             m_allRecords[i].isManaged = meta.hasUserOperations();
             m_allRecords[i].palettes.clear();
             for (const auto& pe : meta.palettes) {
@@ -855,6 +858,7 @@ ItemRecord ContentPanel::createItemRecord(const QString& path) {
     r.note = QString::fromStdWString(meta.note);
     r.width = meta.width;
     r.height = meta.height;
+    r.ingestionStatus = meta.ingestionStatus;
     r.isManaged = meta.hasUserOperations();
     for (const auto& pe : meta.palettes) {
         r.palettes.push_back({pe.color, pe.ratio});
@@ -2986,8 +2990,8 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         // 置顶优先 
         QIcon pinIcon = UiHelper::getIcon("pin_vertical", Style::ActiveOrange, 16); 
         pinIcon.paint(painter, statusRect); 
-    } else if (inManagedLib && (ingStatus == 0 || (isDir && progress >= 0.0 && progress < 1.0))) {
-        // 2026-11-xx 按照 Plan-113：Registered (0) 状态或递归进度均显示进度环，仅对库内文件夹生效
+    } else if (ingStatus >= 0 && inManagedLib && (ingStatus == 0 || (isDir && progress >= 0.0 && progress < 1.0))) {
+        // 按照 Plan-3：显示进度环
         painter->save(); 
         painter->setRenderHint(QPainter::Antialiasing); 
         painter->setPen(QPen(QColor(60, 60, 60, 180), 2)); 
@@ -2996,12 +3000,12 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         pPen.setCapStyle(Qt::RoundCap); 
         painter->setPen(pPen); 
         
-        double pVal = (ingStatus == 0 && progress < 0.1) ? 0.3 : progress; // 状态 0 至少显示 30% 进度感
+        double pVal = (ingStatus == 0 && progress < 0.1) ? 0.3 : progress; 
         int spanAngle = -qRound(pVal * 360 * 16); 
         painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
         painter->restore(); 
-    } else if (inManagedLib && ingStatus == 1) { 
-        // 2026-11-xx 按照 Plan-113：仅对托管库内 Ingested(1) 的项目显示对勾
+    } else if (ingStatus == 1 && inManagedLib) { 
+        // 按照 Plan-3：显示对勾
         QIcon checkIcon = UiHelper::getIcon("check_circle", SuccessGreen, 16); 
         checkIcon.paint(painter, statusRect); 
     } 
