@@ -1,5 +1,6 @@
 #include "ThumbnailDelegate.h"
 #include "ContentPanel.h"
+#include "../core/AutoImportManager.h"
 #include "../meta/MetadataManager.h"
 #include <QPainter>
 #include <QPainterPath>

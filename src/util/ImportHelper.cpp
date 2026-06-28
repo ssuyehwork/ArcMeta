@@ -1,4 +1,5 @@
 #include "ImportHelper.h"
+#include "ShellHelper.h"
 #include "../ui/Logger.h"
 #include "../ui/BatchProgressDialog.h"
 #include "../ui/ToolTipOverlay.h"

@@ -510,6 +510,17 @@
 - **优化点**:
     - **并发稳定性**: 消除死锁隐患，恢复“扫描该盘”功能的响应性，确保自动入库任务能平滑执行。
 
+[2026-11-16 11:30:00]
+- **任务描述**: 修复 UI 代理及导入助手编译错误与变量重定义。
+- **修改文件**:
+    - **修改**: `src/ui/ContentPanel.cpp` (移除 `GridItemDelegate::paint` 中 `path` 变量的重复定义)
+    - **修改**: `src/ui/ThumbnailDelegate.cpp` (补全 `AutoImportManager.h` 头文件引用)
+    - **修改**: `src/ui/TreeItemDelegate.h` (补全 `AutoImportManager.h` 头文件引用)
+    - **修改**: `src/util/ImportHelper.cpp` (补全 `ShellHelper.h` 头文件引用)
+- **修改原因**: 解决由于标识符未定义及变量多次初始化导致的编译阻塞。
+- **优化点**:
+    - **编译稳固**: 确保所有 UI 代理均能正确识别 `AutoImportManager` 接口，并消除 MSVC 编译错误。
+
 - **任务描述**: 托管库核心架构重构与物理同步一体化 (Plan-113)。
 - **修改文件**:
     - **修改**: `src/meta/DatabaseManager.cpp` (新增 `ingestion_status` 字段，废除 `pending_imports` 表)

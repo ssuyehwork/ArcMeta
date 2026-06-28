@@ -2993,7 +2993,6 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
  
     // 2. 扩展名角标 
     QString type = index.data(TypeRole).toString();
-    QString path = index.data(PathRole).toString(); 
     QFileInfo info(path); 
     QString ext;
     if (type == "category" || type == "folder") {
