@@ -517,7 +517,8 @@
     - **修改**: `src/ui/TreeItemDelegate.h` (修复变量隐藏警告)
     - **修改**: `src/core/AutoImportManager.h/.cpp` (对齐 MFT 盘符索引；新增批量信号监听；补全递归登记链路)
     - **修改**: `src/mft/MftReader.h/.cpp` (新增 `getDriveLetter` 接口；实现 `entriesBatchAdded` 批量信号触发)
-    - **修改**: `src/meta/MetadataManager.h/.cpp` (修正 `registerItem` 状态位初值；实现 `getDriveLetterByMftIndex` 服务；补全视觉解析后的状态流转)
+    - **修改**: `src/meta/MetadataManager.h/.cpp` (修正 `registerItem` 状态位初值；实现 `getDriveLetterByMftIndex` 服务；补全视觉解析后的状态流转；删除未使用变量 `pathHint`)
+    - **修改**: `src/ui/ThumbnailDelegate.cpp` (删除未使用变量 `isManaged`)
 - **修改原因**:
     1. 解决右键菜单职责混淆问题，实现物理 Move 与逻辑登记分离。
     2. 优化 UI 文本冗余，将已入库项的“重新收揽入库”精简为“重新扫描”。

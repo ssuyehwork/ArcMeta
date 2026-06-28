@@ -1340,7 +1340,6 @@ bool MetadataManager::moveMetadataToVolume(const std::wstring& path, const std::
         sqlite3_bind_text(catStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
         while (sqlite3_step(catStmt) == SQLITE_ROW) {
             int catId = sqlite3_column_int(catStmt, 0);
-            const wchar_t* pathHint = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(catStmt, 1));
             double addedAt = sqlite3_column_double(catStmt, 2);
 
             sqlite3_stmt* insStmt;
