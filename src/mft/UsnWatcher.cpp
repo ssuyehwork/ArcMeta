@@ -1,5 +1,6 @@
 #include "UsnWatcher.h"
 #include "MftReader.h"
+#include "../meta/MetadataManager.h"
 #include <QDebug>
 #include <QDir>
 #include <winioctl.h>
@@ -57,7 +58,7 @@ void UsnWatcher::run() {
     }
 
     // 检查 USN 空隙：若 savedUsn 比当前 FirstUsn 还小，说明 Journal 记录已被覆盖
-    if (savedUsn > 0 && savedUsn < journalData.FirstUsn) {
+    if (savedUsn > 0 && savedUsn < static_cast<uint64_t>(journalData.FirstUsn)) {
         qDebug() << "[UsnWatcher] 检测到离线期间 USN 记录被覆盖，建议执行全量扫描补偿:" << QString::fromStdWString(m_volume);
         // 此处可触发存量自愈信号，本 Plan 侧重于感知链路修复
     }
