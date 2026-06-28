@@ -1658,13 +1658,13 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         }
 
         // [批量与加密区] 
-        // 2026-07-xx 按照用户要求：只要是文件夹，或者是“非图像文件”，都显示扫描入库选项
+        // 2026-07-xx 按照用户要求：只要是文件夹，或者是“非图像文件”，都显示收揽入库选项
         QString suffix = QFileInfo(path).suffix().toLower();
         bool isGraphic = UiHelper::isGraphicsFile(suffix);
 
         if (isFolder || !isGraphic) { 
             bool isManaged = currentIndex.data(ManagedRole).toBool();
-            QString scanText = isManaged ? "重新扫描" : "扫描入库";
+            QString scanText = isManaged ? "重新扫描" : "收揽入库";
             menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), scanText)->setData(ActionAddToCategory);
         }
 
