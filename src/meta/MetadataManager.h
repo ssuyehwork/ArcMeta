@@ -145,6 +145,9 @@ public:
     void setIngestionStatus(const std::wstring& path, int status, bool notify = true);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
 
+    // 2026-11-xx 新增：盘符还原服务 (供 AutoImportManager 使用)
+    QString getDriveLetterByMftIndex(int driveIdx);
+
     /**
      * @brief 全局重命名标签
      */

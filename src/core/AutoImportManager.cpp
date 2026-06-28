@@ -40,6 +40,7 @@ AutoImportManager::~AutoImportManager() {
 void AutoImportManager::startListening() {
     if (m_isListening) return;
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
+    connect(&MftReader::instance(), &MftReader::entriesBatchAdded, this, &AutoImportManager::onEntriesBatchAdded, Qt::QueuedConnection);
     connect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved, Qt::QueuedConnection);
     connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
     m_isListening = true;
@@ -48,6 +49,7 @@ void AutoImportManager::startListening() {
 void AutoImportManager::stopListening() {
     if (!m_isListening) return;
     disconnect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded);
+    disconnect(&MftReader::instance(), &MftReader::entriesBatchAdded, this, &AutoImportManager::onEntriesBatchAdded);
     disconnect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved);
     disconnect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated);
     m_isListening = false;
@@ -56,10 +58,10 @@ void AutoImportManager::stopListening() {
 void AutoImportManager::onEntryAdded(uint64_t key) {
     uint64_t frn = key & 0x0000FFFFFFFFFFFFull;
     int driveIdx = static_cast<int>(key >> 48);
-    QString driveLetter;
-    const auto drives = QDir::drives();
-    if (driveIdx < drives.size()) driveLetter = drives[driveIdx].absolutePath().left(2).toUpper();
-    else return;
+
+    // 2026-11-xx 按照 Plan-113：修正盘符还原逻辑，对齐 MFT 索引标准
+    QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
+    if (driveLetter.isEmpty()) return;
 
     HANDLE hVol = CreateFileW((L"\\\\.\\" + driveLetter.toStdWString()).c_str(), 
                               GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
@@ -74,7 +76,6 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
             // 2026-11-xx 按照 Plan-113：USN 变动直接同步至核心 metadata 表
             if (isPathInManagedLibrary(wPath)) {
                 // 已在库内：执行全量递归登记 (状态 0)
-                // 这一步确保进度弧的分母基数准确
                 std::function<void(const QString&)> recursiveRegister = [&](const QString& p) {
                     std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
                     MetadataManager::instance().registerItem(wp);
@@ -100,13 +101,45 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
     }
 }
 
+void AutoImportManager::onEntriesBatchAdded(int driveIdx, const QList<uint64_t>& frns) {
+    QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
+    if (driveLetter.isEmpty()) return;
+
+    HANDLE hVol = CreateFileW((L"\\\\.\\" + driveLetter.toStdWString()).c_str(),
+                              GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (hVol == INVALID_HANDLE_VALUE) return;
+
+    std::vector<std::wstring> toAdd;
+    for (uint64_t frn : frns) {
+        QString relPath = MftReader::getPathByFrn(hVol, frn);
+        if (!relPath.isEmpty()) {
+            QString fullPath = driveLetter + relPath;
+            std::wstring wPath = fullPath.toStdWString();
+            if (isPathInManagedLibrary(wPath)) {
+                // 批量场景下简单处理单层级，复杂递归由 startTask 或后续变动补完
+                MetadataManager::instance().registerItem(wPath);
+                MetadataManager::instance().setIngestionStatus(wPath, 0, false);
+                toAdd.push_back(wPath);
+            }
+        }
+    }
+    CloseHandle(hVol);
+
+    if (!toAdd.empty()) {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        for (const auto& p : toAdd) m_pendingPaths.push_back(p);
+        QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+    }
+}
+
 void AutoImportManager::onEntryUpdated(uint64_t key) {
     uint64_t frn = key & 0x0000FFFFFFFFFFFFull;
     int driveIdx = static_cast<int>(key >> 48);
-    QString driveLetter;
-    const auto drives = QDir::drives();
-    if (driveIdx < drives.size()) driveLetter = drives[driveIdx].absolutePath().left(2).toUpper();
-    else return;
+
+    // 2026-11-xx 按照 Plan-113：修正盘符还原逻辑
+    QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
+    if (driveLetter.isEmpty()) return;
 
     HANDLE hVol = CreateFileW((L"\\\\.\\" + driveLetter.toStdWString()).c_str(), 
                               GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
@@ -165,10 +198,10 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
 void AutoImportManager::onEntryRemoved(uint64_t key) {
     uint64_t frn = key & 0x0000FFFFFFFFFFFFull;
     int driveIdx = static_cast<int>(key >> 48);
-    QString driveLetter;
-    const auto drives = QDir::drives();
-    if (driveIdx < drives.size()) driveLetter = drives[driveIdx].absolutePath().left(2).toUpper();
-    else return;
+
+    // 2026-11-xx 按照 Plan-113：修正盘符还原逻辑
+    QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
+    if (driveLetter.isEmpty()) return;
 
     // 2026-11-xx 按照 Plan-113：标记为失效
     std::wstring volSerial = MetadataManager::getVolumeSerialNumber((driveLetter + "\\").toStdWString());

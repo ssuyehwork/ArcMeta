@@ -354,10 +354,11 @@ void MetadataManager::registerItem(const std::wstring& path) {
     // 2. 提取图像尺寸 (Plan-29)
     tryExtractDimensions(nPath);
 
-    // 2026-11-xx 按照 Plan-113：入库完成即标记为 Ingested (1)
+    // 2026-11-xx 按照 Plan-113：登记初值必须为 Registered (0)
+    // 仅在视觉解析 (tryExtractColor) 完成后才由后台任务流转为 Ingested (1)
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nPath].ingestionStatus = 1;
+        m_cache[nPath].ingestionStatus = 0;
     }
 
     // 3. 物理同步 (存入数据库)
@@ -501,6 +502,10 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
     }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
+}
+
+QString MetadataManager::getDriveLetterByMftIndex(int driveIdx) {
+    return MftReader::instance().getDriveLetter(driveIdx);
 }
 
 void MetadataManager::renameTag(const QString& oldName, const QString& newName) {
@@ -679,6 +684,10 @@ void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std:
         RuntimeMeta& meta = m_cache[nPath];
         meta.color = color;
         meta.palettes = entries;
+        // 2026-11-xx 按照 Plan-113：视觉解析完成，流转为 Ingested (1)
+        if (meta.ingestionStatus == 0) {
+            meta.ingestionStatus = 1;
+        }
     }
     
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
