@@ -208,6 +208,7 @@ void MetadataManager::initFromScchMode() {
                 rm.isInvalid = sqlite3_column_int(stmt, 15) != 0;
                 rm.width = sqlite3_column_int(stmt, 16);
                 rm.height = sqlite3_column_int(stmt, 17);
+                rm.ingestionStatus = sqlite3_column_int(stmt, 18);
                 if (paletteBlob && paletteSize > 0) {
                     QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
                     QJsonDocument doc = QJsonDocument::fromJson(ba);
@@ -352,6 +353,13 @@ void MetadataManager::registerItem(const std::wstring& path) {
     ensureActivated(nPath);
     // 2. 提取图像尺寸 (Plan-29)
     tryExtractDimensions(nPath);
+
+    // 2026-11-xx 按照 Plan-113：入库完成即标记为 Ingested (1)
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_cache[nPath].ingestionStatus = 1;
+    }
+
     // 3. 物理同步 (存入数据库)
     syncPhysicalMetadata(nPath, false);
     // 4. 视觉预热 (提取颜色)
@@ -612,6 +620,17 @@ void MetadataManager::setManaged(const std::wstring& path, bool managed, bool no
     // 2026-07-xx 逻辑校准：isManaged 是由数据库持久化驱动的标记。
     // 如果显式设为 true，则发起一次持久化以确保入库；如果是设为 false（罕见），无需特殊持久化。
     if (managed) debouncePersist(nPath); 
+}
+
+void MetadataManager::setIngestionStatus(const std::wstring& path, int status, bool notify) {
+    std::wstring nPath = MetadataManager::normalizePath(path);
+    ensureActivated(nPath);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_cache[nPath].ingestionStatus = status;
+    }
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    debouncePersist(nPath);
 }
 
 void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify) {
@@ -1265,7 +1284,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
     if (!db) return;
 
     sqlite3_stmt* stmt;
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     bool isNew = true;
     {
         sqlite3_stmt* checkStmt;
@@ -1304,6 +1323,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
         sqlite3_bind_int(stmt, 16, rMeta.isInvalid ? 1 : 0);
         sqlite3_bind_int(stmt, 17, rMeta.width);
         sqlite3_bind_int(stmt, 18, rMeta.height);
+        sqlite3_bind_int(stmt, 19, rMeta.ingestionStatus);
 
         if (sqlite3_step(stmt) == SQLITE_DONE) {
             if (isNew) {

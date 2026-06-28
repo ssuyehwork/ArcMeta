@@ -24,6 +24,11 @@ public:
     void startTask(const QString& drive);
     void pauseTask(const QString& drive);
 
+    // 2026-11-xx 按照 Plan-113：物理准入接口
+    static std::wstring getManagedLibraryPath(const std::wstring& pathInDrive);
+    static bool isPathInManagedLibrary(const std::wstring& path);
+    static void ensureManagedFolderExists(const std::wstring& driveRoot);
+
 signals:
     void taskFinished(const QString& drive);
 

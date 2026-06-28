@@ -3,6 +3,7 @@
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
 #include "../util/ImportHelper.h"
+#include "../util/ShellHelper.h"
 #include "AppConfig.h"
 #include <QDebug>
 #include <string>
@@ -65,28 +66,19 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
         CloseHandle(hVol);
         if (!relPath.isEmpty()) {
             QString fullPath = driveLetter + relPath;
+            std::wstring wPath = fullPath.toStdWString();
 
-            // 2026-11-15 按照定点修复 (Plan-111)：USN Journal 单层级监听约束
-            // 理由：深层递归由 ImportHelper 处理，此处仅捕获托管文件夹的直接子项变动。
-            QString parentPath = QFileInfo(fullPath).absolutePath();
-            QString managedFolderDefault = driveLetter + "/ArcMeta.Library_" + driveLetter.left(1);
-            if (QDir::toNativeSeparators(parentPath) != QDir::toNativeSeparators(managedFolderDefault)) {
-                return; // 不是直接子项，忽略 (hVol 已在外部关闭)
-            }
-
-            std::wstring managedFolder;
-            if (checkAndGetManagedPath(fullPath.toStdWString(), managedFolder)) {
-                sqlite3* db = DatabaseManager::instance().getGlobalDb();
-                const char* sql = "REPLACE INTO pending_imports (frn, drive, path, status, timestamp) VALUES (?, ?, ?, 1, ?)";
-                sqlite3_stmt* stmt;
-                if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                    sqlite3_bind_int64(stmt, 1, frn);
-                    sqlite3_bind_text(stmt, 2, driveLetter.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text(stmt, 3, fullPath.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_int64(stmt, 4, QDateTime::currentMSecsSinceEpoch());
-                    sqlite3_step(stmt);
-                    sqlite3_finalize(stmt);
+            // 2026-11-xx 按照 Plan-113：USN 变动直接同步至核心 metadata 表
+            if (isPathInManagedLibrary(wPath)) {
+                // 已在库内：Registered
+                MetadataManager::instance().setIngestionStatus(wPath, 0); 
+                
+                // 加入解析队列 (3秒去抖)
+                {
+                    std::lock_guard<std::mutex> lock(m_queueMutex);
+                    m_pendingPaths.push_back(wPath);
                 }
+                QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
             }
         }
     }
@@ -100,26 +92,15 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
     if (driveIdx < drives.size()) driveLetter = drives[driveIdx].absolutePath().left(2).toUpper();
     else return;
 
-    // 2026-11-15 按照定点修复 (Plan-111)：USN Journal 单层级监听约束
-    // 理由：由于物理文件已消失，通过查询 pending_imports 确认该项是否曾作为直属子项被记录。
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    sqlite3_stmt* checkStmt;
-    bool isDirectChild = false;
-    if (sqlite3_prepare_v2(db, "SELECT 1 FROM pending_imports WHERE frn = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int64(checkStmt, 1, frn);
-        if (sqlite3_step(checkStmt) == SQLITE_ROW) isDirectChild = true;
-        sqlite3_finalize(checkStmt);
-    }
-    if (!isDirectChild) return;
+    // 2026-11-xx 按照 Plan-113：标记为失效
+    std::wstring volSerial = MetadataManager::getVolumeSerialNumber((driveLetter + "\\").toStdWString());
+    std::string fidPrefix = QString::fromStdWString(volSerial).toStdString() + "_" + std::to_string(frn);
+    MetadataManager::instance().setInvalidByFidPrefix(fidPrefix, true);
     
-    const char* sql = "REPLACE INTO pending_imports (frn, drive, status, timestamp) VALUES (?, ?, -1, ?)";
-    sqlite3_stmt* stmt;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int64(stmt, 1, frn);
-        sqlite3_bind_text(stmt, 2, driveLetter.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(stmt, 3, QDateTime::currentMSecsSinceEpoch());
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
+    // 同步更新 ingestionStatus 为 Invalid (-1)
+    std::wstring p = MetadataManager::instance().getPathByFid(MetadataManager::generateFallbackFid(volSerial, std::to_wstring(frn)));
+    if (!p.empty()) {
+        MetadataManager::instance().setIngestionStatus(p, -1);
     }
 }
 
@@ -127,70 +108,23 @@ void AutoImportManager::startTask(const QString& drive) {
     m_globalPaused.store(false);
 
     (void)QtConcurrent::run([this, drive]() {
-        sqlite3* db = DatabaseManager::instance().getGlobalDb();
-        struct TaskItem { uint64_t frn; QString path; };
-        QVector<TaskItem> toImport;
-        const char* selectSql = "SELECT frn, path FROM pending_imports WHERE drive=? AND status=1";
-        sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(db, selectSql, -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(stmt, 1, drive.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                toImport.append({(uint64_t)sqlite3_column_int64(stmt, 0), QString::fromUtf8((const char*)sqlite3_column_text(stmt, 1))});
+        // 按照 Plan-113：扫描库内所有 Registered (0) 的项并发起解析
+        QString managedPath = QString::fromStdWString(getManagedLibraryPath(drive.toStdWString()));
+        if (managedPath.isEmpty()) return;
+
+        QStringList toProcess;
+        MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
+            if (meta.ingestionStatus == 0 && QString::fromStdWString(path).startsWith(managedPath, Qt::CaseInsensitive)) {
+                toProcess << QString::fromStdWString(path);
             }
-            sqlite3_finalize(stmt);
+        });
+
+        if (!toProcess.isEmpty()) {
+            ImportHelper::importPaths(toProcess, 0, nullptr);
+            // importPaths 内部完成 registerItem 会将 ingestionStatus 设置为 Ingested(1) 吗？
+            // 我们需要在 registerItem 逻辑中补全。
         }
 
-        // 2026-11-15 按照定点修复 (Plan-111)：重构执行流
-        // 1. 批量入库
-        if (!toImport.isEmpty()) {
-            QStringList paths;
-            for (const auto& item : toImport) paths << item.path;
-            
-            // 2026-11-16 按照定点修复：移除 BlockingQueuedConnection 包裹，彻底消除死锁。
-            // 理由：ImportHelper::importPaths 内部会自动处理线程切换与异步进度反馈。
-            ImportHelper::importPaths(paths, 0, nullptr);
-            
-            const char* updateSql = "UPDATE pending_imports SET status=2 WHERE path=?";
-            sqlite3_stmt* updateStmt;
-            for (const auto& item : toImport) {
-                if (m_globalPaused.load()) break; // 任务中断检测
-                if (sqlite3_prepare_v2(db, updateSql, -1, &updateStmt, nullptr) == SQLITE_OK) {
-                    sqlite3_bind_text(updateStmt, 1, item.path.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-                    sqlite3_step(updateStmt);
-                    sqlite3_finalize(updateStmt);
-                }
-            }
-        }
-
-        if (m_globalPaused.load()) {
-            emit taskFinished(drive);
-            return;
-        }
-
-        QVector<TaskItem> toRemove;
-        const char* delSql = "SELECT frn, path FROM pending_imports WHERE drive=? AND status=-1";
-        if (sqlite3_prepare_v2(db, delSql, -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(stmt, 1, drive.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                toRemove.append({(uint64_t)sqlite3_column_int64(stmt, 0), QString::fromUtf8((const char*)sqlite3_column_text(stmt, 1))});
-            }
-            sqlite3_finalize(stmt);
-        }
-        if (!toRemove.isEmpty()) {
-            std::wstring volSerial = MetadataManager::getVolumeSerialNumber((drive + "\\").toStdWString());
-            const char* deleteSql = "DELETE FROM pending_imports WHERE path=?";
-            sqlite3_stmt* deleteStmt;
-            for (const auto& item : toRemove) {
-                std::string fidPrefix = QString::fromStdWString(volSerial).toStdString() + "_" + std::to_string(item.frn);
-                MetadataManager::instance().setInvalidByFidPrefix(fidPrefix, true);
-                if (sqlite3_prepare_v2(db, deleteSql, -1, &deleteStmt, nullptr) == SQLITE_OK) {
-                    sqlite3_bind_text(deleteStmt, 1, item.path.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-                    sqlite3_step(deleteStmt);
-                    sqlite3_finalize(deleteStmt);
-                }
-            }
-        }
-        MetadataManager::instance().notifyFullUIRebuild();
         emit taskFinished(drive);
     });
 }
@@ -200,24 +134,34 @@ void AutoImportManager::pauseTask(const QString& drive) {
     m_globalPaused.store(true);
 }
 
-bool AutoImportManager::checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder) {
+bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path) {
     std::wstring volSerial = MetadataManager::getVolumeSerialNumber(path);
     if (volSerial.empty()) return false;
+    std::wstring managed = instance().getManagedFolderAbsolutePath(volSerial);
+    if (managed.empty()) return false;
 
-    std::wstring managedAbs = getManagedFolderAbsolutePath(volSerial);
-    if (managedAbs.empty()) return false;
+    QString nPath = QDir::toNativeSeparators(QString::fromStdWString(path)).toLower();
+    QString nManaged = QDir::toNativeSeparators(QString::fromStdWString(managed)).toLower();
+    return nPath.startsWith(nManaged);
+}
 
-    // 2026-11-15 按照定点修复 (Plan-111)：统一斜杠为反斜杠（Windows 原生）
-    // 根因：fullPath 使用反斜杠，而 Qt 路径常含正斜杠，导致前缀匹配失败。
-    QString nPath = QDir::toNativeSeparators(QString::fromStdWString(path));
-    QString nManaged = QDir::toNativeSeparators(QString::fromStdWString(managedAbs));
+std::wstring AutoImportManager::getManagedLibraryPath(const std::wstring& pathInDrive) {
+    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(pathInDrive);
+    return instance().getManagedFolderAbsolutePath(volSerial);
+}
 
-    if (nPath.size() >= nManaged.size() && 
-        _wcsnicmp(nPath.toStdWString().c_str(), nManaged.toStdWString().c_str(), nManaged.size()) == 0) {
-        outManagedFolder = managedAbs;
-        return true;
+void AutoImportManager::ensureManagedFolderExists(const std::wstring& driveRoot) {
+    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(driveRoot);
+    if (volSerial.empty()) return;
+    
+    std::wstring managed = instance().getManagedFolderAbsolutePath(volSerial);
+    if (managed.empty()) {
+        // 创建默认的
+        QString drive = QString::fromStdWString(driveRoot);
+        if (drive.length() == 2 && drive[1] == ':') drive += "/";
+        QString defaultManaged = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
+        QDir().mkpath(defaultManaged);
     }
-    return false;
 }
 
 std::wstring AutoImportManager::getManagedFolderAbsolutePath(const std::wstring& volSerial) {
@@ -279,6 +223,7 @@ void AutoImportManager::processImportQueue() {
 
         for (const auto& path : pair.second) {
             MetadataManager::instance().registerItem(path);
+            MetadataManager::instance().setIngestionStatus(path, 1); // Ingested
         }
     }
 

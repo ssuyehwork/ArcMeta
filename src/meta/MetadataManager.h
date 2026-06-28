@@ -31,6 +31,7 @@ struct RuntimeMeta {
     bool isManaged; // 2026-06-xx 物理对标：标记该项是否已在数据库中登记
     int width;      // 2026-07-xx 物理尺寸：宽 (像素)
     int height;     // 2026-07-xx 物理尺寸：高 (像素)
+    int ingestionStatus; // 2026-11-xx 按照 Plan-113：0: Registered, 1: Ingested, -1: Invalid
     std::wstring originalPath; // 2026-06-xx 路径记忆：用于回收站还原
     std::string fileId128; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
     
@@ -42,14 +43,14 @@ struct RuntimeMeta {
 
     std::vector<PaletteEntry> palettes;
 
-    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), width(0), height(0), ctime(0), mtime(0), atime(0), fileSize(0) {}
+    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), width(0), height(0), ingestionStatus(1), ctime(0), mtime(0), atime(0), fileSize(0) {}
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
-     * 2026-06-xx 按照用户要求：只要有任何元数据修改或已登记，即视为数据库已录入项
+     * 2026-11-xx 按照 Plan-113：将其与受控状态 (ingestionStatus == 1) 强对齐
      */
     bool hasUserOperations() const {
-        return isManaged || rating > 0 || !color.empty() || !tags.isEmpty() || !note.empty() || !url.empty() || pinned || encrypted;
+        return ingestionStatus == 1 || isManaged || rating > 0 || !color.empty() || !tags.isEmpty() || !note.empty() || !url.empty() || pinned || encrypted;
     }
 };
 
@@ -141,6 +142,7 @@ public:
     void setInvalid(const std::wstring& path, bool invalid, bool notify = true);
     void setInvalidByFidPrefix(const std::string& fidPrefix, bool invalid);
     void setManaged(const std::wstring& path, bool managed, bool notify = true);
+    void setIngestionStatus(const std::wstring& path, int status, bool notify = true);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
 
     /**

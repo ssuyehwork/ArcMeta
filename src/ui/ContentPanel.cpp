@@ -1597,11 +1597,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         if (categories.empty()) categories = CategoryRepo::getAll();
         if (categories.size() > 15) categories.resize(15);
 
-        // 2026-06-xx 按照用户需求：增加“回归未分类”选项
-        QAction* actToUncat = categorizeMenu->addAction(UiHelper::getIcon("uncategorized", QColor("#95a5a6"), 16), "回归“未分类”");
-        actToUncat->setData(ActionCategorize);
-        actToUncat->setProperty("catId", -2); // 未分类的负数 ID
-        categorizeMenu->addSeparator();
 
         if (categories.empty()) { 
             categorizeMenu->addAction("（暂无分类）")->setEnabled(false); 
@@ -1793,16 +1788,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     // 2026-06-xx 物理同步：基于同步获取的 File ID 进行归类，解决新文件关联失败冲突。 
                     std::string fid = MetadataManager::instance().getFileIdSync(wPath); 
                     if (!fid.empty()) { 
-                        // 2026-06-xx 按照用户需求：如果在系统层选择了“未分类”，则清除该项所有其他分类关联
-                        if (catId == -2) { // 未分类的负数 ID
-                             // 2026-07-xx 按照 Plan-83：实现撤销支持
-                             std::vector<int> oldCatIds = CategoryRepo::getItemCategoryIds(fid);
-                             if (!oldCatIds.empty()) {
-                                 if (CategoryRepo::removeAllCategories(fid)) {
-                                     UndoManager::instance().pushCommand(std::make_unique<BulkUncategorizeCommand>(itemPath, fid, oldCatIds));
-                                 }
-                             }
-                        } else if (catId > 0) {
+                        if (catId > 0) {
                              if (CategoryRepo::addItemToCategory(catId, fid, wPath)) {
                                  UndoManager::instance().pushCommand(std::make_unique<CategorizeCommand>(itemPath, fid, catId, true));
                              }
@@ -2001,9 +1987,28 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (paths.isEmpty() && !path.isEmpty()) paths << path;
 
             if (!paths.isEmpty()) {
-                // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
-                // 扫描入库时，镜像分类始终创建在“我的分类”根节点 (ID = 0)
-                ImportHelper::importPaths(paths, 0, this);
+                // 2026-11-xx 按照 Plan-113：库外项目执行“扫描入库”或“拖拽”时，系统强制执行同盘 Move 操作至托管库
+                QStringList finalPaths;
+                for (const QString& p : paths) {
+                    if (AutoImportManager::isPathInManagedLibrary(p.toStdWString())) {
+                        finalPaths << p;
+                    } else {
+                        // 执行迁移
+                        QString drive = QFileInfo(p).absolutePath().left(3);
+                        AutoImportManager::ensureManagedFolderExists(drive.toStdWString());
+                        std::wstring managed = AutoImportManager::getManagedLibraryPath(p.toStdWString());
+                        if (!managed.empty()) {
+                            QString dest = QString::fromStdWString(managed) + "/" + QFileInfo(p).fileName();
+                            if (ShellHelper::copyOrMoveItems({p}, QString::fromStdWString(managed), true)) {
+                                finalPaths << dest;
+                            }
+                        }
+                    }
+                }
+
+                if (!finalPaths.isEmpty()) {
+                    ImportHelper::importPaths(finalPaths, 0, this);
+                }
             }
             break;
         }
@@ -2966,6 +2971,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     bool isPinned = index.data(IsLockedRole).toBool(); 
     bool isManaged = index.data(ManagedRole).toBool(); 
     bool isDir = index.data(TypeRole).toString() == "folder";
+    int ingStatus = index.data(IngestionStatusRole).toInt();
     double progress = index.data(RegistrationProgressRole).toDouble();
      
     QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16);
@@ -2973,21 +2979,27 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         // 置顶优先 
         QIcon pinIcon = UiHelper::getIcon("pin_vertical", Style::ActiveOrange, 16); 
         pinIcon.paint(painter, statusRect); 
-    } else if (isDir && progress >= 0.0 && progress < 1.0) {
-        // --- 绘制进度环 (开箱即用代码) --- 
+    } else if (ingStatus == 0) {
+        // 2026-11-xx 按照 Plan-113：Registered (0) 状态绘制蓝色进度环 (此处模拟 30% 以示占坑)
         painter->save(); 
         painter->setRenderHint(QPainter::Antialiasing); 
-         
-        // 1. 底环 
         painter->setPen(QPen(QColor(60, 60, 60, 180), 2)); 
         painter->drawEllipse(statusRect.adjusted(1, 1, -1, -1)); 
-         
-        // 2. 进度弧 (品牌蓝 #3498db) 
         QPen pPen(QColor("#3498db"), 2); 
         pPen.setCapStyle(Qt::RoundCap); 
         painter->setPen(pPen); 
-         
-        int spanAngle = -qRound(progress * 360 * 16); // 逆时针计算 
+        painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, -qRound(0.3 * 360 * 16)); 
+        painter->restore(); 
+    } else if (isDir && progress >= 0.0 && progress < 1.0) {
+        // --- 绘制文件夹递归进度环 --- 
+        painter->save(); 
+        painter->setRenderHint(QPainter::Antialiasing); 
+        painter->setPen(QPen(QColor(60, 60, 60, 180), 2)); 
+        painter->drawEllipse(statusRect.adjusted(1, 1, -1, -1)); 
+        QPen pPen(QColor("#3498db"), 2); 
+        pPen.setCapStyle(Qt::RoundCap); 
+        painter->setPen(pPen); 
+        int spanAngle = -qRound(progress * 360 * 16); 
         painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
         painter->restore(); 
     } else if (isManaged || progress >= 1.0) { 
@@ -3036,7 +3048,15 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
  
     // 3. 主图标 
     QIcon icon = index.data(Qt::DecorationRole).value<QIcon>(); 
-    icon.paint(painter, m.iconRect); 
+    if (ingStatus == -1) {
+        // 2026-11-xx 按照 Plan-113：Invalid (-1) 状态绘制半透明灰度效果
+        painter->save();
+        painter->setOpacity(0.5);
+        icon.paint(painter, m.iconRect, Qt::AlignCenter, QIcon::Disabled);
+        painter->restore();
+    } else {
+        icon.paint(painter, m.iconRect); 
+    }
  
     // 4. 评级星级 
     int rating = index.data(RatingRole).toInt(); 
@@ -3121,6 +3141,10 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     if (!isSelected && !index.data(ManagedRole).toBool()) { 
         painter->setPen(QColor(238, 238, 238, 120)); 
     } 
+
+    if (ingStatus == -1) {
+        painter->setPen(QColor(128, 128, 128, 180));
+    }
  
     // 2026-06-05 按照用户要求：恢复自动换行逻辑，并在“实在太长”时使用省略号 
     // 零宽空格注入以支持非标准断行（如下划线或点号） 
