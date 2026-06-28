@@ -117,7 +117,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             is_invalid INTEGER DEFAULT 0,
             width INTEGER DEFAULT 0,
             height INTEGER DEFAULT 0,
-            ingestion_status INTEGER DEFAULT 1 -- 0: Registered (占坑), 1: Ingested (受控), -1: Invalid (物理移出)
+            ingestion_status INTEGER DEFAULT 0 -- 0: Registered (占坑), 1: Ingested (受控), -1: Invalid (物理移出)
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
 
@@ -212,7 +212,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     }
     if (!hasIngestionStatusColumn) {
         qDebug() << "[DB] 按照 Plan-113：正在添加 ingestion_status 字段...";
-        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN ingestion_status INTEGER DEFAULT 1", nullptr, nullptr, nullptr);
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN ingestion_status INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
     }
 
     // 彻底废除旧有的任务表
