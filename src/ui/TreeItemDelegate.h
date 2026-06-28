@@ -72,7 +72,7 @@ public:
             if (col == 1) { // 状态列
                 QModelIndex sourceIdx = index.model()->index(index.row(), 0);
                 bool isPinned = sourceIdx.data(IsLockedRole).toBool();
-                int ingStatus = sourceIdx.data(IngestionStatusRole).toInt();
+                ingStatus = sourceIdx.data(IngestionStatusRole).toInt();
                 QString path = sourceIdx.data(PathRole).toString();
                 bool inManagedLib = AutoImportManager::isPathInManagedLibrary(path.toStdWString());
 

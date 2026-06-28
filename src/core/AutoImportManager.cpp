@@ -10,6 +10,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QMetaObject>
+#include <functional>
 #include <QtConcurrent>
 #include <QDateTime>
 
@@ -117,6 +118,29 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
             QString fullPath = driveLetter + relPath;
             std::wstring wPath = fullPath.toStdWString();
 
+            // 准入检查：若新路径在托管库内，触发递归登记
+            if (isPathInManagedLibrary(wPath)) {
+                std::function<void(const QString&)> recursiveRegister;
+                recursiveRegister = [&](const QString& p) {
+                    std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
+                    MetadataManager::instance().registerItem(wp);
+                    MetadataManager::instance().setIngestionStatus(wp, 0, false);
+                    QFileInfo info(p);
+                    if (info.isDir()) {
+                        QDir dir(p);
+                        for (const auto& sub : dir.entryInfoList(
+                                QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot)) {
+                            recursiveRegister(sub.absoluteFilePath());
+                        }
+                    }
+                };
+                recursiveRegister(fullPath);
+
+                std::lock_guard<std::mutex> lock(m_queueMutex);
+                m_pendingPaths.push_back(wPath);
+                QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+            }
+
             // 2026-11-xx 按照 Plan-113：物理重命名同步 (物理 -> 逻辑)
             // 当 USN 监听到库内物理文件夹重命名成功后，同步更新逻辑分类名
             if (QFileInfo(fullPath).isDir()) {
@@ -196,6 +220,9 @@ bool AutoImportManager::isPathInManagedLibrary(const std::wstring& path) {
 
     QString nPath = QDir::toNativeSeparators(QString::fromStdWString(path)).toLower();
     QString nManaged = QDir::toNativeSeparators(QString::fromStdWString(managed)).toLower();
+    
+    // 确保 nManaged 末尾有反斜杠后再比较，防止前缀误匹配
+    if (!nManaged.endsWith('\\')) nManaged += '\\';
     return nPath.startsWith(nManaged);
 }
 

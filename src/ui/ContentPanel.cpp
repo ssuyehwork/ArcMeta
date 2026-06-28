@@ -2970,7 +2970,6 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     // 1. 状态位图标绘制 (置顶 vs. 进度环 vs. 已录入 互斥) 
     // 2026-06-xx 物理修复：校准 ItemRole 作用域，确保 GridItemDelegate 编译通过 
     bool isPinned = index.data(IsLockedRole).toBool(); 
-    bool isManaged = index.data(ManagedRole).toBool(); 
     bool isDir = index.data(TypeRole).toString() == "folder";
     int ingStatus = index.data(IngestionStatusRole).toInt();
     double progress = index.data(RegistrationProgressRole).toDouble();
