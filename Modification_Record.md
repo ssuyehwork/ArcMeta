@@ -1,5 +1,15 @@
 # Modification Record
 
+## 2026-11-17
+- **任务描述**: 修复 MFT 引擎编译错误与警告。
+- **修改文件**:
+    - **修改**: `src/mft/MftReader.cpp` (补全 `MetadataManager.h` 引用)
+    - **修改**: `src/mft/UsnWatcher.cpp` (补全 `MetadataManager.h` 引用；修复 C4018 有符号/无符号比较警告)
+- **修改原因**: 解决由于头文件缺失导致的 `MetadataManager` 相关标识符未定义，以及 USN 比较逻辑中的编译器警告。
+- **优化点**:
+    - **编译稳固**: 确保 `MftReader` 与 `UsnWatcher` 能正确访问元数据服务。
+    - **规范清理**: 显式转换 USN 类型以消除 MSVC 警告。
+
 ## 2026-11-14
 - **任务描述**: 「空格键」快速预览深度优化与全口径属性过滤 (Plan-109)。
 - **修改文件**:

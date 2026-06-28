@@ -3,6 +3,7 @@
 #endif
 #include "MftReader.h"
 #include "UsnWatcher.h"
+#include "../meta/MetadataManager.h"
 #include <winioctl.h>
 #include <Shlwapi.h>
 #pragma comment(lib, "Shlwapi.lib")
