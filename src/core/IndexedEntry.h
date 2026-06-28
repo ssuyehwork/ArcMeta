@@ -33,7 +33,7 @@ struct ItemRecord {
     QString note; // 2026-07-xx 支撑筛选：备注
     int width = 0;
     int height = 0;
-    int ingestionStatus = -2; // 2026-11-xx 按照 Plan-113：入库状态 (-2: 未登记)
+    int ingestionStatus = -1; // 2026-11-xx 按照 Plan-113：入库状态 (-1: 未登记/无效)
 
     // 2026-06-xx 极致优化：预取物理属性，实现渲染零 I/O
     long long size = 0;

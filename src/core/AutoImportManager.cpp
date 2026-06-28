@@ -59,7 +59,6 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
     uint64_t frn = key & 0x0000FFFFFFFFFFFFull;
     int driveIdx = static_cast<int>(key >> 48);
 
-    // 2026-11-xx 按照 Plan-113：修正盘符还原逻辑，对齐 MFT 索引标准
     QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
     if (driveLetter.isEmpty()) return;
 
@@ -73,24 +72,24 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
             QString fullPath = driveLetter + relPath;
             std::wstring wPath = fullPath.toStdWString();
 
-            // 2026-11-xx 按照 Plan-113：USN 变动直接同步至核心 metadata 表
             if (isPathInManagedLibrary(wPath)) {
-                // 已在库内：执行全量递归登记 (状态 0)
-                std::function<void(const QString&)> recursiveRegister = [&](const QString& p) {
-                    std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
-                    MetadataManager::instance().registerItem(wp);
-                    MetadataManager::instance().setIngestionStatus(wp, 0, false); // 初始标记为 Registered
-
-                    QFileInfo info(p);
-                    if (info.isDir()) {
-                        QDir dir(p);
-                        QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-                        for (const auto& sub : entries) recursiveRegister(sub.absoluteFilePath());
-                    }
-                };
-                recursiveRegister(fullPath);
+                MetadataManager::instance().registerItem(wPath);
                 
-                // 加入解析队列 (3秒去抖)
+                if (QFileInfo(fullPath).isDir()) {
+                    (void)QtConcurrent::run([fullPath]() {
+                        QStringList toRegister;
+                        QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+                        while (it.hasNext()) {
+                            toRegister << it.next();
+                            if (toRegister.size() >= 100) {
+                                MetadataManager::instance().registerItemsAsync(toRegister);
+                                toRegister.clear();
+                            }
+                        }
+                        if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
+                    });
+                }
+
                 {
                     std::lock_guard<std::mutex> lock(m_queueMutex);
                     m_pendingPaths.push_back(wPath);
@@ -117,10 +116,23 @@ void AutoImportManager::onEntriesBatchAdded(int driveIdx, const QList<uint64_t>&
             QString fullPath = driveLetter + relPath;
             std::wstring wPath = fullPath.toStdWString();
             if (isPathInManagedLibrary(wPath)) {
-                // 批量场景下简单处理单层级，复杂递归由 startTask 或后续变动补完
                 MetadataManager::instance().registerItem(wPath);
-                MetadataManager::instance().setIngestionStatus(wPath, 0, false);
                 toAdd.push_back(wPath);
+
+                if (QFileInfo(fullPath).isDir()) {
+                    (void)QtConcurrent::run([fullPath]() {
+                        QStringList toRegister;
+                        QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+                        while (it.hasNext()) {
+                            toRegister << it.next();
+                            if (toRegister.size() >= 100) {
+                                MetadataManager::instance().registerItemsAsync(toRegister);
+                                toRegister.clear();
+                            }
+                        }
+                        if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
+                    });
+                }
             }
         }
     }
@@ -137,7 +149,6 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
     uint64_t frn = key & 0x0000FFFFFFFFFFFFull;
     int driveIdx = static_cast<int>(key >> 48);
 
-    // 2026-11-xx 按照 Plan-113：修正盘符还原逻辑
     QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
     if (driveLetter.isEmpty()) return;
 
@@ -151,23 +162,23 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
             QString fullPath = driveLetter + relPath;
             std::wstring wPath = fullPath.toStdWString();
 
-            // 准入检查：若新路径在托管库内，触发递归登记
             if (isPathInManagedLibrary(wPath)) {
-                std::function<void(const QString&)> recursiveRegister;
-                recursiveRegister = [&](const QString& p) {
-                    std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
-                    MetadataManager::instance().registerItem(wp);
-                    MetadataManager::instance().setIngestionStatus(wp, 0, false);
-                    QFileInfo info(p);
-                    if (info.isDir()) {
-                        QDir dir(p);
-                        for (const auto& sub : dir.entryInfoList(
-                                QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot)) {
-                            recursiveRegister(sub.absoluteFilePath());
+                MetadataManager::instance().registerItem(wPath);
+
+                if (QFileInfo(fullPath).isDir()) {
+                    (void)QtConcurrent::run([fullPath]() {
+                        QStringList toRegister;
+                        QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+                        while (it.hasNext()) {
+                            toRegister << it.next();
+                            if (toRegister.size() >= 100) {
+                                MetadataManager::instance().registerItemsAsync(toRegister);
+                                toRegister.clear();
+                            }
                         }
-                    }
-                };
-                recursiveRegister(fullPath);
+                        if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
+                    });
+                }
 
                 std::lock_guard<std::mutex> lock(m_queueMutex);
                 m_pendingPaths.push_back(wPath);
@@ -337,7 +348,7 @@ void AutoImportManager::processImportQueue() {
 
         for (const auto& path : pair.second) {
             MetadataManager::instance().registerItem(path);
-            MetadataManager::instance().setIngestionStatus(path, 1); // Ingested
+            // 2026-11-xx 按照 Plan-3：由 setItemVisualMetadata 解析成功后流转状态，此处禁止手动设为 1
         }
     }
 
