@@ -204,6 +204,12 @@ public:
     std::string getFileIdSync(const std::wstring& path);
 
     /**
+     * @brief 跨库元数据搬迁 (Plan-113)
+     * 将元数据记录从一个物理卷转移到另一个物理卷，并更新缓存
+     */
+    bool moveMetadataToVolume(const std::wstring& path, const std::wstring& targetPath, const std::wstring& srcVol, const std::wstring& dstVol);
+
+    /**
      * @brief 获取路径所在磁盘的卷序列号
      */
     static std::wstring getVolumeSerialNumber(const std::wstring& path);

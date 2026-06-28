@@ -1025,7 +1025,11 @@ void CategoryPanel::initUi() {
         }
 
         // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
-        ImportHelper::importPaths(paths, targetCatId, this);
+        // 2026-11-xx 按照 Plan-113：库外项目执行导入时，系统强制执行同盘 Move 操作至托管库
+        QStringList finalPaths = ImportHelper::validateAndMigrate(paths);
+        if (!finalPaths.isEmpty()) {
+            ImportHelper::importPaths(finalPaths, targetCatId, this);
+        }
     });
     
     sbContentLayout->addWidget(m_categoryTree);

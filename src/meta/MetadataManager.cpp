@@ -446,6 +446,28 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             rm.isManaged = existing.isManaged;
         }
 
+        // 2026-11-xx 按照 Plan-113：原地复活机制
+        // 若该 FID 之前处于失效状态 (-1)，且当前路径位于托管库，则自动恢复为已入库 (1)
+        if (!rm.fileId128.empty()) {
+            auto itFid = m_fidToPath.find(rm.fileId128);
+            if (itFid != m_fidToPath.end()) {
+                RuntimeMeta& oldMeta = m_cache[itFid->second];
+                if (oldMeta.ingestionStatus == -1) {
+                    rm.rating = oldMeta.rating;
+                    rm.color = oldMeta.color;
+                    rm.tags = oldMeta.tags;
+                    rm.note = oldMeta.note;
+                    rm.url = oldMeta.url;
+                    rm.width = oldMeta.width;
+                    rm.height = oldMeta.height;
+                    rm.palettes = oldMeta.palettes;
+                    rm.isManaged = oldMeta.isManaged;
+                    rm.ingestionStatus = 1; // 恢复为已入库
+                    qDebug() << "[Metadata] FRN 追踪：检测到失效项移回，自动复活元数据:" << QString::fromStdWString(nPath);
+                }
+            }
+        }
+
         m_cache[nPath] = rm;
         if (!rm.fileId128.empty()) {
             m_fidToPath[rm.fileId128] = nPath;
@@ -540,8 +562,11 @@ void MetadataManager::setInvalidByFidPrefix(const std::string& fidPrefix, bool i
 
     for (auto& pair : m_cache) {
         if (pair.second.fileId128.find(fidPrefix) == 0) {
-            if (pair.second.isInvalid != invalid) {
+            if (pair.second.isInvalid != invalid || (invalid && pair.second.ingestionStatus != -1)) {
                 pair.second.isInvalid = invalid;
+                // 2026-11-xx 按照 Plan-113：物理移除时同步更新 ingestionStatus 为 -1
+                if (invalid) pair.second.ingestionStatus = -1; 
+                
                 if (pair.second.isManaged) {
                     CategoryRepo::incrementTotalFileCount(invalid ? -1 : 1);
                 }
@@ -1264,6 +1289,73 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
     std::string fid;
     if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = MetadataManager::generateDeterministicSha256Id(path);
     return fid;
+}
+
+bool MetadataManager::moveMetadataToVolume(const std::wstring& path, const std::wstring& targetPath, const std::wstring& srcVol, const std::wstring& dstVol) {
+    if (srcVol == dstVol) return false;
+
+    std::wstring nSrcPath = normalizePath(path);
+    std::wstring nDstPath = normalizePath(targetPath);
+
+    RuntimeMeta rMeta = getMeta(nSrcPath);
+    if (rMeta.fileId128.empty()) return false;
+
+    sqlite3* srcDb = DatabaseManager::instance().getMemoryDb(srcVol);
+    sqlite3* dstDb = DatabaseManager::instance().getMemoryDb(dstVol);
+    if (!srcDb || !dstDb) return false;
+
+    // 1. 从源库读取全量记录 (此处已由 rMeta 载入内存，直接写入目标库)
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_cache[nDstPath] = rMeta;
+        m_cache[nDstPath].isManaged = true; // 目标库写入即受控
+        m_fidToPath[rMeta.fileId128] = nDstPath;
+        // 清理旧路径关联
+        if (m_cache.count(nSrcPath)) m_cache.erase(nSrcPath);
+    }
+
+    // 2. 写入目标库
+    persistAsync(nDstPath, false);
+
+    // 3. 从源库删除
+    sqlite3_stmt* delStmt;
+    if (sqlite3_prepare_v2(srcDb, "DELETE FROM metadata WHERE file_id = ?", -1, &delStmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(delStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(delStmt);
+        sqlite3_finalize(delStmt);
+    }
+
+    // 4. 同步分类关联 (跨库后 category_items 也需要迁移)
+    sqlite3_stmt* catStmt;
+    if (sqlite3_prepare_v2(srcDb, "SELECT category_id, path_hint, added_at FROM category_items WHERE file_id = ?", -1, &catStmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(catStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+        while (sqlite3_step(catStmt) == SQLITE_ROW) {
+            int catId = sqlite3_column_int(catStmt, 0);
+            const wchar_t* pathHint = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(catStmt, 1));
+            double addedAt = sqlite3_column_double(catStmt, 2);
+
+            sqlite3_stmt* insStmt;
+            if (sqlite3_prepare_v2(dstDb, "INSERT OR REPLACE INTO category_items (category_id, file_id, path_hint, added_at) VALUES (?, ?, ?, ?)", -1, &insStmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int(insStmt, 1, catId);
+                sqlite3_bind_text(insStmt, 2, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(insStmt, 3, nDstPath.c_str(), -1, SQLITE_TRANSIENT); // 更新 path_hint 为新路径
+                sqlite3_bind_double(insStmt, 4, addedAt);
+                sqlite3_step(insStmt);
+                sqlite3_finalize(insStmt);
+            }
+        }
+        sqlite3_finalize(catStmt);
+    }
+
+    // 从源库删除关联
+    if (sqlite3_prepare_v2(srcDb, "DELETE FROM category_items WHERE file_id = ?", -1, &delStmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(delStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(delStmt);
+        sqlite3_finalize(delStmt);
+    }
+
+    notifyUI(RefreshLevel::FullRebuild);
+    return true;
 }
 
 void MetadataManager::persistAsync(const std::wstring& path, bool notify) {

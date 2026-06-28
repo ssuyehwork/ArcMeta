@@ -28,6 +28,7 @@ void ThumbnailDelegate::setTypeRole(int role) { m_typeRole = role; }
 void ThumbnailDelegate::setIsEmptyRole(int role) { m_isEmptyRole = role; }
 void ThumbnailDelegate::setColorRole(int role) { m_colorRole = role; }
 void ThumbnailDelegate::setRegistrationProgressRole(int role) { m_registrationProgressRole = role; }
+void ThumbnailDelegate::setIngestionStatusRole(int role) { m_ingestionStatusRole = role; }
 
 ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptionViewItem& option) const {
     Metrics m;
@@ -149,12 +150,19 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         bool isManaged = index.data(m_managedRole).toBool();
         bool isDir = index.data(m_typeRole).toString() == "folder";
         double progress = (m_registrationProgressRole != -1) ? index.data(m_registrationProgressRole).toDouble() : -1.0;
+        int ingestionStatus = (m_ingestionStatusRole != -1) ? index.data(m_ingestionStatusRole).toInt() : 1;
+        QString path = (m_pathRole != -1) ? index.data(m_pathRole).toString() : "";
+
+        // 2026-11-xx 按照 Plan-113：失效数据半透明灰度处理
+        if (ingestionStatus == -1) {
+            painter->setOpacity(0.4);
+        }
 
         QRect statusRect(m.cardRect.right() - 22, m.cardRect.top() + 8, 16, 16);
         if (isPinned) {
             UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, statusRect);
-        } else if (isDir && progress >= 0.0 && progress < 1.0) {
-            // --- 绘制进度环 (开箱即用代码) --- 
+        } else if (isDir && progress >= 0.0 && progress < 1.0 && AutoImportManager::isPathInManagedLibrary(path.toStdWString())) {
+            // --- 绘制进度环 (Plan-113：仅对托管库内文件夹生效) --- 
             painter->save(); 
             painter->setRenderHint(QPainter::Antialiasing); 
              
@@ -170,7 +178,8 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             int spanAngle = -qRound(progress * 360 * 16); // 逆时针计算 
             painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
             painter->restore(); 
-        } else if (isManaged || progress >= 1.0) {
+        } else if (ingestionStatus == 1 && AutoImportManager::isPathInManagedLibrary(path.toStdWString())) {
+            // 2026-11-xx 按照 Plan-113：仅对托管库内 Ingested(1) 的项目显示对勾
             UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, statusRect);
         }
     }

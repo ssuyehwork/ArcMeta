@@ -175,40 +175,6 @@ private:
 };
 
 /**
- * @brief 批量取消分类指令 (Plan-83)
- */
-class BulkUncategorizeCommand : public ActionCommand {
-public:
-    BulkUncategorizeCommand(const QString& path, const std::string& fid, const std::vector<int>& oldCatIds)
-        : m_path(path), m_fid(fid), m_oldCatIds(oldCatIds) {}
-
-    void execute() override {}
-
-    void undo() override {
-        for (int catId : m_oldCatIds) {
-            CategoryRepo::addItemToCategory(catId, m_fid, m_path.toStdWString());
-        }
-        MetadataManager::instance().notifyCategoryCountChanged();
-    }
-
-    void redo() override {
-        CategoryRepo::removeAllCategories(m_fid);
-        MetadataManager::instance().notifyCategoryCountChanged();
-    }
-
-    QString description() const override { return "回归未分类"; }
-
-    bool affectsPath(const QString& path) const override {
-        return m_path == path;
-    }
-
-private:
-    QString m_path;
-    std::string m_fid;
-    std::vector<int> m_oldCatIds;
-};
-
-/**
  * @brief 2026-07-xx 按照用户要求 (1.19)：导入任务指令
  * 支持一键撤销整个导入任务产生的分类节点与关联
  */

@@ -18,6 +18,12 @@ public:
      * @param parent UI 父窗口，用于显示进度框
      */
     static void importPaths(const QStringList& paths, int targetCategoryId = 0, QWidget* parent = nullptr);
+
+    /**
+     * @brief 物理准入校验并返回可导入的路径列表 (Plan-113)
+     * 对于库外项目，自动执行同盘 Move；跨盘则拒绝并提示。
+     */
+    static QStringList validateAndMigrate(const QStringList& paths);
 };
 
 } // namespace ArcMeta

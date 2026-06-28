@@ -1989,23 +1989,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
             if (!paths.isEmpty()) {
                 // 2026-11-xx 按照 Plan-113：库外项目执行“扫描入库”或“拖拽”时，系统强制执行同盘 Move 操作至托管库
-                QStringList finalPaths;
-                for (const QString& p : paths) {
-                    if (AutoImportManager::isPathInManagedLibrary(p.toStdWString())) {
-                        finalPaths << p;
-                    } else {
-                        // 执行迁移
-                        QString drive = QFileInfo(p).absolutePath().left(3);
-                        AutoImportManager::ensureManagedFolderExists(drive.toStdWString());
-                        std::wstring managed = AutoImportManager::getManagedLibraryPath(p.toStdWString());
-                        if (!managed.empty()) {
-                            QString dest = QString::fromStdWString(managed) + "/" + QFileInfo(p).fileName();
-                            if (ShellHelper::copyOrMoveItems({p}, QString::fromStdWString(managed), true)) {
-                                finalPaths << dest;
-                            }
-                        }
-                    }
-                }
+                QStringList finalPaths = ImportHelper::validateAndMigrate(paths);
 
                 if (!finalPaths.isEmpty()) {
                     ImportHelper::importPaths(finalPaths, 0, this);
@@ -2974,14 +2958,21 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     bool isDir = index.data(TypeRole).toString() == "folder";
     int ingStatus = index.data(IngestionStatusRole).toInt();
     double progress = index.data(RegistrationProgressRole).toDouble();
+    QString path = index.data(PathRole).toString();
+    bool inManagedLib = AutoImportManager::isPathInManagedLibrary(path.toStdWString());
+
+    // 2026-11-xx 按照 Plan-113：失效数据半透明灰度处理
+    if (ingStatus == -1) {
+        painter->setOpacity(0.4);
+    }
      
     QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16);
     if (isPinned) { 
         // 置顶优先 
         QIcon pinIcon = UiHelper::getIcon("pin_vertical", Style::ActiveOrange, 16); 
         pinIcon.paint(painter, statusRect); 
-    } else if (ingStatus == 0) {
-        // 2026-11-xx 按照 Plan-113：Registered (0) 状态绘制蓝色进度环 (此处模拟 30% 以示占坑)
+    } else if (inManagedLib && (ingStatus == 0 || (isDir && progress >= 0.0 && progress < 1.0))) {
+        // 2026-11-xx 按照 Plan-113：Registered (0) 状态或递归进度均显示进度环，仅对库内文件夹生效
         painter->save(); 
         painter->setRenderHint(QPainter::Antialiasing); 
         painter->setPen(QPen(QColor(60, 60, 60, 180), 2)); 
@@ -2989,22 +2980,13 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         QPen pPen(QColor("#3498db"), 2); 
         pPen.setCapStyle(Qt::RoundCap); 
         painter->setPen(pPen); 
-        painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, -qRound(0.3 * 360 * 16)); 
-        painter->restore(); 
-    } else if (isDir && progress >= 0.0 && progress < 1.0) {
-        // --- 绘制文件夹递归进度环 --- 
-        painter->save(); 
-        painter->setRenderHint(QPainter::Antialiasing); 
-        painter->setPen(QPen(QColor(60, 60, 60, 180), 2)); 
-        painter->drawEllipse(statusRect.adjusted(1, 1, -1, -1)); 
-        QPen pPen(QColor("#3498db"), 2); 
-        pPen.setCapStyle(Qt::RoundCap); 
-        painter->setPen(pPen); 
-        int spanAngle = -qRound(progress * 360 * 16); 
+        
+        double pVal = (ingStatus == 0 && progress < 0.1) ? 0.3 : progress; // 状态 0 至少显示 30% 进度感
+        int spanAngle = -qRound(pVal * 360 * 16); 
         painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
         painter->restore(); 
-    } else if (isManaged || progress >= 1.0) { 
-        // 已录入但未置顶，显示绿对勾 
+    } else if (inManagedLib && ingStatus == 1) { 
+        // 2026-11-xx 按照 Plan-113：仅对托管库内 Ingested(1) 的项目显示对勾
         QIcon checkIcon = UiHelper::getIcon("check_circle", SuccessGreen, 16); 
         checkIcon.paint(painter, statusRect); 
     } 

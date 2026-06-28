@@ -40,6 +40,7 @@ void AutoImportManager::startListening() {
     if (m_isListening) return;
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
     connect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved, Qt::QueuedConnection);
+    connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
     m_isListening = true;
 }
 
@@ -47,6 +48,7 @@ void AutoImportManager::stopListening() {
     if (!m_isListening) return;
     disconnect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded);
     disconnect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved);
+    disconnect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated);
     m_isListening = false;
 }
 
@@ -70,8 +72,21 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
 
             // 2026-11-xx 按照 Plan-113：USN 变动直接同步至核心 metadata 表
             if (isPathInManagedLibrary(wPath)) {
-                // 已在库内：Registered
-                MetadataManager::instance().setIngestionStatus(wPath, 0); 
+                // 已在库内：执行全量递归登记 (状态 0)
+                // 这一步确保进度弧的分母基数准确
+                std::function<void(const QString&)> recursiveRegister = [&](const QString& p) {
+                    std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
+                    MetadataManager::instance().registerItem(wp);
+                    MetadataManager::instance().setIngestionStatus(wp, 0, false); // 初始标记为 Registered
+
+                    QFileInfo info(p);
+                    if (info.isDir()) {
+                        QDir dir(p);
+                        QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+                        for (const auto& sub : entries) recursiveRegister(sub.absoluteFilePath());
+                    }
+                };
+                recursiveRegister(fullPath);
                 
                 // 加入解析队列 (3秒去抖)
                 {
@@ -79,6 +94,45 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
                     m_pendingPaths.push_back(wPath);
                 }
                 QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+            }
+        }
+    }
+}
+
+void AutoImportManager::onEntryUpdated(uint64_t key) {
+    uint64_t frn = key & 0x0000FFFFFFFFFFFFull;
+    int driveIdx = static_cast<int>(key >> 48);
+    QString driveLetter;
+    const auto drives = QDir::drives();
+    if (driveIdx < drives.size()) driveLetter = drives[driveIdx].absolutePath().left(2).toUpper();
+    else return;
+
+    HANDLE hVol = CreateFileW((L"\\\\.\\" + driveLetter.toStdWString()).c_str(), 
+                              GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
+                              NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (hVol != INVALID_HANDLE_VALUE) {
+        QString relPath = MftReader::getPathByFrn(hVol, frn);
+        CloseHandle(hVol);
+        if (!relPath.isEmpty()) {
+            QString fullPath = driveLetter + relPath;
+            std::wstring wPath = fullPath.toStdWString();
+
+            // 2026-11-xx 按照 Plan-113：物理重命名同步 (物理 -> 逻辑)
+            // 当 USN 监听到库内物理文件夹重命名成功后，同步更新逻辑分类名
+            if (QFileInfo(fullPath).isDir()) {
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wPath);
+                std::string fid = MetadataManager::generateFallbackFid(volSerial, std::to_wstring(frn));
+                std::wstring oldPath = MetadataManager::instance().getPathByFid(fid);
+                
+                if (!oldPath.empty() && oldPath != wPath) {
+                    QString oldName = QFileInfo(QString::fromStdWString(oldPath)).fileName();
+                    QString newName = QFileInfo(fullPath).fileName();
+                    
+                    if (oldName != newName) {
+                        qDebug() << "[AutoImport] 物理重命名同步 (IO 确认):" << oldName << "->" << newName;
+                        MetadataManager::instance().renameItem(oldPath, wPath);
+                    }
+                }
             }
         }
     }

@@ -5,6 +5,7 @@
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/DatabaseManager.h"
+#include "../core/AutoImportManager.h"
 #include <QDir>
 #include <QFileInfo>
 #include <QtConcurrent>
@@ -180,6 +181,23 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
             }
         };
 
+        // 2026-11-xx 按照 Plan-113：入库前执行全量递归登记 (状态 0)
+        // 这一步确保进度弧的分母基数准确
+        std::function<void(const QString&)> recursiveRegister = [&](const QString& p) {
+            if (context->isCancelled) return;
+            std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
+            MetadataManager::instance().registerItem(wp);
+            MetadataManager::instance().setIngestionStatus(wp, 0, false); // 初始标记为 Registered
+
+            QFileInfo info(p);
+            if (info.isDir()) {
+                QDir dir(p);
+                QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+                for (const auto& sub : entries) recursiveRegister(sub.absoluteFilePath());
+            }
+        };
+        for (const QString& root : paths) recursiveRegister(root);
+
         for (const QString& root : paths) {
             processPath(root, targetCategoryId);
         }
@@ -206,6 +224,40 @@ void ImportHelper::importPaths(const QStringList& paths, int targetCategoryId, Q
         CoUninitialize();
         #endif
     });
+}
+
+QStringList ImportHelper::validateAndMigrate(const QStringList& paths) {
+    QStringList finalPaths;
+    for (const QString& p : paths) {
+        if (AutoImportManager::isPathInManagedLibrary(p.toStdWString())) {
+            finalPaths << p;
+        } else {
+            // 执行迁移逻辑 (Plan-113)
+            QString drive = QFileInfo(p).absolutePath().left(3);
+            AutoImportManager::ensureManagedFolderExists(drive.toStdWString());
+            std::wstring managed = AutoImportManager::getManagedLibraryPath(p.toStdWString());
+            
+            if (managed.empty()) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "该文件与目标托管库不在同一磁盘，请手动移动后再执行入库", 3000, QColor("#e74c3c"));
+                continue; 
+            }
+
+            QString destDir = QString::fromStdWString(managed);
+            // 二次确认：确保 managed 路径确实在同一驱动器上
+            if (!destDir.startsWith(drive, Qt::CaseInsensitive)) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "该文件与目标托管库不在同一磁盘，请手动移动后再执行入库", 3000, QColor("#e74c3c"));
+                continue;
+            }
+
+            QString fileName = QFileInfo(p).fileName();
+            QString destPath = QDir(destDir).filePath(fileName);
+
+            if (ShellHelper::copyOrMoveItems({p}, destDir, true)) {
+                finalPaths << destPath;
+            }
+        }
+    }
+    return finalPaths;
 }
 
 } // namespace ArcMeta

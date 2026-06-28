@@ -67,6 +67,26 @@ void CategoryModel::refresh() {
         addSystemItem("失效数据", "invalid_data", "invalid_data", "#f1c40f", -9);
         addSystemItem("标签管理", "tags", "tag", "#1abc9c", -7);
         addSystemItem("回收站", "trash", "trash", "#e74c3c", -8);
+
+        // 2026-11-xx 按照 Plan-113：托管库一等公民，常驻侧边栏主分类
+        const auto drives = QDir::drives();
+        for (const auto& drive : drives) {
+            QString letter = drive.absolutePath().left(1).toUpper();
+            QString managedName = "ArcMeta.Library_" + letter;
+            QString managedPath = drive.absolutePath() + managedName;
+
+            if (QDir(managedPath).exists()) {
+                QStandardItem* item = new QStandardItem(managedName + " (0)");
+                item->setData("nav", TypeRole); // 导航到物理路径
+                item->setData(managedPath, PathRole);
+                item->setData(managedName, NameRole);
+                item->setData("#3498db", ColorRole);
+                item->setData(-10 - letter.at(0).toLatin1(), IdRole); // 分配独立 ID 空间
+                item->setEditable(true); // 支持重命名同步
+                item->setIcon(UiHelper::getIcon("folder_filled", QColor("#3498db"), 16));
+                root->appendRow(item);
+            }
+        }
     }
 
     // 2. 快速访问模块

@@ -36,6 +36,7 @@ private slots:
     // 订阅 MftReader 发现的新增条目
     void onEntryAdded(uint64_t key);
     void onEntryRemoved(uint64_t key);
+    void onEntryUpdated(uint64_t key);
     // 去抖超时，合并写入数据库
     void processImportQueue();
 
