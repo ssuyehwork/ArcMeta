@@ -515,8 +515,8 @@
     - **修改**: `src/meta/DatabaseManager.cpp` (新增 `ingestion_status` 字段，废除 `pending_imports` 表)
     - **修改**: `src/meta/MetadataManager.h/.cpp` (同步内存模型，实现状态设置接口与 SQL 持久化)
     - **修改**: `src/core/AutoImportManager.h/.cpp` (重构监听逻辑，实现“迁移即激活”与托管库自愈)
-    - **修改**: `src/ui/CategoryModel.cpp` (移除“未分类”冗余项，实现逻辑-物理重命名同步)
-    - **修改**: `src/ui/ContentPanel.cpp` (更新 Grid 渲染逻辑，实现 Registered/Invalid 视觉反馈；库外导入强制迁移)
+    - **修改**: `src/ui/CategoryModel.cpp` (移除“未分类”冗余项，实现逻辑-物理重命名同步；补全 `ShellHelper.h`)
+    - **修改**: `src/ui/ContentPanel.cpp` (更新 Grid 渲染逻辑，实现 Registered/Invalid 视觉反馈；库外导入强制迁移；补全 `AutoImportManager.h`)
 - **修改原因**: 确立以“托管库”为核心的数据管理体系，解决 I/O 资源盲目竞争、逻辑链路冗余以及物理变更感应滞后的问题。
 - **优化点**:
     - **状态机闭环**: 引入 Registered (占坑) -> Ingested (受控) -> Invalid (失效) 完整流转逻辑，UI 响应由数据库状态直接驱动。

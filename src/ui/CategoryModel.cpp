@@ -1,5 +1,6 @@
 #include "CategoryModel.h"
 #include "../meta/CategoryRepo.h"
+#include "../util/ShellHelper.h"
 
 #include "UiHelper.h"
 #include <QMimeData>

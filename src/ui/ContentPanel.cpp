@@ -69,6 +69,7 @@
 #include "../meta/MetadataManager.h" 
 #include "../meta/BatchRenameEngine.h" 
 #include "../meta/CategoryRepo.h" 
+#include "../core/AutoImportManager.h" 
 #include "../crypto/EncryptionManager.h" 
 #include "CategoryLockDialog.h" 
 #include "BatchRenameDialog.h" 
