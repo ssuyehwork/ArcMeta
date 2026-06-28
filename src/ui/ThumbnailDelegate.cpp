@@ -152,6 +152,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         double progress = (m_registrationProgressRole != -1) ? index.data(m_registrationProgressRole).toDouble() : -1.0;
         int ingestionStatus = (m_ingestionStatusRole != -1) ? index.data(m_ingestionStatusRole).toInt() : -1;
         QString path = (m_pathRole != -1) ? index.data(m_pathRole).toString() : "";
+        bool inManagedLib = AutoImportManager::isPathInManagedLibrary(path.toStdWString());
 
         // 2026-11-xx 按照 Plan-113：失效数据半透明灰度处理
         if (ingestionStatus == -1) {

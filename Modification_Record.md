@@ -562,7 +562,7 @@
     - **修改**: `src/core/IndexedEntry.h` (修正 `ItemRecord` 初始状态为 -1)
     - **修改**: `src/core/AutoImportManager.cpp` (实现移入文件夹的异步递归扫描登记；移除不合规的状态强制设置)
     - **修改**: `src/ui/ContentPanel.cpp` (补全 `updateRecordMetadata` 的状态映射；强化 Grid 代理标识绘制逻辑)
-    - **修改**: `src/ui/ThumbnailDelegate.cpp` (修正状态 Role 默认取值；强化缩略图标识绘制逻辑)
+    - **修改**: `src/ui/ThumbnailDelegate.cpp` (修正状态 Role 默认取值；强化缩略图标识绘制逻辑；修复 `inManagedLib` 标识符未定义编译错误)
     - **修改**: `src/ui/TreeItemDelegate.h` (强化列表状态标识绘制逻辑)
 - **修改原因**: 解决手动移入项目至托管库后感知失效、视觉状态欺诈（未入库显对勾）以及入库流程不完整的问题。
 - **优化点**:
