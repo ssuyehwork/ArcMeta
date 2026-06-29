@@ -11,4 +11,6 @@
     - 引入 `#3A3A3A` 灰色占位背景，消除从“60% 缩小图标”到“全屏缩略图”的视觉闪烁。
 
 ### 盘符工具栏模块移植 (Plan-115)
-- **src/ui/DriveButton.h / .cpp**: 新增盘符状态机按钮，支持 Inactive/Active/Running/Paused 四种视觉状态及旋转动画。
+- **src/ui/DriveButton.h / .cpp**: [2026-11-15 14:10:05] 新增盘符状态机按钮，支持 Inactive/Active/Running/Paused 四种视觉状态及旋转动画。
+- **src/ui/MainWindow.h / .cpp**: [2026-11-15 14:30:12] 注入 `DriveBar` 布局，补全展开/收起切换逻辑、物理创建 `ArcMeta.Library_盘符` 文件夹及 `AppConfig` 绑定逻辑。
+- **src/core/AutoImportManager.h**: [2026-11-15 14:35:08] 补全 `startTask/pauseTask` 占位接口及 `taskFinished` 信号，对齐 UI 交互协议。

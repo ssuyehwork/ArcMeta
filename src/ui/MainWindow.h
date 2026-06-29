@@ -20,6 +20,7 @@ class AddressBar;
 class CategoryPanel;
 class NavPanel;
 class ContentPanel;
+class DriveButton;
 class MetaPanel;
 class FilterPanel;
 class SearchHistoryPanel;
@@ -83,6 +84,9 @@ private:
     QWidget* m_titleBarWidget = nullptr;
     QHBoxLayout* m_titleBarLayout = nullptr;
     QLabel* m_logoLabel = nullptr;
+    QWidget* m_driveBarWidget = nullptr;
+    QHBoxLayout* m_driveBarLayout = nullptr;
+    QMap<QString, DriveButton*> m_driveButtons;
     QLabel* m_appNameLabel = nullptr;
     QWidget* m_navBarWidget = nullptr;
     QHBoxLayout* m_navBarLayout = nullptr;
@@ -106,6 +110,7 @@ private:
     void initToolbar();
     void setupSplitters();
     void setupCustomTitleBarButtons();
+    void initDriveBar();
     void resetSplitterLayout();
 
     // 复合地址栏
@@ -138,6 +143,7 @@ private:
     QStringList  m_searchHistory;             // 最近 10 条关键词
     
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
+    QPushButton* m_btnToggleDriveBar = nullptr;
     QPushButton* m_btnSync   = nullptr;
     QPushButton* m_btnLayout = nullptr;
     QPushButton* m_btnCreate = nullptr;
@@ -185,6 +191,9 @@ public slots:
      * @brief 2026-07-xx 按照 Plan-63：为已有菜单填充面板显隐 Action
      */
     void populatePanelMenu(QMenu* menu);
+
+    void onDriveButtonClicked();
+    void onDriveButtonContextMenu(const QPoint& pos);
 
 private:
     void loadPanelVisibility();

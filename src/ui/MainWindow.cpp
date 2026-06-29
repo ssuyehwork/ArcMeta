@@ -4,6 +4,7 @@
 #include "MainWindow.h"
 #include <QDateTime>
 #include "Logger.h"
+#include "../util/ShellHelper.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"
 #include "TrayController.h"
@@ -46,6 +47,8 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+#include "DriveButton.h"
+#include "../core/AutoImportManager.h"
 using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
@@ -215,6 +218,11 @@ void MainWindow::initUi() {
         m_mainSplitter->restoreState(state);
         // 2026-07-xx 按照 Plan-63：恢复面板显隐状态 (必须在 restoreState 之后以防布局错乱)
         loadPanelVisibility();
+
+        // 恢复盘符栏显隐
+        bool driveBarVisible = AppConfig::instance().getValue("MainWindow/DriveBarVisible", true).toBool();
+        if (m_btnToggleDriveBar) m_btnToggleDriveBar->setChecked(driveBarVisible);
+        if (m_driveBarWidget) m_driveBarWidget->setVisible(driveBarVisible);
     } else {
         // 初始默认分配: 230 | 230 | 600 | 230 | 230
         QList<int> sizes;
@@ -1039,6 +1047,8 @@ void MainWindow::setupSplitters() {
     m_mainSplitter->addWidget(m_tagManagerView);
 
 
+    initDriveBar();
+
     // 2026-07-xx 按照用户要求：标签搜索联动
     connect(m_tagManagerView, &TagManagerView::requestSearchTag, this, [this](const QString& tag) {
         // 自动切回正常模式并搜索
@@ -1083,6 +1093,7 @@ void MainWindow::setupSplitters() {
 
     mainL->addWidget(m_titleBarWidget);
     mainL->addWidget(m_navBarWidget);
+    mainL->addWidget(m_driveBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
 
@@ -1115,6 +1126,16 @@ void MainWindow::setupCustomTitleBarButtons() {
         ).arg(hoverColor));
         return btn;
     };
+
+    m_btnToggleDriveBar = createTitleBtn("chevrons_down");
+    m_btnToggleDriveBar->setProperty("tooltipText", "展开/收起盘符管理栏");
+    m_btnToggleDriveBar->installEventFilter(m_hoverFilter);
+    m_btnToggleDriveBar->setCheckable(true);
+    m_btnToggleDriveBar->setChecked(true);
+    connect(m_btnToggleDriveBar, &QPushButton::toggled, this, [this](bool checked) {
+        if (m_driveBarWidget) m_driveBarWidget->setVisible(checked);
+        m_btnToggleDriveBar->setIcon(UiHelper::getIcon(checked ? "chevrons_down" : "chevrons_up", QColor("#EEEEEE")));
+    });
 
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
@@ -1202,6 +1223,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
+    layout->addWidget(m_btnToggleDriveBar, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnLayout, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnCreate, 0, Qt::AlignVCenter);
@@ -1476,6 +1498,9 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         // 2026-07-xx 按照 Plan-63：保存面板显隐状态
         savePanelVisibility();
     }
+    if (m_btnToggleDriveBar) {
+        AppConfig::instance().setValue("MainWindow/DriveBarVisible", m_btnToggleDriveBar->isChecked());
+    }
     AppConfig::instance().sync();
 
     // 2026-06-xx 物理加固：退出前强制所有分类数据落盘，彻底解决因防抖计时器导致的重启回滚问题
@@ -1561,6 +1586,84 @@ void MainWindow::savePanelVisibility() {
     if (!m_filterPanel->isVisible())   hiddenPanels << "filter";
     
     AppConfig::instance().setValue("MainWindow/PanelVisibility", hiddenPanels);
+}
+
+void MainWindow::initDriveBar() {
+    m_driveBarWidget = new QWidget(this);
+    m_driveBarWidget->setObjectName("DriveBar");
+    m_driveBarWidget->setFixedHeight(42);
+    m_driveBarWidget->setStyleSheet(QString(
+        "QWidget#DriveBar { background-color: %1; border-bottom: 1px solid %2; }"
+    ).arg(qssColor(BackgroundHeader)).arg(qssColor(BorderColor)));
+
+    m_driveBarLayout = new QHBoxLayout(m_driveBarWidget);
+    m_driveBarLayout->setContentsMargins(15, 0, 15, 0);
+    m_driveBarLayout->setSpacing(8);
+
+    auto drives = QDir::drives();
+    for (const QFileInfo& drive : drives) {
+        QString letter = drive.absolutePath().left(2);
+        DriveButton* btn = new DriveButton(letter, m_driveBarWidget);
+        m_driveButtons[letter] = btn;
+        m_driveBarLayout->addWidget(btn);
+
+        connect(btn, &QPushButton::clicked, this, &MainWindow::onDriveButtonClicked);
+        btn->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(btn, &QWidget::customContextMenuRequested, this, &MainWindow::onDriveButtonContextMenu);
+
+        QString managedPath = drive.absolutePath() + "ArcMeta.Library_" + letter.at(0).toUpper();
+        if (QDir(managedPath).exists()) {
+            btn->setState(DriveButton::Active);
+        } else {
+            btn->setState(DriveButton::Inactive);
+        }
+    }
+    m_driveBarLayout->addStretch();
+}
+
+void MainWindow::onDriveButtonClicked() {
+    // DriveButton* btn = qobject_cast<DriveButton*>(sender());
+    // TODO: 按照 Plan-108 对接 AutoImportManager 任务状态机
+    ToolTipOverlay::instance()->showText(QCursor::pos(), "业务任务调度开发中 (TODO)", 1500);
+}
+
+void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
+    DriveButton* btn = qobject_cast<DriveButton*>(sender());
+    if (!btn) return;
+    QString letter = btn->driveLetter();
+    QString managedPath = letter + "/ArcMeta.Library_" + letter.at(0).toUpper();
+
+    QMenu menu(this);
+    UiHelper::applyMenuStyle(&menu);
+    if (!QDir(managedPath).exists()) {
+        menu.addAction("创建托管文件夹")->setData(1);
+    } else {
+        menu.addAction("打开托管文件夹")->setData(2);
+        menu.addAction("重新收纳该盘")->setData(3);
+    }
+
+    QAction* act = menu.exec(btn->mapToGlobal(pos));
+    if (!act) return;
+    int val = act->data().toInt();
+    if (val == 1) {
+        if (QDir().mkpath(managedPath)) {
+            // 2026-11-15 按照 Plan-108：创建成功后将配置同步至 AppConfig
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(letter.toStdWString());
+            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+            AppConfig::instance().setValue(key, "ArcMeta.Library_" + letter.at(0).toUpper());
+            AppConfig::instance().sync();
+
+            btn->setState(DriveButton::Active);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建成功", 1500, Style::SuccessGreen);
+        } else {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建失败，请检查权限", 1500, Style::ErrorRed);
+        }
+    } else if (val == 2) {
+        ShellHelper::openInExplorer(managedPath);
+    } else if (val == 3) {
+        // TODO: 物理全量扫描并同步数据库逻辑
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "全量收纳扫描开发中 (TODO)", 1500);
+    }
 }
 
 } // namespace ArcMeta
