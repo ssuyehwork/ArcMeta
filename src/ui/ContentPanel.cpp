@@ -1631,13 +1631,13 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         }
 
         // [批量与加密区] 
-        // 2026-07-xx 按照用户要求：只要是文件夹，或者是“非图像文件”，都显示扫描入库选项
+        // 2026-07-xx 按照用户要求：只要是文件夹，或者是“非图像文件”，都显示收揽入库选项
         QString suffix = QFileInfo(path).suffix().toLower();
         bool isGraphic = UiHelper::isGraphicsFile(suffix);
 
         if (isFolder || !isGraphic) { 
             bool isManaged = currentIndex.data(ManagedRole).toBool();
-            QString scanText = isManaged ? "重新扫描入库" : "扫描入库";
+            QString scanText = isManaged ? "重新扫描" : "收揽入库";
             menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), scanText)->setData(ActionAddToCategory);
         }
 
@@ -1971,7 +1971,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
             if (!paths.isEmpty()) {
                 // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
-                // 扫描入库时，镜像分类始终创建在“我的分类”根节点 (ID = 0)
+                // 收揽入库时，镜像分类始终创建在“我的分类”根节点 (ID = 0)
                 ImportHelper::importPaths(paths, 0, this);
             }
             break;
