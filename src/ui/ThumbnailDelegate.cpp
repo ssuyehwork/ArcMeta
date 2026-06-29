@@ -113,15 +113,19 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     painter->setBrush(isWaitingThumb ? QColor("#3A3A3A") : QColor("#2d2d2d"));
     painter->drawRect(m.cardRect);
 
-    if (hasThumb && !thumb.isNull()) {
-        QPixmap scaled = thumb.scaled(m.cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        int x = m.cardRect.center().x() - scaled.width() / 2;
-        int y = m.cardRect.center().y() - scaled.height() / 2;
-        painter->drawPixmap(x, y, scaled);
+    if (hasThumb) {
+        if (!thumb.isNull()) {
+            QPixmap scaled = thumb.scaled(m.cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+            int x = m.cardRect.center().x() - scaled.width() / 2;
+            int y = m.cardRect.center().y() - scaled.height() / 2;
+            painter->drawPixmap(x, y, scaled);
+        }
+        // 2026-xx-xx 按照 Plan-114：当 hasThumb 为 true 时，即便 thumb 为空（加载中），
+        // 也不再回退到 60% 缩小模式，而是保持占位状态，确保视觉比例统一。
     } else {
         QIcon icon = qvariant_cast<QIcon>(decoData);
         if (!icon.isNull()) {
-            // 确保图标在正方形背景中居中显示，且不留白（由背景色填充）
+            // 针对普通文件（非图形/视频），保持 60% 比例缩小的图标绘制逻辑
             int iconSize = qMin(m.cardRect.width(), m.cardRect.height()) * 0.6;
             QRect iconRect(m.cardRect.center().x() - iconSize / 2,
                            m.cardRect.center().y() - iconSize / 2,

@@ -127,6 +127,7 @@ private:
 
     // 工具栏组件
     QToolBar* m_toolbar    = nullptr;
+    QWidget* m_driveBarWidget = nullptr; // 2026-xx-xx 按照 Plan-115：盘符管理栏容器
     QLineEdit* m_searchEdit = nullptr;
     QPushButton* m_btnBack    = nullptr;
     QPushButton* m_btnForward = nullptr;
@@ -139,6 +140,7 @@ private:
     
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
     QPushButton* m_btnSync   = nullptr;
+    QPushButton* m_btnToggleDriveBar = nullptr; // 2026-xx-xx 按照 Plan-115：展开/收起盘符栏按钮
     QPushButton* m_btnLayout = nullptr;
     QPushButton* m_btnCreate = nullptr;
     QPushButton* m_btnPinTop = nullptr;

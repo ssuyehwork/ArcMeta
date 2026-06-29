@@ -47,6 +47,7 @@
 #include "UiHelper.h"
 #include "StyleLibrary.h"
 using namespace ArcMeta::Style;
+#include "DriveButton.h"
 #include "../core/ModelContract.h"
 #include <QFileInfo>
 #include <QDir>
@@ -977,6 +978,9 @@ void MainWindow::setupSplitters() {
     // 2026-06-xx 物理对标：移除额外 addSpacing，直接依赖 layout 默认 5px spacing 达到精准 5 像素间距
     m_navBarLayout->addWidget(m_searchContainer);
 
+    // --- 2.5 盘符管理栏 (Plan-115) ---
+    initDriveBar();
+
     // --- 3. 主体核心容器 (物理还原：10px 全局边距包裹，确保边缘resize可用) ---
     QWidget* bodyWrapper = new QWidget(centralC);
     bodyWrapper->setStyleSheet("background: transparent;"); // 确保背景透明不遮挡阴影
@@ -1083,6 +1087,7 @@ void MainWindow::setupSplitters() {
 
     mainL->addWidget(m_titleBarWidget);
     mainL->addWidget(m_navBarWidget);
+    mainL->addWidget(m_driveBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
 
@@ -1092,6 +1097,41 @@ void MainWindow::setupSplitters() {
 /**
  * @brief 实现符合 funcBtnStyle 规范的自定义按钮组
  */
+void MainWindow::initDriveBar() {
+    m_driveBarWidget = new QWidget(this);
+    m_driveBarWidget->setObjectName("DriveBar");
+    m_driveBarWidget->setFixedHeight(32);
+    m_driveBarWidget->hide(); // 初始隐藏
+
+    QHBoxLayout* layout = new QHBoxLayout(m_driveBarWidget);
+    layout->setContentsMargins(kEdgeMargin, 0, kEdgeMargin, 0);
+    layout->setSpacing(8);
+    layout->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+
+    // 自动扫描磁盘并填充
+    const auto drives = QDir::drives();
+    for (const QFileInfo& drive : drives) {
+        QString path = drive.absolutePath();
+        QString letter = path.left(2); // 取 D:
+        if (letter.endsWith('\\') || letter.endsWith('/')) letter = letter.left(1);
+
+        DriveButton* btn = new DriveButton(letter, m_driveBarWidget);
+
+        // 初始状态判定：探测是否存在托管库
+        // TODO: Task 3 UI-Only version
+        QString libPath = path + "ArcMeta.Library_" + letter.left(1);
+        if (QFile::exists(libPath)) {
+            btn->setState(DriveButton::Active);
+        } else {
+            btn->setState(DriveButton::Inactive);
+        }
+
+        layout->addWidget(btn);
+    }
+
+    layout->addStretch();
+}
+
 void MainWindow::setupCustomTitleBarButtons() {
     QWidget* titleBarBtns = new QWidget(this);
     QHBoxLayout* layout = new QHBoxLayout(titleBarBtns);
@@ -1119,6 +1159,18 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
     m_btnSync->installEventFilter(m_hoverFilter);
+
+    m_btnToggleDriveBar = createTitleBtn("chevrons_down");
+    m_btnToggleDriveBar->setProperty("tooltipText", "显示/隐藏盘符管理栏");
+    m_btnToggleDriveBar->installEventFilter(m_hoverFilter);
+    m_btnToggleDriveBar->setCheckable(true);
+
+    connect(m_btnToggleDriveBar, &QPushButton::toggled, this, [this](bool checked) {
+        if (m_driveBarWidget) {
+            m_driveBarWidget->setVisible(checked);
+            m_btnToggleDriveBar->setIcon(UiHelper::getIcon(checked ? "chevrons_up" : "chevrons_down", QColor("#EEEEEE")));
+        }
+    });
 
     // 2026-06-15 按照用户要求：手动点击同步
     connect(m_btnSync, &QPushButton::clicked, this, [this]() {
@@ -1202,6 +1254,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
+    layout->addWidget(m_btnToggleDriveBar, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnLayout, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnCreate, 0, Qt::AlignVCenter);

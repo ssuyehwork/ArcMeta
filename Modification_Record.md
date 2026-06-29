@@ -1,6 +1,28 @@
 # Modification Record
 
 ## 2026-11-17
+- **任务描述**: 盘符管理栏 UI 复刻 (Plan-115)。
+- **修改文件**:
+    - **新增**: `src/ui/DriveButton.h`, `src/ui/DriveButton.cpp`
+    - **修改**: `src/ui/MainWindow.h`, `src/ui/MainWindow.cpp`, `CMakeLists.txt`
+- **修改原因**: 按照用户要求，从“旧版本-8”复刻盘符管理栏 UI 功能。
+- **优化点**:
+    - **核心复刻**: 实现了标题栏右侧的展开/收起切换按钮（chevrons 图标）及地址栏下方的盘符管理栏容器。
+    - **状态闭环**: 移植了 `DriveButton` 组件，支持 Inactive/Active/Running/Paused 四种状态的视觉渲染与旋转动画。
+    - **自动发现**: 实现了磁盘驱动器自动枚举，并能根据 `ArcMeta.Library_X` 物理路径存在性自动初始化状态。
+    - **UI-Only 隔离**: 核心业务调度逻辑已添加 `TODO: Task 3 UI-Only version` 标识，确保本次修改仅涉及 UI 展现层。
+
+- **任务描述**: 目录导航模式下缩略图填充比例与视频缩略图支持优化 (Plan-114)。
+- **修改文件**:
+    - **修改**: `src/ui/UiHelper.h` (扩展 `isGraphicsFile` 以支持视频格式)
+    - **修改**: `src/ui/ContentPanel.cpp` (统一 `createItemRecord` 路径归一化；优化 `HasThumbnailRole` 判定逻辑)
+    - **修改**: `src/ui/ThumbnailDelegate.cpp` (修正渲染分支判定，消除加载抖动)
+- **修改原因**: 解决物理导航模式下由于路径大小写不一致导致的缩略图判定失效（缩到中心），并满足用户对视频缩略图显示的要求。
+- **优化点**:
+    - **视觉统一**: 通过强制 `HasThumbnailRole` 为 `true`，确保图形与视频文件始终进入“填满卡片”渲染分支，消除了加载期间的视觉抖动。
+    - **路径对齐**: 引入 `MetadataManager::normalizePath` 确保物理扫描路径与元数据缓存 Key 严格一致，彻底根除判定断层。
+    - **功能扩展**: 将常用视频格式纳入识别范围，实现了视频文件的缩略图预览支持。
+
 - **任务描述**: 修复 MFT 引擎编译错误与警告。
 - **修改文件**:
     - **修改**: `src/mft/MftReader.cpp` (补全 `MetadataManager.h` 引用)

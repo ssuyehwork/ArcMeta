@@ -195,7 +195,9 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
         return m_aspectRatios.value(path, 1.0);
     } else if (role == HasThumbnailRole) {
-        // 2026-07-xx 逻辑修复：只要有预存尺寸或缓存比例，即判定为拥有缩略图
+        // 2026-xx-xx 按照 Plan-114：优化 HasThumbnailRole 判定逻辑
+        // 只要是图形或视频格式，均预设为 true，强制 Delegate 进入填满模式，消除抖动
+        if (UiHelper::isGraphicsFile(record.suffix)) return true;
         if (record.width > 0 && record.height > 0) return true;
         return m_aspectRatios.contains(path);
     } else if (role == Qt::DecorationRole && index.column() == 0) {
@@ -795,8 +797,9 @@ void ContentPanel::deferredInit() {
 
 ItemRecord ContentPanel::createItemRecord(const QString& path) {
     ItemRecord r;
-    QString nPath = QDir::toNativeSeparators(path);
-    std::wstring wPath = nPath.toStdWString();
+    // 2026-xx-xx 按照 Plan-114：统一物理路径归一化准则，确保与元数据缓存 Key 严格对齐
+    std::wstring wPath = MetadataManager::normalizePath(path.toStdWString());
+    QString nPath = QString::fromStdWString(wPath);
     QFileInfo info(nPath);
 
     // 1. 物理属性采样 (零 I/O 核心)
