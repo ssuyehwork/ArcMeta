@@ -19,6 +19,13 @@ public:
     void startListening();
     void stopListening();
 
+    // 2026-11-15 按照 Plan-115：占位接口，用于 MainWindow 交互
+    void startTask(const QString& drive) { Q_UNUSED(drive); }
+    void pauseTask(const QString& drive) { Q_UNUSED(drive); }
+
+signals:
+    void taskFinished(const QString& drive);
+
 private slots:
     // 订阅 MftReader 发现的新增条目
     void onEntryAdded(uint64_t key);
