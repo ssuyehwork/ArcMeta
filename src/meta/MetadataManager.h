@@ -305,7 +305,7 @@ private:
     QTimer* m_uiSignalTimer = nullptr;
     std::unordered_set<QString> m_pendingUiPaths;
 
-    // 2026-07-xx 按照用户要求：视觉元数据（解析颜色）异步补偿队列
+    // 2026-07-xx 按照用户要求：视觉元数据（收揽入库）异步补偿队列
     QTimer* m_retryTimer = nullptr;
     std::vector<std::wstring> m_visualRetryQueue;
     void processVisualRetryQueue();

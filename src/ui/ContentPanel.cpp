@@ -1616,7 +1616,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         if (UiHelper::isGraphicsFile(ext)) {
             // 2026-07-xx 逻辑增强：根据是否已入库，动态切换菜单文本
             bool isManaged = currentIndex.data(ManagedRole).toBool();
-            menu.addAction(isManaged ? "重新解析颜色..." : "解析颜色...")->setData(ActionExtractColor);
+            menu.addAction(isManaged ? "重新扫描..." : "收揽入库...")->setData(ActionExtractColor);
         }
 
         menu.addSeparator(); 
@@ -1849,7 +1849,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             // 只有当文件数多于 5 个时才显示进度条
             BatchProgressDialog* progress = nullptr;
             if (total > 5) {
-                progress = new BatchProgressDialog("解析颜色", this);
+                progress = new BatchProgressDialog("收揽入库", this);
                 progress->show();
             }
 
