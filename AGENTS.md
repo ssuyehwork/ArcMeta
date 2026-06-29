@@ -115,13 +115,13 @@ Jules 收到分析委托类消息后，必须按以下顺序执行，**不得跳
 
 ---
 
-## 三、implementation_plan 文档规范
+## 三、Analysis_Modification_Plan 文档规范
 
 ### 3.1 文件命名与存放
 
 - 每个话题 / 独立任务对应一个独立文件
 - 命名规则：`Analysis_Modification_Plan.md`，N 为自增整数，只可取当前最大值 + 1
-- 统一存放于项目根目录下的 `implementation_plan/` 文件夹
+- 统一存放于项目根目录下的 `Analysis_Modification_Plan/` 文件夹
 
 ### 3.2 文件首行格式（强制）
 
@@ -131,7 +131,7 @@ Jules 收到分析委托类消息后，必须按以下顺序执行，**不得跳
 
 示例：
 ```
-# SQLite 内存模式初始化崩溃分析 —— implementation_plan-7.md
+# SQLite 内存模式初始化崩溃分析 —— Analysis_Modification_Plan-7.md
 ```
 
 ### 3.3 文档必含章节（缺一不可）
@@ -327,7 +327,7 @@ Jules 收到分析委托类消息后，必须按以下顺序执行，**不得跳
 - [ ] 若为分析委托：我已收到"理解正确"或"授权创建"指令（Step 2）
 - [ ] 若发现自己跳步：我已回溯到最近完成的步骤，从下一步继续，而不是停下来
 - [ ] 文件命名为 `Analysis_Modification_Plan.md`，N 是当前最大值
-- [ ] 文件存放于 `implementation_plan/` 文件夹
+- [ ] 文件存放于 `Analysis_Modification_Plan/` 文件夹
 - [ ] 文件首行格式符合规范
 - [ ] 文档包含全部 7 个必含章节
 - [ ] 强制对照表已逐条填写，无遗漏
