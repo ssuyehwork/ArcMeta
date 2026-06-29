@@ -1,14 +1,20 @@
 # Modification Record
 
 ## 2026-11-17
-- **任务描述**: 修复 MFT 引擎编译错误与警告。
+- **任务描述**: 修复 MFT 引擎编译错误与警告，以及自动入库监听失效与路径获取逻辑重构。
 - **修改文件**:
     - **修改**: `src/mft/MftReader.cpp` (补全 `MetadataManager.h` 引用)
     - **修改**: `src/mft/UsnWatcher.cpp` (补全 `MetadataManager.h` 引用；修复 C4018 有符号/无符号比较警告)
-- **修改原因**: 解决由于头文件缺失导致的 `MetadataManager` 相关标识符未定义，以及 USN 比较逻辑中的编译器警告。
+    - **修改**: `src/ui/MainWindow.cpp` (在 `initDriveBar` 中补全 `AutoImportManager::startListening()` 调用)
+    - **修改**: `src/core/AutoImportManager.cpp` (重构 `onEntryAdded` 等槽函数，将 `getPathByFrn` 替换为 `getFullPath` 内存索引访问)
+- **修改原因**:
+    1. 解决由于头文件缺失导致的 `MetadataManager` 相关标识符未定义，以及 USN 比较逻辑中的编译器警告。
+    2. 修复 `AutoImportManager` 监听从未启动导致的自动入库失效。
+    3. 解决 `AutoImportManager` 在处理 USN 事件时因实时路径反查时序不可靠导致的入库失败。
 - **优化点**:
-    - **编译稳固**: 确保 `MftReader` 与 `UsnWatcher` 能正确访问元数据服务。
-    - **规范清理**: 显式转换 USN 类型以消除 MSVC 警告。
+    - **编译稳固**: 确保 `MftReader` 与 `UsnWatcher` 能正确访问元数据服务；显式转换 USN 类型以消除 MSVC 警告。
+    - **监听闭环**: 补全了监听启动点，确保 MFT 信号能被正确消费。
+    - **性能与可靠性**: 路径获取由“实时 I/O 反查”切换为“内存索引提取”，极大提升了变动感知效率并消除了竞态风险。
 
 ## 2026-11-14
 - **任务描述**: 「空格键」快速预览深度优化与全口径属性过滤 (Plan-109)。

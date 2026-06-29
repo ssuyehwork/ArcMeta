@@ -1271,6 +1271,9 @@ void MainWindow::setupCustomTitleBarButtons() {
 }
 
 void MainWindow::initDriveBar() {
+    // 2026-11-17 按照 Plan-4：启动全量 MFT 变动监听
+    AutoImportManager::instance().startListening();
+
     connect(&AutoImportManager::instance(), &AutoImportManager::taskFinished, this, [this](const QString& drive) {
         if (m_driveButtons.contains(drive)) {
             m_driveButtons[drive]->setState(DriveButton::Active);
