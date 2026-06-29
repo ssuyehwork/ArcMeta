@@ -47,6 +47,7 @@
 #include "UiHelper.h"
 #include "StyleLibrary.h"
 #include "DriveButton.h"
+#include "../util/ShellHelper.h"
 using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
@@ -1602,9 +1603,16 @@ void MainWindow::initDriveBar() {
         m_driveBarLayout->addWidget(btn);
 
         connect(btn, &QPushButton::clicked, this, &MainWindow::onDriveButtonClicked);
+        btn->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(btn, &QWidget::customContextMenuRequested, this, &MainWindow::onDriveButtonContextMenu);
 
-        // 初始状态简单设置为 Active，后期可由真实逻辑驱动
-        btn->setState(DriveButton::Active);
+        // 根据托管库是否存在初始化状态
+        QString managedPath = drive.absolutePath() + "ArcMeta.Library_" + letter.left(1);
+        if (QDir(managedPath).exists()) {
+            btn->setState(DriveButton::Active);
+        } else {
+            btn->setState(DriveButton::Inactive);
+        }
     }
     m_driveBarLayout->addStretch();
 }
@@ -1612,6 +1620,37 @@ void MainWindow::initDriveBar() {
 void MainWindow::onDriveButtonClicked() {
     // TODO: 盘符点击逻辑待后期安排
     qDebug() << "[Main] Drive button clicked (TODO)";
+}
+
+void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
+    DriveButton* btn = qobject_cast<DriveButton*>(sender());
+    if (!btn) return;
+    QString letter = btn->driveLetter();
+    QString managedPath = letter + "/ArcMeta.Library_" + letter.left(1);
+
+    QMenu menu(this);
+    UiHelper::applyMenuStyle(&menu);
+    if (!QDir(managedPath).exists()) {
+        menu.addAction("创建托管文件夹")->setData(1);
+    } else {
+        menu.addAction("打开托管文件夹")->setData(2);
+        menu.addAction("重新扫描该盘")->setData(3);
+    }
+
+    QAction* act = menu.exec(btn->mapToGlobal(pos));
+    if (!act) return;
+    int val = act->data().toInt();
+    if (val == 1) {
+        if (QDir().mkpath(managedPath)) {
+            btn->setState(DriveButton::Active);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建成功", 1500, Style::SuccessGreen);
+        }
+    } else if (val == 2) {
+        ShellHelper::openInExplorer(managedPath);
+    } else if (val == 3) {
+        // TODO: 重新扫描逻辑
+        qDebug() << "[Main] Request rescan for" << letter << "(TODO)";
+    }
 }
 
 } // namespace ArcMeta

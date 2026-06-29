@@ -59,6 +59,7 @@ private slots:
     void onUpClicked();
     void onStatusBarStatsUpdated(int fileCount, int folderCount, int totalCount);
     void onDriveButtonClicked();
+    void onDriveButtonContextMenu(const QPoint& pos);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
