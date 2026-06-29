@@ -90,11 +90,14 @@ void DriveButton::paintEvent(QPaintEvent* event) {
 }
 
 void DriveButton::mousePressEvent(QMouseEvent* event) {
-    if (event->button() == Qt::LeftButton) {
+    QPushButton::mousePressEvent(event);
+}
+
+void DriveButton::mouseReleaseEvent(QMouseEvent* event) {
+    if (rect().contains(event->pos()) && event->button() == Qt::LeftButton) {
         emit clicked();
-    } else {
-        QPushButton::mousePressEvent(event);
     }
+    QPushButton::mouseReleaseEvent(event);
 }
 
 void DriveButton::updateAnimation() {

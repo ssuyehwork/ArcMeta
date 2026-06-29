@@ -1,7 +1,6 @@
 #pragma once
 #include <QPushButton>
 #include <QTimer>
-#include <QPropertyAnimation>
 #include "StyleLibrary.h"
 
 namespace ArcMeta {

@@ -940,6 +940,8 @@ void MainWindow::setupSplitters() {
     // --- 1. 自定义标题栏 (第一行) ---
     m_titleBarWidget = new QWidget(centralC);
     m_titleBarWidget->setObjectName("TitleBar");
+    // 2026-xx-xx 按照用户要求：添加 1px 底部切割线，与全局规范对齐
+    m_titleBarWidget->setStyleSheet(QString("QWidget#TitleBar { border: none; border-bottom: 1px solid %1; background: transparent; }").arg(qssColor(BorderColor)));
     m_titleBarWidget->setFixedHeight(34);
     m_titleBarLayout = new QHBoxLayout(m_titleBarWidget);
     // 2026-xx-xx 按照用户要求：标题栏左侧与右侧均保持 5px 呼吸边距
@@ -1086,6 +1088,7 @@ void MainWindow::setupSplitters() {
     initDriveBar();
 
     mainL->addWidget(m_titleBarWidget);
+    mainL->addSpacing(5);
     mainL->addWidget(m_navBarWidget);
     mainL->addSpacing(5);
     mainL->addWidget(m_driveBarWidget);
