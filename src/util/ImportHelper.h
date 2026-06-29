@@ -7,7 +7,7 @@ namespace ArcMeta {
 
 /**
  * @brief 导入中枢模块 (ImportHelper)
- * 2026-07-xx 按照用户要求 (1.19)：归一化“收揽入库”与“拖拽导入”的行为逻辑。
+ * 2026-07-xx 按照用户要求 (1.19)：归一化“扫描入库”与“拖拽导入”的行为逻辑。
  */
 class ImportHelper {
 public:

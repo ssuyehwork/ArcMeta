@@ -66,6 +66,7 @@ Step 2 — 等待共识确认
 
 Step 3 — 创建方案文档
 收到授权后，按第三节规范创建 Analysis_Modification_Plan-N.md。
+一旦Analysis_Modification_Plan-N.md 创建之后，禁止删除，即便有错误也不能删除，这是为了迭代。
 
 违规后的强制恢复行为
 如果 Jules 发现自己跳过了 Step 1 或 Step 2 直接输出了方案，无论是被用户指出还是自我发现，正确行为是：

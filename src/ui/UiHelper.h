@@ -132,10 +132,12 @@ public:
 
     static bool isGraphicsFile(const QString& ext) {
         // 2026-06-xx 工业级扩容：只要 Windows 能显示预览图，就允许进入解析流程
+        // 2026-xx-xx 按照 Plan-114：扩展视频格式识别 (对应用户要求：“视频文件也要显示缩略图”)
         static const QStringList graphicsExts = {
             "png", "jpg", "jpeg", "bmp", "gif", "webp", "ico", "tiff", "tif",
             "psd", "psb", "ai", "eps", "pdf", "svg", "cdr",
-            "sketch", "xd", "fig", "dwg", "dxf", "heic", "raw"
+            "sketch", "xd", "fig", "dwg", "dxf", "heic", "raw",
+            "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm"
         };
         return graphicsExts.contains(ext.toLower());
     }
