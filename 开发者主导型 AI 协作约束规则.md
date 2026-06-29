@@ -1,3 +1,5 @@
+请使用中文解说,不允许使用英文答复用户（包括：“Running code review...”和“Ready for review 🎉”）
+
 开发者主导型 AI 协作约束规则
 
 # Role & Philosophy
