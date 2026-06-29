@@ -46,6 +46,7 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+#include "DriveButton.h"
 using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
@@ -1081,8 +1082,11 @@ void MainWindow::setupSplitters() {
     connect(&CoreController::instance(), &CoreController::isIndexingChanged, this, updateStatus);
     updateStatus();
 
+    initDriveBar();
+
     mainL->addWidget(m_titleBarWidget);
     mainL->addWidget(m_navBarWidget);
+    mainL->addWidget(m_driveBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
 
@@ -1115,6 +1119,18 @@ void MainWindow::setupCustomTitleBarButtons() {
         ).arg(hoverColor));
         return btn;
     };
+
+    m_btnToggleDriveBar = createTitleBtn("chevrons_down");
+    m_btnToggleDriveBar->setProperty("tooltipText", "展开/收起盘符管理栏");
+    m_btnToggleDriveBar->installEventFilter(m_hoverFilter);
+    m_btnToggleDriveBar->setCheckable(true);
+    m_btnToggleDriveBar->setChecked(true);
+    connect(m_btnToggleDriveBar, &QPushButton::toggled, this, [this](bool checked) {
+        if (m_driveBarWidget) {
+            m_driveBarWidget->setVisible(checked);
+            m_btnToggleDriveBar->setIcon(UiHelper::getIcon(checked ? "chevrons_down" : "chevrons_up", QColor("#EEEEEE")));
+        }
+    });
 
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
@@ -1202,6 +1218,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
+    layout->addWidget(m_btnToggleDriveBar, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnLayout, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnCreate, 0, Qt::AlignVCenter);
@@ -1561,6 +1578,40 @@ void MainWindow::savePanelVisibility() {
     if (!m_filterPanel->isVisible())   hiddenPanels << "filter";
     
     AppConfig::instance().setValue("MainWindow/PanelVisibility", hiddenPanels);
+}
+
+void MainWindow::initDriveBar() {
+    m_driveBarWidget = new QWidget(this);
+    m_driveBarWidget->setObjectName("DriveBar");
+    m_driveBarWidget->setFixedHeight(42);
+    m_driveBarWidget->setStyleSheet(QString(
+        "QWidget#DriveBar { background-color: %1; border-bottom: 1px solid %2; }"
+    ).arg(qssColor(BackgroundHeader)).arg(qssColor(BorderColor)));
+
+    m_driveBarLayout = new QHBoxLayout(m_driveBarWidget);
+    m_driveBarLayout->setContentsMargins(15, 0, 15, 0);
+    m_driveBarLayout->setSpacing(8);
+
+    auto drives = QDir::drives();
+    for (const QFileInfo& drive : drives) {
+        QString letter = drive.absolutePath().left(2);
+        if (letter.endsWith("/")) letter = letter.left(1) + ":";
+
+        DriveButton* btn = new DriveButton(letter, m_driveBarWidget);
+        m_driveButtons[letter] = btn;
+        m_driveBarLayout->addWidget(btn);
+
+        connect(btn, &QPushButton::clicked, this, &MainWindow::onDriveButtonClicked);
+
+        // 初始状态简单设置为 Active，后期可由真实逻辑驱动
+        btn->setState(DriveButton::Active);
+    }
+    m_driveBarLayout->addStretch();
+}
+
+void MainWindow::onDriveButtonClicked() {
+    // TODO: 盘符点击逻辑待后期安排
+    qDebug() << "[Main] Drive button clicked (TODO)";
 }
 
 } // namespace ArcMeta
