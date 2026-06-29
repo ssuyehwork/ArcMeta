@@ -143,7 +143,6 @@ void QuickLookWindow::renderImage(const QString& path) {
     m_graphicsView->show();
     m_scene->clear();
     m_graphicsView->resetTransform();
-    m_graphicsView->setTransformationAnchor(QGraphicsView::AnchorViewCenter);
 
     // 2026-11-14 性能哨兵：超大文件直接降级到 Shell 缩略图引擎，保护 UI 响应
     QFileInfo info(path);
@@ -189,7 +188,6 @@ void QuickLookWindow::renderProfessionalImage(const QString& path) {
     m_graphicsView->show();
     m_scene->clear();
     m_graphicsView->resetTransform();
-    m_graphicsView->setTransformationAnchor(QGraphicsView::AnchorViewCenter);
 
     QImage img;
     QFileInfo info(path);
@@ -260,7 +258,6 @@ void QuickLookWindow::wheelEvent(QWheelEvent* event) {
         
         m_graphicsView->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
         m_graphicsView->scale(factor, factor);
-        m_graphicsView->setTransformationAnchor(QGraphicsView::AnchorViewCenter);
         event->accept();
     } else if (m_textPreview && m_textPreview->isVisible()) {
         // 文本模式：调整字号大小

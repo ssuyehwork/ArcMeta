@@ -31,7 +31,6 @@ struct RuntimeMeta {
     bool isManaged; // 2026-06-xx 物理对标：标记该项是否已在数据库中登记
     int width;      // 2026-07-xx 物理尺寸：宽 (像素)
     int height;     // 2026-07-xx 物理尺寸：高 (像素)
-    int ingestionStatus; // 2026-11-xx 按照 Plan-113：0: Registered, 1: Ingested, -1: Invalid
     std::wstring originalPath; // 2026-06-xx 路径记忆：用于回收站还原
     std::string fileId128; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
     
@@ -43,14 +42,14 @@ struct RuntimeMeta {
 
     std::vector<PaletteEntry> palettes;
 
-    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), width(0), height(0), ingestionStatus(-1), ctime(0), mtime(0), atime(0), fileSize(0) {}
+    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), width(0), height(0), ctime(0), mtime(0), atime(0), fileSize(0) {}
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
-     * 2026-11-xx 按照 Plan-113：将其与受控状态 (ingestionStatus == 1) 强对齐
+     * 2026-06-xx 按照用户要求：只要有任何元数据修改或已登记，即视为数据库已录入项
      */
     bool hasUserOperations() const {
-        return ingestionStatus == 1 || isManaged || rating > 0 || !color.empty() || !tags.isEmpty() || !note.empty() || !url.empty() || pinned || encrypted;
+        return isManaged || rating > 0 || !color.empty() || !tags.isEmpty() || !note.empty() || !url.empty() || pinned || encrypted;
     }
 };
 
@@ -140,17 +139,8 @@ public:
     void setURL(const std::wstring& path, const std::wstring& url, bool notify = true);
     void setEncrypted(const std::wstring& path, bool encrypted, bool notify = true);
     void setInvalid(const std::wstring& path, bool invalid, bool notify = true);
-    void setInvalidByFidPrefix(const std::string& fidPrefix, bool invalid);
     void setManaged(const std::wstring& path, bool managed, bool notify = true);
-    void setIngestionStatus(const std::wstring& path, int status, bool notify = true);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
-
-    // 2026-11-xx 新增：盘符还原服务 (供 AutoImportManager 使用)
-    QString getDriveLetterByMftIndex(int driveIdx);
-
-    // 2026-11-xx 新增：USN 指针存取接口 (2026-11-xx 按照 Plan-4)
-    uint64_t getLastUsn(const std::wstring& volume);
-    void setLastUsn(const std::wstring& volume, uint64_t usn);
 
     /**
      * @brief 全局重命名标签
@@ -209,12 +199,6 @@ public:
      * 2026-06-15 物理加固：确保在建立分类关联前指纹已就绪
      */
     std::string getFileIdSync(const std::wstring& path);
-
-    /**
-     * @brief 跨库元数据搬迁 (Plan-113)
-     * 将元数据记录从一个物理卷转移到另一个物理卷，并更新缓存
-     */
-    bool moveMetadataToVolume(const std::wstring& path, const std::wstring& targetPath, const std::wstring& srcVol, const std::wstring& dstVol);
 
     /**
      * @brief 获取路径所在磁盘的卷序列号

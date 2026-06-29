@@ -9,7 +9,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include "ContentPanel.h"
-#include "../core/AutoImportManager.h"
 #include "../meta/MetadataManager.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
@@ -48,18 +47,15 @@ public:
         opt.state &= ~QStyle::State_Selected;
         opt.state &= ~QStyle::State_MouseOver;
         
-        int ingStatus = index.model()->index(index.row(), 0).data(IngestionStatusRole).toInt();
         if (selected) {
             opt.palette.setColor(QPalette::Text, Qt::white);
         } else if (m_showStatus) {
-            // 2026-11-xx 按照 Plan-113：失效数据或未入库项文字半透明暗淡处理
-            if (ingStatus <= 0) {
+            // 2026-06-xx 按照视觉要求：未录入项文字半透明暗淡处理
+            // 物理修复：校准作用域
+            bool isManaged = index.data(ManagedRole).toBool();
+            if (!isManaged) {
                 opt.palette.setColor(QPalette::Text, QColor(238, 238, 238, 120));
             }
-        }
-
-        if (ingStatus == -1) {
-            painter->setOpacity(0.4);
         }
 
         // 2026-06-16 按照 8 列架构重构：第 1, 2, 3 列由代理独立绘制
@@ -70,29 +66,16 @@ public:
             painter->setRenderHint(QPainter::Antialiasing);
 
             if (col == 1) { // 状态列
-                QModelIndex sourceIdx = index.model()->index(index.row(), 0);
-                bool isPinned = sourceIdx.data(IsLockedRole).toBool();
-                ingStatus = sourceIdx.data(IngestionStatusRole).toInt();
-                QString path = sourceIdx.data(PathRole).toString();
-                bool inManagedLib = AutoImportManager::isPathInManagedLibrary(path.toStdWString());
-
-                QRect iconRect(option.rect.left() + (option.rect.width() - 16) / 2,
-                               option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
-
-                if (isPinned) {
-                    UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, iconRect);
-                } else if (ingStatus == 0 && inManagedLib) {
-                    // Registered (0) 状态绘制进度弧 (30% 占位)
-                    painter->save();
-                    painter->setPen(QPen(QColor(60, 60, 60, 180), 2));
-                    painter->drawEllipse(iconRect.adjusted(1, 1, -1, -1));
-                    QPen pPen(QColor("#3498db"), 2);
-                    pPen.setCapStyle(Qt::RoundCap);
-                    painter->setPen(pPen);
-                    painter->drawArc(iconRect.adjusted(1, 1, -1, -1), 90 * 16, -qRound(0.3 * 360 * 16));
-                    painter->restore();
-                } else if (ingStatus == 1 && inManagedLib) {
-                    UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, iconRect);
+                bool isPinned = index.model()->index(index.row(), 0).data(IsLockedRole).toBool();
+                bool isManaged = index.model()->index(index.row(), 0).data(ManagedRole).toBool();
+                if (isPinned || isManaged) {
+                    QRect iconRect(option.rect.left() + (option.rect.width() - 16) / 2,
+                                   option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
+                    if (isPinned) {
+                        UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, iconRect);
+                    } else {
+                        UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, iconRect);
+                    }
                 }
             } else if (col == 2) { // 星级列
                 // 2026-06-16 按照方案 20 纠偏：仅在选中或评分 > 0 时显示图标，减少视觉干扰

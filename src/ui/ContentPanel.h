@@ -1,10 +1,6 @@
 #pragma once
 
 #include <QDateTime>
-#include <atomic>
-#include <QSet>
-#include <QMutex>
-#include <QThreadPool>
 #include "../core/IndexedEntry.h"
 #include <QMap>
 #include <unordered_map>
@@ -92,11 +88,6 @@ public:
      */
     void updateRecordMetadata(const QString& path);
 
-    /**
-     * @brief 2026-06-27 高性能增量刷新：主线程更新特定路径文件夹的登记进度并触发局部刷新
-     */
-    void updateRegistrationProgress(const QString& path, double progress);
-
 private:
     std::vector<ItemRecord> m_allRecords;
     std::unordered_map<QString, int, QStringHash> m_pathToIndex;
@@ -181,7 +172,7 @@ public:
     };
 
     explicit ContentPanel(QWidget* parent = nullptr);
-    ~ContentPanel() override;
+    ~ContentPanel() override = default;
 
     // 2026-04-12 关键修复：延迟初始化
     void deferredInit();
@@ -299,14 +290,6 @@ private:
         std::vector<ItemRecord> records;
     };
     QMap<QString, ScanCacheEntry> m_recursiveCache; 
-
-    // --- 2026-06-27 异步进度扫描架构 ---
-    QThreadPool m_progressThreadPool;       // 进度计算专用线程池
-    QSet<QString> m_activeCalculations;     // 当前正在计算的路径集合
-    QMutex m_calcMutex;                     // 用于保护 m_activeCalculations 的互斥锁
-    void startAsyncProgressCalculation();   // 启动异步计算任务
-    double calculateFolderProgressInternal(const QString& folderPath); // 底层扫描计算
-
     void updateGridSize();
     void updateStatusBarStats();
     void recalculateAndEmitStats();

@@ -37,9 +37,7 @@
 #include <QItemSelectionModel> 
 #include <QFileInfo> 
 #include <QDir> 
-#include <QDirIterator>
 #include <QSet>
-#include <QMutexLocker>
 #include <QFile>
 #include <QDateTime> 
 #include <QDesktopServices> 
@@ -69,7 +67,6 @@
 #include "../meta/MetadataManager.h" 
 #include "../meta/BatchRenameEngine.h" 
 #include "../meta/CategoryRepo.h" 
-#include "../core/AutoImportManager.h" 
 #include "../crypto/EncryptionManager.h" 
 #include "CategoryLockDialog.h" 
 #include "BatchRenameDialog.h" 
@@ -187,26 +184,12 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         return record.tags;
     } else if (role == ManagedRole) {
         return record.isManaged;
-    } else if (role == IngestionStatusRole) {
-        return record.ingestionStatus;
     } else if (role == RegistrationProgressRole) {
         return record.registrationProgress;
     } else if (role == CategoryIdRole) {
         return 0; 
     } else if (role == IsEmptyRole) {
         return record.isDir && record.isEmpty;
-    } else if (role == IsDirRole) {
-        return record.isDir;
-    } else if (role == FileSizeRole) {
-        return record.size;
-    } else if (role == MtimeRole) {
-        return record.mtime;
-    } else if (role == CtimeRole) {
-        return record.ctime;
-    } else if (role == AtimeRole) {
-        return record.atime;
-    } else if (role == SuffixRole) {
-        return record.suffix;
     } else if (role == AspectRatioRole) {
         // 2026-07-xx 性能优化：优先使用 ItemRecord 中已注入的尺寸信息，实现渲染零延迟
         if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
@@ -464,7 +447,6 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             m_allRecords[i].fileId = meta.fileId128;
             m_allRecords[i].pinned = meta.pinned;
             m_allRecords[i].encrypted = meta.encrypted;
-            m_allRecords[i].ingestionStatus = meta.ingestionStatus;
             m_allRecords[i].isManaged = meta.hasUserOperations();
             m_allRecords[i].palettes.clear();
             for (const auto& pe : meta.palettes) {
@@ -476,17 +458,6 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             QModelIndex right = index(i, columnCount() - 1);
             emit dataChanged(left, right);
         }
-    }
-}
-
-void FerrexVirtualDbModel::updateRegistrationProgress(const QString& path, double progress) {
-    auto it = m_pathToIndex.find(path);
-    if (it != m_pathToIndex.end()) {
-        int row = it->second;
-        m_allRecords[row].registrationProgress = progress;
-        // 触发局部重绘
-        QModelIndex idx = index(row, 0);
-        emit dataChanged(idx, idx, {RegistrationProgressRole});
     }
 }
 
@@ -767,8 +738,6 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
  
 ContentPanel::ContentPanel(QWidget* parent) 
     : QFrame(parent) { 
-    m_progressThreadPool.setMaxThreadCount(1); // 物理防御：串行 I/O 任务
-
     // 2026-07-xx 按照 Plan-63：启用右键菜单策略（容器级）
     setContextMenuPolicy(Qt::CustomContextMenu);
 
@@ -818,10 +787,6 @@ ContentPanel::ContentPanel(QWidget* parent)
     updateGridSize(); 
 } 
  
-ContentPanel::~ContentPanel() {
-    m_progressThreadPool.waitForDone();
-}
-
 void ContentPanel::deferredInit() { 
     qDebug() << "[ContentPanel] deferredInit 开始执行"; 
     // 2026-04-12 按照用户要求：补全延迟初始化逻辑，此处可处理模型预热或首屏数据对齐 
@@ -858,7 +823,6 @@ ItemRecord ContentPanel::createItemRecord(const QString& path) {
     r.note = QString::fromStdWString(meta.note);
     r.width = meta.width;
     r.height = meta.height;
-    r.ingestionStatus = meta.ingestionStatus;
     r.isManaged = meta.hasUserOperations();
     for (const auto& pe : meta.palettes) {
         r.palettes.push_back({pe.color, pe.ratio});
@@ -1602,6 +1566,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         if (categories.empty()) categories = CategoryRepo::getAll();
         if (categories.size() > 15) categories.resize(15);
 
+        // 2026-06-xx 按照用户需求：增加“回归未分类”选项
+        QAction* actToUncat = categorizeMenu->addAction(UiHelper::getIcon("uncategorized", QColor("#95a5a6"), 16), "回归“未分类”");
+        actToUncat->setData(ActionCategorize);
+        actToUncat->setProperty("catId", -2); // 未分类的负数 ID
+        categorizeMenu->addSeparator();
 
         if (categories.empty()) { 
             categorizeMenu->addAction("（暂无分类）")->setEnabled(false); 
@@ -1662,13 +1631,13 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         }
 
         // [批量与加密区] 
-        // 2026-07-xx 按照用户要求：只要是文件夹，或者是“非图像文件”，都显示收揽入库选项
+        // 2026-07-xx 按照用户要求：只要是文件夹，或者是“非图像文件”，都显示扫描入库选项
         QString suffix = QFileInfo(path).suffix().toLower();
         bool isGraphic = UiHelper::isGraphicsFile(suffix);
 
         if (isFolder || !isGraphic) { 
-            bool inManagedLib = AutoImportManager::isPathInManagedLibrary(path.toStdWString());
-            QString scanText = inManagedLib ? "重新扫描" : "收揽入库";
+            bool isManaged = currentIndex.data(ManagedRole).toBool();
+            QString scanText = isManaged ? "重新扫描入库" : "扫描入库";
             menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), scanText)->setData(ActionAddToCategory);
         }
 
@@ -1793,7 +1762,16 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     // 2026-06-xx 物理同步：基于同步获取的 File ID 进行归类，解决新文件关联失败冲突。 
                     std::string fid = MetadataManager::instance().getFileIdSync(wPath); 
                     if (!fid.empty()) { 
-                        if (catId > 0) {
+                        // 2026-06-xx 按照用户需求：如果在系统层选择了“未分类”，则清除该项所有其他分类关联
+                        if (catId == -2) { // 未分类的负数 ID
+                             // 2026-07-xx 按照 Plan-83：实现撤销支持
+                             std::vector<int> oldCatIds = CategoryRepo::getItemCategoryIds(fid);
+                             if (!oldCatIds.empty()) {
+                                 if (CategoryRepo::removeAllCategories(fid)) {
+                                     UndoManager::instance().pushCommand(std::make_unique<BulkUncategorizeCommand>(itemPath, fid, oldCatIds));
+                                 }
+                             }
+                        } else if (catId > 0) {
                              if (CategoryRepo::addItemToCategory(catId, fid, wPath)) {
                                  UndoManager::instance().pushCommand(std::make_unique<CategorizeCommand>(itemPath, fid, catId, true));
                              }
@@ -1979,7 +1957,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         } 
         case ActionBatchRename: performBatchRename(); break; 
         case ActionAddToCategory: {
-            // 获取选中项路径
             QStringList paths;
             auto indexes = view->selectionModel()->selectedIndexes();
             for (const auto& idx : indexes) {
@@ -1988,33 +1965,15 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     if (!p.isEmpty()) paths << p;
                 }
             }
+            
+            // 降级保护：如果由于某种原因 paths 为空，则回退到当前点击项
             if (paths.isEmpty() && !path.isEmpty()) paths << path;
-            if (paths.isEmpty()) break;
 
-            // 唯一职责：Move 到同盘托管库
-            // 取第一个路径的盘符确定目标托管库
-            QString driveLetter = QDir::toNativeSeparators(paths.first()).left(2).toUpper();
-            QString managedFolder = driveLetter + "\\ArcMeta.Library_" + driveLetter.left(1);
-
-            // 若托管库不存在则自动创建
-            QDir().mkpath(managedFolder);
-
-            // 逐一执行 Move
-            for (const QString& srcPath : paths) {
-                // 跨盘检测
-                QString srcDrive = QDir::toNativeSeparators(srcPath).left(2).toUpper();
-                if (srcDrive.compare(driveLetter, Qt::CaseInsensitive) != 0) {
-                    ToolTipOverlay::instance()->showText(QCursor::pos(),
-                        "该文件与目标托管库不在同一磁盘，请手动移动后再执行入库", 2000,
-                        QColor("#E81123"));
-                    continue;
-                }
-                QString fileName = QFileInfo(srcPath).fileName();
-                QString destPath = managedFolder + "\\" + fileName;
-                ShellHelper::renameItem(srcPath, destPath);
+            if (!paths.isEmpty()) {
+                // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
+                // 扫描入库时，镜像分类始终创建在“我的分类”根节点 (ID = 0)
+                ImportHelper::importPaths(paths, 0, this);
             }
-            // Move 完成，USN Journal 自动感知并触发登记注册
-            // 此处禁止调用 ImportHelper、MetadataManager 或任何入库逻辑
             break;
         }
         case ActionRename: view->edit(currentIndex); break; 
@@ -2415,7 +2374,6 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             if (panelPtr && panelPtr->m_loadRequestId == reqId) { 
                 panelPtr->m_model->setRecords(allItems);
                 panelPtr->m_proxyModel->sort(0, Qt::AscendingOrder);
-                panelPtr->startAsyncProgressCalculation(); // 触发异步进度扫描
                 panelPtr->m_isLoading = false;
                 panelPtr->recalculateAndEmitStats();
                 // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
@@ -2609,7 +2567,6 @@ void ContentPanel::loadCategory(int categoryId) {
             if (weakThis && weakThis->m_loadRequestId == reqId) {
                 weakThis->m_model->setRecords(allRecords);
                 weakThis->m_proxyModel->sort(0, Qt::AscendingOrder);
-                weakThis->startAsyncProgressCalculation(); // 触发异步进度扫描
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
@@ -2686,7 +2643,6 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
             if (weakThis && weakThis->m_loadRequestId == reqId) {
                 weakThis->m_model->setRecords(records);
                 weakThis->m_proxyModel->sort(0, Qt::AscendingOrder);
-                weakThis->startAsyncProgressCalculation(); // 触发异步进度扫描
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
@@ -2735,64 +2691,6 @@ void ContentPanel::appendPaths(const QStringList& paths, int reqId) {
     });
 }
  
-void ContentPanel::startAsyncProgressCalculation() {
-    int reqId = m_loadRequestId.load();
-    std::vector<QString> dirsToCalculate;
-
-    // 主线程只读遍历
-    for (const auto& r : m_model->allRecords()) {
-        // 仅处理真实的文件夹，且之前没有计算过进度（初始值为 -1.0）
-        if (r.isDir && !r.isCategory && r.registrationProgress < -0.5) {
-            dirsToCalculate.push_back(r.path);
-        }
-    }
-
-    if (dirsToCalculate.empty()) return;
-
-    for (const auto& dirPath : dirsToCalculate) {
-        {
-            QMutexLocker lock(&m_calcMutex);
-            if (m_activeCalculations.contains(dirPath)) continue;
-            m_activeCalculations.insert(dirPath);
-        }
-
-        // 使用 QThreadPool 异步提交
-        m_progressThreadPool.start([this, dirPath, reqId]() {
-            double progress = calculateFolderProgressInternal(dirPath);
-
-            // 回调主线程
-            QMetaObject::invokeMethod(this, [this, dirPath, progress, reqId]() {
-                // 检查请求 ID 是否一致，防止由于用户切换了文件夹导致过期回调错误写入
-                if (reqId == m_loadRequestId.load()) {
-                    m_model->updateRegistrationProgress(dirPath, progress);
-                }
-                
-                QMutexLocker lock(&m_calcMutex);
-                m_activeCalculations.remove(dirPath);
-            }, Qt::QueuedConnection);
-        });
-    }
-}
-
-double ContentPanel::calculateFolderProgressInternal(const QString& folderPath) {
-    long long totalCount = 0;
-    long long managedCount = 0;
-
-    // 高效底层的扫描器：仅枚举文件与文件夹，使用 Subdirectories 递归
-    QDirIterator it(folderPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        QString childPath = it.next();
-        totalCount++;
-
-        // 访问元数据读锁缓存
-        if (MetadataManager::instance().getMeta(childPath.toStdWString()).hasUserOperations()) {
-            managedCount++;
-        }
-    }
-
-    return (totalCount == 0) ? 0.0 : (double)managedCount / totalCount;
-}
-
 void ContentPanel::recalculateAndEmitStats() {
     const std::vector<ItemRecord>& records = m_model->allRecords();
     if (records.empty()) {
@@ -2974,44 +2872,41 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     // 1. 状态位图标绘制 (置顶 vs. 进度环 vs. 已录入 互斥) 
     // 2026-06-xx 物理修复：校准 ItemRole 作用域，确保 GridItemDelegate 编译通过 
     bool isPinned = index.data(IsLockedRole).toBool(); 
+    bool isManaged = index.data(ManagedRole).toBool(); 
     bool isDir = index.data(TypeRole).toString() == "folder";
-    int ingStatus = index.data(IngestionStatusRole).toInt();
     double progress = index.data(RegistrationProgressRole).toDouble();
-    QString path = index.data(PathRole).toString();
-    bool inManagedLib = AutoImportManager::isPathInManagedLibrary(path.toStdWString());
-
-    // 2026-11-xx 按照 Plan-113：失效数据半透明灰度处理
-    if (ingStatus == -1) {
-        painter->setOpacity(0.4);
-    }
      
     QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16);
     if (isPinned) { 
         // 置顶优先 
         QIcon pinIcon = UiHelper::getIcon("pin_vertical", Style::ActiveOrange, 16); 
         pinIcon.paint(painter, statusRect); 
-    } else if (ingStatus >= 0 && inManagedLib && (ingStatus == 0 || (isDir && progress >= 0.0 && progress < 1.0))) {
-        // 按照 Plan-3：显示进度环
+    } else if (isDir && progress >= 0.0 && progress < 1.0) {
+        // --- 绘制进度环 (开箱即用代码) --- 
         painter->save(); 
         painter->setRenderHint(QPainter::Antialiasing); 
+         
+        // 1. 底环 
         painter->setPen(QPen(QColor(60, 60, 60, 180), 2)); 
         painter->drawEllipse(statusRect.adjusted(1, 1, -1, -1)); 
+         
+        // 2. 进度弧 (品牌蓝 #3498db) 
         QPen pPen(QColor("#3498db"), 2); 
         pPen.setCapStyle(Qt::RoundCap); 
         painter->setPen(pPen); 
-        
-        double pVal = (ingStatus == 0 && progress < 0.1) ? 0.3 : progress; 
-        int spanAngle = -qRound(pVal * 360 * 16); 
+         
+        int spanAngle = -qRound(progress * 360 * 16); // 逆时针计算 
         painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
         painter->restore(); 
-    } else if (ingStatus == 1 && inManagedLib) { 
-        // 按照 Plan-3：显示对勾
+    } else if (isManaged || progress >= 1.0) { 
+        // 已录入但未置顶，显示绿对勾 
         QIcon checkIcon = UiHelper::getIcon("check_circle", SuccessGreen, 16); 
         checkIcon.paint(painter, statusRect); 
     } 
  
     // 2. 扩展名角标 
     QString type = index.data(TypeRole).toString();
+    QString path = index.data(PathRole).toString(); 
     QFileInfo info(path); 
     QString ext;
     if (type == "category" || type == "folder") {
@@ -3049,15 +2944,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
  
     // 3. 主图标 
     QIcon icon = index.data(Qt::DecorationRole).value<QIcon>(); 
-    if (ingStatus == -1) {
-        // 2026-11-xx 按照 Plan-113：Invalid (-1) 状态绘制半透明灰度效果
-        painter->save();
-        painter->setOpacity(0.5);
-        icon.paint(painter, m.iconRect, Qt::AlignCenter, QIcon::Disabled);
-        painter->restore();
-    } else {
-        icon.paint(painter, m.iconRect); 
-    }
+    icon.paint(painter, m.iconRect); 
  
     // 4. 评级星级 
     int rating = index.data(RatingRole).toInt(); 
@@ -3142,10 +3029,6 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     if (!isSelected && !index.data(ManagedRole).toBool()) { 
         painter->setPen(QColor(238, 238, 238, 120)); 
     } 
-
-    if (ingStatus == -1) {
-        painter->setPen(QColor(128, 128, 128, 180));
-    }
  
     // 2026-06-05 按照用户要求：恢复自动换行逻辑，并在“实在太长”时使用省略号 
     // 零宽空格注入以支持非标准断行（如下划线或点号） 

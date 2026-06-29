@@ -208,7 +208,6 @@ void MetadataManager::initFromScchMode() {
                 rm.isInvalid = sqlite3_column_int(stmt, 15) != 0;
                 rm.width = sqlite3_column_int(stmt, 16);
                 rm.height = sqlite3_column_int(stmt, 17);
-                rm.ingestionStatus = sqlite3_column_int(stmt, 18);
                 if (paletteBlob && paletteSize > 0) {
                     QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
                     QJsonDocument doc = QJsonDocument::fromJson(ba);
@@ -353,14 +352,6 @@ void MetadataManager::registerItem(const std::wstring& path) {
     ensureActivated(nPath);
     // 2. 提取图像尺寸 (Plan-29)
     tryExtractDimensions(nPath);
-
-    // 2026-11-xx 按照 Plan-113：登记初值必须为 Registered (0)
-    // 仅在视觉解析 (tryExtractColor) 完成后才由后台任务流转为 Ingested (1)
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nPath].ingestionStatus = 0;
-    }
-
     // 3. 物理同步 (存入数据库)
     syncPhysicalMetadata(nPath, false);
     // 4. 视觉预热 (提取颜色)
@@ -383,18 +374,12 @@ void MetadataManager::registerItemsAsync(const QStringList& paths) {
             // 1. 激活 (优化版，内含锁分离 I/O)
             ensureActivated(nPath);
             
-            // 2. 标记为 Registered (0)
-            {
-                std::unique_lock<std::shared_mutex> lock(m_mutex);
-                m_cache[nPath].ingestionStatus = 0;
-            }
-
-            // 3. 物理与视觉属性提取 (耗时操作)
+            // 2. 物理与视觉属性提取 (耗时操作)
             tryExtractDimensions(nPath);
             syncPhysicalMetadata(nPath, false); // 内部已异步化
             tryExtractColor(nPath);
             
-            // 4. 增量通知 UI
+            // 3. 增量通知 UI
             notifyUI(RefreshLevel::PathUpdate, qp);
         }
 #ifdef Q_OS_WIN
@@ -453,28 +438,6 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             rm.isManaged = existing.isManaged;
         }
 
-        // 2026-11-xx 按照 Plan-113：原地复活机制
-        // 若该 FID 之前处于失效状态 (-1)，且当前路径位于托管库，则自动恢复为已入库 (1)
-        if (!rm.fileId128.empty()) {
-            auto itFid = m_fidToPath.find(rm.fileId128);
-            if (itFid != m_fidToPath.end()) {
-                RuntimeMeta& oldMeta = m_cache[itFid->second];
-                if (oldMeta.ingestionStatus == -1) {
-                    rm.rating = oldMeta.rating;
-                    rm.color = oldMeta.color;
-                    rm.tags = oldMeta.tags;
-                    rm.note = oldMeta.note;
-                    rm.url = oldMeta.url;
-                    rm.width = oldMeta.width;
-                    rm.height = oldMeta.height;
-                    rm.palettes = oldMeta.palettes;
-                    rm.isManaged = oldMeta.isManaged;
-                    rm.ingestionStatus = 1; // 恢复为已入库
-                    qDebug() << "[Metadata] FRN 追踪：检测到失效项移回，自动复活元数据:" << QString::fromStdWString(nPath);
-                }
-            }
-        }
-
         m_cache[nPath] = rm;
         if (!rm.fileId128.empty()) {
             m_fidToPath[rm.fileId128] = nPath;
@@ -508,26 +471,6 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
     }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     debouncePersist(nPath);
-}
-
-QString MetadataManager::getDriveLetterByMftIndex(int driveIdx) {
-    return MftReader::instance().getDriveLetter(driveIdx);
-}
-
-uint64_t MetadataManager::getLastUsn(const std::wstring& volume) {
-    std::wstring serial = getVolumeSerialNumber(volume);
-    if (serial == L"UNKNOWN") return 0;
-    
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(serial);
-    return (uint64_t)DatabaseManager::instance().getSystemStat(db, "last_usn", 0);
-}
-
-void MetadataManager::setLastUsn(const std::wstring& volume, uint64_t usn) {
-    std::wstring serial = getVolumeSerialNumber(volume);
-    if (serial == L"UNKNOWN") return;
-
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(serial);
-    DatabaseManager::instance().setSystemStat(db, "last_usn", (long long)usn);
 }
 
 void MetadataManager::renameTag(const QString& oldName, const QString& newName) {
@@ -579,32 +522,6 @@ void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool no
         }
         if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
         debouncePersist(nPath);
-    }
-}
-
-void MetadataManager::setInvalidByFidPrefix(const std::string& fidPrefix, bool invalid) {
-    // 2026-06-26 按照 Plan-108：基于 FID 前缀批量标记失效
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
-    std::vector<std::wstring> affectedPaths;
-
-    for (auto& pair : m_cache) {
-        if (pair.second.fileId128.find(fidPrefix) == 0) {
-            if (pair.second.isInvalid != invalid || (invalid && pair.second.ingestionStatus != -1)) {
-                pair.second.isInvalid = invalid;
-                // 2026-11-xx 按照 Plan-113：物理移除时同步更新 ingestionStatus 为 -1
-                if (invalid) pair.second.ingestionStatus = -1; 
-                
-                if (pair.second.isManaged) {
-                    CategoryRepo::incrementTotalFileCount(invalid ? -1 : 1);
-                }
-                affectedPaths.push_back(pair.first);
-            }
-        }
-    }
-
-    lock.unlock();
-    for (const auto& p : affectedPaths) {
-        debouncePersist(p);
     }
 }
 
@@ -674,17 +591,6 @@ void MetadataManager::setManaged(const std::wstring& path, bool managed, bool no
     if (managed) debouncePersist(nPath); 
 }
 
-void MetadataManager::setIngestionStatus(const std::wstring& path, int status, bool notify) {
-    std::wstring nPath = MetadataManager::normalizePath(path);
-    ensureActivated(nPath);
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nPath].ingestionStatus = status;
-    }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    debouncePersist(nPath);
-}
-
 void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
@@ -706,10 +612,6 @@ void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std:
         RuntimeMeta& meta = m_cache[nPath];
         meta.color = color;
         meta.palettes = entries;
-        // 2026-11-xx 按照 Plan-113：视觉解析完成，流转为 Ingested (1)
-        if (meta.ingestionStatus == 0) {
-            meta.ingestionStatus = 1;
-        }
     }
     
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
@@ -1153,10 +1055,6 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
                     success = true;
                 }
             }
-        } else {
-            // 2026-11-xx 按照 Plan-3：非图像文件直接晋升
-            instance().setItemVisualMetadata(nPath, L"", {}, false);
-            success = true;
         }
     } else if (info.isDir()) {
         QDir subDir(qPath);
@@ -1198,10 +1096,6 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
                 instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), samples[bestIdx].palette, false);
                 success = true;
             }
-        } else {
-            // 2026-11-xx 按照 Plan-3：文件夹内无图像，直接晋升
-            instance().setItemVisualMetadata(nPath, L"", {}, false);
-            success = true;
         }
     }
 
@@ -1247,15 +1141,11 @@ void MetadataManager::processVisualRetryQueue() {
             bool ok = false;
 
             if (info.isFile()) {
-                if (ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower())) {
-                    auto palette = ArcMeta::UiHelper::extractPalette(qPath);
-                    if (!palette.isEmpty()) {
-                        QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
-                        setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), palette, true);
-                        ok = true;
-                    }
-                } else {
-                    setItemVisualMetadata(path, L"", {}, true);
+                // 2026-07-xx 按照建议：extractPalette 内部已通过 getImageForAnalysis 解决了 SVG 渲染问题
+                auto palette = ArcMeta::UiHelper::extractPalette(qPath);
+                if (!palette.isEmpty()) {
+                    QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
+                    setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), palette, true);
                     ok = true;
                 }
             } else if (info.isDir()) {
@@ -1296,9 +1186,6 @@ void MetadataManager::processVisualRetryQueue() {
                         setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), samples[bestIdx].palette, true);
                         ok = true;
                     }
-                } else {
-                    setItemVisualMetadata(path, L"", {}, true);
-                    ok = true;
                 }
             }
             
@@ -1337,72 +1224,6 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
     return fid;
 }
 
-bool MetadataManager::moveMetadataToVolume(const std::wstring& path, const std::wstring& targetPath, const std::wstring& srcVol, const std::wstring& dstVol) {
-    if (srcVol == dstVol) return false;
-
-    std::wstring nSrcPath = normalizePath(path);
-    std::wstring nDstPath = normalizePath(targetPath);
-
-    RuntimeMeta rMeta = getMeta(nSrcPath);
-    if (rMeta.fileId128.empty()) return false;
-
-    sqlite3* srcDb = DatabaseManager::instance().getMemoryDb(srcVol);
-    sqlite3* dstDb = DatabaseManager::instance().getMemoryDb(dstVol);
-    if (!srcDb || !dstDb) return false;
-
-    // 1. 从源库读取全量记录 (此处已由 rMeta 载入内存，直接写入目标库)
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nDstPath] = rMeta;
-        m_cache[nDstPath].isManaged = true; // 目标库写入即受控
-        m_fidToPath[rMeta.fileId128] = nDstPath;
-        // 清理旧路径关联
-        if (m_cache.count(nSrcPath)) m_cache.erase(nSrcPath);
-    }
-
-    // 2. 写入目标库
-    persistAsync(nDstPath, false);
-
-    // 3. 从源库删除
-    sqlite3_stmt* delStmt;
-    if (sqlite3_prepare_v2(srcDb, "DELETE FROM metadata WHERE file_id = ?", -1, &delStmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(delStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_step(delStmt);
-        sqlite3_finalize(delStmt);
-    }
-
-    // 4. 同步分类关联 (跨库后 category_items 也需要迁移)
-    sqlite3_stmt* catStmt;
-    if (sqlite3_prepare_v2(srcDb, "SELECT category_id, path_hint, added_at FROM category_items WHERE file_id = ?", -1, &catStmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(catStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-        while (sqlite3_step(catStmt) == SQLITE_ROW) {
-            int catId = sqlite3_column_int(catStmt, 0);
-            double addedAt = sqlite3_column_double(catStmt, 2);
-
-            sqlite3_stmt* insStmt;
-            if (sqlite3_prepare_v2(dstDb, "INSERT OR REPLACE INTO category_items (category_id, file_id, path_hint, added_at) VALUES (?, ?, ?, ?)", -1, &insStmt, nullptr) == SQLITE_OK) {
-                sqlite3_bind_int(insStmt, 1, catId);
-                sqlite3_bind_text(insStmt, 2, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-                sqlite3_bind_text16(insStmt, 3, nDstPath.c_str(), -1, SQLITE_TRANSIENT); // 更新 path_hint 为新路径
-                sqlite3_bind_double(insStmt, 4, addedAt);
-                sqlite3_step(insStmt);
-                sqlite3_finalize(insStmt);
-            }
-        }
-        sqlite3_finalize(catStmt);
-    }
-
-    // 从源库删除关联
-    if (sqlite3_prepare_v2(srcDb, "DELETE FROM category_items WHERE file_id = ?", -1, &delStmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(delStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_step(delStmt);
-        sqlite3_finalize(delStmt);
-    }
-
-    notifyUI(RefreshLevel::FullRebuild);
-    return true;
-}
-
 void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     
@@ -1421,7 +1242,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
     if (!db) return;
 
     sqlite3_stmt* stmt;
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     bool isNew = true;
     {
         sqlite3_stmt* checkStmt;
@@ -1460,7 +1281,6 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
         sqlite3_bind_int(stmt, 16, rMeta.isInvalid ? 1 : 0);
         sqlite3_bind_int(stmt, 17, rMeta.width);
         sqlite3_bind_int(stmt, 18, rMeta.height);
-        sqlite3_bind_int(stmt, 19, rMeta.ingestionStatus);
 
         if (sqlite3_step(stmt) == SQLITE_DONE) {
             if (isNew) {

@@ -4,7 +4,6 @@
 #include <vector>
 #include <string>
 #include <mutex>
-#include <atomic>
 
 namespace ArcMeta {
 
@@ -20,25 +19,9 @@ public:
     void startListening();
     void stopListening();
 
-    // 2026-06-26 按照 Plan-108：任务执行流
-    void startTask(const QString& drive);
-    void pauseTask(const QString& drive);
-
-    // 2026-11-xx 按照 Plan-113：物理准入接口
-    static std::wstring getManagedLibraryPath(const std::wstring& pathInDrive);
-    static bool isPathInManagedLibrary(const std::wstring& path);
-    static void ensureManagedFolderExists(const std::wstring& driveRoot);
-
-signals:
-    void taskFinished(const QString& drive);
-
 private slots:
     // 订阅 MftReader 发现的新增条目
     void onEntryAdded(uint64_t key);
-    void onEntriesBatchAdded(int driveIdx, const QList<uint64_t>& frns);
-    void onEntriesBatchUpdated(int driveIdx, const QList<uint64_t>& frns);
-    void onEntryRemoved(uint64_t key);
-    void onEntryUpdated(uint64_t key);
     // 去抖超时，合并写入数据库
     void processImportQueue();
 
@@ -53,7 +36,6 @@ private:
     std::vector<std::wstring> m_pendingPaths;
     std::mutex m_queueMutex;
     bool m_isListening = false;
-    std::atomic<bool> m_globalPaused{false};
 };
 
 } // namespace ArcMeta

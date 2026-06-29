@@ -69,12 +69,6 @@ public:
      */
     sqlite3* getGlobalDb();
 
-    /**
-     * @brief 存取系统统计信息 (2026-11-xx 按照 Plan-4：支持 USN 持久化)
-     */
-    long long getSystemStat(sqlite3* db, const std::string& key, long long defaultValue = 0);
-    void setSystemStat(sqlite3* db, const std::string& key, long long value);
-
 private:
     DatabaseManager(QObject* parent = nullptr);
     ~DatabaseManager();

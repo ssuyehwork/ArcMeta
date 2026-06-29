@@ -3,7 +3,6 @@
 #endif
 #include "MftReader.h"
 #include "UsnWatcher.h"
-#include "../meta/MetadataManager.h"
 #include <winioctl.h>
 #include <Shlwapi.h>
 #pragma comment(lib, "Shlwapi.lib")
@@ -43,22 +42,6 @@ static int64_t filetimeToUnixMs(int64_t filetime) {
     if (filetime <= 116444736000000000LL) return 0;
     // 10000LL 将 100纳秒 转换为 毫秒 (1ms = 10,000 * 100ns)
     return (filetime - 116444736000000000LL) / 10000LL;
-}
-
-// 2026-06-26 按照 Plan-108：NtQueryInformationFile 所需定义
-typedef struct _FILE_NAME_INFORMATION {
-    ULONG FileNameLength;
-    WCHAR FileName[1];
-} FILE_NAME_INFORMATION, *PFILE_NAME_INFORMATION;
-
-extern "C" {
-    __declspec(dllimport) LONG __stdcall NtQueryInformationFile(
-        HANDLE FileHandle,
-        PVOID IoStatusBlock,
-        PVOID FileInformation,
-        ULONG Length,
-        ULONG FileInformationClass
-    );
 }
 
 static bool enablePrivilege(LPCWSTR privilege) {
@@ -128,7 +111,6 @@ void MftReader::clearInternal() {
     std::vector<uint32_t>().swap(m_sorted_indices);
 
     m_drive_list.clear();
-    m_drive_serials.clear();
     m_drive_active_mask = 0;
     m_frn_to_idx.clear();
     {
@@ -270,7 +252,6 @@ void MftReader::buildIndex(const QStringList& drives) {
         
         size_t dIdx = m_drive_list.size();
         m_drive_list.push_back(sr.volume);
-        m_drive_serials.push_back(MetadataManager::getVolumeSerialNumber(sr.volume));
         if (dIdx < 32) m_drive_active_mask.fetch_or(1 << dIdx);
         m_next_usns[sr.volume] = sr.res.nextUsn;
         mergeDriveResult(sr.volume, sr.res, dIdx);
@@ -353,7 +334,6 @@ bool MftReader::loadFromCache() {
                     for (const auto& [drive, usn] : usnMap) {
                         driveName = QString::fromStdString(drive).toStdWString();
                         m_drive_list.push_back(driveName);
-                        m_drive_serials.push_back(MetadataManager::getVolumeSerialNumber(driveName));
                         m_next_usns[driveName] = usn;
                     }
                     currentTotal = m_frns.size();
@@ -614,23 +594,6 @@ uint32_t MftReader::getAttributes(int index) const {
     return m_attributes[index];
 }
 
-QString MftReader::getDriveLetter(int driveIdx) const {
-    QReadLocker lock(&m_dataLock);
-    if (driveIdx < 0 || static_cast<size_t>(driveIdx) >= m_drive_list.size()) return "";
-    
-    // 2026-11-xx 按照 Plan-4：增加卷序列号动态反查，解决盘符漂移导致的映射失效
-    std::wstring serial = m_drive_serials[driveIdx];
-    const auto drives = QDir::drives();
-    for (const QFileInfo& d : drives) {
-        if (MetadataManager::getVolumeSerialNumber(d.absolutePath().toStdWString()) == serial) {
-            return d.absolutePath().left(2).toUpper();
-        }
-    }
-
-    std::wstring vol = m_drive_list[driveIdx];
-    return QString::fromStdWString(vol).left(2).toUpper();
-}
-
 uint64_t MftReader::getFrn(int index) const {
     QReadLocker lock(&m_dataLock);
     if (index < 0 || index >= (int)m_frns.size()) return 0;
@@ -732,33 +695,6 @@ std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
     // 2026-05-29 物理修复：公开接口持有读锁，内部调用私有无锁逻辑，解决递归死锁。
     QReadLocker readLock(&m_dataLock);
     return getPathFastInternal(driveIdx, frn);
-}
-
-QString MftReader::getPathByFrn(HANDLE hVol, DWORDLONG frn) {
-    // 2026-06-26 按照 Plan-108：物理级路径实时反查 (NtQueryInformationFile)
-    enablePrivilege(SE_BACKUP_NAME);
-    FILE_ID_DESCRIPTOR id;
-    id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
-    id.Type = FileIdType;
-    id.FileId.QuadPart = frn;
-
-    HANDLE hFile = OpenFileById(hVol, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, 0);
-    if (hFile == INVALID_HANDLE_VALUE) return "";
-
-    struct {
-        ULONG_PTR Status;
-        ULONG_PTR Information;
-    } ioStatus;
-    
-    BYTE buffer[1024];
-    LONG status = NtQueryInformationFile(hFile, &ioStatus, buffer, sizeof(buffer), 9); // 9 = FileNameInformation
-    CloseHandle(hFile);
-
-    if (status >= 0) {
-        PFILE_NAME_INFORMATION pInfo = (PFILE_NAME_INFORMATION)buffer;
-        return QString::fromWCharArray(pInfo->FileName, pInfo->FileNameLength / sizeof(WCHAR));
-    }
-    return "";
 }
 
 std::wstring MftReader::getPathFastInternal(size_t driveIdx, uint64_t frn) {
@@ -1250,23 +1186,12 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
         }
     }
 
-    // 2026-11-xx 按照 Plan-4：完善信号感知链，确保大批量更新信号不丢失
+    // 2026-xx-xx 按照 Plan-106：策略：小批量发送单体信号（保证实时性），大批量发送宏观信号（保护 UI）
     if (addedKeys.size() + updatedKeys.size() < 50) {
         for (uint64_t key : addedKeys) emit entryAdded(key);
         for (uint64_t key : updatedKeys) emit entryUpdated(key);
     } else {
-        // 超过 50 项视为“洪流”，发射批量信号供 AutoImportManager 感知
-        if (!addedKeys.empty()) {
-            QList<uint64_t> frns;
-            for (uint64_t key : addedKeys) frns.append(key & 0x0000FFFFFFFFFFFFull);
-            emit entriesBatchAdded(static_cast<int>(dIdx), frns);
-        }
-        if (!updatedKeys.empty()) {
-            QList<uint64_t> frns;
-            for (uint64_t key : updatedKeys) frns.append(key & 0x0000FFFFFFFFFFFFull);
-            emit entriesBatchUpdated(static_cast<int>(dIdx), frns);
-        }
-        // 仅发射一次全局变动信号以刷新 UI 列表
+        // 超过 50 项视为“洪流”，仅发射一次全局变动信号
         emit dataChanged(-1); 
     }
 }

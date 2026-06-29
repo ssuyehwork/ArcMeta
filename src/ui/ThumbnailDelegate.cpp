@@ -1,6 +1,5 @@
 #include "ThumbnailDelegate.h"
 #include "ContentPanel.h"
-#include "../core/AutoImportManager.h"
 #include "../meta/MetadataManager.h"
 #include <QPainter>
 #include <QPainterPath>
@@ -29,7 +28,6 @@ void ThumbnailDelegate::setTypeRole(int role) { m_typeRole = role; }
 void ThumbnailDelegate::setIsEmptyRole(int role) { m_isEmptyRole = role; }
 void ThumbnailDelegate::setColorRole(int role) { m_colorRole = role; }
 void ThumbnailDelegate::setRegistrationProgressRole(int role) { m_registrationProgressRole = role; }
-void ThumbnailDelegate::setIngestionStatusRole(int role) { m_ingestionStatusRole = role; }
 
 ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptionViewItem& option) const {
     Metrics m;
@@ -148,36 +146,31 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     // [新增] 状态位图标绘制 (置顶 vs. 进度环 vs. 已录入 互斥)
     if (m_pinnedRole != -1 && m_managedRole != -1) {
         bool isPinned = index.data(m_pinnedRole).toBool();
+        bool isManaged = index.data(m_managedRole).toBool();
         bool isDir = index.data(m_typeRole).toString() == "folder";
         double progress = (m_registrationProgressRole != -1) ? index.data(m_registrationProgressRole).toDouble() : -1.0;
-        int ingestionStatus = (m_ingestionStatusRole != -1) ? index.data(m_ingestionStatusRole).toInt() : -1;
-        QString path = (m_pathRole != -1) ? index.data(m_pathRole).toString() : "";
-        bool inManagedLib = AutoImportManager::isPathInManagedLibrary(path.toStdWString());
-
-        // 2026-11-xx 按照 Plan-113：失效数据半透明灰度处理
-        if (ingestionStatus == -1) {
-            painter->setOpacity(0.4);
-        }
 
         QRect statusRect(m.cardRect.right() - 22, m.cardRect.top() + 8, 16, 16);
         if (isPinned) {
             UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, statusRect);
-        } else if (ingestionStatus >= 0 && inManagedLib && (ingestionStatus == 0 || (isDir && progress >= 0.0 && progress < 1.0))) {
-            // 按照 Plan-3：仅对 Registered(0) 或递归中的文件夹显示进度环
+        } else if (isDir && progress >= 0.0 && progress < 1.0) {
+            // --- 绘制进度环 (开箱即用代码) --- 
             painter->save(); 
             painter->setRenderHint(QPainter::Antialiasing); 
+             
+            // 1. 底环 
             painter->setPen(QPen(QColor(60, 60, 60, 180), 2)); 
             painter->drawEllipse(statusRect.adjusted(1, 1, -1, -1)); 
+             
+            // 2. 进度弧 (品牌蓝 #3498db) 
             QPen pPen(QColor("#3498db"), 2); 
             pPen.setCapStyle(Qt::RoundCap); 
             painter->setPen(pPen); 
              
-            double pVal = (ingestionStatus == 0 && progress < 0.1) ? 0.3 : progress;
-            int spanAngle = -qRound(pVal * 360 * 16); 
+            int spanAngle = -qRound(progress * 360 * 16); // 逆时针计算 
             painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
             painter->restore(); 
-        } else if (ingestionStatus == 1 && inManagedLib) {
-            // 按照 Plan-3：仅对托管库内 Ingested(1) 的项目显示对勾
+        } else if (isManaged || progress >= 1.0) {
             UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, statusRect);
         }
     }

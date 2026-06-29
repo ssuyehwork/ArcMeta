@@ -34,9 +34,7 @@
 #include <QHBoxLayout>
 #include <QSvgRenderer>
 #include <QPainter>
-#include <QDirIterator>
 #include <QIcon>
-#include <string>
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QCursor>
@@ -48,14 +46,11 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
-#include "DriveButton.h"
-#include "../core/AutoImportManager.h"
 using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
 #include <QDir>
 #include "../meta/MetadataManager.h"
-#include "sqlite3.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -313,40 +308,17 @@ void MainWindow::initUi() {
             
             QModelIndex idx = indexes.first();
             QString path = paths.first();
+            QFileInfo info(path);
             
-            // 2026-11-15 按照 Plan-110：彻底消除主线程 QFileInfo 磁盘访问，改用模型缓存 Role
-            bool      isDir  = idx.data(IsDirRole).toBool();
-            long long size   = idx.data(FileSizeRole).toLongLong();
-            long long ctime  = idx.data(CtimeRole).toLongLong();
-            long long mtime  = idx.data(MtimeRole).toLongLong();
-            long long atime  = idx.data(AtimeRole).toLongLong();
-            QString   suffix = idx.data(SuffixRole).toString();
-
-            // 文件名截取逻辑（零磁盘 I/O）
-            int lastSlash = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
-            QString fileName = (lastSlash == -1) ? path : path.mid(lastSlash + 1);
-            if (fileName.isEmpty()) fileName = path;
-
-            // 属性格式化
-            QString typeStr = isDir ? "文件夹" : (suffix.isEmpty() ? "文件" : suffix.toUpper() + " 文件");
-            QString sizeStr = isDir ? "-" : 
-                (size < 1024 ? QString::number(size) + " B" : 
-                 size < 1024 * 1024 ? QString::number(size / 1024.0, 'f', 1) + " KB" : 
-                 QString::number(size / (1024.0 * 1024.0), 'f', 1) + " MB");
-            
-            auto formatTime = [](long long ms) {
-                return (ms > 0) ? QDateTime::fromMSecsSinceEpoch(ms).toString("yyyy-MM-dd") : "-";
-            };
-
             // 基础信息展示
             m_metaPanel->updateInfo(
-                fileName, 
-                typeStr,
-                sizeStr,
-                formatTime(ctime),
-                formatTime(mtime),
-                formatTime(atime),
-                path,
+                info.fileName().isEmpty() ? path : info.fileName(), 
+                info.isDir() ? "文件夹" : info.suffix().toUpper() + " 文件",
+                info.isDir() ? "-" : QString::number(info.size() / 1024) + " KB",
+                info.birthTime().toString("yyyy-MM-dd"),
+                info.lastModified().toString("yyyy-MM-dd"),
+                info.lastRead().toString("yyyy-MM-dd"),
+                info.absoluteFilePath(),
                 idx.data(EncryptedRole).toBool()
             );
 
@@ -362,8 +334,7 @@ void MainWindow::initUi() {
             m_metaPanel->setURL(rm.url);
 
             // 设置分类显示 (根据当前 UI 状态或路径推导)
-            int lastSep = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
-            QString category = isDir ? path : (lastSep > 0 ? path.left(lastSep) : path);
+            QString category = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
             m_metaPanel->setCategory(category);
 
             // 将色板数据转换为 QVector<QPair<QColor, float>>
@@ -1110,11 +1081,8 @@ void MainWindow::setupSplitters() {
     connect(&CoreController::instance(), &CoreController::isIndexingChanged, this, updateStatus);
     updateStatus();
 
-    initDriveBar();
-
     mainL->addWidget(m_titleBarWidget);
     mainL->addWidget(m_navBarWidget);
-    mainL->addWidget(m_driveBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
 
@@ -1147,16 +1115,6 @@ void MainWindow::setupCustomTitleBarButtons() {
         ).arg(hoverColor));
         return btn;
     };
-
-    m_btnToggleDriveBar = createTitleBtn("chevrons_down");
-    m_btnToggleDriveBar->setProperty("tooltipText", "展开/收起盘符管理栏");
-    m_btnToggleDriveBar->installEventFilter(m_hoverFilter);
-    m_btnToggleDriveBar->setCheckable(true);
-    m_btnToggleDriveBar->setChecked(true);
-    connect(m_btnToggleDriveBar, &QPushButton::toggled, this, [this](bool checked) {
-        m_driveBarWidget->setVisible(checked);
-        m_btnToggleDriveBar->setIcon(UiHelper::getIcon(checked ? "chevrons_down" : "chevrons_up", QColor("#EEEEEE")));
-    });
 
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
@@ -1244,7 +1202,6 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
-    layout->addWidget(m_btnToggleDriveBar, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnLayout, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnCreate, 0, Qt::AlignVCenter);
@@ -1268,140 +1225,6 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     // 逻辑：置顶切换
     connect(m_btnPinTop, &QPushButton::toggled, this, &MainWindow::onPinToggled);
-}
-
-void MainWindow::initDriveBar() {
-    connect(&AutoImportManager::instance(), &AutoImportManager::taskFinished, this, [this](const QString& drive) {
-        if (m_driveButtons.contains(drive)) {
-            m_driveButtons[drive]->setState(DriveButton::Active);
-        }
-    });
-
-    m_driveBarWidget = new QWidget(this);
-    m_driveBarWidget->setObjectName("DriveBar");
-    m_driveBarWidget->setFixedHeight(42);
-    m_driveBarWidget->setStyleSheet(QString(
-        "QWidget#DriveBar { background-color: %1; border-bottom: 1px solid %2; }"
-    ).arg(qssColor(BackgroundHeader)).arg(qssColor(BorderColor)));
-
-    m_driveBarLayout = new QHBoxLayout(m_driveBarWidget);
-    m_driveBarLayout->setContentsMargins(15, 0, 15, 0);
-    m_driveBarLayout->setSpacing(8);
-
-    auto drives = QDir::drives();
-    for (const QFileInfo& drive : drives) {
-        QString letter = drive.absolutePath().left(2);
-        DriveButton* btn = new DriveButton(letter, m_driveBarWidget);
-        m_driveButtons[letter] = btn;
-        m_driveBarLayout->addWidget(btn);
-
-        connect(btn, &QPushButton::clicked, this, &MainWindow::onDriveButtonClicked);
-        btn->setContextMenuPolicy(Qt::CustomContextMenu);
-        connect(btn, &QWidget::customContextMenuRequested, this, &MainWindow::onDriveButtonContextMenu);
-        
-        QString managedPath = drive.absolutePath() + "ArcMeta.Library_" + letter.left(1);
-        if (QDir(managedPath).exists()) {
-            btn->setState(DriveButton::Active);
-        } else {
-            btn->setState(DriveButton::Inactive);
-        }
-    }
-    m_driveBarLayout->addStretch();
-}
-
-void MainWindow::onDriveButtonClicked() {
-    DriveButton* btn = qobject_cast<DriveButton*>(sender());
-    if (!btn) return;
-    QString letter = btn->driveLetter();
-    DriveButton::State currentState = btn->state();
-
-    if (currentState == DriveButton::Inactive) {
-        QString managedPath = letter + "/ArcMeta.Library_" + letter.left(1);
-        if (!QDir(managedPath).exists()) {
-             ToolTipOverlay::instance()->showText(QCursor::pos(), "请右键创建托管库后再激活", 2000, Style::WarningOrange);
-             return;
-        }
-        btn->setState(DriveButton::Running);
-        AutoImportManager::instance().startTask(letter);
-    } else if (currentState == DriveButton::Active) {
-        btn->setState(DriveButton::Running);
-        AutoImportManager::instance().startTask(letter);
-    } else if (currentState == DriveButton::Running) {
-        btn->setState(DriveButton::Paused);
-        AutoImportManager::instance().pauseTask(letter);
-    } else if (currentState == DriveButton::Paused) {
-        btn->setState(DriveButton::Running);
-        AutoImportManager::instance().startTask(letter);
-    }
-}
-
-void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
-    DriveButton* btn = qobject_cast<DriveButton*>(sender());
-    if (!btn) return;
-    QString letter = btn->driveLetter();
-    QString managedPath = letter + "/ArcMeta.Library_" + letter.left(1);
-
-    QMenu menu(this);
-    UiHelper::applyMenuStyle(&menu);
-    if (!QDir(managedPath).exists()) {
-        menu.addAction("创建托管文件夹")->setData(1);
-    } else {
-        menu.addAction("打开托管文件夹")->setData(2);
-        menu.addAction("重新扫描该盘")->setData(3);
-    }
-
-    QAction* act = menu.exec(btn->mapToGlobal(pos));
-    if (!act) return;
-    int val = act->data().toInt();
-    if (val == 1) {
-        if (QDir().mkpath(managedPath)) {
-            // 2026-11-15 按照 Plan-108：创建成功后将配置同步至 AppConfig
-            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(letter.toStdWString());
-            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-            AppConfig::instance().setValue(key, "ArcMeta.Library_" + letter.left(1));
-
-            btn->setState(DriveButton::Active);
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建成功", 1500, Style::SuccessGreen);
-        }
-    } else if (val == 2) {
-        ShellHelper::openInExplorer(managedPath);
-    } else if (val == 3) {
-        btn->setState(DriveButton::Running);
-        // 2026-11-15 按照 Plan-108：执行物理全量扫描并注入 pending_imports
-        (void)QtConcurrent::run([this, letter, managedPath]() {
-            QDir dir(managedPath);
-            QStringList filters; filters << "*" << "*.*";
-            QDirIterator it(managedPath, filters, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-            
-            sqlite3* db = DatabaseManager::instance().getGlobalDb();
-            const char* sql = "REPLACE INTO pending_imports (frn, drive, path, status, timestamp) VALUES (?, ?, ?, 1, ?)";
-            sqlite3_stmt* stmt;
-            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                while (it.hasNext()) {
-                    QString fullPath = it.next();
-                    std::string fid;
-                    long long size = 0, ctime = 0, mtime = 0, atime = 0;
-                    std::wstring type;
-                    std::wstring frnStr;
-                    // 通过物理 API 实时反查 FRN
-                    if (MetadataManager::instance().fetchWinApiMetadataDirect(fullPath.toStdWString(), fid, &frnStr, &size, &type, &ctime, &mtime, &atime)) {
-                        unsigned long long frn = std::stoull(frnStr, nullptr, 16);
-                        sqlite3_bind_int64(stmt, 1, frn);
-                        sqlite3_bind_text(stmt, 2, letter.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_text(stmt, 3, fullPath.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_int64(stmt, 4, QDateTime::currentMSecsSinceEpoch());
-                        sqlite3_step(stmt);
-                        sqlite3_reset(stmt);
-                    }
-                }
-                sqlite3_finalize(stmt);
-            }
-            // 扫描完成后触发 AutoImportManager 消费任务
-            QMetaObject::invokeMethod(this, [letter]() {
-                AutoImportManager::instance().startTask(letter);
-            }, Qt::QueuedConnection);
-        });
-    }
 }
 
 void MainWindow::initIdleDetector() {

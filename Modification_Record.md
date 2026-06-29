@@ -604,3 +604,12 @@
     - **离线感知**: 通过持久化 USN 指针，实现了应用关闭期间物理变动的可靠追平。
     - **洪流防御**: 补全了批量更新信号感知，确保在极端 I/O 场景下数据不丢失。
     - **精准递归**: 确立了文件夹变动触发的异步递归补全逻辑，解决了“降维感知”导致的子项入库遗漏。
+
+[2026-11-17 10:00:00]
+- **任务描述**: 优化自动入库路径获取逻辑，消除实时反查开销。
+- **修改文件**:
+    - **修改**: src/core/AutoImportManager.cpp (重构 onEntryAdded, onEntriesBatchAdded, onEntriesBatchUpdated, onEntryUpdated)
+- **修改原因**: 移除依赖 Win32 API (getPathByFrn) 的实时路径反查，改用 MftReader 内存索引，解决时序竞态问题并提升性能。
+- **优化点**:
+    - **性能提升**: 避免了频繁的 CreateFileW 和 NtQueryInformationFile 调用。
+    - **一致性**: 确保路径来源与 USN 更新后的内存索引完全同步，消除物理-逻辑镜像的时间差。
