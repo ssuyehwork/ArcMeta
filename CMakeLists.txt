@@ -86,6 +86,8 @@ set(SOURCES
     src/ui/ColorPicker.h
     src/ui/ContentPanel.cpp
     src/ui/ContentPanel.h
+    src/ui/DriveButton.cpp
+    src/ui/DriveButton.h
     src/ui/DropJustifiedView.cpp
     src/ui/DropJustifiedView.h
     src/ui/DropListView.cpp
