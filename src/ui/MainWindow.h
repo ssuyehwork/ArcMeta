@@ -58,6 +58,8 @@ private slots:
     void onForwardClicked();
     void onUpClicked();
     void onStatusBarStatsUpdated(int fileCount, int folderCount, int totalCount);
+    void onDriveButtonClicked();
+    void onDriveButtonContextMenu(const QPoint& pos);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -91,6 +93,7 @@ private:
     void initUi();
     void updateNavButtons();
     void updateStatusBar();
+    void initDriveBar();
 
     // 2026-07-xx 导航协议常量
     static inline const QString kProtocolFile     = "file://";
@@ -138,6 +141,7 @@ private:
     QStringList  m_searchHistory;             // 最近 10 条关键词
     
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
+    QPushButton* m_btnToggleDriveBar = nullptr;
     QPushButton* m_btnSync   = nullptr;
     QPushButton* m_btnLayout = nullptr;
     QPushButton* m_btnCreate = nullptr;
@@ -145,6 +149,11 @@ private:
     QPushButton* m_btnMin = nullptr;
     QPushButton* m_btnMax = nullptr;
     QPushButton* m_btnClose = nullptr;
+
+    // 盘符管理栏组件
+    QWidget* m_driveBarWidget = nullptr;
+    QHBoxLayout* m_driveBarLayout = nullptr;
+    QMap<QString, class DriveButton*> m_driveButtons;
 
     // 状态管理
     bool m_isPinned = false;

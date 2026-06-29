@@ -11,4 +11,9 @@
     - 引入 `#3A3A3A` 灰色占位背景，消除从“60% 缩小图标”到“全屏缩略图”的视觉闪烁。
 
 ### 盘符工具栏模块移植 (Plan-115)
-- **src/ui/DriveButton.h / .cpp**: 新增盘符状态机按钮，支持 Inactive/Active/Running/Paused 四种视觉状态及旋转动画。
+- [2026-06-29 15:16:16] **src/ui/DriveButton.h / .cpp**: 从旧版本还原盘符状态机按钮组件，支持 Inactive/Active/Running/Paused 四种视觉状态及旋转动画。
+- [2026-06-29 16:38:19] **src/ui/MainWindow.h / .cpp**: 
+    - 物理加固标题栏按钮组，找回缺失的 `m_btnToggleDriveBar` 切换按钮（当前共 8 个按钮）。
+    - 严格遵循全局视觉规范，在标题栏、地址栏、盘符栏与主体区域间添加 `addSpacing(5)` 物理间距。
+    - 升级 `m_driveBarWidget` 样式，实现上下双 1px 切割线（`border-top` & `border-bottom`）。
+    - 集成 `m_driveBarWidget` 并实现 `initDriveBar` 自动扫描系统盘符生成按钮组。

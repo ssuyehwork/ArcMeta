@@ -46,6 +46,8 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+#include "DriveButton.h"
+#include "../util/ShellHelper.h"
 using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
@@ -938,6 +940,8 @@ void MainWindow::setupSplitters() {
     // --- 1. 自定义标题栏 (第一行) ---
     m_titleBarWidget = new QWidget(centralC);
     m_titleBarWidget->setObjectName("TitleBar");
+    // 2026-xx-xx 按照用户要求：添加 1px 底部切割线，与全局规范对齐
+    m_titleBarWidget->setStyleSheet(QString("QWidget#TitleBar { border: none; border-bottom: 1px solid %1; background: transparent; }").arg(qssColor(BorderColor)));
     m_titleBarWidget->setFixedHeight(34);
     m_titleBarLayout = new QHBoxLayout(m_titleBarWidget);
     // 2026-xx-xx 按照用户要求：标题栏左侧与右侧均保持 5px 呼吸边距
@@ -959,9 +963,7 @@ void MainWindow::setupSplitters() {
     // --- 2. 统一导航栏 (第二行) ---
     m_navBarWidget = new QWidget(centralC);
     m_navBarWidget->setObjectName("NavBar");
-    // 2026-06-xx 物理修正：移除 QWidget 可能自带的 1px 底部边框干扰，确保 100% 重合
     m_navBarWidget->setStyleSheet("QWidget#NavBar { border: none; background: transparent; }");
-    // 2026-06-xx 物理修正：将固定高度从 37px 增加到 42px (32+5+5)
     m_navBarWidget->setFixedHeight(42); 
     
     m_navBarLayout = new QHBoxLayout(m_navBarWidget);
@@ -1081,7 +1083,10 @@ void MainWindow::setupSplitters() {
     connect(&CoreController::instance(), &CoreController::isIndexingChanged, this, updateStatus);
     updateStatus();
 
+    initDriveBar();
+
     mainL->addWidget(m_titleBarWidget);
+    mainL->addWidget(m_driveBarWidget);
     mainL->addWidget(m_navBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
@@ -1115,6 +1120,18 @@ void MainWindow::setupCustomTitleBarButtons() {
         ).arg(hoverColor));
         return btn;
     };
+
+    m_btnToggleDriveBar = createTitleBtn("chevrons_down");
+    m_btnToggleDriveBar->setProperty("tooltipText", "展开/收起盘符管理栏");
+    m_btnToggleDriveBar->installEventFilter(m_hoverFilter);
+    m_btnToggleDriveBar->setCheckable(true);
+    m_btnToggleDriveBar->setChecked(true);
+    connect(m_btnToggleDriveBar, &QPushButton::toggled, this, [this](bool checked) {
+        if (m_driveBarWidget) {
+            m_driveBarWidget->setVisible(checked);
+            m_btnToggleDriveBar->setIcon(UiHelper::getIcon(checked ? "chevrons_down" : "chevrons_up", QColor("#EEEEEE")));
+        }
+    });
 
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
@@ -1202,6 +1219,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
+    layout->addWidget(m_btnToggleDriveBar, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnLayout, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnCreate, 0, Qt::AlignVCenter);
@@ -1561,6 +1579,78 @@ void MainWindow::savePanelVisibility() {
     if (!m_filterPanel->isVisible())   hiddenPanels << "filter";
     
     AppConfig::instance().setValue("MainWindow/PanelVisibility", hiddenPanels);
+}
+
+void MainWindow::initDriveBar() {
+    m_driveBarWidget = new QWidget(this);
+    m_driveBarWidget->setObjectName("DriveBar");
+    m_driveBarWidget->setFixedHeight(42);
+    m_driveBarWidget->setStyleSheet(QString(
+        "QWidget#DriveBar { background-color: %1; border-bottom: 1px solid %2; }"
+    ).arg(qssColor(BackgroundHeader)).arg(qssColor(BorderColor)));
+
+    m_driveBarLayout = new QHBoxLayout(m_driveBarWidget);
+    m_driveBarLayout->setContentsMargins(15, 5, 15, 5);
+    m_driveBarLayout->setSpacing(8);
+
+    auto drives = QDir::drives();
+    for (const QFileInfo& drive : drives) {
+        QString letter = drive.absolutePath().left(2);
+        if (letter.endsWith("/")) letter = letter.left(1) + ":";
+        
+        DriveButton* btn = new DriveButton(letter, m_driveBarWidget);
+        m_driveButtons[letter] = btn;
+        m_driveBarLayout->addWidget(btn);
+
+        connect(btn, &QPushButton::clicked, this, &MainWindow::onDriveButtonClicked);
+        btn->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(btn, &QWidget::customContextMenuRequested, this, &MainWindow::onDriveButtonContextMenu);
+        
+        // 根据托管库是否存在初始化状态
+        QString managedPath = drive.absolutePath() + "ArcMeta.Library_" + letter.left(1);
+        if (QDir(managedPath).exists()) {
+            btn->setState(DriveButton::Active);
+        } else {
+            btn->setState(DriveButton::Inactive);
+        }
+    }
+    m_driveBarLayout->addStretch();
+}
+
+void MainWindow::onDriveButtonClicked() {
+    // TODO: 盘符点击逻辑待后期安排
+    qDebug() << "[Main] Drive button clicked (TODO)";
+}
+
+void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
+    DriveButton* btn = qobject_cast<DriveButton*>(sender());
+    if (!btn) return;
+    QString letter = btn->driveLetter();
+    QString managedPath = letter + "/ArcMeta.Library_" + letter.left(1);
+
+    QMenu menu(this);
+    UiHelper::applyMenuStyle(&menu);
+    if (!QDir(managedPath).exists()) {
+        menu.addAction("创建托管文件夹")->setData(1);
+    } else {
+        menu.addAction("打开托管文件夹")->setData(2);
+        menu.addAction("重新扫描该盘")->setData(3);
+    }
+
+    QAction* act = menu.exec(btn->mapToGlobal(pos));
+    if (!act) return;
+    int val = act->data().toInt();
+    if (val == 1) {
+        if (QDir().mkpath(managedPath)) {
+            btn->setState(DriveButton::Active);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建成功", 1500, Style::SuccessGreen);
+        }
+    } else if (val == 2) {
+        ShellHelper::openInExplorer(managedPath);
+    } else if (val == 3) {
+        // TODO: 重新扫描逻辑
+        qDebug() << "[Main] Request rescan for" << letter << "(TODO)";
+    }
 }
 
 } // namespace ArcMeta
