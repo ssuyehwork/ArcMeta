@@ -94,9 +94,6 @@ void DriveButton::mousePressEvent(QMouseEvent* event) {
 }
 
 void DriveButton::mouseReleaseEvent(QMouseEvent* event) {
-    if (rect().contains(event->pos()) && event->button() == Qt::LeftButton) {
-        emit clicked();
-    }
     QPushButton::mouseReleaseEvent(event);
 }
 
