@@ -58,87 +58,70 @@ void AutoImportManager::stopListening() {
 }
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
-    uint64_t frn = key & 0x0000FFFFFFFFFFFFull;
-    int driveIdx = static_cast<int>(key >> 48);
-    
-    QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
-    if (driveLetter.isEmpty()) return;
+    int index = MftReader::instance().getIndexByKey(key);
+    if (index < 0) return;
 
-    HANDLE hVol = CreateFileW((L"\\\\.\\" + driveLetter.toStdWString()).c_str(), 
-                              GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
-                              NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    if (hVol != INVALID_HANDLE_VALUE) {
-        QString relPath = MftReader::getPathByFrn(hVol, frn);
-        CloseHandle(hVol);
-        if (!relPath.isEmpty()) {
-            QString fullPath = driveLetter + relPath;
-            std::wstring wPath = fullPath.toStdWString();
+    QString fullPath = MftReader::instance().getFullPath(index);
+    if (fullPath.isEmpty()) return;
 
-            if (isPathInManagedLibrary(wPath)) {
-                MetadataManager::instance().registerItem(wPath);
-                
-                if (QFileInfo(fullPath).isDir()) {
-                    (void)QtConcurrent::run([fullPath]() {
-                        QStringList toRegister;
-                        QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-                        while (it.hasNext()) {
-                            toRegister << it.next();
-                            if (toRegister.size() >= 100) {
-                                MetadataManager::instance().registerItemsAsync(toRegister);
-                                toRegister.clear();
-                            }
-                        }
-                        if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
-                    });
+    std::wstring wPath = fullPath.toStdWString();
+    if (isPathInManagedLibrary(wPath)) {
+        MetadataManager::instance().registerItem(wPath);
+
+        if (QFileInfo(fullPath).isDir()) {
+            (void)QtConcurrent::run([fullPath]() {
+                QStringList toRegister;
+                QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+                while (it.hasNext()) {
+                    toRegister << it.next();
+                    if (toRegister.size() >= 100) {
+                        MetadataManager::instance().registerItemsAsync(toRegister);
+                        toRegister.clear();
+                    }
                 }
-
-                {
-                    std::lock_guard<std::mutex> lock(m_queueMutex);
-                    m_pendingPaths.push_back(wPath);
-                }
-                QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
-            }
+                if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
+            });
         }
+
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            m_pendingPaths.push_back(wPath);
+        }
+        QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
     }
 }
 
 void AutoImportManager::onEntriesBatchAdded(int driveIdx, const QList<uint64_t>& frns) {
-    QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
-    if (driveLetter.isEmpty()) return;
-
-    HANDLE hVol = CreateFileW((L"\\\\.\\" + driveLetter.toStdWString()).c_str(), 
-                              GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
-                              NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    if (hVol == INVALID_HANDLE_VALUE) return;
-
     std::vector<std::wstring> toAdd;
     for (uint64_t frn : frns) {
-        QString relPath = MftReader::getPathByFrn(hVol, frn);
-        if (!relPath.isEmpty()) {
-            QString fullPath = driveLetter + relPath;
-            std::wstring wPath = fullPath.toStdWString();
-            if (isPathInManagedLibrary(wPath)) {
-                MetadataManager::instance().registerItem(wPath);
-                toAdd.push_back(wPath);
+        uint64_t key = MftReader::makeKey(driveIdx, frn);
+        int index = MftReader::instance().getIndexByKey(key);
+        if (index < 0) continue;
 
-                if (QFileInfo(fullPath).isDir()) {
-                    (void)QtConcurrent::run([fullPath]() {
-                        QStringList toRegister;
-                        QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-                        while (it.hasNext()) {
-                            toRegister << it.next();
-                            if (toRegister.size() >= 100) {
-                                MetadataManager::instance().registerItemsAsync(toRegister);
-                                toRegister.clear();
-                            }
+        QString fullPath = MftReader::instance().getFullPath(index);
+        if (fullPath.isEmpty()) continue;
+
+        std::wstring wPath = fullPath.toStdWString();
+        if (isPathInManagedLibrary(wPath)) {
+            MetadataManager::instance().registerItem(wPath);
+            toAdd.push_back(wPath);
+
+            if (QFileInfo(fullPath).isDir()) {
+                (void)QtConcurrent::run([fullPath]() {
+                    QStringList toRegister;
+                    QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+                    while (it.hasNext()) {
+                        toRegister << it.next();
+                        if (toRegister.size() >= 100) {
+                            MetadataManager::instance().registerItemsAsync(toRegister);
+                            toRegister.clear();
                         }
-                        if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
-                    });
-                }
+                    }
+                    if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
+                });
             }
         }
     }
-    CloseHandle(hVol);
 
     if (!toAdd.empty()) {
         std::lock_guard<std::mutex> lock(m_queueMutex);
@@ -148,42 +131,36 @@ void AutoImportManager::onEntriesBatchAdded(int driveIdx, const QList<uint64_t>&
 }
 
 void AutoImportManager::onEntriesBatchUpdated(int driveIdx, const QList<uint64_t>& frns) {
-    QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
-    if (driveLetter.isEmpty()) return;
-
-    HANDLE hVol = CreateFileW((L"\\\\.\\" + driveLetter.toStdWString()).c_str(), 
-                              GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
-                              NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    if (hVol == INVALID_HANDLE_VALUE) return;
-
     std::vector<std::wstring> toAdd;
     for (uint64_t frn : frns) {
-        QString relPath = MftReader::getPathByFrn(hVol, frn);
-        if (!relPath.isEmpty()) {
-            QString fullPath = driveLetter + relPath;
-            std::wstring wPath = fullPath.toStdWString();
-            if (isPathInManagedLibrary(wPath)) {
-                MetadataManager::instance().registerItem(wPath);
-                toAdd.push_back(wPath);
+        uint64_t key = MftReader::makeKey(driveIdx, frn);
+        int index = MftReader::instance().getIndexByKey(key);
+        if (index < 0) continue;
 
-                if (QFileInfo(fullPath).isDir()) {
-                    (void)QtConcurrent::run([fullPath]() {
-                        QStringList toRegister;
-                        QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-                        while (it.hasNext()) {
-                            toRegister << it.next();
-                            if (toRegister.size() >= 100) {
-                                MetadataManager::instance().registerItemsAsync(toRegister);
-                                toRegister.clear();
-                            }
+        QString fullPath = MftReader::instance().getFullPath(index);
+        if (fullPath.isEmpty()) continue;
+
+        std::wstring wPath = fullPath.toStdWString();
+        if (isPathInManagedLibrary(wPath)) {
+            MetadataManager::instance().registerItem(wPath);
+            toAdd.push_back(wPath);
+
+            if (QFileInfo(fullPath).isDir()) {
+                (void)QtConcurrent::run([fullPath]() {
+                    QStringList toRegister;
+                    QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+                    while (it.hasNext()) {
+                        toRegister << it.next();
+                        if (toRegister.size() >= 100) {
+                            MetadataManager::instance().registerItemsAsync(toRegister);
+                            toRegister.clear();
                         }
-                        if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
-                    });
-                }
+                    }
+                    if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
+                });
             }
         }
     }
-    CloseHandle(hVol);
 
     if (!toAdd.empty()) {
         std::lock_guard<std::mutex> lock(m_queueMutex);
@@ -193,61 +170,51 @@ void AutoImportManager::onEntriesBatchUpdated(int driveIdx, const QList<uint64_t
 }
 
 void AutoImportManager::onEntryUpdated(uint64_t key) {
-    uint64_t frn = key & 0x0000FFFFFFFFFFFFull;
-    int driveIdx = static_cast<int>(key >> 48);
-    
-    QString driveLetter = MetadataManager::instance().getDriveLetterByMftIndex(driveIdx);
-    if (driveLetter.isEmpty()) return;
+    int index = MftReader::instance().getIndexByKey(key);
+    if (index < 0) return;
 
-    HANDLE hVol = CreateFileW((L"\\\\.\\" + driveLetter.toStdWString()).c_str(), 
-                              GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 
-                              NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    if (hVol != INVALID_HANDLE_VALUE) {
-        QString relPath = MftReader::getPathByFrn(hVol, frn);
-        CloseHandle(hVol);
-        if (!relPath.isEmpty()) {
-            QString fullPath = driveLetter + relPath;
-            std::wstring wPath = fullPath.toStdWString();
+    QString fullPath = MftReader::instance().getFullPath(index);
+    if (fullPath.isEmpty()) return;
 
-            if (isPathInManagedLibrary(wPath)) {
-                MetadataManager::instance().registerItem(wPath);
-                
-                if (QFileInfo(fullPath).isDir()) {
-                    (void)QtConcurrent::run([fullPath]() {
-                        QStringList toRegister;
-                        QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-                        while (it.hasNext()) {
-                            toRegister << it.next();
-                            if (toRegister.size() >= 100) {
-                                MetadataManager::instance().registerItemsAsync(toRegister);
-                                toRegister.clear();
-                            }
-                        }
-                        if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
-                    });
-                }
+    std::wstring wPath = fullPath.toStdWString();
+    if (isPathInManagedLibrary(wPath)) {
+        MetadataManager::instance().registerItem(wPath);
 
-                std::lock_guard<std::mutex> lock(m_queueMutex);
-                m_pendingPaths.push_back(wPath);
-                QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
-            }
-
-            // 2026-11-xx 按照 Plan-113：物理重命名同步 (物理 -> 逻辑)
-            // 当 USN 监听到库内物理文件夹重命名成功后，同步更新逻辑分类名
-            if (QFileInfo(fullPath).isDir()) {
-                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wPath);
-                std::string fid = MetadataManager::generateFallbackFid(volSerial, std::to_wstring(frn));
-                std::wstring oldPath = MetadataManager::instance().getPathByFid(fid);
-                
-                if (!oldPath.empty() && oldPath != wPath) {
-                    QString oldName = QFileInfo(QString::fromStdWString(oldPath)).fileName();
-                    QString newName = QFileInfo(fullPath).fileName();
-                    
-                    if (oldName != newName) {
-                        qDebug() << "[AutoImport] 物理重命名同步 (IO 确认):" << oldName << "->" << newName;
-                        MetadataManager::instance().renameItem(oldPath, wPath);
+        if (QFileInfo(fullPath).isDir()) {
+            (void)QtConcurrent::run([fullPath]() {
+                QStringList toRegister;
+                QDirIterator it(fullPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+                while (it.hasNext()) {
+                    toRegister << it.next();
+                    if (toRegister.size() >= 100) {
+                        MetadataManager::instance().registerItemsAsync(toRegister);
+                        toRegister.clear();
                     }
                 }
+                if (!toRegister.isEmpty()) MetadataManager::instance().registerItemsAsync(toRegister);
+            });
+        }
+
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_pendingPaths.push_back(wPath);
+        QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+    }
+
+    // 2026-11-xx 按照 Plan-113：物理重命名同步 (物理 -> 逻辑)
+    // 当 USN 监听到库内物理文件夹重命名成功后，同步更新逻辑分类名
+    if (QFileInfo(fullPath).isDir()) {
+        uint64_t frn = key & 0x0000FFFFFFFFFFFFull;
+        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wPath);
+        std::string fid = MetadataManager::generateFallbackFid(volSerial, std::to_wstring(frn));
+        std::wstring oldPath = MetadataManager::instance().getPathByFid(fid);
+
+        if (!oldPath.empty() && oldPath != wPath) {
+            QString oldName = QFileInfo(QString::fromStdWString(oldPath)).fileName();
+            QString newName = QFileInfo(fullPath).fileName();
+
+            if (oldName != newName) {
+                qDebug() << "[AutoImport] 物理重命名同步 (IO 确认):" << oldName << "->" << newName;
+                MetadataManager::instance().renameItem(oldPath, wPath);
             }
         }
     }
