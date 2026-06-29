@@ -963,9 +963,7 @@ void MainWindow::setupSplitters() {
     // --- 2. 统一导航栏 (第二行) ---
     m_navBarWidget = new QWidget(centralC);
     m_navBarWidget->setObjectName("NavBar");
-    // 2026-xx-xx 按照用户要求：添加 1px 底部切割线，与全局规范对齐
-    m_navBarWidget->setStyleSheet(QString("QWidget#NavBar { border: none; border-bottom: 1px solid %1; background: transparent; }").arg(qssColor(BorderColor)));
-    // 2026-06-xx 物理修正：将固定高度从 37px 增加到 42px (32+5+5)
+    m_navBarWidget->setStyleSheet("QWidget#NavBar { border: none; background: transparent; }");
     m_navBarWidget->setFixedHeight(42); 
     
     m_navBarLayout = new QHBoxLayout(m_navBarWidget);
@@ -1088,11 +1086,8 @@ void MainWindow::setupSplitters() {
     initDriveBar();
 
     mainL->addWidget(m_titleBarWidget);
-    mainL->addSpacing(5);
-    mainL->addWidget(m_navBarWidget);
-    mainL->addSpacing(5);
     mainL->addWidget(m_driveBarWidget);
-    mainL->addSpacing(5);
+    mainL->addWidget(m_navBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
 
@@ -1595,7 +1590,7 @@ void MainWindow::initDriveBar() {
     ).arg(qssColor(BackgroundHeader)).arg(qssColor(BorderColor)));
 
     m_driveBarLayout = new QHBoxLayout(m_driveBarWidget);
-    m_driveBarLayout->setContentsMargins(15, 0, 15, 0);
+    m_driveBarLayout->setContentsMargins(15, 5, 15, 5);
     m_driveBarLayout->setSpacing(8);
 
     auto drives = QDir::drives();
