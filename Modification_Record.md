@@ -104,3 +104,13 @@
     - 按照品牌化规范将“重新扫描该盘”更名为“重新收纳”。
 - [2026-06-30 15:30:00] **src/core/AutoImportManager.cpp**:
     - 确认 `processImportQueue` 内部已正确透传 `authorized=true` 标记，确保 USN 触发的入库符合 Plan-116 红线。
+
+### 启动异常诊断日志增强
+- [2026-06-30 22:45:00] **src/main.cpp**:
+    - 增加 `a.exec()` 退出后的返回码打印日志。
+- [2026-06-30 22:48:00] **src/core/CoreController.cpp**:
+    - 增强异步 MFT 监控启动任务的生命周期日志，包含异常捕获。
+- [2026-06-30 22:50:00] **src/ui/MainWindow.cpp**:
+    - 在 `showEvent` 延迟加载回调中增加诊断埋点。
+- [2026-06-30 22:52:00] **src/mft/MftReader.cpp**:
+    - 在 `loadFromCache` 和 `buildIndex` 中增加驱动器加载状态与路径校验日志。

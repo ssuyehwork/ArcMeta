@@ -248,7 +248,10 @@ void MftReader::buildIndex(const QStringList& drives) {
     QWriteLocker lock(&m_dataLock);
     std::vector<UsnWatcher*> newWatchers;
     for (auto& sr : scannedResults) {
-        if (!sr.success || sr.res.entries.empty()) continue;
+        if (!sr.success || sr.res.entries.empty()) {
+            qDebug() << "[MftReader] 驱动器扫描失败或为空:" << QString::fromStdWString(sr.volume);
+            continue;
+        }
         
         size_t dIdx = m_drive_list.size();
         m_drive_list.push_back(sr.volume);
@@ -271,8 +274,12 @@ void MftReader::buildIndex(const QStringList& drives) {
 }
 
 bool MftReader::loadFromCache() {
+    qDebug() << "[MftReader] loadFromCache 入口";
     std::filesystem::path cacheDir = "ArcMeta/cache";
-    if (!std::filesystem::exists(cacheDir)) return false;
+    if (!std::filesystem::exists(cacheDir)) {
+        qDebug() << "[MftReader] 缓存目录不存在:" << QString::fromStdString(cacheDir.string());
+        return false;
+    }
 
     // 物理优化：加载前先停止现有监控，避免句柄冲突
     // 注意：这里手动执行清理逻辑，但不触发 saveToCache，防止覆盖磁盘缓存
@@ -339,14 +346,20 @@ bool MftReader::loadFromCache() {
                     currentTotal = m_frns.size();
                 }
                 
+                qDebug() << "[MftReader] 已从缓存加载驱动器:" << QString::fromStdWString(driveName) << "项数:" << count;
                 // 2026-05-14 启动流控优化：释放锁后发射信号，避免 UI 线程调用 totalCount() 时死锁
                 emit driveLoaded(QString::fromStdWString(driveName), (int)count, (int)currentTotal);
+            } else {
+                qDebug() << "[MftReader] 加载缓存文件失败:" << QString::fromStdString(entry.path().string());
             }
         }
     }
 
     QWriteLocker lock(&m_dataLock);
-    if (m_frns.empty()) return false;
+    if (m_frns.empty()) {
+        qDebug() << "[MftReader] loadFromCache 结束: 未能加载任何有效条目";
+        return false;
+    }
     rebuildFrnToIndexMap();
 
     // 2026-05-14 核心性能优化：执行 K 路归并合并排序索引 (Complexity: O(N log K))

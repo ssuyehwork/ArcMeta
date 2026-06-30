@@ -644,6 +644,7 @@ void MainWindow::showEvent(QShowEvent* event) {
         qint64 scheduleStart = QDateTime::currentMSecsSinceEpoch();
         qDebug() << "[Main] 正在排期延迟加载任务 (QTimer::singleShot(0))...";
         QTimer::singleShot(0, [this, scheduleStart]() {
+            qDebug() << "[Main] 延迟加载回调触发点 1";
             qint64 taskStart = QDateTime::currentMSecsSinceEpoch();
             qDebug() << "[Main] 延迟加载任务开始执行，排期等待耗时:" << (taskStart - scheduleStart) << "ms";
             

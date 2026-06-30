@@ -152,6 +152,7 @@ int main(int argc, char *argv[]) {
     qDebug() << "[PERF] main 函数逻辑执行完毕，进入事件循环。总耗时:" << (QDateTime::currentMSecsSinceEpoch() - mainStartTime) << "ms";
 
     int ret = a.exec();
+    qDebug() << "[Main] 事件循环已退出，返回码:" << ret;
 
     // 程序退出前释放单实例锁
 #ifdef Q_OS_WIN
