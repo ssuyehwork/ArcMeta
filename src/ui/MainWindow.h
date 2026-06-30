@@ -161,7 +161,6 @@ private:
     QString m_currentDataSource; // "category" or "nav"
     int m_currentCategoryId = 0;
     bool m_panelsInitialized = false; // 2026-04-12 状态锁：确保面板仅初始化一次
-    QTimer* m_idleTimer = nullptr;
     QTimer* m_searchTimer = nullptr; // 2026-xx-xx 按照 Plan-106：搜索防抖计时器
     QString m_currentPath;
     QStringList m_history;
@@ -179,10 +178,6 @@ private:
     HoverEventFilter* m_hoverFilter = nullptr;
     ResizeEventFilter* m_resizeFilter = nullptr;
     QTimer* m_sidebarRefreshTimer = nullptr;
-    QTimer* m_resourceMonitorTimer = nullptr; // 2026-06-xx 崩溃监控：资源监控定时器
-    // 2026-04-17 按照用户要求：修复 m_idleTimer 重定义，保留上方唯一成员声明
-    void initIdleDetector();
-    void initResourceMonitor(); // 2026-06-xx 崩溃监控：初始化资源监控
 
 public slots:
     /**
