@@ -56,3 +56,11 @@
 ### getManagedFolderAbsolutePath 默认兜底恢复
 - [2026-06-30 18:20:00] **src/core/AutoImportManager.cpp**:
     - 为 `getManagedFolderAbsolutePath` 增加约定优于配置的默认兜底逻辑：若数据库无显式配置，则默认探测并关联 `ArcMeta.Library_[盘符]` 文件夹。
+
+### 最近访问记录与 USN 信号补全 (Plan-119 & 120)
+- [2026-07-01 10:30:00] **src/core/AutoImportManager.h / .cpp**:
+    - 实现 `recordRecentVisitedFolder` 与 `getRecentVisitedFolders` 接口，支持基于磁盘卷序列号的物理文件夹访问历史记忆（上限 14 条）。
+    - 补全 `entryUpdated` 信号监听，确保通过 Move（改名）操作移入托管库的项目能被 USN 感知并触发自动入库。
+- [2026-07-01 11:00:00] **src/ui/ContentPanel.cpp**:
+    - 在 `loadDirectory` 导航触发点注入历史记录调用。
+    - 重构右键“迁移”菜单，将“迁移至最近活跃位置”替换为真实的历史路径列表，提供快捷物理位移入口。

@@ -19,9 +19,15 @@ public:
     void startListening();
     void stopListening();
 
+    // 2026-07-xx 按照 Plan-119：记录与获取最近访问文件夹
+    static void recordRecentVisitedFolder(const std::wstring& path);
+    static QStringList getRecentVisitedFolders(const std::wstring& volSerial);
+
 private slots:
     // 订阅 MftReader 发现的新增条目
     void onEntryAdded(uint64_t key);
+    // 2026-07-xx 按照 Plan-120：订阅 USN 触发的更新条目
+    void onEntryUpdated(uint64_t key);
     // 去抖超时，合并写入数据库
     void processImportQueue();
 

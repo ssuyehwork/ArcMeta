@@ -1680,28 +1680,16 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 actRoot->setProperty("targetPath", managedRoot);
 
                 migrateMenu->addSeparator();
-                migrateMenu->addAction("迁移至最近活跃位置...")->setEnabled(false);
-
-                std::vector<std::pair<QString, long long>> recentDirs;
-                MetadataManager::instance().forEachCachedItem([&](const std::wstring& p, const RuntimeMeta& meta) {
-                    if (meta.isFolder && meta.isManaged && !meta.isTrash && !meta.isInvalid) {
-                        QString qp = QString::fromStdWString(p);
-                        if (qp.startsWith(managedRoot) && qp != managedRoot) {
-                            recentDirs.push_back({qp, meta.atime});
-                        }
+                // 2026-07-xx 按照 Plan-119：使用真实的最近访问历史列表作为迁移目标
+                QStringList recentFolders = AutoImportManager::getRecentVisitedFolders(volSerial);
+                if (recentFolders.isEmpty()) {
+                    migrateMenu->addAction("迁移至最近活跃位置...")->setEnabled(false);
+                } else {
+                    for (const QString& folder : recentFolders) {
+                        QAction* act = migrateMenu->addAction(folder);
+                        act->setData(ActionAddToCategory);
+                        act->setProperty("targetPath", folder);
                     }
-                });
-
-                std::sort(recentDirs.begin(), recentDirs.end(), [](const auto& a, const auto& b) {
-                    return a.second > b.second;
-                });
-
-                int count = 0;
-                for (const auto& pair : recentDirs) {
-                    QAction* act = migrateMenu->addAction(pair.first);
-                    act->setData(ActionAddToCategory);
-                    act->setProperty("targetPath", pair.first);
-                    if (++count >= 14) break;
                 }
 
                 migrateMenu->menuAction()->setData(ActionAddToCategory);
@@ -2412,6 +2400,9 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
     m_currentPath = path; 
     updateLayersButtonState(); 
+
+    // 2026-07-xx 按照 Plan-119：记录最近访问历史（打开即记录）
+    AutoImportManager::recordRecentVisitedFolder(path.toStdWString());
 
     // 2026-07-xx 按照 Plan-116：检测是否导航进入托管库内部
     std::wstring wp = path.toStdWString();
