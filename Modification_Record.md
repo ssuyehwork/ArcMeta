@@ -94,3 +94,15 @@
 ### 事件过滤器安装逻辑修复
 - [2026-06-30 10:21:37] **src/ui/MainWindow.cpp**:
     - 修复因移除闲置检测逻辑误删 `installEventFilter(this)` 导致搜索历史等 UI 交互失效的问题。
+
+### USN 全口径感知修复与调试日志增强 (Plan-117/122)
+- [2026-07-02 10:15:00] **src/mft/UsnWatcher.cpp**:
+    - 在 `run()` 与 `handleRecord()` 中将 `USN_REASON_RENAME_OLD_NAME` 加入捕获掩码，确保移动操作起点可见。
+    - 注入 `[USN_TRACE]` 日志，实时打印变动 FRN 与 Reason 掩码。
+- [2026-07-02 10:25:00] **src/mft/MftReader.cpp**:
+    - 在 `removeEntryByFrn` 物理销毁索引前，利用 `getPathFastInternal` 提取最后已知路径。
+    - 注入 `[MFT_TRACE]` 日志，记录被删除项的 FRN 与物理路径。
+- [2026-07-02 10:40:00] **src/core/AutoImportManager.h / .cpp**:
+    - 订阅 `MftReader::entryRemoved` 信号，实现 `onEntryRemoved` 物理删除感知，同步注销库内数据库记录。
+    - 重构 `onEntryUpdated` 逻辑：利用 FID 反查机制识别项目“移出”场景，当项目离开托管库时自动执行数据库注销。
+    - 注入 `[AIM_TRACE]` 全量业务日志，涵盖信号触发、路径解析、受管状态判定及入库/注销决策。

@@ -31,38 +31,38 @@ AutoImportManager::~AutoImportManager() {
 }
 
 void AutoImportManager::startListening() {
-    qDebug() << "[DIAG] startListening 函数入口, m_isListening 当前值=" << m_isListening;  // 新增，必须在 if 判断之前
+    qDebug() << "[AIM_TRACE] startListening 函数入口, m_isListening 当前值 =" << m_isListening;
     if (m_isListening) return;
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
     // 2026-07-xx 按照 Plan-120：补全对 entryUpdated 的监听，以覆盖文件移动至 Library 的场景
     connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
+    // [AIM_TRACE] 彻底修复：监听物理删除信号
+    connect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved, Qt::QueuedConnection);
     m_isListening = true;
-    qDebug() << "[DIAG] startListening 已执行，信号连接完成";  // 新增 
+    qDebug() << "[AIM_TRACE] startListening 已执行，信号连接完成";
 }
 
 void AutoImportManager::stopListening() {
     if (!m_isListening) return;
     disconnect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded);
     disconnect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated);
+    disconnect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved);
     m_isListening = false;
 }
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
-    qDebug() << "[DIAG] onEntryAdded 被触发, key=" << key;  // 新增 
+    qDebug() << "[AIM_TRACE] onEntryAdded 被触发, key =" << key;
     int idx = MftReader::instance().getIndexByKey(key);
-    qDebug() << "[DIAG] getIndexByKey 返回 idx=" << idx;  // 新增 
     if (idx < 0) return;
 
     QString qPath = MftReader::instance().getFullPath(idx);
-    qDebug() << "[DIAG] getFullPath 返回:" << qPath;  // 新增 
+    qDebug() << "[AIM_TRACE] 新增项路径解析:" << qPath;
     std::wstring fullPath = qPath.toStdWString();
     std::wstring managedFolder;
     
     bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
-    qDebug() << "[DIAG] checkAndGetManagedPath 结果:" << isManaged  
-              << "managedFolder=" << QString::fromStdWString(managedFolder);  // 新增 
-     
     if (isManaged) {
+        qDebug() << "[AIM_TRACE] 识别到托管库内新增，加入入库队列";
         std::lock_guard<std::mutex> lock(m_queueMutex);
         m_pendingPaths.push_back(fullPath);
         
@@ -71,26 +71,72 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
 }
 
 void AutoImportManager::onEntryUpdated(uint64_t key) {
-    // 2026-07-xx 按照 Plan-120：逻辑与 onEntryAdded 一致，处理跨目录移动
-    qDebug() << "[DIAG] onEntryUpdated 被触发, key=" << key;  // 新增 
+    qDebug() << "[AIM_TRACE] onEntryUpdated 被触发, key =" << key;
     int idx = MftReader::instance().getIndexByKey(key);
-    qDebug() << "[DIAG] getIndexByKey 返回 idx=" << idx;  // 新增 
     if (idx < 0) return;
 
     QString qPath = MftReader::instance().getFullPath(idx);
-    qDebug() << "[DIAG] getFullPath 返回:" << qPath;  // 新增 
     std::wstring fullPath = qPath.toStdWString();
     std::wstring managedFolder;
 
     bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
-    qDebug() << "[DIAG] checkAndGetManagedPath 结果:" << isManaged  
-              << "managedFolder=" << QString::fromStdWString(managedFolder);  // 新增 
+    qDebug() << "[AIM_TRACE] 路径变动解析:" << qPath << "受管状态 =" << isManaged;
 
     if (isManaged) {
+        // [移入/原地更新] 场景
         std::lock_guard<std::mutex> lock(m_queueMutex);
         m_pendingPaths.push_back(fullPath);
-
         QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+    } else {
+        // [移出] 场景彻底修复：判定该项此前是否已在库内登记
+        // 注意：此处需要利用 MetadataManager 的 FID 反查能力
+        std::string fid = MetadataManager::instance().getFileIdSync(fullPath);
+        std::wstring lastKnownPath = MetadataManager::instance().getPathByFid(fid);
+
+        if (!lastKnownPath.empty() && MetadataManager::isInsideManagedLibrary(lastKnownPath)) {
+            qDebug() << "[AIM_TRACE] 项目已从库内移出至:" << qPath << "执行数据库同步注销";
+            MetadataManager::instance().deletePermanently(lastKnownPath);
+        }
+    }
+}
+
+void AutoImportManager::onEntryRemoved(uint64_t key) {
+    qDebug() << "[AIM_TRACE] onEntryRemoved 被触发, key =" << key;
+    // 彻底修复：处理物理删除
+    // 此时 MFT 已移除该项，无法通过 MftReader 获取路径。
+    // 但可以通过复合 Key 提取 FRN，并结合 MetadataManager 的 FID 反查（前提是之前已缓存路径）
+
+    // 方案：由于 MetadataManager 持有 fidToPath 映射，而 USN 的复合 key 包含盘符索引
+    // 此处简化处理：由于文件已不存在，我们直接触发 MetadataManager 的全库对账清理或精准反查
+    // 工业级补全：利用 MetadataManager::getPathByFid 寻找可能残留的该 FRN 记录
+
+    // 提取盘符索引和 FRN
+    size_t dIdx = static_cast<size_t>(key >> 48);
+    uint64_t frnVal = key & 0x0000FFFFFFFFFFFFull;
+
+    // 构建 FID
+    std::wstring volSerial = L"UNKNOWN";
+    const auto drives = QDir::drives();
+    int curIdx = 0;
+    for (const QFileInfo& d : drives) {
+        if (curIdx == (int)dIdx) {
+            volSerial = MetadataManager::getVolumeSerialNumber(d.absolutePath().toStdWString());
+            break;
+        }
+        curIdx++;
+    }
+
+    wchar_t frnBuf[17];
+    swprintf(frnBuf, 17, L"%016llX", frnVal);
+    std::string fid = MetadataManager::generateFallbackFid(volSerial, frnBuf);
+
+    std::wstring lastKnownPath = MetadataManager::instance().getPathByFid(fid);
+    if (!lastKnownPath.empty()) {
+        bool inLib = MetadataManager::isInsideManagedLibrary(lastKnownPath);
+        qDebug() << "[AIM_TRACE] 感知到物理删除: 路径 =" << QString::fromStdWString(lastKnownPath) << "库内 =" << inLib;
+        if (inLib) {
+            MetadataManager::instance().deletePermanently(lastKnownPath);
+        }
     }
 }
 
@@ -124,11 +170,11 @@ bool AutoImportManager::checkAndGetManagedPath(const std::wstring& path, std::ws
     std::wstring managedAbs = getManagedLibraryPath(path);
     if (managedAbs.empty()) return false;
 
-    if (path.size() >= managedAbs.size() && _wcsnicmp(path.c_str(), managedAbs.c_str(), managedAbs.size()) == 0) {
+    bool match = (path.size() >= managedAbs.size() && _wcsnicmp(path.c_str(), managedAbs.c_str(), managedAbs.size()) == 0);
+    if (match) {
         outManagedFolder = managedAbs;
-        return true;
     }
-    return false;
+    return match;
 }
 
 std::wstring AutoImportManager::getManagedLibraryPath(const std::wstring& pathOrVolSerial) {

@@ -1205,6 +1205,11 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
     auto it = m_frn_to_idx.find(compositeKey);
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
+
+        // [MFT_TRACE] 记录删除前的最后已知路径
+        std::wstring lastPath = getPathFastInternal(dIdx, frn);
+        qDebug() << "[MFT_TRACE] 物理索引项即将移除: FRN =" << frn << "路径 =" << QString::fromStdWString(lastPath);
+
         m_frns[idx] = 0;
         m_frn_to_idx.erase(it);
         m_dead_count++;
