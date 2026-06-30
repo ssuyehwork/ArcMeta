@@ -82,6 +82,10 @@
 - [2026-06-30 10:18:39] **src/ui/CategoryPanel.cpp**:
     - 彻底移除所有带有 `[CategoryPanel]` 前缀的调试日志打印语句，优化生产环境日志输出。
 
+### ElasticEdit 调试日志清理
+- [2026-06-30 10:57:29] **src/ui/MetaPanel.cpp**:
+    - 彻底移除 `ElasticEdit::adjustHeight` 中的高度调整调试日志 `Logger::log(QString("ElasticEdit [%1] Adjust..."))`。
+
 ### 事件过滤器安装逻辑修复
 - [2026-06-30 10:21:37] **src/ui/MainWindow.cpp**:
     - 修复因移除闲置检测逻辑误删 `installEventFilter(this)` 导致搜索历史等 UI 交互失效的问题。
