@@ -654,9 +654,10 @@ void FilterPanel::rebuildGroups() {
 
 
     // ── 1. 评级 ──────────────────────────────────────────────
-    if (!m_ratingCounts.isEmpty()) {
+    if (!m_ratingCounts.isEmpty() && m_isMirrorSource) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("评级", gl);
+        m_groupRating = g;
         for (int r : {0, 1, 2, 3, 4, 5}) {
             if (!m_ratingCounts.contains(r)) continue;
             QCheckBox* cb = addFilterRow(gl, ratingDisplayName(r), m_ratingCounts[r]);
@@ -674,10 +675,11 @@ void FilterPanel::rebuildGroups() {
 
 
     // ── 2. 颜色标记 (Plan-18: 矩阵重构版) ─────────────────────────
-    if (true) { // 始终显示颜色区域以保持 UI 稳定
+    if (m_isMirrorSource) { // 2026-07-xx 按照 Plan-118：仅在镜像源下显示颜色标记
         QVBoxLayout* gl = nullptr;
         QHBoxLayout* hdrLayout = nullptr;
         QWidget* g = buildGroup("颜色标记", gl, &hdrLayout);
+        m_groupColor = g;
 
         // 新增快速输入框
         m_editColor = new QLineEdit(g);
@@ -1088,9 +1090,10 @@ void FilterPanel::rebuildGroups() {
     }
 
     // ── 7. 链接 (独立主选项) ──────────────────────────────────────────
-    {
+    if (m_isMirrorSource) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("链接", gl);
+        m_groupLink = g;
 
         QButtonGroup* linkGroup = new QButtonGroup(g);
         linkGroup->setExclusive(false); // 改为非排他性，允许取消勾选
@@ -1132,9 +1135,10 @@ void FilterPanel::rebuildGroups() {
     }
 
     // ── 8. 备注 (独立主选项) ──────────────────────────────────────────
-    {
+    if (m_isMirrorSource) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("备注", gl);
+        m_groupNote = g;
 
         QButtonGroup* noteGroup = new QButtonGroup(g);
         noteGroup->setExclusive(false); // 改为非排他性
@@ -1247,9 +1251,10 @@ void FilterPanel::rebuildGroups() {
 
 
     // ── 11. 图像比例 (独立主选项) ──────────────────────────────────────────
-    {
+    if (m_isMirrorSource) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("图像比例", gl);
+        m_groupRatio = g;
 
         static const QList<QPair<FilterState::AspectRatio, QString>> ratios = {
             {FilterState::Horizontal, "横图"}, {FilterState::Vertical, "竖图"},
@@ -1476,6 +1481,14 @@ void FilterPanel::onToggleAllGroupsClicked() {
 
     AppConfig::instance().setValue("FilterPanel/AllGroupsCollapsed", targetCollapsed);
     updateHeaderStatus();
+}
+
+void FilterPanel::setMirrorSource(bool isMirror) {
+    if (m_isMirrorSource == isMirror) return;
+    m_isMirrorSource = isMirror;
+    
+    // 2026-07-xx 按照 Plan-118：强制重绘以刷新受控分组显隐
+    rebuildGroups();
 }
 
 void FilterPanel::selectColor(const QColor& color) {

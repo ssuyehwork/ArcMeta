@@ -33,12 +33,15 @@ AutoImportManager::~AutoImportManager() {
 void AutoImportManager::startListening() {
     if (m_isListening) return;
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
+    // 2026-07-xx 按照 Plan-120：补全对 entryUpdated 的监听，以覆盖文件移动至 Library 的场景
+    connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
     m_isListening = true;
 }
 
 void AutoImportManager::stopListening() {
     if (!m_isListening) return;
     disconnect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded);
+    disconnect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated);
     m_isListening = false;
 }
 
@@ -56,6 +59,49 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
         
         QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
     }
+}
+
+void AutoImportManager::onEntryUpdated(uint64_t key) {
+    // 2026-07-xx 按照 Plan-120：逻辑与 onEntryAdded 一致，处理跨目录移动
+    int idx = MftReader::instance().getIndexByKey(key);
+    if (idx < 0) return;
+
+    QString qPath = MftReader::instance().getFullPath(idx);
+    std::wstring fullPath = qPath.toStdWString();
+    std::wstring managedFolder;
+
+    if (checkAndGetManagedPath(fullPath, managedFolder)) {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_pendingPaths.push_back(fullPath);
+
+        QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+    }
+}
+
+void AutoImportManager::recordRecentVisitedFolder(const std::wstring& path) {
+    if (path.empty()) return;
+    // 库内文件夹不记录（没有意义，本来就在库里）
+    std::wstring managedFolder;
+    if (instance().checkAndGetManagedPath(path, managedFolder)) return;
+
+    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(path);
+    if (volSerial.empty()) return;
+
+    QString key = QString("RecentVisited/Volume_%1").arg(QString::fromStdWString(volSerial));
+    QStringList list = AppConfig::instance().getValue(key, QStringList()).toStringList();
+
+    QString qPath = QString::fromStdWString(MetadataManager::normalizePath(path));
+    list.removeAll(qPath);
+    list.prepend(qPath);
+    while (list.size() > 14) list.removeLast();
+
+    AppConfig::instance().setValue(key, list);
+}
+
+QStringList AutoImportManager::getRecentVisitedFolders(const std::wstring& volSerial) {
+    if (volSerial.empty()) return QStringList();
+    QString key = QString("RecentVisited/Volume_%1").arg(QString::fromStdWString(volSerial));
+    return AppConfig::instance().getValue(key, QStringList()).toStringList();
 }
 
 bool AutoImportManager::checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder) {
@@ -86,7 +132,14 @@ std::wstring AutoImportManager::getManagedFolderAbsolutePath(const std::wstring&
 
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
     QString relPath = AppConfig::instance().getValue(key, "").toString();
-    if (relPath.isEmpty()) return L"";
+
+    // 2026-07-xx 按照 Plan-118：约定优于配置的默认兜底
+    // 若配置不存在，使用默认命名规则 ArcMeta.Library_[盘符]，
+    // 但必须验证该文件夹物理存在，避免对不存在的路径做前缀匹配。
+    if (relPath.isEmpty()) {
+        relPath = "ArcMeta.Library_" + drive.left(1).toUpper();
+        if (!QDir(drive + relPath).exists()) return L"";
+    }
 
     return MetadataManager::normalizePath((drive.toStdWString() + relPath.toStdWString()));
 }

@@ -208,6 +208,12 @@ public:
     static std::wstring getVolumeSerialNumber(const std::wstring& path);
 
     /**
+     * @brief 判定给定路径是否位于任何磁盘的托管库文件夹内部
+     * 2026-07-xx 按照 Plan-117：收拢物理路径归属判定逻辑
+     */
+    static bool isInsideManagedLibrary(const std::wstring& path);
+
+    /**
      * @brief 设置内部操作标志位，用于抑制冗余信号刷新
      */
     void setInternalOperating(bool operating) { m_isInternalOperating = operating; }

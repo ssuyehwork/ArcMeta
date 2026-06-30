@@ -12,6 +12,7 @@
 #include "BatchProgressDialog.h"
 #include "ThumbnailDelegate.h"
 #include "../util/ImportHelper.h"
+#include "../core/AutoImportManager.h"
 #include "ToolTipOverlay.h" 
 #include "MainWindow.h"
  
@@ -1588,64 +1589,113 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         menu.addSeparator(); 
  
         // [归类与标记区] 
-        QMenu* categorizeMenu = menu.addMenu("归类到..."); 
-        UiHelper::applyMenuStyle(categorizeMenu); 
-        // 2026-06-xx 逻辑优化：仅显示最近使用的 15 个分类
-        auto categories = CategoryRepo::getRecentlyUsed(15); 
-        if (categories.empty()) categories = CategoryRepo::getAll();
-        if (categories.size() > 15) categories.resize(15);
+        // 2026-07-xx 按照 Plan-117：语义分流。判定当前是否为“镜像源”
+        // 镜像源定义：侧边栏分类模式 (m_currentCategoryType 不为空) 
+        // 或 物理导航模式下已进入托管库内部 (镜像加速态)
+        bool isMirrorSource = !m_currentCategoryType.isEmpty();
+        if (!isMirrorSource && !m_currentPath.isEmpty()) {
+            isMirrorSource = MetadataManager::isInsideManagedLibrary(m_currentPath.toStdWString());
+        }
 
-        // 2026-06-xx 按照用户需求：增加“回归未分类”选项
-        QAction* actToUncat = categorizeMenu->addAction(UiHelper::getIcon("uncategorized", QColor("#95a5a6"), 16), "回归“未分类”");
-        actToUncat->setData(ActionCategorize);
-        actToUncat->setProperty("catId", -2); // 未分类的负数 ID
-        categorizeMenu->addSeparator();
+        if (isMirrorSource) {
+            // [镜像源：归类与元数据编辑区]
+            QMenu* categorizeMenu = menu.addMenu("归类到..."); 
+            UiHelper::applyMenuStyle(categorizeMenu); 
+            auto categories = CategoryRepo::getRecentlyUsed(15); 
+            if (categories.empty()) categories = CategoryRepo::getAll();
+            if (categories.size() > 15) categories.resize(15);
 
-        if (categories.empty()) { 
-            categorizeMenu->addAction("（暂无分类）")->setEnabled(false); 
-        } else { 
-            for (const auto& cat : categories) { 
-                QAction* act = categorizeMenu->addAction(QString::fromStdWString(cat.name)); 
-                act->setData(ActionCategorize); 
-                act->setProperty("catId", cat.id); 
+            QAction* actToUncat = categorizeMenu->addAction(UiHelper::getIcon("uncategorized", QColor("#95a5a6"), 16), "回归“未分类”");
+            actToUncat->setData(ActionCategorize);
+            actToUncat->setProperty("catId", -2); 
+            categorizeMenu->addSeparator();
+
+            if (categories.empty()) { 
+                categorizeMenu->addAction("（暂无分类）")->setEnabled(false); 
+            } else { 
+                for (const auto& cat : categories) { 
+                    QAction* act = categorizeMenu->addAction(QString::fromStdWString(cat.name)); 
+                    act->setData(ActionCategorize); 
+                    act->setProperty("catId", cat.id); 
+                } 
+            }
+
+            QMenu* colorMenu = menu.addMenu("设定颜色标签"); 
+            UiHelper::applyMenuStyle(colorMenu); 
+            colorMenu->setIcon(UiHelper::getIcon("palette", QColor("#EEEEEE"))); 
+            struct ColorItem { QString value; QString label; QColor preview; }; 
+            QList<ColorItem> colorItems = { 
+                {"", "无颜色", QColor("#888780")}, 
+                {"#E24B4A", "红色", QColor("#E24B4A")}, 
+                {"#EF9F27", "橙色", QColor("#EF9F27")}, 
+                {"#FECF0E", "黄色", QColor("#FECF0E")}, 
+                {"#639922", "绿色", QColor("#639922")}, 
+                {"#1D9E75", "青色", QColor("#1D9E75")}, 
+                {"#378ADD", "蓝色", QColor("#378ADD")}, 
+                {"#7F77DD", "紫色", QColor("#7F77DD")}, 
+                {"#5F5E5A", "灰色", QColor("#5F5E5A")} 
+            }; 
+            for (const auto& ci : colorItems) { 
+                QAction* ca = colorMenu->addAction(ci.label); 
+                ca->setData(ActionColorTag); 
+                ca->setProperty("colorName", ci.value); 
+                QPixmap pix(12, 12); pix.fill(Qt::transparent); 
+                QPainter p(&pix); p.setRenderHint(QPainter::Antialiasing); 
+                p.setBrush(ci.preview); p.setPen(Qt::NoPen); 
+                p.drawEllipse(0, 0, 12, 12); 
+                ca->setIcon(QIcon(pix)); 
             } 
-        } 
  
-        QMenu* colorMenu = menu.addMenu("设定颜色标签"); 
-        UiHelper::applyMenuStyle(colorMenu); 
-        colorMenu->setIcon(UiHelper::getIcon("palette", QColor("#EEEEEE"))); 
-        struct ColorItem { QString value; QString label; QColor preview; }; 
-        QList<ColorItem> colorItems = { 
-            {"", "无颜色", QColor("#888780")}, 
-            {"#E24B4A", "红色", QColor("#E24B4A")}, 
-            {"#EF9F27", "橙色", QColor("#EF9F27")}, 
-            {"#FECF0E", "黄色", QColor("#FECF0E")}, 
-            {"#639922", "绿色", QColor("#639922")}, 
-            {"#1D9E75", "青色", QColor("#1D9E75")}, 
-            {"#378ADD", "蓝色", QColor("#378ADD")}, 
-            {"#7F77DD", "紫色", QColor("#7F77DD")}, 
-            {"#5F5E5A", "灰色", QColor("#5F5E5A")} 
-        }; 
-        for (const auto& ci : colorItems) { 
-            QAction* ca = colorMenu->addAction(ci.label); 
-            ca->setData(ActionColorTag); 
-            ca->setProperty("colorName", ci.value); 
-            QPixmap pix(12, 12); pix.fill(Qt::transparent); 
-            QPainter p(&pix); p.setRenderHint(QPainter::Antialiasing); 
-            p.setBrush(ci.preview); p.setPen(Qt::NoPen); 
-            p.drawEllipse(0, 0, 12, 12); 
-            ca->setIcon(QIcon(pix)); 
-        } 
+            bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
+            menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
  
-        bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
-        menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
- 
-        // --- 2026-05-16 图像分析：从图中提取主色调 ---
-        QString ext = QFileInfo(path).suffix().toLower();
-        if (UiHelper::isGraphicsFile(ext)) {
-            // 2026-07-xx 逻辑增强：根据是否已入库，动态切换菜单文本
-            bool isManaged = currentIndex.data(ManagedRole).toBool();
-            menu.addAction(isManaged ? "重新扫描..." : "收揽入库...")->setData(ActionExtractColor);
+            // --- 2026-07-xx 按照 Plan-116/117：语义校准，移除“收揽入库”术语 ---
+            QString ext = QFileInfo(path).suffix().toLower();
+            if (UiHelper::isGraphicsFile(ext)) {
+                bool isManaged = currentIndex.data(ManagedRole).toBool();
+                // 仅允许库内项目进行颜色解析（库外已被拦截）
+                if (isManaged) {
+                    menu.addAction(UiHelper::getIcon("palette", QColor("#EEEEEE"), 18), "重新解析颜色")->setData(ActionExtractColor);
+                } else {
+                    // 若在库内但尚未完成 USN 入库（极短中间态），提供解析颜色选项，内部会进行入库状态兜底判断
+                    menu.addAction(UiHelper::getIcon("palette", QColor("#EEEEEE"), 18), "解析颜色")->setData(ActionExtractColor);
+                }
+            }
+        } else {
+            // [物理源：显示“迁移”]
+            // 2026-07-xx 按照 Plan-116/117：重构“迁移”菜单逻辑，与“归类到”互斥显示
+            if (!m_currentPath.isEmpty() && m_currentPath != "computer://") {
+                std::wstring wp = path.toStdWString();
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
+                QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+                QString relPath = AppConfig::instance().getValue(key, "").toString();
+                
+                QString drive = path.left(3);
+                QString managedRoot = QDir::toNativeSeparators(drive + relPath);
+
+                QMenu* migrateMenu = menu.addMenu(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "迁移");
+                UiHelper::applyMenuStyle(migrateMenu);
+                
+                QAction* actRoot = migrateMenu->addAction(managedRoot);
+                actRoot->setData(ActionAddToCategory);
+                actRoot->setProperty("targetPath", managedRoot);
+
+                migrateMenu->addSeparator();
+                // 2026-07-xx 按照 Plan-119：使用真实的最近访问历史列表作为迁移目标
+                QStringList recentFolders = AutoImportManager::getRecentVisitedFolders(volSerial);
+                if (recentFolders.isEmpty()) {
+                    migrateMenu->addAction("迁移至最近活跃位置...")->setEnabled(false);
+                } else {
+                    for (const QString& folder : recentFolders) {
+                        QAction* act = migrateMenu->addAction(folder);
+                        act->setData(ActionAddToCategory);
+                        act->setProperty("targetPath", folder);
+                    }
+                }
+
+                migrateMenu->menuAction()->setData(ActionAddToCategory);
+                migrateMenu->menuAction()->setProperty("targetPath", managedRoot);
+            }
         }
 
         menu.addSeparator(); 
@@ -1660,59 +1710,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         }
 
         // [批量与加密区] 
-        // 2026-07-xx 按照用户要求：只要是文件夹，或者是“非图像文件”，都显示收揽入库选项
-        QString suffix = QFileInfo(path).suffix().toLower();
-        bool isGraphic = UiHelper::isGraphicsFile(suffix);
-
-        if (isFolder || !isGraphic) { 
-            // 2026-07-xx 按照 Plan-116：重构“迁移”菜单逻辑
-            std::wstring wp = path.toStdWString();
-            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
-            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-            QString relPath = AppConfig::instance().getValue(key, "").toString();
-            
-            QString drive = path.left(3);
-            QString managedRoot = QDir::toNativeSeparators(drive + relPath);
-
-            QMenu* migrateMenu = menu.addMenu(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "迁移");
-            UiHelper::applyMenuStyle(migrateMenu);
-            
-            // 1. 首项固定：托管库根目录
-            QAction* actRoot = migrateMenu->addAction(managedRoot);
-            actRoot->setData(ActionAddToCategory);
-            actRoot->setProperty("targetPath", managedRoot);
-
-            // 2. 最近访问项：库内 atime 降序
-            migrateMenu->addSeparator();
-            migrateMenu->addAction("迁移至最近活跃位置...")->setEnabled(false);
-            
-            std::vector<std::pair<QString, long long>> recentDirs;
-            MetadataManager::instance().forEachCachedItem([&](const std::wstring& p, const RuntimeMeta& meta) {
-                if (meta.isFolder && meta.isManaged && !meta.isTrash && !meta.isInvalid) {
-                    QString qp = QString::fromStdWString(p);
-                    if (qp.startsWith(managedRoot) && qp != managedRoot) {
-                        recentDirs.push_back({qp, meta.atime});
-                    }
-                }
-            });
-            
-            std::sort(recentDirs.begin(), recentDirs.end(), [](const auto& a, const auto& b) {
-                return a.second > b.second;
-            });
-
-            int count = 0;
-            for (const auto& pair : recentDirs) {
-                QAction* act = migrateMenu->addAction(pair.first);
-                act->setData(ActionAddToCategory);
-                act->setProperty("targetPath", pair.first);
-                if (++count >= 14) break;
-            }
-
-            // 支持主项点击（默认迁移至首位）
-            migrateMenu->menuAction()->setData(ActionAddToCategory);
-            migrateMenu->menuAction()->setProperty("targetPath", managedRoot);
-        }
-
         if (isFolder || selectedCount > 1) { 
             menu.addAction("批量重命名 (Ctrl+Shift+R)")->setData(ActionBatchRename); 
         }
@@ -1814,17 +1811,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionCategorize: { 
             int catId = selectedAction->property("catId").toInt(); 
             auto indexes = view->selectionModel()->selectedIndexes(); 
-            
-            // 2026-07-xx 按照 Plan-88：批量注册异步化，杜绝主线程 I/O 阻塞
-            QStringList toRegister;
-            for (const auto& idx : indexes) {
-                if (idx.column() == 0 && !idx.data(ManagedRole).toBool()) {
-                    toRegister << idx.data(PathRole).toString();
-                }
-            }
-            if (!toRegister.isEmpty()) {
-                MetadataManager::instance().registerItemsAsync(toRegister);
-            }
              
             for (const auto& idx : indexes) { 
                 if (idx.column() == 0) { 
@@ -1938,15 +1924,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                                   Q_ARG(int, i + 1), Q_ARG(int, total), Q_ARG(QString, QFileInfo(itemPath).fileName()));
                     }
 
-                    // 2026-07-xx 逻辑校准：针对未入库项目，执行完整注册流程（内部会自动提取颜色）
-                    if (!item.isManaged) {
-                        MetadataManager::instance().registerItem(itemPath.toStdWString());
-                        
-                        // 注册后通知 UI 刷新单项状态
-                        QMetaObject::invokeMethod(weakThis.data(), [weakThis, itemPath]() {
-                            if (weakThis) weakThis->updateItemMetadata(itemPath);
-                        }, Qt::QueuedConnection);
-                    } else {
+                    // 2026-07-xx 按照 Plan-116/117：废除 UI 主动注册逻辑。
+                    // 仅针对已入库项目（库内）执行强制重新解析逻辑。
+                    if (item.isManaged) {
                         // 针对已入库项目，执行强制重新解析逻辑
                         auto palette = UiHelper::extractPalette(itemPath);
                         if (!palette.isEmpty()) {
@@ -2422,6 +2402,9 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     m_currentPath = path; 
     updateLayersButtonState(); 
 
+    // 2026-07-xx 按照 Plan-119：记录最近访问历史（打开即记录）
+    AutoImportManager::recordRecentVisitedFolder(path.toStdWString());
+
     // 2026-07-xx 按照 Plan-116：检测是否导航进入托管库内部
     std::wstring wp = path.toStdWString();
     std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
@@ -2446,7 +2429,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             std::wstring normParent = MetadataManager::normalizePath(path.toStdWString());
             if (!normParent.empty() && normParent.back() != L'\\' && normParent.back() != L'/') normParent += L'\\';
 
-            MetadataManager::instance().forEachCachedItem([&](const std::wstring& p, const RuntimeMeta& meta) {
+            MetadataManager::instance().forEachCachedItem([&](const std::wstring& p, const RuntimeMeta& /*meta*/) {
                 if (p.find(normParent) == 0) {
                     std::wstring sub = p.substr(normParent.length());
                     if (sub.find_first_of(L"\\/") == std::wstring::npos) {
@@ -2542,34 +2525,22 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
  
 void ContentPanel::search(const QString& query) { 
-    // 2026-07-xx 按照 Plan-57：ContentPanel::search 仅作为搜索发起的代理。
-    // 实际结果处理已在 MainWindow 中通过 CoreController 的信号进行流式对接。
-    m_currentCategoryType = "search";
-    updateLayersButtonState();
-    if (m_viewStack) m_viewStack->show(); 
-    if (m_textPreview) m_textPreview->hide(); 
-    if (m_imagePreview) m_imagePreview->hide(); 
- 
-    // 2026-07-xx 物理同步：必须将搜索词同步给代理模型，防止旧搜索词干扰新结果判定
+    // 2026-07-xx 按照 Plan-118：搜索行为回归筛选流。
+    // 搜索框仅作为当前视图的本地过滤器，禁止切换 m_currentCategoryType 为 "search"。
+    
+    // 1. 同步关键词到当前筛选状态
     m_currentFilter.keyword = query;
+
+    // 2. 触发本地过滤（invalidateFilter）
     applyFilters();
 
-    // 2026-07-xx 物理补全：如果关键词为空，执行显式重置并停止后续执行
-    if (query.isEmpty()) {
-        m_isLoading = false;
-        m_model->clear();
-        CoreController::instance().abortSearch();
-        recalculateAndEmitStats();
-        return;
-    }
+    // 3. 视觉状态同步
+    if (m_textPreview) m_textPreview->hide(); 
+    if (m_imagePreview) m_imagePreview->hide(); 
+    if (m_viewStack) m_viewStack->show(); 
 
-    m_isLoading = true;
-    ++m_loadRequestId; // 增加 ID 以作废之前的异步加载
-    m_model->clear();
-    
-    // 核心逻辑：发起异步搜索。此处参数采用默认值，因为特定的范围感知搜索
-    // 通常由搜索框（MainWindow）直接驱动。此处保留作为通用接口。
-    CoreController::instance().performSearch(query);
+    ArcMeta::Logger::log(QString("[Search] 本地搜索关键词更新: %1 (当前视图类型: %2)")
+                        .arg(query).arg(m_currentCategoryType.isEmpty() ? "nav" : m_currentCategoryType));
 } 
  
 void ContentPanel::applyFilters(const FilterState& state) { 
@@ -2735,9 +2706,8 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
     m_isLoading = true;
     if (reqId == 0) reqId = ++m_loadRequestId;
     // 2026-07-xx 逻辑校准：保持既有的系统分类类型（如 trash/recently_visited），
-    // 仅在明确不是这些特殊类型且不是 search 时，才将其降级为通用的 path_list。
-    if (m_currentCategoryType != "search" && 
-        m_currentCategoryType != "trash" && 
+    // 仅在明确不是这些特殊类型时，才将其降级为通用的 path_list。
+    if (m_currentCategoryType != "trash" && 
         m_currentCategoryType != "recently_visited" &&
         m_currentCategoryType != "untagged" &&
         m_currentCategoryType != "uncategorized" &&
@@ -2750,10 +2720,8 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
     
-    // 如果不是搜索结果，则通常属于分类数据源
-    if (m_currentCategoryType != "search") {
-        emit dataSourceChanged("category"); 
-    }
+    // 加载路径列表通常属于分类/逻辑数据源
+    emit dataSourceChanged("category"); 
      
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, paths, reqId]() {

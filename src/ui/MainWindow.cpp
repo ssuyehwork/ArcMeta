@@ -462,12 +462,9 @@ void MainWindow::initUi() {
             return;
         }
 
-        // keyword 为空时重置 keyword 条件，其他筛选条件保持不变
-        FilterState fs = m_filterPanel->currentFilter();
-        fs.keyword = keyword;
-
-        // 通过统一路径触发过滤，与筛选器完全一致 (不清空模型，不切换视图)
-        m_contentPanel->applyFilters(fs);
+        // 2026-07-xx 按照 Plan-118：搜索行为回归筛选流。
+        // 搜索框作为当前视图的本地过滤器，不再执行外部 fs 拼装，直接驱动 ContentPanel。
+        m_contentPanel->search(keyword);
         updateStatusBar();
 
         // 维护历史记录
@@ -550,11 +547,6 @@ void MainWindow::initUi() {
             
             std::wstring wPath = path.toStdWString();
             
-            // 物理对齐：确保修改前项目已入库
-            if (!idx.data(ManagedRole).toBool()) {
-                MetadataManager::instance().registerItem(wPath);
-            }
-
             MetadataManager::instance().setTags(wPath, tags);
         }
     });
@@ -1371,6 +1363,15 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
             if (m_navPanel) m_navPanel->selectPath(normPath);
             m_currentPath = normPath;
         }
+    }
+
+    // 2026-07-xx 按照 Plan-118：通知筛选面板当前数据源性质
+    if (m_filterPanel && m_contentPanel) {
+        bool isMirror = !m_contentPanel->getCurrentCategoryType().isEmpty();
+        if (!isMirror && !m_currentPath.isEmpty() && m_currentPath != "computer://") {
+            isMirror = MetadataManager::isInsideManagedLibrary(m_currentPath.toStdWString());
+        }
+        m_filterPanel->setMirrorSource(isMirror);
     }
 
     updateNavButtons();

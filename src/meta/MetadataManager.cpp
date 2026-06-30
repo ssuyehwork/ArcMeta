@@ -942,6 +942,31 @@ std::wstring MetadataManager::getVolumeSerialNumber(const std::wstring& path) {
     return L"UNKNOWN";
 }
 
+bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
+    if (path.empty()) return false;
+    
+    // 2026-07-xx 按照 Plan-117：高性能路径归属判定
+    std::wstring volSerial = getVolumeSerialNumber(path);
+    if (volSerial == L"UNKNOWN") return false;
+
+    QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+    QString relPath = AppConfig::instance().getValue(key, "").toString();
+    if (relPath.isEmpty()) return false;
+
+    // 拼装托管库绝对路径并进行前缀匹配
+    QString drive = QString::fromWCharArray(&path[0], 1) + ":";
+    QString managedAbs = QDir::toNativeSeparators(drive + relPath).toLower();
+    QString qPath = QString::fromStdWString(path).toLower();
+
+    // 必须包含在托管库目录下 (StartsWith 且确保边界)
+    if (qPath.startsWith(managedAbs)) {
+        // 进一步校验边界，防止 C:\ArcMeta.Library_D_Backup 匹配 C:\ArcMeta.Library_D
+        if (qPath.length() == managedAbs.length()) return true;
+        if (qPath[managedAbs.length()] == '\\' || qPath[managedAbs.length()] == '/') return true;
+    }
+    return false;
+}
+
 bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::string& outId128, std::wstring* outFrn, long long* outSize, std::wstring* outType, long long* outCtime, long long* outMtime, long long* outAtime) {
     HANDLE hFile = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     std::wstring vol = getVolumeSerialNumber(path);
