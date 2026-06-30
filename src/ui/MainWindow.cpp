@@ -52,6 +52,7 @@ using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
 #include <QDir>
+#include <QDirIterator>
 #include "../meta/MetadataManager.h"
 
 #ifdef Q_OS_WIN
@@ -643,6 +644,7 @@ void MainWindow::showEvent(QShowEvent* event) {
         qint64 scheduleStart = QDateTime::currentMSecsSinceEpoch();
         qDebug() << "[Main] 正在排期延迟加载任务 (QTimer::singleShot(0))...";
         QTimer::singleShot(0, [this, scheduleStart]() {
+            qDebug() << "[Main] 延迟加载回调触发点 1";
             qint64 taskStart = QDateTime::currentMSecsSinceEpoch();
             qDebug() << "[Main] 延迟加载任务开始执行，排期等待耗时:" << (taskStart - scheduleStart) << "ms";
             
@@ -1582,7 +1584,7 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
         menu.addAction("创建托管文件夹")->setData(1);
     } else {
         menu.addAction("打开托管文件夹")->setData(2);
-        menu.addAction("重新扫描该盘")->setData(3);
+        menu.addAction("重新收纳")->setData(3);
     }
 
     QAction* act = menu.exec(btn->mapToGlobal(pos));
@@ -1596,8 +1598,19 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
     } else if (val == 2) {
         ShellHelper::openInExplorer(managedPath);
     } else if (val == 3) {
-        // TODO: 重新扫描逻辑
-        qDebug() << "[Main] Request rescan for" << letter << "(TODO)";
+        // 修正手动扫描入库逻辑 (Plan-117)
+        // 直接在核心 metadata 表中进行 Registered(0) 登记，授权标记设为 true
+        QString pathCopy = managedPath;
+        (void)QtConcurrent::run([pathCopy]() {
+            QDirIterator it(pathCopy, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+            while (it.hasNext()) {
+                QString fullPath = it.next();
+                MetadataManager::instance().registerItem(fullPath.toStdWString(), true);
+            }
+            // 扫描完成后通知 UI 全量重建以显示新入库项
+            MetadataManager::instance().notifyFullUIRebuild();
+        });
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "正在重新收纳...", 1500, Style::PrimaryBlue);
     }
 }
 

@@ -94,3 +94,44 @@
 ### 事件过滤器安装逻辑修复
 - [2026-06-30 10:21:37] **src/ui/MainWindow.cpp**:
     - 修复因移除闲置检测逻辑误删 `installEventFilter(this)` 导致搜索历史等 UI 交互失效的问题。
+
+### USN Journal 自动入库链路修复 (Plan-117)
+- [2026-06-30 15:25:00] **src/core/CoreController.cpp**:
+    - 在 `startSystem` 异步初始化链中補全对 `MftReader::instance().loadFromCache()` 的调用，激活 USN Journal 监控。
+    - 增加对 `MftReader.h`, `QDir`, `QFileInfo` 的包含。
+- [2026-06-30 15:28:00] **src/ui/MainWindow.cpp**:
+    - 修正右键菜单“重新收纳”逻辑：彻底废弃 `pending_imports` 表操作，直接调用 `MetadataManager::registerItem(..., true)` 实现授权入库。
+    - 按照品牌化规范将“重新扫描该盘”更名为“重新收纳”。
+- [2026-06-30 15:30:00] **src/core/AutoImportManager.cpp**:
+    - 确认 `processImportQueue` 内部已正确透传 `authorized=true` 标记，确保 USN 触发的入库符合 Plan-116 红线。
+
+### 启动异常诊断日志增强
+- [2026-06-30 22:45:00] **src/main.cpp**:
+    - 增加 `a.exec()` 退出后的返回码打印日志。
+- [2026-06-30 22:48:00] **src/core/CoreController.cpp**:
+    - 增强异步 MFT 监控启动任务的生命周期日志，包含异常捕获。
+- [2026-06-30 22:50:00] **src/ui/MainWindow.cpp**:
+    - 在 `showEvent` 延迟加载回调中增加诊断埋点。
+- [2026-06-30 22:52:00] **src/mft/MftReader.cpp**:
+    - 在 `loadFromCache` 和 `buildIndex` 中增加驱动器加载状态与路径校验日志。
+
+### 深度初始化与扫描异常诊断 (Plan-117.1)
+- [2026-06-30 23:05:00] **src/mft/MftReader.cpp**:
+    - 在 `buildIndex` 和 `loadMftDirect` 中增加极其详尽的日志，覆盖句柄开启、Journal 查询及批次处理。
+    - 将 `buildIndex` 中的并行扫描（par）暂时降级为串行扫描（seq），以排查多线程库稳定性问题。
+    - 在 USN 记录解析循环中增加 `RecordLength == 0` 的死循环防御检查。
+- [2026-06-30 23:08:00] **src/core/AutoImportManager.cpp**:
+    - 细化 `startListening` 阶段日志，明确记录信号挂载动作。
+
+### 内存预分配安全加固与循环边界修复 (Plan-117.2)
+- [2026-06-30 23:15:00] **src/mft/MftReader.cpp**:
+    - 修复大容量磁盘（条目数 > 200万）导致的 OOM 崩溃：限制 `loadMftDirect` 与 `mergeDriveResult` 中的 `reserve` 向量上限为 150 万，并增加 `std::bad_alloc` 异常捕获保护。
+    - 增强 USN 记录解析循环安全性：显式检查 `p + RecordLength` 边界，防止缓冲区溢出。
+    - 增加 `sizeof(RawEntry)` 与预估条目数打印，监控内存压力。
+
+### 启动初始化策略校准 (Plan-117 最终修正)
+- [2026-06-30 23:25:00] **src/core/CoreController.cpp**:
+    - 撤销启动时自动执行 `buildIndex` 的逻辑。现在仅通过 `loadFromCache` 恢复已有磁盘的监控，严禁自动扫描。
+- [2026-06-30 23:28:00] **src/mft/MftReader.cpp**:
+    - 还原 `buildIndex` 为并行扫描（par）模式。
+    - 清理冗余的批次处理调试日志。

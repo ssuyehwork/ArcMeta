@@ -1,10 +1,13 @@
 #include "CoreController.h"
+#include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
 #include "../ui/Logger.h"
 #include <QThreadPool>
 #include <QDebug>
 #include <QDateTime>
+#include <QDir>
+#include <QFileInfo>
 #include <QDirIterator>
 #include <QtConcurrent>
 #include <unordered_set>
@@ -37,6 +40,20 @@ void CoreController::startSystem() {
             
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
+
+            // 补全监控初始化：仅尝试从缓存恢复 USN 监控 (Plan-117 修正)
+            // 严禁在启动阶段执行 buildIndex 进行全量扫描，只有手动触发才可执行扫描。
+            (void)QtConcurrent::run([this]() {
+                qDebug() << "[Core] 开始从缓存恢复 MFT 监控模块...";
+                try {
+                    bool cacheOk = MftReader::instance().loadFromCache();
+                    qDebug() << "[Core] MftReader::loadFromCache 恢复结果:" << cacheOk;
+                } catch (const std::exception& e) {
+                    qCritical() << "[Core] MFT 监控恢复过程中发生异常:" << e.what();
+                } catch (...) {
+                    qCritical() << "[Core] MFT 监控恢复过程中发生未知错误";
+                }
+            });
             
             QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);
