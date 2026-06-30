@@ -17,3 +17,19 @@
     - 严格遵循全局视觉规范，在标题栏、地址栏、盘符栏与主体区域间添加 `addSpacing(5)` 物理间距。
     - 升级 `m_driveBarWidget` 样式，实现上下双 1px 切割线（`border-top` & `border-bottom`）。
     - 集成 `m_driveBarWidget` 并实现 `initDriveBar` 自动扫描系统盘符生成按钮组。
+
+### 唯一入库路径重构与有序动态迁移 (Plan-116)
+- [2026-06-30 10:20:00] **src/meta/MetadataManager.h / .cpp**:
+    - `persistAsync` 增加 `authorized` 参数，非 USN Journal 触发的 INSERT 操作将被拦截，确保入库路径唯一。
+    - 修复 `persistAsync` 中 `isNew` 校验时的 SQL 绑定缺失问题。
+    - 同步更新 `registerItem` 和 `registerItemsAsync` 接口签名。
+- [2026-06-30 10:45:00] **src/util/ImportHelper.h / .cpp**:
+    - 重构 `importPaths` 为纯物理迁移模式，移除主动数据库登记，依靠 USN 异步补完入库。
+- [2026-06-30 11:15:00] **src/ui/ContentPanel.cpp**:
+    - 实现视图级编辑权限拦截：物理导航模式下禁止对库外项目进行元数据编辑。
+    - 物理导航进入托管库时自动重定向至镜像加载模式，实现加速渲染。
+    - 重构右键菜单，实现基于“库根目录置顶 + atime 排序”的有序动态迁移菜单。
+- [2026-06-30 11:30:00] **src/ui/CategoryPanel.cpp**:
+    - 同步重构拖拽导入逻辑，使其符合物理迁移准则。
+- [2026-06-30 11:40:00] **AGENTS.md**:
+    - 固化 Plan-116 核心红线：唯一入库路径、导航加速加载及有序迁移规范。

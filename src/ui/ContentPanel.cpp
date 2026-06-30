@@ -343,6 +343,32 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
     }
 
     // 2026-06-xx 物理修复：支持星级、颜色、置顶等元数据的持久化设定
+    // 2026-07-xx 按照 Plan-116：视图级编辑权限拦截
+    if (!record.isCategory && (role == RatingRole || role == ColorRole || role == IsLockedRole || role == PinnedRole)) {
+        QString currentType = qobject_cast<ContentPanel*>(parent())->getCurrentCategoryType();
+        if (currentType == "nav" || currentType == "") {
+            // 物理导航模式下，检查是否在库外
+            std::wstring wp = record.path.toStdWString();
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
+            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+            QString relPath = AppConfig::instance().getValue(key, "").toString();
+
+            bool isInsideLibrary = false;
+            if (!relPath.isEmpty()) {
+                QString drive = record.path.left(3);
+                QString managedAbs = QDir::toNativeSeparators(drive + relPath).toLower();
+                if (record.path.toLower().startsWith(managedAbs)) {
+                    isInsideLibrary = true;
+                }
+            }
+
+            if (!isInsideLibrary) {
+                FramelessMessageBox::information(nullptr, "编辑受阻", "该项目尚未入库，无法进行元数据编辑。\n请先执行“迁移”将其移动至托管库文件夹。");
+                return false;
+            }
+        }
+    }
+
     bool metaUpdated = false;
     if (role == RatingRole) {
         int oldRating = index.data(RatingRole).toInt();
@@ -1639,9 +1665,52 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         bool isGraphic = UiHelper::isGraphicsFile(suffix);
 
         if (isFolder || !isGraphic) { 
-            bool isManaged = currentIndex.data(ManagedRole).toBool();
-            QString scanText = isManaged ? "重新扫描" : "收揽入库";
-            menu.addAction(UiHelper::getIcon("add", QColor("#FF8C00"), 18), scanText)->setData(ActionAddToCategory);
+            // 2026-07-xx 按照 Plan-116：重构“迁移”菜单逻辑
+            std::wstring wp = path.toStdWString();
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
+            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+            QString relPath = AppConfig::instance().getValue(key, "").toString();
+
+            QString drive = path.left(3);
+            QString managedRoot = QDir::toNativeSeparators(drive + relPath);
+
+            QMenu* migrateMenu = menu.addMenu(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "迁移");
+            UiHelper::applyMenuStyle(migrateMenu);
+
+            // 1. 首项固定：托管库根目录
+            QAction* actRoot = migrateMenu->addAction(managedRoot);
+            actRoot->setData(ActionAddToCategory);
+            actRoot->setProperty("targetPath", managedRoot);
+
+            // 2. 最近访问项：库内 atime 降序
+            migrateMenu->addSeparator();
+            migrateMenu->addAction("迁移至最近活跃位置...")->setEnabled(false);
+
+            std::vector<std::pair<QString, long long>> recentDirs;
+            MetadataManager::instance().forEachCachedItem([&](const std::wstring& p, const RuntimeMeta& meta) {
+                if (meta.isFolder && meta.isManaged && !meta.isTrash && !meta.isInvalid) {
+                    QString qp = QString::fromStdWString(p);
+                    if (qp.startsWith(managedRoot) && qp != managedRoot) {
+                        recentDirs.push_back({qp, meta.atime});
+                    }
+                }
+            });
+
+            std::sort(recentDirs.begin(), recentDirs.end(), [](const auto& a, const auto& b) {
+                return a.second > b.second;
+            });
+
+            int count = 0;
+            for (const auto& pair : recentDirs) {
+                QAction* act = migrateMenu->addAction(pair.first);
+                act->setData(ActionAddToCategory);
+                act->setProperty("targetPath", pair.first);
+                if (++count >= 14) break;
+            }
+
+            // 支持主项点击（默认迁移至首位）
+            migrateMenu->menuAction()->setData(ActionAddToCategory);
+            migrateMenu->menuAction()->setProperty("targetPath", managedRoot);
         }
 
         if (isFolder || selectedCount > 1) { 
@@ -1969,13 +2038,21 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 }
             }
             
-            // 降级保护：如果由于某种原因 paths 为空，则回退到当前点击项
             if (paths.isEmpty() && !path.isEmpty()) paths << path;
 
-            if (!paths.isEmpty()) {
-                // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
-                // 收揽入库时，镜像分类始终创建在“我的分类”根节点 (ID = 0)
-                ImportHelper::importPaths(paths, 0, this);
+            QString target = selectedAction->property("targetPath").toString();
+            if (target.isEmpty()) {
+                // 兜底逻辑：获取当前盘符托管库根目录
+                std::wstring wp = path.toStdWString();
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
+                QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+                QString relPath = AppConfig::instance().getValue(key, "").toString();
+                target = QDir::toNativeSeparators(path.left(3) + relPath);
+            }
+
+            if (!paths.isEmpty() && !target.isEmpty()) {
+                // 2026-07-xx 按照 Plan-116：物理迁移至目标目录
+                ImportHelper::importPaths(paths, target, this);
             }
             break;
         }
@@ -2344,8 +2421,55 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
     m_currentPath = path; 
     updateLayersButtonState(); 
-     
+
+    // 2026-07-xx 按照 Plan-116：检测是否导航进入托管库内部
+    std::wstring wp = path.toStdWString();
+    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
+    QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+    QString relPath = AppConfig::instance().getValue(key, "").toString();
+    bool isInsideLibrary = false;
+    if (!relPath.isEmpty()) {
+        QString drive = path.left(3);
+        QString managedAbs = QDir::toNativeSeparators(drive + relPath).toLower();
+        if (path.toLower().startsWith(managedAbs)) isInsideLibrary = true;
+    }
+
     QPointer<ContentPanel> panelPtr(this); 
+
+    // 镜像加载模式（加速）
+    if (isInsideLibrary && !recursive) {
+        (void)QtConcurrent::run([panelPtr, path, reqId]() {
+            if (!panelPtr) return;
+            std::vector<ItemRecord> allItems;
+
+            // 从 MetadataManager 内存镜像中过滤出该路径下的直接子项
+            std::wstring normParent = MetadataManager::normalizePath(path.toStdWString());
+            if (!normParent.empty() && normParent.back() != L'\\' && normParent.back() != L'/') normParent += L'\\';
+
+            MetadataManager::instance().forEachCachedItem([&](const std::wstring& p, const RuntimeMeta& meta) {
+                if (p.find(normParent) == 0) {
+                    std::wstring sub = p.substr(normParent.length());
+                    if (sub.find_first_of(L"\\/") == std::wstring::npos) {
+                        allItems.push_back(ContentPanel::createItemRecord(QString::fromStdWString(p)));
+                    }
+                }
+            });
+
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, allItems, reqId]() {
+                if (panelPtr && panelPtr->m_loadRequestId == reqId) {
+                    panelPtr->m_model->setRecords(allItems);
+                    panelPtr->m_proxyModel->sort(0, Qt::AscendingOrder);
+                    panelPtr->m_isLoading = false;
+                    panelPtr->recalculateAndEmitStats();
+                    panelPtr->applyFilters();
+                    ArcMeta::Logger::log(QString("[Content] 托管库镜像加载完成 [%1]").arg(reqId));
+                }
+            });
+        });
+        return;
+    }
+
+    // 物理扫描模式（原逻辑）
     (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive, reqId]() { 
         if (!panelPtr) return; 
          

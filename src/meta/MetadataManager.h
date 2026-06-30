@@ -118,16 +118,18 @@ public:
     void notifyFullUIRebuild();
 
     /**
-     * @brief 一站式项目注册流程
-     * 整合 FID 获取、物理属性同步及视觉预热
+     * @brief 一站式项目注册流程（受控模式）
+     * 2026-07-xx 按照 Plan-116：仅允许受信任的来源（如 AutoImportManager）调用
+     * @param path 物理路径
+     * @param authorized 是否经过授权（只有 true 才能创建新记录）
      */
-    void registerItem(const std::wstring& path);
+    void registerItem(const std::wstring& path, bool authorized = false);
 
     /**
      * @brief 异步批量注册项目 (Plan-88 性能重构)
-     * 将耗时的 Win32 I/O 与视觉分析移至后台线程
+     * 2026-07-xx 按照 Plan-116：UI 层主动调用的批量注册将受到严格拦截
      */
-    void registerItemsAsync(const QStringList& paths);
+    void registerItemsAsync(const QStringList& paths, bool authorized = false);
 
     void ensureActivated(const std::wstring& nPath);
 
@@ -310,7 +312,12 @@ private:
     std::vector<std::wstring> m_visualRetryQueue;
     void processVisualRetryQueue();
 
-    void persistAsync(const std::wstring& path, bool notify = true);
+    /**
+     * @brief 异步持久化项元数据
+     * 2026-07-xx 按照 Plan-116：增加授权标志位，严禁非法入库
+     * @param authorized 是否允许创建新记录（只有 USN Journal 触发时为 true）
+     */
+    void persistAsync(const std::wstring& path, bool notify = true, bool authorized = false);
     void debouncePersist(const std::wstring& path);
 
     // 2026-07-xx 按照 Plan-88：无锁版脏路径推送，解决递归死锁
