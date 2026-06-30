@@ -70,6 +70,12 @@
 - [2026-07-01 15:30:00] **src/core/AutoImportManager.cpp**:
     - 在 `startListening`、`onEntryAdded`、`onEntryUpdated` 及 `getManagedLibraryPath` 中追加 `[DIAG]` 前缀的调试日志，用于排查自动入库触发断点。
 
+### 最终诊断：验证 startListening 调用是否被实际执行 (Plan-124)
+- [2026-07-01 16:00:00] **src/main.cpp**:
+    - 在调用 `startListening` 前后注入 `[DIAG-MAIN]` 日志，并输出 `AutoImportManager` 实例地址以排查单例状态。
+- [2026-07-01 16:00:00] **src/core/AutoImportManager.cpp**:
+    - 在 `startListening` 函数入口（if 判断前）注入 `[DIAG]` 日志，记录 `m_isListening` 的真实初值。
+
 ### 统一库路径计算逻辑 (Plan-121)
 - [2026-07-01 14:00:00] **src/core/AutoImportManager.h / .cpp**:
     - 将 `getManagedFolderAbsolutePath` 重命名并公开为 `static getManagedLibraryPath`，支持自动解析路径所属卷序列号并应用默认兜底逻辑。
