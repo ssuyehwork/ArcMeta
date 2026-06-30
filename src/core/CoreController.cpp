@@ -1,10 +1,13 @@
 #include "CoreController.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
+#include "../mft/MftReader.h"
 #include "../ui/Logger.h"
 #include <QThreadPool>
 #include <QDebug>
 #include <QDateTime>
+#include <QDir>
+#include <QFileInfo>
 #include <QDirIterator>
 #include <QtConcurrent>
 #include <unordered_set>
@@ -41,14 +44,14 @@ void CoreController::startSystem() {
             // 2026-07-xx 物理修复：在元数据初始化后，点火启动 MftReader 发动机
             // 只有 MftReader 启动了，AutoImportManager 才能接收到增量变动信号
             qDebug() << "[Core] 正在启动 MftReader USN 监控...";
-            if (!MftReader::instance().loadFromCache()) {
+            if (!ArcMeta::MftReader::instance().loadFromCache()) {
                 qDebug() << "[Core] 缓存失效，正在执行全量 MFT 扫描...";
                 QStringList drivePaths;
                 const auto drives = QDir::drives();
                 for (const QFileInfo& d : drives) {
                     drivePaths << d.absolutePath();
                 }
-                MftReader::instance().buildIndex(drivePaths);
+                ArcMeta::MftReader::instance().buildIndex(drivePaths);
             }
             
             QMetaObject::invokeMethod(this, [this, startTime]() {

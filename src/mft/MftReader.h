@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
+#include <atomic>
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0601
 #endif
