@@ -105,10 +105,7 @@ QStringList AutoImportManager::getRecentVisitedFolders(const std::wstring& volSe
 }
 
 bool AutoImportManager::checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder) {
-    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(path);
-    if (volSerial.empty()) return false;
-
-    std::wstring managedAbs = getManagedFolderAbsolutePath(volSerial);
+    std::wstring managedAbs = getManagedLibraryPath(path);
     if (managedAbs.empty()) return false;
 
     if (path.size() >= managedAbs.size() && _wcsnicmp(path.c_str(), managedAbs.c_str(), managedAbs.size()) == 0) {
@@ -118,7 +115,16 @@ bool AutoImportManager::checkAndGetManagedPath(const std::wstring& path, std::ws
     return false;
 }
 
-std::wstring AutoImportManager::getManagedFolderAbsolutePath(const std::wstring& volSerial) {
+std::wstring AutoImportManager::getManagedLibraryPath(const std::wstring& pathOrVolSerial) {
+    if (pathOrVolSerial.empty()) return L"";
+
+    std::wstring volSerial = pathOrVolSerial;
+    // 如果传入的是路径而非序列号，则提取序列号
+    if (volSerial.find(L":") != std::wstring::npos || volSerial.find(L"\\") != std::wstring::npos) {
+        volSerial = MetadataManager::getVolumeSerialNumber(pathOrVolSerial);
+    }
+    if (volSerial.empty() || volSerial == L"UNKNOWN") return L"";
+
     // 根据序列号反查当前盘符 (Plan-68 4.1)
     QString drive;
     const auto drives = QDir::drives();

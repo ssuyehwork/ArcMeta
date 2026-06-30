@@ -65,3 +65,10 @@
     - 在 `loadDirectory` 导航触发点注入历史记录调用。
     - 重构右键“迁移”菜单，将“迁移至最近活跃位置”替换为真实的历史路径列表，提供快捷物理位移入口。
     - 补全 `../core/AutoImportManager.h` 引用，解决静态方法调用导致的编译错误。
+
+
+### 统一库路径计算逻辑 (Plan-121)
+- [2026-07-01 14:00:00] **src/core/AutoImportManager.h / .cpp**:
+    - 将 `getManagedFolderAbsolutePath` 重命名并公开为 `static getManagedLibraryPath`，支持自动解析路径所属卷序列号并应用默认兜底逻辑。
+- [2026-07-01 14:30:00] **src/ui/ContentPanel.cpp**:
+    - 在 `onCustomContextMenuRequested` 中，重构“迁移”子菜单构建逻辑：复用 `getManagedLibraryPath` 计算 Library 根目录。若目标盘尚未创建库，则显式提示“该盘库存未创建”并禁用相关操作。

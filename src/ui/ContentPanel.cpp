@@ -1663,25 +1663,31 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
         } else {
             // [物理源：显示“迁移”]
-            // 2026-07-xx 按照 Plan-116/117：重构“迁移”菜单逻辑，与“归类到”互斥显示
             if (!m_currentPath.isEmpty() && m_currentPath != "computer://") {
                 std::wstring wp = path.toStdWString();
                 std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
-                QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-                QString relPath = AppConfig::instance().getValue(key, "").toString();
-                
-                QString drive = path.left(3);
-                QString managedRoot = QDir::toNativeSeparators(drive + relPath);
+
+                // 2026-07-xx 按照 Plan-121：统一复用 AutoImportManager 的路径计算逻辑，
+                // 不再自行拼接，确保与 USN 准入判定使用完全一致的路径来源。
+                std::wstring managedRootW = AutoImportManager::getManagedLibraryPath(wp);
+                QString managedRoot = QString::fromStdWString(managedRootW);
 
                 QMenu* migrateMenu = menu.addMenu(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "迁移");
                 UiHelper::applyMenuStyle(migrateMenu);
-                
-                QAction* actRoot = migrateMenu->addAction(managedRoot);
-                actRoot->setData(ActionAddToCategory);
-                actRoot->setProperty("targetPath", managedRoot);
+
+                if (managedRoot.isEmpty()) {
+                    // Library 文件夹尚未创建，给出明确提示而非显示错误路径
+                    migrateMenu->addAction("该盘库存未创建")->setEnabled(false);
+                } else {
+                    QAction* actRoot = migrateMenu->addAction(managedRoot);
+                    actRoot->setData(ActionAddToCategory);
+                    actRoot->setProperty("targetPath", managedRoot);
+
+                    migrateMenu->menuAction()->setData(ActionAddToCategory);
+                    migrateMenu->menuAction()->setProperty("targetPath", managedRoot);
+                }
 
                 migrateMenu->addSeparator();
-                // 2026-07-xx 按照 Plan-119：使用真实的最近访问历史列表作为迁移目标
                 QStringList recentFolders = AutoImportManager::getRecentVisitedFolders(volSerial);
                 if (recentFolders.isEmpty()) {
                     migrateMenu->addAction("迁移至最近活跃位置...")->setEnabled(false);
@@ -1692,9 +1698,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         act->setProperty("targetPath", folder);
                     }
                 }
-
-                migrateMenu->menuAction()->setData(ActionAddToCategory);
-                migrateMenu->menuAction()->setProperty("targetPath", managedRoot);
             }
         }
 
