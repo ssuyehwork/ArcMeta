@@ -2437,7 +2437,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             std::wstring normParent = MetadataManager::normalizePath(path.toStdWString());
             if (!normParent.empty() && normParent.back() != L'\\' && normParent.back() != L'/') normParent += L'\\';
 
-            MetadataManager::instance().forEachCachedItem([&](const std::wstring& p, const RuntimeMeta& meta) {
+            MetadataManager::instance().forEachCachedItem([&](const std::wstring& p, const RuntimeMeta& /*meta*/) {
                 if (p.find(normParent) == 0) {
                     std::wstring sub = p.substr(normParent.length());
                     if (sub.find_first_of(L"\\/") == std::wstring::npos) {
