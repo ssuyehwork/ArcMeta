@@ -94,3 +94,13 @@
 ### 事件过滤器安装逻辑修复
 - [2026-06-30 10:21:37] **src/ui/MainWindow.cpp**:
     - 修复因移除闲置检测逻辑误删 `installEventFilter(this)` 导致搜索历史等 UI 交互失效的问题。
+
+### USN Journal 自动入库链路修复 (Plan-117)
+- [2026-06-30 15:25:00] **src/core/CoreController.cpp**:
+    - 在 `startSystem` 异步初始化链中補全对 `MftReader::instance().loadFromCache()` 的调用，激活 USN Journal 监控。
+    - 增加对 `MftReader.h`, `QDir`, `QFileInfo` 的包含。
+- [2026-06-30 15:28:00] **src/ui/MainWindow.cpp**:
+    - 修正右键菜单“重新收纳”逻辑：彻底废弃 `pending_imports` 表操作，直接调用 `MetadataManager::registerItem(..., true)` 实现授权入库。
+    - 按照品牌化规范将“重新扫描该盘”更名为“重新收纳”。
+- [2026-06-30 15:30:00] **src/core/AutoImportManager.cpp**:
+    - 确认 `processImportQueue` 内部已正确透传 `authorized=true` 标记，确保 USN 触发的入库符合 Plan-116 红线。

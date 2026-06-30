@@ -1,10 +1,13 @@
 #include "CoreController.h"
+#include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
 #include "../ui/Logger.h"
 #include <QThreadPool>
 #include <QDebug>
 #include <QDateTime>
+#include <QDir>
+#include <QFileInfo>
 #include <QDirIterator>
 #include <QtConcurrent>
 #include <unordered_set>
@@ -37,6 +40,16 @@ void CoreController::startSystem() {
             
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
+
+            // 补全监控初始化：加载缓存并自动启动所有在线磁盘的 UsnWatcher
+            (void)QtConcurrent::run([]() {
+                bool cacheOk = MftReader::instance().loadFromCache();
+                if (!cacheOk) {
+                    QStringList drives;
+                    for (const QFileInfo& d : QDir::drives()) drives << d.absolutePath();
+                    MftReader::instance().buildIndex(drives);
+                }
+            });
             
             QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);

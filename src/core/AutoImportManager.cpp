@@ -206,7 +206,7 @@ void AutoImportManager::processImportQueue() {
         DatabaseManager::instance().getMemoryDb(vol, letter);
 
         for (const auto& path : pair.second) {
-            // 2026-07-xx 按照 Plan-116：通过 USN 链路触发的入库，标记为已授权
+            // 2026-07-xx 按照 Plan-116：USN 触发的入库视为已授权
             MetadataManager::instance().registerItem(path, true);
         }
     }
