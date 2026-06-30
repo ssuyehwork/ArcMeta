@@ -122,3 +122,9 @@
     - 在 USN 记录解析循环中增加 `RecordLength == 0` 的死循环防御检查。
 - [2026-06-30 23:08:00] **src/core/AutoImportManager.cpp**:
     - 细化 `startListening` 阶段日志，明确记录信号挂载动作。
+
+### 内存预分配安全加固与循环边界修复 (Plan-117.2)
+- [2026-06-30 23:15:00] **src/mft/MftReader.cpp**:
+    - 修复大容量磁盘（条目数 > 200万）导致的 OOM 崩溃：限制 `loadMftDirect` 与 `mergeDriveResult` 中的 `reserve` 向量上限为 150 万，并增加 `std::bad_alloc` 异常捕获保护。
+    - 增强 USN 记录解析循环安全性：显式检查 `p + RecordLength` 边界，防止缓冲区溢出。
+    - 增加 `sizeof(RawEntry)` 与预估条目数打印，监控内存压力。

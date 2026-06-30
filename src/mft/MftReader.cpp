@@ -1332,7 +1332,17 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
 
     // 工业级启发式预分配：根据日记账条目数预估文件总数，平均 150 字节一个条目
     size_t estimatedCount = static_cast<size_t>(j.NextUsn / 150);
-    if (estimatedCount > 100000) result.entries.reserve(estimatedCount);
+    qDebug() << "[MftReader] 预估条目数:" << estimatedCount << "RawEntry大小:" << sizeof(MftReader::RawEntry);
+    if (estimatedCount > 100000) {
+        // 2026-07-xx 按照 Plan-117.2：限制预分配上限为 150 万，防止大盘 OOM 崩溃
+        size_t safeReserve = (std::min)(estimatedCount, static_cast<size_t>(1500000));
+        try {
+            result.entries.reserve(safeReserve);
+            qDebug() << "[MftReader] 内存预分配完成:" << safeReserve;
+        } catch (const std::bad_alloc&) {
+            qCritical() << "[MftReader] 内存预分配失败 (bad_alloc), 尝试继续不分配模式";
+        }
+    }
 
     MFT_ENUM_DATA_V0 ed = {0}; ed.HighUsn = j.NextUsn;
     std::vector<uint8_t> buf(1024 * 1024);
@@ -1375,8 +1385,8 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
                 p += header->RecordLength; continue;
             }
 
-            if (header->RecordLength == 0) {
-                qDebug() << "[MftReader] 发现 RecordLength 为 0 的条目，强制退出循环以防死锁";
+            if (header->RecordLength == 0 || (p + header->RecordLength > end)) {
+                qDebug() << "[MftReader] 发现 RecordLength 异常(" << header->RecordLength << ") 或缓冲区溢出，跳过此块";
                 break;
             }
             // 2026-05-14 极致性能优化：全量扫描阶段仅获取核心字段，将重量级 I/O 转移至延迟补全队列
@@ -1400,15 +1410,20 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
 }
 
 void MftReader::mergeDriveResult(const std::wstring& volume, const MftReader::DriveResult& result, size_t driveIdx) {
+    qDebug() << "[MftReader] mergeDriveResult 入口:" << QString::fromStdWString(volume) << "条目数:" << result.entries.size();
     Q_UNUSED(volume);
     size_t count = result.entries.size();
-    m_frns.reserve(m_frns.size() + count);
-    m_parent_frns.reserve(m_parent_frns.size() + count);
-    m_sizes.reserve(m_sizes.size() + count);
-    m_timestamps.reserve(m_timestamps.size() + count);
-    m_name_offsets.reserve(m_name_offsets.size() + count);
-    m_attributes.reserve(m_attributes.size() + count);
-    m_metadata_fetched.reserve(m_metadata_fetched.size() + count);
+    try {
+        m_frns.reserve(m_frns.size() + count);
+        m_parent_frns.reserve(m_parent_frns.size() + count);
+        m_sizes.reserve(m_sizes.size() + count);
+        m_timestamps.reserve(m_timestamps.size() + count);
+        m_name_offsets.reserve(m_name_offsets.size() + count);
+        m_attributes.reserve(m_attributes.size() + count);
+        m_metadata_fetched.reserve(m_metadata_fetched.size() + count);
+    } catch (const std::bad_alloc&) {
+        qCritical() << "[MftReader] SoA 扩容失败 (bad_alloc)，内存可能已耗尽";
+    }
     
     // 方案三：精准写入优化
     if (driveIdx < 32) {
