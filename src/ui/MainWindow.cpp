@@ -550,11 +550,6 @@ void MainWindow::initUi() {
             
             std::wstring wPath = path.toStdWString();
             
-            // 物理对齐：确保修改前项目已入库
-            if (!idx.data(ManagedRole).toBool()) {
-                MetadataManager::instance().registerItem(wPath);
-            }
-
             MetadataManager::instance().setTags(wPath, tags);
         }
     });

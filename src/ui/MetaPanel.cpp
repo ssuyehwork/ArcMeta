@@ -472,12 +472,6 @@ void MetaPanel::onTagAdded() {
                 std::wstring wPath = path.toStdWString();
                 RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
                 
-                // 2026-07-xx 物理对齐：修改前先判断项目是否已经入库，若无则执行注册
-                if (!rm.isManaged) {
-                    MetadataManager::instance().registerItem(wPath);
-                    rm = MetadataManager::instance().getMeta(wPath);
-                }
-
                 if (!rm.tags.contains(text)) {
                     rm.tags << text;
                     MetadataManager::instance().setTags(wPath, rm.tags);
@@ -500,11 +494,6 @@ void MetaPanel::onTagDeleted(const QString& text) {
     for (const QString& path : m_selectedPaths) {
         std::wstring wPath = path.toStdWString();
         RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
-        
-        if (!rm.isManaged) {
-            MetadataManager::instance().registerItem(wPath);
-            rm = MetadataManager::instance().getMeta(wPath);
-        }
 
         if (rm.tags.contains(text)) {
             rm.tags.removeAll(text);
@@ -749,11 +738,6 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
             for (const QString& path : m_selectedPaths) {
                 std::wstring wPath = path.toStdWString();
                 RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
-                
-                if (!rm.isManaged) {
-                    MetadataManager::instance().registerItem(wPath);
-                    rm = MetadataManager::instance().getMeta(wPath);
-                }
 
                 if (newNote != rm.note) {
                     MetadataManager::instance().setNote(wPath, newNote);
@@ -766,11 +750,6 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
             for (const QString& path : m_selectedPaths) {
                 std::wstring wPath = path.toStdWString();
                 RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
-
-                if (!rm.isManaged) {
-                    MetadataManager::instance().registerItem(wPath);
-                    rm = MetadataManager::instance().getMeta(wPath);
-                }
 
                 if (newUrl != rm.url) {
                     MetadataManager::instance().setURL(wPath, newUrl);
