@@ -66,12 +66,9 @@
     - 重构右键“迁移”菜单，将“迁移至最近活跃位置”替换为真实的历史路径列表，提供快捷物理位移入口。
     - 补全 `../core/AutoImportManager.h` 引用，解决静态方法调用导致的编译错误。
 
+
 ### 统一库路径计算逻辑 (Plan-121)
 - [2026-07-01 14:00:00] **src/core/AutoImportManager.h / .cpp**:
     - 将 `getManagedFolderAbsolutePath` 重命名并公开为 `static getManagedLibraryPath`，支持自动解析路径所属卷序列号并应用默认兜底逻辑。
-- [2026-07-01 14:15:00] **src/meta/MetadataManager.cpp**:
-    - 重构 `isInsideManagedLibrary`：废除自行拼接逻辑，统一调用 `AutoImportManager::getManagedLibraryPath` 判定路径归属，解决默认库路径判定失效问题。
 - [2026-07-01 14:30:00] **src/ui/ContentPanel.cpp**:
-    - 在 `FerrexVirtualDbModel::setData` 与 `loadDirectory` 中，统一调用 `MetadataManager::isInsideManagedLibrary` 进行准入判定，支持默认库路径的编辑权限拦截。
     - 在 `onCustomContextMenuRequested` 中，重构“迁移”子菜单构建逻辑：复用 `getManagedLibraryPath` 计算 Library 根目录。若目标盘尚未创建库，则显式提示“该盘库存未创建”并禁用相关操作。
-    - 在 `ActionAddToCategory` 执行逻辑中，同步应用 `getManagedLibraryPath` 进行路径兜底。
