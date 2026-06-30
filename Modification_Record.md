@@ -82,6 +82,10 @@
     - 在 `startSystem` 流程中注入 `MftReader` 点火逻辑，通过 `loadFromCache` 或全量 `buildIndex` 启动 USN 监控。
 - [2026-07-01 17:15:00] **src/meta/MetadataManager.cpp**:
     - 在 `persistAsync` 中引入 `SqlTransaction` 事务锁，加固多线程写入时的 SQLite 并发安全性。
+- [2026-07-01 17:30:00] **src/mft/MftReader.cpp**:
+    - 稳定性修复：彻底移除 `std::execution::par` 并行策略，解决特定环境下的启动退出/崩溃问题。
+    - 死锁修复：移除了 `buildIndex` 中的同步存盘，并将排序逻辑移出锁区间 (Plan-126)。
+    - 安全加固：增加 `RecordLength` 零值校验，防止死循环。
 
 ### 统一库路径计算逻辑 (Plan-121)
 - [2026-07-01 14:00:00] **src/core/AutoImportManager.h / .cpp**:

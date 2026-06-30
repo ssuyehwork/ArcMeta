@@ -7,7 +7,6 @@
 #include <Shlwapi.h>
 #pragma comment(lib, "Shlwapi.lib")
 #include <algorithm>
-#include <execution>
 #include <mutex>
 #include <numeric>
 #include <filesystem>
@@ -226,6 +225,8 @@ void MftReader::buildIndex(const QStringList& drives) {
         }
     }
 
+    qDebug() << "[DIAG] MftReader::buildIndex -> toScan 盘符数量:" << toScan.size();
+
     if (toScan.empty()) {
         // 如果没有新盘需要扫描，且已经初始化，则不需要重建索引
         QReadLocker lock(&m_dataLock);
@@ -238,12 +239,15 @@ void MftReader::buildIndex(const QStringList& drives) {
         bool success = false;
     };
     std::vector<ScannedDrive> scannedResults(toScan.size());
-    std::vector<int> scanIndices((int)toScan.size());
-    std::iota(scanIndices.begin(), scanIndices.end(), 0);
-    std::for_each((std::execution::par), scanIndices.begin(), scanIndices.end(), [&](int i) {
+
+    // 2026-07-xx 稳定性修复：彻底移除所有并行策略 std::execution::par，回归标准串行执行，
+    // 理由：并行 STL 在某些 MinGW/MSVC 混合环境或特定系统库版本下存在未定义行为导致退出。
+    for (size_t i = 0; i < toScan.size(); ++i) {
+        qDebug() << "[DIAG] 正在扫描磁盘:" << QString::fromStdWString(toScan[i]);
         scannedResults[i].volume = toScan[i];
         scannedResults[i].success = loadMftDirect(toScan[i], scannedResults[i].res);
-    });
+        qDebug() << "[DIAG] 扫描磁盘完成:" << QString::fromStdWString(toScan[i]) << " 成功=" << scannedResults[i].success << " 项数=" << scannedResults[i].res.entries.size();
+    }
 
     QWriteLocker lock(&m_dataLock);
     std::vector<UsnWatcher*> newWatchers;
@@ -254,20 +258,35 @@ void MftReader::buildIndex(const QStringList& drives) {
         m_drive_list.push_back(sr.volume);
         if (dIdx < 32) m_drive_active_mask.fetch_or(1 << dIdx);
         m_next_usns[sr.volume] = sr.res.nextUsn;
+
+        qDebug() << "[DIAG] 正在合并磁盘数据:" << QString::fromStdWString(sr.volume);
         mergeDriveResult(sr.volume, sr.res, dIdx);
-        saveDriveToCacheInternal(dIdx);
+
+        // 2026-07-xx 物理修复：禁止在此处同步调用 saveDriveToCacheInternal，
+        // 理由：该函数内部会尝试获取 QReadLocker，而在当前 QWriteLocker 持有下触发重入会导致死锁。
+        // 索引存盘逻辑交由 USN 监控链的脏计数自动触发。
         
         auto* w = new UsnWatcher(sr.volume, sr.res.nextUsn, nullptr);
         m_watchers.push_back(w);
         newWatchers.push_back(w);
     }
 
+    qDebug() << "[DIAG] 正在重建 FRN 映射表...";
     rebuildFrnToIndexMap();
-    buildSortedIndices();
-    m_isInitialized = true;
 
+    // 2026-07-xx 性能优化 (Plan-126)：将耗时的全量排序移出 QWriteLocker 区间
+    // 在持有写锁期间仅标记初始化未完成，在解锁后执行排序，确保 UI 线程不因等待大锁而卡死。
     lock.unlock();
+
+    qDebug() << "[DIAG] 正在构建排序索引 (锁外执行)...";
+    buildSortedIndices();
+
+    QWriteLocker finalLock(&m_dataLock);
+    m_isInitialized = true;
+    finalLock.unlock();
+    qDebug() << "[DIAG] 正在启动 USN 监控线程...";
     for (auto* w : newWatchers) w->start();
+    qDebug() << "[DIAG] buildIndex 执行完成";
 }
 
 bool MftReader::loadFromCache() {
@@ -826,7 +845,8 @@ std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, boo
             }
         }
     } else {
-        std::for_each((std::execution::par), chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
+        // 2026-07-xx 稳定性修复：移除 std::execution::par，改用串行处理
+        std::for_each(chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
             std::vector<uint64_t> localRes;
             localRes.reserve(grainSize / 16);
             size_t startPos = chunkIdx * grainSize;
@@ -1288,6 +1308,7 @@ void MftReader::compact() {
 }
 
 bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult& result) {
+    qDebug() << "[DIAG] loadMftDirect 入口 -> 卷:" << QString::fromStdWString(volume);
     // 极致工业级优化方案 C：SoA 结构内存预分配优化
     // 预估 NTFS 卷的文件数量，提前 reserve 以减少动态扩容带来的内存碎片与拷贝开销
     std::wstring dev = L"\\\\.\\" + volume;
@@ -1312,12 +1333,17 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
 
     MFT_ENUM_DATA_V0 ed = {0}; ed.HighUsn = j.NextUsn;
     std::vector<uint8_t> buf(1024 * 1024);
+    int batchCount = 0;
     while (DeviceIoControl(h, FSCTL_ENUM_USN_DATA, &ed, sizeof(ed), buf.data(), (DWORD)buf.size(), &cb, NULL)) {
+        batchCount++;
         if (m_abort_scan.load()) break; // 1.21：强制中断
         if (cb < 8) break;
         uint8_t* p = buf.data() + 8; uint8_t* end = buf.data() + cb;
-        while (p < end) {
+        while (p + sizeof(USN_RECORD_COMMON_HEADER) <= end) {
             USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(p);
+            // 2026-07-xx 物理加固：防止 RecordLength 为 0 导致的死循环，以及记录长度越界
+            if (header->RecordLength == 0 || p + header->RecordLength > end) break;
+
             uint64_t frn, parentFrn;
             LARGE_INTEGER timestamp;
             uint32_t attr;
@@ -1345,6 +1371,8 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
                 fileNameLength = rec->FileNameLength;
                 fileNameOffset = rec->FileNameOffset;
             } else {
+                // 2026-07-xx 物理防护：防止 RecordLength 为 0 导致的死循环
+                if (header->RecordLength == 0) break;
                 p += header->RecordLength; continue;
             }
 
@@ -1419,7 +1447,8 @@ void MftReader::buildSortedIndices() {
     // 2026-05-14 性能增强：构建预排序索引，支持二分查找 O(log N)
     m_sorted_indices.resize(m_frns.size());
     std::iota(m_sorted_indices.begin(), m_sorted_indices.end(), 0);
-    std::sort((std::execution::par), m_sorted_indices.begin(), m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
+    // 2026-07-xx 稳定性修复：移除 std::execution::par
+    std::sort(m_sorted_indices.begin(), m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
         const char* s1 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[a]);
         const char* s2 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[b]);
         return _stricmp(s1, s2) < 0;
