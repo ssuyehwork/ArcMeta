@@ -102,6 +102,7 @@
 - [2026-07-02 11:20:00] **src/mft/UsnWatcher.cpp**:
     - 在 `run()` 与 `handleRecord()` 中将 `USN_REASON_RENAME_OLD_NAME` 加入捕获掩码，确保移动操作起点可见。
     - 注入 `[USN_TRACE]` 启动日志与捕获日志，实时打印变动 FRN 与 Reason 掩码。
+    - 修复 `hex` 标识符未定义导致的编译错误：改用 `QString::number(..., 16)` 进行 16 进制日志格式化。
 - [2026-07-02 11:30:00] **src/mft/MftReader.cpp**:
     - 在 `removeEntryByFrn` 物理销毁索引前，利用 `getPathFastInternal` 提取最后已知路径并记录 `[MFT_TRACE]` 日志。
     - 在 `entryAdded`、`entryUpdated`、`entryRemoved` 信号发射处增加 `[MFT_TRACE]` 日志，验证信号穿透性。

@@ -107,7 +107,7 @@ void UsnWatcher::run() {
                     *reinterpret_cast<uint64_t*>(&reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileReferenceNumber);
 
                 // [USN_TRACE] 记录原始信号
-                qDebug() << "[USN_TRACE] 捕获变更信号: FRN =" << frn << "原因掩码 =" << hex << reason;
+                qDebug() << "[USN_TRACE] 捕获变更信号: FRN =" << frn << "原因掩码 =" << QString::number(reason, 16);
 
                 if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE |
                               USN_REASON_RENAME_NEW_NAME | USN_REASON_RENAME_OLD_NAME)) {
@@ -155,7 +155,7 @@ void UsnWatcher::handleRecord(USN_RECORD_V2* pRecord) {
         frn = *reinterpret_cast<uint64_t*>(&v3->FileReferenceNumber);
     } else return;
 
-    qDebug() << "[USN_TRACE] handleRecord: FRN =" << frn << "原因掩码 =" << hex << reason;
+    qDebug() << "[USN_TRACE] handleRecord: FRN =" << frn << "原因掩码 =" << QString::number(reason, 16);
 
     // 仅更新 MftReader 内存 SoA，不直接操作数据库
     if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE |
