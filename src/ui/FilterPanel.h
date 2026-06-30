@@ -164,6 +164,12 @@ public:
      */
     void selectColor(const QColor& color);
 
+    /**
+     * @brief 更新数据源感知状态
+     * 2026-07-xx 按照 Plan-118：物理源下隐藏逻辑标签等筛选项
+     */
+    void setMirrorSource(bool isMirror);
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -212,6 +218,15 @@ private:
     QLabel*       m_titleLabel      = nullptr;
 
     QList<QPushButton*> m_groupHeaders; // 跟踪所有分组标题以支持全局控制
+
+    // 2026-07-xx 按照 Plan-118：数据源感知分组引用
+    QWidget* m_groupRating = nullptr;
+    QWidget* m_groupColor = nullptr;
+    QWidget* m_groupLink = nullptr;
+    QWidget* m_groupNote = nullptr;
+    QWidget* m_groupRatio = nullptr;
+
+    bool m_isMirrorSource = true;
 
     // 2026-xx-xx 新增快速输入框成员
     QLineEdit*    m_editColor       = nullptr;

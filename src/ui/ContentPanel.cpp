@@ -2533,34 +2533,22 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
  
 void ContentPanel::search(const QString& query) { 
-    // 2026-07-xx 按照 Plan-57：ContentPanel::search 仅作为搜索发起的代理。
-    // 实际结果处理已在 MainWindow 中通过 CoreController 的信号进行流式对接。
-    m_currentCategoryType = "search";
-    updateLayersButtonState();
-    if (m_viewStack) m_viewStack->show(); 
-    if (m_textPreview) m_textPreview->hide(); 
-    if (m_imagePreview) m_imagePreview->hide(); 
- 
-    // 2026-07-xx 物理同步：必须将搜索词同步给代理模型，防止旧搜索词干扰新结果判定
+    // 2026-07-xx 按照 Plan-118：搜索行为回归筛选流。
+    // 搜索框仅作为当前视图的本地过滤器，禁止切换 m_currentCategoryType 为 "search"。
+
+    // 1. 同步关键词到当前筛选状态
     m_currentFilter.keyword = query;
+
+    // 2. 触发本地过滤（invalidateFilter）
     applyFilters();
 
-    // 2026-07-xx 物理补全：如果关键词为空，执行显式重置并停止后续执行
-    if (query.isEmpty()) {
-        m_isLoading = false;
-        m_model->clear();
-        CoreController::instance().abortSearch();
-        recalculateAndEmitStats();
-        return;
-    }
+    // 3. 视觉状态同步
+    if (m_textPreview) m_textPreview->hide();
+    if (m_imagePreview) m_imagePreview->hide();
+    if (m_viewStack) m_viewStack->show();
 
-    m_isLoading = true;
-    ++m_loadRequestId; // 增加 ID 以作废之前的异步加载
-    m_model->clear();
-    
-    // 核心逻辑：发起异步搜索。此处参数采用默认值，因为特定的范围感知搜索
-    // 通常由搜索框（MainWindow）直接驱动。此处保留作为通用接口。
-    CoreController::instance().performSearch(query);
+    ArcMeta::Logger::log(QString("[Search] 本地搜索关键词更新: %1 (当前视图类型: %2)")
+                        .arg(query).arg(m_currentCategoryType.isEmpty() ? "nav" : m_currentCategoryType));
 } 
  
 void ContentPanel::applyFilters(const FilterState& state) { 
@@ -2726,9 +2714,8 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
     m_isLoading = true;
     if (reqId == 0) reqId = ++m_loadRequestId;
     // 2026-07-xx 逻辑校准：保持既有的系统分类类型（如 trash/recently_visited），
-    // 仅在明确不是这些特殊类型且不是 search 时，才将其降级为通用的 path_list。
-    if (m_currentCategoryType != "search" && 
-        m_currentCategoryType != "trash" && 
+    // 仅在明确不是这些特殊类型时，才将其降级为通用的 path_list。
+    if (m_currentCategoryType != "trash" &&
         m_currentCategoryType != "recently_visited" &&
         m_currentCategoryType != "untagged" &&
         m_currentCategoryType != "uncategorized" &&
@@ -2741,10 +2728,8 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
     
-    // 如果不是搜索结果，则通常属于分类数据源
-    if (m_currentCategoryType != "search") {
-        emit dataSourceChanged("category"); 
-    }
+    // 加载路径列表通常属于分类/逻辑数据源
+    emit dataSourceChanged("category");
      
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, paths, reqId]() {
