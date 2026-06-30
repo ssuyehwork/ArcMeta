@@ -12,12 +12,13 @@ namespace ArcMeta {
 class ImportHelper {
 public:
     /**
-     * @brief 执行统一导入流程
-     * @param paths 待导入的物理路径列表
-     * @param targetCategoryId 目标父分类 ID (0 表示“我的分类”根目录)
-     * @param parent UI 父窗口，用于显示进度框
+     * @brief 执行物理迁移流程
+     * 2026-07-xx 按照 Plan-116：收拢为仅物理 Move 动作。
+     * @param paths 待迁移的物理路径列表
+     * @param targetPhysicalPath 目标物理目录（托管库中的具体文件夹）
+     * @param parent UI 父窗口
      */
-    static void importPaths(const QStringList& paths, int targetCategoryId = 0, QWidget* parent = nullptr);
+    static void importPaths(const QStringList& paths, const QString& targetPhysicalPath, QWidget* parent = nullptr);
 };
 
 } // namespace ArcMeta

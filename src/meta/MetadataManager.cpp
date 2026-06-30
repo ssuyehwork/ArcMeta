@@ -346,25 +346,26 @@ void MetadataManager::notifyFullUIRebuild() {
     QMetaObject::invokeMethod(m_uiSignalTimer, "start", Qt::QueuedConnection);
 }
 
-void MetadataManager::registerItem(const std::wstring& path) {
+void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     std::wstring nPath = normalizePath(path);
     // 1. 激活项目 (获取 FID/FRN 等物理属性)
     ensureActivated(nPath);
     // 2. 提取图像尺寸 (Plan-29)
     tryExtractDimensions(nPath);
     // 3. 物理同步 (存入数据库)
-    syncPhysicalMetadata(nPath, false);
+    // 2026-07-xx 按照 Plan-116：透传授权状态，非授权请求禁止创建新记录
+    persistAsync(nPath, false, authorized);
     // 4. 视觉预热 (提取颜色)
     tryExtractColor(nPath);
     // 5. 通知 UI 刷新该路径
     notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 }
 
-void MetadataManager::registerItemsAsync(const QStringList& paths) {
+void MetadataManager::registerItemsAsync(const QStringList& paths, bool authorized) {
     if (paths.isEmpty()) return;
     
-    // 2026-07-xx 按照 Plan-88：全异步批量注册链
-    (void)QtConcurrent::run([this, paths]() {
+    // 2026-07-xx 按照 Plan-88/116：全异步批量注册链，受控模式
+    (void)QtConcurrent::run([this, paths, authorized]() {
 #ifdef Q_OS_WIN
         CoInitializeEx(NULL, COINIT_APARTMENTTHREADED); // 赋予 Shell/图像分析能力
 #endif
@@ -376,7 +377,8 @@ void MetadataManager::registerItemsAsync(const QStringList& paths) {
             
             // 2. 物理与视觉属性提取 (耗时操作)
             tryExtractDimensions(nPath);
-            syncPhysicalMetadata(nPath, false); // 内部已异步化
+            // 2026-07-xx 按照 Plan-116：只有授权来源允许入库
+            persistAsync(nPath, false, authorized);
             tryExtractColor(nPath);
             
             // 3. 增量通知 UI
@@ -1224,7 +1226,7 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
     return fid;
 }
 
-void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
+void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool authorized) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     
     RuntimeMeta rMeta = getMeta(nPath);
@@ -1241,17 +1243,27 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify) {
     }
     if (!db) return;
 
-    sqlite3_stmt* stmt;
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     bool isNew = true;
     {
         sqlite3_stmt* checkStmt;
         if (sqlite3_prepare_v2(db, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
+            // 2026-07-xx 物理修复：必须绑定 file_id 才能正确判定是否为新项
             sqlite3_bind_text(checkStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
             if (sqlite3_step(checkStmt) == SQLITE_ROW) isNew = false;
             sqlite3_finalize(checkStmt);
         }
     }
+
+    // 2026-07-xx 按照 Plan-116：核心准入拦截逻辑
+    // 如果是新记录且未经过授权（非 USN 触发），则拦截入库动作
+    if (isNew && !authorized) {
+        // 记录日志，但不产生新记录
+        qDebug() << "[Metadata] 拦截到非授权入库请求（库外项目）:" << QString::fromStdWString(nPath);
+        return;
+    }
+
+    sqlite3_stmt* stmt;
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
