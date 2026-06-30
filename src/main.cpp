@@ -28,6 +28,7 @@
 #include "meta/CategoryRepo.h"
 #include "mft/MftReader.h"
 #include "core/CoreController.h"
+#include "core/AutoImportManager.h"
 
 /**
  * @brief 自定义日志处理程序，将 qDebug 消息重定向至本地 .log 文件
@@ -140,6 +141,8 @@ int main(int argc, char *argv[]) {
 
     // 5. 启动异步系统扫描（后台初始化，UI 可响应）
     ArcMeta::CoreController::instance().startSystem();
+    // 2026-07-xx 物理修复：此行此前被意外移除，导致 USN 自动入库链路从未生效
+    ArcMeta::AutoImportManager::instance().startListening();
 
     qDebug() << "[PERF] main 函数逻辑执行完毕，进入事件循环。总耗时:" << (QDateTime::currentMSecsSinceEpoch() - mainStartTime) << "ms";
 
