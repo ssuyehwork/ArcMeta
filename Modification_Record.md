@@ -72,3 +72,8 @@
     - 将 `getManagedFolderAbsolutePath` 重命名并公开为 `static getManagedLibraryPath`，支持自动解析路径所属卷序列号并应用默认兜底逻辑。
 - [2026-07-01 14:30:00] **src/ui/ContentPanel.cpp**:
     - 在 `onCustomContextMenuRequested` 中，重构“迁移”子菜单构建逻辑：复用 `getManagedLibraryPath` 计算 Library 根目录。若目标盘尚未创建库，则显式提示“该盘库存未创建”并禁用相关操作。
+
+### 冗余监控日志与闲置对账逻辑移除
+- [2026-06-30 10:07:34] **src/ui/MainWindow.h / .cpp**, **ScanDialog/src/ui/MainWindow.h / .cpp**:
+    - 彻底移除 `[MONITOR]` 资源监控日志及相关 `m_resourceMonitorTimer` 逻辑。
+    - 彻底移除“检测到系统闲置超过30秒，触发自动对账同步...”逻辑代码及相关 `m_idleTimer` 成员与事件过滤逻辑，不再保留闲置对账功能。

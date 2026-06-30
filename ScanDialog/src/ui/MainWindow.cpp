@@ -135,8 +135,7 @@ MainWindow::MainWindow(QWidget* parent)
     m_trayController = new TrayController(this);
     m_trayController->show();
 
-    initIdleDetector();
-    qDebug() << "[Main] MainWindow 构造函数 UI/托盘/闲置检测初始化完成";
+    qDebug() << "[Main] MainWindow 构造函数 UI/托盘初始化完成";
 
     // 2026-03-xx 性能优化：严禁在构造函数中执行任何可能导致阻塞的同步加载 (如 navigateTo)。
     // 改为延迟 200ms 触发首次加载，确保 MainWindow 框架先瞬间弹出，提升用户感知的“秒开”响应速度。
@@ -700,14 +699,6 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
 
 // 2026-03-xx 按照用户要求：物理拦截事件以实现自定义 ToolTipOverlay 的显隐控制
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
-    // 2026-06-15 闲置感应：拦截用户交互事件，重置同步倒计时
-    if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress || 
-        event->type() == QEvent::KeyPress || event->type() == QEvent::Wheel) {
-        if (m_idleTimer) {
-            m_idleTimer->start(); // 重新开始 30 秒计次
-        }
-    }
-
     // 2026-06-xx 物理修复：双击搜索框时弹出历史记录
     if (event->type() == QEvent::MouseButtonDblClick && watched == m_searchEdit) {
         if (!m_searchHistory.isEmpty()) {
@@ -1079,23 +1070,6 @@ void MainWindow::setupCustomTitleBarButtons() {
     connect(m_btnPinTop, &QPushButton::toggled, this, &MainWindow::onPinToggled);
 }
 
-void MainWindow::initIdleDetector() {
-    // 2026-06-15 按照用户要求：建立 30 秒闲置自动同步机制
-    m_idleTimer = new QTimer(this);
-    m_idleTimer->setInterval(30000); // 30秒
-    m_idleTimer->setSingleShot(true);
-    
-    connect(m_idleTimer, &QTimer::timeout, this, [this]() {
-        qDebug() << "[Main] 检测到系统闲置超过30秒，触发自动对账同步...";
-        SyncEngine::instance().runIncrementalSync();
-    });
-
-    // 启动闲置计时
-    m_idleTimer->start();
-    
-    // 2026-05-29 性能优化：事件过滤器仅安装在 MainWindow 实例上，减少 qApp 全局事件分发的 overhead。
-    this->installEventFilter(this);
-}
 
 void MainWindow::navigateTo(const QString& path, bool record) {
     if (path.isEmpty()) return;
