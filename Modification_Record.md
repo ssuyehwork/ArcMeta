@@ -65,3 +65,4 @@
     - 在 `loadDirectory` 导航触发点注入历史记录调用。
     - 重构右键“迁移”菜单，将“迁移至最近活跃位置”替换为真实的历史路径列表，提供快捷物理位移入口。
     - 补全 `../core/AutoImportManager.h` 引用，解决静态方法调用导致的编译错误。
+    - **CMakeLists.txt**: 将 `AutoImportManager.cpp/h` 补全至编译源文件列表，修复“无法解析的外部符号”链接错误。
