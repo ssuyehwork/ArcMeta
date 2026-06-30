@@ -114,3 +114,11 @@
     - 在 `showEvent` 延迟加载回调中增加诊断埋点。
 - [2026-06-30 22:52:00] **src/mft/MftReader.cpp**:
     - 在 `loadFromCache` 和 `buildIndex` 中增加驱动器加载状态与路径校验日志。
+
+### 深度初始化与扫描异常诊断 (Plan-117.1)
+- [2026-06-30 23:05:00] **src/mft/MftReader.cpp**:
+    - 在 `buildIndex` 和 `loadMftDirect` 中增加极其详尽的日志，覆盖句柄开启、Journal 查询及批次处理。
+    - 将 `buildIndex` 中的并行扫描（par）暂时降级为串行扫描（seq），以排查多线程库稳定性问题。
+    - 在 USN 记录解析循环中增加 `RecordLength == 0` 的死循环防御检查。
+- [2026-06-30 23:08:00] **src/core/AutoImportManager.cpp**:
+    - 细化 `startListening` 阶段日志，明确记录信号挂载动作。

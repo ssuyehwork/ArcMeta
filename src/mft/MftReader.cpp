@@ -204,6 +204,7 @@ bool MftReader::isDriveIndexed(const QString& drive) {
 }
 
 void MftReader::buildIndex(const QStringList& drives) {
+    qDebug() << "[MftReader] buildIndex 入口, 驱动器数:" << drives.size();
     updateActiveDrives(drives);
 
     std::vector<std::wstring> toScan;
@@ -240,11 +241,15 @@ void MftReader::buildIndex(const QStringList& drives) {
     std::vector<ScannedDrive> scannedResults(toScan.size());
     std::vector<int> scanIndices((int)toScan.size());
     std::iota(scanIndices.begin(), scanIndices.end(), 0);
-    std::for_each((std::execution::par), scanIndices.begin(), scanIndices.end(), [&](int i) {
+    qDebug() << "[MftReader] 开始驱动器并行/串行扫描, 待扫盘数:" << toScan.size();
+    std::for_each((std::execution::seq), scanIndices.begin(), scanIndices.end(), [&](int i) {
+        qDebug() << "[MftReader] 正在扫描驱动器:" << QString::fromStdWString(toScan[i]);
         scannedResults[i].volume = toScan[i];
         scannedResults[i].success = loadMftDirect(toScan[i], scannedResults[i].res);
+        qDebug() << "[MftReader] 驱动器扫描结果:" << QString::fromStdWString(toScan[i]) << "成功:" << scannedResults[i].success << "条目数:" << scannedResults[i].res.entries.size();
     });
 
+    qDebug() << "[MftReader] 所有驱动器扫描阶段结束，准备合并数据";
     QWriteLocker lock(&m_dataLock);
     std::vector<UsnWatcher*> newWatchers;
     for (auto& sr : scannedResults) {
@@ -1301,11 +1306,15 @@ void MftReader::compact() {
 }
 
 bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult& result) {
+    qDebug() << "[MftReader] loadMftDirect 入口:" << QString::fromStdWString(volume);
     // 极致工业级优化方案 C：SoA 结构内存预分配优化
     // 预估 NTFS 卷的文件数量，提前 reserve 以减少动态扩容带来的内存碎片与拷贝开销
     std::wstring dev = L"\\\\.\\" + volume;
     HANDLE h = CreateFileW(dev.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    if (h == INVALID_HANDLE_VALUE) return false;
+    if (h == INVALID_HANDLE_VALUE) {
+        qDebug() << "[MftReader] 无法打开卷句柄:" << QString::fromStdWString(dev) << "错误码:" << GetLastError();
+        return false;
+    }
 
     // 2026-05-14 获取根目录句柄作为 Hint，这对于 OpenFileById 的稳定性至关重要
     std::wstring rootPath = volume + L"\\";
@@ -1314,9 +1323,11 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
 
     USN_JOURNAL_DATA_V0 j; DWORD cb;
     if (!DeviceIoControl(h, FSCTL_QUERY_USN_JOURNAL, NULL, 0, &j, sizeof(j), &cb, NULL)) { 
+        qDebug() << "[MftReader] FSCTL_QUERY_USN_JOURNAL 失败, 驱动器:" << QString::fromStdWString(volume);
         if (hHint != INVALID_HANDLE_VALUE) CloseHandle(hHint);
         CloseHandle(h); return false; 
     }
+    qDebug() << "[MftReader] USN Journal 查询成功, NextUsn:" << j.NextUsn;
     result.nextUsn = j.NextUsn;
 
     // 工业级启发式预分配：根据日记账条目数预估文件总数，平均 150 字节一个条目
@@ -1325,7 +1336,10 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
 
     MFT_ENUM_DATA_V0 ed = {0}; ed.HighUsn = j.NextUsn;
     std::vector<uint8_t> buf(1024 * 1024);
+    int batchCount = 0;
     while (DeviceIoControl(h, FSCTL_ENUM_USN_DATA, &ed, sizeof(ed), buf.data(), (DWORD)buf.size(), &cb, NULL)) {
+        batchCount++;
+        if (batchCount % 100 == 0) qDebug() << "[MftReader] 驱动器" << QString::fromStdWString(volume) << "正在处理第" << batchCount << "个批次";
         if (m_abort_scan.load()) break; // 1.21：强制中断
         if (cb < 8) break;
         uint8_t* p = buf.data() + 8; uint8_t* end = buf.data() + cb;
@@ -1361,6 +1375,10 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
                 p += header->RecordLength; continue;
             }
 
+            if (header->RecordLength == 0) {
+                qDebug() << "[MftReader] 发现 RecordLength 为 0 的条目，强制退出循环以防死锁";
+                break;
+            }
             // 2026-05-14 极致性能优化：全量扫描阶段仅获取核心字段，将重量级 I/O 转移至延迟补全队列
             MftReader::RawEntry e; 
             e.frn = frn; 
