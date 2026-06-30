@@ -77,3 +77,11 @@
 - [2026-06-30 10:07:34] **src/ui/MainWindow.h / .cpp**, **ScanDialog/src/ui/MainWindow.h / .cpp**:
     - 彻底移除 `[MONITOR]` 资源监控日志及相关 `m_resourceMonitorTimer` 逻辑。
     - 彻底移除“检测到系统闲置超过30秒，触发自动对账同步...”逻辑代码及相关 `m_idleTimer` 成员与事件过滤逻辑，不再保留闲置对账功能。
+
+### CategoryPanel 调试日志清理
+- [2026-06-30 10:18:39] **src/ui/CategoryPanel.cpp**, **ScanDialog/src/ui/CategoryPanel.cpp**:
+    - 彻底移除所有带有 `[CategoryPanel]` 前缀的调试日志打印语句，优化生产环境日志输出。
+
+### 事件过滤器安装逻辑修复
+- [2026-06-30 10:21:37] **src/ui/MainWindow.cpp**, **ScanDialog/src/ui/MainWindow.cpp**:
+    - 修复因移除闲置检测逻辑误删 `installEventFilter(this)` 导致搜索历史等 UI 交互失效的问题。

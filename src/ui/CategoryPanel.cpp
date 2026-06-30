@@ -120,7 +120,6 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     // 理由：系统启动时的 initFromScchMode 是异步进行的，完成后必须强制刷新侧边栏
     // 以解决数据库加载延迟导致的系统项（如“全部数据”、“未分类”）显示为 0 的问题
     connect(&CoreController::instance(), &CoreController::initializationFinished, this, [this]() {
-        qDebug() << "[CategoryPanel] 检测到系统后台初始化完成，触发强制全量刷新...";
         m_isFirstLoad = true; // 强制执行 refresh() 重建树结构并拉取最新计数
         requestRefresh();
     });
@@ -196,13 +195,11 @@ void CategoryPanel::selectCategoryByType(const QString& type) {
 }
 
 void CategoryPanel::deferredInit() {
-    qDebug() << "[CategoryPanel] deferredInit 开始执行";
 
     // 2026-04-12 关键修复：延迟执行数据库数据加载
     if (m_categoryModel) {
         m_categoryModel->deferredRefresh();
     }
-    qDebug() << "[CategoryPanel] deferredInit 执行完毕";
 }
 
 void CategoryPanel::setupContextMenu() {
@@ -324,10 +321,8 @@ void CategoryPanel::saveExpandedState(const QModelIndex& parent, QSet<int>& expa
             QString name = idx.data(NameRole).toString();
             if (id != 0) {
                 expandedIds.insert(id);
-                qDebug() << "[CategoryPanel] 正在记录展开项: ID =" << id << "名称 =" << name;
             } else {
                 expandedNames << name;
-                qDebug() << "[CategoryPanel] 正在记录展开项: 系统项 =" << name;
             }
             saveExpandedState(idx, expandedIds, expandedNames);
         }
@@ -378,12 +373,10 @@ void CategoryPanel::restoreExpandedState(const QModelIndex& parent, const QSet<i
         }
 
         if (shouldExpand && isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
-            qDebug() << "[CategoryPanel] 恢复展开时拦截加密分类:" << name;
             shouldExpand = false;
         }
 
         if (shouldExpand) {
-            qDebug() << "[CategoryPanel] 正在执行展开动作:" << name;
             m_categoryTree->setExpanded(idx, true);
             restoreExpandedState(idx, expandedIds, expandedNames);
         }
@@ -936,7 +929,6 @@ void CategoryPanel::initUi() {
         }
 
         if (hasRealData) {
-            qDebug() << "[CategoryPanel] 模型即将重置，暂存当前有效展开状态...";
             QSet<int> expandedIds;
             QStringList expandedNames;
             saveExpandedState(QModelIndex(), expandedIds, expandedNames);
@@ -946,14 +938,12 @@ void CategoryPanel::initUi() {
             m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idList));
             m_categoryTree->setProperty("expandedNames", expandedNames);
         } else {
-            qDebug() << "[CategoryPanel] 当前模型处于加载态或为空，跳过暂存以保护既有恢复属性。";
         }
     });
 
     connect(m_categoryModel, &QAbstractItemModel::modelReset, this, [this]() {
         // 2026-06-xx 物理修复：采用 singleShot(0) 解决视图节点生成竞态，确保 setExpanded 绝对生效
         QTimer::singleShot(0, this, [this]() {
-            qDebug() << "[CategoryPanel] 模型已重置且视图已就绪，正在执行物理强开恢复...";
             QList<int> idList = m_categoryTree->property("expandedIds").value<QList<int>>();
             QStringList expandedNames = m_categoryTree->property("expandedNames").toStringList();
             
@@ -965,7 +955,6 @@ void CategoryPanel::initUi() {
             restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
             m_categoryTree->blockSignals(false);
             m_isRestoringState = false;
-            qDebug() << "[CategoryPanel] 物理级展开状态恢复完成。";
         });
     });
 
@@ -1135,7 +1124,6 @@ void CategoryPanel::initUi() {
 
 void CategoryPanel::saveExpandedStateToSettings() {
     if (m_isRestoringState) {
-        qDebug() << "[CategoryPanel] 正在恢复状态中，锁定保存信号，防止由于 UI 展开动作反向覆盖磁盘记录。";
         return;
     }
     if (!m_categoryModel || m_categoryModel->rowCount() <= 0) return;
@@ -1153,7 +1141,6 @@ void CategoryPanel::saveExpandedStateToSettings() {
     QStringList names;
     saveExpandedState(QModelIndex(), ids, names);
 
-    qDebug() << "[CategoryPanel] 正在持久化展开状态到磁盘 - 记录总数:" << ids.size() + names.size();
 
     QList<QVariant> idList;
     for (int id : ids) idList << id;
@@ -1168,7 +1155,6 @@ void CategoryPanel::loadExpandedStateFromSettings() {
     QList<QVariant> idList = AppConfig::instance().getValue("Category/ExpandedIds").toList();
     QStringList names = AppConfig::instance().getValue("Category/ExpandedNames").toStringList();
 
-    qDebug() << "[CategoryPanel] 从 AppConfig 加载记忆 - 记录存在:" << hasRecord << "ID数:" << idList.size() << "系统项数:" << names.size();
 
     // 核心修复：将从设置读取的状态同步到 Tree 属性中，确保异步加载完成后 modelReset 能自动恢复
     m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idList));

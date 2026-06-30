@@ -135,6 +135,9 @@ MainWindow::MainWindow(QWidget* parent)
     m_trayController = new TrayController(this);
     m_trayController->show();
 
+    // 2026-05-29 性能优化：事件过滤器仅安装在 MainWindow 实例上，减少 qApp 全局事件分发的 overhead。
+    this->installEventFilter(this);
+
     qDebug() << "[Main] MainWindow 构造函数 UI/托盘初始化完成";
 
     // 2026-03-xx 性能优化：严禁在构造函数中执行任何可能导致阻塞的同步加载 (如 navigateTo)。
