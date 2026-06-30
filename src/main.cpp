@@ -28,6 +28,7 @@
 #include "meta/CategoryRepo.h"
 #include "mft/MftReader.h"
 #include "core/CoreController.h"
+#include "core/AutoImportManager.h"
 
 /**
  * @brief 自定义日志处理程序，将 qDebug 消息重定向至本地 .log 文件
@@ -140,6 +141,13 @@ int main(int argc, char *argv[]) {
 
     // 5. 启动异步系统扫描（后台初始化，UI 可响应）
     ArcMeta::CoreController::instance().startSystem();
+
+    // 2026-07-xx 按照 Plan-124：最终诊断，验证此处代码是否被实际执行
+    qDebug() << "[DIAG-MAIN] 即将调用 startListening";
+    auto& aim = ArcMeta::AutoImportManager::instance();
+    qDebug() << "[DIAG-MAIN] AutoImportManager 实例地址:" << &aim;
+    aim.startListening();
+    qDebug() << "[DIAG-MAIN] startListening 调用已返回";
 
     qDebug() << "[PERF] main 函数逻辑执行完毕，进入事件循环。总耗时:" << (QDateTime::currentMSecsSinceEpoch() - mainStartTime) << "ms";
 

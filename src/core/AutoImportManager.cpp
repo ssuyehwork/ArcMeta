@@ -31,6 +31,7 @@ AutoImportManager::~AutoImportManager() {
 }
 
 void AutoImportManager::startListening() {
+    qDebug() << "[DIAG] startListening 函数入口, m_isListening 当前值=" << m_isListening;  // 新增，必须在 if 判断之前
     if (m_isListening) return;
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
     // 2026-07-xx 按照 Plan-120：补全对 entryUpdated 的监听，以覆盖文件移动至 Library 的场景
