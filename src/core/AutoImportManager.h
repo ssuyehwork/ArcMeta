@@ -23,6 +23,12 @@ public:
     static void recordRecentVisitedFolder(const std::wstring& path);
     static QStringList getRecentVisitedFolders(const std::wstring& volSerial);
 
+    /**
+     * @brief 2026-07-xx 按照 Plan-118：获取磁盘对应的托管库物理绝对路径
+     * @param pathOrVolSerial 路径或卷序列号
+     */
+    static std::wstring getManagedLibraryPath(const std::wstring& pathOrVolSerial);
+
 private slots:
     // 订阅 MftReader 发现的新增条目
     void onEntryAdded(uint64_t key);
@@ -36,7 +42,6 @@ private:
     ~AutoImportManager() override;
 
     bool checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder);
-    std::wstring getManagedFolderAbsolutePath(const std::wstring& volSerial);
 
     QTimer* m_debounceTimer = nullptr;
     std::vector<std::wstring> m_pendingPaths;

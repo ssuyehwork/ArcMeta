@@ -349,19 +349,8 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
         QString currentType = qobject_cast<ContentPanel*>(parent())->getCurrentCategoryType();
         if (currentType == "nav" || currentType == "") {
             // 物理导航模式下，检查是否在库外
-            std::wstring wp = record.path.toStdWString();
-            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
-            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-            QString relPath = AppConfig::instance().getValue(key, "").toString();
-            
-            bool isInsideLibrary = false;
-            if (!relPath.isEmpty()) {
-                QString drive = record.path.left(3);
-                QString managedAbs = QDir::toNativeSeparators(drive + relPath).toLower();
-                if (record.path.toLower().startsWith(managedAbs)) {
-                    isInsideLibrary = true;
-                }
-            }
+            // 2026-07-xx 按照 Plan-121：统一使用 MetadataManager 提供的准入判定接口，支持默认兜底
+            bool isInsideLibrary = MetadataManager::isInsideManagedLibrary(record.path.toStdWString());
 
             if (!isInsideLibrary) {
                 FramelessMessageBox::information(nullptr, "编辑受阻", "该项目尚未入库，无法进行元数据编辑。\n请先执行“迁移”将其移动至托管库文件夹。");
@@ -1663,22 +1652,29 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
         } else {
             // [物理源：显示“迁移”]
-            // 2026-07-xx 按照 Plan-116/117：重构“迁移”菜单逻辑，与“归类到”互斥显示
             if (!m_currentPath.isEmpty() && m_currentPath != "computer://") {
                 std::wstring wp = path.toStdWString();
                 std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
-                QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-                QString relPath = AppConfig::instance().getValue(key, "").toString();
-                
-                QString drive = path.left(3);
-                QString managedRoot = QDir::toNativeSeparators(drive + relPath);
+
+                // 2026-07-xx 按照 Plan-121：统一复用 AutoImportManager 的路径计算逻辑，
+                // 不再自行拼接，确保与 USN 准入判定使用完全一致的路径来源。
+                std::wstring managedRootW = AutoImportManager::getManagedLibraryPath(wp);
+                QString managedRoot = QString::fromStdWString(managedRootW);
 
                 QMenu* migrateMenu = menu.addMenu(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "迁移");
                 UiHelper::applyMenuStyle(migrateMenu);
-                
-                QAction* actRoot = migrateMenu->addAction(managedRoot);
-                actRoot->setData(ActionAddToCategory);
-                actRoot->setProperty("targetPath", managedRoot);
+
+                if (managedRoot.isEmpty()) {
+                    // Library 文件夹尚未创建，给出明确提示而非显示错误路径
+                    migrateMenu->addAction("该盘库存未创建")->setEnabled(false);
+                } else {
+                    QAction* actRoot = migrateMenu->addAction(managedRoot);
+                    actRoot->setData(ActionAddToCategory);
+                    actRoot->setProperty("targetPath", managedRoot);
+
+                    migrateMenu->menuAction()->setData(ActionAddToCategory);
+                    migrateMenu->menuAction()->setProperty("targetPath", managedRoot);
+                }
 
                 migrateMenu->addSeparator();
                 // 2026-07-xx 按照 Plan-119：使用真实的最近访问历史列表作为迁移目标
@@ -1692,9 +1688,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         act->setProperty("targetPath", folder);
                     }
                 }
-
-                migrateMenu->menuAction()->setData(ActionAddToCategory);
-                migrateMenu->menuAction()->setProperty("targetPath", managedRoot);
             }
         }
 
@@ -2022,12 +2015,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
             QString target = selectedAction->property("targetPath").toString();
             if (target.isEmpty()) {
-                // 兜底逻辑：获取当前盘符托管库根目录
-                std::wstring wp = path.toStdWString();
-                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
-                QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-                QString relPath = AppConfig::instance().getValue(key, "").toString();
-                target = QDir::toNativeSeparators(path.left(3) + relPath);
+                // 2026-07-xx 按照 Plan-121：统一复用 AutoImportManager 的路径计算逻辑，支持默认兜底
+                target = QString::fromStdWString(AutoImportManager::getManagedLibraryPath(path.toStdWString()));
             }
 
             if (!paths.isEmpty() && !target.isEmpty()) {
@@ -2406,16 +2395,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     AutoImportManager::recordRecentVisitedFolder(path.toStdWString());
 
     // 2026-07-xx 按照 Plan-116：检测是否导航进入托管库内部
-    std::wstring wp = path.toStdWString();
-    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
-    QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-    QString relPath = AppConfig::instance().getValue(key, "").toString();
-    bool isInsideLibrary = false;
-    if (!relPath.isEmpty()) {
-        QString drive = path.left(3);
-        QString managedAbs = QDir::toNativeSeparators(drive + relPath).toLower();
-        if (path.toLower().startsWith(managedAbs)) isInsideLibrary = true;
-    }
+    // 2026-07-xx 按照 Plan-121：统一使用 MetadataManager 提供的准入判定接口，支持默认兜底
+    bool isInsideLibrary = MetadataManager::isInsideManagedLibrary(path.toStdWString());
 
     QPointer<ContentPanel> panelPtr(this); 
     
