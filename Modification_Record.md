@@ -66,6 +66,9 @@
     - 重构右键“迁移”菜单，将“迁移至最近活跃位置”替换为真实的历史路径列表，提供快捷物理位移入口。
     - 补全 `../core/AutoImportManager.h` 引用，解决静态方法调用导致的编译错误。
 
+### 自动入库逻辑临时诊断日志补丁
+- [2026-07-01 15:30:00] **src/core/AutoImportManager.cpp**:
+    - 在 `startListening`、`onEntryAdded`、`onEntryUpdated` 及 `getManagedLibraryPath` 中追加 `[DIAG]` 前缀的调试日志，用于排查自动入库触发断点。
 
 ### 统一库路径计算逻辑 (Plan-121)
 - [2026-07-01 14:00:00] **src/core/AutoImportManager.h / .cpp**:
