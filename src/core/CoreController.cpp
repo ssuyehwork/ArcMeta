@@ -7,8 +7,15 @@
 #include <QDebug>
 #include <QDateTime>
 #include <QDirIterator>
-#include <QtConcurrent>
 #include <unordered_set>
+
+// 2026-07-xx 彻底修复编译错误：在所有可能引入 windows.h 的头文件之后
+// 显式清除 run 宏，防止 QtConcurrent::run 符号冲突。
+#ifdef run
+#undef run
+#endif
+
+#include <QtConcurrent>
 
 namespace ArcMeta {
 
@@ -46,7 +53,11 @@ void CoreController::startSystem() {
                 qDebug() << "[Core] MFT 缓存失效或不存在，执行全量索引构建...";
                 // 默认扫描所有驱动器以建立监控链
                 QStringList drives;
-                for (const auto& d : QDir::drives()) drives << d.absolutePath();
+                for (const auto& d : QDir::drives()) {
+                    QString path = d.absolutePath();
+                    if (path.length() > 2 && (path.endsWith('/') || path.endsWith('\\'))) path.resize(path.length() - 1);
+                    drives << path;
+                }
                 MftReader::instance().buildIndex(drives);
             }
             

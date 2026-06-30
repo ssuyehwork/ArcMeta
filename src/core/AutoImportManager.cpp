@@ -7,10 +7,19 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QMetaObject>
+#include <cwchar>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
+
+// 2026-07-xx 彻底修复编译错误：在所有可能引入 windows.h 的头文件之后
+// 显式清除 run 宏，防止 QtConcurrent::run 符号冲突。
+#ifdef run
+#undef run
+#endif
+
+#include <QtConcurrent>
 
 namespace ArcMeta {
 
@@ -33,11 +42,12 @@ AutoImportManager::~AutoImportManager() {
 void AutoImportManager::startListening() {
     qDebug() << "[AIM_TRACE] startListening 函数入口, m_isListening 当前值 =" << m_isListening;
     if (m_isListening) return;
+
+    // 2026-07-xx 彻底修复：确保在主线程执行连接，并显式指定队列连接以处理跨线程信号
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
-    // 2026-07-xx 按照 Plan-120：补全对 entryUpdated 的监听，以覆盖文件移动至 Library 的场景
     connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
-    // [AIM_TRACE] 彻底修复：监听物理删除信号
     connect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved, Qt::QueuedConnection);
+
     m_isListening = true;
     qDebug() << "[AIM_TRACE] startListening 已执行，信号连接完成";
 }
@@ -88,56 +98,49 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
         m_pendingPaths.push_back(fullPath);
         QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
     } else {
-        // [移出] 场景彻底修复：判定该项此前是否已在库内登记
-        // 注意：此处需要利用 MetadataManager 的 FID 反查能力
-        std::string fid = MetadataManager::instance().getFileIdSync(fullPath);
-        std::wstring lastKnownPath = MetadataManager::instance().getPathByFid(fid);
+        // 2026-07-xx 彻底修复闪退：将耗时的 I/O 和数据库注销移至后台线程，防止阻塞 UI 线程导致退出
+        (void)QtConcurrent::run([fullPath, qPath]() {
+            // [移出] 场景彻底修复：判定该项此前是否已在库内登记
+            std::string fid = MetadataManager::instance().getFileIdSync(fullPath);
+            std::wstring lastKnownPath = MetadataManager::instance().getPathByFid(fid);
 
-        if (!lastKnownPath.empty() && MetadataManager::isInsideManagedLibrary(lastKnownPath)) {
-            qDebug() << "[AIM_TRACE] 项目已从库内移出至:" << qPath << "执行数据库同步注销";
-            MetadataManager::instance().deletePermanently(lastKnownPath);
-        }
+            if (!lastKnownPath.empty() && MetadataManager::isInsideManagedLibrary(lastKnownPath)) {
+                qDebug() << "[AIM_TRACE] 项目已从库内移出至:" << qPath << "执行数据库同步注销";
+                MetadataManager::instance().deletePermanently(lastKnownPath);
+            }
+        });
     }
 }
 
 void AutoImportManager::onEntryRemoved(uint64_t key) {
     qDebug() << "[AIM_TRACE] onEntryRemoved 被触发, key =" << key;
-    // 彻底修复：处理物理删除
-    // 此时 MFT 已移除该项，无法通过 MftReader 获取路径。
-    // 但可以通过复合 Key 提取 FRN，并结合 MetadataManager 的 FID 反查（前提是之前已缓存路径）
 
-    // 方案：由于 MetadataManager 持有 fidToPath 映射，而 USN 的复合 key 包含盘符索引
-    // 此处简化处理：由于文件已不存在，我们直接触发 MetadataManager 的全库对账清理或精准反查
-    // 工业级补全：利用 MetadataManager::getPathByFid 寻找可能残留的该 FRN 记录
+    // 2026-07-xx 彻底修复闪退：注销逻辑异步化，杜绝 I/O 阻塞主线程
+    (void)QtConcurrent::run([key]() {
+        // 提取盘符索引和 FRN
+        size_t dIdx = static_cast<size_t>(key >> 48);
+        uint64_t frnVal = key & 0x0000FFFFFFFFFFFFull;
 
-    // 提取盘符索引和 FRN
-    size_t dIdx = static_cast<size_t>(key >> 48);
-    uint64_t frnVal = key & 0x0000FFFFFFFFFFFFull;
-
-    // 构建 FID
-    std::wstring volSerial = L"UNKNOWN";
-    const auto drives = QDir::drives();
-    int curIdx = 0;
-    for (const QFileInfo& d : drives) {
-        if (curIdx == (int)dIdx) {
-            volSerial = MetadataManager::getVolumeSerialNumber(d.absolutePath().toStdWString());
-            break;
+        // 修正映射逻辑：改用 MftReader 已缓存的 driveList
+        std::wstring volSerial = L"UNKNOWN";
+        auto driveList = MftReader::instance().getDriveList();
+        if (dIdx < driveList.size()) {
+            volSerial = MetadataManager::getVolumeSerialNumber(driveList[dIdx]);
         }
-        curIdx++;
-    }
 
-    wchar_t frnBuf[17];
-    swprintf_s(frnBuf, 17, L"%016llX", frnVal);
-    std::string fid = MetadataManager::generateFallbackFid(volSerial, frnBuf);
+        wchar_t frnBuf[17];
+        swprintf_s(frnBuf, 17, L"%016llX", frnVal);
+        std::string fid = MetadataManager::generateFallbackFid(volSerial, frnBuf);
 
-    std::wstring lastKnownPath = MetadataManager::instance().getPathByFid(fid);
-    if (!lastKnownPath.empty()) {
-        bool inLib = MetadataManager::isInsideManagedLibrary(lastKnownPath);
-        qDebug() << "[AIM_TRACE] 感知到物理删除: 路径 =" << QString::fromStdWString(lastKnownPath) << "库内 =" << inLib;
-        if (inLib) {
-            MetadataManager::instance().deletePermanently(lastKnownPath);
+        std::wstring lastKnownPath = MetadataManager::instance().getPathByFid(fid);
+        if (!lastKnownPath.empty()) {
+            bool inLib = MetadataManager::isInsideManagedLibrary(lastKnownPath);
+            qDebug() << "[AIM_TRACE] 感知到物理删除: 路径 =" << QString::fromStdWString(lastKnownPath) << "库内 =" << inLib;
+            if (inLib) {
+                MetadataManager::instance().deletePermanently(lastKnownPath);
+            }
         }
-    }
+    });
 }
 
 void AutoImportManager::recordRecentVisitedFolder(const std::wstring& path) {

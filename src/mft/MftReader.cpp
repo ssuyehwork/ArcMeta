@@ -15,8 +15,6 @@
 #include <QRegularExpression>
 #include <QDir>
 #include <QDateTime>
-#include <QtConcurrent/QtConcurrent>
-#include <QtConcurrent>
 #include <QFuture>
 #include <QFileIconProvider>
 #include <QFileInfo>
@@ -31,6 +29,8 @@
 #ifdef run
 #undef run
 #endif
+
+#include <QtConcurrent>
 
 
 namespace ArcMeta {
@@ -203,6 +203,11 @@ bool MftReader::isDriveIndexed(const QString& drive) {
     return false;
 }
 
+std::vector<std::wstring> MftReader::getDriveList() const {
+    QReadLocker lock(&m_dataLock);
+    return m_drive_list;
+}
+
 void MftReader::buildIndex(const QStringList& drives) {
     updateActiveDrives(drives);
 
@@ -238,12 +243,13 @@ void MftReader::buildIndex(const QStringList& drives) {
         bool success = false;
     };
     std::vector<ScannedDrive> scannedResults(toScan.size());
-    std::vector<int> scanIndices((int)toScan.size());
-    std::iota(scanIndices.begin(), scanIndices.end(), 0);
-    std::for_each((std::execution::par), scanIndices.begin(), scanIndices.end(), [&](int i) {
+
+    // 2026-07-xx 彻底修复闪退：由于部分环境缺失 TBB 并行库导致 std::execution::par 崩溃，
+    // 此处改用串行加载（或后期改为 QtConcurrent）。
+    for (size_t i = 0; i < toScan.size(); ++i) {
         scannedResults[i].volume = toScan[i];
         scannedResults[i].success = loadMftDirect(toScan[i], scannedResults[i].res);
-    });
+    }
 
     QWriteLocker lock(&m_dataLock);
     std::vector<UsnWatcher*> newWatchers;
@@ -266,8 +272,12 @@ void MftReader::buildIndex(const QStringList& drives) {
     buildSortedIndices();
     m_isInitialized = true;
 
+    // 2026-07-xx 彻底修复闪退：必须在释放锁之后再启动线程，防止重入竞争
     lock.unlock();
-    for (auto* w : newWatchers) w->start();
+    for (auto* w : newWatchers) {
+        qDebug() << "[MFT] 正在启动监控线程:" << QString::fromStdWString(w->volume());
+        w->start();
+    }
 }
 
 bool MftReader::loadFromCache() {
@@ -389,12 +399,18 @@ bool MftReader::loadFromCache() {
     m_isInitialized = true;
 
     // 方案一：补完缓存加载后的监控链 (接管变动)
-    // 在缓存加载成功后，立即为所有已加载的驱动器启动 UsnWatcher
-    // 2026-05-29 物理修复：移除此处冗余的 lock 声明（父作用域已持有 lock），消除 C4456 警告
+    // 2026-07-xx 彻底修复闪退：提取需要启动的参数，在锁外执行 start()
+    std::vector<UsnWatcher*> watchersToStart;
     for (const auto& drive : m_drive_list) {
         uint64_t lastUsn = m_next_usns[drive];
         auto* w = new UsnWatcher(drive, lastUsn, nullptr);
         m_watchers.push_back(w);
+        watchersToStart.push_back(w);
+    }
+
+    lock.unlock(); // 物理释放锁后再启动
+    for (auto* w : watchersToStart) {
+        qDebug() << "[MFT] 从缓存恢复并启动监控:" << QString::fromStdWString(w->volume());
         w->start();
     }
 
@@ -826,7 +842,8 @@ std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, boo
             }
         }
     } else {
-        std::for_each((std::execution::par), chunkIndices.begin(), chunkIndices.end(), [&](size_t chunkIdx) {
+        // 2026-07-xx 彻底修复闪退：将 std::execution::par 替换为串行扫描
+        for (size_t chunkIdx = 0; chunkIdx < numChunks; ++chunkIdx) {
             std::vector<uint64_t> localRes;
             localRes.reserve(grainSize / 16);
             size_t startPos = chunkIdx * grainSize;
@@ -882,8 +899,8 @@ std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, boo
                     if (match) localRes.push_back(makeKey(dIdx, m_frns[i]));
                 }
             }
-            if (!localRes.empty()) { std::lock_guard<std::mutex> l(mtx); finalRes.insert(finalRes.end(), localRes.begin(), localRes.end()); }
-        });
+            if (!localRes.empty()) { finalRes.insert(finalRes.end(), localRes.begin(), localRes.end()); }
+        }
     }
     return finalRes;
 }
@@ -1427,7 +1444,9 @@ void MftReader::buildSortedIndices() {
     // 2026-05-14 性能增强：构建预排序索引，支持二分查找 O(log N)
     m_sorted_indices.resize(m_frns.size());
     std::iota(m_sorted_indices.begin(), m_sorted_indices.end(), 0);
-    std::sort((std::execution::par), m_sorted_indices.begin(), m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
+
+    // 2026-07-xx 彻底修复闪退：将 std::execution::par 替换为普通 std::sort
+    std::sort(m_sorted_indices.begin(), m_sorted_indices.end(), [this](uint32_t a, uint32_t b) {
         const char* s1 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[a]);
         const char* s2 = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[b]);
         return _stricmp(s1, s2) < 0;

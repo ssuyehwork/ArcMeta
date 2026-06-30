@@ -16,7 +16,7 @@
 #include <QImage>
 #include <QStringList>
 #include <QStandardPaths>
-#include <QtConcurrent/QtConcurrent>
+#include <QtConcurrent>
 #include <QDebug>
 #include <QSet>
 #include <QCoreApplication>
