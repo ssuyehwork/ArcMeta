@@ -66,6 +66,8 @@ void UsnWatcher::run() {
     const int bufferSize = 128 * 1024;
     std::unique_ptr<uint8_t[]> buffer(new uint8_t[bufferSize]);
 
+    qDebug() << "[USN_TRACE] 监控线程已启动:" << QString::fromStdWString(m_volume);
+
     while (!m_stopRequested.load()) {
         if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL)) {
             DWORD err = GetLastError();

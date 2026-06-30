@@ -1045,8 +1045,10 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
     }
 
     if (isNew) {
+        qDebug() << "[MFT_TRACE] 发射 entryAdded 信号: Key =" << compositeKey;
         emit entryAdded(compositeKey);
     } else {
+        qDebug() << "[MFT_TRACE] 发射 entryUpdated 信号: Key =" << compositeKey;
         emit entryUpdated(compositeKey);
     }
     emit dataChanged(finalIdx);
@@ -1223,6 +1225,7 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
         }
         
         lock.unlock(); // 物理安全：解锁后再发射信号
+        qDebug() << "[MFT_TRACE] 发射 entryRemoved 信号: Key =" << compositeKey;
         emit entryRemoved(compositeKey);
         emit dataChanged(-1);
     }
