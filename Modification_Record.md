@@ -73,8 +73,15 @@
 ### 最终诊断：验证 startListening 调用是否被实际执行 (Plan-124)
 - [2026-07-01 16:00:00] **src/main.cpp**:
     - 在调用 `startListening` 前后注入 `[DIAG-MAIN]` 日志，并输出 `AutoImportManager` 实例地址以排查单例状态。
+    - 物理重构：将 `startListening` 移至 `startSystem` 之前。
 - [2026-07-01 16:00:00] **src/core/AutoImportManager.cpp**:
     - 在 `startListening` 函数入口（if 判断前）注入 `[DIAG]` 日志，记录 `m_isListening` 的真实初值。
+
+### 自动入库链路修复与 MftReader 启动 (Plan-125)
+- [2026-07-01 17:00:00] **src/core/CoreController.cpp**:
+    - 在 `startSystem` 流程中注入 `MftReader` 点火逻辑，通过 `loadFromCache` 或全量 `buildIndex` 启动 USN 监控。
+- [2026-07-01 17:15:00] **src/meta/MetadataManager.cpp**:
+    - 在 `persistAsync` 中引入 `SqlTransaction` 事务锁，加固多线程写入时的 SQLite 并发安全性。
 
 ### 统一库路径计算逻辑 (Plan-121)
 - [2026-07-01 14:00:00] **src/core/AutoImportManager.h / .cpp**:

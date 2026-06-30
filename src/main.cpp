@@ -139,15 +139,16 @@ int main(int argc, char *argv[]) {
     w->show();
     qDebug() << "[PERF] MainWindow->show() 调用耗时（至首帧渲染前）:" << (QDateTime::currentMSecsSinceEpoch() - windowCreateStart) << "ms";
 
-    // 5. 启动异步系统扫描（后台初始化，UI 可响应）
-    ArcMeta::CoreController::instance().startSystem();
-
+    // 5. 启动 USN 监听（必须在 startSystem 之前，确保不丢失初始扫描后的瞬时信号）
     // 2026-07-xx 按照 Plan-124：最终诊断，验证此处代码是否被实际执行
     qDebug() << "[DIAG-MAIN] 即将调用 startListening";
     auto& aim = ArcMeta::AutoImportManager::instance();
     qDebug() << "[DIAG-MAIN] AutoImportManager 实例地址:" << &aim;
     aim.startListening();
     qDebug() << "[DIAG-MAIN] startListening 调用已返回";
+
+    // 6. 启动异步系统扫描（后台初始化，点火 MftReader）
+    ArcMeta::CoreController::instance().startSystem();
 
     qDebug() << "[PERF] main 函数逻辑执行完毕，进入事件循环。总耗时:" << (QDateTime::currentMSecsSinceEpoch() - mainStartTime) << "ms";
 

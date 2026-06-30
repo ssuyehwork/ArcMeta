@@ -1268,6 +1268,9 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     }
     if (!db) return;
 
+    // 2026-07-xx 物理加固：使用事务锁定数据库，防止多线程并行写入同一分库导致的 SQLITE_BUSY 冲突
+    SqlTransaction transaction(db);
+
     bool isNew = true;
     {
         sqlite3_stmt* checkStmt;
@@ -1335,6 +1338,8 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         }
         sqlite3_finalize(stmt);
     }
+
+    transaction.commit();
         
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 }
