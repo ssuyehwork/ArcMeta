@@ -98,6 +98,7 @@
 ### USN 全口径感知修复、初始化激活与追踪日志增强 (Plan-117/122)
 - [2026-07-02 11:10:00] **src/core/CoreController.cpp**:
     - 在 `startSystem` 中补全 `MftReader` 缓存加载与索引构建逻辑，确保 `UsnWatcher` 监控线程在系统启动时正确激活。
+    - 补全 `MftReader.h` 头文件包含，修复标识符未定义的编译错误。
 - [2026-07-02 11:20:00] **src/mft/UsnWatcher.cpp**:
     - 在 `run()` 与 `handleRecord()` 中将 `USN_REASON_RENAME_OLD_NAME` 加入捕获掩码，确保移动操作起点可见。
     - 注入 `[USN_TRACE]` 启动日志与捕获日志，实时打印变动 FRN 与 Reason 掩码。

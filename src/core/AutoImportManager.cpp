@@ -127,7 +127,7 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
     }
 
     wchar_t frnBuf[17];
-    swprintf(frnBuf, 17, L"%016llX", frnVal);
+    swprintf_s(frnBuf, 17, L"%016llX", frnVal);
     std::string fid = MetadataManager::generateFallbackFid(volSerial, frnBuf);
 
     std::wstring lastKnownPath = MetadataManager::instance().getPathByFid(fid);

@@ -1,6 +1,7 @@
 #include "CoreController.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
+#include "../mft/MftReader.h"
 #include "../ui/Logger.h"
 #include <QThreadPool>
 #include <QDebug>
