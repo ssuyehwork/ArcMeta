@@ -1024,8 +1024,20 @@ void CategoryPanel::initUi() {
             isBlankDrop = true;
         }
 
-        // 2026-07-xx 按照用户要求 (1.19)：归一化逻辑，调用统一导入中枢
-        ImportHelper::importPaths(paths, targetCatId, this);
+        // 2026-07-xx 按照 Plan-116：归一化逻辑，改为物理迁移至托管库根目录
+        // 理由：入库动作由且仅由 USN Journal 触发。此处仅负责物理层面的“归拢”。
+        if (!paths.isEmpty()) {
+            QString firstPath = paths.first();
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(firstPath.toStdWString());
+            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+            QString relPath = AppConfig::instance().getValue(key, "").toString();
+            QString drive = firstPath.left(3);
+            QString managedRoot = QDir::toNativeSeparators(drive + relPath);
+
+            if (!managedRoot.isEmpty()) {
+                ImportHelper::importPaths(paths, managedRoot, this);
+            }
+        }
     });
     
     sbContentLayout->addWidget(m_categoryTree);
