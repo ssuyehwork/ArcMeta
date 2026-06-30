@@ -36,6 +36,7 @@ void AutoImportManager::startListening() {
     // 2026-07-xx 按照 Plan-120：补全对 entryUpdated 的监听，以覆盖文件移动至 Library 的场景
     connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
     m_isListening = true;
+    qDebug() << "[DIAG] startListening 已执行，信号连接完成";
 }
 
 void AutoImportManager::stopListening() {
@@ -46,14 +47,21 @@ void AutoImportManager::stopListening() {
 }
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
+    qDebug() << "[DIAG] onEntryAdded 被触发, key=" << key;
     int idx = MftReader::instance().getIndexByKey(key);
+    qDebug() << "[DIAG] getIndexByKey 返回 idx=" << idx;
     if (idx < 0) return;
 
     QString qPath = MftReader::instance().getFullPath(idx);
+    qDebug() << "[DIAG] getFullPath 返回:" << qPath;
     std::wstring fullPath = qPath.toStdWString();
     std::wstring managedFolder;
     
-    if (checkAndGetManagedPath(fullPath, managedFolder)) {
+    bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
+    qDebug() << "[DIAG] checkAndGetManagedPath 结果:" << isManaged
+              << "managedFolder=" << QString::fromStdWString(managedFolder);
+
+    if (isManaged) {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         m_pendingPaths.push_back(fullPath);
         
@@ -62,15 +70,21 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
 }
 
 void AutoImportManager::onEntryUpdated(uint64_t key) {
-    // 2026-07-xx 按照 Plan-120：逻辑与 onEntryAdded 一致，处理跨目录移动
+    qDebug() << "[DIAG] onEntryUpdated 被触发, key=" << key;
     int idx = MftReader::instance().getIndexByKey(key);
+    qDebug() << "[DIAG] getIndexByKey 返回 idx=" << idx;
     if (idx < 0) return;
 
     QString qPath = MftReader::instance().getFullPath(idx);
+    qDebug() << "[DIAG] getFullPath 返回:" << qPath;
     std::wstring fullPath = qPath.toStdWString();
     std::wstring managedFolder;
 
-    if (checkAndGetManagedPath(fullPath, managedFolder)) {
+    bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
+    qDebug() << "[DIAG] checkAndGetManagedPath 结果:" << isManaged
+              << "managedFolder=" << QString::fromStdWString(managedFolder);
+
+    if (isManaged) {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         m_pendingPaths.push_back(fullPath);
 
@@ -119,13 +133,12 @@ std::wstring AutoImportManager::getManagedLibraryPath(const std::wstring& pathOr
     if (pathOrVolSerial.empty()) return L"";
 
     std::wstring volSerial = pathOrVolSerial;
-    // 如果传入的是路径而非序列号，则提取序列号
     if (volSerial.find(L":") != std::wstring::npos || volSerial.find(L"\\") != std::wstring::npos) {
         volSerial = MetadataManager::getVolumeSerialNumber(pathOrVolSerial);
     }
+    qDebug() << "[DIAG] getManagedLibraryPath volSerial=" << QString::fromStdWString(volSerial);
     if (volSerial.empty() || volSerial == L"UNKNOWN") return L"";
 
-    // 根据序列号反查当前盘符 (Plan-68 4.1)
     QString drive;
     const auto drives = QDir::drives();
     for (const QFileInfo& d : drives) {
@@ -134,20 +147,23 @@ std::wstring AutoImportManager::getManagedLibraryPath(const std::wstring& pathOr
             break;
         }
     }
+    qDebug() << "[DIAG] 反查得到 drive=" << drive;
     if (drive.isEmpty()) return L"";
 
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
     QString relPath = AppConfig::instance().getValue(key, "").toString();
+    qDebug() << "[DIAG] AppConfig relPath=" << relPath;
 
-    // 2026-07-xx 按照 Plan-118：约定优于配置的默认兜底
-    // 若配置不存在，使用默认命名规则 ArcMeta.Library_[盘符]，
-    // 但必须验证该文件夹物理存在，避免对不存在的路径做前缀匹配。
     if (relPath.isEmpty()) {
         relPath = "ArcMeta.Library_" + drive.left(1).toUpper();
-        if (!QDir(drive + relPath).exists()) return L"";
+        bool exists = QDir(drive + relPath).exists();
+        qDebug() << "[DIAG] 默认兜底 relPath=" << relPath << "exists=" << exists;
+        if (!exists) return L"";
     }
 
-    return MetadataManager::normalizePath((drive.toStdWString() + relPath.toStdWString()));
+    std::wstring result = MetadataManager::normalizePath((drive.toStdWString() + relPath.toStdWString()));
+    qDebug() << "[DIAG] getManagedLibraryPath 最终返回:" << QString::fromStdWString(result);
+    return result;
 }
 
 void AutoImportManager::processImportQueue() {

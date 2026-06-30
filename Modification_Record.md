@@ -67,6 +67,10 @@
     - 补全 `../core/AutoImportManager.h` 引用，解决静态方法调用导致的编译错误。
 
 
+### 临时诊断日志补丁（Plan-Diag）
+- [2026-06-30 11:29:48] **src/core/AutoImportManager.cpp**:
+    - 在 `startListening`, `onEntryAdded`, `onEntryUpdated`, `getManagedLibraryPath` 中追加 `[DIAG]` 调试日志，用于追踪 USN 监听与库路径判定流程。
+
 ### 统一库路径计算逻辑 (Plan-121)
 - [2026-07-01 14:00:00] **src/core/AutoImportManager.h / .cpp**:
     - 将 `getManagedFolderAbsolutePath` 重命名并公开为 `static getManagedLibraryPath`，支持自动解析路径所属卷序列号并应用默认兜底逻辑。
