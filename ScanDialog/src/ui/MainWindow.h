@@ -135,7 +135,6 @@ private:
     // 状态管理
     bool m_isPinned = false;
     bool m_panelsInitialized = false; // 2026-04-12 状态锁：确保面板仅初始化一次
-    QTimer* m_idleTimer = nullptr;
     QString m_currentPath;
     QStringList m_history;
     int m_historyIndex = -1;
@@ -151,8 +150,6 @@ private:
     TrayController* m_trayController = nullptr;
     HoverEventFilter* m_hoverFilter = nullptr;
     ResizeEventFilter* m_resizeFilter = nullptr;
-    // 2026-04-17 按照用户要求：修复 m_idleTimer 重定义，保留上方唯一成员声明
-    void initIdleDetector();
 };
 
 } // namespace ArcMeta
