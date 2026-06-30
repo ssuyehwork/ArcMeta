@@ -88,6 +88,7 @@ public:
     // 驱动器隔离状态管理
     void updateActiveDrives(const QStringList& activeDrives);
     bool isDriveIndexed(const QString& drive);
+    std::vector<std::wstring> getDriveList() const;
 
     // 查询接口 (支持驱动器掩码隔离)
     // 2026-05-29 物理重构：返回稳定的复合 FRN 主键而非数组下标，杜绝跨线程索引漂移

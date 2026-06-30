@@ -34,6 +34,8 @@ private slots:
     void onEntryAdded(uint64_t key);
     // 2026-07-xx 按照 Plan-120：订阅 USN 触发的更新条目
     void onEntryUpdated(uint64_t key);
+    // [AIM_TRACE] 订阅 USN 触发的删除信号
+    void onEntryRemoved(uint64_t key);
     // 去抖超时，合并写入数据库
     void processImportQueue();
 

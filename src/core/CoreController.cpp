@@ -1,13 +1,21 @@
 #include "CoreController.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
+#include "../mft/MftReader.h"
 #include "../ui/Logger.h"
 #include <QThreadPool>
 #include <QDebug>
 #include <QDateTime>
 #include <QDirIterator>
-#include <QtConcurrent>
 #include <unordered_set>
+
+// 2026-07-xx 彻底修复编译错误：在所有可能引入 windows.h 的头文件之后
+// 显式清除 run 宏，防止 QtConcurrent::run 符号冲突。
+#ifdef run
+#undef run
+#endif
+
+#include <QtConcurrent>
 
 namespace ArcMeta {
 
@@ -37,6 +45,21 @@ void CoreController::startSystem() {
             
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
+
+            // 2026-07-xx 按照 Plan-117：感知链路激活
+            // 在元数据就绪后，必须激活 MFT 索引以启动 UsnWatcher 监控线程
+            qDebug() << "[Core] 正在激活 MFT 索引与 USN 监控...";
+            if (!MftReader::instance().loadFromCache()) {
+                qDebug() << "[Core] MFT 缓存失效或不存在，执行全量索引构建...";
+                // 默认扫描所有驱动器以建立监控链
+                QStringList drives;
+                for (const auto& d : QDir::drives()) {
+                    QString path = d.absolutePath();
+                    if (path.length() > 2 && (path.endsWith('/') || path.endsWith('\\'))) path.resize(path.length() - 1);
+                    drives << path;
+                }
+                MftReader::instance().buildIndex(drives);
+            }
             
             QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);

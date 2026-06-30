@@ -39,6 +39,8 @@ public:
     void stop();
     bool isStopped() const { return m_stopRequested.load(); }
 
+    const std::wstring& volume() const { return m_volume; }
+
 protected:
     void run() override;
 

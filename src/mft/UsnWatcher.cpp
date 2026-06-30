@@ -66,6 +66,8 @@ void UsnWatcher::run() {
     const int bufferSize = 128 * 1024;
     std::unique_ptr<uint8_t[]> buffer(new uint8_t[bufferSize]);
 
+    qDebug() << "[USN_TRACE] 监控线程已启动:" << QString::fromStdWString(m_volume);
+
     while (!m_stopRequested.load()) {
         if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL)) {
             DWORD err = GetLastError();
@@ -100,12 +102,17 @@ void UsnWatcher::run() {
                     reinterpret_cast<USN_RECORD_V2*>(pRecord)->Reason : 
                     reinterpret_cast<USN_RECORD_V3*>(pRecord)->Reason;
                 
-                if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE | USN_REASON_RENAME_NEW_NAME)) {
+                uint64_t frn = (header->MajorVersion == 2) ?
+                    reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileReferenceNumber :
+                    *reinterpret_cast<uint64_t*>(&reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileReferenceNumber);
+
+                // [USN_TRACE] 记录原始信号
+                qDebug() << "[USN_TRACE] 捕获变更信号: FRN =" << frn << "原因掩码 =" << QString::number(reason, 16);
+
+                if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE |
+                              USN_REASON_RENAME_NEW_NAME | USN_REASON_RENAME_OLD_NAME)) {
                     updateBatch.push_back(pRecord);
                 } else if (reason & USN_REASON_FILE_DELETE) {
-                    uint64_t frn = (header->MajorVersion == 2) ? 
-                        reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileReferenceNumber : 
-                        *reinterpret_cast<uint64_t*>(&reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileReferenceNumber);
                     MftReader::instance().removeEntryByFrn(m_volume, frn);
                 }
             }
@@ -113,6 +120,7 @@ void UsnWatcher::run() {
         }
 
         if (!updateBatch.empty()) {
+            qDebug() << "[USN_TRACE] 正在处理批次记录，数量:" << updateBatch.size();
             // 2026-06-xx 工业级 UI 饥饿修复：
             // 如果批次过大，进行分片处理，并在分片间强制释放写锁，给 GUI 线程留出渲染时间
             const size_t chunkSize = 1000;
@@ -147,15 +155,15 @@ void UsnWatcher::handleRecord(USN_RECORD_V2* pRecord) {
         frn = *reinterpret_cast<uint64_t*>(&v3->FileReferenceNumber);
     } else return;
 
+    qDebug() << "[USN_TRACE] handleRecord: FRN =" << frn << "原因掩码 =" << QString::number(reason, 16);
+
     // 仅更新 MftReader 内存 SoA，不直接操作数据库
-    if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE)) {
+    if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE |
+                  USN_REASON_RENAME_NEW_NAME | USN_REASON_RENAME_OLD_NAME)) {
         MftReader::instance().updateEntryFromUsn(reinterpret_cast<uint8_t*>(pRecord), m_volume);
     }
     else if (reason & USN_REASON_FILE_DELETE) {
         MftReader::instance().removeEntryByFrn(m_volume, frn);
-    }
-    else if (reason & USN_REASON_RENAME_NEW_NAME) {
-        MftReader::instance().updateEntryFromUsn(reinterpret_cast<uint8_t*>(pRecord), m_volume);
     }
 }
 

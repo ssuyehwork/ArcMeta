@@ -126,9 +126,11 @@ int main(int argc, char *argv[]) {
     // 确保其内部的 QTimer 等对象归属于主线程，避免跨线程创建导致的行为不确定性
     qint64 metaInitStart = QDateTime::currentMSecsSinceEpoch();
     ArcMeta::MetadataManager::instance();
+    // 2026-07-xx 彻底修复闪退：主线程强行预热 MftReader 单例，锁定 Thread Affinity 为 GUI 线程
+    ArcMeta::MftReader::instance();
     // 2026-06-xx 物理修复：在主线程预热 CategoryRepo，解决 QTimer 跨线程启动导致的内存与磁盘不一致
     ArcMeta::CategoryRepo::initialize();
-    qDebug() << "[PERF] MetadataManager/CategoryRepo 单例预热耗时:" << (QDateTime::currentMSecsSinceEpoch() - metaInitStart) << "ms";
+    qDebug() << "[PERF] MetadataManager/MftReader 单例预热完成，耗时:" << (QDateTime::currentMSecsSinceEpoch() - metaInitStart) << "ms";
 
     // 3. 简化启动：直接显示主窗口
     // 2026-04-13 按用户要求移除 LoadingWindow 和 initializeHotIcons()
@@ -150,8 +152,10 @@ int main(int argc, char *argv[]) {
     qDebug() << "[DIAG-MAIN] startListening 调用已返回";
 
     qDebug() << "[PERF] main 函数逻辑执行完毕，进入事件循环。总耗时:" << (QDateTime::currentMSecsSinceEpoch() - mainStartTime) << "ms";
+    qDebug() << "================ ArcMeta 启动就绪，进入事件循环 ================";
 
     int ret = a.exec();
+    qDebug() << "[PERF] 程序正常退出，退出码:" << ret;
 
     // 程序退出前释放单实例锁
 #ifdef Q_OS_WIN
