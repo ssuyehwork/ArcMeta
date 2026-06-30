@@ -353,7 +353,7 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
             std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
             QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
             QString relPath = AppConfig::instance().getValue(key, "").toString();
-            
+
             bool isInsideLibrary = false;
             if (!relPath.isEmpty()) {
                 QString drive = record.path.left(3);
