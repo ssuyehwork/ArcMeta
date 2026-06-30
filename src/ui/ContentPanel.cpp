@@ -12,6 +12,7 @@
 #include "BatchProgressDialog.h"
 #include "ThumbnailDelegate.h"
 #include "../util/ImportHelper.h"
+#include "../core/AutoImportManager.h"
 #include "ToolTipOverlay.h" 
 #include "MainWindow.h"
  
