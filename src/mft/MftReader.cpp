@@ -241,15 +241,11 @@ void MftReader::buildIndex(const QStringList& drives) {
     std::vector<ScannedDrive> scannedResults(toScan.size());
     std::vector<int> scanIndices((int)toScan.size());
     std::iota(scanIndices.begin(), scanIndices.end(), 0);
-    qDebug() << "[MftReader] 开始驱动器并行/串行扫描, 待扫盘数:" << toScan.size();
-    std::for_each((std::execution::seq), scanIndices.begin(), scanIndices.end(), [&](int i) {
-        qDebug() << "[MftReader] 正在扫描驱动器:" << QString::fromStdWString(toScan[i]);
+    std::for_each((std::execution::par), scanIndices.begin(), scanIndices.end(), [&](int i) {
         scannedResults[i].volume = toScan[i];
         scannedResults[i].success = loadMftDirect(toScan[i], scannedResults[i].res);
-        qDebug() << "[MftReader] 驱动器扫描结果:" << QString::fromStdWString(toScan[i]) << "成功:" << scannedResults[i].success << "条目数:" << scannedResults[i].res.entries.size();
     });
 
-    qDebug() << "[MftReader] 所有驱动器扫描阶段结束，准备合并数据";
     QWriteLocker lock(&m_dataLock);
     std::vector<UsnWatcher*> newWatchers;
     for (auto& sr : scannedResults) {
@@ -1346,10 +1342,7 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
 
     MFT_ENUM_DATA_V0 ed = {0}; ed.HighUsn = j.NextUsn;
     std::vector<uint8_t> buf(1024 * 1024);
-    int batchCount = 0;
     while (DeviceIoControl(h, FSCTL_ENUM_USN_DATA, &ed, sizeof(ed), buf.data(), (DWORD)buf.size(), &cb, NULL)) {
-        batchCount++;
-        if (batchCount % 100 == 0) qDebug() << "[MftReader] 驱动器" << QString::fromStdWString(volume) << "正在处理第" << batchCount << "个批次";
         if (m_abort_scan.load()) break; // 1.21：强制中断
         if (cb < 8) break;
         uint8_t* p = buf.data() + 8; uint8_t* end = buf.data() + cb;

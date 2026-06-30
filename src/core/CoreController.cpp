@@ -41,25 +41,18 @@ void CoreController::startSystem() {
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
 
-            // 补全监控初始化：加载缓存并自动启动所有在线磁盘的 UsnWatcher
+            // 补全监控初始化：仅尝试从缓存恢复 USN 监控 (Plan-117 修正)
+            // 严禁在启动阶段执行 buildIndex 进行全量扫描，只有手动触发才可执行扫描。
             (void)QtConcurrent::run([this]() {
-                qDebug() << "[Core] 开始异步加载 MFT 监控模块...";
+                qDebug() << "[Core] 开始从缓存恢复 MFT 监控模块...";
                 try {
                     bool cacheOk = MftReader::instance().loadFromCache();
-                    qDebug() << "[Core] MftReader::loadFromCache 返回:" << cacheOk;
-                    if (!cacheOk) {
-                        qDebug() << "[Core] 缓存加载失败，正在执行冷启动全盘索引构建...";
-                        QStringList drives;
-                        for (const QFileInfo& d : QDir::drives()) drives << d.absolutePath();
-                        MftReader::instance().buildIndex(drives);
-                        qDebug() << "[Core] 全盘索引构建指令已下达";
-                    }
+                    qDebug() << "[Core] MftReader::loadFromCache 恢复结果:" << cacheOk;
                 } catch (const std::exception& e) {
-                    qCritical() << "[Core] MFT 监控启动过程中发生异常:" << e.what();
+                    qCritical() << "[Core] MFT 监控恢复过程中发生异常:" << e.what();
                 } catch (...) {
-                    qCritical() << "[Core] MFT 监控启动过程中发生未知错误";
+                    qCritical() << "[Core] MFT 监控恢复过程中发生未知错误";
                 }
-                qDebug() << "[Core] 异步 MFT 监控初始化任务结束";
             });
             
             QMetaObject::invokeMethod(this, [this, startTime]() {

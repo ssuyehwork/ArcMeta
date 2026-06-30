@@ -128,3 +128,10 @@
     - 修复大容量磁盘（条目数 > 200万）导致的 OOM 崩溃：限制 `loadMftDirect` 与 `mergeDriveResult` 中的 `reserve` 向量上限为 150 万，并增加 `std::bad_alloc` 异常捕获保护。
     - 增强 USN 记录解析循环安全性：显式检查 `p + RecordLength` 边界，防止缓冲区溢出。
     - 增加 `sizeof(RawEntry)` 与预估条目数打印，监控内存压力。
+
+### 启动初始化策略校准 (Plan-117 最终修正)
+- [2026-06-30 23:25:00] **src/core/CoreController.cpp**:
+    - 撤销启动时自动执行 `buildIndex` 的逻辑。现在仅通过 `loadFromCache` 恢复已有磁盘的监控，严禁自动扫描。
+- [2026-06-30 23:28:00] **src/mft/MftReader.cpp**:
+    - 还原 `buildIndex` 为并行扫描（par）模式。
+    - 清理冗余的批次处理调试日志。
