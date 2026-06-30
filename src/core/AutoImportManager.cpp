@@ -86,7 +86,14 @@ std::wstring AutoImportManager::getManagedFolderAbsolutePath(const std::wstring&
 
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
     QString relPath = AppConfig::instance().getValue(key, "").toString();
-    if (relPath.isEmpty()) return L"";
+
+    // 2026-07-xx 按照 Plan-118：约定优于配置的默认兜底
+    // 若配置不存在，使用默认命名规则 ArcMeta.Library_[盘符]，
+    // 但必须验证该文件夹物理存在，避免对不存在的路径做前缀匹配。
+    if (relPath.isEmpty()) {
+        relPath = "ArcMeta.Library_" + drive.left(1).toUpper();
+        if (!QDir(drive + relPath).exists()) return L"";
+    }
 
     return MetadataManager::normalizePath((drive.toStdWString() + relPath.toStdWString()));
 }

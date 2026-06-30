@@ -52,3 +52,7 @@
 - [2026-06-30 17:30:00] **src/ui/MainWindow.cpp**:
     - 统一 `doSearch` 调用链：由 `ContentPanel::search` 统领过滤逻辑。
     - 在 `unifiedNavigateTo` 导航中枢中注入数据源感知通知，确保筛选面板与内容源状态同步。
+
+### getManagedFolderAbsolutePath 默认兜底恢复
+- [2026-06-30 18:20:00] **src/core/AutoImportManager.cpp**:
+    - 为 `getManagedFolderAbsolutePath` 增加约定优于配置的默认兜底逻辑：若数据库无显式配置，则默认探测并关联 `ArcMeta.Library_[盘符]` 文件夹。
