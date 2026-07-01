@@ -251,6 +251,11 @@ void MftReader::buildIndex(const QStringList& drives) {
         if (!sr.success || sr.res.entries.empty()) continue;
         
         size_t dIdx = m_drive_list.size();
+
+        // 增加卷类型排查
+        UINT driveType = GetDriveTypeW((sr.volume + L"\\").c_str());
+        qDebug() << "[MftReader] 准备合并卷:" << QString::fromStdWString(sr.volume) << "DriveType:" << driveType << "(3=FIXED, 4=REMOTE, 2=REMOVABLE)";
+
         m_drive_list.push_back(sr.volume);
         if (dIdx < 32) m_drive_active_mask.fetch_or(1 << dIdx);
         m_next_usns[sr.volume] = sr.res.nextUsn;

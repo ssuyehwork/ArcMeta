@@ -73,8 +73,16 @@ void UsnWatcher::run() {
     std::unique_ptr<uint8_t[]> buffer(new uint8_t[bufferSize]);
 
     while (!m_stopRequested.load()) {
-        if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL)) {
+        BOOL success = DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL);
+
+        static int loopCount = 0;
+        if (++loopCount % 100 == 0) {
+            qDebug() << "[UsnWatcher Post] 正在循环读取卷:" << QString::fromStdWString(m_volume) << "Success:" << success << "Bytes:" << bytesReturned << "NextStartUsn:" << readData.StartUsn;
+        }
+
+        if (!success) {
             DWORD err = GetLastError();
+            qDebug() << "[UsnWatcher Post] FSCTL_READ_USN_JOURNAL 失败! 错误码:" << err << "卷:" << QString::fromStdWString(m_volume);
             // 方案二：引入 USN 自愈探测。若 Journal 失效或被覆盖，执行重置
             if (err == ERROR_JOURNAL_DELETE_IN_PROGRESS || err == ERROR_JOURNAL_NOT_ACTIVE || err == ERROR_INVALID_PARAMETER) {
                 qDebug() << "[UsnWatcher] 检测到 Journal 失效，执行自愈重置..." << QString::fromStdWString(m_volume);
@@ -88,10 +96,12 @@ void UsnWatcher::run() {
         }
 
         if (bytesReturned <= sizeof(USN)) {
-            // 无新数据，小步长等待
+            // 无新数据
             for (int i = 0; i < 10 && !m_stopRequested.load(); ++i) msleep(50);
             continue;
         }
+
+        qDebug() << "[UsnWatcher Post] 成功获取数据量:" << bytesReturned << "来自卷:" << QString::fromStdWString(m_volume);
 
         uint8_t* pRecord = buffer.get() + sizeof(USN);
         uint8_t* pEnd = buffer.get() + bytesReturned;
@@ -115,6 +125,13 @@ void UsnWatcher::run() {
                         reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameOffset :
                         reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameOffset;
                     QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(pRecord + fileNameOffset), fileNameLength / 2);
+
+                    // 粗暴日志：输出前 10 条任何文件的变化，证明解析在跑
+                    static int totalRecordCount = 0;
+                    if (++totalRecordCount <= 10) {
+                        qDebug() << "[USN Raw] (DEBUG-SAMPLE) 发现记录:" << name << "Reason:" << QString::number(reason, 16);
+                    }
+
                     // 修正：不区分大小写，确保 z:\ArcMeta.library_Z 等路径也能被捕获
                     if (name.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
                         qDebug() << "[USN Raw] 感知到目标路径变化:" << name << "Reason:" << QString::number(reason, 16);
