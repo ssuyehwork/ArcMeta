@@ -178,6 +178,7 @@ bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& fids) {
         // 从回收站恢复后，项目不归属于任何分类，即自然处于逻辑上的“未分类”状态。
         // 无需再向 category_items 写入任何记录。
         // 3. Clear is_trash flag in metadata cache + persist
+        std::wstring path = MetadataManager::instance().getPathByFid(fid);
         if (!path.empty()) {
             MetadataManager::instance().setTrash(path, false);
         }
