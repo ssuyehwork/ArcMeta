@@ -11,6 +11,7 @@
 #include <QFile>
 #include <functional>
 #include <cwchar>
+#include <map>
 #include <cstdint>
 #include "../meta/CategoryRepo.h"
 
