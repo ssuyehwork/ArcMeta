@@ -1,5 +1,6 @@
 #include "CoreController.h"
 #include "NativeFolderWatcher.h"
+#include "AppConfig.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
 #include "../ui/Logger.h"
@@ -46,9 +47,11 @@ void CoreController::startSystem() {
                 std::wstring volSerial = MetadataManager::getVolumeSerialNumber(d.absolutePath().toStdWString());
                 if (volSerial != L"UNKNOWN") {
                     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-                    QString relPath = AppConfig::instance().getValue(key, "").toString();
+                    QString relPath = ::ArcMeta::AppConfig::instance().getValue(key, QVariant("")).toString();
                     if (!relPath.isEmpty()) {
-                        QString managedAbs = QDir::toNativeSeparators(d.absolutePath().at(0).toUpper() + ":" + relPath);
+                        QString driveRoot = QString(d.absolutePath().at(0).toUpper());
+                        driveRoot.append(":");
+                        QString managedAbs = QDir::toNativeSeparators(driveRoot + relPath);
                         NativeFolderWatcher::instance().addWatch(managedAbs.toStdWString());
                     }
                 }

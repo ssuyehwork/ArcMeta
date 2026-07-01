@@ -21,6 +21,7 @@
 #include "MetadataManager.h"
 #include "MetadataDefs.h"
 #include "DatabaseManager.h"
+#include "../core/AppConfig.h"
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 #include "../ui/UiHelper.h"
@@ -1016,12 +1017,13 @@ bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
     if (volSerial == L"UNKNOWN") return false;
 
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-    QString relPath = AppConfig::instance().getValue(key, "").toString();
+    QString relPath = ::ArcMeta::AppConfig::instance().getValue(key, QVariant("")).toString();
     if (relPath.isEmpty()) return false;
 
     // 拼装托管库绝对路径并进行前缀匹配
-    QString drive = QString::fromWCharArray(&path[0], 1) + ":";
-    QString managedAbs = QDir::toNativeSeparators(drive + relPath).toLower();
+    QString driveRoot = QString::fromWCharArray(&path[0], 1);
+    driveRoot.append(":");
+    QString managedAbs = QDir::toNativeSeparators(driveRoot + relPath).toLower();
     QString qPath = QString::fromStdWString(path).toLower();
 
     // 必须包含在托管库目录下 (StartsWith 且确保边界)
