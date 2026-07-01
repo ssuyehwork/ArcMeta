@@ -1,7 +1,6 @@
 #include "AutoImportManager.h"
 #include "../mft/MftReader.h"
 #include "../meta/MetadataManager.h"
-#include "../meta/CategoryRepo.h"
 #include "../meta/DatabaseManager.h"
 #include "AppConfig.h"
 #include <QDebug>
@@ -68,32 +67,6 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
         m_pendingPaths.push_back(fullPath);
         
         QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
-    } else {
-        // 2026-07-xx 按照 Plan-118：物理感应逻辑。检测是否在根目录下创建了符合命名的托管库文件夹
-        QString qPathStr = QString::fromStdWString(fullPath);
-        QFileInfo info(qPathStr);
-        if (info.isDir()) {
-            QDir parentDir = info.dir();
-            if (parentDir.isRoot()) {
-                QString name = info.fileName();
-                if (name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
-                    qDebug() << "[AutoImport] 物理感应：识别到新托管库创建" << qPathStr;
-                    
-                    std::string fid = ::ArcMeta::MetadataManager::instance().getFileIdSync(fullPath);
-                    if (!fid.empty()) {
-                        ::ArcMeta::Category cat;
-                        cat.name = name.toStdWString();
-                        cat.folderFid = fid;
-                        cat.pinned = true; // 托管库默认置顶常驻
-                        
-                        if (::ArcMeta::CategoryRepo::add(cat)) {
-                            qDebug() << "[AutoImport] 成功同步创建侧边栏分类: " << name;
-                            ::ArcMeta::MetadataManager::instance().notifyUI(::ArcMeta::MetadataManager::RefreshLevel::FullRebuild);
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

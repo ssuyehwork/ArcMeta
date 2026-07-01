@@ -1,6 +1,5 @@
 #include "CategoryModel.h"
 #include "../meta/CategoryRepo.h"
-#include "../meta/MetadataManager.h"
 
 #include "UiHelper.h"
 #include <QMimeData>
@@ -9,7 +8,6 @@
 #include <QTimer>
 #include <QSet>
 #include <QMap>
-#include <QDebug>
 #include "../core/AppConfig.h"
 #include <QApplication>
 
@@ -63,7 +61,7 @@ void CategoryModel::refresh() {
         // [还原] 还原原始设计的语义化图标与配色
         // 物理分配负值 ID 空间
         addSystemItem("全部数据", "all", "all_data", "#3498db", -1);
-        // 2026-07-xx 按照 Plan-118：彻底移除“未分类”系统项
+        addSystemItem("未分类", "uncategorized", "uncategorized", "#95a5a6", -2);
         addSystemItem("未标签", "untagged", "untagged", "#7f8c8d", -3);
         addSystemItem("最近访问", "recently_visited", "clock", "#9b59b6", -6);
         addSystemItem("失效数据", "invalid_data", "invalid_data", "#f1c40f", -9);
@@ -124,8 +122,6 @@ void CategoryModel::refresh() {
             item->setData(cat.pinned, PinnedRole);
             item->setData(cat.encrypted, EncryptedRole);
             item->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
-            // 2026-07-xx 按照 Plan-118：保存绑定的物理 FID 用于重命名同步
-            item->setData(QString::fromStdString(cat.folderFid), FolderFidRole);
             item->setFlags(item->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
             
             if (cat.encrypted && !m_unlockedIds.contains(id)) {
@@ -251,27 +247,6 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
         int id = index.data(IdRole).toInt();
         
         if (type == "category" && id > 0) {
-            // 2026-07-xx 按照 Plan-118：实现逻辑 -> 物理重命名同步
-            QString folderFid = index.data(FolderFidRole).toString();
-            if (!folderFid.isEmpty()) {
-                std::wstring oldPathW = MetadataManager::instance().getPathByFid(folderFid.toStdString());
-                if (!oldPathW.empty()) {
-                    QFileInfo oldInfo(QString::fromStdWString(oldPathW));
-                    QDir parentDir = oldInfo.dir();
-                    QString newPath = parentDir.absoluteFilePath(newName);
-                    
-                    qDebug() << "[CategoryModel] 触发同步重命名: FID =" << folderFid 
-                             << "OldPath =" << QString::fromStdWString(oldPathW) << "NewPath =" << newPath;
-
-                    if (QDir().rename(QString::fromStdWString(oldPathW), newPath)) {
-                        qDebug() << "[CategoryModel] 物理重命名成功";
-                    } else {
-                        qWarning() << "[CategoryModel] 物理重命名失败，中止逻辑更新";
-                        return false;
-                    }
-                }
-            }
-
             auto categories = CategoryRepo::getAll();
             for (auto& cat : categories) {
                 if (cat.id == id) {

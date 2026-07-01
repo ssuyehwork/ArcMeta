@@ -21,7 +21,6 @@ struct Category {
     bool pinned = false;
     bool encrypted = false;
     std::wstring encryptHint;
-    std::string folderFid; // 2026-07-xx 按照 Plan-118：物理文件夹唯一标识符
 };
 
 /**
@@ -40,6 +39,7 @@ class CategoryRepo {
 public:
     // 2026-06-xx 物理同步：与 CategoryModel.cpp 定义的系统项 ID 保持绝对一致
     static constexpr int TRASH_CATEGORY_ID    = -8;
+    static constexpr int UNCATEGORIZED_CAT_ID = -2;
 
     /**
      * @brief 获取默认分类颜色：深灰色 (#555555)
@@ -54,14 +54,9 @@ public:
     static bool reorderAll(bool ascending);
     static std::vector<Category> getAll();
     static std::vector<Category> getRecentlyUsed(int limit);
-
-    /**
-     * @brief 根据物理 FID 更新分类名称
-     * 2026-07-xx 按照 Plan-118：用于响应文件夹物理重命名
-     */
-    static bool updateNameByFid(const std::string& fid, const std::wstring& newName);
     static std::vector<std::pair<int, int>> getCounts();
     static int getUniqueItemCount();
+    static int getUncategorizedItemCount();
     static QMap<QString, int> getSystemCounts();
     static QStringList getSystemCategoryPaths(const QString& type);
 
@@ -96,6 +91,7 @@ public:
 
     // 增量计数接口 (Part 4)
     static int getTotalFileCount();
+    static int getUncategorizedCount();
     static void setTotalFileCount(int count);
     static void setCategorizedCount(int count);
     static void incrementTotalFileCount(int delta);
