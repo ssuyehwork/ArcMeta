@@ -68,6 +68,7 @@ struct ItemMeta {
     std::wstring volume;
     std::wstring frn;
     std::string fileId128; // 128-bit File ID (Hex string)
+    int ingestionStatus;   // -1: 未知/非托管, 0: 已登记/待处理, 1: 已完成解析
     long long size;
     long long creationTime;   // ctime (毫秒)
     long long modificationTime; // mtime (毫秒)
@@ -79,6 +80,7 @@ struct ItemMeta {
         , rating(0)
         , pinned(false)
         , encrypted(false)
+        , ingestionStatus(-1)
         , size(0)
         , creationTime(0)
         , modificationTime(0)
