@@ -26,6 +26,7 @@ CoreController::~CoreController() {}
  * 彻底废除分布式文件模式，全面转向 SQLite 内存模式 (One-Drive-One-DB)
  */
 void CoreController::startSystem() {
+    qCritical() << "[CORE-V5-ENTRY] CoreController::startSystem() 入口";
     QThreadPool::globalInstance()->start([this]() {
         try {
             qint64 startTime = QDateTime::currentMSecsSinceEpoch();
@@ -37,6 +38,18 @@ void CoreController::startSystem() {
             
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
+
+            // 2026-07-xx 按照排查要求：强制开启 MFT/USN 监控链路
+            // 否则 UsnWatcher 线程永远不会启动
+            QStringList drives;
+            for (const QFileInfo& drive : QDir::drives()) {
+                QString letter = drive.absolutePath().left(2);
+                if (letter.endsWith("/")) letter = letter.left(1) + ":";
+                drives << letter;
+            }
+            qCritical() << "[CORE-V5-CHECK] 即将启动 MftReader, 盘符:" << drives;
+            MftReader::instance().buildIndex(drives);
+            qCritical() << "[CORE-V5-CHECK] MftReader::buildIndex 调用已返回";
             
             QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);

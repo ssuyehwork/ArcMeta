@@ -204,6 +204,7 @@ bool MftReader::isDriveIndexed(const QString& drive) {
 }
 
 void MftReader::buildIndex(const QStringList& drives) {
+    qCritical() << "[MFT-V5-ENTRY-ACTUAL] buildIndex 启动，盘符:" << drives;
     updateActiveDrives(drives);
 
     std::vector<std::wstring> toScan;
@@ -240,9 +241,12 @@ void MftReader::buildIndex(const QStringList& drives) {
     std::vector<ScannedDrive> scannedResults(toScan.size());
     std::vector<int> scanIndices((int)toScan.size());
     std::iota(scanIndices.begin(), scanIndices.end(), 0);
+    qCritical() << "[MFT-V5-SCAN] 准备并行扫描卷:" << toScan.size() << "个";
     std::for_each((std::execution::par), scanIndices.begin(), scanIndices.end(), [&](int i) {
         scannedResults[i].volume = toScan[i];
+        qCritical() << "[MFT-V5-SCAN-START] 线程启动扫描卷:" << QString::fromStdWString(toScan[i]);
         scannedResults[i].success = loadMftDirect(toScan[i], scannedResults[i].res);
+        qCritical() << "[MFT-V5-SCAN-END] 卷扫描完成:" << QString::fromStdWString(toScan[i]) << "Success:" << scannedResults[i].success;
     });
 
     QWriteLocker lock(&m_dataLock);
@@ -251,12 +255,18 @@ void MftReader::buildIndex(const QStringList& drives) {
         if (!sr.success || sr.res.entries.empty()) continue;
         
         size_t dIdx = m_drive_list.size();
+
+        // 增加卷类型排查
+        UINT driveType = GetDriveTypeW((sr.volume + L"\\").c_str());
+        qDebug() << "[MftReader] 准备合并卷:" << QString::fromStdWString(sr.volume) << "DriveType:" << driveType << "(3=FIXED, 4=REMOTE, 2=REMOVABLE)";
+
         m_drive_list.push_back(sr.volume);
         if (dIdx < 32) m_drive_active_mask.fetch_or(1 << dIdx);
         m_next_usns[sr.volume] = sr.res.nextUsn;
         mergeDriveResult(sr.volume, sr.res, dIdx);
         saveDriveToCacheInternal(dIdx);
         
+        qCritical() << "[MFT-V5-THREAD] 成功创建监控线程，卷:" << QString::fromStdWString(sr.volume);
         auto* w = new UsnWatcher(sr.volume, sr.res.nextUsn, nullptr);
         m_watchers.push_back(w);
         newWatchers.push_back(w);
@@ -393,6 +403,7 @@ bool MftReader::loadFromCache() {
     // 2026-05-29 物理修复：移除此处冗余的 lock 声明（父作用域已持有 lock），消除 C4456 警告
     for (const auto& drive : m_drive_list) {
         uint64_t lastUsn = m_next_usns[drive];
+        qCritical() << "[MFT-V5-RECOVERY] 从缓存恢复监控链，卷:" << QString::fromStdWString(drive) << "LastUsn:" << lastUsn;
         auto* w = new UsnWatcher(drive, lastUsn, nullptr);
         m_watchers.push_back(w);
         w->start();
@@ -965,6 +976,9 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
     
     // 如果该 FID 之前关联在其他路径，或者该路径现在被新 FID 占用，则判定为变动
     auto it = m_frn_to_idx.find(compositeKey);
+    if (name.contains("ArcMeta", Qt::CaseInsensitive)) {
+        qCritical() << "[MFT-V5-SINGLE] 正在处理目标变动:" << name << (it != m_frn_to_idx.end() ? "(更新)" : "(新增)");
+    }
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
         m_parent_frns[idx] = encodedPf;
@@ -1116,6 +1130,9 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
         uint64_t compositeKey = makeKey(dIdx, frn);
         
         auto it = m_frn_to_idx.find(compositeKey);
+        if (name.contains("ArcMeta", Qt::CaseInsensitive)) {
+            qCritical() << "[MFT-V5-BATCH] 正在处理目标变动:" << name << (it != m_frn_to_idx.end() ? "(更新)" : "(新增)");
+        }
         if (it != m_frn_to_idx.end()) {
             uint32_t idx = it->second;
             m_parent_frns[idx] = encodedPf;
@@ -1205,10 +1222,13 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
     auto it = m_frn_to_idx.find(compositeKey);
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
+        const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
+        if (p && StrStrIA(p, "ArcMeta.Library_")) {
+            qDebug() << "[MftReader] 感知到目标路径被删除:" << QString::fromUtf8(p);
+        }
         m_frns[idx] = 0;
         m_frn_to_idx.erase(it);
         m_dead_count++;
-        const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
         m_wasted_string_bytes += (strlen(p) + 1);
         
         { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }

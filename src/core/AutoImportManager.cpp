@@ -94,6 +94,16 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
     }
 }
 
+void AutoImportManager::registerItemDirectly(const std::wstring& path) {
+    if (path.empty()) return;
+    qDebug() << "[AutoImport] 接收到直接入库请求:" << QString::fromStdWString(path);
+
+    std::lock_guard<std::mutex> lock(m_queueMutex);
+    m_pendingPaths.push_back(path);
+
+    QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+}
+
 void AutoImportManager::recordRecentVisitedFolder(const std::wstring& path) {
     if (path.empty()) return;
     // 库内文件夹不记录（没有意义，本来就在库里）

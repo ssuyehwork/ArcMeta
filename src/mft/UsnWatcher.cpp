@@ -1,5 +1,6 @@
 #include "UsnWatcher.h"
 #include "MftReader.h"
+#include "../core/AutoImportManager.h"
 #include <QDebug>
 #include <winioctl.h>
 
@@ -8,6 +9,7 @@ namespace ArcMeta {
 UsnWatcher::UsnWatcher(const std::wstring& volume, uint64_t startUsn, QObject* parent)
     : QThread(parent), m_volume(volume), m_lastUsn(startUsn), m_stopRequested(false) {
     
+    qCritical() << "[USN-V5-CONSTRUCT] 构造实例，卷:" << QString::fromStdWString(m_volume) << "StartUsn:" << startUsn;
     std::wstring devPath = L"\\\\.\\" + m_volume;
     if (devPath.back() == L'\\') devPath.pop_back();
 
@@ -40,12 +42,29 @@ void UsnWatcher::stop() {
 }
 
 void UsnWatcher::run() {
-    if (m_hVolume == INVALID_HANDLE_VALUE) return;
+    qCritical() << "[USN-V5-DIAG] 线程正在进入 run(), 监控卷:" << QString::fromStdWString(m_volume);
+
+    if (m_hVolume == INVALID_HANDLE_VALUE) {
+        std::wstring devPath = L"\\\\.\\" + m_volume;
+        if (devPath.back() == L'\\') devPath.pop_back();
+        m_hVolume = CreateFileW(devPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+
+        if (m_hVolume == INVALID_HANDLE_VALUE) {
+            qCritical() << "[USN-V5-ERROR] 无法打开卷句柄! 错误码:" << GetLastError() << "路径:" << QString::fromStdWString(devPath);
+            return;
+        }
+    }
+
+    UINT dType = GetDriveTypeW((m_volume + L"\\").c_str());
+    qCritical() << "[USN-V5-TYPE] 卷属性诊断 -> DriveType:" << dType << (dType == 4 ? "(网络盘-不支持USN)" : "");
+
+    qCritical() << "[USN-V5-QUERY] 正在查询 Journal:" << QString::fromStdWString(m_volume);
 
     // 1. 获取 Journal ID
     USN_JOURNAL_DATA_V0 journalData;
     DWORD bytesReturned;
     if (!DeviceIoControl(m_hVolume, FSCTL_QUERY_USN_JOURNAL, NULL, 0, &journalData, sizeof(journalData), &bytesReturned, NULL)) {
+        qCritical() << "[USN-V5-ERROR] FSCTL_QUERY_USN_JOURNAL 失败，错误码:" << GetLastError() << "卷:" << QString::fromStdWString(m_volume);
         return;
     }
 
@@ -67,8 +86,11 @@ void UsnWatcher::run() {
     std::unique_ptr<uint8_t[]> buffer(new uint8_t[bufferSize]);
 
     while (!m_stopRequested.load()) {
-        if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL)) {
+        BOOL success = DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL);
+
+        if (!success) {
             DWORD err = GetLastError();
+            qDebug() << "[UsnWatcher Post] FSCTL_READ_USN_JOURNAL 失败! 错误码:" << err << "卷:" << QString::fromStdWString(m_volume);
             // 方案二：引入 USN 自愈探测。若 Journal 失效或被覆盖，执行重置
             if (err == ERROR_JOURNAL_DELETE_IN_PROGRESS || err == ERROR_JOURNAL_NOT_ACTIVE || err == ERROR_INVALID_PARAMETER) {
                 qDebug() << "[UsnWatcher] 检测到 Journal 失效，执行自愈重置..." << QString::fromStdWString(m_volume);
@@ -82,7 +104,7 @@ void UsnWatcher::run() {
         }
 
         if (bytesReturned <= sizeof(USN)) {
-            // 无新数据，小步长等待
+            // 无新数据
             for (int i = 0; i < 10 && !m_stopRequested.load(); ++i) msleep(50);
             continue;
         }
@@ -99,8 +121,53 @@ void UsnWatcher::run() {
                 uint32_t reason = (header->MajorVersion == 2) ? 
                     reinterpret_cast<USN_RECORD_V2*>(pRecord)->Reason : 
                     reinterpret_cast<USN_RECORD_V3*>(pRecord)->Reason;
-                
+
+                WORD nameLen = (header->MajorVersion == 2) ? reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameLength : reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameLength;
+                WORD nameOff = (header->MajorVersion == 2) ? reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameOffset : reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameOffset;
+                QString rawName = QString::fromUtf16(reinterpret_cast<const char16_t*>(pRecord + nameOff), nameLen / 2);
+
+                if (rawName.contains("ArcMeta", Qt::CaseInsensitive)) {
+                    qCritical() << "[USN-V5-RAW] 原始记录匹配:" << rawName << "Reason:" << QString::number(reason, 16) << "卷:" << QString::fromStdWString(m_volume);
+                }
+
                 if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE | USN_REASON_RENAME_NEW_NAME)) {
+                    // 2026-07-xx 按照用户方案：绕开 MftReader 索引，直接尝试解析路径并入库
+                    uint64_t frn = (header->MajorVersion == 2) ?
+                        reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileReferenceNumber :
+                        *reinterpret_cast<uint64_t*>(&reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileReferenceNumber);
+
+                    std::wstring fullPath;
+                    HANDLE hHint = CreateFileW((m_volume + L"\\").c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+                    if (hHint != INVALID_HANDLE_VALUE) {
+                        FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
+                        id.FileId.QuadPart = frn;
+                        HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
+                        if (hFile != INVALID_HANDLE_VALUE) {
+                            wchar_t pathBuf[MAX_PATH];
+                            if (GetFinalPathNameByHandleW(hFile, pathBuf, MAX_PATH, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS)) {
+                                fullPath = pathBuf;
+                                if (fullPath.find(L"\\\\?\\") == 0) fullPath = fullPath.substr(4);
+                            }
+                            CloseHandle(hFile);
+                        }
+                        CloseHandle(hHint);
+                    }
+
+                    if (!fullPath.empty()) {
+                        std::wstring managed;
+                        bool isManaged = AutoImportManager::instance().checkAndGetManagedPath(fullPath, managed);
+                        if (isManaged || fullPath.find(L"ArcMeta") != std::wstring::npos) {
+                            qCritical() << "[USN-V5-PATH] 解析路径成功:" << QString::fromStdWString(fullPath) << "isManaged:" << isManaged;
+                        }
+                        if (isManaged) {
+                            AutoImportManager::instance().registerItemDirectly(fullPath);
+                        }
+                    } else {
+                        if (rawName.contains("ArcMeta", Qt::CaseInsensitive)) {
+                            qCritical() << "[USN-V5-PATH-FAIL] 匹配关键词但路径解析失败!!" << rawName;
+                        }
+                    }
+
                     updateBatch.push_back(pRecord);
                 } else if (reason & USN_REASON_FILE_DELETE) {
                     uint64_t frn = (header->MajorVersion == 2) ? 

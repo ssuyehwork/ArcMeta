@@ -29,6 +29,14 @@ public:
      */
     static std::wstring getManagedLibraryPath(const std::wstring& pathOrVolSerial);
 
+    /**
+     * @brief 2026-07-xx 绕开 MftReader 内存索引，直接将物理路径排队入库
+     */
+    void registerItemDirectly(const std::wstring& path);
+
+    // 辅助路径校验
+    bool checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder);
+
 private slots:
     // 订阅 MftReader 发现的新增条目
     void onEntryAdded(uint64_t key);
@@ -40,8 +48,6 @@ private slots:
 private:
     AutoImportManager(QObject* parent = nullptr);
     ~AutoImportManager() override;
-
-    bool checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder);
 
     QTimer* m_debounceTimer = nullptr;
     std::vector<std::wstring> m_pendingPaths;
