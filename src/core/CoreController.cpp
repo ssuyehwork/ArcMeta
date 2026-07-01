@@ -1,4 +1,6 @@
 #include "CoreController.h"
+#include "NativeFolderWatcher.h"
+#include "AppConfig.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
 #include "../ui/Logger.h"
@@ -37,6 +39,23 @@ void CoreController::startSystem() {
             
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
+
+            // 启动原生监控服务
+            // 2026-07-xx 按照 Plan-117：初始化完成后启动对所有盘符托管库的监控
+            const auto drives = QDir::drives();
+            for (const QFileInfo& d : drives) {
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(d.absolutePath().toStdWString());
+                if (volSerial != L"UNKNOWN") {
+                    QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+                    QString relPath = ::ArcMeta::AppConfig::instance().getValue(key, QVariant("")).toString();
+                    if (!relPath.isEmpty()) {
+                        QString driveRoot = QString(d.absolutePath().at(0).toUpper());
+                        driveRoot.append(":");
+                        QString managedAbs = QDir::toNativeSeparators(driveRoot + relPath);
+                        NativeFolderWatcher::instance().addWatch(managedAbs.toStdWString());
+                    }
+                }
+            }
             
             QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);

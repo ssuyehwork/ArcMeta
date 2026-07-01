@@ -94,3 +94,41 @@
 ### 事件过滤器安装逻辑修复
 - [2026-06-30 10:21:37] **src/ui/MainWindow.cpp**:
     - 修复因移除闲置检测逻辑误删 `installEventFilter(this)` 导致搜索历史等 UI 交互失效的问题。
+
+### USN 全口径感知修复、初始化激活与追踪日志增强 (Plan-117/122)
+- [2026-07-02 11:10:00] **src/core/CoreController.cpp**:
+    - 在 `startSystem` 中补全 `MftReader` 缓存加载与索引构建逻辑，确保 `UsnWatcher` 监控线程在系统启动时正确激活。
+    - 补全 `MftReader.h` 头文件包含，修复标识符未定义的编译错误。
+- [2026-07-02 11:20:00] **src/mft/UsnWatcher.cpp**:
+    - 在 `run()` 与 `handleRecord()` 中将 `USN_REASON_RENAME_OLD_NAME` 加入捕获掩码，确保移动操作起点可见。
+    - 注入 `[USN_TRACE]` 启动日志与捕获日志，实时打印变动 FRN 与 Reason 掩码。
+    - 修复 `hex` 标识符未定义导致的编译错误：改用 `QString::number(..., 16)` 进行 16 进制日志格式化。
+- [2026-07-02 11:30:00] **src/mft/MftReader.cpp**:
+    - 在 `removeEntryByFrn` 物理销毁索引前，利用 `getPathFastInternal` 提取最后已知路径并记录 `[MFT_TRACE]` 日志。
+    - 在 `entryAdded`、`entryUpdated`、`entryRemoved` 信号发射处增加 `[MFT_TRACE]` 日志，验证信号穿透性。
+- [2026-07-02 11:45:00] **src/core/AutoImportManager.h / .cpp**:
+    - 订阅 `MftReader::entryRemoved` 信号，实现 `onEntryRemoved` 物理删除感知，同步注销库内数据库记录。
+    - 重构 `onEntryUpdated` 逻辑：利用 FID 反查机制识别项目“移出”场景，当项目离开托管库时自动执行数据库注销。
+    - 注入 `[AIM_TRACE]` 全量业务日志，涵盖信号触发、路径解析、受管状态判定及入库/注销决策。
+
+### 启动异常退出与 Thread Affinity 冲突修复
+- [2026-07-02 14:30:00] **src/main.cpp**:
+    - 在 GUI 主线程显式预热 `MftReader` 单例，防止由于后台线程首次创建导致的 Thread Affinity 冲突闪退。
+    - 增加“启动就绪”边界日志，辅助判定程序退出点。
+- [2026-07-02 14:45:00] **src/mft/MftReader.cpp**:
+    - **锁分离优化**：将 `UsnWatcher` 的 `start()` 启动调用移出 `m_dataLock` 写锁保护区，彻底杜绝持有锁启动线程导致的潜在内核级死锁。
+    - **兼容性降级**：废除 `std::execution::par` 并行策略，回归串行扫描/排序，解决部分 Windows 环境由于缺失 TBB/并行运行时库导致的瞬时闪退。
+
+### 业务逻辑异步化与盘符映射修复
+- [2026-07-02 15:30:00] **src/core/AutoImportManager.cpp**:
+    - **异步化处理**：将 `onEntryUpdated`（移出判定）和 `onEntryRemoved`（删除同步）中的耗时 I/O 及数据库操作全部移至后台线程执行，防止主线程阻塞导致的 UI 无响应閃退。
+    - **映射修复**：修正 `onEntryRemoved` 中盘符索引映射逻辑，改用 `MftReader::getDriveList()` 确保 FID 重建的卷序列号准确。
+- [2026-07-02 15:45:00] **src/mft/UsnWatcher.h / MftReader.h**:
+    - 补全 `volume()` 和 `getDriveList()` 访问器，支持跨模块盘符信息同步。
+
+### 跨平台兼容性补丁与主线程阻塞防护
+- [2026-07-02 16:15:00] **src/core/AutoImportManager.cpp**:
+    - 补全 `<QtConcurrent>` 与 `<cwchar>` 头文件，修复标识符未定义错误。
+    - 在包含 `windows.h` 后显式 `#undef run`，解决 Windows 宏与 `QtConcurrent::run` 的标识符冲突。
+- [2026-07-02 16:30:00] **src/main.cpp**:
+    - 增强“进入事件循环”与“正常退出”边界日志，用于区分崩溃闪退与逻辑退出。
