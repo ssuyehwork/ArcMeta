@@ -4,6 +4,7 @@
 #include <QtConcurrent>
 #include <QThreadPool>
 #include <QDir>
+#include <QDirIterator>
 #include <QDebug>
 #include <QTimer>
 #include <QDateTime>
@@ -62,16 +63,28 @@ std::wstring MetadataManager::normalizePath(const std::wstring& path) {
 
 std::string MetadataManager::generateFallbackFid(const std::wstring& vol, const std::wstring& frn) {
     if (vol.empty() || frn.empty()) return "";
-    return "FRN:" + QString::fromStdWString(vol).toUpper().toStdString() + ":" + QString::fromStdWString(frn).toUpper().toStdString();
+    std::string result = "FRN:";
+    result.append(QString::fromStdWString(vol).toUpper().toStdString());
+    result.append(":");
+    result.append(QString::fromStdWString(frn).toUpper().toStdString());
+    return result;
 }
 
 std::string MetadataManager::generateDeterministicSha256Id(const std::wstring& path) {
     if (path.empty()) return "";
     std::wstring nPath = MetadataManager::normalizePath(path);
     std::wstring vol = MetadataManager::getVolumeSerialNumber(nPath);
-    QByteArray seed = QString::fromStdWString(vol + L":" + nPath).toUtf8();
+    
+    std::wstring seedW(vol);
+    seedW.append(L":");
+    seedW.append(nPath);
+
+    QByteArray seed = QString::fromStdWString(seedW).toUtf8();
     QByteArray hash = QCryptographicHash::hash(seed, QCryptographicHash::Sha256);
-    return "PATHURL:" + hash.left(16).toHex().toUpper().toStdString();
+    
+    std::string result = "PATHURL:";
+    result.append(hash.left(16).toHex().toUpper().toStdString());
+    return result;
 }
 
 std::wstring MetadataManager::generateDeterministicFrn(const std::wstring& path) {
@@ -1032,49 +1045,65 @@ std::wstring MetadataManager::getVolumeSerialNumber(const std::wstring& path) {
     return L"UNKNOWN";
 }
 
-bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
-    if (path.empty()) return false;
-    
-    // 2026-07-xx 按照 Plan-117：高性能路径归属判定
-    std::wstring volSerial = getVolumeSerialNumber(path);
-    qDebug() << "[DIAG] isInsideManagedLibrary volSerial=" << QString::fromStdWString(volSerial);
-    if (volSerial == L"UNKNOWN") return false;
+std::wstring MetadataManager::getManagedLibraryPath(const std::wstring& volSerial, const QString& driveLetter) {
+    if (volSerial.empty() || volSerial == L"UNKNOWN") return L"";
 
-    QString driveRoot = QString::fromWCharArray(&path[0], 1);
+    QString cleanLetter = driveLetter;
+    if (cleanLetter.endsWith("/") || cleanLetter.endsWith("\\")) {
+        cleanLetter = cleanLetter.left(1);
+    }
+    QString driveRoot(cleanLetter);
     driveRoot.append(":");
 
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
     QString relPath = ::ArcMeta::AppConfig::instance().getValue(key, QVariant("")).toString();
-    qDebug() << "[DIAG] AppConfig relPath=" << relPath;
 
-    // 2026-07-xx 按照 Plan-118：约定优于配置的默认兜底逻辑同步
+    // 2026-07-xx 按照 Plan-118：约定优于配置的默认兜底逻辑
     if (relPath.isEmpty()) {
-        relPath = "ArcMeta.Library_" + driveRoot.left(1).toUpper();
-        // 必须验证该文件夹物理存在，避免对不存在的路径做前缀匹配。
-        QString fullRel = QDir::toNativeSeparators(driveRoot + "/" + relPath);
-        bool exists = QFileInfo::exists(fullRel); 
-        qDebug() << "[DIAG] 默认兜底 relPath=" << relPath << "exists=" << exists;
-        if (!exists) return false;
+        QString defaultRel("ArcMeta.Library_");
+        defaultRel.append(cleanLetter.at(0).toUpper());
+
+        QString fullPath(driveRoot);
+        fullPath.append("/");
+        fullPath.append(defaultRel);
+        
+        if (QFileInfo::exists(QDir::toNativeSeparators(fullPath))) {
+            relPath = defaultRel;
+        }
     }
 
-    // 拼装托管库绝对路径并进行前缀匹配
-    QString managedAbs = QDir::toNativeSeparators(driveRoot + "/" + relPath).toLower();
+    if (relPath.isEmpty()) return L"";
+
+    QString finalPath(driveRoot);
+    finalPath.append("/");
+    finalPath.append(relPath);
+
+    return normalizePath(finalPath.toStdWString());
+}
+
+bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
+    if (path.empty()) return false;
+    
+    std::wstring volSerial = getVolumeSerialNumber(path);
+    QString letter = (path.length() >= 2 && path[1] == L':') ? QString::fromWCharArray(&path[0], 1) : "";
+    
+    std::wstring managedAbsW = getManagedLibraryPath(volSerial, letter);
+    if (managedAbsW.empty()) return false;
+
+    QString managedAbs = QString::fromStdWString(managedAbsW).toLower();
     QString qPath = QString::fromStdWString(normalizePath(path)).toLower();
 
-    qDebug() << "[DIAG] 最终托管库路径(L):" << managedAbs << "当前检查路径(L):" << qPath;
+    qDebug() << "[DIAG] isInsideManagedLibrary 路径比对 -> 库:" << managedAbs << "目标:" << qPath;
 
-    // 必须包含在托管库目录下 (StartsWith 且确保边界)
     if (qPath.startsWith(managedAbs)) {
-        // 进一步校验边界，防止 C:\ArcMeta.Library_D_Backup 匹配 C:\ArcMeta.Library_D
         bool match = false;
         if (qPath.length() == managedAbs.length()) match = true;
         else if (qPath[managedAbs.length()] == '\\' || qPath[managedAbs.length()] == '/') match = true;
         
-        qDebug() << "[DIAG] isInsideManagedLibrary 最终判定结果:" << match;
+        qDebug() << "[DIAG] isInsideManagedLibrary 匹配结果:" << match;
         return match;
     }
 
-    qDebug() << "[DIAG] isInsideManagedLibrary 最终判定结果: false";
     return false;
 }
 
@@ -1400,12 +1429,13 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     if (isNew && !authorized) {
         // 2026-07-xx 补丁：必须校验路径是否确实在托管库内部。
         // 如果在内部但被标记为 isNew 且未授权，可能是监控漏掉的初始信号，应允许入库。
+        qDebug() << "[Metadata] 检测到新项持久化请求，未预授权，开始库内安全判定:" << QString::fromStdWString(nPath);
         if (isInsideManagedLibrary(nPath)) {
-            qDebug() << "[Metadata] 识别到托管库内新增项，自动补齐授权:" << QString::fromStdWString(nPath);
+            qDebug() << "[Metadata] 判定成功: 路径位于托管库内，自动补齐授权";
             authorized = true;
         } else {
             // 记录日志，但不产生新记录
-            qDebug() << "[Metadata] 拦截到非授权入库请求（库外项目）:" << QString::fromStdWString(nPath) << "isNew:" << isNew;
+            qWarning() << "[Metadata] 判定失败: 拦截非授权入库请求（该项目不属于任何托管库）:" << QString::fromStdWString(nPath);
             return;
         }
     }
@@ -1502,7 +1532,9 @@ std::wstring MetadataManager::getVolumeFromFid(const std::string& fid) {
 
 void MetadataManager::unloadVolumeNameCache(const std::wstring& volSerial) {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
-    std::string prefix = "FRN:" + QString::fromStdWString(volSerial).toUpper().toStdString() + ":";
+    std::string prefix = "FRN:";
+    prefix.append(QString::fromStdWString(volSerial).toUpper().toStdString());
+    prefix.append(":");
 
     auto cleanupMap = [&](std::unordered_map<std::wstring, std::vector<std::string>>& map) {
         for (auto it = map.begin(); it != map.end(); ) {
@@ -1526,7 +1558,9 @@ void MetadataManager::unloadVolumeNameCache(const std::wstring& volSerial) {
 
 void MetadataManager::loadVolumeNameCache(const std::wstring& volSerial) {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
-    std::string prefix = "FRN:" + QString::fromStdWString(volSerial).toUpper().toStdString() + ":";
+    std::string prefix = "FRN:";
+    prefix.append(QString::fromStdWString(volSerial).toUpper().toStdString());
+    prefix.append(":");
 
     for (const auto& pair : m_cache) {
         const std::wstring& path = pair.first;

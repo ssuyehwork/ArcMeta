@@ -226,6 +226,12 @@ public:
     static bool isInsideManagedLibrary(const std::wstring& path);
 
     /**
+     * @brief 获取指定卷的托管库绝对路径
+     * 2026-07-xx 按照 Plan-118：整合配置查询与约定兜底逻辑，确保全系统识别一致性
+     */
+    static std::wstring getManagedLibraryPath(const std::wstring& volSerial, const QString& driveLetter);
+
+    /**
      * @brief 设置内部操作标志位，用于抑制冗余信号刷新
      */
     void setInternalOperating(bool operating) { m_isInternalOperating = operating; }
