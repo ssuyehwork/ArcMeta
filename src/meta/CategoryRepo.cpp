@@ -470,37 +470,41 @@ bool CategoryRepo::reorderAll(bool ascending) {
 }
 
 bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint) {
+    return addItemToCategoryBatch(categoryId, {{fileId128, pathHint}});
+}
+
+bool CategoryRepo::addItemToCategoryBatch(int categoryId, const std::vector<std::pair<std::string, std::wstring>>& items) {
+    if (items.empty()) return true;
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return false;
-
-    std::wstring finalPath = MetadataManager::normalizePath(pathHint);
-    if (finalPath.empty()) finalPath = MetadataManager::instance().getPathByFid(fileId128);
 
     SqlTransaction trans(db);
     sqlite3_stmt* stmt;
     const char* sql = "INSERT OR REPLACE INTO category_items (category_id, file_id, path_hint, added_at) VALUES (?, ?, ?, ?)";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, categoryId);
-        sqlite3_bind_text(stmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 3, finalPath.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_double(stmt, 4, static_cast<double>(QDateTime::currentMSecsSinceEpoch()));
-        if (sqlite3_step(stmt) == SQLITE_DONE) {
-            sqlite3_finalize(stmt);
-            trans.commit();
+        double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
+        for (const auto& item : items) {
+            std::wstring finalPath = MetadataManager::normalizePath(item.second);
+            if (finalPath.empty()) finalPath = MetadataManager::instance().getPathByFid(item.first);
 
-            // 2026-06-xx 物理同步：归类操作必然标记为受控项，驱动 UI 绿对勾显示
+            sqlite3_bind_int(stmt, 1, categoryId);
+            sqlite3_bind_text(stmt, 2, item.first.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text16(stmt, 3, finalPath.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(stmt, 4, now);
+            sqlite3_step(stmt);
+            sqlite3_reset(stmt);
+
+            // 批量模式下，注册项目不触发 UI 刷新信号，由调用者统一管理
             if (!finalPath.empty()) {
-                // 2026-07-xx 物理修复：改用 registerItem 确保物理属性被提取并持久化
-                MetadataManager::instance().registerItem(finalPath);
+                MetadataManager::instance().registerItem(finalPath, true);
             }
-
-            syncCategorizedCountForFid(fileId128);
-            
-            // 2026-06-xx 物理优化：手动归类后立即触发侧边栏异步局部刷新
+        }
+        sqlite3_finalize(stmt);
+        if (trans.commit()) {
+            syncCategorizedCountForFid("");
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
             return true;
         }
-        sqlite3_finalize(stmt);
     }
     return false;
 }
@@ -683,7 +687,10 @@ void CategoryRepo::setCategorizedCount(int count) {
 
 void CategoryRepo::incrementTotalFileCount(int delta) {
     s_totalFileCount += delta;
-    updatePersistentStat(STAT_TOTAL_FILES, delta);
+    // 2026-08-xx 性能加固：内部批量操作期间仅更新内存计数，延迟持久化，避免 Global DB 锁竞争
+    if (!MetadataManager::instance().isInternalOperating()) {
+        updatePersistentStat(STAT_TOTAL_FILES, delta);
+    }
 }
 
 void CategoryRepo::incrementCategorizedCount(int delta) {

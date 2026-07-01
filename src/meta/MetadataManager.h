@@ -127,6 +127,11 @@ public:
     void registerItem(const std::wstring& path, bool authorized = false);
 
     /**
+     * @brief 批量注册项目（优化版，支持物理库对账）
+     */
+    void registerItemsBatch(const std::vector<std::wstring>& paths, bool authorized = false);
+
+    /**
      * @brief 异步批量注册项目 (Plan-88 性能重构)
      * 2026-07-xx 按照 Plan-116：UI 层主动调用的批量注册将受到严格拦截
      */

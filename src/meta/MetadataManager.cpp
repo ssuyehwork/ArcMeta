@@ -362,38 +362,58 @@ void MetadataManager::notifyFullUIRebuild() {
 }
 
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
-    std::wstring nPath = normalizePath(path);
-    qDebug() << "[Metadata] 收到项目注册请求:" << QString::fromStdWString(nPath) << "Authorized:" << authorized;
+    registerItemsBatch({path}, authorized);
+}
 
-    // 2026-07-xx 按照 Plan-117：采用登记->解析->完成的闭环逻辑
-    // 为了性能，registerItem 内部不再调用 markAsRegistered 以免产生多余的独立事务
-    
-    // 1. 激活项目 (获取 FID/FRN 等物理属性)
-    ensureActivated(nPath);
+void MetadataManager::registerItemsBatch(const std::vector<std::wstring>& paths, bool authorized) {
+    if (paths.empty()) return;
 
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nPath].ingestionStatus = 0; // 先登记
+    // 按磁盘卷分组以优化事务
+    std::map<std::wstring, std::vector<std::wstring>> pathsByVol;
+    for (const auto& p : paths) {
+        std::wstring nPath = normalizePath(p);
+        pathsByVol[getVolumeSerialNumber(nPath)].push_back(nPath);
     }
 
-    // 2. 提取图像尺寸 (Plan-29)
-    tryExtractDimensions(nPath);
+    for (auto& pair : pathsByVol) {
+        const std::wstring& vol = pair.first;
+        QString letter = "";
+        if (!pair.second.empty()) {
+            const std::wstring& first = pair.second.front();
+            if (first.length() >= 2 && first[1] == L':') letter = QString::fromWCharArray(&first[0], 1);
+        }
 
-    // 4. 视觉预热 (提取颜色)
-    tryExtractColor(nPath);
+        sqlite3* db = DatabaseManager::instance().getMemoryDb(vol, letter);
+        SqlTransaction trans(db);
 
-    // 标记完成
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nPath].ingestionStatus = 1;
+        for (const auto& nPath : pair.second) {
+            ensureActivated(nPath);
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                m_cache[nPath].ingestionStatus = 0;
+            }
+
+            // 批量模式下仅执行轻量级属性提取，耗时操作由子线程异步补偿
+            if (!isInternalOperating()) {
+                tryExtractDimensions(nPath);
+                tryExtractColor(nPath);
+            }
+
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                m_cache[nPath].ingestionStatus = 1;
+            }
+
+            persistAsync(nPath, false, authorized);
+        }
+        trans.commit();
     }
 
-    // 3. 物理同步 (存入数据库) - 合并为一个持久化动作
-    // 2026-07-xx 按照 Plan-116：透传授权状态，非授权请求禁止创建新记录
-    persistAsync(nPath, false, authorized);
-
-    // 5. 通知 UI 刷新该路径
-    notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    if (!isInternalOperating()) {
+        for (const auto& p : paths) {
+            notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(normalizePath(p)));
+        }
+    }
 }
 
 void MetadataManager::markAsRegistered(const std::wstring& path) {
@@ -1145,6 +1165,9 @@ void MetadataManager::activateItem(const std::wstring& path) {
 }
 
 void MetadataManager::tryExtractDimensions(const std::wstring& path) {
+    // 2026-08-xx 性能加固：内部批量操作期间跳过同步解析，防止竞争
+    if (instance().isInternalOperating()) return;
+
     std::wstring nPath = normalizePath(path);
     QFileInfo info(QString::fromStdWString(nPath));
     if (!info.isFile()) return;
@@ -1189,6 +1212,9 @@ void MetadataManager::tryExtractDimensions(const std::wstring& path) {
 }
 
 void MetadataManager::tryExtractColor(const std::wstring& path) {
+    // 2026-08-xx 性能加固：内部批量操作期间跳过同步解析，防止竞争
+    if (instance().isInternalOperating()) return;
+
     std::wstring nPath = MetadataManager::normalizePath(path);
     
     // 2026-07-xx 按照 Plan-29：在提取颜色时同步校准尺寸

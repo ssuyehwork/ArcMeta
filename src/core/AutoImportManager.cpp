@@ -55,6 +55,10 @@ void AutoImportManager::stopListening() {
 void AutoImportManager::syncAllManagedLibraries() {
     const auto drives = QDir::drives();
     bool changed = false;
+
+    // 2026-08-xx 性能加固：启动全盘对账前开启信号抑制，避免每个盘符处理时都触发 UI 重刷
+    MetadataManager::instance().setInternalOperating(true);
+
     for (const QFileInfo& d : drives) {
         QString drive = d.absolutePath();
         QString letter = drive.left(1).toUpper();
@@ -72,6 +76,9 @@ void AutoImportManager::syncAllManagedLibraries() {
             }
         }
     }
+
+    MetadataManager::instance().setInternalOperating(false);
+
     if (changed) {
         MetadataManager::instance().notifyFullUIRebuild();
     }
@@ -258,10 +265,13 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
     QDir dir(QString::fromStdWString(rootPath));
     if (!dir.exists()) return;
 
-    // 2026-08-xx 性能优化：抑制信号，开启批量事务
-    MetadataManager::instance().setInternalOperating(true);
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (db) sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+    // 2026-08-xx 性能优化：抑制信号，开启批量事务 (RAII 自动管理)
+    struct IngestionGuard {
+        IngestionGuard() { MetadataManager::instance().setInternalOperating(true); }
+        ~IngestionGuard() { MetadataManager::instance().setInternalOperating(false); }
+    } guard;
+
+    SqlTransaction trans(DatabaseManager::instance().getGlobalDb());
 
     int rootCatId = 0;
     std::string rootFid;
@@ -301,8 +311,15 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
 
     if (rootCatId <= 0) return;
 
-    std::function<void(const QString&, int)> syncDir;
-    syncDir = [&](const QString& currentPath, int parentCatId) {
+    // 2026-08-xx 递归收集子项目
+    struct Batch {
+        std::vector<std::wstring> regPaths;
+        std::vector<std::pair<std::string, std::wstring>> catItems;
+    };
+    std::map<int, Batch> batches;
+
+    std::function<void(const QString&, int)> scanDir;
+    scanDir = [&](const QString& currentPath, int parentCatId) {
         QDir currentDir(currentPath);
         QFileInfoList list = currentDir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden);
 
@@ -328,25 +345,35 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
                     }
                 }
                 if (existingId > 0) {
-                    syncDir(fi.absoluteFilePath(), existingId);
+                    scanDir(fi.absoluteFilePath(), existingId);
                 }
             } else {
-                MetadataManager::instance().registerItem(wPath, true);
-                if (parentCatId > 0) {
-                    std::string fid;
-                    if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid)) {
-                        CategoryRepo::addItemToCategory(parentCatId, fid, wPath);
-                    }
+                batches[parentCatId].regPaths.push_back(wPath);
+                std::string fid;
+                if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid)) {
+                    batches[parentCatId].catItems.push_back({fid, wPath});
                 }
             }
         }
     };
 
-    syncDir(QString::fromStdWString(rootPath), rootCatId);
+    scanDir(QString::fromStdWString(rootPath), rootCatId);
 
-    // 2026-08-xx 性能优化：提交事务并恢复信号，最后执行一次全量 UI 重建
-    if (db) sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
-    MetadataManager::instance().setInternalOperating(false);
+    // 3. 执行批量入库
+    std::vector<std::wstring> allRegPaths;
+    for (auto& bPair : batches) {
+        allRegPaths.insert(allRegPaths.end(), bPair.second.regPaths.begin(), bPair.second.regPaths.end());
+    }
+    MetadataManager::instance().registerItemsBatch(allRegPaths, true);
+
+    for (auto& bPair : batches) {
+        if (bPair.first > 0) {
+            CategoryRepo::addItemToCategoryBatch(bPair.first, bPair.second.catItems);
+        }
+    }
+
+    // 2026-08-xx 性能优化：提交事务，恢复信号由 guard 处理
+    trans.commit();
     MetadataManager::instance().notifyFullUIRebuild();
 }
 
