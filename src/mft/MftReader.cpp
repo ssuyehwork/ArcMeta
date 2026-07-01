@@ -965,6 +965,9 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
     
     // 如果该 FID 之前关联在其他路径，或者该路径现在被新 FID 占用，则判定为变动
     auto it = m_frn_to_idx.find(compositeKey);
+    if (name.contains("ArcMeta.Library_")) {
+        qDebug() << "[MftReader] 准备处理目标路径:" << name << (it != m_frn_to_idx.end() ? "(更新)" : "(新增)");
+    }
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
         m_parent_frns[idx] = encodedPf;
@@ -1116,6 +1119,9 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
         uint64_t compositeKey = makeKey(dIdx, frn);
         
         auto it = m_frn_to_idx.find(compositeKey);
+        if (name.contains("ArcMeta.Library_")) {
+            qDebug() << "[MftReader Batch] 准备处理目标路径:" << name << (it != m_frn_to_idx.end() ? "(更新)" : "(新增)");
+        }
         if (it != m_frn_to_idx.end()) {
             uint32_t idx = it->second;
             m_parent_frns[idx] = encodedPf;
@@ -1205,6 +1211,10 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
     auto it = m_frn_to_idx.find(compositeKey);
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
+        const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
+        if (p && strstr(p, "ArcMeta.Library_")) {
+            qDebug() << "[MftReader] 感知到目标路径被删除:" << QString::fromUtf8(p);
+        }
         m_frns[idx] = 0;
         m_frn_to_idx.erase(it);
         m_dead_count++;

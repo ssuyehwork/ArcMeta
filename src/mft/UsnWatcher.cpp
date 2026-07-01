@@ -100,6 +100,20 @@ void UsnWatcher::run() {
                     reinterpret_cast<USN_RECORD_V2*>(pRecord)->Reason : 
                     reinterpret_cast<USN_RECORD_V3*>(pRecord)->Reason;
                 
+                // 精准排查日志：感知层 (简单粗暴)
+                {
+                    WORD fileNameLength = (header->MajorVersion == 2) ?
+                        reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameLength :
+                        reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameLength;
+                    WORD fileNameOffset = (header->MajorVersion == 2) ?
+                        reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameOffset :
+                        reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameOffset;
+                    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(pRecord + fileNameOffset), fileNameLength / 2);
+                    if (name.contains("ArcMeta.Library_")) {
+                        qDebug() << "[USN Raw] 感知到目标路径变化:" << name << "Reason:" << QString::number(reason, 16);
+                    }
+                }
+
                 if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE | USN_REASON_RENAME_NEW_NAME)) {
                     updateBatch.push_back(pRecord);
                 } else if (reason & USN_REASON_FILE_DELETE) {
