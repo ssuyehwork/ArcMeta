@@ -29,6 +29,7 @@ struct RuntimeMeta {
     bool isTrash;  // 2026-06-xx 状态标记：是否处于回收站
     bool isInvalid; // 2026-06-xx 物理校验：是否为第三方删除导致的失效数据
     bool isManaged; // 2026-06-xx 物理对标：标记该项是否已在数据库中登记
+    int ingestionStatus; // 2026-07-xx 状态标记：-1: 未知, 0: 待处理, 1: 已完成
     int width;      // 2026-07-xx 物理尺寸：宽 (像素)
     int height;     // 2026-07-xx 物理尺寸：高 (像素)
     std::wstring originalPath; // 2026-06-xx 路径记忆：用于回收站还原
@@ -42,7 +43,7 @@ struct RuntimeMeta {
 
     std::vector<PaletteEntry> palettes;
 
-    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), width(0), height(0), ctime(0), mtime(0), atime(0), fileSize(0) {}
+    RuntimeMeta() : rating(0), pinned(false), encrypted(false), isFolder(false), isTrash(false), isInvalid(false), isManaged(false), ingestionStatus(-1), width(0), height(0), ctime(0), mtime(0), atime(0), fileSize(0) {}
 
     /**
      * @brief 判定是否有用户操作过的信息，作为“已录入/受控”状态的感应逻辑
@@ -130,6 +131,17 @@ public:
      * 2026-07-xx 按照 Plan-116：UI 层主动调用的批量注册将受到严格拦截
      */
     void registerItemsAsync(const QStringList& paths, bool authorized = false);
+
+    /**
+     * @brief 登记项目（待处理状态 0）
+     * 2026-07-xx 按照 Plan-117：标记项目并递归标记子项
+     */
+    void markAsRegistered(const std::wstring& path);
+
+    /**
+     * @brief 标记项目已完成解析（完成状态 1）
+     */
+    void markAsIngested(const std::wstring& path);
 
     void ensureActivated(const std::wstring& nPath);
 

@@ -21,6 +21,7 @@
 #include "MetadataManager.h"
 #include "MetadataDefs.h"
 #include "DatabaseManager.h"
+#include "../core/AppConfig.h"
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 #include "../ui/UiHelper.h"
@@ -208,6 +209,7 @@ void MetadataManager::initFromScchMode() {
                 rm.isInvalid = sqlite3_column_int(stmt, 15) != 0;
                 rm.width = sqlite3_column_int(stmt, 16);
                 rm.height = sqlite3_column_int(stmt, 17);
+                rm.ingestionStatus = sqlite3_column_int(stmt, 18);
                 if (paletteBlob && paletteSize > 0) {
                     QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
                     QJsonDocument doc = QJsonDocument::fromJson(ba);
@@ -348,17 +350,82 @@ void MetadataManager::notifyFullUIRebuild() {
 
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     std::wstring nPath = normalizePath(path);
+
+    // 2026-07-xx 按照 Plan-117：采用登记->解析->完成的闭环逻辑
+    // 为了性能，registerItem 内部不再调用 markAsRegistered 以免产生多余的独立事务
+
     // 1. 激活项目 (获取 FID/FRN 等物理属性)
     ensureActivated(nPath);
+
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_cache[nPath].ingestionStatus = 0; // 先登记
+    }
+
     // 2. 提取图像尺寸 (Plan-29)
     tryExtractDimensions(nPath);
-    // 3. 物理同步 (存入数据库)
-    // 2026-07-xx 按照 Plan-116：透传授权状态，非授权请求禁止创建新记录
-    persistAsync(nPath, false, authorized);
+
     // 4. 视觉预热 (提取颜色)
     tryExtractColor(nPath);
+
+    // 标记完成
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_cache[nPath].ingestionStatus = 1;
+    }
+
+    // 3. 物理同步 (存入数据库) - 合并为一个持久化动作
+    // 2026-07-xx 按照 Plan-116：透传授权状态，非授权请求禁止创建新记录
+    persistAsync(nPath, false, authorized);
+
     // 5. 通知 UI 刷新该路径
     notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+}
+
+void MetadataManager::markAsRegistered(const std::wstring& path) {
+    std::wstring nPath = normalizePath(path);
+
+    // 1. 识别该路径归属的数据库
+    std::wstring volSerial = getVolumeSerialNumber(nPath);
+    QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
+    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+    if (!db) return;
+
+    // 2. 收集所有待登记路径（递归）
+    std::vector<std::wstring> pathsToRegister;
+    pathsToRegister.push_back(nPath);
+
+    QFileInfo info(QString::fromStdWString(nPath));
+    if (info.isDir()) {
+        QDirIterator it(info.absoluteFilePath(), QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            pathsToRegister.push_back(normalizePath(it.next().toStdWString()));
+        }
+    }
+
+    // 3. 开启批量事务处理
+    SqlTransaction trans(db);
+    for (const auto& p : pathsToRegister) {
+        ensureActivated(p);
+        {
+            std::unique_lock<std::shared_mutex> lock(m_mutex);
+            m_cache[p].ingestionStatus = 0;
+        }
+        // 这里的 persistAsync 会使用已经开启的事务
+        persistAsync(p, false, true);
+    }
+    trans.commit();
+}
+
+void MetadataManager::markAsIngested(const std::wstring& path) {
+    std::wstring nPath = normalizePath(path);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        if (m_cache.count(nPath)) {
+            m_cache[nPath].ingestionStatus = 1;
+        }
+    }
+    persistAsync(nPath, false, true);
 }
 
 void MetadataManager::registerItemsAsync(const QStringList& paths, bool authorized) {
@@ -950,12 +1017,13 @@ bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
     if (volSerial == L"UNKNOWN") return false;
 
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-    QString relPath = AppConfig::instance().getValue(key, "").toString();
+    QString relPath = ::ArcMeta::AppConfig::instance().getValue(key, QVariant("")).toString();
     if (relPath.isEmpty()) return false;
 
     // 拼装托管库绝对路径并进行前缀匹配
-    QString drive = QString::fromWCharArray(&path[0], 1) + ":";
-    QString managedAbs = QDir::toNativeSeparators(drive + relPath).toLower();
+    QString driveRoot = QString::fromWCharArray(&path[0], 1);
+    driveRoot.append(":");
+    QString managedAbs = QDir::toNativeSeparators(driveRoot + relPath).toLower();
     QString qPath = QString::fromStdWString(path).toLower();
 
     // 必须包含在托管库目录下 (StartsWith 且确保边界)
@@ -1288,7 +1356,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     }
 
     sqlite3_stmt* stmt;
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
@@ -1318,6 +1386,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         sqlite3_bind_int(stmt, 16, rMeta.isInvalid ? 1 : 0);
         sqlite3_bind_int(stmt, 17, rMeta.width);
         sqlite3_bind_int(stmt, 18, rMeta.height);
+        sqlite3_bind_int(stmt, 19, rMeta.ingestionStatus);
 
         if (sqlite3_step(stmt) == SQLITE_DONE) {
             if (isNew) {
