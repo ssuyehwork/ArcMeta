@@ -57,8 +57,38 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
     QString qPath = MftReader::instance().getFullPath(idx);
     qDebug() << "[DIAG] getFullPath 返回:" << qPath;  // 新增 
     std::wstring fullPath = qPath.toStdWString();
-    std::wstring managedFolder;
     
+    // 2026-07-xx 按照 Plan-118：物理感应逻辑。检测是否在根目录下创建了符合命名的托管库文件夹
+    QFileInfo info(qPath);
+    if (info.isDir() && info.dir().isRoot()) {
+        QString name = info.fileName();
+        if (name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+            qDebug() << "[AutoImport] 物理感应：识别到新托管库创建" << qPath;
+
+            std::string fid = MetadataManager::instance().getFileIdSync(fullPath);
+            if (!fid.empty()) {
+                // 防重检查
+                auto existingCats = CategoryRepo::getAll();
+                bool exists = false;
+                for (const auto& c : existingCats) { if (c.folderFid == fid) { exists = true; break; } }
+
+                if (!exists) {
+                    Category cat;
+                    cat.name = name.toStdWString();
+                    cat.folderFid = fid;
+                    cat.pinned = true; // 托管库默认置顶常驻
+
+                    if (CategoryRepo::add(cat)) {
+                        qDebug() << "[AutoImport] 成功同步创建侧边栏分类: " << name;
+                        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                    }
+                }
+            }
+            return; // 库文件夹创建不触发入库流程
+        }
+    }
+
+    std::wstring managedFolder;
     bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
     qDebug() << "[DIAG] checkAndGetManagedPath 结果:" << isManaged  
               << "managedFolder=" << QString::fromStdWString(managedFolder);  // 新增 
@@ -68,32 +98,6 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
         m_pendingPaths.push_back(fullPath);
         
         QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
-    } else {
-        // 2026-07-xx 按照 Plan-118：物理感应逻辑。检测是否在根目录下创建了符合命名的托管库文件夹
-        QString qPathStr = QString::fromStdWString(fullPath);
-        QFileInfo info(qPathStr);
-        if (info.isDir()) {
-            QDir parentDir = info.dir();
-            if (parentDir.isRoot()) {
-                QString name = info.fileName();
-                if (name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
-                    qDebug() << "[AutoImport] 物理感应：识别到新托管库创建" << qPathStr;
-                    
-                    std::string fid = ::ArcMeta::MetadataManager::instance().getFileIdSync(fullPath);
-                    if (!fid.empty()) {
-                        ::ArcMeta::Category cat;
-                        cat.name = name.toStdWString();
-                        cat.folderFid = fid;
-                        cat.pinned = true; // 托管库默认置顶常驻
-                        
-                        if (::ArcMeta::CategoryRepo::add(cat)) {
-                            qDebug() << "[AutoImport] 成功同步创建侧边栏分类: " << name;
-                            ::ArcMeta::MetadataManager::instance().notifyUI(::ArcMeta::MetadataManager::RefreshLevel::FullRebuild);
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -107,8 +111,42 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
     QString qPath = MftReader::instance().getFullPath(idx);
     qDebug() << "[DIAG] getFullPath 返回:" << qPath;  // 新增 
     std::wstring fullPath = qPath.toStdWString();
-    std::wstring managedFolder;
 
+    // 2026-07-xx 按照 Plan-118：物理 -> 逻辑同步增强
+    // 判定是否为库文件夹变动：1. 是文件夹；2. 位于根目录；3. 名称匹配库规范
+    QFileInfo info(qPath);
+    if (info.isDir() && info.dir().isRoot()) {
+        QString name = info.fileName();
+        if (name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+            std::string fid = MetadataManager::instance().getFileIdSync(fullPath);
+            if (!fid.empty()) {
+                // 1. 尝试作为重命名更新 (旧库改名)
+                if (CategoryRepo::updateNameByFid(fid, name.toStdWString())) {
+                    qDebug() << "[AutoImport] 物理驱动重命名同步成功: FID =" << QString::fromStdString(fid)
+                             << "NewName =" << name;
+                    return;
+                }
+
+                // 2. 若更新未命中，尝试作为新库同步 (新建文件夹重命名为库名)
+                auto existingCats = CategoryRepo::getAll();
+                bool exists = false;
+                for (const auto& c : existingCats) { if (c.folderFid == fid) { exists = true; break; } }
+                if (!exists) {
+                    Category cat;
+                    cat.name = name.toStdWString();
+                    cat.folderFid = fid;
+                    cat.pinned = true;
+                    if (CategoryRepo::add(cat)) {
+                        qDebug() << "[AutoImport] 通过物理重命名感应到新库并创建分类: " << name;
+                        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                    }
+                }
+            }
+            return; // 库文件夹变动不触发入库流程
+        }
+    }
+
+    std::wstring managedFolder;
     bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
     qDebug() << "[DIAG] checkAndGetManagedPath 结果:" << isManaged  
               << "managedFolder=" << QString::fromStdWString(managedFolder);  // 新增 
@@ -139,6 +177,68 @@ void AutoImportManager::recordRecentVisitedFolder(const std::wstring& path) {
     while (list.size() > 14) list.removeLast();
 
     AppConfig::instance().setValue(key, list);
+}
+
+void AutoImportManager::scanExistingLibraries() {
+    qDebug() << "[AutoImport] 开始扫描物理存量托管库...";
+
+    // 2026-07-xx 物理对齐：在执行 MFT 搜索前，必须先同步当前在线磁盘状态
+    // 理由：MftReader::search 内部会校验 m_drive_active_mask，若未同步则所有搜索结果都会被过滤
+    QStringList drives;
+    for (const auto& d : QDir::drives()) drives << d.absolutePath();
+    MftReader::instance().updateActiveDrives(drives);
+
+    // 1. 利用 MftReader 索引快速定位符合 ArcMeta.Library_ 命名的文件夹
+    // 此处使用空 query 触发全量搜索，配合 includeDollar=false 优化性能
+    auto keys = MftReader::instance().search("ArcMeta.Library_", false, false);
+
+    int addedCount = 0;
+    auto existingCats = CategoryRepo::getAll();
+
+    for (uint64_t key : keys) {
+        int idx = MftReader::instance().getIndexByKey(key);
+        if (idx < 0) continue;
+
+        if (!MftReader::instance().isDirectory(idx)) continue;
+
+        QString fullPath = MftReader::instance().getFullPath(idx);
+        QFileInfo info(fullPath);
+
+        // 核心红线：仅识别位于根目录下的托管库
+        if (info.dir().isRoot()) {
+            QString name = info.fileName();
+            std::string fid = MetadataManager::instance().getFileIdSync(fullPath.toStdWString());
+            if (fid.empty()) continue;
+
+            // 检查逻辑分类中是否已绑定该物理 FID
+            bool alreadyRegistered = false;
+            for (const auto& cat : existingCats) {
+                if (cat.folderFid == fid) {
+                    alreadyRegistered = true;
+                    break;
+                }
+            }
+
+            if (!alreadyRegistered) {
+                qDebug() << "[AutoImport] 识别到存量库需同步:" << name << "FID =" << QString::fromStdString(fid);
+                Category cat;
+                cat.name = name.toStdWString();
+                cat.folderFid = fid;
+                cat.pinned = true; // 托管库默认置顶
+
+                if (CategoryRepo::add(cat)) {
+                    addedCount++;
+                }
+            }
+        }
+    }
+
+    if (addedCount > 0) {
+        qDebug() << "[AutoImport] 存量扫描同步完成，共新增分类:" << addedCount;
+        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+    } else {
+        qDebug() << "[AutoImport] 未发现新增存量库";
+    }
 }
 
 QStringList AutoImportManager::getRecentVisitedFolders(const std::wstring& volSerial) {

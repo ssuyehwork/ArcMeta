@@ -125,8 +125,13 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     });
 
     // 2026-06-xx 物理修复：监听元数据变更信号，确保删除项或标记状态后计数实时更新
-    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& /*path*/) {
-        requestRefresh();
+    // 2026-07-xx 按照 Plan-118：支持 __RELOAD_ALL__ 信号触发侧边栏树结构重建
+    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
+        if (path == "__RELOAD_ALL__") {
+            requestRefresh(true);
+        } else {
+            requestRefresh(false);
+        }
     });
 }
 
