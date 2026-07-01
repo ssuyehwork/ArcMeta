@@ -64,10 +64,10 @@ void CoreController::startSystem() {
                 }
             }
             
-            QMetaObject::invokeMethod(this, [this, startTime]() {
-                // 2026-08-xx 物理同步：初始化完成后执行一次全量物理库对账
-                AutoImportManager::instance().syncAllManagedLibraries();
+            // 2026-08-xx 物理同步：初始化完成后执行一次全量物理库对账 (在后台线程执行，避免阻塞 UI)
+            AutoImportManager::instance().syncAllManagedLibraries();
 
+            QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);
                 qDebug() << "[Core] !!! SQLite 内存模式初始化就绪，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
                 emit initializationFinished();

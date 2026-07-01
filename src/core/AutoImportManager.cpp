@@ -258,6 +258,11 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
     QDir dir(QString::fromStdWString(rootPath));
     if (!dir.exists()) return;
 
+    // 2026-08-xx 性能优化：抑制信号，开启批量事务
+    MetadataManager::instance().setInternalOperating(true);
+    sqlite3* db = DatabaseManager::instance().getGlobalDb();
+    if (db) sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+
     int rootCatId = 0;
     std::string rootFid;
     std::wstring rootFrnStr;
@@ -338,6 +343,11 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
     };
 
     syncDir(QString::fromStdWString(rootPath), rootCatId);
+
+    // 2026-08-xx 性能优化：提交事务并恢复信号，最后执行一次全量 UI 重建
+    if (db) sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
+    MetadataManager::instance().setInternalOperating(false);
+    MetadataManager::instance().notifyFullUIRebuild();
 }
 
 } // namespace ArcMeta
