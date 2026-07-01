@@ -2,6 +2,7 @@
 #include "../meta/MetadataManager.h"
 #include <QDebug>
 #include <QFileInfo>
+#include <QDir>
 
 namespace ArcMeta {
 

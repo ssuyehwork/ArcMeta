@@ -7,6 +7,7 @@
 #include <QThreadPool>
 #include <QDebug>
 #include <QDateTime>
+#include <QDir>
 #include <QDirIterator>
 #include <QtConcurrent>
 #include <unordered_set>
