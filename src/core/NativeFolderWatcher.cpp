@@ -65,6 +65,8 @@ void NativeFolderWatcher::addWatch(const std::wstring& path) {
     }
 
     m_watches[path] = item;
+    qDebug() << "[Watcher] IOCP 关联成功，句柄:" << hDir;
+
     requestChanges(item);
     qDebug() << "[Watcher] 监控已就绪:" << QString::fromStdWString(path);
 }

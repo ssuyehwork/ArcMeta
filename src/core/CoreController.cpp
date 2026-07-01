@@ -42,21 +42,20 @@ void CoreController::startSystem() {
             MetadataManager::instance().initFromScchMode();
 
             // 启动原生监控服务
-            // 2026-07-xx 按照 Plan-117：初始化完成后启动对所有盘符托管库的监控
+            // 2026-07-xx 按照 Plan-117/118：初始化完成后，使用统一识别算法启动监控
             const auto drives = QDir::drives();
             for (const QFileInfo& d : drives) {
-                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(d.absolutePath().toStdWString());
+                std::wstring wPath = d.absolutePath().toStdWString();
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wPath);
+                QString letter = d.absolutePath().left(1).toUpper();
+
                 if (volSerial != L"UNKNOWN") {
-                    QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-                    QString relPath = ::ArcMeta::AppConfig::instance().getValue(key, QVariant("")).toString();
-                    if (!relPath.isEmpty()) {
-                        QString driveRoot = QString(d.absolutePath().at(0).toUpper());
-                        driveRoot.append(":");
-                        QString managedAbs = QDir::toNativeSeparators(driveRoot + relPath);
-                        qDebug() << "[Core] 识别到托管库，开启监控:" << managedAbs;
-                        NativeFolderWatcher::instance().addWatch(managedAbs.toStdWString());
+                    std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
+                    if (!managedAbsW.empty()) {
+                        qDebug() << "[Core] 识别到托管库 (或兜底路径)，开启监控:" << QString::fromStdWString(managedAbsW);
+                        NativeFolderWatcher::instance().addWatch(managedAbsW);
                     } else {
-                        qDebug() << "[Core] 该盘符未配置托管库，跳过监控:" << d.absolutePath();
+                        qDebug() << "[Core] 盘符" << letter << "未配置且无默认托管库，跳过监控";
                     }
                 }
             }
