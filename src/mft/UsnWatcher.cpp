@@ -1,5 +1,6 @@
 #include "UsnWatcher.h"
 #include "MftReader.h"
+#include "../core/AutoImportManager.h"
 #include <QDebug>
 #include <winioctl.h>
 
@@ -75,11 +76,6 @@ void UsnWatcher::run() {
     while (!m_stopRequested.load()) {
         BOOL success = DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL);
 
-        static int loopCount = 0;
-        if (++loopCount % 100 == 0) {
-            qDebug() << "[UsnWatcher Post] 正在循环读取卷:" << QString::fromStdWString(m_volume) << "Success:" << success << "Bytes:" << bytesReturned << "NextStartUsn:" << readData.StartUsn;
-        }
-
         if (!success) {
             DWORD err = GetLastError();
             qDebug() << "[UsnWatcher Post] FSCTL_READ_USN_JOURNAL 失败! 错误码:" << err << "卷:" << QString::fromStdWString(m_volume);
@@ -101,8 +97,6 @@ void UsnWatcher::run() {
             continue;
         }
 
-        qDebug() << "[UsnWatcher Post] 成功获取数据量:" << bytesReturned << "来自卷:" << QString::fromStdWString(m_volume);
-
         uint8_t* pRecord = buffer.get() + sizeof(USN);
         uint8_t* pEnd = buffer.get() + bytesReturned;
 
@@ -115,30 +109,38 @@ void UsnWatcher::run() {
                 uint32_t reason = (header->MajorVersion == 2) ? 
                     reinterpret_cast<USN_RECORD_V2*>(pRecord)->Reason : 
                     reinterpret_cast<USN_RECORD_V3*>(pRecord)->Reason;
-                
-                // 精准排查日志：感知层 (简单粗暴)
-                {
-                    WORD fileNameLength = (header->MajorVersion == 2) ?
-                        reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameLength :
-                        reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameLength;
-                    WORD fileNameOffset = (header->MajorVersion == 2) ?
-                        reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameOffset :
-                        reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameOffset;
-                    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(pRecord + fileNameOffset), fileNameLength / 2);
-
-                    // 粗暴日志：输出前 10 条任何文件的变化，证明解析在跑
-                    static int totalRecordCount = 0;
-                    if (++totalRecordCount <= 10) {
-                        qDebug() << "[USN Raw] (DEBUG-SAMPLE) 发现记录:" << name << "Reason:" << QString::number(reason, 16);
-                    }
-
-                    // 修正：不区分大小写，确保 z:\ArcMeta.library_Z 等路径也能被捕获
-                    if (name.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
-                        qDebug() << "[USN Raw] 感知到目标路径变化:" << name << "Reason:" << QString::number(reason, 16);
-                    }
-                }
 
                 if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE | USN_REASON_RENAME_NEW_NAME)) {
+                    // 2026-07-xx 按照用户方案：绕开 MftReader 索引，直接尝试解析路径并入库
+                    uint64_t frn = (header->MajorVersion == 2) ?
+                        reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileReferenceNumber :
+                        *reinterpret_cast<uint64_t*>(&reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileReferenceNumber);
+
+                    std::wstring fullPath;
+                    HANDLE hHint = CreateFileW((m_volume + L"\\").c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+                    if (hHint != INVALID_HANDLE_VALUE) {
+                        FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
+                        id.FileId.QuadPart = frn;
+                        HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
+                        if (hFile != INVALID_HANDLE_VALUE) {
+                            wchar_t pathBuf[MAX_PATH];
+                            if (GetFinalPathNameByHandleW(hFile, pathBuf, MAX_PATH, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS)) {
+                                fullPath = pathBuf;
+                                if (fullPath.find(L"\\\\?\\") == 0) fullPath = fullPath.substr(4);
+                            }
+                            CloseHandle(hFile);
+                        }
+                        CloseHandle(hHint);
+                    }
+
+                    if (!fullPath.empty()) {
+                        std::wstring managed;
+                        if (AutoImportManager::instance().checkAndGetManagedPath(fullPath, managed)) {
+                            qDebug() << "[UsnWatcher] 检测到库内变动，直接入库:" << QString::fromStdWString(fullPath);
+                            AutoImportManager::instance().registerItemDirectly(fullPath);
+                        }
+                    }
+
                     updateBatch.push_back(pRecord);
                 } else if (reason & USN_REASON_FILE_DELETE) {
                     uint64_t frn = (header->MajorVersion == 2) ? 
