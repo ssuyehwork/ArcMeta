@@ -147,6 +147,14 @@ int main(int argc, char *argv[]) {
     auto& aim = ArcMeta::AutoImportManager::instance();
     qDebug() << "[DIAG-MAIN] AutoImportManager 实例地址:" << &aim;
     aim.startListening();
+
+    // 2026-07-xx 按照 Plan-118：启动时扫描存量托管库
+    // 注意：由于 MftReader::buildIndex 在 CoreController 异步执行，
+    // 这里需要连接初始化完成信号来执行扫描，确保 MFT 数据已就绪。
+    QObject::connect(&ArcMeta::CoreController::instance(), &ArcMeta::CoreController::initializationFinished, [&aim]() {
+        aim.scanExistingLibraries();
+    });
+
     qDebug() << "[DIAG-MAIN] startListening 调用已返回";
 
     qDebug() << "[PERF] main 函数逻辑执行完毕，进入事件循环。总耗时:" << (QDateTime::currentMSecsSinceEpoch() - mainStartTime) << "ms";

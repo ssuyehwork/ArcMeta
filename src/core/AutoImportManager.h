@@ -29,6 +29,11 @@ public:
      */
     static std::wstring getManagedLibraryPath(const std::wstring& pathOrVolSerial);
 
+    /**
+     * @brief 2026-07-xx 按照 Plan-118：扫描磁盘上已存在的托管库文件夹并同步至侧边栏
+     */
+    void scanExistingLibraries();
+
 private slots:
     // 订阅 MftReader 发现的新增条目
     void onEntryAdded(uint64_t key);

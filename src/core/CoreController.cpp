@@ -3,6 +3,7 @@
 #include "AppConfig.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
+#include "../mft/MftReader.h"
 #include "../ui/Logger.h"
 #include <QThreadPool>
 #include <QDebug>
@@ -40,6 +41,9 @@ void CoreController::startSystem() {
             
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
+
+            // 2026-07-xx 按照 Plan-118：初始化时载入 MFT 缓存
+            MftReader::instance().loadFromCache();
 
             // 启动原生监控服务
             // 2026-07-xx 按照 Plan-117/118：初始化完成后，使用统一识别算法启动监控
