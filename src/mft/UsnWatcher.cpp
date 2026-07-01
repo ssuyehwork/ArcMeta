@@ -9,6 +9,7 @@ namespace ArcMeta {
 UsnWatcher::UsnWatcher(const std::wstring& volume, uint64_t startUsn, QObject* parent)
     : QThread(parent), m_volume(volume), m_lastUsn(startUsn), m_stopRequested(false) {
     
+    qCritical() << "[USN-V5-CONSTRUCT] 构造实例，卷:" << QString::fromStdWString(m_volume) << "StartUsn:" << startUsn;
     std::wstring devPath = L"\\\\.\\" + m_volume;
     if (devPath.back() == L'\\') devPath.pop_back();
 
@@ -41,18 +42,29 @@ void UsnWatcher::stop() {
 }
 
 void UsnWatcher::run() {
+    qCritical() << "[USN-V5-DIAG] 线程正在进入 run(), 监控卷:" << QString::fromStdWString(m_volume);
+
     if (m_hVolume == INVALID_HANDLE_VALUE) {
-        qDebug() << "[UsnWatcher] 卷句柄无效，线程退出:" << QString::fromStdWString(m_volume);
-        return;
+        std::wstring devPath = L"\\\\.\\" + m_volume;
+        if (devPath.back() == L'\\') devPath.pop_back();
+        m_hVolume = CreateFileW(devPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+
+        if (m_hVolume == INVALID_HANDLE_VALUE) {
+            qCritical() << "[USN-V5-ERROR] 无法打开卷句柄! 错误码:" << GetLastError() << "路径:" << QString::fromStdWString(devPath);
+            return;
+        }
     }
 
-    qDebug() << "[UsnWatcher] 线程已启动，正在查询 Journal:" << QString::fromStdWString(m_volume);
+    UINT dType = GetDriveTypeW((m_volume + L"\\").c_str());
+    qCritical() << "[USN-V5-TYPE] 卷属性诊断 -> DriveType:" << dType << (dType == 4 ? "(网络盘-不支持USN)" : "");
+
+    qCritical() << "[USN-V5-QUERY] 正在查询 Journal:" << QString::fromStdWString(m_volume);
 
     // 1. 获取 Journal ID
     USN_JOURNAL_DATA_V0 journalData;
     DWORD bytesReturned;
     if (!DeviceIoControl(m_hVolume, FSCTL_QUERY_USN_JOURNAL, NULL, 0, &journalData, sizeof(journalData), &bytesReturned, NULL)) {
-        qDebug() << "[UsnWatcher] FSCTL_QUERY_USN_JOURNAL 失败，错误码:" << GetLastError() << "卷:" << QString::fromStdWString(m_volume);
+        qCritical() << "[USN-V5-ERROR] FSCTL_QUERY_USN_JOURNAL 失败，错误码:" << GetLastError() << "卷:" << QString::fromStdWString(m_volume);
         return;
     }
 
@@ -110,6 +122,14 @@ void UsnWatcher::run() {
                     reinterpret_cast<USN_RECORD_V2*>(pRecord)->Reason : 
                     reinterpret_cast<USN_RECORD_V3*>(pRecord)->Reason;
 
+                WORD nameLen = (header->MajorVersion == 2) ? reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameLength : reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameLength;
+                WORD nameOff = (header->MajorVersion == 2) ? reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameOffset : reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameOffset;
+                QString rawName = QString::fromUtf16(reinterpret_cast<const char16_t*>(pRecord + nameOff), nameLen / 2);
+
+                if (rawName.contains("ArcMeta", Qt::CaseInsensitive)) {
+                    qCritical() << "[USN-V5-RAW] 原始记录匹配:" << rawName << "Reason:" << QString::number(reason, 16) << "卷:" << QString::fromStdWString(m_volume);
+                }
+
                 if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE | USN_REASON_RENAME_NEW_NAME)) {
                     // 2026-07-xx 按照用户方案：绕开 MftReader 索引，直接尝试解析路径并入库
                     uint64_t frn = (header->MajorVersion == 2) ?
@@ -135,9 +155,16 @@ void UsnWatcher::run() {
 
                     if (!fullPath.empty()) {
                         std::wstring managed;
-                        if (AutoImportManager::instance().checkAndGetManagedPath(fullPath, managed)) {
-                            qDebug() << "[UsnWatcher] 检测到库内变动，直接入库:" << QString::fromStdWString(fullPath);
+                        bool isManaged = AutoImportManager::instance().checkAndGetManagedPath(fullPath, managed);
+                        if (isManaged || fullPath.find(L"ArcMeta") != std::wstring::npos) {
+                            qCritical() << "[USN-V5-PATH] 解析路径成功:" << QString::fromStdWString(fullPath) << "isManaged:" << isManaged;
+                        }
+                        if (isManaged) {
                             AutoImportManager::instance().registerItemDirectly(fullPath);
+                        }
+                    } else {
+                        if (rawName.contains("ArcMeta", Qt::CaseInsensitive)) {
+                            qCritical() << "[USN-V5-PATH-FAIL] 匹配关键词但路径解析失败!!" << rawName;
                         }
                     }
 

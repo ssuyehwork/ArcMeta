@@ -96,6 +96,7 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
 
 void AutoImportManager::registerItemDirectly(const std::wstring& path) {
     if (path.empty()) return;
+    qDebug() << "[AutoImport] 接收到直接入库请求:" << QString::fromStdWString(path);
 
     std::lock_guard<std::mutex> lock(m_queueMutex);
     m_pendingPaths.push_back(path);

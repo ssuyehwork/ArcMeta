@@ -204,6 +204,7 @@ bool MftReader::isDriveIndexed(const QString& drive) {
 }
 
 void MftReader::buildIndex(const QStringList& drives) {
+    qCritical() << "[MFT-V5-ENTRY-ACTUAL] buildIndex 启动，盘符:" << drives;
     updateActiveDrives(drives);
 
     std::vector<std::wstring> toScan;
@@ -240,9 +241,12 @@ void MftReader::buildIndex(const QStringList& drives) {
     std::vector<ScannedDrive> scannedResults(toScan.size());
     std::vector<int> scanIndices((int)toScan.size());
     std::iota(scanIndices.begin(), scanIndices.end(), 0);
+    qCritical() << "[MFT-V5-SCAN] 准备并行扫描卷:" << toScan.size() << "个";
     std::for_each((std::execution::par), scanIndices.begin(), scanIndices.end(), [&](int i) {
         scannedResults[i].volume = toScan[i];
+        qCritical() << "[MFT-V5-SCAN-START] 线程启动扫描卷:" << QString::fromStdWString(toScan[i]);
         scannedResults[i].success = loadMftDirect(toScan[i], scannedResults[i].res);
+        qCritical() << "[MFT-V5-SCAN-END] 卷扫描完成:" << QString::fromStdWString(toScan[i]) << "Success:" << scannedResults[i].success;
     });
 
     QWriteLocker lock(&m_dataLock);
@@ -262,7 +266,7 @@ void MftReader::buildIndex(const QStringList& drives) {
         mergeDriveResult(sr.volume, sr.res, dIdx);
         saveDriveToCacheInternal(dIdx);
         
-        qDebug() << "[MftReader] 为卷创建 UsnWatcher:" << QString::fromStdWString(sr.volume) << "NextUsn:" << sr.res.nextUsn;
+        qCritical() << "[MFT-V5-THREAD] 成功创建监控线程，卷:" << QString::fromStdWString(sr.volume);
         auto* w = new UsnWatcher(sr.volume, sr.res.nextUsn, nullptr);
         m_watchers.push_back(w);
         newWatchers.push_back(w);
@@ -399,7 +403,7 @@ bool MftReader::loadFromCache() {
     // 2026-05-29 物理修复：移除此处冗余的 lock 声明（父作用域已持有 lock），消除 C4456 警告
     for (const auto& drive : m_drive_list) {
         uint64_t lastUsn = m_next_usns[drive];
-        qDebug() << "[MftReader] 从缓存恢复监控链:" << QString::fromStdWString(drive) << "LastUsn:" << lastUsn;
+        qCritical() << "[MFT-V5-RECOVERY] 从缓存恢复监控链，卷:" << QString::fromStdWString(drive) << "LastUsn:" << lastUsn;
         auto* w = new UsnWatcher(drive, lastUsn, nullptr);
         m_watchers.push_back(w);
         w->start();
@@ -972,8 +976,8 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
     
     // 如果该 FID 之前关联在其他路径，或者该路径现在被新 FID 占用，则判定为变动
     auto it = m_frn_to_idx.find(compositeKey);
-    if (name.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
-        qDebug() << "[MftReader] 准备处理目标路径:" << name << (it != m_frn_to_idx.end() ? "(更新)" : "(新增)");
+    if (name.contains("ArcMeta", Qt::CaseInsensitive)) {
+        qCritical() << "[MFT-V5-SINGLE] 正在处理目标变动:" << name << (it != m_frn_to_idx.end() ? "(更新)" : "(新增)");
     }
     if (it != m_frn_to_idx.end()) {
         uint32_t idx = it->second;
@@ -1126,8 +1130,8 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
         uint64_t compositeKey = makeKey(dIdx, frn);
         
         auto it = m_frn_to_idx.find(compositeKey);
-        if (name.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
-            qDebug() << "[MftReader Batch] 准备处理目标路径:" << name << (it != m_frn_to_idx.end() ? "(更新)" : "(新增)");
+        if (name.contains("ArcMeta", Qt::CaseInsensitive)) {
+            qCritical() << "[MFT-V5-BATCH] 正在处理目标变动:" << name << (it != m_frn_to_idx.end() ? "(更新)" : "(新增)");
         }
         if (it != m_frn_to_idx.end()) {
             uint32_t idx = it->second;
