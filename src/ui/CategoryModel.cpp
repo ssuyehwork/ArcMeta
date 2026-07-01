@@ -4,6 +4,8 @@
 #include "UiHelper.h"
 #include <QMimeData>
 #include <QFileInfo>
+#include <QFile>
+#include <QDir>
 #include <QFont>
 #include <QTimer>
 #include <QSet>
@@ -250,6 +252,25 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
             auto categories = CategoryRepo::getAll();
             for (auto& cat : categories) {
                 if (cat.id == id) {
+                    // 2026-08-xx 物理同步：内促外变
+                    if (!cat.physicalPath.empty()) {
+                        QString oldPath = QString::fromStdWString(cat.physicalPath);
+                        QFileInfo oldInfo(oldPath);
+                        
+                        // 根目录保护：不允许在 UI 重命名托管库根目录
+                        if (oldInfo.fileName().startsWith("ArcMeta.Library_") && cat.parentId == 0) {
+                            return false; 
+                        }
+
+                        QString newPath = QDir::toNativeSeparators(oldInfo.absoluteDir().absoluteFilePath(newName));
+                        if (oldPath != newPath) {
+                            if (!QFile::rename(oldPath, newPath)) {
+                                return false; // 物理失败，拦截逻辑修改
+                            }
+                            cat.physicalPath = newPath.toStdWString();
+                        }
+                    }
+
                     cat.name = newName.toStdWString();
                     CategoryRepo::update(cat);
                     break;

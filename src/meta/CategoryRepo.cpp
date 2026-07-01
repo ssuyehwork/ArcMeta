@@ -30,7 +30,7 @@ std::vector<Category> CategoryRepo::getAll() {
     if (!db) return results;
 
     sqlite3_stmt* stmt;
-    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint FROM categories WHERE id > 0 ORDER BY sort_order ASC";
+    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path FROM categories WHERE id > 0 ORDER BY sort_order ASC";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             Category c;
@@ -48,6 +48,9 @@ std::vector<Category> CategoryRepo::getAll() {
             c.encrypted = sqlite3_column_int(stmt, 7) != 0;
             const wchar_t* hint = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 8));
             if (hint) c.encryptHint = hint;
+            c.physicalFrn = sqlite3_column_int64(stmt, 9);
+            const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 10));
+            if (wpath) c.physicalPath = wpath;
             results.push_back(c);
         }
         sqlite3_finalize(stmt);
@@ -63,7 +66,7 @@ bool CategoryRepo::add(Category& cat) {
     }
 
     sqlite3_stmt* stmt;
-    const char* sql = "INSERT INTO categories (parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT INTO categories (parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
     if (rc == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, cat.parentId);
@@ -78,6 +81,8 @@ bool CategoryRepo::add(Category& cat) {
         sqlite3_bind_int(stmt, 6, cat.pinned ? 1 : 0);
         sqlite3_bind_int(stmt, 7, cat.encrypted ? 1 : 0);
         sqlite3_bind_text16(stmt, 8, cat.encryptHint.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 9, cat.physicalFrn);
+        sqlite3_bind_text16(stmt, 10, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
 
         rc = sqlite3_step(stmt);
         if (rc == SQLITE_DONE) {
@@ -236,12 +241,45 @@ bool CategoryRepo::permanentlyDelete(const std::string& fid) {
     return permanentlyDeleteBatch({fid});
 }
 
+Category CategoryRepo::getById(int id) {
+    sqlite3* db = DatabaseManager::instance().getGlobalDb();
+    Category c;
+    if (!db) return c;
+
+    sqlite3_stmt* stmt;
+    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path FROM categories WHERE id = ?";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, id);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            c.id = sqlite3_column_int(stmt, 0);
+            c.parentId = sqlite3_column_int(stmt, 1);
+            const wchar_t* wname = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
+            if (wname) c.name = wname;
+            const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 3));
+            if (color) c.color = color;
+            const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
+            QString tags = wtags ? QString::fromWCharArray(wtags) : "";
+            for (const auto& t : tags.split(",", Qt::SkipEmptyParts)) c.presetTags.push_back(t.toStdWString());
+            c.sortOrder = sqlite3_column_int(stmt, 5);
+            c.pinned = sqlite3_column_int(stmt, 6) != 0;
+            c.encrypted = sqlite3_column_int(stmt, 7) != 0;
+            const wchar_t* hint = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 8));
+            if (hint) c.encryptHint = hint;
+            c.physicalFrn = sqlite3_column_int64(stmt, 9);
+            const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 10));
+            if (wpath) c.physicalPath = wpath;
+        }
+        sqlite3_finalize(stmt);
+    }
+    return c;
+}
+
 bool CategoryRepo::update(const Category& cat) {
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return false;
 
     sqlite3_stmt* stmt;
-    const char* sql = "UPDATE categories SET parent_id=?, name=?, color=?, preset_tags=?, sort_order=?, pinned=?, encrypted=?, encrypt_hint=? WHERE id=?";
+    const char* sql = "UPDATE categories SET parent_id=?, name=?, color=?, preset_tags=?, sort_order=?, pinned=?, encrypted=?, encrypt_hint=?, physical_frn=?, physical_path=? WHERE id=?";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, cat.parentId);
         sqlite3_bind_text16(stmt, 2, cat.name.c_str(), -1, SQLITE_TRANSIENT);
@@ -253,8 +291,46 @@ bool CategoryRepo::update(const Category& cat) {
         sqlite3_bind_int(stmt, 6, cat.pinned ? 1 : 0);
         sqlite3_bind_int(stmt, 7, cat.encrypted ? 1 : 0);
         sqlite3_bind_text16(stmt, 8, cat.encryptHint.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 9, cat.id);
+        sqlite3_bind_int64(stmt, 9, cat.physicalFrn);
+        sqlite3_bind_text16(stmt, 10, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 11, cat.id);
 
+        bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+        sqlite3_finalize(stmt);
+        return ok;
+    }
+    return false;
+}
+
+int CategoryRepo::findByFrn(uint64_t frn) {
+    if (frn == 0) return 0;
+    sqlite3* db = DatabaseManager::instance().getGlobalDb();
+    if (!db) return 0;
+
+    sqlite3_stmt* stmt;
+    const char* sql = "SELECT id FROM categories WHERE physical_frn = ?";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(stmt, 1, frn);
+        int id = 0;
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            id = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+        return id;
+    }
+    return 0;
+}
+
+bool CategoryRepo::updatePhysicalMapping(int id, uint64_t frn, const std::wstring& path) {
+    sqlite3* db = DatabaseManager::instance().getGlobalDb();
+    if (!db) return false;
+
+    sqlite3_stmt* stmt;
+    const char* sql = "UPDATE categories SET physical_frn = ?, physical_path = ? WHERE id = ?";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(stmt, 1, frn);
+        sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 3, id);
         bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
         sqlite3_finalize(stmt);
         return ok;

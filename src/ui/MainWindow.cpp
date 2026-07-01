@@ -1591,6 +1591,24 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
     if (val == 1) {
         if (QDir().mkpath(managedPath)) {
             btn->setState(DriveButton::Active);
+            
+            // 2026-08-xx 物理同步：创建托管库时，同步注册逻辑分类并锚定 FRN
+            std::wstring wPath = QDir::toNativeSeparators(managedPath).toStdWString();
+            std::string fid;
+            std::wstring frnStr;
+            if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid, &frnStr)) {
+                try {
+                    Category cat;
+                    cat.name = QFileInfo(managedPath).fileName().toStdWString();
+                    cat.physicalFrn = std::stoull(frnStr, nullptr, 16);
+                    cat.physicalPath = wPath;
+                    cat.color = CategoryRepo::getDefaultColor();
+                    if (CategoryRepo::add(cat)) {
+                        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                    }
+                } catch (...) {}
+            }
+            
             ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建成功", 1500, Style::SuccessGreen);
         }
     } else if (val == 2) {

@@ -42,6 +42,7 @@ private:
     ~AutoImportManager() override;
 
     bool checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder);
+    void handleRecursiveIngestion(const std::wstring& rootPath);
 
     QTimer* m_debounceTimer = nullptr;
     std::vector<std::wstring> m_pendingPaths;

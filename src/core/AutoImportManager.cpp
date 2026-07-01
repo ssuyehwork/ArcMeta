@@ -31,13 +31,11 @@ AutoImportManager::~AutoImportManager() {
 }
 
 void AutoImportManager::startListening() {
-    qDebug() << "[DIAG] startListening 函数入口, m_isListening 当前值=" << m_isListening;  // 新增，必须在 if 判断之前
     if (m_isListening) return;
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
     // 2026-07-xx 按照 Plan-120：补全对 entryUpdated 的监听，以覆盖文件移动至 Library 的场景
     connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
     m_isListening = true;
-    qDebug() << "[DIAG] startListening 已执行，信号连接完成";  // 新增 
 }
 
 void AutoImportManager::stopListening() {
@@ -48,21 +46,21 @@ void AutoImportManager::stopListening() {
 }
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
-    qDebug() << "[DIAG] onEntryAdded 被触发, key=" << key;  // 新增 
     int idx = MftReader::instance().getIndexByKey(key);
-    qDebug() << "[DIAG] getIndexByKey 返回 idx=" << idx;  // 新增 
     if (idx < 0) return;
 
     QString qPath = MftReader::instance().getFullPath(idx);
-    qDebug() << "[DIAG] getFullPath 返回:" << qPath;  // 新增 
     std::wstring fullPath = qPath.toStdWString();
     std::wstring managedFolder;
     
     bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
-    qDebug() << "[DIAG] checkAndGetManagedPath 结果:" << isManaged  
-              << "managedFolder=" << QString::fromStdWString(managedFolder);  // 新增 
      
     if (isManaged) {
+        // 2026-08-xx 物理同步：如果是文件夹，启动递归入库同步
+        if (idx >= 0 && MftReader::instance().isDirectory(idx)) {
+            handleRecursiveIngestion(fullPath);
+        }
+
         std::lock_guard<std::mutex> lock(m_queueMutex);
         m_pendingPaths.push_back(fullPath);
         
@@ -72,21 +70,51 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
 
 void AutoImportManager::onEntryUpdated(uint64_t key) {
     // 2026-07-xx 按照 Plan-120：逻辑与 onEntryAdded 一致，处理跨目录移动
-    qDebug() << "[DIAG] onEntryUpdated 被触发, key=" << key;  // 新增 
     int idx = MftReader::instance().getIndexByKey(key);
-    qDebug() << "[DIAG] getIndexByKey 返回 idx=" << idx;  // 新增 
     if (idx < 0) return;
 
     QString qPath = MftReader::instance().getFullPath(idx);
-    qDebug() << "[DIAG] getFullPath 返回:" << qPath;  // 新增 
     std::wstring fullPath = qPath.toStdWString();
+    uint64_t frn = MftReader::instance().getFrn(idx);
+
+    // 2026-08-xx 物理同步：处理物理重命名驱动逻辑更新 (Outer -> Inner)
+    if (MftReader::instance().isDirectory(idx)) {
+        int catId = CategoryRepo::findByFrn(frn);
+        if (catId > 0) {
+            QString newName = QFileInfo(qPath).fileName();
+            Category cat = CategoryRepo::getById(catId);
+            if (cat.id > 0) {
+                // 根目录强制保护逻辑
+                if (cat.parentId == 0 && QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_")) {
+                    QString expectedName = "ArcMeta.Library_" + qPath.left(1).toUpper();
+                    if (newName != expectedName) {
+                        qDebug() << "[AutoImport] 检测到根目录违规重命名，强制恢复:" << newName << "->" << expectedName;
+                        QString parentDir = QFileInfo(qPath).absolutePath();
+                        QString oldPath = QDir::toNativeSeparators(QDir(parentDir).absoluteFilePath(expectedName));
+                        QFile::rename(qPath, oldPath);
+                        return; // 物理恢复后，等待下一轮 USN 信号
+                    }
+                }
+
+                if (QString::fromStdWString(cat.name) != newName) {
+                    qDebug() << "[AutoImport] 同步物理重命名到逻辑分类:" << newName;
+                    cat.name = newName.toStdWString();
+                    cat.physicalPath = fullPath;
+                    CategoryRepo::update(cat);
+                    MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                }
+            }
+        }
+    }
+
     std::wstring managedFolder;
-
     bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
-    qDebug() << "[DIAG] checkAndGetManagedPath 结果:" << isManaged  
-              << "managedFolder=" << QString::fromStdWString(managedFolder);  // 新增 
-
     if (isManaged) {
+        // 如果是新出现的文件夹（由于移动），也需要递归处理
+        if (MftReader::instance().isDirectory(idx)) {
+            handleRecursiveIngestion(fullPath);
+        }
+
         std::lock_guard<std::mutex> lock(m_queueMutex);
         m_pendingPaths.push_back(fullPath);
 
@@ -139,7 +167,6 @@ std::wstring AutoImportManager::getManagedLibraryPath(const std::wstring& pathOr
     if (volSerial.find(L":") != std::wstring::npos || volSerial.find(L"\\") != std::wstring::npos) {
         volSerial = MetadataManager::getVolumeSerialNumber(pathOrVolSerial);
     }
-    qDebug() << "[DIAG] getManagedLibraryPath volSerial=" << QString::fromStdWString(volSerial);  // 新增 
     if (volSerial.empty() || volSerial == L"UNKNOWN") return L"";
 
     // 根据序列号反查当前盘符 (Plan-68 4.1)
@@ -151,12 +178,10 @@ std::wstring AutoImportManager::getManagedLibraryPath(const std::wstring& pathOr
             break;
         }
     }
-    qDebug() << "[DIAG] 反查得到 drive=" << drive;  // 新增 
     if (drive.isEmpty()) return L"";
 
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
     QString relPath = AppConfig::instance().getValue(key, "").toString();
-    qDebug() << "[DIAG] AppConfig relPath=" << relPath;  // 新增 
 
     // 2026-07-xx 按照 Plan-118：约定优于配置的默认兜底
     // 若配置不存在，使用默认命名规则 ArcMeta.Library_[盘符]，
@@ -164,12 +189,10 @@ std::wstring AutoImportManager::getManagedLibraryPath(const std::wstring& pathOr
     if (relPath.isEmpty()) {
         relPath = "ArcMeta.Library_" + drive.left(1).toUpper();
         bool exists = QDir(drive + relPath).exists(); 
-        qDebug() << "[DIAG] 默认兜底 relPath=" << relPath << "exists=" << exists;  // 新增 
         if (!exists) return L"";
     }
 
     std::wstring result = MetadataManager::normalizePath((drive.toStdWString() + relPath.toStdWString()));
-    qDebug() << "[DIAG] getManagedLibraryPath 最终返回:" << QString::fromStdWString(result);  // 新增 
     return result;
 }
 
@@ -213,6 +236,90 @@ void AutoImportManager::processImportQueue() {
 
     MetadataManager::instance().notifyFullUIRebuild();
     qDebug() << "[AutoImport] 自动入库完成，处理项数:" << pathsToProcess.size();
+}
+
+void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
+    QDir dir(QString::fromStdWString(rootPath));
+    if (!dir.exists()) return;
+
+    // 1. 获取 rootPath 对应的分类 ID，如果缺失则补齐
+    int rootCatId = 0;
+    std::string rootFid;
+    std::wstring rootFrnStr;
+    if (MetadataManager::fetchWinApiMetadataDirect(rootPath, rootFid, &rootFrnStr)) {
+        try {
+            uint64_t frn = std::stoull(rootFrnStr, nullptr, 16);
+            rootCatId = CategoryRepo::findByFrn(frn);
+            if (rootCatId == 0) {
+                // 尝试通过父级路径补齐
+                QFileInfo info(QString::fromStdWString(rootPath));
+                std::wstring parentPath = info.absolutePath().toStdWString();
+                std::string parentFid;
+                std::wstring parentFrnStr;
+                int parentCatId = 0;
+                if (MetadataManager::fetchWinApiMetadataDirect(parentPath, parentFid, &parentFrnStr)) {
+                    uint64_t pFrn = std::stoull(parentFrnStr, nullptr, 16);
+                    parentCatId = CategoryRepo::findByFrn(pFrn);
+                }
+
+                Category cat;
+                cat.parentId = parentCatId;
+                cat.name = info.fileName().toStdWString();
+                cat.physicalFrn = frn;
+                cat.physicalPath = rootPath;
+                cat.color = CategoryRepo::getDefaultColor();
+                if (CategoryRepo::add(cat)) {
+                    rootCatId = cat.id;
+                }
+            }
+        } catch (...) {}
+    }
+
+    if (rootCatId <= 0) return;
+
+    // 2. 递归同步子项目
+    std::function<void(const QString&, int)> syncDir;
+    syncDir = [&](const QString& currentPath, int parentCatId) {
+        QDir currentDir(currentPath);
+        QFileInfoList list = currentDir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden);
+
+        for (const QFileInfo& fi : list) {
+            std::wstring wPath = QDir::toNativeSeparators(fi.absoluteFilePath()).toStdWString();
+            if (fi.isDir()) {
+                int existingId = CategoryRepo::findCategoryId(parentCatId, fi.fileName().toStdWString());
+                if (existingId == 0) {
+                    std::string fid;
+                    std::wstring frnStr;
+                    if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid, &frnStr)) {
+                        try {
+                            Category cat;
+                            cat.parentId = parentCatId;
+                            cat.name = fi.fileName().toStdWString();
+                            cat.physicalFrn = std::stoull(frnStr, nullptr, 16);
+                            cat.physicalPath = wPath;
+                            cat.color = CategoryRepo::getDefaultColor();
+                            if (CategoryRepo::add(cat)) {
+                                existingId = cat.id;
+                            }
+                        } catch (...) {}
+                    }
+                }
+                if (existingId > 0) {
+                    syncDir(fi.absoluteFilePath(), existingId);
+                }
+            } else {
+                MetadataManager::instance().registerItem(wPath, true);
+                if (parentCatId > 0) {
+                    std::string fid;
+                    if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid)) {
+                        CategoryRepo::addItemToCategory(parentCatId, fid, wPath);
+                    }
+                }
+            }
+        }
+    };
+
+    syncDir(QString::fromStdWString(rootPath), rootCatId);
 }
 
 } // namespace ArcMeta
