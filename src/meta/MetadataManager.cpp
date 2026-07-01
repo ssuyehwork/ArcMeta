@@ -350,6 +350,7 @@ void MetadataManager::notifyFullUIRebuild() {
 
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] 收到项目注册请求:" << QString::fromStdWString(nPath) << "Authorized:" << authorized;
 
     // 2026-07-xx 按照 Plan-117：采用登记->解析->完成的闭环逻辑
     // 为了性能，registerItem 内部不再调用 markAsRegistered 以免产生多余的独立事务
@@ -1014,24 +1015,44 @@ bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
     
     // 2026-07-xx 按照 Plan-117：高性能路径归属判定
     std::wstring volSerial = getVolumeSerialNumber(path);
+    qDebug() << "[DIAG] isInsideManagedLibrary volSerial=" << QString::fromStdWString(volSerial);
     if (volSerial == L"UNKNOWN") return false;
+
+    QString driveRoot = QString::fromWCharArray(&path[0], 1);
+    driveRoot.append(":");
 
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
     QString relPath = ::ArcMeta::AppConfig::instance().getValue(key, QVariant("")).toString();
-    if (relPath.isEmpty()) return false;
+    qDebug() << "[DIAG] AppConfig relPath=" << relPath;
+
+    // 2026-07-xx 按照 Plan-118：约定优于配置的默认兜底逻辑同步
+    if (relPath.isEmpty()) {
+        relPath = "ArcMeta.Library_" + driveRoot.left(1).toUpper();
+        // 必须验证该文件夹物理存在，避免对不存在的路径做前缀匹配。
+        QString fullRel = QDir::toNativeSeparators(driveRoot + "/" + relPath);
+        bool exists = QFileInfo::exists(fullRel); 
+        qDebug() << "[DIAG] 默认兜底 relPath=" << relPath << "exists=" << exists;
+        if (!exists) return false;
+    }
 
     // 拼装托管库绝对路径并进行前缀匹配
-    QString driveRoot = QString::fromWCharArray(&path[0], 1);
-    driveRoot.append(":");
-    QString managedAbs = QDir::toNativeSeparators(driveRoot + relPath).toLower();
-    QString qPath = QString::fromStdWString(path).toLower();
+    QString managedAbs = QDir::toNativeSeparators(driveRoot + "/" + relPath).toLower();
+    QString qPath = QString::fromStdWString(normalizePath(path)).toLower();
+
+    qDebug() << "[DIAG] 最终托管库路径(L):" << managedAbs << "当前检查路径(L):" << qPath;
 
     // 必须包含在托管库目录下 (StartsWith 且确保边界)
     if (qPath.startsWith(managedAbs)) {
         // 进一步校验边界，防止 C:\ArcMeta.Library_D_Backup 匹配 C:\ArcMeta.Library_D
-        if (qPath.length() == managedAbs.length()) return true;
-        if (qPath[managedAbs.length()] == '\\' || qPath[managedAbs.length()] == '/') return true;
+        bool match = false;
+        if (qPath.length() == managedAbs.length()) match = true;
+        else if (qPath[managedAbs.length()] == '\\' || qPath[managedAbs.length()] == '/') match = true;
+        
+        qDebug() << "[DIAG] isInsideManagedLibrary 最终判定结果:" << match;
+        return match;
     }
+
+    qDebug() << "[DIAG] isInsideManagedLibrary 最终判定结果: false";
     return false;
 }
 
@@ -1324,6 +1345,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     
     RuntimeMeta rMeta = getMeta(nPath);
     sqlite3* db = nullptr;
+    qDebug() << "[Metadata] 执行持久化任务:" << QString::fromStdWString(nPath) << "FID:" << QString::fromStdString(rMeta.fileId128) << "Authorized:" << authorized;
     
     // 2026-06-xx 架构重定向：判定是否为物理磁盘根目录（如 C:\）。
     // 理由：盘符置顶等元数据属于全应用级全局元数据，必须存入全局库以解决物理分库未挂载或盘符漂移冲突。
@@ -1350,9 +1372,16 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     // 2026-07-xx 按照 Plan-116：核心准入拦截逻辑
     // 如果是新记录且未经过授权（非 USN 触发），则拦截入库动作
     if (isNew && !authorized) {
-        // 记录日志，但不产生新记录
-        qDebug() << "[Metadata] 拦截到非授权入库请求（库外项目）:" << QString::fromStdWString(nPath);
-        return;
+        // 2026-07-xx 补丁：必须校验路径是否确实在托管库内部。
+        // 如果在内部但被标记为 isNew 且未授权，可能是监控漏掉的初始信号，应允许入库。
+        if (isInsideManagedLibrary(nPath)) {
+            qDebug() << "[Metadata] 识别到托管库内新增项，自动补齐授权:" << QString::fromStdWString(nPath);
+            authorized = true;
+        } else {
+            // 记录日志，但不产生新记录
+            qDebug() << "[Metadata] 拦截到非授权入库请求（库外项目）:" << QString::fromStdWString(nPath) << "isNew:" << isNew;
+            return;
+        }
     }
 
     sqlite3_stmt* stmt;

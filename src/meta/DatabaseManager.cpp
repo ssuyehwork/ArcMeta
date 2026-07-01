@@ -80,6 +80,7 @@ void DatabaseManager::ensureHidden(const std::wstring& path) {
 
 bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     std::string utf8Path = QString::fromStdWString(diskPath).toUtf8().toStdString();
+    qDebug() << "[DB] 尝试加载数据库:" << QString::fromStdString(utf8Path);
     if (sqlite3_open_v2(utf8Path.c_str(), &conn.diskDb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
         qDebug() << "[DB] Failed to open disk DB:" << QString::fromStdString(utf8Path);
         return false;
@@ -324,6 +325,7 @@ void DatabaseManager::shutdown() {
 
 sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QString& driveLetter) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    qDebug() << "[DB] getMemoryDb requested for Serial:" << QString::fromStdWString(volumeSerial) << "Letter:" << driveLetter;
     
     QString cleanLetter = "";
     if (!driveLetter.isEmpty()) {
