@@ -136,8 +136,11 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             sort_order INTEGER DEFAULT 0,
             pinned INTEGER DEFAULT 0,
             encrypted INTEGER DEFAULT 0,
-            encrypt_hint TEXT
+            encrypt_hint TEXT,
+            physical_frn INTEGER DEFAULT 0,
+            physical_path TEXT
         );
+        CREATE INDEX IF NOT EXISTS idx_categories_frn ON categories(physical_frn);
 
         -- 分类与项目关联表
         CREATE TABLE IF NOT EXISTS category_items (
@@ -218,6 +221,32 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 ingestion_status 字段...";
         sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN ingestion_status INTEGER DEFAULT -1", nullptr, nullptr, nullptr);
     }
+
+    // 2026-08-xx 物理同步扩展：迁移 categories 表字段
+    sqlite3_stmt* catCheckStmt;
+    bool hasFrnColumn = false;
+    bool hasPhysicalPathColumn = false;
+    if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(categories)", -1, &catCheckStmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(catCheckStmt) == SQLITE_ROW) {
+            const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(catCheckStmt, 1));
+            if (colName) {
+                std::string name(colName);
+                if (name == "physical_frn") hasFrnColumn = true;
+                if (name == "physical_path") hasPhysicalPathColumn = true;
+            }
+        }
+        sqlite3_finalize(catCheckStmt);
+    }
+
+    if (!hasFrnColumn) {
+        sqlite3_exec(conn.memDb, "ALTER TABLE categories ADD COLUMN physical_frn INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+    }
+    if (!hasPhysicalPathColumn) {
+        sqlite3_exec(conn.memDb, "ALTER TABLE categories ADD COLUMN physical_path TEXT", nullptr, nullptr, nullptr);
+    }
+
+    // 2026-08-xx 索引优化
+    sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_frn ON categories(physical_frn);", nullptr, nullptr, nullptr);
 
     conn.diskPath = diskPath;
     return true;

@@ -21,6 +21,8 @@ struct Category {
     bool pinned = false;
     bool encrypted = false;
     std::wstring encryptHint;
+    uint64_t physicalFrn = 0;
+    std::wstring physicalPath;
 };
 
 /**
@@ -48,7 +50,10 @@ public:
 
     static bool add(Category& cat);
     static bool update(const Category& cat);
+    static Category getById(int id);
     static int findCategoryId(int parentId, const std::wstring& name);
+    static int findByFrn(uint64_t frn);
+    static bool updatePhysicalMapping(int id, uint64_t frn, const std::wstring& path);
     static bool remove(int id);
     static bool reorder(int parentId, bool ascending);
     static bool reorderAll(bool ascending);
