@@ -1,5 +1,6 @@
 #include "NativeFolderWatcher.h"
 #include "../meta/MetadataManager.h"
+#include "../meta/CategoryRepo.h"
 #include <QDebug>
 #include <QFileInfo>
 #include <QDir>
@@ -157,11 +158,10 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
         FILE_NOTIFY_INFORMATION* notify = (FILE_NOTIFY_INFORMATION*)pBase;
         std::wstring fileName(notify->FileName, notify->FileNameLength / sizeof(WCHAR));
         
-        // 统一使用 Windows 原生分隔符拼接路径，并确保格式标准化
-        QString qFullPath = QString::fromStdWString(item->path);
-        qFullPath.append("/");
-        qFullPath.append(QString::fromStdWString(fileName));
-        qFullPath = QDir::toNativeSeparators(qFullPath);
+        // 统一使用 Windows 原生分隔符拼接路径，并确保格式标准化 (使用 QDir::cleanPath 处理合并)
+        QString qFullPath = QDir::toNativeSeparators(QDir::cleanPath(
+            QString::fromStdWString(item->path) + "/" + QString::fromStdWString(fileName)
+        ));
 
         std::wstring fullPath = qFullPath.toStdWString();
 
@@ -177,24 +177,34 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
 
         // 触发 MetadataManager 登记逻辑
         if (notify->Action == FILE_ACTION_ADDED || 
-            notify->Action == FILE_ACTION_RENAMED_NEW_NAME ||
             notify->Action == FILE_ACTION_MODIFIED) {
             
             qDebug() << "[Watcher] 判定为有效变动，准备分发";
 
             // 2026-07-xx 按照 Plan-117：触发登记与解析闭环
             // 异步调用以免阻塞工作线程
-            QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
+            QMetaObject::invokeMethod(&::ArcMeta::MetadataManager::instance(), [fullPath]() {
                 qDebug() << "[Watcher] 异步回调执行: 开始注册流程" << QString::fromStdWString(fullPath);
                 // 优化：如果是文件夹新增，执行批量级联标记
                 QFileInfo info(QString::fromStdWString(fullPath));
                 if (info.isDir()) {
                     qDebug() << "[Watcher] 检测到目录级变动，触发级联登记";
-                    MetadataManager::instance().markAsRegistered(fullPath);
+                    ::ArcMeta::MetadataManager::instance().markAsRegistered(fullPath);
                 } else {
                     qDebug() << "[Watcher] 检测到文件级变动，触发单项注册";
-                    MetadataManager::instance().registerItem(fullPath, true);
+                    ::ArcMeta::MetadataManager::instance().registerItem(fullPath, true);
                 }
+            }, Qt::QueuedConnection);
+        } else if (notify->Action == FILE_ACTION_RENAMED_NEW_NAME) {
+            // 2026-07-xx 按照 Plan-118：物理 -> 逻辑重命名同步
+            qDebug() << "[Watcher] 检测到重命名变动，触发分类名同步判定" << qFullPath;
+            QMetaObject::invokeMethod(&::ArcMeta::MetadataManager::instance(), [fullPath]() {
+                std::string fid = ::ArcMeta::MetadataManager::instance().getFileIdSync(fullPath);
+                if (!fid.empty()) {
+                    QFileInfo info(QString::fromStdWString(fullPath));
+                    ::ArcMeta::CategoryRepo::updateNameByFid(fid, info.fileName().toStdWString());
+                }
+                ::ArcMeta::MetadataManager::instance().registerItem(fullPath, true);
             }, Qt::QueuedConnection);
         } else {
             qDebug() << "[Watcher] 非目标 Action (" << notify->Action << ")，跳过处理";
