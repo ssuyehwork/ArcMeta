@@ -67,6 +67,31 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
         m_pendingPaths.push_back(fullPath);
         
         QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+    } else {
+        // 2026-07-xx 按照 Plan-118：物理感应逻辑。检测是否在根目录下创建了符合命名的托管库文件夹
+        QFileInfo info(qPath);
+        if (info.isDir()) {
+            QDir parentDir = info.dir();
+            if (parentDir.isRoot()) {
+                QString name = info.fileName();
+                if (name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                    qDebug() << "[AutoImport] 物理感应：识别到新托管库创建" << qPath;
+
+                    std::string fid = MetadataManager::instance().getFileIdSync(fullPath);
+                    if (!fid.empty()) {
+                        Category cat;
+                        cat.name = name.toStdWString();
+                        cat.folderFid = fid;
+                        cat.pinned = true; // 托管库默认置顶常驻
+
+                        if (CategoryRepo::add(cat)) {
+                            qDebug() << "[AutoImport] 成功同步创建侧边栏分类: " << name;
+                            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

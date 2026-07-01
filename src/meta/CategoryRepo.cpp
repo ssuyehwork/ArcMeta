@@ -30,7 +30,7 @@ std::vector<Category> CategoryRepo::getAll() {
     if (!db) return results;
 
     sqlite3_stmt* stmt;
-    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint FROM categories WHERE id > 0 ORDER BY sort_order ASC";
+    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, folder_fid FROM categories WHERE id > 0 ORDER BY sort_order ASC";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             Category c;
@@ -48,6 +48,8 @@ std::vector<Category> CategoryRepo::getAll() {
             c.encrypted = sqlite3_column_int(stmt, 7) != 0;
             const wchar_t* hint = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 8));
             if (hint) c.encryptHint = hint;
+            const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9));
+            if (fid) c.folderFid = fid;
             results.push_back(c);
         }
         sqlite3_finalize(stmt);
@@ -63,7 +65,7 @@ bool CategoryRepo::add(Category& cat) {
     }
 
     sqlite3_stmt* stmt;
-    const char* sql = "INSERT INTO categories (parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT INTO categories (parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, folder_fid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
     if (rc == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, cat.parentId);
@@ -78,11 +80,12 @@ bool CategoryRepo::add(Category& cat) {
         sqlite3_bind_int(stmt, 6, cat.pinned ? 1 : 0);
         sqlite3_bind_int(stmt, 7, cat.encrypted ? 1 : 0);
         sqlite3_bind_text16(stmt, 8, cat.encryptHint.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 9, cat.folderFid.c_str(), -1, SQLITE_TRANSIENT);
 
         rc = sqlite3_step(stmt);
         if (rc == SQLITE_DONE) {
             cat.id = static_cast<int>(sqlite3_last_insert_rowid(db));
-            qDebug() << "[CategoryRepo] add success: Name =" << QString::fromStdWString(cat.name) << "ID =" << cat.id << "Parent =" << cat.parentId;
+            qDebug() << "[CategoryRepo] add success: Name =" << QString::fromStdWString(cat.name) << "ID =" << cat.id << "FID =" << QString::fromStdString(cat.folderFid);
             sqlite3_finalize(stmt);
             return true;
         } else {
@@ -171,19 +174,9 @@ bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& fids) {
             sqlite3_step(delStmt);
             sqlite3_finalize(delStmt);
         }
-        // 2. Add to "未分类" bucket
-        std::wstring path = MetadataManager::instance().getPathByFid(fid);
-        sqlite3_stmt* insStmt;
-        if (sqlite3_prepare_v2(db,
-            "INSERT OR REPLACE INTO category_items (category_id, file_id, path_hint, added_at) VALUES (?, ?, ?, ?)",
-            -1, &insStmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(insStmt, 1, UNCATEGORIZED_CAT_ID);
-            sqlite3_bind_text(insStmt, 2, fid.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text16(insStmt, 3, path.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_double(insStmt, 4, static_cast<double>(QDateTime::currentMSecsSinceEpoch()));
-            sqlite3_step(insStmt);
-            sqlite3_finalize(insStmt);
-        }
+        // 2. 按照 Plan-118：移除“未分类”逻辑。
+        // 从回收站恢复后，项目不归属于任何分类，即自然处于逻辑上的“未分类”状态。
+        // 无需再向 category_items 写入任何记录。
         // 3. Clear is_trash flag in metadata cache + persist
         if (!path.empty()) {
             MetadataManager::instance().setTrash(path, false);
@@ -241,7 +234,7 @@ bool CategoryRepo::update(const Category& cat) {
     if (!db) return false;
 
     sqlite3_stmt* stmt;
-    const char* sql = "UPDATE categories SET parent_id=?, name=?, color=?, preset_tags=?, sort_order=?, pinned=?, encrypted=?, encrypt_hint=? WHERE id=?";
+    const char* sql = "UPDATE categories SET parent_id=?, name=?, color=?, preset_tags=?, sort_order=?, pinned=?, encrypted=?, encrypt_hint=?, folder_fid=? WHERE id=?";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, cat.parentId);
         sqlite3_bind_text16(stmt, 2, cat.name.c_str(), -1, SQLITE_TRANSIENT);
@@ -253,11 +246,35 @@ bool CategoryRepo::update(const Category& cat) {
         sqlite3_bind_int(stmt, 6, cat.pinned ? 1 : 0);
         sqlite3_bind_int(stmt, 7, cat.encrypted ? 1 : 0);
         sqlite3_bind_text16(stmt, 8, cat.encryptHint.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 9, cat.id);
+        sqlite3_bind_text(stmt, 9, cat.folderFid.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 10, cat.id);
 
         bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
         sqlite3_finalize(stmt);
         return ok;
+    }
+    return false;
+}
+
+bool CategoryRepo::updateNameByFid(const std::string& fid, const std::wstring& newName) {
+    if (fid.empty()) return false;
+    sqlite3* db = DatabaseManager::instance().getGlobalDb();
+    if (!db) return false;
+
+    sqlite3_stmt* stmt;
+    const char* sql = "UPDATE categories SET name = ? WHERE folder_fid = ?";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text16(stmt, 1, newName.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, fid.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_DONE) {
+            sqlite3_finalize(stmt);
+            qDebug() << "[CategoryRepo] 物理同步逻辑名成功: FID =" << QString::fromStdString(fid) << "NewName =" << QString::fromStdWString(newName);
+
+            // 触发 UI 刷新（防抖由面板负责）
+            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+            return true;
+        }
+        sqlite3_finalize(stmt);
     }
     return false;
 }
@@ -660,7 +677,7 @@ void CategoryRepo::syncCategorizedCountForFid(const std::string& /*fid*/) {
     // 2026-06-xx 物理对账：通过全局 DISTINCT 查询重新计算已分类总数
     // 这种做法比手动增减 delta 更稳健，能自动修正因程序崩溃导致的计数偏差
     sqlite3_stmt* stmt;
-    // 物理红线：分类计数必须排除回收站 (ID = -8) 和未分类 (ID = -2)
+    // 物理红线：分类计数必须排除回收站 (ID = -8)
     const char* sql = "SELECT COUNT(DISTINCT file_id) FROM category_items WHERE category_id > 0";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         if (sqlite3_step(stmt) == SQLITE_ROW) {

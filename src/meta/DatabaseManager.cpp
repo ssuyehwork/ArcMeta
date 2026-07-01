@@ -136,7 +136,8 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             sort_order INTEGER DEFAULT 0,
             pinned INTEGER DEFAULT 0,
             encrypted INTEGER DEFAULT 0,
-            encrypt_hint TEXT
+            encrypt_hint TEXT,
+            folder_fid TEXT
         );
 
         -- 分类与项目关联表
@@ -188,6 +189,9 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     bool hasHeightColumn = false;
     bool hasIngestionStatusColumn = false;
 
+    // 2026-07-xx 按照 Plan-118：新增 categories.folder_fid 支持
+    bool hasFolderFidColumn = false;
+
     if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(checkStmt) == SQLITE_ROW) {
             const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(checkStmt, 1));
@@ -217,6 +221,20 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     if (!hasIngestionStatusColumn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 ingestion_status 字段...";
         sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN ingestion_status INTEGER DEFAULT -1", nullptr, nullptr, nullptr);
+    }
+
+    // 2026-07-xx 按照 Plan-118：迁移 categories 表
+    if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(categories)", -1, &checkStmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(checkStmt) == SQLITE_ROW) {
+            const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(checkStmt, 1));
+            if (colName && std::string(colName) == "folder_fid") hasFolderFidColumn = true;
+        }
+        sqlite3_finalize(checkStmt);
+    }
+
+    if (!hasFolderFidColumn) {
+        qDebug() << "[DB] 检测到旧版数据库，正在为 categories 添加 folder_fid 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE categories ADD COLUMN folder_fid TEXT", nullptr, nullptr, nullptr);
     }
 
     conn.diskPath = diskPath;

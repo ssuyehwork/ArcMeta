@@ -177,7 +177,6 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
 
         // 触发 MetadataManager 登记逻辑
         if (notify->Action == FILE_ACTION_ADDED ||
-            notify->Action == FILE_ACTION_RENAMED_NEW_NAME ||
             notify->Action == FILE_ACTION_MODIFIED) {
 
             qDebug() << "[Watcher] 判定为有效变动，准备分发";
@@ -195,6 +194,17 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
                     qDebug() << "[Watcher] 检测到文件级变动，触发单项注册";
                     MetadataManager::instance().registerItem(fullPath, true);
                 }
+            }, Qt::QueuedConnection);
+        } else if (notify->Action == FILE_ACTION_RENAMED_NEW_NAME) {
+            // 2026-07-xx 按照 Plan-118：物理 -> 逻辑重命名同步
+            qDebug() << "[Watcher] 检测到重命名变动，触发分类名同步判定" << qFullPath;
+            QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
+                std::string fid = MetadataManager::instance().getFileIdSync(fullPath);
+                if (!fid.empty()) {
+                    QFileInfo info(QString::fromStdWString(fullPath));
+                    CategoryRepo::updateNameByFid(fid, info.fileName().toStdWString());
+                }
+                MetadataManager::instance().registerItem(fullPath, true);
             }, Qt::QueuedConnection);
         } else {
             qDebug() << "[Watcher] 非目标 Action (" << notify->Action << ")，跳过处理";
