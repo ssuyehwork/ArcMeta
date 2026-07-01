@@ -40,12 +40,18 @@ void UsnWatcher::stop() {
 }
 
 void UsnWatcher::run() {
-    if (m_hVolume == INVALID_HANDLE_VALUE) return;
+    if (m_hVolume == INVALID_HANDLE_VALUE) {
+        qDebug() << "[UsnWatcher] 卷句柄无效，线程退出:" << QString::fromStdWString(m_volume);
+        return;
+    }
+
+    qDebug() << "[UsnWatcher] 线程已启动，正在查询 Journal:" << QString::fromStdWString(m_volume);
 
     // 1. 获取 Journal ID
     USN_JOURNAL_DATA_V0 journalData;
     DWORD bytesReturned;
     if (!DeviceIoControl(m_hVolume, FSCTL_QUERY_USN_JOURNAL, NULL, 0, &journalData, sizeof(journalData), &bytesReturned, NULL)) {
+        qDebug() << "[UsnWatcher] FSCTL_QUERY_USN_JOURNAL 失败，错误码:" << GetLastError() << "卷:" << QString::fromStdWString(m_volume);
         return;
     }
 
@@ -109,7 +115,8 @@ void UsnWatcher::run() {
                         reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameOffset :
                         reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameOffset;
                     QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(pRecord + fileNameOffset), fileNameLength / 2);
-                    if (name.contains("ArcMeta.Library_")) {
+                    // 修正：不区分大小写，确保 z:\ArcMeta.library_Z 等路径也能被捕获
+                    if (name.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
                         qDebug() << "[USN Raw] 感知到目标路径变化:" << name << "Reason:" << QString::number(reason, 16);
                     }
                 }
