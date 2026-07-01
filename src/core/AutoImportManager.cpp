@@ -2,11 +2,19 @@
 #include "../mft/MftReader.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
+#include "../meta/CategoryRepo.h"
 #include "AppConfig.h"
 #include <QDebug>
 #include <QCoreApplication>
 #include <QDir>
 #include <QMetaObject>
+#include <QFileInfo>
+#include <QFile>
+#include <QTimer>
+#include <functional>
+#include <cwchar>
+#include <map>
+#include <cstdint>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -33,7 +41,6 @@ AutoImportManager::~AutoImportManager() {
 void AutoImportManager::startListening() {
     if (m_isListening) return;
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
-    // 2026-07-xx 按照 Plan-120：补全对 entryUpdated 的监听，以覆盖文件移动至 Library 的场景
     connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
     m_isListening = true;
 }
@@ -43,6 +50,31 @@ void AutoImportManager::stopListening() {
     disconnect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded);
     disconnect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated);
     m_isListening = false;
+}
+
+void AutoImportManager::syncAllManagedLibraries() {
+    const auto drives = QDir::drives();
+    bool changed = false;
+    for (const QFileInfo& d : drives) {
+        QString drive = d.absolutePath();
+        QString letter = drive.left(1).toUpper();
+        
+        QDir rootDir(drive);
+        QStringList entries = rootDir.entryList({"ArcMeta.Library_*"}, QDir::Dirs | QDir::Hidden);
+        
+        QString targetName = "ArcMeta.Library_" + letter;
+        for (const QString& entry : entries) {
+            if (QString::compare(entry, targetName, Qt::CaseInsensitive) == 0) {
+                QString managedPath = rootDir.absoluteFilePath(entry);
+                qDebug() << "[AutoImport] 启动对账：发现物理托管库，执行同步 ->" << managedPath;
+                handleRecursiveIngestion(QDir::toNativeSeparators(managedPath).toStdWString());
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        MetadataManager::instance().notifyFullUIRebuild();
+    }
 }
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
@@ -56,8 +88,7 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
     bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
      
     if (isManaged) {
-        // 2026-08-xx 物理同步：如果是文件夹，启动递归入库同步
-        if (idx >= 0 && MftReader::instance().isDirectory(idx)) {
+        if (MftReader::instance().isDirectory(idx)) {
             handleRecursiveIngestion(fullPath);
         }
 
@@ -69,7 +100,6 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
 }
 
 void AutoImportManager::onEntryUpdated(uint64_t key) {
-    // 2026-07-xx 按照 Plan-120：逻辑与 onEntryAdded 一致，处理跨目录移动
     int idx = MftReader::instance().getIndexByKey(key);
     if (idx < 0) return;
 
@@ -77,22 +107,20 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
     std::wstring fullPath = qPath.toStdWString();
     uint64_t frn = MftReader::instance().getFrn(idx);
 
-    // 2026-08-xx 物理同步：处理物理重命名驱动逻辑更新 (Outer -> Inner)
     if (MftReader::instance().isDirectory(idx)) {
         int catId = CategoryRepo::findByFrn(frn);
         if (catId > 0) {
             QString newName = QFileInfo(qPath).fileName();
             Category cat = CategoryRepo::getById(catId);
             if (cat.id > 0) {
-                // 根目录强制保护逻辑
-                if (cat.parentId == 0 && QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_")) {
+                if (cat.parentId == 0 && QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
                     QString expectedName = "ArcMeta.Library_" + qPath.left(1).toUpper();
                     if (newName != expectedName) {
                         qDebug() << "[AutoImport] 检测到根目录违规重命名，强制恢复:" << newName << "->" << expectedName;
                         QString parentDir = QFileInfo(qPath).absolutePath();
                         QString oldPath = QDir::toNativeSeparators(QDir(parentDir).absoluteFilePath(expectedName));
                         QFile::rename(qPath, oldPath);
-                        return; // 物理恢复后，等待下一轮 USN 信号
+                        return; 
                     }
                 }
 
@@ -110,7 +138,6 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
     std::wstring managedFolder;
     bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
     if (isManaged) {
-        // 如果是新出现的文件夹（由于移动），也需要递归处理
         if (MftReader::instance().isDirectory(idx)) {
             handleRecursiveIngestion(fullPath);
         }
@@ -124,7 +151,6 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
 
 void AutoImportManager::recordRecentVisitedFolder(const std::wstring& path) {
     if (path.empty()) return;
-    // 库内文件夹不记录（没有意义，本来就在库里）
     std::wstring managedFolder;
     if (instance().checkAndGetManagedPath(path, managedFolder)) return;
 
@@ -163,13 +189,11 @@ std::wstring AutoImportManager::getManagedLibraryPath(const std::wstring& pathOr
     if (pathOrVolSerial.empty()) return L"";
 
     std::wstring volSerial = pathOrVolSerial;
-    // 如果传入的是路径而非序列号，则提取序列号
     if (volSerial.find(L":") != std::wstring::npos || volSerial.find(L"\\") != std::wstring::npos) {
         volSerial = MetadataManager::getVolumeSerialNumber(pathOrVolSerial);
     }
     if (volSerial.empty() || volSerial == L"UNKNOWN") return L"";
 
-    // 根据序列号反查当前盘符 (Plan-68 4.1)
     QString drive;
     const auto drives = QDir::drives();
     for (const QFileInfo& d : drives) {
@@ -183,9 +207,6 @@ std::wstring AutoImportManager::getManagedLibraryPath(const std::wstring& pathOr
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
     QString relPath = AppConfig::instance().getValue(key, "").toString();
 
-    // 2026-07-xx 按照 Plan-118：约定优于配置的默认兜底
-    // 若配置不存在，使用默认命名规则 ArcMeta.Library_[盘符]，
-    // 但必须验证该文件夹物理存在，避免对不存在的路径做前缀匹配。
     if (relPath.isEmpty()) {
         relPath = "ArcMeta.Library_" + drive.left(1).toUpper();
         bool exists = QDir(drive + relPath).exists(); 
@@ -206,7 +227,6 @@ void AutoImportManager::processImportQueue() {
 
     if (pathsToProcess.empty()) return;
 
-    // 通道 3：按照磁盘聚合并执行静默挂载与入库
     std::map<std::wstring, std::vector<std::wstring>> pathsByVol;
     for (const auto& p : pathsToProcess) {
         pathsByVol[MetadataManager::getVolumeSerialNumber(p)].push_back(p);
@@ -216,7 +236,6 @@ void AutoImportManager::processImportQueue() {
         const std::wstring& vol = pair.first;
         if (vol.empty()) continue;
 
-        // 提取其中一个路径的盘符用于重命名纠偏
         QString letter = "";
         if (!pair.second.empty()) {
             const std::wstring& firstPath = pair.second.front();
@@ -225,24 +244,25 @@ void AutoImportManager::processImportQueue() {
             }
         }
 
-        // 静默强制挂载数据库
         DatabaseManager::instance().getMemoryDb(vol, letter);
 
         for (const auto& path : pair.second) {
-            // 2026-07-xx 按照 Plan-116：通过 USN 链路触发的入库，标记为已授权
             MetadataManager::instance().registerItem(path, true);
         }
     }
 
     MetadataManager::instance().notifyFullUIRebuild();
-    qDebug() << "[AutoImport] 自动入库完成，处理项数:" << pathsToProcess.size();
 }
 
 void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
     QDir dir(QString::fromStdWString(rootPath));
     if (!dir.exists()) return;
 
-    // 1. 获取 rootPath 对应的分类 ID，如果缺失则补齐
+    // 2026-08-xx 性能优化：抑制信号，开启批量事务
+    MetadataManager::instance().setInternalOperating(true);
+    sqlite3* db = DatabaseManager::instance().getGlobalDb();
+    if (db) sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+
     int rootCatId = 0;
     std::string rootFid;
     std::wstring rootFrnStr;
@@ -251,7 +271,6 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
             uint64_t frn = std::stoull(rootFrnStr, nullptr, 16);
             rootCatId = CategoryRepo::findByFrn(frn);
             if (rootCatId == 0) {
-                // 尝试通过父级路径补齐
                 QFileInfo info(QString::fromStdWString(rootPath));
                 std::wstring parentPath = info.absolutePath().toStdWString();
                 std::string parentFid;
@@ -263,7 +282,12 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
                 }
 
                 Category cat;
-                cat.parentId = parentCatId;
+                // 2026-08-xx 物理同步：ArcMeta.Library_* 强制作为顶级分类 (parentId = 0)
+                if (info.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                    cat.parentId = 0;
+                } else {
+                    cat.parentId = parentCatId;
+                }
                 cat.name = info.fileName().toStdWString();
                 cat.physicalFrn = frn;
                 cat.physicalPath = rootPath;
@@ -277,7 +301,6 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
 
     if (rootCatId <= 0) return;
 
-    // 2. 递归同步子项目
     std::function<void(const QString&, int)> syncDir;
     syncDir = [&](const QString& currentPath, int parentCatId) {
         QDir currentDir(currentPath);
@@ -320,6 +343,11 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
     };
 
     syncDir(QString::fromStdWString(rootPath), rootCatId);
+
+    // 2026-08-xx 性能优化：提交事务并恢复信号，最后执行一次全量 UI 重建
+    if (db) sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
+    MetadataManager::instance().setInternalOperating(false);
+    MetadataManager::instance().notifyFullUIRebuild();
 }
 
 } // namespace ArcMeta

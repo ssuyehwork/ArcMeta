@@ -29,39 +29,26 @@ void CategoryModel::deferredRefresh() {
 }
 
 void CategoryModel::refresh() {
-    // 2026-06-xx 物理修复：移除对 m_isFirstLoad 的强行拦截。
-    // 理由：refresh() 必须允许重建树结构，否则在应用期间增删改“分类”时 UI 无法感知。
-    // 异步高频刷新应由 CategoryPanel::requestRefresh 及其内部的 updateStatistics 承载。
     m_isFirstLoad = false;
 
-    // 2026-06-xx 物理修复：废除破坏性的 clear()，改用 beginResetModel 手动管理。
-    // 理由：clear() 会提前发射重置信号，导致 UI 在数据还没填充时就尝试恢复展开状态，引发折叠。
     beginResetModel();
     
-    // 清理旧项
     removeRows(0, rowCount());
     
     QStandardItem* root = invisibleRootItem();
 
-    // 1. 系统模块 (同步构建 - 8项)
     if (m_type == System || m_type == Both) {
-        // 2026-06-xx 物理削峰：refresh 仅构建树结构，计数逻辑剥离至异步 updateStatistics
-        // 理由：getSystemCounts() 涉及全量内存盘点，在 UI 线程执行会导致假死。
         auto addSystemItem = [&](const QString& name, const QString& type, const QString& icon, const QString& color, int sysId) {
-            // 2026-06-xx 物理修复：杜绝采用“...”占位符，默认显示为 (0)
             QStandardItem* item = new QStandardItem(QString("%1 (0)").arg(name));
             item->setData(type, TypeRole);
             item->setData(name, NameRole);
             item->setData(color, ColorRole); 
-            // 2026-06-xx 物理修复：为系统项分配负数 ID，彻底消除与数据库 ID (0/正数) 的歧义冲突
             item->setData(sysId, IdRole);
             item->setEditable(false); 
             item->setIcon(UiHelper::getIcon(icon, QColor(color), 16));
             root->appendRow(item);
         };
 
-        // [还原] 还原原始设计的语义化图标与配色
-        // 物理分配负值 ID 空间
         addSystemItem("全部数据", "all", "all_data", "#3498db", -1);
         addSystemItem("未分类", "uncategorized", "uncategorized", "#95a5a6", -2);
         addSystemItem("未标签", "untagged", "untagged", "#7f8c8d", -3);
@@ -71,7 +58,6 @@ void CategoryModel::refresh() {
         addSystemItem("回收站", "trash", "trash", "#e74c3c", -8);
     }
 
-    // 2. 快速访问模块
     QStandardItem* favGroup = nullptr;
     if (m_type == Both || m_type == User) {
         favGroup = new QStandardItem("快速访问");
@@ -85,10 +71,8 @@ void CategoryModel::refresh() {
         favGroup->setFont(font);
         favGroup->setForeground(QColor("#FFFFFF"));
         root->appendRow(favGroup);
-
     }
 
-    // 3. 我的分类模块
     QStandardItem* userGroup = nullptr;
     if (m_type == User || m_type == Both) {
         userGroup = new QStandardItem("我的分类");
@@ -108,14 +92,12 @@ void CategoryModel::refresh() {
         QMap<int, QStandardItem*> itemMap;
         QMap<int, Category> catMap;
 
-        // 先创建所有分类节点，但不挂载
         for (const auto& cat : categories) {
             catMap[cat.id] = cat;
             int id = cat.id;
             QString name = QString::fromStdWString(cat.name);
             QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
 
-            // 2026-06-xx 物理修复：杜绝采用“...”占位符，默认显示为 (0)
             QStandardItem* item = new QStandardItem(QString("%1 (0)").arg(name));
             item->setData("category", TypeRole);
             item->setData(id, IdRole);
@@ -134,10 +116,6 @@ void CategoryModel::refresh() {
             itemMap[id] = item;
         }
 
-        // 2026-06-xx 按照用户要求回归“镜像模式”：实体保留，置顶生成快捷镜像
-        // 逻辑：1. 在“我的分类”中构建完整树；2. 将置顶项镜像一份到“快速访问”
-        
-        // 1. 在“我的分类”构建完整原始树 (不收置顶状态位移干扰)
         for (const auto& cat : categories) {
             int id = cat.id;
             QStandardItem* item = itemMap[id];
@@ -145,12 +123,16 @@ void CategoryModel::refresh() {
 
             if (parentId > 0 && itemMap.contains(parentId)) {
                 itemMap[parentId]->appendRow(item);
-            } else if (userGroup) {
-                userGroup->appendRow(item);
+            } else {
+                // 2026-08-xx 物理同步：ArcMeta.Library_* 强制置顶作为顶级分类 (Peer to "我的分类")
+                if (QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                    root->appendRow(item);
+                } else if (userGroup) {
+                    userGroup->appendRow(item);
+                }
             }
         }
 
-        // 2. 为置顶项在“快速访问”中创建虚拟镜像 (快捷入口)
         if (favGroup) {
             for (const auto& cat : categories) {
                 if (cat.pinned) {
@@ -158,7 +140,6 @@ void CategoryModel::refresh() {
                     QString name = QString::fromStdWString(cat.name);
                     QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
                     
-                    // 2026-07-xx 视觉对齐：镜像节点初始也应携带 (0) 占位符，符合《红线规范》
                     QStandardItem* mirror = new QStandardItem(QString("%1 (0)").arg(name));
                     mirror->setData("category", TypeRole);
                     mirror->setData(id, IdRole);
@@ -193,7 +174,6 @@ void CategoryModel::updateSystemCounts() {
 }
 
 void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
-    // 2026-06-xx 极致性能优化：采用深度遍历进行局部 setData 更新，杜绝 beginResetModel 引发视图抖动
     std::function<void(QStandardItem*)> updateItem;
     updateItem = [&](QStandardItem* parent) {
         for (int i = 0; i < parent->rowCount(); ++i) {
@@ -202,24 +182,20 @@ void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const 
             QString name = item->data(NameRole).toString();
             int id = item->data(IdRole).toInt();
 
-            bool changed = false;
-            if (id < 0) { // 系统项
+            if (id < 0) { 
                 int count = sysCounts.value(type, 0);
                 QString newText = QString("%1 (%2)").arg(name).arg(count);
                 if (item->text() != newText) {
                     item->setText(newText);
-                    changed = true;
                 }
-            } else if (type == "category" && id > 0) { // 用户分类
+            } else if (type == "category" && id > 0) { 
                 int count = catCounts.value(id, 0);
                 QString newText = QString("%1 (%2)").arg(name).arg(count);
                 if (item->text() != newText) {
                     item->setText(newText);
-                    changed = true;
                 }
             }
 
-            // 递归处理子项
             if (item->hasChildren()) {
                 updateItem(item);
             }
@@ -252,20 +228,18 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
             auto categories = CategoryRepo::getAll();
             for (auto& cat : categories) {
                 if (cat.id == id) {
-                    // 2026-08-xx 物理同步：内促外变
                     if (!cat.physicalPath.empty()) {
                         QString oldPath = QString::fromStdWString(cat.physicalPath);
                         QFileInfo oldInfo(oldPath);
                         
-                        // 根目录保护：不允许在 UI 重命名托管库根目录
-                        if (oldInfo.fileName().startsWith("ArcMeta.Library_") && cat.parentId == 0) {
+                        if (oldInfo.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive) && cat.parentId == 0) {
                             return false; 
                         }
 
                         QString newPath = QDir::toNativeSeparators(oldInfo.absoluteDir().absoluteFilePath(newName));
                         if (oldPath != newPath) {
                             if (!QFile::rename(oldPath, newPath)) {
-                                return false; // 物理失败，拦截逻辑修改
+                                return false; 
                             }
                             cat.physicalPath = newPath.toStdWString();
                         }
@@ -285,14 +259,10 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
 }
 
 Qt::DropActions CategoryModel::supportedDropActions() const {
-    // 2026-06-xx 物理修复：扩展支持的动作。界外拖入通常被识别为 Copy 或 Link。
-    // 只有在此处声明，Qt 视图才不会在拖入时显示“禁止图标”。
     return Qt::MoveAction | Qt::CopyAction | Qt::LinkAction;
 }
 
 bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction action, int row, int column, const QModelIndex& parent) {
-    // 2026-06-xx 物理修复：如果是外部 URL/路径拖入，放宽校验限制。
-    // 允许在侧边栏任意位置释放，由 CategoryPanel 处理具体的分类归属逻辑。
     if (mimeData->hasUrls() || mimeData->hasFormat("text/plain")) {
         return true;
     }
@@ -309,7 +279,6 @@ bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction actio
         QString type = parentItem->data(TypeRole).toString();
         QString name = parentItem->data(NameRole).toString();
         
-        // 内部拖拽（Move）依然保持严格校验，仅允许移动到分类、书签或根组
         if (type != "category" && type != "bookmark" && name != "我的分类") {
             return false; 
         }

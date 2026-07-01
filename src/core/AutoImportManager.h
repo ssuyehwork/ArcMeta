@@ -19,6 +19,11 @@ public:
     void startListening();
     void stopListening();
 
+    /**
+     * @brief 2026-08-xx 物理同步：扫描所有盘符，补全物理存在但逻辑缺失的托管库根分类
+     */
+    void syncAllManagedLibraries();
+
     // 2026-07-xx 按照 Plan-119：记录与获取最近访问文件夹
     static void recordRecentVisitedFolder(const std::wstring& path);
     static QStringList getRecentVisitedFolders(const std::wstring& volSerial);
