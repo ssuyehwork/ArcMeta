@@ -1,5 +1,6 @@
 #include "CategoryModel.h"
 #include "../meta/CategoryRepo.h"
+#include "../meta/MetadataManager.h"
 
 #include "UiHelper.h"
 #include <QMimeData>
@@ -8,6 +9,7 @@
 #include <QTimer>
 #include <QSet>
 #include <QMap>
+#include <QDebug>
 #include "../core/AppConfig.h"
 #include <QApplication>
 

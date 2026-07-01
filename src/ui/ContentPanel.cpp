@@ -2276,7 +2276,7 @@ void ContentPanel::refreshAll() {
     // 2026-06-xx 物理对标：完善刷新逻辑，支持所有上下文类型
     if (m_currentCategoryType == "user_category") {
         if (m_currentCategoryId != -1) loadCategory(m_currentCategoryId);
-    } else if (m_currentCategoryType == "all" || m_currentCategoryType == "uncategorized" || 
+    } else if (m_currentCategoryType == "all" ||
                m_currentCategoryType == "untagged" || m_currentCategoryType == "recently_visited" || 
                m_currentCategoryType == "trash") {
         QStringList paths = CategoryRepo::getSystemCategoryPaths(m_currentCategoryType);
@@ -2697,11 +2697,10 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
     m_isLoading = true;
     if (reqId == 0) reqId = ++m_loadRequestId;
     // 2026-07-xx 逻辑校准：保持既有的系统分类类型（如 trash/recently_visited），
-    // 仅在明确不是这些特殊类型时，才将其降级为通用的 path_list。
+    // 仅在明确不是 these 特殊类型时，才将其降级为通用的 path_list。
     if (m_currentCategoryType != "trash" && 
         m_currentCategoryType != "recently_visited" &&
         m_currentCategoryType != "untagged" &&
-        m_currentCategoryType != "uncategorized" &&
         m_currentCategoryType != "all") {
         m_currentCategoryType = "path_list";
     }

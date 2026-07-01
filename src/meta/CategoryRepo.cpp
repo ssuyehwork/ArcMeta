@@ -610,10 +610,6 @@ int CategoryRepo::getTotalFileCount() {
     return s_totalFileCount.load();
 }
 
-int CategoryRepo::getUncategorizedCount() {
-    return getSystemCounts()["uncategorized"];
-}
-
 void CategoryRepo::setTotalFileCount(int count) {
     s_totalFileCount.store(count);
 }
@@ -880,10 +876,6 @@ int CategoryRepo::getUniqueItemCount() {
     return s_totalFileCount.load();
 }
 
-int CategoryRepo::getUncategorizedItemCount() {
-    return getSystemCounts()["uncategorized"];
-}
-
 QMap<QString, int> CategoryRepo::getSystemCounts() {
     QMap<QString, int> res;
     
@@ -901,7 +893,7 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     }
 
     // 2026-07-xx 物理加固：使用 Set 进行 FID 去重计数，彻底解决因路径偏移导致的幽灵计数
-    std::unordered_set<std::string> seenAll, seenRecent, seenUntagged, seenUncategorized, seenTrash, seenInvalid;
+    std::unordered_set<std::string> seenAll, seenRecent, seenUntagged, seenTrash, seenInvalid;
     QSet<QString> uniqueTags;
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
 
@@ -931,16 +923,12 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
 
         if (meta.atime >= now - 86400000.0) seenRecent.insert(meta.fileId128);
         
-        if (categorizedFids.find(meta.fileId128) == categorizedFids.end()) {
-            seenUncategorized.insert(meta.fileId128);
-        }
     });
 
     res["all"] = static_cast<int>(seenAll.size());
     res["tags"] = static_cast<int>(uniqueTags.size());
     res["recently_visited"] = static_cast<int>(seenRecent.size());
     res["untagged"] = static_cast<int>(seenUntagged.size());
-    res["uncategorized"] = static_cast<int>(seenUncategorized.size());
     res["trash"] = static_cast<int>(seenTrash.size());
     res["invalid_data"] = static_cast<int>(seenInvalid.size());
     return res;
@@ -948,22 +936,6 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
 
 QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
     QStringList paths;
-    std::unordered_set<std::string> categorizedIds;
-    if (type == "uncategorized") {
-        sqlite3* db = DatabaseManager::instance().getGlobalDb();
-        if (db) {
-            sqlite3_stmt* stmt;
-            // 2026-06-xx 性能优化：查询“未分类”路径时，排除掉已在自定义分类 (ID > 0) 中的文件
-            if (sqlite3_prepare_v2(db, "SELECT DISTINCT file_id FROM category_items WHERE category_id > 0", -1, &stmt, nullptr) == SQLITE_OK) {
-                while (sqlite3_step(stmt) == SQLITE_ROW) {
-                    const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                    if (fid) categorizedIds.insert(fid);
-                }
-                sqlite3_finalize(stmt);
-            }
-        }
-    }
-
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
         // 核心红线：彻底排除文件夹
@@ -987,7 +959,6 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
 
                 if (type == "untagged" && meta.tags.isEmpty()) match = true;
                 else if (type == "recently_visited" && meta.atime >= now - 86400000.0) match = true;
-                else if (type == "uncategorized" && !meta.fileId128.empty() && categorizedIds.find(meta.fileId128) == categorizedIds.end()) match = true;
             }
         }
         

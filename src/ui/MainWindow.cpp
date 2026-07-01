@@ -270,7 +270,7 @@ void MainWindow::initUi() {
             unifiedNavigateTo(kProtocolCategory + QString::number(id) + "?name=" + name);
         } else if (type == "bookmark" && !path.isEmpty()) {
             unifiedNavigateTo(path);
-        } else if (type == "all" || type == "uncategorized" || type == "untagged" || 
+        } else if (type == "all" || type == "untagged" ||
                    type == "recently_visited" || type == "trash") {
             unifiedNavigateTo(kProtocolSystem + type);
         } else {
