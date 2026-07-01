@@ -1218,7 +1218,6 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
         m_frns[idx] = 0;
         m_frn_to_idx.erase(it);
         m_dead_count++;
-        const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
         m_wasted_string_bytes += (strlen(p) + 1);
         
         { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
