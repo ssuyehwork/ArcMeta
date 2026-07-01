@@ -52,6 +52,32 @@ void AutoImportManager::stopListening() {
     m_isListening = false;
 }
 
+void AutoImportManager::syncAllManagedLibraries() {
+    const auto drives = QDir::drives();
+    bool changed = false;
+    for (const QFileInfo& d : drives) {
+        QString drive = d.absolutePath();
+        QString letter = drive.left(1).toUpper();
+
+        // 2026-08-xx 物理同步：兼容不同大小写的物理目录名
+        QDir rootDir(drive);
+        QStringList entries = rootDir.entryList({"ArcMeta.Library_*"}, QDir::Dirs | QDir::Hidden);
+
+        QString targetName = "ArcMeta.Library_" + letter;
+        for (const QString& entry : entries) {
+            if (QString::compare(entry, targetName, Qt::CaseInsensitive) == 0) {
+                QString managedPath = rootDir.absoluteFilePath(entry);
+                qDebug() << "[AutoImport] 启动对账：发现物理托管库，执行同步 ->" << managedPath;
+                handleRecursiveIngestion(QDir::toNativeSeparators(managedPath).toStdWString());
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        MetadataManager::instance().notifyFullUIRebuild();
+    }
+}
+
 void AutoImportManager::onEntryAdded(uint64_t key) {
     int idx = MftReader::instance().getIndexByKey(key);
     if (idx < 0) return;
@@ -92,7 +118,7 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
             Category cat = CategoryRepo::getById(catId);
             if (cat.id > 0) {
                 // 根目录强制保护逻辑
-                if (cat.parentId == 0 && QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_")) {
+                if (cat.parentId == 0 && QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
                     QString expectedName = "ArcMeta.Library_" + qPath.left(1).toUpper();
                     if (newName != expectedName) {
                         qDebug() << "[AutoImport] 检测到根目录违规重命名，强制恢复:" << newName << "->" << expectedName;

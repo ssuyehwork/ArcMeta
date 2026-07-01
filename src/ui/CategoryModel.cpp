@@ -258,7 +258,7 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
                         QFileInfo oldInfo(oldPath);
                         
                         // 根目录保护：不允许在 UI 重命名托管库根目录
-                        if (oldInfo.fileName().startsWith("ArcMeta.Library_") && cat.parentId == 0) {
+                        if (oldInfo.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive) && cat.parentId == 0) {
                             return false; 
                         }
 
