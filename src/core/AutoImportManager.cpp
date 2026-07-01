@@ -7,6 +7,12 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QMetaObject>
+#include <QFileInfo>
+#include <QFile>
+#include <functional>
+#include <cwchar>
+#include <cstdint>
+#include "../meta/CategoryRepo.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
