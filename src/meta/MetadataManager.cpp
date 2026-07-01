@@ -350,6 +350,7 @@ void MetadataManager::notifyFullUIRebuild() {
 
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[Metadata] 收到项目注册请求:" << QString::fromStdWString(nPath) << "Authorized:" << authorized;
 
     // 2026-07-xx 按照 Plan-117：采用登记->解析->完成的闭环逻辑
     // 为了性能，registerItem 内部不再调用 markAsRegistered 以免产生多余的独立事务
@@ -1324,6 +1325,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     
     RuntimeMeta rMeta = getMeta(nPath);
     sqlite3* db = nullptr;
+    qDebug() << "[Metadata] 执行持久化任务:" << QString::fromStdWString(nPath) << "FID:" << QString::fromStdString(rMeta.fileId128) << "Authorized:" << authorized;
     
     // 2026-06-xx 架构重定向：判定是否为物理磁盘根目录（如 C:\）。
     // 理由：盘符置顶等元数据属于全应用级全局元数据，必须存入全局库以解决物理分库未挂载或盘符漂移冲突。
@@ -1350,9 +1352,16 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     // 2026-07-xx 按照 Plan-116：核心准入拦截逻辑
     // 如果是新记录且未经过授权（非 USN 触发），则拦截入库动作
     if (isNew && !authorized) {
-        // 记录日志，但不产生新记录
-        qDebug() << "[Metadata] 拦截到非授权入库请求（库外项目）:" << QString::fromStdWString(nPath);
-        return;
+        // 2026-07-xx 补丁：必须校验路径是否确实在托管库内部。
+        // 如果在内部但被标记为 isNew 且未授权，可能是监控漏掉的初始信号，应允许入库。
+        if (isInsideManagedLibrary(nPath)) {
+            qDebug() << "[Metadata] 识别到托管库内新增项，自动补齐授权:" << QString::fromStdWString(nPath);
+            authorized = true;
+        } else {
+            // 记录日志，但不产生新记录
+            qDebug() << "[Metadata] 拦截到非授权入库请求（库外项目）:" << QString::fromStdWString(nPath) << "isNew:" << isNew;
+            return;
+        }
     }
 
     sqlite3_stmt* stmt;

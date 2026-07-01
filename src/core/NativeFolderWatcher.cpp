@@ -142,15 +142,24 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
     while (true) {
         FILE_NOTIFY_INFORMATION* notify = (FILE_NOTIFY_INFORMATION*)pBase;
         std::wstring fileName(notify->FileName, notify->FileNameLength / sizeof(WCHAR));
-        std::wstring fullPath = item->path + L"/" + fileName;
 
-        // 转换路径分隔符
-        for (auto& ch : fullPath) if (ch == L'\\') ch = L'/';
+        // 统一使用 Windows 原生分隔符拼接路径，并确保格式标准化
+        QString qFullPath = QDir::toNativeSeparators(QString::fromStdWString(item->path) + "/" + QString::fromStdWString(fileName));
+        std::wstring fullPath = qFullPath.toStdWString();
+
+        // 过滤规则：严禁监控 .arcmeta 目录自身的变动，防止死循环
+        if (qFullPath.contains("/.arcmeta") || qFullPath.contains("\\.arcmeta")) {
+            if (notify->NextEntryOffset == 0) break;
+            pBase += notify->NextEntryOffset;
+            continue;
+        }
 
         // 触发 MetadataManager 登记逻辑
         if (notify->Action == FILE_ACTION_ADDED ||
             notify->Action == FILE_ACTION_RENAMED_NEW_NAME ||
             notify->Action == FILE_ACTION_MODIFIED) {
+
+            qDebug() << "[Watcher] 检测到文件变动:" << notify->Action << qFullPath;
 
             // 2026-07-xx 按照 Plan-117：触发登记与解析闭环
             // 异步调用以免阻塞工作线程

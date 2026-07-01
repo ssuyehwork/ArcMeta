@@ -52,7 +52,10 @@ void CoreController::startSystem() {
                         QString driveRoot = QString(d.absolutePath().at(0).toUpper());
                         driveRoot.append(":");
                         QString managedAbs = QDir::toNativeSeparators(driveRoot + relPath);
+                        qDebug() << "[Core] 识别到托管库，开启监控:" << managedAbs;
                         NativeFolderWatcher::instance().addWatch(managedAbs.toStdWString());
+                    } else {
+                        qDebug() << "[Core] 该盘符未配置托管库，跳过监控:" << d.absolutePath();
                     }
                 }
             }
