@@ -405,6 +405,8 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
     }
 
     // 3. 开启批量事务处理
+    qDebug() << "[Metadata] 开始批量级联登记，总项数:" << pathsToRegister.size();
+    QStringList qPathsToRegister;
     SqlTransaction trans(db);
     for (const auto& p : pathsToRegister) {
         ensureActivated(p);
@@ -414,8 +416,15 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         }
         // 这里的 persistAsync 会使用已经开启的事务
         persistAsync(p, false, true);
+        qPathsToRegister << QString::fromStdWString(p);
     }
-    trans.commit();
+    if (trans.commit()) {
+        qDebug() << "[Metadata] 批量登记事务提交成功，触发异步解析流程";
+        // 4. 登记完成后，触发异步解析链实现闭环
+        registerItemsAsync(qPathsToRegister, true);
+    } else {
+        qWarning() << "[Metadata] 批量登记事务提交失败！";
+    }
 }
 
 void MetadataManager::markAsIngested(const std::wstring& path) {
@@ -432,7 +441,7 @@ void MetadataManager::markAsIngested(const std::wstring& path) {
 void MetadataManager::registerItemsAsync(const QStringList& paths, bool authorized) {
     if (paths.isEmpty()) return;
     
-    // 2026-07-xx 按照 Plan-88/116：全异步批量注册链，受控模式
+    // 2026-07-xx 按照 Plan-117：全异步批量注册解析链，状态闭环
     (void)QtConcurrent::run([this, paths, authorized]() {
 #ifdef Q_OS_WIN
         CoInitializeEx(NULL, COINIT_APARTMENTTHREADED); // 赋予 Shell/图像分析能力
@@ -442,14 +451,27 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
             
             // 1. 激活 (优化版，内含锁分离 I/O)
             ensureActivated(nPath);
+
+            // 2. 设置待处理状态
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                m_cache[nPath].ingestionStatus = 0;
+            }
             
-            // 2. 物理与视觉属性提取 (耗时操作)
+            // 3. 物理与视觉属性提取 (耗时解析操作)
             tryExtractDimensions(nPath);
-            // 2026-07-xx 按照 Plan-116：只有授权来源允许入库
-            persistAsync(nPath, false, authorized);
             tryExtractColor(nPath);
+
+            // 4. 标记完成并持久化
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                m_cache[nPath].ingestionStatus = 1;
+            }
             
-            // 3. 增量通知 UI
+            // 只有授权来源允许入库
+            persistAsync(nPath, false, authorized);
+            
+            // 5. 增量通知 UI
             notifyUI(RefreshLevel::PathUpdate, qp);
         }
 #ifdef Q_OS_WIN
@@ -1131,6 +1153,9 @@ void MetadataManager::tryExtractDimensions(const std::wstring& path) {
         RuntimeMeta& meta = instance().m_cache[nPath];
         meta.width = w;
         meta.height = h;
+        qDebug() << "[Metadata] 尺寸解析成功:" << w << "x" << h << QString::fromStdWString(nPath);
+    } else {
+        qDebug() << "[Metadata] 尺寸解析跳过或失败:" << QString::fromStdWString(nPath);
     }
 }
 
@@ -1169,6 +1194,7 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
                     QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
                     instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
                     success = true;
+                    qDebug() << "[Metadata] 颜色分析成功:" << dominant.name() << QString::fromStdWString(nPath);
                 }
             }
         }
@@ -1417,7 +1443,8 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         sqlite3_bind_int(stmt, 18, rMeta.height);
         sqlite3_bind_int(stmt, 19, rMeta.ingestionStatus);
 
-        if (sqlite3_step(stmt) == SQLITE_DONE) {
+        int rc = sqlite3_step(stmt);
+        if (rc == SQLITE_DONE) {
             if (isNew) {
                 // 2026-07-xx 物理修复：新项目入库时，若其状态为回收站或失效，则不增加总计数
                 if (!rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
@@ -1430,6 +1457,9 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
                 m_cache[nPath].isManaged = true;
             }
+            qDebug() << "[Metadata] SQL 执行成功: INSERT/REPLACE" << QString::fromStdWString(nPath);
+        } else {
+            qWarning() << "[Metadata] SQL 执行失败 [" << rc << "]:" << sqlite3_errmsg(db) << "Path:" << QString::fromStdWString(nPath);
         }
         sqlite3_finalize(stmt);
     }
