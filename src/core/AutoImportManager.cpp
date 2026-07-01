@@ -112,18 +112,37 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
     qDebug() << "[DIAG] getFullPath 返回:" << qPath;  // 新增 
     std::wstring fullPath = qPath.toStdWString();
 
-    // 2026-07-xx 按照 Plan-118：物理 -> 逻辑重命名同步
-    // 判定是否为库文件夹改名：1. 是文件夹；2. 位于根目录；3. 绑定了 FID
+    // 2026-07-xx 按照 Plan-118：物理 -> 逻辑同步增强
+    // 判定是否为库文件夹变动：1. 是文件夹；2. 位于根目录；3. 名称匹配库规范
     QFileInfo info(qPath);
     if (info.isDir() && info.dir().isRoot()) {
-        std::string fid = MetadataManager::instance().getFileIdSync(fullPath);
-        if (!fid.empty()) {
-            // 通过 FID 反查是否为托管库，若是则同步改名
-            if (CategoryRepo::updateNameByFid(fid, info.fileName().toStdWString())) {
-                qDebug() << "[AutoImport] 物理驱动重命名成功: FID =" << QString::fromStdString(fid)
-                         << "NewName =" << info.fileName();
-                return; // 库文件夹改名不触发入库流程
+        QString name = info.fileName();
+        if (name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+            std::string fid = MetadataManager::instance().getFileIdSync(fullPath);
+            if (!fid.empty()) {
+                // 1. 尝试作为重命名更新 (旧库改名)
+                if (CategoryRepo::updateNameByFid(fid, name.toStdWString())) {
+                    qDebug() << "[AutoImport] 物理驱动重命名同步成功: FID =" << QString::fromStdString(fid)
+                             << "NewName =" << name;
+                    return;
+                }
+
+                // 2. 若更新未命中，尝试作为新库同步 (新建文件夹重命名为库名)
+                auto existingCats = CategoryRepo::getAll();
+                bool exists = false;
+                for (const auto& c : existingCats) { if (c.folderFid == fid) { exists = true; break; } }
+                if (!exists) {
+                    Category cat;
+                    cat.name = name.toStdWString();
+                    cat.folderFid = fid;
+                    cat.pinned = true;
+                    if (CategoryRepo::add(cat)) {
+                        qDebug() << "[AutoImport] 通过物理重命名感应到新库并创建分类: " << name;
+                        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                    }
+                }
             }
+            return; // 库文件夹变动不触发入库流程
         }
     }
 
@@ -162,6 +181,12 @@ void AutoImportManager::recordRecentVisitedFolder(const std::wstring& path) {
 
 void AutoImportManager::scanExistingLibraries() {
     qDebug() << "[AutoImport] 开始扫描物理存量托管库...";
+
+    // 2026-07-xx 物理对齐：在执行 MFT 搜索前，必须先同步当前在线磁盘状态
+    // 理由：MftReader::search 内部会校验 m_drive_active_mask，若未同步则所有搜索结果都会被过滤
+    QStringList drives;
+    for (const auto& d : QDir::drives()) drives << d.absolutePath();
+    MftReader::instance().updateActiveDrives(drives);
 
     // 1. 利用 MftReader 索引快速定位符合 ArcMeta.Library_ 命名的文件夹
     // 此处使用空 query 触发全量搜索，配合 includeDollar=false 优化性能

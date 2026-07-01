@@ -42,8 +42,22 @@ void CoreController::startSystem() {
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
 
-            // 2026-07-xx 按照 Plan-118：初始化时载入 MFT 缓存
-            MftReader::instance().loadFromCache();
+            // 2026-07-xx 按照 Plan-118：初始化时载入 MFT 缓存并确保索引构建
+            if (!MftReader::instance().loadFromCache()) {
+                qDebug() << "[Core] MFT 缓存不存在，准备执行驱动器扫描...";
+            }
+
+            QStringList drivesToScan;
+            for (const auto& d : QDir::drives()) {
+                QString letter = d.absolutePath();
+                if (!MftReader::instance().isDriveIndexed(letter)) {
+                    drivesToScan << letter;
+                }
+            }
+            if (!drivesToScan.isEmpty()) {
+                qDebug() << "[Core] 发现未索引盘符，执行同步构建索引:" << drivesToScan;
+                MftReader::instance().buildIndex(drivesToScan);
+            }
 
             // 启动原生监控服务
             // 2026-07-xx 按照 Plan-117/118：初始化完成后，使用统一识别算法启动监控

@@ -268,12 +268,16 @@ bool CategoryRepo::updateNameByFid(const std::string& fid, const std::wstring& n
         sqlite3_bind_text16(stmt, 1, newName.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 2, fid.c_str(), -1, SQLITE_TRANSIENT);
         if (sqlite3_step(stmt) == SQLITE_DONE) {
+            int changes = sqlite3_changes(db);
             sqlite3_finalize(stmt);
-            qDebug() << "[CategoryRepo] 物理同步逻辑名成功: FID =" << QString::fromStdString(fid) << "NewName =" << QString::fromStdWString(newName);
             
-            // 触发 UI 刷新（防抖由面板负责）
-            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
-            return true;
+            if (changes > 0) {
+                qDebug() << "[CategoryRepo] 物理同步逻辑名成功: FID =" << QString::fromStdString(fid) << "NewName =" << QString::fromStdWString(newName);
+                // 触发 UI 刷新（防抖由面板负责）
+                MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                return true;
+            }
+            return false;
         }
         sqlite3_finalize(stmt);
     }
