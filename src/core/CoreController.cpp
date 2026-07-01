@@ -55,7 +55,10 @@ void CoreController::startSystem() {
                         qDebug() << "[Core] 识别到托管库 (或兜底路径)，开启监控:" << QString::fromStdWString(managedAbsW);
                         NativeFolderWatcher::instance().addWatch(managedAbsW);
                     } else {
-                        qDebug() << "[Core] 盘符" << letter << "未配置且无默认托管库，跳过监控";
+                        QString msg("[Core] 盘符 ");
+                        msg.append(letter);
+                        msg.append(" 未配置且无默认托管库，跳过监控");
+                        qDebug() << msg;
                     }
                 }
             }

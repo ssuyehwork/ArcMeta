@@ -158,7 +158,11 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
         std::wstring fileName(notify->FileName, notify->FileNameLength / sizeof(WCHAR));
 
         // 统一使用 Windows 原生分隔符拼接路径，并确保格式标准化
-        QString qFullPath = QDir::toNativeSeparators(QString::fromStdWString(item->path) + "/" + QString::fromStdWString(fileName));
+        QString qFullPath = QString::fromStdWString(item->path);
+        qFullPath.append("/");
+        qFullPath.append(QString::fromStdWString(fileName));
+        qFullPath = QDir::toNativeSeparators(qFullPath);
+
         std::wstring fullPath = qFullPath.toStdWString();
 
         qDebug() << "[Watcher] IOCP 收到原始信号 Action:" << notify->Action << "Path:" << qFullPath;

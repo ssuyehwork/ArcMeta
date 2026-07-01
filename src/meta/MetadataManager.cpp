@@ -63,16 +63,28 @@ std::wstring MetadataManager::normalizePath(const std::wstring& path) {
 
 std::string MetadataManager::generateFallbackFid(const std::wstring& vol, const std::wstring& frn) {
     if (vol.empty() || frn.empty()) return "";
-    return "FRN:" + QString::fromStdWString(vol).toUpper().toStdString() + ":" + QString::fromStdWString(frn).toUpper().toStdString();
+    std::string result = "FRN:";
+    result.append(QString::fromStdWString(vol).toUpper().toStdString());
+    result.append(":");
+    result.append(QString::fromStdWString(frn).toUpper().toStdString());
+    return result;
 }
 
 std::string MetadataManager::generateDeterministicSha256Id(const std::wstring& path) {
     if (path.empty()) return "";
     std::wstring nPath = MetadataManager::normalizePath(path);
     std::wstring vol = MetadataManager::getVolumeSerialNumber(nPath);
-    QByteArray seed = QString::fromStdWString(vol + L":" + nPath).toUtf8();
+
+    std::wstring seedW(vol);
+    seedW.append(L":");
+    seedW.append(nPath);
+
+    QByteArray seed = QString::fromStdWString(seedW).toUtf8();
     QByteArray hash = QCryptographicHash::hash(seed, QCryptographicHash::Sha256);
-    return "PATHURL:" + hash.left(16).toHex().toUpper().toStdString();
+
+    std::string result = "PATHURL:";
+    result.append(hash.left(16).toHex().toUpper().toStdString());
+    return result;
 }
 
 std::wstring MetadataManager::generateDeterministicFrn(const std::wstring& path) {
@@ -1040,23 +1052,33 @@ std::wstring MetadataManager::getManagedLibraryPath(const std::wstring& volSeria
     if (cleanLetter.endsWith("/") || cleanLetter.endsWith("\\")) {
         cleanLetter = cleanLetter.left(1);
     }
-    QString driveRoot = cleanLetter + ":";
+    QString driveRoot(cleanLetter);
+    driveRoot.append(":");
 
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
     QString relPath = ::ArcMeta::AppConfig::instance().getValue(key, QVariant("")).toString();
 
     // 2026-07-xx 按照 Plan-118：约定优于配置的默认兜底逻辑
     if (relPath.isEmpty()) {
-        QString defaultRel = "ArcMeta.Library_" + cleanLetter.at(0).toUpper();
-        QString fullPath = QDir::toNativeSeparators(driveRoot + "/" + defaultRel);
-        if (QFileInfo::exists(fullPath)) {
+        QString defaultRel("ArcMeta.Library_");
+        defaultRel.append(cleanLetter.at(0).toUpper());
+
+        QString fullPath(driveRoot);
+        fullPath.append("/");
+        fullPath.append(defaultRel);
+
+        if (QFileInfo::exists(QDir::toNativeSeparators(fullPath))) {
             relPath = defaultRel;
         }
     }
 
     if (relPath.isEmpty()) return L"";
 
-    return normalizePath((driveRoot + "/" + relPath).toStdWString());
+    QString finalPath(driveRoot);
+    finalPath.append("/");
+    finalPath.append(relPath);
+
+    return normalizePath(finalPath.toStdWString());
 }
 
 bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
@@ -1510,7 +1532,9 @@ std::wstring MetadataManager::getVolumeFromFid(const std::string& fid) {
 
 void MetadataManager::unloadVolumeNameCache(const std::wstring& volSerial) {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
-    std::string prefix = "FRN:" + QString::fromStdWString(volSerial).toUpper().toStdString() + ":";
+    std::string prefix = "FRN:";
+    prefix.append(QString::fromStdWString(volSerial).toUpper().toStdString());
+    prefix.append(":");
 
     auto cleanupMap = [&](std::unordered_map<std::wstring, std::vector<std::string>>& map) {
         for (auto it = map.begin(); it != map.end(); ) {
@@ -1534,7 +1558,9 @@ void MetadataManager::unloadVolumeNameCache(const std::wstring& volSerial) {
 
 void MetadataManager::loadVolumeNameCache(const std::wstring& volSerial) {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
-    std::string prefix = "FRN:" + QString::fromStdWString(volSerial).toUpper().toStdString() + ":";
+    std::string prefix = "FRN:";
+    prefix.append(QString::fromStdWString(volSerial).toUpper().toStdString());
+    prefix.append(":");
 
     for (const auto& pair : m_cache) {
         const std::wstring& path = pair.first;
