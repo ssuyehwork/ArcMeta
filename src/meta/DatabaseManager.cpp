@@ -18,8 +18,12 @@ SqlTransaction::SqlTransaction(struct sqlite3* db) : m_db(db) {
         if (!m_isNested) {
             // 2026-06-xx 物理加固：内置针对 SQLITE_BUSY 的重试机制
             int retry = 0;
-            while (sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr) == SQLITE_BUSY && retry++ < 5) {
+            int rc;
+            while ((rc = sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr)) == SQLITE_BUSY && retry++ < 5) {
                 Sleep(50);
+            }
+            if (rc != SQLITE_OK) {
+                qWarning() << "[DB] 事务开启失败:" << sqlite3_errmsg(m_db);
             }
         }
     }
@@ -351,6 +355,7 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
 
                 QString metaDir = getAppDir() + "/.arcmeta";
                 QString targetPath = metaDir + "/" + expectedFileName;
+                qDebug() << "[DB] 准备执行重命名:" << currentDiskPath << "->" << targetPath;
                 
                 // 如果目标已存在且不是自己，先将其移走（按用户规则重命名为无效）
                 if (QFile::exists(targetPath) && targetPath != currentDiskPath) {
@@ -360,11 +365,15 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
                     while (QFile::exists(invalidPath)) {
                         invalidPath = QString("%1_%2.db").arg(invalidBase).arg(counter++);
                     }
+                    qDebug() << "[DB] 目标文件已存在，先将其重命名为无效:" << invalidPath;
                     QFile::rename(targetPath, invalidPath);
                 }
 
                 if (QFile::rename(currentDiskPath, targetPath)) {
                     conn.diskPath = targetPath.toStdWString();
+                    qDebug() << "[DB] 重命名成功";
+                } else {
+                    qWarning() << "[DB] 重命名失败";
                 }
                 
                 // 重新加载到内存
