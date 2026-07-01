@@ -1015,24 +1015,44 @@ bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
     
     // 2026-07-xx 按照 Plan-117：高性能路径归属判定
     std::wstring volSerial = getVolumeSerialNumber(path);
+    qDebug() << "[DIAG] isInsideManagedLibrary volSerial=" << QString::fromStdWString(volSerial);
     if (volSerial == L"UNKNOWN") return false;
+
+    QString driveRoot = QString::fromWCharArray(&path[0], 1);
+    driveRoot.append(":");
 
     QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
     QString relPath = ::ArcMeta::AppConfig::instance().getValue(key, QVariant("")).toString();
-    if (relPath.isEmpty()) return false;
+    qDebug() << "[DIAG] AppConfig relPath=" << relPath;
+
+    // 2026-07-xx 按照 Plan-118：约定优于配置的默认兜底逻辑同步
+    if (relPath.isEmpty()) {
+        relPath = "ArcMeta.Library_" + driveRoot.left(1).toUpper();
+        // 必须验证该文件夹物理存在，避免对不存在的路径做前缀匹配。
+        QString fullRel = QDir::toNativeSeparators(driveRoot + "/" + relPath);
+        bool exists = QFileInfo::exists(fullRel);
+        qDebug() << "[DIAG] 默认兜底 relPath=" << relPath << "exists=" << exists;
+        if (!exists) return false;
+    }
 
     // 拼装托管库绝对路径并进行前缀匹配
-    QString driveRoot = QString::fromWCharArray(&path[0], 1);
-    driveRoot.append(":");
-    QString managedAbs = QDir::toNativeSeparators(driveRoot + relPath).toLower();
-    QString qPath = QString::fromStdWString(path).toLower();
+    QString managedAbs = QDir::toNativeSeparators(driveRoot + "/" + relPath).toLower();
+    QString qPath = QString::fromStdWString(normalizePath(path)).toLower();
+
+    qDebug() << "[DIAG] 最终托管库路径(L):" << managedAbs << "当前检查路径(L):" << qPath;
 
     // 必须包含在托管库目录下 (StartsWith 且确保边界)
     if (qPath.startsWith(managedAbs)) {
         // 进一步校验边界，防止 C:\ArcMeta.Library_D_Backup 匹配 C:\ArcMeta.Library_D
-        if (qPath.length() == managedAbs.length()) return true;
-        if (qPath[managedAbs.length()] == '\\' || qPath[managedAbs.length()] == '/') return true;
+        bool match = false;
+        if (qPath.length() == managedAbs.length()) match = true;
+        else if (qPath[managedAbs.length()] == '\\' || qPath[managedAbs.length()] == '/') match = true;
+
+        qDebug() << "[DIAG] isInsideManagedLibrary 最终判定结果:" << match;
+        return match;
     }
+
+    qDebug() << "[DIAG] isInsideManagedLibrary 最终判定结果: false";
     return false;
 }
 
