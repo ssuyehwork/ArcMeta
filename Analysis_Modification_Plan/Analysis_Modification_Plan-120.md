@@ -31,7 +31,7 @@
 *   在 `AutoImportManager::syncAllManagedLibraries` 中，物理删除对 `handleRecursiveIngestion` 的调用（对应用户原话：“再次启动主程序时不该自动继续扫描入库”）。
 *   启动流程改为仅识别托管库路径并确保 UI 树层级显示正确（对应用户原话：“只可以手动扫描入库”）。
 
-### 4.2 增强右键菜单：持久化“重新扫描”
+### 4.2 增强右键菜单（对应用户原话：“右键菜单”）：持久化“重新扫描”
 *   在 `src/ui/ContentPanel.cpp` 的菜单构建逻辑中，通过物理路径判定是否属于托管库（对应用户原话：“针对‘ArcMeta.Library_[盘符]’文件夹里的项目也要根据是否已入库来显示相应的选项”）。
 *   **强制注入**：无论项目入库状态如何，均固定增加“重新扫描”菜单项（对应用户原话：“即便已经入库了，右键菜单中也要显示‘重新扫描’”）。
 
@@ -55,7 +55,7 @@
 - [ ] `src/core/AutoImportManager.cpp`: 启动逻辑与摄取归一化。
 - [ ] `src/meta/MetadataManager.cpp`: 准入权限校验修正。
 - [ ] `src/ui/CategoryModel.cpp`: 物理移除系统项。
-- [ ] `src/ui/ContentPanel.cpp`: 右键菜单语义增强。
+- [ ] `src/ui/ContentPanel.cpp`: 右键菜单（对应用户原话：“右键菜单”）语义增强。
 
 **明确禁止越界修改的范围：**
 - [ ] 禁止修改任何非分析类文档。
