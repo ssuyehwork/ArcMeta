@@ -1018,16 +1018,22 @@ void CategoryPanel::initUi() {
         if (!paths.isEmpty()) {
             // 2026-07-xx 按照 Development_Plan 2.2：拖拽入库冲突拦截
             QStringList finalPaths;
+            bool anyBlocked = false;
             for (const QString& p : paths) {
                 std::wstring wp = p.toStdWString();
+                // 物理判定：仅拦截已位于托管库内且已解析完成的项目
                 if (MetadataManager::isInsideManagedLibrary(wp)) {
                     RuntimeMeta meta = MetadataManager::instance().getMeta(wp);
                     if (meta.ingestionStatus == 1) {
-                        ToolTipOverlay::instance()->showText(QCursor::pos(), "该项目已入库，无需再次入库", 1500, QColor("#FECF0E"));
+                        anyBlocked = true;
                         continue; 
                     }
                 }
                 finalPaths << p;
+            }
+
+            if (anyBlocked) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "该项目已入库，无需再次入库", 2000, QColor("#FECF0E"));
             }
 
             if (finalPaths.isEmpty()) return;

@@ -477,6 +477,12 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             m_allRecords[i].pinned = meta.pinned;
             m_allRecords[i].encrypted = meta.encrypted;
             m_allRecords[i].isManaged = meta.hasUserOperations();
+            
+            // 2026-07-xx 物理同步：实时更新文件夹登记进度
+            if (m_allRecords[i].isDir) {
+                m_allRecords[i].registrationProgress = MetadataManager::instance().getProgressFromDb(nPath.toStdWString());
+            }
+
             m_allRecords[i].palettes.clear();
             for (const auto& pe : meta.palettes) {
                 m_allRecords[i].palettes.push_back({pe.color, pe.ratio});
@@ -2066,7 +2072,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (!targetPaths.isEmpty()) {
                 // 2026-07-xx 按照 Development_Plan 2.1：强制执行物理状态同步与元数据重新解析
                 // 作用域严格锁定在选中项。
-                MetadataManager::instance().registerItemsAsync(targetPaths, true);
+                // 物理红线：必须显式传入 forceRescan = true 以无视现有状态
+                MetadataManager::instance().registerItemsAsync(targetPaths, true, true);
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "已启动强制重新扫描", 1500, QColor("#378ADD"));
             }
             break;

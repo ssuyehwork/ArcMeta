@@ -129,14 +129,16 @@ public:
     /**
      * @brief 异步批量注册项目 (Plan-88 性能重构)
      * 2026-07-xx 按照 Plan-116：UI 层主动调用的批量注册将受到严格拦截
+     * @param forceRescan 是否无视现有状态强制重新解析 (Development_Plan 2.1)
      */
-    void registerItemsAsync(const QStringList& paths, bool authorized = false);
+    void registerItemsAsync(const QStringList& paths, bool authorized = false, bool forceRescan = false);
 
     /**
      * @brief 登记项目（待处理状态 0）
      * 2026-07-xx 按照 Plan-117：标记项目并递归标记子项
+     * @param force 是否强制重新解析 (Development_Plan 2.1)
      */
-    void markAsRegistered(const std::wstring& path);
+    void markAsRegistered(const std::wstring& path, bool force = false);
 
     /**
      * @brief 标记项目已完成解析（完成状态 1）
@@ -215,12 +217,12 @@ public:
      * @brief 尝试提取视觉元数据（颜色与色板）
      * 2026-06-xx 提取公共逻辑：封装颜色解析与文件夹代表色逻辑
      */
-    static void tryExtractColor(const std::wstring& path);
+    static void tryExtractColor(const std::wstring& path, bool force = false);
 
     /**
      * @brief 尝试提取图像尺寸 (Plan-29)
      */
-    static void tryExtractDimensions(const std::wstring& path);
+    static void tryExtractDimensions(const std::wstring& path, bool force = false);
 
     /**
      * @brief 统一注册 .arcmeta 目录的 FRN
@@ -322,6 +324,13 @@ signals:
      * @param hasPending 是否存在待处理数据
      */
     void pendingSyncChanged(bool hasPending);
+
+    /**
+     * @brief 某个盘符的解析任务状态发生变化
+     * @param volumeSerial 卷序列号
+     * @param isRunning 是否正在运行
+     */
+    void ingestionTaskStatusChanged(const QString& volumeSerial, bool isRunning);
 
 private:
     MetadataManager(QObject* parent = nullptr);
