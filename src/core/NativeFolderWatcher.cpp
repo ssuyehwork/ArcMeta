@@ -186,14 +186,17 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
             // 异步调用以免阻塞工作线程
             QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
                 qDebug() << "[Watcher] 异步回调执行: 开始注册流程" << QString::fromStdWString(fullPath);
-                // 优化：如果是文件夹新增，执行批量级联标记
+                
                 QFileInfo info(QString::fromStdWString(fullPath));
                 if (info.isDir()) {
+                    // 目录：触发登记（内部已优化为异步，见 MetadataManager::markAsRegistered）
                     qDebug() << "[Watcher] 检测到目录级变动，触发级联登记";
                     MetadataManager::instance().markAsRegistered(fullPath);
                 } else {
-                    qDebug() << "[Watcher] 检测到文件级变动，触发单项注册";
-                    MetadataManager::instance().registerItem(fullPath, true);
+                    // 文件：直接走异步批量接口，所有耗时操作在后台线程执行
+                    qDebug() << "[Watcher] 检测到文件级变动，触发异步单项注册";
+                    MetadataManager::instance().registerItemsAsync(
+                        {QString::fromStdWString(fullPath)}, true);
                 }
             }, Qt::QueuedConnection);
         } else {
