@@ -859,6 +859,9 @@ ItemRecord ContentPanel::createItemRecord(const QString& path) {
     }
 
     if (r.isDir) {
+        // 2026-07-xx 按照 Development_Plan 3.2：从数据库加载持久化的进度值
+        r.registrationProgress = MetadataManager::instance().getProgressFromDb(wPath);
+
         QDir sub(nPath);
         r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
         r.suffix = ""; // 文件夹不应有扩展名后缀
@@ -1750,6 +1753,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         menu.addAction("复制路径")->setData(ActionCopyPath); 
         menu.addAction("属性")->setData(ActionProperties); 
 
+        // 2026-07-xx 按照 Development_Plan 2.1：始终显示“重新扫描”选项 (仅限托管库内项目)
+        if (MetadataManager::isInsideManagedLibrary(path.toStdWString())) {
+            menu.addSeparator();
+            menu.addAction(UiHelper::getIcon("sync", QColor("#378ADD"), 18), "重新扫描")->setData(ActionRescan);
+        }
+
         // 2026-06-xx 按照用户要求：在回收站分类中，最底部增加“永久删除”选项
         if (m_currentCategoryType == "trash") {
             menu.addSeparator();
@@ -2043,6 +2052,25 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionCopy: performCopy(false); break; 
         case ActionCut: performCopy(true); break; 
         case ActionPaste: performPaste(); break; 
+        case ActionRescan: {
+            auto indexes = view->selectionModel()->selectedIndexes();
+            QStringList targetPaths;
+            for (const auto& idx : indexes) {
+                if (idx.column() == 0) {
+                    QString p = idx.data(PathRole).toString();
+                    if (!p.isEmpty()) targetPaths << p;
+                }
+            }
+            if (targetPaths.isEmpty() && !path.isEmpty()) targetPaths << path;
+
+            if (!targetPaths.isEmpty()) {
+                // 2026-07-xx 按照 Development_Plan 2.1：强制执行物理状态同步与元数据重新解析
+                // 作用域严格锁定在选中项。
+                MetadataManager::instance().registerItemsAsync(targetPaths, true);
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "已启动强制重新扫描", 1500, QColor("#378ADD"));
+            }
+            break;
+        }
         case ActionRestore: {
             auto indexes = view->selectionModel()->selectedIndexes();
             for (const auto& idx : indexes) {
@@ -2981,6 +3009,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         pinIcon.paint(painter, statusRect); 
     } else if (isDir && progress >= 0.0 && progress < 1.0) {
         // --- 绘制进度环 (开箱即用代码) --- 
+        // 2026-07-xx 按照 Development_Plan 3.1：进度弧线完全通过数据库中的 0 和 1 标记值计算得出
         painter->save(); 
         painter->setRenderHint(QPainter::Antialiasing); 
          
@@ -2996,7 +3025,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         int spanAngle = -qRound(progress * 360 * 16); // 逆时针计算 
         painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
         painter->restore(); 
-    } else if (isManaged || progress >= 1.0) { 
+    } else if (isManaged || (isDir && progress >= 1.0)) { 
         // 已录入但未置顶，显示绿对勾 
         QIcon checkIcon = UiHelper::getIcon("check_circle", SuccessGreen, 16); 
         checkIcon.paint(painter, statusRect); 

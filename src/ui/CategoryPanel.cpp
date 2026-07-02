@@ -1016,7 +1016,23 @@ void CategoryPanel::initUi() {
         // 2026-07-xx 按照 Plan-116：归一化逻辑，改为物理迁移至托管库根目录
         // 理由：入库动作由且仅由 USN Journal 触发。此处仅负责物理层面的“归拢”。
         if (!paths.isEmpty()) {
-            QString firstPath = paths.first();
+            // 2026-07-xx 按照 Development_Plan 2.2：拖拽入库冲突拦截
+            QStringList finalPaths;
+            for (const QString& p : paths) {
+                std::wstring wp = p.toStdWString();
+                if (MetadataManager::isInsideManagedLibrary(wp)) {
+                    RuntimeMeta meta = MetadataManager::instance().getMeta(wp);
+                    if (meta.ingestionStatus == 1) {
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "该项目已入库，无需再次入库", 1500, QColor("#FECF0E"));
+                        continue; 
+                    }
+                }
+                finalPaths << p;
+            }
+
+            if (finalPaths.isEmpty()) return;
+
+            QString firstPath = finalPaths.first();
             std::wstring volSerial = MetadataManager::getVolumeSerialNumber(firstPath.toStdWString());
             QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
             QString relPath = AppConfig::instance().getValue(key, "").toString();
@@ -1024,7 +1040,7 @@ void CategoryPanel::initUi() {
             QString managedRoot = QDir::toNativeSeparators(drive + relPath);
 
             if (!managedRoot.isEmpty()) {
-                ImportHelper::importPaths(paths, managedRoot, this);
+                ImportHelper::importPaths(finalPaths, managedRoot, this);
             }
         }
     });

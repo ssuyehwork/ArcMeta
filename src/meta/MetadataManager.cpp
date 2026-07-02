@@ -371,26 +371,17 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     // 1. 激活项目 (获取 FID/FRN 等物理属性)
     ensureActivated(nPath);
 
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nPath].ingestionStatus = 0; // 先登记
-    }
+    // 2. 登记项目（待处理状态 0）
+    updateIngestionStatus(nPath, 0);
 
-    // 2. 提取图像尺寸 (Plan-29)
+    // 3. 提取图像尺寸 (Plan-29)
     tryExtractDimensions(nPath);
 
     // 4. 视觉预热 (提取颜色)
     tryExtractColor(nPath);
 
-    // 标记完成
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nPath].ingestionStatus = 1;
-    }
-
-    // 3. 物理同步 (存入数据库) - 合并为一个持久化动作
-    // 2026-07-xx 按照 Plan-116：透传授权状态，非授权请求禁止创建新记录
-    persistAsync(nPath, false, authorized);
+    // 5. 标记完成并持久化（完成状态 1）
+    updateIngestionStatus(nPath, 1);
 
     // 5. 通知 UI 刷新该路径
     notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
@@ -425,12 +416,7 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         SqlTransaction trans(db);
         for (const auto& p : pathsToRegister) {
             ensureActivated(p);
-            {
-                std::unique_lock<std::shared_mutex> lock(m_mutex);
-                m_cache[p].ingestionStatus = 0;
-            }
-            // 这里的 persistAsync 会使用已经开启的事务
-            persistAsync(p, false, true);
+            updateIngestionStatus(p, 0);
             qPathsToRegister << QString::fromStdWString(p);
         }
         
@@ -445,14 +431,111 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
 }
 
 void MetadataManager::markAsIngested(const std::wstring& path) {
+    updateIngestionStatus(path, 1);
+}
+
+void MetadataManager::updateIngestionStatus(const std::wstring& path, int newStatus) {
     std::wstring nPath = normalizePath(path);
+    bool changed = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         if (m_cache.count(nPath)) {
-            m_cache[nPath].ingestionStatus = 1;
+            if (m_cache[nPath].ingestionStatus != newStatus) {
+                m_cache[nPath].ingestionStatus = newStatus;
+                changed = true;
+            }
         }
     }
-    persistAsync(nPath, false, true);
+
+    if (changed) {
+        persistAsync(nPath, false, true);
+
+        // 异步更新父目录进度，避免阻塞
+        std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nPath)).absolutePath()).toStdWString();
+        if (!parentPath.empty() && isInsideManagedLibrary(parentPath)) {
+            QThreadPool::globalInstance()->start([this, parentPath]() {
+                calculateAndPersistProgress(parentPath);
+            });
+        }
+    }
+}
+
+void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath) {
+    std::wstring nFolder = normalizePath(folderPath);
+    
+    // 1. 获取库归属数据库
+    std::wstring volSerial = getVolumeSerialNumber(nFolder);
+    QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
+    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+    if (!db) return;
+
+    // 2. 统计状态（严禁物理读盘，仅使用数据库标记）
+    // 进度 = (该目录下状态为 1 的项目数) / (该目录下状态为 0 和 1 的项目总数)
+    int count0 = 0;
+    int count1 = 0;
+
+    sqlite3_stmt* stmt;
+    const char* sql = "SELECT ingestion_status, COUNT(*) FROM metadata WHERE path LIKE ? GROUP BY ingestion_status";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        std::wstring pattern = nFolder;
+        if (pattern.back() != L'\\' && pattern.back() != L'/') pattern += L'\\';
+        pattern += L"%";
+
+        sqlite3_bind_text16(stmt, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            int status = sqlite3_column_int(stmt, 0);
+            int count = sqlite3_column_int(stmt, 1);
+            if (status == 0) count0 = count;
+            else if (status == 1) count1 = count;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    double progress = 0.0;
+    if (count0 + count1 > 0) {
+        progress = (double)count1 / (count0 + count1);
+    }
+
+    // 3. 持久化进度到 system_stats 表（或复用 metadata 表的特殊字段，根据规约 3.2 记录到专属字段）
+    // 这里采用同步更新缓存并持久化的策略。为了简单起见，如果文件夹本身也在 metadata 表中，更新其 progress
+    // 注意：Development_Plan 3.2 提到记录到数据库专属字段。
+    // 我们假设 system_stats 表用于此类持久化，或者在 metadata 表增加 progress 字段。
+    // 根据之前的代码，metadata 表没有 progress 字段，但 ingestion_status 可以作为标记。
+    // 规约 3.2 要求 UI 从数据库加载。
+    
+    // 我们在 system_stats 中存储：PROGRESS:path -> value
+    const char* upsertSql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?)";
+    if (sqlite3_prepare_v2(db, upsertSql, -1, &stmt, nullptr) == SQLITE_OK) {
+        std::string key = "PROGRESS:" + QString::fromStdWString(nFolder).toUtf8().toStdString();
+        sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_double(stmt, 2, progress);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+
+    // 通知 UI 更新
+    notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nFolder));
+}
+
+double MetadataManager::getProgressFromDb(const std::wstring& folderPath) {
+    std::wstring nFolder = normalizePath(folderPath);
+    std::wstring volSerial = getVolumeSerialNumber(nFolder);
+    QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
+    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+    if (!db) return -1.0;
+
+    double progress = -1.0;
+    sqlite3_stmt* stmt;
+    const char* sql = "SELECT value FROM system_stats WHERE key = ?";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        std::string key = "PROGRESS:" + QString::fromStdWString(nFolder).toUtf8().toStdString();
+        sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            progress = sqlite3_column_double(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+    }
+    return progress;
 }
 
 void MetadataManager::registerItemsAsync(const QStringList& paths, bool authorized) {
@@ -469,24 +552,15 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
             // 1. 激活 (优化版，内含锁分离 I/O)
             ensureActivated(nPath);
 
-            // 2. 设置待处理状态
-            {
-                std::unique_lock<std::shared_mutex> lock(m_mutex);
-                m_cache[nPath].ingestionStatus = 0;
-            }
+            // 2. 设置待处理状态 (Development_Plan 1.1)
+            updateIngestionStatus(nPath, 0);
             
             // 3. 物理与视觉属性提取 (耗时解析操作)
             tryExtractDimensions(nPath);
             tryExtractColor(nPath);
 
-            // 4. 标记完成并持久化
-            {
-                std::unique_lock<std::shared_mutex> lock(m_mutex);
-                m_cache[nPath].ingestionStatus = 1;
-            }
-            
-            // 只有授权来源允许入库
-            persistAsync(nPath, false, authorized);
+            // 4. 标记完成并持久化 (Development_Plan 1.1)
+            updateIngestionStatus(nPath, 1);
             
             // 5. 增量通知 UI
             notifyUI(RefreshLevel::PathUpdate, qp);

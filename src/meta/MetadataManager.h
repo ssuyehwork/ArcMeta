@@ -143,6 +143,25 @@ public:
      */
     void markAsIngested(const std::wstring& path);
 
+    /**
+     * @brief 原子化更新项目的登记状态并同步父目录进度
+     * 2026-07-xx 按照 Development_Plan 3.3：专属原子函数负责标记值更新与比例值同步
+     * @param path 物理路径
+     * @param newStatus 新状态 (0: 待处理, 1: 已完成)
+     */
+    void updateIngestionStatus(const std::wstring& path, int newStatus);
+
+    /**
+     * @brief 计算并持久化指定目录的进度百分比
+     * 2026-07-xx 按照 Development_Plan 3.1 & 3.2
+     */
+    void calculateAndPersistProgress(const std::wstring& folderPath);
+
+    /**
+     * @brief 从数据库加载持久化的进度值
+     */
+    double getProgressFromDb(const std::wstring& folderPath);
+
     void ensureActivated(const std::wstring& nPath);
 
     void setRating(const std::wstring& path, int rating, bool notify = true);
