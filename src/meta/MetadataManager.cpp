@@ -460,22 +460,32 @@ void MetadataManager::updateIngestionStatus(const std::wstring& path, int newSta
         // 2026-07-xx 按照 Development_Plan 3.3：翻转必须由专属函数原子化完成并同步父目录
         persistAsync(nPath, false, true);
 
-        // 异步更新父目录进度，避免阻塞主线程
-        QString qParent = QFileInfo(QString::fromStdWString(nPath)).absolutePath();
-        std::wstring parentPath = normalizePath(qParent.toStdWString());
-        
-        if (!parentPath.empty() && isInsideManagedLibrary(parentPath)) {
-            // 2026-07-xx 物理对标：使用 QThreadPool 确保解析任务不积压 UI 队列
-            QThreadPool::globalInstance()->start([this, parentPath]() {
-                calculateAndPersistProgress(parentPath);
-            });
+        // 2026-07-xx 强化：递归向上更新所有符合条件的祖先目录进度，确保全局持久化一致性
+        QString current = QString::fromStdWString(nPath);
+        while (true) {
+            QString parent = QFileInfo(current).absolutePath();
+            if (parent == current || parent.isEmpty()) break;
+
+            std::wstring parentPath = normalizePath(parent.toStdWString());
+            if (isInsideManagedLibrary(parentPath)) {
+                // 异步更新进度，避免阻塞状态翻转的主线程
+                QThreadPool::globalInstance()->start([this, parentPath]() {
+                    calculateAndPersistProgress(parentPath);
+                });
+                current = parent;
+            } else {
+                break;
+            }
         }
     }
 }
 
 void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath) {
     std::wstring nFolder = normalizePath(folderPath);
-    
+
+    // 规约 3.4：严格限定范围。Library外项目一律不做任何统计计算。
+    if (!isInsideManagedLibrary(nFolder)) return;
+
     // 1. 获取归属数据库
     std::wstring volSerial = getVolumeSerialNumber(nFolder);
     QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
@@ -483,7 +493,7 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
     if (!db) return;
 
     // 2. 统计状态（规约 3.1：严禁物理读盘，仅使用数据库标记）
-    // 公式：进度 = (状态为 1 的项目数) / (状态为 0 和 1 的项目总数)
+    // 公式：进度 = (该目录下状态为 1 的项目数) / (该目录下状态为 0 和 1 的项目总数)
     int count0 = 0;
     int count1 = 0;
 
@@ -509,8 +519,8 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
     if (count0 + count1 > 0) {
         progress = (double)count1 / (count0 + count1);
     } else {
-        // 若目录下无受控项，进度视为 1.0 (已完成) 或按需设为 0.0
-        progress = 1.0; 
+        // 若目录下无任何标记项，视为已完成（或按需返回 -1.0，此处遵循旧版逻辑返回 1.0 以消除圆圈）
+        progress = 1.0;
     }
 
     // 3. 规约 3.2：持久化进度到数据库专属字段 (system_stats 表)
@@ -525,13 +535,7 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
     }
 
     // 4. 同步更新内存缓存，确保 UI 渲染一致性
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        if (m_cache.count(nFolder)) {
-            // 注意：RuntimeMeta 中新增 ingestionStatus 字段复用为进度值(0~1)存储（仅针对文件夹）
-            // 或保持独立。此处通过 PathUpdate 信号通知 UI 刷新
-        }
-    }
+    // 注意：RuntimeMeta 不直接存储进度值，UI 通过 getProgressFromDb 获取。
 
     // 通知 UI 刷新文件夹状态（进度环）
     notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nFolder));
@@ -540,12 +544,16 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
 double MetadataManager::getProgressFromDb(const std::wstring& folderPath) {
     // 规约 3.2：启动零开销。直接从数据库加载已存的进度数值进行渲染。
     std::wstring nFolder = normalizePath(folderPath);
+
+    // 规约 3.4：严格限定范围。Library外项目一律不渲染。
+    if (!isInsideManagedLibrary(nFolder)) return -1.0;
+
     std::wstring volSerial = getVolumeSerialNumber(nFolder);
     QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
     sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
-    if (!db) return 1.0; // 库外项默认不显示进度环
+    if (!db) return -1.0;
 
-    double progress = 1.0; // 默认已完成
+    double progress = -1.0; // 默认返回 -1.0 表示没有记录
     sqlite3_stmt* stmt;
     const char* sql = "SELECT value FROM system_stats WHERE key = ?";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
