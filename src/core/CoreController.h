@@ -42,6 +42,49 @@ public:
      */
     void abortSearch();
 
+    /**
+     * @brief 创建托管文件夹并注册逻辑分类 (2026-07-xx 按照 Analysis_Modification_Plan-120)
+     * @param driveLetter 盘符 (如 "C:")
+     * @return 是否成功创建
+     */
+    bool createManagedFolder(const QString& driveLetter);
+
+    /**
+     * @brief 更新项目星级 (中转接口)
+     */
+    void setItemRating(const QString& path, int rating);
+
+    /**
+     * @brief 更新项目颜色 (中转接口)
+     */
+    void setItemColor(const QString& path, const QString& color);
+
+    /**
+     * @brief 更新项目标签 (中转接口)
+     */
+    void setItemTags(const QString& path, const QStringList& tags);
+
+    /**
+     * @brief 触发托管库强制重扫 (2026-07-xx 按照 Analysis_Modification_Plan-120)
+     */
+    void rescanDrive(const QString& managedPath);
+
+    /**
+     * @brief 获取指定盘符的托管库绝对路径
+     */
+    QString getManagedFolderPath(const QString& driveLetter);
+
+    /**
+     * @brief 判定指定路径是否位于托管库内部
+     */
+    bool isInsideManagedLibrary(const QString& path);
+
+public slots:
+    /**
+     * @brief 响应硬件设备变更
+     */
+    void onDeviceChanged(bool arrival);
+
 signals:
     /**
      * @brief 搜索结果流式返回

@@ -392,8 +392,8 @@ void MainWindow::initUi() {
     connect(&QuickLookWindow::instance(), &QuickLookWindow::ratingRequested, this, [this](int rating) {
         if (m_currentQuickLookPath.isEmpty()) return;
 
-        // 2026-04-11 按照用户要求：补全物理持久化逻辑 (MetadataManager 直接入库)
-        MetadataManager::instance().setRating(m_currentQuickLookPath.toStdWString(), rating);
+        // 2026-07-xx 按照 Analysis_Modification_Plan-120：剥离 MetadataManager 直接调用，走 CoreController 中转
+        CoreController::instance().setItemRating(m_currentQuickLookPath, rating);
 
         m_metaPanel->setRating(rating);
         // 2026-04-11 按照用户要求：在预览窗设定星级时，左上方即时反馈
@@ -404,8 +404,8 @@ void MainWindow::initUi() {
     connect(&QuickLookWindow::instance(), &QuickLookWindow::colorRequested, this, [this](const QString& color) {
         if (m_currentQuickLookPath.isEmpty()) return;
 
-        // 2026-04-11 按照用户要求：补全物理持久化逻辑 (MetadataManager 直接入库)
-        MetadataManager::instance().setColor(m_currentQuickLookPath.toStdWString(), color.toStdWString());
+        // 2026-07-xx 按照 Analysis_Modification_Plan-120：剥离 MetadataManager 直接调用，走 CoreController 中转
+        CoreController::instance().setItemColor(m_currentQuickLookPath, color);
 
         m_metaPanel->setColor(color.toStdWString());
         
@@ -538,11 +538,11 @@ void MainWindow::initUi() {
             if(path.isEmpty()) continue;
             
             if (rating != -1) {
-                // 2026-05-24 按照用户要求：彻底移除 SCCH，改为中心化异步持久化
-                MetadataManager::instance().setRating(path.toStdWString(), rating);
+                // 2026-07-xx 按照 Analysis_Modification_Plan-120：剥离 MetadataManager 直接调用，走 CoreController 中转
+                CoreController::instance().setItemRating(path, rating);
             }
             if (color != L"__NO_CHANGE__") {
-                MetadataManager::instance().setColor(path.toStdWString(), color);
+                CoreController::instance().setItemColor(path, QString::fromStdWString(color));
             }
         }
     });
@@ -554,9 +554,8 @@ void MainWindow::initUi() {
             QString path = idx.data(PathRole).toString();
             if (path.isEmpty()) continue;
             
-            std::wstring wPath = path.toStdWString();
-            
-            MetadataManager::instance().setTags(wPath, tags);
+            // 2026-07-xx 按照 Analysis_Modification_Plan-120：剥离 MetadataManager 直接调用，走 CoreController 中转
+            CoreController::instance().setItemTags(path, tags);
         }
     });
 
@@ -623,24 +622,6 @@ void MainWindow::initUi() {
     });
 }
 
-#ifdef Q_OS_WIN
-bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
-    Q_UNUSED(eventType);
-    Q_UNUSED(result);
-
-    MSG* msg = static_cast<MSG*>(message);
-    if (msg->message == WM_DEVICECHANGE) {
-        // 2026-05-24 按照用户要求：捕捉硬件变更，硬盘插入时触发 GLOB 扫描对账
-        if (msg->wParam == DBT_DEVICEARRIVAL || msg->wParam == DBT_DEVICEREMOVECOMPLETE) {
-            qDebug() << "[Main] 检测到磁盘硬件变更，触发全量 GLOB 对账对账...";
-            // 异步触发扫描，防止阻塞 UI
-            (void)QtConcurrent::run([]() {
-            });
-        }
-    }
-    return false;
-}
-#endif
 
 void MainWindow::showEvent(QShowEvent* event) {
     QMainWindow::showEvent(event);
@@ -1555,6 +1536,7 @@ void MainWindow::initDriveBar() {
         if (letter.endsWith("/")) letter = letter.left(1) + ":";
         
         // 建立序列号反查映射
+        // 2026-07-xx 按照 Analysis_Modification_Plan-120：收拢读取接口
         std::wstring volSerial = MetadataManager::getVolumeSerialNumber(drive.absolutePath().toStdWString());
         if (volSerial != L"UNKNOWN") {
             m_serialToLetter[QString::fromStdWString(volSerial)] = letter;
@@ -1569,7 +1551,8 @@ void MainWindow::initDriveBar() {
         connect(btn, &QWidget::customContextMenuRequested, this, &MainWindow::onDriveButtonContextMenu);
         
         // 根据托管库是否存在初始化状态
-        QString managedPath = drive.absolutePath() + "ArcMeta.Library_" + letter.left(1);
+        // 2026-07-xx 按照 Analysis_Modification_Plan-120：剥离物理路径拼接逻辑
+        QString managedPath = CoreController::instance().getManagedFolderPath(letter);
         if (QDir(managedPath).exists()) {
             btn->setState(DriveButton::Active);
         } else {
@@ -1613,35 +1596,20 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
     if (!act) return;
     int val = act->data().toInt();
     if (val == 1) {
-        if (QDir().mkpath(managedPath)) {
+        // 2026-07-xx 按照 Analysis_Modification_Plan-120：剥离物理 IO 与分类模型构建
+        if (CoreController::instance().createManagedFolder(letter)) {
             btn->setState(DriveButton::Active);
-            
-            // 2026-08-xx 物理同步：创建托管库时，同步注册逻辑分类并锚定 FRN
-            std::wstring wPath = QDir::toNativeSeparators(managedPath).toStdWString();
-            std::string fid;
-            std::wstring frnStr;
-            if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid, &frnStr)) {
-                try {
-                    Category cat;
-                    cat.name = QFileInfo(managedPath).fileName().toStdWString();
-                    cat.physicalFrn = std::stoull(frnStr, nullptr, 16);
-                    cat.physicalPath = wPath;
-                    cat.color = CategoryRepo::getDefaultColor();
-                    if (CategoryRepo::add(cat)) {
-                        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
-                    }
-                } catch (...) {}
-            }
-            
             ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建成功", 1500, Style::SuccessGreen);
+        } else {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建失败，请检查权限", 1500, Style::ErrorRed);
         }
     } else if (val == 2) {
         ShellHelper::openInExplorer(managedPath);
     } else if (val == 3) {
         // 2026-07-xx 按照 Development_Plan 2.1：“重新扫描该盘”是指扫描该盘符下的“ArcMeta.Library_[盘符]”文件夹里所有的数据
         if (QDir(managedPath).exists()) {
-            // 物理红线：必须传入 force = true 以执行全量物理同步与元数据重新解析
-            MetadataManager::instance().markAsRegistered(managedPath.toStdWString(), true);
+            // 2026-07-xx 按照 Analysis_Modification_Plan-120：剥离 MetadataManager 直接调用，走 CoreController 中转
+            CoreController::instance().rescanDrive(managedPath);
             ToolTipOverlay::instance()->showText(QCursor::pos(), "已开始重新扫描托管库", 1500, QColor("#378ADD"));
         }
     }

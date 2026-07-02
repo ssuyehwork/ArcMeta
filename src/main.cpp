@@ -29,6 +29,7 @@
 #include "mft/MftReader.h"
 #include "core/CoreController.h"
 #include "core/AutoImportManager.h"
+#include "core/SystemEventFilter.h"
 
 /**
  * @brief 自定义日志处理程序，将 qDebug 消息重定向至本地 .log 文件
@@ -121,6 +122,12 @@ int main(int argc, char *argv[]) {
 
     a.setApplicationName("ArcMeta");
     a.setOrganizationName("ArcMetaTeam");
+
+    // 2026-07-xx 按照 Analysis_Modification_Plan-120：安装系统事件过滤器以脱离 MainWindow
+    ArcMeta::SystemEventFilter* sysFilter = new ArcMeta::SystemEventFilter(&a);
+    a.installNativeEventFilter(sysFilter);
+    QObject::connect(sysFilter, &ArcMeta::SystemEventFilter::deviceChanged,
+                     &ArcMeta::CoreController::instance(), &ArcMeta::CoreController::onDeviceChanged);
 
     // 2026-05-27 物理修复：在主线程预热元数据管理器单例
     // 确保其内部的 QTimer 等对象归属于主线程，避免跨线程创建导致的行为不确定性

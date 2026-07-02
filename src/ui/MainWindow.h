@@ -45,13 +45,6 @@ protected:
     // 2026-04-11 按照用户要求：showEvent 是执行 ToolTipOverlay GPU 真实预热的唯一合法时机
     void showEvent(QShowEvent* event) override;
 
-    /**
-     * @brief 2026-05-24 按照用户要求：拦截 Windows 原生事件监听硬件变化
-     */
-#ifdef Q_OS_WIN
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
-#endif
-
 private slots:
     void onPinToggled(bool checked);
     void onBackClicked();

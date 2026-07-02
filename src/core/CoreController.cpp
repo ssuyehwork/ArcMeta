@@ -186,4 +186,70 @@ void CoreController::setStatus(const QString& text, bool indexing) {
     }
 }
 
+bool CoreController::createManagedFolder(const QString& driveLetter) {
+    QString letter = driveLetter;
+    if (letter.endsWith("/") || letter.endsWith("\\")) letter = letter.left(1) + ":";
+
+    QString managedPath = letter + "/ArcMeta.Library_" + letter.left(1);
+
+    // 1. 物理创建
+    if (!QDir().mkpath(managedPath)) {
+        return false;
+    }
+
+    // 2. 数据库同步逻辑 (2026-08-xx 物理同步：创建托管库时，同步注册逻辑分类并锚定 FRN)
+    std::wstring wPath = QDir::toNativeSeparators(managedPath).toStdWString();
+    std::string fid;
+    std::wstring frnStr;
+    if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid, &frnStr)) {
+        try {
+            Category cat;
+            cat.name = QFileInfo(managedPath).fileName().toStdWString();
+            cat.physicalFrn = std::stoull(frnStr, nullptr, 16);
+            cat.physicalPath = wPath;
+            cat.color = CategoryRepo::getDefaultColor();
+            if (CategoryRepo::add(cat)) {
+                MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                return true;
+            }
+        } catch (...) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void CoreController::setItemRating(const QString& path, int rating) {
+    MetadataManager::instance().setRating(path.toStdWString(), rating);
+}
+
+void CoreController::setItemColor(const QString& path, const QString& color) {
+    MetadataManager::instance().setColor(path.toStdWString(), color.toStdWString());
+}
+
+void CoreController::setItemTags(const QString& path, const QStringList& tags) {
+    MetadataManager::instance().setTags(path.toStdWString(), tags);
+}
+
+void CoreController::rescanDrive(const QString& managedPath) {
+    MetadataManager::instance().markAsRegistered(managedPath.toStdWString(), true);
+}
+
+QString CoreController::getManagedFolderPath(const QString& driveLetter) {
+    QString letter = driveLetter;
+    if (letter.endsWith("/") || letter.endsWith("\\")) letter = letter.left(1) + ":";
+    return letter + "/ArcMeta.Library_" + letter.left(1);
+}
+
+bool CoreController::isInsideManagedLibrary(const QString& path) {
+    return MetadataManager::isInsideManagedLibrary(path.toStdWString());
+}
+
+void CoreController::onDeviceChanged(bool arrival) {
+    qDebug() << "[Core] 设备状态变更，执行同步对账... Arrival:" << arrival;
+    // 2026-07-xx 物理削峰：高频消息下仅执行增量同步，不干扰 UI
+    AutoImportManager::instance().syncAllManagedLibraries();
+}
+
 } // namespace ArcMeta
