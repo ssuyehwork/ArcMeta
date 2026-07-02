@@ -453,7 +453,7 @@ void MetadataManager::updateIngestionStatus(const std::wstring& path, int newSta
         // 异步更新父目录进度，避免阻塞
         std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nPath)).absolutePath()).toStdWString();
         if (!parentPath.empty() && isInsideManagedLibrary(parentPath)) {
-            QtConcurrent::run([this, parentPath]() {
+            QThreadPool::globalInstance()->start([this, parentPath]() {
                 calculateAndPersistProgress(parentPath);
             });
         }
