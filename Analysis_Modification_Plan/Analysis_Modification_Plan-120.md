@@ -1,4 +1,4 @@
-# 托管库逻辑归一化与架构清理方案 —— Analysis_Modification_Plan-120.md
+托管库逻辑归一化与架构清理方案 —— Analysis_Modification_Plan-120.md
 
 ## 1. 任务背景
 针对当前版本中 `ArcMeta.Library_` 托管库在启动时违规自动扫描、右键菜单功能残缺、拖拽逻辑存在冲突以及代码实现高度冗余（ImportHelper 与 AutoImportManager 重复造轮子）等问题进行深度解构，并提供符合资深程序员标准的重构蓝图。
