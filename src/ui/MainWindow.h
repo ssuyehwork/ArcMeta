@@ -154,6 +154,7 @@ private:
     QWidget* m_driveBarWidget = nullptr;
     QHBoxLayout* m_driveBarLayout = nullptr;
     QMap<QString, class DriveButton*> m_driveButtons;
+    QMap<QString, QString> m_serialToLetter; // 卷序列号 -> 盘符 (如 "A1B2C3D4" -> "C:")
 
     // 状态管理
     bool m_isPinned = false;

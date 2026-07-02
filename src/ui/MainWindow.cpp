@@ -167,6 +167,14 @@ MainWindow::MainWindow(QWidget* parent)
 
     initUi();
 
+    // 2026-07-xx 按照 Development_Plan 5.1：绑定盘符解析状态联动
+    connect(&MetadataManager::instance(), &MetadataManager::ingestionTaskStatusChanged, this, [this](const QString& vol, bool isRunning) {
+        QString letter = m_serialToLetter.value(vol);
+        if (!letter.isEmpty() && m_driveButtons.contains(letter)) {
+            m_driveButtons[letter]->setState(isRunning ? DriveButton::Running : DriveButton::Active);
+        }
+    });
+
     m_trayController = new TrayController(this);
     m_trayController->show();
 
@@ -1546,6 +1554,12 @@ void MainWindow::initDriveBar() {
         QString letter = drive.absolutePath().left(2);
         if (letter.endsWith("/")) letter = letter.left(1) + ":";
         
+        // 建立序列号反查映射
+        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(drive.absolutePath().toStdWString());
+        if (volSerial != L"UNKNOWN") {
+            m_serialToLetter[QString::fromStdWString(volSerial)] = letter;
+        }
+
         DriveButton* btn = new DriveButton(letter, m_driveBarWidget);
         m_driveButtons[letter] = btn;
         m_driveBarLayout->addWidget(btn);
@@ -1566,8 +1580,18 @@ void MainWindow::initDriveBar() {
 }
 
 void MainWindow::onDriveButtonClicked() {
-    // TODO: 盘符点击逻辑待后期安排
-    qDebug() << "[Main] Drive button clicked (TODO)";
+    DriveButton* btn = qobject_cast<DriveButton*>(sender());
+    if (!btn) return;
+    QString letter = btn->driveLetter();
+    QString managedPath = letter + "/ArcMeta.Library_" + letter.left(1);
+
+    if (!QDir(managedPath).exists()) {
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "尚未创建文件夹，请单击右键进行创建托管文件夹", 3000, QColor("#FECF0E"));
+        return;
+    }
+
+    // 若托管库已存在，则跳转至该盘符的托管库根目录
+    unifiedNavigateTo(managedPath);
 }
 
 void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
@@ -1616,7 +1640,8 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
     } else if (val == 3) {
         // 2026-07-xx 按照 Development_Plan 2.1：“重新扫描该盘”是指扫描该盘符下的“ArcMeta.Library_[盘符]”文件夹里所有的数据
         if (QDir(managedPath).exists()) {
-            MetadataManager::instance().markAsRegistered(managedPath.toStdWString());
+            // 物理红线：必须传入 force = true 以执行全量物理同步与元数据重新解析
+            MetadataManager::instance().markAsRegistered(managedPath.toStdWString(), true);
             ToolTipOverlay::instance()->showText(QCursor::pos(), "已开始重新扫描托管库", 1500, QColor("#378ADD"));
         }
     }

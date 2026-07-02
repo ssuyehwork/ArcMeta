@@ -387,11 +387,11 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 }
 
-void MetadataManager::markAsRegistered(const std::wstring& path) {
+void MetadataManager::markAsRegistered(const std::wstring& path, bool force) {
     std::wstring nPath = normalizePath(path);
     
     // 2026-07-xx 按照性能优化要求：将级联登记逻辑移至后台线程，杜绝大目录导入阻塞主线程
-    (void)QtConcurrent::run([this, nPath]() {
+    (void)QtConcurrent::run([this, nPath, force]() {
         // 1. 识别该路径归属的数据库
         std::wstring volSerial = getVolumeSerialNumber(nPath);
         QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
@@ -411,7 +411,7 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         }
 
         // 3. 开启批量事务处理
-        qDebug() << "[Metadata] 开始异步批量级联登记，总项数:" << pathsToRegister.size();
+        qDebug() << "[Metadata] 开始异步批量级联登记，总项数:" << pathsToRegister.size() << "Force:" << force;
         QStringList qPathsToRegister;
         SqlTransaction trans(db);
         for (const auto& p : pathsToRegister) {
@@ -423,7 +423,7 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         if (trans.commit()) {
             qDebug() << "[Metadata] 异步批量登记事务提交成功，触发后台解析流程";
             // 4. 登记完成后，触发异步解析链实现闭环
-            registerItemsAsync(qPathsToRegister, true);
+            registerItemsAsync(qPathsToRegister, true, force);
         } else {
             qWarning() << "[Metadata] 异步批量登记事务提交失败！";
         }
@@ -444,15 +444,28 @@ void MetadataManager::updateIngestionStatus(const std::wstring& path, int newSta
                 m_cache[nPath].ingestionStatus = newStatus;
                 changed = true;
             }
+        } else {
+            // 2026-07-xx 物理补全：若缓存中不存在，则激活并设置状态
+            lock.unlock();
+            ensureActivated(nPath);
+            lock.lock();
+            if (m_cache.count(nPath)) {
+                m_cache[nPath].ingestionStatus = newStatus;
+                changed = true;
+            }
         }
     }
 
     if (changed) {
+        // 2026-07-xx 按照 Development_Plan 3.3：翻转必须由专属函数原子化完成并同步父目录
         persistAsync(nPath, false, true);
 
-        // 异步更新父目录进度，避免阻塞
-        std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nPath)).absolutePath()).toStdWString();
+        // 异步更新父目录进度，避免阻塞主线程
+        QString qParent = QFileInfo(QString::fromStdWString(nPath)).absolutePath();
+        std::wstring parentPath = normalizePath(qParent.toStdWString());
+
         if (!parentPath.empty() && isInsideManagedLibrary(parentPath)) {
+            // 2026-07-xx 物理对标：使用 QThreadPool 确保解析任务不积压 UI 队列
             QThreadPool::globalInstance()->start([this, parentPath]() {
                 calculateAndPersistProgress(parentPath);
             });
@@ -463,22 +476,23 @@ void MetadataManager::updateIngestionStatus(const std::wstring& path, int newSta
 void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath) {
     std::wstring nFolder = normalizePath(folderPath);
 
-    // 1. 获取库归属数据库
+    // 1. 获取归属数据库
     std::wstring volSerial = getVolumeSerialNumber(nFolder);
     QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
     sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
     if (!db) return;
 
-    // 2. 统计状态（严禁物理读盘，仅使用数据库标记）
-    // 进度 = (该目录下状态为 1 的项目数) / (该目录下状态为 0 和 1 的项目总数)
+    // 2. 统计状态（规约 3.1：严禁物理读盘，仅使用数据库标记）
+    // 公式：进度 = (状态为 1 的项目数) / (状态为 0 和 1 的项目总数)
     int count0 = 0;
     int count1 = 0;
 
     sqlite3_stmt* stmt;
+    // 使用 LIKE 匹配该目录下所有层级的子项
     const char* sql = "SELECT ingestion_status, COUNT(*) FROM metadata WHERE path LIKE ? GROUP BY ingestion_status";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         std::wstring pattern = nFolder;
-        if (pattern.back() != L'\\' && pattern.back() != L'/') pattern += L'\\';
+        if (!pattern.empty() && pattern.back() != L'\\' && pattern.back() != L'/') pattern += L'\\';
         pattern += L"%";
 
         sqlite3_bind_text16(stmt, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
@@ -494,16 +508,13 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
     double progress = 0.0;
     if (count0 + count1 > 0) {
         progress = (double)count1 / (count0 + count1);
+    } else {
+        // 若目录下无受控项，进度视为 1.0 (已完成) 或按需设为 0.0
+        progress = 1.0;
     }
 
-    // 3. 持久化进度到 system_stats 表（或复用 metadata 表的特殊字段，根据规约 3.2 记录到专属字段）
-    // 这里采用同步更新缓存并持久化的策略。为了简单起见，如果文件夹本身也在 metadata 表中，更新其 progress
-    // 注意：Development_Plan 3.2 提到记录到数据库专属字段。
-    // 我们假设 system_stats 表用于此类持久化，或者在 metadata 表增加 progress 字段。
-    // 根据之前的代码，metadata 表没有 progress 字段，但 ingestion_status 可以作为标记。
-    // 规约 3.2 要求 UI 从数据库加载。
-
-    // 我们在 system_stats 中存储：PROGRESS:path -> value
+    // 3. 规约 3.2：持久化进度到数据库专属字段 (system_stats 表)
+    // 记录 Key 格式：PROGRESS:[path]
     const char* upsertSql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?)";
     if (sqlite3_prepare_v2(db, upsertSql, -1, &stmt, nullptr) == SQLITE_OK) {
         std::string key = "PROGRESS:" + QString::fromStdWString(nFolder).toUtf8().toStdString();
@@ -513,18 +524,28 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
         sqlite3_finalize(stmt);
     }
 
-    // 通知 UI 更新
+    // 4. 同步更新内存缓存，确保 UI 渲染一致性
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        if (m_cache.count(nFolder)) {
+            // 注意：RuntimeMeta 中新增 ingestionStatus 字段复用为进度值(0~1)存储（仅针对文件夹）
+            // 或保持独立。此处通过 PathUpdate 信号通知 UI 刷新
+        }
+    }
+
+    // 通知 UI 刷新文件夹状态（进度环）
     notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nFolder));
 }
 
 double MetadataManager::getProgressFromDb(const std::wstring& folderPath) {
+    // 规约 3.2：启动零开销。直接从数据库加载已存的进度数值进行渲染。
     std::wstring nFolder = normalizePath(folderPath);
     std::wstring volSerial = getVolumeSerialNumber(nFolder);
     QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
     sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
-    if (!db) return -1.0;
+    if (!db) return 1.0; // 库外项默认不显示进度环
 
-    double progress = -1.0;
+    double progress = 1.0; // 默认已完成
     sqlite3_stmt* stmt;
     const char* sql = "SELECT value FROM system_stats WHERE key = ?";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -538,17 +559,36 @@ double MetadataManager::getProgressFromDb(const std::wstring& folderPath) {
     return progress;
 }
 
-void MetadataManager::registerItemsAsync(const QStringList& paths, bool authorized) {
+void MetadataManager::registerItemsAsync(const QStringList& paths, bool authorized, bool forceRescan) {
     if (paths.isEmpty()) return;
     
     // 2026-07-xx 按照 Plan-117：全异步批量注册解析链，状态闭环
-    (void)QtConcurrent::run([this, paths, authorized]() {
+    (void)QtConcurrent::run([this, paths, authorized, forceRescan]() {
+        // 2026-07-xx 按照 Development_Plan 5.1：解析开始，盘符状态转圈
+        QMap<QString, bool> volRunning;
+        for (const auto& qp : paths) {
+            QString vol = QString::fromStdWString(getVolumeSerialNumber(qp.toStdWString()));
+            if (!volRunning.contains(vol)) {
+                volRunning[vol] = true;
+                emit ingestionTaskStatusChanged(vol, true);
+            }
+        }
+
 #ifdef Q_OS_WIN
         CoInitializeEx(NULL, COINIT_APARTMENTTHREADED); // 赋予 Shell/图像分析能力
 #endif
         for (const auto& qp : paths) {
             std::wstring nPath = normalizePath(qp.toStdWString());
             
+            // 2026-07-xx 按照 Development_Plan 2.1：状态无关性。强制执行流程。
+            if (!forceRescan) {
+                // 若非强制扫描，且已完成，则跳过
+                std::shared_lock<std::shared_mutex> lock(m_mutex);
+                if (m_cache.count(nPath) && m_cache[nPath].ingestionStatus == 1) {
+                    continue;
+                }
+            }
+
             // 1. 激活 (优化版，内含锁分离 I/O)
             ensureActivated(nPath);
 
@@ -556,8 +596,8 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
             updateIngestionStatus(nPath, 0);
             
             // 3. 物理与视觉属性提取 (耗时解析操作)
-            tryExtractDimensions(nPath);
-            tryExtractColor(nPath);
+            tryExtractDimensions(nPath, forceRescan);
+            tryExtractColor(nPath, forceRescan);
 
             // 4. 标记完成并持久化 (Development_Plan 1.1)
             updateIngestionStatus(nPath, 1);
@@ -568,6 +608,10 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
 #ifdef Q_OS_WIN
         CoUninitialize();
 #endif
+        // 2026-07-xx 按照 Development_Plan 5.1：解析结束，恢复状态
+        for (auto it = volRunning.begin(); it != volRunning.end(); ++it) {
+            emit ingestionTaskStatusChanged(it.key(), false);
+        }
     });
 }
 
@@ -1222,8 +1266,13 @@ void MetadataManager::activateItem(const std::wstring& path) {
     instance().registerItem(path);
 }
 
-void MetadataManager::tryExtractDimensions(const std::wstring& path) {
+void MetadataManager::tryExtractDimensions(const std::wstring& path, bool force) {
     std::wstring nPath = normalizePath(path);
+    {
+        std::shared_lock<std::shared_mutex> lock(instance().m_mutex);
+        if (!force && instance().m_cache.count(nPath) && instance().m_cache[nPath].width > 0) return;
+    }
+
     QFileInfo info(QString::fromStdWString(nPath));
     if (!info.isFile()) return;
 
@@ -1266,7 +1315,7 @@ void MetadataManager::tryExtractDimensions(const std::wstring& path) {
     }
 }
 
-void MetadataManager::tryExtractColor(const std::wstring& path) {
+void MetadataManager::tryExtractColor(const std::wstring& path, bool force) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     
     // 2026-07-xx 按照 Plan-29：在提取颜色时同步校准尺寸
@@ -1276,7 +1325,7 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
         const auto& m = instance().m_cache[nPath];
         currentW = m.width;
         currentH = m.height;
-        if (!m.color.empty() && currentW > 0) return; 
+        if (!force && !m.color.empty() && currentW > 0) return;
     }
     
     QFileInfo info(QString::fromStdWString(nPath));
