@@ -351,10 +351,6 @@ private:
     bool m_loaded = false; // 2026-06-xx 物理加固：加载状态标记
     std::atomic<bool> m_isInternalOperating{false}; // 2026-xx-xx 按照 Plan-105：信号抑制标志位
     
-    // 2026-05-25 按照用户要求：改用单例计时器与脏路径集，彻底解决计时器风暴
-    QTimer* m_batchTimer = nullptr;
-    std::unordered_set<std::wstring, std::hash<std::wstring>> m_dirtyPaths;
-
     // 2026-06-xx 性能加固：信号攒批机制，防止 5 万级数据扫描导致 UI 信号淹没
     QTimer* m_uiSignalTimer = nullptr;
     std::unordered_set<QString> m_pendingUiPaths;
@@ -365,15 +361,12 @@ private:
     void processVisualRetryQueue();
 
     /**
-     * @brief 异步持久化项元数据
-     * 2026-07-xx 按照 Plan-116：增加授权标志位，严禁非法入库
-     * @param authorized 是否允许创建新记录（只有 USN Journal 触发时为 true）
+     * @brief 持久化项元数据到磁盘
+     * 2026-10-xx 磁盘优先架构：改为同步落盘，支持“先磁盘后内存”流程
+     * @param rMeta 待写入的元数据。若为空，则从内存缓存中获取当前值。
+     * @param authorized 是否允许创建新记录
      */
-    void persistAsync(const std::wstring& path, bool notify = true, bool authorized = false);
-    void debouncePersist(const std::wstring& path);
-
-    // 2026-07-xx 按照 Plan-88：无锁版脏路径推送，解决递归死锁
-    void pushToDirty_NoLock(const std::wstring& nPath);
+    bool persistToDisk(const std::wstring& path, const RuntimeMeta* rMeta = nullptr, bool notify = true, bool authorized = false);
 };
 
 } // namespace ArcMeta

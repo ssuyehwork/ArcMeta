@@ -67,7 +67,6 @@ DatabaseManager::DatabaseManager(QObject* parent) : QObject(parent) {
 }
 
 DatabaseManager::~DatabaseManager() {
-    flushAll();
     for (auto& pair : m_driveDbs) {
         closeDb(pair.second);
     }
@@ -84,23 +83,17 @@ void DatabaseManager::ensureHidden(const std::wstring& path) {
 
 bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     std::string utf8Path = QString::fromStdWString(diskPath).toUtf8().toStdString();
-    qDebug() << "[DB] 尝试加载数据库:" << QString::fromStdString(utf8Path);
+    qDebug() << "[DB] 尝试加载物理数据库:" << QString::fromStdString(utf8Path);
     if (sqlite3_open_v2(utf8Path.c_str(), &conn.diskDb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
         qDebug() << "[DB] Failed to open disk DB:" << QString::fromStdString(utf8Path);
         return false;
     }
     ensureHidden(diskPath);
 
-    if (sqlite3_open(":memory:", &conn.memDb) != SQLITE_OK) {
-        sqlite3_close(conn.diskDb);
-        return false;
-    }
+    // 2026-07-xx 性能补强 (WAL)：开启磁盘实时落盘模式所需的性能参数
+    sqlite3_exec(conn.diskDb, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec(conn.diskDb, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
 
-    sqlite3_backup* backup = sqlite3_backup_init(conn.memDb, "main", conn.diskDb, "main");
-    if (backup) {
-        sqlite3_backup_step(backup, -1);
-        sqlite3_backup_finish(backup);
-    }
     // 初始化表结构 (Schema)
     const char* schema = R"(
         CREATE TABLE IF NOT EXISTS metadata (
@@ -173,7 +166,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         );
     )";
     char* errMsg = nullptr;
-    sqlite3_exec(conn.memDb, schema, nullptr, nullptr, &errMsg);
+    sqlite3_exec(conn.diskDb, schema, nullptr, nullptr, &errMsg);
     if (errMsg) {
         qDebug() << "[DB] Schema error:" << errMsg;
         sqlite3_free(errMsg);
@@ -181,7 +174,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         // 2026-06-xx 按照用户要求：清理任何误入 categories 表的系统保留 ID。
         // 系统分类 ID (-1, -2) 仅作为桶位标记存在于逻辑层，绝不可作为 UI 节点存储在 categories 表中。
         const char* cleanup = "DELETE FROM categories WHERE id <= 0;";
-        sqlite3_exec(conn.memDb, cleanup, nullptr, nullptr, nullptr);
+        sqlite3_exec(conn.diskDb, cleanup, nullptr, nullptr, nullptr);
     }
 
     // 2026-07-xx 物理加固：自动迁移旧版本数据库字段 (Plan-29)
@@ -191,7 +184,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     bool hasHeightColumn = false;
     bool hasIngestionStatusColumn = false;
 
-    if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt, nullptr) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(conn.diskDb, "PRAGMA table_info(metadata)", -1, &checkStmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(checkStmt) == SQLITE_ROW) {
             const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(checkStmt, 1));
             if (colName) {
@@ -207,26 +200,26 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
 
     if (!hasInvalidColumn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 is_invalid 字段...";
-        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN is_invalid INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+        sqlite3_exec(conn.diskDb, "ALTER TABLE metadata ADD COLUMN is_invalid INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
     }
     if (!hasWidthColumn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 width 字段...";
-        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN width INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+        sqlite3_exec(conn.diskDb, "ALTER TABLE metadata ADD COLUMN width INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
     }
     if (!hasHeightColumn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 height 字段...";
-        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN height INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+        sqlite3_exec(conn.diskDb, "ALTER TABLE metadata ADD COLUMN height INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
     }
     if (!hasIngestionStatusColumn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 ingestion_status 字段...";
-        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN ingestion_status INTEGER DEFAULT -1", nullptr, nullptr, nullptr);
+        sqlite3_exec(conn.diskDb, "ALTER TABLE metadata ADD COLUMN ingestion_status INTEGER DEFAULT -1", nullptr, nullptr, nullptr);
     }
 
     // 2026-08-xx 物理同步扩展：迁移 categories 表字段
     sqlite3_stmt* catCheckStmt;
     bool hasFrnColumn = false;
     bool hasPhysicalPathColumn = false;
-    if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(categories)", -1, &catCheckStmt, nullptr) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(conn.diskDb, "PRAGMA table_info(categories)", -1, &catCheckStmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(catCheckStmt) == SQLITE_ROW) {
             const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(catCheckStmt, 1));
             if (colName) {
@@ -239,33 +232,25 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     }
 
     if (!hasFrnColumn) {
-        sqlite3_exec(conn.memDb, "ALTER TABLE categories ADD COLUMN physical_frn INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+        sqlite3_exec(conn.diskDb, "ALTER TABLE categories ADD COLUMN physical_frn INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
     }
     if (!hasPhysicalPathColumn) {
-        sqlite3_exec(conn.memDb, "ALTER TABLE categories ADD COLUMN physical_path TEXT", nullptr, nullptr, nullptr);
+        sqlite3_exec(conn.diskDb, "ALTER TABLE categories ADD COLUMN physical_path TEXT", nullptr, nullptr, nullptr);
     }
 
     // 2026-08-xx 索引优化
-    sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_frn ON categories(physical_frn);", nullptr, nullptr, nullptr);
+    sqlite3_exec(conn.diskDb, "CREATE INDEX IF NOT EXISTS idx_categories_frn ON categories(physical_frn);", nullptr, nullptr, nullptr);
 
     conn.diskPath = diskPath;
     return true;
 }
 
-void DatabaseManager::saveDb(DbConnection& conn) {
-    if (!conn.memDb || !conn.diskDb) return;
-    sqlite3_backup* backup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-    if (backup) {
-        sqlite3_backup_step(backup, -1);
-        sqlite3_backup_finish(backup);
-    }
+void DatabaseManager::saveDb(DbConnection&) {
+    // 实时落盘模式下无需手动备份载入
 }
 
 void DatabaseManager::closeDb(DbConnection& conn) {
-    saveDb(conn);
-    if (conn.memDb) sqlite3_close(conn.memDb);
-    if (conn.diskDb) sqlite3_close(conn.diskDb);
-    conn.memDb = nullptr;
+    if (conn.diskDb) sqlite3_close_v2(conn.diskDb);
     conn.diskDb = nullptr;
 }
 
@@ -286,73 +271,21 @@ bool DatabaseManager::init() {
 }
 
 void DatabaseManager::flushAll() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    saveDb(m_globalDb);
-    for (auto& pair : m_driveDbs) {
-        saveDb(pair.second);
-    }
+    // 实时落盘模式下无需全量备份
 }
 
 bool DatabaseManager::flushStep() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto stepConn = [](DbConnection& conn) -> bool {
-        if (!conn.memDb || !conn.diskDb) return true;
-        if (!conn.activeBackup) {
-            conn.activeBackup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-        }
-        if (conn.activeBackup) {
-            int rc = sqlite3_backup_step(conn.activeBackup, 50); // 1.21：每 50 页一跳
-            if (rc == SQLITE_DONE || rc != SQLITE_OK) {
-                sqlite3_backup_finish(conn.activeBackup);
-                conn.activeBackup = nullptr;
-                return true;
-            }
-            return false;
-        }
-        return true;
-    };
-
-    bool allDone = true;
-    if (!stepConn(m_globalDb)) allDone = false;
-    for (auto& pair : m_driveDbs) {
-        if (!stepConn(pair.second)) allDone = false;
-    }
-    return allDone;
+    return true; // 实时落盘模式下始终视为完成
 }
 
 void DatabaseManager::shutdown() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    // 强制完成所有挂起的备份
-    auto forceFinish = [](DbConnection& conn) {
-        if (conn.activeBackup) {
-            sqlite3_backup_step(conn.activeBackup, -1);
-            sqlite3_backup_finish(conn.activeBackup);
-            conn.activeBackup = nullptr;
-        } else {
-            // 如果没有活动备份，执行一次完整的同步
-            if (conn.memDb && conn.diskDb) {
-                sqlite3_backup* b = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-                if (b) {
-                    sqlite3_backup_step(b, -1);
-                    sqlite3_backup_finish(b);
-                }
-            }
-        }
-    };
-    
-    forceFinish(m_globalDb);
-    for (auto& pair : m_driveDbs) forceFinish(pair.second);
-
     // 关闭所有句柄 (1.21：解除物理占用)
     for (auto& pair : m_driveDbs) {
-        if (pair.second.memDb) sqlite3_close_v2(pair.second.memDb);
         if (pair.second.diskDb) sqlite3_close_v2(pair.second.diskDb);
-        pair.second.memDb = nullptr;
         pair.second.diskDb = nullptr;
     }
-    if (m_globalDb.memDb) sqlite3_close_v2(m_globalDb.memDb);
     if (m_globalDb.diskDb) sqlite3_close_v2(m_globalDb.diskDb);
-    m_globalDb.memDb = nullptr;
     m_globalDb.diskDb = nullptr;
 }
 
@@ -374,12 +307,9 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
                 qDebug() << "[DB] 检测到盘符漂移，执行动态迁移:" << currentDiskPath << " -> " << expectedFileName;
                 
                 DbConnection& conn = m_driveDbs[volumeSerial];
-                saveDb(conn); // 先持久化
                 
                 // 关闭句柄以解除占用
-                if (conn.memDb) sqlite3_close_v2(conn.memDb);
                 if (conn.diskDb) sqlite3_close_v2(conn.diskDb);
-                conn.memDb = nullptr;
                 conn.diskDb = nullptr;
 
                 QString metaDir = getAppDir() + "/.arcmeta";
@@ -405,11 +335,11 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
                     qWarning() << "[DB] 重命名失败";
                 }
                 
-                // 重新加载到内存
+                // 重新加载物理库
                 loadDb(conn.diskPath, conn);
             }
         }
-        return m_driveDbs[volumeSerial].memDb;
+        return m_driveDbs[volumeSerial].diskDb;
     }
 
     if (m_driveDbs.find(volumeSerial) == m_driveDbs.end()) {
@@ -463,11 +393,11 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
             return nullptr;
         }
     }
-    return m_driveDbs[volumeSerial].memDb;
+    return m_driveDbs[volumeSerial].diskDb;
 }
 
 sqlite3* DatabaseManager::getGlobalDb() {
-    return m_globalDb.memDb;
+    return m_globalDb.diskDb;
 }
 
 } // namespace ArcMeta
