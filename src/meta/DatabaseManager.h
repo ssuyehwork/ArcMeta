@@ -42,13 +42,13 @@ public:
     bool init();
 
     /**
-     * @brief 持久化所有内存库到磁盘
+     * @brief 持久化所有库（已废弃，实时落盘模式下为空实现）
      */
     void flushAll();
 
     /**
-     * @brief 2026-07-xx 按照用户要求 (1.21)：步进式持久化接口
-     * @return 如果所有备份已完成，返回 true；否则返回 false。
+     * @brief 步进式持久化接口（已废弃，实时落盘模式下始终返回 true）
+     * @return 始终返回 true
      */
     bool flushStep();
 
@@ -58,14 +58,14 @@ public:
     void shutdown();
 
     /**
-     * @brief 获取指定磁盘卷序列号对应的内存连接
+     * @brief 获取指定磁盘卷序列号对应的数据库连接
      * @param volumeSerial 磁盘卷序列号（如 A1B2C3D4）
      * @param driveLetter 盘符（如 "D" 或 "D:"），可选。若提供则触发数据库文件名自适应重命名。
      */
     sqlite3* getMemoryDb(const std::wstring& volumeSerial, const QString& driveLetter = "");
 
     /**
-     * @brief 获取全局数据库内存连接
+     * @brief 获取全局数据库连接
      */
     sqlite3* getGlobalDb();
 
@@ -75,8 +75,6 @@ private:
 
     struct DbConnection {
         sqlite3* diskDb = nullptr;
-        sqlite3* memDb = nullptr;
-        sqlite3_backup* activeBackup = nullptr;
         std::wstring diskPath;
     };
 

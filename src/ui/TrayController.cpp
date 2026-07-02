@@ -78,16 +78,7 @@ void TrayController::onQuitApp() {
     // 2. 强制中断所有后台任务
     MftReader::instance().clear(); 
 
-    // 3. 步进式备份持久化
-    progress->setStatus("正在将内存数据持久化至磁盘...");
-    int totalSteps = 0;
-    while (!DatabaseManager::instance().flushStep()) {
-        totalSteps++;
-        QApplication::processEvents(); // 维持界面响应
-        if (totalSteps % 10 == 0) {
-            progress->setStatus(QString("正在保存数据 (已执行 %1 步拷贝)...").arg(totalSteps));
-        }
-    }
+    // 3. 磁盘优先架构：数据已实时落盘，无需执行同步循环
 
     // 4. 显式释放所有句柄 (解除占用)
     DatabaseManager::instance().shutdown();
