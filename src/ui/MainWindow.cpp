@@ -1556,11 +1556,9 @@ void MainWindow::initDriveBar() {
         
         // 根据托管库是否存在初始化状态
         QString managedPath = drive.absolutePath() + "ArcMeta.Library_" + letter.left(1);
-        if (QDir(managedPath).exists()) {
-            btn->setState(DriveButton::Active);
-        } else {
-            btn->setState(DriveButton::Inactive);
-        }
+        bool isManaged = QDir(managedPath).exists();
+        btn->setManaged(isManaged);
+        btn->setState(isManaged ? DriveButton::Active : DriveButton::Inactive);
     }
 
     // 2026-07-xx 按照用户要求：盘符处理状态联动（转圈显示）
@@ -1571,9 +1569,9 @@ void MainWindow::initDriveBar() {
             if (isProcessing) {
                 btn->setState(DriveButton::Running);
             } else {
-                // 恢复状态：根据托管库是否存在判定
-                QString managedPath = letter + "/ArcMeta.Library_" + letter.left(1);
-                btn->setState(QDir(managedPath).exists() ? DriveButton::Active : DriveButton::Inactive);
+                // 恢复状态：使用缓存的托管标记，严禁在信号响应中执行任何磁盘 I/O (Plan-117 物理加固)
+                // 解决 Z 盘等网络驱动器导致的 UI 线程假死问题
+                btn->setState(btn->isManaged() ? DriveButton::Active : DriveButton::Inactive);
             }
         }
     });
@@ -1606,6 +1604,7 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
     int val = act->data().toInt();
     if (val == 1) {
         if (QDir().mkpath(managedPath)) {
+            btn->setManaged(true);
             btn->setState(DriveButton::Active);
             
             // 2026-08-xx 物理同步：创建托管库时，同步注册逻辑分类并锚定 FRN

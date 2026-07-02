@@ -26,6 +26,14 @@ void DriveButton::setState(State state) {
     update();
 }
 
+void DriveButton::setManaged(bool managed) {
+    m_isManaged = managed;
+    // 如果不再受管且当前处于活动状态，强制切回非活动态（UI 及时反馈）
+    if (!managed && (m_state == Active || m_state == Running)) {
+        setState(Inactive);
+    }
+}
+
 void DriveButton::paintEvent(QPaintEvent* event) {
     Q_UNUSED(event);
     QPainter painter(this);

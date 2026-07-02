@@ -21,6 +21,9 @@ public:
     State state() const { return m_state; }
     QString driveLetter() const { return m_driveLetter; }
 
+    void setManaged(bool managed);
+    bool isManaged() const { return m_isManaged; }
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -32,6 +35,7 @@ private slots:
 private:
     QString m_driveLetter;
     State m_state = Inactive;
+    bool m_isManaged = false;
     int m_rotationAngle = 0;
     QTimer* m_animationTimer = nullptr;
     
