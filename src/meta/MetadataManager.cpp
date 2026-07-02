@@ -399,45 +399,49 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
 void MetadataManager::markAsRegistered(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
     
-    // 1. 识别该路径归属的数据库
-    std::wstring volSerial = getVolumeSerialNumber(nPath);
-    QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
-    if (!db) return;
+    // 2026-07-xx 按照性能优化要求：将级联登记逻辑移至后台线程，杜绝大目录导入阻塞主线程
+    (void)QtConcurrent::run([this, nPath]() {
+        // 1. 识别该路径归属的数据库
+        std::wstring volSerial = getVolumeSerialNumber(nPath);
+        QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
+        sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+        if (!db) return;
 
-    // 2. 收集所有待登记路径（递归）
-    std::vector<std::wstring> pathsToRegister;
-    pathsToRegister.push_back(nPath);
+        // 2. 收集所有待登记路径（递归）
+        std::vector<std::wstring> pathsToRegister;
+        pathsToRegister.push_back(nPath);
 
-    QFileInfo info(QString::fromStdWString(nPath));
-    if (info.isDir()) {
-        QDirIterator it(info.absoluteFilePath(), QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-        while (it.hasNext()) {
-            pathsToRegister.push_back(normalizePath(it.next().toStdWString()));
+        QFileInfo info(QString::fromStdWString(nPath));
+        if (info.isDir()) {
+            QDirIterator it(info.absoluteFilePath(), QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+            while (it.hasNext()) {
+                pathsToRegister.push_back(normalizePath(it.next().toStdWString()));
+            }
         }
-    }
 
-    // 3. 开启批量事务处理
-    qDebug() << "[Metadata] 开始批量级联登记，总项数:" << pathsToRegister.size();
-    QStringList qPathsToRegister;
-    SqlTransaction trans(db);
-    for (const auto& p : pathsToRegister) {
-        ensureActivated(p);
-        {
-            std::unique_lock<std::shared_mutex> lock(m_mutex);
-            m_cache[p].ingestionStatus = 0;
+        // 3. 开启批量事务处理
+        qDebug() << "[Metadata] 开始异步批量级联登记，总项数:" << pathsToRegister.size();
+        QStringList qPathsToRegister;
+        SqlTransaction trans(db);
+        for (const auto& p : pathsToRegister) {
+            ensureActivated(p);
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                m_cache[p].ingestionStatus = 0;
+            }
+            // 这里的 persistAsync 会使用已经开启的事务
+            persistAsync(p, false, true);
+            qPathsToRegister << QString::fromStdWString(p);
         }
-        // 这里的 persistAsync 会使用已经开启的事务
-        persistAsync(p, false, true);
-        qPathsToRegister << QString::fromStdWString(p);
-    }
-    if (trans.commit()) {
-        qDebug() << "[Metadata] 批量登记事务提交成功，触发异步解析流程";
-        // 4. 登记完成后，触发异步解析链实现闭环
-        registerItemsAsync(qPathsToRegister, true);
-    } else {
-        qWarning() << "[Metadata] 批量登记事务提交失败！";
-    }
+
+        if (trans.commit()) {
+            qDebug() << "[Metadata] 异步批量登记事务提交成功，触发后台解析流程";
+            // 4. 登记完成后，触发异步解析链实现闭环
+            registerItemsAsync(qPathsToRegister, true);
+        } else {
+            qWarning() << "[Metadata] 异步批量登记事务提交失败！";
+        }
+    });
 }
 
 void MetadataManager::markAsIngested(const std::wstring& path) {
