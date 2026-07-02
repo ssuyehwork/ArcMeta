@@ -159,6 +159,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, statusRect);
         } else if (isDir && progress >= 0.0 && progress < 1.0) {
             // --- 绘制进度环 (开箱即用代码) --- 
+            // 2026-07-xx 按照 Development_Plan 3.1：进度弧线完全通过数据库中的 0 和 1 标记值计算得出
             painter->save(); 
             painter->setRenderHint(QPainter::Antialiasing); 
              
@@ -174,7 +175,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             int spanAngle = -qRound(progress * 360 * 16); // 逆时针计算 
             painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
             painter->restore(); 
-        } else if (isManaged || progress >= 1.0) {
+        } else if (isManaged || (isDir && progress >= 1.0)) {
             UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, statusRect);
         }
     }

@@ -1614,8 +1614,11 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
     } else if (val == 2) {
         ShellHelper::openInExplorer(managedPath);
     } else if (val == 3) {
-        // TODO: 重新扫描逻辑
-        qDebug() << "[Main] Request rescan for" << letter << "(TODO)";
+        // 2026-07-xx 按照 Development_Plan 2.1：“重新扫描该盘”是指扫描该盘符下的“ArcMeta.Library_[盘符]”文件夹里所有的数据
+        if (QDir(managedPath).exists()) {
+            MetadataManager::instance().markAsRegistered(managedPath.toStdWString());
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "已开始重新扫描托管库", 1500, QColor("#378ADD"));
+        }
     }
 }
 

@@ -66,16 +66,32 @@ public:
             painter->setRenderHint(QPainter::Antialiasing);
 
             if (col == 1) { // 状态列
-                bool isPinned = index.model()->index(index.row(), 0).data(IsLockedRole).toBool();
-                bool isManaged = index.model()->index(index.row(), 0).data(ManagedRole).toBool();
-                if (isPinned || isManaged) {
-                    QRect iconRect(option.rect.left() + (option.rect.width() - 16) / 2,
-                                   option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
-                    if (isPinned) {
-                        UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, iconRect);
-                    } else {
-                        UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, iconRect);
-                    }
+                QModelIndex idx0 = index.model()->index(index.row(), 0);
+                bool isPinned = idx0.data(IsLockedRole).toBool();
+                bool isManaged = idx0.data(ManagedRole).toBool();
+                bool isDir = idx0.data(TypeRole).toString() == "folder";
+                double progress = idx0.data(RegistrationProgressRole).toDouble();
+
+                QRect iconRect(option.rect.left() + (option.rect.width() - 16) / 2,
+                               option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
+
+                if (isPinned) {
+                    UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, iconRect);
+                } else if (isDir && progress >= 0.0 && progress < 1.0) {
+                    // --- 绘制进度环 (开箱即用代码) ---
+                    // 2026-07-xx 按照 Development_Plan 3.1：进度弧线完全通过数据库中的 0 和 1 标记值计算得出
+                    painter->save();
+                    painter->setRenderHint(QPainter::Antialiasing);
+                    painter->setPen(QPen(QColor(60, 60, 60, 180), 2));
+                    painter->drawEllipse(iconRect.adjusted(1, 1, -1, -1));
+                    QPen pPen(QColor("#3498db"), 2);
+                    pPen.setCapStyle(Qt::RoundCap);
+                    painter->setPen(pPen);
+                    int spanAngle = -qRound(progress * 360 * 16);
+                    painter->drawArc(iconRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle);
+                    painter->restore();
+                } else if (isManaged || (isDir && progress >= 1.0)) {
+                    UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, iconRect);
                 }
             } else if (col == 2) { // 星级列
                 // 2026-06-16 按照方案 20 纠偏：仅在选中或评分 > 0 时显示图标，减少视觉干扰
