@@ -11,6 +11,8 @@
 #include <shared_mutex>
 #include <string>
 #include <atomic>
+#include <mutex>
+#include <QMap>
 
 namespace ArcMeta {
 
@@ -304,6 +306,13 @@ signals:
      */
     void pendingSyncChanged(bool hasPending);
 
+    /**
+     * @brief 盘符处理状态变更信号 (用于 UI 顶部盘符栏转圈显示)
+     * @param driveLetter 盘符 (如 "C:")
+     * @param isProcessing 是否正在处理
+     */
+    void volumeProcessingChanged(const QString& driveLetter, bool isProcessing);
+
 private:
     MetadataManager(QObject* parent = nullptr);
     ~MetadataManager() override = default;
@@ -335,6 +344,12 @@ private:
     QTimer* m_retryTimer = nullptr;
     std::vector<std::wstring> m_visualRetryQueue;
     void processVisualRetryQueue();
+
+    // 2026-07-xx 按照用户要求：盘符任务统计
+    mutable std::mutex m_taskCountMutex;
+    QMap<QString, int> m_driveTaskCounts;
+    void incrementTaskCount(const QString& driveLetter);
+    void decrementTaskCount(const QString& driveLetter);
 
     /**
      * @brief 异步持久化项元数据

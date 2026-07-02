@@ -403,9 +403,16 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
     (void)QtConcurrent::run([this, nPath]() {
         // 1. 识别该路径归属的数据库
         std::wstring volSerial = getVolumeSerialNumber(nPath);
-        QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
-        if (!db) return;
+        QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 2).toUpper() : "";
+
+        // 增加任务计数（转圈）
+        if (!letter.isEmpty()) incrementTaskCount(letter);
+
+        sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, (letter.length() >= 2 ? letter.left(1) : ""));
+        if (!db) {
+            if (!letter.isEmpty()) decrementTaskCount(letter);
+            return;
+        }
 
         // 2. 收集所有待登记路径（递归）
         std::vector<std::wstring> pathsToRegister;
@@ -441,6 +448,9 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         } else {
             qWarning() << "[Metadata] 异步批量登记事务提交失败！";
         }
+
+        // 任务完成（停止转圈）
+        if (!letter.isEmpty()) decrementTaskCount(letter);
     });
 }
 
@@ -460,6 +470,13 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
     
     // 2026-07-xx 按照 Plan-117：全异步批量注册解析链，状态闭环
     (void)QtConcurrent::run([this, paths, authorized]() {
+        // 提取涉及的盘符并增加任务计数
+        QSet<QString> affectedDrives;
+        for (const auto& p : paths) {
+            if (p.length() >= 2 && p[1] == ':') affectedDrives.insert(p.left(2).toUpper());
+        }
+        for (const auto& drv : affectedDrives) incrementTaskCount(drv);
+
 #ifdef Q_OS_WIN
         CoInitializeEx(NULL, COINIT_APARTMENTTHREADED); // 赋予 Shell/图像分析能力
 #endif
@@ -494,6 +511,8 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
 #ifdef Q_OS_WIN
         CoUninitialize();
 #endif
+        // 减少任务计数
+        for (const auto& drv : affectedDrives) decrementTaskCount(drv);
     });
 }
 
@@ -1611,6 +1630,27 @@ std::vector<std::string> MetadataManager::getFidsByExtension(const std::wstring&
     std::transform(lowerExt.begin(), lowerExt.end(), lowerExt.begin(), ::towlower);
     auto it = m_extensionToFids.find(lowerExt);
     return (it != m_extensionToFids.end()) ? it->second : std::vector<std::string>();
+}
+
+void MetadataManager::incrementTaskCount(const QString& driveLetter) {
+    std::lock_guard<std::mutex> lock(m_taskCountMutex);
+    int oldCount = m_driveTaskCounts.value(driveLetter, 0);
+    m_driveTaskCounts[driveLetter] = oldCount + 1;
+    if (oldCount == 0) {
+        emit volumeProcessingChanged(driveLetter, true);
+    }
+}
+
+void MetadataManager::decrementTaskCount(const QString& driveLetter) {
+    std::lock_guard<std::mutex> lock(m_taskCountMutex);
+    int oldCount = m_driveTaskCounts.value(driveLetter, 0);
+    if (oldCount > 0) {
+        int newCount = oldCount - 1;
+        m_driveTaskCounts[driveLetter] = newCount;
+        if (newCount == 0) {
+            emit volumeProcessingChanged(driveLetter, false);
+        }
+    }
 }
 
 bool MetadataManager::hasPendingSync() const { return false; }

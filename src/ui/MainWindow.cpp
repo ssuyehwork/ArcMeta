@@ -1562,6 +1562,22 @@ void MainWindow::initDriveBar() {
             btn->setState(DriveButton::Inactive);
         }
     }
+
+    // 2026-07-xx 按照用户要求：盘符处理状态联动（转圈显示）
+    connect(&MetadataManager::instance(), &MetadataManager::volumeProcessingChanged, this, [this](const QString& driveLetter, bool isProcessing) {
+        QString letter = driveLetter.toUpper();
+        if (m_driveButtons.contains(letter)) {
+            DriveButton* btn = m_driveButtons[letter];
+            if (isProcessing) {
+                btn->setState(DriveButton::Running);
+            } else {
+                // 恢复状态：根据托管库是否存在判定
+                QString managedPath = letter + "/ArcMeta.Library_" + letter.left(1);
+                btn->setState(QDir(managedPath).exists() ? DriveButton::Active : DriveButton::Inactive);
+            }
+        }
+    });
+
     m_driveBarLayout->addStretch();
 }
 
