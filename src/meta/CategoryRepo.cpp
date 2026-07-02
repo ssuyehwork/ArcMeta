@@ -21,7 +21,7 @@ void CategoryRepo::initialize() {
 }
 
 void CategoryRepo::saveImmediately() {
-    DatabaseManager::instance().flushAll();
+    // 磁盘优先模式下实时落盘，无需手动刷新
 }
 
 std::vector<Category> CategoryRepo::getAll() {
@@ -682,13 +682,15 @@ void CategoryRepo::setCategorizedCount(int count) {
 }
 
 void CategoryRepo::incrementTotalFileCount(int delta) {
-    s_totalFileCount += delta;
+    // 2026-10-xx 磁盘优先：先落盘，后内存
     updatePersistentStat(STAT_TOTAL_FILES, delta);
+    s_totalFileCount += delta;
 }
 
 void CategoryRepo::incrementCategorizedCount(int delta) {
-    s_categorizedCount += delta;
+    // 2026-10-xx 磁盘优先：先落盘，后内存
     updatePersistentStat(STAT_CATEGORIZED, delta);
+    s_categorizedCount += delta;
 }
 
 void CategoryRepo::updatePersistentStat(const std::string& key, int delta) {
@@ -742,12 +744,12 @@ void CategoryRepo::syncCategorizedCountForFid(const std::string& /*fid*/) {
         if (sqlite3_step(stmt) == SQLITE_ROW) {
             int count = sqlite3_column_int(stmt, 0);
             int oldCount = s_categorizedCount.load();
-            s_categorizedCount.store(count);
             
-            // 物理持久化：直接更新增量
+            // 2026-10-xx 磁盘优先：先落盘，后内存
             if (count != oldCount) {
                 updatePersistentStat(STAT_CATEGORIZED, count - oldCount);
             }
+            s_categorizedCount.store(count);
         }
         sqlite3_finalize(stmt);
     }
@@ -860,8 +862,6 @@ void CategoryRepo::fullRecount() {
                 sqlite3_finalize(stmt);
             }
             trans.commit();
-            // 物理落盘，确保初始化结果即刻生效
-            DatabaseManager::instance().flushAll();
         }
     }
 
@@ -893,8 +893,6 @@ void CategoryRepo::fullRecount() {
 
         if (invalidatedCount > 0) {
             qDebug() << "[Recount] 物理校验发现" << invalidatedCount << "个失效项，已归类至失效数据";
-            // 2026-06-xx 物理同步：强制将内存中的 is_invalid 变更刷入磁盘
-            DatabaseManager::instance().flushAll();
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
         }
     });
