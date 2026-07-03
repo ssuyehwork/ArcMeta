@@ -4,6 +4,7 @@
 #include "MetadataDefs.h"
 #include <QObject>
 #include <QString>
+#include <QVariant>
 #include <QTimer>
 #include <QStringList>
 #include <unordered_map>
@@ -348,6 +349,15 @@ private:
     std::atomic<bool> m_isInternalOperating{false}; // 2026-xx-xx 按照 Plan-105：信号抑制标志位
     
     // 2026-08-xx 按照 Analysis_Modification_Plan-119：实时增量同步架构
+    enum class PersistenceOp {
+        UpsertMetadata,
+        DeleteMetadata,
+        UpsertCategory,
+        DeleteCategory,
+        UpsertRelation,
+        DeleteRelation,
+        SyncStat
+    };
     enum class MetaField {
         Rating, Color, Tags, Note, URL, Pinned, Encrypted, Invalid, IngestionStatus, VisualMetadata, TrashStatus, FullSync
     };
@@ -355,12 +365,36 @@ private:
         MetaField field;
         QVariant value;
         QVector<PaletteEntry> palettes; // 针对 VisualMetadata
+
+        MetadataDelta() : field(MetaField::Rating) {}
+        MetadataDelta(MetaField f, QVariant v) : field(f), value(v) {}
+        MetadataDelta(MetaField f, QVariant v, const QVector<PaletteEntry>& p) : field(f), value(v), palettes(p) {}
     };
     struct PersistenceTask {
-        std::wstring path;
+        PersistenceOp op;
+        std::wstring path; // 对于 Metadata 相关
+        std::string fid;   // 对于 Metadata/Relation 相关
         std::vector<MetadataDelta> deltas;
-        bool authorized;
-        bool notify;
+
+        // 针对 Category
+        int categoryId = 0;
+        std::wstring categoryName;
+        int parentId = 0;
+        std::wstring categoryColor;
+        QStringList presetTags;
+        int sortOrder = 0;
+        bool pinned = false;
+        bool encrypted = false;
+        std::wstring encryptHint;
+        uint64_t physicalFrn = 0;
+        std::wstring physicalPath;
+
+        // 针对 Stat
+        std::string statKey;
+        int statDelta = 0;
+
+        bool authorized = false;
+        bool notify = true;
     };
     std::deque<PersistenceTask> m_persistenceQueue;
     std::thread m_persistenceThread;
@@ -369,6 +403,7 @@ private:
     std::atomic<bool> m_persistenceStop{false};
 
     void persistenceLoop();
+    void pushPersistenceTask(PersistenceTask task);
     void pushPersistenceTask(const std::wstring& path, const std::vector<MetadataDelta>& deltas, bool authorized, bool notify);
     void executePersistenceTask(const PersistenceTask& task);
 

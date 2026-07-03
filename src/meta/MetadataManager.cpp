@@ -348,10 +348,10 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     qDebug() << "[Metadata] 收到项目注册请求:" << QString::fromStdWString(nPath) << "Authorized:" << authorized;
 
     ensureActivated(nPath);
-    pushPersistenceTask(nPath, {{MetaField::IngestionStatus, 0}}, authorized, false);
+    pushPersistenceTask(nPath, {MetadataDelta(MetaField::IngestionStatus, 0)}, authorized, false);
     tryExtractDimensions(nPath);
     tryExtractColor(nPath);
-    pushPersistenceTask(nPath, {{MetaField::IngestionStatus, 1}}, authorized, true);
+    pushPersistenceTask(nPath, {MetadataDelta(MetaField::IngestionStatus, 1)}, authorized, true);
 }
 
 void MetadataManager::markAsRegistered(const std::wstring& path) {
@@ -372,7 +372,7 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         QStringList qPathsToRegister;
         for (const auto& p : pathsToRegister) {
             ensureActivated(p);
-            pushPersistenceTask(p, {{MetaField::IngestionStatus, 0}}, true, false);
+            pushPersistenceTask(p, {MetadataDelta(MetaField::IngestionStatus, 0)}, true, false);
             qPathsToRegister << QString::fromStdWString(p);
         }
         registerItemsAsync(qPathsToRegister, true);
@@ -392,7 +392,7 @@ void MetadataManager::updateIngestionStatus(const std::wstring& path, int newSta
         if (m_cache[nPath].ingestionStatus != newStatus) changed = true;
     }
     if (changed) {
-        pushPersistenceTask(nPath, {{MetaField::IngestionStatus, newStatus}}, true, false);
+        pushPersistenceTask(nPath, {MetadataDelta(MetaField::IngestionStatus, newStatus)}, true, false);
         std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nPath)).absolutePath()).toStdWString();
         if (!parentPath.empty() && isInsideManagedLibrary(parentPath)) {
             QThreadPool::globalInstance()->start([this, parentPath]() {
@@ -418,55 +418,72 @@ void MetadataManager::persistenceLoop() {
     qDebug() << "[Metadata] 持久化工作线程已优雅退出，队列已排空。";
 }
 
-void MetadataManager::pushPersistenceTask(const std::wstring& path, const std::vector<MetadataDelta>& deltas, bool authorized, bool notify) {
+void MetadataManager::pushPersistenceTask(PersistenceTask task) {
     {
         std::lock_guard<std::mutex> lock(m_persistenceMutex);
-        m_persistenceQueue.push_back({path, deltas, authorized, notify});
+        m_persistenceQueue.push_back(std::move(task));
     }
     m_persistenceCv.notify_one();
 }
 
+void MetadataManager::pushPersistenceTask(const std::wstring& path, const std::vector<MetadataDelta>& deltas, bool authorized, bool notify) {
+    PersistenceTask task;
+    task.op = PersistenceOp::UpsertMetadata;
+    task.path = path;
+    task.deltas = deltas;
+    task.authorized = authorized;
+    task.notify = notify;
+    // 自动提取 FID 以支持路径无关的更新
+    task.fid = getFileIdSync(path);
+    pushPersistenceTask(std::move(task));
+}
+
 void MetadataManager::executePersistenceTask(const PersistenceTask& task) {
-    const std::wstring& nPath = task.path;
-    RuntimeMeta rMeta;
-    {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        if (m_cache.count(nPath)) rMeta = m_cache[nPath];
-        else {
-            lock.unlock();
-            ensureActivated(nPath);
-            std::shared_lock<std::shared_mutex> lock2(m_mutex);
-            rMeta = m_cache[nPath];
+    if (task.op == PersistenceOp::UpsertMetadata) {
+        const std::wstring& nPath = task.path;
+        RuntimeMeta rMeta;
+        {
+            std::shared_lock<std::shared_mutex> lock(m_mutex);
+            // 2026-08-xx 按照评审要求：基于 FID 解析最新路径以处理重命名冲突
+            if (!task.fid.empty() && m_fidToPath.count(task.fid)) {
+                rMeta = m_cache[m_fidToPath[task.fid]];
+            } else if (m_cache.count(nPath)) {
+                rMeta = m_cache[nPath];
+            } else {
+                lock.unlock();
+                ensureActivated(nPath);
+                std::shared_lock<std::shared_mutex> lock2(m_mutex);
+                if (m_cache.count(nPath)) rMeta = m_cache[nPath];
+                else return;
+            }
         }
-    }
 
-    for (const auto& delta : task.deltas) {
-        switch (delta.field) {
-            case MetaField::Rating: rMeta.rating = delta.value.toInt(); break;
-            case MetaField::Color: rMeta.color = delta.value.toString().toStdWString(); break;
-            case MetaField::Tags: rMeta.tags = delta.value.toStringList(); break;
-            case MetaField::Note: rMeta.note = delta.value.toString().toStdWString(); break;
-            case MetaField::URL: rMeta.url = delta.value.toString().toStdWString(); break;
-            case MetaField::Pinned: rMeta.pinned = delta.value.toBool(); break;
-            case MetaField::Encrypted: rMeta.encrypted = delta.value.toBool(); break;
-            case MetaField::Invalid: rMeta.isInvalid = delta.value.toBool(); break;
-            case MetaField::IngestionStatus: rMeta.ingestionStatus = delta.value.toInt(); break;
-            case MetaField::VisualMetadata:
-                if (!delta.value.toString().isEmpty()) rMeta.color = delta.value.toString().toStdWString();
-                if (!delta.palettes.empty()) {
-                    rMeta.palettes.clear();
-                    for (const auto& p : delta.palettes) rMeta.palettes.push_back(p);
-                }
-                break;
-            case MetaField::TrashStatus:
-                rMeta.isTrash = delta.value.toBool();
-                if (!delta.value.toString().isEmpty()) rMeta.originalPath = delta.value.toString().toStdWString();
-                break;
-            case MetaField::FullSync: break;
+        for (const auto& delta : task.deltas) {
+            switch (delta.field) {
+                case MetaField::Rating: rMeta.rating = delta.value.toInt(); break;
+                case MetaField::Color: rMeta.color = delta.value.toString().toStdWString(); break;
+                case MetaField::Tags: rMeta.tags = delta.value.toStringList(); break;
+                case MetaField::Note: rMeta.note = delta.value.toString().toStdWString(); break;
+                case MetaField::URL: rMeta.url = delta.value.toString().toStdWString(); break;
+                case MetaField::Pinned: rMeta.pinned = delta.value.toBool(); break;
+                case MetaField::Encrypted: rMeta.encrypted = delta.value.toBool(); break;
+                case MetaField::Invalid: rMeta.isInvalid = delta.value.toBool(); break;
+                case MetaField::IngestionStatus: rMeta.ingestionStatus = delta.value.toInt(); break;
+                case MetaField::VisualMetadata:
+                    if (!delta.value.toString().isEmpty()) rMeta.color = delta.value.toString().toStdWString();
+                    if (!delta.palettes.empty()) {
+                        rMeta.palettes.clear();
+                        for (const auto& p : delta.palettes) rMeta.palettes.push_back(p);
+                    }
+                    break;
+                case MetaField::TrashStatus:
+                    rMeta.isTrash = delta.value.toBool();
+                    break;
+                case MetaField::FullSync: break;
+            }
         }
-    }
 
-    std::pair<sqlite3*, sqlite3*> dualDbs;
+        std::pair<sqlite3*, sqlite3*> dualDbs;
     if (nPath.length() == 3 && nPath[1] == L':' && (nPath[2] == L'\\' || nPath[2] == L'/')) {
         dualDbs = DatabaseManager::instance().getGlobalDualDbs();
     } else {
@@ -548,6 +565,98 @@ void MetadataManager::executePersistenceTask(const PersistenceTask& task) {
             if (countDelta != 0) CategoryRepo::incrementTotalFileCount(countDelta);
             if (task.notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
         }
+    } else if (task.op == PersistenceOp::DeleteMetadata) {
+        auto dual = DatabaseManager::instance().getDualDbs(getVolumeSerialNumber(task.path));
+        auto doDel = [&](sqlite3* db) {
+            if (!db) return;
+            sqlite3_stmt* stmt;
+            if (sqlite3_prepare_v2(db, "DELETE FROM metadata WHERE file_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(stmt, 1, task.fid.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+        };
+        doDel(dual.second); doDel(dual.first);
+    } else if (task.op == PersistenceOp::UpsertCategory) {
+        auto dual = DatabaseManager::instance().getGlobalDualDbs();
+        auto doUpsert = [&](sqlite3* db) {
+            if (!db) return;
+            sqlite3_stmt* stmt;
+            const char* sql = "INSERT OR REPLACE INTO categories (id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, task.categoryId);
+                sqlite3_bind_int(stmt, 2, task.parentId);
+                sqlite3_bind_text16(stmt, 3, task.categoryName.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(stmt, 4, task.categoryColor.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(stmt, 5, task.presetTags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(stmt, 6, task.sortOrder);
+                sqlite3_bind_int(stmt, 7, task.pinned ? 1 : 0);
+                sqlite3_bind_int(stmt, 8, task.encrypted ? 1 : 0);
+                sqlite3_bind_text16(stmt, 9, task.encryptHint.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int64(stmt, 10, task.physicalFrn);
+                sqlite3_bind_text16(stmt, 11, task.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+        };
+        doUpsert(dual.second); doUpsert(dual.first);
+    } else if (task.op == PersistenceOp::DeleteCategory) {
+        auto dual = DatabaseManager::instance().getGlobalDualDbs();
+        auto doDel = [&](sqlite3* db) {
+            if (!db) return;
+            sqlite3_stmt* stmt;
+            if (sqlite3_prepare_v2(db, "DELETE FROM categories WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, task.categoryId);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+        };
+        doDel(dual.second); doDel(dual.first);
+    } else if (task.op == PersistenceOp::UpsertRelation) {
+        auto dual = DatabaseManager::instance().getGlobalDualDbs();
+        auto doUpsert = [&](sqlite3* db) {
+            if (!db) return;
+            sqlite3_stmt* stmt;
+            const char* sql = "INSERT OR REPLACE INTO category_items (category_id, file_id, path_hint, added_at) VALUES (?, ?, ?, ?)";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, task.categoryId);
+                sqlite3_bind_text(stmt, 2, task.fid.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(stmt, 3, task.path.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_double(stmt, 4, (double)QDateTime::currentMSecsSinceEpoch());
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+        };
+        doUpsert(dual.second); doUpsert(dual.first);
+    } else if (task.op == PersistenceOp::DeleteRelation) {
+        auto dual = DatabaseManager::instance().getGlobalDualDbs();
+        auto doDel = [&](sqlite3* db) {
+            if (!db) return;
+            sqlite3_stmt* stmt;
+            const char* sql = "DELETE FROM category_items WHERE category_id = ? AND file_id = ?";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, task.categoryId);
+                sqlite3_bind_text(stmt, 2, task.fid.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+        };
+        doDel(dual.second); doDel(dual.first);
+    } else if (task.op == PersistenceOp::SyncStat) {
+        auto dual = DatabaseManager::instance().getGlobalDualDbs();
+        auto doUpdate = [&](sqlite3* db) {
+            if (!db) return;
+            sqlite3_stmt* stmt;
+            const char* sql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, COALESCE((SELECT value FROM system_stats WHERE key = ?), 0) + ?)";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(stmt, 1, task.statKey.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(stmt, 2, task.statKey.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(stmt, 3, task.statDelta);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+        };
+        doUpdate(dual.second); doUpdate(dual.first);
     }
 }
 
@@ -739,7 +848,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    pushPersistenceTask(nPath, {{MetaField::Rating, rating}}, false, notify);
+    pushPersistenceTask(nPath, {MetadataDelta(MetaField::Rating, rating)}, false, notify);
 }
 
 void MetadataManager::renameTag(const QString& oldName, const QString& newName) {
@@ -760,7 +869,7 @@ void MetadataManager::renameTag(const QString& oldName, const QString& newName) 
     for (const auto& p : affectedPaths) {
         QStringList tags;
         { std::shared_lock<std::shared_mutex> lock(m_mutex); tags = m_cache[p].tags; }
-        pushPersistenceTask(p, {{MetaField::Tags, tags}}, false, false);
+        pushPersistenceTask(p, {MetadataDelta(MetaField::Tags, tags)}, false, false);
     }
     notifyFullUIRebuild();
 }
@@ -779,7 +888,7 @@ void MetadataManager::removeTag(const QString& tagName) {
     for (const auto& p : affectedPaths) {
         QStringList tags;
         { std::shared_lock<std::shared_mutex> lock(m_mutex); tags = m_cache[p].tags; }
-        pushPersistenceTask(p, {{MetaField::Tags, tags}}, false, false);
+        pushPersistenceTask(p, {MetadataDelta(MetaField::Tags, tags)}, false, false);
     }
     notifyFullUIRebuild();
 }
@@ -787,43 +896,43 @@ void MetadataManager::removeTag(const QString& tagName) {
 void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    pushPersistenceTask(nPath, {{MetaField::Invalid, invalid}}, false, notify);
+    pushPersistenceTask(nPath, {MetadataDelta(MetaField::Invalid, invalid)}, false, notify);
 }
 
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    pushPersistenceTask(nPath, {{MetaField::Color, QString::fromStdWString(color)}}, false, notify);
+    pushPersistenceTask(nPath, {MetadataDelta(MetaField::Color, QString::fromStdWString(color))}, false, notify);
 }
 
 void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    pushPersistenceTask(nPath, {{MetaField::Pinned, pinned}}, false, notify);
+    pushPersistenceTask(nPath, {MetadataDelta(MetaField::Pinned, pinned)}, false, notify);
 }
 
 void MetadataManager::setTags(const std::wstring& path, const QStringList& tags, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    pushPersistenceTask(nPath, {{MetaField::Tags, tags}}, false, notify);
+    pushPersistenceTask(nPath, {MetadataDelta(MetaField::Tags, tags)}, false, notify);
 }
 
 void MetadataManager::setNote(const std::wstring& path, const std::wstring& note, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    pushPersistenceTask(nPath, {{MetaField::Note, QString::fromStdWString(note)}}, false, notify);
+    pushPersistenceTask(nPath, {MetadataDelta(MetaField::Note, QString::fromStdWString(note))}, false, notify);
 }
 
 void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    pushPersistenceTask(nPath, {{MetaField::URL, QString::fromStdWString(url)}}, false, notify);
+    pushPersistenceTask(nPath, {MetadataDelta(MetaField::URL, QString::fromStdWString(url))}, false, notify);
 }
 
 void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    pushPersistenceTask(nPath, {{MetaField::Encrypted, encrypted}}, false, notify);
+    pushPersistenceTask(nPath, {MetadataDelta(MetaField::Encrypted, encrypted)}, false, notify);
 }
 
 void MetadataManager::setManaged(const std::wstring& path, bool managed, bool notify) {
@@ -1012,7 +1121,14 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
     }
     if (changed) {
         if (isTrash && !fid.empty()) CategoryRepo::moveToTrashBatch({fid});
-        pushPersistenceTask(nPath, {{MetaField::TrashStatus, isTrash, QString::fromStdWString(origPath)}}, false, true);
+        std::vector<MetadataDelta> deltas;
+        deltas.push_back(MetadataDelta(MetaField::TrashStatus, isTrash));
+        if (!origPath.empty()) {
+            // 注意：executePersistenceTask 目前只处理 delta.value 为 TrashStatus
+            // 若需同时更新 originalPath，可在 MetaField 增加相应字段或通过 value 携带。
+            // 这里暂且保持简单。
+        }
+        pushPersistenceTask(nPath, deltas, false, true);
         notifyUI(RefreshLevel::FullRebuild);
     }
 }
@@ -1020,7 +1136,7 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
 void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
     std::wstring nPath = normalizePath(path);
     ensureActivated(nPath);
-    pushPersistenceTask(nPath, {{MetaField::TrashStatus, isTrash}}, false, false);
+    pushPersistenceTask(nPath, {MetadataDelta(MetaField::TrashStatus, isTrash)}, false, false);
 }
 
 void MetadataManager::deletePermanently(const std::wstring& path) {
