@@ -7,6 +7,7 @@
 #include <map>
 #include <string>
 #include <mutex>
+#include <shared_mutex>
 #include <functional>
 #include <deque>
 #include <thread>
@@ -118,7 +119,7 @@ private:
 
     std::map<std::wstring, DbConnection> m_driveDbs;
     DbConnection m_globalDb;
-    std::mutex m_mutex;
+    mutable std::shared_mutex m_mutex;
 
     bool loadDb(const std::wstring& diskPath, DbConnection& conn);
     void saveDb(DbConnection& conn);

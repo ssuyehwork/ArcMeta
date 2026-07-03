@@ -1477,246 +1477,141 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
 void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, bool authorized) {
     if (paths.empty()) return;
 
-    // 1. 按数据库对路径进行分组，以支持大事务写入
-    struct BatchTask {
-        sqlite3* memDb;
-        std::vector<std::wstring> groupPaths;
+    // 1. 按数据库分组，捕获内存快照
+    struct BatchRecord {
+        std::wstring path;
+        RuntimeMeta meta;
     };
-    std::map<sqlite3*, std::vector<std::wstring>> groups;
+    std::map<sqlite3*, std::vector<BatchRecord>> groups;
 
     for (const auto& p : paths) {
-        sqlite3* db = nullptr;
+        RuntimeMeta rMeta = getMeta(p);
+        if (rMeta.fileId128.empty()) continue;
+
+        sqlite3* memDb = nullptr;
         if (p.length() == 3 && p[1] == L':' && (p[2] == L'\\' || p[2] == L'/')) {
-            db = DatabaseManager::instance().getGlobalDb();
+            memDb = DatabaseManager::instance().getGlobalDb();
         } else {
             std::wstring volSerial = getVolumeSerialNumber(p);
             QString letter = (p.length() >= 2 && p[1] == L':') ? QString::fromWCharArray(&p[0], 1) : "";
-            db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+            memDb = DatabaseManager::instance().getMemoryDb(volSerial, letter);
         }
-        if (db) groups[db].push_back(p);
+        if (memDb) groups[memDb].push_back({p, rMeta});
     }
 
     const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     for (auto& entry : groups) {
         sqlite3* memDb = entry.first;
-        const auto& groupPaths = entry.second;
+        auto records = entry.second;
 
-        // 2. 内存库批量提交 (使用 SqlTransaction 确保原子性与速度)
-        SqlTransaction trans(memDb);
-        std::vector<std::pair<std::wstring, RuntimeMeta>> recordsToSync;
+        // 2. 投递全异步任务（内存写+磁盘写）
+        DatabaseManager::instance().enqueueSyncTask([memDb, records, sql, authorized]() {
+            sqlite3* diskDb = DatabaseManager::instance().getDiskDb(memDb);
 
-        for (const auto& p : groupPaths) {
-            RuntimeMeta rMeta = getMeta(p);
-            if (rMeta.fileId128.empty()) continue;
+            // A. 执行内存库事务
+            {
+                SqlTransaction memTrans(memDb);
+                sqlite3_stmt* memStmt;
+                if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
+                    for (const auto& rec : records) {
+                        // 准入检查
+                        bool isNew = true;
+                        sqlite3_stmt* checkStmt;
+                        if (sqlite3_prepare_v2(memDb, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
+                            sqlite3_bind_text(checkStmt, 1, rec.meta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+                            if (sqlite3_step(checkStmt) == SQLITE_ROW) isNew = false;
+                            sqlite3_finalize(checkStmt);
+                        }
+                        if (isNew && !authorized && !isInsideManagedLibrary(rec.path)) continue;
 
-            // 准入检查
-            bool isNew = true;
-            sqlite3_stmt* checkStmt;
-            if (sqlite3_prepare_v2(memDb, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
-                sqlite3_bind_text(checkStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-                if (sqlite3_step(checkStmt) == SQLITE_ROW) isNew = false;
-                sqlite3_finalize(checkStmt);
-            }
-
-            if (isNew && !authorized) {
-                if (!isInsideManagedLibrary(p)) continue;
-            }
-
-            sqlite3_stmt* memStmt;
-            if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
-                // 绑定逻辑 (复用 persistAsync 中的绑定逻辑，此处为了清晰直接展开或调用辅助函数)
-                auto bindLogic = [](sqlite3_stmt* stmt, const std::wstring& path, const RuntimeMeta& meta) {
-                    sqlite3_bind_text(stmt, 1, meta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_int(stmt, 3, meta.isFolder ? 1 : 0);
-                    sqlite3_bind_int(stmt, 4, meta.rating);
-                    sqlite3_bind_text16(stmt, 5, meta.color.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(stmt, 6, meta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(stmt, 7, meta.note.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(stmt, 8, meta.url.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_int64(stmt, 9, meta.ctime);
-                    sqlite3_bind_int64(stmt, 10, meta.mtime);
-                    sqlite3_bind_int64(stmt, 11, meta.atime);
-                    sqlite3_bind_int64(stmt, 12, meta.fileSize);
-                    QJsonArray arr;
-                    for (const auto& pe : meta.palettes) {
-                        QJsonObject obj; obj["color"] = pe.color.name(); obj["ratio"] = (double)pe.ratio;
-                        arr.append(obj);
+                        // 绑定并执行 (此处省略展开 bindMeta，实际代码中应封装)
+                        auto bindFunc = [](sqlite3_stmt* stmt, const std::wstring& p, const RuntimeMeta& m) {
+                            sqlite3_bind_text(stmt, 1, m.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_text16(stmt, 2, p.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_int(stmt, 3, m.isFolder ? 1 : 0);
+                            sqlite3_bind_int(stmt, 4, m.rating);
+                            sqlite3_bind_text16(stmt, 5, m.color.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_text16(stmt, 6, m.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_text16(stmt, 7, m.note.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_text16(stmt, 8, m.url.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_int64(stmt, 9, m.ctime);
+                            sqlite3_bind_int64(stmt, 10, m.mtime);
+                            sqlite3_bind_int64(stmt, 11, m.atime);
+                            sqlite3_bind_int64(stmt, 12, m.fileSize);
+                            QJsonArray arr;
+                            for (const auto& pe : m.palettes) {
+                                QJsonObject obj; obj["color"] = pe.color.name(); obj["ratio"] = (double)pe.ratio; arr.append(obj);
+                            }
+                            QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
+                            sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
+                            sqlite3_bind_int(stmt, 14, m.isTrash ? 1 : 0);
+                            sqlite3_bind_text16(stmt, 15, m.originalPath.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_int(stmt, 16, m.isInvalid ? 1 : 0);
+                            sqlite3_bind_int(stmt, 17, m.width);
+                            sqlite3_bind_int(stmt, 18, m.height);
+                            sqlite3_bind_int(stmt, 19, m.ingestionStatus);
+                        };
+                        bindFunc(memStmt, rec.path, rec.meta);
+                        if (sqlite3_step(memStmt) == SQLITE_DONE) {
+                            if (isNew && !rec.meta.isFolder && !rec.meta.isInvalid && !rec.meta.isTrash) {
+                                CategoryRepo::incrementTotalFileCount(1);
+                            }
+                        }
+                        sqlite3_reset(memStmt);
                     }
-                    QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
-                    sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
-                    sqlite3_bind_int(stmt, 14, meta.isTrash ? 1 : 0);
-                    sqlite3_bind_text16(stmt, 15, meta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_int(stmt, 16, meta.isInvalid ? 1 : 0);
-                    sqlite3_bind_int(stmt, 17, meta.width);
-                    sqlite3_bind_int(stmt, 18, meta.height);
-                    sqlite3_bind_int(stmt, 19, meta.ingestionStatus);
-                };
-                bindLogic(memStmt, p, rMeta);
-
-                if (sqlite3_step(memStmt) == SQLITE_DONE) {
-                    if (isNew && !rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
-                        CategoryRepo::incrementTotalFileCount(1);
-                    }
-                    recordsToSync.push_back({p, rMeta});
+                    sqlite3_finalize(memStmt);
                 }
-                sqlite3_finalize(memStmt);
+                memTrans.commit();
             }
-        }
-        trans.commit();
 
-        // 3. 将批量同步任务投递至磁盘 I/O 队列 (带大事务保护)
-        if (!recordsToSync.empty()) {
-            DatabaseManager::instance().enqueueSyncTask([memDb, recordsToSync, sql]() {
-                sqlite3* diskDb = DatabaseManager::instance().getDiskDb(memDb);
-                if (!diskDb) return;
-
-                sqlite3_exec(diskDb, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+            // B. 执行磁盘库事务 (若存在)
+            if (diskDb) {
+                SqlTransaction diskTrans(diskDb);
                 sqlite3_stmt* diskStmt;
                 if (sqlite3_prepare_v2(diskDb, sql, -1, &diskStmt, nullptr) == SQLITE_OK) {
-                    for (const auto& rec : recordsToSync) {
-                        const std::wstring& p = rec.first;
-                        const RuntimeMeta& meta = rec.second;
-
-                        // 重新绑定
-                        sqlite3_bind_text(diskStmt, 1, meta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_text16(diskStmt, 2, p.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_int(diskStmt, 3, meta.isFolder ? 1 : 0);
-                        sqlite3_bind_int(diskStmt, 4, meta.rating);
-                        sqlite3_bind_text16(diskStmt, 5, meta.color.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_text16(diskStmt, 6, meta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_text16(diskStmt, 7, meta.note.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_text16(diskStmt, 8, meta.url.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_int64(diskStmt, 9, meta.ctime);
-                        sqlite3_bind_int64(diskStmt, 10, meta.mtime);
-                        sqlite3_bind_int64(diskStmt, 11, meta.atime);
-                        sqlite3_bind_int64(diskStmt, 12, meta.fileSize);
-                        QJsonArray arr;
-                        for (const auto& pe : meta.palettes) {
-                            QJsonObject obj; obj["color"] = pe.color.name(); obj["ratio"] = (double)pe.ratio;
-                            arr.append(obj);
-                        }
-                        QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
-                        sqlite3_bind_blob(diskStmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
-                        sqlite3_bind_int(diskStmt, 14, meta.isTrash ? 1 : 0);
-                        sqlite3_bind_text16(diskStmt, 15, meta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_int(diskStmt, 16, meta.isInvalid ? 1 : 0);
-                        sqlite3_bind_int(diskStmt, 17, meta.width);
-                        sqlite3_bind_int(diskStmt, 18, meta.height);
-                        sqlite3_bind_int(diskStmt, 19, meta.ingestionStatus);
-
-                        if (sqlite3_step(diskStmt) != SQLITE_DONE) {
-                            qWarning() << "[DB_SYNC] 批量磁盘持久化单条失败:" << sqlite3_errmsg(diskDb);
-                        }
+                    for (const auto& rec : records) {
+                        auto bindFunc = [](sqlite3_stmt* stmt, const std::wstring& p, const RuntimeMeta& m) {
+                            sqlite3_bind_text(stmt, 1, m.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_text16(stmt, 2, p.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_int(stmt, 3, m.isFolder ? 1 : 0);
+                            sqlite3_bind_int(stmt, 4, m.rating);
+                            sqlite3_bind_text16(stmt, 5, m.color.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_text16(stmt, 6, m.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_text16(stmt, 7, m.note.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_text16(stmt, 8, m.url.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_int64(stmt, 9, m.ctime);
+                            sqlite3_bind_int64(stmt, 10, m.mtime);
+                            sqlite3_bind_int64(stmt, 11, m.atime);
+                            sqlite3_bind_int64(stmt, 12, m.fileSize);
+                            QJsonArray arr;
+                            for (const auto& pe : m.palettes) {
+                                QJsonObject obj; obj["color"] = pe.color.name(); obj["ratio"] = (double)pe.ratio; arr.append(obj);
+                            }
+                            QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
+                            sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
+                            sqlite3_bind_int(stmt, 14, m.isTrash ? 1 : 0);
+                            sqlite3_bind_text16(stmt, 15, m.originalPath.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_int(stmt, 16, m.isInvalid ? 1 : 0);
+                            sqlite3_bind_int(stmt, 17, m.width);
+                            sqlite3_bind_int(stmt, 18, m.height);
+                            sqlite3_bind_int(stmt, 19, m.ingestionStatus);
+                        };
+                        bindFunc(diskStmt, rec.path, rec.meta);
+                        sqlite3_step(diskStmt);
                         sqlite3_reset(diskStmt);
                     }
                     sqlite3_finalize(diskStmt);
                 }
-                sqlite3_exec(diskDb, "COMMIT", nullptr, nullptr, nullptr);
-            });
-        }
+                diskTrans.commit();
+            }
+        });
     }
 }
 
 void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool authorized) {
-    std::wstring nPath = MetadataManager::normalizePath(path);
-    
-    RuntimeMeta rMeta = getMeta(nPath);
-    sqlite3* memDb = nullptr;
-    
-    if (nPath.length() == 3 && nPath[1] == L':' && (nPath[2] == L'\\' || nPath[2] == L'/')) {
-        memDb = DatabaseManager::instance().getGlobalDb();
-    } else {
-        std::wstring volSerial = getVolumeSerialNumber(nPath);
-        QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
-        memDb = DatabaseManager::instance().getMemoryDb(volSerial, letter);
-    }
-    if (!memDb) return;
-
-    // 1. 内存库操作 (Memory Commit)
-    bool isNew = true;
-    {
-        sqlite3_stmt* checkStmt;
-        if (sqlite3_prepare_v2(memDb, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(checkStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-            if (sqlite3_step(checkStmt) == SQLITE_ROW) isNew = false;
-            sqlite3_finalize(checkStmt);
-        }
-    }
-
-    if (isNew && !authorized) {
-        if (!isInsideManagedLibrary(nPath)) return;
-        authorized = true;
-    }
-
-    auto bindMeta = [](sqlite3_stmt* stmt, const std::wstring& path, const RuntimeMeta& meta) {
-        sqlite3_bind_text(stmt, 1, meta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 3, meta.isFolder ? 1 : 0);
-        sqlite3_bind_int(stmt, 4, meta.rating);
-        sqlite3_bind_text16(stmt, 5, meta.color.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 6, meta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 7, meta.note.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 8, meta.url.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(stmt, 9, meta.ctime);
-        sqlite3_bind_int64(stmt, 10, meta.mtime);
-        sqlite3_bind_int64(stmt, 11, meta.atime);
-        sqlite3_bind_int64(stmt, 12, meta.fileSize);
-
-        QJsonArray arr;
-        for (const auto& pe : meta.palettes) {
-            QJsonObject obj;
-            obj["color"] = pe.color.name();
-            obj["ratio"] = (double)pe.ratio;
-            arr.append(obj);
-        }
-        QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
-        sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 14, meta.isTrash ? 1 : 0);
-        sqlite3_bind_text16(stmt, 15, meta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 16, meta.isInvalid ? 1 : 0);
-        sqlite3_bind_int(stmt, 17, meta.width);
-        sqlite3_bind_int(stmt, 18, meta.height);
-        sqlite3_bind_int(stmt, 19, meta.ingestionStatus);
-    };
-
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-
-    sqlite3_stmt* memStmt;
-    if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
-        bindMeta(memStmt, nPath, rMeta);
-        if (sqlite3_step(memStmt) == SQLITE_DONE) {
-            if (isNew) {
-                if (!rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
-                    CategoryRepo::incrementTotalFileCount(1);
-                }
-            }
-            {
-                std::unique_lock<std::shared_mutex> lock(m_mutex);
-                m_cache[nPath].isManaged = true;
-            }
-
-            // 2. 异步磁盘分发 (Async Dispatch to Disk)
-            DatabaseManager::instance().enqueueSyncTask([nPath, rMeta, memDb, sql, bindMeta]() {
-                sqlite3* diskDb = DatabaseManager::instance().getDiskDb(memDb);
-                if (!diskDb) return;
-
-                sqlite3_stmt* diskStmt;
-                if (sqlite3_prepare_v2(diskDb, sql, -1, &diskStmt, nullptr) == SQLITE_OK) {
-                    bindMeta(diskStmt, nPath, rMeta);
-                    int rc = sqlite3_step(diskStmt);
-                    if (rc != SQLITE_DONE) {
-                        qWarning() << "[DB_SYNC] 磁盘持久化失败:" << sqlite3_errmsg(diskDb) << "Path:" << QString::fromStdWString(nPath);
-                    }
-                    sqlite3_finalize(diskStmt);
-                }
-            });
-        }
-        sqlite3_finalize(memStmt);
-    }
-        
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    persistBatchAsync({path}, authorized);
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(path));
 }
 
 

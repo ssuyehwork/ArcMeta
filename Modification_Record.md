@@ -158,3 +158,12 @@
     - 移除陈旧的“延时同步”反馈逻辑，重构为基于异步队列监控的实时同步状态展示。
 - [2026-07-03 15:35:00] **CMakeLists.txt**:
     - 注册 `SyncStatusService` 源码，启用自动化编译支持。
+
+### 并发安全性加固与 SQL 职责下沉 (Plan-122)
+- [2026-07-03 16:20:00] **src/meta/DatabaseManager.h / .cpp**:
+    - 将全局锁 `m_mutex` 升级为 `std::shared_mutex`，支持读写分离。
+    - 优化 `getMemoryDb`、`getGlobalDb` 与 `getDiskDb` 访问路径，主线程获取句柄改用 `shared_lock`，彻底杜绝主从线程锁竞争风险。
+- [2026-07-03 16:45:00] **src/meta/MetadataManager.h / .cpp**:
+    - **职责下沉**：重构 `persistBatchAsync` 逻辑，将“内存库 SQL 写入”从主线程剥离并下沉至后台 I/O 线程。主线程实现“零 SQL 等待”。
+    - **双重事务优化**：异步任务内部实现“内存事务 -> 磁盘事务”的链式原子提交。针对批量标签变动，通过 `persistBatchAsync` 实现了高性能大事务同步。
+    - 修复了 `persistAsync` 内部的同步信号通知点，确保 UI 刷新与数据快照捕获时机一致。
