@@ -84,23 +84,22 @@ void DatabaseManager::ensureHidden(const std::wstring& path) {
 
 bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     std::string utf8Path = QString::fromStdWString(diskPath).toUtf8().toStdString();
-    qDebug() << "[DB] 尝试加载数据库:" << QString::fromStdString(utf8Path);
+    qDebug() << "[DB] 尝试直连磁盘数据库:" << QString::fromStdString(utf8Path);
+
+    // 2026-07-xx 按照 Plan-119：直连磁盘数据库并开启 WAL 模式
     if (sqlite3_open_v2(utf8Path.c_str(), &conn.diskDb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
         qDebug() << "[DB] Failed to open disk DB:" << QString::fromStdString(utf8Path);
         return false;
     }
     ensureHidden(diskPath);
 
-    if (sqlite3_open(":memory:", &conn.memDb) != SQLITE_OK) {
-        sqlite3_close(conn.diskDb);
-        return false;
-    }
+    // 性能优化：启用 WAL 模式与同步策略
+    sqlite3_exec(conn.diskDb, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec(conn.diskDb, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
 
-    sqlite3_backup* backup = sqlite3_backup_init(conn.memDb, "main", conn.diskDb, "main");
-    if (backup) {
-        sqlite3_backup_step(backup, -1);
-        sqlite3_backup_finish(backup);
-    }
+    // 废弃内存库中转，memDb 直接指向 diskDb 以维持外部调用兼容性
+    conn.memDb = conn.diskDb;
+
     // 初始化表结构 (Schema)
     const char* schema = R"(
         CREATE TABLE IF NOT EXISTS metadata (
@@ -252,19 +251,15 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     return true;
 }
 
-void DatabaseManager::saveDb(DbConnection& conn) {
-    if (!conn.memDb || !conn.diskDb) return;
-    sqlite3_backup* backup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-    if (backup) {
-        sqlite3_backup_step(backup, -1);
-        sqlite3_backup_finish(backup);
-    }
+void DatabaseManager::saveDb(DbConnection& /*conn*/) {
+    // 2026-07-xx 按照 Plan-119：直连模式下无需手动备份
 }
 
 void DatabaseManager::closeDb(DbConnection& conn) {
-    saveDb(conn);
-    if (conn.memDb) sqlite3_close(conn.memDb);
-    if (conn.diskDb) sqlite3_close(conn.diskDb);
+    // 2026-07-xx 按照 Plan-119：仅关闭物理句柄
+    if (conn.diskDb) {
+        sqlite3_close_v2(conn.diskDb);
+    }
     conn.memDb = nullptr;
     conn.diskDb = nullptr;
 }
@@ -286,74 +281,30 @@ bool DatabaseManager::init() {
 }
 
 void DatabaseManager::flushAll() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    saveDb(m_globalDb);
-    for (auto& pair : m_driveDbs) {
-        saveDb(pair.second);
-    }
+    // 2026-07-xx 按照 Plan-119：直连模式下无需手动同步，此接口已废弃
 }
 
 bool DatabaseManager::flushStep() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto stepConn = [](DbConnection& conn) -> bool {
-        if (!conn.memDb || !conn.diskDb) return true;
-        if (!conn.activeBackup) {
-            conn.activeBackup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-        }
-        if (conn.activeBackup) {
-            int rc = sqlite3_backup_step(conn.activeBackup, 50); // 1.21：每 50 页一跳
-            if (rc == SQLITE_DONE || rc != SQLITE_OK) {
-                sqlite3_backup_finish(conn.activeBackup);
-                conn.activeBackup = nullptr;
-                return true;
-            }
-            return false;
-        }
-        return true;
-    };
-
-    bool allDone = true;
-    if (!stepConn(m_globalDb)) allDone = false;
-    for (auto& pair : m_driveDbs) {
-        if (!stepConn(pair.second)) allDone = false;
-    }
-    return allDone;
+    // 2026-07-xx 按照 Plan-119：直连模式下始终返回完成，确保秒退出
+    return true;
 }
 
 void DatabaseManager::shutdown() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    // 强制完成所有挂起的备份
-    auto forceFinish = [](DbConnection& conn) {
-        if (conn.activeBackup) {
-            sqlite3_backup_step(conn.activeBackup, -1);
-            sqlite3_backup_finish(conn.activeBackup);
-            conn.activeBackup = nullptr;
-        } else {
-            // 如果没有活动备份，执行一次完整的同步
-            if (conn.memDb && conn.diskDb) {
-                sqlite3_backup* b = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-                if (b) {
-                    sqlite3_backup_step(b, -1);
-                    sqlite3_backup_finish(b);
-                }
-            }
-        }
-    };
-    
-    forceFinish(m_globalDb);
-    for (auto& pair : m_driveDbs) forceFinish(pair.second);
-
-    // 关闭所有句柄 (1.21：解除物理占用)
+    // 2026-07-xx 按照 Plan-119：直接关闭所有物理句柄，解除占用
     for (auto& pair : m_driveDbs) {
-        if (pair.second.memDb) sqlite3_close_v2(pair.second.memDb);
-        if (pair.second.diskDb) sqlite3_close_v2(pair.second.diskDb);
-        pair.second.memDb = nullptr;
+        if (pair.second.diskDb) {
+            sqlite3_close_v2(pair.second.diskDb);
+        }
         pair.second.diskDb = nullptr;
+        pair.second.memDb = nullptr;
     }
-    if (m_globalDb.memDb) sqlite3_close_v2(m_globalDb.memDb);
-    if (m_globalDb.diskDb) sqlite3_close_v2(m_globalDb.diskDb);
-    m_globalDb.memDb = nullptr;
+
+    if (m_globalDb.diskDb) {
+        sqlite3_close_v2(m_globalDb.diskDb);
+    }
     m_globalDb.diskDb = nullptr;
+    m_globalDb.memDb = nullptr;
 }
 
 sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QString& driveLetter) {

@@ -132,3 +132,29 @@
     - 在包含 `windows.h` 后显式 `#undef run`，解决 Windows 宏与 `QtConcurrent::run` 的标识符冲突。
 - [2026-07-02 16:30:00] **src/main.cpp**:
     - 增强“进入事件循环”与“正常退出”边界日志，用于区分崩溃闪退与逻辑退出。
+
+### 数据库实时磁盘同步与秒退出架构 (Plan-119)
+- [2026-07-02 18:00:00] **src/meta/DatabaseManager.cpp/h**:
+    - 废弃 :memory: 内存中转库，改为直连物理磁盘数据库。
+    - 开启 WAL 模式 () 与  优化并发写入性能。
+    - 移除所有  相关的备份、同步及步进持久化逻辑。
+- [2026-07-02 18:15:00] **src/meta/MetadataManager.cpp/h**:
+    - 废弃  (1500ms) 防抖批处理机制，改为实时异步写入。
+    - 遵循“磁盘优先”规约：所有元数据变更先执行磁盘 SQL 写入，成功后再更新内存镜像并通知 UI。
+    - 重构 , , ,  等 Setter 及关键操作链路。
+- [2026-07-02 18:30:00] **src/ui/TrayController.cpp**:
+    - 彻底移除退出程序时的  进度条与  备份循环。
+    - 实现程序秒退出，仅保留后台线程清理与数据库物理句柄释放。
+
+### 数据库实时磁盘同步与秒退出架构 (Plan-119)
+- [2026-07-02 18:00:00] **src/meta/DatabaseManager.cpp/h**:
+    - 废弃 :memory: 内存中转库，改为直连物理磁盘数据库。
+    - 开启 WAL 模式 (PRAGMA journal_mode=WAL) 与 PRAGMA synchronous=NORMAL 优化并发写入性能。
+    - 移除所有 sqlite3_backup 相关的备份、同步及步进持久化逻辑。
+- [2026-07-02 18:15:00] **src/meta/MetadataManager.cpp/h**:
+    - 废弃 m_batchTimer (1500ms) 防抖批处理机制，改为实时异步写入。
+    - 遵循“磁盘优先”规约：所有元数据变更先执行磁盘 SQL 写入，成功后再更新内存镜像并通知 UI。
+    - 重构 setRating, setTags, markAsTrash, renameItem 等 Setter 及关键操作链路。
+- [2026-07-02 18:30:00] **src/ui/TrayController.cpp**:
+    - 彻底移除退出程序时的 BatchProgressDialog 进度条与 flushStep 备份循环。
+    - 实现程序秒退出，仅保留后台线程清理与数据库物理句柄释放。

@@ -75,8 +75,7 @@ private:
 
     struct DbConnection {
         sqlite3* diskDb = nullptr;
-        sqlite3* memDb = nullptr;
-        sqlite3_backup* activeBackup = nullptr;
+        sqlite3* memDb = nullptr; // 2026-07-xx Plan-119: 在直连模式下，memDb 指向与 diskDb 相同的句柄
         std::wstring diskPath;
     };
 
