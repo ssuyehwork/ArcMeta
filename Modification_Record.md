@@ -181,3 +181,4 @@
     - **事务安全性加固**：在异步任务中引入 RAII 风格的 `SqlTransaction`，确保批量导入过程中数据库状态的一致性与异常安全。
     - **信号抑制与通知迁移**：将 `setInternalOperating(true/false)` 信号抑制逻辑与全量 UI 通知完整迁移至后台线程执行体，实现高性能导入。
     - **包含性修复**：同步更新 `onEntryAdded`、`onEntryUpdated` 以及 `syncAllManagedLibraries` 触发逻辑，实现全链路响应性能优化。
+    - **编译警告修复**：将 `QtConcurrent::run` 的返回值显式转换为 `(void)`，消除 MSVC C4858 警告。

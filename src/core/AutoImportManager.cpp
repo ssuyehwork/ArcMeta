@@ -71,7 +71,7 @@ void AutoImportManager::syncAllManagedLibraries() {
             if (QString::compare(entry, targetName, Qt::CaseInsensitive) == 0) {
                 QString managedPath = rootDir.absoluteFilePath(entry);
                 qDebug() << "[AutoImport] 启动对账：发现物理托管库，执行同步 ->" << managedPath;
-                QtConcurrent::run([this, managedPath]() {
+                (void)QtConcurrent::run([this, managedPath]() {
                     handleRecursiveIngestion(QDir::toNativeSeparators(managedPath).toStdWString());
                 });
                 changed = true;
@@ -95,7 +95,7 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
      
     if (isManaged) {
         if (MftReader::instance().isDirectory(idx)) {
-            QtConcurrent::run([this, fullPath]() {
+            (void)QtConcurrent::run([this, fullPath]() {
                 handleRecursiveIngestion(fullPath);
             });
         }
@@ -147,7 +147,7 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
     bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
     if (isManaged) {
         if (MftReader::instance().isDirectory(idx)) {
-            QtConcurrent::run([this, fullPath]() {
+            (void)QtConcurrent::run([this, fullPath]() {
                 handleRecursiveIngestion(fullPath);
             });
         }
@@ -238,7 +238,7 @@ void AutoImportManager::processImportQueue() {
     if (pathsToProcess.empty()) return;
 
     // 2026-08-xx 异步化改造：将耗时的 registerItem 循环移入后台线程
-    QtConcurrent::run([this, pathsToProcess]() {
+    (void)QtConcurrent::run([this, pathsToProcess]() {
         std::lock_guard<std::mutex> dbLock(s_dbAccessMutex);
         MetadataManager::instance().setInternalOperating(true);
 
