@@ -8,6 +8,7 @@
 #include <string>
 #include <mutex>
 #include <functional>
+#include <utility>
 
 struct sqlite3;
 

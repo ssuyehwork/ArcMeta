@@ -348,9 +348,17 @@ private:
     std::atomic<bool> m_isInternalOperating{false}; // 2026-xx-xx 按照 Plan-105：信号抑制标志位
     
     // 2026-08-xx 按照 Analysis_Modification_Plan-119：实时增量同步架构
+    enum class MetaField {
+        Rating, Color, Tags, Note, URL, Pinned, Encrypted, Invalid, IngestionStatus, VisualMetadata, TrashStatus, FullSync
+    };
+    struct MetadataDelta {
+        MetaField field;
+        QVariant value;
+        QVector<PaletteEntry> palettes; // 针对 VisualMetadata
+    };
     struct PersistenceTask {
         std::wstring path;
-        RuntimeMeta targetMeta;
+        std::vector<MetadataDelta> deltas;
         bool authorized;
         bool notify;
     };
@@ -361,7 +369,7 @@ private:
     std::atomic<bool> m_persistenceStop{false};
 
     void persistenceLoop();
-    void pushPersistenceTask(const std::wstring& path, const RuntimeMeta& meta, bool authorized, bool notify);
+    void pushPersistenceTask(const std::wstring& path, const std::vector<MetadataDelta>& deltas, bool authorized, bool notify);
     void executePersistenceTask(const PersistenceTask& task);
 
     // 2026-06-xx 性能加固：信号攒批机制，防止 5 万级数据扫描导致 UI 信号淹没

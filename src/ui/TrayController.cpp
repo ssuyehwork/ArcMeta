@@ -5,6 +5,7 @@
 #include <QProgressDialog>
 #include "../mft/MftReader.h"
 #include "../meta/DatabaseManager.h"
+#include "../meta/MetadataManager.h"
 #include "BatchProgressDialog.h"
 
 namespace ArcMeta {

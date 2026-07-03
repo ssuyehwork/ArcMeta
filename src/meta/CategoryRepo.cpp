@@ -59,45 +59,38 @@ std::vector<Category> CategoryRepo::getAll() {
 }
 
 bool CategoryRepo::add(Category& cat) {
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) {
-        qDebug() << "[CategoryRepo] add FAILED: No DB connection";
-        return false;
-    }
+    (void)QtConcurrent::run([cat]() mutable {
+        auto dual = DatabaseManager::instance().getGlobalDualDbs();
+        sqlite3* memDb = dual.first;
+        sqlite3* diskDb = dual.second;
+        if (!memDb || !diskDb) return;
 
-    sqlite3_stmt* stmt;
-    const char* sql = "INSERT INTO categories (parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
-    if (rc == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, cat.parentId);
-        sqlite3_bind_text16(stmt, 2, cat.name.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 3, cat.color.c_str(), -1, SQLITE_TRANSIENT);
-        
-        QStringList tags;
-        for (const auto& t : cat.presetTags) tags << QString::fromStdWString(t);
-        sqlite3_bind_text16(stmt, 4, tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-        
-        sqlite3_bind_int(stmt, 5, cat.sortOrder);
-        sqlite3_bind_int(stmt, 6, cat.pinned ? 1 : 0);
-        sqlite3_bind_int(stmt, 7, cat.encrypted ? 1 : 0);
-        sqlite3_bind_text16(stmt, 8, cat.encryptHint.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(stmt, 9, cat.physicalFrn);
-        sqlite3_bind_text16(stmt, 10, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
-
-        rc = sqlite3_step(stmt);
-        if (rc == SQLITE_DONE) {
-            cat.id = static_cast<int>(sqlite3_last_insert_rowid(db));
-            qDebug() << "[CategoryRepo] add success: Name =" << QString::fromStdWString(cat.name) << "ID =" << cat.id << "Parent =" << cat.parentId;
+        auto doAdd = [&](sqlite3* db) -> bool {
+            sqlite3_stmt* stmt;
+            const char* sql = "INSERT INTO categories (parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+            sqlite3_bind_int(stmt, 1, cat.parentId);
+            sqlite3_bind_text16(stmt, 2, cat.name.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text16(stmt, 3, cat.color.c_str(), -1, SQLITE_TRANSIENT);
+            QStringList tags;
+            for (const auto& t : cat.presetTags) tags << QString::fromStdWString(t);
+            sqlite3_bind_text16(stmt, 4, tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 5, cat.sortOrder);
+            sqlite3_bind_int(stmt, 6, cat.pinned ? 1 : 0);
+            sqlite3_bind_int(stmt, 7, cat.encrypted ? 1 : 0);
+            sqlite3_bind_text16(stmt, 8, cat.encryptHint.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(stmt, 9, cat.physicalFrn);
+            sqlite3_bind_text16(stmt, 10, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
+            int rc = sqlite3_step(stmt);
             sqlite3_finalize(stmt);
-            return true;
-        } else {
-            qDebug() << "[CategoryRepo] add FAILED during step:" << sqlite3_errmsg(db) << "Code:" << rc;
+            return (rc == SQLITE_DONE);
+        };
+
+        if (doAdd(diskDb)) {
+            doAdd(memDb);
         }
-        sqlite3_finalize(stmt);
-    } else {
-        qDebug() << "[CategoryRepo] add FAILED during prepare:" << sqlite3_errmsg(db) << "Code:" << rc;
-    }
-    return false;
+    });
+    return true; // 异步返回
 }
 
 bool CategoryRepo::removeAllCategories(const std::string& fileId128) {
@@ -275,31 +268,39 @@ Category CategoryRepo::getById(int id) {
 }
 
 bool CategoryRepo::update(const Category& cat) {
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return false;
+    (void)QtConcurrent::run([cat]() {
+        auto dual = DatabaseManager::instance().getGlobalDualDbs();
+        sqlite3* memDb = dual.first;
+        sqlite3* diskDb = dual.second;
+        if (!memDb || !diskDb) return;
 
-    sqlite3_stmt* stmt;
-    const char* sql = "UPDATE categories SET parent_id=?, name=?, color=?, preset_tags=?, sort_order=?, pinned=?, encrypted=?, encrypt_hint=?, physical_frn=?, physical_path=? WHERE id=?";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, cat.parentId);
-        sqlite3_bind_text16(stmt, 2, cat.name.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 3, cat.color.c_str(), -1, SQLITE_TRANSIENT);
-        QStringList tags;
-        for (const auto& t : cat.presetTags) tags << QString::fromStdWString(t);
-        sqlite3_bind_text16(stmt, 4, tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 5, cat.sortOrder);
-        sqlite3_bind_int(stmt, 6, cat.pinned ? 1 : 0);
-        sqlite3_bind_int(stmt, 7, cat.encrypted ? 1 : 0);
-        sqlite3_bind_text16(stmt, 8, cat.encryptHint.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(stmt, 9, cat.physicalFrn);
-        sqlite3_bind_text16(stmt, 10, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 11, cat.id);
+        auto doUpdate = [&](sqlite3* db) -> bool {
+            sqlite3_stmt* stmt;
+            const char* sql = "UPDATE categories SET parent_id=?, name=?, color=?, preset_tags=?, sort_order=?, pinned=?, encrypted=?, encrypt_hint=?, physical_frn=?, physical_path=? WHERE id=?";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+            sqlite3_bind_int(stmt, 1, cat.parentId);
+            sqlite3_bind_text16(stmt, 2, cat.name.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text16(stmt, 3, cat.color.c_str(), -1, SQLITE_TRANSIENT);
+            QStringList tags;
+            for (const auto& t : cat.presetTags) tags << QString::fromStdWString(t);
+            sqlite3_bind_text16(stmt, 4, tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 5, cat.sortOrder);
+            sqlite3_bind_int(stmt, 6, cat.pinned ? 1 : 0);
+            sqlite3_bind_int(stmt, 7, cat.encrypted ? 1 : 0);
+            sqlite3_bind_text16(stmt, 8, cat.encryptHint.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(stmt, 9, cat.physicalFrn);
+            sqlite3_bind_text16(stmt, 10, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 11, cat.id);
+            int rc = sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+            return (rc == SQLITE_DONE);
+        };
 
-        bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
-        sqlite3_finalize(stmt);
-        return ok;
-    }
-    return false;
+        if (doUpdate(diskDb)) {
+            doUpdate(memDb);
+        }
+    });
+    return true;
 }
 
 int CategoryRepo::findByFrn(uint64_t frn) {
@@ -322,18 +323,25 @@ int CategoryRepo::findByFrn(uint64_t frn) {
 }
 
 bool CategoryRepo::updatePhysicalMapping(int id, uint64_t frn, const std::wstring& path) {
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return false;
+    auto dual = DatabaseManager::instance().getGlobalDualDbs();
+    sqlite3* memDb = dual.first;
+    sqlite3* diskDb = dual.second;
+    if (!memDb || !diskDb) return false;
 
-    sqlite3_stmt* stmt;
-    const char* sql = "UPDATE categories SET physical_frn = ?, physical_path = ? WHERE id = ?";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+    auto doUpdate = [&](sqlite3* db) -> bool {
+        sqlite3_stmt* stmt;
+        const char* sql = "UPDATE categories SET physical_frn = ?, physical_path = ? WHERE id = ?";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
         sqlite3_bind_int64(stmt, 1, frn);
         sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, 3, id);
-        bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+        int rc = sqlite3_step(stmt);
         sqlite3_finalize(stmt);
-        return ok;
+        return (rc == SQLITE_DONE);
+    };
+
+    if (doUpdate(diskDb)) {
+        return doUpdate(memDb);
     }
     return false;
 }
@@ -361,80 +369,61 @@ int CategoryRepo::findCategoryId(int parentId, const std::wstring& name) {
 }
 
 bool CategoryRepo::remove(int id) {
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return false;
-
-    // Step 1: Recursively collect all category IDs to delete (existing logic, keep as-is)
+    // 获取子树 ID 必须在主线程（或通过 memDb）快速完成，以便收集待处理数据
     std::vector<int> toDelete = {id};
-    size_t i = 0;
-    while (i < toDelete.size()) {
-        int pid = toDelete[i++];
-        sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(db, "SELECT id FROM categories WHERE parent_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(stmt, 1, pid);
-            while (sqlite3_step(stmt) == SQLITE_ROW) toDelete.push_back(sqlite3_column_int(stmt, 0));
-            sqlite3_finalize(stmt);
-        }
-    }
-
-    // Step 2: Collect all unique File IDs from those categories (deduplicated)
-    std::vector<std::string> fids;
-    std::unordered_map<std::string, std::wstring> fidToPath; // fid -> path_hint
-    for (int catId : toDelete) {
-        auto items = getItemsInCategory(catId);
-        for (const auto& item : items) {
-            if (fidToPath.find(item.fileId128) == fidToPath.end()) {
-                fidToPath[item.fileId128] = item.pathHint;
-                fids.push_back(item.fileId128);
+    sqlite3* memDb = DatabaseManager::instance().getGlobalDb();
+    if (memDb) {
+        size_t idx = 0;
+        while (idx < toDelete.size()) {
+            int pid = toDelete[idx++];
+            sqlite3_stmt* stmt;
+            if (sqlite3_prepare_v2(memDb, "SELECT id FROM categories WHERE parent_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, pid);
+                while (sqlite3_step(stmt) == SQLITE_ROW) toDelete.push_back(sqlite3_column_int(stmt, 0));
+                sqlite3_finalize(stmt);
             }
         }
     }
 
-    // Step 3: For each File ID — remove all its category associations, then insert one row into trash bucket
-    executeFidBatch(fids, [&](sqlite3* innerDb, const std::string& fid) {
-        const std::wstring& pathHint = fidToPath[fid];
+    (void)QtConcurrent::run([toDelete]() {
+        auto dual = DatabaseManager::instance().getGlobalDualDbs();
+        sqlite3* memDb = dual.first;
+        sqlite3* diskDb = dual.second;
+        if (!memDb || !diskDb) return;
 
-        // Remove ALL existing category_items rows for this fid
-        sqlite3_stmt* delStmt;
-        if (sqlite3_prepare_v2(innerDb, "DELETE FROM category_items WHERE file_id = ?", -1, &delStmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(delStmt, 1, fid.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_step(delStmt);
-            sqlite3_finalize(delStmt);
+        // Step 2: Collect all unique File IDs
+        std::vector<std::string> fids;
+        for (int catId : toDelete) {
+            auto items = getItemsInCategory(catId);
+            for (const auto& item : items) {
+                if (std::find(fids.begin(), fids.end(), item.fileId128) == fids.end()) {
+                    fids.push_back(item.fileId128);
+                }
+            }
         }
-        // Insert one row into trash bucket
-        sqlite3_stmt* insStmt;
-        if (sqlite3_prepare_v2(innerDb,
-            "INSERT OR REPLACE INTO category_items (category_id, file_id, path_hint, added_at) VALUES (?, ?, ?, ?)",
-            -1, &insStmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(insStmt, 1, TRASH_CATEGORY_ID);
-            sqlite3_bind_text(insStmt, 2, fid.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text16(insStmt, 3, pathHint.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_double(insStmt, 4, static_cast<double>(QDateTime::currentMSecsSinceEpoch()));
-            sqlite3_step(insStmt);
-            sqlite3_finalize(insStmt);
+
+        // Step 3: Move to trash (Dual-Write inside)
+        moveToTrashBatch(fids);
+
+        // Step 4: Delete category rows
+        auto doDeleteCategories = [&](sqlite3* db) -> bool {
+            SqlTransaction trans(db);
+            for (int delId : toDelete) {
+                sqlite3_stmt* stmt;
+                if (sqlite3_prepare_v2(db, "DELETE FROM categories WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_int(stmt, 1, delId);
+                    sqlite3_step(stmt);
+                    sqlite3_finalize(stmt);
+                }
+            }
+            return trans.commit();
+        };
+
+        if (doDeleteCategories(diskDb)) {
+            doDeleteCategories(memDb);
         }
-        // Update in-memory cache: set isTrash = true, then persist
-        std::wstring path = MetadataManager::instance().getPathByFid(fid);
-        if (path.empty()) path = pathHint;
-        if (!path.empty()) {
-            MetadataManager::instance().setTrash(path, true);
-        }
-        return true;
+        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
     });
-
-    // Step 4: Delete only the category rows (NOT category_items — already handled above)
-    SqlTransaction trans(db);
-    for (int delId : toDelete) {
-        sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(db, "DELETE FROM categories WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(stmt, 1, delId);
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
-        }
-    }
-    trans.commit();
-
-    MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
     return true;
 }
 
@@ -470,71 +459,67 @@ bool CategoryRepo::reorderAll(bool ascending) {
 }
 
 bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint) {
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return false;
-
     std::wstring finalPath = MetadataManager::normalizePath(pathHint);
-    if (finalPath.empty()) finalPath = MetadataManager::instance().getPathByFid(fileId128);
+    (void)QtConcurrent::run([categoryId, fileId128, finalPath]() {
+        auto dual = DatabaseManager::instance().getGlobalDualDbs();
+        sqlite3* memDb = dual.first;
+        sqlite3* diskDb = dual.second;
+        if (!memDb || !diskDb) return;
 
-    SqlTransaction trans(db);
-    sqlite3_stmt* stmt;
-    const char* sql = "INSERT OR REPLACE INTO category_items (category_id, file_id, path_hint, added_at) VALUES (?, ?, ?, ?)";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, categoryId);
-        sqlite3_bind_text(stmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 3, finalPath.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_double(stmt, 4, static_cast<double>(QDateTime::currentMSecsSinceEpoch()));
-        if (sqlite3_step(stmt) == SQLITE_DONE) {
+        std::wstring actualPath = finalPath;
+        if (actualPath.empty()) actualPath = MetadataManager::instance().getPathByFid(fileId128);
+
+        auto doAdd = [&](sqlite3* db) -> bool {
+            SqlTransaction trans(db);
+            sqlite3_stmt* stmt;
+            const char* sql = "INSERT OR REPLACE INTO category_items (category_id, file_id, path_hint, added_at) VALUES (?, ?, ?, ?)";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+            sqlite3_bind_int(stmt, 1, categoryId);
+            sqlite3_bind_text(stmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text16(stmt, 3, actualPath.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(stmt, 4, static_cast<double>(QDateTime::currentMSecsSinceEpoch()));
+            bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
             sqlite3_finalize(stmt);
-            trans.commit();
+            return ok && trans.commit();
+        };
 
-            // 2026-06-xx 物理同步：归类操作必然标记为受控项，驱动 UI 绿对勾显示
-            if (!finalPath.empty()) {
-                // 2026-07-xx 物理修复：改用 registerItem 确保物理属性被提取并持久化
-                MetadataManager::instance().registerItem(finalPath);
+        if (doAdd(diskDb)) {
+            if (doAdd(memDb)) {
+                if (!actualPath.empty()) MetadataManager::instance().registerItem(actualPath);
+                syncCategorizedCountForFid(fileId128);
+                MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
             }
-
-            syncCategorizedCountForFid(fileId128);
-            
-            // 2026-06-xx 物理优化：手动归类后立即触发侧边栏异步局部刷新
-            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
-            return true;
         }
-        sqlite3_finalize(stmt);
-    }
-    return false;
+    });
+    return true;
 }
 
 bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fileId128) {
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return false;
+    (void)QtConcurrent::run([categoryId, fileId128]() {
+        auto dual = DatabaseManager::instance().getGlobalDualDbs();
+        sqlite3* memDb = dual.first;
+        sqlite3* diskDb = dual.second;
+        if (!memDb || !diskDb) return;
 
-    SqlTransaction trans(db);
-    sqlite3_stmt* stmt;
-    const char* sql = "DELETE FROM category_items WHERE category_id = ? AND file_id = ?";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, categoryId);
-        sqlite3_bind_text(stmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(stmt) == SQLITE_DONE) {
+        auto doRemove = [&](sqlite3* db) -> bool {
+            SqlTransaction trans(db);
+            sqlite3_stmt* stmt;
+            const char* sql = "DELETE FROM category_items WHERE category_id = ? AND file_id = ?";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+            sqlite3_bind_int(stmt, 1, categoryId);
+            sqlite3_bind_text(stmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
+            bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
             sqlite3_finalize(stmt);
-            trans.commit();
+            return ok && trans.commit();
+        };
 
-            // 2026-06-xx 物理同步：移出分类后，需要重新判定 Managed 状态。
-            // 由于 MetadataManager::setManaged 会同步更新 RuntimeMeta，
-            // 这里利用 syncCategorizedCountForFid 间接完成状态刷新。
-            std::wstring path = MetadataManager::instance().getPathByFid(fileId128);
-            if (!path.empty()) {
-                auto meta = MetadataManager::instance().getMeta(path);
-                // 如果没有其他用户操作，且不再属于任何分类，则可能需要取消 Managed 标记。
-                // 暂时保持现状，或调用一次 refresh 逻辑。
+        if (doRemove(diskDb)) {
+            if (doRemove(memDb)) {
+                syncCategorizedCountForFid(fileId128);
             }
-
-            syncCategorizedCountForFid(fileId128);
-            return true;
         }
-        sqlite3_finalize(stmt);
-    }
-    return false;
+    });
+    return true;
 }
 
 std::vector<CategoryItem> CategoryRepo::getItemsInCategory(int categoryId) {
@@ -692,41 +677,54 @@ void CategoryRepo::incrementCategorizedCount(int delta) {
 }
 
 void CategoryRepo::updatePersistentStat(const std::string& key, int delta) {
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return;
+    auto dual = DatabaseManager::instance().getGlobalDualDbs();
+    sqlite3* memDb = dual.first;
+    sqlite3* diskDb = dual.second;
+    if (!memDb || !diskDb) return;
 
-    sqlite3_stmt* stmt;
-    const char* sql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, "
-                      "COALESCE((SELECT value FROM system_stats WHERE key = ?), 0) + ?)";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, key.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 3, delta);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-    }
+    auto doUpdate = [&](sqlite3* db) {
+        sqlite3_stmt* stmt;
+        const char* sql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, "
+                          "COALESCE((SELECT value FROM system_stats WHERE key = ?), 0) + ?)";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, key.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 3, delta);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+    };
+
+    doUpdate(diskDb);
+    doUpdate(memDb);
 }
 
 bool CategoryRepo::executeFidBatch(const std::vector<std::string>& fids, std::function<bool(struct sqlite3*, const std::string&)> action) {
     if (fids.empty()) return true;
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return false;
+    auto dual = DatabaseManager::instance().getGlobalDualDbs();
+    sqlite3* memDb = dual.first;
+    sqlite3* diskDb = dual.second;
+    if (!memDb || !diskDb) return false;
 
-    SqlTransaction trans(db);
-    for (const auto& fid : fids) {
-        if (!action(db, fid)) {
-            trans.rollback();
-            return false;
+    auto doBatch = [&](sqlite3* db) -> bool {
+        SqlTransaction trans(db);
+        for (const auto& fid : fids) {
+            if (!action(db, fid)) {
+                trans.rollback();
+                return false;
+            }
+        }
+        return trans.commit();
+    };
+
+    if (doBatch(diskDb)) {
+        if (doBatch(memDb)) {
+            syncCategorizedCountForFid("");
+            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
+            return true;
         }
     }
-    bool ok = trans.commit();
-    
-    // 2026-06-xx 架构优化：批量变动后自动同步已分类计数，实现跨表一致性
-    syncCategorizedCountForFid("");
-    
-    // 批量处理后通知 UI 刷新
-    MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
-    return ok;
+    return false;
 }
 
 void CategoryRepo::syncCategorizedCountForFid(const std::string& /*fid*/) {
