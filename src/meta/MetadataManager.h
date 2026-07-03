@@ -72,6 +72,7 @@ public:
     static std::wstring normalizePath(const std::wstring& path);
     
     void initFromScchMode();
+    void shutdown();
     RuntimeMeta getMeta(const std::wstring& path);
     std::wstring getPathByFid(const std::string& fid);
 

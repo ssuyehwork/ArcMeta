@@ -72,7 +72,10 @@ void TrayController::onQuitApp() {
     // 1. 强制中断所有后台任务
     MftReader::instance().clear(); 
 
-    // 2. 显式释放所有句柄 (由于运行期已实时增量落地，此处仅执行关闭)
+    // 2. 停止元数据持久化线程 (确保队列排空)
+    MetadataManager::instance().shutdown();
+
+    // 3. 显式释放所有数据库句柄 (由于运行期已实时增量落地，此处仅执行关闭)
     DatabaseManager::instance().shutdown();
 
     qDebug() << "[Exit] 物理占用已释放。程序秒级退出。";

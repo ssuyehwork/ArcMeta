@@ -128,15 +128,19 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
         }
     });
 
-    // 2026-06-xx 物理加固：监听程序退出信号，确保内存中的元数据变更落盘
+    // 2026-06-xx 物理加固：监听程序退出信号
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, [this]() {
-        qDebug() << "[Metadata] 程序退出，通知同步线程停止...";
-        // 2026-08-xx 按照 Plan-119：秒退出，无需再执行 aboutToQuit 里的备份
+        qDebug() << "[Metadata] 程序意外退出，执行紧急资源清理...";
+        this->shutdown();
         DatabaseManager::instance().shutdown();
     });
 }
 
 MetadataManager::~MetadataManager() {
+    shutdown();
+}
+
+void MetadataManager::shutdown() {
     m_persistenceStop = true;
     m_persistenceCv.notify_all();
     if (m_persistenceThread.joinable()) {
@@ -413,17 +417,23 @@ void MetadataManager::markAsIngested(const std::wstring& path) {
 }
 
 void MetadataManager::persistenceLoop() {
-    while (!m_persistenceStop) {
+    while (true) {
         PersistenceTask task;
         {
             std::unique_lock<std::mutex> lock(m_persistenceMutex);
             m_persistenceCv.wait(lock, [this] { return !m_persistenceQueue.empty() || m_persistenceStop; });
+
+            // 2026-08-xx 按照评审要求：只有当停止标志位被设且队列为空时，才彻底退出
             if (m_persistenceStop && m_persistenceQueue.empty()) break;
+
+            if (m_persistenceQueue.empty()) continue; // 虚假唤醒且未停止
+
             task = std::move(m_persistenceQueue.front());
             m_persistenceQueue.pop_front();
         }
         executePersistenceTask(task);
     }
+    qDebug() << "[Metadata] 持久化工作线程已优雅退出，队列已排空。";
 }
 
 void MetadataManager::pushPersistenceTask(const std::wstring& path, const RuntimeMeta& meta, bool authorized, bool notify) {
@@ -515,18 +525,37 @@ void MetadataManager::executePersistenceTask(const PersistenceTask& task) {
         // B. 执行内存库写入
         if (doWrite(memDb)) {
             // C. 更新 m_cache
-            bool cacheNew = false;
+            int countDelta = 0;
             {
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
-                if (m_cache.find(nPath) == m_cache.end()) cacheNew = true;
+                auto it = m_cache.find(nPath);
+                if (it == m_cache.end()) {
+                    // 新项入库
+                    if (!rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
+                        countDelta = 1;
+                    }
+                } else {
+                    // 现有项更新，计算计数差异 (仅针对已标记为 Managed 的项)
+                    if (it->second.isManaged) {
+                        bool wasActive = !it->second.isFolder && !it->second.isInvalid && !it->second.isTrash;
+                        bool nowActive = !rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash;
+                        if (wasActive && !nowActive) countDelta = -1;
+                        else if (!wasActive && nowActive) countDelta = 1;
+                    } else {
+                        // 之前未入库，现在入库成功
+                        if (!rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
+                            countDelta = 1;
+                        }
+                    }
+                }
 
                 m_cache[nPath] = rMeta;
                 m_cache[nPath].isManaged = true; // 落地成功即受控
                 if (!rMeta.fileId128.empty()) m_fidToPath[rMeta.fileId128] = nPath;
             }
 
-            if (cacheNew && !rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
-                CategoryRepo::incrementTotalFileCount(1);
+            if (countDelta != 0) {
+                CategoryRepo::incrementTotalFileCount(countDelta);
             }
 
             if (task.notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
@@ -1100,7 +1129,10 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
         sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
     }
 
-    if (totalDelta != 0) CategoryRepo::incrementTotalFileCount(totalDelta);
+    if (totalDelta != 0) {
+        // 2026-08-xx 按照 Plan-119：同步更新持久化计数
+        CategoryRepo::incrementTotalFileCount(totalDelta);
+    }
     
     // 2026-06-xx 物理级根除：基于 File ID (FRN) 批量清理所有分类关联，彻底杜绝“幽灵关联”
     if (!fids.empty()) {
@@ -1169,11 +1201,6 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
             CategoryRepo::moveToTrashBatch({meta.fileId128});
         }
 
-        // 2026-07-xx 架构修正：移入回收站应视为从活跃池移除。
-        if (meta.isManaged && !meta.isInvalid) {
-            CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
-        }
-
         pushPersistenceTask(nPath, meta, false, true);
         notifyUI(RefreshLevel::FullRebuild);
     }
@@ -1189,9 +1216,6 @@ void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
     }
 
     if (meta.isTrash != isTrash) {
-        if (meta.isManaged && !meta.isInvalid) {
-            CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
-        }
         meta.isTrash = isTrash;
         if (!isTrash) meta.originalPath = L"";
         pushPersistenceTask(nPath, meta, false, false);

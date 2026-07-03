@@ -85,6 +85,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         qDebug() << "[DB] Failed to open disk DB:" << QString::fromStdString(utf8Path);
         return false;
     }
+    sqlite3_busy_timeout(conn.diskDb, 5000); // 2026-08-xx 物理加固：设置 5 秒忙碌重试
     ensureHidden(diskPath);
 
     if (sqlite3_open(":memory:", &conn.memDb) != SQLITE_OK) {
@@ -329,7 +330,7 @@ std::pair<sqlite3*, sqlite3*> DatabaseManager::getDualDbs(const std::wstring& vo
                 loadDb(conn.diskPath, conn);
             }
         }
-        return m_driveDbs[volumeSerial].memDb;
+        return {m_driveDbs[volumeSerial].memDb, m_driveDbs[volumeSerial].diskDb};
     }
 
     if (m_driveDbs.find(volumeSerial) == m_driveDbs.end()) {
