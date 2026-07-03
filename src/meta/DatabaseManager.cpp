@@ -67,11 +67,7 @@ DatabaseManager::DatabaseManager(QObject* parent) : QObject(parent) {
 }
 
 DatabaseManager::~DatabaseManager() {
-    flushAll();
-    for (auto& pair : m_driveDbs) {
-        closeDb(pair.second);
-    }
-    closeDb(m_globalDb);
+    shutdown();
 }
 
 QString DatabaseManager::getAppDir() {
@@ -252,19 +248,9 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     return true;
 }
 
-void DatabaseManager::saveDb(DbConnection& conn) {
-    if (!conn.memDb || !conn.diskDb) return;
-    sqlite3_backup* backup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-    if (backup) {
-        sqlite3_backup_step(backup, -1);
-        sqlite3_backup_finish(backup);
-    }
-}
-
 void DatabaseManager::closeDb(DbConnection& conn) {
-    saveDb(conn);
-    if (conn.memDb) sqlite3_close(conn.memDb);
-    if (conn.diskDb) sqlite3_close(conn.diskDb);
+    if (conn.memDb) sqlite3_close_v2(conn.memDb);
+    if (conn.diskDb) sqlite3_close_v2(conn.diskDb);
     conn.memDb = nullptr;
     conn.diskDb = nullptr;
 }
@@ -285,87 +271,22 @@ bool DatabaseManager::init() {
     return true;
 }
 
-void DatabaseManager::flushAll() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    saveDb(m_globalDb);
-    for (auto& pair : m_driveDbs) {
-        saveDb(pair.second);
-    }
-}
-
-bool DatabaseManager::flushStep() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto stepConn = [](DbConnection& conn) -> bool {
-        if (!conn.memDb || !conn.diskDb) return true;
-        if (!conn.activeBackup) {
-            conn.activeBackup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-        }
-        if (conn.activeBackup) {
-            int rc = sqlite3_backup_step(conn.activeBackup, 50); // 1.21：每 50 页一跳
-            if (rc == SQLITE_DONE || rc != SQLITE_OK) {
-                sqlite3_backup_finish(conn.activeBackup);
-                conn.activeBackup = nullptr;
-                return true;
-            }
-            return false;
-        }
-        return true;
-    };
-
-    bool allDone = true;
-    if (!stepConn(m_globalDb)) allDone = false;
-    for (auto& pair : m_driveDbs) {
-        if (!stepConn(pair.second)) allDone = false;
-    }
-    return allDone;
-}
-
 void DatabaseManager::shutdown() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    // 强制完成所有挂起的备份
-    auto forceFinish = [](DbConnection& conn) {
-        if (conn.activeBackup) {
-            sqlite3_backup_step(conn.activeBackup, -1);
-            sqlite3_backup_finish(conn.activeBackup);
-            conn.activeBackup = nullptr;
-        } else {
-            // 如果没有活动备份，执行一次完整的同步
-            if (conn.memDb && conn.diskDb) {
-                sqlite3_backup* b = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-                if (b) {
-                    sqlite3_backup_step(b, -1);
-                    sqlite3_backup_finish(b);
-                }
-            }
-        }
-    };
-    
-    forceFinish(m_globalDb);
-    for (auto& pair : m_driveDbs) forceFinish(pair.second);
-
-    // 关闭所有句柄 (1.21：解除物理占用)
     for (auto& pair : m_driveDbs) {
-        if (pair.second.memDb) sqlite3_close_v2(pair.second.memDb);
-        if (pair.second.diskDb) sqlite3_close_v2(pair.second.diskDb);
-        pair.second.memDb = nullptr;
-        pair.second.diskDb = nullptr;
+        closeDb(pair.second);
     }
-    if (m_globalDb.memDb) sqlite3_close_v2(m_globalDb.memDb);
-    if (m_globalDb.diskDb) sqlite3_close_v2(m_globalDb.diskDb);
-    m_globalDb.memDb = nullptr;
-    m_globalDb.diskDb = nullptr;
+    closeDb(m_globalDb);
 }
 
-sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QString& driveLetter) {
+std::pair<sqlite3*, sqlite3*> DatabaseManager::getDualDbs(const std::wstring& volumeSerial, const QString& driveLetter) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    qDebug() << "[DB] getMemoryDb requested for Serial:" << QString::fromStdWString(volumeSerial) << "Letter:" << driveLetter;
     
     QString cleanLetter = "";
     if (!driveLetter.isEmpty()) {
         cleanLetter = driveLetter.at(0).toUpper();
     }
 
-    // 2026-07-xx 按照用户要求：若数据库已加载但盘符发生变化，触发“关闭-重命名-重新打开”
     if (m_driveDbs.find(volumeSerial) != m_driveDbs.end()) {
         if (!cleanLetter.isEmpty()) {
             QString currentDiskPath = QString::fromStdWString(m_driveDbs[volumeSerial].diskPath);
@@ -374,7 +295,6 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
                 qDebug() << "[DB] 检测到盘符漂移，执行动态迁移:" << currentDiskPath << " -> " << expectedFileName;
                 
                 DbConnection& conn = m_driveDbs[volumeSerial];
-                saveDb(conn); // 先持久化
                 
                 // 关闭句柄以解除占用
                 if (conn.memDb) sqlite3_close_v2(conn.memDb);
@@ -460,14 +380,23 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
         if (loadDb(targetPath.toStdWString(), conn)) {
             m_driveDbs[volumeSerial] = conn;
         } else {
-            return nullptr;
+            return {nullptr, nullptr};
         }
     }
-    return m_driveDbs[volumeSerial].memDb;
+    return {m_driveDbs[volumeSerial].memDb, m_driveDbs[volumeSerial].diskDb};
+}
+
+std::pair<sqlite3*, sqlite3*> DatabaseManager::getGlobalDualDbs() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return {m_globalDb.memDb, m_globalDb.diskDb};
+}
+
+sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QString& driveLetter) {
+    return getDualDbs(volumeSerial, driveLetter).first;
 }
 
 sqlite3* DatabaseManager::getGlobalDb() {
-    return m_globalDb.memDb;
+    return getGlobalDualDbs().first;
 }
 
 } // namespace ArcMeta

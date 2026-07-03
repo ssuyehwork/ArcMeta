@@ -11,6 +11,10 @@
 #include <shared_mutex>
 #include <string>
 #include <atomic>
+#include <deque>
+#include <condition_variable>
+#include <thread>
+#include <functional>
 
 namespace ArcMeta {
 
@@ -325,7 +329,7 @@ signals:
 
 private:
     MetadataManager(QObject* parent = nullptr);
-    ~MetadataManager() override = default;
+    ~MetadataManager() override;
 
     std::unordered_map<std::wstring, RuntimeMeta> m_cache;
     std::unordered_map<std::string, std::wstring> m_fidToPath;
@@ -342,9 +346,22 @@ private:
     bool m_loaded = false; // 2026-06-xx 物理加固：加载状态标记
     std::atomic<bool> m_isInternalOperating{false}; // 2026-xx-xx 按照 Plan-105：信号抑制标志位
     
-    // 2026-05-25 按照用户要求：改用单例计时器与脏路径集，彻底解决计时器风暴
-    QTimer* m_batchTimer = nullptr;
-    std::unordered_set<std::wstring, std::hash<std::wstring>> m_dirtyPaths;
+    // 2026-08-xx 按照 Analysis_Modification_Plan-119：实时增量同步架构
+    struct PersistenceTask {
+        std::wstring path;
+        RuntimeMeta targetMeta;
+        bool authorized;
+        bool notify;
+    };
+    std::deque<PersistenceTask> m_persistenceQueue;
+    std::thread m_persistenceThread;
+    std::condition_variable m_persistenceCv;
+    std::mutex m_persistenceMutex;
+    std::atomic<bool> m_persistenceStop{false};
+
+    void persistenceLoop();
+    void pushPersistenceTask(const std::wstring& path, const RuntimeMeta& meta, bool authorized, bool notify);
+    void executePersistenceTask(const PersistenceTask& task);
 
     // 2026-06-xx 性能加固：信号攒批机制，防止 5 万级数据扫描导致 UI 信号淹没
     QTimer* m_uiSignalTimer = nullptr;
@@ -354,17 +371,6 @@ private:
     QTimer* m_retryTimer = nullptr;
     std::vector<std::wstring> m_visualRetryQueue;
     void processVisualRetryQueue();
-
-    /**
-     * @brief 异步持久化项元数据
-     * 2026-07-xx 按照 Plan-116：增加授权标志位，严禁非法入库
-     * @param authorized 是否允许创建新记录（只有 USN Journal 触发时为 true）
-     */
-    void persistAsync(const std::wstring& path, bool notify = true, bool authorized = false);
-    void debouncePersist(const std::wstring& path);
-
-    // 2026-07-xx 按照 Plan-88：无锁版脏路径推送，解决递归死锁
-    void pushToDirty_NoLock(const std::wstring& nPath);
 };
 
 } // namespace ArcMeta

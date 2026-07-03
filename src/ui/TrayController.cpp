@@ -66,36 +66,16 @@ void TrayController::onShowMainWindow() {
 }
 
 void TrayController::onQuitApp() {
-    // 2026-07-xx 按照用户要求 (1.21)：退出流程优化与文件占用解决
+    // 2026-08-xx 按照 Analysis_Modification_Plan-119：秒退出架构
     if (m_trayIcon) m_trayIcon->hide();
 
-    // 1. 弹出模态进度提示 (退出反馈)
-    BatchProgressDialog* progress = new BatchProgressDialog("正在安全保存数据并退出...", nullptr);
-    progress->setWindowModality(Qt::ApplicationModal);
-    progress->show();
-    progress->setStatus("正在停止后台扫描线程...");
-
-    // 2. 强制中断所有后台任务
+    // 1. 强制中断所有后台任务
     MftReader::instance().clear(); 
 
-    // 3. 步进式备份持久化
-    progress->setStatus("正在将内存数据持久化至磁盘...");
-    int totalSteps = 0;
-    while (!DatabaseManager::instance().flushStep()) {
-        totalSteps++;
-        QApplication::processEvents(); // 维持界面响应
-        if (totalSteps % 10 == 0) {
-            progress->setStatus(QString("正在保存数据 (已执行 %1 步拷贝)...").arg(totalSteps));
-        }
-    }
-
-    // 4. 显式释放所有句柄 (解除占用)
+    // 2. 显式释放所有句柄 (由于运行期已实时增量落地，此处仅执行关闭)
     DatabaseManager::instance().shutdown();
 
-    progress->accept();
-    delete progress;
-
-    qDebug() << "[Exit] 数据保存完成，物理占用已释放。程序正式退出。";
+    qDebug() << "[Exit] 物理占用已释放。程序秒级退出。";
     QApplication::quit();
 }
 

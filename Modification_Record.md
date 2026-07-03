@@ -132,3 +132,19 @@
     - 在包含 `windows.h` 后显式 `#undef run`，解决 Windows 宏与 `QtConcurrent::run` 的标识符冲突。
 - [2026-07-02 16:30:00] **src/main.cpp**:
     - 增强“进入事件循环”与“正常退出”边界日志，用于区分崩溃闪退与逻辑退出。
+
+### 内存与磁盘实时增量同步与秒退出架构实现 (Plan-119)
+- [2026-08-01 10:00:00] **src/meta/DatabaseManager.h / .cpp**:
+    - 重构数据库管理架构，由全量/步进式备份模式切换为“双句柄并行”模式。
+    - 实现 `getDualDbs` 和 `getGlobalDualDbs` 接口，同时向业务层暴露内存与磁盘连接句柄。
+    - 废弃 `flushAll`、`flushStep` 等同步接口，简化 `shutdown` 逻辑以实现物理占用瞬时释放。
+- [2026-08-01 11:30:00] **src/meta/MetadataManager.h / .cpp**:
+    - 引入基于后台线程的顺序持久化工作队列 `m_persistenceQueue`。
+    - 强制执行“Step A (Disk) -> Step B (Memory) -> Step C (Cache)”的持久化链路，确保物理落盘优先。
+    - 彻底废弃基于计时器的防抖持久化逻辑（`m_batchTimer` / `m_dirtyPaths`），改用实时任务下发。
+    - 重构所有元数据设置接口（Rating, Color, Tags 等），使其通过持久化线程异步同步。
+- [2026-08-01 14:00:00] **src/ui/TrayController.cpp**:
+    - 彻底移除退出时的 `BatchProgressDialog` 进度条及全量搬运循环。
+    - 调用简化后的 `DatabaseManager::shutdown`，实现程序秒级瞬间关闭。
+- [2026-08-01 14:15:00] **src/meta/CategoryRepo.cpp**:
+    - 移除所有手动的 `flushAll` 持久化触发，完全依赖 `MetadataManager` 的实时同步机制。

@@ -101,9 +101,7 @@ MetadataManager& MetadataManager::instance() {
 }
 
 MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
-    m_batchTimer = new QTimer(this);
-    m_batchTimer->setInterval(1500);
-    m_batchTimer->setSingleShot(true);
+    m_persistenceThread = std::thread(&MetadataManager::persistenceLoop, this);
 
     m_uiSignalTimer = new QTimer(this);
     m_uiSignalTimer->setInterval(200); // 200ms 时间窗口
@@ -130,40 +128,20 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
         }
     });
 
-    connect(m_batchTimer, &QTimer::timeout, [this]() {
-        std::vector<std::wstring> paths;
-        {
-            std::unique_lock<std::shared_mutex> lock(m_mutex);
-            for (const auto& p : m_dirtyPaths) {
-                paths.push_back(p);
-            }
-            m_dirtyPaths.clear();
-        }
-        
-        // 2026-06-xx 性能优化：持久化任务切入后台线程池，杜绝主线程 I/O 挂起
-        if (!paths.empty()) {
-            (void)QtConcurrent::run([this, paths]() {
-                for (const auto& p : paths) {
-                    persistAsync(p);
-                }
-            });
-        }
-    });
-
     // 2026-06-xx 物理加固：监听程序退出信号，确保内存中的元数据变更落盘
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, [this]() {
-        qDebug() << "[Metadata] 程序退出前强制保存所有脏数据...";
-        std::vector<std::wstring> paths;
-        {
-            std::unique_lock<std::shared_mutex> lock(m_mutex);
-            for (const auto& p : m_dirtyPaths) paths.push_back(p);
-            m_dirtyPaths.clear();
-        }
-        for (const auto& p : paths) persistAsync(p);
-        
-        // 2026-06-xx 物理切换：强制刷新 SQLite 到磁盘
-        DatabaseManager::instance().flushAll();
+        qDebug() << "[Metadata] 程序退出，通知同步线程停止...";
+        // 2026-08-xx 按照 Plan-119：秒退出，无需再执行 aboutToQuit 里的备份
+        DatabaseManager::instance().shutdown();
     });
+}
+
+MetadataManager::~MetadataManager() {
+    m_persistenceStop = true;
+    m_persistenceCv.notify_all();
+    if (m_persistenceThread.joinable()) {
+        m_persistenceThread.join();
+    }
 }
 
 
@@ -365,14 +343,18 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     std::wstring nPath = normalizePath(path);
     qDebug() << "[Metadata] 收到项目注册请求:" << QString::fromStdWString(nPath) << "Authorized:" << authorized;
 
-    // 2026-07-xx 按照 Plan-117：采用登记->解析->完成的闭环逻辑
-    // 为了性能，registerItem 内部不再调用 markAsRegistered 以免产生多余的独立事务
-    
     // 1. 激活项目 (获取 FID/FRN 等物理属性)
     ensureActivated(nPath);
 
+    RuntimeMeta meta;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
+
     // 2. 登记项目（待处理状态 0）
-    updateIngestionStatus(nPath, 0);
+    meta.ingestionStatus = 0;
+    pushPersistenceTask(nPath, meta, authorized, false);
 
     // 3. 提取图像尺寸 (Plan-29)
     tryExtractDimensions(nPath);
@@ -381,10 +363,12 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     tryExtractColor(nPath);
 
     // 5. 标记完成并持久化（完成状态 1）
-    updateIngestionStatus(nPath, 1);
-
-    // 5. 通知 UI 刷新该路径
-    notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
+    meta.ingestionStatus = 1;
+    pushPersistenceTask(nPath, meta, authorized, true);
 }
 
 void MetadataManager::markAsRegistered(const std::wstring& path) {
@@ -392,13 +376,7 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
     
     // 2026-07-xx 按照性能优化要求：将级联登记逻辑移至后台线程，杜绝大目录导入阻塞主线程
     (void)QtConcurrent::run([this, nPath]() {
-        // 1. 识别该路径归属的数据库
-        std::wstring volSerial = getVolumeSerialNumber(nPath);
-        QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
-        if (!db) return;
-
-        // 2. 收集所有待登记路径（递归）
+        // 1. 收集所有待登记路径（递归）
         std::vector<std::wstring> pathsToRegister;
         pathsToRegister.push_back(nPath);
 
@@ -410,23 +388,23 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
             }
         }
 
-        // 3. 开启批量事务处理
+        // 2. 批量提交持久化任务
         qDebug() << "[Metadata] 开始异步批量级联登记，总项数:" << pathsToRegister.size();
         QStringList qPathsToRegister;
-        SqlTransaction trans(db);
         for (const auto& p : pathsToRegister) {
             ensureActivated(p);
-            updateIngestionStatus(p, 0);
+            RuntimeMeta meta;
+            {
+                std::shared_lock<std::shared_mutex> lock(m_mutex);
+                meta = m_cache[p];
+            }
+            meta.ingestionStatus = 0;
+            pushPersistenceTask(p, meta, true, false);
             qPathsToRegister << QString::fromStdWString(p);
         }
         
-        if (trans.commit()) {
-            qDebug() << "[Metadata] 异步批量登记事务提交成功，触发后台解析流程";
-            // 4. 登记完成后，触发异步解析链实现闭环
-            registerItemsAsync(qPathsToRegister, true);
-        } else {
-            qWarning() << "[Metadata] 异步批量登记事务提交失败！";
-        }
+        // 3. 触发后台解析流程
+        registerItemsAsync(qPathsToRegister, true);
     });
 }
 
@@ -434,21 +412,146 @@ void MetadataManager::markAsIngested(const std::wstring& path) {
     updateIngestionStatus(path, 1);
 }
 
-void MetadataManager::updateIngestionStatus(const std::wstring& path, int newStatus) {
-    std::wstring nPath = normalizePath(path);
-    bool changed = false;
+void MetadataManager::persistenceLoop() {
+    while (!m_persistenceStop) {
+        PersistenceTask task;
+        {
+            std::unique_lock<std::mutex> lock(m_persistenceMutex);
+            m_persistenceCv.wait(lock, [this] { return !m_persistenceQueue.empty() || m_persistenceStop; });
+            if (m_persistenceStop && m_persistenceQueue.empty()) break;
+            task = std::move(m_persistenceQueue.front());
+            m_persistenceQueue.pop_front();
+        }
+        executePersistenceTask(task);
+    }
+}
+
+void MetadataManager::pushPersistenceTask(const std::wstring& path, const RuntimeMeta& meta, bool authorized, bool notify) {
     {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        if (m_cache.count(nPath)) {
-            if (m_cache[nPath].ingestionStatus != newStatus) {
-                m_cache[nPath].ingestionStatus = newStatus;
-                changed = true;
-            }
+        std::lock_guard<std::mutex> lock(m_persistenceMutex);
+        // 简单去重：如果队列末尾是同一个路径的更新，可以考虑合并或替换，但这里先实现顺序执行
+        m_persistenceQueue.push_back({path, meta, authorized, notify});
+    }
+    m_persistenceCv.notify_one();
+}
+
+void MetadataManager::executePersistenceTask(const PersistenceTask& task) {
+    const std::wstring& nPath = task.path;
+    const RuntimeMeta& rMeta = task.targetMeta;
+
+    std::pair<sqlite3*, sqlite3*> dualDbs;
+    if (nPath.length() == 3 && nPath[1] == L':' && (nPath[2] == L'\\' || nPath[2] == L'/')) {
+        dualDbs = DatabaseManager::instance().getGlobalDualDbs();
+    } else {
+        std::wstring volSerial = getVolumeSerialNumber(nPath);
+        QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
+        dualDbs = DatabaseManager::instance().getDualDbs(volSerial, letter);
+    }
+
+    sqlite3* memDb = dualDbs.first;
+    sqlite3* diskDb = dualDbs.second;
+    if (!memDb || !diskDb) return;
+
+    // Step A: Disk Write
+    auto doWrite = [&](sqlite3* db) -> bool {
+        sqlite3_stmt* stmt;
+        const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+
+        sqlite3_bind_text(stmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 2, nPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 3, rMeta.isFolder ? 1 : 0);
+        sqlite3_bind_int(stmt, 4, rMeta.rating);
+        sqlite3_bind_text16(stmt, 5, rMeta.color.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 6, rMeta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 7, rMeta.note.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 8, rMeta.url.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 9, rMeta.ctime);
+        sqlite3_bind_int64(stmt, 10, rMeta.mtime);
+        sqlite3_bind_int64(stmt, 11, rMeta.atime);
+        sqlite3_bind_int64(stmt, 12, rMeta.fileSize);
+
+        QJsonArray arr;
+        for (const auto& pe : rMeta.palettes) {
+            QJsonObject obj;
+            obj["color"] = pe.color.name();
+            obj["ratio"] = (double)pe.ratio;
+            arr.append(obj);
+        }
+        QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
+        sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 14, rMeta.isTrash ? 1 : 0);
+        sqlite3_bind_text16(stmt, 15, rMeta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 16, rMeta.isInvalid ? 1 : 0);
+        sqlite3_bind_int(stmt, 17, rMeta.width);
+        sqlite3_bind_int(stmt, 18, rMeta.height);
+        sqlite3_bind_int(stmt, 19, rMeta.ingestionStatus);
+
+        int rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        return (rc == SQLITE_DONE);
+    };
+
+    // 磁盘写入前，先检查是否是新项且未授权 (Plan-116 逻辑迁移)
+    bool isNew = true;
+    {
+        sqlite3_stmt* checkStmt;
+        if (sqlite3_prepare_v2(diskDb, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(checkStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(checkStmt) == SQLITE_ROW) isNew = false;
+            sqlite3_finalize(checkStmt);
         }
     }
 
-    if (changed) {
-        persistAsync(nPath, false, true);
+    if (isNew && !task.authorized) {
+        if (!isInsideManagedLibrary(nPath)) {
+            qWarning() << "[Metadata] 拦截非授权磁盘入库请求:" << QString::fromStdWString(nPath);
+            return;
+        }
+    }
+
+    // A. 执行磁盘写入
+    if (doWrite(diskDb)) {
+        // B. 执行内存库写入
+        if (doWrite(memDb)) {
+            // C. 更新 m_cache
+            bool cacheNew = false;
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                if (m_cache.find(nPath) == m_cache.end()) cacheNew = true;
+
+                m_cache[nPath] = rMeta;
+                m_cache[nPath].isManaged = true; // 落地成功即受控
+                if (!rMeta.fileId128.empty()) m_fidToPath[rMeta.fileId128] = nPath;
+            }
+
+            if (cacheNew && !rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
+                CategoryRepo::incrementTotalFileCount(1);
+            }
+
+            if (task.notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+            qDebug() << "[Metadata] 增量同步完成 (Disk->Mem->Cache):" << QString::fromStdWString(nPath);
+        } else {
+            qCritical() << "[Metadata] 内存库同步失败！数据不一致风险:" << QString::fromStdWString(nPath);
+        }
+    } else {
+        qWarning() << "[Metadata] 物理磁盘写入失败，拦截内存同步:" << QString::fromStdWString(nPath);
+    }
+}
+
+void MetadataManager::updateIngestionStatus(const std::wstring& path, int newStatus) {
+    std::wstring nPath = normalizePath(path);
+    ensureActivated(nPath);
+
+    RuntimeMeta nextMeta;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        nextMeta = m_cache[nPath];
+    }
+
+    if (nextMeta.ingestionStatus != newStatus) {
+        nextMeta.ingestionStatus = newStatus;
+        pushPersistenceTask(nPath, nextMeta, true, false);
 
         // 异步更新父目录进度，避免阻塞
         std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nPath)).absolutePath()).toStdWString();
@@ -552,18 +655,27 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
             // 1. 激活 (优化版，内含锁分离 I/O)
             ensureActivated(nPath);
 
+            RuntimeMeta meta;
+            {
+                std::shared_lock<std::shared_mutex> lock(m_mutex);
+                meta = m_cache[nPath];
+            }
+
             // 2. 设置待处理状态 (Development_Plan 1.1)
-            updateIngestionStatus(nPath, 0);
+            meta.ingestionStatus = 0;
+            pushPersistenceTask(nPath, meta, authorized, false);
             
             // 3. 物理与视觉属性提取 (耗时解析操作)
             tryExtractDimensions(nPath);
             tryExtractColor(nPath);
 
             // 4. 标记完成并持久化 (Development_Plan 1.1)
-            updateIngestionStatus(nPath, 1);
-            
-            // 5. 增量通知 UI
-            notifyUI(RefreshLevel::PathUpdate, qp);
+            {
+                std::shared_lock<std::shared_mutex> lock(m_mutex);
+                meta = m_cache[nPath];
+            }
+            meta.ingestionStatus = 1;
+            pushPersistenceTask(nPath, meta, authorized, true);
         }
 #ifdef Q_OS_WIN
         CoUninitialize();
@@ -648,157 +760,194 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
+    RuntimeMeta meta;
     { 
-        std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        m_cache[nPath].rating = rating; 
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
     }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    debouncePersist(nPath);
+    if (meta.rating != rating) {
+        meta.rating = rating;
+        pushPersistenceTask(nPath, meta, false, notify);
+    }
 }
 
 void MetadataManager::renameTag(const QString& oldName, const QString& newName) {
     if (oldName == newName) return;
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
-    for (auto& pair : m_cache) {
-        if (pair.second.tags.contains(oldName)) {
-            pair.second.tags.removeAll(oldName);
-            if (!newName.isEmpty() && !pair.second.tags.contains(newName)) {
-                pair.second.tags.append(newName);
+    std::vector<std::pair<std::wstring, RuntimeMeta>> tasks;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        for (auto& pair : m_cache) {
+            if (pair.second.tags.contains(oldName)) {
+                RuntimeMeta meta = pair.second;
+                meta.tags.removeAll(oldName);
+                if (!newName.isEmpty() && !meta.tags.contains(newName)) {
+                    meta.tags.append(newName);
+                }
+                tasks.push_back({pair.first, meta});
             }
-            pushToDirty_NoLock(pair.first);
         }
     }
-    QMetaObject::invokeMethod(m_batchTimer, "start", Qt::QueuedConnection);
+    for (const auto& task : tasks) {
+        pushPersistenceTask(task.first, task.second, false, false);
+    }
     notifyFullUIRebuild();
 }
 
 void MetadataManager::removeTag(const QString& tagName) {
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
-    for (auto& pair : m_cache) {
-        if (pair.second.tags.contains(tagName)) {
-            pair.second.tags.removeAll(tagName);
-            pushToDirty_NoLock(pair.first);
+    std::vector<std::pair<std::wstring, RuntimeMeta>> tasks;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        for (auto& pair : m_cache) {
+            if (pair.second.tags.contains(tagName)) {
+                RuntimeMeta meta = pair.second;
+                meta.tags.removeAll(tagName);
+                tasks.push_back({pair.first, meta});
+            }
         }
     }
-    QMetaObject::invokeMethod(m_batchTimer, "start", Qt::QueuedConnection);
+    for (const auto& task : tasks) {
+        pushPersistenceTask(task.first, task.second, false, false);
+    }
     notifyFullUIRebuild();
 }
 
 void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    bool changed = false;
-    bool isManaged = false;
+    RuntimeMeta meta;
     { 
-        std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        if (m_cache[nPath].isInvalid != invalid) {
-            m_cache[nPath].isInvalid = invalid; 
-            changed = true;
-            isManaged = m_cache[nPath].isManaged;
-        }
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
     }
-    
-    if (changed) {
-        // 2026-07-xx 物理修复：仅当项已登记 (isManaged) 时，其失效状态变更才影响活跃总数
-        if (isManaged) {
-            CategoryRepo::incrementTotalFileCount(invalid ? -1 : 1);
-        }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-        debouncePersist(nPath);
+    if (meta.isInvalid != invalid) {
+        meta.isInvalid = invalid;
+        pushPersistenceTask(nPath, meta, false, notify);
     }
 }
 
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
+    RuntimeMeta meta;
     { 
-        std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        m_cache[nPath].color = color; 
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
     }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    debouncePersist(nPath);
+    if (meta.color != color) {
+        meta.color = color;
+        pushPersistenceTask(nPath, meta, false, notify);
+    }
 }
 
 void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    debouncePersist(nPath);
+    RuntimeMeta meta;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
+    if (meta.pinned != pinned) {
+        meta.pinned = pinned;
+        pushPersistenceTask(nPath, meta, false, notify);
+    }
 }
 
 void MetadataManager::setTags(const std::wstring& path, const QStringList& tags, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-
+    RuntimeMeta meta;
     {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nPath].tags = tags;
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
     }
-
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    debouncePersist(nPath);
+    meta.tags = tags;
+    pushPersistenceTask(nPath, meta, false, notify);
 }
 
 void MetadataManager::setNote(const std::wstring& path, const std::wstring& note, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    debouncePersist(nPath);
+    RuntimeMeta meta;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
+    if (meta.note != note) {
+        meta.note = note;
+        pushPersistenceTask(nPath, meta, false, notify);
+    }
 }
 
 void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    debouncePersist(nPath);
+    RuntimeMeta meta;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
+    if (meta.url != url) {
+        meta.url = url;
+        pushPersistenceTask(nPath, meta, false, notify);
+    }
 }
 
 void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].encrypted = encrypted; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    debouncePersist(nPath);
+    RuntimeMeta meta;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
+    if (meta.encrypted != encrypted) {
+        meta.encrypted = encrypted;
+        pushPersistenceTask(nPath, meta, false, notify);
+    }
 }
 
 void MetadataManager::setManaged(const std::wstring& path, bool managed, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].isManaged = managed; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    // 2026-07-xx 逻辑校准：isManaged 是由数据库持久化驱动的标记。
-    // 如果显式设为 true，则发起一次持久化以确保入库；如果是设为 false（罕见），无需特殊持久化。
-    if (managed) debouncePersist(nPath); 
+    RuntimeMeta meta;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
+    if (meta.isManaged != managed) {
+        meta.isManaged = managed;
+        pushPersistenceTask(nPath, meta, false, notify);
+    }
 }
 
 void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
+    RuntimeMeta meta;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].palettes = entries; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    debouncePersist(nPath);
+    meta.palettes = entries;
+    pushPersistenceTask(nPath, meta, false, notify);
 }
 
 void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std::wstring& color, const QVector<QPair<QColor, float>>& palettes, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
+    RuntimeMeta meta;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
-    
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        RuntimeMeta& meta = m_cache[nPath];
-        meta.color = color;
-        meta.palettes = entries;
-    }
-    
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    debouncePersist(nPath);
+    meta.color = color;
+    meta.palettes = entries;
+    pushPersistenceTask(nPath, meta, false, notify);
 }
 
 QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
@@ -815,20 +964,13 @@ QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
     return {};
 }
 
-void MetadataManager::debouncePersist(const std::wstring& nPath) {
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_dirtyPaths.insert(nPath); }
-    QMetaObject::invokeMethod(m_batchTimer, "start", Qt::QueuedConnection);
-}
-
-void MetadataManager::pushToDirty_NoLock(const std::wstring& nPath) {
-    m_dirtyPaths.insert(nPath);
-}
 
 void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring& newPath) {
     std::wstring nOld = normalizePath(oldPath);
     std::wstring nNew = normalizePath(newPath);
     if (nOld == nNew) return;
 
+    RuntimeMeta meta;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         auto it = m_cache.find(nOld);
@@ -856,6 +998,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 }
             }
 
+            meta = it->second;
             m_cache[nNew] = it->second; 
             m_cache.erase(it); 
             if (!fid.empty()) {
@@ -878,23 +1021,17 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                     }
                 }
             }
-
-            // 物理同步：更新 SQLite 路径
-            std::wstring volSerial = getVolumeSerialNumber(nNew);
-            QString letter = (nNew.length() >= 2 && nNew[1] == L':') ? QString::fromWCharArray(&nNew[0], 1) : "";
-            sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
-            if (db) {
-                sqlite3_stmt* stmt;
-                const char* sql = "UPDATE metadata SET path = ? WHERE file_id = ?";
-                if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                    sqlite3_bind_text16(stmt, 1, nNew.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text(stmt, 2, fid.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_step(stmt);
-                    sqlite3_finalize(stmt);
-                }
-            }
+        } else {
+            return;
         }
     }
+
+    // 提交持久化任务以同步 SQLite
+    pushPersistenceTask(nNew, meta, false, false);
+
+    // 注意：SQLite 中的旧路径会被 INSERT OR REPLACE (按 file_id) 自动覆盖，
+    // 因为 executePersistenceTask 使用的是 INSERT OR REPLACE。
+
     notifyFullUIRebuild();
 }
 
@@ -976,9 +1113,6 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
     std::string fid;
     fetchWinApiMetadataDirect(nPath, fid);
 
-    bool changed = false;
-    bool isManaged = false;
-    bool isInvalid = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         
@@ -1017,56 +1151,51 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
     
     ensureActivated(nPath); 
 
+    RuntimeMeta meta;
+    bool changed = false;
     {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        if (m_cache[nPath].isTrash != isTrash) {
-            m_cache[nPath].isTrash = isTrash;
-            if (isTrash && !origPath.empty()) m_cache[nPath].originalPath = origPath;
-            changed = true;
-            isManaged = m_cache[nPath].isManaged;
-            isInvalid = m_cache[nPath].isInvalid;
-        }
-        if (!fid.empty()) m_fidToPath[fid] = nPath;
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
+    if (meta.isTrash != isTrash) {
+        meta.isTrash = isTrash;
+        if (isTrash && !origPath.empty()) meta.originalPath = origPath;
+        changed = true;
     }
     
     if (changed) {
         // 2026-06-xx 按照用户要求：移入回收站时，必须和其他分类彻底隔离
-        if (isTrash && !fid.empty()) {
-            // 将文件移入“回收站”桶位（ID -8），这会自动解除所有现有分类关联
-            CategoryRepo::moveToTrashBatch({fid});
+        if (isTrash && !meta.fileId128.empty()) {
+            CategoryRepo::moveToTrashBatch({meta.fileId128});
         }
 
         // 2026-07-xx 架构修正：移入回收站应视为从活跃池移除。
-        // 核心红线：仅当项已登记且非失效状态时，才执行计数同步。
-        if (isManaged && !isInvalid) {
+        if (meta.isManaged && !meta.isInvalid) {
             CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
         }
 
-        persistAsync(nPath);
-        
-        // 2026-06-xx 物理修复：状态变更后必须强制发射信号，驱动侧边栏重数一遍
+        pushPersistenceTask(nPath, meta, false, true);
         notifyUI(RefreshLevel::FullRebuild);
     }
 }
 
 void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
     std::wstring nPath = normalizePath(path);
+    ensureActivated(nPath);
+    RuntimeMeta meta;
     {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it == m_cache.end()) return;
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
 
-        // 2026-07-xx 按照规则同步活跃计数：仅对已登记项执行
-        if (it->second.isManaged && it->second.isTrash != isTrash && !it->second.isInvalid) {
+    if (meta.isTrash != isTrash) {
+        if (meta.isManaged && !meta.isInvalid) {
             CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
         }
-
-        it->second.isTrash = isTrash;
-        if (!isTrash) {
-            it->second.originalPath = L""; // Clear on restore
-        }
+        meta.isTrash = isTrash;
+        if (!isTrash) meta.originalPath = L"";
+        pushPersistenceTask(nPath, meta, false, false);
     }
-    debouncePersist(nPath);
 }
 
 void MetadataManager::deletePermanently(const std::wstring& path) {
@@ -1216,7 +1345,16 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
     return false;
 }
 
-void MetadataManager::syncPhysicalMetadata(const std::wstring& path, bool notify) { persistAsync(path, notify); }
+void MetadataManager::syncPhysicalMetadata(const std::wstring& path, bool notify) {
+    std::wstring nPath = normalizePath(path);
+    ensureActivated(nPath);
+    RuntimeMeta meta;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        meta = m_cache[nPath];
+    }
+    pushPersistenceTask(nPath, meta, false, notify);
+}
 
 void MetadataManager::activateItem(const std::wstring& path) {
     instance().registerItem(path);
@@ -1473,107 +1611,6 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
     return fid;
 }
 
-void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool authorized) {
-    std::wstring nPath = MetadataManager::normalizePath(path);
-    
-    RuntimeMeta rMeta = getMeta(nPath);
-    sqlite3* db = nullptr;
-    qDebug() << "[Metadata] 执行持久化任务:" << QString::fromStdWString(nPath) << "FID:" << QString::fromStdString(rMeta.fileId128) << "Authorized:" << authorized;
-    
-    // 2026-06-xx 架构重定向：判定是否为物理磁盘根目录（如 C:\）。
-    // 理由：盘符置顶等元数据属于全应用级全局元数据，必须存入全局库以解决物理分库未挂载或盘符漂移冲突。
-    if (nPath.length() == 3 && nPath[1] == L':' && (nPath[2] == L'\\' || nPath[2] == L'/')) {
-        db = DatabaseManager::instance().getGlobalDb();
-    } else {
-        std::wstring volSerial = getVolumeSerialNumber(nPath);
-        QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
-        db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
-    }
-    if (!db) return;
-
-    bool isNew = true;
-    {
-        sqlite3_stmt* checkStmt;
-        if (sqlite3_prepare_v2(db, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
-            // 2026-07-xx 物理修复：必须绑定 file_id 才能正确判定是否为新项
-            sqlite3_bind_text(checkStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-            if (sqlite3_step(checkStmt) == SQLITE_ROW) isNew = false;
-            sqlite3_finalize(checkStmt);
-        }
-    }
-
-    // 2026-07-xx 按照 Plan-116：核心准入拦截逻辑
-    // 如果是新记录且未经过授权（非 USN 触发），则拦截入库动作
-    if (isNew && !authorized) {
-        // 2026-07-xx 补丁：必须校验路径是否确实在托管库内部。
-        // 如果在内部但被标记为 isNew 且未授权，可能是监控漏掉的初始信号，应允许入库。
-        qDebug() << "[Metadata] 检测到新项持久化请求，未预授权，开始库内安全判定:" << QString::fromStdWString(nPath);
-        if (isInsideManagedLibrary(nPath)) {
-            qDebug() << "[Metadata] 判定成功: 路径位于托管库内，自动补齐授权";
-            authorized = true;
-        } else {
-            // 记录日志，但不产生新记录
-            qWarning() << "[Metadata] 判定失败: 拦截非授权入库请求（该项目不属于任何托管库）:" << QString::fromStdWString(nPath);
-            return;
-        }
-    }
-
-    sqlite3_stmt* stmt;
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 2, nPath.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 3, rMeta.isFolder ? 1 : 0);
-        sqlite3_bind_int(stmt, 4, rMeta.rating);
-        sqlite3_bind_text16(stmt, 5, rMeta.color.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 6, rMeta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 7, rMeta.note.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 8, rMeta.url.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(stmt, 9, rMeta.ctime);
-        sqlite3_bind_int64(stmt, 10, rMeta.mtime);
-        sqlite3_bind_int64(stmt, 11, rMeta.atime);
-        sqlite3_bind_int64(stmt, 12, rMeta.fileSize);
-
-        QJsonArray arr;
-        for (const auto& pe : rMeta.palettes) {
-            QJsonObject obj;
-            obj["color"] = pe.color.name();
-            obj["ratio"] = (double)pe.ratio;
-            arr.append(obj);
-        }
-        QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
-        sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 14, rMeta.isTrash ? 1 : 0);
-        sqlite3_bind_text16(stmt, 15, rMeta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 16, rMeta.isInvalid ? 1 : 0);
-        sqlite3_bind_int(stmt, 17, rMeta.width);
-        sqlite3_bind_int(stmt, 18, rMeta.height);
-        sqlite3_bind_int(stmt, 19, rMeta.ingestionStatus);
-
-        int rc = sqlite3_step(stmt);
-        if (rc == SQLITE_DONE) {
-            if (isNew) {
-                // 2026-07-xx 物理修复：新项目入库时，若其状态为回收站或失效，则不增加总计数
-                if (!rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
-                    CategoryRepo::incrementTotalFileCount(1);
-                }
-            }
-            // 2026-07-xx 物理同步：只要 SQL 执行成功，即确保内存标记为已登记，不再区分 isNew
-            // 注意：此处不再调用 setManaged 以避免无限递归 debouncePersist
-            {
-                std::unique_lock<std::shared_mutex> lock(m_mutex);
-                m_cache[nPath].isManaged = true;
-            }
-            qDebug() << "[Metadata] SQL 执行成功: INSERT/REPLACE" << QString::fromStdWString(nPath);
-        } else {
-            qWarning() << "[Metadata] SQL 执行失败 [" << rc << "]:" << sqlite3_errmsg(db) << "Path:" << QString::fromStdWString(nPath);
-        }
-        sqlite3_finalize(stmt);
-    }
-        
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-}
 
 
 void MetadataManager::parsePathComponents(const std::wstring& normalizedPath, bool isFolder, std::wstring& outName, std::wstring& outExt) {

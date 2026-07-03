@@ -21,7 +21,7 @@ void CategoryRepo::initialize() {
 }
 
 void CategoryRepo::saveImmediately() {
-    DatabaseManager::instance().flushAll();
+    // 2026-08-xx 按照 Plan-119：实时增量同步，无需手动 flushAll
 }
 
 std::vector<Category> CategoryRepo::getAll() {
@@ -860,8 +860,6 @@ void CategoryRepo::fullRecount() {
                 sqlite3_finalize(stmt);
             }
             trans.commit();
-            // 物理落盘，确保初始化结果即刻生效
-            DatabaseManager::instance().flushAll();
         }
     }
 
@@ -893,8 +891,6 @@ void CategoryRepo::fullRecount() {
 
         if (invalidatedCount > 0) {
             qDebug() << "[Recount] 物理校验发现" << invalidatedCount << "个失效项，已归类至失效数据";
-            // 2026-06-xx 物理同步：强制将内存中的 is_invalid 变更刷入磁盘
-            DatabaseManager::instance().flushAll();
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
         }
     });
