@@ -119,7 +119,7 @@ private:
 
     std::map<std::wstring, DbConnection> m_driveDbs;
     DbConnection m_globalDb;
-    mutable std::shared_mutex m_mutex;
+    mutable std::shared_mutex m_dbMutex;
 
     bool loadDb(const std::wstring& diskPath, DbConnection& conn);
     void saveDb(DbConnection& conn);

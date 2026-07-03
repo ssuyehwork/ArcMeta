@@ -272,7 +272,7 @@ void DatabaseManager::closeDb(DbConnection& conn) {
 }
 
 bool DatabaseManager::init() {
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    std::unique_lock<std::shared_mutex> lock(m_dbMutex);
     QString metaDir = getAppDir() + "/.arcmeta";
     QDir().mkpath(metaDir);
     ensureHidden(metaDir.toStdWString());
@@ -288,7 +288,7 @@ bool DatabaseManager::init() {
 }
 
 void DatabaseManager::flushAll() {
-    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    std::shared_lock<std::shared_mutex> lock(m_dbMutex);
     saveDb(m_globalDb);
     for (auto& pair : m_driveDbs) {
         saveDb(pair.second);
@@ -296,7 +296,7 @@ void DatabaseManager::flushAll() {
 }
 
 bool DatabaseManager::flushStep() {
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    std::unique_lock<std::shared_mutex> lock(m_dbMutex);
     auto stepConn = [](DbConnection& conn) -> bool {
         if (!conn.memDb || !conn.diskDb) return true;
         if (!conn.activeBackup) {
@@ -325,7 +325,7 @@ bool DatabaseManager::flushStep() {
 void DatabaseManager::shutdown() {
     stopWorkerThread();
 
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    std::unique_lock<std::shared_mutex> lock(m_dbMutex);
 
     // 关闭所有句柄 (1.21：解除物理占用)
     for (auto& pair : m_driveDbs) {
@@ -341,26 +341,26 @@ void DatabaseManager::shutdown() {
 }
 
 sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QString& driveLetter) {
-    // 1. 尝试使用共享锁快速读取已加载的连接
+    // 1. 尝试使用共享锁快速读取已加载的连接 (高性能读路径)
     {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        if (m_driveDbs.find(volumeSerial) != m_driveDbs.end()) {
-            // 如果提供了盘符，需要检查是否发生漂移，这种情况必须升级为排他锁
-            if (driveLetter.isEmpty()) return m_driveDbs[volumeSerial].memDb;
+        std::shared_lock<std::shared_mutex> lock(m_dbMutex);
+        auto it = m_driveDbs.find(volumeSerial);
+        if (it != m_driveDbs.end()) {
+            // 如果未提供盘符，直接返回已存在的句柄
+            if (driveLetter.isEmpty()) return it->second.memDb;
 
+            // 校验盘符漂移：只需比对路径后缀
             QString cleanLetter = driveLetter.at(0).toUpper();
-            QString currentDiskPath = QString::fromStdWString(m_driveDbs[volumeSerial].diskPath);
+            QString currentDiskPath = QString::fromStdWString(it->second.diskPath);
             QString expectedFileName = QString("Arcmeta_%1_%2.db").arg(QString::fromStdWString(volumeSerial).toUpper()).arg(cleanLetter);
             if (currentDiskPath.endsWith(expectedFileName)) {
-                return m_driveDbs[volumeSerial].memDb;
+                return it->second.memDb;
             }
-        } else {
-            // 如果不存在，也需要升级锁来加载
         }
     }
 
-    // 2. 升级为排他锁执行加载或迁移
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    // 2. 升级为排他锁执行加载或迁移 (低频维护路径)
+    std::unique_lock<std::shared_mutex> lock(m_dbMutex);
     qDebug() << "[DB] getMemoryDb (Locked) requested for Serial:" << QString::fromStdWString(volumeSerial) << "Letter:" << driveLetter;
     
     QString cleanLetter = "";
@@ -471,12 +471,12 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
 
 sqlite3* DatabaseManager::getGlobalDb() {
     // 全局库句柄在 init 后即固定，仅需共享锁
-    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    std::shared_lock<std::shared_mutex> lock(m_dbMutex);
     return m_globalDb.memDb;
 }
 
 sqlite3* DatabaseManager::getDiskDb(sqlite3* memDb) {
-    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    std::shared_lock<std::shared_mutex> lock(m_dbMutex);
     if (m_globalDb.memDb == memDb) return m_globalDb.diskDb;
     for (auto& pair : m_driveDbs) {
         if (pair.second.memDb == memDb) return pair.second.diskDb;

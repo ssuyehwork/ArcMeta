@@ -167,3 +167,9 @@
     - **职责下沉**：重构 `persistBatchAsync` 逻辑，将“内存库 SQL 写入”从主线程剥离并下沉至后台 I/O 线程。主线程实现“零 SQL 等待”。
     - **双重事务优化**：异步任务内部实现“内存事务 -> 磁盘事务”的链式原子提交。针对批量标签变动，通过 `persistBatchAsync` 实现了高性能大事务同步。
     - 修复了 `persistAsync` 内部的同步信号通知点，确保 UI 刷新与数据快照捕获时机一致。
+
+### DatabaseManager 读写分离锁高性能优化 (Plan-123)
+- [2026-07-03 17:10:00] **src/meta/DatabaseManager.h / .cpp**:
+    - 将全局锁更名为 `m_dbMutex` 并全面应用 `std::shared_mutex`。
+    - 重构 `getMemoryDb`：实现“读锁先行 + 失败升级写锁”的双重检查模式。常规句柄查询开销降低至 O(1) 且支持全并行。
+    - 对 `getGlobalDb` 与 `getDiskDb` 实施共享锁优化，彻底消除查询路径上的主从线程竞争风险。
