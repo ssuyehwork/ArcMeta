@@ -173,3 +173,11 @@
     - 将全局锁更名为 `m_dbMutex` 并全面应用 `std::shared_mutex`。
     - 重构 `getMemoryDb`：实现“读锁先行 + 失败升级写锁”的双重检查模式。常规句柄查询开销降低至 O(1) 且支持全并行。
     - 对 `getGlobalDb` 与 `getDiskDb` 实施共享锁优化，彻底消除查询路径上的主从线程竞争风险。
+
+### AutoImportManager 异步化与 UI 响应性能优化 (Plan-122)
+- [2026-08-15 10:30:00] **src/core/AutoImportManager.cpp**:
+    - **重型任务异步化**：将 `handleRecursiveIngestion`（递归扫描）和 `processImportQueue`（队列处理）整体移入 `QtConcurrent::run` 后台线程执行，彻底消除主线程阻塞点。
+    - **数据库写入保护**：引入静态互斥锁 `s_dbAccessMutex`，专门保护后台异步任务对全局数据库句柄及 `CategoryRepo` 的写入操作，防止多线程并发冲突。
+    - **事务安全性加固**：在异步任务中引入 RAII 风格的 `SqlTransaction`，确保批量导入过程中数据库状态的一致性与异常安全。
+    - **信号抑制与通知迁移**：将 `setInternalOperating(true/false)` 信号抑制逻辑与全量 UI 通知完整迁移至后台线程执行体，实现高性能导入。
+    - **包含性修复**：同步更新 `onEntryAdded`、`onEntryUpdated` 以及 `syncAllManagedLibraries` 触发逻辑，实现全链路响应性能优化。

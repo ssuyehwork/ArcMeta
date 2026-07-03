@@ -11,6 +11,8 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QTimer>
+#include <QtConcurrent>
+#include <QFuture>
 #include <functional>
 #include <cwchar>
 #include <map>
@@ -21,6 +23,8 @@
 #endif
 
 namespace ArcMeta {
+
+static std::mutex s_dbAccessMutex;
 
 AutoImportManager& AutoImportManager::instance() {
     static AutoImportManager inst;
@@ -67,7 +71,9 @@ void AutoImportManager::syncAllManagedLibraries() {
             if (QString::compare(entry, targetName, Qt::CaseInsensitive) == 0) {
                 QString managedPath = rootDir.absoluteFilePath(entry);
                 qDebug() << "[AutoImport] 启动对账：发现物理托管库，执行同步 ->" << managedPath;
-                handleRecursiveIngestion(QDir::toNativeSeparators(managedPath).toStdWString());
+                QtConcurrent::run([this, managedPath]() {
+                    handleRecursiveIngestion(QDir::toNativeSeparators(managedPath).toStdWString());
+                });
                 changed = true;
             }
         }
@@ -89,7 +95,9 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
      
     if (isManaged) {
         if (MftReader::instance().isDirectory(idx)) {
-            handleRecursiveIngestion(fullPath);
+            QtConcurrent::run([this, fullPath]() {
+                handleRecursiveIngestion(fullPath);
+            });
         }
 
         std::lock_guard<std::mutex> lock(m_queueMutex);
@@ -139,7 +147,9 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
     bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
     if (isManaged) {
         if (MftReader::instance().isDirectory(idx)) {
-            handleRecursiveIngestion(fullPath);
+            QtConcurrent::run([this, fullPath]() {
+                handleRecursiveIngestion(fullPath);
+            });
         }
 
         std::lock_guard<std::mutex> lock(m_queueMutex);
@@ -227,125 +237,139 @@ void AutoImportManager::processImportQueue() {
 
     if (pathsToProcess.empty()) return;
 
-    std::map<std::wstring, std::vector<std::wstring>> pathsByVol;
-    for (const auto& p : pathsToProcess) {
-        pathsByVol[MetadataManager::getVolumeSerialNumber(p)].push_back(p);
-    }
+    // 2026-08-xx 异步化改造：将耗时的 registerItem 循环移入后台线程
+    QtConcurrent::run([this, pathsToProcess]() {
+        std::lock_guard<std::mutex> dbLock(s_dbAccessMutex);
+        MetadataManager::instance().setInternalOperating(true);
 
-    for (auto& pair : pathsByVol) {
-        const std::wstring& vol = pair.first;
-        if (vol.empty()) continue;
+        std::map<std::wstring, std::vector<std::wstring>> pathsByVol;
+        for (const auto& p : pathsToProcess) {
+            pathsByVol[MetadataManager::getVolumeSerialNumber(p)].push_back(p);
+        }
 
-        QString letter = "";
-        if (!pair.second.empty()) {
-            const std::wstring& firstPath = pair.second.front();
-            if (firstPath.length() >= 2 && firstPath[1] == L':') {
-                letter = QString::fromWCharArray(&firstPath[0], 1);
+        for (auto& pair : pathsByVol) {
+            const std::wstring& vol = pair.first;
+            if (vol.empty()) continue;
+
+            QString letter = "";
+            if (!pair.second.empty()) {
+                const std::wstring& firstPath = pair.second.front();
+                if (firstPath.length() >= 2 && firstPath[1] == L':') {
+                    letter = QString::fromWCharArray(&firstPath[0], 1);
+                }
+            }
+
+            // 此处可能涉及数据库加载/重命名，需在锁保护下执行
+            DatabaseManager::instance().getMemoryDb(vol, letter);
+
+            for (const auto& path : pair.second) {
+                // registerItem 内部包含图像元数据提取，是 CPU 密集型操作
+                MetadataManager::instance().registerItem(path, true);
             }
         }
 
-        DatabaseManager::instance().getMemoryDb(vol, letter);
-
-        for (const auto& path : pair.second) {
-            MetadataManager::instance().registerItem(path, true);
-        }
-    }
-
-    MetadataManager::instance().notifyFullUIRebuild();
+        MetadataManager::instance().setInternalOperating(false);
+        MetadataManager::instance().notifyFullUIRebuild();
+    });
 }
 
 void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
     QDir dir(QString::fromStdWString(rootPath));
     if (!dir.exists()) return;
 
-    // 2026-08-xx 性能优化：抑制信号，开启批量事务
+    // 2026-08-xx 异步化改造：整机加锁保护数据库写入，并迁移信号抑制逻辑
+    std::lock_guard<std::mutex> dbLock(s_dbAccessMutex);
+
     MetadataManager::instance().setInternalOperating(true);
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (db) sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
 
-    int rootCatId = 0;
-    std::string rootFid;
-    std::wstring rootFrnStr;
-    if (MetadataManager::fetchWinApiMetadataDirect(rootPath, rootFid, &rootFrnStr)) {
-        try {
-            uint64_t frn = std::stoull(rootFrnStr, nullptr, 16);
-            rootCatId = CategoryRepo::findByFrn(frn);
-            if (rootCatId == 0) {
-                QFileInfo info(QString::fromStdWString(rootPath));
-                std::wstring parentPath = info.absolutePath().toStdWString();
-                std::string parentFid;
-                std::wstring parentFrnStr;
-                int parentCatId = 0;
-                if (MetadataManager::fetchWinApiMetadataDirect(parentPath, parentFid, &parentFrnStr)) {
-                    uint64_t pFrn = std::stoull(parentFrnStr, nullptr, 16);
-                    parentCatId = CategoryRepo::findByFrn(pFrn);
-                }
+    {
+        SqlTransaction trans(db);
 
-                Category cat;
-                // 2026-08-xx 物理同步：ArcMeta.Library_* 强制作为顶级分类 (parentId = 0)
-                if (info.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
-                    cat.parentId = 0;
-                } else {
-                    cat.parentId = parentCatId;
+        int rootCatId = 0;
+        std::string rootFid;
+        std::wstring rootFrnStr;
+        if (MetadataManager::fetchWinApiMetadataDirect(rootPath, rootFid, &rootFrnStr)) {
+            try {
+                uint64_t frn = std::stoull(rootFrnStr, nullptr, 16);
+                rootCatId = CategoryRepo::findByFrn(frn);
+                if (rootCatId == 0) {
+                    QFileInfo info(QString::fromStdWString(rootPath));
+                    std::wstring parentPath = info.absolutePath().toStdWString();
+                    std::string parentFid;
+                    std::wstring parentFrnStr;
+                    int parentCatId = 0;
+                    if (MetadataManager::fetchWinApiMetadataDirect(parentPath, parentFid, &parentFrnStr)) {
+                        uint64_t pFrn = std::stoull(parentFrnStr, nullptr, 16);
+                        parentCatId = CategoryRepo::findByFrn(pFrn);
+                    }
+
+                    Category cat;
+                    // 2026-08-xx 物理同步：ArcMeta.Library_* 强制作为顶级分类 (parentId = 0)
+                    if (info.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                        cat.parentId = 0;
+                    } else {
+                        cat.parentId = parentCatId;
+                    }
+                    cat.name = info.fileName().toStdWString();
+                    cat.physicalFrn = frn;
+                    cat.physicalPath = rootPath;
+                    cat.color = CategoryRepo::getDefaultColor();
+                    if (CategoryRepo::add(cat)) {
+                        rootCatId = cat.id;
+                    }
                 }
-                cat.name = info.fileName().toStdWString();
-                cat.physicalFrn = frn;
-                cat.physicalPath = rootPath;
-                cat.color = CategoryRepo::getDefaultColor();
-                if (CategoryRepo::add(cat)) {
-                    rootCatId = cat.id;
+            } catch (...) {}
+        }
+
+        if (rootCatId > 0) {
+            std::function<void(const QString&, int)> syncDir;
+            syncDir = [&](const QString& currentPath, int parentCatId) {
+                QDir currentDir(currentPath);
+                QFileInfoList list = currentDir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden);
+
+                for (const QFileInfo& fi : list) {
+                    std::wstring wPath = QDir::toNativeSeparators(fi.absoluteFilePath()).toStdWString();
+                    if (fi.isDir()) {
+                        int existingId = CategoryRepo::findCategoryId(parentCatId, fi.fileName().toStdWString());
+                        if (existingId == 0) {
+                            std::string fid;
+                            std::wstring frnStr;
+                            if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid, &frnStr)) {
+                                try {
+                                    Category cat;
+                                    cat.parentId = parentCatId;
+                                    cat.name = fi.fileName().toStdWString();
+                                    cat.physicalFrn = std::stoull(frnStr, nullptr, 16);
+                                    cat.physicalPath = wPath;
+                                    cat.color = CategoryRepo::getDefaultColor();
+                                    if (CategoryRepo::add(cat)) {
+                                        existingId = cat.id;
+                                    }
+                                } catch (...) {}
+                            }
+                        }
+                        if (existingId > 0) {
+                            syncDir(fi.absoluteFilePath(), existingId);
+                        }
+                    } else {
+                        MetadataManager::instance().registerItem(wPath, true);
+                        if (parentCatId > 0) {
+                            std::string fid;
+                            if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid)) {
+                                CategoryRepo::addItemToCategory(parentCatId, fid, wPath);
+                            }
+                        }
+                    }
                 }
-            }
-        } catch (...) {}
+            };
+
+            syncDir(QString::fromStdWString(rootPath), rootCatId);
+        }
+
+        trans.commit();
     }
 
-    if (rootCatId <= 0) return;
-
-    std::function<void(const QString&, int)> syncDir;
-    syncDir = [&](const QString& currentPath, int parentCatId) {
-        QDir currentDir(currentPath);
-        QFileInfoList list = currentDir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden);
-
-        for (const QFileInfo& fi : list) {
-            std::wstring wPath = QDir::toNativeSeparators(fi.absoluteFilePath()).toStdWString();
-            if (fi.isDir()) {
-                int existingId = CategoryRepo::findCategoryId(parentCatId, fi.fileName().toStdWString());
-                if (existingId == 0) {
-                    std::string fid;
-                    std::wstring frnStr;
-                    if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid, &frnStr)) {
-                        try {
-                            Category cat;
-                            cat.parentId = parentCatId;
-                            cat.name = fi.fileName().toStdWString();
-                            cat.physicalFrn = std::stoull(frnStr, nullptr, 16);
-                            cat.physicalPath = wPath;
-                            cat.color = CategoryRepo::getDefaultColor();
-                            if (CategoryRepo::add(cat)) {
-                                existingId = cat.id;
-                            }
-                        } catch (...) {}
-                    }
-                }
-                if (existingId > 0) {
-                    syncDir(fi.absoluteFilePath(), existingId);
-                }
-            } else {
-                MetadataManager::instance().registerItem(wPath, true);
-                if (parentCatId > 0) {
-                    std::string fid;
-                    if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid)) {
-                        CategoryRepo::addItemToCategory(parentCatId, fid, wPath);
-                    }
-                }
-            }
-        }
-    };
-
-    syncDir(QString::fromStdWString(rootPath), rootCatId);
-
-    // 2026-08-xx 性能优化：提交事务并恢复信号，最后执行一次全量 UI 重建
-    if (db) sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
     MetadataManager::instance().setInternalOperating(false);
     MetadataManager::instance().notifyFullUIRebuild();
 }
