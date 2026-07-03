@@ -8,6 +8,10 @@
 #include <string>
 #include <mutex>
 #include <functional>
+#include <deque>
+#include <thread>
+#include <condition_variable>
+#include <atomic>
 
 struct sqlite3;
 
@@ -69,6 +73,16 @@ public:
      */
     sqlite3* getGlobalDb();
 
+    /**
+     * @brief 获取指定内存连接对应的磁盘连接（仅供异步同步使用）
+     */
+    sqlite3* getDiskDb(sqlite3* memDb);
+
+    /**
+     * @brief 将任务投递到异步 I/O 队列
+     */
+    void enqueueSyncTask(std::function<void()> task);
+
 private:
     DatabaseManager(QObject* parent = nullptr);
     ~DatabaseManager();
@@ -79,6 +93,16 @@ private:
         sqlite3_backup* activeBackup = nullptr;
         std::wstring diskPath;
     };
+
+    void startWorkerThread();
+    void stopWorkerThread();
+    void workerLoop();
+
+    std::deque<std::function<void()>> m_syncQueue;
+    std::mutex m_queueMutex;
+    std::condition_variable m_queueCv;
+    std::thread m_workerThread;
+    std::atomic<bool> m_stopWorker{false};
 
     std::map<std::wstring, DbConnection> m_driveDbs;
     DbConnection m_globalDb;

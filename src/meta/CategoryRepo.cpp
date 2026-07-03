@@ -470,69 +470,82 @@ bool CategoryRepo::reorderAll(bool ascending) {
 }
 
 bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint) {
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return false;
+    sqlite3* memDb = DatabaseManager::instance().getGlobalDb();
+    if (!memDb) return false;
 
     std::wstring finalPath = MetadataManager::normalizePath(pathHint);
     if (finalPath.empty()) finalPath = MetadataManager::instance().getPathByFid(fileId128);
 
-    SqlTransaction trans(db);
-    sqlite3_stmt* stmt;
     const char* sql = "INSERT OR REPLACE INTO category_items (category_id, file_id, path_hint, added_at) VALUES (?, ?, ?, ?)";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, categoryId);
-        sqlite3_bind_text(stmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 3, finalPath.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_double(stmt, 4, static_cast<double>(QDateTime::currentMSecsSinceEpoch()));
-        if (sqlite3_step(stmt) == SQLITE_DONE) {
-            sqlite3_finalize(stmt);
-            trans.commit();
+    double addedAt = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
 
-            // 2026-06-xx 物理同步：归类操作必然标记为受控项，驱动 UI 绿对勾显示
+    sqlite3_stmt* memStmt;
+    if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int(memStmt, 1, categoryId);
+        sqlite3_bind_text(memStmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(memStmt, 3, finalPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_double(memStmt, 4, addedAt);
+        
+        if (sqlite3_step(memStmt) == SQLITE_DONE) {
+            sqlite3_finalize(memStmt);
+
+            // 异步磁盘分发
+            DatabaseManager::instance().enqueueSyncTask([categoryId, fileId128, finalPath, addedAt, memDb, sql]() {
+                sqlite3* diskDb = DatabaseManager::instance().getDiskDb(memDb);
+                if (!diskDb) return;
+                sqlite3_stmt* diskStmt;
+                if (sqlite3_prepare_v2(diskDb, sql, -1, &diskStmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_int(diskStmt, 1, categoryId);
+                    sqlite3_bind_text(diskStmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(diskStmt, 3, finalPath.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_double(diskStmt, 4, addedAt);
+                    sqlite3_step(diskStmt);
+                    sqlite3_finalize(diskStmt);
+                }
+            });
+
             if (!finalPath.empty()) {
-                // 2026-07-xx 物理修复：改用 registerItem 确保物理属性被提取并持久化
                 MetadataManager::instance().registerItem(finalPath);
             }
 
             syncCategorizedCountForFid(fileId128);
-            
-            // 2026-06-xx 物理优化：手动归类后立即触发侧边栏异步局部刷新
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
             return true;
         }
-        sqlite3_finalize(stmt);
+        sqlite3_finalize(memStmt);
     }
     return false;
 }
 
 bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fileId128) {
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return false;
+    sqlite3* memDb = DatabaseManager::instance().getGlobalDb();
+    if (!memDb) return false;
 
-    SqlTransaction trans(db);
-    sqlite3_stmt* stmt;
     const char* sql = "DELETE FROM category_items WHERE category_id = ? AND file_id = ?";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, categoryId);
-        sqlite3_bind_text(stmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(stmt) == SQLITE_DONE) {
-            sqlite3_finalize(stmt);
-            trans.commit();
+    sqlite3_stmt* memStmt;
+    if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int(memStmt, 1, categoryId);
+        sqlite3_bind_text(memStmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(memStmt) == SQLITE_DONE) {
+            sqlite3_finalize(memStmt);
 
-            // 2026-06-xx 物理同步：移出分类后，需要重新判定 Managed 状态。
-            // 由于 MetadataManager::setManaged 会同步更新 RuntimeMeta，
-            // 这里利用 syncCategorizedCountForFid 间接完成状态刷新。
-            std::wstring path = MetadataManager::instance().getPathByFid(fileId128);
-            if (!path.empty()) {
-                auto meta = MetadataManager::instance().getMeta(path);
-                // 如果没有其他用户操作，且不再属于任何分类，则可能需要取消 Managed 标记。
-                // 暂时保持现状，或调用一次 refresh 逻辑。
-            }
+            // 异步磁盘分发
+            DatabaseManager::instance().enqueueSyncTask([categoryId, fileId128, memDb, sql]() {
+                sqlite3* diskDb = DatabaseManager::instance().getDiskDb(memDb);
+                if (!diskDb) return;
+                sqlite3_stmt* diskStmt;
+                if (sqlite3_prepare_v2(diskDb, sql, -1, &diskStmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_int(diskStmt, 1, categoryId);
+                    sqlite3_bind_text(diskStmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(diskStmt);
+                    sqlite3_finalize(diskStmt);
+                }
+            });
 
             syncCategorizedCountForFid(fileId128);
             return true;
         }
-        sqlite3_finalize(stmt);
+        sqlite3_finalize(memStmt);
     }
     return false;
 }
@@ -692,18 +705,36 @@ void CategoryRepo::incrementCategorizedCount(int delta) {
 }
 
 void CategoryRepo::updatePersistentStat(const std::string& key, int delta) {
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return;
+    sqlite3* memDb = DatabaseManager::instance().getGlobalDb();
+    if (!memDb) return;
 
-    sqlite3_stmt* stmt;
     const char* sql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, "
                       "COALESCE((SELECT value FROM system_stats WHERE key = ?), 0) + ?)";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, key.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 3, delta);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
+    
+    sqlite3_stmt* memStmt;
+    if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(memStmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(memStmt, 2, key.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(memStmt, 3, delta);
+        if (sqlite3_step(memStmt) == SQLITE_DONE) {
+            sqlite3_finalize(memStmt);
+
+            // 异步磁盘分发
+            DatabaseManager::instance().enqueueSyncTask([key, delta, memDb, sql]() {
+                sqlite3* diskDb = DatabaseManager::instance().getDiskDb(memDb);
+                if (!diskDb) return;
+                sqlite3_stmt* diskStmt;
+                if (sqlite3_prepare_v2(diskDb, sql, -1, &diskStmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_text(diskStmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(diskStmt, 2, key.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_int(diskStmt, 3, delta);
+                    sqlite3_step(diskStmt);
+                    sqlite3_finalize(diskStmt);
+                }
+            });
+        } else {
+            sqlite3_finalize(memStmt);
+        }
     }
 }
 

@@ -132,3 +132,17 @@
     - 在包含 `windows.h` 后显式 `#undef run`，解决 Windows 宏与 `QtConcurrent::run` 的标识符冲突。
 - [2026-07-02 16:30:00] **src/main.cpp**:
     - 增强“进入事件循环”与“正常退出”边界日志，用于区分崩溃闪退与逻辑退出。
+
+### 实时增量同步与秒退出架构重构 (Plan-119)
+- [2026-07-03 10:20:00] **src/meta/DatabaseManager.h / .cpp**:
+    - 引入后台 I/O 工作线程与任务队列 `m_syncQueue`，支持非阻塞式磁盘持久化。
+    - 维持 `memDb` (内存) 与 `diskDb` (磁盘) 双句柄管理，实现启动时 Disk->Memory 全量预热。
+    - 重构 `shutdown` 流程：停止工作线程并安全释放物理占用，彻底废除退出时的全量备份循环。
+- [2026-07-03 10:45:00] **src/meta/MetadataManager.h / .cpp**:
+    - 彻底废除 `m_batchTimer` 1.5s 防抖延迟，重构为“即改即同步”架构。
+    - 重构 `persistAsync`：优先提交内存事务，随后将 SQL 任务投递至后台队列执行磁盘落盘。
+    - 批量操作优化：在 `renameTag`、`removeTag` 及 `removeMetadataSync` 的异步任务中引入显式事务保护，并增加磁盘写入异常日志。
+- [2026-07-03 11:10:00] **src/meta/CategoryRepo.cpp**:
+    - 同步重构 `addItemToCategory`、`removeItemFromCategory` 等归类逻辑，实现内存优先的异步持久化。
+- [2026-07-03 11:20:00] **src/ui/TrayController.cpp**:
+    - 物理移除 `BatchProgressDialog` 及 `flushStep` 持久化进度条，实现程序秒级退出体验。

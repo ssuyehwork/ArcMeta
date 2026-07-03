@@ -64,9 +64,11 @@ DatabaseManager& DatabaseManager::instance() {
 }
 
 DatabaseManager::DatabaseManager(QObject* parent) : QObject(parent) {
+    startWorkerThread();
 }
 
 DatabaseManager::~DatabaseManager() {
+    stopWorkerThread();
     flushAll();
     for (auto& pair : m_driveDbs) {
         closeDb(pair.second);
@@ -321,28 +323,10 @@ bool DatabaseManager::flushStep() {
 }
 
 void DatabaseManager::shutdown() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    // 强制完成所有挂起的备份
-    auto forceFinish = [](DbConnection& conn) {
-        if (conn.activeBackup) {
-            sqlite3_backup_step(conn.activeBackup, -1);
-            sqlite3_backup_finish(conn.activeBackup);
-            conn.activeBackup = nullptr;
-        } else {
-            // 如果没有活动备份，执行一次完整的同步
-            if (conn.memDb && conn.diskDb) {
-                sqlite3_backup* b = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
-                if (b) {
-                    sqlite3_backup_step(b, -1);
-                    sqlite3_backup_finish(b);
-                }
-            }
-        }
-    };
-    
-    forceFinish(m_globalDb);
-    for (auto& pair : m_driveDbs) forceFinish(pair.second);
+    stopWorkerThread();
 
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
     // 关闭所有句柄 (1.21：解除物理占用)
     for (auto& pair : m_driveDbs) {
         if (pair.second.memDb) sqlite3_close_v2(pair.second.memDb);
@@ -468,6 +452,55 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
 
 sqlite3* DatabaseManager::getGlobalDb() {
     return m_globalDb.memDb;
+}
+
+sqlite3* DatabaseManager::getDiskDb(sqlite3* memDb) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_globalDb.memDb == memDb) return m_globalDb.diskDb;
+    for (auto& pair : m_driveDbs) {
+        if (pair.second.memDb == memDb) return pair.second.diskDb;
+    }
+    return nullptr;
+}
+
+void DatabaseManager::enqueueSyncTask(std::function<void()> task) {
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_syncQueue.push_back(std::move(task));
+    }
+    m_queueCv.notify_one();
+}
+
+void DatabaseManager::startWorkerThread() {
+    m_stopWorker = false;
+    m_workerThread = std::thread(&DatabaseManager::workerLoop, this);
+}
+
+void DatabaseManager::stopWorkerThread() {
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_stopWorker = true;
+    }
+    m_queueCv.notify_all();
+    if (m_workerThread.joinable()) {
+        m_workerThread.join();
+    }
+}
+
+void DatabaseManager::workerLoop() {
+    while (true) {
+        std::function<void()> task;
+        {
+            std::unique_lock<std::mutex> lock(m_queueMutex);
+            m_queueCv.wait(lock, [this] { return m_stopWorker || !m_syncQueue.empty(); });
+            if (m_stopWorker && m_syncQueue.empty()) break;
+            task = std::move(m_syncQueue.front());
+            m_syncQueue.pop_front();
+        }
+        if (task) {
+            task();
+        }
+    }
 }
 
 } // namespace ArcMeta
