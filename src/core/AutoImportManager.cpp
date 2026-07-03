@@ -24,7 +24,7 @@
 
 namespace ArcMeta {
 
-static std::mutex s_dbAccessMutex;
+static std::recursive_mutex s_dbAccessMutex;
 
 AutoImportManager& AutoImportManager::instance() {
     static AutoImportManager inst;
@@ -84,79 +84,87 @@ void AutoImportManager::syncAllManagedLibraries() {
 }
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
-    int idx = MftReader::instance().getIndexByKey(key);
-    if (idx < 0) return;
+    (void)QtConcurrent::run([this, key]() {
+        std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
 
-    QString qPath = MftReader::instance().getFullPath(idx);
-    std::wstring fullPath = qPath.toStdWString();
-    std::wstring managedFolder;
-    
-    bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
-     
-    if (isManaged) {
-        if (MftReader::instance().isDirectory(idx)) {
-            (void)QtConcurrent::run([this, fullPath]() {
-                handleRecursiveIngestion(fullPath);
-            });
-        }
+        int idx = MftReader::instance().getIndexByKey(key);
+        if (idx < 0) return;
 
-        std::lock_guard<std::mutex> lock(m_queueMutex);
-        m_pendingPaths.push_back(fullPath);
+        QString qPath = MftReader::instance().getFullPath(idx);
+        std::wstring fullPath = qPath.toStdWString();
+        std::wstring managedFolder;
         
-        QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
-    }
+        bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
+
+        if (isManaged) {
+            if (MftReader::instance().isDirectory(idx)) {
+                handleRecursiveIngestion(fullPath);
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(m_queueMutex);
+                m_pendingPaths.push_back(fullPath);
+            }
+
+            QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+        }
+    });
 }
 
 void AutoImportManager::onEntryUpdated(uint64_t key) {
-    int idx = MftReader::instance().getIndexByKey(key);
-    if (idx < 0) return;
+    (void)QtConcurrent::run([this, key]() {
+        std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
 
-    QString qPath = MftReader::instance().getFullPath(idx);
-    std::wstring fullPath = qPath.toStdWString();
-    uint64_t frn = MftReader::instance().getFrn(idx);
+        int idx = MftReader::instance().getIndexByKey(key);
+        if (idx < 0) return;
 
-    if (MftReader::instance().isDirectory(idx)) {
-        int catId = CategoryRepo::findByFrn(frn);
-        if (catId > 0) {
-            QString newName = QFileInfo(qPath).fileName();
-            Category cat = CategoryRepo::getById(catId);
-            if (cat.id > 0) {
-                if (cat.parentId == 0 && QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
-                    QString expectedName = "ArcMeta.Library_" + qPath.left(1).toUpper();
-                    if (newName != expectedName) {
-                        qDebug() << "[AutoImport] 检测到根目录违规重命名，强制恢复:" << newName << "->" << expectedName;
-                        QString parentDir = QFileInfo(qPath).absolutePath();
-                        QString oldPath = QDir::toNativeSeparators(QDir(parentDir).absoluteFilePath(expectedName));
-                        QFile::rename(qPath, oldPath);
-                        return; 
+        QString qPath = MftReader::instance().getFullPath(idx);
+        std::wstring fullPath = qPath.toStdWString();
+        uint64_t frn = MftReader::instance().getFrn(idx);
+
+        if (MftReader::instance().isDirectory(idx)) {
+            int catId = CategoryRepo::findByFrn(frn);
+            if (catId > 0) {
+                QString newName = QFileInfo(qPath).fileName();
+                Category cat = CategoryRepo::getById(catId);
+                if (cat.id > 0) {
+                    if (cat.parentId == 0 && QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                        QString expectedName = "ArcMeta.Library_" + qPath.left(1).toUpper();
+                        if (newName != expectedName) {
+                            qDebug() << "[AutoImport] 检测到根目录违规重命名，强制恢复:" << newName << "->" << expectedName;
+                            QString parentDir = QFileInfo(qPath).absolutePath();
+                            QString oldPath = QDir::toNativeSeparators(QDir(parentDir).absoluteFilePath(expectedName));
+                            QFile::rename(qPath, oldPath);
+                            return;
+                        }
                     }
-                }
 
-                if (QString::fromStdWString(cat.name) != newName) {
-                    qDebug() << "[AutoImport] 同步物理重命名到逻辑分类:" << newName;
-                    cat.name = newName.toStdWString();
-                    cat.physicalPath = fullPath;
-                    CategoryRepo::update(cat);
-                    MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                    if (QString::fromStdWString(cat.name) != newName) {
+                        qDebug() << "[AutoImport] 同步物理重命名到逻辑分类:" << newName;
+                        cat.name = newName.toStdWString();
+                        cat.physicalPath = fullPath;
+                        CategoryRepo::update(cat);
+                        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                    }
                 }
             }
         }
-    }
 
-    std::wstring managedFolder;
-    bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
-    if (isManaged) {
-        if (MftReader::instance().isDirectory(idx)) {
-            (void)QtConcurrent::run([this, fullPath]() {
+        std::wstring managedFolder;
+        bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
+        if (isManaged) {
+            if (MftReader::instance().isDirectory(idx)) {
                 handleRecursiveIngestion(fullPath);
-            });
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(m_queueMutex);
+                m_pendingPaths.push_back(fullPath);
+            }
+
+            QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
         }
-
-        std::lock_guard<std::mutex> lock(m_queueMutex);
-        m_pendingPaths.push_back(fullPath);
-
-        QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
-    }
+    });
 }
 
 void AutoImportManager::recordRecentVisitedFolder(const std::wstring& path) {
@@ -239,7 +247,7 @@ void AutoImportManager::processImportQueue() {
 
     // 2026-08-xx 异步化改造：将耗时的 registerItem 循环移入后台线程
     (void)QtConcurrent::run([this, pathsToProcess]() {
-        std::lock_guard<std::mutex> dbLock(s_dbAccessMutex);
+        std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
         MetadataManager::instance().setInternalOperating(true);
 
         std::map<std::wstring, std::vector<std::wstring>> pathsByVol;
@@ -278,7 +286,7 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
     if (!dir.exists()) return;
 
     // 2026-08-xx 异步化改造：整机加锁保护数据库写入，并迁移信号抑制逻辑
-    std::lock_guard<std::mutex> dbLock(s_dbAccessMutex);
+    std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
 
     MetadataManager::instance().setInternalOperating(true);
     sqlite3* db = DatabaseManager::instance().getGlobalDb();

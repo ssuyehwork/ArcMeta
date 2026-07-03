@@ -182,3 +182,4 @@
     - **信号抑制与通知迁移**：将 `setInternalOperating(true/false)` 信号抑制逻辑与全量 UI 通知完整迁移至后台线程执行体，实现高性能导入。
     - **包含性修复**：同步更新 `onEntryAdded`、`onEntryUpdated` 以及 `syncAllManagedLibraries` 触发逻辑，实现全链路响应性能优化。
     - **编译警告修复**：将 `QtConcurrent::run` 的返回值显式转换为 `(void)`，消除 MSVC C4858 警告。
+    - **并发冲突与死锁修复**：将 `s_dbAccessMutex` 升级为 `std::recursive_mutex`，并实现 `onEntryAdded`/`onEntryUpdated` 的全量异步化保护，解决潜在的线程安全风险。
