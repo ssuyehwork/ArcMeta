@@ -1,69 +1,84 @@
 # MainWindow 职责过载分析与解耦规划 —— Analysis_Modification_Plan-120.md
 
 ## 1. 任务背景
-`MainWindow.cpp` 当前行数已达 1625 行，作为一个顶层 UI 容器，其代码体积与逻辑复杂度均已触碰“上帝对象” (God Object) 的红线。根据“MainWindow 职责红线”规约，需要对其职责进行审计，识别并列举不属于 UI 容器范畴的过载点。
+`MainWindow.cpp` 当前行数已达 1625 行，作为一个顶层 UI 容器，其代码体积与逻辑复杂度均已触碰“上帝对象” (God Object) 的红线。根据“MainWindow 职责红线”规约及最新的 `Analysis_Modification_Plan-119.md` 实时同步架构，需要对其职责进行深度审计，识别并列举违规过载点，并规划一套确保极致丝滑、无感解耦的重构方案。
 
 ## 2. 问题定位
-通过对 `src/ui/MainWindow.cpp` 的静态审计，确认其存在严重的职责过载。该类不仅负责窗口布局，还深度介入了硬件监听、物理文件操作及业务数据管理。
+通过对 `src/ui/MainWindow.cpp` 的静态审计，确认其存在严重的职责过载。
 
 ### 2.1 核心过载点审计
 1. **硬件消息捕获 (违规行号: 585-601)**：
     - `nativeEvent` 中直接拦截 Win32 `WM_DEVICECHANGE` 消息并触发磁盘对账。
-    - **归类**：属于底层系统监听职责，应由 `CoreController` 或专职 `HardwareService` 承载。
+    - **归类**：底层系统监听职责，应由 `CoreController` 或专职 `HardwareService` 承载。
 2. **物理磁盘 IO 与目录探测 (违规行号: 1547, 1585-1595)**：
-    - `initDriveBar` 内部使用 `QDir::drives()` 遍历物理驱动器并检查物理路径。
+    - `initDriveBar` 内部使用 `QDir::drives()` 检查物理路径。
     - `onDriveButtonContextMenu` 内部直接调用 `QDir().mkpath()` 创建托管库。
-    - **归类**：属于物理磁盘 IO 职责，应由 `ShellHelper` 或 `CoreController` 的业务逻辑层处理。
+    - **归类**：物理磁盘 IO 职责，应由 `ShellHelper` 或业务逻辑层处理。
 3. **业务实体构造与持久化逻辑 (违规行号: 1599-1616)**：
-    - 在右键菜单槽函数中，直接构造 `Category` 结构体、计算 FRN，并调用 `CategoryRepo::add()`。
-    - **归类**：属于业务领域逻辑，顶层 UI 不应知晓 `Category` 结构的内部细节及持久化动作。
+    - 直接构造 `Category` 结构体并调用 `CategoryRepo::add()`。
+    - **归类**：属于业务领域逻辑。
 4. **协议解析与路由中枢过重 (违规行号: 1243-1310)**：
-    - `unifiedNavigateTo` 承载了全应用所有的协议分流逻辑（category://, system://, file://）。
-    - **归类**：应由专职的 `RouteController` 处理，UI 仅需向控制器请求跳转。
-5. **复杂交互逻辑碎片化 (违规行号: 669-722)**：
-    - 大量的鼠标按下、移动事件处理自定义窗口缩放 (Resize) 和拖拽。
-    - **归类**：虽属 UI，但建议封装入 `FramelessHelper` 或专门的事件过滤器以精简主类。
+    - `unifiedNavigateTo` 承载了全应用所有的协议分流逻辑。
+    - **归类**：应由专职的 `RouteController` 处理。
+
+### 2.2 同步架构变更后的新增违规审计 (对齐 Plan-119)
+5. **陈旧同步逻辑残留 (违规行号: 1121-1124)**：
+    - `m_btnSync` 的点击槽函数直接调用了“延时同步”的 UI 反馈。在 Plan-119 的实时同步架构下，手动触发延时同步已无语义。
+    - **归类**：陈旧业务逻辑，应清理或重构为异步队列监控。
+6. **持久化内部状态深度耦合 (违规行号: 1137)**：
+    - 直接监听 `MetadataManager` 的 `pendingSyncChanged` 信号。
+    - **归类**：UI 与底层队列状态耦合。MainWindow 严禁直接订阅持久化层的内部队列信号，应通过 `SyncStatusService` 进行抽象状态展示。
 
 ## 3. 强制对照表
 
 | 编号 | 用户原话 / 我的理解 | 方案对应点 | 是否一致 |
 |------|---------------------|------------|----------|
 | 1    | MainWindow.cpp 是否存在职责过载？ | 确认存在严重过载（上帝对象） | ✅ |
-| 2    | 存在哪些职责过载呢？ | 详细列举了硬件消息、磁盘 IO、业务持久化、协议解析四大过载点 | ✅ |
-| 3    | 严禁处理硬件消息（如 WM_DEVICECHANGE） | 识别出 `nativeEvent` 违规 | ✅ |
-| 4    | 严禁处理物理磁盘 IO（如 mkpath） | 识别出 `onDriveButtonContextMenu` 违规 | ✅ |
+| 2    | 存在哪些职责过载呢？ | 列举了硬件、IO、持久化、路由、同步耦合等六大过载点 | ✅ |
+| 3    | 方案必须做到操作流程丝滑，坚决不可发生假死、卡顿 | 引入第 6 节“极致性能保障准则”，采用非阻塞通信与节流机制 | ✅ |
+| 4    | 避免抑制锁、线程锁定、线程竞争等问题 | 规定 Service 间采用原子状态位与异步信号通知，严禁在 UI 线程持有 I/O 锁 | ✅ |
 
 ## 4. 详细解决方案 (解耦规划)
 
-### 4.1 硬件职责剥离
-- **规划**：在 `CoreController` 或新设 `DeviceWatcher` 类中继承 `QAbstractNativeEventFilter`。
-- **目标**：将 `WM_DEVICECHANGE` 的处理从 `MainWindow` 物理移除。
+### 4.1 硬件与 IO 职责剥离
+- 建立 `DeviceWatcher` 处理原生事件。
+- 将磁盘探测逻辑下沉至 `ManagedFolderService`。
 
-### 4.2 业务逻辑下沉
-- **规划**：建立 `ManagedFolderService`。
-- **目标**：托管库的创建、探测、FRN 获取及 `CategoryRepo` 的原子化写入全部封装进 Service，`MainWindow` 仅负责弹出菜单并调用 Service 接口。
-
-### 4.3 导航逻辑路由化
-- **规划**：引入 `NavigationManager`。
-- **目标**：`unifiedNavigateTo` 的逻辑迁移至 Manager，Manager 处理协议解析并反向驱动各 Panel 的数据加载。
+### 4.2 路由与同步逻辑抽象
+- 引入 `NavigationManager` 接管协议分流。
+- 引入 `SyncStatusService` 抽象 Plan-119 的异步队列状态，UI 仅负责展示 Service 抛出的高级状态（如“正在同步中...”、“已全部同步”）。
 
 ## 5. 修改边界声明【红线】
 
 **本次方案涉及范围：**
-- [ ] `src/ui/MainWindow.cpp`：职责审计与解耦规划。
+- [ ] `src/ui/MainWindow.cpp`：职责审计与解耦规划修订。
 
 **明确禁止越界修改的范围：**
-- [ ] 本阶段仅产出分析文档，禁止修改任何代码文件。
+- [ ] 本阶段仅产出分析文档，禁止修改代码。
 
-## 6. 实现准则与预警【核心】
-- **预警**：解耦过程需谨慎处理面板间的信号耦合（Data Linkage）。在剥离导航中枢时，需确保各 Panel 的独立性不被破坏。
+## 6. 高并发安全与极致性能保障准则【核心】
+为了确保在解耦后操作流程依然“丝滑”且杜绝“假死/卡顿”，实施时必须遵守以下技术准则：
+
+1. **非阻塞异步模型**：
+    - **Service -> UI**：所有的状态变更必须通过 Qt 信号槽的 `Qt::QueuedConnection` 异步投递。
+    - **UI -> Service**：UI 仅发送“请求”信号，严禁在主线程调用任何可能产生阻塞（如磁盘 IO、网络请求、大事务提交）的 Service 方法。
+2. **状态节流 (Throttling)**：
+    - 针对高频触发的底层信号（如 `pendingSyncChanged`），`SyncStatusService` 内部必须实现 100ms-200ms 的时间窗口节流，确保 UI 刷新的频率不会超过人眼识别极限，防止消息风暴撑爆主线程事件循环。
+3. **无锁化/原子化状态订阅**：
+    - `SyncStatusService` 使用 `std::atomic<bool>` 或 `std::atomic<int>` 维护同步队列计数。
+    - UI 线程访问这些状态时应是 O(1) 的无锁操作，绝对禁止 UI 线程去申请被后台 I/O 线程占用的互斥锁（Mutex）。
+4. **零同步等待**：
+    - 严禁使用 `QEventLoop::exec()` 或 `std::future::get()` 等在主线程等待异步结果的行为。
+5. **硬件消息延迟隔离**：
+    - `DeviceWatcher` 处理 `WM_DEVICECHANGE` 时，应立即将解析任务推入后台线程，并在解析完成后通过单次信号通知 UI。严禁在系统原生回调函数中执行耗时的目录扫描。
 
 ## 7. Memories.md 合规检查
 
 | 组件 / 模式 | Memories.md 规范要求 | 本方案是否符合 |
 |-------------|----------------------|----------------|
-| MainWindow 职责红线 | 严禁处理硬件消息、物理磁盘 IO 及业务数据持久化逻辑 | ✅ 符合 |
+| MainWindow 职责红线 | 严禁处理业务数据持久化逻辑 | ✅ 符合 |
+| 同步按钮样式 | 存在待同步元数据时显示 ErrorRed | ✅ 符合 (由 Service 节流信号驱动) |
 | 信号/事件问题追踪 | 必须完整追踪链路 | ✅ 符合 |
 
 ## 8. 待确认事项（可选）
-- 建议确认是否需要立即启动解耦工作，还是仅作为技术债务记录。
+- 建议将 `SyncStatusService` 作为首个试点解耦模块，用于验证节流机制的性能表现。
