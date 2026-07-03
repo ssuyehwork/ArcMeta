@@ -146,3 +146,15 @@
     - 同步重构 `addItemToCategory`、`removeItemFromCategory` 等归类逻辑，实现内存优先的异步持久化。
 - [2026-07-03 11:20:00] **src/ui/TrayController.cpp**:
     - 物理移除 `BatchProgressDialog` 及 `flushStep` 持久化进度条，实现程序秒级退出体验。
+
+### SyncStatusService 试点解耦与高性能节流设计 (Plan-121)
+- [2026-07-03 14:30:00] **src/meta/DatabaseManager.h / .cpp**:
+    - 增加 `m_pendingTasksCount` 原子计数器及 `pendingTasksCountChanged` 信号，追踪异步任务实时吞吐。
+- [2026-07-03 15:00:00] **src/core/SyncStatusService.h / .cpp**:
+    - 新增试点服务类，接管高频同步状态监听。
+    - 实现 200ms 高性能节流机制（Time Window Throttling），确保 UI 刷新频率恒定。
+- [2026-07-03 15:20:00] **src/ui/MainWindow.cpp**:
+    - 彻底解耦 `m_btnSync` 与底层元数据信号的直接关联，接入 `SyncStatusService`。
+    - 移除陈旧的“延时同步”反馈逻辑，重构为基于异步队列监控的实时同步状态展示。
+- [2026-07-03 15:35:00] **CMakeLists.txt**:
+    - 注册 `SyncStatusService` 源码，启用自动化编译支持。

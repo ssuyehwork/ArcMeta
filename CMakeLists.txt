@@ -49,6 +49,8 @@ set(SOURCES
     src/core/CacheManager.cpp
     src/core/CacheManager.h
     src/core/IndexedEntry.h
+    src/core/SyncStatusService.cpp
+    src/core/SyncStatusService.h
     src/core/AutoImportManager.cpp
     src/core/AutoImportManager.h
     src/core/AppConfig.h

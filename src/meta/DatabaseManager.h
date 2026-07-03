@@ -83,6 +83,17 @@ public:
      */
     void enqueueSyncTask(std::function<void()> task);
 
+    /**
+     * @brief 获取当前挂起的同步任务总数 (Atomic)
+     */
+    int getPendingTasksCount() const { return m_pendingTasksCount.load(); }
+
+signals:
+    /**
+     * @brief 异步任务计数变更信号
+     */
+    void pendingTasksCountChanged(int count);
+
 private:
     DatabaseManager(QObject* parent = nullptr);
     ~DatabaseManager();
@@ -103,6 +114,7 @@ private:
     std::condition_variable m_queueCv;
     std::thread m_workerThread;
     std::atomic<bool> m_stopWorker{false};
+    std::atomic<int> m_pendingTasksCount{0};
 
     std::map<std::wstring, DbConnection> m_driveDbs;
     DbConnection m_globalDb;
