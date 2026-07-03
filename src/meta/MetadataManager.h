@@ -357,6 +357,12 @@ private:
      * @param authorized 是否允许创建新记录（只有 USN Journal 触发时为 true）
      */
     void persistAsync(const std::wstring& path, bool notify = true, bool authorized = false);
+
+    /**
+     * @brief 异步批量持久化元数据 (Plan-119 性能加固)
+     * 自动按数据库分组并执行单任务大事务落盘。
+     */
+    void persistBatchAsync(const std::vector<std::wstring>& paths, bool authorized = false);
 };
 
 } // namespace ArcMeta

@@ -46,6 +46,7 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+#include "../core/SyncStatusService.h"
 #include "DriveButton.h"
 #include "../util/ShellHelper.h"
 using namespace ArcMeta::Style;
@@ -1122,24 +1123,25 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
     m_btnSync->installEventFilter(m_hoverFilter);
 
-    // 2026-06-15 按照用户要求：手动点击同步
-    connect(m_btnSync, &QPushButton::clicked, this, [this]() {
-        
-        ToolTipOverlay::instance()->showText(m_btnSync->mapToGlobal(QPoint(0,0)), "正在启动延时同步...", 1500);
-    });
-
-    // 联动同步按钮颜色状态 (红色预警)
-    auto updateSyncBtnState = [this](bool hasPending) {
-        if (hasPending) {
+    // 2026-07-xx 按照用户要求 (Plan-121)：通过试点服务解耦同步状态展示
+    connect(&SyncStatusService::instance(), &SyncStatusService::statusUpdated, this, [this](bool syncing, int count) {
+        if (syncing) {
             m_btnSync->setIcon(UiHelper::getIcon("sync", ErrorRed)); // 强制红色
-            m_btnSync->setProperty("tooltipText", "存在待同步元数据，请点击或等待闲置同步");
+            m_btnSync->setProperty("tooltipText", QString("正在同步元数据 (%1 项待落盘)...").arg(count));
         } else {
             m_btnSync->setIcon(UiHelper::getIcon("sync", TextMain)); // 恢复正常
             m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
         }
-    };
-    
-    connect(&MetadataManager::instance(), &MetadataManager::pendingSyncChanged, this, updateSyncBtnState);
+    });
+
+    // 2026-06-15 按照用户要求：手动点击同步 (仅作交互反馈)
+    connect(m_btnSync, &QPushButton::clicked, this, [this]() {
+        if (SyncStatusService::instance().isSyncing()) {
+            ToolTipOverlay::instance()->showText(m_btnSync->mapToGlobal(QPoint(0,0)), "同步正在进行中...", 1500);
+        } else {
+            ToolTipOverlay::instance()->showText(m_btnSync->mapToGlobal(QPoint(0,0)), "元数据已全部落地", 1500);
+        }
+    });
 
     m_btnLayout = createTitleBtn("layout");
     m_btnLayout->setProperty("tooltipText", "布局管理与重置");

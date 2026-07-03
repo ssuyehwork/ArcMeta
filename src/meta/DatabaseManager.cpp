@@ -464,10 +464,13 @@ sqlite3* DatabaseManager::getDiskDb(sqlite3* memDb) {
 }
 
 void DatabaseManager::enqueueSyncTask(std::function<void()> task) {
+    int count = 0;
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         m_syncQueue.push_back(std::move(task));
+        count = ++m_pendingTasksCount;
     }
+    emit pendingTasksCountChanged(count);
     m_queueCv.notify_one();
 }
 
@@ -499,6 +502,8 @@ void DatabaseManager::workerLoop() {
         }
         if (task) {
             task();
+            int count = --m_pendingTasksCount;
+            emit pendingTasksCountChanged(count);
         }
     }
 }
