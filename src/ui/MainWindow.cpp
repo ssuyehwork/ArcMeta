@@ -1287,10 +1287,14 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
         // 2026-08-xx 按照 Plan-128：失效数据审计模式下的容器动态管理
         if (type == "invalid_data") {
             if (m_navPanel) m_navPanel->hide();
-            // 失效数据采用扁平列表展示，无需目录树
+            // 2026-xx-xx 按照用户要求：在失效数据审计模式下进一步隐藏元数据和筛选面板
+            if (m_metaPanel) m_metaPanel->hide();
+            if (m_filterPanel) m_filterPanel->hide();
         } else {
             // 回归常规模式，恢复显示
             if (m_navPanel) m_navPanel->show();
+            if (m_metaPanel) m_metaPanel->show();
+            if (m_filterPanel) m_filterPanel->show();
         }
 
         if (m_categoryPanel) {

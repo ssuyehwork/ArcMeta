@@ -528,14 +528,16 @@ double MetadataManager::getProgressFromDb(const std::wstring& folderPath) {
         if (it != m_folderProgressCache.end()) return it->second;
     }
 
+    // [Plan-124 优化]：杜绝在循环内执行 SQL 预编译。
+    // 如果缓存未命中，执行一次快速查询。
     std::wstring volSerial = getVolumeSerialNumber(nFolder);
     QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
     sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
     if (!db) return -1.0;
 
     double progress = -1.0;
+    static const char* sql = "SELECT value FROM system_stats WHERE key = ?";
     sqlite3_stmt* stmt;
-    const char* sql = "SELECT value FROM system_stats WHERE key = ?";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         std::string key = "PROGRESS:" + QString::fromStdWString(nFolder).toUtf8().toStdString();
         sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
@@ -925,16 +927,25 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
 
-        // 1. 深度收集所有子孙路径
+        // Plan-124: 利用树级索引实现 O(K) 深度搜集，废除 O(N) 全量遍历
         std::vector<std::pair<std::wstring, std::wstring>> itemsToRename;
-        for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
-            const std::wstring& p = it->first;
-            if (p == nOld) {
-                itemsToRename.push_back({p, nNew});
-            } else if (p.find(nOld + L"\\") == 0 || p.find(nOld + L"/") == 0) {
-                std::wstring relative = p.substr(nOld.length());
-                itemsToRename.push_back({p, nNew + relative});
-            }
+
+        std::function<void(const std::wstring&, const std::wstring&)> collectRecursive =
+            [&](const std::wstring& o, const std::wstring& n) {
+                itemsToRename.push_back({o, n});
+                auto it = m_parentToChildren.find(o);
+                if (it != m_parentToChildren.end()) {
+                    std::vector<std::wstring> children = it->second; // 拷贝副本防止迭代器失效
+                    for (const auto& childOld : children) {
+                        std::wstring childName = QFileInfo(QString::fromStdWString(childOld)).fileName().toStdWString();
+                        std::wstring childNew = n + (n.back() == L'\\' || n.back() == L'/' ? L"" : L"\\") + childName;
+                        collectRecursive(childOld, normalizePath(childNew));
+                    }
+                }
+            };
+
+        if (m_cache.count(nOld)) {
+            collectRecursive(nOld, nNew);
         }
 
         if (itemsToRename.empty()) return;
@@ -978,9 +989,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             }
 
             // [树级索引维护] - 内部项仅移除
-            if (curOld != nOld) {
-                m_parentToChildren.erase(curOld);
-            }
+            m_parentToChildren.erase(curOld);
 
             // 3. 缓存迁移
             RuntimeMeta meta = it->second;
@@ -1000,17 +1009,12 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                     if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
                     if (!newExt.empty()) {
                         auto& ve = m_extensionToFids[newExt];
-                        if (std::find(ve.begin(), ve.end(), fid) == ve.end()) v.push_back(fid);
+                        if (std::find(ve.begin(), ve.end(), fid) == ve.end()) ve.push_back(fid);
                     }
                 }
             }
 
-            // [树级索引关系迁移]
-            if (isFolder) {
-                // 如果是文件夹，它的原有子项需要重新挂载（路径已变）
-                // 这里的处理逻辑在 itemsToRename 循环中会由子项的 newParent 逻辑处理。
-            }
-
+            // [树级索引关系重新挂载]
             std::wstring curNewParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(curNew)).absolutePath()).toStdWString());
             if (curNewParent != curNew) {
                 auto& children = m_parentToChildren[curNewParent];
@@ -1071,6 +1075,21 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
 
+        // Plan-124: 利用树级索引实现 O(K) 深度采集待删除项，废除 O(N) 全量扫描
+        std::vector<std::wstring> itemsToRemove;
+        std::function<void(const std::wstring&)> collectRecursive = [&](const std::wstring& p) {
+            itemsToRemove.push_back(p);
+            auto it = m_parentToChildren.find(p);
+            if (it != m_parentToChildren.end()) {
+                std::vector<std::wstring> children = it->second;
+                for (const auto& child : children) collectRecursive(child);
+            }
+        };
+
+        if (m_cache.count(nPath)) {
+            collectRecursive(nPath);
+        }
+
         // 1. 优化：先从父级索引中一次性移除根路径，避免循环内 O(K^2)
         std::wstring rootParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nPath)).absolutePath()).toStdWString());
         if (m_parentToChildren.count(rootParent)) {
@@ -1079,46 +1098,44 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
             if (children.empty()) m_parentToChildren.erase(rootParent);
         }
 
-        for (auto it = m_cache.begin(); it != m_cache.end(); ) {
-            if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
-                std::wstring curPath = it->first;
+        for (const auto& curPath : itemsToRemove) {
+            auto it = m_cache.find(curPath);
+            if (it == m_cache.end()) continue;
 
-                if (!it->second.isFolder && !it->second.isInvalid && !it->second.isTrash) {
-                    totalDelta--;
-                }
-                if (!it->second.fileId128.empty()) {
-                    std::string fid = it->second.fileId128;
-                    bool isFolder = it->second.isFolder;
-                    fids.push_back(fid);
-                    m_fidToPath.erase(fid);
+            if (!it->second.isFolder && !it->second.isInvalid && !it->second.isTrash) {
+                totalDelta--;
+            }
+            if (!it->second.fileId128.empty()) {
+                std::string fid = it->second.fileId128;
+                bool isFolder = it->second.isFolder;
+                fids.push_back(fid);
+                m_fidToPath.erase(fid);
 
-                    // [倒排索引维护]
-                    std::wstring name, ext;
-                    parsePathComponents(curPath, isFolder, name, ext);
-                    if (!name.empty()) {
-                        if (isFolder) {
-                            auto& v = m_folderNameToFids[name];
-                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_folderNameToFids.erase(name);
-                        } else {
-                            auto& v = m_fileNameToFids[name];
-                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_fileNameToFids.erase(name);
-                            if (!ext.empty()) {
-                                auto& ve = m_extensionToFids[ext];
-                                ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                                if (ve.empty()) m_extensionToFids.erase(ext);
-                            }
+                // [倒排索引维护]
+                std::wstring name, ext;
+                parsePathComponents(curPath, isFolder, name, ext);
+                if (!name.empty()) {
+                    if (isFolder) {
+                        auto& v = m_folderNameToFids[name];
+                        v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                        if (v.empty()) m_folderNameToFids.erase(name);
+                    } else {
+                        auto& v = m_fileNameToFids[name];
+                        v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                        if (v.empty()) m_fileNameToFids.erase(name);
+                        if (!ext.empty()) {
+                            auto& ve = m_extensionToFids[ext];
+                            ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
+                            if (ve.empty()) m_extensionToFids.erase(ext);
                         }
                     }
-
-                    // [树级索引维护] - 仅清除当前项作为父节点的关系（子项正在被删除）
-                    m_parentToChildren.erase(curPath);
-                    m_folderProgressCache.erase(curPath);
                 }
-                it = m_cache.erase(it);
+
+                // [树级索引维护] - 仅清除当前项作为父节点的关系（子项正在被删除）
+                m_parentToChildren.erase(curPath);
+                m_folderProgressCache.erase(curPath);
             }
-            else ++it;
+            m_cache.erase(it);
         }
     }
 

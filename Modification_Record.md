@@ -188,7 +188,8 @@
 - [2026-08-16 10:20:00] **src/meta/MetadataManager.h / .cpp**:
     - 引入 `m_parentToChildren` 快速层级索引与 `m_folderProgressCache` 进度缓存，将目录检索复杂度从 $O(N)$ 降至 $O(1)$。
     - 实现 `getChildrenFromCache` 与 `hasChildrenInCache` 接口，支持零 I/O 加载。
-    - **性能加固**：重构 `renameItem` 与 `removeMetadataSync` 算法，采用“先切断根关联”策略，将大批量操作的索引维护复杂度由 $O(K^2)$ 优化至 $O(K)$。
+    - **性能加固**：重构 `renameItem` 与 `removeMetadataSync` 算法，利用树级索引实现 $O(K)$ 深度递归采集与维护，废除 $O(N)$ 全量遍历。
+    - **SQL 优化**：将进度查询 SQL 句柄静态化，杜绝列表构建循环中的重复预编译。
     - **初始化优化**：在 `initFromScchMode` 中实现层级索引的完整重建与去重校验。
 - [2026-08-16 11:00:00] **src/ui/ContentPanel.h / .cpp**:
     - 重构 `createItemRecord` 为零 I/O 路径：支持传入预取的 `RuntimeMeta`，并废除子文件夹空判定的物理磁盘扫描。

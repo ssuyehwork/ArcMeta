@@ -153,7 +153,13 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
                     }
                 }
             } else {
-                // 内部移动：逻辑层已处理或随后处理，此处静默
+                // 2026-08-xx 按照 Plan-128：内部移动
+                // 在应用内将项目移出托管库，数据应直接从数据库里抹除
+                int idx = MftReader::instance().getIndexByKey(key);
+                if (idx >= 0) {
+                    QString qPath = MftReader::instance().getFullPath(idx);
+                    MetadataManager::instance().removeMetadataSync(qPath.toStdWString());
+                }
             }
             return;
         }
@@ -232,7 +238,19 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
         }
 
         // 2. 文件项审计
-        if (!isInternal) {
+        if (isInternal) {
+            // 内部物理删除：若数据库还残留（例如是通过原生 unlink 而非应用内逻辑删除），在此执行物理注销
+            auto drives = MftReader::instance().getDriveList();
+            for (const auto& volPath : drives) {
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volPath);
+                wchar_t frnBuf[17]; swprintf(frnBuf, 17, L"%016llX", frn);
+                std::string fid = MetadataManager::generateFallbackFid(volSerial, frnBuf);
+                std::wstring path = MetadataManager::instance().getPathByFid(fid);
+                if (!path.empty()) {
+                    MetadataManager::instance().removeMetadataSync(path);
+                }
+            }
+        } else {
             // 2026-08-xx 按照 Plan-128：第三方物理删除审计 (文件级)
             // 遍历所有在线卷，利用 FRN 与 序列号 复合主键准确定位已失效的托管项
             auto drives = MftReader::instance().getDriveList();
