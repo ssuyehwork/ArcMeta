@@ -877,8 +877,15 @@ ItemRecord ContentPanel::createItemRecord(const QString& path, const RuntimeMeta
         // 2026-07-xx 按照 Development_Plan 3.2：从数据库加载持久化的进度值
         r.registrationProgress = MetadataManager::instance().getProgressFromDb(wPath);
 
-        // Plan-124: 废除物理磁盘空判定
-        r.isEmpty = !MetadataManager::instance().hasChildrenInCache(wPath);
+        // 2026-xx-xx 工业级稳健判定 (Plan-124 修正)：
+        // 只有当明确处于“镜像模式”（providedMeta != nullptr）或项已由数据库托管时，才信任内存索引。
+        // 物理路径导航模式下，若项未录入或缓存未命中，必须执行磁盘 I/O 探测以确保正确性。
+        if (providedMeta || meta.isManaged) {
+            r.isEmpty = !MetadataManager::instance().hasChildrenInCache(wPath);
+        } else {
+            QDir sub(nPath);
+            r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
+        }
         r.suffix = ""; // 文件夹不应有扩展名后缀
     } else {
         int lastDot = nPath.lastIndexOf('.');

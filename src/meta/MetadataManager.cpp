@@ -287,6 +287,12 @@ void MetadataManager::initFromScchMode() {
         m_parentToChildren = tempParentToChildren;
         m_folderProgressCache = tempFolderProgressCache;
 
+        // Plan-124: 确保层级索引中不含重复项 (针对启动阶段的多库合并场景)
+        for (auto& entry : m_parentToChildren) {
+            std::sort(entry.second.begin(), entry.second.end());
+            entry.second.erase(std::unique(entry.second.begin(), entry.second.end()), entry.second.end());
+        }
+
         // 2026-07-xx 物理同步：初始化时构建所有已加载卷的隔离索引
         for (const auto& pair : m_cache) {
             const std::wstring& path = pair.first;
@@ -878,7 +884,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
 
-        // Plan-124: 收集所有需要重命名的子孙项 (递归)
+        // 1. 深度收集所有子孙路径
         std::vector<std::pair<std::wstring, std::wstring>> itemsToRename;
         for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
             const std::wstring& p = it->first;
@@ -892,6 +898,14 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
 
         if (itemsToRename.empty()) return;
 
+        // 2. 优化：先一次性切断根级树索引关系，防止循环内 O(K^2) 的 std::remove 开销
+        std::wstring rootOldParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nOld)).absolutePath()).toStdWString());
+        if (m_parentToChildren.count(rootOldParent)) {
+            auto& children = m_parentToChildren[rootOldParent];
+            children.erase(std::remove(children.begin(), children.end(), nOld), children.end());
+            if (children.empty()) m_parentToChildren.erase(rootOldParent);
+        }
+
         for (const auto& pair : itemsToRename) {
             const std::wstring& curOld = pair.first;
             const std::wstring& curNew = pair.second;
@@ -902,7 +916,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             std::string fid = it->second.fileId128;
             bool isFolder = it->second.isFolder;
 
-            // 1. 移除旧索引
+            // [倒排索引维护]
             std::wstring oldName, oldExt;
             parsePathComponents(curOld, isFolder, oldName, oldExt);
             if (!oldName.empty()) {
@@ -922,22 +936,18 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 }
             }
 
-            // 移除旧树级索引关系
-            std::wstring oldParent = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(curOld)).absolutePath()).toStdWString();
-            oldParent = normalizePath(oldParent);
-            if (m_parentToChildren.count(oldParent)) {
-                auto& children = m_parentToChildren[oldParent];
-                children.erase(std::remove(children.begin(), children.end(), curOld), children.end());
-                if (children.empty()) m_parentToChildren.erase(oldParent);
+            // [树级索引维护] - 内部项仅移除
+            if (curOld != nOld) {
+                m_parentToChildren.erase(curOld);
             }
 
-            // 2. 更新缓存
+            // 3. 缓存迁移
             RuntimeMeta meta = it->second;
             m_cache.erase(it);
             m_cache[curNew] = meta;
             if (!fid.empty()) m_fidToPath[fid] = curNew;
 
-            // 3. 注册新索引
+            // [倒排索引重建]
             std::wstring newName, newExt;
             parsePathComponents(curNew, isFolder, newName, newExt);
             if (!newName.empty()) {
@@ -954,21 +964,28 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 }
             }
 
-            // 注册新树级索引关系
-            std::wstring newParent = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(curNew)).absolutePath()).toStdWString();
-            newParent = normalizePath(newParent);
-            if (newParent != curNew) {
-                m_parentToChildren[newParent].push_back(curNew);
+            // [树级索引关系迁移]
+            if (isFolder) {
+                // 如果是文件夹，它的原有子项需要重新挂载（路径已变）
+                // 这里的处理逻辑在 itemsToRename 循环中会由子项的 newParent 逻辑处理。
             }
 
-            // 4. 进度缓存迁移
+            std::wstring curNewParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(curNew)).absolutePath()).toStdWString());
+            if (curNewParent != curNew) {
+                auto& children = m_parentToChildren[curNewParent];
+                if (std::find(children.begin(), children.end(), curNew) == children.end()) {
+                    children.push_back(curNew);
+                }
+            }
+
+            // [进度缓存迁移]
             if (isFolder && m_folderProgressCache.count(curOld)) {
                 double prog = m_folderProgressCache[curOld];
                 m_folderProgressCache.erase(curOld);
                 m_folderProgressCache[curNew] = prog;
             }
 
-            // 5. 物理数据库同步
+            // 4. 物理数据库同步
             std::wstring volSerial = getVolumeSerialNumber(curNew);
             QString letter = (curNew.length() >= 2 && curNew[1] == L':') ? QString::fromWCharArray(&curNew[0], 1) : "";
             sqlite3* memDb = DatabaseManager::instance().getMemoryDb(volSerial, letter);
@@ -1012,12 +1029,19 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
     
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
+
+        // 1. 优化：先从父级索引中一次性移除根路径，避免循环内 O(K^2)
+        std::wstring rootParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nPath)).absolutePath()).toStdWString());
+        if (m_parentToChildren.count(rootParent)) {
+            auto& children = m_parentToChildren[rootParent];
+            children.erase(std::remove(children.begin(), children.end(), nPath), children.end());
+            if (children.empty()) m_parentToChildren.erase(rootParent);
+        }
+
         for (auto it = m_cache.begin(); it != m_cache.end(); ) {
             if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
                 std::wstring curPath = it->first;
 
-                // 2026-07-xx 物理修正：回收站项目已在移入时预扣减，
-                // 此处物理删除时，仅对“活跃”（非回收站且非失效）的项目执行扣减。
                 if (!it->second.isFolder && !it->second.isInvalid && !it->second.isTrash) {
                     totalDelta--;
                 }
@@ -1027,7 +1051,7 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                     fids.push_back(fid);
                     m_fidToPath.erase(fid);
 
-                    // 2026-07-xx 隔离索引同步：移除删除项
+                    // [倒排索引维护]
                     std::wstring name, ext;
                     parsePathComponents(curPath, isFolder, name, ext);
                     if (!name.empty()) {
@@ -1047,16 +1071,8 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                         }
                     }
 
-                    // Plan-124: 移除树级索引关系
-                    std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(curPath)).absolutePath()).toStdWString();
-                    parentPath = normalizePath(parentPath);
-                    if (m_parentToChildren.count(parentPath)) {
-                        auto& children = m_parentToChildren[parentPath];
-                        children.erase(std::remove(children.begin(), children.end(), curPath), children.end());
-                        if (children.empty()) m_parentToChildren.erase(parentPath);
-                    }
-
-                    // 清理进度缓存
+                    // [树级索引维护] - 仅清除当前项作为父节点的关系（子项正在被删除）
+                    m_parentToChildren.erase(curPath);
                     m_folderProgressCache.erase(curPath);
                 }
                 it = m_cache.erase(it);
