@@ -244,3 +244,5 @@
     - 重构 `isUnderManagedLibrary`：废弃字符串路径比对，全面转向内存级 FRN 链判定。
 - [2026-07-04 16:50:10] **src/meta/DatabaseManager.h / .cpp**:
     - 引入 RAII 风格的 `SyncTaskToken` 管理异步任务状态，消除由于异常导致的同步计数挂起风险。
+- [2026-07-04 16:50:10] **src/meta/MetadataManager.cpp**:
+    - 修复 C4456 变量隐藏警告。
