@@ -140,16 +140,17 @@ void MftReader::clear() {
         m_isInitialized = false; 
     }
 
-    // 2. 将耗时的停止、存盘、释放逻辑转移至后台线程
+    // 2. [Plan-130] 优化退出响应性：主线程同步停止监控线程，确保及时释放卷句柄
+    std::vector<UsnWatcher*> toStop;
+    {
+        QWriteLocker lock(&m_dataLock);
+        toStop = std::move(m_watchers);
+        m_watchers.clear();
+    }
+    for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
+
+    // 3. 将后续耗时的存盘与释放逻辑转移至后台线程
     (void)QtConcurrent::run([this]() {
-        // A. 停止所有监控线程 (防止产生新的脏数据)
-        std::vector<UsnWatcher*> toStop;
-        {
-            QWriteLocker lock(&m_dataLock);
-            toStop = std::move(m_watchers);
-            m_watchers.clear();
-        }
-        for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
 
         // B. 等待正在进行的异步写盘任务结束
         while (m_is_saving.load(std::memory_order_acquire)) {

@@ -91,7 +91,7 @@ void UsnWatcher::run() {
         uint8_t* pEnd = buffer.get() + bytesReturned;
 
         std::vector<uint8_t*> updateBatch; // 存储原始指针以保留版本信息
-        while (pRecord < pEnd) {
+        while (pRecord < pEnd && !m_stopRequested.load()) {
             USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(pRecord);
             
             // 工业级优化：优先采用批量处理模式

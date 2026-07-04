@@ -203,6 +203,10 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
                     CategoryRepo::update(cat);
                     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
                 }
+            } else {
+                // [Plan-130] 补全实时入库分流：处理首次从库外移入的文件夹
+                qDebug() << "[AutoImport] 检测到新文件夹移入库内，触发递归入库 ->" << qPath;
+                handleRecursiveIngestion(fullPath);
             }
         } else {
             // 文件更新：重新注册元数据
