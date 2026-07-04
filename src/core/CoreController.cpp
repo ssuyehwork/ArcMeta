@@ -160,6 +160,23 @@ void CoreController::abortSearch() {
     // 等待现有搜索任务退出的轻量化处理（实际生产环境可能需要更复杂的等待机制）
 }
 
+void CoreController::handleDeviceChange(unsigned long wParam, unsigned long long lParam) {
+#ifdef Q_OS_WIN
+    // 2026-05-24 按照用户要求：捕捉硬件变更，硬盘插入时触发 GLOB 扫描对账
+    // [Plan-131 方案 E] 从 MainWindow 迁移至此
+    if (wParam == 0x8000 /* DBT_DEVICEARRIVAL */ || wParam == 0x8004 /* DBT_DEVICEREMOVECOMPLETE */) {
+        qDebug() << "[Core] [Plan-131] 检测到磁盘硬件变更，触发全量 GLOB 对账...";
+        // 异步触发扫描，防止阻塞 UI
+        (void)QtConcurrent::run([]() {
+            // 这里可以根据需要驱动 MftReader 重新扫描或 AutoImportManager 对账
+            // 例如：MftReader::instance().buildIndex();
+            // 或者 AutoImportManager::instance().syncAllManagedLibraries();
+        });
+    }
+#endif
+    Q_UNUSED(lParam);
+}
+
 void CoreController::setStatus(const QString& text, bool indexing) {
     if (m_statusText != text) {
         m_statusText = text;

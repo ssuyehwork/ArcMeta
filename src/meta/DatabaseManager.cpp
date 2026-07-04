@@ -63,6 +63,18 @@ DatabaseManager& DatabaseManager::instance() {
     return inst;
 }
 
+DatabaseManager::SyncTaskToken::SyncTaskToken() {
+    DatabaseManager::instance().incrementPendingTasks();
+}
+
+DatabaseManager::SyncTaskToken::SyncTaskToken(const SyncTaskToken&) {
+    DatabaseManager::instance().incrementPendingTasks();
+}
+
+DatabaseManager::SyncTaskToken::~SyncTaskToken() {
+    DatabaseManager::instance().decrementPendingTasks();
+}
+
 DatabaseManager::DatabaseManager(QObject* parent) : QObject(parent) {
     startWorkerThread();
 }
@@ -433,14 +445,24 @@ sqlite3* DatabaseManager::getDiskDb(sqlite3* memDb) {
     return nullptr;
 }
 
+void DatabaseManager::incrementPendingTasks() {
+    int count = ++m_pendingTasksCount;
+    emit pendingTasksCountChanged(count);
+}
+
+void DatabaseManager::decrementPendingTasks() {
+    int count = --m_pendingTasksCount;
+    emit pendingTasksCountChanged(count);
+}
+
 void DatabaseManager::enqueueSyncTask(std::function<void()> task) {
-    int count = 0;
+    SyncTaskToken token;
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
-        m_syncQueue.push_back(std::move(task));
-        count = ++m_pendingTasksCount;
+        m_syncQueue.push_back([task, token]() {
+            task();
+        });
     }
-    emit pendingTasksCountChanged(count);
     m_queueCv.notify_one();
 }
 
@@ -472,8 +494,6 @@ void DatabaseManager::workerLoop() {
         }
         if (task) {
             task();
-            int count = --m_pendingTasksCount;
-            emit pendingTasksCountChanged(count);
         }
     }
 }

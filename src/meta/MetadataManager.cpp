@@ -365,12 +365,31 @@ void MetadataManager::notifyFullUIRebuild() {
 
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     std::wstring nPath = normalizePath(path);
-    qDebug() << "[Metadata] 收到项目注册请求:" << QString::fromStdWString(nPath) << "Authorized:" << authorized;
 
-    // 2026-07-xx 按照 Plan-117：采用登记->解析->完成的闭环逻辑
-    // 为了性能，registerItem 内部不再调用 markAsRegistered 以免产生多余的独立事务
-    
+    // [Plan-131 方案 C] 物理指纹准入机制
+    std::string pFid;
+    long long pSize = 0, pMtime = 0;
+    if (fetchWinApiMetadataDirect(nPath, pFid, nullptr, &pSize, nullptr, nullptr, &pMtime, nullptr)) {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        auto it = m_cache.find(nPath);
+        if (it != m_cache.end()) {
+            if (it->second.ingestionStatus == 1 && it->second.fileSize == pSize && it->second.mtime == pMtime) {
+                return; // 指纹一致且已完成解析，跳过后续所有流程
+            }
+        }
+    }
+
+    qDebug() << "[Metadata] [Plan-131] 执行解析流水线 ->" << QString::fromStdWString(nPath);
+
     // 1. 激活项目 (获取 FID/FRN 等物理属性)
+    // 注意：ensureActivated 内部对已存在项会跳过，故此处需确保若指纹变化能更新缓存
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        if (m_cache.count(nPath)) {
+            m_cache[nPath].fileSize = pSize;
+            m_cache[nPath].mtime = pMtime;
+        }
+    }
     ensureActivated(nPath);
 
     // 2. 登记项目（待处理状态 0）
@@ -1052,7 +1071,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             sqlite3* memDb = entry.first;
             auto& tasks = entry.second;
 
-            // 内存库批量事务
+            // [Plan-131 方案 A] 直连磁盘模式，无需重复异步分发
             SqlTransaction trans(memDb);
             sqlite3_stmt* memStmt;
             if (sqlite3_prepare_v2(memDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
@@ -1065,25 +1084,6 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 sqlite3_finalize(memStmt);
             }
             trans.commit();
-
-            // 磁盘库大事务异步投递
-            DatabaseManager::instance().enqueueSyncTask([memDb, updSql, tasks]() {
-                sqlite3* diskDb = DatabaseManager::instance().getDiskDb(memDb);
-                if (!diskDb) return;
-                
-                sqlite3_exec(diskDb, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
-                sqlite3_stmt* diskStmt;
-                if (sqlite3_prepare_v2(diskDb, updSql, -1, &diskStmt, nullptr) == SQLITE_OK) {
-                    for (const auto& task : tasks) {
-                        sqlite3_bind_text16(diskStmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_text(diskStmt, 2, task.first.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_step(diskStmt);
-                        sqlite3_reset(diskStmt);
-                    }
-                    sqlite3_finalize(diskStmt);
-                }
-                sqlite3_exec(diskDb, "COMMIT", nullptr, nullptr, nullptr);
-            });
         }
 
         notifyFullUIRebuild();
@@ -1156,6 +1156,8 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
     // 2026-06-xx 物理级根除：基于 File ID (FRN) 批量清理
     if (db && !fids.empty()) {
         const char* sql = "DELETE FROM metadata WHERE file_id = ?";
+        // [Plan-131 方案 A] 直连模式，取消冗余异步任务
+        SqlTransaction trans(db);
         sqlite3_stmt* memStmt;
         if (sqlite3_prepare_v2(db, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
             for (const auto& fid : fids) {
@@ -1164,25 +1166,8 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                 sqlite3_reset(memStmt);
             }
             sqlite3_finalize(memStmt);
-
-            // 异步磁盘同步 (带事务保护)
-            DatabaseManager::instance().enqueueSyncTask([db, sql, fids]() {
-                sqlite3* diskDb = DatabaseManager::instance().getDiskDb(db);
-                if (!diskDb) return;
-                
-                sqlite3_exec(diskDb, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
-                sqlite3_stmt* diskStmt;
-                if (sqlite3_prepare_v2(diskDb, sql, -1, &diskStmt, nullptr) == SQLITE_OK) {
-                    for (const auto& fid : fids) {
-                        sqlite3_bind_text(diskStmt, 1, fid.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_step(diskStmt);
-                        sqlite3_reset(diskStmt);
-                    }
-                    sqlite3_finalize(diskStmt);
-                }
-                sqlite3_exec(diskDb, "COMMIT", nullptr, nullptr, nullptr);
-            });
         }
+        trans.commit();
     }
 
     if (totalDelta != 0) CategoryRepo::incrementTotalFileCount(totalDelta);
@@ -1268,6 +1253,7 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
         sqlite3* db = entry.first;
         const auto& fids = entry.second;
 
+        // [Plan-131 方案 A] 直连模式，废除冗余异步分发
         SqlTransaction trans(db);
         sqlite3_stmt* memStmt;
         if (sqlite3_prepare_v2(db, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
@@ -1279,23 +1265,6 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
             sqlite3_finalize(memStmt);
         }
         trans.commit();
-
-        DatabaseManager::instance().enqueueSyncTask([db, sql, fids]() {
-            sqlite3* diskDb = DatabaseManager::instance().getDiskDb(db);
-            if (!diskDb) return;
-            
-            sqlite3_exec(diskDb, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
-            sqlite3_stmt* diskStmt;
-            if (sqlite3_prepare_v2(diskDb, sql, -1, &diskStmt, nullptr) == SQLITE_OK) {
-                for (const auto& fid : fids) {
-                    sqlite3_bind_text(diskStmt, 1, fid.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_step(diskStmt);
-                    sqlite3_reset(diskStmt);
-                }
-                sqlite3_finalize(diskStmt);
-            }
-            sqlite3_exec(diskDb, "COMMIT", nullptr, nullptr, nullptr);
-        });
     }
 
     if (totalDelta != 0) CategoryRepo::incrementTotalFileCount(totalDelta);
@@ -1906,57 +1875,6 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
             }
         }
         trans.commit();
-
-        // 3. 将批量同步任务投递至磁盘 I/O 队列 (带大事务保护)
-        if (!recordsToSync.empty()) {
-            DatabaseManager::instance().enqueueSyncTask([memDb, recordsToSync, sql]() {
-                sqlite3* diskDb = DatabaseManager::instance().getDiskDb(memDb);
-                if (!diskDb) return;
-
-                sqlite3_exec(diskDb, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
-                sqlite3_stmt* diskStmt;
-                if (sqlite3_prepare_v2(diskDb, sql, -1, &diskStmt, nullptr) == SQLITE_OK) {
-                    for (const auto& rec : recordsToSync) {
-                        const std::wstring& p = rec.first;
-                        const RuntimeMeta& meta = rec.second;
-                        
-                        // 重新绑定
-                        sqlite3_bind_text(diskStmt, 1, meta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_text16(diskStmt, 2, p.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_int(diskStmt, 3, meta.isFolder ? 1 : 0);
-                        sqlite3_bind_int(diskStmt, 4, meta.rating);
-                        sqlite3_bind_text16(diskStmt, 5, meta.color.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_text16(diskStmt, 6, meta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_text16(diskStmt, 7, meta.note.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_text16(diskStmt, 8, meta.url.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_int64(diskStmt, 9, meta.ctime);
-                        sqlite3_bind_int64(diskStmt, 10, meta.mtime);
-                        sqlite3_bind_int64(diskStmt, 11, meta.atime);
-                        sqlite3_bind_int64(diskStmt, 12, meta.fileSize);
-                        QJsonArray arr;
-                        for (const auto& pe : meta.palettes) {
-                            QJsonObject obj; obj["color"] = pe.color.name(); obj["ratio"] = (double)pe.ratio;
-                            arr.append(obj);
-                        }
-                        QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
-                        sqlite3_bind_blob(diskStmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
-                        sqlite3_bind_int(diskStmt, 14, meta.isTrash ? 1 : 0);
-                        sqlite3_bind_text16(diskStmt, 15, meta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_int(diskStmt, 16, meta.isInvalid ? 1 : 0);
-                        sqlite3_bind_int(diskStmt, 17, meta.width);
-                        sqlite3_bind_int(diskStmt, 18, meta.height);
-                        sqlite3_bind_int(diskStmt, 19, meta.ingestionStatus);
-
-                        if (sqlite3_step(diskStmt) != SQLITE_DONE) {
-                            qWarning() << "[DB_SYNC] 批量磁盘持久化单条失败:" << sqlite3_errmsg(diskDb);
-                        }
-                        sqlite3_reset(diskStmt);
-                    }
-                    sqlite3_finalize(diskStmt);
-                }
-                sqlite3_exec(diskDb, "COMMIT", nullptr, nullptr, nullptr);
-            });
-        }
     }
 }
 
@@ -2037,22 +1955,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
                 m_cache[nPath].isManaged = true;
             }
-
-            // 2. 异步磁盘分发 (Async Dispatch to Disk)
-            DatabaseManager::instance().enqueueSyncTask([nPath, rMeta, memDb, sql, bindMeta]() {
-                sqlite3* diskDb = DatabaseManager::instance().getDiskDb(memDb);
-                if (!diskDb) return;
-
-                sqlite3_stmt* diskStmt;
-                if (sqlite3_prepare_v2(diskDb, sql, -1, &diskStmt, nullptr) == SQLITE_OK) {
-                    bindMeta(diskStmt, nPath, rMeta);
-                    int rc = sqlite3_step(diskStmt);
-                    if (rc != SQLITE_DONE) {
-                        qWarning() << "[DB_SYNC] 磁盘持久化失败:" << sqlite3_errmsg(diskDb) << "Path:" << QString::fromStdWString(nPath);
-                    }
-                    sqlite3_finalize(diskStmt);
-                }
-            });
+            // [Plan-131 方案 A] 磁盘直连模式，取消 redundant async dispatch
         }
         sqlite3_finalize(memStmt);
     }

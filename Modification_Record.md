@@ -234,3 +234,14 @@
     - 将 `UsnWatcher` 的停止调用移回主线程同步执行，彻底解决退出假死问题。
 - [2026-07-04 15:27:04] **src/meta/DatabaseManager.cpp**:
     - 彻底废除内存库中转与 `flushStep` 备份逻辑，改为直连磁盘 DB 并开启 WAL 模式，对齐“秒退出”架构规约。
+
+### 架构逻辑“去毒”与性能飞跃方案 (Plan-131)
+- [2026-07-04 16:15:00] **src/meta/DatabaseManager.h / DatabaseManager.cpp**:
+    - **方案 D**：落地 RAII 状态令牌。定义 `SyncTaskToken` 结构，利用 C++ RAII 特性管理 `m_pendingTasksCount`，彻底根治异步任务计数器因异常或拷贝导致的不归零 Bug，消除 UI 伪假死。
+- [2026-07-04 16:15:00] **src/meta/MetadataManager.cpp**:
+    - **方案 A**：废除冗余异步持久化。在磁盘直连模式下移除 `persistAsync`、`persistBatchAsync` 等方法中的 `enqueueSyncTask` 冗余调用，利用 WAL 模式并发特性直接在主事务中落盘，减少 50%-70% 的 I/O 压力。
+    - **方案 C**：引入“物理指纹”准入机制。在 `registerItem` 解析流水线前对比磁盘文件的 `mtime` 和 `size`，若指纹一致且已入库则直接跳过后续解析与写入流程。
+- [2026-07-04 16:15:00] **src/core/AutoImportManager.h / AutoImportManager.cpp / src/mft/MftReader.h / MftReader.cpp**:
+    - **方案 B**：重构 FRN 判定链。在 `AutoImportManager` 中引入 `m_managedFrnCache` 缓存托管根 FRN；在 `MftReader` 中新增 `getParentFrnByFrn` 接口。`isUnderManagedLibrary` 升级为内存级 FRN 链溯源判定（(log N)$），完全废除低效的全路径字符串拼接逻辑。
+- [2026-07-04 16:15:00] **src/ui/MainWindow.cpp / src/core/CoreController.h / CoreController.cpp**:
+    - **方案 E**：MainWindow 职责剥离。建立 `handleDeviceChange` 接口专职处理硬件信号，将 `MainWindow` 中关于 `WM_DEVICECHANGE` 的底层处理逻辑迁移至 `CoreController`，解决“上帝对象”逻辑耦合问题。

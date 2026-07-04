@@ -60,6 +60,9 @@ private:
     std::vector<std::wstring> m_pendingPaths;
     std::mutex m_queueMutex;
     bool m_isListening = false;
+
+    // 2026-08-xx [Plan-131 方案 B]：托管库根目录 FRN 缓存
+    std::unordered_set<uint64_t> m_managedFrnCache;
 };
 
 } // namespace ArcMeta

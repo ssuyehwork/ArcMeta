@@ -109,6 +109,7 @@ public:
                         const QStringList& extensionList, bool includeHidden, bool includeSystem,
                         bool includeDollar = true) const;
     int      getIndexByKey(uint64_t compositeKey) const;
+    uint64_t getParentFrnByFrn(uint64_t frn, int driveIdx) const;
     uint64_t getKeyByIndex(int index) const;
     QString  getName(int index) const;
     int64_t getSize(int index) const;
