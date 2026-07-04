@@ -225,3 +225,12 @@
     - 在 `startSystem` 启动链条中补齐 `MftReader::instance().loadFromCache()` 调用，确保程序启动时自动激活历史盘符的监控线程。
 - [2026-07-04 14:34:18] **src/ui/MainWindow.cpp**:
     - 在 `onDriveButtonContextMenu` 交互中补齐 `MftReader::instance().buildIndex({letter})` 调用，并引入 `isDriveIndexed` 预检逻辑，实现新建托管库后的实时监控“热激活”且防止重复启动线程。
+
+### 实时入库逻辑修复与秒退架构对齐 (Plan-130)
+- [2026-07-04 15:27:04] **src/core/AutoImportManager.cpp**:
+    - 在 `onEntryUpdated` 中补全 `catId == 0` 分流逻辑，确保首次从库外移入的文件夹能正确触发递归入库。
+- [2026-07-04 15:27:04] **src/mft/UsnWatcher.cpp / MftReader.cpp**:
+    - 在 `UsnWatcher::run()` 批处理循环中增加停止位检查。
+    - 将 `UsnWatcher` 的停止调用移回主线程同步执行，彻底解决退出假死问题。
+- [2026-07-04 15:27:04] **src/meta/DatabaseManager.cpp**:
+    - 彻底废除内存库中转与 `flushStep` 备份逻辑，改为直连磁盘 DB 并开启 WAL 模式，对齐“秒退出”架构规约。
