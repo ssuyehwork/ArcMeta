@@ -182,7 +182,7 @@ public:
      * @brief 统一条目构建中枢
      * 2026-07-xx 架构优化：收拢物理属性采样与元数据注入逻辑，确保渲染一致性
      */
-    static ItemRecord createItemRecord(const QString& path);
+    static ItemRecord createItemRecord(const QString& path, const RuntimeMeta* providedMeta = nullptr);
 
     /**
      * @brief 切换视图模式
