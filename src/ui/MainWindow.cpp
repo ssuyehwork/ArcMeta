@@ -1643,6 +1643,11 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
                     }
                 } catch (...) {}
             }
+
+            // [Plan-129] USN 监控热激活：新建库后立即点火该盘符的监控引擎 (需预检防止重复启动)
+            if (!MftReader::instance().isDriveIndexed(letter)) {
+                MftReader::instance().buildIndex({letter});
+            }
             
             ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建成功", 1500, Style::SuccessGreen);
         }

@@ -219,3 +219,9 @@
 ### 失效数据列表斑马纹样式修复
 - [2026-07-04 13:38:57] **src/ui/InvalidDataListView.h**:
     - 在 `m_view` 的样式表中增加 `alternate-background-color: #252526`，修复开启斑马纹后在深色主题下回退至浅色背景导致文字不可见的问题。
+
+### USN 实时监控引擎“点火”补完 (Plan-129)
+- [2026-07-04 14:34:18] **src/core/CoreController.cpp**:
+    - 在 `startSystem` 启动链条中补齐 `MftReader::instance().loadFromCache()` 调用，确保程序启动时自动激活历史盘符的监控线程。
+- [2026-07-04 14:34:18] **src/ui/MainWindow.cpp**:
+    - 在 `onDriveButtonContextMenu` 交互中补齐 `MftReader::instance().buildIndex({letter})` 调用，并引入 `isDriveIndexed` 预检逻辑，实现新建托管库后的实时监控“热激活”且防止重复启动线程。
