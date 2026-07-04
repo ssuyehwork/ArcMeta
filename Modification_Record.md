@@ -245,3 +245,5 @@
     - **方案 B**：重构 FRN 判定链。在 `AutoImportManager` 中引入 `m_managedFrnCache` 缓存托管根 FRN；在 `MftReader` 中新增 `getParentFrnByFrn` 接口。`isUnderManagedLibrary` 升级为内存级 FRN 链溯源判定（(log N)$），完全废除低效的全路径字符串拼接逻辑。
 - [2026-07-04 16:15:00] **src/ui/MainWindow.cpp / src/core/CoreController.h / CoreController.cpp**:
     - **方案 E**：MainWindow 职责剥离。建立 `handleDeviceChange` 接口专职处理硬件信号，将 `MainWindow` 中关于 `WM_DEVICECHANGE` 的底层处理逻辑迁移至 `CoreController`，解决“上帝对象”逻辑耦合问题。
+- [2026-07-04 16:30:00] **src/core/AutoImportManager.h**:
+    - 补全缺失的 <unordered_set> 与 <cstdint> 头文件，修复方案 B 引入的编译错误。

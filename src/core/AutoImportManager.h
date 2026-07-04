@@ -4,6 +4,8 @@
 #include <vector>
 #include <string>
 #include <mutex>
+#include <unordered_set>
+#include <cstdint>
 
 namespace ArcMeta {
 
