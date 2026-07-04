@@ -184,6 +184,17 @@ public:
     void setURL(const std::wstring& path, const std::wstring& url, bool notify = true);
     void setEncrypted(const std::wstring& path, bool encrypted, bool notify = true);
     void setInvalid(const std::wstring& path, bool invalid, bool notify = true);
+
+    /**
+     * @brief 2026-08-xx 按照 Plan-128：递归标记指定目录及其子项为失效
+     */
+    void setInvalidRecursive(const std::wstring& path, bool invalid);
+
+    /**
+     * @brief 2026-08-xx 按照 Plan-128：根据物理 FRN 标记项失效
+     */
+    void setInvalidByFrn(uint64_t frn, const std::wstring& volSerial, bool invalid);
+
     void setManaged(const std::wstring& path, bool managed, bool notify = true);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
 

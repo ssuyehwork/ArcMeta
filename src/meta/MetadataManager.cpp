@@ -768,6 +768,47 @@ void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool no
     }
 }
 
+void MetadataManager::setInvalidByFrn(uint64_t frn, const std::wstring& volSerial, bool invalid) {
+    // 物理 FRN 在 NTFS 中以 16 进制字符串形式缓存
+    wchar_t frnBuf[17];
+    swprintf(frnBuf, 17, L"%016llX", frn);
+    std::string fid = generateFallbackFid(volSerial, frnBuf);
+    
+    std::wstring path;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        auto it = m_fidToPath.find(fid);
+        if (it != m_fidToPath.end()) path = it->second;
+    }
+
+    if (!path.empty()) {
+        setInvalid(path, invalid);
+    }
+}
+
+void MetadataManager::setInvalidRecursive(const std::wstring& path, bool invalid) {
+    std::wstring nPath = normalizePath(path);
+    std::vector<std::wstring> affectedPaths;
+
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        for (auto& pair : m_cache) {
+            const std::wstring& p = pair.first;
+            if (p == nPath || p.find(nPath + L"\\") == 0 || p.find(nPath + L"/") == 0) {
+                if (pair.second.isInvalid != invalid) {
+                    pair.second.isInvalid = invalid;
+                    affectedPaths.push_back(p);
+                }
+            }
+        }
+    }
+
+    if (!affectedPaths.empty()) {
+        persistBatchAsync(affectedPaths);
+        notifyFullUIRebuild();
+    }
+}
+
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);

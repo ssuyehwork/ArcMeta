@@ -134,10 +134,27 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
 
 void AutoImportManager::onEntryUpdated(uint64_t key) {
     (void)QtConcurrent::run([this, key]() {
-        // 2026-08-xx 按照 Plan-126：USN 高效过滤
-        if (!isUnderManagedLibrary(key)) {
-            // 特殊处理：如果项从托管库移出，则需注销
-            // 此处逻辑由 onEntryRemoved 处理（USN 移动等价于原位删除+新位新增）
+        // 2026-08-xx 按照 Plan-128：操作溯源判定
+        bool isInternal = MetadataManager::instance().isInternalOperating();
+        bool isUnderLibrary = isUnderManagedLibrary(key);
+
+        if (!isUnderLibrary) {
+            // [信号审计]：项移出了托管库
+            if (!isInternal) {
+                // 第三方移动：标记失效（防丢审计）
+                int idx = MftReader::instance().getIndexByKey(key);
+                if (idx >= 0) {
+                    QString qPath = MftReader::instance().getFullPath(idx);
+                    std::wstring fullPath = qPath.toStdWString();
+                    if (MftReader::instance().isDirectory(idx)) {
+                        MetadataManager::instance().setInvalidRecursive(fullPath, true);
+                    } else {
+                        MetadataManager::instance().setInvalid(fullPath, true);
+                    }
+                }
+            } else {
+                // 内部移动：逻辑层已处理或随后处理，此处静默
+            }
             return;
         }
 
@@ -186,6 +203,9 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
 
 void AutoImportManager::onEntryRemoved(uint64_t key) {
     (void)QtConcurrent::run([this, key]() {
+        // 2026-08-xx 按照 Plan-128：操作溯源判定
+        bool isInternal = MetadataManager::instance().isInternalOperating();
+
         // 由于 MftReader 已经删除了索引，无法通过 MftReader 获取路径，需直接操作数据库。
         // key 的低 48 位即为 FRN
         uint64_t frn = key & 0x0000FFFFFFFFFFFFull;
@@ -195,14 +215,33 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
         // 1. 检查是否为镜像分类
         int catId = CategoryRepo::findByFrn(frn);
         if (catId > 0) {
-            qDebug() << "[Mirror] 物理目录已消失，同步删除分类 ID:" << catId;
-            CategoryRepo::remove(catId);
+            if (isInternal) {
+                qDebug() << "[Mirror] 内部删除：同步移除镜像分类 ID:" << catId;
+                CategoryRepo::remove(catId);
+            } else {
+                qDebug() << "[Mirror] 第三方删除：递归标记分类下项目失效";
+                // 获取分类对应的物理路径并执行递归失效
+                Category cat = CategoryRepo::getById(catId);
+                if (!cat.physicalPath.empty()) {
+                    MetadataManager::instance().setInvalidRecursive(cat.physicalPath, true);
+                }
+                // 注意：第三方删除时，分类本身也应被逻辑隐藏或标记
+                CategoryRepo::remove(catId); 
+            }
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
         }
 
-        // 2. 文件的物理失效处理已在 MetadataManager::removeMetadataSync 或 USN 主链中有其他环节，
-        // 但 Plan-126 要求 1:1 同步。若物理项消失，且曾在库内，自动标记失效。
-        // 此处依赖 MetadataManager 的 FID 对账。
+        // 2. 文件项审计
+        if (!isInternal) {
+            // 2026-08-xx 按照 Plan-128：第三方物理删除审计 (文件级)
+            // 遍历所有在线卷，利用 FRN 与 序列号 复合主键准确定位已失效的托管项
+            auto drives = MftReader::instance().getDriveList();
+            for (const auto& volPath : drives) {
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volPath);
+                MetadataManager::instance().setInvalidByFrn(frn, volSerial, true);
+            }
+            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+        }
     });
 }
 
