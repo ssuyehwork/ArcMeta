@@ -88,6 +88,12 @@ public:
      */
     int getPendingTasksCount() const { return m_pendingTasksCount.load(); }
 
+    /**
+     * @brief 内部接口：增减任务计数 (Plan-131 方案 D)
+     */
+    void incrementPendingTasks();
+    void decrementPendingTasks();
+
 signals:
     /**
      * @brief 异步任务计数变更信号
@@ -115,6 +121,15 @@ private:
     std::thread m_workerThread;
     std::atomic<bool> m_stopWorker{false};
     std::atomic<int> m_pendingTasksCount{0};
+
+    /**
+     * @brief 异步任务 RAII 令牌 (Plan-131 方案 D)
+     */
+    struct SyncTaskToken {
+        SyncTaskToken();
+        SyncTaskToken(const SyncTaskToken&);
+        ~SyncTaskToken();
+    };
 
     std::map<std::wstring, DbConnection> m_driveDbs;
     DbConnection m_globalDb;

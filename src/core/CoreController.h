@@ -42,6 +42,11 @@ public:
      */
     void abortSearch();
 
+    /**
+     * @brief 响应硬件变更 (Plan-131 方案 E)
+     */
+    void handleDeviceChange(unsigned long wParam, unsigned long long lParam);
+
 signals:
     /**
      * @brief 搜索结果流式返回

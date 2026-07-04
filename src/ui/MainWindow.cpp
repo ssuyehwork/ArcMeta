@@ -624,13 +624,8 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
 
     MSG* msg = static_cast<MSG*>(message);
     if (msg->message == WM_DEVICECHANGE) {
-        // 2026-05-24 按照用户要求：捕捉硬件变更，硬盘插入时触发 GLOB 扫描对账
-        if (msg->wParam == DBT_DEVICEARRIVAL || msg->wParam == DBT_DEVICEREMOVECOMPLETE) {
-            qDebug() << "[Main] 检测到磁盘硬件变更，触发全量 GLOB 对账对账...";
-            // 异步触发扫描，防止阻塞 UI
-            (void)QtConcurrent::run([]() {
-            });
-        }
+        // [Plan-131 方案 E] 职责剥离：UI 仅转发硬件消息，不处理逻辑
+        CoreController::instance().handleDeviceChange(static_cast<unsigned long>(msg->wParam), static_cast<unsigned long long>(msg->lParam));
     }
     return false;
 }

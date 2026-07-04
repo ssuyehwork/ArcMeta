@@ -44,6 +44,27 @@ AutoImportManager::~AutoImportManager() {
 
 void AutoImportManager::startListening() {
     if (m_isListening) return;
+
+    // [Plan-131 方案 B] 预热 FRN 缓存
+    m_managedFrnCache.clear();
+    const auto drives = QDir::drives();
+    for (const QFileInfo& d : drives) {
+        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(d.absolutePath().toStdWString());
+        std::wstring managedPath = MetadataManager::getManagedLibraryPath(volSerial, d.absolutePath());
+        if (!managedPath.empty()) {
+            std::string fid; std::wstring frnStr;
+            if (MetadataManager::fetchWinApiMetadataDirect(managedPath, fid, &frnStr)) {
+                try {
+                    uint64_t frn = std::stoull(frnStr, nullptr, 16);
+                    m_managedFrnCache.insert(frn);
+                    qDebug() << "[AutoImport] [Plan-131] 已缓存托管库根 FRN:" << QString::fromStdWString(frnStr) << "->" << QString::fromStdWString(managedPath);
+                } catch (...) {
+                    qWarning() << "[AutoImport] 解析托管库根 FRN 失败:" << QString::fromStdWString(frnStr);
+                }
+            }
+        }
+    }
+
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
     connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
     connect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved, Qt::QueuedConnection);
@@ -392,14 +413,24 @@ void AutoImportManager::processImportQueue() {
 }
 
 bool AutoImportManager::isUnderManagedLibrary(uint64_t key) {
-    // 2026-08-xx 按照 Plan-126：基于 FRN 链的高效托管路径过滤 (内存级)
-    int idx = MftReader::instance().getIndexByKey(key);
-    if (idx < 0) return false;
+    // [Plan-131 方案 B]：基于 FRN 链的高效托管路径过滤 (内存级 $O(log N)$ 比对)
+    uint64_t currentFrn = key & 0x0000FFFFFFFFFFFFull;
+    int driveIdx = static_cast<int>(key >> 48);
 
-    // 获取路径并比对前缀（已在内存中完成，无磁盘 I/O）
-    QString path = MftReader::instance().getFullPath(idx);
-    std::wstring managedFolder;
-    return checkAndGetManagedPath(path.toStdWString(), managedFolder);
+    // 向上溯源 FRN 链
+    uint64_t frn = currentFrn;
+    while (frn != 0) {
+        if (m_managedFrnCache.count(frn)) {
+            return true;
+        }
+        
+        // 获取父级 FRN (通过 MftReader 内存索引)
+        uint64_t pFrn = MftReader::instance().getParentFrnByFrn(frn, driveIdx);
+        if (pFrn == 0 || pFrn == frn) break;
+        frn = pFrn;
+    }
+
+    return false;
 }
 
 void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {

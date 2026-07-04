@@ -622,6 +622,16 @@ int MftReader::getIndexByKey(uint64_t compositeKey) const {
     return (it != m_frn_to_idx.end()) ? (int)it->second : -1;
 }
 
+uint64_t MftReader::getParentFrnByFrn(uint64_t frn, int driveIdx) const {
+    QReadLocker lock(&m_dataLock);
+    uint64_t compositeKey = (static_cast<uint64_t>(driveIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
+    auto it = m_frn_to_idx.find(compositeKey);
+    if (it != m_frn_to_idx.end()) {
+        return m_parent_frns[it->second] & 0x0000FFFFFFFFFFFFull;
+    }
+    return 0;
+}
+
 bool MftReader::matchEntry(int i, const QString& query, bool useRegex, bool caseSensitive, 
                           const QStringList& extensionList, bool includeHidden, bool includeSystem,
                           bool includeDollar) const {
