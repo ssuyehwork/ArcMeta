@@ -46,6 +46,7 @@ void AutoImportManager::startListening() {
     if (m_isListening) return;
     connect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded, Qt::QueuedConnection);
     connect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated, Qt::QueuedConnection);
+    connect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved, Qt::QueuedConnection);
     m_isListening = true;
 }
 
@@ -53,6 +54,7 @@ void AutoImportManager::stopListening() {
     if (!m_isListening) return;
     disconnect(&MftReader::instance(), &MftReader::entryAdded, this, &AutoImportManager::onEntryAdded);
     disconnect(&MftReader::instance(), &MftReader::entryUpdated, this, &AutoImportManager::onEntryUpdated);
+    disconnect(&MftReader::instance(), &MftReader::entryRemoved, this, &AutoImportManager::onEntryRemoved);
     m_isListening = false;
 }
 
@@ -85,36 +87,10 @@ void AutoImportManager::syncAllManagedLibraries() {
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
     (void)QtConcurrent::run([this, key]() {
+        // 2026-08-xx 按照 Plan-126：USN 高效过滤 (FRN 链判定)
+        if (!isUnderManagedLibrary(key)) return;
+
         std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
-
-        int idx = MftReader::instance().getIndexByKey(key);
-        if (idx < 0) return;
-
-        QString qPath = MftReader::instance().getFullPath(idx);
-        std::wstring fullPath = qPath.toStdWString();
-        std::wstring managedFolder;
-        
-        bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
-        
-        if (isManaged) {
-            if (MftReader::instance().isDirectory(idx)) {
-                handleRecursiveIngestion(fullPath);
-            }
-
-            {
-                std::lock_guard<std::mutex> lock(m_queueMutex);
-                m_pendingPaths.push_back(fullPath);
-            }
-            
-            QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
-        }
-    });
-}
-
-void AutoImportManager::onEntryUpdated(uint64_t key) {
-    (void)QtConcurrent::run([this, key]() {
-        std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
-
         int idx = MftReader::instance().getIndexByKey(key);
         if (idx < 0) return;
 
@@ -123,47 +99,110 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
         uint64_t frn = MftReader::instance().getFrn(idx);
 
         if (MftReader::instance().isDirectory(idx)) {
-            int catId = CategoryRepo::findByFrn(frn);
-            if (catId > 0) {
-                QString newName = QFileInfo(qPath).fileName();
-                Category cat = CategoryRepo::getById(catId);
-                if (cat.id > 0) {
-                    if (cat.parentId == 0 && QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
-                        QString expectedName = "ArcMeta.Library_" + qPath.left(1).toUpper();
-                        if (newName != expectedName) {
-                            qDebug() << "[AutoImport] 检测到根目录违规重命名，强制恢复:" << newName << "->" << expectedName;
-                            QString parentDir = QFileInfo(qPath).absolutePath();
-                            QString oldPath = QDir::toNativeSeparators(QDir(parentDir).absoluteFilePath(expectedName));
-                            QFile::rename(qPath, oldPath);
-                            return; 
-                        }
-                    }
-
-                    if (QString::fromStdWString(cat.name) != newName) {
-                        qDebug() << "[AutoImport] 同步物理重命名到逻辑分类:" << newName;
-                        cat.name = newName.toStdWString();
-                        cat.physicalPath = fullPath;
-                        CategoryRepo::update(cat);
-                        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
-                    }
+            // 1:1 镜像同步：创建逻辑分类
+            int existingCat = CategoryRepo::findByFrn(frn);
+            if (existingCat == 0) {
+                QString fileName = QFileInfo(qPath).fileName();
+                std::wstring parentPath = QFileInfo(qPath).absolutePath().toStdWString();
+                std::string parentFid;
+                std::wstring pFrnStr;
+                int parentCatId = 0;
+                if (MetadataManager::fetchWinApiMetadataDirect(parentPath, parentFid, &pFrnStr)) {
+                    uint64_t pFrn = std::stoull(pFrnStr, nullptr, 16);
+                    parentCatId = CategoryRepo::findByFrn(pFrn);
                 }
-            }
-        }
 
-        std::wstring managedFolder;
-        bool isManaged = checkAndGetManagedPath(fullPath, managedFolder);
-        if (isManaged) {
-            if (MftReader::instance().isDirectory(idx)) {
-                handleRecursiveIngestion(fullPath);
+                Category cat;
+                cat.parentId = parentCatId;
+                cat.name = fileName.toStdWString();
+                cat.physicalFrn = frn;
+                cat.physicalPath = fullPath;
+                cat.color = CategoryRepo::getDefaultColor();
+                CategoryRepo::add(cat);
+                MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
             }
-
+        } else {
+            // 职责收拢：USN 驱动入库
             {
                 std::lock_guard<std::mutex> lock(m_queueMutex);
                 m_pendingPaths.push_back(fullPath);
             }
-
             QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
         }
+    });
+}
+
+void AutoImportManager::onEntryUpdated(uint64_t key) {
+    (void)QtConcurrent::run([this, key]() {
+        // 2026-08-xx 按照 Plan-126：USN 高效过滤
+        if (!isUnderManagedLibrary(key)) {
+            // 特殊处理：如果项从托管库移出，则需注销
+            // 此处逻辑由 onEntryRemoved 处理（USN 移动等价于原位删除+新位新增）
+            return;
+        }
+
+        std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
+        int idx = MftReader::instance().getIndexByKey(key);
+        if (idx < 0) return;
+
+        QString qPath = MftReader::instance().getFullPath(idx);
+        std::wstring fullPath = qPath.toStdWString();
+        uint64_t frn = MftReader::instance().getFrn(idx);
+
+        if (MftReader::instance().isDirectory(idx)) {
+            // 1:1 镜像同步：重命名或位移
+            int catId = CategoryRepo::findByFrn(frn);
+            if (catId > 0) {
+                Category cat = CategoryRepo::getById(catId);
+                QString newName = QFileInfo(qPath).fileName();
+                
+                // 物理父目录 FRN 校验
+                std::wstring parentPath = QFileInfo(qPath).absolutePath().toStdWString();
+                std::string pfid; std::wstring pfrnStr;
+                int newParentId = 0;
+                if (MetadataManager::fetchWinApiMetadataDirect(parentPath, pfid, &pfrnStr)) {
+                    newParentId = CategoryRepo::findByFrn(std::stoull(pfrnStr, nullptr, 16));
+                }
+
+                if (QString::fromStdWString(cat.name) != newName || cat.parentId != newParentId) {
+                    qDebug() << "[Mirror] 物理同步逻辑分类 ->" << newName << "Parent:" << newParentId;
+                    cat.name = newName.toStdWString();
+                    cat.parentId = newParentId;
+                    cat.physicalPath = fullPath;
+                    CategoryRepo::update(cat);
+                    MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                }
+            }
+        } else {
+            // 文件更新：重新注册元数据
+            {
+                std::lock_guard<std::mutex> lock(m_queueMutex);
+                m_pendingPaths.push_back(fullPath);
+            }
+            QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
+        }
+    });
+}
+
+void AutoImportManager::onEntryRemoved(uint64_t key) {
+    (void)QtConcurrent::run([this, key]() {
+        // 由于 MftReader 已经删除了索引，无法通过 MftReader 获取路径，需直接操作数据库。
+        // key 的低 48 位即为 FRN
+        uint64_t frn = key & 0x0000FFFFFFFFFFFFull;
+        
+        std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
+        
+        // 1. 检查是否为镜像分类
+        int catId = CategoryRepo::findByFrn(frn);
+        if (catId > 0) {
+            qDebug() << "[Mirror] 物理目录已消失，同步删除分类 ID:" << catId;
+            CategoryRepo::remove(catId);
+            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+        }
+
+        // 2. 文件的物理失效处理已在 MetadataManager::removeMetadataSync 或 USN 主链中有其他环节，
+        // 但 Plan-126 要求 1:1 同步。若物理项消失，且曾在库内，自动标记失效。
+        // 此处依赖 MetadataManager 的 FID 对账。
     });
 }
 
@@ -279,6 +318,17 @@ void AutoImportManager::processImportQueue() {
         MetadataManager::instance().setInternalOperating(false);
         MetadataManager::instance().notifyFullUIRebuild();
     });
+}
+
+bool AutoImportManager::isUnderManagedLibrary(uint64_t key) {
+    // 2026-08-xx 按照 Plan-126：基于 FRN 链的高效托管路径过滤 (内存级)
+    int idx = MftReader::instance().getIndexByKey(key);
+    if (idx < 0) return false;
+
+    // 获取路径并比对前缀（已在内存中完成，无磁盘 I/O）
+    QString path = MftReader::instance().getFullPath(idx);
+    std::wstring managedFolder;
+    return checkAndGetManagedPath(path.toStdWString(), managedFolder);
 }
 
 void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
