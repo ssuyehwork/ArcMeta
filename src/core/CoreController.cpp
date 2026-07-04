@@ -1,5 +1,4 @@
 #include "CoreController.h"
-#include "NativeFolderWatcher.h"
 #include "AutoImportManager.h"
 #include "AppConfig.h"
 #include "../meta/CategoryRepo.h"
@@ -42,27 +41,9 @@ void CoreController::startSystem() {
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
 
-            // 启动原生监控服务
-            // 2026-07-xx 按照 Plan-117/118：初始化完成后，使用统一识别算法启动监控
-            const auto drives = QDir::drives();
-            for (const QFileInfo& d : drives) {
-                std::wstring wPath = d.absolutePath().toStdWString();
-                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wPath);
-                QString letter = d.absolutePath().left(1).toUpper();
-
-                if (volSerial != L"UNKNOWN") {
-                    std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
-                    if (!managedAbsW.empty()) {
-                        qDebug() << "[Core] 识别到托管库 (或兜底路径)，开启监控:" << QString::fromStdWString(managedAbsW);
-                        NativeFolderWatcher::instance().addWatch(managedAbsW);
-                    } else {
-                        QString msg("[Core] 盘符 ");
-                        msg.append(letter);
-                        msg.append(" 未配置且无默认托管库，跳过监控");
-                        qDebug() << msg;
-                    }
-                }
-            }
+            // 2026-08-xx 按照 Plan-126：彻底废除 NativeFolderWatcher (IOCP) 双轨制。
+            // 全面转向单一 USN Journal 主轨。
+            AutoImportManager::instance().startListening();
             
             // 2026-08-xx 物理同步：初始化完成后执行一次全量物理库对账 (在后台线程执行，避免阻塞 UI)
             AutoImportManager::instance().syncAllManagedLibraries();

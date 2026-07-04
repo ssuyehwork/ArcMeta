@@ -2087,10 +2087,10 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (targetPaths.isEmpty() && !path.isEmpty()) targetPaths << path;
 
             if (!targetPaths.isEmpty()) {
-                // 2026-07-xx 按照 Development_Plan 2.1：强制执行物理状态同步与元数据重新解析
-                // 作用域严格锁定在选中项。
+                // 2026-08-xx 按照 Plan-126：用户手动发起的“重新扫描”应属于元数据刷新
+                // 此时依然允许通过 MetadataManager 执行，但不应作为常规“入库”手段
                 MetadataManager::instance().registerItemsAsync(targetPaths, true);
-                ToolTipOverlay::instance()->showText(QCursor::pos(), "已启动强制重新扫描", 1500, QColor("#378ADD"));
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "已启动物理状态同步", 1500, QColor("#378ADD"));
             }
             break;
         }

@@ -422,9 +422,17 @@ bool CategoryRepo::remove(int id) {
         return true;
     });
 
-    // Step 4: Delete only the category rows (NOT category_items — already handled above)
+        // 4. Delete only the category rows
     SqlTransaction trans(db);
     for (int delId : toDelete) {
+            // 首先清理子项关联，防止幽灵关联
+            sqlite3_stmt* itemDelStmt;
+            if (sqlite3_prepare_v2(db, "DELETE FROM category_items WHERE category_id = ?", -1, &itemDelStmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int(itemDelStmt, 1, delId);
+                sqlite3_step(itemDelStmt);
+                sqlite3_finalize(itemDelStmt);
+            }
+
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "DELETE FROM categories WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, delId);
@@ -504,9 +512,8 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId12
                 }
             });
 
-            if (!finalPath.empty()) {
-                MetadataManager::instance().registerItem(finalPath);
-            }
+            // 2026-08-xx 按照 Plan-126：废除此处直接调用 registerItem。
+            // 归类操作不应直接触发表入库，应由物理位移（如迁移）触发 USN 信号后再由 AutoImportManager 驱动。
 
             syncCategorizedCountForFid(fileId128);
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
@@ -837,7 +844,8 @@ void CategoryRepo::fullRecount() {
             if (path.empty()) continue;
             auto meta = MetadataManager::instance().getMeta(path);
             if (meta.fileId128.empty()) {
-                MetadataManager::instance().registerItem(path);
+                // 此处注册是基于数据库记录的“存量找回”，符合 1:1 同步原则
+                MetadataManager::instance().registerItem(path, true);
             } else if (!meta.isManaged) {
                 // 已在缓存中但未标记为 Managed (多见于归类后即时重启)，执行一次物理补齐
                 MetadataManager::instance().setManaged(path, true, false);
