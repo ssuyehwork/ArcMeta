@@ -89,6 +89,14 @@ public:
     void updateActiveDrives(const QStringList& activeDrives);
     bool isDriveIndexed(const QString& drive);
 
+    /**
+     * @brief 获取当前索引的所有驱动器列表
+     */
+    std::vector<std::wstring> getDriveList() const {
+        QReadLocker lock(&m_dataLock);
+        return m_drive_list;
+    }
+
     // 查询接口 (支持驱动器掩码隔离)
     // 2026-05-29 物理重构：返回稳定的复合 FRN 主键而非数组下标，杜绝跨线程索引漂移
     std::vector<uint64_t> search(const QString& query, bool useRegex = false, bool caseSensitive = false, 

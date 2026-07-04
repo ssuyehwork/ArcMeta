@@ -1283,6 +1283,16 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
     else if (url.startsWith(kProtocolSystem)) {
         // system://all | trash | etc.
         QString type = url.mid(kProtocolSystem.length());
+
+        // 2026-08-xx 按照 Plan-128：失效数据审计模式下的容器动态管理
+        if (type == "invalid_data") {
+            if (m_navPanel) m_navPanel->hide();
+            // 失效数据采用扁平列表展示，无需目录树
+        } else {
+            // 回归常规模式，恢复显示
+            if (m_navPanel) m_navPanel->show();
+        }
+
         if (m_categoryPanel) {
             m_categoryPanel->blockSignals(true);
             m_categoryPanel->selectCategoryByType(type);
@@ -1296,6 +1306,9 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
         m_currentPath = url;
     }
     else {
+        // 2026-08-xx 按照 Plan-128：常规导航恢复显示
+        if (m_navPanel) m_navPanel->show();
+
         // 物理路径 (file:// 或 原生路径)
         QString path = url;
         if (path.startsWith(kProtocolFile)) path = path.mid(kProtocolFile.length());
