@@ -1,5 +1,6 @@
 #include "CoreController.h"
 #include "AutoImportManager.h"
+#include "../mft/MftReader.h"
 #include "AppConfig.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
@@ -45,6 +46,9 @@ void CoreController::startSystem() {
             // 全面转向单一 USN Journal 主轨。
             AutoImportManager::instance().startListening();
             
+            // [Plan-129] USN 监控点火：系统启动时自动载入缓存并开启监控线程
+            MftReader::instance().loadFromCache();
+
             // 2026-08-xx 物理同步：初始化完成后执行一次全量物理库对账 (在后台线程执行，避免阻塞 UI)
             AutoImportManager::instance().syncAllManagedLibraries();
 
