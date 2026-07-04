@@ -692,6 +692,26 @@ QString MftReader::getFullPath(int index) const {
     return QString::fromStdWString(const_cast<MftReader*>(this)->getPathFastInternal(dIdx, frn));
 }
 
+bool MftReader::isDescendantOf(uint64_t key, uint64_t rootFrn) const {
+    QReadLocker lock(&m_dataLock);
+
+    uint64_t curFrn = key & 0x0000FFFFFFFFFFFFull;
+    size_t driveIdx = static_cast<size_t>(key >> 48);
+
+    // 限制深度防止环路
+    int depth = 0;
+    while (curFrn != 5 && curFrn != 0 && depth++ < 100) {
+        if (curFrn == rootFrn) return true;
+
+        uint64_t compositeKey = makeKey(driveIdx, curFrn);
+        auto it = m_frn_to_idx.find(compositeKey);
+        if (it == m_frn_to_idx.end()) break;
+
+        curFrn = m_parent_frns[it->second] & 0x0000FFFFFFFFFFFFull;
+    }
+    return false;
+}
+
 std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
     // 2026-05-29 物理修复：公开接口持有读锁，内部调用私有无锁逻辑，解决递归死锁。
     QReadLocker readLock(&m_dataLock);

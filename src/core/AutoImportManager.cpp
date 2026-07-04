@@ -392,14 +392,35 @@ void AutoImportManager::processImportQueue() {
 }
 
 bool AutoImportManager::isUnderManagedLibrary(uint64_t key) {
-    // 2026-08-xx 按照 Plan-126：基于 FRN 链的高效托管路径过滤 (内存级)
-    int idx = MftReader::instance().getIndexByKey(key);
-    if (idx < 0) return false;
+    // [Plan-131] 2026-08-xx 按照规约：基于内存中 FRN 链的高效层级判定
+    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(MftReader::instance().getDriveList()[static_cast<size_t>(key >> 48)]);
+    std::wstring managedPath = getManagedLibraryPath(volSerial);
+    if (managedPath.empty()) return false;
 
-    // 获取路径并比对前缀（已在内存中完成，无磁盘 I/O）
-    QString path = MftReader::instance().getFullPath(idx);
-    std::wstring managedFolder;
-    return checkAndGetManagedPath(path.toStdWString(), managedFolder);
+    // 1. [Plan-131] 从数据库反查托管库根目录的 FRN (带线程安全锁)
+    static std::unordered_map<std::wstring, uint64_t> s_rootFrnCache;
+    static std::mutex s_cacheMutex;
+    uint64_t rootFrn = 0;
+    {
+        std::lock_guard<std::mutex> lock(s_cacheMutex);
+        if (s_rootFrnCache.count(managedPath)) {
+            rootFrn = s_rootFrnCache[managedPath];
+        }
+    }
+
+    if (rootFrn == 0) {
+        std::string fid; std::wstring frnStr;
+        if (MetadataManager::fetchWinApiMetadataDirect(managedPath, fid, &frnStr)) {
+            rootFrn = std::stoull(frnStr, nullptr, 16);
+            std::lock_guard<std::mutex> lock(s_cacheMutex);
+            s_rootFrnCache[managedPath] = rootFrn;
+        }
+    }
+
+    if (rootFrn == 0) return false;
+
+    // 2. 调用 MftReader 执行层级向上爬取判定
+    return MftReader::instance().isDescendantOf(key, rootFrn);
 }
 
 void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {

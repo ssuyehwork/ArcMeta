@@ -88,6 +88,22 @@ public:
      */
     int getPendingTasksCount() const { return m_pendingTasksCount.load(); }
 
+    /**
+     * @brief [Plan-131] 异步任务状态令牌 (RAII)
+     */
+    class SyncTaskToken {
+    public:
+        explicit SyncTaskToken(DatabaseManager* mgr) : m_mgr(mgr) {}
+        ~SyncTaskToken() {
+            if (m_mgr) {
+                int count = --(m_mgr->m_pendingTasksCount);
+                emit m_mgr->pendingTasksCountChanged(count);
+            }
+        }
+    private:
+        DatabaseManager* m_mgr;
+    };
+
 signals:
     /**
      * @brief 异步任务计数变更信号

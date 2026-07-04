@@ -118,6 +118,7 @@ public:
     bool isDirectory(int index) const;
     int totalCount() const;
     QString getFullPath(int index) const;
+    bool isDescendantOf(uint64_t key, uint64_t rootFrn) const;
     void requestMetadata(int index);
     bool isMetadataFetched(int index) const;
 

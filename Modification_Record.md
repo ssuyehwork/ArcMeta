@@ -234,3 +234,13 @@
     - 将 `UsnWatcher` 的停止调用移回主线程同步执行，彻底解决退出假死问题。
 - [2026-07-04 15:27:04] **src/meta/DatabaseManager.cpp**:
     - 彻底废除内存库中转与 `flushStep` 备份逻辑，改为直连磁盘 DB 并开启 WAL 模式，对齐“秒退出”架构规约。
+
+### 实时监控点火与架构补齐 (Plan-131)
+- [2026-07-04 16:50:10] **src/core/CoreController.cpp**:
+    - 显式调用 `MftReader::instance().loadFromCache()`，补全 USN 监控点火逻辑。
+- [2026-07-04 16:50:10] **src/mft/MftReader.h / .cpp**:
+    - 新增 `isDescendantOf` 接口，支持基于 SoA 数组的高性能 FRN 爬链层级判定。
+- [2026-07-04 16:50:10] **src/core/AutoImportManager.cpp**:
+    - 重构 `isUnderManagedLibrary`：废弃字符串路径比对，全面转向内存级 FRN 链判定。
+- [2026-07-04 16:50:10] **src/meta/DatabaseManager.h / .cpp**:
+    - 引入 RAII 风格的 `SyncTaskToken` 管理异步任务状态，消除由于异常导致的同步计数挂起风险。

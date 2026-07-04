@@ -471,9 +471,8 @@ void DatabaseManager::workerLoop() {
             m_syncQueue.pop_front();
         }
         if (task) {
+            SyncTaskToken token(this);
             task();
-            int count = --m_pendingTasksCount;
-            emit pendingTasksCountChanged(count);
         }
     }
 }
