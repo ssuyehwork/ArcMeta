@@ -215,3 +215,7 @@
     - 实现 `setInvalidRecursive` 与 `setInvalidByFrn` 接口，支持基于 FRN 复合主键的跨卷精确失效标记。
 - [2026-08-16 17:00:00] **src/ui/MainWindow.cpp**:
     - 实现审计视图状态机：点击“失效数据”分类时自动隐藏 `NavPanel` 容器，实现审计模式下的独占列表展示。
+
+### 失效数据列表斑马纹样式修复
+- [2026-07-04 13:38:57] **src/ui/InvalidDataListView.h**:
+    - 在 `m_view` 的样式表中增加 `alternate-background-color: #252526`，修复开启斑马纹后在深色主题下回退至浅色背景导致文字不可见的问题。

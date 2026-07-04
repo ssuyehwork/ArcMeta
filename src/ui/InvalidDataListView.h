@@ -60,7 +60,7 @@ public:
         m_view->setAlternatingRowColors(true);
         m_view->setSelectionMode(QAbstractItemView::ExtendedSelection);
         m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-        m_view->setStyleSheet("QTreeView { background-color: #1E1E1E; border: none; color: #EEE; }"
+        m_view->setStyleSheet("QTreeView { background-color: #1E1E1E; alternate-background-color: #252526; border: none; color: #EEE; }"
                              "QTreeView::item { height: 32px; }"
                              "QTreeView::item:selected { background-color: #378ADD; }");
         
