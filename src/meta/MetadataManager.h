@@ -218,6 +218,13 @@ public:
 
     void renameItem(const std::wstring& oldPath, const std::wstring& newPath);
     void removeMetadataSync(const std::wstring& path);
+
+    /**
+     * @brief 2026-08-xx 按照 Plan-128：高性能批量删除元数据
+     * 支持内存单事务与磁盘单任务大事务，解决大规模删除导致的 I/O 阻塞。
+     */
+    void removeMetadataBatchSync(const QStringList& paths);
+
     void markAsTrash(const std::wstring& path, bool isTrash, const std::wstring& origPath = L"");
     void setTrash(const std::wstring& path, bool isTrash);
     void deletePermanently(const std::wstring& path);

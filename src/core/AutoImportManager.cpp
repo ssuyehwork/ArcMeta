@@ -140,20 +140,34 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
 
         if (!isUnderLibrary) {
             // [信号审计]：项移出了托管库
-            if (!isInternal) {
-                // 第三方移动：标记失效（防丢审计）
-                int idx = MftReader::instance().getIndexByKey(key);
-                if (idx >= 0) {
-                    QString qPath = MftReader::instance().getFullPath(idx);
-                    std::wstring fullPath = qPath.toStdWString();
-                    if (MftReader::instance().isDirectory(idx)) {
-                        MetadataManager::instance().setInvalidRecursive(fullPath, true);
-                    } else {
-                        MetadataManager::instance().setInvalid(fullPath, true);
+            int idx = MftReader::instance().getIndexByKey(key);
+            if (idx >= 0) {
+                uint64_t frn = MftReader::instance().getFrn(idx);
+                size_t dIdx = static_cast<size_t>(key >> 48);
+                auto drives = MftReader::instance().getDriveList();
+                
+                if (dIdx < drives.size()) {
+                    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(drives[dIdx]);
+                    wchar_t frnBuf[17]; swprintf(frnBuf, 17, L"%016llX", frn);
+                    std::string fid = MetadataManager::generateFallbackFid(volSerial, frnBuf);
+                    std::wstring oldPath = MetadataManager::instance().getPathByFid(fid);
+
+                    // 物理红线：必须确保该项此前在托管库内（即存在元数据记录）才执行后续逻辑
+                    if (!oldPath.empty() && MetadataManager::isInsideManagedLibrary(oldPath)) {
+                        if (!isInternal) {
+                            // 第三方移动出库：标记失效
+                            if (MftReader::instance().isDirectory(idx)) {
+                                MetadataManager::instance().setInvalidRecursive(oldPath, true);
+                            } else {
+                                MetadataManager::instance().setInvalid(oldPath, true);
+                            }
+                        } else {
+                            // 2026-08-xx 按照 Plan-128：内部操作移出托管库 -> 执行硬删除
+                            qDebug() << "[AutoImport] 内部操作移出托管库：执行硬删除 ->" << QString::fromStdWString(oldPath);
+                            MetadataManager::instance().removeMetadataSync(oldPath);
+                        }
                     }
                 }
-            } else {
-                // 内部移动：逻辑层已处理或随后处理，此处静默
             }
             return;
         }
@@ -232,16 +246,30 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
         }
 
         // 2. 文件项审计
-        if (!isInternal) {
-            // 2026-08-xx 按照 Plan-128：第三方物理删除审计 (文件级)
-            // 遍历所有在线卷，利用 FRN 与 序列号 复合主键准确定位已失效的托管项
-            auto drives = MftReader::instance().getDriveList();
-            for (const auto& volPath : drives) {
-                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volPath);
-                MetadataManager::instance().setInvalidByFrn(frn, volSerial, true);
+        // 2026-08-xx 按照 Plan-128：物理删除审计。由于 MFT 记录已消失，通过所有在线卷的 FID 缓存找回路径。
+        auto drives = MftReader::instance().getDriveList();
+        for (const auto& volPath : drives) {
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(volPath);
+            
+            wchar_t frnBuf[17];
+            swprintf(frnBuf, 17, L"%016llX", frn);
+            std::string fid = MetadataManager::generateFallbackFid(volSerial, frnBuf);
+
+            std::wstring path = MetadataManager::instance().getPathByFid(fid);
+            if (!path.empty()) {
+                // 物理红线：仅针对原先位于托管库内的项执行审计分流
+                if (MetadataManager::isInsideManagedLibrary(path)) {
+                    if (isInternal) {
+                        qDebug() << "[AutoImport] 内部操作删除：执行硬删除 ->" << QString::fromStdWString(path);
+                        MetadataManager::instance().removeMetadataSync(path);
+                    } else {
+                        qDebug() << "[AutoImport] 第三方外部删除：标记失效 ->" << QString::fromStdWString(path);
+                        MetadataManager::instance().setInvalid(path, true);
+                    }
+                }
             }
-            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
         }
+        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
     });
 }
 

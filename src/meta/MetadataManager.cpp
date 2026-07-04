@@ -922,141 +922,172 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
     std::wstring nNew = normalizePath(newPath);
     if (nOld == nNew) return;
 
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        
-        // 1. 深度收集所有子孙路径
+    // 2026-08-xx 按照性能优化要求：将级联更名逻辑移至后台线程，杜绝大目录重命名阻塞主线程 (Plan-128)
+    (void)QtConcurrent::run([this, nOld, nNew]() {
         std::vector<std::pair<std::wstring, std::wstring>> itemsToRename;
-        for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
-            const std::wstring& p = it->first;
-            if (p == nOld) {
-                itemsToRename.push_back({p, nNew});
-            } else if (p.find(nOld + L"\\") == 0 || p.find(nOld + L"/") == 0) {
-                std::wstring relative = p.substr(nOld.length());
-                itemsToRename.push_back({p, nNew + relative});
-            }
-        }
-
-        if (itemsToRename.empty()) return;
-
-        // 2. 优化：先一次性切断根级树索引关系，防止循环内 O(K^2) 的 std::remove 开销
-        std::wstring rootOldParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nOld)).absolutePath()).toStdWString());
-        if (m_parentToChildren.count(rootOldParent)) {
-            auto& children = m_parentToChildren[rootOldParent];
-            children.erase(std::remove(children.begin(), children.end(), nOld), children.end());
-            if (children.empty()) m_parentToChildren.erase(rootOldParent);
-        }
-
-        for (const auto& pair : itemsToRename) {
-            const std::wstring& curOld = pair.first;
-            const std::wstring& curNew = pair.second;
-
-            auto it = m_cache.find(curOld);
-            if (it == m_cache.end()) continue;
-
-            std::string fid = it->second.fileId128;
-            bool isFolder = it->second.isFolder;
-
-            // [倒排索引维护]
-            std::wstring oldName, oldExt;
-            parsePathComponents(curOld, isFolder, oldName, oldExt);
-            if (!oldName.empty()) {
-                if (isFolder) {
-                    auto& v = m_folderNameToFids[oldName];
-                    v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                    if (v.empty()) m_folderNameToFids.erase(oldName);
-                } else {
-                    auto& v = m_fileNameToFids[oldName];
-                    v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                    if (v.empty()) m_fileNameToFids.erase(oldName);
-                    if (!oldExt.empty()) {
-                        auto& ve = m_extensionToFids[oldExt];
-                        ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                        if (ve.empty()) m_extensionToFids.erase(oldExt);
-                    }
+        
+        {
+            std::unique_lock<std::shared_mutex> lock(m_mutex);
+            
+            // 1. 深度收集所有子孙路径
+            for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
+                const std::wstring& p = it->first;
+                if (p == nOld) {
+                    itemsToRename.push_back({p, nNew});
+                } else if (p.find(nOld + L"\\") == 0 || p.find(nOld + L"/") == 0) {
+                    std::wstring relative = p.substr(nOld.length());
+                    itemsToRename.push_back({p, nNew + relative});
                 }
             }
 
-            // [树级索引维护] - 内部项仅移除
-            if (curOld != nOld) {
-                m_parentToChildren.erase(curOld); 
+            if (itemsToRename.empty()) return;
+
+            // 2. 优化：先一次性切断根级树索引关系，防止循环内 O(K^2) 的 std::remove 开销
+            std::wstring rootOldParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nOld)).absolutePath()).toStdWString());
+            if (m_parentToChildren.count(rootOldParent)) {
+                auto& children = m_parentToChildren[rootOldParent];
+                children.erase(std::remove(children.begin(), children.end(), nOld), children.end());
+                if (children.empty()) m_parentToChildren.erase(rootOldParent);
             }
 
-            // 3. 缓存迁移
-            RuntimeMeta meta = it->second;
-            m_cache.erase(it);
-            m_cache[curNew] = meta;
-            if (!fid.empty()) m_fidToPath[fid] = curNew;
+            for (const auto& pair : itemsToRename) {
+                const std::wstring& curOld = pair.first;
+                const std::wstring& curNew = pair.second;
 
-            // [倒排索引重建]
-            std::wstring newName, newExt;
-            parsePathComponents(curNew, isFolder, newName, newExt);
-            if (!newName.empty()) {
-                if (isFolder) {
-                    auto& v = m_folderNameToFids[newName];
-                    if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
-                } else {
-                    auto& v = m_fileNameToFids[newName];
-                    if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
-                    if (!newExt.empty()) {
-                        auto& ve = m_extensionToFids[newExt];
-                        if (std::find(ve.begin(), ve.end(), fid) == ve.end()) v.push_back(fid);
-                    }
-                }
-            }
+                auto it = m_cache.find(curOld);
+                if (it == m_cache.end()) continue;
 
-            // [树级索引关系迁移]
-            if (isFolder) {
-                // 如果是文件夹，它的原有子项需要重新挂载（路径已变）
-                // 这里的处理逻辑在 itemsToRename 循环中会由子项的 newParent 逻辑处理。
-            }
+                std::string fid = it->second.fileId128;
+                bool isFolder = it->second.isFolder;
 
-            std::wstring curNewParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(curNew)).absolutePath()).toStdWString());
-            if (curNewParent != curNew) {
-                auto& children = m_parentToChildren[curNewParent];
-                if (std::find(children.begin(), children.end(), curNew) == children.end()) {
-                    children.push_back(curNew);
-                }
-            }
-
-            // [进度缓存迁移]
-            if (isFolder && m_folderProgressCache.count(curOld)) {
-                double prog = m_folderProgressCache[curOld];
-                m_folderProgressCache.erase(curOld);
-                m_folderProgressCache[curNew] = prog;
-            }
-
-            // 4. 物理数据库同步
-            std::wstring volSerial = getVolumeSerialNumber(curNew);
-            QString letter = (curNew.length() >= 2 && curNew[1] == L':') ? QString::fromWCharArray(&curNew[0], 1) : "";
-            sqlite3* memDb = DatabaseManager::instance().getMemoryDb(volSerial, letter);
-            if (memDb) {
-                const char* updSql = "UPDATE metadata SET path = ? WHERE file_id = ?";
-                sqlite3_stmt* memStmt;
-                if (sqlite3_prepare_v2(memDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
-                    sqlite3_bind_text16(memStmt, 1, curNew.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text(memStmt, 2, fid.c_str(), -1, SQLITE_TRANSIENT);
-                    if (sqlite3_step(memStmt) == SQLITE_DONE) {
-                        sqlite3_finalize(memStmt);
-                        DatabaseManager::instance().enqueueSyncTask([memDb, updSql, curNew, fid]() {
-                            sqlite3* diskDb = DatabaseManager::instance().getDiskDb(memDb);
-                            if (!diskDb) return;
-                            sqlite3_stmt* diskStmt;
-                            if (sqlite3_prepare_v2(diskDb, updSql, -1, &diskStmt, nullptr) == SQLITE_OK) {
-                                sqlite3_bind_text16(diskStmt, 1, curNew.c_str(), -1, SQLITE_TRANSIENT);
-                                sqlite3_bind_text(diskStmt, 2, fid.c_str(), -1, SQLITE_TRANSIENT);
-                                sqlite3_step(diskStmt);
-                                sqlite3_finalize(diskStmt);
-                            }
-                        });
+                // [倒排索引维护]
+                std::wstring oldName, oldExt;
+                parsePathComponents(curOld, isFolder, oldName, oldExt);
+                if (!oldName.empty()) {
+                    if (isFolder) {
+                        auto& v = m_folderNameToFids[oldName];
+                        v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                        if (v.empty()) m_folderNameToFids.erase(oldName);
                     } else {
-                        sqlite3_finalize(memStmt);
+                        auto& v = m_fileNameToFids[oldName];
+                        v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                        if (v.empty()) m_fileNameToFids.erase(oldName);
+                        if (!oldExt.empty()) {
+                            auto& ve = m_extensionToFids[oldExt];
+                            ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
+                            if (ve.empty()) m_extensionToFids.erase(oldExt);
+                        }
                     }
+                }
+
+                // [树级索引维护] - 内部项仅移除
+                if (curOld != nOld) {
+                    m_parentToChildren.erase(curOld); 
+                }
+
+                // 3. 缓存迁移
+                RuntimeMeta meta = it->second;
+                m_cache.erase(it);
+                m_cache[curNew] = meta;
+                if (!fid.empty()) m_fidToPath[fid] = curNew;
+
+                // [倒排索引重建]
+                std::wstring newName, newExt;
+                parsePathComponents(curNew, isFolder, newName, newExt);
+                if (!newName.empty()) {
+                    if (isFolder) {
+                        auto& v = m_folderNameToFids[newName];
+                        if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
+                    } else {
+                        auto& v = m_fileNameToFids[newName];
+                        if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
+                        if (!newExt.empty()) {
+                            auto& ve = m_extensionToFids[newExt];
+                            // 2026-08-xx 物理修复：修正容器指向错误导致的扩展名索引失效
+                            if (std::find(ve.begin(), ve.end(), fid) == ve.end()) ve.push_back(fid);
+                        }
+                    }
+                }
+
+                std::wstring curNewParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(curNew)).absolutePath()).toStdWString());
+                if (curNewParent != curNew) {
+                    auto& children = m_parentToChildren[curNewParent];
+                    if (std::find(children.begin(), children.end(), curNew) == children.end()) {
+                        children.push_back(curNew);
+                    }
+                }
+
+                // [进度缓存迁移]
+                if (isFolder && m_folderProgressCache.count(curOld)) {
+                    double prog = m_folderProgressCache[curOld];
+                    m_folderProgressCache.erase(curOld);
+                    m_folderProgressCache[curNew] = prog;
                 }
             }
         }
-    }
-    notifyFullUIRebuild();
+
+        // 4. 物理数据库批量同步 (Plan-128: 引入事务保护)
+        // 极致优化：预取根路径的卷信息，避免在循环中重复执行耗时的 Win32 磁盘查询
+        std::wstring volSerial = getVolumeSerialNumber(nNew);
+        QString letter = (nNew.length() >= 2 && nNew[1] == L':') ? QString::fromWCharArray(&nNew[0], 1) : "";
+        sqlite3* memDb = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+        
+        std::map<sqlite3*, std::vector<std::pair<std::string, std::wstring>>> groupedSyncTasks;
+        for (const auto& pair : itemsToRename) {
+            const std::wstring& curNew = pair.second;
+            std::string fid;
+            {
+                std::shared_lock<std::shared_mutex> lock(m_mutex);
+                if (m_cache.count(curNew)) fid = m_cache[curNew].fileId128;
+            }
+            if (fid.empty()) continue;
+
+            if (memDb) {
+                groupedSyncTasks[memDb].push_back({fid, curNew});
+            }
+        }
+
+        const char* updSql = "UPDATE metadata SET path = ? WHERE file_id = ?";
+        for (auto& entry : groupedSyncTasks) {
+            sqlite3* memDb = entry.first;
+            auto& tasks = entry.second;
+
+            // 内存库批量事务
+            SqlTransaction trans(memDb);
+            sqlite3_stmt* memStmt;
+            if (sqlite3_prepare_v2(memDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
+                for (const auto& task : tasks) {
+                    sqlite3_bind_text16(memStmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(memStmt, 2, task.first.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(memStmt);
+                    sqlite3_reset(memStmt);
+                }
+                sqlite3_finalize(memStmt);
+            }
+            trans.commit();
+
+            // 磁盘库大事务异步投递
+            DatabaseManager::instance().enqueueSyncTask([memDb, updSql, tasks]() {
+                sqlite3* diskDb = DatabaseManager::instance().getDiskDb(memDb);
+                if (!diskDb) return;
+                
+                sqlite3_exec(diskDb, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+                sqlite3_stmt* diskStmt;
+                if (sqlite3_prepare_v2(diskDb, updSql, -1, &diskStmt, nullptr) == SQLITE_OK) {
+                    for (const auto& task : tasks) {
+                        sqlite3_bind_text16(diskStmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_text(diskStmt, 2, task.first.c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_step(diskStmt);
+                        sqlite3_reset(diskStmt);
+                    }
+                    sqlite3_finalize(diskStmt);
+                }
+                sqlite3_exec(diskDb, "COMMIT", nullptr, nullptr, nullptr);
+            });
+        }
+
+        notifyFullUIRebuild();
+    });
 }
 
 void MetadataManager::removeMetadataSync(const std::wstring& path) {
@@ -1160,6 +1191,117 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
     if (!fids.empty()) {
         CategoryRepo::removeAllCategoriesBatch(fids);
     }
+}
+
+void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
+    if (paths.isEmpty()) return;
+
+    // 1. 按数据库分组以支持大事务
+    std::map<sqlite3*, std::vector<std::string>> groupedFids;
+    std::vector<std::string> allFids;
+    int totalDelta = 0;
+
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+
+        for (const QString& qp : paths) {
+            std::wstring nPath = normalizePath(qp.toStdWString());
+            
+            // 收集所有匹配项及子项
+            std::vector<std::wstring> toRemove;
+            for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
+                const std::wstring& p = it->first;
+                if (p == nPath || p.find(nPath + L"\\") == 0 || p.find(nPath + L"/") == 0) {
+                    toRemove.push_back(p);
+                }
+            }
+
+            for (const auto& p : toRemove) {
+                auto it = m_cache.find(p);
+                if (it == m_cache.end()) continue;
+
+                if (!it->second.isFolder && !it->second.isInvalid && !it->second.isTrash) {
+                    totalDelta--;
+                }
+
+                std::string fid = it->second.fileId128;
+                if (!fid.empty()) {
+                    allFids.push_back(fid);
+                    m_fidToPath.erase(fid);
+
+                    // 数据库定位
+                    std::wstring volSerial = getVolumeSerialNumber(p);
+                    QString letter = (p.length() >= 2 && p[1] == L':') ? QString::fromWCharArray(&p[0], 1) : "";
+                    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+                    if (db) groupedFids[db].push_back(fid);
+
+                    // 索引维护
+                    std::wstring name, ext;
+                    parsePathComponents(p, it->second.isFolder, name, ext);
+                    if (!name.empty()) {
+                        if (it->second.isFolder) {
+                            auto& v = m_folderNameToFids[name];
+                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                            if (v.empty()) m_folderNameToFids.erase(name);
+                        } else {
+                            auto& v = m_fileNameToFids[name];
+                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                            if (v.empty()) m_fileNameToFids.erase(name);
+                            if (!ext.empty()) {
+                                auto& ve = m_extensionToFids[ext];
+                                ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
+                                if (ve.empty()) m_extensionToFids.erase(ext);
+                            }
+                        }
+                    }
+                    m_parentToChildren.erase(p);
+                    m_folderProgressCache.erase(p);
+                }
+                m_cache.erase(it);
+            }
+        }
+    }
+
+    // 2. 数据库执行
+    const char* sql = "DELETE FROM metadata WHERE file_id = ?";
+    for (auto& entry : groupedFids) {
+        sqlite3* db = entry.first;
+        const auto& fids = entry.second;
+
+        SqlTransaction trans(db);
+        sqlite3_stmt* memStmt;
+        if (sqlite3_prepare_v2(db, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
+            for (const auto& fid : fids) {
+                sqlite3_bind_text(memStmt, 1, fid.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(memStmt);
+                sqlite3_reset(memStmt);
+            }
+            sqlite3_finalize(memStmt);
+        }
+        trans.commit();
+
+        DatabaseManager::instance().enqueueSyncTask([db, sql, fids]() {
+            sqlite3* diskDb = DatabaseManager::instance().getDiskDb(db);
+            if (!diskDb) return;
+            
+            sqlite3_exec(diskDb, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+            sqlite3_stmt* diskStmt;
+            if (sqlite3_prepare_v2(diskDb, sql, -1, &diskStmt, nullptr) == SQLITE_OK) {
+                for (const auto& fid : fids) {
+                    sqlite3_bind_text(diskStmt, 1, fid.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(diskStmt);
+                    sqlite3_reset(diskStmt);
+                }
+                sqlite3_finalize(diskStmt);
+            }
+            sqlite3_exec(diskDb, "COMMIT", nullptr, nullptr, nullptr);
+        });
+    }
+
+    if (totalDelta != 0) CategoryRepo::incrementTotalFileCount(totalDelta);
+    if (!allFids.empty()) CategoryRepo::removeAllCategoriesBatch(allFids);
+    
+    notifyFullUIRebuild();
 }
 
 void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const std::wstring& origPath) {

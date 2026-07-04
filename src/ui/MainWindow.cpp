@@ -18,6 +18,7 @@
 #include "MetaPanel.h"
 #include "FilterPanel.h"
 #include "TagManagerView.h"
+#include "InvalidDataListView.h"
 #include "QuickLookWindow.h"
 #include "ToolTipOverlay.h"
 
@@ -272,7 +273,7 @@ void MainWindow::initUi() {
         } else if (type == "bookmark" && !path.isEmpty()) {
             unifiedNavigateTo(path);
         } else if (type == "all" || type == "uncategorized" || type == "untagged" || 
-                   type == "recently_visited" || type == "trash") {
+                   type == "recently_visited" || type == "trash" || type == "invalid_data") {
             unifiedNavigateTo(kProtocolSystem + type);
         } else {
             // 回滚：对于未识别的系统项，仅执行搜索展示
@@ -1003,6 +1004,9 @@ void MainWindow::setupSplitters() {
     m_tagManagerView = new TagManagerView(this);
     m_tagManagerView->hide();
 
+    m_invalidDataListView = new InvalidDataListView(this);
+    m_invalidDataListView->hide();
+
     // 2026-05-07 按照用户要求：焦点线持久化显示，基于数据来源而非焦点位置
     connect(m_contentPanel, &ContentPanel::dataSourceChanged, this, [this](const QString& source) {
         m_currentDataSource = source;
@@ -1025,6 +1029,7 @@ void MainWindow::setupSplitters() {
     m_mainSplitter->addWidget(m_metaPanel);
     m_mainSplitter->addWidget(m_filterPanel);
     m_mainSplitter->addWidget(m_tagManagerView);
+    m_mainSplitter->addWidget(m_invalidDataListView);
 
 
     // 2026-07-xx 按照用户要求：标签搜索联动
@@ -1284,13 +1289,19 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
         // system://all | trash | etc.
         QString type = url.mid(kProtocolSystem.length());
         
-        // 2026-08-xx 按照 Plan-128：失效数据审计模式下的容器动态管理
+        // 2026-08-xx 按照 Plan-128：失效数据审计模式下的容器收敛
         if (type == "invalid_data") {
-            if (m_navPanel) m_navPanel->hide();
-            // 失效数据采用扁平列表展示，无需目录树
+            m_navPanel->hide();
+            m_contentPanel->hide();
+            m_filterPanel->hide();
+            m_metaPanel->hide();
+            
+            m_invalidDataListView->refresh();
+            m_invalidDataListView->show();
         } else {
-            // 回归常规模式，恢复显示
-            if (m_navPanel) m_navPanel->show();
+            m_invalidDataListView->hide();
+            m_contentPanel->show(); // 基础显示
+            loadPanelVisibility();
         }
 
         if (m_categoryPanel) {
@@ -1306,8 +1317,10 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
         m_currentPath = url;
     }
     else {
-        // 2026-08-xx 按照 Plan-128：常规导航恢复显示
-        if (m_navPanel) m_navPanel->show();
+        // 2026-08-xx 按照 Plan-128：常规导航，根据记忆状态恢复显示
+        m_invalidDataListView->hide();
+        m_contentPanel->show();
+        loadPanelVisibility();
 
         // 物理路径 (file:// 或 原生路径)
         QString path = url;
@@ -1500,6 +1513,7 @@ void MainWindow::resetSplitterLayout() {
     // 1. 物理恢复可见性并退出特殊模式
     m_isTagManagerMode = false;
     m_tagManagerView->hide();
+    if (m_invalidDataListView) m_invalidDataListView->hide();
 
     m_categoryPanel->show();
     m_navPanel->show();
@@ -1535,6 +1549,12 @@ void MainWindow::loadPanelVisibility() {
 }
 
 void MainWindow::savePanelVisibility() {
+    // 2026-08-xx 物理回避：在失效数据或标签管理等收敛模式下，禁止保存当前布局状态，
+    // 防止覆盖用户正常的日常分栏配置。
+    if (m_isTagManagerMode || (m_invalidDataListView && m_invalidDataListView->isVisible())) {
+        return;
+    }
+
     QStringList hiddenPanels;
     if (!m_categoryPanel->isVisible()) hiddenPanels << "category";
     if (!m_navPanel->isVisible())      hiddenPanels << "nav";

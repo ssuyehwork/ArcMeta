@@ -183,3 +183,35 @@
     - **包含性修复**：同步更新 `onEntryAdded`、`onEntryUpdated` 以及 `syncAllManagedLibraries` 触发逻辑，实现全链路响应性能优化。
     - **编译警告修复**：将 `QtConcurrent::run` 的返回值显式转换为 `(void)`，消除 MSVC C4858 警告。
     - **并发冲突与死锁修复**：将 `s_dbAccessMutex` 升级为 `std::recursive_mutex`，并实现 `onEntryAdded`/`onEntryUpdated` 的全量异步化保护，解决潜在的线程安全风险。
+
+### 托管库内存模式秒开重构与索引优化 (Plan-124)
+- [2026-08-16 10:20:00] **src/meta/MetadataManager.h / .cpp**:
+    - 引入 `m_parentToChildren` 快速层级索引与 `m_folderProgressCache` 进度缓存，将目录检索复杂度从 $O(N)$ 降至 $O(1)$。
+    - 实现 `getChildrenFromCache` 与 `hasChildrenInCache` 接口，支持零 I/O 加载。
+    - **性能加固**：重构 `renameItem` 与 `removeMetadataSync` 算法，利用树级索引实现 $O(K)$ 深度递归采集与维护，废除 $O(N)$ 全量遍历。
+    - **SQL 优化**：将进度查询 SQL 句柄静态化，杜绝列表构建循环中的重复预编译。
+    - **初始化优化**：在 `initFromScchMode` 中实现层级索引的完整重建与去重校验。
+- [2026-08-16 11:00:00] **src/ui/ContentPanel.h / .cpp**:
+    - 重构 `createItemRecord` 为零 I/O 路径：支持传入预取的 `RuntimeMeta`，并废除子文件夹空判定的物理磁盘扫描。
+    - **稳健性修复**：引入镜像模式分流判定，仅在托管项上信任内存索引，普通导航维持磁盘探测以确保正确性。
+    - 重构 `loadDirectory` 内存加速分支：利用 `getChildrenFromCache` 遵循“获取副本即解锁”原则，彻底消灭 UI 阻塞。
+
+### 监控链路收拢与 1:1 物理镜像同步 (Plan-126)
+- [2026-08-16 14:30:00] **src/core/CoreController.cpp**:
+    - 彻底废除 `NativeFolderWatcher` (IOCP) 初始化逻辑，系统监控全面转向单一 USN 主轨。
+- [2026-08-16 14:45:00] **src/core/AutoImportManager.h / .cpp**:
+    - 实现 `isUnderManagedLibrary` 高效过滤：基于 FRN 链条拦截非托管路径事件，大幅降低全卷监控下的信号处理开销。
+    - 建立 1:1 镜像同步：监听到文件夹变动时，实时同步维护 `CategoryRepo` 中的逻辑分类，废除一切“逻辑脑补”。
+- [2026-08-16 15:10:00] **src/meta/CategoryRepo.cpp**:
+    - 确立“位移驱动入库”红线：废除归类时的直接 `registerItem` 调用，将入库触发职责完全收拢至 USN 信号。
+- [2026-08-16 15:20:00] **CMakeLists.txt**:
+    - 移除 `NativeFolderWatcher.cpp` / `.h` 的编译配置，清理冗余代码。
+
+### 第三方操作审计机制与失效视图 (Plan-128)
+- [2026-08-16 16:15:00] **src/core/AutoImportManager.cpp**:
+    - 引入 `InternalOperating` 操作溯源：精确区分内部管理动作与第三方物理操作。
+    - 实现“防丢审计”：捕获外部导致的删除或移出信号，自动触发递归失效标记（`setInvalidRecursive`）。
+- [2026-08-16 16:40:00] **src/meta/MetadataManager.h / .cpp**:
+    - 实现 `setInvalidRecursive` 与 `setInvalidByFrn` 接口，支持基于 FRN 复合主键的跨卷精确失效标记。
+- [2026-08-16 17:00:00] **src/ui/MainWindow.cpp**:
+    - 实现审计视图状态机：点击“失效数据”分类时自动隐藏 `NavPanel` 容器，实现审计模式下的独占列表展示。

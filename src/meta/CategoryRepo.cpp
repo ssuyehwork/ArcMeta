@@ -1068,10 +1068,19 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
         if (meta.isFolder) return;
         
         bool match = false;
+        std::wstring finalPath = path;
+
         if (type == "trash") {
             if (meta.isTrash) match = true;
         } else if (type == "invalid_data") {
-            if (meta.isInvalid) match = true;
+            // 2026-08-xx 物理修复：失效数据查询不一致 Bug。
+            // 当标记为失效时，物理路径可能已在 m_cache 中缺失，改用 originalPath 作为标识找回
+            if (meta.isInvalid) {
+                match = true;
+                if (finalPath.empty() && !meta.originalPath.empty()) {
+                    finalPath = meta.originalPath;
+                }
+            }
         } else {
             // 严禁显示失效数据
             if (meta.isInvalid) return;
@@ -1089,7 +1098,7 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
             }
         }
         
-        if (match) paths << QString::fromStdWString(path);
+        if (match && !finalPath.empty()) paths << QString::fromStdWString(finalPath);
     });
     return paths;
 }
