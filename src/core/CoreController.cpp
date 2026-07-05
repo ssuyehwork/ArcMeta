@@ -39,17 +39,26 @@ void CoreController::startSystem() {
                 setStatus("正在载入元数据缓存...", true);
             }, Qt::QueuedConnection);
             
-            // 仅执行 SQLite 模式初始化
+            // 1. 数据库就绪：加载 SQLite 内存镜像
             MetadataManager::instance().initFromScchMode();
 
-            // 2026-08-xx 按照 Plan-126：彻底废除 NativeFolderWatcher (IOCP) 双轨制。
-            // 全面转向单一 USN Journal 主轨。
+            // 2. 信号捕获就绪：在 MFT 引擎启动前建立连接，确保不丢失启动瞬间的事件
             AutoImportManager::instance().startListening();
             
-            // [Plan-129] USN 监控点火：系统启动时自动载入缓存并开启监控线程
+            // 3. 监控引擎点火 (阶段 A)：优先从磁盘缓存快速恢复已有的 USN 游标
             MftReader::instance().loadFromCache();
 
-            // 2026-08-xx 物理同步：初始化完成后执行一次全量物理库对账 (在后台线程执行，避免阻塞 UI)
+            // 4. 监控引擎点火 (阶段 B)：补全全量扫描。
+            // 获取系统所有可用盘符，为没有缓存文件的盘符启动首次全量构建并激活 UsnWatcher 线程
+            QStringList allDrives;
+            const auto drives = QDir::drives();
+            for (const QFileInfo& d : drives) {
+                allDrives << d.absolutePath();
+            }
+            qDebug() << "[Core] [Plan-131] 正在点火全量 MFT 扫描与 USN 监控，覆盖盘符:" << allDrives;
+            MftReader::instance().buildIndex(allDrives);
+
+            // 5. 物理同步：初始化完成后执行一次全量物理库对账 (在后台线程执行)
             AutoImportManager::instance().syncAllManagedLibraries();
 
             QMetaObject::invokeMethod(this, [this, startTime]() {

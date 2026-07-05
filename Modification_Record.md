@@ -260,3 +260,8 @@
     - 在 `onEntryAdded` 信号感知层与过滤决策层分别注入 `QMessageBox` 调试弹窗，用于实时确认 USN 信号的接收与托管库路径过滤结果。
 - [2026-07-04 17:35:00] **src/meta/MetadataManager.cpp**:
     - 在 `registerItem` 业务解析层入口注入 `QMessageBox` 调试弹窗，用于确认解析流水线的实际启动状态。
+
+### USN 实时监控引擎“点火”逻辑修复 (Plan-131)
+- [2026-07-04 18:05:00] **src/core/CoreController.cpp**:
+    - 重构系统启动链条：确立了 Metadata -> AutoImport -> MFT Cache -> Full MFT Scan 的加载次序。
+    - 补全 `MftReader::instance().buildIndex(allDrives)` 调用，解决 USN 监控线程在无缓存情况下从未启动的问题，确保全盘符实时感知的可靠性。

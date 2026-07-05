@@ -11,7 +11,6 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QTimer>
-#include <QMessageBox>
 #include <QtConcurrent>
 #include <QFuture>
 #include <functional>
@@ -109,20 +108,8 @@ void AutoImportManager::syncAllManagedLibraries() {
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
     (void)QtConcurrent::run([this, key]() {
-        // [调试埋点 2.1] 信号感知层
-        int initIdx = MftReader::instance().getIndexByKey(key);
-        QString initPath = (initIdx >= 0) ? MftReader::instance().getFullPath(initIdx) : "Unknown";
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [initPath]() {
-            QMessageBox::information(nullptr, "USN 信号感知", "感知到新增条目: " + initPath);
-        });
-
         // 2026-08-xx 按照 Plan-126：USN 高效过滤 (FRN 链判定)
         if (!isUnderManagedLibrary(key)) return;
-
-        // [调试埋点 2.2] 过滤决策层
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [initPath]() {
-            QMessageBox::information(nullptr, "过滤决策", "已通过托管库过滤: " + initPath);
-        });
 
         std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
         int idx = MftReader::instance().getIndexByKey(key);
