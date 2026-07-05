@@ -9,6 +9,7 @@
 #include <QTimer>
 #include <QDateTime>
 #include <QCoreApplication>
+#include <QMessageBox>
 #include <QRegularExpression>
 #include <QImageReader>
 #include <QSvgRenderer>
@@ -365,6 +366,12 @@ void MetadataManager::notifyFullUIRebuild() {
 
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     std::wstring nPath = normalizePath(path);
+    QString qPath = QString::fromStdWString(nPath);
+
+    // [调试埋点 2.3] 业务解析层
+    QMetaObject::invokeMethod(QCoreApplication::instance(), [qPath]() {
+        QMessageBox::information(nullptr, "业务解析", "开始执行解析流水线: " + qPath);
+    });
 
     // [Plan-131 方案 C] 物理指纹准入机制
     std::string pFid;

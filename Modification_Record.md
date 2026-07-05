@@ -254,3 +254,9 @@
     - 落实激活前拦截逻辑：处于 `Inactive` 状态的盘符按钮在被点击时将拦截跳转，并提示用户通过右键菜单创建托管库。
 - [2026-07-04 17:10:00] **src/util/ImportHelper.cpp**:
     - 集成盘符状态联动：在 `importPaths` 执行物理迁移期间，将目标盘符切换为 `Running`（转圈动画）；任务结束后根据托管库现状自动恢复 `Active` 或 `Inactive` 状态。
+
+### USN 实时感知与解析触发逻辑调试埋点
+- [2026-07-04 17:35:00] **src/core/AutoImportManager.cpp**:
+    - 在 `onEntryAdded` 信号感知层与过滤决策层分别注入 `QMessageBox` 调试弹窗，用于实时确认 USN 信号的接收与托管库路径过滤结果。
+- [2026-07-04 17:35:00] **src/meta/MetadataManager.cpp**:
+    - 在 `registerItem` 业务解析层入口注入 `QMessageBox` 调试弹窗，用于确认解析流水线的实际启动状态。
