@@ -26,17 +26,14 @@ UsnWatcher::UsnWatcher(const std::wstring& volume, uint64_t startUsn, QObject* p
 
 UsnWatcher::~UsnWatcher() {
     stop();
+    if (m_hVolume != INVALID_HANDLE_VALUE) {
+        CloseHandle(m_hVolume);
+        m_hVolume = INVALID_HANDLE_VALUE;
+    }
 }
 
 void UsnWatcher::stop() {
     m_stopRequested.store(true);
-    if (m_hVolume != INVALID_HANDLE_VALUE) {
-        // 2026-xx-xx 物理对账优化：强制关闭句柄以中断 DeviceIoControl 同步阻塞
-        // 解决程序退出时由于等待 USN 读取导致的假死（未响应）问题
-        HANDLE h = m_hVolume;
-        m_hVolume = INVALID_HANDLE_VALUE;
-        CloseHandle(h);
-    }
     if (isRunning()) {
         wait();
     }
@@ -71,7 +68,6 @@ void UsnWatcher::run() {
 
     while (!m_stopRequested.load()) {
         if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL)) {
-            if (m_stopRequested.load()) break;
             DWORD err = GetLastError();
             // 方案二：引入 USN 自愈探测。若 Journal 失效或被覆盖，执行重置
             if (err == ERROR_JOURNAL_DELETE_IN_PROGRESS || err == ERROR_JOURNAL_NOT_ACTIVE || err == ERROR_INVALID_PARAMETER) {
