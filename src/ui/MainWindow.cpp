@@ -67,6 +67,12 @@ using namespace ArcMeta::Style;
 
 namespace ArcMeta {
 
+MainWindow* MainWindow::s_instance = nullptr;
+
+MainWindow* MainWindow::instance() {
+    return s_instance;
+}
+
 // 【物理护栏-禁止修改/禁止改为0】全局边缘留白基准值，统一应用于标题栏/导航栏/主体容器右侧
 // 及状态栏左右两侧。2026-06-xx 曾被错误改为0导致搜索框/元数据/筛选面板右侧被截断，
 // 任何"贴合边缘/滚动条对齐/物理修正"等理由都不能作为改动此常量或下方四处引用的依据。
@@ -83,6 +89,7 @@ MainWindow::~MainWindow() {
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent), m_currentDataSource("nav"), m_currentCategoryId(0) {
+    s_instance = this;
     // 2026-04-12 关键修复：显式初始化面板加载状态锁，防止未定义行为导致闪退
     m_panelsInitialized = false;
     qDebug() << "[Main] MainWindow 构造开始执行";
@@ -1596,8 +1603,29 @@ void MainWindow::initDriveBar() {
 }
 
 void MainWindow::onDriveButtonClicked() {
-    // TODO: 盘符点击逻辑待后期安排
-    qDebug() << "[Main] Drive button clicked (TODO)";
+    DriveButton* btn = qobject_cast<DriveButton*>(sender());
+    if (!btn) return;
+
+    // [Plan-131 5.2] 激活前拦截：如果盘符未激活 (Inactive)，拦截跳转并弹出引导提示
+    if (btn->state() == DriveButton::Inactive) {
+        ToolTipOverlay::instance()->showText(QCursor::pos(), 
+            "尚未创建文件夹，请单击右键进行创建托管文件夹", 2500, QColor("#E74C3C"));
+        return;
+    }
+
+    // TODO: 激活态点击跳转逻辑待后期完善
+    qDebug() << "[Main] Drive button clicked for:" << btn->driveLetter();
+}
+
+void MainWindow::setDriveState(const QString& driveLetter, int state) {
+    QString cleanLetter = driveLetter;
+    if (cleanLetter.length() > 2) cleanLetter = cleanLetter.left(2);
+    if (cleanLetter.endsWith("/") || cleanLetter.endsWith("\\")) cleanLetter = cleanLetter.left(2);
+    if (cleanLetter.length() == 1) cleanLetter += ":";
+
+    if (m_driveButtons.contains(cleanLetter)) {
+        m_driveButtons[cleanLetter]->setState(static_cast<DriveButton::State>(state));
+    }
 }
 
 void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
