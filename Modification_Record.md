@@ -247,3 +247,10 @@
     - **方案 E**：MainWindow 职责剥离。建立 `handleDeviceChange` 接口专职处理硬件信号，将 `MainWindow` 中关于 `WM_DEVICECHANGE` 的底层处理逻辑迁移至 `CoreController`，解决“上帝对象”逻辑耦合问题。
 - [2026-07-04 16:30:00] **src/core/AutoImportManager.h**:
     - 补全缺失的 <unordered_set> 与 <cstdint> 头文件，修复方案 B 引入的编译错误。
+
+### 盘符栏 (Drive Bar) 逻辑架构规约 (Plan-131 5.1 & 5.2)
+- [2026-07-04 17:10:00] **src/ui/MainWindow.h / src/ui/MainWindow.cpp**:
+    - 实现 `MainWindow` 单例模式与 `setDriveState` 接口，支持跨模块更新盘符按钮状态。
+    - 落实激活前拦截逻辑：处于 `Inactive` 状态的盘符按钮在被点击时将拦截跳转，并提示用户通过右键菜单创建托管库。
+- [2026-07-04 17:10:00] **src/util/ImportHelper.cpp**:
+    - 集成盘符状态联动：在 `importPaths` 执行物理迁移期间，将目标盘符切换为 `Running`（转圈动画）；任务结束后根据托管库现状自动恢复 `Active` 或 `Inactive` 状态。
