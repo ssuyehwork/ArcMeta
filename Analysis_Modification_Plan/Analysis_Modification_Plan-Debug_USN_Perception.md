@@ -23,10 +23,50 @@
 - **目的**：确认去抖动（Debounce）之后，解析任务是否真正开始执行。
 - **信息**：显示“开始执行解析流水线”。
 
-## 3. 技术实现细节
-- **线程安全**：由于上述逻辑均运行在异步线程池（`QtConcurrent`），必须使用 `QMetaObject::invokeMethod` 切换到主线程显示 `QMessageBox`。
-- **头文件依赖**：需在 `AutoImportManager.cpp` 和 `MetadataManager.cpp` 中包含 `<QMessageBox>`。
+## 3. 技术实施细节 (Git Merge Diff 预览)
+
+### 3.1 AutoImportManager.cpp 埋点
+```cpp
+// 引入头文件
+#include <QMessageBox>
+#include <QApplication>
+
+// onEntryAdded 逻辑增强
+void AutoImportManager::onEntryAdded(uint64_t key) {
+    (void)QtConcurrent::run([this, key]() {
+        // [调试埋点 A] 确认信号到达
+        QMetaObject::invokeMethod(qApp, [key]() {
+            QMessageBox::information(nullptr, "Debug [A]", QString("USN 感知到物理变动\nKey: %1").arg(key));
+        });
+
+        if (!isUnderManagedLibrary(key)) return;
+
+        // [调试埋点 B] 确认通过过滤
+        QMetaObject::invokeMethod(qApp, [key]() {
+            QMessageBox::information(nullptr, "Debug [B]", QString("过滤通过：该项属于托管库范围"));
+        });
+        // ...
+    });
+}
+```
+
+### 3.2 MetadataManager.cpp 埋点
+```cpp
+// 引入头文件
+#include <QMessageBox>
+
+// registerItem 逻辑增强
+void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
+    // ... 指纹校验后 ...
+    // [调试埋点 C] 确认解析点火
+    QMetaObject::invokeMethod(QCoreApplication::instance(), [nPath]() {
+        QMessageBox::information(nullptr, "Debug [C]", QString("解析流水线点火\n路径: %1").arg(QString::fromStdWString(nPath)));
+    });
+    // ...
+}
+```
 
 ## 4. 风险控制
-- 避免在循环内触发过多弹窗导致界面假死（仅用于小规模调试）。
-- 确保不破坏现有的 `isInternalOperating` 锁逻辑和事务逻辑。
+- **线程安全**：通过 `QMetaObject::invokeMethod` 确保 UI 操作回到 GUI 主线程，防止跨线程调用导致的段错误。
+- **性能影响**：`QMessageBox` 是模态阻塞的，会暂停当前逻辑。建议仅在测试单体文件增删时开启。
+- **不脑补原则**：本方案仅作为辅助诊断，不修改任何核心业务状态位。
