@@ -127,6 +127,13 @@ public:
     void registerItem(const std::wstring& path, bool authorized = false);
 
     /**
+     * @brief 轻量级注册接口 (仅物理元数据入库，不执行图像解析)
+     * 2026-08-xx 按照优化规约：用于大规模递归扫描场景。
+     * @param path 物理路径
+     */
+    void registerItemLight(const std::wstring& path);
+
+    /**
      * @brief 异步批量注册项目 (Plan-88 性能重构)
      * 2026-07-xx 按照 Plan-116：UI 层主动调用的批量注册将受到严格拦截
      */

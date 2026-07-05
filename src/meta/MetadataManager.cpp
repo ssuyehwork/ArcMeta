@@ -409,6 +409,32 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 }
 
+void MetadataManager::registerItemLight(const std::wstring& path) {
+    std::wstring nPath = normalizePath(path);
+
+    // [Plan-131 方案 C] 物理指纹准入检查：若已解析且指纹未变，则无需重复 Status 0 登记
+    std::string pFid;
+    long long pSize = 0, pMtime = 0;
+    if (fetchWinApiMetadataDirect(nPath, pFid, nullptr, &pSize, nullptr, nullptr, &pMtime, nullptr)) {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        auto it = m_cache.find(nPath);
+        if (it != m_cache.end()) {
+            if (it->second.ingestionStatus == 1 && it->second.fileSize == pSize && it->second.mtime == pMtime) {
+                return;
+            }
+        }
+    }
+
+    // 1. 激活项目（基础元数据入库）
+    ensureActivated(nPath);
+
+    // 2. 仅标记为 Status 0（待处理），不执行后续解析逻辑
+    updateIngestionStatus(nPath, 0);
+
+    // 3. 语义化通知 (聚合通知)
+    notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+}
+
 void MetadataManager::markAsRegistered(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
     
