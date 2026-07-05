@@ -365,6 +365,7 @@ void MetadataManager::notifyFullUIRebuild() {
 }
 
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
+    Q_UNUSED(authorized);
     std::wstring nPath = normalizePath(path);
     QString qPath = QString::fromStdWString(nPath);
 
@@ -1075,13 +1076,13 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
 
         const char* updSql = "UPDATE metadata SET path = ? WHERE file_id = ?";
         for (auto& entry : groupedSyncTasks) {
-            sqlite3* memDb = entry.first;
+            sqlite3* targetDb = entry.first;
             auto& tasks = entry.second;
 
             // [Plan-131 方案 A] 直连磁盘模式，无需重复异步分发
-            SqlTransaction trans(memDb);
+            SqlTransaction trans(targetDb);
             sqlite3_stmt* memStmt;
-            if (sqlite3_prepare_v2(memDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_prepare_v2(targetDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
                 for (const auto& task : tasks) {
                     sqlite3_bind_text16(memStmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_text(memStmt, 2, task.first.c_str(), -1, SQLITE_TRANSIENT);
