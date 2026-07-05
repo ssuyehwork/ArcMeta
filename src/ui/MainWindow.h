@@ -35,13 +35,6 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
 
-    static MainWindow* instance();
-
-    /**
-     * @brief 2026-xx-xx 按照 Plan-131 5.1：更新指定盘符的状态
-     */
-    void setDriveState(const QString& driveLetter, int state);
-
 protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -186,8 +179,6 @@ private:
     HoverEventFilter* m_hoverFilter = nullptr;
     ResizeEventFilter* m_resizeFilter = nullptr;
     QTimer* m_sidebarRefreshTimer = nullptr;
-
-    static MainWindow* s_instance;
 
 public slots:
     /**

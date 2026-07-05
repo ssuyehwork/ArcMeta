@@ -364,7 +364,6 @@ void MetadataManager::notifyFullUIRebuild() {
 }
 
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
-    Q_UNUSED(authorized);
     std::wstring nPath = normalizePath(path);
 
     // [Plan-131 方案 C] 物理指纹准入机制
@@ -406,32 +405,6 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     updateIngestionStatus(nPath, 1);
 
     // 5. 通知 UI 刷新该路径
-    notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-}
-
-void MetadataManager::registerItemLight(const std::wstring& path) {
-    std::wstring nPath = normalizePath(path);
-
-    // [Plan-131 方案 C] 物理指纹准入检查：若已解析且指纹未变，则无需重复 Status 0 登记
-    std::string pFid;
-    long long pSize = 0, pMtime = 0;
-    if (fetchWinApiMetadataDirect(nPath, pFid, nullptr, &pSize, nullptr, nullptr, &pMtime, nullptr)) {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end()) {
-            if (it->second.ingestionStatus == 1 && it->second.fileSize == pSize && it->second.mtime == pMtime) {
-                return;
-            }
-        }
-    }
-
-    // 1. 激活项目（基础元数据入库）
-    ensureActivated(nPath);
-
-    // 2. 仅标记为 Status 0（待处理），不执行后续解析逻辑
-    updateIngestionStatus(nPath, 0);
-
-    // 3. 语义化通知 (聚合通知)
     notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 }
 
@@ -1095,13 +1068,13 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
 
         const char* updSql = "UPDATE metadata SET path = ? WHERE file_id = ?";
         for (auto& entry : groupedSyncTasks) {
-            sqlite3* targetDb = entry.first;
+            sqlite3* memDb = entry.first;
             auto& tasks = entry.second;
 
             // [Plan-131 方案 A] 直连磁盘模式，无需重复异步分发
-            SqlTransaction trans(targetDb);
+            SqlTransaction trans(memDb);
             sqlite3_stmt* memStmt;
-            if (sqlite3_prepare_v2(targetDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_prepare_v2(memDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
                 for (const auto& task : tasks) {
                     sqlite3_bind_text16(memStmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_text(memStmt, 2, task.first.c_str(), -1, SQLITE_TRANSIENT);

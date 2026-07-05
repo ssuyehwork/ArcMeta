@@ -2,8 +2,6 @@
 #include "../ui/Logger.h"
 #include "../ui/BatchProgressDialog.h"
 #include "../ui/ToolTipOverlay.h"
-#include "../ui/MainWindow.h"
-#include "../ui/DriveButton.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/DatabaseManager.h"
@@ -50,12 +48,6 @@ void ImportHelper::importPaths(const QStringList& paths, const QString& targetPh
     });
 
     context->future = QtConcurrent::run([paths, targetPhysicalPath, weakProgress, context]() {
-        // [Plan-131 5.1] 状态联动：任务开始，切换所属盘符至 Running
-        QString drive = targetPhysicalPath.left(2);
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [drive]() {
-            if (MainWindow::instance()) MainWindow::instance()->setDriveState(drive, DriveButton::Running);
-        });
-
         // 2026-07-xx 按照 Plan-116：收拢为纯物理移动动作
         // 数据库入库动作完全依靠 USN Journal 异步感知。
         
@@ -75,14 +67,7 @@ void ImportHelper::importPaths(const QStringList& paths, const QString& targetPh
             ShellHelper::copyOrMoveItems({src}, targetPhysicalPath, true);
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, handled, targetPhysicalPath, drive]() {
-            // [Plan-131 5.1] 状态联动：任务结束，恢复盘符状态
-            if (MainWindow::instance()) {
-                QString managedPath = drive + "/ArcMeta.Library_" + drive.left(1).toUpper();
-                bool exists = QDir(managedPath).exists();
-                MainWindow::instance()->setDriveState(drive, exists ? DriveButton::Active : DriveButton::Inactive);
-            }
-
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, handled]() {
             if (context->isCancelled) return;
             if (weakProgress) {
                 weakProgress->accept();

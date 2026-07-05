@@ -16,7 +16,6 @@
 #include <functional>
 #include <cwchar>
 #include <map>
-#include <memory>
 #include <cstdint>
 
 #ifdef Q_OS_WIN
@@ -110,10 +109,7 @@ void AutoImportManager::syncAllManagedLibraries() {
 void AutoImportManager::onEntryAdded(uint64_t key) {
     (void)QtConcurrent::run([this, key]() {
         // 2026-08-xx 按照 Plan-126：USN 高效过滤 (FRN 链判定)
-        bool underManaged = isUnderManagedLibrary(key);
-        qDebug() << "[AUDIT] onEntryAdded key:" << QString::number(key, 16) << "underManaged:" << underManaged;
-        
-        if (!underManaged) return;
+        if (!isUnderManagedLibrary(key)) return;
 
         std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
         int idx = MftReader::instance().getIndexByKey(key);
@@ -162,7 +158,6 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
         // 2026-08-xx 按照 Plan-128：操作溯源判定
         bool isInternal = MetadataManager::instance().isInternalOperating();
         bool isUnderLibrary = isUnderManagedLibrary(key);
-        qDebug() << "[AUDIT] onEntryUpdated key:" << QString::number(key, 16) << "isUnderLibrary:" << isUnderLibrary << "isInternal:" << isInternal;
 
         if (!isUnderLibrary) {
             // [信号审计]：项移出了托管库
@@ -442,38 +437,15 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
     QDir dir(QString::fromStdWString(rootPath));
     if (!dir.exists()) return;
 
-    // 2026-08-xx 异步化改造：整机加锁保护数据库写入
+    // 2026-08-xx 异步化改造：整机加锁保护数据库写入，并迁移信号抑制逻辑
     std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
 
-    // 1. 最外层开启内部操作屏蔽 (拦截冗余 UI 刷新)
     MetadataManager::instance().setInternalOperating(true);
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     
-    struct IngestionContext {
-        sqlite3* db;
-        int count = 0;
-        std::unique_ptr<SqlTransaction> trans;
-        QStringList batchPaths;
+    {
+        SqlTransaction trans(db);
 
-        void checkCommit() {
-            count++;
-            if (count >= 500) {
-                trans->commit();
-                // 批次提交后，立刻投递异步解析任务
-                MetadataManager::instance().registerItemsAsync(batchPaths, true);
-                
-                batchPaths.clear();
-                trans.reset(new SqlTransaction(db));
-                count = 0;
-            }
-        }
-    };
-
-    IngestionContext ctx;
-    ctx.db = db;
-    ctx.trans.reset(new SqlTransaction(db));
-
-    try {
         int rootCatId = 0;
         std::string rootFid;
         std::wstring rootFrnStr;
@@ -493,6 +465,7 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
                     }
 
                     Category cat;
+                    // 2026-08-xx 物理同步：ArcMeta.Library_* 强制作为顶级分类 (parentId = 0)
                     if (info.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
                         cat.parentId = 0;
                     } else {
@@ -505,7 +478,6 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
                     if (CategoryRepo::add(cat)) {
                         rootCatId = cat.id;
                     }
-                    ctx.checkCommit();
                 }
             } catch (...) {}
         }
@@ -536,23 +508,18 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
                                     }
                                 } catch (...) {}
                             }
-                            ctx.checkCommit();
                         }
                         if (existingId > 0) {
                             syncDir(fi.absoluteFilePath(), existingId);
                         }
                     } else {
-                        // 使用轻量级注册接口，仅占位入库
-                        MetadataManager::instance().registerItemLight(wPath);
-                        ctx.batchPaths << QString::fromStdWString(wPath);
-
+                        MetadataManager::instance().registerItem(wPath, true);
                         if (parentCatId > 0) {
                             std::string fid;
                             if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid)) {
                                 CategoryRepo::addItemToCategory(parentCatId, fid, wPath);
                             }
                         }
-                        ctx.checkCommit();
                     }
                 }
             };
@@ -560,16 +527,9 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
             syncDir(QString::fromStdWString(rootPath), rootCatId);
         }
         
-        // 提交最后一个不完整的批次
-        ctx.trans->commit();
-        if (!ctx.batchPaths.isEmpty()) {
-            MetadataManager::instance().registerItemsAsync(ctx.batchPaths, true);
-        }
-    } catch (...) {
-        qWarning() << "[AutoImport] handleRecursiveIngestion 遭遇异常中断";
+        trans.commit();
     }
 
-    // 2. 全部完成后关闭屏蔽并触发全量重建
     MetadataManager::instance().setInternalOperating(false);
     MetadataManager::instance().notifyFullUIRebuild();
 }

@@ -265,3 +265,10 @@
 - [2026-07-04 18:05:00] **src/core/CoreController.cpp**:
     - 重构系统启动链条：确立了 Metadata -> AutoImport -> MFT Cache -> Full MFT Scan 的加载次序。
     - 补全 `MftReader::instance().buildIndex(allDrives)` 调用，解决 USN 监控线程在无缓存情况下从未启动的问题，确保全盘符实时感知的可靠性。
+
+### 递归入库性能重构：职责分离与事务分片
+- [2026-07-05 07:33:26] **src/core/AutoImportManager.cpp**:
+    - **职责分离**：重构 `handleRecursiveIngestion`，将同步重型解析替换为 `registerItemLight`（物理占位）+ `registerItemsAsync`（异步补全解析）的两步走策略，显著提升大目录初次导入速度。
+    - **事务分片**：引入 `IngestionContext` 实现 500 项步进式批次提交，支持 `global.db` 与盘符 `metadata.db` 的双重事务分片，防止长事务锁死数据库连接。
+    - **性能优化**：直接利用内存元数据缓存获取刚登记项的 FID，彻底消除递归遍历中的重复物理磁盘 I/O。
+    - **稳定性增强**：确保 DFS 遍历下的“分类先于项”依赖顺序，通过分批提交保证主线程 UI 刷新期间的“呼吸空间”。

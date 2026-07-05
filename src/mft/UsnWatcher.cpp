@@ -2,23 +2,8 @@
 #include "MftReader.h"
 #include <QDebug>
 #include <winioctl.h>
-#include <fstream>
-#include <chrono>
-#include <ctime>
-#include <string>
 
 namespace ArcMeta {
-
-// 物理级审计宏：直接写盘，杜绝脑补
-inline void PHYSICAL_AUDIT(const std::string& msg) {
-    std::ofstream logFile("C:\\ArcMeta_Debug.log", std::ios::app);
-    if (logFile.is_open()) {
-        auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        char timeBuf[20];
-        std::strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
-        logFile << "[" << timeBuf << "] [UsnWatcher] " << msg << std::endl;
-    }
-}
 
 UsnWatcher::UsnWatcher(const std::wstring& volume, uint64_t startUsn, QObject* parent)
     : QThread(parent), m_volume(volume), m_lastUsn(startUsn), m_stopRequested(false) {
@@ -55,25 +40,14 @@ void UsnWatcher::stop() {
 }
 
 void UsnWatcher::run() {
-    // 【物理审计 1：确认入口进入】
-    std::string volLabel = QString::fromStdWString(m_volume).toStdString();
-    PHYSICAL_AUDIT(">>> run() ENTERED for volume: " + volLabel);
-
-    if (m_hVolume == INVALID_HANDLE_VALUE) {
-        PHYSICAL_AUDIT("!!! FAILED: Volume handle is INVALID (LastError: " + std::to_string(GetLastError()) + ")");
-        return;
-    }
+    if (m_hVolume == INVALID_HANDLE_VALUE) return;
 
     // 1. 获取 Journal ID
     USN_JOURNAL_DATA_V0 journalData;
     DWORD bytesReturned;
-    // 【物理审计 2：确认驱动通信】
     if (!DeviceIoControl(m_hVolume, FSCTL_QUERY_USN_JOURNAL, NULL, 0, &journalData, sizeof(journalData), &bytesReturned, NULL)) {
-        PHYSICAL_AUDIT("!!! FAILED: FSCTL_QUERY_USN_JOURNAL (LastError: " + std::to_string(GetLastError()) + ")");
         return;
     }
-    
-    PHYSICAL_AUDIT("SUCCESS: Journal queried. NextUsn: " + std::to_string(journalData.NextUsn));
 
     // 2. 离线追平逻辑：若 m_lastUsn 为 0，从当前 NextUsn 开始
     if (m_lastUsn == 0) {
@@ -92,14 +66,9 @@ void UsnWatcher::run() {
     const int bufferSize = 128 * 1024;
     std::unique_ptr<uint8_t[]> buffer(new uint8_t[bufferSize]);
 
-    // 【物理审计 3：确认进入主循环】
-    PHYSICAL_AUDIT(">>> Entering main while-loop for: " + volLabel);
-
     while (!m_stopRequested.load()) {
         if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL)) {
             DWORD err = GetLastError();
-            PHYSICAL_AUDIT("!!! LOOP ERROR: FSCTL_READ_USN_JOURNAL failed (LastError: " + std::to_string(err) + ")");
-
             // 方案二：引入 USN 自愈探测。若 Journal 失效或被覆盖，执行重置
             if (err == ERROR_JOURNAL_DELETE_IN_PROGRESS || err == ERROR_JOURNAL_NOT_ACTIVE || err == ERROR_INVALID_PARAMETER) {
                 qDebug() << "[UsnWatcher] 检测到 Journal 失效，执行自愈重置..." << QString::fromStdWString(m_volume);
@@ -118,8 +87,6 @@ void UsnWatcher::run() {
             continue;
         }
 
-        PHYSICAL_AUDIT("DeviceIoControl returned " + std::to_string(bytesReturned) + " bytes.");
-
         uint8_t* pRecord = buffer.get() + sizeof(USN);
         uint8_t* pEnd = buffer.get() + bytesReturned;
 
@@ -133,17 +100,6 @@ void UsnWatcher::run() {
                     reinterpret_cast<USN_RECORD_V2*>(pRecord)->Reason : 
                     reinterpret_cast<USN_RECORD_V3*>(pRecord)->Reason;
                 
-                // 获取文件名进行审计
-                std::wstring fileName;
-                if (header->MajorVersion == 2) {
-                    USN_RECORD_V2* v2 = reinterpret_cast<USN_RECORD_V2*>(pRecord);
-                    fileName.assign(reinterpret_cast<wchar_t*>(pRecord + v2->FileNameOffset), v2->FileNameLength / sizeof(wchar_t));
-                } else {
-                    USN_RECORD_V3* v3 = reinterpret_cast<USN_RECORD_V3*>(pRecord);
-                    fileName.assign(reinterpret_cast<wchar_t*>(pRecord + v3->FileNameOffset), v3->FileNameLength / sizeof(wchar_t));
-                }
-                PHYSICAL_AUDIT("  RAW RECORD: " + QString::fromStdWString(fileName).toStdString() + " (Reason: " + std::to_string(reason) + ")");
-
                 if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE | USN_REASON_RENAME_NEW_NAME)) {
                     updateBatch.push_back(pRecord);
                 } else if (reason & USN_REASON_FILE_DELETE) {
