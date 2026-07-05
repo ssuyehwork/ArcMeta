@@ -53,7 +53,9 @@ void CoreController::startSystem() {
             QStringList allDrives;
             const auto drives = QDir::drives();
             for (const QFileInfo& d : drives) {
-                allDrives << d.absolutePath();
+                if (!AutoImportManager::getManagedLibraryPath(d.absolutePath().toStdWString()).empty()) {
+                    allDrives << d.absolutePath();
+                }
             }
             qDebug() << "[Core] [Plan-131] 正在点火全量 MFT 扫描与 USN 监控，覆盖盘符:" << allDrives;
             MftReader::instance().buildIndex(allDrives);

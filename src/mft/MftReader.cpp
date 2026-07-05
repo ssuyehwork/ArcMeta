@@ -1319,6 +1319,7 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
 
     // 工业级启发式预分配：根据日记账条目数预估文件总数，平均 150 字节一个条目
     size_t estimatedCount = static_cast<size_t>(j.NextUsn / 150);
+    estimatedCount = std::min<size_t>(estimatedCount, 5000000); // 硬上限保护，防止对超大Journal的系统盘一次性申请异常内存
     if (estimatedCount > 100000) result.entries.reserve(estimatedCount);
 
     MFT_ENUM_DATA_V0 ed = {0}; ed.HighUsn = j.NextUsn;
