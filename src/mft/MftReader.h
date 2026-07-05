@@ -132,6 +132,7 @@ public:
     void updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, const std::wstring& volume);
     void removeEntryByFrn(const std::wstring& volume, uint64_t frn);
     std::wstring getPathFast(size_t driveIdx, uint64_t frn);
+    QString getPathByFrn(uint64_t frn, int driveIdx);
 
 private:
     // 2026-05-29 物理修复：提供无锁内部接口，解决嵌套调用引起的 QReadWriteLock 递归死锁

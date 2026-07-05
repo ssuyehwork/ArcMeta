@@ -49,17 +49,6 @@ void CoreController::startSystem() {
             // [Plan-129] USN 监控点火：系统启动时自动载入缓存并开启监控线程
             MftReader::instance().loadFromCache();
 
-            // [Plan-131] 补全全量扫描：为没有缓存文件的盘符（仅限有托管库的盘）启动首次全量构建，
-            // 确保这些盘符也能创建并启动 UsnWatcher 线程，而不是只依赖 loadFromCache 的缓存命中。
-            QStringList allDrives;
-            const auto drives = QDir::drives();
-            for (const QFileInfo& d : drives) {
-                if (!AutoImportManager::getManagedLibraryPath(d.absolutePath().toStdWString()).empty()) {
-                    allDrives << d.absolutePath();
-                }
-            }
-            qDebug() << "[Core] [Plan-131] 正在点火全量 MFT 扫描与 USN 监控，覆盖盘符:" << allDrives;
-            MftReader::instance().buildIndex(allDrives);
 
             // 2026-08-xx 物理同步：初始化完成后执行一次全量物理库对账 (在后台线程执行，避免阻塞 UI)
             AutoImportManager::instance().syncAllManagedLibraries();

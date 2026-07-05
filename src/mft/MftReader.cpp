@@ -716,6 +716,36 @@ std::wstring MftReader::getPathFast(size_t driveIdx, uint64_t frn) {
     return getPathFastInternal(driveIdx, frn);
 }
 
+QString MftReader::getPathByFrn(uint64_t frn, int driveIdx) {
+    // [Plan-131] 物理级路径还原：绕过内存索引，直接询问 OS
+    std::wstring vol;
+    {
+        QReadLocker lock(&m_dataLock);
+        if (driveIdx < (int)m_drive_list.size()) vol = m_drive_list[driveIdx];
+        else return QString();
+    }
+
+    std::wstring rootPath = vol + L"\\";
+    HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (hHint == INVALID_HANDLE_VALUE) return QString();
+
+    QString result;
+    FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
+    id.FileId.QuadPart = frn;
+    HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        wchar_t pathBuf[MAX_PATH];
+        DWORD len = GetFinalPathNameByHandleW(hFile, pathBuf, MAX_PATH, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+        if (len > 0 && len < MAX_PATH) {
+            result = QString::fromWCharArray(pathBuf);
+            if (result.startsWith("\\\\?\\")) result.remove(0, 4);
+        }
+        CloseHandle(hFile);
+    }
+    CloseHandle(hHint);
+    return result;
+}
+
 std::wstring MftReader::getPathFastInternal(size_t driveIdx, uint64_t frn) {
     // 2026-05-29 物理修复：内部无锁实现。调用方必须已持有 m_dataLock。
     uint64_t compositeKey = (static_cast<uint64_t>(driveIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
@@ -1064,8 +1094,10 @@ void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volum
     }
 
     if (isNew) {
+        qDebug() << "[MftReader] [REALTIME] 发射 entryAdded Key:" << QString::number(compositeKey, 16) << "Name:" << name;
         emit entryAdded(compositeKey);
     } else {
+        qDebug() << "[MftReader] [REALTIME] 发射 entryUpdated Key:" << QString::number(compositeKey, 16) << "Name:" << name;
         emit entryUpdated(compositeKey);
     }
     emit dataChanged(finalIdx);
@@ -1212,15 +1244,26 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
 
     // 2026-xx-xx 按照 Plan-106：策略：小批量发送单体信号（保证实时性），大批量发送宏观信号（保护 UI）
     // 物理加固：即使是“洪流”，也必须发射文件夹变动信号，以确保 AutoImportManager 能触发递归同步
-    // 核心修正：移动项目通常涉及数百个文件，100 的阈值过低，提升至 500
+    // 核心修正：移动项目通常涉及数百个文件， 100 的阈值过低，提升至 500
     if (addedKeys.size() + updatedKeys.size() < 500) {
-        for (uint64_t key : addedKeys) emit entryAdded(key);
-        for (uint64_t key : updatedKeys) emit entryUpdated(key);
+        qDebug() << "[MftReader] 批量发射信号，总计:" << (addedKeys.size() + updatedKeys.size());
+        for (uint64_t key : addedKeys) {
+            emit entryAdded(key);
+        }
+        for (uint64_t key : updatedKeys) {
+            emit entryUpdated(key);
+        }
     } else {
         // 超过阈值视为“洪流”，必须发射所有文件夹变动信号，因为 AutoImportManager 极其依赖它们进行递归同步
         qDebug() << "[MftReader] USN 信号洪流探测：" << addedKeys.size() << "Added," << updatedKeys.size() << "Updated. 启用文件夹优先转发。";
-        for (uint64_t key : addedFolderKeys) emit entryAdded(key);
-        for (uint64_t key : updatedFolderKeys) emit entryUpdated(key);
+        for (uint64_t key : addedFolderKeys) {
+            qDebug() << "[MftReader] 洪流转发 Folder entryAdded Key:" << QString::number(key, 16);
+            emit entryAdded(key);
+        }
+        for (uint64_t key : updatedFolderKeys) {
+            qDebug() << "[MftReader] 洪流转发 Folder entryUpdated Key:" << QString::number(key, 16);
+            emit entryUpdated(key);
+        }
         emit dataChanged(-1); 
     }
 }
@@ -1255,7 +1298,7 @@ void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
 void MftReader::compact() {
     // 2026-06-xx 状态标记：碎片整理期间阻止其他写操作
     m_is_compacting.store(true);
-    // 2026-05-14 内存管理优化：执行碎片整理，回收无效条目和字符串池空间
+    // 2026-05-14 内存 management 优化：执行碎片整理，回收无效条目和字符串池空间
     std::vector<uint64_t>  new_frns;
     std::vector<uint64_t>  new_parent_frns;
     std::vector<int64_t>   new_sizes;

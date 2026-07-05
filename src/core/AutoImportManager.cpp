@@ -119,9 +119,15 @@ void AutoImportManager::syncAllManagedLibraries() {
 }
 
 void AutoImportManager::onEntryAdded(uint64_t key) {
+    qDebug() << "[AutoImport] 接收到 entryAdded 信号 Key:" << QString::number(key, 16);
     (void)QtConcurrent::run([this, key]() {
         // 2026-08-xx 按照 Plan-126：USN 高效过滤 (FRN 链判定)
-        if (!isUnderManagedLibrary(key)) return;
+        if (!isUnderManagedLibrary(key)) {
+            // qDebug() << "[AutoImport] entryAdded 被过滤 (不在托管库下) Key:" << QString::number(key, 16);
+            return;
+        }
+
+        qDebug() << "[AutoImport] 确认变动发生在托管库内! Key:" << QString::number(key, 16);
 
         std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
         int idx = MftReader::instance().getIndexByKey(key);
@@ -177,6 +183,7 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
 }
 
 void AutoImportManager::onEntryUpdated(uint64_t key) {
+    qDebug() << "[AutoImport] 接收到 entryUpdated 信号 Key:" << QString::number(key, 16);
     (void)QtConcurrent::run([this, key]() {
         // 2026-08-xx 按照 Plan-128：操作溯源判定
         bool isInternal = MetadataManager::instance().isInternalOperating();
@@ -458,36 +465,57 @@ bool AutoImportManager::isUnderManagedLibrary(uint64_t key) {
 
     // 向上溯源 FRN 链
     uint64_t frn = currentFrn;
-    while (frn != 0) {
+    int depth = 0;
+    while (frn != 0 && depth < 20) {
+        depth++;
         {
             std::lock_guard<std::mutex> lock(m_cacheMutex);
             if (m_managedFrnCache.count(frn)) {
+                // qDebug() << "[AutoImport] FRN 匹配成功:" << QString::number(frn, 16) << "在缓存中";
                 return true;
             }
         }
         
         // 2026-xx-xx 增强型动态捕获：在向上溯源过程中，如果发现任何父目录符合 ArcMeta.Library_ 规范
         // 且位于磁盘根目录 (Parent FRN = 5)，则自动将其识别为托管库根节点并缓存。
-        // 这解决了运行期间新建托管文件夹或启动时文件夹为空导致未命中缓存的问题。
         uint64_t compositeKey = (static_cast<uint64_t>(driveIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
         int idx = MftReader::instance().getIndexByKey(compositeKey);
+
+        // [核心修正]：不再仅依赖 MftReader 的 ParentFRN 接口，因为内存索引可能滞后或不完整
+        uint64_t parentFrn = 0;
+        QString name;
+
         if (idx >= 0) {
-            uint64_t parentFrn = MftReader::instance().getParentFrnByFrn(frn, driveIdx);
-            if (parentFrn == 5) {
-                QString name = MftReader::instance().getName(idx);
+            name = MftReader::instance().getName(idx);
+            parentFrn = MftReader::instance().getParentFrnByFrn(frn, driveIdx);
+        } else {
+            // [Plan-131] 物理兜底：如果内存索引还没更新，直接问 OS 要路径和父 FRN
+            // 解决“移入空文件夹时感知不到”的问题：此时 MFT 内存索引可能还没来得及更新
+            QString path = MftReader::instance().getPathByFrn(frn, driveIdx);
+            if (!path.isEmpty()) {
+                name = QFileInfo(path).fileName();
+                std::string fid; std::wstring pfrnStr;
+                if (MetadataManager::fetchWinApiMetadataDirect(QFileInfo(path).absolutePath().toStdWString(), fid, &pfrnStr)) {
+                    try { parentFrn = std::stoull(pfrnStr, nullptr, 16); } catch(...) {}
+                }
+            }
+        }
+
+        if (!name.isEmpty()) {
+            // 物理对标：NTFS 磁盘根目录的 Parent FRN 通常为 5，但在某些卷或虚拟盘上可能为 0
+            if (parentFrn == 5 || parentFrn == 0 || parentFrn == 1407374883553285ull) {
                 if (name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
                     std::lock_guard<std::mutex> lock(m_cacheMutex);
                     m_managedFrnCache.insert(frn);
-                    qDebug() << "[AutoImport] 动态识别并补全托管库根 FRN 缓存:" << QString::number(frn, 16) << "->" << name;
+                    qDebug() << "[AutoImport] 成功探测到托管库根目录 ->" << name << "FRN:" << QString::number(frn, 16);
                     return true;
                 }
             }
         }
 
         // 获取父级 FRN (通过 MftReader 内存索引)
-        uint64_t pFrn = MftReader::instance().getParentFrnByFrn(frn, driveIdx);
-        if (pFrn == 0 || pFrn == frn) break;
-        frn = pFrn;
+        if (parentFrn == 0 || parentFrn == frn) break;
+        frn = parentFrn;
     }
 
     return false;

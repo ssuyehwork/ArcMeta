@@ -73,6 +73,7 @@ void UsnWatcher::run() {
         if (!DeviceIoControl(m_hVolume, FSCTL_READ_USN_JOURNAL, &readData, sizeof(readData), buffer.get(), bufferSize, &bytesReturned, NULL)) {
             if (m_stopRequested.load()) break;
             DWORD err = GetLastError();
+            qWarning() << "[UsnWatcher] DeviceIoControl (FSCTL_READ_USN_JOURNAL) 失败, Error:" << err << "卷:" << QString::fromStdWString(m_volume);
             // 方案二：引入 USN 自愈探测。若 Journal 失效或被覆盖，执行重置
             if (err == ERROR_JOURNAL_DELETE_IN_PROGRESS || err == ERROR_JOURNAL_NOT_ACTIVE || err == ERROR_INVALID_PARAMETER) {
                 qDebug() << "[UsnWatcher] 检测到 Journal 失效，执行自愈重置..." << QString::fromStdWString(m_volume);
@@ -105,6 +106,9 @@ void UsnWatcher::run() {
                     reinterpret_cast<USN_RECORD_V3*>(pRecord)->Reason;
                 
                 if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE | USN_REASON_RENAME_NEW_NAME)) {
+                    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(pRecord + (header->MajorVersion == 2 ? reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameOffset : reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameOffset)),
+                                                     (header->MajorVersion == 2 ? reinterpret_cast<USN_RECORD_V2*>(pRecord)->FileNameLength : reinterpret_cast<USN_RECORD_V3*>(pRecord)->FileNameLength) / 2);
+                    qDebug() << "[UsnWatcher] 捕获变动记录:" << name << "Reason:" << QString::number(reason, 16);
                     updateBatch.push_back(pRecord);
                 } else if (reason & USN_REASON_FILE_DELETE) {
                     uint64_t frn = (header->MajorVersion == 2) ? 
