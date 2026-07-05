@@ -46,20 +46,23 @@ void AutoImportManager::startListening() {
     if (m_isListening) return;
 
     // [Plan-131 方案 B] 预热 FRN 缓存
-    m_managedFrnCache.clear();
-    const auto drives = QDir::drives();
-    for (const QFileInfo& d : drives) {
-        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(d.absolutePath().toStdWString());
-        std::wstring managedPath = MetadataManager::getManagedLibraryPath(volSerial, d.absolutePath());
-        if (!managedPath.empty()) {
-            std::string fid; std::wstring frnStr;
-            if (MetadataManager::fetchWinApiMetadataDirect(managedPath, fid, &frnStr)) {
-                try {
-                    uint64_t frn = std::stoull(frnStr, nullptr, 16);
-                    m_managedFrnCache.insert(frn);
-                    qDebug() << "[AutoImport] [Plan-131] 已缓存托管库根 FRN:" << QString::fromStdWString(frnStr) << "->" << QString::fromStdWString(managedPath);
-                } catch (...) {
-                    qWarning() << "[AutoImport] 解析托管库根 FRN 失败:" << QString::fromStdWString(frnStr);
+    {
+        std::lock_guard<std::mutex> lock(m_cacheMutex);
+        m_managedFrnCache.clear();
+        const auto drives = QDir::drives();
+        for (const QFileInfo& d : drives) {
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(d.absolutePath().toStdWString());
+            std::wstring managedPath = MetadataManager::getManagedLibraryPath(volSerial, d.absolutePath());
+            if (!managedPath.empty()) {
+                std::string fid; std::wstring frnStr;
+                if (MetadataManager::fetchWinApiMetadataDirect(managedPath, fid, &frnStr)) {
+                    try {
+                        uint64_t frn = std::stoull(frnStr, nullptr, 16);
+                        m_managedFrnCache.insert(frn);
+                        qDebug() << "[AutoImport] [Plan-131] 已缓存托管库根 FRN:" << QString::fromStdWString(frnStr) << "->" << QString::fromStdWString(managedPath);
+                    } catch (...) {
+                        qWarning() << "[AutoImport] 解析托管库根 FRN 失败:" << QString::fromStdWString(frnStr);
+                    }
                 }
             }
         }
@@ -417,11 +420,30 @@ bool AutoImportManager::isUnderManagedLibrary(uint64_t key) {
     uint64_t currentFrn = key & 0x0000FFFFFFFFFFFFull;
     int driveIdx = static_cast<int>(key >> 48);
 
+    // 2026-xx-xx 按照用户反馈：感知不到运行期间新创建的托管文件夹。
+    // 增加动态缓存补齐逻辑：如果当前 FRN 的名称符合 ArcMeta.Library_ 规范，且父级是根目录 (5)，则动态加入缓存。
+    int idx = MftReader::instance().getIndexByKey(key);
+    if (idx >= 0) {
+        QString name = MftReader::instance().getName(idx);
+        uint64_t pFrn = MftReader::instance().getParentFrnByFrn(currentFrn, driveIdx);
+        if (pFrn == 5 && name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            if (m_managedFrnCache.find(currentFrn) == m_managedFrnCache.end()) {
+                m_managedFrnCache.insert(currentFrn);
+                qDebug() << "[AutoImport] 动态捕获并缓存新托管库 FRN:" << QString::number(currentFrn, 16) << "->" << name;
+            }
+            return true;
+        }
+    }
+
     // 向上溯源 FRN 链
     uint64_t frn = currentFrn;
     while (frn != 0) {
-        if (m_managedFrnCache.count(frn)) {
-            return true;
+        {
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            if (m_managedFrnCache.count(frn)) {
+                return true;
+            }
         }
         
         // 获取父级 FRN (通过 MftReader 内存索引)

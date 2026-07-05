@@ -1082,6 +1082,8 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
 
     std::vector<uint64_t> addedKeys;
     std::vector<uint64_t> updatedKeys;
+    std::vector<uint64_t> addedFolderKeys;
+    std::vector<uint64_t> updatedFolderKeys;
 
     for (uint8_t* recordPtr : records) {
         USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(recordPtr);
@@ -1126,6 +1128,7 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
         uint64_t encodedPf = makeKey(dIdx, parentFrn);
         uint64_t compositeKey = makeKey(dIdx, frn);
         
+        bool isDir = (finalAttr & FILE_ATTRIBUTE_DIRECTORY);
         auto it = m_frn_to_idx.find(compositeKey);
         if (it != m_frn_to_idx.end()) {
             uint32_t idx = it->second;
@@ -1150,6 +1153,7 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
                 m_string_pool.push_back('\0');
             }
             updatedKeys.push_back(compositeKey);
+            if (isDir) updatedFolderKeys.push_back(compositeKey);
         } else {
             uint32_t newIdx = (uint32_t)m_frns.size();
             m_frns.push_back(frn);
@@ -1165,6 +1169,7 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
             m_frn_to_idx[compositeKey] = newIdx;
             if (dIdx < 32) m_drive_entry_indices[dIdx].push_back(newIdx);
             addedKeys.push_back(compositeKey);
+            if (isDir) addedFolderKeys.push_back(compositeKey);
         }
         { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
         m_next_usns[volume] = usn;
@@ -1198,11 +1203,14 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
     }
 
     // 2026-xx-xx 按照 Plan-106：策略：小批量发送单体信号（保证实时性），大批量发送宏观信号（保护 UI）
-    if (addedKeys.size() + updatedKeys.size() < 50) {
+    // 物理加固：即使是“洪流”，也必须发射文件夹变动信号，以确保 AutoImportManager 能触发递归同步
+    if (addedKeys.size() + updatedKeys.size() < 100) {
         for (uint64_t key : addedKeys) emit entryAdded(key);
         for (uint64_t key : updatedKeys) emit entryUpdated(key);
     } else {
-        // 超过 50 项视为“洪流”，仅发射一次全局变动信号
+        // 超过 100 项视为“洪流”，仅发射文件夹变动信号和全局刷新信号
+        for (uint64_t key : addedFolderKeys) emit entryAdded(key);
+        for (uint64_t key : updatedFolderKeys) emit entryUpdated(key);
         emit dataChanged(-1); 
     }
 }
