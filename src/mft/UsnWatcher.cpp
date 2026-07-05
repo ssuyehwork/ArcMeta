@@ -118,6 +118,8 @@ void UsnWatcher::run() {
             continue;
         }
 
+        PHYSICAL_AUDIT("DeviceIoControl returned " + std::to_string(bytesReturned) + " bytes.");
+
         uint8_t* pRecord = buffer.get() + sizeof(USN);
         uint8_t* pEnd = buffer.get() + bytesReturned;
 
@@ -131,6 +133,17 @@ void UsnWatcher::run() {
                     reinterpret_cast<USN_RECORD_V2*>(pRecord)->Reason : 
                     reinterpret_cast<USN_RECORD_V3*>(pRecord)->Reason;
                 
+                // 获取文件名进行审计
+                std::wstring fileName;
+                if (header->MajorVersion == 2) {
+                    USN_RECORD_V2* v2 = reinterpret_cast<USN_RECORD_V2*>(pRecord);
+                    fileName.assign(reinterpret_cast<wchar_t*>(pRecord + v2->FileNameOffset), v2->FileNameLength / sizeof(wchar_t));
+                } else {
+                    USN_RECORD_V3* v3 = reinterpret_cast<USN_RECORD_V3*>(pRecord);
+                    fileName.assign(reinterpret_cast<wchar_t*>(pRecord + v3->FileNameOffset), v3->FileNameLength / sizeof(wchar_t));
+                }
+                PHYSICAL_AUDIT("  RAW RECORD: " + QString::fromStdWString(fileName).toStdString() + " (Reason: " + std::to_string(reason) + ")");
+
                 if (reason & (USN_REASON_FILE_CREATE | USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE | USN_REASON_RENAME_NEW_NAME)) {
                     updateBatch.push_back(pRecord);
                 } else if (reason & USN_REASON_FILE_DELETE) {

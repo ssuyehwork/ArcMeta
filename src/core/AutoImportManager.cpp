@@ -110,7 +110,10 @@ void AutoImportManager::syncAllManagedLibraries() {
 void AutoImportManager::onEntryAdded(uint64_t key) {
     (void)QtConcurrent::run([this, key]() {
         // 2026-08-xx 按照 Plan-126：USN 高效过滤 (FRN 链判定)
-        if (!isUnderManagedLibrary(key)) return;
+        bool underManaged = isUnderManagedLibrary(key);
+        qDebug() << "[AUDIT] onEntryAdded key:" << QString::number(key, 16) << "underManaged:" << underManaged;
+        
+        if (!underManaged) return;
 
         std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
         int idx = MftReader::instance().getIndexByKey(key);
@@ -159,6 +162,7 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
         // 2026-08-xx 按照 Plan-128：操作溯源判定
         bool isInternal = MetadataManager::instance().isInternalOperating();
         bool isUnderLibrary = isUnderManagedLibrary(key);
+        qDebug() << "[AUDIT] onEntryUpdated key:" << QString::number(key, 16) << "isUnderLibrary:" << isUnderLibrary << "isInternal:" << isInternal;
 
         if (!isUnderLibrary) {
             // [信号审计]：项移出了托管库

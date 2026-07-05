@@ -394,6 +394,7 @@ bool MftReader::loadFromCache() {
     // 2026-05-29 物理修复：移除此处冗余的 lock 声明（父作用域已持有 lock），消除 C4456 警告
     for (const auto& drive : m_drive_list) {
         uint64_t lastUsn = m_next_usns[drive];
+        qDebug() << "[MftReader] 为驱动器启动 UsnWatcher:" << QString::fromStdWString(drive) << "StartUsn:" << lastUsn;
         auto* w = new UsnWatcher(drive, lastUsn, nullptr);
         m_watchers.push_back(w);
         w->start();
