@@ -131,26 +131,34 @@ void MftReader::clearInternal() {
 
 void MftReader::clear() {
     // 极致工业级重构：非阻塞异步清理链
-    // 1. 立即标记状态失效，让 UI 线程在 request_lock 时能快速感知并退出，实现“秒关”体验
+    // 1. 立即标记状态失效，实现“秒关”体验
     {
         QWriteLocker lock(&m_dataLock);
         if (!m_isInitialized || m_is_clearing.load()) return;
         m_is_clearing.store(true);
-        m_abort_scan.store(true); // 1.21：强制中断位
+        m_abort_scan.store(true);
         m_isInitialized = false; 
     }
 
-    // 2. [Plan-130] 优化退出响应性：主线程同步停止监控线程，确保及时释放卷句柄
+    // 2. [Plan-130] 优化退出响应性：不再主线程同步等待 Watcher 退出
+    // 将 Watcher 移动到临时变量，在后台线程执行 stop()，避免阻塞 UI
     std::vector<UsnWatcher*> toStop;
     {
         QWriteLocker lock(&m_dataLock);
         toStop = std::move(m_watchers);
         m_watchers.clear();
     }
-    for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
 
-    // 3. 将后续耗时的存盘与释放逻辑转移至后台线程
-    (void)QtConcurrent::run([this]() {
+    // 3. 将后续耗时的存盘、停止线程与释放逻辑转移至后台线程
+    (void)QtConcurrent::run([this, toStop]() {
+        // A. 在后台停止监控线程
+        for (auto* w : toStop) {
+            if (w) {
+                w->stop();
+                delete w;
+            }
+        }
+
 
         // B. 等待正在进行的异步写盘任务结束
         while (m_is_saving.load(std::memory_order_acquire)) {
@@ -1204,11 +1212,13 @@ void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, 
 
     // 2026-xx-xx 按照 Plan-106：策略：小批量发送单体信号（保证实时性），大批量发送宏观信号（保护 UI）
     // 物理加固：即使是“洪流”，也必须发射文件夹变动信号，以确保 AutoImportManager 能触发递归同步
-    if (addedKeys.size() + updatedKeys.size() < 100) {
+    // 核心修正：移动项目通常涉及数百个文件，100 的阈值过低，提升至 500
+    if (addedKeys.size() + updatedKeys.size() < 500) {
         for (uint64_t key : addedKeys) emit entryAdded(key);
         for (uint64_t key : updatedKeys) emit entryUpdated(key);
     } else {
-        // 超过 100 项视为“洪流”，仅发射文件夹变动信号和全局刷新信号
+        // 超过阈值视为“洪流”，必须发射所有文件夹变动信号，因为 AutoImportManager 极其依赖它们进行递归同步
+        qDebug() << "[MftReader] USN 信号洪流探测：" << addedKeys.size() << "Added," << updatedKeys.size() << "Updated. 启用文件夹优先转发。";
         for (uint64_t key : addedFolderKeys) emit entryAdded(key);
         for (uint64_t key : updatedFolderKeys) emit entryUpdated(key);
         emit dataChanged(-1); 
