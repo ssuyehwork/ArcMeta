@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QTimer>
+#include <QMessageBox>
 #include <QtConcurrent>
 #include <QFuture>
 #include <functional>
@@ -58,7 +59,7 @@ void AutoImportManager::startListening() {
                 if (MetadataManager::fetchWinApiMetadataDirect(managedPath, fid, &frnStr)) {
                     try {
                         uint64_t frn = std::stoull(frnStr, nullptr, 16);
-                        m_managedFrnCache.insert(frn);
+                        m_managedFrnCache.insert(frn & 0x0000FFFFFFFFFFFFull);
                         qDebug() << "[AutoImport] [Plan-131] 已缓存托管库根 FRN:" << QString::fromStdWString(frnStr) << "->" << QString::fromStdWString(managedPath);
                     } catch (...) {
                         qWarning() << "[AutoImport] 解析托管库根 FRN 失败:" << QString::fromStdWString(frnStr);
@@ -88,15 +89,23 @@ void AutoImportManager::syncAllManagedLibraries() {
     for (const QFileInfo& d : drives) {
         QString drive = d.absolutePath();
         QString letter = drive.left(1).toUpper();
+        if (!letter.endsWith(":")) letter += ":";
         
         QDir rootDir(drive);
         QStringList entries = rootDir.entryList({"ArcMeta.Library_*"}, QDir::Dirs | QDir::Hidden);
         
-        QString targetName = "ArcMeta.Library_" + letter;
+        QString targetName = "ArcMeta.Library_" + letter.left(1);
         for (const QString& entry : entries) {
             if (QString::compare(entry, targetName, Qt::CaseInsensitive) == 0) {
                 QString managedPath = rootDir.absoluteFilePath(entry);
                 qDebug() << "[AutoImport] 启动对账：发现物理托管库，执行同步 ->" << managedPath;
+
+                // [Plan-129] 热点补齐：如果该盘符未开启 MFT 索引，立即点火，确保运行期间变动可感知
+                if (!MftReader::instance().isDriveIndexed(letter)) {
+                    qDebug() << "[AutoImport] 检测到托管库所在盘符未索引，热启动 USN 监控 ->" << letter;
+                    MftReader::instance().buildIndex({letter});
+                }
+
                 (void)QtConcurrent::run([this, managedPath]() {
                     handleRecursiveIngestion(QDir::toNativeSeparators(managedPath).toStdWString());
                 });
@@ -119,10 +128,21 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
         if (idx < 0) return;
 
         QString qPath = MftReader::instance().getFullPath(idx);
+
+        // 调试：弹出 QMessageBox 告知感知到新增
+        QMetaObject::invokeMethod(qApp, [qPath]() {
+            QMessageBox::information(nullptr, "USN 调试", "感知到托管库内【新增】项目：\n" + qPath);
+        }, Qt::QueuedConnection);
+
         std::wstring fullPath = qPath.toStdWString();
         uint64_t frn = MftReader::instance().getFrn(idx);
 
         if (MftReader::instance().isDirectory(idx)) {
+            // 调试：弹出 QMessageBox 告知开始同步文件夹
+            QMetaObject::invokeMethod(qApp, [qPath]() {
+                QMessageBox::information(nullptr, "USN 调试", "正在对新增文件夹触发【递归解析入库】：\n" + qPath);
+            }, Qt::QueuedConnection);
+
             // 1:1 镜像同步：创建逻辑分类
             int existingCat = CategoryRepo::findByFrn(frn);
             if (existingCat == 0) {
@@ -151,6 +171,10 @@ void AutoImportManager::onEntryAdded(uint64_t key) {
                 std::lock_guard<std::mutex> lock(m_queueMutex);
                 m_pendingPaths.push_back(fullPath);
             }
+            // 调试：弹出 QMessageBox 告知已加入队列
+            QMetaObject::invokeMethod(qApp, [qPath]() {
+                QMessageBox::information(nullptr, "USN 调试", "已将新增文件加入【待解析队列】：\n" + qPath);
+            }, Qt::QueuedConnection);
             QMetaObject::invokeMethod(m_debounceTimer, "start", Qt::QueuedConnection);
         }
     });
@@ -161,6 +185,17 @@ void AutoImportManager::onEntryUpdated(uint64_t key) {
         // 2026-08-xx 按照 Plan-128：操作溯源判定
         bool isInternal = MetadataManager::instance().isInternalOperating();
         bool isUnderLibrary = isUnderManagedLibrary(key);
+
+        if (isUnderLibrary) {
+            int idx = MftReader::instance().getIndexByKey(key);
+            if (idx >= 0) {
+                QString qPath = MftReader::instance().getFullPath(idx);
+                // 调试：弹出 QMessageBox 告知感知到移动/更新
+                QMetaObject::invokeMethod(qApp, [qPath]() {
+                    QMessageBox::information(nullptr, "USN 调试", "感知到托管库内【移动/更新】项目：\n" + qPath);
+                }, Qt::QueuedConnection);
+            }
+        }
 
         if (!isUnderLibrary) {
             // [信号审计]：项移出了托管库
@@ -287,6 +322,12 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
             if (!path.empty()) {
                 // 物理红线：仅针对原先位于托管库内的项执行审计分流
                 if (MetadataManager::isInsideManagedLibrary(path)) {
+                    QString qPath = QString::fromStdWString(path);
+                    // 调试：弹出 QMessageBox 告知感知到删除
+                    QMetaObject::invokeMethod(qApp, [qPath]() {
+                        QMessageBox::warning(nullptr, "USN 调试", "感知到托管库内项目被【删除】：\n" + qPath);
+                    }, Qt::QueuedConnection);
+
                     if (isInternal) {
                         qDebug() << "[AutoImport] 内部操作删除：执行硬删除 ->" << QString::fromStdWString(path);
                         MetadataManager::instance().removeMetadataSync(path);
@@ -388,6 +429,12 @@ void AutoImportManager::processImportQueue() {
         for (const auto& p : pathsToProcess) {
             pathsByVol[MetadataManager::getVolumeSerialNumber(p)].push_back(p);
         }
+
+        // 调试：开始批量解析
+        size_t total = pathsToProcess.size();
+        QMetaObject::invokeMethod(qApp, [total]() {
+            QMessageBox::information(nullptr, "USN 调试", QString("开始执行批量解析流水线，总计项数：%1").arg(total));
+        }, Qt::QueuedConnection);
 
         for (auto& pair : pathsByVol) {
             const std::wstring& vol = pair.first;
