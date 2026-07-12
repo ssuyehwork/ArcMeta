@@ -462,7 +462,7 @@ QMimeData* ScanTableModel::mimeData(const QModelIndexList& indexes) const {
 ScanDialog::ScanDialog(QWidget* parent)
     : FramelessDialog("FERREX-META", parent) 
 {
-    // [CRITICAL] 必须在构造函数最顶端极其安全地预初始化悬停定时器
+    // [CRITICAL] 必须在构造函数最顶端极其安全地预初始化悬停定时器并注册本身事件过滤器
     m_itemToolTipTimer = new QTimer(this);
     m_itemToolTipTimer->setSingleShot(true);
     m_itemToolTipTimer->setInterval(2000);
@@ -475,6 +475,7 @@ ScanDialog::ScanDialog(QWidget* parent)
             ToolTipOverlay::instance()->showText(QCursor::pos(), text);
         }
     });
+    this->installEventFilter(this);
 
     m_config.load();
     resize(1000, 700);
@@ -937,6 +938,9 @@ void ScanDialog::setupUi() {
     mainLayout->addWidget(searchContainer);
 
     m_resultView = new QTableView();
+    m_resultView->setMouseTracking(true);
+    m_resultView->viewport()->setMouseTracking(true);
+    m_resultView->installEventFilter(this);
     m_resultView->viewport()->installEventFilter(this);
     m_resultView->verticalHeader()->setDefaultSectionSize(30); // 默认行高
     m_controller = new ScanController(this);
@@ -1006,6 +1010,9 @@ void ScanDialog::setupUi() {
     m_viewStack->addWidget(m_resultView);
     
     m_iconView = new JustifiedView();
+    m_iconView->setMouseTracking(true);
+    m_iconView->viewport()->setMouseTracking(true);
+    m_iconView->installEventFilter(this);
     m_iconView->viewport()->installEventFilter(this);
     m_iconView->setModel(m_tableModel);
     m_iconView->setItemDelegate(new ThumbnailDelegate(this));
@@ -1775,9 +1782,18 @@ bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
         return FramelessDialog::eventFilter(watched, event);
     }
 
-    // 2. 检查是否为列表或网格视图的 viewport 事件，执行统一的悬停状态机
-    bool isResultView = (m_resultView && watched == m_resultView->viewport());
-    bool isIconView = (m_iconView && watched == m_iconView->viewport());
+    // 2. 检查整个窗口主体的离开或失焦事件，确保鼠标移出软件范围时绝无残留
+    if (watched == this) {
+        if (event->type() == QEvent::Leave || event->type() == QEvent::WindowDeactivate || event->type() == QEvent::Hide) {
+            ToolTipOverlay::hideTip();
+            m_itemToolTipTimer->stop();
+            m_lastHoveredIndex = QModelIndex();
+        }
+    }
+
+    // 3. 检查是否为列表或网格视图及其 viewport 的事件，执行统一的悬停状态机
+    bool isResultView = (m_resultView && (watched == m_resultView || watched == m_resultView->viewport()));
+    bool isIconView = (m_iconView && (watched == m_iconView || watched == m_iconView->viewport()));
 
     if (isResultView || isIconView) {
         QAbstractItemView* view = isResultView ? m_resultView : m_iconView;
@@ -1786,18 +1802,33 @@ bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
                 case QEvent::MouseMove: {
                     QMouseEvent* me = static_cast<QMouseEvent*>(event);
                     if (me) {
-                        QModelIndex index = view->indexAt(me->pos());
-                        if (index.isValid()) {
+                        QPoint pos = me->pos();
+                        if (watched == view) {
+                            pos = view->viewport()->mapFrom(view, pos);
+                        }
+                        QModelIndex index = view->indexAt(pos);
+                        bool isInsideCard = true;
+
+                        if (isIconView && index.isValid()) {
+                            // 在网格图标视图下，精准判定鼠标是否在卡片区域内（adjusted 对应 ThumbnailDelegate::calculateMetrics 里的 cardRect 边界）
+                            QRect cellRect = view->visualRect(index);
+                            QRect cardRect = cellRect.adjusted(3, 3, -3, -67);
+                            if (!cardRect.contains(pos)) {
+                                isInsideCard = false;
+                            }
+                        }
+
+                        if (index.isValid() && isInsideCard) {
                             // 统一映射到第 0 列作为项唯一标识
                             QModelIndex baseIndex = view->model()->index(index.row(), 0);
 
-                            // 任何鼠标移动（即使在同一个项内）代表不处于静止悬停状态，重置状态
+                            // 任何鼠标移动（包含微小移动）代表不处于静止悬停状态，重置状态
                             ToolTipOverlay::hideTip();
                             m_itemToolTipTimer->stop();
                             m_lastHoveredIndex = baseIndex;
                             m_itemToolTipTimer->start(2000); // 重新计算：必须持续静止悬停 2 秒
                         } else {
-                            // 鼠标移动到了没有项目的空白区，立即销毁定时器并隐藏气泡
+                            // 鼠标移动到了没有项目或在卡片范围之外的空白区，立即销毁定时器并隐藏气泡
                             ToolTipOverlay::hideTip();
                             m_itemToolTipTimer->stop();
                             m_lastHoveredIndex = QModelIndex();
@@ -1812,11 +1843,15 @@ bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
                 case QEvent::Wheel:
                 case QEvent::FocusOut:
                 case QEvent::Hide: {
-                    // 在鼠标移动、点击、移出、滚动或隐藏等非悬停状态下，立即销毁（停止）定时器并隐藏 ToolTipOverlay
+                    // 在鼠标点击、移出、滚动或失去焦点时，立即销毁（停止）定时器并隐藏 ToolTipOverlay
                     ToolTipOverlay::hideTip();
                     m_itemToolTipTimer->stop();
                     m_lastHoveredIndex = QModelIndex();
                     break;
+                }
+                case QEvent::ToolTip: {
+                    // 彻底阻断并消费原生 ToolTip 事件，阻止其向 Delegate 的 helpEvent 传递，杜绝无延时触发
+                    return true;
                 }
                 default:
                     break;
@@ -1824,7 +1859,7 @@ bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
         }
     }
 
-    // 3. 原有的 QSlider 点击跳转定位逻辑 (包含严格的空指针检测防御)
+    // 4. 原有的 QSlider 点击跳转定位逻辑 (包含严格的空指针检测防御)
     if (m_sizeSlider && watched == m_sizeSlider && event->type() == QEvent::MouseButtonPress) {
         QMouseEvent* me = static_cast<QMouseEvent*>(event);
         if (me && me->button() == Qt::LeftButton) {
@@ -1834,7 +1869,7 @@ bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
         }
     }
 
-    // 4. 原有的双击搜索框弹出搜索历史逻辑 (包含极其严格的空指针检测防御)
+    // 5. 原有的双击搜索框弹出搜索历史逻辑 (包含极其严格的空指针检测防御)
     bool isSearchEdit = (m_searchEdit && watched == m_searchEdit);
     bool isExtEdit = (m_extEdit && watched == m_extEdit);
     if ((isSearchEdit || isExtEdit) && event->type() == QEvent::MouseButtonDblClick) {
