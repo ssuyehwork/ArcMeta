@@ -413,23 +413,6 @@ bool ThumbnailDelegate::eventFilter(QObject* obj, QEvent* event) {
     return QStyledItemDelegate::eventFilter(obj, event); 
 } 
 
-bool ThumbnailDelegate::helpEvent(QHelpEvent* event, QAbstractItemView* view, 
-                                const QStyleOptionViewItem& option, const QModelIndex& index) {
-    Metrics m = calculateMetrics(option);
-    QRect statusRect(m.cardRect.right() - 22, m.cardRect.top() + 8, 16, 16);
-
-    if (statusRect.contains(event->pos())) {
-        double p = (m_registrationProgressRole != -1) ? index.data(m_registrationProgressRole).toDouble() : -1.0;
-        if (p >= 0.0) {
-            // 2026-07-xx 按照 Plan-65：悬停触发，timeout = 0
-            ToolTipOverlay::instance()->showText(event->globalPos(), 
-                QString("登记进度: %1%").arg(qRound(p * 100)), 0);
-            return true;
-        }
-    }
-    return QStyledItemDelegate::helpEvent(event, view, option, index);
-}
-
 bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) {
     if (m_ratingRole != -1 && event->type() == QEvent::MouseButtonPress) {
         QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event);

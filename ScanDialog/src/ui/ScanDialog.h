@@ -173,6 +173,9 @@ private:
 
     std::unique_ptr<CacheManager> m_cacheManager;
     ScanConfig m_config;
+
+    QTimer* m_itemToolTipTimer = nullptr;
+    QModelIndex m_lastHoveredIndex;
 };
 
 } // namespace ArcMeta

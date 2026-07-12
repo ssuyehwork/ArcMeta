@@ -3218,23 +3218,6 @@ bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) {
     return QStyledItemDelegate::eventFilter(obj, event); 
 } 
  
-bool GridItemDelegate::helpEvent(QHelpEvent* event, QAbstractItemView* view, 
-                                const QStyleOptionViewItem& option, const QModelIndex& index) {
-    GridMetrics m = calculateMetrics(option);
-    QRect statusRect(m.squareRect.right() - 22, m.squareRect.top() + 8, 16, 16);
-
-    if (statusRect.contains(event->pos())) {
-        double p = index.data(RegistrationProgressRole).toDouble();
-        if (p >= 0.0) {
-            // 2026-07-xx 按照 Plan-65：悬停触发，timeout = 0
-            ToolTipOverlay::instance()->showText(event->globalPos(), 
-                QString("登记进度: %1%").arg(qRound(p * 100)), 0);
-            return true;
-        }
-    }
-    return QStyledItemDelegate::helpEvent(event, view, option, index);
-}
-
 bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) { 
     if (event->type() == QEvent::MouseButtonPress) { 
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 子类转型歧义 

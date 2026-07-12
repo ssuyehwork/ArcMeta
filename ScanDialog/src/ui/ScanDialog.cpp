@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "ScanDialog.h"
+#include "ToolTipOverlay.h"
 #include "../core/CacheManager.h"
 #include <QPainter>
 #include <QTimer>
@@ -461,6 +462,20 @@ QMimeData* ScanTableModel::mimeData(const QModelIndexList& indexes) const {
 ScanDialog::ScanDialog(QWidget* parent)
     : FramelessDialog("FERREX-META", parent) 
 {
+    // [CRITICAL] 必须在构造函数最顶端极其安全地预初始化悬停定时器
+    m_itemToolTipTimer = new QTimer(this);
+    m_itemToolTipTimer->setSingleShot(true);
+    m_itemToolTipTimer->setInterval(2000);
+    connect(m_itemToolTipTimer, &QTimer::timeout, this, [this]() {
+        if (!m_itemToolTipTimer) return;
+        if (!m_lastHoveredIndex.isValid()) return;
+        if (!m_tableModel) return;
+        QString text = m_tableModel->data(m_lastHoveredIndex, Qt::ToolTipRole).toString();
+        if (!text.isEmpty()) {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), text);
+        }
+    });
+
     m_config.load();
     resize(1000, 700);
     setMinimumSize(800, 500);
@@ -922,6 +937,7 @@ void ScanDialog::setupUi() {
     mainLayout->addWidget(searchContainer);
 
     m_resultView = new QTableView();
+    m_resultView->viewport()->installEventFilter(this);
     m_resultView->verticalHeader()->setDefaultSectionSize(30); // 默认行高
     m_controller = new ScanController(this);
     m_tableModel = new ScanTableModel(m_controller, this);
@@ -990,6 +1006,7 @@ void ScanDialog::setupUi() {
     m_viewStack->addWidget(m_resultView);
     
     m_iconView = new JustifiedView();
+    m_iconView->viewport()->installEventFilter(this);
     m_iconView->setModel(m_tableModel);
     m_iconView->setItemDelegate(new ThumbnailDelegate(this));
     m_iconView->setTargetRowHeight(m_config.iconSize);
@@ -1751,15 +1768,76 @@ void ScanDialog::handleMetadataShortcut(QKeyEvent* event) {
 }
 
 bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
-    if (watched == m_sizeSlider && event->type() == QEvent::MouseButtonPress) {
+    if (!watched || !event) return false;
+
+    // 1. 严格的安全防御保护，避免任何对象早期未初始化或提前释放而引起的空指针解引用崩溃
+    if (!m_itemToolTipTimer) {
+        return FramelessDialog::eventFilter(watched, event);
+    }
+
+    // 2. 检查是否为列表或网格视图的 viewport 事件，执行统一的悬停状态机
+    bool isResultView = (m_resultView && watched == m_resultView->viewport());
+    bool isIconView = (m_iconView && watched == m_iconView->viewport());
+
+    if (isResultView || isIconView) {
+        QAbstractItemView* view = isResultView ? m_resultView : m_iconView;
+        if (view && view->model()) {
+            switch (event->type()) {
+                case QEvent::MouseMove: {
+                    QMouseEvent* me = static_cast<QMouseEvent*>(event);
+                    if (me) {
+                        QModelIndex index = view->indexAt(me->pos());
+                        if (index.isValid()) {
+                            // 统一映射到第 0 列作为项唯一标识
+                            QModelIndex baseIndex = view->model()->index(index.row(), 0);
+
+                            // 任何鼠标移动（即使在同一个项内）代表不处于静止悬停状态，重置状态
+                            ToolTipOverlay::hideTip();
+                            m_itemToolTipTimer->stop();
+                            m_lastHoveredIndex = baseIndex;
+                            m_itemToolTipTimer->start(2000); // 重新计算：必须持续静止悬停 2 秒
+                        } else {
+                            // 鼠标移动到了没有项目的空白区，立即销毁定时器并隐藏气泡
+                            ToolTipOverlay::hideTip();
+                            m_itemToolTipTimer->stop();
+                            m_lastHoveredIndex = QModelIndex();
+                        }
+                    }
+                    break;
+                }
+                case QEvent::Leave:
+                case QEvent::MouseButtonPress:
+                case QEvent::MouseButtonRelease:
+                case QEvent::MouseButtonDblClick:
+                case QEvent::Wheel:
+                case QEvent::FocusOut:
+                case QEvent::Hide: {
+                    // 在鼠标移动、点击、移出、滚动或隐藏等非悬停状态下，立即销毁（停止）定时器并隐藏 ToolTipOverlay
+                    ToolTipOverlay::hideTip();
+                    m_itemToolTipTimer->stop();
+                    m_lastHoveredIndex = QModelIndex();
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+    }
+
+    // 3. 原有的 QSlider 点击跳转定位逻辑 (包含严格的空指针检测防御)
+    if (m_sizeSlider && watched == m_sizeSlider && event->type() == QEvent::MouseButtonPress) {
         QMouseEvent* me = static_cast<QMouseEvent*>(event);
-        if (me->button() == Qt::LeftButton) {
+        if (me && me->button() == Qt::LeftButton) {
             int val = QStyle::sliderValueFromPosition(m_sizeSlider->minimum(), m_sizeSlider->maximum(), me->pos().x(), m_sizeSlider->width());
             m_sizeSlider->setValue(val);
             return true;
         }
     }
-    if ((watched == m_searchEdit || watched == m_extEdit) && event->type() == QEvent::MouseButtonDblClick) {
+
+    // 4. 原有的双击搜索框弹出搜索历史逻辑 (包含极其严格的空指针检测防御)
+    bool isSearchEdit = (m_searchEdit && watched == m_searchEdit);
+    bool isExtEdit = (m_extEdit && watched == m_extEdit);
+    if ((isSearchEdit || isExtEdit) && event->type() == QEvent::MouseButtonDblClick) {
         bool isQuery = (watched == m_searchEdit);
         const QStringList& history = isQuery ? m_config.queryHistory : m_config.extHistory;
         
@@ -1769,8 +1847,8 @@ bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
             
             for (const QString& item : history) {
                 menu.addAction(item, [this, isQuery, item]() {
-                    if (isQuery) m_searchEdit->setText(item);
-                    else m_extEdit->setText(item);
+                    if (isQuery && m_searchEdit) m_searchEdit->setText(item);
+                    else if (!isQuery && m_extEdit) m_extEdit->setText(item);
                     onTriggerSearch();
                 });
             }
@@ -1782,10 +1860,14 @@ bool ScanDialog::eventFilter(QObject* watched, QEvent* event) {
                 m_config.save();
             });
             
-            menu.exec(static_cast<QWidget*>(watched)->mapToGlobal(QPoint(0, static_cast<QWidget*>(watched)->height())));
+            QWidget* widget = static_cast<QWidget*>(watched);
+            if (widget) {
+                menu.exec(widget->mapToGlobal(QPoint(0, widget->height())));
+            }
             return true;
         }
     }
+
     return FramelessDialog::eventFilter(watched, event);
 }
 
