@@ -25,7 +25,7 @@ namespace ArcMeta {
 std::vector<uint32_t> CacheManager::s_crcTable;
 bool CacheManager::s_crcTableInitialized = false;
 
-// 2026-05-09 按照用户要求：实现高效缓存管理器，参考 FERREX 的 FIDX 格式
+// 2026-05-09 按照用户要求：实现高效缓存管理器，参考 ArcMeta 的 FIDX 格式
 CacheManager::CacheManager() {
     // 初始化缓存目录 - 修改为程序根目录下的Cache文件夹
     QString appDir = QCoreApplication::applicationDirPath();
