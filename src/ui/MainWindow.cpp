@@ -92,7 +92,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     resize(1200, 800);
     setMinimumSize(1180, 653); // 物理对齐：5x230px面板 + 20px分割手柄 + 10px全局边距
-    setWindowTitle("FERREX");
+    setWindowTitle("ArcMeta");
 
     // ============================================================
     // 【物理护栏 - 禁止移动】事件过滤器必须在 initUi() 之前创建
@@ -941,7 +941,7 @@ void MainWindow::setupSplitters() {
     m_logoLabel->setStyleSheet("background: transparent; border: none;");
     m_titleBarLayout->addWidget(m_logoLabel);
 
-    m_appNameLabel = new QLabel("FERREX", m_titleBarWidget);
+    m_appNameLabel = new QLabel("ArcMeta", m_titleBarWidget);
     m_appNameLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-weight: bold;").arg(BrandOrange.name()));
     m_titleBarLayout->addWidget(m_appNameLabel);
     m_titleBarLayout->addStretch();
