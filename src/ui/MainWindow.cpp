@@ -291,6 +291,16 @@ void MainWindow::initUi() {
         unifiedNavigateTo(kProtocolCategory + QString::number(id) + "?name=" + name);
     });
 
+    // 监听内容容器的右键添加至收藏夹信号
+    connect(m_contentPanel, &ContentPanel::requestAddFavorite, this, [this](const QStringList& paths) {
+        if (m_navPanel) {
+            for (const QString& p : paths) {
+                m_navPanel->addFavoriteItem(p);
+            }
+            m_navPanel->saveFavorites();
+        }
+    });
+
     // 2. 内容面板选中项改变 -> 元数据面板刷新 & 自动预览
     // 2026-03-xx 按照高性能要求，优先从模型 Role 读取元数据缓存，避免频繁磁盘 IO
     // 2026-05-27 物理加固：补全 this 上下文
