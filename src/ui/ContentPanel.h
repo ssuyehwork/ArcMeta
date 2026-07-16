@@ -169,7 +169,8 @@ public:
         ActionProperties,
         ActionExtractColor,
         ActionAddToCategory,
-        ActionRescan
+        ActionRescan,
+        ActionAddToFavorites
     };
 
     explicit ContentPanel(QWidget* parent = nullptr);
@@ -215,6 +216,12 @@ signals:
      * @param path 物理路径
      */
     void requestQuickLook(const QString& path);
+
+    /**
+     * @brief 请求将指定路径添加至收藏夹的信号
+     * @param paths 选中的项目绝对物理路径列表
+     */
+    void requestAddFavorite(const QStringList& paths);
 
     /**
      * @brief 选中项发生变化时通知元数据面板刷新
