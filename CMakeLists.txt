@@ -103,8 +103,6 @@ set(SOURCES
     src/ui/DropTreeView.h
     src/ui/FilterPanel.cpp
     src/ui/FilterPanel.h
-    src/ui/InvalidDataModel.h
-    src/ui/InvalidDataListView.h
     src/ui/FramelessDialog.cpp
     src/ui/FramelessDialog.h
     src/ui/FramelessFileDialog.cpp

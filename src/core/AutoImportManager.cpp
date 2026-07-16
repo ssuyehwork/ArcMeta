@@ -12,7 +12,6 @@
 #include <QTimer>
 #include <QtConcurrent>
 #include <QFuture>
-#include <QMessageBox> // 引入弹出框支持
 #include <functional>
 #include <cwchar>
 #include <map>
