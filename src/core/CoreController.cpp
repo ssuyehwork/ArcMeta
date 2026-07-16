@@ -1,5 +1,6 @@
 #include "CoreController.h"
 #include "AutoImportManager.h"
+#include "NativeFolderWatcher.h"
 #include "../mft/MftReader.h"
 #include "AppConfig.h"
 #include "../meta/CategoryRepo.h"
@@ -44,10 +45,26 @@ void CoreController::startSystem() {
 
             // 2026-08-xx 按照 Plan-126：彻底废除 NativeFolderWatcher (IOCP) 双轨制。
             // 全面转向单一 USN Journal 主轨。
-            AutoImportManager::instance().startListening();
+            // AutoImportManager::instance().startListening(); // 注销 USN 日志监听
             
             // [Plan-129] USN 监控点火：系统启动时自动载入缓存并开启监控线程
-            MftReader::instance().loadFromCache();
+            // MftReader::instance().loadFromCache();          // 注销 Mft MftReader 缓存加载
+
+            // 启动原生监控服务 (对应用户原话："采用NativeFolderWatcher (IOCP) 机制的方式")
+            const auto drives = QDir::drives();
+            for (const QFileInfo& d : drives) {
+                std::wstring wPath = d.absolutePath().toStdWString();
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wPath);
+                QString letter = d.absolutePath().left(1).toUpper();
+
+                if (volSerial != L"UNKNOWN") {
+                    std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
+                    if (!managedAbsW.empty()) {
+                        qDebug() << "[Core] 识别到托管库，开启 IOCP 监控:" << QString::fromStdWString(managedAbsW);
+                        NativeFolderWatcher::instance().addWatch(managedAbsW);
+                    }
+                }
+            }
 
             // 2026-08-xx 物理同步：初始化完成后执行一次全量物理库对账 (在后台线程执行，避免阻塞 UI)
             AutoImportManager::instance().syncAllManagedLibraries();
