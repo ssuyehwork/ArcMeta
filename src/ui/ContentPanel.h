@@ -169,6 +169,7 @@ public:
         ActionProperties,
         ActionExtractColor,
         ActionAddToCategory,
+        ActionAddToFavorites,
         ActionRescan
     };
 
@@ -222,6 +223,12 @@ signals:
      */
     void selectionChanged(const QStringList& paths);
     void directorySelected(const QString& path);
+
+    /**
+     * @brief 请求将指定路径添加至收藏夹的信号 (对应用户原话：“把选中的项目收藏到收藏区里”)
+     * @param paths 选中的项目绝对物理路径列表 (对应用户原话：“选中某个项目”)
+     */
+    void requestAddFavorite(const QStringList& paths);
 
     /**
      * @brief 数据源变更信号，用于焦点线管理

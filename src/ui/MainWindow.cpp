@@ -249,6 +249,16 @@ void MainWindow::initUi() {
         unifiedNavigateTo(path);
     });
 
+    // 监听内容容器的右键添加至收藏夹信号 (对应用户原话：“选中某个项目单击右键选择该选项“添加至收藏夹”时，则把选中的项目收藏到收藏区里”)
+    connect(m_contentPanel, &ContentPanel::requestAddFavorite, this, [this](const QStringList& paths) {
+        if (m_navPanel) {
+            for (const QString& p : paths) {
+                m_navPanel->addFavoriteItem(p);
+            }
+            m_navPanel->saveFavorites();
+        }
+    });
+
     // 1a. 分类选择 -> 统一导航中枢 (Plan-56)
     connect(m_categoryPanel, &CategoryPanel::categorySelected, this, [this](int id, const QString& name, const QString& type, const QString& path) {
         m_currentCategoryId = id;

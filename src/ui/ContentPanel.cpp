@@ -1774,6 +1774,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
  
         menu.addSeparator(); 
         menu.addAction("复制路径")->setData(ActionCopyPath); 
+        menu.addAction("添加至收藏夹")->setData(ActionAddToFavorites);
         menu.addAction("属性")->setData(ActionProperties); 
 
         // 2026-07-xx 按照 Development_Plan 2.1：始终显示“重新扫描”选项 (仅限托管库内项目)
@@ -2228,6 +2229,23 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         }
                     });
                 });
+            }
+            break;
+        }
+        case ActionAddToFavorites: {
+            QStringList selectedPaths;
+            QModelIndexList indexes = getSelectedIndexes();
+            for (const auto& idx : indexes) {
+                if (idx.column() == 0) {
+                    QString p = idx.data(PathRole).toString();
+                    if (!p.isEmpty()) {
+                        selectedPaths << p;
+                    }
+                }
+            }
+            if (!selectedPaths.isEmpty()) {
+                emit requestAddFavorite(selectedPaths);
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "已成功添加至收藏夹", 1500, QColor("#2ecc71"));
             }
             break;
         }

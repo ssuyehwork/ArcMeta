@@ -42,6 +42,10 @@ public:
      */
     void selectPath(const QString& path);
 
+    // 新增：向外暴露的收藏夹追加与持久化保存接口 (对应用户原话：“把选中的项目收藏到收藏区里”)
+    void addFavoriteItem(const QString& path);
+    void saveFavorites();
+
 signals:
     /**
      * @brief 当用户点击目录时发出信号
@@ -70,8 +74,6 @@ private:
     
     // 收藏夹持久化
     void loadFavorites();
-    void saveFavorites();
-    void addFavoriteItem(const QString& path);
 
     QWidget* buildGroup(const QString& title, const QIcon& icon, const QColor& color, QVBoxLayout*& outContentLayout);
 
