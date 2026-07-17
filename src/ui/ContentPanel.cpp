@@ -26,6 +26,7 @@
 #include <QStyle> 
 #include <QLabel> 
 #include <QAction> 
+#include <QActionGroup>
 #include <QMenu> 
 #include <QAbstractItemView> 
 #include <QStandardItem> 
