@@ -9,7 +9,7 @@ namespace ArcMeta {
 class IScanResultView : public QObject { 
     Q_OBJECT 
 public: 
-    explicit IScanResultView(QWidget* parent = nullptr) : QObject(parent) {}
+    explicit IScanResultView(QObject* parent = nullptr) : QObject(parent) {}
     virtual ~IScanResultView() = default; 
  
     // 获取宿主物理外层 QWidget 容器控件（用于加载至 QStackedWidget） 

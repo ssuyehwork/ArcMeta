@@ -1357,7 +1357,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 return true; 
             } 
             if (keyEvent->modifiers() & Qt::ControlModifier && keyEvent->key() == Qt::Key_Backslash) { 
-                setViewMode(m_viewStack->currentIndex() == 0 ? ListView : GridView); 
+                setViewMode(m_viewStack->currentIndex() == 0 ? GridViewMode : ListViewMode);
                 return true; 
             } 
         } 
@@ -1398,7 +1398,7 @@ void ContentPanel::wheelEvent(QWheelEvent* event) {
                 m_zoomLevel += 4;
                 if (m_zoomLevel > 96) {
                     m_zoomLevel = 96;
-                    setViewMode(GridView);
+                    setViewMode(GridViewMode);
                 }
                 updateGridSize();
             } else {
@@ -1409,7 +1409,7 @@ void ContentPanel::wheelEvent(QWheelEvent* event) {
             // 缩小
             if (m_viewStack->currentWidget() == m_gridView) {
                 if (m_zoomLevel <= 96) {
-                    setViewMode(ListView);
+                    setViewMode(ListViewMode);
                     m_zoomLevel = 80;
                     updateGridSize();
                 } else {

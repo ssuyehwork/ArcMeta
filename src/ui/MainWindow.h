@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QSystemTrayIcon>
 #include <QSet>
+#include <QSlider>
 
 #include "FramelessDialog.h"
 
@@ -196,7 +197,7 @@ private:
     QPushButton* m_btnListView = nullptr;
     QPushButton* m_btnJustifiedView = nullptr;
     QPushButton* m_btnGridView = nullptr;
-    class QSlider* m_sizeSlider = nullptr;
+    QSlider* m_sizeSlider = nullptr;
     QTimer* m_zoomDebounceTimer = nullptr;
 
     // 底部状态栏
