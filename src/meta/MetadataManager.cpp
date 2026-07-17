@@ -1474,24 +1474,34 @@ std::wstring MetadataManager::getManagedLibraryPath(const std::wstring& volSeria
 bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
     if (path.empty()) return false;
     
+    std::wstring normW = normalizePath(path);
+    QString qPath = QString::fromStdWString(normW).toLower();
+
+    // 1. 检查默认托管库
     std::wstring volSerial = getVolumeSerialNumber(path);
     QString letter = (path.length() >= 2 && path[1] == L':') ? QString::fromWCharArray(&path[0], 1) : "";
-    
     std::wstring managedAbsW = getManagedLibraryPath(volSerial, letter);
-    if (managedAbsW.empty()) return false;
+    if (!managedAbsW.empty()) {
+        QString managedAbs = QString::fromStdWString(managedAbsW).toLower();
+        if (qPath.startsWith(managedAbs)) {
+            if (qPath.length() == managedAbs.length() ||
+                qPath[managedAbs.length()] == '\\' || qPath[managedAbs.length()] == '/') {
+                return true;
+            }
+        }
+    }
 
-    QString managedAbs = QString::fromStdWString(managedAbsW).toLower();
-    QString qPath = QString::fromStdWString(normalizePath(path)).toLower();
-
-    qDebug() << "[DIAG] isInsideManagedLibrary 路径比对 -> 库:" << managedAbs << "目标:" << qPath;
-
-    if (qPath.startsWith(managedAbs)) {
-        bool match = false;
-        if (qPath.length() == managedAbs.length()) match = true;
-        else if (qPath[managedAbs.length()] == '\\' || qPath[managedAbs.length()] == '/') match = true;
-        
-        qDebug() << "[DIAG] isInsideManagedLibrary 匹配结果:" << match;
-        return match;
+    // 2. 检查自定义托管/监控库 (AppConfig)
+    QStringList customFolders = AppConfig::instance().getValue("DriveBar/CustomMonitoredFolders").toStringList();
+    for (const QString& folder : customFolders) {
+        std::wstring customNorm = normalizePath(folder.toStdWString());
+        QString customAbs = QString::fromStdWString(customNorm).toLower();
+        if (qPath.startsWith(customAbs)) {
+            if (qPath.length() == customAbs.length() ||
+                qPath[customAbs.length()] == '\\' || qPath[customAbs.length()] == '/') {
+                return true;
+            }
+        }
     }
 
     return false;

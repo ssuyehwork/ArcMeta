@@ -1809,6 +1809,9 @@ void MainWindow::showNewAutoImportDialog() {
             // 2. 动态点火 NativeFolderWatcher 的监控
             NativeFolderWatcher::instance().addWatch(normPath);
 
+            // 2a. 异步递归扫描并将既有数据入库登记
+            MetadataManager::instance().markAsRegistered(normPath);
+
             // 3. 重新加载渲染盘符栏 FolderButtons
             updateCustomFolderButtons();
 
