@@ -1510,18 +1510,21 @@ void ContentPanel::initGridView() {
 } 
  
 void ContentPanel::initListView() { 
+    qDebug() << "[Content] [Trace] [initListView] 进入";
     m_treeView = new DropTreeView(this); 
+    qDebug() << "[Content] [Trace] [initListView] 1. new DropTreeView 完成";
     m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded); 
     m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded); 
     m_treeView->setSortingEnabled(true); 
     m_treeView->setContextMenuPolicy(Qt::CustomContextMenu); 
     m_treeView->setSelectionMode(QAbstractItemView::ExtendedSelection); 
-    // 2026-06-xx 按照用户要求：开启蓝色透明框选效果
-    // 物理修复：QTreeView 不支持 setSelectionRectVisible，通过 QPalette 高亮色实现视觉对齐
+    qDebug() << "[Content] [Trace] [initListView] 2. 基础属性与 SelectionMode 设置完成";
+
     QPalette tp = m_treeView->palette();
     tp.setColor(QPalette::Highlight, QColor(55, 138, 221, 80));
     tp.setColor(QPalette::HighlightedText, Qt::white);
     m_treeView->setPalette(tp);
+    qDebug() << "[Content] [Trace] [initListView] 3. 调色板设置完成";
      
     m_treeView->setDragEnabled(true); 
     m_treeView->setAcceptDrops(true);
@@ -1529,13 +1532,17 @@ void ContentPanel::initListView() {
  
     m_treeView->setExpandsOnDoubleClick(false); 
     m_treeView->setRootIsDecorated(false); 
+    qDebug() << "[Content] [Trace] [initListView] 4. 拖拽属性与缩放双击设置完成";
      
     m_treeView->setItemDelegate(new TreeItemDelegate(this)); 
+    qDebug() << "[Content] [Trace] [initListView] 5. setItemDelegate 完成";
  
     m_treeView->setModel(m_proxyModel); 
     m_treeView->viewport()->installEventFilter(this); 
+    qDebug() << "[Content] [Trace] [initListView] 6. setModel 及事件过滤器完成";
 
     connect(m_treeView, SIGNAL(pathsDropped(QStringList,QModelIndex)), this, SLOT(onPathsDropped(QStringList,QModelIndex)));
+    qDebug() << "[Content] [Trace] [initListView] 7. pathsDropped 信号连接完成";
  
     m_treeView->setStyleSheet( 
         "QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
@@ -1544,44 +1551,46 @@ void ContentPanel::initListView() {
         "QTreeView::item:hover { background-color: #2A2A2A; }"
         "QTreeView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }" 
     ); 
+    qDebug() << "[Content] [Trace] [initListView] 8. QSS 样式表加载完成";
  
     m_treeView->header()->setDefaultAlignment(Qt::AlignCenter);
     m_treeView->header()->setStyleSheet( 
         "QHeaderView::section { background-color: #252525; color: #B0B0B0; border: none; border-right: 1px solid #333333; height: 32px; font-size: 11px; }" 
     ); 
+    qDebug() << "[Content] [Trace] [initListView] 9. Header 样式表加载完成";
     
-    // 2026-06-16 工业级 UI 架构重构 (Plan-21)：名称 Stretch + 日期可调且 Min 150px
     auto* header = m_treeView->header();
     header->setStretchLastSection(false); // 禁止末端拉伸，交由名称列处理
     header->setCascadingSectionResizes(false);
     header->setMinimumSectionSize(30);    // 全局最小宽度设定为 30 像素
+    qDebug() << "[Content] [Trace] [initListView] 10. Header 物理属性配置完成";
 
     QByteArray headerState = AppConfig::instance().getValue("UI/ListHeaderState").toByteArray();
     if (!headerState.isEmpty()) {
+        qDebug() << "[Content] [Trace] [initListView] 11a. 准备恢复 Header 状态...";
         header->restoreState(headerState);
+        qDebug() << "[Content] [Trace] [initListView] 11b. Header 状态恢复完成";
     } 
 
-    // 无论是否恢复状态，都显式设定初始宽度与最小值，防止恢复状态异常导致列宽为0
-    // 确保所有列均可见
     for(int i = 0; i <= 7; ++i) header->setSectionHidden(i, false);
+    qDebug() << "[Content] [Trace] [initListView] 12. 强制显示所有列完成";
 
-    // 初始像素宽度设定
     header->resizeSection(0, 400); // 名称
-    header->resizeSection(1, 40);  // 状态 (固定图标区)
-    header->resizeSection(2, 60);  // 星级 (固定图标区)
-    header->resizeSection(3, 60);  // 颜色标记 (固定图标区)
+    header->resizeSection(1, 40);  // 状态
+    header->resizeSection(2, 60);  // 星级
+    header->resizeSection(3, 60);  // 颜色标记
     header->resizeSection(4, 100); // 标签
     header->resizeSection(5, 80);  // 类型
     header->resizeSection(6, 80);  // 大小
-    header->resizeSection(7, 150); // 修改日期：物理锁定 150 像素
+    header->resizeSection(7, 150); // 修改日期
+    qDebug() << "[Content] [Trace] [initListView] 13.resizeSection 列宽配置完成";
     
-    // 1. 设定调整模式：名称列拉伸，其余列交互
     for(int i = 1; i <= 7; ++i) {
         header->setSectionResizeMode(i, QHeaderView::Interactive);
     }
     header->setSectionResizeMode(0, QHeaderView::Stretch);
+    qDebug() << "[Content] [Trace] [initListView] 14. setSectionResizeMode 调整模式配置完成";
 
-    // 3. 宽度守恒与物理红线拦截逻辑
     connect(header, &QHeaderView::sectionResized, this, [this, header](int index, int oldSize, int newSize) {
         Q_UNUSED(oldSize);
         static bool guard = false; 
@@ -1589,36 +1598,35 @@ void ContentPanel::initListView() {
         
         guard = true;
         
-        // 物理红线判定：修改日期（索引7）最小 150px
         if (index == 7 && newSize < 150) {
             header->resizeSection(7, 150);
             guard = false;
             return;
         }
 
-        // 宽度守恒判定：杜绝水平滚动条
         int currentTotal = header->length();
         int maxAvailable = m_treeView->viewport()->width();
         
         if (currentTotal > maxAvailable && maxAvailable > 100) {
              int allowed = newSize - (currentTotal - maxAvailable);
              int minAllowed = header->minimumSectionSize();
-             if (index == 7) minAllowed = 150; // 修改日期红线优先级最高
+             if (index == 7) minAllowed = 150;
              
              header->resizeSection(index, qMax(minAllowed, allowed));
         }
         
-        // 5. 持久化逻辑：仅在非加载状态下保存，防止启动抖动
         if (!m_isLoading) {
             AppConfig::instance().setValue("UI/ListHeaderState", header->saveState());
         }
         
         guard = false;
     });
+    qDebug() << "[Content] [Trace] [initListView] 15. sectionResized 信号连接完成";
  
     connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
     connect(m_treeView, &QTreeView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
     connect(m_treeView, &QTreeView::doubleClicked, this, &ContentPanel::onDoubleClicked); 
+    qDebug() << "[Content] [Trace] [initListView] 16. selection/doubleClicked 信号连接完成，退出 initListView()";
 } 
 
 void ContentPanel::initGridCardView() { 
