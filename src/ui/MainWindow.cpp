@@ -181,41 +181,27 @@ MainWindow::~MainWindow() {
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent), m_currentDataSource("nav"), m_currentCategoryId(0) {
-    // 2026-04-12 关键修复：显式初始化面板加载状态锁，防止未定义行为导致闪退
     m_panelsInitialized = false;
     qDebug() << "[Main] MainWindow 构造开始执行";
 
-    // 2026-04-11 按照用户要求：在程序启动的最顶端预初始化 ToolTipOverlay
-    // 配合 ToolTipOverlay 内部的 winId() 强行预热，消除初次显示延迟
+    qDebug() << "[Main] [Trace] 1. 准备调用 ToolTipOverlay::instance()";
     ToolTipOverlay::instance();
+    qDebug() << "[Main] [Trace] 2. ToolTipOverlay::instance() 调用成功";
 
     resize(1200, 800);
-    setMinimumSize(1180, 653); // 物理对齐：5x230px面板 + 20px分割手柄 + 10px全局边距
+    setMinimumSize(1180, 653);
     setWindowTitle("ArcMeta");
 
-    // ============================================================
-    // 【物理护栏 - 禁止移动】事件过滤器必须在 initUi() 之前创建
-    // 原因：initUi() -> initToolbar()/setupCustomTitleBarButtons() 会调用
-    //       installEventFilter(m_hoverFilter)，setupCustomTitleBarButtons()
-    //       内部还依赖 m_resizeFilter 做全局安装。
-    //       若此处移到 initUi() 之后，installEventFilter 会收到 nullptr，
-    //       Qt 不会报错也不会崩溃，但功能（hover提示/边缘缩放）会静默失效，
-    //       极难排查。2026-06-xx 已踩坑一次。
-    // ============================================================
+    qDebug() << "[Main] [Trace] 3. 基础窗口属性设置完毕，创建事件过滤器";
     m_hoverFilter = new HoverEventFilter(this);
     m_resizeFilter = new ResizeEventFilter(this);
     Q_ASSERT(m_hoverFilter && m_resizeFilter);
-    // ============================================================
 
-    // 从设置读取置顶状态
+    qDebug() << "[Main] [Trace] 4. 事件过滤器创建并校验通过，准备读取置顶状态";
     m_isPinned = AppConfig::instance().getValue("MainWindow/AlwaysOnTop", false).toBool();
     
-    // 设置基础窗口标志 (保持无边框)
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
 
-    // 初始应用置顶 (WinAPI)
-    // 2026-03-xx 关键修复：构造函数内不再调用 winId() 或 SetWindowPos 避免触发窗口提前显示
-    // 置顶逻辑现在改为按需由 external 或 showEvent 安全触发
     if (m_isPinned) {
 #ifdef Q_OS_WIN
         QTimer::singleShot(0, this, [this]() {
@@ -227,8 +213,7 @@ MainWindow::MainWindow(QWidget* parent)
 #endif
     }
 
-    // 应用全局样式（优先尝试从资源系统加载以支持动态同步）
-    // 2026-06-xx 物理修复：如果资源加载失败，则回退到内联样式以确保“物理切割感”永不消失
+    qDebug() << "[Main] [Trace] 5. 窗口标志及置顶应用成功，准备加载样式表";
     QFile file(":/style.qss");
     if (file.open(QFile::ReadOnly)) {
         setStyleSheet(QLatin1String(file.readAll()));
@@ -265,14 +250,16 @@ MainWindow::MainWindow(QWidget* parent)
         setStyleSheet(qss);
     }
 
+    qDebug() << "[Main] [Trace] 6. 样式表设置完毕，准备调用 initUi()";
     initUi();
 
+    qDebug() << "[Main] [Trace] 7. initUi() 成功返回，准备创建 TrayController";
     m_trayController = new TrayController(this);
     m_trayController->show();
 
-    // 2026-05-29 性能优化：事件过滤器仅安装在 MainWindow 实例上，减少 qApp 全局事件分发的 overhead。
     this->installEventFilter(this);
 
+    qDebug() << "[Main] [Trace] 8. 托盘和过滤器注册完毕，MainWindow 构造函数即将圆满结束";
     qDebug() << "[Main] MainWindow 构造函数 UI/托盘初始化完成";
 
     // 2026-03-xx 性能优化：严禁在构造函数中执行任何可能导致阻塞的同步加载 (如 unifiedNavigateTo)。
@@ -294,16 +281,20 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 void MainWindow::initUi() {
-    // 物理断言：确保过滤器已就绪，防止静默失效
+    qDebug() << "[Main] [Trace] [initUi] 进入 initUi()";
     Q_ASSERT(m_hoverFilter && m_resizeFilter && "事件过滤器必须在 initUi() 之前创建，见构造函数顶部注释");
 
+    qDebug() << "[Main] [Trace] [initUi] 1. 准备调用 initToolbar()";
     initToolbar();
+    qDebug() << "[Main] [Trace] [initUi] 2. initToolbar() 调用成功，准备调用 setupSplitters()";
     setupSplitters();
+    qDebug() << "[Main] [Trace] [initUi] 3. setupSplitters() 调用成功";
 
-    // 全局安装：拦截子控件边缘鼠标事件以支持无边框窗口缩放
     QCoreApplication::instance()->installEventFilter(m_resizeFilter);
 
+    qDebug() << "[Main] [Trace] [initUi] 4. 准备调用 setupCustomTitleBarButtons()";
     setupCustomTitleBarButtons();
+    qDebug() << "[Main] [Trace] [initUi] 5. setupCustomTitleBarButtons() 调用成功";
     
     // 2026-04-11 按照用户要求：物理锁定侧边栏宽度，最大化时仅“内容”区拉伸
     m_mainSplitter->setStretchFactor(0, 0); // 分类
@@ -1190,23 +1181,30 @@ void MainWindow::setupSplitters() {
         "QSplitter::handle:hover { background-color: %2; }" 
     ).arg(qssColor(BackgroundDeep)).arg(qssColor(BackgroundHover)));
 
+    qDebug() << "[Main] [Trace] [setupSplitters] 实例化 CategoryPanel...";
     m_categoryPanel = new CategoryPanel(this);
     m_categoryPanel->setObjectName("SidebarContainer");
     
+    qDebug() << "[Main] [Trace] [setupSplitters] 实例化 NavPanel...";
     m_navPanel = new NavPanel(this);
     m_navPanel->setObjectName("ListContainer");
     
+    qDebug() << "[Main] [Trace] [setupSplitters] 实例化 ContentPanel...";
     m_contentPanel = new ContentPanel(this);
     m_contentPanel->setObjectName("EditorContainer");
     
+    qDebug() << "[Main] [Trace] [setupSplitters] 实例化 MetaPanel...";
     m_metaPanel = new MetaPanel(this);
     m_metaPanel->setObjectName("MetadataContainer");
     
+    qDebug() << "[Main] [Trace] [setupSplitters] 实例化 FilterPanel...";
     m_filterPanel = new FilterPanel(this);
     m_filterPanel->setObjectName("FilterContainer");
 
+    qDebug() << "[Main] [Trace] [setupSplitters] 实例化 TagManagerView...";
     m_tagManagerView = new TagManagerView(this);
     m_tagManagerView->hide();
+    qDebug() << "[Main] [Trace] [setupSplitters] 所有子面板实例创建成功";
 
     // 2026-05-07 按照用户要求：焦点线持久化显示，基于数据来源而非焦点位置
     connect(m_contentPanel, &ContentPanel::dataSourceChanged, this, [this](const QString& source) {

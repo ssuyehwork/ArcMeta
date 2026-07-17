@@ -8,7 +8,7 @@
 namespace ArcMeta {
 
 ToolTipOverlay::ToolTipOverlay() : QWidget(nullptr) {
-    // [CRITICAL] 彻底弃用 Qt::ToolTip，防止 OS 动画残留
+    qDebug() << "[ToolTip] [Trace] ToolTipOverlay 构造函数进入";
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint | 
                   Qt::WindowTransparentForInput | Qt::NoDropShadowWindowHint | Qt::WindowDoesNotAcceptFocus);
     setObjectName("ToolTipOverlay");
@@ -16,18 +16,21 @@ ToolTipOverlay::ToolTipOverlay() : QWidget(nullptr) {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_ShowWithoutActivating);
 
-    // 2026-06-xx 物理修复：通过原生 API 实现置顶，避免标志位导致的重建问题
+    qDebug() << "[ToolTip] [Trace] 1. 窗口属性设置完成，准备单帧延迟原生置顶处理";
 #ifdef Q_OS_WIN
     QTimer::singleShot(0, this, [this]() {
+        qDebug() << "[ToolTip] [Trace] (Async) 原生置顶开始执行，准备调用 winId()";
         HWND hwnd = reinterpret_cast<HWND>(winId());
+        qDebug() << "[ToolTip] [Trace] (Async) winId() 获取成功，窗口句柄:" << hwnd << "，执行 SetWindowPos";
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+        qDebug() << "[ToolTip] [Trace] (Async) SetWindowPos 执行完成";
     });
 #else
     setWindowFlag(Qt::WindowStaysOnTopHint, true);
 #endif
     
+    qDebug() << "[ToolTip] [Trace] 2. 准备设置富文本和调色板颜色";
     m_doc.setUndoRedoEnabled(false);
-    // [ULTIMATE FIX] 强制锁定调色板颜色
     QPalette pal = palette();
     pal.setColor(QPalette::WindowText, QColor("#EEEEEE"));
     pal.setColor(QPalette::Text, QColor("#EEEEEE"));
@@ -44,8 +47,9 @@ ToolTipOverlay::ToolTipOverlay() : QWidget(nullptr) {
     m_hideTimer.setSingleShot(true);
     connect(&m_hideTimer, &QTimer::timeout, this, &QWidget::hide);
 
-    // 初始静默隐藏，等待 MainWindow 的 showEvent 触发真正有效的 GPU 预热
+    qDebug() << "[ToolTip] [Trace] 3. 准备执行静默隐藏";
     hide();
+    qDebug() << "[ToolTip] [Trace] ToolTipOverlay 构造函数执行结束";
 }
 
 void ToolTipOverlay::showText(const QPoint& globalPos, const QString& text, int timeout, const QColor& borderColor) {
