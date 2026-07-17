@@ -248,6 +248,45 @@ void CategoryPanel::setupContextMenu() {
                 menu.addAction(UiHelper::getIcon("random_color", QColor("#e91e63"), 18), "随机颜色", this, &CategoryPanel::onRandomColor);
                 menu.addAction(UiHelper::getIcon("tag_filled", QColor("#9b59b6"), 18), "设置预设标签", this, &CategoryPanel::onSetPresetTags);
 
+                // [Plan-6] 创建主选项“文件夹图标”
+                QMenu* iconMenu = menu.addMenu(UiHelper::getIcon("folder_filled", WarningOrange, 18), "文件夹图标");
+                UiHelper::applyMenuStyle(iconMenu);
+
+                static const QList<QPair<QString, QString>> builtInIconList = {
+                    {"默认文件夹", "folder_filled"},
+                    {"层级分类", "category"},
+                    {"照片媒体", "image_filled"},
+                    {"时钟历史", "clock_filled"},
+                    {"星标收藏", "star_filled"},
+                    {"爱心常用", "heart_filled"},
+                    {"加密安全", "lock_filled"},
+                    {"图书文档", "book"},
+                    {"配置管理", "settings_filled"},
+                    {"网络球体", "globe_filled"}
+                };
+
+                QString colorStr = index.data(ColorRole).toString();
+                QColor catColor = colorStr.isEmpty() ? QColor("#555555") : QColor(colorStr);
+
+                for (const auto& pair : builtInIconList) {
+                    QString label = pair.first;
+                    QString iconKey = pair.second;
+
+                    QAction* iconAct = iconMenu->addAction(UiHelper::getIcon(iconKey, catColor, 18), label);
+
+                    connect(iconAct, &QAction::triggered, this, [this, id, iconKey]() {
+                        auto cats = CategoryRepo::getAll();
+                        for (auto& cat : cats) {
+                            if (cat.id == id) {
+                                cat.icon = iconKey.toStdWString();
+                                CategoryRepo::update(cat);
+                                break;
+                            }
+                        }
+                        m_categoryModel->refresh();
+                    });
+                }
+
                 menu.addSeparator();
 
                 menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建分类", this, &CategoryPanel::onCreateCategory);

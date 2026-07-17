@@ -110,7 +110,8 @@ void CategoryModel::refresh() {
             if (cat.encrypted && !m_unlockedIds.contains(id)) {
                 item->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
             } else {
-                item->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
+                QString iconKey = QString::fromStdWString(cat.icon).isEmpty() ? "folder_filled" : QString::fromStdWString(cat.icon);
+                item->setIcon(UiHelper::getIcon(iconKey, QColor(color), 16));
             }
             itemMap[id] = item;
         }
@@ -149,7 +150,8 @@ void CategoryModel::refresh() {
                     if (cat.encrypted && !m_unlockedIds.contains(id)) {
                         mirror->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
                     } else {
-                        mirror->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
+                        QString iconKey = QString::fromStdWString(cat.icon).isEmpty() ? "folder_filled" : QString::fromStdWString(cat.icon);
+                        mirror->setIcon(UiHelper::getIcon(iconKey, QColor(color), 16));
                     }
                     favGroup->appendRow(mirror);
                 }

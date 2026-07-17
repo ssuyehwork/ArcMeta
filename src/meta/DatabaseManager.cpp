@@ -237,6 +237,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     sqlite3_stmt* catCheckStmt;
     bool hasFrnColumn = false;
     bool hasPhysicalPathColumn = false;
+    bool hasIconColumn = false;
     if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(categories)", -1, &catCheckStmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(catCheckStmt) == SQLITE_ROW) {
             const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(catCheckStmt, 1));
@@ -244,6 +245,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
                 std::string name(colName);
                 if (name == "physical_frn") hasFrnColumn = true;
                 if (name == "physical_path") hasPhysicalPathColumn = true;
+                if (name == "icon") hasIconColumn = true;
             }
         }
         sqlite3_finalize(catCheckStmt);
@@ -254,6 +256,9 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     }
     if (!hasPhysicalPathColumn) {
         sqlite3_exec(conn.memDb, "ALTER TABLE categories ADD COLUMN physical_path TEXT", nullptr, nullptr, nullptr);
+    }
+    if (!hasIconColumn) {
+        sqlite3_exec(conn.memDb, "ALTER TABLE categories ADD COLUMN icon TEXT DEFAULT 'folder_filled'", nullptr, nullptr, nullptr);
     }
 
     // 2026-08-xx 索引优化

@@ -23,6 +23,7 @@ struct Category {
     std::wstring encryptHint;
     uint64_t physicalFrn = 0;
     std::wstring physicalPath;
+    std::wstring icon = L"folder_filled";
 };
 
 /**
