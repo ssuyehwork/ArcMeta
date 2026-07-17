@@ -1,8 +1,10 @@
 #include "NativeFolderWatcher.h"
 #include "../meta/MetadataManager.h"
+#include "AutoImportManager.h"
 #include <QDebug>
 #include <QFileInfo>
 #include <QDir>
+#include <QtConcurrent>
 
 namespace ArcMeta {
 
@@ -189,9 +191,12 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
                 
                 QFileInfo info(QString::fromStdWString(fullPath));
                 if (info.isDir()) {
-                    // 目录：触发登记（内部已优化为异步，见 MetadataManager::markAsRegistered）
-                    qDebug() << "[Watcher] 检测到目录级变动，触发级联登记";
-                    MetadataManager::instance().markAsRegistered(fullPath);
+                    // 目录：触发级联对账与分类树构建（统一交由 handleRecursiveIngestion 执行）
+                    // 2026-07-xx 按照 Plan-128: 对目录级变动，统一调用 handleRecursiveIngestion 实现 1:1 分类树自动创建与全量重构刷新
+                    qDebug() << "[Watcher] 检测到目录级变动，触发级联对账与 1:1 分类树构建";
+                    (void)QtConcurrent::run([fullPath]() {
+                        AutoImportManager::instance().handleRecursiveIngestion(fullPath);
+                    });
                 } else {
                     // 文件：直接走异步批量接口，所有耗时操作在后台线程执行
                     qDebug() << "[Watcher] 检测到文件级变动，触发异步单项注册";
