@@ -36,6 +36,11 @@ public:
      */
     static std::wstring getManagedLibraryPath(const std::wstring& pathOrVolSerial);
 
+    /**
+     * @brief 2026-08-xx 自动同步对账和递归 1:1 分类建立
+     */
+    void handleRecursiveIngestion(const std::wstring& rootPath);
+
 private slots:
     // 订阅 MftReader 发现的新增条目
     void onEntryAdded(uint64_t key);
@@ -51,7 +56,6 @@ private:
     ~AutoImportManager() override;
 
     bool checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder);
-    void handleRecursiveIngestion(const std::wstring& rootPath);
 
     /**
      * @brief 2026-08-xx 按照 Plan-126：基于 FRN 链的高效托管路径过滤
