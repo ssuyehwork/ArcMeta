@@ -152,8 +152,8 @@ void FolderButton::paintEvent(QPaintEvent* event) {
     painter.setBrush(bgColor);
     painter.drawRoundedRect(r, 4, 4);
 
-    // 绘制 folder 矢量图标 (SvgIcons)
-    QPixmap pix = UiHelper::getPixmap("folder", QSize(16, 16), Style::TextMain);
+    // 绘制 folder_filled 矢量图标 (SvgIcons)
+    QPixmap pix = UiHelper::getPixmap("folder_filled", QSize(16, 16), Style::TextMain);
     QRect iconRect(r.left() + (r.width() - 16) / 2, r.top() + (r.height() - 16) / 2, 16, 16);
     painter.drawPixmap(iconRect, pix);
 }
