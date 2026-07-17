@@ -108,6 +108,19 @@ class ContentPanel : public QFrame {
     Q_OBJECT
 
 public:
+    enum SortType {
+        SortByName,
+        SortByCreateDate,
+        SortByModifyDate,
+        SortByExtension,
+        SortBySize,
+        SortByDimension,
+        SortByRating
+    };
+
+    SortType currentSortType() const { return m_sortType; }
+    Qt::SortOrder currentSortOrder() const { return m_sortOrder; }
+
     /**
      * @brief 内部传输结构，用于异步扫描结果
      */
@@ -289,6 +302,8 @@ private:
     bool m_isCategoryRecursive = false;
     bool m_showFolders = true;
     bool m_showFiles = true;
+    SortType m_sortType = SortByName;
+    Qt::SortOrder m_sortOrder = Qt::AscendingOrder;
     std::atomic<bool> m_isLoading{false}; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
     std::atomic<int> m_loadRequestId{0}; // 2026-07-xx 物理请求 ID：防止异步回调导致的视图内容乱跳
 

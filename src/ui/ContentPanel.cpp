@@ -761,6 +761,60 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
         if (sortOrder() == Qt::AscendingOrder) return leftPinned; // 升序：左置顶 -> 小 (true)
         else return !leftPinned; // 降序：左置顶 -> 结果反转 -> 需要返回 false 以保持顶部
     } 
+
+    // 3. 第三级：由右键选择的 m_sortType 驱动的七维精确物理属性对位排序（对应用户原话：“名称、创建日期、修改日期、扩展名、大小、尺寸、评分”）
+    const auto* sourceModelPtr = qobject_cast<const FerrexVirtualDbModel*>(sourceModel());
+    if (!sourceModelPtr) return QSortFilterProxyModel::lessThan(source_left, source_right);
+
+    const auto& records = sourceModelPtr->allRecords();
+    int leftRow = source_left.row();
+    int rightRow = source_right.row();
+    if (leftRow < 0 || leftRow >= (int)records.size() || rightRow < 0 || rightRow >= (int)records.size()) {
+        return QSortFilterProxyModel::lessThan(source_left, source_right);
+    }
+
+    const auto& leftRec = records[leftRow];
+    const auto& rightRec = records[rightRow];
+
+    auto* contentPanel = qobject_cast<ContentPanel*>(parent());
+    ContentPanel::SortType sType = contentPanel ? contentPanel->currentSortType() : ContentPanel::SortByName;
+
+    switch (sType) {
+        case ContentPanel::SortByName: {
+            QString lName = leftRec.isCategory ? leftRec.categoryName : QFileInfo(leftRec.path).fileName();
+            QString rName = rightRec.isCategory ? rightRec.categoryName : QFileInfo(rightRec.path).fileName();
+            return lName.localeAwareCompare(rName) < 0;
+        }
+        case ContentPanel::SortByCreateDate: {
+            // 对比 ctime (创建时间戳)
+            return leftRec.ctime < rightRec.ctime;
+        }
+        case ContentPanel::SortByModifyDate: {
+            // 对比 mtime (修改时间戳)
+            return leftRec.mtime < rightRec.mtime;
+        }
+        case ContentPanel::SortByExtension: {
+            // 对比文件后缀名
+            return leftRec.suffix.localeAwareCompare(rightRec.suffix) < 0;
+        }
+        case ContentPanel::SortBySize: {
+            // 对比文件大小 (文件夹或子分类默认视为 -1)
+            long long lSize = (leftRec.isCategory || leftRec.isDir) ? -1 : leftRec.size;
+            long long rSize = (rightRec.isCategory || rightRec.isDir) ? -1 : rightRec.size;
+            return lSize < rSize;
+        }
+        case ContentPanel::SortByDimension: {
+            // 对比图片的总尺寸 (宽 x 高，无尺寸信息视为 0)
+            long long lDim = (long long)leftRec.width * leftRec.height;
+            long long rDim = (long long)rightRec.width * rightRec.height;
+            return lDim < rDim;
+        }
+        case ContentPanel::SortByRating: {
+            // 对比文件评分
+            return leftRec.rating < rightRec.rating;
+        }
+    }
+
     return QSortFilterProxyModel::lessThan(source_left, source_right); 
 } 
  
@@ -811,6 +865,11 @@ ContentPanel::ContentPanel(QWidget* parent)
     m_currentFilter.showFolders = m_showFolders;
     m_currentFilter.showFiles = m_showFiles;
  
+    // 从配置中恢复排序类型与方向 (对应用户原话："名称、创建日期、修改日期、扩展名、大小、尺寸、评分" 与 "升序、降序")
+    m_sortType = static_cast<SortType>(AppConfig::instance().getValue("ContentPanel/RightClickSortType", SortByName).toInt());
+    m_sortOrder = static_cast<Qt::SortOrder>(AppConfig::instance().getValue("ContentPanel/RightClickSortOrder", Qt::AscendingOrder).toInt());
+    m_proxyModel->sort(0, m_sortOrder);
+
     initUi(); 
     // 2026-05-27 按照用户要求：构造函数末尾强行对齐初始网格尺寸，废除 initGridView 中的旧硬编码值 
     updateGridSize(); 
@@ -1596,6 +1655,58 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
  
     QMenu menu(this); 
     UiHelper::applyMenuStyle(&menu); 
+
+    // 注入“排序”二级子菜单 (对应用户原话：“排序二级子菜单，包含名称、创建日期、修改日期、扩展名、大小、尺寸、评分，以及升序、降序”)
+    QMenu* sortMenu = menu.addMenu("排序");
+    UiHelper::applyMenuStyle(sortMenu);
+
+    // 属性单选组
+    QActionGroup* typeGroup = new QActionGroup(this);
+    auto addTypeAct = [&](const QString& label, ContentPanel::SortType type) {
+        QAction* act = sortMenu->addAction(label);
+        act->setCheckable(true);
+        act->setChecked(m_sortType == type);
+        typeGroup->addAction(act);
+        connect(act, &QAction::triggered, [this, type]() {
+            m_sortType = type;
+            AppConfig::instance().setValue("ContentPanel/RightClickSortType", static_cast<int>(type));
+
+            // 实时触发全量无效化与排序重计算
+            m_proxyModel->invalidate();
+            m_proxyModel->sort(0, m_sortOrder);
+        });
+    };
+
+    addTypeAct("名称", ContentPanel::SortByName);
+    addTypeAct("创建日期", ContentPanel::SortByCreateDate);
+    addTypeAct("修改日期", ContentPanel::SortByModifyDate);
+    addTypeAct("扩展名", ContentPanel::SortByExtension);
+    addTypeAct("大小", ContentPanel::SortBySize);
+    addTypeAct("尺寸", ContentPanel::SortByDimension);
+    addTypeAct("评分", ContentPanel::SortByRating);
+
+    sortMenu->addSeparator();
+
+    // 方向单选组
+    QActionGroup* orderGroup = new QActionGroup(this);
+    auto addOrderAct = [&](const QString& label, Qt::SortOrder order) {
+        QAction* act = sortMenu->addAction(label);
+        act->setCheckable(true);
+        act->setChecked(m_sortOrder == order);
+        orderGroup->addAction(act);
+        connect(act, &QAction::triggered, [this, order]() {
+            m_sortOrder = order;
+            AppConfig::instance().setValue("ContentPanel/RightClickSortOrder", static_cast<int>(order));
+
+            m_proxyModel->invalidate();
+            m_proxyModel->sort(0, order);
+        });
+    };
+
+    addOrderAct("升序", Qt::AscendingOrder);
+    addOrderAct("降序", Qt::DescendingOrder);
+
+    menu.addSeparator();
  
     if (onItem) { 
         // 2026-06-xx 物理修复：在回收站分类中，顶部增加“还原”选项
