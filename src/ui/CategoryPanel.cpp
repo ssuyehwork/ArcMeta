@@ -249,6 +249,7 @@ void CategoryPanel::setupContextMenu() {
                 menu.addAction(UiHelper::getIcon("tag_filled", QColor("#9b59b6"), 18), "设置预设标签", this, &CategoryPanel::onSetPresetTags);
 
                 // [Plan-6] 创建主选项“文件夹图标”
+                int id = index.data(IdRole).toInt();
                 QMenu* iconMenu = menu.addMenu(UiHelper::getIcon("folder_filled", WarningOrange, 18), "文件夹图标");
                 UiHelper::applyMenuStyle(iconMenu);
 
