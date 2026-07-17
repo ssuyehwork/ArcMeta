@@ -18,16 +18,22 @@ QAbstractItemView* JustifiedResultView::getBaseView() {
 }
 
 void JustifiedResultView::setModel(QAbstractItemModel* model) {
-    m_justifiedView->setModel(model);
+    if (m_justifiedView) {
+        m_justifiedView->setModel(model);
+    }
 }
 
 void JustifiedResultView::setIconSize(int size) {
-    m_justifiedView->setTargetRowHeight(size);
+    if (m_justifiedView) {
+        m_justifiedView->setTargetRowHeight(size);
+    }
 }
 
 void JustifiedResultView::refreshLayout() {
-    m_justifiedView->setLayoutMode(JustifiedView::JustifiedMode);
-    m_justifiedView->doItemsLayout();
+    if (m_justifiedView) {
+        m_justifiedView->setLayoutMode(JustifiedView::JustifiedMode);
+        m_justifiedView->doItemsLayout();
+    }
 }
 
 } // namespace ArcMeta

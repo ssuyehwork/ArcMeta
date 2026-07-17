@@ -1093,9 +1093,12 @@ void ContentPanel::initUi() {
     initGridCardView();
  
     // 实例化三大结果视图包装类 (对应 IScanResultView.h 及三大视图模式移植)
-    m_listResultView = new ListResultView(qobject_cast<DropTreeView*>(m_treeView), this);
-    m_justifiedResultView = new JustifiedResultView(qobject_cast<DropJustifiedView*>(m_gridView), this);
-    m_gridResultView = new GridResultView(qobject_cast<DropJustifiedView*>(m_gridCardView), this);
+    // 极其重要安全优化：采用 compile-time 的 static_cast 替换 runtime 的 qobject_cast，
+    // 彻底根除在某些编译器环境下由于元对象系统尚未初始化或运行时转换失败导致返回 nullptr，
+    // 进而避免在后续 setIconSize 等调用时对 nullptr 进行解引用导致的闪退。
+    m_listResultView = new ListResultView(static_cast<DropTreeView*>(m_treeView), this);
+    m_justifiedResultView = new JustifiedResultView(static_cast<DropJustifiedView*>(m_gridView), this);
+    m_gridResultView = new GridResultView(static_cast<DropJustifiedView*>(m_gridCardView), this);
 
     m_viewStack->addWidget(m_treeView); 
     m_viewStack->addWidget(m_gridView); 

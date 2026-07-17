@@ -15,16 +15,22 @@ QAbstractItemView* ListResultView::getBaseView() {
 }
 
 void ListResultView::setModel(QAbstractItemModel* model) {
-    m_treeView->setModel(model);
+    if (m_treeView) {
+        m_treeView->setModel(model);
+    }
 }
 
 void ListResultView::setIconSize(int size) {
-    // 列表模式下的图标随行高调整 (2026-06-xx 物理修复)
-    m_treeView->setIconSize(QSize(size - 8, size - 8));
+    if (m_treeView) {
+        // 列表模式下的图标随行高调整 (2026-06-xx 物理修复)
+        m_treeView->setIconSize(QSize(size - 8, size - 8));
+    }
 }
 
 void ListResultView::refreshLayout() {
-    m_treeView->viewport()->update();
+    if (m_treeView && m_treeView->viewport()) {
+        m_treeView->viewport()->update();
+    }
 }
 
 } // namespace ArcMeta
