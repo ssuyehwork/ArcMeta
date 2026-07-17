@@ -826,7 +826,7 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
  
 ContentPanel::ContentPanel(QWidget* parent) 
     : QFrame(parent) { 
-    // 2026-07-xx 按照 Plan-63：启用右键菜单策略（容器级）
+    qDebug() << "[Content] [Trace] 1. ContentPanel 构造函数进入";
     setContextMenuPolicy(Qt::CustomContextMenu);
 
     setObjectName("EditorContainer"); 
@@ -838,12 +838,11 @@ ContentPanel::ContentPanel(QWidget* parent)
     m_mainLayout->setContentsMargins(0, 0, 0, 0); 
     m_mainLayout->setSpacing(0); 
  
- 
+    qDebug() << "[Content] [Trace] 2. 准备实例化 FerrexVirtualDbModel 和 FilterProxyModel";
     m_model = new FerrexVirtualDbModel(this); 
     m_proxyModel = new FilterProxyModel(this); 
     m_proxyModel->setSourceModel(m_model); 
     
-    // 2026-05-17 新增：当模型数据发生改变时，自动触发统计重新计算并推送至 FilterPanel
     connect(m_model, &FerrexVirtualDbModel::dataChanged, this, [this](const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles) {
         Q_UNUSED(topLeft); Q_UNUSED(bottomRight);
         if (roles.isEmpty() || roles.contains(ColorRole) || roles.contains(RatingRole) || roles.contains(TagsRole)) {
@@ -851,33 +850,31 @@ ContentPanel::ContentPanel(QWidget* parent)
         }
     });
      
-    // 2026-04-12 深度修复：强制锁定过滤列为第 0 列（名称列），确保搜索逻辑不偏离 
     m_proxyModel->setFilterKeyColumn(0); 
-    // 2026-05-29 物理修复：开启动态排序，确保“置顶优先”逻辑能在数据加载后自动生效
     m_proxyModel->setDynamicSortFilter(true);
+    qDebug() << "[Content] [Trace] 3. 准备执行 m_proxyModel->sort(0, Qt::AscendingOrder)";
     m_proxyModel->sort(0, Qt::AscendingOrder);
+    qDebug() << "[Content] [Trace] 4. sort(0) 执行完成";
  
-    // 2026-06-05 按照要求：从配置中加载上次保存的缩放比例 
     m_zoomLevel = AppConfig::instance().getValue("UI/GridZoomLevel", 96).toInt(); 
     m_isRecursive = false; 
-    // 2026-07-xx 物理同步：从配置中加载分类递归显示状态
     m_isCategoryRecursive = AppConfig::instance().getValue("ContentPanel/IsCategoryRecursive", false).toBool();
-    // 2026-07-xx 按照用户要求：文件夹默认设为隐藏 (false)
     m_showFolders = AppConfig::instance().getValue("ContentPanel/ShowFolders", false).toBool();
     m_showFiles = AppConfig::instance().getValue("ContentPanel/ShowFiles", true).toBool();
     
-    // 同步到当前 FilterState
     m_currentFilter.showFolders = m_showFolders;
     m_currentFilter.showFiles = m_showFiles;
  
-    // 从配置中恢复排序类型与方向 (对应用户原话："名称、创建日期、修改日期、扩展名、大小、尺寸、评分" 与 "升序、降序")
+    qDebug() << "[Content] [Trace] 5. 准备读取排序设置并应用排序";
     m_sortType = static_cast<SortType>(AppConfig::instance().getValue("ContentPanel/RightClickSortType", SortByName).toInt());
     m_sortOrder = static_cast<Qt::SortOrder>(AppConfig::instance().getValue("ContentPanel/RightClickSortOrder", Qt::AscendingOrder).toInt());
     m_proxyModel->sort(0, m_sortOrder);
+    qDebug() << "[Content] [Trace] 6. 排序应用完成，准备调用 initUi()";
 
     initUi(); 
-    // 2026-05-27 按照用户要求：构造函数末尾强行对齐初始网格尺寸，废除 initGridView 中的旧硬编码值 
+    qDebug() << "[Content] [Trace] 7. initUi() 执行完毕，准备调用 updateGridSize()";
     updateGridSize(); 
+    qDebug() << "[Content] [Trace] 8. updateGridSize() 执行完毕，ContentPanel 构造函数结束";
 } 
  
 void ContentPanel::deferredInit() { 
@@ -959,6 +956,7 @@ ItemRecord ContentPanel::createItemRecord(const QString& path, const RuntimeMeta
 }
  
 void ContentPanel::initUi() { 
+    qDebug() << "[Content] [Trace] [initUi] 进 initUi()";
     QWidget* titleBar = new QWidget(this); 
     titleBar->setObjectName("ContainerHeader"); 
     titleBar->setFixedHeight(32); 
@@ -1086,25 +1084,27 @@ void ContentPanel::initUi() {
  
     m_mainLayout->addWidget(titleBar); 
  
+    qDebug() << "[Content] [Trace] [initUi] 创建 m_viewStack";
     m_viewStack = new QStackedWidget(this); 
      
+    qDebug() << "[Content] [Trace] [initUi] 调用 initListView()";
     initListView(); 
+    qDebug() << "[Content] [Trace] [initUi] 调用 initGridView()";
     initGridView(); 
+    qDebug() << "[Content] [Trace] [initUi] 调用 initGridCardView()";
     initGridCardView();
  
-    // 实例化三大结果视图包装类 (对应 IScanResultView.h 及三大视图模式移植)
-    // 极其重要安全优化：采用 compile-time 的 static_cast 替换 runtime 的 qobject_cast，
-    // 彻底根除在某些编译器环境下由于元对象系统尚未初始化或运行时转换失败导致返回 nullptr，
-    // 进而避免在后续 setIconSize 等调用时对 nullptr 进行解引用导致的闪退。
+    qDebug() << "[Content] [Trace] [initUi] 实例化三大结果视图";
     m_listResultView = new ListResultView(static_cast<DropTreeView*>(m_treeView), this);
     m_justifiedResultView = new JustifiedResultView(static_cast<DropJustifiedView*>(m_gridView), this);
     m_gridResultView = new GridResultView(static_cast<DropJustifiedView*>(m_gridCardView), this);
 
+    qDebug() << "[Content] [Trace] [initUi] addWidget 到 m_viewStack";
     m_viewStack->addWidget(m_treeView); 
     m_viewStack->addWidget(m_gridView); 
     m_viewStack->addWidget(m_gridCardView); 
 
-    // 设置默认激活视图为等高排版视图 (JustifiedViewMode)
+    qDebug() << "[Content] [Trace] [initUi] 设置 m_currentActiveView";
     m_currentActiveView = m_justifiedResultView;
     m_viewStack->setCurrentWidget(m_gridView); 
  
