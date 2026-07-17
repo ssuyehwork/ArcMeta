@@ -2067,8 +2067,16 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
 
             if (!paths.isEmpty() && !target.isEmpty()) {
-                // 2026-07-xx 按照 Plan-116：物理迁移至目标目录
-                ImportHelper::importPaths(paths, target, this);
+                // 弱指针安全机制：避免在异步物理移动期间，ContentPanel 析构而导致的非法内存访问
+                QPointer<ContentPanel> weakThis(this);
+
+                // 执行物理迁移，并提供无缝无感刷新执行动作 (对应用户原话："行，试试吧")
+                ImportHelper::importPaths(paths, target, this, [weakThis]() {
+                    if (weakThis) {
+                        qDebug() << "[Content] 后台物理迁移完成，安全触发 UI 异步无感防闪载入";
+                        weakThis->refreshAll();
+                    }
+                });
             }
             break;
         }

@@ -2,6 +2,7 @@
 
 #include <QStringList>
 #include <QWidget>
+#include <functional> // 新增标准回调支持 (对应用户原话："执行刷新逻辑")
 
 namespace ArcMeta {
 
@@ -14,11 +15,15 @@ public:
     /**
      * @brief 执行物理迁移流程
      * 2026-07-xx 按照 Plan-116：收拢为仅物理 Move 动作。
-     * @param paths 待迁移的物理路径列表
+     * @param paths 待迁移 of 物理路径列表
      * @param targetPhysicalPath 目标物理目录（托管库中的具体文件夹）
      * @param parent UI 父窗口
+     * @param onComplete 迁移成功完成后的无感刷新回调 (对应用户原话："是无感刷新吗？")
      */
-    static void importPaths(const QStringList& paths, const QString& targetPhysicalPath, QWidget* parent = nullptr);
+    static void importPaths(const QStringList& paths,
+                            const QString& targetPhysicalPath,
+                            QWidget* parent = nullptr,
+                            std::function<void()> onComplete = nullptr);
 };
 
 } // namespace ArcMeta

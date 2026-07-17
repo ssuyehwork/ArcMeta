@@ -23,7 +23,10 @@
 
 namespace ArcMeta {
 
-void ImportHelper::importPaths(const QStringList& paths, const QString& targetPhysicalPath, QWidget* parent) {
+void ImportHelper::importPaths(const QStringList& paths,
+                               const QString& targetPhysicalPath,
+                               QWidget* parent,
+                               std::function<void()> onComplete) {
     if (paths.isEmpty()) return;
 
     BatchProgressDialog* progress = new BatchProgressDialog("正在迁移项目至托管库...", parent);
@@ -47,7 +50,8 @@ void ImportHelper::importPaths(const QStringList& paths, const QString& targetPh
         weakProgress->deleteLater();
     });
 
-    context->future = QtConcurrent::run([paths, targetPhysicalPath, weakProgress, context]() {
+    // 捕获并保存 onComplete 刷新闭包
+    context->future = QtConcurrent::run([paths, targetPhysicalPath, weakProgress, context, onComplete]() {
         // 2026-07-xx 按照 Plan-116：收拢为纯物理移动动作
         // 数据库入库动作完全依靠 USN Journal 异步感知。
         
@@ -67,7 +71,7 @@ void ImportHelper::importPaths(const QStringList& paths, const QString& targetPh
             ShellHelper::copyOrMoveItems({src}, targetPhysicalPath, true);
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, handled]() {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, handled, onComplete]() {
             if (context->isCancelled) return;
             if (weakProgress) {
                 weakProgress->accept();
@@ -75,6 +79,11 @@ void ImportHelper::importPaths(const QStringList& paths, const QString& targetPh
             }
             ToolTipOverlay::instance()->showText(QCursor::pos(), 
                 QString("已完成 %1 个项目的物理迁移，数据库将随后异步更新").arg(handled), 2000, QColor("#2ecc71"));
+
+            // 物理搬运结束后，安全派发无感刷新指令 (对应用户原话："是无感刷新吗？")
+            if (onComplete) {
+                onComplete();
+            }
         });
     });
 }
