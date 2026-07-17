@@ -142,6 +142,13 @@ set(SOURCES
     src/core/ActionCommand.h
     src/core/UndoManager.h
     src/core/BasicCommands.h
+    src/ui/IScanResultView.h
+    src/ui/ListResultView.cpp
+    src/ui/ListResultView.h
+    src/ui/JustifiedResultView.cpp
+    src/ui/JustifiedResultView.h
+    src/ui/GridResultView.cpp
+    src/ui/GridResultView.h
     src/ui/ToolTipOverlay.cpp
     src/ui/ToolTipOverlay.h
     src/ui/TreeItemDelegate.h

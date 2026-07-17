@@ -148,8 +148,9 @@ public:
     };
 
     enum ViewMode {
-        GridView,
-        ListView
+        ListViewMode,
+        JustifiedViewMode,
+        GridViewMode
     };
 
     /**
@@ -212,9 +213,14 @@ public:
     QAbstractItemModel* model() const { return m_model; }
     QSortFilterProxyModel* getProxyModel() const { return m_proxyModel; }
     QModelIndexList getSelectedIndexes() const {
-        return (m_viewStack->currentWidget() == m_gridView) ? 
-                m_gridView->selectionModel()->selectedIndexes() : 
-                m_treeView->selectionModel()->selectedIndexes();
+        if (m_viewStack->currentWidget() == m_treeView) {
+            return m_treeView->selectionModel()->selectedIndexes();
+        } else if (m_viewStack->currentWidget() == m_gridView) {
+            return m_gridView->selectionModel()->selectedIndexes();
+        } else if (m_viewStack->currentWidget() == m_gridCardView) {
+            return m_gridCardView->selectionModel()->selectedIndexes();
+        }
+        return QModelIndexList();
     }
 
     /**
@@ -264,6 +270,7 @@ private:
     void initUi();
     void initGridView();
     void initListView();
+    void initGridCardView();
     void setupContextMenu();
     void updateLayersButtonState();
 
@@ -286,6 +293,13 @@ private:
     // 视图组件
     QAbstractItemView* m_gridView = nullptr;
     QTreeView* m_treeView = nullptr;
+    QAbstractItemView* m_gridCardView = nullptr;
+
+    class IScanResultView* m_listResultView = nullptr;
+    class IScanResultView* m_justifiedResultView = nullptr;
+    class IScanResultView* m_gridResultView = nullptr;
+    class IScanResultView* m_currentActiveView = nullptr;
+
     FerrexVirtualDbModel* m_model = nullptr;
     QSortFilterProxyModel* m_proxyModel = nullptr;
 
@@ -351,6 +365,12 @@ public slots:
      * @brief 强制重新加载当前视图的所有内容
      */
     void refreshAll();
+
+    void setZoomLevel(int level) {
+        m_zoomLevel = level;
+        updateGridSize();
+    }
+    int zoomLevel() const { return m_zoomLevel; }
 
     /**
      * @brief 局部更新某项的元数据（星级、颜色、标签等）

@@ -48,6 +48,12 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
 
+    void setSliderValue(int val) {
+        if (m_sizeSlider) {
+            m_sizeSlider->setValue(val);
+        }
+    }
+
 protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -185,6 +191,13 @@ private:
     QString m_currentPath;
     QStringList m_history;
     int m_historyIndex = -1;
+
+    // 视图切换和尺寸调节 (对应三大视图模式与双尺寸调节机制)
+    QPushButton* m_btnListView = nullptr;
+    QPushButton* m_btnJustifiedView = nullptr;
+    QPushButton* m_btnGridView = nullptr;
+    class QSlider* m_sizeSlider = nullptr;
+    QTimer* m_zoomDebounceTimer = nullptr;
 
     // 底部状态栏
     QLabel* m_statusLeft = nullptr;

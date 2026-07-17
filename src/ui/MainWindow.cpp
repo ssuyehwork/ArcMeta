@@ -46,6 +46,8 @@
 #include <QWidgetAction>
 #include <QGridLayout>
 #include <QTimer>
+#include <QSlider>
+#include <QButtonGroup>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
 #include "../core/SyncStatusService.h"
@@ -941,6 +943,16 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
         }
     }
 
+    // 轨道点击精准定位 (对应双尺寸调节机制：拖拽 / 点击轨道点击定位)
+    if (watched == m_sizeSlider && event->type() == QEvent::MouseButtonPress) {
+        QMouseEvent* me = static_cast<QMouseEvent*>(event);
+        if (me->button() == Qt::LeftButton) {
+            int val = QStyle::sliderValueFromPosition(m_sizeSlider->minimum(), m_sizeSlider->maximum(), me->position().x(), m_sizeSlider->width());
+            m_sizeSlider->setValue(val);
+            return true;
+        }
+    }
+
     return QMainWindow::eventFilter(watched, event);
 }
 
@@ -1064,6 +1076,76 @@ void MainWindow::setupSplitters() {
     m_navBarLayout->addWidget(m_btnForward);
     m_navBarLayout->addWidget(m_btnUp);
     m_navBarLayout->addWidget(m_addressBar, 1);
+
+    // 实例化三种视图模式选择按钮 (对应三种视图模式：列表、等高合理排版、网格卡片)
+    m_btnListView = createBtn("layers", "列表视图");
+    m_btnJustifiedView = createBtn("layout", "等高排版视图");
+    m_btnGridView = createBtn("category", "网格卡片视图");
+
+    m_btnListView->setCheckable(true);
+    m_btnJustifiedView->setCheckable(true);
+    m_btnGridView->setCheckable(true);
+
+    QButtonGroup* btnGroup = new QButtonGroup(this);
+    btnGroup->setExclusive(true);
+    btnGroup->addButton(m_btnListView);
+    btnGroup->addButton(m_btnJustifiedView);
+    btnGroup->addButton(m_btnGridView);
+
+    // 默认选中等高排版视图
+    m_btnJustifiedView->setChecked(true);
+
+    // 实例化双尺寸调节滑动条
+    m_sizeSlider = new QSlider(Qt::Horizontal, this);
+    m_sizeSlider->setRange(32, 256); // 物理范围：32 像素至 256 像素 (对应双尺寸调节机制方案)
+    m_sizeSlider->setValue(AppConfig::instance().getValue("UI/GridZoomLevel", 96).toInt());
+    m_sizeSlider->setFixedSize(110, 20);
+    m_sizeSlider->setCursor(Qt::PointingHandCursor);
+    m_sizeSlider->installEventFilter(this); // 安装事件过滤器
+
+    // 设置 QSlider 样式，采用原生，禁止 rgba 蒙版，悬停色 #3E3E42，按下色 #4E4E52
+    m_sizeSlider->setStyleSheet(
+        "QSlider::groove:horizontal { border: 1px solid #333; height: 4px; background: #252526; border-radius: 2px; }"
+        "QSlider::sub-page:horizontal { background: #007ACC; border-radius: 2px; }"
+        "QSlider::add-page:horizontal { background: #2D2D2D; border-radius: 2px; }"
+        "QSlider::handle:horizontal { background: #EEEEEE; border: 1px solid #555; width: 14px; margin-top: -5px; margin-bottom: -5px; border-radius: 7px; }"
+        "QSlider::handle:horizontal:hover { background: #3E3E42; }"
+        "QSlider::handle:horizontal:pressed { background: #4E4E52; }"
+    );
+
+    // 绑定信号槽
+    connect(m_btnListView, &QPushButton::clicked, this, [this]() {
+        if (m_contentPanel) m_contentPanel->setViewMode(ContentPanel::ListViewMode);
+    });
+    connect(m_btnJustifiedView, &QPushButton::clicked, this, [this]() {
+        if (m_contentPanel) m_contentPanel->setViewMode(ContentPanel::JustifiedViewMode);
+    });
+    connect(m_btnGridView, &QPushButton::clicked, this, [this]() {
+        if (m_contentPanel) m_contentPanel->setViewMode(ContentPanel::GridViewMode);
+    });
+
+    // 200ms 防抖定时器 (对应双尺寸调节机制防抖)
+    m_zoomDebounceTimer = new QTimer(this);
+    m_zoomDebounceTimer->setSingleShot(true);
+    m_zoomDebounceTimer->setInterval(200);
+
+    connect(m_sizeSlider, &QSlider::valueChanged, this, [this](int v) {
+        if (m_contentPanel) {
+            m_contentPanel->setZoomLevel(v);
+        }
+        m_zoomDebounceTimer->start();
+    });
+
+    connect(m_zoomDebounceTimer, &QTimer::timeout, this, [this]() {
+        AppConfig::instance().setValue("UI/GridZoomLevel", m_sizeSlider->value());
+        AppConfig::instance().sync();
+    });
+
+    m_navBarLayout->addWidget(m_btnListView);
+    m_navBarLayout->addWidget(m_btnJustifiedView);
+    m_navBarLayout->addWidget(m_btnGridView);
+    m_navBarLayout->addWidget(m_sizeSlider);
+
     // 2026-06-xx 物理对标：移除额外 addSpacing，直接依赖 layout 默认 5px spacing 达到精准 5 像素间距
     m_navBarLayout->addWidget(m_searchContainer);
 

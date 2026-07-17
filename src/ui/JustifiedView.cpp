@@ -29,6 +29,13 @@ JustifiedView::JustifiedView(QWidget* parent) : QAbstractItemView(parent) {
 
 }
 
+void JustifiedView::setLayoutMode(LayoutMode mode) {
+    if (m_layoutMode != mode) {
+        m_layoutMode = mode;
+        doLayout();
+    }
+}
+
 void JustifiedView::setTargetRowHeight(int h) {
     if (m_targetRowHeight != h) {
         m_targetRowHeight = h;
@@ -362,95 +369,126 @@ void JustifiedView::doLayout() {
     if (containerWidth <= 0) return;
 
     int currentY = margin; 
-    int i = 0;
-    
-    while (i < count) {
-        int rowStart = i;
-        double rowAspectRatioSum = 0;
-        std::vector<double> aspectRatios;
 
-        bool forceBreak = false;
+    const int textHeight = 36;
+    const int ratingHeight = 20;
+    const int gap = 4;
+    const int cardPadding = 6; // 左右内边距总和 (3px + 3px)
+    const int extraHeight = cardPadding + textHeight + ratingHeight + gap; // cardPadding 也是上下内边距总和
+
+    if (m_layoutMode == GridMode) {
+        // GridMode 核心布局算法：等宽等高网格排布
+        int itemWidth = m_targetRowHeight + cardPadding;
+        int itemHeight = m_targetRowHeight + extraHeight;
+
+        // 预先计算标准满行情况下的最多容纳数（最少能放 1 个）
+        int maxNumInRow = (containerWidth + spacing) / (itemWidth + spacing);
+        if (maxNumInRow <= 0) maxNumInRow = 1;
+
+        // 确定标准的物理列间距（使跨行垂直列线严格对齐，避免末行由于未满排而被强行拉伸分散）
+        int standardSpacing = spacing;
+        if (maxNumInRow > 1) {
+            standardSpacing = (containerWidth - (maxNumInRow * itemWidth)) / (maxNumInRow - 1);
+        }
+
+        int i = 0;
         while (i < count) {
-            QModelIndex idx = model()->index(i, 0);
-            double ar = model()->data(idx, m_aspectRatioRole).toDouble();
-            if (ar <= 0) ar = 1.0;
-            
-            // 2026-07-xx 物理分离逻辑：如果当前项是文件，但行首是文件夹（或反之），强制换行
-            QString type = model()->data(idx, TypeRole).toString();
-            bool isCurrentDir = (type == "folder" || type == "category");
-            
-            if (i > rowStart) {
-                QModelIndex prevIdx = model()->index(i - 1, 0);
-                QString prevType = model()->data(prevIdx, TypeRole).toString();
-                bool isPrevDir = (prevType == "folder" || prevType == "category");
+            int numInRow = std::min(maxNumInRow, count - i);
+
+            int currentX = margin;
+            for (int j = 0; j < numInRow; ++j) {
+                int itemIdx = i + j;
+                m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, itemHeight), itemIdx };
+                currentX += itemWidth + standardSpacing;
+            }
+            currentY += itemHeight + spacing;
+            i += numInRow;
+        }
+    } else {
+        int i = 0;
+        while (i < count) {
+            int rowStart = i;
+            double rowAspectRatioSum = 0;
+            std::vector<double> aspectRatios;
+
+            bool forceBreak = false;
+            while (i < count) {
+                QModelIndex idx = model()->index(i, 0);
+                double ar = model()->data(idx, m_aspectRatioRole).toDouble();
+                if (ar <= 0) ar = 1.0;
+
+                // 2026-07-xx 物理分离逻辑：如果当前项是文件，但行首是文件夹（或反之），强制换行
+                QString type = model()->data(idx, TypeRole).toString();
+                bool isCurrentDir = (type == "folder" || type == "category");
                 
-                if (isCurrentDir != isPrevDir) {
-                    forceBreak = true;
+                if (i > rowStart) {
+                    QModelIndex prevIdx = model()->index(i - 1, 0);
+                    QString prevType = model()->data(prevIdx, TypeRole).toString();
+                    bool isPrevDir = (prevType == "folder" || prevType == "category");
+
+                    if (isCurrentDir != isPrevDir) {
+                        forceBreak = true;
+                        break;
+                    }
+                }
+
+                aspectRatios.push_back(ar);
+                rowAspectRatioSum += ar;
+
+                int numInRow = (int)aspectRatios.size();
+                // 2026-06-xx 物理修正：考虑 ThumbnailDelegate 的内边距 (左右各 3px = 6px)
+                // 预估宽度 = (宽高比总和 * 目标高度) + (内边距补偿 6px * 数量) + (项间距 * 间距数量)
+                double estimatedWidth = (rowAspectRatioSum * m_targetRowHeight) + (6 * numInRow) + (spacing * (numInRow - 1));
+                if (estimatedWidth > containerWidth) {
+                    // 如果单项就超过了容器宽度，则强制独占一行
+                    if (numInRow > 1) {
+                        aspectRatios.pop_back();
+                        rowAspectRatioSum -= ar;
+                    } else {
+                        i++;
+                    }
                     break;
                 }
+                i++;
             }
 
-            aspectRatios.push_back(ar);
-            rowAspectRatioSum += ar;
-            
-            int numInRow = (int)aspectRatios.size();
-            // 2026-06-xx 物理修正：考虑 ThumbnailDelegate 的内边距 (左右各 3px = 6px)
-            // 预估宽度 = (宽高比总和 * 目标高度) + (内边距补偿 6px * 数量) + (项间距 * 间距数量)
-            double estimatedWidth = (rowAspectRatioSum * m_targetRowHeight) + (6 * numInRow) + (spacing * (numInRow - 1));
-            if (estimatedWidth > containerWidth) {
-                // 如果单项就超过了容器宽度，则强制独占一行
-                if (numInRow > 1) {
-                    aspectRatios.pop_back();
-                    rowAspectRatioSum -= ar;
+            int rowEnd = i;
+            int numInRow = rowEnd - rowStart;
+            if (numInRow <= 0) break;
+
+            int actualHeight = m_targetRowHeight;
+            bool isLastRow = (i == count);
+            // 2026-07-xx 物理对齐修正：若因类型差异导致的强制换行，该行不执行两端对齐，防止图标拉伸变形
+            bool rowIsJustified = !isLastRow && !forceBreak;
+
+            int availableImageWidth = containerWidth - (spacing * (numInRow - 1)) - (6 * numInRow);
+
+            if (rowIsJustified) {
+                actualHeight = qRound(availableImageWidth / rowAspectRatioSum);
+                // 工业级纠偏：允许高度在一定范围内浮动以填满行宽，无论是否超出 targetRowHeight 范围均开启对齐
+                actualHeight = std::max(actualHeight, (int)(m_targetRowHeight * 0.75));
+                actualHeight = std::min(actualHeight, (int)(m_targetRowHeight * 1.5));
+                rowIsJustified = true;
+            }
+
+            int currentX = margin;
+
+            for (int j = 0; j < numInRow; ++j) {
+                int itemIdx = rowStart + j;
+                int itemWidth;
+
+                if (j == numInRow - 1 && rowIsJustified) {
+                    // 最后一个 item 精确填满剩余宽度，消除舍入误差导致的空隙
+                    itemWidth = (containerWidth + margin) - currentX;
                 } else {
-                    i++;
+                    itemWidth = qRound(aspectRatios[j] * actualHeight) + cardPadding;
                 }
-                break; 
+
+                m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + extraHeight), itemIdx };
+                currentX += itemWidth + spacing;
             }
-            i++;
+            currentY += actualHeight + extraHeight + spacing; // 统一行高推进
         }
-
-        int rowEnd = i;
-        int numInRow = rowEnd - rowStart;
-        if (numInRow <= 0) break;
-
-        int actualHeight = m_targetRowHeight;
-        bool isLastRow = (i == count);
-        // 2026-07-xx 物理对齐修正：若因类型差异导致的强制换行，该行不执行两端对齐，防止图标拉伸变形
-        bool rowIsJustified = !isLastRow && !forceBreak; 
-
-        int availableImageWidth = containerWidth - (spacing * (numInRow - 1)) - (6 * numInRow);
-
-        if (rowIsJustified) {
-            actualHeight = qRound(availableImageWidth / rowAspectRatioSum);
-            // 工业级纠偏：允许高度在一定范围内浮动以填满行宽，无论是否超出 targetRowHeight 范围均开启对齐
-            actualHeight = std::max(actualHeight, (int)(m_targetRowHeight * 0.75));
-            actualHeight = std::min(actualHeight, (int)(m_targetRowHeight * 1.5));
-            rowIsJustified = true; 
-        }
-
-        int currentX = margin;
-        const int textHeight = 36;
-        const int ratingHeight = 20;
-        const int gap = 4;
-        const int cardPadding = 6; // 左右内边距总和 (3px + 3px)
-        const int extraHeight = cardPadding + textHeight + ratingHeight + gap; // cardPadding 也是上下内边距总和
-
-        for (int j = 0; j < numInRow; ++j) {
-            int itemIdx = rowStart + j;
-            int itemWidth;
-
-            if (j == numInRow - 1 && rowIsJustified) {
-                // 最后一个 item 精确填满剩余宽度，消除舍入误差导致的空隙
-                itemWidth = (containerWidth + margin) - currentX;
-            } else {
-                itemWidth = qRound(aspectRatios[j] * actualHeight) + cardPadding;
-            }
-
-            m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, actualHeight + extraHeight), itemIdx };
-            currentX += itemWidth + spacing; 
-        }
-        currentY += actualHeight + extraHeight + spacing; // 统一行高推进
     }
 
     m_totalHeight = currentY + 10;
