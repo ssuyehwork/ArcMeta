@@ -66,13 +66,17 @@ void CoreController::startSystem() {
                 }
             }
 
-            // [Plan-4] 识别到自定义监控目录，开启 IOCP 监控
+            // [Plan-5] 识别到自定义监控目录，开启 IOCP 监控并对账同步
             QStringList customFolders = AppConfig::instance().getValue("DriveBar/CustomMonitoredFolders").toStringList();
             for (const QString& folder : customFolders) {
                 std::wstring normPath = MetadataManager::normalizePath(folder.toStdWString());
                 if (!normPath.empty()) {
-                    qDebug() << "[Core] 识别到自定义监控目录，开启 IOCP 监控:" << QString::fromStdWString(normPath);
+                    qDebug() << "[Core] 识别到自定义监控目录，开启 IOCP 监控并对账同步:" << QString::fromStdWString(normPath);
                     NativeFolderWatcher::instance().addWatch(normPath);
+
+                    (void)QtConcurrent::run([normPath]() {
+                        AutoImportManager::instance().handleRecursiveIngestion(normPath);
+                    });
                 }
             }
 

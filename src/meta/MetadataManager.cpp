@@ -1177,6 +1177,14 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
     if (!fids.empty()) {
         CategoryRepo::removeAllCategoriesBatch(fids);
     }
+
+    // [Plan-5] 移除 1:1 自动建立的整个镜像分类树节点
+    auto allCats = CategoryRepo::getAll();
+    for (const auto& cat : allCats) {
+        if (cat.physicalPath == nPath || cat.physicalPath.find(nPath + L"\\") == 0 || cat.physicalPath.find(nPath + L"/") == 0) {
+            CategoryRepo::remove(cat.id);
+        }
+    }
 }
 
 void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {

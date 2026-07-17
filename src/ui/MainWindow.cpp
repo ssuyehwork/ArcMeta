@@ -54,6 +54,7 @@ using namespace ArcMeta::Style;
 #include <QFileInfo>
 #include <QDir>
 #include "../meta/MetadataManager.h"
+#include "../core/AutoImportManager.h"
 #include "../core/NativeFolderWatcher.h"
 #include "FramelessDialog.h"
 #include "FramelessFileDialog.h"
@@ -1809,13 +1810,15 @@ void MainWindow::showNewAutoImportDialog() {
             // 2. 动态点火 NativeFolderWatcher 的监控
             NativeFolderWatcher::instance().addWatch(normPath);
 
-            // 2a. 异步递归扫描并将既有数据入库登记
-            MetadataManager::instance().markAsRegistered(normPath);
+            // 2a. 异步递归扫描并将既有数据和镜像分类导入登记
+            (void)QtConcurrent::run([normPath]() {
+                AutoImportManager::instance().handleRecursiveIngestion(normPath);
+            });
 
             // 3. 重新加载渲染盘符栏 FolderButtons
             updateCustomFolderButtons();
 
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "已开始自动监控该文件夹", 1500, Style::SuccessGreen);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "已开始自动监控该文件夹并同步镜像分类", 1500, Style::SuccessGreen);
         }
     }
 }
@@ -1852,10 +1855,13 @@ void MainWindow::removeCustomMonitoredFolder(const QString& path) {
         // 2. 从 NativeFolderWatcher 监控中注销此路径
         NativeFolderWatcher::instance().removeWatch(normPath);
 
+        // 2a. 强力数据根除，拒绝数据残留：递归清理该目录下所有注册的文件、子项元数据以及在侧边栏自动创建的 1:1 分类树映射！
+        MetadataManager::instance().removeMetadataSync(normPath);
+
         // 3. 动态刷新盘符栏
         updateCustomFolderButtons();
 
-        ToolTipOverlay::instance()->showText(QCursor::pos(), "已停止监控该文件夹", 1500, QColor("#FECF0E"));
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "已停止监控该文件夹并移除相关镜像分类", 1500, QColor("#FECF0E"));
     }
 }
 
