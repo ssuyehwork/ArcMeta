@@ -10,6 +10,7 @@
 #include <atomic>
 #include <mutex>
 #include <map>
+#include <set>
 
 namespace ArcMeta {
 
@@ -55,6 +56,7 @@ private:
 
     HANDLE m_hIOCP;
     std::map<std::wstring, WatchItem*> m_watches;
+    std::set<WatchItem*> m_orphans;
     std::vector<std::thread> m_workers;
     std::atomic<bool> m_running;
     std::mutex m_mutex;

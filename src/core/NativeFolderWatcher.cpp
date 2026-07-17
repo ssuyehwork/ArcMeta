@@ -78,8 +78,11 @@ void NativeFolderWatcher::removeWatch(const std::wstring& path) {
         WatchItem* item = it->second;
         CancelIoEx(item->hDir, &item->overlapped);
         CloseHandle(item->hDir);
-        delete item;
         m_watches.erase(it);
+
+        // 移入孤儿容器，交由 workerThread 异步安全清理，防止 UAF 崩溃
+        m_orphans.insert(item);
+        qDebug() << "[Watcher] 目录监控移出并加入孤儿队列，路径:" << QString::fromStdWString(path);
     }
 }
 
@@ -105,6 +108,11 @@ void NativeFolderWatcher::shutdown() {
         delete pair.second;
     }
     m_watches.clear();
+
+    for (WatchItem* item : m_orphans) {
+        delete item;
+    }
+    m_orphans.clear();
 
     if (m_hIOCP != INVALID_HANDLE_VALUE) {
         CloseHandle(m_hIOCP);
@@ -138,11 +146,39 @@ void NativeFolderWatcher::workerThread() {
     while (m_running) {
         BOOL ok = GetQueuedCompletionStatus(m_hIOCP, &bytesTransferred, &completionKey, &overlapped, INFINITE);
         if (!m_running) break;
-        if (!ok || !completionKey) continue;
 
-        WatchItem* item = (WatchItem*)completionKey;
-        handleNotification(item, bytesTransferred);
-        requestChanges(item); // 重新发起请求
+        if (completionKey) {
+            WatchItem* item = (WatchItem*)completionKey;
+
+            // 检查该 item 是否已被标记为孤儿
+            bool isOrphan = false;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                if (m_orphans.count(item)) {
+                    isOrphan = true;
+                }
+            }
+
+            if (isOrphan) {
+                // 如果是已被取消的监控项，此时收到的是 CancelIoEx 触发的 ERROR_OPERATION_ABORTED 完成包。
+                // 我们在工作线程里安全销毁内存，彻底消除 Use-After-Free 崩溃隐患。
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    m_orphans.erase(item);
+                }
+                delete item;
+                qDebug() << "[Watcher] 异步安全销毁孤儿 WatchItem";
+                continue;
+            }
+
+            if (!ok) {
+                // 如果是发生错误的非孤儿，跳过此轮请求
+                continue;
+            }
+
+            handleNotification(item, bytesTransferred);
+            requestChanges(item); // 重新发起请求
+        }
     }
 }
 

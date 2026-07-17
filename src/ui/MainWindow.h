@@ -191,6 +191,13 @@ public slots:
     void populatePanelMenu(QMenu* menu);
 
 private:
+    QVector<class FolderButton*> m_folderButtons;
+    void updateCustomFolderButtons();
+    void showNewAutoImportDialog();
+    void removeCustomMonitoredFolder(const QString& path);
+    void onDriveBarContextMenu(const QPoint& pos);
+    void onFolderButtonContextMenu(const QPoint& pos);
+
     void loadPanelVisibility();
     void savePanelVisibility();
 };

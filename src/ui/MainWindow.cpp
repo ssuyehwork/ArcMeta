@@ -20,6 +20,10 @@
 #include "TagManagerView.h"
 #include "QuickLookWindow.h"
 #include "ToolTipOverlay.h"
+#include "FramelessDialog.h"
+#include "FramelessFileDialog.h"
+#include "DriveButton.h"
+#include "NativeFolderWatcher.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -65,6 +69,100 @@ using namespace ArcMeta::Style;
 #include <QtConcurrent>
 
 namespace ArcMeta {
+
+class CustomFolderImportDialog : public FramelessDialog {
+    Q_OBJECT
+public:
+    explicit CustomFolderImportDialog(QWidget* parent = nullptr)
+        : FramelessDialog("新建自动导入", parent) {
+
+        QWidget* content = getContentArea();
+        QVBoxLayout* layout = new QVBoxLayout(content);
+        layout->setContentsMargins(20, 15, 20, 20);
+        layout->setSpacing(15);
+
+        QHBoxLayout* pathL = new QHBoxLayout();
+        pathL->setSpacing(8);
+
+        m_edit = new QLineEdit(this);
+        m_edit->setPlaceholderText("请输入或选择文件夹路径...");
+        m_edit->setClearButtonEnabled(true); // 唯一指定清除实现
+        m_edit->setStyleSheet(
+            "QLineEdit { "
+            "  background-color: #252526; "
+            "  color: #F1F1F1; "
+            "  border: 1px solid #3E3E42; "
+            "  border-radius: 4px; "
+            "  padding: 6px 10px; "
+            "  font-family: 'Segoe UI', Microsoft YaHei; "
+            "  font-size: 12px; "
+            "}"
+            "QLineEdit:focus { border: 1px solid #007ACC; }"
+        );
+        pathL->addWidget(m_edit);
+
+        QPushButton* btnBrowse = new QPushButton("浏览", this);
+        btnBrowse->setCursor(Qt::PointingHandCursor);
+        btnBrowse->setStyleSheet(
+            "QPushButton { "
+            "  background-color: #3E3E42; "
+            "  color: #F1F1F1; "
+            "  border: 1px solid #555555; "
+            "  border-radius: 4px; "
+            "  padding: 6px 14px; "
+            "  font-size: 12px; "
+            "}"
+            "QPushButton:hover { background-color: #4E4E52; }"
+        );
+        pathL->addWidget(btnBrowse);
+        layout->addLayout(pathL);
+
+        QHBoxLayout* bottomL = new QHBoxLayout();
+        bottomL->addStretch();
+
+        QPushButton* btnOk = new QPushButton("完成", this);
+        btnOk->setCursor(Qt::PointingHandCursor);
+        btnOk->setStyleSheet(
+            "QPushButton { "
+            "  background-color: #007ACC; "
+            "  color: #FFFFFF; "
+            "  border: none; "
+            "  border-radius: 4px; "
+            "  padding: 6px 20px; "
+            "  font-weight: bold; "
+            "  font-size: 12px; "
+            "}"
+            "QPushButton:hover { background-color: #1C97EA; }"
+        );
+        bottomL->addWidget(btnOk);
+        layout->addLayout(bottomL);
+
+        connect(btnBrowse, &QPushButton::clicked, this, &CustomFolderImportDialog::onBrowse);
+        connect(btnOk, &QPushButton::clicked, this, [this]() {
+            QString path = m_edit->text().trimmed();
+            if (path.isEmpty()) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "路径不能为空！", 1500, QColor("#E81123"));
+                return;
+            }
+            if (!QDir(path).exists()) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "无效的文件夹路径！", 1500, QColor("#E81123"));
+                return;
+            }
+            accept();
+        });
+    }
+
+    QString selectedPath() const { return m_edit->text().trimmed(); }
+
+private:
+    void onBrowse() {
+        QString dir = FramelessFileDialog::getExistingDirectory(this, "选择自动导入文件夹");
+        if (!dir.isEmpty()) {
+            m_edit->setText(QDir::toNativeSeparators(dir));
+        }
+    }
+    QLineEdit* m_edit;
+};
 
 // 【物理护栏-禁止修改/禁止改为0】全局边缘留白基准值，统一应用于标题栏/导航栏/主体容器右侧
 // 及状态栏左右两侧。2026-06-xx 曾被错误改为0导致搜索框/元数据/筛选面板右侧被截断，
@@ -1558,6 +1656,9 @@ void MainWindow::initDriveBar() {
         "QWidget#DriveBar { background-color: %1; border-bottom: 1px solid %2; }"
     ).arg(qssColor(BackgroundHeader)).arg(qssColor(BorderColor)));
 
+    m_driveBarWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_driveBarWidget, &QWidget::customContextMenuRequested, this, &MainWindow::onDriveBarContextMenu);
+
     m_driveBarLayout = new QHBoxLayout(m_driveBarWidget);
     m_driveBarLayout->setContentsMargins(15, 5, 15, 5);
     m_driveBarLayout->setSpacing(8);
@@ -1584,6 +1685,9 @@ void MainWindow::initDriveBar() {
         }
     }
     m_driveBarLayout->addStretch();
+
+    // 自动加载渲染盘符栏 FolderButtons
+    updateCustomFolderButtons();
 }
 
 void MainWindow::onDriveButtonClicked() {
@@ -1645,6 +1749,114 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
             MetadataManager::instance().markAsRegistered(managedPath.toStdWString());
             ToolTipOverlay::instance()->showText(QCursor::pos(), "已开始重新扫描托管库", 1500, QColor("#378ADD"));
         }
+    }
+}
+
+void MainWindow::updateCustomFolderButtons() {
+    // 清除既有 custom folder 按钮
+    for (FolderButton* btn : m_folderButtons) {
+        m_driveBarLayout->removeWidget(btn);
+        btn->deleteLater();
+    }
+    m_folderButtons.clear();
+
+    // 载入配置并追加
+    QStringList customFolders = AppConfig::instance().getValue("DriveBar/CustomMonitoredFolders").toStringList();
+    int insertIndex = m_driveBarLayout->count() - 1; // 插入在末尾 stretch spacer 之前
+    if (insertIndex < 0) insertIndex = 0;
+
+    for (const QString& path : customFolders) {
+        FolderButton* btn = new FolderButton(path, m_driveBarWidget);
+        btn->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(btn, &QWidget::customContextMenuRequested, this, &MainWindow::onFolderButtonContextMenu);
+
+        // 单击该文件夹按钮，自动将内容导航面板重定向至此物理路径
+        connect(btn, &QPushButton::clicked, this, [this, path]() {
+            m_navPanel->setRootPath(path);
+        });
+
+        m_driveBarLayout->insertWidget(insertIndex++, btn);
+        m_folderButtons.push_back(btn);
+    }
+}
+
+void MainWindow::onDriveBarContextMenu(const QPoint& pos) {
+    QMenu menu(this);
+    UiHelper::applyMenuStyle(&menu);
+    QAction* act = menu.addAction("新建自动导入");
+
+    QAction* selectedAct = menu.exec(m_driveBarWidget->mapToGlobal(pos));
+    if (selectedAct == act) {
+        showNewAutoImportDialog();
+    }
+}
+
+void MainWindow::showNewAutoImportDialog() {
+    CustomFolderImportDialog dlg(this);
+    if (dlg.exec() == QDialog::Accepted) {
+        QString path = dlg.selectedPath();
+        if (!path.isEmpty()) {
+            QStringList customFolders = AppConfig::instance().getValue("DriveBar/CustomMonitoredFolders").toStringList();
+            std::wstring normPath = MetadataManager::normalizePath(path.toStdWString());
+            QString finalPath = QString::fromStdWString(normPath);
+
+            if (customFolders.contains(finalPath)) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "该文件夹已在监控列表中！", 1500, QColor("#E81123"));
+                return;
+            }
+
+            // 1. 记入 AppConfig 并持久化
+            customFolders.append(finalPath);
+            AppConfig::instance().setValue("DriveBar/CustomMonitoredFolders", customFolders);
+            AppConfig::instance().sync();
+
+            // 2. 动态点火 NativeFolderWatcher 的监控
+            NativeFolderWatcher::instance().addWatch(normPath);
+
+            // 3. 重新加载渲染盘符栏 FolderButtons
+            updateCustomFolderButtons();
+
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "已开始自动监控该文件夹", 1500, Style::SuccessGreen);
+        }
+    }
+}
+
+void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
+    FolderButton* btn = qobject_cast<FolderButton*>(sender());
+    if (!btn) return;
+    QString path = btn->folderPath();
+
+    QMenu menu(this);
+    UiHelper::applyMenuStyle(&menu);
+    QAction* actNew = menu.addAction("新建自动导入");
+    QAction* actRemove = menu.addAction("移除");
+
+    QAction* selectedAct = menu.exec(btn->mapToGlobal(pos));
+    if (selectedAct == actNew) {
+        showNewAutoImportDialog();
+    } else if (selectedAct == actRemove) {
+        removeCustomMonitoredFolder(path);
+    }
+}
+
+void MainWindow::removeCustomMonitoredFolder(const QString& path) {
+    QStringList customFolders = AppConfig::instance().getValue("DriveBar/CustomMonitoredFolders").toStringList();
+    std::wstring normPath = MetadataManager::normalizePath(path.toStdWString());
+    QString finalPath = QString::fromStdWString(normPath);
+
+    if (customFolders.contains(finalPath)) {
+        // 1. 从 AppConfig 中移除
+        customFolders.removeAll(finalPath);
+        AppConfig::instance().setValue("DriveBar/CustomMonitoredFolders", customFolders);
+        AppConfig::instance().sync();
+
+        // 2. 从 NativeFolderWatcher 监控中注销此路径
+        NativeFolderWatcher::instance().removeWatch(normPath);
+
+        // 3. 动态刷新盘符栏
+        updateCustomFolderButtons();
+
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "已停止监控该文件夹", 1500, QColor("#FECF0E"));
     }
 }
 
