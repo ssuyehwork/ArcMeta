@@ -43,6 +43,8 @@
 #include <QCloseEvent>
 #include <QMenu>
 #include <QAction>
+#include <QWidgetAction>
+#include <QGridLayout>
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
@@ -1833,11 +1835,114 @@ void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
     QAction* actNew = menu.addAction("新建自动导入");
     QAction* actRemove = menu.addAction("移除");
 
+    menu.addSeparator();
+
+    // 1. 新增 “设置颜色”
+    QAction* actSetColor = menu.addAction(UiHelper::getIcon("palette", WarningOrange, 18), "设置颜色");
+
+    // 2. 新增 “随机颜色”
+    QAction* actRandomColor = menu.addAction(UiHelper::getIcon("random_color", QColor("#e91e63"), 18), "随机颜色");
+
+    // 3. 新增 “文件夹图标” 二级子菜单
+    QMenu* iconMenu = menu.addMenu(UiHelper::getIcon("folder_filled", WarningOrange, 18), "文件夹图标");
+    UiHelper::applyMenuStyle(iconMenu);
+
+    QString colorStr = AppConfig::instance().getValue(QString("DriveBar/FolderColor_%1").arg(path), "#FFFFFF").toString();
+    QColor folderColor = QColor(colorStr);
+    if (!folderColor.isValid()) {
+        folderColor = Style::TextMain;
+    }
+
+    QWidgetAction* pickerAction = new QWidgetAction(iconMenu);
+    QWidget* pickerWidget = new QWidget(iconMenu);
+    QGridLayout* pickerLayout = new QGridLayout(pickerWidget);
+    pickerLayout->setContentsMargins(6, 6, 6, 6);
+    pickerLayout->setSpacing(6);
+
+    static const QList<QPair<QString, QString>> builtInIcons = {
+        {"默认文件夹", "folder_filled"},
+        {"层级分类", "category"},
+        {"照片媒体", "image_filled"},
+        {"时钟历史", "clock_filled"},
+        {"星标收藏", "star_filled"},
+        {"爱心常用", "heart_filled"},
+        {"加密安全", "lock_filled"},
+        {"图书文档", "book"},
+        {"配置管理", "settings_filled"},
+        {"网络球体", "globe_filled"}
+    };
+
+    int row = 0;
+    int col = 0;
+    for (const auto& pair : builtInIcons) {
+        QString label = pair.first;
+        QString iconKey = pair.second;
+
+        QPushButton* btnIcon = new QPushButton(pickerWidget);
+        btnIcon->setFixedSize(28, 28);
+        btnIcon->setCursor(Qt::PointingHandCursor);
+        btnIcon->setStyleSheet(
+            "QPushButton { "
+            "  background-color: transparent; "
+            "  border: 1px solid transparent; "
+            "  border-radius: 4px; "
+            "}"
+            "QPushButton:hover { "
+            "  background-color: #3E3E42; "
+            "  border: 1px solid #555555; "
+            "}"
+            "QPushButton:pressed { "
+            "  background-color: #4E4E52; "
+            "}"
+        );
+        btnIcon->setIcon(UiHelper::getIcon(iconKey, folderColor, 18));
+        btnIcon->setIconSize(QSize(18, 18));
+        btnIcon->setToolTip(label);
+
+        pickerLayout->addWidget(btnIcon, row, col);
+
+        connect(btnIcon, &QPushButton::clicked, this, [btn, path, iconKey, iconMenu]() {
+            AppConfig::instance().setValue(QString("DriveBar/FolderIcon_%1").arg(path), iconKey);
+            AppConfig::instance().sync();
+            btn->update(); // 触发 FolderButton 的更新重绘
+            iconMenu->close(); // 选中后关闭菜单
+        });
+
+        col++;
+        if (col >= 5) {
+            col = 0;
+            row++;
+        }
+    }
+
+    pickerWidget->setLayout(pickerLayout);
+    pickerAction->setDefaultWidget(pickerWidget);
+    iconMenu->addAction(pickerAction);
+
     QAction* selectedAct = menu.exec(btn->mapToGlobal(pos));
     if (selectedAct == actNew) {
         showNewAutoImportDialog();
     } else if (selectedAct == actRemove) {
         removeCustomMonitoredFolder(path);
+    } else if (selectedAct == actSetColor) {
+        FramelessColorPicker dlg("选择文件夹颜色", this);
+        dlg.setCurrentColor(folderColor);
+        if (dlg.exec() == QDialog::Accepted) {
+            QColor selected = dlg.selectedColor();
+            AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), selected.name().toUpper());
+            AppConfig::instance().sync();
+            btn->update(); // 触发重绘
+        }
+    } else if (selectedAct == actRandomColor) {
+        static const QStringList palette = {
+            "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEEAD",
+            "#D4A5A5", "#9B59B6", "#3498DB", "#E67E22", "#2ECC71",
+            "#E74C3C", "#F1C40F", "#1ABC9C", "#34495E", "#95A5A6"
+        };
+        QString chosenColor = palette.at(QRandomGenerator::global()->bounded(palette.size()));
+        AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), chosenColor);
+        AppConfig::instance().sync();
+        btn->update(); // 触发重绘
     }
 }
 
@@ -1850,12 +1955,19 @@ void MainWindow::removeCustomMonitoredFolder(const QString& path) {
         // 1. 从 AppConfig 中移除
         customFolders.removeAll(finalPath);
         AppConfig::instance().setValue("DriveBar/CustomMonitoredFolders", customFolders);
+
+        // 1a. 清除颜色和图标配置，防止配置文件残留膨胀
+        AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), QVariant());
+        AppConfig::instance().setValue(QString("DriveBar/FolderIcon_%1").arg(path), QVariant());
+        AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(finalPath), QVariant());
+        AppConfig::instance().setValue(QString("DriveBar/FolderIcon_%1").arg(finalPath), QVariant());
+
         AppConfig::instance().sync();
 
         // 2. 从 NativeFolderWatcher 监控中注销此路径
         NativeFolderWatcher::instance().removeWatch(normPath);
 
-        // 2a. 强力数据根除，拒绝数据残留：递归清理该目录下所有注册的文件、子项元数据以及在侧边栏自动创建的 1:1 分类树映射！
+        // 2a. 强力数据根除，拒绝数据残留：递归清理该目录下所有注册的文件、子项元数据以及在侧边栏自动创建 of 1:1 分类树映射！
         MetadataManager::instance().removeMetadataSync(normPath);
 
         // 3. 动态刷新盘符栏

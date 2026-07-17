@@ -5,6 +5,7 @@
 #include <QDir>
 #include "UiHelper.h"
 #include "ToolTipOverlay.h"
+#include "../core/AppConfig.h"
 
 namespace ArcMeta {
 
@@ -152,8 +153,20 @@ void FolderButton::paintEvent(QPaintEvent* event) {
     painter.setBrush(bgColor);
     painter.drawRoundedRect(r, 4, 4);
 
-    // 绘制 folder_filled 矢量图标 (SvgIcons)
-    QPixmap pix = UiHelper::getPixmap("folder_filled", QSize(16, 16), Style::TextMain);
+    // 从 AppConfig 读取自定义图标和颜色，完美支持个性化渲染
+    QString colorKey = QString("DriveBar/FolderColor_%1").arg(m_folderPath);
+    QString iconKeyPath = QString("DriveBar/FolderIcon_%1").arg(m_folderPath);
+
+    QString colorStr = AppConfig::instance().getValue(colorKey, "#FFFFFF").toString();
+    QString iconKey = AppConfig::instance().getValue(iconKeyPath, "folder_filled").toString();
+
+    QColor folderColor = QColor(colorStr);
+    if (!folderColor.isValid()) {
+        folderColor = Style::TextMain;
+    }
+
+    // 绘制自定义矢量图标 (SvgIcons)
+    QPixmap pix = UiHelper::getPixmap(iconKey, QSize(16, 16), folderColor);
     QRect iconRect(r.left() + (r.width() - 16) / 2, r.top() + (r.height() - 16) / 2, 16, 16);
     painter.drawPixmap(iconRect, pix);
 }
