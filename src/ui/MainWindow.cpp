@@ -71,6 +71,7 @@ namespace ArcMeta {
 
 CustomFolderImportDialog::CustomFolderImportDialog(QWidget* parent)
     : FramelessDialog("新建自动导入", parent) {
+    setFixedWidth(500);
 
     QWidget* content = getContentArea();
     QVBoxLayout* layout = new QVBoxLayout(content);
