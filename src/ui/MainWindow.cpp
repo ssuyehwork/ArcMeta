@@ -1030,6 +1030,27 @@ void MainWindow::initToolbar() {
 
 
 void MainWindow::setupSplitters() {
+    auto createBtn = [this](const QString& iconKey, const QString& tip) {
+        QPushButton* btn = new QPushButton(this);
+        btn->setAttribute(Qt::WA_Hover);
+        btn->setFixedSize(32, 28);
+
+        QIcon icon = UiHelper::getIcon(iconKey, QColor("#EEEEEE"));
+        btn->setIcon(icon);
+        btn->setIconSize(QSize(18, 18));
+
+        btn->setProperty("tooltipText", tip);
+        btn->installEventFilter(this);
+
+        btn->setStyleSheet(
+            "QPushButton { background: transparent; border: none; border-radius: 4px; }"
+            "QPushButton:hover { background: #3E3E42; }"
+            "QPushButton:pressed { background: #4E4E52; }"
+            "QPushButton:disabled { opacity: 0.3; }"
+        );
+        return btn;
+    };
+
     QWidget* centralC = new QWidget(this);
     centralC->setObjectName("CentralWidget");
     centralC->setStyleSheet("#CentralWidget { background-color: #1E1E1E; }"); 
