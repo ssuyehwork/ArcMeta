@@ -115,7 +115,10 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
 
     if (hasThumb) {
         if (!thumb.isNull()) {
-            QPixmap scaled = thumb.scaled(m.cardRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+            bool isGrid = option.widget ? option.widget->property("gridMode").toBool() : false;
+            QPixmap scaled = thumb.scaled(m.cardRect.size(),
+                                          isGrid ? Qt::KeepAspectRatio : Qt::KeepAspectRatioByExpanding,
+                                          Qt::SmoothTransformation);
             int x = m.cardRect.center().x() - scaled.width() / 2;
             int y = m.cardRect.center().y() - scaled.height() / 2;
             painter->drawPixmap(x, y, scaled);

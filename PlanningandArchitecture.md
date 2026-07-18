@@ -89,7 +89,8 @@
 2. **`GridResultView`** 与 **`JustifiedResultView`**：
    - 包装了高度物理对齐的 `DropJustifiedView`（继承自 `JustifiedView`）。
    - 分别将其 `LayoutMode` 设定为 `GridMode`（网格卡片）与 `JustifiedMode`（等高自适应合理排版），共享同一个底层视图实例。
-   - **双轴筛选一致性**：由于三视图均共同挂接在 `ContentPanel` 唯一的 `FilterProxyModel` (`m_proxyModel`) 下，确保了用户进行颜色、标签或星级筛选时，所有视图内的数据变化保持绝对对齐和状态守恒。
+   - **不拉伸完整容纳 (Contain) 与等比覆盖 (Cover) 自适应切换 (P14)**：在网格视图模式下（`isGrid == true`），`ThumbnailDelegate` 会动态读取视图的 `gridMode` 属性，将缩略图缩放模式智能调节为 `Qt::KeepAspectRatio`（等比不拉伸，不裁剪完整呈现全图细节）；在等高自适应合理排版模式下则继续采用 `Qt::KeepAspectRatioByExpanding` 铺满，达到完美双布局切换。
+   - **双轴筛选一致性**：由于三视图均共同挂接在 `ContentPanel` 唯一的 `FilterProxyModel` (`m_proxyModel`) 下，确保了用户进行颜色、标签或星级筛选时，所有视图内的数据变化保持绝对对齐 and 状态守恒。
 
 ---
 
