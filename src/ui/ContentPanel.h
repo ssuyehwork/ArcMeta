@@ -78,6 +78,7 @@ public:
     bool canFetchMore(const QModelIndex& parent) const override;
     void fetchMore(const QModelIndex& parent) override;
 
+    void setQuery(const QString& query) { m_query = query; }
     void setRecords(const std::vector<ItemRecord>& records);
     void clear();
 
@@ -95,6 +96,7 @@ private:
     std::vector<ItemRecord> m_allRecords;
     std::unordered_map<QString, int, QStringHash> m_pathToIndex;
     int m_displayCount = 0;
+    QString m_query;
 
     mutable QCache<QString, QIcon> m_iconCache;
     mutable QSet<QString> m_requestedIcons;

@@ -3,6 +3,7 @@
 #endif
 #include "ContentPanel.h" 
 #include "../meta/MetadataManager.h" 
+#include <algorithm>
 #include "Logger.h"
 #include "SvgIcons.h" 
 #include "TreeItemDelegate.h" 
@@ -391,11 +392,18 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
 
 bool FerrexVirtualDbModel::canFetchMore(const QModelIndex& parent) const {
     Q_UNUSED(parent);
-    return false;
+    return m_displayCount < static_cast<int>(m_allRecords.size());
 }
 
 void FerrexVirtualDbModel::fetchMore(const QModelIndex& parent) {
     Q_UNUSED(parent);
+    if (m_displayCount < static_cast<int>(m_allRecords.size())) {
+        int remaining = static_cast<int>(m_allRecords.size()) - m_displayCount;
+        int batchSize = std::min(100, remaining);
+        beginInsertRows(QModelIndex(), m_displayCount, m_displayCount + batchSize - 1);
+        m_displayCount += batchSize;
+        endInsertRows();
+    }
 }
 
 void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
@@ -405,7 +413,11 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
     for (int i = 0; i < static_cast<int>(m_allRecords.size()); ++i) {
         m_pathToIndex[m_allRecords[i].path] = i;
     }
-    m_displayCount = static_cast<int>(m_allRecords.size());
+    if (!m_query.isEmpty() && m_query.length() < 3) {
+        m_displayCount = std::min(100, static_cast<int>(m_allRecords.size()));
+    } else {
+        m_displayCount = static_cast<int>(m_allRecords.size());
+    }
     m_requestedIcons.clear();
     m_aspectRatios.clear();
     m_metaCache.clear();
@@ -561,6 +573,7 @@ void FerrexVirtualDbModel::clear() {
     m_allRecords.clear();
     m_pathToIndex.clear();
     m_displayCount = 0;
+    m_query.clear();
     m_requestedIcons.clear();
     m_aspectRatios.clear();
     m_metaCache.clear();
@@ -2809,6 +2822,10 @@ void ContentPanel::search(const QString& query) {
     // 2026-07-xx 按照 Plan-118：搜索行为回归筛选流。
     // 搜索框仅作为当前视图的本地过滤器，禁止切换 m_currentCategoryType 为 "search"。
     
+    if (m_model) {
+        m_model->setQuery(query);
+    }
+
     // 1. 同步关键词到当前筛选状态
     m_currentFilter.keyword = query;
 
