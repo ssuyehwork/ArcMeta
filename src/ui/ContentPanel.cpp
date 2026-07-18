@@ -2702,6 +2702,7 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
     if (info.isDir()) { 
         emit directorySelected(path);  
     } else { 
+        MetadataManager::instance().recordAccess(path.toStdWString());
         QDesktopServices::openUrl(QUrl::fromLocalFile(path)); 
     } 
 } 

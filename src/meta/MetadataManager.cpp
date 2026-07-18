@@ -317,8 +317,8 @@ void MetadataManager::initFromScchMode() {
         m_loaded = true;
     }
 
-    // 2026-06-xx 物理对账：在初始化结束后（m_loaded 为 true 且缓存就绪），执行一次完整的统计重计
-    CategoryRepo::fullRecount();
+    // 2026-06-xx 物理对账：在初始化结束后（m_loaded 为 true 且缓存就绪），加载缓存计数
+    CategoryRepo::loadStatsFromDb();
     qDebug() << "[PERF] SQLite 元数据镜像构建完成。内存映射数:" << tempCache.size() 
              << " ID索引数:" << tempFidToPath.size()
              << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
@@ -687,6 +687,23 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         }
 
         m_cache[nPath] = rm;
+        if (!rm.isFolder) {
+            CategoryRepo::s_totalCount.fetch_add(1);
+            if (rm.tags.isEmpty()) {
+                CategoryRepo::s_untaggedCount.fetch_add(1);
+            } else {
+                std::lock_guard<std::mutex> tagsLock(CategoryRepo::s_tagsMutex);
+                for (const auto& t : rm.tags) {
+                    if (!CategoryRepo::s_globalTagsSet.contains(t)) {
+                        CategoryRepo::s_globalTagsSet.insert(t);
+                        CategoryRepo::s_tagsCount.fetch_add(1);
+                    }
+                }
+            }
+            if (CategoryRepo::getItemCategoryIds(rm.fileId128).empty()) {
+                CategoryRepo::s_uncategorizedCount.fetch_add(1);
+            }
+        }
         if (!rm.fileId128.empty()) {
             m_fidToPath[rm.fileId128] = nPath;
 
@@ -773,12 +790,18 @@ void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool no
     ensureActivated(nPath);
     bool changed = false;
     bool isManaged = false;
+    bool isFolder = false;
+    bool oldEmpty = false;
+    std::string fid;
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
         if (m_cache[nPath].isInvalid != invalid) {
             m_cache[nPath].isInvalid = invalid; 
             changed = true;
             isManaged = m_cache[nPath].isManaged;
+            isFolder = m_cache[nPath].isFolder;
+            oldEmpty = m_cache[nPath].tags.isEmpty();
+            fid = m_cache[nPath].fileId128;
         }
     }
     
@@ -786,6 +809,19 @@ void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool no
         // 2026-07-xx 物理修复：仅当项已登记 (isManaged) 时，其失效状态变更才影响活跃总数
         if (isManaged) {
             CategoryRepo::incrementTotalFileCount(invalid ? -1 : 1);
+        }
+        if (!isFolder) {
+            if (invalid) {
+                CategoryRepo::s_totalCount.fetch_sub(1);
+                CategoryRepo::s_invalidCount.fetch_add(1);
+                if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_sub(1);
+                if (CategoryRepo::getItemCategoryIds(fid).empty()) CategoryRepo::s_uncategorizedCount.fetch_sub(1);
+            } else {
+                CategoryRepo::s_totalCount.fetch_add(1);
+                CategoryRepo::s_invalidCount.fetch_sub(1);
+                if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_add(1);
+                if (CategoryRepo::getItemCategoryIds(fid).empty()) CategoryRepo::s_uncategorizedCount.fetch_add(1);
+            }
         }
         if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
         persistAsync(nPath);
@@ -822,6 +858,21 @@ void MetadataManager::setInvalidRecursive(const std::wstring& path, bool invalid
                 if (pair.second.isInvalid != invalid) {
                     pair.second.isInvalid = invalid;
                     affectedPaths.push_back(p);
+
+                    // 增量计数
+                    if (!pair.second.isFolder) {
+                        if (invalid) {
+                            CategoryRepo::s_totalCount.fetch_sub(1);
+                            CategoryRepo::s_invalidCount.fetch_add(1);
+                            if (pair.second.tags.isEmpty()) CategoryRepo::s_untaggedCount.fetch_sub(1);
+                            if (CategoryRepo::getItemCategoryIds(pair.second.fileId128).empty()) CategoryRepo::s_uncategorizedCount.fetch_sub(1);
+                        } else {
+                            CategoryRepo::s_totalCount.fetch_add(1);
+                            CategoryRepo::s_invalidCount.fetch_sub(1);
+                            if (pair.second.tags.isEmpty()) CategoryRepo::s_untaggedCount.fetch_add(1);
+                            if (CategoryRepo::getItemCategoryIds(pair.second.fileId128).empty()) CategoryRepo::s_uncategorizedCount.fetch_add(1);
+                        }
+                    }
                 }
             }
         }
@@ -856,9 +907,41 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
 
+    bool oldEmpty = false;
+    bool newEmpty = tags.isEmpty();
+    QStringList oldTags;
+    bool isFolder = false;
+
+    {
+        std::shared_lock<std::shared_mutex> rLock(m_mutex);
+        auto it = m_cache.find(nPath);
+        if (it != m_cache.end()) {
+            oldEmpty = it->second.tags.isEmpty();
+            oldTags = it->second.tags;
+            isFolder = it->second.isFolder;
+        }
+    }
+
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache[nPath].tags = tags;
+    }
+
+    if (!isFolder) {
+        if (oldEmpty && !newEmpty) {
+            CategoryRepo::s_untaggedCount.fetch_sub(1);
+        } else if (!oldEmpty && newEmpty) {
+            CategoryRepo::s_untaggedCount.fetch_add(1);
+        }
+
+        // Update global tags and tagsCount
+        std::lock_guard<std::mutex> tagsLock(CategoryRepo::s_tagsMutex);
+        for (const auto& t : tags) {
+            if (!CategoryRepo::s_globalTagsSet.contains(t)) {
+                CategoryRepo::s_globalTagsSet.insert(t);
+                CategoryRepo::s_tagsCount.fetch_add(1);
+            }
+        }
     }
 
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
@@ -1119,6 +1202,22 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
             if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
                 std::wstring curPath = it->first;
 
+                if (!it->second.isFolder) {
+                    if (it->second.isInvalid) {
+                        CategoryRepo::s_invalidCount.fetch_sub(1);
+                    } else if (it->second.isTrash) {
+                        CategoryRepo::s_trashCount.fetch_sub(1);
+                    } else {
+                        CategoryRepo::s_totalCount.fetch_sub(1);
+                        if (it->second.tags.isEmpty()) {
+                            CategoryRepo::s_untaggedCount.fetch_sub(1);
+                        }
+                        if (CategoryRepo::getItemCategoryIds(it->second.fileId128).empty()) {
+                            CategoryRepo::s_uncategorizedCount.fetch_sub(1);
+                        }
+                    }
+                }
+
                 if (!it->second.isFolder && !it->second.isInvalid && !it->second.isTrash) {
                     totalDelta--;
                 }
@@ -1217,6 +1316,22 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
             for (const auto& p : toRemove) {
                 auto it = m_cache.find(p);
                 if (it == m_cache.end()) continue;
+
+                if (!it->second.isFolder) {
+                    if (it->second.isInvalid) {
+                        CategoryRepo::s_invalidCount.fetch_sub(1);
+                    } else if (it->second.isTrash) {
+                        CategoryRepo::s_trashCount.fetch_sub(1);
+                    } else {
+                        CategoryRepo::s_totalCount.fetch_sub(1);
+                        if (it->second.tags.isEmpty()) {
+                            CategoryRepo::s_untaggedCount.fetch_sub(1);
+                        }
+                        if (CategoryRepo::getItemCategoryIds(it->second.fileId128).empty()) {
+                            CategoryRepo::s_uncategorizedCount.fetch_sub(1);
+                        }
+                    }
+                }
 
                 if (!it->second.isFolder && !it->second.isInvalid && !it->second.isTrash) {
                     totalDelta--;
@@ -1346,6 +1461,8 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
     
     ensureActivated(nPath); 
 
+    bool isFolder = false;
+    bool oldEmpty = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         if (m_cache[nPath].isTrash != isTrash) {
@@ -1354,6 +1471,8 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
             changed = true;
             isManaged = m_cache[nPath].isManaged;
             isInvalid = m_cache[nPath].isInvalid;
+            isFolder = m_cache[nPath].isFolder;
+            oldEmpty = m_cache[nPath].tags.isEmpty();
         }
         if (!fid.empty()) m_fidToPath[fid] = nPath;
     }
@@ -1371,6 +1490,24 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
             CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
         }
 
+        if (!isFolder) {
+            if (isTrash) {
+                CategoryRepo::s_totalCount.fetch_sub(1);
+                CategoryRepo::s_trashCount.fetch_add(1);
+                if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_sub(1);
+                if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+                    CategoryRepo::s_uncategorizedCount.fetch_sub(1);
+                }
+            } else {
+                CategoryRepo::s_totalCount.fetch_add(1);
+                CategoryRepo::s_trashCount.fetch_sub(1);
+                if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_add(1);
+                if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+                    CategoryRepo::s_uncategorizedCount.fetch_add(1);
+                }
+            }
+        }
+
         persistAsync(nPath);
         
         // 2026-06-xx 物理修复：状态变更后必须强制发射信号，驱动侧边栏重数一遍
@@ -1380,19 +1517,45 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
 
 void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
     std::wstring nPath = normalizePath(path);
+    bool changed = false;
+    bool isFolder = false;
+    bool oldEmpty = false;
+    std::string fid;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         auto it = m_cache.find(nPath);
-        if (it == m_cache.end()) return;
-
-        // 2026-07-xx 按照规则同步活跃计数：仅对已登记项执行
-        if (it->second.isManaged && it->second.isTrash != isTrash && !it->second.isInvalid) {
-            CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
+        if (it != m_cache.end()) {
+            if (it->second.isTrash != isTrash) {
+                // 2026-07-xx 按照规则同步活跃计数：仅对已登记项执行
+                if (it->second.isManaged && !it->second.isInvalid) {
+                    CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
+                }
+                it->second.isTrash = isTrash;
+                if (!isTrash) {
+                    it->second.originalPath = L""; // Clear on restore
+                }
+                changed = true;
+                isFolder = it->second.isFolder;
+                oldEmpty = it->second.tags.isEmpty();
+                fid = it->second.fileId128;
+            }
         }
-
-        it->second.isTrash = isTrash;
-        if (!isTrash) {
-            it->second.originalPath = L""; // Clear on restore
+    }
+    if (changed && !isFolder) {
+        if (isTrash) {
+            CategoryRepo::s_totalCount.fetch_sub(1);
+            CategoryRepo::s_trashCount.fetch_add(1);
+            if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_sub(1);
+            if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+                CategoryRepo::s_uncategorizedCount.fetch_sub(1);
+            }
+        } else {
+            CategoryRepo::s_totalCount.fetch_add(1);
+            CategoryRepo::s_trashCount.fetch_sub(1);
+            if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_add(1);
+            if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+                CategoryRepo::s_uncategorizedCount.fetch_add(1);
+            }
         }
     }
     persistAsync(nPath);
@@ -2246,6 +2409,54 @@ QList<QPair<QString, int>> MetadataManager::getTopTags(int limit) const {
         return list.mid(0, limit);
     }
     return list;
+}
+
+void MetadataManager::recordAccess(const std::wstring& path) {
+    std::wstring nPath = normalizePath(path);
+    {
+        std::lock_guard<std::mutex> lock(m_recentMutex);
+        if (m_recentVisitedSet.find(nPath) == m_recentVisitedSet.end()) {
+            m_recentVisitedSet.insert(nPath);
+            CategoryRepo::s_recentlyVisitedCount.fetch_add(1);
+        }
+        m_recentVisitedQueue.push_back(nPath);
+    }
+
+    double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto it = m_cache.find(nPath);
+        if (it != m_cache.end()) {
+            it->second.atime = static_cast<long long>(now);
+        }
+    }
+    persistAsync(nPath);
+}
+
+double MetadataManager::getCachedAtime(const std::wstring& path) {
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    auto it = m_cache.find(path);
+    if (it != m_cache.end()) {
+        return static_cast<double>(it->second.atime);
+    }
+    return 0.0;
+}
+
+void MetadataManager::slideRecentWindow() {
+    std::lock_guard<std::mutex> lock(m_recentMutex);
+    double expireThreshold = static_cast<double>(QDateTime::currentMSecsSinceEpoch()) - 86400000.0;
+    while (!m_recentVisitedQueue.empty()) {
+        const std::wstring& oldestPath = m_recentVisitedQueue.front();
+        double itemAtime = getCachedAtime(oldestPath);
+        if (itemAtime < expireThreshold) {
+            m_recentVisitedQueue.pop_front();
+            if (m_recentVisitedSet.erase(oldestPath) > 0) {
+                CategoryRepo::s_recentlyVisitedCount.fetch_sub(1);
+            }
+        } else {
+            break; // 队首依然在 24h 窗口内，说明后续更安全，直接跳出剪枝！
+        }
+    }
 }
 
 } // namespace ArcMeta

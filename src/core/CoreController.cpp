@@ -8,6 +8,7 @@
 #include "../ui/Logger.h"
 #include <QThreadPool>
 #include <QDebug>
+#include <QTimer>
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
@@ -87,6 +88,13 @@ void CoreController::startSystem() {
                 setStatus("系统就绪", false);
                 qDebug() << "[Core] !!! SQLite 内存模式初始化就绪，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
                 emit initializationFinished();
+
+                // 2.0秒后异步执行一次全量对账与原子计数校准 (不阻塞主线程/首屏渲染)
+                QTimer::singleShot(2000, []() {
+                    QtConcurrent::run([]() {
+                        CategoryRepo::fullRecount();
+                    });
+                });
             }, Qt::QueuedConnection);
 
         } catch (...) {

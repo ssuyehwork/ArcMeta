@@ -11,6 +11,8 @@
 #include <shared_mutex>
 #include <string>
 #include <atomic>
+#include <deque>
+#include <mutex>
 
 namespace ArcMeta {
 
@@ -311,6 +313,13 @@ public:
     void loadVolumeNameCache(const std::wstring& volSerial);
 
     /**
+     * @brief 2026-08-xx Sliding window functions for recently_visited
+     */
+    void recordAccess(const std::wstring& path);
+    void slideRecentWindow();
+    double getCachedAtime(const std::wstring& path);
+
+    /**
      * @brief 隔离查询 API
      */
     std::vector<std::string> getFileFidsByName(const std::wstring& filename);
@@ -364,6 +373,11 @@ private:
     // Key: 标准化父级目录路径 (结尾不含斜杠), Value: 直接子项的完整标准化路径集合
     std::unordered_map<std::wstring, std::vector<std::wstring>> m_parentToChildren;
     std::unordered_map<std::wstring, double> m_folderProgressCache;
+
+    // 2026-08-xx Sliding window for recently_visited
+    std::deque<std::wstring> m_recentVisitedQueue;
+    std::unordered_set<std::wstring> m_recentVisitedSet;
+    std::mutex m_recentMutex;
 
     // 2026-07-xx 隔离式倒排索引：物理隔离文件、文件夹及后缀
     // 1. 仅文件 (Key: L"resume.pdf", Value: file_ids)

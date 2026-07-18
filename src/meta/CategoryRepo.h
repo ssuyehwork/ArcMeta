@@ -4,8 +4,10 @@
 #include <vector>
 #include <QString>
 #include <QMap>
+#include <QSet>
 #include <atomic>
 #include <functional>
+#include <mutex>
 #include <map>
 #include "sqlite3.h"
 
@@ -104,6 +106,11 @@ public:
     static void incrementCategorizedCount(int delta);
     
     /**
+     * @brief 从数据库加载历史持久化计数
+     */
+    static void loadStatsFromDb();
+
+    /**
      * @brief 强制执行全量计数重计 (物理账本对账)
      */
     static void fullRecount();
@@ -131,6 +138,18 @@ public:
 
     static std::atomic<int> s_totalFileCount;
     static std::atomic<int> s_categorizedCount;
+
+    // 2026-08-xx：侧边栏高性能原子计数器
+    static std::atomic<int> s_totalCount;             // 对应 "all"
+    static std::atomic<int> s_tagsCount;              // 对应 "tags"
+    static std::atomic<int> s_recentlyVisitedCount;   // 对应 "recently_visited"
+    static std::atomic<int> s_untaggedCount;          // 对应 "untagged"
+    static std::atomic<int> s_uncategorizedCount;     // 对应 "uncategorized"
+    static std::atomic<int> s_trashCount;             // 对应 "trash"
+    static std::atomic<int> s_invalidCount;           // 对应 "invalid_data"
+
+    static std::mutex s_tagsMutex;
+    static QSet<QString> s_globalTagsSet;
 };
 
 } // namespace ArcMeta

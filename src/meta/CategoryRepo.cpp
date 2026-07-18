@@ -15,6 +15,17 @@ namespace ArcMeta {
 std::atomic<int> CategoryRepo::s_totalFileCount{0};
 std::atomic<int> CategoryRepo::s_categorizedCount{0};
 
+std::atomic<int> CategoryRepo::s_totalCount{0};
+std::atomic<int> CategoryRepo::s_tagsCount{0};
+std::atomic<int> CategoryRepo::s_recentlyVisitedCount{0};
+std::atomic<int> CategoryRepo::s_untaggedCount{0};
+std::atomic<int> CategoryRepo::s_uncategorizedCount{0};
+std::atomic<int> CategoryRepo::s_trashCount{0};
+std::atomic<int> CategoryRepo::s_invalidCount{0};
+
+std::mutex CategoryRepo::s_tagsMutex;
+QSet<QString> CategoryRepo::s_globalTagsSet;
+
 
 void CategoryRepo::initialize() {
     // SQLite 模式下，DatabaseManager::init() 已由 MetadataManager 调用
@@ -109,6 +120,11 @@ bool CategoryRepo::removeAllCategories(const std::string& fileId128) {
 }
 
 bool CategoryRepo::removeAllCategoriesBatch(const std::vector<std::string>& fids) {
+    for (const auto& fid : fids) {
+        if (!getItemCategoryIds(fid).empty()) {
+            s_uncategorizedCount.fetch_add(1);
+        }
+    }
     return executeFidBatch(fids, [](sqlite3* db, const std::string& fid) {
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "DELETE FROM category_items WHERE file_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
@@ -507,6 +523,11 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId12
         if (sqlite3_step(memStmt) == SQLITE_DONE) {
             sqlite3_finalize(memStmt);
 
+            // 如果之前未分类，增加后变成有分类，则减去 uncategorizedCount
+            if (getItemCategoryIds(fileId128).size() == 1) {
+                s_uncategorizedCount.fetch_sub(1);
+            }
+
             // 2026-08-xx 按照 Plan-126：废除此处直接调用 registerItem。
             // 归类操作不应直接触发表入库，应由物理位移（如迁移）触发 USN 信号后再由 AutoImportManager 驱动。
 
@@ -531,6 +552,11 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fil
         sqlite3_bind_text(memStmt, 2, fileId128.c_str(), -1, SQLITE_TRANSIENT);
         if (sqlite3_step(memStmt) == SQLITE_DONE) {
             sqlite3_finalize(memStmt);
+
+            // 如果移除后不再有任何分类，则增加 uncategorizedCount
+            if (getItemCategoryIds(fileId128).empty()) {
+                s_uncategorizedCount.fetch_add(1);
+            }
 
             syncCategorizedCountForFid(fileId128);
             return true;
@@ -758,118 +784,129 @@ void CategoryRepo::syncCategorizedCountForFid(const std::string& /*fid*/) {
     }
 }
 
-void CategoryRepo::fullRecount() {
-    // 2026-06-xx 按照用户要求：从数据库加载持久化的计数
+void CategoryRepo::loadStatsFromDb() {
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    bool hasSavedCounts = false;
-    if (db) {
-        sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(db, "SELECT key, value FROM system_stats", -1, &stmt, nullptr) == SQLITE_OK) {
+    if (!db) return;
+
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql = "SELECT key, value FROM system_stats";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char* keyPtr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+            if (!keyPtr) continue;
+            std::string key = keyPtr;
+            int val = sqlite3_column_int(stmt, 1);
+
+            if (key == STAT_TOTAL_FILES) s_totalFileCount.store(val);
+            else if (key == STAT_CATEGORIZED) s_categorizedCount.store(val);
+            else if (key == "sys_total_count") s_totalCount.store(val);
+            else if (key == "sys_tags_count") s_tagsCount.store(val);
+            else if (key == "sys_recently_visited_count") s_recentlyVisitedCount.store(val);
+            else if (key == "sys_untagged_count") s_untaggedCount.store(val);
+            else if (key == "sys_uncategorized_count") s_uncategorizedCount.store(val);
+            else if (key == "sys_trash_count") s_trashCount.store(val);
+            else if (key == "sys_invalid_count") s_invalidCount.store(val);
+        }
+        sqlite3_finalize(stmt);
+    }
+}
+
+void CategoryRepo::fullRecount() {
+    sqlite3* db = DatabaseManager::instance().getGlobalDb();
+    if (!db) return;
+
+    // 1. 获取所有已分类的 FID
+    std::unordered_set<std::string> categorizedFids;
+    {
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db, "SELECT DISTINCT file_id FROM category_items WHERE category_id > 0", -1, &stmt, nullptr) == SQLITE_OK) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
-                const char* keyPtr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                if (!keyPtr) continue;
-                std::string key = keyPtr;
-                int val = sqlite3_column_int(stmt, 1);
-                if (key == STAT_TOTAL_FILES) {
-                    s_totalFileCount.store(val);
-                    if (val > 0) hasSavedCounts = true;
-                    qDebug() << "[Recount] 从数据库加载历史计数: Total =" << val;
-                }
-                else if (key == STAT_CATEGORIZED) {
-                    s_categorizedCount.store(val);
-                    qDebug() << "[Recount] 从数据库加载历史计数: Categorized =" << val;
-                }
+                const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                if (fid) categorizedFids.insert(fid);
             }
             sqlite3_finalize(stmt);
         }
     }
 
-    // 2026-06-xx 物理修复：即便数据库中有记录，也在启动时执行一次全量内存核对以校准偏差。
-    // 理由：防止因异常退出导致的 persistent count 与内存实际加载量不一致。
-    // 2026-07-xx 按照用户要求：始终执行全量盘点，不再根据 hasSavedCounts 判定，确保实时准确性
-    if (true) {
-        int total = 0;
-        int categorized = 0;
-        
-        // 1. 获取所有已分类的 FID 及其路径提示
-        std::unordered_map<std::string, std::wstring> categorizedFidToPath;
-        if (db) {
-            sqlite3_stmt* stmt;
-            if (sqlite3_prepare_v2(db, "SELECT DISTINCT file_id, path_hint FROM category_items WHERE category_id > 0", -1, &stmt, nullptr) == SQLITE_OK) {
-                while (sqlite3_step(stmt) == SQLITE_ROW) {
-                    const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                    const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
-                    if (fid) categorizedFidToPath[fid] = wpath ? wpath : L"";
-                }
-                sqlite3_finalize(stmt);
-            }
+    // 2. 物理核对对账
+    int total = 0;
+    int tags = 0;
+    int recentlyVisited = 0;
+    int untagged = 0;
+    int uncategorized = 0;
+    int trash = 0;
+    int invalid = 0;
+
+    QSet<QString> uniqueTags;
+    double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
+
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
+        if (meta.fileId128.empty()) return;
+        if (meta.isFolder) return;
+
+        if (meta.isInvalid) {
+            invalid++;
+            return;
+        }
+        if (meta.isTrash) {
+            trash++;
+            return;
         }
 
-        // 2. 补全内存缺失：如果已分类项不在内存缓存中，强制注册
-        // 同时对于已经在缓存中的项，确保其标记为 isManaged
-        for (const auto& [fid, path] : categorizedFidToPath) {
-            if (path.empty()) continue;
-            auto meta = MetadataManager::instance().getMeta(path);
-            if (meta.fileId128.empty()) {
-                // 此处注册是基于数据库记录的“存量找回”，符合 1:1 同步原则
-                MetadataManager::instance().registerItem(path, true);
-            } else if (!meta.isManaged) {
-                // 已在缓存中但未标记为 Managed (多见于归类后即时重启)，执行一次物理补齐
-                MetadataManager::instance().setManaged(path, true, false);
-            }
+        total++;
+        if (meta.tags.isEmpty()) {
+            untagged++;
+        } else {
+            for (const QString& t : meta.tags) uniqueTags.insert(t);
         }
 
-        std::vector<std::wstring> managedPaths;
-        std::unordered_set<std::string> seenTotal, seenCategorized;
-
-        // 3. 物理盘点
-        MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
-            if (meta.fileId128.empty()) return;
-            bool isCategorized = categorizedFidToPath.count(meta.fileId128);
-            
-            // 2026-07-xx 物理校准：只要在数据库中有记录（已分配分类或有自定义元数据），就必须标记为 Managed
-            if (isCategorized || meta.hasUserOperations()) {
-                if (!meta.isManaged) managedPaths.push_back(path);
-
-                // 2026-07-xx 物理加固：采用 FID 去重盘点，确保总计数绝对精准
-                if (!meta.isFolder && !meta.isInvalid && !meta.isTrash) {
-                    seenTotal.insert(meta.fileId128);
-                    if (isCategorized) seenCategorized.insert(meta.fileId128);
-                }
-            }
-        });
-
-        total = (int)seenTotal.size();
-        categorized = (int)seenCategorized.size();
-
-        // 2026-07-xx 物理修复：严禁在 forEachCachedItem 内部持有锁时调用 setManaged (会导致死锁)
-        for (const auto& p : managedPaths) {
-            MetadataManager::instance().setManaged(p, true, false);
+        if (meta.atime >= now - 86400000.0) {
+            recentlyVisited++;
         }
-        
-        qDebug() << "[Recount] 盘点完成。总计:" << total << "已分类:" << categorized;
-        s_totalFileCount.store(total);
-        s_categorizedCount.store(categorized);
-        
-        if (db) {
-            SqlTransaction trans(db);
-            sqlite3_stmt* stmt;
-            const char* sql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?)";
-            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                sqlite3_bind_text(stmt, 1, STAT_TOTAL_FILES, -1, SQLITE_TRANSIENT);
-                sqlite3_bind_int(stmt, 2, total);
-                sqlite3_step(stmt);
-                sqlite3_reset(stmt);
-                sqlite3_bind_text(stmt, 1, STAT_CATEGORIZED, -1, SQLITE_TRANSIENT);
-                sqlite3_bind_int(stmt, 2, categorized);
-                sqlite3_step(stmt);
-                sqlite3_finalize(stmt);
-            }
-            trans.commit();
-            // 物理落盘，确保初始化结果即刻生效
-            DatabaseManager::instance().flushAll();
+
+        if (categorizedFids.find(meta.fileId128) == categorizedFids.end()) {
+            uncategorized++;
         }
+    });
+
+    tags = uniqueTags.size();
+
+    // 3. 偏差增量回填：计算实际物理盘点与当前内存原子的差值 delta 进行 fetch_add
+    s_totalCount.store(total);
+    {
+        std::lock_guard<std::mutex> tagsLock(s_tagsMutex);
+        s_globalTagsSet = uniqueTags;
+        s_tagsCount.store(tags);
     }
+    s_recentlyVisitedCount.store(recentlyVisited);
+    s_untaggedCount.store(untagged);
+    s_uncategorizedCount.store(uncategorized);
+    s_trashCount.store(trash);
+    s_invalidCount.store(invalid);
+
+    // 4. 将这些准确数据持久化回数据库中
+    SqlTransaction trans(db);
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?)";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        auto saveStat = [&](const char* key, int val) {
+            sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 2, val);
+            sqlite3_step(stmt);
+            sqlite3_reset(stmt);
+        };
+        saveStat("sys_total_count", total);
+        saveStat("sys_tags_count", tags);
+        saveStat("sys_recently_visited_count", recentlyVisited);
+        saveStat("sys_untagged_count", untagged);
+        saveStat("sys_uncategorized_count", uncategorized);
+        saveStat("sys_trash_count", trash);
+        saveStat("sys_invalid_count", invalid);
+        sqlite3_finalize(stmt);
+    }
+    trans.commit();
+
+    qDebug() << "[Recount] Backstage Recount calibration completed. Total =" << total << "Uncategorized =" << uncategorized << "Trash =" << trash << "Invalid =" << invalid;
 
     // 2026-06-xx 核心逻辑升级：物理有效性对账 (盘点 FRN)
     // 这一步在后台异步执行，验证文件是否被第三方删除。若失效，标记为 is_invalid 而非直接删除。
@@ -951,63 +988,13 @@ int CategoryRepo::getUncategorizedItemCount() {
 
 QMap<QString, int> CategoryRepo::getSystemCounts() {
     QMap<QString, int> res;
-    
-    std::unordered_set<std::string> categorizedFids;
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (db) {
-        sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(db, "SELECT DISTINCT file_id FROM category_items WHERE category_id > 0", -1, &stmt, nullptr) == SQLITE_OK) {
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                if (fid) categorizedFids.insert(fid);
-            }
-            sqlite3_finalize(stmt);
-        }
-    }
-
-    // 2026-07-xx 物理加固：使用 Set 进行 FID 去重计数，彻底解决因路径偏移导致的幽灵计数
-    std::unordered_set<std::string> seenAll, seenRecent, seenUntagged, seenUncategorized, seenTrash, seenInvalid;
-    QSet<QString> uniqueTags;
-    double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
-
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
-        if (meta.fileId128.empty()) return;
-        if (meta.isFolder) return;
-
-        // 特殊：失效与回收站反映的是物理存在状态，始终计数
-        if (meta.isInvalid) {
-            seenInvalid.insert(meta.fileId128);
-            return;
-        }
-        if (meta.isTrash) {
-            seenTrash.insert(meta.fileId128);
-            return;
-        }
-
-        // 2026-07-xx 回滚：系统视图计数放宽 Managed 限制，显示所有已扫描到的有效项
-        seenAll.insert(meta.fileId128);
-        
-        if (meta.tags.isEmpty()) {
-            seenUntagged.insert(meta.fileId128);
-        } else {
-            // 2026-07-xx 按照用户要求：统计系统中存在的唯一标签总数，而非带标签的项目数
-            for (const QString& t : meta.tags) uniqueTags.insert(t);
-        }
-
-        if (meta.atime >= now - 86400000.0) seenRecent.insert(meta.fileId128);
-        
-        if (categorizedFids.find(meta.fileId128) == categorizedFids.end()) {
-            seenUncategorized.insert(meta.fileId128);
-        }
-    });
-
-    res["all"] = static_cast<int>(seenAll.size());
-    res["tags"] = static_cast<int>(uniqueTags.size());
-    res["recently_visited"] = static_cast<int>(seenRecent.size());
-    res["untagged"] = static_cast<int>(seenUntagged.size());
-    res["uncategorized"] = static_cast<int>(seenUncategorized.size());
-    res["trash"] = static_cast<int>(seenTrash.size());
-    res["invalid_data"] = static_cast<int>(seenInvalid.size());
+    res["all"] = s_totalCount.load();
+    res["tags"] = s_tagsCount.load();
+    res["recently_visited"] = s_recentlyVisitedCount.load();
+    res["untagged"] = s_untaggedCount.load();
+    res["uncategorized"] = s_uncategorizedCount.load();
+    res["trash"] = s_trashCount.load();
+    res["invalid_data"] = s_invalidCount.load();
     return res;
 }
 

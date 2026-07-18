@@ -415,6 +415,9 @@ bool DatabaseManager::init() {
 }
 
 void DatabaseManager::flushAll(bool forceFull) {
+    // 24h 滑动窗口 15s 剪枝
+    MetadataManager::instance().slideRecentWindow();
+
     if (!m_isDirty.load()) {
         qDebug() << "[DB] Database is clean (not dirty), skipping flushAll() for instant exit.";
         return;
