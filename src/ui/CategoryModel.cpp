@@ -250,7 +250,7 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
             }
 
             // 提交给线程池异步执行重命名和数据库写入
-            QtConcurrent::run([this, targetCat, newName]() mutable {
+            (void)QtConcurrent::run([this, targetCat, newName]() mutable {
                 bool renameSuccess = true;
                 if (!targetCat.physicalPath.empty()) {
                     QString oldPath = QString::fromStdWString(targetCat.physicalPath);

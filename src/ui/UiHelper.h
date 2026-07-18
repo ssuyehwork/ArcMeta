@@ -215,7 +215,7 @@ public:
         }
 
         // 2. 将实际提取任务投递到线程池异步执行，完成后通知主线程
-        QtConcurrent::run([filePath, key, info]() {
+        (void)QtConcurrent::run([filePath, key, info]() {
             QFileIconProvider provider;
             QIcon icon;
             if (info.isDir()) {
