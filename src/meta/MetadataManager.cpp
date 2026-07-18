@@ -1813,6 +1813,7 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
 }
 
 void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, bool authorized) {
+    WriteGuard guard;
     if (paths.empty()) return;
 
     // 1. 按数据库对路径进行分组，以支持大事务写入
@@ -1912,6 +1913,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
 }
 
 void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool authorized) {
+    WriteGuard guard;
     std::wstring nPath = MetadataManager::normalizePath(path);
     
     RuntimeMeta rMeta = getMeta(nPath);
@@ -2132,44 +2134,86 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
         hasScope = true;
     }
 
-    std::shared_lock<std::shared_mutex> lock(m_mutex);
-    
     // 2026-07-xx 物理对账：规范化父路径前缀用于导航范围搜索
     std::wstring wParentPath = (scopeSource == "nav" && !parentPath.isEmpty()) ? normalizePath(parentPath.toStdWString()) : L"";
     if (!wParentPath.empty()) {
         bool endsWithSlash = false;
-        if (!wParentPath.empty()) {
-            wchar_t lastChar = wParentPath.back();
-            if (lastChar == L'\\' || lastChar == L'/') endsWithSlash = true;
-        }
+        if (wParentPath.back() == L'\\' || wParentPath.back() == L'/') endsWithSlash = true;
         if (!endsWithSlash) {
             wParentPath += L'\\';
         }
     }
 
-    for (std::unordered_map<std::wstring, RuntimeMeta>::const_iterator it = m_cache.begin(); it != m_cache.end(); ++it) {
-        const std::wstring& path = it->first; 
-        const RuntimeMeta& meta = it->second;
+    // 2. 区分检索词长度获取匹配路径，避开 O(N) 扫描
+    std::vector<std::wstring> matchedPaths;
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
 
-        // 范围检查 (Scope Check)
-        if (hasScope) {
-            if (scopeFids.find(meta.fileId128) == scopeFids.end()) continue;
-        } else if (!wParentPath.empty()) {
-            // 物理视图下的路径范围匹配
-            if (path.find(wParentPath) != 0) continue;
-        }
+    if (keyword.length() >= 3) {
+        // FTS5 trigram 快速 Match 路径
+        QString cleanKeyword = keyword;
+        cleanKeyword.replace("\"", "");
+        QString ftsQuery = "\"" + cleanKeyword + "\"";
+        std::string utf8Query = ftsQuery.toUtf8().toStdString();
 
-        QString qPath = QString::fromStdWString(path); 
-        QString qNote = QString::fromStdWString(meta.note);
-        
-        bool match = qPath.contains(keyword, Qt::CaseInsensitive) || qNote.contains(keyword, Qt::CaseInsensitive);
-        if (!match) { 
-            for (int i = 0; i < meta.tags.size(); ++i) { 
-                if (meta.tags[i].contains(keyword, Qt::CaseInsensitive)) { match = true; break; } 
-            } 
+        const char* sql = "SELECT path FROM metadata WHERE rowid IN (SELECT rowid FROM metadata_fts WHERE metadata_fts MATCH ?)";
+        for (sqlite3* db : dbs) {
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(stmt, 1, utf8Query.c_str(), -1, SQLITE_TRANSIENT);
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                    const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 0));
+                    if (wpath) {
+                        matchedPaths.push_back(normalizePath(wpath));
+                    }
+                }
+                sqlite3_finalize(stmt);
+            }
         }
-        if (match) results << qPath;
+    } else {
+        // 退化路径：LIKE 模糊匹配降级路径
+        QString likeQueryStr = "%" + keyword + "%";
+        std::wstring likeQuery = likeQueryStr.toStdWString();
+
+        const char* sql = "SELECT path FROM metadata WHERE path LIKE ? OR note LIKE ? OR tags LIKE ?";
+        for (sqlite3* db : dbs) {
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text16(stmt, 1, likeQuery.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(stmt, 2, likeQuery.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(stmt, 3, likeQuery.c_str(), -1, SQLITE_TRANSIENT);
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                    const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 0));
+                    if (wpath) {
+                        matchedPaths.push_back(normalizePath(wpath));
+                    }
+                }
+                sqlite3_finalize(stmt);
+            }
+        }
     }
+
+    // 去重
+    std::sort(matchedPaths.begin(), matchedPaths.end());
+    matchedPaths.erase(std::unique(matchedPaths.begin(), matchedPaths.end()), matchedPaths.end());
+
+    // 3. 关联内存缓存并执行 Scope 过滤
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    for (const auto& path : matchedPaths) {
+        auto it = m_cache.find(path);
+        if (it != m_cache.end()) {
+            const RuntimeMeta& meta = it->second;
+
+            // Scope check
+            if (hasScope) {
+                if (scopeFids.find(meta.fileId128) == scopeFids.end()) continue;
+            } else if (!wParentPath.empty()) {
+                if (path.find(wParentPath) != 0) continue;
+            }
+
+            results << QString::fromStdWString(path);
+        }
+    }
+
     return results;
 }
 

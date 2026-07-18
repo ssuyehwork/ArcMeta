@@ -1,4 +1,5 @@
 #include "DatabaseManager.h"
+#include <chrono>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -10,6 +11,7 @@
 namespace ArcMeta {
 
 SqlTransaction::SqlTransaction(struct sqlite3* db) : m_db(db) {
+    DatabaseManager::instance().incrementWriteSources();
     if (m_db) {
         // 2026-07-xx 物理修复 (1.22)：通过检测 autocommit 状态支持伪嵌套事务。
         // 如果 autocommit 为 0，说明已经处于外部事务中。
@@ -33,6 +35,7 @@ SqlTransaction::~SqlTransaction() {
     if (m_db && !m_committed && !m_isNested) {
         sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
     }
+    DatabaseManager::instance().decrementWriteSources();
 }
 
 bool SqlTransaction::commit() {
@@ -93,7 +96,7 @@ DatabaseManager::~DatabaseManager() {
         m_syncTimer->stop();
     }
     stopWorkerThread();
-    flushAll();
+    flushAll(true);
     for (auto& pair : m_driveDbs) {
         closeDb(pair.second);
     }
@@ -117,6 +120,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         qDebug() << "[DB] Failed to open disk DB:" << QString::fromStdString(utf8Path);
         return false;
     }
+    sqlite3_busy_timeout(conn.diskDb, 25000);
 
     // 打开独立的内存数据库连接
     if (sqlite3_open_v2(":memory:", &conn.memDb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
@@ -125,6 +129,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         conn.diskDb = nullptr;
         return false;
     }
+    sqlite3_busy_timeout(conn.memDb, 25000);
     ensureHidden(diskPath);
 
     // 使用 SQLite Backup API 将 conn.diskDb 的数据一次性导入内存 conn.memDb
@@ -223,6 +228,42 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         // 系统分类 ID (-1, -2) 仅作为桶位标记存在于逻辑层，绝不可作为 UI 节点存储在 categories 表中。
         const char* cleanup = "DELETE FROM categories WHERE id <= 0;";
         sqlite3_exec(conn.memDb, cleanup, nullptr, nullptr, nullptr);
+
+        // FTS5 trigram 模糊匹配与自动触发器同步
+        const char* ftsSchema = R"(
+            CREATE VIRTUAL TABLE IF NOT EXISTS metadata_fts USING fts5(
+                file_id UNINDEXED,
+                path,
+                tags,
+                note,
+                content='metadata',
+                content_rowid='rowid',
+                tokenize="trigram"
+            );
+            CREATE TRIGGER IF NOT EXISTS tb_metadata_insert AFTER INSERT ON metadata BEGIN
+                INSERT INTO metadata_fts(rowid, file_id, path, tags, note)
+                VALUES (new.rowid, new.file_id, new.path, new.tags, new.note);
+            END;
+            CREATE TRIGGER IF NOT EXISTS tb_metadata_update AFTER UPDATE ON metadata BEGIN
+                INSERT INTO metadata_fts(metadata_fts, rowid, file_id, path, tags, note)
+                VALUES('delete', old.rowid, old.file_id, old.path, old.tags, old.note);
+                INSERT INTO metadata_fts(rowid, file_id, path, tags, note)
+                VALUES(new.rowid, new.file_id, new.path, new.tags, new.note);
+            END;
+            CREATE TRIGGER IF NOT EXISTS tb_metadata_delete AFTER DELETE ON metadata BEGIN
+                INSERT INTO metadata_fts(metadata_fts, rowid, file_id, path, tags, note)
+                VALUES('delete', old.rowid, old.file_id, old.path, old.tags, old.note);
+            END;
+        )";
+        char* ftsErrMsg = nullptr;
+        sqlite3_exec(conn.memDb, ftsSchema, nullptr, nullptr, &ftsErrMsg);
+        if (ftsErrMsg) {
+            qWarning() << "[DB] FTS Schema error:" << ftsErrMsg;
+            sqlite3_free(ftsErrMsg);
+        } else {
+            // Rebuild FTS index to populate any data loaded from disk
+            sqlite3_exec(conn.memDb, "INSERT INTO metadata_fts(metadata_fts) VALUES('rebuild');", nullptr, nullptr, nullptr);
+        }
     }
 
     // 2026-07-xx 物理加固：自动迁移旧版本数据库字段 (Plan-29)
@@ -298,16 +339,51 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     return true;
 }
 
-void DatabaseManager::saveDb(DbConnection& conn) {
+void DatabaseManager::saveDb(DbConnection& conn, bool forceFull) {
     if (!conn.diskDb || !conn.memDb) return;
+
+    if (!forceFull) {
+        bool expected = false;
+        if (!m_isBackupRunning.compare_exchange_strong(expected, true)) {
+            qDebug() << "[DB] Backup is already running, skipping background snapshot.";
+            return;
+        }
+    }
 
     sqlite3_backup* backup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
     if (backup) {
-        sqlite3_backup_step(backup, -1);
+        if (forceFull) {
+            // 中止可能存在的后台备份，同步执行一次性全量备份
+            sqlite3_backup_step(backup, -1);
+            qDebug() << "[DB] Successfully backed up memory database to disk synchronously:" << QString::fromStdWString(conn.diskPath);
+        } else {
+            // 增量分片备份：步长为 100 pages（约 400KB）
+            int rc;
+            do {
+                auto stagnant_start = std::chrono::steady_clock::now();
+                while (m_activeWriteSources.load() > 0) {
+                    auto now = std::chrono::steady_clock::now();
+                    double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - stagnant_start).count() / 1000.0;
+                    if (elapsed >= 3.0) {
+                        break; // 3.0s 安全阀判定，防止无限期让路造成数据长期不落盘风险
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2)); // 让步
+                }
+
+                rc = sqlite3_backup_step(backup, 100);
+                if (rc == SQLITE_OK || rc == SQLITE_BUSY || rc == SQLITE_LOCKED) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+            } while (rc == SQLITE_OK || rc == SQLITE_BUSY || rc == SQLITE_LOCKED);
+            qDebug() << "[DB] Successfully backed up memory database to disk (incremental):" << QString::fromStdWString(conn.diskPath);
+        }
         sqlite3_backup_finish(backup);
-        qDebug() << "[DB] Successfully backed up memory database to disk:" << QString::fromStdWString(conn.diskPath);
     } else {
         qWarning() << "[DB] Failed to initialize backup from memory to disk:" << sqlite3_errmsg(conn.diskDb);
+    }
+
+    if (!forceFull) {
+        m_isBackupRunning.store(false);
     }
 }
 
@@ -338,12 +414,17 @@ bool DatabaseManager::init() {
     return true;
 }
 
-void DatabaseManager::flushAll() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    saveDb(m_globalDb);
-    for (auto& pair : m_driveDbs) {
-        saveDb(pair.second);
+void DatabaseManager::flushAll(bool forceFull) {
+    if (!m_isDirty.load()) {
+        qDebug() << "[DB] Database is clean (not dirty), skipping flushAll() for instant exit.";
+        return;
     }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    saveDb(m_globalDb, forceFull);
+    for (auto& pair : m_driveDbs) {
+        saveDb(pair.second, forceFull);
+    }
+    m_isDirty.store(false);
 }
 
 bool DatabaseManager::flushStep() {
@@ -357,7 +438,7 @@ void DatabaseManager::shutdown() {
     }
     stopWorkerThread();
 
-    flushAll();
+    flushAll(true);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     
@@ -481,6 +562,16 @@ sqlite3* DatabaseManager::getGlobalDb() {
     return m_globalDb.memDb;
 }
 
+std::vector<sqlite3*> DatabaseManager::getActiveMemoryDbs() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<sqlite3*> dbs;
+    if (m_globalDb.memDb) dbs.push_back(m_globalDb.memDb);
+    for (const auto& pair : m_driveDbs) {
+        if (pair.second.memDb) dbs.push_back(pair.second.memDb);
+    }
+    return dbs;
+}
+
 sqlite3* DatabaseManager::getDiskDb(sqlite3* memDb) {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_globalDb.memDb == memDb) return m_globalDb.diskDb;
@@ -488,6 +579,15 @@ sqlite3* DatabaseManager::getDiskDb(sqlite3* memDb) {
         if (pair.second.memDb == memDb) return pair.second.diskDb;
     }
     return nullptr;
+}
+
+void DatabaseManager::incrementWriteSources() {
+    m_activeWriteSources.fetch_add(1);
+    m_isDirty.store(true);
+}
+
+void DatabaseManager::decrementWriteSources() {
+    m_activeWriteSources.fetch_sub(1);
 }
 
 void DatabaseManager::incrementPendingTasks() {

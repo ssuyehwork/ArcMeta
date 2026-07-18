@@ -49,7 +49,7 @@ public:
     /**
      * @brief 持久化所有内存库到磁盘
      */
-    void flushAll();
+    void flushAll(bool forceFull = false);
 
     /**
      * @brief 2026-07-xx 按照用户要求 (1.21)：步进式持久化接口
@@ -75,9 +75,23 @@ public:
     sqlite3* getGlobalDb();
 
     /**
+     * @brief 获取所有当前已加载的内存数据库连接
+     */
+    std::vector<sqlite3*> getActiveMemoryDbs();
+
+    /**
      * @brief 获取指定内存连接对应的磁盘连接（仅供异步同步使用）
      */
     sqlite3* getDiskDb(sqlite3* memDb);
+
+    /**
+     * @brief 增减并发写入源计数以及控制脏标记
+     */
+    void incrementWriteSources();
+    void decrementWriteSources();
+    int getActiveWriteSources() const { return m_activeWriteSources.load(); }
+    bool isDirty() const { return m_isDirty.load(); }
+    void setDirty(bool dirty) { m_isDirty.store(dirty); }
 
     /**
      * @brief 将任务投递到异步 I/O 队列
@@ -137,12 +151,26 @@ private:
     DbConnection m_globalDb;
     std::mutex m_mutex;
 
+    std::atomic<int> m_activeWriteSources{0};
+    std::atomic<bool> m_isBackupRunning{false};
+    std::atomic<bool> m_isDirty{false};
+
     bool loadDb(const std::wstring& diskPath, DbConnection& conn);
-    void saveDb(DbConnection& conn);
+    void saveDb(DbConnection& conn, bool forceFull = false);
     void closeDb(DbConnection& conn);
 
     QString getAppDir();
     void ensureHidden(const std::wstring& path);
+};
+
+class WriteGuard {
+public:
+    WriteGuard() {
+        DatabaseManager::instance().incrementWriteSources();
+    }
+    ~WriteGuard() {
+        DatabaseManager::instance().decrementWriteSources();
+    }
 };
 
 } // namespace ArcMeta

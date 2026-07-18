@@ -61,6 +61,7 @@ std::vector<Category> CategoryRepo::getAll() {
 }
 
 bool CategoryRepo::add(Category& cat) {
+    WriteGuard guard;
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) {
         qDebug() << "[CategoryRepo] add FAILED: No DB connection";
@@ -280,6 +281,7 @@ Category CategoryRepo::getById(int id) {
 }
 
 bool CategoryRepo::update(const Category& cat) {
+    WriteGuard guard;
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return false;
 
@@ -328,6 +330,7 @@ int CategoryRepo::findByFrn(uint64_t frn) {
 }
 
 bool CategoryRepo::updatePhysicalMapping(int id, uint64_t frn, const std::wstring& path) {
+    WriteGuard guard;
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return false;
 
@@ -484,6 +487,7 @@ bool CategoryRepo::reorderAll(bool ascending) {
 }
 
 bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint) {
+    WriteGuard guard;
     sqlite3* memDb = DatabaseManager::instance().getGlobalDb();
     if (!memDb) return false;
 
@@ -516,6 +520,7 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId12
 }
 
 bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fileId128) {
+    WriteGuard guard;
     sqlite3* memDb = DatabaseManager::instance().getGlobalDb();
     if (!memDb) return false;
 
@@ -690,6 +695,7 @@ void CategoryRepo::incrementCategorizedCount(int delta) {
 }
 
 void CategoryRepo::updatePersistentStat(const std::string& key, int delta) {
+    WriteGuard guard;
     sqlite3* memDb = DatabaseManager::instance().getGlobalDb();
     if (!memDb) return;
 
