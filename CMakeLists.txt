@@ -101,6 +101,13 @@ set(SOURCES
     src/ui/DropListView.h
     src/ui/DropTreeView.cpp
     src/ui/DropTreeView.h
+    src/ui/IScanResultView.h
+    src/ui/ListResultView.cpp
+    src/ui/ListResultView.h
+    src/ui/GridResultView.cpp
+    src/ui/GridResultView.h
+    src/ui/JustifiedResultView.cpp
+    src/ui/JustifiedResultView.h
     src/ui/FilterPanel.cpp
     src/ui/FilterPanel.h
     src/ui/FramelessDialog.cpp

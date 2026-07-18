@@ -88,6 +88,9 @@ public:
      */
     void updateRecordMetadata(const QString& path);
 
+    // 视口感知缩略图加载
+    void loadThumbnailsForRows(const QList<int>& rows);
+
 private:
     std::vector<ItemRecord> m_allRecords;
     std::unordered_map<QString, int, QStringHash> m_pathToIndex;
@@ -148,8 +151,9 @@ public:
     };
 
     enum ViewMode {
+        ListView,
         GridView,
-        ListView
+        JustifiedViewMode
     };
 
     /**
@@ -287,6 +291,9 @@ private:
     QAbstractItemView* m_gridView = nullptr;
     QTreeView* m_treeView = nullptr;
     FerrexVirtualDbModel* m_model = nullptr;
+
+    QTimer* m_visibleTimer = nullptr;
+    void refreshVisibleThumbnails();
     QSortFilterProxyModel* m_proxyModel = nullptr;
 
 
@@ -302,6 +309,7 @@ private:
     bool m_isCategoryRecursive = false;
     bool m_showFolders = true;
     bool m_showFiles = true;
+    ViewMode m_currentViewMode = GridView;
     SortType m_sortType = SortByName;
     Qt::SortOrder m_sortOrder = Qt::AscendingOrder;
     std::atomic<bool> m_isLoading{false}; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置

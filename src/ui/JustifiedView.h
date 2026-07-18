@@ -9,10 +9,14 @@ namespace ArcMeta {
 class JustifiedView : public QAbstractItemView {
     Q_OBJECT
 public:
+    enum LayoutMode { JustifiedMode, GridMode };
+
     explicit JustifiedView(QWidget* parent = nullptr);
 
     void setTargetRowHeight(int h);
     void setAspectRatioRole(int role);
+    void setLayoutMode(LayoutMode mode);
+    LayoutMode layoutMode() const;
 
     QRect visualRect(const QModelIndex& index) const override;
     void scrollTo(const QModelIndex& index, ScrollHint hint = EnsureVisible) override;
@@ -26,6 +30,7 @@ protected slots:
     void dataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight, const QList<int>& roles = QList<int>()) override;
     void rowsInserted(const QModelIndex& parent, int start, int end) override;
     void rowsAboutToBeRemoved(const QModelIndex& parent, int start, int end) override;
+    void onLayoutTimerTimeout();
 
 protected:
     QModelIndex moveCursor(CursorAction cursorAction, Qt::KeyboardModifiers modifiers) override;
@@ -44,6 +49,7 @@ protected:
 
 private:
     void doLayout();
+    void scheduleLayout();
 
     struct ItemGeometry {
         QRect rect;
@@ -58,6 +64,10 @@ private:
     QPoint m_dragStartPos;
     bool m_isDraggingSelection = false;
     QRect m_selectionRect;
+
+    LayoutMode m_layoutMode = JustifiedMode;
+    QTimer* m_layoutTimer = nullptr;
+    bool m_layoutDirty = false;
 };
 
 } // namespace ArcMeta

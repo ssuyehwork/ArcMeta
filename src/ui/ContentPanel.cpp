@@ -211,8 +211,6 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         return m_aspectRatios.contains(path);
     } else if (role == Qt::DecorationRole && index.column() == 0) {
         // 2026-07-xx 架构优化：使用 File ID 作为缓存 Key。
-        // 理由：这允许位于不同文件夹下的相同文件（FID 相同）共享同一个缩略图缓存，
-        // 彻底解决用户反馈的“同一文件在不同文件夹显示不一致”及重复加载问题。
         QString cacheKey = record.fileId.empty() ? path : QString::fromStdString(record.fileId);
         QIcon* cached = m_iconCache.object(cacheKey);
         if (cached) return *cached;
@@ -220,63 +218,6 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         QFileInfo info(path);
         QString ext = info.suffix().toLower();
         bool isGraphic = UiHelper::isGraphicsFile(ext) || ext == "svg";
-
-        if (!m_requestedIcons.contains(cacheKey)) {
-            m_requestedIcons.insert(cacheKey);
-            QPointer<const FerrexVirtualDbModel> weakThis(this);
-            (void)QtConcurrent::run([weakThis, path, cacheKey, ext]() {
-                #ifdef Q_OS_WIN
-                CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-                #endif
-                QIcon icon;
-                double ar = 1.0;
-                bool hasThumb = false;
-
-                if (ext == "svg") {
-                    QSvgRenderer renderer(path);
-                    if (renderer.isValid()) {
-                        QPixmap pix(128, 128);
-                        pix.fill(Qt::transparent);
-                        QPainter painter(&pix);
-                        renderer.render(&painter);
-                        icon = QIcon(pix);
-                        ar = 1.0;
-                        hasThumb = true;
-                    }
-                } else if (UiHelper::isGraphicsFile(ext)) {
-                    QImage img = UiHelper::getShellThumbnail(path, 128);
-                    if (!img.isNull()) {
-                        icon = QIcon(QPixmap::fromImage(img));
-                        ar = (double)img.width() / img.height();
-                        hasThumb = true;
-                    }
-                }
-
-                if (icon.isNull()) {
-                    icon = UiHelper::getFileIcon(path, 128);
-                }
-
-                QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, cacheKey, icon, ar, hasThumb]() {
-                    if (!weakThis) return;
-                    auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
-                    mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
-                    if (hasThumb) mutableThis->m_aspectRatios[path] = ar;
-                    
-                    // 局部刷新，提高性能 (扫描所有匹配该 Key 的路径)
-                    for (int i = 0; i < mutableThis->m_displayCount; ++i) {
-                        const auto& rec = mutableThis->m_allRecords[i];
-                        bool match = (rec.path == path) || (!rec.fileId.empty() && QString::fromStdString(rec.fileId) == cacheKey);
-                        if (match) {
-                            emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
-                            break;
-                        }
-                    }
-                }, Qt::QueuedConnection);
-                #ifdef Q_OS_WIN
-                CoUninitialize();
-                #endif
-            });
-        }
         
         // 2026-11-14 执行第二步：图形文件等待缩略图时返回空图标，由 Delegate 绘制占位背景，消除抖动
         if (isGraphic) return QIcon(); 
@@ -494,6 +435,123 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             QModelIndex left = index(i, 0);
             QModelIndex right = index(i, columnCount() - 1);
             emit dataChanged(left, right);
+        }
+    }
+}
+
+void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
+    std::vector<std::pair<QString, QString>> newQueue; // {path, cacheKey}
+
+    for (int r : rows) {
+        if (r < 0 || r >= m_displayCount) continue;
+        const auto& rec = m_allRecords[r];
+        if (rec.isCategory) continue;
+
+        QString path = rec.path;
+        QString cacheKey = rec.fileId.empty() ? path : QString::fromStdString(rec.fileId);
+
+        if (m_iconCache.contains(cacheKey)) continue;
+        newQueue.push_back({path, cacheKey});
+    }
+
+    static QList<std::pair<QString, QString>> s_waitingQueue;
+    static QSet<QString> s_activeLoadingKeys; // 正在后台物理提取的 keys
+    static QMutex s_queueMutex;
+    static int s_activeThreadCount = 0;
+
+    {
+        QMutexLocker locker(&s_queueMutex);
+        s_waitingQueue.clear();
+        for (const auto& item : newQueue) {
+            if (!s_activeLoadingKeys.contains(item.second)) {
+                s_waitingQueue.append(item);
+            }
+        }
+
+        int maxThreads = 4;
+        while (s_activeThreadCount < maxThreads && !s_waitingQueue.isEmpty()) {
+            s_activeThreadCount++;
+            auto initialTask = s_waitingQueue.takeFirst();
+            s_activeLoadingKeys.insert(initialTask.second);
+
+            QPointer<FerrexVirtualDbModel> weakThis(this);
+            (void)QtConcurrent::run([weakThis, initialTask]() {
+                #ifdef Q_OS_WIN
+                CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+                #endif
+
+                std::pair<QString, QString> task = initialTask;
+                while (true) {
+                    QString path = task.first;
+                    QString cacheKey = task.second;
+                    QFileInfo info(path);
+                    QString ext = info.suffix().toLower();
+
+                    QIcon icon;
+                    double ar = 1.0;
+                    bool hasThumb = false;
+
+                    if (ext == "svg") {
+                        QSvgRenderer renderer(path);
+                        if (renderer.isValid()) {
+                            QPixmap pix(128, 128);
+                            pix.fill(Qt::transparent);
+                            QPainter painter(&pix);
+                            renderer.render(&painter);
+                            icon = QIcon(pix);
+                            ar = 1.0;
+                            hasThumb = true;
+                        }
+                    } else if (UiHelper::isGraphicsFile(ext)) {
+                        QImage img = UiHelper::getShellThumbnail(path, 128);
+                        if (!img.isNull()) {
+                            icon = QIcon(QPixmap::fromImage(img));
+                            ar = (double)img.width() / img.height();
+                            hasThumb = true;
+                        }
+                    }
+
+                    if (icon.isNull()) {
+                        icon = UiHelper::getFileIcon(path, 128);
+                    }
+
+                    if (weakThis) {
+                        QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, cacheKey, icon, ar, hasThumb]() {
+                            if (!weakThis) return;
+                            auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
+                            mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
+                            if (hasThumb) mutableThis->m_aspectRatios[path] = ar;
+
+                            for (int i = 0; i < mutableThis->m_displayCount; ++i) {
+                                const auto& rec = mutableThis->m_allRecords[i];
+                                bool match = (rec.path == path) || (!rec.fileId.empty() && QString::fromStdString(rec.fileId) == cacheKey);
+                                if (match) {
+                                    emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+                                    break;
+                                }
+                            }
+                        }, Qt::QueuedConnection);
+                    }
+
+                    // 取下一个任务
+                    QMutexLocker innerLocker(&s_queueMutex);
+                    s_activeLoadingKeys.remove(cacheKey);
+
+                    if (s_waitingQueue.isEmpty() || !weakThis) {
+                        break;
+                    }
+
+                    task = s_waitingQueue.takeFirst();
+                    s_activeLoadingKeys.insert(task.second);
+                }
+
+                #ifdef Q_OS_WIN
+                CoUninitialize();
+                #endif
+
+                QMutexLocker innerLocker(&s_queueMutex);
+                s_activeThreadCount--;
+            });
         }
     }
 }
@@ -845,6 +903,11 @@ ContentPanel::ContentPanel(QWidget* parent)
     m_model = new FerrexVirtualDbModel(this); 
     m_proxyModel = new FilterProxyModel(this); 
     m_proxyModel->setSourceModel(m_model); 
+
+    m_visibleTimer = new QTimer(this);
+    m_visibleTimer->setSingleShot(true);
+    m_visibleTimer->setInterval(100); // 100ms 黄金防抖视口延迟
+    connect(m_visibleTimer, &QTimer::timeout, this, &ContentPanel::refreshVisibleThumbnails);
     
     // 2026-05-17 新增：当模型数据发生改变时，自动触发统计重新计算并推送至 FilterPanel
     connect(m_model, &FerrexVirtualDbModel::dataChanged, this, [this](const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles) {
@@ -1140,6 +1203,38 @@ void ContentPanel::updateStatusBarStats() {
     emit statusBarStatsUpdated(0, 0, totalCount);
 }
 
+void ContentPanel::refreshVisibleThumbnails() {
+    QWidget* current = m_viewStack->currentWidget();
+    QAbstractItemView* view = qobject_cast<QAbstractItemView*>(current);
+    if (!view || !m_model) return;
+
+    int top = 0;
+    int bottom = m_proxyModel->rowCount() - 1;
+
+    // 获取视口可见区域对应的索引
+    QModelIndex topIdx = view->indexAt(QPoint(10, 10));
+    QModelIndex bottomIdx = view->indexAt(QPoint(view->viewport()->width() - 10, view->viewport()->height() - 10));
+
+    if (topIdx.isValid()) top = topIdx.row();
+    if (bottomIdx.isValid()) bottom = bottomIdx.row();
+
+    // 稍微向外扩大一两页缓冲，以防止滑动假白 (Precache padding)
+    int padding = 5;
+    top = std::max(0, top - padding);
+    bottom = std::min(m_proxyModel->rowCount() - 1, bottom + padding);
+
+    QList<int> visibleRows;
+    for (int r = top; r <= bottom; ++r) {
+        QModelIndex proxyIdx = m_proxyModel->index(r, 0);
+        QModelIndex srcIdx = m_proxyModel->mapToSource(proxyIdx);
+        if (srcIdx.isValid()) {
+            visibleRows.append(srcIdx.row());
+        }
+    }
+
+    m_model->loadThumbnailsForRows(visibleRows);
+}
+
 void ContentPanel::updateGridSize() {
     // 2026-06-05 按照用户要求：彻底重构为正方形布局，名称外置
     // 2026-06-08 按照用户核心铁律：物理强制锁定缩放最小值为 96 像素
@@ -1409,7 +1504,11 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                 return true; 
             } 
             if (keyEvent->modifiers() & Qt::ControlModifier && keyEvent->key() == Qt::Key_Backslash) { 
-                setViewMode(m_viewStack->currentIndex() == 0 ? ListView : GridView); 
+                ViewMode nextMode = ListView;
+                if (m_currentViewMode == ListView) nextMode = GridView;
+                else if (m_currentViewMode == GridView) nextMode = JustifiedViewMode;
+                else if (m_currentViewMode == JustifiedViewMode) nextMode = ListView;
+                setViewMode(nextMode);
                 return true; 
             } 
         } 
@@ -1480,8 +1579,24 @@ void ContentPanel::wheelEvent(QWheelEvent* event) {
 } 
  
 void ContentPanel::setViewMode(ViewMode mode) { 
-    if (mode == GridView) m_viewStack->setCurrentWidget(m_gridView); 
-    else m_viewStack->setCurrentWidget(m_treeView); 
+    m_currentViewMode = mode;
+    if (mode == ListView) {
+        m_viewStack->setCurrentWidget(m_treeView);
+    } else if (mode == GridView) {
+        auto* justifiedView = qobject_cast<JustifiedView*>(m_gridView);
+        if (justifiedView) {
+            justifiedView->setLayoutMode(JustifiedView::GridMode);
+        }
+        m_viewStack->setCurrentWidget(m_gridView);
+    } else if (mode == JustifiedViewMode) {
+        auto* justifiedView = qobject_cast<JustifiedView*>(m_gridView);
+        if (justifiedView) {
+            justifiedView->setLayoutMode(JustifiedView::JustifiedMode);
+        }
+        m_viewStack->setCurrentWidget(m_gridView);
+    }
+    updateGridSize();
+    m_visibleTimer->start();
 } 
  
 void ContentPanel::initGridView() { 
@@ -1543,6 +1658,9 @@ void ContentPanel::initGridView() {
  
     connect(m_gridView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
     connect(m_gridView, &QAbstractItemView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
+    connect(m_gridView->verticalScrollBar(), &QScrollBar::valueChanged, this, [this]() {
+        m_visibleTimer->start();
+    });
 } 
  
 void ContentPanel::initListView() { 
@@ -1655,6 +1773,9 @@ void ContentPanel::initListView() {
     connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
     connect(m_treeView, &QTreeView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
     connect(m_treeView, &QTreeView::doubleClicked, this, &ContentPanel::onDoubleClicked); 
+    connect(m_treeView->verticalScrollBar(), &QScrollBar::valueChanged, this, [this]() {
+        m_visibleTimer->start();
+    });
 } 
  
 void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) { 
@@ -2673,6 +2794,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 }
 
                 ArcMeta::Logger::log(QString("[Content] 目录扫描完成并已应用到 UI [%1]").arg(reqId));
+                panelPtr->m_visibleTimer->start();
             } else if (panelPtr) {
                 ArcMeta::Logger::log(QString("[Content] 拦截到过期的目录扫描回调 [%1], 当前 ID: %2").arg(reqId).arg(panelPtr->m_loadRequestId.load()));
             }
@@ -2721,6 +2843,7 @@ void ContentPanel::applyFilters() {
     } 
     // 2026-05-08 按照用户要求：筛选条件变化后更新状态栏统计
     updateStatusBarStats();
+    m_visibleTimer->start();
 } 
  
 void ContentPanel::previewFile(const QString& path) { 
