@@ -9,6 +9,8 @@
 #include <string>
 #include <mutex>
 #include <functional>
+#include <unordered_map>
+#include <memory>
 #include <deque>
 #include <thread>
 #include <condition_variable>
@@ -85,6 +87,12 @@ public:
     sqlite3* getDiskDb(sqlite3* memDb);
 
     /**
+     * @brief 2026-08-xx：按盘符/按资源拆分锁粒度，支持高并发 WAL 模式
+     */
+    std::mutex& getGlobalMutex() { return m_globalDbMutex; }
+    std::shared_ptr<std::mutex> getDriveMutex(const std::wstring& volSerial);
+
+    /**
      * @brief 增减并发写入源计数以及控制脏标记
      */
     void incrementWriteSources();
@@ -154,6 +162,10 @@ private:
     std::atomic<int> m_activeWriteSources{0};
     std::atomic<bool> m_isBackupRunning{false};
     std::atomic<bool> m_isDirty{false};
+
+    std::mutex m_globalDbMutex;
+    std::mutex m_mapMutex;
+    std::unordered_map<std::wstring, std::shared_ptr<std::mutex>> m_driveDbMutexMap;
 
     bool loadDb(const std::wstring& diskPath, DbConnection& conn);
     void saveDb(DbConnection& conn, bool forceFull = false);

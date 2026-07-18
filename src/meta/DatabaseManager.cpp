@@ -581,6 +581,17 @@ sqlite3* DatabaseManager::getDiskDb(sqlite3* memDb) {
     return nullptr;
 }
 
+std::shared_ptr<std::mutex> DatabaseManager::getDriveMutex(const std::wstring& volSerial) {
+    std::lock_guard<std::mutex> lock(m_mapMutex);
+    auto it = m_driveDbMutexMap.find(volSerial);
+    if (it == m_driveDbMutexMap.end()) {
+        auto mtx = std::make_shared<std::mutex>();
+        m_driveDbMutexMap[volSerial] = mtx;
+        return mtx;
+    }
+    return it->second;
+}
+
 void DatabaseManager::incrementWriteSources() {
     m_activeWriteSources.fetch_add(1);
     m_isDirty.store(true);

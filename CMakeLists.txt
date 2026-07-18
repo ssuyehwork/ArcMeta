@@ -62,6 +62,8 @@ set(SOURCES
     src/crypto/EncryptionManager.h
     src/meta/CategoryRepo.cpp
     src/meta/CategoryRepo.h
+    src/meta/TagRepository.cpp
+    src/meta/TagRepository.h
     src/meta/DatabaseManager.cpp
     src/meta/DatabaseManager.h
     src/meta/BatchRenameEngine.cpp

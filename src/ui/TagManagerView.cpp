@@ -4,7 +4,7 @@
 #include "MetaPanel.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
-#include "sqlite3.h"
+#include "../meta/TagRepository.h"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QScrollArea>
@@ -335,18 +335,7 @@ bool TagManagerView::eventFilter(QObject* watched, QEvent* event) {
 void TagManagerView::addTagToGroup(const QString& tagName, int groupId) {
     QPointer<TagManagerView> weakThis(this);
     (void)QtConcurrent::run([weakThis, tagName, groupId]() {
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-        if (!db) return;
-        sqlite3_stmt* stmt;
-        const char* sql = "INSERT INTO tag_group_items (group_id, tag_name) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM tag_group_items WHERE group_id = ? AND tag_name = ?)";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(stmt, 1, groupId);
-            QByteArray tagUtf8 = tagName.toUtf8();
-            sqlite3_bind_text(stmt, 2, tagUtf8.constData(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_int(stmt, 3, groupId);
-            sqlite3_bind_text(stmt, 4, tagUtf8.constData(), -1, SQLITE_TRANSIENT);
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
+        if (TagRepository::addTagToGroup(tagName, groupId)) {
             if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
         }
     });
@@ -355,24 +344,7 @@ void TagManagerView::addTagToGroup(const QString& tagName, int groupId) {
 void TagManagerView::removeTagFromGroup(const QString& tagName, int groupId) {
     QPointer<TagManagerView> weakThis(this);
     (void)QtConcurrent::run([weakThis, tagName, groupId]() {
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-        if (!db) return;
-        sqlite3_stmt* stmt;
-        QString sql;
-        if (groupId == -1) {
-            sql = "DELETE FROM tag_group_items WHERE tag_name = ?";
-        } else {
-            sql = "DELETE FROM tag_group_items WHERE group_id = ? AND tag_name = ?";
-        }
-        if (sqlite3_prepare_v2(db, sql.toUtf8().constData(), -1, &stmt, nullptr) == SQLITE_OK) {
-            if (groupId == -1) {
-                sqlite3_bind_text(stmt, 1, tagName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-            } else {
-                sqlite3_bind_int(stmt, 1, groupId);
-                sqlite3_bind_text(stmt, 2, tagName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-            }
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
+        if (TagRepository::removeTagFromGroup(tagName, groupId)) {
             if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
         }
     });
@@ -381,14 +353,7 @@ void TagManagerView::removeTagFromGroup(const QString& tagName, int groupId) {
 void TagManagerView::renameGroup(int groupId, const QString& newName) {
     QPointer<TagManagerView> weakThis(this);
     (void)QtConcurrent::run([weakThis, groupId, newName]() {
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-        if (!db) return;
-        sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(db, "UPDATE tag_groups SET name = ? WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(stmt, 1, newName.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_int(stmt, 2, groupId);
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
+        if (TagRepository::renameGroup(groupId, newName)) {
             if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
         }
     });
@@ -397,22 +362,9 @@ void TagManagerView::renameGroup(int groupId, const QString& newName) {
 void TagManagerView::deleteGroup(int groupId) {
     QPointer<TagManagerView> weakThis(this);
     (void)QtConcurrent::run([weakThis, groupId]() {
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-        if (!db) return;
-        sqlite3_stmt* stmt;
-        sqlite3_exec(db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
-        if (sqlite3_prepare_v2(db, "DELETE FROM tag_groups WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(stmt, 1, groupId);
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
+        if (TagRepository::deleteGroup(groupId)) {
+            if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
         }
-        if (sqlite3_prepare_v2(db, "DELETE FROM tag_group_items WHERE group_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(stmt, 1, groupId);
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
-        }
-        sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
-        if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
     });
 }
 
@@ -422,21 +374,11 @@ void TagManagerView::createNewGroup() {
         QString name = dlg.text();
         if (name.isEmpty()) return;
 
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-        if (db) {
-            sqlite3_stmt* stmt;
-            const char* sql = "INSERT INTO tag_groups (name, color, sort_order) VALUES (?, ?, (SELECT IFNULL(MAX(sort_order), 0) + 1 FROM tag_groups))";
-            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                QByteArray utf8Name = name.trimmed().toUtf8();
-                sqlite3_bind_text(stmt, 1, utf8Name.constData(), -1, SQLITE_TRANSIENT);
-                sqlite3_bind_text(stmt, 2, "#3498db", -1, SQLITE_TRANSIENT); // 默认蓝色
-                if (sqlite3_step(stmt) == SQLITE_DONE) {
-                    refresh();
-                } else {
-                    FramelessMessageBox::warning(this, "错误", "创建标签组失败");
-                }
-                sqlite3_finalize(stmt);
-            }
+        int groupId = TagRepository::createGroup(name);
+        if (groupId != -1) {
+            refresh();
+        } else {
+            FramelessMessageBox::warning(this, "错误", "创建标签组失败");
         }
     }
 }
@@ -533,28 +475,14 @@ void TagManagerView::refresh() {
     
     // 加载标签组
     m_tagGroups.clear();
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(L"C");
-    if (db) {
-        sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(db, "SELECT id, name, color FROM tag_groups ORDER BY sort_order ASC", -1, &stmt, nullptr) == SQLITE_OK) {
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                TagGroup tg;
-                tg.id = sqlite3_column_int(stmt, 0);
-                tg.name = QString::fromUtf8((const char*)sqlite3_column_text(stmt, 1));
-                tg.color = QString::fromUtf8((const char*)sqlite3_column_text(stmt, 2));
-                
-                sqlite3_stmt* itemStmt;
-                if (sqlite3_prepare_v2(db, "SELECT tag_name FROM tag_group_items WHERE group_id = ?", -1, &itemStmt, nullptr) == SQLITE_OK) {
-                    sqlite3_bind_int(itemStmt, 1, tg.id);
-                    while (sqlite3_step(itemStmt) == SQLITE_ROW) {
-                        tg.tags << QString::fromUtf8((const char*)sqlite3_column_text(itemStmt, 0));
-                    }
-                    sqlite3_finalize(itemStmt);
-                }
-                m_tagGroups.append(tg);
-            }
-            sqlite3_finalize(stmt);
-        }
+    auto groups = TagRepository::getAllGroups();
+    for (const auto& g : groups) {
+        TagGroup tg;
+        tg.id = g.id;
+        tg.name = g.name;
+        tg.color = g.color;
+        tg.tags = g.tags;
+        m_tagGroups.append(tg);
     }
 
     // 更新侧边栏

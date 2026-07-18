@@ -24,8 +24,6 @@
 
 namespace ArcMeta {
 
-static std::recursive_mutex s_dbAccessMutex;
-
 AutoImportManager& AutoImportManager::instance() {
     static AutoImportManager inst;
     return inst;
@@ -172,7 +170,6 @@ void AutoImportManager::processImportQueue() {
     if (pathsToProcess.empty()) return;
 
     (void)QtConcurrent::run([this, pathsToProcess]() {
-        std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
         MetadataManager::instance().setInternalOperating(true);
 
         std::map<std::wstring, std::vector<std::wstring>> pathsByVol;
@@ -183,6 +180,9 @@ void AutoImportManager::processImportQueue() {
         for (auto& pair : pathsByVol) {
             const std::wstring& vol = pair.first;
             if (vol.empty()) continue;
+
+            auto driveLock = DatabaseManager::instance().getDriveMutex(vol);
+            std::lock_guard<std::mutex> dLock(*driveLock);
 
             QString letter = "";
             if (!pair.second.empty()) {
@@ -213,7 +213,12 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
     QDir dir(QString::fromStdWString(rootPath));
     if (!dir.exists()) return;
 
-    std::lock_guard<std::recursive_mutex> dbLock(s_dbAccessMutex);
+    // 先全局锁，后分库锁
+    std::lock_guard<std::mutex> globalLock(DatabaseManager::instance().getGlobalMutex());
+
+    std::wstring vol = MetadataManager::getVolumeSerialNumber(rootPath);
+    auto driveLock = DatabaseManager::instance().getDriveMutex(vol);
+    std::lock_guard<std::mutex> dLock(*driveLock);
 
     MetadataManager::instance().setInternalOperating(true);
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
