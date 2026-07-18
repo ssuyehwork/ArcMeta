@@ -475,8 +475,8 @@ void TagManagerView::refresh() {
     
     // 加载标签组
     m_tagGroups.clear();
-    auto groups = TagRepository::getAllGroups();
-    for (const auto& g : groups) {
+    auto allRepoGroups = TagRepository::getAllGroups();
+    for (const auto& g : allRepoGroups) {
         TagGroup tg;
         tg.id = g.id;
         tg.name = g.name;
