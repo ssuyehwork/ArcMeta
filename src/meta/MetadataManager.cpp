@@ -629,6 +629,10 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
 #ifdef Q_OS_WIN
         CoUninitialize();
 #endif
+        // 关键操作后即时异步落盘
+        DatabaseManager::instance().enqueueSyncTask([]() {
+            DatabaseManager::instance().flushAll();
+        });
     });
 }
 
@@ -1280,6 +1284,11 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
     if (!allFids.empty()) CategoryRepo::removeAllCategoriesBatch(allFids);
     
     notifyFullUIRebuild();
+
+    // 关键操作后即时异步落盘
+    DatabaseManager::instance().enqueueSyncTask([]() {
+        DatabaseManager::instance().flushAll();
+    });
 }
 
 void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const std::wstring& origPath) {
@@ -1895,6 +1904,11 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
         }
         trans.commit();
     }
+
+    // 关键操作后即时异步落盘
+    DatabaseManager::instance().enqueueSyncTask([]() {
+        DatabaseManager::instance().flushAll();
+    });
 }
 
 void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool authorized) {
