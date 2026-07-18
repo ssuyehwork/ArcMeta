@@ -50,6 +50,19 @@
 
 namespace ArcMeta {
 
+class IconLoadNotifier : public QObject {
+    Q_OBJECT
+signals:
+    void iconLoaded();
+public:
+    static IconLoadNotifier& instance() {
+        static IconLoadNotifier inst;
+        return inst;
+    }
+private:
+    IconLoadNotifier(QObject* parent = nullptr) : QObject(parent) {}
+};
+
 /**
  * @brief UI 辅助类 (全量热加载版 - 杜绝懒加载)
  */
@@ -180,28 +193,61 @@ public:
             }
         }
 
-        // 2026-06-xx 性能警告：QFileIconProvider 在 Windows 下涉及 Shell API，
-        // 必须确保其操作的线程安全性。虽然 QIcon 引用计数安全，但 QMap 容器操作非线程安全。
-        QFileIconProvider provider;
-        QIcon icon;
-        if (info.isDir()) {
-            // 2026-06-xx 架构修正：判断是否为磁盘根目录
-            if (info.isRoot()) {
-                // 若是磁盘根目录，必须获取其盘符图标而非通用文件夹图标
-                icon = provider.icon(info);
-            } else {
-                icon = provider.icon(QFileIconProvider::Folder);
-            }
-        } else {
-            icon = provider.icon(QFileInfo("dummy." + key));
-            if (icon.isNull()) {
-                icon = provider.icon(QFileIconProvider::File);
-            }
+        // 1. 如果缓存没有，先返回快速默认占位图标，杜绝主线程同步调用 Shell API
+        static QIcon s_defaultFileIcon;
+        static QIcon s_defaultFolderIcon;
+        if (s_defaultFileIcon.isNull() || s_defaultFolderIcon.isNull()) {
+            QFileIconProvider provider;
+            s_defaultFolderIcon = provider.icon(QFileIconProvider::Folder);
+            s_defaultFileIcon = provider.icon(QFileIconProvider::File);
         }
-        
-        QMutexLocker locker(&fileIconMutex());
-        s_fileIconCache[key] = icon;
-        return icon;
+        QIcon placeholderIcon = info.isDir() ? s_defaultFolderIcon : s_defaultFileIcon;
+
+        // 维护正在异步加载的 key 集合，防止对同一个文件扩展名发起多次重复加载任务
+        static QSet<QString> s_loadingKeys;
+        static QMutex s_loadingMutex;
+        {
+            QMutexLocker lock(&s_loadingMutex);
+            if (s_loadingKeys.contains(key)) {
+                return placeholderIcon;
+            }
+            s_loadingKeys.insert(key);
+        }
+
+        // 2. 将实际提取任务投递到线程池异步执行，完成后通知主线程
+        (void)QtConcurrent::run([filePath, key, info]() {
+            QFileIconProvider provider;
+            QIcon icon;
+            if (info.isDir()) {
+                if (info.isRoot()) {
+                    icon = provider.icon(info);
+                } else {
+                    icon = provider.icon(QFileIconProvider::Folder);
+                }
+            } else {
+                icon = provider.icon(QFileInfo("dummy." + key));
+                if (icon.isNull()) {
+                    icon = provider.icon(QFileIconProvider::File);
+                }
+            }
+
+            {
+                QMutexLocker locker(&fileIconMutex());
+                s_fileIconCache[key] = icon;
+            }
+
+            {
+                QMutexLocker lock(&s_loadingMutex);
+                s_loadingKeys.remove(key);
+            }
+
+            // 安全通知主线程刷新 UI 树
+            QMetaObject::invokeMethod(&IconLoadNotifier::instance(), []() {
+                emit IconLoadNotifier::instance().iconLoaded();
+            }, Qt::QueuedConnection);
+        });
+
+        return placeholderIcon;
     }
 
     static QPixmap getPixmap(const QString& key, const QSize& size, const QColor& color) {

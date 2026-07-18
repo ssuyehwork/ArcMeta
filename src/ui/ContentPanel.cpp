@@ -86,6 +86,13 @@ namespace ArcMeta {
 FerrexVirtualDbModel::FerrexVirtualDbModel(QObject* parent) : QAbstractTableModel(parent) {
     m_iconCache.setMaxCost(500);
     m_metaCache.setMaxCost(1000);
+
+    // 订阅文件图标异步加载完成信号，安全刷新第 0 列渲染
+    connect(&IconLoadNotifier::instance(), &IconLoadNotifier::iconLoaded, this, [this]() {
+        if (m_displayCount > 0) {
+            emit dataChanged(index(0, 0), index(m_displayCount - 1, 0), {Qt::DecorationRole});
+        }
+    });
 }
 
 int FerrexVirtualDbModel::rowCount(const QModelIndex& parent) const {
@@ -782,8 +789,8 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
 
     switch (sType) {
         case ContentPanel::SortByName: {
-            QString lName = leftRec.isCategory ? leftRec.categoryName : QFileInfo(leftRec.path).fileName();
-            QString rName = rightRec.isCategory ? rightRec.categoryName : QFileInfo(rightRec.path).fileName();
+            const QString& lName = leftRec.isCategory ? leftRec.categoryName : leftRec.filename;
+            const QString& rName = rightRec.isCategory ? rightRec.categoryName : rightRec.filename;
             return lName.localeAwareCompare(rName) < 0;
         }
         case ContentPanel::SortByCreateDate: {
@@ -917,6 +924,11 @@ ItemRecord ContentPanel::createItemRecord(const QString& path, const RuntimeMeta
     }
 
     r.path = nPath;
+    {
+        int lastSlash = nPath.lastIndexOf('\\');
+        if (lastSlash == -1) lastSlash = nPath.lastIndexOf('/');
+        r.filename = (lastSlash != -1) ? nPath.mid(lastSlash + 1) : nPath;
+    }
 
     // 2. 核心元数据注入 (确保 width/height/palettes 物理对齐)
     r.rating = meta.rating;

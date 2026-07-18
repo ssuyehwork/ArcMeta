@@ -3,6 +3,7 @@
 
 #include <QString>
 #include <QObject>
+#include <QTimer>
 #include "sqlite3.h"
 #include <map>
 #include <string>
@@ -121,6 +122,7 @@ private:
     std::thread m_workerThread;
     std::atomic<bool> m_stopWorker{false};
     std::atomic<int> m_pendingTasksCount{0};
+    QTimer* m_syncTimer = nullptr;
 
     /**
      * @brief 异步任务 RAII 令牌 (Plan-131 方案 D)

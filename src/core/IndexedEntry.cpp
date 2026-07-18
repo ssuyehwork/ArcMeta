@@ -17,6 +17,7 @@ ItemRecord ItemRecord::create(const QString& path) {
     MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
 
     r.path = nPath;
+    r.filename = info.fileName();
     r.size = size;
     r.ctime = ctime;
     r.mtime = mtime;

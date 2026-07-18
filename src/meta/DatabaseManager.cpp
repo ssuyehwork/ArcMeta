@@ -77,9 +77,21 @@ DatabaseManager::SyncTaskToken::~SyncTaskToken() {
 
 DatabaseManager::DatabaseManager(QObject* parent) : QObject(parent) {
     startWorkerThread();
+
+    m_syncTimer = new QTimer(this);
+    m_syncTimer->setInterval(15000);
+    connect(m_syncTimer, &QTimer::timeout, this, [this]() {
+        enqueueSyncTask([this]() {
+            flushAll();
+        });
+    });
+    m_syncTimer->start();
 }
 
 DatabaseManager::~DatabaseManager() {
+    if (m_syncTimer) {
+        m_syncTimer->stop();
+    }
     stopWorkerThread();
     flushAll();
     for (auto& pair : m_driveDbs) {
@@ -98,19 +110,37 @@ void DatabaseManager::ensureHidden(const std::wstring& path) {
 
 bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     std::string utf8Path = QString::fromStdWString(diskPath).toUtf8().toStdString();
-    qDebug() << "[DB] [Plan-130] 直连磁盘数据库模式开启 ->" << QString::fromStdString(utf8Path);
+    qDebug() << "[DB] 内存数据库模式开启 ->" << QString::fromStdString(utf8Path);
     
-    // 1. [Plan-130] 秒退架构：彻底废弃 :memory: 中转，直连磁盘数据库
+    // 打开独立的磁盘数据库连接
     if (sqlite3_open_v2(utf8Path.c_str(), &conn.diskDb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
         qDebug() << "[DB] Failed to open disk DB:" << QString::fromStdString(utf8Path);
         return false;
     }
-    conn.memDb = conn.diskDb; // memDb 句柄现在指向磁盘 DB 句柄，保持上层接口兼容
+
+    // 打开独立的内存数据库连接
+    if (sqlite3_open_v2(":memory:", &conn.memDb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
+        qDebug() << "[DB] Failed to open memory DB";
+        sqlite3_close_v2(conn.diskDb);
+        conn.diskDb = nullptr;
+        return false;
+    }
     ensureHidden(diskPath);
 
-    // 2. 配置高性能 WAL 模式
+    // 使用 SQLite Backup API 将 conn.diskDb 的数据一次性导入内存 conn.memDb
+    sqlite3_backup* backup = sqlite3_backup_init(conn.memDb, "main", conn.diskDb, "main");
+    if (backup) {
+        sqlite3_backup_step(backup, -1);
+        sqlite3_backup_finish(backup);
+    } else {
+        qWarning() << "[DB] Failed to backup disk to memory:" << sqlite3_errmsg(conn.memDb);
+    }
+
+    // 配置高性能 WAL 模式
     sqlite3_exec(conn.diskDb, "PRAGMA journal_mode = WAL;", nullptr, nullptr, nullptr);
     sqlite3_exec(conn.diskDb, "PRAGMA synchronous = NORMAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec(conn.memDb, "PRAGMA journal_mode = WAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec(conn.memDb, "PRAGMA synchronous = NORMAL;", nullptr, nullptr, nullptr);
 
     // 初始化表结构 (Schema)
     const char* schema = R"(
@@ -269,12 +299,22 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
 }
 
 void DatabaseManager::saveDb(DbConnection& conn) {
-    // [Plan-130] 秒退架构：废弃备份逻辑
-    Q_UNUSED(conn);
+    if (!conn.diskDb || !conn.memDb) return;
+
+    sqlite3_backup* backup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
+    if (backup) {
+        sqlite3_backup_step(backup, -1);
+        sqlite3_backup_finish(backup);
+        qDebug() << "[DB] Successfully backed up memory database to disk:" << QString::fromStdWString(conn.diskPath);
+    } else {
+        qWarning() << "[DB] Failed to initialize backup from memory to disk:" << sqlite3_errmsg(conn.diskDb);
+    }
 }
 
 void DatabaseManager::closeDb(DbConnection& conn) {
-    // [Plan-130] 磁盘直连模式：仅关闭单一句柄
+    if (conn.memDb) {
+        sqlite3_close_v2(conn.memDb);
+    }
     if (conn.diskDb) {
         sqlite3_close_v2(conn.diskDb);
     }
@@ -312,19 +352,19 @@ bool DatabaseManager::flushStep() {
 }
 
 void DatabaseManager::shutdown() {
+    if (m_syncTimer) {
+        m_syncTimer->stop();
+    }
     stopWorkerThread();
+
+    flushAll();
 
     std::lock_guard<std::mutex> lock(m_mutex);
     
-    // [Plan-130] 秒退架构：关闭所有磁盘句柄
     for (auto& pair : m_driveDbs) {
-        if (pair.second.diskDb) sqlite3_close_v2(pair.second.diskDb);
-        pair.second.memDb = nullptr;
-        pair.second.diskDb = nullptr;
+        closeDb(pair.second);
     }
-    if (m_globalDb.diskDb) sqlite3_close_v2(m_globalDb.diskDb);
-    m_globalDb.memDb = nullptr;
-    m_globalDb.diskDb = nullptr;
+    closeDb(m_globalDb);
 }
 
 sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QString& driveLetter) {

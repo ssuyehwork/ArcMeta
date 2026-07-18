@@ -2,6 +2,7 @@
 #include "../meta/CategoryRepo.h"
 
 #include "UiHelper.h"
+#include <QtConcurrent>
 #include <QMimeData>
 #include <QFileInfo>
 #include <QFile>
@@ -226,32 +227,56 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
         int id = index.data(IdRole).toInt();
         
         if (type == "category" && id > 0) {
+            // 在主线程获取数据，避免多线程访问冲突
             auto categories = CategoryRepo::getAll();
-            for (auto& cat : categories) {
+            Category targetCat;
+            bool found = false;
+            for (const auto& cat : categories) {
                 if (cat.id == id) {
-                    if (!cat.physicalPath.empty()) {
-                        QString oldPath = QString::fromStdWString(cat.physicalPath);
-                        QFileInfo oldInfo(oldPath);
-                        
-                        if (oldInfo.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive) && cat.parentId == 0) {
-                            return false; 
-                        }
-
-                        QString newPath = QDir::toNativeSeparators(oldInfo.absoluteDir().absoluteFilePath(newName));
-                        if (oldPath != newPath) {
-                            if (!QFile::rename(oldPath, newPath)) {
-                                return false; 
-                            }
-                            cat.physicalPath = newPath.toStdWString();
-                        }
-                    }
-
-                    cat.name = newName.toStdWString();
-                    CategoryRepo::update(cat);
+                    targetCat = cat;
+                    found = true;
                     break;
                 }
             }
-            refresh();
+            if (!found) return false;
+
+            // 限制顶级托管库重命名
+            if (!targetCat.physicalPath.empty()) {
+                QString oldPath = QString::fromStdWString(targetCat.physicalPath);
+                QFileInfo oldInfo(oldPath);
+                if (oldInfo.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive) && targetCat.parentId == 0) {
+                    return false;
+                }
+            }
+
+            // 提交给线程池异步执行重命名和数据库写入
+            (void)QtConcurrent::run([this, targetCat, newName]() mutable {
+                bool renameSuccess = true;
+                if (!targetCat.physicalPath.empty()) {
+                    QString oldPath = QString::fromStdWString(targetCat.physicalPath);
+                    QFileInfo oldInfo(oldPath);
+                    QString newPath = QDir::toNativeSeparators(oldInfo.absoluteDir().absoluteFilePath(newName));
+                    if (oldPath != newPath) {
+                        if (QFile::rename(oldPath, newPath)) {
+                            targetCat.physicalPath = newPath.toStdWString();
+                        } else {
+                            renameSuccess = false;
+                            qWarning() << "[CategoryModel] QFile::rename failed from" << oldPath << "to" << newPath;
+                        }
+                    }
+                }
+
+                if (renameSuccess) {
+                    targetCat.name = newName.toStdWString();
+                    CategoryRepo::update(targetCat);
+                }
+
+                // 在主线程安全重新刷新 UI 树
+                QMetaObject::invokeMethod(this, [this]() {
+                    refresh();
+                }, Qt::QueuedConnection);
+            });
+
             return true;
         }
         return false;
