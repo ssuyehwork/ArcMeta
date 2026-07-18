@@ -840,7 +840,7 @@ void CategoryRepo::fullRecount() {
     QSet<QString> uniqueTags;
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
 
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
         if (meta.fileId128.empty()) return;
         if (meta.isFolder) return;
 

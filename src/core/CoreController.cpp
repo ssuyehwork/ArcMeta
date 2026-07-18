@@ -91,7 +91,7 @@ void CoreController::startSystem() {
 
                 // 2.0秒后异步执行一次全量对账与原子计数校准 (不阻塞主线程/首屏渲染)
                 QTimer::singleShot(2000, []() {
-                    QtConcurrent::run([]() {
+                    (void)QtConcurrent::run([]() {
                         CategoryRepo::fullRecount();
                     });
                 });
