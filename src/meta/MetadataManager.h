@@ -56,6 +56,17 @@ struct RuntimeMeta {
     }
 };
 
+struct LightMeta {
+    std::wstring path;
+    std::string fileId128;
+    bool isFolder;
+    bool isInvalid;
+    bool isTrash;
+    bool tagsEmpty;
+    double atime;
+    QStringList tags;
+};
+
 /**
  * @brief 元数据管理器
  */
@@ -332,6 +343,12 @@ public:
             fn(it->first, it->second);
         }
     }
+
+    /**
+     * @brief 获取极轻量级内存缓存快照以避免长持读锁对账
+     */
+    std::vector<LightMeta> getLightweightCacheSnapshot() const;
+    std::shared_mutex& getMutex() const { return m_mutex; }
 
     // 2026-06-xx 废弃接口：保留为空实现以维持二进制/ABI兼容（若需要），或在完成清理后移除
     bool hasPendingSync() const;

@@ -2198,4 +2198,24 @@ void MetadataManager::slideRecentWindow() {
     }
 }
 
+std::vector<LightMeta> MetadataManager::getLightweightCacheSnapshot() const {
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    std::vector<LightMeta> result;
+    result.reserve(m_cache.size());
+    for (const auto& pair : m_cache) {
+        const auto& meta = pair.second;
+        result.push_back({
+            pair.first,
+            meta.fileId128,
+            meta.isFolder,
+            meta.isInvalid,
+            meta.isTrash,
+            meta.tags.isEmpty(),
+            static_cast<double>(meta.atime),
+            meta.tags
+        });
+    }
+    return result;
+}
+
 } // namespace ArcMeta

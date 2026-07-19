@@ -120,10 +120,16 @@ bool CategoryRepo::removeAllCategories(const std::string& fileId128) {
 }
 
 bool CategoryRepo::removeAllCategoriesBatch(const std::vector<std::string>& fids) {
+    int categorizedDelta = 0;
     for (const auto& fid : fids) {
         if (!getItemCategoryIds(fid).empty()) {
             s_uncategorizedCount.fetch_add(1);
+            s_categorizedCount.fetch_sub(1);
+            categorizedDelta--;
         }
+    }
+    if (categorizedDelta != 0) {
+        updatePersistentStat(STAT_CATEGORIZED, categorizedDelta);
     }
     return executeFidBatch(fids, [](sqlite3* db, const std::string& fid) {
         sqlite3_stmt* stmt;
@@ -252,6 +258,8 @@ bool CategoryRepo::permanentlyDeleteBatch(const std::vector<std::string>& fids) 
     // 3. Update "全部数据" count — permanent delete is the only operation that reduces it
     if (removedCount > 0) {
         incrementTotalFileCount(-removedCount);
+        s_trashCount.fetch_sub(removedCount);
+        updatePersistentStat("sys_trash_count", -removedCount);
     }
 
     return ok;
@@ -523,15 +531,16 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId12
         if (sqlite3_step(memStmt) == SQLITE_DONE) {
             sqlite3_finalize(memStmt);
 
-            // 如果之前未分类，增加后变成有分类，则减去 uncategorizedCount
+            // 如果之前未分类，增加后变成有分类，则减去 uncategorizedCount，增加 categorizedCount 并持久化
             if (getItemCategoryIds(fileId128).size() == 1) {
                 s_uncategorizedCount.fetch_sub(1);
+                s_categorizedCount.fetch_add(1);
+                updatePersistentStat(STAT_CATEGORIZED, 1);
             }
 
             // 2026-08-xx 按照 Plan-126：废除此处直接调用 registerItem。
             // 归类操作不应直接触发表入库，应由物理位移（如迁移）触发 USN 信号后再由 AutoImportManager 驱动。
 
-            syncCategorizedCountForFid(fileId128);
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
             return true;
         }
@@ -553,12 +562,13 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fil
         if (sqlite3_step(memStmt) == SQLITE_DONE) {
             sqlite3_finalize(memStmt);
 
-            // 如果移除后不再有任何分类，则增加 uncategorizedCount
+            // 如果移除后不再有任何分类，则增加 uncategorizedCount，减少 categorizedCount 并持久化
             if (getItemCategoryIds(fileId128).empty()) {
                 s_uncategorizedCount.fetch_add(1);
+                s_categorizedCount.fetch_sub(1);
+                updatePersistentStat(STAT_CATEGORIZED, -1);
             }
 
-            syncCategorizedCountForFid(fileId128);
             return true;
         }
         sqlite3_finalize(memStmt);
@@ -752,9 +762,6 @@ bool CategoryRepo::executeFidBatch(const std::vector<std::string>& fids, std::fu
     }
     bool ok = trans.commit();
     
-    // 2026-06-xx 架构优化：批量变动后自动同步已分类计数，实现跨表一致性
-    syncCategorizedCountForFid("");
-    
     // 批量处理后通知 UI 刷新
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
     return ok;
@@ -840,21 +847,22 @@ void CategoryRepo::fullRecount() {
     QSet<QString> uniqueTags;
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
 
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
-        if (meta.fileId128.empty()) return;
-        if (meta.isFolder) return;
+    auto snapshot = MetadataManager::instance().getLightweightCacheSnapshot();
+    for (const auto& meta : snapshot) {
+        if (meta.fileId128.empty()) continue;
+        if (meta.isFolder) continue;
 
         if (meta.isInvalid) {
             invalid++;
-            return;
+            continue;
         }
         if (meta.isTrash) {
             trash++;
-            return;
+            continue;
         }
 
         total++;
-        if (meta.tags.isEmpty()) {
+        if (meta.tagsEmpty) {
             untagged++;
         } else {
             for (const QString& t : meta.tags) uniqueTags.insert(t);
@@ -867,7 +875,7 @@ void CategoryRepo::fullRecount() {
         if (categorizedFids.find(meta.fileId128) == categorizedFids.end()) {
             uncategorized++;
         }
-    });
+    }
 
     tags = uniqueTags.size();
 
@@ -911,16 +919,16 @@ void CategoryRepo::fullRecount() {
     // 2026-06-xx 核心逻辑升级：物理有效性对账 (盘点 FRN)
     // 这一步在后台异步执行，验证文件是否被第三方删除。若失效，标记为 is_invalid 而非直接删除。
     // 使用 [db] 显式捕获数据库指针，并增加错误检查
-    (void)QtConcurrent::run([db]() {
+    (void)QtConcurrent::run([db, snapshot]() {
         if (!db) return;
 
         std::vector<std::pair<std::wstring, std::string>> itemsToCheck;
-        MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
+        for (const auto& meta : snapshot) {
             // 只对未标记失效且非回收站的文件进行物理校验
             if (!meta.isFolder && !meta.isInvalid && !meta.isTrash) {
-                itemsToCheck.push_back({path, meta.fileId128});
+                itemsToCheck.push_back({meta.path, meta.fileId128});
             }
-        });
+        }
 
         int invalidatedCount = 0;
         for (const auto& item : itemsToCheck) {
