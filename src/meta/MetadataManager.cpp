@@ -370,7 +370,7 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     // [Plan-131 方案 C] 物理指纹准入机制
     std::string pFid;
     long long pSize = 0, pMtime = 0;
-    if (FileMetadataExtractor::fetchWinApiMetadataDirect(nPath, pFid, nullptr, &pSize, nullptr, nullptr, &pMtime, nullptr)) {
+    if (fetchWinApiMetadataDirect(nPath, pFid, nullptr, &pSize, nullptr, nullptr, &pMtime, nullptr)) {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
         auto it = m_cache.find(nPath);
         if (it != m_cache.end()) {
@@ -397,10 +397,10 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     updateIngestionStatus(nPath, 0);
 
     // 3. 提取图像尺寸 (Plan-29)
-    FileMetadataExtractor::tryExtractDimensions(nPath);
+    tryExtractDimensions(nPath);
 
     // 4. 视觉预热 (提取颜色)
-    FileMetadataExtractor::tryExtractColor(nPath);
+    tryExtractColor(nPath);
 
     // 5. 标记完成并持久化（完成状态 1）
     updateIngestionStatus(nPath, 1);
@@ -617,8 +617,8 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
             updateIngestionStatus(nPath, 0);
             
             // 3. 物理与视觉属性提取 (耗时解析操作)
-            FileMetadataExtractor::tryExtractDimensions(nPath);
-            FileMetadataExtractor::tryExtractColor(nPath);
+            tryExtractDimensions(nPath);
+            tryExtractColor(nPath);
 
             // 4. 标记完成并持久化 (Development_Plan 1.1)
             updateIngestionStatus(nPath, 1);
@@ -665,7 +665,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
     RuntimeMeta rm;
     std::wstring frn;
     std::wstring type;
-    if (FileMetadataExtractor::fetchWinApiMetadataDirect(nPath, rm.fileId128, &frn, &rm.fileSize, &type, &rm.ctime, &rm.mtime, &rm.atime)) {
+    if (fetchWinApiMetadataDirect(nPath, rm.fileId128, &frn, &rm.fileSize, &type, &rm.ctime, &rm.mtime, &rm.atime)) {
         rm.isFolder = (type == L"folder");
         
         // 3. 写锁写入缓存
@@ -1409,7 +1409,7 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
 void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const std::wstring& origPath) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     std::string fid;
-    FileMetadataExtractor::fetchWinApiMetadataDirect(nPath, fid);
+    fetchWinApiMetadataDirect(nPath, fid);
 
     bool changed = false;
     bool isManaged = false;
@@ -1579,7 +1579,7 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
 
     // 2. 物理加固：如果路径匹配失败（常见于 OS 将文件移入回收站后路径发生偏移），尝试通过物理 FID 反查
     if (!existsInDb) {
-        if (FileMetadataExtractor::fetchWinApiMetadataDirect(nPath, fid)) {
+        if (fetchWinApiMetadataDirect(nPath, fid)) {
             std::shared_lock<std::shared_mutex> lock(m_mutex);
             auto it = m_fidToPath.find(fid);
             if (it != m_fidToPath.end()) {
@@ -1687,9 +1687,9 @@ bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
     return false;
 }
 
-bool FileMetadataExtractor::fetchWinApiMetadataDirect(const std::wstring& path, std::string& outId128, std::wstring* outFrn, long long* outSize, std::wstring* outType, long long* outCtime, long long* outMtime, long long* outAtime) {
+bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::string& outId128, std::wstring* outFrn, long long* outSize, std::wstring* outType, long long* outCtime, long long* outMtime, long long* outAtime) {
     HANDLE hFile = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    std::wstring vol = MetadataManager::getVolumeSerialNumber(path);
+    std::wstring vol = getVolumeSerialNumber(path);
     if (hFile == INVALID_HANDLE_VALUE) {
         if (outFrn) *outFrn = MetadataManager::generateDeterministicFrn(path);
         outId128 = MetadataManager::generateDeterministicSha256Id(path);
@@ -1724,7 +1724,7 @@ void MetadataManager::activateItem(const std::wstring& path) {
     instance().registerItem(path);
 }
 
-void FileMetadataExtractor::tryExtractDimensions(const std::wstring& path) {
+void MetadataManager::tryExtractDimensions(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
     QFileInfo info(QString::fromStdWString(nPath));
     if (!info.isFile()) return;
@@ -1768,7 +1768,7 @@ void FileMetadataExtractor::tryExtractDimensions(const std::wstring& path) {
     }
 }
 
-void FileMetadataExtractor::tryExtractColor(const std::wstring& path) {
+void MetadataManager::tryExtractColor(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     
     // 2026-07-xx 按照 Plan-29：在提取颜色时同步校准尺寸
@@ -1971,7 +1971,7 @@ void MetadataManager::registerArcmetaFrn(const std::wstring&) {
 
 std::string MetadataManager::getFileIdSync(const std::wstring& path) {
     std::string fid;
-    if (!FileMetadataExtractor::fetchWinApiMetadataDirect(path, fid, nullptr)) fid = MetadataManager::generateDeterministicSha256Id(path);
+    if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = MetadataManager::generateDeterministicSha256Id(path);
     return fid;
 }
 
@@ -2107,16 +2107,55 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         authorized = true;
     }
 
-    if (MetadataRepository::saveMeta(memDb, nPath, rMeta)) {
-        if (isNew) {
-            if (!rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
-                CategoryRepo::incrementTotalFileCount(1);
+    auto bindMeta = [](sqlite3_stmt* stmt, const std::wstring& path, const RuntimeMeta& meta) {
+        sqlite3_bind_text(stmt, 1, meta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 3, meta.isFolder ? 1 : 0);
+        sqlite3_bind_int(stmt, 4, meta.rating);
+        sqlite3_bind_text16(stmt, 5, meta.color.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 6, meta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 7, meta.note.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 8, meta.url.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 9, meta.ctime);
+        sqlite3_bind_int64(stmt, 10, meta.mtime);
+        sqlite3_bind_int64(stmt, 11, meta.atime);
+        sqlite3_bind_int64(stmt, 12, meta.fileSize);
+
+        QJsonArray arr;
+        for (const auto& pe : meta.palettes) {
+            QJsonObject obj;
+            obj["color"] = pe.color.name();
+            obj["ratio"] = (double)pe.ratio;
+            arr.append(obj);
+        }
+        QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
+        sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 14, meta.isTrash ? 1 : 0);
+        sqlite3_bind_text16(stmt, 15, meta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 16, meta.isInvalid ? 1 : 0);
+        sqlite3_bind_int(stmt, 17, meta.width);
+        sqlite3_bind_int(stmt, 18, meta.height);
+        sqlite3_bind_int(stmt, 19, meta.ingestionStatus);
+    };
+
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    sqlite3_stmt* memStmt;
+    if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
+        bindMeta(memStmt, nPath, rMeta);
+        if (sqlite3_step(memStmt) == SQLITE_DONE) {
+            if (isNew) {
+                if (!rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
+                    CategoryRepo::incrementTotalFileCount(1);
+                }
             }
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                m_cache[nPath].isManaged = true;
+            }
+            // [Plan-131 方案 A] 磁盘直连模式，取消 redundant async dispatch
         }
-        {
-            std::unique_lock<std::shared_mutex> lock(m_mutex);
-            m_cache[nPath].isManaged = true;
-        }
+        sqlite3_finalize(memStmt);
     }
         
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
@@ -2418,74 +2457,6 @@ void MetadataManager::slideRecentWindow() {
             break; // 队首依然在 24h 窗口内，说明后续更安全，直接跳出剪枝！
         }
     }
-}
-
-bool MetadataRepository::saveMeta(sqlite3* db, const std::wstring& path, const RuntimeMeta& meta) {
-    auto bindMeta = [](sqlite3_stmt* stmt, const std::wstring& path, const RuntimeMeta& meta) {
-        sqlite3_bind_text(stmt, 1, meta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 3, meta.isFolder ? 1 : 0);
-        sqlite3_bind_int(stmt, 4, meta.rating);
-        sqlite3_bind_text16(stmt, 5, meta.color.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 6, meta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 7, meta.note.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 8, meta.url.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(stmt, 9, meta.ctime);
-        sqlite3_bind_int64(stmt, 10, meta.mtime);
-        sqlite3_bind_int64(stmt, 11, meta.atime);
-        sqlite3_bind_int64(stmt, 12, meta.fileSize);
-
-        QJsonArray arr;
-        for (const auto& pe : meta.palettes) {
-            QJsonObject obj;
-            obj["color"] = pe.color.name();
-            obj["ratio"] = (double)pe.ratio;
-            arr.append(obj);
-        }
-        QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
-        sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 14, meta.isTrash ? 1 : 0);
-        sqlite3_bind_text16(stmt, 15, meta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 16, meta.isInvalid ? 1 : 0);
-        sqlite3_bind_int(stmt, 17, meta.width);
-        sqlite3_bind_int(stmt, 18, meta.height);
-        sqlite3_bind_int(stmt, 19, meta.ingestionStatus);
-    };
-
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-    sqlite3_stmt* memStmt = nullptr;
-    if (sqlite3_prepare_v2(db, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
-        bindMeta(memStmt, path, meta);
-        bool success = (sqlite3_step(memStmt) == SQLITE_DONE);
-        sqlite3_finalize(memStmt);
-        return success;
-    }
-    return false;
-}
-
-bool MetadataRepository::deleteMeta(sqlite3* db, const std::string& fileId) {
-    const char* sql = "DELETE FROM metadata WHERE file_id = ?";
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, fileId.c_str(), -1, SQLITE_TRANSIENT);
-        bool success = (sqlite3_step(stmt) == SQLITE_DONE);
-        sqlite3_finalize(stmt);
-        return success;
-    }
-    return false;
-}
-
-bool MetadataRepository::setInvalidFlag(sqlite3* db, const std::string& fileId, bool invalid) {
-    const char* sql = "UPDATE metadata SET is_invalid = ? WHERE file_id = ?";
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(stmt, 1, invalid ? 1 : 0);
-        sqlite3_bind_text(stmt, 2, fileId.c_str(), -1, SQLITE_TRANSIENT);
-        bool success = (sqlite3_step(stmt) == SQLITE_DONE);
-        sqlite3_finalize(stmt);
-        return success;
-    }
-    return false;
 }
 
 } // namespace ArcMeta

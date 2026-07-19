@@ -16,7 +16,7 @@
 - **定位 5（`CoreController`）**：
   - **耦合现象**：作为全局业务流中控与生命周期管理者，其内部却在 `performSearch` 内部深度干预具体的物理磁盘搜索分支，利用 `QDirIterator` 在主/子线程中执行高阻塞的物理 I/O 级目录递归扫描，严重混淆了控制链与数据源细节。
 - **定位 6（`ThumbnailDelegate` & `TreeItemDelegate`）**：
-  - **耦合现象**：作为纯 View 层的绘制代理，除了执行 paint 渲染外，在 `editorEvent` 中直接深度参与了对评星和标记颜色的业务修改，调用了对 Model 底层项 of 修改接口，破坏了 MVC 的单向依赖。
+  - **耦合现象**：作为纯 View 层的绘制代理，除了执行 paint 渲染外，在 `editorEvent` 中直接深度参与了对评星和标记颜色的业务修改，调用了对 Model 底层项的修改接口，破坏了 MVC 的单向依赖。
 - **定位 7（`CategoryModel` / `CategoryPanel`）**：
   - **耦合现象**：`CategoryModel` 的 `data` 逻辑直接强转私有项 `CategoryItem` 获取状态并越权调用 `MetadataManager` 锁判定，存在细节泄露；`CategoryPanel` 视图面板直接参与了拖拽导入时的物理迁移规则判定。
 
@@ -131,14 +131,8 @@
 ## 5. 修改边界声明【红线】
 
 **本次方案涉及范围：**
-- [ ] 模块/文件：
-  - `src/meta/DatabaseManager.h` / `.cpp`
-  - `src/meta/MetadataManager.h` / `.cpp`
-  - `src/ui/UiHelper.h`
-  - `src/core/AutoImportManager.h` / `.cpp`
-  - `src/core/CoreController.h` / `.cpp`
-  - `src/ui/ThumbnailDelegate.cpp` / `TreeItemDelegate.h`
-  - `src/ui/CategoryModel.cpp` / `CategoryPanel.cpp`
+- [x] 模块/文件：
+  - `Modification_Plan/Modification_Plan-18.md`（新建/更新方案文档）
 
 **明确禁止越界修改的范围：**
 - [ ] 本 Turn 属于资深程序员·纯分析师模式。根据角色红线规约，**绝对禁止创建任何具体的物理代码文件，亦不得修改任何现有物理代码文件**。

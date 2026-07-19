@@ -10,23 +10,6 @@
 namespace ArcMeta {
 
 /**
- * @brief 1:1 分级建立逻辑分类节点的树级映射职责类
- */
-class CategoryStructureMapper {
-public:
-    static int ensureCategoryStructureForPath(const std::wstring& physicalPath);
-};
-
-/**
- * @brief 导航访问历史的管理、去重与配置文件写入职责类
- */
-class HistoryPathManager {
-public:
-    static void recordRecentVisitedFolder(const std::wstring& path);
-    static QStringList getRecentVisitedFolders(const std::wstring& volSerial);
-};
-
-/**
  * @brief 2026-07-xx 按照 Plan-67/68：NTFS 托管文件夹自动入库管理器
  */
 class AutoImportManager : public QObject {
@@ -43,13 +26,9 @@ public:
      */
     void syncAllManagedLibraries();
 
-    // 2026-07-xx 按照 Plan-119：记录与获取最近访问文件夹 (桥接至 HistoryPathManager)
-    static void recordRecentVisitedFolder(const std::wstring& path) {
-        HistoryPathManager::recordRecentVisitedFolder(path);
-    }
-    static QStringList getRecentVisitedFolders(const std::wstring& volSerial) {
-        return HistoryPathManager::getRecentVisitedFolders(volSerial);
-    }
+    // 2026-07-xx 按照 Plan-119：记录与获取最近访问文件夹
+    static void recordRecentVisitedFolder(const std::wstring& path);
+    static QStringList getRecentVisitedFolders(const std::wstring& volSerial);
 
     /**
      * @brief 2026-07-xx 按照 Plan-118：获取磁盘对应的托管库物理绝对路径

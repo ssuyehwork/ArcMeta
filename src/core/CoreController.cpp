@@ -22,44 +22,10 @@ CoreController& CoreController::instance() {
     return inst;
 }
 
-void DiskSearchEngine::run() {
-    QDirIterator it(m_parentPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    QStringList batch;
-    int scanCount = 0;
-
-    while (it.hasNext()) {
-        if (m_abort) break;
-        scanCount++;
-        if (scanCount % 2000 == 0) {
-             ArcMeta::Logger::log(QString("[Core] I/O 扫描进度: 已检查 %1 个项目 [%2]").arg(scanCount).arg(m_searchId));
-        }
-
-        QString fullPath = it.next();
-        QString fileName = it.fileName();
-
-        if (fileName.contains(m_keyword, Qt::CaseInsensitive)) {
-            batch << fullPath;
-            if (batch.size() >= 50) {
-                emit fileFound(batch);
-                batch.clear();
-            }
-        }
-    }
-
-    if (!batch.isEmpty() && !m_abort) {
-        emit fileFound(batch);
-    }
-
-    emit searchFinished(scanCount);
-}
-
 CoreController::CoreController(QObject* parent) : QObject(parent) {
-    m_diskSearchEngine = new DiskSearchEngine(this);
 }
 
-CoreController::~CoreController() {
-    abortSearch();
-}
+CoreController::~CoreController() {}
 
 /**
  * @brief 启动系统初始化链条
@@ -181,25 +147,41 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
 
         // --- 第二阶段：如果是物理导航模式，执行 I/O 扫描补全 (Plan-57) ---
         if (scopeSource == "nav" && !parentPath.isEmpty() && !m_isSearchAborted && m_currentSearchId == searchId) {
-            connect(m_diskSearchEngine, &DiskSearchEngine::fileFound, this, [this, &seenPaths, &totalFound, searchId](const QStringList& files) {
-                if (m_isSearchAborted || m_currentSearchId != searchId) return;
-                QStringList filtered;
-                for (const auto& fp : files) {
-                    std::wstring wPath = MetadataManager::normalizePath(fp.toStdWString());
+            QDirIterator it(parentPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+            QStringList batch;
+            int scanCount = 0;
+
+            while (it.hasNext()) {
+                if (m_isSearchAborted || m_currentSearchId != searchId) break;
+                scanCount++;
+                if (scanCount % 2000 == 0) {
+                     ArcMeta::Logger::log(QString("[Core] I/O 扫描进度: 已检查 %1 个项目 [%2]").arg(scanCount).arg(searchId));
+                }
+
+                QString fullPath = it.next();
+                QString fileName = it.fileName();
+
+                // 关键词匹配逻辑 (简单文件名包含，未来可扩展为更复杂匹配)
+                if (fileName.contains(keyword, Qt::CaseInsensitive)) {
+                    std::wstring wPath = MetadataManager::normalizePath(fullPath.toStdWString());
+                    // 去重：如果已经在缓存中搜到了，则跳过
                     if (seenPaths.find(wPath) == seenPaths.end()) {
-                        filtered << fp;
+                        batch << fullPath;
                         seenPaths.insert(wPath);
                         totalFound++;
+
+                        // 攒批发射，防止 UI 信号淹没
+                        if (batch.size() >= 50) {
+                            emit searchResultsAvailable(batch, true);
+                            batch.clear();
+                        }
                     }
                 }
-                if (!filtered.isEmpty()) {
-                    emit searchResultsAvailable(filtered, true);
-                }
-            }, Qt::DirectConnection);
+            }
 
-            m_diskSearchEngine->startSearch(keyword, parentPath, searchId);
-            m_diskSearchEngine->wait();
-            m_diskSearchEngine->disconnect(this);
+            if (!batch.isEmpty() && !m_isSearchAborted) {
+                emit searchResultsAvailable(batch, true);
+            }
         }
 
         m_isSearching = false;
@@ -214,10 +196,7 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
 
 void CoreController::abortSearch() {
     m_isSearchAborted = true;
-    if (m_diskSearchEngine) {
-        m_diskSearchEngine->abort();
-        m_diskSearchEngine->wait();
-    }
+    // 等待现有搜索任务退出的轻量化处理（实际生产环境可能需要更复杂的等待机制）
 }
 
 void CoreController::handleDeviceChange(unsigned long wParam, unsigned long long lParam) {

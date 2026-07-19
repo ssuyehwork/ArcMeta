@@ -21,15 +21,6 @@ struct sqlite3;
 namespace ArcMeta {
 
 /**
- * @brief 数据库物理文件辅助类，剥离物理 I/O 职责
- */
-class DbFileSystemHelper {
-public:
-    static void ensureFileHidden(const std::wstring& path);
-    static QString handleDriveDriftRename(const std::wstring& volumeSerial, const QString& driveLetter, const QString& currentPath, const QString& metaDir);
-};
-
-/**
  * @brief 数据库事务 RAII 守卫
  * 确保即使在逻辑分支提前返回时事务也能安全关闭。
  */
@@ -181,6 +172,7 @@ private:
     void closeDb(DbConnection& conn);
 
     QString getAppDir();
+    void ensureHidden(const std::wstring& path);
 };
 
 class WriteGuard {
