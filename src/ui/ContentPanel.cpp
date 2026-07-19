@@ -75,6 +75,7 @@
 #include "BatchRenameDialog.h" 
 #include "UiHelper.h" 
 #include "StyleLibrary.h"
+#include <QFileIconProvider>
 #include "../core/CoreController.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"
