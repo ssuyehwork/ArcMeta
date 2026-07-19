@@ -176,46 +176,6 @@ public:
     }
 
 public:
-    bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) override {
-        // 2026-06-16 按照方案 20：交互逻辑闭环修正
-        if (event->type() == QEvent::MouseButtonPress && index.column() == 2) {
-            QAbstractItemView* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
-
-            // 物理加固：未选中项严禁直接通过 Delegate 修改元数据
-            // 2026-06-xx 稳健性增强：通过 View 获取实时的选中状态（检查整行是否被选中）
-            bool isSelected = (option.state & QStyle::State_Selected);
-            if (view && view->selectionModel()) {
-                // 在 TreeView 中，我们通常关心的是当前行是否被选中
-                isSelected = view->selectionModel()->isRowSelected(index.row(), index.parent());
-            }
-            if (!isSelected) return false;
-
-            QMouseEvent* me = static_cast<QMouseEvent*>(event);
-            
-            // 精准 Hitbox：禁止图标
-            QRect banHitbox(option.rect.left() + 5, option.rect.top() + (option.rect.height() - 16)/2, 16, 16);
-            
-            if (banHitbox.contains(me->pos())) {
-                // 核心意图：统一由模型 setData 触发持久化，消除双写冲突
-                model->setData(index.model()->index(index.row(), 0), 0, RatingRole);
-                return true;
-            }
-
-            // 处理点击星级评分
-            int starSize = 14;
-            int spacing = 1;
-            int startX = option.rect.left() + 5 + 16 + 5; 
-            for (int i = 0; i < 5; ++i) {
-                QRect starRect(startX + i * (starSize + spacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
-                if (starRect.contains(me->pos())) {
-                    model->setData(index.model()->index(index.row(), 0), i + 1, RatingRole);
-                    return true;
-                }
-            }
-        }
-        return QStyledItemDelegate::editorEvent(event, model, option, index);
-    }
-
     QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
         return QStyledItemDelegate::createEditor(parent, option, index);
     }
