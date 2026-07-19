@@ -39,6 +39,16 @@ public:
      * @brief 格式化字节大小
      */
     static QString formatSize(qint64 bytes);
+
+    /**
+     * @brief 物理设置文件/文件夹隐藏属性 (解耦自 DatabaseManager)
+     */
+    static void ensureHidden(const std::wstring& path);
+
+    /**
+     * @brief 盘符漂移与冗余数据库物理纠偏路由 (解耦自 DatabaseManager)
+     */
+    static QString resolveAndAlignDatabasePath(const std::wstring& volumeSerial, const QString& driveLetter, const QString& currentDiskPathInConn = "", bool isLoaded = false);
 };
 
 } // namespace ArcMeta
