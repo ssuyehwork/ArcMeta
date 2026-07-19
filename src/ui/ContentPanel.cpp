@@ -14,6 +14,7 @@
 #include "ThumbnailDelegate.h"
 #include "../util/ImportHelper.h"
 #include "../core/AutoImportManager.h"
+#include "../core/NavigationHistoryService.h"
 #include "ToolTipOverlay.h" 
 #include "MainWindow.h"
  
@@ -2050,7 +2051,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 }
 
                 migrateMenu->addSeparator();
-                QStringList recentFolders = AutoImportManager::getRecentVisitedFolders(volSerial);
+                QStringList recentFolders = NavigationHistoryService::getRecentVisitedFolders(volSerial);
                 if (recentFolders.isEmpty()) {
                     migrateMenu->addAction("迁移至最近活跃位置...")->setEnabled(false);
                 } else {

@@ -18,6 +18,7 @@
 #include "MetaPanel.h"
 #include "FilterPanel.h"
 #include "TagManagerView.h"
+#include "../core/NavigationHistoryService.h"
 #include "QuickLookWindow.h"
 #include "ToolTipOverlay.h"
 
@@ -1408,7 +1409,7 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
             if (m_navPanel) m_navPanel->selectPath(normPath);
             m_currentPath = normPath;
             // 物理导航历史与业务剥离由 Controller 统一接管
-            AutoImportManager::recordRecentVisitedFolder(normPath.toStdWString());
+            NavigationHistoryService::recordRecentVisitedFolder(normPath.toStdWString());
         }
     }
 

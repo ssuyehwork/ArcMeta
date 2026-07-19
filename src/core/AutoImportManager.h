@@ -26,9 +26,6 @@ public:
      */
     void syncAllManagedLibraries();
 
-    // 2026-07-xx 按照 Plan-119：记录与获取最近访问文件夹
-    static void recordRecentVisitedFolder(const std::wstring& path);
-    static QStringList getRecentVisitedFolders(const std::wstring& volSerial);
 
     /**
      * @brief 2026-07-xx 按照 Plan-118：获取磁盘对应的托管库物理绝对路径
@@ -54,8 +51,6 @@ private slots:
 private:
     AutoImportManager(QObject* parent = nullptr);
     ~AutoImportManager() override;
-
-    bool checkAndGetManagedPath(const std::wstring& path, std::wstring& outManagedFolder);
 
     /**
      * @brief 2026-08-xx 按照 Plan-126：基于 FRN 链的高效托管路径过滤

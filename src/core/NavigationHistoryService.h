@@ -15,6 +15,10 @@ public:
     void removePath(const QString& path);
     void clearAll();
 
+    // 2026-07-xx 按照 Plan-119：记录与获取最近访问文件夹 (从 AutoImportManager 解耦迁移至此)
+    static void recordRecentVisitedFolder(const std::wstring& path);
+    static QStringList getRecentVisitedFolders(const std::wstring& volSerial);
+
 signals:
     void historyChanged(const QStringList& newHistory);
 
