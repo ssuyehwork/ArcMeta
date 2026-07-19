@@ -1,7 +1,7 @@
 # 全量核心组件职责单一与高度解耦架构设计方案 —— Modification_Plan-18.md
 
 ## 1. 任务背景
-在百万真实元数据规模的工业级高并发场景下，系统的模块化和解耦程度直接决定了高吞吐写入时的并发安全、性能稳定性和后期可维护性。然而，根据对现有架构的全面审计（对应用户原话：“看看“ArchitectureComplianceAudit.md”里还有哪些职责不单一且未被修改的，需要继续完成职责单一的规划”），项目中仍存在多个耦合严重、职责模糊的核心组件（FAIL 项）。这导致“底层 I/O 与上层 UI 穿透、SQL 裸写与业务逻辑混杂、文件系统操作与数据库管理倒置”等重度反模式依然残留在系统中。本方案旨在针对这些尚未重构的组件提供一份系统、完备、不留死角的职责单一化与高度解耦的架构整改路线图，并对历史遗留锁问题及生命周期进行彻底溯源与消解。
+在百万真实元数据规模 of 工业级高并发场景下，系统的模块化和解耦程度直接决定了高吞吐写入时的并发安全、性能稳定性和后期可维护性。然而，根据对现有架构的全面审计（对应用户原话：“看看“ArchitectureComplianceAudit.md”里还有哪些职责不单一且未被修改的，需要继续完成职责单一的规划”），项目中仍存在多个耦合严重、职责模糊的核心组件（FAIL 项）。这导致“底层 I/O 与上层 UI 穿透、SQL 裸写与业务逻辑混杂、文件系统操作与数据库管理倒置”等重度反模式依然残留在系统中。本方案旨在针对这些尚未重构的组件提供一份系统、完备、不留死角的职责单一化与高度解耦的架构整改路线图，并对历史遗留锁问题及生命周期进行彻底溯源与消解。
 
 ## 2. 问题定位与历史溯源
 
@@ -14,9 +14,9 @@
    - *第一步*（读锁周期）：在 `forEachCachedItem` 内部纯读取信息，将需要检测的路径追加到局部容器 `itemsToCheck`（不调用任何会申请写锁的 `setInvalid` 接口）。
    - *第二步*（锁释放周期）：`forEachCachedItem` 运行结束，其拥有的 shared 读锁已被释放。随后在循环中遍历 `itemsToCheck`，安全地调用 `MetadataManager::instance().setInvalid`（从而安全地、不产生重叠地获取 write 写锁），彻底杜绝了因“读锁未释放即尝试升级为写锁”引起的自死锁。
 
-#### (b) Plan-16 双锁获取函数、调用路径走查与执行现状
+#### (b) Plan-16 双锁获取函数、调用路径走走与执行现状
 Plan-16 已经实际执行完成。代码库中建立的双锁（`m_globalDbMutex` 全局分类库锁 与 `m_driveDbMutexMap` 分盘符隔离锁）其真实的调用路径完全符合“先全局，后分盘”的单向加锁顺序规约：
-- **涉及双锁的调用路径走查**：
+- **涉及双锁的调用路径走走**：
   - **唯一涉及双锁的函数**：`AutoImportManager::handleRecursiveIngestion` (位于 `src/core/AutoImportManager.cpp` 217~221 行)。
   - **加锁路径顺序**：
     1. 首先获取全局锁：`std::lock_guard<std::mutex> globalLock(DatabaseManager::instance().getGlobalMutex());` (保护全局分类表 categories 写入)
@@ -95,7 +95,7 @@ Plan-16 已经实际执行完成。代码库中建立的双锁（`m_globalDbMute
   专职负责 Win32 Shell COM（`IShellItemImageFactory`）的多媒体缩略图提取、系统内置文件大图标获取逻辑，并全面收拢原 `UiHelper` 里的所有高风险静态共享状态。
 
 #### 2. 共享状态生命周期精细化管理
-原 `UiHelper` 中懒加载产生的 static 局部变量 `s_fileIconCache`（图标缓存）、`s_loadingKeys`（并发加载拦截集合）及通知器 `IconLoadNotifier`，在重构后将被升级并完全由 `ShellIconManager` 单例的生命周期统一管理：
+原 `UiHelper` 中懒加载产生的 static 局部变量 `s_fileIconCache`（图标缓存）、`s_loadingKeys`（并发加载拦截集合）及通知器 `IconLoadNotifier`，在重构后将被升级并完全由 `ShellIconManager` 单例 of 生命周期的统一管理：
 ```cpp
 class ShellIconManager : public QObject {
     Q_OBJECT
@@ -148,7 +148,7 @@ signals:
   彻底废除 `ThumbnailDelegate` 和 `TreeItemDelegate` 的 `editorEvent` 内部直接调用 `#include "MetadataManager.h"` 对 `MetadataManager` 进行直接状态更新的穿透调用。
 - **重构后交互动作驱动流**：
   1. *View 触发*：用户在 UI 界面点击星星（评分）或标签颜色。
-  2. *Delegate 拦截*：`ThumbnailDelegate::editorEvent` 捕获该物理坐标点击，计算出用户期望的评星值（如 4 颗星）。
+  2. *Delegate 拦截*：`ThumbnailDelegate::editorEvent` 捕获该物理坐标点击，计算出用户期望 of 评星值（如 4 颗星）。
   3. *信使传递*：Delegate **不进行任何底层数据库操作，亦不修改内存缓存**，仅仅调用 `model->setData(index, 4, Roles::EditRatingRole)` 或者是发射代表 UI 请求的标准信号 `requestUpdateRating(index, 4)`。
   4. *Model/Controller 落地*：由 Model（`FerrexVirtualDbModel`）的 `setData` 函数捕获到 `EditRatingRole` 角色更新请求：
      - 调用底层的 `MetadataManager::instance().setRating` 进行内存哈希更新与异步落盘。
@@ -193,7 +193,7 @@ signals:
   ```
   它**不需要也不应该获取 `m_globalDbMutex` 全局分类库锁**。
 - **锁秩序规约**：
-  - 如果业务层级在某些复杂链路中（例如在 `AutoImportManager` 中执行级联入库）需要同时调用全局分类写入和对应盘符的元数据持久化，必须无条件遵循先拿 `getGlobalMutex()` (全局锁) 后拿 `getDriveMutex(vol)` (盘符锁) 的严格单向锁获取顺序，以防并发死锁。
+  - 如果业务层级在某些复杂链路中（例如在 `AutoImportManager` 中执行级联入库）需要同时调用全局分类写入 and 对应盘符的元数据持久化，必须无条件遵循先拿 `getGlobalMutex()` (全局锁) 后拿 `getDriveMutex(vol)` (盘符锁) 的严格单向锁获取顺序，以防并发死锁。
 
 ### 6.2 Win32 COM 初始化预警
 新拆分出的 `ShellIconManager` 在后台异步线程池执行 Shell 图标和缩略图提取时，由于 COM 接口的多线程敏感性，提取线程被拉起后必须先调用 `CoInitializeEx(NULL, COINIT_APARTMENTTHREADED)` 预热，提取完成后调用 `CoUninitialize()` 释放，否则会导致特定 Windows 环境下 Shell 提取静默失败。
