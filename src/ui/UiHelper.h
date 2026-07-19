@@ -178,12 +178,12 @@ public:
     static QIcon getFileIcon(const QString& filePath, int size = 18, const QColor& overrideColor = QColor()) {
         Q_UNUSED(overrideColor);
         Q_UNUSED(size);
-        
+
         QFileInfo info(filePath);
         // 2026-06-xx 架构修正：磁盘根目录图标应独立缓存，防止其覆盖通用文件夹图标
         QString key = info.isDir() ? (info.isRoot() ? filePath : "folder") : info.suffix().toLower();
         if (key.length() > 128) key = "unknown";
-        
+
         static QMap<QString, QIcon> s_fileIconCache;
 
         {
@@ -403,11 +403,11 @@ public:
         if (targetImg.isNull()) return {};
 
         QImage sampled = targetImg.scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        
-        struct BucketInfo { 
-            long long rSum = 0, gSum = 0, bSum = 0; 
+
+        struct BucketInfo {
+            long long rSum = 0, gSum = 0, bSum = 0;
             double rankWeight = 0.0;
-            int count = 0; 
+            int count = 0;
         };
         QMap<QRgb, BucketInfo> bucketStats;
         int totalPixels = 0;
@@ -495,7 +495,7 @@ public:
             for (int i = 0; i < candidates.size(); ++i) {
                 const auto& c = candidates[i];
                 double score = c.score;
-                
+
                 // 2026-07-xx 按照 Plan-28：引入增强型 DeltaE 空间排斥逻辑，杜绝相似色霸屏，对齐精度
                 for (const auto& r : result) {
                     double de = calculateDeltaE(c.color, r.first);
@@ -505,7 +505,7 @@ public:
                         score *= (de / 45.0) * 0.5; // 中度排斥
                     }
                 }
-                
+
                 if (score > maxScore) { maxScore = score; bestIdx = i; }
             }
             if (bestIdx != -1 && maxScore > 0) {
@@ -585,7 +585,7 @@ public:
 
                     QImage img(p, w, h, w * 4, QImage::Format_RGBA8888);
                     img = img.copy(); // 确保数据所有权
-                    
+
                     // 异步存入磁盘缓存
                     (void)QtConcurrent::run([img, cachePath]() {
                         img.save(cachePath, "PNG");

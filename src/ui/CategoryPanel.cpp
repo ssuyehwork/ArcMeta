@@ -1107,7 +1107,7 @@ void CategoryPanel::initUi() {
                     RuntimeMeta meta = MetadataManager::instance().getMeta(wp);
                     if (meta.ingestionStatus == 1) {
                         ToolTipOverlay::instance()->showText(QCursor::pos(), "该项目已入库，无需再次入库", 1500, QColor("#FECF0E"));
-                        continue; 
+                        continue;
                     }
                 }
                 finalPaths << p;

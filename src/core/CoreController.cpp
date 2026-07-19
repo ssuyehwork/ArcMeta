@@ -150,17 +150,17 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
             QDirIterator it(parentPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
             QStringList batch;
             int scanCount = 0;
-            
+
             while (it.hasNext()) {
                 if (m_isSearchAborted || m_currentSearchId != searchId) break;
                 scanCount++;
                 if (scanCount % 2000 == 0) {
                      ArcMeta::Logger::log(QString("[Core] I/O 扫描进度: 已检查 %1 个项目 [%2]").arg(scanCount).arg(searchId));
                 }
-                
+
                 QString fullPath = it.next();
                 QString fileName = it.fileName();
-                
+
                 // 关键词匹配逻辑 (简单文件名包含，未来可扩展为更复杂匹配)
                 if (fileName.contains(keyword, Qt::CaseInsensitive)) {
                     std::wstring wPath = MetadataManager::normalizePath(fullPath.toStdWString());
@@ -178,7 +178,7 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
                     }
                 }
             }
-            
+
             if (!batch.isEmpty() && !m_isSearchAborted) {
                 emit searchResultsAvailable(batch, true);
             }

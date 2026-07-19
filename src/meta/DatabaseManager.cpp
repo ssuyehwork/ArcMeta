@@ -467,7 +467,7 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
             QString expectedFileName = QString("Arcmeta_%1_%2.db").arg(QString::fromStdWString(volumeSerial).toUpper()).arg(cleanLetter);
             if (!currentDiskPath.endsWith(expectedFileName)) {
                 qDebug() << "[DB] 检测到盘符漂移，执行动态迁移:" << currentDiskPath << " -> " << expectedFileName;
-                
+
                 DbConnection& conn = m_driveDbs[volumeSerial];
                 saveDb(conn); // 先持久化
                 
@@ -480,7 +480,7 @@ sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QS
                 QString metaDir = getAppDir() + "/.arcmeta";
                 QString targetPath = metaDir + "/" + expectedFileName;
                 qDebug() << "[DB] 准备执行重命名:" << currentDiskPath << "->" << targetPath;
-                
+
                 // 如果目标已存在且不是自己，先将其移走（按用户规则重命名为无效）
                 if (QFile::exists(targetPath) && targetPath != currentDiskPath) {
                     QString invalidBase = QString("%1/Arcmeta_%2_无效").arg(metaDir).arg(QString::fromStdWString(volumeSerial).toUpper());
