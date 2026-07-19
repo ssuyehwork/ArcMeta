@@ -1,6 +1,10 @@
 #include "TagRepository.h"
 #include "DatabaseManager.h"
+#include "../mft/MftReader.h"
+#include "MetadataManager.h"
 #include <QDebug>
+#include <QFileInfo>
+#include <QDir>
 #include <vector>
 #include <string>
 
@@ -188,87 +192,112 @@ void TagRepository::checkAndMigrate() {
     }
 
     // 3. 执行迁移
-    sqlite3* cDb = DatabaseManager::instance().getMemoryDb(L"C");
-    if (cDb && cDb != globalDb && !globalHasGroups) {
-        qDebug() << "[TagRepository] Detected unmigrated tag data in C-drive. Migrating...";
-        
-        // 读取 C 盘数据
-        struct MigratingGroup {
-            int id;
-            std::wstring name;
-            std::wstring color;
-            int sortOrder;
-            std::vector<std::wstring> tags;
-        };
-        std::vector<MigratingGroup> migratingGroups;
-
-        sqlite3_stmt* stmt = nullptr;
-        if (sqlite3_prepare_v2(cDb, "SELECT id, name, color, sort_order FROM tag_groups", -1, &stmt, nullptr) == SQLITE_OK) {
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                MigratingGroup mg;
-                mg.id = sqlite3_column_int(stmt, 0);
-                
-                const wchar_t* wname = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
-                const wchar_t* wcolor = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
-                mg.sortOrder = sqlite3_column_int(stmt, 3);
-                if (wname) mg.name = wname;
-                if (wcolor) mg.color = wcolor;
-
-                // 读取对应的 items
-                sqlite3_stmt* itemStmt = nullptr;
-                if (sqlite3_prepare_v2(cDb, "SELECT tag_name FROM tag_group_items WHERE group_id = ?", -1, &itemStmt, nullptr) == SQLITE_OK) {
-                    sqlite3_bind_int(itemStmt, 1, mg.id);
-                    while (sqlite3_step(itemStmt) == SQLITE_ROW) {
-                        const wchar_t* wtag = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(itemStmt, 0));
-                        if (wtag) mg.tags.push_back(wtag);
-                    }
-                    sqlite3_finalize(itemStmt);
-                }
-                migratingGroups.push_back(mg);
+    if (!globalHasGroups) {
+        std::vector<std::wstring> drives = MftReader::instance().getDriveList();
+        if (drives.empty()) {
+            for (const QFileInfo& driveInfo : QDir::drives()) {
+                drives.push_back(driveInfo.absolutePath().toStdWString());
             }
-            sqlite3_finalize(stmt);
         }
 
-        if (!migratingGroups.empty()) {
-            // 开始大事务写入全局库
-            SqlTransaction trans(globalDb);
-            
-            const char* insertGroupSql = "INSERT INTO tag_groups (id, name, color, sort_order) VALUES (?, ?, ?, ?)";
-            const char* insertItemSql = "INSERT INTO tag_group_items (group_id, tag_name) VALUES (?, ?)";
+        for (const std::wstring& drive : drives) {
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(drive);
+            if (volSerial.empty()) continue;
 
-            sqlite3_stmt* groupInsertStmt = nullptr;
-            sqlite3_stmt* itemInsertStmt = nullptr;
+            sqlite3* driveDb = DatabaseManager::instance().getMemoryDb(volSerial, QString::fromStdWString(drive));
+            if (!driveDb || driveDb == globalDb) continue;
 
-            if (sqlite3_prepare_v2(globalDb, insertGroupSql, -1, &groupInsertStmt, nullptr) == SQLITE_OK &&
-                sqlite3_prepare_v2(globalDb, insertItemSql, -1, &itemInsertStmt, nullptr) == SQLITE_OK) {
-                
-                for (const auto& mg : migratingGroups) {
-                    sqlite3_bind_int(groupInsertStmt, 1, mg.id);
-                    sqlite3_bind_text16(groupInsertStmt, 2, mg.name.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(groupInsertStmt, 3, mg.color.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_int(groupInsertStmt, 4, mg.sortOrder);
-                    sqlite3_step(groupInsertStmt);
-                    sqlite3_reset(groupInsertStmt);
+            // 检查该盘是否有 tag_groups 记录
+            bool hasGroups = false;
+            sqlite3_stmt* checkGroupStmt = nullptr;
+            if (sqlite3_prepare_v2(driveDb, "SELECT 1 FROM tag_groups LIMIT 1", -1, &checkGroupStmt, nullptr) == SQLITE_OK) {
+                if (sqlite3_step(checkGroupStmt) == SQLITE_ROW) {
+                    hasGroups = true;
+                }
+                sqlite3_finalize(checkGroupStmt);
+            }
 
-                    for (const auto& tag : mg.tags) {
-                        sqlite3_bind_int(itemInsertStmt, 1, mg.id);
-                        sqlite3_bind_text16(itemInsertStmt, 2, tag.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_step(itemInsertStmt);
-                        sqlite3_reset(itemInsertStmt);
+            if (!hasGroups) continue;
+
+            qDebug() << "[TagRepository] Detected unmigrated tag data in drive" << QString::fromStdWString(drive) << ". Migrating...";
+
+            struct MigratingGroup {
+                int id;
+                std::wstring name;
+                std::wstring color;
+                int sortOrder;
+                std::vector<std::wstring> tags;
+            };
+            std::vector<MigratingGroup> migratingGroups;
+
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(driveDb, "SELECT id, name, color, sort_order FROM tag_groups", -1, &stmt, nullptr) == SQLITE_OK) {
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                    MigratingGroup mg;
+                    mg.id = sqlite3_column_int(stmt, 0);
+
+                    const wchar_t* wname = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
+                    const wchar_t* wcolor = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
+                    mg.sortOrder = sqlite3_column_int(stmt, 3);
+                    if (wname) mg.name = wname;
+                    if (wcolor) mg.color = wcolor;
+
+                    // 读取对应的 items
+                    sqlite3_stmt* itemStmt = nullptr;
+                    if (sqlite3_prepare_v2(driveDb, "SELECT tag_name FROM tag_group_items WHERE group_id = ?", -1, &itemStmt, nullptr) == SQLITE_OK) {
+                        sqlite3_bind_int(itemStmt, 1, mg.id);
+                        while (sqlite3_step(itemStmt) == SQLITE_ROW) {
+                            const wchar_t* wtag = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(itemStmt, 0));
+                            if (wtag) mg.tags.push_back(wtag);
+                        }
+                        sqlite3_finalize(itemStmt);
                     }
+                    migratingGroups.push_back(mg);
                 }
+                sqlite3_finalize(stmt);
+            }
+
+            if (!migratingGroups.empty()) {
+                // 开始大事务写入全局库
+                SqlTransaction trans(globalDb);
                 
-                sqlite3_finalize(groupInsertStmt);
-                sqlite3_finalize(itemInsertStmt);
-                
-                if (trans.commit()) {
-                    qDebug() << "[TagRepository] Successfully migrated" << migratingGroups.size() << "tag groups to global.db.";
+                const char* insertGroupSql = "INSERT INTO tag_groups (id, name, color, sort_order) VALUES (?, ?, ?, ?)";
+                const char* insertItemSql = "INSERT INTO tag_group_items (group_id, tag_name) VALUES (?, ?)";
+
+                sqlite3_stmt* groupInsertStmt = nullptr;
+                sqlite3_stmt* itemInsertStmt = nullptr;
+
+                if (sqlite3_prepare_v2(globalDb, insertGroupSql, -1, &groupInsertStmt, nullptr) == SQLITE_OK &&
+                    sqlite3_prepare_v2(globalDb, insertItemSql, -1, &itemInsertStmt, nullptr) == SQLITE_OK) {
+
+                    for (const auto& mg : migratingGroups) {
+                        sqlite3_bind_int(groupInsertStmt, 1, mg.id);
+                        sqlite3_bind_text16(groupInsertStmt, 2, mg.name.c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_text16(groupInsertStmt, 3, mg.color.c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_int(groupInsertStmt, 4, mg.sortOrder);
+                        sqlite3_step(groupInsertStmt);
+                        sqlite3_reset(groupInsertStmt);
+
+                        for (const auto& tag : mg.tags) {
+                            sqlite3_bind_int(itemInsertStmt, 1, mg.id);
+                            sqlite3_bind_text16(itemInsertStmt, 2, tag.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_step(itemInsertStmt);
+                            sqlite3_reset(itemInsertStmt);
+                        }
+                    }
+
+                    sqlite3_finalize(groupInsertStmt);
+                    sqlite3_finalize(itemInsertStmt);
+
+                    if (trans.commit()) {
+                        qDebug() << "[TagRepository] Successfully migrated" << migratingGroups.size() << "tag groups from drive" << QString::fromStdWString(drive) << "to global.db.";
+                    } else {
+                        qWarning() << "[TagRepository] FAILED to commit migrating transaction!";
+                    }
                 } else {
-                    qWarning() << "[TagRepository] FAILED to commit migrating transaction!";
+                    if (groupInsertStmt) sqlite3_finalize(groupInsertStmt);
+                    if (itemInsertStmt) sqlite3_finalize(itemInsertStmt);
                 }
-            } else {
-                if (groupInsertStmt) sqlite3_finalize(groupInsertStmt);
-                if (itemInsertStmt) sqlite3_finalize(itemInsertStmt);
             }
         }
     }

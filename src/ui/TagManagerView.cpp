@@ -374,12 +374,19 @@ void TagManagerView::createNewGroup() {
         QString name = dlg.text();
         if (name.isEmpty()) return;
 
-        int groupId = TagRepository::createGroup(name);
-        if (groupId != -1) {
-            refresh();
-        } else {
-            FramelessMessageBox::warning(this, "错误", "创建标签组失败");
-        }
+        QPointer<TagManagerView> weakThis(this);
+        (void)QtConcurrent::run([weakThis, name]() {
+            int groupId = TagRepository::createGroup(name);
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, groupId]() {
+                if (weakThis) {
+                    if (groupId != -1) {
+                        weakThis->refresh();
+                    } else {
+                        FramelessMessageBox::warning(weakThis.data(), "错误", "创建标签组失败");
+                    }
+                }
+            }, Qt::QueuedConnection);
+        });
     }
 }
 
@@ -632,16 +639,26 @@ void TagManagerView::refresh() {
                     if (dlg.exec() == QDialog::Accepted) {
                         QString newName = dlg.text();
                         if (!newName.isEmpty() && newName != tagName) {
-                            MetadataManager::instance().renameTag(tagName, newName);
-                            refresh();
+                            QPointer<TagManagerView> weakThis(this);
+                            (void)QtConcurrent::run([weakThis, tagName, newName]() {
+                                MetadataManager::instance().renameTag(tagName, newName);
+                                if (weakThis) {
+                                    QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
+                                }
+                            });
                         }
                     }
                 });
 
                 menu.addAction(UiHelper::getIcon("trash", ErrorRed), "删除标签", [this, tagName]() {
                     if (FramelessMessageBox::question(this, "删除标签", QString("确定要全局删除标签 \"%1\" 吗？此操作不可撤销。").arg(tagName))) {
-                        MetadataManager::instance().removeTag(tagName);
-                        refresh();
+                        QPointer<TagManagerView> weakThis(this);
+                        (void)QtConcurrent::run([weakThis, tagName]() {
+                            MetadataManager::instance().removeTag(tagName);
+                            if (weakThis) {
+                                QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
+                            }
+                        });
                     }
                 });
 
