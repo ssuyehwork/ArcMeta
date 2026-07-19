@@ -44,6 +44,9 @@ struct ItemRecord {
     QString suffix;
     QString filename; // 缓存文件名以供排序时 O(1) 提取，消除高频 QFileInfo 构造开销
     std::vector<std::pair<QColor, float>> palettes; // 烘焙物理色板，消除 filterAcceptsRow 锁争抢
+
+    static ItemRecord create(const QString& path, const struct RuntimeMeta* providedMeta = nullptr);
+    static void fromMetadata(ItemRecord& r, const struct RuntimeMeta& meta);
 };
 
 /**

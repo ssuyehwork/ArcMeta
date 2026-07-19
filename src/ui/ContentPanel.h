@@ -23,11 +23,12 @@
 #include <QDebug>
 #include <QIcon>
 #include "FilterPanel.h"
-#include "../meta/MetadataManager.h"
 
 #include "../core/ModelContract.h"
 
 namespace ArcMeta {
+
+struct RuntimeMeta;
 
 /**
  * @brief 2026-06-xx 物理强化：针对 QString 优化 std::unordered_map 的哈希器
@@ -62,6 +63,7 @@ class FerrexVirtualDbModel : public QAbstractTableModel {
     Q_OBJECT
 public:
     explicit FerrexVirtualDbModel(QObject* parent = nullptr);
+    ~FerrexVirtualDbModel() override;
 
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
@@ -127,20 +129,6 @@ public:
     Qt::SortOrder currentSortOrder() const { return m_sortOrder; }
 
     /**
-     * @brief 内部传输结构，用于异步扫描结果
-     */
-    struct ScanItemData {
-        QString name;
-        QString fullPath;
-        bool isDir;
-        QString suffix;
-        qint64 size;
-        QDateTime mtime;
-        RuntimeMeta meta;
-        bool isEmpty = false;
-    };
-
-    /**
      * @brief 统计结构
      */
     struct ScanStats {
@@ -197,12 +185,6 @@ public:
 
     // 2026-04-12 关键修复：延迟初始化
     void deferredInit();
-
-    /**
-     * @brief 统一条目构建中枢
-     * 2026-07-xx 架构优化：收拢物理属性采样与元数据注入逻辑，确保渲染一致性
-     */
-    static ItemRecord createItemRecord(const QString& path, const RuntimeMeta* providedMeta = nullptr);
 
     /**
      * @brief 切换视图模式

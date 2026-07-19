@@ -97,6 +97,9 @@ FerrexVirtualDbModel::FerrexVirtualDbModel(QObject* parent) : QAbstractTableMode
     });
 }
 
+FerrexVirtualDbModel::~FerrexVirtualDbModel() {
+}
+
 int FerrexVirtualDbModel::rowCount(const QModelIndex& parent) const {
     if (parent.isValid()) return 0;
     return m_displayCount;
@@ -432,17 +435,7 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
         int i = it->second;
         if (i >= 0 && i < static_cast<int>(m_allRecords.size())) {
             auto meta = MetadataManager::instance().getMeta(nPath.toStdWString());
-            m_allRecords[i].rating = meta.rating;
-            m_allRecords[i].color = QString::fromStdWString(meta.color);
-            m_allRecords[i].tags = meta.tags;
-            m_allRecords[i].fileId = meta.fileId128;
-            m_allRecords[i].pinned = meta.pinned;
-            m_allRecords[i].encrypted = meta.encrypted;
-            m_allRecords[i].isManaged = meta.hasUserOperations();
-            m_allRecords[i].palettes.clear();
-            for (const auto& pe : meta.palettes) {
-                m_allRecords[i].palettes.push_back({pe.color, pe.ratio});
-            }
+            ItemRecord::fromMetadata(m_allRecords[i], meta);
             
             m_metaCache.remove(nPath);
             QModelIndex left = index(i, 0);
@@ -966,82 +959,6 @@ void ContentPanel::deferredInit() {
     qDebug() << "[ContentPanel] deferredInit 执行完毕"; 
 } 
 
-ItemRecord ContentPanel::createItemRecord(const QString& path, const RuntimeMeta* providedMeta) {
-    ItemRecord r;
-    // 2026-xx-xx 按照 Plan-114：统一物理路径归一化准则，确保与元数据缓存 Key 严格对齐
-    std::wstring wPath = MetadataManager::normalizePath(path.toStdWString());
-    QString nPath = QString::fromStdWString(wPath);
-
-    // 1. 物理属性采样 (零 I/O 核心)
-    RuntimeMeta meta;
-    if (providedMeta) {
-        meta = *providedMeta;
-    } else {
-        meta = MetadataManager::instance().getMeta(wPath);
-    }
-
-    // Plan-124: 只有在内存缓存缺失物理时间戳时，才触发 fetchWinApiMetadataDirect
-    if (meta.fileId128.empty() || (meta.ctime == 0 && meta.mtime == 0)) {
-        std::string fid;
-        long long size = 0, ctime = 0, mtime = 0, atime = 0;
-        MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
-        r.size = size;
-        r.ctime = ctime;
-        r.mtime = mtime;
-        r.atime = atime;
-        r.fileId = fid;
-        r.isDir = QFileInfo(nPath).isDir();
-    } else {
-        r.size = meta.fileSize;
-        r.ctime = meta.ctime;
-        r.mtime = meta.mtime;
-        r.atime = meta.atime;
-        r.fileId = meta.fileId128;
-        r.isDir = meta.isFolder;
-    }
-
-    r.path = nPath;
-    {
-        int lastSlash = nPath.lastIndexOf('\\');
-        if (lastSlash == -1) lastSlash = nPath.lastIndexOf('/');
-        r.filename = (lastSlash != -1) ? nPath.mid(lastSlash + 1) : nPath;
-    }
-
-    // 2. 核心元数据注入 (确保 width/height/palettes 物理对齐)
-    r.rating = meta.rating;
-    r.color = QString::fromStdWString(meta.color);
-    r.tags = meta.tags;
-    r.pinned = meta.pinned;
-    r.encrypted = meta.encrypted;
-    r.url = QString::fromStdWString(meta.url);
-    r.note = QString::fromStdWString(meta.note);
-    r.width = meta.width;
-    r.height = meta.height;
-    r.isManaged = meta.hasUserOperations();
-    for (const auto& pe : meta.palettes) {
-        r.palettes.push_back({pe.color, pe.ratio});
-    }
-
-    if (r.isDir) {
-        // 2026-07-xx 按照 Development_Plan 3.2：从数据库加载持久化的进度值
-        r.registrationProgress = MetadataManager::instance().getProgressFromDb(wPath);
-
-        // 2026-xx-xx 工业级稳健判定 (Plan-124 修正)：
-        // 只有当明确处于“镜像模式”（providedMeta != nullptr）或项已由数据库托管时，才信任内存索引。
-        // 物理路径导航模式下，若项未录入或缓存未命中，必须执行磁盘 I/O 探测以确保正确性。
-        if (providedMeta || meta.isManaged) {
-            r.isEmpty = !MetadataManager::instance().hasChildrenInCache(wPath);
-        } else {
-            QDir sub(nPath);
-            r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
-        }
-        r.suffix = ""; // 文件夹不应有扩展名后缀
-    } else {
-        int lastDot = nPath.lastIndexOf('.');
-        r.suffix = (lastDot != -1) ? nPath.mid(lastDot + 1).toLower() : "";
-    }
-    return r;
-}
  
 void ContentPanel::initUi() { 
     QWidget* titleBar = new QWidget(this); 
@@ -2038,8 +1955,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         // 镜像源定义：侧边栏分类模式 (m_currentCategoryType 不为空) 
         // 或 物理导航模式下已进入托管库内部 (镜像加速态)
         bool isMirrorSource = !m_currentCategoryType.isEmpty();
-        if (!isMirrorSource && !m_currentPath.isEmpty()) {
-            isMirrorSource = MetadataManager::isInsideManagedLibrary(m_currentPath.toStdWString());
+        if (!isMirrorSource && onItem) {
+            isMirrorSource = currentIndex.data(ManagedRole).toBool();
         }
 
         if (isMirrorSource) {
@@ -2197,7 +2114,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         menu.addAction("属性")->setData(ActionProperties); 
 
         // 2026-07-xx 按照 Development_Plan 2.1：始终显示“重新扫描”选项 (仅限托管库内项目)
-        if (MetadataManager::isInsideManagedLibrary(path.toStdWString())) {
+        if (currentIndex.data(ManagedRole).toBool()) {
             menu.addSeparator();
             menu.addAction(UiHelper::getIcon("sync", QColor("#378ADD"), 18), "重新扫描")->setData(ActionRescan);
         }
@@ -2889,7 +2806,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         const auto drives = QDir::drives(); 
         std::vector<ItemRecord> driveRecords;
         for (const QFileInfo& drive : drives) { 
-            driveRecords.push_back(ContentPanel::createItemRecord(drive.absolutePath()));
+            driveRecords.push_back(ItemRecord::create(drive.absolutePath()));
         } 
         m_model->setRecords(driveRecords);
         // 2026-05-29 物理对齐：在加载“此电脑”后显式触发一次排序，确保置顶硬盘排在首位
@@ -2901,9 +2818,6 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
  
     m_currentPath = path; 
     updateLayersButtonState(); 
-
-    // 2026-07-xx 按照 Plan-119：记录最近访问历史（打开即记录）
-    AutoImportManager::recordRecentVisitedFolder(path.toStdWString());
 
     QPointer<ContentPanel> panelPtr(this); 
 
@@ -2924,7 +2838,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
  
                 QString absPath = info.absoluteFilePath();
-                allItems.push_back(ContentPanel::createItemRecord(absPath));
+                allItems.push_back(ItemRecord::create(absPath));
  
                 if (rec && info.isDir()) { 
                     scanDir(absPath, true); 
@@ -3118,7 +3032,7 @@ void ContentPanel::loadCategory(int categoryId) {
             }
 
             if (!wPath.empty()) {
-                allRecords.push_back(ContentPanel::createItemRecord(QString::fromStdWString(wPath)));
+                allRecords.push_back(ItemRecord::create(QString::fromStdWString(wPath)));
             }
         }
 
@@ -3191,7 +3105,7 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
         for (const QString& p : paths) {
             if (!weakThis) return;
             if (!p.isEmpty()) {
-                records.push_back(ContentPanel::createItemRecord(p));
+                records.push_back(ItemRecord::create(p));
             }
         }
         
@@ -3226,7 +3140,7 @@ void ContentPanel::appendPaths(const QStringList& paths, int reqId) {
         newRecords.reserve(static_cast<int>(paths.size()));
         for (const QString& p : paths) {
             if (!weakThis) return;
-            newRecords.push_back(ContentPanel::createItemRecord(p));
+            newRecords.push_back(ItemRecord::create(p));
         }
 
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, newRecords, reqId]() {
