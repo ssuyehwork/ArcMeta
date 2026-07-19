@@ -1407,6 +1407,8 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
             if (m_contentPanel) m_contentPanel->loadDirectory(normPath);
             if (m_navPanel) m_navPanel->selectPath(normPath);
             m_currentPath = normPath;
+            // 物理导航历史与业务剥离由 Controller 统一接管
+            AutoImportManager::recordRecentVisitedFolder(normPath.toStdWString());
         }
     }
 
