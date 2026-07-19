@@ -50,6 +50,7 @@ set(SOURCES
     src/core/NativeFolderWatcher.h
     src/core/CacheManager.cpp
     src/core/CacheManager.h
+    src/core/IndexedEntry.cpp
     src/core/IndexedEntry.h
     src/core/SyncStatusService.cpp
     src/core/SyncStatusService.h
