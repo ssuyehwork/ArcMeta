@@ -210,6 +210,7 @@ target_include_directories(ArcMeta PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     ${CMAKE_CURRENT_SOURCE_DIR}/src/mft
     ${CMAKE_CURRENT_SOURCE_DIR}/src/crypto
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util
 )
 
 # 2026-03-xx 按照用户要求及《记忆碎片》规范：
