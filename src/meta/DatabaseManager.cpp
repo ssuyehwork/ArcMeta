@@ -399,7 +399,7 @@ bool DatabaseManager::init() {
     std::lock_guard<std::mutex> lock(m_mutex);
     QString metaDir = getAppDir() + "/.arcmeta";
     QDir().mkpath(metaDir);
-    ensureHidden(metaDir.toStdWString());
+    DbFileSystemHelper::ensureFileHidden(metaDir.toStdWString());
 
     // 加载全局库
     std::wstring globalPath = (metaDir + "/global.db").toStdWString();

@@ -1,5 +1,5 @@
 #include "FileMigrationHandler.h"
-#include "ImportHelper.h"
+#include "../util/ImportHelper.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QDebug>

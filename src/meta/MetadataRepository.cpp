@@ -66,7 +66,7 @@ bool MetadataRepository::saveMeta(sqlite3* db, const std::wstring& path, const R
     for (const auto& p : meta.palettes) {
         pData.append(p.color.name().toUtf8());
         pData.append(",");
-        pData.append(QString::number(p.weight).toUtf8());
+        pData.append(QString::number(p.ratio).toUtf8());
         pData.append(";");
     }
     sqlite3_bind_blob(stmt, 13, pData.constData(), pData.size(), SQLITE_TRANSIENT);
@@ -126,7 +126,7 @@ bool MetadataRepository::getMeta(sqlite3* db, const std::wstring& path, RuntimeM
                 if (sub.size() == 2) {
                     PaletteEntry pe;
                     pe.color = QColor(sub[0]);
-                    pe.weight = sub[1].toFloat();
+                    pe.ratio = sub[1].toFloat();
                     outMeta.palettes.push_back(pe);
                 }
             }
