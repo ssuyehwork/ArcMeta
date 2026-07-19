@@ -46,6 +46,8 @@ set(SOURCES
     src/meta/sqlite3.h
     src/core/CoreController.cpp
     src/core/CoreController.h
+    src/core/PhysicalDiskSearchExtractor.cpp
+    src/core/PhysicalDiskSearchExtractor.h
     src/core/NativeFolderWatcher.cpp
     src/core/NativeFolderWatcher.h
     src/core/CacheManager.cpp

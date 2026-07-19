@@ -11,9 +11,9 @@
 #include <QTimer>
 #include <QDateTime>
 #include <QDir>
-#include <QDirIterator>
 #include <QtConcurrent>
 #include <unordered_set>
+#include "PhysicalDiskSearchExtractor.h"
 
 namespace ArcMeta {
 
@@ -140,41 +140,13 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
 
         // --- 第二阶段：如果是物理导航模式，执行 I/O 扫描补全 (Plan-57) ---
         if (scopeSource == "nav" && !parentPath.isEmpty() && !m_isSearchAborted && m_currentSearchId == searchId) {
-            QDirIterator it(parentPath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-            QStringList batch;
-            int scanCount = 0;
-            
-            while (it.hasNext()) {
-                if (m_isSearchAborted || m_currentSearchId != searchId) break;
-                scanCount++;
-                if (scanCount % 2000 == 0) {
-                     ArcMeta::Logger::log(QString("[Core] I/O 扫描进度: 已检查 %1 个项目 [%2]").arg(scanCount).arg(searchId));
+            int foundInDisk = PhysicalDiskSearchExtractor::performDiskSearch(
+                parentPath, keyword, m_isSearchAborted, m_currentSearchId, searchId, seenPaths,
+                [this](const QStringList& batch) {
+                    emit searchResultsAvailable(batch, true);
                 }
-                
-                QString fullPath = it.next();
-                QString fileName = it.fileName();
-                
-                // 关键词匹配逻辑 (简单文件名包含，未来可扩展为更复杂匹配)
-                if (fileName.contains(keyword, Qt::CaseInsensitive)) {
-                    std::wstring wPath = MetadataManager::normalizePath(fullPath.toStdWString());
-                    // 去重：如果已经在缓存中搜到了，则跳过
-                    if (seenPaths.find(wPath) == seenPaths.end()) {
-                        batch << fullPath;
-                        seenPaths.insert(wPath);
-                        totalFound++;
-
-                        // 攒批发射，防止 UI 信号淹没
-                        if (batch.size() >= 50) {
-                            emit searchResultsAvailable(batch, true);
-                            batch.clear();
-                        }
-                    }
-                }
-            }
-            
-            if (!batch.isEmpty() && !m_isSearchAborted) {
-                emit searchResultsAvailable(batch, true);
-            }
+            );
+            totalFound += foundInDisk;
         }
 
         m_isSearching = false;
