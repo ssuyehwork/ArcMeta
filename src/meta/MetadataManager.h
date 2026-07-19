@@ -16,6 +16,28 @@
 
 namespace ArcMeta {
 
+struct RuntimeMeta;
+
+/**
+ * @brief 元数据物理提取器，负责获取物理特征、多媒体及代表色分析
+ */
+class FileMetadataExtractor {
+public:
+    static bool fetchWinApiMetadataDirect(const std::wstring& path, std::string& outId128, std::wstring* outFrn = nullptr, long long* outSize = nullptr, std::wstring* outType = nullptr, long long* outCtime = nullptr, long long* outMtime = nullptr, long long* outAtime = nullptr);
+    static void tryExtractDimensions(const std::wstring& path);
+    static void tryExtractColor(const std::wstring& path);
+};
+
+/**
+ * @brief 数据访问仓储，负责对底层的 SQL CRUD 拼装与执行进行封装
+ */
+class MetadataRepository {
+public:
+    static bool saveMeta(sqlite3* db, const std::wstring& path, const RuntimeMeta& meta);
+    static bool deleteMeta(sqlite3* db, const std::string& fileId);
+    static bool setInvalidFlag(sqlite3* db, const std::string& fileId, bool invalid);
+};
+
 /**
  * @brief 内存元数据镜像结构
  */
@@ -243,16 +265,6 @@ public:
      */
     static void activateItem(const std::wstring& path);
 
-    /**
-     * @brief 尝试提取视觉元数据（颜色与色板）
-     * 2026-06-xx 提取公共逻辑：封装颜色解析与文件夹代表色逻辑
-     */
-    static void tryExtractColor(const std::wstring& path);
-
-    /**
-     * @brief 尝试提取图像尺寸 (Plan-29)
-     */
-    static void tryExtractDimensions(const std::wstring& path);
 
     /**
      * @brief 统一注册 .arcmeta 目录的 FRN
@@ -344,12 +356,6 @@ public:
     void removeFidsFromLog(const QStringList& fids);
     void addToSyncLog(const std::wstring& dirPath);
 
-    /**
-     * @brief 内部辅助：通过 WinAPI 获取 File ID 和基础元数据
-     * 2026-06-xx 物理修复：已升级为公开静态成员，支持跨模块同步入库
-     * 2026-06-xx 物理补完：增加 outFrn 参数以获取物理索引，彻底杜绝数据库主键冲突
-     */
-    static bool fetchWinApiMetadataDirect(const std::wstring& path, std::string& outId128, std::wstring* outFrn = nullptr, long long* outSize = nullptr, std::wstring* outType = nullptr, long long* outCtime = nullptr, long long* outMtime = nullptr, long long* outAtime = nullptr);
 
 signals:
     // 2026-05-27 物理修复：信号参数由 std::wstring 改为 QString

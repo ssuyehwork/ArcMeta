@@ -6,7 +6,39 @@
 #include <memory>
 #include <atomic>
 
+#include <QThread>
+
 namespace ArcMeta {
+
+/**
+ * @brief 独立物理目录迭代与检索引擎职责类
+ */
+class DiskSearchEngine : public QThread {
+    Q_OBJECT
+public:
+    DiskSearchEngine(QObject* parent = nullptr) : QThread(parent), m_searchId(0), m_abort(false) {}
+    void startSearch(const QString& keyword, const QString& parentPath, int searchId) {
+        m_keyword = keyword;
+        m_parentPath = parentPath;
+        m_searchId = searchId;
+        m_abort = false;
+        start();
+    }
+    void abort() {
+        m_abort = true;
+    }
+
+signals:
+    void fileFound(const QStringList& paths);
+    void searchFinished(int scanCount);
+
+private:
+    void run() override;
+    QString m_keyword;
+    QString m_parentPath;
+    int m_searchId;
+    std::atomic<bool> m_abort;
+};
 
 /**
  * @brief 核心中控类
@@ -74,6 +106,8 @@ private:
     std::atomic<bool> m_isSearchAborted{false};
     std::atomic<bool> m_isSearching{false};
     std::atomic<int> m_currentSearchId{0}; // 物理搜索 ID：用于识别并中止过期的异步扫描任务
+
+    DiskSearchEngine* m_diskSearchEngine = nullptr;
 };
 
 } // namespace ArcMeta

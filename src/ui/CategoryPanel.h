@@ -10,6 +10,14 @@
 
 namespace ArcMeta {
 
+/**
+ * @brief 物理拖拽迁移、覆盖策略与动作物理迁移中枢职责类
+ */
+class FileMigrationHandler {
+public:
+    static bool handleDroppedPaths(const QStringList& paths, int targetCatId, QWidget* parent);
+};
+
 class CategoryModel;
 class CategoryFilterProxyModel;
 class DropTreeView;

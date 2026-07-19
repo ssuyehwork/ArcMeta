@@ -91,10 +91,17 @@ void AutoImportManager::onEntryRemoved(uint64_t key) {
     Q_UNUSED(key);
 }
 
-void AutoImportManager::recordRecentVisitedFolder(const std::wstring& path) {
+void HistoryPathManager::recordRecentVisitedFolder(const std::wstring& path) {
     if (path.empty()) return;
     std::wstring managedFolder;
-    if (instance().checkAndGetManagedPath(path, managedFolder)) return;
+    if (AutoImportManager::instance().getManagedLibraryPath(path) != L"") {
+        std::wstring managedAbs = AutoImportManager::getManagedLibraryPath(path);
+        if (!managedAbs.empty()) {
+            if (path.size() >= managedAbs.size() && _wcsnicmp(path.c_str(), managedAbs.c_str(), managedAbs.size()) == 0) {
+                return;
+            }
+        }
+    }
 
     std::wstring volSerial = MetadataManager::getVolumeSerialNumber(path);
     if (volSerial.empty()) return;
@@ -110,7 +117,7 @@ void AutoImportManager::recordRecentVisitedFolder(const std::wstring& path) {
     AppConfig::instance().setValue(key, list);
 }
 
-QStringList AutoImportManager::getRecentVisitedFolders(const std::wstring& volSerial) {
+QStringList HistoryPathManager::getRecentVisitedFolders(const std::wstring& volSerial) {
     if (volSerial.empty()) return QStringList();
     QString key = QString("RecentVisited/Volume_%1").arg(QString::fromStdWString(volSerial));
     return AppConfig::instance().getValue(key, QStringList()).toStringList();
@@ -209,6 +216,44 @@ bool AutoImportManager::isUnderManagedLibrary(uint64_t key) {
     return false;
 }
 
+int CategoryStructureMapper::ensureCategoryStructureForPath(const std::wstring& physicalPath) {
+    std::string fid;
+    std::wstring frnStr;
+    if (FileMetadataExtractor::fetchWinApiMetadataDirect(physicalPath, fid, &frnStr)) {
+        try {
+            uint64_t frn = std::stoull(frnStr, nullptr, 16);
+            int catId = CategoryRepo::findByFrn(frn);
+            if (catId == 0) {
+                QFileInfo info(QString::fromStdWString(physicalPath));
+                std::wstring parentPath = info.absolutePath().toStdWString();
+                std::string parentFid;
+                std::wstring parentFrnStr;
+                int parentCatId = 0;
+                if (FileMetadataExtractor::fetchWinApiMetadataDirect(parentPath, parentFid, &parentFrnStr)) {
+                    uint64_t pFrn = std::stoull(parentFrnStr, nullptr, 16);
+                    parentCatId = CategoryRepo::findByFrn(pFrn);
+                }
+
+                Category cat;
+                if (info.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                    cat.parentId = 0;
+                } else {
+                    cat.parentId = parentCatId;
+                }
+                cat.name = info.fileName().toStdWString();
+                cat.physicalFrn = frn;
+                cat.physicalPath = physicalPath;
+                cat.color = CategoryRepo::getDefaultColor();
+                if (CategoryRepo::add(cat)) {
+                    catId = cat.id;
+                }
+            }
+            return catId;
+        } catch (...) {}
+    }
+    return 0;
+}
+
 void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
     QDir dir(QString::fromStdWString(rootPath));
     if (!dir.exists()) return;
@@ -226,40 +271,7 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
     {
         SqlTransaction trans(db);
 
-        int rootCatId = 0;
-        std::string rootFid;
-        std::wstring rootFrnStr;
-        if (MetadataManager::fetchWinApiMetadataDirect(rootPath, rootFid, &rootFrnStr)) {
-            try {
-                uint64_t frn = std::stoull(rootFrnStr, nullptr, 16);
-                rootCatId = CategoryRepo::findByFrn(frn);
-                if (rootCatId == 0) {
-                    QFileInfo info(QString::fromStdWString(rootPath));
-                    std::wstring parentPath = info.absolutePath().toStdWString();
-                    std::string parentFid;
-                    std::wstring parentFrnStr;
-                    int parentCatId = 0;
-                    if (MetadataManager::fetchWinApiMetadataDirect(parentPath, parentFid, &parentFrnStr)) {
-                        uint64_t pFrn = std::stoull(parentFrnStr, nullptr, 16);
-                        parentCatId = CategoryRepo::findByFrn(pFrn);
-                    }
-
-                    Category cat;
-                    if (info.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
-                        cat.parentId = 0;
-                    } else {
-                        cat.parentId = parentCatId;
-                    }
-                    cat.name = info.fileName().toStdWString();
-                    cat.physicalFrn = frn;
-                    cat.physicalPath = rootPath;
-                    cat.color = CategoryRepo::getDefaultColor();
-                    if (CategoryRepo::add(cat)) {
-                        rootCatId = cat.id;
-                    }
-                }
-            } catch (...) {}
-        }
+        int rootCatId = CategoryStructureMapper::ensureCategoryStructureForPath(rootPath);
 
         if (rootCatId > 0) {
             std::function<void(const QString&, int)> syncDir;
@@ -270,24 +282,7 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
                 for (const QFileInfo& fi : list) {
                     std::wstring wPath = QDir::toNativeSeparators(fi.absoluteFilePath()).toStdWString();
                     if (fi.isDir()) {
-                        int existingId = CategoryRepo::findCategoryId(parentCatId, fi.fileName().toStdWString());
-                        if (existingId == 0) {
-                            std::string fid;
-                            std::wstring frnStr;
-                            if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid, &frnStr)) {
-                                try {
-                                    Category cat;
-                                    cat.parentId = parentCatId;
-                                    cat.name = fi.fileName().toStdWString();
-                                    cat.physicalFrn = std::stoull(frnStr, nullptr, 16);
-                                    cat.physicalPath = wPath;
-                                    cat.color = CategoryRepo::getDefaultColor();
-                                    if (CategoryRepo::add(cat)) {
-                                        existingId = cat.id;
-                                    }
-                                } catch (...) {}
-                            }
-                        }
+                        int existingId = CategoryStructureMapper::ensureCategoryStructureForPath(wPath);
                         if (existingId > 0) {
                             syncDir(fi.absoluteFilePath(), existingId);
                         }
@@ -295,7 +290,7 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
                         MetadataManager::instance().registerItem(wPath, true);
                         if (parentCatId > 0) {
                             std::string fid;
-                            if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid)) {
+                            if (FileMetadataExtractor::fetchWinApiMetadataDirect(wPath, fid)) {
                                 CategoryRepo::addItemToCategory(parentCatId, fid, wPath);
                             }
                         }
