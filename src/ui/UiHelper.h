@@ -3,36 +3,16 @@
 #endif
 #pragma once
 
-// Keep common transitively included headers to avoid breaking downstream compilation
 #include <QIcon>
 #include <QString>
 #include <QColor>
-#include <QSvgRenderer>
-#include <QPainter>
 #include <QPixmap>
-#include <QMap>
-#include <QCache>
-#include "../core/AppConfig.h"
-#include <QFileInfo>
-#include <QImage>
-#include <QStringList>
-#include <QStandardPaths>
-#include <QtConcurrent/QtConcurrent>
-#include <QDebug>
-#include <QSet>
-#include <QCoreApplication>
+#include <QSize>
 #include <QWidget>
-#include <QBuffer>
-#include <QProcess>
-#include <QUuid>
-#include <QDir>
-#include <QFile>
-#include <QFileIconProvider>
-#include <QMutex>
-#include <QMutexLocker>
-#include <QTimer>
-#include <algorithm>
-#include <cmath>
+#include <QImage>
+#include <QVector>
+#include <QPair>
+#include <QDebug>
 
 #include "SvgIconRenderer.h"
 #include "WindowsShellThumbnailProvider.h"
