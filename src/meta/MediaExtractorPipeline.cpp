@@ -1,3 +1,7 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "MediaExtractorPipeline.h"
 #include "MetadataManager.h"
 #include "../ui/MediaColorExtractor.h"
