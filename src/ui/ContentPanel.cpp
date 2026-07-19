@@ -1320,6 +1320,164 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         ToolTipOverlay::hideTip(); 
     } 
  
+    if (event->type() == QEvent::MouseButtonPress) {
+        QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event);
+        if (mEvent->button() == Qt::LeftButton) {
+            if (obj == m_gridView || obj == m_gridView->viewport() || obj == m_treeView || obj == m_treeView->viewport()) {
+                QAbstractItemView* view = qobject_cast<QAbstractItemView*>(obj);
+                if (!view) view = qobject_cast<QAbstractItemView*>(obj->parent());
+                if (view) {
+                    QPoint pos = mEvent->pos();
+                    if (obj == view && view->viewport()) {
+                        pos = view->viewport()->mapFrom(view, pos);
+                    }
+                    QModelIndex index = view->indexAt(pos);
+                    if (index.isValid()) {
+                        // 针对 Grid 模式 / Justified 模式的 Hitbox
+                        ThumbnailDelegate* thumbDel = qobject_cast<ThumbnailDelegate*>(view->itemDelegate(index));
+                        if (thumbDel) {
+                            QStyleOptionViewItem opt = view->viewOptions();
+                            opt.rect = view->visualRect(index);
+                            if (opt.decorationSize.width() <= 0) opt.decorationSize = view->iconSize();
+                            ThumbnailDelegate::Metrics m = thumbDel->calculateMetrics(opt);
+
+                            bool isBanHit = m.banRect.contains(pos);
+                            int hitStar = -1;
+                            for (int i = 0; i < 5; ++i) {
+                                if (m.starRect(i).contains(pos)) {
+                                    hitStar = i + 1;
+                                    break;
+                                }
+                            }
+
+                            if (isBanHit || hitStar != -1) {
+                                bool isSelected = false;
+                                if (view->selectionModel()) {
+                                    isSelected = view->selectionModel()->isSelected(index);
+                                }
+                                if (!isSelected) return false;
+
+                                int newValue = isBanHit ? 0 : hitStar;
+                                if (view->selectionModel() && view->selectionModel()->isSelected(index)) {
+                                    auto selectedIndexes = view->selectionModel()->selectedIndexes();
+                                    for (const auto& selIdx : selectedIndexes) {
+                                        if (selIdx.column() == 0) {
+                                            m_proxyModel->setData(selIdx, newValue, RatingRole);
+                                        }
+                                    }
+                                } else {
+                                    m_proxyModel->setData(index, newValue, RatingRole);
+                                }
+
+                                QAbstractItemView::EditTriggers currentTriggers = view->editTriggers();
+                                view->setEditTriggers(QAbstractItemView::NoEditTriggers);
+                                QTimer::singleShot(0, view, [view, currentTriggers]() {
+                                    view->setEditTriggers(currentTriggers);
+                                });
+                                event->accept();
+                                return true;
+                            }
+                        }
+
+                        GridItemDelegate* gridDel = qobject_cast<GridItemDelegate*>(view->itemDelegate(index));
+                        if (gridDel) {
+                            QStyleOptionViewItem opt = view->viewOptions();
+                            opt.rect = view->visualRect(index);
+                            if (opt.decorationSize.width() <= 0) opt.decorationSize = view->iconSize();
+                            GridItemDelegate::GridMetrics m = gridDel->calculateMetrics(opt);
+
+                            bool isBanHit = m.banRect.contains(pos);
+                            int hitStar = -1;
+                            for (int i = 0; i < 5; ++i) {
+                                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
+                                if (starRect.contains(pos)) {
+                                    hitStar = i + 1;
+                                    break;
+                                }
+                            }
+
+                            if (isBanHit || hitStar != -1) {
+                                bool isSelected = false;
+                                if (view->selectionModel()) {
+                                    isSelected = view->selectionModel()->isSelected(index);
+                                }
+                                if (!isSelected) return false;
+
+                                int newValue = isBanHit ? 0 : hitStar;
+                                if (view->selectionModel() && view->selectionModel()->isSelected(index)) {
+                                    auto selectedIndexes = view->selectionModel()->selectedIndexes();
+                                    for (const auto& selIdx : selectedIndexes) {
+                                        if (selIdx.column() == 0) {
+                                            m_proxyModel->setData(selIdx, newValue, RatingRole);
+                                        }
+                                    }
+                                } else {
+                                    m_proxyModel->setData(index, newValue, RatingRole);
+                                }
+
+                                QAbstractItemView::EditTriggers currentTriggers = view->editTriggers();
+                                view->setEditTriggers(QAbstractItemView::NoEditTriggers);
+                                QTimer::singleShot(0, view, [view, currentTriggers]() {
+                                    view->setEditTriggers(currentTriggers);
+                                });
+                                event->accept();
+                                return true;
+                            }
+                        }
+
+                        // 针对 TreeView 列 2 (星级列) 的 Hitbox
+                        if (view == m_treeView) {
+                            QModelIndex indexCol2 = index.model()->index(index.row(), 2, index.parent());
+                            QRect col2Rect = m_treeView->visualRect(indexCol2);
+
+                            QRect banHitbox(col2Rect.left() + 5, col2Rect.top() + (col2Rect.height() - 16)/2, 16, 16);
+                            bool isBanHit = banHitbox.contains(pos);
+                            int hitStar = -1;
+
+                            int starSize = 14;
+                            int spacing = 1;
+                            int startX = col2Rect.left() + 5 + 16 + 5;
+                            for (int i = 0; i < 5; ++i) {
+                                QRect starRect(startX + i * (starSize + spacing), col2Rect.top() + (col2Rect.height() - starSize) / 2, starSize, starSize);
+                                if (starRect.contains(pos)) {
+                                    hitStar = i + 1;
+                                    break;
+                                }
+                            }
+
+                            if (isBanHit || hitStar != -1) {
+                                bool isRowSelected = false;
+                                if (m_treeView->selectionModel()) {
+                                    isRowSelected = m_treeView->selectionModel()->isRowSelected(index.row(), index.parent());
+                                }
+                                if (!isRowSelected) return false;
+
+                                int newValue = isBanHit ? 0 : hitStar;
+                                if (m_treeView->selectionModel()) {
+                                    auto selectedRows = m_treeView->selectionModel()->selectedRows();
+                                    for (const auto& selRow : selectedRows) {
+                                        QModelIndex targetIdx = m_treeView->model()->index(selRow.row(), 0, selRow.parent());
+                                        m_proxyModel->setData(targetIdx, newValue, RatingRole);
+                                    }
+                                } else {
+                                    m_proxyModel->setData(index.model()->index(index.row(), 0, index.parent()), newValue, RatingRole);
+                                }
+
+                                QAbstractItemView::EditTriggers currentTriggers = m_treeView->editTriggers();
+                                m_treeView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+                                QTimer::singleShot(0, m_treeView, [this, currentTriggers]() {
+                                    m_treeView->setEditTriggers(currentTriggers);
+                                });
+                                event->accept();
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if ((obj == m_gridView || obj == m_gridView->viewport() || obj == m_treeView || obj == m_treeView->viewport()) && event->type() == QEvent::Wheel) { 
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 static_cast 的类型推导逻辑错误 
         QWheelEvent* wEvent = reinterpret_cast<QWheelEvent*>(event); 
@@ -3485,69 +3643,6 @@ bool GridItemDelegate::helpEvent(QHelpEvent* event, QAbstractItemView* view,
     return QStyledItemDelegate::helpEvent(event, view, option, index);
 }
 
-bool GridItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) { 
-    if (event->type() == QEvent::MouseButtonPress) { 
-        // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 子类转型歧义 
-        QMouseEvent* mEvent = reinterpret_cast<QMouseEvent*>(event); 
-        if (mEvent->button() == Qt::LeftButton) { 
-            QAbstractItemView* view = qobject_cast<QAbstractItemView*>(const_cast<QWidget*>(option.widget));
-            
-            // 物理加固：未选中项严禁直接通过 Delegate 修改元数据
-            // 2026-06-xx 稳健性增强：通过 View 获取实时的选中状态，防止 option.state 延迟或缺失
-            bool isSelected = (option.state & QStyle::State_Selected);
-            if (view && view->selectionModel()) {
-                isSelected = view->selectionModel()->isSelected(index);
-            }
-            if (!isSelected) return false;
-
-            // 2026-05-28 按照用户授权：废除本地硬编码判定，统一使用 calculateMetrics 保证 Hitbox 零偏差 
-            // 2026-06-xx 物理对齐：补全 decorationSize，防止因 option 属性缺失导致 Hitbox 偏移
-            QStyleOptionViewItem opt = option;
-            if (opt.decorationSize.width() <= 0 && view) opt.decorationSize = view->iconSize();
-            GridMetrics m = calculateMetrics(opt); 
- 
-            // 1. 区域判定
-            bool isBanHit = m.banRect.contains(mEvent->pos());
-            int hitStar = -1;
-            for (int i = 0; i < 5; ++i) { 
-                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
-                if (starRect.contains(mEvent->pos())) { 
-                    hitStar = i + 1;
-                    break; 
-                } 
-            }
-
-            if (isBanHit || hitStar != -1) { 
-                // 2. 执行数据更新 (支持选区感知批量操作)
-                int newValue = isBanHit ? 0 : hitStar;
-                if (view && view->selectionModel() && view->selectionModel()->isSelected(index)) {
-                    auto selectedIndexes = view->selectionModel()->selectedIndexes();
-                    // 2026-07-xx 按照 Plan-86：遍历选区实现批量评分
-                    for (const auto& selIdx : selectedIndexes) {
-                        if (selIdx.column() == 0) {
-                            model->setData(selIdx, newValue, RatingRole);
-                        }
-                    }
-                } else {
-                    model->setData(index, newValue, RatingRole); 
-                }
-
-                // 3. 物理修复：直接执行禁用逻辑，杜绝 Lambda 嵌套导致的编译错误
-                if (view) {
-                    QAbstractItemView::EditTriggers currentTriggers = view->editTriggers();
-                    view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-                    // 延迟恢复触发器
-                    QTimer::singleShot(0, view, [view, currentTriggers]() {
-                        view->setEditTriggers(currentTriggers);
-                    });
-                }
-                event->accept(); 
-                return true; 
-            } 
-        } 
-    } 
-    return QStyledItemDelegate::editorEvent(event, model, option, index); 
-} 
  
 QWidget* GridItemDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const { 
     Q_UNUSED(option); 

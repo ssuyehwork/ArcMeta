@@ -26,19 +26,7 @@ public:
     void setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const override;
     void updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
     bool eventFilter(QObject* obj, QEvent* event) override;
-    bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) override;
     bool helpEvent(QHelpEvent* event, QAbstractItemView* view, const QStyleOptionViewItem& option, const QModelIndex& index) override;
-
-private:
-    int m_hasThumbnailRole = Qt::UserRole + 1;
-    int m_ratingRole = -1;
-    int m_pathRole = -1;
-    int m_pinnedRole = -1;
-    int m_managedRole = -1;
-    int m_typeRole = -1;
-    int m_isEmptyRole = -1;
-    int m_colorRole = -1;
-    int m_registrationProgressRole = -1;
 
     struct Metrics {
         QRect cardRect;
@@ -57,6 +45,17 @@ private:
         }
     };
     Metrics calculateMetrics(const QStyleOptionViewItem& option) const;
+
+private:
+    int m_hasThumbnailRole = Qt::UserRole + 1;
+    int m_ratingRole = -1;
+    int m_pathRole = -1;
+    int m_pinnedRole = -1;
+    int m_managedRole = -1;
+    int m_typeRole = -1;
+    int m_isEmptyRole = -1;
+    int m_colorRole = -1;
+    int m_registrationProgressRole = -1;
 };
 
 } // namespace ArcMeta
