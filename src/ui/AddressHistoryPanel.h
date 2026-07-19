@@ -23,8 +23,9 @@ public:
 
 signals:
     void historyItemClicked(const QString& path);
-    void historyItemRemoved(const QString& path);
-    void clearAllRequested();
+
+private slots:
+    void onHistoryChanged(const QStringList& newHistory);
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;

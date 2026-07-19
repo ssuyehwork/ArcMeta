@@ -56,6 +56,8 @@ set(SOURCES
     src/core/AutoImportManager.cpp
     src/core/AutoImportManager.h
     src/core/AppConfig.h
+    src/core/NavigationHistoryService.cpp
+    src/core/NavigationHistoryService.h
     src/mft/UsnWatcher.cpp
     src/mft/UsnWatcher.h
     src/crypto/EncryptionManager.cpp

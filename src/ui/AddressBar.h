@@ -23,11 +23,6 @@ public:
     void setPath(const QString& path);
     QString currentPath() const { return m_currentPath; }
 
-    /**
-     * @brief 2026-06-xx 按照用户要求：持久化路径历史
-     */
-    void saveToHistory(const QString& path);
-
 signals:
     void pathChanged(const QString& path);
     void refreshRequested();

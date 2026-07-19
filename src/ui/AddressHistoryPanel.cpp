@@ -1,5 +1,6 @@
 #include "AddressHistoryPanel.h"
 #include "UiHelper.h"
+#include "../core/NavigationHistoryService.h"
 #include <QCursor>
 #include <QApplication>
 #include <QMouseEvent>
@@ -15,13 +16,17 @@ AddressHistoryPanel::AddressHistoryPanel(QWidget* parent)
         "#AddressHistoryPanel {"
         "  background-color: #252526;"
         "  border: 1px solid #444444;"
-        "  border-radius: 6px;"
+        "  border-radius: 8px;"
         "}"
     );
 
     m_layout = new QVBoxLayout(this);
     m_layout->setContentsMargins(6, 6, 6, 6);
     m_layout->setSpacing(2);
+
+    // 绑定服务信号，实现去耦自我同步
+    connect(&NavigationHistoryService::instance(), &NavigationHistoryService::historyChanged,
+            this, &AddressHistoryPanel::onHistoryChanged);
 
     hide();
 }
@@ -31,10 +36,17 @@ void AddressHistoryPanel::setHistory(const QStringList& history) {
     rebuild();
 }
 
+void AddressHistoryPanel::onHistoryChanged(const QStringList& newHistory) {
+    m_history = newHistory;
+    rebuild();
+}
+
 void AddressHistoryPanel::rebuild() {
     QLayoutItem* child;
     while ((child = m_layout->takeAt(0)) != nullptr) {
-        if (child->widget()) child->widget()->deleteLater();
+        if (child->widget()) {
+            child->widget()->deleteLater();
+        }
         delete child;
     }
 
@@ -59,7 +71,9 @@ void AddressHistoryPanel::rebuild() {
             "QPushButton { color: #666666; font-size: 11px; border: none; background: transparent; }"
             "QPushButton:hover { color: #378ADD; }"
         );
-        connect(btnClearAll, &QPushButton::clicked, this, &AddressHistoryPanel::clearAllRequested);
+        connect(btnClearAll, &QPushButton::clicked, this, []() {
+            NavigationHistoryService::instance().clearAll();
+        });
 
         titleLayout->addWidget(titleLabel);
         titleLayout->addStretch();
@@ -101,8 +115,8 @@ void AddressHistoryPanel::rebuild() {
                 "QPushButton { background: transparent; border: none; border-radius: 3px; }"
                 "QPushButton:hover { background: #3E3E42; }"
             );
-            connect(btnRemove, &QPushButton::clicked, this, [this, path]() {
-                emit historyItemRemoved(path);
+            connect(btnRemove, &QPushButton::clicked, this, [path]() {
+                NavigationHistoryService::instance().removePath(path);
             });
 
             rowLayout->addWidget(icon);

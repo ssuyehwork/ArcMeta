@@ -1,6 +1,7 @@
 #include "AddressBar.h"
 #include "UiHelper.h"
 #include "ToolTipOverlay.h"
+#include "../core/NavigationHistoryService.h"
 #include <QHBoxLayout>
 #include <QDir>
 #include <QPushButton>
@@ -85,16 +86,6 @@ AddressBar::AddressBar(QWidget* parent) : QWidget(parent) {
         emit pathChanged(path);
         m_historyPanel->hide();
     });
-    connect(m_historyPanel, &AddressHistoryPanel::historyItemRemoved, this, [this](const QString& path) {
-        QStringList history = AppConfig::instance().getValue("AddressBar/History").toStringList();
-        history.removeAll(path);
-        AppConfig::instance().setValue("AddressBar/History", history);
-        m_historyPanel->setHistory(history);
-    });
-    connect(m_historyPanel, &AddressHistoryPanel::clearAllRequested, this, [this]() {
-        AppConfig::instance().setValue("AddressBar/History", QStringList());
-        m_historyPanel->setHistory(QStringList());
-    });
 }
 
 void AddressBar::setPath(const QString& path) {
@@ -103,16 +94,7 @@ void AddressBar::setPath(const QString& path) {
     m_pathEdit->setText(displayPath);
     m_breadcrumbBar->setPath(path);
     m_pathStack->setCurrentWidget(m_breadcrumbBar);
-    saveToHistory(path);
-}
-
-void AddressBar::saveToHistory(const QString& path) {
-    if (path.isEmpty() || path == "computer://" || path.startsWith("分类: ")) return;
-    QStringList history = AppConfig::instance().getValue("AddressBar/History").toStringList();
-    history.removeAll(path);
-    history.prepend(path);
-    while (history.size() > 10) history.removeLast();
-    AppConfig::instance().setValue("AddressBar/History", history);
+    NavigationHistoryService::instance().appendPath(path);
 }
 
 void AddressBar::onBreadcrumbBlankClicked() {
@@ -168,7 +150,7 @@ bool AddressBar::eventFilter(QObject* obj, QEvent* event) {
         event->type() == QEvent::MouseButtonDblClick) {
         
         // 2026-06-xx 物理拦截：双击时立即弹出历史面板，并防止文本编辑器吞掉事件
-        QStringList history = AppConfig::instance().getValue("AddressBar/History").toStringList();
+        QStringList history = NavigationHistoryService::instance().getHistory();
         if (!history.isEmpty()) {
             m_historyPanel->setHistory(history);
             // 锚定到整个 Stack 以获得正确的对齐
