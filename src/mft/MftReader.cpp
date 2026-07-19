@@ -19,6 +19,7 @@
 #include <QtConcurrent>
 #include <QFuture>
 #include <QFileIconProvider>
+#include <QAbstractFileIconProvider>
 #include <QFileInfo>
 #include <queue>
 
@@ -1552,11 +1553,11 @@ QIcon MftReader::getCachedIcon(const QString& ext, bool isDir) {
     QFileIconProvider provider;
     QIcon icon;
     if (isDir) {
-        icon = provider.icon(QFileIconProvider::Folder);
+        icon = provider.icon(QAbstractFileIconProvider::Folder);
     } else {
         if (key.length() > 12) key = "unknown";
         icon = provider.icon(QFileInfo("dummy." + key));
-        if (icon.isNull()) icon = provider.icon(QFileIconProvider::File);
+        if (icon.isNull()) icon = provider.icon(QAbstractFileIconProvider::File);
     }
 
     {

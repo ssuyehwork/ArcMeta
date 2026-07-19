@@ -1,6 +1,7 @@
 #include "ShellIconManager.h"
 #include <QFileInfo>
 #include <QFileIconProvider>
+#include <QAbstractFileIconProvider>
 #include <QtConcurrent/QtConcurrent>
 #include <windows.h>
 #include <objbase.h>
@@ -35,8 +36,8 @@ QIcon ShellIconManager::getFileIcon(const QString& filePath, int size) {
     static QIcon s_defaultFolderIcon;
     if (s_defaultFileIcon.isNull() || s_defaultFolderIcon.isNull()) {
         QFileIconProvider provider;
-        s_defaultFolderIcon = provider.icon(QFileIconProvider::Folder);
-        s_defaultFileIcon = provider.icon(QFileIconProvider::File);
+        s_defaultFolderIcon = provider.icon(QAbstractFileIconProvider::Folder);
+        s_defaultFileIcon = provider.icon(QAbstractFileIconProvider::File);
     }
     QIcon placeholderIcon = info.isDir() ? s_defaultFolderIcon : s_defaultFileIcon;
 
@@ -58,12 +59,12 @@ QIcon ShellIconManager::getFileIcon(const QString& filePath, int size) {
             if (info.isRoot()) {
                 icon = provider.icon(info);
             } else {
-                icon = provider.icon(QFileIconProvider::Folder);
+                icon = provider.icon(QAbstractFileIconProvider::Folder);
             }
         } else {
             icon = provider.icon(QFileInfo("dummy." + key));
             if (icon.isNull()) {
-                icon = provider.icon(QFileIconProvider::File);
+                icon = provider.icon(QAbstractFileIconProvider::File);
             }
         }
 

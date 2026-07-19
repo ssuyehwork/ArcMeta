@@ -16,6 +16,7 @@
 #include "../core/AutoImportManager.h"
 #include "ToolTipOverlay.h" 
 #include "MainWindow.h"
+#include <QFileIconProvider>
  
 #include <QVBoxLayout> 
 #include <QHBoxLayout> 
@@ -143,7 +144,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         } else if (role == IsLockedRole || role == PinnedRole) {
             return record.pinned;
         } else if (role == Qt::DecorationRole && index.column() == 0) {
-            static QIcon catIcon = QFileIconProvider().icon(QFileIconProvider::Folder);
+            static QIcon catIcon = QFileIconProvider().icon(QAbstractFileIconProvider::Folder);
             return catIcon;
         }
         return QVariant();
