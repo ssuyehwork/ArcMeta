@@ -25,7 +25,7 @@
 #include "../core/AppConfig.h"
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
-#include "../ui/UiHelper.h"
+#include "../ui/MediaColorExtractor.h"
 #include "sqlite3.h"
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -1786,9 +1786,9 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
     bool success = false;
     
     if (info.isFile()) {
-        if (ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower())) {
+        if (ArcMeta::MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
             // 2026-07-xx 按照建议：统一使用 getImageForAnalysis 以确保 SVG 正确栅格化
-            QImage img = ArcMeta::UiHelper::getImageForAnalysis(qPath, 256);
+            QImage img = ArcMeta::MediaColorExtractor::getImageForAnalysis(qPath, 256);
             
             if (!img.isNull()) {
                 // 如果之前没拿到尺寸，这里补救
@@ -1798,9 +1798,9 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
                     instance().m_cache[nPath].height = img.height();
                 }
 
-                auto palette = ArcMeta::UiHelper::extractPalette(qPath);
+                auto palette = ArcMeta::MediaColorExtractor::extractPalette(qPath);
                 if (!palette.isEmpty()) {
-                    QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
+                    QColor dominant = ArcMeta::MediaColorExtractor::quantizeColor(palette.first().first);
                     instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
                     success = true;
                     qDebug() << "[Metadata] 颜色分析成功:" << dominant.name() << QString::fromStdWString(nPath);
@@ -1816,8 +1816,8 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
         QVector<Sample> samples;
 
         for (const auto& sf : subFiles) {
-            if (ArcMeta::UiHelper::isGraphicsFile(sf.suffix().toLower())) {
-                auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath());
+            if (ArcMeta::MediaColorExtractor::isGraphicsFile(sf.suffix().toLower())) {
+                auto palette = ArcMeta::MediaColorExtractor::extractPalette(sf.absoluteFilePath());
                 if (!palette.isEmpty()) {
                     samples.append({palette.first().first, palette});
                 }
@@ -1831,7 +1831,7 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
             for (int i = 0; i < samples.size(); ++i) {
                 int votes = 0;
                 for (int j = 0; j < samples.size(); ++j) {
-                    if (ArcMeta::UiHelper::calculateDeltaE(samples[i].dominant, samples[j].dominant) < 20.0) {
+                    if (ArcMeta::MediaColorExtractor::calculateDeltaE(samples[i].dominant, samples[j].dominant) < 20.0) {
                         votes++;
                     }
                 }
@@ -1843,7 +1843,7 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
 
             // 聚合决策：若只有一个样本直接采纳；若多个样本，最强簇必须占据 30% 以上权重且至少有 2 个成员
             if (samples.size() == 1 || (maxVotes >= 2 && maxVotes >= samples.size() * 0.3)) {
-                QColor dominant = ArcMeta::UiHelper::quantizeColor(samples[bestIdx].dominant);
+                QColor dominant = ArcMeta::MediaColorExtractor::quantizeColor(samples[bestIdx].dominant);
                 instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), samples[bestIdx].palette, false);
                 success = true;
             }
@@ -1851,7 +1851,7 @@ void MetadataManager::tryExtractColor(const std::wstring& path) {
     }
 
     // 2026-07-xx 按照建议：解析失败（且属于图像类型）时加入重试队列
-    if (!success && (info.isDir() || ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower()))) {
+    if (!success && (info.isDir() || ArcMeta::MediaColorExtractor::isGraphicsFile(info.suffix().toLower()))) {
         {
             std::unique_lock<std::shared_mutex> lock(instance().m_mutex);
             // 查重：避免队列膨胀
@@ -1893,9 +1893,9 @@ void MetadataManager::processVisualRetryQueue() {
 
             if (info.isFile()) {
                 // 2026-07-xx 按照建议：extractPalette 内部已通过 getImageForAnalysis 解决了 SVG 渲染问题
-                auto palette = ArcMeta::UiHelper::extractPalette(qPath);
+                auto palette = ArcMeta::MediaColorExtractor::extractPalette(qPath);
                 if (!palette.isEmpty()) {
-                    QColor dominant = ArcMeta::UiHelper::quantizeColor(palette.first().first);
+                    QColor dominant = ArcMeta::MediaColorExtractor::quantizeColor(palette.first().first);
                     setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), palette, true);
                     ok = true;
                 }
@@ -1907,8 +1907,8 @@ void MetadataManager::processVisualRetryQueue() {
                 QVector<Sample> samples;
 
                 for (const auto& sf : subFiles) {
-                    if (ArcMeta::UiHelper::isGraphicsFile(sf.suffix().toLower())) {
-                        auto palette = ArcMeta::UiHelper::extractPalette(sf.absoluteFilePath());
+                    if (ArcMeta::MediaColorExtractor::isGraphicsFile(sf.suffix().toLower())) {
+                        auto palette = ArcMeta::MediaColorExtractor::extractPalette(sf.absoluteFilePath());
                         if (!palette.isEmpty()) {
                             samples.append({palette.first().first, palette});
                         }
@@ -1922,7 +1922,7 @@ void MetadataManager::processVisualRetryQueue() {
                     for (int i = 0; i < samples.size(); ++i) {
                         int votes = 0;
                         for (int j = 0; j < samples.size(); ++j) {
-                            if (ArcMeta::UiHelper::calculateDeltaE(samples[i].dominant, samples[j].dominant) < 20.0) {
+                            if (ArcMeta::MediaColorExtractor::calculateDeltaE(samples[i].dominant, samples[j].dominant) < 20.0) {
                                 votes++;
                             }
                         }
@@ -1933,7 +1933,7 @@ void MetadataManager::processVisualRetryQueue() {
                     }
 
                     if (samples.size() == 1 || (maxVotes >= 2 && maxVotes >= samples.size() * 0.3)) {
-                        QColor dominant = ArcMeta::UiHelper::quantizeColor(samples[bestIdx].dominant);
+                        QColor dominant = ArcMeta::MediaColorExtractor::quantizeColor(samples[bestIdx].dominant);
                         setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), samples[bestIdx].palette, true);
                         ok = true;
                     }
@@ -1942,7 +1942,7 @@ void MetadataManager::processVisualRetryQueue() {
             
             // 2026-07-xx 按照 Plan-28：重构移除策略
             // 只有成功，或者确定不是图像文件（无法提取）时，才从队列移除
-            bool isGraphics = ArcMeta::UiHelper::isGraphicsFile(info.suffix().toLower());
+            bool isGraphics = ArcMeta::MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
             if (ok || (!isGraphics && !info.isDir())) {
                 finished.push_back(path);
             }

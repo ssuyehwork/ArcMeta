@@ -155,6 +155,12 @@ set(SOURCES
     src/ui/ToolTipOverlay.h
     src/ui/TreeItemDelegate.h
     src/ui/UiHelper.h
+    src/ui/SvgIconRenderer.h
+    src/ui/SvgIconRenderer.cpp
+    src/ui/WindowsShellThumbnailProvider.h
+    src/ui/WindowsShellThumbnailProvider.cpp
+    src/ui/MediaColorExtractor.h
+    src/ui/MediaColorExtractor.cpp
     src/util/ShellHelper.cpp
     src/util/ShellHelper.h
     src/util/ImportHelper.cpp
