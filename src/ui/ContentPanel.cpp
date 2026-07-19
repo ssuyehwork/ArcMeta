@@ -1336,9 +1336,10 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                         // 针对 Grid 模式 / Justified 模式的 Hitbox
                         ThumbnailDelegate* thumbDel = qobject_cast<ThumbnailDelegate*>(view->itemDelegate(index));
                         if (thumbDel) {
-                            QStyleOptionViewItem opt = view->viewOptions();
+                            QStyleOptionViewItem opt;
                             opt.rect = view->visualRect(index);
-                            if (opt.decorationSize.width() <= 0) opt.decorationSize = view->iconSize();
+                            opt.decorationSize = view->iconSize();
+                            if (opt.decorationSize.width() <= 0) opt.decorationSize = QSize(96, 96);
                             ThumbnailDelegate::Metrics m = thumbDel->calculateMetrics(opt);
 
                             bool isBanHit = m.banRect.contains(pos);
@@ -1381,9 +1382,10 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
 
                         GridItemDelegate* gridDel = qobject_cast<GridItemDelegate*>(view->itemDelegate(index));
                         if (gridDel) {
-                            QStyleOptionViewItem opt = view->viewOptions();
+                            QStyleOptionViewItem opt;
                             opt.rect = view->visualRect(index);
-                            if (opt.decorationSize.width() <= 0) opt.decorationSize = view->iconSize();
+                            opt.decorationSize = view->iconSize();
+                            if (opt.decorationSize.width() <= 0) opt.decorationSize = QSize(96, 96);
                             GridItemDelegate::GridMetrics m = gridDel->calculateMetrics(opt);
 
                             bool isBanHit = m.banRect.contains(pos);
