@@ -1334,7 +1334,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                     QModelIndex index = view->indexAt(pos);
                     if (index.isValid()) {
                         // 针对 Grid 模式 / Justified 模式的 Hitbox
-                        ThumbnailDelegate* thumbDel = qobject_cast<ThumbnailDelegate*>(view->itemDelegate(index));
+                        ThumbnailDelegate* thumbDel = qobject_cast<ThumbnailDelegate*>(view->itemDelegateForIndex(index));
                         if (thumbDel) {
                             QStyleOptionViewItem opt;
                             opt.rect = view->visualRect(index);
@@ -1380,7 +1380,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                             }
                         }
 
-                        GridItemDelegate* gridDel = qobject_cast<GridItemDelegate*>(view->itemDelegate(index));
+                        GridItemDelegate* gridDel = qobject_cast<GridItemDelegate*>(view->itemDelegateForIndex(index));
                         if (gridDel) {
                             QStyleOptionViewItem opt;
                             opt.rect = view->visualRect(index);
