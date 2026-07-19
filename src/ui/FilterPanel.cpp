@@ -5,6 +5,7 @@
 #include "StyleLibrary.h"
 #include "ColorPicker.h"
 #include "SearchHistoryPanel.h"
+#include "../core/SearchHistoryService.h"
 #include <QPushButton>
 #include <QMouseEvent>
 #include <QCursor>
@@ -447,16 +448,11 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
 
 void FilterPanel::saveFilterHistory(const QString& key, const QString& text) {
     if (text.trimmed().isEmpty()) return;
-    QString fullKey = "FilterHistory/" + key;
-    QStringList history = AppConfig::instance().getValue(fullKey).toStringList();
-    history.removeAll(text);
-    history.append(text);
-    if (history.size() > 10) history.removeFirst();
-    AppConfig::instance().setValue(fullKey, history);
+    SearchHistoryService::instance().appendSearch(key, text);
 }
 
 QStringList FilterPanel::getFilterHistory(const QString& key) const {
-    return AppConfig::instance().getValue("FilterHistory/" + key).toStringList();
+    return SearchHistoryService::instance().getHistory(key);
 }
 
 // 2026-03-xx 按照用户要求：物理拦截事件以实现自定义 ToolTipOverlay 的显隐控制
@@ -472,6 +468,7 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
             else if (edit == m_editModifyDate) key = "ModifyDate";
 
             if (!key.isEmpty()) {
+                m_historyPanel->setCategory(key);
                 QStringList history = getFilterHistory(key);
                 m_historyPanel->setHistory(history, "最近搜索");
                 
@@ -488,19 +485,6 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
                     saveFilterHistory(key, text);
                     emit filterChanged(m_filter);
                     m_historyPanel->hide();
-                });
-
-                connect(m_historyPanel, &SearchHistoryPanel::historyItemRemoved, this, [this, key](const QString& text) {
-                    QString fullKey = "FilterHistory/" + key;
-                    QStringList history = AppConfig::instance().getValue(fullKey).toStringList();
-                    history.removeAll(text);
-                    AppConfig::instance().setValue(fullKey, history);
-                    m_historyPanel->setHistory(history, "最近搜索");
-                });
-
-                connect(m_historyPanel, &SearchHistoryPanel::clearAllRequested, this, [this, key]() {
-                    AppConfig::instance().setValue("FilterHistory/" + key, QStringList());
-                    m_historyPanel->setHistory(QStringList(), "最近搜索");
                 });
 
                 m_historyPanel->showBelow(edit);

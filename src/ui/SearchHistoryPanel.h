@@ -10,8 +10,7 @@
 namespace ArcMeta {
 
 /**
- * @brief 2026-04-12 按照用户要求：搜索历史悬浮面板
- * 在搜索框下方弹出，显示最近 10 条搜索关键词，支持点击填入及单条删除。
+ * @brief 搜索历史悬浮面板
  */
 class SearchHistoryPanel : public QFrame {
     Q_OBJECT
@@ -19,25 +18,17 @@ class SearchHistoryPanel : public QFrame {
 public:
     explicit SearchHistoryPanel(QWidget* parent = nullptr);
 
-    /**
-     * @brief 填充/刷新历史列表
-     */
-    void setHistory(const QStringList& history, const QString& title = "最近搜索");
+    void setCategory(const QString& category) { m_category = category; }
+    QString category() const { return m_category; }
 
-    /**
-     * @brief 定位并显示在指定锚点控件正下方
-     */
+    void setHistory(const QStringList& history, const QString& title = "最近搜索");
     void showBelow(QWidget* anchor);
 
 signals:
-    /// 用户点击了某条历史关键词（应填入搜索框并触发搜索）
     void historyItemClicked(const QString& keyword);
 
-    /// 用户点击了某条的 X 删除按钮
-    void historyItemRemoved(const QString& keyword);
-
-    /// 用户点击了"全部清除"
-    void clearAllRequested();
+private slots:
+    void onSearchHistoryChanged(const QString& category, const QStringList& newHistory);
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
@@ -48,6 +39,7 @@ private:
     QVBoxLayout* m_layout   = nullptr;
     QStringList  m_history;
     QString      m_currentTitle = "最近搜索";
+    QString      m_category = "global";
 };
 
 } // namespace ArcMeta

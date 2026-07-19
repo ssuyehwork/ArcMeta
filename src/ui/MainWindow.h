@@ -151,7 +151,6 @@ private:
     // 2026-04-12 按照用户要求：搜索历史悬浮面板及历史记录
     QWidget* m_searchContainer = nullptr; // 搜索框容器
     SearchHistoryPanel* m_searchHistoryPanel = nullptr;
-    QStringList  m_searchHistory;             // 最近 10 条关键词
     
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
     QPushButton* m_btnToggleDriveBar = nullptr;

@@ -48,6 +48,7 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+#include "../core/SearchHistoryService.h"
 #include "../core/SyncStatusService.h"
 #include "DriveButton.h"
 #include "../util/ShellHelper.h"
@@ -554,10 +555,9 @@ void MainWindow::initUi() {
     });
 
     // 7. 搜索框回车触发逻辑 (2026-07-xx 按照 Plan-57 升级为异步流式展示)
-    m_searchHistory = AppConfig::instance().getValue("Search/History").toStringList();
-    
     m_searchHistoryPanel = new SearchHistoryPanel(this);
-    m_searchHistoryPanel->setHistory(m_searchHistory);
+    m_searchHistoryPanel->setCategory("global");
+    m_searchHistoryPanel->setHistory(SearchHistoryService::instance().getHistory("global"));
 
     // 2026-xx-xx 按照 Plan-106：初始化搜索防抖计时器
     m_searchTimer = new QTimer(this);
@@ -578,11 +578,7 @@ void MainWindow::initUi() {
 
         // 维护历史记录
         if (!keyword.isEmpty()) {
-            m_searchHistory.removeAll(keyword);
-            m_searchHistory.prepend(keyword);
-            if (m_searchHistory.size() > 10) m_searchHistory.removeLast();
-            AppConfig::instance().setValue("Search/History", m_searchHistory);
-            m_searchHistoryPanel->setHistory(m_searchHistory);
+            SearchHistoryService::instance().appendSearch("global", keyword);
         }
         m_searchHistoryPanel->hide();
     };
@@ -613,18 +609,6 @@ void MainWindow::initUi() {
     connect(m_searchHistoryPanel, &SearchHistoryPanel::historyItemClicked, this, [this, doSearch](const QString& keyword) {
         m_searchEdit->setText(keyword);
         doSearch(keyword);
-    });
-
-    connect(m_searchHistoryPanel, &SearchHistoryPanel::historyItemRemoved, this, [this](const QString& keyword) {
-        m_searchHistory.removeAll(keyword);
-        AppConfig::instance().setValue("Search/History", m_searchHistory);
-        m_searchHistoryPanel->setHistory(m_searchHistory);
-    });
-
-    connect(m_searchHistoryPanel, &SearchHistoryPanel::clearAllRequested, this, [this]() {
-        m_searchHistory.clear();
-        AppConfig::instance().setValue("Search/History", m_searchHistory);
-        m_searchHistoryPanel->setHistory(m_searchHistory);
     });
 
     // 2026-06-xx 物理清理：移除 prefetchDirectory 调用。中心化缓存已在启动时加载，无需手动预取。
@@ -936,7 +920,9 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     // 2026-06-xx 物理修复：双击搜索框时弹出历史记录
     if (event->type() == QEvent::MouseButtonDblClick && watched == m_searchEdit) {
-        if (!m_searchHistory.isEmpty()) {
+        QStringList history = SearchHistoryService::instance().getHistory("global");
+        if (!history.isEmpty()) {
+            m_searchHistoryPanel->setHistory(history);
             m_searchHistoryPanel->showBelow(m_searchEdit);
         }
     }
