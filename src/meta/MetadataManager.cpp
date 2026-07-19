@@ -2018,6 +2018,7 @@ void MetadataManager::removeFidsFromLog(const QStringList&) {}
 void MetadataManager::addToSyncLog(const std::wstring&) {}
 
 QStringList MetadataManager::searchInCache(const QString& keyword, const QString& scopeSource, int categoryId, const QString& parentPath) {
+    // [Plan-26] 彻底废除 O(N) 全量内存线性遍历，全面拥抱 FTS5 trigram 模糊检索引擎 + 内存 O(1) 快速反查
     QStringList results; if (keyword.isEmpty()) return results;
     
     // 2026-07-xx 按照方案计划：实现范围感知搜索
@@ -2051,7 +2052,7 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
 
     if (keyword.length() >= 3) {
-        // FTS5 trigram 快速 Match 路径
+        // [Plan-26] FTS5 trigram 快速 Match 路径：通过倒排索引实现 O(log N) 模糊检索分流，彻底释解读写锁
         QString cleanKeyword = keyword;
         cleanKeyword.replace("\"", "");
         QString ftsQuery = "\"" + cleanKeyword + "\"";
@@ -2072,21 +2073,21 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
             }
         }
     } else {
-        // 退化路径：LIKE 模糊匹配降级路径
+        // [Plan-26] 退化路径：LIKE 模糊匹配降级路径 (使用高性能 UTF-8 绑定以避免 SQLite 内部编码转换开销)
         QString likeQueryStr = "%" + keyword + "%";
-        std::wstring likeQuery = likeQueryStr.toStdWString();
+        std::string utf8LikeQuery = likeQueryStr.toUtf8().toStdString();
 
         const char* sql = "SELECT path FROM metadata WHERE path LIKE ? OR note LIKE ? OR tags LIKE ?";
         for (sqlite3* db : dbs) {
             sqlite3_stmt* stmt = nullptr;
             if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                sqlite3_bind_text16(stmt, 1, likeQuery.c_str(), -1, SQLITE_TRANSIENT);
-                sqlite3_bind_text16(stmt, 2, likeQuery.c_str(), -1, SQLITE_TRANSIENT);
-                sqlite3_bind_text16(stmt, 3, likeQuery.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(stmt, 1, utf8LikeQuery.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(stmt, 2, utf8LikeQuery.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(stmt, 3, utf8LikeQuery.c_str(), -1, SQLITE_TRANSIENT);
                 while (sqlite3_step(stmt) == SQLITE_ROW) {
-                    const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 0));
-                    if (wpath) {
-                        matchedPaths.push_back(normalizePath(wpath));
+                    const char* utf8Path = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                    if (utf8Path) {
+                        matchedPaths.push_back(normalizePath(QString::fromUtf8(utf8Path).toStdWString()));
                     }
                 }
                 sqlite3_finalize(stmt);
