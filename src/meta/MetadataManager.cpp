@@ -26,6 +26,7 @@
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 #include "../ui/MediaColorExtractor.h"
+#include "MediaExtractorPipeline.h"
 #include "sqlite3.h"
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -105,9 +106,6 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
     m_uiSignalTimer->setInterval(200); // 200ms 时间窗口
     m_uiSignalTimer->setSingleShot(true);
 
-    m_retryTimer = new QTimer(this);
-    m_retryTimer->setInterval(5000); // 每 5 秒尝试一次补偿
-    connect(m_retryTimer, &QTimer::timeout, this, &MetadataManager::processVisualRetryQueue);
     connect(m_uiSignalTimer, &QTimer::timeout, [this]() {
         std::vector<QString> paths;
         {
@@ -396,17 +394,8 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     // 2. 登记项目（待处理状态 0）
     updateIngestionStatus(nPath, 0);
 
-    // 3. 提取图像尺寸 (Plan-29)
-    tryExtractDimensions(nPath);
-
-    // 4. 视觉预热 (提取颜色)
-    tryExtractColor(nPath);
-
-    // 5. 标记完成并持久化（完成状态 1）
-    updateIngestionStatus(nPath, 1);
-
-    // 5. 通知 UI 刷新该路径
-    notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    // 3. 投递至后台抽取流水线
+    MediaExtractorPipeline::instance().enqueue(nPath);
 }
 
 void MetadataManager::markAsRegistered(const std::wstring& path) {
@@ -601,38 +590,17 @@ std::vector<std::pair<std::wstring, RuntimeMeta>> MetadataManager::getChildrenFr
 
 void MetadataManager::registerItemsAsync(const QStringList& paths, bool authorized) {
     if (paths.isEmpty()) return;
+    (void)authorized;
     
-    // 2026-07-xx 按照 Plan-117：全异步批量注册解析链，状态闭环
-    (void)QtConcurrent::run([this, paths, authorized]() {
-#ifdef Q_OS_WIN
-        CoInitializeEx(NULL, COINIT_APARTMENTTHREADED); // 赋予 Shell/图像分析能力
-#endif
+    (void)QtConcurrent::run([this, paths]() {
+        std::vector<std::wstring> stdPaths;
         for (const auto& qp : paths) {
             std::wstring nPath = normalizePath(qp.toStdWString());
-            
-            // 1. 激活 (优化版，内含锁分离 I/O)
             ensureActivated(nPath);
-
-            // 2. 设置待处理状态 (Development_Plan 1.1)
             updateIngestionStatus(nPath, 0);
-            
-            // 3. 物理与视觉属性提取 (耗时解析操作)
-            tryExtractDimensions(nPath);
-            tryExtractColor(nPath);
-
-            // 4. 标记完成并持久化 (Development_Plan 1.1)
-            updateIngestionStatus(nPath, 1);
-            
-            // 5. 增量通知 UI
-            notifyUI(RefreshLevel::PathUpdate, qp);
+            stdPaths.push_back(nPath);
         }
-#ifdef Q_OS_WIN
-        CoUninitialize();
-#endif
-        // 关键操作后即时异步落盘
-        DatabaseManager::instance().enqueueSyncTask([]() {
-            DatabaseManager::instance().flushAll();
-        });
+        MediaExtractorPipeline::instance().enqueueBatch(stdPaths);
     });
 }
 
@@ -1007,6 +975,18 @@ void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std:
     
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     persistAsync(nPath);
+}
+
+void MetadataManager::setItemDimensions(const std::wstring& path, int width, int height) {
+    std::wstring nPath = MetadataManager::normalizePath(path);
+    ensureActivated(nPath);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        RuntimeMeta& meta = m_cache[nPath];
+        meta.width = width;
+        meta.height = height;
+    }
+    persistAsync(nPath, false);
 }
 
 QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
@@ -1724,247 +1704,6 @@ void MetadataManager::activateItem(const std::wstring& path) {
     instance().registerItem(path);
 }
 
-void MetadataManager::tryExtractDimensions(const std::wstring& path) {
-    std::wstring nPath = normalizePath(path);
-    QFileInfo info(QString::fromStdWString(nPath));
-    if (!info.isFile()) return;
-
-    int w = 0, h = 0;
-    
-    // 2026-07-xx 按照计划：SVG 需特殊处理，防止 QImageReader 获取到错误的默认尺寸
-    if (info.suffix().toLower() == "svg") {
-        QSvgRenderer renderer(info.absoluteFilePath());
-        if (renderer.isValid()) {
-            QSize sz = renderer.defaultSize();
-            w = sz.width();
-            h = sz.height();
-        }
-    } else {
-        // 方案 A: 尝试通过 QImageReader 获取尺寸 (仅读取头部，极快)
-        QImageReader reader(info.absoluteFilePath());
-        QSize sz = reader.size();
-        if (sz.isValid()) {
-            w = sz.width();
-            h = sz.height();
-        }
-    }
-    
-    // 2026-07-xx 按照 Plan-29：如果 QImageReader 失败且是图像类型，尝试 Windows Shell 属性
-#ifdef Q_OS_WIN
-    if (w <= 0 || h <= 0) {
-        // PSD/AI 等格式可能需要 Shell 接口
-        // TODO: 后续可集成 IPropertyStore 进一步增强专业格式识别
-    }
-#endif
-
-    if (w > 0 && h > 0) {
-        std::unique_lock<std::shared_mutex> lock(instance().m_mutex);
-        RuntimeMeta& meta = instance().m_cache[nPath];
-        meta.width = w;
-        meta.height = h;
-        qDebug() << "[Metadata] 尺寸解析成功:" << w << "x" << h << QString::fromStdWString(nPath);
-    } else {
-        qDebug() << "[Metadata] 尺寸解析跳过或失败:" << QString::fromStdWString(nPath);
-    }
-}
-
-void MetadataManager::tryExtractColor(const std::wstring& path) {
-    std::wstring nPath = MetadataManager::normalizePath(path);
-    
-    // 2026-07-xx 按照 Plan-29：在提取颜色时同步校准尺寸
-    int currentW = 0, currentH = 0;
-    {
-        std::shared_lock<std::shared_mutex> lock(instance().m_mutex);
-        const auto& m = instance().m_cache[nPath];
-        currentW = m.width;
-        currentH = m.height;
-        if (!m.color.empty() && currentW > 0) return; 
-    }
-    
-    QFileInfo info(QString::fromStdWString(nPath));
-    QString qPath = QString::fromStdWString(nPath);
-    bool success = false;
-    
-    if (info.isFile()) {
-        if (ArcMeta::MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-            // 2026-07-xx 按照建议：统一使用 getImageForAnalysis 以确保 SVG 正确栅格化
-            QImage img = ArcMeta::MediaColorExtractor::getImageForAnalysis(qPath, 256);
-            
-            if (!img.isNull()) {
-                // 如果之前没拿到尺寸，这里补救
-                if (currentW <= 0) {
-                    std::unique_lock<std::shared_mutex> lock(instance().m_mutex);
-                    instance().m_cache[nPath].width = img.width();
-                    instance().m_cache[nPath].height = img.height();
-                }
-
-                auto palette = ArcMeta::MediaColorExtractor::extractPalette(qPath);
-                if (!palette.isEmpty()) {
-                    QColor dominant = ArcMeta::MediaColorExtractor::quantizeColor(palette.first().first);
-                    instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), palette, false);
-                    success = true;
-                    qDebug() << "[Metadata] 颜色分析成功:" << dominant.name() << QString::fromStdWString(nPath);
-                }
-            }
-        }
-    } else if (info.isDir()) {
-        QDir subDir(qPath);
-        // 2026-07-xx 按照计划：扫描前 10 个图像文件并执行多样本一致性校验
-        QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-        
-        struct Sample { QColor dominant; QVector<QPair<QColor, float>> palette; };
-        QVector<Sample> samples;
-
-        for (const auto& sf : subFiles) {
-            if (ArcMeta::MediaColorExtractor::isGraphicsFile(sf.suffix().toLower())) {
-                auto palette = ArcMeta::MediaColorExtractor::extractPalette(sf.absoluteFilePath());
-                if (!palette.isEmpty()) {
-                    samples.append({palette.first().first, palette});
-                }
-                if (samples.size() >= 10) break;
-            }
-        }
-
-        if (!samples.isEmpty()) {
-            int bestIdx = 0;
-            int maxVotes = 0;
-            for (int i = 0; i < samples.size(); ++i) {
-                int votes = 0;
-                for (int j = 0; j < samples.size(); ++j) {
-                    if (ArcMeta::MediaColorExtractor::calculateDeltaE(samples[i].dominant, samples[j].dominant) < 20.0) {
-                        votes++;
-                    }
-                }
-                if (votes > maxVotes) {
-                    maxVotes = votes;
-                    bestIdx = i;
-                }
-            }
-
-            // 聚合决策：若只有一个样本直接采纳；若多个样本，最强簇必须占据 30% 以上权重且至少有 2 个成员
-            if (samples.size() == 1 || (maxVotes >= 2 && maxVotes >= samples.size() * 0.3)) {
-                QColor dominant = ArcMeta::MediaColorExtractor::quantizeColor(samples[bestIdx].dominant);
-                instance().setItemVisualMetadata(nPath, dominant.name().toUpper().toStdWString(), samples[bestIdx].palette, false);
-                success = true;
-            }
-        }
-    }
-
-    // 2026-07-xx 按照建议：解析失败（且属于图像类型）时加入重试队列
-    if (!success && (info.isDir() || ArcMeta::MediaColorExtractor::isGraphicsFile(info.suffix().toLower()))) {
-        {
-            std::unique_lock<std::shared_mutex> lock(instance().m_mutex);
-            // 查重：避免队列膨胀
-            bool found = false;
-            for(const auto& p : instance().m_visualRetryQueue) if(p == nPath) { found = true; break; }
-            if (!found) {
-                instance().m_visualRetryQueue.push_back(nPath);
-                // 2026-07-xx 物理对齐：QTimer 非线程安全，必须通过元对象系统跨线程启动
-                QMetaObject::invokeMethod(instance().m_retryTimer, "start", Qt::QueuedConnection);
-            }
-        }
-    }
-}
-
-void MetadataManager::processVisualRetryQueue() {
-    std::vector<std::wstring> batch;
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        if (m_visualRetryQueue.empty()) {
-            m_retryTimer->stop();
-            return;
-        }
-        // 每次处理 5 个，防止阻塞
-        size_t count = std::min(m_visualRetryQueue.size(), (size_t)5);
-        for(size_t i = 0; i < count; ++i) batch.push_back(m_visualRetryQueue[i]);
-    }
-
-    // 异步执行，不阻塞 UI
-    (void)QtConcurrent::run([this, batch]() {
-        #ifdef Q_OS_WIN
-        CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-        #endif
-
-        std::vector<std::wstring> finished;
-        for (const auto& path : batch) {
-            QFileInfo info(QString::fromStdWString(path));
-            QString qPath = QString::fromStdWString(path);
-            bool ok = false;
-
-            if (info.isFile()) {
-                // 2026-07-xx 按照建议：extractPalette 内部已通过 getImageForAnalysis 解决了 SVG 渲染问题
-                auto palette = ArcMeta::MediaColorExtractor::extractPalette(qPath);
-                if (!palette.isEmpty()) {
-                    QColor dominant = ArcMeta::MediaColorExtractor::quantizeColor(palette.first().first);
-                    setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), palette, true);
-                    ok = true;
-                }
-            } else if (info.isDir()) {
-                QDir subDir(qPath);
-                QFileInfoList subFiles = subDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-                
-                struct Sample { QColor dominant; QVector<QPair<QColor, float>> palette; };
-                QVector<Sample> samples;
-
-                for (const auto& sf : subFiles) {
-                    if (ArcMeta::MediaColorExtractor::isGraphicsFile(sf.suffix().toLower())) {
-                        auto palette = ArcMeta::MediaColorExtractor::extractPalette(sf.absoluteFilePath());
-                        if (!palette.isEmpty()) {
-                            samples.append({palette.first().first, palette});
-                        }
-                        if (samples.size() >= 10) break;
-                    }
-                }
-
-                if (!samples.isEmpty()) {
-                    int bestIdx = 0;
-                    int maxVotes = 0;
-                    for (int i = 0; i < samples.size(); ++i) {
-                        int votes = 0;
-                        for (int j = 0; j < samples.size(); ++j) {
-                            if (ArcMeta::MediaColorExtractor::calculateDeltaE(samples[i].dominant, samples[j].dominant) < 20.0) {
-                                votes++;
-                            }
-                        }
-                        if (votes > maxVotes) {
-                            maxVotes = votes;
-                            bestIdx = i;
-                        }
-                    }
-
-                    if (samples.size() == 1 || (maxVotes >= 2 && maxVotes >= samples.size() * 0.3)) {
-                        QColor dominant = ArcMeta::MediaColorExtractor::quantizeColor(samples[bestIdx].dominant);
-                        setItemVisualMetadata(path, dominant.name().toUpper().toStdWString(), samples[bestIdx].palette, true);
-                        ok = true;
-                    }
-                }
-            }
-            
-            // 2026-07-xx 按照 Plan-28：重构移除策略
-            // 只有成功，或者确定不是图像文件（无法提取）时，才从队列移除
-            bool isGraphics = ArcMeta::MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
-            if (ok || (!isGraphics && !info.isDir())) {
-                finished.push_back(path);
-            }
-        }
-
-        // 从队列中移除已处理项
-        if (!finished.empty()) {
-            QMetaObject::invokeMethod(this, [this, finished]() {
-                std::unique_lock<std::shared_mutex> lock(m_mutex);
-                for (const auto& p : finished) {
-                    auto it = std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), p);
-                    if (it != m_visualRetryQueue.end()) m_visualRetryQueue.erase(it);
-                }
-                if (!m_visualRetryQueue.empty()) m_retryTimer->start();
-            });
-        }
-
-        #ifdef Q_OS_WIN
-        CoUninitialize();
-        #endif
-    });
-}
 
 void MetadataManager::registerArcmetaFrn(const std::wstring&) {
 }

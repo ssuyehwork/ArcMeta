@@ -216,6 +216,11 @@ public:
      */
     void setItemVisualMetadata(const std::wstring& path, const std::wstring& color, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
 
+    /**
+     * @brief 设置图片/媒体的宽高
+     */
+    void setItemDimensions(const std::wstring& path, int width, int height);
+
     QVector<QColor> getPalettes(const std::wstring& path);
 
     void renameItem(const std::wstring& oldPath, const std::wstring& newPath);
@@ -243,16 +248,6 @@ public:
      */
     static void activateItem(const std::wstring& path);
 
-    /**
-     * @brief 尝试提取视觉元数据（颜色与色板）
-     * 2026-06-xx 提取公共逻辑：封装颜色解析与文件夹代表色逻辑
-     */
-    static void tryExtractColor(const std::wstring& path);
-
-    /**
-     * @brief 尝试提取图像尺寸 (Plan-29)
-     */
-    static void tryExtractDimensions(const std::wstring& path);
 
     /**
      * @brief 统一注册 .arcmeta 目录的 FRN
@@ -394,11 +389,6 @@ private:
     // 2026-06-xx 性能加固：信号攒批机制，防止 5 万级数据扫描导致 UI 信号淹没
     QTimer* m_uiSignalTimer = nullptr;
     std::unordered_set<QString> m_pendingUiPaths;
-
-    // 2026-07-xx 按照用户要求：视觉元数据（解析颜色）异步补偿队列
-    QTimer* m_retryTimer = nullptr;
-    std::vector<std::wstring> m_visualRetryQueue;
-    void processVisualRetryQueue();
 
     /**
      * @brief 异步持久化项元数据
