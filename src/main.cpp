@@ -13,6 +13,7 @@
 #include <QLockFile>
 #include <QDir>
 #include <QMutex>
+#include <QTimer>
 
 #ifdef Q_OS_WIN
 #include <windows.h>

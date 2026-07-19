@@ -15,6 +15,7 @@ using namespace ArcMeta::Style;
 #include "BatchProgressDialog.h"
 #include <QDir>
 #include <QFileInfo>
+#include <QTimer>
 #include <QRegularExpression>
 #include "../meta/CategoryRepo.h"
 #include "../util/ShellHelper.h"

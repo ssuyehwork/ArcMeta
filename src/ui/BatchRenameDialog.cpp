@@ -9,6 +9,7 @@
 #include "FramelessDialog.h"
 #include "ToolTipOverlay.h"
 #include <QFileInfo>
+#include <QTimer>
 #include <QDir>
 #include <QLabel>
 #include <QFile>

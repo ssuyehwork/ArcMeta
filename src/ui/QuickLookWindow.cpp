@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QShortcut>
 #include "UiHelper.h"
+#include <QTimer>
 
 #ifdef Q_OS_WIN
 #include <windows.h>

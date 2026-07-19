@@ -15,6 +15,7 @@
 #include <QPointer>
 #include <QtConcurrent>
 #include "FramelessDialog.h"
+#include <QTimer>
 
 using namespace ArcMeta::Style;
 

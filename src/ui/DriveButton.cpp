@@ -5,6 +5,7 @@
 #include <QDir>
 #include "UiHelper.h"
 #include "ToolTipOverlay.h"
+#include <QTimer>
 #include "../core/AppConfig.h"
 
 namespace ArcMeta {
