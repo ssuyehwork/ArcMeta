@@ -53,6 +53,7 @@
 #include "../core/SyncStatusService.h"
 #include "DriveButton.h"
 #include "../util/ShellHelper.h"
+#include "../util/ImportHelper.h"
 using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
 #include <QFileInfo>
@@ -388,6 +389,39 @@ void MainWindow::initUi() {
             if (m_searchEdit) { m_searchEdit->blockSignals(true); m_searchEdit->clear(); m_searchEdit->blockSignals(false); }
             if (m_addressBar) m_addressBar->setPath("分类: " + name);
             if (!name.isEmpty()) m_contentPanel->search(name);
+        }
+    });
+
+    // 监听侧边栏分类拖拽事件并交由控制层 (MainWindow) 处理物理导入与迁移决策
+    connect(m_categoryPanel, &CategoryPanel::pathsDroppedToCategory, this, [this](const QStringList& paths, int targetCatId) {
+        Q_UNUSED(targetCatId);
+        if (paths.isEmpty()) return;
+
+        // 2026-07-xx 按照 Development_Plan 2.2：拖拽入库冲突拦截
+        QStringList finalPaths;
+        for (const QString& p : paths) {
+            std::wstring wp = p.toStdWString();
+            if (MetadataManager::isInsideManagedLibrary(wp)) {
+                RuntimeMeta meta = MetadataManager::instance().getMeta(wp);
+                if (meta.ingestionStatus == 1) {
+                    ToolTipOverlay::instance()->showText(QCursor::pos(), "该项目已入库，无需再次入库", 1500, QColor("#FECF0E"));
+                    continue;
+                }
+            }
+            finalPaths << p;
+        }
+
+        if (finalPaths.isEmpty()) return;
+
+        QString firstPath = finalPaths.first();
+        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(firstPath.toStdWString());
+        QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
+        QString relPath = AppConfig::instance().getValue(key, "").toString();
+        QString drive = firstPath.left(3);
+        QString managedRoot = QDir::toNativeSeparators(drive + relPath);
+
+        if (!managedRoot.isEmpty()) {
+            ImportHelper::importPaths(finalPaths, managedRoot, this);
         }
     });
 
