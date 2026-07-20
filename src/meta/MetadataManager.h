@@ -374,6 +374,13 @@ signals:
      */
     void pendingSyncChanged(bool hasPending);
 
+private slots:
+    void triggerUiSignalTimer() {
+        if (m_uiSignalTimer && !m_uiSignalTimer->isActive()) {
+            m_uiSignalTimer->start();
+        }
+    }
+
 private:
     MetadataManager(QObject* parent = nullptr);
     ~MetadataManager() override = default;

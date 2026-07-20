@@ -686,46 +686,40 @@ void MainWindow::initUi() {
         }
     });
 
-    // 9. 2026-03-xx 按照用户要求：响应元数据全局变更，同步刷新 UI
-    
-    // 9a. 全局内容区同步：只要元数据变了，通知内容面板刷新对应的行
+    // 9. 2026-03-xx 响应元数据全局变更，同步刷新 UI (合并优化，消除重复连接与性能损耗)
+    m_sidebarRefreshTimer = new QTimer(this);
+    m_sidebarRefreshTimer->setInterval(800);
+    m_sidebarRefreshTimer->setSingleShot(true);
+
+    connect(m_sidebarRefreshTimer, &QTimer::timeout, this, [this]() {
+        if (m_categoryPanel) m_categoryPanel->requestRefresh();
+    });
+
     connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
+        // 1. 全局内容区与侧边栏同步
         if (path == "__RELOAD_ALL__") {
             m_contentPanel->refreshAll();
+            if (m_categoryPanel) {
+                m_categoryPanel->requestRefresh(true);
+            }
             return;
         }
-        // 关键修复：通知 ContentPanel 局部更新该路径的数据
+
+        // 2. 局部路径更新
         m_contentPanel->updateItemMetadata(path);
 
-        // 2026-06-xx 物理修复：实时刷新联动
-        // 当元数据（如颜色、备注、标签）发生变更时，如果当前选中项正好是该文件，
-        // 则强制触发元数据面板刷新，确保 UI 与后台数据物理一致。
+        // 3. 实时刷新联动
         auto indexes = m_contentPanel->getSelectedIndexes();
         if (!indexes.isEmpty()) {
             if (indexes.first().data(PathRole).toString() == path) {
                 emit m_contentPanel->selectionChanged({path});
             }
         }
-    });
 
-    // 9b. 侧边栏刷新防抖
-    m_sidebarRefreshTimer = new QTimer(this);
-    m_sidebarRefreshTimer->setInterval(800);
-    m_sidebarRefreshTimer->setSingleShot(true);
-
-    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
-        if (!m_categoryPanel) return;
-
-        // __RELOAD_ALL__ 信号立即刷新，其他信号防抖
-        if (path == "__RELOAD_ALL__") {
-            m_categoryPanel->requestRefresh(true);
-        } else {
+        // 4. 侧边栏防抖刷新
+        if (m_categoryPanel) {
             m_sidebarRefreshTimer->start(); // 重置计时器
         }
-    });
-
-    connect(m_sidebarRefreshTimer, &QTimer::timeout, this, [this]() {
-        if (m_categoryPanel) m_categoryPanel->requestRefresh();
     });
 
     // 10. 侧边栏点击物理项（文件预览或文件夹跳转）

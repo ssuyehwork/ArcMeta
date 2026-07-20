@@ -108,17 +108,22 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
 
     connect(m_uiSignalTimer, &QTimer::timeout, [this]() {
         std::vector<QString> paths;
+        bool hasReloadAll = false;
         {
             std::unique_lock<std::shared_mutex> lock(m_mutex);
-            for (const auto& p : m_pendingUiPaths) paths.push_back(p);
+            for (const auto& p : m_pendingUiPaths) {
+                if (p == "__RELOAD_ALL__") {
+                    hasReloadAll = true;
+                }
+                paths.push_back(p);
+            }
             m_pendingUiPaths.clear();
         }
 
-        for (const auto& p : paths) {
-            // 语义化特殊信号依然直接发射以确保优先级
-            if (p.startsWith("__RELOAD_")) {
-                emit metaChanged(p);
-            } else {
+        if (hasReloadAll || paths.size() > 50) {
+            emit metaChanged("__RELOAD_ALL__");
+        } else {
+            for (const auto& p : paths) {
                 emit metaChanged(p);
             }
         }
@@ -334,7 +339,7 @@ void MetadataManager::notifyUI(RefreshLevel level, const QString& path) {
                     std::unique_lock<std::shared_mutex> lock(m_mutex);
                     m_pendingUiPaths.insert(path);
                 }
-                QMetaObject::invokeMethod(m_uiSignalTimer, "start", Qt::QueuedConnection);
+                QMetaObject::invokeMethod(this, "triggerUiSignalTimer", Qt::QueuedConnection);
             }
             break;
         case RefreshLevel::FullRebuild:
@@ -349,7 +354,7 @@ void MetadataManager::notifyCategoryCountChanged() {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_pendingUiPaths.insert("__RELOAD_COUNT__");
     }
-    QMetaObject::invokeMethod(m_uiSignalTimer, "start", Qt::QueuedConnection);
+    QMetaObject::invokeMethod(this, "triggerUiSignalTimer", Qt::QueuedConnection);
 }
 
 void MetadataManager::notifyFullUIRebuild() {
@@ -358,7 +363,7 @@ void MetadataManager::notifyFullUIRebuild() {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_pendingUiPaths.insert("__RELOAD_ALL__");
     }
-    QMetaObject::invokeMethod(m_uiSignalTimer, "start", Qt::QueuedConnection);
+    QMetaObject::invokeMethod(this, "triggerUiSignalTimer", Qt::QueuedConnection);
 }
 
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
