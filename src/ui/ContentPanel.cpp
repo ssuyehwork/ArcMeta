@@ -494,38 +494,42 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                     QFileInfo info(path);
                     QString ext = info.suffix().toLower();
                     
-                    QIcon icon;
+                    QImage img;
                     double ar = 1.0;
                     bool hasThumb = false;
 
                     if (ext == "svg") {
                         QSvgRenderer renderer(path);
                         if (renderer.isValid()) {
-                            QPixmap pix(128, 128);
-                            pix.fill(Qt::transparent);
-                            QPainter painter(&pix);
+                            QImage svgImg(128, 128, QImage::Format_ARGB32_Premultiplied);
+                            svgImg.fill(Qt::transparent);
+                            QPainter painter(&svgImg);
                             renderer.render(&painter);
-                            icon = QIcon(pix);
+                            img = svgImg;
                             ar = 1.0;
                             hasThumb = true;
                         }
                     } else if (UiHelper::isGraphicsFile(ext)) {
-                        QImage img = UiHelper::getShellThumbnail(path, 128);
+                        img = UiHelper::getShellThumbnail(path, 128);
                         if (!img.isNull()) {
-                            icon = QIcon(QPixmap::fromImage(img));
                             ar = (double)img.width() / img.height();
                             hasThumb = true;
                         }
                     }
 
-                    if (icon.isNull()) {
-                        icon = UiHelper::getFileIcon(path, 128);
-                    }
-
                     if (weakThis) {
-                        QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, cacheKey, icon, ar, hasThumb]() {
+                        QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, cacheKey, img, ar, hasThumb]() {
                             if (!weakThis) return;
                             auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
+
+                            // 所有的 QPixmap / QIcon 及文件图标提取强制收拢到主 GUI 线程中执行，彻底消除后台线程渲染/转换导致的静默失败和秒消失缺陷
+                            QIcon icon;
+                            if (!img.isNull()) {
+                                icon = QIcon(QPixmap::fromImage(img));
+                            } else {
+                                icon = UiHelper::getFileIcon(path, 128);
+                            }
+
                             mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
                             if (hasThumb) mutableThis->m_aspectRatios[path] = ar;
                             
