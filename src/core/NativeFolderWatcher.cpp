@@ -169,8 +169,8 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
 
         qDebug() << "[Watcher] IOCP 收到原始信号 Action:" << notify->Action << "Path:" << qFullPath;
 
-        // 过滤规则：严禁监控 .arcmeta 目录自身的变动，防止死循环 (使用不区分大小写的匹配)
-        if (qFullPath.contains(QLatin1String(".arcmeta"), Qt::CaseInsensitive)) {
+        // 过滤规则：严禁监控 .arcmeta 目录自身的变动，防止死循环
+        if (qFullPath.contains("/.arcmeta") || qFullPath.contains("\\.arcmeta")) {
             qDebug() << "[Watcher] 过滤内部数据库变动信号:" << qFullPath;
             if (notify->NextEntryOffset == 0) break;
             pBase += notify->NextEntryOffset;

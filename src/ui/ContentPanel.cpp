@@ -216,7 +216,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         if (record.width > 0 && record.height > 0) return true;
         return m_aspectRatios.contains(path);
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        // 统一使用稳定且唯一的 path 作为内存缩略图缓存 Key，彻底根除注册前/后 fileId 状态变化导致的缓存失效或闪烁痛点
+        // 统一使用稳定且唯一的 path 作为内存缩略图缓存 Key，彻底根除注册前/后 fileId 状态变化（例如从 NTFS 临时 ID 到 SHA256 数据库 ID）导致的缓存失效或闪烁痛点
         QString cacheKey = path;
         QIcon* cached = m_iconCache.object(cacheKey);
         if (cached) return *cached;
@@ -522,7 +522,6 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             if (!weakThis) return;
                             auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
 
-                            // 所有的 QPixmap / QIcon 及文件图标提取强制收拢到主 GUI 线程中执行，彻底消除后台线程渲染/转换导致的静默失败和秒消失缺陷
                             QIcon icon;
                             if (!img.isNull()) {
                                 icon = QIcon(QPixmap::fromImage(img));
