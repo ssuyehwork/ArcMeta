@@ -59,6 +59,13 @@ signals:
     void categorySelected(int id, const QString& name, const QString& type, const QString& path = "");
     void fileSelected(const QString& path);
 
+    /**
+     * @brief 当外部文件拖入侧边栏分类树时，视图仅抛出通知，不执行任何物理操作
+     * @param paths 拖入的绝对路径列表
+     * @param targetCatId 目标分类 ID (空白或顶级为 0)
+     */
+    void pathsDroppedToCategory(const QStringList& paths, int targetCatId);
+
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
 
