@@ -551,7 +551,7 @@ void DatabaseManager::decrementPendingTasks() {
 }
 
 void DatabaseManager::enqueueSyncTask(std::function<void()> task) {
-    SyncTaskToken token; 
+    auto token = std::make_shared<SyncTaskToken>();
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         m_syncQueue.push_back([task, token]() {
