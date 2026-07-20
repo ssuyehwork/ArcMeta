@@ -32,11 +32,14 @@ JustifiedView::JustifiedView(QWidget* parent) : QAbstractItemView(parent) {
     viewport()->setPalette(pal);
     setPalette(pal);
 
+    // 默认初始化 gridMode 属性，用于 Delegate 获取视图模式以自适应缩放等比
+    setProperty("gridMode", false);
 }
 
 void JustifiedView::setLayoutMode(LayoutMode mode) {
     if (m_layoutMode != mode) {
         m_layoutMode = mode;
+        setProperty("gridMode", m_layoutMode == GridMode);
         scheduleLayout();
     }
 }
