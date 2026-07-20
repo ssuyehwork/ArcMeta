@@ -23,6 +23,7 @@
 #include <QDebug>
 #include <QIcon>
 #include "FilterPanel.h"
+#include "IScanResultView.h"
 
 #include "../core/ModelContract.h"
 
@@ -200,9 +201,10 @@ public:
     QAbstractItemModel* model() const { return m_model; }
     QSortFilterProxyModel* getProxyModel() const { return m_proxyModel; }
     QModelIndexList getSelectedIndexes() const {
-        return (m_viewStack->currentWidget() == m_gridView) ? 
-                m_gridView->selectionModel()->selectedIndexes() : 
-                m_treeView->selectionModel()->selectedIndexes();
+        if (m_currentActiveView && m_currentActiveView->getBaseView()) {
+            return m_currentActiveView->getBaseView()->selectionModel()->selectedIndexes();
+        }
+        return {};
     }
 
     /**
@@ -268,6 +270,8 @@ private:
     QPushButton* m_btnLayersBlue = nullptr;
     QPushButton* m_btnToggleFolders = nullptr; // 2026-07-xx 按照 Plan-73：显示/隐藏文件夹切换
     QPushButton* m_btnToggleFiles = nullptr;   // 2026-07-xx 按照 Plan-73：显示/隐藏文件切换
+    QPushButton* m_viewBtn = nullptr;          // 视图下拉按钮
+    QSlider* m_sizeSlider = nullptr;           // 尺寸无缝滑动调节器
     QTextBrowser* m_textPreview = nullptr;
     QLabel* m_imagePreview = nullptr;
 
@@ -275,6 +279,11 @@ private:
     QAbstractItemView* m_gridView = nullptr;
     QTreeView* m_treeView = nullptr;
     FerrexVirtualDbModel* m_model = nullptr;
+
+    IScanResultView* m_listResultView = nullptr;
+    IScanResultView* m_gridResultView = nullptr;
+    IScanResultView* m_justifiedResultView = nullptr;
+    IScanResultView* m_currentActiveView = nullptr;
 
     QTimer* m_visibleTimer = nullptr;
     void refreshVisibleThumbnails();
