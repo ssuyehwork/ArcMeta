@@ -394,6 +394,7 @@ void MainWindow::initUi() {
 
     // 监听侧边栏分类拖拽事件并交由控制层 (MainWindow) 处理物理导入与迁移决策
     connect(m_categoryPanel, &CategoryPanel::pathsDroppedToCategory, this, [this](const QStringList& paths, int targetCatId) {
+        Q_UNUSED(targetCatId);
         if (paths.isEmpty()) return;
 
         // 2026-07-xx 按照 Development_Plan 2.2：拖拽入库冲突拦截
