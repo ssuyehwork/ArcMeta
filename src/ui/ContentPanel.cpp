@@ -216,8 +216,8 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         if (record.width > 0 && record.height > 0) return true;
         return m_aspectRatios.contains(path);
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        // 2026-07-xx 架构优化：使用 File ID 作为缓存 Key。
-        QString cacheKey = record.fileId.empty() ? path : QString::fromStdString(record.fileId);
+        // 统一使用稳定且唯一的 path 作为内存缩略图缓存 Key，彻底根除注册前/后 fileId 状态变化导致的缓存失效或闪烁痛点
+        QString cacheKey = path;
         QIcon* cached = m_iconCache.object(cacheKey);
         if (cached) return *cached;
 
@@ -455,7 +455,7 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
         if (rec.isCategory) continue;
         
         QString path = rec.path;
-        QString cacheKey = rec.fileId.empty() ? path : QString::fromStdString(rec.fileId);
+        QString cacheKey = path; // 统一使用稳定且唯一的 path 作为内存缓存 Key
         
         if (m_iconCache.contains(cacheKey)) continue;
         newQueue.push_back({path, cacheKey});
@@ -531,7 +531,7 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             
                             for (int i = 0; i < mutableThis->m_displayCount; ++i) {
                                 const auto& rec = mutableThis->m_allRecords[i];
-                                bool match = (rec.path == path) || (!rec.fileId.empty() && QString::fromStdString(rec.fileId) == cacheKey);
+                                bool match = (rec.path == path);
                                 if (match) {
                                     emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
                                     break;
