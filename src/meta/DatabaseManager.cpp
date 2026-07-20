@@ -71,12 +71,14 @@ DatabaseManager::SyncTaskToken::SyncTaskToken() {
     DatabaseManager::instance().incrementPendingTasks();
 }
 
-DatabaseManager::SyncTaskToken::SyncTaskToken(const SyncTaskToken&) {
-    DatabaseManager::instance().incrementPendingTasks();
+DatabaseManager::SyncTaskToken::SyncTaskToken(SyncTaskToken&& other) noexcept {
+    other.m_moved = true;
 }
 
 DatabaseManager::SyncTaskToken::~SyncTaskToken() {
-    DatabaseManager::instance().decrementPendingTasks();
+    if (!m_moved) {
+        DatabaseManager::instance().decrementPendingTasks();
+    }
 }
 
 DatabaseManager::DatabaseManager(QObject* parent) : QObject(parent) {

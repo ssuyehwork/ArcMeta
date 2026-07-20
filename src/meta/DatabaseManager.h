@@ -151,8 +151,13 @@ private:
      */
     struct SyncTaskToken {
         SyncTaskToken();
-        SyncTaskToken(const SyncTaskToken&);
+        SyncTaskToken(const SyncTaskToken&) = delete;
+        SyncTaskToken& operator=(const SyncTaskToken&) = delete;
+        SyncTaskToken(SyncTaskToken&& other) noexcept;
+        SyncTaskToken& operator=(SyncTaskToken&&) = delete;
         ~SyncTaskToken();
+    private:
+        bool m_moved = false;
     };
 
     std::map<std::wstring, DbConnection> m_driveDbs;
