@@ -58,9 +58,71 @@ public:
             }
         }
 
-        // 2026-06-16 按照 8 列架构重构：第 1, 2, 3 列由代理独立绘制
+        // 2026-06-16 按照 8 列架构重构：第 1, 2, 3 列由代理独立绘制；第 0 列作为名称列，具有微型圆角卡片预览（最左侧看片）
         int col = index.column();
-        if (col == 1 || col == 2 || col == 3) {
+        if (col == 0) {
+            // 自定义绘制名称列与最左侧圆角卡片（最左侧看片）
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setRenderHint(QPainter::SmoothPixmapTransform);
+
+            int padding = 3;
+            int side = option.rect.height() - (padding * 2);
+            if (side <= 0) side = 16;
+
+            // 微卡片矩形区域
+            QRect squareRect(option.rect.left() + 6, option.rect.top() + padding, side, side);
+
+            // 1. 绘制 4px 圆角微型卡片容器背景
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(QColor("#2D2D2D"));
+            QPainterPath cardPath;
+            cardPath.addRoundedRect(squareRect, 4, 4);
+            painter->drawPath(cardPath);
+
+            // 2. 图像/图标平滑居中绘制（最左侧看片核心逻辑）
+            QVariant decoData = index.data(Qt::DecorationRole);
+            if (decoData.canConvert<QPixmap>()) {
+                QPixmap thumb = decoData.value<QPixmap>();
+                if (!thumb.isNull()) {
+                    QPixmap scaled = thumb.scaled(squareRect.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                    int x = squareRect.center().x() - scaled.width() / 2;
+                    int y = squareRect.center().y() - scaled.height() / 2;
+                    painter->drawPixmap(x, y, scaled);
+                }
+            } else {
+                QIcon icon = qvariant_cast<QIcon>(decoData);
+                if (!icon.isNull()) {
+                    int iconSize = qRound(side * 0.6);
+                    QRect iconRect(squareRect.center().x() - iconSize / 2,
+                                   squareRect.center().y() - iconSize / 2,
+                                   iconSize, iconSize);
+                    icon.paint(painter, iconRect);
+                }
+            }
+
+            // 3. 文本排版向右偏移并采用中间省略
+            QString name = index.data(Qt::DisplayRole).toString();
+            QColor textColor = selected ? QColor("#FFFFFF") : QColor("#EEEEEE");
+
+            painter->setPen(textColor);
+            painter->setFont(option.font);
+
+            QRect textRect = option.rect;
+            textRect.setLeft(squareRect.right() + 10);
+
+            QString elidedText = option.fontMetrics.elidedText(name, Qt::ElideMiddle, textRect.width() - 10);
+            painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, elidedText);
+
+            // 4. 物理自绘底部分割线，完美贯通消除截断
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing, false);
+            painter->setPen(QColor("#252526"));
+            painter->drawLine(option.rect.left(), option.rect.bottom(), option.rect.right(), option.rect.bottom());
+            painter->restore();
+
+            painter->restore();
+        } else if (col == 1 || col == 2 || col == 3) {
             // 这三列不调用默认 paint，完全自定义
             painter->save();
             painter->setRenderHint(QPainter::Antialiasing);
