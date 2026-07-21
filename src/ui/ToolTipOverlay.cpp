@@ -63,65 +63,76 @@ void ToolTipOverlay::fadeOutAndHide() {
     m_fadeAnim->start();
 }
 
-void ToolTipOverlay::showText(const QPoint& globalPos, const QString& text, int timeout, const QColor& borderColor, bool exactPosition) {
+void ToolTipOverlay::showText(const QPoint& globalPos, const QString& text, int timeout, const QColor& borderColor, bool exactPosition, const QColor& backgroundColor) {
     // [THREAD SAFE] 强制确保在主线程执行
     if (thread() != QThread::currentThread()) {
-        QMetaObject::invokeMethod(this, [this, globalPos, text, timeout, borderColor, exactPosition]() {
-            showText(globalPos, text, timeout, borderColor, exactPosition);
+        QMetaObject::invokeMethod(this, [this, globalPos, text, timeout, borderColor, exactPosition, backgroundColor]() {
+            showText(globalPos, text, timeout, borderColor, exactPosition, backgroundColor);
         });
         return;
     }
 
-    if (text.isEmpty()) { fadeOutAndHide(); return; }
+    m_currentBorderColor = borderColor;
+    m_currentBackgroundColor = backgroundColor;
 
-    // 2026-05-20 性能优化：内容脏检查，防止鼠标在按钮内部微动导致的重复渲染卡顿
-    if (isVisible() && m_text == text && m_currentBorderColor == borderColor && !exactPosition) {
-        move(globalPos + QPoint(15, 15));
-        return;
-    }
-    
     if (timeout > 0) {
         timeout = qBound(500, timeout, 60000); 
     }
 
-    m_currentBorderColor = borderColor;
+    int w = 40;
+    int h = 24;
 
-    QString htmlBody;
-    if (text.contains("<") && text.contains(">")) {
-        htmlBody = text;
+    if (text.isEmpty()) {
+        // 2026-xx-xx 按照用户最新指令：当 text 为空时，表明我们处于纯色块（颜色气泡）模式。
+        // 我们不解析文档或文本，而是设置成固定 60x24px 大小的纯色色块指示器！
+        m_text = "";
+        m_doc.clear();
+        w = 60;
+        h = 24;
     } else {
-        htmlBody = text.toHtmlEscaped().replace("\n", "<br>");
-    }
+        // 2026-05-20 性能优化：内容脏检查，防止鼠标在按钮内部微动导致的重复渲染卡顿
+        if (isVisible() && m_text == text && m_currentBorderColor == borderColor && !exactPosition) {
+            move(globalPos + QPoint(15, 15));
+            return;
+        }
 
-    m_text = QString(
-        "<html><head><style>div, p, span, body { color: #EEEEEE !important; }</style></head>"
-        "<body style='margin:0; padding:0; color:#EEEEEE; font-family:\"Microsoft YaHei\",\"Segoe UI\",sans-serif;'>"
-        "<div style='color:#EEEEEE !important;'>%1</div>"
-        "</body></html>"
-    ).arg(htmlBody);
-    
-    m_doc.setHtml(m_text);
-    m_doc.setDocumentMargin(0); 
-    
-    m_doc.setTextWidth(-1); 
-    qreal idealW = m_doc.idealWidth();
-    
-    if (idealW > 450) {
-        m_doc.setTextWidth(450); 
-    } else {
-        m_doc.setTextWidth(idealW); 
+        QString htmlBody;
+        if (text.contains("<") && text.contains(">")) {
+            htmlBody = text;
+        } else {
+            htmlBody = text.toHtmlEscaped().replace("\n", "<br>");
+        }
+
+        m_text = QString(
+            "<html><head><style>div, p, span, body { color: #EEEEEE !important; }</style></head>"
+            "<body style='margin:0; padding:0; color:#EEEEEE; font-family:\"Microsoft YaHei\",\"Segoe UI\",sans-serif;'>"
+            "<div style='color:#EEEEEE !important;'>%1</div>"
+            "</body></html>"
+        ).arg(htmlBody);
+
+        m_doc.setHtml(m_text);
+        m_doc.setDocumentMargin(0);
+
+        m_doc.setTextWidth(-1);
+        qreal idealW = m_doc.idealWidth();
+
+        if (idealW > 450) {
+            m_doc.setTextWidth(450);
+        } else {
+            m_doc.setTextWidth(idealW);
+        }
+
+        QSize textSize = m_doc.size().toSize();
+
+        int padX = 12;
+        int padY = 8;
+
+        w = textSize.width() + padX * 2;
+        h = textSize.height() + padY * 2;
+
+        w = qMax(w, 40);
+        h = qMax(h, 24);
     }
-    
-    QSize textSize = m_doc.size().toSize();
-    
-    int padX = 12; 
-    int padY = 8;
-    
-    int w = textSize.width() + padX * 2;
-    int h = textSize.height() + padY * 2;
-    
-    w = qMax(w, 40);
-    h = qMax(h, 24);
     
     resize(w, h);
     
@@ -181,14 +192,16 @@ void ToolTipOverlay::paintEvent(QPaintEvent*) {
     QRectF rectF(0.5, 0.5, width() - 1, height() - 1);
     
     p.setPen(QPen(m_currentBorderColor, 1));
-    p.setBrush(QColor("#2B2B2B"));
+    p.setBrush(m_currentBackgroundColor);
     // 2026-03-xx 按照用户硬性要求：ToolTip 圆角必须锁定为 2px
     p.drawRoundedRect(rectF, 2, 2);
     
-    p.save();
-    p.translate(12, 8); 
-    m_doc.drawContents(&p);
-    p.restore();
+    if (!m_text.isEmpty()) {
+        p.save();
+        p.translate(12, 8);
+        m_doc.drawContents(&p);
+        p.restore();
+    }
 }
 
 } // namespace ArcMeta

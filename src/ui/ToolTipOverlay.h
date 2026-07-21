@@ -43,7 +43,7 @@ public:
     /**
      * @brief 显示提示文字（2026-03-xx 重构升级版）
      */
-    void showText(const QPoint& globalPos, const QString& text, int timeout = 700, const QColor& borderColor = QColor("#B0B0B0"), bool exactPosition = false);
+    void showText(const QPoint& globalPos, const QString& text, int timeout = 700, const QColor& borderColor = QColor("#B0B0B0"), bool exactPosition = false, const QColor& backgroundColor = QColor("#2B2B2B"));
 
     // 兼容旧接口
     void showTip(const QString& text, const QPoint& pos, int timeout = 700) {
@@ -66,6 +66,7 @@ private:
     QTextDocument m_doc;
     QTimer m_hideTimer;
     QColor m_currentBorderColor = QColor("#B0B0B0");
+    QColor m_currentBackgroundColor = QColor("#2B2B2B");
     QPropertyAnimation* m_fadeAnim = nullptr;
 };
 

@@ -575,48 +575,32 @@ void MainWindow::initUi() {
 
         m_metaPanel->setColor(color.toStdWString());
         
-        // 2026-xx-xx 按照用户最新反馈：QTextDocument 对 CSS border-radius 50% 与 flexbox 复杂特性不具有完美渲染兼容性，
-        // 强行使用会导致标签坍塌为空白方块。此处改用 QTextDocument 100% 完美支持的 Unicode 大字号圆形字符(●)直接着色！
-        QString colorHex = "#888888";
-        if (color == "red") { colorHex = "#E81123"; }
-        else if (color == "orange") { colorHex = "#FF551C"; }
-        else if (color == "yellow") { colorHex = "#FECF0E"; }
-        else if (color == "green") { colorHex = "#2ECC71"; }
-        else if (color == "cyan") { colorHex = "#41F2F2"; }
-        else if (color == "blue") { colorHex = "#3498DB"; }
-        else if (color == "purple") { colorHex = "#9B59B6"; }
-        else if (color == "gray") { colorHex = "#95A5A6"; }
+        // 2026-xx-xx 按照用户最新指令：采用颜色气泡直接覆盖 ToolTipOverlay 背景，彻底禁绝文本与 unicode 字符！
+        QColor colorHex = QColor("#2B2B2B"); // 默认/无颜色时
+        QColor borderCol = QColor("#888888");
 
-        QString msg;
-        if (color.isEmpty()) {
-            // “无颜色”打标时，展示一个精致的暗灰色空心圈
-            msg = "<div style='text-align: center; padding: 2px 10px;'><span style='color: #444444; font-size: 16pt;'>○</span></div>";
-        } else {
-            msg = QString(
-                "<div style='text-align: center; padding: 2px 10px;'>"
-                "  <span style='color: %1; font-size: 18pt;'>●</span>"
-                "</div>"
-            ).arg(colorHex);
-        }
+        if (color == "red") { colorHex = QColor("#E81123"); borderCol = QColor("#FF6B6B"); }
+        else if (color == "orange") { colorHex = QColor("#FF551C"); borderCol = QColor("#FF8C00"); }
+        else if (color == "yellow") { colorHex = QColor("#FECF0E"); borderCol = QColor("#FFF200"); }
+        else if (color == "green") { colorHex = QColor("#2ECC71"); borderCol = QColor("#2ECC71"); }
+        else if (color == "cyan") { colorHex = QColor("#41F2F2"); borderCol = QColor("#E0FFFF"); }
+        else if (color == "blue") { colorHex = QColor("#3498DB"); borderCol = QColor("#00BFFF"); }
+        else if (color == "purple") { colorHex = QColor("#9B59B6"); borderCol = QColor("#EE82EE"); }
+        else if (color == "gray") { colorHex = QColor("#95A5A6"); borderCol = QColor("#BDC3C7"); }
+
+        // 传入空文本驱动纯色块模式
+        QString msg = "";
 
         QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
         if (!screen) screen = QGuiApplication::primaryScreen();
         QRect screenGeom = screen ? screen->geometry() : QRect(0, 0, 1920, 1080);
 
-        QTextDocument doc;
-        doc.setHtml(msg);
-        doc.setDefaultStyleSheet("body, div, p, span, b, i { color: #EEEEEE !important; font-family: 'Microsoft YaHei', 'Segoe UI'; font-size: 9pt; }");
-        doc.setDocumentMargin(0);
-        qreal idealW = doc.idealWidth();
-        if (idealW > 450) idealW = 450;
-        int w = static_cast<int>(idealW) + 24;
-
+        int w = 60; // 纯色块默认大小
         int centerX = screenGeom.x() + screenGeom.width() / 2;
         int targetX = centerX - w / 2;
         int targetY = screenGeom.y() + 50; // 靠齐屏幕上方居中 (留 50px 顶部安全间距)
 
-        QColor borderCol = color.isEmpty() ? QColor("#888888") : QColor(colorHex);
-        ToolTipOverlay::instance()->showText(QPoint(targetX, targetY), msg, 1500, borderCol, true);
+        ToolTipOverlay::instance()->showText(QPoint(targetX, targetY), msg, 1500, borderCol, true, colorHex);
     });
 
     // 5a. 目录装载完成 -> FilterPanel 动态填充 (六参数版本: 移除标签统计)
