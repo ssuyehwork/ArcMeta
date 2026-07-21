@@ -131,15 +131,16 @@ public:
 
         if (hasThumb) {
             if (!thumb.isNull()) {
-                // 在真实宽高比的卡片下，KeepAspectRatio 会自动无缝铺满卡片，且绝不拉伸变形
+                // 图片/视频项目：强制使用 KeepAspectRatioByExpanding (Cover 覆盖填充) 充满卡片，决不出现留白
                 QPixmap scaled = thumb.scaled(m.cardRect.size(),
-                                              Qt::KeepAspectRatio,
+                                              Qt::KeepAspectRatioByExpanding,
                                               Qt::SmoothTransformation);
                 int x = m.cardRect.center().x() - scaled.width() / 2;
                 int y = m.cardRect.center().y() - scaled.height() / 2;
                 painter->drawPixmap(x, y, scaled);
             }
         } else {
+            // 非多媒体项目：系统图标 1:1 完美等比居中绘制在正方形卡片内 (限制在 60% 卡片尺寸)，绝不拉伸变形
             QIcon icon = qvariant_cast<QIcon>(decoData);
             if (!icon.isNull()) {
                 int iconSize = qMin(m.cardRect.width(), m.cardRect.height()) * 0.6;

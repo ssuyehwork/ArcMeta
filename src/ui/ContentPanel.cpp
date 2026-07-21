@@ -264,8 +264,18 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == IsEmptyRole) {
         return record.isDir && record.isEmpty;
     } else if (role == AspectRatioRole) {
-        // 2026-07-xx 性能优化：优先使用 ItemRecord 中已注入的尺寸信息，实现渲染零延迟
-        if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
+        // 物理规则对齐：若非图形图像、视频项目，宽高比一律强制返回 1.0 (正方形)
+        QString ext = record.suffix.toLower();
+        bool isMedia = UiHelper::isGraphicsFile(ext) || ext == "svg" ||
+                       ext == "mp4" || ext == "mkv" || ext == "avi" || ext == "mov" ||
+                       ext == "webm" || ext == "flv" || ext == "wmv";
+        if (!isMedia) {
+            return 1.0;
+        }
+        // 多媒体项目允许返回真实的物理宽高比
+        if (record.width > 0 && record.height > 0) {
+            return (double)record.width / record.height;
+        }
         return m_aspectRatios.value(path, 1.0);
     } else if (role == HasThumbnailRole) {
         // 2026-xx-xx 按照 Plan-114：优化 HasThumbnailRole 判定逻辑
@@ -595,8 +605,6 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                     } else if (UiHelper::isGraphicsFile(ext)) {
                         img = UiHelper::getShellThumbnail(path, 128);
                         if (!img.isNull()) {
-                            // 引入 QImageReader 极速读取真实图片的物理宽高比，防止被系统 Shell 返回的 128x128 正方形缩略图污染。
-                            // 只有这样，自适应视图的卡片宽度才能真正随着缩略图物理宽度而变宽！
                             QImageReader reader(path);
                             QSize realSize = reader.size();
                             if (realSize.isValid() && realSize.height() > 0) {
@@ -605,6 +613,15 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                                 ar = (double)img.width() / img.height();
                             }
                             hasThumb = true;
+                        }
+                    } else {
+                        // 视频项目同样提取缩略图并解析比例
+                        if (ext == "mp4" || ext == "mkv" || ext == "avi" || ext == "mov" || ext == "webm") {
+                            img = UiHelper::getShellThumbnail(path, 128);
+                            if (!img.isNull()) {
+                                ar = (double)img.width() / img.height();
+                                hasThumb = true;
+                            }
                         }
                     }
 
