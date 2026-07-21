@@ -534,8 +534,19 @@ void MainWindow::initUi() {
         MetadataManager::instance().setRating(m_currentQuickLookPath.toStdWString(), rating);
 
         m_metaPanel->setRating(rating);
-        // 2026-04-11 按照用户要求：在预览窗设定星级时，通过新计算的居中定位，靠齐屏幕上方居中显示
-        QString msg = QString("已设定星级: <span style='color: #FECF0E;'>%1 星</span>").arg(rating);
+
+        // 2026-xx-xx 按照用户最新硬性指令：不再保留任何“已设定星级”或“无评级”中英文字符，只展示纯 5 星标指示器！
+        QString starsStr;
+        // 采用标准 5 星格位显示，选中的为金色，其余未选中的置灰，没有字眼。即使 rating 级别为 0（无评级），也仅显示 5 个置灰暗星
+        int activeStars = qBound(0, rating, 5);
+        for (int i = 1; i <= 5; ++i) {
+            if (i <= activeStars) {
+                starsStr += "<span style='color: #FECF0E; font-size: 14pt; margin-right: 2px;'>★</span>";
+            } else {
+                starsStr += "<span style='color: #444444; font-size: 14pt; margin-right: 2px;'>★</span>";
+            }
+        }
+        QString msg = QString("<div style='text-align: center; padding: 4px 10px;'>%1</div>").arg(starsStr);
 
         QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
         if (!screen) screen = QGuiApplication::primaryScreen();
@@ -564,17 +575,35 @@ void MainWindow::initUi() {
 
         m_metaPanel->setColor(color.toStdWString());
         
-        QString colorName = "无颜色";
-        if (color == "red") colorName = "红色";
-        else if (color == "orange") colorName = "橙色";
-        else if (color == "yellow") colorName = "黄色";
-        else if (color == "green") colorName = "绿色";
-        else if (color == "cyan") colorName = "青色";
-        else if (color == "blue") colorName = "蓝色";
-        else if (color == "purple") colorName = "紫色";
-        else if (color == "gray") colorName = "灰色";
+        // 2026-xx-xx 按照用户最新硬性指令：不再保留任何“已设定颜色”或“无颜色标记”中英文字符，只展示纯物理发光圆形 Dot！
+        QString colorHex = "#888888";
+        QString glowColor = "rgba(136, 136, 136, 0.4)";
+        if (color == "red") { colorHex = "#E81123"; glowColor = "rgba(232, 17, 35, 0.5)"; }
+        else if (color == "orange") { colorHex = "#FF551C"; glowColor = "rgba(255, 85, 28, 0.5)"; }
+        else if (color == "yellow") { colorHex = "#FECF0E"; glowColor = "rgba(254, 207, 14, 0.5)"; }
+        else if (color == "green") { colorHex = "#2ECC71"; glowColor = "rgba(46, 204, 113, 0.5)"; }
+        else if (color == "cyan") { colorHex = "#41F2F2"; glowColor = "rgba(65, 242, 242, 0.5)"; }
+        else if (color == "blue") { colorHex = "#3498DB"; glowColor = "rgba(52, 152, 219, 0.5)"; }
+        else if (color == "purple") { colorHex = "#9B59B6"; glowColor = "rgba(155, 89, 182, 0.5)"; }
+        else if (color == "gray") { colorHex = "#95A5A6"; glowColor = "rgba(149, 165, 166, 0.5)"; }
 
-        QString msg = QString("已设定颜色: <span style='color: #41F2F2;'>%1</span>").arg(colorName);
+        QString msg;
+        if (color.isEmpty()) {
+            // “无颜色”打标时，不输出任何字词，展示一个精致的暗色透明灰色圈
+            msg = QString(
+                "<div style='text-align: center; padding: 4px 10px; display: flex; align-items: center; justify-content: center;'>"
+                "  <span style='background-color: transparent; border-radius: 50%; display: inline-block; width: 14px; height: 16px; "
+                "               border: 2px dashed #444444;'></span>"
+                "</div>"
+            );
+        } else {
+            msg = QString(
+                "<div style='text-align: center; padding: 4px 10px; display: flex; align-items: center; justify-content: center;'>"
+                "  <span style='background-color: %1; border-radius: 50%; display: inline-block; width: 16px; height: 16px; "
+                "               box-shadow: 0 0 8px %2; border: 1px solid rgba(255,255,255,0.2);'></span>"
+                "</div>"
+            ).arg(colorHex).arg(glowColor);
+        }
 
         QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
         if (!screen) screen = QGuiApplication::primaryScreen();
@@ -592,7 +621,8 @@ void MainWindow::initUi() {
         int targetX = centerX - w / 2;
         int targetY = screenGeom.y() + 50; // 靠齐屏幕上方居中 (留 50px 顶部安全间距)
 
-        ToolTipOverlay::instance()->showText(QPoint(targetX, targetY), msg, 1500, QColor("#41F2F2"), true);
+        QColor borderCol = color.isEmpty() ? QColor("#888888") : QColor(colorHex);
+        ToolTipOverlay::instance()->showText(QPoint(targetX, targetY), msg, 1500, borderCol, true);
     });
 
     // 5a. 目录装载完成 -> FilterPanel 动态填充 (六参数版本: 移除标签统计)
