@@ -182,6 +182,9 @@ MainWindow::~MainWindow() {
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent), m_currentDataSource("nav"), m_currentCategoryId(0) {
+    // 初始化 QuickLookWindow 实例
+    m_quickLook = new QuickLookWindow(this);
+
     // 2026-04-12 关键修复：显式初始化面板加载状态锁，防止未定义行为导致闪退
     m_panelsInitialized = false;
     qDebug() << "[Main] MainWindow 构造开始执行";
@@ -499,7 +502,9 @@ void MainWindow::initUi() {
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_contentPanel, &ContentPanel::requestQuickLook, this, [this](const QString& path) {
         m_currentQuickLookPath = path;
-        QuickLookWindow::instance().previewFile(path);
+        if (m_quickLook) {
+            m_quickLook->preview(path);
+        }
     });
 
     // 4. 内容面板统计信息更新 -> 状态栏
@@ -508,56 +513,58 @@ void MainWindow::initUi() {
 
     // 2026-04-11 按照用户要求：双向联动，实现预览窗内方向键切图导航
     // 2026-05-27 物理加固：补全 this 上下文
-    connect(&QuickLookWindow::instance(), &QuickLookWindow::prevRequested, this, [this]() {
-        QString prev = m_contentPanel->getAdjacentFilePath(m_currentQuickLookPath, -1);
-        if (!prev.isEmpty()) {
-            m_currentQuickLookPath = prev;
-            QuickLookWindow::instance().previewFile(prev);
-        }
-    });
+    if (m_quickLook) {
+        connect(m_quickLook, &QuickLookWindow::prevRequested, this, [this]() {
+            QString prev = m_contentPanel->getAdjacentFilePath(m_currentQuickLookPath, -1);
+            if (!prev.isEmpty()) {
+                m_currentQuickLookPath = prev;
+                m_quickLook->preview(prev);
+            }
+        });
 
-    connect(&QuickLookWindow::instance(), &QuickLookWindow::nextRequested, this, [this]() {
-        QString next = m_contentPanel->getAdjacentFilePath(m_currentQuickLookPath, 1);
-        if (!next.isEmpty()) {
-            m_currentQuickLookPath = next;
-            QuickLookWindow::instance().previewFile(next);
-        }
-    });
+        connect(m_quickLook, &QuickLookWindow::nextRequested, this, [this]() {
+            QString next = m_contentPanel->getAdjacentFilePath(m_currentQuickLookPath, 1);
+            if (!next.isEmpty()) {
+                m_currentQuickLookPath = next;
+                m_quickLook->preview(next);
+            }
+        });
 
-    // 4. 元数据变化 -> 同步元数据面板
-    connect(&QuickLookWindow::instance(), &QuickLookWindow::ratingRequested, this, [this](int rating) {
-        if (m_currentQuickLookPath.isEmpty()) return;
+        // 4. 元数据变化 -> 同步元数据面板 (更正：重新加固连接打标快捷键触发信号)
+        connect(m_quickLook, &QuickLookWindow::ratingRequested, this, [this](int rating) {
+            if (m_currentQuickLookPath.isEmpty()) return;
 
-        // 2026-04-11 按照用户要求：补全物理持久化逻辑 (MetadataManager 直接入库)
-        MetadataManager::instance().setRating(m_currentQuickLookPath.toStdWString(), rating);
+            // 补全物理持久化逻辑 (MetadataManager 直接入库)
+            MetadataManager::instance().setRating(m_currentQuickLookPath.toStdWString(), rating);
 
-        m_metaPanel->setRating(rating);
-        // 2026-04-11 按照用户要求：在预览窗设定星级时，左上方即时反馈
-        QString msg = QString("已设定星级: <span style='color: #FECF0E;'>%1 星</span>").arg(rating);
-        ToolTipOverlay::instance()->showText(QPoint(50, 50), msg, 1500, QColor("#FECF0E"));
-    });
+            m_metaPanel->setRating(rating);
+            // 左上方即时反馈
+            QString msg = QString("已设定星级: <span style='color: #FECF0E;'>%1 星</span>").arg(rating);
+            ToolTipOverlay::instance()->showText(QPoint(50, 50), msg, 1500, QColor("#FECF0E"));
+        });
 
-    connect(&QuickLookWindow::instance(), &QuickLookWindow::colorRequested, this, [this](const QString& color) {
-        if (m_currentQuickLookPath.isEmpty()) return;
+        connect(m_quickLook, &QuickLookWindow::colorRequested, this, [this](const QString& color) {
+            if (m_currentQuickLookPath.isEmpty()) return;
 
-        // 2026-04-11 按照用户要求：补全物理持久化逻辑 (MetadataManager 直接入库)
-        MetadataManager::instance().setColor(m_currentQuickLookPath.toStdWString(), color.toStdWString());
+            // 补全物理持久化逻辑 (MetadataManager 直接入库)
+            MetadataManager::instance().setColor(m_currentQuickLookPath.toStdWString(), color.toStdWString());
 
-        m_metaPanel->setColor(color.toStdWString());
-        
-        QString colorName = "无颜色";
-        if (color == "red") colorName = "红色";
-        else if (color == "orange") colorName = "橙色";
-        else if (color == "yellow") colorName = "黄色";
-        else if (color == "green") colorName = "绿色";
-        else if (color == "cyan") colorName = "青色";
-        else if (color == "blue") colorName = "蓝色";
-        else if (color == "purple") colorName = "紫色";
-        else if (color == "gray") colorName = "灰色";
+            m_metaPanel->setColor(color.toStdWString());
 
-        QString msg = QString("已设定颜色: <span style='color: #41F2F2;'>%1</span>").arg(colorName);
-        ToolTipOverlay::instance()->showText(QPoint(50, 50), msg, 1500, QColor("#41F2F2"));
-    });
+            QString colorName = "无颜色";
+            if (color == "red") colorName = "红色";
+            else if (color == "orange") colorName = "橙色";
+            else if (color == "yellow") colorName = "黄色";
+            else if (color == "green") colorName = "绿色";
+            else if (color == "cyan") colorName = "青色";
+            else if (color == "blue") colorName = "蓝色";
+            else if (color == "purple") colorName = "紫色";
+            else if (color == "gray") colorName = "灰色";
+
+            QString msg = QString("已设定颜色: <span style='color: #41F2F2;'>%1</span>").arg(colorName);
+            ToolTipOverlay::instance()->showText(QPoint(50, 50), msg, 1500, QColor("#41F2F2"));
+        });
+    }
 
     // 5a. 目录装载完成 -> FilterPanel 动态填充 (六参数版本: 移除标签统计)
     connect(m_contentPanel, &ContentPanel::directoryStatsReady, this,

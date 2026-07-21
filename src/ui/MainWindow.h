@@ -127,6 +127,9 @@ private:
     // 复合地址栏
     AddressBar* m_addressBar = nullptr;
 
+    // 2026-07-xx：改用非单例的 QuickLookWindow，避免全局单例状态竞争与泄露
+    class QuickLookWindow* m_quickLook = nullptr;
+
     // 六个面板
     CategoryPanel* m_categoryPanel = nullptr;
     // 2026-04-11 按照用户要求：记录当前预览的文件路径，用于驱动方向键切图

@@ -1,7 +1,6 @@
 #include "QuickLookWindow.h"
 #include "UiHelper.h"
 #include <QKeyEvent>
-#include <QMouseEvent>
 #include <QFileInfo>
 #include <QScreen>
 #include <QApplication>
@@ -48,16 +47,20 @@ QuickLookGraphicsView::QuickLookGraphicsView(QWidget* parent) : QGraphicsView(pa
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setStyleSheet("background: transparent; border: none;");
 
-    // 美化滚动条
+    // 美化滚动条：宽度 10px、圆角 3px、背景透明、Handle 颜色 #333333
     horizontalScrollBar()->setStyleSheet(R"(
-        QScrollBar:horizontal { height: 4px; background: transparent; }
-        QScrollBar::handle:horizontal { background: #444; border-radius: 2px; }
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { border: none; background: none; }
+        QScrollBar:horizontal { height: 10px; background: transparent; }
+        QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; min-width: 20px; }
+        QScrollBar::handle:horizontal:hover { background: #444444; }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; height: 0px; }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
     )");
     verticalScrollBar()->setStyleSheet(R"(
-        QScrollBar:vertical { width: 4px; background: transparent; }
-        QScrollBar::handle:vertical { background: #444; border-radius: 2px; }
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { border: none; background: none; }
+        QScrollBar:vertical { width: 10px; background: transparent; }
+        QScrollBar::handle:vertical { background: #333333; border-radius: 3px; min-height: 20px; }
+        QScrollBar::handle:vertical:hover { background: #444444; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { width: 0px; height: 0px; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
     )");
 }
 
@@ -183,12 +186,7 @@ void QuickLookGraphicsView::updateCursor() {
 // QuickLookWindow 实现
 // ==========================================
 
-QuickLookWindow& QuickLookWindow::instance() {
-    static QuickLookWindow inst;
-    return inst;
-}
-
-QuickLookWindow::QuickLookWindow() : QWidget(nullptr) {
+QuickLookWindow::QuickLookWindow(QWidget* parent) : QWidget(parent) {
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::Tool);
 
     setupUi();
@@ -225,8 +223,9 @@ void QuickLookWindow::setupUi() {
     m_titleLabel = new QLabel(m_container);
     m_titleLabel->setObjectName("QLTitle");
     m_titleLabel->hide();
+    // 标题栏不再占用布局空间，仅保留对象供其他函数调用 setText()
 
-    // 图片渲染控件
+    // 图片渲染控件 (QGraphicsView 替代原本的 QLabel)
     m_graphicsView = new QuickLookGraphicsView();
     m_graphicsView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     layout->addWidget(m_graphicsView);
@@ -235,136 +234,25 @@ void QuickLookWindow::setupUi() {
     m_textEdit = new QPlainTextEdit();
     m_textEdit->setReadOnly(true);
     m_textEdit->hide();
+
+    // 美化文本框的滚动条样式：宽度 10px、圆角 3px、背景透明、Handle 颜色 #333333
     m_textEdit->verticalScrollBar()->setStyleSheet(R"(
-        QScrollBar:vertical { width: 4px; background: transparent; }
-        QScrollBar::handle:vertical { background: #444; border-radius: 2px; }
+        QScrollBar:vertical { width: 10px; background: transparent; }
+        QScrollBar::handle:vertical { background: #333333; border-radius: 3px; min-height: 20px; }
+        QScrollBar::handle:vertical:hover { background: #444444; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { width: 0px; height: 0px; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
     )");
-    m_textEdit->installEventFilter(this);
+    m_textEdit->installEventFilter(this); // 拦截空格键以防吞噬
     layout->addWidget(m_textEdit);
-
-    // 媒体播放器控件容器
-    m_mediaContainer = new QWidget();
-    m_mediaContainer->hide();
-    auto* mediaLayout = new QVBoxLayout(m_mediaContainer);
-    mediaLayout->setContentsMargins(0, 0, 0, 0);
-    mediaLayout->setSpacing(10);
-
-#ifdef ARCMETA_HAS_MULTIMEDIA
-    m_videoWidget = new QVideoWidget();
-    m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    mediaLayout->addWidget(m_videoWidget);
-#endif
-
-    m_audioPlaceholder = new QLabel();
-    m_audioPlaceholder->setAlignment(Qt::AlignCenter);
-    m_audioPlaceholder->setStyleSheet("color: #FF8C00; font-size: 20px; font-weight: bold; background: #121212; border-radius: 8px;");
-    m_audioPlaceholder->hide();
-    mediaLayout->addWidget(m_audioPlaceholder);
-
-    auto* ctrlLayout = new QHBoxLayout();
-    ctrlLayout->setContentsMargins(0, 0, 0, 0);
-    ctrlLayout->setSpacing(10);
-
-    m_playBtn = new QPushButton("播放");
-    m_playBtn->setStyleSheet(R"(
-        QPushButton {
-            background-color: #333;
-            color: #EEE;
-            border: 1px solid #555;
-            padding: 5px 15px;
-            border-radius: 4px;
-        }
-        QPushButton:hover {
-            background-color: #444;
-        }
-    )");
-    ctrlLayout->addWidget(m_playBtn);
-
-    m_timeSlider = new QSlider(Qt::Horizontal);
-    m_timeSlider->setStyleSheet(R"(
-        QSlider::groove:horizontal {
-            height: 6px;
-            background: #333;
-            border-radius: 3px;
-        }
-        QSlider::sub-page:horizontal {
-            background: #FF8C00;
-            border-radius: 3px;
-        }
-        QSlider::handle:horizontal {
-            background: #EEE;
-            width: 12px;
-            margin-top: -3px;
-            margin-bottom: -3px;
-            border-radius: 6px;
-        }
-    )");
-    ctrlLayout->addWidget(m_timeSlider);
-
-    m_timeLabel = new QLabel("00:00 / 00:00");
-    m_timeLabel->setStyleSheet("color: #AAA; font-family: 'Consolas';");
-    ctrlLayout->addWidget(m_timeLabel);
-
-    mediaLayout->addLayout(ctrlLayout);
-    layout->addWidget(m_mediaContainer);
 
     // 状态与信息标签
     m_infoLabel = new QLabel(m_container);
     m_infoLabel->setStyleSheet("color: #777;");
     m_infoLabel->hide();
+    // 信息栏不再占用布局空间，仅保留对象供其他函数调用 setText()
 
     rootLayout->addWidget(m_container);
-
-#ifdef ARCMETA_HAS_MULTIMEDIA
-    // 初始化媒体播放器
-    m_mediaPlayer = new QMediaPlayer(this);
-    m_audioOutput = new QAudioOutput(this);
-    m_mediaPlayer->setAudioOutput(m_audioOutput);
-    m_mediaPlayer->setVideoOutput(m_videoWidget);
-
-    connect(m_mediaPlayer, &QMediaPlayer::positionChanged, this, [this](qint64 position) {
-        if (!m_timeSlider->isSliderDown()) {
-            m_timeSlider->setValue(static_cast<int>(position));
-        }
-        m_timeLabel->setText(QString("%1 / %2")
-            .arg(formatTime(position))
-            .arg(formatTime(m_mediaPlayer->duration())));
-    });
-
-    connect(m_mediaPlayer, &QMediaPlayer::durationChanged, this, [this](qint64 duration) {
-        m_timeSlider->setRange(0, static_cast<int>(duration));
-        m_timeLabel->setText(QString("%1 / %2")
-            .arg(formatTime(m_mediaPlayer->position()))
-            .arg(formatTime(duration)));
-    });
-
-    connect(m_playBtn, &QPushButton::clicked, this, [this]() {
-        if (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState) {
-            m_mediaPlayer->pause();
-            m_playBtn->setText("播放");
-        } else {
-            m_mediaPlayer->play();
-            m_playBtn->setText("暂停");
-        }
-    });
-
-    connect(m_timeSlider, &QSlider::sliderMoved, this, [this](int position) {
-        m_mediaPlayer->setPosition(position);
-    });
-
-    connect(m_mediaPlayer, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error error, const QString &errorString) {
-        Q_UNUSED(error);
-        m_infoLabel->setText(QString("播放错误: %1 (可能缺失系统编解码器)").arg(errorString));
-        m_infoLabel->setStyleSheet("color: #E24B4A; font-weight: bold;");
-    });
-#else
-    m_playBtn->setEnabled(false);
-    m_timeSlider->setEnabled(false);
-#endif
-}
-
-void QuickLookWindow::previewFile(const QString& path) {
-    preview(path);
 }
 
 void QuickLookWindow::preview(const QString& filePath) {
@@ -375,18 +263,15 @@ void QuickLookWindow::preview(const QString& filePath) {
 
     QString ext = fi.suffix().toLower();
 
-    // 停止并重置之前的媒体播放
-    resetMedia();
-
     if (VIDEO_EXTS.contains(ext) || AUDIO_EXTS.contains(ext)) {
-        renderMedia(filePath);
+        // 多媒体组件已废弃，直接走文本模式预览元数据或文本形式
+        renderText(filePath);
     } else if (UiHelper::isGraphicsFile(ext)) {
         renderImage(filePath);
     } else if (UNPREVIEWABLE_EXTS.contains(ext)) {
         // 直接提示不支持，显示其系统图标
         m_graphicsView->hide();
         m_textEdit->hide();
-        m_mediaContainer->hide();
 
         m_graphicsView->clear();
         m_textEdit->clear();
@@ -402,7 +287,9 @@ void QuickLookWindow::preview(const QString& filePath) {
         renderText(filePath);
     }
 
+    // 全屏显示：改用 Qt 原生 showFullScreen()
     showFullScreen();
+
     raise();
     activateWindow();
 
@@ -417,13 +304,11 @@ void QuickLookWindow::preview(const QString& filePath) {
 }
 
 void QuickLookWindow::closePreview() {
-    resetMedia();
     hide();
 }
 
 void QuickLookWindow::renderImage(const QString& path) {
     m_textEdit->hide();
-    m_mediaContainer->hide();
     m_graphicsView->show();
     m_graphicsView->clear();
     m_infoLabel->setText("正在加载预览...");
@@ -448,8 +333,10 @@ void QuickLookWindow::renderImage(const QString& path) {
                 renderer.render(&painter);
             }
         } else if (QT_NATIVE_FORMATS.contains(ext)) {
+            // Qt 原生支持的格式无损加载
             img.load(path);
         } else {
+            // 非原生格式兜底
             img = UiHelper::getShellThumbnail(path, 4096);
             if (img.isNull()) {
                 img.load(path);
@@ -484,7 +371,6 @@ void QuickLookWindow::renderImage(const QString& path) {
 
 void QuickLookWindow::renderText(const QString& path) {
     m_graphicsView->hide();
-    m_mediaContainer->hide();
     m_textEdit->show();
     m_textEdit->setPlainText("正在读取文件...");
 
@@ -500,7 +386,6 @@ void QuickLookWindow::renderText(const QString& path) {
     bool potentialUtf16 = fileData.startsWith("\xFF\xFE") || fileData.startsWith("\xFE\xFF");
     if (!potentialUtf16 && isBinary(fileData)) {
         m_textEdit->hide();
-        m_mediaContainer->hide();
         m_graphicsView->show();
         m_graphicsView->clear();
 
@@ -530,49 +415,6 @@ void QuickLookWindow::renderText(const QString& path) {
     m_textEdit->setPlainText(text);
     m_textEdit->verticalScrollBar()->setValue(0);
     m_infoLabel->setText(QString("编码: %1 | 大小: %2 KB | %3").arg(encodingName).arg(QFileInfo(path).size() / 1024.0, 0, 'f', 1).arg(path));
-}
-
-void QuickLookWindow::renderMedia(const QString& path) {
-    m_graphicsView->hide();
-    m_textEdit->hide();
-    m_mediaContainer->show();
-
-    QFileInfo fi(path);
-    QString ext = fi.suffix().toLower();
-
-#ifdef ARCMETA_HAS_MULTIMEDIA
-    if (AUDIO_EXTS.contains(ext)) {
-        m_videoWidget->hide();
-        m_audioPlaceholder->setText(QString("音频播放中...\n%1").arg(fi.fileName()));
-        m_audioPlaceholder->show();
-    } else {
-        m_audioPlaceholder->hide();
-        m_videoWidget->show();
-    }
-
-    m_mediaPlayer->setSource(QUrl::fromLocalFile(path));
-    m_mediaPlayer->play();
-    m_playBtn->setText("暂停");
-
-    m_infoLabel->setText(path);
-#else
-    m_audioPlaceholder->setText(QString("音视频预览未启用\n%1").arg(fi.fileName()));
-    m_audioPlaceholder->show();
-    m_infoLabel->setText("当前系统未启用多媒体播放模块 (构建时缺少 Qt Multimedia 组件)");
-    m_infoLabel->setStyleSheet("color: #FF8C00; font-weight: bold;");
-#endif
-}
-
-void QuickLookWindow::resetMedia() {
-#ifdef ARCMETA_HAS_MULTIMEDIA
-    if (m_mediaPlayer) {
-        m_mediaPlayer->stop();
-        m_mediaPlayer->setSource(QUrl());
-    }
-#endif
-    m_playBtn->setText("播放");
-    m_timeSlider->setValue(0);
-    m_timeLabel->setText("00:00 / 00:00");
 }
 
 QString QuickLookWindow::formatTime(qint64 ms) {
@@ -619,7 +461,7 @@ QString QuickLookWindow::detectEncoding(const QByteArray& fileData) {
 }
 
 void QuickLookWindow::keyPressEvent(QKeyEvent* event) {
-    // 支持 Ctrl+W 关闭空格文件预览窗口
+    // 2026-07-10 新增：支持 Ctrl+W 关闭空格文件预览窗口
     if (event->key() == Qt::Key_W && (event->modifiers() & Qt::ControlModifier)) {
         closePreview();
         event->accept();
@@ -630,20 +472,7 @@ void QuickLookWindow::keyPressEvent(QKeyEvent* event) {
         closePreview();
         return;
     }
-    if (event->key() == Qt::Key_P) {
-#ifdef ARCMETA_HAS_MULTIMEDIA
-        if (m_mediaContainer && m_mediaContainer->isVisible() && m_mediaPlayer) {
-            if (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState) {
-                m_mediaPlayer->pause();
-                m_playBtn->setText("播放");
-            } else {
-                m_mediaPlayer->play();
-                m_playBtn->setText("暂停");
-            }
-        }
-#endif
-        return;
-    }
+
     if (event->key() == Qt::Key_Up || event->key() == Qt::Key_Left) {
         emit prevRequested();
         return;
@@ -653,14 +482,15 @@ void QuickLookWindow::keyPressEvent(QKeyEvent* event) {
         return;
     }
 
-    // 评分标记：1-5 键
+    // 2026-07-21 更正：恢复打标快捷键 (1-5 键星级打标)
     if (event->key() >= Qt::Key_1 && event->key() <= Qt::Key_5 && !(event->modifiers() & Qt::AltModifier)) {
         int rating = event->key() - Qt::Key_0;
         emit ratingRequested(rating);
+        event->accept();
         return;
     }
 
-    // 颜色标记：Alt + 1-9
+    // 2026-07-21 更正：恢复颜色打标快捷键 (Alt + 1-9 键)
     if (event->modifiers() & Qt::AltModifier && event->key() >= Qt::Key_1 && event->key() <= Qt::Key_9) {
         QString color;
         switch (event->key()) {
@@ -675,6 +505,7 @@ void QuickLookWindow::keyPressEvent(QKeyEvent* event) {
             case Qt::Key_9: color = ""; break;
         }
         emit colorRequested(color);
+        event->accept();
         return;
     }
 
@@ -686,11 +517,12 @@ void QuickLookWindow::showEvent(QShowEvent* event) {
 }
 
 bool QuickLookWindow::eventFilter(QObject* watched, QEvent* event) {
+    // 2026-07-xx 核心改进：当文本框组件获得焦点并按下空格键时，将其拦截，改为执行关闭预览逻辑
     if (watched == m_textEdit && event->type() == QEvent::KeyPress) {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
         if (keyEvent->key() == Qt::Key_Space) {
             closePreview();
-            return true;
+            return true; // 100% 拦截，阻止 QPlainTextEdit 响应并向下翻页
         }
     }
 

@@ -4,23 +4,9 @@
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QVBoxLayout>
-#include <QPropertyAnimation>
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QGraphicsPixmapItem>
-#include <QPushButton>
-#include <QSlider>
-#include <QHBoxLayout>
-
-// 在此项目默认不链接 Qt Multimedia 模块，我们定义或留空 ARCMETA_HAS_MULTIMEDIA。
-// 这样当没有此依赖时，会完美优雅降级。
-#undef ARCMETA_HAS_MULTIMEDIA
-
-#ifdef ARCMETA_HAS_MULTIMEDIA
-#include <QMediaPlayer>
-#include <QAudioOutput>
-#include <QVideoWidget>
-#endif
 
 namespace ArcMeta {
 
@@ -52,9 +38,9 @@ private:
 class QuickLookWindow : public QWidget {
     Q_OBJECT
 public:
-    static QuickLookWindow& instance();
+    explicit QuickLookWindow(QWidget* parent = nullptr);
+    ~QuickLookWindow() override;
 
-    void previewFile(const QString& path);
     void preview(const QString& filePath);
     void closePreview();
 
@@ -70,14 +56,9 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
-    QuickLookWindow();
-    ~QuickLookWindow() override;
-
     void setupUi();
     void renderImage(const QString& path);
     void renderText(const QString& path);
-    void renderMedia(const QString& path);
-    void resetMedia();
 
     QString formatTime(qint64 ms);
     QString detectEncoding(const QByteArray& data);
@@ -88,22 +69,6 @@ private:
     QLabel* m_titleLabel = nullptr;
     QLabel* m_infoLabel = nullptr;
     QWidget* m_container = nullptr;
-    
-    // 媒体播放器组件
-    QWidget* m_mediaContainer = nullptr;
-#ifdef ARCMETA_HAS_MULTIMEDIA
-    QVideoWidget* m_videoWidget = nullptr;
-    QMediaPlayer* m_mediaPlayer = nullptr;
-    QAudioOutput* m_audioOutput = nullptr;
-#else
-    QWidget* m_videoWidget = nullptr;
-    QObject* m_mediaPlayer = nullptr;
-    QObject* m_audioOutput = nullptr;
-#endif
-    QPushButton* m_playBtn = nullptr;
-    QSlider* m_timeSlider = nullptr;
-    QLabel* m_timeLabel = nullptr;
-    QLabel* m_audioPlaceholder = nullptr; // 音频专属的黑屏/波形提示占位
     
     QString m_currentPath;
     bool m_ignoreDeactivate = false;
