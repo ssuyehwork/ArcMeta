@@ -36,7 +36,7 @@ static const QSet<QString> UNPREVIEWABLE_EXTS = {"zip", "rar", "7z", "tar", "gz"
 QuickLookGraphicsView::QuickLookGraphicsView(QWidget* parent) : QGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
-    
+
     m_pixmapItem = new QGraphicsPixmapItem();
     m_pixmapItem->setTransformationMode(Qt::SmoothTransformation);
     m_scene->addItem(m_pixmapItem);
@@ -47,18 +47,6 @@ QuickLookGraphicsView::QuickLookGraphicsView(QWidget* parent) : QGraphicsView(pa
     setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setStyleSheet("background: transparent; border: none;");
-    
-    // 美化滚动条
-    horizontalScrollBar()->setStyleSheet(R"(
-        QScrollBar:horizontal { height: 4px; background: transparent; }
-        QScrollBar::handle:horizontal { background: #444; border-radius: 2px; }
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { border: none; background: none; }
-    )");
-    verticalScrollBar()->setStyleSheet(R"(
-        QScrollBar:vertical { width: 4px; background: transparent; }
-        QScrollBar::handle:vertical { background: #444; border-radius: 2px; }
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { border: none; background: none; }
-    )");
 }
 
 void QuickLookGraphicsView::setPixmap(const QPixmap& pixmap) {
@@ -78,11 +66,11 @@ void QuickLookGraphicsView::clear() {
 
 void QuickLookGraphicsView::fitImage() {
     if (!m_pixmapItem || m_pixmapItem->pixmap().isNull()) return;
-    
+
     resetTransform();
     m_scene->setSceneRect(m_pixmapItem->boundingRect());
     fitInView(m_pixmapItem, Qt::KeepAspectRatio);
-    
+
     m_currentScale = transform().m11();
     m_isFitMode = true;
     updateCursor();
@@ -189,7 +177,23 @@ QuickLookWindow& QuickLookWindow::instance() {
 }
 
 QuickLookWindow::QuickLookWindow() : QWidget(nullptr) {
+    setObjectName("QuickLookWindow");
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::Tool);
+
+    // 按照 Plan-109 规范：预览窗口内的滚动条宽度 10px、圆角 3px、背景透明、Handle 颜色对齐 #333333
+    setStyleSheet(
+        "#QuickLookWindow { background-color: #1E1E1E; }"
+        "QScrollBar:vertical { border: none; background: transparent; width: 10px; margin: 0px; }"
+        "QScrollBar::handle:vertical { background: #333333; min-height: 20px; border-radius: 3px; }"
+        "QScrollBar::handle:vertical:hover { background: #444444; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { width: 0px; height: 0px; }"
+        "QScrollBar:horizontal { height: 10px; background: transparent; border: none; margin: 0px; }"
+        "QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; min-width: 20px; }"
+        "QScrollBar::handle:horizontal:hover { background: #444444; }"
+        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; height: 0px; }"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical, "
+        "QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }"
+    );
 
     setupUi();
     installEventFilter(this);
@@ -224,7 +228,8 @@ void QuickLookWindow::setupUi() {
 
     m_titleLabel = new QLabel(m_container);
     m_titleLabel->setObjectName("QLTitle");
-    m_titleLabel->hide();
+    m_titleLabel->setStyleSheet("padding: 8px 15px; color: #FF8C00; font-weight: bold; font-size: 14px; background-color: #151516; border-bottom: 1px solid #2D2D2D;");
+    layout->addWidget(m_titleLabel);
 
     // 图片渲染控件
     m_graphicsView = new QuickLookGraphicsView();
@@ -235,10 +240,6 @@ void QuickLookWindow::setupUi() {
     m_textEdit = new QPlainTextEdit();
     m_textEdit->setReadOnly(true);
     m_textEdit->hide();
-    m_textEdit->verticalScrollBar()->setStyleSheet(R"(
-        QScrollBar:vertical { width: 4px; background: transparent; }
-        QScrollBar::handle:vertical { background: #444; border-radius: 2px; }
-    )");
     m_textEdit->installEventFilter(this);
     layout->addWidget(m_textEdit);
 
@@ -310,10 +311,27 @@ void QuickLookWindow::setupUi() {
 
     // 状态与信息标签
     m_infoLabel = new QLabel(m_container);
-    m_infoLabel->setStyleSheet("color: #777;");
-    m_infoLabel->hide();
+    m_infoLabel->setStyleSheet("padding: 6px 15px; color: #888; background-color: #151516; font-size: 11px; border-top: 1px solid #2D2D2D;");
+    layout->addWidget(m_infoLabel);
 
     rootLayout->addWidget(m_container);
+
+    // 应用符合 Plan-109 的全局滚动条样式美化，突破级联 QSS 屏蔽问题
+    QString scrollbarQss = R"(
+        QScrollBar:vertical { border: none; background: transparent; width: 10px; margin: 0px; }
+        QScrollBar::handle:vertical { background: #333333; min-height: 20px; border-radius: 3px; }
+        QScrollBar::handle:vertical:hover { background: #444444; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { width: 0px; height: 0px; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+        QScrollBar:horizontal { height: 10px; background: transparent; border: none; margin: 0px; }
+        QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; min-width: 20px; }
+        QScrollBar::handle:horizontal:hover { background: #444444; }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; height: 0px; }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+    )";
+    m_graphicsView->horizontalScrollBar()->setStyleSheet(scrollbarQss);
+    m_graphicsView->verticalScrollBar()->setStyleSheet(scrollbarQss);
+    m_textEdit->verticalScrollBar()->setStyleSheet(scrollbarQss);
 
 #ifdef ARCMETA_HAS_MULTIMEDIA
     // 初始化媒体播放器
@@ -371,7 +389,10 @@ void QuickLookWindow::preview(const QString& filePath) {
     m_currentPath = filePath;
     QFileInfo fi(filePath);
     m_titleLabel->setText(fi.fileName());
-    m_infoLabel->setStyleSheet("color: #777;");
+    m_titleLabel->show();
+
+    m_infoLabel->setStyleSheet("padding: 6px 15px; color: #888; background-color: #151516; font-size: 11px; border-top: 1px solid #2D2D2D;");
+    m_infoLabel->show();
 
     QString ext = fi.suffix().toLower();
 
@@ -397,7 +418,7 @@ void QuickLookWindow::preview(const QString& filePath) {
         m_graphicsView->show();
 
         m_infoLabel->setText("该文件类型暂不支持预览");
-        m_infoLabel->setStyleSheet("color: #FF8C00; font-weight: bold; font-size: 14px;");
+        m_infoLabel->setStyleSheet("padding: 6px 15px; color: #FF8C00; background-color: #151516; font-weight: bold; font-size: 12px; border-top: 1px solid #2D2D2D;");
     } else {
         renderText(filePath);
     }
@@ -503,7 +524,7 @@ void QuickLookWindow::renderText(const QString& path) {
         m_mediaContainer->hide();
         m_graphicsView->show();
         m_graphicsView->clear();
-        
+
         QIcon fileIcon = UiHelper::getFileIcon(path, 256);
         QPixmap pix = fileIcon.pixmap(256, 256);
         m_graphicsView->setPixmap(pix);
@@ -529,6 +550,7 @@ void QuickLookWindow::renderText(const QString& path) {
 
     m_textEdit->setPlainText(text);
     m_textEdit->verticalScrollBar()->setValue(0);
+    m_textEdit->setFocus(); // 文字模式下强制将焦点设置到 viewport，确保键盘滚动立即可用
     m_infoLabel->setText(QString("编码: %1 | 大小: %2 KB | %3").arg(encodingName).arg(QFileInfo(path).size() / 1024.0, 0, 'f', 1).arg(path));
 }
 
@@ -553,7 +575,7 @@ void QuickLookWindow::renderMedia(const QString& path) {
     m_mediaPlayer->setSource(QUrl::fromLocalFile(path));
     m_mediaPlayer->play();
     m_playBtn->setText("暂停");
-    
+
     m_infoLabel->setText(path);
 #else
     m_audioPlaceholder->setText(QString("音视频预览未启用\n%1").arg(fi.fileName()));
