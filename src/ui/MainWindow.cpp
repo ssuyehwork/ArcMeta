@@ -575,34 +575,28 @@ void MainWindow::initUi() {
 
         m_metaPanel->setColor(color.toStdWString());
         
-        // 2026-xx-xx 按照用户最新硬性指令：不再保留任何“已设定颜色”或“无颜色标记”中英文字符，只展示纯物理发光圆形 Dot！
+        // 2026-xx-xx 按照用户最新反馈：QTextDocument 对 CSS border-radius 50% 与 flexbox 复杂特性不具有完美渲染兼容性，
+        // 强行使用会导致标签坍塌为空白方块。此处改用 QTextDocument 100% 完美支持的 Unicode 大字号圆形字符(●)直接着色！
         QString colorHex = "#888888";
-        QString glowColor = "rgba(136, 136, 136, 0.4)";
-        if (color == "red") { colorHex = "#E81123"; glowColor = "rgba(232, 17, 35, 0.5)"; }
-        else if (color == "orange") { colorHex = "#FF551C"; glowColor = "rgba(255, 85, 28, 0.5)"; }
-        else if (color == "yellow") { colorHex = "#FECF0E"; glowColor = "rgba(254, 207, 14, 0.5)"; }
-        else if (color == "green") { colorHex = "#2ECC71"; glowColor = "rgba(46, 204, 113, 0.5)"; }
-        else if (color == "cyan") { colorHex = "#41F2F2"; glowColor = "rgba(65, 242, 242, 0.5)"; }
-        else if (color == "blue") { colorHex = "#3498DB"; glowColor = "rgba(52, 152, 219, 0.5)"; }
-        else if (color == "purple") { colorHex = "#9B59B6"; glowColor = "rgba(155, 89, 182, 0.5)"; }
-        else if (color == "gray") { colorHex = "#95A5A6"; glowColor = "rgba(149, 165, 166, 0.5)"; }
+        if (color == "red") { colorHex = "#E81123"; }
+        else if (color == "orange") { colorHex = "#FF551C"; }
+        else if (color == "yellow") { colorHex = "#FECF0E"; }
+        else if (color == "green") { colorHex = "#2ECC71"; }
+        else if (color == "cyan") { colorHex = "#41F2F2"; }
+        else if (color == "blue") { colorHex = "#3498DB"; }
+        else if (color == "purple") { colorHex = "#9B59B6"; }
+        else if (color == "gray") { colorHex = "#95A5A6"; }
 
         QString msg;
         if (color.isEmpty()) {
-            // “无颜色”打标时，不输出任何字词，展示一个精致的暗色透明灰色圈
-            msg = QString(
-                "<div style='text-align: center; padding: 4px 10px; display: flex; align-items: center; justify-content: center;'>"
-                "  <span style='background-color: transparent; border-radius: 50%; display: inline-block; width: 14px; height: 16px; "
-                "               border: 2px dashed #444444;'></span>"
-                "</div>"
-            );
+            // “无颜色”打标时，展示一个精致的暗灰色空心圈
+            msg = "<div style='text-align: center; padding: 2px 10px;'><span style='color: #444444; font-size: 16pt;'>○</span></div>";
         } else {
             msg = QString(
-                "<div style='text-align: center; padding: 4px 10px; display: flex; align-items: center; justify-content: center;'>"
-                "  <span style='background-color: %1; border-radius: 50%; display: inline-block; width: 16px; height: 16px; "
-                "               box-shadow: 0 0 8px %2; border: 1px solid rgba(255,255,255,0.2);'></span>"
+                "<div style='text-align: center; padding: 2px 10px;'>"
+                "  <span style='color: %1; font-size: 18pt;'>●</span>"
                 "</div>"
-            ).arg(colorHex).arg(glowColor);
+            ).arg(colorHex);
         }
 
         QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
