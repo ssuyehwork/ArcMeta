@@ -535,13 +535,13 @@ void MainWindow::initUi() {
 
         m_metaPanel->setRating(rating);
 
-        // 2026-xx-xx 按照用户最新硬性指令：不再保留任何“已设定星级”或“无评级”中英文字符，只展示纯 5 星标指示器！
+        // 2026-xx-xx 拨乱反正：不再使用任何非标金色，选中的星标高亮色采用全局置顶/激活唯一合法色值 ActiveOrange (#FF551C)！
         QString starsStr;
-        // 采用标准 5 星格位显示，选中的为金色，其余未选中的置灰，没有字眼。即使 rating 级别为 0（无评级），也仅显示 5 个置灰暗星
+        // 采用标准 5 星格位显示，选中的为 ActiveOrange 激活色，其余未选中的置灰，没有字眼。即使 rating 级别为 0（无评级），也仅显示 5 个置灰暗星
         int activeStars = qBound(0, rating, 5);
         for (int i = 1; i <= 5; ++i) {
             if (i <= activeStars) {
-                starsStr += "<span style='color: #FECF0E; font-size: 14pt; margin-right: 2px;'>★</span>";
+                starsStr += "<span style='color: #FF551C; font-size: 14pt; margin-right: 2px;'>★</span>";
             } else {
                 starsStr += "<span style='color: #444444; font-size: 14pt; margin-right: 2px;'>★</span>";
             }
@@ -564,7 +564,7 @@ void MainWindow::initUi() {
         int targetX = centerX - w / 2;
         int targetY = screenGeom.y() + 50; // 靠齐屏幕上方居中 (留 50px 顶部安全间距)
 
-        ToolTipOverlay::instance()->showText(QPoint(targetX, targetY), msg, 1500, QColor("#FECF0E"), true);
+        ToolTipOverlay::instance()->showText(QPoint(targetX, targetY), msg, 1500, QColor("#FF551C"), true);
     });
 
     connect(&QuickLookWindow::instance(), &QuickLookWindow::colorRequested, this, [this](const QString& color) {
