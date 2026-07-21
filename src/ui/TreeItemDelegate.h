@@ -2,6 +2,7 @@
 
 #include <QStyledItemDelegate>
 #include <QPainter>
+#include <QPainterPath>
 #include <QApplication>
 #include <QMouseEvent>
 #include <QLineEdit>
