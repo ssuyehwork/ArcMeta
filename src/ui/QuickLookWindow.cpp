@@ -1,5 +1,6 @@
 #include "QuickLookWindow.h"
 #include "UiHelper.h"
+#include "StyleLibrary.h"
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QFileInfo>
@@ -24,10 +25,11 @@
 
 namespace ArcMeta {
 
-// 静态文件分类后缀定义
-static const QSet<QString> VIDEO_EXTS = {"mp4", "m4v", "mov", "avi", "mkv", "wmv", "flv", "webm", "3gp"};
-static const QSet<QString> AUDIO_EXTS = {"mp3", "wav", "wma", "flac", "aac", "ogg", "m4a", "ape"};
-static const QSet<QString> UNPREVIEWABLE_EXTS = {"zip", "rar", "7z", "tar", "gz", "bz2", "xz", "exe", "dll", "msi", "sys", "iso", "dmg", "pkg", "bin", "ini", "lnk"};
+// 静态文件分类后缀定义 (音视频格式并入黑名单进行系统大图标降级预览，不直接播放)
+static const QSet<QString> UNPREVIEWABLE_EXTS = {
+    "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "exe", "dll", "msi", "sys", "iso", "dmg", "pkg", "bin", "ini", "lnk",
+    "mp4", "m4v", "mov", "avi", "mkv", "wmv", "flv", "webm", "3gp", "mp3", "wav", "wma", "flac", "aac", "ogg", "m4a", "ape"
+};
 
 // ==========================================
 // QuickLookGraphicsView 实现
@@ -48,16 +50,18 @@ QuickLookGraphicsView::QuickLookGraphicsView(QWidget* parent) : QGraphicsView(pa
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setStyleSheet("background: transparent; border: none;");
     
-    // 美化滚动条
+    // 美化滚动条，对齐系统考古全局规范：宽度 10px、圆角 3px、背景透明、Handle 颜色对齐 #333333
     horizontalScrollBar()->setStyleSheet(R"(
-        QScrollBar:horizontal { height: 4px; background: transparent; }
-        QScrollBar::handle:horizontal { background: #444; border-radius: 2px; }
+        QScrollBar:horizontal { height: 10px; background: transparent; }
+        QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; }
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { border: none; background: none; }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
     )");
     verticalScrollBar()->setStyleSheet(R"(
-        QScrollBar:vertical { width: 4px; background: transparent; }
-        QScrollBar::handle:vertical { background: #444; border-radius: 2px; }
+        QScrollBar:vertical { width: 10px; background: transparent; }
+        QScrollBar::handle:vertical { background: #333333; border-radius: 3px; }
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { border: none; background: none; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
     )");
 }
 
@@ -235,78 +239,21 @@ void QuickLookWindow::setupUi() {
     m_textEdit = new QPlainTextEdit();
     m_textEdit->setReadOnly(true);
     m_textEdit->hide();
+    // 重构 QPlainTextEdit 的垂直与水平滚动条，使其完全满足全局考古标准
     m_textEdit->verticalScrollBar()->setStyleSheet(R"(
-        QScrollBar:vertical { width: 4px; background: transparent; }
-        QScrollBar::handle:vertical { background: #444; border-radius: 2px; }
+        QScrollBar:vertical { width: 10px; background: transparent; }
+        QScrollBar::handle:vertical { background: #333333; border-radius: 3px; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { border: none; background: none; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+    )");
+    m_textEdit->horizontalScrollBar()->setStyleSheet(R"(
+        QScrollBar:horizontal { height: 10px; background: transparent; }
+        QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { border: none; background: none; }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
     )");
     m_textEdit->installEventFilter(this);
     layout->addWidget(m_textEdit);
-
-    // 媒体播放器控件容器
-    m_mediaContainer = new QWidget();
-    m_mediaContainer->hide();
-    auto* mediaLayout = new QVBoxLayout(m_mediaContainer);
-    mediaLayout->setContentsMargins(0, 0, 0, 0);
-    mediaLayout->setSpacing(10);
-
-#ifdef ARCMETA_HAS_MULTIMEDIA
-    m_videoWidget = new QVideoWidget();
-    m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    mediaLayout->addWidget(m_videoWidget);
-#endif
-
-    m_audioPlaceholder = new QLabel();
-    m_audioPlaceholder->setAlignment(Qt::AlignCenter);
-    m_audioPlaceholder->setStyleSheet("color: #FF8C00; font-size: 20px; font-weight: bold; background: #121212; border-radius: 8px;");
-    m_audioPlaceholder->hide();
-    mediaLayout->addWidget(m_audioPlaceholder);
-
-    auto* ctrlLayout = new QHBoxLayout();
-    ctrlLayout->setContentsMargins(0, 0, 0, 0);
-    ctrlLayout->setSpacing(10);
-
-    m_playBtn = new QPushButton("播放");
-    m_playBtn->setStyleSheet(R"(
-        QPushButton {
-            background-color: #333;
-            color: #EEE;
-            border: 1px solid #555;
-            padding: 5px 15px;
-            border-radius: 4px;
-        }
-        QPushButton:hover {
-            background-color: #444;
-        }
-    )");
-    ctrlLayout->addWidget(m_playBtn);
-
-    m_timeSlider = new QSlider(Qt::Horizontal);
-    m_timeSlider->setStyleSheet(R"(
-        QSlider::groove:horizontal {
-            height: 6px;
-            background: #333;
-            border-radius: 3px;
-        }
-        QSlider::sub-page:horizontal {
-            background: #FF8C00;
-            border-radius: 3px;
-        }
-        QSlider::handle:horizontal {
-            background: #EEE;
-            width: 12px;
-            margin-top: -3px;
-            margin-bottom: -3px;
-            border-radius: 6px;
-        }
-    )");
-    ctrlLayout->addWidget(m_timeSlider);
-
-    m_timeLabel = new QLabel("00:00 / 00:00");
-    m_timeLabel->setStyleSheet("color: #AAA; font-family: 'Consolas';");
-    ctrlLayout->addWidget(m_timeLabel);
-
-    mediaLayout->addLayout(ctrlLayout);
-    layout->addWidget(m_mediaContainer);
 
     // 状态与信息标签
     m_infoLabel = new QLabel(m_container);
@@ -314,53 +261,6 @@ void QuickLookWindow::setupUi() {
     m_infoLabel->hide();
 
     rootLayout->addWidget(m_container);
-
-#ifdef ARCMETA_HAS_MULTIMEDIA
-    // 初始化媒体播放器
-    m_mediaPlayer = new QMediaPlayer(this);
-    m_audioOutput = new QAudioOutput(this);
-    m_mediaPlayer->setAudioOutput(m_audioOutput);
-    m_mediaPlayer->setVideoOutput(m_videoWidget);
-
-    connect(m_mediaPlayer, &QMediaPlayer::positionChanged, this, [this](qint64 position) {
-        if (!m_timeSlider->isSliderDown()) {
-            m_timeSlider->setValue(static_cast<int>(position));
-        }
-        m_timeLabel->setText(QString("%1 / %2")
-            .arg(formatTime(position))
-            .arg(formatTime(m_mediaPlayer->duration())));
-    });
-
-    connect(m_mediaPlayer, &QMediaPlayer::durationChanged, this, [this](qint64 duration) {
-        m_timeSlider->setRange(0, static_cast<int>(duration));
-        m_timeLabel->setText(QString("%1 / %2")
-            .arg(formatTime(m_mediaPlayer->position()))
-            .arg(formatTime(duration)));
-    });
-
-    connect(m_playBtn, &QPushButton::clicked, this, [this]() {
-        if (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState) {
-            m_mediaPlayer->pause();
-            m_playBtn->setText("播放");
-        } else {
-            m_mediaPlayer->play();
-            m_playBtn->setText("暂停");
-        }
-    });
-
-    connect(m_timeSlider, &QSlider::sliderMoved, this, [this](int position) {
-        m_mediaPlayer->setPosition(position);
-    });
-
-    connect(m_mediaPlayer, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error error, const QString &errorString) {
-        Q_UNUSED(error);
-        m_infoLabel->setText(QString("播放错误: %1 (可能缺失系统编解码器)").arg(errorString));
-        m_infoLabel->setStyleSheet("color: #E24B4A; font-weight: bold;");
-    });
-#else
-    m_playBtn->setEnabled(false);
-    m_timeSlider->setEnabled(false);
-#endif
 }
 
 void QuickLookWindow::previewFile(const QString& path) {
@@ -375,18 +275,12 @@ void QuickLookWindow::preview(const QString& filePath) {
     
     QString ext = fi.suffix().toLower();
     
-    // 停止并重置之前的媒体播放
-    resetMedia();
-
-    if (VIDEO_EXTS.contains(ext) || AUDIO_EXTS.contains(ext)) {
-        renderMedia(filePath);
-    } else if (UiHelper::isGraphicsFile(ext)) {
+    if (UiHelper::isGraphicsFile(ext)) {
         renderImage(filePath);
     } else if (UNPREVIEWABLE_EXTS.contains(ext)) {
         // 直接提示不支持，显示其系统图标
         m_graphicsView->hide();
         m_textEdit->hide();
-        m_mediaContainer->hide();
         
         m_graphicsView->clear();
         m_textEdit->clear();
@@ -417,13 +311,11 @@ void QuickLookWindow::preview(const QString& filePath) {
 }
 
 void QuickLookWindow::closePreview() {
-    resetMedia();
     hide();
 }
 
 void QuickLookWindow::renderImage(const QString& path) {
     m_textEdit->hide();
-    m_mediaContainer->hide();
     m_graphicsView->show();
     m_graphicsView->clear();
     m_infoLabel->setText("正在加载预览...");
@@ -484,7 +376,6 @@ void QuickLookWindow::renderImage(const QString& path) {
 
 void QuickLookWindow::renderText(const QString& path) {
     m_graphicsView->hide();
-    m_mediaContainer->hide();
     m_textEdit->show();
     m_textEdit->setPlainText("正在读取文件...");
 
@@ -500,7 +391,6 @@ void QuickLookWindow::renderText(const QString& path) {
     bool potentialUtf16 = fileData.startsWith("\xFF\xFE") || fileData.startsWith("\xFE\xFF");
     if (!potentialUtf16 && isBinary(fileData)) {
         m_textEdit->hide();
-        m_mediaContainer->hide();
         m_graphicsView->show();
         m_graphicsView->clear();
         
@@ -532,57 +422,6 @@ void QuickLookWindow::renderText(const QString& path) {
     m_infoLabel->setText(QString("编码: %1 | 大小: %2 KB | %3").arg(encodingName).arg(QFileInfo(path).size() / 1024.0, 0, 'f', 1).arg(path));
 }
 
-void QuickLookWindow::renderMedia(const QString& path) {
-    m_graphicsView->hide();
-    m_textEdit->hide();
-    m_mediaContainer->show();
-
-    QFileInfo fi(path);
-    QString ext = fi.suffix().toLower();
-
-#ifdef ARCMETA_HAS_MULTIMEDIA
-    if (AUDIO_EXTS.contains(ext)) {
-        m_videoWidget->hide();
-        m_audioPlaceholder->setText(QString("音频播放中...\n%1").arg(fi.fileName()));
-        m_audioPlaceholder->show();
-    } else {
-        m_audioPlaceholder->hide();
-        m_videoWidget->show();
-    }
-
-    m_mediaPlayer->setSource(QUrl::fromLocalFile(path));
-    m_mediaPlayer->play();
-    m_playBtn->setText("暂停");
-    
-    m_infoLabel->setText(path);
-#else
-    m_audioPlaceholder->setText(QString("音视频预览未启用\n%1").arg(fi.fileName()));
-    m_audioPlaceholder->show();
-    m_infoLabel->setText("当前系统未启用多媒体播放模块 (构建时缺少 Qt Multimedia 组件)");
-    m_infoLabel->setStyleSheet("color: #FF8C00; font-weight: bold;");
-#endif
-}
-
-void QuickLookWindow::resetMedia() {
-#ifdef ARCMETA_HAS_MULTIMEDIA
-    if (m_mediaPlayer) {
-        m_mediaPlayer->stop();
-        m_mediaPlayer->setSource(QUrl());
-    }
-#endif
-    m_playBtn->setText("播放");
-    m_timeSlider->setValue(0);
-    m_timeLabel->setText("00:00 / 00:00");
-}
-
-QString QuickLookWindow::formatTime(qint64 ms) {
-    qint64 secs = ms / 1000;
-    qint64 mins = secs / 60;
-    secs = secs % 60;
-    return QString("%1:%2")
-        .arg(mins, 2, 10, QChar('0'))
-        .arg(secs, 2, 10, QChar('0'));
-}
 
 bool QuickLookWindow::isBinary(const QByteArray& fileData) {
     if (fileData.isEmpty()) return false;
@@ -628,20 +467,6 @@ void QuickLookWindow::keyPressEvent(QKeyEvent* event) {
 
     if (event->key() == Qt::Key_Space || event->key() == Qt::Key_Escape) {
         closePreview();
-        return;
-    }
-    if (event->key() == Qt::Key_P) {
-#ifdef ARCMETA_HAS_MULTIMEDIA
-        if (m_mediaContainer && m_mediaContainer->isVisible() && m_mediaPlayer) {
-            if (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState) {
-                m_mediaPlayer->pause();
-                m_playBtn->setText("播放");
-            } else {
-                m_mediaPlayer->play();
-                m_playBtn->setText("暂停");
-            }
-        }
-#endif
         return;
     }
     if (event->key() == Qt::Key_Up || event->key() == Qt::Key_Left) {
