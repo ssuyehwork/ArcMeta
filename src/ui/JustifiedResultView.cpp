@@ -132,11 +132,9 @@ public:
         if (hasThumb) {
             if (!thumb.isNull()) {
                 QPixmap scaled = thumb.scaled(m.cardRect.size(),
-                                              Qt::KeepAspectRatio,
+                                              Qt::IgnoreAspectRatio,
                                               Qt::SmoothTransformation);
-                int x = m.cardRect.center().x() - scaled.width() / 2;
-                int y = m.cardRect.center().y() - scaled.height() / 2;
-                painter->drawPixmap(x, y, scaled);
+                painter->drawPixmap(m.cardRect.topLeft(), scaled);
             }
         } else {
             QIcon icon = qvariant_cast<QIcon>(decoData);
