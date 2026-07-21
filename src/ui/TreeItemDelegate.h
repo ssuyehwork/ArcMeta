@@ -22,8 +22,8 @@ namespace ArcMeta {
  */
 class TreeItemDelegate : public QStyledItemDelegate {
 public:
-    explicit TreeItemDelegate(QObject* parent = nullptr, bool showStatus = true)
-        : QStyledItemDelegate(parent), m_showStatus(showStatus) {}
+    explicit TreeItemDelegate(QObject* parent = nullptr, bool showStatus = true, bool drawMiniCards = false)
+        : QStyledItemDelegate(parent), m_showStatus(showStatus), m_drawMiniCards(drawMiniCards) {}
     
     void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
         if (!index.isValid()) return;
@@ -61,7 +61,7 @@ public:
 
         // 2026-06-16 按照 8 列架构重构：第 1, 2, 3 列由代理独立绘制；第 0 列作为名称列，具有微型圆角卡片预览（最左侧看片）
         int col = index.column();
-        if (col == 0) {
+        if (col == 0 && m_drawMiniCards) {
             // 自定义绘制名称列与最左侧圆角卡片（最左侧看片）
             painter->save();
             painter->setRenderHint(QPainter::Antialiasing);
@@ -270,6 +270,7 @@ public:
 
 private:
     bool m_showStatus;
+    bool m_drawMiniCards;
 };
 
 } // namespace ArcMeta

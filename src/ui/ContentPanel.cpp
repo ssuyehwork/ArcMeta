@@ -1821,7 +1821,8 @@ void ContentPanel::initListView() {
     m_treeView->setExpandsOnDoubleClick(false); 
     m_treeView->setRootIsDecorated(false); 
      
-    m_treeView->setItemDelegate(new TreeItemDelegate(this)); 
+    // 列表视图开启 m_drawMiniCards = true，以启用 Column 0 “最左侧微卡片圆角预览”和底部分割线贯通绘制
+    m_treeView->setItemDelegate(new TreeItemDelegate(this, true, true));
  
     m_treeView->setModel(m_proxyModel); 
     m_treeView->viewport()->installEventFilter(this); 
