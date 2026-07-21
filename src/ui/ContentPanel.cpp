@@ -4,6 +4,7 @@
 #include "ContentPanel.h" 
 #include "../meta/MetadataManager.h" 
 #include <algorithm>
+#include <QImageReader>
 #include "Logger.h"
 #include "SvgIcons.h" 
 #include "TreeItemDelegate.h" 
@@ -594,7 +595,15 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                     } else if (UiHelper::isGraphicsFile(ext)) {
                         img = UiHelper::getShellThumbnail(path, 128);
                         if (!img.isNull()) {
-                            ar = (double)img.width() / img.height();
+                            // 引入 QImageReader 极速读取真实图片的物理宽高比，防止被系统 Shell 返回的 128x128 正方形缩略图污染。
+                            // 只有这样，自适应视图的卡片宽度才能真正随着缩略图物理宽度而变宽！
+                            QImageReader reader(path);
+                            QSize realSize = reader.size();
+                            if (realSize.isValid() && realSize.height() > 0) {
+                                ar = (double)realSize.width() / realSize.height();
+                            } else {
+                                ar = (double)img.width() / img.height();
+                            }
                             hasThumb = true;
                         }
                     }

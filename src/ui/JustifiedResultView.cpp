@@ -131,10 +131,13 @@ public:
 
         if (hasThumb) {
             if (!thumb.isNull()) {
+                // 在真实宽高比的卡片下，KeepAspectRatio 会自动无缝铺满卡片，且绝不拉伸变形
                 QPixmap scaled = thumb.scaled(m.cardRect.size(),
-                                              Qt::IgnoreAspectRatio,
+                                              Qt::KeepAspectRatio,
                                               Qt::SmoothTransformation);
-                painter->drawPixmap(m.cardRect.topLeft(), scaled);
+                int x = m.cardRect.center().x() - scaled.width() / 2;
+                int y = m.cardRect.center().y() - scaled.height() / 2;
+                painter->drawPixmap(x, y, scaled);
             }
         } else {
             QIcon icon = qvariant_cast<QIcon>(decoData);
