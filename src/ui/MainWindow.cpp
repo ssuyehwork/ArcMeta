@@ -513,6 +513,7 @@ void MainWindow::initUi() {
         if (!prev.isEmpty()) {
             m_currentQuickLookPath = prev;
             QuickLookWindow::instance().previewFile(prev);
+            m_contentPanel->selectAndScrollToPath(prev);
         }
     });
 
@@ -521,6 +522,7 @@ void MainWindow::initUi() {
         if (!next.isEmpty()) {
             m_currentQuickLookPath = next;
             QuickLookWindow::instance().previewFile(next);
+            m_contentPanel->selectAndScrollToPath(next);
         }
     });
 
@@ -532,9 +534,26 @@ void MainWindow::initUi() {
         MetadataManager::instance().setRating(m_currentQuickLookPath.toStdWString(), rating);
 
         m_metaPanel->setRating(rating);
-        // 2026-04-11 按照用户要求：在预览窗设定星级时，左上方即时反馈
+        // 2026-04-11 按照用户要求：在预览窗设定星级时，通过新计算的居中定位，靠齐屏幕上方居中显示
         QString msg = QString("已设定星级: <span style='color: #FECF0E;'>%1 星</span>").arg(rating);
-        ToolTipOverlay::instance()->showText(QPoint(50, 50), msg, 1500, QColor("#FECF0E"));
+
+        QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
+        if (!screen) screen = QGuiApplication::primaryScreen();
+        QRect screenGeom = screen ? screen->geometry() : QRect(0, 0, 1920, 1080);
+
+        QTextDocument doc;
+        doc.setHtml(msg);
+        doc.setDefaultStyleSheet("body, div, p, span, b, i { color: #EEEEEE !important; font-family: 'Microsoft YaHei', 'Segoe UI'; font-size: 9pt; }");
+        doc.setDocumentMargin(0);
+        qreal idealW = doc.idealWidth();
+        if (idealW > 450) idealW = 450;
+        int w = static_cast<int>(idealW) + 24;
+
+        int centerX = screenGeom.x() + screenGeom.width() / 2;
+        int targetX = centerX - w / 2;
+        int targetY = screenGeom.y() + 50; // 靠齐屏幕上方居中 (留 50px 顶部安全间距)
+
+        ToolTipOverlay::instance()->showText(QPoint(targetX, targetY), msg, 1500, QColor("#FECF0E"), true);
     });
 
     connect(&QuickLookWindow::instance(), &QuickLookWindow::colorRequested, this, [this](const QString& color) {
@@ -556,7 +575,24 @@ void MainWindow::initUi() {
         else if (color == "gray") colorName = "灰色";
 
         QString msg = QString("已设定颜色: <span style='color: #41F2F2;'>%1</span>").arg(colorName);
-        ToolTipOverlay::instance()->showText(QPoint(50, 50), msg, 1500, QColor("#41F2F2"));
+
+        QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
+        if (!screen) screen = QGuiApplication::primaryScreen();
+        QRect screenGeom = screen ? screen->geometry() : QRect(0, 0, 1920, 1080);
+
+        QTextDocument doc;
+        doc.setHtml(msg);
+        doc.setDefaultStyleSheet("body, div, p, span, b, i { color: #EEEEEE !important; font-family: 'Microsoft YaHei', 'Segoe UI'; font-size: 9pt; }");
+        doc.setDocumentMargin(0);
+        qreal idealW = doc.idealWidth();
+        if (idealW > 450) idealW = 450;
+        int w = static_cast<int>(idealW) + 24;
+
+        int centerX = screenGeom.x() + screenGeom.width() / 2;
+        int targetX = centerX - w / 2;
+        int targetY = screenGeom.y() + 50; // 靠齐屏幕上方居中 (留 50px 顶部安全间距)
+
+        ToolTipOverlay::instance()->showText(QPoint(targetX, targetY), msg, 1500, QColor("#41F2F2"), true);
     });
 
     // 5a. 目录装载完成 -> FilterPanel 动态填充 (六参数版本: 移除标签统计)

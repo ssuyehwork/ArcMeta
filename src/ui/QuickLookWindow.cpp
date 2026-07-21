@@ -233,6 +233,7 @@ void QuickLookWindow::setupUi() {
     // 图片渲染控件
     m_graphicsView = new QuickLookGraphicsView();
     m_graphicsView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_graphicsView->installEventFilter(this);
     layout->addWidget(m_graphicsView);
 
     // 文本渲染控件
@@ -511,11 +512,27 @@ void QuickLookWindow::showEvent(QShowEvent* event) {
 }
 
 bool QuickLookWindow::eventFilter(QObject* watched, QEvent* event) {
-    if (watched == m_textEdit && event->type() == QEvent::KeyPress) {
+    if ((watched == m_textEdit || watched == m_graphicsView) && event->type() == QEvent::KeyPress) {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
-        if (keyEvent->key() == Qt::Key_Space) {
-            closePreview();
-            return true;
+        bool intercept = false;
+        int key = keyEvent->key();
+        Qt::KeyboardModifiers mods = keyEvent->modifiers();
+
+        if (key == Qt::Key_Space || key == Qt::Key_Escape) {
+            intercept = true;
+        } else if (key == Qt::Key_W && (mods & Qt::ControlModifier)) {
+            intercept = true;
+        } else if (key == Qt::Key_Up || key == Qt::Key_Left || key == Qt::Key_Down || key == Qt::Key_Right) {
+            intercept = true;
+        } else if (key >= Qt::Key_1 && key <= Qt::Key_5 && !(mods & Qt::AltModifier)) {
+            intercept = true;
+        } else if ((mods & Qt::AltModifier) && key >= Qt::Key_1 && key <= Qt::Key_9) {
+            intercept = true;
+        }
+
+        if (intercept) {
+            keyPressEvent(keyEvent);
+            return true; // 彻底物理截断，防止被子控件内部吞没
         }
     }
 

@@ -18,6 +18,7 @@
 #include <QPen>
 #include <QBrush>
 #include <QRectF>
+#include <QPropertyAnimation>
 
 namespace ArcMeta {
 
@@ -42,7 +43,7 @@ public:
     /**
      * @brief 显示提示文字（2026-03-xx 重构升级版）
      */
-    void showText(const QPoint& globalPos, const QString& text, int timeout = 700, const QColor& borderColor = QColor("#B0B0B0"));
+    void showText(const QPoint& globalPos, const QString& text, int timeout = 700, const QColor& borderColor = QColor("#B0B0B0"), bool exactPosition = false);
 
     // 兼容旧接口
     void showTip(const QString& text, const QPoint& pos, int timeout = 700) {
@@ -57,11 +58,15 @@ protected:
     explicit ToolTipOverlay();
     void paintEvent(QPaintEvent* event) override;
 
+private slots:
+    void fadeOutAndHide();
+
 private:
     QString m_text;
     QTextDocument m_doc;
     QTimer m_hideTimer;
     QColor m_currentBorderColor = QColor("#B0B0B0");
+    QPropertyAnimation* m_fadeAnim = nullptr;
 };
 
 } // namespace ArcMeta

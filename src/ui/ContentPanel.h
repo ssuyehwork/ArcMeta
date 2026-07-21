@@ -187,6 +187,12 @@ public:
     void deferredInit();
 
     /**
+     * @brief 物理定位选中并滚动到对应视图行号
+     * @param path 绝对物理路径
+     */
+    void selectAndScrollToPath(const QString& path);
+
+    /**
      * @brief 切换视图模式
      */
     void setViewMode(ViewMode mode);

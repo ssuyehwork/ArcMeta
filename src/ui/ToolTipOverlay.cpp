@@ -1,7 +1,7 @@
 #include "ToolTipOverlay.h"
 
 #ifdef Q_OS_WIN
-#include <windows.h>
+#include <qt_windows.h>
 #endif
 #include <QTimer>
 
@@ -41,26 +41,41 @@ ToolTipOverlay::ToolTipOverlay() : QWidget(nullptr) {
     f.setPointSize(9);
     m_doc.setDefaultFont(f);
 
+    m_fadeAnim = new QPropertyAnimation(this, "windowOpacity", this);
+    m_fadeAnim->setDuration(150);
+
     m_hideTimer.setSingleShot(true);
-    connect(&m_hideTimer, &QTimer::timeout, this, &QWidget::hide);
+    connect(&m_hideTimer, &QTimer::timeout, this, &ToolTipOverlay::fadeOutAndHide);
 
     // 初始静默隐藏，等待 MainWindow 的 showEvent 触发真正有效的 GPU 预热
     hide();
 }
 
-void ToolTipOverlay::showText(const QPoint& globalPos, const QString& text, int timeout, const QColor& borderColor) {
+void ToolTipOverlay::fadeOutAndHide() {
+    m_fadeAnim->stop();
+    m_fadeAnim->setStartValue(windowOpacity());
+    m_fadeAnim->setEndValue(0.0);
+    disconnect(m_fadeAnim, &QPropertyAnimation::finished, nullptr, nullptr);
+    connect(m_fadeAnim, &QPropertyAnimation::finished, this, [this]() {
+        QWidget::hide();
+        setWindowOpacity(1.0); // 隐藏后重置不透明度以兼容非动画弹出
+    });
+    m_fadeAnim->start();
+}
+
+void ToolTipOverlay::showText(const QPoint& globalPos, const QString& text, int timeout, const QColor& borderColor, bool exactPosition) {
     // [THREAD SAFE] 强制确保在主线程执行
     if (thread() != QThread::currentThread()) {
-        QMetaObject::invokeMethod(this, [this, globalPos, text, timeout, borderColor]() { 
-            showText(globalPos, text, timeout, borderColor); 
+        QMetaObject::invokeMethod(this, [this, globalPos, text, timeout, borderColor, exactPosition]() {
+            showText(globalPos, text, timeout, borderColor, exactPosition);
         });
         return;
     }
 
-    if (text.isEmpty()) { hide(); return; }
+    if (text.isEmpty()) { fadeOutAndHide(); return; }
 
     // 2026-05-20 性能优化：内容脏检查，防止鼠标在按钮内部微动导致的重复渲染卡顿
-    if (isVisible() && m_text == text && m_currentBorderColor == borderColor) {
+    if (isVisible() && m_text == text && m_currentBorderColor == borderColor && !exactPosition) {
         move(globalPos + QPoint(15, 15));
         return;
     }
@@ -110,23 +125,46 @@ void ToolTipOverlay::showText(const QPoint& globalPos, const QString& text, int 
     
     resize(w, h);
     
-    QPoint pos = globalPos + QPoint(15, 15);
-    
-    QScreen* screen = QGuiApplication::screenAt(globalPos);
-    if (!screen) screen = QGuiApplication::primaryScreen();
-    if (screen) {
-        QRect screenGeom = screen->geometry();
-        if (pos.x() + width() > screenGeom.right()) {
-            pos.setX(globalPos.x() - width() - 15);
-        }
-        if (pos.y() + height() > screenGeom.bottom()) {
-            pos.setY(globalPos.y() - height() - 15);
+    QPoint pos;
+    if (exactPosition) {
+        pos = globalPos;
+    } else {
+        pos = globalPos + QPoint(15, 15);
+        QScreen* screen = QGuiApplication::screenAt(globalPos);
+        if (!screen) screen = QGuiApplication::primaryScreen();
+        if (screen) {
+            QRect screenGeom = screen->geometry();
+            if (pos.x() + width() > screenGeom.right()) {
+                pos.setX(globalPos.x() - width() - 15);
+            }
+            if (pos.y() + height() > screenGeom.bottom()) {
+                pos.setY(globalPos.y() - height() - 15);
+            }
         }
     }
     
     move(pos);
+
+    // 淡入显示
+    m_fadeAnim->stop();
+    disconnect(m_fadeAnim, &QPropertyAnimation::finished, nullptr, nullptr);
+    setWindowOpacity(0.0);
     show();
     update();
+
+    // 2026-xx-xx 特殊修复：由于 QuickLookWindow 自身是通过 SetWindowPos(..., HWND_TOPMOST, ...) 显示的置顶无边框窗口，
+    // 为了防止 ToolTipOverlay 被同样是 TOPMOST 的预览窗口意外遮挡，在调用 show() 后，必须强制性通过原生 WinAPI
+    // 重新确立 ToolTipOverlay 的最高优先级置顶秩序，确保提示信息绝对不被遮蔽。
+#ifdef Q_OS_WIN
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+#else
+    raise();
+#endif
+
+    m_fadeAnim->setStartValue(0.0);
+    m_fadeAnim->setEndValue(1.0);
+    m_fadeAnim->start();
 
     if (timeout > 0) {
         m_hideTimer.start(timeout);

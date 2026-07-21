@@ -1636,6 +1636,23 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
     return QWidget::eventFilter(obj, event); 
 } 
  
+void ContentPanel::selectAndScrollToPath(const QString& path) {
+    if (!m_proxyModel) return;
+    for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
+        QModelIndex proxyIdx = m_proxyModel->index(i, 0);
+        if (proxyIdx.data(PathRole).toString() == path) {
+            QAbstractItemView* view = (m_viewStack->currentWidget() == m_treeView) ?
+                static_cast<QAbstractItemView*>(m_treeView) : static_cast<QAbstractItemView*>(m_gridView);
+            if (view) {
+                view->scrollTo(proxyIdx);
+                view->setCurrentIndex(proxyIdx);
+                view->selectionModel()->select(proxyIdx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+            }
+            break;
+        }
+    }
+}
+
 QString ContentPanel::getAdjacentFilePath(const QString& currentPath, int delta) { 
     if (!m_proxyModel || m_proxyModel->rowCount() == 0) return QString(); 
  
