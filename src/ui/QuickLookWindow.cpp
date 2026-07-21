@@ -1,5 +1,6 @@
 #include "QuickLookWindow.h"
 #include "UiHelper.h"
+#include "StyleLibrary.h"
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QFileInfo>
@@ -48,16 +49,18 @@ QuickLookGraphicsView::QuickLookGraphicsView(QWidget* parent) : QGraphicsView(pa
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setStyleSheet("background: transparent; border: none;");
     
-    // 美化滚动条
+    // 美化滚动条，对齐系统考古全局规范：宽度 10px、圆角 3px、背景透明、Handle 颜色对齐 #333333
     horizontalScrollBar()->setStyleSheet(R"(
-        QScrollBar:horizontal { height: 4px; background: transparent; }
-        QScrollBar::handle:horizontal { background: #444; border-radius: 2px; }
+        QScrollBar:horizontal { height: 10px; background: transparent; }
+        QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; }
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { border: none; background: none; }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
     )");
     verticalScrollBar()->setStyleSheet(R"(
-        QScrollBar:vertical { width: 4px; background: transparent; }
-        QScrollBar::handle:vertical { background: #444; border-radius: 2px; }
+        QScrollBar:vertical { width: 10px; background: transparent; }
+        QScrollBar::handle:vertical { background: #333333; border-radius: 3px; }
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { border: none; background: none; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
     )");
 }
 
@@ -235,9 +238,18 @@ void QuickLookWindow::setupUi() {
     m_textEdit = new QPlainTextEdit();
     m_textEdit->setReadOnly(true);
     m_textEdit->hide();
+    // 重构 QPlainTextEdit 的垂直与水平滚动条，使其完全满足全局考古标准
     m_textEdit->verticalScrollBar()->setStyleSheet(R"(
-        QScrollBar:vertical { width: 4px; background: transparent; }
-        QScrollBar::handle:vertical { background: #444; border-radius: 2px; }
+        QScrollBar:vertical { width: 10px; background: transparent; }
+        QScrollBar::handle:vertical { background: #333333; border-radius: 3px; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { border: none; background: none; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+    )");
+    m_textEdit->horizontalScrollBar()->setStyleSheet(R"(
+        QScrollBar:horizontal { height: 10px; background: transparent; }
+        QScrollBar::handle:horizontal { background: #333333; border-radius: 3px; }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { border: none; background: none; }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
     )");
     m_textEdit->installEventFilter(this);
     layout->addWidget(m_textEdit);
