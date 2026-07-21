@@ -11,7 +11,6 @@
 #include "DropListView.h" 
 #include "DropJustifiedView.h"
 #include "BatchProgressDialog.h"
-#include "ThumbnailDelegate.h"
 #include "IScanResultView.h"
 #include "ListResultView.h"
 #include "GridResultView.h"
@@ -88,6 +87,60 @@ using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
  
 namespace ArcMeta { 
+
+struct ThumbnailMetrics {
+    QRect cardRect;
+    QRect textRect;
+    QRect banRect;
+    int starsStartX;
+    int starSize;
+    int starSpacing;
+    int ratingY;
+    int ratingH;
+
+    QRect starRect(int index) const {
+        return QRect(starsStartX + index * (starSize + starSpacing),
+                     ratingY + (ratingH - starSize) / 2,
+                     starSize, starSize);
+    }
+};
+
+static ThumbnailMetrics calculateThumbnailMetrics(const QStyleOptionViewItem& option) {
+    ThumbnailMetrics m;
+    const int textHeight = 36;
+    const int ratingHeight = 24;
+    const int gap = 4;
+
+    m.ratingH = ratingHeight;
+    m.cardRect = option.rect.adjusted(3, 3, -3, -(textHeight + m.ratingH + gap + 3));
+    m.ratingY = m.cardRect.bottom() + gap;
+
+    m.textRect = QRect(option.rect.left() + 3,
+                       m.ratingY + m.ratingH - 5,
+                       option.rect.width() - 6,
+                       textHeight);
+
+    int zoom = option.decorationSize.width();
+
+    m.starSize = 22;
+    m.starSpacing = -4;
+    int banW = 14;
+
+    if (zoom < 100) {
+        m.starSize = 18;
+        m.starSpacing = -4;
+        banW = 12;
+    }
+
+    int banGap = 2;
+    int infoTotalW = banW + banGap + (5 * m.starSize) + (4 * m.starSpacing);
+    int infoStartX = m.cardRect.left() + (m.cardRect.width() - infoTotalW) / 2;
+
+    m.banRect = QRect(infoStartX, m.ratingY + (m.ratingH - banW) / 2, banW, banW);
+    m.starsStartX = infoStartX + banW + banGap;
+
+    return m;
+}
  
 // --- FerrexVirtualDbModel 实现 ---
 FerrexVirtualDbModel::FerrexVirtualDbModel(QObject* parent) : QAbstractTableModel(parent) {
@@ -1269,14 +1322,14 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                     }
                     QModelIndex index = view->indexAt(pos);
                     if (index.isValid()) {
-                        // 针对 Grid 模式 / Justified 模式的 Hitbox
-                        ThumbnailDelegate* thumbDel = qobject_cast<ThumbnailDelegate*>(view->itemDelegateForIndex(index));
-                        if (thumbDel) {
+                        if (m_gridResultView && m_justifiedResultView &&
+                            (view == m_gridResultView->getBaseView() || view == m_justifiedResultView->getBaseView())) {
                             QStyleOptionViewItem opt;
                             opt.rect = view->visualRect(index);
                             opt.decorationSize = view->iconSize();
                             if (opt.decorationSize.width() <= 0) opt.decorationSize = QSize(96, 96);
-                            ThumbnailDelegate::Metrics m = thumbDel->calculateMetrics(opt);
+
+                            ThumbnailMetrics m = calculateThumbnailMetrics(opt);
 
                             bool isBanHit = m.banRect.contains(pos);
                             int hitStar = -1;
@@ -1309,54 +1362,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                                 QAbstractItemView::EditTriggers currentTriggers = view->editTriggers();
                                 view->setEditTriggers(QAbstractItemView::NoEditTriggers);
                                 QTimer::singleShot(0, view, [view, currentTriggers]() {
-                                    view->setEditTriggers(currentTriggers);
-                                });
-                                event->accept();
-                                return true;
-                            }
-                        }
-
-                        GridItemDelegate* gridDel = qobject_cast<GridItemDelegate*>(view->itemDelegateForIndex(index));
-                        if (gridDel) {
-                            QStyleOptionViewItem opt;
-                            opt.rect = view->visualRect(index);
-                            opt.decorationSize = view->iconSize();
-                            if (opt.decorationSize.width() <= 0) opt.decorationSize = QSize(96, 96);
-                            GridItemDelegate::GridMetrics m = gridDel->calculateMetrics(opt);
-
-                            bool isBanHit = m.banRect.contains(pos);
-                            int hitStar = -1;
-                            for (int i = 0; i < 5; ++i) {
-                                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
-                                if (starRect.contains(pos)) {
-                                    hitStar = i + 1;
-                                    break;
-                                }
-                            }
-
-                            if (isBanHit || hitStar != -1) {
-                                bool isSelected = false;
-                                if (view->selectionModel()) {
-                                    isSelected = view->selectionModel()->isSelected(index);
-                                }
-                                if (!isSelected) return false;
-
-                                int newValue = isBanHit ? 0 : hitStar;
-                                if (view->selectionModel() && view->selectionModel()->isSelected(index)) {
-                                    auto selectedIndexes = view->selectionModel()->selectedIndexes();
-                                    for (const auto& selIdx : selectedIndexes) {
-                                        if (selIdx.column() == 0) {
-                                            m_proxyModel->setData(selIdx, newValue, RatingRole);
-                                        }
-                                    }
-                                } else {
-                                    m_proxyModel->setData(index, newValue, RatingRole);
-                                }
-
-                                QAbstractItemView::EditTriggers currentTriggers = view->editTriggers();
-                                view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-                                QTimer::singleShot(0, view, [view, currentTriggers]() {
-                                    view->setEditTriggers(currentTriggers);
+                                    if (view) view->setEditTriggers(currentTriggers);
                                 });
                                 event->accept();
                                 return true;

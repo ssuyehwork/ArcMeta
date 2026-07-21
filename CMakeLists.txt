@@ -127,8 +127,6 @@ set(SOURCES
     src/ui/FramelessFileDialog.h
     src/ui/JustifiedView.cpp
     src/ui/JustifiedView.h
-    src/ui/ThumbnailDelegate.cpp
-    src/ui/ThumbnailDelegate.h
     src/ui/LoadingWindow.cpp
     src/ui/LoadingWindow.h
     src/ui/Logger.h
