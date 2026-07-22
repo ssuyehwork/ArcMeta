@@ -219,6 +219,13 @@ public:
 
 signals:
     /**
+     * @brief 缩放比例与视图模式变更信号 (Modification_Plan-47)
+     */
+    void zoomLevelChanged(int level);
+    void viewModeChanged(ViewMode mode);
+
+signals:
+    /**
      * @brief 请求 QuickLook 预览信号
      * @param path 物理路径
      */
@@ -323,6 +330,12 @@ private:
                                QMap<QString, int>& createDateCounts,
                                QMap<QString, int>& modifyDateCounts,
                                int& noTagCount);
+
+public slots:
+    /**
+     * @brief 设置缩放比例，限制在 96~128px 之间 (Modification_Plan-47)
+     */
+    void setZoomLevel(int level);
 
 public slots:
     void onSelectionChanged();

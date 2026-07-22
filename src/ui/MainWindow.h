@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QSystemTrayIcon>
 #include <QSet>
+#include <QSlider>
 
 #include "FramelessDialog.h"
 
@@ -152,6 +153,10 @@ private:
     QWidget* m_searchContainer = nullptr; // 搜索框容器
     SearchHistoryPanel* m_searchHistoryPanel = nullptr;
     
+    // 排列方式视图按钮及中性缩放滑杆 (Modification_Plan-47)
+    QPushButton* m_btnViewMenu = nullptr;
+    QSlider* m_sizeSlider = nullptr;
+
     // 标题栏按钮组 (用于 frameless 时的模拟，此处作为标准按钮展示)
     QPushButton* m_btnToggleDriveBar = nullptr;
     QPushButton* m_btnSync   = nullptr;
