@@ -129,6 +129,9 @@ public:
     SortType currentSortType() const { return m_sortType; }
     Qt::SortOrder currentSortOrder() const { return m_sortOrder; }
 
+    QPushButton* viewBtn() const { return m_viewBtn; }
+    QSlider* sizeSlider() const { return m_sizeSlider; }
+
     /**
      * @brief 统计结构
      */

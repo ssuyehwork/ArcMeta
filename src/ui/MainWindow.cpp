@@ -1268,6 +1268,18 @@ void MainWindow::setupCustomTitleBarButtons() {
         return btn;
     };
 
+    // 从 contentPanel 抓取排列方式按钮与卡片尺寸调节滑杆，赋予其正确 parent 并塞入标题栏最左侧
+    QPushButton* contentViewBtn = m_contentPanel ? m_contentPanel->viewBtn() : nullptr;
+    QSlider* contentSizeSlider = m_contentPanel ? m_contentPanel->sizeSlider() : nullptr;
+    if (contentViewBtn) {
+        contentViewBtn->setParent(titleBarBtns);
+        layout->addWidget(contentViewBtn, 0, Qt::AlignVCenter);
+    }
+    if (contentSizeSlider) {
+        contentSizeSlider->setParent(titleBarBtns);
+        layout->addWidget(contentSizeSlider, 0, Qt::AlignVCenter);
+    }
+
     m_btnToggleDriveBar = createTitleBtn("chevrons_down");
     m_btnToggleDriveBar->setProperty("tooltipText", "展开/收起盘符管理栏");
     m_btnToggleDriveBar->installEventFilter(m_hoverFilter);

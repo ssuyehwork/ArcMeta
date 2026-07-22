@@ -1114,8 +1114,8 @@ void ContentPanel::initUi() {
         } 
     }); 
  
-    // 排列按钮 m_viewBtn 构建
-    m_viewBtn = new QPushButton(titleBar);
+    // 排列按钮 m_viewBtn 构建 (其父对象设置为 nullptr，后续将移至 MainWindow 标题栏)
+    m_viewBtn = new QPushButton(nullptr);
     m_viewBtn->setFixedSize(24, 24); // 严格满足外框 24x24px 考古规范
     m_viewBtn->setIcon(UiHelper::getIcon("grid", QColor("#CCCCCC"), 18)); // 严格满足图标 18x18px
     m_viewBtn->setIconSize(QSize(18, 18));
@@ -1161,8 +1161,8 @@ void ContentPanel::initUi() {
         menu->exec(m_viewBtn->mapToGlobal(QPoint(0, m_viewBtn->height() + 2)));
     });
 
-    // 尺寸滑杆 m_sizeSlider 构建
-    m_sizeSlider = new QSlider(Qt::Horizontal, titleBar);
+    // 尺寸滑杆 m_sizeSlider 构建 (其父对象设置为 nullptr，后续将移至 MainWindow 标题栏)
+    m_sizeSlider = new QSlider(Qt::Horizontal, nullptr);
     m_sizeSlider->setRange(32, 256); // 严格调节范围限制 32 至 256
     m_sizeSlider->setValue(m_zoomLevel);
     m_sizeSlider->setFixedSize(110, 20); // 严格满足滑杆 110px 宽度
@@ -1185,8 +1185,6 @@ void ContentPanel::initUi() {
 
     titleL->addWidget(titleLabel); 
     titleL->addStretch(); 
-    titleL->addWidget(m_viewBtn);     // 排列方式选择按钮
-    titleL->addWidget(m_sizeSlider);  // 尺寸调整滑动杆
     titleL->addWidget(m_btnToggleFolders, 0, Qt::AlignVCenter);
     titleL->addWidget(m_btnToggleFiles, 0, Qt::AlignVCenter);
     titleL->addWidget(m_btnLayersBlue, 0, Qt::AlignVCenter);
