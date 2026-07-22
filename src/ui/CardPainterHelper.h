@@ -34,6 +34,9 @@ public:
 
     // 6. 绘制空文件夹特异虚线边框
     static void drawEmptyFolderBorder(QPainter* painter, const QRect& cardRect);
+
+    // 7. 绘制分类侧边栏节点的高亮/彩色背景底色
+    static void drawCategoryBackground(QPainter* painter, const QRect& contentRect, bool isSelected, bool isHover, const QString& colorHex);
 };
 
 } // namespace ArcMeta

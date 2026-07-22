@@ -7,6 +7,7 @@
 #include <QAbstractProxyModel>
 #include "CategoryModel.h"
 #include "CategoryFilterProxyModel.h"
+#include "CardPainterHelper.h"
 #include "StyleLibrary.h"
 using namespace ArcMeta::Style;
 
@@ -29,14 +30,6 @@ public:
         bool isSelectable = index.flags() & Qt::ItemIsSelectable;
 
         if (isSelectable && (selected || hover)) {
-            painter->save();
-            painter->setRenderHint(QPainter::Antialiasing);
-
-            QString colorHex = index.data(ColorRole).toString();
-            QColor baseColor = colorHex.isEmpty() ? QColor("#3498db") : QColor(colorHex);
-            QColor bg = selected ? baseColor : QColor("#2a2d2e");
-            if (selected) bg.setAlphaF(0.2f); 
-
             // 2026-03-xx 按照用户要求：物理隔离 branch 区域，解决选中背景遮挡折叠图标的问题
             // 严格执行宪法第五定律第 6 条：padding: 2px 4px, margin: 1px 2px
             QStyle* style = option.widget ? option.widget->style() : QApplication::style();
@@ -54,10 +47,8 @@ public:
             // 应用宪法规范：margin 1px 2px (上下 1px, 左右 2px)
             contentRect.adjust(2, 1, -2, -1);
             
-            painter->setBrush(bg);
-            painter->setPen(Qt::NoPen);
-            painter->drawRoundedRect(contentRect, 4, 4);
-            painter->restore();
+            QString colorHex = index.data(ColorRole).toString();
+            CardPainterHelper::drawCategoryBackground(painter, contentRect, selected, hover, colorHex);
         }
 
         QStyleOptionViewItem opt = option;

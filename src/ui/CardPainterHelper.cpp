@@ -179,4 +179,22 @@ void CardPainterHelper::drawEmptyFolderBorder(QPainter* painter, const QRect& ca
     painter->restore();
 }
 
+void CardPainterHelper::drawCategoryBackground(QPainter* painter, const QRect& contentRect, bool isSelected, bool isHover, const QString& colorHex) {
+    if (!isSelected && !isHover) return;
+
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing);
+
+    QColor baseColor = colorHex.isEmpty() ? QColor("#3498db") : QColor(colorHex);
+    QColor bg = isSelected ? baseColor : QColor("#2a2d2e");
+    if (isSelected) {
+        bg.setAlphaF(0.2f);
+    }
+
+    painter->setBrush(bg);
+    painter->setPen(Qt::NoPen);
+    painter->drawRoundedRect(contentRect, 4, 4);
+    painter->restore();
+}
+
 } // namespace ArcMeta
