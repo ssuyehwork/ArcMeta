@@ -63,6 +63,8 @@ using namespace ArcMeta::Style;
 #include "../core/NativeFolderWatcher.h"
 #include "FramelessDialog.h"
 #include "FramelessFileDialog.h"
+#include <QSlider>
+#include <QSignalBlocker>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -1268,6 +1270,74 @@ void MainWindow::setupCustomTitleBarButtons() {
         return btn;
     };
 
+    // 排列方式视图按钮及中性缩放滑杆 (Modification_Plan-47)
+    m_btnViewMenu = createTitleBtn("grid");
+    m_btnViewMenu->setProperty("tooltipText", "排列方式");
+    m_btnViewMenu->installEventFilter(m_hoverFilter);
+
+    connect(m_btnViewMenu, &QPushButton::clicked, this, [this]() {
+        QMenu menu(this);
+        UiHelper::applyMenuStyle(&menu);
+
+        QAction* actAdaptive = menu.addAction("自适应");
+        QAction* actGrid = menu.addAction("网格");
+        QAction* actList = menu.addAction("列表");
+
+        actAdaptive->setCheckable(true);
+        actGrid->setCheckable(true);
+        actList->setCheckable(true);
+
+        auto currentMode = m_contentPanel->property("currentViewMode").toInt();
+        ContentPanel::ViewMode mode = static_cast<ContentPanel::ViewMode>(currentMode);
+        actAdaptive->setChecked(mode == ContentPanel::JustifiedViewMode);
+        actGrid->setChecked(mode == ContentPanel::GridView);
+        actList->setChecked(mode == ContentPanel::ListView);
+
+        connect(actAdaptive, &QAction::triggered, this, [this]() {
+            m_contentPanel->setViewMode(ContentPanel::JustifiedViewMode);
+        });
+        connect(actGrid, &QAction::triggered, this, [this]() {
+            m_contentPanel->setViewMode(ContentPanel::GridView);
+        });
+        connect(actList, &QAction::triggered, this, [this]() {
+            m_contentPanel->setViewMode(ContentPanel::ListView);
+        });
+
+        menu.exec(m_btnViewMenu->mapToGlobal(QPoint(0, m_btnViewMenu->height())));
+    });
+
+    m_sizeSlider = new QSlider(Qt::Horizontal, m_titleBarWidget);
+    m_sizeSlider->setRange(96, 128);
+    m_sizeSlider->setFixedSize(110, 20);
+    m_sizeSlider->setCursor(Qt::PointingHandCursor);
+    m_sizeSlider->setStyleSheet(
+        "QSlider { background: transparent; margin-right: 5px; }"
+        "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }"
+        "QSlider::sub-page:horizontal { background: #3F3F3F; border-radius: 2px; }" // 统一为深灰背景，去除橙色高亮填充条
+        "QSlider::handle:horizontal { width: 10px; height: 10px; background: #8E8E93; border-radius: 5px; margin: -4px 0; }" // 中性手柄背景色
+        "QSlider::handle:horizontal:hover { background: #CCCCCC; }" // 悬停反馈
+    );
+
+    connect(m_sizeSlider, &QSlider::valueChanged, this, [this](int value) {
+        m_contentPanel->setZoomLevel(value);
+    });
+
+    // 信号槽的双向跨组件绑定联动 (Modification_Plan-47)
+    connect(m_contentPanel, &ContentPanel::zoomLevelChanged, this, [this](int level) {
+        QSignalBlocker blocker(m_sizeSlider); // 必须在回设滑杆时屏蔽其信号，防止跨组件循环触发导致栈溢出
+        m_sizeSlider->setValue(level);
+    });
+
+    connect(m_contentPanel, &ContentPanel::viewModeChanged, this, [this](ContentPanel::ViewMode mode) {
+        QString iconKey = "grid";
+        if (mode == ContentPanel::ListView) iconKey = "list";
+        else if (mode == ContentPanel::JustifiedViewMode) iconKey = "columns";
+        m_btnViewMenu->setIcon(UiHelper::getIcon(iconKey, QColor("#EEEEEE")));
+    });
+
+    int initZoom = AppConfig::instance().getValue("UI/GridZoomLevel", 96).toInt();
+    m_sizeSlider->setValue(qBound(96, initZoom, 128));
+
     m_btnToggleDriveBar = createTitleBtn("chevrons_down");
     m_btnToggleDriveBar->setProperty("tooltipText", "展开/收起盘符管理栏");
     m_btnToggleDriveBar->installEventFilter(m_hoverFilter);
@@ -1367,6 +1437,8 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->installEventFilter(m_hoverFilter);
 
     m_btnCreate->installEventFilter(m_hoverFilter);
+    layout->addWidget(m_sizeSlider, 0, Qt::AlignVCenter);
+    layout->addWidget(m_btnViewMenu, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnToggleDriveBar, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnLayout, 0, Qt::AlignVCenter);
