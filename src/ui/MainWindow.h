@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QSystemTrayIcon>
 #include <QSet>
+#include <QSlider>
 
 #include "FramelessDialog.h"
 
