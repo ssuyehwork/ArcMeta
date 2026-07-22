@@ -1410,14 +1410,14 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_sizeSlider = new QSlider(Qt::Horizontal, this);
     m_sizeSlider->setRange(32, 256);
     m_sizeSlider->setValue(m_contentPanel->zoomLevel()); // 默认与 ContentPanel 的初始 zoomLevel 保持一致
-    m_sizeSlider->setFixedSize(110, 20);
+    m_sizeSlider->setFixedSize(85, 20);
     m_sizeSlider->setCursor(Qt::PointingHandCursor);
     m_sizeSlider->setStyleSheet(
-        "QSlider { background: transparent; margin-right: 5px; }"
+        "QSlider { background: transparent; padding: 0px; margin: 0px; }"
         "QSlider::groove:horizontal { height: 3px; background: #333333; border-radius: 2px; }"
         "QSlider::sub-page:horizontal { background: #FF8C00; border-radius: 2px; }"
-        "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; "
-        "  background: #FF8C00; border-radius: 6px; }"
+        "QSlider::handle:horizontal { width: 10px; height: 10px; margin: -4px 0; "
+        "  background: #FF8C00; border-radius: 5px; }"
     );
 
     connect(m_sizeSlider, &QSlider::valueChanged, this, [this](int val) {
