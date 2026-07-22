@@ -49,6 +49,7 @@
 #include <QTimer>
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+#include "SvgIconRenderer.h"
 #include "../core/SearchHistoryService.h"
 #include "../core/SyncStatusService.h"
 #include "DriveButton.h"
@@ -873,7 +874,6 @@ void MainWindow::mousePressEvent(QMouseEvent* event) {
     }
 }
 
-
 void MainWindow::mouseMoveEvent(QMouseEvent* event) {
     if (m_isResizing) {
         const QPoint delta = event->globalPosition().toPoint() - m_resizeStartGlobal;
@@ -1076,8 +1076,6 @@ void MainWindow::initToolbar() {
     searchLayout->addWidget(m_searchEdit);
 }
 
-
-
 void MainWindow::setupSplitters() {
     QWidget* centralC = new QWidget(this);
     centralC->setObjectName("CentralWidget");
@@ -1189,7 +1187,6 @@ void MainWindow::setupSplitters() {
     m_mainSplitter->addWidget(m_filterPanel);
     m_mainSplitter->addWidget(m_tagManagerView);
 
-
     // 2026-07-xx 按照用户要求：标签搜索联动
     connect(m_tagManagerView, &TagManagerView::requestSearchTag, this, [this](const QString& tag) {
         // 自动切回正常模式并搜索
@@ -1250,13 +1247,14 @@ void MainWindow::setupCustomTitleBarButtons() {
     QWidget* titleBarBtns = new QWidget(this);
     QHBoxLayout* layout = new QHBoxLayout(titleBarBtns);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(5); // 保持右侧按钮组内部 5px 严格间距
+    layout->setSpacing(5); // 2026-xx-xx 按照用户要求：按钮高亮间距统一为 5px
 
     auto createTitleBtn = [this](const QString& iconKey, const QString& hoverColor = "#3E3E42") {
         QPushButton* btn = new QPushButton(this);
-        btn->setAttribute(Qt::WA_Hover);
-        btn->setFixedSize(24, 24);
+        btn->setAttribute(Qt::WA_Hover); // 2026-05-20 性能优化：必须开启 Hover 属性以触发悬停事件
+        btn->setFixedSize(24, 24); // 固定 24x24px
         
+        // 使用 UiHelper 全局辅助类
         QIcon icon = UiHelper::getIcon(iconKey, QColor("#EEEEEE"));
         btn->setIcon(icon);
         btn->setIconSize(QSize(18, 18));
@@ -1269,19 +1267,7 @@ void MainWindow::setupCustomTitleBarButtons() {
         return btn;
     };
 
-    m_btnToggleDriveBar = createTitleBtn("chevrons_down");
-    m_btnToggleDriveBar->setProperty("tooltipText", "展开/收起盘符管理栏");
-    m_btnToggleDriveBar->installEventFilter(m_hoverFilter);
-    m_btnToggleDriveBar->setCheckable(true);
-    m_btnToggleDriveBar->setChecked(true);
-    connect(m_btnToggleDriveBar, &QPushButton::toggled, this, [this](bool checked) {
-        if (m_driveBarWidget) {
-            m_driveBarWidget->setVisible(checked);
-            m_btnToggleDriveBar->setIcon(UiHelper::getIcon(checked ? "chevrons_down" : "chevrons_up", QColor("#EEEEEE")));
-        }
-    });
-
-    // 独立排列方式视图按钮 (挂载在 m_titleBarWidget 上)
+    // 排列方式视图按钮及中性缩放滑杆 (Modification_Plan-47)
     m_btnViewMenu = createTitleBtn("grid");
     m_btnViewMenu->setProperty("tooltipText", "排列方式");
     m_btnViewMenu->installEventFilter(m_hoverFilter);
@@ -1290,9 +1276,9 @@ void MainWindow::setupCustomTitleBarButtons() {
         QMenu menu(this);
         UiHelper::applyMenuStyle(&menu);
 
-        QAction* actAdaptive = menu.addAction("自适应");
-        QAction* actGrid = menu.addAction("网格");
-        QAction* actList = menu.addAction("列表");
+        QAction* actAdaptive = menu.addAction("自适应(A)");
+        QAction* actGrid = menu.addAction("网格(G)");
+        QAction* actList = menu.addAction("列表(L)");
 
         actAdaptive->setCheckable(true);
         actGrid->setCheckable(true);
@@ -1303,6 +1289,14 @@ void MainWindow::setupCustomTitleBarButtons() {
         actAdaptive->setChecked(mode == ContentPanel::JustifiedViewMode);
         actGrid->setChecked(mode == ContentPanel::GridView);
         actList->setChecked(mode == ContentPanel::ListView);
+
+        // 自定义菜单项样式，高亮选中选项为 ActiveOrange 品牌橙色 (#ff551c)，并定制打勾图标
+        QString checkPath = SvgIconRenderer::getSvgTempFilePath("check", QColor("#ff551c"));
+        menu.setStyleSheet(menu.styleSheet() + QString(
+            "QMenu::item:checked { color: #ff551c; }"
+            "QMenu::item:checked:selected { color: #ff551c; }"
+            "QMenu::indicator:checked { image: url(%1); width: 14px; height: 14px; left: 4px; }"
+        ).arg(checkPath));
 
         connect(actAdaptive, &QAction::triggered, this, [this]() {
             m_contentPanel->setViewMode(ContentPanel::JustifiedViewMode);
@@ -1317,13 +1311,12 @@ void MainWindow::setupCustomTitleBarButtons() {
         menu.exec(m_btnViewMenu->mapToGlobal(QPoint(0, m_btnViewMenu->height())));
     });
 
-    // 恢复旧版滑块层级与 110px 宽度，带 margin-right: 5px，并采用 Plan-47 中性无橙色配色
     m_sizeSlider = new QSlider(Qt::Horizontal, m_titleBarWidget);
     m_sizeSlider->setRange(96, 128);
-    m_sizeSlider->setFixedSize(110, 20); // 恢复 110px
+    m_sizeSlider->setFixedSize(110, 20);
     m_sizeSlider->setCursor(Qt::PointingHandCursor);
     m_sizeSlider->setStyleSheet(
-        "QSlider { background: transparent; margin-right: 5px; }" // 恢复 margin-right
+        "QSlider { background: transparent; margin-right: 5px; }"
         "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }"
         "QSlider::sub-page:horizontal { background: #3F3F3F; border-radius: 2px; }" // 统一为深灰背景，去除橙色高亮填充条
         "QSlider::handle:horizontal { width: 10px; height: 10px; background: #8E8E93; border-radius: 5px; margin: -4px 0; }" // 中性手柄背景色
@@ -1334,8 +1327,9 @@ void MainWindow::setupCustomTitleBarButtons() {
         m_contentPanel->setZoomLevel(value);
     });
 
+    // 信号槽的双向跨组件绑定联动 (Modification_Plan-47)
     connect(m_contentPanel, &ContentPanel::zoomLevelChanged, this, [this](int level) {
-        QSignalBlocker blocker(m_sizeSlider);
+        QSignalBlocker blocker(m_sizeSlider); // 必须在回设滑杆时屏蔽其信号，防止跨组件循环触发导致栈溢出
         m_sizeSlider->setValue(level);
     });
 
@@ -1349,20 +1343,34 @@ void MainWindow::setupCustomTitleBarButtons() {
     int initZoom = AppConfig::instance().getValue("UI/GridZoomLevel", 96).toInt();
     m_sizeSlider->setValue(qBound(96, initZoom, 128));
 
+    m_btnToggleDriveBar = createTitleBtn("chevrons_down");
+    m_btnToggleDriveBar->setProperty("tooltipText", "展开/收起盘符管理栏");
+    m_btnToggleDriveBar->installEventFilter(m_hoverFilter);
+    m_btnToggleDriveBar->setCheckable(true);
+    m_btnToggleDriveBar->setChecked(true);
+    connect(m_btnToggleDriveBar, &QPushButton::toggled, this, [this](bool checked) {
+        if (m_driveBarWidget) {
+            m_driveBarWidget->setVisible(checked);
+            m_btnToggleDriveBar->setIcon(UiHelper::getIcon(checked ? "chevrons_down" : "chevrons_up", QColor("#EEEEEE")));
+        }
+    });
+
     m_btnSync = createTitleBtn("sync");
     m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
     m_btnSync->installEventFilter(m_hoverFilter);
 
+    // 2026-07-xx 按照用户要求 (Plan-121)：通过试点服务解耦同步状态展示
     connect(&SyncStatusService::instance(), &SyncStatusService::statusUpdated, this, [this](bool syncing, int count) {
         if (syncing) {
-            m_btnSync->setIcon(UiHelper::getIcon("sync", ErrorRed));
+            m_btnSync->setIcon(UiHelper::getIcon("sync", ErrorRed)); // 强制红色
             m_btnSync->setProperty("tooltipText", QString("正在同步元数据 (%1 项待落盘)...").arg(count));
         } else {
-            m_btnSync->setIcon(UiHelper::getIcon("sync", TextMain));
+            m_btnSync->setIcon(UiHelper::getIcon("sync", TextMain)); // 恢复正常
             m_btnSync->setProperty("tooltipText", "元数据已同步至物理文件");
         }
     });
 
+    // 2026-06-15 按照用户要求：手动点击同步 (仅作交互反馈)
     connect(m_btnSync, &QPushButton::clicked, this, [this]() {
         if (SyncStatusService::instance().isSyncing()) {
             ToolTipOverlay::instance()->showText(m_btnSync->mapToGlobal(QPoint(0,0)), "同步正在进行中...", 1500);
@@ -1381,7 +1389,7 @@ void MainWindow::setupCustomTitleBarButtons() {
         menu.exec(m_btnLayout->mapToGlobal(QPoint(0, m_btnLayout->height())));
     });
 
-    m_btnCreate = createTitleBtn("add");
+    m_btnCreate = createTitleBtn("add"); // 2026-03-xx 规范化：“+”按钮图标修正
     m_btnCreate->setProperty("tooltipText", "新建...");
     QMenu* createMenu = new QMenu(m_btnCreate);
     UiHelper::applyMenuStyle(createMenu);
@@ -1390,6 +1398,10 @@ void MainWindow::setupCustomTitleBarButtons() {
     QAction* actNewMd     = createMenu->addAction(UiHelper::getIcon("text", QColor("#EEEEEE")), "创建 Markdown");
     QAction* actNewTxt    = createMenu->addAction(UiHelper::getIcon("text", QColor("#EEEEEE")), "创建纯文本文件 (txt)");
     
+    // 2026-03-xx 按照用户要求修正居中对齐：
+    // 不再使用 setMenu，避免按钮进入“菜单模式”从而为指示器预留空间导致图标偏左。
+    // 采用手动 popup 方式展示菜单。
+    // 2026-05-27 物理加固：补全 this 上下文
     connect(m_btnCreate, &QPushButton::clicked, this, [this, createMenu]() {
         createMenu->popup(m_btnCreate->mapToGlobal(QPoint(0, m_btnCreate->height())));
     });
@@ -1397,6 +1409,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     auto handleCreate = [this](const QString& type) {
         m_contentPanel->createNewItem(type);
     };
+    // 2026-05-27 物理加固：补全 this 上下文
     connect(actNewFolder, &QAction::triggered, this, [handleCreate](){ handleCreate("folder"); });
     connect(actNewMd,     &QAction::triggered, this, [handleCreate](){ handleCreate("md"); });
     connect(actNewTxt,    &QAction::triggered, this, [handleCreate](){ handleCreate("txt"); });
@@ -1418,7 +1431,8 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnMax->setProperty("tooltipText", "最大化/还原");
     m_btnMax->installEventFilter(m_hoverFilter);
 
-    m_btnClose = createTitleBtn("close", qssColor(ErrorRed));
+    m_btnClose = createTitleBtn("close", qssColor(ErrorRed)); // 初始创建
+    // 按照用户要求：关闭按钮持续显示红色高亮，不再仅悬停显示
     m_btnClose->setStyleSheet(QString(
         "QPushButton { background-color: %1; border: none; border-radius: 4px; padding: 0; }"
         "QPushButton:hover { background-color: %1; }"
@@ -1429,7 +1443,7 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     m_btnCreate->installEventFilter(m_hoverFilter);
 
-    // 右侧图标按钮组内部仅保留功能按钮，严格 5px 间距
+    // 右侧功能按钮组容器（内部维护 5px 严格按钮间距）
     layout->addWidget(m_btnToggleDriveBar, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnLayout, 0, Qt::AlignVCenter);
@@ -1439,20 +1453,23 @@ void MainWindow::setupCustomTitleBarButtons() {
     layout->addWidget(m_btnMax, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnClose, 0, Qt::AlignVCenter);
 
+    // 绑定基础逻辑
     connect(m_btnMin, &QPushButton::clicked, this, &MainWindow::showMinimized);
+    // 2026-05-27 物理加固：补全 this 上下文
     connect(m_btnMax, &QPushButton::clicked, this, [this]() {
         if (isMaximized()) showNormal();
         else showMaximized();
     });
     connect(m_btnClose, &QPushButton::clicked, this, &MainWindow::close);
 
-    // 还原外层 m_titleBarLayout 的挂载顺序，各主组件保持 8px 间距
+    // 外层标题栏布局 (m_titleBarLayout 维护 8px 组件间距与边距)
     if (m_titleBarLayout) {
         m_titleBarLayout->addWidget(m_sizeSlider, 0, Qt::AlignVCenter);
         m_titleBarLayout->addWidget(m_btnViewMenu, 0, Qt::AlignVCenter);
         m_titleBarLayout->addWidget(titleBarBtns);
     }
 
+    // 逻辑：置顶切换
     connect(m_btnPinTop, &QPushButton::toggled, this, &MainWindow::onPinToggled);
 }
 
