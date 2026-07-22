@@ -1259,6 +1259,19 @@ void ContentPanel::updateGridSize() {
 } 
  
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 
+    if (event->type() == QEvent::Wheel) {
+        QWheelEvent* wEvent = static_cast<QWheelEvent*>(event);
+        if (wEvent->modifiers() & Qt::ControlModifier) {
+            if (m_currentViewMode != ListView) {
+                int deltaY = wEvent->angleDelta().y();
+                int newZoom = m_zoomLevel + (deltaY > 0 ? 8 : -8);
+                setZoomLevel(newZoom);
+            }
+            wEvent->accept();
+            return true; // 吞噬该事件，不让子视图产生滚动，彻底解决逻辑混乱和时灵时不灵问题
+        }
+    }
+
     // 2026-03-xx 按照宪法要求：物理拦截 Hover 事件以触发 ToolTipOverlay 
     // 2026-05-20 性能优化：同时支持 Enter/Leave 事件，确保响应灵敏 
     if (event->type() == QEvent::HoverEnter || event->type() == QEvent::Enter) { 
@@ -1656,9 +1669,11 @@ void ContentPanel::setZoomLevel(int level) {
 
 void ContentPanel::wheelEvent(QWheelEvent* event) { 
     if (event->modifiers() & Qt::ControlModifier) {
-        int deltaY = event->angleDelta().y();
-        int newZoom = m_zoomLevel + (deltaY > 0 ? 8 : -8);
-        setZoomLevel(newZoom);
+        if (m_currentViewMode != ListView) {
+            int deltaY = event->angleDelta().y();
+            int newZoom = m_zoomLevel + (deltaY > 0 ? 8 : -8);
+            setZoomLevel(newZoom);
+        }
         event->accept();
         return;
     }
