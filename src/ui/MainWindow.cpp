@@ -1374,6 +1374,7 @@ void MainWindow::setupCustomTitleBarButtons() {
 
     connect(m_viewBtn, &QPushButton::clicked, this, [this]() {
         QMenu* menu = new QMenu(this);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
         UiHelper::applyMenuStyle(menu); // 维持现有的菜单高内聚样式规范
 
         QAction* actJustified = menu->addAction("自适应");
