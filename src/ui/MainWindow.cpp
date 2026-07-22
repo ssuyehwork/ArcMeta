@@ -1284,8 +1284,7 @@ void MainWindow::setupCustomTitleBarButtons() {
         actGrid->setCheckable(true);
         actList->setCheckable(true);
 
-        auto currentMode = m_contentPanel->property("currentViewMode").toInt();
-        ContentPanel::ViewMode mode = static_cast<ContentPanel::ViewMode>(currentMode);
+        ContentPanel::ViewMode mode = m_contentPanel->currentViewMode();
         actAdaptive->setChecked(mode == ContentPanel::JustifiedViewMode);
         actGrid->setChecked(mode == ContentPanel::GridView);
         actList->setChecked(mode == ContentPanel::ListView);

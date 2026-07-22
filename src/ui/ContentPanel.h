@@ -196,6 +196,7 @@ public:
      * @brief 切换视图模式
      */
     void setViewMode(ViewMode mode);
+    ViewMode currentViewMode() const { return m_currentViewMode; }
 
     /**
      * @brief 拦截空格键（红线：物理拦截 QEvent::KeyPress 且为 Key_Space）
