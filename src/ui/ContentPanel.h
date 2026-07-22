@@ -197,6 +197,10 @@ public:
      */
     void setViewMode(ViewMode mode);
 
+    int zoomLevel() const { return m_zoomLevel; }
+    void setZoomLevel(int level);
+    ViewMode currentViewMode() const { return m_currentViewMode; }
+
     /**
      * @brief 拦截空格键（红线：物理拦截 QEvent::KeyPress 且为 Key_Space）
      */
@@ -218,6 +222,8 @@ public:
     QString getAdjacentFilePath(const QString& currentPath, int delta);
 
 signals:
+    void zoomLevelChanged(int level);
+
     /**
      * @brief 请求 QuickLook 预览信号
      * @param path 物理路径
