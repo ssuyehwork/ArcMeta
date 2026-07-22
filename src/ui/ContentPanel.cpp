@@ -1487,7 +1487,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         }
     }
 
-    if (watched == m_sizeSlider && event->type() == QEvent::MouseButtonPress) {
+    if (obj == m_sizeSlider && event->type() == QEvent::MouseButtonPress) {
         QMouseEvent* me = static_cast<QMouseEvent*>(event);
         if (me->button() == Qt::LeftButton) {
             int val = QStyle::sliderValueFromPosition(m_sizeSlider->minimum(), m_sizeSlider->maximum(), me->pos().x(), m_sizeSlider->width());
