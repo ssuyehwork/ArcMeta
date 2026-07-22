@@ -1,12 +1,15 @@
 # 备份备注
 
-**备份时间**：2026-07-19 00:39:29  
-**备份目录**：Buk_20260719_003923  
+**备份时间**：2026-07-22 12:12:59
+**备份目录**：Buk_20260722_121257
 
 ---
 
-完成了 Modification_Plan-17.md 关于侧边栏计数服务及 24h 滑动窗口的全部整改工作：
-1. 在 CategoryRepo 中定义并引入 7 个静态 std::atomic<int> 计数寄存器及全局标签去重集合，重构 CategoryRepo::getSystemCounts 瞬间提取加载实现 O(1) 检索，消灭 system-wide 线性扫描；
-2. 精细梳理并重写新注册、打标、设失效、移入/移出回收站和分配分类（MetadataManager / CategoryRepo）等多维写链路，瞬间进行 fetch_add/fetch_sub 的极速增量维护；
-3. 设计有序双端队列 std::deque + 快速哈希 set 架构对 atime 变动更新，在 15秒 DatabaseManager::flushAll 后台定时器中对队头旧数据执行 O(K) 局部时间滑动剪枝，彻底消灭 recent 线性全量时间戳扫描；
-4. 取消程序启动时的主线程 fullRecount() 阻碍，改用 loadStatsFromDb 同步极速加载 system_stats 快照秒开界面；在加载 2.0s 后拉起后台子线程 QtConcurrent::run 对账，最终以 fetch_add 修正 delta 偏差确保最终一致性。
+本次提交完成了对 ThumbnailDelegate 的模块化拆分与职责重构：
+1. 成功解决了原 ThumbnailDelegate 极其臃肿、多维渲染与逻辑控制“职责过载”的问题。
+2. 提取出 ElidedTextUtility 专门负责双行文本裁剪算法。
+3. 提取出 CardPainterHelper 专门负责底层 QPainter 细节的原子化静态物理绘制，并在每个绘制阶段严格调用 save() 与 restore() 确保画笔状态安全。
+4. 使得 ThumbnailDelegate 大幅精简，只专注于卡片尺寸几何计算、输入法编辑器控制和分流交互，高内聚且低耦合，没有任何视觉样式回归。
+5. 注册 CMakeLists.txt，确保编译链接完全一致。
+
+这个版本 内容面板数据来源与内存情况下 显示的卡片是正确的，但来自目录导航是，显示的卡片是正方形，是错误的

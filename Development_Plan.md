@@ -70,3 +70,11 @@
   3. 在 `ContentPanel` 中新增 `selectAndScrollToPath(path)` 方法，保持主视图选中态随切图进行双向联动。
 - 不在本次范围内的是：重构预览界面或主界面的非快捷键/切图逻辑。
 - 对应方案文档：Modification_Plan-39.md
+
+## [2026-07-21] ThumbnailDelegate 职责过载审计与模块化拆分规划
+
+- 用户描述的现象/问题：单元格展示委托 `ThumbnailDelegate` 存在多维重绘、生命期、排版和提示的职责过载，难以维护及复用。
+- 用户期望的结果：对其进行代码职责过载分析并输出模块化的单一职责拆解和落地规划。
+- 本次任务边界：对 `src/ui/ThumbnailDelegate.h` 与 `src/ui/ThumbnailDelegate.cpp` 展开整体架构梳理，定位其过载现状，设计面向高内聚、零开销、低耦合的模块化（视觉物理渲染、文本排版、控制器生命期分流）拆分图纸。由于本 Turn 为只读分析师模式，不修改任何项目代码文件。
+- 不在本次范围内的是：修改逻辑代码、在外部执行构建验证。
+- 对应方案文档：Modification_Plan-40.md

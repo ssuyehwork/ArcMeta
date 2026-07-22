@@ -208,7 +208,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == AspectRatioRole) {
         // 2026-07-xx 性能优化：优先使用 ItemRecord 中已注入的尺寸信息，实现渲染零延迟
         if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
-        return m_aspectRatios.value(path, 1.0);
+        return m_aspectRatios.value(QDir::toNativeSeparators(path), 1.0);
     } else if (role == HasThumbnailRole) {
         // 2026-xx-xx 按照 Plan-114：优化 HasThumbnailRole 判定逻辑
         // 只要是图形或视频格式，均预设为 true，强制 Delegate 进入填满模式，消除抖动
@@ -482,7 +482,13 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
         QString path = rec.path;
         QString cacheKey = path; // 统一使用稳定且唯一的 path 作为内存缓存 Key
         
-        if (m_iconCache.contains(cacheKey)) continue;
+        // 核心排重与同步机制纠偏：对于图形格式文件，即使 icon 缓存命中，若宽高比缓存丢失，依然必须拉起加载以补全尺寸
+        bool needLoad = !m_iconCache.contains(cacheKey);
+        if (UiHelper::isGraphicsFile(rec.suffix) && !m_aspectRatios.contains(QDir::toNativeSeparators(path))) {
+            needLoad = true;
+        }
+        if (!needLoad) continue;
+
         newQueue.push_back({path, cacheKey});
     }
 
@@ -555,7 +561,7 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             }
                             
                             mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
-                            if (hasThumb) mutableThis->m_aspectRatios[path] = ar;
+                            if (hasThumb) mutableThis->m_aspectRatios[QDir::toNativeSeparators(path)] = ar;
                             
                             for (int i = 0; i < mutableThis->m_displayCount; ++i) {
                                 const auto& rec = mutableThis->m_allRecords[i];
