@@ -157,6 +157,8 @@ private:
     QPushButton* m_btnSync   = nullptr;
     QPushButton* m_btnLayout = nullptr;
     QPushButton* m_btnCreate = nullptr;
+    QPushButton* m_viewBtn   = nullptr;
+    class QSlider* m_sizeSlider = nullptr;
     QPushButton* m_btnPinTop = nullptr;
     QPushButton* m_btnMin = nullptr;
     QPushButton* m_btnMax = nullptr;
