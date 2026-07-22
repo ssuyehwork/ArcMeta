@@ -47,6 +47,8 @@ public:
     Metrics calculateMetrics(const QStyleOptionViewItem& option) const;
 
 private:
+    void drawFileNameText(QPainter* painter, const QRect& textRect, bool isSelected, const QModelIndex& index, const QStyleOptionViewItem& option) const;
+
     int m_hasThumbnailRole = Qt::UserRole + 1;
     int m_ratingRole = -1;
     int m_pathRole = -1;
