@@ -1255,8 +1255,6 @@ void ContentPanel::updateGridSize() {
     // 2026-06-05 按照要求：持久化保存当前的缩放级别
     AppConfig::instance().setValue("UI/GridZoomLevel", m_zoomLevel);
 
-    emit zoomLevelChanged(m_zoomLevel);
-
     qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
 } 
  
@@ -1652,11 +1650,6 @@ void ContentPanel::wheelEvent(QWheelEvent* event) {
     QWidget::wheelEvent(event);
 } 
  
-void ContentPanel::setZoomLevel(int level) {
-    m_zoomLevel = level;
-    updateGridSize();
-}
-
 void ContentPanel::setViewMode(ViewMode mode) { 
     m_currentViewMode = mode;
     if (mode == ListView) {

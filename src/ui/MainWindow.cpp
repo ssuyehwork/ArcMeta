@@ -45,8 +45,6 @@
 #include <QMenu>
 #include <QAction>
 #include <QWidgetAction>
-#include <QSlider>
-#include <QActionGroup>
 #include <QGridLayout>
 #include <QTimer>
 #include "UiHelper.h"
@@ -1368,74 +1366,11 @@ void MainWindow::setupCustomTitleBarButtons() {
     m_btnClose->setProperty("tooltipText", "关闭项目");
     m_btnClose->installEventFilter(m_hoverFilter);
 
-    m_viewBtn = createTitleBtn("grid");
-    m_viewBtn->setProperty("tooltipText", "排列方式");
-    m_viewBtn->installEventFilter(m_hoverFilter);
-
-    connect(m_viewBtn, &QPushButton::clicked, this, [this]() {
-        QMenu* menu = new QMenu(this);
-        menu->setAttribute(Qt::WA_DeleteOnClose);
-        UiHelper::applyMenuStyle(menu); // 维持现有的菜单高内聚样式规范
-
-        QAction* actJustified = menu->addAction("自适应");
-        actJustified->setCheckable(true);
-        actJustified->setChecked(m_contentPanel->currentViewMode() == ContentPanel::JustifiedViewMode);
-
-        QAction* actGrid = menu->addAction("网格");
-        actGrid->setCheckable(true);
-        actGrid->setChecked(m_contentPanel->currentViewMode() == ContentPanel::GridView);
-
-        QAction* actList = menu->addAction("列表");
-        actList->setCheckable(true);
-        actList->setChecked(m_contentPanel->currentViewMode() == ContentPanel::ListView);
-
-        QActionGroup* grp = new QActionGroup(menu);
-        grp->addAction(actJustified);
-        grp->addAction(actGrid);
-        grp->addAction(actList);
-
-        connect(actJustified, &QAction::triggered, this, [this]() {
-            m_contentPanel->setViewMode(ContentPanel::JustifiedViewMode);
-        });
-        connect(actGrid, &QAction::triggered, this, [this]() {
-            m_contentPanel->setViewMode(ContentPanel::GridView);
-        });
-        connect(actList, &QAction::triggered, this, [this]() {
-            m_contentPanel->setViewMode(ContentPanel::ListView);
-        });
-
-        menu->exec(m_viewBtn->mapToGlobal(QPoint(0, m_viewBtn->height() + 2)));
-    });
-
-    m_sizeSlider = new QSlider(Qt::Horizontal, this);
-    m_sizeSlider->setRange(32, 256);
-    m_sizeSlider->setValue(m_contentPanel->zoomLevel()); // 默认与 ContentPanel 的初始 zoomLevel 保持一致
-    m_sizeSlider->setFixedSize(85, 20);
-    m_sizeSlider->setCursor(Qt::PointingHandCursor);
-    m_sizeSlider->setStyleSheet(
-        "QSlider { background: transparent; padding: 0px; margin: 0px; }"
-        "QSlider::groove:horizontal { height: 3px; background: #333333; border-radius: 2px; }"
-        "QSlider::sub-page:horizontal { background: #FF8C00; border-radius: 2px; }"
-        "QSlider::handle:horizontal { width: 10px; height: 10px; margin: -4px 0; "
-        "  background: #FF8C00; border-radius: 5px; }"
-    );
-
-    connect(m_sizeSlider, &QSlider::valueChanged, this, [this](int val) {
-        m_contentPanel->setZoomLevel(val);
-    });
-
-    connect(m_contentPanel, &ContentPanel::zoomLevelChanged, this, [this](int level) {
-        QSignalBlocker blocker(m_sizeSlider);
-        m_sizeSlider->setValue(level);
-    });
-
     m_btnCreate->installEventFilter(m_hoverFilter);
     layout->addWidget(m_btnToggleDriveBar, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnSync, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnLayout, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnCreate, 0, Qt::AlignVCenter);
-    layout->addWidget(m_viewBtn, 0, Qt::AlignVCenter); // 插入排列方式按钮
-    layout->addWidget(m_sizeSlider, 0, Qt::AlignVCenter); // 插入滑杆
     layout->addWidget(m_btnPinTop, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnMin, 0, Qt::AlignVCenter);
     layout->addWidget(m_btnMax, 0, Qt::AlignVCenter);
