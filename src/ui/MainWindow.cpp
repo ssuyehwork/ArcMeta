@@ -1333,13 +1333,6 @@ void MainWindow::setupCustomTitleBarButtons() {
         m_sizeSlider->setValue(level);
     });
 
-    connect(m_contentPanel, &ContentPanel::viewModeChanged, this, [this](ContentPanel::ViewMode mode) {
-        QString iconKey = "grid";
-        if (mode == ContentPanel::ListView) iconKey = "list";
-        else if (mode == ContentPanel::JustifiedViewMode) iconKey = "columns";
-        m_btnViewMenu->setIcon(UiHelper::getIcon(iconKey, QColor("#EEEEEE")));
-    });
-
     int initZoom = AppConfig::instance().getValue("UI/GridZoomLevel", 96).toInt();
     m_sizeSlider->setValue(qBound(96, initZoom, 128));
 
