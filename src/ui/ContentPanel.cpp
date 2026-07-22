@@ -1433,43 +1433,6 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         }
     }
 
-    if ((obj == m_gridView || obj == m_gridView->viewport() || obj == m_treeView || obj == m_treeView->viewport()) && event->type() == QEvent::Wheel) { 
-        // 2026-05-25 物理修复：改用 reinterpret_cast 避开 static_cast 的类型推导逻辑错误 
-        QWheelEvent* wEvent = reinterpret_cast<QWheelEvent*>(event); 
-        if (wEvent->modifiers() & Qt::ControlModifier) { 
-            int delta = wEvent->angleDelta().y(); 
-            if (delta > 0) {
-                // 向上滚动（放大）
-                if (m_viewStack->currentWidget() == m_treeView) {
-                    m_zoomLevel += 4; // 列表模式步进调小一些，追求平滑
-                    if (m_zoomLevel > 96) {
-                        m_zoomLevel = 96;
-                        setViewMode(GridView);
-                    }
-                    updateGridSize();
-                } else {
-                    m_zoomLevel += 8;
-                    updateGridSize();
-                }
-            } else {
-                // 向下滚动（缩小）
-                if (m_viewStack->currentWidget() == m_gridView) {
-                    if (m_zoomLevel <= 96) {
-                        setViewMode(ListView);
-                        m_zoomLevel = 80; // 切换到列表时给一个初始行高
-                        updateGridSize();
-                    } else {
-                        m_zoomLevel -= 8;
-                        updateGridSize();
-                    }
-                } else if (m_viewStack->currentWidget() == m_treeView) {
-                    m_zoomLevel = qMax(24, m_zoomLevel - 4); // 列表模式最小行高锁定 24
-                    updateGridSize();
-                }
-            }
-            return true; 
-        } 
-    } 
  
     if (event->type() == QEvent::KeyPress) { 
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 QEvent 到 QKeyEvent 的 static_cast 歧义 
@@ -1684,41 +1647,7 @@ QString ContentPanel::getAdjacentFilePath(const QString& currentPath, int delta)
 } 
  
 void ContentPanel::wheelEvent(QWheelEvent* event) { 
-    if (event->modifiers() & Qt::ControlModifier) { 
-        int delta = event->angleDelta().y(); 
-        if (delta > 0) {
-            // 放大
-            if (m_viewStack->currentWidget() == m_treeView) {
-                m_zoomLevel += 4;
-                if (m_zoomLevel > 96) {
-                    m_zoomLevel = 96;
-                    setViewMode(GridView);
-                }
-                updateGridSize();
-            } else {
-                m_zoomLevel += 8;
-                updateGridSize();
-            }
-        } else {
-            // 缩小
-            if (m_viewStack->currentWidget() == m_gridView) {
-                if (m_zoomLevel <= 96) {
-                    setViewMode(ListView);
-                    m_zoomLevel = 80;
-                    updateGridSize();
-                } else {
-                    m_zoomLevel -= 8;
-                    updateGridSize();
-                }
-            } else if (m_viewStack->currentWidget() == m_treeView) {
-                m_zoomLevel = qMax(24, m_zoomLevel - 4);
-                updateGridSize();
-            }
-        }
-        event->accept(); 
-    } else { 
-        QWidget::wheelEvent(event); 
-    } 
+    QWidget::wheelEvent(event);
 } 
  
 void ContentPanel::setViewMode(ViewMode mode) { 
