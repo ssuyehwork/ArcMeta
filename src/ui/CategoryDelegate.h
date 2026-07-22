@@ -55,7 +55,6 @@ public:
             // 应用宪法规范：margin 1px 2px (上下 1px, 左右 2px)
             contentRect.adjust(2, 1, -2, -1);
             
-            QString colorHex = index.data(ColorRole).toString();
             ArcMeta::CardPainterHelper::drawCategoryBackground(painter, contentRect, selected, hover, colorHex);
             painter->restore();
         }
