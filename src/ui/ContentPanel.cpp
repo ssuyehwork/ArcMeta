@@ -214,7 +214,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         // 只要是图形或视频格式，均预设为 true，强制 Delegate 进入填满模式，消除抖动
         if (UiHelper::isGraphicsFile(record.suffix)) return true;
         if (record.width > 0 && record.height > 0) return true;
-        return m_aspectRatios.contains(path);
+        return m_aspectRatios.contains(QDir::toNativeSeparators(path));
     } else if (role == Qt::DecorationRole && index.column() == 0) {
         // 统一使用稳定且唯一的 path 作为内存缩略图缓存 Key，彻底根除注册前/后 fileId 状态变化导致的缓存失效或闪烁痛点
         QString cacheKey = path;

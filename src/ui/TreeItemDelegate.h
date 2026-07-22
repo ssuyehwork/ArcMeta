@@ -83,13 +83,40 @@ public:
 
             // 2. 图像/图标平滑居中绘制（最左侧看片核心逻辑）
             QVariant decoData = index.data(Qt::DecorationRole);
-            if (decoData.canConvert<QPixmap>()) {
-                QPixmap thumb = decoData.value<QPixmap>();
+            bool hasThumb = index.data(HasThumbnailRole).toBool();
+
+            if (hasThumb) {
+                QPixmap thumb;
+                if (decoData.canConvert<QPixmap>()) {
+                    thumb = decoData.value<QPixmap>();
+                } else if (decoData.canConvert<QIcon>()) {
+                    QIcon icon = decoData.value<QIcon>();
+                    if (!icon.isNull()) {
+                        thumb = icon.pixmap(squareRect.size());
+                    }
+                }
+
                 if (!thumb.isNull()) {
+                    painter->save();
+                    QPainterPath clipPath;
+                    clipPath.addRoundedRect(squareRect, 4, 4);
+                    painter->setClipPath(clipPath);
+
                     QPixmap scaled = thumb.scaled(squareRect.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
                     int x = squareRect.center().x() - scaled.width() / 2;
                     int y = squareRect.center().y() - scaled.height() / 2;
                     painter->drawPixmap(x, y, scaled);
+
+                    painter->restore();
+                } else {
+                    QIcon icon = qvariant_cast<QIcon>(decoData);
+                    if (!icon.isNull()) {
+                        int iconSize = qRound(side * 0.6);
+                        QRect iconRect(squareRect.center().x() - iconSize / 2,
+                                       squareRect.center().y() - iconSize / 2,
+                                       iconSize, iconSize);
+                        icon.paint(painter, iconRect);
+                    }
                 }
             } else {
                 QIcon icon = qvariant_cast<QIcon>(decoData);
