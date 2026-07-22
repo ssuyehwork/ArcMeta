@@ -1114,8 +1114,79 @@ void ContentPanel::initUi() {
         } 
     }); 
  
+    // 排列按钮 m_viewBtn 构建
+    m_viewBtn = new QPushButton(titleBar);
+    m_viewBtn->setFixedSize(24, 24); // 严格满足外框 24x24px 考古规范
+    m_viewBtn->setIcon(UiHelper::getIcon("grid", QColor("#CCCCCC"), 18)); // 严格满足图标 18x18px
+    m_viewBtn->setIconSize(QSize(18, 18));
+    m_viewBtn->setCursor(Qt::PointingHandCursor);
+    m_viewBtn->setProperty("tooltipText", "排列方式");
+    m_viewBtn->installEventFilter(this);
+    m_viewBtn->setStyleSheet(
+        "QPushButton { background: transparent; border: none; border-radius: 4px; padding: 0; }"
+        "QPushButton:hover { background: #3E3E42; }"    // 悬停色 #3E3E42 考古标准
+        "QPushButton:pressed { background: #4E4E52; }"  // 按下色 #4E4E52 考古标准
+    );
+
+    connect(m_viewBtn, &QPushButton::clicked, this, [this]() {
+        QMenu* menu = new QMenu(this);
+        menu->setStyleSheet(
+            "QMenu { background: #1A1A1A; color: #CCC; border: 1px solid #333; border-radius: 6px; }"
+            "QMenu::item { padding: 6px 24px; }"
+            "QMenu::item:selected { background: #2A2A2A; color: #FFF; }"
+            "QMenu::item:checked { color: #FF551C; }" // 选中激活色对齐置顶激活橙 #ff551c
+        );
+
+        QAction* jModeAct = menu->addAction("自适应(A)");
+        jModeAct->setCheckable(true);
+        jModeAct->setChecked(m_currentViewMode == JustifiedViewMode);
+
+        QAction* gModeAct = menu->addAction("网格(G)");
+        gModeAct->setCheckable(true);
+        gModeAct->setChecked(m_currentViewMode == GridView);
+
+        QAction* listModeAct = menu->addAction("列表(L)");
+        listModeAct->setCheckable(true);
+        listModeAct->setChecked(m_currentViewMode == ListView);
+
+        QActionGroup* modeGrp = new QActionGroup(menu);
+        modeGrp->addAction(jModeAct);
+        modeGrp->addAction(gModeAct);
+        modeGrp->addAction(listModeAct);
+
+        connect(jModeAct, &QAction::triggered, this, [this]() { setViewMode(JustifiedViewMode); });
+        connect(gModeAct, &QAction::triggered, this, [this]() { setViewMode(GridView); });
+        connect(listModeAct, &QAction::triggered, this, [this]() { setViewMode(ListView); });
+
+        menu->exec(m_viewBtn->mapToGlobal(QPoint(0, m_viewBtn->height() + 2)));
+    });
+
+    // 尺寸滑杆 m_sizeSlider 构建
+    m_sizeSlider = new QSlider(Qt::Horizontal, titleBar);
+    m_sizeSlider->setRange(32, 256); // 严格调节范围限制 32 至 256
+    m_sizeSlider->setValue(m_zoomLevel);
+    m_sizeSlider->setFixedSize(110, 20); // 严格满足滑杆 110px 宽度
+    m_sizeSlider->setCursor(Qt::PointingHandCursor);
+    m_sizeSlider->installEventFilter(this);
+    m_sizeSlider->setStyleSheet(
+        "QSlider { background: transparent; margin-right: 1px; }"
+        "QSlider::groove:horizontal { height: 3px; background: #3F3F3F; border-radius: 2px; }"
+        "QSlider::sub-page:horizontal { background: #FF551C; border-radius: 2px; }" // 填充对齐激活色 #ff551c
+        "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; "
+        "  background: #FF551C; border-radius: 6px; }" // 按钮对齐激活色 #ff551c
+    );
+
+    connect(m_sizeSlider, &QSlider::valueChanged, this, [this](int v) {
+        m_zoomLevel = v;
+        // 更新当前正在使用的活动视图中的卡片/图标渲染高度
+        updateGridSize(); // 调和并同步当前视图中的网格高度，消除闪烁
+        AppConfig::instance().setValue("UI/GridZoomLevel", m_zoomLevel);
+    });
+
     titleL->addWidget(titleLabel); 
     titleL->addStretch(); 
+    titleL->addWidget(m_viewBtn);     // 排列方式选择按钮
+    titleL->addWidget(m_sizeSlider);  // 尺寸调整滑动杆
     titleL->addWidget(m_btnToggleFolders, 0, Qt::AlignVCenter);
     titleL->addWidget(m_btnToggleFiles, 0, Qt::AlignVCenter);
     titleL->addWidget(m_btnLayersBlue, 0, Qt::AlignVCenter);
@@ -1203,12 +1274,6 @@ void ContentPanel::refreshVisibleThumbnails() {
 
 void ContentPanel::updateGridSize() {
     // 2026-06-05 按照用户要求：彻底重构为正方形布局，名称外置
-    // 2026-06-08 按照用户核心铁律：物理强制锁定缩放最小值为 96 像素
-    
-    if (m_viewStack->currentWidget() == m_gridView) {
-        m_zoomLevel = qBound(96, m_zoomLevel, 128);
-    }
-
     // 写入实时日志 
     ArcMeta::Logger::log(QString("[UI_DEBUG] 卡片缩放级: %1").arg(m_zoomLevel));
     
@@ -1227,15 +1292,6 @@ void ContentPanel::updateGridSize() {
             lv->setGridSize(QSize(side, totalH));
         }
     } else if (m_viewStack->currentWidget() == m_treeView) {
-        // 2026-06-xx 按照要求：列表模式下调整行高
-        if (m_zoomLevel > 96) {
-            // 如果行高超过 96，自动切换到卡片形式
-            setViewMode(GridView);
-            m_zoomLevel = 96; // 修正：切换回网格时对齐红线
-            updateGridSize();
-            return;
-        }
-        
         // 2026-06-xx 物理修复：图标大小必须随行高变化
         m_treeView->setIconSize(QSize(m_zoomLevel - 8, m_zoomLevel - 8));
         
@@ -1433,41 +1489,29 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
         }
     }
 
+    if (watched == m_sizeSlider && event->type() == QEvent::MouseButtonPress) {
+        QMouseEvent* me = static_cast<QMouseEvent*>(event);
+        if (me->button() == Qt::LeftButton) {
+            int val = QStyle::sliderValueFromPosition(m_sizeSlider->minimum(), m_sizeSlider->maximum(), me->pos().x(), m_sizeSlider->width());
+            m_sizeSlider->setValue(val);
+            return true; // 消费此点击事件以实现精准直接跳转
+        }
+    }
+
     if ((obj == m_gridView || obj == m_gridView->viewport() || obj == m_treeView || obj == m_treeView->viewport()) && event->type() == QEvent::Wheel) { 
         // 2026-05-25 物理修复：改用 reinterpret_cast 避开 static_cast 的类型推导逻辑错误 
         QWheelEvent* wEvent = reinterpret_cast<QWheelEvent*>(event); 
         if (wEvent->modifiers() & Qt::ControlModifier) { 
-            int delta = wEvent->angleDelta().y(); 
-            if (delta > 0) {
-                // 向上滚动（放大）
-                if (m_viewStack->currentWidget() == m_treeView) {
-                    m_zoomLevel += 4; // 列表模式步进调小一些，追求平滑
-                    if (m_zoomLevel > 96) {
-                        m_zoomLevel = 96;
-                        setViewMode(GridView);
-                    }
-                    updateGridSize();
-                } else {
-                    m_zoomLevel += 8;
-                    updateGridSize();
-                }
-            } else {
-                // 向下滚动（缩小）
-                if (m_viewStack->currentWidget() == m_gridView) {
-                    if (m_zoomLevel <= 96) {
-                        setViewMode(ListView);
-                        m_zoomLevel = 80; // 切换到列表时给一个初始行高
-                        updateGridSize();
-                    } else {
-                        m_zoomLevel -= 8;
-                        updateGridSize();
-                    }
-                } else if (m_viewStack->currentWidget() == m_treeView) {
-                    m_zoomLevel = qMax(24, m_zoomLevel - 4); // 列表模式最小行高锁定 24
-                    updateGridSize();
+            int deltaY = wEvent->angleDelta().y();
+            if (m_sizeSlider) {
+                // 拦截底层事件，直接修改卡片滑杆的数值以更新卡片尺寸，每次步进 10 像素
+                if (deltaY > 0) {
+                    m_sizeSlider->setValue(m_sizeSlider->value() + 10);
+                } else if (deltaY < 0) {
+                    m_sizeSlider->setValue(m_sizeSlider->value() - 10);
                 }
             }
-            return true; 
+            return true; // 拦截并消费此滚轮事件，掐断底层纵向滚动动作
         } 
     } 
  
@@ -1686,33 +1730,12 @@ QString ContentPanel::getAdjacentFilePath(const QString& currentPath, int delta)
 void ContentPanel::wheelEvent(QWheelEvent* event) { 
     if (event->modifiers() & Qt::ControlModifier) { 
         int delta = event->angleDelta().y(); 
-        if (delta > 0) {
-            // 放大
-            if (m_viewStack->currentWidget() == m_treeView) {
-                m_zoomLevel += 4;
-                if (m_zoomLevel > 96) {
-                    m_zoomLevel = 96;
-                    setViewMode(GridView);
-                }
-                updateGridSize();
-            } else {
-                m_zoomLevel += 8;
-                updateGridSize();
-            }
-        } else {
-            // 缩小
-            if (m_viewStack->currentWidget() == m_gridView) {
-                if (m_zoomLevel <= 96) {
-                    setViewMode(ListView);
-                    m_zoomLevel = 80;
-                    updateGridSize();
-                } else {
-                    m_zoomLevel -= 8;
-                    updateGridSize();
-                }
-            } else if (m_viewStack->currentWidget() == m_treeView) {
-                m_zoomLevel = qMax(24, m_zoomLevel - 4);
-                updateGridSize();
+        if (m_sizeSlider) {
+            // 每次滚轮滚动，平滑无级加/减 10 像素大小
+            if (delta > 0) {
+                m_sizeSlider->setValue(m_sizeSlider->value() + 10);
+            } else if (delta < 0) {
+                m_sizeSlider->setValue(m_sizeSlider->value() - 10);
             }
         }
         event->accept(); 

@@ -14,6 +14,7 @@
 #include <QTreeView>
 #include <QStackedWidget>
 #include <QPushButton>
+#include <QSlider>
 #include <QTextBrowser>
 #include <QStandardItemModel>
 #include <QSortFilterProxyModel>
@@ -274,6 +275,8 @@ private:
     QPushButton* m_btnLayersBlue = nullptr;
     QPushButton* m_btnToggleFolders = nullptr; // 2026-07-xx 按照 Plan-73：显示/隐藏文件夹切换
     QPushButton* m_btnToggleFiles = nullptr;   // 2026-07-xx 按照 Plan-73：显示/隐藏文件切换
+    QPushButton* m_viewBtn = nullptr;          // 排列方式按钮
+    QSlider* m_sizeSlider = nullptr;           // 调整卡片尺寸滑杆
     QTextBrowser* m_textPreview = nullptr;
     QLabel* m_imagePreview = nullptr;
 
