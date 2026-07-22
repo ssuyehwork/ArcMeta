@@ -48,7 +48,7 @@ public:
             contentRect.adjust(2, 1, -2, -1);
             
             QString colorHex = index.data(ColorRole).toString();
-            CardPainterHelper::drawCategoryBackground(painter, contentRect, selected, hover, colorHex);
+            ArcMeta::CardPainterHelper::drawCategoryBackground(painter, contentRect, selected, hover, colorHex);
         }
 
         QStyleOptionViewItem opt = option;
