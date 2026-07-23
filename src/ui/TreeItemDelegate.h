@@ -150,8 +150,8 @@ public:
             painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, elidedText);
 
             painter->restore();
-        } else if (col == 1 || col == 2 || col == 3) {
-            // 这三列不调用默认 paint，完全自定义
+        } else if (col == 1 || col == 2) {
+            // 这两列不调用默认 paint，完全自定义
             painter->save();
             painter->setRenderHint(QPainter::Antialiasing);
 
@@ -245,16 +245,6 @@ public:
                     for (int i = 0; i < 5; ++i) {
                         QRect starRect(starsStartX + i * (starSize + starSpacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
                         painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
-                    }
-                }
-            } else if (col == 3) { // 颜色列
-                QString colorHex = index.model()->index(index.row(), 0).data(ColorRole).toString();
-                if (!colorHex.isEmpty()) {
-                    QColor c = UiHelper::parseColorName(colorHex);
-                    if (c.isValid()) {
-                        painter->setBrush(c);
-                        painter->setPen(Qt::NoPen);
-                        painter->drawEllipse(option.rect.center(), 6, 6);
                     }
                 }
             }

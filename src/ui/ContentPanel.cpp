@@ -107,7 +107,7 @@ int FerrexVirtualDbModel::rowCount(const QModelIndex& parent) const {
 }
 
 int FerrexVirtualDbModel::columnCount(const QModelIndex&) const {
-    return 8; // 名称, 状态, 星级, 颜色, 标签, 类型, 大小, 修改日期
+    return 7; // 名称, 状态, 星级, 尺寸, 类型, 大小, 修改日期（移除已冗余的“颜色”列）
 }
 
 Qt::ItemFlags FerrexVirtualDbModel::flags(const QModelIndex& index) const {
@@ -132,7 +132,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         if (role == Qt::DisplayRole || role == Qt::EditRole) {
             switch (index.column()) {
                 case 0: return record.categoryName;
-                case 5: return "子分类";
+                case 4: return "子分类";
                 default: return "";
             }
         } else if (role == CategoryIdRole) {
@@ -165,25 +165,25 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                 if (name.isEmpty() && path.length() >= 2 && path[1] == ':') return path; // 盘符根目录
                 return name;
             }
-            case 4: {
+            case 3: {
                 if (record.isDir) return "-";
                 if (record.width > 0 && record.height > 0) {
                     return QString("%1 x %2").arg(record.width).arg(record.height);
                 }
                 return "-";
             }
-            case 5: {
+            case 4: {
                 if (record.isDir) return "文件夹";
                 int lastDot = path.lastIndexOf('.');
                 return (lastDot != -1) ? path.mid(lastDot + 1).toUpper() : "";
             }
-            case 6: {
+            case 5: {
                 if (record.isDir) return "-";
                 if (record.size < 1024) return QString::number(record.size) + " B";
                 if (record.size < 1024 * 1024) return QString::number(record.size / 1024.0, 'f', 1) + " KB";
                 return QString::number(record.size / (1024.0 * 1024.0), 'f', 1) + " MB";
             }
-            case 7: {
+            case 6: {
                 return QDateTime::fromMSecsSinceEpoch(record.mtime).toString("dd-MM-yyyy HH:mm");
             }
         }
@@ -239,7 +239,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
 
 QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientation, int role) const {
     if (orientation == Qt::Horizontal && role == Qt::DisplayRole) {
-        static const QStringList headers = {"名称", "状态", "星级", "颜色", "尺寸", "类型", "大小", "修改日期"};
+        static const QStringList headers = {"名称", "状态", "星级", "尺寸", "类型", "大小", "修改日期"};
         if (section < static_cast<int>(headers.size())) return headers[section];
     }
     return QVariant();
@@ -1829,23 +1829,23 @@ void ContentPanel::initListView() {
     header->setStretchLastSection(false); // 禁止末端强行拉伸
     header->setCascadingSectionResizes(false);
 
-    // 1. 确保所有 8 列均可见
-    for (int i = 0; i <= 7; ++i) {
+    // 1. 确保所有 7 列均可见，并且彻底隐藏或移除多余的第 7 列（原本的第 7 列已被前移）
+    for (int i = 0; i <= 6; ++i) {
         header->setSectionHidden(i, false);
     }
+    header->setSectionHidden(7, true);
 
-    // 2. 精确设置各列固定像素宽度
+    // 2. 精确设置各列固定像素宽度（彻底移除“颜色”列，平移后续所有列宽度）
     header->resizeSection(1, 50);   // 状态 (固定 50px 图标区)
     header->resizeSection(2, 120);  // 星级 (固定 120px 图标区)
-    header->resizeSection(3, 50);   // 颜色 (固定 50px 图标区)
-    header->resizeSection(4, 120);  // 尺寸 (固定 120px)
-    header->resizeSection(5, 80);   // 类型 (固定 80px)
-    header->resizeSection(6, 100);  // 大小 (固定 100px)
-    header->resizeSection(7, 120);  // 修改日期 (固定 120px)
+    header->resizeSection(3, 120);  // 尺寸 (固定 120px)
+    header->resizeSection(4, 80);   // 类型 (固定 80px)
+    header->resizeSection(5, 100);  // 大小 (固定 100px)
+    header->resizeSection(6, 120);  // 修改日期 (固定 120px)
 
-    // 3. 锁定调整模式：第 0 列（名称）弹性自适应拉伸，第 1~7 列物理固定禁止拖拽
+    // 3. 锁定调整模式：第 0 列（名称）弹性自适应拉伸，第 1~6 列物理固定禁止拖拽
     header->setSectionResizeMode(0, QHeaderView::Stretch);
-    for (int i = 1; i <= 7; ++i) {
+    for (int i = 1; i <= 6; ++i) {
         header->setSectionResizeMode(i, QHeaderView::Fixed);
     }
  
