@@ -370,7 +370,7 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     (void)authorized;
     std::wstring nPath = normalizePath(path);
 
-    // [Plan-131 方案 C] 物理指纹准入机制
+    // [Plan-131 方案 C] 物理指纹准入机制 与 Plan-53 两阶段注册自愈机制
     std::string pFid;
     long long pSize = 0, pMtime = 0;
     if (fetchWinApiMetadataDirect(nPath, pFid, nullptr, &pSize, nullptr, nullptr, &pMtime, nullptr)) {
@@ -378,7 +378,21 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
         auto it = m_cache.find(nPath);
         if (it != m_cache.end()) {
             if (it->second.ingestionStatus == 1 && it->second.fileSize == pSize && it->second.mtime == pMtime) {
-                return; // 指纹一致且已完成解析，跳过后续所有流程
+                QFileInfo info(QString::fromStdWString(nPath));
+                bool needsMetadata = info.isDir() || MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
+                if (!needsMetadata) {
+                    return; // 指纹一致且无需高级元数据，跳过
+                }
+
+                bool hasValidMeta = false;
+                if (info.isDir()) {
+                    hasValidMeta = !it->second.color.empty();
+                } else {
+                    hasValidMeta = (it->second.width > 0 && it->second.height > 0 && !it->second.color.empty());
+                }
+                if (hasValidMeta) {
+                    return; // 指纹一致且已成功解析并包含完整的高级元数据，跳过
+                }
             }
         }
     }
