@@ -82,6 +82,11 @@ void MediaExtractorPipeline::processNextBatch() {
 }
 
 void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
+    QFileInfo info(QString::fromStdWString(path));
+    bool isDir = info.isDir();
+    bool isGraphics = MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
+    bool isMedia = isDir || isGraphics;
+
     int w = 0, h = 0;
     extractDimensions(path, w, h);
     if (w > 0 && h > 0) {
@@ -95,12 +100,15 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
         MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, false);
     }
 
-    MetadataManager::instance().updateIngestionStatus(path, 1);
+    // 只有当提取成功时才允许标记 ingestionStatus = 1。如果是目录，只需颜色提取成功；如果是文件，需颜色和尺寸都提取成功。
+    bool extractionSuccessful = !isMedia || (success && (isDir || (w > 0 && h > 0)));
+    if (extractionSuccessful) {
+        MetadataManager::instance().updateIngestionStatus(path, 1);
+    }
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::PathUpdate, QString::fromStdWString(path));
 
-    if (!success) {
-        QFileInfo info(QString::fromStdWString(path));
-        if (info.isDir() || MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
+    if (!extractionSuccessful) {
+        if (isMedia) {
             std::lock_guard<std::mutex> lock(m_retryMutex);
             if (std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), path) == m_visualRetryQueue.end()) {
                 m_visualRetryQueue.push_back(path);
@@ -216,13 +224,31 @@ void MediaExtractorPipeline::processRetryQueue() {
             std::wstring colorStr;
             QVector<QPair<QColor, float>> palette;
             bool ok = extractColor(path, colorStr, palette);
-            if (ok) {
-                MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, true);
-            }
 
             QFileInfo info(QString::fromStdWString(path));
             bool isGraphics = MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
-            if (ok || (!isGraphics && !info.isDir())) {
+            bool isDir = info.isDir();
+            bool isMedia = isGraphics || isDir;
+
+            bool extractionSuccessful = false;
+            if (ok) {
+                int w = 0, h = 0;
+                if (!isDir) {
+                    extractDimensions(path, w, h);
+                    if (w > 0 && h > 0) {
+                        MetadataManager::instance().setItemDimensions(path, w, h);
+                    }
+                }
+                MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, true);
+
+                // 只有当是目录，或者文件且成功提取了尺寸时，才算真正重试成功
+                if (isDir || (w > 0 && h > 0)) {
+                    MetadataManager::instance().updateIngestionStatus(path, 1);
+                    extractionSuccessful = true;
+                }
+            }
+
+            if (extractionSuccessful || !isMedia) {
                 finished.push_back(path);
             }
         }

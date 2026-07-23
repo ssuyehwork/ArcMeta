@@ -557,6 +557,12 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             if (!weakThis) return;
                             auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
                             
+                            // [Plan-53] 保护已有缩略图缓存，若新读取的图片为空且已有缓存，进行无损退避
+                            bool alreadyHasIcon = mutableThis->m_iconCache.contains(cacheKey);
+                            if (img.isNull() && alreadyHasIcon) {
+                                return; // 优质缓存保护，无损退避
+                            }
+
                             QIcon icon;
                             if (!img.isNull()) {
                                 icon = QIcon(QPixmap::fromImage(img));
@@ -564,6 +570,10 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                                 icon = UiHelper::getFileIcon(path, 128);
                             }
                             
+                            if (icon.isNull()) {
+                                return; // 绝对禁止将空图标覆写入内存
+                            }
+
                             mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
                             if (hasThumb) mutableThis->m_aspectRatios[QDir::toNativeSeparators(path)] = ar;
                             
