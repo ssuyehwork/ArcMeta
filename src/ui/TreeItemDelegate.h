@@ -78,9 +78,9 @@ public:
             // 微卡片矩形区域
             QRect squareRect(option.rect.left() + 6, option.rect.top() + padding, side, side);
 
-            // 1. 绘制 4px 圆角微型卡片容器背景
+            // 1. 绘制 4px 圆角微型卡片容器背景（透明背景穿透，对应用户原话：“卡片的背景色都必须是透明的”）
             painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor("#2D2D2D"));
+            painter->setBrush(Qt::transparent);
             QPainterPath cardPath;
             cardPath.addRoundedRect(squareRect, 4, 4);
             painter->drawPath(cardPath);
