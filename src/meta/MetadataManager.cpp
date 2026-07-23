@@ -1172,6 +1172,28 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
     });
 }
 
+void MetadataManager::syncAfterMove(const std::wstring& oldPath, const std::wstring& newPath) {
+    std::wstring nOld = normalizePath(oldPath);
+    std::wstring nNew = normalizePath(newPath);
+    if (nOld == nNew) return;
+
+    bool wasManaged = isInsideManagedLibrary(nOld);
+    bool isNowManaged = isInsideManagedLibrary(nNew);
+
+    if (wasManaged && isNowManaged) {
+        // 库内移动（含跨托管子文件夹）：仅路径变化，元数据整体保留
+        renameItem(nOld, nNew);
+    } else if (wasManaged && !isNowManaged) {
+        // 移出托管库：等同于永久删除，彻底清除元数据
+        removeMetadataSync(nOld);
+        notifyFullUIRebuild();
+    } else if (!wasManaged && isNowManaged) {
+        // 移入托管库：走登记流水线，触发媒体特征提取
+        markAsRegistered(nNew);
+    }
+    // 库外移到库外：与托管数据无关，不做任何处理
+}
+
 void MetadataManager::removeMetadataSync(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     std::wstring volSerial = getVolumeSerialNumber(nPath);

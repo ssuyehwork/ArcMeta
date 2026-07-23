@@ -238,6 +238,11 @@ public:
     void removeMetadataSync(const std::wstring& path);
 
     /**
+     * @brief 在物理移动/剪切完成后，统一调用该函数进行元数据和统计对账
+     */
+    void syncAfterMove(const std::wstring& oldPath, const std::wstring& newPath);
+
+    /**
      * @brief 2026-08-xx 按照 Plan-128：高性能批量删除元数据
      * 支持内存单事务与磁盘单任务大事务，解决大规模删除导致的 I/O 阻塞。
      */

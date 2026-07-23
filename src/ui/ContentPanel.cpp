@@ -2660,6 +2660,11 @@ void ContentPanel::performPaste() {
  
     if (ShellHelper::copyOrMoveItems(fromPaths, m_currentPath, isMove)) { 
         if (isMove) {
+            for (const QString& src : fromPaths) {
+                QString destPath = QDir(m_currentPath).absoluteFilePath(QFileInfo(src).fileName());
+                MetadataManager::instance().syncAfterMove(
+                    src.toStdWString(), destPath.toStdWString());
+            }
             UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), m_currentPath));
         }
         loadDirectory(m_currentPath, m_isRecursive); 
@@ -2758,6 +2763,11 @@ void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& t
 
     if (ShellHelper::copyOrMoveItems(paths, destDir, isMove)) {
         if (isMove) {
+            for (const QString& src : paths) {
+                QString destPath = QDir(destDir).absoluteFilePath(QFileInfo(src).fileName());
+                MetadataManager::instance().syncAfterMove(
+                    src.toStdWString(), destPath.toStdWString());
+            }
             UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
         }
         // 显式执行一次刷新，确保用户操作立即反馈
