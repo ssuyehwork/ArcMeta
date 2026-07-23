@@ -45,6 +45,9 @@ public:
         }
 
         QStyleOptionViewItem opt = option;
+        if (index.column() >= 1) {
+            opt.displayAlignment = Qt::AlignCenter;
+        }
         opt.state &= ~QStyle::State_Selected;
         opt.state &= ~QStyle::State_MouseOver;
         if (selected || hover) {
@@ -193,7 +196,8 @@ public:
                     int starSize = 18;        // 星级图标尺寸：18px
                     int banGap = 2;           // 禁止图标与第 1 颗星的间距：2px
                     int starSpacing = -4;     // 星星与星星之间的间距：-4px
-                    int startX = option.rect.left() + 6;
+                    int totalW = banW + banGap + 5 * starSize + 4 * starSpacing; // 88px
+                    int startX = option.rect.left() + (option.rect.width() - totalW) / 2;
 
                     QRect banRect(startX, option.rect.top() + (option.rect.height() - banW) / 2, banW, banW);
                     int starsStartX = startX + banW + banGap;

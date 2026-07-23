@@ -166,7 +166,11 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
                 return name;
             }
             case 4: {
-                return record.tags.join(", ");
+                if (record.isDir) return "-";
+                if (record.width > 0 && record.height > 0) {
+                    return QString("%1 x %2").arg(record.width).arg(record.height);
+                }
+                return "-";
             }
             case 5: {
                 if (record.isDir) return "文件夹";
@@ -235,7 +239,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
 
 QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientation, int role) const {
     if (orientation == Qt::Horizontal && role == Qt::DisplayRole) {
-        static const QStringList headers = {"名称", "状态", "星级", "颜色", "标签", "类型", "大小", "修改日期"};
+        static const QStringList headers = {"名称", "状态", "星级", "颜色", "尺寸", "类型", "大小", "修改日期"};
         if (section < static_cast<int>(headers.size())) return headers[section];
     }
     return QVariant();
@@ -1405,7 +1409,8 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                             int starSize = 18;
                             int banGap = 2;
                             int starSpacing = -4; // 与 Delegate 严格保持 -4 间距对齐
-                            int startX = col2Rect.left() + 6;
+                            int totalW = banW + banGap + 5 * starSize + 4 * starSpacing; // 88px
+                            int startX = col2Rect.left() + (col2Rect.width() - totalW) / 2;
 
                             QRect banHitbox(startX, col2Rect.top() + (col2Rect.height() - banW)/2, banW, banW);
                             bool isBanHit = banHitbox.contains(pos);
@@ -1832,10 +1837,10 @@ void ContentPanel::initListView() {
     header->resizeSection(1, 50);   // 状态 (固定 50px 图标区)
     header->resizeSection(2, 120);  // 星级 (固定 120px 图标区)
     header->resizeSection(3, 50);   // 颜色 (固定 50px 图标区)
-    header->resizeSection(4, 120);  // 标签 (固定 120px)
+    header->resizeSection(4, 120);  // 尺寸 (固定 120px)
     header->resizeSection(5, 80);   // 类型 (固定 80px)
     header->resizeSection(6, 100);  // 大小 (固定 100px)
-    header->resizeSection(7, 150);  // 修改日期 (固定 150px)
+    header->resizeSection(7, 120);  // 修改日期 (固定 120px)
 
     // 3. 锁定调整模式：第 0 列（名称）弹性自适应拉伸，第 1~7 列物理固定禁止拖拽
     header->setSectionResizeMode(0, QHeaderView::Stretch);
