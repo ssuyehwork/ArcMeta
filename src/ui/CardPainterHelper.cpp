@@ -133,7 +133,7 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
         }
     }
 
-    bool shouldShowRating = (rating > 0) || isSelected;
+    bool shouldShowRating = (rating > 0) || isSelected || !colorStr.isEmpty();
     if (shouldShowRating) {
         QColor bgColor = colorStr.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorStr);
         

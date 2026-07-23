@@ -184,14 +184,13 @@ public:
                     UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, iconRect);
                 }
             } else if (col == 2) { // 星级列
-                // 2026-06-16 按照方案 20 纠偏：仅在选中或评分 > 0 时显示图标，减少视觉干扰
+                // 2026-06-16 按照方案 20 纠偏：仅在选中、评分 > 0 或标记了颜色时显示图标，减少视觉干扰且修复颜色无法显示的逻辑缺陷
                 QModelIndex idx0 = index.model()->index(index.row(), 0);
                 int rating = idx0.data(RatingRole).toInt();
                 bool isSelected = option.state & QStyle::State_Selected;
+                QString colorName = idx0.data(ColorRole).toString();
 
-                if (rating > 0 || isSelected) {
-                    QString colorName = idx0.data(ColorRole).toString();
-
+                if (rating > 0 || isSelected || !colorName.isEmpty()) {
                     int banW = 12;            // 禁止图标宽度：对齐紧凑规格 12px
                     int starSize = 18;        // 星级图标尺寸：18px
                     int banGap = 2;           // 禁止图标与第 1 颗星的间距：2px

@@ -3423,11 +3423,11 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         }
     }
 
-    // 2026-xx-xx 按照最新要求： 
-    // 1. 如果已有打分 (rating > 0)，始终显示。 
+    // 2026-xx-xx 按照最新要求且修复颜色不显示的缺陷：
+    // 1. 如果已有打分 (rating > 0) 或者是标记了颜色 (!colorName.isEmpty())，始终显示。
     // 2. 如果未打分但被选中，显示禁止图标和空心星。 
-    // 3. 如果未打分且未选中，不显示。 
-    bool shouldShowRating = (rating > 0) || isSelected; 
+    // 3. 如果未打分、未标记颜色且未选中，不显示。
+    bool shouldShowRating = (rating > 0) || isSelected || !colorName.isEmpty();
  
     if (shouldShowRating) { 
         QColor bgColor = colorName.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorName);
