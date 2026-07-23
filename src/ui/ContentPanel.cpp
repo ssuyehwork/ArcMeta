@@ -1401,10 +1401,10 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                             QModelIndex indexCol2 = index.model()->index(index.row(), 2, index.parent());
                             QRect col2Rect = m_treeView->visualRect(indexCol2);
                             
-                            int banW = 14;
+                            int banW = 12;
                             int starSize = 18;
                             int banGap = 2;
-                            int starSpacing = 0; // 与 Delegate 严格保持 0 间距对齐
+                            int starSpacing = -4; // 与 Delegate 严格保持 -4 间距对齐
                             int startX = col2Rect.left() + 6;
 
                             QRect banHitbox(startX, col2Rect.top() + (col2Rect.height() - banW)/2, banW, banW);

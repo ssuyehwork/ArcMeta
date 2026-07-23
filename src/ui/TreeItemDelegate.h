@@ -189,16 +189,16 @@ public:
                 if (rating > 0 || isSelected) {
                     QString colorName = idx0.data(ColorRole).toString();
 
-                    int banW = 14;
-                    int starSize = 18;
-                    int banGap = 2;           // 禁止图标与第 1 颗星的间距：严格 2px
-                    int starSpacing = 0;      // 星星与星星之间的间距：严格 0px 紧贴
+                    int banW = 12;            // 禁止图标宽度：对齐紧凑规格 12px
+                    int starSize = 18;        // 星级图标尺寸：18px
+                    int banGap = 2;           // 禁止图标与第 1 颗星的间距：2px
+                    int starSpacing = -4;     // 星星与星星之间的间距：-4px
                     int startX = option.rect.left() + 6;
 
                     QRect banRect(startX, option.rect.top() + (option.rect.height() - banW) / 2, banW, banW);
                     int starsStartX = startX + banW + banGap;
 
-                    // 若存在颜色，先在星级下方绘制一行半圆角背景胶囊
+                    // 若存在颜色标记，先在星级下方绘制一行半圆角背景胶囊
                     if (!colorName.isEmpty()) {
                         QColor bgColor = UiHelper::parseColorName(colorName);
                         if (bgColor.isValid()) {
@@ -231,12 +231,12 @@ public:
                         emptyStarColor = QColor(0, 0, 0, 140);
                     }
 
-                    // 统一物理排版与标准 SVG 图标绘制
+                    // 统一物理排版与标准 SVG 图标绘制 (对齐网格视图原生图标 star_filled 和 star)
                     QIcon banIcon = UiHelper::getIcon("no_color", starColor, banW);
                     banIcon.paint(painter, banRect);
 
-                    QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(starSize, starSize), starColor);
-                    QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(starSize, starSize), emptyStarColor);
+                    QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), starColor);
+                    QPixmap emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), emptyStarColor);
 
                     for (int i = 0; i < 5; ++i) {
                         QRect starRect(starsStartX + i * (starSize + starSpacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
