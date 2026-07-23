@@ -1401,16 +1401,17 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                             QModelIndex indexCol2 = index.model()->index(index.row(), 2, index.parent());
                             QRect col2Rect = m_treeView->visualRect(indexCol2);
                             
-                            QRect banHitbox(col2Rect.left() + 6, col2Rect.top() + (col2Rect.height() - 16)/2, 16, 16);
+                            int banW = 14;
+                            QRect banHitbox(col2Rect.left() + 6, col2Rect.top() + (col2Rect.height() - banW)/2, banW, banW);
                             bool isBanHit = banHitbox.contains(pos);
                             int hitStar = -1;
 
-                            // 统一提升点击命中区尺寸至 22 像素（对应用户原话：“星级大小为何比网格、自适应视图显示的星级还小”）
-                            int starSize = 22;
-                            int spacing = 2;
-                            int startX = col2Rect.left() + 6 + 16 + 6; 
+                            // 统一星级点击命中区参数，使其与 TreeItemDelegate 绘制参数保持绝对物理对齐
+                            int starSize = 18;
+                            int spacing = 1;
+                            int starsStartX = banHitbox.right() + 4;
                             for (int i = 0; i < 5; ++i) {
-                                QRect starRect(startX + i * (starSize + spacing), col2Rect.top() + (col2Rect.height() - starSize) / 2, starSize, starSize);
+                                QRect starRect(starsStartX + i * (starSize + spacing), col2Rect.top() + (col2Rect.height() - starSize) / 2, starSize, starSize);
                                 if (starRect.contains(pos)) {
                                     hitStar = i + 1;
                                     break;

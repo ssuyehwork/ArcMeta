@@ -182,40 +182,64 @@ public:
                 }
             } else if (col == 2) { // 星级列
                 // 2026-06-16 按照方案 20 纠偏：仅在选中或评分 > 0 时显示图标，减少视觉干扰
-                int rating = index.model()->index(index.row(), 0).data(RatingRole).toInt();
+                QModelIndex idx0 = index.model()->index(index.row(), 0);
+                int rating = idx0.data(RatingRole).toInt();
                 bool isSelected = option.state & QStyle::State_Selected;
 
                 if (rating > 0 || isSelected) {
-                    // 绘制“禁止”图标
-                    QRect banRect(option.rect.left() + 6, option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
-                    UiHelper::getIcon("no_color", QColor("#888888"), 16).paint(painter, banRect);
+                    QString colorName = idx0.data(ColorRole).toString();
 
-                    // 统一提升星级尺寸至 22 像素（对应用户原话：“星级大小为何比网格、自适应视图显示的星级还小”）
-                    int starSize = 22;
-                    int spacing = 2;
-                    int startX = banRect.right() + 6;
+                    int banW = 14;
+                    int starSize = 18;
+                    int spacing = 1;
+                    int startX = option.rect.left() + 6;
 
-                    if (rating > 0) {
-                        QPixmap star = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), QColor("#FECF0E"));
-                        for (int i = 0; i < rating; ++i) {
-                            painter->drawPixmap(startX + i * (starSize + spacing), 
-                                                option.rect.top() + (option.rect.height() - starSize) / 2, star);
+                    QRect banRect(startX, option.rect.top() + (option.rect.height() - banW) / 2, banW, banW);
+                    int starsStartX = banRect.right() + 4;
+
+                    // 若存在颜色标记，先在星级下方绘制一行半圆角背景胶囊
+                    if (!colorName.isEmpty()) {
+                        QColor bgColor = UiHelper::parseColorName(colorName);
+                        if (bgColor.isValid()) {
+                            painter->save();
+                            painter->setBrush(bgColor);
+                            painter->setPen(Qt::NoPen);
+                            QRect lastStarRect(starsStartX + 4 * (starSize + spacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
+                            QRect totalRect = banRect.united(lastStarRect);
+                            painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
+                            painter->restore();
                         }
-                        // 如果选中，补齐剩余的空心星
-                        if (isSelected && rating < 5) {
-                            QPixmap emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), QColor("#555555"));
-                            for (int i = rating; i < 5; ++i) {
-                                painter->drawPixmap(startX + i * (starSize + spacing), 
-                                                    option.rect.top() + (option.rect.height() - starSize) / 2, emptyStar);
-                            }
-                        }
+                    }
+
+                    // 移植网格视图的亮度对比度感知算法
+                    QColor bgColor = colorName.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorName);
+                    double luminance = 0.0;
+                    if (bgColor.isValid() && bgColor.alpha() > 0) {
+                        luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
+                    }
+
+                    QColor starColor, emptyStarColor;
+                    if (colorName.isEmpty()) {
+                        starColor      = QColor("#CCCCCC");
+                        emptyStarColor = QColor("#888888");
+                    } else if (luminance < 0.5) {
+                        starColor      = QColor("#FFFFFF");
+                        emptyStarColor = QColor(255, 255, 255, 160);
                     } else {
-                        // 仅选中但无评分，显示 5 颗空心星
-                        QPixmap emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), QColor("#555555"));
-                        for (int i = 0; i < 5; ++i) {
-                            painter->drawPixmap(startX + i * (starSize + spacing), 
-                                                option.rect.top() + (option.rect.height() - starSize) / 2, emptyStar);
-                        }
+                        starColor      = QColor("#1A1A1A");
+                        emptyStarColor = QColor(0, 0, 0, 140);
+                    }
+
+                    // 统一物理排版与标准 SVG 图标绘制
+                    QIcon banIcon = UiHelper::getIcon("no_color", starColor, banW);
+                    banIcon.paint(painter, banRect);
+
+                    QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(starSize, starSize), starColor);
+                    QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(starSize, starSize), emptyStarColor);
+
+                    for (int i = 0; i < 5; ++i) {
+                        QRect starRect(starsStartX + i * (starSize + spacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
+                        painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
                     }
                 }
             } else if (col == 3) { // 颜色列
