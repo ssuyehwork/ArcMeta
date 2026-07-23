@@ -990,6 +990,10 @@ ContentPanel::ContentPanel(QWidget* parent)
     initUi(); 
     // 2026-05-27 按照用户要求：构造函数末尾强行对齐初始网格尺寸，废除 initGridView 中的旧硬编码值 
     updateGridSize(); 
+
+    // 从 AppConfig 恢复上一次的视图模式
+    int savedMode = AppConfig::instance().getValue("ContentPanel/ViewMode", static_cast<int>(GridView)).toInt();
+    setViewMode(static_cast<ViewMode>(savedMode));
 } 
  
 void ContentPanel::deferredInit() { 
@@ -1709,6 +1713,10 @@ void ContentPanel::setViewMode(ViewMode mode) {
         }
         m_viewStack->setCurrentWidget(m_gridView);
     }
+
+    // 保存当前的视图模式到 AppConfig，实现跨生命周期持久化
+    AppConfig::instance().setValue("ContentPanel/ViewMode", static_cast<int>(mode));
+    AppConfig::instance().sync();
 
     updateGridSize();
     emit viewModeChanged(mode); // 触发模式改变信号
