@@ -3423,46 +3423,48 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
         }
     }
 
-    // 2026-xx-xx 按照最新要求且修复颜色不显示的缺陷：
-    // 1. 如果已有打分 (rating > 0) 或者是标记了颜色 (!colorName.isEmpty())，始终显示。
-    // 2. 如果未打分但被选中，显示禁止图标和空心星。 
-    // 3. 如果未打分、未标记颜色且未选中，不显示。
+    // 2026-xx-xx 按照最新深度共识：如果标记了颜色 (!colorName.isEmpty()) 或者有星级评分 (rating > 0) 或者未评级但被选中 (isSelected)，显示外层背景或评级
     bool shouldShowRating = (rating > 0) || isSelected || !colorName.isEmpty();
  
     if (shouldShowRating) { 
-        QColor bgColor = colorName.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorName);
-        
-        // 2026-06-xx 物理修复：采用感知亮度对比色计算，确保在深色标记（如灰色/深蓝）下星星依然清晰可见
-        double luminance = 0.0;
-        if (bgColor.isValid() && bgColor.alpha() > 0) {
-            luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
-        }
+        // 精准控制是否绘制星级和禁止图标
+        bool drawStars = (rating > 0) || (isSelected && colorName.isEmpty());
 
-        QColor starColor, emptyStarColor;
-        if (colorName.isEmpty()) {
-            starColor      = QColor("#CCCCCC");
-            emptyStarColor = QColor("#888888");
-        } else if (luminance < 0.5) {
-            // 背景较暗 -> 使用亮色星
-            starColor      = QColor("#FFFFFF");
-            emptyStarColor = QColor(255, 255, 255, 160);
-        } else {
-            // 背景较亮 -> 使用暗色星
-            starColor      = QColor("#1A1A1A");
-            emptyStarColor = QColor(0, 0, 0, 140);
-        }
+        if (drawStars) {
+            QColor bgColor = colorName.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorName);
 
-        // 2026-xx-xx 深度修复：调高禁止图标与空心星亮度，确保在深色卡片背景下清晰可见 
-        QIcon banIcon = UiHelper::getIcon("no_color", starColor, m.banRect.width()); 
-        banIcon.paint(painter, m.banRect); 
- 
-        QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), starColor); 
-        QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor); 
- 
-        for (int i = 0; i < 5; ++i) { 
-            QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize); 
-            painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar); 
-        } 
+            // 2026-06-xx 物理修复：采用感知亮度对比色计算，确保在深色标记（如灰色/深蓝）下星星依然清晰可见
+            double luminance = 0.0;
+            if (bgColor.isValid() && bgColor.alpha() > 0) {
+                luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
+            }
+
+            QColor starColor, emptyStarColor;
+            if (colorName.isEmpty()) {
+                starColor      = QColor("#CCCCCC");
+                emptyStarColor = QColor("#888888");
+            } else if (luminance < 0.5) {
+                // 背景较暗 -> 使用亮色星
+                starColor      = QColor("#FFFFFF");
+                emptyStarColor = QColor(255, 255, 255, 160);
+            } else {
+                // 背景较亮 -> 使用暗色星
+                starColor      = QColor("#1A1A1A");
+                emptyStarColor = QColor(0, 0, 0, 140);
+            }
+
+            // 2026-xx-xx 深度修复：调高禁止图标与空心星亮度，确保在深色卡片背景下清晰可见
+            QIcon banIcon = UiHelper::getIcon("no_color", starColor, m.banRect.width());
+            banIcon.paint(painter, m.banRect);
+
+            QPixmap filledStar = UiHelper::getPixmap("star-svgrepo-com.svg", QSize(m.starSize, m.starSize), starColor);
+            QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(m.starSize, m.starSize), emptyStarColor);
+
+            for (int i = 0; i < 5; ++i) {
+                QRect starRect(m.starsStartX + i * (m.starSize + m.starSpacing), m.ratingY + (m.ratingH - m.starSize) / 2, m.starSize, m.starSize);
+                painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
+            }
+        }
     } 
      
     // [名称区绘制] - 在正方形下方 
