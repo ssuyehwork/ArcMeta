@@ -1311,7 +1311,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     }); 
 
     m_sizeSlider = new QSlider(Qt::Horizontal, m_titleBarWidget); 
-    m_sizeSlider->setRange(96, 128);  
+    m_sizeSlider->setRange(30, 230);
     m_sizeSlider->setFixedSize(110, 20); 
     m_sizeSlider->setCursor(Qt::PointingHandCursor); 
     m_sizeSlider->setStyleSheet( 
@@ -1333,7 +1333,7 @@ void MainWindow::setupCustomTitleBarButtons() {
     }); 
  
     int initZoom = AppConfig::instance().getValue("UI/GridZoomLevel", 96).toInt(); 
-    m_sizeSlider->setValue(qBound(96, initZoom, 128)); 
+    m_sizeSlider->setValue(qBound(30, initZoom, 230));
 
     m_btnToggleDriveBar = createTitleBtn("chevrons_down");
     m_btnToggleDriveBar->setProperty("tooltipText", "展开/收起盘符管理栏");

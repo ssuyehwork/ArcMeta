@@ -1206,44 +1206,26 @@ void ContentPanel::refreshVisibleThumbnails() {
 }
 
 void ContentPanel::updateGridSize() {
-    // 2026-06-05 按照用户要求：彻底重构为正方形布局，名称外置
-    // 2026-06-08 按照用户核心铁律：物理强制锁定缩放最小值为 96 像素
-    
-    if (m_viewStack->currentWidget() == m_gridView) {
-        m_zoomLevel = qBound(96, m_zoomLevel, 128);
-    }
+    ArcMeta::Logger::log(QString("[UI_DEBUG] 缩放级: %1").arg(m_zoomLevel));
 
-    // 写入实时日志 
-    ArcMeta::Logger::log(QString("[UI_DEBUG] 卡片缩放级: %1").arg(m_zoomLevel));
-    
     if (m_viewStack->currentWidget() == m_gridView) {
         if (auto* jv = qobject_cast<JustifiedView*>(m_gridView)) {
-            jv->setTargetRowHeight(m_zoomLevel);
+            jv->setTargetRowHeight(m_zoomLevel); // 自适应/网格模式下的卡片/行高
         } else if (auto* lv = qobject_cast<QListView*>(m_gridView)) {
             lv->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
-            int side = m_zoomLevel + 46; // 正方形边长
-            int ratingH = 24;           // 2026-05-17 按照要求：为卡片外的评分区预留高度
-            int nameH = (int)(m_zoomLevel * 0.25); // 名称高度
-            int gap = 6;                // 间距归一化
-            
-            // 总高度 = 正方形边长 + 间距1 + 评分高度 + 间距2 + 名称高度 + 底部缓冲
+            int side = m_zoomLevel + 46;
+            int ratingH = 24;
+            int nameH = (int)(m_zoomLevel * 0.25);
+            int gap = 6;
             int totalH = side + gap + ratingH + gap + nameH + 8;
             lv->setGridSize(QSize(side, totalH));
         }
     } else if (m_viewStack->currentWidget() == m_treeView) {
-        // 2026-06-xx 按照要求：列表模式下调整行高
-        if (m_zoomLevel > 96) {
-            // 如果行高超过 96，自动切换到卡片形式
-            setViewMode(GridView);
-            m_zoomLevel = 96; // 修正：切换回网格时对齐红线
-            updateGridSize();
-            return;
-        }
-        
-        // 2026-06-xx 物理修复：图标大小必须随行高变化
-        m_treeView->setIconSize(QSize(m_zoomLevel - 8, m_zoomLevel - 8));
-        
-        // 2026-06-xx 性能优化：仅当行高发生实际变化时更新样式表
+        // 列表模式：动态计算安全图标尺寸（最低不小于 16px）
+        int iconSize = qMax(16, m_zoomLevel - 8);
+        m_treeView->setIconSize(QSize(iconSize, iconSize));
+
+        // 动态设置列表项的物理行高为 m_zoomLevel (范围：30px ~ 230px)
         static int lastTreeHeight = -1;
         if (lastTreeHeight != m_zoomLevel) {
             m_treeView->setStyleSheet( 
@@ -1259,7 +1241,7 @@ void ContentPanel::updateGridSize() {
         }
     }
 
-    // 2026-06-05 按照要求：持久化保存当前的缩放级别
+    // 持久化保存当前的缩放级别
     AppConfig::instance().setValue("UI/GridZoomLevel", m_zoomLevel);
 
     qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
@@ -1269,11 +1251,9 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
     if (event->type() == QEvent::Wheel) {
         QWheelEvent* wEvent = static_cast<QWheelEvent*>(event);
         if (wEvent->modifiers() & Qt::ControlModifier) {
-            if (m_currentViewMode != ListView) {
-                int deltaY = wEvent->angleDelta().y();
-                int newZoom = m_zoomLevel + (deltaY > 0 ? 8 : -8);
-                setZoomLevel(newZoom);
-            }
+            int deltaY = wEvent->angleDelta().y();
+            int newZoom = m_zoomLevel + (deltaY > 0 ? 8 : -8);
+            setZoomLevel(newZoom);
             wEvent->accept();
             return true; // 吞噬该事件，不让子视图产生滚动，彻底解决逻辑混乱和时灵时不灵问题
         }
@@ -1673,8 +1653,22 @@ QString ContentPanel::getAdjacentFilePath(const QString& currentPath, int delta)
 } 
  
 void ContentPanel::setZoomLevel(int level) {
-    int boundedLevel = qBound(96, level, 128); // 限制在 96~128px
+    // 1. 根据当前视图模式动态决定最小/最大像素边界
+    int minZoom = 85;
+    int maxZoom = 230;
+
+    if (m_currentViewMode == ListView) {
+        minZoom = 30;   // 列表视图最小值：30 像素
+        maxZoom = 230;  // 列表视图最大值：230 像素
+    } else { // GridView 与 JustifiedViewMode
+        minZoom = 85;   // 网格/自适应最小值：85 像素
+        maxZoom = 230;  // 网格/自适应最大值：230 像素
+    }
+
+    // 2. 严格按模式物理裁切
+    int boundedLevel = qBound(minZoom, level, maxZoom);
     if (m_zoomLevel == boundedLevel) return;
+
     m_zoomLevel = boundedLevel;
     updateGridSize();
     emit zoomLevelChanged(m_zoomLevel);
@@ -1682,11 +1676,9 @@ void ContentPanel::setZoomLevel(int level) {
 
 void ContentPanel::wheelEvent(QWheelEvent* event) { 
     if (event->modifiers() & Qt::ControlModifier) { 
-        if (m_currentViewMode != ListView) {
-            int deltaY = event->angleDelta().y(); 
-            int newZoom = m_zoomLevel + (deltaY > 0 ? 8 : -8); 
-            setZoomLevel(newZoom); 
-        }
+        int deltaY = event->angleDelta().y();
+        int newZoom = m_zoomLevel + (deltaY > 0 ? 8 : -8);
+        setZoomLevel(newZoom);
         event->accept(); 
         return; 
     } 
@@ -1695,6 +1687,13 @@ void ContentPanel::wheelEvent(QWheelEvent* event) {
  
 void ContentPanel::setViewMode(ViewMode mode) { 
     m_currentViewMode = mode;
+
+    // 1. 模式切换时自动校准 m_zoomLevel，确保处于新模式的合法范围内
+    int minZoom = (mode == ListView) ? 30 : 85;
+    int maxZoom = 230;
+    m_zoomLevel = qBound(minZoom, m_zoomLevel, maxZoom);
+
+    // 2. 切换 ViewStack 页面
     if (mode == ListView) {
         m_viewStack->setCurrentWidget(m_treeView);
     } else if (mode == GridView) {
@@ -1710,8 +1709,10 @@ void ContentPanel::setViewMode(ViewMode mode) {
         }
         m_viewStack->setCurrentWidget(m_gridView);
     }
+
     updateGridSize();
     emit viewModeChanged(mode); // 触发模式改变信号
+    emit zoomLevelChanged(m_zoomLevel); // 通知标题栏滑杆更新数值
     m_visibleTimer->start();
 } 
  
