@@ -82,11 +82,6 @@ void MediaExtractorPipeline::processNextBatch() {
 }
 
 void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
-    QFileInfo info(QString::fromStdWString(path));
-    bool isDir = info.isDir();
-    bool isGraphics = MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
-    bool isMedia = isDir || isGraphics;
-
     int w = 0, h = 0;
     extractDimensions(path, w, h);
     if (w > 0 && h > 0) {
@@ -100,15 +95,23 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
         MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, false);
     }
 
-    // 只有当提取成功时才允许标记 ingestionStatus = 1。如果是目录，只需颜色提取成功；如果是文件，需颜色和尺寸都提取成功。
-    bool extractionSuccessful = !isMedia || (success && (isDir || (w > 0 && h > 0)));
-    if (extractionSuccessful) {
+    // [Plan-53 状态安全拦截] 校验是否真正完成了至少一项多媒体特征提取。
+    // 如果由于文件拷贝中、独占等竞态，导致 w, h 均无效且色彩也提取失败，则保持其 IngestionStatus = 0（待命自愈状态）！
+    // 只有当提取成功，或者该文件类型确定非媒体图像时，才允许将其置为 1（已完成）状态
+    QFileInfo info(QString::fromStdWString(path));
+    bool isGraphics = MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
+    bool isExtractedOk = (w > 0 && h > 0) || success;
+
+    if (isExtractedOk || (!isGraphics && !info.isDir())) {
         MetadataManager::instance().updateIngestionStatus(path, 1);
+    } else {
+        qDebug() << "[Pipeline] [Plan-53] 多媒体文件读取遇阻，保留待处理状态(0)，送入重试链 ->" << QString::fromStdWString(path);
     }
+
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::PathUpdate, QString::fromStdWString(path));
 
-    if (!extractionSuccessful) {
-        if (isMedia) {
+    if (!success) {
+        if (info.isDir() || isGraphics) {
             std::lock_guard<std::mutex> lock(m_retryMutex);
             if (std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), path) == m_visualRetryQueue.end()) {
                 m_visualRetryQueue.push_back(path);
@@ -224,31 +227,13 @@ void MediaExtractorPipeline::processRetryQueue() {
             std::wstring colorStr;
             QVector<QPair<QColor, float>> palette;
             bool ok = extractColor(path, colorStr, palette);
+            if (ok) {
+                MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, true);
+            }
 
             QFileInfo info(QString::fromStdWString(path));
             bool isGraphics = MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
-            bool isDir = info.isDir();
-            bool isMedia = isGraphics || isDir;
-
-            bool extractionSuccessful = false;
-            if (ok) {
-                int w = 0, h = 0;
-                if (!isDir) {
-                    extractDimensions(path, w, h);
-                    if (w > 0 && h > 0) {
-                        MetadataManager::instance().setItemDimensions(path, w, h);
-                    }
-                }
-                MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, true);
-
-                // 只有当是目录，或者文件且成功提取了尺寸时，才算真正重试成功
-                if (isDir || (w > 0 && h > 0)) {
-                    MetadataManager::instance().updateIngestionStatus(path, 1);
-                    extractionSuccessful = true;
-                }
-            }
-
-            if (extractionSuccessful || !isMedia) {
+            if (ok || (!isGraphics && !info.isDir())) {
                 finished.push_back(path);
             }
         }

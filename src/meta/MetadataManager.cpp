@@ -370,29 +370,24 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     (void)authorized;
     std::wstring nPath = normalizePath(path);
 
-    // [Plan-131 方案 C] 物理指纹准入机制 与 Plan-53 两阶段注册自愈机制
+    // [Plan-131 方案 C + Plan-53 降级自愈安全防护] 物理指纹与高级特征双重准入机制
     std::string pFid;
     long long pSize = 0, pMtime = 0;
     if (fetchWinApiMetadataDirect(nPath, pFid, nullptr, &pSize, nullptr, nullptr, &pMtime, nullptr)) {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
         auto it = m_cache.find(nPath);
         if (it != m_cache.end()) {
-            if (it->second.ingestionStatus == 1 && it->second.fileSize == pSize && it->second.mtime == pMtime) {
-                QFileInfo info(QString::fromStdWString(nPath));
-                bool needsMetadata = info.isDir() || MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
-                if (!needsMetadata) {
-                    return; // 指纹一致且无需高级元数据，跳过
+            // 只有当文件指纹一致、曾经被置为1，且色彩和尺寸物理属性都确切存在、非残缺时，才允许返回跳过！
+            // 这杜绝了历史解析失败时留下空元数据、又因状态为 1 无法再次扫描提取的致命 Bug
+            bool metadataValid = true;
+            QFileInfo info(QString::fromStdWString(nPath));
+            if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
+                if (it->second.width <= 0 || it->second.height <= 0 || it->second.color.empty()) {
+                    metadataValid = false;
                 }
-
-                bool hasValidMeta = false;
-                if (info.isDir()) {
-                    hasValidMeta = !it->second.color.empty();
-                } else {
-                    hasValidMeta = (it->second.width > 0 && it->second.height > 0 && !it->second.color.empty());
-                }
-                if (hasValidMeta) {
-                    return; // 指纹一致且已成功解析并包含完整的高级元数据，跳过
-                }
+            }
+            if (it->second.ingestionStatus == 1 && it->second.fileSize == pSize && it->second.mtime == pMtime && metadataValid) {
+                return; // 物理指纹及高级多媒体特征完备且未发生改变，安全返回
             }
         }
     }
