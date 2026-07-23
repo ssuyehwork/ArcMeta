@@ -47,6 +47,10 @@ public:
         QStyleOptionViewItem opt = option;
         opt.state &= ~QStyle::State_Selected;
         opt.state &= ~QStyle::State_MouseOver;
+        if (selected || hover) {
+            opt.features &= ~QStyleOptionViewItem::Alternate;
+            opt.backgroundBrush = QBrush();
+        }
         
         if (selected) {
             opt.palette.setColor(QPalette::Text, Qt::white);
@@ -183,12 +187,12 @@ public:
 
                 if (rating > 0 || isSelected) {
                     // 绘制“禁止”图标
-                    QRect banRect(option.rect.left() + 5, option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
+                    QRect banRect(option.rect.left() + 6, option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
                     UiHelper::getIcon("no_color", QColor("#888888"), 16).paint(painter, banRect);
 
-                    int starSize = 14;
-                    int spacing = 1;
-                    int startX = banRect.right() + 5;
+                    int starSize = 16;
+                    int spacing = 2;
+                    int startX = banRect.right() + 6;
 
                     if (rating > 0) {
                         QPixmap star = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), QColor("#FECF0E"));

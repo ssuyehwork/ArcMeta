@@ -171,7 +171,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
             case 5: {
                 if (record.isDir) return "文件夹";
                 int lastDot = path.lastIndexOf('.');
-                return (lastDot != -1) ? path.mid(lastDot + 1).toUpper() + " 文件" : "文件";
+                return (lastDot != -1) ? path.mid(lastDot + 1).toUpper() : "";
             }
             case 6: {
                 if (record.isDir) return "-";
@@ -1401,13 +1401,13 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                             QModelIndex indexCol2 = index.model()->index(index.row(), 2, index.parent());
                             QRect col2Rect = m_treeView->visualRect(indexCol2);
                             
-                            QRect banHitbox(col2Rect.left() + 5, col2Rect.top() + (col2Rect.height() - 16)/2, 16, 16);
+                            QRect banHitbox(col2Rect.left() + 6, col2Rect.top() + (col2Rect.height() - 16)/2, 16, 16);
                             bool isBanHit = banHitbox.contains(pos);
                             int hitStar = -1;
 
-                            int starSize = 14;
-                            int spacing = 1;
-                            int startX = col2Rect.left() + 5 + 16 + 5; 
+                            int starSize = 16;
+                            int spacing = 2;
+                            int startX = col2Rect.left() + 6 + 16 + 6;
                             for (int i = 0; i < 5; ++i) {
                                 QRect starRect(startX + i * (starSize + spacing), col2Rect.top() + (col2Rect.height() - starSize) / 2, starSize, starSize);
                                 if (starRect.contains(pos)) {
@@ -1830,12 +1830,12 @@ void ContentPanel::initListView() {
 
     // 初始像素宽度设定
     header->resizeSection(0, 400); // 名称
-    header->resizeSection(1, 40);  // 状态 (固定图标区)
-    header->resizeSection(2, 60);  // 星级 (固定图标区)
-    header->resizeSection(3, 60);  // 颜色标记 (固定图标区)
-    header->resizeSection(4, 100); // 标签
+    header->resizeSection(1, 50);  // 状态 (固定图标区)
+    header->resizeSection(2, 120); // 星级 (固定图标区)
+    header->resizeSection(3, 50);  // 颜色标记 (固定图标区)
+    header->resizeSection(4, 120); // 标签
     header->resizeSection(5, 80);  // 类型
-    header->resizeSection(6, 80);  // 大小
+    header->resizeSection(6, 100); // 大小
     header->resizeSection(7, 150); // 修改日期：物理锁定 150 像素
     
     // 1. 设定调整模式：名称列拉伸，其余列交互
@@ -3351,8 +3351,8 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     QString colorName = index.data(ColorRole).toString();
      
     // 2026-06-05 按照用户要求：背景框仅限正方形区域，名称外置 
-    QColor cardBg = isSelected ? BackgroundSelected : (isHovered ? BackgroundHover : BackgroundDeep); 
-    painter->setPen(isSelected ? QPen(PrimaryBlue, 2) : QPen(BorderColor, 1)); 
+    QColor cardBg = isSelected ? BackgroundSelected : (isHovered ? BackgroundHover : Qt::transparent);
+    painter->setPen(isSelected ? QPen(PrimaryBlue, 2) : (isHovered ? QPen(BorderColor, 1) : QPen(Qt::transparent)));
     painter->setBrush(cardBg); 
     painter->drawRoundedRect(m.squareRect, 8, 8); 
  
