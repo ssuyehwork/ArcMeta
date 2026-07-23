@@ -1402,16 +1402,18 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                             QRect col2Rect = m_treeView->visualRect(indexCol2);
                             
                             int banW = 14;
-                            QRect banHitbox(col2Rect.left() + 6, col2Rect.top() + (col2Rect.height() - banW)/2, banW, banW);
+                            int starSize = 18;
+                            int kSpacing = 2; // 与 Delegate 保持绝对统一
+                            int startX = col2Rect.left() + 6;
+
+                            QRect banHitbox(startX, col2Rect.top() + (col2Rect.height() - banW)/2, banW, banW);
                             bool isBanHit = banHitbox.contains(pos);
                             int hitStar = -1;
 
                             // 统一星级点击命中区参数，使其与 TreeItemDelegate 绘制参数保持绝对物理对齐
-                            int starSize = 18;
-                            int spacing = 1;
-                            int starsStartX = banHitbox.right() + 4;
+                            int starsStartX = startX + banW + kSpacing;
                             for (int i = 0; i < 5; ++i) {
-                                QRect starRect(starsStartX + i * (starSize + spacing), col2Rect.top() + (col2Rect.height() - starSize) / 2, starSize, starSize);
+                                QRect starRect(starsStartX + i * (starSize + kSpacing), col2Rect.top() + (col2Rect.height() - starSize) / 2, starSize, starSize);
                                 if (starRect.contains(pos)) {
                                     hitStar = i + 1;
                                     break;
