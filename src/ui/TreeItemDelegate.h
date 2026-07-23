@@ -191,20 +191,21 @@ public:
 
                     int banW = 14;
                     int starSize = 18;
-                    int kSpacing = 2; // 统一绝对间距
+                    int banGap = 2;           // 禁止图标与第 1 颗星的间距：严格 2px
+                    int starSpacing = 0;      // 星星与星星之间的间距：严格 0px 紧贴
                     int startX = option.rect.left() + 6;
 
                     QRect banRect(startX, option.rect.top() + (option.rect.height() - banW) / 2, banW, banW);
-                    int starsStartX = startX + banW + kSpacing; // 消除 QRect::right() 的 1px 偏差
+                    int starsStartX = startX + banW + banGap;
 
-                    // 若存在颜色标记，先在星级下方绘制一行半圆角背景胶囊
+                    // 若存在颜色，先在星级下方绘制一行半圆角背景胶囊
                     if (!colorName.isEmpty()) {
                         QColor bgColor = UiHelper::parseColorName(colorName);
                         if (bgColor.isValid()) {
                             painter->save();
                             painter->setBrush(bgColor);
                             painter->setPen(Qt::NoPen);
-                            QRect lastStarRect(starsStartX + 4 * (starSize + kSpacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
+                            QRect lastStarRect(starsStartX + 4 * (starSize + starSpacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
                             QRect totalRect = banRect.united(lastStarRect);
                             painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
                             painter->restore();
@@ -238,7 +239,7 @@ public:
                     QPixmap emptyStar = UiHelper::getPixmap("star-rate-rating-outline-svgrepo-com.svg", QSize(starSize, starSize), emptyStarColor);
 
                     for (int i = 0; i < 5; ++i) {
-                        QRect starRect(starsStartX + i * (starSize + kSpacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
+                        QRect starRect(starsStartX + i * (starSize + starSpacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
                         painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
                     }
                 }
