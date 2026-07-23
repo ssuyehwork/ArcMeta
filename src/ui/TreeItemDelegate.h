@@ -190,7 +190,8 @@ public:
                     QRect banRect(option.rect.left() + 6, option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
                     UiHelper::getIcon("no_color", QColor("#888888"), 16).paint(painter, banRect);
 
-                    int starSize = 16;
+                    // 统一提升星级尺寸至 22 像素（对应用户原话：“星级大小为何比网格、自适应视图显示的星级还小”）
+                    int starSize = 22;
                     int spacing = 2;
                     int startX = banRect.right() + 6;
 

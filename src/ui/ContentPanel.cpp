@@ -1405,7 +1405,8 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
                             bool isBanHit = banHitbox.contains(pos);
                             int hitStar = -1;
 
-                            int starSize = 16;
+                            // 统一提升点击命中区尺寸至 22 像素（对应用户原话：“星级大小为何比网格、自适应视图显示的星级还小”）
+                            int starSize = 22;
                             int spacing = 2;
                             int startX = col2Rect.left() + 6 + 16 + 6; 
                             for (int i = 0; i < 5; ++i) {
