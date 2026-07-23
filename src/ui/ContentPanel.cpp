@@ -1817,71 +1817,30 @@ void ContentPanel::initListView() {
         "QHeaderView::section { background-color: #252525; color: #B0B0B0; border: none; border-right: 1px solid #333333; height: 32px; font-size: 11px; }" 
     ); 
     
-    // 2026-06-16 工业级 UI 架构重构 (Plan-21)：名称 Stretch + 日期可调且 Min 150px
+    // --- 列表表头（Header）列宽固定化重构 ---
     auto* header = m_treeView->header();
-    header->setStretchLastSection(false); // 禁止末端拉伸，交由名称列处理
+    header->setStretchLastSection(false); // 禁止末端强行拉伸
     header->setCascadingSectionResizes(false);
-    header->setMinimumSectionSize(30);    // 全局最小宽度设定为 30 像素
 
-    QByteArray headerState = AppConfig::instance().getValue("UI/ListHeaderState").toByteArray();
-    if (!headerState.isEmpty()) {
-        header->restoreState(headerState);
-    } 
-
-    // 无论是否恢复状态，都显式设定初始宽度与最小值，防止恢复状态异常导致列宽为0
-    // 确保所有列均可见
-    for(int i = 0; i <= 7; ++i) header->setSectionHidden(i, false);
-
-    // 初始像素宽度设定
-    header->resizeSection(0, 400); // 名称
-    header->resizeSection(1, 50);  // 状态 (固定图标区)
-    header->resizeSection(2, 120); // 星级 (固定图标区)
-    header->resizeSection(3, 50);  // 颜色标记 (固定图标区)
-    header->resizeSection(4, 120); // 标签
-    header->resizeSection(5, 80);  // 类型
-    header->resizeSection(6, 100); // 大小
-    header->resizeSection(7, 150); // 修改日期：物理锁定 150 像素
-    
-    // 1. 设定调整模式：名称列拉伸，其余列交互
-    for(int i = 1; i <= 7; ++i) {
-        header->setSectionResizeMode(i, QHeaderView::Interactive);
+    // 1. 确保所有 8 列均可见
+    for (int i = 0; i <= 7; ++i) {
+        header->setSectionHidden(i, false);
     }
+
+    // 2. 精确设置各列固定像素宽度
+    header->resizeSection(1, 50);   // 状态 (固定 50px 图标区)
+    header->resizeSection(2, 120);  // 星级 (固定 120px 图标区)
+    header->resizeSection(3, 50);   // 颜色标记 (固定 50px 图标区)
+    header->resizeSection(4, 120);  // 标签 (固定 120px)
+    header->resizeSection(5, 80);   // 类型 (固定 80px)
+    header->resizeSection(6, 100);  // 大小 (固定 100px)
+    header->resizeSection(7, 150);  // 修改日期 (固定 150px)
+
+    // 3. 锁定调整模式：第 0 列（名称）弹性自适应拉伸，第 1~7 列物理固定禁止拖拽
     header->setSectionResizeMode(0, QHeaderView::Stretch);
-
-    // 3. 宽度守恒与物理红线拦截逻辑
-    connect(header, &QHeaderView::sectionResized, this, [this, header](int index, int oldSize, int newSize) {
-        Q_UNUSED(oldSize);
-        static bool guard = false; 
-        if (guard || index == 0) return; 
-        
-        guard = true;
-        
-        // 物理红线判定：修改日期（索引7）最小 150px
-        if (index == 7 && newSize < 150) {
-            header->resizeSection(7, 150);
-            guard = false;
-            return;
-        }
-
-        // 宽度守恒判定：杜绝水平滚动条
-        int currentTotal = header->length();
-        int maxAvailable = m_treeView->viewport()->width();
-        
-        if (currentTotal > maxAvailable && maxAvailable > 100) {
-             int allowed = newSize - (currentTotal - maxAvailable);
-             int minAllowed = header->minimumSectionSize();
-             if (index == 7) minAllowed = 150; // 修改日期红线优先级最高
-             
-             header->resizeSection(index, qMax(minAllowed, allowed));
-        }
-        
-        // 5. 持久化逻辑：仅在非加载状态下保存，防止启动抖动
-        if (!m_isLoading) {
-            AppConfig::instance().setValue("UI/ListHeaderState", header->saveState());
-        }
-        
-        guard = false;
-    });
+    for (int i = 1; i <= 7; ++i) {
+        header->setSectionResizeMode(i, QHeaderView::Fixed);
+    }
  
     connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
     connect(m_treeView, &QTreeView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
