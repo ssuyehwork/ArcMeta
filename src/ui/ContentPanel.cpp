@@ -1245,6 +1245,9 @@ void ContentPanel::updateGridSize() {
             m_treeView->setStyleSheet( 
                 QString("QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
                         "QTreeView::item { height: %1px; color: #EEEEEE; padding-left: 0px; }" 
+                        "QTreeView::item:alternate { background-color: #252526; }"
+                        "QTreeView::item:selected { background-color: rgba(52, 152, 219, 0.2); border-left: 2px solid #3498db; }"
+                        "QTreeView::item:hover { background-color: #2A2A2A; }"
                         "QTreeView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }")
                 .arg(m_zoomLevel)
             );
@@ -1768,6 +1771,7 @@ void ContentPanel::initGridView() {
  
 void ContentPanel::initListView() { 
     m_treeView = new DropTreeView(this); 
+    m_treeView->setAlternatingRowColors(true); // 开启交替斑马纹背景
     m_treeView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded); 
     m_treeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded); 
     m_treeView->setSortingEnabled(true); 
@@ -1798,6 +1802,7 @@ void ContentPanel::initListView() {
     m_treeView->setStyleSheet( 
         "QTreeView { background-color: transparent; border: none; outline: none; font-size: 12px; }" 
         "QTreeView::item { height: 28px; color: #EEEEEE; padding-left: 0px; }" 
+        "QTreeView::item:alternate { background-color: #252526; }" // 斑马纹交替行高亮背景
         "QTreeView::item:selected { background-color: rgba(52, 152, 219, 0.2); border-left: 2px solid #3498db; }"
         "QTreeView::item:hover { background-color: #2A2A2A; }"
         "QTreeView QLineEdit { background-color: #2D2D2D; color: #FFFFFF; border: 1px solid #378ADD; border-radius: 6px; padding: 2px; selection-background-color: #378ADD; selection-color: #FFFFFF; }" 

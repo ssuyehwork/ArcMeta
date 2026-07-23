@@ -142,13 +142,6 @@ public:
             QString elidedText = option.fontMetrics.elidedText(name, Qt::ElideMiddle, textRect.width() - 10);
             painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, elidedText);
 
-            // 4. 物理自绘底部分割线，完美贯通消除截断
-            painter->save();
-            painter->setRenderHint(QPainter::Antialiasing, false);
-            painter->setPen(QColor("#252526"));
-            painter->drawLine(option.rect.left(), option.rect.bottom(), option.rect.right(), option.rect.bottom());
-            painter->restore();
-
             painter->restore();
         } else if (col == 1 || col == 2 || col == 3) {
             // 这三列不调用默认 paint，完全自定义
