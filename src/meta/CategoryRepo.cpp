@@ -333,6 +333,28 @@ bool CategoryRepo::update(const Category& cat) {
     return false;
 }
 
+bool CategoryRepo::updateCategoryColorByPath(const std::wstring& path, const std::wstring& color) {
+    WriteGuard guard;
+    sqlite3* memDb = DatabaseManager::instance().getGlobalDb();
+    if (!memDb) return false;
+
+    const char* sql = "UPDATE categories SET color = ? WHERE physical_path = ?";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(memDb, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text16(stmt, 1, color.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
+        bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+        sqlite3_finalize(stmt);
+        if (ok) {
+            qDebug() << "[DB_TRACE] updateCategoryColorByPath 成功同步更新 categories 表分类颜色，路径:" << QString::fromStdWString(path) << "颜色:" << QString::fromStdWString(color);
+            DatabaseManager::instance().flushAll();
+            return true;
+        }
+    }
+    qWarning() << "[DB_TRACE] updateCategoryColorByPath 执行失败！路径:" << QString::fromStdWString(path);
+    return false;
+}
+
 int CategoryRepo::findByFrn(uint64_t frn) {
     if (frn == 0) return 0;
     sqlite3* db = DatabaseManager::instance().getGlobalDb();

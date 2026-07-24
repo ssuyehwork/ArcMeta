@@ -173,7 +173,7 @@ private:
     std::unordered_map<std::wstring, std::shared_ptr<std::mutex>> m_driveDbMutexMap;
 
     bool loadDb(const std::wstring& diskPath, DbConnection& conn);
-    void saveDb(DbConnection& conn, bool forceFull = false);
+    bool saveDb(DbConnection& conn, bool forceFull = false);
     void closeDb(DbConnection& conn);
 
     QString getAppDir();
