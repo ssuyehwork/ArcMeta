@@ -82,8 +82,10 @@ void MediaExtractorPipeline::processNextBatch() {
 }
 
 void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
+    qDebug() << "[DEBUG_TRACE] [processItemDirect] 准备直接分析和抽取高级元数据:" << QString::fromStdWString(path);
     int w = 0, h = 0;
     extractDimensions(path, w, h);
+    qDebug() << "[DEBUG_TRACE] [processItemDirect] 尺寸抽取结果: width=" << w << "height=" << h;
     if (w > 0 && h > 0) {
         MetadataManager::instance().setItemDimensions(path, w, h);
     }
@@ -91,6 +93,8 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     std::wstring colorStr;
     QVector<QPair<QColor, float>> palette;
     bool success = extractColor(path, colorStr, palette);
+    qDebug() << "[DEBUG_TRACE] [processItemDirect] 颜色抽取结果:" << success
+             << "colorStr:" << QString::fromStdWString(colorStr) << "palette_size:" << palette.size();
     if (success) {
         MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, false);
     }
@@ -100,9 +104,12 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
 
     if (!success) {
         QFileInfo info(QString::fromStdWString(path));
+        qDebug() << "[DEBUG_TRACE] [processItemDirect] 提取色彩未成功。检测是否为目标重试项: isDir=" << info.isDir()
+                 << "isGraphics=" << MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
         if (info.isDir() || MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
             std::lock_guard<std::mutex> lock(m_retryMutex);
             if (std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), path) == m_visualRetryQueue.end()) {
+                qDebug() << "[DEBUG_TRACE] [processItemDirect] 将路径推入异步重试队列 m_visualRetryQueue";
                 m_visualRetryQueue.push_back(path);
                 QMetaObject::invokeMethod(m_retryTimer, "start", Qt::QueuedConnection);
             }
@@ -135,12 +142,19 @@ bool MediaExtractorPipeline::extractColor(const std::wstring& path, std::wstring
     QFileInfo info(QString::fromStdWString(path));
     QString qPath = QString::fromStdWString(path);
     bool success = false;
+    qDebug() << "[DEBUG_TRACE] [extractColor] 开始分析文件/文件夹颜色:" << qPath << "isFile:" << info.isFile() << "isDir:" << info.isDir();
 
     if (info.isFile()) {
-        if (MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
+        QString suffix = info.suffix().toLower();
+        bool isGraphics = MediaColorExtractor::isGraphicsFile(suffix);
+        qDebug() << "[DEBUG_TRACE] [extractColor] 文件后缀:" << suffix << "是否为支持的媒体图形格式(isGraphics):" << isGraphics;
+        if (isGraphics) {
             QImage img = MediaColorExtractor::getImageForAnalysis(qPath, 256);
+            qDebug() << "[DEBUG_TRACE] [extractColor] getImageForAnalysis 图像是否为空(isNull):" << img.isNull()
+                     << "width:" << img.width() << "height:" << img.height();
             if (!img.isNull()) {
                 auto palette = MediaColorExtractor::extractPalette(qPath);
+                qDebug() << "[DEBUG_TRACE] [extractColor] extractPalette 提取出的色板大小:" << palette.size();
                 if (!palette.isEmpty()) {
                     QColor dominant = MediaColorExtractor::quantizeColor(palette.first().first);
                     outColorStr = dominant.name().toUpper().toStdWString();
