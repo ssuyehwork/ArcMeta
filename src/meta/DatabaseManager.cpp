@@ -8,6 +8,7 @@
 #include <windows.h>
 #include "MetadataManager.h"
 #include "../util/ShellHelper.h"
+#include "../util/AppDirectoryInitializer.h"
 
 namespace ArcMeta {
 
@@ -129,7 +130,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         return false;
     }
     sqlite3_busy_timeout(conn.memDb, 25000);
-    ShellHelper::ensureHidden(diskPath);
+    // 🚀【修改方案一】：彻底删去对 ShellHelper::ensureHidden 的直接耦合，保持 DAL 纯粹性
 
     // 使用 SQLite Backup API 将 conn.diskDb 的数据一次性导入内存 conn.memDb
     sqlite3_backup* backup = sqlite3_backup_init(conn.memDb, "main", conn.diskDb, "main");
@@ -368,9 +369,9 @@ void DatabaseManager::closeDb(DbConnection& conn) {
 
 bool DatabaseManager::init() {
     std::lock_guard<std::mutex> lock(m_mutex);
+    AppDirectoryInitializer::initializeStoragePath(getAppDir());
+
     QString metaDir = getAppDir() + "/.arcmeta";
-    QDir().mkpath(metaDir);
-    ShellHelper::ensureHidden(metaDir.toStdWString());
 
     // 加载全局库
     std::wstring globalPath = (metaDir + "/global.db").toStdWString();

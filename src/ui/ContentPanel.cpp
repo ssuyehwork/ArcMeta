@@ -17,6 +17,7 @@
 #include "../core/NavigationHistoryService.h"
 #include "ToolTipOverlay.h" 
 #include "MainWindow.h"
+#include "../util/SecureFileEraser.h"
  
 #include <QVBoxLayout> 
 #include <QHBoxLayout> 
@@ -2524,48 +2525,10 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
                         
                         // 1. 物理抹除
+                        // 🚀【修改方案三】：UI上帝类彻底丢弃复杂的扇区覆写算法，高聚隔离为一行优雅调用！
                         bool physicalOk = false;
                         if (action == ActionSecureDelete) {
-                            // 安全擦除逻辑：递归覆写
-                            std::function<bool(const QString&)> secureRemove;
-                            secureRemove = [&](const QString& target) -> bool {
-                                QFileInfo info(target);
-                                if (info.isDir()) {
-                                    QDir dir(target);
-                                    for (const QString& entry : dir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot)) {
-                                        secureRemove(target + "/" + entry);
-                                    }
-                                    return QDir().rmdir(target);
-                                } else {
-                                    // 随机覆写全量扇区
-                                    QFile file(target);
-                                    if (file.open(QIODevice::ReadWrite)) {
-                                        qint64 size = file.size();
-                                        if (size > 0) {
-                                            QByteArray buffer(65536, 0);
-                                            for (int pass = 0; pass < 3; ++pass) { // 覆写 3 遍
-                                                file.seek(0);
-                                                qint64 written = 0;
-                                                while (written < size) {
-                                                    for (int i = 0; i < buffer.size(); ++i) buffer[i] = (char)QRandomGenerator::global()->bounded(256);
-                                                    qint64 toWrite = qMin((qint64)buffer.size(), size - written);
-                                                    file.write(buffer.data(), toWrite);
-                                                    written += toWrite;
-                                                }
-                                                file.flush();
-                                                // 2026-06-xx 物理对齐：调用 Windows API 强制落盘，确保覆写数据真实写入扇区
-                                                HANDLE hFile = (HANDLE)_get_osfhandle(file.handle());
-                                                if (hFile != INVALID_HANDLE_VALUE) {
-                                                    FlushFileBuffers(hFile);
-                                                }
-                                            }
-                                        }
-                                        file.close();
-                                    }
-                                    return QFile::remove(target);
-                                }
-                            };
-                            physicalOk = secureRemove(p);
+                            physicalOk = SecureFileEraser::shredFile(p);
                         } else {
                             // 普通彻底删除：递归
                             std::function<bool(const QString&)> recursiveRemove;

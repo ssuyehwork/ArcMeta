@@ -16,12 +16,18 @@
 #include <QtConcurrent>
 #include "FramelessDialog.h"
 #include <QTimer>
+#include "TagManagerController.h"
 
 using namespace ArcMeta::Style;
 
 namespace ArcMeta {
 
 TagManagerView::TagManagerView(QWidget* parent) : QWidget(parent) {
+    m_controller = new TagManagerController(this);
+    connect(m_controller, &TagManagerController::tagGroupStateChanged, this, [this]() {
+        // 当数据库改变时，被动刷新视图
+        QMetaObject::invokeMethod(this, "refresh", Qt::QueuedConnection);
+    });
     initUi();
 }
 
@@ -334,21 +340,17 @@ bool TagManagerView::eventFilter(QObject* watched, QEvent* event) {
 }
 
 void TagManagerView::addTagToGroup(const QString& tagName, int groupId) {
-    QPointer<TagManagerView> weakThis(this);
-    (void)QtConcurrent::run([weakThis, tagName, groupId]() {
-        if (TagRepository::addTagToGroup(tagName, groupId)) {
-            if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
-        }
-    });
+    // 🚀 仅将语义请求转给 Controller，自己绝不直接跑线程和写库！
+    if (m_controller) {
+        m_controller->addTagToGroupAsync(tagName, groupId);
+    }
 }
 
 void TagManagerView::removeTagFromGroup(const QString& tagName, int groupId) {
-    QPointer<TagManagerView> weakThis(this);
-    (void)QtConcurrent::run([weakThis, tagName, groupId]() {
-        if (TagRepository::removeTagFromGroup(tagName, groupId)) {
-            if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
-        }
-    });
+    // 🚀 仅将语义请求转给 Controller，自己绝不直接跑线程和写库！
+    if (m_controller) {
+        m_controller->removeTagFromGroupAsync(tagName, groupId);
+    }
 }
 
 void TagManagerView::renameGroup(int groupId, const QString& newName) {

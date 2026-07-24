@@ -89,6 +89,9 @@ private:
     };
     QList<TagGroup> m_tagGroups;
 
+    // 🚀 依赖注入 Controller
+    class TagManagerController* m_controller = nullptr;
+
     QWidget* createSidebarItem(const QString& icon, const QString& name, const QString& countText, QLabel** outCountLabel = nullptr);
 };
 
