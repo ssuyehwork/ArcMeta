@@ -403,6 +403,16 @@ public slots:
     void appendPaths(const QStringList& paths, int reqId = 0);
 
     /**
+     * @brief 增量追加扫描出的 ItemRecord (第二级流式推送)
+     */
+    void appendRecords(const std::vector<ItemRecord>& records, int reqId);
+
+    /**
+     * @brief 扫描完成回调
+     */
+    void onLoadCompleted(int reqId);
+
+    /**
      * @brief 获取当前最新的加载请求 ID
      */
     int currentLoadRequestId() const { return m_loadRequestId.load(); }

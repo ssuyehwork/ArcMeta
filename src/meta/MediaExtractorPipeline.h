@@ -18,6 +18,7 @@ public:
 
     void enqueue(const std::wstring& path);
     void enqueueBatch(const std::vector<std::wstring>& paths);
+    void processItemDirect(const std::wstring& path);
 
 private slots:
     void processNextBatch();
@@ -26,8 +27,6 @@ private slots:
 private:
     MediaExtractorPipeline(QObject* parent = nullptr);
     ~MediaExtractorPipeline() override;
-
-    void processItemDirect(const std::wstring& path);
     void extractDimensions(const std::wstring& path, int& outW, int& outH);
     bool extractColor(const std::wstring& path, std::wstring& outColorStr, QVector<QPair<QColor, float>>& outPalette);
 

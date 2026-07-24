@@ -188,6 +188,7 @@ public:
     std::vector<std::pair<std::wstring, RuntimeMeta>> getChildrenFromCache(const std::wstring& folderPath);
 
     void ensureActivated(const std::wstring& nPath);
+    void ensureActivatedBatch(const std::vector<struct BatchEnumeratedEntry>& entries);
 
     void setRating(const std::wstring& path, int rating, bool notify = true);
     void setColor(const std::wstring& path, const std::wstring& color, bool notify = true);

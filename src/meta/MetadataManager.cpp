@@ -28,6 +28,7 @@
 #include "../ui/MediaColorExtractor.h"
 #include "MediaExtractorPipeline.h"
 #include "sqlite3.h"
+#include "../util/DirectoryBatchEnumerator.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -653,6 +654,85 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         // 3. 写锁写入缓存
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         if (m_cache.count(nPath)) return; // 二次检查防止竞态
+
+        // 共享元数据逻辑 (FID 关联)
+        if (!rm.fileId128.empty() && m_fidToPath.count(rm.fileId128)) {
+            const RuntimeMeta& existing = m_cache[m_fidToPath[rm.fileId128]];
+            rm.rating    = existing.rating;
+            rm.color     = existing.color;
+            rm.tags      = existing.tags;
+            rm.note      = existing.note;
+            rm.url       = existing.url;
+            rm.width     = existing.width;
+            rm.height    = existing.height;
+            rm.palettes  = existing.palettes;
+            rm.isManaged = existing.isManaged;
+        }
+
+        m_cache[nPath] = rm;
+        if (!rm.isFolder) {
+            CategoryRepo::s_totalCount.fetch_add(1);
+            if (rm.tags.isEmpty()) {
+                CategoryRepo::s_untaggedCount.fetch_add(1);
+            } else {
+                std::lock_guard<std::mutex> tagsLock(CategoryRepo::s_tagsMutex);
+                for (const auto& t : rm.tags) {
+                    if (!CategoryRepo::s_globalTagsSet.contains(t)) {
+                        CategoryRepo::s_globalTagsSet.insert(t);
+                        CategoryRepo::s_tagsCount.fetch_add(1);
+                    }
+                }
+            }
+            if (CategoryRepo::getItemCategoryIds(rm.fileId128).empty()) {
+                CategoryRepo::s_uncategorizedCount.fetch_add(1);
+            }
+        }
+        if (!rm.fileId128.empty()) {
+            m_fidToPath[rm.fileId128] = nPath;
+
+            // Plan-124: 维护树级索引
+            std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nPath)).absolutePath()).toStdWString();
+            parentPath = normalizePath(parentPath);
+            if (parentPath != nPath) {
+                auto& children = m_parentToChildren[parentPath];
+                if (std::find(children.begin(), children.end(), nPath) == children.end()) {
+                    children.push_back(nPath);
+                }
+            }
+
+            // 索引同步逻辑
+            std::wstring name, ext;
+            parsePathComponents(nPath, rm.isFolder, name, ext);
+            if (!name.empty()) {
+                if (rm.isFolder) {
+                    auto& v = m_folderNameToFids[name];
+                    if (std::find(v.begin(), v.end(), rm.fileId128) == v.end()) v.push_back(rm.fileId128);
+                } else {
+                    auto& v = m_fileNameToFids[name];
+                    if (std::find(v.begin(), v.end(), rm.fileId128) == v.end()) v.push_back(rm.fileId128);
+                    if (!ext.empty()) {
+                        auto& ve = m_extensionToFids[ext];
+                        if (std::find(ve.begin(), ve.end(), rm.fileId128) == ve.end()) ve.push_back(rm.fileId128);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void MetadataManager::ensureActivatedBatch(const std::vector<BatchEnumeratedEntry>& entries) {
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    for (const auto& entry : entries) {
+        std::wstring nPath = entry.fullPath;
+        if (m_cache.find(nPath) != m_cache.end()) continue;
+
+        RuntimeMeta rm;
+        rm.fileId128 = entry.fileId128;
+        rm.fileSize = entry.fileSize;
+        rm.ctime = entry.ctime;
+        rm.mtime = entry.mtime;
+        rm.atime = entry.atime;
+        rm.isFolder = entry.isDir;
 
         // 共享元数据逻辑 (FID 关联)
         if (!rm.fileId128.empty() && m_fidToPath.count(rm.fileId128)) {

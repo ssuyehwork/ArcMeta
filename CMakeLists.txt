@@ -163,6 +163,9 @@ set(SOURCES
     src/core/ActionCommand.h
     src/core/UndoManager.h
     src/core/BasicCommands.h
+    src/core/IoTask.h
+    src/core/IoTaskScheduler.h
+    src/core/IoTaskScheduler.cpp
     src/ui/ToolTipOverlay.cpp
     src/ui/ToolTipOverlay.h
     src/ui/TreeItemDelegate.h
@@ -177,6 +180,8 @@ set(SOURCES
     src/util/ShellHelper.h
     src/util/ImportHelper.cpp
     src/util/ImportHelper.h
+    src/util/DirectoryBatchEnumerator.cpp
+    src/util/DirectoryBatchEnumerator.h
     ArcMeta.rc
     resources/resources.qrc
 )
