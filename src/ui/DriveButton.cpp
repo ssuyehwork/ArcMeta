@@ -118,6 +118,14 @@ void DriveButton::stopRotation() {
     m_rotationAngle = 0;
 }
 
+static QString safeKey(const QString& path) {
+    QString safe = path;
+    safe.replace("\\", "_");
+    safe.replace("/", "_");
+    safe.replace(":", "_");
+    return safe;
+}
+
 FolderButton::FolderButton(const QString& folderPath, QWidget* parent)
     : QPushButton(parent), m_folderPath(folderPath) {
     setFixedSize(28, 28);
@@ -155,8 +163,8 @@ void FolderButton::paintEvent(QPaintEvent* event) {
     painter.drawRoundedRect(r, 4, 4);
 
     // 从 AppConfig 读取自定义图标和颜色，完美支持个性化渲染
-    QString colorKey = QString("DriveBar/FolderColor_%1").arg(m_folderPath);
-    QString iconKeyPath = QString("DriveBar/FolderIcon_%1").arg(m_folderPath);
+    QString colorKey = QString("DriveBar/FolderColor_%1").arg(safeKey(m_folderPath));
+    QString iconKeyPath = QString("DriveBar/FolderIcon_%1").arg(safeKey(m_folderPath));
     
     QString colorStr = AppConfig::instance().getValue(colorKey, "#FFFFFF").toString();
     QString iconKey = AppConfig::instance().getValue(iconKeyPath, "folder_filled").toString();

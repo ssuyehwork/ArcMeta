@@ -1898,6 +1898,14 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
     }
 }
 
+static QString safeKey(const QString& path) {
+    QString safe = path;
+    safe.replace("\\", "_");
+    safe.replace("/", "_");
+    safe.replace(":", "_");
+    return safe;
+}
+
 void MainWindow::updateCustomFolderButtons() {
     // 清除既有 custom folder 按钮
     for (FolderButton* btn : m_folderButtons) {
@@ -1995,7 +2003,7 @@ void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
     QMenu* iconMenu = menu.addMenu(UiHelper::getIcon("folder_filled", WarningOrange, 18), "文件夹图标");
     UiHelper::applyMenuStyle(iconMenu);
 
-    QString colorStr = AppConfig::instance().getValue(QString("DriveBar/FolderColor_%1").arg(path), "#FFFFFF").toString();
+    QString colorStr = AppConfig::instance().getValue(QString("DriveBar/FolderColor_%1").arg(safeKey(path)), "#FFFFFF").toString();
     QColor folderColor = QColor(colorStr);
     if (!folderColor.isValid()) {
         folderColor = Style::TextMain;
@@ -2050,7 +2058,7 @@ void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
         pickerLayout->addWidget(btnIcon, row, col);
 
         connect(btnIcon, &QPushButton::clicked, this, [btn, path, iconKey, iconMenu]() {
-            AppConfig::instance().setValue(QString("DriveBar/FolderIcon_%1").arg(path), iconKey);
+            AppConfig::instance().setValue(QString("DriveBar/FolderIcon_%1").arg(safeKey(path)), iconKey);
             AppConfig::instance().sync();
             btn->update(); // 触发 FolderButton 的更新重绘
             iconMenu->close(); // 选中后关闭菜单
@@ -2077,7 +2085,7 @@ void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
         dlg.setCurrentColor(folderColor);
         if (dlg.exec() == QDialog::Accepted) {
             QColor selected = dlg.selectedColor();
-            AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), selected.name().toUpper());
+            AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(safeKey(path)), selected.name().toUpper());
             AppConfig::instance().sync();
             btn->update(); // 触发重绘
         }
@@ -2088,7 +2096,7 @@ void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
             "#E74C3C", "#F1C40F", "#1ABC9C", "#34495E", "#95A5A6"
         };
         QString chosenColor = palette.at(QRandomGenerator::global()->bounded(palette.size()));
-        AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), chosenColor);
+        AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(safeKey(path)), chosenColor);
         AppConfig::instance().sync();
         btn->update(); // 触发重绘
     }
@@ -2105,10 +2113,10 @@ void MainWindow::removeCustomMonitoredFolder(const QString& path) {
         AppConfig::instance().setValue("DriveBar/CustomMonitoredFolders", customFolders);
         
         // 1a. 清除颜色和图标配置，防止配置文件残留膨胀
-        AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), QVariant());
-        AppConfig::instance().setValue(QString("DriveBar/FolderIcon_%1").arg(path), QVariant());
-        AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(finalPath), QVariant());
-        AppConfig::instance().setValue(QString("DriveBar/FolderIcon_%1").arg(finalPath), QVariant());
+        AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(safeKey(path)), QVariant());
+        AppConfig::instance().setValue(QString("DriveBar/FolderIcon_%1").arg(safeKey(path)), QVariant());
+        AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(safeKey(finalPath)), QVariant());
+        AppConfig::instance().setValue(QString("DriveBar/FolderIcon_%1").arg(safeKey(finalPath)), QVariant());
         
         AppConfig::instance().sync();
 
