@@ -366,28 +366,42 @@ void MetadataManager::notifyFullUIRebuild() {
 }
 
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
-    (void)authorized;
     std::wstring nPath = normalizePath(path);
+    qDebug() << "[DEBUG_TRACE] [registerItem] 尝试注册/解析路径:" << QString::fromStdWString(nPath)
+             << "authorized:" << authorized
+             << "isInsideManagedLibrary:" << isInsideManagedLibrary(nPath);
 
     // [Plan-131 方案 C + Plan-53 降级自愈安全防护] 物理指纹与高级特征双重准入机制
     std::string pFid;
     long long pSize = 0, pMtime = 0;
-    if (fetchWinApiMetadataDirect(nPath, pFid, nullptr, &pSize, nullptr, nullptr, &pMtime, nullptr)) {
+    bool fetchOk = fetchWinApiMetadataDirect(nPath, pFid, nullptr, &pSize, nullptr, nullptr, &pMtime, nullptr);
+    qDebug() << "[DEBUG_TRACE] [registerItem] fetchWinApiMetadataDirect 结果:" << fetchOk
+             << "pFid:" << QString::fromStdString(pFid) << "pSize:" << pSize << "pMtime:" << pMtime;
+
+    if (fetchOk) {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
         auto it = m_cache.find(nPath);
         if (it != m_cache.end()) {
-            // 只有当文件指纹一致、曾经被置为1，且色彩和尺寸物理属性都确切存在、非残缺时，才允许返回跳过！
-            // 这杜绝了历史解析失败时留下空元数据、又因状态为 1 无法再次扫描提取的致命 Bug 
             bool metadataValid = true;
             QFileInfo info(QString::fromStdWString(nPath));
             if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
                 if (it->second.width <= 0 || it->second.height <= 0 || it->second.color.empty()) {
                     metadataValid = false;
+                    qDebug() << "[DEBUG_TRACE] [registerItem] 缓存中媒体属性残缺: width=" << it->second.width
+                             << "height=" << it->second.height << "color.empty=" << it->second.color.empty();
                 }
             }
+
+            qDebug() << "[DEBUG_TRACE] [registerItem] 检测到缓存已有项. ingestionStatus:" << it->second.ingestionStatus
+                     << "cacheSize:" << it->second.fileSize << "cacheMtime:" << it->second.mtime
+                     << "metadataValid:" << metadataValid;
+
             if (it->second.ingestionStatus == 1 && it->second.fileSize == pSize && it->second.mtime == pMtime && metadataValid) {
-                return; // 物理指纹及高级多媒体特征完备且未发生改变，安全返回
+                qDebug() << "[DEBUG_TRACE] [registerItem] 指纹、属性和状态1全部吻合，直接跳过解析。";
+                return;
             }
+        } else {
+            qDebug() << "[DEBUG_TRACE] [registerItem] 内存缓存未找到该路径";
         }
     }
 
@@ -408,6 +422,7 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     updateIngestionStatus(nPath, 0);
 
     // 3. 投递至后台抽取流水线
+    qDebug() << "[DEBUG_TRACE] [registerItem] 成功登记并将项目放入解析队列 (Status=0)";
     MediaExtractorPipeline::instance().enqueue(nPath);
 }
 
@@ -1075,21 +1090,33 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
 void MetadataManager::syncAfterMove(const std::wstring& oldPath, const std::wstring& newPath) {
     std::wstring nOld = normalizePath(oldPath);
     std::wstring nNew = normalizePath(newPath);
-    if (nOld == nNew) return;
+    qDebug() << "[DEBUG_TRACE] [syncAfterMove] 物理移动发生! oldPath:" << QString::fromStdWString(nOld)
+             << "-> newPath:" << QString::fromStdWString(nNew);
+    if (nOld == nNew) {
+        qDebug() << "[DEBUG_TRACE] [syncAfterMove] 原路径与目标路径完全相同，跳过对账。";
+        return;
+    }
 
     bool wasManaged = isInsideManagedLibrary(nOld);
     bool isNowManaged = isInsideManagedLibrary(nNew);
+    qDebug() << "[DEBUG_TRACE] [syncAfterMove] wasManaged(是否曾属托管库):" << wasManaged
+             << "isNowManaged(当前是否属于托管库):" << isNowManaged;
 
     if (wasManaged && isNowManaged) {
         // 库内移动（含跨托管子文件夹）：仅路径变化，元数据整体保留
+        qDebug() << "[DEBUG_TRACE] [syncAfterMove] 执行库内重命名逻辑 renameItem...";
         renameItem(nOld, nNew);
     } else if (wasManaged && !isNowManaged) {
         // 移出托管库：等同于永久删除，彻底清除元数据
+        qDebug() << "[DEBUG_TRACE] [syncAfterMove] 移出托管库，彻底物理清洗清除元数据 removeMetadataSync...";
         removeMetadataSync(nOld);
         notifyFullUIRebuild();
     } else if (!wasManaged && isNowManaged) {
         // 移入托管库：走登记流水线，触发媒体特征提取
+        qDebug() << "[DEBUG_TRACE] [syncAfterMove] 新移入托管库，立即触发 markAsRegistered 异步登记对账...";
         markAsRegistered(nNew);
+    } else {
+        qDebug() << "[DEBUG_TRACE] [syncAfterMove] 库外移到库外，不做任何元数据处理。";
     }
     // 库外移到库外：与托管数据无关，不做任何处理
 }
