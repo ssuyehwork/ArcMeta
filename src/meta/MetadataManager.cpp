@@ -491,7 +491,15 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
     std::wstring volSerial = getVolumeSerialNumber(nFolder);
     QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
     sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
-    if (!db) return;
+    if (!db) {
+        qWarning() << "[DB_TRACE] calculateAndPersistProgress 失败：无法取得分库，文件夹:" << QString::fromStdWString(nFolder);
+        return;
+    }
+
+    // 【新增调试日志与互斥锁保护】
+    auto dbLock = DatabaseManager::instance().getDriveMutex(volSerial);
+    std::lock_guard<std::mutex> lockConn(*dbLock);
+    qDebug() << "[DB_TRACE] calculateAndPersistProgress 开始计算导入进度，获取连接互斥锁，文件夹:" << QString::fromStdWString(nFolder);
 
     // 2. 统计状态（严禁物理读盘，仅使用数据库标记）
     // 进度 = (该目录下状态为 1 的项目数) / (该目录下状态为 0 和 1 的项目总数)
@@ -526,7 +534,11 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
         std::string key = "PROGRESS:" + QString::fromStdWString(nFolder).toUtf8().toStdString();
         sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_double(stmt, 2, progress);
-        sqlite3_step(stmt);
+        if (sqlite3_step(stmt) == SQLITE_DONE) {
+            qDebug() << "[DB_TRACE] calculateAndPersistProgress 写入进度数据成功，进度:" << progress << "文件夹:" << QString::fromStdWString(nFolder);
+        } else {
+            qWarning() << "[DB_TRACE] calculateAndPersistProgress 写入进度失败！Error:" << sqlite3_errmsg(db);
+        }
         sqlite3_finalize(stmt);
     }
 
@@ -880,11 +892,19 @@ void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std:
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
     
+    bool isFolder = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         RuntimeMeta& meta = m_cache[nPath];
         meta.color = color;
         meta.palettes = entries;
+        isFolder = meta.isFolder;
+    }
+
+    // 【新增同步】文件夹主色提取时，同步更新 categories 关联表
+    if (isFolder) {
+        qDebug() << "[DB_TRACE] setItemVisualMetadata 判定为文件夹，触发 categories 颜色同步更新。路径:" << QString::fromStdWString(nPath);
+        CategoryRepo::updateCategoryColorByPath(nPath, color);
     }
     
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
@@ -1749,15 +1769,30 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     
     RuntimeMeta rMeta = getMeta(nPath);
     sqlite3* memDb = nullptr;
+    std::wstring volSerial;
     
     if (nPath.length() == 3 && nPath[1] == L':' && (nPath[2] == L'\\' || nPath[2] == L'/')) {
         memDb = DatabaseManager::instance().getGlobalDb();
     } else {
-        std::wstring volSerial = getVolumeSerialNumber(nPath);
+        volSerial = getVolumeSerialNumber(nPath);
         QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
         memDb = DatabaseManager::instance().getMemoryDb(volSerial, letter);
     }
-    if (!memDb) return;
+    if (!memDb) {
+        qWarning() << "[DB_TRACE] persistAsync 失败：未能获取 memDb，路径:" << QString::fromStdWString(nPath);
+        return;
+    }
+
+    // 【新增调试日志与互斥锁保护】
+    std::shared_ptr<std::mutex> dbLock;
+    if (!volSerial.empty()) {
+        dbLock = DatabaseManager::instance().getDriveMutex(volSerial);
+    }
+    std::unique_lock<std::mutex> lockConn;
+    if (dbLock) {
+        lockConn = std::unique_lock<std::mutex>(*dbLock);
+        qDebug() << "[DB_TRACE] persistAsync 成功锁定驱动盘互斥锁，开始执行写入，路径:" << QString::fromStdWString(nPath);
+    }
 
     // 1. 内存库操作 (Memory Commit)
     bool isNew = true;
@@ -1820,7 +1855,9 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
                 m_cache[nPath].isManaged = true;
             }
-            // [Plan-131 方案 A] 磁盘直连模式，取消 redundant async dispatch
+            qDebug() << "[DB_TRACE] persistAsync 写入内存库成功，是否新项:" << isNew << "路径:" << QString::fromStdWString(nPath);
+        } else {
+            qWarning() << "[DB_TRACE] persistAsync 写入内存库失败！Error:" << sqlite3_errmsg(memDb) << "路径:" << QString::fromStdWString(nPath);
         }
         sqlite3_finalize(memStmt);
     }

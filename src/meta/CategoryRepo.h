@@ -56,6 +56,7 @@ public:
     static Category getById(int id);
     static int findCategoryId(int parentId, const std::wstring& name);
     static int findByFrn(uint64_t frn);
+    static bool updateCategoryColorByPath(const std::wstring& path, const std::wstring& color);
     static bool updatePhysicalMapping(int id, uint64_t frn, const std::wstring& path);
     static bool remove(int id);
     static bool reorder(int parentId, bool ascending);
