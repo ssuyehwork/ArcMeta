@@ -498,8 +498,8 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
 
     // 【新增调试日志与互斥锁保护】
     auto dbLock = DatabaseManager::instance().getDriveMutex(volSerial);
-    std::lock_guard<std::mutex> lockConn(*dbLock);
-    qDebug() << "[DB_TRACE] calculateAndPersistProgress 开始计算导入进度，获取连接互斥锁，文件夹:" << QString::fromStdWString(nFolder);
+    std::lock_guard<std::recursive_mutex> lockConn(*dbLock);
+    qDebug() << "[DB_TRACE] calculateAndPersistProgress 开始计算导入进度，获取连接递归互斥锁，文件夹:" << QString::fromStdWString(nFolder);
 
     // 2. 统计状态（严禁物理读盘，仅使用数据库标记）
     // 进度 = (该目录下状态为 1 的项目数) / (该目录下状态为 0 和 1 的项目总数)
@@ -1784,14 +1784,14 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     }
 
     // 【新增调试日志与互斥锁保护】
-    std::shared_ptr<std::mutex> dbLock;
+    std::shared_ptr<std::recursive_mutex> dbLock;
     if (!volSerial.empty()) {
         dbLock = DatabaseManager::instance().getDriveMutex(volSerial);
     }
-    std::unique_lock<std::mutex> lockConn;
+    std::unique_lock<std::recursive_mutex> lockConn;
     if (dbLock) {
-        lockConn = std::unique_lock<std::mutex>(*dbLock);
-        qDebug() << "[DB_TRACE] persistAsync 成功锁定驱动盘互斥锁，开始执行写入，路径:" << QString::fromStdWString(nPath);
+        lockConn = std::unique_lock<std::recursive_mutex>(*dbLock);
+        qDebug() << "[DB_TRACE] persistAsync 成功锁定驱动盘递归互斥锁，开始执行写入，路径:" << QString::fromStdWString(nPath);
     }
 
     // 1. 内存库操作 (Memory Commit)

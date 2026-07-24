@@ -508,11 +508,11 @@ sqlite3* DatabaseManager::getDiskDb(sqlite3* memDb) {
     return nullptr;
 }
 
-std::shared_ptr<std::mutex> DatabaseManager::getDriveMutex(const std::wstring& volSerial) {
+std::shared_ptr<std::recursive_mutex> DatabaseManager::getDriveMutex(const std::wstring& volSerial) {
     std::lock_guard<std::mutex> lock(m_mapMutex);
     auto it = m_driveDbMutexMap.find(volSerial);
     if (it == m_driveDbMutexMap.end()) {
-        auto mtx = std::make_shared<std::mutex>();
+        auto mtx = std::make_shared<std::recursive_mutex>();
         m_driveDbMutexMap[volSerial] = mtx;
         return mtx;
     }

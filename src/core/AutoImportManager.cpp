@@ -146,7 +146,7 @@ void AutoImportManager::processImportQueue() {
             if (vol.empty()) continue;
 
             auto driveLock = DatabaseManager::instance().getDriveMutex(vol);
-            std::lock_guard<std::mutex> dLock(*driveLock);
+            std::lock_guard<std::recursive_mutex> dLock(*driveLock);
 
             QString letter = "";
             if (!pair.second.empty()) {
@@ -179,7 +179,7 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
 
     std::wstring vol = MetadataManager::getVolumeSerialNumber(rootPath);
     auto driveLock = DatabaseManager::instance().getDriveMutex(vol);
-    std::lock_guard<std::mutex> dLock(*driveLock);
+    std::lock_guard<std::recursive_mutex> dLock(*driveLock);
 
     MetadataManager::instance().setInternalOperating(true);
 
