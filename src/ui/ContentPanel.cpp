@@ -275,7 +275,7 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
     if (role == Qt::EditRole && index.column() == 0) {
         if (record.isCategory) return false; // 2026-07-xx 按照 Plan-73：子分类暂不支持在此重命名
 
-        QString newName = value.toString();
+        QString newName = value.toString().trimmed();
         if (newName.isEmpty()) return false;
 
         auto& mutableRecord = m_allRecords[index.row()];
@@ -285,19 +285,37 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
 
         if (oldPath != newPath) {
             QString nativeNewPath = QDir::toNativeSeparators(newPath);
-            if (ShellHelper::renameItem(oldPath, nativeNewPath)) {
-                // 2026-06-xx 物理同步：重命名后必须更新 MetadataManager
-                MetadataManager::instance().renameItem(oldPath.toStdWString(), nativeNewPath.toStdWString());
+            QPointer<FerrexVirtualDbModel> weakThis(this);
+            int row = index.row();
+            (void)QtConcurrent::run([weakThis, oldPath, nativeNewPath, newName, row, role]() {
+                if (ShellHelper::renameItem(oldPath, nativeNewPath)) {
+                    QMetaObject::invokeMethod(weakThis.data(), [weakThis, oldPath, nativeNewPath, newName, row, role]() {
+                        if (weakThis) {
+                            if (row < static_cast<int>(weakThis->m_allRecords.size())) {
+                                auto& mutableRec = weakThis->m_allRecords[row];
+                                mutableRec.path = nativeNewPath;
+                                mutableRec.filename = newName;
+                                weakThis->m_metaCache.remove(oldPath);
 
-                // 撤销支持
-                UndoManager::instance().pushCommand(std::make_unique<RenameCommand>(oldPath, nativeNewPath));
+                                // 物理同步：安全更新模型私有的路径到行号的映射
+                                auto it = weakThis->m_pathToIndex.find(oldPath);
+                                if (it != weakThis->m_pathToIndex.end()) {
+                                    int oldRow = it->second;
+                                    weakThis->m_pathToIndex.erase(it);
+                                    weakThis->m_pathToIndex[nativeNewPath] = oldRow;
+                                }
 
-                // 物理同步：手动修改 m_allRecords 里的 path 以保持模型数据一致
-                mutableRecord.path = nativeNewPath;
-                m_metaCache.remove(oldPath);
-                emit dataChanged(index, index, {role, Qt::DisplayRole, PathRole});
-                return true;
-            }
+                                UndoManager::instance().pushCommand(std::make_unique<RenameCommand>(oldPath, nativeNewPath));
+
+                                QModelIndex modelIdx = weakThis->index(row, 0);
+                                emit weakThis->recordRenamed(oldPath, nativeNewPath, newName);
+                                emit weakThis->dataChanged(modelIdx, modelIdx, {role, Qt::DisplayRole, PathRole});
+                            }
+                        }
+                    }, Qt::QueuedConnection);
+                }
+            });
+            return true;
         }
         return false;
     }
@@ -972,6 +990,16 @@ ContentPanel::ContentPanel(QWidget* parent)
         if (roles.isEmpty() || roles.contains(ColorRole) || roles.contains(RatingRole) || roles.contains(TagsRole)) {
             recalculateAndEmitStats();
         }
+    });
+
+    // 🚀【方案 A 核心】：监听模型层的 recordRenamed 信号，进行增量更新与选中重新对齐，绝对不触发全量 loadDirectory
+    connect(m_model, &FerrexVirtualDbModel::recordRenamed, this, [this](const QString& oldPath, const QString& newPath, const QString& newName) {
+        Q_UNUSED(oldPath);
+        this->setPendingSelectName(newName, false);
+
+        // 通知视图重新定位并同步元数据面板状态
+        this->selectAndScrollToPath(newPath);
+        this->onSelectionChanged();
     });
      
     // 2026-04-12 深度修复：强制锁定过滤列为第 0 列（名称列），确保搜索逻辑不偏离 
@@ -3628,28 +3656,12 @@ void GridItemDelegate::setEditorData(QWidget* editor, const QModelIndex& index) 
 void GridItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const { 
     QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor); 
     if (!lineEdit) return; 
-    QString value = lineEdit->text(); 
-    if(value.isEmpty() || value == index.data(Qt::DisplayRole).toString()) return; 
+
+    QString newName = lineEdit->text().trimmed();
+    if (newName.isEmpty()) return;
  
-    // 2026-06-xx 架构解耦修复：物理重命名职责已彻底移至 Model 层的 setData。
-    // Delegate 仅负责触发数据变更。这消除了“重复重命名”导致的静默失败 Bug。
-    if (model->setData(index, value, Qt::EditRole)) {
-        // 2026-xx-xx 按照用户要求：重命名后触发 selectionChanged 信号，以驱动元数据面板刷新
-        // 由于 setModelData 没有 option 参数，通过 parent 获取 View
-        QAbstractItemView* view = qobject_cast<QAbstractItemView*>(editor->parentWidget()->parentWidget());
-        if (view) {
-            // 向上寻找 ContentPanel 以调用 onSelectionChanged
-            QWidget* p = view->parentWidget();
-            while (p) {
-                ContentPanel* cp = qobject_cast<ContentPanel*>(p);
-                if (cp) {
-                    cp->onSelectionChanged();
-                    break;
-                }
-                p = p->parentWidget();
-            }
-        }
-    }
+    // 🚀【方案 A 核心】：仅调用标准的 setData，没有任何 parent 向上引用的非标代码！
+    model->setData(index, newName, Qt::EditRole);
 } 
 
  

@@ -94,6 +94,9 @@ public:
     // 视口感知缩略图加载
     void loadThumbnailsForRows(const QList<int>& rows);
 
+signals:
+    void recordRenamed(const QString& oldPath, const QString& newPath, const QString& newName);
+
 private:
     std::vector<ItemRecord> m_allRecords;
     std::unordered_map<QString, int, QStringHash> m_pathToIndex;
