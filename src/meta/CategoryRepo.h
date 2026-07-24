@@ -147,7 +147,6 @@ public:
     static std::atomic<int> s_untaggedCount;          // 对应 "untagged"
     static std::atomic<int> s_uncategorizedCount;     // 对应 "uncategorized"
     static std::atomic<int> s_trashCount;             // 对应 "trash"
-    static std::atomic<int> s_invalidCount;           // 对应 "invalid_data"
 
     static std::mutex s_tagsMutex;
     static QSet<QString> s_globalTagsSet;

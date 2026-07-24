@@ -21,7 +21,6 @@ std::atomic<int> CategoryRepo::s_recentlyVisitedCount{0};
 std::atomic<int> CategoryRepo::s_untaggedCount{0};
 std::atomic<int> CategoryRepo::s_uncategorizedCount{0};
 std::atomic<int> CategoryRepo::s_trashCount{0};
-std::atomic<int> CategoryRepo::s_invalidCount{0};
 
 std::mutex CategoryRepo::s_tagsMutex;
 QSet<QString> CategoryRepo::s_globalTagsSet;
@@ -688,7 +687,7 @@ std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
     // 2026-07-xx 回滚：仅计算直接关联的 FID，取消自动向上递归汇总
     MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
         // 2026-07-xx 物理对齐：只要在关联表中且非文件夹/回收站，即计入分类总数
-        if (!meta.fileId128.empty() && !meta.isFolder && !meta.isTrash && !meta.isInvalid) {
+        if (!meta.fileId128.empty() && !meta.isFolder && !meta.isTrash) {
             auto it = fidToCats.find(meta.fileId128);
             if (it != fidToCats.end()) {
                 for (int catId : it->second) {
@@ -812,7 +811,6 @@ void CategoryRepo::loadStatsFromDb() {
             else if (key == "sys_untagged_count") s_untaggedCount.store(val);
             else if (key == "sys_uncategorized_count") s_uncategorizedCount.store(val);
             else if (key == "sys_trash_count") s_trashCount.store(val);
-            else if (key == "sys_invalid_count") s_invalidCount.store(val);
         }
         sqlite3_finalize(stmt);
     }
@@ -842,7 +840,6 @@ void CategoryRepo::fullRecount() {
     int untagged = 0;
     int uncategorized = 0;
     int trash = 0;
-    int invalid = 0;
 
     QSet<QString> uniqueTags;
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
@@ -852,10 +849,6 @@ void CategoryRepo::fullRecount() {
         if (meta.fileId128.empty()) continue;
         if (meta.isFolder) continue;
 
-        if (meta.isInvalid) {
-            invalid++;
-            continue;
-        }
         if (meta.isTrash) {
             trash++;
             continue;
@@ -890,7 +883,6 @@ void CategoryRepo::fullRecount() {
     s_untaggedCount.store(untagged);
     s_uncategorizedCount.store(uncategorized);
     s_trashCount.store(trash);
-    s_invalidCount.store(invalid);
 
     // 4. 将这些准确数据持久化回数据库中
     SqlTransaction trans(db);
@@ -909,44 +901,49 @@ void CategoryRepo::fullRecount() {
         saveStat("sys_untagged_count", untagged);
         saveStat("sys_uncategorized_count", uncategorized);
         saveStat("sys_trash_count", trash);
-        saveStat("sys_invalid_count", invalid);
         sqlite3_finalize(stmt);
     }
     trans.commit();
 
-    qDebug() << "[Recount] Backstage Recount calibration completed. Total =" << total << "Uncategorized =" << uncategorized << "Trash =" << trash << "Invalid =" << invalid;
+    qDebug() << "[Recount] Backstage Recount calibration completed. Total =" << total << "Uncategorized =" << uncategorized << "Trash =" << trash;
 
     // 2026-06-xx 核心逻辑升级：物理有效性对账 (盘点 FRN)
-    // 这一步在后台异步执行，验证文件是否被第三方删除。若失效，标记为 is_invalid 而非直接删除。
+    // 这一步在后台异步执行，验证文件是否被第三方删除。若失效，直接物理清退。
     // 使用 [db] 显式捕获数据库指针，并增加错误检查
     (void)QtConcurrent::run([db, snapshot]() {
         if (!db) return;
 
         std::vector<std::pair<std::wstring, std::string>> itemsToCheck;
         for (const auto& meta : snapshot) {
-            // 只对未标记失效且非回收站的文件进行物理校验
-            if (!meta.isFolder && !meta.isInvalid && !meta.isTrash) {
+            // 只对非回收站的文件进行物理校验
+            if (!meta.isFolder && !meta.isTrash) {
                 itemsToCheck.push_back({meta.path, meta.fileId128});
             }
         }
 
-        int invalidatedCount = 0;
+        std::vector<std::wstring> pathsToRemove;
         for (const auto& item : itemsToCheck) {
             std::string currentFid;
             // 通过 WinAPI 直接检查物理文件是否存在且 ID 匹配
             bool exists = MetadataManager::fetchWinApiMetadataDirect(item.first, currentFid);
             if (!exists || currentFid != item.second) {
-                // 物理校验失败：文件可能已被第三方删除或移动，标记为失效
-                invalidatedCount++;
-                MetadataManager::instance().setInvalid(item.first, true);
+                // 物理校验失败：文件已被删除或移出，加入删除列表
+                pathsToRemove.push_back(item.first);
             }
         }
 
-        if (invalidatedCount > 0) {
-            qDebug() << "[Recount] 物理校验发现" << invalidatedCount << "个失效项，已归类至失效数据";
-            // 2026-06-xx 物理同步：强制将内存中的 is_invalid 变更刷入磁盘
-            DatabaseManager::instance().flushAll();
-            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+        if (!pathsToRemove.empty()) {
+            qDebug() << "[Recount] 物理校验发现" << pathsToRemove.size() << "个失效项，准备在安全线程彻底物理清退";
+            QMetaObject::invokeMethod(&MetadataManager::instance(), [pathsToRemove]() {
+                QStringList qPaths;
+                for (const auto& p : pathsToRemove) {
+                    qPaths.append(QString::fromStdWString(p));
+                }
+                MetadataManager::instance().removeMetadataBatchSync(qPaths);
+
+                DatabaseManager::instance().flushAll();
+                MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+            }, Qt::BlockingQueuedConnection);
         }
     });
 }
@@ -1002,7 +999,6 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     res["untagged"] = s_untaggedCount.load();
     res["uncategorized"] = s_uncategorizedCount.load();
     res["trash"] = s_trashCount.load();
-    res["invalid_data"] = s_invalidCount.load();
     return res;
 }
 
@@ -1034,19 +1030,7 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
 
         if (type == "trash") {
             if (meta.isTrash) match = true;
-        } else if (type == "invalid_data") {
-            // 2026-08-xx 物理修复：失效数据查询不一致 Bug。
-            // 当标记为失效时，物理路径可能已在 m_cache 中缺失，改用 originalPath 作为标识找回
-            if (meta.isInvalid) {
-                match = true;
-                if (finalPath.empty() && !meta.originalPath.empty()) {
-                    finalPath = meta.originalPath;
-                }
-            }
         } else {
-            // 严禁显示失效数据
-            if (meta.isInvalid) return;
-
             if (type == "all") {
                 if (meta.isTrash) return; 
                 match = true;
