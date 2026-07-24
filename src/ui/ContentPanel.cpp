@@ -297,6 +297,14 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
                                 mutableRec.filename = newName;
                                 weakThis->m_metaCache.remove(oldPath);
 
+                                // 物理同步：安全更新模型私有的路径到行号的映射
+                                auto it = weakThis->m_pathToIndex.find(oldPath);
+                                if (it != weakThis->m_pathToIndex.end()) {
+                                    int oldRow = it->second;
+                                    weakThis->m_pathToIndex.erase(it);
+                                    weakThis->m_pathToIndex[nativeNewPath] = oldRow;
+                                }
+
                                 UndoManager::instance().pushCommand(std::make_unique<RenameCommand>(oldPath, nativeNewPath));
 
                                 QModelIndex modelIdx = weakThis->index(row, 0);
@@ -986,17 +994,10 @@ ContentPanel::ContentPanel(QWidget* parent)
 
     // 🚀【方案 A 核心】：监听模型层的 recordRenamed 信号，进行增量更新与选中重新对齐，绝对不触发全量 loadDirectory
     connect(m_model, &FerrexVirtualDbModel::recordRenamed, this, [this](const QString& oldPath, const QString& newPath, const QString& newName) {
+        Q_UNUSED(oldPath);
         this->setPendingSelectName(newName, false);
 
-        // 1. 修改内存 ToIndex 映射
-        auto it = m_pathToIndex.find(oldPath);
-        if (it != m_pathToIndex.end()) {
-            int oldIndexRow = it->second;
-            m_pathToIndex.erase(it);
-            m_pathToIndex[newPath] = oldIndexRow;
-        }
-
-        // 2. 通知视图重新定位并同步元数据面板状态
+        // 通知视图重新定位并同步元数据面板状态
         this->selectAndScrollToPath(newPath);
         this->onSelectionChanged();
     });
