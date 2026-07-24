@@ -21,6 +21,9 @@ class NativeFolderWatcher : public QObject {
 public:
     static NativeFolderWatcher& instance();
 
+signals:
+    void managedFolderRemoved(const std::wstring& path);
+
     /**
      * @brief 开始监控指定目录
      * @param path 物理路径

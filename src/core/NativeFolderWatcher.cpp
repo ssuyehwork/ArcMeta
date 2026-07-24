@@ -208,6 +208,12 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
                    notify->Action == FILE_ACTION_RENAMED_OLD_NAME) {
 
             qDebug() << "[Watcher] 检测到物理删除/重命名移出事件，立即执行数据库物理清洗";
+            if (notify->Action == FILE_ACTION_REMOVED) {
+                std::wstring pathStr = fullPath;
+                if (pathStr.find(L"ArcMeta.Library_") != std::wstring::npos) {
+                    emit managedFolderRemoved(pathStr);
+                }
+            }
             QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
                 qDebug() << "[Watcher] 异步回调执行: 开始彻底物理清退流程" << QString::fromStdWString(fullPath);
                 MetadataManager::instance().removeMetadataSync(fullPath);

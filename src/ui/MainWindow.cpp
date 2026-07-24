@@ -1819,6 +1819,19 @@ void MainWindow::initDriveBar() {
 
     // 自动追加加载自定义 monitored buttons
     updateCustomFolderButtons();
+
+    // 连接文件监视信号，当发现第三方删除托管库时安全更新 UI 与底层除账
+    connect(&NativeFolderWatcher::instance(), &NativeFolderWatcher::managedFolderRemoved, this, [this](const std::wstring& path) {
+        QString qPath = QString::fromStdWString(path);
+        // 提取盘符：例如从 "D:\ArcMeta.Library_D" 提取出 "D:"
+        QFileInfo info(qPath);
+        QString letter = info.absolutePath().left(2).toUpper(); // "D:"
+        if (m_driveButtons.contains(letter)) {
+            m_driveButtons[letter]->setState(DriveButton::Inactive); // 蓝色打勾变灰色
+        }
+        // 底层数据物理除账
+        MetadataManager::instance().removeMetadataSync(path);
+    });
 }
 
 void MainWindow::onDriveButtonClicked() {
@@ -1867,7 +1880,9 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
 
             // [Plan-129] USN 监控热激活：新建库后立即点火该盘符的监控引擎 (需预检防止重复启动)
             if (!MftReader::instance().isDriveIndexed(letter)) {
-                MftReader::instance().buildIndex({letter});
+                (void)QtConcurrent::run([letter]() {
+                    MftReader::instance().buildIndex({letter});
+                });
             }
             
             ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建成功", 1500, Style::SuccessGreen);
