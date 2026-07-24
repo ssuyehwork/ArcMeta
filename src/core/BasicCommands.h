@@ -269,4 +269,79 @@ private:
     std::vector<std::wstring> m_registeredPaths;
 };
 
+/**
+ * @brief 安全物理删除指令
+ */
+class SecureDeleteCommand : public ActionCommand {
+public:
+    explicit SecureDeleteCommand(const QStringList& paths) : m_targetPaths(paths) {}
+
+    void execute() override {
+        for (const auto& path : m_targetPaths) {
+            QFileInfo info(path);
+            if (info.isDir()) {
+                QDir dir(path);
+                dir.removeRecursively();
+            } else {
+                QFile::remove(path);
+            }
+            MetadataManager::instance().removeMetadataSync(path.toStdWString());
+        }
+    }
+
+    void undo() override {
+        // 物理删除不可撤销，此接口留空
+    }
+
+    void redo() override {
+        execute();
+    }
+
+    QString description() const override { return "安全物理删除"; }
+
+    bool affectsPath(const QString& path) const override {
+        for (const auto& p : m_targetPaths) {
+            if (p == path) return true;
+        }
+        return false;
+    }
+
+private:
+    QStringList m_targetPaths;
+};
+
+/**
+ * @brief 安全加密指令
+ */
+class EncryptCommand : public ActionCommand {
+public:
+    EncryptCommand(const QStringList& paths, const std::string& pwd)
+        : m_targetPaths(paths), m_pwd(pwd) {}
+
+    void execute() override {
+        // 后台加密由外部 QThreadPool 调用，此处指令记录该状态并支持后续扩展
+    }
+
+    void undo() override {
+        // 解除加密
+    }
+
+    void redo() override {
+        execute();
+    }
+
+    QString description() const override { return "安全加密保护"; }
+
+    bool affectsPath(const QString& path) const override {
+        for (const auto& p : m_targetPaths) {
+            if (p == path || (p + ".amenc") == path) return true;
+        }
+        return false;
+    }
+
+private:
+    QStringList m_targetPaths;
+    std::string m_pwd;
+};
+
 } // namespace ArcMeta

@@ -229,28 +229,12 @@ void ThumbnailDelegate::setEditorData(QWidget* editor, const QModelIndex& index)
 void ThumbnailDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const {
     QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor);
     if (!lineEdit) return;
-    QString value = lineEdit->text();
-    if (value.isEmpty() || value == index.data(Qt::DisplayRole).toString()) return;
 
-    // 架构解耦修复：物理重命名职责已彻底移至 Model 层的 setData。
-    // Delegate 仅负责触发数据变更。这消除了“重复重命名”导致的静默失败 Bug。
-    if (model->setData(index, value, Qt::EditRole)) {
-        // 触发刷新信号，驱动元数据面板同步
-        // 物理修复：编辑器挂在 viewport 上，需多跳一级 parent
-        QAbstractItemView* view = qobject_cast<QAbstractItemView*>(editor->parentWidget()->parentWidget());
-        if (view) {
-            // 向上寻找 ContentPanel
-            QWidget* p = view->parentWidget();
-            while (p) {
-                ContentPanel* cp = qobject_cast<ContentPanel*>(p);
-                if (cp) {
-                    cp->onSelectionChanged();
-                    break;
-                }
-                p = p->parentWidget();
-            }
-        }
-    }
+    QString newName = lineEdit->text().trimmed();
+    if (newName.isEmpty()) return;
+
+    // 🚀【方案 A 核心】：仅调用标准的 setData，没有任何 parent 向上引用的非标代码！
+    model->setData(index, newName, Qt::EditRole);
 }
 
 bool ThumbnailDelegate::eventFilter(QObject* obj, QEvent* event) {

@@ -261,29 +261,12 @@ public:
     void setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const override {
         QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor);
         if (!lineEdit) return;
-        QString value = lineEdit->text();
-        if (value.isEmpty() || value == index.data(Qt::DisplayRole).toString()) return;
 
-        // 2026-06-xx 架构解耦修复：物理重命名职责已彻底移至 Model 层的 setData。
-        // Delegate 仅负责触发数据变更。这消除了“重复重命名”导致的静默失败 Bug。
-        if (model->setData(index, value, Qt::EditRole)) {
-            // 2026-xx-xx 按照用户要求：触发刷新信号
-            // 物理修复：editor->parent() 返回 QObject*，需先转为 QWidget*
-            QAbstractItemView* view = qobject_cast<QAbstractItemView*>(editor->parentWidget()->parentWidget());
-            if (view) {
-                // 对于 TreeView，editor 的 parent 是 viewport，viewport 的 parent 是 TreeView
-                // 向上寻找 ContentPanel 以调用 onSelectionChanged
-                QWidget* p = view->parentWidget();
-                while (p) {
-                    ContentPanel* cp = qobject_cast<ContentPanel*>(p);
-                    if (cp) {
-                        cp->onSelectionChanged();
-                        break;
-                    }
-                    p = p->parentWidget();
-                }
-            }
-        }
+        QString newName = lineEdit->text().trimmed();
+        if (newName.isEmpty()) return;
+
+        // 🚀【方案 A 核心】：仅调用标准的 setData，没有任何 parent 向上引用的非标代码！
+        model->setData(index, newName, Qt::EditRole);
     }
 
 public:
