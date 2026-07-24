@@ -192,10 +192,9 @@ void MetadataManager::initFromScchMode() {
                 rm.isTrash = sqlite3_column_int(stmt, 13) != 0;
                 const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 14));
                 if (wOrigPath) rm.originalPath = wOrigPath;
-                rm.isInvalid = sqlite3_column_int(stmt, 15) != 0;
-                rm.width = sqlite3_column_int(stmt, 16);
-                rm.height = sqlite3_column_int(stmt, 17);
-                rm.ingestionStatus = sqlite3_column_int(stmt, 18);
+                rm.width = sqlite3_column_int(stmt, 15);
+                rm.height = sqlite3_column_int(stmt, 16);
+                rm.ingestionStatus = sqlite3_column_int(stmt, 17);
                 if (paletteBlob && paletteSize > 0) {
                     QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
                     QJsonDocument doc = QJsonDocument::fromJson(ba);
@@ -767,105 +766,6 @@ void MetadataManager::removeTag(const QString& tagName) {
     notifyFullUIRebuild();
 }
 
-void MetadataManager::setInvalid(const std::wstring& path, bool invalid, bool notify) {
-    std::wstring nPath = MetadataManager::normalizePath(path);
-    ensureActivated(nPath);
-    bool changed = false;
-    bool isManaged = false;
-    bool isFolder = false;
-    bool oldEmpty = false;
-    std::string fid;
-    { 
-        std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        if (m_cache[nPath].isInvalid != invalid) {
-            m_cache[nPath].isInvalid = invalid; 
-            changed = true;
-            isManaged = m_cache[nPath].isManaged;
-            isFolder = m_cache[nPath].isFolder;
-            oldEmpty = m_cache[nPath].tags.isEmpty();
-            fid = m_cache[nPath].fileId128;
-        }
-    }
-    
-    if (changed) {
-        // 2026-07-xx 物理修复：仅当项已登记 (isManaged) 时，其失效状态变更才影响活跃总数
-        if (isManaged) {
-            CategoryRepo::incrementTotalFileCount(invalid ? -1 : 1);
-        }
-        if (!isFolder) {
-            if (invalid) {
-                CategoryRepo::s_totalCount.fetch_sub(1);
-                CategoryRepo::s_invalidCount.fetch_add(1);
-                if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_sub(1);
-                if (CategoryRepo::getItemCategoryIds(fid).empty()) CategoryRepo::s_uncategorizedCount.fetch_sub(1);
-            } else {
-                CategoryRepo::s_totalCount.fetch_add(1);
-                CategoryRepo::s_invalidCount.fetch_sub(1);
-                if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_add(1);
-                if (CategoryRepo::getItemCategoryIds(fid).empty()) CategoryRepo::s_uncategorizedCount.fetch_add(1);
-            }
-        }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-        persistAsync(nPath);
-    }
-}
-
-void MetadataManager::setInvalidByFrn(uint64_t frn, const std::wstring& volSerial, bool invalid) {
-    // 物理 FRN 在 NTFS 中以 16 进制字符串形式缓存
-    wchar_t frnBuf[17];
-    swprintf(frnBuf, 17, L"%016llX", frn);
-    std::string fid = generateFallbackFid(volSerial, frnBuf);
-    
-    std::wstring path;
-    {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_fidToPath.find(fid);
-        if (it != m_fidToPath.end()) path = it->second;
-    }
-
-    if (!path.empty()) {
-        setInvalid(path, invalid);
-    }
-}
-
-void MetadataManager::setInvalidRecursive(const std::wstring& path, bool invalid) {
-    std::wstring nPath = normalizePath(path);
-    std::vector<std::wstring> affectedPaths;
-
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        for (auto& pair : m_cache) {
-            const std::wstring& p = pair.first;
-            if (p == nPath || p.find(nPath + L"\\") == 0 || p.find(nPath + L"/") == 0) {
-                if (pair.second.isInvalid != invalid) {
-                    pair.second.isInvalid = invalid;
-                    affectedPaths.push_back(p);
-
-                    // 增量计数
-                    if (!pair.second.isFolder) {
-                        if (invalid) {
-                            CategoryRepo::s_totalCount.fetch_sub(1);
-                            CategoryRepo::s_invalidCount.fetch_add(1);
-                            if (pair.second.tags.isEmpty()) CategoryRepo::s_untaggedCount.fetch_sub(1);
-                            if (CategoryRepo::getItemCategoryIds(pair.second.fileId128).empty()) CategoryRepo::s_uncategorizedCount.fetch_sub(1);
-                        } else {
-                            CategoryRepo::s_totalCount.fetch_add(1);
-                            CategoryRepo::s_invalidCount.fetch_sub(1);
-                            if (pair.second.tags.isEmpty()) CategoryRepo::s_untaggedCount.fetch_add(1);
-                            if (CategoryRepo::getItemCategoryIds(pair.second.fileId128).empty()) CategoryRepo::s_uncategorizedCount.fetch_add(1);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (!affectedPaths.empty()) {
-        persistBatchAsync(affectedPaths);
-        notifyFullUIRebuild();
-    }
-}
-
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
@@ -1219,9 +1119,7 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                 std::wstring curPath = it->first;
 
                 if (!it->second.isFolder) {
-                    if (it->second.isInvalid) {
-                        CategoryRepo::s_invalidCount.fetch_sub(1);
-                    } else if (it->second.isTrash) {
+                    if (it->second.isTrash) {
                         CategoryRepo::s_trashCount.fetch_sub(1);
                     } else {
                         CategoryRepo::s_totalCount.fetch_sub(1);
@@ -1234,7 +1132,7 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                     }
                 }
 
-                if (!it->second.isFolder && !it->second.isInvalid && !it->second.isTrash) {
+                if (!it->second.isFolder && !it->second.isTrash) {
                     totalDelta--;
                 }
                 if (!it->second.fileId128.empty()) {
@@ -1334,9 +1232,7 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                 if (it == m_cache.end()) continue;
 
                 if (!it->second.isFolder) {
-                    if (it->second.isInvalid) {
-                        CategoryRepo::s_invalidCount.fetch_sub(1);
-                    } else if (it->second.isTrash) {
+                    if (it->second.isTrash) {
                         CategoryRepo::s_trashCount.fetch_sub(1);
                     } else {
                         CategoryRepo::s_totalCount.fetch_sub(1);
@@ -1349,7 +1245,7 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                     }
                 }
 
-                if (!it->second.isFolder && !it->second.isInvalid && !it->second.isTrash) {
+                if (!it->second.isFolder && !it->second.isTrash) {
                     totalDelta--;
                 }
 
@@ -1429,7 +1325,6 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
 
     bool changed = false;
     bool isManaged = false;
-    bool isInvalid = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         
@@ -1486,7 +1381,6 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
             if (isTrash && !origPath.empty()) m_cache[nPath].originalPath = origPath;
             changed = true;
             isManaged = m_cache[nPath].isManaged;
-            isInvalid = m_cache[nPath].isInvalid;
             isFolder = m_cache[nPath].isFolder;
             oldEmpty = m_cache[nPath].tags.isEmpty();
         }
@@ -1501,8 +1395,8 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
         }
 
         // 2026-07-xx 架构修正：移入回收站应视为从活跃池移除。
-        // 核心红线：仅当项已登记且非失效状态时，才执行计数同步。
-        if (isManaged && !isInvalid) {
+        // 核心红线：仅当项已登记时，才执行计数同步。
+        if (isManaged) {
             CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
         }
 
@@ -1543,7 +1437,7 @@ void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
         if (it != m_cache.end()) {
             if (it->second.isTrash != isTrash) {
                 // 2026-07-xx 按照规则同步活跃计数：仅对已登记项执行
-                if (it->second.isManaged && !it->second.isInvalid) {
+                if (it->second.isManaged) {
                     CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
                 }
                 it->second.isTrash = isTrash;
@@ -1773,7 +1667,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
         if (db) groups[db].push_back(p);
     }
 
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     for (auto& entry : groups) {
         sqlite3* memDb = entry.first;
@@ -1825,15 +1719,14 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
                     sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
                     sqlite3_bind_int(stmt, 14, meta.isTrash ? 1 : 0);
                     sqlite3_bind_text16(stmt, 15, meta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_int(stmt, 16, meta.isInvalid ? 1 : 0);
-                    sqlite3_bind_int(stmt, 17, meta.width);
-                    sqlite3_bind_int(stmt, 18, meta.height);
-                    sqlite3_bind_int(stmt, 19, meta.ingestionStatus);
+                    sqlite3_bind_int(stmt, 16, meta.width);
+                    sqlite3_bind_int(stmt, 17, meta.height);
+                    sqlite3_bind_int(stmt, 18, meta.ingestionStatus);
                 };
                 bindLogic(memStmt, p, rMeta);
 
                 if (sqlite3_step(memStmt) == SQLITE_DONE) {
-                    if (isNew && !rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
+                    if (isNew && !rMeta.isFolder && !rMeta.isTrash) {
                         CategoryRepo::incrementTotalFileCount(1);
                     }
                     recordsToSync.push_back({p, rMeta});
@@ -1907,20 +1800,19 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, 14, meta.isTrash ? 1 : 0);
         sqlite3_bind_text16(stmt, 15, meta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 16, meta.isInvalid ? 1 : 0);
-        sqlite3_bind_int(stmt, 17, meta.width);
-        sqlite3_bind_int(stmt, 18, meta.height);
-        sqlite3_bind_int(stmt, 19, meta.ingestionStatus);
+        sqlite3_bind_int(stmt, 16, meta.width);
+        sqlite3_bind_int(stmt, 17, meta.height);
+        sqlite3_bind_int(stmt, 18, meta.ingestionStatus);
     };
 
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, is_invalid, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     
     sqlite3_stmt* memStmt;
     if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
         bindMeta(memStmt, nPath, rMeta);
         if (sqlite3_step(memStmt) == SQLITE_DONE) {
             if (isNew) {
-                if (!rMeta.isFolder && !rMeta.isInvalid && !rMeta.isTrash) {
+                if (!rMeta.isFolder && !rMeta.isTrash) {
                     CategoryRepo::incrementTotalFileCount(1);
                 }
             }
@@ -2160,7 +2052,7 @@ QMap<QString, int> MetadataManager::getAllTags() const {
     QMap<QString, int> tagCounts;
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
-        if (it->second.isManaged && !it->second.isInvalid && !it->second.isTrash) {
+        if (it->second.isManaged && !it->second.isTrash) {
             for (const QString& tag : it->second.tags) {
                 tagCounts[tag]++;
             }
@@ -2245,7 +2137,6 @@ std::vector<LightMeta> MetadataManager::getLightweightCacheSnapshot() const {
             pair.first,
             meta.fileId128,
             meta.isFolder,
-            meta.isInvalid,
             meta.isTrash,
             meta.tags.isEmpty(),
             static_cast<double>(meta.atime),

@@ -165,7 +165,6 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             palettes BLOB,
             is_trash INTEGER DEFAULT 0,
             original_path TEXT,
-            is_invalid INTEGER DEFAULT 0,
             width INTEGER DEFAULT 0,
             height INTEGER DEFAULT 0,
             ingestion_status INTEGER DEFAULT -1
@@ -268,7 +267,6 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
 
     // 2026-07-xx 物理加固：自动迁移旧版本数据库字段 (Plan-29)
     sqlite3_stmt* checkStmt;
-    bool hasInvalidColumn = false;
     bool hasWidthColumn = false;
     bool hasHeightColumn = false;
     bool hasIngestionStatusColumn = false;
@@ -278,7 +276,6 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(checkStmt, 1));
             if (colName) {
                 std::string name(colName);
-                if (name == "is_invalid") hasInvalidColumn = true;
                 if (name == "width") hasWidthColumn = true;
                 if (name == "height") hasHeightColumn = true;
                 if (name == "ingestion_status") hasIngestionStatusColumn = true;
@@ -287,10 +284,6 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         sqlite3_finalize(checkStmt);
     }
 
-    if (!hasInvalidColumn) {
-        qDebug() << "[DB] 检测到旧版数据库，正在添加 is_invalid 字段...";
-        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN is_invalid INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
-    }
     if (!hasWidthColumn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 width 字段...";
         sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN width INTEGER DEFAULT 0", nullptr, nullptr, nullptr);

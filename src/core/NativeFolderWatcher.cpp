@@ -177,7 +177,7 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
             continue;
         }
 
-        // 触发 MetadataManager 登记逻辑
+        // 触发 MetadataManager 登记与清洗逻辑
         if (notify->Action == FILE_ACTION_ADDED || 
             notify->Action == FILE_ACTION_RENAMED_NEW_NAME ||
             notify->Action == FILE_ACTION_MODIFIED) {
@@ -203,6 +203,14 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
                     MetadataManager::instance().registerItemsAsync(
                         {QString::fromStdWString(fullPath)}, true);
                 }
+            }, Qt::QueuedConnection);
+        } else if (notify->Action == FILE_ACTION_REMOVED ||
+                   notify->Action == FILE_ACTION_RENAMED_OLD_NAME) {
+
+            qDebug() << "[Watcher] 检测到物理删除/重命名移出事件，立即执行数据库物理清洗";
+            QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
+                qDebug() << "[Watcher] 异步回调执行: 开始彻底物理清退流程" << QString::fromStdWString(fullPath);
+                MetadataManager::instance().removeMetadataSync(fullPath);
             }, Qt::QueuedConnection);
         } else {
             qDebug() << "[Watcher] 非目标 Action (" << notify->Action << ")，跳过处理";
