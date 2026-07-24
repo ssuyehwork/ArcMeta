@@ -44,15 +44,13 @@ bool DirectoryBatchEnumerator::enumerate(const std::wstring& dirPath, std::vecto
         std::vector<BYTE> buffer(bufferSize);
 
         bool success = true;
-        bool isFirstCall = true;
 
         while (true) {
             if (!GetFileInformationByHandleEx(
                     hDir,
                     FileIdBothDirectoryInfo,
                     buffer.data(),
-                    bufferSize,
-                    isFirstCall
+                    bufferSize
                 )) {
                 DWORD err = GetLastError();
                 if (err == ERROR_NO_MORE_FILES) {
@@ -62,8 +60,6 @@ bool DirectoryBatchEnumerator::enumerate(const std::wstring& dirPath, std::vecto
                 success = false;
                 break;
             }
-
-            isFirstCall = false;
 
             BYTE* pCurrent = buffer.data();
             while (true) {

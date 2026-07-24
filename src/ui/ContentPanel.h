@@ -61,6 +61,7 @@ protected:
  */
 class FerrexVirtualDbModel : public QAbstractTableModel {
     Q_OBJECT
+    friend class ThumbnailLoadTask;
 public:
     explicit FerrexVirtualDbModel(QObject* parent = nullptr);
     ~FerrexVirtualDbModel() override;
