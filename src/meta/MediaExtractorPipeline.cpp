@@ -6,6 +6,7 @@
 #include "MetadataManager.h"
 #include "../ui/MediaColorExtractor.h"
 #include "DatabaseManager.h"
+#include "../core/IoTaskScheduler.h"
 #include <QImageReader>
 #include <QSvgRenderer>
 #include <QFileInfo>
@@ -21,15 +22,45 @@
 
 namespace ArcMeta {
 
+class MediaExtractTask : public IoTask {
+public:
+    MediaExtractTask(const std::wstring& path, TaskPriority priority = TaskPriority::BackgroundBatch)
+        : m_path(path) {
+        setPriority(priority);
+    }
+
+    std::wstring category() const override { return L"media_extract"; }
+    std::wstring id() const override { return m_path; }
+
+    void run() override {
+        if (isCancelled()) return;
+
+#ifdef Q_OS_WIN
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+#endif
+
+        MediaExtractorPipeline::instance().processItemDirect(m_path);
+
+#ifdef Q_OS_WIN
+        CoUninitialize();
+#endif
+
+        DatabaseManager::instance().enqueueSyncTask([]() {
+            DatabaseManager::instance().flushAll();
+        });
+    }
+
+private:
+    std::wstring m_path;
+};
+
 MediaExtractorPipeline& MediaExtractorPipeline::instance() {
     static MediaExtractorPipeline inst;
     return inst;
 }
 
 MediaExtractorPipeline::MediaExtractorPipeline(QObject* parent) : QObject(parent) {
-    m_timer = new QTimer(this);
-    m_timer->setInterval(1500);
-    connect(m_timer, &QTimer::timeout, this, &MediaExtractorPipeline::processNextBatch);
+    m_timer = nullptr;
 
     m_retryTimer = new QTimer(this);
     m_retryTimer->setInterval(3000);
@@ -37,48 +68,23 @@ MediaExtractorPipeline::MediaExtractorPipeline(QObject* parent) : QObject(parent
 }
 
 MediaExtractorPipeline::~MediaExtractorPipeline() {
-    m_timer->stop();
     m_retryTimer->stop();
 }
 
 void MediaExtractorPipeline::enqueue(const std::wstring& path) {
-    std::lock_guard<std::mutex> lock(m_queueMutex);
-    m_queue.push_back(path);
-    QMetaObject::invokeMethod(m_timer, "start", Qt::QueuedConnection);
+    auto task = std::make_shared<MediaExtractTask>(path, TaskPriority::BackgroundBatch);
+    IoTaskScheduler::instance().submit(task);
 }
 
 void MediaExtractorPipeline::enqueueBatch(const std::vector<std::wstring>& paths) {
-    std::lock_guard<std::mutex> lock(m_queueMutex);
-    m_queue.insert(m_queue.end(), paths.begin(), paths.end());
-    QMetaObject::invokeMethod(m_timer, "start", Qt::QueuedConnection);
+    for (const auto& path : paths) {
+        auto task = std::make_shared<MediaExtractTask>(path, TaskPriority::BackgroundBatch);
+        IoTaskScheduler::instance().submit(task);
+    }
 }
 
 void MediaExtractorPipeline::processNextBatch() {
-    std::vector<std::wstring> batch;
-    {
-        std::lock_guard<std::mutex> lock(m_queueMutex);
-        if (m_queue.empty()) {
-            m_timer->stop();
-            return;
-        }
-        batch = std::move(m_queue);
-        m_queue.clear();
-    }
-
-    (void)QtConcurrent::run([this, batch]() {
-#ifdef Q_OS_WIN
-        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-#endif
-        for (const auto& path : batch) {
-            processItemDirect(path);
-        }
-#ifdef Q_OS_WIN
-        CoUninitialize();
-#endif
-        DatabaseManager::instance().enqueueSyncTask([]() {
-            DatabaseManager::instance().flushAll();
-        });
-    });
+    // 统一交由调度器处理，本函数已退化，保持空实现
 }
 
 void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
@@ -207,41 +213,26 @@ void MediaExtractorPipeline::processRetryQueue() {
         }
     }
 
-    (void)QtConcurrent::run([this, batch]() {
-#ifdef Q_OS_WIN
-        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-#endif
-        std::vector<std::wstring> finished;
-        for (const auto& path : batch) {
-            std::wstring colorStr;
-            QVector<QPair<QColor, float>> palette;
-            bool ok = extractColor(path, colorStr, palette);
-            if (ok) {
-                MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, true);
-            }
+    // 将重试特征提取任务作为普通后台优先级提交给统一任务调度器
+    for (const auto& path : batch) {
+        auto task = std::make_shared<MediaExtractTask>(path, TaskPriority::BackgroundBatch);
+        IoTaskScheduler::instance().submit(task);
+    }
 
-            QFileInfo info(QString::fromStdWString(path));
-            bool isGraphics = MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
-            if (ok || (!isGraphics && !info.isDir())) {
-                finished.push_back(path);
+    // 假设在任务运行完成后，由其自身的完成/重试逻辑进行自我除名。
+    // 为了与原有逻辑对账兼容：在 processRetryQueue 触发后，将当前已提交的重试项从队列里清除。
+    {
+        std::lock_guard<std::mutex> lock(m_retryMutex);
+        for (const auto& p : batch) {
+            auto it = std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), p);
+            if (it != m_visualRetryQueue.end()) {
+                m_visualRetryQueue.erase(it);
             }
         }
-#ifdef Q_OS_WIN
-        CoUninitialize();
-#endif
-
-        if (!finished.empty()) {
-            QMetaObject::invokeMethod(this, [this, finished]() {
-                std::lock_guard<std::mutex> lock(m_retryMutex);
-                for (const auto& p : finished) {
-                    auto it = std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), p);
-                    if (it != m_visualRetryQueue.end()) {
-                        m_visualRetryQueue.erase(it);
-                    }
-                }
-            }, Qt::QueuedConnection);
+        if (m_visualRetryQueue.empty()) {
+            m_retryTimer->stop();
         }
-    });
+    }
 }
 
 } // namespace ArcMeta

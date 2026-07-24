@@ -61,6 +61,7 @@ protected:
  */
 class FerrexVirtualDbModel : public QAbstractTableModel {
     Q_OBJECT
+    friend class ThumbnailLoadTask;
 public:
     explicit FerrexVirtualDbModel(QObject* parent = nullptr);
     ~FerrexVirtualDbModel() override;
@@ -404,6 +405,16 @@ public slots:
      * @param reqId 可选的请求 ID。只有当 ID 与当前 ID 一致时才会执行追加。
      */
     void appendPaths(const QStringList& paths, int reqId = 0);
+
+    /**
+     * @brief 增量追加扫描出的 ItemRecord (第二级流式推送)
+     */
+    void appendRecords(const std::vector<ItemRecord>& records, int reqId);
+
+    /**
+     * @brief 扫描完成回调
+     */
+    void onLoadCompleted(int reqId);
 
     /**
      * @brief 获取当前最新的加载请求 ID

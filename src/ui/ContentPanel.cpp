@@ -15,6 +15,8 @@
 #include "../util/ImportHelper.h"
 #include "../core/AutoImportManager.h"
 #include "../core/NavigationHistoryService.h"
+#include "../core/IoTaskScheduler.h"
+#include "../util/DirectoryBatchEnumerator.h"
 #include "ToolTipOverlay.h" 
 #include "MainWindow.h"
  
@@ -480,6 +482,102 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
     }
 }
 
+class ThumbnailLoadTask : public IoTask {
+public:
+    ThumbnailLoadTask(const QString& path, const QString& cacheKey, QPointer<FerrexVirtualDbModel> modelPtr, TaskPriority priority = TaskPriority::ViewportVisible)
+        : m_path(path), m_cacheKey(cacheKey), m_modelPtr(modelPtr) {
+        setPriority(priority);
+    }
+
+    std::wstring category() const override { return L"thumbnail_load"; }
+    std::wstring id() const override { return m_path.toStdWString(); }
+
+    void run() override {
+        if (isCancelled() || !m_modelPtr) return;
+
+#ifdef Q_OS_WIN
+        CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+#endif
+
+        QFileInfo info(m_path);
+        QString ext = info.suffix().toLower();
+
+        QImage img;
+        double ar = 1.0;
+        bool hasThumb = false;
+
+        if (ext == "svg") {
+            QSvgRenderer renderer(m_path);
+            if (renderer.isValid()) {
+                QImage svgImg(128, 128, QImage::Format_ARGB32);
+                svgImg.fill(Qt::transparent);
+                QPainter painter(&svgImg);
+                renderer.render(&painter);
+                img = svgImg;
+                ar = 1.0;
+                hasThumb = true;
+            }
+        } else if (UiHelper::isGraphicsFile(ext)) {
+            img = UiHelper::getShellThumbnail(m_path, 128);
+            if (!img.isNull()) {
+                ar = (double)img.width() / img.height();
+                hasThumb = true;
+            }
+        }
+
+        if (isCancelled()) {
+#ifdef Q_OS_WIN
+            CoUninitialize();
+#endif
+            return;
+        }
+
+        QPointer<FerrexVirtualDbModel> weakThis = m_modelPtr;
+        QString path = m_path;
+        QString cacheKey = m_cacheKey;
+
+        if (weakThis) {
+            QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, cacheKey, img, ar, hasThumb]() {
+                if (!weakThis) return;
+                auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
+
+                if (img.isNull()) {
+                    if (mutableThis->m_iconCache.contains(cacheKey)) {
+                        return; // [Plan-53 内存缓存无损退避]
+                    }
+                }
+
+                QIcon icon;
+                if (!img.isNull()) {
+                    icon = QIcon(QPixmap::fromImage(img));
+                } else {
+                    icon = UiHelper::getFileIcon(path, 128);
+                }
+
+                mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
+                if (hasThumb) mutableThis->m_aspectRatios[QDir::toNativeSeparators(path)] = ar;
+
+                for (int i = 0; i < mutableThis->m_displayCount; ++i) {
+                    const auto& rec = mutableThis->m_allRecords[i];
+                    if (rec.path == path) {
+                        emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+                        break;
+                    }
+                }
+            }, Qt::QueuedConnection);
+        }
+
+#ifdef Q_OS_WIN
+        CoUninitialize();
+#endif
+    }
+
+private:
+    QString m_path;
+    QString m_cacheKey;
+    QPointer<FerrexVirtualDbModel> m_modelPtr;
+};
+
 void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
     // 【双阶段保护 - 阶段二】：基于实际测量出的可见行数动态修正 maxCost
     int folderTotal = static_cast<int>(m_allRecords.size());
@@ -494,8 +592,11 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
     }
     m_iconCache.setMaxCost(dynamicCost);
 
-    std::vector<std::pair<QString, QString>> newQueue; // {path, cacheKey}
-    
+    // 取消之前挂起的所有缩略图加载任务
+    IoTaskScheduler::instance().cancelTasksByCategory(L"thumbnail_load");
+
+    QPointer<FerrexVirtualDbModel> weakThis(this);
+
     for (int r : rows) {
         if (r < 0 || r >= m_displayCount) continue;
         const auto& rec = m_allRecords[r];
@@ -510,123 +611,10 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
             needLoad = true;
         }
         if (!needLoad) continue;
-        
-        newQueue.push_back({path, cacheKey});
-    }
 
-    static QList<std::pair<QString, QString>> s_waitingQueue;
-    static QSet<QString> s_activeLoadingKeys; // 正在后台物理提取的 keys
-    static QMutex s_queueMutex;
-    static int s_activeThreadCount = 0;
-    
-    {
-        QMutexLocker locker(&s_queueMutex);
-        s_waitingQueue.clear();
-        for (const auto& item : newQueue) {
-            if (!s_activeLoadingKeys.contains(item.second)) {
-                s_waitingQueue.append(item);
-            }
-        }
-        
-        int maxThreads = 4;
-        while (s_activeThreadCount < maxThreads && !s_waitingQueue.isEmpty()) {
-            s_activeThreadCount++;
-            auto initialTask = s_waitingQueue.takeFirst();
-            s_activeLoadingKeys.insert(initialTask.second);
-            
-            QPointer<FerrexVirtualDbModel> weakThis(this);
-            (void)QtConcurrent::run([weakThis, initialTask]() {
-                #ifdef Q_OS_WIN
-                CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-                #endif
-                
-                std::pair<QString, QString> task = initialTask;
-                while (true) {
-                    QString path = task.first;
-                    QString cacheKey = task.second;
-                    QFileInfo info(path);
-                    QString ext = info.suffix().toLower();
-                    
-                    QImage img;
-                    double ar = 1.0;
-                    bool hasThumb = false;
-
-                    if (ext == "svg") {
-                        QSvgRenderer renderer(path);
-                        if (renderer.isValid()) {
-                            QImage svgImg(128, 128, QImage::Format_ARGB32);
-                            svgImg.fill(Qt::transparent);
-                            QPainter painter(&svgImg);
-                            renderer.render(&painter);
-                            img = svgImg;
-                            ar = 1.0;
-                            hasThumb = true;
-                        }
-                    } else if (UiHelper::isGraphicsFile(ext)) {
-                        img = UiHelper::getShellThumbnail(path, 128);
-                        if (!img.isNull()) {
-                            ar = (double)img.width() / img.height();
-                            hasThumb = true;
-                        }
-                    }
-
-                    if (weakThis) {
-                        QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, cacheKey, img, ar, hasThumb]() {
-                            if (!weakThis) return;
-                            auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
-                            
-                            // [Plan-53 内存缓存无损退避机制] 
-                            // 在刷新或重置导致二次强行提取时，如果由于物理拷贝尚未完成或图片暂时遇阻，
-                            // img 返回空图，若此时缓存 m_iconCache 中已经存在了我们之前成功绘制出来的缩略图，
-                            // 我们必须无损退退避，绝对禁止用空图或低质默认文件图标将优质的内存 QIcon 缓存覆灭覆盖！
-                            if (img.isNull()) {
-                                if (mutableThis->m_iconCache.contains(cacheKey)) {
-                                    // 缓存已有优质图像，无损保留
-                                    return;
-                                }
-                            }
-
-                            QIcon icon;
-                            if (!img.isNull()) {
-                                icon = QIcon(QPixmap::fromImage(img));
-                            } else {
-                                icon = UiHelper::getFileIcon(path, 128);
-                            }
-                            
-                            mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
-                            if (hasThumb) mutableThis->m_aspectRatios[QDir::toNativeSeparators(path)] = ar;
-                            
-                            for (int i = 0; i < mutableThis->m_displayCount; ++i) {
-                                const auto& rec = mutableThis->m_allRecords[i];
-                                bool match = (rec.path == path);
-                                if (match) {
-                                    emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
-                                    break;
-                                }
-                            }
-                        }, Qt::QueuedConnection);
-                    }
-
-                    // 取下一个任务
-                    QMutexLocker innerLocker(&s_queueMutex);
-                    s_activeLoadingKeys.remove(cacheKey);
-                    
-                    if (s_waitingQueue.isEmpty() || !weakThis) {
-                        break;
-                    }
-                    
-                    task = s_waitingQueue.takeFirst();
-                    s_activeLoadingKeys.insert(task.second);
-                }
-
-                #ifdef Q_OS_WIN
-                CoUninitialize();
-                #endif
-
-                QMutexLocker innerLocker(&s_queueMutex);
-                s_activeThreadCount--;
-            });
-        }
+        // 提交缩略图加载任务至统一任务调度器
+        auto task = std::make_shared<ThumbnailLoadTask>(path, cacheKey, weakThis, TaskPriority::ViewportVisible);
+        IoTaskScheduler::instance().submit(task);
     }
 }
 
@@ -1242,6 +1230,12 @@ void ContentPanel::refreshVisibleThumbnails() {
         QModelIndex srcIdx = m_proxyModel->mapToSource(proxyIdx);
         if (srcIdx.isValid()) {
             visibleRows.append(srcIdx.row());
+
+            // 将视口可见文件的媒体特征提取任务的优先级提升为 ViewportVisible 级别
+            QString path = m_model->data(srcIdx, PathRole).toString();
+            if (!path.isEmpty()) {
+                IoTaskScheduler::instance().updatePriority(path.toStdWString(), TaskPriority::ViewportVisible);
+            }
         }
     }
 
@@ -2829,8 +2823,102 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
         QDesktopServices::openUrl(QUrl::fromLocalFile(path)); 
     } 
 } 
+
+class DirectoryScanTask : public IoTask {
+public:
+    DirectoryScanTask(const std::wstring& rootPath, bool recursive, int reqId, QPointer<ContentPanel> panelPtr)
+        : m_rootPath(rootPath), m_recursive(recursive), m_reqId(reqId), m_panelPtr(panelPtr) {
+        setPriority(TaskPriority::ViewportVisible); // 目录扫描属于最高优先级
+    }
+
+    std::wstring category() const override { return L"directory_scan"; }
+    std::wstring id() const override { return m_rootPath; }
+
+    void run() override {
+        if (!m_panelPtr || isCancelled()) return;
+
+        std::vector<ItemRecord> chunk;
+        const size_t chunkSize = 200;
+        qint64 lastPostTime = QDateTime::currentMSecsSinceEpoch();
+
+        auto postChunk = [&]() {
+            if (chunk.empty() || !m_panelPtr || isCancelled()) return;
+            std::vector<ItemRecord> chunkCopy = std::move(chunk);
+            chunk.clear();
+
+            int reqId = m_reqId;
+            QPointer<ContentPanel> panel = m_panelPtr;
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [panel, chunkCopy, reqId]() {
+                if (panel && panel->currentLoadRequestId() == reqId) {
+                    panel->appendRecords(chunkCopy, reqId);
+                }
+            }, Qt::QueuedConnection);
+        };
+
+        std::function<void(const std::wstring&)> scanDir;
+        scanDir = [&](const std::wstring& p) {
+            if (isCancelled() || !m_panelPtr) return;
+
+            std::vector<BatchEnumeratedEntry> entries;
+            if (!DirectoryBatchEnumerator::enumerate(p, entries)) {
+                return; // 降级处理也已包含在 enumerate 内部，若 enumerate 返回 false 说明彻底失败
+            }
+
+            // 1. 批量预激活 MetadataManager 缓存
+            MetadataManager::instance().ensureActivatedBatch(entries);
+
+            // 2. 转换为 ItemRecord
+            for (const auto& entry : entries) {
+                if (isCancelled() || !m_panelPtr) return;
+                if (entry.name == L"metadata.scch" || entry.name == L"metadata.scch.tmp") continue;
+
+                // 使用 pre-activated metadata 创建 ItemRecord
+                RuntimeMeta meta = MetadataManager::instance().getMeta(entry.fullPath);
+                ItemRecord rec = ItemRecord::create(QString::fromStdWString(entry.fullPath), &meta);
+                chunk.push_back(std::move(rec));
+
+                qint64 now = QDateTime::currentMSecsSinceEpoch();
+                if (chunk.size() >= chunkSize || (now - lastPostTime >= 100)) {
+                    postChunk();
+                    lastPostTime = now;
+                }
+            }
+
+            // 3. 递归扫描子目录
+            if (m_recursive) {
+                for (const auto& entry : entries) {
+                    if (isCancelled()) return;
+                    if (entry.isDir) {
+                        scanDir(entry.fullPath);
+                    }
+                }
+            }
+        };
+
+        scanDir(m_rootPath);
+        postChunk(); // 递交最后一批
+
+        // 扫描完全结束
+        int reqId = m_reqId;
+        QPointer<ContentPanel> panel = m_panelPtr;
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [panel, reqId]() {
+            if (panel && panel->currentLoadRequestId() == reqId) {
+                panel->onLoadCompleted(reqId);
+            }
+        }, Qt::QueuedConnection);
+    }
+
+private:
+    std::wstring m_rootPath;
+    bool m_recursive = false;
+    int m_reqId = 0;
+    QPointer<ContentPanel> m_panelPtr;
+};
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
+    // 取消上一个目录中尚未完成的目录扫描任务
+    IoTaskScheduler::instance().cancelTasksByCategory(L"directory_scan");
+
     m_isLoading = true;
     int reqId = ++m_loadRequestId;
     m_currentCategoryType = ""; // 物理导航模式下清除系统类型
@@ -2864,76 +2952,14 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     m_currentPath = path; 
     updateLayersButtonState(); 
 
-    QPointer<ContentPanel> panelPtr(this); 
+    // 先行物理置空模型，准备流式填入
+    m_model->clear();
 
-    // 物理扫描模式（原逻辑）
-    (void)QThreadPool::globalInstance()->start([panelPtr, path, recursive, reqId]() { 
-        if (!panelPtr) return; 
-         
-        std::vector<ItemRecord> allItems;
- 
-        std::function<void(const QString&, bool)> scanDir; 
-        scanDir = [&](const QString& p, bool rec) { 
-            QDir dir(p); 
-            if (!dir.exists()) return; 
- 
-            QFileInfoList entries = dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name); 
-            for (const QFileInfo& info : entries) { 
-                if (!panelPtr) return; 
-                if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
- 
-                QString absPath = info.absoluteFilePath();
-                allItems.push_back(ItemRecord::create(absPath));
- 
-                if (rec && info.isDir()) { 
-                    scanDir(absPath, true); 
-                } 
-            } 
-        }; 
- 
-        scanDir(path, recursive); 
-        if (!panelPtr) return; 
- 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, reqId]() { 
-            if (panelPtr && panelPtr->m_loadRequestId == reqId) { 
-                panelPtr->m_model->setRecords(allItems);
-                panelPtr->m_proxyModel->sort(0, Qt::AscendingOrder);
-                panelPtr->m_isLoading = false;
-                panelPtr->recalculateAndEmitStats();
-                // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
-                panelPtr->applyFilters();
+    QPointer<ContentPanel> panelPtr(this);
 
-                // 2026-07-xx 按照 Plan-66：处理新建项后的自动定位与编辑
-                if (!panelPtr->m_pendingSelectName.isEmpty()) {
-                    const auto& records = panelPtr->m_model->allRecords();
-                    for (size_t i = 0; i < records.size(); ++i) {
-                        if (QFileInfo(records[i].path).fileName() == panelPtr->m_pendingSelectName) {
-                            QModelIndex srcIdx = panelPtr->m_model->index(static_cast<int>(i), 0);
-                            QModelIndex proxyIdx = panelPtr->m_proxyModel->mapFromSource(srcIdx);
-                            if (proxyIdx.isValid()) {
-                                if (panelPtr->m_viewStack->currentWidget() == panelPtr->m_gridView) {
-                                    panelPtr->m_gridView->scrollTo(proxyIdx);
-                                    panelPtr->m_gridView->setCurrentIndex(proxyIdx);
-                                    if (panelPtr->m_isPendingEdit) panelPtr->m_gridView->edit(proxyIdx);
-                                } else {
-                                    panelPtr->m_treeView->scrollTo(proxyIdx);
-                                    panelPtr->m_treeView->setCurrentIndex(proxyIdx);
-                                    if (panelPtr->m_isPendingEdit) panelPtr->m_treeView->edit(proxyIdx);
-                                }
-                            }
-                            break;
-                        }
-                    }
-                    panelPtr->m_pendingSelectName = ""; // 必须物理清空状态
-                }
-
-                ArcMeta::Logger::log(QString("[Content] 目录扫描完成并已应用到 UI [%1]").arg(reqId));
-                panelPtr->m_visibleTimer->start();
-            } else if (panelPtr) {
-                ArcMeta::Logger::log(QString("[Content] 拦截到过期的目录扫描回调 [%1], 当前 ID: %2").arg(reqId).arg(panelPtr->m_loadRequestId.load()));
-            }
-        }, Qt::QueuedConnection); 
-    }); 
+    // 投递全新的 DirectoryScanTask 任务到统一调度器执行
+    auto task = std::make_shared<DirectoryScanTask>(path.toStdWString(), recursive, reqId, panelPtr);
+    IoTaskScheduler::instance().submit(task);
 } 
  
  
@@ -3204,6 +3230,53 @@ void ContentPanel::appendPaths(const QStringList& paths, int reqId) {
             }
         });
     });
+}
+
+void ContentPanel::appendRecords(const std::vector<ItemRecord>& records, int reqId) {
+    if (m_loadRequestId != reqId) return;
+
+    std::vector<ItemRecord> all = m_model->allRecords();
+    all.insert(all.end(), records.begin(), records.end());
+    m_model->setRecords(all);
+
+    m_proxyModel->sort(0, Qt::AscendingOrder);
+    recalculateAndEmitStats();
+    applyFilters();
+}
+
+void ContentPanel::onLoadCompleted(int reqId) {
+    if (m_loadRequestId != reqId) return;
+
+    m_isLoading = false;
+    recalculateAndEmitStats();
+    applyFilters();
+
+    // 处理新建项后的自动定位与编辑
+    if (!m_pendingSelectName.isEmpty()) {
+        const auto& records = m_model->allRecords();
+        for (size_t i = 0; i < records.size(); ++i) {
+            if (QFileInfo(records[i].path).fileName() == m_pendingSelectName) {
+                QModelIndex srcIdx = m_model->index(static_cast<int>(i), 0);
+                QModelIndex proxyIdx = m_proxyModel->mapFromSource(srcIdx);
+                if (proxyIdx.isValid()) {
+                    if (m_viewStack->currentWidget() == m_gridView) {
+                        m_gridView->scrollTo(proxyIdx);
+                        m_gridView->setCurrentIndex(proxyIdx);
+                        if (m_isPendingEdit) m_gridView->edit(proxyIdx);
+                    } else {
+                        m_treeView->scrollTo(proxyIdx);
+                        m_treeView->setCurrentIndex(proxyIdx);
+                        if (m_isPendingEdit) m_treeView->edit(proxyIdx);
+                    }
+                }
+                break;
+            }
+        }
+        m_pendingSelectName = ""; // 必须物理清空状态
+    }
+
+    ArcMeta::Logger::log(QString("[Content] 目录流式扫描加载完成 [%1]").arg(reqId));
+    m_visibleTimer->start();
 }
  
 void ContentPanel::recalculateAndEmitStats() {
