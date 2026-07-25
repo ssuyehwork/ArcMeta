@@ -1257,6 +1257,12 @@ bool CategoryPanel::eventFilter(QObject* obj, QEvent* event) {
             return true;
         }
 
+        // 2026-xx-xx 按照 Plan-63：按 F2 同步进入行内编辑状态
+        if (obj == m_categoryTree && keyEvent->key() == Qt::Key_F2) {
+            onRenameCategory();
+            return true;
+        }
+
         if (keyEvent->key() == Qt::Key_Escape) {
             // [UX] 两段式：查找对话框内的第一个非空输入框
             QLineEdit* edit = findChild<QLineEdit*>();
