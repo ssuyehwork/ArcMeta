@@ -2063,19 +2063,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
  
             bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
             menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
- 
-            // --- 2026-07-xx 按照 Plan-116/117：语义校准，移除“收揽入库”术语 ---
-            QString ext = QFileInfo(path).suffix().toLower();
-            if (UiHelper::isGraphicsFile(ext)) {
-                bool isManaged = currentIndex.data(ManagedRole).toBool();
-                // 仅允许库内项目进行颜色解析（库外已被拦截）
-                if (isManaged) {
-                    menu.addAction(UiHelper::getIcon("palette", QColor("#EEEEEE"), 18), "重新解析颜色")->setData(ActionExtractColor);
-                } else {
-                    // 若在库内但尚未完成 USN 入库（极短中间态），提供解析颜色选项，内部会进行入库状态兜底判断
-                    menu.addAction(UiHelper::getIcon("palette", QColor("#EEEEEE"), 18), "解析颜色")->setData(ActionExtractColor);
-                }
-            }
         } else {
             // [物理源：显示“迁移”]
             if (!m_currentPath.isEmpty() && m_currentPath != "computer://") {
@@ -2306,89 +2293,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             } 
             break; 
         } 
-        case ActionExtractColor: {
-            // 2026-07-xx 按照用户要求：支持多选批量解析颜色
-            QModelIndexList selectedRows = view->selectionModel()->selectedRows();
-            // 物理对齐：仅保留选中行中的第 0 列项，防止重复计数
-            QModelIndexList filteredRows;
-            for (const auto& selIdx : selectedRows) {
-                if (selIdx.column() == 0) filteredRows << selIdx;
-            }
-            if (filteredRows.isEmpty() && currentIndex.isValid()) filteredRows << currentIndex;
-            
-            struct ProcessItem { QString path; bool isManaged; };
-            QVector<ProcessItem> itemsToProcess;
-            for (const auto& selIdx : filteredRows) {
-                QString pathItem = selIdx.data(PathRole).toString();
-                if (!pathItem.isEmpty()) {
-                    itemsToProcess.append({pathItem, selIdx.data(ManagedRole).toBool()});
-                }
-            }
-            if (itemsToProcess.isEmpty()) break;
-
-            QPointer<ContentPanel> weakThis(this);
-            int total = static_cast<int>(itemsToProcess.size());
-
-            // 只有当文件数多于 5 个时才显示进度条
-            BatchProgressDialog* progress = nullptr;
-            if (total > 5) {
-                progress = new BatchProgressDialog("收揽入库", this);
-                progress->show();
-            }
-
-            (void)QtConcurrent::run([weakThis, itemsToProcess, total, progress]() {
-                // 后台线程初始化 COM 环境以支持 Shell 缩略图/颜色提取
-                CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-                
-                for (int i = 0; i < total; ++i) {
-                    const auto& item = itemsToProcess[i];
-                    QString itemPath = item.path;
-                    
-                    if (progress) {
-                        QMetaObject::invokeMethod(progress, "updateProgress", Qt::QueuedConnection, 
-                                                  Q_ARG(int, i + 1), Q_ARG(int, total), Q_ARG(QString, QFileInfo(itemPath).fileName()));
-                    }
-
-                    // 2026-07-xx 按照 Plan-116/117：废除 UI 主动注册逻辑。
-                    // 仅针对已入库项目（库内）执行强制重新解析逻辑。
-                    if (item.isManaged) {
-                        // 针对已入库项目，执行强制重新解析逻辑
-                        auto palette = UiHelper::extractPalette(itemPath);
-                        if (!palette.isEmpty()) {
-                            QColor dominant = UiHelper::quantizeColor(palette.first().first);
-                            QString colorHex = dominant.name().toUpper();
-
-                            QMetaObject::invokeMethod(weakThis.data(), [weakThis, itemPath, colorHex, palette]() {
-                                if (weakThis) {
-                                    MetadataManager::instance().setPalettes(itemPath.toStdWString(), palette);
-                                    
-                                    auto* model = weakThis->m_model;
-                                    const auto& records = model->allRecords();
-                                    for (size_t j = 0; j < records.size(); ++j) {
-                                        if (records[j].path == itemPath) {
-                                            QModelIndex srcIdx = model->index(static_cast<int>(j), 0);
-                                            model->setData(srcIdx, colorHex, ColorRole);
-                                            break;
-                                        }
-                                    }
-                                }
-                            }, Qt::QueuedConnection);
-                        }
-                    }
-                }
-
-                QMetaObject::invokeMethod(weakThis.data(), [weakThis, progress]() {
-                    if (weakThis) {
-                        weakThis->onSelectionChanged();
-                        if (progress) progress->close();
-                        ToolTipOverlay::instance()->showText(QCursor::pos(), "批量颜色解析完成", 1500, QColor("#2ecc71"));
-                    }
-                }, Qt::QueuedConnection);
-
-                CoUninitialize();
-            });
-            break;
-        }
         case ActionEncrypt: { 
             FramelessInputDialog dlg("加密保护", "设置加密密码:", "", this);
             dlg.setEchoMode(QLineEdit::Password);
