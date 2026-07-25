@@ -3,6 +3,7 @@
 #endif
 #include "ContentPanel.h" 
 #include "ColorPicker.h"
+#include <QWidgetAction>
 #include "../meta/MetadataManager.h" 
 #include <algorithm>
 #include "Logger.h"
