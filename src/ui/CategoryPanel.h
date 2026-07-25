@@ -75,8 +75,6 @@ private slots:
     void onRenameCategory();
     void onDeleteCategory();
     void onClassifyToCategory();
-    void onSetColor();
-    void onRandomColor();
     void onSetPresetTags();
     void onTogglePin();
     void onSetPassword();

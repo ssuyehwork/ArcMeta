@@ -5,6 +5,9 @@
 #include <QImage>
 #include <QLineEdit>
 #include <QSlider>
+#include <QList>
+#include <QString>
+#include <QEnterEvent>
 
 namespace ArcMeta {
 
@@ -77,6 +80,32 @@ private:
     QWidget*   m_previewBlock;
     QLineEdit* m_hexEdit;
     QSlider*   m_toleranceSlider = nullptr; // 2026-05-17 按照用户要求：准确度（容差）滑条
+};
+
+// --- 水平标注色块快捷菜单项 ColorStripPicker ---
+class ColorStripPicker : public QWidget {
+    Q_OBJECT
+public:
+    explicit ColorStripPicker(const QString& currentColorHex, QWidget* parent = nullptr);
+signals:
+    void colorSelected(const QString& hexColor);
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void enterEvent(QEnterEvent* event) override;
+    void leaveEvent(QEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+private:
+    struct ColorItem {
+        QString hex;
+        QColor color;
+        QString name;
+    };
+    QList<ColorItem> m_items;
+    int m_hoveredIndex = -1;
+    QString m_selectedColor;
+    int m_circleRadius = 10; // 半径 10，直径 20
+    int m_spacing = 8;       // 间隔 8
 };
 
 } // namespace ArcMeta
