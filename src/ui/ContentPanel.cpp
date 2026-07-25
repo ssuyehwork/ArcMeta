@@ -3203,8 +3203,8 @@ void ContentPanel::recalculateAndEmitStats() {
 
             stats.ratingCounts[record.rating]++;
             
-            if (!record.color.isEmpty()) {
-                stats.colorCounts[record.color.toUpper()]++;
+            if (!record.manualColor.isEmpty()) {
+                stats.colorCounts[record.manualColor.toUpper()]++;
             } else {
                 stats.colorCounts[""]++;
             }
