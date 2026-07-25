@@ -34,7 +34,7 @@
 
 ## [2026-07-20] 彻底放弃当前 QuickLookWindow 运行逻辑并使用 FERREX-META 逻辑替代重构
 
-- 用户描述的现象/问题：当前版本的 `QuickLookWindow` 预览运行逻辑不符合预期，其处理逻辑和界面交互（如图像缩放、音视频媒体处理、文本二进制检测及编码识别等）功能不够完备。
+- 用户描述的现象/问题：当前版本的 `QuickLookWindow` 预览运行逻辑不符合预期，其处理逻辑 and 界面交互（如图像缩放、音视频媒体处理、文本二进制检测及编码识别等）功能不够完备。
 - 用户期望的结果：彻底放弃当前版本的 `QuickLookWindow` 运行逻辑，将其替换为 `FERREX-META` 版本中的 `QuickLookWindow` 运行逻辑。这包括采用专门设计的 `QuickLookGraphicsView`（支持滚轮缩放、双击恢复/适配大小、鼠标拖拽移动及光标跟随变动）、引入更完整的多媒体及文本二进制与编码自动检测识别渲染，实现更好的大文件和特殊文件类型的预览。
 - 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView` 控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅的占位降级兼容。
 - 不在本次范围内的是：修改 `MainWindow` 的主导航调度机制 or 任何非预览关联的面板组件。
@@ -94,6 +94,16 @@
 
 - 用户描述的现象/问题：应用中可能存在整体混乱的逻辑架构，文件职责过载（违反SRP），以及存在某些功能具有不合理的傻逼逻辑架构。
 - 用户期望的结果：对全款应用及核心源码文件进行地毯式的通读与细粒度审计，标记所有存在职责过载（违反 SRP）的文件，定位逻辑架构设计不合理的傻逼逻辑架构功能。
-- 本次任务边界：对 `src/` 目录下的核心逻辑、业务模块和 UI 骨架（如 `ContentPanel`, `MainWindow`, `MetadataManager`, `MftReader` 等）及各组件数据流向、跨层耦合和 UI 层业务硬编码进行地毯式地深层审计与排查，输出架构漏洞、混乱点、文件职责过载证据（行号 + 代码片段）并归档。
+- 本次任务边界：对 `src/` 目录下的核心逻辑、业务模块 and UI 骨架（如 `ContentPanel`, `MainWindow`, `MetadataManager`, `MftReader` 等）及各组件数据流向、跨层耦合和 UI 层业务硬编码进行地毯式地深层审计与排查，输出架构漏洞、混乱点、文件职责过载证据（行号 + 代码片段）并归档。
 - 不在本次范围内的是：修改任何代码文件、创建实际重构代码、或扫描非当前项目指定的外部不相关目录。
 - 对应方案文档：Modification_Plan/Modification_Plan-54.md
+
+## [2026-07-25] 重复多媒体及色彩解析清理与兜底重扫描路径加固
+
+- 用户描述的现象/问题：在内容面板中，存在重复造轮子的“重新解析颜色”功能（ActionExtractColor），它绕过了底层的统一数据提取管线且采用残缺实现，导致了字段污染与维护开销；而现存的“重新扫描”功能作为用户的手动兜底机制是必要且符合预期的。
+- 用户期望的结果：彻底物理删除绕过底层提取管线的“重新解析颜色”功能分支与界面入口；同时，保留并维持“重新扫描”采用统一 `registerItemsAsync` -> `MediaExtractorPipeline` 异步处理流程及状态回置的完美机制。
+- 本次任务边界：
+  1. 在 `src/ui/ContentPanel.cpp` 中完全删除 `ActionExtractColor` 对应的右键菜单项及相关的后台 `QtConcurrent::run` 批量调色板解析/UI通知等逻辑。
+  2. 保护 `ActionRescan`（重新扫描）逻辑并维持现有调用，确保 `updateIngestionStatus(nPath, 0)` 对视觉反馈的更新。
+- 不在本次范围内的是：修改核心统一多媒体解析逻辑 `MediaExtractorPipeline` 及 `registerItemsAsync` 的底层排队管道。
+- 对应方案文档：Modification_Plan/Modification_Plan-60.md

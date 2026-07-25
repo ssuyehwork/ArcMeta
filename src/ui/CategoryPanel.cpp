@@ -127,9 +127,13 @@ CategoryPanel::CategoryPanel(QWidget* parent)
         requestRefresh();
     });
 
-    // 2026-06-xx 物理修复：监听元数据变更信号，确保删除项或标记状态后计数实时更新
-    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& /*path*/) {
-        requestRefresh();
+    // 2026-06-xx 物理修复：监听元数据变更信号，确保删除项或标记状态后计数实时更新，且支持全量重建（1:1 同步刷新保障）
+    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
+        if (path == "__RELOAD_ALL__") {
+            requestRefresh(true);
+        } else {
+            requestRefresh();
+        }
     });
 }
 

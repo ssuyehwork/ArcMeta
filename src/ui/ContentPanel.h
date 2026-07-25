@@ -177,7 +177,6 @@ public:
         ActionRestore,
         ActionCopyPath,
         ActionProperties,
-        ActionExtractColor,
         ActionAddToCategory,
         ActionAddToFavorites,
         ActionRescan
