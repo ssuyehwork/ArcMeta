@@ -1957,7 +1957,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         // 或 物理导航模式下已进入托管库内部 (镜像加速态)
         bool isMirrorSource = !m_currentCategoryType.isEmpty();
         if (!isMirrorSource && onItem) {
-            isMirrorSource = currentIndex.data(ManagedRole).toBool();
+            // 物理修复：只要该项已被登记（isManaged），或者是托管库内部的项，一律允许显示“设定颜色标签”和“归类”
+            bool isManaged = currentIndex.data(ManagedRole).toBool();
+            QString path = currentIndex.data(PathRole).toString();
+            bool isInsideLib = MetadataManager::instance().isInsideManagedLibrary(path.toStdWString());
+            isMirrorSource = isManaged || isInsideLib;
         }
 
         if (isMirrorSource) {

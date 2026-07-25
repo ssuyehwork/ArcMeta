@@ -1,5 +1,6 @@
 #include "CategoryModel.h"
 #include "../meta/CategoryRepo.h"
+#include "../meta/MetadataManager.h"
 
 #include "UiHelper.h"
 #include <QtConcurrent>
@@ -263,13 +264,17 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
             // 提交给线程池异步执行重命名和数据库写入
             (void)QtConcurrent::run([this, targetCat, newName]() mutable {
                 bool renameSuccess = true;
+                bool physicalRenamed = false;
+                QString oldPath;
+                QString newPath;
                 if (!targetCat.physicalPath.empty()) {
-                    QString oldPath = QString::fromStdWString(targetCat.physicalPath);
+                    oldPath = QString::fromStdWString(targetCat.physicalPath);
                     QFileInfo oldInfo(oldPath);
-                    QString newPath = QDir::toNativeSeparators(oldInfo.absoluteDir().absoluteFilePath(newName));
+                    newPath = QDir::toNativeSeparators(oldInfo.absoluteDir().absoluteFilePath(newName));
                     if (oldPath != newPath) {
                         if (QFile::rename(oldPath, newPath)) {
                             targetCat.physicalPath = newPath.toStdWString();
+                            physicalRenamed = true;
                         } else {
                             renameSuccess = false;
                             qWarning() << "[CategoryModel] QFile::rename failed from" << oldPath << "to" << newPath;
@@ -280,6 +285,11 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
                 if (renameSuccess) {
                     targetCat.name = newName.toStdWString();
                     CategoryRepo::update(targetCat);
+
+                    if (physicalRenamed) {
+                        // 【核心同步】：级联通知元数据管理器将原文件夹下所有子孙项的数据库绝对路径以及倒排索引完美重构
+                        MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
+                    }
                 }
 
                 // 在主线程安全重新刷新 UI 树
