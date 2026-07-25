@@ -1,12 +1,10 @@
 #include "CategoryModel.h"
-#include "../meta/CategoryRepo.h"
-
+#include "../db/CategoryRepo.h"
+#include "../db/ItemRepo.h"
+#include "../db/FavoritesRepo.h"
 #include "UiHelper.h"
-#include <QtConcurrent>
 #include <QMimeData>
 #include <QFileInfo>
-#include <QFile>
-#include <QDir>
 #include <QFont>
 #include <QTimer>
 #include <QSet>
@@ -30,43 +28,45 @@ void CategoryModel::deferredRefresh() {
 }
 
 void CategoryModel::refresh() {
-    m_isFirstLoad = false;
-
-    // 获取当前内存中的最新缓存计数，进行树构建时的第一级初始化，杜绝 (0) 频闪副作用
-    auto sysCounts = CategoryRepo::getSystemCounts();
-    auto catCountsVec = CategoryRepo::getCounts();
-    QMap<int, int> catCounts;
-    for (const auto& entry : catCountsVec) {
-        catCounts[entry.first] = entry.second;
-    }
-
+    // 2026-06-xx 物理修复：废除破坏性的 clear()，改用 beginResetModel 手动管理。
+    // 理由：clear() 会提前发射重置信号，导致 UI 在数据还没填充时就尝试恢复展开状态，引发折叠。
     beginResetModel();
     
+    // 清理旧项
     removeRows(0, rowCount());
     
     QStandardItem* root = invisibleRootItem();
 
+    // 1. 系统模块 (同步构建 - 8项)
     if (m_type == System || m_type == Both) {
+        auto counts = CategoryRepo::getSystemCounts();
+        
         auto addSystemItem = [&](const QString& name, const QString& type, const QString& icon, const QString& color, int sysId) {
-            int count = sysCounts.value(type, 0);
+            int count = counts.value(type, 0);
             QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
             item->setData(type, TypeRole);
             item->setData(name, NameRole);
             item->setData(color, ColorRole); 
+            // 2026-06-xx 物理修复：为系统项分配负数 ID，彻底消除与数据库 ID (0/正数) 的歧义冲突
             item->setData(sysId, IdRole);
             item->setEditable(false); 
             item->setIcon(UiHelper::getIcon(icon, QColor(color), 16));
             root->appendRow(item);
         };
 
+        // [还原] 还原原始设计的语义化图标与配色
+        // 物理分配负值 ID 空间
         addSystemItem("全部数据", "all", "all_data", "#3498db", -1);
         addSystemItem("未分类", "uncategorized", "uncategorized", "#95a5a6", -2);
         addSystemItem("未标签", "untagged", "untagged", "#7f8c8d", -3);
+        addSystemItem("今日数据", "today", "today", "#2ecc71", -4);
+        addSystemItem("昨日数据", "yesterday", "today", "#f39c12", -5);
         addSystemItem("最近访问", "recently_visited", "clock", "#9b59b6", -6);
         addSystemItem("标签管理", "tags", "tag", "#1abc9c", -7);
         addSystemItem("回收站", "trash", "trash", "#e74c3c", -8);
     }
 
+    // 2. 快速访问模块
     QStandardItem* favGroup = nullptr;
     if (m_type == Both || m_type == User) {
         favGroup = new QStandardItem("快速访问");
@@ -80,8 +80,20 @@ void CategoryModel::refresh() {
         favGroup->setFont(font);
         favGroup->setForeground(QColor("#FFFFFF"));
         root->appendRow(favGroup);
+
+        // A. 物理收藏路径 (FavoritesRepo)
+        auto favorites = FavoritesRepo::getAll();
+        for (const auto& fav : favorites) {
+            QStandardItem* item = new QStandardItem(QString::fromStdWString(fav.name));
+            item->setData("bookmark", TypeRole);
+            item->setData(QString::fromStdWString(fav.path), PathRole);
+            item->setData(QString::fromStdWString(fav.name), NameRole);
+            item->setIcon(UiHelper::getIcon("folder_filled", QColor("#555555"), 16));
+            favGroup->appendRow(item);
+        }
     }
 
+    // 3. 我的分类模块
     QStandardItem* userGroup = nullptr;
     if (m_type == User || m_type == Both) {
         userGroup = new QStandardItem("我的分类");
@@ -98,16 +110,21 @@ void CategoryModel::refresh() {
         root->appendRow(userGroup);
 
         auto categories = CategoryRepo::getAll();
+        auto countsVec = CategoryRepo::getCounts();
+        QMap<int, int> counts;
+        for (const auto& p : countsVec) counts[p.first] = p.second;
+
         QMap<int, QStandardItem*> itemMap;
         QMap<int, Category> catMap;
 
+        // 先创建所有分类节点，但不挂载
         for (const auto& cat : categories) {
             catMap[cat.id] = cat;
             int id = cat.id;
             QString name = QString::fromStdWString(cat.name);
             QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
+            int count = counts.value(id, 0);
 
-            int count = catCounts.value(id, 0);
             QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
             item->setData("category", TypeRole);
             item->setData(id, IdRole);
@@ -121,12 +138,15 @@ void CategoryModel::refresh() {
             if (cat.encrypted && !m_unlockedIds.contains(id)) {
                 item->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
             } else {
-                QString iconKey = QString::fromStdWString(cat.icon).isEmpty() ? "folder_filled" : QString::fromStdWString(cat.icon);
-                item->setIcon(UiHelper::getIcon(iconKey, QColor(color), 16));
+                item->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
             }
             itemMap[id] = item;
         }
 
+        // 2026-06-xx 按照用户要求回归“镜像模式”：实体保留，置顶生成快捷镜像
+        // 逻辑：1. 在“我的分类”中构建完整树；2. 将置顶项镜像一份到“快速访问”
+        
+        // 1. 在“我的分类”构建完整原始树 (不收置顶状态位移干扰)
         for (const auto& cat : categories) {
             int id = cat.id;
             QStandardItem* item = itemMap[id];
@@ -134,16 +154,12 @@ void CategoryModel::refresh() {
 
             if (parentId > 0 && itemMap.contains(parentId)) {
                 itemMap[parentId]->appendRow(item);
-            } else {
-                // 2026-08-xx 物理同步：ArcMeta.Library_* 强制置顶作为顶级分类 (Peer to "我的分类")
-                if (QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
-                    root->appendRow(item);
-                } else if (userGroup) {
-                    userGroup->appendRow(item);
-                }
+            } else if (userGroup) {
+                userGroup->appendRow(item);
             }
         }
 
+        // 2. 为置顶项在“快速访问”中创建虚拟镜像 (快捷入口)
         if (favGroup) {
             for (const auto& cat : categories) {
                 if (cat.pinned) {
@@ -151,8 +167,7 @@ void CategoryModel::refresh() {
                     QString name = QString::fromStdWString(cat.name);
                     QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
                     
-                    int count = catCounts.value(id, 0);
-                    QStandardItem* mirror = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
+                    QStandardItem* mirror = new QStandardItem(name);
                     mirror->setData("category", TypeRole);
                     mirror->setData(id, IdRole);
                     mirror->setData(color, ColorRole);
@@ -162,8 +177,7 @@ void CategoryModel::refresh() {
                     if (cat.encrypted && !m_unlockedIds.contains(id)) {
                         mirror->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
                     } else {
-                        QString iconKey = QString::fromStdWString(cat.icon).isEmpty() ? "folder_filled" : QString::fromStdWString(cat.icon);
-                        mirror->setIcon(UiHelper::getIcon(iconKey, QColor(color), 16));
+                        mirror->setIcon(UiHelper::getIcon("folder_filled", QColor(color), 16));
                     }
                     favGroup->appendRow(mirror);
                 }
@@ -172,50 +186,6 @@ void CategoryModel::refresh() {
     }
     
     endResetModel();
-}
-
-void CategoryModel::updateSystemCounts() {
-    auto counts = CategoryRepo::getSystemCounts();
-    for (int i = 0; i < invisibleRootItem()->rowCount(); ++i) {
-        QStandardItem* item = invisibleRootItem()->child(i);
-        QString type = item->data(TypeRole).toString();
-        if (counts.contains(type)) {
-            QString name = item->data(NameRole).toString();
-            item->setText(QString("%1 (%2)").arg(name).arg(counts[type]));
-        }
-    }
-}
-
-void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
-    std::function<void(QStandardItem*)> updateItem;
-    updateItem = [&](QStandardItem* parent) {
-        for (int i = 0; i < parent->rowCount(); ++i) {
-            QStandardItem* item = parent->child(i);
-            QString type = item->data(TypeRole).toString();
-            QString name = item->data(NameRole).toString();
-            int id = item->data(IdRole).toInt();
-
-            if (id < 0) { 
-                int count = sysCounts.value(type, 0);
-                QString newText = QString("%1 (%2)").arg(name).arg(count);
-                if (item->text() != newText) {
-                    item->setText(newText);
-                }
-            } else if (type == "category" && id > 0) { 
-                int count = catCounts.value(id, 0);
-                QString newText = QString("%1 (%2)").arg(name).arg(count);
-                if (item->text() != newText) {
-                    item->setText(newText);
-                }
-            }
-
-            if (item->hasChildren()) {
-                updateItem(item);
-            }
-        }
-    };
-
-    updateItem(invisibleRootItem());
 }
 
 void CategoryModel::loadCategoryItems(const QModelIndex& parentIndex) {
@@ -238,56 +208,15 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
         int id = index.data(IdRole).toInt();
         
         if (type == "category" && id > 0) {
-            // 在主线程获取数据，避免多线程访问冲突
             auto categories = CategoryRepo::getAll();
-            Category targetCat;
-            bool found = false;
-            for (const auto& cat : categories) {
+            for (auto& cat : categories) {
                 if (cat.id == id) {
-                    targetCat = cat;
-                    found = true;
+                    cat.name = newName.toStdWString();
+                    CategoryRepo::update(cat);
                     break;
                 }
             }
-            if (!found) return false;
-
-            // 限制顶级托管库重命名
-            if (!targetCat.physicalPath.empty()) {
-                QString oldPath = QString::fromStdWString(targetCat.physicalPath);
-                QFileInfo oldInfo(oldPath);
-                if (oldInfo.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive) && targetCat.parentId == 0) {
-                    return false; 
-                }
-            }
-
-            // 提交给线程池异步执行重命名和数据库写入
-            (void)QtConcurrent::run([this, targetCat, newName]() mutable {
-                bool renameSuccess = true;
-                if (!targetCat.physicalPath.empty()) {
-                    QString oldPath = QString::fromStdWString(targetCat.physicalPath);
-                    QFileInfo oldInfo(oldPath);
-                    QString newPath = QDir::toNativeSeparators(oldInfo.absoluteDir().absoluteFilePath(newName));
-                    if (oldPath != newPath) {
-                        if (QFile::rename(oldPath, newPath)) {
-                            targetCat.physicalPath = newPath.toStdWString();
-                        } else {
-                            renameSuccess = false;
-                            qWarning() << "[CategoryModel] QFile::rename failed from" << oldPath << "to" << newPath;
-                        }
-                    }
-                }
-
-                if (renameSuccess) {
-                    targetCat.name = newName.toStdWString();
-                    CategoryRepo::update(targetCat);
-                }
-
-                // 在主线程安全重新刷新 UI 树
-                QMetaObject::invokeMethod(this, [this]() {
-                    refresh();
-                }, Qt::QueuedConnection);
-            });
-
+            refresh();
             return true;
         }
         return false;
@@ -296,10 +225,14 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
 }
 
 Qt::DropActions CategoryModel::supportedDropActions() const {
+    // 2026-06-xx 物理修复：扩展支持的动作。界外拖入通常被识别为 Copy 或 Link。
+    // 只有在此处声明，Qt 视图才不会在拖入时显示“禁止图标”。
     return Qt::MoveAction | Qt::CopyAction | Qt::LinkAction;
 }
 
 bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction action, int row, int column, const QModelIndex& parent) {
+    // 2026-06-xx 物理修复：如果是外部 URL/路径拖入，放宽校验限制。
+    // 允许在侧边栏任意位置释放，由 CategoryPanel 处理具体的分类归属逻辑。
     if (mimeData->hasUrls() || mimeData->hasFormat("text/plain")) {
         return true;
     }
@@ -316,6 +249,7 @@ bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction actio
         QString type = parentItem->data(TypeRole).toString();
         QString name = parentItem->data(NameRole).toString();
         
+        // 内部拖拽（Move）依然保持严格校验，仅允许移动到分类、书签或根组
         if (type != "category" && type != "bookmark" && name != "我的分类") {
             return false; 
         }

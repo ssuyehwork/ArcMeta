@@ -74,6 +74,11 @@ class MetadataManager : public QObject {
 public:
     static MetadataManager& instance();
 
+    bool isLoaded() const {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        return m_loaded;
+    }
+
     static std::string generateFallbackFid(const std::wstring& vol, const std::wstring& frn);
     static std::string generateDeterministicSha256Id(const std::wstring& path);
     static std::wstring generateDeterministicFrn(const std::wstring& path);

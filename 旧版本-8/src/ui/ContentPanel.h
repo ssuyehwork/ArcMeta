@@ -1,9 +1,7 @@
 #pragma once
 
 #include <QDateTime>
-#include "../core/IndexedEntry.h"
 #include <QMap>
-#include <unordered_map>
 #include <deque>
 #include <vector>
 #include <QCache>
@@ -23,21 +21,11 @@
 #include <QDebug>
 #include <QIcon>
 #include "FilterPanel.h"
-
+#include "../meta/MetadataManager.h"
+#include "../db/ItemRepo.h"
 #include "../core/ModelContract.h"
 
 namespace ArcMeta {
-
-struct RuntimeMeta;
-
-/**
- * @brief 2026-06-xx 物理强化：针对 QString 优化 std::unordered_map 的哈希器
- */
-struct QStringHash {
-    size_t operator()(const QString& key) const {
-        return qHash(key);
-    }
-};
 
 /**
  * @brief 内部代理类：专门处理高级筛选逻辑 (2026-05-25 物理化以修复 static_cast 编译报错)
@@ -48,8 +36,10 @@ public:
     explicit FilterProxyModel(QObject* parent = nullptr);
 
     FilterState currentFilter;
+    QString m_searchQuery;
 
     void updateFilter();
+    void setSearchQuery(const QString& query);
 
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override;
@@ -63,7 +53,6 @@ class FerrexVirtualDbModel : public QAbstractTableModel {
     Q_OBJECT
 public:
     explicit FerrexVirtualDbModel(QObject* parent = nullptr);
-    ~FerrexVirtualDbModel() override;
 
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
@@ -72,36 +61,18 @@ public:
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
     bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
 
-    // 拖拽支持
-    QStringList mimeTypes() const override;
-    QMimeData* mimeData(const QModelIndexList& indexes) const override;
-
     // 虚拟化加载
     bool canFetchMore(const QModelIndex& parent) const override;
     void fetchMore(const QModelIndex& parent) override;
 
-    void setQuery(const QString& query) { m_query = query; }
-    void setRecords(const std::vector<ItemRecord>& records);
+    void setRecords(const std::vector<ArcMeta::ItemRepo::ItemRecord>& records);
     void clear();
 
-    const std::vector<ItemRecord>& allRecords() const { return m_allRecords; }
-
-    /**
-     * @brief 2026-06-xx 物理同步：从 MetadataManager 重新拉取指定路径的元数据并刷新 UI
-     */
-    void updateRecordMetadata(const QString& path);
-
-    // 视口感知缩略图加载
-    void loadThumbnailsForRows(const QList<int>& rows);
-
-signals:
-    void recordRenamed(const QString& oldPath, const QString& newPath, const QString& newName);
+    const std::vector<ArcMeta::ItemRepo::ItemRecord>& allRecords() const { return m_allRecords; }
 
 private:
-    std::vector<ItemRecord> m_allRecords;
-    std::unordered_map<QString, int, QStringHash> m_pathToIndex;
+    std::vector<ArcMeta::ItemRepo::ItemRecord> m_allRecords;
     int m_displayCount = 0;
-    QString m_query;
 
     mutable QCache<QString, QIcon> m_iconCache;
     mutable QSet<QString> m_requestedIcons;
@@ -118,18 +89,19 @@ class ContentPanel : public QFrame {
     Q_OBJECT
 
 public:
-    enum SortType {
-        SortByName,
-        SortByCreateDate,
-        SortByModifyDate,
-        SortByExtension,
-        SortBySize,
-        SortByDimension,
-        SortByRating
+    /**
+     * @brief 内部传输结构，用于异步扫描结果
+     */
+    struct ScanItemData {
+        QString name;
+        QString fullPath;
+        bool isDir;
+        QString suffix;
+        qint64 size;
+        QDateTime mtime;
+        RuntimeMeta meta;
+        bool isEmpty = false;
     };
-
-    SortType currentSortType() const { return m_sortType; }
-    Qt::SortOrder currentSortOrder() const { return m_sortOrder; }
 
     /**
      * @brief 统计结构
@@ -137,16 +109,16 @@ public:
     struct ScanStats {
         QMap<int, int> ratingCounts;
         QMap<QString, int> colorCounts;
+        QMap<QString, int> tagCounts;
         QMap<QString, int> typeCounts;
         QMap<QString, int> createDateCounts;
         QMap<QString, int> modifyDateCounts;
-        int emptyFolderCount = 0;
+        int noTagCount = 0;
     };
 
     enum ViewMode {
-        ListView,
         GridView,
-        JustifiedViewMode
+        ListView
     };
 
     /**
@@ -177,10 +149,7 @@ public:
         ActionRestore,
         ActionCopyPath,
         ActionProperties,
-        ActionAddToCategory,
-        ActionAddToFavorites,
-        ActionRescan,
-        ActionRefresh
+        ActionExtractColor
     };
 
     explicit ContentPanel(QWidget* parent = nullptr);
@@ -189,17 +158,11 @@ public:
     // 2026-04-12 关键修复：延迟初始化
     void deferredInit();
 
-    /**
-     * @brief 物理定位选中并滚动到对应视图行号
-     * @param path 绝对物理路径
-     */
-    void selectAndScrollToPath(const QString& path);
 
     /**
      * @brief 切换视图模式
      */
     void setViewMode(ViewMode mode);
-    ViewMode currentViewMode() const { return m_currentViewMode; }
 
     /**
      * @brief 拦截空格键（红线：物理拦截 QEvent::KeyPress 且为 Key_Space）
@@ -223,13 +186,6 @@ public:
 
 signals:
     /**
-     * @brief 缩放比例与视图模式变更信号 (Modification_Plan-47)
-     */
-    void zoomLevelChanged(int level);
-    void viewModeChanged(ViewMode mode);
-
-signals:
-    /**
      * @brief 请求 QuickLook 预览信号
      * @param path 物理路径
      */
@@ -243,12 +199,6 @@ signals:
     void directorySelected(const QString& path);
 
     /**
-     * @brief 请求将指定路径添加至收藏夹的信号 (对应用户原话：“把选中的项目收藏到收藏区里”)
-     * @param paths 选中的项目绝对物理路径列表 (对应用户原话：“选中某个项目”)
-     */
-    void requestAddFavorite(const QStringList& paths);
-
-    /**
      * @brief 数据源变更信号，用于焦点线管理
      * @param source 数据源标识
      */
@@ -260,10 +210,10 @@ signals:
     void directoryStatsReady(
         const QMap<int, int>&     ratingCounts,
         const QMap<QString, int>& colorCounts,
+        const QMap<QString, int>& tagCounts,
         const QMap<QString, int>& typeCounts,
         const QMap<QString, int>& createDateCounts,
-        const QMap<QString, int>& modifyDateCounts,
-        int emptyFolderCount);
+        const QMap<QString, int>& modifyDateCounts);
 
 private:
     void initUi();
@@ -282,9 +232,6 @@ private:
     QVBoxLayout* m_mainLayout = nullptr;
     QStackedWidget* m_viewStack = nullptr;
     QPushButton* m_btnLayers = nullptr;
-    QPushButton* m_btnLayersBlue = nullptr;
-    QPushButton* m_btnToggleFolders = nullptr; // 2026-07-xx 按照 Plan-73：显示/隐藏文件夹切换
-    QPushButton* m_btnToggleFiles = nullptr;   // 2026-07-xx 按照 Plan-73：显示/隐藏文件切换
     QTextBrowser* m_textPreview = nullptr;
     QLabel* m_imagePreview = nullptr;
 
@@ -292,9 +239,6 @@ private:
     QAbstractItemView* m_gridView = nullptr;
     QTreeView* m_treeView = nullptr;
     FerrexVirtualDbModel* m_model = nullptr;
-
-    QTimer* m_visibleTimer = nullptr;
-    void refreshVisibleThumbnails();
     QSortFilterProxyModel* m_proxyModel = nullptr;
 
 
@@ -302,26 +246,9 @@ private:
 
     int m_zoomLevel = 64;
     QString m_currentPath;
-    QString m_pendingSelectName;
-    bool m_isPendingEdit = false;
-    int m_currentCategoryId = -1;
     QString m_currentCategoryType; // 用于驱动差异化右键菜单
     bool m_isRecursive = false;
-    bool m_isCategoryRecursive = false;
-    bool m_showFolders = true;
-    bool m_showFiles = true;
-    ViewMode m_currentViewMode = GridView;
-    SortType m_sortType = SortByName;
-    Qt::SortOrder m_sortOrder = Qt::AscendingOrder;
-    std::atomic<bool> m_isLoading{false}; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
-    std::atomic<int> m_loadRequestId{0}; // 2026-07-xx 物理请求 ID：防止异步回调导致的视图内容乱跳
-
-    // --- 2026-06-xx 性能优化：递归扫描指纹缓存 ---
-    struct ScanCacheEntry {
-        qint64 lastModified; // 根目录的时间戳
-        std::vector<ItemRecord> records;
-    };
-    QMap<QString, ScanCacheEntry> m_recursiveCache; 
+    bool m_isLoading = false; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
     void updateGridSize();
     void updateStatusBarStats();
     void recalculateAndEmitStats();
@@ -336,41 +263,14 @@ private:
                                int& noTagCount);
 
 public slots:
-    /**
-     * @brief 设置缩放比例，限制在 96~128px 之间 (Modification_Plan-47)
-     */
-    void setZoomLevel(int level);
-
-public slots:
     void onSelectionChanged();
     void onCustomContextMenuRequested(const QPoint& pos);
     void onDoubleClicked(const QModelIndex& index);
-    void onPathsDropped(const QStringList& paths, const QModelIndex& targetIndex);
 
     /**
      * @brief 加载并显示目录内容
      */
     void loadDirectory(const QString& path, bool recursive = false);
-
-    /**
-     * @brief 设置待选中的项名称，并在下次加载完成后自动定位
-     * @param name 文件名
-     * @param edit 是否进入编辑模式
-     */
-    void setPendingSelectName(const QString& name, bool edit = false) { 
-        m_pendingSelectName = name; 
-        m_isPendingEdit = edit;
-    }
-
-    /**
-     * @brief 强制重新加载当前视图的所有内容
-     */
-    void refreshAll();
-
-    /**
-     * @brief 局部更新某项的元数据（星级、颜色、标签等）
-     */
-    void updateItemMetadata(const QString& path);
 
     /**
      * @brief 全局/本地搜索
@@ -395,20 +295,8 @@ public slots:
 
     /**
      * @brief 加载指定路径列表 (分类联动使用)
-     * @param reqId 可选的请求 ID。若为 0，则自动生成新 ID。
      */
-    void loadPaths(const QStringList& paths, int reqId = 0);
-
-    /**
-     * @brief 2026-07-xx 按照 Plan-57：增量追加路径列表 (异步搜索流式返回使用)
-     * @param reqId 可选的请求 ID。只有当 ID 与当前 ID 一致时才会执行追加。
-     */
-    void appendPaths(const QStringList& paths, int reqId = 0);
-
-    /**
-     * @brief 获取当前最新的加载请求 ID
-     */
-    int currentLoadRequestId() const { return m_loadRequestId.load(); }
+    void loadPaths(const QStringList& paths);
 
     /**
      * @brief 2026-06-xx 彻底重构：加载分类及其子项 (分类 ID 联动)
@@ -416,9 +304,8 @@ public slots:
     void loadCategory(int categoryId);
 
     /**
-     * @brief 获取/设置当前分类类型，用于驱动右键菜单差异化
+     * @brief 设置当前分类类型，用于驱动右键菜单差异化
      */
-    QString getCurrentCategoryType() const { return m_currentCategoryType; }
     void setCurrentCategoryType(const QString& type) { m_currentCategoryType = type; }
 
 signals:
@@ -475,7 +362,7 @@ public:
     void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
     QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override;
     bool eventFilter(QObject* obj, QEvent* event) override;
-    bool helpEvent(QHelpEvent* event, QAbstractItemView* view, const QStyleOptionViewItem& option, const QModelIndex& index) override;
+    bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option, const QModelIndex& index) override;
 
     QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
     void setEditorData(QWidget* editor, const QModelIndex& index) const override;
