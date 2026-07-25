@@ -1988,18 +1988,15 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 } 
             }
 
-            QMenu* colorMenu = menu.addMenu("设定颜色标签"); 
-            UiHelper::applyMenuStyle(colorMenu); 
-            colorMenu->setIcon(UiHelper::getIcon("palette", QColor("#EEEEEE"))); 
-
+            // 直接在主菜单上呈现“设定颜色标签”快捷色块栏
             QString currentColorStr = currentIndex.data(ColorRole).toString();
 
-            QWidgetAction* pickerAction = new QWidgetAction(colorMenu);
-            ColorStripPicker* pickerWidget = new ColorStripPicker(currentColorStr, colorMenu);
+            QWidgetAction* pickerAction = new QWidgetAction(&menu);
+            ColorStripPicker* pickerWidget = new ColorStripPicker(currentColorStr, &menu);
             pickerAction->setDefaultWidget(pickerWidget);
-            colorMenu->addAction(pickerAction);
+            menu.addAction(pickerAction);
 
-            connect(pickerWidget, &ColorStripPicker::colorSelected, this, [this, view, colorMenu](const QString& hexColor) {
+            connect(pickerWidget, &ColorStripPicker::colorSelected, this, [this, view, &menu](const QString& hexColor) {
                 auto indexes = view->selectionModel()->selectedIndexes();
                 for (const auto& idx : indexes) {
                     if (idx.column() == 0) {
@@ -2024,7 +2021,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole);
                     }
                 }
-                colorMenu->close();
+                menu.close();
             });
  
             bool isPinned = currentIndex.data(IsLockedRole).toBool(); 

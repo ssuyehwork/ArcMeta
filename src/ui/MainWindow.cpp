@@ -1992,16 +1992,13 @@ void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
         folderColor = Style::TextMain;
     }
 
-    // 1. 新增 “设定分类色” 水平色块
-    QMenu* colorMenu = menu.addMenu(UiHelper::getIcon("palette", WarningOrange, 18), "设定分类色");
-    UiHelper::applyMenuStyle(colorMenu);
-
-    QWidgetAction* colorPickerAction = new QWidgetAction(colorMenu);
-    ColorStripPicker* colorPickerWidget = new ColorStripPicker(colorStr, colorMenu);
+    // 1. 新增 “设定分类色” 水平色块，直接展露在主菜单上
+    QWidgetAction* colorPickerAction = new QWidgetAction(&menu);
+    ColorStripPicker* colorPickerWidget = new ColorStripPicker(colorStr, &menu);
     colorPickerAction->setDefaultWidget(colorPickerWidget);
-    colorMenu->addAction(colorPickerAction);
+    menu.addAction(colorPickerAction);
 
-    connect(colorPickerWidget, &ColorStripPicker::colorSelected, this, [btn, path, colorMenu](const QString& hexColor) {
+    connect(colorPickerWidget, &ColorStripPicker::colorSelected, this, [btn, path, &menu](const QString& hexColor) {
         AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), hexColor.toUpper());
         AppConfig::instance().sync();
 
@@ -2010,7 +2007,7 @@ void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
         MetadataManager::instance().setColor(normPath, hexColor.toUpper().toStdWString(), true);
 
         btn->update();
-        colorMenu->close();
+        menu.close();
     });
 
     // 3. 新增 “文件夹图标” 二级子菜单

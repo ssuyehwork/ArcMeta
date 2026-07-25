@@ -256,17 +256,14 @@ void CategoryPanel::setupContextMenu() {
                 
                 QString colorStr = index.data(ColorRole).toString();
 
-                // 使用 ColorStripPicker 快捷菜单项
-                QMenu* colorMenu = menu.addMenu(UiHelper::getIcon("palette", WarningOrange, 18), "分类颜色");
-                UiHelper::applyMenuStyle(colorMenu);
-
-                QWidgetAction* colorPickerAction = new QWidgetAction(colorMenu);
-                ColorStripPicker* colorPickerWidget = new ColorStripPicker(colorStr, colorMenu);
+                // 使用 ColorStripPicker 快捷菜单项，直接展露在主菜单上
+                QWidgetAction* colorPickerAction = new QWidgetAction(&menu);
+                ColorStripPicker* colorPickerWidget = new ColorStripPicker(colorStr, &menu);
                 colorPickerAction->setDefaultWidget(colorPickerWidget);
-                colorMenu->addAction(colorPickerAction);
+                menu.addAction(colorPickerAction);
 
                 int id = index.data(IdRole).toInt();
-                connect(colorPickerWidget, &ColorStripPicker::colorSelected, this, [this, id, colorMenu](const QString& hexColor) {
+                connect(colorPickerWidget, &ColorStripPicker::colorSelected, this, [this, id, &menu](const QString& hexColor) {
                     auto all = CategoryRepo::getAll();
                     for (auto& cat : all) {
                         if (cat.id == id) {
@@ -286,7 +283,7 @@ void CategoryPanel::setupContextMenu() {
                     m_categoryModel->refresh();
 
                     restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
-                    colorMenu->close();
+                    menu.close();
                 });
 
                 menu.addAction(UiHelper::getIcon("tag_filled", QColor("#9b59b6"), 18), "设置预设标签", this, &CategoryPanel::onSetPresetTags);
