@@ -104,8 +104,8 @@ private:
     QList<ColorItem> m_items;
     int m_hoveredIndex = -1;
     QString m_selectedColor;
-    int m_circleRadius = 10; // 半径 10，直径 20
-    int m_spacing = 8;       // 间隔 8
+    int m_circleRadius = 7;  // 半径 7，直径 14
+    int m_spacing = 6;       // 间隔 6
 };
 
 } // namespace ArcMeta

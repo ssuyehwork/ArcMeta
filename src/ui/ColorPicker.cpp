@@ -339,7 +339,7 @@ int ColorPicker::currentTolerance() const {
 // --- ColorStripPicker 实现 ---
 ColorStripPicker::ColorStripPicker(const QString& currentColorHex, QWidget* parent)
     : QWidget(parent), m_selectedColor(currentColorHex) {
-    setFixedSize(268, 32);
+    setFixedSize(198, 26);
     setMouseTracking(true);
     setCursor(Qt::PointingHandCursor);
 
@@ -361,28 +361,27 @@ void ColorStripPicker::paintEvent(QPaintEvent* event) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    // 背景填充 (与暗色菜单对齐)
-    painter.fillRect(rect(), QColor("#1e1e1e"));
+    // 不再填充任何背景，使其保持完全透明，完美融合于菜单自身的 QSS 背景中
 
     int startX = 12; // 起始左边距
     int y = rect().height() / 2;
 
     for (int i = 0; i < m_items.size(); ++i) {
-        int cx = startX + i * (20 + m_spacing) + 10;
+        int cx = startX + i * (14 + m_spacing) + 7;
 
         // 1. 绘制色块本身
         painter.setPen(Qt::NoPen);
         painter.setBrush(m_items[i].color);
-        painter.drawEllipse(QPoint(cx, y), 10, 10);
+        painter.drawEllipse(QPoint(cx, y), m_circleRadius, m_circleRadius);
 
         // 2. 悬停状态：绘制突出亮白圈
         if (i == m_hoveredIndex) {
             painter.setBrush(Qt::NoBrush);
-            // 亮白画笔，宽度 1.8 像素
-            QPen pen(QColor("#FFFFFF"), 1.8);
+            // 亮白画笔，宽度 1.5 像素
+            QPen pen(QColor("#FFFFFF"), 1.5);
             painter.setPen(pen);
-            // 稍大一圈，半径设为 12 像素以包裹里面的色块
-            painter.drawEllipse(QPoint(cx, y), 12, 12);
+            // 半径设为 m_circleRadius + 2.0 像素以完美包裹里面的色块
+            painter.drawEllipse(QPoint(cx, y), m_circleRadius + 2, m_circleRadius + 2);
         }
     }
 }
@@ -392,10 +391,10 @@ void ColorStripPicker::mouseMoveEvent(QMouseEvent* event) {
     int cy = rect().height() / 2;
     int startX = 12;
     for (int i = 0; i < m_items.size(); ++i) {
-        int cx = startX + i * (20 + m_spacing) + 10;
+        int cx = startX + i * (14 + m_spacing) + 7;
         int dx = event->pos().x() - cx;
         int dy = event->pos().y() - cy;
-        if (dx * dx + dy * dy <= 12 * 12) { // 12像素感应半径
+        if (dx * dx + dy * dy <= (m_circleRadius + 2) * (m_circleRadius + 2)) { // 感应半径
             newHovered = i;
             break;
         }
