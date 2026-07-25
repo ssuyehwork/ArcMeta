@@ -454,7 +454,16 @@ bool CategoryRepo::remove(int id) {
         return true;
     });
 
-        // 4. Delete only the category rows
+    // 收集所有关联了物理路径的文件夹分类
+    std::vector<std::wstring> physicalDirsToDelete;
+    for (int delId : toDelete) {
+        Category cat = getById(delId);
+        if (cat.id > 0 && !cat.physicalPath.empty()) {
+            physicalDirsToDelete.push_back(cat.physicalPath);
+        }
+    }
+
+    // 4. Delete only the category rows
     SqlTransaction trans(db);
     for (int delId : toDelete) {
             // 首先清理子项关联，防止幽灵关联
@@ -473,6 +482,20 @@ bool CategoryRepo::remove(int id) {
         }
     }
     trans.commit();
+
+    // 对磁盘上的对应物理文件夹执行物理清理/移出
+    for (const auto& wPath : physicalDirsToDelete) {
+        QString qPath = QString::fromStdWString(wPath);
+        QDir dir(qPath);
+        if (dir.exists()) {
+            qDebug() << "[DB_TRACE] 同步清理物理文件夹:" << qPath;
+            if (dir.removeRecursively()) {
+                qDebug() << "[DB_TRACE] 物理文件夹清理成功:" << qPath;
+            } else {
+                qWarning() << "[DB_TRACE] 物理文件夹清理失败 (可能被占用或权限不足):" << qPath;
+            }
+        }
+    }
 
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
     return true;

@@ -1219,12 +1219,20 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
         CategoryRepo::removeAllCategoriesBatch(fids);
     }
 
-    // [Plan-5] 移除 1:1 自动建立的整个镜像分类树节点
+    // [Plan-5] 移除 1:1 自动建立的整个镜像分类树节点（标准化比对加固）
     auto allCats = CategoryRepo::getAll();
+    bool anyCatRemoved = false;
     for (const auto& cat : allCats) {
-        if (cat.physicalPath == nPath || cat.physicalPath.find(nPath + L"\\") == 0 || cat.physicalPath.find(nPath + L"/") == 0) {
-            CategoryRepo::remove(cat.id);
+        if (!cat.physicalPath.empty()) {
+            std::wstring normCatPath = normalizePath(cat.physicalPath);
+            if (normCatPath == nPath || normCatPath.find(nPath + L"\\") == 0 || normCatPath.find(nPath + L"/") == 0) {
+                CategoryRepo::remove(cat.id);
+                anyCatRemoved = true;
+            }
         }
+    }
+    if (anyCatRemoved) {
+        notifyUI(RefreshLevel::FullRebuild);
     }
 }
 
