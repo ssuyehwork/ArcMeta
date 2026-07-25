@@ -74,7 +74,6 @@ private slots:
     void onCreateSubCategory();
     void onRenameCategory();
     void onDeleteCategory();
-    void onClassifyToCategory();
     void onSetPresetTags();
     void onTogglePin();
     void onSetPassword();
