@@ -32,6 +32,14 @@ void CategoryModel::deferredRefresh() {
 void CategoryModel::refresh() {
     m_isFirstLoad = false;
 
+    // 获取当前内存中的最新缓存计数，进行树构建时的第一级初始化，杜绝 (0) 频闪副作用
+    auto sysCounts = CategoryRepo::getSystemCounts();
+    auto catCountsVec = CategoryRepo::getCounts();
+    QMap<int, int> catCounts;
+    for (const auto& entry : catCountsVec) {
+        catCounts[entry.first] = entry.second;
+    }
+
     beginResetModel();
     
     removeRows(0, rowCount());
@@ -40,7 +48,8 @@ void CategoryModel::refresh() {
 
     if (m_type == System || m_type == Both) {
         auto addSystemItem = [&](const QString& name, const QString& type, const QString& icon, const QString& color, int sysId) {
-            QStandardItem* item = new QStandardItem(QString("%1 (0)").arg(name));
+            int count = sysCounts.value(type, 0);
+            QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
             item->setData(type, TypeRole);
             item->setData(name, NameRole);
             item->setData(color, ColorRole); 
@@ -98,7 +107,8 @@ void CategoryModel::refresh() {
             QString name = QString::fromStdWString(cat.name);
             QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
 
-            QStandardItem* item = new QStandardItem(QString("%1 (0)").arg(name));
+            int count = catCounts.value(id, 0);
+            QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
             item->setData("category", TypeRole);
             item->setData(id, IdRole);
             item->setData(color, ColorRole);
@@ -141,7 +151,8 @@ void CategoryModel::refresh() {
                     QString name = QString::fromStdWString(cat.name);
                     QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
                     
-                    QStandardItem* mirror = new QStandardItem(QString("%1 (0)").arg(name));
+                    int count = catCounts.value(id, 0);
+                    QStandardItem* mirror = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
                     mirror->setData("category", TypeRole);
                     mirror->setData(id, IdRole);
                     mirror->setData(color, ColorRole);

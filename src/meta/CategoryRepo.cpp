@@ -862,6 +862,12 @@ void CategoryRepo::loadStatsFromDb() {
 }
 
 void CategoryRepo::fullRecount() {
+    // 物理加固：若元数据管理器尚未加载完成，且快照为空，拒绝重算以防止内存计数器归零并覆盖数据库
+    if (!MetadataManager::instance().isLoaded()) {
+        qDebug() << "[Recount] MetadataManager has not finished loading. Abort recount to prevent zeroing stats.";
+        return;
+    }
+
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return;
 

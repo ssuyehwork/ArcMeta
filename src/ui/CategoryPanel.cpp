@@ -97,8 +97,10 @@ CategoryPanel::CategoryPanel(QWidget* parent)
             // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
             QMetaObject::invokeMethod(weakThis.data(), [weakThis, sysCounts, catCounts]() {
                 if (weakThis && weakThis->m_categoryModel) {
-                    // 2026-07-xx 物理修复：若统计数据全空，且系统尚未加载完成，则拒绝执行 UI 更新以防止计数清零
-                    if (sysCounts.isEmpty() && catCounts.isEmpty()) {
+                    // 物理修复：若统计数据全为0，且系统元数据尚未加载完成，则拒绝执行 UI 更新以防止计数清零
+                    bool isSysUnready = !MetadataManager::instance().isLoaded();
+                    bool allCountsZero = (sysCounts.value("all", 0) == 0 && sysCounts.value("trash", 0) == 0);
+                    if (isSysUnready && allCountsZero) {
                         return;
                     }
                     // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
