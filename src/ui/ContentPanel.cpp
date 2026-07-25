@@ -3203,8 +3203,8 @@ void ContentPanel::recalculateAndEmitStats() {
 
             stats.ratingCounts[record.rating]++;
             
-            if (!record.color.isEmpty()) {
-                stats.colorCounts[record.color.toUpper()]++;
+            if (!record.manualColor.isEmpty()) {
+                stats.colorCounts[record.manualColor.toUpper()]++;
             } else {
                 stats.colorCounts[""]++;
             }
@@ -3219,12 +3219,8 @@ void ContentPanel::recalculateAndEmitStats() {
                 stats.typeCounts[record.suffix.toUpper()]++;
             }
             
-            auto dateKey = [&](long long ts) {
-                return QDateTime::fromMSecsSinceEpoch(ts).date().toString("dd-MM-yyyy");
-            };
-
-            stats.createDateCounts[dateKey(record.ctime)]++;
-            stats.modifyDateCounts[dateKey(record.mtime)]++;
+            stats.createDateCounts[QDateTime::fromMSecsSinceEpoch(record.ctime).date().toString("dd-MM-yyyy")]++;
+            stats.modifyDateCounts[QDateTime::fromMSecsSinceEpoch(record.mtime).date().toString("dd-MM-yyyy")]++;
         }
 
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, stats]() {
