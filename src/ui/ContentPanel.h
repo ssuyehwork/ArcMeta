@@ -179,7 +179,8 @@ public:
         ActionProperties,
         ActionAddToCategory,
         ActionAddToFavorites,
-        ActionRescan
+        ActionRescan,
+        ActionRefresh
     };
 
     explicit ContentPanel(QWidget* parent = nullptr);

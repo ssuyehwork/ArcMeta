@@ -1933,58 +1933,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
  
     QMenu menu(this); 
     UiHelper::applyMenuStyle(&menu); 
-
-    // 注入“排序”二级子菜单 (对应用户原话：“排序二级子菜单，包含名称、创建日期、修改日期、扩展名、大小、尺寸、评分，以及升序、降序”)
-    QMenu* sortMenu = menu.addMenu("排序");
-    UiHelper::applyMenuStyle(sortMenu);
-
-    // 属性单选组
-    QActionGroup* typeGroup = new QActionGroup(this);
-    auto addTypeAct = [&](const QString& label, ContentPanel::SortType type) {
-        QAction* act = sortMenu->addAction(label);
-        act->setCheckable(true);
-        act->setChecked(m_sortType == type);
-        typeGroup->addAction(act);
-        connect(act, &QAction::triggered, [this, type]() {
-            m_sortType = type;
-            AppConfig::instance().setValue("ContentPanel/RightClickSortType", static_cast<int>(type));
-            
-            // 实时触发全量无效化与排序重计算
-            m_proxyModel->invalidate();
-            m_proxyModel->sort(0, m_sortOrder);
-        });
-    };
-
-    addTypeAct("名称", ContentPanel::SortByName);
-    addTypeAct("创建日期", ContentPanel::SortByCreateDate);
-    addTypeAct("修改日期", ContentPanel::SortByModifyDate);
-    addTypeAct("扩展名", ContentPanel::SortByExtension);
-    addTypeAct("大小", ContentPanel::SortBySize);
-    addTypeAct("尺寸", ContentPanel::SortByDimension);
-    addTypeAct("评分", ContentPanel::SortByRating);
-
-    sortMenu->addSeparator();
-
-    // 方向单选组
-    QActionGroup* orderGroup = new QActionGroup(this);
-    auto addOrderAct = [&](const QString& label, Qt::SortOrder order) {
-        QAction* act = sortMenu->addAction(label);
-        act->setCheckable(true);
-        act->setChecked(m_sortOrder == order);
-        orderGroup->addAction(act);
-        connect(act, &QAction::triggered, [this, order]() {
-            m_sortOrder = order;
-            AppConfig::instance().setValue("ContentPanel/RightClickSortOrder", static_cast<int>(order));
-            
-            m_proxyModel->invalidate();
-            m_proxyModel->sort(0, order);
-        });
-    };
-
-    addOrderAct("升序", Qt::AscendingOrder);
-    addOrderAct("降序", Qt::DescendingOrder);
-
-    menu.addSeparator();
  
     if (onItem) { 
         // 2026-06-xx 物理修复：在回收站分类中，顶部增加“还原”选项
@@ -2151,6 +2099,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         menu.addSeparator(); 
         menu.addAction("复制路径")->setData(ActionCopyPath); 
         menu.addAction("添加至收藏夹")->setData(ActionAddToFavorites); 
+        menu.addAction("刷新")->setData(ActionRefresh);
         menu.addAction("属性")->setData(ActionProperties); 
 
         // 2026-07-xx 按照 Development_Plan 2.1：始终显示“重新扫描”选项 (仅限托管库内项目)
@@ -2179,6 +2128,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         actPaste->setData(ActionPaste); 
         actPaste->setEnabled(!m_currentPath.isEmpty() && m_currentPath != "computer://"); 
  
+        menu.addSeparator();
+        menu.addAction("刷新")->setData(ActionRefresh);
+
         menu.addSeparator(); 
         QAction* actProp = menu.addAction("当前文件夹属性"); 
         actProp->setData(ActionProperties); 
@@ -2186,6 +2138,58 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
         // 2026-07-xx 按照 Plan-63：如果是空白处点击，直接在这里注入并在下方 exec
     } 
+
+    menu.addSeparator();
+
+    // 注入“排序”二级子菜单
+    QMenu* sortMenu = menu.addMenu("排序");
+    UiHelper::applyMenuStyle(sortMenu);
+
+    // 属性单选组
+    QActionGroup* typeGroup = new QActionGroup(this);
+    auto addTypeAct = [&](const QString& label, ContentPanel::SortType type) {
+        QAction* act = sortMenu->addAction(label);
+        act->setCheckable(true);
+        act->setChecked(m_sortType == type);
+        typeGroup->addAction(act);
+        connect(act, &QAction::triggered, [this, type]() {
+            m_sortType = type;
+            AppConfig::instance().setValue("ContentPanel/RightClickSortType", static_cast<int>(type));
+
+            // 实时触发全量无效化与排序重计算
+            m_proxyModel->invalidate();
+            m_proxyModel->sort(0, m_sortOrder);
+        });
+    };
+
+    addTypeAct("名称", ContentPanel::SortByName);
+    addTypeAct("创建日期", ContentPanel::SortByCreateDate);
+    addTypeAct("修改日期", ContentPanel::SortByModifyDate);
+    addTypeAct("扩展名", ContentPanel::SortByExtension);
+    addTypeAct("大小", ContentPanel::SortBySize);
+    addTypeAct("尺寸", ContentPanel::SortByDimension);
+    addTypeAct("评分", ContentPanel::SortByRating);
+
+    sortMenu->addSeparator();
+
+    // 方向单选组
+    QActionGroup* orderGroup = new QActionGroup(this);
+    auto addOrderAct = [&](const QString& label, Qt::SortOrder order) {
+        QAction* act = sortMenu->addAction(label);
+        act->setCheckable(true);
+        act->setChecked(m_sortOrder == order);
+        orderGroup->addAction(act);
+        connect(act, &QAction::triggered, [this, order]() {
+            m_sortOrder = order;
+            AppConfig::instance().setValue("ContentPanel/RightClickSortOrder", static_cast<int>(order));
+
+            m_proxyModel->invalidate();
+            m_proxyModel->sort(0, order);
+        });
+    };
+
+    addOrderAct("升序", Qt::AscendingOrder);
+    addOrderAct("降序", Qt::DescendingOrder);
 
     // 2026-07-xx 按照 Plan-63：注入布局显示控制菜单
     menu.addSeparator();
@@ -2512,11 +2516,31 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
             break;
         }
-        case ActionCopyPath: QApplication::clipboard()->setText(QDir::toNativeSeparators(path)); break; 
+        case ActionCopyPath: {
+            QModelIndexList indexes = getSelectedIndexes();
+            QStringList targetPaths;
+            for (const auto& idx : indexes) {
+                if (idx.column() == 0) {
+                    QString p = idx.data(PathRole).toString();
+                    if (!p.isEmpty()) targetPaths << QDir::toNativeSeparators(p);
+                }
+            }
+            if (targetPaths.isEmpty() && !path.isEmpty()) {
+                targetPaths << QDir::toNativeSeparators(path);
+            }
+            if (!targetPaths.isEmpty()) {
+                QApplication::clipboard()->setText(targetPaths.join("\n"));
+            }
+            break;
+        }
         case ActionProperties: { 
             ShellHelper::showProperties(onItem ? path : m_currentPath); 
             break; 
         } 
+        case ActionRefresh: {
+            refreshAll();
+            break;
+        }
         default: break; 
     } 
 } 
