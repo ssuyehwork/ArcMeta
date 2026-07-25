@@ -145,7 +145,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
         } else if (role == TypeRole) {
             return "category";
         } else if (role == PathRole) {
-            return ""; // 2026-06-xx 物理级补全：子分类无物理路径，返回空以防止逻辑溢出
+            return record.path; // 2026-06-xx 物理级同步：返回子分类绑定的实际物理路径，以支持在资源管理器中定位
         } else if (role == IsLockedRole || role == PinnedRole) {
             return record.pinned;
         } else if (role == Qt::DecorationRole && index.column() == 0) {
@@ -2967,6 +2967,7 @@ void ContentPanel::loadCategory(int categoryId) {
                 // 2026-07-xx 物理同步：从内存缓存或元数据管理器中拉取分类的评分（如有）
                 r.rating = 0; 
                 r.pinned = cat.pinned;
+                r.path = QString::fromStdWString(cat.physicalPath);
                 allRecords.push_back(r);
             }
         }
