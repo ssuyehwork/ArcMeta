@@ -249,11 +249,6 @@ void CategoryPanel::setupContextMenu() {
             // 只要不是系统根节点，都弹出完整菜单
             if (itemType == "category" || itemType == "file" || itemType == "folder") {
                 
-                // 2026-06-xx 统一图标
-                menu.addAction(UiHelper::getIcon("folder_filled", PrimaryBlue, 18), "归类到此分类", this, &CategoryPanel::onClassifyToCategory);
-                
-                menu.addSeparator();
-                
                 QString colorStr = index.data(ColorRole).toString();
                 
                 // 使用 ColorStripPicker 快捷菜单项，直接展露在主菜单上
@@ -549,25 +544,6 @@ void CategoryPanel::onCreateSubCategory() {
             restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         }
     }
-}
-
-void CategoryPanel::onClassifyToCategory() {
-    QModelIndex index = m_categoryTree->currentIndex();
-    int id = getTargetCategoryId(index);
-    if (id <= 0) return;
-
-    AppConfig::instance().setValue("Category/ExtensionTargetId", id);
-
-    QSet<int> expandedIds;
-    QStringList expandedNames;
-    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
-
-    m_categoryModel->refresh();
-
-    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
-
-    QString name = index.data(NameRole).toString();
-    ToolTipOverlay::instance()->showText(QCursor::pos(), QString("已设为归类目标: %1").arg(name), 1000);
 }
 
 void CategoryPanel::onSetPresetTags() {

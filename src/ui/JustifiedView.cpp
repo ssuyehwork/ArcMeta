@@ -415,15 +415,35 @@ void JustifiedView::doLayout() {
 
         int i = 0;
         while (i < count) {
-            int numInRow = std::min(maxNumInRow, count - i);
+            int rowStart = i;
+            
+            // 1. 获取本行第一个元素的类型 (是否是文件夹/分类)
+            QModelIndex firstIdx = model()->index(rowStart, 0);
+            QString firstType = model()->data(firstIdx, TypeRole).toString();
+            bool isFirstDir = (firstType == "folder" || firstType == "category");
+
+            // 2. 循环塞入元素，一旦遇到类型变动 (例如从文件夹突变为普通文件)，立即在这里截断退出当前行，强制折行
+            int numInRow = 0;
+            while (numInRow < maxNumInRow && (rowStart + numInRow) < count) {
+                int nextIdx = rowStart + numInRow;
+                QModelIndex idx = model()->index(nextIdx, 0);
+                QString nextType = model()->data(idx, TypeRole).toString();
+                bool isNextDir = (nextType == "folder" || nextType == "category");
+
+                if (isNextDir != isFirstDir) {
+                    break; // 类型改变，立即断开，不允许继续混排同行
+                }
+                numInRow++;
+            }
+
             int currentX = margin;
             for (int j = 0; j < numInRow; ++j) {
-                int itemIdx = i + j;
+                int itemIdx = rowStart + j;
                 m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, itemHeight), itemIdx };
                 currentX += itemWidth + standardSpacing;
             }
             currentY += itemHeight + spacing;
-            i += numInRow;
+            i += numInRow; // 推进到下一行
         }
     } else {
         // JustifiedMode 自适应宽高合理对齐排版
