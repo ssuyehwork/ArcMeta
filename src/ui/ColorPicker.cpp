@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QToolTip>
 #include "UiHelper.h"
 
 namespace ArcMeta {
@@ -332,6 +333,100 @@ void ColorPicker::setCurrentColor(const QColor& c) {
 // 2026-05-17 按照用户要求：暴露准确度滑条当前值
 int ColorPicker::currentTolerance() const {
     return m_toleranceSlider ? m_toleranceSlider->value() : 30;
+}
+
+
+// --- ColorStripPicker 实现 ---
+ColorStripPicker::ColorStripPicker(const QString& currentColorHex, QWidget* parent)
+    : QWidget(parent), m_selectedColor(currentColorHex) {
+    setFixedSize(268, 32);
+    setMouseTracking(true);
+    setCursor(Qt::PointingHandCursor);
+
+    m_items = {
+        {"", QColor("#888780"), "无颜色"},
+        {"#E24B4A", QColor("#E24B4A"), "红色"},
+        {"#EF9F27", QColor("#EF9F27"), "橙色"},
+        {"#FECF0E", QColor("#FECF0E"), "黄色"},
+        {"#639922", QColor("#639922"), "绿色"},
+        {"#1D9E75", QColor("#1D9E75"), "青色"},
+        {"#378ADD", QColor("#378ADD"), "蓝色"},
+        {"#7F77DD", QColor("#7F77DD"), "紫色"},
+        {"#5F5E5A", QColor("#5F5E5A"), "灰色"}
+    };
+}
+
+void ColorStripPicker::paintEvent(QPaintEvent* event) {
+    Q_UNUSED(event);
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // 背景填充 (与暗色菜单对齐)
+    painter.fillRect(rect(), QColor("#1e1e1e"));
+
+    int startX = 12; // 起始左边距
+    int y = rect().height() / 2;
+
+    for (int i = 0; i < m_items.size(); ++i) {
+        int cx = startX + i * (20 + m_spacing) + 10;
+
+        // 1. 绘制色块本身
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(m_items[i].color);
+        painter.drawEllipse(QPoint(cx, y), 10, 10);
+
+        // 2. 悬停状态：绘制突出亮白圈
+        if (i == m_hoveredIndex) {
+            painter.setBrush(Qt::NoBrush);
+            // 亮白画笔，宽度 1.8 像素
+            QPen pen(QColor("#FFFFFF"), 1.8);
+            painter.setPen(pen);
+            // 稍大一圈，半径设为 12 像素以包裹里面的色块
+            painter.drawEllipse(QPoint(cx, y), 12, 12);
+        }
+    }
+}
+
+void ColorStripPicker::mouseMoveEvent(QMouseEvent* event) {
+    int newHovered = -1;
+    int cy = rect().height() / 2;
+    int startX = 12;
+    for (int i = 0; i < m_items.size(); ++i) {
+        int cx = startX + i * (20 + m_spacing) + 10;
+        int dx = event->pos().x() - cx;
+        int dy = event->pos().y() - cy;
+        if (dx * dx + dy * dy <= 12 * 12) { // 12像素感应半径
+            newHovered = i;
+            break;
+        }
+    }
+    if (newHovered != m_hoveredIndex) {
+        m_hoveredIndex = newHovered;
+        update();
+        if (m_hoveredIndex >= 0) {
+            QToolTip::showText(QCursor::pos(), m_items[m_hoveredIndex].name, this);
+        } else {
+            QToolTip::hideText();
+        }
+    }
+}
+
+void ColorStripPicker::enterEvent(QEnterEvent* event) {
+    QWidget::enterEvent(event);
+}
+
+void ColorStripPicker::leaveEvent(QEvent* event) {
+    QWidget::leaveEvent(event);
+    m_hoveredIndex = -1;
+    update();
+    QToolTip::hideText();
+}
+
+void ColorStripPicker::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && m_hoveredIndex >= 0) {
+        emit colorSelected(m_items[m_hoveredIndex].hex);
+    }
+    QWidget::mousePressEvent(event);
 }
 
 } // namespace ArcMeta

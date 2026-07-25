@@ -2,6 +2,8 @@
 #define NOMINMAX
 #endif
 #include "ContentPanel.h" 
+#include "ColorPicker.h"
+#include <QWidgetAction>
 #include "../meta/MetadataManager.h" 
 #include <algorithm>
 #include "Logger.h"
@@ -1986,31 +1988,41 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 } 
             }
 
-            QMenu* colorMenu = menu.addMenu("设定颜色标签"); 
-            UiHelper::applyMenuStyle(colorMenu); 
-            colorMenu->setIcon(UiHelper::getIcon("palette", QColor("#EEEEEE"))); 
-            struct ColorItem { QString value; QString label; QColor preview; }; 
-            QList<ColorItem> colorItems = { 
-                {"", "无颜色", QColor("#888780")}, 
-                {"#E24B4A", "红色", QColor("#E24B4A")}, 
-                {"#EF9F27", "橙色", QColor("#EF9F27")}, 
-                {"#FECF0E", "黄色", QColor("#FECF0E")}, 
-                {"#639922", "绿色", QColor("#639922")}, 
-                {"#1D9E75", "青色", QColor("#1D9E75")}, 
-                {"#378ADD", "蓝色", QColor("#378ADD")}, 
-                {"#7F77DD", "紫色", QColor("#7F77DD")}, 
-                {"#5F5E5A", "灰色", QColor("#5F5E5A")} 
-            }; 
-            for (const auto& ci : colorItems) { 
-                QAction* ca = colorMenu->addAction(ci.label); 
-                ca->setData(ActionColorTag); 
-                ca->setProperty("colorName", ci.value); 
-                QPixmap pix(12, 12); pix.fill(Qt::transparent); 
-                QPainter p(&pix); p.setRenderHint(QPainter::Antialiasing); 
-                p.setBrush(ci.preview); p.setPen(Qt::NoPen); 
-                p.drawEllipse(0, 0, 12, 12); 
-                ca->setIcon(QIcon(pix)); 
-            } 
+            // 直接在主菜单上呈现“设定颜色标签”快捷色块栏
+            QString currentColorStr = currentIndex.data(ColorRole).toString();
+
+            QWidgetAction* pickerAction = new QWidgetAction(&menu);
+            ColorStripPicker* pickerWidget = new ColorStripPicker(currentColorStr, &menu);
+            pickerAction->setDefaultWidget(pickerWidget);
+            menu.addAction(pickerAction);
+
+            connect(pickerWidget, &ColorStripPicker::colorSelected, this, [this, view, &menu](const QString& hexColor) {
+                auto indexes = view->selectionModel()->selectedIndexes();
+                for (const auto& idx : indexes) {
+                    if (idx.column() == 0) {
+                        QString itemPath = idx.data(PathRole).toString();
+                        // 1. 同步写入到 metadata 表的 color 字段
+                        m_proxyModel->setData(idx, hexColor, ColorRole);
+
+                        // 2. 如果它是文件夹并且被绑定为了 categories 分类，则同时存入 categories 表的 color 字段
+                        std::wstring normPath = MetadataManager::normalizePath(itemPath.toStdWString());
+                        CategoryRepo::updateCategoryColorByPath(normPath, hexColor.toUpper().toStdWString());
+
+                        // 3. 重新渲染图标以保持视觉同步
+                        QIcon coloredIcon;
+                        QString ext = QFileInfo(itemPath).suffix().toLower();
+                        if (UiHelper::isGraphicsFile(ext)) {
+                            QImage img = UiHelper::getShellThumbnail(itemPath, this->m_zoomLevel);
+                            if (!img.isNull()) coloredIcon = QIcon(QPixmap::fromImage(img));
+                        }
+                        if (coloredIcon.isNull()) {
+                            coloredIcon = UiHelper::getFileIcon(itemPath, this->m_zoomLevel);
+                        }
+                        m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole);
+                    }
+                }
+                menu.close();
+            });
  
             bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
             menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
@@ -2272,32 +2284,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             // 2026-06-xx 物理修复：强制刷新代理模型排序，确保置顶项立即重排至顶部
             m_proxyModel->invalidate();
             m_proxyModel->sort(0, m_proxyModel->sortOrder());
-            break; 
-        } 
-        case ActionColorTag: { 
-            QString colorName = selectedAction->property("colorName").toString(); 
-            auto indexes = view->selectionModel()->selectedIndexes(); 
-            for (const auto& idx : indexes) { 
-                if (idx.column() == 0) { 
-                    QString itemPath = idx.data(PathRole).toString(); 
-                    // 2026-06-xx 架构简化：统一由 model->setData 处理持久化与缓存清理
-                    m_proxyModel->setData(idx, colorName, ColorRole); 
- 
-                    // 2026-06-05 按照要求：设置颜色后立即重新生成并应用图标，实现视觉同步 
-                    // 2026-05-17 逻辑修复：针对图像格式，必须优先尝试提取缩略图，防止图标覆盖内容
-                    QIcon coloredIcon;
-                    QString ext = QFileInfo(itemPath).suffix().toLower();
-                    if (UiHelper::isGraphicsFile(ext)) {
-                        // 2026-06-xx 物理同步：使用 m_zoomLevel 确保尺寸一致
-                        QImage img = UiHelper::getShellThumbnail(itemPath, this->m_zoomLevel);
-                        if (!img.isNull()) coloredIcon = QIcon(QPixmap::fromImage(img));
-                    }
-                    if (coloredIcon.isNull()) {
-                        coloredIcon = UiHelper::getFileIcon(itemPath, this->m_zoomLevel);
-                    }
-                    m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
-                } 
-            } 
             break; 
         } 
         case ActionEncrypt: { 

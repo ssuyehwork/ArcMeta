@@ -1,6 +1,7 @@
 #include "CategoryPanel.h"
 #include "MainWindow.h"
 #include "CategoryModel.h"
+#include "ColorPicker.h"
 #include "CategoryFilterProxyModel.h"
 #include "CategoryLockDialog.h"
 #include "CategorySetPasswordDialog.h"
@@ -253,16 +254,44 @@ void CategoryPanel::setupContextMenu() {
                 
                 menu.addSeparator();
                 
-                menu.addAction(UiHelper::getIcon("palette", WarningOrange, 18), "设置颜色", this, &CategoryPanel::onSetColor);
-                menu.addAction(UiHelper::getIcon("random_color", QColor("#e91e63"), 18), "随机颜色", this, &CategoryPanel::onRandomColor);
+                QString colorStr = index.data(ColorRole).toString();
+
+                // 使用 ColorStripPicker 快捷菜单项，直接展露在主菜单上
+                QWidgetAction* colorPickerAction = new QWidgetAction(&menu);
+                ColorStripPicker* colorPickerWidget = new ColorStripPicker(colorStr, &menu);
+                colorPickerAction->setDefaultWidget(colorPickerWidget);
+                menu.addAction(colorPickerAction);
+
+                int id = index.data(IdRole).toInt();
+                connect(colorPickerWidget, &ColorStripPicker::colorSelected, this, [this, id, &menu](const QString& hexColor) {
+                    auto all = CategoryRepo::getAll();
+                    for (auto& cat : all) {
+                        if (cat.id == id) {
+                            cat.color = hexColor.toUpper().toStdWString();
+                            CategoryRepo::update(cat);
+                            if (!cat.physicalPath.empty()) {
+                                MetadataManager::instance().setColor(cat.physicalPath, cat.color, true);
+                            }
+                            break;
+                        }
+                    }
+
+                    QSet<int> expandedIds;
+                    QStringList expandedNames;
+                    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
+
+                    m_categoryModel->refresh();
+
+                    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
+                    menu.close();
+                });
+
                 menu.addAction(UiHelper::getIcon("tag_filled", QColor("#9b59b6"), 18), "设置预设标签", this, &CategoryPanel::onSetPresetTags);
 
                 // [Plan-6] 创建主选项“文件夹图标”
-                int id = index.data(IdRole).toInt();
                 QMenu* iconMenu = menu.addMenu(UiHelper::getIcon("folder_filled", WarningOrange, 18), "文件夹图标");
                 UiHelper::applyMenuStyle(iconMenu);
 
-                QString colorStr = index.data(ColorRole).toString();
                 QColor catColor = colorStr.isEmpty() ? QColor("#555555") : QColor(colorStr);
 
                 // 使用 QWidgetAction 构建纯图标选择器（无任何文字，网格排列，支持 Hover 色值对齐与 Tooltip）
@@ -539,83 +568,6 @@ void CategoryPanel::onClassifyToCategory() {
 
     QString name = index.data(NameRole).toString();
     ToolTipOverlay::instance()->showText(QCursor::pos(), QString("已设为归类目标: %1").arg(name), 1000);
-}
-
-void CategoryPanel::onSetColor() {
-    QModelIndex index = m_categoryTree->currentIndex();
-    int id = getTargetCategoryId(index);
-    if (id <= 0) return;
-
-    QColor originalColor = Qt::white;
-    auto all_cats = CategoryRepo::getAll();
-    for(const auto& c : all_cats) {
-        if(c.id == id) {
-            originalColor = QColor(QString::fromStdWString(c.color));
-            break;
-        }
-    }
-
-    FramelessColorPicker dlg("选择分类颜色", this);
-    dlg.setCurrentColor(originalColor);
-    if (dlg.exec() != QDialog::Accepted) return;
-    
-    QColor color = dlg.selectedColor();
-
-    auto all = CategoryRepo::getAll();
-    for(auto& cat : all) {
-        if(cat.id == id) {
-            cat.color = color.name().toUpper().toStdWString();
-            CategoryRepo::update(cat);
-            if (!cat.physicalPath.empty()) {
-                MetadataManager::instance().setColor(cat.physicalPath, cat.color, true);
-            }
-            break;
-        }
-    }
-    
-    QSet<int> expandedIds;
-    QStringList expandedNames;
-    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
-
-    m_categoryModel->refresh();
-
-    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
-    
-    ToolTipOverlay::instance()->showText(QCursor::pos(), "分类颜色已更新", 1000);
-}
-
-void CategoryPanel::onRandomColor() {
-    QModelIndex index = m_categoryTree->currentIndex();
-    int id = getTargetCategoryId(index);
-    if (id <= 0) return;
-    
-    // 2026-03-xx 按照用户要求：从旧版本中迁移调色盘逻辑
-    static const QStringList palette = {
-        "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEEAD",
-        "#D4A5A5", "#9B59B6", "#3498DB", "#E67E22", "#2ECC71",
-        "#E74C3C", "#F1C40F", "#1ABC9C", "#34495E", "#95A5A6"
-    };
-    QString chosenColor = palette.at(QRandomGenerator::global()->bounded(palette.size()));
-    
-    auto all = CategoryRepo::getAll();
-    for(auto& cat : all) {
-        if(cat.id == id) {
-            cat.color = chosenColor.toStdWString();
-            CategoryRepo::update(cat);
-            if (!cat.physicalPath.empty()) {
-                MetadataManager::instance().setColor(cat.physicalPath, cat.color, true);
-            }
-            break;
-        }
-    }
-    
-    QSet<int> expandedIds;
-    QStringList expandedNames;
-    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
-
-    m_categoryModel->refresh();
-
-    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
 }
 
 void CategoryPanel::onSetPresetTags() {
@@ -1299,6 +1251,12 @@ bool CategoryPanel::eventFilter(QObject* obj, QEvent* event) {
         // 2026-06-xx 按照用户要求：支持 Delete 键物理删除选中分类
         if (obj == m_categoryTree && keyEvent->key() == Qt::Key_Delete) {
             onDeleteCategory();
+            return true;
+        }
+
+        // 2026-xx-xx 按照 Plan-63：按 F2 同步进入行内编辑状态
+        if (obj == m_categoryTree && keyEvent->key() == Qt::Key_F2) {
+            onRenameCategory();
             return true;
         }
 

@@ -12,6 +12,7 @@
 #include "AddressBar.h"
 #include "../core/CoreController.h"
 #include "CategoryPanel.h"
+#include "ColorPicker.h"
 #include "CategoryModel.h"
 #include "NavPanel.h"
 #include "ContentPanel.h"
@@ -1985,21 +1986,33 @@ void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
 
     menu.addSeparator();
 
-    // 1. 新增 “设置颜色”
-    QAction* actSetColor = menu.addAction(UiHelper::getIcon("palette", WarningOrange, 18), "设置颜色");
-
-    // 2. 新增 “随机颜色”
-    QAction* actRandomColor = menu.addAction(UiHelper::getIcon("random_color", QColor("#e91e63"), 18), "随机颜色");
-
-    // 3. 新增 “文件夹图标” 二级子菜单
-    QMenu* iconMenu = menu.addMenu(UiHelper::getIcon("folder_filled", WarningOrange, 18), "文件夹图标");
-    UiHelper::applyMenuStyle(iconMenu);
-
     QString colorStr = AppConfig::instance().getValue(QString("DriveBar/FolderColor_%1").arg(path), "#FFFFFF").toString();
     QColor folderColor = QColor(colorStr);
     if (!folderColor.isValid()) {
         folderColor = Style::TextMain;
     }
+
+    // 1. 新增 “设定分类色” 水平色块，直接展露在主菜单上
+    QWidgetAction* colorPickerAction = new QWidgetAction(&menu);
+    ColorStripPicker* colorPickerWidget = new ColorStripPicker(colorStr, &menu);
+    colorPickerAction->setDefaultWidget(colorPickerWidget);
+    menu.addAction(colorPickerAction);
+
+    connect(colorPickerWidget, &ColorStripPicker::colorSelected, this, [btn, path, &menu](const QString& hexColor) {
+        AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), hexColor.toUpper());
+        AppConfig::instance().sync();
+
+        // 如果此物理路径在托管库内已被入库标记为分类，同时也应同步存入 categories 表
+        std::wstring normPath = MetadataManager::normalizePath(path.toStdWString());
+        MetadataManager::instance().setColor(normPath, hexColor.toUpper().toStdWString(), true);
+
+        btn->update();
+        menu.close();
+    });
+
+    // 3. 新增 “文件夹图标” 二级子菜单
+    QMenu* iconMenu = menu.addMenu(UiHelper::getIcon("folder_filled", WarningOrange, 18), "文件夹图标");
+    UiHelper::applyMenuStyle(iconMenu);
 
     QWidgetAction* pickerAction = new QWidgetAction(iconMenu);
     QWidget* pickerWidget = new QWidget(iconMenu);
@@ -2072,25 +2085,6 @@ void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
         showNewAutoImportDialog();
     } else if (selectedAct == actRemove) {
         removeCustomMonitoredFolder(path);
-    } else if (selectedAct == actSetColor) {
-        FramelessColorPicker dlg("选择文件夹颜色", this);
-        dlg.setCurrentColor(folderColor);
-        if (dlg.exec() == QDialog::Accepted) {
-            QColor selected = dlg.selectedColor();
-            AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), selected.name().toUpper());
-            AppConfig::instance().sync();
-            btn->update(); // 触发重绘
-        }
-    } else if (selectedAct == actRandomColor) {
-        static const QStringList palette = {
-            "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEEAD",
-            "#D4A5A5", "#9B59B6", "#3498DB", "#E67E22", "#2ECC71",
-            "#E74C3C", "#F1C40F", "#1ABC9C", "#34495E", "#95A5A6"
-        };
-        QString chosenColor = palette.at(QRandomGenerator::global()->bounded(palette.size()));
-        AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), chosenColor);
-        AppConfig::instance().sync();
-        btn->update(); // 触发重绘
     }
 }
 
