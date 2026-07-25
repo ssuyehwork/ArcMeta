@@ -215,9 +215,8 @@ public:
                         }
                     }
 
-                    // 2026-xx-xx 按照最新深度共识：如果星级为0且不是(未打分但被选中且无颜色)的状态，则不绘制任何星星或禁止图标（只保留胶囊背景颜色）
-                    bool drawStars = (rating > 0) || (isSelected && colorName.isEmpty());
-
+                    // 只有在“评分非0”或“被选中”时，才绘制星级和禁止图标
+                    bool drawStars = (rating > 0) || isSelected;
                     if (drawStars) {
                         // 移植网格视图的亮度对比度感知算法
                         QColor bgColor = colorName.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorName);

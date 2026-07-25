@@ -133,44 +133,40 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
         }
     }
 
-    bool shouldShowRating = (rating > 0) || isSelected || !colorStr.isEmpty();
-    if (shouldShowRating) {
-        bool drawStars = (rating > 0) || (isSelected && colorStr.isEmpty());
+    bool drawStars = (rating > 0) || isSelected;
+    if (drawStars) {
+        QColor bgColor = colorStr.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorStr);
 
-        if (drawStars) {
-            QColor bgColor = colorStr.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorStr);
-            
-            // 物理修复：采用感知亮度对比色计算
-            double luminance = 0.0;
-            if (bgColor.isValid() && bgColor.alpha() > 0) {
-                luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
-            }
-
-            QColor starColor, emptyStarColor;
-            if (colorStr.isEmpty()) {
-                starColor      = QColor("#CCCCCC");
-                emptyStarColor = QColor("#888888");
-            } else if (luminance < 0.5) {
-                starColor      = QColor("#FFFFFF");
-                emptyStarColor = QColor(255, 255, 255, 160);
-            } else {
-                starColor      = QColor("#1A1A1A");
-                emptyStarColor = QColor(0, 0, 0, 140);
-            }
-
-            painter->save();
-            painter->setRenderHint(QPainter::Antialiasing);
-            UiHelper::getIcon("no_color", starColor, banRect.width()).paint(painter, banRect);
-            QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), starColor);
-            QPixmap emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), emptyStarColor);
-            for (int i = 0; i < 5; ++i) {
-                QRect starRect(starsStartX + i * (starSize + starSpacing), 
-                               ratingY + (ratingH - starSize) / 2, 
-                               starSize, starSize);
-                painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
-            }
-            painter->restore();
+        // 物理修复：采用感知亮度对比色计算
+        double luminance = 0.0;
+        if (bgColor.isValid() && bgColor.alpha() > 0) {
+            luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
         }
+
+        QColor starColor, emptyStarColor;
+        if (colorStr.isEmpty()) {
+            starColor      = QColor("#CCCCCC");
+            emptyStarColor = QColor("#888888");
+        } else if (luminance < 0.5) {
+            starColor      = QColor("#FFFFFF");
+            emptyStarColor = QColor(255, 255, 255, 160);
+        } else {
+            starColor      = QColor("#1A1A1A");
+            emptyStarColor = QColor(0, 0, 0, 140);
+        }
+
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        UiHelper::getIcon("no_color", starColor, banRect.width()).paint(painter, banRect);
+        QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), starColor);
+        QPixmap emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), emptyStarColor);
+        for (int i = 0; i < 5; ++i) {
+            QRect starRect(starsStartX + i * (starSize + starSpacing),
+                           ratingY + (ratingH - starSize) / 2,
+                           starSize, starSize);
+            painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
+        }
+        painter->restore();
     }
 }
 
