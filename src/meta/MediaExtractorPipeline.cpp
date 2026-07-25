@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QtConcurrent/QtConcurrent>
 #include <QDebug>
+#include <QCoreApplication>
 #include <algorithm>
 
 #ifdef Q_OS_WIN
@@ -34,6 +35,13 @@ MediaExtractorPipeline::MediaExtractorPipeline(QObject* parent) : QObject(parent
     m_retryTimer = new QTimer(this);
     m_retryTimer->setInterval(3000);
     connect(m_retryTimer, &QTimer::timeout, this, &MediaExtractorPipeline::processRetryQueue);
+
+    // 【修复】必须放在两个定时器创建完成之后：moveToThread 只会带走
+    // 调用时已存在的子对象，先创建子对象、最后再整体迁移线程，
+    // 才能保证 m_timer/m_retryTimer 真正跟随主线程事件循环运行，避免后台线程因没有事件循环导致定时器哑死的问题。
+    if (QCoreApplication::instance()) {
+        this->moveToThread(QCoreApplication::instance()->thread());
+    }
 }
 
 MediaExtractorPipeline::~MediaExtractorPipeline() {
@@ -44,12 +52,14 @@ MediaExtractorPipeline::~MediaExtractorPipeline() {
 void MediaExtractorPipeline::enqueue(const std::wstring& path) {
     std::lock_guard<std::mutex> lock(m_queueMutex);
     m_queue.push_back(path);
+    qDebug() << "[DB_TRACE] MediaExtractorPipeline::enqueue 推入提取队列，路径:" << QString::fromStdWString(path) << "总队列大小:" << m_queue.size();
     QMetaObject::invokeMethod(m_timer, "start", Qt::QueuedConnection);
 }
 
 void MediaExtractorPipeline::enqueueBatch(const std::vector<std::wstring>& paths) {
     std::lock_guard<std::mutex> lock(m_queueMutex);
     m_queue.insert(m_queue.end(), paths.begin(), paths.end());
+    qDebug() << "[DB_TRACE] MediaExtractorPipeline::enqueueBatch 批量推入提取队列，新增数量:" << paths.size() << "总队列大小:" << m_queue.size();
     QMetaObject::invokeMethod(m_timer, "start", Qt::QueuedConnection);
 }
 
@@ -64,6 +74,7 @@ void MediaExtractorPipeline::processNextBatch() {
         batch = std::move(m_queue);
         m_queue.clear();
     }
+    qDebug() << "[DB_TRACE] MediaExtractorPipeline::processNextBatch 开始处理提取任务批次，任务数量:" << batch.size();
 
     (void)QtConcurrent::run([this, batch]() {
 #ifdef Q_OS_WIN

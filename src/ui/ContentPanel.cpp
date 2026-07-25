@@ -195,7 +195,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == RatingRole) {
         return record.rating;
     } else if (role == ColorRole) {
-        return record.color;
+        return record.manualColor;
     } else if (role == IsLockedRole || role == PinnedRole) {
         return record.pinned;
     } else if (role == EncryptedRole) {
@@ -685,11 +685,10 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
  
     // 2. 颜色过滤 (Plan-18: 基于 CIELAB Delta E 的感知筛选逻辑)
     if (!currentFilter.colors.isEmpty() || !currentFilter.colorFilterText.isEmpty()) { 
-        QString dominantColorHex = record.color; 
         bool matchColor = false;
 
-        // 2026-06-23 按照用户要求：颜色筛选引入“面积占比”双轴过滤逻辑
-        auto calculateMatchedArea = [&](const QColor& targetCol) -> float {
+        // 计算自动提取色的匹配面积占比
+        auto calculateAutoColorMatchedArea = [&](const QColor& targetCol) -> float {
             if (!targetCol.isValid()) return 0.0f;
             float totalMatchedArea = 0.0f;
 
@@ -700,9 +699,9 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
                         totalMatchedArea += pe.second;
                     }
                 }
-            } else {
-                // Case B: 仅有主色调数据，若主色匹配则占比视为 100% (降级处理)
-                QColor recordCol = UiHelper::parseColorName(dominantColorHex);
+            } else if (!record.autoColor.isEmpty()) {
+                // Case B: 仅有自动主色调数据，若自动主色匹配则占比视为 100%
+                QColor recordCol = UiHelper::parseColorName(record.autoColor);
                 if (UiHelper::calculateDeltaE(targetCol, recordCol) < currentFilter.colorTolerance) {
                     totalMatchedArea = 1.0f;
                 }
@@ -710,16 +709,36 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
             return totalMatchedArea;
         };
 
+        // 判断特定的 targetCol 是否与当前记录匹配（结合手动色与自动色）
+        auto isColorMatched = [&](const QColor& targetCol) -> bool {
+            if (!targetCol.isValid()) return false;
+
+            // 1. 检查手动色：单一颜色值匹配，不受最小面积占比限制
+            if (!record.manualColor.isEmpty()) {
+                QColor recordCol = UiHelper::parseColorName(record.manualColor);
+                if (UiHelper::calculateDeltaE(targetCol, recordCol) < currentFilter.colorTolerance) {
+                    return true;
+                }
+            }
+
+            // 2. 检查自动色：利用 palettes 占比及 minColorArea 限制
+            float area = calculateAutoColorMatchedArea(targetCol);
+            if (area > 0.0f && area * 100.0f >= (float)currentFilter.minColorArea) {
+                return true;
+            }
+
+            return false;
+        };
+
         // 2.0 文本过滤逻辑 (如果存在文本)
         if (!currentFilter.colorFilterText.isEmpty()) {
             QString searchText = currentFilter.colorFilterText.trimmed();
             // 物理规则：支持名称、色值或“无色标”
             if (searchText == "无色标") {
-                if (dominantColorHex.isEmpty()) matchColor = true;
+                if (record.manualColor.isEmpty() && record.autoColor.isEmpty()) matchColor = true;
             } else if (searchText.startsWith("#")) {
                 QColor targetCol = UiHelper::parseColorName(searchText);
-                float area = calculateMatchedArea(targetCol);
-                if (area > 0.0f && area * 100.0f >= (float)currentFilter.minColorArea) matchColor = true;
+                if (isColorMatched(targetCol)) matchColor = true;
             } else {
                 // 模糊匹配颜色名称 (通过反查 colorMap)
                 static const QMap<QString, QString> nameToHex = {
@@ -730,8 +749,7 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
                 for (auto it = nameToHex.begin(); it != nameToHex.end(); ++it) {
                     if (it.key().contains(searchText)) {
                         QColor targetCol = QColor(it.value());
-                        float area = calculateMatchedArea(targetCol);
-                        if (area > 0.0f && area * 100.0f >= (float)currentFilter.minColorArea) { matchColor = true; break; }
+                        if (isColorMatched(targetCol)) { matchColor = true; break; }
                     }
                 }
             }
@@ -744,13 +762,12 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
             for (const QString& fc : currentFilter.colors) {
                 // 特殊情况：无色标 (不涉及占比逻辑)
                 if (fc.isEmpty()) {
-                    if (dominantColorHex.isEmpty()) { matchColor = true; break; }
+                    if (record.manualColor.isEmpty() && record.autoColor.isEmpty()) { matchColor = true; break; }
                     continue;
                 }
 
                 QColor targetCol = UiHelper::parseColorName(fc);
-                float area = calculateMatchedArea(targetCol);
-                if (area > 0.0f && area * 100.0f >= (float)currentFilter.minColorArea) {
+                if (isColorMatched(targetCol)) {
                     matchColor = true;
                     break;
                 }

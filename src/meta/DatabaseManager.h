@@ -90,7 +90,7 @@ public:
      * @brief 2026-08-xx：按盘符/按资源拆分锁粒度，支持高并发 WAL 模式
      */
     std::mutex& getGlobalMutex() { return m_globalDbMutex; }
-    std::shared_ptr<std::mutex> getDriveMutex(const std::wstring& volSerial);
+    std::shared_ptr<std::recursive_mutex> getDriveMutex(const std::wstring& volSerial);
 
     /**
      * @brief 增减并发写入源计数以及控制脏标记
@@ -170,10 +170,10 @@ private:
 
     std::mutex m_globalDbMutex;
     std::mutex m_mapMutex;
-    std::unordered_map<std::wstring, std::shared_ptr<std::mutex>> m_driveDbMutexMap;
+    std::unordered_map<std::wstring, std::shared_ptr<std::recursive_mutex>> m_driveDbMutexMap;
 
     bool loadDb(const std::wstring& diskPath, DbConnection& conn);
-    void saveDb(DbConnection& conn, bool forceFull = false);
+    bool saveDb(DbConnection& conn, bool forceFull = false);
     void closeDb(DbConnection& conn);
 
     QString getAppDir();

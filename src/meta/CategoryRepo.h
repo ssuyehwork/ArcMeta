@@ -70,6 +70,7 @@ public:
     static QStringList getSystemCategoryPaths(const QString& type);
 
     // 条目关联逻辑
+    static bool updateCategoryColorByPath(const std::wstring& path, const std::wstring& color);
     static bool addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint = L"");
     static bool removeItemFromCategory(int categoryId, const std::string& fileId128);
     static bool removeAllCategories(const std::string& fileId128);

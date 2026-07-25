@@ -509,6 +509,28 @@ bool CategoryRepo::reorderAll(bool ascending) {
     return true;
 }
 
+bool CategoryRepo::updateCategoryColorByPath(const std::wstring& path, const std::wstring& color) {
+    WriteGuard guard;
+    sqlite3* memDb = DatabaseManager::instance().getGlobalDb();
+    if (!memDb) return false;
+
+    const char* sql = "UPDATE categories SET color = ? WHERE physical_path = ?";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(memDb, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text16(stmt, 1, color.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
+        bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+        sqlite3_finalize(stmt);
+        if (ok) {
+            qDebug() << "[DB_TRACE] updateCategoryColorByPath 成功同步更新 categories 表分类颜色，路径:" << QString::fromStdWString(path) << "颜色:" << QString::fromStdWString(color);
+            DatabaseManager::instance().flushAll();
+            return true;
+        }
+    }
+    qWarning() << "[DB_TRACE] updateCategoryColorByPath 执行失败！路径:" << QString::fromStdWString(path);
+    return false;
+}
+
 bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint) {
     WriteGuard guard;
     sqlite3* memDb = DatabaseManager::instance().getGlobalDb();
@@ -1080,9 +1102,11 @@ void CategoryRepo::syncPhysicalDirectoryCascade(const std::wstring& rootPath) {
                 cat.name = info.fileName().toStdWString();
                 cat.physicalFrn = frn;
                 cat.physicalPath = rootPath;
-                cat.color = CategoryRepo::getDefaultColor();
                 if (CategoryRepo::add(cat)) {
                     rootCatId = cat.id;
+                    // 对根文件夹自身注册元数据，使其进入颜色、尺寸等后台解析流水线
+                    MetadataManager::instance().registerItem(rootPath, true);
+                    qDebug() << "[DB_TRACE] syncPhysicalDirectoryCascade 成功为根文件夹本身注册元数据：" << QString::fromStdWString(rootPath);
                 }
             }
         } catch (...) {}
@@ -1108,9 +1132,11 @@ void CategoryRepo::syncPhysicalDirectoryCascade(const std::wstring& rootPath) {
                                 cat.name = fi.fileName().toStdWString();
                                 cat.physicalFrn = std::stoull(frnStr, nullptr, 16);
                                 cat.physicalPath = wPath;
-                                cat.color = CategoryRepo::getDefaultColor();
                                 if (CategoryRepo::add(cat)) {
                                     existingId = cat.id;
+                                    // 对发现的子文件夹自身注册元数据，使其进入解析流水线
+                                    MetadataManager::instance().registerItem(wPath, true);
+                                    qDebug() << "[DB_TRACE] syncPhysicalDirectoryCascade 成功为子文件夹注册元数据：" << QString::fromStdWString(wPath);
                                 }
                             } catch (...) {}
                         }

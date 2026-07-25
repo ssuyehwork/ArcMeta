@@ -27,6 +27,8 @@
 
 #include "meta/MetadataManager.h"
 #include "meta/CategoryRepo.h"
+#include "meta/MediaExtractorPipeline.h"
+#include "meta/DatabaseManager.h"
 #include "mft/MftReader.h"
 #include "core/CoreController.h"
 #include "core/AutoImportManager.h"
@@ -129,7 +131,11 @@ int main(int argc, char *argv[]) {
     ArcMeta::MetadataManager::instance();
     // 2026-06-xx 物理修复：在主线程预热 CategoryRepo，解决 QTimer 跨线程启动导致的内存与磁盘不一致
     ArcMeta::CategoryRepo::initialize();
-    qDebug() << "[PERF] MetadataManager/CategoryRepo 单例预热耗时:" << (QDateTime::currentMSecsSinceEpoch() - metaInitStart) << "ms";
+    // 2026-07-25 物理修复：在主线程预热多媒体特征提取管道单例，确保其 QTimer 定时器和事件分发都依附在主线程的 QEventLoop 中运行，杜绝后台线程因没有事件循环导致定时器哑死的问题
+    ArcMeta::MediaExtractorPipeline::instance();
+    // 2026-07-25 物理修复：在主线程预热数据库管理器单例，确保其定期落盘 QTimer 定时器能正常在主线程事件循环中调度，保障数据安全备份兜底
+    ArcMeta::DatabaseManager::instance();
+    qDebug() << "[PERF] MetadataManager/CategoryRepo/MediaExtractorPipeline/DatabaseManager 单例预热耗时:" << (QDateTime::currentMSecsSinceEpoch() - metaInitStart) << "ms";
 
     // 3. 简化启动：直接显示主窗口
     // 2026-04-13 按用户要求移除 LoadingWindow 和 initializeHotIcons()

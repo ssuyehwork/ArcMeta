@@ -93,6 +93,13 @@ DatabaseManager::DatabaseManager(QObject* parent) : QObject(parent) {
         });
     });
     m_syncTimer->start();
+
+    // 【修复】必须放在定时器创建完成之后：moveToThread 只会带走
+    // 调用时已存在的子对象，先创建子对象、最后再整体迁移线程，
+    // 才能保证 m_syncTimer 真正跟随主线程事件循环运行，保障后台定期兜底存盘保险正常运行。
+    if (QCoreApplication::instance()) {
+        this->moveToThread(QCoreApplication::instance()->thread());
+    }
 }
 
 DatabaseManager::~DatabaseManager() {
@@ -167,7 +174,8 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             original_path TEXT,
             width INTEGER DEFAULT 0,
             height INTEGER DEFAULT 0,
-            ingestion_status INTEGER DEFAULT -1
+            ingestion_status INTEGER DEFAULT -1,
+            auto_color TEXT DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
 
@@ -270,6 +278,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     bool hasWidthColumn = false;
     bool hasHeightColumn = false;
     bool hasIngestionStatusColumn = false;
+    bool hasAutoColorColumn = false;
 
     if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(checkStmt) == SQLITE_ROW) {
@@ -279,6 +288,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
                 if (name == "width") hasWidthColumn = true;
                 if (name == "height") hasHeightColumn = true;
                 if (name == "ingestion_status") hasIngestionStatusColumn = true;
+                if (name == "auto_color") hasAutoColorColumn = true;
             }
         }
         sqlite3_finalize(checkStmt);
@@ -295,6 +305,10 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     if (!hasIngestionStatusColumn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 ingestion_status 字段...";
         sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN ingestion_status INTEGER DEFAULT -1", nullptr, nullptr, nullptr);
+    }
+    if (!hasAutoColorColumn) {
+        qDebug() << "[DB] 检测到旧版数据库，正在添加 auto_color 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN auto_color TEXT DEFAULT ''", nullptr, nullptr, nullptr);
     }
 
     // 2026-08-xx 物理同步扩展：迁移 categories 表字段
@@ -332,8 +346,11 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     return true;
 }
 
-void DatabaseManager::saveDb(DbConnection& conn, bool forceFull) {
-    if (!conn.diskDb || !conn.memDb) return;
+bool DatabaseManager::saveDb(DbConnection& conn, bool forceFull) {
+    if (!conn.diskDb || !conn.memDb) {
+        qWarning() << "[DB_TRACE] saveDb 失败：连接句柄为空，路径:" << QString::fromStdWString(conn.diskPath);
+        return false;
+    }
 
     // 2026-07-20 优化设计：彻底废除性能极低的增量分步备份与频繁 sleep 让步机制。
     // 因为该函数本身就在后台异步工作线程中运行，直接执行一次性全量备份（sqlite3_backup_step 设为 -1）
@@ -341,11 +358,18 @@ void DatabaseManager::saveDb(DbConnection& conn, bool forceFull) {
     (void)forceFull;
     sqlite3_backup* backup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
     if (backup) {
-        sqlite3_backup_step(backup, -1);
+        int rc = sqlite3_backup_step(backup, -1);
         sqlite3_backup_finish(backup);
-        qDebug() << "[DB] Successfully backed up memory database to disk:" << QString::fromStdWString(conn.diskPath);
+        if (rc == SQLITE_DONE) {
+            qDebug() << "[DB_TRACE] saveDb 成功备份内存数据库至硬盘！路径:" << QString::fromStdWString(conn.diskPath);
+            return true;
+        } else {
+            qWarning() << "[DB_TRACE] saveDb 备份到硬盘中途失败！错误代码:" << rc << "路径:" << QString::fromStdWString(conn.diskPath);
+            return false;
+        }
     } else {
-        qWarning() << "[DB] Failed to initialize backup from memory to disk:" << sqlite3_errmsg(conn.diskDb);
+        qWarning() << "[DB_TRACE] saveDb 初始化备份失败！错误:" << sqlite3_errmsg(conn.diskDb) << "路径:" << QString::fromStdWString(conn.diskPath);
+        return false;
     }
 }
 
@@ -381,15 +405,39 @@ void DatabaseManager::flushAll(bool forceFull) {
     MetadataManager::instance().slideRecentWindow();
 
     if (!m_isDirty.load()) {
-        qDebug() << "[DB] Database is clean (not dirty), skipping flushAll() for instant exit.";
+        qDebug() << "[DB_TRACE] flushAll 跳过：当前没有脏数据需要备份。";
         return;
     }
     std::lock_guard<std::mutex> lock(m_mutex);
-    saveDb(m_globalDb, forceFull);
-    for (auto& pair : m_driveDbs) {
-        saveDb(pair.second, forceFull);
+    qDebug() << "[DB_TRACE] flushAll 开始将所有脏数据库备份到硬盘...";
+
+    bool allSucceeded = true;
+    
+    // 全局库互斥锁锁定保护
+    {
+        std::lock_guard<std::mutex> lockGlobal(m_globalDbMutex);
+        if (!saveDb(m_globalDb, forceFull)) {
+            allSucceeded = false;
+            qWarning() << "[DB_TRACE] flushAll: 全局库备份失败！";
+        }
     }
-    m_isDirty.store(false);
+    
+    // 各驱动分库互斥锁锁定保护
+    for (auto& pair : m_driveDbs) {
+        auto dbLock = getDriveMutex(pair.first);
+        std::lock_guard<std::recursive_mutex> lockDrive(*dbLock);
+        if (!saveDb(pair.second, forceFull)) {
+            allSucceeded = false;
+            qWarning() << "[DB_TRACE] flushAll: 磁盘分库备份失败，序列号:" << QString::fromStdWString(pair.first);
+        }
+    }
+    
+    if (allSucceeded) {
+        qDebug() << "[DB_TRACE] flushAll: 所有分库已全部成功持久化落盘，清空脏标记。";
+        m_isDirty.store(false);
+    } else {
+        qWarning() << "[DB_TRACE] flushAll: 存在分库备份失败！保留脏标记以防数据丢失，等候重试。";
+    }
 }
 
 bool DatabaseManager::flushStep() {
@@ -483,11 +531,11 @@ sqlite3* DatabaseManager::getDiskDb(sqlite3* memDb) {
     return nullptr;
 }
 
-std::shared_ptr<std::mutex> DatabaseManager::getDriveMutex(const std::wstring& volSerial) {
+std::shared_ptr<std::recursive_mutex> DatabaseManager::getDriveMutex(const std::wstring& volSerial) {
     std::lock_guard<std::mutex> lock(m_mapMutex);
     auto it = m_driveDbMutexMap.find(volSerial);
     if (it == m_driveDbMutexMap.end()) {
-        auto mtx = std::make_shared<std::mutex>();
+        auto mtx = std::make_shared<std::recursive_mutex>();
         m_driveDbMutexMap[volSerial] = mtx;
         return mtx;
     }

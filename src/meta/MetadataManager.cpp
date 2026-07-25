@@ -171,7 +171,10 @@ void MetadataManager::initFromScchMode() {
                 rm.isFolder = sqlite3_column_int(stmt, 2);
                 rm.rating = sqlite3_column_int(stmt, 3);
                 const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
-                if (color) rm.color = color;
+                if (color) rm.manualColor = color;
+
+                const wchar_t* autoColor = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 18));
+                if (autoColor) rm.autoColor = autoColor;
                 
                 const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 5));
                 QString tags = wtags ? QString::fromWCharArray(wtags) : "";
@@ -381,7 +384,7 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
             bool metadataValid = true;
             QFileInfo info(QString::fromStdWString(nPath));
             if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-                if (it->second.width <= 0 || it->second.height <= 0 || it->second.color.empty()) {
+                if (it->second.width <= 0 || it->second.height <= 0 || it->second.autoColor.empty()) {
                     metadataValid = false;
                 }
             }
@@ -491,7 +494,15 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
     std::wstring volSerial = getVolumeSerialNumber(nFolder);
     QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
     sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
-    if (!db) return;
+    if (!db) {
+        qWarning() << "[DB_TRACE] calculateAndPersistProgress 失败：无法取得分库，文件夹:" << QString::fromStdWString(nFolder);
+        return;
+    }
+
+    // 互斥锁定该物理分库递归句柄，解决高并发下在同一个 sqlite3 连接中冲突导致的死锁，确保重入安全
+    auto dbLock = DatabaseManager::instance().getDriveMutex(volSerial);
+    std::lock_guard<std::recursive_mutex> lockConn(*dbLock);
+    qDebug() << "[DB_TRACE] calculateAndPersistProgress 开始计算导入进度，获取连接递归互斥锁，文件夹:" << QString::fromStdWString(nFolder);
 
     // 2. 统计状态（严禁物理读盘，仅使用数据库标记）
     // 进度 = (该目录下状态为 1 的项目数) / (该目录下状态为 0 和 1 的项目总数)
@@ -526,7 +537,11 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
         std::string key = "PROGRESS:" + QString::fromStdWString(nFolder).toUtf8().toStdString();
         sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_double(stmt, 2, progress);
-        sqlite3_step(stmt);
+        if (sqlite3_step(stmt) == SQLITE_DONE) {
+            qDebug() << "[DB_TRACE] calculateAndPersistProgress 写入进度数据成功，进度:" << progress << "文件夹:" << QString::fromStdWString(nFolder);
+        } else {
+            qWarning() << "[DB_TRACE] calculateAndPersistProgress 写入进度失败！Error:" << sqlite3_errmsg(db);
+        }
         sqlite3_finalize(stmt);
     }
 
@@ -657,7 +672,8 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         if (!rm.fileId128.empty() && m_fidToPath.count(rm.fileId128)) {
             const RuntimeMeta& existing = m_cache[m_fidToPath[rm.fileId128]];
             rm.rating    = existing.rating;
-            rm.color     = existing.color;
+            rm.manualColor = existing.manualColor;
+            rm.autoColor = existing.autoColor;
             rm.tags      = existing.tags;
             rm.note      = existing.note;
             rm.url       = existing.url;
@@ -771,7 +787,7 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
     ensureActivated(nPath);
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        m_cache[nPath].color = color; 
+        m_cache[nPath].manualColor = color; 
     }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     persistAsync(nPath);
@@ -880,11 +896,19 @@ void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std:
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
     
+    bool isFolder = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         RuntimeMeta& meta = m_cache[nPath];
-        meta.color = color;
+        meta.autoColor = color;
         meta.palettes = entries;
+        isFolder = meta.isFolder;
+    }
+    
+    // 【同步逻辑】如果是文件夹主色提取，则同步更新 categories 分类定义表中的颜色
+    if (isFolder) {
+        qDebug() << "[DB_TRACE] setItemVisualMetadata 判定为文件夹，触发 categories 颜色同步。路径:" << QString::fromStdWString(nPath) << "颜色:" << QString::fromStdWString(color);
+        CategoryRepo::updateCategoryColorByPath(nPath, color);
     }
     
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
@@ -1667,7 +1691,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
         if (db) groups[db].push_back(p);
     }
 
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     for (auto& entry : groups) {
         sqlite3* memDb = entry.first;
@@ -1702,7 +1726,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
                     sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_int(stmt, 3, meta.isFolder ? 1 : 0);
                     sqlite3_bind_int(stmt, 4, meta.rating);
-                    sqlite3_bind_text16(stmt, 5, meta.color.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(stmt, 5, meta.manualColor.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_text16(stmt, 6, meta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_text16(stmt, 7, meta.note.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_text16(stmt, 8, meta.url.c_str(), -1, SQLITE_TRANSIENT);
@@ -1722,6 +1746,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
                     sqlite3_bind_int(stmt, 16, meta.width);
                     sqlite3_bind_int(stmt, 17, meta.height);
                     sqlite3_bind_int(stmt, 18, meta.ingestionStatus);
+                    sqlite3_bind_text16(stmt, 19, meta.autoColor.c_str(), -1, SQLITE_TRANSIENT);
                 };
                 bindLogic(memStmt, p, rMeta);
 
@@ -1749,15 +1774,30 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     
     RuntimeMeta rMeta = getMeta(nPath);
     sqlite3* memDb = nullptr;
+    std::wstring volSerial;
     
     if (nPath.length() == 3 && nPath[1] == L':' && (nPath[2] == L'\\' || nPath[2] == L'/')) {
         memDb = DatabaseManager::instance().getGlobalDb();
     } else {
-        std::wstring volSerial = getVolumeSerialNumber(nPath);
+        volSerial = getVolumeSerialNumber(nPath);
         QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
         memDb = DatabaseManager::instance().getMemoryDb(volSerial, letter);
     }
-    if (!memDb) return;
+    if (!memDb) {
+        qWarning() << "[DB_TRACE] persistAsync 失败：未能获取 memDb，路径:" << QString::fromStdWString(nPath);
+        return;
+    }
+
+    // 获取驱动盘递归互斥锁并上锁，解决并发写入和备份竞争造成的 SQLITE_BUSY / SQLITE_LOCKED 冲突，且确保重入安全
+    std::shared_ptr<std::recursive_mutex> dbLock;
+    if (!volSerial.empty()) {
+        dbLock = DatabaseManager::instance().getDriveMutex(volSerial);
+    }
+    std::unique_lock<std::recursive_mutex> lockConn;
+    if (dbLock) {
+        lockConn = std::unique_lock<std::recursive_mutex>(*dbLock);
+        qDebug() << "[DB_TRACE] persistAsync 成功锁定驱动盘递归互斥锁，开始写入内存库，路径:" << QString::fromStdWString(nPath);
+    }
 
     // 1. 内存库操作 (Memory Commit)
     bool isNew = true;
@@ -1780,7 +1820,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, 3, meta.isFolder ? 1 : 0);
         sqlite3_bind_int(stmt, 4, meta.rating);
-        sqlite3_bind_text16(stmt, 5, meta.color.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 5, meta.manualColor.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text16(stmt, 6, meta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text16(stmt, 7, meta.note.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text16(stmt, 8, meta.url.c_str(), -1, SQLITE_TRANSIENT);
@@ -1803,9 +1843,10 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         sqlite3_bind_int(stmt, 16, meta.width);
         sqlite3_bind_int(stmt, 17, meta.height);
         sqlite3_bind_int(stmt, 18, meta.ingestionStatus);
+        sqlite3_bind_text16(stmt, 19, meta.autoColor.c_str(), -1, SQLITE_TRANSIENT);
     };
 
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     
     sqlite3_stmt* memStmt;
     if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
@@ -1820,9 +1861,13 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
                 m_cache[nPath].isManaged = true;
             }
-            // [Plan-131 方案 A] 磁盘直连模式，取消 redundant async dispatch
+            qDebug() << "[DB_TRACE] persistAsync 写入内存库成功，是否新项:" << isNew << "路径:" << QString::fromStdWString(nPath);
+        } else {
+            qWarning() << "[DB_TRACE] persistAsync 写入内存库失败！Error:" << sqlite3_errmsg(memDb) << "路径:" << QString::fromStdWString(nPath);
         }
         sqlite3_finalize(memStmt);
+    } else {
+        qWarning() << "[DB_TRACE] persistAsync SQL prepare 失败！Error:" << sqlite3_errmsg(memDb) << "路径:" << QString::fromStdWString(nPath);
     }
         
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));

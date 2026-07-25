@@ -23,7 +23,8 @@ struct ItemRecord {
 
     // 2026-06-xx 物理对标：注入核心元数据，杜绝 UI 渲染时的同步 I/O
     int rating = 0;
-    QString color;
+    QString manualColor;
+    QString autoColor;
     QStringList tags;
     std::string fileId;
     bool pinned = false;

@@ -7,7 +7,8 @@ namespace ArcMeta {
 
 void ItemRecord::fromMetadata(ItemRecord& r, const RuntimeMeta& meta) {
     r.rating = meta.rating;
-    r.color = QString::fromStdWString(meta.color);
+    r.manualColor = QString::fromStdWString(meta.manualColor);
+    r.autoColor = QString::fromStdWString(meta.autoColor);
     r.tags = meta.tags;
     r.pinned = meta.pinned;
     r.encrypted = meta.encrypted;

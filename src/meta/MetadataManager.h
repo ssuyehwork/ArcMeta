@@ -21,7 +21,8 @@ namespace ArcMeta {
  */
 struct RuntimeMeta {
     int rating;
-    std::wstring color;
+    std::wstring manualColor;
+    std::wstring autoColor;
     QStringList tags;
     std::wstring note;
     std::wstring url;
@@ -51,7 +52,7 @@ struct RuntimeMeta {
      * 2026-06-xx 按照用户要求：只要有任何元数据修改或已登记，即视为数据库已录入项
      */
     bool hasUserOperations() const {
-        return isManaged || rating > 0 || !color.empty() || !tags.isEmpty() || !note.empty() || !url.empty() || pinned || encrypted;
+        return isManaged || rating > 0 || !manualColor.empty() || !autoColor.empty() || !tags.isEmpty() || !note.empty() || !url.empty() || pinned || encrypted;
     }
 };
 
