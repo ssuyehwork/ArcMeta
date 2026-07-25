@@ -105,7 +105,7 @@ private:
     int m_hoveredIndex = -1;
     QString m_selectedColor;
     int m_circleRadius = 7;  // 半径 7，直径 14
-    int m_spacing = 3;       // 间隔 3
+    int m_spacing = 5;       // 间隔 5
 };
 
 } // namespace ArcMeta

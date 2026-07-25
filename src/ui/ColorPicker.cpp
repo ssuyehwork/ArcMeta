@@ -339,9 +339,9 @@ int ColorPicker::currentTolerance() const {
 // --- ColorStripPicker 实现 ---
 ColorStripPicker::ColorStripPicker(const QString& currentColorHex, QWidget* parent)
     : QWidget(parent), m_selectedColor(currentColorHex) {
-    // 9个直径为14像素的圆，间距为3像素。
-    // 总宽度：左侧预留12像素 + 9 * 14像素圆 + 8 * 3像素间隔 + 右侧预留12像素 = 12 + 126 + 24 + 12 = 174像素
-    setFixedSize(174, 26);
+    // 9个直径为14像素的圆，间距为5像素。
+    // 总宽度：左侧预留12像素 + 9 * 14像素圆 + 8 * 5像素间隔 + 右侧预留12像素 = 12 + 126 + 40 + 12 = 190像素
+    setFixedSize(190, 26);
     setMouseTracking(true);
     setCursor(Qt::PointingHandCursor);
 
