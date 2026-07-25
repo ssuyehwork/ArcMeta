@@ -1,21 +1,23 @@
-# Modification Plan - 标注色块选择器集成与旧颜色逻辑根除方案
+# Modification Plan - 标注色块选择器集成与全模式断行防混排方案
 
-本方案严格遵守用户指定的任务边界，致力于：
-1. 彻底根除并清理“随机颜色”和“设置颜色”相关的旧逻辑代码；
-2. 在分类树（`CategoryPanel`）及自定义盘符文件夹按钮（`FolderButton`）的右键菜单上，直接渲染横向圆形标注色选择器。鼠标 Hover 时呈现同心白色圆圈高亮；
-3. 选择色块后，关闭右键菜单，并将色值同时写入数据库 `categories` 表的 `color` 字段以及 `metadata` 表的 `color` 字段，实现数据的多表同步。
+本方案旨在：
+1. 彻底清除冗余的“随机颜色”和“设置颜色”旧逻辑代码，并直接在右键菜单中提供一个横向圆形色块选择器；
+2. 贯彻 **“任何模式都不允许混排”** 的钢律，捍卫文件夹与普通文件的严格断行隔离规则，消除当前版本中 `GridMode` 视图下文件与文件夹同行并排的恶劣混排 Bug。
 
 ---
 
 ## 1. 拟修改与清理的文件清单
 
 - **`src/ui/CategoryPanel.h` / `src/ui/CategoryPanel.cpp`**:
-  - 彻底删除旧函数 `onSetColor()` 与 `onRandomColor()` 的声明与定义。
-  - 清理分类树右键菜单中的 `“设置颜色”` 与 `“随机颜色”` 菜单项。
+  - 彻底删除 `onSetColor()` 与 `onRandomColor()` 声明与定义。
+  - 删除右键菜单中的 `“设置颜色”` 与 `“随机颜色”` 菜单项。
   - 引入并在右键菜单中嵌入新建的 `ColorStripPicker` 行动作。
 - **`src/ui/MainWindow.cpp`**:
-  - 在 `onFolderButtonContextMenu`（自定义文件夹按钮右键菜单）中，彻底删除旧的 `actSetColor`、`actRandomColor` 动作逻辑，彻底移除调色板 `FramelessColorPicker` 在此处的实例化。
-  - 引入并嵌入 `ColorStripPicker` 行动作，选择颜色后同步更新 `categories` 表与 `metadata` 表。
+  - 在 `onFolderButtonContextMenu`（文件夹按钮右键菜单）中，删除旧的 `actSetColor`、`actRandomColor` 动作逻辑，彻底移除 `FramelessColorPicker` 在此处的实例化。
+  - 引入并嵌入 `ColorStripPicker` 行动作，选择颜色后同步更新多表字段。
+- **`src/ui/JustifiedView.cpp`**:
+  - 针对 `GridMode` 网格视图重构排版循环，注入类型突变断行判定，彻底消除文件和文件夹同行并排。
+  - 强化并保留 `JustifiedMode` 自适应视图下的物理强制分离换行机制。
 - **`src/ui/ColorStripPicker.h` / `src/ui/ColorStripPicker.cpp`（新增）**:
   - 实现横向色块选择控件。每个色块支持鼠标 hover 时的白色高亮圆圈，并在选中时关闭右键菜单、触发信号。
 
@@ -120,31 +122,122 @@ signals:
 } // namespace ArcMeta
 ```
 
-### 2.2 数据的多表同步更新与菜单嵌入
+### 2.2 彻底捍卫“任何模式都不允许混排”硬核折行机制
 
-#### 2.2.1 分类树（`CategoryPanel`）右键菜单应用：
-1. 选中颜色后，通过 `CategoryRepo` 将 `colorHex` 写入对应分类的 `color` 字段并落库。
-2. 同步检查分类是否具有物理路径 `physicalPath`，若有则调用 `MetadataManager::instance().setColor(cat.physicalPath, colorHex.toStdWString(), true)` 同步写入 `metadata` 表。
-3. 刷新视图 `m_categoryModel->refresh()`。
+#### 2.2.1 `GridMode`（网格视图）彻底杜绝同行混排
+当前版本的网格模式排版没有任何类型判断，导致文件进入文件夹同行。我们通过在填充该行之前进行**类型变动强行截断断行**：
 
-#### 2.2.2 盘符/自定义文件夹（`FolderButton`）右键菜单应用：
-1. 调用 `MetadataManager::instance().setColor(folderPath, colorHex.toStdWString(), true)` 写入元数据表。
-2. 同时调用 `CategoryRepo::updateCategoryColorByPath(folderPath, colorHex.toStdWString())`，将对应的分类数据库表（`categories`）中的对应字段同步写入。
-3. 更新 AppConfig 本地颜色配置并重绘按钮。
+```cpp
+    if (m_layoutMode == GridMode) {
+        // GridMode 网格等宽等高排布
+        int itemWidth = m_targetRowHeight + cardPadding;
+        int itemHeight = m_targetRowHeight + extraHeight;
+
+        int maxNumInRow = (containerWidth + spacing) / (itemWidth + spacing);
+        if (maxNumInRow <= 0) maxNumInRow = 1;
+
+        int standardSpacing = spacing;
+        if (maxNumInRow > 1) {
+            standardSpacing = (containerWidth - (maxNumInRow * itemWidth)) / (maxNumInRow - 1);
+        }
+
+        int i = 0;
+        while (i < count) {
+            int rowStart = i;
+            // 1. 获取当前行首项的类型 (是文件夹/分类还是普通文件)
+            QModelIndex firstIdx = model()->index(rowStart, 0);
+            QString firstType = model()->data(firstIdx, TypeRole).toString();
+            bool isFirstDir = (firstType == "folder" || firstType == "category");
+
+            // 2. 遍历本行允许容纳的项，一旦检测到后续项类型突变，强行截断断行，另起一行！
+            int numInRow = 0;
+            while (numInRow < maxNumInRow && (rowStart + numInRow) < count) {
+                int nextIdx = rowStart + numInRow;
+                QModelIndex idx = model()->index(nextIdx, 0);
+                QString nextType = model()->data(idx, TypeRole).toString();
+                bool isNextDir = (nextType == "folder" || nextType == "category");
+
+                if (isNextDir != isFirstDir) {
+                    break; // 类型改变，立即截断，本行填充到此为止
+                }
+                numInRow++;
+            }
+
+            int currentX = margin;
+            for (int j = 0; j < numInRow; ++j) {
+                int itemIdx = rowStart + j;
+                m_geometries[itemIdx] = { QRect(currentX, currentY, itemWidth, itemHeight), itemIdx };
+                currentX += itemWidth + standardSpacing;
+            }
+            currentY += itemHeight + spacing;
+            i += numInRow; // 推进下一行
+        }
+    }
+```
+
+#### 2.2.2 `JustifiedMode`（自适应视图）保留物理隔离换行
+保留并加固原本在 `JustifiedMode` 下工作的物理隔离换行判断，确保自适应模式下也没有任何混排漏网之鱼：
+```cpp
+            bool forceBreak = false;
+            while (i < count) {
+                QModelIndex idx = model()->index(i, 0);
+                double ar = model()->data(idx, m_aspectRatioRole).toDouble();
+                if (ar <= 0) ar = 1.0;
+                
+                // 物理分离逻辑：如果当前项是文件，但行首是文件夹（或反之），强制换行
+                QString type = model()->data(idx, TypeRole).toString();
+                bool isCurrentDir = (type == "folder" || type == "category");
+                
+                if (i > rowStart) {
+                    QModelIndex prevIdx = model()->index(i - 1, 0);
+                    QString prevType = model()->data(prevIdx, TypeRole).toString();
+                    bool isPrevDir = (prevType == "folder" || prevType == "category");
+                    
+                    if (isCurrentDir != isPrevDir) {
+                        forceBreak = true;
+                        break;
+                    }
+                }
+                ...
+```
 
 ---
 
-## 3. 彻底清除旧代码列表（绝不残留）
+## 3. 多数据库（多表）同步写入逻辑
+
+### 3.1 分类树（`CategoryPanel`）右键选色：
+1. 更新 `categories` 表：
+   - 根据选中的分类 `id` 查找 `Category` 数据，设置 `cat.color = colorHex.toStdWString()`。
+   - 调用 `CategoryRepo::update(cat)` 将更改写入 `categories` 表。
+2. 同步更新 `metadata` 表：
+   - 检查分类是否具有 `physicalPath`，若有则调用 `MetadataManager::instance().setColor(cat.physicalPath, colorHex.toStdWString(), true)` 同步写入。
+3. 自动同步和 UI 刷新：
+   - 调用 `m_categoryModel->refresh()`。
+   - 自动关闭菜单。
+
+### 3.2 盘符/自定义文件夹（`FolderButton`）右键选色：
+1. 更新 `metadata` 表：
+   - 调用 `MetadataManager::instance().setColor(folderPath, colorHex.toStdWString(), true)`。
+2. 同步更新 `categories` 表：
+   - 调用 `CategoryRepo::updateCategoryColorByPath(folderPath, colorHex.toStdWString())`，确保侧边栏同名物理关联分类的颜色绝对同步。
+3. 更新 AppConfig 与本地缓存：
+   - `AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(folderPath), colorHex)`。
+   - 触发按钮重绘 `btn->update()` 并关闭右键 QMenu。
+
+---
+
+## 4. 彻底清除死代码列表
 
 - `CategoryPanel::onSetColor` 及定义。
 - `CategoryPanel::onRandomColor` 及定义。
-- 移除 `CategoryPanel` 菜单构建处的旧“设置颜色”与“随机颜色”动作。
-- 移除 `MainWindow` 菜单构建处的旧 `actSetColor`、`actRandomColor` 动作，完全不再引用、实例化 `FramelessColorPicker`。
+- 移除 `CategoryPanel` 菜单构建处的旧 Palette 设定与 Random 设定。
+- 移除 `MainWindow` 菜单构建处的旧 `actSetColor`、`actRandomColor` 和 `FramelessColorPicker`。
 
 ---
 
-## 4. 验证与回归测试
+## 5. 验证与回归测试
 
 1. 右击侧边栏任意分类，横向圆形色块选择条完美嵌入，无冗余文字。
 2. 鼠标悬浮在圆形色块上，能被耀眼的白色高亮圆圈精准包裹。
-3. 点击色块后，右键菜单完美关闭， `categories` 数据库和 `metadata` 数据库中的对应的 `color` 字段同步落盘更改，界面刷新。
+3. 点击色块后，右键菜单完美关闭， categories 数据库和 metadata 数据库中的对应的 color 字段同步落盘更改，界面刷新。
+4. 打开任何模式（自适应视图、网格视图），**文件夹永久在最上方，文件永久在最下方，且绝对、没有任何一个文件能混到文件夹组那一行去并排**！
