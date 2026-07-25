@@ -785,12 +785,33 @@ void MetadataManager::removeTag(const QString& tagName) {
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
+    bool changed = false;
+    bool isFolder = false;
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        m_cache[nPath].manualColor = color; 
+        auto it = m_cache.find(nPath);
+        if (it != m_cache.end()) {
+            isFolder = it->second.isFolder;
+            if (it->second.manualColor != color) {
+                it->second.manualColor = color;
+                changed = true;
+            }
+        } else {
+            m_cache[nPath].manualColor = color;
+            changed = true;
+        }
     }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    persistAsync(nPath);
+    if (changed) {
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+        persistAsync(nPath);
+
+        // 自下而上：如果改变的是文件夹，同步更新映射分类颜色
+        if (isFolder) {
+            if (CategoryRepo::updateCategoryColorByPath(nPath, color)) {
+                notifyUI(RefreshLevel::FullRebuild);
+            }
+        }
+    }
 }
 
 void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool notify) {

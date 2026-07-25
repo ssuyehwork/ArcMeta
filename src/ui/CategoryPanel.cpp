@@ -566,6 +566,9 @@ void CategoryPanel::onSetColor() {
         if(cat.id == id) {
             cat.color = color.name().toUpper().toStdWString();
             CategoryRepo::update(cat);
+            if (!cat.physicalPath.empty()) {
+                MetadataManager::instance().setColor(cat.physicalPath, cat.color, true);
+            }
             break;
         }
     }
@@ -599,6 +602,9 @@ void CategoryPanel::onRandomColor() {
         if(cat.id == id) {
             cat.color = chosenColor.toStdWString();
             CategoryRepo::update(cat);
+            if (!cat.physicalPath.empty()) {
+                MetadataManager::instance().setColor(cat.physicalPath, cat.color, true);
+            }
             break;
         }
     }
