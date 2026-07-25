@@ -339,7 +339,9 @@ int ColorPicker::currentTolerance() const {
 // --- ColorStripPicker 实现 ---
 ColorStripPicker::ColorStripPicker(const QString& currentColorHex, QWidget* parent)
     : QWidget(parent), m_selectedColor(currentColorHex) {
-    setFixedSize(198, 26);
+    // 9个直径为10像素的圆，间距为4像素。
+    // 总宽度：左侧预留12像素 + 9 * 10像素圆 + 8 * 4像素间隔 + 右侧预留12像素 = 12 + 90 + 32 + 12 = 146像素
+    setFixedSize(146, 22);
     setMouseTracking(true);
     setCursor(Qt::PointingHandCursor);
 
@@ -361,13 +363,13 @@ void ColorStripPicker::paintEvent(QPaintEvent* event) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    // 不再填充任何背景，使其保持完全透明，完美融合于菜单自身的 QSS 背景中
+    // 保持完全透明底色
 
     int startX = 12; // 起始左边距
     int y = rect().height() / 2;
 
     for (int i = 0; i < m_items.size(); ++i) {
-        int cx = startX + i * (14 + m_spacing) + 7;
+        int cx = startX + i * (10 + m_spacing) + m_circleRadius;
 
         // 1. 绘制色块本身
         painter.setPen(Qt::NoPen);
@@ -391,7 +393,7 @@ void ColorStripPicker::mouseMoveEvent(QMouseEvent* event) {
     int cy = rect().height() / 2;
     int startX = 12;
     for (int i = 0; i < m_items.size(); ++i) {
-        int cx = startX + i * (14 + m_spacing) + 7;
+        int cx = startX + i * (10 + m_spacing) + m_circleRadius;
         int dx = event->pos().x() - cx;
         int dy = event->pos().y() - cy;
         if (dx * dx + dy * dy <= (m_circleRadius + 2) * (m_circleRadius + 2)) { // 感应半径
@@ -402,11 +404,6 @@ void ColorStripPicker::mouseMoveEvent(QMouseEvent* event) {
     if (newHovered != m_hoveredIndex) {
         m_hoveredIndex = newHovered;
         update();
-        if (m_hoveredIndex >= 0) {
-            QToolTip::showText(QCursor::pos(), m_items[m_hoveredIndex].name, this);
-        } else {
-            QToolTip::hideText();
-        }
     }
 }
 
@@ -418,7 +415,6 @@ void ColorStripPicker::leaveEvent(QEvent* event) {
     QWidget::leaveEvent(event);
     m_hoveredIndex = -1;
     update();
-    QToolTip::hideText();
 }
 
 void ColorStripPicker::mousePressEvent(QMouseEvent* event) {
