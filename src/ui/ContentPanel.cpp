@@ -1775,14 +1775,14 @@ QString ContentPanel::getAdjacentFilePath(const QString& currentPath, int delta)
  
 void ContentPanel::setZoomLevel(int level) {
     // 1. 根据当前视图模式动态决定最小/最大像素边界
-    int minZoom = 85;
+    int minZoom = 93;
     int maxZoom = 230;
 
     if (m_currentViewMode == ListView) {
         minZoom = 30;   // 列表视图最小值：30 像素
         maxZoom = 230;  // 列表视图最大值：230 像素
     } else { // GridView 与 JustifiedViewMode
-        minZoom = 85;   // 网格/自适应最小值：85 像素
+        minZoom = 93;   // 网格/自适应最小值：93 像素
         maxZoom = 230;  // 网格/自适应最大值：230 像素
     }
 
@@ -1810,7 +1810,7 @@ void ContentPanel::setViewMode(ViewMode mode) {
     m_currentViewMode = mode;
 
     // 1. 模式切换时自动校准 m_zoomLevel，确保处于新模式的合法范围内
-    int minZoom = (mode == ListView) ? 30 : 85;
+    int minZoom = (mode == ListView) ? 30 : 93;
     int maxZoom = 230;
     m_zoomLevel = qBound(minZoom, m_zoomLevel, maxZoom);
 
