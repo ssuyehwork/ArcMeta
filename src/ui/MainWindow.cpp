@@ -753,6 +753,13 @@ void MainWindow::initUi() {
             return;
         }
 
+        if (path == "__RELOAD_CATEGORY_ONLY__") {
+            if (m_categoryPanel) {
+                m_categoryPanel->requestRefresh(true);
+            }
+            return;
+        }
+
         // 2. 局部路径更新
         m_contentPanel->updateItemMetadata(path);
 

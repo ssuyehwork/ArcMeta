@@ -194,6 +194,7 @@ public:
      * @param path 绝对物理路径
      */
     void selectAndScrollToPath(const QString& path);
+    void selectAndScrollToItem(const QString& type, const QString& path, int categoryId);
 
     /**
      * @brief 切换视图模式

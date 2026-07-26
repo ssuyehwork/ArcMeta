@@ -115,7 +115,8 @@ public:
     enum class RefreshLevel {
         CountsOnly,   // 仅刷新侧边栏计数
         PathUpdate,   // 刷新特定文件
-        FullRebuild   // 全量 UI 重建
+        FullRebuild,  // 全量 UI 重建
+        CategoryOnly  // 仅物理更新分类，避免数据全量重载
     };
 
     /**

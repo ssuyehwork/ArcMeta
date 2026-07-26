@@ -347,6 +347,14 @@ void MetadataManager::notifyUI(RefreshLevel level, const QString& path) {
         case RefreshLevel::FullRebuild:
             notifyFullUIRebuild();
             break;
+        case RefreshLevel::CategoryOnly:
+            if (m_isInternalOperating) return;
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                m_pendingUiPaths.insert("__RELOAD_CATEGORY_ONLY__");
+            }
+            QMetaObject::invokeMethod(this, "triggerUiSignalTimer", Qt::QueuedConnection);
+            break;
     }
 }
 
@@ -808,7 +816,7 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
         // 自下而上：如果改变的是文件夹，同步更新映射分类颜色
         if (isFolder) {
             if (CategoryRepo::updateCategoryColorByPath(nPath, color)) {
-                notifyUI(RefreshLevel::FullRebuild);
+                if (notify) notifyUI(RefreshLevel::CategoryOnly);
             }
         }
     }

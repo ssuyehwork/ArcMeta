@@ -444,6 +444,9 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
             QModelIndex left = this->index(index.row(), 0);
             QModelIndex right = this->index(index.row(), columnCount() - 1);
             emit dataChanged(left, right);
+
+            // 通知 CategoryPanel（分类树）同步更新分类颜色！
+            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CategoryOnly);
         }
         return true;
     }
@@ -510,6 +513,30 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             QModelIndex left = index(i, 0);
             QModelIndex right = index(i, columnCount() - 1);
             emit dataChanged(left, right);
+        }
+    }
+}
+
+void ContentPanel::selectAndScrollToItem(const QString& type, const QString& path, int categoryId) {
+    if (!m_proxyModel) return;
+    for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
+        QModelIndex proxyIdx = m_proxyModel->index(i, 0);
+        bool match = false;
+        if (type == "category") {
+            match = (proxyIdx.data(TypeRole).toString() == "category" && proxyIdx.data(CategoryIdRole).toInt() == categoryId);
+        } else {
+            match = (!path.isEmpty() && proxyIdx.data(PathRole).toString() == path);
+        }
+
+        if (match) {
+            QAbstractItemView* view = (m_viewStack->currentWidget() == m_treeView) ?
+                static_cast<QAbstractItemView*>(m_treeView) : static_cast<QAbstractItemView*>(m_gridView);
+            if (view) {
+                view->scrollTo(proxyIdx);
+                view->setCurrentIndex(proxyIdx);
+                view->selectionModel()->select(proxyIdx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+            }
+            break;
         }
     }
 }
@@ -2028,28 +2055,32 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             menu.addAction(pickerAction);
 
             connect(pickerWidget, &ColorStripPicker::colorSelected, this, [this, view, &menu](const QString& hexColor) {
-                // 1. 物理记住当前所有被选中的项目路径 (无论是文件还是文件夹)
-                QStringList selectedPaths;
+                struct SelectedItemInfo {
+                    QString type;
+                    QString path;
+                    int categoryId = 0;
+                };
+                QList<SelectedItemInfo> selectedItems;
                 auto indexes = view->selectionModel()->selectedIndexes();
                 for (const auto& idx : indexes) {
                     if (idx.column() == 0) {
-                        QString p = idx.data(PathRole).toString();
-                        if (!p.isEmpty()) selectedPaths << p;
+                        SelectedItemInfo info;
+                        info.type = idx.data(TypeRole).toString();
+                        info.path = idx.data(PathRole).toString();
+                        info.categoryId = idx.data(CategoryIdRole).toInt();
+                        selectedItems.append(info);
                     }
                 }
 
-                // 2. 执行模型设色更新
                 for (const auto& idx : indexes) {
                     if (idx.column() == 0) {
                         m_proxyModel->setData(idx, hexColor, ColorRole);
                     }
                 }
 
-                // 3. 强行还原选中状态，防止焦点流失
-                for (const QString& p : selectedPaths) {
-                    selectAndScrollToPath(p);
+                for (const auto& info : selectedItems) {
+                    selectAndScrollToItem(info.type, info.path, info.categoryId);
                 }
-
                 menu.close();
             });
  
