@@ -59,11 +59,11 @@ protected:
 /**
  * @brief 虚拟化数据库模型：支持百万级条目瞬时加载 (2026-06-xx 重构)
  */
-class FerrexVirtualDbModel : public QAbstractTableModel {
+class ArcMetaVirtualDbModel : public QAbstractTableModel {
     Q_OBJECT
 public:
-    explicit FerrexVirtualDbModel(QObject* parent = nullptr);
-    ~FerrexVirtualDbModel() override;
+    explicit ArcMetaVirtualDbModel(QObject* parent = nullptr);
+    ~ArcMetaVirtualDbModel() override;
 
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
@@ -297,7 +297,7 @@ private:
     // 视图组件
     QAbstractItemView* m_gridView = nullptr;
     QTreeView* m_treeView = nullptr;
-    FerrexVirtualDbModel* m_model = nullptr;
+    ArcMetaVirtualDbModel* m_model = nullptr;
 
     QTimer* m_visibleTimer = nullptr;
     void refreshVisibleThumbnails();

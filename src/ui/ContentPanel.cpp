@@ -89,8 +89,8 @@ using namespace ArcMeta::Style;
  
 namespace ArcMeta { 
  
-// --- FerrexVirtualDbModel 实现 ---
-FerrexVirtualDbModel::FerrexVirtualDbModel(QObject* parent) : QAbstractTableModel(parent) {
+// --- ArcMetaVirtualDbModel 实现 ---
+ArcMetaVirtualDbModel::ArcMetaVirtualDbModel(QObject* parent) : QAbstractTableModel(parent) {
     m_iconCache.setMaxCost(500);
     m_metaCache.setMaxCost(1000);
 
@@ -102,19 +102,19 @@ FerrexVirtualDbModel::FerrexVirtualDbModel(QObject* parent) : QAbstractTableMode
     });
 }
 
-FerrexVirtualDbModel::~FerrexVirtualDbModel() {
+ArcMetaVirtualDbModel::~ArcMetaVirtualDbModel() {
 }
 
-int FerrexVirtualDbModel::rowCount(const QModelIndex& parent) const {
+int ArcMetaVirtualDbModel::rowCount(const QModelIndex& parent) const {
     if (parent.isValid()) return 0;
     return m_displayCount;
 }
 
-int FerrexVirtualDbModel::columnCount(const QModelIndex&) const {
+int ArcMetaVirtualDbModel::columnCount(const QModelIndex&) const {
     return 7; // 名称, 状态, 星级, 尺寸, 类型, 大小, 修改日期（移除已冗余的“颜色”列）
 }
 
-Qt::ItemFlags FerrexVirtualDbModel::flags(const QModelIndex& index) const {
+Qt::ItemFlags ArcMetaVirtualDbModel::flags(const QModelIndex& index) const {
     if (!index.isValid()) return Qt::NoItemFlags;
     Qt::ItemFlags f = Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsDragEnabled;
     // 仅允许第 0 列（名称列）且非“分类”项进行重命名
@@ -126,7 +126,7 @@ Qt::ItemFlags FerrexVirtualDbModel::flags(const QModelIndex& index) const {
     return f;
 }
 
-QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
+QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
     if (!index.isValid() || index.row() >= static_cast<int>(m_allRecords.size())) return QVariant();
 
     const auto& record = m_allRecords[index.row()];
@@ -241,7 +241,7 @@ QVariant FerrexVirtualDbModel::data(const QModelIndex& index, int role) const {
     return QVariant();
 }
 
-QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientation, int role) const {
+QVariant ArcMetaVirtualDbModel::headerData(int section, Qt::Orientation orientation, int role) const {
     if (orientation == Qt::Horizontal && role == Qt::DisplayRole) {
         static const QStringList headers = {"名称", "状态", "星级", "尺寸", "类型", "大小", "修改日期"};
         if (section < static_cast<int>(headers.size())) return headers[section];
@@ -249,11 +249,11 @@ QVariant FerrexVirtualDbModel::headerData(int section, Qt::Orientation orientati
     return QVariant();
 }
 
-QStringList FerrexVirtualDbModel::mimeTypes() const {
+QStringList ArcMetaVirtualDbModel::mimeTypes() const {
     return {"text/uri-list"};
 }
 
-QMimeData* FerrexVirtualDbModel::mimeData(const QModelIndexList& indexes) const {
+QMimeData* ArcMetaVirtualDbModel::mimeData(const QModelIndexList& indexes) const {
     QMimeData* mime = new QMimeData();
     QList<QUrl> urls;
     for (const auto& idx : indexes) {
@@ -270,7 +270,7 @@ QMimeData* FerrexVirtualDbModel::mimeData(const QModelIndexList& indexes) const 
     return mime;
 }
 
-bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& value, int role) {
+bool ArcMetaVirtualDbModel::setData(const QModelIndex& index, const QVariant& value, int role) {
     if (!index.isValid() || index.row() >= static_cast<int>(m_allRecords.size())) return false;
 
     const auto& record = m_allRecords[index.row()];
@@ -289,7 +289,7 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
 
         if (oldPath != newPath) {
             QString nativeNewPath = QDir::toNativeSeparators(newPath);
-            QPointer<FerrexVirtualDbModel> weakThis(this);
+            QPointer<ArcMetaVirtualDbModel> weakThis(this);
             int row = index.row();
             (void)QtConcurrent::run([weakThis, oldPath, nativeNewPath, newName, row, role]() {
                 if (ShellHelper::renameItem(oldPath, nativeNewPath)) {
@@ -458,12 +458,12 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
     return false;
 }
 
-bool FerrexVirtualDbModel::canFetchMore(const QModelIndex& parent) const {
+bool ArcMetaVirtualDbModel::canFetchMore(const QModelIndex& parent) const {
     Q_UNUSED(parent);
     return m_displayCount < static_cast<int>(m_allRecords.size());
 }
 
-void FerrexVirtualDbModel::fetchMore(const QModelIndex& parent) {
+void ArcMetaVirtualDbModel::fetchMore(const QModelIndex& parent) {
     Q_UNUSED(parent);
     if (m_displayCount < static_cast<int>(m_allRecords.size())) {
         int remaining = static_cast<int>(m_allRecords.size()) - m_displayCount;
@@ -474,7 +474,7 @@ void FerrexVirtualDbModel::fetchMore(const QModelIndex& parent) {
     }
 }
 
-void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
+void ArcMetaVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
     beginResetModel();
     m_allRecords = records;
     m_pathToIndex.clear();
@@ -505,7 +505,7 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
     endResetModel();
 }
 
-void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
+void ArcMetaVirtualDbModel::updateRecordMetadata(const QString& path) {
     QString nPath = QDir::toNativeSeparators(path);
     auto it = m_pathToIndex.find(nPath);
     if (it != m_pathToIndex.end()) {
@@ -522,7 +522,7 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
     }
 }
 
-void FerrexVirtualDbModel::migrateCache(const QString& oldPath, const QString& newPath) {
+void ArcMetaVirtualDbModel::migrateCache(const QString& oldPath, const QString& newPath) {
     QString nativeOld = QDir::toNativeSeparators(oldPath);
     QString nativeNew = QDir::toNativeSeparators(newPath);
 
@@ -571,7 +571,7 @@ void ContentPanel::selectAndScrollToItem(const QString& type, const QString& pat
     }
 }
 
-void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
+void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
     // 【双阶段保护 - 阶段二】：基于实际测量出的可见行数动态修正 maxCost
     int folderTotal = static_cast<int>(m_allRecords.size());
     int visibleCount = rows.size();
@@ -625,7 +625,7 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
             auto initialTask = s_waitingQueue.takeFirst();
             s_activeLoadingKeys.insert(initialTask.second);
             
-            QPointer<FerrexVirtualDbModel> weakThis(this);
+            QPointer<ArcMetaVirtualDbModel> weakThis(this);
             (void)QtConcurrent::run([weakThis, initialTask]() {
                 #ifdef Q_OS_WIN
                 CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -662,9 +662,9 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                     }
 
                     if (weakThis) {
-                        QMetaObject::invokeMethod(const_cast<FerrexVirtualDbModel*>(weakThis.data()), [weakThis, path, cacheKey, img, ar, hasThumb]() {
+                        QMetaObject::invokeMethod(const_cast<ArcMetaVirtualDbModel*>(weakThis.data()), [weakThis, path, cacheKey, img, ar, hasThumb]() {
                             if (!weakThis) return;
-                            auto* mutableThis = const_cast<FerrexVirtualDbModel*>(weakThis.data());
+                            auto* mutableThis = const_cast<ArcMetaVirtualDbModel*>(weakThis.data());
                             
                             // [Plan-53 内存缓存无损退避机制] 
                             // 在刷新或重置导致二次强行提取时，如果由于物理拷贝尚未完成或图片暂时遇阻，
@@ -721,7 +721,7 @@ void FerrexVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
     }
 }
 
-void FerrexVirtualDbModel::clear() {
+void ArcMetaVirtualDbModel::clear() {
     beginResetModel();
     m_allRecords.clear();
     m_pathToIndex.clear();
@@ -745,7 +745,7 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     QModelIndex idx = sourceModel()->index(sourceRow, 0, sourceParent); 
      
     // 2026-06-xx 性能优化：提前获取 ItemRecord，避免重复查询并为下方过滤提供数据支撑
-    const auto* sourceModelPtr = qobject_cast<const FerrexVirtualDbModel*>(sourceModel());
+    const auto* sourceModelPtr = qobject_cast<const ArcMetaVirtualDbModel*>(sourceModel());
     if (!sourceModelPtr) return true;
 
     const auto& records = sourceModelPtr->allRecords();
@@ -1012,7 +1012,7 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
     } 
 
     // 3. 第三级：由右键选择的 m_sortType 驱动的七维精确物理属性对位排序（对应用户原话：“名称、创建日期、修改日期、扩展名、大小、尺寸、评分”）
-    const auto* sourceModelPtr = qobject_cast<const FerrexVirtualDbModel*>(sourceModel());
+    const auto* sourceModelPtr = qobject_cast<const ArcMetaVirtualDbModel*>(sourceModel());
     if (!sourceModelPtr) return QSortFilterProxyModel::lessThan(source_left, source_right);
 
     const auto& records = sourceModelPtr->allRecords();
@@ -1083,7 +1083,7 @@ ContentPanel::ContentPanel(QWidget* parent)
     m_mainLayout->setSpacing(0); 
  
  
-    m_model = new FerrexVirtualDbModel(this); 
+    m_model = new ArcMetaVirtualDbModel(this); 
     m_proxyModel = new FilterProxyModel(this); 
     m_proxyModel->setSourceModel(m_model); 
 
@@ -1093,7 +1093,7 @@ ContentPanel::ContentPanel(QWidget* parent)
     connect(m_visibleTimer, &QTimer::timeout, this, &ContentPanel::refreshVisibleThumbnails);
     
     // 2026-05-17 新增：当模型数据发生改变时，自动触发统计重新计算并推送至 FilterPanel
-    connect(m_model, &FerrexVirtualDbModel::dataChanged, this, [this](const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles) {
+    connect(m_model, &ArcMetaVirtualDbModel::dataChanged, this, [this](const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles) {
         Q_UNUSED(topLeft); Q_UNUSED(bottomRight);
         if (roles.isEmpty() || roles.contains(ColorRole) || roles.contains(RatingRole) || roles.contains(TagsRole)) {
             recalculateAndEmitStats();
@@ -1101,7 +1101,7 @@ ContentPanel::ContentPanel(QWidget* parent)
     });
 
     // 🚀【方案 A 核心】：监听模型层的 recordRenamed 信号，进行增量更新与选中重新对齐，绝对不触发全量 loadDirectory
-    connect(m_model, &FerrexVirtualDbModel::recordRenamed, this, [this](const QString& oldPath, const QString& newPath, const QString& newName) {
+    connect(m_model, &ArcMetaVirtualDbModel::recordRenamed, this, [this](const QString& oldPath, const QString& newPath, const QString& newName) {
         Q_UNUSED(oldPath);
         this->setPendingSelectName(newName, false);
         
@@ -3457,7 +3457,7 @@ void GridItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     const auto* proxy = qobject_cast<const QSortFilterProxyModel*>(index.model());
     if (proxy) srcIdx = proxy->mapToSource(index);
     
-    const auto* srcModel = qobject_cast<const FerrexVirtualDbModel*>(srcIdx.model());
+    const auto* srcModel = qobject_cast<const ArcMetaVirtualDbModel*>(srcIdx.model());
     if (srcModel && srcIdx.row() >= 0 && srcIdx.row() < (int)srcModel->allRecords().size()) {
         const auto& record = srcModel->allRecords()[srcIdx.row()];
         if (record.isCategory || record.isDir) ext = "DIR";
