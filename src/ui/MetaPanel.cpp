@@ -1,4 +1,5 @@
 #include "MetaPanel.h"
+#include "CategoryPanel.h" // 引入 DataFlowGuard
 #include "SvgIcons.h"
 #include "ToolTipOverlay.h"
 #include <QVBoxLayout>
@@ -597,20 +598,20 @@ void MetaPanel::showEvent(QShowEvent* event) {
 
 void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s, const QString& ct, const QString& mt, const QString& at, const QString& p, bool e) {
     Logger::log(QString("MetaPanel::updateInfo for Path: %1").arg(p));
-    m_nameEdit->blockSignals(true);
+
+    // 2026-07-26 极致重构：引入 DataFlowGuard 优雅控制单向数据流阻断，消除密集的 blockSignals
+    DataFlowGuard guard(m_isInternalUpdating);
+
     QFileInfo info(n);
     m_nameEdit->setPlainText(info.completeBaseName());
     m_nameEdit->adjustHeight();
     m_nameEdit->setProperty("oldPath", p);
     m_nameEdit->setProperty("suffix", info.suffix());
-    m_nameEdit->blockSignals(false);
     
     lblType->setText(t); lblSize->setText(s); lblCtime->setText(ct); lblMtime->setText(mt); lblAtime->setText(at); 
     
-    m_pathEdit->blockSignals(true);
     m_pathEdit->setPlainText(p);
     m_pathEdit->adjustHeight();
-    m_pathEdit->blockSignals(false);
 
     lblEncrypted->setText(e ? "已加密" : "未加密");
     
@@ -670,24 +671,18 @@ void MetaPanel::setTags(const QStringList& tags) {
     m_adjustTimer->start();
 }
 void MetaPanel::setNote(const std::wstring& note) { 
-    m_noteEdit->blockSignals(true); 
     m_noteEdit->setPlainText(QString::fromStdWString(note)); 
     m_noteEdit->adjustHeight();
-    m_noteEdit->blockSignals(false); 
     if (m_container) m_container->adjustSize();
 }
 void MetaPanel::setURL(const std::wstring& url) { 
-    m_linkEdit->blockSignals(true); 
     m_linkEdit->setPlainText(QString::fromStdWString(url)); 
     m_linkEdit->adjustHeight();
-    m_linkEdit->blockSignals(false); 
     if (m_container) m_container->adjustSize();
 }
 void MetaPanel::setCategory(const QString& category) { 
-    m_categoryEdit->blockSignals(true);
     m_categoryEdit->setPlainText(category); 
     m_categoryEdit->adjustHeight();
-    m_categoryEdit->blockSignals(false);
     if (m_container) m_container->adjustSize();
 }
 
@@ -753,6 +748,8 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
             }
         }
     } else if (watched == m_nameEdit && event->type() == QEvent::FocusOut) {
+        if (m_isInternalUpdating) return QFrame::eventFilter(watched, event);
+
         QString oldPath = m_nameEdit->property("oldPath").toString();
         QString newName = m_nameEdit->toPlainText().trimmed();
         
@@ -774,15 +771,8 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
                     return true;
                 }
 
-                if (QFile::rename(oldPath, newPath)) {
-                    MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
-                    m_pathEdit->setPlainText(newPath);
-                    m_pathEdit->adjustHeight();
-                    m_nameEdit->setProperty("oldPath", newPath);
-                } else {
-                    // 重命名失败，回滚文本
-                    m_nameEdit->setPlainText(oldInfo.completeBaseName());
-                }
+                // 2026-07-26 极致重构：禁止 MetaPanel 自行调用 QFile::rename，向外发射 renameRequested 信号，由 CoreController 接管并实现 MVC 单向驱动
+                emit renameRequested(oldPath, newPath);
             }
         }
     }

@@ -137,6 +137,18 @@ private:
     // 2026-04-15 物理锁：恢复状态期间严禁反向触发保存，防止信号回流污染 Settings
     bool m_isRestoringState = false;
     bool m_isFirstLoad = true;
+
+    // 2026-07-26 极致重构：引入单向数据流与非交互控制标志位，彻底消灭 blockSignals
+    bool m_isInternalUpdating = false;
+};
+
+// 2026-07-26 极致重构：RAII 数据流状态防护锁
+class DataFlowGuard {
+public:
+    DataFlowGuard(bool& flag) : m_flag(flag) { m_flag = true; }
+    ~DataFlowGuard() { m_flag = false; }
+private:
+    bool& m_flag;
 };
 
 } // namespace ArcMeta
