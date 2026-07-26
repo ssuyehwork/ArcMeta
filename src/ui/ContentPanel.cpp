@@ -441,8 +441,8 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
             updateRecordMetadata(path);
         } else {
             // 1. 【对齐文件】发送整行（列 0 到 列 6）变更信号，确保 TreeItemDelegate / ThumbnailDelegate 能够全量重绘
-            QModelIndex left = index(index.row(), 0);
-            QModelIndex right = index(index.row(), columnCount() - 1);
+            QModelIndex left = this->index(index.row(), 0);
+            QModelIndex right = this->index(index.row(), columnCount() - 1);
             emit dataChanged(left, right);
 
             // 2. 【对齐文件】物理触发全局 UI 刷新信号，驱动左侧边栏 CategoryPanel（分类树）同步更新文件夹图标颜色
