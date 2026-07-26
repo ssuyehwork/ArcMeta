@@ -14,6 +14,7 @@
 #include <QDir>
 #include <QMutex>
 #include <QTimer>
+#include <QThreadPool>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -24,7 +25,6 @@
 #include "ui/Logger.h"
 #include "ui/MainWindow.h"
 
-
 #include "meta/MetadataManager.h"
 #include "meta/CategoryRepo.h"
 #include "meta/MediaExtractorPipeline.h"
@@ -34,74 +34,82 @@
 #include "core/AutoImportManager.h"
 
 /**
- * @brief 自定义日志处理程序，将 qDebug 消息重定向至本地 .log 文件
- * 2026-03-xx 按照用户要求：在手动运行 .exe 时，通过日志文件排查初始化挂起或信号丢失问题。
+ * @brief 自定义日志重定向。极速格式化日志内容后投递到异步缓冲区，杜绝同步磁盘等待。
  */
 void customMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
-    Q_UNUSED(context); 
-    static QMutex s_logMutex; // 2026-07-xx 物理加固：增加互斥锁，确保多线程扫描时日志不交织且不丢失
-    QMutexLocker locker(&s_logMutex);
-
-    static int writeCount = 0;
-    QString fileName = "arcmeta_debug.log";
-
-    // 2026-xx-xx 按照 Plan-97：同步容量哨兵逻辑
-    if (++writeCount >= 100) {
-        ArcMeta::Logger::rotateLogFiles(fileName);
-        writeCount = 0;
+    Q_UNUSED(context);
+    QString level;
+    switch (type) {
+        case QtDebugMsg:    level = "DEBUG";    break;
+        case QtInfoMsg:     level = "INFO ";    break;
+        case QtWarningMsg:  level = "WARN ";    break;
+        case QtCriticalMsg: level = "CRIT ";    break;
+        case QtFatalMsg:    level = "FATAL";    break;
     }
+    // 投递至异步 RingBuffer 日志引擎写出，线程安全且极其高效
+    ArcMeta::Logger::log(QString("[%1] %2").arg(level, msg));
+}
 
-    QFile logFile(fileName);
-    // 2026-07-xx 按照用户要求 (1.18)：开启强力落盘模式
-    // 即使发生系统级闪退，也要确保最后一条日志已写入物理磁盘
-    if (logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        QTextStream textStream(&logFile);
-        QString timeStr = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
-        QString level;
-        switch (type) {
-            case QtDebugMsg:    level = "DEBUG";    break;
-            case QtInfoMsg:     level = "INFO ";    break;
-            case QtWarningMsg:  level = "WARN ";    break;
-            case QtCriticalMsg: level = "CRIT ";    break;
-            case QtFatalMsg:    level = "FATAL";    break;
-        }
-        textStream << QString("[%1][%2] %3").arg(timeStr, level, msg) << Qt::endl;
-        textStream.flush();
-        logFile.flush(); // 强制物理落盘
-        logFile.close();
+/**
+ * @brief 退出时调用的清场函数，优雅停止各子系统线程、确保数据完整落盘不损坏。
+ */
+void onApplicationAboutToQuit(HANDLE hMutex) {
+    qDebug() << "[Shutdown] >>> 开启 Clean Shutdown 优雅退出流程 <<<";
+
+    // 1. 阻塞等待全局工作线程池中所有子任务退场，防止多线程写冲突与硬截断
+    qDebug() << "[Shutdown] 正在等待子线程池安全退场...";
+    QThreadPool::globalInstance()->waitForDone();
+    qDebug() << "[Shutdown] 全局子线程已完全退场";
+
+    // 2. 将高频落盘缓存中的所有待写数据同步强力落盘写入，安全闭卷
+    qDebug() << "[Shutdown] 正在强制元数据及 SQLite 落盘...";
+    ArcMeta::DatabaseManager::instance().flushAll(true);
+    qDebug() << "[Shutdown] 持久化落盘完毕";
+
+    // 3. 挂起并关闭异步日志写出线程，使其后续降级同步写
+    ArcMeta::Logger::stopAsyncLogger();
+
+    // 4. 释放 COM 套间环境
+#ifdef Q_OS_WIN
+    CoUninitialize();
+    qDebug() << "[Shutdown] COM 套间释放完毕";
+
+    // 5. 释放单实例互斥量锁
+    if (hMutex) {
+        ReleaseMutex(hMutex);
+        CloseHandle(hMutex);
+        qDebug() << "[Shutdown] 单实例 Mutex 互斥锁已完全释放";
     }
+#endif
+    qDebug() << "[Shutdown] <<< Clean Shutdown 正常退场，系统安全关闭 <<<";
 }
 
 int main(int argc, char *argv[]) {
-    // 2026-xx-xx 按照 Plan-97：启动自检，容量哨兵立即执行
-    ArcMeta::Logger::rotateLogFiles("arcmeta_debug.log");
-
-    // 2026-07-xx 按照用户要求 (1.20)：主程序限制单实例运行，防止无限打开
+    // -------------------------------------------------------------
+    // 重构 2：启动安全。最顶端优先执行单实例互斥量哨兵检测
+    // -------------------------------------------------------------
+    HANDLE hMutex = nullptr;
 #ifdef Q_OS_WIN
-    // Windows: 使用 Mutex 实现，确保程序异常退出后资源能被 OS 自动回收
-    HANDLE hMutex = CreateMutexA(NULL, TRUE, "ArcMeta_SingleInstance_Mutex");
+    hMutex = CreateMutexA(NULL, TRUE, "ArcMeta_SingleInstance_Mutex");
     if (hMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
         if (hMutex) CloseHandle(hMutex);
-        // 单实例检测失败，由于此时 QApplication 尚未启动，直接退出
+        // 单实例检测失败，由于尚未影响任何运行状态及日志，直接优雅退出
         return 0;
     }
 #else
-    // 非 Windows (Linux/macOS): 使用 QLockFile 确保单实例运行
     QString lockPath = QDir::tempPath() + "/ArcMeta_SingleInstance.lock";
-    static QLockFile lockFile(lockPath); // 必须静态或在 main 作用域持续存在
-    if (!lockFile.tryLock(100)) { // 尝试等待 100ms
+    static QLockFile lockFile(lockPath);
+    if (!lockFile.tryLock(100)) {
         return 0;
     }
 #endif
 
+    // 单实例锁定成功，安全哨兵放行。此时再执行日志容量哨兵轮转切片
+    ArcMeta::Logger::rotateLogFiles("arcmeta_debug.log");
+
     qint64 mainStartTime = QDateTime::currentMSecsSinceEpoch();
 
-    // 初始化 COM 环境 (多媒体缩略图提取需要)
-#ifdef Q_OS_WIN
-    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-#endif
-
-    // 1. 安装自定义日志处理器：确保从程序启动的第一秒开始就能捕获所有调试信息
+    // 1. 安装自定义日志处理器（使用超高吞吐无阻塞的内存队列异步写入）
     qInstallMessageHandler(customMessageHandler);
     qDebug() << "================ ArcMeta 启动加载 ================";
     qDebug() << "[PERF] 程序入口点计时开始";
@@ -128,48 +136,43 @@ int main(int argc, char *argv[]) {
     a.setApplicationName("ArcMeta");
     a.setOrganizationName("ArcMetaTeam");
 
-    // 2026-05-27 物理修复：在主线程预热元数据管理器单例
-    // 确保其内部的 QTimer 等对象归属于主线程，避免跨线程创建导致的行为不确定性
-    qint64 metaInitStart = QDateTime::currentMSecsSinceEpoch();
-    ArcMeta::MetadataManager::instance();
-    // 2026-06-xx 物理修复：在主线程预热 CategoryRepo，解决 QTimer 跨线程启动导致的内存与磁盘不一致
-    ArcMeta::CategoryRepo::initialize();
-    // 2026-07-25 物理修复：在主线程预热多媒体特征提取管道单例，确保其 QTimer 定时器和事件分发都依附在主线程的 QEventLoop 中运行，杜绝后台线程因没有事件循环导致定时器哑死的问题
-    ArcMeta::MediaExtractorPipeline::instance();
-    // 2026-07-25 物理修复：在主线程预热数据库管理器单例，确保其定期落盘 QTimer 定时器能正常在主线程事件循环中调度，保障数据安全备份兜底
-    ArcMeta::DatabaseManager::instance();
-    qDebug() << "[PERF] MetadataManager/CategoryRepo/MediaExtractorPipeline/DatabaseManager 单例预热耗时:" << (QDateTime::currentMSecsSinceEpoch() - metaInitStart) << "ms";
+    // -------------------------------------------------------------
+    // 重构 4：COM 亲和性。在 QApplication 实例化后，安全初始化 COM 环境
+    // -------------------------------------------------------------
+#ifdef Q_OS_WIN
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+#endif
 
-    // 3. 简化启动：直接显示主窗口
-    // 2026-04-13 按用户要求移除 LoadingWindow 和 initializeHotIcons()
+    // -------------------------------------------------------------
+    // 重构 3：生命期。引入 AppCoreController 统一拓扑预热
+    // -------------------------------------------------------------
+    ArcMeta::CoreController::initializeCoreComponents();
+
+    // -------------------------------------------------------------
+    // 重构 5：多段启动。MainWindow 放置于栈上局部作用域，利用 RAII 自动且安全析构，规避 Double Free
+    // -------------------------------------------------------------
     qint64 windowCreateStart = QDateTime::currentMSecsSinceEpoch();
-    ArcMeta::MainWindow* w = new ArcMeta::MainWindow();
+    ArcMeta::MainWindow w;
     qDebug() << "[PERF] MainWindow 构造耗时:" << (QDateTime::currentMSecsSinceEpoch() - windowCreateStart) << "ms";
     
-    w->show();
-    qDebug() << "[PERF] MainWindow->show() 调用耗时（至首帧渲染前）:" << (QDateTime::currentMSecsSinceEpoch() - windowCreateStart) << "ms";
-
-    // 5. 启动异步系统扫描（后台初始化，UI 可响应）
+    // 启动异步系统扫描与监控监听
     ArcMeta::CoreController::instance().startSystem();
-    
-    // 2026-07-xx 按照 Plan-124：最终诊断，验证此处代码是否被实际执行
-    qDebug() << "[DIAG-MAIN] 即将调用 startListening";
-    auto& aim = ArcMeta::AutoImportManager::instance();
-    qDebug() << "[DIAG-MAIN] AutoImportManager 实例地址:" << &aim;
-    aim.startListening();
-    qDebug() << "[DIAG-MAIN] startListening 调用已返回";
+    ArcMeta::AutoImportManager::instance().startListening();
+
+    // 利用主线程第一个 Tick 调度，平滑显示窗口，消解首帧信号洪暴导致的渲染卡顿
+    QTimer::singleShot(0, [&w, windowCreateStart]() {
+        w.show();
+        qDebug() << "[PERF] MainWindow->show() 调用已下发（至首帧渲染前）:" << (QDateTime::currentMSecsSinceEpoch() - windowCreateStart) << "ms";
+    });
+
+    // -------------------------------------------------------------
+    // 重构 6：Clean Shutdown 退出清场机制挂接
+    // -------------------------------------------------------------
+    QObject::connect(&a, &QApplication::aboutToQuit, [&a, hMutex]() {
+        onApplicationAboutToQuit(hMutex);
+    });
 
     qDebug() << "[PERF] main 函数逻辑执行完毕，进入事件循环。总耗时:" << (QDateTime::currentMSecsSinceEpoch() - mainStartTime) << "ms";
 
-    int ret = a.exec();
-
-    // 程序退出前释放单实例锁
-#ifdef Q_OS_WIN
-    if (hMutex) {
-        ReleaseMutex(hMutex);
-        CloseHandle(hMutex);
-    }
-#endif
-
-    return ret;
+    return a.exec();
 }
