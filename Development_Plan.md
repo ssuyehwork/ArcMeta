@@ -203,3 +203,14 @@
   4. 引入全流程调试追踪日志，使用 `Logger::log` 在加载、重设、保存及析构全生命期中记录状态及防护标志的演变，供定位排查使用。
 - 不在本次范围内的是：修改分类树具体的构建、重排逻辑或数据库查询。
 - 对应方案文档：Modification_Plan/Modification_Plan-100.md
+
+## [2026-07-26] 侧边栏分类树状展开状态重启持久化失效根治重构二期
+
+- 用户描述的现象/问题：在上一轮排查中，用户发现即便重构了锁逻辑，重启后仍折叠，排查出 3 个致命死穴（类型强转失败、内存/磁盘类型混用不一致、save 里的“我的分类”字符串过激匹配拦截）。
+- 用户期望的结果：通过统一加载数据类型、移除过激空拦截并实时同步 Property，以及在 `modelReset` 信号中加入兼容性安全类型解析，彻底根治持久化。
+- 本次任务边界：
+  1. 统一 `loadExpandedStateFromSettings` Property 存储类型为 `QList<int>`。
+  2. 重构 `saveExpandedStateToSettings`，删除包含 `"我的分类"` 的过激拦截匹配，并在物理落盘后同步向 tree property 更新最新的 `idIntList`。
+  3. 在 `modelReset` 槽函数中，通过 `canConvert` 机制，增加对 `QVariantList` 与 `QList<int>` 双重类型的安全兼容解析与提取。
+- 不在本次范围内的是：修改物理库构建、重排和数据库层查询。
+- 对应方案文档：Modification_Plan/Modification_Plan-101.md

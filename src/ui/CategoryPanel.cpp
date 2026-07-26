@@ -986,14 +986,20 @@ void CategoryPanel::initUi() {
 
     connect(m_categoryModel, &QAbstractItemModel::modelReset, this, [this]() {
         Logger::log(QString("[CategoryPanel] modelReset: rowCount after reset: %1").arg(m_categoryModel->rowCount()));
-        // 极致重构：利用 DataFlowGuard 优雅控制并消除 singleShot(0) 和 blockSignals，直接同步恢复状态
-        QList<int> idList = m_categoryTree->property("expandedIds").value<QList<int>>();
+        QVariant varIds = m_categoryTree->property("expandedIds");
         QStringList expandedNames = m_categoryTree->property("expandedNames").toStringList();
-        Logger::log(QString("[CategoryPanel] modelReset: Restoring state. properties expandedIds count: %1, expandedNames count: %2")
-            .arg(idList.size()).arg(expandedNames.size()));
 
+        // 兼容性读取：同时支持 QList<int> 与 QVariantList 两种变体
         QSet<int> expandedIds;
-        for (int id : idList) expandedIds.insert(id);
+        if (varIds.canConvert<QList<int>>()) {
+            QList<int> list = varIds.value<QList<int>>();
+            for (int id : list) expandedIds.insert(id);
+        } else if (varIds.canConvert<QVariantList>()) {
+            QVariantList list = varIds.toList();
+            for (const auto& v : list) expandedIds.insert(v.toInt());
+        }
+        Logger::log(QString("[CategoryPanel] modelReset: Restoring state. properties expandedIds count: %1, expandedNames count: %2")
+            .arg(expandedIds.size()).arg(expandedNames.size()));
 
         m_isRestoringState = true;
         {
@@ -1001,8 +1007,6 @@ void CategoryPanel::initUi() {
             restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         }
         m_isRestoringState = false;
-
-        // 重置彻底完成后，重新开放拦截锁，允许用户的正常展开/折叠交互行为进行持久化
         m_isInternalUpdating = false;
         Logger::log("[CategoryPanel] modelReset: Restore finished, m_isInternalUpdating set to false");
     });
@@ -1158,20 +1162,20 @@ void CategoryPanel::initUi() {
 }
 
 void CategoryPanel::saveExpandedStateToSettings() {
-    // 1. 如果正在进行状态还原，或者处于内部异步刷新更新中，绝不保存！
+    // 1. 状态还原或内部更新中，绝不保存
     if (m_isRestoringState || m_isInternalUpdating) {
         Logger::log(QString("[CategoryPanel] saveExpandedStateToSettings: Ignored. m_isRestoringState: %1, m_isInternalUpdating: %2")
             .arg(m_isRestoringState).arg(m_isInternalUpdating));
         return;
     }
 
-    // 2. 如果模型正在重置期间，或者模型行数正在变动，绝不保存！
+    // 2. 模型为空或正在重置，绝不保存
     if (!m_categoryModel || m_categoryModel->rowCount() <= 0) {
         Logger::log("[CategoryPanel] saveExpandedStateToSettings: Ignored. Model is null or empty rowCount.");
         return;
     }
 
-    // 3. 物理防御：如果只有一个项且是加载中占位符，严禁保存，防止清空用户的历史记忆
+    // 3. 占位符防护
     if (m_categoryModel->rowCount() == 1) {
         QModelIndex first = m_categoryModel->index(0, 0);
         QString type = first.data(TypeRole).toString();
@@ -1185,53 +1189,47 @@ void CategoryPanel::saveExpandedStateToSettings() {
     QStringList names;
     saveExpandedState(QModelIndex(), ids, names);
 
-    // 4. 重大物理防御加固：如果是空的状态，由于模型可能被临时清空，千万不能用空去覆盖有历史记录的 settings
-    // 只有在捕获到有展开的节点时，或者是用户手动将所有节点折叠完毕（这里可以通过判断模型是否真实存在顶级“我的分类”来精细防护）才执行保存。
-    // 如果是因为整个树被清空导致的 0 展开项，坚决予以阻断，防止闪烁式覆写
-    if (ids.isEmpty() && names.isEmpty()) {
-        // 如果我们有历史数据，且模型的数据量实际上是临时归零（或者不完整），不要覆盖旧设置
-        // 只有当模型确实有效加载了我的分类（数据正常加载完毕）且展开真的全被折叠时，才允许覆盖。
-        bool hasMyCategory = false;
-        for (int i = 0; i < m_categoryModel->rowCount(); ++i) {
-            if (m_categoryModel->index(i, 0).data(NameRole).toString() == "我的分类") {
-                hasMyCategory = true;
-                break;
-            }
-        }
-        // 如果我的分类这一根节点都找不到了，说明树正在重建中，这时的 ids.isEmpty() 纯属系统清空，决不能保存
-        if (!hasMyCategory) {
-            Logger::log("[CategoryPanel] saveExpandedStateToSettings: Ignored. Blocked empty write because '我的分类' root was missing.");
-            return;
-        }
-    }
+    // 构造标准化的写入列表
+    QVariantList idVarList;
+    QList<int> idIntList = ids.values();
+    for (int id : idIntList) idVarList << id;
 
-    QList<QVariant> idList;
-    for (int id : ids) idList << id;
-    AppConfig::instance().setValue("Category/ExpandedIds", idList);
+    // 物理落盘
+    AppConfig::instance().setValue("Category/ExpandedIds", idVarList);
     AppConfig::instance().setValue("Category/ExpandedNames", names);
-    AppConfig::instance().sync(); // 物理落盘
-    Logger::log(QString("[CategoryPanel] saveExpandedStateToSettings: Successfully saved to Settings. ids count: %1, names count: %2")
+    AppConfig::instance().sync();
+
+    // 关键点：物理同步更新当前 Tree 的 Property，确保后续刷新时能拿到最新的展开记忆
+    m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idIntList));
+    m_categoryTree->setProperty("expandedNames", names);
+    Logger::log(QString("[CategoryPanel] saveExpandedStateToSettings: Successfully saved to Settings and updated Property. ids count: %1, names count: %2")
         .arg(ids.size()).arg(names.size()));
 }
 
 void CategoryPanel::loadExpandedStateFromSettings() {
-    bool hasRecord = !AppConfig::instance().getValue("Category/ExpandedIds").isNull() || !AppConfig::instance().getValue("Category/ExpandedNames").isNull();
+    bool hasRecord = !AppConfig::instance().getValue("Category/ExpandedIds").isNull() ||
+                     !AppConfig::instance().getValue("Category/ExpandedNames").isNull();
     
-    QList<QVariant> idList = AppConfig::instance().getValue("Category/ExpandedIds").toList();
+    QVariantList idVarList = AppConfig::instance().getValue("Category/ExpandedIds").toList();
     QStringList names = AppConfig::instance().getValue("Category/ExpandedNames").toStringList();
 
     Logger::log(QString("[CategoryPanel] loadExpandedStateFromSettings: Loaded settings. ids count: %1, names count: %2, hasRecord: %3")
-        .arg(idList.size()).arg(names.size()).arg(hasRecord));
+        .arg(idVarList.size()).arg(names.size()).arg(hasRecord));
 
-    // 核心修复：将从设置读取的状态同步到 Tree 属性中，确保异步加载完成后 modelReset 能自动恢复
-    m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idList));
+    QSet<int> ids;
+    QList<int> idIntList;
+    for (const auto& v : idVarList) {
+        int id = v.toInt();
+        ids.insert(id);
+        idIntList << id;
+    }
+
+    // 核心修复：Property 中统一存储 QList<int>，彻底消除类型强转失败
+    m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idIntList));
     m_categoryTree->setProperty("expandedNames", names);
     m_categoryTree->setProperty("hasHistoryRecord", hasRecord);
 
-    QSet<int> ids;
-    for (const auto& v : idList) ids.insert(v.toInt());
-
-    // 同时也尝试立即恢复一次（兼容同步加载场景）
+    // 尝试立即恢复一次
     m_isRestoringState = true;
     {
         DataFlowGuard guard(m_isInternalUpdating);
