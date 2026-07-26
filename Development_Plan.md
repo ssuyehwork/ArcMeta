@@ -180,3 +180,37 @@
   2. 统一拦截 `QLineEdit` 编辑器的键盘事件。针对 `Qt::Key_Up`/`Qt::Key_Down`，直接吞噬拦截；针对 `Qt::Key_Left`/`Qt::Key_Right`，当处于 `hasSelectedText()` 全选（高亮）状态时，分别将光标强制定位到 `0` 或 `text().length()` 并执行 `deselect()` 清除高亮，同时拦截该事件；处于非全选时则放行系统默认光标移动。
 - 不在本次范围内的是：修改 MFT 扫描、USN 监控底座或数据库相关的非界面编辑逻辑。
 - 对应方案文档：Modification_Plan/Modification_Plan-95.md
+
+## [2026-07-26] 侧边栏分类树状展开状态重启不持久化与模型重置竞态修复
+
+- 用户描述的现象/问题：侧边栏分类树状展开之后没有被持久化，重启主程序之后又被自动折叠了，且之前的 Plan-98 方案修复后仍未达到预期。
+- 用户期望的结果：侧边栏某个分类（包括顶级托管库 ArcMeta.Library_* 及其子分类）展开之后能够完美持久化，即便重启主程序之后仍然处于展开状态。
+- 本次任务边界：
+  1. 修复 `CategoryPanel::initUi` 中 `modelReset` 信号响应的竞态问题，重新引入 `QTimer::singleShot(0)` 异步延迟处理，确保 `QTreeView` 已经处理完重置并渲染出物理节点后才执行展开状态的恢复。
+  2. 确保 `m_isInternalUpdating` 拦截锁覆盖异步延迟期，在节点物理生成并完成展开前屏蔽所有折叠虚假信号。
+  3. 完善 `saveExpandedStateToSettings` 和 `restoreExpandedState` 的控制与过滤。
+- 不在本次范围内的是：修改 `CategoryRepo` 数据库的具体查询或系统项分类重排逻辑，修改其他面板（如内容面板）的数据加载逻辑。
+- 对应方案文档：Modification_Plan/Modification_Plan-99.md
+
+## [2026-07-26] 侧边栏分类树状展开状态重启持久化失效根治重构
+
+- 用户描述的现象/问题：侧边栏某个分类展开之后能够持续化，重启主程序之后又被自动折叠了。
+- 用户期望的结果：侧边栏某个分类展开之后能够持续化，即便重启主程序之后仍然处于展开状态，不被空状态异常覆盖，并期望添加调试日志以便追踪定位问题所在。
+- 本次任务边界：
+  1. 在 `modelAboutToBeReset` 信号触发瞬间将 `m_isInternalUpdating` 设为 `true`，开启拦截锁，彻底断开 `beginResetModel` -> `removeRows` 期间视图中旧节点销毁引发的高频、同步 `collapsed` 信号风暴。
+  2. 在 `modelReset` 完成展开状态（`restoreExpandedState`）同步恢复后，将 `m_isInternalUpdating` 重置为 `false`，重新开放并允许用户手动交互被正常持久化。
+  3. 实现析构函数 `~CategoryPanel()`，将 `m_isInternalUpdating` 设为 `true` 并安全 `disconnect` 展开/折叠信号，确保窗体销毁时无虚假状态污染配置文件。
+  4. 引入全流程调试追踪日志，使用 `Logger::log` 在加载、重设、保存及析构全生命期中记录状态及防护标志的演变，供定位排查使用。
+- 不在本次范围内的是：修改分类树具体的构建、重排逻辑或数据库查询。
+- 对应方案文档：Modification_Plan/Modification_Plan-100.md
+
+## [2026-07-26] 侧边栏分类树状展开状态重启持久化失效根治重构二期
+
+- 用户描述的现象/问题：在上一轮排查中，用户发现即便重构了锁逻辑，重启后仍折叠，排查出 3 个致命死穴（类型强转失败、内存/磁盘类型混用不一致、save 里的“我的分类”字符串过激匹配拦截）。
+- 用户期望的结果：通过统一加载数据类型、移除过激空拦截并实时同步 Property，以及在 `modelReset` 信号中加入兼容性安全类型解析，彻底根治持久化。
+- 本次任务边界：
+  1. 统一 `loadExpandedStateFromSettings` Property 存储类型为 `QList<int>`。
+  2. 重构 `saveExpandedStateToSettings`，删除包含 `"我的分类"` 的过激拦截匹配，并在物理落盘后同步向 tree property 更新最新的 `idIntList`。
+  3. 在 `modelReset` 槽函数中，通过 `canConvert` 机制，增加对 `QVariantList` 与 `QList<int>` 双重类型的安全兼容解析与提取。
+- 不在本次范围内的是：修改物理库构建、重排和数据库层查询。
+- 对应方案文档：Modification_Plan/Modification_Plan-101.md
