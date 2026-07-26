@@ -20,6 +20,7 @@
 #include "ToolTipOverlay.h" 
 #include "MainWindow.h"
 #include "../util/SecureFileEraser.h"
+#include "../util/DiskIoService.h"
  
 #include <QVBoxLayout> 
 #include <QHBoxLayout> 
@@ -2492,49 +2493,18 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
                 QPointer<ContentPanel> weakThis(this);
                 QPointer<BatchProgressDialog> weakProgress(progress);
-                (void)QtConcurrent::run([weakThis, targetPaths, action, weakProgress]() {
-                    int count = 0;
-                    for (const QString& p : targetPaths) {
-                        if (!weakThis || !weakProgress) return;
-                        std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
-                        
-                        // 1. 物理抹除
-                        // 🚀【修改方案三】：UI上帝类彻底丢弃复杂的扇区覆写算法，高聚隔离为一行优雅调用！
-                        bool physicalOk = false;
-                        if (action == ActionSecureDelete) {
-                            physicalOk = SecureFileEraser::shredFile(p);
-                        } else {
-                            // 普通彻底删除：递归
-                            std::function<bool(const QString&)> recursiveRemove;
-                            recursiveRemove = [&](const QString& target) -> bool {
-                                QFileInfo info(target);
-                                if (info.isDir()) {
-                                    QDir dir(target);
-                                    for (const QString& entry : dir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot)) {
-                                        recursiveRemove(target + "/" + entry);
-                                    }
-                                    return QDir().rmdir(target);
-                                } else {
-                                    return QFile::remove(target);
-                                }
-                            };
-                            physicalOk = recursiveRemove(p);
+
+                // 2026-07-26 极致重构：将物理文件删除业务彻底外包解耦到后台 DiskIoService 中，并引入 QPointer 弱引用
+                DiskIoService::asyncDeletePaths(
+                    targetPaths,
+                    action == ActionSecureDelete,
+                    weakThis,
+                    [weakProgress](int percent) {
+                        if (weakProgress) {
+                            weakProgress->setValue(percent);
                         }
-
-                        if (physicalOk) {
-                            // 2026-06-xx 按照用户要求：永久删除后从数据库彻底移除相应数据
-                            MetadataManager::instance().deletePermanently(wp);
-                            // 2026-06-xx 按照分析计划 #8：清理撤销栈
-                            UndoManager::instance().removeCommandsForPath(p);
-                        }
-
-                        count++;
-                        QMetaObject::invokeMethod(weakProgress.data(), [weakProgress, count, targetPaths]() {
-                            if (weakProgress) weakProgress->setValue((int)((float)count / targetPaths.size() * 100));
-                        });
-                    }
-
-                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, weakProgress]() {
+                    },
+                    [weakThis, weakProgress]() {
                         if (weakProgress) {
                             weakProgress->accept();
                             weakProgress->deleteLater();
@@ -2543,8 +2513,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                             weakThis->loadDirectory(weakThis->m_currentPath);
                             ToolTipOverlay::instance()->showText(QCursor::pos(), "深层抹除已完成，关联记录已物理清空", 1500, QColor("#2ecc71"));
                         }
-                    });
-                });
+                    }
+                );
             }
             break;
         }

@@ -734,6 +734,19 @@ void MainWindow::initUi() {
         }
     });
 
+    // 2026-07-26 极致重构：响应元数据编辑面板重命名信号，统一交由 ShellHelper 并在 MVC 成功后刷新视图
+    connect(m_metaPanel, &MetaPanel::renameRequested, this, [this](const QString& oldPath, const QString& newPath) {
+        if (ShellHelper::renameItem(oldPath, newPath)) {
+            // 重命名成功，同步刷新当前目录
+            m_contentPanel->refreshAll();
+            // 同时刷新侧边栏统计计数
+            if (m_categoryPanel) m_categoryPanel->requestRefresh(true);
+        } else {
+            // 重命名失败，利用 Model 的 updateRecordMetadata 将原先状态重新拉回面板
+            m_contentPanel->updateItemMetadata(oldPath);
+        }
+    });
+
     // 9. 2026-03-xx 响应元数据全局变更，同步刷新 UI (合并优化，消除重复连接与性能损耗)
     m_sidebarRefreshTimer = new QTimer(this);
     m_sidebarRefreshTimer->setInterval(800);

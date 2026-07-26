@@ -168,11 +168,10 @@ void CategoryPanel::selectCategory(int id) {
         // 2026-xx-xx 按照 Plan-98：映射至代理模型索引
         QModelIndex proxyIdx = m_proxyModel->mapFromSource(target);
         if (proxyIdx.isValid()) {
-            // 2026-03-xx 物理阻断：通过代码强制选中时，必须锁定信号发射，防止与 ContentPanel 形成回环死循环
-            m_categoryTree->blockSignals(true);
+            // 2026-07-26 极致重构：利用 DataFlowGuard 优雅控制，彻底消灭 blockSignals
+            DataFlowGuard guard(m_isInternalUpdating);
             m_categoryTree->setCurrentIndex(proxyIdx);
             m_categoryTree->scrollTo(proxyIdx);
-            m_categoryTree->blockSignals(false);
         }
     }
 }
@@ -196,10 +195,10 @@ void CategoryPanel::selectCategoryByType(const QString& type) {
     if (target.isValid()) {
         QModelIndex proxyIdx = m_proxyModel->mapFromSource(target);
         if (proxyIdx.isValid()) {
-            m_categoryTree->blockSignals(true);
+            // 2026-07-26 极致重构：利用 DataFlowGuard 优雅控制，彻底消灭 blockSignals
+            DataFlowGuard guard(m_isInternalUpdating);
             m_categoryTree->setCurrentIndex(proxyIdx);
             m_categoryTree->scrollTo(proxyIdx);
-            m_categoryTree->blockSignals(false);
         }
     }
 }
@@ -966,20 +965,19 @@ void CategoryPanel::initUi() {
     });
 
     connect(m_categoryModel, &QAbstractItemModel::modelReset, this, [this]() {
-        // 2026-06-xx 物理修复：采用 singleShot(0) 解决视图节点生成竞态，确保 setExpanded 绝对生效
-        QTimer::singleShot(0, this, [this]() {
-            QList<int> idList = m_categoryTree->property("expandedIds").value<QList<int>>();
-            QStringList expandedNames = m_categoryTree->property("expandedNames").toStringList();
-            
-            QSet<int> expandedIds;
-            for (int id : idList) expandedIds.insert(id);
+        // 2026-07-26 极致重构：利用 DataFlowGuard 优雅控制并消除 singleShot(0) 和 blockSignals，直接同步恢复状态
+        QList<int> idList = m_categoryTree->property("expandedIds").value<QList<int>>();
+        QStringList expandedNames = m_categoryTree->property("expandedNames").toStringList();
+        
+        QSet<int> expandedIds;
+        for (int id : idList) expandedIds.insert(id);
 
-            m_isRestoringState = true;
-            m_categoryTree->blockSignals(true); // 物理阻断：防止展开动作触发 saveExpandedStateToSettings
+        m_isRestoringState = true;
+        {
+            DataFlowGuard guard(m_isInternalUpdating);
             restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
-            m_categoryTree->blockSignals(false);
-            m_isRestoringState = false;
-        });
+        }
+        m_isRestoringState = false;
     });
 
     connect(m_categoryTree, &QTreeView::clicked, this, [this](const QModelIndex& proxyIndex) {
@@ -1133,7 +1131,7 @@ void CategoryPanel::initUi() {
 }
 
 void CategoryPanel::saveExpandedStateToSettings() {
-    if (m_isRestoringState) {
+    if (m_isRestoringState || m_isInternalUpdating) {
         return;
     }
     if (!m_categoryModel || m_categoryModel->rowCount() <= 0) return;
@@ -1176,9 +1174,10 @@ void CategoryPanel::loadExpandedStateFromSettings() {
 
     // 同时也尝试立即恢复一次（兼容同步加载场景）
     m_isRestoringState = true;
-    m_categoryTree->blockSignals(true);
-    restoreExpandedState(QModelIndex(), ids, names);
-    m_categoryTree->blockSignals(false);
+    {
+        DataFlowGuard guard(m_isInternalUpdating);
+        restoreExpandedState(QModelIndex(), ids, names);
+    }
     m_isRestoringState = false;
 }
 
