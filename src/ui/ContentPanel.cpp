@@ -3598,7 +3598,14 @@ bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) {
                     if (key == Qt::Key_Left) {
                         editor->setCursorPosition(0);
                     } else {
-                        editor->setCursorPosition(editor->text().length());
+                        // 2026-07-26 极致重构：按下向右键光标一键定位到文件名基名（不含扩展名部分）的末端（点号前面）（对应用户原话：“我指的是文件名，不是后缀名...基名”）
+                        QString val = editor->text();
+                        int lastDot = val.lastIndexOf('.');
+                        if (lastDot > 0) {
+                            editor->setCursorPosition(lastDot);
+                        } else {
+                            editor->setCursorPosition(val.length());
+                        }
                     }
                     editor->deselect(); // 清除全选高亮状态
                     keyEvent->accept();

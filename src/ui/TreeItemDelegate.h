@@ -270,11 +270,52 @@ public:
 
 public:
     QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
-        QWidget* editor = QStyledItemDelegate::createEditor(parent, option, index);
-        if (editor) {
-            editor->installEventFilter(const_cast<TreeItemDelegate*>(this));
-        }
+        Q_UNUSED(option);
+        Q_UNUSED(index);
+        QLineEdit* editor = new QLineEdit(parent);
+        // 2026-07-26 极致重构：应用精致的暗黑带蓝边框样式（背景 `#2D2D2D`，外框 `#3498db`，圆角 `4px`），消除默认白色粗糙样式
+        editor->setStyleSheet(
+            "QLineEdit {"
+            "  background-color: #2D2D2D;"
+            "  color: white;"
+            "  selection-background-color: #3498db;"
+            "  border: 1px solid #3498db;"
+            "  border-radius: 4px;"
+            "  padding: 0px 4px;"
+            "  margin: 0px;"
+            "  font-size: 8pt;"
+            "}"
+        );
+        editor->installEventFilter(const_cast<TreeItemDelegate*>(this));
         return editor;
+    }
+
+    void updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        QRect targetRect = option.rect;
+
+        // 2026-07-26 极致重构：如果渲染了微卡片，则对编辑器 left 边界执行完全的物理避让（对应用户原话：“绝不覆盖、叠占卡片”）
+        if (index.column() == 0 && m_drawMiniCards) {
+            int padding = 3;
+            int side = option.rect.height() - (padding * 2);
+            if (side <= 0) side = 16;
+            QRect squareRect(option.rect.left() + 6, option.rect.top() + padding, side, side);
+            targetRect.setLeft(squareRect.right() + 10);
+        } else {
+            targetRect.adjust(6, 0, -6, 0);
+        }
+
+        // 2026-07-26 极致重构：行内编辑框物理最大高度不超过 28 像素限幅约束，居中收缩留白（对应用户原话：“行内编辑的编辑框高度不可大于28像素”）
+        const int maxH = 28;
+        if (targetRect.height() > maxH) {
+            int diff = targetRect.height() - maxH;
+            int topAdj = diff / 2;
+            int botAdj = diff - topAdj;
+            targetRect.adjust(0, topAdj, 0, -botAdj);
+        } else {
+            targetRect.adjust(0, 2, 0, -2);
+        }
+
+        editor->setGeometry(targetRect);
     }
 
     bool eventFilter(QObject* obj, QEvent* event) override {
@@ -293,7 +334,14 @@ public:
                         if (key == Qt::Key_Left) {
                             editor->setCursorPosition(0);
                         } else {
-                            editor->setCursorPosition(editor->text().length());
+                            // 2026-07-26 极致重构：按下向右键光标一键定位到文件名基名（不含扩展名部分）的末端（点号前面）（对应用户原话：“我指的是文件名，不是后缀名...基名”）
+                            QString val = editor->text();
+                            int lastDot = val.lastIndexOf('.');
+                            if (lastDot > 0) {
+                                editor->setCursorPosition(lastDot);
+                            } else {
+                                editor->setCursorPosition(val.length());
+                            }
                         }
                         editor->deselect(); // 清除全选高亮状态
                         keyEvent->accept();
