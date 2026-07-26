@@ -979,22 +979,24 @@ void CategoryPanel::initUi() {
     });
 
     connect(m_categoryModel, &QAbstractItemModel::modelReset, this, [this]() {
-        // 2026-07-26 极致重构：利用 DataFlowGuard 优雅控制并消除 singleShot(0) 和 blockSignals，直接同步恢复状态
-        QList<int> idList = m_categoryTree->property("expandedIds").value<QList<int>>();
-        QStringList expandedNames = m_categoryTree->property("expandedNames").toStringList();
-        
-        QSet<int> expandedIds;
-        for (int id : idList) expandedIds.insert(id);
+        // 2026-07-26 物理修复：在异步单次定时器中延迟执行，以确保 QTreeView 已经处理完了 modelReset，节点在视图中已经物理生成并映射
+        QTimer::singleShot(0, this, [this]() {
+            QList<int> idList = m_categoryTree->property("expandedIds").value<QList<int>>();
+            QStringList expandedNames = m_categoryTree->property("expandedNames").toStringList();
 
-        m_isRestoringState = true;
-        {
-            DataFlowGuard guard(m_isInternalUpdating);
-            restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
-        }
-        m_isRestoringState = false;
+            QSet<int> expandedIds;
+            for (int id : idList) expandedIds.insert(id);
 
-        // 在这之后重设并开放拦截锁
-        m_isInternalUpdating = false;
+            m_isRestoringState = true;
+            {
+                DataFlowGuard guard(m_isInternalUpdating);
+                restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
+            }
+            m_isRestoringState = false;
+
+            // 状态还原完全落定后，再安全解开拦截锁
+            m_isInternalUpdating = false;
+        });
     });
 
     connect(m_categoryTree, &QTreeView::clicked, this, [this](const QModelIndex& proxyIndex) {

@@ -180,3 +180,14 @@
   2. 统一拦截 `QLineEdit` 编辑器的键盘事件。针对 `Qt::Key_Up`/`Qt::Key_Down`，直接吞噬拦截；针对 `Qt::Key_Left`/`Qt::Key_Right`，当处于 `hasSelectedText()` 全选（高亮）状态时，分别将光标强制定位到 `0` 或 `text().length()` 并执行 `deselect()` 清除高亮，同时拦截该事件；处于非全选时则放行系统默认光标移动。
 - 不在本次范围内的是：修改 MFT 扫描、USN 监控底座或数据库相关的非界面编辑逻辑。
 - 对应方案文档：Modification_Plan/Modification_Plan-95.md
+
+## [2026-07-26] 侧边栏分类树状展开状态重启不持久化与模型重置竞态修复
+
+- 用户描述的现象/问题：侧边栏分类树状展开之后没有被持久化，重启主程序之后又被自动折叠了，且之前的 Plan-98 方案修复后仍未达到预期。
+- 用户期望的结果：侧边栏某个分类（包括顶级托管库 ArcMeta.Library_* 及其子分类）展开之后能够完美持久化，即便重启主程序之后仍然处于展开状态。
+- 本次任务边界：
+  1. 修复 `CategoryPanel::initUi` 中 `modelReset` 信号响应的竞态问题，重新引入 `QTimer::singleShot(0)` 异步延迟处理，确保 `QTreeView` 已经处理完重置并渲染出物理节点后才执行展开状态的恢复。
+  2. 确保 `m_isInternalUpdating` 拦截锁覆盖异步延迟期，在节点物理生成并完成展开前屏蔽所有折叠虚假信号。
+  3. 完善 `saveExpandedStateToSettings` 和 `restoreExpandedState` 的控制与过滤。
+- 不在本次范围内的是：修改 `CategoryRepo` 数据库的具体查询或系统项分类重排逻辑，修改其他面板（如内容面板）的数据加载逻辑。
+- 对应方案文档：Modification_Plan/Modification_Plan-99.md
