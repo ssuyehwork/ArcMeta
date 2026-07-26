@@ -382,9 +382,37 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
         QString oldColor = index.data(ColorRole).toString();
         QString newColor = value.toString();
         if (oldColor != newColor) {
-            MetadataManager::instance().setColor(path.toStdWString(), newColor.toStdWString());
-            UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Color, oldColor, newColor));
-            metaUpdated = true;
+            auto& mutableRec = m_allRecords[index.row()];
+
+            if (record.isCategory) {
+                // 1. 子分类项 (record.isCategory == true)
+                auto all = CategoryRepo::getAll();
+                for (auto& c : all) {
+                    if (c.id == record.categoryId) {
+                        c.color = newColor.toUpper().toStdWString();
+                        CategoryRepo::update(c); // 持久化到 categories 表
+                        if (!c.physicalPath.empty()) {
+                            MetadataManager::instance().setColor(c.physicalPath, c.color, true);
+                        }
+                        break;
+                    }
+                }
+                // 关键点：物理同步更新内存中当前 Record 的颜色字段，使 data() 能够查到新颜色
+                mutableRec.categoryColor = newColor;
+                metaUpdated = true;
+            } else {
+                // 2. 普通文件或物理文件夹 (record.isCategory == false)
+                MetadataManager::instance().setColor(path.toStdWString(), newColor.toStdWString());
+
+                // 若该物理文件夹绑定了 categories 表中的分类，同步更新 categories 表
+                if (record.isDir) {
+                    std::wstring normPath = MetadataManager::normalizePath(path.toStdWString());
+                    CategoryRepo::updateCategoryColorByPath(normPath, newColor.toUpper().toStdWString());
+                }
+
+                UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Color, oldColor, newColor));
+                metaUpdated = true;
+            }
         }
     } else if (role == IsLockedRole || role == PinnedRole) {
         bool pinned = value.toBool();
@@ -1997,31 +2025,14 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             menu.addAction(pickerAction);
 
             connect(pickerWidget, &ColorStripPicker::colorSelected, this, [this, view, &menu](const QString& hexColor) {
-                auto indexes = view->selectionModel()->selectedIndexes();  
-                for (const auto& idx : indexes) {  
-                    if (idx.column() == 0) {  
-                        QString itemPath = idx.data(PathRole).toString();  
-                        // 1. 同步写入到 metadata 表的 color 字段 
-                        m_proxyModel->setData(idx, hexColor, ColorRole);  
-                         
-                        // 2. 如果它是文件夹并且被绑定为了 categories 分类，则同时存入 categories 表的 color 字段 
-                        std::wstring normPath = MetadataManager::normalizePath(itemPath.toStdWString()); 
-                        CategoryRepo::updateCategoryColorByPath(normPath, hexColor.toUpper().toStdWString()); 
-                         
-                        // 3. 重新渲染图标以保持视觉同步 
-                        QIcon coloredIcon; 
-                        QString ext = QFileInfo(itemPath).suffix().toLower(); 
-                        if (UiHelper::isGraphicsFile(ext)) { 
-                            QImage img = UiHelper::getShellThumbnail(itemPath, this->m_zoomLevel); 
-                            if (!img.isNull()) coloredIcon = QIcon(QPixmap::fromImage(img)); 
-                        } 
-                        if (coloredIcon.isNull()) { 
-                            coloredIcon = UiHelper::getFileIcon(itemPath, this->m_zoomLevel); 
-                        } 
-                        m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole);  
-                    }  
-                } 
-                menu.close(); 
+                auto indexes = view->selectionModel()->selectedIndexes();
+                for (const auto& idx : indexes) {
+                    if (idx.column() == 0) {
+                        // 统一交给 setData 处理，模型层会自动处理内存更新、多表持久化与 UI 信号通知
+                        m_proxyModel->setData(idx, hexColor, ColorRole);
+                    }
+                }
+                menu.close();
             });
  
             bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
