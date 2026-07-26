@@ -19,7 +19,7 @@
 ## [2026-07-20] 内容面板视图模式对齐重构与自定义调整滑杆及视图按钮移植
 
 - 用户描述的现象/问题：当前版本现有的三个视图模式没有达到预期；且原有Ctrl+滚轮缩放兼切换多视图的逻辑未达预期；同时顶部缺少方便调节卡片尺寸 and 快速切换视图排列方式的控件。
-- 用户期望的结果：在当前版本中移植并实现类似于 FERREX-META 版本的“调整卡片尺寸的滑杆（m_sizeSlider）”和“排列方式 of 视图按钮（viewBtn）”；完全放弃原有Ctrl+滚轮多级缩放切换视图的逻辑；且参照 FERREX-META 的实现彻底重构移植三个视图模式（列表、自适应、网格），确保职责单一模块化。
+- 用户期望的结果：在当前版本中移植并实现类似于 FERREX-META 版本的“调整卡片尺寸的滑杆（m_sizeSlider）” and “排列方式 of 视图按钮（viewBtn）”；完全放弃原有Ctrl+滚轮多级缩放切换视图的逻辑；且参照 FERREX-META 的实现彻底重构移植三个视图模式（列表、自适应、网格），确保职责单一模块化。
 - 本次任务边界：重写并替换当前版本的 `ListResultView`、`GridResultView`、`JustifiedResultView` 等视图接口与实现，剔除不合预期的多级滚轮缩放切换逻辑；并在 `ContentPanel` 顶部标题栏区域中嵌入 `m_sizeSlider` 与 `viewBtn` 控件，实现卡片尺寸 32~256 像素无缝调节及列表/自适应/网格三种排版模式的一键式极速切换。
 - 不在本次范围内的是：修改 MFT / USN 底层扫描或数据库检索流程，移植与视图显示无关 of 外部控制器组件。
 - 对应方案文档：Modification_Plan-34.md
@@ -68,7 +68,7 @@
   1. 在 `ToolTipOverlay` 中引入 QPropertyAnimation，实现 `windowOpacity` 属性动画（淡进淡出 150ms 优雅呈现），并新增 `exactPosition` 精确定位参数。
   2. 在 `QuickLookWindow::eventFilter` 中加装事件过滤器物理拦截 `m_graphicsView` 和 `m_textEdit` 的 `KeyPress` 动作，拦截 arrow keys、数字、Alt 等核心快捷键并转发分发给 `keyPressEvent`。
   3. 在 `ContentPanel` 中新增 `selectAndScrollToPath(path)` 方法，保持主视图选中态随切图进行双向联动。
-- 不在本次范围内的是：重构预览界面或主界面的非快捷键/切图逻辑。
+- 不在本次范围内的是：重构预览界面 or 主界面的非快捷键/切图逻辑。
 - 对应方案文档：Modification_Plan-39.md
 
 ## [2026-07-21] ThumbnailDelegate 职责过载审计与模块化拆分规划
@@ -107,3 +107,39 @@
   2. 保护 `ActionRescan`（重新扫描）逻辑并维持现有调用，确保 `updateIngestionStatus(nPath, 0)` 对视觉反馈的更新。
 - 不在本次范围内的是：修改核心统一多媒体解析逻辑 `MediaExtractorPipeline` 及 `registerItemsAsync` 的底层排队管道。
 - 对应方案文档：Modification_Plan/Modification_Plan-60.md
+
+## [2026-07-25] 文件夹与映射分类颜色双向实时同步机制修复
+
+- 用户描述的现象/问题：之前版本原本支持对文件夹设定颜色标签，但在前几轮修改时由于jules脑补修改导致同步机制被破坏。具体为：对内容区物理文件夹设定某个颜色标签后，无法同步到相应的映射分类颜色；同样地，从侧边栏对分类设定颜色后，也无法同频更新对应入库的物理文件夹颜色。
+- 用户期望的结果：无论是从侧边栏分类设定颜色或从内容面板对文件夹进行设定颜色，两者都能相互同步展现同频的颜色标签。该功能仅限与已入库的文件夹/分类。
+- 本次任务边界：
+  1. 在 `MetadataManager::setColor` 内部增加同步判断，一旦对文件夹修改颜色，同步调用 `CategoryRepo::updateCategoryColorByPath` 将颜色同步更新至映射分类定义中。
+  2. 在 `CategoryPanel::onSetColor` 和 `onRandomColor` 中增加同步写入，当分类绑定的物理文件夹非空时，同步调用 `MetadataManager::instance().setColor` 将新颜色同步写入对应的物理文件夹缓存与持久化中。
+  3. 确保该双向同步动作仅对已入库的物理文件夹/分类有效，不影响其他普通未入库项目。
+- 不在本次范围内的是：修改非颜色属性的元数据持久化、或者对非入库文件更改颜色的独立打标逻辑。
+- 对应方案文档：Modification_Plan/Modification_Plan-61.md
+
+## [2026-07-25] 彻底根除随机/设置颜色旧UI与在右键菜单上直接以悬停白圈色块展示并同步存库
+
+- 用户描述的现象/问题：现有的右键菜单及部分分类/文件夹设置中采用“随机颜色”和“设置颜色”的传统菜单项（QAction）及弹窗操作链路复杂、不够直观。
+- 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段和 metadata 表的 color 字段中。
+- 本次任务边界：
+  1. 彻底删除 `CategoryPanel` 及 `MainWindow`（FolderButton 菜单）中的“随机颜色”与“设置颜色”旧 QAction 和旧对应响应函数（如 `onRandomColor` / `onSetColor`）。
+  2. 针对 `CategoryPanel` 侧边分类右键菜单、`MainWindow` 中的 FolderButton 右键菜单，以及 `ContentPanel` 内容右键菜单中的“设定颜色标签”（ActionColorTag）子菜单，实现全新的一排水平排列色块快捷操作区域（可以使用自定义 `QWidgetAction` 加载色块容器）。
+  3. 每个色块尺寸和间距根据界面情况合理设定（如圆形色块，直径 20px-24px，间隔 6px-8px），且鼠标悬停在色块上方时绘制出明晰的白色同心圆突显色块边缘。
+  4. 选中某个色块后，立即调用更新接口：
+     - 如果是在 `CategoryPanel` 对分类进行设置，将色值写入对应分类在 `categories` 表的 `color` 字段，同时如果该分类绑定了物理文件夹路径，则将对应路径在 `metadata` 表的 `color` 字段也一并同步更新；
+     - 如果是在 `MainWindow` 对 FolderButton 自定义 monitored folder 进行操作，将色值写入 AppConfig 中对应属性，并更新对应物理路径在 `metadata` 表的 `color` 字段（如果已登记到库中，也会同步到绑定映射分类）；
+     - 如果是在 `ContentPanel` 对登记的项目进行操作，将色值写入该项目在 `metadata` 表的 `color` 字段，若该项目是已入库且绑定了侧边栏映射分类的文件夹，也将色值存入对应分类的 `categories` 表的 `color` 字段中。
+- 不在本次范围内的是：修改非颜色属性的其他关联持久化，或者调整与色块绘制无关的其他右键菜单项。
+- 对应方案文档：Modification_Plan/Modification_Plan-62.md
+
+## [2026-07-26] 消除控制按钮点击后的点状虚线聚焦边框
+
+- 用户描述的现象/问题：在内容面板顶栏中，点击“显示/隐藏文件夹”等控制按钮时，按钮周边会显示点状的聚焦虚线框，影响界面纯净度。
+- 用户期望的结果：在点击按钮时，不显示此聚焦虚线框。
+- 本次任务边界：
+  1. 定位内容面板顶栏的四个核心控制按钮（`m_btnToggleFolders`, `m_btnToggleFiles`, `m_btnLayersBlue`, `m_btnLayers`）。
+  2. 显式设置这些按钮的焦点策略为 `Qt::NoFocus`，从而防止它们在被鼠标点击时捕获键盘焦点，彻底避免绘制点状虚线聚焦边框。
+- 不在本次范围内的是：修改其他非顶栏按钮的焦点策略，或更改其任何点击事件触发的过滤或逻辑行为。
+- 对应方案文档：Modification_Plan/Modification_Plan-90.md
