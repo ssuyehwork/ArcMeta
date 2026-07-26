@@ -483,20 +483,7 @@ bool CategoryRepo::remove(int id) {
     }
     trans.commit();
 
-    // 对磁盘上的对应物理文件夹执行物理清理/移出
-    for (const auto& wPath : physicalDirsToDelete) {
-        QString qPath = QString::fromStdWString(wPath);
-        QDir dir(qPath);
-        if (dir.exists()) {
-            qDebug() << "[DB_TRACE] 同步清理物理文件夹:" << qPath;
-            if (dir.removeRecursively()) {
-                qDebug() << "[DB_TRACE] 物理文件夹清理成功:" << qPath;
-            } else {
-                qWarning() << "[DB_TRACE] 物理文件夹清理失败 (可能被占用或权限不足):" << qPath;
-            }
-        }
-    }
-
+    // ✅ 修正后：删除分类只清理数据库与内存关联，严禁物理删除用户磁盘上的实际文件夹！
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
     return true;
 }
