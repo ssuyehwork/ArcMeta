@@ -180,7 +180,7 @@ private:
     QVBoxLayout* m_containerLayout = nullptr;
     
     ElasticEdit* m_nameEdit = nullptr;
-    QLabel* lblType = nullptr, *lblSize = nullptr;
+    QLabel* lblType = nullptr, *lblSize = nullptr, *lblDimensions = nullptr;
     QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
     ElasticEdit* m_pathEdit = nullptr;
     QLabel* lblEncrypted = nullptr;

@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QFile>
+#include <functional>
 #include "SecureFileEraser.h"
 #include "../meta/MetadataManager.h"
 #include "../core/UndoManager.h"

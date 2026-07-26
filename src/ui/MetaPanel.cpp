@@ -401,6 +401,7 @@ void MetaPanel::initUi() {
 
     // [Section 7] 详情网格 (基本信息)
     addInfoRow("类型", lblType); addInfoRow("大小", lblSize);
+    addInfoRow("尺寸", lblDimensions); // 2026-07-26 极致重构：动态尺寸行展示，紧密对齐在“大小”下一行（对应用户原话：“显示位置在‘大小’的下一行”）
     addInfoRow("创建时间", lblCtime); addInfoRow("修改时间", lblMtime); addInfoRow("访问时间", lblAtime);
     
     // 2026-06-xx 工业级重构：物理路径升级为只读 ElasticEdit，彻底解决超长路径不换行与截断问题
@@ -626,6 +627,24 @@ void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s,
             pal.append({entry.color, entry.ratio});
         }
         setPalettes(pal);
+
+        // 2026-07-26 极致重构：如果包含提取出来的物理图片/SVG宽高尺寸，动态显示在“大小”下一行，否则平滑隐藏（对应用户原话：“如果包含尺寸情况下，那么metapanel.cpp面板需要将尺寸显示出来”）
+        if (rm.width > 0 && rm.height > 0) {
+            lblDimensions->setText(QString("%1 x %2 像素").arg(rm.width).arg(rm.height));
+            if (lblDimensions->parentWidget()) {
+                lblDimensions->parentWidget()->show(); // 动态展现
+            }
+        } else {
+            lblDimensions->setText("-");
+            if (lblDimensions->parentWidget()) {
+                lblDimensions->parentWidget()->hide(); // 平滑自适应隐藏
+            }
+        }
+    } else {
+        lblDimensions->setText("-");
+        if (lblDimensions->parentWidget()) {
+            lblDimensions->parentWidget()->hide();
+        }
     }
     if (m_container) m_container->adjustSize();
 }
