@@ -301,6 +301,18 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
                                 mutableRec.filename = newName;
                                 weakThis->m_metaCache.remove(oldPath);
 
+                                // 2026-07-26 极致重构：在磁盘模式重命名成功后，同步就地无损迁移缩略图缓存与宽高比缓存，彻底解决重命名后变灰的设计缺陷（对应用户原话：“磁盘模式下重命名导致缩略图变灰设计缺陷修复”）
+                                QIcon* oldIconPtr = weakThis->m_iconCache.take(oldPath);
+                                if (oldIconPtr) {
+                                    weakThis->m_iconCache.insert(nativeNewPath, oldIconPtr);
+                                }
+                                QString oldNativeKey = QDir::toNativeSeparators(oldPath);
+                                QString newNativeKey = QDir::toNativeSeparators(nativeNewPath);
+                                if (weakThis->m_aspectRatios.contains(oldNativeKey)) {
+                                    double oldRatio = weakThis->m_aspectRatios.take(oldNativeKey);
+                                    weakThis->m_aspectRatios[newNativeKey] = oldRatio;
+                                }
+
                                 // 物理同步：安全更新模型私有的路径到行号的映射
                                 auto it = weakThis->m_pathToIndex.find(oldPath);
                                 if (it != weakThis->m_pathToIndex.end()) {
