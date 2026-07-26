@@ -36,7 +36,7 @@
 
 - 用户描述的现象/问题：当前版本的 `QuickLookWindow` 预览运行逻辑不符合预期，其处理逻辑 and 界面交互（如图像缩放、音视频媒体处理、文本二进制检测及编码识别等）功能不够完备。
 - 用户期望的结果：彻底放弃当前版本的 `QuickLookWindow` 运行逻辑，将其替换为 `FERREX-META` 版本中的 `QuickLookWindow` 运行逻辑。这包括采用专门设计的 `QuickLookGraphicsView`（支持滚轮缩放、双击恢复/适配大小、鼠标拖拽移动及光标跟随变动）、引入更完整的多媒体及文本二进制与编码自动检测识别渲染，实现更好的大文件和特殊文件类型的预览。
-- 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView` 控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅的占位降级兼容。
+- 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView`控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅的占位降级兼容。
 - 不在本次范围内的是：修改 `MainWindow` 的主导航调度机制 or 任何非预览关联的面板组件。
 - 对应方案文档：Modification_Plan-36.md
 
@@ -93,7 +93,7 @@
 ## [2026-07-24] 全款应用架构与文件职责过载深度排查
 
 - 用户描述的现象/问题：应用中可能存在整体混乱的逻辑架构，文件职责过载（违反SRP），以及存在某些功能具有不合理的傻逼逻辑架构。
-- 用户期望的结果：对全款应用及核心源码文件进行地毯式的通读与细粒度审计，标记所有存在职责过载（违反 SRP）的文件，定位逻辑架构设计不合理的傻逼逻辑架构功能。
+- 用户期望的结果：对全款应用及核心源码文件进行地毯式的通红与细粒度审计，标记所有存在职责过载（违反 SRP）的文件，定位逻辑架构设计不合理的傻逼逻辑架构功能。
 - 本次任务边界：对 `src/` 目录下的核心逻辑、业务模块 and UI 骨架（如 `ContentPanel`, `MainWindow`, `MetadataManager`, `MftReader` 等）及各组件数据流向、跨层耦合和 UI 层业务硬编码进行地毯式地深层审计与排查，输出架构漏洞、混乱点、文件职责过载证据（行号 + 代码片段）并归档。
 - 不在本次范围内的是：修改任何代码文件、创建实际重构代码、或扫描非当前项目指定的外部不相关目录。
 - 对应方案文档：Modification_Plan/Modification_Plan-54.md
@@ -122,7 +122,7 @@
 ## [2026-07-25] 彻底根除随机/设置颜色旧UI与在右键菜单上直接以悬停白圈色块展示并同步存库
 
 - 用户描述的现象/问题：现有的右键菜单及部分分类/文件夹设置中采用“随机颜色”和“设置颜色”的传统菜单项（QAction）及弹窗操作链路复杂、不够直观。
-- 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段和 metadata 表的 color 字段中。
+- 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段和 metadata 表 of color 字段中。
 - 本次任务边界：
   1. 彻底删除 `CategoryPanel` 及 `MainWindow`（FolderButton 菜单）中的“随机颜色”与“设置颜色”旧 QAction 和旧对应响应函数（如 `onRandomColor` / `onSetColor`）。
   2. 针对 `CategoryPanel` 侧边分类右键菜单、`MainWindow` 中的 FolderButton 右键菜单，以及 `ContentPanel` 内容右键菜单中的“设定颜色标签”（ActionColorTag）子菜单，实现全新的一排水平排列色块快捷操作区域（可以使用自定义 `QWidgetAction` 加载色块容器）。
@@ -133,3 +133,11 @@
      - 如果是在 `ContentPanel` 对登记的项目进行操作，将色值写入该项目在 `metadata` 表的 `color` 字段，若该项目是已入库且绑定了侧边栏映射分类的文件夹，也将色值存入对应分类的 `categories` 表的 `color` 字段中。
 - 不在本次范围内的是：修改非颜色属性的其他关联持久化，或者调整与色块绘制无关的其他右键菜单项。
 - 对应方案文档：Modification_Plan/Modification_Plan-62.md
+
+## [2026-07-26] 解决全局所有按钮点击后显示点状聚焦虚线框问题
+
+- 用户描述的现象/问题：在全站范围内，当用户点击任意按钮时，按钮周边都会显示点状虚线聚焦边框。
+- 用户期望的结果：全局禁用这一虚线的显现，保持全站级的完美屏蔽，不影响原有样式且实现最简单、彻底的修复。
+- 本次任务边界：在 `src/main.cpp` 中初始化 `QApplication` 的位置，加入一行全局样式表设置 `a.setStyleSheet("QAbstractButton { outline: none; }");`。
+- 不在本次范围内的是：逐个修改各页面组件按钮的逻辑，或在其他样式表文件中写分散的规则。
+- 对应方案文档：Modification_Plan/Modification_Plan-91.md
