@@ -30,7 +30,7 @@
 - 用户期望的结果：对三种视图底层控制链展开深度排查，找出不合理的架构缺陷并形成极致解耦与性能提升的优化方案，并产出详细设计。
 - 本次任务边界：审计并理清 `JustifiedView`、`ListResultView`、`GridResultView`、`JustifiedResultView` 以及 `ContentPanel` 之间在视图控制、数据映射 and 布局渲染上的依赖关系，设计职责更清晰、耦合度更低的模块化结构。
 - 不在本次范围内的是：实际修改或编译代码，移植非视图类的其他外部功能。
-- 对应方案文档：Modification_Plan-35.md
+- 对应方案文档: Modification_Plan-35.md
 
 ## [2026-07-20] 彻底放弃当前 QuickLookWindow 运行逻辑并使用 FERREX-META 逻辑替代重构
 
@@ -38,7 +38,7 @@
 - 用户期望的结果：彻底放弃当前版本的 `QuickLookWindow` 运行逻辑，将其替换为 `FERREX-META` 版本中的 `QuickLookWindow` 运行逻辑。这包括采用专门设计的 `QuickLookGraphicsView`（支持滚轮缩放、双击恢复/适配大小、鼠标拖拽移动及光标跟随变动）、引入更完整的多媒体及文本二进制与编码自动检测识别渲染，实现更好的大文件和特殊文件类型的预览。
 - 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView`控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅的占位降级兼容。
 - 不在本次范围内的是：修改 `MainWindow` 的主导航调度机制 or 任何非预览关联的面板组件。
-- 对应方案文档：Modification_Plan-36.md
+- 对应方案文档: Modification_Plan-36.md
 
 ## [2026-07-21] 预览界面滚动条样式对齐考古规范优化
 
@@ -46,15 +46,15 @@
 - 用户期望的结果：将预览界面（QuickLookWindow）内的滚动条样式彻底重构，使其严格遵循全局规范：宽度 10px、圆角 3px、背景透明、Handle 颜色对齐 `BorderColor` #333333。
 - 本次任务边界：修改 `src/ui/QuickLookWindow.cpp` 中 `QuickLookGraphicsView` 和 `QPlainTextEdit` 控件的水平及垂直滚动条的 QSS 样式。
 - 不在本次范围内的是：修改预览界面其他的图片/文本渲染、缩放或事件分流逻辑.
-- 对应方案文档：Modification_Plan-37.md
+- 对应方案文档: Modification_Plan-37.md
 
 ## [2026-07-21] 预览界面多媒体残留代码彻底物理根除与净化
 
 - 用户描述的现象/问题：上一代 AI 在收到彻底根除多媒体播放功能的指令后，依然在 `QuickLookWindow` 中保留了多媒体播放及占位相关冗余代码。
-- 用户期望的结果：彻底删除并根除 `QuickLookWindow` 中的所有多媒体组件（如播放、暂停、进度条、多媒体相关容器控件和占位框等）和无用快捷键与接口，音视频转走标准系统大图标降级展示。
+- 用户期望的结果：彻底删除并根除 `QuickLookWindow` 中的所有多媒体组件（如播放、暂停、进度条、多媒体相关容器控件 and 占位框等）和无用快捷键与接口，音视频转走标准系统大图标降级展示。
 - 本次任务边界：彻底删除 `src/ui/QuickLookWindow.h` 与 `src/ui/QuickLookWindow.cpp` 中的所有多媒体成员变量、宏定义、多媒体容器构建、以及 `renderMedia`、`resetMedia`、键盘 `P` 按键处理逻辑等。
 - 不在本次范围内的是：修改预览界面其他的图片/文本渲染、缩放或事件分流逻辑。
-- 对应方案文档：Modification_Plan-38.md
+- 对应方案文档: Modification_Plan-38.md
 
 ## [2026-07-21] 预览窗快捷键 ToolTip 屏幕上方居中淡进淡出显示、切图/导航加固及 ContentPanel 选中联动
 
@@ -69,7 +69,7 @@
   2. 在 `QuickLookWindow::eventFilter` 中加装事件过滤器物理拦截 `m_graphicsView` 和 `m_textEdit` 的 `KeyPress` 动作，拦截 arrow keys、数字、Alt 等核心快捷键并转发分发给 `keyPressEvent`。
   3. 在 `ContentPanel` 中新增 `selectAndScrollToPath(path)` 方法，保持主视图选中态随切图进行双向联动。
 - 不在本次范围内的是：重构预览界面 or 主界面的非快捷键/切图逻辑。
-- 对应方案文档：Modification_Plan-39.md
+- 对应方案文档: Modification_Plan-39.md
 
 ## [2026-07-21] ThumbnailDelegate 职责过载审计与模块化拆分规划
 
@@ -77,7 +77,7 @@
 - 用户期望的结果：对其进行代码职责过载分析并输出模块化的单一职责拆解和落地规划。
 - 本次任务边界：对 `src/ui/ThumbnailDelegate.h` 与 `src/ui/ThumbnailDelegate.cpp` 展开整体架构梳理，定位其过载现状，设计面向高内聚、零开销、低耦合的模块化（视觉物理渲染、文本排版、控制器生命期分流）拆分图纸。由于本 Turn 为只读分析师模式，不修改任何项目代码文件。
 - 不在本次范围内的是：修改逻辑代码、在外部执行构建验证。
-- 对应方案文档：Modification_Plan-40.md
+- 对应方案文档: Modification_Plan-40.md
 
 ## [2026-07-22] 视图按钮及缩放滑杆功能移植重构
 
@@ -86,9 +86,9 @@
 - 本次任务边界：
   1. 在主窗口 `MainWindow::setupCustomTitleBarButtons()` 对应的自定义按钮组中，植入“缩放滑杆”和“视图模式一键切换按钮”，调整按钮间距物理对齐全局规范。
   2. 重构 `ContentPanel` 的 `wheelEvent`，捕获 Ctrl+滚轮 动作实现滑杆尺寸/内容卡片尺寸 `m_zoomLevel`（限制在 96~128px 之间）的物理同频缩放，并保证滑杆值及 `updateGridSize()` 持久化一致。
-  3. 在“视图按钮”下拉菜单中，完美对接 `ListView`、`GridView` (网格自适应即 JustifiedMode) 以及 `JustifiedViewMode` 的逻辑切换。
+  3. 在“视图按钮”下拉菜单中，完美对接 `ListView`、`GridView` (网格自适应即 JustifiedMode) 以及 `JustifiedViewMode` 的 logic 切换。
 - 不在本次范围内的是：重写或修改物理 USN 监控底座或底层 MFT 文件过滤搜索流程。
-- 对应方案文档：Modification_Plan-45.md
+- 对应方案文档: Modification_Plan-45.md
 
 ## [2026-07-24] 全款应用架构与文件职责过载深度排查
 
@@ -152,3 +152,31 @@
   3. 修改 `src/core/CoreController` 引入 `initializeCoreComponents`，统一、拓扑性地进行单例实例化及定时器哑死物理加固。
 - 不在本次范围内的是：修改物理 MFT 文件扫描核心算法、IOCP 底层驱动及 UI 具体的渲染重排。
 - 对应方案文档：Modification_Plan/Modification_Plan-89.md
+
+## [2026-07-26] 磁盘模式下重命名导致缩略图变灰设计缺陷修复
+
+- 用户描述的现象/问题：在磁盘导航模式下打开某个文件夹后，对其中的某个图形文件执行重命名操作。重命名成功后，由于新旧物理路径发生变更，但缩略图及宽高比缓存未同步迁移或清理，导致该文件在重置渲染时无法命中缓存，变为了纯灰色占位符。
+- 用户期望的结果：重命名成功后，缩略图和宽高比等高级元数据缓存应当无缝继承 to 新文件名路径下，不发生变灰与闪烁，保证无缝的高性能浏览体验。
+- 本次任务边界：
+  1. 在 `FerrexVirtualDbModel::setData` 异步重命名成功的主线程回调中，针对 `m_iconCache`（缩略图缓存）与 `m_aspectRatios`（宽高比缓存）执行高内聚的 **无损缓存 Key 迁移**。
+  2. 将原保存在旧路径 `oldPath` 下的 `QIcon` 指针及 `m_aspectRatios` 值，安全移除并重新插入到新路径 `nativeNewPath` 的 Key 下，无需重新进行后台多媒体解析或读盘。
+- 不在本次范围内的是：修改物理 MFT 扫描、USN 监控底座以及其他非缩略图相关的逻辑。
+- 对应方案文档：Modification_Plan/Modification_Plan-94.md
+
+## [2026-07-26] 行内编辑及全选状态下方向键选择漂移与光标一键定位修复
+
+- 用户描述的现象/问题：当选中某个项目并按下 F2 进入行内编辑时，
+  1. 已经进入了编辑状态，用户按下向上/向下方向键时，意外游动并选中了上方/下方的项目，导致重命名编辑被意外中断并退出。
+  2. 如果用户在全选（高亮）状态下按下向左/向右方向键，光标会尴尬地定位到扩展名“.”的后面，而不是文本最前或最后。
+- 用户期望的结果：
+  1. 在已经进入编辑状态后，按下向上/向下键应被完全屏蔽拦截，绝对不向上或向下游动选中邻近项目。
+  2. 全选状态下，按向左方向键应一键将光标精准定位到最前面（位置 0）并清除选中，按向右方向键应一键将光标精准定位到包含扩展名在内的最末尾（位置 length()）并清除选中。非全选状态下则恢复普通的逐字光标移动逻辑。
+- 本次任务边界：
+  1. 重构并升级所有行内编辑代理（Delegate）的 `eventFilter` 按键拦截：
+     - `GridItemDelegate`（位于 `src/ui/ContentPanel.cpp`）
+     - `ThumbnailDelegate`（位于 `src/ui/ThumbnailDelegate.cpp`）
+     - `TreeItemDelegate`（位于 `src/ui/TreeItemDelegate.h`）
+     - `CategoryDelegate`（位于 `src/ui/CategoryDelegate.h`）
+  2. 统一拦截 `QLineEdit` 编辑器的键盘事件。针对 `Qt::Key_Up`/`Qt::Key_Down`，直接吞噬拦截；针对 `Qt::Key_Left`/`Qt::Key_Right`，当处于 `hasSelectedText()` 全选（高亮）状态时，分别将光标强制定位到 `0` 或 `text().length()` 并执行 `deselect()` 清除高亮，同时拦截该事件；处于非全选时则放行系统默认光标移动。
+- 不在本次范围内的是：修改 MFT 扫描、USN 监控底座或数据库相关的非界面编辑逻辑。
+- 对应方案文档：Modification_Plan/Modification_Plan-95.md

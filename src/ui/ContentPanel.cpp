@@ -301,6 +301,9 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
                                 mutableRec.filename = newName;
                                 weakThis->m_metaCache.remove(oldPath);
 
+                                // 2026-07-26 极致重构：在磁盘模式重命名成功后，同步就地无损迁移缩略图缓存与宽高比缓存，彻底解决重命名后变灰的设计缺陷（对应用户原话：“磁盘模式下重命名导致缩略图变灰设计缺陷修复”）
+                                weakThis->migrateCache(oldPath, nativeNewPath);
+
                                 // 物理同步：安全更新模型私有的路径到行号的映射
                                 auto it = weakThis->m_pathToIndex.find(oldPath);
                                 if (it != weakThis->m_pathToIndex.end()) {
@@ -496,7 +499,8 @@ void FerrexVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
     m_iconCache.setMaxCost(initCost);
 
     m_requestedIcons.clear();
-    m_aspectRatios.clear();
+    // 2026-07-26 极致重构：在加载记录时，不强制清空 m_aspectRatios 宽高比映射字典，保证在增量/刷新或重命名时数据被无损地平滑保留，避免再次触发磁盘 I/O 重复提取，彻底消除闪烁
+    // m_aspectRatios.clear();
     m_metaCache.clear();
     endResetModel();
 }
@@ -515,6 +519,31 @@ void FerrexVirtualDbModel::updateRecordMetadata(const QString& path) {
             QModelIndex right = index(i, columnCount() - 1);
             emit dataChanged(left, right);
         }
+    }
+}
+
+void FerrexVirtualDbModel::migrateCache(const QString& oldPath, const QString& newPath) {
+    QString nativeOld = QDir::toNativeSeparators(oldPath);
+    QString nativeNew = QDir::toNativeSeparators(newPath);
+
+    // 1. 缩略图缓存平滑更名：弹出原有缓存的 QIcon 指针并立刻 insert 回新路径下
+    QIcon* oldIconPtr = m_iconCache.take(oldPath);
+    if (oldIconPtr) {
+        m_iconCache.insert(nativeNew, oldIconPtr);
+    } else {
+        oldIconPtr = m_iconCache.take(nativeOld);
+        if (oldIconPtr) {
+            m_iconCache.insert(nativeNew, oldIconPtr);
+        }
+    }
+
+    // 2. 宽高比缓存平滑更名：同步迁移并更新 m_aspectRatios
+    if (m_aspectRatios.contains(nativeOld)) {
+        double oldRatio = m_aspectRatios.take(nativeOld);
+        m_aspectRatios[nativeNew] = oldRatio;
+    } else if (m_aspectRatios.contains(oldPath)) {
+        double oldRatio = m_aspectRatios.take(oldPath);
+        m_aspectRatios[nativeNew] = oldRatio;
     }
 }
 
@@ -2665,6 +2694,16 @@ void ContentPanel::onSelectionChanged() {
 } 
  
 void ContentPanel::refreshAll() {
+    // 2026-07-26 极致重构：在执行刷新前，自动暂存当前选中项的文件名，确保异步刷新后依然处于选中高亮状态（对应用户原话：“对某个文件夹/文件进行重命名 或 进行其他操作后仍然处于选中高亮状态”）
+    QModelIndexList selected = getSelectedIndexes();
+    if (!selected.isEmpty() && m_pendingSelectName.isEmpty()) {
+        QString p = selected.first().data(PathRole).toString();
+        if (!p.isEmpty()) {
+            m_pendingSelectName = QFileInfo(p).fileName();
+            m_isPendingEdit = false;
+        }
+    }
+
     // 2026-06-xx 物理对标：完善刷新逻辑，支持所有上下文类型
     if (m_currentCategoryType == "user_category") {
         if (m_currentCategoryId != -1) loadCategory(m_currentCategoryId);
@@ -2684,6 +2723,12 @@ void ContentPanel::refreshAll() {
 void ContentPanel::updateItemMetadata(const QString& path) {
     if (m_model) {
         m_model->updateRecordMetadata(path);
+    }
+}
+
+void ContentPanel::migrateModelCache(const QString& oldPath, const QString& newPath) {
+    if (m_model) {
+        m_model->migrateCache(oldPath, newPath);
     }
 }
 
@@ -3016,6 +3061,29 @@ void ContentPanel::loadCategory(int categoryId) {
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
+
+                // 2026-07-26 极致重构：系统或分类加载完成，自动重新选中之前的选中高亮目标（对应用户原话：“对某个文件夹/文件进行重命名 或 进行其他操作后仍然处于选中高亮状态”）
+                if (!weakThis->m_pendingSelectName.isEmpty()) {
+                    const auto& records = weakThis->m_model->allRecords();
+                    for (size_t i = 0; i < records.size(); ++i) {
+                        if (QFileInfo(records[i].path).fileName() == weakThis->m_pendingSelectName) {
+                            QModelIndex srcIdx = weakThis->m_model->index(static_cast<int>(i), 0);
+                            QModelIndex proxyIdx = weakThis->m_proxyModel->mapFromSource(srcIdx);
+                            if (proxyIdx.isValid()) {
+                                if (weakThis->m_viewStack->currentWidget() == weakThis->m_gridView) {
+                                    weakThis->m_gridView->scrollTo(proxyIdx);
+                                    weakThis->m_gridView->setCurrentIndex(proxyIdx);
+                                } else {
+                                    weakThis->m_treeView->scrollTo(proxyIdx);
+                                    weakThis->m_treeView->setCurrentIndex(proxyIdx);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    weakThis->m_pendingSelectName = ""; // 清空
+                }
+
                 ArcMeta::Logger::log(QString("[Content] 分类加载完成 [%1]").arg(reqId));
             } else if (weakThis) {
                 ArcMeta::Logger::log(QString("[Content] 拦截到过期的分类加载回调 [%1]").arg(reqId));
@@ -3089,6 +3157,29 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
+
+                // 2026-07-26 极致重构：路径列表（如搜索、系统项）加载完成，自动重新选中之前的选中高亮目标（对应用户原话：“对某个文件夹/文件进行重命名 或 进行其他操作后仍然处于选中高亮状态”）
+                if (!weakThis->m_pendingSelectName.isEmpty()) {
+                    const auto& rList = weakThis->m_model->allRecords();
+                    for (size_t i = 0; i < rList.size(); ++i) {
+                        if (QFileInfo(rList[i].path).fileName() == weakThis->m_pendingSelectName) {
+                            QModelIndex srcIdx = weakThis->m_model->index(static_cast<int>(i), 0);
+                            QModelIndex proxyIdx = weakThis->m_proxyModel->mapFromSource(srcIdx);
+                            if (proxyIdx.isValid()) {
+                                if (weakThis->m_viewStack->currentWidget() == weakThis->m_gridView) {
+                                    weakThis->m_gridView->scrollTo(proxyIdx);
+                                    weakThis->m_gridView->setCurrentIndex(proxyIdx);
+                                } else {
+                                    weakThis->m_treeView->scrollTo(proxyIdx);
+                                    weakThis->m_treeView->setCurrentIndex(proxyIdx);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    weakThis->m_pendingSelectName = ""; // 清空
+                }
+
                 ArcMeta::Logger::log(QString("[Content] 路径列表加载完成 [%1]").arg(reqId));
             } else if (weakThis) {
                 ArcMeta::Logger::log(QString("[Content] 拦截到过期的路径列表加载回调 [%1]").arg(reqId));
@@ -3496,18 +3587,32 @@ bool GridItemDelegate::eventFilter(QObject* obj, QEvent* event) {
         QKeyEvent* keyEvent = reinterpret_cast<QKeyEvent*>(event); 
         QLineEdit* editor = qobject_cast<QLineEdit*>(obj); 
         if (editor) { 
-            switch (keyEvent->key()) { 
-                case Qt::Key_Left: 
-                case Qt::Key_Right: 
-                case Qt::Key_Up: 
-                case Qt::Key_Down: 
-                case Qt::Key_Home: 
-                case Qt::Key_End: 
-                    keyEvent->accept(); 
-                    return false; 
-                default: 
-                    break; 
-            } 
+            int key = keyEvent->key();
+            if (key == Qt::Key_Up || key == Qt::Key_Down) {
+                keyEvent->accept();
+                return true; // 彻底吞噬，不让 View 漂移（对应用户原话：“用户按下向上/向下方向键时则不该向上游动选中上方/下方的项目”）
+            }
+            if (key == Qt::Key_Left || key == Qt::Key_Right) {
+                if (editor->hasSelectedText()) {
+                    // 全选高亮状态（对应用户原话：“如果用户按下向左/向右方向键，应该将光标定位到名称最前面或最后面，而不是'.'的后面，除非处于非全选状态”）
+                    if (key == Qt::Key_Left) {
+                        editor->setCursorPosition(0);
+                    } else {
+                        // 2026-07-26 极致重构：按下向右键光标一键定位到文件名基名（不含扩展名部分）的末端（点号前面）（对应用户原话：“我指的是文件名，不是后缀名...基名”）
+                        QString val = editor->text();
+                        int lastDot = val.lastIndexOf('.');
+                        if (lastDot > 0) {
+                            editor->setCursorPosition(lastDot);
+                        } else {
+                            editor->setCursorPosition(val.length());
+                        }
+                    }
+                    editor->deselect(); // 清除全选高亮状态
+                    keyEvent->accept();
+                    return true; // 吞噬该事件，不执行默认的点号后游离定位
+                }
+                return false; // 非全选状态，走默认逐字位移
+            }
         } 
     } 
     return QStyledItemDelegate::eventFilter(obj, event); 
