@@ -23,7 +23,7 @@ class CategoryPanel : public QFrame {
 
 public:
     explicit CategoryPanel(QWidget* parent = nullptr);
-    ~CategoryPanel() override = default;
+    ~CategoryPanel() override;
     
     // 2026-04-12 关键修复：延迟初始化数据模型，避免主线程阻塞
     void deferredInit();
