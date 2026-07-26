@@ -737,6 +737,8 @@ void MainWindow::initUi() {
     // 2026-07-26 极致重构：响应元数据编辑面板重命名信号，统一交由 ShellHelper 并在 MVC 成功后刷新视图
     connect(m_metaPanel, &MetaPanel::renameRequested, this, [this](const QString& oldPath, const QString& newPath) {
         if (ShellHelper::renameItem(oldPath, newPath)) {
+            // 2026-07-26 极致重构：在重构后的全生命周期更名刷新前，同步就地无损迁移缩略图与宽高比缓存，彻底解决退化变灰缺陷
+            m_contentPanel->migrateModelCache(oldPath, newPath);
             // 重命名成功，同步刷新当前目录
             m_contentPanel->refreshAll();
             // 同时刷新侧边栏统计计数

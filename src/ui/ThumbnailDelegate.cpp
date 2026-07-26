@@ -187,6 +187,8 @@ QWidget* ThumbnailDelegate::createEditor(QWidget* parent, const QStyleOptionView
             "background-color: #2D2D2D; color: white; selection-background-color: #3498db; "
             "border: 1px solid #3498db; border-radius: 4px; padding: 0 4px;"
         );
+        // 2026-07-26 极致重构：为编辑器安装事件过滤器，确保 eventFilter 能有效捕获键盘冲突并拦截（对应用户原话：“在编辑状态下按下向上/向下方向键时则不该向上游动选中项目”）
+        editor->installEventFilter(const_cast<ThumbnailDelegate*>(this));
     }
     return editor;
 }
@@ -242,18 +244,25 @@ bool ThumbnailDelegate::eventFilter(QObject* obj, QEvent* event) {
         QKeyEvent* keyEvent = reinterpret_cast<QKeyEvent*>(event); 
         QLineEdit* editor = qobject_cast<QLineEdit*>(obj); 
         if (editor) { 
-            switch (keyEvent->key()) { 
-                case Qt::Key_Left: 
-                case Qt::Key_Right: 
-                case Qt::Key_Up: 
-                case Qt::Key_Down: 
-                case Qt::Key_Home: 
-                case Qt::Key_End: 
-                    keyEvent->accept(); 
-                    return false; 
-                default: 
-                    break; 
-            } 
+            int key = keyEvent->key();
+            if (key == Qt::Key_Up || key == Qt::Key_Down) {
+                keyEvent->accept();
+                return true; // 彻底吞噬，不让 View 漂移（对应用户原话：“用户按下向上/向下方向键时则不该向上游动选中上方/下方的项目”）
+            }
+            if (key == Qt::Key_Left || key == Qt::Key_Right) {
+                if (editor->hasSelectedText()) {
+                    // 全选高亮状态（对应用户原话：“如果用户按下向左/向右方向键，应该将光标定位到名称最前面或最后面，而不是'.'的后面，除非处于非全选状态”）
+                    if (key == Qt::Key_Left) {
+                        editor->setCursorPosition(0);
+                    } else {
+                        editor->setCursorPosition(editor->text().length());
+                    }
+                    editor->deselect(); // 清除全选高亮状态
+                    keyEvent->accept();
+                    return true; // 吞噬该事件，不让其触发默认定位
+                }
+                return false; // 非全选状态，走默认逐字位移
+            }
         } 
     } 
     return QStyledItemDelegate::eventFilter(obj, event); 

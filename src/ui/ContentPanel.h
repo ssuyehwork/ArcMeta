@@ -94,6 +94,11 @@ public:
     // 视口感知缩略图加载
     void loadThumbnailsForRows(const QList<int>& rows);
 
+    /**
+     * @brief 2026-07-26 极致重构：就地无损更名缩略图与宽高比缓存
+     */
+    void migrateCache(const QString& oldPath, const QString& newPath);
+
 signals:
     void recordRenamed(const QString& oldPath, const QString& newPath, const QString& newName);
 
@@ -372,6 +377,11 @@ public slots:
      * @brief 局部更新某项的元数据（星级、颜色、标签等）
      */
     void updateItemMetadata(const QString& path);
+
+    /**
+     * @brief 2026-07-26 极致重构：平滑更名缩略图与宽高比缓存 Key
+     */
+    void migrateModelCache(const QString& oldPath, const QString& newPath);
 
     /**
      * @brief 全局/本地搜索

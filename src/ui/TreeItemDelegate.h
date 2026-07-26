@@ -270,7 +270,40 @@ public:
 
 public:
     QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
-        return QStyledItemDelegate::createEditor(parent, option, index);
+        QWidget* editor = QStyledItemDelegate::createEditor(parent, option, index);
+        if (editor) {
+            editor->installEventFilter(const_cast<TreeItemDelegate*>(this));
+        }
+        return editor;
+    }
+
+    bool eventFilter(QObject* obj, QEvent* event) override {
+        if (event->type() == QEvent::KeyPress) {
+            QKeyEvent* keyEvent = reinterpret_cast<QKeyEvent*>(event);
+            QLineEdit* editor = qobject_cast<QLineEdit*>(obj);
+            if (editor) {
+                int key = keyEvent->key();
+                if (key == Qt::Key_Up || key == Qt::Key_Down) {
+                    keyEvent->accept();
+                    return true; // 彻底吞噬，不让 View 漂移（对应用户原话：“用户按下向上/向下方向键时则不该向上游动选中上方/下方的项目”）
+                }
+                if (key == Qt::Key_Left || key == Qt::Key_Right) {
+                    if (editor->hasSelectedText()) {
+                        // 全选高亮状态（对应用户原话：“如果用户按下向左/向右方向键，应该将光标定位到名称最前面或最后面，而不是'.'的后面，除非处于非全选状态”）
+                        if (key == Qt::Key_Left) {
+                            editor->setCursorPosition(0);
+                        } else {
+                            editor->setCursorPosition(editor->text().length());
+                        }
+                        editor->deselect(); // 清除全选高亮状态
+                        keyEvent->accept();
+                        return true; // 吞噬该事件，不让其触发默认定位
+                    }
+                    return false; // 非全选状态，走默认逐字位移
+                }
+            }
+        }
+        return QStyledItemDelegate::eventFilter(obj, event);
     }
 
     void setEditorData(QWidget* editor, const QModelIndex& index) const override {
