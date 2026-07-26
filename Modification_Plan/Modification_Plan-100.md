@@ -37,6 +37,8 @@
 
 ## 4. 详细解决方案
 
+解决此问题的核心法则是：**在不属于用户手动（非 UI 点击/键盘等物理操作）导致的节点展开/折叠状态下，一律拦截并禁止 `saveExpandedStateToSettings` 的保存调用，并织入完备的日志追踪链**。具体改动如下：
+
 ### 4.1 在 `modelAboutToBeReset` 信号触发时立即上锁保护
 在模型重置的起点（`modelAboutToBeReset`），将控制标志 `m_isInternalUpdating` 设为 `true`，以完全断开由于 `removeRows` 触发的折叠信号风暴：
 ```cpp
