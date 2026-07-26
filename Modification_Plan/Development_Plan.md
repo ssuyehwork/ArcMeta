@@ -36,7 +36,7 @@
 
 - 用户描述的现象/问题：当前版本的 `QuickLookWindow` 预览运行逻辑不符合预期，其处理逻辑 and 界面交互（如图像缩放、音视频媒体处理、文本二进制检测及编码识别等）功能不够完备。
 - 用户期望的结果：彻底放弃当前版本的 `QuickLookWindow` 运行逻辑，将其替换为 `FERREX-META` 版本中的 `QuickLookWindow` 运行逻辑。这包括采用专门设计的 `QuickLookGraphicsView`（支持滚轮缩放、双击恢复/适配大小、鼠标拖拽移动及光标跟随变动）、引入更完整的多媒体及文本二进制与编码自动检测识别渲染，实现更好的大文件和特殊文件类型的预览。
-- 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView` 控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅的占位降级兼容。
+- 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView`控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅的占位降级兼容。
 - 不在本次范围内的是：修改 `MainWindow` 的主导航调度机制 or 任何非预览关联的面板组件。
 - 对应方案文档：Modification_Plan-36.md
 
@@ -45,7 +45,7 @@
 - 用户描述的现象/问题：按下空格键打开预览界面后的滚动条样式，违背了考古，由上一代 AI 导致。
 - 用户期望的结果：将预览界面（QuickLookWindow）内的滚动条样式彻底重构，使其严格遵循全局规范：宽度 10px、圆角 3px、背景透明、Handle 颜色对齐 `BorderColor` #333333。
 - 本次任务边界：修改 `src/ui/QuickLookWindow.cpp` 中 `QuickLookGraphicsView` 和 `QPlainTextEdit` 控件的水平及垂直滚动条的 QSS 样式。
-- 不在本次范围内的是：修改预览界面其他的图片/文本渲染、缩放或事件分流逻辑。
+- 不在本次范围内的是：修改预览界面其他的图片/文本渲染、缩放或事件分流逻辑.
 - 对应方案文档：Modification_Plan-37.md
 
 ## [2026-07-21] 预览界面多媒体残留代码彻底物理根除与净化
@@ -93,7 +93,7 @@
 ## [2026-07-24] 全款应用架构与文件职责过载深度排查
 
 - 用户描述的现象/问题：应用中可能存在整体混乱的逻辑架构，文件职责过载（违反SRP），以及存在某些功能具有不合理的傻逼逻辑架构。
-- 用户期望的结果：对全款应用及核心源码文件进行地毯式的通读与细粒度审计，标记所有存在职责过载（违反 SRP）的文件，定位逻辑架构设计不合理的傻逼逻辑架构功能。
+- 用户期望的结果：对全款应用及核心源码文件进行地毯式的通红与细粒度审计，标记所有存在职责过载（违反 SRP）的文件，定位逻辑架构设计不合理的傻逼逻辑架构功能。
 - 本次任务边界：对 `src/` 目录下的核心逻辑、业务模块 and UI 骨架（如 `ContentPanel`, `MainWindow`, `MetadataManager`, `MftReader` 等）及各组件数据流向、跨层耦合和 UI 层业务硬编码进行地毯式地深层审计与排查，输出架构漏洞、混乱点、文件职责过载证据（行号 + 代码片段）并归档。
 - 不在本次范围内的是：修改任何代码文件、创建实际重构代码、或扫描非当前项目指定的外部不相关目录。
 - 对应方案文档：Modification_Plan/Modification_Plan-54.md
@@ -122,7 +122,7 @@
 ## [2026-07-25] 彻底根除随机/设置颜色旧UI与在右键菜单上直接以悬停白圈色块展示并同步存库
 
 - 用户描述的现象/问题：现有的右键菜单及部分分类/文件夹设置中采用“随机颜色”和“设置颜色”的传统菜单项（QAction）及弹窗操作链路复杂、不够直观。
-- 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段和 metadata 表的 color 字段中。
+- 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段 and metadata 表 of color 字段中。
 - 本次任务边界：
   1. 彻底删除 `CategoryPanel` 及 `MainWindow`（FolderButton 菜单）中的“随机颜色”与“设置颜色”旧 QAction 和旧对应响应函数（如 `onRandomColor` / `onSetColor`）。
   2. 针对 `CategoryPanel` 侧边分类右键菜单、`MainWindow` 中的 FolderButton 右键菜单，以及 `ContentPanel` 内容右键菜单中的“设定颜色标签”（ActionColorTag）子菜单，实现全新的一排水平排列色块快捷操作区域（可以使用自定义 `QWidgetAction` 加载色块容器）。
@@ -130,16 +130,47 @@
   4. 选中某个色块后，立即调用更新接口：
      - 如果是在 `CategoryPanel` 对分类进行设置，将色值写入对应分类在 `categories` 表的 `color` 字段，同时如果该分类绑定了物理文件夹路径，则将对应路径在 `metadata` 表的 `color` 字段也一并同步更新；
      - 如果是在 `MainWindow` 对 FolderButton 自定义 monitored folder 进行操作，将色值写入 AppConfig 中对应属性，并更新对应物理路径在 `metadata` 表的 `color` 字段（如果已登记到库中，也会同步到绑定映射分类）；
-     - 如果是在 `ContentPanel` 对登记的项目进行操作，将色值写入该项目在 `metadata` 表的 `color` 字段，若该项目是已入库且绑定了侧边栏映射分类的文件夹，也将色值存入对应分类的 `categories` 表的 `color` 字段中。
+     - 如果是在 `ContentPanel` 对登记的项目进行操作，将色值写入该项目在 `metadata` 表的 `color` 字段，若该项目是已入库且绑定了侧边栏映射分类 of 文件夹，也将色值存入对应分类的 `categories` 表的 `color` 字段中。
 - 不在本次范围内的是：修改非颜色属性的其他关联持久化，或者调整与色块绘制无关的其他右键菜单项。
 - 对应方案文档：Modification_Plan/Modification_Plan-62.md
 
-## [2026-07-26] 消除控制按钮点击后的点状虚线聚焦边框
+## [2026-07-26] 解决全局所有按钮点击后显示点状聚焦虚线框问题
 
-- 用户描述的现象/问题：在内容面板顶栏中，点击“显示/隐藏文件夹”等控制按钮时，按钮周边会显示点状的聚焦虚线框，影响界面纯净度。
-- 用户期望的结果：在点击按钮时，不显示此聚焦虚线框。
+- 用户描述的现象/问题：在全站范围内，当用户点击任意按钮时，按钮周边都会显示点状虚线聚焦边框。
+- 用户期望的结果：全局禁用这一虚线的显现，保持全站级的完美屏蔽，不影响原有样式且实现最简单、彻底的修复。
+- 本次任务边界：在 `src/main.cpp` 中初始化 `QApplication` 的位置，加入一行全局样式表设置 `a.setStyleSheet("QAbstractButton { outline: none; }");`。
+- 不在本次范围内的是：逐个修改各页面组件按钮的逻辑，或在其他样式表文件中写分散的规则。
+- 对应方案文档：Modification_Plan/Modification_Plan-91.md
+
+## [2026-07-26] main.cpp 打补丁式架构排查与极致重构规划
+
+- 用户描述的现象/问题：`main.cpp` 被写入了大量应急性补丁、跨线程单例强制点名预热、同步高频物理日志落盘，导致职责过载、单实例竞态及程序退出强杀数据库、拖慢扫描等严重隐患。
+- 用户期望的结果：消除这些典型的打补丁式脏代码，按照工业级标准对程序启动、优雅退出、多线程协作生命期与异步日志进行极致重构。
 - 本次任务边界：
-  1. 定位内容面板顶栏的四个核心控制按钮（`m_btnToggleFolders`, `m_btnToggleFiles`, `m_btnLayersBlue`, `m_btnLayers`）。
-  2. 显式设置这些按钮的焦点策略为 `Qt::NoFocus`，从而防止它们在被鼠标点击时捕获键盘焦点，彻底避免绘制点状虚线聚焦边框。
-- 不在本次范围内的是：修改其他非顶栏按钮的焦点策略，或更改其任何点击事件触发的过滤或逻辑行为。
-- 对应方案文档：Modification_Plan/Modification_Plan-90.md
+  1. 重写 `src/main.cpp` 编排科学时序启动、退出关于 aboutToQuit 信号的清场槽函数。
+  2. 重构 `src/ui/Logger.h` 实现高性能异步缓冲日志线程（去除 qDebug 的同步物理写锁阻塞）。
+  3. 修改 `src/core/CoreController` 引入 `initializeCoreComponents`，统一、拓扑性地进行单例实例化及定时器哑死物理加固。
+- 不在本次范围内的是：修改物理 MFT 文件扫描核心算法、IOCP 底层驱动及 UI 具体的渲染重排。
+- 对应方案文档：Modification_Plan/Modification_Plan-89.md
+
+## [2026-07-26] 深度排查全库“补丁堆砌、职责错位”并规划彻底解决补丁问题
+
+- 用户描述的现象/问题：除了 `main.cpp` 之外，全库中的各模块（包括 UI、Model、View 等组件）在前期多代开发中可能也残留了单点应急补丁（如滥用 singleShot(0)、狂暴 blockSignals 阻止死循环、魔数在 UI 与底层流转）以及职责严重错位（如 UI 包含物理文件删改 I/O 等）等傻逼补丁架构问题。
+- 用户期望的结果：深度排查当前最新工作区中的每一个 C++ 源码文件，彻底搜寻并清晰指明所有仍然隐藏的“补丁堆砌、职责错位”死穴，并为此规划出高内聚、高标准的彻底解决重构图纸。
+- 本次任务边界：
+  1. 排查 `src/` 目录下（除 `main.cpp` 外）的每一个 C++ 文件，寻找使用 `singleShot(0)` 延迟操作掩盖竞态、密集 `blockSignals` 物理打阻断、属性面板和 Model 包含物理磁盘 `QFile::remove / rename` 删改等缺陷，提取行号与代码片段。
+  2. 针对排查出的缺陷，在 `Modification_Plan/` 下新建 `Modification_Plan-92.md` 方案文档，给出对应的彻底解耦与解决图纸，将共识记录归档。
+  3. 严格遵守分析师角色，绝对不修改任何源码。
+- 不在本次范围内的是：在未获得用户“批准执行”指令前修改任何功能性源码文件。
+- 对应方案文档：Modification_Plan/Modification_Plan-92.md
+
+## [2026-07-26] 图形文件图像尺寸提取与 MetaPanel “大小”下一行展现方案规划
+
+- 用户描述的现象/问题：希望确认 `mediacolorextractor.cpp` 和 `meta/mediaextractorpipeline.cpp` 是否已经包含了提取图形图像文件尺寸的功能；若包含，需要在 `metapanel.cpp` 面板中，把提取出的尺寸在“大小”这一属性行的下一行清晰展现出来。
+- 用户期望的结果：地毯式分析提取管线对尺寸的抓取情况，提供清晰、专业的重构规划方案，并按物理视觉设计在 MetaPanel “大小”下一行插入“尺寸”标签和数值展现，产出 Modification_Plan 方案文档。
+- 本次任务边界：
+  1. 检索 `src/ui/MediaColorExtractor.cpp` 及 `src/meta/MediaExtractorPipeline.cpp` 的图像/特征尺寸提取逻辑，查证其是否在持久化 `metadata` 数据库、特征管道或缓存中抓取并保存了 `width` / `height` 分辨率。
+  2. 精确定位 `src/ui/MetaPanel.cpp` 中的 UI 标签排版位置，分析如何在“大小（m_sizeLabel）”的下一行动态嵌入并渲染图形尺寸信息（未选中或非图形文件时平滑隐藏，杜绝白屏/布局错乱）。
+  3. 新建 `Modification_Plan-93.md`，处于分析师角色，绝不直接修改代码。
+- 不在本次范围内的是：修改 C++ 源码、测试运行。
+- 对应方案文档：Modification_Plan/Modification_Plan-93.md
