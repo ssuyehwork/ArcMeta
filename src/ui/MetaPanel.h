@@ -141,6 +141,11 @@ signals:
      */
     void tagsChanged(const QStringList& tags);
 
+    /**
+     * @brief 2026-07-26 极致重构：文件/文件夹重命名申请信号
+     */
+    void renameRequested(const QString& oldPath, const QString& newPath);
+
 public:
     /**
      * @brief 设置星级显示
@@ -199,6 +204,9 @@ private:
     QList<TagPill*> m_tagPool;
     QList<ColorPill*> m_colorPool;
     QTimer* m_adjustTimer = nullptr;
+
+    // 2026-07-26 极致重构：引入单向数据流阻断标志位，彻底消除 blockSignals 拼图
+    bool m_isInternalUpdating = false;
 
 private slots:
     void onTagAdded();
