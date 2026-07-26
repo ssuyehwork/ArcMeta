@@ -392,19 +392,19 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
                         c.color = newColor.toUpper().toStdWString();
                         CategoryRepo::update(c); // 持久化到 categories 表
                         if (!c.physicalPath.empty()) {
-                            MetadataManager::instance().setColor(c.physicalPath, c.color, true);
+                            // 物理关键：notify 传 false，严禁触发全量 Reload 导致 beginResetModel 抹除选中！
+                            MetadataManager::instance().setColor(c.physicalPath, c.color, false);
                         }
                         break;
                     }
                 }
-                // 关键点：物理同步更新内存中当前 Record 的颜色字段，使 data() 能够查到新颜色
                 mutableRec.categoryColor = newColor;
                 metaUpdated = true;
             } else {
                 // 2. 普通文件或物理文件夹 (record.isCategory == false)
-                MetadataManager::instance().setColor(path.toStdWString(), newColor.toStdWString());
+                // 物理关键：notify 传 false，仅做纯粹的本地元数据更新
+                MetadataManager::instance().setColor(path.toStdWString(), newColor.toStdWString(), false);
 
-                // 若该物理文件夹绑定了 categories 表中的分类，同步更新 categories 表
                 if (record.isDir) {
                     std::wstring normPath = MetadataManager::normalizePath(path.toStdWString());
                     CategoryRepo::updateCategoryColorByPath(normPath, newColor.toUpper().toStdWString());
@@ -440,13 +440,10 @@ bool FerrexVirtualDbModel::setData(const QModelIndex& index, const QVariant& val
             // 2026-06-xx 物理同步：更新本地 Record 缓存，确保 UI 和排序逻辑立即可见最新状态
             updateRecordMetadata(path);
         } else {
-            // 1. 【对齐文件】发送整行（列 0 到 列 6）变更信号，确保 TreeItemDelegate / ThumbnailDelegate 能够全量重绘
+            // 分类文件夹：也只发 dataChanged 信号，绝对不调用 notifyUI(FullRebuild)！
             QModelIndex left = this->index(index.row(), 0);
             QModelIndex right = this->index(index.row(), columnCount() - 1);
             emit dataChanged(left, right);
-
-            // 2. 【对齐文件】物理触发全局 UI 刷新信号，驱动左侧边栏 CategoryPanel（分类树）同步更新文件夹图标颜色
-            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
         }
         return true;
     }
@@ -2031,13 +2028,28 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             menu.addAction(pickerAction);
 
             connect(pickerWidget, &ColorStripPicker::colorSelected, this, [this, view, &menu](const QString& hexColor) {
+                // 1. 物理记住当前所有被选中的项目路径 (无论是文件还是文件夹)
+                QStringList selectedPaths;
                 auto indexes = view->selectionModel()->selectedIndexes();
                 for (const auto& idx : indexes) {
                     if (idx.column() == 0) {
-                        // 统一交给 setData 处理，模型层会自动处理内存更新、多表持久化与 UI 信号通知
+                        QString p = idx.data(PathRole).toString();
+                        if (!p.isEmpty()) selectedPaths << p;
+                    }
+                }
+
+                // 2. 执行模型设色更新
+                for (const auto& idx : indexes) {
+                    if (idx.column() == 0) {
                         m_proxyModel->setData(idx, hexColor, ColorRole);
                     }
                 }
+
+                // 3. 强行还原选中状态，防止焦点流失
+                for (const QString& p : selectedPaths) {
+                    selectAndScrollToPath(p);
+                }
+
                 menu.close();
             });
  
