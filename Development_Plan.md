@@ -191,3 +191,14 @@
   3. 完善 `saveExpandedStateToSettings` 和 `restoreExpandedState` 的控制与过滤。
 - 不在本次范围内的是：修改 `CategoryRepo` 数据库的具体查询或系统项分类重排逻辑，修改其他面板（如内容面板）的数据加载逻辑。
 - 对应方案文档：Modification_Plan/Modification_Plan-99.md
+
+## [2026-07-26] 侧边栏分类树状展开状态重启持久化失效根治重构
+
+- 用户描述的现象/问题：侧边栏某个分类展开之后能够持续化，重启主程序之后又被自动折叠了。
+- 用户期望的结果：侧边栏某个分类展开之后能够持续化，即便重启主程序之后仍然处于展开状态，不被空状态异常覆盖。
+- 本次任务边界：
+  1. 在 `modelAboutToBeReset` 信号触发瞬间将 `m_isInternalUpdating` 设为 `true`，开启拦截锁，彻底断开 `beginResetModel` -> `removeRows` 期间视图中旧节点销毁引发的高频、同步 `collapsed` 信号风暴。
+  2. 在 `modelReset` 完成展开状态（`restoreExpandedState`）同步恢复后，将 `m_isInternalUpdating` 重置为 `false`，重新开放并允许用户手动交互被正常持久化。
+  3. 实现析构函数 `~CategoryPanel()`，将 `m_isInternalUpdating` 设为 `true` 并安全 `disconnect` 展开/折叠信号，确保窗体销毁时无虚假状态污染配置文件。
+- 不在本次范围内的是：修改分类树具体的构建、重排逻辑或数据库查询。
+- 对应方案文档：Modification_Plan/Modification_Plan-100.md
