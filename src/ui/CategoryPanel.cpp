@@ -52,6 +52,17 @@ static std::wstring getDefaultCategoryColor() {
     return L"#555555";
 }
 
+CategoryPanel::~CategoryPanel() {
+    // 1. 在面板被析构前，将控制标志设为内部更新态，彻底屏蔽 QTreeView 卸载时的折叠信号回流
+    m_isInternalUpdating = true;
+
+    // 2. 物理断开这些高危信号，确保高枕无忧
+    if (m_categoryTree) {
+        disconnect(m_categoryTree, &QTreeView::expanded, this, &CategoryPanel::saveExpandedStateToSettings);
+        disconnect(m_categoryTree, &QTreeView::collapsed, this, &CategoryPanel::saveExpandedStateToSettings);
+    }
+}
+
 CategoryPanel::CategoryPanel(QWidget* parent)
     : QFrame(parent) {
     // 2026-07-xx 按照 Plan-63：启用右键菜单策略（容器级）
@@ -936,6 +947,9 @@ void CategoryPanel::initUi() {
     // 2026-03-xx 物理兼容：监听模型重置信号，在刷新后尝试恢复展开状态
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_categoryModel, &QAbstractItemModel::modelAboutToBeReset, this, [this]() {
+        // 开启数据流拦截锁，防止接下来 beginResetModel 触发大量的 collapsed 虚假信号泄露覆写
+        m_isInternalUpdating = true;
+
         // 同步解锁 ID 到模型
         m_categoryModel->setUnlockedIds(m_unlockedIds);
         
@@ -978,6 +992,9 @@ void CategoryPanel::initUi() {
             restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         }
         m_isRestoringState = false;
+
+        // 在这之后重设并开放拦截锁
+        m_isInternalUpdating = false;
     });
 
     connect(m_categoryTree, &QTreeView::clicked, this, [this](const QModelIndex& proxyIndex) {
@@ -1131,12 +1148,15 @@ void CategoryPanel::initUi() {
 }
 
 void CategoryPanel::saveExpandedStateToSettings() {
+    // 1. 如果正在进行状态还原，或者处于内部异步刷新更新中，绝不保存！
     if (m_isRestoringState || m_isInternalUpdating) {
         return;
     }
+
+    // 2. 如果模型正在重置期间，或者模型行数正在变动，绝不保存！
     if (!m_categoryModel || m_categoryModel->rowCount() <= 0) return;
 
-    // 物理防御：如果只有一个项且是加载中占位符，严禁保存，防止清空用户的历史记忆
+    // 3. 物理防御：如果只有一个项且是加载中占位符，严禁保存，防止清空用户的历史记忆
     if (m_categoryModel->rowCount() == 1) {
         QModelIndex first = m_categoryModel->index(0, 0);
         QString type = first.data(TypeRole).toString();
@@ -1149,6 +1169,24 @@ void CategoryPanel::saveExpandedStateToSettings() {
     QStringList names;
     saveExpandedState(QModelIndex(), ids, names);
 
+    // 4. 重大物理防御加固：如果是空的状态，由于模型可能被临时清空，千万不能用空去覆盖有历史记录的 settings
+    // 只有在捕获到有展开的节点时，或者是用户手动将所有节点折叠完毕（这里可以通过判断模型是否真实存在顶级“我的分类”来精细防护）才执行保存。
+    // 如果是因为整个树被清空导致的 0 展开项，坚决予以阻断，防止闪烁式覆写
+    if (ids.isEmpty() && names.isEmpty()) {
+        // 如果我们有历史数据，且模型的数据量实际上是临时归零（或者不完整），不要覆盖旧设置
+        // 只有当模型确实有效加载了我的分类（数据正常加载完毕）且展开真的全被折叠时，才允许覆盖。
+        bool hasMyCategory = false;
+        for (int i = 0; i < m_categoryModel->rowCount(); ++i) {
+            if (m_categoryModel->index(i, 0).data(NameRole).toString() == "我的分类") {
+                hasMyCategory = true;
+                break;
+            }
+        }
+        // 如果我的分类这一根节点都找不到了，说明树正在重建中，这时的 ids.isEmpty() 纯属系统清空，决不能保存
+        if (!hasMyCategory) {
+            return;
+        }
+    }
 
     QList<QVariant> idList;
     for (int id : ids) idList << id;
