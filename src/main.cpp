@@ -63,7 +63,7 @@ void onApplicationAboutToQuit(HANDLE hMutex) {
 
     // 2. 将高频落盘缓存中的所有待写数据同步强力落盘写入，安全闭卷
     qDebug() << "[Shutdown] 正在强制元数据及 SQLite 落盘...";
-    ArcMeta::DatabaseManager::instance().flush();
+    ArcMeta::DatabaseManager::instance().flushAll(true);
     qDebug() << "[Shutdown] 持久化落盘完毕";
 
     // 3. 挂起并关闭异步日志写出线程，使其后续降级同步写
