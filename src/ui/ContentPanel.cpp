@@ -2665,6 +2665,16 @@ void ContentPanel::onSelectionChanged() {
 } 
  
 void ContentPanel::refreshAll() {
+    // 2026-07-26 极致重构：在执行刷新前，自动暂存当前选中项的文件名，确保异步刷新后依然处于选中高亮状态（对应用户原话：“对某个文件夹/文件进行重命名 或 进行其他操作后仍然处于选中高亮状态”）
+    QModelIndexList selected = getSelectedIndexes();
+    if (!selected.isEmpty() && m_pendingSelectName.isEmpty()) {
+        QString p = selected.first().data(PathRole).toString();
+        if (!p.isEmpty()) {
+            m_pendingSelectName = QFileInfo(p).fileName();
+            m_isPendingEdit = false;
+        }
+    }
+
     // 2026-06-xx 物理对标：完善刷新逻辑，支持所有上下文类型
     if (m_currentCategoryType == "user_category") {
         if (m_currentCategoryId != -1) loadCategory(m_currentCategoryId);
@@ -3016,6 +3026,29 @@ void ContentPanel::loadCategory(int categoryId) {
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
+
+                // 2026-07-26 极致重构：系统或分类加载完成，自动重新选中之前的选中高亮目标（对应用户原话：“对某个文件夹/文件进行重命名 或 进行其他操作后仍然处于选中高亮状态”）
+                if (!weakThis->m_pendingSelectName.isEmpty()) {
+                    const auto& records = weakThis->m_model->allRecords();
+                    for (size_t i = 0; i < records.size(); ++i) {
+                        if (QFileInfo(records[i].path).fileName() == weakThis->m_pendingSelectName) {
+                            QModelIndex srcIdx = weakThis->m_model->index(static_cast<int>(i), 0);
+                            QModelIndex proxyIdx = weakThis->m_proxyModel->mapFromSource(srcIdx);
+                            if (proxyIdx.isValid()) {
+                                if (weakThis->m_viewStack->currentWidget() == weakThis->m_gridView) {
+                                    weakThis->m_gridView->scrollTo(proxyIdx);
+                                    weakThis->m_gridView->setCurrentIndex(proxyIdx);
+                                } else {
+                                    weakThis->m_treeView->scrollTo(proxyIdx);
+                                    weakThis->m_treeView->setCurrentIndex(proxyIdx);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    weakThis->m_pendingSelectName = ""; // 清空
+                }
+
                 ArcMeta::Logger::log(QString("[Content] 分类加载完成 [%1]").arg(reqId));
             } else if (weakThis) {
                 ArcMeta::Logger::log(QString("[Content] 拦截到过期的分类加载回调 [%1]").arg(reqId));
@@ -3089,6 +3122,29 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
                 weakThis->m_isLoading = false;
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
+
+                // 2026-07-26 极致重构：路径列表（如搜索、系统项）加载完成，自动重新选中之前的选中高亮目标（对应用户原话：“对某个文件夹/文件进行重命名 或 进行其他操作后仍然处于选中高亮状态”）
+                if (!weakThis->m_pendingSelectName.isEmpty()) {
+                    const auto& rList = weakThis->m_model->allRecords();
+                    for (size_t i = 0; i < rList.size(); ++i) {
+                        if (QFileInfo(rList[i].path).fileName() == weakThis->m_pendingSelectName) {
+                            QModelIndex srcIdx = weakThis->m_model->index(static_cast<int>(i), 0);
+                            QModelIndex proxyIdx = weakThis->m_proxyModel->mapFromSource(srcIdx);
+                            if (proxyIdx.isValid()) {
+                                if (weakThis->m_viewStack->currentWidget() == weakThis->m_gridView) {
+                                    weakThis->m_gridView->scrollTo(proxyIdx);
+                                    weakThis->m_gridView->setCurrentIndex(proxyIdx);
+                                } else {
+                                    weakThis->m_treeView->scrollTo(proxyIdx);
+                                    weakThis->m_treeView->setCurrentIndex(proxyIdx);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    weakThis->m_pendingSelectName = ""; // 清空
+                }
+
                 ArcMeta::Logger::log(QString("[Content] 路径列表加载完成 [%1]").arg(reqId));
             } else if (weakThis) {
                 ArcMeta::Logger::log(QString("[Content] 拦截到过期的路径列表加载回调 [%1]").arg(reqId));
