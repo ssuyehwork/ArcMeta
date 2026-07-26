@@ -5,6 +5,8 @@
 #include "AppConfig.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
+#include "../meta/DatabaseManager.h"
+#include "../meta/MediaExtractorPipeline.h"
 #include "../ui/Logger.h"
 #include <QThreadPool>
 #include <QDebug>
@@ -20,6 +22,24 @@ namespace ArcMeta {
 CoreController& CoreController::instance() {
     static CoreController inst;
     return inst;
+}
+
+void CoreController::initializeCoreComponents() {
+    qint64 metaInitStart = QDateTime::currentMSecsSinceEpoch();
+
+    // 1. 底层持久化 SQLite 连接启动与定时机制保障
+    ArcMeta::DatabaseManager::instance();
+
+    // 2. 元数据内存索引结构预热
+    ArcMeta::MetadataManager::instance();
+
+    // 3. 分类依赖库拉起与同步机制保障
+    ArcMeta::CategoryRepo::initialize();
+
+    // 4. 后台提取特征管道、定时器及事件队列预热
+    ArcMeta::MediaExtractorPipeline::instance();
+
+    qDebug() << "[PERF] [CoreController] CoreComponents 单例拓扑链预热耗时:" << (QDateTime::currentMSecsSinceEpoch() - metaInitStart) << "ms";
 }
 
 CoreController::CoreController(QObject* parent) : QObject(parent) {

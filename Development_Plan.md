@@ -45,7 +45,7 @@
 - 用户描述的现象/问题：按下空格键打开预览界面后的滚动条样式，违背了考古，由上一代 AI 导致。
 - 用户期望的结果：将预览界面（QuickLookWindow）内的滚动条样式彻底重构，使其严格遵循全局规范：宽度 10px、圆角 3px、背景透明、Handle 颜色对齐 `BorderColor` #333333。
 - 本次任务边界：修改 `src/ui/QuickLookWindow.cpp` 中 `QuickLookGraphicsView` 和 `QPlainTextEdit` 控件的水平及垂直滚动条的 QSS 样式。
-- 不在本次范围内的是：修改预览界面其他的图片/文本渲染、缩放或事件分流逻辑。
+- 不在本次范围内的是：修改预览界面其他的图片/文本渲染、缩放或事件分流逻辑.
 - 对应方案文档：Modification_Plan-37.md
 
 ## [2026-07-21] 预览界面多媒体残留代码彻底物理根除与净化
@@ -141,3 +141,14 @@
 - 本次任务边界：在 `src/main.cpp` 中初始化 `QApplication` 的位置，加入一行全局样式表设置 `a.setStyleSheet("QAbstractButton { outline: none; }");`。
 - 不在本次范围内的是：逐个修改各页面组件按钮的逻辑，或在其他样式表文件中写分散的规则。
 - 对应方案文档：Modification_Plan/Modification_Plan-91.md
+
+## [2026-07-26] main.cpp 打补丁式架构排查与极致重构规划
+
+- 用户描述的现象/问题：`main.cpp` 被写入了大量应急性补丁、跨线程单例强制点名预热、同步高频物理日志落盘，导致职责过载、单实例竞态及程序退出强杀数据库、拖慢扫描等严重隐患。
+- 用户期望的结果：消除这些典型的打补丁式脏代码，按照工业级标准对程序启动、优雅退出、多线程协作生命期与异步日志进行极致重构。
+- 本次任务边界：
+  1. 重写 `src/main.cpp` 编排科学时序启动、退出关于 aboutToQuit 信号的清场槽函数。
+  2. 重构 `src/ui/Logger.h` 实现高性能异步缓冲日志线程（去除 qDebug 的同步物理写锁阻塞）。
+  3. 修改 `src/core/CoreController` 引入 `initializeCoreComponents`，统一、拓扑性地进行单例实例化及定时器哑死物理加固。
+- 不在本次范围内的是：修改物理 MFT 文件扫描核心算法、IOCP 底层驱动及 UI 具体的渲染重排。
+- 对应方案文档：Modification_Plan/Modification_Plan-89.md

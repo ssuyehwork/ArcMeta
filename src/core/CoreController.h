@@ -21,6 +21,11 @@ public:
     static CoreController& instance();
 
     /**
+     * @brief 在主线程、QApplication 实例化后，顺序并安全地完成基础核心单例与定时器的依赖预热
+     */
+    static void initializeCoreComponents();
+
+    /**
      * @brief 启动异步初始化序列
      */
     void startSystem();
