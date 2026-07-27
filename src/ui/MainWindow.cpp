@@ -804,6 +804,52 @@ void MainWindow::initUi() {
             m_contentPanel->previewFile(path);
         }
     });
+
+    m_elapsedTimer = new QTimer(this);
+    m_elapsedTimer->setInterval(100);
+
+    connect(m_elapsedTimer, &QTimer::timeout, this, [this]() {
+        if (m_syncStartTime > 0) {
+            double elapsedSec = (QDateTime::currentMSecsSinceEpoch() - m_syncStartTime) / 1000.0;
+            int pct = m_topProgressBar->value();
+
+            m_statusLeft->setText(QString("正在同步元数据... %1%  |  耗时: %2s")
+                                  .arg(pct)
+                                  .arg(QString::number(elapsedSec, 'f', 1)));
+        }
+    });
+
+    // 监听 SyncStatusService 后台同步与扫描进度
+    connect(&SyncStatusService::instance(), &SyncStatusService::statusUpdated,
+            this, [this](bool syncing, int pendingCount) {
+        if (syncing && pendingCount > 0) {
+            if (m_syncStartTime == 0) {
+                m_syncStartTime = QDateTime::currentMSecsSinceEpoch();
+                m_elapsedTimer->start();
+                updateProgressBarGeometry(); // 显影前刷新一次绝对位置
+                m_topProgressBar->setValue(10);
+                m_topProgressBar->show();
+            }
+            int estPct = qBound(10, 100 - (pendingCount * 2), 95);
+            m_topProgressBar->setValue(estPct);
+        } else {
+            if (m_syncStartTime > 0) {
+                m_topProgressBar->setValue(100);
+                m_elapsedTimer->stop();
+
+                double totalSec = (QDateTime::currentMSecsSinceEpoch() - m_syncStartTime) / 1000.0;
+                m_statusLeft->setText(QString("元数据处理完成  |  总耗时: %1s").arg(QString::number(totalSec, 'f', 1)));
+
+                QTimer::singleShot(400, this, [this]() {
+                    m_topProgressBar->hide();
+                    m_syncStartTime = 0;
+                    QTimer::singleShot(3000, this, [this]() {
+                        updateStatusBar(); // 3秒后复位常态“10 个项目, 已选中 1 个”
+                    });
+                });
+            }
+        }
+    });
 }
 
 #ifdef Q_OS_WIN
@@ -1259,6 +1305,17 @@ void MainWindow::setupSplitters() {
     mainL->addWidget(m_navBarWidget);
     mainL->addWidget(bodyWrapper, 1);
     mainL->addWidget(statusBar);
+
+    // --- 3.5 创建不占位、不加布局的 5px 悬浮覆盖进度条 ---
+    m_topProgressBar = new QProgressBar(centralC); // 父对象绑定为 centralC
+    m_topProgressBar->setFixedHeight(5);          // 高度设定为 5 像素，完美覆盖 5px 缝隙
+    m_topProgressBar->setTextVisible(false);      // 隐藏文字
+    m_topProgressBar->setRange(0, 100);
+    m_topProgressBar->setStyleSheet(QString(
+        "QProgressBar { background: transparent; border: none; max-height: 5px; }"
+        "QProgressBar::chunk { background-color: %1; border-radius: 1px; }"
+    ).arg(qssColor(PrimaryBlue)));
+    m_topProgressBar->hide(); // 默认无任务时静默隐藏
 
     setCentralWidget(centralC);
 }
@@ -2182,6 +2239,28 @@ void MainWindow::removeCustomMonitoredFolder(const QString& path) {
         updateCustomFolderButtons();
 
         ToolTipOverlay::instance()->showText(QCursor::pos(), "已停止监控该文件夹并移除相关镜像分类", 1500, QColor("#FECF0E"));
+    }
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event) {
+    QMainWindow::resizeEvent(event);
+    updateProgressBarGeometry(); // 窗口调整大小时，实时刷新 5px 进度条几何位置
+}
+
+void MainWindow::updateProgressBarGeometry() {
+    if (!m_topProgressBar || !m_mainSplitter || !m_statusLeft) return;
+
+    QWidget* bodyWrapper = m_mainSplitter->parentWidget();
+    QWidget* statusBar = m_statusLeft->parentWidget();
+
+    if (bodyWrapper && statusBar) {
+        // 绝对定位计算：
+        int x = bodyWrapper->geometry().left();     // 左右边距与上方主体容器对齐
+        int y = statusBar->geometry().top() - 5;    // 精确吸附于 statusBar 顶部上方 5 像素缝隙内
+        int width = bodyWrapper->geometry().width(); // 宽度与上方主体容器保持一致
+
+        m_topProgressBar->setGeometry(x, y, width, 5);
+        m_topProgressBar->raise(); // 提升渲染层级，确保置顶悬浮在 centralC 背景之上
     }
 }
 
