@@ -88,7 +88,7 @@
   2. 重构 `ContentPanel` 的 `wheelEvent`，捕获 Ctrl+滚轮 动作实现滑杆尺寸/内容卡片尺寸 `m_zoomLevel`（限制在 96~128px 之间）的物理同频缩放，并保证滑杆值及 `updateGridSize()` 持久化一致。
   3. 在“视图按钮”下拉菜单中，完美对接 `ListView`、`GridView` (网格自适应即 JustifiedMode) 以及 `JustifiedViewMode` 的 logic 切换。
 - 不在本次范围内的是：重写或修改物理 USN 监控底座或底层 MFT 文件过滤搜索流程。
-- 对应方案文档: Modification_Plan-45.md
+- 对应方案文档：Modification_Plan-45.md
 
 ## [2026-07-24] 全款应用架构与文件职责过载深度排查
 
@@ -114,7 +114,7 @@
 - 用户期望的结果：无论是从侧边栏分类设定颜色或从内容面板对文件夹进行设定颜色，两者都能相互同步展现同频的颜色标签。该功能仅限与已入库的文件夹/分类。
 - 本次任务边界：
   1. 在 `MetadataManager::setColor` 内部增加同步判断，一旦对文件夹修改颜色，同步调用 `CategoryRepo::updateCategoryColorByPath` 将颜色同步更新至映射分类定义中。
-  2. 在 `CategoryPanel::onSetColor` 和 `onRandomColor` 中增加同步写入，当分类绑定的物理文件夹非空时，同步调用 `MetadataManager::instance().setColor` 将新颜色同步写入对应的物理文件夹缓存与持久化中。
+  2. 在 `CategoryPanel::onSetColor` and `onRandomColor` 中增加同步写入，当分类绑定的物理文件夹非空时，同步调用 `MetadataManager::instance().setColor` 将新颜色同步写入对应的物理文件夹缓存与持久化中。
   3. 确保该双向同步动作仅对已入库的物理文件夹/分类有效，不影响其他普通未入库项目。
 - 不在本次范围内的是：修改非颜色属性的元数据持久化、或者对非入库文件更改颜色的独立打标逻辑。
 - 对应方案文档：Modification_Plan/Modification_Plan-61.md
@@ -207,7 +207,7 @@
 ## [2026-07-26] 侧边栏分类树状展开状态重启持久化失效根治重构二期
 
 - 用户描述的现象/问题：在上一轮排查中，用户发现即便重构了锁逻辑，重启后仍折叠，排查出 3 个致命死穴（类型强转失败、内存/磁盘类型混用不一致、save 里的“我的分类”字符串过激匹配拦截）。
-- 用户期望的结果：通过统一加载数据类型、移除过激空拦截并实时同步 Property，以及在 `modelReset` 信号中加入兼容性安全类型解析，彻底根治持久化。
+- 用户期望的结果：通过统一加载数据类型、移除过激空拦截并实时同步 Property，以及在 `modelReset` 信号中加入兼容性安全类型解析，彻底根根治持久化。
 - 本次任务边界：
   1. 统一 `loadExpandedStateFromSettings` Property 存储类型为 `QList<int>`。
   2. 重构 `saveExpandedStateToSettings`，删除包含 `"我的分类"` 的过激拦截匹配，并在物理落盘后同步向 tree property 更新最新的 `idIntList`。
@@ -235,7 +235,7 @@
   1. 升级 `MainWindow.h`，增设变量 `m_totalBatchCount` 保持批次总量感知；
   2. 升级 `MainWindow.cpp`，显式设定 `setInvertedAppearance(false)` 强制普通方向；
   3. 升级 `initUi()` 的 100ms 刷新槽和信号连接 logic，运用 $T_{elapsed} \times \frac{100 - P}{P}$ 动态公式推算预计耗时，并完美替换对应语境。
-- 不在本次范围内的是：修改 `SyncStatusService` 本身的发射频率，或者对除了 `MainWindow` 顶层控制链路之外的普通面板数据视图进行重设。
+- 不在本次范围内的是：修改 `SyncStatusService` 本身的发射频率，或者对除了 `MainWindow`顶层控制链路之外的普通面板数据视图进行重设。
 - 对应方案文档：Modification_Plan/Modification_Plan-106.md
 
 ## [2026-07-27] 创建自动导入中途取消与数据擦除机制安全落地
@@ -270,3 +270,13 @@
   2. 规划科学的解耦重构技术路线，建立独立的服务接口（如 `ShellIconService` 负责提取图标，`NavigationHistoryService` 承接导航历史，`ContentContextMenuManager` 托管右键菜单构建等），从而彻底分流过载职责。
 - 不在本次范围内的：由于目前处于只读分析师状态，不直接修改任何 C++ 源码文件（.cpp / .h），不破坏现行软件编译流程。
 - 对应方案文档：Modification_Plan/Modification_Plan-111.md
+
+## [2026-07-28] 修复构建配置缺失与 FilterEngine 编译类型错误
+
+- 用户描述的现象/问题：编译 C++ 项目时，遇到了多处编译器语法错误（在 FilterEngine.cpp 中未声明的标识符 `record` / `fileName` / `pe` 等，将 `IngestedRecord` 假定为 `int` 等）以及 “util/ShellHelper.h”、“core/AppConfig.h”、“core/FileSystemService.h” 头文件无法找到的问题。
+- 用户期望的结果：完全修复上述所有的 C++ 编译及头文件包含错误，使项目能够顺利通过编译。
+- 本次任务边界：
+  1. 修复 `src/ui/FilterEngine.h` 和 `src/ui/FilterEngine.cpp`，将未定义的 `IngestedRecord` 类型统一修改为系统实际定义的 `ItemRecord`。
+  2. 修改 `CMakeLists.txt`，在 `target_include_directories` 中追加 `${CMAKE_CURRENT_SOURCE_DIR}/src` 包含路径，以解决未带 `src/` 前缀的绝对路径式头文件包含失败。
+- 不在本次范围内的：新增、修改任何业务功能和 UI 样式。
+- 对应方案文档：Modification_Plan/Modification_Plan-113.md
