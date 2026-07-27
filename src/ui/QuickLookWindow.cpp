@@ -34,7 +34,7 @@ namespace ArcMeta {
 
 // 静态文件分类后缀定义 (音视频格式并入黑名单进行系统大图标降级预览，不直接播放)
 static const QSet<QString> UNPREVIEWABLE_EXTS = {
-    "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "exe", "dll", "msi", "sys", "iso", "dmg", "pkg", "bin", "ini", "lnk",
+    "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "exe", "dll", "msi", "sys", "iso", "dmg", "pkg", "bin", "lnk",
     "mp4", "m4v", "mov", "avi", "mkv", "wmv", "flv", "webm", "3gp", "mp3", "wav", "wma", "flac", "aac", "ogg", "m4a", "ape"
 };
 
@@ -270,6 +270,7 @@ void QuickLookWindow::setupUi() {
         QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
     )");
     m_textEdit->installEventFilter(this);
+    m_textEdit->viewport()->installEventFilter(this);
     layout->addWidget(m_textEdit);
 
     // 状态与信息标签
@@ -528,18 +529,18 @@ void QuickLookWindow::showEvent(QShowEvent* event) {
 }
 
 bool QuickLookWindow::eventFilter(QObject* watched, QEvent* event) {
-    if ((watched == m_textEdit || watched == m_graphicsView) && event->type() == QEvent::MouseButtonDblClick) {
+    if ((watched == m_textEdit || watched == m_textEdit->viewport() || watched == m_graphicsView) && event->type() == QEvent::MouseButtonDblClick) {
         // 2026-11-xx：如果在 QuickLookWindow 界面（或其内的视图）双击时，直接关闭窗口
         closePreview();
         return true;
     }
 
-    if ((watched == m_textEdit || watched == m_graphicsView) && event->type() == QEvent::ContextMenu) {
+    if ((watched == m_textEdit || watched == m_textEdit->viewport() || watched == m_graphicsView) && event->type() == QEvent::ContextMenu) {
         showContextMenu(static_cast<QContextMenuEvent*>(event)->globalPos());
         return true;
     }
 
-    if ((watched == m_textEdit || watched == m_graphicsView) && event->type() == QEvent::KeyPress) {
+    if ((watched == m_textEdit || watched == m_textEdit->viewport() || watched == m_graphicsView) && event->type() == QEvent::KeyPress) {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
         bool intercept = false;
         int key = keyEvent->key();
