@@ -18,6 +18,12 @@ NativeFolderWatcher::NativeFolderWatcher(QObject* parent)
     
     m_hIOCP = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
     
+    // 初始化防抖定时器，必须关联主线程事件循环
+    m_debounceTimer = new QTimer(this);
+    m_debounceTimer->setSingleShot(true);
+    m_debounceTimer->setInterval(200); // 200ms 防抖滑窗
+    connect(m_debounceTimer, &QTimer::timeout, this, &NativeFolderWatcher::processDebounceQueue);
+
     // 启动线程池 (根据 CPU 核心数)
     unsigned int threads = std::thread::hardware_concurrency();
     if (threads == 0) threads = 2;
@@ -55,18 +61,17 @@ void NativeFolderWatcher::addWatch(const std::wstring& path) {
         return;
     }
 
-    WatchItem* item = new WatchItem();
+    auto item = std::make_shared<WatchItem>();
     item->hDir = hDir;
     item->path = path;
 
-    if (!CreateIoCompletionPort(hDir, m_hIOCP, (ULONG_PTR)item, 0)) {
+    if (!CreateIoCompletionPort(hDir, m_hIOCP, (ULONG_PTR)item.get(), 0)) {
         qWarning() << "[Watcher] CreateIoCompletionPort 关联失败! Error:" << GetLastError();
-        CloseHandle(hDir);
-        delete item;
         return;
     }
 
     m_watches[path] = item;
+    m_outstandingWatches.insert(item);
     qDebug() << "[Watcher] IOCP 关联成功，句柄:" << hDir;
     
     requestChanges(item);
@@ -77,17 +82,20 @@ void NativeFolderWatcher::removeWatch(const std::wstring& path) {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_watches.find(path);
     if (it != m_watches.end()) {
-        WatchItem* item = it->second;
-        CancelIoEx(item->hDir, &item->overlapped);
-        CloseHandle(item->hDir);
-        delete item;
+        std::shared_ptr<WatchItem> item = it->second;
+        // 只从活跃映射中擦除
         m_watches.erase(it);
+
+        // 取消挂起的异步 I/O 动作。注意：此操作可能会在 IOCP 中产生一个完成通知包，
+        // 我们需要保持 shared_ptr 存在于 m_outstandingWatches 中，直至完成包被释放。
+        CancelIoEx(item->hDir, &item->overlapped);
     }
 }
 
 void NativeFolderWatcher::shutdown() {
     qDebug() << "[Watcher] 正在关闭监控服务...";
     m_running = false;
+
     if (m_hIOCP != INVALID_HANDLE_VALUE) {
         // 通知所有线程退出
         for (size_t i = 0; i < m_workers.size(); ++i) {
@@ -101,20 +109,21 @@ void NativeFolderWatcher::shutdown() {
     m_workers.clear();
     qDebug() << "[Watcher] 工作线程池已安全退出";
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (auto& pair : m_watches) {
-        CloseHandle(pair.second->hDir);
-        delete pair.second;
-    }
-    m_watches.clear();
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_watches.clear();
+        m_outstandingWatches.clear();
 
-    if (m_hIOCP != INVALID_HANDLE_VALUE) {
-        CloseHandle(m_hIOCP);
-        m_hIOCP = INVALID_HANDLE_VALUE;
+        if (m_hIOCP != INVALID_HANDLE_VALUE) {
+            CloseHandle(m_hIOCP);
+            m_hIOCP = INVALID_HANDLE_VALUE;
+        }
     }
 }
 
-void NativeFolderWatcher::requestChanges(WatchItem* item) {
+void NativeFolderWatcher::requestChanges(std::shared_ptr<WatchItem> item) {
+    if (!m_running) return;
+
     ZeroMemory(&item->overlapped, sizeof(OVERLAPPED));
     BOOL success = ReadDirectoryChangesW(
         item->hDir,
@@ -140,21 +149,88 @@ void NativeFolderWatcher::workerThread() {
     while (m_running) {
         BOOL ok = GetQueuedCompletionStatus(m_hIOCP, &bytesTransferred, &completionKey, &overlapped, INFINITE);
         if (!m_running) break;
-        if (!ok || !completionKey) continue;
+        if (!ok && overlapped == NULL) continue; // 真正的系统错误
 
-        WatchItem* item = (WatchItem*)completionKey;
-        handleNotification(item, bytesTransferred);
-        requestChanges(item); // 重新发起请求
+        // 在进行任何指针操作前，必须加锁，验证 completionKey 对应的 WatchItem 是否仍有效存活
+        std::shared_ptr<WatchItem> activeItem;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            WatchItem* rawItem = (WatchItem*)completionKey;
+            for (const auto& item : m_outstandingWatches) {
+                if (item.get() == rawItem) {
+                    activeItem = item;
+                    break;
+                }
+            }
+        }
+
+        // 如果对应的监控项已经被释放（非 outstanding），或者 completionKey 为空，则跳过
+        if (!activeItem) {
+            continue;
+        }
+
+        // 线程加锁逻辑：避免同一个 WatchItem 的多线程并发重入解析
+        bool expected = false;
+        if (!activeItem->isProcessing.compare_exchange_strong(expected, true)) {
+            // 当前 item 正在被其他线程并发处理中，我们本次不予重复执行
+            continue;
+        }
+
+        // 只有当 I/O 请求被完全取消（ERROR_OPERATION_ABORTED）或者 WatchItem 本身不在活跃列表中时，
+        // 需将其从 outstanding 集合中安全移除，避免内存泄露。
+        DWORD err = ok ? 0 : GetLastError();
+        bool active = false;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            auto it = m_watches.find(activeItem->path);
+            if (it != m_watches.end() && it->second == activeItem) {
+                active = true;
+            }
+        }
+
+        if (err == ERROR_OPERATION_ABORTED || !active) {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_outstandingWatches.erase(activeItem);
+            activeItem->isProcessing = false;
+            continue;
+        }
+
+        handleNotification(activeItem, bytesTransferred);
+
+        // 重设 processing 状态
+        activeItem->isProcessing = false;
+
+        // 解析完成后，若该 item 依然活跃，则重新挂起 ReadDirectoryChangesW
+        bool stillActive = false;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            auto it = m_watches.find(activeItem->path);
+            if (it != m_watches.end() && it->second == activeItem) {
+                stillActive = true;
+            }
+        }
+        if (stillActive) {
+            requestChanges(activeItem);
+        }
     }
 }
 
-void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransferred) {
+void NativeFolderWatcher::handleNotification(std::shared_ptr<WatchItem> item, DWORD bytesTransferred) {
+    // 拦截 3. 缓冲区溢出时的自愈对账（解决缺陷 3）
     if (bytesTransferred == 0) {
-        qDebug() << "[Watcher] 收到空通知 (bytesTransferred == 0)";
+        qWarning() << "[Watcher] 检测到监控缓冲区溢出（变更信号极其密集），启动全量级联扫描自愈对账...";
+        std::wstring folderPath = item->path;
+        QMetaObject::invokeMethod(&MetadataManager::instance(), [folderPath]() {
+            (void)QtConcurrent::run([folderPath]() {
+                AutoImportManager::instance().handleRecursiveIngestion(folderPath);
+            });
+        }, Qt::QueuedConnection);
         return;
     }
 
     BYTE* pBase = item->buffer;
+    QString lastOldPath;
+
     while (true) {
         FILE_NOTIFY_INFORMATION* notify = (FILE_NOTIFY_INFORMATION*)pBase;
         std::wstring fileName(notify->FileName, notify->FileNameLength / sizeof(WCHAR));
@@ -177,42 +253,49 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
             continue;
         }
 
-        // 触发 MetadataManager 登记与清洗逻辑
-        if (notify->Action == FILE_ACTION_ADDED || 
-            notify->Action == FILE_ACTION_RENAMED_NEW_NAME ||
-            notify->Action == FILE_ACTION_MODIFIED) {
+        // 智能重命名事件合并与元数据继承（解决缺陷 2）
+        if (notify->Action == FILE_ACTION_RENAMED_OLD_NAME) {
+            lastOldPath = qFullPath;
             
-            qDebug() << "[Watcher] 判定为有效变动，准备分发";
-
-            // 2026-07-xx 按照 Plan-117：触发登记与解析闭环
-            // 异步调用以免阻塞工作线程
-            QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
-                qDebug() << "[Watcher] 异步回调执行: 开始注册流程" << QString::fromStdWString(fullPath);
-                
-                QFileInfo info(QString::fromStdWString(fullPath));
-                if (info.isDir()) {
-                    // 目录：触发级联对账与分类树构建（统一交由 handleRecursiveIngestion 执行）
-                    // 2026-07-xx 按照 Plan-128: 对目录级变动，统一调用 handleRecursiveIngestion 实现 1:1 分类树自动创建与全量重构刷新
-                    qDebug() << "[Watcher] 检测到目录级变动，触发级联对账与 1:1 分类树构建";
-                    (void)QtConcurrent::run([fullPath]() {
-                        AutoImportManager::instance().handleRecursiveIngestion(fullPath);
-                    });
-                } else {
-                    // 文件：直接走异步批量接口，所有耗时操作在后台线程执行
-                    qDebug() << "[Watcher] 检测到文件级变动，触发异步单项注册";
-                    MetadataManager::instance().registerItemsAsync(
-                        {QString::fromStdWString(fullPath)}, true);
-                }
+            // 启动 50ms 跨缓冲区延时重构防护，处理可能跨通知的情况
+            QMetaObject::invokeMethod(this, [this, qFullPath]() {
+                handleOldName(qFullPath);
             }, Qt::QueuedConnection);
-        } else if (notify->Action == FILE_ACTION_REMOVED || 
-                   notify->Action == FILE_ACTION_RENAMED_OLD_NAME) {
-            
-            qDebug() << "[Watcher] 检测到物理删除/重命名移出事件，立即执行数据库物理清洗";
-            if (notify->Action == FILE_ACTION_REMOVED) {
-                std::wstring pathStr = fullPath;
-                if (pathStr.find(L"ArcMeta.Library_") != std::wstring::npos) {
-                    emit managedFolderRemoved(pathStr);
-                }
+
+        } else if (notify->Action == FILE_ACTION_RENAMED_NEW_NAME) {
+            if (!lastOldPath.isEmpty()) {
+                // 如果在同一个解析链表流中，上一个正好是 OLD_NAME
+                QString oldPath = lastOldPath;
+                QString newPath = qFullPath;
+                lastOldPath.clear();
+
+                // 立即取消对应的延时清除，执行无损迁移事务
+                QMetaObject::invokeMethod(this, [this, oldPath, newPath]() {
+                    if (m_pendingRenameOldPath == oldPath) {
+                        m_pendingRenameOldPath.clear();
+                    }
+                    QMetaObject::invokeMethod(&MetadataManager::instance(), [oldPath, newPath]() {
+                        MetadataManager::instance().syncAfterMove(oldPath.toStdWString(), newPath.toStdWString());
+                    }, Qt::QueuedConnection);
+                }, Qt::QueuedConnection);
+            } else {
+                // 跨缓冲区匹配
+                QMetaObject::invokeMethod(this, [this, qFullPath]() {
+                    handleNewName(qFullPath);
+                }, Qt::QueuedConnection);
+            }
+
+        } else if (notify->Action == FILE_ACTION_ADDED || notify->Action == FILE_ACTION_MODIFIED) {
+            // 事件防抖与去重引擎（解决缺陷 5）
+            QMetaObject::invokeMethod(this, [this, qFullPath]() {
+                enqueueAddOrModify(qFullPath);
+            }, Qt::QueuedConnection);
+
+        } else if (notify->Action == FILE_ACTION_REMOVED) {
+            qDebug() << "[Watcher] 检测到物理删除事件，立即执行数据库物理清洗";
+            std::wstring pathStr = fullPath;
+            if (pathStr.find(L"ArcMeta.Library_") != std::wstring::npos) {
+                emit managedFolderRemoved(pathStr);
             }
             QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
                 qDebug() << "[Watcher] 异步回调执行: 开始彻底物理清退流程" << QString::fromStdWString(fullPath);
@@ -224,6 +307,78 @@ void NativeFolderWatcher::handleNotification(WatchItem* item, DWORD bytesTransfe
 
         if (notify->NextEntryOffset == 0) break;
         pBase += notify->NextEntryOffset;
+    }
+}
+
+void NativeFolderWatcher::enqueueAddOrModify(const QString& path) {
+    m_debounceAddQueue.insert(path);
+    if (!m_debounceTimer->isActive()) {
+        m_debounceTimer->start();
+    }
+}
+
+void NativeFolderWatcher::processDebounceQueue() {
+    if (m_debounceAddQueue.isEmpty()) return;
+
+    QStringList filePaths;
+    QStringList folderPaths;
+
+    for (const QString& path : m_debounceAddQueue) {
+        QFileInfo info(path);
+        if (info.isDir()) {
+            folderPaths.append(path);
+        } else {
+            filePaths.append(path);
+        }
+    }
+    m_debounceAddQueue.clear();
+
+    // 目录级变动分发：触发级联扫描与重构
+    for (const QString& folderPath : folderPaths) {
+        std::wstring fullPath = folderPath.toStdWString();
+        (void)QtConcurrent::run([fullPath]() {
+            AutoImportManager::instance().handleRecursiveIngestion(fullPath);
+        });
+    }
+
+    // 文件级变动分发：批量接口进行去重登记解析
+    if (!filePaths.isEmpty()) {
+        MetadataManager::instance().registerItemsAsync(filePaths, true);
+    }
+}
+
+void NativeFolderWatcher::handleOldName(const QString& oldPath) {
+    m_pendingRenameOldPath = oldPath;
+
+    // 延迟 50ms。如果在 50ms 内没有收到与之配对的 NEW_NAME，则认为该文件已经被完全物理清退
+    QTimer::singleShot(50, this, [this, oldPath]() {
+        if (m_pendingRenameOldPath == oldPath) {
+            m_pendingRenameOldPath.clear();
+            std::wstring fullPath = oldPath.toStdWString();
+
+            qDebug() << "[Watcher] 智能重命名延迟超时，执行完全物理清退" << oldPath;
+            if (fullPath.find(L"ArcMeta.Library_") != std::wstring::npos) {
+                emit managedFolderRemoved(fullPath);
+            }
+            QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
+                MetadataManager::instance().removeMetadataSync(fullPath);
+            }, Qt::QueuedConnection);
+        }
+    });
+}
+
+void NativeFolderWatcher::handleNewName(const QString& newPath) {
+    if (!m_pendingRenameOldPath.isEmpty()) {
+        QString oldPath = m_pendingRenameOldPath;
+        m_pendingRenameOldPath.clear();
+
+        qDebug() << "[Watcher] 跨缓冲区匹配成功，旧路径:" << oldPath << "新路径:" << newPath;
+        QMetaObject::invokeMethod(&MetadataManager::instance(), [oldPath, newPath]() {
+            MetadataManager::instance().syncAfterMove(oldPath.toStdWString(), newPath.toStdWString());
+        }, Qt::QueuedConnection);
+    } else {
+        // 无孤立 OLD_NAME，作为普通 ADD 处理
+        enqueueAddOrModify(newPath);
     }
 }
 
