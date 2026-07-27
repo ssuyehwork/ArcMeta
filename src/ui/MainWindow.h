@@ -211,6 +211,7 @@ private:
     QProgressBar* m_topProgressBar = nullptr; // 悬浮覆盖层进度条
     QTimer* m_elapsedTimer = nullptr;         // 耗时刷新定时器
     qint64 m_syncStartTime = 0;               // 任务开始毫秒时间戳
+    int m_totalBatchCount = 0;                // 当前批次扫描的任务总项数
 
 public slots:
     /**

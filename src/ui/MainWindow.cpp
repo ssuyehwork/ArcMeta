@@ -806,45 +806,70 @@ void MainWindow::initUi() {
     });
 
     m_elapsedTimer = new QTimer(this);
-    m_elapsedTimer->setInterval(100);
+    m_elapsedTimer->setInterval(100); // 100ms 动态刷新率
 
+    // 100ms 刷新率计算预计耗时与文案
     connect(m_elapsedTimer, &QTimer::timeout, this, [this]() {
         if (m_syncStartTime > 0) {
             double elapsedSec = (QDateTime::currentMSecsSinceEpoch() - m_syncStartTime) / 1000.0;
-            int pct = m_topProgressBar->value();
+            int currentPct = m_topProgressBar->value();
 
-            m_statusLeft->setText(QString("正在同步元数据... %1%  |  耗时: %2s")
-                                  .arg(pct)
-                                  .arg(QString::number(elapsedSec, 'f', 1)));
+            // 动态推算预计剩余耗时 (ETA)
+            QString etaStr = "计算中...";
+            if (currentPct >= 5) {
+                double estRemainingSec = elapsedSec * (100.0 - currentPct) / (double)currentPct;
+                etaStr = QString("%1s").arg(QString::number(estRemainingSec, 'f', 1));
+            }
+
+            // 1. 文案更正为“扫描数据中...”
+            // 2. 耗词更正为“预计耗时”
+            m_statusLeft->setText(QString("扫描数据中... %1%  |  预计耗时: %2")
+                                  .arg(currentPct)
+                                  .arg(etaStr));
         }
     });
 
-    // 监听 SyncStatusService 后台同步与扫描进度
+    // 监听后台数据感知与扫描变动
     connect(&SyncStatusService::instance(), &SyncStatusService::statusUpdated,
             this, [this](bool syncing, int pendingCount) {
         if (syncing && pendingCount > 0) {
+            // --- 扫描任务启动 ---
             if (m_syncStartTime == 0) {
                 m_syncStartTime = QDateTime::currentMSecsSinceEpoch();
+                m_totalBatchCount = pendingCount; // 锁定初始任务总量
                 m_elapsedTimer->start();
-                updateProgressBarGeometry(); // 显影前刷新一次绝对位置
-                m_topProgressBar->setValue(10);
+                updateProgressBarGeometry();
+
+                m_topProgressBar->setValue(1); // 从左侧 1% 开始
                 m_topProgressBar->show();
             }
-            int estPct = qBound(10, 100 - (pendingCount * 2), 95);
-            m_topProgressBar->setValue(estPct);
+
+            // 动态修正总量（防止扫描过程中新追加任务导致溢出）
+            if (pendingCount > m_totalBatchCount) {
+                m_totalBatchCount = pendingCount;
+            }
+
+            // 3. 严格计算【由左向右】递增的百分比：已完成 / 总项数
+            int completedCount = m_totalBatchCount - pendingCount;
+            int pct = qBound(1, (int)((double)completedCount / m_totalBatchCount * 100), 99);
+
+            m_topProgressBar->setValue(pct); // 百分比递增，推动进度条从 Left -> Right
         } else {
+            // --- 扫描任务完成 ---
             if (m_syncStartTime > 0) {
-                m_topProgressBar->setValue(100);
+                m_topProgressBar->setValue(100); // 光条拉满至最右侧 100%
                 m_elapsedTimer->stop();
 
                 double totalSec = (QDateTime::currentMSecsSinceEpoch() - m_syncStartTime) / 1000.0;
-                m_statusLeft->setText(QString("元数据处理完成  |  总耗时: %1s").arg(QString::number(totalSec, 'f', 1)));
+                m_statusLeft->setText(QString("数据扫描完成  |  实际耗时: %1s").arg(QString::number(totalSec, 'f', 1)));
 
+                // 400ms 后平滑淡出隐藏，3 秒后恢复常规项目计数
                 QTimer::singleShot(400, this, [this]() {
                     m_topProgressBar->hide();
                     m_syncStartTime = 0;
+                    m_totalBatchCount = 0;
                     QTimer::singleShot(3000, this, [this]() {
-                        updateStatusBar(); // 3秒后复位常态“10 个项目, 已选中 1 个”
+                        updateStatusBar(); // 恢复常态“10 个项目, 已选中 1 个”
                     });
                 });
             }
@@ -1311,6 +1336,7 @@ void MainWindow::setupSplitters() {
     m_topProgressBar->setFixedHeight(5);          // 高度设定为 5 像素，完美覆盖 5px 缝隙
     m_topProgressBar->setTextVisible(false);      // 隐藏文字
     m_topProgressBar->setRange(0, 100);
+    m_topProgressBar->setInvertedAppearance(false); // 🚨 强制方向：绝对由左向右推进！
     m_topProgressBar->setStyleSheet(QString(
         "QProgressBar { background: transparent; border: none; max-height: 5px; }"
         "QProgressBar::chunk { background-color: %1; border-radius: 1px; }"
