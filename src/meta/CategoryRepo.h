@@ -71,6 +71,7 @@ public:
 
     // 条目关联逻辑
     static bool updateCategoryColorByPath(const std::wstring& path, const std::wstring& color);
+    static bool renamePhysicalCategoryPath(const std::wstring& oldPath, const std::wstring& newPath);
     static bool addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint = L"");
     static bool removeItemFromCategory(int categoryId, const std::string& fileId128);
     static bool removeAllCategories(const std::string& fileId128);

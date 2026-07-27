@@ -11,6 +11,8 @@
 #include <QSystemTrayIcon>
 #include <QSet>
 #include <QSlider>
+#include <QProgressBar>
+#include <QDateTime>
 
 #include "FramelessDialog.h"
 
@@ -58,6 +60,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     // 2026-04-11 按照用户要求：showEvent 是执行 ToolTipOverlay GPU 真实预热的唯一合法时机
     void showEvent(QShowEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
     /**
      * @brief 2026-05-24 按照用户要求：拦截 Windows 原生事件监听硬件变化
@@ -202,6 +205,13 @@ private:
     HoverEventFilter* m_hoverFilter = nullptr;
     ResizeEventFilter* m_resizeFilter = nullptr;
     QTimer* m_sidebarRefreshTimer = nullptr;
+
+    void updateProgressBarGeometry(); // 实时计算 5px 悬浮位置函数
+
+    QProgressBar* m_topProgressBar = nullptr; // 悬浮覆盖层进度条
+    QTimer* m_elapsedTimer = nullptr;         // 耗时刷新定时器
+    qint64 m_syncStartTime = 0;               // 任务开始毫秒时间戳
+    int m_totalBatchCount = 0;                // 当前批次扫描的任务总项数
 
 public slots:
     /**

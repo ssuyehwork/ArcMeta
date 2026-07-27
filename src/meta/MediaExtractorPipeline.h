@@ -8,6 +8,7 @@
 #include <vector>
 #include <string>
 #include <mutex>
+#include <atomic>
 
 namespace ArcMeta {
 
@@ -37,6 +38,7 @@ private:
     QTimer* m_retryTimer;
     std::mutex m_queueMutex;
     std::mutex m_retryMutex;
+    std::atomic<int> m_activeCount{0}; // 正在处理解析中 of 任务数量
 };
 
 } // namespace ArcMeta

@@ -28,6 +28,8 @@ public:
     explicit BatchRenameDialog(const std::vector<std::wstring>& originalPaths, QWidget* parent = nullptr);
     ~BatchRenameDialog() override = default;
 
+    QString getFirstNewName() const { return m_firstNewName; }
+
 private slots:
     void onAddRow();
     void updatePreview();
@@ -70,6 +72,8 @@ private:
     QPushButton* m_btnExecute = nullptr;
     QPushButton* m_btnCancel = nullptr;
     QPushButton* m_btnPreview = nullptr;
+
+    QString m_firstNewName;
 };
 
 } // namespace ArcMeta
