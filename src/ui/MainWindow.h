@@ -82,6 +82,22 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
+    // 2026-05-08 按照用户要求：添加边缘resize相关成员变量
+    enum ResizeDirection {
+        None = 0,
+        Left, Right, Top, Bottom,
+        TopLeft, TopRight, BottomLeft, BottomRight
+    };
+
+    ResizeDirection m_resizeDir = None;
+    bool m_isResizing = false;
+    QPoint m_resizeStartGlobal;
+    QRect  m_resizeStartGeometry;
+    
+    static constexpr int kResizeMargin = 6; // 边缘热区宽度（像素）
+    
+    ResizeDirection getResizeDirection(const QPoint& localPos) const;
+    void updateCursorShape(ResizeDirection dir);
 
     QWidget* m_titleBarWidget = nullptr;
     QHBoxLayout* m_titleBarLayout = nullptr;
@@ -174,14 +190,20 @@ private:
     bool m_panelsInitialized = false; // 2026-04-12 状态锁：确保面板仅初始化一次
     QTimer* m_searchTimer = nullptr; // 2026-xx-xx 按照 Plan-106：搜索防抖计时器
     QString m_currentPath;
+    QStringList m_history;
+    int m_historyIndex = -1;
 
     // 底部状态栏
     QLabel* m_statusLeft = nullptr;
 
+    // 窗口拖动
+    bool m_isDragging = false;
+    QPoint m_dragPosition;
+
     // 系统托盘控制器
     TrayController* m_trayController = nullptr;
     HoverEventFilter* m_hoverFilter = nullptr;
-    class FramelessWindowResizer* m_resizeFilter = nullptr;
+    ResizeEventFilter* m_resizeFilter = nullptr;
     QTimer* m_sidebarRefreshTimer = nullptr;
 
     void updateProgressBarGeometry(); // 实时计算 5px 悬浮位置函数

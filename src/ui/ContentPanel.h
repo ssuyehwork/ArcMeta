@@ -126,7 +126,6 @@ private:
  */
 class ContentPanel : public QFrame {
     Q_OBJECT
-    friend class ContentContextMenuManager;
 
 public:
     enum SortType {

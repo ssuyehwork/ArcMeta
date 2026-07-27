@@ -70,48 +70,4 @@ QStringList NavigationHistoryService::getRecentVisitedFolders(const std::wstring
     return AppConfig::instance().getValue(key, QStringList()).toStringList();
 }
 
-void NavigationHistoryService::recordNavigation(const QString& url, bool record) {
-    if (url.isEmpty()) return;
-    if (record) {
-        if (m_navHistoryIndex < static_cast<int>(m_navHistory.size()) - 1) {
-            m_navHistory = m_navHistory.mid(0, m_navHistoryIndex + 1);
-        }
-        if (m_navHistory.isEmpty() || m_navHistory.last() != url) {
-            m_navHistory.append(url);
-            m_navHistoryIndex = static_cast<int>(m_navHistory.size()) - 1;
-        }
-    }
-}
-
-bool NavigationHistoryService::canGoBack() const {
-    return m_navHistoryIndex > 0;
-}
-
-bool NavigationHistoryService::canGoForward() const {
-    return m_navHistoryIndex < static_cast<int>(m_navHistory.size()) - 1;
-}
-
-QString NavigationHistoryService::goBack() {
-    if (canGoBack()) {
-        m_navHistoryIndex--;
-        return m_navHistory[m_navHistoryIndex];
-    }
-    return QString();
-}
-
-QString NavigationHistoryService::goForward() {
-    if (canGoForward()) {
-        m_navHistoryIndex++;
-        return m_navHistory[m_navHistoryIndex];
-    }
-    return QString();
-}
-
-QString NavigationHistoryService::currentUrl() const {
-    if (m_navHistoryIndex >= 0 && m_navHistoryIndex < m_navHistory.size()) {
-        return m_navHistory[m_navHistoryIndex];
-    }
-    return QString();
-}
-
 } // namespace ArcMeta

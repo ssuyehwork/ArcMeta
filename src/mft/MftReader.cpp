@@ -3,7 +3,6 @@
 #endif
 #include "MftReader.h"
 #include "UsnWatcher.h"
-#include "MetadataQueueDispatcher.h"
 #include <winioctl.h>
 #include <Shlwapi.h>
 #pragma comment(lib, "Shlwapi.lib")
@@ -95,7 +94,10 @@ MftReader::~MftReader() {
 }
 
 void MftReader::clearInternal() {
-    MetadataQueueDispatcher::instance().clear();
+    {
+        std::lock_guard<std::mutex> qLock(m_queueMutex);
+        m_metadata_queue.clear();
+    }
     // 极致工业级优化方案 A：物理内存“强制归还”
     // 使用 Swap 技巧强制 STL 释放 Capacity 并归还堆内存给操作系统
     std::vector<uint64_t>().swap(m_frns);
@@ -114,6 +116,10 @@ void MftReader::clearInternal() {
     {
         std::lock_guard<std::mutex> lock(m_pathCacheMutex);
         m_path_cache.clear();
+    }
+    {
+        QWriteLocker lock(&m_iconCacheLock);
+        m_icon_cache.clear();
     }
     m_next_usns.clear();
     m_isInitialized = false;
@@ -1458,7 +1464,106 @@ void MftReader::requestMetadata(int index) {
     std::wstring volume = m_drive_list[dIdx];
     writeLock.unlock();
 
-    MetadataQueueDispatcher::instance().requestMetadata(index, frn, volume);
+    {
+        std::lock_guard<std::mutex> qLock(m_queueMutex);
+        m_metadata_queue.push_back({index, frn, volume});
+    }
+    processMetadataQueue();
+}
+
+void MftReader::processMetadataQueue() {
+    // 2026-06-xx 工业级节流：限制并发拉取元数据的线程数为 4
+    if (m_active_metadata_tasks.load() >= 4) return;
+
+    MetadataTask task;
+    {
+        std::lock_guard<std::mutex> qLock(m_queueMutex);
+        if (m_metadata_queue.empty()) return;
+        task = m_metadata_queue.back(); // 优先处理最新的请求 (LIFO，适配 UI 滚动)
+        m_metadata_queue.pop_back();
+    }
+
+    m_active_metadata_tasks.fetch_add(1);
+    (void)QtConcurrent::run([this, task]() {
+        int index = task.index;
+        uint64_t frn = task.frn;
+        std::wstring volume = task.volume;
+
+        // 2026-05-14 极致性能重构：对标 Rust 原版，采用 API 分级拉取策略
+        // 1. 优先使用 GetFileAttributesExW (不涉及文件句柄，非侵入式，性能极高)
+        QString fullPath = getFullPath(index);
+        WIN32_FILE_ATTRIBUTE_DATA attrData;
+        if (GetFileAttributesExW(reinterpret_cast<const wchar_t*>(fullPath.utf16()), GetFileExInfoStandard, &attrData)) {
+            QWriteLocker lock(&m_dataLock);
+            if (index < (int)m_frns.size() && m_frns[index] == frn) {
+                m_sizes[index] = (static_cast<uint64_t>(attrData.nFileSizeHigh) << 32) | attrData.nFileSizeLow;
+                m_timestamps[index] = filetimeToUnixMs((static_cast<int64_t>(attrData.ftLastWriteTime.dwHighDateTime) << 32) | attrData.ftLastWriteTime.dwLowDateTime);
+                m_attributes[index] = attrData.dwFileAttributes;
+                m_metadata_fetched[index] = 2;
+                lock.unlock();
+                emit dataChanged(index);
+                return;
+            }
+        }
+
+        // 2. 退化方案：对于特殊文件（如被独占锁定但允许属性读取的文件），使用 OpenFileById
+        std::wstring rootPath = volume + L"\\";
+        HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        if (hHint != INVALID_HANDLE_VALUE) {
+            FILE_ID_DESCRIPTOR id = { sizeof(FILE_ID_DESCRIPTOR), FileIdType };
+            id.FileId.QuadPart = frn;
+            HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
+            if (hFile != INVALID_HANDLE_VALUE) {
+                BY_HANDLE_FILE_INFORMATION bhfi;
+                if (GetFileInformationByHandle(hFile, &bhfi)) {
+                    QWriteLocker writeLock(&m_dataLock);
+                    if (index < (int)m_frns.size() && m_frns[index] == frn) {
+                        m_sizes[index] = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
+                        m_timestamps[index] = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
+                        m_attributes[index] = bhfi.dwFileAttributes;
+                        m_metadata_fetched[index] = 2;
+                    }
+                }
+                CloseHandle(hFile);
+            }
+            CloseHandle(hHint);
+        }
+
+        QWriteLocker lock(&m_dataLock);
+        if (index < (int)m_metadata_fetched.size() && m_metadata_fetched[index] == 1) {
+            if (m_metadata_fetched[index] != 2) m_metadata_fetched[index] = 0; 
+        }
+        lock.unlock();
+        emit dataChanged(index); 
+
+        m_active_metadata_tasks.fetch_sub(1);
+        processMetadataQueue(); // 递归触发下一个任务
+    });
+}
+
+QIcon MftReader::getCachedIcon(const QString& ext, bool isDir) {
+    QString key = isDir ? "folder" : ext.toLower();
+    {
+        QReadLocker lock(&m_iconCacheLock);
+        auto it = m_icon_cache.find(key);
+        if (it != m_icon_cache.end()) return *it;
+    }
+
+    QFileIconProvider provider;
+    QIcon icon;
+    if (isDir) {
+        icon = provider.icon(QFileIconProvider::Folder);
+    } else {
+        if (key.length() > 12) key = "unknown";
+        icon = provider.icon(QFileInfo("dummy." + key));
+        if (icon.isNull()) icon = provider.icon(QFileIconProvider::File);
+    }
+
+    {
+        QWriteLocker lock(&m_iconCacheLock);
+        m_icon_cache[key] = icon;
+    }
+    return icon;
 }
 
 } // namespace ArcMeta

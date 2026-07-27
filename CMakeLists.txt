@@ -57,8 +57,6 @@ set(SOURCES
     src/core/SyncStatusService.cpp
     src/core/SyncStatusService.h
     src/core/AutoImportManager.cpp
-    src/core/FileSystemService.cpp
-    src/core/FileSystemService.h
     src/core/AutoImportManager.h
     src/core/AppConfig.h
     src/core/NavigationHistoryService.cpp
@@ -86,8 +84,6 @@ set(SOURCES
     src/mft/MftReader.h
     src/mft/ScchCache.cpp
     src/mft/ScchCache.h
-    src/mft/MetadataQueueDispatcher.cpp
-    src/mft/MetadataQueueDispatcher.h
     src/ui/BatchRenameDialog.cpp
     src/ui/BatchRenameDialog.h
     src/ui/BatchRenamePreviewDialog.cpp
@@ -103,8 +99,6 @@ set(SOURCES
     src/ui/CategoryPanel.cpp
     src/ui/CategoryPanel.h
     src/ui/CategorySetPasswordDialog.cpp
-    src/ui/ContentContextMenuManager.cpp
-    src/ui/ContentContextMenuManager.h
     src/ui/CategorySetPasswordDialog.h
     src/ui/ColorPicker.cpp
     src/ui/ColorPicker.h
@@ -127,8 +121,6 @@ set(SOURCES
     src/ui/JustifiedResultView.h
     src/ui/FilterPanel.cpp
     src/ui/FilterPanel.h
-    src/ui/FilterEngine.cpp
-    src/ui/FilterEngine.h
     src/ui/FramelessDialog.cpp
     src/ui/FramelessDialog.h
     src/ui/FramelessFileDialog.cpp
@@ -149,8 +141,8 @@ set(SOURCES
     src/ui/TrayController.h
     src/ui/HoverEventFilter.cpp
     src/ui/HoverEventFilter.h
-    src/ui/FramelessWindowResizer.cpp
-    src/ui/FramelessWindowResizer.h
+    src/ui/ResizeEventFilter.cpp
+    src/ui/ResizeEventFilter.h
     src/ui/AddressBar.cpp
     src/ui/AddressBar.h
     src/ui/MetaPanel.cpp
@@ -176,8 +168,6 @@ set(SOURCES
     src/ui/ToolTipOverlay.cpp
     src/ui/ToolTipOverlay.h
     src/ui/TreeItemDelegate.h
-    src/ui/ShellIconService.h
-    src/ui/ShellIconService.cpp
     src/ui/UiHelper.h
     src/ui/SvgIconRenderer.h
     src/ui/SvgIconRenderer.cpp
