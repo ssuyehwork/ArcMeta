@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QSet>
+#include <QDateTime>
 #include <windows.h>
 #include <vector>
 #include <thread>
@@ -16,6 +17,20 @@
 #include <set>
 
 namespace ArcMeta {
+
+enum class FileAction {
+    Added,
+    Modified,
+    Removed,
+    Renamed
+};
+
+struct FileEvent {
+    FileAction action;
+    QString path;
+    QString oldPath; // 仅对重命名有效
+    QDateTime timestamp;
+};
 
 /**
  * @brief 基于 IOCP + ReadDirectoryChangesW 的高性能异步监控服务
@@ -43,13 +58,15 @@ public:
     void shutdown();
 
 signals:
-    void managedFolderRemoved(const std::wstring& path);
+    void fileAdded(const QString& path);
+    void fileModified(const QString& path);
+    void fileRemoved(const QString& path);
+    void fileRenamed(const QString& oldPath, const QString& newPath);
+    void managedFolderRemoved(const std::wstring& path); // 维持原有的托管文件夹物理注销信号
+    void bufferOverflowed(const std::wstring& rootPath); // 缓冲区溢出通知
 
 private slots:
-    void processDebounceQueue();
-    void enqueueAddOrModify(const QString& path);
-    void handleOldName(const QString& oldPath);
-    void handleNewName(const QString& newPath);
+    void processRawEvents(); // 20ms 合并与防抖去重处理槽
 
 private:
     NativeFolderWatcher(QObject* parent = nullptr);
@@ -83,12 +100,17 @@ private:
     std::atomic<bool> m_running;
     std::mutex m_mutex;
 
-    // 防抖与去重成员
-    QTimer* m_debounceTimer;
-    QSet<QString> m_debounceAddQueue;
+    // 事件批次合并缓冲区与其定时器
+    QTimer* m_mergeTimer;
+    std::vector<FileEvent> m_rawEventQueue;
+    std::mutex m_eventQueueMutex;
 
-    // 升级为队列/列表容器，杜绝高密集并发/批量重命名时的数据错配与事件丢失
-    std::vector<QString> m_pendingRenameOldPaths;
+    // 结构：暂存未配对的旧文件名
+    struct PendingRename {
+        QString oldPath;
+        QDateTime timestamp;
+    };
+    std::vector<PendingRename> m_pendingOldNames;
 
     void workerThread();
     void requestChanges(std::shared_ptr<WatchItem> item);

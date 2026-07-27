@@ -38,6 +38,53 @@ void CoreController::initializeCoreComponents() {
     
     // 4. 后台提取特征管道、定时器及事件队列预热
     ArcMeta::MediaExtractorPipeline::instance();
+
+    // 5. NativeFolderWatcher 单例强制在 GUI 主线程进行初始化点火，确保 QTimer 的线程亲和性安全
+    auto& watcher = ArcMeta::NativeFolderWatcher::instance();
+
+    // 6. 订阅解耦后的 NativeFolderWatcher 信号并桥接给上层业务层 (AutoImportManager 与 MetadataManager)
+    QObject::connect(&watcher, &NativeFolderWatcher::fileAdded, &watcher, [](const QString& path) {
+        QFileInfo info(path);
+        if (info.isDir()) {
+            std::wstring wpath = path.toStdWString();
+            (void)QtConcurrent::run([wpath]() {
+                AutoImportManager::instance().handleRecursiveIngestion(wpath);
+            });
+        } else {
+            MetadataManager::instance().registerItemsAsync({path}, true);
+        }
+    });
+
+    QObject::connect(&watcher, &NativeFolderWatcher::fileModified, &watcher, [](const QString& path) {
+        QFileInfo info(path);
+        if (info.isDir()) {
+            std::wstring wpath = path.toStdWString();
+            (void)QtConcurrent::run([wpath]() {
+                AutoImportManager::instance().handleRecursiveIngestion(wpath);
+            });
+        } else {
+            MetadataManager::instance().registerItemsAsync({path}, true);
+        }
+    });
+
+    QObject::connect(&watcher, &NativeFolderWatcher::fileRemoved, &watcher, [](const QString& path) {
+        std::wstring wpath = path.toStdWString();
+        QMetaObject::invokeMethod(&MetadataManager::instance(), [wpath]() {
+            MetadataManager::instance().removeMetadataSync(wpath);
+        }, Qt::QueuedConnection);
+    });
+
+    QObject::connect(&watcher, &NativeFolderWatcher::fileRenamed, &watcher, [](const QString& oldPath, const QString& newPath) {
+        QMetaObject::invokeMethod(&MetadataManager::instance(), [oldPath, newPath]() {
+            MetadataManager::instance().syncAfterMove(oldPath.toStdWString(), newPath.toStdWString());
+        }, Qt::QueuedConnection);
+    });
+
+    QObject::connect(&watcher, &NativeFolderWatcher::bufferOverflowed, &watcher, [](const std::wstring& rootPath) {
+        (void)QtConcurrent::run([rootPath]() {
+            AutoImportManager::instance().handleRecursiveIngestion(rootPath);
+        });
+    });
     
     qDebug() << "[PERF] [CoreController] CoreComponents 单例拓扑链预热耗时:" << (QDateTime::currentMSecsSinceEpoch() - metaInitStart) << "ms";
 }
