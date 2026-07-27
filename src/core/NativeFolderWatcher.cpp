@@ -3,6 +3,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QCoreApplication>
+#include <QThread>
 #include <algorithm>
 
 namespace ArcMeta {
