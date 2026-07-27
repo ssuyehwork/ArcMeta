@@ -324,8 +324,8 @@ void QuickLookWindow::renderImage(const QString& path) {
     QFileInfo fi(path);
     QString ext = fi.suffix().toLower();
 
-    // 优先读取原始像素的本地格式
-    static const QSet<QString> QT_NATIVE_FORMATS = {"png", "jpg", "jpeg", "bmp", "gif", "webp"};
+    // 优先读取原始像素的本地格式 (由于 Qt 可能未安装/未部署 WebP 图像解码器插件，WebP 格式应交由系统 Shell 提供高分辨率缩略图预览)
+    static const QSet<QString> QT_NATIVE_FORMATS = {"png", "jpg", "jpeg", "bmp", "gif"};
 
     QPointer<QuickLookWindow> weakThis(this);
     (void)QtConcurrent::run([weakThis, path, ext]() {
