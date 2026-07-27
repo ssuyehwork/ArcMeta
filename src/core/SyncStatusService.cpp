@@ -11,26 +11,42 @@ SyncStatusService& SyncStatusService::instance() {
 
 SyncStatusService::SyncStatusService() {
     m_throttleTimer = new QTimer(this);
-    m_throttleTimer->setInterval(200); // 200ms 高性能节流窗口
+    m_throttleTimer->setInterval(150); // 150ms 节流平滑输出
     m_throttleTimer->setSingleShot(true);
 
     connect(m_throttleTimer, &QTimer::timeout, [this]() {
         emit statusUpdated(isSyncing(), pendingCount());
     });
 
-    // 订阅底层原始信号
-    connect(&DatabaseManager::instance(), &DatabaseManager::pendingTasksCountChanged, this, [this](int count) {
-        updateState(count);
-    }, Qt::QueuedConnection);
+    // 1. 订阅 SQLite 数据库落盘队列
+    connect(&DatabaseManager::instance(), &DatabaseManager::pendingTasksCountChanged,
+            this, &SyncStatusService::updateDbPending, Qt::QueuedConnection);
 
-    // 初始化同步计数
-    m_pendingCount.store(DatabaseManager::instance().getPendingTasksCount());
+    // 初始化数据库任务计数
+    m_dbPending.store(DatabaseManager::instance().getPendingTasksCount());
 }
 
-void SyncStatusService::updateState(int count) {
-    m_pendingCount.store(count);
-    
-    // 如果计时器未运行，启动计时器进行节流
+int SyncStatusService::pendingCount() const {
+    // 三方后台任务池总量叠加：数据库 + 多媒体提取 + 扫描
+    return m_dbPending.load() + m_mediaPending.load() + m_scanPending.load();
+}
+
+void SyncStatusService::updateDbPending(int count) {
+    m_dbPending.store(count);
+    notifyThrottled();
+}
+
+void SyncStatusService::updateMediaPending(int count) {
+    m_mediaPending.store(count);
+    notifyThrottled();
+}
+
+void SyncStatusService::updateScanPending(int count) {
+    m_scanPending.store(count);
+    notifyThrottled();
+}
+
+void SyncStatusService::notifyThrottled() {
     if (!m_throttleTimer->isActive()) {
         m_throttleTimer->start();
     }

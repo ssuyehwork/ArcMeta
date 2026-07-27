@@ -8,8 +8,8 @@
 namespace ArcMeta {
 
 /**
- * @brief 同步状态服务 (解耦试点)
- * 负责从底层同步引擎接收高频信号，并按 UI 刷新率进行节流分发。
+ * @brief 同步状态服务 (多源任务聚合重构)
+ * 负责从底层数据库落盘、文件扫描以及多媒体特征解析提取接收高频信号并进行节流分发。
  */
 class SyncStatusService : public QObject {
     Q_OBJECT
@@ -17,29 +17,37 @@ public:
     static SyncStatusService& instance();
 
     /**
-     * @brief 是否正在同步中 (线程安全)
+     * @brief 是否正在同步/扫描中 (线程安全)
      */
-    bool isSyncing() const { return m_pendingCount.load() > 0; }
+    bool isSyncing() const { return pendingCount() > 0; }
 
     /**
-     * @brief 获取待处理任务数 (线程安全)
+     * @brief 获取待处理总任务数 (线程安全)
      */
-    int pendingCount() const { return m_pendingCount.load(); }
+    int pendingCount() const;
+
+public slots:
+    // 供各后台模块投递待处理任务计数的统一槽方法
+    void updateDbPending(int count);
+    void updateMediaPending(int count);
+    void updateScanPending(int count);
 
 signals:
     /**
      * @brief 节流后的状态更新信号 (主线程触发)
      */
-    void statusUpdated(bool syncing, int count);
+    void statusUpdated(bool syncing, int pendingCount);
 
 private:
     SyncStatusService();
     ~SyncStatusService() override = default;
 
-    std::atomic<int> m_pendingCount{0};
-    QTimer* m_throttleTimer = nullptr;
+    void notifyThrottled();
 
-    void updateState(int count);
+    QTimer* m_throttleTimer = nullptr;
+    std::atomic<int> m_dbPending{0};    // 数据库待刷盘任务数
+    std::atomic<int> m_mediaPending{0}; // 多媒体特征待提取项数
+    std::atomic<int> m_scanPending{0};  // 后台文件扫描待注册项数
 };
 
 } // namespace ArcMeta
