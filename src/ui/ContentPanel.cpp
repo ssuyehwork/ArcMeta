@@ -2882,7 +2882,25 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
         emit directorySelected(path);  
     } else { 
         MetadataManager::instance().recordAccess(path.toStdWString());
-        QDesktopServices::openUrl(QUrl::fromLocalFile(path)); 
+
+        // 2026-11-xx 按照用户全新要求：在内容面板双击某个文件时如同按下空格键那样打开预览
+        QString ext = info.suffix().toLower();
+        // 1. 系统级不可预览黑名单 (包含压缩包、二进制文件及系统库)
+        static const QSet<QString> blackList = {
+            "exe", "dll", "sys", "bin", "dat", "lib", "obj", "msi", "com",
+            "zip", "rar", "7z", "iso", "tar", "gz", "bz2", "dmg", "pkg"
+        };
+        if (blackList.contains(ext)) return;
+
+        // 2. 预览准入白名单 (仅限受支持的图像类及文本/代码类文件)
+        static const QSet<QString> whiteList = {
+            "jpg", "jpeg", "png", "bmp", "webp", "gif", "ico", "psd", "ai", "eps", "pdf", "svg",
+            "txt", "md", "markdown", "log", "cpp", "h", "hpp", "c", "py", "js", "css", "html", "json", "xml", "ini", "conf", "yaml", "yml"
+        };
+
+        if (whiteList.contains(ext)) {
+            emit requestQuickLook(path);
+        }
     } 
 } 
  

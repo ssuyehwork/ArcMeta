@@ -3,6 +3,13 @@
 #include "StyleLibrary.h"
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QMenu>
+#include <QClipboard>
+#include <QMimeData>
+#include <QDir>
+#include <QDesktopServices>
+#include <QContextMenuEvent>
+#include "../util/ShellHelper.h"
 #include <QFileInfo>
 #include <QScreen>
 #include <QApplication>
@@ -68,7 +75,7 @@ QuickLookGraphicsView::QuickLookGraphicsView(QWidget* parent) : QGraphicsView(pa
 void QuickLookGraphicsView::setPixmap(const QPixmap& pixmap) {
     m_pixmapItem->setPixmap(pixmap);
     m_scene->setSceneRect(m_pixmapItem->boundingRect());
-    fitImage();
+    setZoomOriginal(); // 2026-11-xx：将“原始大小模式（100% 比例）”作为默认
 }
 
 void QuickLookGraphicsView::clear() {
@@ -76,7 +83,7 @@ void QuickLookGraphicsView::clear() {
     m_scene->setSceneRect(QRectF());
     resetTransform();
     m_currentScale = 1.0;
-    m_isFitMode = true;
+    m_isFitMode = false; // 2026-11-xx：默认模式设定为原始大小模式（false）
     updateCursor();
 }
 
@@ -99,6 +106,16 @@ void QuickLookGraphicsView::setZoomOriginal() {
     m_scene->setSceneRect(m_pixmapItem->boundingRect());
     m_currentScale = 1.0;
     m_isFitMode = false;
+    updateCursor();
+}
+
+void QuickLookGraphicsView::rotateClockwise() {
+    rotate(90);
+    updateCursor();
+}
+
+void QuickLookGraphicsView::flipHorizontal() {
+    scale(-1, 1);
     updateCursor();
 }
 
@@ -133,13 +150,12 @@ void QuickLookGraphicsView::wheelEvent(QWheelEvent* event) {
 }
 
 void QuickLookGraphicsView::mouseDoubleClickEvent(QMouseEvent* event) {
-    Q_UNUSED(event);
-    if (!m_pixmapItem || m_pixmapItem->pixmap().isNull()) return;
-
-    if (m_isFitMode) {
-        setZoomOriginal();
+    if (event->button() == Qt::LeftButton) {
+        // 2026-11-xx：放弃当前双击切换自适应/原始像素功能，双击时直接关闭预览
+        QuickLookWindow::instance().closePreview();
+        event->accept();
     } else {
-        fitImage();
+        QGraphicsView::mouseDoubleClickEvent(event);
     }
 }
 
@@ -512,6 +528,17 @@ void QuickLookWindow::showEvent(QShowEvent* event) {
 }
 
 bool QuickLookWindow::eventFilter(QObject* watched, QEvent* event) {
+    if ((watched == m_textEdit || watched == m_graphicsView) && event->type() == QEvent::MouseButtonDblClick) {
+        // 2026-11-xx：如果在 QuickLookWindow 界面（或其内的视图）双击时，直接关闭窗口
+        closePreview();
+        return true;
+    }
+
+    if ((watched == m_textEdit || watched == m_graphicsView) && event->type() == QEvent::ContextMenu) {
+        showContextMenu(static_cast<QContextMenuEvent*>(event)->globalPos());
+        return true;
+    }
+
     if ((watched == m_textEdit || watched == m_graphicsView) && event->type() == QEvent::KeyPress) {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
         bool intercept = false;
@@ -543,6 +570,92 @@ bool QuickLookWindow::eventFilter(QObject* watched, QEvent* event) {
         closePreview();
     }
     return QWidget::eventFilter(watched, event);
+}
+
+void QuickLookWindow::contextMenuEvent(QContextMenuEvent* event) {
+    showContextMenu(event->globalPos());
+}
+
+void QuickLookWindow::showContextMenu(const QPoint& globalPos) {
+    if (m_currentPath.isEmpty()) return;
+
+    QMenu menu(this);
+    UiHelper::applyMenuStyle(&menu);
+
+    // 14 项选项
+    QAction* actPrev = menu.addAction("上一个");
+    QAction* actNext = menu.addAction("下一个");
+    menu.addSeparator();
+
+    QAction* actRotate = menu.addAction("旋转");
+    QAction* actFlip = menu.addAction("水平翻转");
+    QAction* actOrig = menu.addAction("原始");
+    QAction* actFit = menu.addAction("自适应");
+    menu.addSeparator();
+
+    QAction* actOpenDefault = menu.addAction("用系统默认程序打开");
+    QAction* actShowExplorer = menu.addAction("在”资源管理器”中显示");
+    menu.addSeparator();
+
+    QAction* actCopy = menu.addAction("复制");
+    QAction* actCut = menu.addAction("剪切");
+    QAction* actDel = menu.addAction("删除");
+    menu.addSeparator();
+
+    QAction* actCopyName = menu.addAction("复制文件名");
+    QAction* actCopyPath = menu.addAction("复制路径");
+    QAction* actFavorite = menu.addAction("添加至收藏夹");
+
+    // 根据是否显示图片启用/禁用 旋转、水平翻转、原始、自适应
+    bool isImage = m_graphicsView->isVisible();
+    actRotate->setEnabled(isImage);
+    actFlip->setEnabled(isImage);
+    actOrig->setEnabled(isImage);
+    actFit->setEnabled(isImage);
+
+    QAction* selected = menu.exec(globalPos);
+    if (!selected) return;
+
+    if (selected == actPrev) {
+        emit prevRequested();
+    } else if (selected == actNext) {
+        emit nextRequested();
+    } else if (selected == actRotate) {
+        m_graphicsView->rotateClockwise();
+    } else if (selected == actFlip) {
+        m_graphicsView->flipHorizontal();
+    } else if (selected == actOrig) {
+        m_graphicsView->setZoomOriginal();
+    } else if (selected == actFit) {
+        m_graphicsView->fitImage();
+    } else if (selected == actOpenDefault) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(m_currentPath));
+    } else if (selected == actShowExplorer) {
+        ShellHelper::openInExplorer(m_currentPath);
+    } else if (selected == actCopy) {
+        QList<QUrl> urls;
+        urls << QUrl::fromLocalFile(m_currentPath);
+        QMimeData* mime = new QMimeData();
+        mime->setUrls(urls);
+        QApplication::clipboard()->setMimeData(mime);
+    } else if (selected == actCut) {
+        QList<QUrl> urls;
+        urls << QUrl::fromLocalFile(m_currentPath);
+        QMimeData* mime = new QMimeData();
+        mime->setUrls(urls);
+        QByteArray effectData;
+        effectData.append((char)2);
+        mime->setData("Preferred DropEffect", effectData);
+        QApplication::clipboard()->setMimeData(mime);
+    } else if (selected == actDel) {
+        emit deleteRequested(m_currentPath);
+    } else if (selected == actCopyName) {
+        QApplication::clipboard()->setText(QFileInfo(m_currentPath).fileName());
+    } else if (selected == actCopyPath) {
+        QApplication::clipboard()->setText(QDir::toNativeSeparators(m_currentPath));
+    } else if (selected == actFavorite) {
+        emit favoriteRequested(m_currentPath);
+    }
 }
 
 } // namespace ArcMeta

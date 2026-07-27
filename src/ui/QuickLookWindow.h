@@ -21,6 +21,8 @@ public:
     void setPixmap(const QPixmap& pixmap);
     void fitImage();
     void setZoomOriginal();
+    void rotateClockwise();
+    void flipHorizontal();
     void clear();
 
 protected:
@@ -53,11 +55,14 @@ signals:
     void colorRequested(const QString& color);
     void prevRequested();
     void nextRequested();
+    void favoriteRequested(const QString& path);
+    void deleteRequested(const QString& path);
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
     void showEvent(QShowEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
 
 private:
     QuickLookWindow();
@@ -66,6 +71,7 @@ private:
     void setupUi();
     void renderImage(const QString& path);
     void renderText(const QString& path);
+    void showContextMenu(const QPoint& globalPos);
     
     QString detectEncoding(const QByteArray& data);
     bool isBinary(const QByteArray& data);
