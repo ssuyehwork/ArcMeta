@@ -56,7 +56,7 @@ void MediaExtractorPipeline::enqueue(const std::wstring& path) {
     qDebug() << "[DB_TRACE] MediaExtractorPipeline::enqueue 推入提取队列，路径:" << QString::fromStdWString(path) << "总队列大小:" << m_queue.size();
 
     // 🚨 联动通知：特征待提取总项数（排队 + 正在解析数）
-    SyncStatusService::instance().updateMediaPending(m_queue.size() + m_activeCount.load());
+    SyncStatusService::instance().updateMediaPending(static_cast<int>(m_queue.size()) + m_activeCount.load());
 
     QMetaObject::invokeMethod(m_timer, "start", Qt::QueuedConnection);
 }
@@ -67,7 +67,7 @@ void MediaExtractorPipeline::enqueueBatch(const std::vector<std::wstring>& paths
     qDebug() << "[DB_TRACE] MediaExtractorPipeline::enqueueBatch 批量推入提取队列，新增数量:" << paths.size() << "总队列大小:" << m_queue.size();
 
     // 🚨 联动通知：特征待提取总项数（排队 + 正在解析数）
-    SyncStatusService::instance().updateMediaPending(m_queue.size() + m_activeCount.load());
+    SyncStatusService::instance().updateMediaPending(static_cast<int>(m_queue.size()) + m_activeCount.load());
 
     QMetaObject::invokeMethod(m_timer, "start", Qt::QueuedConnection);
 }
@@ -89,7 +89,7 @@ void MediaExtractorPipeline::processNextBatch() {
     m_activeCount.fetch_add(static_cast<int>(batch.size()));
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
-        SyncStatusService::instance().updateMediaPending(m_queue.size() + m_activeCount.load());
+        SyncStatusService::instance().updateMediaPending(static_cast<int>(m_queue.size()) + m_activeCount.load());
     }
 
     (void)QtConcurrent::run([this, batch]() {
@@ -144,7 +144,7 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     }
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
-        SyncStatusService::instance().updateMediaPending(m_queue.size() + active);
+        SyncStatusService::instance().updateMediaPending(static_cast<int>(m_queue.size()) + active);
     }
 }
 
