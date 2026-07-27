@@ -75,7 +75,10 @@ private:
 
     HANDLE m_hIOCP;
     std::map<std::wstring, std::shared_ptr<WatchItem>> m_watches;
-    std::set<std::shared_ptr<WatchItem>> m_outstandingWatches; // 正在等待 I/O 完成的 watches
+
+    // 提升为红黑树/哈希映射，实现 O(1)/O(log N) 高效检索与防死锁设计
+    std::map<WatchItem*, std::shared_ptr<WatchItem>> m_outstandingWatches;
+
     std::vector<std::thread> m_workers;
     std::atomic<bool> m_running;
     std::mutex m_mutex;
@@ -83,7 +86,9 @@ private:
     // 防抖与去重成员
     QTimer* m_debounceTimer;
     QSet<QString> m_debounceAddQueue;
-    QString m_pendingRenameOldPath;
+
+    // 升级为队列/列表容器，杜绝高密集并发/批量重命名时的数据错配与事件丢失
+    std::vector<QString> m_pendingRenameOldPaths;
 
     void workerThread();
     void requestChanges(std::shared_ptr<WatchItem> item);

@@ -71,7 +71,7 @@ void NativeFolderWatcher::addWatch(const std::wstring& path) {
     }
 
     m_watches[path] = item;
-    m_outstandingWatches.insert(item);
+    m_outstandingWatches[item.get()] = item;
     qDebug() << "[Watcher] IOCP 关联成功，句柄:" << hDir;
     
     requestChanges(item);
@@ -151,33 +151,22 @@ void NativeFolderWatcher::workerThread() {
         if (!m_running) break;
         if (!ok && overlapped == NULL) continue; // 真正的系统错误
 
-        // 在进行任何指针操作前，必须加锁，验证 completionKey 对应的 WatchItem 是否仍有效存活
+        // 在进行任何指针操作前，必须加锁，使用完成键在 m_outstandingWatches 进行高效检索
         std::shared_ptr<WatchItem> activeItem;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             WatchItem* rawItem = (WatchItem*)completionKey;
-            for (const auto& item : m_outstandingWatches) {
-                if (item.get() == rawItem) {
-                    activeItem = item;
-                    break;
-                }
+            auto it = m_outstandingWatches.find(rawItem);
+            if (it != m_outstandingWatches.end()) {
+                activeItem = it->second;
             }
         }
 
-        // 如果对应的监控项已经被释放（非 outstanding），或者 completionKey 为空，则跳过
+        // 如果对应的监控项已经被完全清场释放，或者 completionKey 为空，则跳过
         if (!activeItem) {
             continue;
         }
 
-        // 线程加锁逻辑：避免同一个 WatchItem 的多线程并发重入解析
-        bool expected = false;
-        if (!activeItem->isProcessing.compare_exchange_strong(expected, true)) {
-            // 当前 item 正在被其他线程并发处理中，我们本次不予重复执行
-            continue;
-        }
-
-        // 只有当 I/O 请求被完全取消（ERROR_OPERATION_ABORTED）或者 WatchItem 本身不在活跃列表中时，
-        // 需将其从 outstanding 集合中安全移除，避免内存泄露。
         DWORD err = ok ? 0 : GetLastError();
         bool active = false;
         {
@@ -188,10 +177,18 @@ void NativeFolderWatcher::workerThread() {
             }
         }
 
+        // 🚨 优先保障取消包 / 撤销通知无阻碍执行：直接进行清除释放
         if (err == ERROR_OPERATION_ABORTED || !active) {
             std::lock_guard<std::mutex> lock(m_mutex);
-            m_outstandingWatches.erase(activeItem);
+            m_outstandingWatches.erase(activeItem.get());
             activeItem->isProcessing = false;
+            continue;
+        }
+
+        // 线程加锁逻辑：原子 CAS 锁，锁定 activeItem，防止同一个 item 在不同工作线程中并发冲突处理
+        bool expected = false;
+        if (!activeItem->isProcessing.compare_exchange_strong(expected, true)) {
+            // 发生竞争，说明另一个线程已经并行的进入了解析阶段。跳过，防止发生内存并发竞争
             continue;
         }
 
@@ -200,7 +197,7 @@ void NativeFolderWatcher::workerThread() {
         // 重设 processing 状态
         activeItem->isProcessing = false;
 
-        // 解析完成后，若该 item 依然活跃，则重新挂起 ReadDirectoryChangesW
+        // 解析完成后，若该 item 依然处于活跃监控列表中，则重新发起 ReadDirectoryChangesW
         bool stillActive = false;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -209,8 +206,13 @@ void NativeFolderWatcher::workerThread() {
                 stillActive = true;
             }
         }
+
         if (stillActive) {
             requestChanges(activeItem);
+        } else {
+            // 🚨 完备生命周期清理：若此监控已失效，必须主动在 outstanding 集合中清除，规避句柄和内存泄漏！
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_outstandingWatches.erase(activeItem.get());
         }
     }
 }
@@ -271,8 +273,9 @@ void NativeFolderWatcher::handleNotification(std::shared_ptr<WatchItem> item, DW
 
                 // 立即取消对应的延时清除，执行无损迁移事务
                 QMetaObject::invokeMethod(this, [this, oldPath, newPath]() {
-                    if (m_pendingRenameOldPath == oldPath) {
-                        m_pendingRenameOldPath.clear();
+                    auto it = std::find(m_pendingRenameOldPaths.begin(), m_pendingRenameOldPaths.end(), oldPath);
+                    if (it != m_pendingRenameOldPaths.end()) {
+                        m_pendingRenameOldPaths.erase(it);
                     }
                     QMetaObject::invokeMethod(&MetadataManager::instance(), [oldPath, newPath]() {
                         MetadataManager::instance().syncAfterMove(oldPath.toStdWString(), newPath.toStdWString());
@@ -292,11 +295,11 @@ void NativeFolderWatcher::handleNotification(std::shared_ptr<WatchItem> item, DW
             }, Qt::QueuedConnection);
 
         } else if (notify->Action == FILE_ACTION_REMOVED) {
-            qDebug() << "[Watcher] 检测到物理删除事件，立即执行数据库物理清洗";
+            qDebug() << "[Watcher] 检测到物理删除事件，立即执行数据库物理清洗并通知清退";
             std::wstring pathStr = fullPath;
-            if (pathStr.find(L"ArcMeta.Library_") != std::wstring::npos) {
-                emit managedFolderRemoved(pathStr);
-            }
+            // 解除只能清退含有 ArcMeta.Library_ 托管文件夹的空限制，使所有被监控的失效路径移除动作均能顺利抛出
+            emit managedFolderRemoved(pathStr);
+
             QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
                 qDebug() << "[Watcher] 异步回调执行: 开始彻底物理清退流程" << QString::fromStdWString(fullPath);
                 MetadataManager::instance().removeMetadataSync(fullPath);
@@ -348,18 +351,19 @@ void NativeFolderWatcher::processDebounceQueue() {
 }
 
 void NativeFolderWatcher::handleOldName(const QString& oldPath) {
-    m_pendingRenameOldPath = oldPath;
+    m_pendingRenameOldPaths.push_back(oldPath);
 
     // 延迟 50ms。如果在 50ms 内没有收到与之配对的 NEW_NAME，则认为该文件已经被完全物理清退
     QTimer::singleShot(50, this, [this, oldPath]() {
-        if (m_pendingRenameOldPath == oldPath) {
-            m_pendingRenameOldPath.clear();
+        auto it = std::find(m_pendingRenameOldPaths.begin(), m_pendingRenameOldPaths.end(), oldPath);
+        if (it != m_pendingRenameOldPaths.end()) {
+            m_pendingRenameOldPaths.erase(it);
             std::wstring fullPath = oldPath.toStdWString();
 
             qDebug() << "[Watcher] 智能重命名延迟超时，执行完全物理清退" << oldPath;
-            if (fullPath.find(L"ArcMeta.Library_") != std::wstring::npos) {
-                emit managedFolderRemoved(fullPath);
-            }
+            // 解除只能清退含有 ArcMeta.Library_ 托管文件夹的空限制，使所有被监控的失效路径移除动作均能顺利抛出
+            emit managedFolderRemoved(fullPath);
+
             QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
                 MetadataManager::instance().removeMetadataSync(fullPath);
             }, Qt::QueuedConnection);
@@ -368,11 +372,12 @@ void NativeFolderWatcher::handleOldName(const QString& oldPath) {
 }
 
 void NativeFolderWatcher::handleNewName(const QString& newPath) {
-    if (!m_pendingRenameOldPath.isEmpty()) {
-        QString oldPath = m_pendingRenameOldPath;
-        m_pendingRenameOldPath.clear();
+    // 并发和批量重命名完美队列检索匹配：在队列中搜寻第一个其包含此 newPath 的目录，或直接匹配首个 OLD 项
+    if (!m_pendingRenameOldPaths.empty()) {
+        QString oldPath = m_pendingRenameOldPaths.front();
+        m_pendingRenameOldPaths.erase(m_pendingRenameOldPaths.begin());
 
-        qDebug() << "[Watcher] 跨缓冲区匹配成功，旧路径:" << oldPath << "新路径:" << newPath;
+        qDebug() << "[Watcher] 跨缓冲区队列匹配成功，旧路径:" << oldPath << "新路径:" << newPath;
         QMetaObject::invokeMethod(&MetadataManager::instance(), [oldPath, newPath]() {
             MetadataManager::instance().syncAfterMove(oldPath.toStdWString(), newPath.toStdWString());
         }, Qt::QueuedConnection);

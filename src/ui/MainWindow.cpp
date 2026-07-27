@@ -1843,17 +1843,27 @@ void MainWindow::initDriveBar() {
     // 自动追加加载自定义 monitored buttons
     updateCustomFolderButtons();
 
-    // 连接文件监视信号，当发现第三方删除托管库时安全更新 UI 与底层除账
+    // 连接文件监视信号，当发现第三方删除托管库或自定义监控文件夹时安全更新 UI 与底层除账
     connect(&NativeFolderWatcher::instance(), &NativeFolderWatcher::managedFolderRemoved, this, [this](const std::wstring& path) {
         QString qPath = QString::fromStdWString(path);
-        // 提取盘符：例如从 "D:\ArcMeta.Library_D" 提取出 "D:"
-        QFileInfo info(qPath);
-        QString letter = info.absolutePath().left(2).toUpper(); // "D:"
-        if (m_driveButtons.contains(letter)) {
-            m_driveButtons[letter]->setState(DriveButton::Inactive); // 蓝色打勾变灰色
+        std::wstring normPath = MetadataManager::normalizePath(path);
+        QString finalPath = QString::fromStdWString(normPath);
+
+        QStringList customFolders = AppConfig::instance().getValue("DriveBar/CustomMonitoredFolders").toStringList();
+
+        // 如果被移动/删除的是自定义监控文件夹，自动触发注销逻辑
+        if (customFolders.contains(finalPath) || customFolders.contains(qPath)) {
+            removeCustomMonitoredFolder(qPath);
+        } else {
+            // 默认托管库清退逻辑
+            QFileInfo info(qPath);
+            QString letter = info.absolutePath().left(2).toUpper(); // "D:"
+            if (m_driveButtons.contains(letter)) {
+                m_driveButtons[letter]->setState(DriveButton::Inactive); // 蓝色打勾变灰色
+            }
+            // 底层数据物理除账
+            MetadataManager::instance().removeMetadataSync(path);
         }
-        // 底层数据物理除账
-        MetadataManager::instance().removeMetadataSync(path);
     });
 }
 
@@ -1934,19 +1944,53 @@ void MainWindow::updateCustomFolderButtons() {
     int insertIndex = m_driveBarLayout->count() - 1; // 插入在末尾 stretch spacer 之前
     if (insertIndex < 0) insertIndex = 0;
 
+    QStringList validFolders;
+    bool hasInvalid = false;
+
     for (const QString& path : customFolders) {
-        FolderButton* btn = new FolderButton(path, m_driveBarWidget);
+        std::wstring normPath = MetadataManager::normalizePath(path.toStdWString());
+        QString finalPath = QString::fromStdWString(normPath);
+
+        // 🚨 核心自愈逻辑：如果在物理磁盘上文件夹已经不存在（被移走或删除），自动触发数据清洗与自动解绑！
+        if (!QDir(finalPath).exists()) {
+            qDebug() << "[DriveBar] 检测到监控文件夹在硬盘上已失效，自动清退:" << finalPath;
+
+            // 1. 从 NativeFolderWatcher 监控中注销此路径
+            NativeFolderWatcher::instance().removeWatch(normPath);
+
+            // 2. 彻底清洗数据库元数据与侧边栏镜像分类
+            MetadataManager::instance().removeMetadataSync(normPath);
+
+            // 3. 清除相关图标与颜色配置
+            AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), QVariant());
+            AppConfig::instance().setValue(QString("DriveBar/FolderIcon_%1").arg(path), QVariant());
+            AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(finalPath), QVariant());
+            AppConfig::instance().setValue(QString("DriveBar/FolderIcon_%1").arg(finalPath), QVariant());
+
+            hasInvalid = true;
+            continue; // 跳过，不进行 UI 按钮绘制
+        }
+
+        validFolders.append(finalPath);
+
+        FolderButton* btn = new FolderButton(finalPath, m_driveBarWidget);
         btn->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(btn, &QWidget::customContextMenuRequested, this, &MainWindow::onFolderButtonContextMenu);
         
         // 单击该文件夹按钮，自动将内容导航面板重定向至此物理路径
-        connect(btn, &QPushButton::clicked, this, [this, path]() {
-            m_navPanel->setRootPath(path);
-            unifiedNavigateTo(path);
+        connect(btn, &QPushButton::clicked, this, [this, finalPath]() {
+            m_navPanel->setRootPath(finalPath);
+            unifiedNavigateTo(finalPath);
         });
 
         m_driveBarLayout->insertWidget(insertIndex++, btn);
         m_folderButtons.push_back(btn);
+    }
+
+    // 配置回写与同步
+    if (hasInvalid) {
+        AppConfig::instance().setValue("DriveBar/CustomMonitoredFolders", validFolders);
+        AppConfig::instance().sync();
     }
 }
 
