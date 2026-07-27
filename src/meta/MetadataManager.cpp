@@ -22,6 +22,8 @@
 #include "MetadataManager.h"
 #include "MetadataDefs.h"
 #include "DatabaseManager.h"
+#include "PhysicalDataExtractor.h"
+#include "IngestionProgressEngine.h"
 #include "../core/AppConfig.h"
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
