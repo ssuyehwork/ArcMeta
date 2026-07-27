@@ -4,6 +4,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QMenu>
+#include <QAction>
 #include <QClipboard>
 #include <QMimeData>
 #include <QDir>
@@ -529,18 +530,20 @@ void QuickLookWindow::showEvent(QShowEvent* event) {
 }
 
 bool QuickLookWindow::eventFilter(QObject* watched, QEvent* event) {
-    if ((watched == m_textEdit || watched == m_textEdit->viewport() || watched == m_graphicsView) && event->type() == QEvent::MouseButtonDblClick) {
+    bool hasTextEditViewport = m_textEdit && m_textEdit->viewport();
+
+    if ((watched == m_textEdit || (hasTextEditViewport && watched == m_textEdit->viewport()) || watched == m_graphicsView) && event->type() == QEvent::MouseButtonDblClick) {
         // 2026-11-xx：如果在 QuickLookWindow 界面（或其内的视图）双击时，直接关闭窗口
         closePreview();
         return true;
     }
 
-    if ((watched == m_textEdit || watched == m_textEdit->viewport() || watched == m_graphicsView) && event->type() == QEvent::ContextMenu) {
+    if ((watched == m_textEdit || (hasTextEditViewport && watched == m_textEdit->viewport()) || watched == m_graphicsView) && event->type() == QEvent::ContextMenu) {
         showContextMenu(static_cast<QContextMenuEvent*>(event)->globalPos());
         return true;
     }
 
-    if ((watched == m_textEdit || watched == m_textEdit->viewport() || watched == m_graphicsView) && event->type() == QEvent::KeyPress) {
+    if ((watched == m_textEdit || (hasTextEditViewport && watched == m_textEdit->viewport()) || watched == m_graphicsView) && event->type() == QEvent::KeyPress) {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
         bool intercept = false;
         int key = keyEvent->key();
