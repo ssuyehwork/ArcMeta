@@ -94,7 +94,7 @@
 
 - 用户描述的现象/问题：应用中可能存在整体混乱的逻辑架构，文件职责过载（违反SRP），以及存在某些功能具有不合理的傻逼逻辑架构。
 - 用户期望的结果：对全款应用及核心源码文件进行地毯式的通红与细粒度审计，标记所有存在职责过载（违反 SRP）的文件，定位逻辑架构设计不合理的傻逼逻辑架构功能。
-- 本次任务边界：对 `src/` 目录下的核心逻辑、业务模块 and UI 骨架（如 `ContentPanel`, `MainWindow`, `MetadataManager`, `MftReader` 等）及各组件数据流向、跨层耦合和 UI 层业务硬编码进行地毯式地深层审计与排查，输出架构漏洞、混乱点、文件职责过载证据（行号 + 代码片段）并归档。
+- 本次任务边界：对 `src/` 目录下的核心逻辑、业务模块 and UI 骨架（如 `ContentPanel`, `MainWindow`, `MetadataManager`, `MftReader` 等）及各组件数据流向、跨层耦合 and UI 层业务硬编码进行地毯式地深层审计与排查，输出架构漏洞、混乱点、文件职责过载证据（行号 + 代码片段）并归档。
 - 不在本次范围内的是：修改任何代码文件、创建实际重构代码、或扫描非当前项目指定的外部不相关目录。
 - 对应方案文档：Modification_Plan/Modification_Plan-54.md
 
@@ -236,7 +236,7 @@
   2. 升级 `MainWindow.cpp`，显式设定 `setInvertedAppearance(false)` 强制普通方向；
   3. 升级 `initUi()` 的 100ms 刷新槽和信号连接 logic，运用 $T_{elapsed} \times \frac{100 - P}{P}$ 动态公式推算预计耗时，并完美替换对应语境。
 - 不在本次范围内的是：修改 `SyncStatusService` 本身的发射频率，或者对除了 `MainWindow`顶层控制链路之外的普通面板数据视图进行重设。
-- 对应方案文档：Modification_Plan/Modification_Plan-106.md
+- 对应方案文档: Modification_Plan/Modification_Plan-106.md
 
 ## [2026-07-27] 创建自动导入中途取消与数据擦除机制安全落地
 
@@ -268,7 +268,7 @@
 - 本次任务边界：
   1. 在 `Inspect and Mark.md` 中详细标记并剖析整款应用（尤其是 `ContentPanel`、`MainWindow`、`MftReader`、`FilterPanel`）的职责过载。
   2. 规划科学的解耦重构技术路线，建立独立的服务接口（如 `ShellIconService` 负责提取图标，`NavigationHistoryService` 承接导航历史，`ContentContextMenuManager` 托管右键菜单构建等），从而彻底分流过载职责。
-- 不在本次范围内的：由于目前处于只读分析师状态，不直接修改任何 C++ 源码文件（.cpp / .h），不破坏现行软件编译流程。
+- 不在本次范围内的：由于目前处于只读分析师状态，不直接修改 C++ 源码文件（.cpp / .h），不破坏现行软件编译流程。
 - 对应方案文档：Modification_Plan/Modification_Plan-111.md
 
 ## [2026-07-28] 修复构建配置缺失与 FilterEngine 编译类型错误
@@ -280,3 +280,11 @@
   2. 修改 `CMakeLists.txt`，在 `target_include_directories` 中追加 `${CMAKE_CURRENT_SOURCE_DIR}/src` 包含路径，以解决未带 `src/` 前缀的绝对路径式头文件包含失败。
 - 不在本次范围内的：新增、修改任何业务功能和 UI 样式。
 - 对应方案文档：Modification_Plan/Modification_Plan-113.md
+
+## [2026-07-28] NativeFolderWatcher 代码架构合理性、职责单一性与傻逼逻辑地毯式排查
+
+- 用户描述的现象/问题：系统核心监控组件 `NativeFolderWatcher` 相关的代码架构、职责边界、以及事件防抖与跨线程逻辑可能存在潜在的不良设计与非单一职责设计。
+- 用户期望的结果：扩大范围对 `NativeFolderWatcher` 相关的代码架构展开地毯式审计，排查是否存在设计合理性、职责单一性以及运作流程逻辑缺陷，并形成极高质量的分析和重构规划文档。
+- 本次任务边界：全面审计 `src/core/NativeFolderWatcher.h` 和 `src/core/NativeFolderWatcher.cpp`，梳理其与底层 Windows IOCP API 交互、事件去重与延迟分发、重命名超时配对，以及对外部类如 `MetadataManager`、`AutoImportManager` 的硬编码耦合。由于当前角色是分析师，仅产出架构剖析与重构规划文档，不实际修改或重构任何代码文件，亦不执行编译。
+- 不在本次范围内的是：物理修改代码文件、进行编译测试。
+- 对应方案文档：Modification_Plan/Modification_Plan-114.md

@@ -43,6 +43,30 @@ void CoreController::initializeCoreComponents() {
 }
 
 CoreController::CoreController(QObject* parent) : QObject(parent) {
+    // [Plan-115] 注册 Qt 元类型，防止 QueuedConnection 因未注册自定义类型而分发失败
+    qRegisterMetaType<QList<ArcMeta::FileWatcherEvent>>("QList<ArcMeta::FileWatcherEvent>");
+
+    // [Plan-115] 绑定 NativeFolderWatcher 纯净自定义批次变动信号到具体业务单例，彻底断开两端硬编码耦合
+    connect(&NativeFolderWatcher::instance(), &NativeFolderWatcher::filesChanged, this, [this](const QList<ArcMeta::FileWatcherEvent>& events) {
+        for (const auto& ev : events) {
+            std::wstring normNewPath = MetadataManager::normalizePath(ev.newPath.toStdWString());
+            if (ev.action == ArcMeta::WatcherAction::Added || ev.action == ArcMeta::WatcherAction::Modified) {
+                if (ev.isDirectory) {
+                    (void)QtConcurrent::run([normNewPath]() {
+                        AutoImportManager::instance().handleRecursiveIngestion(normNewPath);
+                    });
+                } else {
+                    MetadataManager::instance().registerItemsAsync(QStringList() << ev.newPath, true);
+                }
+            } else if (ev.action == ArcMeta::WatcherAction::Removed) {
+                emit NativeFolderWatcher::instance().managedFolderRemoved(normNewPath);
+                MetadataManager::instance().removeMetadataSync(normNewPath);
+            } else if (ev.action == ArcMeta::WatcherAction::Renamed) {
+                std::wstring normOldPath = MetadataManager::normalizePath(ev.oldPath.toStdWString());
+                MetadataManager::instance().syncAfterMove(normOldPath, normNewPath);
+            }
+        }
+    }, Qt::QueuedConnection);
 }
 
 CoreController::~CoreController() {}

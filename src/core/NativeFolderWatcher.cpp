@@ -1,6 +1,4 @@
 #include "NativeFolderWatcher.h"
-#include "../meta/MetadataManager.h"
-#include "AutoImportManager.h"
 #include <QDebug>
 #include <QFileInfo>
 #include <QDir>
@@ -18,16 +16,16 @@ NativeFolderWatcher::NativeFolderWatcher(QObject* parent)
     
     m_hIOCP = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
     
-    // 初始化防抖定时器，必须关联主线程事件循环
-    m_debounceTimer = new QTimer(this);
-    m_debounceTimer->setSingleShot(true);
-    m_debounceTimer->setInterval(200); // 200ms 防抖滑窗
-    connect(m_debounceTimer, &QTimer::timeout, this, &NativeFolderWatcher::processDebounceQueue);
+    // 初始化 100ms 批次定时器，必须关联主线程事件循环
+    m_batchTimer = new QTimer(this);
+    m_batchTimer->setInterval(100); // 100ms 聚合分批发送
+    connect(m_batchTimer, &QTimer::timeout, this, &NativeFolderWatcher::processBatchQueue);
+    m_batchTimer->start();
 
     // 启动线程池 (根据 CPU 核心数)
     unsigned int threads = std::thread::hardware_concurrency();
     if (threads == 0) threads = 2;
-    qDebug() << "[Watcher] 初始化 IOCP 服务，启动工作线程数:" << threads;
+    qDebug() << "[Watcher] 初始化高吞吐量 IOCP 监控，启动工作线程数:" << threads;
     for (unsigned int i = 0; i < threads; ++i) {
         m_workers.emplace_back(&NativeFolderWatcher::workerThread, this);
     }
@@ -218,20 +216,16 @@ void NativeFolderWatcher::workerThread() {
 }
 
 void NativeFolderWatcher::handleNotification(std::shared_ptr<WatchItem> item, DWORD bytesTransferred) {
-    // 拦截 3. 缓冲区溢出时的自愈对账（解决缺陷 3）
+    // 拦截 3. 缓冲区溢出时的自适应去噪标记（解决缺陷 3）
     if (bytesTransferred == 0) {
-        qWarning() << "[Watcher] 检测到监控缓冲区溢出（变更信号极其密集），启动全量级联扫描自愈对账...";
-        std::wstring folderPath = item->path;
-        QMetaObject::invokeMethod(&MetadataManager::instance(), [folderPath]() {
-            (void)QtConcurrent::run([folderPath]() {
-                AutoImportManager::instance().handleRecursiveIngestion(folderPath);
-            });
-        }, Qt::QueuedConnection);
+        qWarning() << "[Watcher] 检测到监控缓冲区溢出（变更信号极其密集），加入批次缓冲稍后在主线程弹性自愈对账...";
+        std::lock_guard<std::mutex> lock(m_eventMutex);
+        m_rawEvents.push_back({0, QString::fromStdWString(item->path)}); // Action = 0 代表溢出标记
         return;
     }
 
     BYTE* pBase = item->buffer;
-    QString lastOldPath;
+    std::vector<RawEvent> batchLocal;
 
     while (true) {
         FILE_NOTIFY_INFORMATION* notify = (FILE_NOTIFY_INFORMATION*)pBase;
@@ -243,147 +237,168 @@ void NativeFolderWatcher::handleNotification(std::shared_ptr<WatchItem> item, DW
         qFullPath.append(QString::fromStdWString(fileName));
         qFullPath = QDir::toNativeSeparators(qFullPath);
 
-        std::wstring fullPath = qFullPath.toStdWString();
-
-        qDebug() << "[Watcher] IOCP 收到原始信号 Action:" << notify->Action << "Path:" << qFullPath;
-
         // 过滤规则：严禁监控 .arcmeta 目录自身的变动，防止死循环
         if (qFullPath.contains("/.arcmeta") || qFullPath.contains("\\.arcmeta")) {
-            qDebug() << "[Watcher] 过滤内部数据库变动信号:" << qFullPath;
             if (notify->NextEntryOffset == 0) break;
             pBase += notify->NextEntryOffset;
             continue;
         }
 
-        // 智能重命名事件合并与元数据继承（解决缺陷 2）
-        if (notify->Action == FILE_ACTION_RENAMED_OLD_NAME) {
-            lastOldPath = qFullPath;
-            
-            // 启动 50ms 跨缓冲区延时重构防护，处理可能跨通知的情况
-            QMetaObject::invokeMethod(this, [this, qFullPath]() {
-                handleOldName(qFullPath);
-            }, Qt::QueuedConnection);
-
-        } else if (notify->Action == FILE_ACTION_RENAMED_NEW_NAME) {
-            if (!lastOldPath.isEmpty()) {
-                // 如果在同一个解析链表流中，上一个正好是 OLD_NAME
-                QString oldPath = lastOldPath;
-                QString newPath = qFullPath;
-                lastOldPath.clear();
-
-                // 立即取消对应的延时清除，执行无损迁移事务
-                QMetaObject::invokeMethod(this, [this, oldPath, newPath]() {
-                    auto it = std::find(m_pendingRenameOldPaths.begin(), m_pendingRenameOldPaths.end(), oldPath);
-                    if (it != m_pendingRenameOldPaths.end()) {
-                        m_pendingRenameOldPaths.erase(it);
-                    }
-                    QMetaObject::invokeMethod(&MetadataManager::instance(), [oldPath, newPath]() {
-                        MetadataManager::instance().syncAfterMove(oldPath.toStdWString(), newPath.toStdWString());
-                    }, Qt::QueuedConnection);
-                }, Qt::QueuedConnection);
-            } else {
-                // 跨缓冲区匹配
-                QMetaObject::invokeMethod(this, [this, qFullPath]() {
-                    handleNewName(qFullPath);
-                }, Qt::QueuedConnection);
-            }
-
-        } else if (notify->Action == FILE_ACTION_ADDED || notify->Action == FILE_ACTION_MODIFIED) {
-            // 事件防抖与去重引擎（解决缺陷 5）
-            QMetaObject::invokeMethod(this, [this, qFullPath]() {
-                enqueueAddOrModify(qFullPath);
-            }, Qt::QueuedConnection);
-
-        } else if (notify->Action == FILE_ACTION_REMOVED) {
-            qDebug() << "[Watcher] 检测到物理删除事件，立即执行数据库物理清洗并通知清退";
-            std::wstring pathStr = fullPath;
-            // 解除只能清退含有 ArcMeta.Library_ 托管文件夹的空限制，使所有被监控的失效路径移除动作均能顺利抛出
-            emit managedFolderRemoved(pathStr);
-
-            QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
-                qDebug() << "[Watcher] 异步回调执行: 开始彻底物理清退流程" << QString::fromStdWString(fullPath);
-                MetadataManager::instance().removeMetadataSync(fullPath);
-            }, Qt::QueuedConnection);
-        } else {
-            qDebug() << "[Watcher] 非目标 Action (" << notify->Action << ")，跳过处理";
-        }
+        batchLocal.push_back({(int)notify->Action, qFullPath});
 
         if (notify->NextEntryOffset == 0) break;
         pBase += notify->NextEntryOffset;
     }
-}
 
-void NativeFolderWatcher::enqueueAddOrModify(const QString& path) {
-    m_debounceAddQueue.insert(path);
-    if (!m_debounceTimer->isActive()) {
-        m_debounceTimer->start();
+    // 批量无锁/极低锁竞争写入主线程缓冲区
+    if (!batchLocal.empty()) {
+        std::lock_guard<std::mutex> lock(m_eventMutex);
+        m_rawEvents.insert(m_rawEvents.end(), batchLocal.begin(), batchLocal.end());
     }
 }
 
-void NativeFolderWatcher::processDebounceQueue() {
-    if (m_debounceAddQueue.isEmpty()) return;
-
-    QStringList filePaths;
-    QStringList folderPaths;
-
-    for (const QString& path : m_debounceAddQueue) {
-        QFileInfo info(path);
-        if (info.isDir()) {
-            folderPaths.append(path);
-        } else {
-            filePaths.append(path);
+void NativeFolderWatcher::processBatchQueue() {
+    std::vector<RawEvent> eventsToProcess;
+    {
+        std::lock_guard<std::mutex> lock(m_eventMutex);
+        if (m_rawEvents.empty() && m_renamePool.empty()) {
+            return;
         }
-    }
-    m_debounceAddQueue.clear();
-
-    // 目录级变动分发：触发级联扫描与重构
-    for (const QString& folderPath : folderPaths) {
-        std::wstring fullPath = folderPath.toStdWString();
-        (void)QtConcurrent::run([fullPath]() {
-            AutoImportManager::instance().handleRecursiveIngestion(fullPath);
-        });
+        eventsToProcess.swap(m_rawEvents);
     }
 
-    // 文件级变动分发：批量接口进行去重登记解析
-    if (!filePaths.isEmpty()) {
-        MetadataManager::instance().registerItemsAsync(filePaths, true);
-    }
-}
+    QList<FileWatcherEvent> finalizedEvents;
+    QString lastOldPath;
 
-void NativeFolderWatcher::handleOldName(const QString& oldPath) {
-    m_pendingRenameOldPaths.push_back(oldPath);
-    
-    // 延迟 50ms。如果在 50ms 内没有收到与之配对的 NEW_NAME，则认为该文件已经被完全物理清退
-    QTimer::singleShot(50, this, [this, oldPath]() {
-        auto it = std::find(m_pendingRenameOldPaths.begin(), m_pendingRenameOldPaths.end(), oldPath);
-        if (it != m_pendingRenameOldPaths.end()) {
-            m_pendingRenameOldPaths.erase(it);
-            std::wstring fullPath = oldPath.toStdWString();
+    // A. 处理溢出、添加、修改、删除和重命名
+    for (const auto& raw : eventsToProcess) {
+        QString qFullPath = raw.path;
+        QFileInfo info(qFullPath);
+        bool isDir = info.exists() ? info.isDir() : qFullPath.endsWith("\\") || qFullPath.endsWith("/");
+
+        // 1. 拦截底层溢出
+        if (raw.actionType == 0) {
+            // 自适应弹性自愈通知：将溢出转换并延迟自适应通知
+            FileWatcherEvent ev;
+            ev.action = WatcherAction::Modified;
+            ev.newPath = qFullPath;
+            ev.isDirectory = true; // 告知上层是根目录需要自愈
+            finalizedEvents.append(ev);
+            continue;
+        }
+
+        if (raw.actionType == FILE_ACTION_RENAMED_OLD_NAME) {
+            lastOldPath = qFullPath;
             
-            qDebug() << "[Watcher] 智能重命名延迟超时，执行完全物理清退" << oldPath;
-            // 解除只能清退含有 ArcMeta.Library_ 托管文件夹的空限制，使所有被监控的失效路径移除动作均能顺利抛出
-            emit managedFolderRemoved(fullPath);
+            // 加入配对池，并记录高精度时间戳
+            PendingRename pr;
+            pr.timer.start();
+            pr.oldPath = qFullPath;
+            m_renamePool.push_back(pr);
 
-            QMetaObject::invokeMethod(&MetadataManager::instance(), [fullPath]() {
-                MetadataManager::instance().removeMetadataSync(fullPath);
-            }, Qt::QueuedConnection);
+        } else if (raw.actionType == FILE_ACTION_RENAMED_NEW_NAME) {
+            if (!lastOldPath.isEmpty()) {
+                // 在同一个包中的相邻项直接高速匹配成功
+                QString oldPath = lastOldPath;
+                lastOldPath.clear();
+
+                // 移除配对池对应项
+                for (auto it = m_renamePool.begin(); it != m_renamePool.end(); ++it) {
+                    if (it->oldPath == oldPath) {
+                        m_renamePool.erase(it);
+                        break;
+                    }
+                }
+
+                FileWatcherEvent ev;
+                ev.action = WatcherAction::Renamed;
+                ev.oldPath = oldPath;
+                ev.newPath = qFullPath;
+                ev.isDirectory = isDir;
+                finalizedEvents.append(ev);
+            } else {
+                // 跨包/跨通知缓冲区，在精确关联池中匹配
+                bool matched = false;
+                if (!m_renamePool.empty()) {
+                    // 进行后缀或名字就近匹配，如果都在 50ms 滑动窗口内
+                    for (auto it = m_renamePool.begin(); it != m_renamePool.end(); ++it) {
+                        if (it->timer.elapsed() <= 50) {
+                            // 优先配对
+                            QString oldPath = it->oldPath;
+                            m_renamePool.erase(it);
+
+                            FileWatcherEvent ev;
+                            ev.action = WatcherAction::Renamed;
+                            ev.oldPath = oldPath;
+                            ev.newPath = qFullPath;
+                            ev.isDirectory = isDir;
+                            finalizedEvents.append(ev);
+                            matched = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!matched) {
+                    // 无法在滑窗内配对，则当作全新 ADD 处理
+                    FileWatcherEvent ev;
+                    ev.action = WatcherAction::Added;
+                    ev.newPath = qFullPath;
+                    ev.isDirectory = isDir;
+                    finalizedEvents.append(ev);
+                }
+            }
+        } else if (raw.actionType == FILE_ACTION_ADDED || raw.actionType == FILE_ACTION_MODIFIED) {
+            FileWatcherEvent ev;
+            ev.action = (raw.actionType == FILE_ACTION_ADDED) ? WatcherAction::Added : WatcherAction::Modified;
+            ev.newPath = qFullPath;
+            ev.isDirectory = isDir;
+            finalizedEvents.append(ev);
+
+        } else if (raw.actionType == FILE_ACTION_REMOVED) {
+            FileWatcherEvent ev;
+            ev.action = WatcherAction::Removed;
+            ev.newPath = qFullPath;
+            ev.isDirectory = isDir;
+            finalizedEvents.append(ev);
         }
-    });
-}
+    }
 
-void NativeFolderWatcher::handleNewName(const QString& newPath) {
-    // 并发和批量重命名完美队列检索匹配：在队列中搜寻第一个其包含此 newPath 的目录，或直接匹配首个 OLD 项
-    if (!m_pendingRenameOldPaths.empty()) {
-        QString oldPath = m_pendingRenameOldPaths.front();
-        m_pendingRenameOldPaths.erase(m_pendingRenameOldPaths.begin());
-        
-        qDebug() << "[Watcher] 跨缓冲区队列匹配成功，旧路径:" << oldPath << "新路径:" << newPath;
-        QMetaObject::invokeMethod(&MetadataManager::instance(), [oldPath, newPath]() {
-            MetadataManager::instance().syncAfterMove(oldPath.toStdWString(), newPath.toStdWString());
-        }, Qt::QueuedConnection);
-    } else {
-        // 无孤立 OLD_NAME，作为普通 ADD 处理
-        enqueueAddOrModify(newPath);
+    // B. 超时事务精确结算：遍历重命名映射池，将 50ms 内依然孤立的 OLD_NAME 定性为真正物理删除
+    auto it = m_renamePool.begin();
+    while (it != m_renamePool.end()) {
+        if (it->timer.elapsed() > 50) {
+            QString oldPath = it->oldPath;
+            it = m_renamePool.erase(it);
+
+            FileWatcherEvent ev;
+            ev.action = WatcherAction::Removed;
+            ev.newPath = oldPath;
+            ev.isDirectory = false; // 默认作文件移除，业务层会有安全判定
+            finalizedEvents.append(ev);
+        } else {
+            ++it;
+        }
+    }
+
+    // C. 防抖去重合并：采用批次内重合事件压缩
+    if (!finalizedEvents.isEmpty()) {
+        QList<FileWatcherEvent> compressedEvents;
+        QSet<QString> processedPaths;
+
+        // 倒序遍历可以保留最新的最终状态，且去除高频重复的 Modified 事件
+        for (int i = finalizedEvents.size() - 1; i >= 0; --i) {
+            const auto& ev = finalizedEvents[i];
+            QString key = (ev.action == WatcherAction::Renamed) ? (ev.oldPath + "->" + ev.newPath) : ev.newPath;
+            if (!processedPaths.contains(key)) {
+                processedPaths.insert(key);
+                compressedEvents.prepend(ev);
+            }
+        }
+
+        if (!compressedEvents.isEmpty()) {
+            emit filesChanged(compressedEvents);
+        }
     }
 }
 
