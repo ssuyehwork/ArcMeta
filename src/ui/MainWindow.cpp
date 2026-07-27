@@ -2004,7 +2004,7 @@ void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
     QMenu menu(this);
     UiHelper::applyMenuStyle(&menu);
     QAction* actNew = menu.addAction("新建自动导入");
-    QAction* actRemove = menu.addAction("移除");
+    QAction* actRemove = menu.addAction("解除监控");
 
     menu.addSeparator();
 
