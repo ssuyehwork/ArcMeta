@@ -99,6 +99,11 @@ public:
      */
     void migrateCache(const QString& oldPath, const QString& newPath);
 
+    /**
+     * @brief 2026-07-27 按照 Plan-107：清除被擦除文件夹对应的缩略图、宽高比与元数据缓存
+     */
+    void clearCacheForFolder(const QString& folderPath);
+
 signals:
     void recordRenamed(const QString& oldPath, const QString& newPath, const QString& newName);
 
@@ -185,7 +190,8 @@ public:
         ActionAddToCategory,
         ActionAddToFavorites,
         ActionRescan,
-        ActionRefresh
+        ActionRefresh,
+        ActionCancelImport
     };
 
     explicit ContentPanel(QWidget* parent = nullptr);
@@ -382,6 +388,11 @@ public slots:
      * @brief 2026-07-26 极致重构：平滑更名缩略图与宽高比缓存 Key
      */
     void migrateModelCache(const QString& oldPath, const QString& newPath);
+
+    /**
+     * @brief 2026-07-27 按照 Plan-107：物理清除被擦除文件夹对应的缩略图与宽高比等高级缓存
+     */
+    void clearFolderCache(const QString& folderPath);
 
     /**
      * @brief 全局/本地搜索

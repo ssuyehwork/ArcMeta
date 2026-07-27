@@ -5,6 +5,7 @@
 #include "ColorPicker.h"
 #include <QWidgetAction>
 #include "../meta/MetadataManager.h" 
+#include "../meta/MediaExtractorPipeline.h"
 #include <algorithm>
 #include "Logger.h"
 #include "SvgIcons.h" 
@@ -544,6 +545,38 @@ void ArcMetaVirtualDbModel::migrateCache(const QString& oldPath, const QString& 
     } else if (m_aspectRatios.contains(oldPath)) {
         double oldRatio = m_aspectRatios.take(oldPath);
         m_aspectRatios[nativeNew] = oldRatio;
+    }
+}
+
+void ArcMetaVirtualDbModel::clearCacheForFolder(const QString& folderPath) {
+    QString nativeFolder = QDir::toNativeSeparators(folderPath);
+    QString prefix = nativeFolder;
+    if (!prefix.endsWith(QDir::separator())) {
+        prefix += QDir::separator();
+    }
+
+    // 1. 清理 m_aspectRatios QMap
+    for (auto it = m_aspectRatios.begin(); it != m_aspectRatios.end(); ) {
+        QString key = it.key();
+        if (key == nativeFolder || key.startsWith(prefix)) {
+            it = m_aspectRatios.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // 2. 收集可能匹配的 Key 以彻底从 QCache 中 remove
+    QSet<QString> keysToClear;
+    for (const auto& pair : m_pathToIndex) {
+        if (pair.first == nativeFolder || pair.first.startsWith(prefix)) {
+            keysToClear.insert(pair.first);
+        }
+    }
+
+    for (const QString& key : keysToClear) {
+        m_iconCache.remove(key);
+        m_metaCache.remove(key);
+        m_requestedIcons.remove(key);
     }
 }
 
@@ -2213,6 +2246,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             menu.addAction(UiHelper::getIcon("sync", QColor("#378ADD"), 18), "重新扫描")->setData(ActionRescan);
         }
 
+        // 2026-07-27 按照 Plan-107：仅对已在托管库中登记的文件夹，增加“取消导入并清除数据”菜单项
+        if (currentIndex.data(TypeRole).toString() == "folder" && currentIndex.data(ManagedRole).toBool()) {
+            menu.addAction(UiHelper::getIcon("close", QColor("#e81123"), 18), "取消导入并清除数据")->setData(ActionCancelImport);
+        }
+
         // 2026-06-xx 按照用户要求：在回收站分类中，最底部增加“永久删除”选项
         if (m_currentCategoryType == "trash") {
             menu.addSeparator();
@@ -2479,6 +2517,36 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
             break;
         }
+        case ActionCancelImport: {
+            auto indexes = view->selectionModel()->selectedIndexes();
+            QStringList targetPaths;
+            for (const auto& idx : indexes) {
+                if (idx.column() == 0) {
+                    QString p = idx.data(PathRole).toString();
+                    if (!p.isEmpty()) targetPaths << p;
+                }
+            }
+            if (targetPaths.isEmpty() && !path.isEmpty()) targetPaths << path;
+
+            if (!targetPaths.isEmpty()) {
+                std::vector<std::wstring> stdPaths;
+                for (const QString& tp : targetPaths) {
+                    stdPaths.push_back(tp.toStdWString());
+                    // 物理清退内容面板缩略图与宽高比缓存
+                    clearFolderCache(tp);
+                }
+
+                // 1. 中止并取消队列中以及正在提取的高级多媒体任务
+                MediaExtractorPipeline::instance().cancelBatch(stdPaths);
+
+                // 2. 批量大事务级联擦除已入库的元数据和关联、进度、重置计数器
+                MetadataManager::instance().removeMetadataBatchSync(targetPaths);
+
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "已取消自动导入并彻底擦除相关元数据", 2000, QColor("#e81123"));
+                refreshAll();
+            }
+            break;
+        }
         case ActionRestore: {
             auto indexes = view->selectionModel()->selectedIndexes();
             for (const auto& idx : indexes) {
@@ -2739,6 +2807,12 @@ void ContentPanel::updateItemMetadata(const QString& path) {
 void ContentPanel::migrateModelCache(const QString& oldPath, const QString& newPath) {
     if (m_model) {
         m_model->migrateCache(oldPath, newPath);
+    }
+}
+
+void ContentPanel::clearFolderCache(const QString& folderPath) {
+    if (m_model) {
+        m_model->clearCacheForFolder(folderPath);
     }
 }
 

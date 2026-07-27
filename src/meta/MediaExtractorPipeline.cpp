@@ -50,7 +50,61 @@ MediaExtractorPipeline::~MediaExtractorPipeline() {
     m_retryTimer->stop();
 }
 
+void MediaExtractorPipeline::cancelAll() {
+    m_isCanceled.store(true);
+    std::vector<std::wstring> abandoned;
+    {
+        std::lock_guard<std::mutex> queueLock(m_queueMutex);
+        abandoned = std::move(m_queue);
+        m_queue.clear();
+    }
+    {
+        std::lock_guard<std::mutex> retryLock(m_retryMutex);
+        m_visualRetryQueue.clear();
+    }
+    m_activeCount.store(0);
+    SyncStatusService::instance().updateMediaPending(0);
+    qDebug() << "[DB_TRACE] MediaExtractorPipeline::cancelAll 触发全局取消，已安全丢弃排队中的" << abandoned.size() << "个任务";
+}
+
+void MediaExtractorPipeline::cancelBatch(const std::vector<std::wstring>& paths) {
+    if (paths.empty()) return;
+    std::lock_guard<std::mutex> queueLock(m_queueMutex);
+    
+    // 收集标准化的前缀用于批量匹配过滤
+    std::vector<std::wstring> normPrefixes;
+    normPrefixes.reserve(paths.size());
+    for (const auto& p : paths) {
+        normPrefixes.push_back(MetadataManager::normalizePath(p));
+    }
+
+    auto isPrefixMatched = [&](const std::wstring& targetPath) {
+        std::wstring normTarget = MetadataManager::normalizePath(targetPath);
+        for (const auto& prefix : normPrefixes) {
+            if (normTarget == prefix) return true;
+            if (normTarget.find(prefix + L"\\") == 0 || normTarget.find(prefix + L"/") == 0) return true;
+        }
+        return false;
+    };
+
+    int originalQueueSize = static_cast<int>(m_queue.size());
+    m_queue.erase(std::remove_if(m_queue.begin(), m_queue.end(), isPrefixMatched), m_queue.end());
+    int removedFromQueue = originalQueueSize - static_cast<int>(m_queue.size());
+
+    {
+        std::lock_guard<std::mutex> retryLock(m_retryMutex);
+        m_visualRetryQueue.erase(std::remove_if(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), isPrefixMatched), m_visualRetryQueue.end());
+    }
+
+    int remaining = static_cast<int>(m_queue.size()) + m_activeCount.load();
+    if (remaining < 0) remaining = 0;
+    SyncStatusService::instance().updateMediaPending(remaining);
+
+    qDebug() << "[DB_TRACE] MediaExtractorPipeline::cancelBatch 批量取消过滤。从主队列丢弃:" << removedFromQueue;
+}
+
 void MediaExtractorPipeline::enqueue(const std::wstring& path) {
+    m_isCanceled.store(false); // 投递新任务时自动重置取消状态
     std::lock_guard<std::mutex> lock(m_queueMutex);
     m_queue.push_back(path);
     qDebug() << "[DB_TRACE] MediaExtractorPipeline::enqueue 推入提取队列，路径:" << QString::fromStdWString(path) << "总队列大小:" << m_queue.size();
@@ -62,6 +116,7 @@ void MediaExtractorPipeline::enqueue(const std::wstring& path) {
 }
 
 void MediaExtractorPipeline::enqueueBatch(const std::vector<std::wstring>& paths) {
+    m_isCanceled.store(false); // 投递新任务时自动重置取消状态
     std::lock_guard<std::mutex> lock(m_queueMutex);
     m_queue.insert(m_queue.end(), paths.begin(), paths.end());
     qDebug() << "[DB_TRACE] MediaExtractorPipeline::enqueueBatch 批量推入提取队列，新增数量:" << paths.size() << "总队列大小:" << m_queue.size();
@@ -76,7 +131,7 @@ void MediaExtractorPipeline::processNextBatch() {
     std::vector<std::wstring> batch;
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
-        if (m_queue.empty()) {
+        if (m_queue.empty() || m_isCanceled.load()) {
             m_timer->stop();
             return;
         }
@@ -97,6 +152,16 @@ void MediaExtractorPipeline::processNextBatch() {
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 #endif
         for (const auto& path : batch) {
+            if (m_isCanceled.load()) {
+                qDebug() << "[DB_TRACE] MediaExtractorPipeline 检测到全局已取消，平滑丢弃子任务:" << QString::fromStdWString(path);
+                int active = m_activeCount.fetch_sub(1) - 1;
+                if (active < 0) {
+                    m_activeCount.store(0);
+                    active = 0;
+                }
+                SyncStatusService::instance().updateMediaPending(active);
+                continue;
+            }
             processItemDirect(path);
         }
 #ifdef Q_OS_WIN
@@ -109,15 +174,47 @@ void MediaExtractorPipeline::processNextBatch() {
 }
 
 void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
+    if (m_isCanceled.load()) {
+        int active = m_activeCount.fetch_sub(1) - 1;
+        if (active < 0) {
+            m_activeCount.store(0);
+            active = 0;
+        }
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        SyncStatusService::instance().updateMediaPending(static_cast<int>(m_queue.size()) + active);
+        return;
+    }
+
     int w = 0, h = 0;
     extractDimensions(path, w, h);
+    if (m_isCanceled.load()) {
+        int active = m_activeCount.fetch_sub(1) - 1;
+        if (active < 0) { m_activeCount.store(0); active = 0; }
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        SyncStatusService::instance().updateMediaPending(static_cast<int>(m_queue.size()) + active);
+        return;
+    }
+
     if (w > 0 && h > 0) {
         MetadataManager::instance().setItemDimensions(path, w, h);
     }
 
     std::wstring colorStr;
     QVector<QPair<QColor, float>> palette;
-    bool success = extractColor(path, colorStr, palette);
+    bool success = false;
+    
+    if (!m_isCanceled.load()) {
+        success = extractColor(path, colorStr, palette);
+    }
+
+    if (m_isCanceled.load()) {
+        int active = m_activeCount.fetch_sub(1) - 1;
+        if (active < 0) { m_activeCount.store(0); active = 0; }
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        SyncStatusService::instance().updateMediaPending(static_cast<int>(m_queue.size()) + active);
+        return;
+    }
+
     if (success) {
         MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, false);
     }
@@ -125,7 +222,7 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     MetadataManager::instance().updateIngestionStatus(path, 1);
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::PathUpdate, QString::fromStdWString(path));
 
-    if (!success) {
+    if (!success && !m_isCanceled.load()) {
         QFileInfo info(QString::fromStdWString(path));
         if (info.isDir() || MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
             std::lock_guard<std::mutex> lock(m_retryMutex);
@@ -235,7 +332,7 @@ void MediaExtractorPipeline::processRetryQueue() {
     std::vector<std::wstring> batch;
     {
         std::lock_guard<std::mutex> lock(m_retryMutex);
-        if (m_visualRetryQueue.empty()) {
+        if (m_visualRetryQueue.empty() || m_isCanceled.load()) {
             m_retryTimer->stop();
             return;
         }
@@ -251,10 +348,12 @@ void MediaExtractorPipeline::processRetryQueue() {
 #endif
         std::vector<std::wstring> finished;
         for (const auto& path : batch) {
+            if (m_isCanceled.load()) break;
+
             std::wstring colorStr;
             QVector<QPair<QColor, float>> palette;
             bool ok = extractColor(path, colorStr, palette);
-            if (ok) {
+            if (ok && !m_isCanceled.load()) {
                 MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, true);
             }
 

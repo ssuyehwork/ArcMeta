@@ -20,6 +20,10 @@ public:
     void enqueue(const std::wstring& path);
     void enqueueBatch(const std::vector<std::wstring>& paths);
 
+    // 2026-07-27 按照 Plan-107：安全、平滑取消与中止接口
+    void cancelAll();
+    void cancelBatch(const std::vector<std::wstring>& paths);
+
 private slots:
     void processNextBatch();
     void processRetryQueue();
@@ -39,6 +43,7 @@ private:
     std::mutex m_queueMutex;
     std::mutex m_retryMutex;
     std::atomic<int> m_activeCount{0}; // 正在处理解析中 of 任务数量
+    std::atomic<bool> m_isCanceled{false}; // 2026-07-27 按照 Plan-107：原子取消中止标记
 };
 
 } // namespace ArcMeta

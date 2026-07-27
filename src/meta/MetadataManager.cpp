@@ -1365,7 +1365,28 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
             }
             sqlite3_finalize(memStmt);
         }
+
+        // 🚨 2026-07-27 按照 Plan-107：极速级联清除 system_stats 中的 PROGRESS 进度记录
+        for (const QString& qp : paths) {
+            std::wstring nPath = normalizePath(qp.toStdWString());
+            std::string progressKey = "PROGRESS:" + QString::fromStdWString(nPath).toUtf8().toStdString();
+            sqlite3_stmt* statStmt;
+            if (sqlite3_prepare_v2(db, "DELETE FROM system_stats WHERE key = ?", -1, &statStmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(statStmt, 1, progressKey.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(statStmt);
+                sqlite3_finalize(statStmt);
+            }
+        }
         trans.commit();
+    }
+
+    // 🚨 同步清理进程中的进度条内存缓存
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        for (const QString& qp : paths) {
+            std::wstring nPath = normalizePath(qp.toStdWString());
+            m_folderProgressCache.erase(nPath);
+        }
     }
 
     if (totalDelta != 0) CategoryRepo::incrementTotalFileCount(totalDelta);
