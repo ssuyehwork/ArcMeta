@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QSet>
+#include <QElapsedTimer>
 #include <windows.h>
 #include <vector>
 #include <thread>
@@ -14,6 +15,33 @@
 #include <map>
 #include <memory>
 #include <set>
+
+namespace ArcMeta {
+
+/**
+ * @brief 底层文件监控动作枚举
+ */
+enum class WatcherAction {
+    Added,
+    Modified,
+    Removed,
+    Renamed
+};
+
+/**
+ * @brief 文件变动通用事件包
+ */
+struct FileWatcherEvent {
+    WatcherAction action;
+    QString oldPath; // 仅对 Renamed 动作有效
+    QString newPath;
+    bool isDirectory;
+};
+
+} // namespace ArcMeta
+
+Q_DECLARE_METATYPE(ArcMeta::FileWatcherEvent)
+Q_DECLARE_METATYPE(QList<ArcMeta::FileWatcherEvent>)
 
 namespace ArcMeta {
 
@@ -43,13 +71,22 @@ public:
     void shutdown();
 
 signals:
+    /**
+     * @brief 高内聚批次聚合事件推送信号
+     * 业务层可通过此信号进行批量去重对账与入库，避免 GUI 线程信号风暴
+     */
+    void filesChanged(const QList<ArcMeta::FileWatcherEvent>& events);
+
+    /**
+     * @brief 旧版路径清退信号（为了平滑向后兼容保留，亦可在桥接处同步）
+     */
     void managedFolderRemoved(const std::wstring& path);
 
 private slots:
-    void processDebounceQueue();
-    void enqueueAddOrModify(const QString& path);
-    void handleOldName(const QString& oldPath);
-    void handleNewName(const QString& newPath);
+    /**
+     * @brief 定时分批管道逻辑
+     */
+    void processBatchQueue();
 
 private:
     NativeFolderWatcher(QObject* parent = nullptr);
@@ -83,12 +120,23 @@ private:
     std::atomic<bool> m_running;
     std::mutex m_mutex;
 
-    // 防抖与去重成员
-    QTimer* m_debounceTimer;
-    QSet<QString> m_debounceAddQueue;
+    // 定时分批与防抖缓冲容器
+    QTimer* m_batchTimer;
+    std::mutex m_eventMutex;
 
-    // 升级为队列/列表容器，杜绝高密集并发/批量重命名时的数据错配与事件丢失
-    std::vector<QString> m_pendingRenameOldPaths;
+    // 原始工作线程投递事件包缓冲区
+    struct RawEvent {
+        int actionType; // Windows FILE_ACTION_*
+        QString path;
+    };
+    std::vector<RawEvent> m_rawEvents;
+
+    // 超时事务精确关联池 (带滑窗超时判定)
+    struct PendingRename {
+        QElapsedTimer timer;
+        QString oldPath;
+    };
+    std::vector<PendingRename> m_renamePool;
 
     void workerThread();
     void requestChanges(std::shared_ptr<WatchItem> item);
