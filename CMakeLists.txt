@@ -213,6 +213,7 @@ target_link_libraries(ArcMeta PRIVATE
 )
 
 target_include_directories(ArcMeta PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/meta
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core

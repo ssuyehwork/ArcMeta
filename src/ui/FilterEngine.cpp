@@ -9,7 +9,7 @@ FilterEngine& FilterEngine::instance() {
     return inst;
 }
 
-bool FilterEngine::acceptsRow(const FilterState& currentFilter, const IngestedRecord& record, const QString& fileName) const {
+bool FilterEngine::acceptsRow(const FilterState& currentFilter, const ItemRecord& record, const QString& fileName) const {
     // --- 按照 Plan-73 & Plan-94：显示/隐藏文件夹/文件与筛选联动 ---
     // 2026-07-xx 逻辑校准：子分类在逻辑上等同于文件夹，受 showFolders 控制
     if (record.isCategory || record.isDir) {
