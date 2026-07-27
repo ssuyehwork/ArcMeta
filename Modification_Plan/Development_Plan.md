@@ -30,15 +30,15 @@
 - 用户期望的结果：对三种视图底层控制链展开深度排查，找出不合理的架构缺陷并形成极致解耦与性能提升的优化方案，并产出详细设计。
 - 本次任务边界：审计并理清 `JustifiedView`、`ListResultView`、`GridResultView`、`JustifiedResultView` 以及 `ContentPanel` 之间在视图控制、数据映射 and 布局渲染上的依赖关系，设计职责更清晰、耦合度更低的模块化结构。
 - 不在本次范围内的是：实际修改或编译代码，移植非视图类的其他外部功能。
-- 对应方案文档：Modification_Plan-35.md
+- 对应方案文档: Modification_Plan-35.md
 
 ## [2026-07-20] 彻底放弃当前 QuickLookWindow 运行逻辑并使用 FERREX-META 逻辑替代重构
 
 - 用户描述的现象/问题：当前版本的 `QuickLookWindow` 预览运行逻辑不符合预期，其处理逻辑 and 界面交互（如图像缩放、音视频媒体处理、文本二进制检测及编码识别等）功能不够完备。
-- 用户期望的结果：彻底放弃当前版本的 `QuickLookWindow` 运行逻辑，将其替换为 `FERREX-META` 版本中的 `QuickLookWindow` 运行逻辑。这包括采用专门设计的 `QuickLookGraphicsView`（支持滚轮缩放、双击恢复/适配大小、鼠标拖拽移动及光标跟随变动）、引入更完整的多媒体及文本二进制与编码自动检测识别渲染，实现更好的大文件和特殊文件类型的预览。
+- 用户期望的结果：彻底放弃当前版本的 `QuickLookWindow` 运行逻辑，将其替换为 `FERREX-META` 版本中的 `QuickLookWindow` 运行逻辑。这包括采用专门设计的 `QuickLookGraphicsView`（支持滚轮缩放、双击恢复/适配大小、鼠标拖拽移动及光标跟随变动）、引入更完整的多媒体及文本二进制与编码自动检测识别渲染，实现更好的大文件 and 特殊文件类型的预览。
 - 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView`控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅的占位降级兼容。
 - 不在本次范围内的是：修改 `MainWindow` 的主导航调度机制 or 任何非预览关联的面板组件。
-- 对应方案文档：Modification_Plan-36.md
+- 对应方案文档: Modification_Plan-36.md
 
 ## [2026-07-21] 预览界面滚动条样式对齐考古规范优化
 
@@ -46,15 +46,15 @@
 - 用户期望的结果：将预览界面（QuickLookWindow）内的滚动条样式彻底重构，使其严格遵循全局规范：宽度 10px、圆角 3px、背景透明、Handle 颜色对齐 `BorderColor` #333333。
 - 本次任务边界：修改 `src/ui/QuickLookWindow.cpp` 中 `QuickLookGraphicsView` 和 `QPlainTextEdit` 控件的水平及垂直滚动条的 QSS 样式。
 - 不在本次范围内的是：修改预览界面其他的图片/文本渲染、缩放或事件分流逻辑.
-- 对应方案文档：Modification_Plan-37.md
+- 对应方案文档: Modification_Plan-37.md
 
 ## [2026-07-21] 预览界面多媒体残留代码彻底物理根除与净化
 
 - 用户描述的现象/问题：上一代 AI 在收到彻底根除多媒体播放功能的指令后，依然在 `QuickLookWindow` 中保留了多媒体播放及占位相关冗余代码。
-- 用户期望的结果：彻底删除并根除 `QuickLookWindow` 中的所有多媒体组件（如播放、暂停、进度条、多媒体相关容器控件和占位框等）和无用快捷键与接口，音视频转走标准系统大图标降级展示。
+- 用户期望的结果：彻底删除并根除 `QuickLookWindow` 中的所有多媒体组件（如播放、暂停、进度条、多媒体相关容器控件 and 占位框等）和无用快捷键与接口，音视频转走标准系统大图标降级展示。
 - 本次任务边界：彻底删除 `src/ui/QuickLookWindow.h` 与 `src/ui/QuickLookWindow.cpp` 中的所有多媒体成员变量、宏定义、多媒体容器构建、以及 `renderMedia`、`resetMedia`、键盘 `P` 按键处理逻辑等。
 - 不在本次范围内的是：修改预览界面其他的图片/文本渲染、缩放或事件分流逻辑。
-- 对应方案文档：Modification_Plan-38.md
+- 对应方案文档: Modification_Plan-38.md
 
 ## [2026-07-21] 预览窗快捷键 ToolTip 屏幕上方居中淡进淡出显示、切图/导航加固及 ContentPanel 选中联动
 
@@ -66,18 +66,18 @@
   2. 修复切图/导航快捷键响应。按下 Arrow keys 时能精准跳转上一个或下一个文件，并让主界面的 ContentPanel 对应的高亮选中项也同步更新滚动。
 - 本次任务边界：
   1. 在 `ToolTipOverlay` 中引入 QPropertyAnimation，实现 `windowOpacity` 属性动画（淡进淡出 150ms 优雅呈现），并新增 `exactPosition` 精确定位参数。
-  2. 在 `QuickLookWindow::eventFilter` 中加装事件过滤器物理拦截 `m_graphicsView` 和 `m_textEdit` 的 `KeyPress` 动作，拦截 arrow keys、数字、Alt 等核心快捷键并转发分发给 `keyPressEvent`。
+  2. 在 `QuickLookWindow::eventFilter` 中加装事件过滤器物理拦截 `m_graphicsView` 和 `m_textEdit` 的 `KeyPress` 动作，拦截 arrow keys、数字、Alt 等核心快捷键并转发分发给 `keyPressEvent`
   3. 在 `ContentPanel` 中新增 `selectAndScrollToPath(path)` 方法，保持主视图选中态随切图进行双向联动。
 - 不在本次范围内的是：重构预览界面 or 主界面的非快捷键/切图逻辑。
-- 对应方案文档：Modification_Plan-39.md
+- 对应方案文档: Modification_Plan-39.md
 
 ## [2026-07-21] ThumbnailDelegate 职责过载审计与模块化拆分规划
 
 - 用户描述的现象/问题：单元格展示委托 `ThumbnailDelegate` 存在多维重绘、生命期、排版 and 提示的职责过载，难以维护及复用。
-- 用户期望的结果：对其进行代码职责过载分析并输出模块化的单一职责拆解和落地规划。
+- 用户期望的结果：对其进行代码职责过载分析并输出模块化的单一职责拆解 and 落地规划。
 - 本次任务边界：对 `src/ui/ThumbnailDelegate.h` 与 `src/ui/ThumbnailDelegate.cpp` 展开整体架构梳理，定位其过载现状，设计面向高内聚、零开销、低耦合的模块化（视觉物理渲染、文本排版、控制器生命期分流）拆分图纸。由于本 Turn 为只读分析师模式，不修改任何项目代码文件。
 - 不在本次范围内的是：修改逻辑代码、在外部执行构建验证。
-- 对应方案文档：Modification_Plan-40.md
+- 对应方案文档: Modification_Plan-40.md
 
 ## [2026-07-22] 视图按钮及缩放滑杆功能移植重构
 
@@ -86,9 +86,9 @@
 - 本次任务边界：
   1. 在主窗口 `MainWindow::setupCustomTitleBarButtons()` 对应的自定义按钮组中，植入“缩放滑杆”和“视图模式一键切换按钮”，调整按钮间距物理对齐全局规范。
   2. 重构 `ContentPanel` 的 `wheelEvent`，捕获 Ctrl+滚轮 动作实现滑杆尺寸/内容卡片尺寸 `m_zoomLevel`（限制在 96~128px 之间）的物理同频缩放，并保证滑杆值及 `updateGridSize()` 持久化一致。
-  3. 在“视图按钮”下拉菜单中，完美对接 `ListView`、`GridView` (网格自适应即 JustifiedMode) 以及 `JustifiedViewMode` 的逻辑切换。
+  3. 在“视图按钮”下拉菜单中，完美对接 `ListView`、`GridView` (网格自适应即 JustifiedMode) 以及 `JustifiedViewMode` 的 logic 切换。
 - 不在本次范围内的是：重写或修改物理 USN 监控底座或底层 MFT 文件过滤搜索流程。
-- 对应方案文档：Modification_Plan-45.md
+- 对应方案文档: Modification_Plan-45.md
 
 ## [2026-07-24] 全款应用架构与文件职责过载深度排查
 
@@ -121,8 +121,8 @@
 
 ## [2026-07-25] 彻底根除随机/设置颜色旧UI与在右键菜单上直接以悬停白圈色块展示并同步存库
 
-- 用户描述的现象/问题：现有的右键菜单及部分分类/文件夹设置中采用“随机颜色”和“设置颜色”的传统菜单项（QAction）及弹窗操作链路复杂、不够直观。
-- 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段 and metadata 表 of color 字段中。
+- 用户描述的现象/问题：现有的右键菜单及部分分类/文件夹设置中采用“随机颜色” and “设置颜色”的传统菜单项（QAction）及弹窗操作链路复杂、不够直观。
+- 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段和 metadata 表 of color 字段中。
 - 本次任务边界：
   1. 彻底删除 `CategoryPanel` 及 `MainWindow`（FolderButton 菜单）中的“随机颜色”与“设置颜色”旧 QAction 和旧对应响应函数（如 `onRandomColor` / `onSetColor`）。
   2. 针对 `CategoryPanel` 侧边分类右键菜单、`MainWindow` 中的 FolderButton 右键菜单，以及 `ContentPanel` 内容右键菜单中的“设定颜色标签”（ActionColorTag）子菜单，实现全新的一排水平排列色块快捷操作区域（可以使用自定义 `QWidgetAction` 加载色块容器）。
@@ -130,7 +130,7 @@
   4. 选中某个色块后，立即调用更新接口：
      - 如果是在 `CategoryPanel` 对分类进行设置，将色值写入对应分类在 `categories` 表的 `color` 字段，同时如果该分类绑定了物理文件夹路径，则将对应路径在 `metadata` 表的 `color` 字段也一并同步更新；
      - 如果是在 `MainWindow` 对 FolderButton 自定义 monitored folder 进行操作，将色值写入 AppConfig 中对应属性，并更新对应物理路径在 `metadata` 表的 `color` 字段（如果已登记到库中，也会同步到绑定映射分类）；
-     - 如果是在 `ContentPanel` 对登记的项目进行操作，将色值写入该项目在 `metadata` 表的 `color` 字段，若该项目是已入库且绑定了侧边栏映射分类 of 文件夹，也将色值存入对应分类的 `categories` 表的 `color` 字段中。
+     - 如果是在 `ContentPanel` 对登记的项目进行操作，将色值写入该项目在 `metadata` 表的 `color` 字段，若该项目是已入库且绑定了侧边栏映射分类的文件夹，也将色值存入对应分类的 `categories` 表的 `color` 字段中。
 - 不在本次范围内的是：修改非颜色属性的其他关联持久化，或者调整与色块绘制无关的其他右键菜单项。
 - 对应方案文档：Modification_Plan/Modification_Plan-62.md
 
@@ -153,24 +153,88 @@
 - 不在本次范围内的是：修改物理 MFT 文件扫描核心算法、IOCP 底层驱动及 UI 具体的渲染重排。
 - 对应方案文档：Modification_Plan/Modification_Plan-89.md
 
-## [2026-07-26] 深度排查全库“补丁堆砌、职责错位”并规划彻底解决补丁问题
+## [2026-07-26] 磁盘模式下重命名导致缩略图变灰设计缺陷修复
 
-- 用户描述的现象/问题：除了 `main.cpp` 之外，全库中的各模块（包括 UI、Model、View 等组件）在前期多代开发中可能也残留了单点应急补丁（如滥用 singleShot(0)、狂暴 blockSignals 阻止死循环、魔数在 UI 与底层流转）以及职责严重错位（如 UI 包含物理文件删改 I/O 等）等傻逼补丁架构问题。
-- 用户期望的结果：深度排查当前最新工作区中的每一个 C++ 源码文件，彻底搜寻并清晰指明所有仍然隐藏的“补丁堆砌、职责错位”死穴，并为此规划出高内聚、高标准的彻底解决重构图纸。
+- 用户描述的现象/问题：在磁盘导航模式下打开某个文件夹后，对其中的某个图形文件执行重命名操作。重命名成功后，由于新旧物理路径发生变更，但缩略图及宽高比缓存未同步迁移或清理，导致该文件在重置渲染时无法命中缓存，变为了纯灰色占位符。
+- 用户期望的结果：重命名成功后，缩略图和宽高比等高级元数据缓存应当无缝继承 to 新文件名路径下，不发生变灰与闪烁，保证无缝的高性能浏览体验。
 - 本次任务边界：
-  1. 排查 `src/` 目录下（除 `main.cpp` 外）的每一个 C++ 文件，寻找使用 `singleShot(0)` 延迟操作掩盖竞态、密集 `blockSignals` 物理打阻断、属性面板和 Model 包含物理磁盘 `QFile::remove / rename` 删改等缺陷，提取行号与代码片段。
-  2. 针对排查出的缺陷，在 `Modification_Plan/` 下新建 `Modification_Plan-92.md` 方案文档，给出对应的彻底解耦与解决图纸，将共识记录归档。
-  3. 严格遵守分析师角色，绝对不修改任何源码。
-- 不在本次范围内的是：在未获得用户“批准执行”指令前修改任何功能性源码文件。
-- 对应方案文档：Modification_Plan/Modification_Plan-92.md
+  1. 在 `FerrexVirtualDbModel::setData` 异步重命名成功的主线程回调中，针对 `m_iconCache`（缩略图缓存）与 `m_aspectRatios`（宽高比缓存）执行高内聚的 **无损缓存 Key 迁移**。
+  2. 将原保存在旧路径 `oldPath` 下 of `QIcon` 指针及 `m_aspectRatios` 值，安全移除并重新插入到新路径 `nativeNewPath` 的 Key 下，无需重新进行后台多媒体解析或读盘。
+- 不在本次范围内的是：修改物理 MFT 扫描、USN 监控底座以及其他非缩略图相关的逻辑。
+- 对应方案文档：Modification_Plan/Modification_Plan-94.md
 
-## [2026-07-26] 图形文件图像尺寸提取与 MetaPanel “大小”下一行展现方案规划
+## [2026-07-26] 行内编辑及全选状态下方向键选择漂移与光标一键定位修复
 
-- 用户描述的现象/问题：希望确认 `mediacolorextractor.cpp` 和 `meta/mediaextractorpipeline.cpp` 是否已经包含了提取图形图像文件尺寸的功能；若包含，需要在 `metapanel.cpp` 面板中，把提取出的尺寸在“大小”这一属性行的下一行清晰展现出来。
-- 用户期望的结果：地毯式分析提取管线对尺寸的抓取情况，提供清晰、专业的重构规划方案，并按物理视觉设计在 MetaPanel “大小”下一行插入“尺寸”标签和数值展现，产出 Modification_Plan 方案文档。
+- 用户描述的现象/问题：当选中某个项目并按下 F2 进入行内编辑时，
+  1. 已经进入了编辑状态，用户按下向上/向下方向键时，意外游动并选中了上方/下方的项目，导致重命名编辑被意外中断并退出。
+  2. 如果用户在全选（高亮）状态下按下向左/向右方向键，光标会尴尬地定位到扩展名“.”的后面，而不是文本最前或最后。
+- 用户期望的结果：
+  1. 在已经进入编辑状态后，按下向上/向下键应被完全屏蔽拦截，绝对不向上或向下游动选中邻近项目。
+  2. 全选状态下，按向左方向键应一键将光标精准定位到最前面（位置 0）并清除选中，按向右方向键应一键将光标精准定位到包含扩展名在内的最末尾（位置 length()）并清除选中。非全选状态下则恢复普通的逐字光标移动逻辑。
 - 本次任务边界：
-  1. 检索 `src/ui/MediaColorExtractor.cpp` 及 `src/meta/MediaExtractorPipeline.cpp` 的图像/特征尺寸提取逻辑，查证其是否在持久化 `metadata` 数据库、特征管道或缓存中抓取并保存了 `width` / `height` 分辨率。
-  2. 精确定位 `src/ui/MetaPanel.cpp` 中的 UI 标签排版位置，分析如何在“大小（m_sizeLabel）”的下一行动态嵌入并渲染图形尺寸信息（未选中或非图形文件时平滑隐藏，杜绝白屏/布局错乱）。
-  3. 新建 `Modification_Plan-93.md`，处于分析师角色，绝不直接修改代码。
-- 不在本次范围内的是：修改 C++ 源码、测试运行。
-- 对应方案文档：Modification_Plan/Modification_Plan-93.md
+  1. 重构并升级所有行内编辑代理（Delegate）的 `eventFilter` 按键拦截：
+     - `GridItemDelegate`（位于 `src/ui/ContentPanel.cpp`）
+     - `ThumbnailDelegate`（位于 `src/ui/ThumbnailDelegate.cpp`）
+     - `TreeItemDelegate`（位于 `src/ui/TreeItemDelegate.h`）
+     - `CategoryDelegate`（位于 `src/ui/CategoryDelegate.h`）
+  2. 统一拦截 `QLineEdit` 编辑器的键盘事件。针对 `Qt::Key_Up`/`Qt::Key_Down`，直接吞噬拦截；针对 `Qt::Key_Left`/`Qt::Key_Right`，当处于 `hasSelectedText()` 全选（高亮）状态时，分别将光标强制定位到 `0` 或 `text().length()` 并执行 `deselect()` 清除高亮，同时拦截该事件；处于非全选时则放行系统默认光标移动。
+- 不在本次范围内的是：修改 MFT 扫描、USN 监控底座或数据库相关的非界面编辑逻辑。
+- 对应方案文档：Modification_Plan/Modification_Plan-95.md
+
+## [2026-07-26] 侧边栏分类树状展开状态重启不持久化与模型重置竞态修复
+
+- 用户描述的现象/问题：侧边栏分类树状展开之后没有被持久化，重启主程序之后又被自动折叠了，且之前的 Plan-98 方案修复后仍未达到预期。
+- 用户期望的结果：侧边栏某个分类（包括顶级托管库 ArcMeta.Library_* 及其子分类）展开之后能够完美持久化，即便重启主程序之后仍然处于展开状态。
+- 本次任务边界：
+  1. 修复 `CategoryPanel::initUi` 中 `modelReset` 信号响应的竞态问题，重新引入 `QTimer::singleShot(0)` 异步延迟处理，确保 `QTreeView` 已经处理完重置并渲染出物理节点后才执行展开状态的恢复。
+  2. 确保 `m_isInternalUpdating` 拦截锁覆盖异步延迟期，在节点物理生成并完成展开前屏蔽所有折叠虚假信号。
+  3. 完善 `saveExpandedStateToSettings` 和 `restoreExpandedState` 的控制与过滤。
+- 不在本次范围内的是：修改 `CategoryRepo` 数据库的具体查询或系统项分类重排逻辑，修改其他面板（如内容面板）的数据加载逻辑。
+- 对应方案文档：Modification_Plan/Modification_Plan-99.md
+
+## [2026-07-26] 侧边栏分类树状展开状态重启持久化失效根治重构
+
+- 用户描述的现象/问题：侧边栏某个分类展开之后能够持续化，重启主程序之后又被自动折叠了。
+- 用户期望的结果：侧边栏某个分类展开之后能够持续化，即便重启主程序之后仍然处于展开状态，不被空状态异常覆盖，并期望添加调试日志以便追踪定位问题所在。
+- 本次任务边界：
+  1. 在 `modelAboutToBeReset` 信号触发瞬间将 `m_isInternalUpdating` 设为 `true`，开启拦截锁，彻底断开 `beginResetModel` -> `removeRows` 期间视图中旧节点销毁引发的高频、同步 `collapsed` 信号风暴。
+  2. 在 `modelReset` 完成展开状态（`restoreExpandedState`）同步恢复后，将 `m_isInternalUpdating`重置为 `false`，重新开放并允许用户手动交互被正常持久化。
+  3. 实现析构函数 `~CategoryPanel()`，将 `m_isInternalUpdating` 设为 `true` 并安全 `disconnect` 展开/折叠信号，确保窗体销毁时无虚假状态污染配置文件。
+  4. 引入全流程调试追踪日志，使用 `Logger::log` 在加载、重设、保存及析构全生命期中记录状态及防护标志的演变，供定位排查使用。
+- 不在本次范围内的是：修改分类树具体的构建、重排逻辑或数据库查询。
+- 对应方案文档：Modification_Plan/Modification_Plan-100.md
+
+## [2026-07-26] 侧边栏分类树状展开状态重启持久化失效根治重构二期
+
+- 用户描述的现象/问题：在上一轮排查中，用户发现即便重构了锁逻辑，重启后仍折叠，排查出 3 个致命死穴（类型强转失败、内存/磁盘类型混用不一致、save 里的“我的分类”字符串过激匹配拦截）。
+- 用户期望的结果：通过统一加载数据类型、移除过激空拦截并实时同步 Property，以及在 `modelReset` 信号中加入兼容性安全类型解析，彻底根治持久化。
+- 本次任务边界：
+  1. 统一 `loadExpandedStateFromSettings` Property 存储类型为 `QList<int>`。
+  2. 重构 `saveExpandedStateToSettings`，删除包含 `"我的分类"` 的过激拦截匹配，并在物理落盘后同步向 tree property 更新最新的 `idIntList`。
+  3. 在 `modelReset` 槽函数中，通过 `canConvert` 机制，增加对 `QVariantList` 与 `QList<int>` 双重类型的安全兼容解析与提取。
+- 不在本次范围内的是：修改物理库构建、重排和数据库层查询。
+- 对应方案文档：Modification_Plan/Modification_Plan-101.md
+
+## [2026-08-01] 高性能文件变动监控 NativeFolderWatcher 致命缺陷重构方案
+
+- 用户描述的现象/问题：`NativeFolderWatcher.cpp` 存在 5 大极其严重的设计缺陷，可能导致内存 UAF 悬空指针崩溃、文件重命名时丢失星级/标签等全部元数据、高频密集变更下缓冲区溢出时事件漏落库、多线程并发解析同一个监控缓冲区造成的内存竞态错乱，以及高频修改信号缺乏防抖触发信号风暴导致 UI 严重卡顿。
+- 用户期望的结果：在不改变底层高性能 IOCP 架构的基础上，创建一套能彻底根治上述 5 大致命缺陷的重构修复方案，确保极其稳定、高性能的多线程磁盘监控体验。
+- 本次任务边界：在 `Modification_Plan/` 文件夹下，新建 `Modification_Plan-103.md`，深度规划 `NativeFolderWatcher` 架构升级方案：使用 `std::shared_ptr` 管理 `WatchItem` 并实现安全异步延迟释放；支持重命名 `OLD_NAME` / `NEW_NAME` 成对配对与元数据同步继承逻辑；在 `bytesTransferred == 0` 时引入全量级联自愈扫描；利用工作线程专用内存块或重构为单工作线程/分发队列，并实现 200ms 高效路径去重防抖处理，从而彻底阻断信号风暴。
+- 不在本次范围内的是：对物理 `.cpp` 和 `.h` 代码文件进行任何实际修改。
+- 对应方案文档：Modification_Plan/Modification_Plan-103.md
+
+## [2026-08-01] 监控文件夹被移走后盘符不消失及残留清除的物理存在性自愈方案
+
+- 用户描述的现象/问题：在外部（如 Windows 资源管理器）将已监控 of 文件夹移动或删除后，原有的监控路径虽然物理失效，但软件并没有“物理存在性自愈”能力：不自动解绑监控，不自动在盘符栏销毁失效的文件夹按钮，也不清洗数据库中残留的元数据及在侧边栏自动创建的 1:1 镜像分类树。
+- 用户期望的结果：实现完美的自愈能力，一旦监控文件夹物理不存在（被重命名、移走、删除），软件应该在启动时、刷新时或者由于外部监控检测到变动时，实时物理清退：自动注销后台监控，自动清除盘符栏无效按钮，并且彻底清洗底层数据库对应路径下的所有元数据及 1:1 分类树，不残留任何残留废弃数据。
+- 本次任务边界：在 `Modification_Plan/` 文件夹下，新建 `Modification_Plan-104.md`，规划在 `MainWindow::updateCustomFolderButtons` 中对加载自定义监控项追加物理 `QDir::exists()` 检验；在 `NativeFolderWatcher::handleNotification` 中在发现自定义自动导入文件夹被外部移除时，也向主线程抛出 `managedFolderRemoved` 通告；并在 `MainWindow` 中响应该通告并联动触发 `removeCustomMonitoredFolder` 进行清除销毁和数据库物理除账，保证绝无残留。
+- 不在本次范围内的是：实际修改任何功能性代码。
+- 对应方案文档：Modification_Plan/Modification_Plan-104.md
+
+## [2026-08-01] 批量重命名支持内存数据库映射与多源视图无缝同步重构方案
+
+- 用户描述的现象/问题：当前的“批量重命名（BatchRename）”功能仅在物理磁盘导航模式下有效。当切换至左侧内存数据库分类、系统快捷分类（全部数据、最近访问、垃圾桶等）下，即便选中多个有映射路径的文件或文件夹并执行重命名，由于没有从视图项中解析出物理路径并联动触发磁盘 I/O 以及后续元数据及镜像分类树节点的数据库同步修改，导致该功能在非 nav 模式下无法正常应用。
+- 用户期望的结果：重构批量重命名逻辑，使其同时支持对数据库中的项（文件夹/文件）进行操作。通过无缝建立“选中项路径提取 -> 磁盘物理更名 I/O -> 数据库和分类绑定多维同步落盘”双轨映射机制，实现磁盘与数据库的完美同步联动。
+- 本次任务边界：在 `Modification_Plan/` 文件夹下，新建 `Modification_Plan-105.md`，规划对 `BatchRenameDialog` 及 `ContentPanel::performBatchRename` 的重构：在多选唤醒时，完全支持从 `PathRole` 获取真实的本地物理绝对路径列表；在 `BatchRenameDialog::onExecute` 中执行完磁盘物理 `rename` 之后，向 `MetadataManager` 投递 `renameItem` 将元数据从 `oldPath` 无损迁移到 `newPath`；同时在 `CategoryRepo` 内部追加接口将 `categories` 和 `category_items` 表中的旧物理路径和绑定提示一并迁移更名，以确保 1:1 镜像分类树节点完备迁移；最后安全暂存新文件名并触发无感异步重载刷新。
+- 不在本次范围内的是：对物理 `.cpp` 和 `.h` 代码文件进行任何实际修改。
+- 对应方案文档：Modification_Plan/Modification_Plan-105.md
