@@ -607,6 +607,34 @@ void MainWindow::initUi() {
         ToolTipOverlay::instance()->showText(QPoint(targetX, targetY), msg, 1500, borderCol, true, colorHex);
     });
 
+    connect(&QuickLookWindow::instance(), &QuickLookWindow::deleteRequested, this, [this](const QString& path) {
+        if (path.isEmpty()) return;
+        if (ShellHelper::moveToTrash({path})) {
+            QString next = m_contentPanel->getAdjacentFilePath(path, 1);
+            if (!next.isEmpty()) {
+                m_currentQuickLookPath = next;
+                QuickLookWindow::instance().previewFile(next);
+            } else {
+                QString prev = m_contentPanel->getAdjacentFilePath(path, -1);
+                if (!prev.isEmpty()) {
+                    m_currentQuickLookPath = prev;
+                    QuickLookWindow::instance().previewFile(prev);
+                } else {
+                    QuickLookWindow::instance().closePreview();
+                }
+            }
+            m_contentPanel->refreshAll();
+        }
+    });
+
+    connect(&QuickLookWindow::instance(), &QuickLookWindow::favoriteRequested, this, [this](const QString& path) {
+        if (!path.isEmpty() && m_navPanel) {
+            m_navPanel->addFavoriteItem(path);
+            m_navPanel->saveFavorites();
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "已成功添加至收藏夹", 1500, Style::SuccessGreen);
+        }
+    });
+
     // 5a. 目录装载完成 -> FilterPanel 动态填充 (六参数版本: 移除标签统计)
     connect(m_contentPanel, &ContentPanel::directoryStatsReady, this,
         [this](const QMap<int,int>& r, const QMap<QString,int>& c,
