@@ -27,7 +27,7 @@
 ## [2026-07-20] 三种视图架构设计缺陷排查与极致重构规划
 
 - 用户描述的现象/问题：当前版本中的三种视图（列表、网格、合理自适应对齐模式）存在逻辑冗余、职责过载以及交互/渲染卡顿等傻逼逻辑架构问题。
-- 用户期望的结果：对三种视图底层控制链展开深度排查，找出不合理的架构缺陷并形成极致解耦与性能提升的优化方案，并产出详细设计。
+- 用户期望的结果：对三种视图底层控制链展开深度排查，找出不合理的架构缺陷并形成极致解耦与性能提升 of 优化方案，并产出详细设计。
 - 本次任务边界：审计并理清 `JustifiedView`、`ListResultView`、`GridResultView`、`JustifiedResultView` 以及 `ContentPanel` 之间在视图控制、数据映射 and 布局渲染上的依赖关系，设计职责更清晰、耦合度更低的模块化结构。
 - 不在本次范围内的是：实际修改或编译代码，移植非视图类的其他外部功能。
 - 对应方案文档: Modification_Plan-35.md
@@ -35,7 +35,7 @@
 ## [2026-07-20] 彻底放弃当前 QuickLookWindow 运行逻辑并使用 FERREX-META 逻辑替代重构
 
 - 用户描述的现象/问题：当前版本的 `QuickLookWindow` 预览运行逻辑不符合预期，其处理逻辑 and 界面交互（如图像缩放、音视频媒体处理、文本二进制检测及编码识别等）功能不够完备。
-- 用户期望的结果：彻底放弃当前版本的 `QuickLookWindow` 运行逻辑，将其替换为 `FERREX-META` 版本中的 `QuickLookWindow` 运行逻辑。这包括采用专门设计的 `QuickLookGraphicsView`（支持滚轮缩放、双击恢复/适配大小、鼠标拖拽移动及光标跟随变动）、引入更完整的多媒体及文本二进制与编码自动检测识别渲染，实现更好的大文件 and 特殊文件类型的预览。
+- 用户期望的结果：彻底放弃当前版本的 `QuickLookWindow` 运行逻辑，将其替换为 `FERREX-META` 版本中的 `QuickLookWindow` 运行逻辑。这包括采用专门设计的 `QuickLookGraphicsView`（支持滚轮缩放、双击恢复/适配大小、鼠标拖拽移动及光标跟随变动）、引入更完整的多媒体及文本二进制与编码自动检测识别渲染，实现更好的大文件和特殊文件类型的预览。
 - 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView`控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅的占位降级兼容。
 - 不在本次范围内的是：修改 `MainWindow` 的主导航调度机制 or 任何非预览关联的面板组件。
 - 对应方案文档: Modification_Plan-36.md
@@ -66,7 +66,7 @@
   2. 修复切图/导航快捷键响应。按下 Arrow keys 时能精准跳转上一个或下一个文件，并让主界面的 ContentPanel 对应的高亮选中项也同步更新滚动。
 - 本次任务边界：
   1. 在 `ToolTipOverlay` 中引入 QPropertyAnimation，实现 `windowOpacity` 属性动画（淡进淡出 150ms 优雅呈现），并新增 `exactPosition` 精确定位参数。
-  2. 在 `QuickLookWindow::eventFilter` 中加装事件过滤器物理拦截 `m_graphicsView` 和 `m_textEdit` 的 `KeyPress` 动作，拦截 arrow keys、数字、Alt 等核心快捷键并转发分发给 `keyPressEvent`
+  2. 在 `QuickLookWindow::eventFilter` 中加装事件过滤器物理拦截 `m_graphicsView` 和 `m_textEdit` 的 `KeyPress` 动作，拦截 arrow keys、数字、Alt 等核心快捷键并转发分发给 `keyPressEvent`。
   3. 在 `ContentPanel` 中新增 `selectAndScrollToPath(path)` 方法，保持主视图选中态随切图进行双向联动。
 - 不在本次范围内的是：重构预览界面 or 主界面的非快捷键/切图逻辑。
 - 对应方案文档: Modification_Plan-39.md
@@ -74,7 +74,7 @@
 ## [2026-07-21] ThumbnailDelegate 职责过载审计与模块化拆分规划
 
 - 用户描述的现象/问题：单元格展示委托 `ThumbnailDelegate` 存在多维重绘、生命期、排版 and 提示的职责过载，难以维护及复用。
-- 用户期望的结果：对其进行代码职责过载分析并输出模块化的单一职责拆解 and 落地规划。
+- 用户期望的结果：对其进行代码职责过载分析并输出模块化的单一职责拆解和落地规划。
 - 本次任务边界：对 `src/ui/ThumbnailDelegate.h` 与 `src/ui/ThumbnailDelegate.cpp` 展开整体架构梳理，定位其过载现状，设计面向高内聚、零开销、低耦合的模块化（视觉物理渲染、文本排版、控制器生命期分流）拆分图纸。由于本 Turn 为只读分析师模式，不修改任何项目代码文件。
 - 不在本次范围内的是：修改逻辑代码、在外部执行构建验证。
 - 对应方案文档: Modification_Plan-40.md
@@ -121,12 +121,12 @@
 
 ## [2026-07-25] 彻底根除随机/设置颜色旧UI与在右键菜单上直接以悬停白圈色块展示并同步存库
 
-- 用户描述的现象/问题：现有的右键菜单及部分分类/文件夹设置中采用“随机颜色” and “设置颜色”的传统菜单项（QAction）及弹窗操作链路复杂、不够直观。
+- 用户描述的现象/问题：现有的右键菜单及部分分类/文件夹设置中采用“随机颜色”和“设置颜色”的传统菜单项（QAction）及弹窗操作链路复杂、不够直观。
 - 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段和 metadata 表 of color 字段中。
 - 本次任务边界：
   1. 彻底删除 `CategoryPanel` 及 `MainWindow`（FolderButton 菜单）中的“随机颜色”与“设置颜色”旧 QAction 和旧对应响应函数（如 `onRandomColor` / `onSetColor`）。
   2. 针对 `CategoryPanel` 侧边分类右键菜单、`MainWindow` 中的 FolderButton 右键菜单，以及 `ContentPanel` 内容右键菜单中的“设定颜色标签”（ActionColorTag）子菜单，实现全新的一排水平排列色块快捷操作区域（可以使用自定义 `QWidgetAction` 加载色块容器）。
-  3. 每个色块尺寸和间距根据界面情况合理设定（如圆形色块，直径 20px-24px，间隔 6px-8px），且鼠标悬停在色块上方时绘制出明晰的白色同心圆突显色块边缘。
+  3. 每个色块尺寸 and 间距根据界面情况合理设定（如圆形色块，直径 20px-24px，间隔 6px-8px），且鼠标悬停在色块上方时绘制出明晰的白色同心圆突显色块边缘。
   4. 选中某个色块后，立即调用更新接口：
      - 如果是在 `CategoryPanel` 对分类进行设置，将色值写入对应分类在 `categories` 表的 `color` 字段，同时如果该分类绑定了物理文件夹路径，则将对应路径在 `metadata` 表的 `color` 字段也一并同步更新；
      - 如果是在 `MainWindow` 对 FolderButton 自定义 monitored folder 进行操作，将色值写入 AppConfig 中对应属性，并更新对应物理路径在 `metadata` 表的 `color` 字段（如果已登记到库中，也会同步到绑定映射分类）；
@@ -159,7 +159,7 @@
 - 用户期望的结果：重命名成功后，缩略图和宽高比等高级元数据缓存应当无缝继承 to 新文件名路径下，不发生变灰与闪烁，保证无缝的高性能浏览体验。
 - 本次任务边界：
   1. 在 `FerrexVirtualDbModel::setData` 异步重命名成功的主线程回调中，针对 `m_iconCache`（缩略图缓存）与 `m_aspectRatios`（宽高比缓存）执行高内聚的 **无损缓存 Key 迁移**。
-  2. 将原保存在旧路径 `oldPath` 下 of `QIcon` 指针及 `m_aspectRatios` 值，安全移除并重新插入到新路径 `nativeNewPath` 的 Key 下，无需重新进行后台多媒体解析或读盘。
+  2. 将原保存在旧路径 `oldPath` 下的 `QIcon` 指针及 `m_aspectRatios` 值，安全移除并重新插入 to 新路径 `nativeNewPath` 的 Key 下，无需重新进行后台多媒体解析或读盘。
 - 不在本次范围内的是：修改物理 MFT 扫描、USN 监控底座以及其他非缩略图相关的逻辑。
 - 对应方案文档：Modification_Plan/Modification_Plan-94.md
 
@@ -188,7 +188,7 @@
 - 本次任务边界：
   1. 修复 `CategoryPanel::initUi` 中 `modelReset` 信号响应的竞态问题，重新引入 `QTimer::singleShot(0)` 异步延迟处理，确保 `QTreeView` 已经处理完重置并渲染出物理节点后才执行展开状态的恢复。
   2. 确保 `m_isInternalUpdating` 拦截锁覆盖异步延迟期，在节点物理生成并完成展开前屏蔽所有折叠虚假信号。
-  3. 完善 `saveExpandedStateToSettings` 和 `restoreExpandedState` 的控制与过滤。
+  3. 完善 `saveExpandedStateToSettings` and `restoreExpandedState` 的控制与过滤。
 - 不在本次范围内的是：修改 `CategoryRepo` 数据库的具体查询或系统项分类重排逻辑，修改其他面板（如内容面板）的数据加载逻辑。
 - 对应方案文档：Modification_Plan/Modification_Plan-99.md
 
@@ -198,7 +198,7 @@
 - 用户期望的结果：侧边栏某个分类展开之后能够持续化，即便重启主程序之后仍然处于展开状态，不被空状态异常覆盖，并期望添加调试日志以便追踪定位问题所在。
 - 本次任务边界：
   1. 在 `modelAboutToBeReset` 信号触发瞬间将 `m_isInternalUpdating` 设为 `true`，开启拦截锁，彻底断开 `beginResetModel` -> `removeRows` 期间视图中旧节点销毁引发的高频、同步 `collapsed` 信号风暴。
-  2. 在 `modelReset` 完成展开状态（`restoreExpandedState`）同步恢复后，将 `m_isInternalUpdating`重置为 `false`，重新开放并允许用户手动交互被正常持久化。
+  2. 在 `modelReset` 完成展开状态（`restoreExpandedState`）同步恢复后，将 `m_isInternalUpdating` 重置为 `false`，重新开放并允许用户手动交互被正常持久化。
   3. 实现析构函数 `~CategoryPanel()`，将 `m_isInternalUpdating` 设为 `true` 并安全 `disconnect` 展开/折叠信号，确保窗体销毁时无虚假状态污染配置文件。
   4. 引入全流程调试追踪日志，使用 `Logger::log` 在加载、重设、保存及析构全生命期中记录状态及防护标志的演变，供定位排查使用。
 - 不在本次范围内的是：修改分类树具体的构建、重排逻辑或数据库查询。
@@ -215,26 +215,48 @@
 - 不在本次范围内的是：修改物理库构建、重排和数据库层查询。
 - 对应方案文档：Modification_Plan/Modification_Plan-101.md
 
-## [2026-08-01] 高性能文件变动监控 NativeFolderWatcher 致命缺陷重构方案
+## [2026-07-27] 容器与状态栏 5px 隙缝悬浮进度条与状态栏计时联动落地实现
 
-- 用户描述的现象/问题：`NativeFolderWatcher.cpp` 存在 5 大极其严重的设计缺陷，可能导致内存 UAF 悬空指针崩溃、文件重命名时丢失星级/标签等全部元数据、高频密集变更下缓冲区溢出时事件漏落库、多线程并发解析同一个监控缓冲区造成的内存竞态错乱，以及高频修改信号缺乏防抖触发信号风暴导致 UI 严重卡顿。
-- 用户期望的结果：在不改变底层高性能 IOCP 架构的基础上，创建一套能彻底根治上述 5 大致命缺陷的重构修复方案，确保极其稳定、高性能的多线程磁盘监控体验。
-- 本次任务边界：在 `Modification_Plan/` 文件夹下，新建 `Modification_Plan-103.md`，深度规划 `NativeFolderWatcher` 架构升级方案：使用 `std::shared_ptr` 管理 `WatchItem` 并实现安全异步延迟释放；支持重命名 `OLD_NAME` / `NEW_NAME` 成对配对与元数据同步继承逻辑；在 `bytesTransferred == 0` 时引入全量级联自愈扫描；利用工作线程专用内存块或重构为单工作线程/分发队列，并实现 200ms 高效路径去重防抖处理，从而彻底阻断信号风暴。
-- 不在本次范围内的是：对物理 `.cpp` 和 `.h` 代码文件进行任何实际修改。
-- 对应方案文档：Modification_Plan/Modification_Plan-103.md
-
-## [2026-08-01] 监控文件夹被移走后盘符不消失及残留清除的物理存在性自愈方案
-
-- 用户描述的现象/问题：在外部（如 Windows 资源管理器）将已监控 of 文件夹移动或删除后，原有的监控路径虽然物理失效，但软件并没有“物理存在性自愈”能力：不自动解绑监控，不自动在盘符栏销毁失效的文件夹按钮，也不清洗数据库中残留的元数据及在侧边栏自动创建的 1:1 镜像分类树。
-- 用户期望的结果：实现完美的自愈能力，一旦监控文件夹物理不存在（被重命名、移走、删除），软件应该在启动时、刷新时或者由于外部监控检测到变动时，实时物理清退：自动注销后台监控，自动清除盘符栏无效按钮，并且彻底清洗底层数据库对应路径下的所有元数据及 1:1 分类树，不残留任何残留废弃数据。
-- 本次任务边界：在 `Modification_Plan/` 文件夹下，新建 `Modification_Plan-104.md`，规划在 `MainWindow::updateCustomFolderButtons` 中对加载自定义监控项追加物理 `QDir::exists()` 检验；在 `NativeFolderWatcher::handleNotification` 中在发现自定义自动导入文件夹被外部移除时，也向主线程抛出 `managedFolderRemoved` 通告；并在 `MainWindow` 中响应该通告并联动触发 `removeCustomMonitoredFolder` 进行清除销毁和数据库物理除账，保证绝无残留。
-- 不在本次范围内的是：实际修改任何功能性代码。
-- 对应方案文档：Modification_Plan/Modification_Plan-104.md
-
-## [2026-08-01] 批量重命名支持内存数据库映射与多源视图无缝同步重构方案
-
-- 用户描述的现象/问题：当前的“批量重命名（BatchRename）”功能仅在物理磁盘导航模式下有效。当切换至左侧内存数据库分类、系统快捷分类（全部数据、最近访问、垃圾桶等）下，即便选中多个有映射路径的文件或文件夹并执行重命名，由于没有从视图项中解析出物理路径并联动触发磁盘 I/O 以及后续元数据及镜像分类树节点的数据库同步修改，导致该功能在非 nav 模式下无法正常应用。
-- 用户期望的结果：重构批量重命名逻辑，使其同时支持对数据库中的项（文件夹/文件）进行操作。通过无缝建立“选中项路径提取 -> 磁盘物理更名 I/O -> 数据库和分类绑定多维同步落盘”双轨映射机制，实现磁盘与数据库的完美同步联动。
-- 本次任务边界：在 `Modification_Plan/` 文件夹下，新建 `Modification_Plan-105.md`，规划对 `BatchRenameDialog` 及 `ContentPanel::performBatchRename` 的重构：在多选唤醒时，完全支持从 `PathRole` 获取真实的本地物理绝对路径列表；在 `BatchRenameDialog::onExecute` 中执行完磁盘物理 `rename` 之后，向 `MetadataManager` 投递 `renameItem` 将元数据从 `oldPath` 无损迁移到 `newPath`；同时在 `CategoryRepo` 内部追加接口将 `categories` 和 `category_items` 表中的旧物理路径和绑定提示一并迁移更名，以确保 1:1 镜像分类树节点完备迁移；最后安全暂存新文件名并触发无感异步重载刷新。
-- 不在本次范围内的是：对物理 `.cpp` 和 `.h` 代码文件进行任何实际修改。
+- 用户描述的现象/问题：主界面五个容器与底部状态栏之间有 5 像素 of 物理间距，现在需要在这个间距上实现一个高度为 5 像素、用于展示元数据同步进度和耗时的微型进度条，要求不破坏现有布局、无重绘抖动、在同步时显示、同步完成后自动隐藏并恢复状态栏。
+- 用户期望的结果：在不改变已有布局边距的前提下，采用“无布局悬浮覆盖层 + 绝对定位”设计，在 5 像素的缝隙内精准渲染悬浮进度条，并与后台元数据同步状态服务联动，同步时显示滚动值及总耗时统计，同步完后淡出或静默隐藏并恢复状态栏。
+- 本次任务边界：
+  1. 在 `MainWindow.h` 中添加 `resizeEvent` 重写、悬浮计算方法 `updateProgressBarGeometry` 以及相关控制变量；
+  2. 在 `MainWindow.cpp` 的 `setupSplitters` 中初始化一个高度为 5px 的不占位悬浮 `QProgressBar` 并将其设为隐藏；
+  3. 实现 `resizeEvent` 与 `updateProgressBarGeometry`，通过 `centralC`、`bodyWrapper` 和 `statusBar` 的相对物理几何计算，精确确定进度条位置并调用 `raise()` 确保图层最上；
+  4. 关联状态栏耗时定时器与 `SyncStatusService` 的信号。
+- 不在本次范围内的是：修改任何非进度条相关的窗口层叠、对物理 MFT 扫描、磁盘监控等底座进行重构。
 - 对应方案文档：Modification_Plan/Modification_Plan-105.md
+
+## [2026-07-27] 悬浮进度条体验升级：扫描数据中语境、预计耗时 (ETA) 与从左向右推进彻底落地
+
+- 用户描述的现象/问题：Plan-105 方案设计存在 3 点不够完美的瑕疵，即文案称谓非直接“扫描”、未对剩余任务和时间比进行精确的“预计耗时 (ETA)”推算、以及进度百分比倒退引起视觉“自右向左”的严重倒退错觉。
+- 用户期望的结果：在 5px 隙缝悬浮进度条的基础上，将状态栏语境修正为“扫描数据中...”（完成时为“数据扫描完成”），将计时由静态已消耗修正为动态实时计算剩余的“预计耗时”；且锁定在任务开始时拦截并记录初始待处理项总量 `m_totalBatchCount`，用 `(总项数 - 剩余项数) / 总项数` 锁定并递增当前百分比，保证进度光条始终“由左向右”平滑推进。
+- 本次任务边界：
+  1. 升级 `MainWindow.h`，增设变量 `m_totalBatchCount` 保持批次总量感知；
+  2. 升级 `MainWindow.cpp`，显式设定 `setInvertedAppearance(false)` 强制普通方向；
+  3. 升级 `initUi()` 的 100ms 刷新槽和信号连接 logic，运用 $T_{elapsed} \times \frac{100 - P}{P}$ 动态公式推算预计耗时，并完美替换对应语境。
+- 不在本次范围内的是：修改 `SyncStatusService` 本身的发射频率，或者对除了 `MainWindow` 顶层控制链路之外的普通面板数据视图进行重设。
+- 对应方案文档：Modification_Plan/Modification_Plan-106.md
+
+## [2026-07-27] 创建自动导入中途取消与数据擦除机制安全落地
+
+- 用户描述的现象/问题：在自动导入（Auto-Import）进行过程中，如果用户突然改变主意，当前缺乏一种允许用户中途停止（Stop）并彻底擦除（Erase）已导入元数据和缓存垃圾的安全撤销机制（Kill & Purge）。
+- 用户期望的结果：在不破坏程序稳定性的前提下，设计并实现一套中途停止和擦除机制。用户触发取消时，首先安全、平滑地中止后台的多媒体特征提取与入库流水线（避免强杀线程造成死锁或数据库损坏），随后批量高效地删除该托管文件夹已入库的所有元数据记录，并彻底物理清理已生成的对应缩略图及宽高比高级缓存，恢复到干净的状态。
+- 本次任务边界：
+  1. 设计并实现 `MediaExtractorPipeline::cancelBatch()` 与 `cancelAll()` 接口，通过引入原子取消标记 `std::atomic<bool> m_isCanceled` 支持执行中断与排队任务清空，安全、非阻塞地挂起和清退流水线。
+  2. 在 `MetadataManager` 中新增 `removeMetadataBatchSync` 的同步数据擦除加固方法，支持对指定托管文件夹路径进行级联批量对账和物理清退，快速擦除所有在 `metadata` 与 `category_items` 表中的对应元数据及关联记录。
+  3. 提供 `CacheManager::clearCacheForPath(path)` 或 `FerrexVirtualDbModel::clearCacheForFolder(path)` 接口，在擦除数据时一并无损清理对应的缩略图、宽高比和调色板内存及磁盘高级缓存。
+- 不在本次范围内的是：物理删除用户位于磁盘上的实际文件或源文件夹本身，或重构底层的 USN / MFT 核心监控及扫描时序。
+- 对应方案文档：Modification_Plan/Modification_Plan-107.md
+
+## [2026-07-28] NativeFolderWatcher 监控服务架构解耦与防抖重命名高内聚重构
+
+- 用户描述的现象/问题：底层文件系统 IOCP 监控服务 `NativeFolderWatcher` 职责不单一，直接依赖并耦合了上层 `MetadataManager` 和 `AutoImportManager` 的具体业务操作；高密集并发/批量重命名时由于先进先出（FIFO）弹出队列极易错配；高频事件可能导致 GUI 线程在极短时间内因大量 `invokeMethod` 回调而被风暴积压、假死卡顿；另外，单例在工作线程中无意被首次加载时可能引发 QTimer 线程亲和性失效警告。
+- 用户期望的结果：重构并优化 `NativeFolderWatcher` 架构，使其彻底解耦，不调用任何上层管理器，只负责基础 IO 事件处理并抛出标准 Qt 信号；重新设计防抖和并发重命名合并逻辑，杜绝 FIFO 错配并大幅削减对 GUI 线程的信号轰炸；确保单例模式下 QTimer 安全初始化。
+- 本次任务边界：
+  1. 彻底切断 `NativeFolderWatcher` 对 `MetadataManager`、`AutoImportManager` 等上层业务类的直接头文件依赖和调用。
+  2. 重构 `NativeFolderWatcher` 事件分发。所有捕获的文件变更（新增、修改、删除、重命名）均转化为标准的自定义结构并通过统一/分立信号（如 `fileChanged(path, action)`）分发。
+  3. 优化防抖/合并算法。采用高内聚的以路径为 Key、以定时器关联的去重延迟合并缓存，削减短时间内对主线程的通知风暴；在监控层独立实现一套安全、健壮的重命名匹配配对池，不再采用基于顺序的出队机制。
+  4. 解决线程亲和性警告，通过懒加载或确保 `m_debounceTimer` 正确关联主线程事件循环。
+- 不在本次范围内的：修改底层 Windows ReadDirectoryChangesW/IOCP 的异步多线程核心驱动机制，或者重写 `MftReader`、数据库 SQLite 事务持久化细节。
+- 对应方案文档：Modification_Plan/Modification_Plan-110.md
