@@ -8,7 +8,7 @@
 #include "../core/BasicCommands.h"
 #include "TrayController.h"
 #include "HoverEventFilter.h"
-#include "ResizeEventFilter.h"
+#include "FramelessWindowResizer.h"
 #include "AddressBar.h"
 #include "../core/CoreController.h"
 #include "CategoryPanel.h"
@@ -208,7 +208,7 @@ MainWindow::MainWindow(QWidget* parent)
     //       极难排查。2026-06-xx 已踩坑一次。
     // ============================================================
     m_hoverFilter = new HoverEventFilter(this);
-    m_resizeFilter = new ResizeEventFilter(this);
+    m_resizeFilter = new FramelessWindowResizer(this);
     Q_ASSERT(m_hoverFilter && m_resizeFilter);
     // ============================================================
 

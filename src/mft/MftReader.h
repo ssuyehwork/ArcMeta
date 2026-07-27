@@ -63,11 +63,10 @@ class UsnWatcher;
  */
 class MftReader : public QObject {
     Q_OBJECT
+    friend class MetadataQueueDispatcher;
 public:
     static MftReader& instance();
 
-    // 全局图标缓存管理 (解决 UAF 风险)
-    QIcon getCachedIcon(const QString& ext, bool isDir);
 
 signals:
     void dataChanged(int index = -1);
@@ -185,8 +184,6 @@ private:
     std::vector<UsnWatcher*> m_watchers;
 
     mutable QReadWriteLock m_dataLock;
-    mutable QReadWriteLock m_iconCacheLock;
-    QHash<QString, QIcon>  m_icon_cache;
 
     bool m_isInitialized = false;
     std::atomic<bool> m_is_compacting{false}; // 标识是否处于碎片整理中
@@ -204,17 +201,6 @@ private:
     size_t   m_dead_count = 0;
     size_t   m_wasted_string_bytes = 0;
     std::vector<uint32_t> m_sorted_indices;
-
-    // 2026-06-xx 工业级元数据节流队列
-    struct MetadataTask {
-        int index;
-        uint64_t frn;
-        std::wstring volume;
-    };
-    std::vector<MetadataTask> m_metadata_queue;
-    std::mutex       m_queueMutex;
-    std::atomic<int> m_active_metadata_tasks{0};
-    void processMetadataQueue();
 };
 
 } // namespace ArcMeta

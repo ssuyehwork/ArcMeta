@@ -19,6 +19,14 @@ public:
     static void recordRecentVisitedFolder(const std::wstring& path);
     static QStringList getRecentVisitedFolders(const std::wstring& volSerial);
 
+    // 协议栈压栈、出栈和边界判定 (Plan-111 解耦重构)
+    void recordNavigation(const QString& url, bool record = true);
+    bool canGoBack() const;
+    bool canGoForward() const;
+    QString goBack();
+    QString goForward();
+    QString currentUrl() const;
+
 signals:
     void historyChanged(const QStringList& newHistory);
 
@@ -27,6 +35,9 @@ private:
     ~NavigationHistoryService() override = default;
 
     const int m_maxLimit = 15;
+
+    QStringList m_navHistory;
+    int m_navHistoryIndex = -1;
 };
 
 } // namespace ArcMeta
