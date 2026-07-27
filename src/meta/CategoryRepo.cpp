@@ -541,6 +541,123 @@ bool CategoryRepo::updateCategoryColorByPath(const std::wstring& path, const std
     return false;
 }
 
+bool CategoryRepo::renamePhysicalCategoryPath(const std::wstring& oldPath, const std::wstring& newPath) {
+    WriteGuard guard;
+    sqlite3* memDb = DatabaseManager::instance().getGlobalDb();
+    if (!memDb) return false;
+
+    bool anyOk = false;
+
+    // 1. 更新 categories 表中的 physical_path 物理匹配
+    // 同时也需要迁移作为其子目录的 1:1 物理镜像分支的前缀：
+    // 例如 D:\projects 重命名为 D:\projects_new 时，D:\projects\cpp 应该变为 D:\projects_new\cpp
+    std::wstring oldPathWithSlash = oldPath + L"\\";
+    std::wstring newPathWithSlash = newPath + L"\\";
+
+    // 更新精准等于它的 physical_path
+    {
+        const char* sql = "UPDATE categories SET physical_path = ? WHERE physical_path = ?";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(memDb, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text16(stmt, 1, newPath.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text16(stmt, 2, oldPath.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmt) == SQLITE_DONE) anyOk = true;
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    // 更新以此作为子路径前缀的所有 categories 项
+    {
+        // 查找所有 categories 并迁移子物理目录映射项
+        const char* sqlSel = "SELECT id, physical_path FROM categories WHERE physical_path LIKE ?";
+        sqlite3_stmt* stmtSel = nullptr;
+        std::wstring matchPattern = oldPath + L"\\%";
+        if (sqlite3_prepare_v2(memDb, sqlSel, -1, &stmtSel, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text16(stmtSel, 1, matchPattern.c_str(), -1, SQLITE_TRANSIENT);
+            std::vector<std::pair<int, std::wstring>> listToUpdate;
+            while (sqlite3_step(stmtSel) == SQLITE_ROW) {
+                int cid = sqlite3_column_int(stmtSel, 0);
+                const wchar_t* pText = (const wchar_t*)sqlite3_column_text16(stmtSel, 1);
+                if (pText) {
+                    listToUpdate.push_back({cid, pText});
+                }
+            }
+            sqlite3_finalize(stmtSel);
+
+            const char* sqlUpd = "UPDATE categories SET physical_path = ? WHERE id = ?";
+            for (const auto& pair : listToUpdate) {
+                std::wstring subPath = pair.second;
+                if (subPath.rfind(oldPathWithSlash, 0) == 0) { // startsWith
+                    std::wstring subNewPath = newPathWithSlash + subPath.substr(oldPathWithSlash.length());
+                    sqlite3_stmt* stmtUpd = nullptr;
+                    if (sqlite3_prepare_v2(memDb, sqlUpd, -1, &stmtUpd, nullptr) == SQLITE_OK) {
+                        sqlite3_bind_text16(stmtUpd, 1, subNewPath.c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_int(stmtUpd, 2, pair.first);
+                        sqlite3_step(stmtUpd);
+                        sqlite3_finalize(stmtUpd);
+                        anyOk = true;
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. 更新 category_items 中的 path_hint 指针，防止断开关联
+    {
+        // 精准等于
+        {
+            const char* sql = "UPDATE category_items SET path_hint = ? WHERE path_hint = ?";
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(memDb, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text16(stmt, 1, newPath.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(stmt, 2, oldPath.c_str(), -1, SQLITE_TRANSIENT);
+                if (sqlite3_step(stmt) == SQLITE_DONE) anyOk = true;
+                sqlite3_finalize(stmt);
+            }
+        }
+
+        // 以 oldPath 为前缀的子项 path_hint 重写
+        {
+            const char* sqlSel = "SELECT rowid, path_hint FROM category_items WHERE path_hint LIKE ?";
+            sqlite3_stmt* stmtSel = nullptr;
+            std::wstring matchPattern = oldPath + L"\\%";
+            if (sqlite3_prepare_v2(memDb, sqlSel, -1, &stmtSel, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text16(stmtSel, 1, matchPattern.c_str(), -1, SQLITE_TRANSIENT);
+                std::vector<std::pair<long long, std::wstring>> itemsToUpdate;
+                while (sqlite3_step(stmtSel) == SQLITE_ROW) {
+                    long long rowid = sqlite3_column_int64(stmtSel, 0);
+                    const wchar_t* pText = (const wchar_t*)sqlite3_column_text16(stmtSel, 1);
+                    if (pText) {
+                        itemsToUpdate.push_back({rowid, pText});
+                    }
+                }
+                sqlite3_finalize(stmtSel);
+
+                const char* sqlUpd = "UPDATE category_items SET path_hint = ? WHERE rowid = ?";
+                for (const auto& pair : itemsToUpdate) {
+                    std::wstring subPath = pair.second;
+                    if (subPath.rfind(oldPathWithSlash, 0) == 0) { // startsWith
+                        std::wstring subNewPath = newPathWithSlash + subPath.substr(oldPathWithSlash.length());
+                        sqlite3_stmt* stmtUpd = nullptr;
+                        if (sqlite3_prepare_v2(memDb, sqlUpd, -1, &stmtUpd, nullptr) == SQLITE_OK) {
+                            sqlite3_bind_text16(stmtUpd, 1, subNewPath.c_str(), -1, SQLITE_TRANSIENT);
+                            sqlite3_bind_int64(stmtUpd, 2, pair.first);
+                            sqlite3_step(stmtUpd);
+                            sqlite3_finalize(stmtUpd);
+                            anyOk = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (anyOk) {
+        DatabaseManager::instance().flushAll();
+    }
+    return anyOk;
+}
+
 bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint) {
     WriteGuard guard;
     sqlite3* memDb = DatabaseManager::instance().getGlobalDb();

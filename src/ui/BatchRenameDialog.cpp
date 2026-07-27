@@ -4,6 +4,7 @@
 #include "UiHelper.h"
 #include "../meta/BatchRenameEngine.h"
 #include "../meta/MetadataManager.h"
+#include "../meta/CategoryRepo.h"
 #include <QHeaderView>
 #include "FramelessFileDialog.h"
 #include "FramelessDialog.h"
@@ -383,31 +384,51 @@ void BatchRenameDialog::onExecute() {
     }
 
     int successCount = 0;
+
+    // 🚨 开启防抖与内部操作锁定，防止高密集 Windows IOCP 更名重命名变动反馈产生严重的系统刷新和竞态！
+    MetadataManager::instance().setInternalOperating(true);
+
     for (int i = 0; i < (int)m_originalPaths.size(); ++i) {
         QString oldPath = QString::fromStdWString(m_originalPaths[i]);
         QFileInfo oldInfo(oldPath);
         QString finalTargetDir = m_rbRename->isChecked() ? oldInfo.absolutePath() : targetDir;
-        QString newPath = QDir(finalTargetDir).filePath(QString::fromStdWString(newNames[i]));
+        QString newPathStr = QDir(finalTargetDir).filePath(QString::fromStdWString(newNames[i]));
 
         bool ok = false;
         if (m_rbCopy->isChecked()) {
-            ok = QFile::copy(oldPath, newPath);
+            ok = QFile::copy(oldPath, newPathStr);
         } else if (m_rbMove->isChecked()) {
-            if (QFile::copy(oldPath, newPath)) {
+            if (QFile::copy(oldPath, newPathStr)) {
                 ok = QFile::remove(oldPath);
             }
         } else {
-            ok = QFile::rename(oldPath, newPath);
+            ok = QFile::rename(oldPath, newPathStr);
         }
 
         if (ok) {
             successCount++;
             if (!m_rbCopy->isChecked()) {
-                // 2026-05-24 按照用户要求：彻底移除 SCCH 逻辑
-                MetadataManager::instance().renameItem(oldInfo.absoluteFilePath().toStdWString(), QDir(finalTargetDir).absoluteFilePath(QString::fromStdWString(newNames[i])).toStdWString());
+                std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
+                std::wstring newW = QDir(finalTargetDir).absoluteFilePath(QString::fromStdWString(newNames[i])).toStdWString();
+
+                // 1. 同步进行元数据迁移
+                MetadataManager::instance().renameItem(oldW, newW);
+
+                // 2. 双轨制同步：同步修正 categories 表分类定义与 category_items 表中的 pathHint 引用，保持 1:1 分类镜像不损坏！
+                CategoryRepo::renamePhysicalCategoryPath(oldW, newW);
             }
         }
     }
+
+    if (successCount > 0 && !newNames.empty()) {
+        m_firstNewName = QString::fromStdWString(newNames.front());
+    }
+
+    // 🚨 关闭内部操作锁定并提交
+    MetadataManager::instance().setInternalOperating(false);
+
+    // 发射全量 UI 刷新信号，使侧边栏分类树、内容视图同频重新计数和对账
+    MetadataManager::instance().notifyFullUIRebuild();
 
     FramelessMessageBox::information(this, "操作完成", QString("成功处理 %1 个文件").arg(successCount));
     accept();

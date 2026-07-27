@@ -2662,7 +2662,9 @@ void ContentPanel::performBatchRename() {
     for (const auto& idx : indexes) { 
         if (idx.column() == 0) { 
             QString path = idx.data(PathRole).toString(); 
-            if (!path.isEmpty()) originalPaths.push_back(path.toStdWString()); 
+            if (!path.isEmpty()) {
+                originalPaths.push_back(QDir::toNativeSeparators(path).toStdWString());
+            }
         } 
     } 
  
@@ -2673,7 +2675,15 @@ void ContentPanel::performBatchRename() {
  
     BatchRenameDialog dlg(originalPaths, this); 
     if (dlg.exec() == QDialog::Accepted) { 
-        loadDirectory(m_currentPath, m_isRecursive); 
+        // 🚨 极致自愈高亮：如果对话框成功重命名，将其返回的首个新名称作为 pendingSelectName
+        QString firstNew = dlg.getFirstNewName();
+        if (!firstNew.isEmpty()) {
+            m_pendingSelectName = firstNew;
+            m_isPendingEdit = false;
+        }
+        // 🚨 联动支持：不应强绑定物理 loadDirectory，统一调用 refreshAll 以自适应数据库和系统分类下的异步刷新，
+        // 并实现完美的选中态无缝自愈高亮！
+        refreshAll();
         ToolTipOverlay::instance()->showText(QCursor::pos(), "批量重命名操作已成功执行", 1500, QColor("#2ecc71")); 
     } 
 } 
