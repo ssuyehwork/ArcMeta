@@ -44,7 +44,7 @@
 
 - 用户描述的现象/问题：按下空格键打开预览界面后的滚动条样式，违背了考古，由上一代 AI 导致。
 - 用户期望的结果：将预览界面（QuickLookWindow）内的滚动条样式彻底重构，使其严格遵循全局规范：宽度 10px、圆角 3px、背景透明、Handle 颜色对齐 `BorderColor` #333333。
-- 本次任务边界：修改 `src/ui/QuickLookWindow.cpp` 中 `QuickLookGraphicsView` 和 `QPlainTextEdit` 控件的水平及垂直滚动条的 QSS 样式。
+- 本次任务边界：修改 `src/ui/QuickLookWindow.cpp` 中 `QuickLookGraphicsView` and `QPlainTextEdit` 控件的水平及垂直滚动条的 QSS 样式。
 - 不在本次范围内的是：修改预览界面其他的图片/文本渲染、缩放或事件分流逻辑.
 - 对应方案文档: Modification_Plan-37.md
 
@@ -122,7 +122,7 @@
 ## [2026-07-25] 彻底根除随机/设置颜色旧UI与在右键菜单上直接以悬停白圈色块展示并同步存库
 
 - 用户描述的现象/问题：现有的右键菜单及部分分类/文件夹设置中采用“随机颜色”和“设置颜色”的传统菜单项（QAction）及弹窗操作链路复杂、不够直观。
-- 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段和 metadata 表 of color 字段中。
+- 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段 and metadata 表 of color 字段中。
 - 本次任务边界：
   1. 彻底删除 `CategoryPanel` 及 `MainWindow`（FolderButton 菜单）中的“随机颜色”与“设置颜色”旧 QAction 和旧对应响应函数（如 `onRandomColor` / `onSetColor`）。
   2. 针对 `CategoryPanel` 侧边分类右键菜单、`MainWindow` 中的 FolderButton 右键菜单，以及 `ContentPanel` 内容右键菜单中的“设定颜色标签”（ActionColorTag）子菜单，实现全新的一排水平排列色块快捷操作区域（可以使用自定义 `QWidgetAction` 加载色块容器）。
@@ -273,3 +273,11 @@
   3. 创建独立的 `FilterEngine` 核心过滤引擎（类），托管多维属性及文件的组合过滤运算；完全清除 `FilterPanel` 及 `ContentPanel`（`FilterProxyModel`）中重复的各种大小、链接、备注、比例等算法拼接。
 - 不在本次范围内的是：修改底层 MFT 文件高速检索算法，重构数据库 `sqlite3.c` 持久化底座。
 - 对应方案文档：Modification_Plan/Modification_Plan-112.md
+
+## [2026-08-01] 扩大范围排查整款应用不符合 SRP（单一职责原则）的地方与极致规划
+
+- 用户描述的现象/问题：整款应用可能存在职责过载、大单例越界调度等不符合单一职责原则（SRP）的地方。
+- 用户期望的结果：继续扩大范围排查整款应用哪些存在职责过载并一律标记出来。所有不符合“SRP”的都需要设计极致整改重构图纸。
+- 本次任务边界：地毯式分析 `MetadataManager`、`AutoImportManager`、`MftReader`、`DatabaseManager`、`MainWindow` 等核心中枢。排查这些模块是否存在承担过多数据库 IO 驱动、磁盘扫描、分类规则绑定和 UI 直接刷新的“硬编码过载”，输出解耦重构技术规范与逻辑划分方案。
+- 不在本次范围内的是：分析师阶段不对 C++ 源代码执行直接的物理修改。
+- 对应方案文档：Modification_Plan/Modification_Plan-116.md
