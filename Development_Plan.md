@@ -271,6 +271,16 @@
 - 不在本次范围内的：由于目前处于只读分析师状态，不直接修改 C++ 源码文件（.cpp / .h），不破坏现行软件编译流程。
 - 对应方案文档：Modification_Plan/Modification_Plan-111.md
 
+## [2026-07-28] 解决每次启动主程序时重复对账与无谓重新扫描元数据缺陷
+
+- 用户描述的现象/问题：被监控的文件夹没有新增任何文件或文件夹，元数据也已经持久化至磁盘数据库，但每次重启主程序时都会重新对账并触发全量文件元数据扫描与多媒体特征提取。
+- 用户期望的结果：在启动主程序进行全量对账时，跳过已成功导入且指纹/修改时间未发生变化的完备文件，杜绝每次重启时的冗余扫描和特征提取，保护物理磁盘并大幅减少 CPU 占用。
+- 本次任务边界：
+  1. 在 `MetadataManager::registerItemsAsync` 中增加文件物理指纹与高级特征双重准入检查，若文件已完备且大小/修改时间一致，直接跳过登记和提取。
+  2. 在 `CategoryRepo::addItemToCategory` 中增加重复关联预检，防止每次重启时 `category_items` 被无谓 `INSERT OR REPLACE` 覆盖并导致 `added_at` 乱序和数据库频繁标记 Dirty。
+- 不在本次范围内的是：修改物理 MFT 扫描、USN 监控底座以及其他非元数据和分类对账关联的逻辑。
+- 对应方案文档：Modification_Plan/Modification_Plan-117.md
+
 ## [2026-07-28] 修复构建配置缺失与 FilterEngine 编译类型错误
 
 - 用户描述的现象/问题：编译 C++ 项目时，遇到了多处编译器语法错误（在 FilterEngine.cpp 中未声明的标识符 `record` / `fileName` / `pe` 等，将 `IngestedRecord` 假定为 `int` 等）以及 “util/ShellHelper.h”、“core/AppConfig.h”、“core/FileSystemService.h” 头文件无法找到的问题。

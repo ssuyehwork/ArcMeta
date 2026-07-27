@@ -34,7 +34,7 @@ namespace ArcMeta {
 
 // 静态文件分类后缀定义 (音视频格式并入黑名单进行系统大图标降级预览，不直接播放)
 static const QSet<QString> UNPREVIEWABLE_EXTS = {
-    "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "exe", "dll", "msi", "sys", "iso", "dmg", "pkg", "bin", "ini", "lnk",
+    "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "exe", "dll", "msi", "sys", "iso", "dmg", "pkg", "bin", "lnk",
     "mp4", "m4v", "mov", "avi", "mkv", "wmv", "flv", "webm", "3gp", "mp3", "wav", "wma", "flac", "aac", "ogg", "m4a", "ape"
 };
 
