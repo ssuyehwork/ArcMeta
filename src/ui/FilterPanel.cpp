@@ -446,15 +446,6 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
     connect(this, &FilterPanel::filterChanged, this, &FilterPanel::updateHeaderStatus);
 }
 
-void FilterPanel::saveFilterHistory(const QString& key, const QString& text) {
-    if (text.trimmed().isEmpty()) return;
-    SearchHistoryService::instance().appendSearch(key, text);
-}
-
-QStringList FilterPanel::getFilterHistory(const QString& key) const {
-    return SearchHistoryService::instance().getHistory(key);
-}
-
 // 2026-03-xx 按照用户要求：物理拦截事件以实现自定义 ToolTipOverlay 的显隐控制
 bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
     // 2026-xx-xx 按照用户要求：处理双击快速输入框显示历史记录
@@ -469,7 +460,7 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
 
             if (!key.isEmpty()) {
                 m_historyPanel->setCategory(key);
-                QStringList history = getFilterHistory(key);
+                QStringList history = SearchHistoryService::instance().getHistory(key);
                 m_historyPanel->setHistory(history, "最近搜索");
                 
                 // 断开之前的连接
@@ -482,7 +473,7 @@ bool FilterPanel::eventFilter(QObject* watched, QEvent* event) {
                     else if (edit == m_editCreateDate) m_filter.createDateFilterText = text;
                     else if (edit == m_editModifyDate) m_filter.modifyDateFilterText = text;
 
-                    saveFilterHistory(key, text);
+                    SearchHistoryService::instance().appendSearch(key, text);
                     emit filterChanged(m_filter);
                     m_historyPanel->hide();
                 });
@@ -686,7 +677,7 @@ void FilterPanel::rebuildGroups() {
         m_editColor->installEventFilter(this);
         connect(m_editColor, &QLineEdit::returnPressed, this, [this]() {
             m_filter.colorFilterText = m_editColor->text();
-            saveFilterHistory("Color", m_filter.colorFilterText);
+            SearchHistoryService::instance().appendSearch("Color", m_filter.colorFilterText);
             emit filterChanged(m_filter);
         });
         connect(m_editColor, &QLineEdit::textChanged, this, [this](const QString& text) {
@@ -917,7 +908,7 @@ void FilterPanel::rebuildGroups() {
         m_editType->installEventFilter(this);
         connect(m_editType, &QLineEdit::returnPressed, this, [this]() {
             m_filter.typeFilterText = m_editType->text();
-            saveFilterHistory("Type", m_filter.typeFilterText);
+            SearchHistoryService::instance().appendSearch("Type", m_filter.typeFilterText);
             emit filterChanged(m_filter);
         });
         connect(m_editType, &QLineEdit::textChanged, this, [this](const QString& text) {
@@ -1011,7 +1002,7 @@ void FilterPanel::rebuildGroups() {
         m_editCreateDate->installEventFilter(this);
         connect(m_editCreateDate, &QLineEdit::returnPressed, this, [this]() {
             m_filter.createDateFilterText = m_editCreateDate->text();
-            saveFilterHistory("CreateDate", m_filter.createDateFilterText);
+            SearchHistoryService::instance().appendSearch("CreateDate", m_filter.createDateFilterText);
             emit filterChanged(m_filter);
         });
         connect(m_editCreateDate, &QLineEdit::textChanged, this, [this](const QString& text) {
@@ -1058,7 +1049,7 @@ void FilterPanel::rebuildGroups() {
         m_editModifyDate->installEventFilter(this);
         connect(m_editModifyDate, &QLineEdit::returnPressed, this, [this]() {
             m_filter.modifyDateFilterText = m_editModifyDate->text();
-            saveFilterHistory("ModifyDate", m_filter.modifyDateFilterText);
+            SearchHistoryService::instance().appendSearch("ModifyDate", m_filter.modifyDateFilterText);
             emit filterChanged(m_filter);
         });
         connect(m_editModifyDate, &QLineEdit::textChanged, this, [this](const QString& text) {

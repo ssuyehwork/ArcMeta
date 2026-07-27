@@ -241,10 +241,6 @@ private:
     bool          m_isFilterPinned = false;    // 2026-06-23 按照用户要求：筛选器锁定状态
 
     SearchHistoryPanel* m_historyPanel = nullptr;
-    
-    // 辅助方法：处理历史记录
-    void saveFilterHistory(const QString& key, const QString& text);
-    QStringList getFilterHistory(const QString& key) const;
 
 private slots:
     void onToggleAllGroupsClicked();

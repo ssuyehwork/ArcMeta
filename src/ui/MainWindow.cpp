@@ -944,105 +944,15 @@ void MainWindow::showEvent(QShowEvent* event) {
 }
 
 void MainWindow::mousePressEvent(QMouseEvent* event) {
-    if (event->button() != Qt::LeftButton) return;
-
-    const QPoint localPos = event->position().toPoint();
-    ResizeDirection dir = getResizeDirection(localPos);
-
-    if (dir != None) {
-        // 2026-05-08 按照用户要求：进入 Resize 模式
-        m_isResizing = true;
-        m_isDragging = false;
-        m_resizeDir = dir;
-        m_resizeStartGlobal   = event->globalPosition().toPoint();
-        m_resizeStartGeometry = geometry();
-        event->accept();
-        return;
-    }
-
-    // 原有拖动逻辑：仅标题栏区域
-    if (localPos.y() <= 34) {
-        m_isDragging = true;
-        m_dragPosition = event->globalPosition().toPoint() - frameGeometry().topLeft();
-        event->accept();
-    }
+    event->ignore();
 }
 
 void MainWindow::mouseMoveEvent(QMouseEvent* event) {
-    if (m_isResizing) {
-        const QPoint delta = event->globalPosition().toPoint() - m_resizeStartGlobal;
-        QRect r = m_resizeStartGeometry;
-
-        if (m_resizeDir == Left || m_resizeDir == TopLeft || m_resizeDir == BottomLeft)
-            r.setLeft(r.left() + delta.x());
-        if (m_resizeDir == Right || m_resizeDir == TopRight || m_resizeDir == BottomRight)
-            r.setRight(r.right() + delta.x());
-        if (m_resizeDir == Top || m_resizeDir == TopLeft || m_resizeDir == TopRight)
-            r.setTop(r.top() + delta.y());
-        if (m_resizeDir == Bottom || m_resizeDir == BottomLeft || m_resizeDir == BottomRight)
-            r.setBottom(r.bottom() + delta.y());
-
-        // 尊重最小尺寸约束
-        if (r.width() >= minimumWidth() && r.height() >= minimumHeight())
-            setGeometry(r);
-
-        event->accept();
-        return;
-    }
-
-    if (m_isDragging && (event->buttons() & Qt::LeftButton)) {
-        move(event->globalPosition().toPoint() - m_dragPosition);
-        event->accept();
-        return;
-    }
-
-    // 2026-05-08 按照用户要求：悬停时动态更新光标（未按下状态）
-    if (!m_isDragging) {
-        updateCursorShape(getResizeDirection(event->position().toPoint()));
-    }
-}
-
-// 2026-05-08 按照用户要求：实现边缘resize方向检测函数
-MainWindow::ResizeDirection MainWindow::getResizeDirection(const QPoint& pos) const {
-    // 按照用户建议：将感应宽度改为根据 DPI 动态计算
-    int m = kResizeMargin;
-    if (windowHandle()) {
-        m = qRound(screen()->logicalDotsPerInch() / 96.0 * (double)kResizeMargin);
-    }
-    const int w = width(), h = height();
-    bool left   = pos.x() < m;
-    bool right  = pos.x() > w - m;
-    bool top    = pos.y() < m;
-    bool bottom = pos.y() > h - m;
-
-    if (top    && left)  return TopLeft;
-    if (top    && right) return TopRight;
-    if (bottom && left)  return BottomLeft;
-    if (bottom && right) return BottomRight;
-    if (left)   return Left;
-    if (right)  return Right;
-    if (top)    return Top;
-    if (bottom) return Bottom;
-    return None;
-}
-
-// 2026-05-08 按照用户要求：实现光标形状更新函数
-void MainWindow::updateCursorShape(ResizeDirection dir) {
-    switch (dir) {
-        case Left:        case Right:       setCursor(Qt::SizeHorCursor);  break;
-        case Top:         case Bottom:      setCursor(Qt::SizeVerCursor);  break;
-        case TopLeft:     case BottomRight: setCursor(Qt::SizeFDiagCursor); break;
-        case TopRight:    case BottomLeft:  setCursor(Qt::SizeBDiagCursor); break;
-        default:                            setCursor(Qt::ArrowCursor);    break;
-    }
+    event->ignore();
 }
 
 void MainWindow::mouseReleaseEvent(QMouseEvent* event) {
-    Q_UNUSED(event);
-    m_isDragging  = false;
-    m_isResizing  = false;
-    m_resizeDir   = None;
-    setCursor(Qt::ArrowCursor);
+    event->ignore();
 }
 
 void MainWindow::keyPressEvent(QKeyEvent* event) {
@@ -1591,16 +1501,8 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
 
     if (m_filterPanel) m_filterPanel->clearAllFilters();
 
-    // 2. 压栈逻辑 (原子化)
-    if (record) {
-        if (m_historyIndex < static_cast<int>(m_history.size()) - 1) {
-            m_history = m_history.mid(0, m_historyIndex + 1);
-        }
-        if (m_history.isEmpty() || m_history.last() != url) {
-            m_history.append(url);
-            m_historyIndex = static_cast<int>(m_history.size()) - 1;
-        }
-    }
+    // 2. 压栈逻辑 (原子化，完全代理到 NavigationHistoryService 单例)
+    NavigationHistoryService::instance().recordNavigation(url, record);
 
     // 3. 协议分流加载
     if (url.startsWith(kProtocolCategory)) {
@@ -1677,16 +1579,20 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
 }
 
 void MainWindow::onBackClicked() {
-    if (m_historyIndex > 0) {
-        m_historyIndex--;
-        unifiedNavigateTo(m_history[m_historyIndex], false);
+    if (NavigationHistoryService::instance().canGoBack()) {
+        QString target = NavigationHistoryService::instance().goBack();
+        if (!target.isEmpty()) {
+            unifiedNavigateTo(target, false);
+        }
     }
 }
 
 void MainWindow::onForwardClicked() {
-    if (m_historyIndex < m_history.size() - 1) {
-        m_historyIndex++;
-        unifiedNavigateTo(m_history[m_historyIndex], false);
+    if (NavigationHistoryService::instance().canGoForward()) {
+        QString target = NavigationHistoryService::instance().goForward();
+        if (!target.isEmpty()) {
+            unifiedNavigateTo(target, false);
+        }
     }
 }
 
@@ -1704,8 +1610,8 @@ void MainWindow::onUpClicked() {
 }
 
 void MainWindow::updateNavButtons() {
-    m_btnBack->setEnabled(m_historyIndex > 0);
-    m_btnForward->setEnabled(m_historyIndex < m_history.size() - 1);
+    m_btnBack->setEnabled(NavigationHistoryService::instance().canGoBack());
+    m_btnForward->setEnabled(NavigationHistoryService::instance().canGoForward());
     
     bool isLogic = m_currentPath.contains("://");
     bool atRoot = (m_currentPath == "computer://" || (!isLogic && QDir(m_currentPath).isRoot()));

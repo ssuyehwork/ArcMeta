@@ -260,3 +260,13 @@
   4. 解决线程亲和性警告，通过懒加载或确保 `m_debounceTimer` 正确关联主线程事件循环。
 - 不在本次范围内的：修改底层 Windows ReadDirectoryChangesW/IOCP 的异步多线程核心驱动机制，或者重写 `MftReader`、数据库 SQLite 事务持久化细节。
 - 对应方案文档：Modification_Plan/Modification_Plan-110.md
+
+## [2026-07-28] 全局核心组件（ContentPanel、MainWindow 等）SRP 违规深度整改与极致重构
+
+- 用户描述的现象/问题：整款应用中存在多处极其严重的单一职责原则（SRP）违规与职责过载（违反 SRP），例如 `ContentPanel` 混合了 UI 视图呈现、递归扫描、剪切板操作及右键菜单构建；`MainWindow` 混合了无边框拖曳、本地导航栈及预计耗时 (ETA) 业务运算；`MftReader` 混合了底层 MFT/USN 解析、系统图标提取与异步元数据填充任务调度。
+- 用户期望的结果：对全款应用及核心源码文件中的 SRP 违规点进行彻底梳理和标记，制定出高度模块化、科学解耦的整体重构整改（“整改”）方案，使各组件职责彻底单一化。
+- 本次任务边界：
+  1. 在 `Inspect and Mark.md` 中详细标记并剖析整款应用（尤其是 `ContentPanel`、`MainWindow`、`MftReader`、`FilterPanel`）的职责过载。
+  2. 规划科学的解耦重构技术路线，建立独立的服务接口（如 `ShellIconService` 负责提取图标，`NavigationHistoryService` 承接导航历史，`ContentContextMenuManager` 托管右键菜单构建等），从而彻底分流过载职责。
+- 不在本次范围内的：由于目前处于只读分析师状态，不直接修改任何 C++ 源码文件（.cpp / .h），不破坏现行软件编译流程。
+- 对应方案文档：Modification_Plan/Modification_Plan-111.md

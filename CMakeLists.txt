@@ -127,6 +127,8 @@ set(SOURCES
     src/ui/JustifiedResultView.h
     src/ui/FilterPanel.cpp
     src/ui/FilterPanel.h
+    src/ui/FilterEngine.cpp
+    src/ui/FilterEngine.h
     src/ui/FramelessDialog.cpp
     src/ui/FramelessDialog.h
     src/ui/FramelessFileDialog.cpp

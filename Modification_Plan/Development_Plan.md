@@ -3,8 +3,8 @@
 ## [2024-07-20] 扩大范围排查当前版本的整体逻辑架构
 
 - 用户描述的现象/问题：当前版本的整体逻辑架构可能存在职责过载、运行流程上下文冲突、重复造轮子、性能问题（死循环、线程竞争、假死、卡顿）以及线程相互干扰。
-- 用户期望的结果：扩大范围排查这些潜在架构及运行问题，并将排查到的结果详细记载到 `Inspect and Mark.md` 文档里。
-- 本次任务边界：对当前版本的整体逻辑架构展开全面的代码审计与静态排查，针对指定5点列出详细排查结果，格式化输出到 `Inspect and Mark.md` 中。因为当前角色是分析师，仅对代码逻辑及架构进行审计分析，不修改任何功能性代码文件。
+- 用户期望的结果：扩大范围排查这些潜在架构及运行问题，并将排查到的结果详细记载 to `Inspect and Mark.md` 文档里。
+- 本次任务边界：对当前版本的整体逻辑架构展开全面的代码审计与静态排查，针对指定5点列出详细排查结果，格式化输出 to `Inspect and Mark.md` 中。因为当前角色是分析师，仅对代码逻辑及架构进行审计分析，不修改任何功能性代码文件。
 - 不在本次范围内的是：实际修改代码或引入任何功能性代码的改动。
 - 对应方案文档：无（本次为分析委托，直接产出 `Inspect and Mark.md` 文档，不需要单独编写 `Modification_Plan-N.md` 并执行代码修改，因为没有代码修改需求）
 
@@ -26,7 +26,7 @@
 
 ## [2026-07-20] 三种视图架构设计缺陷排查与极致重构规划
 
-- 用户描述的现象/问题：当前版本中的三种视图（列表、网格、合理自适应对齐模式）存在逻辑冗余、职责过载以及交互/渲染卡顿等傻逼逻辑架构问题。
+- 用户描述的现象/问题：当前版本中的三种视图（列表、网格、合理自适应对齐模式）存在逻辑 redundancy、职责过载以及交互/渲染卡顿等傻逼逻辑架构问题。
 - 用户期望的结果：对三种视图底层控制链展开深度排查，找出不合理的架构缺陷并形成极致解耦与性能提升 of 优化方案，并产出详细设计。
 - 本次任务边界：审计并理清 `JustifiedView`、`ListResultView`、`GridResultView`、`JustifiedResultView` 以及 `ContentPanel` 之间在视图控制、数据映射 and 布局渲染上的依赖关系，设计职责更清晰、耦合度更低的模块化结构。
 - 不在本次范围内的是：实际修改或编译代码，移植非视图类的其他外部功能。
@@ -88,7 +88,7 @@
   2. 重构 `ContentPanel` 的 `wheelEvent`，捕获 Ctrl+滚轮 动作实现滑杆尺寸/内容卡片尺寸 `m_zoomLevel`（限制在 96~128px 之间）的物理同频缩放，并保证滑杆值及 `updateGridSize()` 持久化一致。
   3. 在“视图按钮”下拉菜单中，完美对接 `ListView`、`GridView` (网格自适应即 JustifiedMode) 以及 `JustifiedViewMode` 的 logic 切换。
 - 不在本次范围内的是：重写或修改物理 USN 监控底座或底层 MFT 文件过滤搜索流程。
-- 对应方案文档: Modification_Plan-45.md
+- 对应方案文档：Modification_Plan-45.md
 
 ## [2026-07-24] 全款应用架构与文件职责过载深度排查
 
@@ -207,7 +207,7 @@
 ## [2026-07-26] 侧边栏分类树状展开状态重启持久化失效根治重构二期
 
 - 用户描述的现象/问题：在上一轮排查中，用户发现即便重构了锁逻辑，重启后仍折叠，排查出 3 个致命死穴（类型强转失败、内存/磁盘类型混用不一致、save 里的“我的分类”字符串过激匹配拦截）。
-- 用户期望的结果：通过统一加载数据类型、移除过激空拦截并实时同步 Property，以及在 `modelReset` 信号中加入兼容性安全类型解析，彻底根治持久化。
+- 用户期望的结果：通过统一加载数据类型、移除过激空拦截并实时同步 Property，以及在 `modelReset` 信号中加入兼容性安全类型解析，彻底根指持久化。
 - 本次任务边界：
   1. 统一 `loadExpandedStateFromSettings` Property 存储类型为 `QList<int>`。
   2. 重构 `saveExpandedStateToSettings`，删除包含 `"我的分类"` 的过激拦截匹配，并在物理落盘后同步向 tree property 更新最新的 `idIntList`。
@@ -246,7 +246,7 @@
   1. 设计并实现 `MediaExtractorPipeline::cancelBatch()` 与 `cancelAll()` 接口，通过引入原子取消标记 `std::atomic<bool> m_isCanceled` 支持执行中断与排队任务清空，安全、非阻塞地挂起和清退流水线。
   2. 在 `MetadataManager` 中新增 `removeMetadataBatchSync` 的同步数据擦除加固方法，支持对指定托管文件夹路径进行级联批量对账和物理清退，快速擦除所有在 `metadata` 与 `category_items` 表中的对应元数据及关联记录。
   3. 提供 `CacheManager::clearCacheForPath(path)` 或 `FerrexVirtualDbModel::clearCacheForFolder(path)` 接口，在擦除数据时一并无损清理对应的缩略图、宽高比和调色板内存及磁盘高级缓存。
-- 不在本次范围内的是：物理删除用户位于磁盘上的实际文件或源文件夹本身，或重构底层的 USN / MFT 核心监控及扫描时序。
+- 不在本次范围内的是：物理删除用户位于磁盘上的实际文件或源文件夹本身， or 重构底层的 USN / MFT 核心监控及扫描时序。
 - 对应方案文档：Modification_Plan/Modification_Plan-107.md
 
 ## [2026-07-28] NativeFolderWatcher 监控服务架构解耦与防抖重命名高内聚重构
@@ -260,3 +260,16 @@
   4. 解决线程亲和性警告，通过懒加载或确保 `m_debounceTimer` 正确关联主线程事件循环。
 - 不在本次范围内的：修改底层 Windows ReadDirectoryChangesW/IOCP 的异步多线程核心驱动机制，或者重写 `MftReader`、数据库 SQLite 事务持久化细节。
 - 对应方案文档：Modification_Plan/Modification_Plan-110.md
+
+## [2026-07-28] MainWindow 其余清理 & FilterPanel 解耦
+
+- 用户描述的现象/问题：主窗口 MainWindow 内残留了冗余的原生无边框拖拽/拉伸数值运算与光标形状更新逻辑；且主窗口中仍保留了旧的历史变量，没有完全统一到 `NavigationHistoryService` 单例。同时，筛选面板 `FilterPanel` 的 UI 逻辑与组合过滤检索算法深度混杂，职责不单一，违背了 SRP 准则。
+- 用户期望的结果：
+  1. 完全清理 MainWindow 中的冗余拉伸与拖曳数值运算，交由已有过滤器接管；将旧的成员变量历史记录彻底替换为解耦后的 `NavigationHistoryService::instance()`；
+  2. 重构 `FilterPanel`：建立独立的计算逻辑层 `FilterEngine`，剥离 Adobe Bridge 风格多维组合判定、Trigram 模糊、时间、大小等运算逻辑。FilterPanel 仅负责 UI 展现和事件同步，不再承担过滤计算。
+- 本次任务边界：
+  1. 彻底移除 `MainWindow` 中 `getResizeDirection`、`updateCursorShape` 以及相关的鼠标压下、移动事件内部多余拉伸状态，改由 `FramelessWindowResizer` 接管。
+  2. 将 `MainWindow.cpp` 中旧的 `m_history` / `m_historyIndex` 等历史栈处理全部替换为 `NavigationHistoryService::instance()`。
+  3. 创建独立的 `FilterEngine` 核心过滤引擎（类），托管多维属性及文件的组合过滤运算；完全清除 `FilterPanel` 及 `ContentPanel`（`FilterProxyModel`）中重复的各种大小、链接、备注、比例等算法拼接。
+- 不在本次范围内的是：修改底层 MFT 文件高速检索算法，重构数据库 `sqlite3.c` 持久化底座。
+- 对应方案文档：Modification_Plan/Modification_Plan-112.md
