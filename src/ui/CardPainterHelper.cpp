@@ -16,6 +16,7 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
     // ① 统一设置卡片圆角裁切
+    painter->save();
     QPainterPath clipPath;
     clipPath.addRoundedRect(cardRect, 6, 6);
     painter->setClipPath(clipPath);
@@ -44,6 +45,7 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
         defaultIcon.paint(painter, iconRect);
     }
 
+    painter->restore();
     painter->restore();
 }
 
