@@ -219,8 +219,9 @@ QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
         if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
         return m_aspectRatios.value(QDir::toNativeSeparators(path), 1.0);
     } else if (role == HasThumbnailRole) {
-        // 🚨 核心修正：仅当数据库中确实记录了宽高分辨率，或者内存中确实生成了宽高比缓存时，
-        // 才判定为真存在有效缩略图！绝不根据后缀名盲目返回 true！
+        // 2026-xx-xx 按照 Plan-114：优化 HasThumbnailRole 判定逻辑
+        // 只要是图形或视频格式，均预设为 true，强制 Delegate 进入填满模式，消除抖动
+        if (UiHelper::isGraphicsFile(record.suffix)) return true;
         if (record.width > 0 && record.height > 0) return true;
         return m_aspectRatios.contains(QDir::toNativeSeparators(path));
     } else if (role == Qt::DecorationRole && index.column() == 0) {
@@ -686,15 +687,7 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             hasThumb = true;
                         }
                     } else if (UiHelper::isGraphicsFile(ext)) {
-                        // 1. 优先尝试系统 Shell 提取
                         img = UiHelper::getShellThumbnail(path, 128);
-
-                        // 🚨 核心根治：如果 Shell 提取失败（或针对 .cur/.ico 等格式），
-                        // 直接用 QImage 物理读取原文件！直接拿到 100% 纯净透明背景的图像，彻底抹杀 Windows 方块底衬！
-                        if (img.isNull()) {
-                            img.load(path);
-                        }
-
                         if (!img.isNull()) {
                             ar = (double)img.width() / img.height();
                             hasThumb = true;
@@ -721,14 +714,7 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             if (!img.isNull()) {
                                 icon = QIcon(QPixmap::fromImage(img));
                             } else {
-                                // 🚨 针对 .ai 等确实无图片的格式：使用矢量渲染纯净图标，绝不调用带有深色方块底衬的系统图标！
-                                QString ext = QFileInfo(path).suffix().toLower();
-                                if (ext == "ai" || ext == "eps" || ext == "psd") {
-                                    // 渲染纯净透明的矢量品牌图标，无任何黑色方块底衬
-                                    icon = UiHelper::getIcon("category", QColor("#FF8C00"), 128);
-                                } else {
-                                    icon = UiHelper::getFileIcon(path, 128);
-                                }
+                                icon = UiHelper::getFileIcon(path, 128);
                             }
                             
                             mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));

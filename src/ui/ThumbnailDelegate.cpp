@@ -80,18 +80,14 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     bool hasThumb = index.data(m_hasThumbnailRole).toBool();
     QVariant decoData = index.data(Qt::DecorationRole);
     QPixmap thumb;
-    bool hasValidThumb = false;
-
-    // 🚨 核心修正：只有当 DecoData 本身就是真正的 QPixmap 时，才判定为有有效缩略图！
-    // 严禁将 QIcon（系统默认文件图标）强转为 QPixmap(thumb)，避免欺骗绘制器！
     if (decoData.canConvert<QPixmap>()) {
         thumb = decoData.value<QPixmap>();
-        if (!thumb.isNull()) {
-            hasValidThumb = true;
+    } else if (decoData.canConvert<QIcon>()) {
+        QIcon icon = decoData.value<QIcon>();
+        if (!icon.isNull()) {
+            thumb = icon.pixmap(m.cardRect.size());
         }
     }
-
-    QIcon defaultIcon = qvariant_cast<QIcon>(decoData);
 
     // 只有当模型判定为有缩略图 (hasThumb == true)、但当前 Pixmap 尚未加载完成 (thumb.isNull()) 时，
     // 才判定为“等待缩略图中”，避免无缩略图的 AI/CUR 永久显示灰色底盒！
@@ -106,9 +102,9 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
 
     bool isGrid = option.widget ? option.widget->property("gridMode").toBool() : false;
 
-    // ① 绘制主体卡片底色及缩略图 Cover（仅当 hasValidThumb 为 true 时才按图片渲染）
-    CardPainterHelper::drawCardCover(painter, m.cardRect, isSelected, hasValidThumb, thumb,
-                                     defaultIcon, isGrid, isWaitingThumb);
+    // ① 绘制主体卡片底色及缩略图 Cover
+    CardPainterHelper::drawCardCover(painter, m.cardRect, isSelected, hasThumb, thumb,
+                                     qvariant_cast<QIcon>(decoData), isGrid, isWaitingThumb);
 
     // ② 绘制卡片边框
     CardPainterHelper::drawCardBorder(painter, m.cardRect, isSelected);
@@ -123,7 +119,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         CardPainterHelper::drawStatusIndicators(painter, m.cardRect, isPinned, isManaged, isDir, progress);
     }
 
-    // ④ 绘制自适应扩展名徽章（使用真实有效缩略图标记 hasValidThumb）
+    // ④ 绘制自适应扩展名徽章
     if (m_pathRole != -1) {
         QString type = (m_typeRole != -1) ? index.data(m_typeRole).toString() : "";
         QString path = index.data(m_pathRole).toString();
@@ -136,7 +132,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         }
         if (ext.isEmpty()) ext = "FILE";
 
-        CardPainterHelper::drawExtensionBadge(painter, m.cardRect, ext, hasValidThumb);
+        CardPainterHelper::drawExtensionBadge(painter, m.cardRect, ext, hasThumb);
     }
 
     // ⑤ 绘制评级星级与彩色胶囊底色
