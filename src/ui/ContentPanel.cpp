@@ -234,8 +234,8 @@ QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
         QString ext = info.suffix().toLower();
         bool isGraphic = UiHelper::isGraphicsFile(ext) || ext == "svg";
         
-        // 2026-11-14 执行第二步：图形文件等待缩略图时返回空图标，由 Delegate 绘制占位背景，消除抖动
-        if (isGraphic) return QIcon(); 
+        // 2026-11-14 执行第二步：图形文件等待缩略图时返回空数据，由 Delegate 绘制占位背景，消除抖动，物理隔绝系统默认图标！
+        if (isGraphic) return QVariant();
         return UiHelper::getFileIcon(path, 128); // 非图形文件直接显示系统图标
     }
 
