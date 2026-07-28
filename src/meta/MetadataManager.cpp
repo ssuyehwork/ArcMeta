@@ -308,7 +308,6 @@ void MetadataManager::initFromScchMode() {
 
         // 2026-07-xx 物理同步：初始化时构建所有已加载卷的隔离索引
         for (const auto& pair : m_cache) {
-            const std::wstring& path = pair.first;
             const RuntimeMeta& meta = pair.second;
             if (!meta.baseName.empty()) {
                 if (meta.isFolder) {
