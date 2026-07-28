@@ -136,6 +136,8 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
         qDebug() << "[Metadata] 程序正在退出，等待异步同步完成...";
         // 2026-06-xx 物理切换：强制刷新 SQLite 到磁盘
         DatabaseManager::instance().shutdown();
+        AppConfig::instance().setValue("System/LastCleanShutdown", true);
+        AppConfig::instance().sync();
     });
 }
 
