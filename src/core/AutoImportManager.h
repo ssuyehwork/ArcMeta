@@ -24,7 +24,7 @@ public:
     /**
      * @brief 2026-08-xx 物理同步：扫描所有盘符，补全物理存在但逻辑缺失的托管库根分类
      */
-    void syncAllManagedLibraries();
+    void syncAllManagedLibraries(bool allowLightweight = false);
 
 
     /**
@@ -36,7 +36,10 @@ public:
     /**
      * @brief 2026-08-xx 自动同步对账和递归 1:1 分类建立
      */
-    void handleRecursiveIngestion(const std::wstring& rootPath);
+    void handleRecursiveIngestion(const std::wstring& rootPath, bool allowLightweight = false);
+
+    bool hasTopLevelChanged(const std::wstring& rootPath);
+    void saveTopLevelSnapshot(const std::wstring& rootPath);
 
 private slots:
     // 订阅 MftReader 发现的新增条目

@@ -2,9 +2,13 @@
 #include "DatabaseManager.h"
 #include "MetadataManager.h"
 #include "sqlite3.h"
+#include "../core/AppConfig.h"
 #include <QDebug>
 #include <QDateTime>
 #include <QDir>
+#include <QFileInfo>
+#include <QJsonObject>
+#include <QJsonDocument>
 #include <QtConcurrent>
 #include <set>
 #include <unordered_set>
@@ -972,6 +976,63 @@ void CategoryRepo::fullRecount() {
         return;
     }
 
+    // ----------------------------------------------------
+    // 【增量判断拦截机制】：检查自上次重算/退出以来，监控目录是否改变
+    // 物理加固：指纹比对拦截只针对启动后的首次对账重算生效，避免阻断应用内打标签或调整分类导致的实时计数刷新。
+    // ----------------------------------------------------
+    static bool s_firstRecountDone = false;
+
+    // 1. 搜集当前所有的监控根目录绝对路径并计算 mtime 指纹
+    QStringList monitoredPaths;
+    const auto drives = QDir::drives();
+    for (const QFileInfo& d : drives) {
+        std::wstring wPath = d.absolutePath().toStdWString();
+        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wPath);
+        QString letter = d.absolutePath().left(1).toUpper();
+        if (volSerial != L"UNKNOWN") {
+            std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
+            if (!managedAbsW.empty()) {
+                monitoredPaths.append(QString::fromStdWString(managedAbsW));
+            }
+        }
+    }
+    QStringList customFolders = AppConfig::instance().getValue("DriveBar/CustomMonitoredFolders").toStringList();
+    for (const QString& folder : customFolders) {
+        std::wstring normPath = MetadataManager::normalizePath(folder.toStdWString());
+        if (!normPath.empty()) {
+            monitoredPaths.append(QString::fromStdWString(normPath));
+        }
+    }
+    monitoredPaths.removeDuplicates();
+
+    QJsonObject currentFingerprints;
+    for (const QString& path : monitoredPaths) {
+        QFileInfo fi(path);
+        if (fi.exists()) {
+            currentFingerprints.insert(path, QString::number(fi.lastModified().toMSecsSinceEpoch()));
+        }
+    }
+
+    if (!s_firstRecountDone) {
+        // 2. 载入上一次保存的指纹进行比对
+        QJsonObject lastFingerprints;
+        QString lastFingerprintsStr = AppConfig::instance().getValue("Recount/LastMonitoredFingerprints", "").toString();
+        if (!lastFingerprintsStr.isEmpty()) {
+            QJsonDocument doc = QJsonDocument::fromJson(lastFingerprintsStr.toUtf8());
+            if (doc.isObject()) {
+                lastFingerprints = doc.object();
+            }
+        }
+
+        // 3. 核心比对：如果所有监控路径和修改时间戳完全吻合，则直接拦截并返回，不进行全量重算
+        bool isFingerprintMatch = !currentFingerprints.isEmpty() && (currentFingerprints == lastFingerprints);
+        if (isFingerprintMatch) {
+            qDebug() << "[Recount] [Incremental] All monitored root directories remain unchanged. Skip first full recount and physical check.";
+            s_firstRecountDone = true; // 首次对账拦截完成
+            return;
+        }
+    }
+
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return;
 
@@ -1060,6 +1121,12 @@ void CategoryRepo::fullRecount() {
     }
     trans.commit();
 
+    // 4.1 既然重算已经成功持久化，将当前最新的指纹集合更新至 AppConfig 内存并落盘，并重置首次状态
+    QJsonDocument nextDoc(currentFingerprints);
+    AppConfig::instance().setValue("Recount/LastMonitoredFingerprints", QString::fromUtf8(nextDoc.toJson(QJsonDocument::Compact)));
+    AppConfig::instance().sync();
+    s_firstRecountDone = true;
+
     qDebug() << "[Recount] Backstage Recount calibration completed. Total =" << total << "Uncategorized =" << uncategorized << "Trash =" << trash;
 
     // 2026-06-xx 核心逻辑升级：物理有效性对账 (盘点 FRN)
@@ -1096,6 +1163,50 @@ void CategoryRepo::fullRecount() {
                 }
                 MetadataManager::instance().removeMetadataBatchSync(qPaths);
                 
+                DatabaseManager::instance().flushAll();
+                MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+            }, Qt::BlockingQueuedConnection);
+        }
+    });
+
+    // 2026-08-xx 补全失效物理文件夹分类的异步盘点校验清退逻辑
+    (void)QtConcurrent::run([db]() {
+        if (!db) return;
+
+        auto allCats = CategoryRepo::getAll();
+        std::vector<int> catsToRemove;
+
+        for (const auto& cat : allCats) {
+            if (cat.physicalPath.empty()) continue; // 虚拟分类不参与
+
+            // 库根目录保护：判定标准与 CategoryModel.cpp 的 setData() 重命名保护完全一致
+            if (cat.parentId == 0 && QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                continue;
+            }
+
+            std::string currentFid;
+            std::wstring currentFrnStr;
+            bool exists = MetadataManager::fetchWinApiMetadataDirect(cat.physicalPath, currentFid, &currentFrnStr);
+
+            bool frnMismatch = false;
+            if (exists && cat.physicalFrn != 0) {
+                try {
+                    uint64_t currentFrn = std::stoull(currentFrnStr, nullptr, 16);
+                    frnMismatch = (currentFrn != cat.physicalFrn);
+                } catch (...) { frnMismatch = true; }
+            }
+
+            if (!exists || frnMismatch) {
+                catsToRemove.push_back(cat.id);
+            }
+        }
+
+        if (!catsToRemove.empty()) {
+            qDebug() << "[Recount] 物理校验发现" << catsToRemove.size() << "个失效文件夹，准备清退";
+            QMetaObject::invokeMethod(&MetadataManager::instance(), [catsToRemove]() {
+                for (int id : catsToRemove) {
+                    CategoryRepo::remove(id); // 注意：remove() 是把文件夹下的文件移入回收站，不是物理删除记录
+                }
                 DatabaseManager::instance().flushAll();
                 MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
             }, Qt::BlockingQueuedConnection);
