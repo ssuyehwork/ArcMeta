@@ -10,24 +10,21 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
                                      bool hasThumb, const QPixmap& thumb, const QIcon& defaultIcon, 
                                      bool isGridMode, bool isWaitingThumb) {
     Q_UNUSED(isSelected);
-
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    // ① 统一设置卡片圆角裁切
     painter->save();
     QPainterPath clipPath;
     clipPath.addRoundedRect(cardRect, 6, 6);
     painter->setClipPath(clipPath);
 
-    // ② 绘制卡片统一背景色 (128x128 底框)
+    // 统一底色：等待中为 #3A3A3A，常规为 #2d2d2d
     painter->setPen(Qt::NoPen);
     painter->setBrush(isWaitingThumb ? QColor("#3A3A3A") : QColor("#2d2d2d"));
     painter->drawRect(cardRect);
 
     if (hasThumb && !thumb.isNull()) {
-        // 图片/视频缩略图：平滑充满/适应卡片
         QPixmap scaled = thumb.scaled(cardRect.size(),
                                       isGridMode ? Qt::KeepAspectRatio : Qt::KeepAspectRatioByExpanding,
                                       Qt::SmoothTransformation);
@@ -35,16 +32,14 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
         int y = cardRect.center().y() - scaled.height() / 2;
         painter->drawPixmap(x, y, scaled);
     } else if (!defaultIcon.isNull()) {
-        // 🚨 非图片文件（.zxp, .ahk, .exe, .txt）：彻底消灭套娃灰框！
-        // 删掉内层 fillPath(#333333) 的二次小框，直接将图标按 52% 比例精准居中绘制在底框上
-        int iconSize = qMin(cardRect.width(), cardRect.height()) * 0.52;
+        // 🚨 统一参数：彻底消灭套娃灰框，全库统一锁定 65% 比例居中
+        int iconSize = qMin(cardRect.width(), cardRect.height()) * 0.65;
         QRect iconRect(cardRect.center().x() - iconSize / 2,
                        cardRect.center().y() - iconSize / 2,
                        iconSize, iconSize);
 
         defaultIcon.paint(painter, iconRect);
     }
-
     painter->restore();
     painter->restore();
 }
@@ -115,7 +110,12 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
                                         const QRect& cardRect, int starSize, int starSpacing, int ratingY, int ratingH, int starsStartX,
                                         int rating, const QString& colorStr, bool isSelected) {
     Q_UNUSED(cardRect);
-    // 逻辑重构：彩色胶囊背景独立于星级显示
+    Q_UNUSED(starSpacing);
+
+    // 🚨 强制参数锁定：星级间距统一为 -4px，杜绝 0px 稀疏错位
+    int unifiedSpacing = -4;
+
+    // 彩色胶囊底色
     if (!colorStr.isEmpty()) {
         QColor bgColor = UiHelper::parseColorName(colorStr);
         if (bgColor.isValid()) {
@@ -124,7 +124,7 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
             painter->setBrush(bgColor);
             painter->setPen(Qt::NoPen);
             
-            QRect lastStarRect(starsStartX + 4 * (starSize + starSpacing), 
+            QRect lastStarRect(starsStartX + 4 * (starSize + unifiedSpacing),
                                ratingY + (ratingH - starSize) / 2, 
                                starSize, starSize);
             QRect totalRect = banRect.united(lastStarRect);
@@ -137,7 +137,7 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
     if (drawStars) {
         QColor bgColor = colorStr.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorStr);
         
-        // 物理修复：采用感知亮度对比色计算
+        // 感知亮度对比度自适应算法
         double luminance = 0.0;
         if (bgColor.isValid() && bgColor.alpha() > 0) {
             luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
@@ -158,10 +158,13 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
         UiHelper::getIcon("no_color", starColor, banRect.width()).paint(painter, banRect);
+
+        // 🚨 统一资源图标名：彻底抹平资源文件不一致
         QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), starColor);
-        QPixmap emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), emptyStarColor);
+        QPixmap emptyStar  = UiHelper::getPixmap("star", QSize(starSize, starSize), emptyStarColor);
+
         for (int i = 0; i < 5; ++i) {
-            QRect starRect(starsStartX + i * (starSize + starSpacing), 
+            QRect starRect(starsStartX + i * (starSize + unifiedSpacing),
                            ratingY + (ratingH - starSize) / 2, 
                            starSize, starSize);
             painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
