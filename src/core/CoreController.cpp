@@ -93,13 +93,6 @@ void CoreController::startSystem() {
             AppConfig::instance().setValue("System/LastCleanShutdown", false);
             AppConfig::instance().sync();
 
-            // 2026-08-xx 按照 Plan-126：彻底废除 NativeFolderWatcher (IOCP) 双轨制。
-            // 全面转向单一 USN Journal 主轨。
-            // AutoImportManager::instance().startListening(); // 注销 USN 日志监听
-            
-            // [Plan-129] USN 监控点火：系统启动时自动载入缓存并开启监控线程
-            // MftReader::instance().loadFromCache();          // 注销 Mft MftReader 缓存加载
-
             // 启动原生监控服务 (对应用户原话："采用NativeFolderWatcher (IOCP) 机制的方式")
             const auto drives = QDir::drives();
             for (const QFileInfo& d : drives) {
@@ -221,8 +214,6 @@ void CoreController::handleDeviceChange(unsigned long wParam, unsigned long long
         qDebug() << "[Core] [Plan-131] 检测到磁盘硬件变更，触发全量 GLOB 对账...";
         // 异步触发扫描，防止阻塞 UI
         (void)QtConcurrent::run([]() {
-            // 这里可以根据需要驱动 MftReader 重新扫描或 AutoImportManager 对账
-            // 例如：MftReader::instance().buildIndex(); 
             // 或者 AutoImportManager::instance().syncAllManagedLibraries();
         });
     }

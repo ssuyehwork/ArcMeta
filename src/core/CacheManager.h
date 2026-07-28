@@ -18,7 +18,6 @@ struct CacheHeader {
     uint64_t entryCount;    // 条目总数
     uint64_t stringPoolSize; // 字符串池大小
     uint64_t driveSerial;   // 驱动器序列号
-    uint64_t usnWatermark;  // 新增：USN 水位
     uint32_t checksum;     // CRC32 校验
     uint32_t reserved;     // 保留字段
 };

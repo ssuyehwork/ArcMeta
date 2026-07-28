@@ -63,8 +63,6 @@ set(SOURCES
     src/core/NavigationHistoryService.h
     src/core/SearchHistoryService.cpp
     src/core/SearchHistoryService.h
-    src/mft/UsnWatcher.cpp
-    src/mft/UsnWatcher.h
     src/crypto/EncryptionManager.cpp
     src/crypto/EncryptionManager.h
     src/meta/CategoryRepo.cpp

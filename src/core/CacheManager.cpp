@@ -100,10 +100,13 @@ CacheValidationResult CacheManager::validateCache(const QString& drivePath) {
     };
 
     uint32_t finalCrc = 0xFFFFFFFF;
-    finalCrc = crc_func(data, 0x30, finalCrc); // 头部前 48 字节 (刚好到 checksum 前面)
+    // 2026-05-09 修正头部大小对齐：Header 已经不含 usnWatermark，所以 checksum 偏移发生改变
+    // 现在的 CacheHeader 结构体中：
+    // magic(4) + version(4) + timestamp(8) + entryCount(8) + stringPoolSize(8) + driveSerial(8) = 40 字节 = 0x28
+    finalCrc = crc_func(data, 0x28, finalCrc); // 头部前 40 字节 (刚好到 checksum 前面)
     uint32_t z = 0;
     finalCrc = crc_func(&z, 4, finalCrc);      // 模拟校验和位置为 0
-    finalCrc = crc_func(data + 0x34, fileSize - 0x34, finalCrc); // 剩余数据
+    finalCrc = crc_func(data + 0x2C, fileSize - 0x2C, finalCrc); // 剩余数据
     finalCrc ^= 0xFFFFFFFF;
 
     if (finalCrc != storedChecksum) {
@@ -222,7 +225,6 @@ bool CacheManager::saveToCache(const QString& drivePath, const std::vector<Index
     header.entryCount = entries.size();
     header.stringPoolSize = stringPool.size();
     header.driveSerial = getDriveSerial(drivePath);
-    header.usnWatermark = 0; // 未来可以对接真实 USN 进度
     header.checksum = 0; 
     header.reserved = 0;
     

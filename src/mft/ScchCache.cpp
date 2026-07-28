@@ -68,8 +68,7 @@ bool ScchCache::save(
     const std::vector<uint32_t>&                 attributes,
     const std::vector<uint8_t>&                  metadata_fetched,
     const std::vector<uint8_t>&                  string_pool,
-    const std::vector<uint32_t>&                 sorted_indices,
-    const std::unordered_map<std::string, uint64_t>& usn_map
+    const std::vector<uint32_t>&                 sorted_indices
 ) {
     try {
         std::filesystem::path p(path);
@@ -89,7 +88,6 @@ bool ScchCache::save(
         bodySize += 8 + metadata_fetched.size();
         bodySize += 8 + string_pool.size();
         bodySize += 8 + sorted_indices.size() * 4;
-        bodySize += 8 + usn_map.size() * sizeof(ScchUsnEntry);
 
         size_t totalSize = sizeof(ScchHeader) + bodySize;
 
@@ -134,15 +132,6 @@ bool ScchCache::save(
 
         writeVec32(sorted_indices);
 
-        writeU64(usn_map.size());
-        for (const auto& [drive, usn] : usn_map) {
-            ScchUsnEntry entry{};
-            size_t copyLen = (std::min)(drive.size(), sizeof(entry.drive) - 1);
-            memcpy(entry.drive, drive.data(), copyLen);
-            entry.next_usn = usn;
-            writeRaw(&entry, sizeof(entry));
-        }
-
         // 4. 计算 CRC 并填充头部
         uint32_t crc = computeCrc32(base + sizeof(ScchHeader), bodySize);
         ScchHeader* header = reinterpret_cast<ScchHeader*>(base);
@@ -153,7 +142,7 @@ bool ScchCache::save(
             std::chrono::system_clock::now().time_since_epoch()).count();
         header->record_count = frns.size();
         header->pool_size = string_pool.size();
-        header->usn_map_count = usn_map.size();
+        header->usn_map_count = 0;
         header->sorted_indices_count = sorted_indices.size();
         header->crc32 = crc;
         header->flags = 0;
@@ -185,8 +174,7 @@ ScchResult ScchCache::load(
     std::vector<uint32_t>&                       attributes,
     std::vector<uint8_t>&                        metadata_fetched,
     std::vector<uint8_t>&                        string_pool,
-    std::vector<uint32_t>&                       sorted_indices,
-    std::unordered_map<std::string, uint64_t>&   usn_map
+    std::vector<uint32_t>&                       sorted_indices
 ) {
     try {
         std::wstring wpath = std::filesystem::path(path).wstring();
@@ -275,23 +263,6 @@ ScchResult ScchCache::load(
         if (!readVec32(sorted_indices, header->sorted_indices_count)) {
             UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
             return ScchResult::Truncated;
-        }
-
-        uint64_t usnCount = 0;
-        if (!readU64(usnCount) || usnCount != header->usn_map_count) {
-            UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
-            return ScchResult::Truncated;
-        }
-        usn_map.clear();
-        for (uint64_t i = 0; i < usnCount; ++i) {
-            if (ptr + sizeof(ScchUsnEntry) > end) {
-                UnmapViewOfFile(base); CloseHandle(hMap); CloseHandle(hFile);
-                return ScchResult::Truncated;
-            }
-            ScchUsnEntry entry{};
-            memcpy(&entry, ptr, sizeof(entry));
-            ptr += sizeof(entry);
-            usn_map[std::string(entry.drive)] = entry.next_usn;
         }
 
         UnmapViewOfFile(base);

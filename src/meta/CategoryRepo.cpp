@@ -690,8 +690,7 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& fileId12
                 updatePersistentStat(STAT_CATEGORIZED, 1);
             }
 
-            // 2026-08-xx 按照 Plan-126：废除此处直接调用 registerItem。
-            // 归类操作不应直接触发表入库，应由物理位移（如迁移）触发 USN 信号后再由 AutoImportManager 驱动。
+            // 归类操作不应直接触发表入库，应由物理位移（如迁移）后再由 AutoImportManager 驱动。
 
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
             return true;

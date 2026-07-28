@@ -2156,7 +2156,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
 
                 // 2026-07-xx 按照 Plan-121：统一复用 AutoImportManager 的路径计算逻辑，
-                // 不再自行拼接，确保与 USN 准入判定使用完全一致的路径来源。
+                // 不再自行拼接，确保使用完全一致的路径来源。
                 std::wstring managedRootW = AutoImportManager::getManagedLibraryPath(wp);
                 QString managedRoot = QString::fromStdWString(managedRootW);
 

@@ -6,7 +6,7 @@
 namespace ArcMeta {
 
 /**
- * @brief 专职负责底盘级硬件热插拔、USN/IOCP 多维监控智能点火的纯无头（Headless）服务类
+ * @brief 专职负责底盘级硬件热插拔、IOCP 多维监控智能点火的纯无头（Headless）服务类
  */
 class SystemBootstrapper : public QObject {
     Q_OBJECT

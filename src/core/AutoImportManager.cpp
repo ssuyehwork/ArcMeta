@@ -42,15 +42,9 @@ AutoImportManager::~AutoImportManager() {
 }
 
 void AutoImportManager::startListening() {
-    if (m_isListening) return;
-    m_isListening = true;
-    qDebug() << "[AutoImport] USN 监听已停用，不连接 MftReader 信号";
 }
 
 void AutoImportManager::stopListening() {
-    if (!m_isListening) return;
-    m_isListening = false;
-    qDebug() << "[AutoImport] USN 监听已停止";
 }
 
 void AutoImportManager::syncAllManagedLibraries(bool allowLightweight) {
@@ -80,17 +74,6 @@ void AutoImportManager::syncAllManagedLibraries(bool allowLightweight) {
     }
 }
 
-void AutoImportManager::onEntryAdded(uint64_t key) {
-    Q_UNUSED(key);
-}
-
-void AutoImportManager::onEntryUpdated(uint64_t key) {
-    Q_UNUSED(key);
-}
-
-void AutoImportManager::onEntryRemoved(uint64_t key) {
-    Q_UNUSED(key);
-}
 
 std::wstring AutoImportManager::getManagedLibraryPath(const std::wstring& pathOrVolSerial) {
     if (pathOrVolSerial.empty()) return L"";

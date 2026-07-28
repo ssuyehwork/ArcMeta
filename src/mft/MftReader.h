@@ -19,25 +19,7 @@
 #include <winioctl.h>
 
 #if defined(__MINGW32__) || defined(__MINGW64__)
-typedef USN_RECORD USN_RECORD_V2;
-typedef USN_JOURNAL_DATA USN_JOURNAL_DATA_V0;
 typedef MFT_ENUM_DATA MFT_ENUM_DATA_V0;
-typedef READ_USN_JOURNAL_DATA READ_USN_JOURNAL_DATA_V0;
-struct USN_RECORD_COMMON_HEADER {
-    DWORD RecordLength;
-    WORD  MajorVersion;
-    WORD  MinorVersion;
-};
-struct USN_RECORD_V3 {
-    DWORD RecordLength;
-    WORD  MajorVersion;
-    WORD  MinorVersion;
-    FILE_ID_128 FileReferenceNumber;
-    FILE_ID_128 ParentFileReferenceNumber;
-    USN   Usn;
-    LARGE_INTEGER TimeStamp;
-    DWORD Reason;
-};
 #endif
 #include <QIcon>
 #include <QHash>
@@ -56,8 +38,6 @@ struct USN_RECORD_V3 {
 
 namespace ArcMeta {
 
-class UsnWatcher;
-
 /**
  * @brief 高性能 MFT 索引引擎 (SoA 架构)
  */
@@ -71,9 +51,6 @@ public:
 
 signals:
     void dataChanged(int index = -1);
-    void entryAdded(uint64_t key);   // 2026-05-29 新增：实时增量信号
-    void entryRemoved(uint64_t key); // 2026-05-29 新增：实时删除信号
-    void entryUpdated(uint64_t key); // 2026-05-29 新增：实时更新信号
     void driveLoaded(const QString& drive, int count, int total); // 2026-05-14 新增：驱动器就绪信号
 
 public:
@@ -127,10 +104,6 @@ public:
         return (static_cast<uint64_t>(driveIdx) << 48) | (frn & 0x0000FFFFFFFFFFFFull);
     }
 
-    // USN 更新
-    void updateEntryFromUsn(uint8_t* record, const std::wstring& volume);
-    void updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, const std::wstring& volume);
-    void removeEntryByFrn(const std::wstring& volume, uint64_t frn);
     std::wstring getPathFast(size_t driveIdx, uint64_t frn);
 
 private:
@@ -151,7 +124,6 @@ private:
     };
     struct DriveResult {
         std::vector<RawEntry> entries;
-        uint64_t nextUsn;
     };
 
     bool saveDriveToCacheInternal(size_t driveIdx); 
@@ -180,9 +152,6 @@ private:
 
     mutable std::unordered_map<uint64_t, std::wstring>  m_path_cache;
     mutable std::mutex m_pathCacheMutex;
-
-    std::unordered_map<std::wstring, uint64_t>          m_next_usns;
-    std::vector<UsnWatcher*> m_watchers;
 
     mutable QReadWriteLock m_dataLock;
     mutable QReadWriteLock m_iconCacheLock;

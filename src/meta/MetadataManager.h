@@ -419,7 +419,7 @@ private:
     /**
      * @brief 异步持久化项元数据
      * 2026-07-xx 按照 Plan-116：增加授权标志位，严禁非法入库
-     * @param authorized 是否允许创建新记录（只有 USN Journal 触发时为 true）
+     * @param authorized 是否允许创建新记录（只有文件变化触发时为 true）
      */
     void persistAsync(const std::wstring& path, bool notify = true, bool authorized = false);
 

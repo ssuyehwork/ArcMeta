@@ -2,7 +2,6 @@
 #define NOMINMAX
 #endif
 #include "MftReader.h"
-#include "UsnWatcher.h"
 #include <winioctl.h>
 #include <Shlwapi.h>
 #pragma comment(lib, "Shlwapi.lib")
@@ -121,7 +120,6 @@ void MftReader::clearInternal() {
         QWriteLocker lock(&m_iconCacheLock);
         m_icon_cache.clear();
     }
-    m_next_usns.clear();
     m_isInitialized = false;
     for (int i = 0; i < 32; ++i) {
         m_drive_dirty_counts[i] = 0;
@@ -140,16 +138,7 @@ void MftReader::clear() {
         m_isInitialized = false; 
     }
 
-    // 2. [Plan-130] 优化退出响应性：主线程同步停止监控线程，确保及时释放卷句柄
-    std::vector<UsnWatcher*> toStop;
-    {
-        QWriteLocker lock(&m_dataLock);
-        toStop = std::move(m_watchers);
-        m_watchers.clear();
-    }
-    for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
-
-    // 3. 将后续耗时的存盘与释放逻辑转移至后台线程
+    // 2. 将后续耗时的存盘与释放逻辑转移至后台线程
     (void)QtConcurrent::run([this]() {
 
         // B. 等待正在进行的异步写盘任务结束
@@ -157,7 +146,7 @@ void MftReader::clear() {
             QThread::msleep(10);
         }
 
-        // C. 执行最后一次强制存盘 (持久化 USN 游标)
+        // C. 执行最后一次强制存盘
         // 方案一：盘符级状态隔离。检查所有盘符的脏计数
         bool hasDirty = false;
         for (int i = 0; i < 32; ++i) {
@@ -247,44 +236,25 @@ void MftReader::buildIndex(const QStringList& drives) {
     });
 
     QWriteLocker lock(&m_dataLock);
-    std::vector<UsnWatcher*> newWatchers;
     for (auto& sr : scannedResults) {
         if (!sr.success || sr.res.entries.empty()) continue;
         
         size_t dIdx = m_drive_list.size();
         m_drive_list.push_back(sr.volume);
         if (dIdx < 32) m_drive_active_mask.fetch_or(1 << dIdx);
-        m_next_usns[sr.volume] = sr.res.nextUsn;
         mergeDriveResult(sr.volume, sr.res, dIdx);
         saveDriveToCacheInternal(dIdx);
-        
-        auto* w = new UsnWatcher(sr.volume, sr.res.nextUsn, nullptr);
-        m_watchers.push_back(w);
-        newWatchers.push_back(w);
     }
 
     rebuildFrnToIndexMap();
     buildSortedIndices();
     m_isInitialized = true;
-
-    lock.unlock();
-    for (auto* w : newWatchers) w->start();
 }
 
 bool MftReader::loadFromCache() {
     std::filesystem::path cacheDir = "ArcMeta/cache";
     if (!std::filesystem::exists(cacheDir)) return false;
 
-    // 物理优化：加载前先停止现有监控，避免句柄冲突
-    // 注意：这里手动执行清理逻辑，但不触发 saveToCache，防止覆盖磁盘缓存
-    std::vector<UsnWatcher*> toStop;
-    {
-        QWriteLocker lock(&m_dataLock);
-        toStop = std::move(m_watchers);
-        m_watchers.clear();
-    }
-    for (auto* w : toStop) { if (w) { w->stop(); delete w; } }
-    
     {
         QWriteLocker lock(&m_dataLock);
         clearInternal();
@@ -302,9 +272,8 @@ bool MftReader::loadFromCache() {
             std::vector<int64_t> s, t;
             std::vector<uint32_t> no, attr, ds;
             std::vector<uint8_t> sp, mf;
-            std::unordered_map<std::string, uint64_t> usnMap;
 
-            if (ScchCache::load(entry.path().string().c_str(), f, pf, s, t, no, attr, mf, sp, ds, usnMap) == ScchResult::Ok) {
+            if (ScchCache::load(entry.path().string().c_str(), f, pf, s, t, no, attr, mf, sp, ds) == ScchResult::Ok) {
                 size_t dIdx;
                 size_t oldPoolSize;
                 uint32_t baseIdx;
@@ -332,11 +301,8 @@ bool MftReader::loadFromCache() {
                     
                     allSortedIndices.push_back({std::move(ds), baseIdx});
 
-                    for (const auto& [drive, usn] : usnMap) {
-                        driveName = QString::fromStdString(drive).toStdWString();
-                        m_drive_list.push_back(driveName);
-                        m_next_usns[driveName] = usn;
-                    }
+                    driveName = entry.path().stem().wstring() + L":";
+                    m_drive_list.push_back(driveName);
                     currentTotal = m_frns.size();
                 }
                 
@@ -388,17 +354,6 @@ bool MftReader::loadFromCache() {
     }
 
     m_isInitialized = true;
-
-    // 方案一：补完缓存加载后的监控链 (接管变动)
-    // 在缓存加载成功后，立即为所有已加载的驱动器启动 UsnWatcher
-    // 2026-05-29 物理修复：移除此处冗余的 lock 声明（父作用域已持有 lock），消除 C4456 警告
-    for (const auto& drive : m_drive_list) {
-        uint64_t lastUsn = m_next_usns[drive];
-        auto* w = new UsnWatcher(drive, lastUsn, nullptr);
-        m_watchers.push_back(w);
-        w->start();
-    }
-
     return true;
 }
 
@@ -410,7 +365,6 @@ bool MftReader::saveToCache() {
         std::vector<int64_t> s, t;
         std::vector<uint32_t> no, attr, ds;
         std::vector<uint8_t> sp, mf;
-        uint64_t usn;
     };
     std::vector<DriveSnapshot> snapshots;
 
@@ -425,7 +379,6 @@ bool MftReader::saveToCache() {
 
         for (size_t i = 0; i < dCount; ++i) {
             snapshots[i].volume = m_drive_list[i];
-            snapshots[i].usn = m_next_usns[m_drive_list[i]];
         }
 
         // 方案三：精准写入优化。不再执行全量 $O(N)$ 遍历，改为按驱动器索引遍历
@@ -481,10 +434,8 @@ bool MftReader::saveToCache() {
     // 锁外并行存盘 (QtConcurrent)
     for (const auto& snap : snapshots) {
         if (snap.f.empty()) continue;
-        std::unordered_map<std::string, uint64_t> usnMap;
-        usnMap[QString::fromStdWString(snap.volume).toStdString()] = snap.usn;
         QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(snap.volume).left(1));
-        ScchCache::save(path.toStdString().c_str(), snap.f, snap.pf, snap.s, snap.t, snap.no, snap.attr, snap.mf, snap.sp, snap.ds, usnMap);
+        ScchCache::save(path.toStdString().c_str(), snap.f, snap.pf, snap.s, snap.t, snap.no, snap.attr, snap.mf, snap.sp, snap.ds);
     }
     return true;
 }
@@ -502,7 +453,6 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
     std::vector<int64_t> s, t;
     std::vector<uint32_t> no, attr, ds;
     std::vector<uint8_t> sp, mf;
-    uint64_t nextUsnVal = 0;
 
     {
         // 2026-05-29 物理加固：在采样阶段显式获取读锁，确保 SoA 容器在拷贝期间不被写线程重分配
@@ -511,7 +461,6 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
         
         if (driveIdx >= m_drive_list.size()) return false;
         volume = m_drive_list[driveIdx];
-        nextUsnVal = m_next_usns[volume];
 
         std::unordered_map<uint32_t, uint32_t> offsetMap;
         std::unordered_map<size_t, uint32_t> globalToLocal;
@@ -562,13 +511,11 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
 
     // [阶段 2] 锁外 I/O（Unlocked Persistence）
     // 此时已释放 m_dataLock，UI 线程可以自由执行搜索、渲染等操作。
-    std::unordered_map<std::string, uint64_t> usnMap;
-    usnMap[QString::fromStdWString(volume).toStdString()] = nextUsnVal;
     QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
     
     // 释放调用者的锁以允许并发（由于 saveToCache 等函数持有锁，这里需要特殊的逻辑处理）
     // 为了不破坏现有调用链，我们将 saveToCache 逻辑也进行重构。
-    return ScchCache::save(path.toStdString().c_str(), f, pf, s, t, no, attr, mf, sp, ds, usnMap);
+    return ScchCache::save(path.toStdString().c_str(), f, pf, s, t, no, attr, mf, sp, ds);
 }
 
 QString MftReader::getName(int index) const {
@@ -899,340 +846,6 @@ std::vector<uint64_t> MftReader::search(const QString& query, bool useRegex, boo
     return finalRes;
 }
 
-void MftReader::updateEntryFromUsn(uint8_t* recordPtr, const std::wstring& volume) {
-    USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(recordPtr);
-    uint64_t frn, parentFrn;
-    uint32_t attr;
-    LARGE_INTEGER timestamp;
-    WORD fileNameLength, fileNameOffset;
-    USN usn;
-
-    // 2026-05-14 核心排查：针对 V2 (64bit FRN) 和 V3 (128bit FRN) 进行严格的偏移匹配
-    if (header->MajorVersion == 2) {
-        USN_RECORD_V2* record = reinterpret_cast<USN_RECORD_V2*>(recordPtr);
-        frn = record->FileReferenceNumber;
-        parentFrn = record->ParentFileReferenceNumber;
-        attr = record->FileAttributes;
-        timestamp = record->TimeStamp;
-        fileNameLength = record->FileNameLength;
-        fileNameOffset = record->FileNameOffset;
-        usn = record->Usn;
-    } else if (header->MajorVersion == 3) {
-        // 手动映射 V3 布局，避免 SDK 定义缺失导致的读取错误
-        struct V3_LAYOUT {
-            DWORD RecordLength; WORD MajorVersion; WORD MinorVersion;
-            BYTE FileReferenceNumber[16]; BYTE ParentFileReferenceNumber[16];
-            USN Usn; LARGE_INTEGER TimeStamp; DWORD Reason; DWORD SourceInfo;
-            DWORD SecurityId; DWORD FileAttributes; WORD FileNameLength; WORD FileNameOffset;
-        } *v3 = reinterpret_cast<V3_LAYOUT*>(recordPtr);
-        frn = *reinterpret_cast<uint64_t*>(v3->FileReferenceNumber);
-        parentFrn = *reinterpret_cast<uint64_t*>(v3->ParentFileReferenceNumber);
-        usn = v3->Usn;
-        attr = v3->FileAttributes;
-        timestamp = v3->TimeStamp;
-        fileNameLength = v3->FileNameLength;
-        fileNameOffset = v3->FileNameOffset;
-    } else return;
-
-    uint64_t fileSize = 0;
-    int64_t finalModifyTime = filetimeToUnixMs(timestamp.QuadPart);
-    uint32_t finalAttr = attr;
-    bool fetchedSuccess = false;
-
-    if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        std::wstring rootPath = volume + L"\\";
-        // 2026-05-14 修正：hHint 需要 FILE_READ_ATTRIBUTES 权限来辅助 OpenFileById
-        HANDLE hHint = CreateFileW(rootPath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-        if (hHint != INVALID_HANDLE_VALUE) {
-            FILE_ID_DESCRIPTOR id = {0};
-            id.dwSize = sizeof(FILE_ID_DESCRIPTOR);
-            id.Type = FileIdType;
-            id.FileId.QuadPart = frn;
-            // 2026-05-14 核心修正：OpenFileById 的 DesiredAccess 不能为 0，必须至少为 FILE_READ_ATTRIBUTES 才能获取文件大小
-            HANDLE hFile = OpenFileById(hHint, &id, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, FILE_FLAG_BACKUP_SEMANTICS);
-            if (hFile != INVALID_HANDLE_VALUE) {
-                BY_HANDLE_FILE_INFORMATION bhfi;
-                if (GetFileInformationByHandle(hFile, &bhfi)) {
-                    fileSize = (static_cast<uint64_t>(bhfi.nFileSizeHigh) << 32) | bhfi.nFileSizeLow;
-                    finalAttr = bhfi.dwFileAttributes;
-                    finalModifyTime = filetimeToUnixMs((static_cast<int64_t>(bhfi.ftLastWriteTime.dwHighDateTime) << 32) | bhfi.ftLastWriteTime.dwLowDateTime);
-                    fetchedSuccess = true;
-                }
-                CloseHandle(hFile);
-            }
-            CloseHandle(hHint);
-        }
-    }
-
-    QWriteLocker lock(&m_dataLock);
-    QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(recordPtr + fileNameOffset), fileNameLength / 2);
-    size_t dIdx = 0;
-    for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
-    uint64_t encodedPf = makeKey(dIdx, parentFrn);
-    uint64_t compositeKey = makeKey(dIdx, frn);
-
-    // 2026-07-xx 按照 Plan-84：物理对账优化
-    // 1. 通过路径反查，检测是否发生了同名覆盖（即路径没变但 FRN 变了）
-    
-    // 如果该 FID 之前关联在其他路径，或者该路径现在被新 FID 占用，则判定为变动
-    auto it = m_frn_to_idx.find(compositeKey);
-    if (it != m_frn_to_idx.end()) {
-        uint32_t idx = it->second;
-        m_parent_frns[idx] = encodedPf;
-        m_attributes[idx] = finalAttr;
-        m_metadata_fetched[idx] = fetchedSuccess ? 2 : 0;
-        
-        // 2026-05-14 逻辑加固：优先使用 API 获取的属性，若失败则回退至 USN 提供的时间戳
-        m_sizes[idx] = fileSize;
-        m_timestamps[idx] = (finalModifyTime > 0) ? finalModifyTime : filetimeToUnixMs(timestamp.QuadPart);
-
-        QByteArray utf8 = name.toUtf8();
-        uint32_t oldOff = m_name_offsets[idx];
-        const char* oldPtr = reinterpret_cast<const char*>(m_string_pool.data() + oldOff);
-        size_t oldLen = strlen(oldPtr);
-        if ((size_t)utf8.size() <= oldLen) {
-            memcpy(m_string_pool.data() + oldOff, utf8.constData(), utf8.size());
-            m_string_pool[oldOff + utf8.size()] = '\0';
-            if ((size_t)utf8.size() < oldLen) m_wasted_string_bytes += (oldLen - utf8.size());
-        } else {
-            m_wasted_string_bytes += (oldLen + 1);
-            m_name_offsets[idx] = (uint32_t)m_string_pool.size();
-            m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
-            m_string_pool.push_back('\0');
-        }
-    } else {
-        uint32_t newIdx = (uint32_t)m_frns.size();
-        m_frns.push_back(frn);
-        m_parent_frns.push_back(encodedPf);
-        m_sizes.push_back(fileSize);
-        m_timestamps.push_back(finalModifyTime);
-        m_attributes.push_back(finalAttr);
-        m_metadata_fetched.push_back(fetchedSuccess ? 2 : 0);
-        QByteArray utf8 = name.toUtf8();
-        m_name_offsets.push_back((uint32_t)m_string_pool.size());
-        m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
-        m_string_pool.push_back('\0');
-        m_frn_to_idx[compositeKey] = newIdx;
-        if (dIdx < 32) m_drive_entry_indices[dIdx].push_back(newIdx);
-    }
-    { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
-    m_next_usns[volume] = usn;
-    if (dIdx < 32) m_drive_dirty_counts[dIdx]++;
-    
-    // 2026-05-14 工业级内存加固：实时监控内存碎片率
-    // 当浪费的字符串空间超过 20MB 或死亡条目过多时，强制执行 compact 碎片整理
-    if (m_wasted_string_bytes > 20 * 1024 * 1024 || m_dead_count > 100000) {
-        compact();
-    }
-
-    bool shouldSave = false;
-    if (dIdx < 32 && m_drive_dirty_counts[dIdx].load() >= 1000) { 
-        m_drive_dirty_counts[dIdx] = 0; 
-        shouldSave = true;
-    }
-    
-    int finalIdx = -1;
-    bool isNew = (it == m_frn_to_idx.end());
-    if (!isNew) finalIdx = (int)it->second;
-    else finalIdx = (int)m_frns.size() - 1;
-
-    lock.unlock(); // 2026-05-29 物理安全：先解锁再发射信号，杜绝 DirectConnection 导致的跨模块死锁
-
-    if (shouldSave) {
-        // 工业级架构优化：将耗时 I/O 持久化逻辑异步执行，杜绝阻塞 USN 监控主循环与 UI 响应
-        // 增加 CAS 原子操作防止并发写盘竞争，确保单盘持久化原子性
-        bool expected = false;
-        if (m_is_saving.compare_exchange_strong(expected, true)) {
-            // 2026-05-29 工业级警告消除：明确丢弃 QFuture 返回值，满足 MSVC C4858 规范
-            (void)QtConcurrent::run([this, dIdx]() {
-                try {
-                    saveDriveToCache(dIdx); 
-                } catch (...) {
-                    qWarning() << "[MftReader] 后台存盘发生未知异常";
-                }
-                m_is_saving.store(false);
-            });
-        }
-    }
-
-    if (isNew) {
-        emit entryAdded(compositeKey);
-    } else {
-        emit entryUpdated(compositeKey);
-    }
-    emit dataChanged(finalIdx);
-}
-
-void MftReader::updateEntriesFromUsnBatch(const std::vector<uint8_t*>& records, const std::wstring& volume) {
-    if (records.empty()) return;
-    
-    // 工业级重构：批量更新模式，大幅降低 QWriteLocker 的竞争频率
-    QWriteLocker lock(&m_dataLock);
-    
-    size_t dIdx = 0;
-    bool driveFound = false;
-    for (size_t i = 0; i < m_drive_list.size(); ++i) { 
-        if (m_drive_list[i] == volume) { 
-            dIdx = i; 
-            driveFound = true;
-            break; 
-        } 
-    }
-    if (!driveFound) return;
-
-    std::vector<uint64_t> addedKeys;
-    std::vector<uint64_t> updatedKeys;
-
-    for (uint8_t* recordPtr : records) {
-        USN_RECORD_COMMON_HEADER* header = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(recordPtr);
-        uint64_t frn, parentFrn;
-        uint32_t attr;
-        LARGE_INTEGER timestamp;
-        WORD fileNameLength, fileNameOffset;
-        USN usn;
-
-        if (header->MajorVersion == 2) {
-            USN_RECORD_V2* record = reinterpret_cast<USN_RECORD_V2*>(recordPtr);
-            frn = record->FileReferenceNumber;
-            parentFrn = record->ParentFileReferenceNumber;
-            attr = record->FileAttributes;
-            timestamp = record->TimeStamp;
-            fileNameLength = record->FileNameLength;
-            fileNameOffset = record->FileNameOffset;
-            usn = record->Usn;
-        } else if (header->MajorVersion == 3) {
-            struct V3_LAYOUT {
-                DWORD RecordLength; WORD MajorVersion; WORD MinorVersion;
-                BYTE FileReferenceNumber[16]; BYTE ParentFileReferenceNumber[16];
-                USN Usn; LARGE_INTEGER TimeStamp; DWORD Reason; DWORD SourceInfo;
-                DWORD SecurityId; DWORD FileAttributes; WORD FileNameLength; WORD FileNameOffset;
-            } *v3 = reinterpret_cast<V3_LAYOUT*>(recordPtr);
-            frn = *reinterpret_cast<uint64_t*>(v3->FileReferenceNumber);
-            parentFrn = *reinterpret_cast<uint64_t*>(v3->ParentFileReferenceNumber);
-            attr = v3->FileAttributes;
-            timestamp = v3->TimeStamp;
-            fileNameLength = v3->FileNameLength;
-            fileNameOffset = v3->FileNameOffset;
-            usn = v3->Usn;
-        } else continue;
-
-        int64_t finalModifyTime = filetimeToUnixMs(timestamp.QuadPart);
-        uint32_t finalAttr = attr;
-
-        // 批量模式下暂不执行耗时的 OpenFileById 同步拉取，交由异步 Metadata 队列处理
-        // 这样可以确保 USN 监控线程以最高速吞噬日志
-        
-        QString name = QString::fromUtf16(reinterpret_cast<const char16_t*>(recordPtr + fileNameOffset), fileNameLength / 2);
-        uint64_t encodedPf = makeKey(dIdx, parentFrn);
-        uint64_t compositeKey = makeKey(dIdx, frn);
-        
-        auto it = m_frn_to_idx.find(compositeKey);
-        if (it != m_frn_to_idx.end()) {
-            uint32_t idx = it->second;
-            m_parent_frns[idx] = encodedPf;
-            m_attributes[idx] = finalAttr;
-            m_metadata_fetched[idx] = 0; // 标记为未获取，待后续异步补全
-            m_sizes[idx] = 0;
-            m_timestamps[idx] = finalModifyTime;
-
-            QByteArray utf8 = name.toUtf8();
-            uint32_t oldOff = m_name_offsets[idx];
-            const char* oldPtr = reinterpret_cast<const char*>(m_string_pool.data() + oldOff);
-            size_t oldLen = strlen(oldPtr);
-            if ((size_t)utf8.size() <= oldLen) {
-                memcpy(m_string_pool.data() + oldOff, utf8.constData(), utf8.size());
-                m_string_pool[oldOff + utf8.size()] = '\0';
-                if ((size_t)utf8.size() < oldLen) m_wasted_string_bytes += (oldLen - utf8.size());
-            } else {
-                m_wasted_string_bytes += (oldLen + 1);
-                m_name_offsets[idx] = (uint32_t)m_string_pool.size();
-                m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
-                m_string_pool.push_back('\0');
-            }
-            updatedKeys.push_back(compositeKey);
-        } else {
-            uint32_t newIdx = (uint32_t)m_frns.size();
-            m_frns.push_back(frn);
-            m_parent_frns.push_back(encodedPf);
-            m_sizes.push_back(0);
-            m_timestamps.push_back(finalModifyTime);
-            m_attributes.push_back(finalAttr);
-            m_metadata_fetched.push_back(0);
-            QByteArray utf8 = name.toUtf8();
-            m_name_offsets.push_back((uint32_t)m_string_pool.size());
-            m_string_pool.insert(m_string_pool.end(), utf8.begin(), utf8.end());
-            m_string_pool.push_back('\0');
-            m_frn_to_idx[compositeKey] = newIdx;
-            if (dIdx < 32) m_drive_entry_indices[dIdx].push_back(newIdx);
-            addedKeys.push_back(compositeKey);
-        }
-        { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
-        m_next_usns[volume] = usn;
-        if (dIdx < 32) m_drive_dirty_counts[dIdx]++;
-    }
-
-    if (m_wasted_string_bytes > 20 * 1024 * 1024 || m_dead_count > 100000) {
-        compact();
-    }
-
-    bool shouldSave = false;
-    if (dIdx < 32 && m_drive_dirty_counts[dIdx].load() >= 1000) { 
-        m_drive_dirty_counts[dIdx] = 0; 
-        shouldSave = true;
-    }
-
-    lock.unlock();
-
-    if (shouldSave) {
-        bool expected = false;
-        if (m_is_saving.compare_exchange_strong(expected, true)) {
-            (void)QtConcurrent::run([this, dIdx]() {
-                try {
-                    saveDriveToCache(dIdx); 
-                } catch (...) {
-                    qWarning() << "[MftReader] 批量更新后台存盘发生未知异常";
-                }
-                m_is_saving.store(false);
-            });
-        }
-    }
-
-    // 2026-xx-xx 按照 Plan-106：策略：小批量发送单体信号（保证实时性），大批量发送宏观信号（保护 UI）
-    if (addedKeys.size() + updatedKeys.size() < 50) {
-        for (uint64_t key : addedKeys) emit entryAdded(key);
-        for (uint64_t key : updatedKeys) emit entryUpdated(key);
-    } else {
-        // 超过 50 项视为“洪流”，仅发射一次全局变动信号
-        emit dataChanged(-1); 
-    }
-}
-
-void MftReader::removeEntryByFrn(const std::wstring& volume, uint64_t frn) {
-    QWriteLocker lock(&m_dataLock);
-    size_t dIdx = 0;
-    for (size_t i = 0; i < m_drive_list.size(); ++i) { if (m_drive_list[i] == volume) { dIdx = i; break; } }
-    uint64_t compositeKey = makeKey(dIdx, frn);
-
-    auto it = m_frn_to_idx.find(compositeKey);
-    if (it != m_frn_to_idx.end()) {
-        uint32_t idx = it->second;
-        m_frns[idx] = 0;
-        m_frn_to_idx.erase(it);
-        m_dead_count++;
-        const char* p = reinterpret_cast<const char*>(m_string_pool.data() + m_name_offsets[idx]);
-        m_wasted_string_bytes += (strlen(p) + 1);
-        
-        { std::lock_guard<std::mutex> l(m_pathCacheMutex); m_path_cache.erase(compositeKey); }
-        
-        if (m_dead_count > 50000 || m_wasted_string_bytes > 10 * 1024 * 1024) {
-            compact();
-        }
-        
-        lock.unlock(); // 物理安全：解锁后再发射信号
-        emit entryRemoved(compositeKey);
-        emit dataChanged(-1);
-    }
-}
 
 void MftReader::compact() {
     // 2026-06-xx 状态标记：碎片整理期间阻止其他写操作
@@ -1315,7 +928,6 @@ bool MftReader::loadMftDirect(const std::wstring& volume, MftReader::DriveResult
         if (hHint != INVALID_HANDLE_VALUE) CloseHandle(hHint);
         CloseHandle(h); return false; 
     }
-    result.nextUsn = j.NextUsn;
 
     // 工业级启发式预分配：根据日记账条目数预估文件总数，平均 150 字节一个条目
     size_t estimatedCount = static_cast<size_t>(j.NextUsn / 150);
