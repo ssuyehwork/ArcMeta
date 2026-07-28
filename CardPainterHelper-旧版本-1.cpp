@@ -21,15 +21,10 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
     clipPath.addRoundedRect(cardRect, 6, 6);
     painter->setClipPath(clipPath);
 
-    // ② 🚨 严格保持透明：卡片内部 100% 完全透明（绝不绘制任何不透明底色）
+    // ② 绘制卡片底色（单层纯净背景，彻底消除套娃灰框）
     painter->setPen(Qt::NoPen);
-    if (isWaitingThumb) {
-        painter->setBrush(QColor("#2A2A2A")); // 仅在等待缩略图时显示轻量占位灰底
-        painter->drawRect(cardRect);
-    } else {
-        painter->setBrush(Qt::transparent);  // ✅ 常规状态保持完全透明！
-        painter->drawRect(cardRect);
-    }
+    painter->setBrush(isWaitingThumb ? QColor("#3A3A3A") : QColor("#2d2d2d"));
+    painter->drawRect(cardRect);
 
     if (hasThumb && !thumb.isNull()) {
         // 图片/视频缩略图：按原比例 Contain 居中展示，完好保留长宽比
@@ -38,7 +33,7 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
         int y = cardRect.center().y() - scaled.height() / 2;
         painter->drawPixmap(x, y, scaled);
     } else if (!defaultIcon.isNull()) {
-        // 非图片文件图标：65% 比例居中悬浮展示，带有 Qt::AlignCenter
+        // 非图片文件（.zxp, .ahk, .exe, .txt）：65% 比例居中展示，带有 Qt::AlignCenter 居中对齐
         int iconSize = qMin(cardRect.width(), cardRect.height()) * 0.65;
         QRect iconRect(cardRect.center().x() - iconSize / 2,
                        cardRect.center().y() - iconSize / 2,
@@ -54,16 +49,16 @@ void CardPainterHelper::drawCardBorder(QPainter* painter, const QRect& cardRect,
     painter->setRenderHint(QPainter::Antialiasing);
 
     if (isSelected) {
-        // 1. 选中状态：2 像素品牌蓝高亮边框 (#3498db)，贴合卡片边缘
+        // 1. 选中状态：2 像素品牌蓝高亮边框 (#3498db)，紧贴卡片边缘
         painter->setPen(QPen(QColor("#3498db"), 2));
     } else {
-        // 2. 🚨 恢复要求：未选中状态恢复 2 像素深灰套边 (#4a4a4a)
+        // 2. 未选中状态：2 像素深灰套边 (#4a4a4a)
         painter->setPen(QPen(QColor("#4a4a4a"), 2));
     }
 
     painter->setBrush(Qt::NoBrush);
     
-    // 直接在 cardRect 原位绘制 6px 圆角套边，无多余间隙
+    // 废除 1px 间隙：直接在 cardRect 原位绘制 6px 圆角边框，无任何外扩偏移
     painter->drawRoundedRect(cardRect, 6, 6);
     
     painter->restore();
@@ -99,6 +94,7 @@ void CardPainterHelper::drawExtensionBadge(QPainter* painter, const QRect& cardR
                                            const QString& ext, bool hasThumb) {
     QColor badgeColor = UiHelper::getExtensionColor(ext);
 
+    // 针对无缩略图项应用半透明角标，减少视觉冲击
     if (!hasThumb) {
         badgeColor.setAlpha(160);
     }
@@ -122,8 +118,10 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
     Q_UNUSED(cardRect);
     Q_UNUSED(starSpacing);
 
+    // 强制参数锁定：星级间距统一锁定为 -4px，杜绝 0px 稀疏错位
     int unifiedSpacing = -4;
 
+    // 彩色胶囊底色
     if (!colorStr.isEmpty()) {
         QColor bgColor = UiHelper::parseColorName(colorStr);
         if (bgColor.isValid()) {
@@ -145,6 +143,7 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
     if (drawStars) {
         QColor bgColor = colorStr.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorStr);
         
+        // 感知亮度对比度自适应算法
         double luminance = 0.0;
         if (bgColor.isValid() && bgColor.alpha() > 0) {
             luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
@@ -166,6 +165,7 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
         painter->setRenderHint(QPainter::Antialiasing);
         UiHelper::getIcon("no_color", starColor, banRect.width()).paint(painter, banRect);
         
+        // 统一资源图标名：彻底抹平资源文件不一致
         QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), starColor);
         QPixmap emptyStar  = UiHelper::getPixmap("star", QSize(starSize, starSize), emptyStarColor);
         
@@ -183,7 +183,7 @@ void CardPainterHelper::drawEmptyFolderBorder(QPainter* painter, const QRect& ca
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine));
-    painter->setBrush(Qt::NoBrush);
+    painter->setBrush(Qt::NoBrush); // 确保空文件夹标记为全透明
     painter->drawRoundedRect(cardRect, 6, 6);
     painter->restore();
 }
