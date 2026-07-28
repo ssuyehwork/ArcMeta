@@ -686,7 +686,15 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             hasThumb = true;
                         }
                     } else if (UiHelper::isGraphicsFile(ext)) {
+                        // 1. 优先尝试系统 Shell 提取
                         img = UiHelper::getShellThumbnail(path, 128);
+
+                        // 🚨 核心根治：如果 Shell 提取失败（或针对 .cur/.ico 等格式），
+                        // 直接用 QImage 物理读取原文件！直接拿到 100% 纯净透明背景的图像，彻底抹杀 Windows 方块底衬！
+                        if (img.isNull()) {
+                            img.load(path);
+                        }
+
                         if (!img.isNull()) {
                             ar = (double)img.width() / img.height();
                             hasThumb = true;
@@ -713,7 +721,14 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             if (!img.isNull()) {
                                 icon = QIcon(QPixmap::fromImage(img));
                             } else {
-                                icon = UiHelper::getFileIcon(path, 128);
+                                // 🚨 针对 .ai 等确实无图片的格式：使用矢量渲染纯净图标，绝不调用带有深色方块底衬的系统图标！
+                                QString ext = QFileInfo(path).suffix().toLower();
+                                if (ext == "ai" || ext == "eps" || ext == "psd") {
+                                    // 渲染纯净透明的矢量品牌图标，无任何黑色方块底衬
+                                    icon = UiHelper::getIcon("category", QColor("#FF8C00"), 128);
+                                } else {
+                                    icon = UiHelper::getFileIcon(path, 128);
+                                }
                             }
                             
                             mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));

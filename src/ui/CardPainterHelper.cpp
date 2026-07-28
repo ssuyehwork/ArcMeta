@@ -38,9 +38,8 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
         int y = cardRect.center().y() - scaled.height() / 2;
         painter->drawPixmap(x, y, scaled);
     } else if (!defaultIcon.isNull()) {
-        // 🚨 彻底消灭套娃：将系统图标比例由 0.65 提升至 0.88！
-        // 让 Windows 自带的 .ai/.cur 深色方块图标自然贴合卡片边缘，消除悬空留白与套娃感！
-        int iconSize = qMin(cardRect.width(), cardRect.height()) * 0.88;
+        // 非图片文件图标：65% 比例居中悬浮展示，带有 Qt::AlignCenter
+        int iconSize = qMin(cardRect.width(), cardRect.height()) * 0.65;
         QRect iconRect(cardRect.center().x() - iconSize / 2,
                        cardRect.center().y() - iconSize / 2,
                        iconSize, iconSize);
