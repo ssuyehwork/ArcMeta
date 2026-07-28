@@ -46,13 +46,15 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
 }
 
 void CardPainterHelper::drawCardBorder(QPainter* painter, const QRect& cardRect, bool isSelected) {
+    // 🚨 核心改动：未选中时直接返回，彻底不画任何灰色外框（实现真正的 0 像素无边框效果）
+    if (!isSelected) {
+        return;
+    }
+
+    // 只有在【选中状态】下，才绘制 3 像素的品牌蓝高亮边框
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
-    if (isSelected) {
-        painter->setPen(QPen(QColor("#3498db"), 3));
-    } else {
-        painter->setPen(QPen(QColor("#4a4a4a"), 1));
-    }
+    painter->setPen(QPen(QColor("#3498db"), 3));
     painter->setBrush(Qt::NoBrush);
     painter->drawRoundedRect(cardRect, 6, 6);
     painter->restore();
