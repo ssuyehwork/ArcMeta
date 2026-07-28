@@ -362,6 +362,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
                             if (lastDot != std::wstring::npos && lastDot > 0) {
                                 ext = fullName.substr(lastDot + 1);
                                 std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+                                name = fullName.substr(0, lastDot);
                             }
                         }
 
@@ -411,6 +412,10 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
 
     // 2026-08-xx 索引优化
     sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_frn ON categories(physical_frn);", nullptr, nullptr, nullptr);
+    sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_category_items_file_id ON category_items(file_id);", nullptr, nullptr, nullptr);
+    sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_category_items_path_hint ON category_items(path_hint);", nullptr, nullptr, nullptr);
+    sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id);", nullptr, nullptr, nullptr);
+    sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_physical_path ON categories(physical_path);", nullptr, nullptr, nullptr);
 
     conn.diskPath = diskPath;
     return true;

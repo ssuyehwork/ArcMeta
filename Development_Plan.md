@@ -147,7 +147,7 @@
 - 用户描述的现象/问题：`main.cpp` 被写入了大量应急性补丁、跨线程单例强制点名预热、同步高频物理日志落盘，导致职责过载、单实例竞态及程序退出强杀数据库、拖慢扫描等严重隐患。
 - 用户期望的结果：消除这些典型的打补丁式脏代码，按照工业级标准对程序启动、优雅退出、多线程协作生命期与异步日志进行极致重构。
 - 本次任务边界：
-  1. 重写 `src/main.cpp` 编排科学时序启动、退出关于 aboutToQuit 信号的清场槽函数。
+  1. 重写 `src/main.cpp` 编排科学时序启动、退出关于 aboutToQuit 信号 of 清场槽函数。
   2. 重构 `src/ui/Logger.h` 实现高性能异步缓冲日志线程（去除 qDebug 的同步物理写锁阻塞）。
   3. 修改 `src/core/CoreController` 引入 `initializeCoreComponents`，统一、拓扑性地进行单例实例化及定时器哑死物理加固。
 - 不在本次范围内的是：修改物理 MFT 文件扫描核心算法、IOCP 底层驱动及 UI 具体的渲染重排。
@@ -278,7 +278,7 @@
 - 本次任务边界：
   1. 在 `MetadataManager::registerItemsAsync` 中增加文件物理指纹与高级特征双重准入检查，若文件已完备且大小/修改时间一致，直接跳过登记和提取。
   2. 在 `CategoryRepo::addItemToCategory` 中增加重复关联预检，防止每次重启时 `category_items` 被无谓 `INSERT OR REPLACE` 覆盖并导致 `added_at` 乱序并导致数据库频繁标记 Dirty。
-- 不在本次范围内的是：修改物理 MFT 扫描、USN 监控底座以及其他非元数据和分类对账关联的逻辑。
+- 不在本次范围内的是：修改物理 MFT 扫描、USN 监控底座以及其他非元数据 and 分类对账关联的逻辑。
 - 对应方案文档：Modification_Plan/Modification_Plan-117.md
 
 ## [2026-07-28] 修复构建配置缺失与 FilterEngine 编译类型错误
@@ -308,3 +308,16 @@
   - 下次启动或刷新触发 `fullRecount()` 时，通过快速读取比对所有监控目录的当前 `mtime`。如果这些目录的修改时间均未发生改变，则在 `fullRecount()` 最前端直接拦截，不再执行任何文件快照的物理盘点、WinAPI 文件探测和数据库更新，从而极大保护物理磁盘，降低 CPU 与 I/O 消耗。
 - 不在本次范围内的：重构底层 `NativeFolderWatcher` IOCP 或 USN 文件实时监听的核心，或修改侧边栏分类树的非统计相关的 UI 交互逻辑。
 - 对应方案文档：Modification_Plan-118.md
+
+## [2026-07-28] 高频关联多维查询缺失关键索引极速对账加固
+
+- 用户描述的现象/问题：底层数据库在删除关联、查询单个文件分类从属、分类树递归折叠和级联重命名等高频过滤操作中严重缺乏索引保护，导致库在大量条目和长路径下频繁触发耗时的全表线性扫描。
+- 用户期望的结果：在不改变已有 WAL 高性能读写特性的前提下，在 DDL 层面为高频查询条件中涉及的字段一键加装幂等的非最左复合索引，从而消除性能卡顿并阻断全表扫描。
+- 本次任务边界：
+  - 在 `DatabaseManager.cpp` 初始化连接的末尾，追加以下非最左复合索引：
+    1. `idx_category_items_file_id` 作用于 `category_items(file_id)`，优化高频文件移除/归类。
+    2. `idx_category_items_path_hint` 作用于 `category_items(path_hint)`，优化物理重命名级联同步。
+    3. `idx_categories_parent_id` 作用于 `categories(parent_id)`，优化递归分类 BFS 与建子树热点。
+    4. `idx_categories_physical_path` 作用于 `categories(physical_path)`，优化同级前缀 LIKE 检索。
+- 不在本次范围内的是：修改 CategoryRepo 中 SQL 命令的组装与过滤条件，或重构底层的分卷 DB 连接模型。
+- 对应方案文档：Modification_Plan-119.md

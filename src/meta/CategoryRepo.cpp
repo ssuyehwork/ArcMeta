@@ -978,7 +978,10 @@ void CategoryRepo::fullRecount() {
 
     // ----------------------------------------------------
     // 【增量判断拦截机制】：检查自上次重算/退出以来，监控目录是否改变
+    // 物理加固：指纹比对拦截只针对启动后的首次对账重算生效，避免阻断应用内打标签或调整分类导致的实时计数刷新。
     // ----------------------------------------------------
+    static bool s_firstRecountDone = false;
+
     // 1. 搜集当前所有的监控根目录绝对路径并计算 mtime 指纹
     QStringList monitoredPaths;
     const auto drives = QDir::drives();
@@ -1010,21 +1013,24 @@ void CategoryRepo::fullRecount() {
         }
     }
 
-    // 2. 载入上一次保存的指纹进行比对
-    QJsonObject lastFingerprints;
-    QString lastFingerprintsStr = AppConfig::instance().getValue("Recount/LastMonitoredFingerprints", "").toString();
-    if (!lastFingerprintsStr.isEmpty()) {
-        QJsonDocument doc = QJsonDocument::fromJson(lastFingerprintsStr.toUtf8());
-        if (doc.isObject()) {
-            lastFingerprints = doc.object();
+    if (!s_firstRecountDone) {
+        // 2. 载入上一次保存的指纹进行比对
+        QJsonObject lastFingerprints;
+        QString lastFingerprintsStr = AppConfig::instance().getValue("Recount/LastMonitoredFingerprints", "").toString();
+        if (!lastFingerprintsStr.isEmpty()) {
+            QJsonDocument doc = QJsonDocument::fromJson(lastFingerprintsStr.toUtf8());
+            if (doc.isObject()) {
+                lastFingerprints = doc.object();
+            }
         }
-    }
 
-    // 3. 核心比对：如果所有监控路径和修改时间戳完全吻合，则直接拦截并返回，不进行全量重算
-    bool isFingerprintMatch = !currentFingerprints.isEmpty() && (currentFingerprints == lastFingerprints);
-    if (isFingerprintMatch) {
-        qDebug() << "[Recount] [Incremental] All monitored root directories remain unchanged. Skip full recount and physical check.";
-        return;
+        // 3. 核心比对：如果所有监控路径和修改时间戳完全吻合，则直接拦截并返回，不进行全量重算
+        bool isFingerprintMatch = !currentFingerprints.isEmpty() && (currentFingerprints == lastFingerprints);
+        if (isFingerprintMatch) {
+            qDebug() << "[Recount] [Incremental] All monitored root directories remain unchanged. Skip first full recount and physical check.";
+            s_firstRecountDone = true; // 首次对账拦截完成
+            return;
+        }
     }
 
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
@@ -1115,10 +1121,11 @@ void CategoryRepo::fullRecount() {
     }
     trans.commit();
 
-    // 4.1 既然重算已经成功持久化，将当前最新的指纹集合更新至 AppConfig 内存并落盘
+    // 4.1 既然重算已经成功持久化，将当前最新的指纹集合更新至 AppConfig 内存并落盘，并重置首次状态
     QJsonDocument nextDoc(currentFingerprints);
     AppConfig::instance().setValue("Recount/LastMonitoredFingerprints", QString::fromUtf8(nextDoc.toJson(QJsonDocument::Compact)));
     AppConfig::instance().sync();
+    s_firstRecountDone = true;
 
     qDebug() << "[Recount] Backstage Recount calibration completed. Total =" << total << "Uncategorized =" << uncategorized << "Trash =" << trash;
 

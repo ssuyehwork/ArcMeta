@@ -1823,6 +1823,11 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
                     if (isNew && !rMeta.isFolder && !rMeta.isTrash) {
                         CategoryRepo::incrementTotalFileCount(1);
                     }
+                    rMeta.isManaged = true;
+                    {
+                        std::unique_lock<std::shared_mutex> lock(m_mutex);
+                        m_cache[p] = rMeta;
+                    }
                     recordsToSync.push_back({p, rMeta});
                 }
                 sqlite3_finalize(memStmt);
@@ -1933,7 +1938,8 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
             }
             {
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
-                m_cache[nPath].isManaged = true;
+                rMeta.isManaged = true;
+                m_cache[nPath] = rMeta;
             }
             qDebug() << "[DB_TRACE] persistAsync 写入内存库成功，是否新项:" << isNew << "路径:" << QString::fromStdWString(nPath);
         } else {
