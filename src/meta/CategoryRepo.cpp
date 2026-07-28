@@ -2,9 +2,13 @@
 #include "DatabaseManager.h"
 #include "MetadataManager.h"
 #include "sqlite3.h"
+#include "../core/AppConfig.h"
 #include <QDebug>
 #include <QDateTime>
 #include <QDir>
+#include <QFileInfo>
+#include <QJsonObject>
+#include <QJsonDocument>
 #include <QtConcurrent>
 #include <set>
 #include <unordered_set>
@@ -972,6 +976,57 @@ void CategoryRepo::fullRecount() {
         return;
     }
 
+    // ----------------------------------------------------
+    // 【增量判断拦截机制】：检查自上次重算/退出以来，监控目录是否改变
+    // ----------------------------------------------------
+    // 1. 搜集当前所有的监控根目录绝对路径并计算 mtime 指纹
+    QStringList monitoredPaths;
+    const auto drives = QDir::drives();
+    for (const QFileInfo& d : drives) {
+        std::wstring wPath = d.absolutePath().toStdWString();
+        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wPath);
+        QString letter = d.absolutePath().left(1).toUpper();
+        if (volSerial != L"UNKNOWN") {
+            std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
+            if (!managedAbsW.empty()) {
+                monitoredPaths.append(QString::fromStdWString(managedAbsW));
+            }
+        }
+    }
+    QStringList customFolders = AppConfig::instance().getValue("DriveBar/CustomMonitoredFolders").toStringList();
+    for (const QString& folder : customFolders) {
+        std::wstring normPath = MetadataManager::normalizePath(folder.toStdWString());
+        if (!normPath.empty()) {
+            monitoredPaths.append(QString::fromStdWString(normPath));
+        }
+    }
+    monitoredPaths.removeDuplicates();
+
+    QJsonObject currentFingerprints;
+    for (const QString& path : monitoredPaths) {
+        QFileInfo fi(path);
+        if (fi.exists()) {
+            currentFingerprints.insert(path, QString::number(fi.lastModified().toMSecsSinceEpoch()));
+        }
+    }
+
+    // 2. 载入上一次保存的指纹进行比对
+    QJsonObject lastFingerprints;
+    QString lastFingerprintsStr = AppConfig::instance().getValue("Recount/LastMonitoredFingerprints", "").toString();
+    if (!lastFingerprintsStr.isEmpty()) {
+        QJsonDocument doc = QJsonDocument::fromJson(lastFingerprintsStr.toUtf8());
+        if (doc.isObject()) {
+            lastFingerprints = doc.object();
+        }
+    }
+
+    // 3. 核心比对：如果所有监控路径和修改时间戳完全吻合，则直接拦截并返回，不进行全量重算
+    bool isFingerprintMatch = !currentFingerprints.isEmpty() && (currentFingerprints == lastFingerprints);
+    if (isFingerprintMatch) {
+        qDebug() << "[Recount] [Incremental] All monitored root directories remain unchanged. Skip full recount and physical check.";
+        return;
+    }
+
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
     if (!db) return;
 
@@ -1059,6 +1114,11 @@ void CategoryRepo::fullRecount() {
         sqlite3_finalize(stmt);
     }
     trans.commit();
+
+    // 4.1 既然重算已经成功持久化，将当前最新的指纹集合更新至 AppConfig 内存并落盘
+    QJsonDocument nextDoc(currentFingerprints);
+    AppConfig::instance().setValue("Recount/LastMonitoredFingerprints", QString::fromUtf8(nextDoc.toJson(QJsonDocument::Compact)));
+    AppConfig::instance().sync();
 
     qDebug() << "[Recount] Backstage Recount calibration completed. Total =" << total << "Uncategorized =" << uncategorized << "Trash =" << trash;
 

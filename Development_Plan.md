@@ -26,7 +26,7 @@
 
 ## [2026-07-20] 三种视图架构设计缺陷排查与极致重构规划
 
-- 用户描述的现象/问题：当前版本中的三种视图（列表、网格、合理自适应对齐模式）存在逻辑冗余、职责过载以及交互/渲染卡顿等傻逼逻辑架构问题。
+- 用户描述的现象/问题：当前版本中的三种视图（列表、网格、合理自适应对齐模式）存在 logic 冗余、职责过载以及交互/渲染卡顿等傻逼逻辑架构问题。
 - 用户期望的结果：对三种视图底层控制链展开深度排查，找出不合理的架构缺陷并形成极致解耦与性能提升 of 优化方案，并产出详细设计。
 - 本次任务边界：审计并理清 `JustifiedView`、`ListResultView`、`GridResultView`、`JustifiedResultView` 以及 `ContentPanel` 之间在视图控制、数据映射 and 布局渲染上的依赖关系，设计职责更清晰、耦合度更低的模块化结构。
 - 不在本次范围内的是：实际修改或编译代码，移植非视图类的其他外部功能。
@@ -36,7 +36,7 @@
 
 - 用户描述的现象/问题：当前版本的 `QuickLookWindow` 预览运行逻辑不符合预期，其处理逻辑 and 界面交互（如图像缩放、音视频媒体处理、文本二进制检测及编码识别等）功能不够完备。
 - 用户期望的结果：彻底放弃当前版本的 `QuickLookWindow` 运行逻辑，将其替换为 `FERREX-META` 版本中的 `QuickLookWindow` 运行逻辑。这包括采用专门设计的 `QuickLookGraphicsView`（支持滚轮缩放、双击恢复/适配大小、鼠标拖拽移动及光标跟随变动）、引入更完整的多媒体及文本二进制与编码自动检测识别渲染，实现更好的大文件和特殊文件类型的预览。
-- 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView`控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅的占位降级兼容。
+- 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView`控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅 of 占位降级兼容。
 - 不在本次范围内的是：修改 `MainWindow` 的主导航调度机制 or 任何非预览关联的面板组件。
 - 对应方案文档: Modification_Plan-36.md
 
@@ -92,7 +92,7 @@
 
 ## [2026-07-24] 全款应用架构与文件职责过载深度排查
 
-- 用户描述的现象/问题：应用中可能存在整体混乱的逻辑架构，文件职责过载（违反SRP），以及存在某些功能具有不合理的傻逼逻辑架构。
+- 用户描述的现象/问题：应用中可能存在整体混乱的逻辑架构，文件职责过载（违反SRP），以及存在某些功能具有不合理的傻逼逻辑架构功能。
 - 用户期望的结果：对全款应用及核心源码文件进行地毯式的通红与细粒度审计，标记所有存在职责过载（违反 SRP）的文件，定位逻辑架构设计不合理的傻逼逻辑架构功能。
 - 本次任务边界：对 `src/` 目录下的核心逻辑、业务模块 and UI 骨架（如 `ContentPanel`, `MainWindow`, `MetadataManager`, `MftReader` 等）及各组件数据流向、跨层耦合 and UI 层业务硬编码进行地毯式地深层审计与排查，输出架构漏洞、混乱点、文件职责过载证据（行号 + 代码片段）并归档。
 - 不在本次范围内的是：修改任何代码文件、创建实际重构代码、或扫描非当前项目指定的外部不相关目录。
@@ -124,7 +124,7 @@
 - 用户描述的现象/问题：现有的右键菜单及部分分类/文件夹设置中采用“随机颜色”和“设置颜色”的传统菜单项（QAction）及弹窗操作链路复杂、不够直观。
 - 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段和 metadata 表 of color 字段中。
 - 本次任务边界：
-  1. 彻底删除 `CategoryPanel` 及 `MainWindow`（FolderButton 菜单）中的“随机颜色”与“设置颜色”旧 QAction 和旧对应响应函数（如 `onRandomColor` / `onSetColor`）。
+  1.彻底删除 `CategoryPanel` 及 `MainWindow`（FolderButton 菜单）中的“随机颜色”与“设置颜色”旧 QAction 和旧对应响应函数（如 `onRandomColor` / `onSetColor`）。
   2. 针对 `CategoryPanel` 侧边分类右键菜单、`MainWindow` 中的 FolderButton 右键菜单，以及 `ContentPanel` 内容右键菜单中的“设定颜色标签”（ActionColorTag）子菜单，实现全新的一排水平排列色块快捷操作区域（可以使用自定义 `QWidgetAction` 加载色块容器）。
   3. 每个色块尺寸 and 间距根据界面情况合理设定（如圆形色块，直径 20px-24px，间隔 6px-8px），且鼠标悬停在色块上方时绘制出明晰的白色同心圆突显色块边缘。
   4. 选中某个色块后，立即调用更新接口：
@@ -240,7 +240,7 @@
 
 ## [2026-07-27] 创建自动导入中途取消与数据擦除机制安全落地
 
-- 用户描述的现象/问题：在自动导入（Auto-Import）进行过程中，如果用户突然改变主意，当前缺乏一种允许用户中途停止（Stop）并彻底擦除（Erase）已导入元数据和缓存垃圾的安全撤销机制（Kill & Purge）。
+- 用户描述的现象/问题：在自动导入（Auto-Import）进行过程中，如果用户突然改变主意，当前缺乏一种允许用户中途停止（Stop）并彻底擦除（Erase）已导入元数据 and 缓存垃圾的安全撤销机制（Kill & Purge）。
 - 用户期望的结果：在不破坏程序稳定性的前提下，设计并实现一套中途停止和擦除机制。用户触发取消时，首先安全、平滑地中止后台的多媒体特征提取与入库流水线（避免强杀线程造成死锁或数据库损坏），随后批量高效地删除该托管文件夹已入库的所有元数据记录，并彻底物理清理已生成的对应缩略图及宽高比高级缓存，恢复到干净的状态。
 - 本次任务边界：
   1. 设计并实现 `MediaExtractorPipeline::cancelBatch()` 与 `cancelAll()` 接口，通过引入原子取消标记 `std::atomic<bool> m_isCanceled` 支持执行中断与排队任务清空，安全、非阻塞地挂起和清退流水线。
@@ -277,7 +277,7 @@
 - 用户期望的结果：在启动主程序进行全量对账时，跳过已成功导入且指纹/修改时间未发生变化的完备文件，杜绝每次重启时的冗余扫描和特征提取，保护物理磁盘并大幅减少 CPU 占用。
 - 本次任务边界：
   1. 在 `MetadataManager::registerItemsAsync` 中增加文件物理指纹与高级特征双重准入检查，若文件已完备且大小/修改时间一致，直接跳过登记和提取。
-  2. 在 `CategoryRepo::addItemToCategory` 中增加重复关联预检，防止每次重启时 `category_items` 被无谓 `INSERT OR REPLACE` 覆盖并导致 `added_at` 乱序和数据库频繁标记 Dirty。
+  2. 在 `CategoryRepo::addItemToCategory` 中增加重复关联预检，防止每次重启时 `category_items` 被无谓 `INSERT OR REPLACE` 覆盖并导致 `added_at` 乱序并导致数据库频繁标记 Dirty。
 - 不在本次范围内的是：修改物理 MFT 扫描、USN 监控底座以及其他非元数据和分类对账关联的逻辑。
 - 对应方案文档：Modification_Plan/Modification_Plan-117.md
 
@@ -298,3 +298,13 @@
 - 本次任务边界：全面审计 `src/core/NativeFolderWatcher.h` 和 `src/core/NativeFolderWatcher.cpp`，梳理其与底层 Windows IOCP API 交互、事件去重与延迟分发、重命名超时配对，以及对外部类如 `MetadataManager`、`AutoImportManager` 的硬编码耦合。由于当前角色是分析师，仅产出架构剖析与重构规划文档，不实际修改或重构任何代码文件，亦不执行编译。
 - 不在本次范围内的是：物理修改代码文件、进行编译测试。
 - 对应方案文档：Modification_Plan/Modification_Plan-114.md
+
+## [2026-07-28] 侧边栏 `fullRecount()` 启动全量扫描增量判断机制加固
+
+- 用户描述的现象/问题：因为这套架构里根本没有"增量判断"这一层,`fullRecount()` 被设计成无条件全量扫描,没有任何机制去判断"上次退出到这次启动之间,磁盘到底有没有变化"。启动时无条件触发全量扫描/全量核对，白白消耗启动时间和磁盘 I/O。
+- 用户期望的结果：在 `fullRecount()` 之前（或调用处）引入轻量级的“是否真的需要重算”的增量判断机制。如果上次退出到这次启动之间，监控目录没有任何变动，则跳过耗时的全量物理校验探针与重新对账流程，直接复用已加载的计数。
+- 本次任务边界：
+  - 设计在退出或同步完成时记录各监控目录（Managed Library 或自定义监控目录）的最后修改时间（`mtime`）指纹并持久化到 `AppConfig`。
+  - 下次启动或刷新触发 `fullRecount()` 时，通过快速读取比对所有监控目录的当前 `mtime`。如果这些目录的修改时间均未发生改变，则在 `fullRecount()` 最前端直接拦截，不再执行任何文件快照的物理盘点、WinAPI 文件探测和数据库更新，从而极大保护物理磁盘，降低 CPU 与 I/O 消耗。
+- 不在本次范围内的：重构底层 `NativeFolderWatcher` IOCP 或 USN 文件实时监听的核心，或修改侧边栏分类树的非统计相关的 UI 交互逻辑。
+- 对应方案文档：Modification_Plan-118.md
