@@ -13,6 +13,9 @@
 #include <QVector>
 #include <QPair>
 #include <QDebug>
+#include <QFileInfo>
+#include <QFileIconProvider>
+#include <QMap>
 
 #include "SvgIconRenderer.h"
 #include "WindowsShellThumbnailProvider.h"
@@ -76,7 +79,35 @@ public:
 
     static inline QIcon getFileIcon(const QString& filePath, int size = 18, const QColor& overrideColor = QColor()) {
         Q_UNUSED(overrideColor);
-        return WindowsShellThumbnailProvider::getFileIcon(filePath, size);
+        Q_UNUSED(size);
+
+        QFileInfo info(filePath);
+        // 1. 如果是目录，正常获取文件夹图标
+        if (info.isDir()) {
+            QFileIconProvider provider;
+            if (info.isRoot()) return provider.icon(info);
+            return provider.icon(QFileIconProvider::Folder);
+        }
+
+        // 2. 🚨 物理对齐 FERREX-META 秘密 2：针对文件，使用虚拟扩展名 "dummy.ext" 提取纯净图标！
+        // 彻底杜绝 Windows 传回带有深色圆角方块的粗糙系统图标！
+        QString ext = info.suffix().toLower();
+        if (ext.isEmpty()) ext = "unknown";
+
+        static QMap<QString, QIcon> s_cleanIconCache;
+        if (s_cleanIconCache.contains(ext)) {
+            return s_cleanIconCache[ext];
+        }
+
+        QFileIconProvider provider;
+        // 给 QFileIconProvider 传虚拟文件名 dummy.ext，拿到 100% 透明背景的纯净矢量图标
+        QIcon cleanIcon = provider.icon(QFileInfo("dummy." + ext));
+        if (cleanIcon.isNull()) {
+            cleanIcon = provider.icon(QFileIconProvider::File);
+        }
+
+        s_cleanIconCache[ext] = cleanIcon;
+        return cleanIcon;
     }
 
     static inline QPixmap getPixmap(const QString& key, const QSize& size, const QColor& color) {
