@@ -11,6 +11,7 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QHBoxLayout>
+#include <QContextMenuEvent>
 
 namespace ArcMeta {
 
