@@ -36,8 +36,8 @@ NavPanel::NavPanel(QWidget* parent)
     // 设置面板宽度（遵循文档：导航面板 230px）
     setMinimumWidth(230);
     
-    // 核心修正：移除宽泛的 QWidget QSS，防止其屏蔽 MainWindow 赋予的 ID 边框样式
-    setStyleSheet("color: #EEEEEE;");
+    // 核心修正：设置明确的背景色与前景色，防止 QSS 异步加载时露出系统默认浅色背景
+    setStyleSheet("NavPanel { background-color: #1E1E1E; color: #EEEEEE; }");
 
     m_mainLayout = new QVBoxLayout(this);
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
@@ -155,7 +155,7 @@ void NavPanel::initUi() {
     // 2026-xx-xx 按照 Plan-107：物理还原 QSplitter 弹性架构
     m_splitter = new QSplitter(Qt::Vertical, this);
     m_splitter->setHandleWidth(1);
-    m_splitter->setStyleSheet("QSplitter::handle { background: #333333; }");
+    m_splitter->setStyleSheet("QSplitter { background-color: #1E1E1E; border: none; } QSplitter::handle { background: #333333; }");
 
     // --- 磁盘树 ---
     m_treeView = new DropTreeView(this);
