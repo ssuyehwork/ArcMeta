@@ -175,7 +175,9 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             width INTEGER DEFAULT 0,
             height INTEGER DEFAULT 0,
             ingestion_status INTEGER DEFAULT -1,
-            auto_color TEXT DEFAULT ''
+            auto_color TEXT DEFAULT '',
+            base_name TEXT DEFAULT '',
+            ext TEXT DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
 
@@ -310,6 +312,74 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 auto_color 字段...";
         sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN auto_color TEXT DEFAULT ''", nullptr, nullptr, nullptr);
     }
+
+    // 2026-08-xx 新增字段：持久化基名与后缀名，避免每次启动现算并优化回填
+    bool hasBaseNameColumn = false;
+    bool hasExtColumn = false;
+    sqlite3_stmt* checkStmt2 = nullptr;
+    if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt2, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(checkStmt2) == SQLITE_ROW) {
+            const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(checkStmt2, 1));
+            if (colName) {
+                std::string name(colName);
+                if (name == "base_name") hasBaseNameColumn = true;
+                if (name == "ext") hasExtColumn = true;
+            }
+        }
+        sqlite3_finalize(checkStmt2);
+    }
+
+    if (!hasBaseNameColumn) {
+        qDebug() << "[DB] 检测到旧版数据库，正在添加 base_name 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN base_name TEXT DEFAULT ''", nullptr, nullptr, nullptr);
+    }
+    if (!hasExtColumn) {
+        qDebug() << "[DB] 检测到旧版数据库，正在添加 ext 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN ext TEXT DEFAULT ''", nullptr, nullptr, nullptr);
+
+        // 回填存量数据
+        sqlite3_stmt* selStmt = nullptr;
+        if (sqlite3_prepare_v2(conn.memDb, "SELECT file_id, path, is_folder FROM metadata", -1, &selStmt, nullptr) == SQLITE_OK) {
+            sqlite3_stmt* updStmt = nullptr;
+            if (sqlite3_prepare_v2(conn.memDb, "UPDATE metadata SET base_name = ?, ext = ? WHERE file_id = ?", -1, &updStmt, nullptr) == SQLITE_OK) {
+                // 暂时用局部逻辑来实现旧数据的解析和回填（不调用未初始化完全的 MetadataManager 的实例）
+                while (sqlite3_step(selStmt) == SQLITE_ROW) {
+                    const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(selStmt, 0));
+                    const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(selStmt, 1));
+                    bool isFolder = sqlite3_column_int(selStmt, 2) != 0;
+                    if (fid && wpath) {
+                        std::wstring normPath(wpath);
+                        size_t lastSlash = normPath.find_last_of(L"\\/");
+                        std::wstring fullName = (lastSlash == std::wstring::npos) ? normPath : normPath.substr(lastSlash + 1);
+
+                        std::wstring name, ext;
+                        if (isFolder) {
+                            name = fullName;
+                            ext = L"";
+                        } else {
+                            name = fullName;
+                            size_t lastDot = fullName.find_last_of(L'.');
+                            if (lastDot != std::wstring::npos && lastDot > 0) {
+                                ext = fullName.substr(lastDot + 1);
+                                std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+                            }
+                        }
+
+                        sqlite3_bind_text16(updStmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_text16(updStmt, 2, ext.c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_text(updStmt, 3, fid, -1, SQLITE_TRANSIENT);
+                        sqlite3_step(updStmt);
+                        sqlite3_reset(updStmt);
+                    }
+                }
+                sqlite3_finalize(updStmt);
+            }
+            sqlite3_finalize(selStmt);
+            qDebug() << "[DB] 存量数据 base_name/ext 回填完成";
+        }
+    }
+
+    sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_metadata_ext ON metadata(ext);", nullptr, nullptr, nullptr);
 
     // 2026-08-xx 物理同步扩展：迁移 categories 表字段
     sqlite3_stmt* catCheckStmt;

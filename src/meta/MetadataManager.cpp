@@ -177,6 +177,12 @@ void MetadataManager::initFromScchMode() {
 
                 const wchar_t* autoColor = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 18));
                 if (autoColor) rm.autoColor = autoColor;
+
+                const wchar_t* wBaseName = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 19));
+                if (wBaseName) rm.baseName = wBaseName;
+
+                const wchar_t* wExt = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 20));
+                if (wExt) rm.ext = wExt;
                 
                 const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 5));
                 QString tags = wtags ? QString::fromWCharArray(wtags) : "";
@@ -304,17 +310,15 @@ void MetadataManager::initFromScchMode() {
         for (const auto& pair : m_cache) {
             const std::wstring& path = pair.first;
             const RuntimeMeta& meta = pair.second;
-            std::wstring name, ext;
-            parsePathComponents(path, meta.isFolder, name, ext);
-            if (!name.empty()) {
+            if (!meta.baseName.empty()) {
                 if (meta.isFolder) {
-                    auto& v = m_folderNameToFids[name];
+                    auto& v = m_folderNameToFids[meta.baseName];
                     if (std::find(v.begin(), v.end(), meta.fileId128) == v.end()) v.push_back(meta.fileId128);
                 } else {
-                    auto& v = m_fileNameToFids[name];
+                    auto& v = m_fileNameToFids[meta.baseName];
                     if (std::find(v.begin(), v.end(), meta.fileId128) == v.end()) v.push_back(meta.fileId128);
-                    if (!ext.empty()) {
-                        auto& ve = m_extensionToFids[ext];
+                    if (!meta.ext.empty()) {
+                        auto& ve = m_extensionToFids[meta.ext];
                         if (std::find(ve.begin(), ve.end(), meta.fileId128) == ve.end()) ve.push_back(meta.fileId128);
                     }
                 }
@@ -1751,7 +1755,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
         if (db) groups[db].push_back(p);
     }
 
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     for (auto& entry : groups) {
         sqlite3* memDb = entry.first;
@@ -1777,6 +1781,9 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
             if (isNew && !authorized) {
                 if (!isInsideManagedLibrary(p)) continue;
             }
+
+            // 重新解析出最新基名与后缀塞入
+            parsePathComponents(p, rMeta.isFolder, rMeta.baseName, rMeta.ext);
 
             sqlite3_stmt* memStmt;
             if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
@@ -1807,6 +1814,8 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
                     sqlite3_bind_int(stmt, 17, meta.height);
                     sqlite3_bind_int(stmt, 18, meta.ingestionStatus);
                     sqlite3_bind_text16(stmt, 19, meta.autoColor.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(stmt, 20, meta.baseName.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(stmt, 21, meta.ext.c_str(), -1, SQLITE_TRANSIENT);
                 };
                 bindLogic(memStmt, p, rMeta);
 
@@ -1833,6 +1842,9 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     std::wstring nPath = MetadataManager::normalizePath(path);
     
     RuntimeMeta rMeta = getMeta(nPath);
+    // 写入前现算一次持久化基名与后缀
+    parsePathComponents(nPath, rMeta.isFolder, rMeta.baseName, rMeta.ext);
+
     sqlite3* memDb = nullptr;
     std::wstring volSerial;
     
@@ -1904,9 +1916,11 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         sqlite3_bind_int(stmt, 17, meta.height);
         sqlite3_bind_int(stmt, 18, meta.ingestionStatus);
         sqlite3_bind_text16(stmt, 19, meta.autoColor.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 20, meta.baseName.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmt, 21, meta.ext.c_str(), -1, SQLITE_TRANSIENT);
     };
 
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     
     sqlite3_stmt* memStmt;
     if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {

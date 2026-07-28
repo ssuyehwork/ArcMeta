@@ -1161,6 +1161,50 @@ void CategoryRepo::fullRecount() {
             }, Qt::BlockingQueuedConnection);
         }
     });
+
+    // 2026-08-xx 补全失效物理文件夹分类的异步盘点校验清退逻辑
+    (void)QtConcurrent::run([db]() {
+        if (!db) return;
+
+        auto allCats = CategoryRepo::getAll();
+        std::vector<int> catsToRemove;
+
+        for (const auto& cat : allCats) {
+            if (cat.physicalPath.empty()) continue; // 虚拟分类不参与
+
+            // 库根目录保护：判定标准与 CategoryModel.cpp 的 setData() 重命名保护完全一致
+            if (cat.parentId == 0 && QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                continue;
+            }
+
+            std::string currentFid;
+            std::wstring currentFrnStr;
+            bool exists = MetadataManager::fetchWinApiMetadataDirect(cat.physicalPath, currentFid, &currentFrnStr);
+
+            bool frnMismatch = false;
+            if (exists && cat.physicalFrn != 0) {
+                try {
+                    uint64_t currentFrn = std::stoull(currentFrnStr, nullptr, 16);
+                    frnMismatch = (currentFrn != cat.physicalFrn);
+                } catch (...) { frnMismatch = true; }
+            }
+
+            if (!exists || frnMismatch) {
+                catsToRemove.push_back(cat.id);
+            }
+        }
+
+        if (!catsToRemove.empty()) {
+            qDebug() << "[Recount] 物理校验发现" << catsToRemove.size() << "个失效文件夹，准备清退";
+            QMetaObject::invokeMethod(&MetadataManager::instance(), [catsToRemove]() {
+                for (int id : catsToRemove) {
+                    CategoryRepo::remove(id); // 注意：remove() 是把文件夹下的文件移入回收站，不是物理删除记录
+                }
+                DatabaseManager::instance().flushAll();
+                MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+            }, Qt::BlockingQueuedConnection);
+        }
+    });
 }
 
 std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
