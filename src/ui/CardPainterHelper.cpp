@@ -15,53 +15,35 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    // ① 绘制内容与裁剪 (Cover 模式)
-    painter->save();
+    // ① 统一设置卡片圆角裁切
     QPainterPath clipPath;
     clipPath.addRoundedRect(cardRect, 6, 6);
     painter->setClipPath(clipPath);
 
-    // 绘制卡片背景
+    // ② 绘制卡片统一背景色 (128x128 底框)
     painter->setPen(Qt::NoPen);
     painter->setBrush(isWaitingThumb ? QColor("#3A3A3A") : QColor("#2d2d2d"));
     painter->drawRect(cardRect);
 
-    if (hasThumb) {
-        if (!thumb.isNull()) {
-            QPixmap scaled = thumb.scaled(cardRect.size(), 
-                                          isGridMode ? Qt::KeepAspectRatio : Qt::KeepAspectRatioByExpanding, 
-                                          Qt::SmoothTransformation);
-            int x = cardRect.center().x() - scaled.width() / 2;
-            int y = cardRect.center().y() - scaled.height() / 2;
-            painter->drawPixmap(x, y, scaled);
-        }
-    } else {
-        // 当没有有效缩略图（如 .ahk、.txt、.py 等非图片文件）时，
-        // 严禁画满巨型黑色相框！而是收拢为固定比例的精致微型圆角卡片容器 (Mini-Card)
-        if (!defaultIcon.isNull()) {
-            // 1. 计算精致微型卡片的尺寸 (最大锁定 48px，防止随行高无限膨胀成巨型墓碑)
-            int miniSize = qMin(cardRect.width(), cardRect.height());
-            if (miniSize > 48) miniSize = 48; // 物理锁定上限 48px，比例最完美
+    if (hasThumb && !thumb.isNull()) {
+        // 图片/视频缩略图：平滑充满/适应卡片
+        QPixmap scaled = thumb.scaled(cardRect.size(),
+                                      isGridMode ? Qt::KeepAspectRatio : Qt::KeepAspectRatioByExpanding,
+                                      Qt::SmoothTransformation);
+        int x = cardRect.center().x() - scaled.width() / 2;
+        int y = cardRect.center().y() - scaled.height() / 2;
+        painter->drawPixmap(x, y, scaled);
+    } else if (!defaultIcon.isNull()) {
+        // 🚨 非图片文件（.zxp, .ahk, .exe, .txt）：彻底消灭套娃灰框！
+        // 删掉内层 fillPath(#333333) 的二次小框，直接将图标按 52% 比例精准居中绘制在底框上
+        int iconSize = qMin(cardRect.width(), cardRect.height()) * 0.52;
+        QRect iconRect(cardRect.center().x() - iconSize / 2,
+                       cardRect.center().y() - iconSize / 2,
+                       iconSize, iconSize);
 
-            QRect miniCardRect(cardRect.center().x() - miniSize / 2,
-                               cardRect.center().y() - miniSize / 2,
-                               miniSize, miniSize);
-
-            // 2. 绘制精致的微卡片背景圆角矩形
-            QPainterPath miniPath;
-            miniPath.addRoundedRect(miniCardRect, 6, 6);
-            painter->fillPath(miniPath, QColor("#333333")); // 柔和深灰底，替代突兀的纯黑
-
-            // 3. 将图标精准居中填充在微卡片内部 (占用 75% 比例)
-            int drawIconSize = qRound(miniSize * 0.75);
-            QRect iconDrawRect(miniCardRect.center().x() - drawIconSize / 2,
-                               miniCardRect.center().y() - drawIconSize / 2,
-                               drawIconSize, drawIconSize);
-
-            defaultIcon.paint(painter, iconDrawRect);
-        }
+        defaultIcon.paint(painter, iconRect);
     }
-    painter->restore();
+
     painter->restore();
 }
 
