@@ -10,38 +10,42 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
                                      bool hasThumb, const QPixmap& thumb, const QIcon& defaultIcon, 
                                      bool isGridMode, bool isWaitingThumb) {
     Q_UNUSED(isSelected);
+    Q_UNUSED(isGridMode);
+
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    painter->save();
+    // ① 设置圆角裁切
     QPainterPath clipPath;
     clipPath.addRoundedRect(cardRect, 6, 6);
     painter->setClipPath(clipPath);
 
-    // 统一底色：等待中为 #3A3A3A，常规为 #2d2d2d
+    // 🚨 1. 满足要求：卡片内部 100% 完全透明（非等待状态下不画任何灰/黑背景）
     painter->setPen(Qt::NoPen);
-    painter->setBrush(isWaitingThumb ? QColor("#3A3A3A") : QColor("#2d2d2d"));
-    painter->drawRect(cardRect);
+    if (isWaitingThumb) {
+        painter->setBrush(QColor("#2A2A2A")); // 仅在等待缩略图时显示轻量占位
+        painter->drawRect(cardRect);
+    } else {
+        painter->setBrush(Qt::transparent);  // 常规状态全透明穿透
+        painter->drawRect(cardRect);
+    }
 
     if (hasThumb && !thumb.isNull()) {
-        QPixmap scaled = thumb.scaled(cardRect.size(),
-                                      isGridMode ? Qt::KeepAspectRatio : Qt::KeepAspectRatioByExpanding,
-                                      Qt::SmoothTransformation);
+        // 🚨 2. 对标图二：缩略图严格按原始长宽比 (KeepAspectRatio) 居中绘制，绝对不拉伸、不裁切！
+        QPixmap scaled = thumb.scaled(cardRect.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
         int x = cardRect.center().x() - scaled.width() / 2;
         int y = cardRect.center().y() - scaled.height() / 2;
         painter->drawPixmap(x, y, scaled);
     } else if (!defaultIcon.isNull()) {
-        // 🚨 统一参数：彻底消灭套娃灰框，全库统一锁定 65% 比例居中
+        // 非图片文件：图标按 65% 比例精准居中悬浮在透明背景上
         int iconSize = qMin(cardRect.width(), cardRect.height()) * 0.65;
         QRect iconRect(cardRect.center().x() - iconSize / 2,
                        cardRect.center().y() - iconSize / 2,
                        iconSize, iconSize);
 
-        // 🚨 补充对齐标志 Qt::AlignCenter，解决非图片文件图标靠左上角偏斜的问题
         defaultIcon.paint(painter, iconRect, Qt::AlignCenter);
     }
-    painter->restore();
     painter->restore();
 }
 
@@ -66,20 +70,14 @@ void CardPainterHelper::drawStatusIndicators(QPainter* painter, const QRect& car
     if (isPinned) {
         UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, statusRect);
     } else if (isDir && progress >= 0.0 && progress < 1.0) {
-        // --- 绘制进度环 (开箱即用代码) --- 
         painter->save(); 
         painter->setRenderHint(QPainter::Antialiasing); 
-         
-        // 1. 底环 
         painter->setPen(QPen(QColor(60, 60, 60, 180), 2)); 
         painter->drawEllipse(statusRect.adjusted(1, 1, -1, -1)); 
-         
-        // 2. 进度弧 (品牌蓝 #3498db) 
         QPen pPen(QColor("#3498db"), 2); 
         pPen.setCapStyle(Qt::RoundCap); 
         painter->setPen(pPen); 
-         
-        int spanAngle = -qRound(progress * 360 * 16); // 逆时针计算 
+        int spanAngle = -qRound(progress * 360 * 16);
         painter->drawArc(statusRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
         painter->restore(); 
     } else if (isManaged || (isDir && progress >= 1.0)) {
@@ -91,7 +89,6 @@ void CardPainterHelper::drawExtensionBadge(QPainter* painter, const QRect& cardR
                                            const QString& ext, bool hasThumb) {
     QColor badgeColor = UiHelper::getExtensionColor(ext);
 
-    // 物理优化：针对无缩略图项应用半透明角标，减少视觉冲击
     if (!hasThumb) {
         badgeColor.setAlpha(160);
     }
@@ -115,10 +112,8 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
     Q_UNUSED(cardRect);
     Q_UNUSED(starSpacing);
 
-    // 🚨 强制参数锁定：星级间距统一为 -4px，杜绝 0px 稀疏错位
     int unifiedSpacing = -4;
 
-    // 彩色胶囊底色
     if (!colorStr.isEmpty()) {
         QColor bgColor = UiHelper::parseColorName(colorStr);
         if (bgColor.isValid()) {
@@ -140,7 +135,6 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
     if (drawStars) {
         QColor bgColor = colorStr.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorStr);
         
-        // 感知亮度对比度自适应算法
         double luminance = 0.0;
         if (bgColor.isValid() && bgColor.alpha() > 0) {
             luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
@@ -162,7 +156,6 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
         painter->setRenderHint(QPainter::Antialiasing);
         UiHelper::getIcon("no_color", starColor, banRect.width()).paint(painter, banRect);
 
-        // 🚨 统一资源图标名：彻底抹平资源文件不一致
         QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), starColor);
         QPixmap emptyStar  = UiHelper::getPixmap("star", QSize(starSize, starSize), emptyStarColor);
 
@@ -180,7 +173,7 @@ void CardPainterHelper::drawEmptyFolderBorder(QPainter* painter, const QRect& ca
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setPen(QPen(QColor("#41F2F2"), 1, Qt::DashLine));
-    painter->setBrush(Qt::NoBrush); // 确保空文件夹标记为全透明
+    painter->setBrush(Qt::NoBrush);
     painter->drawRoundedRect(cardRect, 6, 6);
     painter->restore();
 }

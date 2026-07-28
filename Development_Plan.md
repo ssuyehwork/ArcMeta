@@ -36,7 +36,7 @@
 
 - 用户描述的现象/问题：当前版本的 `QuickLookWindow` 预览运行逻辑不符合预期，其处理逻辑 and 界面交互（如图像缩放、音视频媒体处理、文本二进制检测及编码识别等）功能不够完备。
 - 用户期望的结果：彻底放弃当前版本的 `QuickLookWindow` 运行逻辑，将其替换为 `FERREX-META` 版本中的 `QuickLookWindow` 运行逻辑。这包括采用专门设计的 `QuickLookGraphicsView`（支持滚轮缩放、双击恢复/适配大小、鼠标拖拽移动及光标跟随变动）、引入更完整的多媒体及文本二进制与编码自动检测识别渲染，实现更好的大文件和特殊文件类型的预览。
-- 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView`控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅 of 占位降级兼容。
+- 本次任务边界：彻底重构 `src/ui/QuickLookWindow.h` and `src/ui/QuickLookWindow.cpp`，将 `FERREX-META` 版本的 `QuickLookWindow` and `QuickLookGraphicsView`控制与交互机制移植并合并至其中，适配 `ArcMeta` 命名空间及符合本项目标准的样式设计。同时确保当前项目正在运行的核心快捷键/信号链路继续工作（评分打标 `ratingRequested`、颜色标签打标 `colorRequested` 以及切图 `prevRequested`/`nextRequested` 信号），并对音视频进行优雅的占位降级兼容。
 - 不在本次范围内的是：修改 `MainWindow` 的主导航调度机制 or 任何非预览关联的面板组件。
 - 对应方案文档: Modification_Plan-36.md
 
@@ -77,7 +77,7 @@
 - 用户期望的结果：对其进行代码职责过载分析并输出模块化的单一职责拆解和落地规划。
 - 本次任务边界：对 `src/ui/ThumbnailDelegate.h` 与 `src/ui/ThumbnailDelegate.cpp` 展开整体架构梳理，定位其过载现状，设计面向高内聚、零开销、低耦合的模块化（视觉物理渲染、文本排版、控制器生命期分流）拆分图纸。由于本 Turn 为只读分析师模式，不修改任何项目代码文件。
 - 不在本次范围内的是：修改逻辑代码、在外部执行构建验证。
-- 对应方案文档: Modification_Plan-40.md
+- 对应方案文档：Modification_Plan-40.md
 
 ## [2026-07-22] 视图按钮及缩放滑杆功能移植重构
 
@@ -92,7 +92,7 @@
 
 ## [2026-07-24] 全款应用架构与文件职责过载深度排查
 
-- 用户描述的现象/问题：应用中可能存在整体混乱的逻辑架构，文件职责过载（违反SRP），以及存在某些功能具有不合理的傻逼逻辑架构功能。
+- 用户描述的现象/问题：应用中可能存在整体混乱的逻辑架构，文件职责过载（违反SRP），以及存在某些功能具有不合理的傻逼逻辑架构。
 - 用户期望的结果：对全款应用及核心源码文件进行地毯式的通红与细粒度审计，标记所有存在职责过载（违反 SRP）的文件，定位逻辑架构设计不合理的傻逼逻辑架构功能。
 - 本次任务边界：对 `src/` 目录下的核心逻辑、业务模块 and UI 骨架（如 `ContentPanel`, `MainWindow`, `MetadataManager`, `MftReader` 等）及各组件数据流向、跨层耦合 and UI 层业务硬编码进行地毯式地深层审计与排查，输出架构漏洞、混乱点、文件职责过载证据（行号 + 代码片段）并归档。
 - 不在本次范围内的是：修改任何代码文件、创建实际重构代码、或扫描非当前项目指定的外部不相关目录。
@@ -124,7 +124,7 @@
 - 用户描述的现象/问题：现有的右键菜单及部分分类/文件夹设置中采用“随机颜色”和“设置颜色”的传统菜单项（QAction）及弹窗操作链路复杂、不够直观。
 - 用户期望的结果：彻底根除“随机颜色”和“设置颜色”相关逻辑代码，不可保留。直接将当前现有的标注色直接显示在右键菜单上作为一排水平排列的色块进行选择，悬停在某个色块上方时通过白圈突显色块。选择色块后，将色值同时存入到 categories 表的 color 字段和 metadata 表 of color 字段中。
 - 本次任务边界：
-  1.彻底删除 `CategoryPanel` 及 `MainWindow`（FolderButton 菜单）中的“随机颜色”与“设置颜色”旧 QAction 和旧对应响应函数（如 `onRandomColor` / `onSetColor`）。
+  1. 彻底删除 `CategoryPanel` 及 `MainWindow`（FolderButton 菜单）中的“随机颜色”与“设置颜色”旧 QAction 和旧对应响应函数（如 `onRandomColor` / `onSetColor`）。
   2. 针对 `CategoryPanel` 侧边分类右键菜单、`MainWindow` 中的 FolderButton 右键菜单，以及 `ContentPanel` 内容右键菜单中的“设定颜色标签”（ActionColorTag）子菜单，实现全新的一排水平排列色块快捷操作区域（可以使用自定义 `QWidgetAction` 加载色块容器）。
   3. 每个色块尺寸 and 间距根据界面情况合理设定（如圆形色块，直径 20px-24px，间隔 6px-8px），且鼠标悬停在色块上方时绘制出明晰的白色同心圆突显色块边缘。
   4. 选中某个色块后，立即调用更新接口：
@@ -138,7 +138,7 @@
 
 - 用户描述的现象/问题：在全站范围内，当用户点击任意按钮时，按钮周边都会显示点状虚线聚焦边框。
 - 用户期望的结果：全局禁用这一虚线的显现，保持全站级的完美屏蔽，不影响原有样式且实现最简单、彻底的修复。
-- 本次任务边界：在 `src/main.cpp` 中初始化 `QApplication` 的位置，加入一行全局样式表设置 `a.setStyleSheet("QAbstractButton { outline: none; }");`。
+- 本次任务边界：在 `src/main.cpp` 中初始化 `QApplication` 的位置，加入一行全局样式表设置 `a.setStyleSheet("QAbstractButton { outline: none; }");` / `a.setStyleSheet("QAbstractButton { outline: none; }");` 的统一设置。
 - 不在本次范围内的是：逐个修改各页面组件按钮的逻辑，或在其他样式表文件中写分散的规则。
 - 对应方案文档：Modification_Plan/Modification_Plan-91.md
 
@@ -147,7 +147,7 @@
 - 用户描述的现象/问题：`main.cpp` 被写入了大量应急性补丁、跨线程单例强制点名预热、同步高频物理日志落盘，导致职责过载、单实例竞态及程序退出强杀数据库、拖慢扫描等严重隐患。
 - 用户期望的结果：消除这些典型的打补丁式脏代码，按照工业级标准对程序启动、优雅退出、多线程协作生命期与异步日志进行极致重构。
 - 本次任务边界：
-  1. 重写 `src/main.cpp` 编排科学时序启动、退出关于 aboutToQuit 信号 of 清场槽函数。
+  1. 重写 `src/main.cpp` 编排科学时序启动、退出关于 aboutToQuit 信号的清场槽函数。
   2. 重构 `src/ui/Logger.h` 实现高性能异步缓冲日志线程（去除 qDebug 的同步物理写锁阻塞）。
   3. 修改 `src/core/CoreController` 引入 `initializeCoreComponents`，统一、拓扑性地进行单例实例化及定时器哑死物理加固。
 - 不在本次范围内的是：修改物理 MFT 文件扫描核心算法、IOCP 底层驱动及 UI 具体的渲染重排。
@@ -236,11 +236,11 @@
   2. 升级 `MainWindow.cpp`，显式设定 `setInvertedAppearance(false)` 强制普通方向；
   3. 升级 `initUi()` 的 100ms 刷新槽和信号连接 logic，运用 $T_{elapsed} \times \frac{100 - P}{P}$ 动态公式推算预计耗时，并完美替换对应语境。
 - 不在本次范围内的是：修改 `SyncStatusService` 本身的发射频率，或者对除了 `MainWindow`顶层控制链路之外的普通面板数据视图进行重设。
-- 对应方案文档: Modification_Plan/Modification_Plan-106.md
+- 对应方案文档: Modification_Plan-106.md
 
 ## [2026-07-27] 创建自动导入中途取消与数据擦除机制安全落地
 
-- 用户描述的现象/问题：在自动导入（Auto-Import）进行过程中，如果用户突然改变主意，当前缺乏一种允许用户中途停止（Stop）并彻底擦除（Erase）已导入元数据 and 缓存垃圾的安全撤销机制（Kill & Purge）。
+- 用户描述的现象/问题：在自动导入（Auto-Import）进行过程中，如果用户突然改变主意，当前缺乏一种允许用户中途停止（Stop）并彻底擦除（Erase）已导入元数据和缓存垃圾的安全撤销机制（Kill & Purge）。
 - 用户期望的结果：在不破坏程序稳定性的前提下，设计并实现一套中途停止和擦除机制。用户触发取消时，首先安全、平滑地中止后台的多媒体特征提取与入库流水线（避免强杀线程造成死锁或数据库损坏），随后批量高效地删除该托管文件夹已入库的所有元数据记录，并彻底物理清理已生成的对应缩略图及宽高比高级缓存，恢复到干净的状态。
 - 本次任务边界：
   1. 设计并实现 `MediaExtractorPipeline::cancelBatch()` 与 `cancelAll()` 接口，通过引入原子取消标记 `std::atomic<bool> m_isCanceled` 支持执行中断与排队任务清空，安全、非阻塞地挂起和清退流水线。
@@ -252,9 +252,9 @@
 ## [2026-07-28] NativeFolderWatcher 监控服务架构解耦与防抖重命名高内聚重构
 
 - 用户描述的现象/问题：底层文件系统 IOCP 监控服务 `NativeFolderWatcher` 职责不单一，直接依赖并耦合了上层 `MetadataManager` 和 `AutoImportManager` 的具体业务操作；高密集并发/批量重命名时由于先进先出（FIFO）弹出队列极易错配；高频事件可能导致 GUI 线程在极短时间内因大量 `invokeMethod` 回调而被风暴积压、假死卡顿；另外，单例在工作线程中无意被首次加载时可能引发 QTimer 线程亲和性失效警告。
-- 用户期望的结果：重构并优化 `NativeFolderWatcher` 架构，使其彻底解耦，不调用任何上层管理器，只负责基础 IO 事件处理并抛出标准 Qt 信号；重新设计防抖和并发重命名合并逻辑，杜绝 FIFO 错配并大幅削减对 GUI 线程的信号轰炸；确保单例模式下 QTimer 安全初始化。
+- 用户期望的结果：重构并优化 `NativeFolderWatcher` 架构，使其彻底解耦，不调用任何上层管理器，只负责基础 IO 事件处理并抛出标准 Qt 信号；重新设计防抖和并发重命名合并逻辑，杜绝 FIFO 错配并大幅削减对 GUI 线程的信号轰炸；确保单例模式下 QTimer安全初始化。
 - 本次任务边界：
-  1. 彻底切断 `NativeFolderWatcher` 对 `MetadataManager`、`AutoImportManager` 等上层业务类的直接头文件依赖和调用。
+  1. 彻底切断 `NativeFolderWatcher` 对 `MetadataManager`、`AutoImportManager` 等上层业务类的直接头文件依赖 and 调用。
   2. 重构 `NativeFolderWatcher` 事件分发。所有捕获的文件变更（新增、修改、删除、重命名）均转化为标准的自定义结构并通过统一/分立信号（如 `fileChanged(path, action)`）分发。
   3. 优化防抖/合并算法。采用高内聚的以路径为 Key、以定时器关联的去重延迟合并缓存，削减短时间内对主线程的通知风暴；在监控层独立实现一套安全、健壮的重命名匹配配对池，不再采用基于顺序的出队机制。
   4. 解决线程亲和性警告，通过懒加载或确保 `m_debounceTimer` 正确关联主线程事件循环。
@@ -271,16 +271,6 @@
 - 不在本次范围内的：由于目前处于只读分析师状态，不直接修改 C++ 源码文件（.cpp / .h），不破坏现行软件编译流程。
 - 对应方案文档：Modification_Plan/Modification_Plan-111.md
 
-## [2026-07-28] 解决每次启动主程序时重复对账与无谓重新扫描元数据缺陷
-
-- 用户描述的现象/问题：被监控的文件夹没有新增任何文件或文件夹，元数据也已经持久化至磁盘数据库，但每次重启主程序时都会重新对账并触发全量文件元数据扫描与多媒体特征提取。
-- 用户期望的结果：在启动主程序进行全量对账时，跳过已成功导入且指纹/修改时间未发生变化的完备文件，杜绝每次重启时的冗余扫描和特征提取，保护物理磁盘并大幅减少 CPU 占用。
-- 本次任务边界：
-  1. 在 `MetadataManager::registerItemsAsync` 中增加文件物理指纹与高级特征双重准入检查，若文件已完备且大小/修改时间一致，直接跳过登记和提取。
-  2. 在 `CategoryRepo::addItemToCategory` 中增加重复关联预检，防止每次重启时 `category_items` 被无谓 `INSERT OR REPLACE` 覆盖并导致 `added_at` 乱序并导致数据库频繁标记 Dirty。
-- 不在本次范围内的是：修改物理 MFT 扫描、USN 监控底座以及其他非元数据 and 分类对账关联的逻辑。
-- 对应方案文档：Modification_Plan/Modification_Plan-117.md
-
 ## [2026-07-28] 修复构建配置缺失与 FilterEngine 编译类型错误
 
 - 用户描述的现象/问题：编译 C++ 项目时，遇到了多处编译器语法错误（在 FilterEngine.cpp 中未声明的标识符 `record` / `fileName` / `pe` 等，将 `IngestedRecord` 假定为 `int` 等）以及 “util/ShellHelper.h”、“core/AppConfig.h”、“core/FileSystemService.h” 头文件无法找到的问题。
@@ -288,7 +278,7 @@
 - 本次任务边界：
   1. 修复 `src/ui/FilterEngine.h` 和 `src/ui/FilterEngine.cpp`，将未定义的 `IngestedRecord` 类型统一修改为系统实际定义的 `ItemRecord`。
   2. 修改 `CMakeLists.txt`，在 `target_include_directories` 中追加 `${CMAKE_CURRENT_SOURCE_DIR}/src` 包含路径，以解决未带 `src/` 前缀的绝对路径式头文件包含失败。
-- 不在本次范围内的：新增、修改任何业务功能和 UI 样式。
+- 不在本次范围内的：新增、修改任何业务功能 and UI 样式。
 - 对应方案文档：Modification_Plan/Modification_Plan-113.md
 
 ## [2026-07-28] NativeFolderWatcher 代码架构合理性、职责单一性与傻逼逻辑地毯式排查
@@ -299,25 +289,32 @@
 - 不在本次范围内的是：物理修改代码文件、进行编译测试。
 - 对应方案文档：Modification_Plan/Modification_Plan-114.md
 
-## [2026-07-28] 侧边栏 `fullRecount()` 启动全量扫描增量判断机制加固
+## [2026-07-28] 主程序启动闪烁白色边框缺陷修复
 
-- 用户描述的现象/问题：因为这套架构里根本没有"增量判断"这一层,`fullRecount()` 被设计成无条件全量扫描,没有任何机制去判断"上次退出到这次启动之间,磁盘到底有没有变化"。启动时无条件触发全量扫描/全量核对，白白消耗启动时间和磁盘 I/O。
-- 用户期望的结果：在 `fullRecount()` 之前（或调用处）引入轻量级的“是否真的需要重算”的增量判断机制。如果上次退出到这次启动之间，监控目录没有任何变动，则跳过耗时的全量物理校验探针与重新对账流程，直接复用已加载的计数。
+- 用户描述的现象/问题：启动主程序之后，主界面的导航栏或分割器区域会短暂闪烁显示浅白色边框，随后在界面加载完成或样式表加载完毕后又消失。该白色闪烁极为影响暗色主题的视觉一致性，是不应当出现的样式瑕疵。
+- 用户期望的结果：彻底根治主程序启动时的白色边框瞬时闪烁现象，使其在数据及样式未完全加载就绪的延迟空窗期前，也能保持与暗色调主题同频一致的优雅灰色/深色背景展示。
+- 本次任务边界：在 `src/ui/NavPanel.cpp` 构造函数和 `m_splitter` 初始化部分中，显式设定与暗色主题匹配的背景色样式（如 `#1E1E1E`）。保证延迟异步填充数据导致的瞬时重排期间，不会露出操作系统的默认浅灰色底层边缘。
+- 不在本次范围内的是：修改任何除了启动时导航栏白色边框样式修复之外的逻辑，不修改物理文件检索扫描对账逻辑，不修改数据库、MFT 扫描或其它无关的 UI 组件。
+- 对应方案文档：Modification_Plan/Modification_Plan-117.md
+
+## [2026-07-29] 屏蔽系统图标伪缩略图与普通小图标极致中央居中重构
+
+- 用户描述的现象/问题：
+  1. 标记为①的卡片里（如 `文件夹.ai`、`文件夹2.ai`）出现了原本属于系统图标自带的白色圆角边框。有的图标出现了白色边框，有的图标却未出现，严重破坏了卡片的纯暗色主题视觉感。
+  2. AHK 等某些系统关联小图标（例如 `w 唯一标识符.ahk` 中的 AHK 图标）未能在卡片正中心正确绘制，而是偏移显示在了卡片的左上角，且面积比例极小，显得很不美观。
+- 用户期望的结果：
+  1. 彻底不显示任何白色边框的伪缩略图。
+  2. 所有的图标和缩略图在卡片内部必须高品质、无偏移、比例协调地正中心绝对居中。
 - 本次任务边界：
-  - 设计在退出或同步完成时记录各监控目录（Managed Library 或自定义监控目录）的最后修改时间（`mtime`）指纹并持久化到 `AppConfig`。
-  - 下次启动或刷新触发 `fullRecount()` 时，通过快速读取比对所有监控目录的当前 `mtime`。如果这些目录的修改时间均未发生改变，则在 `fullRecount()` 最前端直接拦截，不再执行任何文件快照的物理盘点、WinAPI 文件探测和数据库更新，从而极大保护物理磁盘，降低 CPU 与 I/O 消耗。
-- 不在本次范围内的：重构底层 `NativeFolderWatcher` IOCP 或 USN 文件实时监听的核心，或修改侧边栏分类树的非统计相关的 UI 交互逻辑。
-- 对应方案文档：Modification_Plan-118.md
+  1. 修改 `src/ui/WindowsShellThumbnailProvider.cpp`，把 Windows 原生提取缩略图的 `SIIGBF_RESIZETOFIT` 替换为 `SIIGBF_THUMBNAILONLY` 屏蔽非真正缩略图大图标，根治白色边框的系统级污染。
+  2. 修改 `src/ui/CardPainterHelper.cpp`，统一重构对普通 fallback 图标在卡片里的绘制方案，强制将 icon 获取其指定合适分辨率的 pixmap，并在限定的圆角正中心区域进行完美的平滑拉伸绘制。
+- 不在本次范围内的是：修改任何除了上述两个界面卡片细节修正以外的业务逻辑。
+- 对应方案文档：Modification_Plan/Modification_Plan-121.md
 
-## [2026-07-28] 高频关联多维查询缺失关键索引极速对账加固
+## [2026-07-29] 卡片数据渲染代理多套/多种方式冗余架构审计排查
 
-- 用户描述的现象/问题：底层数据库在删除关联、查询单个文件分类从属、分类树递归折叠和级联重命名等高频过滤操作中严重缺乏索引保护，导致库在大量条目和长路径下频繁触发耗时的全表线性扫描。
-- 用户期望的结果：在不改变已有 WAL 高性能读写特性的前提下，在 DDL 层面为高频查询条件中涉及的字段一键加装幂等的非最左复合索引，从而消除性能卡顿并阻断全表扫描。
-- 本次任务边界：
-  - 在 `DatabaseManager.cpp` 初始化连接的末尾，追加以下非最左复合索引：
-    1. `idx_category_items_file_id` 作用于 `category_items(file_id)`，优化高频文件移除/归类。
-    2. `idx_category_items_path_hint` 作用于 `category_items(path_hint)`，优化物理重命名级联同步。
-    3. `idx_categories_parent_id` 作用于 `categories(parent_id)`，优化递归分类 BFS 与建子树热点。
-    4. `idx_categories_physical_path` 作用于 `categories(physical_path)`，优化同级前缀 LIKE 检索。
-- 不在本次范围内的是：修改 CategoryRepo 中 SQL 命令的组装与过滤条件，或重构底层的分卷 DB 连接模型。
-- 对应方案文档：Modification_Plan-119.md
+- 用户描述的现象/问题：当前应用在渲染内容区卡片数据时，可能存在多套、多种方式并存的冗余逻辑和架构硬伤。
+- 用户期望的结果：对当前版本在卡片渲染层面上所有存在多套方式、职责重叠的代码设计进行全面而透彻的代码审计，并输出结构明晰的架构排查与重构整改设计。
+- 本次任务边界：全面审计 `src/ui/` 目录下所有参与单元格、网格和树形卡片数据渲染的代理组件（包括 `ThumbnailDelegate`、`GridItemDelegate`、`TreeItemDelegate`），定位其在视觉物理渲染、逻辑事件过滤以及尺寸计算上的冗余与过载证据。由于当前角色是分析师，仅产出设计剖析方案，不物理修改任何功能性代码文件。
+- 不在本次范围内的是：修改物理代码，引入或删除任何实际逻辑文件。
+- 对应方案文档：Modification_Plan/Modification_Plan-122.md

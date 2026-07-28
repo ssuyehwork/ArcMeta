@@ -1,140 +1,74 @@
-# 重启全量对账重复扫描与多媒体提取缺陷排查及重构方案 —— Modification_Plan-117.md
- 
-> 状态：待批准执行（分析师角色，等待用户"批准执行"指令，绝不作物理改动）
- 
-## 1. 任务背景 
-用户反馈，当被监控的文件夹没有新增任何文件或文件夹，并且已经将元数据储存到了磁盘里的数据库时，每次重启主程序，系统依然会重复触发全量元数据的二次扫描、全量对账、并触发冗余的多媒体特征（如调色板、宽高尺寸等）提取流水线。
-本方案将对该现象的底层逻辑架构进行深度静态排查，找出无谓重复扫描、多媒体高级特征重新提取的根本原因，并给出极致性能的自愈与过滤重构设计，以彻底避免主程序每次启动时冗余对账及多媒体高级特征流水线的二次开销，保护机械磁盘并极大削减 CPU 占用。
- 
-## 2. 缺陷根因定位 
- 
-通过对 `src/core/CoreController.cpp`、`src/core/AutoImportManager.cpp`、`src/meta/CategoryRepo.cpp` 以及 `src/meta/MetadataManager.cpp` 开展链路跟踪，我们发现了以下三处关键缺陷：
- 
-### 根因一：`CategoryRepo::syncPhysicalDirectoryCascade` 启动即对每个文件无条件触发 `addItemToCategory` 和 `registerItem`
-在 `CategoryRepo::syncPhysicalDirectoryCascade()` 递归遍历物理树时，代码逻辑无条件执行了以下操作：
+# 修复主程序启动瞬时闪烁白色边框缺陷 —— Modification_Plan-117.md
+
+> 状态：待批准执行（尚未获得用户"批准执行"指令）
+
+## 1. 任务背景
+本方案承接自 `Development_Plan.md` 中 [2026-07-28] “主程序启动闪烁白色边框缺陷修复” 任务。
+用户反馈，在启动主程序之后，主界面的导航栏或分割器区域会短暂闪烁显示浅白色边框，随后在界面完全初始化或 QSS 加载完成后消失，极为影响暗色主题的视觉观感，是不应当出现的样式瑕疵。
+本方案将对该现象的底层重绘和 QSS 应用时序进行深度排查，并给出优雅、零开销的本地底色强制锁定重构方案，彻底消除主程序启动瞬间的白色闪烁瑕疵。
+
+## 2. 问题定位
+经过对 `src/ui/NavPanel.cpp`、`src/ui/MainWindow.cpp` 等界面初始化与样式加载流程的排查，定位到根本原因如下：
+1. **异步延迟数据加载窗期：** 导航面板 `NavPanel` 内的磁盘树、收藏夹模型以及 QSplitter 的恢复，均通过 `QTimer::singleShot` 异步延迟进行。
+2. **QSplitter 与子 Widget 的背景色继承缺失：** 在主窗口的全局 QSS 样式表（`style.qss`）加载并级联应用完成前，`NavPanel` 及其内部的 `m_splitter` 未在构造函数中定义显式背景色。
+3. **露出操作系统窗体背景底底板：** 异步导致的 QSplitter 瞬时重排（Relayout）和数据未就绪时的间隙，使得 Qt 采用底层操作系统默认的窗体背景颜色（在普通浅色模式操作系统下显示为浅灰/浅白色）进行绘制，因而形成了白色边框闪烁，在数据就绪及 QSS 全局应用后即被覆盖并消失。
+
+---
+
+## 3. 强制对照表
+
+| 编号 | 用户原话 / 我的理解 | 方案对应点 | 是否一致 |
+|------|---------------------|------------|----------|
+| 1    | 启动主程序之后会显示这白色边框，然后又消失，它本不该出现的，排查一下原因，是不是样式导致的（对应用户原话） | 诊断并排查出是由于异步 QSS 加载应用与延迟初始化时序差期间，QSplitter 未设底色，进而透出浅色操作系统底层所致。 | ✅ |
+| 2    | 请给出相应的修改方案（对应用户原话） | 在 `src/ui/NavPanel.cpp` 构造函数和 `m_splitter` 的初始化逻辑中，通过 `setStyleSheet` 强行指定暗色底色（`#1E1E1E`）。 | ✅ |
+
+---
+
+## 4. 详细解决方案
+为了实现在任何未就绪空档期内均能展现完美的暗色底色，决定在 `NavPanel` 构造和 QSplitter 初始化阶段静态硬编码锁定暗色样式表：
+
+### 4.1 设置 NavPanel 显式暗色背景
+在 `src/ui/NavPanel.cpp` 构造函数中：
 ```cpp
-        // 2. 收集此节点下的文件供批量多媒体提取与注册使用
-        for (const auto& fPath : node.files) {
-            collectedFilesToProcess.push_back(fPath); // <--- 直接推入待处理列表
-            if (parentCatId > 0) {
-                std::string fid;
-                if (MetadataManager::fetchWinApiMetadataDirect(fPath, fid)) {
-                    CategoryRepo::addItemToCategory(parentCatId, fid, fPath); // <--- 无条件对每一项执行 addItemToCategory
-                }
-            }
-        }
+    // 核心修正：设置明确的背景色与前景色，防止 QSS 异步加载时露出系统默认浅色背景
+    setStyleSheet("NavPanel { background-color: #1E1E1E; color: #EEEEEE; }");
 ```
-随后，该函数在尾部无条件调用了多媒体高级特征提取的异步排队方法：
+
+### 4.2 设置 QSplitter 显式暗色背景
+在 `src/ui/NavPanel.cpp` 的 `initUi()` 中，对 `m_splitter` 设置显式底色：
 ```cpp
-    if (!collectedFilesToProcess.empty()) {
-        QStringList qPathsToRegister;
-        for (const auto& fp : collectedFilesToProcess) {
-            qPathsToRegister.append(QString::fromStdWString(fp));
-        }
-        // 调用 registerItemsAsync，完美一键批处理在后台将文件塞入多媒体解析提取队列 (enqueueBatch)
-        MetadataManager::instance().registerItemsAsync(qPathsToRegister, true);
-        qDebug() << "[AutoImport] [Pipeline_Bridge] 已将" << qPathsToRegister.size() << "个新导入文件全部推入异步多媒体高级特征提取队列";
-    }
+    // 2026-xx-xx 按照 Plan-107：物理还原 QSplitter 弹性架构
+    m_splitter = new QSplitter(Qt::Vertical, this);
+    m_splitter->setHandleWidth(1);
+    m_splitter->setStyleSheet("QSplitter { background-color: #1E1E1E; border: none; } QSplitter::handle { background: #333333; }");
 ```
-**分析**：这导致即使文件在以前已经扫描导入成功，数据库中已经完备地存有其多媒体数据和 status = 1 的记录，在每次重启时，仍然会被重新放入 `collectedFilesToProcess` 队列，强行触发 `registerItemsAsync` 与 `MediaExtractorPipeline` 后台解析。
 
-### 根因二：`CategoryRepo::addItemToCategory` 无条件写入带来海量无谓 I/O 与脏标记
-在 `CategoryRepo::addItemToCategory` 中，系统会无条件在 SQLite 全局内存库上执行 `INSERT OR REPLACE INTO category_items` 覆写操作，并且因为关联发生变化，会重新调用：
-```cpp
-            // 如果之前未分类，增加后变成有分类，则减去 uncategorizedCount，增加 categorizedCount 并持久化
-            if (getItemCategoryIds(fileId128).size() == 1) {
-                s_uncategorizedCount.fetch_sub(1);
-                s_categorizedCount.fetch_add(1);
-                updatePersistentStat(STAT_CATEGORIZED, 1);
-            }
-```
-**分析**：即使这个文件早就已经归属于对应的 `categoryId`，每次启动时的 `addItemToCategory` 仍旧会重新执行一次 `INSERT OR REPLACE`。这会导致 `category_items` 的 `added_at` 字段被重置为启动时的毫秒时间戳（破坏了用户原有的历史时间排序，变为重启即全部打乱排序），并且频繁标记数据库脏（`m_isDirty`），进而强行触发后台 `DatabaseManager` 落盘备份，造成完全不必要的巨大磁盘 I/O。
+---
 
-### 根因三：`MetadataManager::registerItemsAsync` 的批量准入检查缺失
-在 `MetadataManager::registerItem(path)` 中，系统确实具备部分单路径双重准入检查：
-```cpp
-    std::string pFid;
-    long long pSize = 0, pMtime = 0;
-    if (fetchWinApiMetadataDirect(nPath, pFid, nullptr, &pSize, nullptr, nullptr, &pMtime, nullptr)) {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end()) {
-            bool metadataValid = true;
-            // 校验是否属于图形、是否具备完整宽度、高度和自动颜色
-            ...
-            if (it->second.ingestionStatus == 1 && it->second.fileSize == pSize && it->second.mtime == pMtime && metadataValid) {
-                return; // 物理指纹及高级多媒体特征完备且未发生改变，安全返回
-            }
-        }
-    }
-```
-然而，在 `CategoryRepo::syncPhysicalDirectoryCascade` 递归中使用的**批量管道** `MetadataManager::registerItemsAsync`，则是完全绕过了这一安全检查：
-```cpp
-void MetadataManager::registerItemsAsync(const QStringList& paths, bool authorized) {
-    if (paths.isEmpty()) return;
-    (void)authorized;
-    
-    (void)QtConcurrent::run([this, paths]() {
-        std::vector<std::wstring> stdPaths;
-        for (const auto& qp : paths) {
-            std::wstring nPath = normalizePath(qp.toStdWString());
-            ensureActivated(nPath);
-            updateIngestionStatus(nPath, 0); // <--- 这里一律无条件将 ingestion_status 强制刷回 0（待处理状态）！
-            stdPaths.push_back(nPath);
-        }
-        MediaExtractorPipeline::instance().enqueueBatch(stdPaths); // <--- 一律推入提取流水线重新提起
-    });
-}
-```
-**分析**：这就导致批量注册路径成了“法外之地”：无论文件是否解析过，在每次启动对账时，只要被 `registerItemsAsync` 批量传入，这些已经完备的元数据的 ingestionStatus 就会被**强制重置为 0**，然后强制推入 `MediaExtractorPipeline` 的大批次提取队列，再次耗费数十秒乃至数分钟的高开销 CPU/GPU/IO 多媒体解析，从而形成严重的性能故障！
+## 5. 修改边界声明【范围】
 
---- 
- 
-## 3. 极致性能自愈与重构方案 
- 
-为了实现“启动对账无感化、零磁盘 I/O 开销与零 CPU 冗余提取”，我们将对递归对账逻辑和批量注册拦截逻辑进行极致加固：
- 
-### 方案第一步：在 `CategoryRepo::addItemToCategory` 引入重复关联快速拦截
-1. 在向 `category_items` 表插入之前，先安全查询是否已存在该 `(category_id, file_id)` 组合。
-2. 如果已经存在，直接返回 `true`（快速静默通行），拦截物理覆写！
-3. 这能产生三大收益：
-   - 彻底避免 `category_items` 表中 `added_at`（归类时间）被重启刷新覆盖，**保护了原有的归类时序**。
-   - 避免对 SQLite 造成无谓覆写，不触发 `DatabaseManager` 脏标记，**杜绝程序启动即产生磁盘持久化写入**。
-   - 保证了 `categorizedCount` 与 `uncategorizedCount` 等计数原子的稳定性。
+**本次方案涉及范围：**
+- [ ] 模块/文件：`src/ui/NavPanel.cpp` （具体为 `NavPanel` 构造函数背景色注入以及 `initUi` 中 `m_splitter` 样式强化）
 
-### 方案第二步：在 `MetadataManager::registerItemsAsync` 中实施“双重物理指纹与高级特征完备性”批量过滤
-1. 升级 `registerItemsAsync` 的批处理实现。
-2. 在对每一条路径进行重置 `updateIngestionStatus(nPath, 0)` 之前，先执行物理极速对账检验：
-   - 磁盘文件大小 `pSize`、修改时间 `pMtime` 是否与缓存中记录的值一致。
-   - 文件在内存中的 `ingestionStatus` 是否已经为 1（已提取完备）。
-   - 如果文件是图片/SVG，其核心高级特征（`width` / `height` / `autoColor`）是否均已成功填充且不为空（非破损缓存）。
-3. 如果满足以上指纹与特征双重完备校验，说明该文件在先前运行期间已经成功提取过且其物理属性从未改变过，**直接从要处理的路径列表中剔除**。
-4. 只有对于指纹不符（发生过改动）或者状态不完备（历史提取中途崩溃、字段不齐等破损项）的文件，才调用 `ensureActivated`、重置 `ingestionStatus` 并推入后台流水线。
-
-### 方案第三步：优化 `CategoryRepo::syncPhysicalDirectoryCascade` 纯收集时对无用文件的拦截
-1. 在收集物理子树文件并追加到 `collectedFilesToProcess` 列表前，预先调用 `MetadataManager` 的轻量级校验（或上述批量检查逻辑），将已完全导入且无任何物理变化的完备文件，剔除出待注册列表，不传入 `registerItemsAsync`。
-2. 这可以减少不必要的进程间/线程间批量包装对象的拷贝开销，实现真正无感、瞬间完成的启动同步。
-
---- 
- 
-## 4. 修改边界声明【范围】 
- 
-**物理修改的代码文件边界（待批准执行）：**
-- [ ] 模块/文件：`src/meta/CategoryRepo.cpp` （物理改动，增加 addItemToCategory 快速拦截，以及收集阶段的完备性剔除）
-- [ ] 模块/文件：`src/meta/MetadataManager.cpp` （物理改动，重构并升级批量 registerItemsAsync 里的指纹与高级多媒体完备性验证与拦截逻辑）
- 
 **明确禁止越界修改的范围：**
-- [ ] 物理 MFT 读取模块 `src/core/MftReader.cpp` —— 不修改 
-- [ ] 数据库事务驱动底座 `src/meta/DatabaseManager.cpp` —— 不修改
- 
---- 
- 
-## 5. 实现准则与重入安全性保障
- 
-1. **重入安全性**：对账过程在后台 QtConcurrent 线程中高并发进行，而在执行校验和缓存查询时，`registerItemsAsync` 的过滤逻辑必须先调用 `MetadataManager` 现有的 `m_mutex` 读锁（`shared_lock`）来获取缓存状态，随后仅在确需对脏项或新项做重置时，才发起写锁，以此保证高性能高并发读写。
-2. **零开销保障**：预校验利用 Win32 `fetchWinApiMetadataDirect` 极速获取文件大小与时间戳，这在 Windows 平台几乎不产生实际的磁盘读取开销，且避免了复杂的解码和媒体元数据解析，完全能满足百万级大目录的毫秒级对账开销需求。
- 
---- 
- 
-## 6. 待确认事项 
-- 暂无。
+- [ ] 全局主窗口模块 `src/ui/MainWindow.cpp` —— 不修改
+- [ ] 底层数据监控与检索层 `src/core/` 目录 —— 不修改
+
+---
+
+## 6. 实现准则与预警【核心】
+1. **QSS 优先级继承无损性**：当主窗口后续加载全局 `style.qss` 样式表后，由于 `NavPanel` 依然保持着它的对象名 `ListContainer`，全局 QSS 中的 `#ListContainer` 具有更精确的 ID 选择器，它将无缝对齐和层叠（Cascade）本地设置，这保证了完全的视觉和布局规范性。
+2. **零编译依赖安全**：该界面底色修补完全基于 Qt 原生的 QWidget 和 QSplitter 自有样式接口，无任何外部库、宏和新头文件的依赖，做到了完美的自包含。
+
+---
+
+## 7. Memories.md 合规检查
+
+| 组件 / 模式 | Memories.md 规范要求（写具体内容，不写引用） | 本方案是否符合 |
+|-------------|----------------------|----------------|
+| **UI 异步加载与防闪烁规范** | 针对异步数据加载，在数据就绪前的空窗期内避免出现“白屏/黑屏/浅色”视觉抖动，保留原本样式底色。 | ✅ 符合。本方案通过在 QSplitter 和 QWidget 构造时静态硬编码注入暗色样式（#1E1E1E），在延迟初始化的异步空档期内彻底阻断了浅色操作系统底底板的透露，满足防闪烁规范。 |
+
+---
+
+## 8. 待确认事项（可选）
+- **无**。
