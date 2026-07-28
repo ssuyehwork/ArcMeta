@@ -12,6 +12,7 @@
 #include "ContentPanel.h"
 #include "../meta/MetadataManager.h"
 #include "UiHelper.h"
+#include "CardPainterHelper.h"
 #include "StyleLibrary.h"
 using namespace ArcMeta::Style;
 
@@ -69,7 +70,7 @@ public:
         // 2026-06-16 按照 8 列架构重构：第 1, 2, 3 列由代理独立绘制；第 0 列作为名称列，具有微型圆角卡片预览（最左侧看片）
         int col = index.column();
         if (col == 0 && m_drawMiniCards) {
-            // 自定义绘制名称列与最左侧圆角卡片（最左侧看片）
+            // 自定义绘制名称列与最左侧圆角卡片
             painter->save();
             painter->setRenderHint(QPainter::Antialiasing);
             painter->setRenderHint(QPainter::SmoothPixmapTransform);
@@ -78,17 +79,16 @@ public:
             int side = option.rect.height() - (padding * 2);
             if (side <= 0) side = 16;
 
-            // 微卡片矩形区域
             QRect squareRect(option.rect.left() + 6, option.rect.top() + padding, side, side);
 
-            // 1. 绘制 4px 圆角微型卡片容器背景（透明背景穿透，对应用户原话：“卡片的背景色都必须是透明的”）
+            // 1. 绘制微型卡片背景
             painter->setPen(Qt::NoPen);
             painter->setBrush(Qt::transparent);
             QPainterPath cardPath;
             cardPath.addRoundedRect(squareRect, 4, 4);
             painter->drawPath(cardPath);
 
-            // 2. 图像/图标平滑居中绘制（最左侧看片核心逻辑）
+            // 2. 图像/图标平滑居中绘制
             QVariant decoData = index.data(Qt::DecorationRole);
             bool hasThumb = index.data(HasThumbnailRole).toBool();
 
@@ -98,9 +98,7 @@ public:
                     thumb = decoData.value<QPixmap>();
                 } else if (decoData.canConvert<QIcon>()) {
                     QIcon icon = decoData.value<QIcon>();
-                    if (!icon.isNull()) {
-                        thumb = icon.pixmap(squareRect.size());
-                    }
+                    if (!icon.isNull()) thumb = icon.pixmap(squareRect.size());
                 }
 
                 if (!thumb.isNull()) {
@@ -118,25 +116,27 @@ public:
                 } else {
                     QIcon icon = qvariant_cast<QIcon>(decoData);
                     if (!icon.isNull()) {
-                        int iconSize = qRound(side * 0.6);
+                        int iconSize = qRound(side * 0.65);
                         QRect iconRect(squareRect.center().x() - iconSize / 2,
                                        squareRect.center().y() - iconSize / 2,
                                        iconSize, iconSize);
-                        icon.paint(painter, iconRect);
+                        // 🚨 物理修复 ②：传入 Qt::AlignCenter，强制占位符图标在微卡片内部绝对居中！
+                        icon.paint(painter, iconRect, Qt::AlignCenter);
                     }
                 }
             } else {
                 QIcon icon = qvariant_cast<QIcon>(decoData);
                 if (!icon.isNull()) {
-                    int iconSize = qRound(side * 0.6);
+                    int iconSize = qRound(side * 0.65);
                     QRect iconRect(squareRect.center().x() - iconSize / 2,
                                    squareRect.center().y() - iconSize / 2,
                                    iconSize, iconSize);
-                    icon.paint(painter, iconRect);
+                    // 🚨 物理修复 ②：传入 Qt::AlignCenter，强制占位符图标在微卡片内部绝对居中！
+                    icon.paint(painter, iconRect, Qt::AlignCenter);
                 }
             }
 
-            // 3. 文本排版向右偏移并采用中间省略
+            // 3. 文本排版向右偏移
             QString name = index.data(Qt::DisplayRole).toString();
             QColor textColor = selected ? QColor("#FFFFFF") : QColor("#EEEEEE");
 
@@ -151,104 +151,59 @@ public:
 
             painter->restore();
         } else if (col == 1 || col == 2) {
-            // 这两列不调用默认 paint，完全自定义
             painter->save();
             painter->setRenderHint(QPainter::Antialiasing);
 
-            if (col == 1) { // 状态列
-                QModelIndex idx0 = index.model()->index(index.row(), 0);
+            QModelIndex idx0 = index.model()->index(index.row(), 0);
+
+            if (col == 1) { // 🚨 物理修复 ①：状态列图标在单元格内部 100% 水平+垂直绝对居中！
                 bool isPinned = idx0.data(IsLockedRole).toBool();
                 bool isManaged = idx0.data(ManagedRole).toBool();
                 bool isDir = idx0.data(TypeRole).toString() == "folder";
                 double progress = idx0.data(RegistrationProgressRole).toDouble();
 
-                QRect iconRect(option.rect.left() + (option.rect.width() - 16) / 2,
-                               option.rect.top() + (option.rect.height() - 16) / 2, 16, 16);
+                int iconSize = 16;
+                // 计算单元格物理中心坐标
+                QRect centeredRect(option.rect.left() + (option.rect.width() - iconSize) / 2,
+                                   option.rect.top() + (option.rect.height() - iconSize) / 2,
+                                   iconSize, iconSize);
 
                 if (isPinned) {
-                    UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, iconRect);
+                    UiHelper::getIcon("pin_vertical", QColor("#FF551C"), 16).paint(painter, centeredRect, Qt::AlignCenter);
                 } else if (isDir && progress >= 0.0 && progress < 1.0) {
-                    // --- 绘制进度环 (开箱即用代码) --- 
-                    // 2026-07-xx 按照 Development_Plan 3.1：进度弧线完全通过数据库中的 0 和 1 标记值计算得出
                     painter->save(); 
                     painter->setRenderHint(QPainter::Antialiasing); 
                     painter->setPen(QPen(QColor(60, 60, 60, 180), 2)); 
-                    painter->drawEllipse(iconRect.adjusted(1, 1, -1, -1)); 
+                    painter->drawEllipse(centeredRect.adjusted(1, 1, -1, -1)); 
                     QPen pPen(QColor("#3498db"), 2); 
                     pPen.setCapStyle(Qt::RoundCap); 
                     painter->setPen(pPen); 
                     int spanAngle = -qRound(progress * 360 * 16); 
-                    painter->drawArc(iconRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
+                    painter->drawArc(centeredRect.adjusted(1, 1, -1, -1), 90 * 16, spanAngle); 
                     painter->restore(); 
                 } else if (isManaged || (isDir && progress >= 1.0)) {
-                    UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, iconRect);
+                    UiHelper::getIcon("check_circle", QColor("#2ecc71"), 16).paint(painter, centeredRect, Qt::AlignCenter);
                 }
             } else if (col == 2) { // 星级列
-                // 2026-06-16 按照方案 20 纠偏：仅在选中、评分 > 0 或标记了颜色时显示图标，减少视觉干扰且修复颜色无法显示的逻辑缺陷
-                QModelIndex idx0 = index.model()->index(index.row(), 0);
                 int rating = idx0.data(RatingRole).toInt();
                 bool isSelected = option.state & QStyle::State_Selected;
                 QString colorName = idx0.data(ColorRole).toString();
 
                 if (rating > 0 || isSelected || !colorName.isEmpty()) {
-                    int banW = 12;            // 禁止图标宽度：对齐紧凑规格 12px
-                    int starSize = 18;        // 星级图标尺寸：18px
-                    int banGap = 2;           // 禁止图标与第 1 颗星的间距：2px
-                    int starSpacing = -4;     // 星星与星星之间的间距：-4px
-                    int totalW = banW + banGap + 5 * starSize + 4 * starSpacing; // 88px
+                    int banW = 12;
+                    int starSize = 18;
+                    int banGap = 2;
+                    int starSpacing = -4;
+                    int totalW = banW + banGap + 5 * starSize + 4 * starSpacing;
                     int startX = option.rect.left() + (option.rect.width() - totalW) / 2;
 
                     QRect banRect(startX, option.rect.top() + (option.rect.height() - banW) / 2, banW, banW);
                     int starsStartX = startX + banW + banGap; 
 
-                    // 若存在颜色标记，先在星级下方绘制一行半圆角背景胶囊
-                    if (!colorName.isEmpty()) {
-                        QColor bgColor = UiHelper::parseColorName(colorName);
-                        if (bgColor.isValid()) {
-                            painter->save();
-                            painter->setBrush(bgColor);
-                            painter->setPen(Qt::NoPen);
-                            QRect lastStarRect(starsStartX + 4 * (starSize + starSpacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
-                            QRect totalRect = banRect.united(lastStarRect);
-                            painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
-                            painter->restore();
-                        }
-                    }
-
-                    // 只有在“评分非0”或“被选中”时，才绘制星级和禁止图标
-                    bool drawStars = (rating > 0) || isSelected;
-                    if (drawStars) {
-                        // 移植网格视图的亮度对比度感知算法
-                        QColor bgColor = colorName.isEmpty() ? QColor(0,0,0,0) : UiHelper::parseColorName(colorName);
-                        double luminance = 0.0;
-                        if (bgColor.isValid() && bgColor.alpha() > 0) {
-                            luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
-                        }
-
-                        QColor starColor, emptyStarColor;
-                        if (colorName.isEmpty()) {
-                            starColor      = QColor("#CCCCCC");
-                            emptyStarColor = QColor("#888888");
-                        } else if (luminance < 0.5) {
-                            starColor      = QColor("#FFFFFF");
-                            emptyStarColor = QColor(255, 255, 255, 160);
-                        } else {
-                            starColor      = QColor("#1A1A1A");
-                            emptyStarColor = QColor(0, 0, 0, 140);
-                        }
-
-                        // 统一物理排版与标准 SVG 图标绘制 (对齐网格视图原生图标 star_filled 和 star)
-                        QIcon banIcon = UiHelper::getIcon("no_color", starColor, banW);
-                        banIcon.paint(painter, banRect);
-
-                        QPixmap filledStar = UiHelper::getPixmap("star_filled", QSize(starSize, starSize), starColor);
-                        QPixmap emptyStar = UiHelper::getPixmap("star", QSize(starSize, starSize), emptyStarColor);
-
-                        for (int i = 0; i < 5; ++i) {
-                            QRect starRect(starsStartX + i * (starSize + starSpacing), option.rect.top() + (option.rect.height() - starSize) / 2, starSize, starSize);
-                            painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
-                        }
-                    }
+                    // 2. 一行代码委托绘制 5 星与彩色胶囊背景（含感知对比度自动计算）
+                    CardPainterHelper::drawRatingStars(painter, banRect, option.rect, starSize, starSpacing, 
+                                                      option.rect.top(), option.rect.height(), starsStartX,
+                                                      rating, colorName, isSelected);
                 }
             }
             painter->restore();

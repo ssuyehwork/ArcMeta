@@ -184,8 +184,16 @@ QWidget* ThumbnailDelegate::createEditor(QWidget* parent, const QStyleOptionView
     if (editor) {
         // 按照用户要求：修改为项目标准蓝 (#3498db)
         editor->setStyleSheet(
-            "background-color: #2D2D2D; color: white; selection-background-color: #3498db; "
-            "border: 1px solid #3498db; border-radius: 4px; padding: 0 4px;"
+            "QLineEdit {"
+            "  background-color: #2D2D2D;"
+            "  color: #FFFFFF;"
+            "  selection-background-color: #3498db;"
+            "  border: 1px solid #3498db;"
+            "  border-radius: 4px;"
+            "  padding: 0px 4px;"
+            "  margin: 0px;"
+            "  font-size: 8pt;"
+            "}"
         );
         // 2026-07-26 极致重构：为编辑器安装事件过滤器，确保 eventFilter 能有效捕获键盘冲突并拦截（对应用户原话：“在编辑状态下按下向上/向下方向键时则不该向上游动选中项目”）
         editor->installEventFilter(const_cast<ThumbnailDelegate*>(this));

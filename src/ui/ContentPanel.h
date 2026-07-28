@@ -462,47 +462,4 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
 };
 
-/**
- * @brief 自定义 Delegate：处理网格视图下的图标、星级、颜色圆点及角标叠加
- */
-class GridItemDelegate : public QStyledItemDelegate {
-    Q_OBJECT
-public:
-    using QStyledItemDelegate::QStyledItemDelegate;
-
-    struct GridMetrics {
-        QRect cardRect;      // 整个条目占用的总区域
-        QRect squareRect;    // 正方形背景区域（包含图标、评级、角标）
-        int iconDrawSize;
-        int ratingH;
-        int nameH;
-        int gap1;            // 图标与评级之间的间距
-        int gap2;            // 正方形区与名称之间的间距
-        int totalH;
-        int startY;
-        QRect iconRect;
-        int ratingY;
-        int infoTotalW;
-        int infoStartX;
-        QRect banRect;
-        int starsStartX;
-        int starSize;
-        int starSpacing;
-        int nameY;
-        QRect nameRect;
-    };
-
-    static GridMetrics calculateMetrics(const QStyleOptionViewItem& option);
-
-    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
-    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override;
-    bool eventFilter(QObject* obj, QEvent* event) override;
-    bool helpEvent(QHelpEvent* event, QAbstractItemView* view, const QStyleOptionViewItem& option, const QModelIndex& index) override;
-
-    QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
-    void setEditorData(QWidget* editor, const QModelIndex& index) const override;
-    void setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const override;
-    void updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
-};
-
 } // namespace ArcMeta
