@@ -89,9 +89,10 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         }
     }
 
-    // 2026-11-14 执行第三步：图形文件等待缩略图时，绘制轻量灰色占位背景
+    // 只有当模型判定为有缩略图 (hasThumb == true)、但当前 Pixmap 尚未加载完成 (thumb.isNull()) 时，
+    // 才判定为“等待缩略图中”，避免无缩略图的 AI/CUR 永久显示灰色底盒！
     bool isWaitingThumb = false;
-    if (m_pathRole != -1 && thumb.isNull()) {
+    if (hasThumb && thumb.isNull() && m_pathRole != -1) {
         QString path = index.data(m_pathRole).toString();
         QString ext = QFileInfo(path).suffix().toLower();
         if (UiHelper::isGraphicsFile(ext) || ext == "svg") {
