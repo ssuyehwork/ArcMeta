@@ -15,37 +15,35 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    // ① 绘制内容与裁剪 (Cover 模式)
-    painter->save();
+    // ① 统一设置卡片圆角裁切
     QPainterPath clipPath;
     clipPath.addRoundedRect(cardRect, 6, 6);
     painter->setClipPath(clipPath);
 
-    // 绘制卡片背景
+    // ② 绘制卡片统一背景色 (128x128 底框)
     painter->setPen(Qt::NoPen);
     painter->setBrush(isWaitingThumb ? QColor("#3A3A3A") : QColor("#2d2d2d"));
     painter->drawRect(cardRect);
 
-    if (hasThumb) {
-        if (!thumb.isNull()) {
-            QPixmap scaled = thumb.scaled(cardRect.size(), 
-                                          isGridMode ? Qt::KeepAspectRatio : Qt::KeepAspectRatioByExpanding, 
-                                          Qt::SmoothTransformation);
-            int x = cardRect.center().x() - scaled.width() / 2;
-            int y = cardRect.center().y() - scaled.height() / 2;
-            painter->drawPixmap(x, y, scaled);
-        }
-    } else {
-        if (!defaultIcon.isNull()) {
-            // 针对普通文件（非图形/视频），保持 60% 比例缩小的图标绘制逻辑
-            int iconSize = qMin(cardRect.width(), cardRect.height()) * 0.6;
-            QRect iconRect(cardRect.center().x() - iconSize / 2,
-                           cardRect.center().y() - iconSize / 2,
-                           iconSize, iconSize);
-            defaultIcon.paint(painter, iconRect);
-        }
+    if (hasThumb && !thumb.isNull()) {
+        // 图片/视频缩略图：平滑充满/适应卡片
+        QPixmap scaled = thumb.scaled(cardRect.size(), 
+                                      isGridMode ? Qt::KeepAspectRatio : Qt::KeepAspectRatioByExpanding, 
+                                      Qt::SmoothTransformation);
+        int x = cardRect.center().x() - scaled.width() / 2;
+        int y = cardRect.center().y() - scaled.height() / 2;
+        painter->drawPixmap(x, y, scaled);
+    } else if (!defaultIcon.isNull()) {
+        // 🚨 非图片文件（.zxp, .ahk, .exe, .txt）：彻底消灭套娃灰框！
+        // 删掉内层 fillPath(#333333) 的二次小框，直接将图标按 52% 比例精准居中绘制在底框上
+        int iconSize = qMin(cardRect.width(), cardRect.height()) * 0.65;
+        QRect iconRect(cardRect.center().x() - iconSize / 2,
+                       cardRect.center().y() - iconSize / 2,
+                       iconSize, iconSize);
+
+        defaultIcon.paint(painter, iconRect);
     }
-    painter->restore();
+
     painter->restore();
 }
 

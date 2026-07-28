@@ -2563,7 +2563,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     }
                 }
             }
-            loadDirectory(m_currentPath);
+            // 修正：采用 refreshAll() 替换 loadDirectory(m_currentPath)
+            refreshAll();
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild); // 刷新全量统计
             break;
         }
@@ -2579,9 +2580,19 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (targetPaths.isEmpty()) break;
 
             if (action == ActionDelete) {
-                if (ShellHelper::moveToTrash(targetPaths)) loadDirectory(m_currentPath);
+                // 1. 开启内部操作锁，彻底抑制 NativeFolderWatcher 的二次干扰信号
+                MetadataManager::instance().setInternalOperating(true);
+
+                if (ShellHelper::moveToTrash(targetPaths)) {
+                    // 2. 修正：调用 refreshAll() 自适应协议与物理路径刷新，绝不调 loadDirectory！
+                    refreshAll();
+                }
+
+                // 2000ms 后平滑释放抑制锁
+                QTimer::singleShot(2000, []() {
+                    MetadataManager::instance().setInternalOperating(false);
+                });
             } else {
-                // 2026-07-xx 物理级同步：将逻辑收拢为“永久删除”（安全抹除）
                 QString msg = "确定要永久删除选中的项目吗？数据将被物理覆写并彻底抹除，此操作不可恢复。";
                 if (!FramelessMessageBox::question(this, "确认删除", msg)) break;
 
@@ -2591,7 +2602,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 QPointer<ContentPanel> weakThis(this);
                 QPointer<BatchProgressDialog> weakProgress(progress);
 
-                // 2026-07-26 极致重构：将物理文件删除业务彻底外包解耦到后台 DiskIoService 中，并引入 QPointer 弱引用
+                // 1. 开启内部操作锁，彻底抑制 NativeFolderWatcher 的二次干扰信号
+                MetadataManager::instance().setInternalOperating(true);
+
                 DiskIoService::asyncDeletePaths(
                     targetPaths,
                     action == ActionSecureDelete,
@@ -2607,9 +2620,16 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                             weakProgress->deleteLater();
                         }
                         if (weakThis) {
-                            weakThis->loadDirectory(weakThis->m_currentPath);
+                            // 2. 核心修正：使用 refreshAll() 替代 loadDirectory()！
+                            // refreshAll 能自动识别是 system://all、category:// 还是物理路径，精准刷出正确数据！
+                            weakThis->refreshAll();
                             ToolTipOverlay::instance()->showText(QCursor::pos(), "深层抹除已完成，关联记录已物理清空", 1500, QColor("#2ecc71"));
                         }
+
+                        // 3. 2000ms 后平滑释放抑制锁
+                        QTimer::singleShot(2000, []() {
+                            MetadataManager::instance().setInternalOperating(false);
+                        });
                     }
                 );
             }
