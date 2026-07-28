@@ -13,7 +13,7 @@ namespace ArcMeta {
 
 bool MediaColorExtractor::isGraphicsFile(const QString& ext) {
     static const QStringList graphicsExts = {
-        "png", "jpg", "jpeg", "bmp", "gif", "webp", "ico", "tiff", "tif",
+        "png", "jpg", "jpeg", "bmp", "gif", "webp", "ico", "cur", "ani", "tiff", "tif",
         "psd", "psb", "ai", "eps", "pdf", "svg", "cdr",
         "sketch", "xd", "fig", "dwg", "dxf", "heic", "raw",
         "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm"
@@ -23,7 +23,7 @@ bool MediaColorExtractor::isGraphicsFile(const QString& ext) {
 
 bool MediaColorExtractor::isStandardImage(const QString& ext) {
     static const QStringList standardExts = {
-        "png", "jpg", "jpeg", "bmp", "gif", "webp", "ico"
+        "png", "jpg", "jpeg", "bmp", "gif", "webp", "ico", "cur", "ani"
     };
     return standardExts.contains(ext.toLower());
 }

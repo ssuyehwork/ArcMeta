@@ -1715,7 +1715,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
 
                         // 2. 预览准入白名单 (仅限受支持的图像类及文本/代码类文件)
                         static const QSet<QString> whiteList = {
-                            "jpg", "jpeg", "png", "bmp", "webp", "gif", "ico", "psd", "ai", "eps", "pdf", "svg",
+                            "jpg", "jpeg", "png", "bmp", "webp", "gif", "ico", "cur", "ani", "psd", "ai", "eps", "pdf", "svg",
                             "txt", "md", "markdown", "log", "cpp", "h", "hpp", "c", "py", "js", "css", "html", "json", "xml", "ini", "conf", "yaml", "yml"
                         };
 
@@ -2865,7 +2865,7 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
 
         // 2. 预览准入白名单 (仅限受支持的图像类及文本/代码类文件)
         static const QSet<QString> whiteList = {
-            "jpg", "jpeg", "png", "bmp", "webp", "gif", "ico", "psd", "ai", "eps", "pdf", "svg",
+            "jpg", "jpeg", "png", "bmp", "webp", "gif", "ico", "cur", "ani", "psd", "ai", "eps", "pdf", "svg",
             "txt", "md", "markdown", "log", "cpp", "h", "hpp", "c", "py", "js", "css", "html", "json", "xml", "ini", "conf", "yaml", "yml"
         };
 
