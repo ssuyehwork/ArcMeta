@@ -93,8 +93,10 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
 
     QIcon defaultIcon = qvariant_cast<QIcon>(decoData);
 
+    // 只有当模型判定为有缩略图 (hasThumb == true)、但当前 Pixmap 尚未加载完成 (thumb.isNull()) 时，
+    // 才判定为“等待缩略图中”，避免无缩略图的 AI/CUR 永久显示灰色底盒！
     bool isWaitingThumb = false;
-    if (hasThumb && !hasValidThumb && m_pathRole != -1) {
+    if (hasThumb && thumb.isNull() && m_pathRole != -1) {
         QString path = index.data(m_pathRole).toString();
         QString ext = QFileInfo(path).suffix().toLower();
         if (UiHelper::isGraphicsFile(ext) || ext == "svg") {
