@@ -38,7 +38,8 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
                        cardRect.center().y() - iconSize / 2,
                        iconSize, iconSize);
 
-        defaultIcon.paint(painter, iconRect);
+        // 🚨 补充对齐标志 Qt::AlignCenter，解决非图片文件图标靠左上角偏斜的问题
+        defaultIcon.paint(painter, iconRect, Qt::AlignCenter);
     }
     painter->restore();
     painter->restore();
