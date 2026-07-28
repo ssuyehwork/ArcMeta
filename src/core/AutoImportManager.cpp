@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QtConcurrent>
 #include <QFuture>
+#include <QCryptographicHash>
 #include <functional>
 #include <cwchar>
 #include <map>
@@ -52,7 +53,7 @@ void AutoImportManager::stopListening() {
     qDebug() << "[AutoImport] USN 监听已停止";
 }
 
-void AutoImportManager::syncAllManagedLibraries() {
+void AutoImportManager::syncAllManagedLibraries(bool allowLightweight) {
     const auto drives = QDir::drives();
     bool changed = false;
     for (const QFileInfo& d : drives) {
@@ -67,8 +68,8 @@ void AutoImportManager::syncAllManagedLibraries() {
             if (QString::compare(entry, targetName, Qt::CaseInsensitive) == 0) {
                 QString managedPath = rootDir.absoluteFilePath(entry);
                 qDebug() << "[AutoImport] 启动对账：发现物理托管库，执行同步 ->" << managedPath;
-                (void)QtConcurrent::run([this, managedPath]() {
-                    handleRecursiveIngestion(QDir::toNativeSeparators(managedPath).toStdWString());
+                (void)QtConcurrent::run([this, managedPath, allowLightweight]() {
+                    handleRecursiveIngestion(QDir::toNativeSeparators(managedPath).toStdWString(), allowLightweight);
                 });
                 changed = true;
             }
@@ -173,9 +174,39 @@ bool AutoImportManager::isUnderManagedLibrary(uint64_t key) {
     return false;
 }
 
-void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
+bool AutoImportManager::hasTopLevelChanged(const std::wstring& rootPath) {
+    QFileInfo info(QString::fromStdWString(rootPath));
+    if (!info.exists()) return true;
+
+    qint64 currentMtime = info.lastModified().toMSecsSinceEpoch();
+    int currentChildCount = QDir(info.absoluteFilePath()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size();
+
+    QString key = "ScanSnapshot/" + QString::fromUtf8(QCryptographicHash::hash(
+        QString::fromStdWString(rootPath).toUtf8(), QCryptographicHash::Md5).toHex());
+    QString saved = AppConfig::instance().getValue(key, "").toString();
+    QString current = QString("%1:%2").arg(currentMtime).arg(currentChildCount);
+
+    return saved != current;
+}
+
+void AutoImportManager::saveTopLevelSnapshot(const std::wstring& rootPath) {
+    QFileInfo info(QString::fromStdWString(rootPath));
+    if (!info.exists()) return;
+    qint64 mtime = info.lastModified().toMSecsSinceEpoch();
+    int childCount = QDir(info.absoluteFilePath()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size();
+    QString key = "ScanSnapshot/" + QString::fromUtf8(QCryptographicHash::hash(
+        QString::fromStdWString(rootPath).toUtf8(), QCryptographicHash::Md5).toHex());
+    AppConfig::instance().setValue(key, QString("%1:%2").arg(mtime).arg(childCount));
+}
+
+void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath, bool allowLightweight) {
     QDir dir(QString::fromStdWString(rootPath));
     if (!dir.exists()) return;
+
+    if (allowLightweight && !hasTopLevelChanged(rootPath)) {
+        qDebug() << "[AutoImport] [Incremental] 顶层快照无变化，跳过托管库深度递归对账与盘点:" << QString::fromStdWString(rootPath);
+        return;
+    }
 
     std::wstring vol = MetadataManager::getVolumeSerialNumber(rootPath);
     auto driveLock = DatabaseManager::instance().getDriveMutex(vol);
@@ -187,6 +218,8 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath) {
 
     MetadataManager::instance().setInternalOperating(false);
     MetadataManager::instance().notifyFullUIRebuild();
+
+    saveTopLevelSnapshot(rootPath);
 }
 
 } // namespace ArcMeta

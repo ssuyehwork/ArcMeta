@@ -88,6 +88,11 @@ void CoreController::startSystem() {
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
 
+            // 在系统顶层统一提取一次“上次是否正常关闭”状态，提取后立刻置脏
+            bool wasCleanShutdown = AppConfig::instance().getValue("System/LastCleanShutdown", false).toBool();
+            AppConfig::instance().setValue("System/LastCleanShutdown", false);
+            AppConfig::instance().sync();
+
             // 2026-08-xx 按照 Plan-126：彻底废除 NativeFolderWatcher (IOCP) 双轨制。
             // 全面转向单一 USN Journal 主轨。
             // AutoImportManager::instance().startListening(); // 注销 USN 日志监听
@@ -119,14 +124,14 @@ void CoreController::startSystem() {
                     qDebug() << "[Core] 识别到自定义监控目录，开启 IOCP 监控并对账同步:" << QString::fromStdWString(normPath);
                     NativeFolderWatcher::instance().addWatch(normPath);
                     
-                    (void)QtConcurrent::run([normPath]() {
-                        AutoImportManager::instance().handleRecursiveIngestion(normPath);
+                    (void)QtConcurrent::run([normPath, wasCleanShutdown]() {
+                        AutoImportManager::instance().handleRecursiveIngestion(normPath, wasCleanShutdown);
                     });
                 }
             }
 
             // 2026-08-xx 物理同步：初始化完成后执行一次全量物理库对账 (在后台线程执行，避免阻塞 UI)
-            AutoImportManager::instance().syncAllManagedLibraries();
+            AutoImportManager::instance().syncAllManagedLibraries(wasCleanShutdown);
 
             QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);
