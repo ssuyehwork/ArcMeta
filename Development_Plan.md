@@ -309,4 +309,12 @@
   1. 修改 `src/ui/WindowsShellThumbnailProvider.cpp`，把 Windows 原生提取缩略图的 `SIIGBF_RESIZETOFIT` 替换为 `SIIGBF_THUMBNAILONLY` 屏蔽非真正缩略图大图标，根治白色边框的系统级污染。
   2. 修改 `src/ui/CardPainterHelper.cpp`，统一重构对普通 fallback 图标在卡片里的绘制方案，强制将 icon 获取其指定合适分辨率的 pixmap，并在限定的圆角正中心区域进行完美的平滑拉伸绘制。
 - 不在本次范围内的是：修改任何除了上述两个界面卡片细节修正以外的业务逻辑。
-- 对应方案文档：Modification_Plan/Modification_Plan-120.md
+- 对应方案文档：Modification_Plan/Modification_Plan-121.md
+
+## [2026-07-29] 卡片数据渲染代理多套/多种方式冗余架构审计排查
+
+- 用户描述的现象/问题：当前应用在渲染内容区卡片数据时，可能存在多套、多种方式并存的冗余逻辑和架构硬伤。
+- 用户期望的结果：对当前版本在卡片渲染层面上所有存在多套方式、职责重叠的代码设计进行全面而透彻的代码审计，并输出结构明晰的架构排查与重构整改设计。
+- 本次任务边界：全面审计 `src/ui/` 目录下所有参与单元格、网格和树形卡片数据渲染的代理组件（包括 `ThumbnailDelegate`、`GridItemDelegate`、`TreeItemDelegate`），定位其在视觉物理渲染、逻辑事件过滤以及尺寸计算上的冗余与过载证据。由于当前角色是分析师，仅产出设计剖析方案，不物理修改任何功能性代码文件。
+- 不在本次范围内的是：修改物理代码，引入或删除任何实际逻辑文件。
+- 对应方案文档：Modification_Plan/Modification_Plan-122.md
