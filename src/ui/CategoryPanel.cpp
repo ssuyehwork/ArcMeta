@@ -238,7 +238,7 @@ void CategoryPanel::setupContextMenu() {
         QMenu menu(this);
         UiHelper::applyMenuStyle(&menu);
 
-        // 基于规范逻辑：如果没有选中项，或者选中了“我的分类”根节点
+        // 基于规范逻辑：如果没有选中项，或者选中了“临时分类”根节点
         QString itemName = index.data(NameRole).toString();
         QString itemType = index.data(TypeRole).toString();
 
@@ -246,7 +246,7 @@ void CategoryPanel::setupContextMenu() {
             // 2026-06-xx 物理级 1:1 还原：回收站专属右键菜单
             menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "清空回收站", this, &CategoryPanel::onEmptyTrash);
             menu.addAction(UiHelper::getIcon("sync", PrimaryBlue, 18), "还原全部项目", this, &CategoryPanel::onRestoreAllFromTrash);
-        } else if (!index.isValid() || itemName == "我的分类") {
+        } else if (!index.isValid() || itemName == "临时分类") {
             menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建分类", this, &CategoryPanel::onCreateCategory);
             
             auto* sortMenu = menu.addMenu(UiHelper::getIcon("list_ul", QColor("#aaaaaa"), 18), "排列");
@@ -487,12 +487,12 @@ void CategoryPanel::restoreExpandedState(const QModelIndex& parent, const QSet<i
         if (expandedNames.contains(name) || (id != 0 && expandedIds.contains(id))) {
             shouldExpand = true;
         }
-        else if (name == "我的分类" || name == "快速访问") {
+        else if (name == "临时分类" || name == "快速访问") {
             shouldExpand = true;
         }
         else if (!hasHistory) {
             QModelIndex pIdx = idx.parent();
-            if (pIdx.isValid() && pIdx.data(NameRole).toString() == "我的分类") {
+            if (pIdx.isValid() && pIdx.data(NameRole).toString() == "临时分类") {
                 shouldExpand = true;
             }
         }
@@ -1054,7 +1054,7 @@ void CategoryPanel::initUi() {
 
             if (type == "category" && index.data(IdRole).toInt() > 0) {
                 targetCatId = index.data(IdRole).toInt();
-            } else if (name == "我的分类") {
+            } else if (name == "临时分类") {
                 targetCatId = 0;
             } else {
                 targetCatId = 0;
@@ -1121,7 +1121,7 @@ void CategoryPanel::initUi() {
     connect(m_categoryTree, &QTreeView::collapsed, this, &CategoryPanel::saveExpandedStateToSettings);
     // 2026-06-xx 物理同步：支持内部拖拽重排持久化
     connect(m_categoryModel, &QAbstractItemModel::rowsMoved, this, [this](const QModelIndex&, int, int, const QModelIndex&, int) {
-        // 核心逻辑：深度优先遍历“我的分类”子树，根据 UI 层级物理同步 DB 中的 parent_id 与 sort_order
+        // 核心逻辑：深度优先遍历“临时分类”子树，根据 UI 层级物理同步 DB 中的 parent_id 与 sort_order
         std::function<void(const QModelIndex&, int)> syncSubtree;
         syncSubtree = [&](const QModelIndex& parentIdx, int parentIdInDb) {
             for (int i = 0; i < m_categoryModel->rowCount(parentIdx); ++i) {
@@ -1130,9 +1130,9 @@ void CategoryPanel::initUi() {
                 QString type = childIdx.data(TypeRole).toString();
                 bool isPinned = childIdx.data(PinnedRole).toBool();
 
-                // 物理阻断：严禁处理“镜像节点”（即 Pinned 为 true 且其父项不是“我的分类”的节点）。
+                // 物理阻断：严禁处理“镜像节点”（即 Pinned 为 true 且其父项不是“临时分类”的节点）。
                 // 理由：镜像节点仅作为 UI 快捷方式，其移动不应改写原始数据库中的 parentId 关系。
-                if (parentIdInDb != -1 && isPinned && parentIdx.data(NameRole).toString() != "我的分类" && parentIdx.data(TypeRole).toString() != "category") {
+                if (parentIdInDb != -1 && isPinned && parentIdx.data(NameRole).toString() != "临时分类" && parentIdx.data(TypeRole).toString() != "category") {
                     continue;
                 }
 
@@ -1151,8 +1151,8 @@ void CategoryPanel::initUi() {
                     }
                     // 递归同步子分类
                     syncSubtree(childIdx, id);
-                } else if (childIdx.data(NameRole).toString() == "我的分类") {
-                    // 进入“我的分类”根容器
+                } else if (childIdx.data(NameRole).toString() == "临时分类") {
+                    // 进入“临时分类”根容器
                     syncSubtree(childIdx, 0);
                 }
             }

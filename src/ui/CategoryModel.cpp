@@ -85,8 +85,8 @@ void CategoryModel::refresh() {
 
     QStandardItem* userGroup = nullptr;
     if (m_type == User || m_type == Both) {
-        userGroup = new QStandardItem("我的分类");
-        userGroup->setData("我的分类", NameRole);
+        userGroup = new QStandardItem("临时分类");
+        userGroup->setData("临时分类", NameRole);
         userGroup->setSelectable(false);
         userGroup->setEditable(false);
         userGroup->setFlags(userGroup->flags() | Qt::ItemIsDropEnabled);
@@ -136,7 +136,7 @@ void CategoryModel::refresh() {
             if (parentId > 0 && itemMap.contains(parentId)) {
                 itemMap[parentId]->appendRow(item);
             } else {
-                // 2026-08-xx 物理同步：ArcMeta.Library_* 强制置顶作为顶级分类 (Peer to "我的分类")
+                // 2026-08-xx 物理同步：ArcMeta.Library_* 强制置顶作为顶级分类 (Peer to "临时分类")
                 if (QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
                     root->appendRow(item);
                 } else if (userGroup) {
@@ -326,7 +326,7 @@ bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction actio
         QString type = parentItem->data(TypeRole).toString();
         QString name = parentItem->data(NameRole).toString();
         
-        if (type != "category" && type != "bookmark" && name != "我的分类") {
+        if (type != "category" && type != "bookmark" && name != "临时分类") {
             return false; 
         }
     }

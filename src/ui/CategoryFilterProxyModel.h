@@ -7,7 +7,7 @@ namespace ArcMeta {
 
 /**
  * @brief 分类递归过滤代理模型
- * 2026-xx-xx 按照 Plan-98：实现“我的分类”专项递归过滤
+ * 2026-xx-xx 按照 Plan-98：实现“临时分类”专项递归过滤
  */
 class CategoryFilterProxyModel : public QSortFilterProxyModel {
     Q_OBJECT
@@ -36,11 +36,11 @@ protected:
         if (id < 0) return true;
 
         // 2. 根容器处理
-        if (name == "快速访问" || name == "我的分类") {
+        if (name == "快速访问" || name == "临时分类") {
             return hasMatchingChild(index);
         }
 
-        // 3. “我的分类”子树逻辑
+        // 3. “临时分类”子树逻辑
         if (name.contains(m_filterText, Qt::CaseInsensitive)) return true;
 
         // 4. 递归检查子项
