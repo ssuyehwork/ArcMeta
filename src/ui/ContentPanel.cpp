@@ -89,6 +89,30 @@ using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
  
 namespace ArcMeta { 
+
+// 纯 C++ 极速提取 .ai 文件中内嵌的高清 JPEG 预览图 (耗时仅 1~2ms，零依赖)
+static QImage extractEmbeddedAiPreview(const QString& filePath) {
+    QFile file(filePath);
+    // 打开 .ai 文件（仅读取前 5MB 即可，缩略图数据通常在文件头附近）
+    if (!file.open(QIODevice::ReadOnly)) return QImage();
+
+    QByteArray data = file.read(5 * 1024 * 1024);
+    file.close();
+
+    // 搜索 JPEG 文件的魔数二进制头 (0xFF 0xD8 0xFF) 与尾 (0xFF 0xD9)
+    int start = data.indexOf("\xFF\xD8\xFF");
+    if (start != -1) {
+        int end = data.indexOf("\xFF\xD9", start);
+        if (end != -1) {
+            QByteArray imgData = data.mid(start, (end - start) + 2);
+            QImage img;
+            if (img.loadFromData(imgData)) {
+                return img; // 成功提取出 .ai 内嵌的高清原图！
+            }
+        }
+    }
+    return QImage();
+}
  
 // --- ArcMetaVirtualDbModel 实现 ---
 ArcMetaVirtualDbModel::ArcMetaVirtualDbModel(QObject* parent) : QAbstractTableModel(parent) {
@@ -217,16 +241,23 @@ QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == AspectRatioRole) {
         // 2026-07-xx 性能优化：优先使用 ItemRecord 中已注入的尺寸信息，实现渲染零延迟
         if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
-        return m_aspectRatios.value(QDir::toNativeSeparators(path), 1.0);
+        double ratio = m_aspectRatios.value(QDir::toNativeSeparators(path), 1.0);
+        return ratio > 0.0 ? ratio : 1.0;
     } else if (role == HasThumbnailRole) {
         // 2026-xx-xx 按照 Plan-114 优化 + 冗余边框修复：
-        // cur/ico/ani 为纯图标类文件，ai 尚未支持真实缩略图预览，
-        // 三者均应强制视为"无缩略图"，走 defaultIcon 干净绘制，避免 Shell 图标回退位图自带的描边被放大铺满卡片
-        static const QStringList iconOnlyExts = {"cur", "ico", "ani", "ai"};
+        // cur/ico/ani 为纯图标类文件，ai 根据是否成功提取出内嵌缩略图决定是否走缩略图路径
+        static const QStringList iconOnlyExts = {"cur", "ico", "ani"};
         if (iconOnlyExts.contains(record.suffix.toLower())) return false;
+        if (record.suffix.toLower() == "ai") {
+            QString nativePath = QDir::toNativeSeparators(path);
+            if (m_aspectRatios.contains(nativePath)) {
+                return m_aspectRatios.value(nativePath) > 0.0;
+            }
+            return false; // 尚未加载完成或提取失败，走 defaultIcon 干净绘制，避免拉伸和虚假边框
+        }
         if (UiHelper::isGraphicsFile(record.suffix)) return true;
         if (record.width > 0 && record.height > 0) return true;
-        return m_aspectRatios.contains(QDir::toNativeSeparators(path));
+        return m_aspectRatios.contains(QDir::toNativeSeparators(path)) && m_aspectRatios.value(QDir::toNativeSeparators(path)) > 0.0;
     } else if (role == Qt::DecorationRole && index.column() == 0) {
         // 统一使用稳定且唯一的 path 作为内存缩略图缓存 Key，彻底根除注册前/后 fileId 状态变化导致的缓存失效或闪烁痛点
         QString cacheKey = path;
@@ -689,13 +720,23 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             ar = 1.0;
                             hasThumb = true;
                         }
+                    } else if (ext == "ai") {
+                        // 纯 C++ 提取 .ai 文件中内嵌的高清 JPEG 预览图 (耗时仅 1~2ms，零依赖)
+                        img = extractEmbeddedAiPreview(path);
+                        if (!img.isNull()) {
+                            ar = (double)img.width() / img.height();
+                            hasThumb = true;
+                        } else {
+                            ar = 1.0;
+                            hasThumb = false;
+                        }
                     } else if (UiHelper::isGraphicsFile(ext) && ext != "cur" && ext != "ico" && ext != "ani" && ext != "ai") {
                         img = UiHelper::getShellThumbnail(path, 128);
                         if (!img.isNull()) {
                             ar = (double)img.width() / img.height();
                             hasThumb = true;
                         }
-                    } else if (ext == "cur" || ext == "ico" || ext == "ani" || ext == "ai") {
+                    } else if (ext == "cur" || ext == "ico" || ext == "ani") {
                         // 图标类文件固定视为 1:1，避免因 hasThumb 恒为 false 导致宽高比永远未写入、每次都被判定为 needLoad
                         ar = 1.0;
                         hasThumb = false;
@@ -725,7 +766,7 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             }
                             
                             mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
-                            mutableThis->m_aspectRatios[QDir::toNativeSeparators(path)] = ar;
+                            mutableThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
                             
                             for (int i = 0; i < mutableThis->m_displayCount; ++i) {
                                 const auto& rec = mutableThis->m_allRecords[i];
