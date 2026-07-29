@@ -38,13 +38,32 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
         int y = cardRect.center().y() - scaled.height() / 2;
         painter->drawPixmap(x, y, scaled);
     } else if (!defaultIcon.isNull()) {
-        // 非图片文件图标：65% 比例居中悬浮展示，带有 Qt::AlignCenter
+        // 非图片文件图标：65% 比例居中悬浮展示
         int iconSize = qMin(cardRect.width(), cardRect.height()) * 0.65;
-        QRect iconRect(cardRect.center().x() - iconSize / 2,
-                       cardRect.center().y() - iconSize / 2,
-                       iconSize, iconSize);
 
-        defaultIcon.paint(painter, iconRect, Qt::AlignCenter);
+        // 关键修复：不要直接向 QIcon 请求任意大尺寸的 pixmap ——
+        // 部分来源（如基于虚构 dummy 文件名提取的 Shell 关联图标）在被请求超出其
+        // 原生可用尺寸时，会触发 Windows Shell 对"大图标/Jumbo 图标"的重新提取，
+        // 若源文件不存在会导致提取失败，退化为空白通用图标。
+        // 因此改为：先取该 QIcon 实际拥有最大原生尺寸位图，再手动平滑放大。
+        QList<QSize> availSizes = defaultIcon.availableSizes();
+        QSize nativeSize = availSizes.isEmpty() ? QSize(32, 32) : availSizes.last();
+        QPixmap iconPixmap = defaultIcon.pixmap(nativeSize);
+
+        if (iconPixmap.isNull()) {
+            // 兜底：万一原生尺寸也取不到，再退回按目标尺寸请求一次
+            iconPixmap = defaultIcon.pixmap(iconSize, iconSize);
+        }
+
+        if (!iconPixmap.isNull() && (iconPixmap.width() != iconSize || iconPixmap.height() != iconSize)) {
+            iconPixmap = iconPixmap.scaled(iconSize, iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
+
+        QRect iconRect(cardRect.center().x() - iconPixmap.width() / 2,
+                       cardRect.center().y() - iconPixmap.height() / 2,
+                       iconPixmap.width(), iconPixmap.height());
+
+        painter->drawPixmap(iconRect, iconPixmap);
     }
     painter->restore();
 }
