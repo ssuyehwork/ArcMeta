@@ -177,9 +177,11 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             ingestion_status INTEGER DEFAULT -1,
             auto_color TEXT DEFAULT '',
             base_name TEXT DEFAULT '',
-            ext TEXT DEFAULT ''
+            ext TEXT DEFAULT '',
+            added_at INTEGER DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
+        CREATE INDEX IF NOT EXISTS idx_metadata_added_at ON metadata(added_at);
 
         -- 分类定义表
         CREATE TABLE IF NOT EXISTS categories (
@@ -281,6 +283,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     bool hasHeightColumn = false;
     bool hasIngestionStatusColumn = false;
     bool hasAutoColorColumn = false;
+    bool hasAddedAtColumn = false;
 
     if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(checkStmt) == SQLITE_ROW) {
@@ -291,6 +294,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
                 if (name == "height") hasHeightColumn = true;
                 if (name == "ingestion_status") hasIngestionStatusColumn = true;
                 if (name == "auto_color") hasAutoColorColumn = true;
+                if (name == "added_at") hasAddedAtColumn = true;
             }
         }
         sqlite3_finalize(checkStmt);
@@ -311,6 +315,11 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     if (!hasAutoColorColumn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 auto_color 字段...";
         sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN auto_color TEXT DEFAULT ''", nullptr, nullptr, nullptr);
+    }
+    if (!hasAddedAtColumn) {
+        qDebug() << "[DB] 检测到旧版数据库，正在添加 added_at 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN added_at INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+        sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_metadata_added_at ON metadata(added_at);", nullptr, nullptr, nullptr);
     }
 
     // 2026-08-xx 新增字段：持久化基名与后缀名，避免每次启动现算并优化回填

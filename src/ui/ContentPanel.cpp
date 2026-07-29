@@ -2974,6 +2974,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             for (const QFileInfo& info : entries) { 
                 if (!panelPtr) return; 
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
+                if (info.isDir() && info.fileName().endsWith(".arc", Qt::CaseInsensitive)) continue;
  
                 QString absPath = info.absoluteFilePath();
                 allItems.push_back(ItemRecord::create(absPath));

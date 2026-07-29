@@ -22,7 +22,7 @@
   ├── m8crzbs3jb7dj.arc/ ───> 原始文件.psd + _thumbnail.png (256x256)
   └── k9x2p1q4r8v5z.arc/ ───> 照片.jpg + _thumbnail.png (256x256)
 
-[ 侧边栏分类树 (彻底废除“我的分类”外壳) ]
+[ 侧边栏分类树 (彻底废除“临时分类”外壳) ]
   ├── ArcMeta.Library_D (一等公民，parentId = 0)
   │   └── 文件夹 A (次等分类，parentId = Library_D)
   │       ├── 文件夹 B ───> [关联资产包：m8crzbs3jb7dj]
@@ -41,7 +41,7 @@
 |:---:|---|---|:---:|
 | 1 | `ArcMeta.Library/[ID].arc` 1 个文件夹存储 1 个文件，放弃旧映射逻辑 | 详见 4.1 节，实现 `.arc` 物理封装与固定 ID 主键化，废除全量路径重对账 | ✅ |
 | 2 | 不使用 `metadata.json`，全量使用 SQLite 数据库 | 详见 4.1 节，物理层仅存原文件+`_thumbnail.png`，元数据 100% 存在 SQLite DB | ✅ |
-| 3 | 侧边栏废除“我的分类”外壳，`ArcMeta.Library_[盘符]` 为一等公民 (Root ID) | 详见 4.2 节，`ArcMeta.Library_[盘符]` 的 `parentId` 设为 `0`，直属侧边栏根节点 | ✅ |
+| 3 | 侧边栏废除“临时分类”外壳，`ArcMeta.Library_[盘符]` 为一等公民 (Root ID) | 详见 4.2 节，`ArcMeta.Library_[盘符]` 的 `parentId` 设为 `0`，直属侧边栏根节点 | ✅ |
 | 4 | 拖拽文件夹 A (含 B、C) 创建次等子分类，拖拽单文件归属未分类 | 详见 4.3 节，实现 `AssetImporter` 自动化逻辑分流器 | ✅ |
 | 5 | 内容面板只显示虚拟子分类和文件，UI 上 100% 隐去 `.arc` 文件夹 | 详见 4.6 节，`loadCategory` 与 `scanDir` 物理级过滤所有 `.arc` 目录 | ✅ |
 | 6 | 补齐“添加日期” (`added_at`) 字段与“按添加日期排序”菜单 | 详见 4.5 节，全表与 Model 补齐 `added_at`，扩充 `SortByAddedDate` 枚举 | ✅ |
@@ -65,8 +65,8 @@
     *   软件内重命名、改分类、改标签，只更新 SQLite 数据库记录，耗时 $0.001 \text{ ms}$，彻底杜绝文件锁死与 Windows `MAX_PATH` 260 字符溢出报错。
 
 ### 4.2 重构 2：侧边栏“一等公民”分类树重构
-*   **物理剥离“我的分类”**：
-    在 `CategoryModel` 和 `CategoryPanel` 中，废除顶层“我的分类”虚拟外壳包装。
+*   **物理剥离“临时分类”**：
+    在 `CategoryModel` 和 `CategoryPanel` 中，废除顶层“临时分类”虚拟外壳包装。
 *   **一等公民设定**：
     所有已创建/激活托管库的盘符（如 `ArcMeta.Library_C`、`ArcMeta.Library_D`、`ArcMeta.Library_Z`）直接作为 `parentId = 0` 的根分类节点挂载在侧边栏分类树顶层。
 
@@ -119,7 +119,7 @@
 - [ ] `src/core/ModelContract.h` / `src/meta/MetadataDefs.h`（增加 `addedAt` 时间戳字段）
 - [ ] `src/meta/MetadataManager.h` / `src/meta/MetadataManager.cpp`（重构 `registerItem` 入库写入 `added_at`，清洗旧路径对账逻辑）
 - [ ] `src/meta/CategoryRepo.h` / `src/meta/CategoryRepo.cpp`（清空 `syncPhysicalDirectoryCascade` 旧对账逻辑，配合一等公民 Root 分类树）
-- [ ] `src/ui/CategoryModel.cpp` / `src/ui/CategoryPanel.cpp`（废除“我的分类”顶层节点，实现 `ArcMeta.Library_[盘符]` 一等公民树渲染）
+- [ ] `src/ui/CategoryModel.cpp` / `src/ui/CategoryPanel.cpp`（废除“临时分类”顶层节点，实现 `ArcMeta.Library_[盘符]` 一等公民树渲染）
 - [ ] `src/ui/ContentPanel.h` / `src/ui/ContentPanel.cpp`（扩充 `SortByAddedDate` 排序，实现 `.arc` 目录过滤）
 - [ ] `src/ui/CardPainterHelper.cpp`（保持透明内衬，未选中 2px 灰色套边 `#4a4a4a`，选中 2px 蓝色高亮 `#3498db`，无 1px 间隙）
 
