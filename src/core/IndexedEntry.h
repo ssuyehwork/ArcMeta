@@ -40,6 +40,7 @@ struct ItemRecord {
     long long mtime = 0;
     long long ctime = 0;
     long long atime = 0;
+    long long added_at = 0;
     bool isEmpty = false;
     bool isManaged = false; // 预存受控状态
     QString suffix;

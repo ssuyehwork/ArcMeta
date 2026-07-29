@@ -44,6 +44,15 @@ bool PhysicalDataExtractor::fetchWinApiMetadataDirect(
     sprintf_s(buf, "%08X-%08X%08X", volSerial, indexHigh, indexLow);
     outId128 = buf;
 
+    // 2026-08-xx .arc 物理解耦：如果处于 .arc 容器中，直接以 .arc 容器名作为唯一的 fileId128，实现绝对持久且防漂移的逻辑绑定
+    QFileInfo qinfo(QString::fromStdWString(path));
+    QString parentDir = qinfo.absolutePath();
+    QFileInfo parentInfo(parentDir);
+    QString parentName = parentInfo.fileName();
+    if (parentName.endsWith(".arc", Qt::CaseInsensitive)) {
+        outId128 = parentName.left(parentName.length() - 4).toStdString();
+    }
+
     if (outFrn) {
         // FRN 序列化
         wchar_t frnBuf[64];

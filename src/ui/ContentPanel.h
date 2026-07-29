@@ -135,7 +135,8 @@ public:
         SortByExtension,
         SortBySize,
         SortByDimension,
-        SortByRating
+        SortByRating,
+        SortByAddedDate
     };
 
     SortType currentSortType() const { return m_sortType; }

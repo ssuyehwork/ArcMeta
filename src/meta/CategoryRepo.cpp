@@ -995,13 +995,6 @@ void CategoryRepo::fullRecount() {
             }
         }
     }
-    QStringList customFolders = AppConfig::instance().getValue("DriveBar/CustomMonitoredFolders").toStringList();
-    for (const QString& folder : customFolders) {
-        std::wstring normPath = MetadataManager::normalizePath(folder.toStdWString());
-        if (!normPath.empty()) {
-            monitoredPaths.append(QString::fromStdWString(normPath));
-        }
-    }
     monitoredPaths.removeDuplicates();
 
     QJsonObject currentFingerprints;

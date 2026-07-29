@@ -16,6 +16,7 @@ void ItemRecord::fromMetadata(ItemRecord& r, const RuntimeMeta& meta) {
     r.note = QString::fromStdWString(meta.note);
     r.width = meta.width;
     r.height = meta.height;
+    r.added_at = meta.added_at;
     r.isManaged = meta.hasUserOperations();
     if (!meta.fileId128.empty()) {
         r.fileId = meta.fileId128;

@@ -36,11 +36,11 @@ protected:
         if (id < 0) return true;
 
         // 2. 根容器处理
-        if (name == "快速访问" || name == "临时分类") {
+        if (name == "快速访问") {
             return hasMatchingChild(index);
         }
 
-        // 3. “临时分类”子树逻辑
+        // 3. 子树匹配逻辑
         if (name.contains(m_filterText, Qt::CaseInsensitive)) return true;
 
         // 4. 递归检查子项
