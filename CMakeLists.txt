@@ -44,6 +44,8 @@ set(SOURCES
     src/main.cpp
     src/meta/sqlite3.c
     src/meta/sqlite3.h
+    src/meta/AmMetaJson.cpp
+    src/meta/AmMetaJson.h
     src/core/CoreController.cpp
     src/core/CoreController.h
     src/core/PhysicalDiskSearchExtractor.cpp
