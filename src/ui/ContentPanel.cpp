@@ -16,6 +16,7 @@
 #include "BatchProgressDialog.h"
 #include "ThumbnailDelegate.h"
 #include "../util/ImportHelper.h"
+#include "../util/AssetImporter.h"
 #include "../core/AutoImportManager.h"
 #include "../meta/AmMetaJson.h"
 #include "../core/NavigationHistoryService.h"
