@@ -695,6 +695,10 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             ar = (double)img.width() / img.height();
                             hasThumb = true;
                         }
+                    } else if (ext == "cur" || ext == "ico" || ext == "ani" || ext == "ai") {
+                        // 图标类文件固定视为 1:1，避免因 hasThumb 恒为 false 导致宽高比永远未写入、每次都被判定为 needLoad
+                        ar = 1.0;
+                        hasThumb = false;
                     }
 
                     if (weakThis) {
@@ -721,7 +725,7 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             }
                             
                             mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
-                            if (hasThumb) mutableThis->m_aspectRatios[QDir::toNativeSeparators(path)] = ar;
+                            mutableThis->m_aspectRatios[QDir::toNativeSeparators(path)] = ar;
                             
                             for (int i = 0; i < mutableThis->m_displayCount; ++i) {
                                 const auto& rec = mutableThis->m_allRecords[i];

@@ -38,13 +38,21 @@ void CardPainterHelper::drawCardCover(QPainter* painter, const QRect& cardRect, 
         int y = cardRect.center().y() - scaled.height() / 2;
         painter->drawPixmap(x, y, scaled);
     } else if (!defaultIcon.isNull()) {
-        // 非图片文件图标：65% 比例居中悬浮展示，带有 Qt::AlignCenter
+        // 非图片文件图标：65% 比例居中悬浮展示
         int iconSize = qMin(cardRect.width(), cardRect.height()) * 0.65;
-        QRect iconRect(cardRect.center().x() - iconSize / 2,
-                       cardRect.center().y() - iconSize / 2,
-                       iconSize, iconSize);
 
-        defaultIcon.paint(painter, iconRect, Qt::AlignCenter);
+        // 显式请求目标尺寸的 QPixmap，避免 QIcon::paint() 在只有小尺寸位图时
+        // 不按 QRect 缩放、导致图标偏小贴边的问题
+        QPixmap iconPixmap = defaultIcon.pixmap(iconSize, iconSize);
+        if (iconPixmap.width() < iconSize || iconPixmap.height() < iconSize) {
+            iconPixmap = iconPixmap.scaled(iconSize, iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
+
+        QRect iconRect(cardRect.center().x() - iconPixmap.width() / 2,
+                       cardRect.center().y() - iconPixmap.height() / 2,
+                       iconPixmap.width(), iconPixmap.height());
+
+        painter->drawPixmap(iconRect, iconPixmap);
     }
     painter->restore();
 }
