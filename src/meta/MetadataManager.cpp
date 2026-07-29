@@ -30,6 +30,7 @@
 #include "../ui/MediaColorExtractor.h"
 #include "MediaExtractorPipeline.h"
 #include "sqlite3.h"
+#include "AmMetaJson.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -754,13 +755,35 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
 
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    ensureActivated(nPath);
-    { 
-        std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        m_cache[nPath].rating = rating; 
+    if (isInsideManagedLibrary(nPath)) {
+        // A. 托管库模式：写入 SQLite 数据库
+        ensureActivated(nPath);
+        { 
+            std::unique_lock<std::shared_mutex> lock(m_mutex); 
+            m_cache[nPath].rating = rating; 
+        }
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+        persistAsync(nPath);
+    } else {
+        // B. 磁盘导航模式：写入 ArcMeta.cache 高级 JSON 缓存文件
+        QFileInfo info(QString::fromStdWString(nPath));
+        std::wstring folderPath = info.absolutePath().toStdWString();
+        std::wstring fileName = info.fileName().toStdWString();
+
+        AmMetaJson jsonCache(folderPath);
+        jsonCache.load();
+        jsonCache.items()[fileName].rating = rating;
+        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
+        jsonCache.save(); // 物理落盘写进 ArcMeta.cache/*.json
+
+        // 同步内存缓存
+        ensureActivated(nPath); // 确保内存缓存激活
+        { 
+            std::unique_lock<std::shared_mutex> lock(m_mutex); 
+            m_cache[nPath].rating = rating; 
+        }
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    persistAsync(nPath);
 }
 
 void MetadataManager::setAddedAt(const std::wstring& path, long long addedAt, bool notify) {
@@ -813,103 +836,193 @@ void MetadataManager::removeTag(const QString& tagName) {
 
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    ensureActivated(nPath);
-    bool changed = false;
-    bool isFolder = false;
-    { 
-        std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end()) {
-            isFolder = it->second.isFolder;
-            if (it->second.manualColor != color) {
-                it->second.manualColor = color;
+    if (isInsideManagedLibrary(nPath)) {
+        ensureActivated(nPath);
+        bool changed = false;
+        bool isFolder = false;
+        { 
+            std::unique_lock<std::shared_mutex> lock(m_mutex); 
+            auto it = m_cache.find(nPath);
+            if (it != m_cache.end()) {
+                isFolder = it->second.isFolder;
+                if (it->second.manualColor != color) {
+                    it->second.manualColor = color;
+                    changed = true;
+                }
+            } else {
+                m_cache[nPath].manualColor = color;
                 changed = true;
             }
-        } else {
-            m_cache[nPath].manualColor = color;
-            changed = true;
         }
-    }
-    if (changed) {
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-        persistAsync(nPath);
-        
-        // 自下而上：如果改变的是文件夹，同步更新映射分类颜色
-        if (isFolder) {
-            if (CategoryRepo::updateCategoryColorByPath(nPath, color)) {
-                if (notify) notifyUI(RefreshLevel::CategoryOnly);
+        if (changed) {
+            if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+            persistAsync(nPath);
+            
+            // 自下而上：如果改变的是文件夹，同步更新映射分类颜色
+            if (isFolder) {
+                if (CategoryRepo::updateCategoryColorByPath(nPath, color)) {
+                    if (notify) notifyUI(RefreshLevel::CategoryOnly);
+                }
             }
         }
+    } else {
+        // B. 磁盘导航模式：写入 ArcMeta.cache 高级 JSON 缓存文件
+        QFileInfo info(QString::fromStdWString(nPath));
+        std::wstring folderPath = info.absolutePath().toStdWString();
+        std::wstring fileName = info.fileName().toStdWString();
+
+        AmMetaJson jsonCache(folderPath);
+        jsonCache.load();
+        jsonCache.items()[fileName].color = color;
+        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
+        jsonCache.save(); // 物理落盘写进 ArcMeta.cache/*.json
+
+        // 同步内存缓存
+        ensureActivated(nPath); // 确保内存缓存激活
+        { 
+            std::unique_lock<std::shared_mutex> lock(m_mutex); 
+            m_cache[nPath].manualColor = color; 
+        }
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     }
 }
 
 void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    ensureActivated(nPath);
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    persistAsync(nPath);
+    if (isInsideManagedLibrary(nPath)) {
+        ensureActivated(nPath);
+        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+        persistAsync(nPath);
+    } else {
+        QFileInfo info(QString::fromStdWString(nPath));
+        std::wstring folderPath = info.absolutePath().toStdWString();
+        std::wstring fileName = info.fileName().toStdWString();
+
+        AmMetaJson jsonCache(folderPath);
+        jsonCache.load();
+        jsonCache.items()[fileName].pinned = pinned;
+        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
+        jsonCache.save();
+
+        ensureActivated(nPath);
+        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    }
 }
 
 void MetadataManager::setTags(const std::wstring& path, const QStringList& tags, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    ensureActivated(nPath);
+    if (isInsideManagedLibrary(nPath)) {
+        ensureActivated(nPath);
 
-    bool oldEmpty = false;
-    bool newEmpty = tags.isEmpty();
-    QStringList oldTags;
-    bool isFolder = false;
+        bool oldEmpty = false;
+        bool newEmpty = tags.isEmpty();
+        QStringList oldTags;
+        bool isFolder = false;
 
-    {
-        std::shared_lock<std::shared_mutex> rLock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end()) {
-            oldEmpty = it->second.tags.isEmpty();
-            oldTags = it->second.tags;
-            isFolder = it->second.isFolder;
-        }
-    }
-
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache[nPath].tags = tags;
-    }
-
-    if (!isFolder) {
-        if (oldEmpty && !newEmpty) {
-            CategoryRepo::s_untaggedCount.fetch_sub(1);
-        } else if (!oldEmpty && newEmpty) {
-            CategoryRepo::s_untaggedCount.fetch_add(1);
-        }
-
-        // Update global tags and tagsCount
-        std::lock_guard<std::mutex> tagsLock(CategoryRepo::s_tagsMutex);
-        for (const auto& t : tags) {
-            if (!CategoryRepo::s_globalTagsSet.contains(t)) {
-                CategoryRepo::s_globalTagsSet.insert(t);
-                CategoryRepo::s_tagsCount.fetch_add(1);
+        {
+            std::shared_lock<std::shared_mutex> rLock(m_mutex);
+            auto it = m_cache.find(nPath);
+            if (it != m_cache.end()) {
+                oldEmpty = it->second.tags.isEmpty();
+                oldTags = it->second.tags;
+                isFolder = it->second.isFolder;
             }
         }
-    }
 
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    persistAsync(nPath);
+        {
+            std::unique_lock<std::shared_mutex> lock(m_mutex);
+            m_cache[nPath].tags = tags;
+        }
+
+        if (!isFolder) {
+            if (oldEmpty && !newEmpty) {
+                CategoryRepo::s_untaggedCount.fetch_sub(1);
+            } else if (!oldEmpty && newEmpty) {
+                CategoryRepo::s_untaggedCount.fetch_add(1);
+            }
+
+            // Update global tags and tagsCount
+            std::lock_guard<std::mutex> tagsLock(CategoryRepo::s_tagsMutex);
+            for (const auto& t : tags) {
+                if (!CategoryRepo::s_globalTagsSet.contains(t)) {
+                    CategoryRepo::s_globalTagsSet.insert(t);
+                    CategoryRepo::s_tagsCount.fetch_add(1);
+                }
+            }
+        }
+
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+        persistAsync(nPath);
+    } else {
+        QFileInfo info(QString::fromStdWString(nPath));
+        std::wstring folderPath = info.absolutePath().toStdWString();
+        std::wstring fileName = info.fileName().toStdWString();
+
+        AmMetaJson jsonCache(folderPath);
+        jsonCache.load();
+        
+        std::vector<std::wstring> wTags;
+        for (const QString& t : tags) {
+            wTags.push_back(t.toStdWString());
+        }
+        jsonCache.items()[fileName].tags = wTags;
+        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
+        jsonCache.save();
+
+        ensureActivated(nPath);
+        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].tags = tags; }
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    }
 }
 
 void MetadataManager::setNote(const std::wstring& path, const std::wstring& note, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    ensureActivated(nPath);
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    persistAsync(nPath);
+    if (isInsideManagedLibrary(nPath)) {
+        ensureActivated(nPath);
+        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+        persistAsync(nPath);
+    } else {
+        QFileInfo info(QString::fromStdWString(nPath));
+        std::wstring folderPath = info.absolutePath().toStdWString();
+        std::wstring fileName = info.fileName().toStdWString();
+
+        AmMetaJson jsonCache(folderPath);
+        jsonCache.load();
+        jsonCache.items()[fileName].note = note;
+        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
+        jsonCache.save();
+
+        ensureActivated(nPath);
+        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    }
 }
 
 void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    ensureActivated(nPath);
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    persistAsync(nPath);
+    if (isInsideManagedLibrary(nPath)) {
+        ensureActivated(nPath);
+        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+        persistAsync(nPath);
+    } else {
+        QFileInfo info(QString::fromStdWString(nPath));
+        std::wstring folderPath = info.absolutePath().toStdWString();
+        std::wstring fileName = info.fileName().toStdWString();
+
+        AmMetaJson jsonCache(folderPath);
+        jsonCache.load();
+        jsonCache.items()[fileName].url = url;
+        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
+        jsonCache.save();
+
+        ensureActivated(nPath);
+        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
+        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    }
 }
 
 void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, bool notify) {

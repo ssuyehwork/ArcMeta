@@ -82,6 +82,18 @@
 - **样式**: 预览窗口内的滚动条样式必须严格遵循全局规范：宽度 10px、圆角 3px、背景透明、Handle 颜色对齐 `BorderColor` (#333333)。
 
 # 11. 快速预览 (QuickLook) 进阶规范 (Plan-109)
-- **拦截机制**: 必须采用“黑名单拦截+白名单准入”的双重防御机制。严禁预览文件夹、安装包 (.msi, .exe)、系统库 (.dll, .sys) 及各类压缩包。
+- **拦截机制**: 必须采用“黑名单拦截+白名单准入”的双重防御机制。严禁预览文件夹、安装包 (.msi, .exe), 系统库 (.dll, .sys) 及各类压缩包。
 - **性能红线**: `renderImage` 在加载原图前必须检查文件物理大小。若超过 50MB，必须自动降级调用高清缩略图引擎以确保 UI 响应性能。
 - **画质保障**: `SmoothPixmapTransform` 必须全程开启，杜绝在高清屏下出现插值锯齿。
+
+# 12. 内容面板数据源判定与强类型契约规范 (Plan-123)
+- **核心定义**: 必须使用强类型枚举 `DataSourceType` 统一规范内容面板 (`ContentPanel`) 的显示数据源来源：
+  - `DiskNav`: 物理磁盘直接 I/O 直接扫描的导航模式 (m_currentCategoryType 为空)；
+  - `UserCategory`: 数据库驱动的用户自定义逻辑分类模型 (m_currentCategoryType == "user_category")；
+  - `SystemCategory`: 系统内置逻辑桶（全部、未分类、无标签、最近访问、垃圾箱）；
+  - `PathList`: 临时加载的静态路径集合（标签或搜索物理结果）；
+- **铁律 1 (杜绝拼写 Bug)**: 严禁在全应用任何 cpp 文件中随手写散落的弱类型字符串判定（如 `if (m_currentCategoryType == "all")`），判定数据源必须统一通过 `ContentPanel::dataSourceType()` 枚举接口，充分运用编译器在编译阶段进行类型强制安全检查。
+- **铁律 2 (统一辅助判定)**: `ContentPanel` 必须公开 `isMirrorSource()` (返回是否为逻辑/镜像源数据) 与 `isManagedContext()` (返回当前是否处于已激活的托管库内可读写 SQLite DB 的可信生命周期内)。
+- **铁律 3 (双轨标记落盘路由)**: 当打标或星级操作触发时，统一由数据源契约一键判断：
+  - 在托管库上下文 (`isManagedContext() == true`) 内，元数据 100% 写入统一 SQLite 本地数据库；
+  - 在库外普通磁盘模式 (`isManagedContext() == false`) 下，元数据自动调用 `AmMetaJson` 精准、非侵入式写入主程序 `ArcMeta.cache/文件夹哈希.json` 离散缓存中，确保不污染用户原始物理盘。

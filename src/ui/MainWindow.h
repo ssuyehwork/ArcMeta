@@ -167,7 +167,6 @@ private:
     QVector<class FolderButton*> m_folderButtons;
     
     void updateCustomFolderButtons();
-    void removeCustomMonitoredFolder(const QString& path);
     void onDriveBarContextMenu(const QPoint& pos);
     void onFolderButtonContextMenu(const QPoint& pos);
 

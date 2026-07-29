@@ -17,6 +17,7 @@
 #include "ThumbnailDelegate.h"
 #include "../util/ImportHelper.h"
 #include "../core/AutoImportManager.h"
+#include "../meta/AmMetaJson.h"
 #include "../core/NavigationHistoryService.h"
 #include "ToolTipOverlay.h" 
 #include "MainWindow.h"
@@ -360,33 +361,6 @@ bool ArcMetaVirtualDbModel::setData(const QModelIndex& index, const QVariant& va
             return true;
         }
         return false;
-    }
-
-    // 2026-06-xx 物理修复：支持星级、颜色、置顶等元数据的持久化设定
-    // 2026-07-xx 按照 Plan-116：视图级编辑权限拦截
-    if (!record.isCategory && (role == RatingRole || role == ColorRole || role == IsLockedRole || role == PinnedRole)) {
-        QString currentType = qobject_cast<ContentPanel*>(parent())->getCurrentCategoryType();
-        if (currentType == "nav" || currentType == "") {
-            // 物理导航模式下，检查是否在库外
-            std::wstring wp = record.path.toStdWString();
-            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
-            QString key = QString("ManagedFolder/Volume_%1").arg(QString::fromStdWString(volSerial));
-            QString relPath = AppConfig::instance().getValue(key, "").toString();
-            
-            bool isInsideLibrary = false;
-            if (!relPath.isEmpty()) {
-                QString drive = record.path.left(3);
-                QString managedAbs = QDir::toNativeSeparators(drive + relPath).toLower();
-                if (record.path.toLower().startsWith(managedAbs)) {
-                    isInsideLibrary = true;
-                }
-            }
-
-            if (!isInsideLibrary) {
-                FramelessMessageBox::information(nullptr, "编辑受阻", "该项目尚未入库，无法进行元数据编辑。\n请先执行“迁移”将其移动至托管库文件夹。");
-                return false;
-            }
-        }
     }
 
     bool metaUpdated = false;
@@ -2979,6 +2953,11 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             QDir dir(p); 
             if (!dir.exists()) return; 
  
+            // 自动加载该文件夹下的 AmMetaJson 离散标记缓存
+            AmMetaJson jsonCache(p.toStdWString());
+            jsonCache.load();
+            const auto& cachedItems = jsonCache.items();
+
             QFileInfoList entries = dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name); 
             for (const QFileInfo& info : entries) { 
                 if (!panelPtr) return; 
@@ -2986,7 +2965,24 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (info.isDir() && info.fileName().endsWith(".arc", Qt::CaseInsensitive)) continue;
  
                 QString absPath = info.absoluteFilePath();
-                allItems.push_back(ItemRecord::create(absPath));
+                ItemRecord itemRec = ItemRecord::create(absPath);
+
+                // 如果该物理文件在 ArcMeta.cache 中有对应的离散打标缓存，将其无缝还原到 ItemRecord 中
+                std::wstring fileName = info.fileName().toStdWString();
+                auto it = cachedItems.find(fileName);
+                if (it != cachedItems.end()) {
+                    itemRec.rating = it->second.rating;
+                    itemRec.manualColor = QString::fromStdWString(it->second.color);
+                    itemRec.pinned = it->second.pinned;
+                    itemRec.note = QString::fromStdWString(it->second.note);
+                    itemRec.url = QString::fromStdWString(it->second.url);
+                    itemRec.tags.clear();
+                    for (const auto& t : it->second.tags) {
+                        itemRec.tags.append(QString::fromStdWString(t));
+                    }
+                }
+
+                allItems.push_back(itemRec);
  
                 if (rec && info.isDir()) { 
                     scanDir(absPath, true); 
