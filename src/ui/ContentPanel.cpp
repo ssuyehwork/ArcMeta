@@ -2758,6 +2758,28 @@ void ContentPanel::performBatchRename() {
     } 
 } 
  
+ContentPanel::DataSourceType ContentPanel::dataSourceType() const {
+    if (m_currentCategoryType == "user_category") {
+        return DataSourceType::UserCategory;
+    } else if (m_currentCategoryType == "all" || m_currentCategoryType == "uncategorized" ||
+               m_currentCategoryType == "untagged" || m_currentCategoryType == "recently_visited" ||
+               m_currentCategoryType == "trash" || m_currentCategoryType == "system_category") {
+        return DataSourceType::SystemCategory;
+    } else if (m_currentCategoryType == "path_list" || m_currentCategoryType == "search") {
+        return DataSourceType::PathList;
+    }
+    return DataSourceType::DiskNav;
+}
+
+bool ContentPanel::isMirrorSource() const {
+    return dataSourceType() != DataSourceType::DiskNav;
+}
+
+bool ContentPanel::isManagedContext() const {
+    if (isMirrorSource()) return true;
+    return MetadataManager::instance().isInsideManagedLibrary(m_currentPath.toStdWString());
+}
+
 void ContentPanel::onSelectionChanged() { 
     QItemSelectionModel* selectionModel = (m_viewStack->currentWidget() == m_gridView) ? m_gridView->selectionModel() : m_treeView->selectionModel(); 
     if (!selectionModel) return; 
@@ -2819,51 +2841,79 @@ void ContentPanel::clearFolderCache(const QString& folderPath) {
 }
 
 void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& targetIndex) {
-    if (paths.isEmpty() || m_currentPath.isEmpty() || m_currentPath == "computer://") return;
+    if (paths.isEmpty()) return;
 
-    QString destDir = m_currentPath;
-    if (targetIndex.isValid()) {
-        QModelIndex srcIdx = m_proxyModel->mapToSource(targetIndex);
-        if (srcIdx.isValid()) {
-            QString targetPath = srcIdx.data(PathRole).toString();
-            if (!targetPath.isEmpty() && QFileInfo(targetPath).isDir()) {
-                destDir = targetPath;
+    if (dataSourceType() == DataSourceType::DiskNav) {
+        if (m_currentPath.isEmpty() || m_currentPath == "computer://") return;
+        // 【分流 A：磁盘导航模式】──> 执行标准的操作系统级物理粘贴/复制，绝不调用 AssetImporter！
+        QString destDir = m_currentPath;
+        if (targetIndex.isValid()) {
+            QModelIndex srcIdx = m_proxyModel->mapToSource(targetIndex);
+            if (srcIdx.isValid()) {
+                QString targetPath = srcIdx.data(PathRole).toString();
+                if (!targetPath.isEmpty() && QFileInfo(targetPath).isDir()) {
+                    destDir = targetPath;
+                }
             }
         }
-    }
 
-    // 检查是否在原地投放
-    bool sameDir = true;
-    for (const QString& p : paths) {
-        if (QDir::toNativeSeparators(QFileInfo(p).absolutePath()) != QDir::toNativeSeparators(destDir)) {
-            sameDir = false;
-            break;
-        }
-    }
-    if (sameDir && destDir == m_currentPath) return;
-
-    bool isMove = !(QApplication::keyboardModifiers() & Qt::ControlModifier);
-    
-    // 2026-xx-xx 按照 Plan-105：在拖拽入库操作期间抑制 AutoImportManager 产生的冗余刷新信号
-    MetadataManager::instance().setInternalOperating(true);
-
-    if (ShellHelper::copyOrMoveItems(paths, destDir, isMove)) {
-        if (isMove) {
-            for (const QString& src : paths) {
-                QString destPath = QDir(destDir).absoluteFilePath(QFileInfo(src).fileName());
-                MetadataManager::instance().syncAfterMove(
-                    src.toStdWString(), destPath.toStdWString());
+        // 检查是否在原地投放
+        bool sameDir = true;
+        for (const QString& p : paths) {
+            if (QDir::toNativeSeparators(QFileInfo(p).absolutePath()) != QDir::toNativeSeparators(destDir)) {
+                sameDir = false;
+                break;
             }
-            UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
         }
-        // 显式执行一次刷新，确保用户操作立即反馈
-        loadDirectory(m_currentPath, m_isRecursive);
-    }
+        if (sameDir && destDir == m_currentPath) return;
 
-    // 2000ms 后释放抑制锁，足以覆盖 MFT 变更探测与 AutoImportManager 的 3s 防抖窗口冲突期
-    QTimer::singleShot(2000, []() {
-        MetadataManager::instance().setInternalOperating(false);
-    });
+        bool isMove = !(QApplication::keyboardModifiers() & Qt::ControlModifier);
+
+        MetadataManager::instance().setInternalOperating(true);
+
+        if (ShellHelper::copyOrMoveItems(paths, destDir, isMove)) {
+            if (isMove) {
+                for (const QString& src : paths) {
+                    QString destPath = QDir(destDir).absoluteFilePath(QFileInfo(src).fileName());
+                    MetadataManager::instance().syncAfterMove(
+                        src.toStdWString(), destPath.toStdWString());
+                }
+                UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
+            }
+            loadDirectory(m_currentPath, m_isRecursive);
+        }
+
+        QTimer::singleShot(2000, []() {
+            MetadataManager::instance().setInternalOperating(false);
+        });
+    } else {
+        // 【分流 B：托管库/逻辑分类模式】──> 弹出确认框并调用 AssetImporter 执行 .arc 打包入库
+        int targetCatId = 0;
+        if (dataSourceType() == DataSourceType::UserCategory) {
+            targetCatId = m_currentCategoryId;
+        }
+
+        if (targetIndex.isValid()) {
+            QModelIndex srcIdx = m_proxyModel->mapToSource(targetIndex);
+            if (srcIdx.isValid() && srcIdx.data(TypeRole).toString() == "category") {
+                targetCatId = srcIdx.data(CategoryIdRole).toInt();
+            }
+        }
+
+        QString drive = paths.first().left(3);
+        if (drive.isEmpty()) drive = "D:/";
+        QString managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
+
+        QString msg = QString("确定要将选中的项目分流导入并打包至托管库吗？\n目标分类ID: %1").arg(targetCatId);
+        if (FramelessMessageBox::question(this, "资产导入", msg)) {
+            QPointer<ContentPanel> weakThis(this);
+            AssetImporter::importAssets(paths, targetCatId, this, [weakThis]() {
+                if (weakThis) {
+                    weakThis->refreshAll();
+                }
+            });
+        }
+    }
 }
 
 void ContentPanel::onDoubleClicked(const QModelIndex& index) { 
