@@ -763,6 +763,17 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
     persistAsync(nPath);
 }
 
+void MetadataManager::setAddedAt(const std::wstring& path, long long addedAt, bool notify) {
+    std::wstring nPath = MetadataManager::normalizePath(path);
+    ensureActivated(nPath);
+    { 
+        std::unique_lock<std::shared_mutex> lock(m_mutex); 
+        m_cache[nPath].added_at = addedAt; 
+    }
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    persistAsync(nPath);
+}
+
 void MetadataManager::renameTag(const QString& oldName, const QString& newName) {
     if (oldName == newName) return;
     
@@ -1668,19 +1679,6 @@ bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
         if (qPath.startsWith(managedAbs)) {
             if (qPath.length() == managedAbs.length() ||
                 qPath[managedAbs.length()] == '\\' || qPath[managedAbs.length()] == '/') {
-                return true;
-            }
-        }
-    }
-
-    // 2. 检查自定义托管/监控库 (AppConfig)
-    QStringList customFolders = AppConfig::instance().getValue("DriveBar/CustomMonitoredFolders").toStringList();
-    for (const QString& folder : customFolders) {
-        std::wstring customNorm = normalizePath(folder.toStdWString());
-        QString customAbs = QString::fromStdWString(customNorm).toLower();
-        if (qPath.startsWith(customAbs)) {
-            if (qPath.length() == customAbs.length() ||
-                qPath[customAbs.length()] == '\\' || qPath[customAbs.length()] == '/') {
                 return true;
             }
         }

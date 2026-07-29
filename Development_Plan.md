@@ -81,7 +81,7 @@
 
 ## [2026-07-22] 视图按钮及缩放滑杆功能移植重构
 
-- 用户描述的现象/问题：当前版本缺少直观的“缩放滑杆”和“视图模式一键切换”按钮，且 Ctrl+滚轮 缩放无法动态调整视图卡片的大小，交互体验滞后。
+- 用户描述的现象/问题：当前版本缺少直观的“缩放滑杆” and “视图模式一键切换”按钮，且 Ctrl+滚轮 缩放无法动态调整视图卡片的大小，交互体验滞后。
 - 用户期望的结果：将 FERREX-META 版本的滑杆（m_sizeSlider）和排列方式视图按钮（viewBtn）移植到当前版本并关联使用，同时支持通过 Ctrl+滚轮 在内容视图上进行自由的比例缩放。
 - 本次任务边界：
   1. 在主窗口 `MainWindow::setupCustomTitleBarButtons()` 对应的自定义按钮组中，植入“缩放滑杆”和“视图模式一键切换按钮”，调整按钮间距物理对齐全局规范。
@@ -130,7 +130,7 @@
   4. 选中某个色块后，立即调用更新接口：
      - 如果是在 `CategoryPanel` 对分类进行设置，将色值写入对应分类在 `categories` 表的 `color` 字段，同时如果该分类绑定了物理文件夹路径，则将对应路径在 `metadata` 表的 `color` 字段也一并同步更新；
      - 如果是在 `MainWindow` 对 FolderButton 自定义 monitored folder 进行操作，将色值写入 AppConfig 中对应属性，并更新对应物理路径在 `metadata` 表的 `color` 字段（如果已登记到库中，也会同步到绑定映射分类）；
-     - 如果是在 `ContentPanel` 对登记的项目进行操作，将色值写入该项目在 `metadata` 表的 `color` 字段，若该项目是已入库且绑定了侧边栏映射分类的文件夹，也将色值存入对应分类的 `categories` 表的 `color` 字段中。
+     - 如果是在 `ContentPanel` 对登记的项目进行操作，将色值写入该项目在 `metadata` 表的 `color` 字段，若该项目是已入库且绑定了侧边栏映射分类的文件夹，也将色值存入对应分类的 `categories` 表 of `color` 字段中。
 - 不在本次范围内的是：修改非颜色属性的其他关联持久化，或者调整与色块绘制无关的其他右键菜单项。
 - 对应方案文档：Modification_Plan/Modification_Plan-62.md
 
@@ -307,7 +307,7 @@
   2. 所有的图标和缩略图在卡片内部必须高品质、无偏移、比例协调地正中心绝对居中。
 - 本次任务边界：
   1. 修改 `src/ui/WindowsShellThumbnailProvider.cpp`，把 Windows 原生提取缩略图的 `SIIGBF_RESIZETOFIT` 替换为 `SIIGBF_THUMBNAILONLY` 屏蔽非真正缩略图大图标，根治白色边框的系统级污染。
-  2. 修改 `src/ui/CardPainterHelper.cpp`，统一重构对普通 fallback 图标在卡片里的绘制方案，强制将 icon 获取其指定合适分辨率的 pixmap，并在限定的圆角正中心区域进行完美的平滑拉伸绘制。
+  2. 修改 `src/ui/CardPainterHelper.cpp`，统一重构对普通 fallback 图标在卡片里的绘制方案，强制将 icon 获取其指定合适分辨率的 pixmap，并在限定 of 圆角正中心区域进行完美的平滑拉伸绘制。
 - 不在本次范围内的是：修改任何除了上述两个界面卡片细节修正以外的业务逻辑。
 - 对应方案文档：Modification_Plan/Modification_Plan-121.md
 
@@ -318,3 +318,11 @@
 - 本次任务边界：全面审计 `src/ui/` 目录下所有参与单元格、网格和树形卡片数据渲染的代理组件（包括 `ThumbnailDelegate`、`GridItemDelegate`、`TreeItemDelegate`），定位其在视觉物理渲染、逻辑事件过滤以及尺寸计算上的冗余与过载证据。由于当前角色是分析师，仅产出设计剖析方案，不物理修改任何功能性代码文件。
 - 不在本次范围内的是：修改物理代码，引入或删除任何实际逻辑文件。
 - 对应方案文档：Modification_Plan/Modification_Plan-122.md
+
+## [2026-07-29] Library资产包重构与自动导入彻底根除 —— Modification_Plan-2.md
+
+- 用户描述的现象/问题：用户希望对 `Modification_Plan-1.md` 进行重构，仅保留对 `ArcMeta.Library_[盘符]`（资产包物理封装与侧边栏一等公民）的重构方案，而原有的“创建自动导入”功能（涉及 CustomFolderImportDialog、监控配置 customFolders、以及底层自动导入对账等）和临时外部监控 In-Place Watcher 则须彻底弃用与物理根除。
+- 用户期望的结果：彻底物理根除并弃用“创建自动导入”与 In-Place Watcher，清除一切冗余监控和对账。同时，按原版 `Modification_Plan-1.md` 重构物理层 `.arc` 封装及一等公民分类树逻辑。
+- 本次任务边界：在 `Modification_Plan/` 下创建 `Modification_Plan-2.md`，精确界定删除“创建自动导入”的 UI 与底层逻辑（包括 `CustomFolderImportDialog` 声明与定义、主窗口盘符栏右键菜单、FolderButton 的监控状态解除和关联监控、`AutoImportManager` 里处理 customFolders、以及 `CoreController` 中与之关联的初始化逻辑），并完整保留一等公民 `.arc` 资产包的设计方案。
+- 不在本次范围内的是：修改物理 MFT 底盘扫描驱动，或更改非自动导入相关的逻辑。
+- 对应方案文档：Modification_Plan/Modification_Plan-2.md

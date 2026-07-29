@@ -1,6 +1,7 @@
 #include "ShellHelper.h"
 #include <QFileInfo>
 #include <QDateTime>
+#include <atomic>
 #include <QFile>
 #include <QDir>
 #include <QProcess>
@@ -16,6 +17,27 @@
 #include "../meta/CategoryRepo.h"
 
 namespace ArcMeta {
+
+QString ShellHelper::generateBase36Id() {
+    static std::atomic<unsigned int> counter(0);
+    qint64 msecs = QDateTime::currentMSecsSinceEpoch();
+    unsigned int count = counter.fetch_add(1) % 46656; // 36^3 = 46656
+    
+    auto toBase36 = [](qint64 val, int width) -> QString {
+        const char chars[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+        QString res;
+        while (val > 0) {
+            res.prepend(chars[val % 36]);
+            val /= 36;
+        }
+        while (res.length() < width) {
+            res.prepend('0');
+        }
+        return res;
+    };
+    
+    return toBase36(msecs, 10) + toBase36(count, 3);
+}
 
 bool ShellHelper::moveToTrash(const QStringList& paths) {
     if (paths.isEmpty()) return true;

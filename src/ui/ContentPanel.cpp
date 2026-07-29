@@ -1143,6 +1143,14 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
             // 对比文件评分
             return leftRec.rating < rightRec.rating;
         }
+        case ContentPanel::SortByAddedDate: {
+            // 对比添加时间 (对 added_at == 0 的自愈回退到 ctime)
+            long long leftAdded = leftRec.added_at;
+            long long rightAdded = rightRec.added_at;
+            if (leftAdded == 0) leftAdded = leftRec.ctime;
+            if (rightAdded == 0) rightAdded = rightRec.ctime;
+            return leftAdded < rightAdded;
+        }
     }
 
     return QSortFilterProxyModel::lessThan(source_left, source_right); 
@@ -2311,6 +2319,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
     addTypeAct("大小", ContentPanel::SortBySize);
     addTypeAct("尺寸", ContentPanel::SortByDimension);
     addTypeAct("评分", ContentPanel::SortByRating);
+    addTypeAct("添加日期", ContentPanel::SortByAddedDate);
 
     sortMenu->addSeparator();
 

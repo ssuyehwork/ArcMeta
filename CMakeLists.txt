@@ -177,6 +177,8 @@ set(SOURCES
     src/util/ShellHelper.h
     src/util/ImportHelper.cpp
     src/util/ImportHelper.h
+    src/util/AssetImporter.cpp
+    src/util/AssetImporter.h
     ArcMeta.rc
     resources/resources.qrc
 )
