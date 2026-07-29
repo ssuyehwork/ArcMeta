@@ -75,6 +75,11 @@ struct ItemMeta {
     long long accessTime;     // atime (毫秒)
     std::vector<PaletteEntry> palettes;
 
+    std::wstring autoColor; // 2026-07-xx 1:1对等：自适应主色
+    long long addedAt;      // 2026-07-xx 1:1对等：添加/导入日期 (时间戳)
+    int width;              // 2026-07-xx 1:1对等：图像宽度
+    int height;             // 2026-07-xx 1:1对等：图像高度
+
     ItemMeta()
         : type(L"file")
         , rating(0)
@@ -85,11 +90,15 @@ struct ItemMeta {
         , creationTime(0)
         , modificationTime(0)
         , accessTime(0)
+        , addedAt(0)
+        , width(0)
+        , height(0)
     {}
 
     bool hasUserOperations() const {
         return rating > 0 || !color.empty() || !tags.empty() || pinned ||
-               !note.empty() || !url.empty() || encrypted || !fileId128.empty() || !palettes.empty();
+               !note.empty() || !url.empty() || encrypted || !fileId128.empty() || !palettes.empty() ||
+               !autoColor.empty() || addedAt > 0 || width > 0 || height > 0;
     }
 };
 

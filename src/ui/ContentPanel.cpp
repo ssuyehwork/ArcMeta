@@ -3031,6 +3031,16 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                     for (const auto& t : it->second.tags) {
                         itemRec.tags.append(QString::fromStdWString(t));
                     }
+                    // 2026-07-xx 1:1对等字段同步载入到卡片记录中以支撑渲染与过滤
+                    itemRec.width = it->second.width;
+                    itemRec.height = it->second.height;
+                    itemRec.autoColor = QString::fromStdWString(it->second.autoColor);
+                    itemRec.added_at = it->second.addedAt;
+
+                    itemRec.palettes.clear();
+                    for (const auto& pe : it->second.palettes) {
+                        itemRec.palettes.push_back({pe.color, pe.ratio});
+                    }
                 }
 
                 allItems.push_back(itemRec);
