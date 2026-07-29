@@ -326,3 +326,35 @@
 - 本次任务边界：在 `Modification_Plan/` 下创建 `Modification_Plan-2.md`，精确界定删除“创建自动导入”的 UI 与底层逻辑（包括 `CustomFolderImportDialog` 声明与定义、主窗口盘符栏右键菜单、FolderButton 的监控状态解除和关联监控、`AutoImportManager` 里处理 customFolders、以及 `CoreController` 中与之关联的初始化逻辑），并完整保留一等公民 `.arc` 资产包的设计方案。
 - 不在本次范围内的是：修改物理 MFT 底盘扫描驱动，或更改非自动导入相关的逻辑。
 - 对应方案文档：Modification_Plan/Modification_Plan-2.md
+
+## [2026-07-29] 磁盘导航模式双轨元数据路由隔离与 AmMetaJson 独占持久化重构
+
+- 用户描述的现象/问题：在确定了 `ArcMeta.Library_[盘符]` 托管库与 `.arc` 资产包封装架构后，系统形成了托管库模式与磁盘导航模式明确的双轨机制。目前缺乏强类型数据源判定契约，拖拽粘贴分流，以及磁盘模式下元数据防倒灌 SQLite 数据库的机制。
+- 用户期望的结果：建立强类型、绝对精准的数据源判定中枢，实现磁盘模式拖拽物理粘贴而托管库调用 AssetImporter，以及磁盘模式下打标等元数据 100% 独占调用 AmMetaJson 写入且零污染 SQLite。
+- 本次任务边界：在 `ContentPanel.h` 增加 `DataSourceType` 强类型枚举及判定接口；在 `ContentPanel.cpp` 解封 `setData`，重构 `onPathsDropped` 拖放分流，在 `scanDir` 中自动装载 `AmMetaJson`；在 `MetadataManager` 中实现 `saveToDiskModeJson` 隔离 SQLite。
+- 不在本次范围内的：托管库内 `.arc` 资产包封装格式、SQLite 数据库底层读写驱动等不予修改.
+- 对应方案文档：Modification_Plan/Modification_Plan-4.md
+
+## [2026-07-29] 磁盘模式元数据结构与 DB 1:1 字段语义对等规范重构
+
+- 用户描述的现象/问题：在确定双轨路由机制后，为保障物理浏览模式与资产库托管模式的高能协同，磁盘导航模式下的 JSON 缓存结构必须与 DB 数据库保持 1:1 结构一致与字段语义完全对等。
+- 用户期望的结果：在 ItemMeta 结构体与 AmMetaJson 的序列化映射层中，彻底补齐缺失的 width、height、auto_color、added_at 等物理表对等字段，建立完全无损的双轨迁移物理基石。
+- 本次任务边界：扩容 `src/meta/MetadataDefs.h` 中的 `ItemMeta`，新增对等字段定义并重构其 `hasUserOperations()` 状态感应；重构 `src/meta/AmMetaJson.cpp` 中的 `itemToEntry` 与 `entryToItem` 数据对齐转换映射，保障 1:1 无缝落盘与反序列化还原。
+- 不在本次范围内的：修改 SQLite 底层创建表、非元数据的高级计算流程。
+- 对应方案文档：Modification_Plan/Modification_Plan-5.md
+
+## [2026-07-29] 物理 .arc 容器扫描拦截与分类及关联条目去重清洗重构
+
+- 用户描述的现象/问题：托管库中的 `.arc` 资产包文件夹在物理扫描 `scanPhysicalDirectory` 时被误当成子目录分类，导致写入了假分类并在 `category_items` 表里被双重计数（如 12 变 24）。
+- 用户期望的结果：彻底拦截 `.arc` 自身作为分类节点添加，直接平铺收集内部真实物理文件；并物理清洗 categories 和 category_items 表中历史上误入的以 `.arc` 结尾的假分类与垃圾条目，确保统计 100% 精准。
+- 本次任务边界：重构 `src/meta/CategoryRepo.cpp` 中的 `scanPhysicalDirectory`，在 `fi.isDir()` 分支拦截过滤以 `.arc` 结尾的文件，并在 `src/meta/DatabaseManager.cpp` 初始化处运行清理 SQL。
+- 不在本次范围内的：物理删除真实的资产文件。
+- 对应方案文档：Modification_Plan/Modification_Plan-6.md
+
+## [2026-07-29] 侧边栏空白及根托管库拖拽释放归入未分类重构
+
+- 用户描述的现象/问题：用户将文件或文件夹拖放到分类侧边栏的空白处或顶层托管库节点（如 ArcMeta.Library_D）上时，缺乏清晰的落地判定，未能正确归入指定的逻辑区间。
+- 用户期望的结果：当拖拽投放到分类树的空白处或根托管库时，默认将目标分类 ID 指定为 `CategoryRepo::UNCATEGORIZED_CAT_ID` (-2, 未分类)，通知 MainWindow 启动物理入库并绑定未分类。
+- 本次任务边界：重构 `src/ui/CategoryPanel.cpp` 中的 `pathsDropped` 信号回调 Lambda 表达式，补齐 `!index.isValid()` 时的空白处判定和根托管库节点的判定逻辑。
+- 不在本次范围内的：拖拽到回收站的处理逻辑等。
+- 对应方案文档：Modification_Plan/Modification_Plan-7.md

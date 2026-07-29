@@ -753,6 +753,19 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
     }
 }
 
+void MetadataManager::saveToDiskModeJson(const std::wstring& nPath, std::function<void(ItemMeta&)> updater) {
+    QFileInfo info(QString::fromStdWString(nPath));
+    std::wstring folderPath = info.absolutePath().toStdWString();
+    std::wstring fileName = info.fileName().toStdWString();
+
+    AmMetaJson jsonCache(folderPath);
+    jsonCache.load();
+    ItemMeta& meta = jsonCache.items()[fileName];
+    meta.type = info.isDir() ? L"folder" : L"file";
+    updater(meta);
+    jsonCache.save(); // 物理落盘写进 ArcMeta.cache/*.json，零 SQLite 污染！
+}
+
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     if (isInsideManagedLibrary(nPath)) {
@@ -766,15 +779,9 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
         persistAsync(nPath);
     } else {
         // B. 磁盘导航模式：写入 ArcMeta.cache 高级 JSON 缓存文件
-        QFileInfo info(QString::fromStdWString(nPath));
-        std::wstring folderPath = info.absolutePath().toStdWString();
-        std::wstring fileName = info.fileName().toStdWString();
-
-        AmMetaJson jsonCache(folderPath);
-        jsonCache.load();
-        jsonCache.items()[fileName].rating = rating;
-        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
-        jsonCache.save(); // 物理落盘写进 ArcMeta.cache/*.json
+        saveToDiskModeJson(nPath, [rating](ItemMeta& meta) {
+            meta.rating = rating;
+        });
 
         // 同步内存缓存
         ensureActivated(nPath); // 确保内存缓存激活
@@ -867,15 +874,9 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
         }
     } else {
         // B. 磁盘导航模式：写入 ArcMeta.cache 高级 JSON 缓存文件
-        QFileInfo info(QString::fromStdWString(nPath));
-        std::wstring folderPath = info.absolutePath().toStdWString();
-        std::wstring fileName = info.fileName().toStdWString();
-
-        AmMetaJson jsonCache(folderPath);
-        jsonCache.load();
-        jsonCache.items()[fileName].color = color;
-        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
-        jsonCache.save(); // 物理落盘写进 ArcMeta.cache/*.json
+        saveToDiskModeJson(nPath, [color](ItemMeta& meta) {
+            meta.color = color;
+        });
 
         // 同步内存缓存
         ensureActivated(nPath); // 确保内存缓存激活
@@ -895,15 +896,9 @@ void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool noti
         if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
         persistAsync(nPath);
     } else {
-        QFileInfo info(QString::fromStdWString(nPath));
-        std::wstring folderPath = info.absolutePath().toStdWString();
-        std::wstring fileName = info.fileName().toStdWString();
-
-        AmMetaJson jsonCache(folderPath);
-        jsonCache.load();
-        jsonCache.items()[fileName].pinned = pinned;
-        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
-        jsonCache.save();
+        saveToDiskModeJson(nPath, [pinned](ItemMeta& meta) {
+            meta.pinned = pinned;
+        });
 
         ensureActivated(nPath);
         { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
@@ -956,20 +951,13 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
         if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
         persistAsync(nPath);
     } else {
-        QFileInfo info(QString::fromStdWString(nPath));
-        std::wstring folderPath = info.absolutePath().toStdWString();
-        std::wstring fileName = info.fileName().toStdWString();
-
-        AmMetaJson jsonCache(folderPath);
-        jsonCache.load();
-        
-        std::vector<std::wstring> wTags;
-        for (const QString& t : tags) {
-            wTags.push_back(t.toStdWString());
-        }
-        jsonCache.items()[fileName].tags = wTags;
-        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
-        jsonCache.save();
+        saveToDiskModeJson(nPath, [tags](ItemMeta& meta) {
+            std::vector<std::wstring> wTags;
+            for (const QString& t : tags) {
+                wTags.push_back(t.toStdWString());
+            }
+            meta.tags = wTags;
+        });
 
         ensureActivated(nPath);
         { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].tags = tags; }
@@ -985,15 +973,9 @@ void MetadataManager::setNote(const std::wstring& path, const std::wstring& note
         if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
         persistAsync(nPath);
     } else {
-        QFileInfo info(QString::fromStdWString(nPath));
-        std::wstring folderPath = info.absolutePath().toStdWString();
-        std::wstring fileName = info.fileName().toStdWString();
-
-        AmMetaJson jsonCache(folderPath);
-        jsonCache.load();
-        jsonCache.items()[fileName].note = note;
-        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
-        jsonCache.save();
+        saveToDiskModeJson(nPath, [note](ItemMeta& meta) {
+            meta.note = note;
+        });
 
         ensureActivated(nPath);
         { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
@@ -1009,15 +991,9 @@ void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, 
         if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
         persistAsync(nPath);
     } else {
-        QFileInfo info(QString::fromStdWString(nPath));
-        std::wstring folderPath = info.absolutePath().toStdWString();
-        std::wstring fileName = info.fileName().toStdWString();
-
-        AmMetaJson jsonCache(folderPath);
-        jsonCache.load();
-        jsonCache.items()[fileName].url = url;
-        jsonCache.items()[fileName].type = info.isDir() ? L"folder" : L"file";
-        jsonCache.save();
+        saveToDiskModeJson(nPath, [url](ItemMeta& meta) {
+            meta.url = url;
+        });
 
         ensureActivated(nPath);
         { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
@@ -1143,7 +1119,26 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 const std::wstring& curNew = pair.second;
 
                 auto it = m_cache.find(curOld);
-                if (it == m_cache.end()) continue;
+                if (it == m_cache.end()) {
+                    // 即使内存缓存不含有，由于处于 DiskNav 模式，我们依然需要支持对离散 JSON 的平滑重命名同步
+                    QFileInfo oldFileInfo(QString::fromStdWString(curOld));
+                    QFileInfo newFileInfo(QString::fromStdWString(curNew));
+                    if (oldFileInfo.isDir()) {
+                        AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
+                    } else {
+                        AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
+                    }
+                    continue;
+                }
+
+                // 同步迁移离散 JSON 缓存
+                QFileInfo oldFileInfo(QString::fromStdWString(curOld));
+                QFileInfo newFileInfo(QString::fromStdWString(curNew));
+                if (oldFileInfo.isDir()) {
+                    AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
+                } else {
+                    AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
+                }
 
                 std::string fid = it->second.fileId128;
                 bool isFolder = it->second.isFolder;
