@@ -1098,8 +1098,30 @@ void CategoryRepo::fullRecount() {
     s_uncategorizedCount.store(uncategorized);
     s_trashCount.store(trash);
 
-    // 4. 将这些准确数据持久化回数据库中
+    // 查找并清理幽灵关联（在 category_items 中存在，但在 metadata 缓存中已不存在的记录）
+    std::vector<std::string> orphanedFids;
+    for (const auto& fid : categorizedFids) {
+        if (MetadataManager::instance().getPathByFid(fid).empty()) {
+            orphanedFids.push_back(fid);
+        }
+    }
+
+    // 4. 将这些准确数据持久化回数据库中，并一并物理清退失效路径关联
     SqlTransaction trans(db);
+
+    if (!orphanedFids.empty()) {
+        sqlite3_stmt* delStmt = nullptr;
+        if (sqlite3_prepare_v2(db, "DELETE FROM category_items WHERE file_id = ?", -1, &delStmt, nullptr) == SQLITE_OK) {
+            for (const auto& fid : orphanedFids) {
+                sqlite3_bind_text(delStmt, 1, fid.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(delStmt);
+                sqlite3_reset(delStmt);
+            }
+            sqlite3_finalize(delStmt);
+        }
+        qDebug() << "[Recount] Cleaned up" << orphanedFids.size() << "orphaned category_items association records.";
+    }
+
     sqlite3_stmt* stmt = nullptr;
     const char* sql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?)";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
