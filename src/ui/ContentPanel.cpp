@@ -2960,6 +2960,34 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     m_isLoading = true;
     int reqId = ++m_loadRequestId;
+
+    // 🚨 新增：路由分流判断——地址栏输入的路径如果落在托管库范围内，
+    // 一律转交给"分类/托管库"这条轨道处理，绝不让 DiskNav 的 scanDir 碰它。
+    // 两条轨道各自独立运作，这里只是"选对入口"，不涉及任何一方的内部实现改动。
+    if (path != "computer://" && !path.isEmpty() &&
+        MetadataManager::instance().isInsideManagedLibrary(path.toStdWString())) {
+
+        // 通过物理路径反查其在 categories 表中对应的分类 ID
+        std::string fid;
+        std::wstring frnStr;
+        int catId = 0;
+        if (MetadataManager::fetchWinApiMetadataDirect(path.toStdWString(), fid, &frnStr)) {
+            try {
+                uint64_t frn = std::stoull(frnStr, nullptr, 16);
+                catId = CategoryRepo::findByFrn(frn);
+            } catch (...) {}
+        }
+
+        if (catId > 0) {
+            m_currentCategoryType = "user_category"; // 显式声明走分类轨道
+            loadCategory(catId); // 转交给已有的、专门处理托管库分类的加载逻辑
+            return;
+        }
+        // 若一时找不到对应分类（比如刚创建、索引还没建好），
+        // 走下面兜底：仍按磁盘原样打开，但不再对 .arc 做特殊语义解释，
+        // 避免 DiskNav 轨道去"猜测"托管库内部结构。
+    }
+
     m_currentCategoryType = ""; // 物理导航模式下清除系统类型
     ArcMeta::Logger::log(QString("[Content] 开始物理递归扫描 (虚拟化) [%1] -> %2 (%3)")
                         .arg(reqId).arg(path).arg(recursive ? "递归" : "单级"));
@@ -3013,50 +3041,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             for (const QFileInfo& info : entries) { 
                 if (!panelPtr) return; 
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
-
-                // 🚨 修改：.arc 容器不再整体跳过丢弃，而是透视进内部，把真正的原始资产文件掏出来展示，
-                // 与 CategoryRepo::scanPhysicalDirectory() 的处理方式保持一致。
-                // 否则当所打开的目录本身 100% 由 .arc 容器构成时（如 ArcMeta.Library_Z 根目录），
-                // 会导致每一项都被跳过，界面呈现"假空白"。
-                if (info.isDir() && info.fileName().endsWith(".arc", Qt::CaseInsensitive)) {
-                    QDir arcDir(info.absoluteFilePath());
-                    QFileInfoList arcFiles = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-                    for (const QFileInfo& afi : arcFiles) {
-                        QString fn = afi.fileName();
-                        if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
-                        if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
-
-                        QString innerAbsPath = afi.absoluteFilePath();
-                        ItemRecord innerRec = ItemRecord::create(innerAbsPath);
-
-                        // 离散打标缓存同样按原始文件名对齐注入（原逻辑不变，只是作用对象换成容器内部文件）
-                        std::wstring innerFileName = afi.fileName().toStdWString();
-                        auto innerIt = cachedItems.find(innerFileName);
-                        if (innerIt != cachedItems.end()) {
-                            innerRec.rating = innerIt->second.rating;
-                            innerRec.manualColor = QString::fromStdWString(innerIt->second.color);
-                            innerRec.pinned = innerIt->second.pinned;
-                            innerRec.note = QString::fromStdWString(innerIt->second.note);
-                            innerRec.url = QString::fromStdWString(innerIt->second.url);
-                            innerRec.tags.clear();
-                            for (const auto& t : innerIt->second.tags) {
-                                innerRec.tags.append(QString::fromStdWString(t));
-                            }
-                            innerRec.width = innerIt->second.width;
-                            innerRec.height = innerIt->second.height;
-                            innerRec.autoColor = QString::fromStdWString(innerIt->second.autoColor);
-                            innerRec.added_at = innerIt->second.addedAt;
-
-                            innerRec.palettes.clear();
-                            for (const auto& pe : innerIt->second.palettes) {
-                                innerRec.palettes.push_back({pe.color, pe.ratio});
-                            }
-                        }
-
-                        allItems.push_back(innerRec);
-                    }
-                    continue; // 容器本身不再作为一个"文件夹条目"参与展示，也不再递归进它内部（已经处理完毕）
-                }
+                if (info.isDir() && info.fileName().endsWith(".arc", Qt::CaseInsensitive)) continue;
 
                 QString absPath = info.absoluteFilePath();
                 ItemRecord itemRec = ItemRecord::create(absPath);
