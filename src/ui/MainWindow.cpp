@@ -1600,7 +1600,7 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
 
     // 2026-07-xx 按照 Plan-118：通知筛选面板当前数据源性质
     if (m_filterPanel && m_contentPanel) {
-        bool isMirror = !m_contentPanel->getCurrentCategoryType().isEmpty();
+        bool isMirror = m_contentPanel->isMirrorSource();
         if (!isMirror && !m_currentPath.isEmpty() && m_currentPath != "computer://") {
             isMirror = MetadataManager::isInsideManagedLibrary(m_currentPath.toStdWString());
         }
