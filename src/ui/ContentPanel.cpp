@@ -239,7 +239,9 @@ QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == CategoryIdRole) {
         return 0; 
     } else if (role == IsEmptyRole) {
-        return record.isDir && record.isEmpty;
+        auto* contentPanel = qobject_cast<ContentPanel*>(parent());
+        bool isDiskMode = contentPanel && (contentPanel->dataSourceType() == ContentPanel::DataSourceType::DiskNav);
+        return isDiskMode && record.isDir && record.isEmpty;
     } else if (role == AspectRatioRole) {
         // 2026-07-xx 性能优化：优先使用 ItemRecord 中已注入的尺寸信息，实现渲染零延迟
         if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
@@ -811,9 +813,13 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     // --- 按照 Plan-73 & Plan-94：显示/隐藏文件夹/文件与筛选联动 ---
     // 2026-07-xx 逻辑校准：子分类在逻辑上等同于文件夹，受 showFolders 控制
     if (record.isCategory || record.isDir) {
+        auto* contentPanel = qobject_cast<ContentPanel*>(parent());
+        bool isDiskMode = contentPanel && (contentPanel->dataSourceType() == ContentPanel::DataSourceType::DiskNav);
+        bool isEmptyFolder = isDiskMode && record.isDir && record.isEmpty;
+
         // 2026-07-xx Plan-94: 判定用户是否在筛选面板中显式勾选了“文件夹”或匹配的“空文件夹”
         bool isFolderExplicitlySelected = currentFilter.types.contains("folder") || 
-                                         (record.isEmpty && currentFilter.types.contains("空文件夹"));
+                                         (isEmptyFolder && currentFilter.types.contains("空文件夹"));
         
         // 只有当“顶栏全局开关为隐藏”且“筛选器未显式勾选文件夹”时，才执行拦截
         if (!currentFilter.showFolders && !isFolderExplicitlySelected) {
@@ -3450,8 +3456,11 @@ void ContentPanel::recalculateAndEmitStats() {
         return;
     }
 
+    // 判断当前是否为纯物理磁盘模式
+    bool isDiskMode = (dataSourceType() == DataSourceType::DiskNav);
+
     QPointer<ContentPanel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, records]() {
+    (void)QtConcurrent::run([weakThis, records, isDiskMode]() {
         ScanStats stats;
 
         for (const auto& record : records) {
@@ -3467,7 +3476,8 @@ void ContentPanel::recalculateAndEmitStats() {
             
             if (record.isDir || record.isCategory) {
                 stats.typeCounts["folder"]++;
-                if (record.isDir && record.isEmpty) {
+                // 物理限制：仅在磁盘模式下才累计空文件夹
+                if (isDiskMode && record.isDir && record.isEmpty) {
                     stats.emptyFolderCount++;
                 }
             } else {
