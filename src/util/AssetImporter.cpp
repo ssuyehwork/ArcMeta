@@ -104,17 +104,17 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     QString fileName = srcInfo.fileName();
     QString destPath = containerDir + "/" + fileName;
 
-    bool moved = false;
-    if (QFile::rename(srcPath, destPath)) {
-        moved = true;
+    // 修改为安全复制流程：粘贴/导入操作统一改为纯粹的安全复制，不强制删除源文件，确保资产包物理文件绝不被错误删除
+    bool copied = false;
+    if (QFile::copy(srcPath, destPath)) {
+        copied = true;
     } else {
-        if (QFile::copy(srcPath, destPath)) {
-            QFile::remove(srcPath);
-            moved = true;
+        if (QFile::rename(srcPath, destPath)) {
+            copied = true;
         }
     }
 
-    if (!moved) {
+    if (!copied) {
         QDir(containerDir).removeRecursively();
         return false;
     }
@@ -134,6 +134,9 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     // 更新 added_at 为当前毫秒时间戳
     long long nowMsecs = QDateTime::currentMSecsSinceEpoch();
     MetadataManager::instance().setAddedAt(wContainerPath, nowMsecs, false);
+
+    // 🚨 显式补充 SQLite 数据库持久化落盘，确保新创建的 .arc 资产包被正式写入 SQLite 的 metadata 表，使得刷新后可以精准查出并刷新卡片
+    MetadataManager::instance().persistAsync(wContainerPath, false, true);
 
     // 从容器路径中反查其实际的物理 File ID，用以执行 100% 精准的逻辑分类绑定
     std::string actualContainerFid = MetadataManager::instance().getFileIdSync(wContainerPath);
