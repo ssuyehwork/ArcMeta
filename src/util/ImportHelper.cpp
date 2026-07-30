@@ -66,9 +66,23 @@ void ImportHelper::importPaths(const QStringList& paths,
                                          Q_ARG(int, handled), Q_ARG(int, total), Q_ARG(QString, QFileInfo(src).fileName()));
             }
 
-            QString destPath = QDir(targetPhysicalPath).absoluteFilePath(QFileInfo(src).fileName());
+            // 🚨 核心逻辑：如果目标位置是 ArcMeta.Library_[盘符] 托管库，为其创建 .arc 资产包！
+            QString destPath;
+            if (targetPhysicalPath.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                // 生成 13 位唯一 ID，建 ID.arc/ 容器
+                std::string assetId = MetadataManager::generateDeterministicSha256Id(src.toStdWString());
+                if (assetId.find("PATHURL:") == 0) assetId = assetId.substr(8);
+                if (assetId.length() > 13) assetId = assetId.substr(0, 13);
+
+                QString arcContainer = QDir(targetPhysicalPath).filePath(QString::fromStdString(assetId) + ".arc");
+                QDir().mkpath(arcContainer);
+                destPath = QDir(arcContainer).filePath(QFileInfo(src).fileName());
+            } else {
+                destPath = QDir(targetPhysicalPath).absoluteFilePath(QFileInfo(src).fileName());
+            }
+
             // 执行物理移动
-            bool moved = ShellHelper::copyOrMoveItems({src}, targetPhysicalPath, true);
+            bool moved = ShellHelper::copyOrMoveItems({src}, QFileInfo(destPath).absolutePath(), true);
             if (moved) {
                 MetadataManager::instance().syncAfterMove(
                     QDir::toNativeSeparators(src).toStdWString(),
