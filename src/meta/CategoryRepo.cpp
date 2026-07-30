@@ -1057,6 +1057,12 @@ void CategoryRepo::fullRecount() {
         if (meta.fileId128.empty()) continue;
         if (meta.isFolder) continue;
 
+        // 🚨 核心物理防火墙：如果是普通的磁盘导航模式下激活的库外普通项目，绝对禁止其污染侧边栏计数！
+        // 各自执行各自的逻辑，两者相互不产生任何关联。
+        if (!MetadataManager::instance().isInsideManagedLibrary(meta.path)) {
+            continue;
+        }
+
         if (meta.isTrash) {
             trash++;
             continue;

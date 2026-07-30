@@ -20,6 +20,16 @@ namespace ArcMeta {
 class AmMetaJson {
 public:
     /**
+     * @brief 获取 ArcMeta.cache 根目录绝对路径（若不存在会自动创建）
+     */
+    static QString getCacheDirectory();
+
+    /**
+     * @brief 内部转换辅助：根据目标文件夹物理路径计算出 ArcMeta.cache 中唯一的 JSON 路径
+     */
+    static std::wstring resolveCacheFilePath(const std::wstring& folderPath);
+
+    /**
      * @param folderPath 目标物理文件夹的完整路径
      */
     explicit AmMetaJson(const std::wstring& folderPath);
@@ -56,20 +66,12 @@ public:
      */
     static bool migrateFolderCache(const QString& oldFolderPath, const QString& newFolderPath);
 
-    /**
-     * @brief 获取 ArcMeta.cache 根目录绝对路径（若不存在会自动创建）
-     */
-    static QString getCacheDirectory();
-
 private:
     std::wstring m_folderPath;
     std::wstring m_filePath; // 映射到 ArcMeta.cache/ 中的真实 .json 物理路径
     
     FolderMeta m_folder;
     std::map<std::wstring, ItemMeta> m_items;
-
-    // 内部转换辅助：根据目标文件夹物理路径计算出 ArcMeta.cache 中唯一的 JSON 路径
-    static std::wstring resolveCacheFilePath(const std::wstring& folderPath);
 
     static QJsonObject folderToEntry(const FolderMeta& meta);
     static FolderMeta entryToFolder(const QJsonObject& obj);
