@@ -47,6 +47,7 @@ void AssetImporter::importAssets(const QStringList& paths,
     context->future = QtConcurrent::run([paths, targetCatId, weakProgress, context, onComplete]() {
         int total = paths.size();
         int handled = 0;
+        int successCount = 0;
 
         for (const QString& src : paths) {
             if (context->isCancelled) break;
@@ -61,24 +62,38 @@ void AssetImporter::importAssets(const QStringList& paths,
             QString drive = QFileInfo(src).absolutePath().left(3);
             if (drive.isEmpty()) drive = "D:/";
             QString managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
-            QDir().mkpath(managedRoot);
+            
+            if (!QDir().mkpath(managedRoot)) {
+                qWarning() << "[AssetImporter] 无法建立托管库根目录:" << managedRoot << " 导入源:" << src;
+                continue;
+            }
 
             QFileInfo srcInfo(src);
+            bool ok = false;
             if (srcInfo.isFile()) {
-                importSingleFile(src, targetCatId, managedRoot);
+                ok = importSingleFile(src, targetCatId, managedRoot);
+                if (!ok) {
+                    qWarning() << "[AssetImporter] importSingleFile 导入失败！源文件:" << src;
+                }
             } else if (srcInfo.isDir()) {
-                importDirectoryRecursive(src, targetCatId, managedRoot);
+                ok = importDirectoryRecursive(src, targetCatId, managedRoot);
+                if (!ok) {
+                    qWarning() << "[AssetImporter] importDirectoryRecursive 导入失败！源文件夹:" << src;
+                }
+            }
+            if (ok) {
+                successCount++;
             }
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, handled, onComplete]() {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, successCount, onComplete]() {
             if (context->isCancelled) return;
             if (weakProgress) {
                 weakProgress->accept();
                 weakProgress->deleteLater();
             }
             ToolTipOverlay::instance()->showText(QCursor::pos(),
-                QString("已完成 %1 个项目的物理分流导入").arg(handled), 2000, QColor("#2ecc71"));
+                QString("已成功导入 %1 个受控资产单元").arg(successCount), 2000, QColor("#2ecc71"));
 
             if (onComplete) {
                 onComplete();
@@ -104,17 +119,17 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     QString fileName = srcInfo.fileName();
     QString destPath = containerDir + "/" + fileName;
 
-    bool moved = false;
-    if (QFile::rename(srcPath, destPath)) {
-        moved = true;
+    // 修改为安全复制流程：粘贴/导入操作统一改为纯粹的安全复制，不强制删除源文件，确保资产包物理文件绝不被错误删除
+    bool copied = false;
+    if (QFile::copy(srcPath, destPath)) {
+        copied = true;
     } else {
-        if (QFile::copy(srcPath, destPath)) {
-            QFile::remove(srcPath);
-            moved = true;
+        if (QFile::rename(srcPath, destPath)) {
+            copied = true;
         }
     }
 
-    if (!moved) {
+    if (!copied) {
         QDir(containerDir).removeRecursively();
         return false;
     }
@@ -126,18 +141,25 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
         thumb.save(containerDir + "/" + baseName + "_thumbnail.png", "PNG");
     }
 
-    // 5. 写入数据库，标记其 added_at 为当前时间戳
-    std::wstring wDestPath = QDir::toNativeSeparators(destPath).toStdWString();
-    MetadataManager::instance().ensureActivated(wDestPath);
+    // 5. 写入数据库：将整个 .arc 资产包文件夹作为唯一的受控资产单位进行激活和登记！
+    // 完美契合“1个 .arc 包 = 1个条目”的核心准则，杜绝包内原始文件重复计账导致的 FID 断层假死现象。
+    std::wstring wContainerPath = QDir::toNativeSeparators(containerDir).toStdWString();
+    MetadataManager::instance().ensureActivated(wContainerPath);
 
     // 更新 added_at 为当前毫秒时间戳
     long long nowMsecs = QDateTime::currentMSecsSinceEpoch();
-    MetadataManager::instance().setAddedAt(wDestPath, nowMsecs, false);
+    MetadataManager::instance().setAddedAt(wContainerPath, nowMsecs, false);
+
+    // 🚨 显式补充 SQLite 数据库持久化落盘，确保新创建的 .arc 资产包被正式写入 SQLite 的 metadata 表，使得刷新后可以精准查出并刷新卡片
+    MetadataManager::instance().persistAsync(wContainerPath, false, true);
+
+    // 从容器路径中反查其实际的物理 File ID，用以执行 100% 精准的逻辑分类绑定
+    std::string actualContainerFid = MetadataManager::instance().getFileIdSync(wContainerPath);
 
     // 6. 分类归纳
     // 如果 targetCatId > 0，绑定它
-    if (targetCatId > 0) {
-        CategoryRepo::addItemToCategory(targetCatId, fileId.toStdString(), wDestPath);
+    if (targetCatId > 0 && !actualContainerFid.empty()) {
+        CategoryRepo::addItemToCategory(targetCatId, actualContainerFid, wContainerPath);
     }
 
     return true;

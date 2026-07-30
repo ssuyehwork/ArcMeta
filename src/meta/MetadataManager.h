@@ -369,6 +369,13 @@ public:
      */
     static bool fetchWinApiMetadataDirect(const std::wstring& path, std::string& outId128, std::wstring* outFrn = nullptr, long long* outSize = nullptr, std::wstring* outType = nullptr, long long* outCtime = nullptr, long long* outMtime = nullptr, long long* outAtime = nullptr);
 
+    /**
+     * @brief 异步持久化项元数据
+     * 2026-07-xx 按照 Plan-116：增加授权标志位，严禁非法入库
+     * @param authorized 是否允许创建新记录（只有文件变化触发时为 true）
+     */
+    void persistAsync(const std::wstring& path, bool notify = true, bool authorized = false);
+
 signals:
     // 2026-05-27 物理修复：信号参数由 std::wstring 改为 QString
     // 理由：std::wstring 未注册为元类型，导致跨线程发射时（如数据库预热阶段）触发 QueuedConnection 失败从而引起崩溃。
@@ -419,13 +426,6 @@ private:
     // 2026-06-xx 性能加固：信号攒批机制，防止 5 万级数据扫描导致 UI 信号淹没
     QTimer* m_uiSignalTimer = nullptr;
     std::unordered_set<QString> m_pendingUiPaths;
-
-    /**
-     * @brief 异步持久化项元数据
-     * 2026-07-xx 按照 Plan-116：增加授权标志位，严禁非法入库
-     * @param authorized 是否允许创建新记录（只有文件变化触发时为 true）
-     */
-    void persistAsync(const std::wstring& path, bool notify = true, bool authorized = false);
 
     /**
      * @brief 异步批量持久化元数据 (Plan-119 性能加固)

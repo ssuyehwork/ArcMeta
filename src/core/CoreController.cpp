@@ -88,7 +88,8 @@ CoreController::CoreController(QObject* parent) : QObject(parent) {
                     if (relative.startsWith('\\') || relative.startsWith('/')) {
                         relative = relative.mid(1);
                     }
-                    QString topLevelComponent = relative.section(QDir::separator(), 0, 0);
+                    // 健壮性优化：将所有路径分隔符统一替换为正斜杠 '/' 进行安全分段提取
+                    QString topLevelComponent = relative.replace('\\', '/').section('/', 0, 0);
                     if (topLevelComponent.isEmpty()) {
                         // 变动的就是监控文件夹本身，跳过
                         continue;

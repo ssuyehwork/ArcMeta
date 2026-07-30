@@ -56,6 +56,7 @@ void ImportHelper::importPaths(const QStringList& paths,
         
         int total = paths.size();
         int handled = 0;
+        int successCount = 0;
 
         for (const QString& src : paths) {
             if (context->isCancelled) break;
@@ -75,7 +76,10 @@ void ImportHelper::importPaths(const QStringList& paths,
                 if (assetId.length() > 13) assetId = assetId.substr(0, 13);
                 
                 QString arcContainer = QDir(targetPhysicalPath).filePath(QString::fromStdString(assetId) + ".arc");
-                QDir().mkpath(arcContainer);
+                if (!QDir().mkpath(arcContainer)) {
+                    qWarning() << "[ImportHelper] 无法建立 .arc 资产包容器:" << arcContainer << " 源项目:" << src;
+                    continue;
+                }
                 destPath = QDir(arcContainer).filePath(QFileInfo(src).fileName());
             } else {
                 destPath = QDir(targetPhysicalPath).absoluteFilePath(QFileInfo(src).fileName());
@@ -87,17 +91,20 @@ void ImportHelper::importPaths(const QStringList& paths,
                 MetadataManager::instance().syncAfterMove(
                     QDir::toNativeSeparators(src).toStdWString(),
                     QDir::toNativeSeparators(destPath).toStdWString());
+                successCount++;
+            } else {
+                qWarning() << "[ImportHelper] copyOrMoveItems 失败！ 源文件:" << src << " 目标文件夹:" << QFileInfo(destPath).absolutePath();
             }
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, handled, onComplete]() {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, successCount, onComplete]() {
             if (context->isCancelled) return;
             if (weakProgress) {
                 weakProgress->accept();
                 weakProgress->deleteLater();
             }
             ToolTipOverlay::instance()->showText(QCursor::pos(), 
-                QString("已完成 %1 个项目的物理迁移，数据库将随后异步更新").arg(handled), 2000, QColor("#2ecc71"));
+                QString("已成功迁移 %1 个条目").arg(successCount), 2000, QColor("#2ecc71"));
 
             // 物理搬运结束后，安全派发无感刷新指令 (对应用户原话："是无感刷新吗？")
             if (onComplete) {
