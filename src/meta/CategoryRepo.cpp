@@ -1335,6 +1335,9 @@ static void scanPhysicalDirectory(const QString& currentPath, ScanNode& node) {
                 QDir arcDir(fi.absoluteFilePath());
                 QFileInfoList arcFiles = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
                 for (const QFileInfo& afi : arcFiles) {
+                    QString fn = afi.fileName();
+                    if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
+                    if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
                     node.files.push_back(QDir::toNativeSeparators(afi.absoluteFilePath()).toStdWString());
                 }
                 continue; // 彻底跳过将 .arc 自身创建为分类！

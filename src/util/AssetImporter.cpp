@@ -119,10 +119,11 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
         return false;
     }
 
-    // 4. 提取 256x256 高清预渲染缩略图 _thumbnail.png
+    // 4. 提取 256x256 高清预渲染缩略图 [baseName]_thumbnail.png
     QImage thumb = WindowsShellThumbnailProvider::getShellThumbnail(destPath, 256);
     if (!thumb.isNull()) {
-        thumb.save(containerDir + "/_thumbnail.png", "PNG");
+        QString baseName = QFileInfo(fileName).completeBaseName();
+        thumb.save(containerDir + "/" + baseName + "_thumbnail.png", "PNG");
     }
 
     // 5. 写入数据库，标记其 added_at 为当前时间戳
@@ -147,6 +148,11 @@ bool AssetImporter::importDirectoryRecursive(const QString& srcDir,
                                              const QString& managedRoot) {
     QFileInfo dirInfo(srcDir);
     if (!dirInfo.exists() || !dirInfo.isDir()) return false;
+
+    // 🚨 核心防线：.arc 容器已经是最终打包好的资产单元，绝不能被当作普通子目录再次创建分类/递归打包
+    if (dirInfo.fileName().endsWith(".arc", Qt::CaseInsensitive)) {
+        return false; // 视为已导入资产，跳过，不重复打包、不创建同名分类
+    }
 
     // 1. 在 categories 树中递归新建逻辑分类
     Category cat;
