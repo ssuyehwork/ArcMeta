@@ -444,20 +444,35 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
         if (!db) return;
 
-        // 2. 收集所有待登记路径（递归）
+        // 2. 收集所有待登记路径
         std::vector<std::wstring> pathsToRegister;
-        pathsToRegister.push_back(nPath);
 
         QFileInfo info(QString::fromStdWString(nPath));
         if (info.isDir()) {
-            QDirIterator it(info.absoluteFilePath(), QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-            while (it.hasNext()) {
-                pathsToRegister.push_back(normalizePath(it.next().toStdWString()));
+            QDir dir(info.absoluteFilePath());
+            // 🚨 核心逻辑：直接扫描托管库下的顶层子项
+            QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot);
+            for (const QFileInfo& entry : entries) {
+                QString fn = entry.fileName();
+
+                // 1. 如果是 .arc 资产包文件夹 —— 它本身就是一个原子资产条目！加入登记
+                if (entry.isDir() && fn.endsWith(".arc", Qt::CaseInsensitive)) {
+                    pathsToRegister.push_back(normalizePath(entry.absoluteFilePath().toStdWString()));
+                }
+                // 2. 如果是散落在托管库根目录的普通物理文件，也作为独立资产登记
+                else if (entry.isFile() && !fn.endsWith("_thumbnail.png", Qt::CaseInsensitive) &&
+                         fn.compare("metadata.scch", Qt::CaseInsensitive) != 0) {
+                    pathsToRegister.push_back(normalizePath(entry.absoluteFilePath().toStdWString()));
+                }
             }
+        } else {
+            pathsToRegister.push_back(nPath);
         }
 
+        if (pathsToRegister.empty()) return;
+
         // 3. 开启批量事务处理
-        qDebug() << "[Metadata] 开始异步批量级联登记，总项数:" << pathsToRegister.size();
+        qDebug() << "[Metadata] 正确以 .arc 资产包为单位登记，原子资产总数:" << pathsToRegister.size();
         QStringList qPathsToRegister;
         SqlTransaction trans(db);
         for (const auto& p : pathsToRegister) {
@@ -467,11 +482,11 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         }
         
         if (trans.commit()) {
-            qDebug() << "[Metadata] 异步批量登记事务提交成功，触发后台解析流程";
-            // 4. 登记完成后，触发异步解析链实现闭环
+            qDebug() << "[Metadata] 资产包登记提交成功，推入多媒体抽取流水线，资产包数量:" << qPathsToRegister.size();
+            // 将 .arc 资产包路径投递给流水线，由流水线解析包内部主文件并生成 _thumbnail.png
             registerItemsAsync(qPathsToRegister, true);
         } else {
-            qWarning() << "[Metadata] 异步批量登记事务提交失败！";
+            qWarning() << "[Metadata] 资产包批量登记事务提交失败！";
         }
     });
 }

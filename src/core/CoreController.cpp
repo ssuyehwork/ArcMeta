@@ -63,7 +63,16 @@ CoreController::CoreController(QObject* parent) : QObject(parent) {
             bool isAutoImportMatch = false;
             QString matchedPrefix;
             for (const QString& folder : customFolders) {
-                if (qNewPath.startsWith(folder, Qt::CaseInsensitive)) {
+                if (qNewPath.compare(folder, Qt::CaseInsensitive) == 0) {
+                    isAutoImportMatch = true;
+                    matchedPrefix = folder;
+                    break;
+                }
+                QString folderWithSep = folder;
+                if (!folderWithSep.endsWith('/') && !folderWithSep.endsWith('\\')) {
+                    folderWithSep += QDir::separator();
+                }
+                if (qNewPath.startsWith(folderWithSep, Qt::CaseInsensitive)) {
                     isAutoImportMatch = true;
                     matchedPrefix = folder;
                     break;
