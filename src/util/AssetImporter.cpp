@@ -126,18 +126,22 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
         thumb.save(containerDir + "/" + baseName + "_thumbnail.png", "PNG");
     }
 
-    // 5. 写入数据库，标记其 added_at 为当前时间戳
-    std::wstring wDestPath = QDir::toNativeSeparators(destPath).toStdWString();
-    MetadataManager::instance().ensureActivated(wDestPath);
+    // 5. 写入数据库：将整个 .arc 资产包文件夹作为唯一的受控资产单位进行激活和登记！
+    // 完美契合“1个 .arc 包 = 1个条目”的核心准则，杜绝包内原始文件重复计账导致的 FID 断层假死现象。
+    std::wstring wContainerPath = QDir::toNativeSeparators(containerDir).toStdWString();
+    MetadataManager::instance().ensureActivated(wContainerPath);
 
     // 更新 added_at 为当前毫秒时间戳
     long long nowMsecs = QDateTime::currentMSecsSinceEpoch();
-    MetadataManager::instance().setAddedAt(wDestPath, nowMsecs, false);
+    MetadataManager::instance().setAddedAt(wContainerPath, nowMsecs, false);
+
+    // 从容器路径中反查其实际的物理 File ID，用以执行 100% 精准的逻辑分类绑定
+    std::string actualContainerFid = MetadataManager::instance().getFileIdSync(wContainerPath);
 
     // 6. 分类归纳
     // 如果 targetCatId > 0，绑定它
-    if (targetCatId > 0) {
-        CategoryRepo::addItemToCategory(targetCatId, fileId.toStdString(), wDestPath);
+    if (targetCatId > 0 && !actualContainerFid.empty()) {
+        CategoryRepo::addItemToCategory(targetCatId, actualContainerFid, wContainerPath);
     }
 
     return true;
