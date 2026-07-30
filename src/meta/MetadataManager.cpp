@@ -695,9 +695,25 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
     RuntimeMeta rm;
     std::wstring frn;
     std::wstring type;
-    if (fetchWinApiMetadataDirect(nPath, rm.fileId128, &frn, &rm.fileSize, &type, &rm.ctime, &rm.mtime, &rm.atime)) {
+
+    // 自愈与健壮性改造：若 Win32 原生 API 失败（如 Linux Sandbox、共享访问冲突等），提供 QFileInfo 完美兜底，确保激活成功
+    bool success = fetchWinApiMetadataDirect(nPath, rm.fileId128, &frn, &rm.fileSize, &type, &rm.ctime, &rm.mtime, &rm.atime);
+    if (!success) {
+        QFileInfo qinfo(QString::fromStdWString(nPath));
+        if (qinfo.exists()) {
+            rm.fileSize = qinfo.size();
+            rm.isFolder = qinfo.isDir();
+            rm.ctime = qinfo.birthTime().toMSecsSinceEpoch();
+            rm.mtime = qinfo.lastModified().toMSecsSinceEpoch();
+            rm.atime = qinfo.lastRead().toMSecsSinceEpoch();
+            rm.fileId128 = generateDeterministicSha256Id(nPath);
+            success = true;
+        }
+    } else {
         rm.isFolder = (type == L"folder");
-        
+    }
+
+    if (success) {
         // 3. 写锁写入缓存
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         if (m_cache.count(nPath)) return; // 二次检查防止竞态

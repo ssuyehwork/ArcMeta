@@ -47,6 +47,7 @@ void AssetImporter::importAssets(const QStringList& paths,
     context->future = QtConcurrent::run([paths, targetCatId, weakProgress, context, onComplete]() {
         int total = paths.size();
         int handled = 0;
+        int successCount = 0;
 
         for (const QString& src : paths) {
             if (context->isCancelled) break;
@@ -61,24 +62,38 @@ void AssetImporter::importAssets(const QStringList& paths,
             QString drive = QFileInfo(src).absolutePath().left(3);
             if (drive.isEmpty()) drive = "D:/";
             QString managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
-            QDir().mkpath(managedRoot);
+
+            if (!QDir().mkpath(managedRoot)) {
+                qWarning() << "[AssetImporter] 无法建立托管库根目录:" << managedRoot << " 导入源:" << src;
+                continue;
+            }
 
             QFileInfo srcInfo(src);
+            bool ok = false;
             if (srcInfo.isFile()) {
-                importSingleFile(src, targetCatId, managedRoot);
+                ok = importSingleFile(src, targetCatId, managedRoot);
+                if (!ok) {
+                    qWarning() << "[AssetImporter] importSingleFile 导入失败！源文件:" << src;
+                }
             } else if (srcInfo.isDir()) {
-                importDirectoryRecursive(src, targetCatId, managedRoot);
+                ok = importDirectoryRecursive(src, targetCatId, managedRoot);
+                if (!ok) {
+                    qWarning() << "[AssetImporter] importDirectoryRecursive 导入失败！源文件夹:" << src;
+                }
+            }
+            if (ok) {
+                successCount++;
             }
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, handled, onComplete]() {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, successCount, onComplete]() {
             if (context->isCancelled) return;
             if (weakProgress) {
                 weakProgress->accept();
                 weakProgress->deleteLater();
             }
             ToolTipOverlay::instance()->showText(QCursor::pos(),
-                QString("已完成 %1 个项目的物理分流导入").arg(handled), 2000, QColor("#2ecc71"));
+                QString("已成功导入 %1 个受控资产单元").arg(successCount), 2000, QColor("#2ecc71"));
 
             if (onComplete) {
                 onComplete();
