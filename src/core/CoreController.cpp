@@ -16,6 +16,7 @@
 #include <QtConcurrent>
 #include <unordered_set>
 #include "PhysicalDiskSearchExtractor.h"
+#include "../util/AssetImporter.h"
 
 namespace ArcMeta {
 
@@ -48,8 +49,74 @@ CoreController::CoreController(QObject* parent) : QObject(parent) {
 
     // [Plan-115] 绑定 NativeFolderWatcher 纯净自定义批次变动信号到具体业务单例，彻底断开两端硬编码耦合
     connect(&NativeFolderWatcher::instance(), &NativeFolderWatcher::filesChanged, this, [this](const QList<ArcMeta::FileWatcherEvent>& events) {
+        // 读取当前的 "DriveBar/CustomMonitoredFolders" 配置，用于前缀匹配
+        QStringList customFolders = AppConfig::instance().getValue("DriveBar/CustomMonitoredFolders").toStringList();
+        
+        // 记录当前批次正在迁移的顶级路径，防止重入/死循环
+        static std::unordered_set<std::wstring> s_currentlyMigrating;
+
         for (const auto& ev : events) {
             std::wstring normNewPath = MetadataManager::normalizePath(ev.newPath.toStdWString());
+            QString qNewPath = QString::fromStdWString(normNewPath);
+
+            // 1. 进行 "自动导入路径" 前缀精准匹配
+            bool isAutoImportMatch = false;
+            QString matchedPrefix;
+            for (const QString& folder : customFolders) {
+                if (qNewPath.compare(folder, Qt::CaseInsensitive) == 0) {
+                    isAutoImportMatch = true;
+                    matchedPrefix = folder;
+                    break;
+                }
+                QString folderWithSep = folder;
+                if (!folderWithSep.endsWith('/') && !folderWithSep.endsWith('\\')) {
+                    folderWithSep += QDir::separator();
+                }
+                if (qNewPath.startsWith(folderWithSep, Qt::CaseInsensitive)) {
+                    isAutoImportMatch = true;
+                    matchedPrefix = folder;
+                    break;
+                }
+            }
+
+            if (isAutoImportMatch) {
+                // 触发 自动导入剪切迁移机制
+                if (ev.action == ArcMeta::WatcherAction::Added || ev.action == ArcMeta::WatcherAction::Modified) {
+                    // 计算顶级项目（Top-level Item）物理路径
+                    // 计算相对路径成分名，取出相对路径的第一级，拼接到 matchedPrefix 后面
+                    QString relative = qNewPath.mid(matchedPrefix.length());
+                    if (relative.startsWith('\\') || relative.startsWith('/')) {
+                        relative = relative.mid(1);
+                    }
+                    QString topLevelComponent = relative.section(QDir::separator(), 0, 0);
+                    if (topLevelComponent.isEmpty()) {
+                        // 变动的就是监控文件夹本身，跳过
+                        continue;
+                    }
+                    QString topLevelPath = QDir::toNativeSeparators(QDir(matchedPrefix).absoluteFilePath(topLevelComponent));
+                    std::wstring wTopLevelPath = topLevelPath.toStdWString();
+
+                    // 检查物理路径是否真实存在，且其未被列入当前正在迁移的待处理批次中
+                    if (QFileInfo(topLevelPath).exists() && s_currentlyMigrating.find(wTopLevelPath) == s_currentlyMigrating.end()) {
+                        s_currentlyMigrating.insert(wTopLevelPath);
+
+                        qDebug() << "[CoreController] 检测到自动导入目录变动，开始执行静默迁移:" << topLevelPath;
+
+                        // 直接调用资产打包导入器进行剪切迁移入库 (targetCatId = 0)，后台静默进行
+                        AssetImporter::importAssets(QStringList() << topLevelPath, 0, nullptr, [wTopLevelPath]() {
+                            s_currentlyMigrating.erase(wTopLevelPath);
+                            // 迁移完成后，自动调用 MetadataManager::instance().notifyFullUIRebuild() 进行自愈式刷新
+                            MetadataManager::instance().notifyFullUIRebuild();
+                        });
+                    }
+                } else if (ev.action == ArcMeta::WatcherAction::Removed) {
+                    // 处理 Removed 事件：在 CoreController 中处理 WatcherAction::Removed 时，若该路径是外部监控目录，调用 removeMetadataSync 即使返回未注册也不产生任何影响
+                    MetadataManager::instance().removeMetadataSync(normNewPath);
+                }
+                continue;
+            }
+
+            // 2. 原普通托管库/常规文件的 IOCP 变动响应逻辑
             if (ev.action == ArcMeta::WatcherAction::Added || ev.action == ArcMeta::WatcherAction::Modified) {
                 if (ev.isDirectory) {
                     (void)QtConcurrent::run([normNewPath]() {
@@ -94,6 +161,7 @@ void CoreController::startSystem() {
             AppConfig::instance().sync();
 
             // 启动原生监控服务 (对应用户原话："采用NativeFolderWatcher (IOCP) 机制的方式")
+            // 托管库无需开启 IOCP 监控（已取消）
             const auto drives = QDir::drives();
             for (const QFileInfo& d : drives) {
                 std::wstring wPath = d.absolutePath().toStdWString();
@@ -103,8 +171,8 @@ void CoreController::startSystem() {
                 if (volSerial != L"UNKNOWN") {
                     std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
                     if (!managedAbsW.empty()) {
-                        qDebug() << "[Core] 识别到托管库，开启 IOCP 监控:" << QString::fromStdWString(managedAbsW);
-                        NativeFolderWatcher::instance().addWatch(managedAbsW);
+                        qDebug() << "[Core] 识别到托管库，已取消开启 IOCP 监控:" << QString::fromStdWString(managedAbsW);
+                        // NativeFolderWatcher::instance().addWatch(managedAbsW);
                     }
                 }
             }
