@@ -239,7 +239,9 @@ QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
     } else if (role == CategoryIdRole) {
         return 0; 
     } else if (role == IsEmptyRole) {
-        return record.isDir && record.isEmpty;
+        auto* contentPanel = qobject_cast<ContentPanel*>(parent());
+        bool isDiskMode = contentPanel && (contentPanel->dataSourceType() == ContentPanel::DataSourceType::DiskNav);
+        return isDiskMode && record.isDir && record.isEmpty;
     } else if (role == AspectRatioRole) {
         // 2026-07-xx 性能优化：优先使用 ItemRecord 中已注入的尺寸信息，实现渲染零延迟
         if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
@@ -811,9 +813,13 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     // --- 按照 Plan-73 & Plan-94：显示/隐藏文件夹/文件与筛选联动 ---
     // 2026-07-xx 逻辑校准：子分类在逻辑上等同于文件夹，受 showFolders 控制
     if (record.isCategory || record.isDir) {
+        auto* contentPanel = qobject_cast<ContentPanel*>(parent());
+        bool isDiskMode = contentPanel && (contentPanel->dataSourceType() == ContentPanel::DataSourceType::DiskNav);
+        bool isEmptyFolder = isDiskMode && record.isDir && record.isEmpty;
+
         // 2026-07-xx Plan-94: 判定用户是否在筛选面板中显式勾选了“文件夹”或匹配的“空文件夹”
         bool isFolderExplicitlySelected = currentFilter.types.contains("folder") || 
-                                         (record.isEmpty && currentFilter.types.contains("空文件夹"));
+                                         (isEmptyFolder && currentFilter.types.contains("空文件夹"));
         
         // 只有当“顶栏全局开关为隐藏”且“筛选器未显式勾选文件夹”时，才执行拦截
         if (!currentFilter.showFolders && !isFolderExplicitlySelected) {
@@ -2541,7 +2547,12 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         QDir().mkpath(QFileInfo(dest).absolutePath());
                         if (QFile::rename(itemPath, dest)) {
                             MetadataManager::instance().markAsTrash(dest.toStdWString(), false);
-                            // 物理同步：由于原文件位置可能已被 MFT 逻辑自动识别，此处主要负责状态翻转
+
+                            // 🚨 按照要求：还原后一律归入"未分类"，不恢复删除前的任何分类关联
+                            std::string fid = MetadataManager::instance().getFileIdSync(dest.toStdWString());
+                            if (!fid.empty()) {
+                                CategoryRepo::removeAllCategories(fid);
+                            }
                         }
                     }
                 }
@@ -2692,9 +2703,6 @@ void ContentPanel::performCopy(bool cutMode) {
 } 
  
 void ContentPanel::performPaste() { 
-    // 2026-03-xx 按照用户要求：封装标准化文件粘贴逻辑，对接 Windows Shell 
-    if (m_currentPath.isEmpty() || m_currentPath == "computer://") return; 
- 
     const QMimeData* mime = QApplication::clipboard()->mimeData(); 
     if (!mime || !mime->hasUrls()) return; 
  
@@ -2705,25 +2713,38 @@ void ContentPanel::performPaste() {
     }
      
     if (fromPaths.isEmpty()) return; 
- 
-    // 探测是否为剪切模式 
-    bool isMove = false; 
-    if (mime->hasFormat("Preferred DropEffect")) { 
-        QByteArray effect = mime->data("Preferred DropEffect"); 
-        if (!effect.isEmpty() && (effect.at(0) & 0x02)) isMove = true; 
-    } 
- 
-    if (ShellHelper::copyOrMoveItems(fromPaths, m_currentPath, isMove)) { 
-        if (isMove) {
-            for (const QString& src : fromPaths) {
-                QString destPath = QDir(m_currentPath).absoluteFilePath(QFileInfo(src).fileName());
-                MetadataManager::instance().syncAfterMove(
-                    src.toStdWString(), destPath.toStdWString());
+
+    int targetCatId = 0;
+    if (!resolvePasteDestination(targetCatId)) return; // 内部已完成提示/取消处理
+
+    if (dataSourceType() == DataSourceType::DiskNav) {
+        bool isMove = false; 
+        if (mime->hasFormat("Preferred DropEffect")) { 
+            QByteArray effect = mime->data("Preferred DropEffect"); 
+            if (!effect.isEmpty() && (effect.at(0) & 0x02)) isMove = true; 
+        } 
+
+        if (ShellHelper::copyOrMoveItems(fromPaths, m_currentPath, isMove)) { 
+            if (isMove) {
+                for (const QString& src : fromPaths) {
+                    QString destPath = QDir(m_currentPath).absoluteFilePath(QFileInfo(src).fileName());
+                    MetadataManager::instance().syncAfterMove(src.toStdWString(), destPath.toStdWString());
+                }
+                UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), m_currentPath));
             }
-            UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), m_currentPath));
+            loadDirectory(m_currentPath, m_isRecursive); 
+        } else {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "粘贴失败：文件写入操作未能完成", 2000, QColor("#e81123"));
         }
-        loadDirectory(m_currentPath, m_isRecursive); 
-    } 
+    } else {
+        QString msg = QString("确定要将剪贴板中的 %1 个项目分流导入并打包至该分类吗？").arg(fromPaths.size());
+        if (FramelessMessageBox::question(this, "资产导入", msg)) {
+            QPointer<ContentPanel> weakThis(this);
+            AssetImporter::importAssets(fromPaths, targetCatId, this, [weakThis]() {
+                if (weakThis) weakThis->refreshAll();
+            });
+        }
+    }
 } 
  
 void ContentPanel::performBatchRename() { 
@@ -2888,30 +2909,28 @@ void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& t
             MetadataManager::instance().setInternalOperating(false);
         });
     } else {
-        // 【分流 B：托管库/逻辑分类模式】──> 弹出确认框并调用 AssetImporter 执行 .arc 打包入库
+        // 优先尊重"拖拽到具体子分类节点上"这个更精确的用户意图
         int targetCatId = 0;
-        if (dataSourceType() == DataSourceType::UserCategory) {
-            targetCatId = m_currentCategoryId;
-        }
-
+        bool droppedOnCategoryNode = false;
         if (targetIndex.isValid()) {
             QModelIndex srcIdx = m_proxyModel->mapToSource(targetIndex);
             if (srcIdx.isValid() && srcIdx.data(TypeRole).toString() == "category") {
                 targetCatId = srcIdx.data(CategoryIdRole).toInt();
+                droppedOnCategoryNode = true;
             }
         }
 
-        QString drive = paths.first().left(3);
-        if (drive.isEmpty()) drive = "D:/";
-        QString managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
+        if (!droppedOnCategoryNode) {
+            // 没有拖拽到具体子分类节点上，则退回统一的目的地判断规则
+            // （磁盘模式已在上面 return，这里只会命中 UserCategory / 聚合视图 / 回收站三种情形）
+            if (!resolvePasteDestination(targetCatId)) return;
+        }
 
-        QString msg = QString("确定要将选中的项目分流导入并打包至托管库吗？\n目标分类ID: %1").arg(targetCatId);
+        QString msg = QString("确定要将选中的 %1 个项目分流导入并打包至托管库吗？").arg(paths.size());
         if (FramelessMessageBox::question(this, "资产导入", msg)) {
             QPointer<ContentPanel> weakThis(this);
             AssetImporter::importAssets(paths, targetCatId, this, [weakThis]() {
-                if (weakThis) {
-                    weakThis->refreshAll();
-                }
+                if (weakThis) weakThis->refreshAll();
             });
         }
     }
@@ -2958,34 +2977,9 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
 } 
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
-    // 🚨 修改：不在路由判断之前抢先设置 m_isLoading / m_loadRequestId / m_currentCategoryType。
-    // 这几个状态一旦确定要转交给 loadCategory() 处理，必须完全交由它自己原子性地设置一次，
-    // 否则会污染它自身的防重入判断，导致双击/重复触发时被误判为“已经在加载同一分类”而空转，
-    // 同时还会因为 loadDirectory 自己额外自增了 m_loadRequestId，
-    // 导致 loadCategory() 真正在跑的那次异步结果被当成“过期请求”丢弃——两边都失败。
-
-    if (path != "computer://" && !path.isEmpty() &&
-        MetadataManager::instance().isInsideManagedLibrary(path.toStdWString())) {
-
-        // 通过物理路径反查其在 categories 表中对应的分类 ID
-        std::string fid;
-        std::wstring frnStr;
-        int catId = 0;
-        if (MetadataManager::fetchWinApiMetadataDirect(path.toStdWString(), fid, &frnStr)) {
-            try {
-                uint64_t frn = std::stoull(frnStr, nullptr, 16);
-                catId = CategoryRepo::findByFrn(frn);
-            } catch (...) {}
-        }
-
-        if (catId > 0) {
-            loadCategory(catId); // 完全交给它自己管理 m_isLoading / m_currentCategoryType / m_currentCategoryId / reqId
-            return;
-        }
-        // 若一时找不到对应分类（比如刚创建、索引还没建好），
-        // 走下面兜底：仍按磁盘原样打开，但不再对 .arc 做特殊语义解释，
-        // 避免 DiskNav 轨道去"猜测"托管库内部结构。
-    }
+    // =========================================================================
+    // 【彻底解耦与隔离】：干掉越界的劫持与重定向逻辑，保持磁盘模式 100% 的纯粹性！
+    // =========================================================================
 
     m_isLoading = true;
     int reqId = ++m_loadRequestId;
@@ -3042,7 +3036,6 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             for (const QFileInfo& info : entries) { 
                 if (!panelPtr) return; 
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
-                if (info.isDir() && info.fileName().endsWith(".arc", Qt::CaseInsensitive)) continue;
 
                 QString absPath = info.absoluteFilePath();
                 ItemRecord itemRec = ItemRecord::create(absPath);
@@ -3442,6 +3435,69 @@ void ContentPanel::appendPaths(const QStringList& paths, int reqId) {
     });
 }
  
+bool ContentPanel::resolvePasteDestination(int& outCatId) {
+    DataSourceType srcType = dataSourceType();
+
+    if (srcType == DataSourceType::DiskNav) {
+        // 磁盘模式目的地就是 m_currentPath，这里不涉及 catId，直接放行
+        if (m_currentPath.isEmpty() || m_currentPath == "computer://") {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "粘贴失败：当前未处于任何有效目录中", 2000, QColor("#e81123"));
+            return false;
+        }
+        return true;
+    }
+
+    if (srcType == DataSourceType::UserCategory) {
+        // 用户已经明确导航到了某个具体分类，目的地无歧义
+        if (m_currentCategoryId <= 0) {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "粘贴失败：未识别到有效的目标分类", 2000, QColor("#e81123"));
+            return false;
+        }
+        outCatId = m_currentCategoryId;
+        return true;
+    }
+
+    // 🚨 回收站：功能定位就是承接"删除"这一个来源，不接受任何形式的新内容粘贴/拖拽
+    if (m_currentCategoryType == "trash") {
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "当前视图为回收站，不支持粘贴或拖拽导入新项目", 2000, QColor("#e81123"));
+        return false;
+    }
+
+    // 🚨 全部数据 / 未分类 / 未标签 / 最近访问 / 搜索结果·路径列表：
+    // 均为跨托管库的聚合展示，没有单一确定的目的地，弹出选择框交由用户手动指定
+    if (m_currentCategoryType == "all" || m_currentCategoryType == "uncategorized" ||
+        m_currentCategoryType == "untagged" || m_currentCategoryType == "recently_visited" ||
+        m_currentCategoryType == "path_list" || m_currentCategoryType == "search") {
+
+        auto categories = CategoryRepo::getAll();
+        if (categories.empty()) {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "尚无任何可用分类，请先在托管库中创建分类", 2000, QColor("#e81123"));
+            return false;
+        }
+
+        QMenu pickerMenu(this);
+        UiHelper::applyMenuStyle(&pickerMenu);
+        pickerMenu.addAction("请选择要导入到的分类：")->setEnabled(false);
+        pickerMenu.addSeparator();
+        for (const auto& cat : categories) {
+            QAction* act = pickerMenu.addAction(QString::fromStdWString(cat.name));
+            act->setData(cat.id);
+        }
+
+        QAction* chosen = pickerMenu.exec(QCursor::pos());
+        if (!chosen || !chosen->data().isValid()) {
+            // 用户主动取消选择，不算失败提示，静默终止即可
+            return false;
+        }
+        outCatId = chosen->data().toInt();
+        return true;
+    }
+
+    // 兜底：其余未识别的状态，同样视为无法判断目的地
+    ToolTipOverlay::instance()->showText(QCursor::pos(), "粘贴失败：当前视图不是一个有效的归类目的地", 2000, QColor("#e81123"));
+    return false;
+}
+
 void ContentPanel::recalculateAndEmitStats() {
     const std::vector<ItemRecord>& records = m_model->allRecords();
     if (records.empty()) {
@@ -3450,8 +3506,11 @@ void ContentPanel::recalculateAndEmitStats() {
         return;
     }
 
+    // 判断当前是否为纯物理磁盘模式
+    bool isDiskMode = (dataSourceType() == DataSourceType::DiskNav);
+
     QPointer<ContentPanel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, records]() {
+    (void)QtConcurrent::run([weakThis, records, isDiskMode]() {
         ScanStats stats;
 
         for (const auto& record : records) {
@@ -3467,7 +3526,8 @@ void ContentPanel::recalculateAndEmitStats() {
             
             if (record.isDir || record.isCategory) {
                 stats.typeCounts["folder"]++;
-                if (record.isDir && record.isEmpty) {
+                // 物理限制：仅在磁盘模式下才累计空文件夹
+                if (isDiskMode && record.isDir && record.isEmpty) {
                     stats.emptyFolderCount++;
                 }
             } else {
