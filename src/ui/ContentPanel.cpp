@@ -15,7 +15,6 @@
 #include "DropJustifiedView.h"
 #include "BatchProgressDialog.h"
 #include "ThumbnailDelegate.h"
-#include "../util/ImportHelper.h"
 #include "../util/AssetImporter.h"
 #include "../core/AutoImportManager.h"
 #include "../meta/AmMetaJson.h"
@@ -2474,7 +2473,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 QPointer<ContentPanel> weakThis(this);
 
                 // 执行物理迁移，并提供无缝无感刷新执行动作 (对应用户原话："行，试试吧")
-                ImportHelper::importPaths(paths, target, this, [weakThis]() {
+                AssetImporter::importAssets(paths, 0, target, true, this, [weakThis]() {
                     if (weakThis) {
                         qDebug() << "[Content] 后台物理迁移完成，安全触发 UI 异步无感防闪载入";
                         weakThis->refreshAll(); 

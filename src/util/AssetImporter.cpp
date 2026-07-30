@@ -21,9 +21,19 @@ void AssetImporter::importAssets(const QStringList& paths,
                                  int targetCatId,
                                  QWidget* parent,
                                  std::function<void()> onComplete) {
+    importAssets(paths, targetCatId, "", false, parent, onComplete);
+}
+
+void AssetImporter::importAssets(const QStringList& paths,
+                                 int targetCatId,
+                                 const QString& targetPhysicalPath,
+                                 bool isMove,
+                                 QWidget* parent,
+                                 std::function<void()> onComplete) {
     if (paths.isEmpty()) return;
 
-    BatchProgressDialog* progress = new BatchProgressDialog("正在导入资产包...", parent);
+    QString title = !targetPhysicalPath.isEmpty() ? "正在迁移项目至托管库..." : "正在导入资产包...";
+    BatchProgressDialog* progress = new BatchProgressDialog(title, parent);
     progress->show();
 
     struct ImportContext {
@@ -33,9 +43,11 @@ void AssetImporter::importAssets(const QStringList& paths,
     auto context = std::make_shared<ImportContext>();
     QPointer<BatchProgressDialog> weakProgress(progress);
 
-    QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent]() {
+    QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent, targetPhysicalPath]() {
         if (!weakProgress) return;
-        if (!FramelessMessageBox::question(parent, "中断导入", "导入尚未完成。确定要停止当前导入吗？")) {
+        QString titleStr = !targetPhysicalPath.isEmpty() ? "中断迁移" : "中断导入";
+        QString contentStr = !targetPhysicalPath.isEmpty() ? "迁移尚未完成。确定要停止当前迁移任务吗？" : "导入尚未完成。确定要停止当前导入吗？";
+        if (!FramelessMessageBox::question(parent, titleStr, contentStr)) {
             weakProgress->show();
             return;
         }
@@ -44,10 +56,12 @@ void AssetImporter::importAssets(const QStringList& paths,
         weakProgress->deleteLater();
     });
 
-    context->future = QtConcurrent::run([paths, targetCatId, weakProgress, context, onComplete]() {
+    context->future = QtConcurrent::run([paths, targetCatId, targetPhysicalPath, isMove, weakProgress, context, onComplete]() {
         int total = paths.size();
         int handled = 0;
         int successCount = 0;
+
+        bool isPhysicalImport = !targetPhysicalPath.isEmpty();
 
         for (const QString& src : paths) {
             if (context->isCancelled) break;
@@ -58,42 +72,72 @@ void AssetImporter::importAssets(const QStringList& paths,
                                          Q_ARG(int, handled), Q_ARG(int, total), Q_ARG(QString, QFileInfo(src).fileName()));
             }
 
-            // 1. 获取目标盘符托管库路径 [盘符]:/ArcMeta.Library_[盘符]/
-            QString drive = QFileInfo(src).absolutePath().left(3);
-            if (drive.isEmpty()) drive = "D:/";
-            QString managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
-            
-            if (!QDir().mkpath(managedRoot)) {
-                qWarning() << "[AssetImporter] 无法建立托管库根目录:" << managedRoot << " 导入源:" << src;
-                continue;
-            }
+            if (isPhysicalImport) {
+                // 🚨 核心逻辑（从原 ImportHelper 移植）：如果目标位置是 ArcMeta.Library_[盘符] 托管库，为其创建 .arc 资产包！
+                QString destPath;
+                if (targetPhysicalPath.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                    // 统一规范：无论是导入还是剪切迁入，都使用统一 Base36 ID 生成！
+                    QString assetId = ShellHelper::generateBase36Id();
+                    QString arcContainer = QDir(targetPhysicalPath).filePath(assetId + ".arc");
+                    if (!QDir().mkpath(arcContainer)) {
+                        qWarning() << "[AssetImporter] 无法建立 .arc 资产包容器:" << arcContainer << " 源项目:" << src;
+                        continue;
+                    }
+                    destPath = QDir(arcContainer).filePath(QFileInfo(src).fileName());
+                } else {
+                    destPath = QDir(targetPhysicalPath).filePath(QFileInfo(src).fileName());
+                }
 
-            QFileInfo srcInfo(src);
-            bool ok = false;
-            if (srcInfo.isFile()) {
-                ok = importSingleFile(src, targetCatId, managedRoot);
-                if (!ok) {
-                    qWarning() << "[AssetImporter] importSingleFile 导入失败！源文件:" << src;
+                // 执行物理移动/复制
+                bool moved = ShellHelper::copyOrMoveItems({src}, QFileInfo(destPath).absolutePath(), isMove);
+                if (moved) {
+                    MetadataManager::instance().syncAfterMove(
+                        QDir::toNativeSeparators(src).toStdWString(),
+                        QDir::toNativeSeparators(destPath).toStdWString());
+                    successCount++;
+                } else {
+                    qWarning() << "[AssetImporter] copyOrMoveItems 失败！ 源文件:" << src << " 目标文件夹:" << QFileInfo(destPath).absolutePath();
                 }
-            } else if (srcInfo.isDir()) {
-                ok = importDirectoryRecursive(src, targetCatId, managedRoot);
-                if (!ok) {
-                    qWarning() << "[AssetImporter] importDirectoryRecursive 导入失败！源文件夹:" << src;
+            } else {
+                // 1. 获取目标盘符托管库路径 [盘符]:/ArcMeta.Library_[盘符]/
+                QString drive = QFileInfo(src).absolutePath().left(3);
+                if (drive.isEmpty()) drive = "D:/";
+                QString managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
+                
+                if (!QDir().mkpath(managedRoot)) {
+                    qWarning() << "[AssetImporter] 无法建立托管库根目录:" << managedRoot << " 导入源:" << src;
+                    continue;
                 }
-            }
-            if (ok) {
-                successCount++;
+
+                QFileInfo srcInfo(src);
+                bool ok = false;
+                if (srcInfo.isFile()) {
+                    ok = importSingleFile(src, targetCatId, managedRoot);
+                    if (!ok) {
+                        qWarning() << "[AssetImporter] importSingleFile 导入失败！源文件:" << src;
+                    }
+                } else if (srcInfo.isDir()) {
+                    ok = importDirectoryRecursive(src, targetCatId, managedRoot);
+                    if (!ok) {
+                        qWarning() << "[AssetImporter] importDirectoryRecursive 导入失败！源文件夹:" << src;
+                    }
+                }
+                if (ok) {
+                    successCount++;
+                }
             }
         }
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, successCount, onComplete]() {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, successCount, isPhysicalImport, onComplete]() {
             if (context->isCancelled) return;
             if (weakProgress) {
                 weakProgress->accept();
                 weakProgress->deleteLater();
             }
+
+            QString tipMsg = isPhysicalImport ? QString("已成功迁移 %1 个条目") : QString("已成功导入 %1 个受控资产单元");
             ToolTipOverlay::instance()->showText(QCursor::pos(),
-                QString("已成功导入 %1 个受控资产单元").arg(successCount), 2000, QColor("#2ecc71"));
+                tipMsg.arg(successCount), 2000, QColor("#2ecc71"));
 
             if (onComplete) {
                 onComplete();
