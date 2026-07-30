@@ -3013,8 +3013,51 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             for (const QFileInfo& info : entries) { 
                 if (!panelPtr) return; 
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
-                if (info.isDir() && info.fileName().endsWith(".arc", Qt::CaseInsensitive)) continue;
- 
+
+                // 🚨 修改：.arc 容器不再整体跳过丢弃，而是透视进内部，把真正的原始资产文件掏出来展示，
+                // 与 CategoryRepo::scanPhysicalDirectory() 的处理方式保持一致。
+                // 否则当所打开的目录本身 100% 由 .arc 容器构成时（如 ArcMeta.Library_Z 根目录），
+                // 会导致每一项都被跳过，界面呈现"假空白"。
+                if (info.isDir() && info.fileName().endsWith(".arc", Qt::CaseInsensitive)) {
+                    QDir arcDir(info.absoluteFilePath());
+                    QFileInfoList arcFiles = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                    for (const QFileInfo& afi : arcFiles) {
+                        QString fn = afi.fileName();
+                        if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
+                        if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
+
+                        QString innerAbsPath = afi.absoluteFilePath();
+                        ItemRecord innerRec = ItemRecord::create(innerAbsPath);
+
+                        // 离散打标缓存同样按原始文件名对齐注入（原逻辑不变，只是作用对象换成容器内部文件）
+                        std::wstring innerFileName = afi.fileName().toStdWString();
+                        auto innerIt = cachedItems.find(innerFileName);
+                        if (innerIt != cachedItems.end()) {
+                            innerRec.rating = innerIt->second.rating;
+                            innerRec.manualColor = QString::fromStdWString(innerIt->second.color);
+                            innerRec.pinned = innerIt->second.pinned;
+                            innerRec.note = QString::fromStdWString(innerIt->second.note);
+                            innerRec.url = QString::fromStdWString(innerIt->second.url);
+                            innerRec.tags.clear();
+                            for (const auto& t : innerIt->second.tags) {
+                                innerRec.tags.append(QString::fromStdWString(t));
+                            }
+                            innerRec.width = innerIt->second.width;
+                            innerRec.height = innerIt->second.height;
+                            innerRec.autoColor = QString::fromStdWString(innerIt->second.autoColor);
+                            innerRec.added_at = innerIt->second.addedAt;
+
+                            innerRec.palettes.clear();
+                            for (const auto& pe : innerIt->second.palettes) {
+                                innerRec.palettes.push_back({pe.color, pe.ratio});
+                            }
+                        }
+
+                        allItems.push_back(innerRec);
+                    }
+                    continue; // 容器本身不再作为一个"文件夹条目"参与展示，也不再递归进它内部（已经处理完毕）
+                }
+
                 QString absPath = info.absoluteFilePath();
                 ItemRecord itemRec = ItemRecord::create(absPath);
 
