@@ -244,7 +244,9 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         const char* arcCleanup1 = "DELETE FROM categories WHERE name LIKE '%.arc';";
         sqlite3_exec(conn.memDb, arcCleanup1, nullptr, nullptr, nullptr);
 
-        const char* arcCleanup2 = "DELETE FROM category_items WHERE path_hint LIKE '%.arc' OR path_hint LIKE '%.arc\\%';";
+        const char* arcCleanup2 =
+            "DELETE FROM category_items WHERE path_hint LIKE '%.arc' ESCAPE '\\' "
+            "OR path_hint LIKE '%.arc\\%' ESCAPE '\\';";
         sqlite3_exec(conn.memDb, arcCleanup2, nullptr, nullptr, nullptr);
 
         // FTS5 trigram 模糊匹配与自动触发器同步
