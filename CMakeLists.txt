@@ -177,8 +177,6 @@ set(SOURCES
     src/ui/MediaColorExtractor.cpp
     src/util/ShellHelper.cpp
     src/util/ShellHelper.h
-    src/util/ImportHelper.cpp
-    src/util/ImportHelper.h
     src/util/AssetImporter.cpp
     src/util/AssetImporter.h
     ArcMeta.rc
