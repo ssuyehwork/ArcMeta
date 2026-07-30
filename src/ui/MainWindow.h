@@ -29,6 +29,16 @@ class MetaPanel;
 class FilterPanel;
 class SearchHistoryPanel;
 
+class CustomFolderImportDialog : public FramelessDialog {
+    Q_OBJECT
+public:
+    explicit CustomFolderImportDialog(QWidget* parent = nullptr);
+    QString selectedPath() const;
+
+private:
+    void onBrowse();
+    QLineEdit* m_edit = nullptr;
+};
 
 /**
  * @brief 主窗口类
@@ -167,6 +177,8 @@ private:
     QVector<class FolderButton*> m_folderButtons;
     
     void updateCustomFolderButtons();
+    void showNewAutoImportDialog();
+    void removeCustomMonitoredFolder(const QString& path);
     void onDriveBarContextMenu(const QPoint& pos);
     void onFolderButtonContextMenu(const QPoint& pos);
 
