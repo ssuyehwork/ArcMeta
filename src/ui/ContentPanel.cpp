@@ -2958,6 +2958,35 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
 } 
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
+    // 🚨 修改：不在路由判断之前抢先设置 m_isLoading / m_loadRequestId / m_currentCategoryType。
+    // 这几个状态一旦确定要转交给 loadCategory() 处理，必须完全交由它自己原子性地设置一次，
+    // 否则会污染它自身的防重入判断，导致双击/重复触发时被误判为“已经在加载同一分类”而空转，
+    // 同时还会因为 loadDirectory 自己额外自增了 m_loadRequestId，
+    // 导致 loadCategory() 真正在跑的那次异步结果被当成“过期请求”丢弃——两边都失败。
+
+    if (path != "computer://" && !path.isEmpty() &&
+        MetadataManager::instance().isInsideManagedLibrary(path.toStdWString())) {
+
+        // 通过物理路径反查其在 categories 表中对应的分类 ID
+        std::string fid;
+        std::wstring frnStr;
+        int catId = 0;
+        if (MetadataManager::fetchWinApiMetadataDirect(path.toStdWString(), fid, &frnStr)) {
+            try {
+                uint64_t frn = std::stoull(frnStr, nullptr, 16);
+                catId = CategoryRepo::findByFrn(frn);
+            } catch (...) {}
+        }
+
+        if (catId > 0) {
+            loadCategory(catId); // 完全交给它自己管理 m_isLoading / m_currentCategoryType / m_currentCategoryId / reqId
+            return;
+        }
+        // 若一时找不到对应分类（比如刚创建、索引还没建好），
+        // 走下面兜底：仍按磁盘原样打开，但不再对 .arc 做特殊语义解释，
+        // 避免 DiskNav 轨道去"猜测"托管库内部结构。
+    }
+
     m_isLoading = true;
     int reqId = ++m_loadRequestId;
     m_currentCategoryType = ""; // 物理导航模式下清除系统类型
@@ -3014,7 +3043,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 if (!panelPtr) return; 
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
                 if (info.isDir() && info.fileName().endsWith(".arc", Qt::CaseInsensitive)) continue;
- 
+
                 QString absPath = info.absoluteFilePath();
                 ItemRecord itemRec = ItemRecord::create(absPath);
 

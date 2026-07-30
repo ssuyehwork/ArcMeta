@@ -185,6 +185,9 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
         return;
     }
 
+    QString qPath = QString::fromStdWString(path);
+    QFileInfo info(qPath);
+
     int w = 0, h = 0;
     extractDimensions(path, w, h);
     if (m_isCanceled.load()) {
@@ -204,7 +207,31 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     bool success = false;
     
     if (!m_isCanceled.load()) {
-        success = extractColor(path, colorStr, palette);
+        if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
+            QImage img = MediaColorExtractor::getImageForAnalysis(qPath, 256);
+            if (!img.isNull()) {
+                // 🚨 物理落盘核心：如果是在 .arc 资产包内，直接保存为 [baseName]_thumbnail.png！
+                QString containerDir = info.absolutePath();
+                if (containerDir.endsWith(".arc", Qt::CaseInsensitive)) {
+                    QString baseName = info.completeBaseName();
+                    QString thumbPath = containerDir + "/" + baseName + "_thumbnail.png";
+                    if (!QFile::exists(thumbPath)) {
+                        img.save(thumbPath, "PNG"); // 保存高清 256x256 缩略图
+                        qDebug() << "[Pipeline] 成功生成并物理落盘 .arc 缩略图:" << thumbPath;
+                    }
+                }
+
+                auto pal = MediaColorExtractor::extractPalette(qPath);
+                if (!pal.isEmpty()) {
+                    QColor dominant = MediaColorExtractor::quantizeColor(pal.first().first);
+                    colorStr = dominant.name().toUpper().toStdWString();
+                    palette = pal;
+                    success = true;
+                }
+            }
+        } else if (info.isDir()) {
+            success = extractColor(path, colorStr, palette);
+        }
     }
 
     if (m_isCanceled.load()) {
@@ -223,7 +250,6 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::PathUpdate, QString::fromStdWString(path));
 
     if (!success && !m_isCanceled.load()) {
-        QFileInfo info(QString::fromStdWString(path));
         if (info.isDir() || MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
             std::lock_guard<std::mutex> lock(m_retryMutex);
             if (std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), path) == m_visualRetryQueue.end()) {
