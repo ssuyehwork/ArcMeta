@@ -228,12 +228,15 @@ void MainWindow::initUi() {
     m_mainSplitter->setStretchFactor(3, 0); // 元数据
     m_mainSplitter->setStretchFactor(4, 0); // 筛选
 
-    // 2026-04-11 按照用户要求：物理还原/记忆侧边栏宽度
+    // 1. 先应用面板显隐状态
+    loadPanelVisibility();
+
+    // 2. 延迟至下一个事件循环（等窗口 geometry 稳定后）再恢复 SplitterState
     QByteArray state = AppConfig::instance().getValue("MainWindow/SplitterState").toByteArray();
     if (!state.isEmpty()) {
-        m_mainSplitter->restoreState(state);
-        // 2026-07-xx 按照 Plan-63：恢复面板显隐状态 (必须在 restoreState 之后以防布局错乱)
-        loadPanelVisibility();
+        QTimer::singleShot(0, this, [this, state]() {
+            m_mainSplitter->restoreState(state);
+        });
     } else {
         // 初始默认分配: 230 | 230 | 600 | 230 | 230
         QList<int> sizes;

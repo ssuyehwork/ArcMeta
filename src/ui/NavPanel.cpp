@@ -198,9 +198,16 @@ void NavPanel::initUi() {
     m_favoriteView->setModel(m_favoriteModel);
     favLayout->addWidget(m_favoriteView);
 
-    // 将各组件加入 Splitter
+    // 将各组件加入 Splitter，并进行尺寸约束与防折叠设置，防止收藏夹过大或吞噬磁盘树空间
+    m_treeView->setMinimumHeight(150);
+    favGroup->setMinimumHeight(100);
+    favGroup->setMaximumHeight(320); // 限制最高高度，防止过度拉伸占满屏幕
+
     m_splitter->addWidget(m_treeView);
     m_splitter->addWidget(favGroup);
+
+    m_splitter->setCollapsible(0, false); // 磁盘树不可折叠为 0（必须在 addWidget 之后索引存在时设置）
+    m_splitter->setCollapsible(1, false); // 收藏夹不可折叠为 0
 
     m_mainLayout->addWidget(m_splitter, 1);
 
