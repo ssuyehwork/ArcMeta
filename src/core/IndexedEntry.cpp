@@ -74,13 +74,12 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         // 从数据库加载持久化的进度值
         r.registrationProgress = MetadataManager::instance().getProgressFromDb(wPath);
 
-        // 只有当明确处于“镜像模式”（providedMeta != nullptr）或项已由数据库托管时，才信任内存索引。
-        // 物理路径导航模式下，若项未录入或缓存未命中，必须执行磁盘 I/O 探测以确保正确性。
+        // 严格遵循规则：空文件夹判定只应用于磁盘模式！
         if (providedMeta || meta.isManaged) {
-            r.isEmpty = !MetadataManager::instance().hasChildrenInCache(wPath);
+            r.isEmpty = false; // 镜像/托管模式下强行禁用空文件夹逻辑
         } else {
             QDir sub(nPath);
-            r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
+            r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty(); // 仅磁盘模式生效
         }
         r.suffix = ""; // 文件夹不应有扩展名后缀
     } else {
