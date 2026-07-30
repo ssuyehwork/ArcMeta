@@ -2958,12 +2958,12 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
 } 
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
-    m_isLoading = true;
-    int reqId = ++m_loadRequestId;
+    // 🚨 修改：不在路由判断之前抢先设置 m_isLoading / m_loadRequestId / m_currentCategoryType。
+    // 这几个状态一旦确定要转交给 loadCategory() 处理，必须完全交由它自己原子性地设置一次，
+    // 否则会污染它自身的防重入判断，导致双击/重复触发时被误判为“已经在加载同一分类”而空转，
+    // 同时还会因为 loadDirectory 自己额外自增了 m_loadRequestId，
+    // 导致 loadCategory() 真正在跑的那次异步结果被当成“过期请求”丢弃——两边都失败。
 
-    // 🚨 新增：路由分流判断——地址栏输入的路径如果落在托管库范围内，
-    // 一律转交给"分类/托管库"这条轨道处理，绝不让 DiskNav 的 scanDir 碰它。
-    // 两条轨道各自独立运作，这里只是"选对入口"，不涉及任何一方的内部实现改动。
     if (path != "computer://" && !path.isEmpty() &&
         MetadataManager::instance().isInsideManagedLibrary(path.toStdWString())) {
 
@@ -2979,8 +2979,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         }
 
         if (catId > 0) {
-            m_currentCategoryType = "user_category"; // 显式声明走分类轨道
-            loadCategory(catId); // 转交给已有的、专门处理托管库分类的加载逻辑
+            loadCategory(catId); // 完全交给它自己管理 m_isLoading / m_currentCategoryType / m_currentCategoryId / reqId
             return;
         }
         // 若一时找不到对应分类（比如刚创建、索引还没建好），
@@ -2988,6 +2987,8 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         // 避免 DiskNav 轨道去"猜测"托管库内部结构。
     }
 
+    m_isLoading = true;
+    int reqId = ++m_loadRequestId;
     m_currentCategoryType = ""; // 物理导航模式下清除系统类型
     ArcMeta::Logger::log(QString("[Content] 开始物理递归扫描 (虚拟化) [%1] -> %2 (%3)")
                         .arg(reqId).arg(path).arg(recursive ? "递归" : "单级"));
