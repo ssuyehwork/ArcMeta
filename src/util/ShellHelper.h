@@ -11,7 +11,7 @@ namespace ArcMeta {
 class ShellHelper {
 public:
     /**
-     * @brief 生成 13 位唯一 Base36 ID (基于毫秒时间戳 + 计数器)
+     * @brief 生成唯一 SHA-256 ID (64位十六进制字符串，基于毫秒时间戳 + 计数器 + UUID)
      */
     static QString generateBase36Id();
 
