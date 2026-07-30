@@ -2058,17 +2058,17 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
  
         // [归类与标记区] 
         // 2026-07-xx 按照 Plan-117：语义分流。判定当前是否为“镜像源”
-        // 镜像源定义：侧边栏分类模式 (m_currentCategoryType 不为空) 
+        // 镜像源定义：侧边栏分类模式 (isMirrorSource() 为真)
         // 或 物理导航模式下已进入托管库内部 (镜像加速态)
-        bool isMirrorSource = !m_currentCategoryType.isEmpty();
-        if (!isMirrorSource && onItem) {
+        bool isMirror = isMirrorSource();
+        if (!isMirror && onItem) {
             // 物理修复：只要该项已被登记（isManaged），或者是托管库内部的项，一律允许显示“设定颜色标签”和“归类”
             bool isManaged = currentIndex.data(ManagedRole).toBool();
             bool isInsideLib = MetadataManager::instance().isInsideManagedLibrary(path.toStdWString());
-            isMirrorSource = isManaged || isInsideLib;
+            isMirror = isManaged || isInsideLib;
         }
 
-        if (isMirrorSource) {
+        if (isMirror) {
             // [镜像源：归类与元数据编辑区]
             QMenu* categorizeMenu = menu.addMenu("归类到..."); 
             UiHelper::applyMenuStyle(categorizeMenu); 
@@ -3547,9 +3547,8 @@ void ContentPanel::updateLayersButtonState() {
         return; 
     } 
 
-    // 2026-07-xx 逻辑增强：若处于搜索或其他路径列表模式，禁用递归功能
-    // 注意：m_currentCategoryType 为空时代表正常的物理目录导航（nav 模式）
-    if (!m_currentCategoryType.isEmpty() && m_currentCategoryType != "nav") {
+    // 2026-07-xx 逻辑增强：若处于搜索或其他路径列表模式（即非物理磁盘导航，即镜像源），禁用递归功能
+    if (isMirrorSource()) {
         m_btnLayers->setEnabled(false);
         m_btnLayers->setChecked(false);
         m_btnLayers->setProperty("tooltipText", "当前视图不支持递归显示");
