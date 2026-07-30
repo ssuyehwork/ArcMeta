@@ -350,6 +350,13 @@ private:
     void updateStatusBarStats();
     void recalculateAndEmitStats();
 
+    /**
+     * @brief 统一判断粘贴/拖拽导入的目的地。
+     * @param outCatId 输出参数：解析出的目标分类 ID（DiskNav 场景下无意义，忽略）
+     * @return true 表示可以继续执行导入；false 表示应终止（已在内部完成提示或已被用户取消）
+     */
+    bool resolvePasteDestination(int& outCatId);
+
     void addItemsFromDirectory(const QString& path, bool recursive,
                                QMap<int, int>& ratingCounts,
                                QMap<QString, int>& colorCounts,
