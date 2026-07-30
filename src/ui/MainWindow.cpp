@@ -55,7 +55,6 @@
 #include "../core/SyncStatusService.h"
 #include "DriveButton.h"
 #include "../util/ShellHelper.h"
-#include "../util/ImportHelper.h"
 #include "../util/AssetImporter.h"
 using namespace ArcMeta::Style;
 #include "../core/ModelContract.h"
