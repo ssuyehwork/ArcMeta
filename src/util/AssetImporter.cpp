@@ -19,6 +19,13 @@ namespace ArcMeta {
 
 void AssetImporter::importAssets(const QStringList& paths,
                                  int targetCatId,
+                                 QWidget* parent,
+                                 std::function<void()> onComplete) {
+    importAssets(paths, targetCatId, "", false, parent, onComplete);
+}
+
+void AssetImporter::importAssets(const QStringList& paths,
+                                 int targetCatId,
                                  const QString& targetPhysicalPath,
                                  bool isMove,
                                  QWidget* parent,
@@ -36,7 +43,7 @@ void AssetImporter::importAssets(const QStringList& paths,
     auto context = std::make_shared<ImportContext>();
     QPointer<BatchProgressDialog> weakProgress(progress);
 
-    QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent]() {
+    QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent, targetPhysicalPath]() {
         if (!weakProgress) return;
         QString titleStr = !targetPhysicalPath.isEmpty() ? "中断迁移" : "中断导入";
         QString contentStr = !targetPhysicalPath.isEmpty() ? "迁移尚未完成。确定要停止当前迁移任务吗？" : "导入尚未完成。确定要停止当前导入吗？";
