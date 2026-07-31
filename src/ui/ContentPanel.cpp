@@ -188,12 +188,12 @@ QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
     if (role == Qt::DisplayRole || role == Qt::EditRole) {
         switch (index.column()) {
             case 0: {
-                // 2026-06-xx 极致性能优化：文件名称提取杜绝 QFileInfo 随机访问。
-                // path 已经归一化，通过字符串操作获取文件名
+                // 优先使用 ItemRecord 中解包好的 filename（包含 .arc 内部真正的主素材文件名）
+                if (!record.filename.isEmpty()) return record.filename;
                 int lastSlash = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
                 if (lastSlash == -1) return path;
                 QString name = path.mid(lastSlash + 1);
-                if (name.isEmpty() && path.length() >= 2 && path[1] == ':') return path; // 盘符根目录
+                if (name.isEmpty() && path.length() >= 2 && path[1] == ':') return path; // 盘符根目录安全保护
                 return name;
             }
             case 3: {

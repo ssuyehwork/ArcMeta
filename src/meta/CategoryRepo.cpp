@@ -847,6 +847,18 @@ std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
                     catToUniqueFids[catId].insert(meta.fileId128);
                 }
             }
+            // 针对 .arc 资产包容器，检查以包 ID 形式登记在 category_items 中的关联
+            if (meta.isFolder && path.size() >= 4 && path.compare(path.size() - 4, 4, L".arc") == 0) {
+                std::string arcFid = MetadataManager::instance().getFileIdSync(path);
+                if (!arcFid.empty() && arcFid != meta.fileId128) {
+                    auto itArc = fidToCats.find(arcFid);
+                    if (itArc != fidToCats.end()) {
+                        for (int catId : itArc->second) {
+                            catToUniqueFids[catId].insert(arcFid);
+                        }
+                    }
+                }
+            }
         }
     });
 
