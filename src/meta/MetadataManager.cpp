@@ -87,6 +87,11 @@ std::wstring MetadataManager::normalizePath(const std::wstring& path) {
     return qp.toStdWString();
 }
 
+bool MetadataManager::isCountableAsset(const std::wstring& path, bool isFolder) {
+    if (!isFolder) return true;
+    return (path.size() >= 4 && path.compare(path.size() - 4, 4, L".arc") == 0);
+}
+
 std::string MetadataManager::generateFallbackFid(const std::wstring& vol, const std::wstring& frn) {
     if (vol.empty() || frn.empty()) return "";
     std::string result = "FRN:";
@@ -762,8 +767,8 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         }
 
         m_cache[nPath] = rm;
-        // 🚨 资产判定重构：.arc 容器在物理上虽然 isFolder 为真，但在托管库语义中代表一个资产单元，必须作为资产进行计数
-        bool countsAsAsset = !rm.isFolder || (nPath.size() >= 4 && nPath.substr(nPath.size() - 4) == L".arc");
+        // 🚨 资产判定重构：.arc 容器在物理上虽然 isFolder 为真，但在托管库语义中代表一个资产单元，通过共享判定函数作为资产进行计数
+        bool countsAsAsset = isCountableAsset(nPath, rm.isFolder);
         if (countsAsAsset) {
             CategoryRepo::s_totalCount.fetch_add(1);
             if (rm.tags.isEmpty()) {
