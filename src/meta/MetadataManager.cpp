@@ -56,6 +56,28 @@ namespace ArcMeta {
 
 // --- Helper Functions ---
 
+// 🚨 内存数据库模式唯一ID体系重构：路径级 Base36 ID 静态提取解析器
+static std::string extractBase36Id(const std::wstring& path) {
+    // 查找 ".arc" 容器扩展名在路径中的位置
+    size_t pos = path.find(L".arc");
+    if (pos == std::wstring::npos) return "";
+
+    // 向上查找紧邻 ".arc" 前方的路径分隔符以界定容器名称
+    size_t lastSep = path.rfind(L'\\', pos);
+    if (lastSep == std::wstring::npos) {
+        lastSep = path.rfind(L'/', pos);
+    }
+
+    size_t start = (lastSep == std::wstring::npos) ? 0 : lastSep + 1;
+    std::wstring folderName = path.substr(start, pos - start);
+
+    // 托管资产容器文件夹名格式恒为 13 位 Base36 字符串 (如 00ms73182x000)
+    if (folderName.length() == 13) {
+        return std::string(folderName.begin(), folderName.end());
+    }
+    return "";
+}
+
 std::wstring MetadataManager::normalizePath(const std::wstring& path) {
     if (path.empty()) return L"";
     // 2026-06-xx 物理对账优化：Windows 环境下路径不区分大小写，
@@ -717,6 +739,12 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         // 3. 写锁写入缓存
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         if (m_cache.count(nPath)) return; // 二次检查防止竞态
+
+        // 🚨 内存数据库模式唯一ID体系重构：激活写入内存缓存前，将主键统一覆盖为 13 位 Base36 ID
+        std::string base36 = extractBase36Id(nPath);
+        if (!base36.empty()) {
+            rm.fileId128 = base36;
+        }
 
         // 共享元数据逻辑 (FID 关联)
         if (!rm.fileId128.empty() && m_fidToPath.count(rm.fileId128)) {
@@ -1868,6 +1896,13 @@ void MetadataManager::registerArcmetaFrn(const std::wstring&) {
 }
 
 std::string MetadataManager::getFileIdSync(const std::wstring& path) {
+    // 1. 如果处于受控托管库中，直接提取 13 位 Base36 ID，终结系统级 FRN 物理依赖
+    std::string base36 = extractBase36Id(path);
+    if (!base36.empty()) {
+        return base36;
+    }
+
+    // 2. 磁盘模式（非托管路径）不使用 Base36 ID，自愈退避至原本的系统级物理 FRN 
     std::string fid;
     if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = MetadataManager::generateDeterministicSha256Id(path);
     return fid;
