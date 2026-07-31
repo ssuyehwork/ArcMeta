@@ -316,6 +316,7 @@ bool ArcMetaVirtualDbModel::setData(const QModelIndex& index, const QVariant& va
     QString path = record.path;
 
     if (role == Qt::EditRole && index.column() == 0) {
+        // 🚨 [双轨不隔离违规点-6]: 在共享模型的 setData 中，无论处于托管库（内存）模式还是磁盘导航模式，重命名操作都无条件执行了物理重命名 ShellHelper::renameItem，混淆了两轨的重命名逻辑（托管库内应为仅改写 SQLite 映射字段的逻辑重命名，磁盘模式下应为物理重命名）
         if (record.isCategory) return false; // 2026-07-xx 按照 Plan-73：子分类暂不支持在此重命名
 
         QString newName = value.toString().trimmed();
@@ -2066,6 +2067,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         // 2026-07-xx 按照 Plan-117：语义分流。判定当前是否为“镜像源”
         // 镜像源定义：侧边栏分类模式 (isMirrorSource() 为真) 
         // 或 物理导航模式下已进入托管库内部 (镜像加速态)
+        // 🚨 [双轨不隔离违规点-3]: 右键菜单在非镜像源（磁盘模式）下，强行判断 isManaged 或 isInsideLib 以允许数据库修改操作（归类/颜色标签/置顶），破坏了磁盘模式行为等同于资源管理器的纯粹性
         bool isMirror = isMirrorSource();
         if (!isMirror && onItem) {
             // 物理修复：只要该项已被登记（isManaged），或者是托管库内部的项，一律允许显示“设定颜色标签”和“归类”
@@ -2728,6 +2730,7 @@ void ContentPanel::performPaste() {
             if (isMove) {
                 for (const QString& src : fromPaths) {
                     QString destPath = QDir(m_currentPath).absoluteFilePath(QFileInfo(src).fileName());
+                    // 🚨 [双轨不隔离违规点-5]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
                     MetadataManager::instance().syncAfterMove(src.toStdWString(), destPath.toStdWString());
                 }
                 UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), m_currentPath));
@@ -2798,6 +2801,7 @@ bool ContentPanel::isMirrorSource() const {
 }
 
 bool ContentPanel::isManagedContext() const {
+    // 🚨 [双轨不隔离违规点-2]: 磁盘模式（isMirrorSource() == false）下通过 isInsideManagedLibrary 判断当前路径是否在托管库中，导致双轨制逻辑交叉混叠
     if (isMirrorSource()) return true;
     return MetadataManager::instance().isInsideManagedLibrary(m_currentPath.toStdWString());
 }
@@ -2897,6 +2901,7 @@ void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& t
             if (isMove) {
                 for (const QString& src : paths) {
                     QString destPath = QDir(destDir).absoluteFilePath(QFileInfo(src).fileName());
+                    // 🚨 [双轨不隔离违规点-4]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
                     MetadataManager::instance().syncAfterMove(
                         src.toStdWString(), destPath.toStdWString());
                 }
