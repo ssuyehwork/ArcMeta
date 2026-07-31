@@ -33,7 +33,7 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
     QString nPath = QString::fromStdWString(wPath);
 
     // 1. 物理属性采样 (零 I/O 核心)
-    // 🚨 [双轨不隔离违规点-1] : 磁盘导航模式下通过 MetadataManager::getMeta 直接读取了托管库 SQLite 数据库
+    // 🚨 [双轨不隔离违规点-1]: 磁盘导航模式下通过 MetadataManager::getMeta 直接读取了托管库 SQLite 数据库
     RuntimeMeta meta;
     if (providedMeta) {
         meta = *providedMeta;
@@ -50,7 +50,15 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         r.ctime = ctime;
         r.mtime = mtime;
         r.atime = atime;
-        r.fileId = fid;
+
+        // 🚨 内存数据库模式唯一ID体系重构：优先解析和提取 Base36 ID，如果是磁盘普通路径，则复用本轮采样已取得的 fid，彻底消除双重 I/O 冗余
+        size_t pos = wPath.find(L".arc");
+        if (pos != std::wstring::npos) {
+            r.fileId = QString::fromStdString(MetadataManager::instance().getFileIdSync(wPath));
+        } else {
+            r.fileId = QString::fromStdString(fid);
+        }
+
         r.isDir = QFileInfo(nPath).isDir();
     } else {
         r.size = meta.fileSize;

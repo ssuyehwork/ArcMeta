@@ -2579,22 +2579,14 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 // 1. 开启内部操作锁，彻底抑制 NativeFolderWatcher 的二次干扰信号
                 MetadataManager::instance().setInternalOperating(true);
 
-                QPointer<ContentPanel> weakThis(this);
-                // 异步化删除：将大量的 QFile::rename 及回收站数据库逻辑移至后台线程，解决大目录物理删除阻塞主线程问题
-                (void)QtConcurrent::run([weakThis, targetPaths]() {
-                    bool ok = ShellHelper::moveToTrash(targetPaths);
-                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, ok]() {
-                        if (weakThis) {
-                            if (ok) {
-                                // 2. 修正：调用 refreshAll() 自适应协议与物理路径刷新，绝不调 loadDirectory！
-                                weakThis->refreshAll();
-                            }
-                        }
-                        // 2000ms 后平滑释放抑制锁，保证在后台物理操作在系统底层更新后信号稳定
-                        QTimer::singleShot(2000, []() {
-                            MetadataManager::instance().setInternalOperating(false);
-                        });
-                    }, Qt::QueuedConnection);
+                if (ShellHelper::moveToTrash(targetPaths)) {
+                    // 2. 修正：调用 refreshAll() 自适应协议与物理路径刷新，绝不调 loadDirectory！
+                    refreshAll();
+                }
+
+                // 2000ms 后平滑释放抑制锁
+                QTimer::singleShot(2000, []() {
+                    MetadataManager::instance().setInternalOperating(false);
                 });
             } else {
                 QString msg = "确定要永久删除选中的项目吗？数据将被物理覆写并彻底抹除，此操作不可恢复。";
@@ -2734,30 +2726,19 @@ void ContentPanel::performPaste() {
             if (!effect.isEmpty() && (effect.at(0) & 0x02)) isMove = true; 
         } 
 
-        QString destPath = m_currentPath;
-        QPointer<ContentPanel> weakThis(this);
-        // 将重型物理 I/O 抛入后台线程，避免阻塞主 UI 线程
-        (void)QtConcurrent::run([weakThis, fromPaths, destPath, isMove]() {
-            bool ok = ShellHelper::copyOrMoveItems(fromPaths, destPath, isMove);
-            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, fromPaths, destPath, isMove, ok]() {
-                if (!weakThis) return;
-                if (ok) {
-                    if (isMove) {
-                        for (const QString& src : fromPaths) {
-                            QString newPath = QDir(destPath).absoluteFilePath(QFileInfo(src).fileName());
-                            // 🚨 [双轨不隔离违规点-5]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
-                            MetadataManager::instance().syncAfterMove(src.toStdWString(), newPath.toStdWString());
-                        }
-                        UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), destPath));
-                    }
-                    if (weakThis->m_currentPath == destPath) {
-                        weakThis->loadDirectory(destPath, weakThis->m_isRecursive);
-                    }
-                } else {
-                    ToolTipOverlay::instance()->showText(QCursor::pos(), "粘贴失败：文件写入操作未能完成", 2000, QColor("#e81123"));
+        if (ShellHelper::copyOrMoveItems(fromPaths, m_currentPath, isMove)) {
+            if (isMove) {
+                for (const QString& src : fromPaths) {
+                    QString destPath = QDir(m_currentPath).absoluteFilePath(QFileInfo(src).fileName());
+                    // 🚨 [双轨不隔离违规点-5]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
+                    MetadataManager::instance().syncAfterMove(src.toStdWString(), destPath.toStdWString());
                 }
-            }, Qt::QueuedConnection);
-        });
+                UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), m_currentPath));
+            }
+            loadDirectory(m_currentPath, m_isRecursive);
+        } else {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "粘贴失败：文件写入操作未能完成", 2000, QColor("#e81123"));
+        }
     } else {
         QString msg = QString("确定要将剪贴板中的 %1 个项目分流导入并打包至该分类吗？").arg(fromPaths.size());
         if (FramelessMessageBox::question(this, "资产导入", msg)) {
@@ -2916,31 +2897,21 @@ void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& t
         
         MetadataManager::instance().setInternalOperating(true);
 
-        QString currentDir = m_currentPath;
-        QPointer<ContentPanel> weakThis(this);
-        // 拖放移动重构：由于 copyOrMoveItems 会卡住大分区拷贝，需扔入后台，并在结束时异步关闭抑制锁
-        (void)QtConcurrent::run([weakThis, paths, destDir, isMove, currentDir]() {
-            bool ok = ShellHelper::copyOrMoveItems(paths, destDir, isMove);
-            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, paths, destDir, isMove, currentDir, ok]() {
-                if (ok) {
-                    if (isMove) {
-                        for (const QString& src : paths) {
-                            QString destPath = QDir(destDir).absoluteFilePath(QFileInfo(src).fileName());
-                            // 🚨 [双轨不隔离违规点-4]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
-                            MetadataManager::instance().syncAfterMove(
-                                src.toStdWString(), destPath.toStdWString());
-                        }
-                        UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
-                    }
-                    if (weakThis && weakThis->m_currentPath == currentDir) {
-                        weakThis->loadDirectory(currentDir, weakThis->m_isRecursive);
-                    }
+        if (ShellHelper::copyOrMoveItems(paths, destDir, isMove)) {
+            if (isMove) {
+                for (const QString& src : paths) {
+                    QString destPath = QDir(destDir).absoluteFilePath(QFileInfo(src).fileName());
+                    // 🚨 [双轨不隔离违规点-4]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
+                    MetadataManager::instance().syncAfterMove(
+                        src.toStdWString(), destPath.toStdWString());
                 }
-                // 确保在 I/O 完全完成后延迟安全释放抑制锁，避免文件改变信号误触发
-                QTimer::singleShot(2000, []() {
-                    MetadataManager::instance().setInternalOperating(false);
-                });
-            }, Qt::QueuedConnection);
+                UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
+            }
+            loadDirectory(m_currentPath, m_isRecursive);
+        }
+
+        QTimer::singleShot(2000, []() {
+            MetadataManager::instance().setInternalOperating(false);
         });
     } else {
         // 优先尊重"拖拽到具体子分类节点上"这个更精确的用户意图

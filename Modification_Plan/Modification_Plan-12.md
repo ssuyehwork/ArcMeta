@@ -1,215 +1,167 @@
-# 磁盘模式重型物理 I/O 主线程阻塞缺陷异步化重构 —— Modification_Plan-12.md
+# 重构内存数据库模式唯一ID体系为 Base36 ID —— Modification_Plan-12.md
 
 > 状态：待批准执行（尚未获得用户"批准执行"指令）
 
 ## 1. 任务背景
-在 ArcMeta 双轨制架构中，“磁盘目录模式（DiskNav）”直接对本地文件系统进行物理操作。目前，该模式下的文件粘贴（`performPaste`）、拖放物理移动（`onPathsDropped`）以及物理删除/移至回收站（`ActionDelete`）均直接在 UI 主线程上同步调用了重型阻塞 I/O 函数（如系统函数 `SHFileOperationW` 和 `QFile::rename`）。当进行大文件或跨分区大目录的操作时，会导致主线程长时间完全冻结，界面白屏、无进度提示且点击无响应，造成严重的体验缺陷（对应用户原话：“卡死了看起来像没反应”）。
-
-为了彻底解决这一缺陷，本方案设计将上述重型物理操作异步移至后台线程（使用 `QtConcurrent::run`）执行，并使用 `QPointer` 弱引用与主线程事件循环同步通信更新 UI，同时确保操作期间对文件监控信号的抑制锁（`setInternalOperating`）安全管理。
+在目前的应用架构中，内存数据库模式使用 Windows 系统级的 `fileId128`（即物理 FRN / 文件引用号）作为资产的唯一身份标识。在跨分区物理移动、外接移动硬盘插拔、非 NTFS 分区（如 FAT32 / exFAT）、以及多机对账同步等复杂多场景下，物理 `fileId128` 极易由于操作系统的底层变动而产生断层或冲突，给数据的绝对留存带来隐患。
+为实现绝对持久且防飘移、系统级容灾的逻辑绑定，本方案将内存数据库模式的唯一 ID 体系从系统级 `fileId128` 全面替换为由 `ShellHelper::generateBase36Id()` 生成的 13 位 Base36 字符串（即受控容器的目录名，例如 `00ms73182x000`）。该改造仅影响内存数据库内部的身份标识机制，不改变磁盘模式的任何行为，确保磁盘模式 100% 的纯净性。
 
 ## 2. 问题定位
-通过代码审计，共定位出以下三处导致主线程 I/O 阻塞的模块与逻辑：
-1. **右键粘贴（`ContentPanel::performPaste`）**：在纯物理磁盘模式下，同步调用 `ShellHelper::copyOrMoveItems` 进行文件复制或剪切。若源文件包含数千小文件或在大体积文件跨磁盘分区拷贝时，主线程进入系统函数死等状态，造成主界面“未响应”。
-2. **拖放操作（`ContentPanel::onPathsDropped`）**：在纯物理磁盘模式下，拖拽松开时，同步调用 `ShellHelper::copyOrMoveItems` 阻塞 UI 主线程。
-3. **右键删除（`ContentPanel::onCustomContextMenuRequested` / `ActionDelete`）**：同步在主线程内调用 `ShellHelper::moveToTrash` 循环遍历文件进行 `QFile::rename` 物理移动以及同步数据库。对于多文件级联物理删除，易因磁盘高 I/O 延迟导致界面假死。
+经过全量代码库的深度排查与检索，定位出引用 `fileId128`/`fid` 作为内存数据库模式主键或关联键的所有具体关键位置如下：
+
+1. **`src/meta/MetadataManager.cpp`**
+   - **`MetadataManager::getFileIdSync(const std::wstring& path)`**：此函数用于在登记或建立分类关联时，实时获取特定路径的唯一关联 ID。在资产被包装至 `.arc`（如 `00ms73182x000.arc`）之后，此处应优先提取并返回 13 位 Base36 ID。
+   - **`MetadataManager::ensureActivated(const std::wstring& nPath)`**：用于将文件元数据激活并读入内存缓存 `m_cache`。在创建、导入、或首次对账载入缓存时，应当将对应的 `rm.fileId128` 优先设为 13 位 Base36 ID，使写盘和内存映射同步归一化为 Base36 ID。
+
+2. **`src/core/IndexedEntry.cpp`**
+   - **`ItemRecord::create(const QString& path, const RuntimeMeta* providedMeta)`**：在创建内容面板显示卡片对应的 `ItemRecord` 时，如果元数据缺失而触发了底层物理采样，其 `r.fileId` 应当优先使用 `getFileIdSync` 返回的 Base36 ID，确保前台 UI 渲染和逻辑与内存数据库完全接轨对齐。
 
 ## 3. 强制对照表
 
 | 编号 | 用户原话 / 我的理解 | 方案对应点 | 是否一致 |
 |------|---------------------|------------|----------|
-| 1    | 将缺陷直接修复吧（对应用户原话：“将缺陷直接修复吧”） | 4.1、4.2 节，提供 3 处主线程同步 I/O 阻塞调用转为后台异步线程的物理 Merge Diff 替换块 | ✅ |
-| 2    | 把 performPaste() 磁盘模式分支里对 ShellHelper::copyOrMoveItems 的调用，从主线程同步执行改成和其他耗时操作一致的后台线程执行，避免阻塞 UI（对应用户原话中的修改方向） | 4.1 节，使用 `QtConcurrent::run` 后台执行粘贴，并异步调用刷新 | ✅ |
-| 3    | 同步排查并修复拖拽移动与物理删除相同的同步阻塞缺陷（对应我的理解：拖拽和物理删除也是完全一致的同步主线程阻塞设计缺陷，需一并修复） | 4.1、4.2 节，对拖拽移动及 `moveToTrash` 删除流程同样实施异步多线程封装 | ✅ |
+| 1    | `category_items` 表：外键字段从 `fileId128` 改为 `00ms73182x000`（Base36 ID） | 4.1 节，改造 `getFileIdSync`，当路径属于受控包时，直接将关联表的外键写入为 Base36 ID | ✅ |
+| 2    | `RuntimeMeta`：主键字段从 `fileId128` 改为 `00ms73182x000` | 4.1 节，改造 `ensureActivated`，使写入 SQLite `metadata` 主表与内存 `m_cache` 的 `fileId128` 字段为 Base36 ID | ✅ |
+| 3    | `ItemRecord`：`fileId` 字段的取值来源从 `fileId128` 改为 `00ms73182x000` | 4.2 节，改造 `ItemRecord::create`，卡片的唯一标识绑定为通过 `getFileIdSync` 获取的 13 位 Base36 ID | ✅ |
+| 4    | 所有以 `fid`/`fileId128` 为 key 的关联表、内存缓存结构，统一改为以 `00ms73182x000` 作为 key | 4.1、4.2 节，底层关联和反查主键经由 getFileIdSync 和 ensureActivated 自动归一化为以 Base36 ID 为 key | ✅ |
+| 5    | ID 的生成时机：`00ms73182x000` 应在资产首次通过 `importSingleFile()` 打包生成 `.arc` 容器时确定一次，之后作为永久唯一 ID | 4.1 节，通过 extractBase36Id 算法，无论是该资产包文件夹自身还是包内原始文件，均能在首次导入后 100% 映射到相同的永久唯一 ID | ✅ |
+| 6    | 不涉及磁盘模式：磁盘模式不使用、也不需要知道这个 ID | 4.1 节，在 extractBase36Id 判定中，非 `.arc` 下的物理磁盘路径不返回 Base36 ID，完美自愈回退到原系统 FRN 逻辑，磁盘模式无任何影响 | ✅ |
 
 ## 4. 详细解决方案
-
 本部分由执行者 AI 角色直接读取，并严格、机械地按照给出的 Git merge diff 代码块进行物理替换，不得做任何自由发挥或脑补改动。
 
-### 4.1 异步化重构右键粘贴与拖放移动
+### 4.1 改造 `src/meta/MetadataManager.cpp` 以支持永久 Base36 ID 提取与映射
+在 `src/meta/MetadataManager.cpp` 中：
+- 注入静态辅助方法 `extractBase36Id`。
+- 修改 `getFileIdSync` 优先返回提取的 13 位 Base36 ID。
+- 修改 `ensureActivated` 在内存预热和缓存建立时，优先用 13 位 Base36 ID 作为 `fileId128` 主键标识。
 
 ```
 <<<<<<< SEARCH
-    if (dataSourceType() == DataSourceType::DiskNav) {
-        bool isMove = false;
-        if (mime->hasFormat("Preferred DropEffect")) {
-            QByteArray effect = mime->data("Preferred DropEffect");
-            if (!effect.isEmpty() && (effect.at(0) & 0x02)) isMove = true;
-        }
-
-        if (ShellHelper::copyOrMoveItems(fromPaths, m_currentPath, isMove)) {
-            if (isMove) {
-                for (const QString& src : fromPaths) {
-                    QString destPath = QDir(m_currentPath).absoluteFilePath(QFileInfo(src).fileName());
-                    // 🚨 [双轨不隔离违规点-5]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
-                    MetadataManager::instance().syncAfterMove(src.toStdWString(), destPath.toStdWString());
-                }
-                UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), m_currentPath));
-            }
-            loadDirectory(m_currentPath, m_isRecursive);
-        } else {
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "粘贴失败：文件写入操作未能完成", 2000, QColor("#e81123"));
-        }
-    } else {
+std::string MetadataManager::getFileIdSync(const std::wstring& path) {
+    std::string fid;
+    if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = MetadataManager::generateDeterministicSha256Id(path);
+    return fid;
+}
 =======
-    if (dataSourceType() == DataSourceType::DiskNav) {
-        bool isMove = false;
-        if (mime->hasFormat("Preferred DropEffect")) {
-            QByteArray effect = mime->data("Preferred DropEffect");
-            if (!effect.isEmpty() && (effect.at(0) & 0x02)) isMove = true;
-        }
+// 🚨 内存数据库模式唯一ID体系重构：路径级 Base36 ID 静态提取解析器
+static std::string extractBase36Id(const std::wstring& path) {
+    // 查找 ".arc" 容器扩展名在路径中的位置
+    size_t pos = path.find(L".arc");
+    if (pos == std::wstring::npos) return "";
 
-        QString destPath = m_currentPath;
-        QPointer<ContentPanel> weakThis(this);
-        // 将重型物理 I/O 抛入后台线程，避免阻塞主 UI 线程
-        (void)QtConcurrent::run([weakThis, fromPaths, destPath, isMove]() {
-            bool ok = ShellHelper::copyOrMoveItems(fromPaths, destPath, isMove);
-            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, fromPaths, destPath, isMove, ok]() {
-                if (!weakThis) return;
-                if (ok) {
-                    if (isMove) {
-                        for (const QString& src : fromPaths) {
-                            QString newPath = QDir(destPath).absoluteFilePath(QFileInfo(src).fileName());
-                            // 🚨 [双轨不隔离违规点-5]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
-                            MetadataManager::instance().syncAfterMove(src.toStdWString(), newPath.toStdWString());
-                        }
-                        UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), destPath));
-                    }
-                    if (weakThis->m_currentPath == destPath) {
-                        weakThis->loadDirectory(destPath, weakThis->m_isRecursive);
-                    }
-                } else {
-                    ToolTipOverlay::instance()->showText(QCursor::pos(), "粘贴失败：文件写入操作未能完成", 2000, QColor("#e81123"));
-                }
-            }, Qt::QueuedConnection);
-        });
-    } else {
+    // 向上查找紧邻 ".arc" 前方的路径分隔符以界定容器名称
+    size_t lastSep = path.rfind(L'\\', pos);
+    if (lastSep == std::wstring::npos) {
+        lastSep = path.rfind(L'/', pos);
+    }
+
+    size_t start = (lastSep == std::wstring::npos) ? 0 : lastSep + 1;
+    std::wstring folderName = path.substr(start, pos - start);
+
+    // 托管资产容器文件夹名格式恒为 13 位 Base36 字符串 (如 00ms73182x000)
+    if (folderName.length() == 13) {
+        return std::string(folderName.begin(), folderName.end());
+    }
+    return "";
+}
+
+std::string MetadataManager::getFileIdSync(const std::wstring& path) {
+    // 1. 如果处于受控托管库中，直接提取 13 位 Base36 ID，终结系统级 FRN 物理依赖
+    std::string base36 = extractBase36Id(path);
+    if (!base36.empty()) {
+        return base36;
+    }
+
+    // 2. 磁盘模式（非托管路径）不使用 Base36 ID，自愈退避至原本的系统级物理 FRN
+    std::string fid;
+    if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = MetadataManager::generateDeterministicSha256Id(path);
+    return fid;
+}
 >>>>>>> REPLACE
 ```
 
 ```
 <<<<<<< SEARCH
-        bool isMove = !(QApplication::keyboardModifiers() & Qt::ControlModifier);
+    if (success) {
+        // 3. 写锁写入缓存
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        if (m_cache.count(nPath)) return; // 二次检查防止竞态
 
-        MetadataManager::instance().setInternalOperating(true);
+        // 共享元数据逻辑 (FID 关联)
+        if (!rm.fileId128.empty() && m_fidToPath.count(rm.fileId128)) {
+=======
+    if (success) {
+        // 3. 写锁写入缓存
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        if (m_cache.count(nPath)) return; // 二次检查防止竞态
 
-        if (ShellHelper::copyOrMoveItems(paths, destDir, isMove)) {
-            if (isMove) {
-                for (const QString& src : paths) {
-                    QString destPath = QDir(destDir).absoluteFilePath(QFileInfo(src).fileName());
-                    // 🚨 [双轨不隔离违规点-4]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
-                    MetadataManager::instance().syncAfterMove(
-                        src.toStdWString(), destPath.toStdWString());
-                }
-                UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
-            }
-            loadDirectory(m_currentPath, m_isRecursive);
+        // 🚨 内存数据库模式唯一ID体系重构：激活写入内存缓存前，将主键统一覆盖为 13 位 Base36 ID
+        std::string base36 = extractBase36Id(nPath);
+        if (!base36.empty()) {
+            rm.fileId128 = base36;
         }
 
-        QTimer::singleShot(2000, []() {
-            MetadataManager::instance().setInternalOperating(false);
-        });
-=======
-        bool isMove = !(QApplication::keyboardModifiers() & Qt::ControlModifier);
-
-        MetadataManager::instance().setInternalOperating(true);
-
-        QString currentDir = m_currentPath;
-        QPointer<ContentPanel> weakThis(this);
-        // 拖放移动重构：由于 copyOrMoveItems 会卡住大分区拷贝，需扔入后台，并在结束时异步关闭抑制锁
-        (void)QtConcurrent::run([weakThis, paths, destDir, isMove, currentDir]() {
-            bool ok = ShellHelper::copyOrMoveItems(paths, destDir, isMove);
-            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, paths, destDir, isMove, currentDir, ok]() {
-                if (ok) {
-                    if (isMove) {
-                        for (const QString& src : paths) {
-                            QString destPath = QDir(destDir).absoluteFilePath(QFileInfo(src).fileName());
-                            // 🚨 [双轨不隔离违规点-4]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
-                            MetadataManager::instance().syncAfterMove(
-                                src.toStdWString(), destPath.toStdWString());
-                        }
-                        UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
-                    }
-                    if (weakThis && weakThis->m_currentPath == currentDir) {
-                        weakThis->loadDirectory(currentDir, weakThis->m_isRecursive);
-                    }
-                }
-                // 确保在 I/O 完全完成后延迟安全释放抑制锁，避免文件改变信号误触发
-                QTimer::singleShot(2000, []() {
-                    MetadataManager::instance().setInternalOperating(false);
-                });
-            }, Qt::QueuedConnection);
-        });
+        // 共享元数据逻辑 (FID 关联)
+        if (!rm.fileId128.empty() && m_fidToPath.count(rm.fileId128)) {
 >>>>>>> REPLACE
 ```
 
-### 4.2 异步化重构右键删除
+### 4.2 改造 `src/core/IndexedEntry.cpp` 以对齐 ItemRecord 卡片 ID 的提取来源
+在 `src/core/IndexedEntry.cpp` 中，修改 `ItemRecord::create` 中缺少缓存触发底层采样时的 ID 提取方式，改由 `getFileIdSync` 统一输出，以确保非 NTFS 或首次加载时卡片 ID 自动收拢到 Base36 ID。
 
 ```
 <<<<<<< SEARCH
-            if (action == ActionDelete) {
-                // 1. 开启内部操作锁，彻底抑制 NativeFolderWatcher 的二次干扰信号
-                MetadataManager::instance().setInternalOperating(true);
-
-                if (ShellHelper::moveToTrash(targetPaths)) {
-                    // 2. 修正：调用 refreshAll() 自适应协议与物理路径刷新，绝不调 loadDirectory！
-                    refreshAll();
-                }
-
-                // 2000ms 后平滑释放抑制锁
-                QTimer::singleShot(2000, []() {
-                    MetadataManager::instance().setInternalOperating(false);
-                });
-            } else {
+    // Plan-124: 只有在内存缓存缺失物理时间戳时，才触发 fetchWinApiMetadataDirect
+    if (meta.fileId128.empty() || (meta.ctime == 0 && meta.mtime == 0)) {
+        std::string fid;
+        long long size = 0, ctime = 0, mtime = 0, atime = 0;
+        MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
+        r.size = size;
+        r.ctime = ctime;
+        r.mtime = mtime;
+        r.atime = atime;
+        r.fileId = fid;
+        r.isDir = QFileInfo(nPath).isDir();
+    } else {
 =======
-            if (action == ActionDelete) {
-                // 1. 开启内部操作锁，彻底抑制 NativeFolderWatcher 的二次干扰信号
-                MetadataManager::instance().setInternalOperating(true);
+    // Plan-124: 只有在内存缓存缺失物理时间戳时，才触发 fetchWinApiMetadataDirect
+    if (meta.fileId128.empty() || (meta.ctime == 0 && meta.mtime == 0)) {
+        std::string fid;
+        long long size = 0, ctime = 0, mtime = 0, atime = 0;
+        MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
+        r.size = size;
+        r.ctime = ctime;
+        r.mtime = mtime;
+        r.atime = atime;
 
-                QPointer<ContentPanel> weakThis(this);
-                // 异步化删除：将大量的 QFile::rename 及回收站数据库逻辑移至后台线程，解决大目录物理删除阻塞主线程问题
-                (void)QtConcurrent::run([weakThis, targetPaths]() {
-                    bool ok = ShellHelper::moveToTrash(targetPaths);
-                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, ok]() {
-                        if (weakThis) {
-                            if (ok) {
-                                // 2. 修正：调用 refreshAll() 自适应协议与物理路径刷新，绝不调 loadDirectory！
-                                weakThis->refreshAll();
-                            }
-                        }
-                        // 2000ms 后平滑释放抑制锁，保证在后台物理操作在系统底层更新后信号稳定
-                        QTimer::singleShot(2000, []() {
-                            MetadataManager::instance().setInternalOperating(false);
-                        });
-                    }, Qt::QueuedConnection);
-                });
-            } else {
+        // 🚨 内存数据库模式唯一ID体系重构：调用 getFileIdSync 优先解析和提取 Base36 ID
+        r.fileId = QString::fromStdString(MetadataManager::instance().getFileIdSync(wPath));
+
+        r.isDir = QFileInfo(nPath).isDir();
+    } else {
 >>>>>>> REPLACE
 ```
 
 ## 5. 修改边界声明【范围】
 
 **本次方案涉及范围：**
-- [ ] `src/ui/ContentPanel.cpp` (重构 `performPaste`, `onPathsDropped` 拖放以及右键菜单 `ActionDelete` 的异步分流，引入 `QtConcurrent` 和弱引用保护)
+- [ ] `src/meta/MetadataManager.cpp`（实现 Base36 路径提取算法，重写 getFileIdSync 与 ensureActivated）
+- [ ] `src/core/IndexedEntry.cpp`（物理同步卡片物理采样时 fileId 为 Base36 ID）
 
 **明确禁止越界修改的范围：**
-- [ ] `src/util/ShellHelper.cpp` （只进行物理调用，不改变其原本底层同步系统方法逻辑）
-- [ ] 托管库导入打包流程相关类（不改动其已经异步化的 `AssetImporter`）
+- [ ] `src/meta/DatabaseManager.cpp` 基础数据库建表结构与字段名称——不修改，直接兼容 `TEXT PRIMARY KEY` 写入。
+- [ ] `src/util/AssetImporter.cpp` 中由 `importSingleFile` 生成 `.arc` 容器名（原本即为 13 位 Base36 ID）——不修改，只对其在写入数据库时的关联 ID 解析。
 
 ## 6. 实现准则与预警【核心】
-
-1. **多线程并发安全性与悬空弱引用保护**：
-   * 在使用 `QtConcurrent::run` 传递 `this` 指针时，必须使用 `QPointer<ContentPanel>` 作为弱引用并在主线程事件循环回调中先行研判 `if (!weakThis) return;`，防止在长时间物理拷贝期间用户关闭或退出了页面导致的内存野指针崩溃。
-2. **`QtConcurrent` 的头文件依赖**：
-   * `ContentPanel.cpp` 已在使用 `QtConcurrent::run`，但仍需确保头文件 `#include <QtConcurrent/QtConcurrent>` 在编译时的可靠性。
-3. **文件监控锁延迟安全管理**：
-   * 将 `MetadataManager::instance().setInternalOperating(false);` 的平滑释放全部移至异步操作回调成功返回的主线程 Queued 回调最后（2 秒延迟），绝不可在启动后台线程后便立即释放，否则在后台 I/O 运行期间，外界系统的 `NativeFolderWatcher` 仍然会疯狂向主线程推送多余的文件更改信号。
+1. **防空指针崩溃**：在提取 Base36 ID 时，必须通过精确的 `.arc` 定位 and 13 字符长度检验，杜绝因对非托管大文件名误删导致 ID 错配。
+2. **磁盘模式 100% 纯净**：非受控盘符路径（不含 `.arc`）直接由 `extractBase36Id` 拦截，确保磁盘模式无感退避原物理 FRN 机制。
 
 ## 7. Memories.md 合规检查
 
 | 组件 / 模式 | Memories.md 规范要求（写具体内容，不写引用） | 本方案是否符合 |
 |-------------|----------------------|----------------|
-| 双轨制路由分流 | 数据流绝对不交叉。托管库仅改写 SQLite 映射字段，磁盘模式进行物理处理并同步缓存，各轨道独立运行。 | ✅ 符合。本方案重构保持了两轨的绝对物理隔离纯净性，且让重型物理 I/O 在各自独立的后台分流中高内聚且流畅地运行。 |
-| UI 线程无阻塞保护 | 重型磁盘 I/O、复杂的级联删除与同步不应直接占用 GUI 主线程，必须一律异步化，在操作期间提供平稳的锁屏或静默处理。 | ✅ 符合。本重构精准地将拖拽、粘贴和级联移入回收站三大主线程同步痛点彻底移至后台，杜绝了无响应缺陷。 |
+| 双轨制路由分流 | 各自独立，内存数据库模式解析容器，磁盘模式不做特殊翻译不污染文件 | ✅ 符合。本重构直接让内存数据库全面摆脱对 Windows 磁盘底层物理 FRN 的依赖，达成内存模式纯净运行。 |
 
 ## 8. 待确认事项（可选）
 - **无**。
