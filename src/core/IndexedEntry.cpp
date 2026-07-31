@@ -54,9 +54,9 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         // 🚨 内存数据库模式唯一ID体系重构：优先解析和提取 Base36 ID，如果是磁盘普通路径，则复用本轮采样已取得的 fid，彻底消除双重 I/O 冗余
         size_t pos = wPath.find(L".arc");
         if (pos != std::wstring::npos) {
-            r.fileId = QString::fromStdString(MetadataManager::instance().getFileIdSync(wPath));
+            r.fileId = MetadataManager::instance().getFileIdSync(wPath);
         } else {
-            r.fileId = QString::fromStdString(fid);
+            r.fileId = fid;
         }
 
         r.isDir = QFileInfo(nPath).isDir();
