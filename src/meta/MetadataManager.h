@@ -86,6 +86,7 @@ public:
     static std::string generateDeterministicSha256Id(const std::wstring& path);
     static std::wstring generateDeterministicFrn(const std::wstring& path);
     static std::wstring normalizePath(const std::wstring& path);
+    static bool isCountableAsset(const std::wstring& path, bool isFolder);
     
     void initFromScchMode();
     RuntimeMeta getMeta(const std::wstring& path);
