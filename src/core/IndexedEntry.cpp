@@ -33,6 +33,7 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
     QString nPath = QString::fromStdWString(wPath);
 
     // 1. 物理属性采样 (零 I/O 核心)
+    // 🚨 [双轨不隔离违规点-1] : 磁盘导航模式下通过 MetadataManager::getMeta 直接读取了托管库 SQLite 数据库
     RuntimeMeta meta;
     if (providedMeta) {
         meta = *providedMeta;
