@@ -120,14 +120,17 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     QString fileName = srcInfo.fileName();
     QString destPath = containerDir + "/" + fileName;
 
-    // 修改为安全复制流程：粘贴/导入操作统一改为纯粹的安全复制，不强制删除源文件，确保资产包物理文件绝不被错误删除
+    // 🚨 导入剪切流程自适应整构：根据源与目标是否在同盘，实施高效且合理的逻辑分流
+    QString srcDrive = QFileInfo(srcPath).absolutePath().left(3);
+    QString destDrive = QFileInfo(destPath).absolutePath().left(3);
+
     bool copied = false;
-    if (QFile::copy(srcPath, destPath)) {
-        copied = true;
+    if (srcDrive.compare(destDrive, Qt::CaseInsensitive) == 0) {
+        // 同盘：直接 rename 指针原子重定向，耗时仅 1ms，源文件原地自然消失
+        copied = QFile::rename(srcPath, destPath);
     } else {
-        if (QFile::rename(srcPath, destPath)) {
-            copied = true;
-        }
+        // 跨盘：rename 在跨物理卷时必然失败，fallback 退化为物理数据复制搬运
+        copied = QFile::copy(srcPath, destPath);
     }
 
     if (!copied) {
