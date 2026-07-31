@@ -581,14 +581,10 @@ void FilterPanel::rebuildDateCheckboxes(bool isCreateDate, bool descending) {
     QVBoxLayout* layout = isCreateDate ? m_createDateLayout : m_modifyDateLayout;
     if (!layout) return;
 
-    // 清除现有的复选框行 (保留 QLineEdit，并在删除前显式立刻隐藏并解除父子绑定，杜绝渲染重影)
+    // 清除现有的复选框行 (保留 QLineEdit)
     while (layout->count() > 1) {
         QLayoutItem* item = layout->takeAt(1);
-        if (item->widget()) {
-            item->widget()->hide();
-            item->widget()->setParent(nullptr);
-            item->widget()->deleteLater();
-        }
+        if (item->widget()) item->widget()->deleteLater();
         delete item;
     }
 
@@ -631,14 +627,10 @@ void FilterPanel::rebuildGroups() {
     m_accuracySlider = nullptr;
     m_areaSlider = nullptr;
 
-    // 清空旧内容（保留末尾 stretch，并在删除前显式立刻隐藏和解除父子绑定，杜绝渲染重影）
+    // 清空旧内容（保留末尾 stretch）
     while (m_containerLayout->count() > 1) {
         QLayoutItem* item = m_containerLayout->takeAt(0);
-        if (item->widget()) {
-            item->widget()->hide();
-            item->widget()->setParent(nullptr);
-            item->widget()->deleteLater();
-        }
+        if (item->widget()) item->widget()->deleteLater();
         delete item;
     }
 
