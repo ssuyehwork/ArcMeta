@@ -7,6 +7,7 @@
 #include "../meta/CategoryRepo.h"
 #include "../meta/DatabaseManager.h"
 #include "../ui/WindowsShellThumbnailProvider.h"
+#include "../ui/MediaColorExtractor.h"
 #include <QDir>
 #include <QFileInfo>
 #include <QtConcurrent>
@@ -135,7 +136,8 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     }
 
     // 4. 提取 256x256 高清预渲染缩略图 [baseName]_thumbnail.png
-    QImage thumb = WindowsShellThumbnailProvider::getShellThumbnail(destPath, 256);
+    // 🚨 极致自包含整构：选用直接字节解码提取器，彻底解除对 Windows Shell 命名空间异步索引的时序依赖
+    QImage thumb = MediaColorExtractor::getImageForAnalysis(destPath, 256);
     if (!thumb.isNull()) {
         QString baseName = QFileInfo(fileName).completeBaseName();
         thumb.save(containerDir + "/" + baseName + "_thumbnail.png", "PNG");
