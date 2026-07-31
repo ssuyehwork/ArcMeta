@@ -1367,15 +1367,8 @@ static void scanPhysicalDirectory(const QString& currentPath, ScanNode& node) {
         if (fi.isDir()) {
             // 🚨 核心物理防线：如果该目录是以 .arc 结尾的资产包容器，绝对禁止作为子分类（node.children）添加！
             if (fi.fileName().endsWith(".arc", Qt::CaseInsensitive)) {
-                // 直接扫描 .arc 内部的真实物理文件，将其作为文件塞入 node.files
-                QDir arcDir(fi.absoluteFilePath());
-                QFileInfoList arcFiles = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-                for (const QFileInfo& afi : arcFiles) {
-                    QString fn = afi.fileName();
-                    if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
-                    if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
-                    node.files.push_back(QDir::toNativeSeparators(afi.absoluteFilePath()).toStdWString());
-                }
+                // 🚨 归一化重构：将 .arc 容器本身作为单一受控资产塞入 node.files，绝不扫描其包内碎片文件！
+                node.files.push_back(wPath);
                 continue; // 彻底跳过将 .arc 自身创建为分类！
             }
 
