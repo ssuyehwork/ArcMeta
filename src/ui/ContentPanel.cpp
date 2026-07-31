@@ -259,6 +259,11 @@ QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
             }
             return false; // 尚未加载完成或提取失败，走 defaultIcon 干净绘制，避免拉伸和虚假边框
         }
+        // .arc 资产包容器：以宽高比缓存是否已命中为准，加载完成前返回 false，避免虚假边框
+        if (record.isDir && path.endsWith(".arc", Qt::CaseInsensitive)) {
+            QString nativePath = QDir::toNativeSeparators(path);
+            return m_aspectRatios.contains(nativePath) && m_aspectRatios.value(nativePath) > 0.0;
+        }
         if (UiHelper::isGraphicsFile(record.suffix)) return true;
         if (record.width > 0 && record.height > 0) return true;
         return m_aspectRatios.contains(QDir::toNativeSeparators(path)) && m_aspectRatios.value(QDir::toNativeSeparators(path)) > 0.0;
@@ -272,8 +277,11 @@ QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
         QString ext = info.suffix().toLower();
         bool isGraphic = UiHelper::isGraphicsFile(ext) || ext == "svg";
         
+        // .arc 资产包容器：包内存在 _thumbnail.png，视同图形文件，等待异步加载时返回空图标占位
+        bool isArcContainer = (ext == "arc" && info.isDir());
+
         // 2026-11-14 执行第二步：图形文件等待缩略图时返回空图标，由 Delegate 绘制占位背景，消除抖动
-        if (isGraphic) return QIcon(); 
+        if (isGraphic || isArcContainer) return QIcon();
         return UiHelper::getFileIcon(path, 128); // 非图形文件直接显示系统图标
     }
 
@@ -642,7 +650,8 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
         
         // 核心排重与同步机制纠偏：对于图形格式文件，即使 icon 缓存命中，若宽高比缓存丢失，依然必须拉起加载以补全尺寸
         bool needLoad = !m_iconCache.contains(cacheKey);
-        if (UiHelper::isGraphicsFile(rec.suffix) && !m_aspectRatios.contains(QDir::toNativeSeparators(path))) {
+        bool isArcContainer = rec.isDir && rec.path.endsWith(".arc", Qt::CaseInsensitive);
+        if ((UiHelper::isGraphicsFile(rec.suffix) || isArcContainer) && !m_aspectRatios.contains(QDir::toNativeSeparators(path))) {
             needLoad = true;
         }
         if (!needLoad) continue;
@@ -718,6 +727,18 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                         // 图标类文件固定视为 1:1，避免因 hasThumb 恒为 false 导致宽高比永远未写入、每次都被判定为 needLoad
                         ar = 1.0;
                         hasThumb = false;
+                    } else if (ext == "arc" && info.isDir()) {
+                        // .arc 资产包容器：穿透进包内，寻找 *_thumbnail.png 作为缩略图
+                        QDir arcDir(path);
+                        QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
+                        if (!thumbFiles.isEmpty()) {
+                            QString thumbPath = path + "/" + thumbFiles.first();
+                            img = QImage(thumbPath);
+                            if (!img.isNull()) {
+                                ar = (double)img.width() / img.height();
+                                hasThumb = true;
+                            }
+                        }
                     }
 
                     if (weakThis) {
