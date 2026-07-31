@@ -88,6 +88,10 @@ std::wstring MetadataManager::normalizePath(const std::wstring& path) {
 }
 
 bool MetadataManager::isCountableAsset(const std::wstring& path, bool isFolder) {
+    // 🚨 屏蔽包内碎片文件：如果路径包含 .arc\ 或 .arc/，说明是资产包内部的碎片文件，绝不属于独立可计数资产
+    if (path.find(L".arc\\") != std::wstring::npos || path.find(L".arc/") != std::wstring::npos) {
+        return false;
+    }
     if (!isFolder) return true;
     return (path.size() >= 4 && path.compare(path.size() - 4, 4, L".arc") == 0);
 }

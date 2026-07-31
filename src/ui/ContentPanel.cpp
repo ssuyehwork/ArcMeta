@@ -536,6 +536,12 @@ void ArcMetaVirtualDbModel::updateRecordMetadata(const QString& path) {
             ItemRecord::fromMetadata(m_allRecords[i], meta);
             
             m_metaCache.remove(nPath);
+            // 🚨 清除该路径下的缩略图图标缓存和宽高比，迫使其重新异步加载最新生成的 _thumbnail.png
+            m_iconCache.remove(nPath);
+            m_iconCache.remove(path);
+            m_aspectRatios.remove(QDir::toNativeSeparators(path));
+            m_aspectRatios.remove(path);
+
             QModelIndex left = index(i, 0);
             QModelIndex right = index(i, columnCount() - 1);
             emit dataChanged(left, right);
