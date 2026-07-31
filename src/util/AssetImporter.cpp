@@ -162,9 +162,21 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     std::string actualContainerFid = MetadataManager::instance().getFileIdSync(wContainerPath);
 
     // 6. 分类归纳
-    // 如果 targetCatId > 0，绑定它
-    if (targetCatId > 0 && !actualContainerFid.empty()) {
-        CategoryRepo::addItemToCategory(targetCatId, actualContainerFid, wContainerPath);
+    // 🚨 归一化绑定：若未指定子分类(targetCatId<=0)，自动绑定至当前盘符托管库根分类(如 ArcMeta.Library_G)
+    int finalCatId = targetCatId;
+    if (finalCatId <= 0) {
+        QString driveLetter = QFileInfo(destPath).absolutePath().left(1).toUpper();
+        QString libCatName = "ArcMeta.Library_" + driveLetter;
+        auto allCats = CategoryRepo::getAll();
+        for (const auto& cat : allCats) {
+            if (cat.parentId == 0 && QString::fromStdWString(cat.name).compare(libCatName, Qt::CaseInsensitive) == 0) {
+                finalCatId = cat.id;
+                break;
+            }
+        }
+    }
+    if (finalCatId > 0 && !actualContainerFid.empty()) {
+        CategoryRepo::addItemToCategory(finalCatId, actualContainerFid, wContainerPath);
     }
 
     return true;
