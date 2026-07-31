@@ -762,7 +762,9 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         }
 
         m_cache[nPath] = rm;
-        if (!rm.isFolder) {
+        // 🚨 资产判定重构：.arc 容器在物理上虽然 isFolder 为真，但在托管库语义中代表一个资产单元，必须作为资产进行计数
+        bool countsAsAsset = !rm.isFolder || (nPath.size() >= 4 && nPath.substr(nPath.size() - 4) == L".arc");
+        if (countsAsAsset) {
             CategoryRepo::s_totalCount.fetch_add(1);
             if (rm.tags.isEmpty()) {
                 CategoryRepo::s_untaggedCount.fetch_add(1);

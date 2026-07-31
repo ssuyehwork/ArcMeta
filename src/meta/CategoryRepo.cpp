@@ -837,9 +837,11 @@ std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
     std::map<int, std::unordered_set<std::string>> catToUniqueFids;
     // 3. 遍历内存缓存，按 FID 去重并分发到各分类桶
     // 2026-07-xx 回滚：仅计算直接关联的 FID，取消自动向上递归汇总
-    MetadataManager::instance().forEachCachedItem([&](const std::wstring&, const RuntimeMeta& meta) {
-        // 2026-07-xx 物理对齐：只要在关联表中且非文件夹/回收站，即计入分类总数
-        if (!meta.fileId128.empty() && !meta.isFolder && !meta.isTrash) {
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
+        // 🚨 资产分类计数重构：只要在关联表中、非回收站、且非普通文件夹（保留 .arc 容器作为资产），即计入分类总数
+        bool isArc = (path.size() >= 4 && path.substr(path.size() - 4) == L".arc");
+        bool countsAsAsset = !meta.isFolder || isArc;
+        if (!meta.fileId128.empty() && countsAsAsset && !meta.isTrash) {
             auto it = fidToCats.find(meta.fileId128);
             if (it != fidToCats.end()) {
                 for (int catId : it->second) {
@@ -1055,7 +1057,9 @@ void CategoryRepo::fullRecount() {
     auto snapshot = MetadataManager::instance().getLightweightCacheSnapshot();
     for (const auto& meta : snapshot) {
         if (meta.fileId128.empty()) continue;
-        if (meta.isFolder) continue;
+
+        bool isArc = (meta.path.size() >= 4 && meta.path.substr(meta.path.size() - 4) == L".arc");
+        if (meta.isFolder && !isArc) continue;
 
         // 🚨 核心物理防火墙：如果是普通的磁盘导航模式下激活的库外普通项目，绝对禁止其污染侧边栏计数！
         // 各自执行各自的逻辑，两者相互不产生任何关联。
@@ -1308,8 +1312,9 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
 
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
-        // 核心红线：彻底排除文件夹
-        if (meta.isFolder) return;
+        // 🚨 界面展现加载重构：普通物理文件夹予以排除，而 .arc 受控容器文件夹作为资产正常加载展现
+        bool isArc = (path.size() >= 4 && path.substr(path.size() - 4) == L".arc");
+        if (meta.isFolder && !isArc) return;
         
         bool match = false;
         std::wstring finalPath = path;
