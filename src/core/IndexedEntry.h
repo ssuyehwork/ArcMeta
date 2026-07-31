@@ -45,6 +45,7 @@ struct ItemRecord {
     bool isManaged = false; // 预存受控状态
     QString suffix;
     QString filename; // 缓存文件名以供排序时 O(1) 提取，消除高频 QFileInfo 构造开销
+    QString mainFilePath; // 包内主素材真实路径 (用于精确定位 Shell 文件图标)
     std::vector<std::pair<QColor, float>> palettes; // 烘焙物理色板，消除 filterAcceptsRow 锁争抢
 
     static ItemRecord create(const QString& path, const struct RuntimeMeta* providedMeta = nullptr);

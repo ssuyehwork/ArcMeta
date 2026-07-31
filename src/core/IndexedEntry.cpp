@@ -76,7 +76,7 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         r.filename = (lastSlash != -1) ? nPath.mid(lastSlash + 1) : nPath;
     }
 
-    // 🚨 内存数据库模式资产解包重构：若为 .arc 容器，解包提取包内主素材文件的真实名称与类型
+    // 🚨 统一内存解包接口：若为 .arc 资产包容器，解包提取包内主素材名称、扩展名及主文件真实物理路径
     if (r.isDir && nPath.endsWith(".arc", Qt::CaseInsensitive)) {
         QDir arcDir(nPath);
         QFileInfoList files = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
@@ -84,9 +84,9 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
             QString fn = fi.fileName();
             if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
             if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
-            // 找到物理主素材
             r.filename = fi.fileName();
             r.suffix = fi.suffix().toLower();
+            r.mainFilePath = QDir::toNativeSeparators(fi.absoluteFilePath());
             break;
         }
     }

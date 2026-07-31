@@ -761,7 +761,15 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             if (!img.isNull()) {
                                 icon = QIcon(QPixmap::fromImage(img));
                             } else {
-                                icon = UiHelper::getFileIcon(path, 128);
+                                // 🚨 统一图标提取解耦：若是 .arc 容器，优先使用解包出来的 mainFilePath 申请原生文件图标，严禁使用 .arc 目录路径
+                                QString iconTarget = path;
+                                for (int i = 0; i < mutableThis->m_displayCount; ++i) {
+                                    if (mutableThis->m_allRecords[i].path == path && !mutableThis->m_allRecords[i].mainFilePath.isEmpty()) {
+                                        iconTarget = mutableThis->m_allRecords[i].mainFilePath;
+                                        break;
+                                    }
+                                }
+                                icon = UiHelper::getFileIcon(iconTarget, 128);
                             }
                             
                             mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
