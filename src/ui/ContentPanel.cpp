@@ -2380,7 +2380,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     std::wstring wPath = itemPath.toStdWString();
 
                     // 2026-06-xx 物理同步：基于同步获取的 File ID 进行归类，解决新文件关联失败冲突。 
-                    std::string fid = MetadataManager::instance().getFileIdSync(wPath); 
+                    std::string fid = MetadataManager::instance().getFolderIdSync(wPath);
                     if (!fid.empty()) { 
                         // 2026-06-xx 按照用户需求：如果在系统层选择了“未分类”，则清除该项所有其他分类关联
                         if (catId == -2) { // 未分类的负数 ID
@@ -2563,7 +2563,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                             MetadataManager::instance().markAsTrash(dest.toStdWString(), false);
 
                             // 🚨 按照要求：还原后一律归入"未分类"，不恢复删除前的任何分类关联
-                            std::string fid = MetadataManager::instance().getFileIdSync(dest.toStdWString());
+                            std::string fid = MetadataManager::instance().getFolderIdSync(dest.toStdWString());
                             if (!fid.empty()) {
                                 CategoryRepo::removeAllCategories(fid);
                             }
@@ -3271,7 +3271,7 @@ void ContentPanel::loadCategory(int categoryId) {
         allRecords.reserve(allRecords.size() + items.size());
         for (const auto& item : items) {
             if (!weakThis) return;
-            std::wstring wPath = MetadataManager::instance().getPathByFid(item.folderId);
+            std::wstring wPath = MetadataManager::instance().getPathByFolderId(item.folderId);
             if (wPath.empty() && !item.pathHint.empty()) {
                 wPath = item.pathHint; 
             }

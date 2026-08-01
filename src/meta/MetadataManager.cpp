@@ -87,7 +87,7 @@ std::wstring MetadataManager::normalizePath(const std::wstring& path) {
     return qp.toStdWString();
 }
 
-std::string MetadataManager::generateFallbackFid(const std::wstring& vol, const std::wstring& frn) {
+std::string MetadataManager::generateFallbackFolderId(const std::wstring& vol, const std::wstring& frn) {
     if (vol.empty() || frn.empty()) return "";
     std::string result = "FRN:";
     result.append(QString::fromStdWString(vol).toUpper().toStdString());
@@ -96,7 +96,7 @@ std::string MetadataManager::generateFallbackFid(const std::wstring& vol, const 
     return result;
 }
 
-std::string MetadataManager::generateDeterministicSha256Id(const std::wstring& path) {
+std::string MetadataManager::generateDeterministicFolderId(const std::wstring& path) {
     if (path.empty()) return "";
     std::wstring nPath = MetadataManager::normalizePath(path);
     std::wstring vol = MetadataManager::getVolumeSerialNumber(nPath);
@@ -324,7 +324,7 @@ void MetadataManager::initFromScchMode() {
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache = tempCache;
-        m_fidToPath = tempFidToPath;
+        m_folderIdToPath = tempFidToPath;
         m_parentToChildren = tempParentToChildren;
         m_folderProgressCache = tempFolderProgressCache;
 
@@ -339,13 +339,13 @@ void MetadataManager::initFromScchMode() {
             const RuntimeMeta& meta = pair.second;
             if (!meta.baseName.empty()) {
                 if (meta.isFolder) {
-                    auto& v = m_folderNameToFids[meta.baseName];
+                    auto& v = m_subFolderNameToFolderIds[meta.baseName];
                     if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
                 } else {
-                    auto& v = m_fileNameToFids[meta.baseName];
+                    auto& v = m_assetNameToFolderIds[meta.baseName];
                     if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
                     if (!meta.ext.empty()) {
-                        auto& ve = m_extensionToFids[meta.ext];
+                        auto& ve = m_extensionToFolderIds[meta.ext];
                         if (std::find(ve.begin(), ve.end(), meta.folderId) == ve.end()) ve.push_back(meta.folderId);
                     }
                 }
@@ -698,11 +698,11 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     return RuntimeMeta();
 }
 
-std::wstring MetadataManager::getPathByFid(const std::string& fid) {
+std::wstring MetadataManager::getPathByFolderId(const std::string& fid) {
     if (fid.empty()) return L"";
     std::shared_lock<std::shared_mutex> lock(m_mutex);
-    auto it = m_fidToPath.find(fid);
-    return (it != m_fidToPath.end()) ? it->second : L"";
+    auto it = m_folderIdToPath.find(fid);
+    return (it != m_folderIdToPath.end()) ? it->second : L"";
 }
 
 void MetadataManager::ensureActivated(const std::wstring& nPath) {
@@ -728,7 +728,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             rm.ctime = qinfo.birthTime().toMSecsSinceEpoch();
             rm.mtime = qinfo.lastModified().toMSecsSinceEpoch();
             rm.atime = qinfo.lastRead().toMSecsSinceEpoch();
-            rm.folderId = generateDeterministicSha256Id(nPath);
+            rm.folderId = generateDeterministicFolderId(nPath);
             success = true;
         }
     } else {
@@ -747,8 +747,8 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         }
 
         // 共享元数据逻辑 (FID 关联)
-        if (!rm.folderId.empty() && m_fidToPath.count(rm.folderId)) {
-            const RuntimeMeta& existing = m_cache[m_fidToPath[rm.folderId]];
+        if (!rm.folderId.empty() && m_folderIdToPath.count(rm.folderId)) {
+            const RuntimeMeta& existing = m_cache[m_folderIdToPath[rm.folderId]];
             rm.rating    = existing.rating;
             rm.manualColor = existing.manualColor;
             rm.autoColor = existing.autoColor;
@@ -780,7 +780,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             }
         }
         if (!rm.folderId.empty()) {
-            m_fidToPath[rm.folderId] = nPath;
+            m_folderIdToPath[rm.folderId] = nPath;
 
             // Plan-124: 维护树级索引
             std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nPath)).absolutePath()).toStdWString();
@@ -797,13 +797,13 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             parsePathComponents(nPath, rm.isFolder, name, ext);
             if (!name.empty()) {
                 if (rm.isFolder) {
-                    auto& v = m_folderNameToFids[name];
+                    auto& v = m_subFolderNameToFolderIds[name];
                     if (std::find(v.begin(), v.end(), rm.folderId) == v.end()) v.push_back(rm.folderId);
                 } else {
-                    auto& v = m_fileNameToFids[name];
+                    auto& v = m_assetNameToFolderIds[name];
                     if (std::find(v.begin(), v.end(), rm.folderId) == v.end()) v.push_back(rm.folderId);
                     if (!ext.empty()) {
-                        auto& ve = m_extensionToFids[ext];
+                        auto& ve = m_extensionToFolderIds[ext];
                         if (std::find(ve.begin(), ve.end(), rm.folderId) == ve.end()) ve.push_back(rm.folderId);
                     }
                 }
@@ -1207,17 +1207,17 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 parsePathComponents(curOld, isFolder, oldName, oldExt);
                 if (!oldName.empty()) {
                     if (isFolder) {
-                        auto& v = m_folderNameToFids[oldName];
+                        auto& v = m_subFolderNameToFolderIds[oldName];
                         v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                        if (v.empty()) m_folderNameToFids.erase(oldName);
+                        if (v.empty()) m_subFolderNameToFolderIds.erase(oldName);
                     } else {
-                        auto& v = m_fileNameToFids[oldName];
+                        auto& v = m_assetNameToFolderIds[oldName];
                         v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                        if (v.empty()) m_fileNameToFids.erase(oldName);
+                        if (v.empty()) m_assetNameToFolderIds.erase(oldName);
                         if (!oldExt.empty()) {
-                            auto& ve = m_extensionToFids[oldExt];
+                            auto& ve = m_extensionToFolderIds[oldExt];
                             ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                            if (ve.empty()) m_extensionToFids.erase(oldExt);
+                            if (ve.empty()) m_extensionToFolderIds.erase(oldExt);
                         }
                     }
                 }
@@ -1231,20 +1231,20 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 RuntimeMeta meta = it->second;
                 m_cache.erase(it);
                 m_cache[curNew] = meta;
-                if (!fid.empty()) m_fidToPath[fid] = curNew;
+                if (!fid.empty()) m_folderIdToPath[fid] = curNew;
 
                 // [倒排索引重建]
                 std::wstring newName, newExt;
                 parsePathComponents(curNew, isFolder, newName, newExt);
                 if (!newName.empty()) {
                     if (isFolder) {
-                        auto& v = m_folderNameToFids[newName];
+                        auto& v = m_subFolderNameToFolderIds[newName];
                         if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
                     } else {
-                        auto& v = m_fileNameToFids[newName];
+                        auto& v = m_assetNameToFolderIds[newName];
                         if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
                         if (!newExt.empty()) {
-                            auto& ve = m_extensionToFids[newExt];
+                            auto& ve = m_extensionToFolderIds[newExt];
                             // 2026-08-xx 物理修复：修正容器指向错误导致的扩展名索引失效
                             if (std::find(ve.begin(), ve.end(), fid) == ve.end()) ve.push_back(fid);
                         }
@@ -1380,24 +1380,24 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                     std::string fid = it->second.folderId;
                     bool isFolder = it->second.isFolder;
                     fids.push_back(fid);
-                    m_fidToPath.erase(fid);
+                    m_folderIdToPath.erase(fid);
 
                     // [倒排索引维护]
                     std::wstring name, ext;
                     parsePathComponents(curPath, isFolder, name, ext);
                     if (!name.empty()) {
                         if (isFolder) {
-                            auto& v = m_folderNameToFids[name];
+                            auto& v = m_subFolderNameToFolderIds[name];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_folderNameToFids.erase(name);
+                            if (v.empty()) m_subFolderNameToFolderIds.erase(name);
                         } else {
-                            auto& v = m_fileNameToFids[name];
+                            auto& v = m_assetNameToFolderIds[name];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_fileNameToFids.erase(name);
+                            if (v.empty()) m_assetNameToFolderIds.erase(name);
                             if (!ext.empty()) {
-                                auto& ve = m_extensionToFids[ext];
+                                auto& ve = m_extensionToFolderIds[ext];
                                 ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                                if (ve.empty()) m_extensionToFids.erase(ext);
+                                if (ve.empty()) m_extensionToFolderIds.erase(ext);
                             }
                         }
                     }
@@ -1501,7 +1501,7 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                 std::string fid = it->second.folderId;
                 if (!fid.empty()) {
                     allFids.push_back(fid);
-                    m_fidToPath.erase(fid);
+                    m_folderIdToPath.erase(fid);
 
                     // 数据库定位
                     std::wstring volSerial = getVolumeSerialNumber(p);
@@ -1514,17 +1514,17 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                     parsePathComponents(p, it->second.isFolder, name, ext);
                     if (!name.empty()) {
                         if (it->second.isFolder) {
-                            auto& v = m_folderNameToFids[name];
+                            auto& v = m_subFolderNameToFolderIds[name];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_folderNameToFids.erase(name);
+                            if (v.empty()) m_subFolderNameToFolderIds.erase(name);
                         } else {
-                            auto& v = m_fileNameToFids[name];
+                            auto& v = m_assetNameToFolderIds[name];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_fileNameToFids.erase(name);
+                            if (v.empty()) m_assetNameToFolderIds.erase(name);
                             if (!ext.empty()) {
-                                auto& ve = m_extensionToFids[ext];
+                                auto& ve = m_extensionToFolderIds[ext];
                                 ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                                if (ve.empty()) m_extensionToFids.erase(ext);
+                                if (ve.empty()) m_extensionToFolderIds.erase(ext);
                             }
                         }
                     }
@@ -1599,8 +1599,8 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         
         // 核心修复：防止内存中出现同一个 FID 的多条路径记录（物理偏移导致的重复计数）
-        if (!fid.empty() && m_fidToPath.count(fid)) {
-            std::wstring oldPath = m_fidToPath[fid];
+        if (!fid.empty() && m_folderIdToPath.count(fid)) {
+            std::wstring oldPath = m_folderIdToPath[fid];
             if (oldPath != nPath) {
                 // 在清理旧路径前，同步清理隔离索引
                 auto itOld = m_cache.find(oldPath);
@@ -1609,17 +1609,17 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
                     parsePathComponents(oldPath, itOld->second.isFolder, oldName, oldExt);
                     if (!oldName.empty()) {
                         if (itOld->second.isFolder) {
-                            auto& v = m_folderNameToFids[oldName];
+                            auto& v = m_subFolderNameToFolderIds[oldName];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_folderNameToFids.erase(oldName);
+                            if (v.empty()) m_subFolderNameToFolderIds.erase(oldName);
                         } else {
-                            auto& v = m_fileNameToFids[oldName];
+                            auto& v = m_assetNameToFolderIds[oldName];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_fileNameToFids.erase(oldName);
+                            if (v.empty()) m_assetNameToFolderIds.erase(oldName);
                             if (!oldExt.empty()) {
-                                auto& ve = m_extensionToFids[oldExt];
+                                auto& ve = m_extensionToFolderIds[oldExt];
                                 ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                                if (ve.empty()) m_extensionToFids.erase(oldExt);
+                                if (ve.empty()) m_extensionToFolderIds.erase(oldExt);
                             }
                         }
                     }
@@ -1654,7 +1654,7 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
             isFolder = m_cache[nPath].isFolder;
             oldEmpty = m_cache[nPath].tags.isEmpty();
         }
-        if (!fid.empty()) m_fidToPath[fid] = nPath;
+        if (!fid.empty()) m_folderIdToPath[fid] = nPath;
     }
     
     if (changed) {
@@ -1761,8 +1761,8 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
     if (!existsInDb) {
         if (fetchWinApiMetadataDirect(nPath, fid)) {
             std::shared_lock<std::shared_mutex> lock(m_mutex);
-            auto it = m_fidToPath.find(fid);
-            if (it != m_fidToPath.end()) {
+            auto it = m_folderIdToPath.find(fid);
+            if (it != m_folderIdToPath.end()) {
                 nPath = it->second; // 修正为缓存中的原始路径，确保 removeMetadataSync 能正确匹配
                 existsInDb = true;
                 qDebug() << "[Metadata] 路径匹配失败，已通过 FID 校准原始路径:" << QString::fromStdWString(nPath);
@@ -1859,7 +1859,7 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
     std::wstring vol = getVolumeSerialNumber(path);
     if (hFile == INVALID_HANDLE_VALUE) {
         if (outFrn) *outFrn = MetadataManager::generateDeterministicFrn(path);
-        outId128 = MetadataManager::generateDeterministicSha256Id(path);
+        outId128 = MetadataManager::generateDeterministicFolderId(path);
         return false;
     }
     BY_HANDLE_FILE_INFORMATION basicInfo;
@@ -1868,7 +1868,7 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
         unsigned long long fullFrn = (static_cast<unsigned long long>(basicInfo.nFileIndexHigh) << 32) | basicInfo.nFileIndexLow;
         swprintf(frnBuf, 17, L"%016llX", fullFrn);
         if (outFrn) *outFrn = frnBuf;
-        outId128 = MetadataManager::generateFallbackFid(vol, frnBuf);
+        outId128 = MetadataManager::generateFallbackFolderId(vol, frnBuf);
         if (outSize) *outSize = (static_cast<long long>(basicInfo.nFileSizeHigh) << 32) | basicInfo.nFileSizeLow;
         if (outType) *outType = (basicInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? L"folder" : L"file";
         auto toMS = [](const FILETIME& ft) {
@@ -1895,7 +1895,7 @@ void MetadataManager::activateItem(const std::wstring& path) {
 void MetadataManager::registerArcmetaFrn(const std::wstring&) {
 }
 
-std::string MetadataManager::getFileIdSync(const std::wstring& path) {
+std::string MetadataManager::getFolderIdSync(const std::wstring& path) {
     // 1. 如果处于受控托管库中，直接提取 13 位 Base36 ID，终结系统级 FRN 物理依赖
     std::string base36 = extractBase36Id(path);
     if (!base36.empty()) {
@@ -1904,7 +1904,7 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
 
     // 2. 磁盘模式（非托管路径）不使用 Base36 ID，自愈退避至原本的系统级物理 FRN 
     std::string fid;
-    if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = MetadataManager::generateDeterministicSha256Id(path);
+    if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = MetadataManager::generateDeterministicFolderId(path);
     return fid;
 }
 
@@ -2152,7 +2152,7 @@ void MetadataManager::parsePathComponents(const std::wstring& normalizedPath, bo
     }
 }
 
-std::wstring MetadataManager::getVolumeFromFid(const std::string& fid) {
+std::wstring MetadataManager::getVolumeFromFolderId(const std::string& fid) {
     if (fid.empty()) return L"UNKNOWN";
     if (fid.find("FRN:") == 0) {
         size_t secondColon = fid.find(':', 4);
@@ -2185,9 +2185,9 @@ void MetadataManager::unloadVolumeNameCache(const std::wstring& volSerial) {
         }
     };
 
-    cleanupMap(m_fileNameToFids);
-    cleanupMap(m_folderNameToFids);
-    cleanupMap(m_extensionToFids);
+    cleanupMap(m_assetNameToFolderIds);
+    cleanupMap(m_subFolderNameToFolderIds);
+    cleanupMap(m_extensionToFolderIds);
 }
 
 void MetadataManager::loadVolumeNameCache(const std::wstring& volSerial) {
@@ -2204,13 +2204,13 @@ void MetadataManager::loadVolumeNameCache(const std::wstring& volSerial) {
             parsePathComponents(path, meta.isFolder, name, ext);
             if (!name.empty()) {
                 if (meta.isFolder) {
-                    auto& v = m_folderNameToFids[name];
+                    auto& v = m_subFolderNameToFolderIds[name];
                     if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
                 } else {
-                    auto& v = m_fileNameToFids[name];
+                    auto& v = m_assetNameToFolderIds[name];
                     if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
                     if (!ext.empty()) {
-                        auto& ve = m_extensionToFids[ext];
+                        auto& ve = m_extensionToFolderIds[ext];
                         if (std::find(ve.begin(), ve.end(), meta.folderId) == ve.end()) ve.push_back(meta.folderId);
                     }
                 }
@@ -2219,28 +2219,28 @@ void MetadataManager::loadVolumeNameCache(const std::wstring& volSerial) {
     }
 }
 
-std::vector<std::string> MetadataManager::getFileFidsByName(const std::wstring& filename) {
+std::vector<std::string> MetadataManager::getFolderIdsByName(const std::wstring& filename) {
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     std::wstring lowerName = filename;
     std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::towlower);
-    auto it = m_fileNameToFids.find(lowerName);
-    return (it != m_fileNameToFids.end()) ? it->second : std::vector<std::string>();
+    auto it = m_assetNameToFolderIds.find(lowerName);
+    return (it != m_assetNameToFolderIds.end()) ? it->second : std::vector<std::string>();
 }
 
-std::vector<std::string> MetadataManager::getFolderFidsByName(const std::wstring& foldername) {
+std::vector<std::string> MetadataManager::getSubFolderIdsByName(const std::wstring& foldername) {
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     std::wstring lowerName = foldername;
     std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::towlower);
-    auto it = m_folderNameToFids.find(lowerName);
-    return (it != m_folderNameToFids.end()) ? it->second : std::vector<std::string>();
+    auto it = m_subFolderNameToFolderIds.find(lowerName);
+    return (it != m_subFolderNameToFolderIds.end()) ? it->second : std::vector<std::string>();
 }
 
-std::vector<std::string> MetadataManager::getFidsByExtension(const std::wstring& extension) {
+std::vector<std::string> MetadataManager::getFolderIdsByExtension(const std::wstring& extension) {
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     std::wstring lowerExt = extension;
     std::transform(lowerExt.begin(), lowerExt.end(), lowerExt.begin(), ::towlower);
-    auto it = m_extensionToFids.find(lowerExt);
-    return (it != m_extensionToFids.end()) ? it->second : std::vector<std::string>();
+    auto it = m_extensionToFolderIds.find(lowerExt);
+    return (it != m_extensionToFolderIds.end()) ? it->second : std::vector<std::string>();
 }
 
 bool MetadataManager::hasPendingSync() const { return false; }

@@ -65,7 +65,7 @@ bool ShellHelper::moveToTrash(const QStringList& paths) {
             // 2. 数据库同步：标记为回收站，记忆原路径
             MetadataManager::instance().markAsTrash(dest.toStdWString(), true, p.toStdWString());
             // 3. 解除所有分类关联
-            std::string fid = MetadataManager::instance().getFileIdSync(dest.toStdWString());
+            std::string fid = MetadataManager::instance().getFolderIdSync(dest.toStdWString());
             CategoryRepo::removeAllCategories(fid);
         } else {
             allOk = false;

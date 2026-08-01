@@ -82,14 +82,14 @@ public:
         return m_loaded;
     }
 
-    static std::string generateFallbackFid(const std::wstring& vol, const std::wstring& frn);
-    static std::string generateDeterministicSha256Id(const std::wstring& path);
+    static std::string generateFallbackFolderId(const std::wstring& vol, const std::wstring& frn);
+    static std::string generateDeterministicFolderId(const std::wstring& path);
     static std::wstring generateDeterministicFrn(const std::wstring& path);
     static std::wstring normalizePath(const std::wstring& path);
     
     void initFromScchMode();
     RuntimeMeta getMeta(const std::wstring& path);
-    std::wstring getPathByFid(const std::string& fid);
+    std::wstring getPathByFolderId(const std::string& fid);
 
     /**
      * @brief 2026-06-xx 按照用户要求：在 SCCH 内存模式下执行多维搜索
@@ -275,7 +275,7 @@ public:
      * @brief 同步获取文件的 128-bit File ID (或 Fallback ID)
      * 2026-06-15 物理加固：确保在建立分类关联前指纹已就绪
      */
-    std::string getFileIdSync(const std::wstring& path);
+    std::string getFolderIdSync(const std::wstring& path);
 
     /**
      * @brief 获取路径所在磁盘的卷序列号
@@ -312,7 +312,7 @@ public:
     /**
      * @brief 从 FID 中提取卷序列号
      */
-    std::wstring getVolumeFromFid(const std::string& fid);
+    std::wstring getVolumeFromFolderId(const std::string& fid);
 
     /**
      * @brief 卸载指定卷的名称/后缀索引映射（驱动器拔出时）
@@ -334,9 +334,9 @@ public:
     /**
      * @brief 隔离查询 API
      */
-    std::vector<std::string> getFileFidsByName(const std::wstring& filename);
-    std::vector<std::string> getFolderFidsByName(const std::wstring& foldername);
-    std::vector<std::string> getFidsByExtension(const std::wstring& extension);
+    std::vector<std::string> getFolderIdsByName(const std::wstring& filename);
+    std::vector<std::string> getSubFolderIdsByName(const std::wstring& foldername);
+    std::vector<std::string> getFolderIdsByExtension(const std::wstring& extension);
 
     /**
      * @brief 只读遍历内存缓存，用于统计等场景（持有读锁）
@@ -399,7 +399,7 @@ private:
     ~MetadataManager() override = default;
 
     std::unordered_map<std::wstring, RuntimeMeta> m_cache;
-    std::unordered_map<std::string, std::wstring> m_fidToPath;
+    std::unordered_map<std::string, std::wstring> m_folderIdToPath;
 
     // 2026-xx-xx 按照 Plan-124：快速层级倒排索引与进度缓存
     // Key: 标准化父级目录路径 (结尾不含斜杠), Value: 直接子项的完整标准化路径集合
@@ -413,11 +413,11 @@ private:
 
     // 2026-07-xx 隔离式倒排索引：物理隔离文件、文件夹及后缀
     // 1. 仅文件 (Key: L"resume.pdf", Value: file_ids)
-    std::unordered_map<std::wstring, std::vector<std::string>> m_fileNameToFids;
+    std::unordered_map<std::wstring, std::vector<std::string>> m_assetNameToFolderIds;
     // 2. 仅文件夹 (Key: L"projects", Value: folder_ids)
-    std::unordered_map<std::wstring, std::vector<std::string>> m_folderNameToFids;
+    std::unordered_map<std::wstring, std::vector<std::string>> m_subFolderNameToFolderIds;
     // 3. 仅后缀 (Key: L"pdf", Value: file_ids)
-    std::unordered_map<std::wstring, std::vector<std::string>> m_extensionToFids;
+    std::unordered_map<std::wstring, std::vector<std::string>> m_extensionToFolderIds;
 
     mutable std::shared_mutex m_mutex;
     bool m_loaded = false; // 2026-06-xx 物理加固：加载状态标记

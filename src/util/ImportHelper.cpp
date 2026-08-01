@@ -71,7 +71,7 @@ void ImportHelper::importPaths(const QStringList& paths,
             QString destPath;
             if (targetPhysicalPath.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
                 // 生成 13 位唯一 ID，建 ID.arc/ 容器
-                std::string assetId = MetadataManager::generateDeterministicSha256Id(src.toStdWString());
+                std::string assetId = MetadataManager::generateDeterministicFolderId(src.toStdWString());
                 if (assetId.find("PATHURL:") == 0) assetId = assetId.substr(8);
                 if (assetId.length() > 13) assetId = assetId.substr(0, 13);
                 

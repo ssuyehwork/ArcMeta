@@ -171,7 +171,7 @@ bool CategoryRepo::removeAllCategoriesBatch(const std::vector<std::string>& fold
 std::vector<int> CategoryRepo::getItemCategoryIds(const std::string& folderId) {
     std::vector<int> ids;
     if (folderId.empty()) return ids;
-    std::wstring path = MetadataManager::instance().getPathByFid(folderId);
+    std::wstring path = MetadataManager::instance().getPathByFolderId(folderId);
     sqlite3* db = DatabaseManager::instance().getDbForPath(path);
     if (!db) return ids;
 
@@ -197,7 +197,7 @@ bool CategoryRepo::moveToTrashBatch(const std::vector<std::string>& folderIds) {
             sqlite3_finalize(delStmt);
         }
         // 2. Insert into trash bucket
-        std::wstring path = MetadataManager::instance().getPathByFid(fid);
+        std::wstring path = MetadataManager::instance().getPathByFolderId(fid);
         sqlite3_stmt* insStmt;
         if (sqlite3_prepare_v2(db,
             "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)",
@@ -230,7 +230,7 @@ bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& folderI
             sqlite3_finalize(delStmt);
         }
         // 2. Add to "未分类" bucket
-        std::wstring path = MetadataManager::instance().getPathByFid(fid);
+        std::wstring path = MetadataManager::instance().getPathByFolderId(fid);
         sqlite3_stmt* insStmt;
         if (sqlite3_prepare_v2(db,
             "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)",
@@ -261,7 +261,7 @@ bool CategoryRepo::permanentlyDeleteBatch(const std::vector<std::string>& folder
     // Collect paths before removing from cache
     std::vector<std::wstring> paths;
     for (const auto& fid : folderIds) {
-        std::wstring path = MetadataManager::instance().getPathByFid(fid);
+        std::wstring path = MetadataManager::instance().getPathByFolderId(fid);
         if (!path.empty()) paths.push_back(path);
     }
 
@@ -476,7 +476,7 @@ bool CategoryRepo::remove(int id) {
             sqlite3_finalize(insStmt);
         }
         // Update in-memory cache: set isTrash = true, then persist
-        std::wstring path = MetadataManager::instance().getPathByFid(fid);
+        std::wstring path = MetadataManager::instance().getPathByFolderId(fid);
         if (path.empty()) path = pathHint;
         if (!path.empty()) {
             MetadataManager::instance().setTrash(path, true);
@@ -694,7 +694,7 @@ bool CategoryRepo::renamePhysicalCategoryPath(const std::wstring& oldPath, const
 bool CategoryRepo::addItemToCategory(int categoryId, const std::string& folderId, const std::wstring& pathHint) {
     WriteGuard guard;
     std::wstring finalPath = MetadataManager::normalizePath(pathHint);
-    if (finalPath.empty()) finalPath = MetadataManager::instance().getPathByFid(folderId);
+    if (finalPath.empty()) finalPath = MetadataManager::instance().getPathByFolderId(folderId);
 
     sqlite3* memDb = DatabaseManager::instance().getDbForPath(finalPath);
     if (!memDb) return false;
@@ -731,7 +731,7 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& folderId
 
 bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& folderId) {
     WriteGuard guard;
-    std::wstring path = MetadataManager::instance().getPathByFid(folderId);
+    std::wstring path = MetadataManager::instance().getPathByFolderId(folderId);
     sqlite3* memDb = DatabaseManager::instance().getDbForPath(path);
     if (!memDb) return false;
 
@@ -922,7 +922,7 @@ bool CategoryRepo::executeFidBatch(const std::vector<std::string>& folderIds, st
     // Group folderIds by their corresponding database connection
     std::map<sqlite3*, std::vector<std::string>> dbToFids;
     for (const auto& fid : folderIds) {
-        std::wstring path = MetadataManager::instance().getPathByFid(fid);
+        std::wstring path = MetadataManager::instance().getPathByFolderId(fid);
         sqlite3* db = DatabaseManager::instance().getDbForPath(path);
         if (db) {
             dbToFids[db].push_back(fid);
@@ -1145,7 +1145,7 @@ void CategoryRepo::fullRecount() {
     // 查找并清理幽灵关联（在 category_items 中存在，但在 metadata 缓存中已不存在的记录）
     std::map<sqlite3*, std::vector<std::string>> dbToOrphanedFids;
     for (const auto& fid : customizedFids) {
-        if (MetadataManager::instance().getPathByFid(fid).empty()) {
+        if (MetadataManager::instance().getPathByFolderId(fid).empty()) {
             for (sqlite3* localDb : dbs) {
                 dbToOrphanedFids[localDb].push_back(fid);
             }
