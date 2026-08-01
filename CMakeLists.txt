@@ -104,6 +104,14 @@ set(SOURCES
     src/ui/ColorPicker.h
     src/ui/ContentPanel.cpp
     src/ui/ContentPanel.h
+    src/ui/DiskExplorerPanel.cpp
+    src/ui/DiskExplorerPanel.h
+    src/ui/CategoryLibraryPanel.cpp
+    src/ui/CategoryLibraryPanel.h
+    src/ui/models/ArcMetaVirtualDbModel.cpp
+    src/ui/models/ArcMetaVirtualDbModel.h
+    src/ui/models/FilterProxyModel.cpp
+    src/ui/models/FilterProxyModel.h
     src/ui/DriveButton.cpp
     src/ui/DriveButton.h
     src/ui/DropJustifiedView.cpp

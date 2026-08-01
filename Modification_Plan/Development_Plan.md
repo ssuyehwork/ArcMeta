@@ -43,7 +43,7 @@
   2. 物理托管资产本质均是 `.arc` 文件夹容器，然而数据库主键 and C++ 成员仍使用 `file_id`/`fileId`，语义模糊含混。
   3. 盘符托管根分类在侧边栏显示的计数定位模糊，导致“未分类”等逻辑桶统计产生偏差。
 - 用户期望的结果：
-  1. 每一个资产包的元数据（`metadata`）和分类项目关联数据（`category_items`）100% 存放在它所属物理盘符的分库数据库中，彻底弃用全局主库的存储关联，消除跨库撕裂。
+  1. 每一个资产包的元数据（`metadata`） and 分类项目关联数据（`category_items`）100% 存放在它所属物理盘符的分库数据库中，彻底弃用全局主库的存储关联，消除跨库撕裂。
   2. 重构 `DatabaseManager::getDbForPath(path)`，只要传入路径，100% 保证打开并内存预热该分库，绝不返回 nullptr。
   3. 在 `AssetImporter::importSingleFile` 中，直接在同盘分库上开启唯一的 `SqlTransaction` 原子落盘。
   4. 全局语义重命名：数据库主键与外键列由 `file_id` 重命名为 `folder_id`，C++ 成员由 `fileId` / `fileId128` 统一重命名为 `folderId`。
@@ -67,3 +67,17 @@
 - 本次任务边界：重构 `WindowsShellThumbnailProvider`、`MediaColorExtractor`、`ContentPanel` 与 `ItemRecord::create`，达到完美的双轨隔离与全新磁盘缓存规范。
 - 不在本次范围内的：不修改 NativeFolderWatcher 物理文件监控底座。
 - 对应方案文档：Modification_Plan-20.md
+
+## [2026-08-01] ContentPanel 深度物理模块化拆分与 100% 架构断连
+
+- 用户描述的现象/问题：
+  ContentPanel 内部逻辑庞大，包含物理磁盘目录扫描与内存数据库模式两种截然不同的行为代码，它们在同一个类中混合并共享了诸如 `ArcMetaVirtualDbModel`、右键菜单和重命名等多项逻辑，难以实现物理级的编译断连阻断，依然具有强耦合的维护隐患。
+- 用户期望的结果：
+  1. 将原本极度复杂的 `ContentPanel` 拆分为 3 个职责高度单一的物理模块。
+  2. 新增 `DiskExplorerPanel.h / .cpp`，负责纯物理磁盘导航（零 SQLite 数据库访问，彻底移除并禁止引入 `MetadataManager.h`、`CategoryRepo.h`、`AssetImporter.h`）。
+  3. 新增 `CategoryLibraryPanel.h / .cpp`，负责数据库驱动的分类与快速访问托管库面板，引入上述托管头文件并处理素材解包与打包导入逻辑。
+  4. 新建 `models` 子目录，并将 `ArcMetaVirtualDbModel` 与 `FilterProxyModel` 抽离成独立物理文件，实现 UI 与数据完全解耦。
+  5. 重构后的 `ContentPanel` 仅作为一个极简的调度外壳，内部通过 `QStackedWidget` 实现对上述两个主面板的选择性分流挂载和动态切换调度。
+- 本次任务边界：物理拆分与新增 `DiskExplorerPanel`、`CategoryLibraryPanel`、及独立的 models 头文件/源文件，重新编写外壳 `ContentPanel` 并更新构建系统，确保物理断连。
+- 不在本次范围内的：不改动侧边栏与其他的 MainWindow 布局控制。
+- 对应方案文档：Modification_Plan-21.md
