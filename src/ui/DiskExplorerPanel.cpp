@@ -1,5 +1,6 @@
 #include "DiskExplorerPanel.h"
 #include "UiHelper.h"
+#include "../core/ModelContract.h"
 #include "../util/ShellHelper.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"

@@ -1,5 +1,6 @@
 #include "CategoryLibraryPanel.h"
 #include "UiHelper.h"
+#include "../core/ModelContract.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
 #include "../util/AssetImporter.h"

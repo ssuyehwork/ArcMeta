@@ -1,5 +1,6 @@
 #include "ArcMetaVirtualDbModel.h"
 #include "../UiHelper.h"
+#include "../../core/ModelContract.h"
 #include "../WindowsShellThumbnailProvider.h"
 #include "../../util/ShellHelper.h"
 #include "../../meta/MetadataManager.h"

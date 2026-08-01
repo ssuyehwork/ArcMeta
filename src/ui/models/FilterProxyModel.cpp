@@ -31,15 +31,15 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     }
 
     // 评分过滤
-    if (currentFilter.rating >= 0) {
+    if (!currentFilter.ratings.isEmpty()) {
         int r = sourceModel()->data(idx, RatingRole).toInt();
-        if (r != currentFilter.rating) return false;
+        if (!currentFilter.ratings.contains(r)) return false;
     }
 
     // 设色过滤
-    if (!currentFilter.colorTag.isEmpty()) {
+    if (!currentFilter.colors.isEmpty()) {
         QString c = sourceModel()->data(idx, ColorRole).toString();
-        if (c.compare(currentFilter.colorTag, Qt::CaseInsensitive) != 0) return false;
+        if (!currentFilter.colors.contains(c.toUpper())) return false;
     }
 
     return true;
