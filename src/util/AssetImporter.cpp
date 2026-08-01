@@ -16,6 +16,11 @@
 #include "FramelessDialog.h"
 #include <QDateTime>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <objbase.h>
+#endif
+
 namespace ArcMeta {
 
 void AssetImporter::importAssets(const QStringList& paths,
@@ -46,6 +51,10 @@ void AssetImporter::importAssets(const QStringList& paths,
     });
 
     context->future = QtConcurrent::run([paths, targetCatId, weakProgress, context, onComplete]() {
+#ifdef Q_OS_WIN
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+#endif
+
         int total = paths.size();
         int handled = 0;
         int successCount = 0;
@@ -86,6 +95,12 @@ void AssetImporter::importAssets(const QStringList& paths,
                 successCount++;
             }
         }
+
+#ifdef Q_OS_WIN
+        if (SUCCEEDED(hr)) {
+            CoUninitialize();
+        }
+#endif
 
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, successCount, onComplete]() {
             if (context->isCancelled) return;
