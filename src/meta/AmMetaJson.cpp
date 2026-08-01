@@ -154,7 +154,7 @@ QJsonObject AmMetaJson::folderToEntry(const FolderMeta& meta) {
     obj.insert("note", toQString(meta.note));
     obj.insert("url", toQString(meta.url));
     obj.insert("encrypted", meta.encrypted);
-    obj.insert("file_id_128", QString::fromStdString(meta.fileId128));
+    obj.insert("file_id_128", QString::fromStdString(meta.folderId));
     QJsonArray tagsArr; for (const auto& t : meta.tags) tagsArr.append(toQString(t));
     obj.insert("tags", tagsArr);
     if (!meta.palettes.empty()) {
@@ -182,7 +182,7 @@ FolderMeta AmMetaJson::entryToFolder(const QJsonObject& obj) {
     meta.note = toStdWString(obj.value("note").toString());
     meta.url = toStdWString(obj.value("url").toString());
     meta.encrypted = obj.value("encrypted").toBool();
-    meta.fileId128 = obj.value("file_id_128").toString().toStdString();
+    meta.folderId = obj.value("file_id_128").toString().toStdString();
     if (obj.contains("tags") && obj.value("tags").isArray()) {
         for (const auto& v : obj.value("tags").toArray()) meta.tags.push_back(toStdWString(v.toString()));
     }
@@ -213,7 +213,7 @@ QJsonObject AmMetaJson::itemToEntry(const ItemMeta& meta) {
     obj.insert("original_name", toQString(meta.originalName));
     obj.insert("volume", toQString(meta.volume));
     obj.insert("frn", toQString(meta.frn));
-    obj.insert("file_id_128", QString::fromStdString(meta.fileId128));
+    obj.insert("file_id_128", QString::fromStdString(meta.folderId));
     
     // 2026-07-xx 1:1对等字段写入
     obj.insert("width", meta.width);
@@ -253,7 +253,7 @@ ItemMeta AmMetaJson::entryToItem(const QJsonObject& obj) {
     meta.originalName = toStdWString(obj.value("original_name").toString());
     meta.volume = toStdWString(obj.value("volume").toString());
     meta.frn = toStdWString(obj.value("frn").toString());
-    meta.fileId128 = obj.value("file_id_128").toString().toStdString();
+    meta.folderId = obj.value("file_id_128").toString().toStdString();
 
     // 2026-07-xx 1:1对等字段读取
     meta.width = obj.value("width").toInt(0);
