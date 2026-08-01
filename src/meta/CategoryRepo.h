@@ -32,7 +32,7 @@ struct Category {
  * @brief 分类项记录（含路径提示）
  */
 struct CategoryItem {
-    std::string fileId128;
+    std::string folderId;
     std::wstring pathHint;
 };
 
@@ -72,17 +72,17 @@ public:
     // 条目关联逻辑
     static bool updateCategoryColorByPath(const std::wstring& path, const std::wstring& color);
     static bool renamePhysicalCategoryPath(const std::wstring& oldPath, const std::wstring& newPath);
-    static bool addItemToCategory(int categoryId, const std::string& fileId128, const std::wstring& pathHint = L"");
-    static bool removeItemFromCategory(int categoryId, const std::string& fileId128);
-    static bool removeAllCategories(const std::string& fileId128);
-    static bool removeAllCategoriesBatch(const std::vector<std::string>& fids);
-    static std::vector<int> getItemCategoryIds(const std::string& fid);
-    static bool moveToTrashBatch(const std::vector<std::string>& fids);
+    static bool addItemToCategory(int categoryId, const std::string& folderId, const std::wstring& pathHint = L"");
+    static bool removeItemFromCategory(int categoryId, const std::string& folderId);
+    static bool removeAllCategories(const std::string& folderId);
+    static bool removeAllCategoriesBatch(const std::vector<std::string>& folderIds);
+    static std::vector<int> getItemCategoryIds(const std::string& folderId, const std::wstring& pathHint = L"");
+    static bool moveToTrashBatch(const std::vector<std::string>& folderIds);
 
-    static bool restoreFromTrash(const std::string& fileId128);
-    static bool restoreFromTrashBatch(const std::vector<std::string>& fids);
-    static bool permanentlyDelete(const std::string& fileId128);
-    static bool permanentlyDeleteBatch(const std::vector<std::string>& fids);
+    static bool restoreFromTrash(const std::string& folderId);
+    static bool restoreFromTrashBatch(const std::vector<std::string>& folderIds);
+    static bool permanentlyDelete(const std::string& folderId);
+    static bool permanentlyDeleteBatch(const std::vector<std::string>& folderIds);
 
     static std::vector<CategoryItem> getItemsInCategory(int categoryId);
     static std::vector<CategoryItem> getItemsInCategories(const std::vector<int>& categoryIds);
@@ -141,6 +141,7 @@ public:
 
     static std::atomic<int> s_totalFileCount;
     static std::atomic<int> s_categorizedCount;
+    static std::atomic<bool> s_countsDirty;
 
     // 2026-08-xx：侧边栏高性能原子计数器
     static std::atomic<int> s_totalCount;             // 对应 "all"

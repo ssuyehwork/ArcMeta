@@ -87,7 +87,7 @@ std::wstring MetadataManager::normalizePath(const std::wstring& path) {
     return qp.toStdWString();
 }
 
-std::string MetadataManager::generateFallbackFid(const std::wstring& vol, const std::wstring& frn) {
+std::string MetadataManager::generateFallbackFolderId(const std::wstring& vol, const std::wstring& frn) {
     if (vol.empty() || frn.empty()) return "";
     std::string result = "FRN:";
     result.append(QString::fromStdWString(vol).toUpper().toStdString());
@@ -96,7 +96,7 @@ std::string MetadataManager::generateFallbackFid(const std::wstring& vol, const 
     return result;
 }
 
-std::string MetadataManager::generateDeterministicSha256Id(const std::wstring& path) {
+std::string MetadataManager::generateDeterministicFolderId(const std::wstring& path) {
     if (path.empty()) return "";
     std::wstring nPath = MetadataManager::normalizePath(path);
     std::wstring vol = MetadataManager::getVolumeSerialNumber(nPath);
@@ -190,7 +190,7 @@ void MetadataManager::initFromScchMode() {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 RuntimeMeta rm;
                 const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                if (fid) rm.fileId128 = fid;
+                if (fid) rm.folderId = fid;
 
                 const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
                 std::wstring path = normalizePath(wpath ? wpath : L"");
@@ -249,7 +249,7 @@ void MetadataManager::initFromScchMode() {
 
                 rm.isManaged = true;
                 tempCache[path] = rm;
-                if (!rm.fileId128.empty()) tempFidToPath[rm.fileId128] = path;
+                if (!rm.folderId.empty()) tempFidToPath[rm.folderId] = path;
 
                 // Plan-124: 维护树级索引
                 std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(path)).absolutePath()).toStdWString();
@@ -324,7 +324,7 @@ void MetadataManager::initFromScchMode() {
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_cache = tempCache;
-        m_fidToPath = tempFidToPath;
+        m_folderIdToPath = tempFidToPath;
         m_parentToChildren = tempParentToChildren;
         m_folderProgressCache = tempFolderProgressCache;
 
@@ -339,14 +339,14 @@ void MetadataManager::initFromScchMode() {
             const RuntimeMeta& meta = pair.second;
             if (!meta.baseName.empty()) {
                 if (meta.isFolder) {
-                    auto& v = m_folderNameToFids[meta.baseName];
-                    if (std::find(v.begin(), v.end(), meta.fileId128) == v.end()) v.push_back(meta.fileId128);
+                    auto& v = m_subFolderNameToFolderIds[meta.baseName];
+                    if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
                 } else {
-                    auto& v = m_fileNameToFids[meta.baseName];
-                    if (std::find(v.begin(), v.end(), meta.fileId128) == v.end()) v.push_back(meta.fileId128);
+                    auto& v = m_assetNameToFolderIds[meta.baseName];
+                    if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
                     if (!meta.ext.empty()) {
-                        auto& ve = m_extensionToFids[meta.ext];
-                        if (std::find(ve.begin(), ve.end(), meta.fileId128) == ve.end()) ve.push_back(meta.fileId128);
+                        auto& ve = m_extensionToFolderIds[meta.ext];
+                        if (std::find(ve.begin(), ve.end(), meta.folderId) == ve.end()) ve.push_back(meta.folderId);
                     }
                 }
             }
@@ -698,11 +698,11 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     return RuntimeMeta();
 }
 
-std::wstring MetadataManager::getPathByFid(const std::string& fid) {
+std::wstring MetadataManager::getPathByFolderId(const std::string& fid) {
     if (fid.empty()) return L"";
     std::shared_lock<std::shared_mutex> lock(m_mutex);
-    auto it = m_fidToPath.find(fid);
-    return (it != m_fidToPath.end()) ? it->second : L"";
+    auto it = m_folderIdToPath.find(fid);
+    return (it != m_folderIdToPath.end()) ? it->second : L"";
 }
 
 void MetadataManager::ensureActivated(const std::wstring& nPath) {
@@ -719,7 +719,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
     std::wstring type;
     
     // 自愈与健壮性改造：若 Win32 原生 API 失败（如 Linux Sandbox、共享访问冲突等），提供 QFileInfo 完美兜底，确保激活成功 
-    bool success = fetchWinApiMetadataDirect(nPath, rm.fileId128, &frn, &rm.fileSize, &type, &rm.ctime, &rm.mtime, &rm.atime);
+    bool success = fetchWinApiMetadataDirect(nPath, rm.folderId, &frn, &rm.fileSize, &type, &rm.ctime, &rm.mtime, &rm.atime);
     if (!success) {
         QFileInfo qinfo(QString::fromStdWString(nPath));
         if (qinfo.exists()) {
@@ -728,7 +728,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             rm.ctime = qinfo.birthTime().toMSecsSinceEpoch();
             rm.mtime = qinfo.lastModified().toMSecsSinceEpoch();
             rm.atime = qinfo.lastRead().toMSecsSinceEpoch();
-            rm.fileId128 = generateDeterministicSha256Id(nPath);
+            rm.folderId = generateDeterministicFolderId(nPath);
             success = true;
         }
     } else {
@@ -743,12 +743,12 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         // 🚨 内存数据库模式唯一ID体系重构：激活写入内存缓存前，将主键统一覆盖为 13 位 Base36 ID
         std::string base36 = extractBase36Id(nPath);
         if (!base36.empty()) {
-            rm.fileId128 = base36;
+            rm.folderId = base36;
         }
 
         // 共享元数据逻辑 (FID 关联)
-        if (!rm.fileId128.empty() && m_fidToPath.count(rm.fileId128)) {
-            const RuntimeMeta& existing = m_cache[m_fidToPath[rm.fileId128]];
+        if (!rm.folderId.empty() && m_folderIdToPath.count(rm.folderId)) {
+            const RuntimeMeta& existing = m_cache[m_folderIdToPath[rm.folderId]];
             rm.rating    = existing.rating;
             rm.manualColor = existing.manualColor;
             rm.autoColor = existing.autoColor;
@@ -775,12 +775,12 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
                     }
                 }
             }
-            if (CategoryRepo::getItemCategoryIds(rm.fileId128).empty()) {
+            if (CategoryRepo::getItemCategoryIds(rm.folderId, nPath).empty()) {
                 CategoryRepo::s_uncategorizedCount.fetch_add(1);
             }
         }
-        if (!rm.fileId128.empty()) {
-            m_fidToPath[rm.fileId128] = nPath;
+        if (!rm.folderId.empty()) {
+            m_folderIdToPath[rm.folderId] = nPath;
 
             // Plan-124: 维护树级索引
             std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nPath)).absolutePath()).toStdWString();
@@ -797,14 +797,14 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             parsePathComponents(nPath, rm.isFolder, name, ext);
             if (!name.empty()) {
                 if (rm.isFolder) {
-                    auto& v = m_folderNameToFids[name];
-                    if (std::find(v.begin(), v.end(), rm.fileId128) == v.end()) v.push_back(rm.fileId128);
+                    auto& v = m_subFolderNameToFolderIds[name];
+                    if (std::find(v.begin(), v.end(), rm.folderId) == v.end()) v.push_back(rm.folderId);
                 } else {
-                    auto& v = m_fileNameToFids[name];
-                    if (std::find(v.begin(), v.end(), rm.fileId128) == v.end()) v.push_back(rm.fileId128);
+                    auto& v = m_assetNameToFolderIds[name];
+                    if (std::find(v.begin(), v.end(), rm.folderId) == v.end()) v.push_back(rm.folderId);
                     if (!ext.empty()) {
-                        auto& ve = m_extensionToFids[ext];
-                        if (std::find(ve.begin(), ve.end(), rm.fileId128) == ve.end()) ve.push_back(rm.fileId128);
+                        auto& ve = m_extensionToFolderIds[ext];
+                        if (std::find(ve.begin(), ve.end(), rm.folderId) == ve.end()) ve.push_back(rm.folderId);
                     }
                 }
             }
@@ -1199,7 +1199,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                     AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
                 }
 
-                std::string fid = it->second.fileId128;
+                std::string fid = it->second.folderId;
                 bool isFolder = it->second.isFolder;
 
                 // [倒排索引维护]
@@ -1207,17 +1207,17 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 parsePathComponents(curOld, isFolder, oldName, oldExt);
                 if (!oldName.empty()) {
                     if (isFolder) {
-                        auto& v = m_folderNameToFids[oldName];
+                        auto& v = m_subFolderNameToFolderIds[oldName];
                         v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                        if (v.empty()) m_folderNameToFids.erase(oldName);
+                        if (v.empty()) m_subFolderNameToFolderIds.erase(oldName);
                     } else {
-                        auto& v = m_fileNameToFids[oldName];
+                        auto& v = m_assetNameToFolderIds[oldName];
                         v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                        if (v.empty()) m_fileNameToFids.erase(oldName);
+                        if (v.empty()) m_assetNameToFolderIds.erase(oldName);
                         if (!oldExt.empty()) {
-                            auto& ve = m_extensionToFids[oldExt];
+                            auto& ve = m_extensionToFolderIds[oldExt];
                             ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                            if (ve.empty()) m_extensionToFids.erase(oldExt);
+                            if (ve.empty()) m_extensionToFolderIds.erase(oldExt);
                         }
                     }
                 }
@@ -1231,20 +1231,20 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 RuntimeMeta meta = it->second;
                 m_cache.erase(it);
                 m_cache[curNew] = meta;
-                if (!fid.empty()) m_fidToPath[fid] = curNew;
+                if (!fid.empty()) m_folderIdToPath[fid] = curNew;
 
                 // [倒排索引重建]
                 std::wstring newName, newExt;
                 parsePathComponents(curNew, isFolder, newName, newExt);
                 if (!newName.empty()) {
                     if (isFolder) {
-                        auto& v = m_folderNameToFids[newName];
+                        auto& v = m_subFolderNameToFolderIds[newName];
                         if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
                     } else {
-                        auto& v = m_fileNameToFids[newName];
+                        auto& v = m_assetNameToFolderIds[newName];
                         if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
                         if (!newExt.empty()) {
-                            auto& ve = m_extensionToFids[newExt];
+                            auto& ve = m_extensionToFolderIds[newExt];
                             // 2026-08-xx 物理修复：修正容器指向错误导致的扩展名索引失效
                             if (std::find(ve.begin(), ve.end(), fid) == ve.end()) ve.push_back(fid);
                         }
@@ -1280,7 +1280,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             std::string fid;
             {
                 std::shared_lock<std::shared_mutex> lock(m_mutex);
-                if (m_cache.count(curNew)) fid = m_cache[curNew].fileId128;
+                if (m_cache.count(curNew)) fid = m_cache[curNew].folderId;
             }
             if (fid.empty()) continue;
 
@@ -1289,7 +1289,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             }
         }
 
-        const char* updSql = "UPDATE metadata SET path = ? WHERE file_id = ?";
+        const char* updSql = "UPDATE metadata SET path = ? WHERE folder_id = ?";
         for (auto& entry : groupedSyncTasks) {
             sqlite3* targetDb = entry.first;
             auto& tasks = entry.second;
@@ -1367,7 +1367,7 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                         if (it->second.tags.isEmpty()) {
                             CategoryRepo::s_untaggedCount.fetch_sub(1);
                         }
-                        if (CategoryRepo::getItemCategoryIds(it->second.fileId128).empty()) {
+                        if (CategoryRepo::getItemCategoryIds(it->second.folderId, curPath).empty()) {
                             CategoryRepo::s_uncategorizedCount.fetch_sub(1);
                         }
                     }
@@ -1376,28 +1376,28 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                 if (!it->second.isFolder && !it->second.isTrash) {
                     totalDelta--;
                 }
-                if (!it->second.fileId128.empty()) {
-                    std::string fid = it->second.fileId128;
+                if (!it->second.folderId.empty()) {
+                    std::string fid = it->second.folderId;
                     bool isFolder = it->second.isFolder;
                     fids.push_back(fid);
-                    m_fidToPath.erase(fid);
+                    m_folderIdToPath.erase(fid);
 
                     // [倒排索引维护]
                     std::wstring name, ext;
                     parsePathComponents(curPath, isFolder, name, ext);
                     if (!name.empty()) {
                         if (isFolder) {
-                            auto& v = m_folderNameToFids[name];
+                            auto& v = m_subFolderNameToFolderIds[name];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_folderNameToFids.erase(name);
+                            if (v.empty()) m_subFolderNameToFolderIds.erase(name);
                         } else {
-                            auto& v = m_fileNameToFids[name];
+                            auto& v = m_assetNameToFolderIds[name];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_fileNameToFids.erase(name);
+                            if (v.empty()) m_assetNameToFolderIds.erase(name);
                             if (!ext.empty()) {
-                                auto& ve = m_extensionToFids[ext];
+                                auto& ve = m_extensionToFolderIds[ext];
                                 ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                                if (ve.empty()) m_extensionToFids.erase(ext);
+                                if (ve.empty()) m_extensionToFolderIds.erase(ext);
                             }
                         }
                     }
@@ -1414,7 +1414,7 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
 
     // 2026-06-xx 物理级根除：基于 File ID (FRN) 批量清理
     if (db && !fids.empty()) {
-        const char* sql = "DELETE FROM metadata WHERE file_id = ?";
+        const char* sql = "DELETE FROM metadata WHERE folder_id = ?";
         // [Plan-131 方案 A] 直连模式，取消冗余异步任务
         SqlTransaction trans(db);
         sqlite3_stmt* memStmt;
@@ -1488,7 +1488,7 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                         if (it->second.tags.isEmpty()) {
                             CategoryRepo::s_untaggedCount.fetch_sub(1);
                         }
-                        if (CategoryRepo::getItemCategoryIds(it->second.fileId128).empty()) {
+                        if (CategoryRepo::getItemCategoryIds(it->second.folderId, p).empty()) {
                             CategoryRepo::s_uncategorizedCount.fetch_sub(1);
                         }
                     }
@@ -1498,10 +1498,10 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                     totalDelta--;
                 }
 
-                std::string fid = it->second.fileId128;
+                std::string fid = it->second.folderId;
                 if (!fid.empty()) {
                     allFids.push_back(fid);
-                    m_fidToPath.erase(fid);
+                    m_folderIdToPath.erase(fid);
 
                     // 数据库定位
                     std::wstring volSerial = getVolumeSerialNumber(p);
@@ -1514,17 +1514,17 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                     parsePathComponents(p, it->second.isFolder, name, ext);
                     if (!name.empty()) {
                         if (it->second.isFolder) {
-                            auto& v = m_folderNameToFids[name];
+                            auto& v = m_subFolderNameToFolderIds[name];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_folderNameToFids.erase(name);
+                            if (v.empty()) m_subFolderNameToFolderIds.erase(name);
                         } else {
-                            auto& v = m_fileNameToFids[name];
+                            auto& v = m_assetNameToFolderIds[name];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_fileNameToFids.erase(name);
+                            if (v.empty()) m_assetNameToFolderIds.erase(name);
                             if (!ext.empty()) {
-                                auto& ve = m_extensionToFids[ext];
+                                auto& ve = m_extensionToFolderIds[ext];
                                 ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                                if (ve.empty()) m_extensionToFids.erase(ext);
+                                if (ve.empty()) m_extensionToFolderIds.erase(ext);
                             }
                         }
                     }
@@ -1537,7 +1537,7 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
     }
 
     // 2. 数据库执行
-    const char* sql = "DELETE FROM metadata WHERE file_id = ?";
+    const char* sql = "DELETE FROM metadata WHERE folder_id = ?";
     for (auto& entry : groupedFids) {
         sqlite3* db = entry.first;
         const auto& fids = entry.second;
@@ -1599,8 +1599,8 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         
         // 核心修复：防止内存中出现同一个 FID 的多条路径记录（物理偏移导致的重复计数）
-        if (!fid.empty() && m_fidToPath.count(fid)) {
-            std::wstring oldPath = m_fidToPath[fid];
+        if (!fid.empty() && m_folderIdToPath.count(fid)) {
+            std::wstring oldPath = m_folderIdToPath[fid];
             if (oldPath != nPath) {
                 // 在清理旧路径前，同步清理隔离索引
                 auto itOld = m_cache.find(oldPath);
@@ -1609,17 +1609,17 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
                     parsePathComponents(oldPath, itOld->second.isFolder, oldName, oldExt);
                     if (!oldName.empty()) {
                         if (itOld->second.isFolder) {
-                            auto& v = m_folderNameToFids[oldName];
+                            auto& v = m_subFolderNameToFolderIds[oldName];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_folderNameToFids.erase(oldName);
+                            if (v.empty()) m_subFolderNameToFolderIds.erase(oldName);
                         } else {
-                            auto& v = m_fileNameToFids[oldName];
+                            auto& v = m_assetNameToFolderIds[oldName];
                             v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_fileNameToFids.erase(oldName);
+                            if (v.empty()) m_assetNameToFolderIds.erase(oldName);
                             if (!oldExt.empty()) {
-                                auto& ve = m_extensionToFids[oldExt];
+                                auto& ve = m_extensionToFolderIds[oldExt];
                                 ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                                if (ve.empty()) m_extensionToFids.erase(oldExt);
+                                if (ve.empty()) m_extensionToFolderIds.erase(oldExt);
                             }
                         }
                     }
@@ -1654,7 +1654,7 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
             isFolder = m_cache[nPath].isFolder;
             oldEmpty = m_cache[nPath].tags.isEmpty();
         }
-        if (!fid.empty()) m_fidToPath[fid] = nPath;
+        if (!fid.empty()) m_folderIdToPath[fid] = nPath;
     }
     
     if (changed) {
@@ -1675,14 +1675,14 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
                 CategoryRepo::s_totalCount.fetch_sub(1);
                 CategoryRepo::s_trashCount.fetch_add(1);
                 if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_sub(1);
-                if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+                if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
                     CategoryRepo::s_uncategorizedCount.fetch_sub(1);
                 }
             } else {
                 CategoryRepo::s_totalCount.fetch_add(1);
                 CategoryRepo::s_trashCount.fetch_sub(1);
                 if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_add(1);
-                if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+                if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
                     CategoryRepo::s_uncategorizedCount.fetch_add(1);
                 }
             }
@@ -1717,7 +1717,7 @@ void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
                 changed = true;
                 isFolder = it->second.isFolder;
                 oldEmpty = it->second.tags.isEmpty();
-                fid = it->second.fileId128;
+                fid = it->second.folderId;
             }
         }
     }
@@ -1726,14 +1726,14 @@ void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
             CategoryRepo::s_totalCount.fetch_sub(1);
             CategoryRepo::s_trashCount.fetch_add(1);
             if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_sub(1);
-            if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+            if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
                 CategoryRepo::s_uncategorizedCount.fetch_sub(1);
             }
         } else {
             CategoryRepo::s_totalCount.fetch_add(1);
             CategoryRepo::s_trashCount.fetch_sub(1);
             if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_add(1);
-            if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+            if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
                 CategoryRepo::s_uncategorizedCount.fetch_add(1);
             }
         }
@@ -1752,7 +1752,7 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
         auto it = m_cache.find(nPath);
         if (it != m_cache.end()) {
-            fid = it->second.fileId128;
+            fid = it->second.folderId;
             existsInDb = true;
         }
     }
@@ -1761,8 +1761,8 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
     if (!existsInDb) {
         if (fetchWinApiMetadataDirect(nPath, fid)) {
             std::shared_lock<std::shared_mutex> lock(m_mutex);
-            auto it = m_fidToPath.find(fid);
-            if (it != m_fidToPath.end()) {
+            auto it = m_folderIdToPath.find(fid);
+            if (it != m_folderIdToPath.end()) {
                 nPath = it->second; // 修正为缓存中的原始路径，确保 removeMetadataSync 能正确匹配
                 existsInDb = true;
                 qDebug() << "[Metadata] 路径匹配失败，已通过 FID 校准原始路径:" << QString::fromStdWString(nPath);
@@ -1859,7 +1859,7 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
     std::wstring vol = getVolumeSerialNumber(path);
     if (hFile == INVALID_HANDLE_VALUE) {
         if (outFrn) *outFrn = MetadataManager::generateDeterministicFrn(path);
-        outId128 = MetadataManager::generateDeterministicSha256Id(path);
+        outId128 = MetadataManager::generateDeterministicFolderId(path);
         return false;
     }
     BY_HANDLE_FILE_INFORMATION basicInfo;
@@ -1868,7 +1868,7 @@ bool MetadataManager::fetchWinApiMetadataDirect(const std::wstring& path, std::s
         unsigned long long fullFrn = (static_cast<unsigned long long>(basicInfo.nFileIndexHigh) << 32) | basicInfo.nFileIndexLow;
         swprintf(frnBuf, 17, L"%016llX", fullFrn);
         if (outFrn) *outFrn = frnBuf;
-        outId128 = MetadataManager::generateFallbackFid(vol, frnBuf);
+        outId128 = MetadataManager::generateFallbackFolderId(vol, frnBuf);
         if (outSize) *outSize = (static_cast<long long>(basicInfo.nFileSizeHigh) << 32) | basicInfo.nFileSizeLow;
         if (outType) *outType = (basicInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? L"folder" : L"file";
         auto toMS = [](const FILETIME& ft) {
@@ -1895,7 +1895,7 @@ void MetadataManager::activateItem(const std::wstring& path) {
 void MetadataManager::registerArcmetaFrn(const std::wstring&) {
 }
 
-std::string MetadataManager::getFileIdSync(const std::wstring& path) {
+std::string MetadataManager::getFolderIdSync(const std::wstring& path) {
     // 1. 如果处于受控托管库中，直接提取 13 位 Base36 ID，终结系统级 FRN 物理依赖
     std::string base36 = extractBase36Id(path);
     if (!base36.empty()) {
@@ -1904,7 +1904,7 @@ std::string MetadataManager::getFileIdSync(const std::wstring& path) {
 
     // 2. 磁盘模式（非托管路径）不使用 Base36 ID，自愈退避至原本的系统级物理 FRN 
     std::string fid;
-    if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = MetadataManager::generateDeterministicSha256Id(path);
+    if (!fetchWinApiMetadataDirect(path, fid, nullptr)) fid = MetadataManager::generateDeterministicFolderId(path);
     return fid;
 }
 
@@ -1931,7 +1931,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
         if (db) groups[db].push_back(p);
     }
 
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     for (auto& entry : groups) {
         sqlite3* memDb = entry.first;
@@ -1943,13 +1943,13 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
 
         for (const auto& p : groupPaths) {
             RuntimeMeta rMeta = getMeta(p);
-            if (rMeta.fileId128.empty()) continue;
+            if (rMeta.folderId.empty()) continue;
 
             // 准入检查
             bool isNew = true;
             sqlite3_stmt* checkStmt;
-            if (sqlite3_prepare_v2(memDb, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
-                sqlite3_bind_text(checkStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_prepare_v2(memDb, "SELECT 1 FROM metadata WHERE folder_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(checkStmt, 1, rMeta.folderId.c_str(), -1, SQLITE_TRANSIENT);
                 if (sqlite3_step(checkStmt) == SQLITE_ROW) isNew = false;
                 sqlite3_finalize(checkStmt);
             }
@@ -1965,7 +1965,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
             if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
                 // 绑定逻辑 (复用 persistAsync 中的绑定逻辑，此处为了清晰直接展开或调用辅助函数)
                 auto bindLogic = [](sqlite3_stmt* stmt, const std::wstring& path, const RuntimeMeta& meta) {
-                    sqlite3_bind_text(stmt, 1, meta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(stmt, 1, meta.folderId.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_int(stmt, 3, meta.isFolder ? 1 : 0);
                     sqlite3_bind_int(stmt, 4, meta.rating);
@@ -2057,8 +2057,8 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     bool isNew = true;
     {
         sqlite3_stmt* checkStmt;
-        if (sqlite3_prepare_v2(memDb, "SELECT 1 FROM metadata WHERE file_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(checkStmt, 1, rMeta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_prepare_v2(memDb, "SELECT 1 FROM metadata WHERE folder_id = ?", -1, &checkStmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(checkStmt, 1, rMeta.folderId.c_str(), -1, SQLITE_TRANSIENT);
             if (sqlite3_step(checkStmt) == SQLITE_ROW) isNew = false;
             sqlite3_finalize(checkStmt);
         }
@@ -2070,7 +2070,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     }
 
     auto bindMeta = [](sqlite3_stmt* stmt, const std::wstring& path, const RuntimeMeta& meta) {
-        sqlite3_bind_text(stmt, 1, meta.fileId128.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 1, meta.folderId.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, 3, meta.isFolder ? 1 : 0);
         sqlite3_bind_int(stmt, 4, meta.rating);
@@ -2103,7 +2103,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         sqlite3_bind_int64(stmt, 22, meta.added_at);
     };
 
-    const char* sql = "INSERT OR REPLACE INTO metadata (file_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     
     sqlite3_stmt* memStmt;
     if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
@@ -2152,7 +2152,7 @@ void MetadataManager::parsePathComponents(const std::wstring& normalizedPath, bo
     }
 }
 
-std::wstring MetadataManager::getVolumeFromFid(const std::string& fid) {
+std::wstring MetadataManager::getVolumeFromFolderId(const std::string& fid) {
     if (fid.empty()) return L"UNKNOWN";
     if (fid.find("FRN:") == 0) {
         size_t secondColon = fid.find(':', 4);
@@ -2185,9 +2185,9 @@ void MetadataManager::unloadVolumeNameCache(const std::wstring& volSerial) {
         }
     };
 
-    cleanupMap(m_fileNameToFids);
-    cleanupMap(m_folderNameToFids);
-    cleanupMap(m_extensionToFids);
+    cleanupMap(m_assetNameToFolderIds);
+    cleanupMap(m_subFolderNameToFolderIds);
+    cleanupMap(m_extensionToFolderIds);
 }
 
 void MetadataManager::loadVolumeNameCache(const std::wstring& volSerial) {
@@ -2199,19 +2199,19 @@ void MetadataManager::loadVolumeNameCache(const std::wstring& volSerial) {
     for (const auto& pair : m_cache) {
         const std::wstring& path = pair.first;
         const RuntimeMeta& meta = pair.second;
-        if (meta.fileId128.find(prefix) == 0) {
+        if (meta.folderId.find(prefix) == 0) {
             std::wstring name, ext;
             parsePathComponents(path, meta.isFolder, name, ext);
             if (!name.empty()) {
                 if (meta.isFolder) {
-                    auto& v = m_folderNameToFids[name];
-                    if (std::find(v.begin(), v.end(), meta.fileId128) == v.end()) v.push_back(meta.fileId128);
+                    auto& v = m_subFolderNameToFolderIds[name];
+                    if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
                 } else {
-                    auto& v = m_fileNameToFids[name];
-                    if (std::find(v.begin(), v.end(), meta.fileId128) == v.end()) v.push_back(meta.fileId128);
+                    auto& v = m_assetNameToFolderIds[name];
+                    if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
                     if (!ext.empty()) {
-                        auto& ve = m_extensionToFids[ext];
-                        if (std::find(ve.begin(), ve.end(), meta.fileId128) == ve.end()) ve.push_back(meta.fileId128);
+                        auto& ve = m_extensionToFolderIds[ext];
+                        if (std::find(ve.begin(), ve.end(), meta.folderId) == ve.end()) ve.push_back(meta.folderId);
                     }
                 }
             }
@@ -2219,28 +2219,28 @@ void MetadataManager::loadVolumeNameCache(const std::wstring& volSerial) {
     }
 }
 
-std::vector<std::string> MetadataManager::getFileFidsByName(const std::wstring& filename) {
+std::vector<std::string> MetadataManager::getFolderIdsByName(const std::wstring& filename) {
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     std::wstring lowerName = filename;
     std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::towlower);
-    auto it = m_fileNameToFids.find(lowerName);
-    return (it != m_fileNameToFids.end()) ? it->second : std::vector<std::string>();
+    auto it = m_assetNameToFolderIds.find(lowerName);
+    return (it != m_assetNameToFolderIds.end()) ? it->second : std::vector<std::string>();
 }
 
-std::vector<std::string> MetadataManager::getFolderFidsByName(const std::wstring& foldername) {
+std::vector<std::string> MetadataManager::getSubFolderIdsByName(const std::wstring& foldername) {
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     std::wstring lowerName = foldername;
     std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::towlower);
-    auto it = m_folderNameToFids.find(lowerName);
-    return (it != m_folderNameToFids.end()) ? it->second : std::vector<std::string>();
+    auto it = m_subFolderNameToFolderIds.find(lowerName);
+    return (it != m_subFolderNameToFolderIds.end()) ? it->second : std::vector<std::string>();
 }
 
-std::vector<std::string> MetadataManager::getFidsByExtension(const std::wstring& extension) {
+std::vector<std::string> MetadataManager::getFolderIdsByExtension(const std::wstring& extension) {
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     std::wstring lowerExt = extension;
     std::transform(lowerExt.begin(), lowerExt.end(), lowerExt.begin(), ::towlower);
-    auto it = m_extensionToFids.find(lowerExt);
-    return (it != m_extensionToFids.end()) ? it->second : std::vector<std::string>();
+    auto it = m_extensionToFolderIds.find(lowerExt);
+    return (it != m_extensionToFolderIds.end()) ? it->second : std::vector<std::string>();
 }
 
 bool MetadataManager::hasPendingSync() const { return false; }
@@ -2264,7 +2264,7 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
             targetIds = CategoryRepo::getSubtreeIds(categoryId);
         }
         auto items = CategoryRepo::getItemsInCategories(targetIds);
-        for (const auto& item : items) scopeFids.insert(item.fileId128);
+        for (const auto& item : items) scopeFids.insert(item.folderId);
         hasScope = true;
     }
 
@@ -2339,7 +2339,7 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
 
             // Scope check
             if (hasScope) {
-                if (scopeFids.find(meta.fileId128) == scopeFids.end()) continue;
+                if (scopeFids.find(meta.folderId) == scopeFids.end()) continue;
             } else if (!wParentPath.empty()) {
                 if (path.find(wParentPath) != 0) continue;
             }
@@ -2438,7 +2438,7 @@ std::vector<LightMeta> MetadataManager::getLightweightCacheSnapshot() const {
         const auto& meta = pair.second;
         result.push_back({
             pair.first,
-            meta.fileId128,
+            meta.folderId,
             meta.isFolder,
             meta.isTrash,
             meta.tags.isEmpty(),

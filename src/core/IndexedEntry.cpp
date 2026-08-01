@@ -2,6 +2,8 @@
 #include "../meta/MetadataManager.h"
 #include <QFileInfo>
 #include <QDir>
+#include <mutex>
+#include <unordered_map>
 
 namespace ArcMeta {
 
@@ -18,8 +20,8 @@ void ItemRecord::fromMetadata(ItemRecord& r, const RuntimeMeta& meta) {
     r.height = meta.height;
     r.added_at = meta.added_at;
     r.isManaged = meta.hasUserOperations();
-    if (!meta.fileId128.empty()) {
-        r.fileId = meta.fileId128;
+    if (!meta.folderId.empty()) {
+        r.folderId = meta.folderId;
     }
     r.palettes.clear();
     for (const auto& pe : meta.palettes) {
@@ -42,7 +44,7 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
     }
 
     // Plan-124: 只有在内存缓存缺失物理时间戳时，才触发 fetchWinApiMetadataDirect
-    if (meta.fileId128.empty() || (meta.ctime == 0 && meta.mtime == 0)) {
+    if (meta.folderId.empty() || (meta.ctime == 0 && meta.mtime == 0)) {
         std::string fid;
         long long size = 0, ctime = 0, mtime = 0, atime = 0;
         MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
@@ -54,9 +56,9 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         // 🚨 内存数据库模式唯一ID体系重构：优先解析和提取 Base36 ID，如果是磁盘普通路径，则复用本轮采样已取得的 fid，彻底消除双重 I/O 冗余
         size_t pos = wPath.find(L".arc");
         if (pos != std::wstring::npos) {
-            r.fileId = MetadataManager::instance().getFileIdSync(wPath);
+            r.folderId = MetadataManager::instance().getFolderIdSync(wPath);
         } else {
-            r.fileId = fid;
+            r.folderId = fid;
         }
         
         r.isDir = QFileInfo(nPath).isDir();
@@ -65,7 +67,7 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         r.ctime = meta.ctime;
         r.mtime = meta.mtime;
         r.atime = meta.atime;
-        r.fileId = meta.fileId128;
+        r.folderId = meta.folderId;
         r.isDir = meta.isFolder;
     }
 

@@ -7,6 +7,7 @@
 #include "sqlite3.h"
 #include <map>
 #include <string>
+#include <vector>
 #include <mutex>
 #include <functional>
 #include <unordered_map>
@@ -75,6 +76,12 @@ public:
      * @brief 获取全局数据库内存连接
      */
     sqlite3* getGlobalDb();
+
+    /** 
+     * @brief 统一数据库访问入口：根据路径自动预热并 100% 返回有效数据库连接句柄 
+     * 保证在多线程下也绝不返回 nullptr 且实现同库同连接。 
+     */ 
+    sqlite3* getDbForPath(const std::wstring& path); 
 
     /**
      * @brief 获取所有当前已加载的内存数据库连接
