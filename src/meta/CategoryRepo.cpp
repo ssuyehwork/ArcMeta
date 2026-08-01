@@ -973,15 +973,12 @@ void CategoryRepo::syncCategorizedCountForFid(const std::string& /*folderId*/) {
     }
 
     int count = static_cast<int>(uniqueFids.size());
-            int oldCount = s_categorizedCount.load();
-            s_categorizedCount.store(count);
-            
-            // 物理持久化：直接更新增量
-            if (count != oldCount) {
-                updatePersistentStat(STAT_CATEGORIZED, count - oldCount);
-            }
-        }
-        sqlite3_finalize(stmt);
+    int oldCount = s_categorizedCount.load();
+    s_categorizedCount.store(count);
+
+    // 物理持久化：直接更新增量
+    if (count != oldCount) {
+        updatePersistentStat(STAT_CATEGORIZED, count - oldCount);
     }
 }
 

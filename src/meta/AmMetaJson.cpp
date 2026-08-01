@@ -154,6 +154,7 @@ QJsonObject AmMetaJson::folderToEntry(const FolderMeta& meta) {
     obj.insert("note", toQString(meta.note));
     obj.insert("url", toQString(meta.url));
     obj.insert("encrypted", meta.encrypted);
+    // 🚨 保持兼容性：磁盘上存储的旧版 JSON 配置文件依然使用 "file_id_128"，内存映射使用统一的 folderId
     obj.insert("file_id_128", QString::fromStdString(meta.folderId));
     QJsonArray tagsArr; for (const auto& t : meta.tags) tagsArr.append(toQString(t));
     obj.insert("tags", tagsArr);
@@ -213,6 +214,7 @@ QJsonObject AmMetaJson::itemToEntry(const ItemMeta& meta) {
     obj.insert("original_name", toQString(meta.originalName));
     obj.insert("volume", toQString(meta.volume));
     obj.insert("frn", toQString(meta.frn));
+    // 🚨 保持兼容性：磁盘上存储的旧版 JSON 配置文件依然使用 "file_id_128"，内存映射使用统一的 folderId
     obj.insert("file_id_128", QString::fromStdString(meta.folderId));
     
     // 2026-07-xx 1:1对等字段写入

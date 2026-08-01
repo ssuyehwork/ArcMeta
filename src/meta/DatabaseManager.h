@@ -7,6 +7,7 @@
 #include "sqlite3.h"
 #include <map>
 #include <string>
+#include <vector>
 #include <mutex>
 #include <functional>
 #include <unordered_map>

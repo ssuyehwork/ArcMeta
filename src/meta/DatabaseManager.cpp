@@ -698,13 +698,23 @@ void DatabaseManager::workerLoop() {
     }
 }
 
+static std::wstring getVolumeSerialNumberHelper(const std::wstring& path) {
+    if (path.length() < 2 || path[1] != L':') return L"UNKNOWN";
+    wchar_t root[4] = { static_cast<wchar_t>(towupper(path[0])), L':', L'\\', L'\0' };
+    DWORD serial = 0;
+    if (GetVolumeInformationW(root, nullptr, 0, &serial, nullptr, nullptr, nullptr, 0)) {
+        wchar_t buf[16]; swprintf(buf, 16, L"%08X", serial); return buf;
+    }
+    return L"UNKNOWN";
+}
+
 sqlite3* DatabaseManager::getDbForPath(const std::wstring& path) {
     std::wstring nPath = QDir::toNativeSeparators(QString::fromStdWString(path)).toStdWString();
     // 如果是程序安装目录下的全局主配置，或者无法获取卷序列号，则预热并返回全局主配置库
     if (nPath.length() == 3 && nPath[1] == L':' && (nPath[2] == L'\\' || nPath[2] == L'/')) {
         return getGlobalDb();
     }
-    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(nPath);
+    std::wstring volSerial = getVolumeSerialNumberHelper(nPath);
     if (volSerial == L"UNKNOWN") {
         return getGlobalDb();
     }
