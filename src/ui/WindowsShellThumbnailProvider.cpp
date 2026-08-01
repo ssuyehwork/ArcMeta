@@ -158,20 +158,6 @@ struct ComInitializer {
 };
 
 QImage WindowsShellThumbnailProvider::getShellThumbnail(const QString& path, int size) {
-    QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QString cacheDir = QDir(appData).filePath("thumbs/");
-    QDir().mkpath(cacheDir);
-
-    QFileInfo fi(path);
-    QString hashKey = QString("%1_%2_%3_%4_v14").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
-    QString safeName = QString::number(qHash(hashKey), 16) + ".png";
-    QString cachePath = cacheDir + safeName;
-
-    if (QFile::exists(cachePath)) {
-        QImage img;
-        if (img.load(cachePath)) return img;
-    }
-
 #ifdef Q_OS_WIN
     ComInitializer comInit;
     PIDLIST_ABSOLUTE pidl = nullptr;
@@ -216,10 +202,6 @@ QImage WindowsShellThumbnailProvider::getShellThumbnail(const QString& path, int
                 QImage img(p, w, h, w * 4, QImage::Format_RGBA8888);
                 img = img.copy(); // 确保数据所有权
                 
-                (void)QtConcurrent::run([img, cachePath]() {
-                    img.save(cachePath, "PNG");
-                });
-
                 DeleteObject(hBitmap);
                 pFactory->Release();
                 pItem->Release();
