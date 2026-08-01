@@ -198,28 +198,6 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
     return QImage();
 }
 
-QImage MediaColorExtractor::extractZipPreview(const QString& path) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) return QImage();
-
-    QByteArray data = file.read(10 * 1024 * 1024); // 读前 10MB
-    file.close();
-
-    // 搜索 PNG 文件头 \x89PNG\r\n\x1a\n 和 尾标 IEND
-    int start = data.indexOf("\x89\x50\x4E\x47\x0D\x0A\x1A\x0A");
-    if (start != -1) {
-        int end = data.indexOf("IEND", start);
-        if (end != -1) {
-            QByteArray pngData = data.mid(start, (end - start) + 8);
-            QImage img;
-            if (img.loadFromData(pngData, "PNG")) {
-                return img; // 成功掏出内嵌 PNG 预览图！
-            }
-        }
-    }
-    return QImage();
-}
-
 QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
     QFileInfo fi(path);
     QString ext = fi.suffix().toLower();
@@ -240,9 +218,6 @@ QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
         if (!img.isNull()) return img;
     } else if (ext == "eps") {
         QImage img = extractEmbeddedEpsPreview(path);
-        if (!img.isNull()) return img;
-    } else if (ext == "sketch" || ext == "xd" || ext == "fig") {
-        QImage img = extractZipPreview(path);
         if (!img.isNull()) return img;
     }
     

@@ -35,7 +35,7 @@ struct RuntimeMeta {
     int width;      // 2026-07-xx 物理尺寸：宽 (像素)
     int height;     // 2026-07-xx 物理尺寸：高 (像素)
     std::wstring originalPath; // 2026-06-xx 路径记忆：用于回收站还原
-    std::string folderId; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
+    std::string fileId128; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
     std::wstring baseName; // 2026-08-xx 持久化基名，避免重复解析计算
     std::wstring ext;      // 2026-08-xx 持久化后缀名，统一小写
     
@@ -61,7 +61,7 @@ struct RuntimeMeta {
 
 struct LightMeta {
     std::wstring path;
-    std::string folderId;
+    std::string fileId128;
     bool isFolder;
     bool isTrash;
     bool tagsEmpty;

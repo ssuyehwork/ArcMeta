@@ -157,7 +157,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     // 初始化表结构 (Schema)
     const char* schema = R"(
         CREATE TABLE IF NOT EXISTS metadata (
-            folder_id TEXT PRIMARY KEY,
+            file_id TEXT PRIMARY KEY,
             path TEXT NOT NULL,
             is_folder INTEGER DEFAULT 0,
             rating INTEGER DEFAULT 0,
@@ -202,12 +202,11 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         -- 分类与项目关联表
         CREATE TABLE IF NOT EXISTS category_items (
             category_id INTEGER,
-            folder_id TEXT,
+            file_id TEXT,
             path_hint TEXT,
             added_at REAL,
-            PRIMARY KEY (category_id, folder_id)
+            PRIMARY KEY (category_id, file_id)
         );
-        CREATE INDEX IF NOT EXISTS idx_category_items_folder_id ON category_items(folder_id);
 
         -- 系统统计表
         CREATE TABLE IF NOT EXISTS system_stats (
@@ -253,7 +252,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         // FTS5 trigram 模糊匹配与自动触发器同步
         const char* ftsSchema = R"(
             CREATE VIRTUAL TABLE IF NOT EXISTS metadata_fts USING fts5(
-                folder_id UNINDEXED,  
+                file_id UNINDEXED,  
                 path,  
                 tags,  
                 note,  
@@ -262,18 +261,18 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
                 tokenize="trigram"
             );
             CREATE TRIGGER IF NOT EXISTS tb_metadata_insert AFTER INSERT ON metadata BEGIN
-                INSERT INTO metadata_fts(rowid, folder_id, path, tags, note)
-                VALUES (new.rowid, new.folder_id, new.path, new.tags, new.note);
+                INSERT INTO metadata_fts(rowid, file_id, path, tags, note)
+                VALUES (new.rowid, new.file_id, new.path, new.tags, new.note);
             END;
             CREATE TRIGGER IF NOT EXISTS tb_metadata_update AFTER UPDATE ON metadata BEGIN
-                INSERT INTO metadata_fts(metadata_fts, rowid, folder_id, path, tags, note)
-                VALUES('delete', old.rowid, old.folder_id, old.path, old.tags, old.note);
-                INSERT INTO metadata_fts(rowid, folder_id, path, tags, note)
-                VALUES(new.rowid, new.folder_id, new.path, new.tags, new.note);
+                INSERT INTO metadata_fts(metadata_fts, rowid, file_id, path, tags, note)
+                VALUES('delete', old.rowid, old.file_id, old.path, old.tags, old.note);
+                INSERT INTO metadata_fts(rowid, file_id, path, tags, note)
+                VALUES(new.rowid, new.file_id, new.path, new.tags, new.note);
             END;
             CREATE TRIGGER IF NOT EXISTS tb_metadata_delete AFTER DELETE ON metadata BEGIN
-                INSERT INTO metadata_fts(metadata_fts, rowid, folder_id, path, tags, note)
-                VALUES('delete', old.rowid, old.folder_id, old.path, old.tags, old.note);
+                INSERT INTO metadata_fts(metadata_fts, rowid, file_id, path, tags, note)
+                VALUES('delete', old.rowid, old.file_id, old.path, old.tags, old.note);
             END;
         )";
         char* ftsErrMsg = nullptr;
@@ -358,9 +357,9 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
 
         // 回填存量数据
         sqlite3_stmt* selStmt = nullptr;
-        if (sqlite3_prepare_v2(conn.memDb, "SELECT folder_id, path, is_folder FROM metadata", -1, &selStmt, nullptr) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(conn.memDb, "SELECT file_id, path, is_folder FROM metadata", -1, &selStmt, nullptr) == SQLITE_OK) {
             sqlite3_stmt* updStmt = nullptr;
-            if (sqlite3_prepare_v2(conn.memDb, "UPDATE metadata SET base_name = ?, ext = ? WHERE folder_id = ?", -1, &updStmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_prepare_v2(conn.memDb, "UPDATE metadata SET base_name = ?, ext = ? WHERE file_id = ?", -1, &updStmt, nullptr) == SQLITE_OK) {
                 // 暂时用局部逻辑来实现旧数据的解析和回填（不调用未初始化完全的 MetadataManager 的实例）
                 while (sqlite3_step(selStmt) == SQLITE_ROW) {
                     const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(selStmt, 0));
@@ -431,7 +430,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
 
     // 2026-08-xx 索引优化
     sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_frn ON categories(physical_frn);", nullptr, nullptr, nullptr);
-    sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_category_items_folder_id ON category_items(folder_id);", nullptr, nullptr, nullptr);
+    sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_category_items_file_id ON category_items(file_id);", nullptr, nullptr, nullptr);
     sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_category_items_path_hint ON category_items(path_hint);", nullptr, nullptr, nullptr);
     sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id);", nullptr, nullptr, nullptr);
     sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_physical_path ON categories(physical_path);", nullptr, nullptr, nullptr);
@@ -697,27 +696,5 @@ void DatabaseManager::workerLoop() {
         }
     }
 }
-
-sqlite3* DatabaseManager::getDbForPath(const std::wstring& path) { 
-    std::wstring nPath = QDir::toNativeSeparators(QString::fromStdWString(path)).toStdWString(); 
-    // 如果是程序安装目录下的全局主配置，或者无法获取卷序列号，则预热并返回全局主配置库 
-    if (nPath.length() == 3 && nPath[1] == L':' && (nPath[2] == L'\\' || nPath[2] == L'/')) { 
-        return getGlobalDb(); 
-    } 
-    std::wstring volSerial = MetadataManager::getVolumeSerialNumber(nPath); 
-    if (volSerial == L"UNKNOWN") { 
-        return getGlobalDb(); 
-    } 
-    QString letter = ""; 
-    if (nPath.length() >= 2 && nPath[1] == L':') { 
-        letter = QString::fromWCharArray(&nPath[0], 1); 
-    } 
-    // 100% 保证自动加载、打开、预热该分库，绝不返回 nullptr 
-    sqlite3* db = getMemoryDb(volSerial, letter); 
-    if (!db) { 
-        db = getGlobalDb(); 
-    } 
-    return db; 
-} 
 
 } // namespace ArcMeta
