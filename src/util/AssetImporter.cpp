@@ -69,9 +69,25 @@ void AssetImporter::importAssets(const QStringList& paths,
             }
 
             // 1. 获取目标盘符托管库路径 [盘符]:/ArcMeta.Library_[盘符]/
-            QString drive = QFileInfo(src).absolutePath().left(3);
-            if (drive.isEmpty()) drive = "D:/";
-            QString managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
+            // 优先由 targetCatId 反查它所属的顶层库路径；否则退化为用源文件盘符兜底
+            QString managedRoot;
+            if (targetCatId > 0) {
+                Category targetCat = CategoryRepo::getById(targetCatId);
+                Category cur = targetCat;
+                while (cur.parentId != 0) {
+                    Category parent = CategoryRepo::getById(cur.parentId);
+                    if (parent.id == 0) break;
+                    cur = parent;
+                }
+                if (!cur.physicalPath.empty()) {
+                    managedRoot = QString::fromStdWString(cur.physicalPath);
+                }
+            }
+            if (managedRoot.isEmpty()) {
+                QString drive = QFileInfo(src).absolutePath().left(3);
+                if (drive.isEmpty()) drive = "D:/";
+                managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
+            }
             
             if (!QDir().mkpath(managedRoot)) {
                 qWarning() << "[AssetImporter] 无法建立托管库根目录:" << managedRoot << " 导入源:" << src;
