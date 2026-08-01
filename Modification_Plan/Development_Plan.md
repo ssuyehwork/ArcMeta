@@ -40,14 +40,30 @@
 
 - 用户描述的现象/问题：
   1. SQLite 分库设计存在主库与驱动盘分库的“跨库撕裂”，导致写入丢失、线程中获取 nullptr 导致崩溃或静默失败。
-  2. 物理托管资产本质均是 `.arc` 文件夹容器，然而数据库主键和 C++ 成员仍使用 `file_id`/`fileId`，语义模糊含混。
+  2. 物理托管资产本质均是 `.arc` 文件夹容器，然而数据库主键 and C++ 成员仍使用 `file_id`/`fileId`，语义模糊含混。
   3. 盘符托管根分类在侧边栏显示的计数定位模糊，导致“未分类”等逻辑桶统计产生偏差。
 - 用户期望的结果：
   1. 每一个资产包的元数据（`metadata`）和分类项目关联数据（`category_items`）100% 存放在它所属物理盘符的分库数据库中，彻底弃用全局主库的存储关联，消除跨库撕裂。
   2. 重构 `DatabaseManager::getDbForPath(path)`，只要传入路径，100% 保证打开并内存预热该分库，绝不返回 nullptr。
   3. 在 `AssetImporter::importSingleFile` 中，直接在同盘分库上开启唯一的 `SqlTransaction` 原子落盘。
   4. 全局语义重命名：数据库主键与外键列由 `file_id` 重命名为 `folder_id`，C++ 成员由 `fileId` / `fileId128` 统一重命名为 `folderId`。
-  5. `ArcMeta.Library_G` 仅作为侧边栏的物理入口，不作为用户语义分类；未人工手动归类前，其托管资产 100% 逻辑归属于“未分类”，保证数据对账 100% 契合（全部数据 = 未分类 = Library_G 仓库）。
+  5. `ArcMeta.Library_G`仅作为侧边栏的物理入口，不作为用户语义分类；未人工手动归类前，其托管资产 100% 逻辑归属于“未分类”，保证数据对账 100% 契合（全部数据 = 未分类 = Library_G 仓库）。
 - 本次任务边界：重构 `DatabaseManager`、`CategoryRepo`、`MetadataManager`、`AssetImporter` 等模块数据库存储路由、同盘事务以及全局语义标识符更名。
 - 不在本次范围内的：不改动磁盘导航模式（DiskNav）的原生态磁盘物理文件系统扫描与缓存。
 - 对应方案文档：Modification_Plan-18.md
+
+## [2026-08-01] 磁盘模式缩略图缓存与双轨 100% 隔离重构
+
+- 用户描述的现象/问题：
+  1. WindowsShellThumbnailProvider 在 getShellThumbnail 中维护的 thumbs/ 缓存机制不合理，应当清理。
+  2. 磁盘模式缩略图缺乏独立存放和隐藏的路径机制，存在与内存模式缩略图逻辑交叉的隐患。
+  3. 磁盘模式下递归扫描文件时没有排除 .arcmeta 本身，会导致“缓存的缓存”递归问题。
+  4. ContentPanel 及其底盘在多处（isManagedContext, onItem, performPaste, setData, ItemRecord::create 等）违反了“两种模式，100% 隔离”的核心规则，发生跨轨倒灌。
+- 用户期望的结果：
+  1. 彻底移去 WindowsShellThumbnailProvider 的缓存。
+  2. 统一将磁盘模式缓存路径收口到 `.arcmeta/disk_thumbs/` 下，实现隐藏并覆盖所有分支。
+  3. 磁盘扫描显式拦截并排除 `.arcmeta` 文件夹，避免递归扫描。
+  4. 重构并彻底解耦 ContentPanel、setData、ItemRecord 的行为，让磁盘模式不读取 SQLite 也不在右键菜单或粘贴/拖拽中调用托管逻辑，重命名区分物理/逻辑。
+- 本次任务边界：重构 `WindowsShellThumbnailProvider`、`MediaColorExtractor`、`ContentPanel` 与 `ItemRecord::create`，达到完美的双轨隔离与全新磁盘缓存规范。
+- 不在本次范围内的：不修改 NativeFolderWatcher 物理文件监控底座。
+- 对应方案文档：Modification_Plan-20.md
