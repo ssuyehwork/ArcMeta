@@ -738,11 +738,15 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             if (!img.isNull()) {
                                 icon = QIcon(QPixmap::fromImage(img));
                             } else {
-                                // 🚨 统一图标提取解耦：若是 .arc 容器，优先使用解包出来的 mainFilePath 申请原生文件图标，严禁使用 .arc 目录路径
                                 QString iconTarget = path;
-                                for (int i = 0; i < mutableThis->m_displayCount; ++i) {
-                                    if (mutableThis->m_allRecords[i].path == path && !mutableThis->m_allRecords[i].mainFilePath.isEmpty()) {
-                                        iconTarget = mutableThis->m_allRecords[i].mainFilePath;
+                                if (ext == "arc" && info.isDir()) {
+                                    QDir arcDir(path);
+                                    QFileInfoList files = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                                    for (const QFileInfo& fi : files) {
+                                        QString fn = fi.fileName();
+                                        if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
+                                        if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
+                                        iconTarget = QDir::toNativeSeparators(fi.absoluteFilePath());
                                         break;
                                     }
                                 }
