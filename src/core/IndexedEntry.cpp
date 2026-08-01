@@ -35,11 +35,13 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
     QString nPath = QString::fromStdWString(wPath);
 
     // 1. 物理属性采样 (零 I/O 核心)
-    // 🚨 [双轨不隔离违规点-1]: 磁盘导航模式下通过 MetadataManager::getMeta 直接读取了托管库 SQLite 数据库
+    // 🚨 [双轨不隔离违规点-1 物理隔离修复]: 磁盘导航模式下不共享、不穿透读取托管库数据库。
+    // 如果没有 providedMeta，且不是 .arc 素材包路径，绝不穿透 MetadataManager。
     RuntimeMeta meta;
+    bool isArcPath = (wPath.find(L".arc") != std::wstring::npos);
     if (providedMeta) {
         meta = *providedMeta;
-    } else {
+    } else if (isArcPath) {
         meta = MetadataManager::instance().getMeta(wPath);
     }
 
@@ -79,7 +81,17 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
     }
 
     // 2. 核心元数据注入 (确保 width/height/palettes 物理对齐)
-    ItemRecord::fromMetadata(r, meta);
+    if (providedMeta || isArcPath) {
+        ItemRecord::fromMetadata(r, meta);
+    } else {
+        r.rating = 0;
+        r.isManaged = false;
+        r.pinned = false;
+        r.encrypted = false;
+        r.width = 0;
+        r.height = 0;
+        r.added_at = 0;
+    }
 
     if (r.isDir) {
         // 从数据库加载持久化的进度值

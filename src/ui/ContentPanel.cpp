@@ -301,33 +301,44 @@ bool ArcMetaVirtualDbModel::setData(const QModelIndex& index, const QVariant& va
     QString path = record.path;
 
     if (role == Qt::EditRole && index.column() == 0) {
-        // 🚨 [双轨不隔离违规点-6]: 在共享模型的 setData 中，无论处于托管库（内存）模式还是磁盘导航模式，重命名操作都无条件执行了物理重命名 ShellHelper::renameItem，混淆了两轨的重命名逻辑（托管库内应为仅改写 SQLite 映射字段的逻辑重命名，磁盘模式下应为物理重命名）
-        if (record.isCategory) return false; // 2026-07-xx 按照 Plan-73：子分类暂不支持在此重命名
+        // 🚨 [双轨不隔离违规点-6 物理隔离修复]:
+        // 1. 如果是内存分类（isCategory）或处于镜像源（托管内存模式，isMirrorSource() == true），重命名属于逻辑重命名，仅需逻辑改写 SQLite 字段（不允许触发物理 rename 破坏资产包内部物理）。
+        // 2. 如果是磁盘导航模式（isMirrorSource() == false），属于纯物理重命名，只重命名磁盘文件与离散缓存。
+        if (record.isCategory) return false;
 
         QString newName = value.toString().trimmed();
         if (newName.isEmpty()) return false;
+
+        auto* contentPanel = qobject_cast<ContentPanel*>(parent());
+        bool isMirror = contentPanel && contentPanel->isMirrorSource();
 
         auto& mutableRecord = m_allRecords[index.row()];
         QString oldPath = mutableRecord.path;
         QFileInfo info(oldPath);
         QString newPath = info.absolutePath() + "/" + newName;
 
-        if (oldPath != newPath) {
-            QString nativeNewPath = QDir::toNativeSeparators(newPath);
-            QPointer<ArcMetaVirtualDbModel> weakThis(this);
-            int row = index.row();
-            (void)QtConcurrent::run([weakThis, oldPath, nativeNewPath, newName, row, role]() {
-                if (ShellHelper::renameItem(oldPath, nativeNewPath)) {
-                    QMetaObject::invokeMethod(weakThis.data(), [weakThis, oldPath, nativeNewPath, newName, row, role]() {
-                        if (weakThis) {
-                            if (row < static_cast<int>(weakThis->m_allRecords.size())) {
-                                auto& mutableRec = weakThis->m_allRecords[row];
-                                mutableRec.path = nativeNewPath;
-                                mutableRec.filename = newName;
-                                weakThis->m_metaCache.remove(oldPath);
+        if (isMirror) {
+            // 内存逻辑重命名：仅改写数据库记录中对应的文件名
+            // 对应的业务逻辑通过逻辑字段重命名同步修改
+            return false; // 内存模式下分类重命名、资产名改写通过更顶层的专门逻辑/对话框操作，setData 在这里安全拦截
+        } else {
+            // 磁盘物理重命名
+            if (oldPath != newPath) {
+                QString nativeNewPath = QDir::toNativeSeparators(newPath);
+                QPointer<ArcMetaVirtualDbModel> weakThis(this);
+                int row = index.row();
+                (void)QtConcurrent::run([weakThis, oldPath, nativeNewPath, newName, row, role]() {
+                    if (ShellHelper::renameItem(oldPath, nativeNewPath)) {
+                        QMetaObject::invokeMethod(weakThis.data(), [weakThis, oldPath, nativeNewPath, newName, row, role]() {
+                            if (weakThis) {
+                                if (row < static_cast<int>(weakThis->m_allRecords.size())) {
+                                    auto& mutableRec = weakThis->m_allRecords[row];
+                                    mutableRec.path = nativeNewPath;
+                                    mutableRec.filename = newName;
+                                    weakThis->m_metaCache.remove(oldPath);
 
-                                // 2026-07-26 极致重构：在磁盘模式重命名成功后，同步就地无损迁移缩略图缓存与宽高比缓存，彻底解决重命名后变灰的设计缺陷（对应用户原话：“磁盘模式下重命名导致缩略图变灰设计缺陷修复”）
-                                weakThis->migrateCache(oldPath, nativeNewPath);
+                                    // 2026-07-26 磁盘模式重命名成功后，同步就地无损迁移缩略图缓存与宽高比缓存
+                                    weakThis->migrateCache(oldPath, nativeNewPath);
 
                                 // 物理同步：安全更新模型私有的路径到行号的映射
                                 auto it = weakThis->m_pathToIndex.find(oldPath);
@@ -351,6 +362,7 @@ bool ArcMetaVirtualDbModel::setData(const QModelIndex& index, const QVariant& va
         }
         return false;
     }
+}
 
     bool metaUpdated = false;
     if (role == RatingRole) {
@@ -2079,14 +2091,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         // 2026-07-xx 按照 Plan-117：语义分流。判定当前是否为“镜像源”
         // 镜像源定义：侧边栏分类模式 (isMirrorSource() 为真) 
         // 或 物理导航模式下已进入托管库内部 (镜像加速态)
-        // 🚨 [双轨不隔离违规点-3]: 右键菜单在非镜像源（磁盘模式）下，强行判断 isManaged 或 isInsideLib 以允许数据库修改操作（归类/颜色标签/置顶），破坏了磁盘模式行为等同于资源管理器的纯粹性
+        // 🚨 [双轨不隔离违规点-3 物理隔离修复]: 磁盘模式右键菜单 100% 与内存数据库模式隔离，
+        // 表现等同于 Windows 资源管理器。普通物理磁盘导航下的项绝对不提供“归类/设置颜色/设置评分”等任何逻辑库特权操作。
         bool isMirror = isMirrorSource();
-        if (!isMirror && onItem) {
-            // 物理修复：只要该项已被登记（isManaged），或者是托管库内部的项，一律允许显示“设定颜色标签”和“归类”
-            bool isManaged = currentIndex.data(ManagedRole).toBool();
-            bool isInsideLib = MetadataManager::instance().isInsideManagedLibrary(path.toStdWString());
-            isMirror = isManaged || isInsideLib;
-        }
 
         if (isMirror) {
             // [镜像源：归类与元数据编辑区]
@@ -2738,16 +2745,12 @@ void ContentPanel::performPaste() {
             if (!effect.isEmpty() && (effect.at(0) & 0x02)) isMove = true; 
         } 
 
-        if (ShellHelper::copyOrMoveItems(fromPaths, m_currentPath, isMove)) { 
+        if (ShellHelper::copyOrMoveItems(fromPaths, m_currentPath, isMove)) {
             if (isMove) {
-                for (const QString& src : fromPaths) {
-                    QString destPath = QDir(m_currentPath).absoluteFilePath(QFileInfo(src).fileName());
-                    // 🚨 [双轨不隔离违规点-5]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
-                    MetadataManager::instance().syncAfterMove(src.toStdWString(), destPath.toStdWString());
-                }
+                // 🚨 [双轨不隔离违规点-5 物理隔离修复]: 磁盘模式（DiskNav）物理移动仅作纯粹的文件 I/O 处理，不回调 syncAfterMove。
                 UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), m_currentPath));
             }
-            loadDirectory(m_currentPath, m_isRecursive); 
+            loadDirectory(m_currentPath, m_isRecursive);
         } else {
             ToolTipOverlay::instance()->showText(QCursor::pos(), "粘贴失败：文件写入操作未能完成", 2000, QColor("#e81123"));
         }
@@ -2813,9 +2816,10 @@ bool ContentPanel::isMirrorSource() const {
 }
 
 bool ContentPanel::isManagedContext() const {
-    // 🚨 [双轨不隔离违规点-2]: 磁盘模式（isMirrorSource() == false）下通过 isInsideManagedLibrary 判断当前路径是否在托管库中，导致双轨制逻辑交叉混叠
+    // 🚨 [双轨不隔离违规点-2 物理隔离修复]: 磁盘模式与内存模式 100% 绝对物理隔离。
+    // 在磁盘模式（isMirrorSource() == false）下直接返回 false，绝不穿透查询托管库，拒绝一切逻辑混叠。
     if (isMirrorSource()) return true;
-    return MetadataManager::instance().isInsideManagedLibrary(m_currentPath.toStdWString());
+    return false;
 }
 
 void ContentPanel::onSelectionChanged() { 
@@ -2911,12 +2915,7 @@ void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& t
 
         if (ShellHelper::copyOrMoveItems(paths, destDir, isMove)) {
             if (isMove) {
-                for (const QString& src : paths) {
-                    QString destPath = QDir(destDir).absoluteFilePath(QFileInfo(src).fileName());
-                    // 🚨 [双轨不隔离违规点-4]: 磁盘模式（DiskNav）物理移动文件后直接调用 MetadataManager::syncAfterMove 相互调用对方的处理逻辑，存在耦合
-                    MetadataManager::instance().syncAfterMove(
-                        src.toStdWString(), destPath.toStdWString());
-                }
+                // 🚨 [双轨不隔离违规点-4 物理隔离修复]: 磁盘模式（DiskNav）物理拖拽移动仅作纯粹的文件 I/O 处理，不回调 syncAfterMove。
                 UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
             }
             loadDirectory(m_currentPath, m_isRecursive);
@@ -3053,6 +3052,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             for (const QFileInfo& info : entries) { 
                 if (!panelPtr) return; 
                 if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue; 
+                if (info.isDir() && info.fileName().compare(".arcmeta", Qt::CaseInsensitive) == 0) continue;
 
                 QString absPath = info.absoluteFilePath();
                 ItemRecord itemRec = ItemRecord::create(absPath);

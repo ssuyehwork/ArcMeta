@@ -2,6 +2,12 @@
 #include "../core/AppConfig.h"
 #include "WindowsShellThumbnailProvider.h"
 #include <QFileInfo>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 #include <QSvgRenderer>
 #include <QPainter>
 #include <QMap>
@@ -49,6 +55,20 @@ QColor MediaColorExtractor::getExtensionColor(const QString& ext) {
     s_cache[upperExt] = color;
     AppConfig::instance().setValue(settingKey, color);
     return color;
+}
+
+QString MediaColorExtractor::diskThumbCachePath(const QString& path, int size) {
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString cacheDir = QDir(appDir).filePath(".arcmeta/disk_thumbs/");
+    QDir().mkpath(cacheDir);
+#ifdef Q_OS_WIN
+    SetFileAttributesW(QDir(appDir).filePath(".arcmeta").toStdWString().c_str(), FILE_ATTRIBUTE_HIDDEN);
+#endif
+
+    QFileInfo fi(path);
+    QString hashKey = QString("%1_%2_%3_%4").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
+    QString safeName = QString::number(qHash(hashKey), 16) + ".png";
+    return cacheDir + safeName;
 }
 
 QColor MediaColorExtractor::quantizeColor(const QColor& color) {
@@ -199,30 +219,40 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
 }
 
 QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
+    QString cachePath = diskThumbCachePath(path, size);
+    if (QFile::exists(cachePath)) {
+        QImage cached;
+        if (cached.load(cachePath)) return cached;
+    }
+
     QFileInfo fi(path);
     QString ext = fi.suffix().toLower();
+    QImage img;
+
     if (ext == "svg") {
         QSvgRenderer renderer(path);
         if (renderer.isValid()) {
-            QImage img(size, size, QImage::Format_ARGB32);
+            img = QImage(size, size, QImage::Format_ARGB32);
             img.fill(Qt::transparent);
             QPainter painter(&img);
             renderer.render(&painter);
-            return img;
         }
     } else if (ext == "psd" || ext == "psb") {
-        QImage img = extractEmbeddedPsdThumbnail(path);
-        if (!img.isNull()) return img;
+        img = extractEmbeddedPsdThumbnail(path);
     } else if (ext == "ai") {
-        QImage img = extractEmbeddedAiPreview(path);
-        if (!img.isNull()) return img;
+        img = extractEmbeddedAiPreview(path);
     } else if (ext == "eps") {
-        QImage img = extractEmbeddedEpsPreview(path);
-        if (!img.isNull()) return img;
+        img = extractEmbeddedEpsPreview(path);
     }
-    
-    QImage img = WindowsShellThumbnailProvider::getShellThumbnail(path, size);
-    if (img.isNull()) img.load(path);
+
+    if (img.isNull()) {
+        img = WindowsShellThumbnailProvider::getShellThumbnail(path, size);
+        if (img.isNull()) img.load(path);
+    }
+
+    if (!img.isNull()) {
+        img.save(cachePath, "PNG");
+    }
     return img;
 }
 
