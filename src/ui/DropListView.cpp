@@ -1,4 +1,5 @@
 #include "DropListView.h"
+#include "../core/ModelContract.h"
 #include "ContentPanel.h"
 #include <QDrag>
 #include <QPixmap>

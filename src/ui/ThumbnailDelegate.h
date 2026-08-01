@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QStyledItemDelegate>
+#include "../core/ModelContract.h"
 
 namespace ArcMeta {
 
