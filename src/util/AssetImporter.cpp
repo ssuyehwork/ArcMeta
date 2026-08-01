@@ -182,37 +182,65 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     }
 
     // 5. 写入数据库：将整个 .arc 资产包文件夹作为唯一的受控资产单位进行激活和登记！
-    // 完美契合“1个 .arc 包 = 1个条目”的核心准则，杜绝包内原始文件重复计账导致的 FID 断层假死现象。
     std::wstring wContainerPath = QDir::toNativeSeparators(containerDir).toStdWString();
-    MetadataManager::instance().ensureActivated(wContainerPath);
+    sqlite3* db = DatabaseManager::instance().getDbForPath(wContainerPath);
+    if (!db) return false;
 
-    // 更新 added_at 为当前毫秒时间戳
+    std::string actualFolderId = fileId.toStdString(); // folder_id 为 13 位 Base36 包 ID
+
+    // 🚨 优雅大事务重构：资产表(metadata)与分类关联表(category_items) 100% 存放在同一个物理 SQLite 分库中，同温同事务落盘
+    SqlTransaction trans(db);
+
     long long nowMsecs = QDateTime::currentMSecsSinceEpoch();
-    MetadataManager::instance().setAddedAt(wContainerPath, nowMsecs, false);
+    // a. 写入元数据资产表 (绑定 folder_id)
+    sqlite3_stmt* stmtMeta = nullptr;
+    const char* sqlMeta = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, added_at) VALUES (?, ?, ?, ?)";
+    if (sqlite3_prepare_v2(db, sqlMeta, -1, &stmtMeta, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmtMeta, 1, actualFolderId.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmtMeta, 2, wContainerPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmtMeta, 3, 1); // 文件夹资产
+        sqlite3_bind_int64(stmtMeta, 4, nowMsecs);
+        sqlite3_step(stmtMeta);
+        sqlite3_finalize(stmtMeta);
+    }
 
-    // 🚨 显式补充 SQLite 数据库持久化落盘，确保新创建的 .arc 资产包被正式写入 SQLite 的 metadata 表，使得刷新后可以精准查出并刷新卡片
-    MetadataManager::instance().persistAsync(wContainerPath, false, true);
-
-    // 从容器路径中反查其实际的物理 File ID，用以执行 100% 精准的逻辑分类绑定
-    std::string actualContainerFid = MetadataManager::instance().getFileIdSync(wContainerPath);
-
-    // 6. 分类归纳
-    // 🚨 归一化绑定：若未指定子分类(targetCatId<=0)，自动绑定至当前盘符托管库根分类(如 ArcMeta.Library_G)
+    // b. 写入分类关联表
     int finalCatId = targetCatId;
     if (finalCatId <= 0) {
         QString driveLetter = QFileInfo(destPath).absolutePath().left(1).toUpper();
         QString libCatName = "ArcMeta.Library_" + driveLetter;
-        auto allCats = CategoryRepo::getAll();
-        for (const auto& cat : allCats) {
-            if (cat.parentId == 0 && QString::fromStdWString(cat.name).compare(libCatName, Qt::CaseInsensitive) == 0) {
-                finalCatId = cat.id;
-                break;
+        // 从分库中读取物理托管库分类 id
+        sqlite3_stmt* stmtCat = nullptr;
+        if (sqlite3_prepare_v2(db, "SELECT id FROM categories WHERE parent_id = 0 AND name = ?", -1, &stmtCat, nullptr) == SQLITE_OK) {
+            std::wstring wLibCatName = libCatName.toStdWString();
+            sqlite3_bind_text16(stmtCat, 1, wLibCatName.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmtCat) == SQLITE_ROW) {
+                finalCatId = sqlite3_column_int(stmtCat, 0);
             }
+            sqlite3_finalize(stmtCat);
         }
     }
-    if (finalCatId > 0 && !actualContainerFid.empty()) {
-        CategoryRepo::addItemToCategory(finalCatId, actualContainerFid, wContainerPath);
+
+    if (finalCatId > 0) {
+        sqlite3_stmt* stmtItems = nullptr;
+        const char* sqlItems = "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)";
+        if (sqlite3_prepare_v2(db, sqlItems, -1, &stmtItems, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmtItems, 1, finalCatId);
+            sqlite3_bind_text(stmtItems, 2, actualFolderId.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text16(stmtItems, 3, wContainerPath.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(stmtItems, 4, static_cast<double>(nowMsecs));
+            sqlite3_step(stmtItems);
+            sqlite3_finalize(stmtItems);
+        }
     }
+
+    if (!trans.commit()) {
+        qWarning() << "[AssetImporter] 100% 同盘单连接事务提交失败！路径:" << destPath;
+        return false;
+    }
+
+    // c. 激活内存缓存
+    MetadataManager::instance().registerItem(wContainerPath, true);
 
     return true;
 }

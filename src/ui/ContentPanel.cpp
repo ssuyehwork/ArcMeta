@@ -3271,7 +3271,7 @@ void ContentPanel::loadCategory(int categoryId) {
         allRecords.reserve(allRecords.size() + items.size());
         for (const auto& item : items) {
             if (!weakThis) return;
-            std::wstring wPath = MetadataManager::instance().getPathByFid(item.fileId128);
+            std::wstring wPath = MetadataManager::instance().getPathByFid(item.folderId);
             if (wPath.empty() && !item.pathHint.empty()) {
                 wPath = item.pathHint; 
             }
