@@ -24,6 +24,7 @@ public:
     static QImage getImageForAnalysis(const QString& path, int size = 256);
     static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile);
     static QColor extractDominantColor(const QString& targetFile);
+    static QImage extractEmbeddedPsdThumbnail(const QString& path);
 };
 
 } // namespace ArcMeta
