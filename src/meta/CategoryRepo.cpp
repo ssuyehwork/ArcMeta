@@ -853,7 +853,7 @@ std::vector<std::string> CategoryRepo::getFileIdsInCategory(int categoryId) {
 bool CategoryRepo::associateItem(int categoryId, const std::wstring& path) {
     // 根据路径先获取 Ingestion/Metadata FID 进行物理绑定
     std::wstring normPath = MetadataManager::normalizePath(path);
-    ItemMeta meta = MetadataManager::instance().getMeta(normPath);
+    RuntimeMeta meta = MetadataManager::instance().getMeta(normPath);
     if (!meta.folderId.empty()) {
         return addItemToCategory(categoryId, meta.folderId, normPath);
     }
