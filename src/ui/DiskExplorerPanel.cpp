@@ -1,5 +1,6 @@
 #include "DiskExplorerPanel.h"
 #include "UiHelper.h"
+#include "../core/ModelContract.h"
 #include "../util/ShellHelper.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"
@@ -226,7 +227,7 @@ void DiskExplorerPanel::loadDirectory(const QString& path, bool recursive) {
 }
 
 void DiskExplorerPanel::refreshVisibleThumbnails() {
-    QAbstractItemView* view = (m_viewStack->currentIndex() == 0) ? m_gridView : m_treeView;
+    QAbstractItemView* view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_gridView) : static_cast<QAbstractItemView*>(m_treeView);
     if (!view) return;
 
     QRect viewportRect = view->viewport()->rect();

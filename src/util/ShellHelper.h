@@ -36,6 +36,21 @@ public:
     static void openInExplorer(const QString& path);
 
     /**
+     * @brief 2026-08-01 编译补全：打开指定文件/文件夹条目 (通过系统默认关联打开)
+     */
+    static void openItem(const QString& path);
+
+    /**
+     * @brief 2026-08-01 编译补全：在资源管理器中定位 (showInExplorer 别名)
+     */
+    static void showInExplorer(const QString& path);
+
+    /**
+     * @brief 2026-08-01 编译补全：移入回收站
+     */
+    static bool deleteItem(const QString& path);
+
+    /**
      * @brief 重命名条目
      */
     static bool renameItem(const QString& oldPath, const QString& newPath);

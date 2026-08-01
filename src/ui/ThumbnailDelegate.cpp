@@ -1,4 +1,5 @@
 #include "ThumbnailDelegate.h"
+#include "../core/ModelContract.h"
 #include "ContentPanel.h"
 #include "CardPainterHelper.h"
 #include "ElidedTextUtility.h"

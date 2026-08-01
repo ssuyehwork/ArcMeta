@@ -1,5 +1,6 @@
 #include "CategoryLibraryPanel.h"
 #include "UiHelper.h"
+#include "../core/ModelContract.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
 #include "../util/AssetImporter.h"
@@ -193,7 +194,7 @@ void CategoryLibraryPanel::loadPaths(const QStringList& paths) {
 }
 
 void CategoryLibraryPanel::refreshVisibleThumbnails() {
-    QAbstractItemView* view = (m_viewStack->currentIndex() == 0) ? m_gridView : m_treeView;
+    QAbstractItemView* view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_gridView) : static_cast<QAbstractItemView*>(m_treeView);
     if (!view) return;
 
     QRect viewportRect = view->viewport()->rect();

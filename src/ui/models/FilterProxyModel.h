@@ -2,6 +2,7 @@
 
 #include <QSortFilterProxyModel>
 #include "../../meta/MetadataDefs.h"
+#include "../FilterPanel.h"
 
 namespace ArcMeta {
 

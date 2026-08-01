@@ -1,5 +1,6 @@
 #include "ArcMetaVirtualDbModel.h"
 #include "../UiHelper.h"
+#include "../../core/ModelContract.h"
 #include "../WindowsShellThumbnailProvider.h"
 #include "../../util/ShellHelper.h"
 #include "../../meta/MetadataManager.h"
@@ -91,8 +92,8 @@ QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
         QVariantList pl;
         for (const auto& pe : record.palettes) {
             QVariantMap m;
-            m["color"] = pe.color;
-            m["ratio"] = pe.ratio;
+            m["color"] = pe.first;
+            m["ratio"] = pe.second;
             pl.append(m);
         }
         return pl;
