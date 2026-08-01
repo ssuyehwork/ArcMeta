@@ -1069,15 +1069,16 @@ void CategoryRepo::fullRecount() {
     }
 
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    sqlite3* db = DatabaseManager::instance().getGlobalDb();
 
     // 1. 获取所有在各个分库中，被绑定了自定义分类 (category_id > 0) 的 folder_id
     std::unordered_set<std::string> customizedFids;
-    for (sqlite3* db : dbs) {
+    for (sqlite3* loopDb : dbs) {
         sqlite3_stmt* stmt = nullptr;
         const char* sql = "SELECT DISTINCT folder_id FROM category_items "
                           "WHERE category_id > 0 AND category_id NOT IN "
                           "(SELECT id FROM categories WHERE parent_id = 0 AND name LIKE 'ArcMeta.Library_%')";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(loopDb, sql, -1, &stmt, nullptr) == SQLITE_OK) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
                 if (fid) customizedFids.insert(fid);
