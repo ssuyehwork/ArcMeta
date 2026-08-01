@@ -35,7 +35,7 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
     QString nPath = QString::fromStdWString(wPath);
 
     // 1. 物理属性采样 (零 I/O 核心)
-    // 🚨 [双轨不隔离违规点-1 物理隔离修复]: 磁盘导航模式下不共享、不穿透读取托管库数据库。
+    // 🚨 [双轨不隔离违规点-1 物理隔离修复]: 磁盘导航模式下不共享、不穿透读取资源库数据库。
     // 如果没有 providedMeta，且不是 .arc 素材包路径，绝不穿透 MetadataManager。
     RuntimeMeta meta;
     bool isArcPath = (wPath.find(L".arc") != std::wstring::npos);

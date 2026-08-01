@@ -1939,7 +1939,7 @@ void MainWindow::initDriveBar() {
         btn->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(btn, &QWidget::customContextMenuRequested, this, &MainWindow::onDriveButtonContextMenu);
         
-        // 根据托管库是否存在初始化状态
+        // 根据资源库是否存在初始化状态
         QString managedPath = drive.absolutePath() + "ArcMeta.Library_" + letter.left(1);
         if (QDir(managedPath).exists()) {
             btn->setState(DriveButton::Active);
@@ -1952,7 +1952,7 @@ void MainWindow::initDriveBar() {
     // 自动追加加载自定义 monitored buttons
     updateCustomFolderButtons();
 
-    // 连接文件监视信号，当发现第三方删除托管库或自定义监控文件夹时安全更新 UI 与底层除账
+    // 连接文件监视信号，当发现第三方删除资源库或自定义监控文件夹时安全更新 UI 与底层除账
     connect(&NativeFolderWatcher::instance(), &NativeFolderWatcher::managedFolderRemoved, this, [this](const std::wstring& path) {
         QString qPath = QString::fromStdWString(path);
         std::wstring normPath = MetadataManager::normalizePath(path);
@@ -1964,7 +1964,7 @@ void MainWindow::initDriveBar() {
         if (customFolders.contains(finalPath) || customFolders.contains(qPath)) {
             removeCustomMonitoredFolder(qPath);
         } else {
-            // 默认托管库清退逻辑
+            // 默认资源库清退逻辑
             QFileInfo info(qPath);
             QString letter = info.absolutePath().left(2).toUpper(); // "D:"
             if (m_driveButtons.contains(letter)) {
@@ -2003,7 +2003,7 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
         if (QDir().mkpath(managedPath)) {
             btn->setState(DriveButton::Active);
             
-            // 2026-08-xx 物理同步：创建托管库时，同步注册逻辑分类并锚定 FRN
+            // 2026-08-xx 物理同步：创建资源库时，同步注册逻辑分类并锚定 FRN
             std::wstring wPath = QDir::toNativeSeparators(managedPath).toStdWString();
             std::string fid;
             std::wstring frnStr;
@@ -2020,7 +2020,7 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
                 } catch (...) {}
             }
 
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "托管库创建成功", 1500, Style::SuccessGreen);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "资源库创建成功", 1500, Style::SuccessGreen);
         }
     } else if (val == 2) {
         ShellHelper::openInExplorer(managedPath);
@@ -2028,7 +2028,7 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
         // 2026-07-xx 按照 Development_Plan 2.1：“重新扫描该盘”是指扫描该盘符下的“ArcMeta.Library_[盘符]”文件夹里所有的数据
         if (QDir(managedPath).exists()) {
             MetadataManager::instance().markAsRegistered(managedPath.toStdWString());
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "已开始重新扫描托管库", 1500, QColor("#378ADD"));
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "已开始重新扫描资源库", 1500, QColor("#378ADD"));
         }
     }
 }
@@ -2184,7 +2184,7 @@ void MainWindow::onFolderButtonContextMenu(const QPoint& pos) {
         AppConfig::instance().setValue(QString("DriveBar/FolderColor_%1").arg(path), hexColor.toUpper());
         AppConfig::instance().sync();
         
-        // 如果此物理路径在托管库内已被入库标记为分类，同时也应同步存入 categories 表
+        // 如果此物理路径在资源库内已被入库标记为分类，同时也应同步存入 categories 表
         std::wstring normPath = MetadataManager::normalizePath(path.toStdWString());
         MetadataManager::instance().setColor(normPath, hexColor.toUpper().toStdWString(), true);
         

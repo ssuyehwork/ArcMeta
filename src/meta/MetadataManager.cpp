@@ -472,7 +472,7 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         QFileInfo info(QString::fromStdWString(nPath));
         if (info.isDir()) {
             QDir dir(info.absoluteFilePath());
-            // 🚨 核心逻辑：直接扫描托管库下的顶层子项
+            // 🚨 核心逻辑：直接扫描资源库下的顶层子项
             QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot);
             for (const QFileInfo& entry : entries) {
                 QString fn = entry.fileName();
@@ -481,7 +481,7 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
                 if (entry.isDir() && fn.endsWith(".arc", Qt::CaseInsensitive)) {
                     pathsToRegister.push_back(normalizePath(entry.absoluteFilePath().toStdWString()));
                 }
-                // 2. 如果是散落在托管库根目录的普通物理文件，也作为独立资产登记
+                // 2. 如果是散落在资源库根目录的普通物理文件，也作为独立资产登记
                 else if (entry.isFile() && !fn.endsWith("_thumbnail.png", Qt::CaseInsensitive) && 
                          fn.compare("metadata.scch", Qt::CaseInsensitive) != 0) {
                     pathsToRegister.push_back(normalizePath(entry.absoluteFilePath().toStdWString()));
@@ -828,7 +828,7 @@ void MetadataManager::saveToDiskModeJson(const std::wstring& nPath, std::functio
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     if (isInsideManagedLibrary(nPath)) {
-        // A. 托管库模式：写入 SQLite 数据库
+        // A. 资源库模式：写入 SQLite 数据库
         ensureActivated(nPath);
         { 
             std::unique_lock<std::shared_mutex> lock(m_mutex); 
@@ -1325,11 +1325,11 @@ void MetadataManager::syncAfterMove(const std::wstring& oldPath, const std::wstr
         // 库内移动（含跨托管子文件夹）：仅路径变化，元数据整体保留
         renameItem(nOld, nNew);
     } else if (wasManaged && !isNowManaged) {
-        // 移出托管库：等同于永久删除，彻底清除元数据
+        // 移出资源库：等同于永久删除，彻底清除元数据
         removeMetadataSync(nOld);
         notifyFullUIRebuild();
     } else if (!wasManaged && isNowManaged) {
-        // 移入托管库：走登记流水线，触发媒体特征提取
+        // 移入资源库：走登记流水线，触发媒体特征提取
         markAsRegistered(nNew);
     }
     // 库外移到库外：与托管数据无关，不做任何处理
@@ -1837,7 +1837,7 @@ bool MetadataManager::isInsideManagedLibrary(const std::wstring& path) {
     std::wstring normW = normalizePath(path);
     QString qPath = QString::fromStdWString(normW).toLower();
 
-    // 1. 检查默认托管库
+    // 1. 检查默认资源库
     std::wstring volSerial = getVolumeSerialNumber(path);
     QString letter = (path.length() >= 2 && path[1] == L':') ? QString::fromWCharArray(&path[0], 1) : "";
     std::wstring managedAbsW = getManagedLibraryPath(volSerial, letter);
@@ -1896,7 +1896,7 @@ void MetadataManager::registerArcmetaFrn(const std::wstring&) {
 }
 
 std::string MetadataManager::getFolderIdSync(const std::wstring& path) {
-    // 1. 如果处于受控托管库中，直接提取 13 位 Base36 ID，终结系统级 FRN 物理依赖
+    // 1. 如果处于受控资源库中，直接提取 13 位 Base36 ID，终结系统级 FRN 物理依赖
     std::string base36 = extractBase36Id(path);
     if (!base36.empty()) {
         return base36;

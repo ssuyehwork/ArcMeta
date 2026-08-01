@@ -9,7 +9,7 @@ class DriveButton : public QPushButton {
     Q_OBJECT
 public:
     enum State {
-        Inactive, // 状态A：灰静 (未激活/无托管库)
+        Inactive, // 状态A：灰静 (未激活/无资源库)
         Active,   // 状态B：蓝静 (已激活/任务空闲)
         Running,  // 状态C：蓝转 (任务执行中)
         Paused    // 状态D：灰暂 (任务暂停)

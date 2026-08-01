@@ -47,7 +47,7 @@ void NavigationHistoryService::recordRecentVisitedFolder(const std::wstring& pat
     if (path.empty()) return;
     std::wstring managedAbs = AutoImportManager::getManagedLibraryPath(path);
     if (!managedAbs.empty() && path.size() >= managedAbs.size() && _wcsnicmp(path.c_str(), managedAbs.c_str(), managedAbs.size()) == 0) {
-        return; // 在托管库内部，不作为物理最近文件夹记录
+        return; // 在资源库内部，不作为物理最近文件夹记录
     }
 
     std::wstring volSerial = MetadataManager::getVolumeSerialNumber(path);

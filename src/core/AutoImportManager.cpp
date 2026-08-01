@@ -61,7 +61,7 @@ void AutoImportManager::syncAllManagedLibraries(bool allowLightweight) {
         for (const QString& entry : entries) {
             if (QString::compare(entry, targetName, Qt::CaseInsensitive) == 0) {
                 QString managedPath = rootDir.absoluteFilePath(entry);
-                qDebug() << "[AutoImport] 启动对账：发现物理托管库，执行同步 ->" << managedPath;
+                qDebug() << "[AutoImport] 启动对账：发现物理资源库，执行同步 ->" << managedPath;
                 (void)QtConcurrent::run([this, managedPath, allowLightweight]() {
                     handleRecursiveIngestion(QDir::toNativeSeparators(managedPath).toStdWString(), allowLightweight);
                 });
@@ -187,7 +187,7 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath, b
     if (!dir.exists()) return;
 
     if (allowLightweight && !hasTopLevelChanged(rootPath)) {
-        qDebug() << "[AutoImport] [Incremental] 顶层快照无变化，跳过托管库深度递归对账与盘点:" << QString::fromStdWString(rootPath);
+        qDebug() << "[AutoImport] [Incremental] 顶层快照无变化，跳过资源库深度递归对账与盘点:" << QString::fromStdWString(rootPath);
         return;
     }
 

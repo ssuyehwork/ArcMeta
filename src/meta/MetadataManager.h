@@ -283,13 +283,13 @@ public:
     static std::wstring getVolumeSerialNumber(const std::wstring& path);
 
     /**
-     * @brief 判定给定路径是否位于任何磁盘的托管库文件夹内部
+     * @brief 判定给定路径是否位于任何磁盘的资源库文件夹内部
      * 2026-07-xx 按照 Plan-117：收拢物理路径归属判定逻辑
      */
     static bool isInsideManagedLibrary(const std::wstring& path);
 
     /**
-     * @brief 获取指定卷的托管库绝对路径
+     * @brief 获取指定卷的资源库绝对路径
      * 2026-07-xx 按照 Plan-118：整合配置查询与约定兜底逻辑，确保全系统识别一致性
      */
     static std::wstring getManagedLibraryPath(const std::wstring& volSerial, const QString& driveLetter);

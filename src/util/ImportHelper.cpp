@@ -29,7 +29,7 @@ void ImportHelper::importPaths(const QStringList& paths,
                                std::function<void()> onComplete) {
     if (paths.isEmpty()) return;
 
-    BatchProgressDialog* progress = new BatchProgressDialog("正在迁移项目至托管库...", parent);
+    BatchProgressDialog* progress = new BatchProgressDialog("正在迁移项目至资源库...", parent);
     progress->show();
 
     struct ImportContext {
@@ -67,7 +67,7 @@ void ImportHelper::importPaths(const QStringList& paths,
                                          Q_ARG(int, handled), Q_ARG(int, total), Q_ARG(QString, QFileInfo(src).fileName()));
             }
 
-            // 🚨 核心逻辑：如果目标位置是 ArcMeta.Library_[盘符] 托管库，为其创建 .arc 资产包！
+            // 🚨 核心逻辑：如果目标位置是 ArcMeta.Library_[盘符] 资源库，为其创建 .arc 资产包！
             QString destPath;
             if (targetPhysicalPath.contains("ArcMeta.Library_", Qt::CaseInsensitive)) {
                 // 生成 13 位唯一 ID，建 ID.arc/ 容器

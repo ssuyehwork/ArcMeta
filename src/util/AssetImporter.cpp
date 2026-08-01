@@ -68,7 +68,7 @@ void AssetImporter::importAssets(const QStringList& paths,
                                          Q_ARG(int, handled), Q_ARG(int, total), Q_ARG(QString, QFileInfo(src).fileName()));
             }
 
-            // 1. 获取目标盘符托管库路径 [盘符]:/ArcMeta.Library_[盘符]/
+            // 1. 获取目标盘符资源库路径 [盘符]:/ArcMeta.Library_[盘符]/
             // 优先由 targetCatId 反查它所属的顶层库路径；否则退化为用源文件盘符兜底
             QString managedRoot;
             if (targetCatId > 0) {
@@ -90,7 +90,7 @@ void AssetImporter::importAssets(const QStringList& paths,
             }
             
             if (!QDir().mkpath(managedRoot)) {
-                qWarning() << "[AssetImporter] 无法建立托管库根目录:" << managedRoot << " 导入源:" << src;
+                qWarning() << "[AssetImporter] 无法建立资源库根目录:" << managedRoot << " 导入源:" << src;
                 continue;
             }
 
@@ -209,7 +209,7 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     if (finalCatId <= 0) { 
         QString driveLetter = QFileInfo(destPath).absolutePath().left(1).toUpper(); 
         QString libCatName = "ArcMeta.Library_" + driveLetter; 
-        // 从分库中读取物理托管库分类 id 
+        // 从分库中读取物理资源库分类 id 
         sqlite3_stmt* stmtCat = nullptr; 
         if (sqlite3_prepare_v2(db, "SELECT id FROM categories WHERE parent_id = 0 AND name = ?", -1, &stmtCat, nullptr) == SQLITE_OK) { 
             std::wstring wLibCatName = libCatName.toStdWString(); 

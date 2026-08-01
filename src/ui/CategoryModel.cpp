@@ -233,7 +233,7 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
             }
             if (!found) return false;
 
-            // 限制顶级托管库重命名
+            // 限制顶级资源库重命名
             if (!targetCat.physicalPath.empty()) {
                 QString oldPath = QString::fromStdWString(targetCat.physicalPath);
                 QFileInfo oldInfo(oldPath);

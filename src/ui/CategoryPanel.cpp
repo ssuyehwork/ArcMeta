@@ -1056,7 +1056,7 @@ void CategoryPanel::initUi() {
             if (type == "category" && index.data(IdRole).toInt() > 0) {
                 targetCatId = index.data(IdRole).toInt();
             } 
-            // 拖到根托管库上 (如 ArcMeta.Library_D)
+            // 拖到根资源库上 (如 ArcMeta.Library_D)
             else if (index.data(IdRole).toInt() == 0 || name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
                 targetCatId = CategoryRepo::UNCATEGORIZED_CAT_ID; // -2 未分类
             }

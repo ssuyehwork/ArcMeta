@@ -14,7 +14,7 @@ public:
     static SystemBootstrapper& instance();
 
     /**
-     * @brief 驱动多盘符托管库并开启底层 NativeFolderWatcher IOCP 监控 (从 MainWindow 移出)
+     * @brief 驱动多盘符资源库并开启底层 NativeFolderWatcher IOCP 监控 (从 MainWindow 移出)
      */
     void bootstrapMonitors();
 

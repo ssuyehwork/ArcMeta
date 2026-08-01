@@ -22,13 +22,13 @@ public:
     void stopListening();
 
     /**
-     * @brief 2026-08-xx 物理同步：扫描所有盘符，补全物理存在但逻辑缺失的托管库根分类
+     * @brief 2026-08-xx 物理同步：扫描所有盘符，补全物理存在但逻辑缺失的资源库根分类
      */
     void syncAllManagedLibraries(bool allowLightweight = false);
 
 
     /**
-     * @brief 2026-07-xx 按照 Plan-118：获取磁盘对应的托管库物理绝对路径
+     * @brief 2026-07-xx 按照 Plan-118：获取磁盘对应的资源库物理绝对路径
      * @param pathOrVolSerial 路径或卷序列号
      */
     static std::wstring getManagedLibraryPath(const std::wstring& pathOrVolSerial);
@@ -59,7 +59,7 @@ private:
     std::mutex m_queueMutex;
     bool m_isListening = false;
 
-    // 2026-08-xx [Plan-131 方案 B]：托管库根目录 FRN 缓存
+    // 2026-08-xx [Plan-131 方案 B]：资源库根目录 FRN 缓存
     std::unordered_set<uint64_t> m_managedFrnCache;
 };
 

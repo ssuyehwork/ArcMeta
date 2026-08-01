@@ -117,7 +117,7 @@ CoreController::CoreController(QObject* parent) : QObject(parent) {
                 continue;
             }
 
-            // 2. 原普通托管库/常规文件的 IOCP 变动响应逻辑
+            // 2. 原普通资源库/常规文件的 IOCP 变动响应逻辑
             if (ev.action == ArcMeta::WatcherAction::Added || ev.action == ArcMeta::WatcherAction::Modified) {
                 if (ev.isDirectory) {
                     (void)QtConcurrent::run([normNewPath]() {
@@ -162,7 +162,7 @@ void CoreController::startSystem() {
             AppConfig::instance().sync();
 
             // 启动原生监控服务 (对应用户原话："采用NativeFolderWatcher (IOCP) 机制的方式")
-            // 托管库无需开启 IOCP 监控（已取消）
+            // 资源库无需开启 IOCP 监控（已取消）
             const auto drives = QDir::drives();
             for (const QFileInfo& d : drives) {
                 std::wstring wPath = d.absolutePath().toStdWString();
@@ -172,7 +172,7 @@ void CoreController::startSystem() {
                 if (volSerial != L"UNKNOWN") {
                     std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
                     if (!managedAbsW.empty()) {
-                        qDebug() << "[Core] 识别到托管库，已取消开启 IOCP 监控:" << QString::fromStdWString(managedAbsW);
+                        qDebug() << "[Core] 识别到资源库，已取消开启 IOCP 监控:" << QString::fromStdWString(managedAbsW);
                         // NativeFolderWatcher::instance().addWatch(managedAbsW);
                     }
                 }

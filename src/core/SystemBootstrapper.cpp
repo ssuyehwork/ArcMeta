@@ -24,7 +24,7 @@ void SystemBootstrapper::bootstrapMonitors() {
         if (volSerial != L"UNKNOWN") {
             std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
             if (!managedAbsW.empty()) {
-                qDebug() << "[Boot] 托管库无需点火 IOCP 监控（已取消）:" << QString::fromStdWString(managedAbsW);
+                qDebug() << "[Boot] 资源库无需点火 IOCP 监控（已取消）:" << QString::fromStdWString(managedAbsW);
                 // 取消监控 ArcMeta.Library_[盘符] 文件夹
                 // NativeFolderWatcher::instance().addWatch(managedAbsW);
             }
