@@ -76,7 +76,7 @@ public:
     static bool removeItemFromCategory(int categoryId, const std::string& folderId);
     static bool removeAllCategories(const std::string& folderId);
     static bool removeAllCategoriesBatch(const std::vector<std::string>& folderIds);
-    static std::vector<int> getItemCategoryIds(const std::string& folderId);
+    static std::vector<int> getItemCategoryIds(const std::string& folderId, const std::wstring& pathHint = L"");
     static bool moveToTrashBatch(const std::vector<std::string>& folderIds);
 
     static bool restoreFromTrash(const std::string& folderId);
@@ -141,6 +141,7 @@ public:
 
     static std::atomic<int> s_totalFileCount;
     static std::atomic<int> s_categorizedCount;
+    static std::atomic<bool> s_countsDirty;
 
     // 2026-08-xx：侧边栏高性能原子计数器
     static std::atomic<int> s_totalCount;             // 对应 "all"

@@ -289,6 +289,10 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
 
     // 2026-07-xx 物理加固：自动迁移旧版本数据库字段 (Plan-29)
     sqlite3_stmt* checkStmt;
+
+    // 🚨 2026-08-xx 物理对齐：自动检测并合并迁移历史遗留的 file_id 字段为标准 folder_id 字段
+    bool hasFileIdInMeta = false;
+    bool hasFolderIdInMeta = false;
     bool hasWidthColumn = false;
     bool hasHeightColumn = false;
     bool hasIngestionStatusColumn = false;
@@ -300,6 +304,8 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(checkStmt, 1));
             if (colName) {
                 std::string name(colName);
+                if (name == "file_id") hasFileIdInMeta = true;
+                if (name == "folder_id") hasFolderIdInMeta = true;
                 if (name == "width") hasWidthColumn = true;
                 if (name == "height") hasHeightColumn = true;
                 if (name == "ingestion_status") hasIngestionStatusColumn = true;
@@ -308,6 +314,31 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             }
         }
         sqlite3_finalize(checkStmt);
+    }
+
+    if (hasFileIdInMeta && !hasFolderIdInMeta) {
+        qDebug() << "[DB] 正在自动升级旧版数据库：将 metadata 表的 file_id 重命名为 folder_id...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata RENAME COLUMN file_id TO folder_id;", nullptr, nullptr, nullptr);
+    }
+
+    // 同步迁移 category_items
+    bool hasFileIdInItems = false;
+    bool hasFolderIdInItems = false;
+    if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(category_items)", -1, &checkStmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(checkStmt) == SQLITE_ROW) {
+            const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(checkStmt, 1));
+            if (colName) {
+                std::string name(colName);
+                if (name == "file_id") hasFileIdInItems = true;
+                if (name == "folder_id") hasFolderIdInItems = true;
+            }
+        }
+        sqlite3_finalize(checkStmt);
+    }
+
+    if (hasFileIdInItems && !hasFolderIdInItems) {
+        qDebug() << "[DB] 正在自动升级旧版数据库：将 category_items 表的 file_id 重命名为 folder_id...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE category_items RENAME COLUMN file_id TO folder_id;", nullptr, nullptr, nullptr);
     }
 
     if (!hasWidthColumn) {

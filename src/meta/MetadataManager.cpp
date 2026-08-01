@@ -775,7 +775,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
                     }
                 }
             }
-            if (CategoryRepo::getItemCategoryIds(rm.folderId).empty()) {
+            if (CategoryRepo::getItemCategoryIds(rm.folderId, nPath).empty()) {
                 CategoryRepo::s_uncategorizedCount.fetch_add(1);
             }
         }
@@ -1367,7 +1367,7 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                         if (it->second.tags.isEmpty()) {
                             CategoryRepo::s_untaggedCount.fetch_sub(1);
                         }
-                        if (CategoryRepo::getItemCategoryIds(it->second.folderId).empty()) {
+                        if (CategoryRepo::getItemCategoryIds(it->second.folderId, curPath).empty()) {
                             CategoryRepo::s_uncategorizedCount.fetch_sub(1);
                         }
                     }
@@ -1488,7 +1488,7 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                         if (it->second.tags.isEmpty()) {
                             CategoryRepo::s_untaggedCount.fetch_sub(1);
                         }
-                        if (CategoryRepo::getItemCategoryIds(it->second.folderId).empty()) {
+                        if (CategoryRepo::getItemCategoryIds(it->second.folderId, p).empty()) {
                             CategoryRepo::s_uncategorizedCount.fetch_sub(1);
                         }
                     }
@@ -1675,14 +1675,14 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
                 CategoryRepo::s_totalCount.fetch_sub(1);
                 CategoryRepo::s_trashCount.fetch_add(1);
                 if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_sub(1);
-                if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+                if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
                     CategoryRepo::s_uncategorizedCount.fetch_sub(1);
                 }
             } else {
                 CategoryRepo::s_totalCount.fetch_add(1);
                 CategoryRepo::s_trashCount.fetch_sub(1);
                 if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_add(1);
-                if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+                if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
                     CategoryRepo::s_uncategorizedCount.fetch_add(1);
                 }
             }
@@ -1726,14 +1726,14 @@ void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
             CategoryRepo::s_totalCount.fetch_sub(1);
             CategoryRepo::s_trashCount.fetch_add(1);
             if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_sub(1);
-            if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+            if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
                 CategoryRepo::s_uncategorizedCount.fetch_sub(1);
             }
         } else {
             CategoryRepo::s_totalCount.fetch_add(1);
             CategoryRepo::s_trashCount.fetch_sub(1);
             if (oldEmpty) CategoryRepo::s_untaggedCount.fetch_add(1);
-            if (CategoryRepo::getItemCategoryIds(fid).empty()) {
+            if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
                 CategoryRepo::s_uncategorizedCount.fetch_add(1);
             }
         }

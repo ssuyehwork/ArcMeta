@@ -18,6 +18,7 @@ namespace ArcMeta {
 
 std::atomic<int> CategoryRepo::s_totalFileCount{0};
 std::atomic<int> CategoryRepo::s_categorizedCount{0};
+std::atomic<bool> CategoryRepo::s_countsDirty{true};
 
 std::atomic<int> CategoryRepo::s_totalCount{0};
 std::atomic<int> CategoryRepo::s_tagsCount{0};
@@ -129,6 +130,7 @@ bool CategoryRepo::add(Category& cat) {
                     sqlite3_finalize(stmtOther);
                 }
             }
+            s_countsDirty.store(true);
             qDebug() << "[CategoryRepo] add success across dbs: Name =" << QString::fromStdWString(cat.name) << "ID =" << cat.id << "Parent =" << cat.parentId;
             return true;
         } else {
@@ -168,10 +170,13 @@ bool CategoryRepo::removeAllCategoriesBatch(const std::vector<std::string>& fold
     });
 }
 
-std::vector<int> CategoryRepo::getItemCategoryIds(const std::string& folderId) {
+std::vector<int> CategoryRepo::getItemCategoryIds(const std::string& folderId, const std::wstring& pathHint) {
     std::vector<int> ids;
     if (folderId.empty()) return ids;
-    std::wstring path = MetadataManager::instance().getPathByFolderId(folderId);
+    std::wstring path = pathHint;
+    if (path.empty()) {
+        path = MetadataManager::instance().getPathByFolderId(folderId);
+    }
     sqlite3* db = DatabaseManager::instance().getDbForPath(path);
     if (!db) return ids;
 
@@ -359,6 +364,9 @@ bool CategoryRepo::update(const Category& cat) {
             sqlite3_finalize(stmt);
         }
     }
+    if (anyOk) {
+        s_countsDirty.store(true);
+    }
     return anyOk;
 }
 
@@ -516,6 +524,7 @@ bool CategoryRepo::remove(int id) {
         trans.commit();
     }
 
+    s_countsDirty.store(true);
     // ✅ 修正后：删除分类只清理数据库与内存关联，严禁物理删除用户磁盘上的实际文件夹！
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
     return true;
@@ -713,7 +722,7 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& folderId
             sqlite3_finalize(memStmt);
 
             // 如果之前未分类，增加后变成有分类，则减去 uncategorizedCount，增加 categorizedCount 并持久化
-            if (getItemCategoryIds(folderId).size() == 1) {
+            if (getItemCategoryIds(folderId, finalPath).size() == 1) {
                 s_uncategorizedCount.fetch_sub(1);
                 s_categorizedCount.fetch_add(1);
                 updatePersistentStat(STAT_CATEGORIZED, 1);
@@ -721,6 +730,7 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& folderId
 
             // 归类操作不应直接触发表入库，应由物理位移（如迁移）后再由 AutoImportManager 驱动。
 
+            s_countsDirty.store(true);
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
             return true;
         }
@@ -744,12 +754,13 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fol
             sqlite3_finalize(memStmt);
 
             // 如果移除后不再有任何分类，则增加 uncategorizedCount，减少 categorizedCount 并持久化
-            if (getItemCategoryIds(folderId).empty()) {
+            if (getItemCategoryIds(folderId, path).empty()) {
                 s_uncategorizedCount.fetch_add(1);
                 s_categorizedCount.fetch_sub(1);
                 updatePersistentStat(STAT_CATEGORIZED, -1);
             }
 
+            s_countsDirty.store(true);
             return true;
         }
         sqlite3_finalize(memStmt);
@@ -847,6 +858,14 @@ std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
 }
 
 std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
+    static std::mutex countsMutex;
+    static std::vector<std::pair<int, int>> cachedCounts;
+
+    std::lock_guard<std::mutex> lock(countsMutex);
+    if (!s_countsDirty.load()) {
+        return cachedCounts;
+    }
+
     std::vector<std::pair<int, int>> res;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
     std::map<int, std::unordered_set<std::string>> catToUniqueFids;
@@ -869,6 +888,8 @@ std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
     for (auto const& [id, fids] : catToUniqueFids) {
         res.push_back({id, static_cast<int>(fids.size())});
     }
+    cachedCounts = res;
+    s_countsDirty.store(false);
     return res;
 }
 
@@ -947,6 +968,7 @@ bool CategoryRepo::executeFidBatch(const std::vector<std::string>& folderIds, st
         }
     }
 
+    s_countsDirty.store(true);
     // 批量处理后通知 UI 刷新
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
     return allOk;
@@ -1142,10 +1164,18 @@ void CategoryRepo::fullRecount() {
     s_uncategorizedCount.store(uncategorized);
     s_trashCount.store(trash);
 
+    // 建立快照中的 folderId 快速索引集合，杜绝循环获取读锁造成主线程卡死
+    std::unordered_set<std::string> activeFolderIds;
+    for (const auto& meta : snapshot) {
+        if (!meta.folderId.empty()) {
+            activeFolderIds.insert(meta.folderId);
+        }
+    }
+
     // 查找并清理幽灵关联（在 category_items 中存在，但在 metadata 缓存中已不存在的记录）
     std::map<sqlite3*, std::vector<std::string>> dbToOrphanedFids;
     for (const auto& fid : customizedFids) {
-        if (MetadataManager::instance().getPathByFolderId(fid).empty()) {
+        if (activeFolderIds.find(fid) == activeFolderIds.end()) {
             for (sqlite3* localDb : dbs) {
                 dbToOrphanedFids[localDb].push_back(fid);
             }

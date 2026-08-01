@@ -2,6 +2,8 @@
 #include "../meta/MetadataManager.h"
 #include <QFileInfo>
 #include <QDir>
+#include <mutex>
+#include <unordered_map>
 
 namespace ArcMeta {
 
