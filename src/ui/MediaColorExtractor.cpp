@@ -183,13 +183,10 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
         return QImage();
     }
 
-    auto readLE32 = [&](int offset) -> quint32 {
-        return (quint8(header[offset])) | (quint8(header[offset + 1]) << 8) |
-               (quint8(header[offset + 2]) << 16) | (quint8(header[offset + 3]) << 24);
-    };
-
-    quint32 tiffOffset = readLE32(20);
-    quint32 tiffLength = readLE32(24);
+    quint32 tiffOffset = (quint8(header[20])) | (quint8(header[21]) << 8) |
+                         (quint8(header[22]) << 16) | (quint8(header[23]) << 24);
+    quint32 tiffLength = (quint8(header[24])) | (quint8(header[25]) << 8) |
+                         (quint8(header[26]) << 16) | (quint8(header[27]) << 24);
     if (tiffOffset == 0 || tiffLength == 0) return QImage();
 
     file.seek(tiffOffset);

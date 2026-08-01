@@ -739,7 +739,9 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                                 icon = QIcon(QPixmap::fromImage(img));
                             } else {
                                 QString iconTarget = path;
-                                if (ext == "arc" && info.isDir()) {
+                                QFileInfo localInfo(path);
+                                QString localExt = localInfo.suffix().toLower();
+                                if (localExt == "arc" && localInfo.isDir()) {
                                     QDir arcDir(path);
                                     QFileInfoList files = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
                                     for (const QFileInfo& fi : files) {
