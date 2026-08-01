@@ -92,9 +92,138 @@ double MediaColorExtractor::calculateDeltaE(const QColor& c1, const QColor& c2) 
     return std::sqrt(std::pow(l1.l - l2.l, 2) + std::pow(l1.a - l2.a, 2) + std::pow(l1.b - l2.b, 2));
 }
 
+QImage MediaColorExtractor::extractEmbeddedPsdThumbnail(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return QImage();
+
+    // PSD 头部固定 26 字节之后是"颜色模式数据段"，其长度可变，再往后才是"图像资源块"
+    QByteArray header = file.read(26);
+    if (header.size() < 26 || !header.startsWith("8BPS")) return QImage();
+
+    quint32 colorModeLen = 0;
+    {
+        QByteArray lenBytes = file.read(4);
+        if (lenBytes.size() < 4) return QImage();
+        colorModeLen = (quint8(lenBytes[0]) << 24) | (quint8(lenBytes[1]) << 16) |
+                       (quint8(lenBytes[2]) << 8) | quint8(lenBytes[3]);
+    }
+    file.seek(file.pos() + colorModeLen);
+
+    QByteArray resLenBytes = file.read(4);
+    if (resLenBytes.size() < 4) return QImage();
+    quint32 resSectionLen = (quint8(resLenBytes[0]) << 24) | (quint8(resLenBytes[1]) << 16) |
+                             (quint8(resLenBytes[2]) << 8) | quint8(resLenBytes[3]);
+
+    qint64 resSectionEnd = file.pos() + resSectionLen;
+    while (file.pos() < resSectionEnd) {
+        QByteArray sig = file.read(4);
+        if (sig != "8BIM") break;
+
+        QByteArray idBytes = file.read(2);
+        if (idBytes.size() < 2) break;
+        quint16 resId = (quint8(idBytes[0]) << 8) | quint8(idBytes[1]);
+
+        quint8 nameLen = 0;
+        file.getChar(reinterpret_cast<char*>(&nameLen));
+        file.seek(file.pos() + nameLen + ((nameLen % 2 == 0) ? 1 : 0)); // 名称按偶数字节对齐
+
+        QByteArray dataLenBytes = file.read(4);
+        if (dataLenBytes.size() < 4) break;
+        quint32 dataLen = (quint8(dataLenBytes[0]) << 24) | (quint8(dataLenBytes[1]) << 16) |
+                           (quint8(dataLenBytes[2]) << 8) | quint8(dataLenBytes[3]);
+
+        // 资源 ID 1036 (0x040C) = 缩略图资源 (RGB, 内嵌标准 JPEG)
+        if (resId == 0x040C) {
+            if (dataLen < 28) break;
+            file.seek(file.pos() + 28); // 跳过缩略图头部固定 28 字节（格式/宽高/位深等字段）
+            QByteArray jpegData = file.read(dataLen - 28);
+            QImage img;
+            if (img.loadFromData(jpegData, "JPEG")) {
+                return img;
+            }
+            break;
+        }
+
+        file.seek(file.pos() + dataLen + (dataLen % 2)); // 数据同样按偶数字节对齐
+    }
+    return QImage();
+}
+
+QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) return QImage();
+
+    QByteArray data = file.read(5 * 1024 * 1024);
+    file.close();
+
+    int start = data.indexOf("\xFF\xD8\xFF");
+    if (start != -1) {
+        int end = data.indexOf("\xFF\xD9", start);
+        if (end != -1) {
+            QByteArray imgData = data.mid(start, (end - start) + 2);
+            QImage img;
+            if (img.loadFromData(imgData)) {
+                return img;
+            }
+        }
+    }
+    return QImage();
+}
+
+QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return QImage();
+
+    QByteArray header = file.read(30);
+    if (header.size() < 30) return QImage();
+
+    // DOS EPS 魔数：C5 D0 D3 C6
+    if (quint8(header[0]) != 0xC5 || quint8(header[1]) != 0xD0 ||
+        quint8(header[2]) != 0xD3 || quint8(header[3]) != 0xC6) {
+        return QImage();
+    }
+
+    quint32 tiffOffset = (quint8(header[20])) | (quint8(header[21]) << 8) |
+                         (quint8(header[22]) << 16) | (quint8(header[23]) << 24);
+    quint32 tiffLength = (quint8(header[24])) | (quint8(header[25]) << 8) |
+                         (quint8(header[26]) << 16) | (quint8(header[27]) << 24);
+    if (tiffOffset == 0 || tiffLength == 0) return QImage();
+
+    file.seek(tiffOffset);
+    QByteArray tiffData = file.read(tiffLength);
+    QImage img;
+    if (img.loadFromData(tiffData, "TIFF")) {
+        return img;
+    }
+    return QImage();
+}
+
+QImage MediaColorExtractor::extractZipPreview(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return QImage();
+
+    QByteArray data = file.read(10 * 1024 * 1024); // 读前 10MB
+    file.close();
+
+    // 搜索 PNG 文件头 \x89PNG\r\n\x1a\n 和 尾标 IEND
+    int start = data.indexOf("\x89\x50\x4E\x47\x0D\x0A\x1A\x0A");
+    if (start != -1) {
+        int end = data.indexOf("IEND", start);
+        if (end != -1) {
+            QByteArray pngData = data.mid(start, (end - start) + 8);
+            QImage img;
+            if (img.loadFromData(pngData, "PNG")) {
+                return img; // 成功掏出内嵌 PNG 预览图！
+            }
+        }
+    }
+    return QImage();
+}
+
 QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
     QFileInfo fi(path);
-    if (fi.suffix().toLower() == "svg") {
+    QString ext = fi.suffix().toLower();
+    if (ext == "svg") {
         QSvgRenderer renderer(path);
         if (renderer.isValid()) {
             QImage img(size, size, QImage::Format_ARGB32);
@@ -103,6 +232,18 @@ QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
             renderer.render(&painter);
             return img;
         }
+    } else if (ext == "psd" || ext == "psb") {
+        QImage img = extractEmbeddedPsdThumbnail(path);
+        if (!img.isNull()) return img;
+    } else if (ext == "ai") {
+        QImage img = extractEmbeddedAiPreview(path);
+        if (!img.isNull()) return img;
+    } else if (ext == "eps") {
+        QImage img = extractEmbeddedEpsPreview(path);
+        if (!img.isNull()) return img;
+    } else if (ext == "sketch" || ext == "xd" || ext == "fig") {
+        QImage img = extractZipPreview(path);
+        if (!img.isNull()) return img;
     }
     
     QImage img = WindowsShellThumbnailProvider::getShellThumbnail(path, size);

@@ -16,6 +16,11 @@
 #include "FramelessDialog.h"
 #include <QDateTime>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <objbase.h>
+#endif
+
 namespace ArcMeta {
 
 void AssetImporter::importAssets(const QStringList& paths,
@@ -46,6 +51,10 @@ void AssetImporter::importAssets(const QStringList& paths,
     });
 
     context->future = QtConcurrent::run([paths, targetCatId, weakProgress, context, onComplete]() {
+#ifdef Q_OS_WIN
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+#endif
+
         int total = paths.size();
         int handled = 0;
         int successCount = 0;
@@ -60,9 +69,25 @@ void AssetImporter::importAssets(const QStringList& paths,
             }
 
             // 1. 获取目标盘符托管库路径 [盘符]:/ArcMeta.Library_[盘符]/
-            QString drive = QFileInfo(src).absolutePath().left(3);
-            if (drive.isEmpty()) drive = "D:/";
-            QString managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
+            // 优先由 targetCatId 反查它所属的顶层库路径；否则退化为用源文件盘符兜底
+            QString managedRoot;
+            if (targetCatId > 0) {
+                Category targetCat = CategoryRepo::getById(targetCatId);
+                Category cur = targetCat;
+                while (cur.parentId != 0) {
+                    Category parent = CategoryRepo::getById(cur.parentId);
+                    if (parent.id == 0) break;
+                    cur = parent;
+                }
+                if (!cur.physicalPath.empty()) {
+                    managedRoot = QString::fromStdWString(cur.physicalPath);
+                }
+            }
+            if (managedRoot.isEmpty()) {
+                QString drive = QFileInfo(src).absolutePath().left(3);
+                if (drive.isEmpty()) drive = "D:/";
+                managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
+            }
             
             if (!QDir().mkpath(managedRoot)) {
                 qWarning() << "[AssetImporter] 无法建立托管库根目录:" << managedRoot << " 导入源:" << src;
@@ -86,6 +111,12 @@ void AssetImporter::importAssets(const QStringList& paths,
                 successCount++;
             }
         }
+
+#ifdef Q_OS_WIN
+        if (SUCCEEDED(hr)) {
+            CoUninitialize();
+        }
+#endif
 
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, successCount, onComplete]() {
             if (context->isCancelled) return;
@@ -143,7 +174,11 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     QImage thumb = MediaColorExtractor::getImageForAnalysis(destPath, 256);
     if (!thumb.isNull()) {
         QString baseName = QFileInfo(fileName).completeBaseName();
-        thumb.save(containerDir + "/" + baseName + "_thumbnail.png", "PNG");
+        QString thumbPath = containerDir + "/" + baseName + "_thumbnail.png";
+        bool saveOk = thumb.save(thumbPath, "PNG");
+        qDebug() << "[AssetImporter] 缩略图生成成功，保存" << (saveOk ? "成功" : "失败") << "：" << thumbPath;
+    } else {
+        qWarning() << "[AssetImporter] 缩略图生成失败，getImageForAnalysis 返回空图：" << destPath;
     }
 
     // 5. 写入数据库：将整个 .arc 资产包文件夹作为唯一的受控资产单位进行激活和登记！

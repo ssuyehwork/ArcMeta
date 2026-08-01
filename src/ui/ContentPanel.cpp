@@ -89,33 +89,10 @@
 #include "../core/BasicCommands.h"
 using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
+#include "../ui/MediaColorExtractor.h"
  
 namespace ArcMeta { 
 
-// 纯 C++ 极速提取 .ai 文件中内嵌的高清 JPEG 预览图 (耗时仅 1~2ms，零依赖)
-static QImage extractEmbeddedAiPreview(const QString& filePath) {
-    QFile file(filePath);
-    // 打开 .ai 文件（仅读取前 5MB 即可，缩略图数据通常在文件头附近）
-    if (!file.open(QIODevice::ReadOnly)) return QImage();
-
-    QByteArray data = file.read(5 * 1024 * 1024); 
-    file.close();
-
-    // 搜索 JPEG 文件的魔数二进制头 (0xFF 0xD8 0xFF) 与尾 (0xFF 0xD9)
-    int start = data.indexOf("\xFF\xD8\xFF");
-    if (start != -1) {
-        int end = data.indexOf("\xFF\xD9", start);
-        if (end != -1) {
-            QByteArray imgData = data.mid(start, (end - start) + 2);
-            QImage img;
-            if (img.loadFromData(imgData)) {
-                return img; // 成功提取出 .ai 内嵌的高清原图！
-            }
-        }
-    }
-    return QImage();
-}
- 
 // --- ArcMetaVirtualDbModel 实现 ---
 ArcMetaVirtualDbModel::ArcMetaVirtualDbModel(QObject* parent) : QAbstractTableModel(parent) {
     m_iconCache.setMaxCost(500);
@@ -709,7 +686,7 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                         }
                     } else if (ext == "ai") {
                         // 纯 C++ 提取 .ai 文件中内嵌的高清 JPEG 预览图 (耗时仅 1~2ms，零依赖)
-                        img = extractEmbeddedAiPreview(path);
+                        img = MediaColorExtractor::extractEmbeddedAiPreview(path);
                         if (!img.isNull()) {
                             ar = (double)img.width() / img.height();
                             hasThumb = true;
@@ -761,11 +738,17 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             if (!img.isNull()) {
                                 icon = QIcon(QPixmap::fromImage(img));
                             } else {
-                                // 🚨 统一图标提取解耦：若是 .arc 容器，优先使用解包出来的 mainFilePath 申请原生文件图标，严禁使用 .arc 目录路径
                                 QString iconTarget = path;
-                                for (int i = 0; i < mutableThis->m_displayCount; ++i) {
-                                    if (mutableThis->m_allRecords[i].path == path && !mutableThis->m_allRecords[i].mainFilePath.isEmpty()) {
-                                        iconTarget = mutableThis->m_allRecords[i].mainFilePath;
+                                QFileInfo localInfo(path);
+                                QString localExt = localInfo.suffix().toLower();
+                                if (localExt == "arc" && localInfo.isDir()) {
+                                    QDir arcDir(path);
+                                    QFileInfoList files = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                                    for (const QFileInfo& fi : files) {
+                                        QString fn = fi.fileName();
+                                        if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
+                                        if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
+                                        iconTarget = QDir::toNativeSeparators(fi.absoluteFilePath());
                                         break;
                                     }
                                 }

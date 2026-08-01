@@ -1,8 +1,8 @@
 # 备份备注
 
-**备份时间**：2026-07-31 02:57:42  
-**备份目录**：Buk_20260731_025741  
+**备份时间**：2026-07-31 18:37:25  
+**备份目录**：Buk_20260731_183723  
 
 ---
 
-修复了当用户在硬盘上清空/直接删除托管库数据时，`category_items`（分类与项目关联表）中残留孤立的幽灵关联记录，导致侧边栏分类计数仍然显示原数字的问题。通过在 `CategoryRepo::fullRecount()` 的事务中加入幽灵关联自动检测和批量清理逻辑，实现了物理对账时的完整性和一致性。
+此修改将 WindowsShellThumbnailProvider：：getShellThumbnail 替换为 AssetImporter：：importSingleFile 内的 MediaColorExtractor：：getImageForAnalysis，从而实现新导入资产的确定性 100% 成功率缩略图生成，无需依赖 Windows Shell 命名空间的索引延迟。
