@@ -174,7 +174,11 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     QImage thumb = MediaColorExtractor::getImageForAnalysis(destPath, 256);
     if (!thumb.isNull()) {
         QString baseName = QFileInfo(fileName).completeBaseName();
-        thumb.save(containerDir + "/" + baseName + "_thumbnail.png", "PNG");
+        QString thumbPath = containerDir + "/" + baseName + "_thumbnail.png";
+        bool saveOk = thumb.save(thumbPath, "PNG");
+        qDebug() << "[AssetImporter] 缩略图生成成功，保存" << (saveOk ? "成功" : "失败") << "：" << thumbPath;
+    } else {
+        qWarning() << "[AssetImporter] 缩略图生成失败，getImageForAnalysis 返回空图：" << destPath;
     }
 
     // 5. 写入数据库：将整个 .arc 资产包文件夹作为唯一的受控资产单位进行激活和登记！
