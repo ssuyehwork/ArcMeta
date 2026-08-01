@@ -27,6 +27,7 @@ public:
     static QImage extractEmbeddedPsdThumbnail(const QString& path);
     static QImage extractEmbeddedAiPreview(const QString& path);
     static QImage extractEmbeddedEpsPreview(const QString& path);
+    static QImage extractZipPreview(const QString& path);
 };
 
 } // namespace ArcMeta
