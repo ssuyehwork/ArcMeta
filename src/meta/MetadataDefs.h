@@ -32,7 +32,7 @@ struct FolderMeta {
     std::string encryptSalt;
     std::string encryptIv;
     std::string encryptVerifyHash;
-    std::string fileId128; // 128-bit File ID (Hex string)
+    std::string folderId; // 128-bit Folder ID (Hex string)
     std::vector<PaletteEntry> palettes;
 
     FolderMeta() 
@@ -45,7 +45,7 @@ struct FolderMeta {
 
     bool isDefault() const {
         return sortBy == L"name" && sortOrder == L"asc" && rating == 0 &&
-               color.empty() && tags.empty() && !pinned && note.empty() && url.empty() && !encrypted && fileId128.empty() && palettes.empty();
+               color.empty() && tags.empty() && !pinned && note.empty() && url.empty() && !encrypted && folderId.empty() && palettes.empty();
     }
 };
 
@@ -67,7 +67,7 @@ struct ItemMeta {
     std::wstring originalName;
     std::wstring volume;
     std::wstring frn;
-    std::string fileId128; // 128-bit File ID (Hex string)
+    std::string folderId; // 128-bit Folder ID (Hex string)
     int ingestionStatus;   // -1: 未知/非托管, 0: 已登记/待处理, 1: 已完成解析
     long long size;
     long long creationTime;   // ctime (毫秒)
@@ -97,7 +97,7 @@ struct ItemMeta {
 
     bool hasUserOperations() const {
         return rating > 0 || !color.empty() || !tags.empty() || pinned ||
-               !note.empty() || !url.empty() || encrypted || !fileId128.empty() || !palettes.empty() ||
+               !note.empty() || !url.empty() || encrypted || !folderId.empty() || !palettes.empty() ||
                !autoColor.empty() || addedAt > 0 || width > 0 || height > 0;
     }
 };

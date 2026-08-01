@@ -26,7 +26,7 @@ struct ItemRecord {
     QString manualColor;
     QString autoColor;
     QStringList tags;
-    std::string fileId;
+    std::string folderId;
     bool pinned = false;
     bool encrypted = false;
     double registrationProgress = -1.0; // 初始为 -1.0 表示未计算
