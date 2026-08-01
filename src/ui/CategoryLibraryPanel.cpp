@@ -193,7 +193,7 @@ void CategoryLibraryPanel::loadPaths(const QStringList& paths) {
 }
 
 void CategoryLibraryPanel::refreshVisibleThumbnails() {
-    QAbstractItemView* view = (m_viewStack->currentIndex() == 0) ? m_gridView : m_treeView;
+    QAbstractItemView* view = (m_viewStack->currentIndex() == 0) ? static_cast<QAbstractItemView*>(m_gridView) : static_cast<QAbstractItemView*>(m_treeView);
     if (!view) return;
 
     QRect viewportRect = view->viewport()->rect();

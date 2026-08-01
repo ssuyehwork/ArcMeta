@@ -850,6 +850,20 @@ std::vector<std::string> CategoryRepo::getFileIdsInCategory(int categoryId) {
     return res;
 }
 
+bool CategoryRepo::associateItem(int categoryId, const std::wstring& path) {
+    // 根据路径先获取 Ingestion/Metadata FID 进行物理绑定
+    std::wstring normPath = MetadataManager::normalizePath(path);
+    ItemMeta meta = MetadataManager::instance().getMeta(normPath);
+    if (!meta.folderId.empty()) {
+        return addItemToCategory(categoryId, meta.folderId, normPath);
+    }
+    return false;
+}
+
+std::vector<std::string> CategoryRepo::getItemFolderIds(int categoryId) {
+    return getFileIdsInCategory(categoryId);
+}
+
 std::vector<std::string> CategoryRepo::getFileIdsRecursive(int categoryId) {
     auto items = getItemsRecursive(categoryId);
     std::vector<std::string> res;

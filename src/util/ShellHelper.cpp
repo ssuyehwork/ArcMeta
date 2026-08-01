@@ -1,6 +1,8 @@
 #include "ShellHelper.h"
 #include <QFileInfo>
 #include <QDateTime>
+#include <QDesktopServices>
+#include <QUrl>
 #include <atomic>
 #include <QFile>
 #include <QDir>
@@ -120,6 +122,18 @@ void ShellHelper::showProperties(const QString& path) {
 #else
     Q_UNUSED(path);
 #endif
+}
+
+void ShellHelper::openItem(const QString& path) {
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
+void ShellHelper::showInExplorer(const QString& path) {
+    openInExplorer(path);
+}
+
+bool ShellHelper::deleteItem(const QString& path) {
+    return moveToTrash({path});
 }
 
 void ShellHelper::openInExplorer(const QString& path) {

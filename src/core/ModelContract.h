@@ -31,7 +31,18 @@ enum CommonRole {
     AspectRatioRole     = Qt::UserRole + 201, // 图像宽高比
     HasThumbnailRole    = Qt::UserRole + 202, // 是否拥有物理缩略图
     PalettesRole        = Qt::UserRole + 203, // 物理色板数据
-    CountRole           = Qt::UserRole + 204  // 子项数量
+    CountRole           = Qt::UserRole + 204, // 子项数量
+
+    // 编译补全缺失的角色 (编译错误修复)
+    IsDirRole           = Qt::UserRole + 210, // 是否为文件夹
+    IsCategoryRole      = Qt::UserRole + 211, // 是否为分类
+    SizeRole            = Qt::UserRole + 212, // 文件大小 (long long)
+    DateCreatedRole     = Qt::UserRole + 213, // 创建时间
+    DateModifiedRole    = Qt::UserRole + 214, // 修改时间
+    NoteRole            = Qt::UserRole + 215, // 备注 (QString)
+    UrlRole             = Qt::UserRole + 216, // 关联 URL
+    FolderIdRole        = Qt::UserRole + 217, // 128-bit Folder ID
+    PaletteRole         = Qt::UserRole + 218  // 色板数据
 };
 
 } // namespace ArcMeta

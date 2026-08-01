@@ -93,6 +93,10 @@ public:
     static std::vector<std::string> getFileIdsInCategory(int categoryId);
     static std::vector<std::string> getFileIdsRecursive(int categoryId);
 
+    // 2026-08-01 编译补全：分类关联同义接口与旧版计数支持接口
+    static bool associateItem(int categoryId, const std::wstring& path);
+    static std::vector<std::string> getItemFolderIds(int categoryId);
+
     static void saveImmediately();
 
     /**
