@@ -25,6 +25,8 @@ public:
     static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile);
     static QColor extractDominantColor(const QString& targetFile);
     static QImage extractEmbeddedPsdThumbnail(const QString& path);
+    static QImage extractEmbeddedAiPreview(const QString& path);
+    static QImage extractEmbeddedEpsPreview(const QString& path);
 };
 
 } // namespace ArcMeta

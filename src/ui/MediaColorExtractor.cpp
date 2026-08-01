@@ -134,6 +134,7 @@ QImage MediaColorExtractor::extractEmbeddedPsdThumbnail(const QString& path) {
 
         // 资源 ID 1036 (0x040C) = 缩略图资源 (RGB, 内嵌标准 JPEG)
         if (resId == 0x040C) {
+            if (dataLen < 28) break;
             file.seek(file.pos() + 28); // 跳过缩略图头部固定 28 字节（格式/宽高/位深等字段）
             QByteArray jpegData = file.read(dataLen - 28);
             QImage img;
@@ -144,6 +145,58 @@ QImage MediaColorExtractor::extractEmbeddedPsdThumbnail(const QString& path) {
         }
 
         file.seek(file.pos() + dataLen + (dataLen % 2)); // 数据同样按偶数字节对齐
+    }
+    return QImage();
+}
+
+QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) return QImage();
+
+    QByteArray data = file.read(5 * 1024 * 1024);
+    file.close();
+
+    int start = data.indexOf("\xFF\xD8\xFF");
+    if (start != -1) {
+        int end = data.indexOf("\xFF\xD9", start);
+        if (end != -1) {
+            QByteArray imgData = data.mid(start, (end - start) + 2);
+            QImage img;
+            if (img.loadFromData(imgData)) {
+                return img;
+            }
+        }
+    }
+    return QImage();
+}
+
+QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return QImage();
+
+    QByteArray header = file.read(30);
+    if (header.size() < 30) return QImage();
+
+    // DOS EPS 魔数：C5 D0 D3 C6
+    if (quint8(header[0]) != 0xC5 || quint8(header[1]) != 0xD0 ||
+        quint8(header[2]) != 0xD3 || quint8(header[3]) != 0xC6) {
+        return QImage();
+    }
+
+    auto readLE32 = [&](int offset) -> quint32 {
+        return (quint8(header[offset])) | (quint8(header[offset + 1]) << 8) |
+               (quint8(header[offset + 2]) << 16) | (quint8(header[offset + 3]) << 24);
+    };
+
+    quint32 tiffOffset = readLE32(20);
+    quint32 tiffLength = readLE32(24);
+    if (tiffOffset == 0 || tiffLength == 0) return QImage();
+
+    file.seek(tiffOffset);
+    QByteArray tiffData = file.read(tiffLength);
+    QImage img;
+    if (img.loadFromData(tiffData, "TIFF")) {
+        return img;
     }
     return QImage();
 }
@@ -160,12 +213,15 @@ QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
             renderer.render(&painter);
             return img;
         }
-    }
-    
-    if (ext == "psd" || ext == "psb") {
+    } else if (ext == "psd" || ext == "psb") {
         QImage img = extractEmbeddedPsdThumbnail(path);
         if (!img.isNull()) return img;
-        // 内嵌缩略图解析失败（极少数情况，比如文件本身损坏），才退回 Shell 极速兜底
+    } else if (ext == "ai") {
+        QImage img = extractEmbeddedAiPreview(path);
+        if (!img.isNull()) return img;
+    } else if (ext == "eps") {
+        QImage img = extractEmbeddedEpsPreview(path);
+        if (!img.isNull()) return img;
     }
 
     QImage img = WindowsShellThumbnailProvider::getShellThumbnail(path, size);
