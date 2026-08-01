@@ -314,7 +314,7 @@ void MetadataManager::initFromScchMode() {
                 if (loadedSerials.find(wSerial) == loadedSerials.end()) {
                     // 启动阶段：若检测到该序列号的磁盘当前在线，则传入盘符触发自适应重命名
                     QString currentLetter = serialToLetter.value(wSerial, "");
-                    loadFromDb(DatabaseManager::instance().getMemoryDb(wSerial, currentLetter));
+                    loadFromDb(DatabaseManager::instance().getDriveDb(wSerial, currentLetter));
                     loadedSerials.insert(wSerial);
                 }
             }
@@ -463,7 +463,7 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         // 1. 识别该路径归属的数据库
         std::wstring volSerial = getVolumeSerialNumber(nPath);
         QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
-        sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+        sqlite3* db = DatabaseManager::instance().getDriveDb(volSerial, letter);
         if (!db) return;
 
         // 2. 收集所有待登记路径
@@ -549,7 +549,7 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
     // 1. 获取库归属数据库
     std::wstring volSerial = getVolumeSerialNumber(nFolder);
     QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+    sqlite3* db = DatabaseManager::instance().getDriveDb(volSerial, letter);
     if (!db) {
         qWarning() << "[DB_TRACE] calculateAndPersistProgress 失败：无法取得分库，文件夹:" << QString::fromStdWString(nFolder);
         return;
@@ -623,7 +623,7 @@ double MetadataManager::getProgressFromDb(const std::wstring& folderPath) {
 
     std::wstring volSerial = getVolumeSerialNumber(nFolder);
     QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+    sqlite3* db = DatabaseManager::instance().getDriveDb(volSerial, letter);
     if (!db) return -1.0;
 
     double progress = -1.0;
@@ -1272,7 +1272,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
         // 极致优化：预取根路径的卷信息，避免在循环中重复执行耗时的 Win32 磁盘查询
         std::wstring volSerial = getVolumeSerialNumber(nNew);
         QString letter = (nNew.length() >= 2 && nNew[1] == L':') ? QString::fromWCharArray(&nNew[0], 1) : "";
-        sqlite3* memDb = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+        sqlite3* memDb = DatabaseManager::instance().getDriveDb(volSerial, letter);
         
         std::map<sqlite3*, std::vector<std::pair<std::string, std::wstring>>> groupedSyncTasks;
         for (const auto& pair : itemsToRename) {
@@ -1339,7 +1339,7 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     std::wstring volSerial = getVolumeSerialNumber(nPath);
     QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
-    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+    sqlite3* db = DatabaseManager::instance().getDriveDb(volSerial, letter);
     
     int totalDelta = 0;
     std::vector<std::string> fids;
@@ -1506,7 +1506,7 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                     // 数据库定位
                     std::wstring volSerial = getVolumeSerialNumber(p);
                     QString letter = (p.length() >= 2 && p[1] == L':') ? QString::fromWCharArray(&p[0], 1) : "";
-                    sqlite3* db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+                    sqlite3* db = DatabaseManager::instance().getDriveDb(volSerial, letter);
                     if (db) groupedFids[db].push_back(fid);
 
                     // 索引维护
@@ -1926,7 +1926,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
         } else {
             std::wstring volSerial = getVolumeSerialNumber(p);
             QString letter = (p.length() >= 2 && p[1] == L':') ? QString::fromWCharArray(&p[0], 1) : "";
-            db = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+            db = DatabaseManager::instance().getDriveDb(volSerial, letter);
         }
         if (db) groups[db].push_back(p);
     }
@@ -2035,7 +2035,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     } else {
         volSerial = getVolumeSerialNumber(nPath);
         QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
-        memDb = DatabaseManager::instance().getMemoryDb(volSerial, letter);
+        memDb = DatabaseManager::instance().getDriveDb(volSerial, letter);
     }
     if (!memDb) {
         qWarning() << "[DB_TRACE] persistAsync 失败：未能获取 memDb，路径:" << QString::fromStdWString(nPath);

@@ -1,4 +1,5 @@
 #include "AutoImportManager.h"
+#include "DatabaseSynchronizer.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
 #include "../meta/CategoryRepo.h"
@@ -140,7 +141,7 @@ void AutoImportManager::processImportQueue() {
                 }
             }
 
-            DatabaseManager::instance().getMemoryDb(vol, letter);
+            DatabaseManager::instance().getDriveDb(vol, letter);
 
             for (const auto& path : pair.second) {
                 MetadataManager::instance().registerItem(path, true);
@@ -197,7 +198,7 @@ void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath, b
 
     MetadataManager::instance().setInternalOperating(true);
 
-    CategoryRepo::syncPhysicalDirectoryCascade(rootPath);
+    DatabaseSynchronizer::syncPhysicalDirectoryCascade(rootPath);
 
     MetadataManager::instance().setInternalOperating(false);
     MetadataManager::instance().notifyFullUIRebuild();

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QDateTime>
-#include "../core/IndexedEntry.h"
+#include "../core/ItemRecord.h"
 #include <QMap>
 #include <unordered_map>
 #include <deque>

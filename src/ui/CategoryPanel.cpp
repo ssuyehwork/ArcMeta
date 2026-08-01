@@ -793,7 +793,7 @@ void CategoryPanel::onSortAllByNameDesc() {
 void CategoryPanel::onEmptyTrash() {
     // 1. 获取回收站内所有 FID
     // 物理修复：明确作用域标识符 CategoryRepo::TRASH_CATEGORY_ID
-    std::vector<std::string> trashItems = CategoryRepo::getFileIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
+    std::vector<std::string> trashItems = CategoryRepo::getFolderIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
     if (trashItems.empty()) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站已空", 1000);
         return;
@@ -809,7 +809,7 @@ void CategoryPanel::onEmptyTrash() {
 void CategoryPanel::onRestoreAllFromTrash() {
     // 1. 获取回收站内所有 FID
     // 物理修复：明确作用域标识符 CategoryRepo::TRASH_CATEGORY_ID
-    std::vector<std::string> trashItems = CategoryRepo::getFileIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
+    std::vector<std::string> trashItems = CategoryRepo::getFolderIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
     if (trashItems.empty()) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站内无项目", 1000);
         return;

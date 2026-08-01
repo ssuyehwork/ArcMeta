@@ -62,7 +62,6 @@ public:
     static bool reorderAll(bool ascending);
     static std::vector<Category> getAll();
     static std::vector<Category> getRecentlyUsed(int limit);
-    static void syncPhysicalDirectoryCascade(const std::wstring& rootPath);
     static std::vector<std::pair<int, int>> getCounts();
     static int getUniqueItemCount();
     static int getUncategorizedItemCount();
@@ -90,8 +89,8 @@ public:
     static std::vector<int> getSubtreeIds(int categoryId);
 
     // 废弃接口（保持兼容）
-    static std::vector<std::string> getFileIdsInCategory(int categoryId);
-    static std::vector<std::string> getFileIdsRecursive(int categoryId);
+    static std::vector<std::string> getFolderIdsInCategory(int categoryId);
+    static std::vector<std::string> getFolderIdsRecursive(int categoryId);
 
     static void saveImmediately();
 

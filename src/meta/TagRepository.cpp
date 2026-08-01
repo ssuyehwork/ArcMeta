@@ -204,7 +204,7 @@ void TagRepository::checkAndMigrate() {
             std::wstring volSerial = MetadataManager::getVolumeSerialNumber(drive);
             if (volSerial.empty()) continue;
 
-            sqlite3* driveDb = DatabaseManager::instance().getMemoryDb(volSerial, QString::fromStdWString(drive));
+            sqlite3* driveDb = DatabaseManager::instance().getDriveDb(volSerial, QString::fromStdWString(drive));
             if (!driveDb || driveDb == globalDb) continue;
 
             // 检查该盘是否有 tag_groups 记录

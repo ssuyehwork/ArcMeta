@@ -15,7 +15,6 @@
 #include <QDebug>
 
 #include "SvgIconRenderer.h"
-#include "WindowsShellThumbnailProvider.h"
 #include "MediaColorExtractor.h"
 
 namespace ArcMeta {
@@ -25,11 +24,6 @@ namespace ArcMeta {
  */
 class UiHelper {
 public:
-    static inline void initializeHotIcons() {
-        qDebug() << "[UiHelper] 图标系统已启用懒加载模式";
-        WindowsShellThumbnailProvider::instance();
-    }
-
     static inline QColor parseColorName(const QString& colorName) {
         if (colorName.isEmpty()) return QColor();
         
@@ -74,11 +68,6 @@ public:
         return SvgIconRenderer::getIcon(key, color, size);
     }
 
-    static inline QIcon getFileIcon(const QString& filePath, int size = 18, const QColor& overrideColor = QColor()) {
-        Q_UNUSED(overrideColor);
-        return WindowsShellThumbnailProvider::getFileIcon(filePath, size);
-    }
-
     static inline QPixmap getPixmap(const QString& key, const QSize& size, const QColor& color) {
         return SvgIconRenderer::getPixmap(key, size, color);
     }
@@ -109,10 +98,6 @@ public:
 
     static inline QColor extractDominantColor(const QString& targetFile) {
         return MediaColorExtractor::extractDominantColor(targetFile);
-    }
-
-    static inline QImage getShellThumbnail(const QString& path, int size) {
-        return WindowsShellThumbnailProvider::getShellThumbnail(path, size);
     }
 };
 

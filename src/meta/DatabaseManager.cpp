@@ -521,7 +521,7 @@ bool DatabaseManager::init() {
 
     // 为每个驱动器加载数据库
     // 注意：此处实际应遍历当前在线的驱动器，这里先简化逻辑
-    // 实际运行时，MetadataManager 会按需通过 getMemoryDb 触发加载或由 init 调用
+    // 实际运行时，MetadataManager 会按需通过 getDriveDb 触发加载或由 init 调用
     return true;
 }
 
@@ -586,9 +586,9 @@ void DatabaseManager::shutdown() {
     closeDb(m_globalDb);
 }
 
-sqlite3* DatabaseManager::getMemoryDb(const std::wstring& volumeSerial, const QString& driveLetter) {
+sqlite3* DatabaseManager::getDriveDb(const std::wstring& volumeSerial, const QString& driveLetter) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    qDebug() << "[DB] getMemoryDb requested for Serial:" << QString::fromStdWString(volumeSerial) << "Letter:" << driveLetter;
+    qDebug() << "[DB] getDriveDb requested for Serial:" << QString::fromStdWString(volumeSerial) << "Letter:" << driveLetter;
     
     QString cleanLetter = "";
     if (!driveLetter.isEmpty()) {
@@ -754,7 +754,7 @@ sqlite3* DatabaseManager::getDbForPath(const std::wstring& path) {
         letter = QString::fromWCharArray(&nPath[0], 1); 
     } 
     // 100% 保证自动加载、打开、预热该分库，绝不返回 nullptr 
-    sqlite3* db = getMemoryDb(volSerial, letter); 
+    sqlite3* db = getDriveDb(volSerial, letter); 
     if (!db) { 
         db = getGlobalDb(); 
     } 

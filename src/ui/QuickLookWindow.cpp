@@ -1,5 +1,6 @@
 #include "QuickLookWindow.h"
 #include "UiHelper.h"
+#include "ShellIconManager.h"
 #include "StyleLibrary.h"
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -304,7 +305,7 @@ void QuickLookWindow::preview(const QString& filePath) {
         m_graphicsView->clear();
         m_textEdit->clear();
         
-        QIcon fileIcon = UiHelper::getFileIcon(filePath, 256);
+        QIcon fileIcon = ShellIconManager::getFileIcon(filePath, 256);
         QPixmap pix = fileIcon.pixmap(256, 256);
         m_graphicsView->setPixmap(pix);
         m_graphicsView->show();
@@ -361,7 +362,7 @@ void QuickLookWindow::renderImage(const QString& path) {
         } else if (QT_NATIVE_FORMATS.contains(ext)) {
             img.load(path);
         } else {
-            img = UiHelper::getShellThumbnail(path, 4096);
+            img = ShellIconManager::getShellThumbnail(path, 4096);
             if (img.isNull()) {
                 img.load(path);
             }
@@ -413,7 +414,7 @@ void QuickLookWindow::renderText(const QString& path) {
         m_graphicsView->show();
         m_graphicsView->clear();
         
-        QIcon fileIcon = UiHelper::getFileIcon(path, 256);
+        QIcon fileIcon = ShellIconManager::getFileIcon(path, 256);
         QPixmap pix = fileIcon.pixmap(256, 256);
         m_graphicsView->setPixmap(pix);
         

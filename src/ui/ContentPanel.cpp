@@ -82,6 +82,7 @@
 #include "CategoryLockDialog.h" 
 #include "BatchRenameDialog.h" 
 #include "UiHelper.h" 
+#include "ShellIconManager.h"
 #include "StyleLibrary.h"
 #include <QFileIconProvider>
 #include "../core/CoreController.h"
@@ -261,7 +262,7 @@ QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
 
         // 2026-11-14 执行第二步：图形文件等待缩略图时返回空图标，由 Delegate 绘制占位背景，消除抖动
         if (isGraphic || isArcContainer) return QIcon(); 
-        return UiHelper::getFileIcon(path, 128); // 非图形文件直接显示系统图标
+        return ShellIconManager::getFileIcon(path, 128); // 非图形文件直接显示系统图标
     }
 
     return QVariant();
@@ -709,7 +710,7 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             hasThumb = false;
                         }
                     } else if (UiHelper::isGraphicsFile(ext) && ext != "cur" && ext != "ico" && ext != "ani" && ext != "ai") {
-                        img = UiHelper::getShellThumbnail(path, 128);
+                        img = ShellIconManager::getShellThumbnail(path, 128);
                         if (!img.isNull()) {
                             ar = (double)img.width() / img.height();
                             hasThumb = true;
@@ -766,7 +767,7 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                                         break;
                                     }
                                 }
-                                icon = UiHelper::getFileIcon(iconTarget, 128);
+                                icon = ShellIconManager::getFileIcon(iconTarget, 128);
                             }
                             
                             mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
@@ -1711,7 +1712,7 @@ bool ContentPanel::eventFilter(QObject* obj, QEvent* event) {
  
                         // 2026-06-05 按照要求：快捷键设置颜色后立即重渲染图标，实现视觉同步 
                         QString path = idx.data(PathRole).toString(); 
-                        QIcon coloredIcon = UiHelper::getFileIcon(path, 128); 
+                        QIcon coloredIcon = ShellIconManager::getFileIcon(path, 128); 
                         m_proxyModel->setData(idx, coloredIcon, Qt::DecorationRole); 
                     } 
                 } 

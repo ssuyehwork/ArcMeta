@@ -1,5 +1,6 @@
 #include "NavPanel.h"
 #include "UiHelper.h"
+#include "ShellIconManager.h"
 #include "Logger.h"
 #include "TreeItemDelegate.h"
 #include "DropTreeView.h"
@@ -363,7 +364,7 @@ void NavPanel::addFavoriteItem(const QString& path) {
     QFileInfo fi(path);
     if (!fi.exists()) return;
 
-    QIcon icon = UiHelper::getFileIcon(path, 18);
+    QIcon icon = ShellIconManager::getFileIcon(path, 18);
     QStandardItem* item = new QStandardItem(icon, fi.fileName().isEmpty() ? path : fi.fileName());
     item->setData(path, Qt::UserRole + 1);
     
@@ -482,7 +483,7 @@ void NavPanel::fetchChildDirs(QStandardItem* parent) {
             safeParent->removeRows(0, safeParent->rowCount());
             
             for (const auto& info : results) {
-                QIcon folderIcon = UiHelper::getFileIcon(info.absPath, 18);
+                QIcon folderIcon = ShellIconManager::getFileIcon(info.absPath, 18);
                 QStandardItem* child = new QStandardItem(folderIcon, info.name);
                 child->setData(info.absPath, Qt::UserRole + 1);
                 

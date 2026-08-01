@@ -56,6 +56,14 @@ set(SOURCES
     src/core/CacheManager.h
     src/core/IndexedEntry.cpp
     src/core/IndexedEntry.h
+    src/core/ItemRecord.cpp
+    src/core/ItemRecord.h
+    src/core/DatabaseSynchronizer.cpp
+    src/core/DatabaseSynchronizer.h
+    src/core/DiskScanService.cpp
+    src/core/DiskScanService.h
+    src/core/CategoryLoadService.cpp
+    src/core/CategoryLoadService.h
     src/core/SyncStatusService.cpp
     src/core/SyncStatusService.h
     src/core/AutoImportManager.cpp
@@ -104,10 +112,6 @@ set(SOURCES
     src/ui/ColorPicker.h
     src/ui/ContentPanel.cpp
     src/ui/ContentPanel.h
-    src/ui/DiskScanService.cpp
-    src/ui/DiskScanService.h
-    src/ui/CategoryLoadService.cpp
-    src/ui/CategoryLoadService.h
     src/ui/DriveButton.cpp
     src/ui/DriveButton.h
     src/ui/DropJustifiedView.cpp
@@ -173,6 +177,7 @@ set(SOURCES
     src/ui/ToolTipOverlay.h
     src/ui/TreeItemDelegate.h
     src/ui/UiHelper.h
+    src/ui/ShellIconManager.h
     src/ui/SvgIconRenderer.h
     src/ui/SvgIconRenderer.cpp
     src/ui/WindowsShellThumbnailProvider.h
