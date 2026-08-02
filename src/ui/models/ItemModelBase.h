@@ -3,7 +3,16 @@
 
 #include <QAbstractTableModel>
 #include <vector>
+#include <QHash>
 #include "src/core/ItemRecord.h" // 修正为正确的头文件路径
+
+namespace ArcMeta {
+    struct QStringHash {
+        size_t operator()(const QString& key) const {
+            return qHash(key);
+        }
+    };
+}
 
 class ItemModelBase : public QAbstractTableModel {
     Q_OBJECT

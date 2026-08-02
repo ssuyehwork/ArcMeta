@@ -9,14 +9,6 @@
 #include <unordered_map>
 #include <QSet>
 
-namespace ArcMeta {
-    struct QStringHash {
-        size_t operator()(const QString& key) const {
-            return qHash(key);
-        }
-    };
-}
-
 class DiskItemModel : public ItemModelBase {
     Q_OBJECT
 public:

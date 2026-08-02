@@ -33,15 +33,6 @@ namespace ArcMeta {
 struct RuntimeMeta;
 
 /**
- * @brief 2026-06-xx 物理强化：针对 QString 优化 std::unordered_map 的哈希器
- */
-struct QStringHash {
-    size_t operator()(const QString& key) const {
-        return qHash(key);
-    }
-};
-
-/**
  * @brief 内部代理类：专门处理高级筛选逻辑 (2026-05-25 物理化以修复 static_cast 编译报错)
  */
 class FilterProxyModel : public QSortFilterProxyModel {

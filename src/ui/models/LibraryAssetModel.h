@@ -10,14 +10,6 @@
 #include <QSet>
 #include "../../../src/meta/MetadataManager.h" // 引入必要的 RuntimeMeta
 
-namespace ArcMeta {
-    struct QStringHash {
-        size_t operator()(const QString& key) const {
-            return qHash(key);
-        }
-    };
-}
-
 class LibraryAssetModel : public ItemModelBase {
     Q_OBJECT
 public:
