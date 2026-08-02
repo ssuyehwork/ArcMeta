@@ -1120,11 +1120,15 @@ void CategoryRepo::fullRecount() {
     auto snapshot = MetadataManager::instance().getLightweightCacheSnapshot();
     for (const auto& meta : snapshot) {
         if (meta.folderId.empty()) continue;
-        if (meta.isFolder) continue;
 
         // 🚨 核心物理防火墙：如果是普通的磁盘导航模式下激活的库外普通项目，绝对禁止其污染侧边栏计数！
         // 各自执行各自的逻辑，两者相互不产生任何关联。
         if (!MetadataManager::instance().isInsideManagedLibrary(meta.path)) {
+            continue;
+        }
+
+        // 仅对不是以 .arc 结尾的普通子文件夹进行剔除，确保合法的受控 .arc 资产包文件夹能够正常计入
+        if (meta.isFolder && !meta.path.endsWith(".arc", Qt::CaseInsensitive)) {
             continue;
         }
 
