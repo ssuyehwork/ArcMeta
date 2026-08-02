@@ -706,7 +706,7 @@ void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
                             ar = (double)img.width() / img.height();
                             hasThumb = true;
                         } else {
-                            ar = 1.0;
+                            ar = -1.0; // 🚨 解析失败，强制标记为 -1.0 告知界面 Delegate 没有内容缩略图！
                             hasThumb = false;
                         }
                     } else if (UiHelper::isGraphicsFile(ext) && ext != "cur" && ext != "ico" && ext != "ani" && ext != "ai") {
