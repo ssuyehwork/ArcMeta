@@ -33,6 +33,10 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
     ItemRecord r;
     std::wstring wPath = MetadataManager::normalizePath(path.toStdWString());
     QString nPath = QString::fromStdWString(wPath);
+    if (nPath.endsWith("/") || nPath.endsWith("\\")) {
+        nPath = nPath.left(nPath.length() - 1);
+        wPath = nPath.toStdWString();
+    }
 
     // 1. 物理属性采样 (零 I/O 核心)
     // 🚨 [双轨不隔离极简解耦重构]: 磁盘导航模式下（isFromMemory == false）100% 拒绝穿透去读受控库数据库！
