@@ -176,6 +176,11 @@ set(SOURCES
     src/ui/ToolTipOverlay.cpp
     src/ui/ToolTipOverlay.h
     src/ui/TreeItemDelegate.h
+    src/ui/models/ItemModelBase.h
+    src/ui/models/DiskItemModel.h
+    src/ui/models/DiskItemModel.cpp
+    src/ui/models/LibraryAssetModel.h
+    src/ui/models/LibraryAssetModel.cpp
     src/ui/UiHelper.h
     src/ui/ShellIconManager.h
     src/ui/SvgIconRenderer.h
@@ -267,6 +272,7 @@ target_link_libraries(ArcMeta PRIVATE
 target_include_directories(ArcMeta PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/meta
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/models
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     ${CMAKE_CURRENT_SOURCE_DIR}/src/mft
     ${CMAKE_CURRENT_SOURCE_DIR}/src/crypto
