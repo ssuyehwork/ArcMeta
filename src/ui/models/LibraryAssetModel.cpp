@@ -392,17 +392,20 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
     } else if (role == HasThumbnailRole) {
         static const QStringList iconOnlyExts = {"cur", "ico", "ani"};
         if (iconOnlyExts.contains(record.suffix.toLower())) return false;
+
+        QFileInfo pInfo(path);
+        bool isInsideArcContainer = pInfo.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
+        if (isInsideArcContainer) {
+            QString nativePath = QDir::toNativeSeparators(path);
+            return m_aspectRatios.contains(nativePath) && m_aspectRatios.value(nativePath) > 0.0;
+        }
+
         if (record.suffix.toLower() == "ai") {
             QString nativePath = QDir::toNativeSeparators(path);
             if (m_aspectRatios.contains(nativePath)) {
                 return m_aspectRatios.value(nativePath) > 0.0;
             }
             return false;
-        }
-        // .arc 资产包容器穿透（对应用户原话：“内容面板应"穿透" .arc 包”）
-        if (record.isDir && path.endsWith(".arc", Qt::CaseInsensitive)) {
-            QString nativePath = QDir::toNativeSeparators(path);
-            return m_aspectRatios.contains(nativePath) && m_aspectRatios.value(nativePath) > 0.0;
         }
         if (UiHelper::isGraphicsFile(record.suffix)) return true;
         if (record.width > 0 && record.height > 0) return true;
@@ -416,10 +419,10 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
         QString ext = info.suffix().toLower();
         bool isGraphic = UiHelper::isGraphicsFile(ext) || ext == "svg";
         
-        // .arc 资产包容器包内存在 _thumbnail.png，等待异步加载
-        bool isArcContainer = (ext == "arc" && info.isDir());
+        // .arc 资产包容器内部文件：判断父目录是否为 .arc 容器，等待异步加载
+        bool isInsideArcContainer = info.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
 
-        if (isGraphic || isArcContainer) return QIcon(); 
+        if (isGraphic || isInsideArcContainer) return QIcon(); 
         return ShellIconManager::getFileIcon(path, 128);
     }
 
