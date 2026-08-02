@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <inttypes.h>   // 🚨 新增：提供 PRIu32/PRIu16/PRIu64 等打印格式宏
 
 /* 基础头文件存在性声明（Windows/MSVC 环境） */
 #define HAVE_ASSERT_H 1
@@ -12,6 +13,7 @@
 #define HAVE_STDINT_H 1
 #define HAVE_STRING_H 1
 #define HAVE_SYS_TYPES_H 1
+#define HAVE_INTTYPES_H 1   // 🚨 新增：告知源码 <inttypes.h> 可用
 
 /* 基础类型尺寸 */
 #define SIZEOF_INT 4
