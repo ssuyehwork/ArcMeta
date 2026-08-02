@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <inttypes.h>   // 🚨 新增：提供 PRIu32/PRIu16/PRIu64 等打印格式宏
+
+#define HAVE_INTTYPES_H 1   // 🚨 新增：告知源码 <inttypes.h> 可用
 
 /* 有符号/无符号定长类型（对外公开接口用） */
 #define TIFF_INT8_T signed char
