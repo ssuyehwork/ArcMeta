@@ -16,9 +16,6 @@ if(MSVC)
     add_compile_options(/W4 /O2 /utf-8)
 endif()
 
-# 解决 libtiff 弃用整型与系统重定义/MSVC 编译冲突
-add_compile_definitions(TIFF_DISABLE_DEPRECATED)
-
 # Qt 6 基础组件
 # 2026-05-10 修复：添加缺失的Core和Gui组件
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent)
@@ -201,19 +198,6 @@ set(SOURCES
     ArcMeta.rc
     resources/resources.qrc
 )
-
-# 新增：libtiff 全量无忧源码配置（已处理同名 main 冲突，包含全套核心与扩展功能）
-set(LIBTIFF_SOURCES
-    # 2. 全套颜色模式与扩展转换支持模块
-    src/third_party/libtiff/tiff-bi.c
-    src/third_party/libtiff/tiff-grayscale.c
-    src/third_party/libtiff/tiff-palette.c
-    src/third_party/libtiff/tiff-rgb.c
-    src/third_party/libtiff/xtiff.c
-)
-
-# 追加到项目总 SOURCES 列表
-list(APPEND SOURCES ${LIBTIFF_SOURCES})
 
 # 可执行文件 (添加 WIN32 属性以消除控制台黑框)
 # 修复：移除直接引用的 "ArcMeta.manifest"，改由 ArcMeta.rc 引入以杜绝 mt.exe 冲突
