@@ -1128,7 +1128,7 @@ void CategoryRepo::fullRecount() {
         }
 
         // 仅对不是以 .arc 结尾的普通子文件夹进行剔除，确保合法的受控 .arc 资产包文件夹能够正常计入
-        if (meta.isFolder && !meta.path.endsWith(".arc", Qt::CaseInsensitive)) {
+        if (meta.isFolder && !QString::fromStdWString(meta.path).endsWith(".arc", Qt::CaseInsensitive)) {
             continue;
         }
 
