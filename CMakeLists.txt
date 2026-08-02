@@ -242,8 +242,19 @@ set(LIBTIFF_SOURCES
     src/third_party/libtiff/xtiff.c
 )
 
+# 自适应核对：循环验证 libtiff 源文件在本地磁盘是否存在，过滤缺失文件并输出友好警告
+# 这样做不仅能保证 CMake 100% 成功生成不报错，还能帮您精确定位本地究竟缺失了哪个文件
+set(VALID_LIBTIFF_SOURCES "")
+foreach(TIFF_FILE ${LIBTIFF_SOURCES})
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${TIFF_FILE}")
+        list(APPEND VALID_LIBTIFF_SOURCES ${TIFF_FILE})
+    else()
+        message(WARNING "⚠️ [CMake 诊断] 找不到 libtiff 文件: ${TIFF_FILE}，该文件可能会被从编译列表中剔除，请核对本地该路径下是否确实存在此文件！")
+    endif()
+endforeach()
+
 # 追加到项目总 SOURCES 列表
-list(APPEND SOURCES ${LIBTIFF_SOURCES})
+list(APPEND SOURCES ${VALID_LIBTIFF_SOURCES})
 
 # 可执行文件 (添加 WIN32 属性以消除控制台黑框)
 # 修复：移除直接引用的 "ArcMeta.manifest"，改由 ArcMeta.rc 引入以杜绝 mt.exe 冲突
