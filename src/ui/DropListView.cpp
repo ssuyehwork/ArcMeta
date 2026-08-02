@@ -59,6 +59,9 @@ void DropListView::startDrag(Qt::DropActions supportedActions) {
 
     // 核心增强：拦截并注入物理路径 QUrl，确保 CategoryPanel 接收校验通过
     QMimeData* mimeData = model()->mimeData(indexes);
+    if (!mimeData) {
+        mimeData = new QMimeData();
+    }
     QList<QUrl> urls;
     for (const QModelIndex& idx : indexes) {
         // 2026-03-xx 物理对齐：使用标准 PathRole 枚举名，消除位移隐患

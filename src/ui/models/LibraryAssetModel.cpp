@@ -185,6 +185,11 @@ bool LibraryAssetModel::setData(const QModelIndex& index, const QVariant& value,
     return false;
 }
 
+Qt::ItemFlags LibraryAssetModel::flags(const QModelIndex& index) const {
+    if (!index.isValid()) return QAbstractTableModel::flags(index);
+    return QAbstractTableModel::flags(index) | Qt::ItemIsDragEnabled;
+}
+
 void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
     // 内存模式：穿透 .arc 搜寻高清缩略图与宽高比
     std::vector<std::pair<QString, QString>> newQueue;
@@ -247,11 +252,16 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
             } else if (ext == "cur" || ext == "ico" || ext == "ani") {
                 ar = 1.0;
                 hasThumb = false;
-            } else if (ext == "arc" && info.isDir()) {
-                QDir arcDir(path);
+            } else if ((ext == "arc" || path.endsWith(".arc", Qt::CaseInsensitive) || path.endsWith(".arc/", Qt::CaseInsensitive) || path.endsWith(".arc\\", Qt::CaseInsensitive)) && info.isDir()) {
+                // 物理规范化文件夹路径：去除末尾的斜杠，保证拼接正常
+                QString cleanPath = path;
+                if (cleanPath.endsWith("/") || cleanPath.endsWith("\\")) {
+                    cleanPath = cleanPath.left(cleanPath.length() - 1);
+                }
+                QDir arcDir(cleanPath);
                 QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
                 if (!thumbFiles.isEmpty()) {
-                    QString thumbPath = path + "/" + thumbFiles.first();
+                    QString thumbPath = cleanPath + "/" + thumbFiles.first();
                     img = QImage(thumbPath);
                     if (!img.isNull()) {
                         ar = (double)img.width() / img.height();
@@ -301,6 +311,10 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
 
     const auto& record = m_allRecords[index.row()];
     QString path = record.path;
+    bool isArcEnd = path.endsWith(".arc", Qt::CaseInsensitive) || path.endsWith(".arc/", Qt::CaseInsensitive) || path.endsWith(".arc\\", Qt::CaseInsensitive);
+    if (isArcEnd && (path.endsWith("/") || path.endsWith("\\"))) {
+        path = path.left(path.length() - 1);
+    }
 
     // 分类节点及子分类专用大分支（对应用户原话：“LibraryAssetModel 只处理内存数据库模式条目（包含 isCategory 分支）”）
     if (record.isCategory) {
@@ -395,7 +409,8 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
 
         QFileInfo pInfo(path);
         bool isInsideArcContainer = pInfo.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
-        if (isInsideArcContainer) {
+        bool isArcContainer = record.isDir && path.endsWith(".arc", Qt::CaseInsensitive);
+        if (isInsideArcContainer || isArcContainer) {
             QString nativePath = QDir::toNativeSeparators(path);
             return m_aspectRatios.contains(nativePath) && m_aspectRatios.value(nativePath) > 0.0;
         }
@@ -421,8 +436,9 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
         
         // .arc 资产包容器内部文件：判断父目录是否为 .arc 容器，等待异步加载
         bool isInsideArcContainer = info.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
+        bool isArcContainer = record.isDir && path.endsWith(".arc", Qt::CaseInsensitive);
 
-        if (isGraphic || isInsideArcContainer) return QIcon(); 
+        if (isGraphic || isInsideArcContainer || isArcContainer) return QIcon(); 
         return ShellIconManager::getFileIcon(path, 128);
     }
 
