@@ -171,35 +171,53 @@ QImage MediaColorExtractor::extractEmbeddedPsdThumbnail(const QString& path) {
 
 QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
     QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) return QImage();
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "[MediaColorExtractor][AI] 文件打开失败：" << filePath;
+        return QImage();
+    }
 
     QByteArray data = file.read(5 * 1024 * 1024);
     file.close();
 
     int start = data.indexOf("\xFF\xD8\xFF");
-    if (start != -1) {
-        int end = data.indexOf("\xFF\xD9", start);
-        if (end != -1) {
-            QByteArray imgData = data.mid(start, (end - start) + 2);
-            QImage img;
-            if (img.loadFromData(imgData)) {
-                return img;
-            }
-        }
+    if (start == -1) {
+        qWarning() << "[MediaColorExtractor][AI] 未找到 JPEG 起始标记(FFD8FF)，该文件可能未内嵌兼容性预览：" << filePath;
+        return QImage();
     }
-    return QImage();
+
+    int end = data.indexOf("\xFF\xD9", start);
+    if (end == -1) {
+        qWarning() << "[MediaColorExtractor][AI] 找到起始标记但未找到 JPEG 结束标记(FFD9)，读取范围内数据不完整：" << filePath;
+        return QImage();
+    }
+
+    QByteArray imgData = data.mid(start, (end - start) + 2);
+    QImage img;
+    if (!img.loadFromData(imgData)) {
+        qWarning() << "[MediaColorExtractor][AI] 已提取出 JPEG 字节流但解码失败，数据长度：" << imgData.size() << "：" << filePath;
+        return QImage();
+    }
+
+    qDebug() << "[MediaColorExtractor][AI] 内嵌预览提取成功：" << filePath;
+    return img;
 }
 
 QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) return QImage();
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "[MediaColorExtractor][EPS] 文件打开失败：" << path;
+        return QImage();
+    }
 
     QByteArray header = file.read(30);
-    if (header.size() < 30) return QImage();
+    if (header.size() < 30) {
+        qWarning() << "[MediaColorExtractor][EPS] 文件头不足 30 字节：" << path;
+        return QImage();
+    }
 
-    // DOS EPS 魔数：C5 D0 D3 C6
     if (quint8(header[0]) != 0xC5 || quint8(header[1]) != 0xD0 ||
         quint8(header[2]) != 0xD3 || quint8(header[3]) != 0xC6) {
+        qWarning() << "[MediaColorExtractor][EPS] 不是 DOS EPS 格式（缺少 C5D0D3C6 魔数），该文件可能是普通 EPS/纯 PostScript，无内嵌位图预览可提取：" << path;
         return QImage();
     }
 
@@ -207,15 +225,21 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
                          (quint8(header[22]) << 16) | (quint8(header[23]) << 24);
     quint32 tiffLength = (quint8(header[24])) | (quint8(header[25]) << 8) |
                          (quint8(header[26]) << 16) | (quint8(header[27]) << 24);
-    if (tiffOffset == 0 || tiffLength == 0) return QImage();
+    if (tiffOffset == 0 || tiffLength == 0) {
+        qWarning() << "[MediaColorExtractor][EPS] DOS EPS 魔数匹配，但 TIFF 预览偏移/长度字段为 0，该文件未内嵌 TIFF 预览：" << path;
+        return QImage();
+    }
 
     file.seek(tiffOffset);
     QByteArray tiffData = file.read(tiffLength);
     QImage img;
-    if (img.loadFromData(tiffData, "TIFF")) {
-        return img;
+    if (!img.loadFromData(tiffData, "TIFF")) {
+        qWarning() << "[MediaColorExtractor][EPS] 已定位到 TIFF 数据区但解码失败，长度：" << tiffData.size() << "：" << path;
+        return QImage();
     }
-    return QImage();
+
+    qDebug() << "[MediaColorExtractor][EPS] 内嵌预览提取成功：" << path;
+    return img;
 }
 
 QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
