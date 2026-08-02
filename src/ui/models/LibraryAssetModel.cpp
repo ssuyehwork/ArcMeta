@@ -9,6 +9,15 @@
 
 using namespace ArcMeta;
 
+#include "../meta/MetadataManager.h"
+#include "../meta/CategoryRepo.h"
+#include "../core/UndoManager.h"
+#include "../core/BasicCommands.h"
+#include "MediaColorExtractor.h"
+#include <QtConcurrent>
+#include <QSvgRenderer>
+#include <QPainter>
+
 LibraryAssetModel::LibraryAssetModel(QObject* parent) : ItemModelBase(parent) {
     m_iconCache.setMaxCost(500);
 }
@@ -22,6 +31,269 @@ int LibraryAssetModel::rowCount(const QModelIndex& parent) const {
 
 int LibraryAssetModel::columnCount(const QModelIndex&) const {
     return 7;
+}
+
+void LibraryAssetModel::setRecords(const std::vector<ItemRecord>& records) {
+    beginResetModel();
+    m_allRecords = records;
+    m_pathToIndex.clear();
+    for (int i = 0; i < static_cast<int>(m_allRecords.size()); ++i) {
+        m_pathToIndex[m_allRecords[i].path] = i;
+    }
+    m_iconCache.setMaxCost(qMax(500, static_cast<int>(m_allRecords.size()) + 50));
+    m_requestedIcons.clear();
+    m_metaCache.clear();
+    endResetModel();
+}
+
+void LibraryAssetModel::clear() {
+    beginResetModel();
+    m_allRecords.clear();
+    m_pathToIndex.clear();
+    m_query.clear();
+    m_requestedIcons.clear();
+    m_aspectRatios.clear();
+    m_metaCache.clear();
+    endResetModel();
+}
+
+void LibraryAssetModel::updateRecordMetadata(const QString& path) {
+    QString nPath = QDir::toNativeSeparators(path);
+    auto it = m_pathToIndex.find(nPath);
+    if (it != m_pathToIndex.end()) {
+        int i = it->second;
+        if (i >= 0 && i < static_cast<int>(m_allRecords.size())) {
+            auto meta = MetadataManager::instance().getMeta(nPath.toStdWString());
+            ItemRecord::fromMetadata(m_allRecords[i], meta);
+            m_metaCache.remove(nPath);
+            emit dataChanged(index(i, 0), index(i, columnCount() - 1));
+        }
+    }
+}
+
+void LibraryAssetModel::migrateCache(const QString& oldPath, const QString& newPath) {
+    QString nativeOld = QDir::toNativeSeparators(oldPath);
+    QString nativeNew = QDir::toNativeSeparators(newPath);
+    QIcon* oldIconPtr = m_iconCache.take(oldPath);
+    if (oldIconPtr) {
+        m_iconCache.insert(nativeNew, oldIconPtr);
+    }
+    if (m_aspectRatios.contains(nativeOld)) {
+        double ratio = m_aspectRatios.take(nativeOld);
+        m_aspectRatios[nativeNew] = ratio;
+    }
+}
+
+void LibraryAssetModel::clearCacheForFolder(const QString& folderPath) {
+    QString nativeFolder = QDir::toNativeSeparators(folderPath);
+    QString prefix = nativeFolder;
+    if (!prefix.endsWith(QDir::separator())) prefix += QDir::separator();
+
+    for (auto it = m_aspectRatios.begin(); it != m_aspectRatios.end(); ) {
+        if (it.key() == nativeFolder || it.key().startsWith(prefix)) {
+            it = m_aspectRatios.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+bool LibraryAssetModel::setData(const QModelIndex& index, const QVariant& value, int role) {
+    if (!index.isValid() || index.row() >= static_cast<int>(m_allRecords.size())) return false;
+
+    const auto& record = m_allRecords[index.row()];
+    QString path = record.path;
+
+    if (role == Qt::EditRole && index.column() == 0) {
+        return false; // 内存模式重命名由 ContentPanel 统一处理
+    }
+
+    bool metaUpdated = false;
+    if (role == RatingRole) {
+        int oldRating = index.data(RatingRole).toInt();
+        int newRating = value.toInt();
+        if (oldRating != newRating) {
+            if (record.isCategory) {
+                auto& mutableRec = m_allRecords[index.row()];
+                mutableRec.rating = newRating;
+                metaUpdated = true;
+            } else {
+                MetadataManager::instance().setRating(path.toStdWString(), newRating);
+                UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Rating, oldRating, newRating));
+                metaUpdated = true;
+            }
+        }
+    } else if (role == ColorRole) {
+        QString oldColor = index.data(ColorRole).toString();
+        QString newColor = value.toString();
+        if (oldColor != newColor) {
+            auto& mutableRec = m_allRecords[index.row()];
+            if (record.isCategory) {
+                auto all = CategoryRepo::getAll();
+                for (auto& c : all) {
+                    if (c.id == record.categoryId) {
+                        c.color = newColor.toUpper().toStdWString();
+                        CategoryRepo::update(c);
+                        if (!c.physicalPath.empty()) {
+                            MetadataManager::instance().setColor(c.physicalPath, c.color, false);
+                        }
+                        break;
+                    }
+                }
+                mutableRec.categoryColor = newColor;
+                metaUpdated = true;
+            } else {
+                MetadataManager::instance().setColor(path.toStdWString(), newColor.toStdWString(), false);
+                if (record.isDir) {
+                    std::wstring normPath = MetadataManager::normalizePath(path.toStdWString());
+                    CategoryRepo::updateCategoryColorByPath(normPath, newColor.toUpper().toStdWString());
+                }
+                UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Color, oldColor, newColor));
+                metaUpdated = true;
+            }
+        }
+    } else if (role == IsLockedRole || role == PinnedRole) {
+        bool pinned = value.toBool();
+        if (record.isCategory) {
+            auto all = CategoryRepo::getAll();
+            for (auto& c : all) {
+                if (c.id == record.categoryId) {
+                    c.pinned = pinned;
+                    CategoryRepo::update(c);
+                    auto& mutableRec = m_allRecords[index.row()];
+                    mutableRec.pinned = pinned;
+                    metaUpdated = true;
+                    break;
+                }
+            }
+        } else {
+            MetadataManager::instance().setPinned(path.toStdWString(), pinned);
+            metaUpdated = true;
+        }
+    }
+
+    if (metaUpdated) {
+        if (!record.isCategory) {
+            m_metaCache.remove(path);
+            updateRecordMetadata(path);
+        } else {
+            emit dataChanged(this->index(index.row(), 0), this->index(index.row(), columnCount() - 1));
+            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CategoryOnly);
+        }
+        return true;
+    }
+    return false;
+}
+
+void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
+    // 内存模式：穿透 .arc 搜寻高清缩略图与宽高比
+    std::vector<std::pair<QString, QString>> newQueue;
+    for (int r : rows) {
+        if (r < 0 || r >= static_cast<int>(m_allRecords.size())) continue;
+        const auto& rec = m_allRecords[r];
+        if (rec.isCategory) continue;
+
+        QString path = rec.path;
+        bool isArcContainer = rec.isDir && rec.path.endsWith(".arc", Qt::CaseInsensitive);
+        bool needLoad = !m_iconCache.contains(path);
+        if ((UiHelper::isGraphicsFile(rec.suffix) || isArcContainer) && !m_aspectRatios.contains(QDir::toNativeSeparators(path))) {
+            needLoad = true;
+        }
+        if (needLoad) {
+            newQueue.push_back({path, path});
+        }
+    }
+
+    if (newQueue.empty()) return;
+
+    QPointer<LibraryAssetModel> weakThis(this);
+    (void)QtConcurrent::run([weakThis, newQueue]() {
+        for (const auto& task : newQueue) {
+            if (!weakThis) break;
+            QString path = task.first;
+            QFileInfo info(path);
+            QString ext = info.suffix().toLower();
+
+            QImage img;
+            double ar = 1.0;
+            bool hasThumb = false;
+
+            if (ext == "svg") {
+                QSvgRenderer renderer(path);
+                if (renderer.isValid()) {
+                    QImage svgImg(128, 128, QImage::Format_ARGB32);
+                    svgImg.fill(Qt::transparent);
+                    QPainter painter(&svgImg);
+                    renderer.render(&painter);
+                    img = svgImg;
+                    ar = 1.0;
+                    hasThumb = true;
+                }
+            } else if (ext == "ai") {
+                img = MediaColorExtractor::extractEmbeddedAiPreview(path);
+                if (!img.isNull()) {
+                    ar = (double)img.width() / img.height();
+                    hasThumb = true;
+                } else {
+                    ar = -1.0;
+                    hasThumb = false;
+                }
+            } else if (UiHelper::isGraphicsFile(ext) && ext != "cur" && ext != "ico" && ext != "ani" && ext != "ai") {
+                img = ShellIconManager::getShellThumbnail(path, 128);
+                if (!img.isNull()) {
+                    ar = (double)img.width() / img.height();
+                    hasThumb = true;
+                }
+            } else if (ext == "cur" || ext == "ico" || ext == "ani") {
+                ar = 1.0;
+                hasThumb = false;
+            } else if (ext == "arc" && info.isDir()) {
+                QDir arcDir(path);
+                QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
+                if (!thumbFiles.isEmpty()) {
+                    QString thumbPath = path + "/" + thumbFiles.first();
+                    img = QImage(thumbPath);
+                    if (!img.isNull()) {
+                        ar = (double)img.width() / img.height();
+                        hasThumb = true;
+                    }
+                }
+            }
+
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, img, ar, hasThumb]() {
+                if (weakThis) {
+                    QIcon icon;
+                    if (!img.isNull()) {
+                        icon = QIcon(QPixmap::fromImage(img));
+                    } else {
+                        QString iconTarget = path;
+                        QFileInfo localInfo(path);
+                        if (localInfo.suffix().toLower() == "arc" && localInfo.isDir()) {
+                            QDir arcDir(path);
+                            QFileInfoList files = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                            for (const QFileInfo& fi : files) {
+                                QString fn = fi.fileName();
+                                if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
+                                if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
+                                iconTarget = QDir::toNativeSeparators(fi.absoluteFilePath());
+                                break;
+                            }
+                        }
+                        icon = ShellIconManager::getFileIcon(iconTarget, 128);
+                    }
+
+                    weakThis->m_iconCache.insert(path, new QIcon(icon));
+                    weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
+
+                    auto it = weakThis->m_pathToIndex.find(path);
+                    if (it != weakThis->m_pathToIndex.end()) {
+                        int rIdx = it->second;
+                        emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+                    }
+                }
+            });
+        }
+    });
 }
 
 QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {

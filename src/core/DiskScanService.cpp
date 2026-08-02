@@ -30,7 +30,7 @@ std::vector<ItemRecord> DiskScanService::scanDirectory(const QString& path,
             if (info.isDir() && info.fileName().compare(".arcmeta", Qt::CaseInsensitive) == 0) continue;
 
             QString absPath = info.absoluteFilePath();
-            ItemRecord itemRec = ItemRecord::create(absPath);
+            ItemRecord itemRec = ItemRecord::create(absPath, nullptr, false);
 
             // 如果该物理文件在 ArcMeta.cache 中有对应的离散打标缓存，将其无缝还原到 ItemRecord 中
             std::wstring fileName = info.fileName().toStdWString();

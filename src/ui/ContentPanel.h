@@ -23,6 +23,8 @@
 #include <QDebug>
 #include <QIcon>
 #include "FilterPanel.h"
+#include "models/DiskItemModel.h"
+#include "models/LibraryAssetModel.h"
 
 #include "../core/ModelContract.h"
 
@@ -59,65 +61,7 @@ protected:
 /**
  * @brief 虚拟化数据库模型：支持百万级条目瞬时加载 (2026-06-xx 重构)
  */
-class ArcMetaVirtualDbModel : public QAbstractTableModel {
-    Q_OBJECT
-public:
-    explicit ArcMetaVirtualDbModel(QObject* parent = nullptr);
-    ~ArcMetaVirtualDbModel() override;
-
-    int rowCount(const QModelIndex& parent = QModelIndex()) const override;
-    int columnCount(const QModelIndex& parent = QModelIndex()) const override;
-    Qt::ItemFlags flags(const QModelIndex& index) const override;
-    QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
-    QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
-    bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
-
-    // 拖拽支持
-    QStringList mimeTypes() const override;
-    QMimeData* mimeData(const QModelIndexList& indexes) const override;
-
-    // 虚拟化加载
-    bool canFetchMore(const QModelIndex& parent) const override;
-    void fetchMore(const QModelIndex& parent) override;
-
-    void setQuery(const QString& query) { m_query = query; }
-    void setRecords(const std::vector<ItemRecord>& records);
-    void clear();
-
-    const std::vector<ItemRecord>& allRecords() const { return m_allRecords; }
-
-    /**
-     * @brief 2026-06-xx 物理同步：从 MetadataManager 重新拉取指定路径的元数据并刷新 UI
-     */
-    void updateRecordMetadata(const QString& path);
-
-    // 视口感知缩略图加载
-    void loadThumbnailsForRows(const QList<int>& rows);
-
-    /**
-     * @brief 2026-07-26 极致重构：就地无损更名缩略图与宽高比缓存
-     */
-    void migrateCache(const QString& oldPath, const QString& newPath);
-
-    /**
-     * @brief 2026-07-27 按照 Plan-107：清除被擦除文件夹对应的缩略图、宽高比与元数据缓存
-     */
-    void clearCacheForFolder(const QString& folderPath);
-
-signals:
-    void recordRenamed(const QString& oldPath, const QString& newPath, const QString& newName);
-
-private:
-    std::vector<ItemRecord> m_allRecords;
-    std::unordered_map<QString, int, QStringHash> m_pathToIndex;
-    int m_displayCount = 0;
-    QString m_query;
-
-    mutable QCache<QString, QIcon> m_iconCache;
-    mutable QSet<QString> m_requestedIcons;
-    mutable QMap<QString, double> m_aspectRatios;
-    mutable QCache<QString, ArcMeta::RuntimeMeta> m_metaCache;
-};
+// 🚨 极致物理重构：ArcMetaVirtualDbModel 已彻底退役并被 DiskItemModel / LibraryAssetModel 继承平替，在此安全移除
 
 
 /**
@@ -315,7 +259,9 @@ private:
     // 视图组件
     QAbstractItemView* m_gridView = nullptr;
     QTreeView* m_treeView = nullptr;
-    ArcMetaVirtualDbModel* m_model = nullptr;
+    DiskItemModel* m_diskModel = nullptr;       // 负责纯物理磁盘导航模型 (0)
+    LibraryAssetModel* m_libraryModel = nullptr; // 负责内存托管逻辑资产模型 (1)
+    ItemModelBase* m_model = nullptr;           // 当前多态激活指针合约
 
     QTimer* m_visibleTimer = nullptr;
     void refreshVisibleThumbnails();

@@ -39,7 +39,7 @@ std::vector<ItemRecord> CategoryLoadService::loadCategoryItems(int categoryId, b
         }
 
         if (!wPath.empty()) {
-            allRecords.push_back(ItemRecord::create(QString::fromStdWString(wPath)));
+            allRecords.push_back(ItemRecord::create(QString::fromStdWString(wPath), nullptr, true));
         }
     }
 
@@ -51,7 +51,7 @@ std::vector<ItemRecord> CategoryLoadService::loadPathItems(const QStringList& pa
     records.reserve(static_cast<int>(paths.size()));
     for (const QString& p : paths) {
         if (!p.isEmpty()) {
-            records.push_back(ItemRecord::create(p));
+            records.push_back(ItemRecord::create(p, nullptr, true));
         }
     }
     return records;

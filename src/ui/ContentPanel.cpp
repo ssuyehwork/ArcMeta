@@ -96,728 +96,6 @@ using namespace ArcMeta::Style;
  
 namespace ArcMeta { 
 
-// --- ArcMetaVirtualDbModel 实现 ---
-ArcMetaVirtualDbModel::ArcMetaVirtualDbModel(QObject* parent) : QAbstractTableModel(parent) {
-    m_iconCache.setMaxCost(500);
-    m_metaCache.setMaxCost(1000);
-
-    // 订阅文件图标异步加载完成信号，安全刷新第 0 列渲染
-    connect(&IconLoadNotifier::instance(), &IconLoadNotifier::iconLoaded, this, [this]() {
-        if (m_displayCount > 0) {
-            emit dataChanged(index(0, 0), index(m_displayCount - 1, 0), {Qt::DecorationRole});
-        }
-    });
-}
-
-ArcMetaVirtualDbModel::~ArcMetaVirtualDbModel() {
-}
-
-int ArcMetaVirtualDbModel::rowCount(const QModelIndex& parent) const {
-    if (parent.isValid()) return 0;
-    return m_displayCount;
-}
-
-int ArcMetaVirtualDbModel::columnCount(const QModelIndex&) const {
-    return 7; // 名称, 状态, 星级, 尺寸, 类型, 大小, 修改日期（移除已冗余的“颜色”列）
-}
-
-Qt::ItemFlags ArcMetaVirtualDbModel::flags(const QModelIndex& index) const {
-    if (!index.isValid()) return Qt::NoItemFlags;
-    Qt::ItemFlags f = Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsDragEnabled;
-    // 仅允许第 0 列（名称列）且非“分类”项进行重命名
-    if (index.column() == 0) {
-        if (index.row() < static_cast<int>(m_allRecords.size()) && !m_allRecords[index.row()].isCategory) {
-            f |= Qt::ItemIsEditable;
-        }
-    }
-    return f;
-}
-
-QVariant ArcMetaVirtualDbModel::data(const QModelIndex& index, int role) const {
-    if (!index.isValid() || index.row() >= static_cast<int>(m_allRecords.size())) return QVariant();
-
-    const auto& record = m_allRecords[index.row()];
-    QString path = record.path;
-
-    if (record.isCategory) {
-        if (role == Qt::DisplayRole || role == Qt::EditRole) {
-            switch (index.column()) {
-                case 0: return record.categoryName;
-                case 4: return "子分类";
-                default: return "";
-            }
-        } else if (role == CategoryIdRole) {
-            return record.categoryId;
-        } else if (role == ColorRole) {
-            return record.categoryColor;
-        } else if (role == RatingRole) {
-            return record.rating; // 2026-07-xx 按照 Plan-73：支持子分类评分
-        } else if (role == TypeRole) {
-            return "category";
-        } else if (role == PathRole) {
-            return record.path; // 2026-06-xx 物理级同步：返回子分类绑定的实际物理路径，以支持在资源管理器中定位
-        } else if (role == IsLockedRole || role == PinnedRole) {
-            return record.pinned;
-        } else if (role == Qt::DecorationRole && index.column() == 0) {
-            static QIcon catIcon = QFileIconProvider().icon(QFileIconProvider::Folder);
-            return catIcon;
-        }
-        return QVariant();
-    }
-
-    if (role == Qt::DisplayRole || role == Qt::EditRole) {
-        switch (index.column()) {
-            case 0: {
-                // 优先使用 ItemRecord 中解包好的 filename（包含 .arc 内部真正的主素材文件名）
-                if (!record.filename.isEmpty()) return record.filename;
-                int lastSlash = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
-                if (lastSlash == -1) return path;
-                QString name = path.mid(lastSlash + 1);
-                if (name.isEmpty() && path.length() >= 2 && path[1] == ':') return path; // 盘符根目录安全保护
-                return name;
-            }
-            case 3: {
-                if (record.isDir) return "-";
-                if (record.width > 0 && record.height > 0) {
-                    return QString("%1 x %2").arg(record.width).arg(record.height);
-                }
-                return "-";
-            }
-            case 4: {
-                if (record.isDir) return "文件夹";
-                int lastDot = path.lastIndexOf('.');
-                return (lastDot != -1) ? path.mid(lastDot + 1).toUpper() : "";
-            }
-            case 5: {
-                if (record.isDir) return "-";
-                if (record.size < 1024) return QString::number(record.size) + " B";
-                if (record.size < 1024 * 1024) return QString::number(record.size / 1024.0, 'f', 1) + " KB";
-                return QString::number(record.size / (1024.0 * 1024.0), 'f', 1) + " MB";
-            }
-            case 6: {
-                return QDateTime::fromMSecsSinceEpoch(record.mtime).toString("dd-MM-yyyy HH:mm");
-            }
-        }
-    } else if (role == PathRole) {
-        return path;
-    } else if (role == TypeRole) {
-        return record.isDir ? "folder" : "file";
-    } else if (role == RatingRole) {
-        return record.rating;
-    } else if (role == ColorRole) {
-        return record.manualColor;
-    } else if (role == IsLockedRole || role == PinnedRole) {
-        return record.pinned;
-    } else if (role == EncryptedRole) {
-        return record.encrypted;
-    } else if (role == TagsRole) {
-        return record.tags;
-    } else if (role == ManagedRole) {
-        return record.isManaged;
-    } else if (role == RegistrationProgressRole) {
-        return record.registrationProgress;
-    } else if (role == CategoryIdRole) {
-        return 0; 
-    } else if (role == IsEmptyRole) {
-        auto* contentPanel = qobject_cast<ContentPanel*>(parent());
-        bool isDiskMode = contentPanel && (contentPanel->dataSourceType() == ContentPanel::DataSourceType::DiskNav);
-        return isDiskMode && record.isDir && record.isEmpty;
-    } else if (role == AspectRatioRole) {
-        // 2026-07-xx 性能优化：优先使用 ItemRecord 中已注入的尺寸信息，实现渲染零延迟
-        if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
-        double ratio = m_aspectRatios.value(QDir::toNativeSeparators(path), 1.0);
-        return ratio > 0.0 ? ratio : 1.0;
-    } else if (role == HasThumbnailRole) {
-        // 2026-xx-xx 按照 Plan-114 优化 + 冗余边框修复：
-        // cur/ico/ani 为纯图标类文件，ai 根据是否成功提取出内嵌缩略图决定是否走缩略图路径
-        static const QStringList iconOnlyExts = {"cur", "ico", "ani"};
-        if (iconOnlyExts.contains(record.suffix.toLower())) return false;
-        if (record.suffix.toLower() == "ai") {
-            QString nativePath = QDir::toNativeSeparators(path);
-            if (m_aspectRatios.contains(nativePath)) {
-                return m_aspectRatios.value(nativePath) > 0.0;
-            }
-            return false; // 尚未加载完成或提取失败，走 defaultIcon 干净绘制，避免拉伸和虚假边框
-        }
-        // .arc 资产包容器：以宽高比缓存是否已命中为准，加载完成前返回 false，避免虚假边框
-        if (record.isDir && path.endsWith(".arc", Qt::CaseInsensitive)) {
-            QString nativePath = QDir::toNativeSeparators(path);
-            return m_aspectRatios.contains(nativePath) && m_aspectRatios.value(nativePath) > 0.0;
-        }
-        if (UiHelper::isGraphicsFile(record.suffix)) return true;
-        if (record.width > 0 && record.height > 0) return true;
-        return m_aspectRatios.contains(QDir::toNativeSeparators(path)) && m_aspectRatios.value(QDir::toNativeSeparators(path)) > 0.0;
-    } else if (role == Qt::DecorationRole && index.column() == 0) {
-        // 统一使用稳定且唯一的 path 作为内存缩略图缓存 Key，彻底根除注册前/后 fileId 状态变化导致的缓存失效或闪烁痛点
-        QString cacheKey = path;
-        QIcon* cached = m_iconCache.object(cacheKey);
-        if (cached) return *cached;
-
-        QFileInfo info(path);
-        QString ext = info.suffix().toLower();
-        bool isGraphic = UiHelper::isGraphicsFile(ext) || ext == "svg";
-        
-        // .arc 资产包容器：包内存在 _thumbnail.png，视同图形文件，等待异步加载时返回空图标占位
-        bool isArcContainer = (ext == "arc" && info.isDir());
-
-        // 2026-11-14 执行第二步：图形文件等待缩略图时返回空图标，由 Delegate 绘制占位背景，消除抖动
-        if (isGraphic || isArcContainer) return QIcon(); 
-        return ShellIconManager::getFileIcon(path, 128); // 非图形文件直接显示系统图标
-    }
-
-    return QVariant();
-}
-
-QVariant ArcMetaVirtualDbModel::headerData(int section, Qt::Orientation orientation, int role) const {
-    if (orientation == Qt::Horizontal && role == Qt::DisplayRole) {
-        static const QStringList headers = {"名称", "状态", "星级", "尺寸", "类型", "大小", "修改日期"};
-        if (section < static_cast<int>(headers.size())) return headers[section];
-    }
-    return QVariant();
-}
-
-QStringList ArcMetaVirtualDbModel::mimeTypes() const {
-    return {"text/uri-list"};
-}
-
-QMimeData* ArcMetaVirtualDbModel::mimeData(const QModelIndexList& indexes) const {
-    QMimeData* mime = new QMimeData();
-    QList<QUrl> urls;
-    for (const auto& idx : indexes) {
-        if (idx.column() == 0) {
-            QString path = data(idx, PathRole).toString();
-            if (!path.isEmpty()) urls << QUrl::fromLocalFile(path);
-        }
-    }
-    if (urls.isEmpty()) {
-        delete mime;
-        return nullptr;
-    }
-    mime->setUrls(urls);
-    return mime;
-}
-
-bool ArcMetaVirtualDbModel::setData(const QModelIndex& index, const QVariant& value, int role) {
-    if (!index.isValid() || index.row() >= static_cast<int>(m_allRecords.size())) return false;
-
-    const auto& record = m_allRecords[index.row()];
-    QString path = record.path;
-
-    if (role == Qt::EditRole && index.column() == 0) {
-        // 🚨 [双轨不隔离违规点-6 物理隔离修复]:  
-        // 1. 如果是内存分类（isCategory）或处于镜像源（托管内存模式，isMirrorSource() == true），重命名属于逻辑重命名，仅需逻辑改写 SQLite 字段（不允许触发物理 rename 破坏资产包内部物理）。 
-        // 2. 如果是磁盘导航模式（isMirrorSource() == false），属于纯物理重命名，只重命名磁盘文件与离散缓存。 
-        if (record.isCategory) return false; 
- 
-        QString newName = value.toString().trimmed(); 
-        if (newName.isEmpty()) return false; 
- 
-        auto* contentPanel = qobject_cast<ContentPanel*>(parent()); 
-        bool isMirror = contentPanel && contentPanel->isMirrorSource(); 
- 
-        auto& mutableRecord = m_allRecords[index.row()]; 
-        QString oldPath = mutableRecord.path; 
-        QFileInfo info(oldPath); 
-        QString newPath = info.absolutePath() + "/" + newName; 
- 
-        if (isMirror) { 
-            // 内存逻辑重命名：仅改写数据库记录中对应的文件名 
-            // 对应的业务逻辑通过逻辑字段重命名同步修改 
-            return false; // 内存模式下分类重命名、资产名改写通过更顶层的专门逻辑/对话框操作，setData 在这里安全拦截 
-        } else { 
-            // 磁盘物理重命名 
-            if (oldPath != newPath) { 
-                QString nativeNewPath = QDir::toNativeSeparators(newPath); 
-                QPointer<ArcMetaVirtualDbModel> weakThis(this); 
-                int row = index.row(); 
-                (void)QtConcurrent::run([weakThis, oldPath, nativeNewPath, newName, row, role]() { 
-                    if (ShellHelper::renameItem(oldPath, nativeNewPath)) { 
-                        QMetaObject::invokeMethod(weakThis.data(), [weakThis, oldPath, nativeNewPath, newName, row, role]() { 
-                            if (weakThis) { 
-                                if (row < static_cast<int>(weakThis->m_allRecords.size())) { 
-                                    auto& mutableRec = weakThis->m_allRecords[row]; 
-                                    mutableRec.path = nativeNewPath; 
-                                    mutableRec.filename = newName; 
-                                    weakThis->m_metaCache.remove(oldPath); 
- 
-                                    // 2026-07-26 磁盘模式重命名成功后，同步就地无损迁移缩略图缓存与宽高比缓存 
-                                    weakThis->migrateCache(oldPath, nativeNewPath); 
-
-                                // 物理同步：安全更新模型私有的路径到行号的映射
-                                auto it = weakThis->m_pathToIndex.find(oldPath);
-                                if (it != weakThis->m_pathToIndex.end()) {
-                                    int oldRow = it->second;
-                                    weakThis->m_pathToIndex.erase(it);
-                                    weakThis->m_pathToIndex[nativeNewPath] = oldRow;
-                                }
-
-                                UndoManager::instance().pushCommand(std::make_unique<RenameCommand>(oldPath, nativeNewPath));
-
-                                QModelIndex modelIdx = weakThis->index(row, 0);
-                                emit weakThis->recordRenamed(oldPath, nativeNewPath, newName);
-                                emit weakThis->dataChanged(modelIdx, modelIdx, {role, Qt::DisplayRole, PathRole});
-                            }
-                        }
-                    }, Qt::QueuedConnection);
-                }
-            });
-            return true;
-        }
-        return false;
-    }
-}
-
-    bool metaUpdated = false;
-    if (role == RatingRole) {
-        int oldRating = index.data(RatingRole).toInt();
-        int newRating = value.toInt();
-        if (oldRating != newRating) {
-            if (record.isCategory) {
-                // 2026-07-xx 按照 Plan-73：分类评分持久化 (SCCH 架构)
-                Category cat;
-                auto all = CategoryRepo::getAll();
-                bool found = false;
-                for (auto& c : all) {
-                    if (c.id == record.categoryId) {
-                        c.presetTags.clear(); // 暂存 Rating 到预设标签或扩展字段。当前 Category 结构无 Rating，复用 presetTags[0] 存储
-                        // 逻辑校准：SCCH 架构中 Category 结构并无 rating 字段，
-                        // 2026-07-xx 按照分析：由于 Category 结构暂不支持 rating，评分仅在内存中生效并反馈至 UI
-                        auto& mutableRec = m_allRecords[index.row()];
-                        mutableRec.rating = newRating;
-                        metaUpdated = true;
-                        found = true;
-                        break;
-                    }
-                }
-            } else {
-                MetadataManager::instance().setRating(path.toStdWString(), newRating);
-                UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Rating, oldRating, newRating));
-                metaUpdated = true;
-            }
-        }
-    } else if (role == ColorRole) { 
-        QString oldColor = index.data(ColorRole).toString(); 
-        QString newColor = value.toString(); 
-        if (oldColor != newColor) { 
-            auto& mutableRec = m_allRecords[index.row()]; 
-             
-            if (record.isCategory) { 
-                // 1. 子分类项 (record.isCategory == true) 
-                auto all = CategoryRepo::getAll(); 
-                for (auto& c : all) { 
-                    if (c.id == record.categoryId) { 
-                        c.color = newColor.toUpper().toStdWString(); 
-                        CategoryRepo::update(c); // 持久化到 categories 表 
-                        if (!c.physicalPath.empty()) { 
-                            // 物理关键：notify 传 false，严禁触发全量 Reload 导致 beginResetModel 抹除选中！
-                            MetadataManager::instance().setColor(c.physicalPath, c.color, false); 
-                        } 
-                        break; 
-                    } 
-                } 
-                mutableRec.categoryColor = newColor; 
-                metaUpdated = true; 
-            } else { 
-                // 2. 普通文件或物理文件夹 (record.isCategory == false) 
-                // 物理关键：notify 传 false，仅做纯粹的本地元数据更新
-                MetadataManager::instance().setColor(path.toStdWString(), newColor.toStdWString(), false); 
-                 
-                if (record.isDir) { 
-                    std::wstring normPath = MetadataManager::normalizePath(path.toStdWString()); 
-                    CategoryRepo::updateCategoryColorByPath(normPath, newColor.toUpper().toStdWString()); 
-                } 
- 
-                UndoManager::instance().pushCommand(std::make_unique<MetadataCommand>(path, MetadataCommand::Color, oldColor, newColor)); 
-                metaUpdated = true; 
-            } 
-        } 
-    } else if (role == IsLockedRole || role == PinnedRole) {
-        bool pinned = value.toBool();
-        if (record.isCategory) {
-            auto all = CategoryRepo::getAll();
-            for (auto& c : all) {
-                if (c.id == record.categoryId) {
-                    c.pinned = pinned;
-                    CategoryRepo::update(c);
-                    auto& mutableRec = m_allRecords[index.row()];
-                    mutableRec.pinned = pinned;
-                    metaUpdated = true;
-                    break;
-                }
-            }
-        } else {
-            MetadataManager::instance().setPinned(path.toStdWString(), pinned);
-            metaUpdated = true;
-        }
-    }
-
-    if (metaUpdated) {
-        if (!record.isCategory) {
-            m_metaCache.remove(path);
-            // 2026-06-xx 物理同步：更新本地 Record 缓存，确保 UI 和排序逻辑立即可见最新状态
-            updateRecordMetadata(path);
-        } else {
-            // 分类文件夹：也只发 dataChanged 信号，绝对不调用 notifyUI(FullRebuild)！
-            QModelIndex left = this->index(index.row(), 0);
-            QModelIndex right = this->index(index.row(), columnCount() - 1);
-            emit dataChanged(left, right);
-
-            // 通知 CategoryPanel（分类树）同步更新分类颜色！
-            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CategoryOnly);
-        }
-        return true;
-    }
-
-    return false;
-}
-
-bool ArcMetaVirtualDbModel::canFetchMore(const QModelIndex& parent) const {
-    Q_UNUSED(parent);
-    return m_displayCount < static_cast<int>(m_allRecords.size());
-}
-
-void ArcMetaVirtualDbModel::fetchMore(const QModelIndex& parent) {
-    Q_UNUSED(parent);
-    if (m_displayCount < static_cast<int>(m_allRecords.size())) {
-        int remaining = static_cast<int>(m_allRecords.size()) - m_displayCount;
-        int batchSize = std::min(100, remaining);
-        beginInsertRows(QModelIndex(), m_displayCount, m_displayCount + batchSize - 1);
-        m_displayCount += batchSize;
-        endInsertRows();
-    }
-}
-
-void ArcMetaVirtualDbModel::setRecords(const std::vector<ItemRecord>& records) {
-    beginResetModel();
-    m_allRecords = records;
-    m_pathToIndex.clear();
-    for (int i = 0; i < static_cast<int>(m_allRecords.size()); ++i) {
-        m_pathToIndex[m_allRecords[i].path] = i;
-    }
-    if (!m_query.isEmpty() && m_query.length() < 3) {
-        m_displayCount = std::min(100, static_cast<int>(m_allRecords.size()));
-    } else {
-        m_displayCount = static_cast<int>(m_allRecords.size());
-    }
-    
-    // 【双阶段保护 - 阶段一】：首载即时保护缓存容量自适应设置
-    int folderTotal = static_cast<int>(m_allRecords.size());
-    const int hardLimit = 3000;
-    int initCost = 500;
-    if (folderTotal <= hardLimit) {
-        initCost = qMax(500, folderTotal + 50); // 无损冗余缓冲
-    } else {
-        initCost = qBound(1000, 40 * 8, hardLimit); // 在尚无视口行数测量数据时预设 40 行可见进行缓冲计算
-    }
-    m_iconCache.setMaxCost(initCost);
-
-    m_requestedIcons.clear();
-    // 2026-07-26 极致重构：在加载记录时，不强制清空 m_aspectRatios 宽高比映射字典，保证在增量/刷新或重命名时数据被无损地平滑保留，避免再次触发磁盘 I/O 重复提取，彻底消除闪烁
-    // m_aspectRatios.clear();
-    m_metaCache.clear();
-    endResetModel();
-}
-
-void ArcMetaVirtualDbModel::updateRecordMetadata(const QString& path) {
-    QString nPath = QDir::toNativeSeparators(path);
-    auto it = m_pathToIndex.find(nPath);
-    if (it != m_pathToIndex.end()) {
-        int i = it->second;
-        if (i >= 0 && i < static_cast<int>(m_allRecords.size())) {
-            auto meta = MetadataManager::instance().getMeta(nPath.toStdWString());
-            ItemRecord::fromMetadata(m_allRecords[i], meta);
-            
-            m_metaCache.remove(nPath);
-            QModelIndex left = index(i, 0);
-            QModelIndex right = index(i, columnCount() - 1);
-            emit dataChanged(left, right);
-        }
-    }
-}
-
-void ArcMetaVirtualDbModel::migrateCache(const QString& oldPath, const QString& newPath) {
-    QString nativeOld = QDir::toNativeSeparators(oldPath);
-    QString nativeNew = QDir::toNativeSeparators(newPath);
-
-    // 1. 缩略图缓存平滑更名：弹出原有缓存的 QIcon 指针并立刻 insert 回新路径下
-    QIcon* oldIconPtr = m_iconCache.take(oldPath);
-    if (oldIconPtr) {
-        m_iconCache.insert(nativeNew, oldIconPtr);
-    } else {
-        oldIconPtr = m_iconCache.take(nativeOld);
-        if (oldIconPtr) {
-            m_iconCache.insert(nativeNew, oldIconPtr);
-        }
-    }
-
-    // 2. 宽高比缓存平滑更名：同步迁移并更新 m_aspectRatios
-    if (m_aspectRatios.contains(nativeOld)) {
-        double oldRatio = m_aspectRatios.take(nativeOld);
-        m_aspectRatios[nativeNew] = oldRatio;
-    } else if (m_aspectRatios.contains(oldPath)) {
-        double oldRatio = m_aspectRatios.take(oldPath);
-        m_aspectRatios[nativeNew] = oldRatio;
-    }
-}
-
-void ArcMetaVirtualDbModel::clearCacheForFolder(const QString& folderPath) {
-    QString nativeFolder = QDir::toNativeSeparators(folderPath);
-    QString prefix = nativeFolder;
-    if (!prefix.endsWith(QDir::separator())) {
-        prefix += QDir::separator();
-    }
-
-    // 1. 清理 m_aspectRatios QMap
-    for (auto it = m_aspectRatios.begin(); it != m_aspectRatios.end(); ) {
-        QString key = it.key();
-        if (key == nativeFolder || key.startsWith(prefix)) {
-            it = m_aspectRatios.erase(it);
-        } else {
-            ++it;
-        }
-    }
-
-    // 2. 收集可能匹配的 Key 以彻底从 QCache 中 remove
-    QSet<QString> keysToClear;
-    for (const auto& pair : m_pathToIndex) {
-        if (pair.first == nativeFolder || pair.first.startsWith(prefix)) {
-            keysToClear.insert(pair.first);
-        }
-    }
-
-    for (const QString& key : keysToClear) {
-        m_iconCache.remove(key);
-        m_metaCache.remove(key);
-        m_requestedIcons.remove(key);
-    }
-}
-
-void ContentPanel::selectAndScrollToItem(const QString& type, const QString& path, int categoryId) {
-    if (!m_proxyModel) return;
-    for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
-        QModelIndex proxyIdx = m_proxyModel->index(i, 0);
-        bool match = false;
-        if (type == "category") {
-            match = (proxyIdx.data(TypeRole).toString() == "category" && proxyIdx.data(CategoryIdRole).toInt() == categoryId);
-        } else {
-            match = (!path.isEmpty() && proxyIdx.data(PathRole).toString() == path);
-        }
-
-        if (match) {
-            QAbstractItemView* view = (m_viewStack->currentWidget() == m_treeView) ? 
-                static_cast<QAbstractItemView*>(m_treeView) : static_cast<QAbstractItemView*>(m_gridView);
-            if (view) {
-                view->scrollTo(proxyIdx);
-                view->setCurrentIndex(proxyIdx);
-                view->selectionModel()->select(proxyIdx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-            }
-            break;
-        }
-    }
-}
-
-void ArcMetaVirtualDbModel::loadThumbnailsForRows(const QList<int>& rows) {
-    // 【双阶段保护 - 阶段二】：基于实际测量出的可见行数动态修正 maxCost
-    int folderTotal = static_cast<int>(m_allRecords.size());
-    int visibleCount = rows.size();
-    const int hardLimit = 3000;
-    int dynamicCost = 500;
-    
-    if (folderTotal <= hardLimit) {
-        dynamicCost = qMax(500, folderTotal + 50);
-    } else {
-        dynamicCost = qBound(1000, visibleCount * 8, hardLimit);
-    }
-    m_iconCache.setMaxCost(dynamicCost);
-
-    std::vector<std::pair<QString, QString>> newQueue; // {path, cacheKey}
-    
-    for (int r : rows) {
-        if (r < 0 || r >= m_displayCount) continue;
-        const auto& rec = m_allRecords[r];
-        if (rec.isCategory) continue;
-        
-        QString path = rec.path;
-        QString cacheKey = path; // 统一使用稳定且唯一的 path 作为内存缓存 Key
-        
-        // 核心排重与同步机制纠偏：对于图形格式文件，即使 icon 缓存命中，若宽高比缓存丢失，依然必须拉起加载以补全尺寸
-        bool needLoad = !m_iconCache.contains(cacheKey);
-        bool isArcContainer = rec.isDir && rec.path.endsWith(".arc", Qt::CaseInsensitive);
-        if ((UiHelper::isGraphicsFile(rec.suffix) || isArcContainer) && !m_aspectRatios.contains(QDir::toNativeSeparators(path))) {
-            needLoad = true;
-        }
-        if (!needLoad) continue;
-        
-        newQueue.push_back({path, cacheKey});
-    }
-
-    static QList<std::pair<QString, QString>> s_waitingQueue;
-    static QSet<QString> s_activeLoadingKeys; // 正在后台物理提取的 keys
-    static QMutex s_queueMutex;
-    static int s_activeThreadCount = 0;
-    
-    {
-        QMutexLocker locker(&s_queueMutex);
-        s_waitingQueue.clear();
-        for (const auto& item : newQueue) {
-            if (!s_activeLoadingKeys.contains(item.second)) {
-                s_waitingQueue.append(item);
-            }
-        }
-        
-        int maxThreads = 4;
-        while (s_activeThreadCount < maxThreads && !s_waitingQueue.isEmpty()) {
-            s_activeThreadCount++;
-            auto initialTask = s_waitingQueue.takeFirst();
-            s_activeLoadingKeys.insert(initialTask.second);
-            
-            QPointer<ArcMetaVirtualDbModel> weakThis(this);
-            (void)QtConcurrent::run([weakThis, initialTask]() {
-                #ifdef Q_OS_WIN
-                CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-                #endif
-                
-                std::pair<QString, QString> task = initialTask;
-                while (true) {
-                    QString path = task.first;
-                    QString cacheKey = task.second;
-                    QFileInfo info(path);
-                    QString ext = info.suffix().toLower();
-                    
-                    QImage img;
-                    double ar = 1.0;
-                    bool hasThumb = false;
-
-                    if (ext == "svg") {
-                        QSvgRenderer renderer(path);
-                        if (renderer.isValid()) {
-                            QImage svgImg(128, 128, QImage::Format_ARGB32);
-                            svgImg.fill(Qt::transparent);
-                            QPainter painter(&svgImg);
-                            renderer.render(&painter);
-                            img = svgImg;
-                            ar = 1.0;
-                            hasThumb = true;
-                        }
-                    } else if (ext == "ai") {
-                        // 纯 C++ 提取 .ai 文件中内嵌的高清 JPEG 预览图 (耗时仅 1~2ms，零依赖)
-                        img = MediaColorExtractor::extractEmbeddedAiPreview(path);
-                        if (!img.isNull()) {
-                            ar = (double)img.width() / img.height();
-                            hasThumb = true;
-                        } else {
-                            ar = -1.0; // 🚨 解析失败，强制标记为 -1.0 告知界面 Delegate 没有内容缩略图！
-                            hasThumb = false;
-                        }
-                    } else if (UiHelper::isGraphicsFile(ext) && ext != "cur" && ext != "ico" && ext != "ani" && ext != "ai") {
-                        img = ShellIconManager::getShellThumbnail(path, 128);
-                        if (!img.isNull()) {
-                            ar = (double)img.width() / img.height();
-                            hasThumb = true;
-                        }
-                    } else if (ext == "cur" || ext == "ico" || ext == "ani") {
-                        // 图标类文件固定视为 1:1，避免因 hasThumb 恒为 false 导致宽高比永远未写入、每次都被判定为 needLoad
-                        ar = 1.0;
-                        hasThumb = false;
-                    } else if (ext == "arc" && info.isDir()) {
-                        // .arc 资产包容器：穿透进包内，寻找 *_thumbnail.png 作为缩略图
-                        QDir arcDir(path);
-                        QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
-                        if (!thumbFiles.isEmpty()) {
-                            QString thumbPath = path + "/" + thumbFiles.first();
-                            img = QImage(thumbPath);
-                            if (!img.isNull()) {
-                                ar = (double)img.width() / img.height();
-                                hasThumb = true;
-                            }
-                        }
-                    }
-
-                    if (weakThis) {
-                        QMetaObject::invokeMethod(const_cast<ArcMetaVirtualDbModel*>(weakThis.data()), [weakThis, path, cacheKey, img, ar, hasThumb]() {
-                            if (!weakThis) return;
-                            auto* mutableThis = const_cast<ArcMetaVirtualDbModel*>(weakThis.data());
-                            
-                            // [Plan-53 内存缓存无损退避机制] 
-                            // 在刷新或重置导致二次强行提取时，如果由于物理拷贝尚未完成或图片暂时遇阻，
-                            // img 返回空图，若此时缓存 m_iconCache 中已经存在了我们之前成功绘制出来的缩略图，
-                            // 我们必须无损退退避，绝对禁止用空图或低质默认文件图标将优质的内存 QIcon 缓存覆灭覆盖！
-                            if (img.isNull()) {
-                                if (mutableThis->m_iconCache.contains(cacheKey)) {
-                                    // 缓存已有优质图像，无损保留
-                                    return;
-                                }
-                            }
-
-                            QIcon icon;
-                            if (!img.isNull()) {
-                                icon = QIcon(QPixmap::fromImage(img));
-                            } else {
-                                QString iconTarget = path;
-                                QFileInfo localInfo(path);
-                                QString localExt = localInfo.suffix().toLower();
-                                if (localExt == "arc" && localInfo.isDir()) {
-                                    QDir arcDir(path);
-                                    QFileInfoList files = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-                                    for (const QFileInfo& fi : files) {
-                                        QString fn = fi.fileName();
-                                        if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
-                                        if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
-                                        iconTarget = QDir::toNativeSeparators(fi.absoluteFilePath());
-                                        break;
-                                    }
-                                }
-                                icon = ShellIconManager::getFileIcon(iconTarget, 128);
-                            }
-                            
-                            mutableThis->m_iconCache.insert(cacheKey, new QIcon(icon));
-                            mutableThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
-                            
-                            for (int i = 0; i < mutableThis->m_displayCount; ++i) {
-                                const auto& rec = mutableThis->m_allRecords[i];
-                                bool match = (rec.path == path);
-                                if (match) {
-                                    emit mutableThis->dataChanged(mutableThis->index(i, 0), mutableThis->index(i, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
-                                    break;
-                                }
-                            }
-                        }, Qt::QueuedConnection);
-                    }
-
-                    // 取下一个任务
-                    QMutexLocker innerLocker(&s_queueMutex);
-                    s_activeLoadingKeys.remove(cacheKey);
-                    
-                    if (s_waitingQueue.isEmpty() || !weakThis) {
-                        break;
-                    }
-                    
-                    task = s_waitingQueue.takeFirst();
-                    s_activeLoadingKeys.insert(task.second);
-                }
-
-                #ifdef Q_OS_WIN
-                CoUninitialize();
-                #endif
-
-                QMutexLocker innerLocker(&s_queueMutex);
-                s_activeThreadCount--;
-            });
-        }
-    }
-}
-
-void ArcMetaVirtualDbModel::clear() {
-    beginResetModel();
-    m_allRecords.clear();
-    m_pathToIndex.clear();
-    m_displayCount = 0;
-    m_query.clear();
-    m_requestedIcons.clear();
-    m_aspectRatios.clear();
-    m_metaCache.clear();
-    endResetModel();
-}
 
 // --- FilterProxyModel 实现 --- 
 FilterProxyModel::FilterProxyModel(QObject* parent) : QSortFilterProxyModel(parent) {} 
@@ -831,7 +109,7 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     QModelIndex idx = sourceModel()->index(sourceRow, 0, sourceParent); 
      
     // 2026-06-xx 性能优化：提前获取 ItemRecord，避免重复查询并为下方过滤提供数据支撑
-    const auto* sourceModelPtr = qobject_cast<const ArcMetaVirtualDbModel*>(sourceModel());
+    const auto* sourceModelPtr = qobject_cast<const ItemModelBase*>(sourceModel());
     if (!sourceModelPtr) return true;
 
     const auto& records = sourceModelPtr->allRecords();
@@ -1102,7 +380,7 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
     } 
 
     // 3. 第三级：由右键选择的 m_sortType 驱动的七维精确物理属性对位排序（对应用户原话：“名称、创建日期、修改日期、扩展名、大小、尺寸、评分”）
-    const auto* sourceModelPtr = qobject_cast<const ArcMetaVirtualDbModel*>(sourceModel());
+    const auto* sourceModelPtr = qobject_cast<const ItemModelBase*>(sourceModel());
     if (!sourceModelPtr) return QSortFilterProxyModel::lessThan(source_left, source_right);
 
     const auto& records = sourceModelPtr->allRecords();
@@ -1181,29 +459,30 @@ ContentPanel::ContentPanel(QWidget* parent)
     m_mainLayout->setSpacing(0); 
  
  
-    m_model = new ArcMetaVirtualDbModel(this); 
+    m_diskModel = new DiskItemModel(this);
+    m_libraryModel = new LibraryAssetModel(this);
+    m_model = m_libraryModel; // 默认挂载受控逻辑库模型
+
     m_proxyModel = new FilterProxyModel(this); 
     m_proxyModel->setSourceModel(m_model); 
 
     m_visibleTimer = new QTimer(this);
     m_visibleTimer->setSingleShot(true);
-    m_visibleTimer->setInterval(100); // 100ms 黄金防抖视口延迟
+    m_visibleTimer->setInterval(100);
     connect(m_visibleTimer, &QTimer::timeout, this, &ContentPanel::refreshVisibleThumbnails);
     
-    // 2026-05-17 新增：当模型数据发生改变时，自动触发统计重新计算并推送至 FilterPanel
-    connect(m_model, &ArcMetaVirtualDbModel::dataChanged, this, [this](const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles) {
+    auto onDataChanged = [this](const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles) {
         Q_UNUSED(topLeft); Q_UNUSED(bottomRight);
         if (roles.isEmpty() || roles.contains(ColorRole) || roles.contains(RatingRole) || roles.contains(TagsRole)) {
             recalculateAndEmitStats();
         }
-    });
+    };
+    connect(m_diskModel, &ItemModelBase::dataChanged, this, onDataChanged);
+    connect(m_libraryModel, &ItemModelBase::dataChanged, this, onDataChanged);
 
-    // 🚀【方案 A 核心】：监听模型层的 recordRenamed 信号，进行增量更新与选中重新对齐，绝对不触发全量 loadDirectory
-    connect(m_model, &ArcMetaVirtualDbModel::recordRenamed, this, [this](const QString& oldPath, const QString& newPath, const QString& newName) {
+    connect(m_libraryModel, &LibraryAssetModel::recordRenamed, this, [this](const QString& oldPath, const QString& newPath, const QString& newName) {
         Q_UNUSED(oldPath);
         this->setPendingSelectName(newName, false);
-        
-        // 通知视图重新定位并同步元数据面板状态
         this->selectAndScrollToPath(newPath);
         this->onSelectionChanged();
     });
@@ -2996,9 +2275,11 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
 } 
  
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
-    // =========================================================================
-    // 【彻底解耦与隔离】：干掉越界的劫持与重定向逻辑，保持磁盘模式 100% 的纯粹性！
-    // =========================================================================
+    // 🚨 0 与 1 彻底断连多态自动分流：物理切断
+    if (m_model != m_diskModel) {
+        m_model = m_diskModel;
+        m_proxyModel->setSourceModel(m_model);
+    }
 
     m_isLoading = true;
     int reqId = ++m_loadRequestId;
@@ -3177,7 +2458,12 @@ void ContentPanel::previewFile(const QString& path) {
 } 
  
 void ContentPanel::loadCategory(int categoryId) { 
-    // 2026-07-xx 物理防护：防重入机制。如果已经在加载同一个分类，则直接拦截，防止重复 clear() 导致的闪烁
+    // 🚨 0 与 1 彻底断连多态自动分流：逻辑切断
+    if (m_model != m_libraryModel) {
+        m_model = m_libraryModel;
+        m_proxyModel->setSourceModel(m_model);
+    }
+
     if (m_isLoading && m_currentCategoryId == categoryId && m_currentCategoryType == "user_category") {
         return;
     }
@@ -3238,6 +2524,12 @@ void ContentPanel::loadCategory(int categoryId) {
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths, int reqId) { 
+    // 🚨 0 与 1 彻底断连多态自动分流：逻辑切断
+    if (m_model != m_libraryModel) {
+        m_model = m_libraryModel;
+        m_proxyModel->setSourceModel(m_model);
+    }
+
     // 2026-07-xx 物理强化：如果路径列表为空，直接执行同步清理并返回
     // 理由：这防止了搜索启动时的清空动作（异步）与随后到达的结果加载（异步）发生竞态。
     if (paths.isEmpty()) {
