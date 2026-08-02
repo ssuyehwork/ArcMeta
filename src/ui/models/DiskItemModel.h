@@ -16,11 +16,11 @@ public:
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
 
-    const std::vector<ItemRecord>& allRecords() const override { return m_allRecords; }
-    std::vector<ItemRecord>& mutableRecords() { return m_allRecords; }
+    const std::vector<ArcMeta::ItemRecord>& allRecords() const override { return m_allRecords; }
+    std::vector<ArcMeta::ItemRecord>& mutableRecords() { return m_allRecords; }
 
 protected:
-    std::vector<ItemRecord> m_allRecords;
+    std::vector<ArcMeta::ItemRecord> m_allRecords;
     mutable QCache<QString, QIcon> m_iconCache;
     mutable QMap<QString, double> m_aspectRatios;
 };
