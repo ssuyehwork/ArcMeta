@@ -102,6 +102,11 @@ set(SOURCES
     src/ui/CategoryDelegate.h
     src/ui/CategoryLockDialog.cpp
     src/ui/CategoryLockDialog.h
+    src/ui/models/ItemModelBase.h
+    src/ui/models/DiskItemModel.h
+    src/ui/models/DiskItemModel.cpp
+    src/ui/models/LibraryAssetModel.h
+    src/ui/models/LibraryAssetModel.cpp
     src/ui/CategoryModel.cpp
     src/ui/CategoryModel.h
     src/ui/CategoryPanel.cpp
@@ -317,6 +322,7 @@ target_link_libraries(ArcMeta PRIVATE
 target_include_directories(ArcMeta PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/meta
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/models
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     ${CMAKE_CURRENT_SOURCE_DIR}/src/mft
     ${CMAKE_CURRENT_SOURCE_DIR}/src/crypto
