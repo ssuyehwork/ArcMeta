@@ -1,77 +1,6 @@
-#include <stddef.h>
-#include <stdint.h>
-
 #include "MediaColorExtractor.h"
 #include "../core/AppConfig.h"
 #include "WindowsShellThumbnailProvider.h"
-
-#ifdef Q_OS_WIN
-#include <windows.h>
-#include <gdiplus.h>
-#pragma comment(lib, "gdiplus.lib")
-
-// 使用 Windows 原生 GDI+ 从内存 IStream 接口无侵入、零依赖地直接解码 TIFF (完美支持 LZW/CMYK/任何 TIFF 压缩)
-static QImage decodeTiffFromMemoryGdiPlus(const QByteArray& tiffData) {
-    static bool gdiplusInitialized = false;
-    static ULONG_PTR gdiplusToken;
-    if (!gdiplusInitialized) {
-        Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-        Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, nullptr);
-        gdiplusInitialized = true;
-    }
-
-    HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, tiffData.size());
-    if (!hGlobal) return QImage();
-
-    void* pData = GlobalLock(hGlobal);
-    if (!pData) {
-        GlobalFree(hGlobal);
-        return QImage();
-    }
-    memcpy(pData, tiffData.constData(), tiffData.size());
-    GlobalUnlock(hGlobal);
-
-    IStream* pStream = nullptr;
-    if (CreateStreamOnHGlobal(hGlobal, TRUE, &pStream) != S_OK) {
-        GlobalFree(hGlobal);
-        return QImage();
-    }
-
-    Gdiplus::Bitmap* pBitmap = Gdiplus::Bitmap::FromStream(pStream);
-    if (!pBitmap || pBitmap->GetLastStatus() != Gdiplus::Ok) {
-        if (pBitmap) delete pBitmap;
-        pStream->Release();
-        return QImage();
-    }
-
-    UINT width = pBitmap->GetWidth();
-    UINT height = pBitmap->GetHeight();
-
-    QImage img(width, height, QImage::Format_ARGB32);
-    Gdiplus::Rect rect(0, 0, width, height);
-    Gdiplus::BitmapData bmpData;
-
-    if (pBitmap->LockBits(&rect, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &bmpData) == Gdiplus::Ok) {
-        for (UINT y = 0; y < height; ++y) {
-            uchar* destLine = img.scanLine(y);
-            uchar* srcLine = reinterpret_cast<uchar*>(bmpData.Scan0) + y * bmpData.Stride;
-            memcpy(destLine, srcLine, width * 4);
-        }
-        pBitmap->UnlockBits(&bmpData);
-    } else {
-        img = QImage();
-    }
-
-    delete pBitmap;
-    pStream->Release(); // CreateStreamOnHGlobal(..., TRUE, ...) 会托管并自动释放 hGlobal
-
-    return img;
-}
-#else
-static QImage decodeTiffFromMemoryGdiPlus(const QByteArray&) {
-    return QImage();
-}
-#endif
 #include <QFileInfo>
 #include <QCoreApplication>
 #include <QDir>
@@ -303,13 +232,13 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
 
     file.seek(tiffOffset);
     QByteArray tiffData = file.read(tiffLength);
-    QImage img = decodeTiffFromMemoryGdiPlus(tiffData);
-    if (img.isNull()) {
-        qWarning() << "[MediaColorExtractor][EPS] 已定位到 TIFF 数据区但通过 Windows GDI+ 原生解码失败，长度：" << tiffData.size() << "：" << path;
+    QImage img;
+    if (!img.loadFromData(tiffData, "TIFF")) {
+        qWarning() << "[MediaColorExtractor][EPS] 已定位到 TIFF 数据区但解码失败，长度：" << tiffData.size() << "：" << path;
         return QImage();
     }
 
-    qDebug() << "[MediaColorExtractor][EPS] 内嵌预览通过 Windows GDI+ 原生提取成功：" << path;
+    qDebug() << "[MediaColorExtractor][EPS] 内嵌预览提取成功：" << path;
     return img;
 }
 
