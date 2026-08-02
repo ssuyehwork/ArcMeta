@@ -1,18 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifndef TIFF_INT64_T
-#define TIFF_INT64_T signed __int64
-#define TIFF_UINT64_T unsigned __int64
-#define TIFF_INT32_T signed __int32
-#define TIFF_UINT32_T unsigned __int32
-#define TIFF_INT16_T signed __int16
-#define TIFF_UINT16_T unsigned __int16
-#define TIFF_INT8_T signed __int8
-#define TIFF_UINT8_T unsigned __int8
-#define TIFF_SSIZE_T signed __int64
-#endif
-
 // 🚨 关键修复：C++ 必须显式指定 extern "C"，告知 MSVC 按纯 C 语言函数名进行链接
 extern "C" {
 #include "tiffio.h"
@@ -290,22 +278,79 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
         return QImage();
     }
 
-    QByteArray data = file.read(5 * 1024 * 1024);
-    file.close();
+    // 采用高效的流式分块搜寻游标，消除 5MB 的硬编码限制，支持无限大文件的内嵌预览检索
+    const qint64 chunkSize = 1024 * 1024; // 1MB chunk size
+    QByteArray buffer;
+    qint64 startOffset = -1;
 
-    int start = data.indexOf("\xFF\xD8\xFF");
-    if (start == -1) {
+    while (!file.atEnd()) {
+        qint64 currentChunkOffset = file.pos();
+        QByteArray chunk = file.read(chunkSize);
+        if (chunk.isEmpty()) break;
+
+        // 如果之前有残留 buffer（重叠），拼接以防标记被分块截断
+        if (!buffer.isEmpty()) {
+            buffer = buffer.right(2) + chunk;
+            currentChunkOffset -= 2;
+        } else {
+            buffer = chunk;
+        }
+
+        int idx = buffer.indexOf("\xFF\xD8\xFF");
+        if (idx != -1) {
+            startOffset = currentChunkOffset + idx;
+            break;
+        }
+    }
+
+    if (startOffset == -1) {
         qWarning() << "[MediaColorExtractor][AI] 未找到 JPEG 起始标记(FFD8FF)，该文件可能未内嵌兼容性预览：" << filePath;
         return QImage();
     }
 
-    int end = data.indexOf("\xFF\xD9", start);
-    if (end == -1) {
-        qWarning() << "[MediaColorExtractor][AI] 找到起始标记但未找到 JPEG 结束标记(FFD9)，读取范围内数据不完整：" << filePath;
+    // 从 startOffset 开始寻找 \xFF\xD9 结束标记
+    if (!file.seek(startOffset)) {
+        qWarning() << "[MediaColorExtractor][AI] 重定向文件指针失败：" << filePath;
         return QImage();
     }
 
-    QByteArray imgData = data.mid(start, (end - start) + 2);
+    QByteArray imgData;
+    buffer.clear();
+    bool foundEnd = false;
+
+    while (!file.atEnd() && imgData.size() < 50 * 1024 * 1024) { // 安全上限：最多提取 50MB 的 JPEG 数据
+        qint64 currentChunkOffset = file.pos();
+        QByteArray chunk = file.read(chunkSize);
+        if (chunk.isEmpty()) break;
+
+        if (!buffer.isEmpty()) {
+            buffer = buffer.right(1) + chunk;
+            currentChunkOffset -= 1;
+        } else {
+            buffer = chunk;
+        }
+
+        int idx = buffer.indexOf("\xFF\xD9");
+        if (idx != -1) {
+            qint64 endOffset = currentChunkOffset + idx + 2;
+            qint64 totalLen = endOffset - startOffset;
+            if (totalLen > 0) {
+                if (file.seek(startOffset)) {
+                    imgData = file.read(totalLen);
+                    foundEnd = true;
+                }
+            }
+            break;
+        }
+    }
+
+    file.close();
+
+    if (!foundEnd || imgData.isEmpty()) {
+        qWarning() << "[MediaColorExtractor][AI] 找到起始标记但未找到 JPEG 结束标记(FFD9)或数据不完整：" << filePath;
+        return QImage();
+    }
+
     QImage img;
     if (!img.loadFromData(imgData)) {
         qWarning() << "[MediaColorExtractor][AI] 已提取出 JPEG 字节流但解码失败，数据长度：" << imgData.size() << "：" << filePath;
@@ -384,6 +429,14 @@ QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
     }
 
     if (img.isNull()) {
+        // 🚨 极致物理重构：针对 psd/psb/ai/eps 这四类矢量和设计层文件，若内嵌数据流解析失败，
+        // 绝对禁止采用系统关联的软件大图标（如 Ai 大图标）进行虚假兜底！
+        static const QStringList rawDesignExts = {"psd", "psb", "ai", "eps"};
+        if (rawDesignExts.contains(ext)) {
+            qWarning() << "[MediaColorExtractor][BLOCK] 已强制拦截该文件的系统默认图标兜底，标记为无真实内容预览：" << path;
+            return QImage(); // 干净地返回空图
+        }
+
         img = WindowsShellThumbnailProvider::getShellThumbnail(path, size);
         if (img.isNull()) img.load(path);
     }
