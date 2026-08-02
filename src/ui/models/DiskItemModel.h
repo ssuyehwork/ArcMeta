@@ -6,6 +6,9 @@
 #include <QMap>
 #include <QIcon>
 
+#include <unordered_map>
+#include <QSet>
+
 class DiskItemModel : public ItemModelBase {
     Q_OBJECT
 public:
@@ -17,12 +20,21 @@ public:
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
 
     const std::vector<ArcMeta::ItemRecord>& allRecords() const override { return m_allRecords; }
-    std::vector<ArcMeta::ItemRecord>& mutableRecords() { return m_allRecords; }
+    void setRecords(const std::vector<ArcMeta::ItemRecord>& records) override;
+    void clear() override;
+    void setQuery(const QString& query) override { m_query = query; }
+    void updateRecordMetadata(const QString& path) override;
+    void loadThumbnailsForRows(const QList<int>& rows) override;
+    void migrateCache(const QString& oldPath, const QString& newPath) override;
+    void clearCacheForFolder(const QString& folderPath) override;
 
 protected:
     std::vector<ArcMeta::ItemRecord> m_allRecords;
+    std::unordered_map<QString, int, ArcMeta::QStringHash> m_pathToIndex;
     mutable QCache<QString, QIcon> m_iconCache;
+    mutable QSet<QString> m_requestedIcons;
     mutable QMap<QString, double> m_aspectRatios;
+    QString m_query;
 };
 
 #endif // DISKITEMMODEL_H

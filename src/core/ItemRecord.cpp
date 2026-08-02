@@ -29,23 +29,21 @@ void ItemRecord::fromMetadata(ItemRecord& r, const RuntimeMeta& meta) {
     }
 }
 
-ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMeta) {
+ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMeta, bool isFromMemory) {
     ItemRecord r;
     std::wstring wPath = MetadataManager::normalizePath(path.toStdWString());
     QString nPath = QString::fromStdWString(wPath);
 
     // 1. 物理属性采样 (零 I/O 核心)
-    // 🚨 [双轨不隔离违规点-1 物理隔离修复]: 磁盘导航模式下不共享、不穿透读取资源库数据库。
-    // 如果没有 providedMeta，且不是 .arc 素材包路径，绝不穿透 MetadataManager。
+    // 🚨 [双轨不隔离极简解耦重构]: 磁盘导航模式下（isFromMemory == false）100% 拒绝穿透去读受控库数据库！
     RuntimeMeta meta;
-    bool isArcPath = (wPath.find(L".arc") != std::wstring::npos);
+    bool isArcPath = isFromMemory && (wPath.find(L".arc") != std::wstring::npos);
     if (providedMeta) {
         meta = *providedMeta;
     } else if (isArcPath) {
         meta = MetadataManager::instance().getMeta(wPath);
     }
 
-    // Plan-124: 只有在内存缓存缺失物理时间戳时，才触发 fetchWinApiMetadataDirect
     if (meta.folderId.empty() || (meta.ctime == 0 && meta.mtime == 0)) {
         std::string fid;
         long long size = 0, ctime = 0, mtime = 0, atime = 0;
@@ -55,9 +53,7 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         r.mtime = mtime;
         r.atime = atime;
         
-        // 🚨 内存数据库模式唯一ID体系重构：优先解析和提取 Base36 ID，如果是磁盘普通路径，则复用本轮采样已取得 of fid，彻底消除双重 I/O 冗余
-        size_t pos = wPath.find(L".arc");
-        if (pos != std::wstring::npos) {
+        if (isFromMemory && wPath.find(L".arc") != std::wstring::npos) {
             r.folderId = MetadataManager::instance().getFolderIdSync(wPath);
         } else {
             r.folderId = fid;
@@ -95,20 +91,40 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
 
     if (r.isDir) {
         // 从数据库加载持久化的进度值
-        r.registrationProgress = MetadataManager::instance().getProgressFromDb(wPath);
+        if (isFromMemory) {
+            r.registrationProgress = MetadataManager::instance().getProgressFromDb(wPath);
+        } else {
+            r.registrationProgress = -1.0;
+        }
 
-        // 严格遵循规则：空文件夹判定只应用于磁盘模式！
-        if (providedMeta || meta.isManaged) {
-            r.isEmpty = false; // 镜像/托管模式下强行禁用空文件夹逻辑
+        if (providedMeta || (isFromMemory && meta.isManaged)) {
+            r.isEmpty = false; 
         } else {
             QDir sub(nPath);
             r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty(); // 仅磁盘模式生效
         }
-        r.suffix = ""; // 文件夹不应有扩展名后缀
+        r.suffix = ""; 
     } else {
         int lastDot = nPath.lastIndexOf('.');
         r.suffix = (lastDot != -1) ? nPath.mid(lastDot + 1).toLower() : "";
     }
+
+    // 3. 内存模式下彻底穿透包内查找主素材文件，将其真实文件名与扩展名注入 ItemRecord
+    if (isFromMemory && r.isDir && nPath.endsWith(".arc", Qt::CaseInsensitive)) {
+        QDir arcDir(nPath);
+        QFileInfoList files = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+        for (const QFileInfo& fi : files) {
+            QString fn = fi.fileName();
+            if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
+            if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
+            if (fn.compare("metadata.scch", Qt::CaseInsensitive) == 0) continue;
+            
+            r.filename = fn;
+            r.suffix = fi.suffix().toLower();
+            break;
+        }
+    }
+
     return r;
 }
 

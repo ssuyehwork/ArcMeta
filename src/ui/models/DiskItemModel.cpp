@@ -8,6 +8,8 @@
 
 using namespace ArcMeta;
 
+#include <QtConcurrent>
+
 DiskItemModel::DiskItemModel(QObject* parent) : ItemModelBase(parent) {
     m_iconCache.setMaxCost(500);
 }
@@ -20,7 +22,106 @@ int DiskItemModel::rowCount(const QModelIndex& parent) const {
 }
 
 int DiskItemModel::columnCount(const QModelIndex&) const {
-    return 7; // 文件基本属性列：名、大小、格式、修改时间等数
+    return 7;
+}
+
+void DiskItemModel::setRecords(const std::vector<ItemRecord>& records) {
+    beginResetModel();
+    m_allRecords = records;
+    m_pathToIndex.clear();
+    for (int i = 0; i < static_cast<int>(m_allRecords.size()); ++i) {
+        m_pathToIndex[m_allRecords[i].path] = i;
+    }
+    m_iconCache.setMaxCost(qMax(500, static_cast<int>(m_allRecords.size()) + 50));
+    m_requestedIcons.clear();
+    endResetModel();
+}
+
+void DiskItemModel::clear() {
+    beginResetModel();
+    m_allRecords.clear();
+    m_pathToIndex.clear();
+    m_query.clear();
+    m_requestedIcons.clear();
+    m_aspectRatios.clear();
+    endResetModel();
+}
+
+void DiskItemModel::updateRecordMetadata(const QString& path) {
+    // 磁盘物理模型拒绝响应任何逻辑库元数据局部更新，静默放行
+}
+
+void DiskItemModel::migrateCache(const QString& oldPath, const QString& newPath) {
+    QString nativeOld = QDir::toNativeSeparators(oldPath);
+    QString nativeNew = QDir::toNativeSeparators(newPath);
+    QIcon* oldIconPtr = m_iconCache.take(oldPath);
+    if (oldIconPtr) {
+        m_iconCache.insert(nativeNew, oldIconPtr);
+    }
+    if (m_aspectRatios.contains(nativeOld)) {
+        double ratio = m_aspectRatios.take(nativeOld);
+        m_aspectRatios[nativeNew] = ratio;
+    }
+}
+
+void DiskItemModel::clearCacheForFolder(const QString& folderPath) {
+    QString nativeFolder = QDir::toNativeSeparators(folderPath);
+    QString prefix = nativeFolder;
+    if (!prefix.endsWith(QDir::separator())) prefix += QDir::separator();
+
+    for (auto it = m_aspectRatios.begin(); it != m_aspectRatios.end(); ) {
+        if (it.key() == nativeFolder || it.key().startsWith(prefix)) {
+            it = m_aspectRatios.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
+    // 磁盘模型：缩略图提取流 100% 盲区拦截：对 .arc、文件夹和非标准图形直接忽略，不生成任何 _thumbnail.png，不穿透
+    std::vector<std::pair<QString, QString>> newQueue;
+    for (int r : rows) {
+        if (r < 0 || r >= static_cast<int>(m_allRecords.size())) continue;
+        const auto& rec = m_allRecords[r];
+        if (rec.isDir) continue; // 绝对不穿透文件夹
+        
+        QString path = rec.path;
+        if (!UiHelper::isGraphicsFile(rec.suffix)) continue;
+        if (m_iconCache.contains(path)) continue;
+        newQueue.push_back({path, path});
+    }
+
+    if (newQueue.empty()) return;
+
+    QPointer<DiskItemModel> weakThis(this);
+    (void)QtConcurrent::run([weakThis, newQueue]() {
+        for (const auto& task : newQueue) {
+            if (!weakThis) break;
+            QString path = task.first;
+            QImage img = ShellIconManager::getShellThumbnail(path, 128);
+            double ar = 1.0;
+            bool hasThumb = false;
+            if (!img.isNull()) {
+                ar = (double)img.width() / img.height();
+                hasThumb = true;
+            }
+
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, img, ar, hasThumb]() {
+                if (weakThis) {
+                    QIcon icon = img.isNull() ? ShellIconManager::getFileIcon(path, 128) : QIcon(QPixmap::fromImage(img));
+                    weakThis->m_iconCache.insert(path, new QIcon(icon));
+                    weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
+
+                    auto it = weakThis->m_pathToIndex.find(path);
+                    if (it != weakThis->m_pathToIndex.end()) {
+                        int rIdx = it->second;
+                        emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+                    }
+                }
+            });
+        }
+    });
 }
 
 QVariant DiskItemModel::data(const QModelIndex& index, int role) const {
