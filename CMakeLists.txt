@@ -201,49 +201,11 @@ set(SOURCES
 
 # 新增：libtiff 全量无忧源码配置（已处理同名 main 冲突，包含全套核心与扩展功能）
 set(LIBTIFF_SOURCES
-    # 1. 核心读写与图像解析模块
-    src/third_party/libtiff/tif_aux.c
-    src/third_party/libtiff/tif_close.c
-    src/third_party/libtiff/tif_codec.c
-    src/third_party/libtiff/tif_color.c
-    src/third_party/libtiff/tif_compress.c
-    src/third_party/libtiff/tif_dir.c
-    src/third_party/libtiff/tif_dirinfo.c
-    src/third_party/libtiff/tif_dirread.c
-    src/third_party/libtiff/tif_dirwrite.c
-    src/third_party/libtiff/tif_dumpmode.c
-    src/third_party/libtiff/tif_error.c
-    src/third_party/libtiff/tif_extension.c
-    src/third_party/libtiff/tif_fax3.c
-    src/third_party/libtiff/tif_fax3sm.c
-    src/third_party/libtiff/tif_flush.c
-    src/third_party/libtiff/tif_getimage.c
-    src/third_party/libtiff/tif_luv.c
-    src/third_party/libtiff/tif_lzw.c
-    src/third_party/libtiff/tif_next.c
-    src/third_party/libtiff/tif_ojpeg.c
-    src/third_party/libtiff/tif_open.c
-    src/third_party/libtiff/tif_packbits.c
-    src/third_party/libtiff/tif_pixarlog.c
-    src/third_party/libtiff/tif_predict.c
-    src/third_party/libtiff/tif_print.c
-    src/third_party/libtiff/tif_read.c
-    src/third_party/libtiff/tif_strip.c
-    src/third_party/libtiff/tif_swab.c
-    src/third_party/libtiff/tif_thunder.c
-    src/third_party/libtiff/tif_tile.c
-    src/third_party/libtiff/tif_version.c
-    src/third_party/libtiff/tif_warning.c
-    src/third_party/libtiff/tif_win32.c
-    src/third_party/libtiff/tif_zip.c
-    src/third_party/libtiff/tif_zstd.c
-
     # 2. 全套颜色模式与扩展转换支持模块
     src/third_party/libtiff/tiff-bi.c
     src/third_party/libtiff/tiff-grayscale.c
     src/third_party/libtiff/tiff-palette.c
     src/third_party/libtiff/tiff-rgb.c
-    src/third_party/libtiff/xtif_dir.c
     src/third_party/libtiff/xtiff.c
 )
 
