@@ -194,6 +194,45 @@ set(SOURCES
     resources/resources.qrc
 )
 
+# Windows MSVC 下对 libtiff 头文件（如 tiffconf.h 和 tif_config.h）的自适应检测与生成配置
+# 优先从本地的 .vc 模板复制；如果模板也不存在，则自动生成标准兼容头文件，防止 MSVC 报错
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libtiff/tiffconf.h")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libtiff/tiffconf.h.vc")
+        message(STATUS "[CMake] 正在从 tiffconf.h.vc 自动复制并生成 tiffconf.h...")
+        configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libtiff/tiffconf.h.vc" "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libtiff/tiffconf.h" COPYONLY)
+    else()
+        message(STATUS "[CMake] 本地未找到 tiffconf.h 且不存在 tiffconf.h.vc 模板，正在自动生成标准 MSVC 兼容的 tiffconf.h...")
+        file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libtiff/tiffconf.h"
+            "#ifndef _TIFFCONF_\n"
+            "#define _TIFFCONF_\n"
+            "#define HAVE_SYS_TYPES_H 1\n"
+            "#define HAVE_FCNTL_H 1\n"
+            "#define SIZEOF_INT 4\n"
+            "#define SIZEOF_LONG 4\n"
+            "#define TIFF_INT64_T signed __int64\n"
+            "#define TIFF_UINT64_T unsigned __int64\n"
+            "#define HAVE_IEEEFP 1\n"
+            "#endif /* _TIFFCONF_ */\n"
+        )
+    endif()
+endif()
+
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libtiff/tif_config.h")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libtiff/tif_config.h.vc")
+        message(STATUS "[CMake] 正在从 tif_config.h.vc 自动复制并生成 tif_config.h...")
+        configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libtiff/tif_config.h.vc" "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libtiff/tif_config.h" COPYONLY)
+    else()
+        message(STATUS "[CMake] 本地未找到 tif_config.h 且不存在 tif_config.h.vc 模板，正在自动生成标准 MSVC 兼容的 tif_config.h...")
+        file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libtiff/tif_config.h"
+            "#ifndef _TIF_CONFIG_\n"
+            "#define _TIF_CONFIG_\n"
+            "#define HAVE_FCNTL_H 1\n"
+            "#define HAVE_SYS_TYPES_H 1\n"
+            "#endif /* _TIF_CONFIG_ */\n"
+        )
+    endif()
+endif()
+
 # 新增：libtiff 全量无忧源码配置（已处理同名 main 冲突，包含全套核心与扩展功能）
 set(LIBTIFF_SOURCES
     # 1. 核心读写与图像解析模块
