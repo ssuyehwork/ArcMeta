@@ -205,27 +205,14 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     } 
  
     // b. 写入分类关联表 
-    int finalCatId = targetCatId; 
-    if (finalCatId <= 0) { 
-        QString driveLetter = QFileInfo(destPath).absolutePath().left(1).toUpper(); 
-        QString libCatName = "ArcMeta.Library_" + driveLetter; 
-        // 从分库中读取物理资源库分类 id 
-        sqlite3_stmt* stmtCat = nullptr; 
-        if (sqlite3_prepare_v2(db, "SELECT id FROM categories WHERE parent_id = 0 AND name = ?", -1, &stmtCat, nullptr) == SQLITE_OK) { 
-            std::wstring wLibCatName = libCatName.toStdWString(); 
-            sqlite3_bind_text16(stmtCat, 1, wLibCatName.c_str(), -1, SQLITE_TRANSIENT); 
-            if (sqlite3_step(stmtCat) == SQLITE_ROW) { 
-                finalCatId = sqlite3_column_int(stmtCat, 0); 
-            } 
-            sqlite3_finalize(stmtCat); 
-        } 
-    } 
- 
-    if (finalCatId > 0) { 
+    // 修改方案：ArcMeta.Library_[盘符] 是物理仓库入口，不是一个可以被 category_items 绑定的
+    // 逻辑分类。只有用户真正手动选择了具体分类（targetCatId > 0）时，才写入 category_items；
+    // 否则完全不写这张表，让该资产在"未分类"这个统计口径下正确地被识别为"没有任何分类关联"
+    if (targetCatId > 0) {
         sqlite3_stmt* stmtItems = nullptr; 
         const char* sqlItems = "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)"; 
         if (sqlite3_prepare_v2(db, sqlItems, -1, &stmtItems, nullptr) == SQLITE_OK) { 
-            sqlite3_bind_int(stmtItems, 1, finalCatId); 
+            sqlite3_bind_int(stmtItems, 1, targetCatId);
             sqlite3_bind_text(stmtItems, 2, actualFolderId.c_str(), -1, SQLITE_TRANSIENT); 
             sqlite3_bind_text16(stmtItems, 3, wContainerPath.c_str(), -1, SQLITE_TRANSIENT); 
             sqlite3_bind_double(stmtItems, 4, static_cast<double>(nowMsecs)); 
