@@ -1,6 +1,101 @@
 #include "MediaColorExtractor.h"
 #include "../core/AppConfig.h"
 #include "WindowsShellThumbnailProvider.h"
+#include "tiffio.h"
+
+// 自定义内存读取结构，用来在内存中模拟文件读取
+struct TiffMemoryStream {
+    const char* data;
+    tmsize_t size;
+    tmsize_t offset;
+};
+
+// 内存读取回调函数
+static tmsize_t tiffReadProc(thandle_t clientData, void* buf, tmsize_t size) {
+    auto stream = reinterpret_cast<TiffMemoryStream*>(clientData);
+    if (stream->offset + size > stream->size) {
+        size = stream->size - stream->offset;
+    }
+    if (size > 0) {
+        memcpy(buf, stream->data + stream->offset, size);
+        stream->offset += size;
+    }
+    return size;
+}
+
+static tmsize_t tiffWriteProc(thandle_t, void*, tmsize_t) {
+    return 0;
+}
+
+static toff_t tiffSeekProc(thandle_t clientData, toff_t off, int whence) {
+    auto stream = reinterpret_cast<TiffMemoryStream*>(clientData);
+    switch (whence) {
+        case SEEK_SET: stream->offset = off; break;
+        case SEEK_CUR: stream->offset += off; break;
+        case SEEK_END: stream->offset = stream->size + off; break;
+    }
+    return stream->offset;
+}
+
+static int tiffCloseProc(thandle_t) {
+    return 0;
+}
+
+static toff_t tiffSizeProc(thandle_t clientData) {
+    return reinterpret_cast<TiffMemoryStream*>(clientData)->size;
+}
+
+static int tiffMapProc(thandle_t clientData, void** pbase, toff_t* psize) {
+    auto stream = reinterpret_cast<TiffMemoryStream*>(clientData);
+    *pbase = const_cast<char*>(stream->data);
+    *psize = stream->size;
+    return 1;
+}
+
+static void tiffUnmapProc(thandle_t, void*, toff_t) {
+}
+
+static QImage decodeTiffFromMemory(const QByteArray& tiffData) {
+    TiffMemoryStream stream;
+    stream.data = tiffData.constData();
+    stream.size = tiffData.size();
+    stream.offset = 0;
+
+    TIFF* tif = TIFFClientOpen("MemoryTIFF", "r",
+                               reinterpret_cast<thandle_t>(&stream),
+                               tiffReadProc, tiffWriteProc,
+                               tiffSeekProc, tiffCloseProc,
+                               tiffSizeProc, tiffMapProc, tiffUnmapProc);
+    if (!tif) {
+        return QImage();
+    }
+
+    uint32_t width = 0, height = 0;
+    TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &width);
+    TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &height);
+
+    if (width == 0 || height == 0) {
+        TIFFClose(tif);
+        return QImage();
+    }
+
+    QImage img(width, height, QImage::Format_ARGB32);
+    if (img.isNull()) {
+        TIFFClose(tif);
+        return QImage();
+    }
+
+    // 使用 TIFFReadRGBAImageOriented 读入，它的原点可以定位在 Top-Left (1)
+    if (!TIFFReadRGBAImageOriented(tif, width, height,
+                                  reinterpret_cast<uint32_t*>(img.bits()),
+                                  ORIENTATION_TOPLEFT, 0)) {
+        TIFFClose(tif);
+        return QImage();
+    }
+
+    TIFFClose(tif);
+    return img;
+}
 #include <QFileInfo>
 #include <QCoreApplication>
 #include <QDir>
@@ -232,13 +327,13 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
 
     file.seek(tiffOffset);
     QByteArray tiffData = file.read(tiffLength);
-    QImage img;
-    if (!img.loadFromData(tiffData, "TIFF")) {
-        qWarning() << "[MediaColorExtractor][EPS] 已定位到 TIFF 数据区但解码失败，长度：" << tiffData.size() << "：" << path;
+    QImage img = decodeTiffFromMemory(tiffData);
+    if (img.isNull()) {
+        qWarning() << "[MediaColorExtractor][EPS] 已定位到 TIFF 数据区但通过 libtiff 解码失败，长度：" << tiffData.size() << "：" << path;
         return QImage();
     }
 
-    qDebug() << "[MediaColorExtractor][EPS] 内嵌预览提取成功：" << path;
+    qDebug() << "[MediaColorExtractor][EPS] 内嵌预览通过 libtiff 提取成功：" << path;
     return img;
 }
 
