@@ -1,5 +1,6 @@
 #ifndef _TIFFCONF_
 #define _TIFFCONF_
+#include <stdint.h>
 #define HAVE_SYS_TYPES_H 1
 #define HAVE_FCNTL_H 1
 #define SIZEOF_INT 4
