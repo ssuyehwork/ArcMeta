@@ -199,6 +199,54 @@ set(SOURCES
     resources/resources.qrc
 )
 
+# 新增：libtiff 核心读写与颜色图像转换源文件配置（排除 tiffcp 等带 main 的命令行工具）
+set(LIBTIFF_SOURCES
+    src/third_party/libtiff/tif_aux.c
+    src/third_party/libtiff/tif_close.c
+    src/third_party/libtiff/tif_codec.c
+    src/third_party/libtiff/tif_color.c
+    src/third_party/libtiff/tif_compress.c
+    src/third_party/libtiff/tif_dir.c
+    src/third_party/libtiff/tif_dirinfo.c
+    src/third_party/libtiff/tif_dirread.c
+    src/third_party/libtiff/tif_dirwrite.c
+    src/third_party/libtiff/tif_dumpmode.c
+    src/third_party/libtiff/tif_error.c
+    src/third_party/libtiff/tif_extension.c
+    src/third_party/libtiff/tif_fax3.c
+    src/third_party/libtiff/tif_fax3sm.c
+    src/third_party/libtiff/tif_flush.c
+    src/third_party/libtiff/tif_getimage.c
+    src/third_party/libtiff/tif_luv.c
+    src/third_party/libtiff/tif_lzw.c
+    src/third_party/libtiff/tif_next.c
+    src/third_party/libtiff/tif_ojpeg.c
+    src/third_party/libtiff/tif_open.c
+    src/third_party/libtiff/tif_packbits.c
+    src/third_party/libtiff/tif_pixarlog.c
+    src/third_party/libtiff/tif_predict.c
+    src/third_party/libtiff/tif_print.c
+    src/third_party/libtiff/tif_read.c
+    src/third_party/libtiff/tif_strip.c
+    src/third_party/libtiff/tif_swab.c
+    src/third_party/libtiff/tif_thunder.c
+    src/third_party/libtiff/tif_tile.c
+    src/third_party/libtiff/tif_version.c
+    src/third_party/libtiff/tif_warning.c
+    src/third_party/libtiff/tif_win32.c
+    src/third_party/libtiff/tif_zip.c
+    src/third_party/libtiff/tif_zstd.c
+    src/third_party/libtiff/tiff-bi.c
+    src/third_party/libtiff/tiff-grayscale.c
+    src/third_party/libtiff/tiff-palette.c
+    src/third_party/libtiff/tiff-rgb.c
+    src/third_party/libtiff/xtif_dir.c
+    src/third_party/libtiff/xtiff.c
+)
+
+# 追加到项目总 SOURCES 列表，以供 MSVC 提供链接符号
+list(APPEND SOURCES ${LIBTIFF_SOURCES})
+
 # 可执行文件 (添加 WIN32 属性以消除控制台黑框)
 # 修复：移除直接引用的 "ArcMeta.manifest"，改由 ArcMeta.rc 引入以杜绝 mt.exe 冲突
 add_executable(ArcMeta WIN32 ${SOURCES})
