@@ -1,3 +1,7 @@
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/types.h>
+
 #include "MediaColorExtractor.h"
 #include "../core/AppConfig.h"
 #include "WindowsShellThumbnailProvider.h"
