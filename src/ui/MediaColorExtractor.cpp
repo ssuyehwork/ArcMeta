@@ -1,18 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifndef TIFF_INT64_T
-#define TIFF_INT64_T signed __int64
-#define TIFF_UINT64_T unsigned __int64
-#define TIFF_INT32_T signed __int32
-#define TIFF_UINT32_T unsigned __int32
-#define TIFF_INT16_T signed __int16
-#define TIFF_UINT16_T unsigned __int16
-#define TIFF_INT8_T signed __int8
-#define TIFF_UINT8_T unsigned __int8
-#define TIFF_SSIZE_T signed __int64
-#endif
-
 // 🚨 关键修复：C++ 必须显式指定 extern "C"，告知 MSVC 按纯 C 语言函数名进行链接
 extern "C" {
 #include "tiffio.h"
