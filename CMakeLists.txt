@@ -16,6 +16,9 @@ if(MSVC)
     add_compile_options(/W4 /O2 /utf-8)
 endif()
 
+# 解决 libtiff 弃用整型与系统重定义/MSVC 编译冲突
+add_compile_definitions(TIFF_DISABLE_DEPRECATED)
+
 # Qt 6 基础组件
 # 2026-05-10 修复：添加缺失的Core和Gui组件
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent)
