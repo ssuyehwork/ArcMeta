@@ -185,6 +185,11 @@ bool LibraryAssetModel::setData(const QModelIndex& index, const QVariant& value,
     return false;
 }
 
+Qt::ItemFlags LibraryAssetModel::flags(const QModelIndex& index) const {
+    if (!index.isValid()) return QAbstractTableModel::flags(index);
+    return QAbstractTableModel::flags(index) | Qt::ItemIsDragEnabled;
+}
+
 void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
     // 内存模式：穿透 .arc 搜寻高清缩略图与宽高比
     std::vector<std::pair<QString, QString>> newQueue;
@@ -306,7 +311,8 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
 
     const auto& record = m_allRecords[index.row()];
     QString path = record.path;
-    if (path.endsWith("/") || path.endsWith("\\")) {
+    bool isArcEnd = path.endsWith(".arc", Qt::CaseInsensitive) || path.endsWith(".arc/", Qt::CaseInsensitive) || path.endsWith(".arc\\", Qt::CaseInsensitive);
+    if (isArcEnd && (path.endsWith("/") || path.endsWith("\\"))) {
         path = path.left(path.length() - 1);
     }
 

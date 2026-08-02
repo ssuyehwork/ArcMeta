@@ -59,6 +59,9 @@ void DropJustifiedView::startDrag(Qt::DropActions supportedActions) {
     if (indexes.isEmpty()) return;
 
     QMimeData* mimeData = model()->mimeData(indexes);
+    if (!mimeData) {
+        mimeData = new QMimeData();
+    }
     QList<QUrl> urls;
     for (const QModelIndex& idx : indexes) {
         if (idx.column() == 0) {

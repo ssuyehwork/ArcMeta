@@ -97,3 +97,11 @@
 - 本次任务边界：重构 `ItemRecord::create` 中对受控容器的穿透解包逻辑并进行属性防覆盖自愈；修改 `LibraryAssetModel` 的 `loadThumbnailsForRows` 对容器后缀及其斜杠路径的处理；更新 `LibraryAssetModel::data` 中 `HasThumbnailRole` 和 `DecorationRole` 对容器的穿透性判定，防止货不对板。
 - 不在本次范围内的：不涉及磁盘模式任何行为、不修改任何物理文件系统及物理文件的解包、不改动 AssetImporter。
 - 对应方案文档：Modification_Plan-22.md
+
+## [2026-08-02] 修复内容面板选中项目无法拖拽到侧边栏分类功能
+
+- 用户描述的现象/问题：由于前几次修改代码，原有的拖拽功能遭到破坏，导致现在在内容面板选中项目后，无法正常拖拽到侧边栏的分类项中。
+- 用户期望的结果：在内容面板选中项目后，可以正常、顺畅地把它们拖拽到侧边栏分类树的对应节点（或分类空白处）中，触发分类关联或导入逻辑。
+- 本次任务边界：排查内容面板各个视图模型（`DropListView`、`DropJustifiedView`、`DropTreeView`）中 `startDrag` 所生成并填充的 `QMimeData` 以及 `CategoryModel::dropMimeData` / `CategoryPanel` 及 `DropTreeView` 接受拖拽的行为（包括 `dragEnterEvent`、`dragMoveEvent`、`dropEvent`），并进行整改以保证完美的拖拽通路。
+- 不在本次范围内的：不修改侧边栏和内容面板除拖拽交互以外的任何 UI 视觉布局，不修改数据库常规 CRUD 的核心操作，不改动导入逻辑底层。
+- 对应方案文档：Modification_Plan-23.md

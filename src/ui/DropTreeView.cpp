@@ -63,6 +63,9 @@ void DropTreeView::startDrag(Qt::DropActions supportedActions) {
 
     // 核心增强：拦截并注入物理路径 QUrl，确保 CategoryPanel 接收校验通过
     QMimeData* mimeData = model()->mimeData(indexes);
+    if (!mimeData) {
+        mimeData = new QMimeData();
+    }
     QList<QUrl> urls;
     for (const QModelIndex& idx : indexes) {
         if (idx.column() != 0) continue;

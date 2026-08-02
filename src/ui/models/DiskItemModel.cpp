@@ -124,6 +124,11 @@ void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
     });
 }
 
+Qt::ItemFlags DiskItemModel::flags(const QModelIndex& index) const {
+    if (!index.isValid()) return QAbstractTableModel::flags(index);
+    return QAbstractTableModel::flags(index) | Qt::ItemIsDragEnabled;
+}
+
 QVariant DiskItemModel::data(const QModelIndex& index, int role) const {
     if (!index.isValid() || index.row() >= static_cast<int>(m_allRecords.size())) return QVariant();
 
