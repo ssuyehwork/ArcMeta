@@ -912,70 +912,71 @@ std::vector<std::string> CategoryRepo::getFolderIdsRecursive(int categoryId) {
     return res;
 }
 
-std::vector<std::pair<int, int>> CategoryRepo::getCounts() { 
-    static std::mutex countsMutex;
-    static std::vector<std::pair<int, int>> cachedCounts;
-
-    std::lock_guard<std::mutex> lock(countsMutex);
-    if (!s_countsDirty.load()) {
-        return cachedCounts;
-    }
-
-    std::vector<std::pair<int, int>> res; 
-    auto dbs = DatabaseManager::instance().getActiveMemoryDbs(); 
-    std::map<int, std::unordered_set<std::string>> catToUniqueFids; 
+std::vector<std::pair<int, int>> CategoryRepo::getCounts() {  
+    static std::mutex countsMutex; 
+    static std::vector<std::pair<int, int>> cachedCounts; 
  
-    for (sqlite3* db : dbs) { 
-        sqlite3_stmt* stmt; 
-        // 1. 修正：取消对 ArcMeta.Library_ 托管库的硬编码排除，允许正常统计分类关联
-        const char* sql = "SELECT folder_id, category_id FROM category_items WHERE category_id > 0";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) { 
-            while (sqlite3_step(stmt) == SQLITE_ROW) { 
-                const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)); 
-                int catId = sqlite3_column_int(stmt, 1); 
-                if (fid) catToUniqueFids[catId].insert(fid); 
+    std::lock_guard<std::mutex> lock(countsMutex); 
+    if (!s_countsDirty.load()) { 
+        return cachedCounts; 
+    } 
+ 
+    std::vector<std::pair<int, int>> res;  
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();  
+    std::map<int, std::unordered_set<std::string>> catToUniqueFids;  
+  
+    for (sqlite3* db : dbs) {  
+        sqlite3_stmt* stmt;  
+        const char* sql = "SELECT folder_id, category_id FROM category_items WHERE category_id > 0"; 
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {  
+            while (sqlite3_step(stmt) == SQLITE_ROW) {  
+                const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));  
+                int catId = sqlite3_column_int(stmt, 1);  
+                if (fid) catToUniqueFids[catId].insert(fid);  
+            }  
+            sqlite3_finalize(stmt);  
+        }  
+    }  
+  
+    for (auto const& [id, fids] : catToUniqueFids) {  
+        res.push_back({id, static_cast<int>(fids.size())});  
+    }  
+ 
+    // 针对 parent_id = 0 的托管仓库根分类，全小写规范化对账核算资产总数 
+    auto allCats = getAll(); 
+    for (const auto& cat : allCats) { 
+        if (cat.parentId == 0 && !cat.physicalPath.empty()) { 
+            std::wstring normCatPath = MetadataManager::normalizePath(cat.physicalPath); 
+            int count = 0; 
+ 
+            if (!normCatPath.empty()) { 
+                MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) { 
+                    if (meta.isTrash || meta.isFolder) return; 
+ 
+                    // 规范化全小写匹配，彻底消除 G:\ 与 g:\ 造成的归零 Bug 
+                    if (path.rfind(normCatPath, 0) == 0) { 
+                        count++; 
+                    } 
+                }); 
             } 
-            sqlite3_finalize(stmt); 
+ 
+            bool updated = false; 
+            for (auto& pair : res) { 
+                if (pair.first == cat.id) { 
+                    pair.second = std::max(pair.second, count); 
+                    updated = true; 
+                    break; 
+                } 
+            } 
+            if (!updated) { 
+                res.push_back({cat.id, count}); 
+            } 
         } 
     } 
  
-    for (auto const& [id, fids] : catToUniqueFids) { 
-        res.push_back({id, static_cast<int>(fids.size())}); 
-    } 
-
-    // 2. 修正：针对 ArcMeta.Library_ 托管仓库根分类，按其实际托管路径实时对账核算资产总数
-    auto allCats = getAll();
-    for (const auto& cat : allCats) {
-        if (cat.parentId == 0 && !cat.physicalPath.empty()) {
-            int count = 0;
-            MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
-                if (meta.isTrash) return;
-                // 核心修正：包含托管资产包，仅排除非托管普通文件夹
-                if (meta.isFolder && !isManagedAsset(meta.isFolder, path)) return;
-
-                // 只要文件物理路径位于该托管仓库目录下，即归属于该仓库
-                if (path.rfind(cat.physicalPath, 0) == 0) {
-                    count++;
-                }
-            });
-
-            bool updated = false;
-            for (auto& pair : res) {
-                if (pair.first == cat.id) {
-                    pair.second = std::max(pair.second, count);
-                    updated = true;
-                    break;
-                }
-            }
-            if (!updated) {
-                res.push_back({cat.id, count});
-            }
-        }
-    }
-
-    cachedCounts = res;
-    s_countsDirty.store(false);
-    return res; 
+    cachedCounts = res; 
+    s_countsDirty.store(false); 
+    return res;  
 } 
 
 int CategoryRepo::getTotalFileCount() {

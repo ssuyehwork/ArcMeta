@@ -105,36 +105,31 @@ void FilterProxyModel::updateFilter() {
     endFilterChange(); 
 } 
  
-bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const { 
-    QModelIndex idx = sourceModel()->index(sourceRow, 0, sourceParent); 
-     
-    // 2026-06-xx 性能优化：提前获取 ItemRecord，避免重复查询并为下方过滤提供数据支撑
-    const auto* sourceModelPtr = qobject_cast<const ItemModelBase*>(sourceModel());
-    if (!sourceModelPtr) return true;
-
-    const auto& records = sourceModelPtr->allRecords();
-    if (sourceRow < 0 || sourceRow >= (int)records.size()) return false;
-    const auto& record = records[sourceRow];
-
-    // --- 核心修正：区分“普通物理文件夹”与“托管资产包 (.arc)” ---
-    // 托管资产包（.arc）虽然底层是目录，但语义上是资产文件，决不能被“隐藏文件夹”开关误杀拦截！
-    bool isRealFolder = record.isCategory || (record.isDir && !record.path.endsWith(".arc", Qt::CaseInsensitive));
-
-    if (isRealFolder) {
-        auto* contentPanel = qobject_cast<ContentPanel*>(parent());
-        bool isDiskMode = contentPanel && (contentPanel->dataSourceType() == ContentPanel::DataSourceType::DiskNav);
-        bool isEmptyFolder = isDiskMode && record.isDir && record.isEmpty;
-
-        bool isFolderExplicitlySelected = currentFilter.types.contains("folder") || 
-                                         (isEmptyFolder && currentFilter.types.contains("空文件夹"));
-        
-        // 只有真正的普通文件夹/分类受 showFolders 开关控制
-        if (!currentFilter.showFolders && !isFolderExplicitlySelected) {
-            return false;
-        }
-    } else {
-        if (!currentFilter.showFiles) return false;
-    }
+bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const {  
+    QModelIndex idx = sourceModel()->index(sourceRow, 0, sourceParent);  
+      
+    const auto* sourceModelPtr = qobject_cast<const ItemModelBase*>(sourceModel()); 
+    if (!sourceModelPtr) return true; 
+ 
+    const auto& records = sourceModelPtr->allRecords(); 
+    if (sourceRow < 0 || sourceRow >= (int)records.size()) return false; 
+    const auto& record = records[sourceRow]; 
+ 
+    // 1. 文件夹与分类卡片控制 
+    if (record.isCategory || record.isDir) { 
+        auto* contentPanel = qobject_cast<ContentPanel*>(parent()); 
+        bool isDiskMode = contentPanel && (contentPanel->dataSourceType() == ContentPanel::DataSourceType::DiskNav); 
+        bool isEmptyFolder = isDiskMode && record.isDir && record.isEmpty; 
+ 
+        bool isFolderExplicitlySelected = currentFilter.types.contains("folder") ||  
+                                         (isEmptyFolder && currentFilter.types.contains("空文件夹")); 
+         
+        if (!currentFilter.showFolders && !isFolderExplicitlySelected) { 
+            return false; 
+        } 
+    } else { 
+        if (!currentFilter.showFiles) return false; 
+    } 
 
     // 1. 评级过滤 
     if (!currentFilter.ratings.isEmpty()) { 
