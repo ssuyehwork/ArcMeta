@@ -1,9 +1,11 @@
 #include "CategoryLockWidget.h"
 #include "UiHelper.h"
-#include "../meta/DatabaseManager.h"
+#include "../core/CategoryLockManager.h"
 #include <QGraphicsDropShadowEffect>
 #include <QKeyEvent>
 #include <QEvent>
+
+using namespace ArcMeta;
 
 CategoryLockWidget::CategoryLockWidget(QWidget* parent) : QWidget(parent) {
     auto* mainLayout = new QVBoxLayout(this);
@@ -88,7 +90,7 @@ bool CategoryLockWidget::eventFilter(QObject* watched, QEvent* event) {
 void CategoryLockWidget::onVerify() {
     if (m_catId == -1) return;
 
-    if (DatabaseManager::instance().verifyCategoryPassword(m_catId, m_pwdEdit->text())) {
+    if (CategoryLockManager::instance().verifyAndUnlock(m_catId, m_pwdEdit->text())) {
         emit unlocked(m_catId);
     } else {
         m_pwdEdit->setStyleSheet(m_pwdEdit->styleSheet() + "border: 1px solid #e74c3c;");
