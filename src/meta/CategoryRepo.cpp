@@ -922,7 +922,10 @@ std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
 
     for (sqlite3* db : dbs) {
         sqlite3_stmt* stmt;
-        const char* sql = "SELECT folder_id, category_id FROM category_items WHERE category_id > 0";
+        // 🚨 修复：通过 JOIN 关联只统计非文件夹 (is_folder = 0) 且非回收站的真实文件
+        const char* sql = "SELECT ci.folder_id, ci.category_id FROM category_items ci "
+                          "JOIN metadata m ON ci.folder_id = m.folder_id "
+                          "WHERE ci.category_id > 0 AND m.is_folder = 0 AND m.is_trash = 0";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));

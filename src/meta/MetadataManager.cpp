@@ -498,6 +498,10 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
     updateIngestionStatus(nPath, 0);
     registerItemsAsync({QString::fromStdWString(nPath)}, true);
 
+    // 🚨 修复：强制标记侧边栏计数已过期，并通知 UI 刷新
+    CategoryRepo::s_countsDirty.store(true);
+    notifyCategoryCountChanged();
+
     notifyUI(RefreshLevel::FullRebuild);
     return true;
 }
