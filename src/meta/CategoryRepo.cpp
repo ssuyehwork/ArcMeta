@@ -922,9 +922,8 @@ std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
  
     for (sqlite3* db : dbs) { 
         sqlite3_stmt* stmt; 
-        const char* sql = "SELECT folder_id, category_id FROM category_items "
-                          "WHERE category_id > 0 AND category_id NOT IN "
-                          "(SELECT id FROM categories WHERE parent_id = 0 AND name LIKE 'ArcMeta.Library_%')";
+        // 1. 修正：取消对 ArcMeta.Library_ 托管库的硬编码排除，允许正常统计分类关联
+        const char* sql = "SELECT folder_id, category_id FROM category_items WHERE category_id > 0";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) { 
             while (sqlite3_step(stmt) == SQLITE_ROW) { 
                 const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)); 
@@ -938,6 +937,34 @@ std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
     for (auto const& [id, fids] : catToUniqueFids) { 
         res.push_back({id, static_cast<int>(fids.size())}); 
     } 
+
+    // 2. 修正：针对 ArcMeta.Library_ 托管仓库根分类，按其实际托管路径实时对账核算资产总数
+    auto allCats = getAll();
+    for (const auto& cat : allCats) {
+        if (cat.parentId == 0 && !cat.physicalPath.empty()) {
+            int count = 0;
+            MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
+                if (meta.isTrash || meta.isFolder) return;
+                // 只要文件物理路径位于该托管仓库目录下，即归属于该仓库
+                if (path.rfind(cat.physicalPath, 0) == 0) {
+                    count++;
+                }
+            });
+
+            bool updated = false;
+            for (auto& pair : res) {
+                if (pair.first == cat.id) {
+                    pair.second = std::max(pair.second, count);
+                    updated = true;
+                    break;
+                }
+            }
+            if (!updated) {
+                res.push_back({cat.id, count});
+            }
+        }
+    }
+
     cachedCounts = res;
     s_countsDirty.store(false);
     return res; 
