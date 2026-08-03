@@ -41,36 +41,44 @@ void CategoryRepo::saveImmediately() {
 
 std::vector<Category> CategoryRepo::getAll() {
     std::vector<Category> results;
-    sqlite3* db = DatabaseManager::instance().getGlobalDb();
-    if (!db) return results;
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
 
-    sqlite3_stmt* stmt;
     const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon FROM categories WHERE id > 0 ORDER BY sort_order ASC";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            Category c;
-            c.id = sqlite3_column_int(stmt, 0);
-            c.parentId = sqlite3_column_int(stmt, 1);
-            const wchar_t* wname = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
-            if (wname) c.name = wname;
-            const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 3));
-            if (color) c.color = color;
-            const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
-            QString tags = wtags ? QString::fromWCharArray(wtags) : "";
-            for (const auto& t : tags.split(",", Qt::SkipEmptyParts)) c.presetTags.push_back(t.toStdWString());
-            c.sortOrder = sqlite3_column_int(stmt, 5);
-            c.pinned = sqlite3_column_int(stmt, 6) != 0;
-            c.encrypted = sqlite3_column_int(stmt, 7) != 0;
-            const wchar_t* hint = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 8));
-            if (hint) c.encryptHint = hint;
-            c.physicalFrn = sqlite3_column_int64(stmt, 9);
-            const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 10));
-            if (wpath) c.physicalPath = wpath;
-            const wchar_t* wicon = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 11));
-            if (wicon) c.icon = wicon;
-            results.push_back(c);
+    std::set<int> seenIds;
+
+    for (sqlite3* db : dbs) {
+        if (!db) continue;
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                int id = sqlite3_column_int(stmt, 0);
+                if (seenIds.count(id)) continue;
+                seenIds.insert(id);
+
+                Category c;
+                c.id = id;
+                c.parentId = sqlite3_column_int(stmt, 1);
+                const wchar_t* wname = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
+                if (wname) c.name = wname;
+                const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 3));
+                if (color) c.color = color;
+                const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
+                QString tags = wtags ? QString::fromWCharArray(wtags) : "";
+                for (const auto& t : tags.split(",", Qt::SkipEmptyParts)) c.presetTags.push_back(t.toStdWString());
+                c.sortOrder = sqlite3_column_int(stmt, 5);
+                c.pinned = sqlite3_column_int(stmt, 6) != 0;
+                c.encrypted = sqlite3_column_int(stmt, 7) != 0;
+                const wchar_t* hint = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 8));
+                if (hint) c.encryptHint = hint;
+                c.physicalFrn = sqlite3_column_int64(stmt, 9);
+                const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 10));
+                if (wpath) c.physicalPath = wpath;
+                const wchar_t* wicon = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 11));
+                if (wicon) c.icon = wicon;
+                results.push_back(c);
+            }
+            sqlite3_finalize(stmt);
         }
-        sqlite3_finalize(stmt);
     }
     return results;
 }
