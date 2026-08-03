@@ -184,26 +184,10 @@ void AutoImportManager::saveTopLevelSnapshot(const std::wstring& rootPath) {
 }
 
 void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath, bool allowLightweight) {
-    QDir dir(QString::fromStdWString(rootPath));
-    if (!dir.exists()) return;
-
-    if (allowLightweight && !hasTopLevelChanged(rootPath)) {
-        qDebug() << "[AutoImport] [Incremental] 顶层快照无变化，跳过资源库深度递归对账与盘点:" << QString::fromStdWString(rootPath);
-        return;
-    }
-
-    std::wstring vol = MetadataManager::getVolumeSerialNumber(rootPath);
-    auto driveLock = DatabaseManager::instance().getDriveMutex(vol);
-    std::lock_guard<std::recursive_mutex> dLock(*driveLock);
-
-    MetadataManager::instance().setInternalOperating(true);
-
-    DatabaseSynchronizer::syncPhysicalDirectoryCascade(rootPath);
-
-    MetadataManager::instance().setInternalOperating(false);
-    MetadataManager::instance().notifyFullUIRebuild();
-
-    saveTopLevelSnapshot(rootPath);
+    // 🚨 彻底根除全量物理对账逻辑：该函数已被清空，直接忽略后台盘点扫描，实现库挂载秒级无缝预热
+    Q_UNUSED(rootPath);
+    Q_UNUSED(allowLightweight);
+    qDebug() << "[AutoImport][CLEANUP] handleRecursiveIngestion ignored to skip full physical scanning.";
 }
 
 } // namespace ArcMeta

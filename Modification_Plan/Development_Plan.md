@@ -101,7 +101,15 @@
 ## [2026-08-02] 修复内容面板选中项目无法拖拽到侧边栏分类功能
 
 - 用户描述的现象/问题：由于前几次修改代码，原有的拖拽功能遭到破坏，导致现在在内容面板选中项目后，无法正常拖拽到侧边栏的分类项中。
-- 用户期望的结果：在内容面板选中项目后，可以正常、顺畅地把它们拖拽到侧边栏分类树的对应节点（或分类空白处）中，触发分类关联或导入逻辑。
+- 用户期望的结果：在内容面板选中项目后，可以正常、顺畅地把它们拖拽到侧边树分类树对应节点（或分类空白处）中，触发分类关联或导入逻辑。
 - 本次任务边界：排查内容面板各个视图模型（`DropListView`、`DropJustifiedView`、`DropTreeView`）中 `startDrag` 所生成并填充的 `QMimeData` 以及 `CategoryModel::dropMimeData` / `CategoryPanel` 及 `DropTreeView` 接受拖拽的行为（包括 `dragEnterEvent`、`dragMoveEvent`、`dropEvent`），并进行整改以保证完美的拖拽通路。
 - 不在本次范围内的：不修改侧边栏和内容面板除拖拽交互以外的任何 UI 视觉布局，不修改数据库常规 CRUD 的核心操作，不改动导入逻辑底层。
 - 对应方案文档：Modification_Plan-23.md
+
+## [2026-08-02] 彻底根除全量物理对账逻辑以根除计数竞争故障
+
+- 用户描述的现象/问题：系统频繁执行昂贵的多分区全量物理目录扫描（`syncPhysicalDirectoryCascade`）和数据库核对（`fullRecount`）机制，由于在系统启动未就绪和多数据库挂载临界时序下的资源踩踏，将空元数据快照计算出了 0 计数，脏写覆盖了分库 stats 统计表，导致侧边栏计数偶发归零以及重启在 10 变 5 变 0 之间震荡，属于不合理的垃圾逻辑架构。
+- 用户期望的结果：彻底根除系统内所有全量物理目录树扫描同步、对账自愈、FRN 盘点清退以及系统启动、重载时触发的全量计数重新统计与脏写覆盖逻辑，完全不予保留，让系统彻底摆脱此机制的臃肿和脆弱隐患，使系统保持绝对的清澈与极速。
+- 本次任务边界：彻底裁撤 `CategoryRepo::fullRecount` 及各分库脏写落盘事务、彻底注销 `DatabaseSynchronizer::syncPhysicalDirectoryCascade` 全量 DFS 扫描对账程序，移除 `AutoImportManager::syncAllManagedLibraries` / `handleRecursiveIngestion` 对整个受控库进行递归对账的高负载链路。
+- 不在本次范围内的：不改动普通的增量文件交互（如正常导入或在软件内重命名文件时的关联更新），不修改磁盘导航模式对磁盘物理目录的原生扫描展示。
+- 对应方案文档：Modification_Plan-24.md
