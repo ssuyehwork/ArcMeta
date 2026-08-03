@@ -1,5 +1,5 @@
 #include "CategoryLockWidget.h"
-#include "IconHelper.h"
+#include "UiHelper.h"
 #include "../core/DatabaseManager.h"
 #include <QGraphicsDropShadowEffect>
 #include <QKeyEvent>
@@ -19,7 +19,7 @@ CategoryLockWidget::CategoryLockWidget(QWidget* parent) : QWidget(parent) {
     // 1. 锁图标 (精简至 32x32)
     auto* lockIcon = new QLabel();
     // [USER_REQUEST] 2026-03-xx 按照用户要求：分类锁定界面中心图标改为绿色 #00A650，标识为安全
-    lockIcon->setPixmap(IconHelper::getIcon("lock_secure", "#00A650").pixmap(32, 32));
+    lockIcon->setPixmap(UiHelper::getIcon("lock_secure", QColor("#00A650"), 32).pixmap(32, 32));
     lockIcon->setAlignment(Qt::AlignCenter);
     layout->addWidget(lockIcon);
 
