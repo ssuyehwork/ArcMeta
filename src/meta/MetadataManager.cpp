@@ -414,6 +414,94 @@ void MetadataManager::notifyFullUIRebuild() {
     QMetaObject::invokeMethod(this, "triggerUiSignalTimer", Qt::QueuedConnection);
 }
 
+// 🚨 SSOT 重构核心：单一权威资产入库登记管线
+bool MetadataManager::registerAsset(const std::string& folderId, const std::wstring& assetPath, int targetCatId) {
+    std::wstring nPath = normalizePath(assetPath);
+    sqlite3* db = DatabaseManager::instance().getDbForPath(nPath);
+    if (!db) return false;
+
+    SqlTransaction trans(db);
+    long long nowMsecs = QDateTime::currentMSecsSinceEpoch();
+
+    // 1. 拆分主文件名与后缀
+    std::wstring baseName, ext;
+    parsePathComponents(nPath, false, baseName, ext);
+
+    // 2. 写入数据库 metadata 表 (绝对绑定内部主文件路径，is_folder 恒为 0)
+    const char* sqlMeta = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, is_trash, width, height, ingestion_status, auto_color, base_name, ext, added_at) "
+                          "VALUES (?, ?, 0, 0, '', '', '', '', ?, ?, ?, ?, 0, 0, 0, 0, '', ?, ?, ?)";
+    sqlite3_stmt* stmtMeta = nullptr;
+    if (sqlite3_prepare_v2(db, sqlMeta, -1, &stmtMeta, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmtMeta, 1, folderId.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmtMeta, 2, nPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmtMeta, 3, nowMsecs);
+        sqlite3_bind_int64(stmtMeta, 4, nowMsecs);
+        sqlite3_bind_int64(stmtMeta, 5, nowMsecs);
+
+        QFileInfo fi(QString::fromStdWString(nPath));
+        sqlite3_bind_int64(stmtMeta, 6, fi.size());
+        sqlite3_bind_text16(stmtMeta, 7, baseName.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text16(stmtMeta, 8, ext.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmtMeta, 9, nowMsecs);
+
+        sqlite3_step(stmtMeta);
+        sqlite3_finalize(stmtMeta);
+    }
+
+    // 3. 若指定了有效用户分类，写入 category_items 表
+    if (targetCatId > 0) {
+        const char* sqlItems = "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)";
+        sqlite3_stmt* stmtItems = nullptr;
+        if (sqlite3_prepare_v2(db, sqlItems, -1, &stmtItems, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmtItems, 1, targetCatId);
+            sqlite3_bind_text(stmtItems, 2, folderId.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text16(stmtItems, 3, nPath.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(stmtItems, 4, static_cast<double>(nowMsecs));
+            sqlite3_step(stmtItems);
+            sqlite3_finalize(stmtItems);
+        }
+    }
+
+    if (!trans.commit()) return false;
+
+    // 4. 同步更新内存缓存 RuntimeMeta (SSOT 规则)
+    RuntimeMeta rm;
+    rm.folderId = folderId;
+    rm.isFolder = false; // 强契约：资产恒为非目录
+    QFileInfo fi(QString::fromStdWString(nPath));
+    rm.fileSize = fi.size();
+    rm.ctime = nowMsecs;
+    rm.mtime = nowMsecs;
+    rm.atime = nowMsecs;
+    rm.added_at = nowMsecs;
+    rm.baseName = baseName;
+    rm.ext = ext;
+    rm.isManaged = true;
+
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_cache[nPath] = rm;
+        m_folderIdToPath[folderId] = nPath;
+    }
+
+    // 5. 实时驱动原子计数器加 1 与全系统通知
+    CategoryRepo::incrementTotalFileCount(1);
+    CategoryRepo::s_totalCount.fetch_add(1);
+    CategoryRepo::updatePersistentStat("sys_total_count", 1);
+    if (targetCatId <= 0) {
+        CategoryRepo::s_uncategorizedCount.fetch_add(1);
+        CategoryRepo::updatePersistentStat("sys_uncategorized_count", 1);
+    }
+
+    // 6. 激活后台提取流水线解析分辨率与调色盘
+    ensureActivated(nPath);
+    updateIngestionStatus(nPath, 0);
+    registerItemsAsync({QString::fromStdWString(nPath)}, true);
+
+    notifyUI(RefreshLevel::FullRebuild);
+    return true;
+}
+
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     (void)authorized;
     std::wstring nPath = normalizePath(path);
@@ -462,32 +550,46 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
 
 void MetadataManager::markAsRegistered(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
-    
-    // 2026-07-xx 按照性能优化要求：将级联登记逻辑移至后台线程，杜绝大目录导入阻塞主线程
+
     (void)QtConcurrent::run([this, nPath]() {
-        // 1. 识别该路径归属的数据库
         std::wstring volSerial = getVolumeSerialNumber(nPath);
         QString letter = (nPath.length() >= 2 && nPath[1] == L':') ? QString::fromWCharArray(&nPath[0], 1) : "";
         sqlite3* db = DatabaseManager::instance().getDriveDb(volSerial, letter);
         if (!db) return;
 
-        // 2. 收集所有待登记路径
+        // 🚨 一键自动清退历史上误写入的 is_folder = 1 的 .arc 外壳垃圾记录
+        {
+            SqlTransaction cleanTrans(db);
+            sqlite3_stmt* cleanStmt;
+            if (sqlite3_prepare_v2(db, "DELETE FROM metadata WHERE is_folder = 1 AND path LIKE '%.arc'", -1, &cleanStmt, nullptr) == SQLITE_OK) {
+                sqlite3_step(cleanStmt);
+                sqlite3_finalize(cleanStmt);
+            }
+            cleanTrans.commit();
+        }
+
         std::vector<std::wstring> pathsToRegister;
 
         QFileInfo info(QString::fromStdWString(nPath));
         if (info.isDir()) {
             QDir dir(info.absoluteFilePath());
-            // 🚨 核心逻辑：直接扫描资源库下的顶层子项
             QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot);
             for (const QFileInfo& entry : entries) {
                 QString fn = entry.fileName();
-                
-                // 1. 如果是 .arc 资产包文件夹 —— 它本身就是一个原子资产条目！加入登记
+
+                // 🚨 穿透 .arc 胶囊，直接提取内部的主资产文件，绝不将 .arc 目录入库
                 if (entry.isDir() && fn.endsWith(".arc", Qt::CaseInsensitive)) {
-                    pathsToRegister.push_back(normalizePath(entry.absoluteFilePath().toStdWString()));
+                    QDir arcDir(entry.absoluteFilePath());
+                    QFileInfoList innerFiles = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                    for (const QFileInfo& inner : innerFiles) {
+                        QString innerFn = inner.fileName();
+                        if (!innerFn.endsWith("_thumbnail.png", Qt::CaseInsensitive) &&
+                            innerFn.compare("metadata.scch", Qt::CaseInsensitive) != 0) {
+                            pathsToRegister.push_back(normalizePath(inner.absoluteFilePath().toStdWString()));
+                        }
+                    }
                 }
-                // 2. 如果是散落在资源库根目录的普通物理文件，也作为独立资产登记
-                else if (entry.isFile() && !fn.endsWith("_thumbnail.png", Qt::CaseInsensitive) && 
+                else if (entry.isFile() && !fn.endsWith("_thumbnail.png", Qt::CaseInsensitive) &&
                          fn.compare("metadata.scch", Qt::CaseInsensitive) != 0) {
                     pathsToRegister.push_back(normalizePath(entry.absoluteFilePath().toStdWString()));
                 }
@@ -498,8 +600,6 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
 
         if (pathsToRegister.empty()) return;
 
-        // 3. 开启批量事务处理
-        qDebug() << "[Metadata] 正确以 .arc 资产包为单位登记，原子资产总数:" << pathsToRegister.size();
         QStringList qPathsToRegister;
         SqlTransaction trans(db);
         for (const auto& p : pathsToRegister) {
@@ -507,13 +607,9 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
             updateIngestionStatus(p, 0);
             qPathsToRegister << QString::fromStdWString(p);
         }
-        
+
         if (trans.commit()) {
-            qDebug() << "[Metadata] 资产包登记提交成功，推入多媒体抽取流水线，资产包数量:" << qPathsToRegister.size();
-            // 将 .arc 资产包路径投递给流水线，由流水线解析包内部主文件并生成 _thumbnail.png
             registerItemsAsync(qPathsToRegister, true);
-        } else {
-            qWarning() << "[Metadata] 资产包批量登记事务提交失败！";
         }
     });
 }
