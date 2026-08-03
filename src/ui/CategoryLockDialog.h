@@ -5,6 +5,8 @@
 #include <QLabel>
 #include <QVBoxLayout>
 
+#include "../core/CategoryLockManager.h"
+
 namespace ArcMeta {
 
 /**

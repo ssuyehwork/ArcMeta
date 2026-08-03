@@ -2484,6 +2484,31 @@ void ContentPanel::loadCategory(int categoryId) {
         m_proxyModel->setSourceModel(m_model);
     }
 
+    Category cat = CategoryRepo::getById(categoryId);
+    if (cat.id > 0) {
+        // 🚨【加锁保护拦截】：若分类加锁且当前未解锁
+        if (cat.encrypted && !CategoryLockManager::instance().isUnlocked(categoryId)) {
+            // 1. 弹出密码输入校验对话框
+            CategoryLockDialog dlg(QString::fromStdWString(cat.encryptHint), this);
+            if (dlg.exec() == QDialog::Accepted) {
+                QString pwd = dlg.password();
+                if (CategoryLockManager::instance().verifyAndUnlock(categoryId, pwd)) {
+                    // 解锁成功，继续向下加载数据
+                } else {
+                    ToolTipOverlay::instance()->showText(QCursor::pos(), "密码错误，无法查看该分类数据", 2000, QColor("#e81123"));
+                    m_model->clear(); // 密码错误：物理清空内容面板！
+                    m_currentCategoryId = -1;
+                    return;
+                }
+            } else {
+                // 用户取消输入：物理清空内容面板，绝不展示数据！
+                m_model->clear();
+                m_currentCategoryId = -1;
+                return;
+            }
+        }
+    }
+
     if (m_isLoading && m_currentCategoryId == categoryId && m_currentCategoryType == "user_category") {
         return;
     }
