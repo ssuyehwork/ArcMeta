@@ -1,6 +1,6 @@
 #include "CategoryLockWidget.h"
 #include "UiHelper.h"
-#include "../core/DatabaseManager.h"
+#include "../meta/DatabaseManager.h"
 #include <QGraphicsDropShadowEffect>
 #include <QKeyEvent>
 #include <QEvent>
