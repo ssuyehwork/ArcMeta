@@ -129,7 +129,7 @@ void CategoryModel::refresh() {
             }
         }
 
-        // 2. 渲染“★ 快速访问”分组节点
+        // 2. 渲染“快速访问”分组节点
         if (favGroup) {
             root->appendRow(favGroup);
         }
