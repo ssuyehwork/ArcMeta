@@ -116,18 +116,19 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     if (sourceRow < 0 || sourceRow >= (int)records.size()) return false;
     const auto& record = records[sourceRow];
 
-    // --- 按照 Plan-73 & Plan-94：显示/隐藏文件夹/文件与筛选联动 ---
-    // 2026-07-xx 逻辑校准：子分类在逻辑上等同于文件夹，受 showFolders 控制
-    if (record.isCategory || record.isDir) {
+    // --- 核心修正：区分“普通物理文件夹”与“托管资产包 (.arc)” ---
+    // 托管资产包（.arc）虽然底层是目录，但语义上是资产文件，决不能被“隐藏文件夹”开关误杀拦截！
+    bool isRealFolder = record.isCategory || (record.isDir && !record.path.endsWith(".arc", Qt::CaseInsensitive));
+
+    if (isRealFolder) {
         auto* contentPanel = qobject_cast<ContentPanel*>(parent());
         bool isDiskMode = contentPanel && (contentPanel->dataSourceType() == ContentPanel::DataSourceType::DiskNav);
         bool isEmptyFolder = isDiskMode && record.isDir && record.isEmpty;
 
-        // 2026-07-xx Plan-94: 判定用户是否在筛选面板中显式勾选了“文件夹”或匹配的“空文件夹”
         bool isFolderExplicitlySelected = currentFilter.types.contains("folder") || 
                                          (isEmptyFolder && currentFilter.types.contains("空文件夹"));
         
-        // 只有当“顶栏全局开关为隐藏”且“筛选器未显式勾选文件夹”时，才执行拦截
+        // 只有真正的普通文件夹/分类受 showFolders 开关控制
         if (!currentFilter.showFolders && !isFolderExplicitlySelected) {
             return false;
         }
