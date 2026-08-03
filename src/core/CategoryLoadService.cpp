@@ -24,22 +24,47 @@ std::vector<ItemRecord> CategoryLoadService::loadCategoryItems(int categoryId, b
     }
 
     // 2. 加载文件 (SCCH 分离模式)
-    std::vector<CategoryItem> items;
-    if (recursive) {
-        items = CategoryRepo::getItemsRecursive(categoryId);
-    } else {
-        items = CategoryRepo::getItemsInCategory(categoryId);
-    }
+    Category cat = CategoryRepo::getById(categoryId);
+    if (cat.id > 0 && cat.parentId == 0 && !cat.physicalPath.empty()) {
+        std::wstring normCatPath = MetadataManager::normalizePath(cat.physicalPath);
+        if (!normCatPath.empty()) {
+            MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
+                if (meta.isTrash || meta.isFolder) return;
 
-    allRecords.reserve(allRecords.size() + items.size());
-    for (const auto& item : items) {
-        std::wstring wPath = MetadataManager::instance().getPathByFolderId(item.folderId);
-        if (wPath.empty() && !item.pathHint.empty()) {
-            wPath = item.pathHint;
+                QString qPath = QString::fromStdWString(path);
+                if (qPath.endsWith("_thumbnail.png", Qt::CaseInsensitive) ||
+                    qPath.endsWith("metadata.scch", Qt::CaseInsensitive)) {
+                    return;
+                }
+
+                if (path.rfind(normCatPath, 0) == 0) {
+                    allRecords.push_back(ItemRecord::create(qPath, nullptr, true));
+                }
+            });
+        }
+    } else {
+        std::vector<CategoryItem> items;
+        if (recursive) {
+            items = CategoryRepo::getItemsRecursive(categoryId);
+        } else {
+            items = CategoryRepo::getItemsInCategory(categoryId);
         }
 
-        if (!wPath.empty()) {
-            allRecords.push_back(ItemRecord::create(QString::fromStdWString(wPath), nullptr, true));
+        allRecords.reserve(allRecords.size() + items.size());
+        for (const auto& item : items) {
+            std::wstring wPath = MetadataManager::instance().getPathByFolderId(item.folderId);
+            if (wPath.empty() && !item.pathHint.empty()) {
+                wPath = item.pathHint;
+            }
+
+            if (!wPath.empty()) {
+                QString qPath = QString::fromStdWString(wPath);
+                if (qPath.endsWith("_thumbnail.png", Qt::CaseInsensitive) ||
+                    qPath.endsWith("metadata.scch", Qt::CaseInsensitive)) {
+                    continue;
+                }
+                allRecords.push_back(ItemRecord::create(qPath, nullptr, true));
+            }
         }
     }
 
@@ -51,6 +76,9 @@ std::vector<ItemRecord> CategoryLoadService::loadPathItems(const QStringList& pa
     records.reserve(static_cast<int>(paths.size()));
     for (const QString& p : paths) {
         if (!p.isEmpty()) {
+            if (p.endsWith("_thumbnail.png", Qt::CaseInsensitive)) {
+                continue;
+            }
             records.push_back(ItemRecord::create(p, nullptr, true));
         }
     }

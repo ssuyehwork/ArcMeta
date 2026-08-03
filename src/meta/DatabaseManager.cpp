@@ -250,6 +250,13 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             "OR path_hint LIKE '%.arc\\%' ESCAPE '\\';";
         sqlite3_exec(conn.memDb, arcCleanup2, nullptr, nullptr, nullptr);
 
+        // 🚨 2026-08-02 一键清除历史上误把 .arc 内部的 _thumbnail.png 登记为独立资产的脏数据
+        const char* thumbCleanup1 = "DELETE FROM metadata WHERE path LIKE '%_thumbnail.png';";
+        sqlite3_exec(conn.memDb, thumbCleanup1, nullptr, nullptr, nullptr);
+
+        const char* thumbCleanup2 = "DELETE FROM category_items WHERE path_hint LIKE '%_thumbnail.png';";
+        sqlite3_exec(conn.memDb, thumbCleanup2, nullptr, nullptr, nullptr);
+
         // FTS5 trigram 模糊匹配与自动触发器同步
         const char* ftsSchema = R"(
             CREATE VIRTUAL TABLE IF NOT EXISTS metadata_fts USING fts5(

@@ -376,7 +376,14 @@ void CategoryPanel::setupContextMenu() {
                 menu.addSeparator();
 
                 menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建分类", this, &CategoryPanel::onCreateCategory);
-                menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建子分类", this, &CategoryPanel::onCreateSubCategory);
+                
+                int catId = index.data(IdRole).toInt();
+                Category cat = CategoryRepo::getById(catId);
+                bool isManagedLibraryRoot = (cat.id > 0 && cat.parentId == 0 && !cat.physicalPath.empty());
+
+                if (!isManagedLibraryRoot) {
+                    menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建子分类", this, &CategoryPanel::onCreateSubCategory);
+                }
 
                 menu.addSeparator();
 
@@ -384,8 +391,10 @@ void CategoryPanel::setupContextMenu() {
                 menu.addAction(UiHelper::getIcon("pin_vertical", isPinned ? Style::ActiveOrange : TextMuted, 18), 
                                isPinned ? "从“快速访问”中移除" : "添加至“快速访问”", this, &CategoryPanel::onTogglePin);
                                
-                menu.addAction(UiHelper::getIcon("edit", TextMuted, 18), "重命名分类", this, &CategoryPanel::onRenameCategory);
-                menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "删除分类", this, &CategoryPanel::onDeleteCategory);
+                if (!isManagedLibraryRoot) {
+                    menu.addAction(UiHelper::getIcon("edit", TextMuted, 18), "重命名分类", this, &CategoryPanel::onRenameCategory);
+                    menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "删除分类", this, &CategoryPanel::onDeleteCategory);
+                }
 
                 menu.addSeparator();
 

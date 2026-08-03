@@ -29,6 +29,7 @@
 #include "../meta/CategoryRepo.h"
 #include "../ui/MediaColorExtractor.h"
 #include "MediaExtractorPipeline.h"
+#include "../util/ShellHelper.h"
 #include "sqlite3.h"
 #include "AmMetaJson.h"
 #include <QJsonDocument>
@@ -498,7 +499,53 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
     updateIngestionStatus(nPath, 0); 
     registerItemsAsync({QString::fromStdWString(nPath)}, true); 
  
+    // 🚨 修复：强制标记侧边栏计数已过期，并通知 UI 刷新
+    CategoryRepo::s_countsDirty.store(true);
+    notifyCategoryCountChanged();
+
     notifyUI(RefreshLevel::FullRebuild); 
+    return true; 
+}
+
+// 🚨 SSOT 重构核心：跨盘托管库胶囊物理迁移（跨盘 1:1 重锚定）
+bool MetadataManager::migrateCapsuleToLibrary(const std::string& assetId, const QString& targetLibraryPath) { 
+    std::wstring currentPath = getPathByFolderId(assetId); 
+    if (currentPath.empty()) return false; 
+ 
+    QFileInfo fileInfo(QString::fromStdWString(currentPath)); 
+    QDir containerDir = fileInfo.dir(); // 获取 00ms73182x000.arc 胶囊文件夹 
+    QString containerName = containerDir.dirName(); 
+ 
+    QString targetContainerDir = targetLibraryPath + "/" + containerName; 
+    if (containerDir.absolutePath().compare(targetContainerDir, Qt::CaseInsensitive) == 0) { 
+        return true; // 已在目标托管库，无需移动 
+    } 
+ 
+    // 1. 物理跨盘剪切整个 .arc 胶囊文件夹 
+    if (!ShellHelper::copyOrMoveItems({containerDir.absolutePath()}, targetLibraryPath, true)) { 
+        return false; 
+    } 
+ 
+    // 2. 计算迁移后的主资产新路径 
+    QString newMainFilePath = targetContainerDir + "/" + fileInfo.fileName(); 
+    std::wstring wNewPath = normalizePath(newMainFilePath.toStdWString()); 
+ 
+    // 3. 获取旧的元数据并从旧库彻底清除 
+    RuntimeMeta oldMeta = getMeta(currentPath); 
+    removeMetadataSync(currentPath); 
+ 
+    // 4. 将旧的元数据移植并写入到新库 
+    oldMeta.folderId = assetId; 
+    oldMeta.isManaged = true; 
+    { 
+        std::unique_lock<std::shared_mutex> lock(m_mutex); 
+        m_cache[wNewPath] = oldMeta; 
+        m_folderIdToPath[assetId] = wNewPath; 
+    } 
+ 
+    // 5. 异步落盘到新库并通知 UI 刷新 
+    persistAsync(wNewPath, true, true); 
+ 
     return true; 
 }
 
