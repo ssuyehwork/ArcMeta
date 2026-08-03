@@ -223,7 +223,21 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
             double ar = 1.0;
             bool hasThumb = false;
 
-            if (ext == "svg") {
+            bool isInsideArc = info.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
+
+            if (isInsideArc) {
+                // 🚨 完美穿透解包联动：如果真实素材在 .arc 包内，直接去搜寻并加载包内同级的 *_thumbnail.png
+                QDir arcDir = info.dir();
+                QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
+                if (!thumbFiles.isEmpty()) {
+                    QString thumbPath = arcDir.absoluteFilePath(thumbFiles.first());
+                    img = QImage(thumbPath);
+                    if (!img.isNull()) {
+                        ar = (double)img.width() / img.height();
+                        hasThumb = true;
+                    }
+                }
+            } else if (ext == "svg") {
                 QSvgRenderer renderer(path);
                 if (renderer.isValid()) {
                     QImage svgImg(128, 128, QImage::Format_ARGB32);

@@ -39,7 +39,11 @@ std::vector<ItemRecord> CategoryLoadService::loadCategoryItems(int categoryId, b
         }
 
         if (!wPath.empty()) {
-            allRecords.push_back(ItemRecord::create(QString::fromStdWString(wPath), nullptr, true));
+            QString qPath = QString::fromStdWString(wPath);
+            if (qPath.endsWith("_thumbnail.png", Qt::CaseInsensitive)) {
+                continue;
+            }
+            allRecords.push_back(ItemRecord::create(qPath, nullptr, true));
         }
     }
 
@@ -51,6 +55,9 @@ std::vector<ItemRecord> CategoryLoadService::loadPathItems(const QStringList& pa
     records.reserve(static_cast<int>(paths.size()));
     for (const QString& p : paths) {
         if (!p.isEmpty()) {
+            if (p.endsWith("_thumbnail.png", Qt::CaseInsensitive)) {
+                continue;
+            }
             records.push_back(ItemRecord::create(p, nullptr, true));
         }
     }
