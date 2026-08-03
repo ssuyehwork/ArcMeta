@@ -80,7 +80,6 @@ void CategoryModel::refresh() {
         font.setBold(true);
         favGroup->setFont(font);
         favGroup->setForeground(QColor("#FFFFFF"));
-        root->appendRow(favGroup);
     }
 
     if (m_type == User || m_type == Both) {
@@ -114,18 +113,46 @@ void CategoryModel::refresh() {
             itemMap[id] = item;
         }
 
+        // 1. 优先渲染托管库根分类 (parentId == 0 && ArcMeta.Library_) 到 root 中间位置
         for (const auto& cat : categories) {
             int id = cat.id;
             QStandardItem* item = itemMap[id];
             int parentId = cat.parentId;
 
-            if (parentId > 0 && itemMap.contains(parentId)) {
+            if (parentId == 0) {
+                QString name = QString::fromStdWString(cat.name);
+                if (name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                    root->appendRow(item);
+                }
+            } else if (parentId > 0 && itemMap.contains(parentId)) {
                 itemMap[parentId]->appendRow(item);
-            } else {
-                root->appendRow(item);
             }
         }
 
+        // 2. 渲染“★ 快速访问”分组节点
+        if (favGroup) {
+            root->appendRow(favGroup);
+        }
+
+        // 3. 渲染用户自定义分类树 (将非 ArcMeta.Library_ 的顶级自定义分类作为“快速访问”的子树展示)
+        for (const auto& cat : categories) {
+            int id = cat.id;
+            QStandardItem* item = itemMap[id];
+            int parentId = cat.parentId;
+
+            if (parentId == 0) {
+                QString name = QString::fromStdWString(cat.name);
+                if (!name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                    if (favGroup) {
+                        favGroup->appendRow(item);
+                    } else {
+                        root->appendRow(item);
+                    }
+                }
+            }
+        }
+
+        // 4. 渲染置顶的镜像分类 (原快速访问镜像)
         if (favGroup) {
             for (const auto& cat : categories) {
                 if (cat.pinned) {

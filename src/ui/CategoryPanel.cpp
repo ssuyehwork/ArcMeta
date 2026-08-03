@@ -1030,7 +1030,11 @@ void CategoryPanel::initUi() {
 
         // 2026-03-xx 物理防御：加密分类点击时触发校验
         if (isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
-            tryUnlockCategory(index);
+            if (tryUnlockCategory(index)) {
+                emit categorySelected(id, name, type, path);
+            } else {
+                emit categorySelected(-1, "", "", "");
+            }
             return;
         }
 
@@ -1257,8 +1261,10 @@ bool CategoryPanel::tryUnlockCategory(const QModelIndex& index) {
     // 2026-03-xx 物理级还原：废弃通用输入框，改用 1:1 复刻的旧版验证界面
     CategoryLockDialog dlg(hint, this);
     if (dlg.exec() == QDialog::Accepted) {
-        // [SIMULATION] 校验成功
-        m_unlockedIds.insert(id);
+        // 🚨 使用 CategoryLockManager 线程安全会话单例管理解锁状态
+        CategoryLockManager::instance().verifyAndUnlock(id, dlg.password());
+        
+        m_unlockedIds = CategoryLockManager::instance().getUnlockedIds();
         
         // 物理补丁：解锁后由于图标需要刷新，强制同步 ID 并进行一次模型重刷
         m_categoryModel->setUnlockedIds(m_unlockedIds);

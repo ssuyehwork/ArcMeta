@@ -26,6 +26,11 @@ public:
      * @brief 按物理路径列表批量创建条目（用于系统分类/搜索结果/资源库内部路径等场景）
      */
     static std::vector<ItemRecord> loadPathItems(const QStringList& paths);
+
+    /**
+     * @brief 🚨【安全过滤拦截】：判断指定资产所属分类是否处于未解锁的加锁状态
+     */
+    static bool isAssetLocked(const std::string& assetId);
 };
 
 } // namespace ArcMeta
