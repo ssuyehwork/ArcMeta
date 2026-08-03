@@ -1167,8 +1167,15 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
 
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
-        // 1. 修复：仅排除非托管普通文件夹，允许 .arc 资产包与托管资产入选
-        if (meta.isFolder && !isManagedAsset(meta.isFolder, path)) return;
+        // 1. 核心修正：彻底过滤掉 .arc 物理容器目录（不渲染 DIR 壳）
+        if (meta.isFolder) return;
+
+        // 2. 核心修正：彻底过滤掉容器内部的辅助缩略图与 SCCH 元数据文件
+        QString qPath = QString::fromStdWString(path);
+        if (qPath.endsWith("_thumbnail.png", Qt::CaseInsensitive) ||
+            qPath.endsWith("metadata.scch", Qt::CaseInsensitive)) {
+            return;
+        }
 
         bool match = false;
         std::wstring finalPath = path;
@@ -1185,7 +1192,6 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
 
                 if (type == "untagged" && meta.tags.isEmpty()) match = true;
                 else if (type == "recently_visited") {
-                    // 2. 修复：最近访问兼容回退，若 atime 为 0 则使用 mtime/ctime/added_at 最高值
                     long long activeTime = meta.atime > 0 ? meta.atime : std::max({meta.mtime, meta.ctime, meta.added_at});
                     if (static_cast<double>(activeTime) >= now - 86400000.0) match = true;
                 }
