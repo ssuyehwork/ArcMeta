@@ -39,11 +39,6 @@ void CategoryRepo::saveImmediately() {
     DatabaseManager::instance().flushAll();
 }
 
-// 统一资产判定静态函数，物理上不管是文件夹还是文件，只要以 .arc 结尾在内存语义中均为原子资产
-static bool isManagedAsset(bool isFolder, const std::wstring& path) {
-    return !isFolder || (path.size() >= 4 && path.compare(path.size() - 4, 4, L".arc") == 0);
-}
-
 // 自动对齐修复被误删的 ArcMeta.Library_ 托管根分类
 void syncManagedLibraries() {
     static std::atomic<bool> s_inSync{false};
@@ -941,7 +936,7 @@ std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
     for (auto const& [id, fids] : catToUniqueFids) {
         res.push_back({id, static_cast<int>(fids.size())});
     }
- 
+
     // 针对 parent_id = 0 的托管仓库根分类，全小写规范化对账核算资产总数
     auto allCats = getAll();
     for (const auto& cat : allCats) {
