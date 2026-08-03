@@ -39,7 +39,54 @@ void CategoryRepo::saveImmediately() {
     DatabaseManager::instance().flushAll();
 }
 
+// 统一资产判定静态函数，物理上不管是文件夹还是文件，只要以 .arc 结尾在内存语义中均为原子资产
+static bool isManagedAsset(bool isFolder, const std::wstring& path) {
+    return !isFolder || (path.size() >= 4 && path.compare(path.size() - 4, 4, L".arc") == 0);
+}
+
+// 自动对齐修复被误删的 ArcMeta.Library_ 托管根分类
+void syncManagedLibraries() {
+    static std::atomic<bool> s_inSync{false};
+    if (s_inSync.exchange(true)) return;
+
+    const auto drives = QDir::drives();
+    for (const QFileInfo& drive : drives) {
+        QString letter = drive.absolutePath().left(1).toUpper();
+        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(drive.absolutePath().toStdWString());
+        if (volSerial == L"UNKNOWN") continue;
+
+        std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
+        if (managedAbsW.empty()) continue;
+
+        QFileInfo libInfo(QString::fromStdWString(managedAbsW));
+        if (!libInfo.exists()) continue;
+
+        std::wstring libName = libInfo.fileName().toStdWString();
+
+        // 检查数据库中是否存在 parent_id = 0 且名称为 ArcMeta.Library_X 的分类
+        int existingId = CategoryRepo::findCategoryId(0, libName);
+        if (existingId == 0) {
+            Category cat;
+            cat.parentId = 0;
+            cat.name = libName;
+            cat.color = L"#378ADD";
+            cat.physicalPath = managedAbsW;
+            cat.icon = L"folder_filled";
+
+            CategoryRepo::add(cat);
+            qDebug() << "[CategoryRepo] 自动修复补全托管根分类:" << QString::fromStdWString(libName);
+        } else {
+            CategoryRepo::updatePhysicalMapping(existingId, 0, managedAbsW);
+        }
+    }
+
+    s_inSync.store(false);
+}
+
 std::vector<Category> CategoryRepo::getAll() {
+    // 启动/读取时自动修复补全缺失的 ArcMeta.Library_ 根分类
+    syncManagedLibraries();
+
     std::vector<Category> results;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
 
@@ -1120,9 +1167,9 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
 
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
-        // 核心红线：彻底排除文件夹
-        if (meta.isFolder) return;
-        
+        // 1. 修复：仅排除非托管普通文件夹，允许 .arc 资产包与托管资产入选
+        if (meta.isFolder && !isManagedAsset(meta.isFolder, path)) return;
+
         bool match = false;
         std::wstring finalPath = path;
 
@@ -1137,7 +1184,11 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
                 if (meta.isTrash) return;
 
                 if (type == "untagged" && meta.tags.isEmpty()) match = true;
-                else if (type == "recently_visited" && meta.atime >= now - 86400000.0) match = true;
+                else if (type == "recently_visited") {
+                    // 2. 修复：最近访问兼容回退，若 atime 为 0 则使用 mtime/ctime/added_at 最高值
+                    long long activeTime = meta.atime > 0 ? meta.atime : std::max({meta.mtime, meta.ctime, meta.added_at});
+                    if (static_cast<double>(activeTime) >= now - 86400000.0) match = true;
+                }
                 else if (type == "uncategorized" && !meta.folderId.empty() && categorizedIds.find(meta.folderId) == categorizedIds.end()) match = true;
             }
         }
