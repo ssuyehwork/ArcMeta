@@ -29,6 +29,7 @@
 #include "../meta/CategoryRepo.h"
 #include "../ui/MediaColorExtractor.h"
 #include "MediaExtractorPipeline.h"
+#include "../util/ShellHelper.h"
 #include "sqlite3.h"
 #include "AmMetaJson.h"
 #include <QJsonDocument>
