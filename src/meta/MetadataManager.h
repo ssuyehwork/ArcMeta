@@ -140,6 +140,11 @@ public:
     void notifyFullUIRebuild();
 
     /**
+     * @brief 🚨 SSOT 重构核心：单一权威资产入库登记管线
+     */
+    bool registerAsset(const std::string& folderId, const std::wstring& assetPath, int targetCatId);
+
+    /**
      * @brief 一站式项目注册流程（受控模式）
      * 2026-07-xx 按照 Plan-116：仅允许受信任的来源（如 AutoImportManager）调用
      * @param path 物理路径
