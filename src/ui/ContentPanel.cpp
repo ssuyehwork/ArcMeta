@@ -116,18 +116,19 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     if (sourceRow < 0 || sourceRow >= (int)records.size()) return false;
     const auto& record = records[sourceRow];
 
-    // --- 按照 Plan-73 & Plan-94：显示/隐藏文件夹/文件与筛选联动 ---
-    // 2026-07-xx 逻辑校准：子分类在逻辑上等同于文件夹，受 showFolders 控制
-    if (record.isCategory || record.isDir) {
+    // --- 核心修正：区分“普通物理文件夹”与“托管资产包 (.arc)” ---
+    // 托管资产包（.arc）虽然底层是目录，但语义上是资产文件，决不能被“隐藏文件夹”开关误杀拦截！
+    bool isRealFolder = record.isCategory || (record.isDir && !record.path.endsWith(".arc", Qt::CaseInsensitive));
+
+    if (isRealFolder) {
         auto* contentPanel = qobject_cast<ContentPanel*>(parent());
         bool isDiskMode = contentPanel && (contentPanel->dataSourceType() == ContentPanel::DataSourceType::DiskNav);
         bool isEmptyFolder = isDiskMode && record.isDir && record.isEmpty;
 
-        // 2026-07-xx Plan-94: 判定用户是否在筛选面板中显式勾选了“文件夹”或匹配的“空文件夹”
         bool isFolderExplicitlySelected = currentFilter.types.contains("folder") || 
                                          (isEmptyFolder && currentFilter.types.contains("空文件夹"));
         
-        // 只有当“顶栏全局开关为隐藏”且“筛选器未显式勾选文件夹”时，才执行拦截
+        // 只有真正的普通文件夹/分类受 showFolders 开关控制
         if (!currentFilter.showFolders && !isFolderExplicitlySelected) {
             return false;
         }
@@ -2547,19 +2548,16 @@ void ContentPanel::loadCategory(int categoryId) {
     });
 } 
  
-void ContentPanel::loadPaths(const QStringList& paths, int reqId) { 
-    // 🚨 0 与 1 彻底断连多态自动分流：逻辑切断
+void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
     if (m_model != m_libraryModel) {
         m_model = m_libraryModel;
         m_proxyModel->setSourceModel(m_model);
     }
 
-    // 2026-07-xx 物理强化：如果路径列表为空，直接执行同步清理并返回
-    // 理由：这防止了搜索启动时的清空动作（异步）与随后到达的结果加载（异步）发生竞态。
     if (paths.isEmpty()) {
         ArcMeta::Logger::log("[Content] loadPaths 收到空路径，执行同步清空");
-        if (reqId == 0) m_loadRequestId++; // 若未指定 ID，则自增以作废前序加载
-        else m_loadRequestId = reqId;      // 若指定了 ID，则强制对其
+        if (reqId == 0) m_loadRequestId++;
+        else m_loadRequestId = reqId;
         
         m_model->clear();
         m_isLoading = false;
@@ -2567,28 +2565,11 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
         return;
     }
 
-    // 校验：如果传入了明确的 reqId，且与当前 ID 不符，则直接拦截。
-    // 这对于搜索结果的流式加载至关重要。
-    if (reqId != 0 && m_loadRequestId != reqId) {
-        ArcMeta::Logger::log(QString("[Content] loadPaths 拦截到过期的同步请求 [%1], 当前 ID: %2")
-                            .arg(reqId).arg(m_loadRequestId.load()));
-        return;
-    }
-
-    // 2026-07-xx 物理防护：防重入机制
-    if (m_isLoading && m_currentCategoryType == "path_list" && reqId == 0) {
-        return;
-    }
-
     m_isLoading = true;
     if (reqId == 0) reqId = ++m_loadRequestId;
-    // 2026-07-xx 逻辑校准：保持既有的系统分类类型（如 trash/recently_visited），
-    // 仅在明确不是这些特殊类型时，才将其降级为通用的 path_list。
-    if (m_currentCategoryType != "trash" && 
-        m_currentCategoryType != "recently_visited" &&
-        m_currentCategoryType != "untagged" &&
-        m_currentCategoryType != "uncategorized" &&
-        m_currentCategoryType != "all") {
+
+    // 维持既有的系统分类类型标识
+    if (m_currentCategoryType.isEmpty()) {
         m_currentCategoryType = "path_list";
     }
     updateLayersButtonState();
@@ -2597,12 +2578,10 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
     
-    // 加载路径列表通常属于分类/逻辑数据源
     emit dataSourceChanged("category"); 
-     
+    
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, paths, reqId]() {
-        // 【物理隔离】数据获取已迁出至 CategoryLoadService
         if (!weakThis) return;
         std::vector<ItemRecord> records = CategoryLoadService::loadPathItems(paths);
         if (!weakThis) return;
@@ -2615,7 +2594,6 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
 
-                // 2026-07-26 极致重构：路径列表（如搜索、系统项）加载完成，自动重新选中之前的选中高亮目标（对应用户原话：“对某个文件夹/文件进行重命名 或 进行其他操作后仍然处于选中高亮状态”）
                 if (!weakThis->m_pendingSelectName.isEmpty()) {
                     const auto& rList = weakThis->m_model->allRecords();
                     for (size_t i = 0; i < rList.size(); ++i) {
@@ -2634,7 +2612,7 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
                             break;
                         }
                     }
-                    weakThis->m_pendingSelectName = ""; // 清空
+                    weakThis->m_pendingSelectName = "";
                 }
 
                 ArcMeta::Logger::log(QString("[Content] 路径列表加载完成 [%1]").arg(reqId));
