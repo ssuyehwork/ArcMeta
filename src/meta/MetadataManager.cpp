@@ -762,7 +762,9 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         }
 
         m_cache[nPath] = rm;
-        if (!rm.isFolder) {
+        bool isManagedAsset = !rm.isFolder ||
+            (nPath.size() >= 4 && nPath.compare(nPath.size() - 4, 4, L".arc") == 0);
+        if (isManagedAsset) {
             CategoryRepo::s_totalCount.fetch_add(1);
             if (rm.tags.isEmpty()) {
                 CategoryRepo::s_untaggedCount.fetch_add(1);
