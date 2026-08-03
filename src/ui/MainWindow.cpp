@@ -405,26 +405,46 @@ void MainWindow::initUi() {
     connect(m_categoryPanel, &CategoryPanel::pathsDroppedToCategory, this, [this](const QStringList& paths, int targetCatId) {
         if (paths.isEmpty()) return;
 
-        // 2026-07-xx 按照 Development_Plan 2.2：拖拽入库冲突拦截
-        QStringList finalPaths;
-        for (const QString& p : paths) {
-            std::wstring wp = p.toStdWString();
-            if (MetadataManager::isInsideManagedLibrary(wp)) {
-                RuntimeMeta meta = MetadataManager::instance().getMeta(wp);
-                if (meta.ingestionStatus == 1) {
-                    ToolTipOverlay::instance()->showText(QCursor::pos(), "该项目已入库，无需再次入库", 1500, QColor("#FECF0E"));
-                    continue; 
+        Category targetCat = CategoryRepo::getById(targetCatId);
+        bool isTargetManagedLibraryRoot = (targetCat.parentId == 0 &&
+            QString::fromStdWString(targetCat.name).startsWith("ArcMeta.Library_"));
+
+        QStringList importPaths;
+        for (const QString& srcPath : paths) {
+            std::wstring wPath = MetadataManager::normalizePath(srcPath.toStdWString());
+
+            // 1. 判断拖拽的卡片是否已经是库内受控资产
+            bool isManaged = MetadataManager::isInsideManagedLibrary(wPath);
+
+            if (isManaged) {
+                // 🚨【库内资产拖拽】：绝对不调用 AssetImporter，零弹窗硬拦截！
+                std::string assetId = MetadataManager::instance().getFolderIdSync(wPath);
+
+                if (isTargetManagedLibraryRoot) {
+                    // 【分支 A】：拖到另一个 ArcMeta.Library_盘符 ➔ 触发跨盘物理迁移
+                    QString targetLibraryPath = QString::fromStdWString(targetCat.physicalPath);
+                    MetadataManager::instance().migrateCapsuleToLibrary(assetId, targetLibraryPath);
+                } else {
+                    // 【分支 B】：拖到自定义虚拟分类 ➔ 1:N 虚拟关联绑定
+                    CategoryRepo::addItemToCategory(targetCatId, assetId, wPath);
                 }
+            } else {
+                // 🚨【库外操作系统文件拖拽】：才触发真正的资产打包入库流程
+                importPaths << srcPath;
             }
-            finalPaths << p;
         }
 
-        if (finalPaths.isEmpty()) return;
-
-        AssetImporter::importAssets(finalPaths, targetCatId, this, [this]() {
+        if (!importPaths.isEmpty()) {
+            AssetImporter::importAssets(importPaths, targetCatId, this, [this]() {
+                m_categoryPanel->requestRefresh(true);
+                m_contentPanel->refreshAll();
+            });
+        } else {
+            // 标记脏数据并通知侧边栏与内容区实时刷新
+            CategoryRepo::s_countsDirty.store(true);
             m_categoryPanel->requestRefresh(true);
             m_contentPanel->refreshAll();
-        });
+        }
     });
 
     // 1b. 内容面板内部跳转分类 (双击同步) -> 统一导航中枢 (Plan-56)

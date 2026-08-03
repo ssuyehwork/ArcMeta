@@ -310,6 +310,15 @@ bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction actio
         if (type != "category" && type != "bookmark") {
             return false; 
         }
+
+        // 🚨 阻止拖拽子分类嵌套入托管库根分类 (parentId == 0 && !physicalPath.empty())
+        if (!mimeData->hasUrls() && !mimeData->hasFormat("text/plain")) {
+            int parentId = parentItem->data(IdRole).toInt();
+            Category parentCat = CategoryRepo::getById(parentId);
+            if (parentCat.id > 0 && parentCat.parentId == 0 && !parentCat.physicalPath.empty()) {
+                return false;
+            }
+        }
     }
     return QStandardItemModel::dropMimeData(mimeData, action, row, column, actualParent);
 }
