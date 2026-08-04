@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include "../meta/AmMetaJson.h"
+#include "../ui/MediaColorExtractor.h" // 🚨 补全头文件引入
 
 using namespace ArcMeta;
 
@@ -190,7 +191,11 @@ void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
         for (const auto& task : newQueue) {
             if (!weakThis) break;
             QString path = task.first;
-            QImage img = ShellIconManager::getShellThumbnail(path, 128);
+
+            // 🚨 核心关键修复：调用 MediaColorExtractor 多媒体提图引擎！
+            // 自动唤醒解包 EPS/PSD/AI/SVG 并在 .arcmeta/disk_thumbs/ 自动生成 PNG 缓存
+            QImage img = MediaColorExtractor::getImageForAnalysis(path, 256);
+
             double ar = 1.0;
             bool hasThumb = false;
             if (!img.isNull()) {
