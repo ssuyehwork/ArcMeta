@@ -6,6 +6,8 @@
 #include <QLabel>
 #include <QVBoxLayout>
 
+namespace ArcMeta {
+
 class CategoryLockWidget : public QWidget {
     Q_OBJECT
 public:
@@ -28,5 +30,7 @@ private:
     QLabel* m_hintLabel;
     QLineEdit* m_pwdEdit;
 };
+
+} // namespace ArcMeta
 
 #endif // CATEGORYLOCKWIDGET_H

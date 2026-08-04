@@ -80,6 +80,8 @@
 #include "../meta/CategoryRepo.h" 
 #include "../crypto/EncryptionManager.h" 
 #include "CategoryLockDialog.h" 
+#include "CategoryLockWidget.h"
+#include "CategoryPanel.h"
 #include "BatchRenameDialog.h" 
 #include "UiHelper.h" 
 #include "ShellIconManager.h"
@@ -655,10 +657,31 @@ void ContentPanel::initUi() {
      
     initGridView(); 
     initListView(); 
+
+    m_lockWidget = new CategoryLockWidget(this);
  
     m_viewStack->addWidget(m_gridView); 
     m_viewStack->addWidget(m_treeView); 
+    m_viewStack->addWidget(m_lockWidget);
+
     m_viewStack->setCurrentWidget(m_gridView); 
+
+    connect(m_lockWidget, &CategoryLockWidget::unlocked, this, [this](int id) {
+        MainWindow* mw = nullptr;
+        QWidget* parentWin = window();
+        while (parentWin) {
+            if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
+            parentWin = parentWin->parentWidget();
+        }
+        if (mw) {
+            CategoryPanel* cp = mw->findChild<CategoryPanel*>();
+            if (cp) {
+                cp->syncUnlockedIds();
+                cp->expandCategory(id);
+            }
+        }
+        loadCategory(id);
+    });
  
     QVBoxLayout* contentWrapper = new QVBoxLayout(); 
     // 2026-06-xx 物理对齐：右侧边距设为 0，使滚动条贴合容器边缘
@@ -2494,25 +2517,26 @@ void ContentPanel::loadCategory(int categoryId) {
     if (cat.id > 0) {
         // 🚨【加锁保护拦截】：若分类加锁且当前未解锁
         if (cat.encrypted && !CategoryLockManager::instance().isUnlocked(categoryId)) {
-            // 1. 弹出密码输入校验对话框
-            CategoryLockDialog dlg(QString::fromStdWString(cat.encryptHint), this);
-            if (dlg.exec() == QDialog::Accepted) {
-                QString pwd = dlg.password();
-                if (CategoryLockManager::instance().verifyAndUnlock(categoryId, pwd)) {
-                    // 解锁成功，继续向下加载数据
-                } else {
-                    ToolTipOverlay::instance()->showText(QCursor::pos(), "密码错误，无法查看该分类数据", 2000, QColor("#e81123"));
-                    m_model->clear(); // 密码错误：物理清空内容面板！
-                    m_currentCategoryId = -1;
-                    return;
-                }
-            } else {
-                // 用户取消输入：物理清空内容面板，绝不展示数据！
-                m_model->clear();
-                m_currentCategoryId = -1;
-                return;
-            }
+            // 彻底移除阻断型模态对话框，直接使用无缝内置卡片式解锁界面进行展示
+            m_model->clear();
+            m_proxyModel->invalidate();
+            m_lockWidget->setCategory(categoryId, QString::fromStdWString(cat.encryptHint));
+            m_viewStack->setCurrentWidget(m_lockWidget);
+            if (m_textPreview) m_textPreview->hide();
+            if (m_imagePreview) m_imagePreview->hide();
+            m_currentCategoryId = categoryId;
+            m_currentCategoryType = "user_category";
+            updateLayersButtonState();
+            emit dataSourceChanged("category");
+            return;
         }
+    }
+
+    // 已经解锁，将视图堆栈还原到正确的列表或网格显示页
+    if (m_currentViewMode == ListView) {
+        m_viewStack->setCurrentWidget(m_treeView);
+    } else {
+        m_viewStack->setCurrentWidget(m_gridView);
     }
 
     if (m_isLoading && m_currentCategoryId == categoryId && m_currentCategoryType == "user_category") {
