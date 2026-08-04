@@ -42,6 +42,8 @@ public:
      * @brief 2026-06-xx 彻底重构：外部跳转接口，用于从内容容器反向选中侧边栏
      */
     void selectCategory(int id);
+    void syncUnlockedIds();
+    void expandCategory(int id);
 
     /**
      * @brief 2026-07-xx 按照 Plan-56：通过类型选中系统项
