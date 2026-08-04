@@ -12,22 +12,17 @@
 namespace ArcMeta {
 
 /**
- * @brief 处理 ArcMeta.cache 下高级 JSON 离散缓存 (.json) 的读写管理类
- * 2026-07-xx 双轨架构重构：
- * 1. 彻底摒弃 XMP 格式，全面采用纯粹、高效、结构化的 JSON 规范。
- * 2. 磁盘模式下不污染用户物理文件夹，统一存放在主程序根目录下的 "ArcMeta.cache" 高级缓存文件夹中。
+ * @brief 处理 .ArcMeta.json 隐藏配置文件的读写管理类
+ * 2026-08-xx 双轨架构重构：
+ * 1. 全面采用纯粹、高效、结构化的 JSON 规范。
+ * 2. 磁盘模式下采用标准的 .ArcMeta.json 隐藏文件直接保存在物理目录中。
  */
 class AmMetaJson {
 public:
     /**
-     * @brief 获取 ArcMeta.cache 根目录绝对路径（若不存在会自动创建）
+     * @brief 物理整体迁移/重命名文件夹缓存接口（历史兼容，在直接保存模式下，重命名会自动由操作系统物理转移子文件）
      */
-    static QString getCacheDirectory();
-
-    /**
-     * @brief 内部转换辅助：根据目标文件夹物理路径计算出 ArcMeta.cache 中唯一的 JSON 路径
-     */
-    static std::wstring resolveCacheFilePath(const std::wstring& folderPath);
+    static bool migrateFolderCache(const QString& oldFolderPath, const QString& newFolderPath);
 
     /**
      * @param folderPath 目标物理文件夹的完整路径
@@ -35,12 +30,12 @@ public:
     explicit AmMetaJson(const std::wstring& folderPath);
 
     /**
-     * @brief 从 ArcMeta.cache 对应位置加载 JSON 缓存文件
+     * @brief 从对应位置加载 JSON 配置文件
      */
     bool load();
 
     /**
-     * @brief 安全保存当前元数据至 ArcMeta.cache 对应的 JSON 文件中
+     * @brief 安全保存当前元数据至对应的 JSON 文件中
      */
     bool save() const;
 
@@ -61,14 +56,9 @@ public:
      */
     static bool renameItem(const QString& folderPath, const QString& oldName, const QString& newName);
 
-    /**
-     * @brief 静态辅助方法：当物理文件夹整体重命名/移动时，迁移其对应的 ArcMeta.cache JSON 文件
-     */
-    static bool migrateFolderCache(const QString& oldFolderPath, const QString& newFolderPath);
-
 private:
     std::wstring m_folderPath;
-    std::wstring m_filePath; // 映射到 ArcMeta.cache/ 中的真实 .json 物理路径
+    std::wstring m_filePath; // 映射到物理文件夹中的 .ArcMeta.json 路径
     
     FolderMeta m_folder;
     std::map<std::wstring, ItemMeta> m_items;

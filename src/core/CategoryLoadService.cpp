@@ -3,6 +3,22 @@
 #include "../meta/CategoryRepo.h"
 #include "CategoryLockManager.h"
 
+namespace {
+static inline bool isAuxiliaryFile(const QString& path) {
+    if (path.isEmpty()) return true;
+
+    // 🚨 仅保留 .ArcMeta.json，彻底清除 .am_meta.json 历史判断
+    if (path.endsWith(".ArcMeta.json", Qt::CaseInsensitive) ||
+        path.endsWith("_thumbnail.png", Qt::CaseInsensitive) ||
+        path.endsWith("metadata.scch", Qt::CaseInsensitive) ||
+        path.endsWith(".arc", Qt::CaseInsensitive)) {
+        return true; // 屏蔽过滤
+    }
+
+    return false;
+}
+}
+
 namespace ArcMeta {
 
 std::vector<ItemRecord> CategoryLoadService::loadCategoryItems(int categoryId, bool recursive) {
@@ -33,8 +49,7 @@ std::vector<ItemRecord> CategoryLoadService::loadCategoryItems(int categoryId, b
                 if (meta.isTrash || meta.isFolder) return;
 
                 QString qPath = QString::fromStdWString(path);
-                if (qPath.endsWith("_thumbnail.png", Qt::CaseInsensitive) ||
-                    qPath.endsWith("metadata.scch", Qt::CaseInsensitive)) {
+                if (isAuxiliaryFile(qPath)) {
                     return;
                 }
 
@@ -66,8 +81,7 @@ std::vector<ItemRecord> CategoryLoadService::loadCategoryItems(int categoryId, b
                     continue;
                 }
                 QString qPath = QString::fromStdWString(wPath);
-                if (qPath.endsWith("_thumbnail.png", Qt::CaseInsensitive) ||
-                    qPath.endsWith("metadata.scch", Qt::CaseInsensitive)) {
+                if (isAuxiliaryFile(qPath)) {
                     continue;
                 }
                 allRecords.push_back(ItemRecord::create(qPath, nullptr, true));
@@ -83,7 +97,7 @@ std::vector<ItemRecord> CategoryLoadService::loadPathItems(const QStringList& pa
     records.reserve(static_cast<int>(paths.size()));
     for (const QString& p : paths) {
         if (!p.isEmpty()) {
-            if (p.endsWith("_thumbnail.png", Qt::CaseInsensitive)) {
+            if (isAuxiliaryFile(p)) {
                 continue;
             }
             std::string assetId = MetadataManager::instance().getFolderIdSync(p.toStdWString());
