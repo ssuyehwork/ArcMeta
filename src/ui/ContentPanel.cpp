@@ -1440,9 +1440,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     act->setProperty("catId", cat.id); 
                 } 
             }
-
-            bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
-            menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
         } else {
             // [物理源：显示“迁移”]
             if (!m_currentPath.isEmpty() && m_currentPath != "computer://") {
@@ -1520,6 +1517,10 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
             menu.close();
         });
+
+        // 🚨【置顶 / 取消置顶】：全模式解锁！磁盘模式下写入 .ArcMeta.json，重排置顶！
+        bool isPinned = currentIndex.data(IsLockedRole).toBool();
+        menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin);
 
         menu.addAction("添加至收藏夹")->setData(ActionAddToFavorites); 
 
