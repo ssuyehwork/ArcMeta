@@ -679,14 +679,15 @@ void FilterPanel::rebuildGroups() {
         m_editColor->setPlaceholderText("例： 红 / #E24B4A / 无色标");
         m_editColor->setText(m_filter.colorFilterText);
         m_editColor->setObjectName("FilterSearchEdit");
+        m_editColor->setFixedHeight(24); // 🚨 强行锁定标准高度 24px！
         m_editColor->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
             "  color: #CCCCCC;"
             "  border: 1px solid #444444;"
-            "  border-radius: 6px;" // 2026-07-xx 按照《Plan-21》：输入框统一使用 6px 圆角
-            "  padding: 4px 8px;"
-            "  margin: 4px 5px;"
+            "  border-radius: 4px;"
+            "  padding: 0px 6px;"        // 🚨 修正内边距，确保文字垂直绝对居中
+            "  margin: 2px 0px;"
             "  font-size: 11px;"
             "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
@@ -918,8 +919,17 @@ void FilterPanel::rebuildGroups() {
         m_editType->setPlaceholderText("例： png / 文件夹...");
         m_editType->setText(m_filter.typeFilterText);
         m_editType->setObjectName("FilterSearchEdit");
+        m_editType->setFixedHeight(24); // 🚨 强行锁定标准高度 24px！
         m_editType->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 5px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit {"
+            "  background: #2D2D2D;"
+            "  color: #CCCCCC;"
+            "  border: 1px solid #444444;"
+            "  border-radius: 4px;"
+            "  padding: 0px 6px;"
+            "  margin: 2px 0px;"
+            "  font-size: 11px;"
+            "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editType->installEventFilter(this);
@@ -1012,8 +1022,17 @@ void FilterPanel::rebuildGroups() {
         m_editCreateDate->setPlaceholderText("例： 2025 / 03-2025...");
         m_editCreateDate->setText(m_filter.createDateFilterText);
         m_editCreateDate->setObjectName("FilterSearchEdit");
+        m_editCreateDate->setFixedHeight(24); // 🚨 强行锁定标准高度 24px！
         m_editCreateDate->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 5px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit {"
+            "  background: #2D2D2D;"
+            "  color: #CCCCCC;"
+            "  border: 1px solid #444444;"
+            "  border-radius: 4px;"
+            "  padding: 0px 6px;"
+            "  margin: 2px 0px;"
+            "  font-size: 11px;"
+            "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editCreateDate->installEventFilter(this);
@@ -1059,8 +1078,17 @@ void FilterPanel::rebuildGroups() {
         m_editModifyDate->setPlaceholderText("例： 2025 / 03-2025...");
         m_editModifyDate->setText(m_filter.modifyDateFilterText);
         m_editModifyDate->setObjectName("FilterSearchEdit");
+        m_editModifyDate->setFixedHeight(24); // 🚨 强行锁定标准高度 24px！
         m_editModifyDate->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 5px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit {"
+            "  background: #2D2D2D;"
+            "  color: #CCCCCC;"
+            "  border: 1px solid #444444;"
+            "  border-radius: 4px;"
+            "  padding: 0px 6px;"
+            "  margin: 2px 0px;"
+            "  font-size: 11px;"
+            "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editModifyDate->installEventFilter(this);
