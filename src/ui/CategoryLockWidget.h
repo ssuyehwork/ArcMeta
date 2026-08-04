@@ -14,6 +14,7 @@ public:
     explicit CategoryLockWidget(QWidget* parent = nullptr);
     
     void setCategory(int id, const QString& hint);
+    void focusInput();
 
 signals:
     void unlocked(int id);

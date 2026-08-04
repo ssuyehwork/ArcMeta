@@ -4,6 +4,8 @@
 #include <QGraphicsDropShadowEffect>
 #include <QKeyEvent>
 #include <QEvent>
+#include <QTimer>
+#include <QPointer>
 
 namespace ArcMeta {
 
@@ -69,7 +71,17 @@ void CategoryLockWidget::setCategory(int id, const QString& hint) {
     m_catId = id;
     m_hintLabel->setText(QString("密码提示: %1").arg(hint.isEmpty() ? "无" : hint));
     m_pwdEdit->clear();
-    m_pwdEdit->setFocus();
+    focusInput();
+}
+
+void CategoryLockWidget::focusInput() {
+    QPointer<QLineEdit> weakEdit(m_pwdEdit);
+    QTimer::singleShot(0, this, [weakEdit]() {
+        if (weakEdit) {
+            weakEdit->setFocus(Qt::OtherFocusReason); // 强行夺取键盘焦点
+            weakEdit->activateWindow();
+        }
+    });
 }
 
 bool CategoryLockWidget::eventFilter(QObject* watched, QEvent* event) {

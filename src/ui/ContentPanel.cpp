@@ -2520,14 +2520,15 @@ void ContentPanel::loadCategory(int categoryId) {
             // 彻底移除阻断型模态对话框，直接使用无缝内置卡片式解锁界面进行展示
             m_model->clear();
             m_proxyModel->invalidate();
-            m_lockWidget->setCategory(categoryId, QString::fromStdWString(cat.encryptHint));
             m_viewStack->setCurrentWidget(m_lockWidget);
+            m_lockWidget->setCategory(categoryId, QString::fromStdWString(cat.encryptHint));
             if (m_textPreview) m_textPreview->hide();
             if (m_imagePreview) m_imagePreview->hide();
             m_currentCategoryId = categoryId;
             m_currentCategoryType = "user_category";
             updateLayersButtonState();
             emit dataSourceChanged("category");
+            m_lockWidget->focusInput();
             return;
         }
     }

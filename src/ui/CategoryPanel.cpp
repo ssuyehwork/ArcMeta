@@ -451,7 +451,7 @@ void CategoryPanel::setupContextMenu() {
                     lockNowAct->setEnabled(isUnlocked);
                     connect(lockNowAct, &QAction::triggered, this, [this, catId]() {
                         CategoryLockManager::instance().lockCategory(catId);
-                        m_categoryModel->refresh();
+                        syncUnlockedIds();
                         
                         MainWindow* mw = nullptr;
                         QWidget* parentWin = window();
@@ -698,7 +698,7 @@ void CategoryPanel::onSetPassword() {
             }
         }
         
-        m_categoryModel->refresh();
+        syncUnlockedIds();
 
         restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 分类已加密</b>", 1000, QColor("#00A650"));
@@ -730,7 +730,7 @@ void CategoryPanel::onClearPassword() {
             }
         }
 
-        m_categoryModel->refresh();
+        syncUnlockedIds();
 
         restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 验证成功，分类已解除加密</b>", 1000, QColor("#00A650"));
@@ -1297,6 +1297,9 @@ void CategoryPanel::syncUnlockedIds() {
     if (m_categoryModel) {
         m_categoryModel->setUnlockedIds(m_unlockedIds);
         m_categoryModel->refresh();
+        if (m_proxyModel) {
+            m_proxyModel->invalidate();
+        }
     }
 }
 
