@@ -697,15 +697,14 @@ void FilterPanel::rebuildGroups() {
         m_editColor->setPlaceholderText("例： 红 / #E24B4A / 无色标");
         m_editColor->setText(m_filter.colorFilterText);
         m_editColor->setObjectName("FilterSearchEdit");
-        m_editColor->setFixedHeight(24); // 🚨 强行锁定标准高度 24px！
         m_editColor->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
             "  color: #CCCCCC;"
             "  border: 1px solid #444444;"
-            "  border-radius: 4px;"
-            "  padding: 0px 6px;"        // 🚨 修正内边距，确保文字垂直绝对居中
-            "  margin: 2px 0px;"
+            "  border-radius: 6px;"
+            "  padding: 4px 8px;"
+            "  margin: 4px 5px;"
             "  font-size: 11px;"
             "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
@@ -923,12 +922,7 @@ void FilterPanel::rebuildGroups() {
              });
         }
 
-        // 🚨 2.5 在“无色标”正下方新增：标准色系 (手动色标 1:1 精准筛选)
-        QLabel* lblExactTitle = new QLabel("标准色系", g);
-        lblExactTitle->setStyleSheet("color: #888888; font-size: 11px; margin-top: 10px; margin-left: 5px; font-weight: bold;");
-        gl->addWidget(lblExactTitle);
-
-        // 定义标准的 8 种手动色标
+        // 🚨 2.5 在“无色标”正下方：直接渲染 8 种手动色标复选行 (物理彻底擦除冗余的 "标准色系" 字符串 Label!)
         static const QList<QPair<QString, QString>> exactManualColors = {
             {"红色", "#E24B4A"},
             {"橙色", "#EF9F27"},
@@ -976,15 +970,14 @@ void FilterPanel::rebuildGroups() {
         m_editType->setPlaceholderText("例： png / 文件夹...");
         m_editType->setText(m_filter.typeFilterText);
         m_editType->setObjectName("FilterSearchEdit");
-        m_editType->setFixedHeight(24); // 🚨 强行锁定标准高度 24px！
         m_editType->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
             "  color: #CCCCCC;"
             "  border: 1px solid #444444;"
-            "  border-radius: 4px;"
-            "  padding: 0px 6px;"
-            "  margin: 2px 0px;"
+            "  border-radius: 6px;"
+            "  padding: 4px 8px;"
+            "  margin: 4px 5px;"
             "  font-size: 11px;"
             "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
@@ -1079,15 +1072,14 @@ void FilterPanel::rebuildGroups() {
         m_editCreateDate->setPlaceholderText("例： 2025 / 03-2025...");
         m_editCreateDate->setText(m_filter.createDateFilterText);
         m_editCreateDate->setObjectName("FilterSearchEdit");
-        m_editCreateDate->setFixedHeight(24); // 🚨 强行锁定标准高度 24px！
         m_editCreateDate->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
             "  color: #CCCCCC;"
             "  border: 1px solid #444444;"
-            "  border-radius: 4px;"
-            "  padding: 0px 6px;"
-            "  margin: 2px 0px;"
+            "  border-radius: 6px;"
+            "  padding: 4px 8px;"
+            "  margin: 4px 5px;"
             "  font-size: 11px;"
             "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
@@ -1135,15 +1127,14 @@ void FilterPanel::rebuildGroups() {
         m_editModifyDate->setPlaceholderText("例： 2025 / 03-2025...");
         m_editModifyDate->setText(m_filter.modifyDateFilterText);
         m_editModifyDate->setObjectName("FilterSearchEdit");
-        m_editModifyDate->setFixedHeight(24); // 🚨 强行锁定标准高度 24px！
         m_editModifyDate->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
             "  color: #CCCCCC;"
             "  border: 1px solid #444444;"
-            "  border-radius: 4px;"
-            "  padding: 0px 6px;"
-            "  margin: 2px 0px;"
+            "  border-radius: 6px;"
+            "  padding: 4px 8px;"
+            "  margin: 4px 5px;"
             "  font-size: 11px;"
             "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
