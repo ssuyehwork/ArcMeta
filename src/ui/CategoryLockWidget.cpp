@@ -5,7 +5,7 @@
 #include <QKeyEvent>
 #include <QEvent>
 
-using namespace ArcMeta;
+namespace ArcMeta {
 
 CategoryLockWidget::CategoryLockWidget(QWidget* parent) : QWidget(parent) {
     auto* mainLayout = new QVBoxLayout(this);
@@ -97,3 +97,5 @@ void CategoryLockWidget::onVerify() {
         m_pwdEdit->selectAll();
     }
 }
+
+} // namespace ArcMeta

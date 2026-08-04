@@ -30,6 +30,8 @@
 
 namespace ArcMeta {
 
+class CategoryLockWidget;
+
 struct RuntimeMeta;
 
 /**
@@ -240,6 +242,7 @@ private:
 
     QVBoxLayout* m_mainLayout = nullptr;
     QStackedWidget* m_viewStack = nullptr;
+    CategoryLockWidget* m_lockWidget = nullptr;
     QPushButton* m_btnLayers = nullptr;
     QPushButton* m_btnLayersBlue = nullptr;
     QPushButton* m_btnToggleFolders = nullptr; // 2026-07-xx 按照 Plan-73：显示/隐藏文件夹切换

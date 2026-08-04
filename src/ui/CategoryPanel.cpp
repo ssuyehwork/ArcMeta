@@ -980,7 +980,7 @@ void CategoryPanel::initUi() {
 
     m_categoryTree->installEventFilter(this);
 
-    // 2026-03-xx 物理拦截：严禁加密分类在未解锁时被展开
+    // 2026-03-xx 物理拦截：严禁加密分类在未解锁时被展开，直接触发内容面板卡片密码输入
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_categoryTree, &QTreeView::expanded, this, [this](const QModelIndex& index) {
         int id = index.data(IdRole).toInt();
@@ -988,17 +988,10 @@ void CategoryPanel::initUi() {
         
         // 物理修复：加密校验仅针对数据库分类（ID > 0），跳过系统项（ID < 0）
         if (isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
-            // 物理阻断：立即折叠，防止闪烁
+            // 物理阻断：立即折叠，防止其在未解锁时显示子项
             m_categoryTree->collapse(index);
-            // 异步触发校验，避免在信号回调中处理复杂 UI
-            QTimer::singleShot(0, [this, index]() {
-                if (tryUnlockCategory(index)) {
-                    // 解锁成功后刷新状态并重新展开
-                    m_categoryModel->setUnlockedIds(m_unlockedIds);
-                    m_categoryModel->refresh();
-                    m_categoryTree->expand(index);
-                }
-            });
+            m_categoryTree->setCurrentIndex(index);
+            emit categorySelected(id, index.data(NameRole).toString(), index.data(TypeRole).toString(), index.data(PathRole).toString());
         } else {
             // 2026-05-27 物理修复：展开时按需动态加载分类关联的文件，杜绝启动挂起
             m_categoryModel->loadCategoryItems(index);
@@ -1079,13 +1072,9 @@ void CategoryPanel::initUi() {
         QString path = index.data(PathRole).toString();
         bool isEncrypted = index.data(EncryptedRole).toBool();
 
-        // 2026-03-xx 物理防御：加密分类点击时触发校验
+        // 2026-03-xx 物理防御：加密分类点击时直接进入，内容面板内置卡片接管验证
         if (isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
-            if (tryUnlockCategory(index)) {
-                emit categorySelected(id, name, type, path);
-            } else {
-                emit categorySelected(-1, "", "", "");
-            }
+            emit categorySelected(id, name, type, path);
             return;
         }
 
@@ -1301,6 +1290,37 @@ void CategoryPanel::loadExpandedStateFromSettings() {
         restoreExpandedState(QModelIndex(), ids, names);
     }
     m_isRestoringState = false;
+}
+
+void CategoryPanel::syncUnlockedIds() {
+    m_unlockedIds = CategoryLockManager::instance().getUnlockedIds();
+    if (m_categoryModel) {
+        m_categoryModel->setUnlockedIds(m_unlockedIds);
+        m_categoryModel->refresh();
+    }
+}
+
+void CategoryPanel::expandCategory(int id) {
+    if (!m_categoryModel || !m_categoryTree) return;
+    
+    std::function<QModelIndex(const QModelIndex&)> findId;
+    findId = [&](const QModelIndex& parent) -> QModelIndex {
+        for (int i = 0; i < m_categoryModel->rowCount(parent); ++i) {
+            QModelIndex idx = m_categoryModel->index(i, 0, parent);
+            if (idx.data(IdRole).toInt() == id) return idx;
+            QModelIndex child = findId(idx);
+            if (child.isValid()) return child;
+        }
+        return QModelIndex();
+    };
+
+    QModelIndex target = findId(QModelIndex());
+    if (target.isValid()) {
+        QModelIndex proxyIdx = m_proxyModel->mapFromSource(target);
+        if (proxyIdx.isValid()) {
+            m_categoryTree->expand(proxyIdx);
+        }
+    }
 }
 
 bool CategoryPanel::tryUnlockCategory(const QModelIndex& index) {
