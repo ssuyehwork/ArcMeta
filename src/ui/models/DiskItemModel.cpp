@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QFileInfo>
 #include <QDir>
+#include "../meta/AmMetaJson.h"
 
 using namespace ArcMeta;
 
@@ -48,7 +49,97 @@ void DiskItemModel::clear() {
 }
 
 void DiskItemModel::updateRecordMetadata(const QString& path) {
-    // 磁盘物理模型拒绝响应任何逻辑库元数据局部更新，静默放行
+    QString nPath = QDir::toNativeSeparators(path);
+    auto it = m_pathToIndex.find(nPath);
+    if (it != m_pathToIndex.end()) {
+        int i = it->second;
+        if (i >= 0 && i < static_cast<int>(m_allRecords.size())) {
+            auto& record = m_allRecords[i];
+            QFileInfo fileInfo(nPath);
+            QString parentDir = QDir::toNativeSeparators(fileInfo.absolutePath());
+            QString fileName = fileInfo.fileName();
+
+            AmMetaJson jsonCache(parentDir.toStdWString());
+            jsonCache.load();
+            const auto& cachedItems = jsonCache.items();
+            auto cachedIt = cachedItems.find(fileName.toStdWString());
+            if (cachedIt != cachedItems.end()) {
+                record.rating = cachedIt->second.rating;
+                record.manualColor = QString::fromStdWString(cachedIt->second.color);
+                record.pinned = cachedIt->second.pinned;
+                record.note = QString::fromStdWString(cachedIt->second.note);
+                record.url = QString::fromStdWString(cachedIt->second.url);
+                record.tags.clear();
+                for (const auto& t : cachedIt->second.tags) {
+                    record.tags.append(QString::fromStdWString(t));
+                }
+                record.width = cachedIt->second.width;
+                record.height = cachedIt->second.height;
+                record.autoColor = QString::fromStdWString(cachedIt->second.autoColor);
+                record.added_at = cachedIt->second.addedAt;
+
+                record.palettes.clear();
+                for (const auto& pe : cachedIt->second.palettes) {
+                    record.palettes.push_back({pe.color, pe.ratio});
+                }
+            }
+            emit dataChanged(index(i, 0), index(i, columnCount() - 1));
+        }
+    }
+}
+
+bool DiskItemModel::setData(const QModelIndex& index, const QVariant& value, int role) {
+    if (!index.isValid() || index.row() >= static_cast<int>(m_allRecords.size())) return false;
+
+    auto& record = m_allRecords[index.row()];
+    QString path = record.path;
+    QFileInfo fileInfo(path);
+    QString parentDir = QDir::toNativeSeparators(fileInfo.absolutePath());
+    QString fileName = fileInfo.fileName();
+
+    bool metaUpdated = false;
+
+    AmMetaJson jsonCache(parentDir.toStdWString());
+    jsonCache.load();
+    auto& cachedItems = jsonCache.items();
+
+    std::wstring wFileName = fileName.toStdWString();
+    if (cachedItems.find(wFileName) == cachedItems.end()) {
+        ItemMeta emptyMeta;
+        emptyMeta.type = record.isDir ? L"folder" : L"file";
+        cachedItems[wFileName] = emptyMeta;
+    }
+    auto& fileMeta = cachedItems[wFileName];
+
+    if (role == RatingRole) {
+        int newRating = value.toInt();
+        if (record.rating != newRating) {
+            record.rating = newRating;
+            fileMeta.rating = newRating;
+            metaUpdated = true;
+        }
+    } else if (role == ColorRole) {
+        QString newColor = value.toString();
+        if (record.manualColor != newColor) {
+            record.manualColor = newColor;
+            fileMeta.color = newColor.toStdWString();
+            metaUpdated = true;
+        }
+    } else if (role == IsLockedRole || role == PinnedRole) {
+        bool pinned = value.toBool();
+        if (record.pinned != pinned) {
+            record.pinned = pinned;
+            fileMeta.pinned = pinned;
+            metaUpdated = true;
+        }
+    }
+
+    if (metaUpdated) {
+        jsonCache.save();
+        emit dataChanged(this->index(index.row(), 0), this->index(index.row(), columnCount() - 1));
+        return true;
+    }
+    return false;
 }
 
 void DiskItemModel::migrateCache(const QString& oldPath, const QString& newPath) {
