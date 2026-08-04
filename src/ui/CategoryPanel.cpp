@@ -1,6 +1,7 @@
 #include "CategoryPanel.h"
 #include "MainWindow.h"
 #include "CategoryModel.h"
+#include "ContentPanel.h"
 #include "ColorPicker.h"
 #include "CategoryFilterProxyModel.h"
 #include "CategoryLockDialog.h"
@@ -449,7 +450,7 @@ void CategoryPanel::setupContextMenu() {
                     QAction* lockNowAct = pwdMenu->addAction("立即锁定");
                     lockNowAct->setEnabled(isUnlocked);
                     connect(lockNowAct, &QAction::triggered, this, [this, catId]() {
-                        CategoryLockManager::instance().lock(catId);
+                        CategoryLockManager::instance().lockCategory(catId);
                         m_categoryModel->refresh();
 
                         MainWindow* mw = nullptr;
