@@ -91,6 +91,7 @@ private:
 struct FilterState {
     QList<int>   ratings;
     QStringList  colors;
+    QStringList  manualExactColors; // 🚨 标准色系：手动色标 1:1 精准过滤字段
     QString      keyword; // 2026-07-xx 按照 Plan-92：合并搜索关键词入 FilterState
     QStringList  types;
     QStringList  createDates;   // "YYYY-MM-DD"
@@ -119,7 +120,7 @@ struct FilterState {
     bool showFiles = true;   // 2026-07-xx 按照 Plan-73：显示/隐藏文件
 
     bool isEmpty() const {
-        return ratings.isEmpty() && colors.isEmpty() && keyword.isEmpty() && types.isEmpty() &&
+        return ratings.isEmpty() && colors.isEmpty() && manualExactColors.isEmpty() && keyword.isEmpty() && types.isEmpty() &&
                createDates.isEmpty() && modifyDates.isEmpty() &&
                linkPresence == All && notePresence == All && ratio == AspectAny &&
                minSize == -1 && maxSize == -1 && minColorArea == 0 &&
