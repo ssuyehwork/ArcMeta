@@ -2,6 +2,7 @@
 #include "CategoryModel.h"
 #include "ContentPanel.h"
 #include <QDrag>
+#include <QPainter>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -102,6 +103,18 @@ void DropTreeView::startDrag(Qt::DropActions supportedActions) {
 
 void DropTreeView::keyboardSearch(const QString& search) {
     Q_UNUSED(search);
+}
+
+void DropTreeView::paintEvent(QPaintEvent* event) {
+    QTreeView::paintEvent(event);
+    if (!m_emptyHint.isEmpty() && model() && model()->rowCount() == 0) {
+        QPainter painter(viewport());
+        painter.save();
+        painter.setPen(QColor("#888888"));
+        painter.setFont(QFont("Microsoft YaHei", 12));
+        painter.drawText(viewport()->rect(), Qt::AlignCenter, m_emptyHint);
+        painter.restore();
+    }
 }
 
 } // namespace ArcMeta

@@ -316,6 +316,15 @@ void JustifiedView::paintEvent(QPaintEvent*) {
     QPainter painter(viewport());
     // 2026-06-xx 物理修复：在开启 TranslucentBackground 时手动填充坚实背景，防止透明穿透
     painter.fillRect(viewport()->rect(), QColor("#1E1E1E"));
+
+    if (m_geometries.empty()) {
+        painter.save();
+        painter.setPen(QColor("#888888"));
+        painter.setFont(QFont("Microsoft YaHei", 12));
+        painter.drawText(viewport()->rect(), Qt::AlignCenter, "没有可显示的项目");
+        painter.restore();
+        return;
+    }
     
     painter.save();
     painter.translate(0, -verticalScrollBar()->value());

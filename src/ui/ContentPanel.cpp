@@ -1305,6 +1305,12 @@ void ContentPanel::initListView() {
     m_treeView->setExpandsOnDoubleClick(false); 
     m_treeView->setRootIsDecorated(false); 
      
+    // 在列表视图中显式指定空项时的文字占位提醒
+    DropTreeView* dropTree = qobject_cast<DropTreeView*>(m_treeView);
+    if (dropTree) {
+        dropTree->setEmptyHint("没有可显示的项目");
+    }
+
     // 列表视图开启 m_drawMiniCards = true，以启用 Column 0 “最左侧微卡片圆角预览”和底部分割线贯通绘制
     m_treeView->setItemDelegate(new TreeItemDelegate(this, true, true)); 
  
