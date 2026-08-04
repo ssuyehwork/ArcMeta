@@ -2323,7 +2323,20 @@ void ContentPanel::onDoubleClicked(const QModelIndex& index) {
     } 
 } 
  
+void ContentPanel::restoreActiveView() {
+    if (m_lockWidget) {
+        m_lockWidget->hide();
+    }
+    if (m_currentViewMode == ListView) {
+        m_viewStack->setCurrentWidget(m_treeView);
+    } else {
+        m_viewStack->setCurrentWidget(m_gridView);
+    }
+}
+
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
+    restoreActiveView(); // 🚨 强行切离开锁屏页，恢复卡片网格/列表页！
+
     // 🚨 0 与 1 彻底断连多态自动分流：物理切断
     if (m_model != m_diskModel) {
         m_model = m_diskModel;
@@ -2520,24 +2533,27 @@ void ContentPanel::loadCategory(int categoryId) {
             // 彻底移除阻断型模态对话框，直接使用无缝内置卡片式解锁界面进行展示
             m_model->clear();
             m_proxyModel->invalidate();
-            m_lockWidget->setCategory(categoryId, QString::fromStdWString(cat.encryptHint));
+            m_lockWidget->clearInput(); // 🚨【物理安全保障】：强行清空输入框中的任何残留密码，绝不给假锁屏留任何机会！
+            
+            // 解析真实的提示文本
+            QString storedData = QString::fromStdWString(cat.encryptHint);
+            QString realHint = storedData.contains(":::") ? storedData.section(":::", 1) : storedData;
+
             m_viewStack->setCurrentWidget(m_lockWidget);
+            m_lockWidget->setCategory(categoryId, realHint);
             if (m_textPreview) m_textPreview->hide(); 
             if (m_imagePreview) m_imagePreview->hide(); 
             m_currentCategoryId = categoryId;
             m_currentCategoryType = "user_category";
             updateLayersButtonState();
             emit dataSourceChanged("category"); 
+            m_lockWidget->focusInput();
             return;
         }
     }
 
     // 已经解锁，将视图堆栈还原到正确的列表或网格显示页
-    if (m_currentViewMode == ListView) {
-        m_viewStack->setCurrentWidget(m_treeView);
-    } else {
-        m_viewStack->setCurrentWidget(m_gridView);
-    }
+    restoreActiveView();
 
     if (m_isLoading && m_currentCategoryId == categoryId && m_currentCategoryType == "user_category") {
         return;
@@ -2599,6 +2615,8 @@ void ContentPanel::loadCategory(int categoryId) {
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
+    restoreActiveView(); // 🚨 强行切离开锁屏页，恢复卡片网格/列表页！
+
     if (m_model != m_libraryModel) {
         m_model = m_libraryModel;
         m_proxyModel->setSourceModel(m_model);

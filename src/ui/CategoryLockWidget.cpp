@@ -4,6 +4,8 @@
 #include <QGraphicsDropShadowEffect>
 #include <QKeyEvent>
 #include <QEvent>
+#include <QTimer>
+#include <QPointer>
 
 namespace ArcMeta {
 
@@ -63,13 +65,47 @@ CategoryLockWidget::CategoryLockWidget(QWidget* parent) : QWidget(parent) {
     setStyleSheet("background: transparent;");
 }
 
+void CategoryLockWidget::clearInput() {
+    m_catId = -1; // 重置分类 ID 标记
+    if (m_pwdEdit) {
+        m_pwdEdit->clear(); // 物理无条件彻底清空密码！
+        // 重置样式，清除之前的错误红框
+        m_pwdEdit->setStyleSheet(
+            "QLineEdit {"
+            "  background-color: #121212; border: 1px solid #333; border-radius: 4px;"
+            "  padding: 0 8px; color: white; font-size: 12px;"
+            "}"
+            "QLineEdit:focus { border: 1px solid #3a90ff; }"
+        );
+    }
+}
+
 void CategoryLockWidget::setCategory(int id, const QString& hint) {
-    if (m_catId == id && isVisible()) return; // 关键修复：防止因数据刷新导致的输入框重置
-    
     m_catId = id;
     m_hintLabel->setText(QString("密码提示: %1").arg(hint.isEmpty() ? "无" : hint));
-    m_pwdEdit->clear();
-    m_pwdEdit->setFocus();
+    
+    // 无条件清空密码框与红框错误样式
+    if (m_pwdEdit) {
+        m_pwdEdit->clear();
+        m_pwdEdit->setStyleSheet(
+            "QLineEdit {"
+            "  background-color: #121212; border: 1px solid #333; border-radius: 4px;"
+            "  padding: 0 8px; color: white; font-size: 12px;"
+            "}"
+            "QLineEdit:focus { border: 1px solid #3a90ff; }"
+        );
+    }
+    focusInput();
+}
+
+void CategoryLockWidget::focusInput() {
+    QPointer<QLineEdit> weakEdit(m_pwdEdit);
+    QTimer::singleShot(0, this, [weakEdit]() {
+        if (weakEdit) {
+            weakEdit->setFocus(Qt::OtherFocusReason); // 强行夺取键盘焦点
+            weakEdit->activateWindow();
+        }
+    });
 }
 
 bool CategoryLockWidget::eventFilter(QObject* watched, QEvent* event) {

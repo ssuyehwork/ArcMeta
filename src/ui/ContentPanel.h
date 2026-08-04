@@ -75,6 +75,7 @@ public:
     DataSourceType dataSourceType() const;
     bool isMirrorSource() const;
     bool isManagedContext() const;
+    int currentCategoryId() const { return m_currentCategoryId; }
 
     enum SortType {
         SortByName,
@@ -229,6 +230,7 @@ signals:
 private:
     void initUi();
     void initGridView();
+    void restoreActiveView();
     void initListView();
     void setupContextMenu();
     void updateLayersButtonState();

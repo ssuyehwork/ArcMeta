@@ -7,6 +7,7 @@
 #include "CategoryLockDialog.h"
 #include "CategorySetPasswordDialog.h"
 #include "CategoryDelegate.h"
+#include <QCryptographicHash>
 #include "DropTreeView.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
@@ -419,24 +420,33 @@ void CategoryPanel::setupContextMenu() {
                 } else {
                     QAction* changeAct = pwdMenu->addAction("修改密码");
                     connect(changeAct, &QAction::triggered, this, [this, index, catId]() {
-                        QString hint = index.data(EncryptHintRole).toString();
-                        CategoryLockDialog dlg(hint, this);
+                        QString storedData = index.data(EncryptHintRole).toString();
+                        QString realHint = storedData.contains(":::") ? storedData.section(":::", 1) : storedData;
+                        CategoryLockDialog dlg(realHint, this);
                         if (dlg.exec() == QDialog::Accepted) {
                             CategorySetPasswordDialog setDlg(this);
                             if (setDlg.exec() == QDialog::Accepted) {
                                 QString newPwd = setDlg.password();
                                 QString newHint = setDlg.hint();
 
+                                if (newPwd.isEmpty()) {
+                                    ToolTipOverlay::instance()->showText(QCursor::pos(), "密码不能为空！", 1500, QColor("#e81123"));
+                                    return;
+                                }
+
+                                QString pwdHash = QCryptographicHash::hash(newPwd.toUtf8(), QCryptographicHash::Sha256).toHex();
+                                QString combinedData = pwdHash + ":::" + newHint;
+
                                 auto all = CategoryRepo::getAll();
                                 for (auto& cat : all) {
                                     if (cat.id == catId) {
                                         cat.encrypted = true;
-                                        cat.encryptHint = newHint.toStdWString();
+                                        cat.encryptHint = combinedData.toStdWString();
                                         CategoryRepo::update(cat);
                                         break;
                                     }
                                 }
-                                m_categoryModel->refresh();
+                                syncUnlockedIds();
                                 ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 密码修改成功</b>", 1000, QColor("#00A650"));
                             }
                         }
@@ -451,7 +461,7 @@ void CategoryPanel::setupContextMenu() {
                     lockNowAct->setEnabled(isUnlocked);
                     connect(lockNowAct, &QAction::triggered, this, [this, catId]() {
                         CategoryLockManager::instance().lockCategory(catId);
-                        m_categoryModel->refresh();
+                        syncUnlockedIds();
                         
                         MainWindow* mw = nullptr;
                         QWidget* parentWin = window();
@@ -595,6 +605,12 @@ void CategoryPanel::onCreateSubCategory() {
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
+    Category catObj = CategoryRepo::getById(id);
+    if (catObj.encrypted && !CategoryLockManager::instance().isUnlocked(id)) {
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>分类处于锁定状态，请先解锁后再执行操作！</b>", 2000, QColor("#e81123"));
+        return;
+    }
+
     FramelessInputDialog dlg("新建子分类", "请输入子分类名称:", "", this);
     if (dlg.exec() == QDialog::Accepted) {
         QString text = dlg.text();
@@ -684,6 +700,17 @@ void CategoryPanel::onSetPassword() {
         QString pwd = dlg.password();
         QString hint = dlg.hint();
 
+        if (pwd.isEmpty()) {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "密码不能为空！", 1500, QColor("#e81123"));
+            return;
+        }
+
+        // 🚨 1. 计算真实密码的 SHA-256 哈希密文
+        QString pwdHash = QCryptographicHash::hash(pwd.toUtf8(), QCryptographicHash::Sha256).toHex();
+        
+        // 🚨 2. 将“密文”与“提示”组合存储 (格式: "SHA256密文:::提示文本")
+        QString combinedData = pwdHash + ":::" + hint;
+
         QSet<int> expandedIds;
         QStringList expandedNames;
         saveExpandedState(QModelIndex(), expandedIds, expandedNames);
@@ -692,16 +719,32 @@ void CategoryPanel::onSetPassword() {
         for(auto& cat : all) {
             if(cat.id == id) {
                 cat.encrypted = true;
-                cat.encryptHint = hint.toStdWString();
+                cat.encryptHint = combinedData.toStdWString();
                 CategoryRepo::update(cat);
                 break;
             }
         }
         
-        m_categoryModel->refresh();
+        // 🚨 3. 核心修复：设置密码后，立刻显式触发强制重锁！
+        CategoryLockManager::instance().lockCategory(id);
+        syncUnlockedIds(); // 侧边栏图标瞬间变成 lock_filled！
+
+        // 🚨 4. 如果内容面板当前正好停留在该分类，立刻刷新切回 CategoryLockWidget 锁屏！
+        MainWindow* mw = nullptr;
+        QWidget* parentWin = window();
+        while (parentWin) {
+            if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
+            parentWin = parentWin->parentWidget();
+        }
+        if (mw) {
+            ContentPanel* cp = mw->findChild<ContentPanel*>();
+            if (cp && cp->currentCategoryId() == id) {
+                cp->loadCategory(id); // 触发 loadCategory，检测到已被锁，直接切到 CategoryLockWidget！
+            }
+        }
 
         restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
-        ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 分类已加密</b>", 1000, QColor("#00A650"));
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 分类已加密并立即锁定</b>", 1500, QColor("#00A650"));
     }
 }
 
@@ -710,36 +753,50 @@ void CategoryPanel::onClearPassword() {
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
 
-    QString hint = index.data(EncryptHintRole).toString();
+    Category cat = CategoryRepo::getById(id);
+    QString storedData = QString::fromStdWString(cat.encryptHint);
+    QString realHint = storedData.contains(":::") ? storedData.section(":::", 1) : storedData;
 
     // 2026-03-xx 物理级还原：清除密码需先通过旧版验证界面校验身份
-    CategoryLockDialog dlg(hint, this);
+    CategoryLockDialog dlg(realHint, this);
     if (dlg.exec() == QDialog::Accepted) {
-        // [SIMULATION] 校验成功
-        QSet<int> expandedIds;
-        QStringList expandedNames;
-        saveExpandedState(QModelIndex(), expandedIds, expandedNames);
+        // 🚨 核心修复：必须经过 SHA-256 真实密文校验
+        if (CategoryLockManager::instance().verifyAndUnlock(id, dlg.password())) {
+            QSet<int> expandedIds;
+            QStringList expandedNames;
+            saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
-        auto all = CategoryRepo::getAll();
-        for(auto& cat : all) {
-            if(cat.id == id) {
-                cat.encrypted = false;
-                cat.encryptHint = L"";
-                CategoryRepo::update(cat);
-                break;
+            auto all = CategoryRepo::getAll();
+            for(auto& c : all) {
+                if(c.id == id) {
+                    c.encrypted = false;
+                    c.encryptHint = L"";
+                    CategoryRepo::update(c);
+                    break;
+                }
             }
+
+            syncUnlockedIds();
+
+            restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 验证成功，分类已解除加密</b>", 1500, QColor("#00A650"));
+        } else {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>旧密码错误，无法解除密码保护！</b>", 2000, QColor("#e81123"));
         }
-
-        m_categoryModel->refresh();
-
-        restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
-        ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 验证成功，分类已解除加密</b>", 1000, QColor("#00A650"));
     }
 }
 
 void CategoryPanel::onRenameCategory() {
     QModelIndex index = m_categoryTree->currentIndex();
     if (index.isValid()) {
+        int catId = getTargetCategoryId(index);
+        if (catId > 0) {
+            Category cat = CategoryRepo::getById(catId);
+            if (cat.encrypted && !CategoryLockManager::instance().isUnlocked(catId)) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>分类处于锁定状态，请先解锁后再执行操作！</b>", 2000, QColor("#e81123"));
+                return;
+            }
+        }
         QString type = index.data(TypeRole).toString();
         // 2026-03-xx 物理兼容：允许重命名分类或文件项 (逻辑处理见 Model)
         if (type == "category" || type == "file" || type == "folder") {
@@ -758,6 +815,18 @@ void CategoryPanel::onDeleteCategory() {
     }
 
     if (selectedRows.isEmpty()) return;
+
+    // 🚨 核心修复：检查任何选中的分类是否被加密并处于锁定状态
+    for (const QModelIndex& index : selectedRows) {
+        int id = getTargetCategoryId(index);
+        if (id > 0) {
+            Category cat = CategoryRepo::getById(id);
+            if (cat.encrypted && !CategoryLockManager::instance().isUnlocked(id)) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>分类处于锁定状态，请先解锁后再执行操作！</b>", 2000, QColor("#e81123"));
+                return;
+            }
+        }
+    }
 
     QSet<int> idsToDelete;
     
@@ -1297,6 +1366,9 @@ void CategoryPanel::syncUnlockedIds() {
     if (m_categoryModel) {
         m_categoryModel->setUnlockedIds(m_unlockedIds);
         m_categoryModel->refresh();
+        if (m_proxyModel) {
+            m_proxyModel->invalidate();
+        }
     }
 }
 
@@ -1327,10 +1399,11 @@ bool CategoryPanel::tryUnlockCategory(const QModelIndex& index) {
     int id = index.data(IdRole).toInt();
     if (id <= 0) return false;
 
-    QString hint = index.data(EncryptHintRole).toString();
+    QString storedData = index.data(EncryptHintRole).toString();
+    QString realHint = storedData.contains(":::") ? storedData.section(":::", 1) : storedData;
 
     // 2026-03-xx 物理级还原：废弃通用输入框，改用 1:1 复刻的旧版验证界面
-    CategoryLockDialog dlg(hint, this);
+    CategoryLockDialog dlg(realHint, this);
     if (dlg.exec() == QDialog::Accepted) {
         // 🚨 使用 CategoryLockManager 线程安全会话单例管理解锁状态
         CategoryLockManager::instance().verifyAndUnlock(id, dlg.password());
