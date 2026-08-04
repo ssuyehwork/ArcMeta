@@ -81,6 +81,7 @@
 #include "../crypto/EncryptionManager.h" 
 #include "CategoryLockDialog.h" 
 #include "CategoryLockWidget.h"
+#include "CategoryPanel.h"
 #include "BatchRenameDialog.h" 
 #include "UiHelper.h" 
 #include "ShellIconManager.h"

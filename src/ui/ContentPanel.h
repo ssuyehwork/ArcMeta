@@ -30,8 +30,9 @@
 
 namespace ArcMeta {
 
-struct RuntimeMeta;
 class CategoryLockWidget;
+
+struct RuntimeMeta;
 
 /**
  * @brief 内部代理类：专门处理高级筛选逻辑 (2026-05-25 物理化以修复 static_cast 编译报错)
