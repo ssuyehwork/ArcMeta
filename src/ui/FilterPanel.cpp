@@ -292,6 +292,16 @@ void FilterPanel::syncUIFromFilterState() {
         // 2. 颜色匹配 (无色标)
         else if (text == "无色标") shouldCheck = m_filter.colors.contains("");
         
+        // 🚨 2.5 手动精准色标同步
+        else if (text == "红色") shouldCheck = m_filter.manualExactColors.contains("#E24B4A");
+        else if (text == "橙色") shouldCheck = m_filter.manualExactColors.contains("#EF9F27");
+        else if (text == "黄色") shouldCheck = m_filter.manualExactColors.contains("#FECF0E");
+        else if (text == "绿色") shouldCheck = m_filter.manualExactColors.contains("#639922");
+        else if (text == "青色") shouldCheck = m_filter.manualExactColors.contains("#1D9E75");
+        else if (text == "蓝色") shouldCheck = m_filter.manualExactColors.contains("#378ADD");
+        else if (text == "紫色") shouldCheck = m_filter.manualExactColors.contains("#7F77DD");
+        else if (text == "灰色") shouldCheck = m_filter.manualExactColors.contains("#5F5E5A");
+
         // 3. 类型/日期匹配
         else if (m_filter.types.contains(text)) shouldCheck = true;
         else if (m_filter.createDates.contains(text)) shouldCheck = true;
@@ -570,6 +580,14 @@ void FilterPanel::populate(
                  else if (m_typeCounts.contains(name)) count = m_typeCounts[name];
                  else if (m_createDateCounts.contains(name)) count = m_createDateCounts[name];
                  else if (m_modifyDateCounts.contains(name)) count = m_modifyDateCounts[name];
+                 else if (name == "红色") count = m_colorCounts.value("#E24B4A", 0);
+                 else if (name == "橙色") count = m_colorCounts.value("#EF9F27", 0);
+                 else if (name == "黄色") count = m_colorCounts.value("#FECF0E", 0);
+                 else if (name == "绿色") count = m_colorCounts.value("#639922", 0);
+                 else if (name == "青色") count = m_colorCounts.value("#1D9E75", 0);
+                 else if (name == "蓝色") count = m_colorCounts.value("#378ADD", 0);
+                 else if (name == "紫色") count = m_colorCounts.value("#7F77DD", 0);
+                 else if (name == "灰色") count = m_colorCounts.value("#5F5E5A", 0);
                  
                  cntLabel->setText(QString::number(count));
              }
@@ -684,7 +702,7 @@ void FilterPanel::rebuildGroups() {
             "  background: #2D2D2D;"
             "  color: #CCCCCC;"
             "  border: 1px solid #444444;"
-            "  border-radius: 6px;" // 2026-07-xx 按照《Plan-21》：输入框统一使用 6px 圆角
+            "  border-radius: 6px;"
             "  padding: 4px 8px;"
             "  margin: 4px 5px;"
             "  font-size: 11px;"
@@ -904,6 +922,40 @@ void FilterPanel::rebuildGroups() {
              });
         }
 
+        // 🚨 2.5 在“无色标”正下方：直接渲染 8 种手动色标复选行 (物理彻底擦除冗余的 "标准色系" 字符串 Label!)
+        static const QList<QPair<QString, QString>> exactManualColors = {
+            {"红色", "#E24B4A"},
+            {"橙色", "#EF9F27"},
+            {"黄色", "#FECF0E"},
+            {"绿色", "#639922"},
+            {"青色", "#1D9E75"},
+            {"蓝色", "#378ADD"},
+            {"紫色", "#7F77DD"},
+            {"灰色", "#5F5E5A"}
+        };
+
+        for (const auto& pair : exactManualColors) {
+            QString name = pair.first;
+            QString hex = pair.second;
+            // 精准获取手动绑定了该色值的项目数量
+            int count = m_colorCounts.value(hex, 0); 
+
+            // 使用整行复选框 addFilterRow 渲染（左侧带圆点色标、中间名称、右侧数字）
+            QCheckBox* cb = addFilterRow(gl, name, count, QColor(hex));
+            cb->setChecked(m_filter.manualExactColors.contains(hex));
+
+            connect(cb, &QCheckBox::toggled, this, [this, hex](bool on) {
+                if (on) {
+                    if (!m_filter.manualExactColors.contains(hex)) {
+                        m_filter.manualExactColors.append(hex);
+                    }
+                } else {
+                    m_filter.manualExactColors.removeAll(hex);
+                }
+                emit filterChanged(m_filter);
+            });
+        }
+
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
 
@@ -919,7 +971,15 @@ void FilterPanel::rebuildGroups() {
         m_editType->setText(m_filter.typeFilterText);
         m_editType->setObjectName("FilterSearchEdit");
         m_editType->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 5px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit {"
+            "  background: #2D2D2D;"
+            "  color: #CCCCCC;"
+            "  border: 1px solid #444444;"
+            "  border-radius: 6px;"
+            "  padding: 4px 8px;"
+            "  margin: 4px 5px;"
+            "  font-size: 11px;"
+            "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editType->installEventFilter(this);
@@ -1013,7 +1073,15 @@ void FilterPanel::rebuildGroups() {
         m_editCreateDate->setText(m_filter.createDateFilterText);
         m_editCreateDate->setObjectName("FilterSearchEdit");
         m_editCreateDate->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 5px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit {"
+            "  background: #2D2D2D;"
+            "  color: #CCCCCC;"
+            "  border: 1px solid #444444;"
+            "  border-radius: 6px;"
+            "  padding: 4px 8px;"
+            "  margin: 4px 5px;"
+            "  font-size: 11px;"
+            "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editCreateDate->installEventFilter(this);
@@ -1060,7 +1128,15 @@ void FilterPanel::rebuildGroups() {
         m_editModifyDate->setText(m_filter.modifyDateFilterText);
         m_editModifyDate->setObjectName("FilterSearchEdit");
         m_editModifyDate->setStyleSheet(
-            "QLineEdit#FilterSearchEdit { background: #2D2D2D; color: #CCCCCC; border: 1px solid #444444; border-radius: 6px; padding: 4px 8px; margin: 4px 5px; font-size: 11px; }"
+            "QLineEdit#FilterSearchEdit {"
+            "  background: #2D2D2D;"
+            "  color: #CCCCCC;"
+            "  border: 1px solid #444444;"
+            "  border-radius: 6px;"
+            "  padding: 4px 8px;"
+            "  margin: 4px 5px;"
+            "  font-size: 11px;"
+            "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
         );
         m_editModifyDate->installEventFilter(this);
@@ -1426,6 +1502,7 @@ void FilterPanel::clearAllFilters(bool force) {
 
     // 2026-06-xx 物理修复：重置所有筛选内存状态
     m_filter = FilterState{};
+    m_filter.manualExactColors.clear();
     m_hueSliderColor.clear();
 
     // 2026-xx-xx 按照用户要求：清空剩余输入框的文字

@@ -139,6 +139,25 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
         if (!currentFilter.ratings.contains(r)) return false; 
     } 
  
+    // 🚨 2.5 手动标准色系精准筛选（1:1 硬核比对，不走色差与调色盘算法）
+    if (!currentFilter.manualExactColors.isEmpty()) {
+        if (record.manualColor.isEmpty()) {
+            return false; // 没有手动色标直接排除
+        }
+
+        QString itemManualHex = record.manualColor.toUpper();
+        bool exactMatched = false;
+
+        for (const QString& targetHex : currentFilter.manualExactColors) {
+            if (itemManualHex.compare(targetHex, Qt::CaseInsensitive) == 0) {
+                exactMatched = true;
+                break;
+            }
+        }
+
+        if (!exactMatched) return false; // 色值不完全相等直接排除
+    }
+
     // 2. 颜色过滤 (Plan-18: 基于 CIELAB Delta E 的感知筛选逻辑)
     if (!currentFilter.colors.isEmpty() || !currentFilter.colorFilterText.isEmpty()) { 
         bool matchColor = false;
@@ -1440,9 +1459,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     act->setProperty("catId", cat.id); 
                 } 
             }
-
-            bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
-            menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
         } else {
             // [物理源：显示“迁移”]
             if (!m_currentPath.isEmpty() && m_currentPath != "computer://") {
@@ -1520,6 +1536,10 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
             menu.close(); 
         });
+
+        // 🚨【置顶 / 取消置顶】：全模式解锁！磁盘模式下写入 .ArcMeta.json，重排置顶！
+        bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
+        menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
 
         menu.addAction("添加至收藏夹")->setData(ActionAddToFavorites); 
 

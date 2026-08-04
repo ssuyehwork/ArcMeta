@@ -77,6 +77,7 @@ private slots:
     void onStatusBarStatsUpdated(int fileCount, int folderCount, int totalCount);
     void onDriveButtonClicked();
     void onDriveButtonContextMenu(const QPoint& pos);
+    void rescanManagedLibrary(const QString& libraryPath);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
