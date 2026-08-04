@@ -2013,7 +2013,7 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
         menu.addAction("创建托管文件夹")->setData(1);
     } else {
         menu.addAction("打开托管文件夹")->setData(2);
-        menu.addAction("重新扫描该盘")->setData(3);
+        menu.addAction("重新扫描该库")->setData(3);
     }
 
     QAction* act = menu.exec(btn->mapToGlobal(pos));
@@ -2045,12 +2045,25 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
     } else if (val == 2) {
         ShellHelper::openInExplorer(managedPath);
     } else if (val == 3) {
-        // 2026-07-xx 按照 Development_Plan 2.1：“重新扫描该盘”是指扫描该盘符下的“ArcMeta.Library_[盘符]”文件夹里所有的数据
-        if (QDir(managedPath).exists()) {
-            MetadataManager::instance().markAsRegistered(managedPath.toStdWString());
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "已开始重新扫描资源库", 1500, QColor("#378ADD"));
-        }
+        rescanManagedLibrary(managedPath);
     }
+}
+
+void MainWindow::rescanManagedLibrary(const QString& libraryPath) {
+    if (!QDir(libraryPath).exists()) return;
+
+    ToolTipOverlay::instance()->showText(QCursor::pos(), "正在扫描托管库并重新提取元数据...", 2000, QColor("#378ADD"));
+
+    // 在后台线程执行物理扫描与元数据重提取
+    (void)QtConcurrent::run([libraryPath]() {
+        std::wstring wLibPath = QDir::toNativeSeparators(libraryPath).toStdWString();
+
+        // 1. 深入物理目录，注册/修复库内所有文件的基本信息
+        MetadataManager::instance().markAsRegistered(wLibPath);
+
+        // 2. 重新扫描并驱动 MediaExtractorPipeline 提取高级多媒体特征（分辨率、主色调、调色盘）
+        MetadataManager::instance().notifyFullUIRebuild();
+    });
 }
 
 void MainWindow::updateCustomFolderButtons() {
