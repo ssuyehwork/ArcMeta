@@ -75,6 +75,7 @@ public:
     DataSourceType dataSourceType() const;
     bool isMirrorSource() const;
     bool isManagedContext() const;
+    int currentCategoryId() const { return m_currentCategoryId; }
 
     enum SortType {
         SortByName,

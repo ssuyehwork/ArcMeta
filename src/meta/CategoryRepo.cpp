@@ -3,6 +3,7 @@
 #include "MetadataManager.h"
 #include "sqlite3.h"
 #include "../core/AppConfig.h"
+#include "../core/CategoryLockManager.h"
 #include <QDebug>
 #include <QDateTime>
 #include <QDir>
@@ -1204,6 +1205,19 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
         if (qPath.endsWith("_thumbnail.png", Qt::CaseInsensitive) || 
             qPath.endsWith("metadata.scch", Qt::CaseInsensitive)) {
             return;
+        }
+
+        // 🚨 3. 安全防护：若该资产被划分到了加锁分类中且尚未解锁，则在聚合视图中物理隐藏之！
+        if (!meta.folderId.empty()) {
+            std::vector<int> associatedCatIds = CategoryRepo::getItemCategoryIds(meta.folderId, path);
+            for (int cid : associatedCatIds) {
+                if (cid > 0) {
+                    Category assocCat = CategoryRepo::getById(cid);
+                    if (assocCat.encrypted && !CategoryLockManager::instance().isUnlocked(cid)) {
+                        return; // 物理强行跳过，杜绝外溢泄露！
+                    }
+                }
+            }
         }
 
         bool match = false;

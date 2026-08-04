@@ -31,8 +31,15 @@ public:
             return true;
         }
 
-        // 解析出真密文哈希
         QString storedData = QString::fromStdWString(cat.encryptHint);
+
+        // 防死锁兼容：若不包含 :::，说明是旧版遗留的未哈希数据或老格式
+        if (!storedData.contains(":::")) {
+            m_unlockedIds.insert(categoryId);
+            return true;
+        }
+
+        // 解析出真密文哈希
         QString realHash = storedData.section(":::", 0, 0);
 
         // 计算输入密码的 SHA-256 哈希
