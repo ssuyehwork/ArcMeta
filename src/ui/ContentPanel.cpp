@@ -1675,22 +1675,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
     addOrderAct("升序", Qt::AscendingOrder);
     addOrderAct("降序", Qt::DescendingOrder);
 
-    // 2026-07-xx 按照 Plan-63：注入布局显示控制菜单
-    menu.addSeparator();
-    QMenu* layoutMenu = menu.addMenu("布局显示");
-    UiHelper::applyMenuStyle(layoutMenu);
-    
-    // 通过向上寻道获取 MainWindow 实例以复用菜单逻辑
-    MainWindow* mw = nullptr;
-    QWidget* parentWin = window();
-    while (parentWin) {
-        if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
-        parentWin = parentWin->parentWidget();
-    }
-    if (mw) {
-        mw->populatePanelMenu(layoutMenu);
-    }
- 
     QAction* selectedAction = menu.exec(view->viewport()->mapToGlobal(pos)); 
     if (!selectedAction || !selectedAction->data().isValid()) return; 
  
