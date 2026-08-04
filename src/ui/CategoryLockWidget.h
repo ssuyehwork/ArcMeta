@@ -15,6 +15,7 @@ public:
     
     void setCategory(int id, const QString& hint);
     void focusInput();
+    void clearInput();
 
 signals:
     void unlocked(int id);
