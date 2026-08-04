@@ -1408,7 +1408,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             menu.addSeparator();
         }
 
-        // [核心操作区] 
+        // ==================== 1. 打开与资产归属组 ====================
         QAction* actOpen = menu.addAction(isFolder ? "打开文件夹" : "打开"); 
         actOpen->setData(ActionOpen); 
         if (!isFolder) { 
@@ -1416,14 +1416,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         } 
         menu.addAction("在“资源管理器”中显示")->setData(ActionShowInExplorer); 
  
-        menu.addSeparator(); 
- 
-        // [归类与标记区] 
-        // 2026-07-xx 按照 Plan-117：语义分流。判定当前是否为“镜像源”
-        // 镜像源定义：侧边栏分类模式 (isMirrorSource() 为真) 
-        // 或 物理导航模式下已进入资源库内部 (镜像加速态)
-        // 🚨 [双轨不隔离违规点-3 物理隔离修复]: 磁盘模式右键菜单 100% 与内存数据库模式隔离，
-        // 表现等同于 Windows 资源管理器。普通物理磁盘导航下的项绝对不提供“归类/设置颜色/设置评分”等任何逻辑库特权操作。
         bool isMirror = isMirrorSource();
 
         if (isMirror) {
@@ -1529,10 +1521,17 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
         }
 
+        menu.addAction("添加至收藏夹")->setData(ActionAddToFavorites); 
+
+        // ==================== 2. 剪贴板与命名编辑组 ====================
         menu.addSeparator(); 
- 
-        // 2026-06-xx 逻辑解耦修复：解除批量重命名的类型硬编码锁定 (架构升级)。
-        // 核心规则：多选有效项目 (PathRole 不为空) 或 单选文件夹时，均解锁批量重命名入口。
+
+        menu.addAction("复制")->setData(ActionCopy); 
+        menu.addAction("剪切")->setData(ActionCut); 
+        menu.addAction("粘贴")->setData(ActionPaste); 
+        menu.addAction("复制名称")->setData(ActionCopyName); 
+        menu.addAction("复制路径")->setData(ActionCopyPath); 
+
         int selectedCount = 0;
         for (const auto& selIdx : view->selectionModel()->selectedIndexes()) {
             if (selIdx.column() == 0 && !selIdx.data(PathRole).toString().isEmpty()) {
@@ -1540,9 +1539,26 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
         }
 
-        // [批量与加密区] 
+        if (selectedCount <= 1) {
+            menu.addAction("重命名")->setData(ActionRename); 
+        }
         if (isFolder || selectedCount > 1) { 
             menu.addAction("批量重命名 (Ctrl+Shift+R)")->setData(ActionBatchRename); 
+        }
+
+        // ==================== 3. 系统与数据管理组 ====================
+        menu.addSeparator(); 
+
+        menu.addAction("刷新")->setData(ActionRefresh); 
+
+        // 2026-07-xx 按照 Development_Plan 2.1：始终显示“重新扫描”选项 (仅限资源库内项目)
+        if (currentIndex.data(ManagedRole).toBool()) {
+            menu.addAction(UiHelper::getIcon("sync", QColor("#378ADD"), 18), "重新扫描")->setData(ActionRescan);
+        }
+
+        // 2026-07-27 按照 Plan-107：仅对已在资源库中登记的文件夹，增加“取消导入并清除数据”菜单项
+        if (currentIndex.data(TypeRole).toString() == "folder" && currentIndex.data(ManagedRole).toBool()) {
+            menu.addAction(UiHelper::getIcon("close", QColor("#e81123"), 18), "取消导入并清除数据")->setData(ActionCancelImport);
         }
 
         if (!isFolder) { 
@@ -1553,48 +1569,13 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             cryptoMenu->addAction("修改加密密码")->setData(ActionChangePwd); 
         } 
  
-        menu.addSeparator(); 
- 
-        // [通用编辑区] 
-        if (selectedCount <= 1) {
-            menu.addAction("重命名")->setData(ActionRename); 
-        }
-        menu.addAction("复制")->setData(ActionCopy); 
-        menu.addAction("剪切")->setData(ActionCut); 
-        menu.addAction("粘贴")->setData(ActionPaste); 
-        
         // 2026-06-xx 按照用户要求：在回收站中不显示二级删除菜单
         if (m_currentCategoryType != "trash") {
             QMenu* delMenu = menu.addMenu("删除");
             UiHelper::applyMenuStyle(delMenu);
             delMenu->addAction("移入回收站")->setData(ActionDelete);
-            // 2026-07-xx 物理级精简：移除普通彻底删除，仅保留并更名为“永久删除”（采用安全抹除逻辑）
             delMenu->addAction("永久删除")->setData(ActionSecureDelete);
         } else {
-            // 回收站模式下，原位置不显示删除
-        }
- 
-        menu.addSeparator(); 
-        menu.addAction("复制路径")->setData(ActionCopyPath); 
-        menu.addAction("添加至收藏夹")->setData(ActionAddToFavorites); 
-        menu.addAction("刷新")->setData(ActionRefresh); 
-        menu.addAction("属性")->setData(ActionProperties); 
-
-        // 2026-07-xx 按照 Development_Plan 2.1：始终显示“重新扫描”选项 (仅限资源库内项目)
-        if (currentIndex.data(ManagedRole).toBool()) {
-            menu.addSeparator();
-            menu.addAction(UiHelper::getIcon("sync", QColor("#378ADD"), 18), "重新扫描")->setData(ActionRescan);
-        }
-
-        // 2026-07-27 按照 Plan-107：仅对已在资源库中登记的文件夹，增加“取消导入并清除数据”菜单项
-        if (currentIndex.data(TypeRole).toString() == "folder" && currentIndex.data(ManagedRole).toBool()) {
-            menu.addAction(UiHelper::getIcon("close", QColor("#e81123"), 18), "取消导入并清除数据")->setData(ActionCancelImport);
-        }
-
-        // 2026-06-xx 按照用户要求：在回收站分类中，最底部增加“永久删除”选项
-        if (m_currentCategoryType == "trash") {
-            menu.addSeparator();
-            // 2026-07-xx 物理一致性：回收站内的永久删除统一采用 ActionSecureDelete
             menu.addAction(UiHelper::getIcon("trash", QColor("#e81123"), 18), "永久删除")->setData(ActionSecureDelete);
         }
  
@@ -1613,13 +1594,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
  
         menu.addSeparator(); 
         menu.addAction("刷新")->setData(ActionRefresh);
-
-        menu.addSeparator(); 
-        QAction* actProp = menu.addAction("当前文件夹属性"); 
-        actProp->setData(ActionProperties); 
-        actProp->setEnabled(!m_currentPath.isEmpty() && m_currentPath != "computer://"); 
-
-        // 2026-07-xx 按照 Plan-63：如果是空白处点击，直接在这里注入并在下方 exec
     } 
 
     menu.addSeparator();
@@ -1675,22 +1649,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
     addOrderAct("升序", Qt::AscendingOrder);
     addOrderAct("降序", Qt::DescendingOrder);
 
-    // 2026-07-xx 按照 Plan-63：注入布局显示控制菜单
-    menu.addSeparator();
-    QMenu* layoutMenu = menu.addMenu("布局显示");
-    UiHelper::applyMenuStyle(layoutMenu);
-    
-    // 通过向上寻道获取 MainWindow 实例以复用菜单逻辑
-    MainWindow* mw = nullptr;
-    QWidget* parentWin = window();
-    while (parentWin) {
-        if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
-        parentWin = parentWin->parentWidget();
-    }
-    if (mw) {
-        mw->populatePanelMenu(layoutMenu);
-    }
- 
     QAction* selectedAction = menu.exec(view->viewport()->mapToGlobal(pos)); 
     if (!selectedAction || !selectedAction->data().isValid()) return; 
  
@@ -1998,6 +1956,24 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
             break;
         }
+        case ActionCopyName: {
+            QModelIndexList indexes = getSelectedIndexes();
+            QStringList targetNames;
+            for (const auto& idx : indexes) {
+                if (idx.column() == 0) {
+                    QString p = idx.data(PathRole).toString();
+                    if (!p.isEmpty()) targetNames << QFileInfo(p).fileName();
+                }
+            }
+            if (targetNames.isEmpty() && !path.isEmpty()) {
+                targetNames << QFileInfo(path).fileName();
+            }
+            if (!targetNames.isEmpty()) {
+                QApplication::clipboard()->setText(targetNames.join("\r\n"));
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "已复制文件名到剪贴板", 1200, QColor("#2ecc71"));
+            }
+            break;
+        }
         case ActionCopyPath: {
             QModelIndexList indexes = getSelectedIndexes();
             QStringList targetPaths;
@@ -2015,10 +1991,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             }
             break;
         }
-        case ActionProperties: { 
-            ShellHelper::showProperties(onItem ? path : m_currentPath); 
-            break; 
-        } 
         case ActionRefresh: {
             refreshAll();
             break;
