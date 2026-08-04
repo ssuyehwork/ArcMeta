@@ -2521,8 +2521,13 @@ void ContentPanel::loadCategory(int categoryId) {
             m_model->clear();
             m_proxyModel->invalidate();
             m_lockWidget->clearInput(); // 🚨【物理安全保障】：强行清空输入框中的任何残留密码，绝不给假锁屏留任何机会！
+
+            // 解析真实的提示文本
+            QString storedData = QString::fromStdWString(cat.encryptHint);
+            QString realHint = storedData.contains(":::") ? storedData.section(":::", 1) : storedData;
+
             m_viewStack->setCurrentWidget(m_lockWidget);
-            m_lockWidget->setCategory(categoryId, QString::fromStdWString(cat.encryptHint));
+            m_lockWidget->setCategory(categoryId, realHint);
             if (m_textPreview) m_textPreview->hide();
             if (m_imagePreview) m_imagePreview->hide();
             m_currentCategoryId = categoryId;
