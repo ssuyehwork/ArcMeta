@@ -1655,10 +1655,26 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
     ContextAction action = static_cast<ContextAction>(selectedAction->data().toInt()); 
  
     switch (action) { 
-        case ActionOpen: 
-        case ActionOpenDefault: 
+        case ActionOpen: {
             onDoubleClicked(currentIndex); 
             break; 
+        }
+        case ActionOpenDefault: {
+            auto indexes = view->selectionModel()->selectedIndexes();
+            for (const auto& idx : indexes) {
+                if (idx.column() == 0) {
+                    QString filePath = idx.data(PathRole).toString();
+                    if (!filePath.isEmpty() && QFileInfo::exists(filePath)) {
+                        // 1. 记录文件访问时间
+                        MetadataManager::instance().recordAccess(filePath.toStdWString());
+
+                        // 2. 真正的操作系统级外部默认程序启动！
+                        QDesktopServices::openUrl(QUrl::fromLocalFile(filePath));
+                    }
+                }
+            }
+            break;
+        }
         case ActionShowInExplorer: { 
             ShellHelper::openInExplorer(onItem ? path : m_currentPath); 
             break; 
