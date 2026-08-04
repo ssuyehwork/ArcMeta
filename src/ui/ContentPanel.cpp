@@ -1441,44 +1441,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 } 
             }
 
-            // 直接在主菜单上呈现“设定颜色标签”快捷色块栏
-            QString currentColorStr = currentIndex.data(ColorRole).toString();
-
-            QWidgetAction* pickerAction = new QWidgetAction(&menu);
-            ColorStripPicker* pickerWidget = new ColorStripPicker(currentColorStr, &menu);
-            pickerAction->setDefaultWidget(pickerWidget);
-            menu.addAction(pickerAction);
-
-            connect(pickerWidget, &ColorStripPicker::colorSelected, this, [this, view, &menu](const QString& hexColor) {
-                struct SelectedItemInfo {
-                    QString type;
-                    QString path;
-                    int categoryId = 0;
-                };
-                QList<SelectedItemInfo> selectedItems;
-                auto indexes = view->selectionModel()->selectedIndexes();  
-                for (const auto& idx : indexes) {  
-                    if (idx.column() == 0) {  
-                        SelectedItemInfo info;
-                        info.type = idx.data(TypeRole).toString();
-                        info.path = idx.data(PathRole).toString();
-                        info.categoryId = idx.data(CategoryIdRole).toInt();
-                        selectedItems.append(info);
-                    }  
-                }
-
-                for (const auto& idx : indexes) {  
-                    if (idx.column() == 0) {  
-                        m_proxyModel->setData(idx, hexColor, ColorRole);  
-                    }  
-                } 
-
-                for (const auto& info : selectedItems) {
-                    selectAndScrollToItem(info.type, info.path, info.categoryId);
-                }
-                menu.close(); 
-            });
- 
             bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
             menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
         } else {
@@ -1520,6 +1482,44 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 }
             }
         }
+
+        // 🚨 无论磁盘模式还是受控库模式，统一展现 ColorStripPicker 颜色选择条！
+        QString currentColorStr = currentIndex.data(ColorRole).toString();
+
+        QWidgetAction* pickerAction = new QWidgetAction(&menu);
+        ColorStripPicker* pickerWidget = new ColorStripPicker(currentColorStr, &menu);
+        pickerAction->setDefaultWidget(pickerWidget);
+        menu.addAction(pickerAction);
+
+        connect(pickerWidget, &ColorStripPicker::colorSelected, this, [this, view, &menu](const QString& hexColor) {
+            struct SelectedItemInfo {
+                QString type;
+                QString path;
+                int categoryId = 0;
+            };
+            QList<SelectedItemInfo> selectedItems;
+            auto indexes = view->selectionModel()->selectedIndexes();  
+            for (const auto& idx : indexes) {  
+                if (idx.column() == 0) {  
+                    SelectedItemInfo info;
+                    info.type = idx.data(TypeRole).toString();
+                    info.path = idx.data(PathRole).toString();
+                    info.categoryId = idx.data(CategoryIdRole).toInt();
+                    selectedItems.append(info);
+                }  
+            }
+
+            for (const auto& idx : indexes) {  
+                if (idx.column() == 0) {  
+                    m_proxyModel->setData(idx, hexColor, ColorRole);  
+                }  
+            } 
+
+            for (const auto& info : selectedItems) {
+                selectAndScrollToItem(info.type, info.path, info.categoryId);
+            }
+            menu.close(); 
+        });
 
         menu.addAction("添加至收藏夹")->setData(ActionAddToFavorites); 
 

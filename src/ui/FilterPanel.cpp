@@ -646,7 +646,7 @@ void FilterPanel::rebuildGroups() {
 
 
     // ── 1. 评级 ──────────────────────────────────────────────
-    if (!m_ratingCounts.isEmpty() && m_isMirrorSource) {
+    if (!m_ratingCounts.isEmpty()) {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("评级", gl);
         m_groupRating = g;
@@ -667,7 +667,7 @@ void FilterPanel::rebuildGroups() {
 
 
     // ── 2. 颜色标记 (Plan-18: 矩阵重构版) ─────────────────────────
-    if (m_isMirrorSource) { // 2026-07-xx 按照 Plan-118：仅在镜像源下显示颜色标记
+    {
         QVBoxLayout* gl = nullptr;
         QHBoxLayout* hdrLayout = nullptr;
         QWidget* g = buildGroup("颜色标记", gl, &hdrLayout);
@@ -1082,7 +1082,7 @@ void FilterPanel::rebuildGroups() {
     }
 
     // ── 7. 链接 (独立主选项) ──────────────────────────────────────────
-    if (m_isMirrorSource) {
+    {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("链接", gl);
         m_groupLink = g;
@@ -1127,7 +1127,7 @@ void FilterPanel::rebuildGroups() {
     }
 
     // ── 8. 备注 (独立主选项) ──────────────────────────────────────────
-    if (m_isMirrorSource) {
+    {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("备注", gl);
         m_groupNote = g;
@@ -1243,7 +1243,7 @@ void FilterPanel::rebuildGroups() {
 
 
     // ── 11. 图像比例 (独立主选项) ──────────────────────────────────────────
-    if (m_isMirrorSource) {
+    {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("图像比例", gl);
         m_groupRatio = g;
@@ -1479,7 +1479,8 @@ void FilterPanel::setMirrorSource(bool isMirror) {
     if (m_isMirrorSource == isMirror) return;
     m_isMirrorSource = isMirror;
     
-    // 2026-07-xx 按照 Plan-118：强制重绘以刷新受控分组显隐
+    // 🚨 三大组件解封后，评级、颜色标记、链接、备注、图像比例不再有 m_isMirrorSource 的显隐限制，
+    // 但如果有其他专属托管源的分组（如果有的话），依然可以刷新。为了保持体验一致性，此处执行重绘。
     rebuildGroups();
 }
 

@@ -1,23 +1,26 @@
-# 彻底清理并清退 `.am_meta.json`，统一使用 `.ArcMeta.json` 离散元数据 —— Modification_Plan-33.md
+# 彻底清理 `.am_meta.json` 统一使用 `.ArcMeta.json` 且完全恢复磁盘模式颜色打标与过滤 —— Modification_Plan-33.md
 
 > 状态：待批准执行（尚未获得用户"批准执行"指令）
 
 ## 1. 任务背景
-在项目资产管理开发演进中，此前曾存在过 `.am_meta.json` 作为各目录的本地资产离散元数据标记文件。为了保障全工程的绝对纯净、一致与统一，清除历史冗余实现，系统需彻底清退全工程中所有关于 `.am_meta.json` 的代码、字符串与注释，不保留任何历史残留痕迹（对应用户原话：“彻底清空并清退全工程中所有关于 `.am_meta.json` 的代码、字符串与注释，不保留任何历史残留痕迹！”）。
-同时，在不侵入 SQLite 的磁盘目录下，全局统一使用纯正、标准的 `.ArcMeta.json` 离散配置文件（对应用户原话：“全局统一使用纯正、标准的 `.ArcMeta.json`”），使物理硬盘上有且仅会生成隐藏文件 `.ArcMeta.json`，达到绝对的架构极简与纯净。
+在项目资产管理开发演进中，此前曾存在过 `.am_meta.json` 作为本地资产离散元数据标记文件。为了保障全工程的绝对纯净、一致与统一，清除历史冗余，系统需彻底清退全工程中所有关于 `.am_meta.json` 的代码、字符串与注释（对应用户原话：“彻底清空并清退全工程中所有关于 `.am_meta.json` 的代码、字符串与注释，不保留任何历史残留痕迹！”）。
+同时，在磁盘导航模式下，全局统一使用纯正、标准的 `.ArcMeta.json` 作为唯一的隐藏物理配置文件名（对应用户原话：“全局统一使用纯正、标准的 `.ArcMeta.json`”）。
+另外，为了确保功能的一致性，磁盘目录模式下内容面板右键菜单的颜色标记（快捷色块栏）与置顶功能应该完全恢复（对应用户原话：“磁盘目录模式下 内容面板右键菜单的颜色标记也应该被恢复，不然怎么标记颜色呢？”）。同时，相应的元数据面板和筛选器面板也需要同步进行调整（对应用户原话：“那么相应的元数据面板和筛选器面板是不是也该调整调整呢？”），在磁盘目录下也完全启用颜色、评级、链接、备注、比例等过滤分组，提供极致、完美的离散打标过滤体验。
 
 ## 2. 问题定位
-- **离散管理逻辑**：`AmMetaJson.cpp` 此前使用主程序下 `ArcMeta.cache/HASH.json` 的形式进行了缓存。现在需要将其彻底更改为隐藏在对应物理文件夹内的 `.ArcMeta.json` 隐藏文件直接读取和保存（对应用户原话：“全局统一使用纯正、标准的 `.ArcMeta.json`”）。
-- **历史冗余排除**：在 `DiskScanService.cpp` 与 `CategoryLoadService.cpp` 的资产过滤逻辑中，此前含有针对 `.am_meta.json` 等历史冗余配置的屏蔽过滤判断。现在需要精简过滤判断（对应用户原话：“彻底清理扫描过滤逻辑中关于 `.am_meta.json` 的历史冗余条件”），且物理磁盘扫描时应对新的隐藏文件 `.ArcMeta.json` 执行彻底屏蔽过滤。
-- **源码注释清理**：主工程 `CMakeLists.txt` 等各处的注释可能仍带有 `.am_meta.json` 字样，需进行统一净化擦除。
+- **离散管理逻辑**：`AmMetaJson.cpp` 构造函数改为直接定位到文件夹下的隐藏文件 `.ArcMeta.json`。
+- **历史冗余排除**：在 `CategoryLoadService.cpp` 与两个 `DiskScanService.cpp` 的资产过滤中，使用统一的 `isAuxiliaryFile` 精确过滤阻断 `.ArcMeta.json`。
+- **右键颜色菜单恢复**：在 `ContentPanel.cpp` 的 `showContextMenu` 中，不应仅在 `isMirror` 下提供“颜色标记”色块栏与“置顶”操作，在普通磁盘目录模式下（`isMirror` 为假时）同样要无条件呈现。
+- **筛选器面板还原**：在 `FilterPanel.cpp` 的 `rebuildGroups` 中，去掉对 `m_isMirrorSource` 的限制，使得颜色标记、评级、链接、备注和图像比例筛选分组在磁盘目录模式下同样完备展现并生效。
 
 ## 3. 强制对照表
 
 | 编号 | 用户原话 / 我的理解 | 方案对应点 | 是否一致 |
 |------|---------------------|------------|----------|
-| 1    | 彻底清空并清退全工程中所有关于 `.am_meta.json` 的代码、字符串与注释，不保留任何历史残留痕迹！ | 彻底排查清理 `CMakeLists.txt`、源文件等中的注释与字符串，清除 `.am_meta.json` 字样。 | ✅ 一致 |
-| 2    | 全局统一使用纯正、标准的 `.ArcMeta.json`，唯一物理文件名：`.ArcMeta.json`，物理硬盘上有且仅会生成隐藏文件 `.ArcMeta.json` | 物理对齐修改 `AmMetaJson.cpp`，移除旧集中化缓存，直接采用直接路径 + `.ArcMeta.json`，并调用 `SetFileAttributesW` 设置隐藏属性。 | ✅ 一致 |
-| 3    | 彻底清理扫描过滤逻辑中关于 `.am_meta.json` 的历史冗余条件，引入 `isAuxiliaryFile` 对 `.ArcMeta.json` 进行无缝拦截 | 在 `CategoryLoadService.cpp`、`DiskScanService.cpp` 中定义并应用统一的 `isAuxiliaryFile`，仅拦截 `.ArcMeta.json`、`_thumbnail.png`、`metadata.scch` 和 `.arc`。 | ✅ 一致 |
+| 1    | 彻底清空并清退全工程中所有关于 `.am_meta.json` 的代码、字符串与注释，不保留任何历史残留痕迹！ | 清除 `CMakeLists.txt` 等各处的历史遗留 `.am_meta.json` 相关注释。 | ✅ 一致 |
+| 2    | 全局统一使用纯正、标准的 `.ArcMeta.json` | 修改 `AmMetaJson.cpp` 直接加载/保存对应目录下的 `.ArcMeta.json` 隐藏物理文件。 | ✅ 一致 |
+| 3    | 磁盘目录模式下 内容面板右键菜单的颜色标记也应该被恢复，不然怎么标记颜色呢？ | 修改 `ContentPanel.cpp` 中的右键菜单，使“设定颜色标签”快捷色块栏和“置顶”功能在物理源（磁盘目录模式）下也完全恢复。 | ✅ 一致 |
+| 4    | 那么相应的元数据面板和筛选器面板是不是也该调整调整呢？ | 修改 `FilterPanel.cpp` 中颜色标记、评级、链接、备注、比例分组的显隐限制，在磁盘模式下完全启用。 | ✅ 一致 |
 
 ## 4. 详细解决方案
 
@@ -513,9 +516,287 @@ namespace ArcMeta {
 >>>>>>> REPLACE
 ```
 
-### 4.3 构建脚本中的历史遗留 `.am_meta.json` 注释清理
+### 4.3 磁盘目录模式下的元数据标记与筛选支持
 
-#### 4.3.1 `CMakeLists.txt`
+#### 4.3.1 `src/ui/ContentPanel.cpp` 中的右键菜单重构
+
+```
+<<<<<<< SEARCH
+        bool isMirror = isMirrorSource();
+
+        if (isMirror) {
+            // [镜像源：归类与元数据编辑区]
+            QMenu* categorizeMenu = menu.addMenu("归类到..."); 
+            UiHelper::applyMenuStyle(categorizeMenu); 
+            auto categories = CategoryRepo::getRecentlyUsed(15); 
+            if (categories.empty()) categories = CategoryRepo::getAll();
+            if (categories.size() > 15) categories.resize(15);
+
+            QAction* actToUncat = categorizeMenu->addAction(UiHelper::getIcon("uncategorized", QColor("#95a5a6"), 16), "回归“未分类”");
+            actToUncat->setData(ActionCategorize);
+            actToUncat->setProperty("catId", -2); 
+            categorizeMenu->addSeparator();
+
+            if (categories.empty()) { 
+                categorizeMenu->addAction("（暂无分类）")->setEnabled(false); 
+            } else { 
+                for (const auto& cat : categories) { 
+                    QAction* act = categorizeMenu->addAction(QString::fromStdWString(cat.name)); 
+                    act->setData(ActionCategorize); 
+                    act->setProperty("catId", cat.id); 
+                } 
+            }
+
+            // 直接在主菜单上呈现“设定颜色标签”快捷色块栏
+            QString currentColorStr = currentIndex.data(ColorRole).toString();
+
+            QWidgetAction* pickerAction = new QWidgetAction(&menu);
+            ColorStripPicker* pickerWidget = new ColorStripPicker(currentColorStr, &menu);
+            pickerAction->setDefaultWidget(pickerWidget);
+            menu.addAction(pickerAction);
+
+            connect(pickerWidget, &ColorStripPicker::colorSelected, this, [this, view, &menu](const QString& hexColor) {
+                struct SelectedItemInfo {
+                    QString type;
+                    QString path;
+                    int categoryId = 0;
+                };
+                QList<SelectedItemInfo> selectedItems;
+                auto indexes = view->selectionModel()->selectedIndexes();  
+                for (const auto& idx : indexes) {  
+                    if (idx.column() == 0) {  
+                        SelectedItemInfo info;
+                        info.type = idx.data(TypeRole).toString();
+                        info.path = idx.data(PathRole).toString();
+                        info.categoryId = idx.data(CategoryIdRole).toInt();
+                        selectedItems.append(info);
+                    }  
+                }
+
+                for (const auto& idx : indexes) {  
+                    if (idx.column() == 0) {  
+                        m_proxyModel->setData(idx, hexColor, ColorRole);  
+                    }  
+                } 
+
+                for (const auto& info : selectedItems) {
+                    selectAndScrollToItem(info.type, info.path, info.categoryId);
+                }
+                menu.close(); 
+            });
+ 
+            bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
+            menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
+        } else {
+            // [物理源：显示“迁移”]
+            if (!m_currentPath.isEmpty() && m_currentPath != "computer://") {
+                std::wstring wp = path.toStdWString();
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
+
+                // 2026-07-xx 按照 Plan-121：统一复用 AutoImportManager 的路径计算逻辑，
+                // 不再自行拼接，确保使用完全一致的路径来源。
+                std::wstring managedRootW = AutoImportManager::getManagedLibraryPath(wp);
+                QString managedRoot = QString::fromStdWString(managedRootW);
+
+                QMenu* migrateMenu = menu.addMenu(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "迁移");
+                UiHelper::applyMenuStyle(migrateMenu);
+
+                if (managedRoot.isEmpty()) {
+                    // Library 文件夹尚未创建，给出明确提示而非显示错误路径
+                    migrateMenu->addAction("该盘库存未创建")->setEnabled(false);
+                } else {
+                    QAction* actRoot = migrateMenu->addAction(managedRoot);
+                    actRoot->setData(ActionAddToCategory);
+                    actRoot->setProperty("targetPath", managedRoot);
+
+                    migrateMenu->menuAction()->setData(ActionAddToCategory);
+                    migrateMenu->menuAction()->setProperty("targetPath", managedRoot);
+                }
+
+                migrateMenu->addSeparator();
+                QStringList recentFolders = NavigationHistoryService::getRecentVisitedFolders(volSerial);
+                if (recentFolders.isEmpty()) {
+                    migrateMenu->addAction("迁移至最近活跃位置...")->setEnabled(false);
+                } else {
+                    for (const QString& folder : recentFolders) {
+                        QAction* act = migrateMenu->addAction(folder);
+                        act->setData(ActionAddToCategory);
+                        act->setProperty("targetPath", folder);
+                    }
+                }
+            }
+        }
+=======
+        bool isMirror = isMirrorSource();
+
+        if (isMirror) {
+            // [镜像源：归类与元数据编辑区]
+            QMenu* categorizeMenu = menu.addMenu("归类到..."); 
+            UiHelper::applyMenuStyle(categorizeMenu); 
+            auto categories = CategoryRepo::getRecentlyUsed(15); 
+            if (categories.empty()) categories = CategoryRepo::getAll();
+            if (categories.size() > 15) categories.resize(15);
+
+            QAction* actToUncat = categorizeMenu->addAction(UiHelper::getIcon("uncategorized", QColor("#95a5a6"), 16), "回归“未分类”");
+            actToUncat->setData(ActionCategorize);
+            actToUncat->setProperty("catId", -2); 
+            categorizeMenu->addSeparator();
+
+            if (categories.empty()) { 
+                categorizeMenu->addAction("（暂无分类）")->setEnabled(false); 
+            } else { 
+                for (const auto& cat : categories) { 
+                    QAction* act = categorizeMenu->addAction(QString::fromStdWString(cat.name)); 
+                    act->setData(ActionCategorize); 
+                    act->setProperty("catId", cat.id); 
+                } 
+            }
+        } else {
+            // [物理源：显示“迁移”]
+            if (!m_currentPath.isEmpty() && m_currentPath != "computer://") {
+                std::wstring wp = path.toStdWString();
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
+
+                // 2026-07-xx 按照 Plan-121：统一复用 AutoImportManager 的路径计算逻辑，
+                // 不再自行拼接，确保使用完全一致的路径来源。
+                std::wstring managedRootW = AutoImportManager::getManagedLibraryPath(wp);
+                QString managedRoot = QString::fromStdWString(managedRootW);
+
+                QMenu* migrateMenu = menu.addMenu(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "迁移");
+                UiHelper::applyMenuStyle(migrateMenu);
+
+                if (managedRoot.isEmpty()) {
+                    // Library 文件夹尚未创建，给出明确提示而非显示错误路径
+                    migrateMenu->addAction("该盘库存未创建")->setEnabled(false);
+                } else {
+                    QAction* actRoot = migrateMenu->addAction(managedRoot);
+                    actRoot->setData(ActionAddToCategory);
+                    actRoot->setProperty("targetPath", managedRoot);
+
+                    migrateMenu->menuAction()->setData(ActionAddToCategory);
+                    migrateMenu->menuAction()->setProperty("targetPath", managedRoot);
+                }
+
+                migrateMenu->addSeparator();
+                QStringList recentFolders = NavigationHistoryService::getRecentVisitedFolders(volSerial);
+                if (recentFolders.isEmpty()) {
+                    migrateMenu->addAction("迁移至最近活跃位置...")->setEnabled(false);
+                } else {
+                    for (const QString& folder : recentFolders) {
+                        QAction* act = migrateMenu->addAction(folder);
+                        act->setData(ActionAddToCategory);
+                        act->setProperty("targetPath", folder);
+                    }
+                }
+            }
+        }
+
+        // 直接在主菜单上呈现“设定颜色标签”快捷色块栏 (在镜像和物理源模式下都显示！)
+        QString currentColorStr = currentIndex.data(ColorRole).toString();
+
+        QWidgetAction* pickerAction = new QWidgetAction(&menu);
+        ColorStripPicker* pickerWidget = new ColorStripPicker(currentColorStr, &menu);
+        pickerAction->setDefaultWidget(pickerWidget);
+        menu.addAction(pickerAction);
+
+        connect(pickerWidget, &ColorStripPicker::colorSelected, this, [this, view, &menu](const QString& hexColor) {
+            struct SelectedItemInfo {
+                QString type;
+                QString path;
+                int categoryId = 0;
+            };
+            QList<SelectedItemInfo> selectedItems;
+            auto indexes = view->selectionModel()->selectedIndexes();  
+            for (const auto& idx : indexes) {  
+                if (idx.column() == 0) {  
+                    SelectedItemInfo info;
+                    info.type = idx.data(TypeRole).toString();
+                    info.path = idx.data(PathRole).toString();
+                    info.categoryId = idx.data(CategoryIdRole).toInt();
+                    selectedItems.append(info);
+                }  
+            }
+
+            for (const auto& idx : indexes) {  
+                if (idx.column() == 0) {  
+                    m_proxyModel->setData(idx, hexColor, ColorRole);  
+                }  
+            } 
+
+            for (const auto& info : selectedItems) {
+                selectAndScrollToItem(info.type, info.path, info.categoryId);
+            }
+            menu.close(); 
+        });
+
+        bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
+        menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
+>>>>>>> REPLACE
+```
+
+#### 4.3.2 `src/ui/FilterPanel.cpp` 中的筛选分组限制去除
+
+```
+<<<<<<< SEARCH
+    // ── 1. 评级 ──────────────────────────────────────────────
+    if (!m_ratingCounts.isEmpty() && m_isMirrorSource) {
+=======
+    // ── 1. 评级 ──────────────────────────────────────────────
+    if (!m_ratingCounts.isEmpty()) {
+>>>>>>> REPLACE
+```
+
+```
+<<<<<<< SEARCH
+    // ── 2. 颜色标记 (Plan-18: 矩阵重构版) ─────────────────────────
+    if (m_isMirrorSource) { // 2026-07-xx 按照 Plan-118：仅在镜像源下显示颜色标记
+        QVBoxLayout* gl = nullptr;
+=======
+    // ── 2. 颜色标记 (Plan-18: 矩阵重构版) ─────────────────────────
+    {
+        QVBoxLayout* gl = nullptr;
+>>>>>>> REPLACE
+```
+
+```
+<<<<<<< SEARCH
+    // ── 7. 链接 (独立主选项) ──────────────────────────────────────────
+    if (m_isMirrorSource) {
+        QVBoxLayout* gl = nullptr;
+=======
+    // ── 7. 链接 (独立主选项) ──────────────────────────────────────────
+    {
+        QVBoxLayout* gl = nullptr;
+>>>>>>> REPLACE
+```
+
+```
+<<<<<<< SEARCH
+    // ── 8. 备注 (独立主选项) ──────────────────────────────────────────
+    if (m_isMirrorSource) {
+        QVBoxLayout* gl = nullptr;
+=======
+    // ── 8. 备注 (独立主选项) ──────────────────────────────────────────
+    {
+        QVBoxLayout* gl = nullptr;
+>>>>>>> REPLACE
+```
+
+```
+<<<<<<< SEARCH
+    // ── 11. 图像比例 (独立主选项) ──────────────────────────────────────────
+    if (m_isMirrorSource) {
+        QVBoxLayout* gl = nullptr;
+=======
+    // ── 11. 图像比例 (独立主选项) ──────────────────────────────────────────
+    {
+        QVBoxLayout* gl = nullptr;
+>>>>>>> REPLACE
+```
+
+### 4.4 构建脚本中的历史遗留 `.am_meta.json` 注释清理
+
+#### 4.4.1 `CMakeLists.txt`
 
 ```
 <<<<<<< SEARCH
@@ -547,6 +828,8 @@ set(SOURCES
 - [ ] `src/core/CategoryLoadService.cpp`：在头部匿名命名空间中引入 `isAuxiliaryFile`，并将内部原有的硬编码 `_thumbnail.png` 和 `metadata.scch` 判定替换为统一的 `isAuxiliaryFile`。
 - [ ] `src/core/DiskScanService.cpp`：在头部匿名命名空间中引入 `isAuxiliaryFile` 并实现其阻断逻辑，剔除关于已废除的历史文件的单独判断。
 - [ ] `src/ui/DiskScanService.cpp`：在头部匿名命名空间中引入 `isAuxiliaryFile` 并实现其阻断逻辑，剔除关于已废除的历史文件的单独判断。
+- [ ] `src/ui/ContentPanel.cpp`：重构 `showContextMenu` 逻辑，在物理模式下（磁盘目录模式）也完全提供和支持颜色标签色块栏和置顶（对应用户原话：“磁盘目录模式下 内容面板右键菜单的颜色标记也应该被恢复”）。
+- [ ] `src/ui/FilterPanel.cpp`：修改 `rebuildGroups` 分组逻辑，在普通磁盘导航模式下也呈现颜色标记、评级、链接、备注、比例等过滤分组（对应用户原话：“相应的元数据面板和筛选器面板是不是也该调整调整呢？”）。
 - [ ] `CMakeLists.txt`：清除构建脚本中描述该历史废弃文件的相关注释（对应用户原话：“彻底清空并清退全工程中所有关于 .am_meta.json 的代码、字符串与注释”）。
 
 **明确禁止越界修改的范围：**
