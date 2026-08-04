@@ -279,14 +279,13 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
         return QImage();
     }
 
-    // 🚨 1. 第一优先路：对齐 Adobe Bridge，解析 Illustrator 官方私有 %AI7_Thumbnail / %AI9_Thumbnail 块
+    // 1. 优先通道：解析 Adobe Illustrator %AI7_Thumbnail / %AI9_Thumbnail 256色索引调色板
     QTextStream in(&file);
     int width = 0, height = 0;
     bool inThumbBlock = false;
     QString hexData;
 
     int lineCount = 0;
-    // 扫描文件头前 50,000 行，极速定位 AI 缩略图块
     while (!in.atEnd() && lineCount++ < 50000) {
         QString line = in.readLine();
 
@@ -302,7 +301,6 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
                 }
             }
         } else {
-            // 遇到结束标记或非%行，退出读取
             if (line.contains("%AI7_ThumbnailEnd") || line.contains("%AI9_ThumbnailEnd") ||
                 line.contains("%%EndData") || (!line.startsWith("%") && !line.trimmed().isEmpty())) {
                 break;
@@ -316,35 +314,42 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
     if (!hexData.isEmpty() && width > 0 && height > 0) {
         QByteArray binaryData = QByteArray::fromHex(hexData.toLatin1());
 
-        // 尝试使用 qUncompress (zlib) 解压数据（%AI9/%AI10 采用 zlib 压缩）
-        QByteArray uncompressed;
-        if (binaryData.size() > 4) {
-            uint32_t expectedLen = width * height * 3;
-            QByteArray prepended = binaryData;
-            QByteArray headerBytes;
-            headerBytes.append((expectedLen >> 24) & 0xFF);
-            headerBytes.append((expectedLen >> 16) & 0xFF);
-            headerBytes.append((expectedLen >> 8) & 0xFF);
-            headerBytes.append(expectedLen & 0xFF);
-            prepended.prepend(headerBytes);
+        // 🚨【核心修正】：放弃错误的 qUncompress，直接解析 Adobe 256色索引调色板 (Indexed8)
+        const int paletteSize = 256 * 3; // 768 字节的 RGB 调色板
 
-            uncompressed = qUncompress(prepended);
+        // A. 24-bit 裸 RGB 模式
+        if (binaryData.size() == width * height * 3) {
+            QImage temp(reinterpret_cast<const uchar*>(binaryData.constData()), width, height, width * 3, QImage::Format_RGB888);
+            QImage img = temp.copy(); // 自动对齐处理
+            if (!img.isNull()) return img;
         }
+        // B. 8-bit 256色索引调色板模式（绝大多数 AI 文件的标准）
+        else if (binaryData.size() >= paletteSize + width * height) {
+            QList<QRgb> colorTable;
+            colorTable.reserve(256);
+            const uchar* palPtr = reinterpret_cast<const uchar*>(binaryData.constData());
 
-        const QByteArray& pixelData = uncompressed.isEmpty() ? binaryData : uncompressed;
+            for (int i = 0; i < 256; ++i) {
+                colorTable.append(qRgb(palPtr[i * 3], palPtr[i * 3 + 1], palPtr[i * 3 + 2]));
+            }
 
-        // 将 RGB24 裸像素构造为 QImage，并安全地自动处理 4 字节（32-bit）内存对齐
-        if (pixelData.size() >= width * height * 3) {
-            QImage temp(reinterpret_cast<const uchar*>(pixelData.constData()), width, height, width * 3, QImage::Format_RGB888);
-            QImage img = temp.copy(); // copy() 会在内部自动处理 32-bit 的行对齐，确保画面绝不扭曲
+            QImage img(width, height, QImage::Format_Indexed8);
+            img.setColorTable(colorTable);
+
+            const uchar* pixelPtr = palPtr + paletteSize;
+            for (int y = 0; y < height; ++y) {
+                uchar* scanLine = img.scanLine(y);
+                memcpy(scanLine, pixelPtr + y * width, width);
+            }
+
             if (!img.isNull()) {
-                qDebug() << "[MediaColorExtractor][AI] 成功通过 Adobe 官方 %AI_Thumbnail 解包出画面：" << filePath;
-                return img;
+                qDebug() << "[MediaColorExtractor][AI] 成功解包 256色索引调色板预览：" << filePath;
+                return img.convertToFormat(QImage::Format_ARGB32);
             }
         }
     }
 
-    // 2. 第二优先路：若无 PostScript 块，检索 PDF 兼容规范下的裸 JPEG/PNG 流
+    // 2. 次要通道：检索 PDF 规范下的 JPEG / PNG 流
     file.seek(0);
     QByteArray rawData = file.read(15 * 1024 * 1024);
     file.close();
@@ -369,12 +374,8 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
         }
     }
 
-    // 3. 第三优先路：Windows Shell 严格缩略图兜底
-    QImage shellImg = WindowsShellThumbnailProvider::getShellThumbnail(filePath, 256);
-    if (!shellImg.isNull()) return shellImg;
-
-    qWarning() << "[MediaColorExtractor][AI] 全通道解析完成，该文件确实无任何可提取画面：" << filePath;
-    return QImage();
+    // 3. 兜底通道：允许系统 Shell 提图
+    return WindowsShellThumbnailProvider::getShellThumbnail(filePath, 256);
 }
 
 QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
@@ -481,13 +482,7 @@ QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
     }
 
     if (img.isNull()) {
-        // 🚨 修正初始化写法：显式指定为 QStringList 强类型构造，解决 MSVC 编译器歧义报错
-        static const QStringList rawDesignExts = QStringList() << "psd" << "psb" << "ai";
-        if (rawDesignExts.contains(ext)) {
-            qWarning() << "[MediaColorExtractor][BLOCK] 已强制拦截该文件的系统默认图标兜底，标记为无真实内容预览：" << path;
-            return QImage(); // 干净地返回空图
-        }
-
+        // 🚨 删掉了原本对 psd/psb/ai 文件的强制拦截阻断，允许其在解析失败时降级提图并使用 Windows Shell 严格缩略图兜底
         img = WindowsShellThumbnailProvider::getShellThumbnail(path, size);
         if (img.isNull()) img.load(path);
     }
