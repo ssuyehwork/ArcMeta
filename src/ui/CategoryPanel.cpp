@@ -406,16 +406,66 @@ void CategoryPanel::setupContextMenu() {
                 sortMenu->addAction("标题(全部) (A→Z)", this, &CategoryPanel::onSortAllByNameAsc);
                 sortMenu->addAction("标题(全部) (Z→A)", this, &CategoryPanel::onSortAllByNameDesc);
 
-                auto* pwdMenu = menu.addMenu(UiHelper::getIcon("lock", QColor("#aaaaaa"), 18), "密码保护");
-                pwdMenu->setStyleSheet(menu.styleSheet());
+                auto* pwdMenu = menu.addMenu(UiHelper::getIcon("lock_secure", QColor("#EEEEEE"), 16), "密码保护");
+                UiHelper::applyMenuStyle(pwdMenu);
                 
-                // 2026-03-xx 按照用户要求：通过 EncryptedRole 动态判断显示“设置”或“清除”
                 bool isEncrypted = index.data(EncryptedRole).toBool();
+                bool isUnlocked = CategoryLockManager::instance().isUnlocked(catId);
                 
                 if (!isEncrypted) {
-                    pwdMenu->addAction("设置密码", this, &CategoryPanel::onSetPassword);
+                    QAction* setAct = pwdMenu->addAction("设置密码");
+                    connect(setAct, &QAction::triggered, this, &CategoryPanel::onSetPassword);
                 } else {
-                    pwdMenu->addAction("清除密码", this, &CategoryPanel::onClearPassword);
+                    QAction* changeAct = pwdMenu->addAction("修改密码");
+                    connect(changeAct, &QAction::triggered, this, [this, index, catId]() {
+                        QString hint = index.data(EncryptHintRole).toString();
+                        CategoryLockDialog dlg(hint, this);
+                        if (dlg.exec() == QDialog::Accepted) {
+                            CategorySetPasswordDialog setDlg(this);
+                            if (setDlg.exec() == QDialog::Accepted) {
+                                QString newPwd = setDlg.password();
+                                QString newHint = setDlg.hint();
+
+                                auto all = CategoryRepo::getAll();
+                                for (auto& cat : all) {
+                                    if (cat.id == catId) {
+                                        cat.encrypted = true;
+                                        cat.encryptHint = newHint.toStdWString();
+                                        CategoryRepo::update(cat);
+                                        break;
+                                    }
+                                }
+                                m_categoryModel->refresh();
+                                ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 密码修改成功</b>", 1000, QColor("#00A650"));
+                            }
+                        }
+                    });
+
+                    QAction* clearAct = pwdMenu->addAction("清除密码");
+                    connect(clearAct, &QAction::triggered, this, &CategoryPanel::onClearPassword);
+
+                    pwdMenu->addSeparator();
+
+                    QAction* lockNowAct = pwdMenu->addAction("立即锁定");
+                    lockNowAct->setEnabled(isUnlocked);
+                    connect(lockNowAct, &QAction::triggered, this, [this, catId]() {
+                        CategoryLockManager::instance().lock(catId);
+                        m_categoryModel->refresh();
+
+                        MainWindow* mw = nullptr;
+                        QWidget* parentWin = window();
+                        while (parentWin) {
+                            if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
+                            parentWin = parentWin->parentWidget();
+                        }
+                        if (mw) {
+                            ContentPanel* cp = mw->findChild<ContentPanel*>();
+                            if (cp) {
+                                cp->loadCategory(catId);
+                            }
+                        }
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 分类已重新锁定</b>", 1000, QColor("#00A650"));
+                    });
                 }
             }
         }
