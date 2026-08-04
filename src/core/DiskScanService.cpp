@@ -3,6 +3,22 @@
 #include <QDir>
 #include <QFileInfo>
 
+namespace {
+static inline bool isAuxiliaryFile(const QString& path) {
+    if (path.isEmpty()) return true;
+
+    // 🚨 仅保留 .ArcMeta.json，彻底清除 .am_meta.json 历史判断
+    if (path.endsWith(".ArcMeta.json", Qt::CaseInsensitive) ||
+        path.endsWith("_thumbnail.png", Qt::CaseInsensitive) ||
+        path.endsWith("metadata.scch", Qt::CaseInsensitive) ||
+        path.endsWith(".arc", Qt::CaseInsensitive)) {
+        return true; // 屏蔽过滤
+    }
+
+    return false;
+}
+}
+
 namespace ArcMeta {
 
 std::vector<ItemRecord> DiskScanService::scanDirectory(const QString& path,
@@ -24,7 +40,7 @@ std::vector<ItemRecord> DiskScanService::scanDirectory(const QString& path,
         for (const QFileInfo& info : entries) {
             if (shouldContinue && !shouldContinue()) return;
 
-            if (info.fileName() == "metadata.scch" || info.fileName() == "metadata.scch.tmp") continue;
+            if (isAuxiliaryFile(info.absoluteFilePath()) || info.fileName() == "metadata.scch.tmp") continue;
             // 应用自身的内部缓存目录，磁盘模式完全不进入、不展示、不扫描它，
             // 防止缓存目录被当作普通文件夹再次生成"缓存的缓存"
             if (info.isDir() && info.fileName().compare(".arcmeta", Qt::CaseInsensitive) == 0) continue;
@@ -32,7 +48,7 @@ std::vector<ItemRecord> DiskScanService::scanDirectory(const QString& path,
             QString absPath = info.absoluteFilePath();
             ItemRecord itemRec = ItemRecord::create(absPath, nullptr, false);
 
-            // 如果该物理文件在 ArcMeta.cache 中有对应的离散打标缓存，将其无缝还原到 ItemRecord 中
+            // 如果该物理文件在离散配置文件中有对应的离散打标缓存，将其无缝还原到 ItemRecord 中
             std::wstring fileName = info.fileName().toStdWString();
             auto it = cachedItems.find(fileName);
             if (it != cachedItems.end()) {
