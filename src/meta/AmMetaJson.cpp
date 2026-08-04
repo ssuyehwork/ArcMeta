@@ -5,8 +5,6 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDir>
-#include <QCoreApplication>
-#include <QCryptographicHash>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -15,41 +13,14 @@
 
 namespace ArcMeta {
 
-QString AmMetaJson::getCacheDirectory() {
-    // 默认存放在主程序根目录下的 "ArcMeta.cache" 文件夹
-    QString appDir = QCoreApplication::applicationDirPath();
-    QString cacheDir = QDir::toNativeSeparators(appDir + "/ArcMeta.cache");
-    
-    QDir dir(cacheDir);
-    if (!dir.exists()) {
-        dir.mkpath(cacheDir);
-        // 在 Windows 下将 ArcMeta.cache 文件夹设为隐藏属性，保持根目录整洁
-        #ifdef Q_OS_WIN
-        SetFileAttributesW(cacheDir.toStdWString().c_str(), FILE_ATTRIBUTE_HIDDEN);
-        #endif
-    }
-    return cacheDir;
-}
-
-std::wstring AmMetaJson::resolveCacheFilePath(const std::wstring& folderPath) {
-    if (folderPath.empty()) return L"";
-
-    // 1. 路径归一化（统一为小写与 Windows 标准分隔符，确保同一个文件夹算出的哈希绝对唯一）
-    QString normPath = QDir::toNativeSeparators(QDir::cleanPath(QString::fromStdWString(folderPath))).toLower();
-    
-    // 2. 使用 SHA-256 算法计算物理路径的唯一哈希，彻底规避长路径 (MAX_PATH) 及非法文件名字符问题
-    QByteArray hash = QCryptographicHash::hash(normPath.toUtf8(), QCryptographicHash::Sha256).toHex();
-    
-    // 3. 拼装为 ArcMeta.cache/哈希值.json
-    QString cacheFileName = QString::fromLatin1(hash) + ".json";
-    QString fullCachePath = getCacheDirectory() + "/" + cacheFileName;
-    return QDir::toNativeSeparators(fullCachePath).toStdWString();
-}
-
 AmMetaJson::AmMetaJson(const std::wstring& folderPath)
     : m_folderPath(folderPath) {
-    // 将输入的物理文件夹路径映射为 ArcMeta.cache 中的高级 JSON 缓存物理路径
-    m_filePath = resolveCacheFilePath(folderPath);
+    std::wstring path = folderPath;
+    if (!path.empty() && path.back() != L'\\' && path.back() != L'/') {
+        path += L'\\';
+    }
+    // 🚨 彻底废除 .am_meta.json，唯一物理文件名：.ArcMeta.json
+    m_filePath = path + L".ArcMeta.json";
 }
 
 bool AmMetaJson::load() {
@@ -83,10 +54,8 @@ bool AmMetaJson::load() {
 }
 
 bool AmMetaJson::save() const {
-    if (m_filePath.empty()) return false;
-
     QJsonObject root;
-    root.insert("version", "2"); // 物理对齐 SHA-256 版本
+    root.insert("version", "2");
     root.insert("folder", folderToEntry(m_folder));
 
     QJsonObject itemsObj;
@@ -98,19 +67,19 @@ bool AmMetaJson::save() const {
     root.insert("items", itemsObj);
 
     QByteArray jsonData = QJsonDocument(root).toJson(QJsonDocument::Indented);
-    QString targetPath = toQString(m_filePath);
-    QString tmpPath = targetPath + ".tmp";
+    QString tmpPath = toQString(m_filePath) + ".tmp";
     
     QFile tmpFile(tmpPath);
     if (!tmpFile.open(QIODevice::WriteOnly)) return false;
     tmpFile.write(jsonData);
     tmpFile.close();
 
-    // 物理原子替换，保障多线程落盘崩溃安全
     if (!MoveFileExW(tmpPath.toStdWString().c_str(), m_filePath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
         QFile::remove(tmpPath);
         return false;
     }
+    // 赋予 Windows 隐藏文件属性
+    SetFileAttributesW(m_filePath.c_str(), FILE_ATTRIBUTE_HIDDEN);
     return true;
 }
 
@@ -129,16 +98,8 @@ bool AmMetaJson::renameItem(const QString& folderPath, const QString& oldName, c
 }
 
 bool AmMetaJson::migrateFolderCache(const QString& oldFolderPath, const QString& newFolderPath) {
-    if (oldFolderPath == newFolderPath) return true;
-    std::wstring oldCachePath = resolveCacheFilePath(oldFolderPath.toStdWString());
-    std::wstring newCachePath = resolveCacheFilePath(newFolderPath.toStdWString());
-
-    QFile oldFile(toQString(oldCachePath));
-    if (oldFile.exists()) {
-        // 如果新缓存文件已存在，先清理
-        QFile::remove(toQString(newCachePath));
-        return oldFile.rename(toQString(newCachePath));
-    }
+    Q_UNUSED(oldFolderPath);
+    Q_UNUSED(newFolderPath);
     return true;
 }
 
