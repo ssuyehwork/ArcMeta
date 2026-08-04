@@ -374,31 +374,67 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
         return QImage();
     }
 
-    if (quint8(header[0]) != 0xC5 || quint8(header[1]) != 0xD0 ||
-        quint8(header[2]) != 0xD3 || quint8(header[3]) != 0xC6) {
-        qWarning() << "[MediaColorExtractor][EPS] 不是 DOS EPS 格式（缺少 C5D0D3C6 魔数），该文件可能是普通 EPS/纯 PostScript，无内嵌位图预览可提取：" << path;
-        return QImage();
+    // 1. 优先尝试 DOS 二进制头 (C5D0D3C6)
+    if (quint8(header[0]) == 0xC5 && quint8(header[1]) == 0xD0 &&
+        quint8(header[2]) == 0xD3 && quint8(header[3]) == 0xC6) {
+
+        quint32 tiffOffset = (quint8(header[20])) | (quint8(header[21]) << 8) |
+                             (quint8(header[22]) << 16) | (quint8(header[23]) << 24);
+        quint32 tiffLength = (quint8(header[24])) | (quint8(header[25]) << 8) |
+                             (quint8(header[26]) << 16) | (quint8(header[27]) << 24);
+        if (tiffOffset > 0 && tiffLength > 0) {
+            file.seek(tiffOffset);
+            QByteArray tiffData = file.read(tiffLength);
+            QImage img = decodeTiffFromMemory(tiffData);
+            if (!img.isNull()) {
+                qDebug() << "[MediaColorExtractor][EPS] 内嵌预览通过 libtiff 提取成功：" << path;
+                return img;
+            }
+        }
     }
 
-    quint32 tiffOffset = (quint8(header[20])) | (quint8(header[21]) << 8) |
-                         (quint8(header[22]) << 16) | (quint8(header[23]) << 24);
-    quint32 tiffLength = (quint8(header[24])) | (quint8(header[25]) << 8) |
-                         (quint8(header[26]) << 16) | (quint8(header[27]) << 24);
-    if (tiffOffset == 0 || tiffLength == 0) {
-        qWarning() << "[MediaColorExtractor][EPS] DOS EPS 魔数匹配，但 TIFF 预览偏移/长度字段为 0，该文件未内嵌 TIFF 预览：" << path;
-        return QImage();
+    // 🚨 2. 补全自愈回退处理：普通 ASCII EPS (文本格式) 的 %%BeginPreview: 预览块解析
+    file.seek(0);
+    QTextStream in(&file);
+    bool inPreview = false;
+    QString hexData;
+    int width = 0, height = 0;
+
+    // 编译优化正则防漏
+    QRegularExpression rxSpaces("\\s+");
+
+    while (!in.atEnd()) {
+        QString line = in.readLine();
+        if (line.startsWith("%%BeginPreview:")) {
+            QStringList parts = line.split(rxSpaces, Qt::SkipEmptyParts);
+            if (parts.size() >= 3) {
+                width = parts[1].toInt();
+                height = parts[2].toInt();
+                inPreview = true;
+            }
+            continue;
+        }
+        if (line.startsWith("%%EndPreview")) {
+            break; // 预览块结束
+        }
+        if (inPreview) {
+            if (line.startsWith("%")) {
+                hexData.append(line.mid(1).trimmed());
+            }
+        }
     }
 
-    file.seek(tiffOffset);
-    QByteArray tiffData = file.read(tiffLength);
-    QImage img = decodeTiffFromMemory(tiffData);
-    if (img.isNull()) {
-        qWarning() << "[MediaColorExtractor][EPS] 已定位到 TIFF 数据区但通过 libtiff 解码失败，长度：" << tiffData.size() << "：" << path;
-        return QImage();
+    if (!hexData.isEmpty() && width > 0 && height > 0) {
+        QByteArray binaryData = QByteArray::fromHex(hexData.toLatin1());
+        QImage img;
+        if (img.loadFromData(binaryData)) {
+            qDebug() << "[MediaColorExtractor][EPS] 普通文本格式 ASCII EPS 内嵌 %%BeginPreview 提取成功：" << path;
+            return img;
+        }
     }
 
-    qDebug() << "[MediaColorExtractor][EPS] 内嵌预览通过 libtiff 提取成功：" << path;
-    return img;
+    qWarning() << "[MediaColorExtractor][EPS] 未能通过 DOS 二进制或 ASCII %%BeginPreview 提取内嵌位图预览：" << path;
+    return QImage();
 }
 
 QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
@@ -429,9 +465,10 @@ QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
     }
 
     if (img.isNull()) {
-        // 🚨 极致物理重构：针对 psd/psb/ai/eps 这四类矢量和设计层文件，若内嵌数据流解析失败，
+        // 🚨 极致物理重构：针对 psd/psb/ai 这三类矢量和设计层文件，若内嵌数据流解析失败，
         // 绝对禁止采用系统关联的软件大图标（如 Ai 大图标）进行虚假兜底！
-        static const QStringList rawDesignExts = {"psd", "psb", "ai", "eps"};
+        // 物理剔除 eps 拦截：解除对 eps 的硬屏蔽，允许其通过 WindowsShellThumbnailProvider 系统级提供预览兜底！
+        static const QStringList rawDesignExts = {"psd", "psb", "ai"};
         if (rawDesignExts.contains(ext)) {
             qWarning() << "[MediaColorExtractor][BLOCK] 已强制拦截该文件的系统默认图标兜底，标记为无真实内容预览：" << path;
             return QImage(); // 干净地返回空图
