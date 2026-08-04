@@ -279,59 +279,101 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
         return QImage();
     }
 
-    // 1. 读取前 20MB 数据流，检索内嵌的真缩略图/预览帧
-    QByteArray data = file.read(20 * 1024 * 1024);
+    // 🚨 1. 第一优先路：对齐 Adobe Bridge，解析 Illustrator 官方私有 %AI7_Thumbnail / %AI9_Thumbnail 块
+    QTextStream in(&file);
+    int width = 0, height = 0;
+    bool inThumbBlock = false;
+    QString hexData;
+
+    int lineCount = 0;
+    // 扫描文件头前 50,000 行，极速定位 AI 缩略图块
+    while (!in.atEnd() && lineCount++ < 50000) {
+        QString line = in.readLine();
+
+        if (!inThumbBlock) {
+            if (line.contains("%AI7_Thumbnail:") || line.contains("%AI8_Thumbnail:") ||
+                line.contains("%AI9_Thumbnail:") || line.contains("%AI10_Thumbnail:")) {
+
+                QStringList parts = line.section(':', 1).trimmed().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                if (parts.size() >= 2) {
+                    width = parts[0].toInt();
+                    height = parts[1].toInt();
+                    inThumbBlock = true;
+                }
+            }
+        } else {
+            // 遇到结束标记或非%行，退出读取
+            if (line.contains("%AI7_ThumbnailEnd") || line.contains("%AI9_ThumbnailEnd") ||
+                line.contains("%%EndData") || (!line.startsWith("%") && !line.trimmed().isEmpty())) {
+                break;
+            }
+            if (line.startsWith("%")) {
+                hexData.append(line.mid(1).trimmed());
+            }
+        }
+    }
+
+    if (!hexData.isEmpty() && width > 0 && height > 0) {
+        QByteArray binaryData = QByteArray::fromHex(hexData.toLatin1());
+
+        // 尝试使用 qUncompress (zlib) 解压数据（%AI9/%AI10 采用 zlib 压缩）
+        QByteArray uncompressed;
+        if (binaryData.size() > 4) {
+            uint32_t expectedLen = width * height * 3;
+            QByteArray prepended = binaryData;
+            QByteArray headerBytes;
+            headerBytes.append((expectedLen >> 24) & 0xFF);
+            headerBytes.append((expectedLen >> 16) & 0xFF);
+            headerBytes.append((expectedLen >> 8) & 0xFF);
+            headerBytes.append(expectedLen & 0xFF);
+            prepended.prepend(headerBytes);
+
+            uncompressed = qUncompress(prepended);
+        }
+
+        const QByteArray& pixelData = uncompressed.isEmpty() ? binaryData : uncompressed;
+
+        // 将 RGB24 裸像素构造为 QImage，并安全地自动处理 4 字节（32-bit）内存对齐
+        if (pixelData.size() >= width * height * 3) {
+            QImage temp(reinterpret_cast<const uchar*>(pixelData.constData()), width, height, width * 3, QImage::Format_RGB888);
+            QImage img = temp.copy(); // copy() 会在内部自动处理 32-bit 的行对齐，确保画面绝不扭曲
+            if (!img.isNull()) {
+                qDebug() << "[MediaColorExtractor][AI] 成功通过 Adobe 官方 %AI_Thumbnail 解包出画面：" << filePath;
+                return img;
+            }
+        }
+    }
+
+    // 2. 第二优先路：若无 PostScript 块，检索 PDF 兼容规范下的裸 JPEG/PNG 流
+    file.seek(0);
+    QByteArray rawData = file.read(15 * 1024 * 1024);
     file.close();
 
-    // 路径 A：检索 JPEG 流 (\xFF\xD8\xFF ... \xFF\xD9)
-    int jpgStart = data.indexOf("\xFF\xD8\xFF");
-    while (jpgStart != -1) {
-        int jpgEnd = data.indexOf("\xFF\xD9", jpgStart);
+    int jpgStart = rawData.indexOf("\xFF\xD8\xFF");
+    if (jpgStart != -1) {
+        int jpgEnd = rawData.indexOf("\xFF\xD9", jpgStart);
         if (jpgEnd != -1) {
-            int len = (jpgEnd + 2) - jpgStart;
-            QByteArray jpgData = data.mid(jpgStart, len);
+            QByteArray jpgData = rawData.mid(jpgStart, (jpgEnd + 2) - jpgStart);
             QImage img;
-            if (img.loadFromData(jpgData, "JPEG")) {
-                // 过滤掉尺寸过小的极小图标（如 16x16 的软件小图标）
-                if (img.width() >= 64 && img.height() >= 64) {
-                    qDebug() << "[MediaColorExtractor][AI] 成功提取真实 JPEG 预览帧：" << filePath;
-                    return img;
-                }
-            }
-            jpgStart = data.indexOf("\xFF\xD8\xFF", jpgEnd);
-        } else break;
+            if (img.loadFromData(jpgData, "JPEG") && img.width() >= 32) return img;
+        }
     }
 
-    // 路径 B：检索 PNG 流 (\x89PNG\r\n\x1a\n ... IEND)
-    int pngStart = data.indexOf("\x89PNG\r\n\x1a\n");
-    while (pngStart != -1) {
-        int pngEnd = data.indexOf("IEND", pngStart);
+    int pngStart = rawData.indexOf("\x89PNG\r\n\x1a\n");
+    if (pngStart != -1) {
+        int pngEnd = rawData.indexOf("IEND", pngStart);
         if (pngEnd != -1) {
-            int len = (pngEnd + 8) - pngStart; // "IEND" (4 字节) + 4 字节 CRC 校验
-            if (pngStart + len <= data.size()) {
-                QByteArray pngData = data.mid(pngStart, len);
-                QImage img;
-                if (img.loadFromData(pngData, "PNG")) {
-                    if (img.width() >= 64 && img.height() >= 64) {
-                        qDebug() << "[MediaColorExtractor][AI] 成功提取真实 PNG 预览帧：" << filePath;
-                        return img;
-                    }
-                }
-            }
-            pngStart = data.indexOf("\x89PNG\r\n\x1a\n", pngEnd);
-        } else break;
+            QByteArray pngData = rawData.mid(pngStart, (pngEnd + 8) - pngStart);
+            QImage img;
+            if (img.loadFromData(pngData, "PNG") && img.width() >= 32) return img;
+        }
     }
 
-    // 2. 尝试使用严苛模式（SIIGBF_THUMBNAILONLY）向系统申请真实缩略图
+    // 3. 第三优先路：Windows Shell 严格缩略图兜底
     QImage shellImg = WindowsShellThumbnailProvider::getShellThumbnail(filePath, 256);
-    if (!shellImg.isNull()) {
-        qDebug() << "[MediaColorExtractor][AI] 成功通过 Windows Shell 提取：" << filePath;
-        return shellImg;
-    }
+    if (!shellImg.isNull()) return shellImg;
 
-    // 🚨 3. 如果文件保存时未勾选“创建 PDF 兼容文件”且无任何内嵌位图，
-    // 干净地返回空 QImage，绝对不拿软件图标凑数！
-    qWarning() << "[MediaColorExtractor][AI] 该 AI 文件保存时未内嵌兼容性预览图，标记为无预览：" << filePath;
+    qWarning() << "[MediaColorExtractor][AI] 全通道解析完成，该文件确实无任何可提取画面：" << filePath;
     return QImage();
 }
 
