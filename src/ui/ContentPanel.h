@@ -230,6 +230,7 @@ signals:
 private:
     void initUi();
     void initGridView();
+    void restoreActiveView();
     void initListView();
     void setupContextMenu();
     void updateLayersButtonState();
