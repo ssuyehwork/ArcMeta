@@ -291,13 +291,6 @@ QVariant DiskItemModel::data(const QModelIndex& index, int role) const {
     } else if (role == HasThumbnailRole) {
         static const QStringList iconOnlyExts = {"cur", "ico", "ani"};
         if (iconOnlyExts.contains(record.suffix.toLower())) return false;
-        if (record.suffix.toLower() == "ai") {
-            QString nativePath = QDir::toNativeSeparators(path);
-            if (m_aspectRatios.contains(nativePath)) {
-                return m_aspectRatios.value(nativePath) > 0.0;
-            }
-            return false;
-        }
         if (UiHelper::isGraphicsFile(record.suffix)) return true;
         if (record.width > 0 && record.height > 0) return true;
         return m_aspectRatios.contains(QDir::toNativeSeparators(path)) && m_aspectRatios.value(QDir::toNativeSeparators(path)) > 0.0;

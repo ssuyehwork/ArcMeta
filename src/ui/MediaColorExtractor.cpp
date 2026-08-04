@@ -279,87 +279,50 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
         return QImage();
     }
 
-    // 采用高效的流式分块搜寻游标，消除 5MB 的硬编码限制，支持无限大文件的内嵌预览检索
-    const qint64 chunkSize = 1024 * 1024; // 1MB chunk size
-    QByteArray buffer;
-    qint64 startOffset = -1;
-
-    while (!file.atEnd()) {
-        qint64 currentChunkOffset = file.pos();
-        QByteArray chunk = file.read(chunkSize);
-        if (chunk.isEmpty()) break;
-
-        // 如果之前有残留 buffer（重叠），拼接以防标记被分块截断
-        if (!buffer.isEmpty()) {
-            buffer = buffer.right(2) + chunk;
-            currentChunkOffset -= 2;
-        } else {
-            buffer = chunk;
-        }
-
-        int idx = buffer.indexOf("\xFF\xD8\xFF");
-        if (idx != -1) {
-            startOffset = currentChunkOffset + idx;
-            break;
-        }
-    }
-
-    if (startOffset == -1) {
-        qWarning() << "[MediaColorExtractor][AI] 未找到 JPEG 起始标记(FFD8FF)，该文件可能未内嵌兼容性预览：" << filePath;
-        return QImage();
-    }
-
-    // 从 startOffset 开始寻找 \xFF\xD9 结束标记
-    if (!file.seek(startOffset)) {
-        qWarning() << "[MediaColorExtractor][AI] 重定向文件指针失败：" << filePath;
-        return QImage();
-    }
-
-    QByteArray imgData;
-    buffer.clear();
-    bool foundEnd = false;
-
-    while (!file.atEnd() && imgData.size() < 50 * 1024 * 1024) { // 安全上限：最多提取 50MB 的 JPEG 数据
-        qint64 currentChunkOffset = file.pos();
-        QByteArray chunk = file.read(chunkSize);
-        if (chunk.isEmpty()) break;
-
-        if (!buffer.isEmpty()) {
-            buffer = buffer.right(1) + chunk;
-            currentChunkOffset -= 1;
-        } else {
-            buffer = chunk;
-        }
-
-        int idx = buffer.indexOf("\xFF\xD9");
-        if (idx != -1) {
-            qint64 endOffset = currentChunkOffset + idx + 2;
-            qint64 totalLen = endOffset - startOffset;
-            if (totalLen > 0) {
-                if (file.seek(startOffset)) {
-                    imgData = file.read(totalLen);
-                    foundEnd = true;
-                }
-            }
-            break;
-        }
-    }
-
+    // 取前 10MB 数据流，兼顾性能与准确度
+    QByteArray headerData = file.read(10 * 1024 * 1024);
     file.close();
 
-    if (!foundEnd || imgData.isEmpty()) {
-        qWarning() << "[MediaColorExtractor][AI] 找到起始标记但未找到 JPEG 结束标记(FFD9)或数据不完整：" << filePath;
-        return QImage();
+    // 1. 检索 JPEG 内嵌数据流 (\xFF\xD8\xFF ... \xFF\xD9)
+    int jpgStart = headerData.indexOf("\xFF\xD8\xFF");
+    if (jpgStart != -1) {
+        int jpgEnd = headerData.indexOf("\xFF\xD9", jpgStart);
+        if (jpgEnd != -1) {
+            int len = (jpgEnd + 2) - jpgStart;
+            QByteArray jpgData = headerData.mid(jpgStart, len);
+            QImage img;
+            if (img.loadFromData(jpgData, "JPEG")) {
+                qDebug() << "[MediaColorExtractor][AI] 成功提取内嵌 JPEG 预览：" << filePath;
+                return img;
+            }
+        }
     }
 
-    QImage img;
-    if (!img.loadFromData(imgData)) {
-        qWarning() << "[MediaColorExtractor][AI] 已提取出 JPEG 字节流但解码失败，数据长度：" << imgData.size() << "：" << filePath;
-        return QImage();
+    // 2. 补全：检索 PNG 内嵌数据流 (\x89PNG\r\n\x1a\n ... IEND)
+    int pngStart = headerData.indexOf("\x89PNG\r\n\x1a\n");
+    if (pngStart != -1) {
+        int pngEnd = headerData.indexOf("IEND", pngStart);
+        if (pngEnd != -1) {
+            int len = (pngEnd + 8) - pngStart; // "IEND" (4 字节) + 4 字节 CRC 校验
+            if (pngStart + len <= headerData.size()) {
+                QByteArray pngData = headerData.mid(pngStart, len);
+                QImage img;
+                if (img.loadFromData(pngData, "PNG")) {
+                    qDebug() << "[MediaColorExtractor][AI] 成功提取内嵌 PNG 预览：" << filePath;
+                    return img;
+                }
+            }
+        }
     }
 
-    qDebug() << "[MediaColorExtractor][AI] 内嵌预览提取成功：" << filePath;
-    return img;
+    // 3. 如果内嵌数据流未开启，尝试通过 Windows Shell 提取（如电脑安装了 Adobe AI 组件）
+    QImage shellImg = WindowsShellThumbnailProvider::getShellThumbnail(filePath, 256);
+    if (!shellImg.isNull()) {
+        qDebug() << "[MediaColorExtractor][AI] 成功通过 Windows Shell 提取：" << filePath;
+        return shellImg;
+    }
+
+    return QImage();
 }
 
 QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
