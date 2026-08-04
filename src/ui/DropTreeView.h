@@ -19,6 +19,11 @@ public:
      */
     int rowHeight(const QModelIndex& index) const { return QTreeView::rowHeight(index); }
 
+    /**
+     * @brief 设置空状态时的占位文本提示
+     */
+    void setEmptyHint(const QString& hint) { m_emptyHint = hint; }
+
 signals:
     void notesDropped(const QList<int>& noteIds, const QModelIndex& targetIndex);
     void pathsDropped(const QStringList& paths, const QModelIndex& targetIndex);
@@ -30,11 +35,13 @@ protected:
     void startDrag(Qt::DropActions supportedActions) override;
 
     void keyboardSearch(const QString& search) override;
+    void paintEvent(QPaintEvent* event) override;
 
 private:
     // 2026-06-xx 物理辅助：拖拽悬停自动展开
     QTimer* m_autoExpandTimer = nullptr;
     QModelIndex m_hoverIndex;
+    QString m_emptyHint;
 };
 
 } // namespace ArcMeta

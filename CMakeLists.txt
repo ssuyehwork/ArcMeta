@@ -108,6 +108,8 @@ set(SOURCES
     src/ui/CategoryPanel.h
     src/ui/CategorySetPasswordDialog.cpp
     src/ui/CategorySetPasswordDialog.h
+    src/ui/CategoryLockWidget.cpp
+    src/ui/CategoryLockWidget.h
     src/ui/ColorPicker.cpp
     src/ui/ColorPicker.h
     src/ui/ContentPanel.cpp
