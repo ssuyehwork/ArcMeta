@@ -919,6 +919,98 @@ void CategoryPanel::onEmptyTrash() {
     }
 }
 
+void CategoryPanel::onScanAndCleanEmptyArcs() {
+    // 🚨 核心阻断：防止重复高频点击触发扫描风暴
+    m_btnScan->setEnabled(false);
+    m_btnScan->setIcon(UiHelper::getIcon("sync", QColor("#888888"), 16));
+
+    // 使用 QtConcurrent 在线程池中执行物理磁盘扫描，避免阻塞主线程 UI
+    QtConcurrent::run([this]() {
+        const auto drives = QDir::drives();
+        int cleanCount = 0;
+        QStringList allEmptyArcDirs;
+        QStringList allEmptyFolderIds;
+
+        for (const QFileInfo& drive : drives) {
+            QString letter = drive.absolutePath().left(1).toUpper();
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(drive.absolutePath().toStdWString());
+            if (volSerial == L"UNKNOWN") continue;
+
+            // 获取资源库根目录绝对路径
+            std::wstring managedRootW = MetadataManager::getManagedLibraryPath(volSerial, letter);
+            if (managedRootW.empty()) continue;
+
+            QString managedRoot = QString::fromStdWString(managedRootW);
+            QDir libDir(managedRoot);
+            if (!libDir.exists()) continue;
+
+            // 寻找全部 .arc 格式容器文件夹
+            QStringList arcEntries = libDir.entryList({"*.arc"}, QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
+            for (const QString& arcName : arcEntries) {
+                // 托管包文件夹名格式必须为 13 位 Base36 (例如 00ms73182x000.arc)
+                QFileInfo arcInfo(libDir.absoluteFilePath(arcName));
+                QString baseName = arcInfo.completeBaseName();
+                if (baseName.length() != 13) continue;
+
+                QDir arcDir(arcInfo.absoluteFilePath());
+                // 获取包内所有物理项：排除隐藏的 _thumbnail.png 以及 .ArcMeta.json 配置文件以外
+                QStringList entries = arcDir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
+                bool hasRealMaterials = false;
+                for (const QString& fName : entries) {
+                    if (fName.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
+                    if (fName.compare(".ArcMeta.json", Qt::CaseInsensitive) == 0) continue;
+                    hasRealMaterials = true;
+                    break;
+                }
+
+                // 如果确实是空的包，记录路径 and 13 位 ID 进行级联抹除
+                if (!hasRealMaterials) {
+                    allEmptyArcDirs << arcInfo.absoluteFilePath();
+                    allEmptyFolderIds << baseName;
+                }
+            }
+        }
+
+        // 批量对数据库与磁盘进行擦除
+        if (!allEmptyArcDirs.isEmpty()) {
+            // 1. 批量清理数据库元数据记录（涉及 metadata 和 category_items 的级联删除）
+            MetadataManager::instance().removeMetadataBatchSync(allEmptyArcDirs);
+
+            // 2. 物理彻底擦除磁盘空目录
+            for (const QString& path : allEmptyArcDirs) {
+                QDir(path).removeRecursively();
+            }
+            cleanCount = allEmptyArcDirs.size();
+        }
+
+        // 3. 在主线程同步 UI 数据、播放反馈通知并恢复按钮状态
+        QMetaObject::invokeMethod(this, [this, cleanCount]() {
+            m_btnScan->setEnabled(true);
+            m_btnScan->setIcon(UiHelper::getIcon("sync", QColor("#B0B0B0"), 16));
+
+            if (cleanCount > 0) {
+                // 重新计数对账以更新侧边栏和主界面
+                CategoryRepo::fullRecount();
+                requestRefresh(true);
+
+                // 尝试寻找主面板进行内容区全局自愈重构刷新
+                QWidget* mw = window();
+                if (mw) {
+                    QMetaObject::invokeMethod(mw, "refreshAll", Qt::QueuedConnection);
+                }
+
+                ToolTipOverlay::instance()->showText(QCursor::pos(),
+                    QString("<b style='color:#00A650;'>已成功清理 %1 个空白托管包</b>").arg(cleanCount),
+                    2500, QColor("#00A650"));
+            } else {
+                ToolTipOverlay::instance()->showText(QCursor::pos(),
+                    "<b style='color:#CCCCCC;'>未检测到多余的空白托管包</b>",
+                    2000, QColor("#2D2D2D"));
+            }
+        });
+    });
+}
+
 void CategoryPanel::onRestoreAllFromTrash() {
     // 1. 获取回收站内所有 FID
     // 物理修复：明确作用域标识符 CategoryRepo::TRASH_CATEGORY_ID
@@ -969,6 +1061,28 @@ void CategoryPanel::initUi() {
     titleLabel->setStyleSheet(QString("font-size: 13px; font-weight: bold; color: %1; background: transparent; border: none;").arg(qssColor(PrimaryBlue)));
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
+
+    // 2026-07-xx 按照用户要求 (Modification_Plan-36)：在分类标题栏右侧加入一键扫描空托管包按钮
+    m_btnScan = new QPushButton(header);
+    m_btnScan->setFixedSize(24, 24);
+    m_btnScan->setIcon(UiHelper::getIcon("sync", QColor("#B0B0B0"), 16));
+    m_btnScan->setStyleSheet(
+        "QPushButton { "
+        "  background: transparent; "
+        "  border: none; "
+        "  border-radius: 3px; "
+        "} "
+        "QPushButton:hover { "
+        "  background-color: #3E3E42; "
+        "} "
+        "QPushButton:pressed { "
+        "  background-color: #4E4E52; "
+        "}"
+    );
+    m_btnScan->setProperty("tooltipText", "扫描并清理空白托管包");
+    m_btnScan->installEventFilter(this); // 复用既有悬停滤镜以触发 tooltip
+    connect(m_btnScan, &QPushButton::clicked, this, &CategoryPanel::onScanAndCleanEmptyArcs);
+    headerLayout->addWidget(m_btnScan);
 
     m_mainLayout->addWidget(header);
 
