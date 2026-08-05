@@ -924,7 +924,7 @@ void CategoryPanel::onEmptyTrash() {
 void CategoryPanel::onScanAndCleanEmptyArcs() {
     // 🚨 核心阻断：防止重复高频点击触发扫描风暴
     m_btnScan->setEnabled(false);
-    m_btnScan->setIcon(UiHelper::getIcon("sync", QColor("#888888"), 16));
+    m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#888888"), 16));
 
     // 使用 QtConcurrent 在线程池中执行物理磁盘与数据库双向深度清理对账扫描，避免阻塞主线程 UI
     (void)QtConcurrent::run([this]() {
@@ -1104,7 +1104,7 @@ void CategoryPanel::onScanAndCleanEmptyArcs() {
         // 4. 在主线程同步 UI 数据、播放反馈通知并恢复按钮状态
         QMetaObject::invokeMethod(this, [this, cleanCount, ghostCount, orphanCount]() {
             m_btnScan->setEnabled(true);
-            m_btnScan->setIcon(UiHelper::getIcon("sync", QColor("#B0B0B0"), 16));
+            m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#B0B0B0"), 16));
 
             int totalCleaned = cleanCount + ghostCount;
             if (totalCleaned > 0 || orphanCount > 0) {
@@ -1187,7 +1187,7 @@ void CategoryPanel::initUi() {
     // 2026-07-xx 按照用户要求 (Modification_Plan-36)：在分类标题栏右侧加入一键扫描空托管包按钮
     m_btnScan = new QPushButton(header);
     m_btnScan->setFixedSize(24, 24);
-    m_btnScan->setIcon(UiHelper::getIcon("sync", QColor("#B0B0B0"), 16));
+    m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#B0B0B0"), 16));
     m_btnScan->setStyleSheet(
         "QPushButton { "
         "  background: transparent; "
