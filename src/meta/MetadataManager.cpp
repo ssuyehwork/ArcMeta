@@ -1743,9 +1743,6 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
     if (totalDelta != 0) CategoryRepo::incrementTotalFileCount(totalDelta);
     if (!allFids.empty()) CategoryRepo::removeAllCategoriesBatch(allFids);
     
-    // 🚨 按照用户对账反馈：强制标记侧边栏计数已过期，防止缓存导致侧边栏计数未同步刷新
-    CategoryRepo::s_countsDirty.store(true);
-
     notifyFullUIRebuild();
 
     // 关键操作后即时异步落盘
