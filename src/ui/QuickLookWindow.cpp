@@ -1,6 +1,7 @@
 #include "QuickLookWindow.h"
 #include "UiHelper.h"
 #include "ShellIconManager.h"
+#include "MediaColorExtractor.h"
 #include "StyleLibrary.h"
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -354,17 +355,25 @@ void QuickLookWindow::renderImage(const QString& path) {
         if (ext == "svg") {
             QSvgRenderer renderer(path);
             if (renderer.isValid()) {
-                img = QImage(1024, 1024, QImage::Format_ARGB32);
+                img = QImage(2048, 2048, QImage::Format_ARGB32);
                 img.fill(Qt::transparent);
                 QPainter painter(&img);
                 renderer.render(&painter);
             }
+        } else if (ext == "ai" || ext == "eps" || ext == "psd" || ext == "psb") {
+            // 🚨 核心修复：针对 ai / eps / psd，直接唤醒 MediaColorExtractor 原生多通道解码与 Ghostscript 引擎！
+            // 传入 2048 像素提取超高清全屏预览大图！
+            img = MediaColorExtractor::getImageForAnalysis(path, 2048);
         } else if (QT_NATIVE_FORMATS.contains(ext)) {
             img.load(path);
         } else {
-            img = ShellIconManager::getShellThumbnail(path, 4096);
+            // 其它格式优先尝试 MediaColorExtractor 提取，失败再尝试 Shell 提图
+            img = MediaColorExtractor::getImageForAnalysis(path, 2048);
             if (img.isNull()) {
-                img.load(path);
+                img = ShellIconManager::getShellThumbnail(path, 4096);
+                if (img.isNull()) {
+                    img.load(path);
+                }
             }
         }
 
