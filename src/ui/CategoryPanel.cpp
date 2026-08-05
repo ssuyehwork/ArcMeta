@@ -16,10 +16,12 @@ using namespace ArcMeta::Style;
 #include "FramelessDialog.h"
 #include "BatchProgressDialog.h"
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QTimer>
 #include <QRegularExpression>
 #include "../meta/CategoryRepo.h"
+#include "../meta/DatabaseManager.h"
 #include "../util/ShellHelper.h"
 
 
