@@ -581,13 +581,28 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path, int t
 }
 
 QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
+    QFileInfo fi(path);
+
+    // 1. 优先检查：如果文件位于 .arc 胶囊容器内，直接检查同级 _thumbnail.png！
+    QString containerDir = fi.absolutePath();
+    if (containerDir.endsWith(".arc", Qt::CaseInsensitive)) {
+        QString thumbPath = containerDir + "/" + fi.completeBaseName() + "_thumbnail.png";
+        if (QFile::exists(thumbPath)) {
+            QImage arcThumb;
+            if (arcThumb.load(thumbPath)) {
+                // 瞬间直接返回硬盘上现成的缩略图，绝对不重新跑 Ghostscript！
+                return arcThumb;
+            }
+        }
+    }
+
+    // 2. 磁盘模式检查：检查 .arcmeta/disk_thumbs/ 缓存
     QString cachePath = diskThumbCachePath(path, size);
     if (QFile::exists(cachePath)) {
         QImage cached;
         if (cached.load(cachePath)) return cached;
     }
 
-    QFileInfo fi(path);
     QString ext = fi.suffix().toLower();
     QImage img;
 
