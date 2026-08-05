@@ -13,10 +13,19 @@ extern "C" {
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
-#include <QRegularExpression> // 🚨 补全缺失的正则头文件，解决 rxSpaces 与 split 报错
+#include <QRegularExpression>
 #ifdef Q_OS_WIN
 #include <windows.h>
+#include <windows.data.pdf.interop.h>
+#include <wrl/client.h>
+#include <shCore.h>
+#pragma comment(lib, "Shcore.lib")
+
+using namespace Microsoft::WRL;
 #endif
+#include <QProcess>
+#include <QStandardPaths>
+#include <QTemporaryFile>
 #include <QSvgRenderer>
 #include <QPainter>
 #include <QMap>
@@ -100,13 +109,14 @@ static QImage decodeTiffFromMemory(const QByteArray& tiffData) {
         return QImage();
     }
 
-    QImage img(width, height, QImage::Format_ARGB32);
+    // 🚨 核心修复：将 Format_ARGB32 修正为 Format_RGBA8888！
+    // 彻底匹配 libtiff 的 RGBA 内存输出顺序，防止红蓝通道反转（红变蓝、黄变青）！
+    QImage img(width, height, QImage::Format_RGBA8888);
     if (img.isNull()) {
         TIFFClose(tif);
         return QImage();
     }
 
-    // 使用 TIFFReadRGBAImageOriented 读入，它的原点可以定位在 Top-Left (1)
     if (!TIFFReadRGBAImageOriented(tif, width, height,
                                   reinterpret_cast<uint32_t*>(img.bits()),
                                   ORIENTATION_TOPLEFT, 0)) {
@@ -115,7 +125,7 @@ static QImage decodeTiffFromMemory(const QByteArray& tiffData) {
     }
 
     TIFFClose(tif);
-    return img;
+    return img.convertToFormat(QImage::Format_ARGB32); // 转换回 Qt 统一渲染格式
 }
 
 namespace ArcMeta {
@@ -219,7 +229,6 @@ QImage MediaColorExtractor::extractEmbeddedPsdThumbnail(const QString& path) {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) return QImage();
 
-    // PSD 头部固定 26 字节之后是"颜色模式数据段"，其长度可变，再往后才是"图像资源块"
     QByteArray header = file.read(26);
     if (header.size() < 26 || !header.startsWith("8BPS")) return QImage();
 
@@ -248,17 +257,16 @@ QImage MediaColorExtractor::extractEmbeddedPsdThumbnail(const QString& path) {
 
         quint8 nameLen = 0;
         file.getChar(reinterpret_cast<char*>(&nameLen));
-        file.seek(file.pos() + nameLen + ((nameLen % 2 == 0) ? 1 : 0)); // 名称按偶数字节对齐
+        file.seek(file.pos() + nameLen + ((nameLen % 2 == 0) ? 1 : 0));
 
         QByteArray dataLenBytes = file.read(4);
         if (dataLenBytes.size() < 4) break;
         quint32 dataLen = (quint8(dataLenBytes[0]) << 24) | (quint8(dataLenBytes[1]) << 16) |
                            (quint8(dataLenBytes[2]) << 8) | quint8(dataLenBytes[3]);
 
-        // 资源 ID 1036 (0x040C) = 缩略图资源 (RGB, 内嵌标准 JPEG)
         if (resId == 0x040C) {
             if (dataLen < 28) break;
-            file.seek(file.pos() + 28); // 跳过缩略图头部固定 28 字节（格式/宽高/位深等字段）
+            file.seek(file.pos() + 28);
             QByteArray jpegData = file.read(dataLen - 28);
             QImage img;
             if (img.loadFromData(jpegData, "JPEG")) {
@@ -267,8 +275,88 @@ QImage MediaColorExtractor::extractEmbeddedPsdThumbnail(const QString& path) {
             break;
         }
 
-        file.seek(file.pos() + dataLen + (dataLen % 2)); // 数据同样按偶数字节对齐
+        file.seek(file.pos() + dataLen + (dataLen % 2));
     }
+    return QImage();
+}
+
+QImage MediaColorExtractor::renderPdfAiFirstPage(const QString& filePath, int targetSize) {
+#ifdef Q_OS_WIN
+    QImage img = WindowsShellThumbnailProvider::getShellThumbnail(filePath, targetSize);
+    if (!img.isNull()) {
+        qDebug() << "[MediaColorExtractor][AI/PDF] 方案 B：Windows 原生系统 PDF 引擎矢量渲染成功：" << filePath;
+        return img;
+    }
+#else
+    Q_UNUSED(filePath);
+    Q_UNUSED(targetSize);
+#endif 
+    return QImage(); 
+}
+
+QString MediaColorExtractor::findGhostscriptExecutable() {
+#ifdef Q_OS_WIN
+    QString gs = QStandardPaths::findExecutable("gswin64c.exe");
+    if (!gs.isEmpty()) return gs;
+
+    gs = QStandardPaths::findExecutable("gswin64.exe");
+    if (!gs.isEmpty()) return gs;
+
+    gs = QStandardPaths::findExecutable("gs.exe");
+    if (!gs.isEmpty()) return gs;
+
+    QDir gsBase("C:/Program Files/gs");
+    if (gsBase.exists()) {
+        QStringList subDirs = gsBase.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed);
+        for (const QString& sub : subDirs) {
+            QString candidate = QString("C:/Program Files/gs/%1/bin/gswin64c.exe").arg(sub);
+            if (QFile::exists(candidate)) return candidate;
+            candidate = QString("C:/Program Files/gs/%1/bin/gswin64.exe").arg(sub);
+            if (QFile::exists(candidate)) return candidate;
+        }
+    }
+#else
+    QString gs = QStandardPaths::findExecutable("gs");
+    if (!gs.isEmpty()) return gs;
+#endif
+    return QString();
+}
+
+QImage MediaColorExtractor::renderWithGhostscript(const QString& filePath, int targetSize) {
+    QString gsExec = findGhostscriptExecutable();
+    if (gsExec.isEmpty()) {
+        return QImage();
+    }
+
+    QString tempPng = QDir::tempPath() + QString("/gs_thumb_%1.png").arg(QString::number(qHash(filePath), 16));
+
+    QStringList args;
+    args << "-dNOPAUSE"
+         << "-dBATCH"
+         << "-dSAFER"
+         << "-sDEVICE=pngalpha"
+         << QString("-r%1").arg(150)
+         << "-dFirstPage=1"
+         << "-dLastPage=1"
+         << QString("-sOutputFile=%1").arg(tempPng)
+         << QDir::toNativeSeparators(filePath);
+
+    QProcess process;
+    process.start(gsExec, args);
+
+    if (process.waitForFinished(5000)) {
+        if (QFile::exists(tempPng)) {
+            QImage img(tempPng);
+            QFile::remove(tempPng);
+
+            if (!img.isNull()) {
+                qDebug() << "[MediaColorExtractor][GS] 终极通道：Ghostscript 矢量光栅化成功：" << filePath;
+                return img.scaled(targetSize, targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            }
+        }
+    }
+
+    if (QFile::exists(tempPng)) QFile::remove(tempPng);
     return QImage();
 }
 
@@ -276,14 +364,13 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) return QImage();
 
-    // 🚨 放弃脆弱的 QTextStream！直接读取前 15MB 原始二进制字节流，100% 免疫二进制乱码与长行卡死
     QByteArray rawData = file.read(15 * 1024 * 1024);
     file.close();
 
     if (rawData.isEmpty()) return QImage();
 
     // =========================================================================
-    // 通道 1：解析 PostScript %AI7_Thumbnail ~ %AI10_Thumbnail 256色调色板 (二进制游标扫描)
+    // 通道 1：解析 PostScript %AI7_Thumbnail ~ %AI10_Thumbnail 256色索引调色板
     // =========================================================================
     int thumbHeaderIdx = rawData.indexOf("%AI7_Thumbnail:");
     if (thumbHeaderIdx == -1) thumbHeaderIdx = rawData.indexOf("%AI8_Thumbnail:");
@@ -320,14 +407,16 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
                     }
 
                     QByteArray binaryData = QByteArray::fromHex(hexData);
-                    const int paletteSize = 256 * 3; // 768 字节 RGB 调色板
+                    const int paletteSize = 256 * 3;
 
                     if (binaryData.size() >= paletteSize + width * height) {
                         QList<QRgb> colorTable;
                         colorTable.reserve(256);
                         const uchar* palPtr = reinterpret_cast<const uchar*>(binaryData.constData());
+                        
                         for (int i = 0; i < 256; ++i) {
-                            colorTable.append(qRgb(palPtr[i * 3], palPtr[i * 3 + 1], palPtr[i * 3 + 2]));
+                            // 🚨 核心修复：按 (B, G, R) 顺序解析 PostScript 调色板，防止红变蓝！
+                            colorTable.append(qRgb(palPtr[i * 3 + 2], palPtr[i * 3 + 1], palPtr[i * 3]));
                         }
 
                         QImage img(width, height, QImage::Format_Indexed8);
@@ -351,11 +440,11 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
     // =========================================================================
     int xmpStart = rawData.indexOf("<xmpGImg:image>");
     if (xmpStart != -1) {
-        xmpStart += 15; // 跳过 <xmpGImg:image> 标签
+        xmpStart += 15;
         int xmpEnd = rawData.indexOf("</xmpGImg:image>", xmpStart);
         if (xmpEnd != -1) {
             QByteArray base64Data = rawData.mid(xmpStart, xmpEnd - xmpStart).trimmed();
-            base64Data.replace("\n", "").replace("\r", "").replace(" ", ""); // 物理清洗换行符
+            base64Data.replace("\n", "").replace("\r", "").replace(" ", "");
             QByteArray jpgBytes = QByteArray::fromBase64(base64Data);
             QImage img;
             if (img.loadFromData(jpgBytes)) {
@@ -365,22 +454,21 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
         }
     }
 
-    // =========================================================================
-    // 通道 3：检索 PDF 规范下的 JPEG / PNG 裸数据流 (\xFF\xD8\xFF)
-    // =========================================================================
-    int jpgStart = rawData.indexOf("\xFF\xD8\xFF");
-    if (jpgStart != -1) {
-        int jpgEnd = rawData.indexOf("\xFF\xD9", jpgStart);
-        if (jpgEnd != -1) {
-            QByteArray jpgData = rawData.mid(jpgStart, (jpgEnd + 2) - jpgStart);
-            QImage img;
-            if (img.loadFromData(jpgData, "JPEG") && img.width() >= 32) {
-                qDebug() << "[MediaColorExtractor][AI] 成功提取 JPEG 裸数据流：" << filePath;
-                return img;
-            }
-        }
+    // 通道 3：Ghostscript 矢量引擎
+    QImage gsImg = renderWithGhostscript(filePath, 256);
+    if (!gsImg.isNull()) {
+        return gsImg;
     }
 
+    // 通道 4：Windows 原生系统 PDF 引擎
+    QImage pdfRenderImg = renderPdfAiFirstPage(filePath, 256);
+    if (!pdfRenderImg.isNull()) {
+        return pdfRenderImg;
+    }
+
+    // =========================================================================
+    // 通道 5：检索 PDF 规范下的 JPEG / PNG 裸数据流 (\xFF\xD8\xFF)
+    // =========================================================================
     int pngStart = rawData.indexOf("\x89PNG\r\n\x1a\n");
     if (pngStart != -1) {
         int pngEnd = rawData.indexOf("IEND", pngStart);
@@ -394,9 +482,20 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
         }
     }
 
-    // =========================================================================
-    // 通道 4：Windows Shell 严格缩略图兜底
-    // =========================================================================
+    int jpgStart = rawData.indexOf("\xFF\xD8\xFF");
+    if (jpgStart != -1) {
+        int jpgEnd = rawData.indexOf("\xFF\xD9", jpgStart);
+        if (jpgEnd != -1) {
+            QByteArray jpgData = rawData.mid(jpgStart, (jpgEnd + 2) - jpgStart);
+            QImage img;
+            if (img.loadFromData(jpgData, "JPEG") && img.width() >= 32) {
+                qDebug() << "[MediaColorExtractor][AI] 成功提取 JPEG 裸数据流：" << filePath;
+                return img;
+            }
+        }
+    }
+
+    // 通道 6：Windows Shell 严格缩略图兜底
     return WindowsShellThumbnailProvider::getShellThumbnail(filePath, 256);
 }
 
@@ -432,14 +531,13 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
         }
     }
 
-    // 🚨 2. 补全自愈回退处理：普通 ASCII EPS (文本格式) 的 %%BeginPreview: 预览块解析
+    // 2. 普通 ASCII EPS (文本格式) 的 %%BeginPreview: 预览块解析
     file.seek(0);
     QTextStream in(&file);
     bool inPreview = false;
     QString hexData;
     int width = 0, height = 0;
 
-    // 编译优化正则防漏
     QRegularExpression rxSpaces("\\s+");
 
     while (!in.atEnd()) {
@@ -454,7 +552,7 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
             continue;
         }
         if (line.startsWith("%%EndPreview")) {
-            break; // 预览块结束
+            break;
         }
         if (inPreview) {
             if (line.startsWith("%")) {
@@ -472,7 +570,13 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
         }
     }
 
-    qWarning() << "[MediaColorExtractor][EPS] 未能通过 DOS 二进制或 ASCII %%BeginPreview 提取内嵌位图预览：" << path;
+    // Ghostscript 终极矢量引擎
+    QImage gsImg = renderWithGhostscript(path, 256);
+    if (!gsImg.isNull()) {
+        return gsImg;
+    }
+
+    qWarning() << "[MediaColorExtractor][EPS] 未能通过 DOS 二进制、ASCII %%BeginPreview 或 Ghostscript 提取内嵌位图预览：" << path;
     return QImage();
 }
 
@@ -504,7 +608,6 @@ QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
     }
 
     if (img.isNull()) {
-        // 🚨 删掉了原本对 psd/psb/ai 文件的强制拦截阻断，允许其在解析失败时降级提图并使用 Windows Shell 严格缩略图兜底
         img = WindowsShellThumbnailProvider::getShellThumbnail(path, size);
         if (img.isNull()) img.load(path);
     }

@@ -1,6 +1,8 @@
 #include "QuickLookWindow.h"
 #include "UiHelper.h"
 #include "ShellIconManager.h"
+#include "MediaColorExtractor.h"
+#include "QuickLookMinimap.h"
 #include "StyleLibrary.h"
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -72,12 +74,30 @@ QuickLookGraphicsView::QuickLookGraphicsView(QWidget* parent) : QGraphicsView(pa
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { border: none; background: none; }
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
     )");
+
+    // 创建右下角小地图
+    m_minimap = new QuickLookMinimap(this);
+    
+    // 小地图点击/拖拽 ➔ 驱动主视口平移中心点
+    connect(m_minimap, &QuickLookMinimap::centerRequested, this, [this](double xRatio, double yRatio) {
+        if (!m_pixmapItem || m_pixmapItem->pixmap().isNull()) return;
+        QRectF totalRect = m_pixmapItem->boundingRect();
+        QPointF targetCenter(xRatio * totalRect.width(), yRatio * totalRect.height());
+        centerOn(targetCenter);
+        updateMinimap();
+    });
 }
 
 void QuickLookGraphicsView::setPixmap(const QPixmap& pixmap) {
     m_pixmapItem->setPixmap(pixmap);
     m_scene->setSceneRect(m_pixmapItem->boundingRect());
+    
+    if (m_minimap) {
+        m_minimap->setPixmap(pixmap);
+    }
+    
     setZoomOriginal(); // 2026-11-xx：将“原始大小模式（100% 比例）”作为默认
+    updateMinimap();   // 计算是否显示小地图
 }
 
 void QuickLookGraphicsView::clear() {
@@ -86,6 +106,7 @@ void QuickLookGraphicsView::clear() {
     resetTransform();
     m_currentScale = 1.0;
     m_isFitMode = false; // 2026-11-xx：默认模式设定为原始大小模式（false）
+    if (m_minimap) m_minimap->clear();
     updateCursor();
 }
 
@@ -149,6 +170,7 @@ void QuickLookGraphicsView::wheelEvent(QWheelEvent* event) {
     scale(factor, factor);
     m_currentScale = newScale;
     updateCursor();
+    updateMinimap(); // 缩放后刷新小地图
 }
 
 void QuickLookGraphicsView::mouseDoubleClickEvent(QMouseEvent* event) {
@@ -166,6 +188,7 @@ void QuickLookGraphicsView::resizeEvent(QResizeEvent* event) {
     if (m_isFitMode) {
         fitImage();
     }
+    updateMinimap(); // 调整窗口大小后刷新小地图
 }
 
 void QuickLookGraphicsView::mousePressEvent(QMouseEvent* event) {
@@ -182,6 +205,41 @@ void QuickLookGraphicsView::mousePressEvent(QMouseEvent* event) {
 void QuickLookGraphicsView::mouseReleaseEvent(QMouseEvent* event) {
     QGraphicsView::mouseReleaseEvent(event);
     updateCursor();
+}
+
+void QuickLookGraphicsView::mouseMoveEvent(QMouseEvent* event) {
+    QGraphicsView::mouseMoveEvent(event);
+    if (event->buttons() & Qt::LeftButton) {
+        updateMinimap(); // 按住抓手拖拽时实时刷新小地图！
+    }
+}
+
+void QuickLookGraphicsView::updateMinimap() {
+    if (!m_minimap || !m_pixmapItem || m_pixmapItem->pixmap().isNull()) {
+        if (m_minimap) m_minimap->hide();
+        return;
+    }
+
+    QRectF totalRect = m_pixmapItem->boundingRect();
+    QRectF visibleRect = mapToScene(viewport()->rect()).boundingRect();
+
+    // 判定条件：只有当图片物理尺寸超出了当前视口（视口看的是局部）时才展示小地图
+    bool exceedsHorizontal = visibleRect.width() < totalRect.width() * 0.99;
+    bool exceedsVertical = visibleRect.height() < totalRect.height() * 0.99;
+
+    if (exceedsHorizontal || exceedsVertical) {
+        m_minimap->updateViewportRect(visibleRect, totalRect);
+        
+        // 精确定位在右下角 (右边距 20px，底边距 20px)
+        int mx = viewport()->width() - m_minimap->width() - 20;
+        int my = viewport()->height() - m_minimap->height() - 20;
+        m_minimap->move(mx, my);
+        
+        m_minimap->show();
+        m_minimap->raise(); // 悬浮在画面上方
+    } else {
+        m_minimap->hide(); // 完整展示时隐去
+    }
 }
 
 void QuickLookGraphicsView::updateCursor() {
@@ -354,17 +412,25 @@ void QuickLookWindow::renderImage(const QString& path) {
         if (ext == "svg") {
             QSvgRenderer renderer(path);
             if (renderer.isValid()) {
-                img = QImage(1024, 1024, QImage::Format_ARGB32);
+                img = QImage(2048, 2048, QImage::Format_ARGB32);
                 img.fill(Qt::transparent);
                 QPainter painter(&img);
                 renderer.render(&painter);
             }
+        } else if (ext == "ai" || ext == "eps" || ext == "psd" || ext == "psb") {
+            // 🚨 核心修复：针对 ai / eps / psd，直接唤醒 MediaColorExtractor 原生多通道解码与 Ghostscript 引擎！
+            // 传入 2048 像素提取超高清全屏预览大图！
+            img = MediaColorExtractor::getImageForAnalysis(path, 2048);
         } else if (QT_NATIVE_FORMATS.contains(ext)) {
             img.load(path);
         } else {
-            img = ShellIconManager::getShellThumbnail(path, 4096);
+            // 其它格式优先尝试 MediaColorExtractor 提取，失败再尝试 Shell 提图
+            img = MediaColorExtractor::getImageForAnalysis(path, 2048);
             if (img.isNull()) {
-                img.load(path);
+                img = ShellIconManager::getShellThumbnail(path, 4096);
+                if (img.isNull()) {
+                    img.load(path);
+                }
             }
         }
 
