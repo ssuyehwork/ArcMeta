@@ -153,7 +153,7 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     } 
  
     // 4. 生成容器内配套的预渲染缩略图 
-    QImage thumb = MediaColorExtractor::getImageForAnalysis(destPath, 256); 
+    QImage thumb = MediaColorExtractor::getImageForAnalysis(destPath, 512);
     if (!thumb.isNull()) { 
         QString baseName = QFileInfo(fileName).completeBaseName(); 
         QString thumbPath = containerDir + "/" + baseName + "_thumbnail.png"; 

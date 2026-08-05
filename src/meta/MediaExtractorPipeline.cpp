@@ -208,7 +208,7 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     
     if (!m_isCanceled.load()) {
         if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-            QImage img = MediaColorExtractor::getImageForAnalysis(qPath, 256);
+            QImage img = MediaColorExtractor::getImageForAnalysis(qPath, 512);
             if (!img.isNull()) {
                 // 🚨 物理落盘核心：如果是在 .arc 资产包内，直接保存为 [baseName]_thumbnail.png！
                 QString containerDir = info.absolutePath();
@@ -216,7 +216,7 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
                     QString baseName = info.completeBaseName();
                     QString thumbPath = containerDir + "/" + baseName + "_thumbnail.png";
                     if (!QFile::exists(thumbPath)) {
-                        img.save(thumbPath, "PNG"); // 保存高清 256x256 缩略图
+                        img.save(thumbPath, "PNG"); // 保存高清 512x512 缩略图
                         qDebug() << "[Pipeline] 成功生成并物理落盘 .arc 缩略图:" << thumbPath;
                     }
                 }
@@ -299,7 +299,7 @@ bool MediaExtractorPipeline::extractColor(const std::wstring& path, std::wstring
 
     if (info.isFile()) {
         if (MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-            QImage img = MediaColorExtractor::getImageForAnalysis(qPath, 256);
+            QImage img = MediaColorExtractor::getImageForAnalysis(qPath, 512);
             if (!img.isNull()) {
                 auto palette = MediaColorExtractor::extractPalette(qPath);
                 if (!palette.isEmpty()) {

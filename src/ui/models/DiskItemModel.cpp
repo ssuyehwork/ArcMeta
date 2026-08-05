@@ -194,7 +194,7 @@ void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
 
             // 🚨 核心关键修复：调用 MediaColorExtractor 多媒体提图引擎！
             // 自动唤醒解包 EPS/PSD/AI/SVG 并在 .arcmeta/disk_thumbs/ 自动生成 PNG 缓存
-            QImage img = MediaColorExtractor::getImageForAnalysis(path, 256);
+            QImage img = MediaColorExtractor::getImageForAnalysis(path, 512);
 
             double ar = 1.0;
             bool hasThumb = false;
