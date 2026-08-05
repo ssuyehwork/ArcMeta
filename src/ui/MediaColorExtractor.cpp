@@ -274,93 +274,109 @@ QImage MediaColorExtractor::extractEmbeddedPsdThumbnail(const QString& path) {
 
 QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
     QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        qWarning() << "[MediaColorExtractor][AI] 文件打开失败：" << filePath;
-        return QImage();
-    }
+    if (!file.open(QIODevice::ReadOnly)) return QImage();
 
-    // 1. 优先通道：解析 Adobe Illustrator %AI7_Thumbnail / %AI9_Thumbnail 256色索引调色板
-    QTextStream in(&file);
-    int width = 0, height = 0;
-    bool inThumbBlock = false;
-    QString hexData;
-
-    int lineCount = 0;
-    while (!in.atEnd() && lineCount++ < 50000) {
-        QString line = in.readLine();
-
-        if (!inThumbBlock) {
-            if (line.contains("%AI7_Thumbnail:") || line.contains("%AI8_Thumbnail:") ||
-                line.contains("%AI9_Thumbnail:") || line.contains("%AI10_Thumbnail:")) {
-
-                QStringList parts = line.section(':', 1).trimmed().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-                if (parts.size() >= 2) {
-                    width = parts[0].toInt();
-                    height = parts[1].toInt();
-                    inThumbBlock = true;
-                }
-            }
-        } else {
-            if (line.contains("%AI7_ThumbnailEnd") || line.contains("%AI9_ThumbnailEnd") ||
-                line.contains("%%EndData") || (!line.startsWith("%") && !line.trimmed().isEmpty())) {
-                break;
-            }
-            if (line.startsWith("%")) {
-                hexData.append(line.mid(1).trimmed());
-            }
-        }
-    }
-
-    if (!hexData.isEmpty() && width > 0 && height > 0) {
-        QByteArray binaryData = QByteArray::fromHex(hexData.toLatin1());
-
-        // 🚨【核心修正】：放弃错误的 qUncompress，直接解析 Adobe 256色索引调色板 (Indexed8)
-        const int paletteSize = 256 * 3; // 768 字节的 RGB 调色板
-
-        // A. 24-bit 裸 RGB 模式
-        if (binaryData.size() == width * height * 3) {
-            QImage temp(reinterpret_cast<const uchar*>(binaryData.constData()), width, height, width * 3, QImage::Format_RGB888);
-            QImage img = temp.copy(); // 自动对齐处理
-            if (!img.isNull()) return img;
-        }
-        // B. 8-bit 256色索引调色板模式（绝大多数 AI 文件的标准）
-        else if (binaryData.size() >= paletteSize + width * height) {
-            QList<QRgb> colorTable;
-            colorTable.reserve(256);
-            const uchar* palPtr = reinterpret_cast<const uchar*>(binaryData.constData());
-
-            for (int i = 0; i < 256; ++i) {
-                colorTable.append(qRgb(palPtr[i * 3], palPtr[i * 3 + 1], palPtr[i * 3 + 2]));
-            }
-
-            QImage img(width, height, QImage::Format_Indexed8);
-            img.setColorTable(colorTable);
-
-            const uchar* pixelPtr = palPtr + paletteSize;
-            for (int y = 0; y < height; ++y) {
-                uchar* scanLine = img.scanLine(y);
-                memcpy(scanLine, pixelPtr + y * width, width);
-            }
-
-            if (!img.isNull()) {
-                qDebug() << "[MediaColorExtractor][AI] 成功解包 256色索引调色板预览：" << filePath;
-                return img.convertToFormat(QImage::Format_ARGB32);
-            }
-        }
-    }
-
-    // 2. 次要通道：检索 PDF 规范下的 JPEG / PNG 流
-    file.seek(0);
+    // 🚨 放弃脆弱的 QTextStream！直接读取前 15MB 原始二进制字节流，100% 免疫二进制乱码与长行卡死
     QByteArray rawData = file.read(15 * 1024 * 1024);
     file.close();
 
+    if (rawData.isEmpty()) return QImage();
+
+    // =========================================================================
+    // 通道 1：解析 PostScript %AI7_Thumbnail ~ %AI10_Thumbnail 256色调色板 (二进制游标扫描)
+    // =========================================================================
+    int thumbHeaderIdx = rawData.indexOf("%AI7_Thumbnail:");
+    if (thumbHeaderIdx == -1) thumbHeaderIdx = rawData.indexOf("%AI8_Thumbnail:");
+    if (thumbHeaderIdx == -1) thumbHeaderIdx = rawData.indexOf("%AI9_Thumbnail:");
+    if (thumbHeaderIdx == -1) thumbHeaderIdx = rawData.indexOf("%AI10_Thumbnail:");
+
+    if (thumbHeaderIdx != -1) {
+        int lineEnd = rawData.indexOf('\n', thumbHeaderIdx);
+        if (lineEnd != -1) {
+            QByteArray headerLine = rawData.mid(thumbHeaderIdx, lineEnd - thumbHeaderIdx);
+            QList<QByteArray> parts = headerLine.section(':', 1).trimmed().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+            if (parts.size() >= 2) {
+                int width = parts[0].toInt();
+                int height = parts[1].toInt();
+
+                int blockEnd = rawData.indexOf("%AI7_ThumbnailEnd", lineEnd);
+                if (blockEnd == -1) blockEnd = rawData.indexOf("%AI9_ThumbnailEnd", lineEnd);
+                if (blockEnd == -1) blockEnd = rawData.indexOf("%%EndData", lineEnd);
+
+                if (blockEnd != -1 && width > 0 && height > 0) {
+                    QByteArray hexData;
+                    hexData.reserve(blockEnd - lineEnd);
+
+                    int cur = lineEnd;
+                    while (cur < blockEnd) {
+                        int nextLine = rawData.indexOf('\n', cur);
+                        if (nextLine == -1) break;
+                        QByteArray line = rawData.mid(cur, nextLine - cur).trimmed();
+                        if (line.startsWith("%")) {
+                            hexData.append(line.mid(1).trimmed());
+                        }
+                        cur = nextLine + 1;
+                    }
+
+                    QByteArray binaryData = QByteArray::fromHex(hexData);
+                    const int paletteSize = 256 * 3; // 768 字节 RGB 调色板
+
+                    if (binaryData.size() >= paletteSize + width * height) {
+                        QList<QRgb> colorTable;
+                        colorTable.reserve(256);
+                        const uchar* palPtr = reinterpret_cast<const uchar*>(binaryData.constData());
+                        for (int i = 0; i < 256; ++i) {
+                            colorTable.append(qRgb(palPtr[i * 3], palPtr[i * 3 + 1], palPtr[i * 3 + 2]));
+                        }
+
+                        QImage img(width, height, QImage::Format_Indexed8);
+                        img.setColorTable(colorTable);
+                        const uchar* pixelPtr = palPtr + paletteSize;
+                        for (int y = 0; y < height; ++y) {
+                            memcpy(img.scanLine(y), pixelPtr + y * width, width);
+                        }
+                        if (!img.isNull()) {
+                            qDebug() << "[MediaColorExtractor][AI] 二进制游标提取 %AI_Thumbnail 成功：" << filePath;
+                            return img.convertToFormat(QImage::Format_ARGB32);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // 通道 2：解析 Adobe XMP 元数据中的 Base64 预览图 (<xmpGImg:image>)
+    // =========================================================================
+    int xmpStart = rawData.indexOf("<xmpGImg:image>");
+    if (xmpStart != -1) {
+        xmpStart += 15; // 跳过 <xmpGImg:image> 标签
+        int xmpEnd = rawData.indexOf("</xmpGImg:image>", xmpStart);
+        if (xmpEnd != -1) {
+            QByteArray base64Data = rawData.mid(xmpStart, xmpEnd - xmpStart).trimmed();
+            base64Data.replace("\n", "").replace("\r", "").replace(" ", ""); // 物理清洗换行符
+            QByteArray jpgBytes = QByteArray::fromBase64(base64Data);
+            QImage img;
+            if (img.loadFromData(jpgBytes)) {
+                qDebug() << "[MediaColorExtractor][AI] 成功解包 Adobe XMP 内嵌 Base64 预览图：" << filePath;
+                return img;
+            }
+        }
+    }
+
+    // =========================================================================
+    // 通道 3：检索 PDF 规范下的 JPEG / PNG 裸数据流 (\xFF\xD8\xFF)
+    // =========================================================================
     int jpgStart = rawData.indexOf("\xFF\xD8\xFF");
     if (jpgStart != -1) {
         int jpgEnd = rawData.indexOf("\xFF\xD9", jpgStart);
         if (jpgEnd != -1) {
             QByteArray jpgData = rawData.mid(jpgStart, (jpgEnd + 2) - jpgStart);
             QImage img;
-            if (img.loadFromData(jpgData, "JPEG") && img.width() >= 32) return img;
+            if (img.loadFromData(jpgData, "JPEG") && img.width() >= 32) {
+                qDebug() << "[MediaColorExtractor][AI] 成功提取 JPEG 裸数据流：" << filePath;
+                return img;
+            }
         }
     }
 
@@ -370,11 +386,16 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
         if (pngEnd != -1) {
             QByteArray pngData = rawData.mid(pngStart, (pngEnd + 8) - pngStart);
             QImage img;
-            if (img.loadFromData(pngData, "PNG") && img.width() >= 32) return img;
+            if (img.loadFromData(pngData, "PNG") && img.width() >= 32) {
+                qDebug() << "[MediaColorExtractor][AI] 成功提取 PNG 裸数据流：" << filePath;
+                return img;
+            }
         }
     }
 
-    // 3. 兜底通道：允许系统 Shell 提图
+    // =========================================================================
+    // 通道 4：Windows Shell 严格缩略图兜底
+    // =========================================================================
     return WindowsShellThumbnailProvider::getShellThumbnail(filePath, 256);
 }
 
