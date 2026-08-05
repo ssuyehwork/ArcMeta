@@ -502,31 +502,36 @@ void MainWindow::initUi() {
             m_metaPanel->setPinned(idx.data(IsLockedRole).toBool());
             m_metaPanel->setTags(idx.data(TagsRole).toStringList());
             
-            // 3. 极速读取备注与链接（非阻塞读）
-            RuntimeMeta rm = MetadataManager::instance().getMeta(path.toStdWString());
-            m_metaPanel->setNote(rm.note);
-            m_metaPanel->setURL(rm.url);
+        // 2. 将耗时的 GetMeta 异步化或轻量化，防止锁竞争卡死点击
+        std::wstring wPath = path.toStdWString();
+        (void)QtConcurrent::run([this, wPath, path]() {
+            RuntimeMeta rm = MetadataManager::instance().getMeta(wPath);
+            QMetaObject::invokeMethod(this, [this, rm, path]() {
+                // 确保用户没有快速切换到其他文件
+                auto selectedNow = m_contentPanel->getSelectedIndexes();
+                if (!selectedNow.isEmpty() && selectedNow.first().data(PathRole).toString() == path) {
+                    m_metaPanel->setNote(rm.note);
+                    m_metaPanel->setURL(rm.url);
+                    QVector<QPair<QColor, float>> pal;
+                    for (const auto& p : rm.palettes) pal.append({p.color, p.ratio});
+                    m_metaPanel->setPalettes(pal);
+                }
+            }, Qt::QueuedConnection);
+        });
 
-            // 🚨 核心优化 2：使用纯内存字符串计算父路径，避免在主线程调 isDir() / absolutePath() 触发任何磁盘阻碍
-            QString category;
-            if (idx.data(TypeRole).toString() == "folder") {
-                category = path;
-            } else {
-                int lastSlash = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
-                category = (lastSlash != -1) ? path.left(lastSlash) : path;
-            }
-            m_metaPanel->setCategory(category);
-
-            // 将色板数据转换为 QVector<QPair<QColor, float>>
-            QVector<QPair<QColor, float>> pal;
-            for (const auto& p : rm.palettes) pal.append({p.color, p.ratio});
-            m_metaPanel->setPalettes(pal);
+        QString category;
+        if (idx.data(TypeRole).toString() == "folder") {
+            category = path;
+        } else {
+            int lastSlash = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+            category = (lastSlash != -1) ? path.left(lastSlash) : path;
         }
-        
-        // 触发状态栏更新以显示选中状态
-        int totalCount = m_contentPanel->getProxyModel()->rowCount();
-        onStatusBarStatsUpdated(0, 0, totalCount);
-    });
+        m_metaPanel->setCategory(category);
+    }
+
+    int totalCount = m_contentPanel->getProxyModel()->rowCount();
+    onStatusBarStatsUpdated(0, 0, totalCount);
+});
 
     // 3. 内容面板请求预览 -> QuickLook
     // 2026-05-27 物理加固：补全 this 上下文

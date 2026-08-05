@@ -430,20 +430,20 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
         if (record.width > 0 && record.height > 0) return true;
         return m_aspectRatios.contains(QDir::toNativeSeparators(path)) && m_aspectRatios.value(QDir::toNativeSeparators(path)) > 0.0;
     } else if (role == Qt::DecorationRole && index.column() == 0) {
-        QString cacheKey = path;
-        QIcon* cached = m_iconCache.object(cacheKey);
+        QIcon* cached = m_iconCache.object(path);
         if (cached) return *cached;
 
-        QFileInfo info(path);
-        QString ext = info.suffix().toLower();
+        // 🚨 核心优化：彻底移除 QFileInfo 和 info.dir() 磁盘调用，改用 pre-baked 的 record 字段
+        QString ext = record.suffix.toLower();
         bool isGraphic = UiHelper::isGraphicsFile(ext) || ext == "svg";
-        
-        // .arc 资产包容器内部文件：判断父目录是否为 .arc 容器，等待异步加载
-        bool isInsideArcContainer = info.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
         bool isArcContainer = record.isDir && path.endsWith(".arc", Qt::CaseInsensitive);
 
-        if (isGraphic || isInsideArcContainer || isArcContainer) return QIcon(); 
-        return ShellIconManager::getFileIcon(path, 128);
+        if (isGraphic || isArcContainer) return QIcon();
+
+        // 对非图片文件使用系统默认文件夹/文件图标兜底，绝不在 paint 路径上同步调 Shell API 阻断 UI
+        static QIcon defaultFileIcon = QFileIconProvider().icon(QFileIconProvider::File);
+        static QIcon defaultFolderIcon = QFileIconProvider().icon(QFileIconProvider::Folder);
+        return record.isDir ? defaultFolderIcon : defaultFileIcon;
     }
 
     return QVariant();
