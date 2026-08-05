@@ -360,7 +360,7 @@ QImage MediaColorExtractor::renderWithGhostscript(const QString& filePath, int t
     return QImage();
 }
 
-QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
+QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath, int targetSize) {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) return QImage();
 
@@ -455,13 +455,13 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
     }
 
     // 通道 3：Ghostscript 矢量引擎
-    QImage gsImg = renderWithGhostscript(filePath, 256);
+    QImage gsImg = renderWithGhostscript(filePath, targetSize);
     if (!gsImg.isNull()) {
         return gsImg;
     }
 
     // 通道 4：Windows 原生系统 PDF 引擎
-    QImage pdfRenderImg = renderPdfAiFirstPage(filePath, 256);
+    QImage pdfRenderImg = renderPdfAiFirstPage(filePath, targetSize);
     if (!pdfRenderImg.isNull()) {
         return pdfRenderImg;
     }
@@ -496,10 +496,10 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
     }
 
     // 通道 6：Windows Shell 严格缩略图兜底
-    return WindowsShellThumbnailProvider::getShellThumbnail(filePath, 256);
+    return WindowsShellThumbnailProvider::getShellThumbnail(filePath, targetSize);
 }
 
-QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
+QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path, int targetSize) {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         qWarning() << "[MediaColorExtractor][EPS] 文件打开失败：" << path;
@@ -571,7 +571,7 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
     }
 
     // Ghostscript 终极矢量引擎
-    QImage gsImg = renderWithGhostscript(path, 256);
+    QImage gsImg = renderWithGhostscript(path, targetSize);
     if (!gsImg.isNull()) {
         return gsImg;
     }
@@ -602,9 +602,9 @@ QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
     } else if (ext == "psd" || ext == "psb") {
         img = extractEmbeddedPsdThumbnail(path);
     } else if (ext == "ai") {
-        img = extractEmbeddedAiPreview(path);
+        img = extractEmbeddedAiPreview(path, size);
     } else if (ext == "eps") {
-        img = extractEmbeddedEpsPreview(path);
+        img = extractEmbeddedEpsPreview(path, size);
     }
 
     if (img.isNull()) {

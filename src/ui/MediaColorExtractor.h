@@ -21,14 +21,14 @@ public:
     
     static LabColor rgbToLab(const QColor& color);
     static double calculateDeltaE(const QColor& c1, const QColor& c2);
-    static QImage getImageForAnalysis(const QString& path, int size = 256);
+    static QImage getImageForAnalysis(const QString& path, int size = 512);
     static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile);
     static QColor extractDominantColor(const QString& targetFile);
     static QImage extractEmbeddedPsdThumbnail(const QString& path);
-    static QImage extractEmbeddedAiPreview(const QString& path);
-    static QImage extractEmbeddedEpsPreview(const QString& path);
-    static QImage renderPdfAiFirstPage(const QString& filePath, int targetSize = 256);
-    static QImage renderWithGhostscript(const QString& filePath, int targetSize = 256);
+    static QImage extractEmbeddedAiPreview(const QString& path, int targetSize = 512);
+    static QImage extractEmbeddedEpsPreview(const QString& path, int targetSize = 512);
+    static QImage renderPdfAiFirstPage(const QString& filePath, int targetSize = 512);
+    static QImage renderWithGhostscript(const QString& filePath, int targetSize = 512);
 private:
     static QString findGhostscriptExecutable();
     static QString diskThumbCachePath(const QString& path, int size);
