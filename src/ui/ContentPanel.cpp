@@ -2162,18 +2162,33 @@ bool ContentPanel::isManagedContext() const {
 } 
 
 void ContentPanel::onSelectionChanged() { 
-    QItemSelectionModel* selectionModel = (m_viewStack->currentWidget() == m_gridView) ? m_gridView->selectionModel() : m_treeView->selectionModel(); 
-    if (!selectionModel) return; 
- 
-    QStringList selectedPaths; 
-    QModelIndexList indices = selectionModel->selectedIndexes(); 
-    for (const QModelIndex& index : indices) { 
-        if (index.column() == 0) { 
-            QString path = index.data(PathRole).toString(); 
-            if (!path.isEmpty()) selectedPaths.append(path); 
-        } 
-    } 
-    emit selectionChanged(selectedPaths); 
+    // 1. 初始化 30ms 防抖定时器
+    if (!m_selectionTimer) {
+        m_selectionTimer = new QTimer(this);
+        m_selectionTimer->setSingleShot(true);
+        m_selectionTimer->setInterval(30); // 30 毫秒黄金防抖窗口
+
+        connect(m_selectionTimer, &QTimer::timeout, this, [this]() {
+            QItemSelectionModel* selectionModel = (m_viewStack->currentWidget() == m_gridView) ?
+                m_gridView->selectionModel() : m_treeView->selectionModel();
+            if (!selectionModel) return;
+
+            QStringList selectedPaths;
+            QModelIndexList indices = selectionModel->selectedIndexes();
+            for (const QModelIndex& index : indices) {
+                if (index.column() == 0) {
+                    QString path = index.data(PathRole).toString();
+                    if (!path.isEmpty()) selectedPaths.append(path);
+                }
+            }
+
+            // 🚨 防抖时间到达后，只向外发射 1 次选中信号！彻底消灭信号风暴！
+            emit selectionChanged(selectedPaths);
+        });
+    }
+
+    // 🚨 2. 每次鼠标快速点击/滑动，仅重置防抖定时器，不阻塞 UI 线程！
+    m_selectionTimer->start();
 } 
  
 void ContentPanel::refreshAll() {
