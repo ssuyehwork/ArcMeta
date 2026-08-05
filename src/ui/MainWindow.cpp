@@ -835,13 +835,15 @@ void MainWindow::initUi() {
         // 2. 局部路径更新
         m_contentPanel->updateItemMetadata(path);
 
-        // 3. 实时刷新联动
+        // 🚨 3. 彻底删掉实时选择反馈：不要在 metaChanged 里重新触发 selectionChanged！防止连锁反馈死循环和抢锁导致的假死
+        /*
         auto indexes = m_contentPanel->getSelectedIndexes();
         if (!indexes.isEmpty()) {
             if (indexes.first().data(PathRole).toString() == path) {
                 emit m_contentPanel->selectionChanged({path});
             }
         }
+        */
 
         // 4. 侧边栏防抖刷新
         if (m_categoryPanel) {
