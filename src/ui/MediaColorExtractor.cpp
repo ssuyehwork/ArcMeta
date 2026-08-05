@@ -294,7 +294,8 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
         int lineEnd = rawData.indexOf('\n', thumbHeaderIdx);
         if (lineEnd != -1) {
             QByteArray headerLine = rawData.mid(thumbHeaderIdx, lineEnd - thumbHeaderIdx);
-            QList<QByteArray> parts = headerLine.section(':', 1).trimmed().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+            QString headerStr = QString::fromLatin1(headerLine);
+            QStringList parts = headerStr.section(':', 1).trimmed().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
             if (parts.size() >= 2) {
                 int width = parts[0].toInt();
                 int height = parts[1].toInt();
