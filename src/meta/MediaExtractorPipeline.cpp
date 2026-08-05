@@ -4,6 +4,7 @@
 
 #include "MediaExtractorPipeline.h"
 #include "MetadataManager.h"
+#include "CapsuleMediaExtractor.h"
 #include "../ui/MediaColorExtractor.h"
 #include "../core/SyncStatusService.h"
 #include "DatabaseManager.h"
@@ -208,19 +209,9 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     
     if (!m_isCanceled.load()) {
         if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-            QImage img = MediaColorExtractor::getImageForAnalysis(qPath, 512);
+            // 🚨 管道二单线直达：直接调用 CapsuleMediaExtractor，零分支判断！
+            QImage img = CapsuleMediaExtractor::getCapsuleThumbnail(qPath, 512);
             if (!img.isNull()) {
-                // 🚨 物理落盘核心：如果是在 .arc 资产包内，直接保存为 [baseName]_thumbnail.png！
-                QString containerDir = info.absolutePath();
-                if (containerDir.endsWith(".arc", Qt::CaseInsensitive)) {
-                    QString baseName = info.completeBaseName();
-                    QString thumbPath = containerDir + "/" + baseName + "_thumbnail.png";
-                    if (!QFile::exists(thumbPath)) {
-                        img.save(thumbPath, "PNG"); // 保存高清 512x512 缩略图
-                        qDebug() << "[Pipeline] 成功生成并物理落盘 .arc 缩略图:" << thumbPath;
-                    }
-                }
-
                 auto pal = MediaColorExtractor::extractPalette(qPath);
                 if (!pal.isEmpty()) {
                     QColor dominant = MediaColorExtractor::quantizeColor(pal.first().first);
@@ -249,15 +240,7 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     MetadataManager::instance().updateIngestionStatus(path, 1);
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::PathUpdate, QString::fromStdWString(path));
 
-    if (!success && !m_isCanceled.load()) {
-        if (info.isDir() || MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-            std::lock_guard<std::mutex> lock(m_retryMutex);
-            if (std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), path) == m_visualRetryQueue.end()) {
-                m_visualRetryQueue.push_back(path);
-                QMetaObject::invokeMethod(m_retryTimer, "start", Qt::QueuedConnection);
-            }
-        }
-    }
+    // 🚨 彻底注销重试队列逻辑，绝不执行 3 秒死循环重试！
 
     // 递减正在处理的计数并实时通知上报，供主界面进度条平滑由左向右推进
     int active = m_activeCount.fetch_sub(1) - 1;
@@ -299,7 +282,8 @@ bool MediaExtractorPipeline::extractColor(const std::wstring& path, std::wstring
 
     if (info.isFile()) {
         if (MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-            QImage img = MediaColorExtractor::getImageForAnalysis(qPath, 512);
+            // 🚨 管道二单线直达：直接调用 CapsuleMediaExtractor，零分支判断！
+            QImage img = CapsuleMediaExtractor::getCapsuleThumbnail(qPath, 512);
             if (!img.isNull()) {
                 auto palette = MediaColorExtractor::extractPalette(qPath);
                 if (!palette.isEmpty()) {

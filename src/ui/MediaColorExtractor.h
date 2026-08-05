@@ -21,7 +21,6 @@ public:
     
     static LabColor rgbToLab(const QColor& color);
     static double calculateDeltaE(const QColor& c1, const QColor& c2);
-    static QImage getImageForAnalysis(const QString& path, int size = 512);
     static QVector<QPair<QColor, float>> extractPalette(const QString& targetFile);
     static QColor extractDominantColor(const QString& targetFile);
     static QImage extractEmbeddedPsdThumbnail(const QString& path);
@@ -31,7 +30,6 @@ public:
     static QImage renderWithGhostscript(const QString& filePath, int targetSize = 512);
 private:
     static QString findGhostscriptExecutable();
-    static QString diskThumbCachePath(const QString& path, int size);
 };
 
 } // namespace ArcMeta

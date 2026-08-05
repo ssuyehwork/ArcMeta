@@ -9,6 +9,7 @@ extern "C" {
 #include "MediaColorExtractor.h"
 #include "../core/AppConfig.h"
 #include "WindowsShellThumbnailProvider.h"
+#include "../meta/CapsuleMediaExtractor.h"
 #include <QFileInfo>
 #include <QCoreApplication>
 #include <QDir>
@@ -168,20 +169,6 @@ QColor MediaColorExtractor::getExtensionColor(const QString& ext) {
     s_cache[upperExt] = color;
     AppConfig::instance().setValue(settingKey, color);
     return color;
-}
-
-QString MediaColorExtractor::diskThumbCachePath(const QString& path, int size) {
-    QString appDir = QCoreApplication::applicationDirPath();
-    QString cacheDir = QDir(appDir).filePath(".arcmeta/disk_thumbs/");
-    QDir().mkpath(cacheDir);
-#ifdef Q_OS_WIN
-    SetFileAttributesW(QDir(appDir).filePath(".arcmeta").toStdWString().c_str(), FILE_ATTRIBUTE_HIDDEN);
-#endif
-
-    QFileInfo fi(path);
-    QString hashKey = QString("%1_%2_%3_%4").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
-    QString safeName = QString::number(qHash(hashKey), 16) + ".png";
-    return cacheDir + safeName;
 }
 
 QColor MediaColorExtractor::quantizeColor(const QColor& color) {
@@ -580,77 +567,10 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path, int t
     return QImage();
 }
 
-QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
-    QFileInfo fi(path);
-    QString containerDir = fi.absolutePath();
-    bool isManagedArc = containerDir.endsWith(".arc", Qt::CaseInsensitive);
-
-    // 1. 【托管库模式】：只去探查 .arc 胶囊内的 [baseName]_thumbnail.png，绝对不去查 disk_thumbs！
-    if (isManagedArc) {
-        QString thumbPath = containerDir + "/" + fi.completeBaseName() + "_thumbnail.png";
-        if (QFile::exists(thumbPath)) {
-            QImage arcThumb;
-            if (arcThumb.load(thumbPath)) {
-                // 0毫秒直接返回胶囊内缩略图！
-                return arcThumb;
-            }
-        }
-    } else {
-        // 2. 【磁盘导航模式】：只去探查 .arcmeta/disk_thumbs/[hash].png 缓存！
-        QString cachePath = diskThumbCachePath(path, size);
-        if (QFile::exists(cachePath)) {
-            QImage cached;
-            if (cached.load(cachePath)) return cached;
-        }
-    }
-
-    // 3. 缓存均未命中，调起解包/提图引擎提取图像...
-    QString ext = fi.suffix().toLower();
-    QImage img;
-
-    if (ext == "svg") {
-        QSvgRenderer renderer(path);
-        if (renderer.isValid()) {
-            img = QImage(size, size, QImage::Format_ARGB32);
-            img.fill(Qt::transparent);
-            QPainter painter(&img);
-            renderer.render(&painter);
-        }
-    } else if (ext == "psd" || ext == "psb") {
-        img = extractEmbeddedPsdThumbnail(path);
-    } else if (ext == "ai") {
-        img = extractEmbeddedAiPreview(path, size);
-    } else if (ext == "eps") {
-        img = extractEmbeddedEpsPreview(path, size);
-    }
-
-    if (img.isNull()) {
-        img = WindowsShellThumbnailProvider::getShellThumbnail(path, size);
-        if (img.isNull()) img.load(path);
-    }
-
-    // 🚨🚨🚨【双轨隔离物理闸门】：根据模式精准分流落盘，绝对不交叉！
-    if (!img.isNull()) {
-        if (isManagedArc) {
-            // A. 托管库模式：100% 只保存到资产自身的 .arc 胶囊内部！绝对不触碰 disk_thumbs！
-            QString thumbPath = containerDir + "/" + fi.completeBaseName() + "_thumbnail.png";
-            if (!QFile::exists(thumbPath)) {
-                img.save(thumbPath, "PNG");
-                qDebug() << "[MediaColorExtractor] 托管库缩略图精准落盘至胶囊:" << thumbPath;
-            }
-        } else {
-            // B. 磁盘导航模式：100% 只保存到程序根目录的 disk_thumbs 集中缓存中！
-            QString cachePath = diskThumbCachePath(path, size);
-            img.save(cachePath, "PNG");
-            qDebug() << "[MediaColorExtractor] 磁盘模式缩略图精准落盘至 disk_thumbs:" << cachePath;
-        }
-    }
-
-    return img;
-}
-
 QVector<QPair<QColor, float>> MediaColorExtractor::extractPalette(const QString& targetFile) {
-    QImage targetImg = getImageForAnalysis(targetFile, 256);
+    // 🚨 物理重构清退：调色盘提取改为利用专属管道一的 getDiskThumbnail 读取或提取，
+    // 在此对接以解除对混合式 getImageForAnalysis 的虚假绑定。
+    QImage targetImg = CapsuleMediaExtractor::getCapsuleThumbnail(targetFile, 256);
     if (targetImg.isNull()) return {};
 
     QImage sampled = targetImg.scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
