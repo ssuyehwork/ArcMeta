@@ -31,6 +31,7 @@ void DiskItemModel::setRecords(const std::vector<ItemRecord>& records) {
     beginResetModel();
     m_allRecords = records;
     m_pathToIndex.clear();
+    m_requestedPaths.clear(); // 🚨 清空请求锁
     for (int i = 0; i < static_cast<int>(m_allRecords.size()); ++i) {
         m_pathToIndex[m_allRecords[i].path] = i;
     }
@@ -43,6 +44,7 @@ void DiskItemModel::clear() {
     beginResetModel();
     m_allRecords.clear();
     m_pathToIndex.clear();
+    m_requestedPaths.clear(); // 🚨 清空请求锁
     m_query.clear();
     m_requestedIcons.clear();
     m_aspectRatios.clear();
@@ -171,7 +173,7 @@ void DiskItemModel::clearCacheForFolder(const QString& folderPath) {
 }
 
 void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
-    // 磁盘模型：缩略图提取流 100% 盲区拦截：对 .arc、文件夹和非标准图形直接忽略，不生成任何 _thumbnail.png，不穿透
+    // 磁盘模型：缩略图提取流 100% 盲区拦截：对 .arc、文件夹和非标准图形直接忽略，不生成 any _thumbnail.png，不穿透
     std::vector<std::pair<QString, QString>> newQueue;
     for (int r : rows) {
         if (r < 0 || r >= static_cast<int>(m_allRecords.size())) continue;
@@ -180,7 +182,12 @@ void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
         
         QString path = rec.path;
         if (!UiHelper::isGraphicsFile(rec.suffix)) continue;
-        if (m_iconCache.contains(path)) continue;
+
+        // 🚨 核心防爆锁：如果已经在缓存中，或者【已经在后台处理排队中】，立刻 0 毫秒跳过！
+        if (m_iconCache.contains(path) || m_requestedPaths.contains(path)) continue;
+
+        // 🚨 0 毫秒瞬间上锁！阻断后续 100ms 高频定时器重复开启进程！
+        m_requestedPaths.insert(path);
         newQueue.push_back({path, path});
     }
 
@@ -208,6 +215,7 @@ void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
                     QIcon icon = img.isNull() ? ShellIconManager::getFileIcon(path, 128) : QIcon(QPixmap::fromImage(img));
                     weakThis->m_iconCache.insert(path, new QIcon(icon));
                     weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
+                    weakThis->m_requestedPaths.remove(path); // 任务完成，释放防抖锁，保持其内存占用完全有界！
 
                     auto it = weakThis->m_pathToIndex.find(path);
                     if (it != weakThis->m_pathToIndex.end()) {

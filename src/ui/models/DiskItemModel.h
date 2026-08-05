@@ -35,6 +35,7 @@ protected:
     std::unordered_map<QString, int, ArcMeta::QStringHash> m_pathToIndex;
     mutable QCache<QString, QIcon> m_iconCache;
     mutable QSet<QString> m_requestedIcons;
+    QSet<QString> m_requestedPaths; // 🚨 核心防爆锁：记录已经在排队/处理中的任务路径
     mutable QMap<QString, double> m_aspectRatios;
     QString m_query;
 };
