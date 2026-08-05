@@ -925,7 +925,7 @@ void CategoryPanel::onScanAndCleanEmptyArcs() {
     m_btnScan->setIcon(UiHelper::getIcon("sync", QColor("#888888"), 16));
 
     // 使用 QtConcurrent 在线程池中执行物理磁盘扫描，避免阻塞主线程 UI
-    QtConcurrent::run([this]() {
+    (void)QtConcurrent::run([this]() {
         const auto drives = QDir::drives();
         int cleanCount = 0;
         QStringList allEmptyArcDirs;
