@@ -172,7 +172,8 @@ QImage WindowsShellThumbnailProvider::getShellThumbnail(const QString& path, int
         if (SUCCEEDED(hr)) {
             SIZE nativeSize = { size, size };
             HBITMAP hBitmap = nullptr;
-            hr = pFactory->GetImage(nativeSize, SIIGBF_RESIZETOFIT, &hBitmap);
+            // 🚨 关键标志位 SIIGBF_THUMBNAILONLY：强行过滤软件图标！拒绝图标冒充缩略图！
+            hr = pFactory->GetImage(nativeSize, SIIGBF_THUMBNAILONLY, &hBitmap);
             if (SUCCEEDED(hr) && hBitmap) {
                 BITMAP bmpInfo;
                 GetObject(hBitmap, sizeof(bmpInfo), &bmpInfo);

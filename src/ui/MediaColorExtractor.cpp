@@ -274,92 +274,130 @@ QImage MediaColorExtractor::extractEmbeddedPsdThumbnail(const QString& path) {
 
 QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
     QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        qWarning() << "[MediaColorExtractor][AI] 文件打开失败：" << filePath;
-        return QImage();
-    }
+    if (!file.open(QIODevice::ReadOnly)) return QImage();
 
-    // 采用高效的流式分块搜寻游标，消除 5MB 的硬编码限制，支持无限大文件的内嵌预览检索
-    const qint64 chunkSize = 1024 * 1024; // 1MB chunk size
-    QByteArray buffer;
-    qint64 startOffset = -1;
-
-    while (!file.atEnd()) {
-        qint64 currentChunkOffset = file.pos();
-        QByteArray chunk = file.read(chunkSize);
-        if (chunk.isEmpty()) break;
-
-        // 如果之前有残留 buffer（重叠），拼接以防标记被分块截断
-        if (!buffer.isEmpty()) {
-            buffer = buffer.right(2) + chunk;
-            currentChunkOffset -= 2;
-        } else {
-            buffer = chunk;
-        }
-
-        int idx = buffer.indexOf("\xFF\xD8\xFF");
-        if (idx != -1) {
-            startOffset = currentChunkOffset + idx;
-            break;
-        }
-    }
-
-    if (startOffset == -1) {
-        qWarning() << "[MediaColorExtractor][AI] 未找到 JPEG 起始标记(FFD8FF)，该文件可能未内嵌兼容性预览：" << filePath;
-        return QImage();
-    }
-
-    // 从 startOffset 开始寻找 \xFF\xD9 结束标记
-    if (!file.seek(startOffset)) {
-        qWarning() << "[MediaColorExtractor][AI] 重定向文件指针失败：" << filePath;
-        return QImage();
-    }
-
-    QByteArray imgData;
-    buffer.clear();
-    bool foundEnd = false;
-
-    while (!file.atEnd() && imgData.size() < 50 * 1024 * 1024) { // 安全上限：最多提取 50MB 的 JPEG 数据
-        qint64 currentChunkOffset = file.pos();
-        QByteArray chunk = file.read(chunkSize);
-        if (chunk.isEmpty()) break;
-
-        if (!buffer.isEmpty()) {
-            buffer = buffer.right(1) + chunk;
-            currentChunkOffset -= 1;
-        } else {
-            buffer = chunk;
-        }
-
-        int idx = buffer.indexOf("\xFF\xD9");
-        if (idx != -1) {
-            qint64 endOffset = currentChunkOffset + idx + 2;
-            qint64 totalLen = endOffset - startOffset;
-            if (totalLen > 0) {
-                if (file.seek(startOffset)) {
-                    imgData = file.read(totalLen);
-                    foundEnd = true;
-                }
-            }
-            break;
-        }
-    }
-
+    // 🚨 放弃脆弱的 QTextStream！直接读取前 15MB 原始二进制字节流，100% 免疫二进制乱码与长行卡死
+    QByteArray rawData = file.read(15 * 1024 * 1024);
     file.close();
 
-    if (!foundEnd || imgData.isEmpty()) {
-        qWarning() << "[MediaColorExtractor][AI] 找到起始标记但未找到 JPEG 结束标记(FFD9)或数据不完整：" << filePath;
-        return QImage();
+    if (rawData.isEmpty()) return QImage();
+
+    // =========================================================================
+    // 通道 1：解析 PostScript %AI7_Thumbnail ~ %AI10_Thumbnail 256色调色板 (二进制游标扫描)
+    // =========================================================================
+    int thumbHeaderIdx = rawData.indexOf("%AI7_Thumbnail:");
+    if (thumbHeaderIdx == -1) thumbHeaderIdx = rawData.indexOf("%AI8_Thumbnail:");
+    if (thumbHeaderIdx == -1) thumbHeaderIdx = rawData.indexOf("%AI9_Thumbnail:");
+    if (thumbHeaderIdx == -1) thumbHeaderIdx = rawData.indexOf("%AI10_Thumbnail:");
+
+    if (thumbHeaderIdx != -1) {
+        int lineEnd = rawData.indexOf('\n', thumbHeaderIdx);
+        if (lineEnd != -1) {
+            QByteArray headerLine = rawData.mid(thumbHeaderIdx, lineEnd - thumbHeaderIdx);
+            QString headerStr = QString::fromLatin1(headerLine);
+            QStringList parts = headerStr.section(':', 1).trimmed().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+            if (parts.size() >= 2) {
+                int width = parts[0].toInt();
+                int height = parts[1].toInt();
+
+                int blockEnd = rawData.indexOf("%AI7_ThumbnailEnd", lineEnd);
+                if (blockEnd == -1) blockEnd = rawData.indexOf("%AI9_ThumbnailEnd", lineEnd);
+                if (blockEnd == -1) blockEnd = rawData.indexOf("%%EndData", lineEnd);
+
+                if (blockEnd != -1 && width > 0 && height > 0) {
+                    QByteArray hexData;
+                    hexData.reserve(blockEnd - lineEnd);
+
+                    int cur = lineEnd;
+                    while (cur < blockEnd) {
+                        int nextLine = rawData.indexOf('\n', cur);
+                        if (nextLine == -1) break;
+                        QByteArray line = rawData.mid(cur, nextLine - cur).trimmed();
+                        if (line.startsWith("%")) {
+                            hexData.append(line.mid(1).trimmed());
+                        }
+                        cur = nextLine + 1;
+                    }
+
+                    QByteArray binaryData = QByteArray::fromHex(hexData);
+                    const int paletteSize = 256 * 3; // 768 字节 RGB 调色板
+
+                    if (binaryData.size() >= paletteSize + width * height) {
+                        QList<QRgb> colorTable;
+                        colorTable.reserve(256);
+                        const uchar* palPtr = reinterpret_cast<const uchar*>(binaryData.constData());
+                        for (int i = 0; i < 256; ++i) {
+                            colorTable.append(qRgb(palPtr[i * 3], palPtr[i * 3 + 1], palPtr[i * 3 + 2]));
+                        }
+
+                        QImage img(width, height, QImage::Format_Indexed8);
+                        img.setColorTable(colorTable);
+                        const uchar* pixelPtr = palPtr + paletteSize;
+                        for (int y = 0; y < height; ++y) {
+                            memcpy(img.scanLine(y), pixelPtr + y * width, width);
+                        }
+                        if (!img.isNull()) {
+                            qDebug() << "[MediaColorExtractor][AI] 二进制游标提取 %AI_Thumbnail 成功：" << filePath;
+                            return img.convertToFormat(QImage::Format_ARGB32);
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    QImage img;
-    if (!img.loadFromData(imgData)) {
-        qWarning() << "[MediaColorExtractor][AI] 已提取出 JPEG 字节流但解码失败，数据长度：" << imgData.size() << "：" << filePath;
-        return QImage();
+    // =========================================================================
+    // 通道 2：解析 Adobe XMP 元数据中的 Base64 预览图 (<xmpGImg:image>)
+    // =========================================================================
+    int xmpStart = rawData.indexOf("<xmpGImg:image>");
+    if (xmpStart != -1) {
+        xmpStart += 15; // 跳过 <xmpGImg:image> 标签
+        int xmpEnd = rawData.indexOf("</xmpGImg:image>", xmpStart);
+        if (xmpEnd != -1) {
+            QByteArray base64Data = rawData.mid(xmpStart, xmpEnd - xmpStart).trimmed();
+            base64Data.replace("\n", "").replace("\r", "").replace(" ", ""); // 物理清洗换行符
+            QByteArray jpgBytes = QByteArray::fromBase64(base64Data);
+            QImage img;
+            if (img.loadFromData(jpgBytes)) {
+                qDebug() << "[MediaColorExtractor][AI] 成功解包 Adobe XMP 内嵌 Base64 预览图：" << filePath;
+                return img;
+            }
+        }
     }
 
-    qDebug() << "[MediaColorExtractor][AI] 内嵌预览提取成功：" << filePath;
-    return img;
+    // =========================================================================
+    // 通道 3：检索 PDF 规范下的 JPEG / PNG 裸数据流 (\xFF\xD8\xFF)
+    // =========================================================================
+    int jpgStart = rawData.indexOf("\xFF\xD8\xFF");
+    if (jpgStart != -1) {
+        int jpgEnd = rawData.indexOf("\xFF\xD9", jpgStart);
+        if (jpgEnd != -1) {
+            QByteArray jpgData = rawData.mid(jpgStart, (jpgEnd + 2) - jpgStart);
+            QImage img;
+            if (img.loadFromData(jpgData, "JPEG") && img.width() >= 32) {
+                qDebug() << "[MediaColorExtractor][AI] 成功提取 JPEG 裸数据流：" << filePath;
+                return img;
+            }
+        }
+    }
+
+    int pngStart = rawData.indexOf("\x89PNG\r\n\x1a\n");
+    if (pngStart != -1) {
+        int pngEnd = rawData.indexOf("IEND", pngStart);
+        if (pngEnd != -1) {
+            QByteArray pngData = rawData.mid(pngStart, (pngEnd + 8) - pngStart);
+            QImage img;
+            if (img.loadFromData(pngData, "PNG") && img.width() >= 32) {
+                qDebug() << "[MediaColorExtractor][AI] 成功提取 PNG 裸数据流：" << filePath;
+                return img;
+            }
+        }
+    }
+
+    // =========================================================================
+    // 通道 4：Windows Shell 严格缩略图兜底
+    // =========================================================================
+    return WindowsShellThumbnailProvider::getShellThumbnail(filePath, 256);
 }
 
 QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
@@ -466,13 +504,7 @@ QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
     }
 
     if (img.isNull()) {
-        // 🚨 修正初始化写法：显式指定为 QStringList 强类型构造，解决 MSVC 编译器歧义报错
-        static const QStringList rawDesignExts = QStringList() << "psd" << "psb" << "ai";
-        if (rawDesignExts.contains(ext)) {
-            qWarning() << "[MediaColorExtractor][BLOCK] 已强制拦截该文件的系统默认图标兜底，标记为无真实内容预览：" << path;
-            return QImage(); // 干净地返回空图
-        }
-
+        // 🚨 删掉了原本对 psd/psb/ai 文件的强制拦截阻断，允许其在解析失败时降级提图并使用 Windows Shell 严格缩略图兜底
         img = WindowsShellThumbnailProvider::getShellThumbnail(path, size);
         if (img.isNull()) img.load(path);
     }
