@@ -7,6 +7,7 @@
 #include "../meta/CategoryRepo.h" 
 #include "../meta/DatabaseManager.h" 
 #include "../ui/MediaColorExtractor.h" 
+#include "../meta/CapsuleMediaExtractor.h"
 #include <QDir> 
 #include <QFileInfo> 
 #include <QtConcurrent> 
@@ -153,12 +154,7 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     } 
  
     // 4. 生成容器内配套的预渲染缩略图 
-    QImage thumb = MediaColorExtractor::getImageForAnalysis(destPath, 512); 
-    if (!thumb.isNull()) { 
-        QString baseName = QFileInfo(fileName).completeBaseName(); 
-        QString thumbPath = containerDir + "/" + baseName + "_thumbnail.png"; 
-        thumb.save(thumbPath, "PNG"); 
-    } 
+    (void)CapsuleMediaExtractor::getCapsuleThumbnail(destPath, 512);
  
     // 🚨 重构核心：废除所有手写原始 SQL！统一转发给 MetadataManager 单一权威管线登记入库 
     std::wstring wDestPath = QDir::toNativeSeparators(destPath).toStdWString(); 

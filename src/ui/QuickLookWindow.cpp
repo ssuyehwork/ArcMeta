@@ -3,6 +3,8 @@
 #include "ShellIconManager.h"
 #include "MediaColorExtractor.h"
 #include "QuickLookMinimap.h"
+#include "../util/DiskMediaExtractor.h"
+#include "../meta/CapsuleMediaExtractor.h"
 #include "StyleLibrary.h"
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -409,6 +411,7 @@ void QuickLookWindow::renderImage(const QString& path) {
         if (!weakThis) return;
         
         QImage img;
+        bool isInsideArc = path.contains(".arc", Qt::CaseInsensitive);
         if (ext == "svg") {
             QSvgRenderer renderer(path);
             if (renderer.isValid()) {
@@ -418,14 +421,19 @@ void QuickLookWindow::renderImage(const QString& path) {
                 renderer.render(&painter);
             }
         } else if (ext == "ai" || ext == "eps" || ext == "psd" || ext == "psb") {
-            // 🚨 核心修复：针对 ai / eps / psd，直接唤醒 MediaColorExtractor 原生多通道解码与 Ghostscript 引擎！
-            // 传入 2048 像素提取超高清全屏预览大图！
-            img = MediaColorExtractor::getImageForAnalysis(path, 2048);
+            if (isInsideArc) {
+                img = CapsuleMediaExtractor::getCapsuleThumbnail(path, 2048);
+            } else {
+                img = DiskMediaExtractor::getDiskThumbnail(path, 2048);
+            }
         } else if (QT_NATIVE_FORMATS.contains(ext)) {
             img.load(path);
         } else {
-            // 其它格式优先尝试 MediaColorExtractor 提取，失败再尝试 Shell 提图
-            img = MediaColorExtractor::getImageForAnalysis(path, 2048);
+            if (isInsideArc) {
+                img = CapsuleMediaExtractor::getCapsuleThumbnail(path, 2048);
+            } else {
+                img = DiskMediaExtractor::getDiskThumbnail(path, 2048);
+            }
             if (img.isNull()) {
                 img = ShellIconManager::getShellThumbnail(path, 4096);
                 if (img.isNull()) {
