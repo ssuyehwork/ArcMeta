@@ -193,6 +193,10 @@ set(SOURCES
     src/ui/WindowsShellThumbnailProvider.cpp
     src/ui/MediaColorExtractor.h
     src/ui/MediaColorExtractor.cpp
+    src/util/DiskMediaExtractor.h
+    src/util/DiskMediaExtractor.cpp
+    src/meta/CapsuleMediaExtractor.h
+    src/meta/CapsuleMediaExtractor.cpp
     src/util/ShellHelper.cpp
     src/util/ShellHelper.h
     src/util/ImportHelper.cpp

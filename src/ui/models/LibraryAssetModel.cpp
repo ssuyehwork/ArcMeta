@@ -11,6 +11,7 @@ using namespace ArcMeta;
 
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
+#include "../meta/CapsuleMediaExtractor.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"
 #include "MediaColorExtractor.h"
@@ -233,40 +234,15 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
 
             bool isInsideArc = info.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
 
-            if (isInsideArc) {
-                // 🚨 完美穿透解包联动：如果真实素材在 .arc 包内，直接去搜寻并加载包内同级的 *_thumbnail.png
-                QDir arcDir = info.dir();
-                QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
-                if (!thumbFiles.isEmpty()) {
-                    QString thumbPath = arcDir.absoluteFilePath(thumbFiles.first());
-                    img = QImage(thumbPath);
-                    if (!img.isNull()) {
-                        ar = (double)img.width() / img.height();
-                        hasThumb = true;
-                    }
-                }
-            } else if (ext == "svg") {
-                QSvgRenderer renderer(path);
-                if (renderer.isValid()) {
-                    QImage svgImg(128, 128, QImage::Format_ARGB32);
-                    svgImg.fill(Qt::transparent);
-                    QPainter painter(&svgImg);
-                    renderer.render(&painter);
-                    img = svgImg;
-                    ar = 1.0;
-                    hasThumb = true;
-                }
-            } else if (ext == "ai") {
-                img = MediaColorExtractor::extractEmbeddedAiPreview(path);
+            if (isInsideArc || ext == "svg" || ext == "psd" || ext == "psb" || ext == "ai" || ext == "eps") {
+                // 🚨 管道二单线直达：直接调用 CapsuleMediaExtractor，零分支判断！
+                img = CapsuleMediaExtractor::getCapsuleThumbnail(path, 128);
                 if (!img.isNull()) {
                     ar = (double)img.width() / img.height();
                     hasThumb = true;
-                } else {
-                    ar = -1.0;
-                    hasThumb = false;
                 }
-            } else if (UiHelper::isGraphicsFile(ext) && ext != "cur" && ext != "ico" && ext != "ani" && ext != "ai") {
-                img = ShellIconManager::getShellThumbnail(path, 128);
+            } else if (UiHelper::isGraphicsFile(ext) && ext != "cur" && ext != "ico" && ext != "ani") {
+                img = CapsuleMediaExtractor::getCapsuleThumbnail(path, 128);
                 if (!img.isNull()) {
                     ar = (double)img.width() / img.height();
                     hasThumb = true;

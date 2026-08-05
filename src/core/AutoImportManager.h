@@ -10,7 +10,7 @@
 namespace ArcMeta {
 
 /**
- * @brief 2026-07-xx 按照 Plan-67/68：NTFS 托管文件夹自动入库管理器
+ * @brief 2026-07-xx 按照 Plan-67/68：NTFS 资源库自动入库管理器
  */
 class AutoImportManager : public QObject {
     Q_OBJECT

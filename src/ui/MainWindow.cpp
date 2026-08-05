@@ -2023,9 +2023,9 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
     QMenu menu(this);
     UiHelper::applyMenuStyle(&menu);
     if (!QDir(managedPath).exists()) {
-        menu.addAction("创建托管文件夹")->setData(1);
+        menu.addAction("创建资源库")->setData(1);
     } else {
-        menu.addAction("打开托管文件夹")->setData(2);
+        menu.addAction("打开资源库")->setData(2);
         menu.addAction("重新扫描该库")->setData(3);
     }
 

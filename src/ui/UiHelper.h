@@ -88,10 +88,6 @@ public:
         return MediaColorExtractor::calculateDeltaE(c1, c2);
     }
 
-    static inline QImage getImageForAnalysis(const QString& path, int size = 256) {
-        return MediaColorExtractor::getImageForAnalysis(path, size);
-    }
-
     static inline QVector<QPair<QColor, float>> extractPalette(const QString& targetFile) {
         return MediaColorExtractor::extractPalette(targetFile);
     }
