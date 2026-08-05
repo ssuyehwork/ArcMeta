@@ -204,7 +204,15 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
         if ((UiHelper::isGraphicsFile(rec.suffix) || isArcContainer) && !m_aspectRatios.contains(QDir::toNativeSeparators(path))) {
             needLoad = true;
         }
+
+        // 🚨 核心防爆锁：如果正在后台处理排队中，立刻 0 毫秒跳过！
+        if (m_requestedIcons.contains(path)) {
+            needLoad = false;
+        }
+
         if (needLoad) {
+            // 🚨 0 毫秒瞬间上锁！阻断高频重复开启渲染进程！
+            m_requestedIcons.insert(path);
             newQueue.push_back({path, path});
         }
     }
@@ -293,7 +301,12 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
                         QString iconTarget = path;
                         QFileInfo localInfo(path);
                         if (localInfo.suffix().toLower() == "arc" && localInfo.isDir()) {
-                            QDir arcDir(path);
+                            // 物理规范化文件夹路径：去除末尾的斜杠，保证拼接正常
+                            QString cleanPath = path;
+                            if (cleanPath.endsWith("/") || cleanPath.endsWith("\\")) {
+                                cleanPath = cleanPath.left(cleanPath.length() - 1);
+                            }
+                            QDir arcDir(cleanPath);
                             QFileInfoList files = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
                             for (const QFileInfo& fi : files) {
                                 QString fn = fi.fileName();
@@ -308,6 +321,7 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
 
                     weakThis->m_iconCache.insert(path, new QIcon(icon));
                     weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
+                    weakThis->m_requestedIcons.remove(path); // 🚨 任务完成，释放防抖锁！
 
                     auto it = weakThis->m_pathToIndex.find(path);
                     if (it != weakThis->m_pathToIndex.end()) {

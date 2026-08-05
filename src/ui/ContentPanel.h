@@ -288,6 +288,7 @@ private:
         std::vector<ItemRecord> records;
     };
     QMap<QString, ScanCacheEntry> m_recursiveCache; 
+    QTimer* m_selectionTimer = nullptr; // 选中防抖定时器
     void updateGridSize();
     void updateStatusBarStats();
     void recalculateAndEmitStats();

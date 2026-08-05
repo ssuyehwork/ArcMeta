@@ -249,6 +249,8 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     MetadataManager::instance().updateIngestionStatus(path, 1);
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::PathUpdate, QString::fromStdWString(path));
 
+    // 🚨 彻底斩断重试死循环！删掉将失败文件无限推入 m_visualRetryQueue 的逻辑，提色失败保持默认灰色，不影响性能与假死！
+    /*
     if (!success && !m_isCanceled.load()) {
         if (info.isDir() || MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
             std::lock_guard<std::mutex> lock(m_retryMutex);
@@ -258,6 +260,7 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
             }
         }
     }
+    */
 
     // 递减正在处理的计数并实时通知上报，供主界面进度条平滑由左向右推进
     int active = m_activeCount.fetch_sub(1) - 1;

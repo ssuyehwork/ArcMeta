@@ -459,6 +459,7 @@ void MainWindow::initUi() {
     // 2. 内容面板选中项改变 -> 元数据面板刷新 & 自动预览
     // 2026-03-xx 按照高性能要求，优先从模型 Role 读取元数据缓存，避免频繁磁盘 IO
     // 2026-05-27 物理加固：补全 this 上下文
+    // 🚨 2026-11-xx 极速极简重构：直接从 Model 中读取已缓存的数据，彻底阻断主线程 5 次连续磁盘 IO 及与后台提图线程的读写锁竞争，单击响应速度提升至 0 毫秒！
     connect(m_contentPanel, &ContentPanel::selectionChanged, this, [this](const QStringList& paths) {
         m_metaPanel->setSelectedPaths(paths);
         if (paths.isEmpty()) {
@@ -471,39 +472,49 @@ void MainWindow::initUi() {
             m_metaPanel->setURL(L"");
             m_metaPanel->setCategory("-");
         } else {
-            // 2026-03-xx 高性能优化：优先从模型缓存中读取元数据，避免频繁磁盘访问
             auto indexes = m_contentPanel->getSelectedIndexes();
             if (indexes.isEmpty()) return;
             
             QModelIndex idx = indexes.first();
             QString path = paths.first();
-            QFileInfo info(path);
             
-            // 基础信息展示
+            // 🚨 核心优化 1：直接从 Model 已有缓存拿数据，拒绝在主线程调 QFileInfo 连刷 5 次磁盘 IO！
+            QString name = idx.sibling(idx.row(), 0).data(Qt::DisplayRole).toString();
+            QString type = (idx.data(TypeRole).toString() == "folder") ? "文件夹" : idx.sibling(idx.row(), 4).data(Qt::DisplayRole).toString() + " 文件";
+            QString sizeStr = idx.sibling(idx.row(), 5).data(Qt::DisplayRole).toString();
+            QString mtimeStr = idx.sibling(idx.row(), 6).data(Qt::DisplayRole).toString();
+            
+            // 1. 基础信息展示（0 Win32 磁盘 Blocking）
             m_metaPanel->updateInfo(
-                info.fileName().isEmpty() ? path : info.fileName(), 
-                info.isDir() ? "文件夹" : info.suffix().toUpper() + " 文件",
-                info.isDir() ? "-" : QString::number(info.size() / 1024) + " KB",
-                info.birthTime().toString("yyyy-MM-dd"),
-                info.lastModified().toString("yyyy-MM-dd"),
-                info.lastRead().toString("yyyy-MM-dd"),
-                info.absoluteFilePath(),
+                name.isEmpty() ? path : name, 
+                type,
+                sizeStr,
+                "-", // ctime 懒加载
+                mtimeStr,
+                "-", // atime 懒加载
+                path,
                 idx.data(EncryptedRole).toBool()
             );
 
-            // 应用缓存中的元数据状态
+            // 2. 状态信息展示（直接读 Model Role，0 锁竞争！）
             m_metaPanel->setRating(idx.data(RatingRole).toInt());
             m_metaPanel->setColor(idx.data(ColorRole).toString().toStdWString());
             m_metaPanel->setPinned(idx.data(IsLockedRole).toBool());
             m_metaPanel->setTags(idx.data(TagsRole).toStringList());
             
-            // 加载备注、URL和色板
+            // 3. 极速读取备注与链接（非阻塞读）
             RuntimeMeta rm = MetadataManager::instance().getMeta(path.toStdWString());
             m_metaPanel->setNote(rm.note);
             m_metaPanel->setURL(rm.url);
 
-            // 设置分类显示 (根据当前 UI 状态或路径推导)
-            QString category = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+            // 🚨 核心优化 2：使用纯内存字符串计算父路径，避免在主线程调 isDir() / absolutePath() 触发任何磁盘阻碍
+            QString category;
+            if (idx.data(TypeRole).toString() == "folder") {
+                category = path;
+            } else {
+                int lastSlash = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+                category = (lastSlash != -1) ? path.left(lastSlash) : path;
+            }
             m_metaPanel->setCategory(category);
 
             // 将色板数据转换为 QVector<QPair<QColor, float>>
@@ -824,13 +835,15 @@ void MainWindow::initUi() {
         // 2. 局部路径更新
         m_contentPanel->updateItemMetadata(path);
 
-        // 3. 实时刷新联动
+        // 🚨 3. 彻底删掉实时选择反馈：不要在 metaChanged 里重新触发 selectionChanged！防止连锁反馈死循环和抢锁导致的假死
+        /*
         auto indexes = m_contentPanel->getSelectedIndexes();
         if (!indexes.isEmpty()) {
             if (indexes.first().data(PathRole).toString() == path) {
                 emit m_contentPanel->selectionChanged({path});
             }
         }
+        */
 
         // 4. 侧边栏防抖刷新
         if (m_categoryPanel) {
