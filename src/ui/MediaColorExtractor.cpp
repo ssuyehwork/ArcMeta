@@ -582,27 +582,29 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path, int t
 
 QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
     QFileInfo fi(path);
-
-    // 1. 优先检查：如果文件位于 .arc 胶囊容器内，直接检查同级 _thumbnail.png！
     QString containerDir = fi.absolutePath();
-    if (containerDir.endsWith(".arc", Qt::CaseInsensitive)) {
+    bool isManagedArc = containerDir.endsWith(".arc", Qt::CaseInsensitive);
+
+    // 1. 【托管库模式】：只去探查 .arc 胶囊内的 [baseName]_thumbnail.png，绝对不去查 disk_thumbs！
+    if (isManagedArc) {
         QString thumbPath = containerDir + "/" + fi.completeBaseName() + "_thumbnail.png";
         if (QFile::exists(thumbPath)) {
             QImage arcThumb;
             if (arcThumb.load(thumbPath)) {
-                // 瞬间直接返回硬盘上现成的缩略图，绝对不重新跑 Ghostscript！
+                // 0毫秒直接返回胶囊内缩略图！
                 return arcThumb;
             }
         }
+    } else {
+        // 2. 【磁盘导航模式】：只去探查 .arcmeta/disk_thumbs/[hash].png 缓存！
+        QString cachePath = diskThumbCachePath(path, size);
+        if (QFile::exists(cachePath)) {
+            QImage cached;
+            if (cached.load(cachePath)) return cached;
+        }
     }
 
-    // 2. 磁盘模式检查：检查 .arcmeta/disk_thumbs/ 缓存
-    QString cachePath = diskThumbCachePath(path, size);
-    if (QFile::exists(cachePath)) {
-        QImage cached;
-        if (cached.load(cachePath)) return cached;
-    }
-
+    // 3. 缓存均未命中，调起解包/提图引擎提取图像...
     QString ext = fi.suffix().toLower();
     QImage img;
 
@@ -627,9 +629,23 @@ QImage MediaColorExtractor::getImageForAnalysis(const QString& path, int size) {
         if (img.isNull()) img.load(path);
     }
 
+    // 🚨🚨🚨【双轨隔离物理闸门】：根据模式精准分流落盘，绝对不交叉！
     if (!img.isNull()) {
-        img.save(cachePath, "PNG");
+        if (isManagedArc) {
+            // A. 托管库模式：100% 只保存到资产自身的 .arc 胶囊内部！绝对不触碰 disk_thumbs！
+            QString thumbPath = containerDir + "/" + fi.completeBaseName() + "_thumbnail.png";
+            if (!QFile::exists(thumbPath)) {
+                img.save(thumbPath, "PNG");
+                qDebug() << "[MediaColorExtractor] 托管库缩略图精准落盘至胶囊:" << thumbPath;
+            }
+        } else {
+            // B. 磁盘导航模式：100% 只保存到程序根目录的 disk_thumbs 集中缓存中！
+            QString cachePath = diskThumbCachePath(path, size);
+            img.save(cachePath, "PNG");
+            qDebug() << "[MediaColorExtractor] 磁盘模式缩略图精准落盘至 disk_thumbs:" << cachePath;
+        }
     }
+
     return img;
 }
 
