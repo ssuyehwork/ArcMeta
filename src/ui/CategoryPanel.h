@@ -89,6 +89,9 @@ private slots:
     void onEmptyTrash();
     void onRestoreAllFromTrash();
 
+    // 2026-07-xx：手动扫描清理空白托管包
+    void onScanAndCleanEmptyArcs();
+
     // 2026-xx-xx 按照 Plan-98：搜索过滤
     void onSearchTextChanged(const QString& text);
 
@@ -130,6 +133,7 @@ private:
     CategoryModel* m_categoryModel = nullptr;
     CategoryFilterProxyModel* m_proxyModel = nullptr;
     QLineEdit* m_searchEdit = nullptr;
+    QPushButton* m_btnScan = nullptr;
     QTimer* m_refreshTimer = nullptr;
     QTimer* m_searchTimer = nullptr; // 2026-xx-xx 按照 Plan-106：搜索防抖计时器
 

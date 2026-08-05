@@ -16,10 +16,12 @@ using namespace ArcMeta::Style;
 #include "FramelessDialog.h"
 #include "BatchProgressDialog.h"
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QTimer>
 #include <QRegularExpression>
 #include "../meta/CategoryRepo.h"
+#include "../meta/DatabaseManager.h"
 #include "../util/ShellHelper.h"
 
 
@@ -919,6 +921,218 @@ void CategoryPanel::onEmptyTrash() {
     }
 }
 
+void CategoryPanel::onScanAndCleanEmptyArcs() {
+    // 🚨 核心阻断：防止重复高频点击触发扫描风暴
+    m_btnScan->setEnabled(false);
+    m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#888888"), 16));
+
+    // 使用 QtConcurrent 在线程池中执行物理磁盘与数据库双向深度清理对账扫描，避免阻塞主线程 UI
+    (void)QtConcurrent::run([this]() {
+        int cleanCount = 0;
+        int ghostCount = 0;
+        int orphanCount = 0;
+
+        auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+
+        // ==========================================
+        // 🚨 第一步：盘查并物理清理空托管包 (磁盘 -> 数据库)
+        // ==========================================
+        const auto drives = QDir::drives();
+        QStringList allEmptyArcDirs;
+        QStringList allEmptyFolderIds;
+
+        for (const QFileInfo& drive : drives) {
+            QString letter = drive.absolutePath().left(1).toUpper();
+            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(drive.absolutePath().toStdWString());
+            if (volSerial == L"UNKNOWN") continue;
+
+            // 获取资源库根目录绝对路径
+            std::wstring managedRootW = MetadataManager::getManagedLibraryPath(volSerial, letter);
+            if (managedRootW.empty()) continue;
+
+            QString managedRoot = QString::fromStdWString(managedRootW);
+            QDir libDir(managedRoot);
+            if (!libDir.exists()) continue;
+
+            // 寻找全部 .arc 格式容器文件夹
+            QStringList arcEntries = libDir.entryList({"*.arc"}, QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
+            for (const QString& arcName : arcEntries) {
+                // 托管包文件夹名格式必须为 13 位 Base36 (例如 00ms73182x000.arc)
+                QFileInfo arcInfo(libDir.absoluteFilePath(arcName));
+                QString baseName = arcInfo.completeBaseName();
+                if (baseName.length() != 13) continue;
+
+                QDir arcDir(arcInfo.absoluteFilePath());
+                // 获取包内所有物理项：排除隐藏的 _thumbnail.png 以及 .ArcMeta.json 配置文件以外
+                QStringList entries = arcDir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
+                bool hasRealMaterials = false;
+                for (const QString& fName : entries) {
+                    if (fName.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
+                    if (fName.compare(".ArcMeta.json", Qt::CaseInsensitive) == 0) continue;
+                    hasRealMaterials = true;
+                    break;
+                }
+
+                // 如果确实是空的包，记录路径 and 13 位 ID 进行级联抹除
+                if (!hasRealMaterials) {
+                    allEmptyArcDirs << arcInfo.absoluteFilePath();
+                    allEmptyFolderIds << baseName;
+                }
+            }
+        }
+
+        // ==========================================
+        // 🚨 第二步：反查数据库死记录 (数据库 -> 磁盘)
+        // ==========================================
+        // 直接从所有活跃的内存分库中查出所有的 metadata 记录，反向校验文件在磁盘上是否存在。
+        // 如果文件不存在，即使它未载入内存 m_cache，也通过纯 SQL 进行强力擦除。
+        QStringList allGhostFolderIds;
+        QStringList allGhostPaths;
+
+        for (sqlite3* db : dbs) {
+            sqlite3_stmt* stmt = nullptr;
+            const char* sqlQuery = "SELECT folder_id, path FROM metadata";
+            if (sqlite3_prepare_v2(db, sqlQuery, -1, &stmt, nullptr) == SQLITE_OK) {
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                    const char* fidText = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                    const wchar_t* pathText = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
+                    if (fidText && pathText) {
+                        QString qPath = QString::fromStdWString(pathText);
+                        // 校验物理路径是否存在
+                        bool exists = false;
+                        if (QFileInfo(qPath).isDir()) {
+                            exists = QDir(qPath).exists();
+                        } else {
+                            exists = QFile::exists(qPath);
+                        }
+
+                        if (!exists) {
+                            allGhostFolderIds << QString::fromUtf8(fidText);
+                            allGhostPaths << qPath;
+                        }
+                    }
+                }
+                sqlite3_finalize(stmt);
+            }
+        }
+
+        // 合并空包和幽灵文件的 folderIds & paths 进行强力物理+数据库级联删除
+        QStringList targetsToRemovePaths = allEmptyArcDirs + allGhostPaths;
+        QStringList targetsToRemoveFolderIds = allEmptyFolderIds + allGhostFolderIds;
+
+        if (!targetsToRemovePaths.isEmpty()) {
+            // 1. 先通过常规 removeMetadataBatchSync 进行内存缓存/索引同步清理及总计数调整
+            // 这个操作会在 MetadataManager 内自动清理已经加载到 m_cache/m_folderIdToPath 的内存条目，并安全微调总计数
+            MetadataManager::instance().removeMetadataBatchSync(targetsToRemovePaths);
+
+            // 2. 数据库强力后备死角兜底：对所有可能未载入内存的幽灵数据进行纯 SQL 直接落盘删除
+            for (sqlite3* db : dbs) {
+                SqlTransaction trans(db);
+                sqlite3_stmt* stmtMeta = nullptr;
+                sqlite3_stmt* stmtItems = nullptr;
+                sqlite3_stmt* stmtStats = nullptr;
+
+                if (sqlite3_prepare_v2(db, "DELETE FROM metadata WHERE folder_id = ?", -1, &stmtMeta, nullptr) == SQLITE_OK &&
+                    sqlite3_prepare_v2(db, "DELETE FROM category_items WHERE folder_id = ?", -1, &stmtItems, nullptr) == SQLITE_OK) {
+                    
+                    for (const QString& fid : targetsToRemoveFolderIds) {
+                        std::string stdFid = fid.toStdString();
+                        
+                        // 从 metadata 删除
+                        sqlite3_bind_text(stmtMeta, 1, stdFid.c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_step(stmtMeta);
+                        sqlite3_reset(stmtMeta);
+
+                        // 从 category_items 删除
+                        sqlite3_bind_text(stmtItems, 1, stdFid.c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_step(stmtItems);
+                        sqlite3_reset(stmtItems);
+                    }
+                }
+                if (stmtMeta) sqlite3_finalize(stmtMeta);
+                if (stmtItems) sqlite3_finalize(stmtItems);
+
+                // 同时清理关联的 PROGRESS 进度记录
+                for (const QString& qp : targetsToRemovePaths) {
+                    std::string progressKey = "PROGRESS:" + qp.toUtf8().toStdString();
+                    if (sqlite3_prepare_v2(db, "DELETE FROM system_stats WHERE key = ?", -1, &stmtStats, nullptr) == SQLITE_OK) {
+                        sqlite3_bind_text(stmtStats, 1, progressKey.c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_step(stmtStats);
+                        sqlite3_finalize(stmtStats);
+                    }
+                }
+                trans.commit();
+            }
+
+            // 3. 物理彻底擦除磁盘空目录（仅针对第一步判定为空的包）
+            for (const QString& path : allEmptyArcDirs) {
+                QDir(path).removeRecursively();
+            }
+
+            cleanCount = allEmptyArcDirs.size();
+            ghostCount = allGhostFolderIds.size();
+        }
+
+        // ==========================================
+        // 🚨 第三步：清洗孤立关联 (category_items -> metadata)
+        // ==========================================
+        // 清理所有 category_items（分类关系表）中那些其 folder_id 已经在 metadata（主元数据表）中不存在的断线幽灵关联
+        for (sqlite3* db : dbs) {
+            SqlTransaction trans(db);
+            char* errMsg = nullptr;
+            const char* sqlCleanOrphans = "DELETE FROM category_items WHERE folder_id NOT IN (SELECT folder_id FROM metadata)";
+            int rc = sqlite3_exec(db, sqlCleanOrphans, nullptr, nullptr, &errMsg);
+            if (rc == SQLITE_OK) {
+                int affected = sqlite3_changes(db);
+                if (affected > 0) {
+                    orphanCount += affected;
+                }
+            } else {
+                if (errMsg) {
+                    qWarning() << "[Cleanup] Clean orphans error:" << errMsg;
+                    sqlite3_free(errMsg);
+                }
+            }
+            trans.commit();
+        }
+
+        // 强力对账与同步通知
+        if (cleanCount > 0 || ghostCount > 0 || orphanCount > 0) {
+            CategoryRepo::s_countsDirty.store(true);
+        }
+
+        // 4. 在主线程同步 UI 数据、播放反馈通知并恢复按钮状态
+        QMetaObject::invokeMethod(this, [this, cleanCount, ghostCount, orphanCount]() {
+            m_btnScan->setEnabled(true);
+            m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#B0B0B0"), 16));
+
+            int totalCleaned = cleanCount + ghostCount;
+            if (totalCleaned > 0 || orphanCount > 0) {
+                // 重新计数对账以更新侧边栏和主界面
+                CategoryRepo::fullRecount();
+                requestRefresh(true);
+
+                // 尝试寻找主面板进行内容区全局自愈重构刷新
+                QWidget* mw = window();
+                if (mw) {
+                    QMetaObject::invokeMethod(mw, "refreshAll", Qt::QueuedConnection);
+                }
+
+                QString msg = QString("<b style='color:#00A650;'>已成功清理 %1 个空白/幽灵资产</b>").arg(totalCleaned);
+                if (orphanCount > 0) {
+                    msg += QString("<br/><span style='color:#00A650; font-size:11px;'>同步剔除 %1 条孤立分类关系</span>").arg(orphanCount);
+                }
+
+                ToolTipOverlay::instance()->showText(QCursor::pos(), msg, 3500, QColor("#00A650"));
+            } else {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), 
+                    "<b style='color:#CCCCCC;'>未检测到多余的空白托管包与幽灵数据</b>", 
+                    2000, QColor("#2D2D2D"));
+            }
+        });
+    });
+}
+
 void CategoryPanel::onRestoreAllFromTrash() {
     // 1. 获取回收站内所有 FID
     // 物理修复：明确作用域标识符 CategoryRepo::TRASH_CATEGORY_ID
@@ -969,6 +1183,28 @@ void CategoryPanel::initUi() {
     titleLabel->setStyleSheet(QString("font-size: 13px; font-weight: bold; color: %1; background: transparent; border: none;").arg(qssColor(PrimaryBlue)));
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
+
+    // 2026-07-xx 按照用户要求 (Modification_Plan-36)：在分类标题栏右侧加入一键扫描空托管包按钮
+    m_btnScan = new QPushButton(header);
+    m_btnScan->setFixedSize(24, 24);
+    m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#B0B0B0"), 16));
+    m_btnScan->setStyleSheet(
+        "QPushButton { "
+        "  background: transparent; "
+        "  border: none; "
+        "  border-radius: 3px; "
+        "} "
+        "QPushButton:hover { "
+        "  background-color: #3E3E42; "
+        "} "
+        "QPushButton:pressed { "
+        "  background-color: #4E4E52; "
+        "}"
+    );
+    m_btnScan->setProperty("tooltipText", "扫描并清理空白托管包");
+    m_btnScan->installEventFilter(this); // 复用既有悬停滤镜以触发 tooltip
+    connect(m_btnScan, &QPushButton::clicked, this, &CategoryPanel::onScanAndCleanEmptyArcs);
+    headerLayout->addWidget(m_btnScan);
 
     m_mainLayout->addWidget(header);
 
