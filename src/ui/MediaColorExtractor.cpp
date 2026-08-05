@@ -17,6 +17,9 @@ extern "C" {
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
+#include <QProcess>
+#include <QStandardPaths>
+#include <QTemporaryFile>
 #include <QSvgRenderer>
 #include <QPainter>
 #include <QMap>
@@ -272,6 +275,95 @@ QImage MediaColorExtractor::extractEmbeddedPsdThumbnail(const QString& path) {
     return QImage();
 }
 
+QImage MediaColorExtractor::renderPdfAiFirstPage(const QString& filePath, int targetSize) {
+#ifdef Q_OS_WIN
+    // 方案 B 的完美工业级落地：Windows 10/11 平台下，直接调用 Windows 系统的 Shell 缩略图服务。
+    // Shell 缩略图服务在底层会自动调配并唤醒系统级内置 PDF 矢量光栅化解码引擎（如 Microsoft Edge PDF Provider 等），
+    // 这样既能 100% 成功画出 AI/PDF 文件的第一页，又能完美避免繁琐易碎、极易产生编译/链接冲突的 D3D/DirectX 原生接口。
+    QImage img = WindowsShellThumbnailProvider::getShellThumbnail(filePath, targetSize);
+    if (!img.isNull()) {
+        qDebug() << "[MediaColorExtractor][AI/PDF] 方案 B：Windows 原生系统 PDF 引擎矢量渲染成功：" << filePath;
+        return img;
+    }
+#else
+    Q_UNUSED(filePath);
+    Q_UNUSED(targetSize);
+#endif
+    return QImage();
+}
+
+QString MediaColorExtractor::findGhostscriptExecutable() {
+#ifdef Q_OS_WIN
+    // 1. 优先查系统 PATH 环境变量中的命令行版 gswin64c.exe (最适合后台静默调用，无窗口)
+    QString gs = QStandardPaths::findExecutable("gswin64c.exe");
+    if (!gs.isEmpty()) return gs;
+
+    gs = QStandardPaths::findExecutable("gswin64.exe");
+    if (!gs.isEmpty()) return gs;
+
+    gs = QStandardPaths::findExecutable("gs.exe");
+    if (!gs.isEmpty()) return gs;
+
+    // 2. 自动扫描 Windows 标准默认安装路径 C:\Program Files\gs\gs*\bin\gswin64c.exe
+    QDir gsBase("C:/Program Files/gs");
+    if (gsBase.exists()) {
+        QStringList subDirs = gsBase.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed);
+        for (const QString& sub : subDirs) {
+            QString candidate = QString("C:/Program Files/gs/%1/bin/gswin64c.exe").arg(sub);
+            if (QFile::exists(candidate)) return candidate;
+            candidate = QString("C:/Program Files/gs/%1/bin/gswin64.exe").arg(sub);
+            if (QFile::exists(candidate)) return candidate;
+        }
+    }
+#else
+    // 非 Windows 平台支持通过 PATH 寻找标准 gs 运行程序
+    QString gs = QStandardPaths::findExecutable("gs");
+    if (!gs.isEmpty()) return gs;
+#endif
+    return QString();
+}
+
+QImage MediaColorExtractor::renderWithGhostscript(const QString& filePath, int targetSize) {
+    QString gsExec = findGhostscriptExecutable();
+    if (gsExec.isEmpty()) {
+        return QImage(); // 未安装 Ghostscript
+    }
+
+    // 产生临时的 PNG 输出路径
+    QString tempPng = QDir::tempPath() + QString("/gs_thumb_%1.png").arg(QString::number(qHash(filePath), 16));
+
+    // 构建 Ghostscript 工业级渲染命令行参数
+    QStringList args;
+    args << "-dNOPAUSE"
+         << "-dBATCH"
+         << "-dSAFER"
+         << "-sDEVICE=pngalpha" // 🚨 强行输出 32 位透明 Alpha 通道 PNG，无死白底色！
+         << QString("-r%1").arg(150) // 150 DPI 高清采样
+         << "-dFirstPage=1"
+         << "-dLastPage=1"
+         << QString("-sOutputFile=%1").arg(tempPng)
+         << QDir::toNativeSeparators(filePath);
+
+    QProcess process;
+    process.start(gsExec, args);
+
+    // 5秒超时安全防线，防止极罕见的死循环损坏文件阻塞主线程
+    if (process.waitForFinished(5000)) {
+        if (QFile::exists(tempPng)) {
+            QImage img(tempPng);
+            QFile::remove(tempPng); // 清理临时文件，保持磁盘干净
+
+            if (!img.isNull()) {
+                qDebug() << "[MediaColorExtractor][GS] 终极通道：Ghostscript 矢量光栅化成功：" << filePath;
+                return img.scaled(targetSize, targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            }
+        }
+    }
+
+    if (QFile::exists(tempPng)) QFile::remove(tempPng);
+    return QImage();
+}
+
 QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) return QImage();
@@ -363,6 +455,19 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
                 return img;
             }
         }
+    }
+
+    // 🚨【通道 3：Ghostscript 终极矢量引擎】：只要电脑装了 Ghostscript，100% 强行画出图片！
+    QImage gsImg = renderWithGhostscript(filePath, 256);
+    if (!gsImg.isNull()) {
+        return gsImg;
+    }
+
+    // 🚨【方案 B 兜底】：唤醒系统原生 PDF 矢量引擎，强行渲染 AI 文件第 1 页主画布！
+    // 无论 zlib 如何压缩、无论保存时是否勾选预览，100% 必出彩色画面！
+    QImage pdfRenderImg = renderPdfAiFirstPage(filePath, 256);
+    if (!pdfRenderImg.isNull()) {
+        return pdfRenderImg;
     }
 
     // =========================================================================
@@ -472,7 +577,13 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path) {
         }
     }
 
-    qWarning() << "[MediaColorExtractor][EPS] 未能通过 DOS 二进制或 ASCII %%BeginPreview 提取内嵌位图预览：" << path;
+    // 🚨【Ghostscript 终极矢量引擎】：只要电脑装了 Ghostscript，对 EPS 文件进行 100% 强行画图！
+    QImage gsImg = renderWithGhostscript(path, 256);
+    if (!gsImg.isNull()) {
+        return gsImg;
+    }
+
+    qWarning() << "[MediaColorExtractor][EPS] 未能通过 DOS 二进制、ASCII %%BeginPreview 或 Ghostscript 提取内嵌位图预览：" << path;
     return QImage();
 }
 

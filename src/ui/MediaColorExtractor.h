@@ -27,7 +27,10 @@ public:
     static QImage extractEmbeddedPsdThumbnail(const QString& path);
     static QImage extractEmbeddedAiPreview(const QString& path);
     static QImage extractEmbeddedEpsPreview(const QString& path);
+    static QImage renderPdfAiFirstPage(const QString& filePath, int targetSize = 256);
+    static QImage renderWithGhostscript(const QString& filePath, int targetSize = 256);
 private:
+    static QString findGhostscriptExecutable();
     static QString diskThumbCachePath(const QString& path, int size);
 };
 

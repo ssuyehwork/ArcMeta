@@ -162,6 +162,8 @@ set(SOURCES
     src/ui/BatchProgressDialog.h
     src/ui/QuickLookWindow.cpp
     src/ui/QuickLookWindow.h
+    src/ui/QuickLookMinimap.cpp
+    src/ui/QuickLookMinimap.h
     src/ui/RuleRow.cpp
     src/ui/RuleRow.h
     src/ui/SearchHistoryPanel.cpp
