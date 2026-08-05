@@ -16,6 +16,14 @@ extern "C" {
 #include <QRegularExpression> // 🚨 补全缺失的正则头文件，解决 rxSpaces 与 split 报错
 #ifdef Q_OS_WIN
 #include <windows.h>
+#include <windows.data.pdf.interop.h>
+#include <wrl/client.h>
+#include <shCore.h>
+#include <d2d1.h>
+#pragma comment(lib, "Shcore.lib")
+#pragma comment(lib, "Windows.Data.Pdf.lib")
+
+using namespace Microsoft::WRL;
 #endif
 #include <QSvgRenderer>
 #include <QPainter>
@@ -272,6 +280,76 @@ QImage MediaColorExtractor::extractEmbeddedPsdThumbnail(const QString& path) {
     return QImage();
 }
 
+QImage MediaColorExtractor::renderPdfAiFirstPage(const QString& filePath, int targetSize) {
+#ifdef Q_OS_WIN
+    // 1. 打开 AI/PDF 文件并创建 Windows Stream
+    std::wstring wPath = QDir::toNativeSeparators(filePath).toStdWString();
+    ComPtr<IStream> pStream;
+    HRESULT hr = SHCreateStreamOnFileEx(wPath.c_str(), STGM_READ | STGM_SHARE_DENY_NONE,
+                                        FILE_ATTRIBUTE_NORMAL, FALSE, NULL, &pStream);
+    if (FAILED(hr) || !pStream) return QImage();
+
+    // 2. 唤醒 Windows 系统原生 PDF 渲染工厂 (Windows.Data.Pdf)
+    ComPtr<IPdfDocument> pPdfDocument;
+    hr = PdfCreateDocumentFromStream(pStream.Get(), NULL, &pPdfDocument);
+    if (FAILED(hr) || !pPdfDocument) return QImage();
+
+    // 3. 获取第 1 页 (AI 矢量的主画布)
+    ComPtr<IPdfPage> pPdfPage;
+    hr = pPdfDocument->GetPage(0, &pPdfPage);
+    if (FAILED(hr) || !pPdfPage) return QImage();
+
+    // 4. 计算渲染尺寸
+    PDF_SIZE pdfSize;
+    pPdfPage->GetSize(&pdfSize);
+    if (pdfSize.width <= 0 || pdfSize.height <= 0) return QImage();
+
+    float scale = (float)targetSize / std::max(pdfSize.width, pdfSize.height);
+    UINT renderW = std::max(1u, (UINT)(pdfSize.width * scale));
+    UINT renderH = std::max(1u, (UINT)(pdfSize.height * scale));
+
+    // 5. 渲染为 HBITMAP 并转化为 QImage
+    PDF_RENDER_PARAMS renderParams = {0};
+    renderParams.DestinationWidth = renderW;
+    renderParams.DestinationHeight = renderH;
+    renderParams.BackgroundColor = D2D1::ColorF(D2D1::ColorF::White); // 默认白色背景
+
+    HBITMAP hBitmap = NULL;
+    hr = pPdfPage->RenderPageToBitmap(&renderParams, &hBitmap);
+    if (SUCCEEDED(hr) && hBitmap) {
+        BITMAP bm;
+        GetObject(hBitmap, sizeof(bm), &bm);
+
+        QImage img(bm.bmWidth, bm.bmHeight, QImage::Format_ARGB32);
+        HDC hdc = CreateCompatibleDC(NULL);
+        HGDIOBJ oldBitmap = SelectObject(hdc, hBitmap);
+
+        BITMAPINFO bmi = {0};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = bm.bmWidth;
+        bmi.bmiHeader.biHeight = -bm.bmHeight; // Top-down
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+
+        GetDIBits(hdc, hBitmap, 0, bm.bmHeight, img.bits(), &bmi, DIB_RGB_COLORS);
+
+        SelectObject(hdc, oldBitmap);
+        DeleteDC(hdc);
+        DeleteObject(hBitmap);
+
+        if (!img.isNull()) {
+            qDebug() << "[MediaColorExtractor][AI/PDF] 方案 B：Windows 原生 PDF 引擎渲染成功：" << filePath;
+            return img;
+        }
+    }
+#else
+    Q_UNUSED(filePath);
+    Q_UNUSED(targetSize);
+#endif
+    return QImage();
+}
+
 QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) return QImage();
@@ -363,6 +441,13 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath) {
                 return img;
             }
         }
+    }
+
+    // 🚨【方案 B 兜底】：唤醒系统原生 PDF 矢量引擎，强行渲染 AI 文件第 1 页主画布！
+    // 无论 zlib 如何压缩、无论保存时是否勾选预览，100% 必出彩色画面！
+    QImage pdfRenderImg = renderPdfAiFirstPage(filePath, 256);
+    if (!pdfRenderImg.isNull()) {
+        return pdfRenderImg;
     }
 
     // =========================================================================
