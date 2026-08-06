@@ -45,8 +45,6 @@ private slots:
 private:
     void initContent();
     void applyTheme();
-    void executeMemoryMode(const std::vector<RenameRule>& rules, const std::vector<std::wstring>& newNames);
-    void executeDiskMode(const std::vector<RenameRule>& rules, const std::vector<std::wstring>& newNames);
 
     std::vector<std::wstring> m_originalPaths;
     bool m_isMirrorSource = false;
