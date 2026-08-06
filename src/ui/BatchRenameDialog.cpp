@@ -391,6 +391,7 @@ void BatchRenameDialog::onExecute() {
 }
 
 void BatchRenameDialog::executeMemoryMode(const std::vector<RenameRule>& rules, const std::vector<std::wstring>& newNames) {
+    Q_UNUSED(rules);
     int successCount = 0;
 
     // 🚨 开启防抖与内部操作锁定
@@ -448,6 +449,7 @@ void BatchRenameDialog::executeMemoryMode(const std::vector<RenameRule>& rules, 
 }
 
 void BatchRenameDialog::executeDiskMode(const std::vector<RenameRule>& rules, const std::vector<std::wstring>& newNames) {
+    Q_UNUSED(rules);
     QString targetDir = m_targetPathEdit->text();
     if ((m_rbMove->isChecked() || m_rbCopy->isChecked()) && targetDir.isEmpty()) {
         FramelessMessageBox::warning(this, "错误", "请先选择目标文件夹");
