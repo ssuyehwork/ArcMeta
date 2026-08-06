@@ -77,6 +77,7 @@ void syncManagedLibraries() {
     }
 
     s_inSync.store(false);
+    CategoryRepo::repairLibraryRootBindings();
 }
 
 std::vector<Category> CategoryRepo::getAll() {
@@ -1245,6 +1246,39 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
         if (match && !finalPath.empty()) paths << QString::fromStdWString(finalPath);
     });
     return paths;
+}
+
+void CategoryRepo::repairLibraryRootBindings() {
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    const char* sql =
+        "INSERT OR IGNORE INTO category_items (category_id, folder_id, path_hint, added_at) "
+        "SELECT c.id, m.folder_id, m.path, m.added_at "
+        "FROM categories c "
+        "JOIN metadata m ON m.path LIKE (c.physical_path || '%') "
+        "WHERE c.parent_id = 0 AND c.physical_path IS NOT NULL AND c.physical_path != '';";
+
+    for (sqlite3* db : dbs) {
+        SqlTransaction trans(db);
+        sqlite3_exec(db, sql, nullptr, nullptr, nullptr);
+        trans.commit();
+    }
+}
+
+void CategoryRepo::bindToLibraryRootCategory(const std::string& folderId, const std::wstring& physicalPath) {
+    if (folderId.empty() || physicalPath.empty()) return;
+
+    // 1. 获取所有根分类 (parentId == 0)
+    auto allCats = getAll();
+    for (const auto& cat : allCats) {
+        if (cat.parentId == 0 && !cat.physicalPath.empty()) {
+            // 2. 检查物理路径是否属于该托管库目录 (前缀匹配)
+            if (physicalPath.rfind(cat.physicalPath, 0) == 0) {
+                // 3. 自动向 category_items 写入绑定映射
+                addItemToCategory(cat.id, folderId, physicalPath);
+                break;
+            }
+        }
+    }
 }
 
 } // namespace ArcMeta

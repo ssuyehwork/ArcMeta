@@ -118,6 +118,18 @@ public:
     static void fullRecount();
 
     /**
+     * @brief 一键物理补全所有托管库文件的根分类绑定关系 (SQL 对账自愈)
+     */
+    static void repairLibraryRootBindings();
+
+    /**
+     * @brief 自动将文件/胶囊绑定到其所在盘符的托管库根分类上
+     * @param folderId 13位资产ID (00ms...)
+     * @param physicalPath 文件绝对路径
+     */
+    static void bindToLibraryRootCategory(const std::string& folderId, const std::wstring& physicalPath);
+
+    /**
      * @brief 统计指标更新原子化
      * @param key 统计项 Key (total_file_count, categorized_count)
      * @param delta 增量

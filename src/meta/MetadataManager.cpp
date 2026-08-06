@@ -462,6 +462,9 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
             sqlite3_finalize(stmtItems); 
         } 
     } 
+
+    // 3b. 自动将新登记的文件绑定到其所在盘符的托管库根分类上 (老数新数自动合并归钩)
+    CategoryRepo::bindToLibraryRootCategory(folderId, nPath);
  
     if (!trans.commit()) return false; 
  
@@ -2299,6 +2302,8 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
             if (isNew) {
                 if (!rMeta.isFolder && !rMeta.isTrash) {
                     CategoryRepo::incrementTotalFileCount(1);
+                    // 🚀 新增：新进资产落库时的源头自动绑定托管库根分类
+                    CategoryRepo::bindToLibraryRootCategory(rMeta.folderId, nPath);
                 }
             }
             {
