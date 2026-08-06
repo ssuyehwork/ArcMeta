@@ -2,6 +2,8 @@
 #include "BatchRenamePreviewDialog.h"
 #include "RuleRow.h"
 #include "UiHelper.h"
+#include "MemoryBatchRenameService.h"
+#include "DiskBatchRenameService.h"
 #include "../meta/BatchRenameEngine.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
@@ -381,9 +383,6 @@ void BatchRenameDialog::onBrowseTarget() {
         m_targetPathEdit->setText(dir);
     }
 }
-
-#include "MemoryBatchRenameService.h"
-#include "DiskBatchRenameService.h"
 
 void BatchRenameDialog::onExecute() {
     std::vector<RenameRule> rules;
