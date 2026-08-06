@@ -9,6 +9,16 @@
 
 namespace ArcMeta {
 
+QImage CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(const QString& mainAssetPath) {
+    QFileInfo fi(mainAssetPath);
+    QString thumbPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_thumbnail.png";
+    if (QFile::exists(thumbPath)) {
+        QImage img;
+        if (img.load(thumbPath)) return img;
+    }
+    return QImage(); // 绝不实时提取
+}
+
 QImage CapsuleMediaExtractor::getCapsuleThumbnail(const QString& mainAssetPath, int size) {
     QFileInfo fi(mainAssetPath);
     QString containerDir = fi.absolutePath();

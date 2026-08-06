@@ -26,6 +26,8 @@ using namespace Microsoft::WRL;
 #endif
 #include <QProcess>
 #include <QStandardPaths>
+#include <QMutex>
+#include <QSemaphore>
 #include <QTemporaryFile>
 #include <QSvgRenderer>
 #include <QPainter>
@@ -282,38 +284,51 @@ QImage MediaColorExtractor::renderPdfAiFirstPage(const QString& filePath, int ta
 }
 
 QString MediaColorExtractor::findGhostscriptExecutable() {
+    static QMutex mutex;
+    static QString cachedPath;
+    static bool searched = false;
+
+    QMutexLocker locker(&mutex);
+    if (searched) return cachedPath;
+    searched = true;
+
 #ifdef Q_OS_WIN
     QString gs = QStandardPaths::findExecutable("gswin64c.exe");
-    if (!gs.isEmpty()) return gs;
+    if (gs.isEmpty()) gs = QStandardPaths::findExecutable("gswin64.exe");
+    if (gs.isEmpty()) gs = QStandardPaths::findExecutable("gs.exe");
 
-    gs = QStandardPaths::findExecutable("gswin64.exe");
-    if (!gs.isEmpty()) return gs;
-
-    gs = QStandardPaths::findExecutable("gs.exe");
-    if (!gs.isEmpty()) return gs;
-
-    QDir gsBase("C:/Program Files/gs");
-    if (gsBase.exists()) {
-        QStringList subDirs = gsBase.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed);
-        for (const QString& sub : subDirs) {
-            QString candidate = QString("C:/Program Files/gs/%1/bin/gswin64c.exe").arg(sub);
-            if (QFile::exists(candidate)) return candidate;
-            candidate = QString("C:/Program Files/gs/%1/bin/gswin64.exe").arg(sub);
-            if (QFile::exists(candidate)) return candidate;
+    if (gs.isEmpty()) {
+        QDir gsBase("C:/Program Files/gs");
+        if (gsBase.exists()) {
+            QStringList subDirs = gsBase.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed);
+            for (const QString& sub : subDirs) {
+                QString candidate = QString("C:/Program Files/gs/%1/bin/gswin64c.exe").arg(sub);
+                if (QFile::exists(candidate)) { gs = candidate; break; }
+                candidate = QString("C:/Program Files/gs/%1/bin/gswin64.exe").arg(sub);
+                if (QFile::exists(candidate)) { gs = candidate; break; }
+            }
         }
     }
+    cachedPath = gs;
 #else
-    QString gs = QStandardPaths::findExecutable("gs");
-    if (!gs.isEmpty()) return gs;
+    cachedPath = QStandardPaths::findExecutable("gs");
 #endif
-    return QString();
+    return cachedPath;
 }
+
+static QSemaphore g_gsConcurrencyLimit(2); // 最多2个Ghostscript进程并发跑
 
 QImage MediaColorExtractor::renderWithGhostscript(const QString& filePath, int targetSize) {
     QString gsExec = findGhostscriptExecutable();
     if (gsExec.isEmpty()) {
         return QImage();
     }
+
+    g_gsConcurrencyLimit.acquire();
+    struct ReleaseGuard {
+        QSemaphore& s;
+        ~ReleaseGuard() { s.release(); }
+    } guard{g_gsConcurrencyLimit};
 
     QString tempPng = QDir::tempPath() + QString("/gs_thumb_%1.png").arg(QString::number(qHash(filePath), 16));
 

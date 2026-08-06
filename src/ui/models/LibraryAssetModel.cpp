@@ -235,14 +235,14 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
             bool isInsideArc = info.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
 
             if (isInsideArc || ext == "svg" || ext == "psd" || ext == "psb" || ext == "ai" || ext == "eps") {
-                // 🚨 管道二单线直达：直接调用 CapsuleMediaExtractor，零分支判断！
-                img = CapsuleMediaExtractor::getCapsuleThumbnail(path, 128);
+                // 🚨 管道二单线直达：直接调用 CapsuleMediaExtractor 只读版本，零分支判断！
+                img = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(path);
                 if (!img.isNull()) {
                     ar = (double)img.width() / img.height();
                     hasThumb = true;
                 }
             } else if (UiHelper::isGraphicsFile(ext) && ext != "cur" && ext != "ico" && ext != "ani") {
-                img = CapsuleMediaExtractor::getCapsuleThumbnail(path, 128);
+                img = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(path);
                 if (!img.isNull()) {
                     ar = (double)img.width() / img.height();
                     hasThumb = true;
