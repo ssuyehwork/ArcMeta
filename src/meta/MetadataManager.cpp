@@ -2736,7 +2736,10 @@ void MetadataManager::recordAccess(const std::wstring& path) {
     std::wstring nPath = normalizePath(path);
     {
         std::lock_guard<std::mutex> lock(m_recentMutex);
-        if (m_recentVisitedSet.find(nPath) == m_recentVisitedSet.end()) {
+        auto it = std::find(m_recentVisitedQueue.begin(), m_recentVisitedQueue.end(), nPath);
+        if (it != m_recentVisitedQueue.end()) {
+            m_recentVisitedQueue.erase(it);
+        } else {
             m_recentVisitedSet.insert(nPath);
             CategoryRepo::s_recentlyVisitedCount.fetch_add(1);
         }
@@ -2772,18 +2775,38 @@ double MetadataManager::getCachedAtime(const std::wstring& path) {
 }
 
 void MetadataManager::slideRecentWindow() {
-    std::lock_guard<std::mutex> lock(m_recentMutex);
     double expireThreshold = static_cast<double>(QDateTime::currentMSecsSinceEpoch()) - 86400000.0;
-    while (!m_recentVisitedQueue.empty()) {
-        const std::wstring& oldestPath = m_recentVisitedQueue.front();
-        double itemAtime = getCachedAtime(oldestPath);
+
+    // 🚨 核心修复：第一步，只在 m_recentMutex 保护下做"取快照"，不在这把锁里做任何可能耗时或
+    // 需要嵌套加锁的操作（如 getCachedAtime 需要另一把 m_mutex）。
+    // 这样即使这一步稍有延迟，也绝不会阻塞 UI 线程里 recordAccess() 抢 m_recentMutex 的时间超过微秒级。
+    std::deque<std::wstring> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(m_recentMutex);
+        snapshot = m_recentVisitedQueue; // 拷贝一份，立即释放锁
+    }
+
+    // 第二步：在锁外计算哪些需要过期剔除（getCachedAtime 内部自己的 m_mutex 与本函数无嵌套关系）
+    std::vector<std::wstring> toErase;
+    for (const auto& path : snapshot) {
+        double itemAtime = getCachedAtime(path);
         if (itemAtime < expireThreshold) {
+            toErase.push_back(path);
+        } else {
+            break; // 队首往后都在窗口内，跳出
+        }
+    }
+
+    if (toErase.empty()) return;
+
+    // 第三步：只在真正要修改队列时，再次短暂加锁做剔除，持锁时间同样是微秒级
+    std::lock_guard<std::mutex> lock(m_recentMutex);
+    for (const auto& path : toErase) {
+        if (!m_recentVisitedQueue.empty() && m_recentVisitedQueue.front() == path) {
             m_recentVisitedQueue.pop_front();
-            if (m_recentVisitedSet.erase(oldestPath) > 0) {
+            if (m_recentVisitedSet.erase(path) > 0) {
                 CategoryRepo::s_recentlyVisitedCount.fetch_sub(1);
             }
-        } else {
-            break; // 队首依然在 24h 窗口内，说明后续更安全，直接跳出剪枝！
         }
     }
 }
