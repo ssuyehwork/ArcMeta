@@ -2118,7 +2118,7 @@ void ContentPanel::performBatchRename() {
         return; 
     } 
  
-    BatchRenameDialog dlg(originalPaths, this); 
+    BatchRenameDialog dlg(originalPaths, isMirrorSource(), this);
     if (dlg.exec() == QDialog::Accepted) { 
         // 🚨 极致自愈高亮：如果对话框成功重命名，将其返回的首个新名称作为 pendingSelectName
         QString firstNew = dlg.getFirstNewName();

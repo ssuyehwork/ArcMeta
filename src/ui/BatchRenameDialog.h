@@ -25,7 +25,7 @@ class RuleRow;
 class BatchRenameDialog : public FramelessDialog {
     Q_OBJECT
 public:
-    explicit BatchRenameDialog(const std::vector<std::wstring>& originalPaths, QWidget* parent = nullptr);
+    explicit BatchRenameDialog(const std::vector<std::wstring>& originalPaths, bool isMirrorSource, QWidget* parent = nullptr);
     ~BatchRenameDialog() override = default;
 
     QString getFirstNewName() const { return m_firstNewName; }
@@ -45,8 +45,11 @@ private slots:
 private:
     void initContent();
     void applyTheme();
+    void executeMemoryMode(const std::vector<RenameRule>& rules, const std::vector<std::wstring>& newNames);
+    void executeDiskMode(const std::vector<RenameRule>& rules, const std::vector<std::wstring>& newNames);
 
     std::vector<std::wstring> m_originalPaths;
+    bool m_isMirrorSource = false;
     
     // 预设相关
     QComboBox* m_presetCombo = nullptr;

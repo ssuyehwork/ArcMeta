@@ -27,8 +27,8 @@
 
 namespace ArcMeta {
 
-BatchRenameDialog::BatchRenameDialog(const std::vector<std::wstring>& originalPaths, QWidget* parent)
-    : FramelessDialog("批量重命名 - ArcMeta", parent), m_originalPaths(originalPaths) {
+BatchRenameDialog::BatchRenameDialog(const std::vector<std::wstring>& originalPaths, bool isMirrorSource, QWidget* parent)
+    : FramelessDialog("批量重命名 - ArcMeta", parent), m_originalPaths(originalPaths), m_isMirrorSource(isMirrorSource) {
     resize(850, 600); // 2026-04-11 按照用户要求：给予窗口更多弹性空间，提高初始显示质量
     initContent();
     applyTheme();
@@ -120,6 +120,12 @@ void BatchRenameDialog::initContent() {
     targetL->addWidget(m_rbRename);
     targetL->addWidget(m_rbMove);
     targetL->addWidget(m_rbCopy);
+
+    if (m_isMirrorSource) {
+        m_rbMove->setEnabled(false);
+        m_rbCopy->setEnabled(false);
+        m_rbRename->setChecked(true);
+    }
 
     QHBoxLayout* pathL = new QHBoxLayout();
     m_targetPathEdit = new QLineEdit(targetGroup);
@@ -376,8 +382,73 @@ void BatchRenameDialog::onExecute() {
     for (auto* row : m_ruleRows) rules.push_back(row->getRule());
     
     auto newNames = BatchRenameEngine::instance().preview(m_originalPaths, rules);
+
+    if (m_isMirrorSource) {
+        executeMemoryMode(rules, newNames);
+    } else {
+        executeDiskMode(rules, newNames);
+    }
+}
+
+void BatchRenameDialog::executeMemoryMode(const std::vector<RenameRule>& rules, const std::vector<std::wstring>& newNames) {
+    int successCount = 0;
+
+    // 🚨 开启防抖与内部操作锁定
+    MetadataManager::instance().beginInternalOperation();
+
+    for (int i = 0; i < (int)m_originalPaths.size(); ++i) {
+        QString oldPath = QString::fromStdWString(m_originalPaths[i]);
+        QFileInfo oldInfo(oldPath);
+        QString finalTargetDir = oldInfo.absolutePath();
+        QString newPathStr = QDir(finalTargetDir).filePath(QString::fromStdWString(newNames[i]));
+
+        if (QFile::rename(oldPath, newPathStr)) {
+            successCount++;
+
+            // 同步对配套 _thumbnail.png 缩略图进行物理重命名
+            QString oldThumbPath = oldInfo.absolutePath() + "/" + oldInfo.completeBaseName() + "_thumbnail.png";
+            if (QFile::exists(oldThumbPath)) {
+                QString newThumbPath = QFileInfo(newPathStr).absolutePath() + "/" + QFileInfo(newPathStr).completeBaseName() + "_thumbnail.png";
+                QFile::rename(oldThumbPath, newThumbPath);
+            }
+
+            std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
+            std::wstring newW = QDir(finalTargetDir).absoluteFilePath(QString::fromStdWString(newNames[i])).toStdWString();
+
+            // 1. 内存模型下的元数据索引及路径迁移
+            MetadataManager::instance().renameItem(oldW, newW);
+
+            // 2. 双轨制同步：更新分类关系与 pathHint 映射，确保侧边栏分类计数精确无误
+            CategoryRepo::renamePhysicalCategoryPath(oldW, newW);
+        }
+    }
+
+    if (successCount > 0 && !newNames.empty()) {
+        m_firstNewName = QString::fromStdWString(newNames.front());
+    }
+
+    // 记住并自动持久化更新后的序列起始值
+    for (auto* row : m_ruleRows) {
+        RenameRule rule = row->getRule();
+        if (rule.type == RenameComponentType::Sequence) {
+            rule.start = rule.start + (int)m_originalPaths.size() * rule.step;
+            row->setRule(rule);
+        }
+    }
+    doAutoSave();
+
+    // 🚨 关闭内部操作锁定并提交
+    MetadataManager::instance().endInternalOperation();
+
+    // 发射全量 UI 刷新信号
+    MetadataManager::instance().notifyFullUIRebuild();
+
+    FramelessMessageBox::information(this, "操作完成", QString("成功处理 %1 个文件").arg(successCount));
+    accept();
+}
+
+void BatchRenameDialog::executeDiskMode(const std::vector<RenameRule>& rules, const std::vector<std::wstring>& newNames) {
     QString targetDir = m_targetPathEdit->text();
-    
     if ((m_rbMove->isChecked() || m_rbCopy->isChecked()) && targetDir.isEmpty()) {
         FramelessMessageBox::warning(this, "错误", "请先选择目标文件夹");
         return;
@@ -385,7 +456,7 @@ void BatchRenameDialog::onExecute() {
 
     int successCount = 0;
 
-    // 🚨 开启防抖与内部操作锁定，防止高密集 Windows IOCP 更名重命名变动反馈产生严重的系统刷新和竞态！
+    // 🚨 开启防抖与内部操作锁定
     MetadataManager::instance().beginInternalOperation();
 
     for (int i = 0; i < (int)m_originalPaths.size(); ++i) {
@@ -397,12 +468,35 @@ void BatchRenameDialog::onExecute() {
         bool ok = false;
         if (m_rbCopy->isChecked()) {
             ok = QFile::copy(oldPath, newPathStr);
+            if (ok) {
+                QString oldThumbPath = oldInfo.absolutePath() + "/" + oldInfo.completeBaseName() + "_thumbnail.png";
+                if (QFile::exists(oldThumbPath)) {
+                    QString newThumbPath = QFileInfo(newPathStr).absolutePath() + "/" + QFileInfo(newPathStr).completeBaseName() + "_thumbnail.png";
+                    QFile::copy(oldThumbPath, newThumbPath);
+                }
+            }
         } else if (m_rbMove->isChecked()) {
             if (QFile::copy(oldPath, newPathStr)) {
                 ok = QFile::remove(oldPath);
+                if (ok) {
+                    QString oldThumbPath = oldInfo.absolutePath() + "/" + oldInfo.completeBaseName() + "_thumbnail.png";
+                    if (QFile::exists(oldThumbPath)) {
+                        QString newThumbPath = QFileInfo(newPathStr).absolutePath() + "/" + QFileInfo(newPathStr).completeBaseName() + "_thumbnail.png";
+                        if (QFile::copy(oldThumbPath, newThumbPath)) {
+                            QFile::remove(oldThumbPath);
+                        }
+                    }
+                }
             }
         } else {
             ok = QFile::rename(oldPath, newPathStr);
+            if (ok) {
+                QString oldThumbPath = oldInfo.absolutePath() + "/" + oldInfo.completeBaseName() + "_thumbnail.png";
+                if (QFile::exists(oldThumbPath)) {
+                    QString newThumbPath = QFileInfo(newPathStr).absolutePath() + "/" + QFileInfo(newPathStr).completeBaseName() + "_thumbnail.png";
+                    QFile::rename(oldThumbPath, newThumbPath);
+                }
+            }
         }
 
         if (ok) {
@@ -411,10 +505,8 @@ void BatchRenameDialog::onExecute() {
                 std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
                 std::wstring newW = QDir(finalTargetDir).absoluteFilePath(QString::fromStdWString(newNames[i])).toStdWString();
                 
-                // 1. 同步进行元数据迁移
+                // 同步进行磁盘离散元数据、哈希 JSON 的重命名与平滑迁移
                 MetadataManager::instance().renameItem(oldW, newW);
-                
-                // 2. 双轨制同步：同步修正 categories 表分类定义与 category_items 表中的 pathHint 引用，保持 1:1 分类镜像不损坏！
                 CategoryRepo::renamePhysicalCategoryPath(oldW, newW);
             }
         }
@@ -424,10 +516,20 @@ void BatchRenameDialog::onExecute() {
         m_firstNewName = QString::fromStdWString(newNames.front());
     }
 
+    // 记住并自动持久化更新后的序列起始值
+    for (auto* row : m_ruleRows) {
+        RenameRule rule = row->getRule();
+        if (rule.type == RenameComponentType::Sequence) {
+            rule.start = rule.start + (int)m_originalPaths.size() * rule.step;
+            row->setRule(rule);
+        }
+    }
+    doAutoSave();
+
     // 🚨 关闭内部操作锁定并提交
     MetadataManager::instance().endInternalOperation();
 
-    // 发射全量 UI 刷新信号，使侧边栏分类树、内容视图同频重新计数 and 对账
+    // 发射全量 UI 刷新信号
     MetadataManager::instance().notifyFullUIRebuild();
 
     FramelessMessageBox::information(this, "操作完成", QString("成功处理 %1 个文件").arg(successCount));
