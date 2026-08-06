@@ -1,27 +1,55 @@
 #include "CapsuleMediaExtractor.h"
+#include "../ui/WindowsShellThumbnailProvider.h"
+#include "../ui/MediaColorExtractor.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QFile>
+#include <QSvgRenderer>
+#include <QPainter>
 
 namespace ArcMeta {
 
 QImage CapsuleMediaExtractor::getCapsuleThumbnail(const QString& mainAssetPath, int size) {
-    Q_UNUSED(size);
     QFileInfo fi(mainAssetPath);
     QString containerDir = fi.absolutePath();
-
-    // 物理死规矩：只查 .arc 托管包里的 _thumbnail.png，绝不做任何多余的现场提取！
     QString thumbPath = containerDir + "/" + fi.completeBaseName() + "_thumbnail.png";
 
+    // 1. 优先查 .arc 胶囊内部
     if (QFile::exists(thumbPath)) {
         QImage arcThumb;
-        if (arcThumb.load(thumbPath)) {
-            return arcThumb; // 找到了直接返回，0 毫秒延时！
-        }
+        if (arcThumb.load(thumbPath)) return arcThumb;
     }
 
-    // 没找到直接返回空图片，交给前端画文件类型徽章，绝不拖泥带水！
-    return QImage();
+    // 2. 提取图像
+    QString ext = fi.suffix().toLower();
+    QImage img;
+
+    if (ext == "svg") {
+        QSvgRenderer renderer(mainAssetPath);
+        if (renderer.isValid()) {
+            img = QImage(size, size, QImage::Format_ARGB32);
+            img.fill(Qt::transparent);
+            QPainter painter(&img);
+            renderer.render(&painter);
+        }
+    } else if (ext == "psd" || ext == "psb") {
+        img = MediaColorExtractor::extractEmbeddedPsdThumbnail(mainAssetPath);
+    } else if (ext == "ai") {
+        img = MediaColorExtractor::extractEmbeddedAiPreview(mainAssetPath, size);
+    } else if (ext == "eps") {
+        img = MediaColorExtractor::extractEmbeddedEpsPreview(mainAssetPath, size);
+    }
+
+    if (img.isNull()) {
+        img = WindowsShellThumbnailProvider::getShellThumbnail(mainAssetPath, size);
+        if (img.isNull()) img.load(mainAssetPath);
+    }
+
+    // 3. 100% 仅落盘保存至 .arc 胶囊容器内部！
+    if (!img.isNull() && containerDir.endsWith(".arc", Qt::CaseInsensitive)) {
+        img.save(thumbPath, "PNG");
+    }
+    return img;
 }
 
 } // namespace ArcMeta
