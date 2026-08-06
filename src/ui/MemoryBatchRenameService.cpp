@@ -31,10 +31,17 @@ int MemoryBatchRenameService::execute(const std::vector<std::wstring>& originalP
         if (QFile::rename(oldPath, newPathStr)) {
             successCount++;
 
+            // 2. 同步重命名胶囊内 <oldBaseName>_thumbnail.png -> <newBaseName>_thumbnail.png
+            QString oldThumb = finalDir + "/" + oldInfo.completeBaseName() + "_thumbnail.png";
+            if (QFile::exists(oldThumb)) {
+                QString newThumb = finalDir + "/" + QFileInfo(newPathStr).completeBaseName() + "_thumbnail.png";
+                QFile::rename(oldThumb, newThumb);
+            }
+
             std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
             std::wstring newW = QDir(finalDir).absoluteFilePath(QString::fromStdWString(newNames[i])).toStdWString();
 
-            // 2. 更新内存数据库与倒排索引（.arc 胶囊内 _thumbnail.png 固定存在，无需改动文件名，只需更新主资产索引）
+            // 3. 更新内存数据库与倒排索引
             MetadataManager::instance().renameItem(oldW, newW);
 
             // 3. 同步更新分类映射表 path_hint 引用
