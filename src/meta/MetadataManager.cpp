@@ -926,17 +926,20 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
 
         // 共享元数据逻辑 (FID 关联)
         if (!rm.folderId.empty() && m_folderIdToPath.count(rm.folderId)) {
-            const RuntimeMeta& existing = currentSnapshot->at(m_folderIdToPath[rm.folderId]);
-            rm.rating    = existing.rating;
-            rm.manualColor = existing.manualColor;
-            rm.autoColor = existing.autoColor;
-            rm.tags      = existing.tags;
-            rm.note      = existing.note;
-            rm.url       = existing.url;
-            rm.width     = existing.width;
-            rm.height    = existing.height;
-            rm.palettes  = existing.palettes;
-            rm.isManaged = existing.isManaged;
+            auto existingIt = currentSnapshot->find(m_folderIdToPath[rm.folderId]);
+            if (existingIt != currentSnapshot->end()) {
+                const RuntimeMeta& existing = existingIt->second;
+                rm.rating    = existing.rating;
+                rm.manualColor = existing.manualColor;
+                rm.autoColor = existing.autoColor;
+                rm.tags      = existing.tags;
+                rm.note      = existing.note;
+                rm.url       = existing.url;
+                rm.width     = existing.width;
+                rm.height    = existing.height;
+                rm.palettes  = existing.palettes;
+                rm.isManaged = existing.isManaged;
+            }
         }
 
         auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);

@@ -96,6 +96,10 @@ set(SOURCES
     src/ui/BatchRenameDialog.h
     src/ui/BatchRenamePreviewDialog.cpp
     src/ui/BatchRenamePreviewDialog.h
+    src/ui/MemoryBatchRenameService.cpp
+    src/ui/MemoryBatchRenameService.h
+    src/ui/DiskBatchRenameService.cpp
+    src/ui/DiskBatchRenameService.h
     src/ui/CategoryFilterProxyModel.h
     src/ui/BreadcrumbBar.cpp
     src/ui/BreadcrumbBar.h

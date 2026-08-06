@@ -6,31 +6,54 @@
 #include <QFile>
 #include <QSvgRenderer>
 #include <QPainter>
+#include <QCryptographicHash>
+#include <QCoreApplication>
 
 namespace ArcMeta {
 
+QString CapsuleMediaExtractor::getDiskThumbCachePath(const QString& mainAssetPath) {
+    if (mainAssetPath.isEmpty()) return "";
+    
+    // 1. 规范化路径并计算 16 位 Sha256 哈希指纹
+    QString normPath = QDir::toNativeSeparators(mainAssetPath).toLower();
+    QByteArray hash = QCryptographicHash::hash(normPath.toUtf8(), QCryptographicHash::Sha256).left(8).toHex().toUpper();
+    
+    // 2. 确保 .arcmeta/disk_thumbs/ 目录存在
+    QString cacheDir = QCoreApplication::applicationDirPath() + "/.arcmeta/disk_thumbs";
+    QDir().mkpath(cacheDir);
+
+    return cacheDir + "/" + QString(hash) + ".png";
+}
+
 QImage CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(const QString& mainAssetPath) {
     QFileInfo fi(mainAssetPath);
-    QString thumbPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_thumbnail.png";
-    if (QFile::exists(thumbPath)) {
-        QImage img;
-        if (img.load(thumbPath)) return img;
+    QString containerDir = fi.absolutePath();
+
+    if (containerDir.endsWith(".arc", Qt::CaseInsensitive)) {
+        // 1. .arc 胶囊模式：读取胶囊内部 <baseName>_thumbnail.png
+        QString thumbPath = containerDir + "/" + fi.completeBaseName() + "_thumbnail.png";
+        if (QFile::exists(thumbPath)) {
+            QImage img;
+            if (img.load(thumbPath)) return img;
+        }
+    } else {
+        // 2. 磁盘模式：读取 .arcmeta/disk_thumbs/ 哈希缓存
+        QString diskCachePath = getDiskThumbCachePath(mainAssetPath);
+        if (QFile::exists(diskCachePath)) {
+            QImage img;
+            if (img.load(diskCachePath)) return img;
+        }
     }
     return QImage(); // 绝不实时提取
 }
 
 QImage CapsuleMediaExtractor::getCapsuleThumbnail(const QString& mainAssetPath, int size) {
+    // 先尝试只读快速命中
+    QImage cached = getCapsuleThumbnailReadOnly(mainAssetPath);
+    if (!cached.isNull()) return cached;
+
+    // 实时提取图像
     QFileInfo fi(mainAssetPath);
-    QString containerDir = fi.absolutePath();
-    QString thumbPath = containerDir + "/" + fi.completeBaseName() + "_thumbnail.png";
-
-    // 1. 优先查 .arc 胶囊内部
-    if (QFile::exists(thumbPath)) {
-        QImage arcThumb;
-        if (arcThumb.load(thumbPath)) return arcThumb;
-    }
-
-    // 2. 提取图像
     QString ext = fi.suffix().toLower();
     QImage img;
 
@@ -55,9 +78,18 @@ QImage CapsuleMediaExtractor::getCapsuleThumbnail(const QString& mainAssetPath, 
         if (img.isNull()) img.load(mainAssetPath);
     }
 
-    // 3. 100% 仅落盘保存至 .arc 胶囊容器内部！
-    if (!img.isNull() && containerDir.endsWith(".arc", Qt::CaseInsensitive)) {
-        img.save(thumbPath, "PNG");
+    // 区分双轨落盘
+    if (!img.isNull()) {
+        QString containerDir = fi.absolutePath();
+        if (containerDir.endsWith(".arc", Qt::CaseInsensitive)) {
+            // A 模式：写入 .arc 胶囊内部
+            QString thumbPath = containerDir + "/" + fi.completeBaseName() + "_thumbnail.png";
+            img.save(thumbPath, "PNG");
+        } else {
+            // B 模式：统一写入 .arcmeta/disk_thumbs/ 目录
+            QString diskCachePath = getDiskThumbCachePath(mainAssetPath);
+            img.save(diskCachePath, "PNG");
+        }
     }
     return img;
 }

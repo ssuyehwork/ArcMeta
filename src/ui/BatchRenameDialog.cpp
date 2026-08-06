@@ -2,6 +2,8 @@
 #include "BatchRenamePreviewDialog.h"
 #include "RuleRow.h"
 #include "UiHelper.h"
+#include "MemoryBatchRenameService.h"
+#include "DiskBatchRenameService.h"
 #include "../meta/BatchRenameEngine.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
@@ -27,8 +29,8 @@
 
 namespace ArcMeta {
 
-BatchRenameDialog::BatchRenameDialog(const std::vector<std::wstring>& originalPaths, QWidget* parent)
-    : FramelessDialog("批量重命名 - ArcMeta", parent), m_originalPaths(originalPaths) {
+BatchRenameDialog::BatchRenameDialog(const std::vector<std::wstring>& originalPaths, bool isMirrorSource, QWidget* parent)
+    : FramelessDialog("批量重命名 - ArcMeta", parent), m_originalPaths(originalPaths), m_isMirrorSource(isMirrorSource) {
     resize(850, 600); // 2026-04-11 按照用户要求：给予窗口更多弹性空间，提高初始显示质量
     initContent();
     applyTheme();
@@ -121,6 +123,12 @@ void BatchRenameDialog::initContent() {
     targetL->addWidget(m_rbMove);
     targetL->addWidget(m_rbCopy);
 
+    if (m_isMirrorSource) {
+        m_rbMove->setEnabled(false);
+        m_rbCopy->setEnabled(false);
+        m_rbRename->setChecked(true);
+    }
+
     QHBoxLayout* pathL = new QHBoxLayout();
     m_targetPathEdit = new QLineEdit(targetGroup);
     m_targetPathEdit->setPlaceholderText("选择目标文件夹...");
@@ -132,6 +140,11 @@ void BatchRenameDialog::initContent() {
     pathL->addWidget(m_targetPathEdit);
     pathL->addWidget(m_btnBrowse);
     targetL->addLayout(pathL);
+
+    if (m_isMirrorSource) {
+        m_targetPathEdit->hide();
+        m_btnBrowse->hide();
+    }
     configL->addWidget(targetGroup);
 
     // 3. 新文件名 (规则构造器)
@@ -376,61 +389,42 @@ void BatchRenameDialog::onExecute() {
     for (auto* row : m_ruleRows) rules.push_back(row->getRule());
     
     auto newNames = BatchRenameEngine::instance().preview(m_originalPaths, rules);
-    QString targetDir = m_targetPathEdit->text();
-    
-    if ((m_rbMove->isChecked() || m_rbCopy->isChecked()) && targetDir.isEmpty()) {
-        FramelessMessageBox::warning(this, "错误", "请先选择目标文件夹");
-        return;
-    }
-
     int successCount = 0;
 
-    // 🚨 开启防抖与内部操作锁定，防止高密集 Windows IOCP 更名重命名变动反馈产生严重的系统刷新和竞态！
-    MetadataManager::instance().beginInternalOperation();
+    if (m_isMirrorSource) {
+        // 调度【内存模式独立模块】
+        successCount = MemoryBatchRenameService::execute(m_originalPaths, newNames);
+    } else {
+        // 调度【磁盘模式独立模块】
+        DiskOperationMode mode = DiskOperationMode::Rename;
+        if (m_rbMove->isChecked()) mode = DiskOperationMode::Move;
+        else if (m_rbCopy->isChecked()) mode = DiskOperationMode::Copy;
 
-    for (int i = 0; i < (int)m_originalPaths.size(); ++i) {
-        QString oldPath = QString::fromStdWString(m_originalPaths[i]);
-        QFileInfo oldInfo(oldPath);
-        QString finalTargetDir = m_rbRename->isChecked() ? oldInfo.absolutePath() : targetDir;
-        QString newPathStr = QDir(finalTargetDir).filePath(QString::fromStdWString(newNames[i]));
-
-        bool ok = false;
-        if (m_rbCopy->isChecked()) {
-            ok = QFile::copy(oldPath, newPathStr);
-        } else if (m_rbMove->isChecked()) {
-            if (QFile::copy(oldPath, newPathStr)) {
-                ok = QFile::remove(oldPath);
-            }
-        } else {
-            ok = QFile::rename(oldPath, newPathStr);
+        QString targetDir = m_targetPathEdit->text();
+        if (mode != DiskOperationMode::Rename && targetDir.isEmpty()) {
+            FramelessMessageBox::warning(this, "错误", "请先选择目标文件夹");
+            return;
         }
 
-        if (ok) {
-            successCount++;
-            if (!m_rbCopy->isChecked()) {
-                std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
-                std::wstring newW = QDir(finalTargetDir).absoluteFilePath(QString::fromStdWString(newNames[i])).toStdWString();
-                
-                // 1. 同步进行元数据迁移
-                MetadataManager::instance().renameItem(oldW, newW);
-                
-                // 2. 双轨制同步：同步修正 categories 表分类定义与 category_items 表中的 pathHint 引用，保持 1:1 分类镜像不损坏！
-                CategoryRepo::renamePhysicalCategoryPath(oldW, newW);
+        successCount = DiskBatchRenameService::execute(m_originalPaths, newNames, mode, targetDir);
+    }
+
+    // 只有在存在实际成功记录时，才依据真实成功数自增序列号，杜绝跳号
+    if (successCount > 0) {
+        for (auto* row : m_ruleRows) {
+            RenameRule rule = row->getRule();
+            if (rule.type == RenameComponentType::Sequence) {
+                rule.start = rule.start + successCount * rule.step;
+                row->setRule(rule);
             }
+        }
+        doAutoSave();
+        if (!newNames.empty()) {
+            m_firstNewName = QString::fromStdWString(newNames.front());
         }
     }
 
-    if (successCount > 0 && !newNames.empty()) {
-        m_firstNewName = QString::fromStdWString(newNames.front());
-    }
-
-    // 🚨 关闭内部操作锁定并提交
-    MetadataManager::instance().endInternalOperation();
-
-    // 发射全量 UI 刷新信号，使侧边栏分类树、内容视图同频重新计数 and 对账
-    MetadataManager::instance().notifyFullUIRebuild();
-
-    FramelessMessageBox::information(this, "操作完成", QString("成功处理 %1 个文件").arg(successCount));
+    FramelessMessageBox::information(this, "操作完成", QString("成功处理 %1 个项目").arg(successCount));
     accept();
 }
 
