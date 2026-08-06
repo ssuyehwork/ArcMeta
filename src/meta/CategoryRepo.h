@@ -51,6 +51,13 @@ public:
      */
     static std::wstring getDefaultColor() { return L"#555555"; }
 
+    /**
+     * @brief 自动将文件/胶囊绑定到其所在盘符的托管库根分类上
+     * @param folderId 13位资产ID (00ms...)
+     * @param physicalPath 文件绝对路径
+     */
+    static void bindToLibraryRootCategory(const std::string& folderId, const std::wstring& physicalPath);
+
     static bool add(Category& cat);
     static bool update(const Category& cat);
     static Category getById(int id);

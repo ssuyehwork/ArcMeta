@@ -462,6 +462,9 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
             sqlite3_finalize(stmtItems); 
         } 
     } 
+
+    // 🚨 3.5：无论是否有自定义分类，入库资产都自动检测并绑定到物理托管根库分类
+    CategoryRepo::bindToLibraryRootCategory(folderId, nPath);
  
     if (!trans.commit()) return false; 
  
