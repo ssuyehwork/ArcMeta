@@ -386,7 +386,7 @@ void BatchRenameDialog::onExecute() {
     int successCount = 0;
 
     // 🚨 开启防抖与内部操作锁定，防止高密集 Windows IOCP 更名重命名变动反馈产生严重的系统刷新和竞态！
-    MetadataManager::instance().setInternalOperating(true);
+    MetadataManager::instance().beginInternalOperation();
 
     for (int i = 0; i < (int)m_originalPaths.size(); ++i) {
         QString oldPath = QString::fromStdWString(m_originalPaths[i]);
@@ -425,9 +425,9 @@ void BatchRenameDialog::onExecute() {
     }
 
     // 🚨 关闭内部操作锁定并提交
-    MetadataManager::instance().setInternalOperating(false);
+    MetadataManager::instance().endInternalOperation();
 
-    // 发射全量 UI 刷新信号，使侧边栏分类树、内容视图同频重新计数和对账
+    // 发射全量 UI 刷新信号，使侧边栏分类树、内容视图同频重新计数 and 对账
     MetadataManager::instance().notifyFullUIRebuild();
 
     FramelessMessageBox::information(this, "操作完成", QString("成功处理 %1 个文件").arg(successCount));

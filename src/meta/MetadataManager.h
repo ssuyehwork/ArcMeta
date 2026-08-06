@@ -305,10 +305,32 @@ public:
     static std::wstring getManagedLibraryPath(const std::wstring& volSerial, const QString& driveLetter);
 
     /**
+     * @brief 物理操作原子事务计数，精确闭锁生命周期
+     */
+    void beginInternalOperation() {
+        m_internalOpsCount.fetch_add(1);
+        m_isInternalOperating.store(true);
+    }
+
+    void endInternalOperation() {
+        int count = m_internalOpsCount.fetch_sub(1) - 1;
+        if (count <= 0) {
+            m_internalOpsCount.store(0);
+            m_isInternalOperating.store(false);
+        }
+    }
+
+    /**
      * @brief 设置内部操作标志位，用于抑制冗余信号刷新
      */
-    void setInternalOperating(bool operating) { m_isInternalOperating = operating; }
-    bool isInternalOperating() const { return m_isInternalOperating; }
+    void setInternalOperating(bool operating) {
+        if (operating) {
+            beginInternalOperation();
+        } else {
+            endInternalOperation();
+        }
+    }
+    bool isInternalOperating() const { return m_isInternalOperating.load(); }
 
     /**
      * @brief 安全解析路径组件
@@ -432,6 +454,7 @@ private:
     mutable std::shared_mutex m_mutex;
     bool m_loaded = false; // 2026-06-xx 物理加固：加载状态标记
     std::atomic<bool> m_isInternalOperating{false}; // 2026-xx-xx 按照 Plan-105：信号抑制标志位
+    std::atomic<int> m_internalOpsCount{0}; // 物理原子事务操作计数器
     
     // 2026-06-xx 性能加固：信号攒批机制，防止 5 万级数据扫描导致 UI 信号淹没
     QTimer* m_uiSignalTimer = nullptr;

@@ -84,7 +84,13 @@ void AssetImporter::importAssets(const QStringList& paths,
             } 
             if (managedRoot.isEmpty()) { 
                 QString drive = QFileInfo(src).absolutePath().left(3); 
-                if (drive.isEmpty()) drive = "D:/"; 
+                if (drive.isEmpty()) {
+                    // 🚨 探针探测运行盘符，废除 D:/ 临时硬编码
+                    drive = QCoreApplication::applicationDirPath().left(3);
+                }
+                if (drive.isEmpty()) {
+                    drive = "C:/";
+                }
                 managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper(); 
             } 
              
