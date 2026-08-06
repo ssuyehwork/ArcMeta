@@ -93,7 +93,8 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     bool isWaitingThumb = false;
     if (m_pathRole != -1 && thumb.isNull()) {
         QString path = index.data(m_pathRole).toString();
-        QString ext = QFileInfo(path).suffix().toLower();
+        int lastDot = path.lastIndexOf('.');
+        QString ext = (lastDot != -1) ? path.mid(lastDot + 1).toLower() : "";
         if (UiHelper::isGraphicsFile(ext) || ext == "svg") {
             isWaitingThumb = true;
         }
