@@ -331,7 +331,6 @@ void MetadataManager::initFromScchMode() {
 
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cache = tempCache;
         m_folderIdToPath = tempFidToPath;
         m_parentToChildren = tempParentToChildren;
         m_folderProgressCache = tempFolderProgressCache;
@@ -343,7 +342,7 @@ void MetadataManager::initFromScchMode() {
         }
 
         // 2026-07-xx 物理同步：初始化时构建所有已加载卷的隔离索引
-        for (const auto& pair : m_cache) {
+        for (const auto& pair : tempCache) {
             const RuntimeMeta& meta = pair.second;
             if (!meta.baseName.empty()) {
                 if (meta.isFolder) {
@@ -832,11 +831,14 @@ std::vector<std::pair<std::wstring, RuntimeMeta>> MetadataManager::getChildrenFr
     std::shared_lock<std::shared_mutex> lock(m_mutex);
     auto it = m_parentToChildren.find(nFolder);
     if (it != m_parentToChildren.end()) {
-        results.reserve(it->second.size());
-        for (const auto& childPath : it->second) {
-            auto itMeta = m_cache.find(childPath);
-            if (itMeta != m_cache.end()) {
-                results.push_back({childPath, itMeta->second});
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot) {
+            results.reserve(it->second.size());
+            for (const auto& childPath : it->second) {
+                auto itMeta = currentSnapshot->find(childPath);
+                if (itMeta != currentSnapshot->end()) {
+                    results.push_back({childPath, itMeta->second});
+                }
             }
         }
     }
@@ -2741,19 +2743,26 @@ void MetadataManager::recordAccess(const std::wstring& path) {
     double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end()) {
-            it->second.atime = static_cast<long long>(now);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot) {
+            auto it = currentSnapshot->find(nPath);
+            if (it != currentSnapshot->end()) {
+                auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+                (*newMap)[nPath].atime = static_cast<long long>(now);
+                std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+            }
         }
     }
     persistAsync(nPath);
 }
 
 double MetadataManager::getCachedAtime(const std::wstring& path) {
-    std::shared_lock<std::shared_mutex> lock(m_mutex);
-    auto it = m_cache.find(path);
-    if (it != m_cache.end()) {
-        return static_cast<double>(it->second.atime);
+    auto currentSnapshot = std::atomic_load(&m_snapshot);
+    if (currentSnapshot) {
+        auto it = currentSnapshot->find(path);
+        if (it != currentSnapshot->end()) {
+            return static_cast<double>(it->second.atime);
+        }
     }
     return 0.0;
 }
