@@ -1668,7 +1668,23 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
     addOrderAct("升序", Qt::AscendingOrder);
     addOrderAct("降序", Qt::DescendingOrder);
 
+    // =========================================================================
+    // 🚨 核心防死锁机制：右键菜单弹出前，暂时阻塞 Model 信号与 View 的 updates，
+    // 阻止后台缩略图异步完成回调在 menu.exec() 模态循环内强行触发父窗口重绘导致 Win32 死锁！
+    // =========================================================================
+    bool oldBlockModel = m_model ? m_model->signalsBlocked() : false;
+    bool oldUpdatesView = view->updatesEnabled();
+
+    if (m_model) m_model->blockSignals(true); // 抑制 dataChanged 分发
+    view->setUpdatesEnabled(false);           // 锁住父视图刷新，防止绘图冲突
+
     QAction* selectedAction = menu.exec(view->viewport()->mapToGlobal(pos)); 
+
+    // 菜单关闭后，立刻恢复信号与视图刷新
+    view->setUpdatesEnabled(oldUpdatesView);
+    if (m_model) m_model->blockSignals(oldBlockModel);
+    view->viewport()->update(); // 恢复后统一补刷一次
+
     if (!selectedAction || !selectedAction->data().isValid()) return; 
  
     ContextAction action = static_cast<ContextAction>(selectedAction->data().toInt()); 
