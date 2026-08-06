@@ -18,33 +18,35 @@ int MemoryBatchRenameService::execute(const std::vector<std::wstring>& originalP
         QString oldPath = QString::fromStdWString(originalPaths[i]);
         QFileInfo oldInfo(oldPath);
 
-        // 目标路径：保持在原 .arc 胶囊文件夹内
-        QString finalDir = oldInfo.absolutePath();
-        QString newPathStr = QDir(finalDir).filePath(QString::fromStdWString(newNames[i]));
+        QDir arcDir = oldInfo.absoluteDir(); // 直接定位到 .arc 胶囊目录
+        QString newBaseName = QFileInfo(QString::fromStdWString(newNames[i])).completeBaseName();
+        QString newMainPath = arcDir.filePath(QString::fromStdWString(newNames[i]));
 
-        if (oldPath == newPathStr) {
+        if (oldPath == newMainPath) {
             successCount++;
             continue;
         }
 
-        // 1. 物理重命名胶囊内主资产文件
-        if (QFile::rename(oldPath, newPathStr)) {
+        // 1. 物理重命名胶囊内主资产文件（如 测试_038.ai）
+        if (QFile::rename(oldPath, newMainPath)) {
             successCount++;
 
-            // 2. 同步重命名胶囊内 <oldBaseName>_thumbnail.png -> <newBaseName>_thumbnail.png
-            QString oldThumb = finalDir + "/" + oldInfo.completeBaseName() + "_thumbnail.png";
-            if (QFile::exists(oldThumb)) {
-                QString newThumb = finalDir + "/" + QFileInfo(newPathStr).completeBaseName() + "_thumbnail.png";
-                QFile::rename(oldThumb, newThumb);
+            // 2. 物理扫描 .arc 胶囊目录，精准强杀并重命名 *_thumbnail.png
+            QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
+            for (const QString& oldThumbName : thumbFiles) {
+                QString oldThumbAbsPath = arcDir.filePath(oldThumbName);
+                QString newThumbAbsPath = arcDir.filePath(newBaseName + "_thumbnail.png");
+
+                if (oldThumbAbsPath != newThumbAbsPath) {
+                    QFile::rename(oldThumbAbsPath, newThumbAbsPath);
+                }
             }
 
             std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
-            std::wstring newW = QDir(finalDir).absoluteFilePath(QString::fromStdWString(newNames[i])).toStdWString();
+            std::wstring newW = QDir::toNativeSeparators(newMainPath).toStdWString();
 
-            // 3. 更新内存数据库与倒排索引
+            // 3. 更新内存数据库与索引
             MetadataManager::instance().renameItem(oldW, newW);
-
-            // 3. 同步更新分类映射表 path_hint 引用
             CategoryRepo::renamePhysicalCategoryPath(oldW, newW);
         }
     }
