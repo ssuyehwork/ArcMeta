@@ -192,7 +192,6 @@ Qt::ItemFlags LibraryAssetModel::flags(const QModelIndex& index) const {
 }
 
 void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
-    // 内存模式：穿透 .arc 搜寻高清缩略图与宽高比
     std::vector<std::pair<QString, QString>> newQueue;
     for (int r : rows) {
         if (r < 0 || r >= static_cast<int>(m_allRecords.size())) continue;
@@ -200,19 +199,7 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
         if (rec.isCategory) continue;
 
         QString path = rec.path;
-        bool isArcContainer = rec.isDir && rec.path.endsWith(".arc", Qt::CaseInsensitive);
-        bool needLoad = !m_iconCache.contains(path);
-        if ((UiHelper::isGraphicsFile(rec.suffix) || isArcContainer) && !m_aspectRatios.contains(QDir::toNativeSeparators(path))) {
-            needLoad = true;
-        }
-
-        // 🚨 核心防爆锁：如果正在后台处理排队中，立刻 0 毫秒跳过！
-        if (m_requestedIcons.contains(path)) {
-            needLoad = false;
-        }
-
-        if (needLoad) {
-            // 🚨 0 毫秒瞬间上锁！阻断高频重复开启渲染进程！
+        if (!m_iconCache.contains(path) && !m_requestedIcons.contains(path)) {
             m_requestedIcons.insert(path);
             newQueue.push_back({path, path});
         }
@@ -225,84 +212,27 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
         for (const auto& task : newQueue) {
             if (!weakThis) break;
             QString path = task.first;
-            QFileInfo info(path);
-            QString ext = info.suffix().toLower();
 
-            QImage img;
-            double ar = 1.0;
-            bool hasThumb = false;
+            // 纯只读读取已有的 _thumbnail.png
+            QImage img = CapsuleMediaExtractor::getCapsuleThumbnail(path, 128);
+            double ar = !img.isNull() ? (double)img.width() / img.height() : -1.0;
 
-            bool isInsideArc = info.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
-
-            if (isInsideArc || ext == "svg" || ext == "psd" || ext == "psb" || ext == "ai" || ext == "eps") {
-                // 🚨 管道二单线直达：直接调用 CapsuleMediaExtractor，零分支判断！
-                img = CapsuleMediaExtractor::getCapsuleThumbnail(path, 128);
-                if (!img.isNull()) {
-                    ar = (double)img.width() / img.height();
-                    hasThumb = true;
-                }
-            } else if (UiHelper::isGraphicsFile(ext) && ext != "cur" && ext != "ico" && ext != "ani") {
-                img = CapsuleMediaExtractor::getCapsuleThumbnail(path, 128);
-                if (!img.isNull()) {
-                    ar = (double)img.width() / img.height();
-                    hasThumb = true;
-                }
-            } else if (ext == "cur" || ext == "ico" || ext == "ani") {
-                ar = 1.0;
-                hasThumb = false;
-            } else if ((ext == "arc" || path.endsWith(".arc", Qt::CaseInsensitive) || path.endsWith(".arc/", Qt::CaseInsensitive) || path.endsWith(".arc\\", Qt::CaseInsensitive)) && info.isDir()) {
-                // 物理规范化文件夹路径：去除末尾的斜杠，保证拼接正常
-                QString cleanPath = path;
-                if (cleanPath.endsWith("/") || cleanPath.endsWith("\\")) {
-                    cleanPath = cleanPath.left(cleanPath.length() - 1);
-                }
-                QDir arcDir(cleanPath);
-                QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
-                if (!thumbFiles.isEmpty()) {
-                    QString thumbPath = cleanPath + "/" + thumbFiles.first();
-                    img = QImage(thumbPath);
-                    if (!img.isNull()) {
-                        ar = (double)img.width() / img.height();
-                        hasThumb = true;
-                    }
-                }
-            }
-
-            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, img, ar, hasThumb]() {
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, img, ar]() {
                 if (weakThis) {
-                    QIcon icon;
-                    if (!img.isNull()) {
-                        icon = QIcon(QPixmap::fromImage(img));
-                    } else {
-                        QString iconTarget = path;
-                        QFileInfo localInfo(path);
-                        if (localInfo.suffix().toLower() == "arc" && localInfo.isDir()) {
-                            // 物理规范化文件夹路径：去除末尾的斜杠，保证拼接正常
-                            QString cleanPath = path;
-                            if (cleanPath.endsWith("/") || cleanPath.endsWith("\\")) {
-                                cleanPath = cleanPath.left(cleanPath.length() - 1);
-                            }
-                            QDir arcDir(cleanPath);
-                            QFileInfoList files = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-                            for (const QFileInfo& fi : files) {
-                                QString fn = fi.fileName();
-                                if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
-                                if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
-                                iconTarget = QDir::toNativeSeparators(fi.absoluteFilePath());
-                                break;
-                            }
-                        }
-                        icon = ShellIconManager::getFileIcon(iconTarget, 128);
-                    }
+                    weakThis->m_requestedIcons.remove(path); // 释放请求防重锁
 
-                    weakThis->m_iconCache.insert(path, new QIcon(icon));
-                    weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
-                    weakThis->m_requestedIcons.remove(path); // 🚨 任务完成，释放防抖锁！
+                    if (!img.isNull()) {
+                        weakThis->m_iconCache.insert(path, new QIcon(QPixmap::fromImage(img)));
+                        weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = ar;
+                    } else {
+                        weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = -1.0;
+                    }
 
                     auto it = weakThis->m_pathToIndex.find(path);
                     if (it != weakThis->m_pathToIndex.end()) {
                         int rIdx = it->second;
-                        emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+                        emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0),
+                                                 {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
                     }
                 }
             });

@@ -1117,7 +1117,10 @@ void CategoryRepo::loadStatsFromDb() {
 }
 
 void CategoryRepo::fullRecount() {
-    // 🚨 彻底根除全量物理对账逻辑：该函数已被完全注销，拒绝一切对账、覆盖和物理脏写，保持系统极度清澈与极速
+    // 🚨 重新计数前，先执行 SQL 补全对账，防止根库计数被清零！
+    repairLibraryRootBindings();
+
+    // 🚨 彻底根除全量物理对账逻辑：该函数已被完全注销，拒绝一切对账、覆盖 and 物理脏写，保持系统极度清澈与极速
     qDebug() << "[Recount][CLEANUP] CategoryRepo::fullRecount has been completely removed. Skip recount.";
 }
 
