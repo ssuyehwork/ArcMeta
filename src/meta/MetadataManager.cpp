@@ -2747,16 +2747,17 @@ void MetadataManager::recordAccess(const std::wstring& path) {
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         auto currentSnapshot = std::atomic_load(&m_snapshot);
-        if (currentSnapshot) {
-            auto it = currentSnapshot->find(nPath);
-            if (it != currentSnapshot->end()) {
-                auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
-                (*newMap)[nPath].atime = static_cast<long long>(now);
-                std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
-            }
+        if (currentSnapshot && currentSnapshot->count(nPath)) {
+            auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+            (*newMap)[nPath].atime = static_cast<long long>(now);
+            std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
         }
     }
-    persistAsync(nPath);
+
+    // 2. 🚨 真正的异步：绝对不在 UI 主线程跑 SQL！抛入后台 Worker 线程异步持久化！
+    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+        persistAsync(nPath);
+    });
 }
 
 double MetadataManager::getCachedAtime(const std::wstring& path) {

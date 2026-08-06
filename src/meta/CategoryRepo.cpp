@@ -34,6 +34,7 @@ QSet<QString> CategoryRepo::s_globalTagsSet;
 // 初始化静态内存快照指针
 std::shared_ptr<const std::vector<Category>> CategoryRepo::s_categoryCache = std::make_shared<const std::vector<Category>>();
 std::shared_ptr<const std::vector<Category>> CategoryRepo::s_recentlyUsedCache = std::make_shared<const std::vector<Category>>();
+std::shared_ptr<const std::unordered_map<std::string, std::vector<int>>> CategoryRepo::s_itemCategoriesCache = std::make_shared<const std::unordered_map<std::string, std::vector<int>>>();
 std::mutex CategoryRepo::s_cacheMutex;
 
 void CategoryRepo::initialize() {
@@ -45,11 +46,33 @@ void CategoryRepo::refreshMemoryCache() {
     // 磁盘 DB -> 内存 DB 读出，构建干净的数组快照
     auto dbCats = getAll();
     auto dbRecent = getRecentlyUsed(50); // 最多缓存 50 个最近使用的分类
+
+    // 2. Rebuild item to categories map cache
+    std::unordered_map<std::string, std::vector<int>> itemCats;
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    const char* sql = "SELECT folder_id, category_id FROM category_items WHERE category_id > 0";
+    for (sqlite3* db : dbs) {
+        if (!db) continue;
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                int catId = sqlite3_column_int(stmt, 1);
+                if (fid) {
+                    itemCats[fid].push_back(catId);
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+
     std::lock_guard<std::mutex> lock(s_cacheMutex);
     std::atomic_store(&s_categoryCache,
         std::shared_ptr<const std::vector<Category>>(std::make_shared<const std::vector<Category>>(std::move(dbCats))));
     std::atomic_store(&s_recentlyUsedCache,
         std::shared_ptr<const std::vector<Category>>(std::make_shared<const std::vector<Category>>(std::move(dbRecent))));
+    std::atomic_store(&s_itemCategoriesCache,
+        std::shared_ptr<const std::unordered_map<std::string, std::vector<int>>>(std::make_shared<const std::unordered_map<std::string, std::vector<int>>>(std::move(itemCats))));
 }
 
 std::vector<Category> CategoryRepo::getCachedAll() {
@@ -280,26 +303,15 @@ bool CategoryRepo::removeAllCategoriesBatch(const std::vector<std::string>& fold
     });
 }
 
-std::vector<int> CategoryRepo::getItemCategoryIds(const std::string& folderId, const std::wstring& pathHint) {
-    std::vector<int> ids;
-    if (folderId.empty()) return ids;
-    std::wstring path = pathHint;
-    if (path.empty()) {
-        path = MetadataManager::instance().getPathByFolderId(folderId);
+std::vector<int> CategoryRepo::getItemCategoryIds(const std::string& folderId, const std::wstring& /*pathHint*/) {
+    if (folderId.empty()) return {};
+    auto snapshot = std::atomic_load(&s_itemCategoriesCache);
+    if (!snapshot) return {};
+    auto it = snapshot->find(folderId);
+    if (it != snapshot->end()) {
+        return it->second;
     }
-    sqlite3* db = DatabaseManager::instance().getDbForPath(path);
-    if (!db) return ids;
-
-    sqlite3_stmt* stmt;
-    const char* sql = "SELECT category_id FROM category_items WHERE folder_id = ? AND category_id > 0";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, folderId.c_str(), -1, SQLITE_TRANSIENT);
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            ids.push_back(sqlite3_column_int(stmt, 0));
-        }
-        sqlite3_finalize(stmt);
-    }
-    return ids;
+    return {};
 }
 
 bool CategoryRepo::moveToTrashBatch(const std::vector<std::string>& folderIds) {
@@ -840,6 +852,8 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& folderId
         if (sqlite3_step(memStmt) == SQLITE_DONE) {
             sqlite3_finalize(memStmt);
 
+            refreshMemoryCache();
+
             // 如果之前未分类，增加后变成有分类，则减去 uncategorizedCount，增加 categorizedCount 并持久化
             if (getItemCategoryIds(folderId, finalPath).size() == 1) {
                 s_uncategorizedCount.fetch_sub(1);
@@ -871,6 +885,8 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fol
         sqlite3_bind_text(memStmt, 2, folderId.c_str(), -1, SQLITE_TRANSIENT);
         if (sqlite3_step(memStmt) == SQLITE_DONE) {
             sqlite3_finalize(memStmt);
+
+            refreshMemoryCache();
 
             // 如果移除后不再有任何分类，则增加 uncategorizedCount，减少 categorizedCount 并持久化
             if (getItemCategoryIds(folderId, path).empty()) {
@@ -1122,6 +1138,7 @@ bool CategoryRepo::executeFidBatch(const std::vector<std::string>& folderIds, st
     }
 
     s_countsDirty.store(true);
+    refreshMemoryCache();
     // 批量处理后通知 UI 刷新
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
     return allOk;
@@ -1297,7 +1314,7 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
             std::vector<int> associatedCatIds = CategoryRepo::getItemCategoryIds(meta.folderId, path);
             for (int cid : associatedCatIds) {
                 if (cid > 0) {
-                    Category assocCat = CategoryRepo::getById(cid);
+                    Category assocCat = CategoryRepo::getCachedById(cid);
                     if (assocCat.encrypted && !CategoryLockManager::instance().isUnlocked(cid)) {
                         return; // 物理强行跳过，杜绝外溢泄露！
                     }

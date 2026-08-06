@@ -10,6 +10,7 @@
 #include <functional>
 #include <mutex>
 #include <map>
+#include <unordered_map>
 #include "sqlite3.h"
 
 namespace ArcMeta {
@@ -172,6 +173,7 @@ private:
     // 内存快照只读指针（RCU Lock-Free 机制）
     static std::shared_ptr<const std::vector<Category>> s_categoryCache;
     static std::shared_ptr<const std::vector<Category>> s_recentlyUsedCache;
+    static std::shared_ptr<const std::unordered_map<std::string, std::vector<int>>> s_itemCategoriesCache;
     static std::mutex s_cacheMutex;
 };
 
