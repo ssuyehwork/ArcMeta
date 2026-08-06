@@ -5,6 +5,7 @@
 #include <QCache>
 #include <QMap>
 #include <QIcon>
+#include <QTimer>
 
 #include <unordered_map>
 #include <QSet>
@@ -42,6 +43,10 @@ protected:
     mutable QMap<QString, double> m_aspectRatios;
     mutable QCache<QString, ArcMeta::RuntimeMeta> m_metaCache;
     QString m_query;
+
+    // 🚨 新增：缩略图获取失败重试
+    mutable QMap<QString, int> m_thumbRetryCount; // path -> 已重试次数
+    QTimer* m_thumbRetryTimer = nullptr;
 };
 
 #endif // LIBRARYASSETMODEL_H

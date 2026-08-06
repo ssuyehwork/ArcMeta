@@ -21,6 +21,24 @@ using namespace ArcMeta;
 
 LibraryAssetModel::LibraryAssetModel(QObject* parent) : ItemModelBase(parent) {
     m_iconCache.setMaxCost(500);
+
+    // 🚨 新增：缩略图重试定时器，800ms 一轮，覆盖大多数"文件还没生成完"的时间窗口
+    m_thumbRetryTimer = new QTimer(this);
+    m_thumbRetryTimer->setInterval(800);
+    connect(m_thumbRetryTimer, &QTimer::timeout, this, [this]() {
+        if (m_thumbRetryCount.isEmpty()) {
+            m_thumbRetryTimer->stop();
+            return;
+        }
+        QList<int> rows;
+        for (auto it = m_thumbRetryCount.begin(); it != m_thumbRetryCount.end(); ++it) {
+            auto pit = m_pathToIndex.find(it.key());
+            if (pit != m_pathToIndex.end()) rows.append(pit->second);
+        }
+        if (!rows.isEmpty()) {
+            loadThumbnailsForRows(rows); // 复用现有请求通道，走正常的去重/加载流程
+        }
+    });
 }
 
 LibraryAssetModel::~LibraryAssetModel() {}
@@ -44,6 +62,8 @@ void LibraryAssetModel::setRecords(const std::vector<ItemRecord>& records) {
     m_iconCache.setMaxCost(qMax(500, static_cast<int>(m_allRecords.size()) + 50));
     m_requestedIcons.clear();
     m_metaCache.clear();
+    m_thumbRetryCount.clear();      // 新增
+    if (m_thumbRetryTimer) m_thumbRetryTimer->stop(); // 新增
     endResetModel();
 }
 
@@ -55,6 +75,8 @@ void LibraryAssetModel::clear() {
     m_requestedIcons.clear();
     m_aspectRatios.clear();
     m_metaCache.clear();
+    m_thumbRetryCount.clear();      // 新增
+    if (m_thumbRetryTimer) m_thumbRetryTimer->stop(); // 新增
     endResetModel();
 }
 
@@ -224,8 +246,21 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
                     if (!img.isNull()) {
                         weakThis->m_iconCache.insert(path, new QIcon(QPixmap::fromImage(img)));
                         weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = ar;
+                        weakThis->m_thumbRetryCount.remove(path); // 成功了，清掉重试记录
                     } else {
                         weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = -1.0;
+
+                        // 🚨 核心修复：不再"查一次没有就永久放弃"。
+                        // 缩略图很可能是后台流水线还没来得及生成，限次重试（最多5轮，每轮800ms）
+                        int& cnt = weakThis->m_thumbRetryCount[path];
+                        if (cnt < 5) {
+                            cnt++;
+                            if (!weakThis->m_thumbRetryTimer->isActive()) {
+                                weakThis->m_thumbRetryTimer->start();
+                            }
+                        } else {
+                            weakThis->m_thumbRetryCount.remove(path); // 重试次数用尽才真正放弃（大概率是真无缩略图，如损坏文件）
+                        }
                     }
 
                     auto it = weakThis->m_pathToIndex.find(path);
