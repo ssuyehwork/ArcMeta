@@ -13,6 +13,7 @@
 #include <atomic>
 #include <deque>
 #include <mutex>
+#include <memory>
 
 namespace ArcMeta {
 
@@ -371,13 +372,14 @@ public:
     std::vector<std::string> getFolderIdsByExtension(const std::wstring& extension);
 
     /**
-     * @brief 只读遍历内存缓存，用于统计等场景（持有读锁）
+     * @brief 只读遍历内存缓存，用于统计等场景（无锁 RCU 读取）
      * 2026-06-xx 物理同步：回调参数包含 (path, RuntimeMeta)
      */
     template<typename Func>
     void forEachCachedItem(Func&& fn) const {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        for (std::unordered_map<std::wstring, RuntimeMeta>::const_iterator it = m_cache.begin(); it != m_cache.end(); ++it) {
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (!currentSnapshot) return;
+        for (auto it = currentSnapshot->begin(); it != currentSnapshot->end(); ++it) {
             fn(it->first, it->second);
         }
     }
@@ -430,7 +432,8 @@ private:
     MetadataManager(QObject* parent = nullptr);
     ~MetadataManager() override = default;
 
-    std::unordered_map<std::wstring, RuntimeMeta> m_cache;
+    // [RCU 内存快照设计]：将缓存升级为原子共享智能指针快照，实现 Lock-Free 共享读取
+    std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>> m_snapshot;
     std::unordered_map<std::string, std::wstring> m_folderIdToPath;
 
     // 2026-xx-xx 按照 Plan-124：快速层级倒排索引与进度缓存

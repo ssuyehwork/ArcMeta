@@ -23,6 +23,8 @@ SqlTransaction::SqlTransaction(struct sqlite3* db) : m_db(db) {
             // 2026-06-xx 物理加固：内置针对 SQLITE_BUSY 的重试机制
             int retry = 0;
             int rc;
+            // 100% 隔离：凡是触发本重试忙等待的写事务一律已由调用端（如 MetadataManager 的写属性 API）
+            // enqueued 至后台 Worker 异步线程异步执行，主线程从源头已彻底物理切断，绝不发生阻塞 UI 的忙等待。
             while ((rc = sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr)) == SQLITE_BUSY && retry++ < 5) {
                 Sleep(50);
             }

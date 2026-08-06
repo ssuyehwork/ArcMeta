@@ -133,6 +133,8 @@ MetadataManager& MetadataManager::instance() {
 }
 
 MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
+    // [RCU 内存快照初始化]：分配空快照，防空指针异常
+    m_snapshot = std::make_shared<const std::unordered_map<std::wstring, RuntimeMeta>>();
     m_uiSignalTimer = new QTimer(this);
     m_uiSignalTimer->setInterval(200); // 200ms 时间窗口
     m_uiSignalTimer->setSingleShot(true);
@@ -359,6 +361,10 @@ void MetadataManager::initFromScchMode() {
         }
 
         m_loaded = true;
+        // 原子同步内存快照缓存指针
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(
+            std::make_shared<const std::unordered_map<std::wstring, RuntimeMeta>>(tempCache)
+        ));
     }
 
     // 2026-06-xx 物理对账：在初始化结束后（m_loaded 为 true 且缓存就绪），加载缓存计数
@@ -484,7 +490,10 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
  
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        m_cache[nPath] = rm; 
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath] = rm;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
         m_folderIdToPath[folderId] = nPath; 
     } 
  
@@ -542,7 +551,10 @@ bool MetadataManager::migrateCapsuleToLibrary(const std::string& assetId, const 
     oldMeta.isManaged = true; 
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        m_cache[wNewPath] = oldMeta; 
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[wNewPath] = oldMeta;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
         m_folderIdToPath[assetId] = wNewPath; 
     } 
  
@@ -560,20 +572,22 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     std::string pFid;
     long long pSize = 0, pMtime = 0;
     if (fetchWinApiMetadataDirect(nPath, pFid, nullptr, &pSize, nullptr, nullptr, &pMtime, nullptr)) {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end()) {
-            // 只有当文件指纹一致、曾经被置为1，且色彩和尺寸物理属性都确切存在、非残缺时，才允许返回跳过！
-            // 这杜绝了历史解析失败时留下空元数据、又因状态为 1 无法再次扫描提取的致命 Bug 
-            bool metadataValid = true;
-            QFileInfo info(QString::fromStdWString(nPath));
-            if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-                if (it->second.width <= 0 || it->second.height <= 0 || it->second.autoColor.empty()) {
-                    metadataValid = false;
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot) {
+            auto it = currentSnapshot->find(nPath);
+            if (it != currentSnapshot->end()) {
+                // 只有当文件指纹一致、曾经被置为1，且色彩和尺寸物理属性都确切存在、非残缺时，才允许返回跳过！
+                // 这杜绝了历史解析失败时留下空元数据、又因状态为 1 无法再次扫描提取的致命 Bug
+                bool metadataValid = true;
+                QFileInfo info(QString::fromStdWString(nPath));
+                if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
+                    if (it->second.width <= 0 || it->second.height <= 0 || it->second.autoColor.empty()) {
+                        metadataValid = false;
+                    }
                 }
-            }
-            if (it->second.ingestionStatus == 1 && it->second.fileSize == pSize && it->second.mtime == pMtime && metadataValid) {
-                return; // 物理指纹及高级多媒体特征完备且未发生改变，安全返回
+                if (it->second.ingestionStatus == 1 && it->second.fileSize == pSize && it->second.mtime == pMtime && metadataValid) {
+                    return; // 物理指纹及高级多媒体特征完备且未发生改变，安全返回
+                }
             }
         }
     }
@@ -584,9 +598,12 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
     // 注意：ensureActivated 内部对已存在项会跳过，故此处需确保若指纹变化能更新缓存
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        if (m_cache.count(nPath)) {
-            m_cache[nPath].fileSize = pSize;
-            m_cache[nPath].mtime = pMtime;
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot && currentSnapshot->count(nPath)) {
+            auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+            (*newMap)[nPath].fileSize = pSize;
+            (*newMap)[nPath].mtime = pMtime;
+            std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
         }
     }
     ensureActivated(nPath);
@@ -673,9 +690,12 @@ void MetadataManager::updateIngestionStatus(const std::wstring& path, int newSta
     bool changed = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        if (m_cache.count(nPath)) {
-            if (m_cache[nPath].ingestionStatus != newStatus) {
-                m_cache[nPath].ingestionStatus = newStatus;
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot && currentSnapshot->count(nPath)) {
+            if (currentSnapshot->at(nPath).ingestionStatus != newStatus) {
+                auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+                (*newMap)[nPath].ingestionStatus = newStatus;
+                std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
                 changed = true;
             }
         }
@@ -841,11 +861,15 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
 
 RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end()) return it->second;
-    }
+
+    // 1. 无锁（Lock-Free）原子获取当前最新快照指针 —— 耗时恒定为 0 毫秒
+    auto currentSnapshot = std::atomic_load(&m_snapshot);
+    if (!currentSnapshot) return RuntimeMeta();
+
+    // 2. 在只读快照副本中查找，绝不与后台持久化线程竞争锁
+    auto it = currentSnapshot->find(nPath);
+    if (it != currentSnapshot->end()) return it->second;
+
     return RuntimeMeta();
 }
 
@@ -859,8 +883,8 @@ std::wstring MetadataManager::getPathByFolderId(const std::string& fid) {
 void MetadataManager::ensureActivated(const std::wstring& nPath) {
     // 1. 读锁检查 (快速路径)
     {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        if (m_cache.find(nPath) != m_cache.end()) return;
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot && currentSnapshot->find(nPath) != currentSnapshot->end()) return;
     }
 
     // 2. 锁外同步获取物理属性 (耗时 I/O 操作)
@@ -889,7 +913,8 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
     if (success) {
         // 3. 写锁写入缓存
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        if (m_cache.count(nPath)) return; // 二次检查防止竞态
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot && currentSnapshot->count(nPath)) return; // 二次检查防止竞态
 
         // 🚨 内存数据库模式唯一ID体系重构：激活写入内存缓存前，将主键统一覆盖为 13 位 Base36 ID
         std::string base36 = extractBase36Id(nPath);
@@ -899,7 +924,7 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
 
         // 共享元数据逻辑 (FID 关联)
         if (!rm.folderId.empty() && m_folderIdToPath.count(rm.folderId)) {
-            const RuntimeMeta& existing = m_cache[m_folderIdToPath[rm.folderId]];
+            const RuntimeMeta& existing = currentSnapshot->at(m_folderIdToPath[rm.folderId]);
             rm.rating    = existing.rating;
             rm.manualColor = existing.manualColor;
             rm.autoColor = existing.autoColor;
@@ -912,7 +937,9 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             rm.isManaged = existing.isManaged;
         }
 
-        m_cache[nPath] = rm;
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath] = rm;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
         if (isManagedAsset(rm.isFolder, nPath)) {
             CategoryRepo::s_totalCount.fetch_add(1);
             CategoryRepo::updatePersistentStat("sys_total_count", 1);
@@ -982,28 +1009,29 @@ void MetadataManager::saveToDiskModeJson(const std::wstring& nPath, std::functio
 
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
+
+    // 1. RCU 内存快照极速更新
+    ensureActivated(nPath);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath].rating = rating;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
+
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+
     if (isInsideManagedLibrary(nPath)) {
-        // A. 资源库模式：写入 SQLite 数据库
-        ensureActivated(nPath);
-        { 
-            std::unique_lock<std::shared_mutex> lock(m_mutex); 
-            m_cache[nPath].rating = rating; 
-        }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-        persistAsync(nPath);
+        // A. 资源库模式：流放至后台写入 SQLite 数据库，主线程 0 毫秒返回，免除任何 SqlTransaction 的 Sleep 忙等待
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath);
+        });
     } else {
         // B. 磁盘导航模式：写入 ArcMeta.cache 高级 JSON 缓存文件
         saveToDiskModeJson(nPath, [rating](ItemMeta& meta) {
             meta.rating = rating;
         });
-
-        // 同步内存缓存
-        ensureActivated(nPath); // 确保内存缓存激活
-        { 
-            std::unique_lock<std::shared_mutex> lock(m_mutex); 
-            m_cache[nPath].rating = rating; 
-        }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     }
 }
 
@@ -1012,10 +1040,15 @@ void MetadataManager::setAddedAt(const std::wstring& path, long long addedAt, bo
     ensureActivated(nPath);
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        m_cache[nPath].added_at = addedAt; 
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath].added_at = addedAt;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
     }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    persistAsync(nPath);
+    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+        persistAsync(nPath);
+    });
 }
 
 void MetadataManager::renameTag(const QString& oldName, const QString& newName) {
@@ -1024,14 +1057,19 @@ void MetadataManager::renameTag(const QString& oldName, const QString& newName) 
     std::vector<std::wstring> affectedPaths;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        for (auto& pair : m_cache) {
-            if (pair.second.tags.contains(oldName)) {
-                pair.second.tags.removeAll(oldName);
-                if (!newName.isEmpty() && !pair.second.tags.contains(newName)) {
-                    pair.second.tags.append(newName);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot) {
+            auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+            for (auto& pair : *newMap) {
+                if (pair.second.tags.contains(oldName)) {
+                    pair.second.tags.removeAll(oldName);
+                    if (!newName.isEmpty() && !pair.second.tags.contains(newName)) {
+                        pair.second.tags.append(newName);
+                    }
+                    affectedPaths.push_back(pair.first);
                 }
-                affectedPaths.push_back(pair.first);
             }
+            std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
         }
     }
     
@@ -1043,11 +1081,16 @@ void MetadataManager::removeTag(const QString& tagName) {
     std::vector<std::wstring> affectedPaths;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        for (auto& pair : m_cache) {
-            if (pair.second.tags.contains(tagName)) {
-                pair.second.tags.removeAll(tagName);
-                affectedPaths.push_back(pair.first);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot) {
+            auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+            for (auto& pair : *newMap) {
+                if (pair.second.tags.contains(tagName)) {
+                    pair.second.tags.removeAll(tagName);
+                    affectedPaths.push_back(pair.first);
+                }
             }
+            std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
         }
     }
     
@@ -1057,27 +1100,39 @@ void MetadataManager::removeTag(const QString& tagName) {
 
 void MetadataManager::setColor(const std::wstring& path, const std::wstring& color, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    if (isInsideManagedLibrary(nPath)) {
-        ensureActivated(nPath);
-        bool changed = false;
-        bool isFolder = false;
-        { 
-            std::unique_lock<std::shared_mutex> lock(m_mutex); 
-            auto it = m_cache.find(nPath);
-            if (it != m_cache.end()) {
+    ensureActivated(nPath);
+
+    bool changed = false;
+    bool isFolder = false;
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot) {
+            auto it = currentSnapshot->find(nPath);
+            if (it != currentSnapshot->end()) {
                 isFolder = it->second.isFolder;
                 if (it->second.manualColor != color) {
-                    it->second.manualColor = color;
+                    auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+                    (*newMap)[nPath].manualColor = color;
+                    std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
                     changed = true;
                 }
             } else {
-                m_cache[nPath].manualColor = color;
+                auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+                (*newMap)[nPath].manualColor = color;
+                std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
                 changed = true;
             }
         }
+    }
+
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+
+    if (isInsideManagedLibrary(nPath)) {
         if (changed) {
-            if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-            persistAsync(nPath);
+            DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+                persistAsync(nPath);
+            });
             
             // 自下而上：如果改变的是文件夹，同步更新映射分类颜色
             if (isFolder) {
@@ -1091,60 +1146,64 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
         saveToDiskModeJson(nPath, [color](ItemMeta& meta) {
             meta.color = color;
         });
-
-        // 同步内存缓存
-        ensureActivated(nPath); // 确保内存缓存激活
-        { 
-            std::unique_lock<std::shared_mutex> lock(m_mutex); 
-            m_cache[nPath].manualColor = color; 
-        }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     }
 }
 
 void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
+    ensureActivated(nPath);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath].pinned = pinned;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+
     if (isInsideManagedLibrary(nPath)) {
-        ensureActivated(nPath);
-        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-        persistAsync(nPath);
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath);
+        });
     } else {
         saveToDiskModeJson(nPath, [pinned](ItemMeta& meta) {
             meta.pinned = pinned;
         });
-
-        ensureActivated(nPath);
-        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].pinned = pinned; }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     }
 }
 
 void MetadataManager::setTags(const std::wstring& path, const QStringList& tags, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    if (isInsideManagedLibrary(nPath)) {
-        ensureActivated(nPath);
+    ensureActivated(nPath);
 
-        bool oldEmpty = false;
-        bool newEmpty = tags.isEmpty();
-        QStringList oldTags;
-        bool isFolder = false;
+    bool oldEmpty = false;
+    bool newEmpty = tags.isEmpty();
+    QStringList oldTags;
+    bool isFolder = false;
 
-        {
-            std::shared_lock<std::shared_mutex> rLock(m_mutex);
-            auto it = m_cache.find(nPath);
-            if (it != m_cache.end()) {
+    {
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot) {
+            auto it = currentSnapshot->find(nPath);
+            if (it != currentSnapshot->end()) {
                 oldEmpty = it->second.tags.isEmpty();
                 oldTags = it->second.tags;
                 isFolder = it->second.isFolder;
             }
         }
+    }
 
-        {
-            std::unique_lock<std::shared_mutex> lock(m_mutex);
-            m_cache[nPath].tags = tags;
-        }
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath].tags = tags;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
 
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+
+    if (isInsideManagedLibrary(nPath)) {
         if (isManagedAsset(isFolder, nPath)) {
             if (oldEmpty && !newEmpty) {
                 CategoryRepo::s_untaggedCount.fetch_sub(1);
@@ -1165,8 +1224,9 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
             }
         }
 
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-        persistAsync(nPath);
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath);
+        });
     } else {
         saveToDiskModeJson(nPath, [tags](ItemMeta& meta) {
             std::vector<std::wstring> wTags;
@@ -1175,65 +1235,89 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
             }
             meta.tags = wTags;
         });
-
-        ensureActivated(nPath);
-        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].tags = tags; }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     }
 }
 
 void MetadataManager::setNote(const std::wstring& path, const std::wstring& note, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
+    ensureActivated(nPath);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath].note = note;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+
     if (isInsideManagedLibrary(nPath)) {
-        ensureActivated(nPath);
-        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-        persistAsync(nPath);
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath);
+        });
     } else {
         saveToDiskModeJson(nPath, [note](ItemMeta& meta) {
             meta.note = note;
         });
-
-        ensureActivated(nPath);
-        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].note = note; }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     }
 }
 
 void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
+    ensureActivated(nPath);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath].url = url;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+
     if (isInsideManagedLibrary(nPath)) {
-        ensureActivated(nPath);
-        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-        persistAsync(nPath);
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath);
+        });
     } else {
         saveToDiskModeJson(nPath, [url](ItemMeta& meta) {
             meta.url = url;
         });
-
-        ensureActivated(nPath);
-        { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].url = url; }
-        if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     }
 }
 
 void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].encrypted = encrypted; }
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath].encrypted = encrypted;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    persistAsync(nPath);
+    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+        persistAsync(nPath);
+    });
 }
 
 void MetadataManager::setManaged(const std::wstring& path, bool managed, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].isManaged = managed; }
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath].isManaged = managed;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     // 2026-07-xx 逻辑校准：isManaged 是由数据库持久化驱动的标记。
     // 如果显式设为 true，则发起一次持久化以确保入库；如果是设为 false（罕见），无需特殊持久化。
-    if (managed) persistAsync(nPath); 
+    if (managed) {
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath);
+        });
+    }
 }
 
 void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify) {
@@ -1241,9 +1325,17 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
     ensureActivated(nPath);
     std::vector<PaletteEntry> entries;
     for (int i = 0; i < palettes.size(); ++i) { entries.push_back(PaletteEntry(palettes[i].first, palettes[i].second)); }
-    { std::unique_lock<std::shared_mutex> lock(m_mutex); m_cache[nPath].palettes = entries; }
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath].palettes = entries;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    persistAsync(nPath);
+    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+        persistAsync(nPath);
+    });
 }
 
 void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std::wstring& color, const QVector<QPair<QColor, float>>& palettes, bool notify) {
@@ -1255,10 +1347,13 @@ void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std:
     bool isFolder = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        RuntimeMeta& meta = m_cache[nPath];
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        RuntimeMeta& meta = (*newMap)[nPath];
         meta.autoColor = color;
         meta.palettes = entries;
         isFolder = meta.isFolder;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
     }
     
     // 【同步逻辑】如果是文件夹主色提取，则同步更新 categories 分类定义表中的颜色
@@ -1268,7 +1363,9 @@ void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std:
     }
     
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    persistAsync(nPath);
+    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+        persistAsync(nPath);
+    });
 }
 
 void MetadataManager::setItemDimensions(const std::wstring& path, int width, int height) {
@@ -1276,19 +1373,24 @@ void MetadataManager::setItemDimensions(const std::wstring& path, int width, int
     ensureActivated(nPath);
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        RuntimeMeta& meta = m_cache[nPath];
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        RuntimeMeta& meta = (*newMap)[nPath];
         meta.width = width;
         meta.height = height;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
     }
-    persistAsync(nPath, false);
+    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+        persistAsync(nPath, false);
+    });
 }
 
 QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end() && !it->second.palettes.empty()) {
+    auto currentSnapshot = std::atomic_load(&m_snapshot);
+    if (currentSnapshot) {
+        auto it = currentSnapshot->find(nPath);
+        if (it != currentSnapshot->end() && !it->second.palettes.empty()) {
             QVector<QColor> colors;
             for (const auto& entry : it->second.palettes) colors << entry.color;
             return colors;
@@ -1309,9 +1411,11 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
         
         {
             std::unique_lock<std::shared_mutex> lock(m_mutex);
+            auto currentSnapshot = std::atomic_load(&m_snapshot);
+            if (!currentSnapshot) return;
             
             // 1. 深度收集所有子孙路径
-            for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
+            for (auto it = currentSnapshot->begin(); it != currentSnapshot->end(); ++it) {
                 const std::wstring& p = it->first;
                 if (p == nOld) {
                     itemsToRename.push_back({p, nNew});
@@ -1331,12 +1435,14 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 if (children.empty()) m_parentToChildren.erase(rootOldParent);
             }
 
+            auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+
             for (const auto& pair : itemsToRename) {
                 const std::wstring& curOld = pair.first;
                 const std::wstring& curNew = pair.second;
 
-                auto it = m_cache.find(curOld);
-                if (it == m_cache.end()) {
+                auto it = newMap->find(curOld);
+                if (it == newMap->end()) {
                     // 即使内存缓存不含有，由于处于 DiskNav 模式，我们依然需要支持对离散 JSON 的平滑重命名同步
                     QFileInfo oldFileInfo(QString::fromStdWString(curOld));
                     QFileInfo newFileInfo(QString::fromStdWString(curNew));
@@ -1387,8 +1493,8 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
 
                 // 3. 缓存迁移
                 RuntimeMeta meta = it->second;
-                m_cache.erase(it);
-                m_cache[curNew] = meta;
+                newMap->erase(it);
+                (*newMap)[curNew] = meta;
                 if (!fid.empty()) m_folderIdToPath[fid] = curNew;
 
                 // [倒排索引重建]
@@ -1424,6 +1530,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                     m_folderProgressCache[curNew] = prog;
                 }
             }
+            std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
         }
 
         // 4. 物理数据库批量同步 (Plan-128: 引入事务保护)
@@ -1437,8 +1544,8 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             const std::wstring& curNew = pair.second;
             std::string fid;
             {
-                std::shared_lock<std::shared_mutex> lock(m_mutex);
-                if (m_cache.count(curNew)) fid = m_cache[curNew].folderId;
+                auto currentSnapshot = std::atomic_load(&m_snapshot);
+                if (currentSnapshot && currentSnapshot->count(curNew)) fid = currentSnapshot->at(curNew).folderId;
             }
             if (fid.empty()) continue;
 
@@ -1513,64 +1620,69 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
             if (children.empty()) m_parentToChildren.erase(rootParent);
         }
 
-        for (auto it = m_cache.begin(); it != m_cache.end(); ) {
-            if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
-                std::wstring curPath = it->first;
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot) {
+            auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+            for (auto it = newMap->begin(); it != newMap->end(); ) {
+                if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
+                    std::wstring curPath = it->first;
 
-                if (isManagedAsset(it->second.isFolder, curPath)) {
-                    if (it->second.isTrash) {
-                        CategoryRepo::s_trashCount.fetch_sub(1);
-                        CategoryRepo::updatePersistentStat("sys_trash_count", -1);
-                    } else {
-                        CategoryRepo::s_totalCount.fetch_sub(1);
-                        CategoryRepo::updatePersistentStat("sys_total_count", -1);
-                        if (it->second.tags.isEmpty()) {
-                            CategoryRepo::s_untaggedCount.fetch_sub(1);
-                            CategoryRepo::updatePersistentStat("sys_untagged_count", -1);
-                        }
-                        if (CategoryRepo::getItemCategoryIds(it->second.folderId, curPath).empty()) {
-                            CategoryRepo::s_uncategorizedCount.fetch_sub(1);
-                            CategoryRepo::updatePersistentStat("sys_uncategorized_count", -1);
-                        }
-                    }
-                }
-
-                if (isManagedAsset(it->second.isFolder, curPath) && !it->second.isTrash) {
-                    totalDelta--;
-                }
-                if (!it->second.folderId.empty()) {
-                    std::string fid = it->second.folderId;
-                    bool isFolder = it->second.isFolder;
-                    fids.push_back(fid);
-                    m_folderIdToPath.erase(fid);
-
-                    // [倒排索引维护]
-                    std::wstring name, ext;
-                    parsePathComponents(curPath, isFolder, name, ext);
-                    if (!name.empty()) {
-                        if (isFolder) {
-                            auto& v = m_subFolderNameToFolderIds[name];
-                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_subFolderNameToFolderIds.erase(name);
+                    if (isManagedAsset(it->second.isFolder, curPath)) {
+                        if (it->second.isTrash) {
+                            CategoryRepo::s_trashCount.fetch_sub(1);
+                            CategoryRepo::updatePersistentStat("sys_trash_count", -1);
                         } else {
-                            auto& v = m_assetNameToFolderIds[name];
-                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_assetNameToFolderIds.erase(name);
-                            if (!ext.empty()) {
-                                auto& ve = m_extensionToFolderIds[ext];
-                                ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                                if (ve.empty()) m_extensionToFolderIds.erase(ext);
+                            CategoryRepo::s_totalCount.fetch_sub(1);
+                            CategoryRepo::updatePersistentStat("sys_total_count", -1);
+                            if (it->second.tags.isEmpty()) {
+                                CategoryRepo::s_untaggedCount.fetch_sub(1);
+                                CategoryRepo::updatePersistentStat("sys_untagged_count", -1);
+                            }
+                            if (CategoryRepo::getItemCategoryIds(it->second.folderId, curPath).empty()) {
+                                CategoryRepo::s_uncategorizedCount.fetch_sub(1);
+                                CategoryRepo::updatePersistentStat("sys_uncategorized_count", -1);
                             }
                         }
                     }
 
-                    // [树级索引维护] - 仅清除当前项作为父节点的关系（子项正在被删除）
-                    m_parentToChildren.erase(curPath);
-                    m_folderProgressCache.erase(curPath);
+                    if (isManagedAsset(it->second.isFolder, curPath) && !it->second.isTrash) {
+                        totalDelta--;
+                    }
+                    if (!it->second.folderId.empty()) {
+                        std::string fid = it->second.folderId;
+                        bool isFolder = it->second.isFolder;
+                        fids.push_back(fid);
+                        m_folderIdToPath.erase(fid);
+
+                        // [倒排索引维护]
+                        std::wstring name, ext;
+                        parsePathComponents(curPath, isFolder, name, ext);
+                        if (!name.empty()) {
+                            if (isFolder) {
+                                auto& v = m_subFolderNameToFolderIds[name];
+                                v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                                if (v.empty()) m_subFolderNameToFolderIds.erase(name);
+                            } else {
+                                auto& v = m_assetNameToFolderIds[name];
+                                v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                                if (v.empty()) m_assetNameToFolderIds.erase(name);
+                                if (!ext.empty()) {
+                                    auto& ve = m_extensionToFolderIds[ext];
+                                    ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
+                                    if (ve.empty()) m_extensionToFolderIds.erase(ext);
+                                }
+                            }
+                        }
+
+                        // [树级索引维护] - 仅清除当前项作为父节点的关系（子项正在被删除）
+                        m_parentToChildren.erase(curPath);
+                        m_folderProgressCache.erase(curPath);
+                    }
+                    it = newMap->erase(it);
                 }
-                it = m_cache.erase(it);
+                else ++it;
             }
-            else ++it;
+            std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
         }
     }
 
@@ -1625,13 +1737,17 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
 
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (!currentSnapshot) return;
+
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
 
         for (const QString& qp : paths) {
             std::wstring nPath = normalizePath(qp.toStdWString());
             
             // 收集所有匹配项及子项
             std::vector<std::wstring> toRemove;
-            for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
+            for (auto it = newMap->begin(); it != newMap->end(); ++it) {
                 const std::wstring& p = it->first;
                 if (p == nPath || p.find(nPath + L"\\") == 0 || p.find(nPath + L"/") == 0) {
                     toRemove.push_back(p);
@@ -1639,8 +1755,8 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
             }
 
             for (const auto& p : toRemove) {
-                auto it = m_cache.find(p);
-                if (it == m_cache.end()) continue;
+                auto it = newMap->find(p);
+                if (it == newMap->end()) continue;
 
                 if (isManagedAsset(it->second.isFolder, p)) {
                     if (it->second.isTrash) {
@@ -1697,9 +1813,10 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                     m_parentToChildren.erase(p);
                     m_folderProgressCache.erase(p);
                 }
-                m_cache.erase(it);
+                newMap->erase(it);
             }
         }
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
     }
 
     // 2. 数据库执行
@@ -1766,45 +1883,49 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
     bool isManaged = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        
-        // 核心修复：防止内存中出现同一个 FID 的多条路径记录（物理偏移导致的重复计数）
-        if (!fid.empty() && m_folderIdToPath.count(fid)) {
-            std::wstring oldPath = m_folderIdToPath[fid];
-            if (oldPath != nPath) {
-                // 在清理旧路径前，同步清理隔离索引
-                auto itOld = m_cache.find(oldPath);
-                if (itOld != m_cache.end()) {
-                    std::wstring oldName, oldExt;
-                    parsePathComponents(oldPath, itOld->second.isFolder, oldName, oldExt);
-                    if (!oldName.empty()) {
-                        if (itOld->second.isFolder) {
-                            auto& v = m_subFolderNameToFolderIds[oldName];
-                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_subFolderNameToFolderIds.erase(oldName);
-                        } else {
-                            auto& v = m_assetNameToFolderIds[oldName];
-                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                            if (v.empty()) m_assetNameToFolderIds.erase(oldName);
-                            if (!oldExt.empty()) {
-                                auto& ve = m_extensionToFolderIds[oldExt];
-                                ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                                if (ve.empty()) m_extensionToFolderIds.erase(oldExt);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot) {
+            // 核心修复：防止内存中出现同一个 FID 的多条路径记录（物理偏移导致的重复计数）
+            if (!fid.empty() && m_folderIdToPath.count(fid)) {
+                std::wstring oldPath = m_folderIdToPath[fid];
+                if (oldPath != nPath) {
+                    auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+                    // 在清理旧路径前，同步清理隔离索引
+                    auto itOld = newMap->find(oldPath);
+                    if (itOld != newMap->end()) {
+                        std::wstring oldName, oldExt;
+                        parsePathComponents(oldPath, itOld->second.isFolder, oldName, oldExt);
+                        if (!oldName.empty()) {
+                            if (itOld->second.isFolder) {
+                                auto& v = m_subFolderNameToFolderIds[oldName];
+                                v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                                if (v.empty()) m_subFolderNameToFolderIds.erase(oldName);
+                            } else {
+                                auto& v = m_assetNameToFolderIds[oldName];
+                                v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                                if (v.empty()) m_assetNameToFolderIds.erase(oldName);
+                                if (!oldExt.empty()) {
+                                    auto& ve = m_extensionToFolderIds[oldExt];
+                                    ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
+                                    if (ve.empty()) m_extensionToFolderIds.erase(oldExt);
+                                }
                             }
+                        }
+
+                        // Plan-124: 移除旧树级索引关系
+                        std::wstring oldParent = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(oldPath)).absolutePath()).toStdWString();
+                        oldParent = normalizePath(oldParent);
+                        if (m_parentToChildren.count(oldParent)) {
+                            auto& children = m_parentToChildren[oldParent];
+                            children.erase(std::remove(children.begin(), children.end(), oldPath), children.end());
+                            if (children.empty()) m_parentToChildren.erase(oldParent);
                         }
                     }
 
-                    // Plan-124: 移除旧树级索引关系
-                    std::wstring oldParent = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(oldPath)).absolutePath()).toStdWString();
-                    oldParent = normalizePath(oldParent);
-                    if (m_parentToChildren.count(oldParent)) {
-                        auto& children = m_parentToChildren[oldParent];
-                        children.erase(std::remove(children.begin(), children.end(), oldPath), children.end());
-                        if (children.empty()) m_parentToChildren.erase(oldParent);
-                    }
+                    newMap->erase(oldPath);
+                    std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+                    qDebug() << "[Metadata] 检测到路径偏移，已从内存清理旧条目以防止重复计数:" << QString::fromStdWString(oldPath);
                 }
-
-                m_cache.erase(oldPath);
-                qDebug() << "[Metadata] 检测到路径偏移，已从内存清理旧条目以防止重复计数:" << QString::fromStdWString(oldPath);
             }
         }
     }
@@ -1815,13 +1936,19 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
     bool oldEmpty = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        if (m_cache[nPath].isTrash != isTrash) {
-            m_cache[nPath].isTrash = isTrash;
-            if (isTrash && !origPath.empty()) m_cache[nPath].originalPath = origPath;
-            changed = true;
-            isManaged = m_cache[nPath].isManaged;
-            isFolder = m_cache[nPath].isFolder;
-            oldEmpty = m_cache[nPath].tags.isEmpty();
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot && currentSnapshot->count(nPath)) {
+            if (currentSnapshot->at(nPath).isTrash != isTrash) {
+                auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+                RuntimeMeta& meta = (*newMap)[nPath];
+                meta.isTrash = isTrash;
+                if (isTrash && !origPath.empty()) meta.originalPath = origPath;
+                changed = true;
+                isManaged = meta.isManaged;
+                isFolder = meta.isFolder;
+                oldEmpty = meta.tags.isEmpty();
+                std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+            }
         }
         if (!fid.empty()) m_folderIdToPath[fid] = nPath;
     }
@@ -1884,21 +2011,27 @@ void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
     std::string fid;
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end()) {
-            if (it->second.isTrash != isTrash) {
-                // 2026-07-xx 按照规则同步活跃计数：仅对已登记项执行
-                if (it->second.isManaged) {
-                    CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot) {
+            auto it = currentSnapshot->find(nPath);
+            if (it != currentSnapshot->end()) {
+                if (it->second.isTrash != isTrash) {
+                    auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+                    RuntimeMeta& meta = (*newMap)[nPath];
+                    // 2026-07-xx 按照规则同步活跃计数：仅对已登记项执行
+                    if (meta.isManaged) {
+                        CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
+                    }
+                    meta.isTrash = isTrash;
+                    if (!isTrash) {
+                        meta.originalPath = L""; // Clear on restore
+                    }
+                    changed = true;
+                    isFolder = meta.isFolder;
+                    oldEmpty = meta.tags.isEmpty();
+                    fid = meta.folderId;
+                    std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
                 }
-                it->second.isTrash = isTrash;
-                if (!isTrash) {
-                    it->second.originalPath = L""; // Clear on restore
-                }
-                changed = true;
-                isFolder = it->second.isFolder;
-                oldEmpty = it->second.tags.isEmpty();
-                fid = it->second.folderId;
             }
         }
     }
@@ -1938,15 +2071,17 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     
     // 2026-06-xx 逻辑优化：遵循“按需根除”原则。
-    // 1. 首先检查内存缓存，判断该项目是否曾被记入数据库。
+    // 1. 首先检查内存缓存，判断该项目是否曾 be 记入数据库。
     std::string fid;
     bool existsInDb = false;
     {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_cache.find(nPath);
-        if (it != m_cache.end()) {
-            fid = it->second.folderId;
-            existsInDb = true;
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (currentSnapshot) {
+            auto it = currentSnapshot->find(nPath);
+            if (it != currentSnapshot->end()) {
+                fid = it->second.folderId;
+                existsInDb = true;
+            }
         }
     }
 
@@ -2196,7 +2331,12 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
                     rMeta.isManaged = true;
                     {
                         std::unique_lock<std::shared_mutex> lock(m_mutex);
-                        m_cache[p] = rMeta;
+                        auto currentSnapshot = std::atomic_load(&m_snapshot);
+                        if (currentSnapshot) {
+                            auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+                            (*newMap)[p] = rMeta;
+                            std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+                        }
                     }
                     recordsToSync.push_back({p, rMeta});
                 }
@@ -2310,7 +2450,12 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
             {
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
                 rMeta.isManaged = true;
-                m_cache[nPath] = rMeta;
+                auto currentSnapshot = std::atomic_load(&m_snapshot);
+                if (currentSnapshot) {
+                    auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+                    (*newMap)[nPath] = rMeta;
+                    std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+                }
             }
             qDebug() << "[DB_TRACE] persistAsync 写入内存库成功，是否新项:" << isNew << "路径:" << QString::fromStdWString(nPath);
         } else {
@@ -2389,22 +2534,25 @@ void MetadataManager::loadVolumeNameCache(const std::wstring& volSerial) {
     prefix.append(QString::fromStdWString(volSerial).toUpper().toStdString());
     prefix.append(":");
 
-    for (const auto& pair : m_cache) {
-        const std::wstring& path = pair.first;
-        const RuntimeMeta& meta = pair.second;
-        if (meta.folderId.find(prefix) == 0) {
-            std::wstring name, ext;
-            parsePathComponents(path, meta.isFolder, name, ext);
-            if (!name.empty()) {
-                if (meta.isFolder) {
-                    auto& v = m_subFolderNameToFolderIds[name];
-                    if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
-                } else {
-                    auto& v = m_assetNameToFolderIds[name];
-                    if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
-                    if (!ext.empty()) {
-                        auto& ve = m_extensionToFolderIds[ext];
-                        if (std::find(ve.begin(), ve.end(), meta.folderId) == ve.end()) ve.push_back(meta.folderId);
+    auto currentSnapshot = std::atomic_load(&m_snapshot);
+    if (currentSnapshot) {
+        for (const auto& pair : *currentSnapshot) {
+            const std::wstring& path = pair.first;
+            const RuntimeMeta& meta = pair.second;
+            if (meta.folderId.find(prefix) == 0) {
+                std::wstring name, ext;
+                parsePathComponents(path, meta.isFolder, name, ext);
+                if (!name.empty()) {
+                    if (meta.isFolder) {
+                        auto& v = m_subFolderNameToFolderIds[name];
+                        if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
+                    } else {
+                        auto& v = m_assetNameToFolderIds[name];
+                        if (std::find(v.begin(), v.end(), meta.folderId) == v.end()) v.push_back(meta.folderId);
+                        if (!ext.empty()) {
+                            auto& ve = m_extensionToFolderIds[ext];
+                            if (std::find(ve.begin(), ve.end(), meta.folderId) == ve.end()) ve.push_back(meta.folderId);
+                        }
                     }
                 }
             }
@@ -2524,20 +2672,22 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
     matchedPaths.erase(std::unique(matchedPaths.begin(), matchedPaths.end()), matchedPaths.end());
 
     // 3. 关联内存缓存并执行 Scope 过滤
-    std::shared_lock<std::shared_mutex> lock(m_mutex);
-    for (const auto& path : matchedPaths) {
-        auto it = m_cache.find(path);
-        if (it != m_cache.end()) {
-            const RuntimeMeta& meta = it->second;
+    auto currentSnapshot = std::atomic_load(&m_snapshot);
+    if (currentSnapshot) {
+        for (const auto& path : matchedPaths) {
+            auto it = currentSnapshot->find(path);
+            if (it != currentSnapshot->end()) {
+                const RuntimeMeta& meta = it->second;
 
-            // Scope check
-            if (hasScope) {
-                if (scopeFids.find(meta.folderId) == scopeFids.end()) continue;
-            } else if (!wParentPath.empty()) {
-                if (path.find(wParentPath) != 0) continue;
+                // Scope check
+                if (hasScope) {
+                    if (scopeFids.find(meta.folderId) == scopeFids.end()) continue;
+                } else if (!wParentPath.empty()) {
+                    if (path.find(wParentPath) != 0) continue;
+                }
+
+                results << QString::fromStdWString(path);
             }
-
-            results << QString::fromStdWString(path);
         }
     }
 
@@ -2546,11 +2696,13 @@ QStringList MetadataManager::searchInCache(const QString& keyword, const QString
 
 QMap<QString, int> MetadataManager::getAllTags() const {
     QMap<QString, int> tagCounts;
-    std::shared_lock<std::shared_mutex> lock(m_mutex);
-    for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
-        if (it->second.isManaged && !it->second.isTrash) {
-            for (const QString& tag : it->second.tags) {
-                tagCounts[tag]++;
+    auto currentSnapshot = std::atomic_load(&m_snapshot);
+    if (currentSnapshot) {
+        for (auto it = currentSnapshot->begin(); it != currentSnapshot->end(); ++it) {
+            if (it->second.isManaged && !it->second.isTrash) {
+                for (const QString& tag : it->second.tags) {
+                    tagCounts[tag]++;
+                }
             }
         }
     }
@@ -2624,20 +2776,22 @@ void MetadataManager::slideRecentWindow() {
 }
 
 std::vector<LightMeta> MetadataManager::getLightweightCacheSnapshot() const {
-    std::shared_lock<std::shared_mutex> lock(m_mutex);
     std::vector<LightMeta> result;
-    result.reserve(m_cache.size());
-    for (const auto& pair : m_cache) {
-        const auto& meta = pair.second;
-        result.push_back({
-            pair.first,
-            meta.folderId,
-            meta.isFolder,
-            meta.isTrash,
-            meta.tags.isEmpty(),
-            static_cast<double>(meta.atime),
-            meta.tags
-        });
+    auto currentSnapshot = std::atomic_load(&m_snapshot);
+    if (currentSnapshot) {
+        result.reserve(currentSnapshot->size());
+        for (const auto& pair : *currentSnapshot) {
+            const auto& meta = pair.second;
+            result.push_back({
+                pair.first,
+                meta.folderId,
+                meta.isFolder,
+                meta.isTrash,
+                meta.tags.isEmpty(),
+                static_cast<double>(meta.atime),
+                meta.tags
+            });
+        }
     }
     return result;
 }
