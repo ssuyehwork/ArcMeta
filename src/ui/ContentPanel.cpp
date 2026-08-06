@@ -1920,18 +1920,16 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (targetPaths.isEmpty()) break;
 
             if (action == ActionDelete) {
-                // 1. 开启内部操作锁，彻底抑制 NativeFolderWatcher 的二次干扰信号
-                MetadataManager::instance().setInternalOperating(true);
+                // 1. 开启内部操作锁，通过原子事务计数，精确闭锁生命周期，彻底废除 QTimer::singleShot 2000ms 补丁
+                MetadataManager::instance().beginInternalOperation();
 
                 if (ShellHelper::moveToTrash(targetPaths)) {
                     // 2. 修正：调用 refreshAll() 自适应协议与物理路径刷新，绝不调 loadDirectory！
                     refreshAll();
                 }
 
-                // 2000ms 后平滑释放抑制锁
-                QTimer::singleShot(2000, []() {
-                    MetadataManager::instance().setInternalOperating(false);
-                });
+                // 在 moveToTrash 物理操作同步完成后直接释放抑制锁
+                MetadataManager::instance().endInternalOperation();
             } else {
                 QString msg = "确定要永久删除选中的项目吗？数据将被物理覆写并彻底抹除，此操作不可恢复。";
                 if (!FramelessMessageBox::question(this, "确认删除", msg)) break;
@@ -1942,8 +1940,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 QPointer<ContentPanel> weakThis(this);
                 QPointer<BatchProgressDialog> weakProgress(progress);
 
-                // 1. 开启内部操作锁，彻底抑制 NativeFolderWatcher 的二次干扰信号
-                MetadataManager::instance().setInternalOperating(true);
+                // 1. 开启内部操作锁，通过原子事务计数，精确闭锁生命周期，彻底废除 QTimer::singleShot 2000ms 补丁
+                MetadataManager::instance().beginInternalOperation();
 
                 DiskIoService::asyncDeletePaths(
                     targetPaths,
@@ -1966,10 +1964,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                             ToolTipOverlay::instance()->showText(QCursor::pos(), "深层抹除已完成，关联记录已物理清空", 1500, QColor("#2ecc71"));
                         }
 
-                        // 3. 2000ms 后平滑释放抑制锁
-                        QTimer::singleShot(2000, []() {
-                            MetadataManager::instance().setInternalOperating(false);
-                        });
+                        // 3. 异步物理删除完毕，彻底释放原子操作锁
+                        MetadataManager::instance().endInternalOperation();
                     }
                 );
             }
@@ -2265,7 +2261,8 @@ void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& t
 
         bool isMove = !(QApplication::keyboardModifiers() & Qt::ControlModifier);
         
-        MetadataManager::instance().setInternalOperating(true);
+        // 开启内部操作原子锁，彻底废除 QTimer::singleShot 2000ms 补丁
+        MetadataManager::instance().beginInternalOperation();
 
         if (ShellHelper::copyOrMoveItems(paths, destDir, isMove)) {
             if (isMove) {
@@ -2275,9 +2272,8 @@ void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& t
             loadDirectory(m_currentPath, m_isRecursive);
         }
 
-        QTimer::singleShot(2000, []() {
-            MetadataManager::instance().setInternalOperating(false);
-        });
+        // 物理转移完成后直接释放原子锁
+        MetadataManager::instance().endInternalOperation();
     } else {
         // 优先尊重"拖拽到具体子分类节点上"这个更精确的用户意图
         int targetCatId = 0;

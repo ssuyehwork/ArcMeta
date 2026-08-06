@@ -126,6 +126,25 @@ std::vector<Category> CategoryRepo::getAll() {
     return results;
 }
 
+void CategoryRepo::bindToLibraryRootCategory(const std::string& folderId, const std::wstring& physicalPath) {
+    if (folderId.empty() || physicalPath.empty()) return;
+
+    // 1. 获取所有根分类 (parentId == 0)
+    auto allCats = getAll();
+    for (const auto& cat : allCats) {
+        if (cat.parentId == 0 && !cat.physicalPath.empty()) {
+            // 2. 检查物理路径是否属于该托管库目录 (前缀匹配)
+            std::wstring normCatPath = MetadataManager::normalizePath(cat.physicalPath);
+            std::wstring normPhysPath = MetadataManager::normalizePath(physicalPath);
+            if (normPhysPath.rfind(normCatPath, 0) == 0) { 
+                // 3. 自动向 category_items 写入绑定映射
+                addItemToCategory(cat.id, folderId, physicalPath);
+                break;
+            }
+        }
+    }
+}
+
 bool CategoryRepo::add(Category& cat) {
     WriteGuard guard;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
@@ -1116,8 +1135,25 @@ void CategoryRepo::loadStatsFromDb() {
 }
 
 void CategoryRepo::fullRecount() {
-    // 🚨 彻底根除全量物理对账逻辑：该函数已被完全注销，拒绝一切对账、覆盖和物理脏写，保持系统极度清澈与极速
-    qDebug() << "[Recount][CLEANUP] CategoryRepo::fullRecount has been completely removed. Skip recount.";
+    qDebug() << "[Recount] CategoryRepo::fullRecount triggered. Starting SQL self-healing alignment.";
+    
+    // 🚨 重新计数时，先执行 SQL 补全对账，防止根分类计数被归零！
+    const char* repairSql = 
+        "INSERT OR IGNORE INTO category_items (category_id, folder_id, path_hint, added_at) "
+        "SELECT c.id, m.folder_id, m.path, m.added_at "
+        "FROM categories c "
+        "JOIN metadata m ON m.path LIKE (c.physical_path || '%') "
+        "WHERE c.parent_id = 0 AND c.physical_path IS NOT NULL AND c.physical_path != '';";
+    
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    for (sqlite3* db : dbs) {
+        if (db) {
+            sqlite3_exec(db, repairSql, nullptr, nullptr, nullptr);
+        }
+    }
+
+    s_countsDirty.store(true);
+    getCounts(); // 物理强制重新更新
 }
 
 std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {

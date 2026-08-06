@@ -119,7 +119,7 @@ void AutoImportManager::processImportQueue() {
     if (pathsToProcess.empty()) return;
 
     (void)QtConcurrent::run([this, pathsToProcess]() {
-        MetadataManager::instance().setInternalOperating(true);
+        MetadataManager::instance().beginInternalOperation();
 
         std::map<std::wstring, std::vector<std::wstring>> pathsByVol;
         for (const auto& p : pathsToProcess) {
@@ -148,7 +148,7 @@ void AutoImportManager::processImportQueue() {
             }
         }
 
-        MetadataManager::instance().setInternalOperating(false);
+        MetadataManager::instance().endInternalOperation();
         MetadataManager::instance().notifyFullUIRebuild();
     });
 }
