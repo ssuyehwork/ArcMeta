@@ -31,9 +31,48 @@ std::atomic<int> CategoryRepo::s_trashCount{0};
 std::mutex CategoryRepo::s_tagsMutex;
 QSet<QString> CategoryRepo::s_globalTagsSet;
 
+// 初始化静态内存快照指针
+std::shared_ptr<const std::vector<Category>> CategoryRepo::s_categoryCache = std::make_shared<const std::vector<Category>>();
+std::shared_ptr<const std::vector<Category>> CategoryRepo::s_recentlyUsedCache = std::make_shared<const std::vector<Category>>();
+std::mutex CategoryRepo::s_cacheMutex;
 
 void CategoryRepo::initialize() {
     // SQLite 模式下，DatabaseManager::init() 已由 MetadataManager 调用
+    refreshMemoryCache();
+}
+
+void CategoryRepo::refreshMemoryCache() {
+    // 磁盘 DB -> 内存 DB 读出，构建干净的数组快照
+    auto dbCats = getAll();
+    auto dbRecent = getRecentlyUsed(50); // 最多缓存 50 个最近使用的分类
+    std::lock_guard<std::mutex> lock(s_cacheMutex);
+    std::atomic_store(&s_categoryCache,
+        std::shared_ptr<const std::vector<Category>>(std::make_shared<const std::vector<Category>>(std::move(dbCats))));
+    std::atomic_store(&s_recentlyUsedCache,
+        std::shared_ptr<const std::vector<Category>>(std::make_shared<const std::vector<Category>>(std::move(dbRecent))));
+}
+
+std::vector<Category> CategoryRepo::getCachedAll() {
+    auto snapshot = std::atomic_load(&s_categoryCache);
+    if (!snapshot) return {};
+    return *snapshot; // 纯内存指针浅拷贝返回，零 SQL 耗时
+}
+
+Category CategoryRepo::getCachedById(int id) {
+    auto snapshot = std::atomic_load(&s_categoryCache);
+    if (!snapshot) return Category();
+    for (const auto& c : *snapshot) {
+        if (c.id == id) return c;
+    }
+    return Category();
+}
+
+std::vector<Category> CategoryRepo::getCachedRecentlyUsed(size_t limit) {
+    auto snapshot = std::atomic_load(&s_recentlyUsedCache);
+    if (!snapshot) return {};
+    std::vector<Category> res = *snapshot;
+    if (res.size() > limit) res.resize(limit);
+    return res;
 }
 
 void CategoryRepo::saveImmediately() {
@@ -202,6 +241,7 @@ bool CategoryRepo::add(Category& cat) {
             }
             s_countsDirty.store(true);
             qDebug() << "[CategoryRepo] add success across dbs: Name =" << QString::fromStdWString(cat.name) << "ID =" << cat.id << "Parent =" << cat.parentId;
+            refreshMemoryCache();
             return true;
         } else {
             qDebug() << "[CategoryRepo] add FAILED during step:" << sqlite3_errmsg(mainDb) << "Code:" << rc;
@@ -436,6 +476,7 @@ bool CategoryRepo::update(const Category& cat) {
     }
     if (anyOk) {
         s_countsDirty.store(true);
+        refreshMemoryCache();
     }
     return anyOk;
 }
@@ -474,6 +515,9 @@ bool CategoryRepo::updatePhysicalMapping(int id, uint64_t frn, const std::wstrin
             if (sqlite3_step(stmt) == SQLITE_DONE) anyOk = true;
             sqlite3_finalize(stmt);
         }
+    }
+    if (anyOk) {
+        refreshMemoryCache();
     }
     return anyOk;
 }
@@ -597,6 +641,7 @@ bool CategoryRepo::remove(int id) {
     s_countsDirty.store(true);
     // ✅ 修正后：删除分类只清理数据库与内存关联，严禁物理删除用户磁盘上的实际文件夹！
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+    refreshMemoryCache();
     return true;
 }
 
@@ -614,6 +659,7 @@ bool CategoryRepo::reorder(int parentId, bool ascending) {
         targets[i]->sortOrder = static_cast<int>(i);
         update(*targets[i]);
     }
+    refreshMemoryCache();
     return true;
 }
 
@@ -628,6 +674,7 @@ bool CategoryRepo::reorderAll(bool ascending) {
         cats[i].sortOrder = static_cast<int>(i);
         update(cats[i]);
     }
+    refreshMemoryCache();
     return true;
 }
 
@@ -646,6 +693,7 @@ bool CategoryRepo::updateCategoryColorByPath(const std::wstring& path, const std
         if (ok) {
             qDebug() << "[DB_TRACE] updateCategoryColorByPath 成功同步更新 categories 表分类颜色，路径:" << QString::fromStdWString(path) << "颜色:" << QString::fromStdWString(color);
             DatabaseManager::instance().flushAll();
+            refreshMemoryCache();
             return true;
         }
     }
@@ -766,6 +814,7 @@ bool CategoryRepo::renamePhysicalCategoryPath(const std::wstring& oldPath, const
 
     if (anyOk) {
         DatabaseManager::instance().flushAll();
+        refreshMemoryCache();
     }
     return anyOk;
 }

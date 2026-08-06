@@ -1441,9 +1441,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             // [镜像源：归类与元数据编辑区]
             QMenu* categorizeMenu = menu.addMenu("归类到..."); 
             UiHelper::applyMenuStyle(categorizeMenu); 
-            auto categories = CategoryRepo::getRecentlyUsed(15); 
-            if (categories.empty()) categories = CategoryRepo::getAll();
-            if (categories.size() > 15) categories.resize(15);
+            auto categories = CategoryRepo::getCachedRecentlyUsed(15);
+            if (categories.empty()) categories = CategoryRepo::getCachedAll();
 
             QAction* actToUncat = categorizeMenu->addAction(UiHelper::getIcon("uncategorized", QColor("#95a5a6"), 16), "回归“未分类”");
             actToUncat->setData(ActionCategorize);
@@ -2545,7 +2544,7 @@ void ContentPanel::loadCategory(int categoryId) {
         m_proxyModel->setSourceModel(m_model);
     }
 
-    Category cat = CategoryRepo::getById(categoryId);
+    Category cat = CategoryRepo::getCachedById(categoryId);
     if (cat.id > 0) {
         // 🚨【加锁保护拦截】：若分类加锁且当前未解锁
         if (cat.encrypted && !CategoryLockManager::instance().isUnlocked(categoryId)) {

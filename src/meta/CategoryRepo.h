@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 #include <QString>
 #include <QMap>
 #include <QSet>
@@ -69,6 +70,13 @@ public:
     static bool reorderAll(bool ascending);
     static std::vector<Category> getAll();
     static std::vector<Category> getRecentlyUsed(int limit);
+
+    // 🚨 【核心重构】：UI 线程专属高并发无锁只读接口（0 毫秒 SQL 阻塞）
+    static void refreshMemoryCache();
+    static std::vector<Category> getCachedAll();
+    static Category getCachedById(int id);
+    static std::vector<Category> getCachedRecentlyUsed(size_t limit = 15);
+
     static std::vector<std::pair<int, int>> getCounts();
     static int getUniqueItemCount();
     static int getUncategorizedItemCount();
@@ -159,6 +167,12 @@ public:
 
     static std::mutex s_tagsMutex;
     static QSet<QString> s_globalTagsSet;
+
+private:
+    // 内存快照只读指针（RCU Lock-Free 机制）
+    static std::shared_ptr<const std::vector<Category>> s_categoryCache;
+    static std::shared_ptr<const std::vector<Category>> s_recentlyUsedCache;
+    static std::mutex s_cacheMutex;
 };
 
 } // namespace ArcMeta
