@@ -1,6 +1,7 @@
 #include "DiskBatchRenameService.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
+#include "../meta/CapsuleMediaExtractor.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QFile>
@@ -24,33 +25,31 @@ int DiskBatchRenameService::execute(const std::vector<std::wstring>& originalPat
         QString newPathStr = QDir(destDir).filePath(QString::fromStdWString(newNames[i]));
 
         bool ok = false;
-        // 处理旁路缩略图 <basename>_thumbnail.png
-        QString oldThumbPath = oldInfo.absolutePath() + "/" + oldInfo.completeBaseName() + "_thumbnail.png";
-        QString newThumbPath = QFileInfo(newPathStr).absolutePath() + "/" + QFileInfo(newPathStr).completeBaseName() + "_thumbnail.png";
-
         if (mode == DiskOperationMode::Copy) {
             ok = QFile::copy(oldPath, newPathStr);
-            if (ok && QFile::exists(oldThumbPath)) {
-                QFile::copy(oldThumbPath, newThumbPath);
-            }
         } else if (mode == DiskOperationMode::Move) {
             if (QFile::copy(oldPath, newPathStr)) {
                 ok = QFile::remove(oldPath);
-                if (ok && QFile::exists(oldThumbPath)) {
-                    if (QFile::copy(oldThumbPath, newThumbPath)) {
-                        QFile::remove(oldThumbPath);
-                    }
-                }
             }
         } else { // Rename
             ok = QFile::rename(oldPath, newPathStr);
-            if (ok && QFile::exists(oldThumbPath)) {
-                QFile::rename(oldThumbPath, newThumbPath);
-            }
         }
 
         if (ok) {
             successCount++;
+
+            // 同步对 .arcmeta/disk_thumbs/ 中的哈希缩略图进行重命名/迁移/复制
+            QString oldThumbHashPath = CapsuleMediaExtractor::getDiskThumbCachePath(oldPath);
+            QString newThumbHashPath = CapsuleMediaExtractor::getDiskThumbCachePath(newPathStr);
+
+            if (QFile::exists(oldThumbHashPath)) {
+                if (mode == DiskOperationMode::Copy) {
+                    QFile::copy(oldThumbHashPath, newThumbHashPath);
+                } else { // Rename 或 Move
+                    QFile::rename(oldThumbHashPath, newThumbHashPath);
+                }
+            }
+
             if (mode != DiskOperationMode::Copy) {
                 std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
                 std::wstring newW = QDir(destDir).absoluteFilePath(QString::fromStdWString(newNames[i])).toStdWString();
