@@ -1053,14 +1053,13 @@ void CategoryPanel::onScanAndCleanEmptyArcs() {
                 if (stmtItems) sqlite3_finalize(stmtItems);
 
                 // 同时清理关联的 PROGRESS 进度记录
-                if (sqlite3_prepare_v2(db, "DELETE FROM system_stats WHERE key = ?", -1, &stmtStats, nullptr) == SQLITE_OK) {
-                    for (const QString& qp : targetsToRemovePaths) {
-                        std::string progressKey = "PROGRESS:" + qp.toUtf8().toStdString();
+                for (const QString& qp : targetsToRemovePaths) {
+                    std::string progressKey = "PROGRESS:" + qp.toUtf8().toStdString();
+                    if (sqlite3_prepare_v2(db, "DELETE FROM system_stats WHERE key = ?", -1, &stmtStats, nullptr) == SQLITE_OK) {
                         sqlite3_bind_text(stmtStats, 1, progressKey.c_str(), -1, SQLITE_TRANSIENT);
                         sqlite3_step(stmtStats);
-                        sqlite3_reset(stmtStats);
+                        sqlite3_finalize(stmtStats);
                     }
-                    sqlite3_finalize(stmtStats);
                 }
                 trans.commit();
             }
