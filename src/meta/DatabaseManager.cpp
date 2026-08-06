@@ -486,13 +486,18 @@ bool DatabaseManager::saveDb(DbConnection& conn, bool forceFull) {
         return false;
     }
 
-    // 2026-07-20 优化设计：彻底废除性能极低的增量分步备份与频繁 sleep 让步机制。
-    // 因为该函数本身就在后台异步工作线程中运行，直接执行一次性全量备份（sqlite3_backup_step 设为 -1）
-    // 效率最高，通常在 1-5 毫秒内即可极速完成，完全不需要分片和让路。
     (void)forceFull;
     sqlite3_backup* backup = sqlite3_backup_init(conn.diskDb, "main", conn.memDb, "main");
     if (backup) {
-        int rc = sqlite3_backup_step(backup, -1);
+        int rc = SQLITE_OK;
+        // 每次只备份 64 个 Pager 页，分片让路，避免长时间锁死 SQLite 数据库
+        do {
+            rc = sqlite3_backup_step(backup, 64);
+            if (rc == SQLITE_OK) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2)); // 主动让出数据库锁
+            }
+        } while (rc == SQLITE_OK);
+
         sqlite3_backup_finish(backup);
         if (rc == SQLITE_DONE) {
             qDebug() << "[DB_TRACE] saveDb 成功备份内存数据库至硬盘！路径:" << QString::fromStdWString(conn.diskPath);
