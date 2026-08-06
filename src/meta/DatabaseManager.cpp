@@ -542,22 +542,33 @@ void DatabaseManager::flushAll(bool forceFull) {
         qDebug() << "[DB_TRACE] flushAll 跳过：当前没有脏数据需要备份。";
         return;
     }
-    std::lock_guard<std::mutex> lock(m_mutex);
+
     qDebug() << "[DB_TRACE] flushAll 开始将所有脏数据库备份到硬盘...";
+
+    // 1. 锁作用域隔离：仅在提取分库句柄快照时短暂加锁（微秒级）
+    DbConnection globalConn;
+    std::vector<std::pair<std::wstring, DbConnection>> driveSnapshot;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        globalConn = m_globalDb;
+        for (const auto& pair : m_driveDbs) {
+            driveSnapshot.push_back(pair);
+        }
+    } // 锁在此处立即释放！后续极耗时的 saveDb 磁盘 I/O 过程绝对不持有 m_mutex！
 
     bool allSucceeded = true;
     
-    // 全局库互斥锁锁定保护
+    // 2. 全局库独立加锁落盘
     {
         std::lock_guard<std::mutex> lockGlobal(m_globalDbMutex);
-        if (!saveDb(m_globalDb, forceFull)) {
+        if (!saveDb(globalConn, forceFull)) {
             allSucceeded = false;
             qWarning() << "[DB_TRACE] flushAll: 全局库备份失败！";
         }
     }
     
-    // 各驱动分库互斥锁锁定保护
-    for (auto& pair : m_driveDbs) {
+    // 3. 各驱动分库按需独立递归锁保护落盘（盘与盘之间物理并行）
+    for (auto& pair : driveSnapshot) {
         auto dbLock = getDriveMutex(pair.first);
         std::lock_guard<std::recursive_mutex> lockDrive(*dbLock);
         if (!saveDb(pair.second, forceFull)) {
@@ -596,7 +607,6 @@ void DatabaseManager::shutdown() {
 }
 
 sqlite3* DatabaseManager::getDriveDb(const std::wstring& volumeSerial, const QString& driveLetter) {
-    std::lock_guard<std::mutex> lock(m_mutex);
     qDebug() << "[DB] getDriveDb requested for Serial:" << QString::fromStdWString(volumeSerial) << "Letter:" << driveLetter;
     
     QString cleanLetter = "";
@@ -604,42 +614,47 @@ sqlite3* DatabaseManager::getDriveDb(const std::wstring& volumeSerial, const QSt
         cleanLetter = driveLetter.at(0).toUpper();
     }
 
-    // 2026-07-xx 按照用户要求：若数据库已加载但盘符发生变化，由解耦路由计算新路径
-    if (m_driveDbs.find(volumeSerial) != m_driveDbs.end()) {
-        if (!cleanLetter.isEmpty()) {
-            QString currentDiskPath = QString::fromStdWString(m_driveDbs[volumeSerial].diskPath);
-            QString resolvedPath = ShellHelper::resolveAndAlignDatabasePath(volumeSerial, cleanLetter, currentDiskPath, true);
-            
-            if (currentDiskPath != resolvedPath) {
-                qDebug() << "[DB] 检测到盘符漂移并完成物理重对账路由，重建连接中:" << currentDiskPath << " -> " << resolvedPath;
+    // 1. 优先在锁内进行微秒级快速查找
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_driveDbs.find(volumeSerial) != m_driveDbs.end()) {
+            // 2026-07-xx 按照用户要求：若数据库已加载但盘符发生变化，由解耦路由计算新路径
+            if (!cleanLetter.isEmpty()) {
+                QString currentDiskPath = QString::fromStdWString(m_driveDbs[volumeSerial].diskPath);
+                QString resolvedPath = ShellHelper::resolveAndAlignDatabasePath(volumeSerial, cleanLetter, currentDiskPath, true);
                 
-                DbConnection& conn = m_driveDbs[volumeSerial];
-                saveDb(conn); // 先持久化
-                
-                // 关闭句柄以解除占用
-                if (conn.memDb) sqlite3_close_v2(conn.memDb);
-                if (conn.diskDb) sqlite3_close_v2(conn.diskDb);
-                conn.memDb = nullptr;
-                conn.diskDb = nullptr;
+                if (currentDiskPath != resolvedPath) {
+                    qDebug() << "[DB] 检测到盘符漂移并完成物理重对账路由，重建连接中:" << currentDiskPath << " -> " << resolvedPath;
 
-                conn.diskPath = resolvedPath.toStdWString();
-                
-                // 重新加载到内存
-                loadDb(conn.diskPath, conn);
+                    DbConnection& conn = m_driveDbs[volumeSerial];
+                    saveDb(conn); // 先持久化
+
+                    // 关闭句柄以解除占用
+                    if (conn.memDb) sqlite3_close_v2(conn.memDb);
+                    if (conn.diskDb) sqlite3_close_v2(conn.diskDb);
+                    conn.memDb = nullptr;
+                    conn.diskDb = nullptr;
+
+                    conn.diskPath = resolvedPath.toStdWString();
+
+                    // 重新加载到内存
+                    loadDb(conn.diskPath, conn);
+                }
             }
+            return m_driveDbs[volumeSerial].memDb;
         }
-        return m_driveDbs[volumeSerial].memDb;
     }
 
-    // 未加载时的全新加载路由
+    // 2. 若未加载，在锁外执行较慢的物理对账和对齐，避免阻塞其他线程
     QString resolvedPath = ShellHelper::resolveAndAlignDatabasePath(volumeSerial, cleanLetter, "", false);
     DbConnection conn;
     if (loadDb(resolvedPath.toStdWString(), conn)) {
+        std::lock_guard<std::mutex> lock(m_mutex);
         m_driveDbs[volumeSerial] = conn;
-    } else {
-        return nullptr;
+        return m_driveDbs[volumeSerial].memDb;
     }
-    return m_driveDbs[volumeSerial].memDb;
+
+    return nullptr;
 }
 
 sqlite3* DatabaseManager::getGlobalDb() {

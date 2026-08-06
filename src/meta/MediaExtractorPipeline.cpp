@@ -168,9 +168,8 @@ void MediaExtractorPipeline::processNextBatch() {
 #ifdef Q_OS_WIN
         CoUninitialize();
 #endif
-        DatabaseManager::instance().enqueueSyncTask([]() {
-            DatabaseManager::instance().flushAll();
-        });
+                // 彻底删除此处的 flushAll()，解除对 UI 读锁的死锁骚扰！
+                // 数据库写盘改由 15 秒定时器后台平滑兜底。
     });
 }
 
