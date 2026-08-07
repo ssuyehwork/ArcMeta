@@ -1,7 +1,6 @@
 #include "CategoryRepo.h"
 #include "DatabaseManager.h"
 #include "MetadataManager.h"
-#include "TagRepository.h"
 #include "sqlite3.h"
 #include "../core/AppConfig.h"
 #include "../core/CategoryLockManager.h"
@@ -1266,42 +1265,10 @@ int CategoryRepo::getUncategorizedItemCount() {
     return getSystemCounts()["uncategorized"];
 }
 
-QMap<QString, int> CategoryRepo::getGlobalUniqueTags() {
-    QMap<QString, int> mergedTags = MetadataManager::instance().getAllTags();
-
-    // 合并数据源 B：分类中的预设标签 (Category Preset Tags)
-    auto allCats = getAll();
-    for (const auto& cat : allCats) {
-        for (const auto& t : cat.presetTags) {
-            QString tagStr = QString::fromStdWString(t).trimmed();
-            if (!tagStr.isEmpty() && !mergedTags.contains(tagStr)) {
-                mergedTags[tagStr] = 0; // 即使文件还没打标签，也以数量 0 进行展示
-            }
-        }
-    }
-
-    // 合并数据源 C：标签组中的标签 (Tag Group Tags)
-    auto allRepoGroups = TagRepository::getAllGroups();
-    for (const auto& g : allRepoGroups) {
-        for (const auto& t : g.tags) {
-            QString tagStr = t.trimmed();
-            if (!tagStr.isEmpty() && !mergedTags.contains(tagStr)) {
-                mergedTags[tagStr] = 0; // 即使文件还没打标签，也以数量 0 进行展示
-            }
-        }
-    }
-
-    return mergedTags;
-}
-
-int CategoryRepo::getGlobalTagsCount() {
-    return getGlobalUniqueTags().size();
-}
-
 QMap<QString, int> CategoryRepo::getSystemCounts() {
     QMap<QString, int> res;
     res["all"] = s_totalCount.load();
-    res["tags"] = getGlobalTagsCount(); // 🚨 重构：统计全系统中所有出现的唯一标签总种数（合并：已标记文件标签 + 分类预设标签 + 标签组标签）
+    res["tags"] = s_tagsCount.load();
     res["recently_visited"] = s_recentlyVisitedCount.load();
     res["untagged"] = s_untaggedCount.load();
     res["uncategorized"] = s_uncategorizedCount.load();

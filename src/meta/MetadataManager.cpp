@@ -2704,8 +2704,7 @@ QMap<QString, int> MetadataManager::getAllTags() const {
     auto currentSnapshot = std::atomic_load(&m_snapshot);
     if (currentSnapshot) {
         for (auto it = currentSnapshot->begin(); it != currentSnapshot->end(); ++it) {
-            // 🚨 修正：移除 isManaged 限制以支持磁盘导航模式/未入库资产打标的种类统计与显示，仅排除回收站
-            if (!it->second.isTrash) {
+            if (it->second.isManaged && !it->second.isTrash) {
                 for (const QString& tag : it->second.tags) {
                     tagCounts[tag]++;
                 }

@@ -112,10 +112,6 @@ set(SOURCES
     src/ui/CategoryModel.h
     src/ui/CategoryPanel.cpp
     src/ui/CategoryPanel.h
-    src/ui/CategoryPresetTagsDialog.cpp
-    src/ui/CategoryPresetTagsDialog.h
-    src/ui/TagPickerPopover.cpp
-    src/ui/TagPickerPopover.h
     src/ui/CategorySetPasswordDialog.cpp
     src/ui/CategorySetPasswordDialog.h
     src/ui/CategoryLockWidget.cpp

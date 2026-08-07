@@ -15,7 +15,6 @@
 using namespace ArcMeta::Style;
 #include "ToolTipOverlay.h"
 #include "FramelessDialog.h"
-#include "CategoryPresetTagsDialog.h"
 #include "BatchProgressDialog.h"
 #include <QDir>
 #include <QFile>
@@ -630,9 +629,15 @@ void CategoryPanel::onSetPresetTags() {
     Category current;
     for(auto& c : all) if(c.id == id) { current = c; break; }
 
-    CategoryPresetTagsDialog dlg(QString::fromStdWString(current.name), current.presetTags, this);
+    QString initial;
+    for(const auto& t : current.presetTags) initial += QString::fromStdWString(t) + ",";
+    if (initial.endsWith(",")) initial.chop(1);
+
+    FramelessInputDialog dlg("设置预设标签", "请输入标签 (用逗号分隔):", initial, this);
     if (dlg.exec() == QDialog::Accepted) {
-        current.presetTags = dlg.getPresetTags();
+        QStringList tags = dlg.text().split(QRegularExpression("[,，]"), Qt::SkipEmptyParts);
+        current.presetTags.clear();
+        for(const QString& t : tags) current.presetTags.push_back(t.trimmed().toStdWString());
         
         QSet<int> expandedIds;
         QStringList expandedNames;

@@ -10,7 +10,6 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QMenu>
-#include <QShowEvent>
 
 namespace ArcMeta {
 
@@ -51,7 +50,6 @@ public:
 protected:
     void resizeEvent(QResizeEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
-    void showEvent(QShowEvent* event) override; // 新增 showEvent 监听以支持页面切换时自动加载刷新
 
 signals:
     /**
