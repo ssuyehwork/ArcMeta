@@ -2,6 +2,8 @@
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
 #include "CategoryLockManager.h"
+#include "../meta/DatabaseManager.h"
+#include <QFileInfo>
 
 namespace {
 static inline bool isAuxiliaryFile(const QString& path) {
@@ -124,6 +126,93 @@ bool CategoryLoadService::isAssetLocked(const std::string& assetId) {
         }
     }
     return false;
+}
+
+std::vector<ItemRecord> CategoryLoadService::loadTrashItems() {
+    std::vector<ItemRecord> libraryTrash;
+    std::vector<ItemRecord> diskTrash;
+
+    // 1. 数据集 A：资源库托管回收项
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
+        if (!meta.isTrash) return;
+
+        // 过滤辅助文件
+        QString qPath = QString::fromStdWString(path);
+        if (isAuxiliaryFile(qPath)) {
+            return;
+        }
+
+        ItemRecord r = ItemRecord::create(qPath, &meta, true);
+        r.groupName = "Library";
+        libraryTrash.push_back(r);
+    });
+
+    // 2. 数据集 B：目录导航物理回收项
+    std::vector<sqlite3*> dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    for (sqlite3* db : dbs) {
+        sqlite3_stmt* stmt = nullptr;
+        const char* sql = "SELECT id, trash_path, original_path, drive_letter, file_name, is_folder, file_size, deleted_at FROM disk_trash";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                int id = sqlite3_column_int(stmt, 0);
+                const wchar_t* wTrashPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
+                const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
+                const wchar_t* wDriveLetter = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 3));
+                const wchar_t* wFileName = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
+                int isFolder = sqlite3_column_int(stmt, 5);
+                long long fileSize = sqlite3_column_int64(stmt, 6);
+                long long deletedAt = sqlite3_column_int64(stmt, 7);
+
+                if (wTrashPath && wOrigPath) {
+                    ItemRecord r;
+                    r.path = QString::fromWCharArray(wTrashPath);
+                    r.originalPath = QString::fromWCharArray(wOrigPath);
+                    r.filename = wFileName ? QString::fromWCharArray(wFileName) : QFileInfo(r.path).fileName();
+                    r.isDir = (isFolder != 0);
+                    r.size = fileSize;
+                    r.mtime = deletedAt;
+                    r.ctime = deletedAt;
+                    r.atime = deletedAt;
+                    r.isDiskTrash = true;
+                    r.diskTrashId = id;
+                    r.groupName = "DiskNav";
+
+                    if (r.isDir) {
+                        r.suffix = "";
+                    } else {
+                        int lastDot = r.filename.lastIndexOf('.');
+                        r.suffix = (lastDot != -1) ? r.filename.mid(lastDot + 1).toLower() : "";
+                    }
+
+                    diskTrash.push_back(r);
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    std::vector<ItemRecord> allRecords;
+    // 如果 Dataset A 非空，则加入 Group A 标题
+    if (!libraryTrash.empty()) {
+        ItemRecord hdr;
+        hdr.isGroupHeader = true;
+        hdr.groupName = "Library";
+        hdr.filename = "【 资源库 - 托管资产 】";
+        allRecords.push_back(hdr);
+        allRecords.insert(allRecords.end(), libraryTrash.begin(), libraryTrash.end());
+    }
+
+    // 如果 Dataset B 非空，则加入 Group B 标题
+    if (!diskTrash.empty()) {
+        ItemRecord hdr;
+        hdr.isGroupHeader = true;
+        hdr.groupName = "DiskNav";
+        hdr.filename = "【 目录导航 - 物理文件 】";
+        allRecords.push_back(hdr);
+        allRecords.insert(allRecords.end(), diskTrash.begin(), diskTrash.end());
+    }
+
+    return allRecords;
 }
 
 } // namespace ArcMeta

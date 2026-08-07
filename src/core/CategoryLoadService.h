@@ -28,6 +28,11 @@ public:
     static std::vector<ItemRecord> loadPathItems(const QStringList& paths);
 
     /**
+     * @brief 加载统一回收站中的所有项（包含“资源库-托管资产”与“目录导航-物理文件”）
+     */
+    static std::vector<ItemRecord> loadTrashItems();
+
+    /**
      * @brief 🚨【安全过滤拦截】：判断指定资产所属分类是否处于未解锁的加锁状态
      */
     static bool isAssetLocked(const std::string& assetId);

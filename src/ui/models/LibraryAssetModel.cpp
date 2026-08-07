@@ -355,6 +355,22 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
         path = path.left(path.length() - 1);
     }
 
+    // 分组标题特异分支 (双轨隔离回收站)
+    if (record.isGroupHeader) {
+        if (role == Qt::DisplayRole || role == Qt::EditRole) {
+            return record.filename;
+        } else if (role == IsGroupHeaderRole) {
+            return true;
+        } else if (role == GroupNameRole) {
+            return record.groupName;
+        } else if (role == TypeRole) {
+            return "group_header";
+        } else if (role == PathRole) {
+            return "";
+        }
+        return QVariant();
+    }
+
     // 分类节点及子分类专用大分支（对应用户原话：“LibraryAssetModel 只处理内存数据库模式条目（包含 isCategory 分支）”）
     if (record.isCategory) {
         if (role == Qt::DisplayRole || role == Qt::EditRole) {
@@ -438,6 +454,14 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
         return 0; 
     } else if (role == IsEmptyRole) {
         return false; // 内存模式不使用物理空文件夹状态
+    } else if (role == IsGroupHeaderRole) {
+        return record.isGroupHeader;
+    } else if (role == GroupNameRole) {
+        return record.groupName;
+    } else if (role == IsDiskTrashRole) {
+        return record.isDiskTrash;
+    } else if (role == DiskTrashIdRole) {
+        return record.diskTrashId;
     } else if (role == AspectRatioRole) {
         if (record.width > 0 && record.height > 0) return (double)record.width / record.height;
         double ratio = m_aspectRatios.value(QDir::toNativeSeparators(path), 1.0);

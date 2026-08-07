@@ -1,6 +1,7 @@
 #include "ThumbnailDelegate.h"
 #include "ContentPanel.h"
 #include "CardPainterHelper.h"
+#include "../core/ModelContract.h"
 #include "ElidedTextUtility.h"
 #include "../meta/MetadataManager.h"
 #include <QPainter>
@@ -74,6 +75,32 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
 }
 
 void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const {
+    if (!index.isValid()) return;
+
+    // 双轨回收站与分组展示：如果该项为组标题，独立精美绘制
+    if (index.data(IsGroupHeaderRole).toBool()) {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing, true);
+
+        QRect rect = option.rect;
+
+        // 绘制一条精美的分界线
+        painter->setPen(QPen(QColor("#333333"), 1, Qt::SolidLine));
+        painter->drawLine(rect.left(), rect.bottom() - 2, rect.right(), rect.bottom() - 2);
+
+        // 绘制大标题文字，使用青蓝色/青绿色以突出主题
+        QFont font("Microsoft YaHei", 11, QFont::Bold);
+        painter->setFont(font);
+        painter->setPen(QColor("#1abc9c"));
+
+        QString text = index.data(Qt::DisplayRole).toString();
+        // 缩进 10 像素避免紧贴边缘
+        painter->drawText(rect.adjusted(10, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, text);
+
+        painter->restore();
+        return;
+    }
+
     Metrics m = calculateMetrics(option);
     bool isSelected = (option.state & QStyle::State_Selected);
 

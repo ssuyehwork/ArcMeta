@@ -231,6 +231,19 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             tag_name TEXT,
             PRIMARY KEY (group_id, tag_name)
         );
+
+        -- 物理磁盘回收站独立表 (双轨隔离)
+        CREATE TABLE IF NOT EXISTS disk_trash (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trash_path TEXT NOT NULL,        -- 暂存区物理路径
+            original_path TEXT NOT NULL,     -- 原始物理绝对路径
+            drive_letter TEXT NOT NULL,      -- 所属盘符
+            file_name TEXT NOT NULL,         -- 原始文件名
+            is_folder INTEGER DEFAULT 0,     -- 是否为文件夹 (1: 是, 0: 否)
+            file_size INTEGER DEFAULT 0,     -- 文件大小
+            deleted_at INTEGER DEFAULT 0     -- 删除时间戳 (毫秒)
+        );
+        CREATE INDEX IF NOT EXISTS idx_disk_trash_drive_letter ON disk_trash(drive_letter);
     )";
     char* errMsg = nullptr;
     sqlite3_exec(conn.memDb, schema, nullptr, nullptr, &errMsg);
