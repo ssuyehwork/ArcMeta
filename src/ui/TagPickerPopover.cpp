@@ -1,6 +1,7 @@
 #include "TagPickerPopover.h"
-#include "components/FlowLayout.h"
 #include "../meta/MetadataManager.h"
+#include "../meta/CategoryRepo.h"
+#include "../meta/TagRepository.h"
 #include "UiHelper.h"
 #include <QPainter>
 #include <QFontMetrics>
@@ -10,36 +11,58 @@
 #include <QStyleOption>
 #include <QGuiApplication>
 #include <QInputMethod>
+#include <QFrame>
 
 namespace ArcMeta {
 
 // ============================================================================
 // TagItemButton 实现
 // ============================================================================
-TagItemButton::TagItemButton(const QString& name, int count, QWidget* parent)
-    : QPushButton(parent), m_tagName(name), m_count(count)
+TagItemButton::TagItemButton(const QString& name, int count, IconType iconType, QWidget* parent)
+    : QPushButton(parent), m_tagName(name), m_count(count), m_iconType(iconType)
 {
-    setFixedHeight(24);
+    setFixedHeight(26);
     setCursor(Qt::PointingHandCursor);
-    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-    QString displayText = m_tagName;
-    if (m_count > 0) {
-        displayText += QString(" (%1)").arg(m_count);
+    auto* layout = new QHBoxLayout(this);
+    layout->setContentsMargins(6, 0, 6, 0);
+    layout->setSpacing(6);
+
+    // 1. 左侧 SVG 图标
+    m_iconLabel = new QLabel(this);
+    m_iconLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+    QIcon icon;
+    if (m_iconType == Clock) {
+        icon = UiHelper::getIcon("clock", QColor("#888888"), 14);
+    } else {
+        icon = UiHelper::getIcon("circle_filled", QColor("#888888"), 10);
     }
-    setText(displayText);
+    m_iconLabel->setPixmap(icon.pixmap(14, 14));
+    layout->addWidget(m_iconLabel);
 
-    // 计算宽度
-    QFontMetrics fm(font());
-    int textWidth = fm.horizontalAdvance(displayText);
-    setFixedWidth(textWidth + 20); // 左右各 10px 间距
+    // 2. 文本标签（采用富文本实现 1:1 视觉对齐）
+    m_textLabel = new QLabel(this);
+    m_textLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+    layout->addWidget(m_textLabel, 1);
+
+    setSelected(false);
 }
 
 void TagItemButton::setSelected(bool selected) {
-    if (m_selected != selected) {
-        m_selected = selected;
-        update();
+    m_selected = selected;
+
+    // 动态调整文本颜色与粗细，配合高亮变化
+    QString nameColor = m_selected ? "#FFFFFF" : "#EEEEEE";
+    QString countColor = m_selected ? "#D4D4D4" : "#888888";
+
+    QString displayText = QString("<span style='color:%1; font-weight:bold; font-size:12px;'>%2</span>").arg(nameColor).arg(m_tagName);
+    if (m_count > 0) {
+        displayText += QString(" <span style='color:%1; font-size:11px;'>(%2)</span>").arg(countColor).arg(m_count);
     }
+    m_textLabel->setText(displayText);
+
+    update();
 }
 
 void TagItemButton::paintEvent(QPaintEvent*) {
@@ -48,24 +71,18 @@ void TagItemButton::paintEvent(QPaintEvent*) {
 
     QRect r = rect().adjusted(1, 1, -1, -1);
 
-    QColor bg, border, textCol;
+    QColor bg, border;
     if (m_selected) {
-        bg = QColor("#3498db");      // 选中蓝
-        border = QColor("#5dade2");  // 选中亮蓝边框
-        textCol = QColor("#FFFFFF");
+        bg = QColor("#3498db");      // 品牌选中蓝
+        border = QColor("#5dade2");  // 选中高亮边
     } else {
-        bg = QColor("#2B2B2B");      // 默认深灰
-        border = QColor("#3C3C3C");  // 默认边框
-        textCol = QColor("#EEEEEE");
+        bg = QColor("transparent");  // 默认背景透明
+        border = QColor("transparent");
     }
 
     painter.setBrush(bg);
     painter.setPen(QPen(border, 1));
-    painter.drawRoundedRect(r, 12, 12);
-
-    painter.setPen(textCol);
-    painter.setFont(font());
-    painter.drawText(r, Qt::AlignCenter, text());
+    painter.drawRoundedRect(r, 4, 4); // 规范圆角：4px
 }
 
 
@@ -116,16 +133,19 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
         "  background-color: #2D2D2D;"
         "  border: 1px solid #444444;"
         "  border-radius: 4px;"
-        "  padding: 0px 8px 0px 2px;" // 修正：将左 Padding 从 24px 缩减至 2px，消除文本脱节缺口
+        "  padding: 0px 8px 0px 2px;" // 修正：左边距缩减至 2px，紧贴 SVG 图标
         "  color: #FFFFFF;"
         "  font-size: 12px;"
         "}"
         "QLineEdit:focus { border: 1px solid #3498db; }"
     );
 
-    // 添加放大镜图标
-    QAction* searchIconAction = m_searchEdit->addAction(UiHelper::getIcon("search", QColor("#888888"), 14), QLineEdit::LeadingPosition);
-    Q_UNUSED(searchIconAction);
+    // 1:1 矢量图标配置
+    // 左侧：搜索图标
+    m_searchEdit->addAction(UiHelper::getIcon("search", QColor("#888888"), 14), QLineEdit::LeadingPosition);
+    // 右侧：网格布局与筛选按钮
+    m_searchEdit->addAction(UiHelper::getIcon("layout_grid", QColor("#888888"), 14), QLineEdit::TrailingPosition);
+    m_searchEdit->addAction(UiHelper::getIcon("filter_funnel_outline", QColor("#888888"), 14), QLineEdit::TrailingPosition);
 
     m_searchEdit->installEventFilter(this);
     connect(m_searchEdit, &QLineEdit::textChanged, this, &TagPickerPopover::onSearchTextChanged);
@@ -149,35 +169,51 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
     m_scrollLayout->setContentsMargins(0, 0, 4, 0);
     m_scrollLayout->setSpacing(12);
 
-    // 最近使用分组
+    // 最近使用分组（QGridLayout 二列网格排布）
     m_recentGroup = new QWidget(m_scrollContainer);
     auto* recentLayout = new QVBoxLayout(m_recentGroup);
     recentLayout->setContentsMargins(0, 0, 0, 0);
     recentLayout->setSpacing(6);
 
-    m_recentLabel = new QLabel("最近使用", m_recentGroup);
+    m_recentLabel = new QLabel(m_recentGroup);
     m_recentLabel->setStyleSheet("color: #888888; font-size: 11px; font-weight: bold;");
     recentLayout->addWidget(m_recentLabel);
 
+    // 1px 细分割线
+    auto* recentLine = new QFrame(m_recentGroup);
+    recentLine->setFixedHeight(1);
+    recentLine->setStyleSheet("background-color: #333333; border: none;");
+    recentLayout->addWidget(recentLine);
+
     m_recentContainer = new QWidget(m_recentGroup);
-    m_recentFlow = new FlowLayout(m_recentContainer, 0, 6, 6);
-    m_recentContainer->setLayout(m_recentFlow);
+    m_recentGrid = new QGridLayout(m_recentContainer);
+    m_recentGrid->setContentsMargins(0, 2, 0, 2);
+    m_recentGrid->setSpacing(6);
+    m_recentContainer->setLayout(m_recentGrid);
     recentLayout->addWidget(m_recentContainer);
     m_scrollLayout->addWidget(m_recentGroup);
 
-    // 其它 / 全局分组
+    // 其它分组（QGridLayout 二列网格排布）
     m_globalGroup = new QWidget(m_scrollContainer);
     auto* globalLayout = new QVBoxLayout(m_globalGroup);
     globalLayout->setContentsMargins(0, 0, 0, 0);
     globalLayout->setSpacing(6);
 
-    m_globalLabel = new QLabel("其它 / 全局标签库", m_globalGroup);
+    m_globalLabel = new QLabel(m_globalGroup);
     m_globalLabel->setStyleSheet("color: #888888; font-size: 11px; font-weight: bold;");
     globalLayout->addWidget(m_globalLabel);
 
+    // 1px 细分割线
+    auto* globalLine = new QFrame(m_globalGroup);
+    globalLine->setFixedHeight(1);
+    globalLine->setStyleSheet("background-color: #333333; border: none;");
+    globalLayout->addWidget(globalLine);
+
     m_globalContainer = new QWidget(m_globalGroup);
-    m_globalFlow = new FlowLayout(m_globalContainer, 0, 6, 6);
-    m_globalContainer->setLayout(m_globalFlow);
+    m_globalGrid = new QGridLayout(m_globalContainer);
+    m_globalGrid->setContentsMargins(0, 2, 0, 2);
+    m_globalGrid->setSpacing(6);
+    m_globalContainer->setLayout(m_globalGrid);
     globalLayout->addWidget(m_globalContainer);
     m_scrollLayout->addWidget(m_globalGroup);
 
@@ -199,9 +235,45 @@ TagPickerPopover::~TagPickerPopover() {
 }
 
 void TagPickerPopover::showAt(const QPoint& globalPos) {
-    // 每次打开时，重新从数据源读取所有 tags 与 top tags 并渲染
+    // 每次从三源接口汇总全量去重标签集合
     m_allTags = MetadataManager::instance().getAllTags();
-    m_topTags = MetadataManager::instance().getTopTags(10);
+
+    // 合并分类预设标签
+    auto allCats = CategoryRepo::getAll();
+    for (const auto& cat : allCats) {
+        for (const auto& t : cat.presetTags) {
+            QString tagStr = QString::fromStdWString(t).trimmed();
+            if (!tagStr.isEmpty() && !m_allTags.contains(tagStr)) {
+                m_allTags[tagStr] = 0;
+            }
+        }
+    }
+
+    // 合并标签组标签
+    auto allRepoGroups = TagRepository::getAllGroups();
+    for (const auto& g : allRepoGroups) {
+        for (const auto& t : g.tags) {
+            QString tagStr = t.trimmed();
+            if (!tagStr.isEmpty() && !m_allTags.contains(tagStr)) {
+                m_allTags[tagStr] = 0;
+            }
+        }
+    }
+
+    // 根据引用计数频次降序排序提取前 10 个作为最近使用，其余按升序排布
+    m_topTags.clear();
+    QList<QPair<QString, int>> tempSorted;
+    for (auto it = m_allTags.begin(); it != m_allTags.end(); ++it) {
+        tempSorted.append({it.key(), it.value()});
+    }
+    // 降序排序
+    std::sort(tempSorted.begin(), tempSorted.end(), [](const QPair<QString, int>& a, const QPair<QString, int>& b) {
+        return a.second > b.second;
+    });
+
+    for (int i = 0; i < qMin(10, tempSorted.size()); ++i) {
+        m_topTags.append(tempSorted[i]);
+    }
 
     m_searchEdit->clear();
     refreshList();
@@ -242,16 +314,15 @@ void TagPickerPopover::refreshList() {
     m_visibleButtons.clear();
     m_selectedIndex = -1;
 
-    // 清空 FlowLayout 中的旧 items
-    while (m_recentFlow->count() > 0) {
-        auto* item = m_recentFlow->takeAt(0);
+    // 清空 Grid 中的旧 items
+    QLayoutItem* item;
+    while ((item = m_recentGrid->takeAt(0)) != nullptr) {
         if (item->widget()) {
             item->widget()->deleteLater();
         }
         delete item;
     }
-    while (m_globalFlow->count() > 0) {
-        auto* item = m_globalFlow->takeAt(0);
+    while ((item = m_globalGrid->takeAt(0)) != nullptr) {
         if (item->widget()) {
             item->widget()->deleteLater();
         }
@@ -260,10 +331,11 @@ void TagPickerPopover::refreshList() {
 
     QString searchFilter = m_searchEdit->text().trimmed().toLower();
 
-    // 记录已经添加到“最近”分组的标签名，避免“全局”分组中重复展示
+    // 记录已经添加到“最近”分组的标签名，避免“其它”分组中重复展示
     QSet<QString> displayedRecentTags;
 
     // 2. 渲染“最近使用”分组
+    int recentCount = 0;
     for (const auto& pair : m_topTags) {
         QString tagName = pair.first;
         int count = pair.second;
@@ -271,10 +343,11 @@ void TagPickerPopover::refreshList() {
             continue;
         }
 
-        auto* btn = new TagItemButton(tagName, count, m_recentContainer);
-        m_recentFlow->addWidget(btn);
+        auto* btn = new TagItemButton(tagName, count, TagItemButton::Clock, m_recentContainer);
+        m_recentGrid->addWidget(btn, recentCount / 2, recentCount % 2);
         m_visibleButtons.append(btn);
         displayedRecentTags.insert(tagName);
+        recentCount++;
 
         // 点击事件
         connect(btn, &QPushButton::clicked, this, [this, tagName]() {
@@ -286,12 +359,11 @@ void TagPickerPopover::refreshList() {
     }
 
     // 3. 渲染“其它 / 全局标签库”分组
-    // getAllTags 返回 QMap，天生按 key 排序
+    int globalCount = 0;
     for (auto it = m_allTags.begin(); it != m_allTags.end(); ++it) {
         QString tagName = it.key();
         int count = it.value();
 
-        // 如果已经被最近使用分组展示了，则在全局中跳过
         if (displayedRecentTags.contains(tagName)) {
             continue;
         }
@@ -300,9 +372,10 @@ void TagPickerPopover::refreshList() {
             continue;
         }
 
-        auto* btn = new TagItemButton(tagName, count, m_globalContainer);
-        m_globalFlow->addWidget(btn);
+        auto* btn = new TagItemButton(tagName, count, TagItemButton::CircleFilled, m_globalContainer);
+        m_globalGrid->addWidget(btn, globalCount / 2, globalCount % 2);
         m_visibleButtons.append(btn);
+        globalCount++;
 
         // 点击事件
         connect(btn, &QPushButton::clicked, this, [this, tagName]() {
@@ -313,11 +386,13 @@ void TagPickerPopover::refreshList() {
         btn->installEventFilter(this);
     }
 
-    // 4. 显示与隐藏空的分组
-    bool hasRecent = m_recentFlow->count() > 0;
+    // 4. 显示与修改标题括号及显示状态
+    m_recentLabel->setText(QString("最近使用 (%1)").arg(recentCount));
+    bool hasRecent = recentCount > 0;
     m_recentGroup->setVisible(hasRecent);
 
-    bool hasGlobal = m_globalFlow->count() > 0;
+    m_globalLabel->setText(QString("其它 (%1)").arg(globalCount));
+    bool hasGlobal = globalCount > 0;
     m_globalGroup->setVisible(hasGlobal);
 
     // 5. 初始化默认选中

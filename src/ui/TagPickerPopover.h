@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
+#include <QGridLayout>
 #include <QList>
 #include <QMap>
 #include <QEvent>
@@ -17,15 +18,15 @@
 
 namespace ArcMeta {
 
-class FlowLayout;
-
 /**
- * @brief 标签检索/选择弹出框中的单个标签项按钮
+ * @brief 1:1复刻的标签项按钮，包含左侧 SVG 矢量图标、标签粗体名称与灰色计数括号
  */
 class TagItemButton : public QPushButton {
     Q_OBJECT
 public:
-    explicit TagItemButton(const QString& name, int count, QWidget* parent = nullptr);
+    enum IconType { Clock, CircleFilled };
+    explicit TagItemButton(const QString& name, int count, IconType iconType, QWidget* parent = nullptr);
+
     QString tagName() const { return m_tagName; }
     void setSelected(bool selected);
     bool isSelected() const { return m_selected; }
@@ -36,7 +37,11 @@ protected:
 private:
     QString m_tagName;
     int m_count;
+    IconType m_iconType;
     bool m_selected = false;
+
+    QLabel* m_iconLabel = nullptr;
+    QLabel* m_textLabel = nullptr;
 };
 
 /**
@@ -79,12 +84,12 @@ private:
     QWidget* m_recentGroup = nullptr;
     QLabel* m_recentLabel = nullptr;
     QWidget* m_recentContainer = nullptr;
-    FlowLayout* m_recentFlow = nullptr;
+    QGridLayout* m_recentGrid = nullptr;
 
     QWidget* m_globalGroup = nullptr;
     QLabel* m_globalLabel = nullptr;
     QWidget* m_globalContainer = nullptr;
-    FlowLayout* m_globalFlow = nullptr;
+    QGridLayout* m_globalGrid = nullptr;
 
     QLabel* m_hintLabel = nullptr;
 
