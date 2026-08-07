@@ -73,7 +73,7 @@ void TagItemButton::paintEvent(QPaintEvent*) {
 // TagPickerPopover 实现
 // ============================================================================
 TagPickerPopover::TagPickerPopover(QWidget* parent)
-    : QWidget(parent, Qt::Popup | Qt::FramelessWindowHint)
+    : QWidget(parent) // 🚨 废除 Qt::Popup，改用同窗口 Child Overlay 架构以保障 Windows IME 正常挂载与上下文畅通
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setFocusPolicy(Qt::StrongFocus);
@@ -81,7 +81,7 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
     // 物理开启输入法上下文，允许 Windows 输入法 (IME) 正常挂载
     setAttribute(Qt::WA_InputMethodEnabled, true);
 
-    resize(320, 360);
+    resize(320, 260); // 调整尺寸，使其在 480x360 主对话框中适配完美
 
     // 主布局
     auto* mainLayout = new QVBoxLayout(this);
@@ -193,6 +193,9 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
 }
 
 TagPickerPopover::~TagPickerPopover() {
+    if (qApp) {
+        qApp->removeEventFilter(this);
+    }
 }
 
 void TagPickerPopover::showAt(const QPoint& globalPos) {
@@ -203,9 +206,34 @@ void TagPickerPopover::showAt(const QPoint& globalPos) {
     m_searchEdit->clear();
     refreshList();
 
-    move(globalPos);
+    // 计算父窗口中的相对位置，确保悬浮框完全容纳在父对话框内，不超出边界
+    if (parentWidget()) {
+        QPoint localPos = parentWidget()->mapFromGlobal(globalPos);
+        int x = localPos.x();
+        int y = localPos.y();
+
+        // 保证悬浮窗不会穿透/超出父对话框
+        if (x + width() > parentWidget()->width()) {
+            x = parentWidget()->width() - width() - 10;
+        }
+        if (y + height() > parentWidget()->height()) {
+            y = parentWidget()->height() - height() - 10;
+        }
+        if (x < 10) x = 10;
+        if (y < 10) y = 10;
+
+        move(x, y);
+    }
+
     show();
+    raise(); // 置于最顶层 Z-order，确保遮挡下方其它控件
     m_searchEdit->setFocus();
+
+    // 注册全局事件过滤器以实现点击外部自动关闭
+    if (qApp) {
+        qApp->removeEventFilter(this); // 防止重复注册
+        qApp->installEventFilter(this);
+    }
 }
 
 void TagPickerPopover::refreshList() {
@@ -383,6 +411,20 @@ void TagPickerPopover::showEvent(QShowEvent* event) {
 }
 
 bool TagPickerPopover::eventFilter(QObject* watched, QEvent* event) {
+    // 全局鼠标点击监听：点击 Popover 外部时自动隐藏并注销全局事件过滤器
+    if (event->type() == QEvent::MouseButtonPress) {
+        auto* mouseEvent = static_cast<QMouseEvent*>(event);
+        QPoint globalPos = mouseEvent->globalPosition().toPoint();
+        QPoint localPos = mapFromGlobal(globalPos);
+        if (!rect().contains(localPos)) {
+            hide();
+            if (qApp) {
+                qApp->removeEventFilter(this);
+            }
+            return false; // 放行点击事件，不阻塞外部操作
+        }
+    }
+
     // 处理 QLineEdit 上的按键过滤，使其支持键盘控制
     if (watched == m_searchEdit && event->type() == QEvent::KeyPress) {
         auto* keyEvent = static_cast<QKeyEvent*>(event);

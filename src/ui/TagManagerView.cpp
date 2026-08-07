@@ -472,6 +472,28 @@ void TagManagerView::search(const QString& keyword) {
 void TagManagerView::refresh() {
     m_tagCounts = MetadataManager::instance().getAllTags();
 
+    // 合并数据源 B：分类中的预设标签 (Category Preset Tags)
+    auto allCats = CategoryRepo::getAll();
+    for (const auto& cat : allCats) {
+        for (const auto& t : cat.presetTags) {
+            QString tagStr = QString::fromStdWString(t).trimmed();
+            if (!tagStr.isEmpty() && !m_tagCounts.contains(tagStr)) {
+                m_tagCounts[tagStr] = 0; // 即使文件还没入库，也以数量 0 进行展示
+            }
+        }
+    }
+
+    // 合并数据源 C：标签组中的标签 (Tag Group Tags)
+    auto allRepoGroupsForMerge = TagRepository::getAllGroups();
+    for (const auto& g : allRepoGroupsForMerge) {
+        for (const auto& t : g.tags) {
+            QString tagStr = t.trimmed();
+            if (!tagStr.isEmpty() && !m_tagCounts.contains(tagStr)) {
+                m_tagCounts[tagStr] = 0; // 即使文件还没入库，也以数量 0 进行展示
+            }
+        }
+    }
+
     // 渲染常用标签 (Plan-82)
     QWidget* popFlow = findChild<QWidget*>("PopularTagsFlowContainer");
     if (popFlow && popFlow->layout()) {
