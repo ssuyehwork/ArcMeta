@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QScrollArea>
 #include <QCursor>
+#include <QTimer>
 
 namespace ArcMeta {
 
@@ -19,8 +20,8 @@ CategoryPresetTagsDialog::CategoryPresetTagsDialog(const QString& folderName,
     : FramelessDialog("设置自动标签", parent), m_folderName(folderName), m_initialTags(initialTags)
 {
     setVisibleButtons(Close);
-    resize(480, 260); // 极简独立主界面尺寸：480x260 (对标图 2)
-    setMinimumSize(400, 240);
+    // 允许根据标签弹性变化，不再设定固定或过大的 minimumSize 限制高度
+    setMinimumWidth(400);
 
     initLayout();
 
@@ -73,9 +74,9 @@ void CategoryPresetTagsDialog::initLayout() {
     m_tagsContainer = new QWidget(m_contentArea);
     m_tagsContainer->setObjectName("TagsContainer");
     QSizePolicy sp = m_tagsContainer->sizePolicy();
-    sp.setHeightForWidth(true);          // 新增：让容器认领 FlowLayout 的 heightForWidth 能力
-    m_tagsContainer->setSizePolicy(sp);  // 新增
-    m_tagsContainer->setMinimumHeight(80);
+    sp.setHeightForWidth(true);          // 让容器认领 FlowLayout 的 heightForWidth 能力
+    m_tagsContainer->setSizePolicy(sp);
+    m_tagsContainer->setMinimumHeight(40); // 弹性的，空状态下最小给 40px 高度
     m_tagsContainer->setCursor(Qt::PointingHandCursor);
     m_tagsContainer->setStyleSheet(
         "QWidget#TagsContainer {"
@@ -89,14 +90,8 @@ void CategoryPresetTagsDialog::initLayout() {
     m_tagsContainer->setLayout(m_tagsFlow);
     m_tagsContainer->installEventFilter(this); // 安装事件过滤器监听点击呼出选择框
 
-    auto* scrollArea = new QScrollArea(m_contentArea);
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setFrameShape(QFrame::NoFrame);
-    scrollArea->setStyleSheet("QScrollArea { background: transparent; }");
-    scrollArea->setWidget(m_tagsContainer);
-
-    tagsLayout->addWidget(scrollArea, 1);
-    layout->addLayout(tagsLayout, 1);
+    tagsLayout->addWidget(m_tagsContainer); // 去掉滚动条，直接添加容器
+    layout->addLayout(tagsLayout);
 
     // 初始化已有的预设标签
     for (const auto& tagW : m_initialTags) {
@@ -129,6 +124,9 @@ void CategoryPresetTagsDialog::initLayout() {
     btnLayout->addWidget(btnOk);
 
     layout->addLayout(btnLayout);
+
+    // 初次布局完成后，调整对话框尺寸
+    adjustDialogSize();
 }
 
 void CategoryPresetTagsDialog::addTagPill(const QString& tagName) {
@@ -155,6 +153,7 @@ void CategoryPresetTagsDialog::onTagSelectedFromPicker(const QString& tagName) {
     if (!exists) {
         addTagPill(tagName);
         m_tagsContainer->updateGeometry();
+        adjustDialogSize();
     }
 }
 
@@ -170,6 +169,38 @@ void CategoryPresetTagsDialog::onRemoveTag(const QString& tagName) {
             }
         }
     }
+    m_tagsContainer->updateGeometry();
+    adjustDialogSize();
+}
+
+void CategoryPresetTagsDialog::adjustDialogSize() {
+    // 异步延时处理，确保所有的 widget 布局计算已更新完毕
+    QTimer::singleShot(50, this, [this]() {
+        // 固定宽度为 480 像素，只允许高度弹性收缩
+        const int dialogWidth = 480;
+
+        // 1. 文件夹名输入框高度：30 + layout spacing (4) + label height (约 15) = 50px
+        // 2. 底部按钮区高度：32 + padding (20) = 52px
+        // 3. 标题栏 + 分割线等高度 = 34 + 4 + 1 = 39px
+        // 4. 外边框及布局内边距 margins (上下 15*2 = 30px) 以及间隙 spacing (10*2 = 20px)
+        // 5. 加上标签容器 FlowLayout 根据 480 宽度计算得出的弹性高度：
+        int containerPaddingAndMargins = 40; // 标签部分的 label 加上 layout margins
+
+        // 计算 FlowLayout 高度
+        int tagsContainerWidth = dialogWidth - 40; // dialogMargins 左右各 20 像素
+        int flowHeight = m_tagsFlow->heightForWidth(tagsContainerWidth);
+        if (flowHeight < 40) {
+            flowHeight = 40;
+        }
+
+        int targetHeight = 39 + 15 + 4 + 30 + 10 + 15 + 4 + flowHeight + 10 + 32 + 15 + 15;
+        // 限制一下合理高度，防止无限拉伸（比如设定在 200 到 600px 之间）
+        targetHeight = qBound(220, targetHeight, 600);
+
+        setMinimumSize(dialogWidth, targetHeight);
+        setMaximumSize(dialogWidth, targetHeight);
+        resize(dialogWidth, targetHeight);
+    });
 }
 
 std::vector<std::wstring> CategoryPresetTagsDialog::getPresetTags() const {

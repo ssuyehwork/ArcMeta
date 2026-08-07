@@ -40,6 +40,7 @@ private slots:
 private:
     void initLayout();
     void addTagPill(const QString& tagName);
+    void adjustDialogSize();
 
     // 核心信息
     QString m_folderName;
