@@ -10,11 +10,11 @@ static inline bool isAuxiliaryFile(const QString& path) {
     if (path.isEmpty()) return true;
 
     // 🚨 仅保留 .ArcMeta.json，彻底清除 .am_meta.json 历史判断
+    // 🚨 修正：移除对 .arc 的过滤！.arc 是托管资源库真实的资产胶囊，绝非无用辅助文件
     if (path.endsWith(".ArcMeta.json", Qt::CaseInsensitive) ||
         path.endsWith("_thumbnail.png", Qt::CaseInsensitive) ||
-        path.endsWith("metadata.scch", Qt::CaseInsensitive) ||
-        path.endsWith(".arc", Qt::CaseInsensitive)) {
-        return true; // 屏蔽过滤
+        path.endsWith("metadata.scch", Qt::CaseInsensitive)) {
+        return true; // 屏蔽过滤真正的辅助配置文件与缩略图
     }
 
     return false;
