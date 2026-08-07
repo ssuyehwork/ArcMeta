@@ -6,7 +6,6 @@
 #include <QHBoxLayout>
 #include <QScrollArea>
 #include <QPushButton>
-#include <QCheckBox>
 #include <QTextEdit>
 #include <QLineEdit>
 #include <QFrame>
@@ -18,7 +17,6 @@ namespace ArcMeta {
 
 /**
  * @brief ElasticEdit: 弹性高度编辑框，内容自动撑开高度
- * 2026-06-xx 工业级重构：基类切换为 QTextEdit 以获得精确的像素级渲染高度反馈
  */
 class ElasticEdit : public QTextEdit {
     Q_OBJECT
@@ -26,14 +24,14 @@ public:
     explicit ElasticEdit(QWidget* parent = nullptr);
     void adjustHeight();
 signals:
-    void returnPressed(); // 统一信号接口
+    void returnPressed();
 protected:
     void keyPressEvent(QKeyEvent* e) override;
     void resizeEvent(QResizeEvent* e) override;
 };
 
 /**
- * @brief Tag Pill 圆角标签组件 (22px height, 11px radius)
+ * @brief Tag Pill 圆角标签组件
  */
 class TagPill : public QWidget {
     Q_OBJECT
@@ -51,7 +49,7 @@ private:
 };
 
 /**
- * @brief 流式布局容器 (用于展示标签)
+ * @brief 流式布局容器 (用于展示标签与调色盘)
  */
 class FlowLayout : public QLayout {
 public:
@@ -71,14 +69,13 @@ public:
     QLayoutItem *takeAt(int index) override;
 private:
     int doLayout(const QRect &rect, bool testOnly) const;
-    int smartSpacing(QStyle::PixelMetric pm) const;
     QList<QLayoutItem *> itemList;
     int m_hSpace;
     int m_vSpace;
 };
 
 /**
- * @brief ColorPill: 用于流式展示的单个颜色块 (16x16px, 4px 圆角)
+ * @brief ColorPill: 单个颜色块组件
  */
 class ColorPill : public QWidget {
     Q_OBJECT
@@ -100,7 +97,7 @@ private:
 };
 
 /**
- * @brief 元数据面板（面板五）
+ * @brief 元数据面板 (纯 View 视图层重构 + ABI 兼容层)
  */
 class MetaPanel : public QFrame {
     Q_OBJECT
@@ -108,55 +105,40 @@ public:
     explicit MetaPanel(QWidget* parent = nullptr);
     ~MetaPanel() override = default;
 
-
+    // 纯 UI 渲染接口
     void updateInfo(const QString& name, const QString& type, const QString& size,
                     const QString& ctime, const QString& mtime, const QString& atime,
-                    const QString& path, bool encrypted);
+                    const QString& path, bool encrypted, int width = 0, int height = 0);
 
-    /**
-     * @brief 设置当前选中的路径列表，用于多选批量操作
-     */
     void setSelectedPaths(const QStringList& paths) { m_selectedPaths = paths; }
-
-    /**
-     * @brief 设置变长色板显示
-     */
     void setPalettes(const QVector<QPair<QColor, float>>& palette);
-    
+    void setTags(const QStringList& tags);
+
+    // 兼容 QString 与 std::wstring 的属性设置
+    void setNote(const QString& note);
+    void setNote(const std::wstring& note);
+
+    void setURL(const QString& url);
+    void setURL(const std::wstring& url);
+
+    void setCategory(const QString& category);
+
+    // 兼容旧版调用的占位空实现（解决外部编译报错，保持纯 View 职责）
+    void setRating(int rating) { Q_UNUSED(rating); }
+    void setColor(const std::wstring& color) { Q_UNUSED(color); }
+    void setPinned(bool pinned) { Q_UNUSED(pinned); }
+
 signals:
-    /**
-     * @brief 元数据面板向上通知的信号
-     * @param rating -1 表示未变，0..5 有效
-     * @param color L"__NO_CHANGE__" 表示未变
-     */
+    // 兼容外部旧信号绑定
     void metadataChanged(int rating, const std::wstring& color);
 
-    /**
-     * @brief 根据颜色搜索项目
-     */
+    // 单向数据流通知信号 (由 Controller 统一接管数据库处理)
+    void noteEdited(const QStringList& paths, const QString& newNote);
+    void linkEdited(const QStringList& paths, const QString& newLink);
+    void primaryColorChanged(const QString& path, const QColor& color);
+    void tagsChanged(const QStringList& paths, const QStringList& tags);
     void searchByColor(const QColor& color);
-
-    /**
-     * @brief 标签变更信号 (支持批量更新)
-     */
-    void tagsChanged(const QStringList& tags);
-
-    /**
-     * @brief 2026-07-26 极致重构：文件/文件夹重命名申请信号
-     */
     void renameRequested(const QString& oldPath, const QString& newPath);
-
-public:
-    /**
-     * @brief 设置星级显示
-     */
-    void setRating(int rating);
-    void setColor(const std::wstring& color);
-    void setPinned(bool pinned);
-    void setTags(const QStringList& tags);
-    void setNote(const std::wstring& note);
-    void setURL(const std::wstring& url);
-    void setCategory(const QString& category);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -168,11 +150,6 @@ private:
     void adjustFlowHeights();
     void addInfoRow(const QString& label, QLabel*& valueLabel);
     QFrame* createSeparator();
-    
-    /**
-     * @brief 2026-04-12 物理还原：创建一个带图标、标题和边框的“小方盒”容器
-     */
-    QWidget* createSectionBox(const QString& iconName, const QString& title, QWidget* content);
 
     QVBoxLayout* m_mainLayout = nullptr;
     QScrollArea* m_scrollArea = nullptr;
@@ -195,17 +172,14 @@ private:
     
     ElasticEdit* m_noteEdit = nullptr;
     ElasticEdit* m_linkEdit = nullptr;
-    
     ElasticEdit* m_categoryEdit = nullptr;
 
     QStringList m_selectedPaths;
 
-    // 2026-06-xx 性能优化：控件复用池
     QList<TagPill*> m_tagPool;
     QList<ColorPill*> m_colorPool;
     QTimer* m_adjustTimer = nullptr;
 
-    // 2026-07-26 极致重构：引入单向数据流阻断标志位，彻底消除 blockSignals 拼图
     bool m_isInternalUpdating = false;
 
 private slots:

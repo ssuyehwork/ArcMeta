@@ -1,33 +1,78 @@
-#include "MetaPanel.h"
-#include "SvgIcons.h"
-#include "ToolTipOverlay.h"
-#include "UiHelper.h"
-#include "Logger.h"
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QPainter>
-#include <QMouseEvent>
-#include <QScrollBar>
-#include <QStyle>
-#include <QScrollArea>
-#include <QFileInfo>
-#include <QLabel>
-#include <QClipboard>
-#include <QApplication>
-#include <QMenu>
-#include <QWidgetAction>
-#include <QLineEdit>
-#include <QDir>
-#include <QTextDocument>
-#include <QtMath>
-#include <QTimer>
-#include <QRegularExpressionValidator>
+**你说得完全正确。之前的修改只做到了“数据层解耦”，但在物理文件与组件层面，确实还没有做到真正的单一职责拆分。**
 
-// 🚨 彻底删除 #include "../meta/MetadataManager.h"，实现 100% 数据库与业务解耦！
+---
+
+### 为什么说目前的元数据面板依然“职责不单一”？
+
+在当前的 `MetaPanel.h` 与 `MetaPanel.cpp` 这单个文件里，同时塞入了 **5 个职责完全独立的组件**：
+
+1. `ElasticEdit`（自适应高度文本框组件）
+2. `TagPill`（圆角标签组件）
+3. `ColorPill`（调色盘色块及颜色格式转换组件）
+4. `FlowLayout`（流式布局管理器算法组件）
+5. `MetaPanel`（主容器面板）
+
+把 5 个不同的 UI 控件与布局算法硬塞在一个文件里，确实违背了**文件级与组件级的单一职责原则（SRP）**。
+
+---
+
+### 真正的物理级模块化拆分方案（1 组件 = 1 文件）
+
+将原本混杂的文件彻底拆分为 **5 组高内聚、独立可复用的子模块**，并在 `CMakeLists.txt` 中显式注册：
+
+```
+src/ui/components/
+├── ElasticEdit.h
+├── ElasticEdit.cpp        // 仅负责自适应高度输入框
+├── TagPill.h
+├── TagPill.cpp            // 仅负责标签 Pill 绘制与删除事件
+├── ColorPill.h
+├── ColorPill.cpp          // 仅负责色块绘制与颜色菜单
+├── FlowLayout.h
+└── FlowLayout.cpp         // 仅负责流式排版算法
+
+src/ui/
+├── MetaPanel.h
+└── MetaPanel.cpp          // 仅负责元数据面板的整体组合与信号分发
+```
+
+---
+
+### 拆分后的代码实现
+
+#### 1. `src/ui/components/ElasticEdit.h`
+```cpp
+#pragma once
+#include <QTextEdit>
 
 namespace ArcMeta {
 
-// --- ElasticEdit 实现 ---
+class ElasticEdit : public QTextEdit {
+    Q_OBJECT
+public:
+    explicit ElasticEdit(QWidget* parent = nullptr);
+    void adjustHeight();
+signals:
+    void returnPressed();
+protected:
+    void keyPressEvent(QKeyEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override;
+};
+
+} // namespace ArcMeta
+```
+
+#### 2. `src/ui/components/ElasticEdit.cpp`
+```cpp
+#include "ElasticEdit.h"
+#include <QTextDocument>
+#include <QKeyEvent>
+#include <QResizeEvent>
+#include <QScrollArea>
+#include <QtMath>
+
+namespace ArcMeta {
+
 ElasticEdit::ElasticEdit(QWidget* parent) : QTextEdit(parent) {
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
@@ -51,10 +96,10 @@ void ElasticEdit::adjustHeight() {
         }
     }
     qreal docHeight = document()->size().height();
-    int newHeight = qMax(28, (int)qCeil(docHeight + verticalPadding + border)); 
+    int newHeight = qMax(28, (int)qCeil(docHeight + verticalPadding + border));
     if (this->height() != newHeight) {
         setFixedHeight(newHeight);
-        updateGeometry(); 
+        updateGeometry();
         QWidget* p = parentWidget();
         while (p) {
             if (p->layout()) p->layout()->activate();
@@ -78,7 +123,221 @@ void ElasticEdit::keyPressEvent(QKeyEvent* e) {
     QTextEdit::keyPressEvent(e);
 }
 
-// --- ColorPill 实现 ---
+} // namespace ArcMeta
+```
+
+---
+
+#### 3. `src/ui/components/TagPill.h`
+```cpp
+#pragma once
+#include <QWidget>
+#include <QLabel>
+#include <QPushButton>
+
+namespace ArcMeta {
+
+class TagPill : public QWidget {
+    Q_OBJECT
+public:
+    explicit TagPill(const QString& text, QWidget* parent = nullptr);
+    void setData(const QString& text);
+signals:
+    void deleteRequested(const QString& text);
+protected:
+    void paintEvent(QPaintEvent* event) override;
+private:
+    QString m_text;
+    QLabel* m_label = nullptr;
+    QPushButton* m_closeBtn = nullptr;
+};
+
+} // namespace ArcMeta
+```
+
+#### 4. `src/ui/components/TagPill.cpp`
+```cpp
+#include "TagPill.h"
+#include "../UiHelper.h"
+#include <QHBoxLayout>
+#include <QPainter>
+#include <QFontMetrics>
+
+namespace ArcMeta {
+
+TagPill::TagPill(const QString& text, QWidget* parent) : QWidget(parent), m_text(text) {
+    setFixedHeight(22);
+    QHBoxLayout* layout = new QHBoxLayout(this);
+    layout->setContentsMargins(8, 0, 4, 0);
+    layout->setSpacing(4);
+    m_label = new QLabel(text, this);
+    m_label->setStyleSheet("color: #EEEEEE; font-size: 12px; border: none; background: transparent;");
+    m_closeBtn = new QPushButton(this);
+    m_closeBtn->setFixedSize(14, 14);
+    m_closeBtn->setCursor(Qt::PointingHandCursor);
+    m_closeBtn->setIcon(UiHelper::getIcon("close", QColor("#B0B0B0"), 12));
+    m_closeBtn->setIconSize(QSize(10, 10));
+    m_closeBtn->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: #3E3E42; border-radius: 2px; }");
+    layout->addWidget(m_label);
+    layout->addWidget(m_closeBtn);
+    connect(m_closeBtn, &QPushButton::clicked, [this]() { emit deleteRequested(m_text); });
+    setData(text);
+}
+
+void TagPill::setData(const QString& text) {
+    m_text = text;
+    setProperty("tagText", text);
+    m_label->setText(text);
+    QFontMetrics fm(m_label->font());
+    setFixedWidth(fm.horizontalAdvance(text) + 30);
+}
+
+void TagPill::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setBrush(QColor("#2B2B2B"));
+    painter.setPen(QPen(QColor("#3c3c3c"), 1));
+    painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 11, 11);
+}
+
+} // namespace ArcMeta
+```
+
+---
+
+#### 5. `src/ui/components/FlowLayout.h`
+```cpp
+#pragma once
+#include <QLayout>
+#include <QList>
+
+namespace ArcMeta {
+
+class FlowLayout : public QLayout {
+public:
+    explicit FlowLayout(QWidget *parent, int margin = -1, int hSpacing = -1, int vSpacing = -1);
+    ~FlowLayout();
+    void addItem(QLayoutItem *item) override;
+    int horizontalSpacing() const;
+    int verticalSpacing() const;
+    Qt::Orientations expandingDirections() const override;
+    bool hasHeightForWidth() const override;
+    int heightForWidth(int) const override;
+    int count() const override;
+    QLayoutItem *itemAt(int index) const override;
+    QSize minimumSize() const override;
+    void setGeometry(const QRect &rect) override;
+    QSize sizeHint() const override;
+    QLayoutItem *takeAt(int index) override;
+private:
+    int doLayout(const QRect &rect, bool testOnly) const;
+    QList<QLayoutItem *> itemList;
+    int m_hSpace;
+    int m_vSpace;
+};
+
+} // namespace ArcMeta
+```
+
+#### 6. `src/ui/components/FlowLayout.cpp`
+```cpp
+#include "FlowLayout.h"
+#include <QWidget>
+
+namespace ArcMeta {
+
+FlowLayout::FlowLayout(QWidget *parent, int margin, int hSpacing, int vSpacing)
+    : QLayout(parent), m_hSpace(hSpacing), m_vSpace(vSpacing) { setContentsMargins(margin, margin, margin, margin); }
+FlowLayout::~FlowLayout() { QLayoutItem *item; while ((item = takeAt(0))) delete item; }
+void FlowLayout::addItem(QLayoutItem *item) { itemList.append(item); invalidate(); }
+int FlowLayout::horizontalSpacing() const { return m_hSpace >= 0 ? m_hSpace : 4; }
+int FlowLayout::verticalSpacing() const { return m_vSpace >= 0 ? m_vSpace : 4; }
+int FlowLayout::count() const { return itemList.size(); }
+QLayoutItem *FlowLayout::itemAt(int index) const { return itemList.value(index); }
+QLayoutItem *FlowLayout::takeAt(int index) { return (index >= 0 && index < itemList.size()) ? itemList.takeAt(index) : nullptr; }
+Qt::Orientations FlowLayout::expandingDirections() const { return Qt::Orientations(); }
+bool FlowLayout::hasHeightForWidth() const { return true; }
+int FlowLayout::heightForWidth(int width) const { return doLayout(QRect(0, 0, width, 0), true); }
+void FlowLayout::setGeometry(const QRect &rect) { QLayout::setGeometry(rect); doLayout(rect, false); }
+QSize FlowLayout::sizeHint() const { return minimumSize(); }
+QSize FlowLayout::minimumSize() const {
+    QSize size;
+    for (QLayoutItem *item : itemList) size = size.expandedTo(item->minimumSize());
+    size += QSize(2 * contentsMargins().top(), 2 * contentsMargins().top());
+    return size;
+}
+int FlowLayout::doLayout(const QRect &rect, bool testOnly) const {
+    int left, top, right, bottom;
+    getContentsMargins(&left, &top, &right, &bottom);
+    QRect effectiveRect = rect.adjusted(+left, +top, -right, -bottom);
+    int x = effectiveRect.x();
+    int y = effectiveRect.y();
+    int lineHeight = 0;
+    for (QLayoutItem *item : itemList) {
+        int spaceX = horizontalSpacing();
+        int spaceY = verticalSpacing();
+        int nextX = x + item->sizeHint().width() + spaceX;
+        if (nextX - spaceX > effectiveRect.right() && lineHeight > 0) {
+            x = effectiveRect.x();
+            y = y + lineHeight + spaceY;
+            nextX = x + item->sizeHint().width() + spaceX;
+            lineHeight = 0;
+        }
+        if (!testOnly) item->setGeometry(QRect(QPoint(x, y), item->sizeHint()));
+        x = nextX;
+        lineHeight = qMax(lineHeight, item->sizeHint().height());
+    }
+    return y + lineHeight - rect.y() + bottom;
+}
+
+} // namespace ArcMeta
+```
+
+---
+
+#### 7. `src/ui/components/ColorPill.h`
+```cpp
+#pragma once
+#include <QWidget>
+#include <QColor>
+
+namespace ArcMeta {
+
+class ColorPill : public QWidget {
+    Q_OBJECT
+public:
+    explicit ColorPill(const QColor& color, float ratio, QWidget* parent = nullptr);
+    void setData(const QColor& color, float ratio);
+signals:
+    void colorSelected(const QColor& color);
+    void requestSetAsPrimary(const QColor& color);
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void enterEvent(QEnterEvent* event) override;
+    void leaveEvent(QEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+private:
+    QColor m_color;
+    float m_ratio;
+    bool m_hovered = false;
+};
+
+} // namespace ArcMeta
+```
+
+#### 8. `src/ui/components/ColorPill.cpp`
+```cpp
+#include "ColorPill.h"
+#include "../ToolTipOverlay.h"
+#include "../UiHelper.h"
+#include <QPainter>
+#include <QMouseEvent>
+#include <QMenu>
+#include <QClipboard>
+#include <QApplication>
+
+namespace ArcMeta {
+
 ColorPill::ColorPill(const QColor& color, float ratio, QWidget* parent) : QWidget(parent) {
     setFixedSize(16, 16);
     setCursor(Qt::PointingHandCursor);
@@ -138,88 +397,123 @@ void ColorPill::mousePressEvent(QMouseEvent* event) {
     QWidget::mousePressEvent(event);
 }
 
-// --- TagPill 实现 ---
-TagPill::TagPill(const QString& text, QWidget* parent) : QWidget(parent), m_text(text) {
-    setFixedHeight(22);
-    QHBoxLayout* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(8, 0, 4, 0);
-    layout->setSpacing(4);
-    m_label = new QLabel(text, this);
-    m_label->setStyleSheet("color: #EEEEEE; font-size: 12px; border: none; background: transparent;");
-    m_closeBtn = new QPushButton(this);
-    m_closeBtn->setFixedSize(14, 14);
-    m_closeBtn->setCursor(Qt::PointingHandCursor);
-    m_closeBtn->setIcon(UiHelper::getIcon("close", QColor("#B0B0B0"), 12));
-    m_closeBtn->setIconSize(QSize(10, 10));
-    m_closeBtn->setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: #3E3E42; border-radius: 2px; }");
-    layout->addWidget(m_label);
-    layout->addWidget(m_closeBtn);
-    connect(m_closeBtn, &QPushButton::clicked, [this]() { emit deleteRequested(m_text); });
-    setData(text);
-}
+} // namespace ArcMeta
+```
 
-void TagPill::setData(const QString& text) {
-    m_text = text;
-    setProperty("tagText", text);
-    m_label->setText(text);
-    QFontMetrics fm(m_label->font());
-    setFixedWidth(fm.horizontalAdvance(text) + 30);
-}
+---
 
-void TagPill::paintEvent(QPaintEvent*) {
-    QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setBrush(QColor("#2B2B2B"));
-    painter.setPen(QPen(QColor("#3c3c3c"), 1));
-    painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 11, 11);
-}
+#### 9. 精简后的 `src/ui/MetaPanel.h`（仅包含容器与布局控制）
+```cpp
+#pragma once
 
-// --- FlowLayout 实现 ---
-FlowLayout::FlowLayout(QWidget *parent, int margin, int hSpacing, int vSpacing)
-    : QLayout(parent), m_hSpace(hSpacing), m_vSpace(vSpacing) { setContentsMargins(margin, margin, margin, margin); }
-FlowLayout::~FlowLayout() { QLayoutItem *item; while ((item = takeAt(0))) delete item; }
-void FlowLayout::addItem(QLayoutItem *item) { itemList.append(item); invalidate(); }
-int FlowLayout::horizontalSpacing() const { return m_hSpace >= 0 ? m_hSpace : 4; }
-int FlowLayout::verticalSpacing() const { return m_vSpace >= 0 ? m_vSpace : 4; }
-int FlowLayout::count() const { return itemList.size(); }
-QLayoutItem *FlowLayout::itemAt(int index) const { return itemList.value(index); }
-QLayoutItem *FlowLayout::takeAt(int index) { return (index >= 0 && index < itemList.size()) ? itemList.takeAt(index) : nullptr; }
-Qt::Orientations FlowLayout::expandingDirections() const { return Qt::Orientations(); }
-bool FlowLayout::hasHeightForWidth() const { return true; }
-int FlowLayout::heightForWidth(int width) const { return doLayout(QRect(0, 0, width, 0), true); }
-void FlowLayout::setGeometry(const QRect &rect) { QLayout::setGeometry(rect); doLayout(rect, false); }
-QSize FlowLayout::sizeHint() const { return minimumSize(); }
-QSize FlowLayout::minimumSize() const {
-    QSize size;
-    for (QLayoutItem *item : itemList) size = size.expandedTo(item->minimumSize());
-    size += QSize(2 * contentsMargins().top(), 2 * contentsMargins().top());
-    return size;
-}
-int FlowLayout::doLayout(const QRect &rect, bool testOnly) const {
-    int left, top, right, bottom;
-    getContentsMargins(&left, &top, &right, &bottom);
-    QRect effectiveRect = rect.adjusted(+left, +top, -right, -bottom);
-    int x = effectiveRect.x();
-    int y = effectiveRect.y();
-    int lineHeight = 0;
-    for (QLayoutItem *item : itemList) {
-        int spaceX = horizontalSpacing();
-        int spaceY = verticalSpacing();
-        int nextX = x + item->sizeHint().width() + spaceX;
-        if (nextX - spaceX > effectiveRect.right() && lineHeight > 0) {
-            x = effectiveRect.x();
-            y = y + lineHeight + spaceY;
-            nextX = x + item->sizeHint().width() + spaceX;
-            lineHeight = 0;
-        }
-        if (!testOnly) item->setGeometry(QRect(QPoint(x, y), item->sizeHint()));
-        x = nextX;
-        lineHeight = qMax(lineHeight, item->sizeHint().height());
-    }
-    return y + lineHeight - rect.y() + bottom;
-}
+#include <QFrame>
+#include <QLabel>
+#include <QVBoxLayout>
+#include <QScrollArea>
+#include <QTimer>
+#include "components/ElasticEdit.h"
+#include "components/TagPill.h"
+#include "components/FlowLayout.h"
+#include "components/ColorPill.h"
 
-// --- MetaPanel 实现 ---
+namespace ArcMeta {
+
+class MetaPanel : public QFrame {
+    Q_OBJECT
+public:
+    explicit MetaPanel(QWidget* parent = nullptr);
+    ~MetaPanel() override = default;
+
+    void updateInfo(const QString& name, const QString& type, const QString& size,
+                    const QString& ctime, const QString& mtime, const QString& atime,
+                    const QString& path, bool encrypted, int width = 0, int height = 0);
+
+    void setSelectedPaths(const QStringList& paths) { m_selectedPaths = paths; }
+    void setPalettes(const QVector<QPair<QColor, float>>& palette);
+    void setTags(const QStringList& tags);
+    void setNote(const QString& note);
+    void setNote(const std::wstring& note);
+    void setURL(const QString& url);
+    void setURL(const std::wstring& url);
+    void setCategory(const QString& category);
+
+    // 兼容层占位
+    void setRating(int rating) { Q_UNUSED(rating); }
+    void setColor(const std::wstring& color) { Q_UNUSED(color); }
+    void setPinned(bool pinned) { Q_UNUSED(pinned); }
+
+signals:
+    void metadataChanged(int rating, const std::wstring& color);
+    void noteEdited(const QStringList& paths, const QString& newNote);
+    void linkEdited(const QStringList& paths, const QString& newLink);
+    void primaryColorChanged(const QString& path, const QColor& color);
+    void tagsChanged(const QStringList& paths, const QStringList& tags);
+    void searchByColor(const QColor& color);
+    void renameRequested(const QString& oldPath, const QString& newPath);
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+
+private:
+    void initUi();
+    void adjustFlowHeights();
+    void addInfoRow(const QString& label, QLabel*& valueLabel);
+    QFrame* createSeparator();
+
+    QVBoxLayout* m_mainLayout = nullptr;
+    QScrollArea* m_scrollArea = nullptr;
+    QWidget* m_container = nullptr;
+    QVBoxLayout* m_containerLayout = nullptr;
+
+    ElasticEdit* m_nameEdit = nullptr;
+    QLabel* lblType = nullptr, *lblSize = nullptr, *lblDimensions = nullptr;
+    QLabel* lblCtime = nullptr, *lblMtime = nullptr, *lblAtime = nullptr;
+    ElasticEdit* m_pathEdit = nullptr;
+    QLabel* lblEncrypted = nullptr;
+
+    QWidget* m_paletteBox = nullptr;
+    FlowLayout* m_paletteFlowLayout = nullptr;
+
+    QWidget* m_tagBox = nullptr;
+    QWidget* m_tagContainer = nullptr;
+    FlowLayout* m_tagFlowLayout = nullptr;
+    ElasticEdit* m_tagEdit = nullptr;
+
+    ElasticEdit* m_noteEdit = nullptr;
+    ElasticEdit* m_linkEdit = nullptr;
+    ElasticEdit* m_categoryEdit = nullptr;
+
+    QStringList m_selectedPaths;
+    QList<TagPill*> m_tagPool;
+    QList<ColorPill*> m_colorPool;
+    QTimer* m_adjustTimer = nullptr;
+    bool m_isInternalUpdating = false;
+
+private slots:
+    void onTagAdded();
+    void onTagDeleted(const QString& text);
+    void setAsPrimaryColor(const QColor& color);
+};
+
+} // namespace ArcMeta
+```
+
+#### 10. 精简后的 `src/ui/MetaPanel.cpp`
+```cpp
+#include "MetaPanel.h"
+#include "SvgIcons.h"
+#include "ToolTipOverlay.h"
+#include "UiHelper.h"
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QFileInfo>
+#include <QLabel>
+#include <QRegularExpressionValidator>
+
+namespace ArcMeta {
+
 MetaPanel::MetaPanel(QWidget* parent) : QFrame(parent) {
     setObjectName("MetadataContainer");
     setAttribute(Qt::WA_StyledBackground, true);
@@ -228,7 +522,7 @@ MetaPanel::MetaPanel(QWidget* parent) : QFrame(parent) {
     m_mainLayout = new QVBoxLayout(this);
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_mainLayout->setSpacing(0);
-    
+
     m_adjustTimer = new QTimer(this);
     m_adjustTimer->setSingleShot(true);
     m_adjustTimer->setInterval(50);
@@ -261,17 +555,17 @@ void MetaPanel::initUi() {
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
 
-    m_container = new QWidget(m_scrollArea); 
-    m_containerLayout = new QVBoxLayout(m_container); 
+    m_container = new QWidget(m_scrollArea);
+    m_containerLayout = new QVBoxLayout(m_container);
     m_containerLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
-    m_containerLayout->setContentsMargins(10, 10, 10, 10); 
+    m_containerLayout->setContentsMargins(10, 10, 10, 10);
     m_containerLayout->setSpacing(8);
-    
+
     m_paletteBox = new QWidget(m_container);
     m_paletteBox->setObjectName("PaletteBox");
     m_paletteBox->setMinimumHeight(28);
     m_paletteBox->setStyleSheet("QWidget#PaletteBox { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; }");
-    
+
     m_paletteFlowLayout = new FlowLayout(m_paletteBox, 6, 6, 6);
     m_paletteFlowLayout->setContentsMargins(10, 6, 10, 6);
     m_containerLayout->addWidget(m_paletteBox);
@@ -298,7 +592,7 @@ void MetaPanel::initUi() {
     QVBoxLayout* tagL = new QVBoxLayout(m_tagBox);
     tagL->setContentsMargins(0, 0, 0, 0);
     tagL->setSpacing(8);
-    
+
     m_tagContainer = new QWidget(m_tagBox);
     m_tagFlowLayout = new FlowLayout(m_tagContainer, 0, 4, 4);
     tagL->addWidget(m_tagContainer);
@@ -325,16 +619,16 @@ void MetaPanel::initUi() {
     addInfoRow("创建时间", lblCtime);
     addInfoRow("修改时间", lblMtime);
     addInfoRow("访问时间", lblAtime);
-    
-    QWidget* pathRow = new QWidget(m_container); 
+
+    QWidget* pathRow = new QWidget(m_container);
     QHBoxLayout* pathL = new QHBoxLayout(pathRow);
-    pathL->setContentsMargins(0, 2, 0, 2); 
+    pathL->setContentsMargins(0, 2, 0, 2);
     pathL->setSpacing(8);
     QLabel* pathKey = new QLabel("物理路径", pathRow);
     pathKey->setFixedWidth(80);
     pathKey->setStyleSheet("font-size: 12px; color: #888888;");
     pathL->addWidget(pathKey, 0, Qt::AlignTop);
-    
+
     m_pathEdit = new ElasticEdit(pathRow);
     m_pathEdit->setReadOnly(true);
     m_pathEdit->setStyleSheet("QTextEdit { background: transparent; border: none; padding: 0; font-size: 12px; color: #CCCCCC; }");
@@ -349,23 +643,23 @@ void MetaPanel::initUi() {
 }
 
 void MetaPanel::addInfoRow(const QString& label, QLabel*& valueLabel) {
-    QWidget* row = new QWidget(m_container); 
-    QHBoxLayout* rl = new QHBoxLayout(row); 
-    rl->setContentsMargins(0, 2, 0, 2); 
-    rl->setSpacing(8); 
-    
-    QLabel* kl = new QLabel(label, row); 
+    QWidget* row = new QWidget(m_container);
+    QHBoxLayout* rl = new QHBoxLayout(row);
+    rl->setContentsMargins(0, 2, 0, 2);
+    rl->setSpacing(8);
+
+    QLabel* kl = new QLabel(label, row);
     kl->setFixedWidth(80);
-    kl->setStyleSheet("font-size: 12px; color: #888888;"); 
+    kl->setStyleSheet("font-size: 12px; color: #888888;");
     rl->addWidget(kl, 0, Qt::AlignTop);
 
-    valueLabel = new QLabel("-", row); 
-    valueLabel->setWordWrap(true); 
+    valueLabel = new QLabel("-", row);
+    valueLabel->setWordWrap(true);
     valueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     valueLabel->setStyleSheet("font-size: 12px; color: #CCCCCC; line-height: 1.5;");
-    valueLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop); 
-    rl->addWidget(valueLabel, 1); 
-    
+    valueLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    rl->addWidget(valueLabel, 1);
+
     m_containerLayout->addWidget(row);
 }
 
@@ -388,7 +682,7 @@ void MetaPanel::onTagAdded() {
 
 void MetaPanel::onTagDeleted(const QString& text) {
     if (m_selectedPaths.isEmpty()) return;
-    
+
     for (int i = 0; i < m_tagFlowLayout->count(); ++i) {
         QLayoutItem* item = m_tagFlowLayout->itemAt(i);
         TagPill* pill = qobject_cast<TagPill*>(item->widget());
@@ -414,8 +708,8 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
         if (m_container->width() != viewportW) {
             m_container->setFixedWidth(viewportW);
         }
-        
-        int maxW = viewportW - 20; 
+
+        int maxW = viewportW - 20;
         if (maxW > 50) {
             auto syncWidthAndHeight = [maxW](ElasticEdit* edit) {
                 if (edit && edit->width() != maxW) {
@@ -429,17 +723,17 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
             syncWidthAndHeight(m_linkEdit);
             syncWidthAndHeight(m_tagEdit);
             syncWidthAndHeight(m_categoryEdit);
-            
+
             int pathW = maxW - 88;
             if (m_pathEdit && pathW > 0) {
                 m_pathEdit->setFixedWidth(pathW);
                 m_pathEdit->adjustHeight();
             }
-            
+
             if (m_paletteBox) m_paletteBox->setFixedWidth(maxW);
             if (m_tagBox) m_tagBox->setFixedWidth(maxW);
             if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
-            
+
             adjustFlowHeights();
             m_container->adjustSize();
         }
@@ -474,24 +768,24 @@ void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s,
                             const QString& ct, const QString& mt, const QString& at,
                             const QString& p, bool e, int width, int height) {
     m_isInternalUpdating = true;
-    
+
     QFileInfo info(n);
     m_nameEdit->setPlainText(info.completeBaseName());
     m_nameEdit->adjustHeight();
     m_nameEdit->setProperty("oldPath", p);
     m_nameEdit->setProperty("suffix", info.suffix());
-    
+
     lblType->setText(t);
     lblSize->setText(s);
     lblCtime->setText(ct);
     lblMtime->setText(mt);
     lblAtime->setText(at);
-    
+
     m_pathEdit->setPlainText(p);
     m_pathEdit->adjustHeight();
 
     lblEncrypted->setText(e ? "已加密" : "未加密");
-    
+
     if (width > 0 && height > 0) {
         lblDimensions->setText(QString("%1 x %2 像素").arg(width).arg(height));
         if (lblDimensions->parentWidget()) lblDimensions->parentWidget()->show();
@@ -553,9 +847,9 @@ void MetaPanel::setURL(const std::wstring& url) {
     setURL(QString::fromStdWString(url));
 }
 
-void MetaPanel::setCategory(const QString& category) { 
+void MetaPanel::setCategory(const QString& category) {
     m_isInternalUpdating = true;
-    m_categoryEdit->setPlainText(category); 
+    m_categoryEdit->setPlainText(category);
     m_categoryEdit->adjustHeight();
     if (m_container) m_container->adjustSize();
     m_isInternalUpdating = false;
@@ -609,7 +903,7 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     } else if (watched == m_nameEdit && event->type() == QEvent::FocusOut) {
         QString oldPath = m_nameEdit->property("oldPath").toString();
         QString newName = m_nameEdit->toPlainText().trimmed();
-        
+
         static const QRegularExpression illegalRegex("[\\\\/:*?\"<>|]");
         newName.remove(illegalRegex);
         m_nameEdit->setPlainText(newName);
@@ -620,7 +914,7 @@ bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
             if (newName != oldInfo.completeBaseName()) {
                 QString newPath = oldInfo.absolutePath() + "/" + newName + (suffix.isEmpty() ? "" : "." + suffix);
                 newPath = QDir::toNativeSeparators(newPath);
-                
+
                 if (QFile::exists(newPath)) {
                     m_nameEdit->setPlainText(oldInfo.completeBaseName());
                     return true;
@@ -641,3 +935,31 @@ void MetaPanel::setAsPrimaryColor(const QColor& color) {
 }
 
 } // namespace ArcMeta
+```
+
+---
+
+### CMake 物理文件注册更新
+
+在 `CMakeLists.txt` 的 `set(SOURCES ...)` 中加入新增的独立组件文件：
+
+```cmake
+set(SOURCES
+    ...
+    src/ui/components/ElasticEdit.h
+    src/ui/components/ElasticEdit.cpp
+    src/ui/components/TagPill.h
+    src/ui/components/TagPill.cpp
+    src/ui/components/FlowLayout.h
+    src/ui/components/FlowLayout.cpp
+    src/ui/components/ColorPill.h
+    src/ui/components/ColorPill.cpp
+    src/ui/MetaPanel.h
+    src/ui/MetaPanel.cpp
+    ...
+)
+```
+
+这样修改后，元数据面板在物理架构上彻底达到了 **100% 模块化与单一职责标准**。
+
+// ===================|===================
