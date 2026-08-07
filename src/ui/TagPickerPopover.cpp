@@ -309,21 +309,32 @@ void TagPickerPopover::toggleSidebar() {
 }
 
 void TagPickerPopover::setSidebarVisible(bool visible) {
+    // 状态未改变，直接返回
+    if (m_sidebarWidget->isVisible() == visible) return;
+
     m_sidebarWidget->setVisible(visible);
     m_dividerLine->setVisible(visible);
     
+    // 侧边栏固定宽度为 120px
+    const int sidebarWidth = 120;
+
     if (visible) {
-        setMinimumWidth(300);
+        setMinimumWidth(320);
         setMaximumWidth(800);
-        resize(qMax(300, width()), height());
-        // 展开侧边栏时，自动激活或高亮当前选中的左侧分组以确保展现列表数据
+        // 展开时，顶层窗口宽度在当前基础上精准增加 120px，给左侧栏腾出空间！
+        resize(width() + sidebarWidth, height());
         updateSidebarHighlight();
     } else {
-        setMinimumWidth(180);
+        setMinimumWidth(200);
         setMaximumWidth(800);
-        resize(qMax(180, width()), height());
+        // 折叠时，顶层窗口宽度精准扣减 120px，收缩窗口！
+        resize(qMax(200, width() - sidebarWidth), height());
     }
     
+    // 强行刷新窗口布局树
+    updateGeometry();
+    adjustSize();
+
     AppConfig::instance().setValue("TagPicker/SidebarVisible", visible);
     AppConfig::instance().sync();
 }
