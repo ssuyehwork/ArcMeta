@@ -17,6 +17,7 @@
 #include "FramelessDialog.h"
 #include <QTimer>
 #include "TagManagerController.h"
+#include "../core/CoreController.h"
 
 using namespace ArcMeta::Style;
 
@@ -28,7 +29,23 @@ TagManagerView::TagManagerView(QWidget* parent) : QWidget(parent) {
         // 当数据库改变时，被动刷新视图
         QMetaObject::invokeMethod(this, "refresh", Qt::QueuedConnection);
     });
+
+    // 绑定系统初始化完成信号：后台 SQLite 元数据一载入完成，自动刷新标签页面
+    connect(&CoreController::instance(), &CoreController::initializationFinished, this, [this]() {
+        QMetaObject::invokeMethod(this, "refresh", Qt::QueuedConnection);
+    });
+
+    // 绑定元数据变更信号：标签增加/修改/删除时，自动同步刷新标签页面
+    connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this]() {
+        QMetaObject::invokeMethod(this, "refresh", Qt::QueuedConnection);
+    });
+
     initUi();
+}
+
+void TagManagerView::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    refresh();
 }
 
 void TagManagerView::initUi() {
