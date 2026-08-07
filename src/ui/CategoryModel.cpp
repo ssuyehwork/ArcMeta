@@ -33,7 +33,6 @@ void CategoryModel::deferredRefresh() {
 void CategoryModel::refresh() {
     m_isFirstLoad = false;
 
-    // 获取当前内存中的最新缓存计数，进行树构建时的第一级初始化，杜绝 (0) 频闪副作用
     auto sysCounts = CategoryRepo::getSystemCounts();
     auto catCountsVec = CategoryRepo::getCounts();
     QMap<int, int> catCounts;
@@ -42,11 +41,11 @@ void CategoryModel::refresh() {
     }
 
     beginResetModel();
-    
     removeRows(0, rowCount());
     
     QStandardItem* root = invisibleRootItem();
 
+    // 1. 渲染系统逻辑桶 (全部数据、未分类、未标签、最近访问、标签管理、回收站)
     if (m_type == System || m_type == Both) {
         auto addSystemItem = [&](const QString& name, const QString& type, const QString& icon, const QString& color, int sysId) {
             int count = sysCounts.value(type, 0);
@@ -68,13 +67,15 @@ void CategoryModel::refresh() {
         addSystemItem("回收站", "trash", "trash", "#e74c3c", -8);
     }
 
+    // 2. 渲染“快速访问”分组节点（仅承载手动固定的快捷镜像）
     QStandardItem* favGroup = nullptr;
     if (m_type == Both || m_type == User) {
         favGroup = new QStandardItem("快速访问");
         favGroup->setData("快速访问", NameRole);
         favGroup->setSelectable(false);
         favGroup->setEditable(false);
-        favGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#FFFFFF"), 16));
+        // 物理更新：图标从 "folder_filled" 替换为 "zap_filled"
+        favGroup->setIcon(UiHelper::getIcon("zap_filled", QColor("#F1C40F"), 16)); 
         
         QFont font = favGroup->font();
         font.setBold(true);
@@ -82,11 +83,29 @@ void CategoryModel::refresh() {
         favGroup->setForeground(QColor("#FFFFFF"));
     }
 
+    // 3. 构建一等公民专属主标题节点：“分类 (子分类数)”
+    QStandardItem* catGroup = nullptr;
+    if (m_type == Both || m_type == User) {
+        catGroup = new QStandardItem();
+        catGroup->setData("category_root_group", TypeRole);
+        catGroup->setData("分类", NameRole);
+        catGroup->setData(CAT_GROUP_SYS_ID, IdRole);
+        catGroup->setSelectable(false);
+        catGroup->setEditable(false);
+        catGroup->setIcon(UiHelper::getIcon("category", QColor("#378ADD"), 16));
+
+        QFont font = catGroup->font();
+        font.setBold(true);
+        catGroup->setFont(font);
+        catGroup->setForeground(QColor("#FFFFFF"));
+    }
+
     if (m_type == User || m_type == Both) {
         auto categories = CategoryRepo::getAll();
         QMap<int, QStandardItem*> itemMap;
         QMap<int, Category> catMap;
 
+        // 构建内部节点映射表
         for (const auto& cat : categories) {
             catMap[cat.id] = cat;
             int id = cat.id;
@@ -113,7 +132,7 @@ void CategoryModel::refresh() {
             itemMap[id] = item;
         }
 
-        // 1. 优先渲染托管库根分类 (parentId == 0 && ArcMeta.Library_) 到 root 中间位置
+        // 4. 渲染物理托管库根分类 (ArcMeta.Library_) 到 root
         for (const auto& cat : categories) {
             int id = cat.id;
             QStandardItem* item = itemMap[id];
@@ -129,12 +148,13 @@ void CategoryModel::refresh() {
             }
         }
 
-        // 2. 渲染“快速访问”分组节点
+        // 5. 挂载“快速访问”分组节点
         if (favGroup) {
             root->appendRow(favGroup);
         }
 
-        // 3. 渲染用户自定义分类树 (将非 ArcMeta.Library_ 的顶级自定义分类作为“快速访问”的子树展示)
+        // 6. 【一等公民架构重构】：统计并挂载所有用户自定义顶级分类至“分类”主标题下
+        int userTopCatCount = 0;
         for (const auto& cat : categories) {
             int id = cat.id;
             QStandardItem* item = itemMap[id];
@@ -143,8 +163,9 @@ void CategoryModel::refresh() {
             if (parentId == 0) {
                 QString name = QString::fromStdWString(cat.name);
                 if (!name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
-                    if (favGroup) {
-                        favGroup->appendRow(item);
+                    userTopCatCount++;
+                    if (catGroup) {
+                        catGroup->appendRow(item); // 物理强行挂载至“分类”主节点下方
                     } else {
                         root->appendRow(item);
                     }
@@ -152,7 +173,13 @@ void CategoryModel::refresh() {
             }
         }
 
-        // 4. 渲染置顶的镜像分类 (原快速访问镜像)
+        // 设置主标题文字，精准反映包含的子分类总个数
+        if (catGroup) {
+            catGroup->setText(QString("分类 (%1)").arg(userTopCatCount));
+            root->appendRow(catGroup);
+        }
+
+        // 7. 挂载已手固定的“快速访问”快捷镜像
         if (favGroup) {
             for (const auto& cat : categories) {
                 if (cat.pinned) {
@@ -204,7 +231,10 @@ void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const 
             QString name = item->data(NameRole).toString();
             int id = item->data(IdRole).toInt();
 
-            if (id < 0) { 
+            if (id == CAT_GROUP_SYS_ID) {
+                // 精准刷新“分类”主标题后的子分类总个数
+                item->setText(QString("分类 (%1)").arg(item->rowCount()));
+            } else if (id < 0) { 
                 int count = sysCounts.value(type, 0);
                 QString newText = QString("%1 (%2)").arg(name).arg(count);
                 if (item->text() != newText) {
@@ -245,9 +275,11 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
 
         QString type = index.data(TypeRole).toString();
         int id = index.data(IdRole).toInt();
+
+        // 禁改系统主标题
+        if (id == CAT_GROUP_SYS_ID) return false;
         
         if (type == "category" && id > 0) {
-            // 在主线程获取数据，避免多线程访问冲突
             auto categories = CategoryRepo::getAll();
             Category targetCat;
             bool found = false;
@@ -260,7 +292,6 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
             }
             if (!found) return false;
 
-            // 限制顶级资源库重命名
             if (!targetCat.physicalPath.empty()) {
                 QString oldPath = QString::fromStdWString(targetCat.physicalPath);
                 QFileInfo oldInfo(oldPath);
@@ -269,7 +300,6 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
                 }
             }
 
-            // 提交给线程池异步执行重命名和数据库写入
             (void)QtConcurrent::run([this, targetCat, newName]() mutable {
                 bool renameSuccess = true;
                 bool physicalRenamed = false;
@@ -295,12 +325,10 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
                     CategoryRepo::update(targetCat);
                     
                     if (physicalRenamed) {
-                        // 【核心同步】：级联通知元数据管理器将原文件夹下所有子孙项的数据库绝对路径以及倒排索引完美重构
                         MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
                     }
                 }
 
-                // 在主线程安全重新刷新 UI 树
                 QMetaObject::invokeMethod(this, [this]() {
                     refresh();
                 }, Qt::QueuedConnection);
@@ -332,13 +360,11 @@ bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction actio
         if (!parentItem) return false;
         
         QString type = parentItem->data(TypeRole).toString();
-        QString name = parentItem->data(NameRole).toString();
         
-        if (type != "category" && type != "bookmark") {
+        if (type != "category" && type != "bookmark" && type != "category_root_group") {
             return false; 
         }
 
-        // 🚨 阻止拖拽子分类嵌套入托管库根分类 (parentId == 0 && !physicalPath.empty())
         if (!mimeData->hasUrls() && !mimeData->hasFormat("text/plain")) {
             int parentId = parentItem->data(IdRole).toInt();
             Category parentCat = CategoryRepo::getById(parentId);
