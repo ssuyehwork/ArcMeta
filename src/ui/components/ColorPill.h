@@ -1,6 +1,10 @@
 #pragma once
 #include <QWidget>
 #include <QColor>
+#include <QPaintEvent>
+#include <QEvent>
+#include <QEnterEvent>
+#include <QMouseEvent>
 
 namespace ArcMeta {
 

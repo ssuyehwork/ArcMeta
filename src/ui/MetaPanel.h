@@ -5,6 +5,9 @@
 #include <QVBoxLayout>
 #include <QScrollArea>
 #include <QTimer>
+#include <QEvent>
+#include <QResizeEvent>
+#include <QShowEvent>
 #include "components/ElasticEdit.h"
 #include "components/TagPill.h"
 #include "components/FlowLayout.h"

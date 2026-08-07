@@ -2,6 +2,7 @@
 #include <QWidget>
 #include <QLabel>
 #include <QPushButton>
+#include <QPaintEvent>
 
 namespace ArcMeta {
 

@@ -1,5 +1,7 @@
 #pragma once
 #include <QTextEdit>
+#include <QKeyEvent>
+#include <QResizeEvent>
 
 namespace ArcMeta {
 
