@@ -178,7 +178,8 @@ bool AssetImporter::importDirectoryRecursive(const QString& srcDir,
     } 
  
     Category cat; 
-    cat.parentId = parentCatId; 
+    // 🚨 安全下限防护：若 parentCatId < 0（如 -2），自动修正为 0（顶级分类），防止生成幽灵隐形分类
+    cat.parentId = (parentCatId < 0) ? 0 : parentCatId; 
     cat.name = dirInfo.fileName().toStdWString(); 
     cat.color = CategoryRepo::getDefaultColor(); 
     if (!CategoryRepo::add(cat)) return false; 

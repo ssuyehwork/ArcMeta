@@ -1377,8 +1377,8 @@ void CategoryPanel::initUi() {
     connect(m_categoryTree, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& proxyIndex) {
         QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         // 2026-06-xx 彻底重构：物理递归遍历 + 分类镜像创建 + SHA-256 物理加固
-        // 核心规则：文件夹拖入空白/分类均递归建树；文件入空白归未分类，入分类归该分类。
-        int targetCatId = CategoryRepo::UNCATEGORIZED_CAT_ID; // 默认目标分类 ID 为 -2 (未分类)
+        // 🚨 修正：拖到空白处时，目标分类 ID 必须为 0（顶级根分类），绝不能是 -2！
+        int targetCatId = 0; 
 
         if (index.isValid()) {
             QString type = index.data(TypeRole).toString();
@@ -1397,15 +1397,11 @@ void CategoryPanel::initUi() {
             // 拖到具体的子分类上 (ID > 0)
             if (type == "category" && index.data(IdRole).toInt() > 0) {
                 targetCatId = index.data(IdRole).toInt();
-            } 
-            // 拖到根资源库上 (如 ArcMeta.Library_D)
-            else if (index.data(IdRole).toInt() == 0 || name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
-                targetCatId = CategoryRepo::UNCATEGORIZED_CAT_ID; // -2 未分类
+            } else {
+                targetCatId = 0; // 其余全部归为顶级分类 (0)
             }
         } else {
-            // 🚨 关键补充：当 index.isValid() == false 时，代表拖到了侧边栏树的【空白处】！
-            // 目标分类 ID 显式指定为 UNCATEGORIZED_CAT_ID (-2，未分类)
-            targetCatId = CategoryRepo::UNCATEGORIZED_CAT_ID;
+            targetCatId = 0; // 拖到空白处归为顶级分类 (0)
         }
 
         if (!paths.isEmpty()) {
