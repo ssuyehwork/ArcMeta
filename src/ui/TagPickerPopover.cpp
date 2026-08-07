@@ -93,9 +93,8 @@ void TagItemButton::paintEvent(QPaintEvent*) {
 // TagPickerPopover 实现
 // ============================================================================
 TagPickerPopover::TagPickerPopover(QWidget* parent)
-    : QWidget(nullptr, Qt::FramelessWindowHint | Qt::Tool) // 两个界面必须彻底独立，继承 QWidget 且无 Parent，带有 Qt::Tool 属性以保障不占用任务栏和正确的层级
+    : QWidget(parent, Qt::FramelessWindowHint | Qt::SubWindow) // 绝不能用 nullptr！必须传入 parent (即 CategoryPresetTagsDialog)，使其成为模态对话框内的合法子控件，彻底绕过 Windows 模态独占死锁保护
 {
-    Q_UNUSED(parent);
     setAttribute(Qt::WA_TranslucentBackground);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true); // 追踪鼠标以调整大小和改变指针样式
@@ -374,29 +373,22 @@ void TagPickerPopover::showAt(const QPoint& globalPos) {
     refreshSidebar();
     refreshList();
     
-    // 两个界面必须彻底独立，所以这里使用绝对屏幕坐标进行精确放置，不依赖 parentWidget
-    int x = globalPos.x();
-    int y = globalPos.y();
+    // 转换为相对于主对话框的局部坐标，100% 绕过 Windows 系统的模态锁阻拦和警告音
+    if (parentWidget()) {
+        QPoint localPos = parentWidget()->mapFromGlobal(globalPos);
+        int x = localPos.x();
+        int y = localPos.y() + 5; // 紧贴在点击位置下方 5px
 
-    // 限制在当前所在的屏幕矩形内，防止窗口飞出可见屏幕之外
-    QScreen* screen = QGuiApplication::screenAt(globalPos);
-    if (!screen) {
-        screen = QGuiApplication::primaryScreen();
-    }
-    if (screen) {
-        QRect screenGeometry = screen->geometry();
-        if (x + width() > screenGeometry.right() - 10) {
-            x = screenGeometry.right() - width() - 10;
+        // 防止超出主对话框边界
+        if (x + width() > parentWidget()->width()) {
+            x = parentWidget()->width() - width() - 10;
         }
-        if (y + height() > screenGeometry.bottom() - 10) {
-            y = screenGeometry.bottom() - height() - 10;
+        if (y + height() > parentWidget()->height()) {
+            y = localPos.y() - height() - 5; // 底部空间不足时向上弹出
         }
-        if (x < screenGeometry.left() + 10) x = screenGeometry.left() + 10;
-        if (y < screenGeometry.top() + 10) y = screenGeometry.top() + 10;
+        move(qMax(10, x), qMax(10, y));
     }
     
-    move(x, y);
-
     show();
     raise(); 
     m_searchEdit->setFocus();
