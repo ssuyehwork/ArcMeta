@@ -2011,7 +2011,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
                 // 异步多线程执行物理安全删除与数据库记录清除 (双轨隔离)
                 (void)QtConcurrent::run([targetPaths, diskTrashItems, action, weakThis, weakProgress]() {
-                    int total = targetPaths.size() + diskTrashItems.size();
+                    int total = static_cast<int>(targetPaths.size() + diskTrashItems.size());
                     int count = 0;
 
                     // A. 处理常规项目 (资源库托管或非回收站物理文件)
