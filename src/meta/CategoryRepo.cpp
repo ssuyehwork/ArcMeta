@@ -1272,7 +1272,21 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     res["recently_visited"] = s_recentlyVisitedCount.load();
     res["untagged"] = s_untaggedCount.load();
     res["uncategorized"] = s_uncategorizedCount.load();
-    res["trash"] = s_trashCount.load();
+    
+    // 双轨隔离：汇总资源库垃圾箱计数和所有磁盘独立回收站计数
+    int diskTrashCount = 0;
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    for (sqlite3* db : dbs) {
+        sqlite3_stmt* stmt = nullptr;
+        const char* sql = "SELECT COUNT(*) FROM disk_trash";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                diskTrashCount += sqlite3_column_int(stmt, 0);
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+    res["trash"] = s_trashCount.load() + diskTrashCount;
     return res;
 }
 

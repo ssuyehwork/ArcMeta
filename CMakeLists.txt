@@ -64,6 +64,8 @@ set(SOURCES
     src/core/DiskScanService.h
     src/core/CategoryLoadService.cpp
     src/core/CategoryLoadService.h
+    src/core/DiskTrashService.cpp
+    src/core/DiskTrashService.h
     src/core/SyncStatusService.cpp
     src/core/SyncStatusService.h
     src/core/AutoImportManager.cpp

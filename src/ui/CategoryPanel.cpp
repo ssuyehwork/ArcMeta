@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "CategoryModel.h"
 #include "ContentPanel.h"
+#include "../core/DiskTrashService.h"
 #include "ColorPicker.h"
 #include "CategoryFilterProxyModel.h"
 #include "CategoryLockDialog.h"
@@ -909,14 +910,40 @@ void CategoryPanel::onEmptyTrash() {
     // 1. 获取回收站内所有 FID
     // 物理修复：明确作用域标识符 CategoryRepo::TRASH_CATEGORY_ID
     std::vector<std::string> trashItems = CategoryRepo::getFolderIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
-    if (trashItems.empty()) {
+    
+    // 双轨回收站：检测是否有物理磁盘删除项目
+    bool hasDiskTrash = false;
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    for (sqlite3* db : dbs) {
+        sqlite3_stmt* stmt = nullptr;
+        const char* sql = "SELECT COUNT(*) FROM disk_trash";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                if (sqlite3_column_int(stmt, 0) > 0) hasDiskTrash = true;
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    if (trashItems.empty() && !hasDiskTrash) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站已空", 1000);
         return;
     }
 
-    // 2. 物理彻底删除
-    if (CategoryRepo::permanentlyDeleteBatch(trashItems)) {
+    // 2. 物理彻底删除 (双轨隔离清空)
+    bool ok1 = true;
+    if (!trashItems.empty()) {
+        ok1 = CategoryRepo::permanentlyDeleteBatch(trashItems);
+    }
+    bool ok2 = DiskTrashService::emptyDiskTrash();
+
+    if (ok1 && ok2) {
         m_categoryModel->refresh();
+        // 强制刷新当前内容面板以更新视图
+        MainWindow* win = qobject_cast<MainWindow*>(window());
+        if (win && win->findChild<ContentPanel*>()) {
+            win->findChild<ContentPanel*>()->refreshAll();
+        }
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e74c3c;'>[OK] 已清空回收站</b>", 1500, ErrorRed);
     }
 }
@@ -1137,14 +1164,40 @@ void CategoryPanel::onRestoreAllFromTrash() {
     // 1. 获取回收站内所有 FID
     // 物理修复：明确作用域标识符 CategoryRepo::TRASH_CATEGORY_ID
     std::vector<std::string> trashItems = CategoryRepo::getFolderIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
-    if (trashItems.empty()) {
+    
+    // 双轨回收站：检测是否有物理磁盘删除项目
+    bool hasDiskTrash = false;
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    for (sqlite3* db : dbs) {
+        sqlite3_stmt* stmt = nullptr;
+        const char* sql = "SELECT COUNT(*) FROM disk_trash";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                if (sqlite3_column_int(stmt, 0) > 0) hasDiskTrash = true;
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    if (trashItems.empty() && !hasDiskTrash) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站内无项目", 1000);
         return;
     }
 
-    // 2. 物理还原至未分类
-    if (CategoryRepo::restoreFromTrashBatch(trashItems)) {
+    // 2. 物理还原至未分类 (双轨分流还原)
+    bool ok1 = true;
+    if (!trashItems.empty()) {
+        ok1 = CategoryRepo::restoreFromTrashBatch(trashItems);
+    }
+    bool ok2 = DiskTrashService::restoreAllDiskTrash();
+
+    if (ok1 && ok2) {
         m_categoryModel->refresh();
+        // 强制刷新当前内容面板以更新视图
+        MainWindow* win = qobject_cast<MainWindow*>(window());
+        if (win && win->findChild<ContentPanel*>()) {
+            win->findChild<ContentPanel*>()->refreshAll();
+        }
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#2ecc71;'>[OK] 已还原全部项目</b>", 1500, QColor("#2ecc71"));
     }
 }
