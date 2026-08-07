@@ -22,6 +22,14 @@ public:
         return WindowsShellThumbnailProvider::getFileIcon(filePath, size);
     }
 
+    static inline QIcon getFileIconFast(const QString& filePath, bool isDir, const QString& suffix) {
+        return WindowsShellThumbnailProvider::getFileIconFast(filePath, isDir, suffix);
+    }
+
+    static inline bool isIconCached(const QString& filePath, bool isDir, const QString& suffix) {
+        return WindowsShellThumbnailProvider::isIconCached(filePath, isDir, suffix);
+    }
+
     static inline QImage getShellThumbnail(const QString& path, int size) {
         return WindowsShellThumbnailProvider::getShellThumbnail(path, size);
     }

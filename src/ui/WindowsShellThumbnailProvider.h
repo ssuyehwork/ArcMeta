@@ -29,6 +29,8 @@ public:
     static WindowsShellThumbnailProvider& instance();
 
     static QIcon getFileIcon(const QString& filePath, int size = 18);
+    static QIcon getFileIconFast(const QString& filePath, bool isDir, const QString& suffix);
+    static bool isIconCached(const QString& filePath, bool isDir, const QString& suffix);
     static QImage getShellThumbnail(const QString& path, int size);
 
 signals:

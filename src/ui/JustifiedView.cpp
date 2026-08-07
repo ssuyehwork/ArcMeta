@@ -124,8 +124,12 @@ QModelIndex JustifiedView::indexAt(const QPoint& point) const {
 }
 
 void JustifiedView::dataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight, const QList<int>& roles) {
-    if (roles.isEmpty() || roles.contains(m_aspectRatioRole)) {
+    // 只有宽高比角色发生变化时才启动 50ms 重新布局，纯选中状态变更绝不启动 50ms 定时器！
+    if (roles.contains(m_aspectRatioRole)) {
         scheduleLayout();
+    } else {
+        // 选中状态/星级/颜色变更：0 毫秒立刻重绘视口，绝不推迟！
+        viewport()->update();
     }
     QAbstractItemView::dataChanged(topLeft, bottomRight, roles);
 }
@@ -260,6 +264,8 @@ void JustifiedView::mousePressEvent(QMouseEvent* event) {
     } else {
         m_anchorRow = -1;
     }
+    // 🚨 0 毫秒物理响应：鼠标按下瞬间，强行立即刷新卡片蓝色高亮边框！
+    viewport()->update();
 }
 
 void JustifiedView::mouseMoveEvent(QMouseEvent* event) {
