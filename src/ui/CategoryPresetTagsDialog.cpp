@@ -176,30 +176,20 @@ void CategoryPresetTagsDialog::onRemoveTag(const QString& tagName) {
 void CategoryPresetTagsDialog::adjustDialogSize() {
     // 异步延时处理，确保所有的 widget 布局计算已更新完毕
     QTimer::singleShot(50, this, [this]() {
-        // 固定宽度为 480 像素，只允许高度弹性收缩
+        // 固定宽度为 480 像素，只允许高度自适应弹性收缩
         const int dialogWidth = 480;
+        setFixedWidth(dialogWidth);
 
-        // 1. 文件夹名输入框高度：30 + layout spacing (4) + label height (约 15) = 50px
-        // 2. 底部按钮区高度：32 + padding (20) = 52px
-        // 3. 标题栏 + 分割线等高度 = 34 + 4 + 1 = 39px
-        // 4. 外边框及布局内边距 margins (上下 15*2 = 30px) 以及间隙 spacing (10*2 = 20px)
-        // 5. 加上标签容器 FlowLayout 根据 480 宽度计算得出的弹性高度：
-        int containerPaddingAndMargins = 40; // 标签部分的 label 加上 layout margins
+        // 移除多余的最小/最大高度限制
+        setMinimumHeight(0);
+        setMaximumHeight(16777215);
 
-        // 计算 FlowLayout 高度
-        int tagsContainerWidth = dialogWidth - 40; // dialogMargins 左右各 20 像素
-        int flowHeight = m_tagsFlow->heightForWidth(tagsContainerWidth);
-        if (flowHeight < 40) {
-            flowHeight = 40;
-        }
+        // 触发 Qt 自带的高性能布局树大小调整，完美处理 DPI、字体及 margins 自适应
+        adjustSize();
 
-        int targetHeight = 39 + 15 + 4 + 30 + 10 + 15 + 4 + flowHeight + 10 + 32 + 15 + 15;
-        // 限制一下合理高度，防止无限拉伸（比如设定在 200 到 600px 之间）
-        targetHeight = qBound(220, targetHeight, 600);
-
-        setMinimumSize(dialogWidth, targetHeight);
-        setMaximumSize(dialogWidth, targetHeight);
-        resize(dialogWidth, targetHeight);
+        // 确保最终尺寸在安全范围内
+        int finalHeight = qBound(220, height(), 600);
+        setFixedSize(dialogWidth, finalHeight);
     });
 }
 
