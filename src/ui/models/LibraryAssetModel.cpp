@@ -469,16 +469,19 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
         QIcon* cached = m_iconCache.object(cacheKey);
         if (cached) return *cached;
 
-        QFileInfo info(path);
-        QString ext = info.suffix().toLower();
+        QString ext = record.suffix.toLower();
         bool isGraphic = UiHelper::isGraphicsFile(ext) || ext == "svg";
         
         // .arc 资产包容器内部文件：判断父目录是否为 .arc 容器，等待异步加载
-        bool isInsideArcContainer = info.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
+        bool isInsideArcContainer = path.contains(".arc/", Qt::CaseInsensitive) || path.contains(".arc\\", Qt::CaseInsensitive);
         bool isArcContainer = record.isDir && path.endsWith(".arc", Qt::CaseInsensitive);
 
         if (isGraphic || isInsideArcContainer || isArcContainer) return QIcon(); 
-        return ShellIconManager::getFileIcon(path, 128);
+        QIcon icon = ShellIconManager::getFileIconFast(path, record.isDir, ext);
+        if (ShellIconManager::isIconCached(path, record.isDir, ext)) {
+            m_iconCache.insert(cacheKey, new QIcon(icon));
+        }
+        return icon;
     }
 
     return QVariant();

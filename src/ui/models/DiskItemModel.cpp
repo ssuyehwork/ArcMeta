@@ -349,12 +349,15 @@ QVariant DiskItemModel::data(const QModelIndex& index, int role) const {
         QIcon* cached = m_iconCache.object(cacheKey);
         if (cached) return *cached;
 
-        QFileInfo info(path);
-        QString ext = info.suffix().toLower();
+        QString ext = record.suffix.toLower();
         bool isGraphic = UiHelper::isGraphicsFile(ext) || ext == "svg";
         
         if (isGraphic) return QIcon(); // 图形文件等待异步加载时返回空图标
-        return ShellIconManager::getFileIcon(path, 128); // 非图形文件显示物理原生图标
+        QIcon icon = ShellIconManager::getFileIconFast(path, record.isDir, ext);
+        if (ShellIconManager::isIconCached(path, record.isDir, ext)) {
+            m_iconCache.insert(cacheKey, new QIcon(icon));
+        }
+        return icon;
     }
 
     return QVariant();

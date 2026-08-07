@@ -93,6 +93,49 @@ QIcon WindowsShellThumbnailProvider::getFileIcon(const QString& filePath, int si
     return placeholderIcon;
 }
 
+bool WindowsShellThumbnailProvider::isIconCached(const QString& filePath, bool isDir, const QString& suffix) {
+    bool isRoot = isDir && (filePath.endsWith(":\\") || filePath.endsWith(":/") || filePath.length() <= 3);
+    QString key = isDir ? (isRoot ? filePath : "folder") : suffix.toLower();
+    if (key.length() > 128) key = "unknown";
+
+    QMutexLocker locker(&fileIconMutex());
+    return fileIconCache().contains(key);
+}
+
+QIcon WindowsShellThumbnailProvider::getFileIconFast(const QString& filePath, bool isDir, const QString& suffix) {
+    bool isRoot = isDir && (filePath.endsWith(":\\") || filePath.endsWith(":/") || filePath.length() <= 3);
+    QString key = isDir ? (isRoot ? filePath : "folder") : suffix.toLower();
+    if (key.length() > 128) key = "unknown";
+
+    {
+        QMutexLocker locker(&fileIconMutex());
+        if (fileIconCache().contains(key)) {
+            return fileIconCache()[key];
+        }
+    }
+
+    static QIcon s_defaultFileIcon;
+    static QIcon s_defaultFolderIcon;
+    if (s_defaultFileIcon.isNull() || s_defaultFolderIcon.isNull()) {
+        QFileIconProvider provider;
+        s_defaultFolderIcon = provider.icon(QFileIconProvider::Folder);
+        s_defaultFileIcon = provider.icon(QFileIconProvider::File);
+    }
+    QIcon placeholderIcon = isDir ? s_defaultFolderIcon : s_defaultFileIcon;
+
+    {
+        QMutexLocker lock(&loadingMutex());
+        if (loadingKeys().contains(key)) {
+            return placeholderIcon;
+        }
+        loadingKeys().insert(key);
+    }
+
+    emit instance().requestIconLoad(filePath, key, isDir, isRoot);
+
+    return placeholderIcon;
+}
+
 void WindowsShellThumbnailProvider::handleIconLoad(const QString& filePath, const QString& key, bool isDir, bool isRoot) {
     (void)QtConcurrent::run([filePath, key, isDir, isRoot]() {
         // 在子线程中执行 COM 线程环境初始化
