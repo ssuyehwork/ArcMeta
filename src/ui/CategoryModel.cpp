@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QSet>
 #include <QMap>
+#include <algorithm>
 #include "../core/AppConfig.h"
 #include <QApplication>
 
@@ -45,7 +46,7 @@ void CategoryModel::refresh() {
     
     QStandardItem* root = invisibleRootItem();
 
-    // 1. 渲染系统逻辑桶 (全部数据、未分类、未标签、最近访问、标签管理、回收站)
+    // 1. 系统逻辑桶
     if (m_type == System || m_type == Both) {
         auto addSystemItem = [&](const QString& name, const QString& type, const QString& icon, const QString& color, int sysId) {
             int count = sysCounts.value(type, 0);
@@ -67,14 +68,13 @@ void CategoryModel::refresh() {
         addSystemItem("回收站", "trash", "trash", "#e74c3c", -8);
     }
 
-    // 2. 渲染“快速访问”分组节点（仅承载手动固定的快捷镜像）
+    // 2. “快速访问”分组节点
     QStandardItem* favGroup = nullptr;
     if (m_type == Both || m_type == User) {
         favGroup = new QStandardItem("快速访问");
         favGroup->setData("快速访问", NameRole);
         favGroup->setSelectable(false);
         favGroup->setEditable(false);
-        // 物理更新：图标从 "folder_filled" 替换为 "zap_filled"
         favGroup->setIcon(UiHelper::getIcon("zap_filled", QColor("#F1C40F"), 16)); 
         
         QFont font = favGroup->font();
@@ -83,7 +83,7 @@ void CategoryModel::refresh() {
         favGroup->setForeground(QColor("#FFFFFF"));
     }
 
-    // 3. 构建一等公民专属主标题节点：“分类 (子分类数)”
+    // 3. “分类”主标题节点
     QStandardItem* catGroup = nullptr;
     if (m_type == Both || m_type == User) {
         catGroup = new QStandardItem();
@@ -105,7 +105,6 @@ void CategoryModel::refresh() {
         QMap<int, QStandardItem*> itemMap;
         QMap<int, Category> catMap;
 
-        // 构建内部节点映射表
         for (const auto& cat : categories) {
             catMap[cat.id] = cat;
             int id = cat.id;
@@ -132,7 +131,7 @@ void CategoryModel::refresh() {
             itemMap[id] = item;
         }
 
-        // 4. 渲染物理托管库根分类 (ArcMeta.Library_) 到 root
+        // 4. 物理托管库根分类
         for (const auto& cat : categories) {
             int id = cat.id;
             QStandardItem* item = itemMap[id];
@@ -148,12 +147,12 @@ void CategoryModel::refresh() {
             }
         }
 
-        // 5. 挂载“快速访问”分组节点
+        // 5. 挂载“快速访问”
         if (favGroup) {
             root->appendRow(favGroup);
         }
 
-        // 6. 【一等公民架构重构】：统计并挂载所有用户自定义顶级分类至“分类”主标题下
+        // 6. 挂载用户自定义分类至“分类”主标题下
         int userTopCatCount = 0;
         for (const auto& cat : categories) {
             int id = cat.id;
@@ -165,7 +164,7 @@ void CategoryModel::refresh() {
                 if (!name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
                     userTopCatCount++;
                     if (catGroup) {
-                        catGroup->appendRow(item); // 物理强行挂载至“分类”主节点下方
+                        catGroup->appendRow(item);
                     } else {
                         root->appendRow(item);
                     }
@@ -173,13 +172,12 @@ void CategoryModel::refresh() {
             }
         }
 
-        // 设置主标题文字，精准反映包含的子分类总个数
         if (catGroup) {
             catGroup->setText(QString("分类 (%1)").arg(userTopCatCount));
             root->appendRow(catGroup);
         }
 
-        // 7. 挂载已手固定的“快速访问”快捷镜像
+        // 7. 挂载快速访问快捷镜像
         if (favGroup) {
             for (const auto& cat : categories) {
                 if (cat.pinned) {
@@ -232,7 +230,6 @@ void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const 
             int id = item->data(IdRole).toInt();
 
             if (id == CAT_GROUP_SYS_ID) {
-                // 精准刷新“分类”主标题后的子分类总个数
                 item->setText(QString("分类 (%1)").arg(item->rowCount()));
             } else if (id < 0) { 
                 int count = sysCounts.value(type, 0);
@@ -276,7 +273,6 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
         QString type = index.data(TypeRole).toString();
         int id = index.data(IdRole).toInt();
 
-        // 禁改系统主标题
         if (id == CAT_GROUP_SYS_ID) return false;
         
         if (type == "category" && id > 0) {
@@ -341,39 +337,93 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
     return QStandardItemModel::setData(index, val, role);
 }
 
+// -------------------------------------------------------------------------
+// 🚨 【拖拽核心重构】：自定义 MimeData + 纯数据库物理重排落盘
+// -------------------------------------------------------------------------
+
+QMimeData* CategoryModel::mimeData(const QModelIndexList& indexes) const {
+    QMimeData* mimeData = QStandardItemModel::mimeData(indexes);
+    if (!indexes.isEmpty() && mimeData) {
+        QModelIndex idx = indexes.first();
+        int catId = idx.data(IdRole).toInt();
+        if (catId > 0) {
+            // 打包真实分类 ID
+            mimeData->setData("application/x-arcmeta-catid", QByteArray::number(catId));
+        }
+    }
+    return mimeData;
+}
+
 Qt::DropActions CategoryModel::supportedDropActions() const {
-    return Qt::MoveAction | Qt::CopyAction | Qt::LinkAction;
+    return Qt::MoveAction | Qt::CopyAction;
 }
 
 bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction action, int row, int column, const QModelIndex& parent) {
-    if (mimeData->hasUrls() || mimeData->hasFormat("text/plain")) {
-        return true;
+    if (!mimeData) return false;
+
+    // 1. 如果是外部物理文件拖入，放行
+    if (mimeData->hasUrls()) return true;
+
+    // 2. 如果不是分类内部拖拽，回退
+    if (!mimeData->hasFormat("application/x-arcmeta-catid")) {
+        return QStandardItemModel::dropMimeData(mimeData, action, row, column, parent);
     }
 
-    Q_UNUSED(action);
-    Q_UNUSED(row);
-    Q_UNUSED(column);
-    
-    QModelIndex actualParent = parent;
-    if (actualParent.isValid()) {
-        QStandardItem* parentItem = itemFromIndex(actualParent);
-        if (!parentItem) return false;
-        
-        QString type = parentItem->data(TypeRole).toString();
-        
-        if (type != "category" && type != "bookmark" && type != "category_root_group") {
-            return false; 
-        }
+    int draggedCatId = mimeData->data("application/x-arcmeta-catid").toInt();
+    if (draggedCatId <= 0) return false;
 
-        if (!mimeData->hasUrls() && !mimeData->hasFormat("text/plain")) {
-            int parentId = parentItem->data(IdRole).toInt();
-            Category parentCat = CategoryRepo::getById(parentId);
-            if (parentCat.id > 0 && parentCat.parentId == 0 && !parentCat.physicalPath.empty()) {
-                return false;
-            }
+    // 3. 计算全新的 targetParentId
+    int targetParentId = 0; // 默认挂载在“分类”主组节点下 (parentId = 0)
+    if (parent.isValid()) {
+        int pId = parent.data(IdRole).toInt();
+        if (pId > 0) {
+            targetParentId = pId; // 嵌套进入子分类
         }
     }
-    return QStandardItemModel::dropMimeData(mimeData, action, row, column, actualParent);
+
+    // 4. 从数据库获取所有同级分类
+    auto allCats = CategoryRepo::getAll();
+    std::vector<Category> siblings;
+    Category draggedCat;
+    bool foundDragged = false;
+
+    for (const auto& cat : allCats) {
+        if (cat.id == draggedCatId) {
+            draggedCat = cat;
+            foundDragged = true;
+        } else if (cat.parentId == targetParentId && !QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+            siblings.push_back(cat);
+        }
+    }
+
+    if (!foundDragged) return false;
+
+    // 按已有的 sortOrder 升序排列同级项
+    std::sort(siblings.begin(), siblings.end(), [](const Category& a, const Category& b) {
+        return a.sortOrder < b.sortOrder;
+    });
+
+    // 5. 计算全新的插入索引 row
+    int insertRow = row;
+    if (insertRow < 0 || insertRow > static_cast<int>(siblings.size())) {
+        insertRow = static_cast<int>(siblings.size()); // 默认插入尾部
+    }
+
+    draggedCat.parentId = targetParentId;
+    siblings.insert(siblings.begin() + insertRow, draggedCat);
+
+    // 6. 100% 物理写盘：批量重新计算并更新 SQLite 中的 sortOrder 序号与 parentId
+    for (size_t i = 0; i < siblings.size(); ++i) {
+        siblings[i].sortOrder = static_cast<int>(i);
+        CategoryRepo::update(siblings[i]);
+    }
+
+    // 7. 彻底阻断 Qt 原生深拷贝克隆坏行为，投递异步 refresh() 从数据库权威重绘！
+    QMetaObject::invokeMethod(this, [this]() {
+        refresh();
+    }, Qt::QueuedConnection);
+
+    return true; // 物理阻断 Qt 原生深拷贝！
 }
 
 } // namespace ArcMeta
