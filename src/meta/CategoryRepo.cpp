@@ -1265,6 +1265,25 @@ int CategoryRepo::getUncategorizedItemCount() {
     return getSystemCounts()["uncategorized"];
 }
 
+QMap<QString, int> CategoryRepo::getGlobalUniqueTags() {
+    QMap<QString, int> tagCounts;
+
+    // 遍历所有非回收站资产的 RuntimeMeta 标签数据
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) {
+        if (meta.isTrash || meta.isFolder) return;
+
+        // meta.tags 本身已是 QStringList / QList<QString> 容器，直接迭代
+        for (const QString& tag : meta.tags) {
+            QString cleanTag = tag.trimmed();
+            if (!cleanTag.isEmpty()) {
+                tagCounts[cleanTag]++;
+            }
+        }
+    });
+
+    return tagCounts;
+}
+
 QMap<QString, int> CategoryRepo::getSystemCounts() {
     QMap<QString, int> res;
     res["all"] = s_totalCount.load();
