@@ -8,6 +8,8 @@
 #include <QHBoxLayout>
 #include <QApplication>
 #include <QStyleOption>
+#include <QGuiApplication>
+#include <QInputMethod>
 
 namespace ArcMeta {
 
@@ -75,6 +77,10 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setFocusPolicy(Qt::StrongFocus);
+
+    // 物理开启输入法上下文，允许 Windows 输入法 (IME) 正常挂载
+    setAttribute(Qt::WA_InputMethodEnabled, true);
+
     resize(320, 360);
 
     // 主布局
@@ -100,6 +106,8 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
 
     // 1. 顶部搜索框
     m_searchEdit = new QLineEdit(container);
+    m_searchEdit->setAttribute(Qt::WA_InputMethodEnabled, true);
+    m_searchEdit->setInputMethodHints(Qt::ImhPreferLowercase | Qt::ImhNoAutoUppercase);
     m_searchEdit->setPlaceholderText("搜索...");
     m_searchEdit->setClearButtonEnabled(true);
     m_searchEdit->setMinimumHeight(30);
@@ -378,10 +386,16 @@ bool TagPickerPopover::eventFilter(QObject* watched, QEvent* event) {
     // 处理 QLineEdit 上的按键过滤，使其支持键盘控制
     if (watched == m_searchEdit && event->type() == QEvent::KeyPress) {
         auto* keyEvent = static_cast<QKeyEvent*>(event);
-        if (keyEvent->key() == Qt::Key_Down || keyEvent->key() == Qt::Key_Up ||
-            keyEvent->key() == Qt::Key_Left || keyEvent->key() == Qt::Key_Right ||
-            keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter ||
-            keyEvent->key() == Qt::Key_Escape)
+
+        // 核心防护：如果输入法正在弹出拼音候选框选词，100% 放行，绝不抢占 KeyPress！
+        if (QGuiApplication::inputMethod()->isVisible()) {
+            return false; // 放行给输入法上屏
+        }
+
+        int key = keyEvent->key();
+        if (key == Qt::Key_Down || key == Qt::Key_Up ||
+            key == Qt::Key_Return || key == Qt::Key_Enter ||
+            key == Qt::Key_Escape)
         {
             // 直接由 Popover 的 keyPressEvent 统一处理
             this->keyPressEvent(keyEvent);
