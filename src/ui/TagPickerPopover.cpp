@@ -95,6 +95,7 @@ void TagItemButton::paintEvent(QPaintEvent*) {
 TagPickerPopover::TagPickerPopover(QWidget* parent)
     : QWidget(nullptr, Qt::FramelessWindowHint | Qt::Tool) // 两个界面必须彻底独立，继承 QWidget 且无 Parent，带有 Qt::Tool 属性以保障不占用任务栏和正确的层级
 {
+    Q_UNUSED(parent);
     setAttribute(Qt::WA_TranslucentBackground);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true); // 追踪鼠标以调整大小和改变指针样式
