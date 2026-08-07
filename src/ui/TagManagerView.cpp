@@ -5,6 +5,7 @@
 #include "../meta/MetadataManager.h"
 #include "../meta/DatabaseManager.h"
 #include "../meta/TagRepository.h"
+#include "../meta/CategoryRepo.h"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QScrollArea>
