@@ -157,7 +157,6 @@ std::vector<ItemRecord> CategoryLoadService::loadTrashItems() {
                 int id = sqlite3_column_int(stmt, 0);
                 const wchar_t* wTrashPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
                 const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
-                const wchar_t* wDriveLetter = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 3));
                 const wchar_t* wFileName = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
                 int isFolder = sqlite3_column_int(stmt, 5);
                 long long fileSize = sqlite3_column_int64(stmt, 6);
