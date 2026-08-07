@@ -348,8 +348,30 @@ bool TagManagerView::eventFilter(QObject* watched, QEvent* event) {
                 QTimer::singleShot(0, this, &TagManagerView::adjustFlowHeights);
                 return true;
             } else if (action == "frequent") {
-                // TODO: 常用标签逻辑（目前暂无权重统计，显示为空）
-                search("___NON_EXISTENT_TAG___");
+                // 仅筛选并显示系统最常用的前 20 个标签，彻底消除 ___NON_EXISTENT_TAG___ 脑残硬编码
+                QSet<QString> topTagsSet;
+                auto topTags = MetadataManager::instance().getTopTags(20);
+                for (const auto& pair : topTags) {
+                    topTagsSet.insert(pair.first);
+                }
+
+                QVBoxLayout* contentLayout = qobject_cast<QVBoxLayout*>(m_contentWidget->layout());
+                for (int i = 0; i < contentLayout->count(); ++i) {
+                    QWidget* groupWidget = contentLayout->itemAt(i)->widget();
+                    if (!groupWidget) continue;
+                    bool groupHasVisibleTag = false;
+                    const auto buttons = groupWidget->findChildren<QPushButton*>();
+                    for (QPushButton* btn : buttons) {
+                        QString btnText = btn->text();
+                        int lastParen = btnText.lastIndexOf(" (");
+                        QString tagName = (lastParen != -1) ? btnText.left(lastParen) : btnText;
+                        bool visible = topTagsSet.contains(tagName);
+                        btn->setVisible(visible);
+                        if (visible) groupHasVisibleTag = true;
+                    }
+                    groupWidget->setVisible(groupHasVisibleTag);
+                }
+                QTimer::singleShot(0, this, &TagManagerView::adjustFlowHeights);
                 return true;
             }
         }
