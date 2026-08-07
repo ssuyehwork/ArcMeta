@@ -72,6 +72,9 @@ void CategoryPresetTagsDialog::initLayout() {
 
     m_tagsContainer = new QWidget(m_contentArea);
     m_tagsContainer->setObjectName("TagsContainer");
+    QSizePolicy sp = m_tagsContainer->sizePolicy();
+    sp.setHeightForWidth(true);          // 新增：让容器认领 FlowLayout 的 heightForWidth 能力
+    m_tagsContainer->setSizePolicy(sp);  // 新增
     m_tagsContainer->setMinimumHeight(80);
     m_tagsContainer->setCursor(Qt::PointingHandCursor);
     m_tagsContainer->setStyleSheet(

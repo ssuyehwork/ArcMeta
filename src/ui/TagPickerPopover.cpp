@@ -99,7 +99,7 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
     setFocusPolicy(Qt::StrongFocus);
 
     // 读取折叠/展开习惯
-    bool sidebarVisible = AppConfig::instance().getValue("TagPicker/SidebarVisible", true).toBool();
+    bool sidebarVisible = AppConfig::instance().getValue("TagPicker/SidebarVisible", false).toBool();
     resize(sidebarVisible ? 400 : 200, 260); // 动态初始化尺寸
 
     // 主布局
@@ -144,7 +144,7 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
 
     // 1:1 矢量图标配置
     m_searchEdit->addAction(UiHelper::getIcon("search", QColor("#888888"), 14), QLineEdit::LeadingPosition);
-    auto* sidebarAction = m_searchEdit->addAction(UiHelper::getIcon("layout_grid", QColor("#888888"), 14), QLineEdit::TrailingPosition);
+    auto* sidebarAction = m_searchEdit->addAction(UiHelper::getIcon("sidebar", QColor("#888888"), 14), QLineEdit::TrailingPosition);
     connect(sidebarAction, &QAction::triggered, this, &TagPickerPopover::toggleSidebar);
     m_searchEdit->addAction(UiHelper::getIcon("filter_funnel_outline", QColor("#888888"), 14), QLineEdit::TrailingPosition);
 
