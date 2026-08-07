@@ -82,6 +82,7 @@ public:
     static int getUniqueItemCount();
     static int getUncategorizedItemCount();
     static QMap<QString, int> getSystemCounts();
+    static int getGlobalTagsCount(); // 新增：计算全局唯一标签数（合并文件、分类预设和标签组标签）
     static QStringList getSystemCategoryPaths(const QString& type);
 
     // 条目关联逻辑
