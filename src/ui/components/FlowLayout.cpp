@@ -20,7 +20,9 @@ QSize FlowLayout::sizeHint() const { return minimumSize(); }
 QSize FlowLayout::minimumSize() const {
     QSize size;
     for (QLayoutItem *item : itemList) size = size.expandedTo(item->minimumSize());
-    size += QSize(2 * contentsMargins().top(), 2 * contentsMargins().top());
+    int left, top, right, bottom;
+    getContentsMargins(&left, &top, &right, &bottom);
+    size += QSize(left + right, top + bottom);
     return size;
 }
 int FlowLayout::doLayout(const QRect &rect, bool testOnly) const {
