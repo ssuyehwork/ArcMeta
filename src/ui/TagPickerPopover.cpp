@@ -219,6 +219,7 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setFrameShape(QFrame::NoFrame);
     m_scrollArea->setStyleSheet("QScrollArea { background: transparent; }");
+    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // 强制禁用水平滚动条，防止其意外弹出
     m_scrollArea->verticalScrollBar()->setStyleSheet(
         "QScrollBar:vertical { background: transparent; width: 6px; margin: 0; }"
         "QScrollBar::handle:vertical { background: #444; border-radius: 3px; min-height: 20px; }"
@@ -315,20 +316,22 @@ void TagPickerPopover::setSidebarVisible(bool visible) {
     m_sidebarWidget->setVisible(visible);
     m_dividerLine->setVisible(visible);
     
-    // 侧边栏固定宽度为 120px
-    const int sidebarWidth = 120;
+    const int sidebarWidth = 120; // 左侧栏固定宽 120px
+    const int minGridWidth = 280; // 右侧网格极限最小宽 280px
 
     if (visible) {
-        setMinimumWidth(320);
+        // 展开状态：总宽不少于 400px (120 + 280)
+        setMinimumWidth(sidebarWidth + minGridWidth);
         setMaximumWidth(800);
-        // 展开时，顶层窗口宽度在当前基础上精准增加 120px，给左侧栏腾出空间！
-        resize(width() + sidebarWidth, height());
+        int targetWidth = qMax(sidebarWidth + minGridWidth, width() + sidebarWidth);
+        resize(targetWidth, height());
         updateSidebarHighlight();
     } else {
-        setMinimumWidth(200);
+        // 折叠状态：总宽不少于 280px
+        setMinimumWidth(minGridWidth);
         setMaximumWidth(800);
-        // 折叠时，顶层窗口宽度精准扣减 120px，收缩窗口！
-        resize(qMax(200, width() - sidebarWidth), height());
+        int targetWidth = qMax(minGridWidth, width() - sidebarWidth);
+        resize(targetWidth, height());
     }
     
     // 强行刷新窗口布局树
