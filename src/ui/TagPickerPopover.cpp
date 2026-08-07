@@ -93,10 +93,11 @@ void TagItemButton::paintEvent(QPaintEvent*) {
 // TagPickerPopover 实现
 // ============================================================================
 TagPickerPopover::TagPickerPopover(QWidget* parent)
-    : QWidget(parent) // 🚨 废除 Qt::Popup，改用同窗口 Child Overlay 架构以保障 Windows IME 正常挂载与上下文畅通
+    : QWidget(nullptr, Qt::FramelessWindowHint | Qt::Tool) // 两个界面必须彻底独立，继承 QWidget 且无 Parent，带有 Qt::Tool 属性以保障不占用任务栏和正确的层级
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setFocusPolicy(Qt::StrongFocus);
+    setMouseTracking(true); // 追踪鼠标以调整大小和改变指针样式
 
     // 读取折叠/展开习惯
     bool sidebarVisible = AppConfig::instance().getValue("TagPicker/SidebarVisible", false).toBool();
@@ -110,6 +111,7 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
     // 容器组件，用于提供背景边框与圆角
     auto* container = new QWidget(this);
     container->setObjectName("PopoverContainer");
+    container->setMouseTracking(true);
     container->setStyleSheet(
         "QWidget#PopoverContainer {"
         "  background-color: #1E1E1E;"
@@ -122,6 +124,11 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
     auto* containerLayout = new QVBoxLayout(container);
     containerLayout->setContentsMargins(10, 10, 10, 10);
     containerLayout->setSpacing(8);
+
+    // 顶部搜索和侧边栏控制区域
+    auto* searchRowLayout = new QHBoxLayout();
+    searchRowLayout->setContentsMargins(0, 0, 0, 0);
+    searchRowLayout->setSpacing(6);
 
     // 1. 顶部搜索框
     m_searchEdit = new QLineEdit(container);
@@ -142,15 +149,28 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
         "QLineEdit:focus { border: 1px solid #3498db; }"
     );
 
-    // 1:1 矢量图标配置
+    // 1:1 矢量图标配置：去掉脑补的 1 号漏斗(filter_funnel_outline)图标
     m_searchEdit->addAction(UiHelper::getIcon("search", QColor("#888888"), 14), QLineEdit::LeadingPosition);
-    auto* sidebarAction = m_searchEdit->addAction(UiHelper::getIcon("sidebar", QColor("#888888"), 14), QLineEdit::TrailingPosition);
-    connect(sidebarAction, &QAction::triggered, this, &TagPickerPopover::toggleSidebar);
-    m_searchEdit->addAction(UiHelper::getIcon("filter_funnel_outline", QColor("#888888"), 14), QLineEdit::TrailingPosition);
 
     m_searchEdit->installEventFilter(this);
     connect(m_searchEdit, &QLineEdit::textChanged, this, &TagPickerPopover::onSearchTextChanged);
-    containerLayout->addWidget(m_searchEdit);
+    searchRowLayout->addWidget(m_searchEdit, 1);
+
+    // 2. 侧边栏按钮(sidebar)应当位于输入框之外的右侧
+    auto* sidebarBtn = new QPushButton(container);
+    sidebarBtn->setFixedSize(30, 30);
+    sidebarBtn->setIcon(UiHelper::getIcon("sidebar", QColor("#888888"), 14));
+    sidebarBtn->setIconSize(QSize(14, 14));
+    sidebarBtn->setCursor(Qt::PointingHandCursor);
+    sidebarBtn->setStyleSheet(
+        "QPushButton { background-color: #2D2D2D; border: 1px solid #444444; border-radius: 4px; }"
+        "QPushButton:hover { background-color: #3E3E3E; border: 1px solid #555555; }"
+        "QPushButton:pressed { background-color: #1A1A1A; }"
+    );
+    connect(sidebarBtn, &QPushButton::clicked, this, &TagPickerPopover::toggleSidebar);
+    searchRowLayout->addWidget(sidebarBtn);
+
+    containerLayout->addLayout(searchRowLayout);
 
     // 2. 双栏布局核心装载
     m_columnsLayout = new QHBoxLayout();
@@ -270,6 +290,10 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
     containerLayout->addWidget(m_hintLabel);
 
     setSidebarVisible(sidebarVisible);
+
+    // 注册 Hover/Mouse 过滤器，用来处理窗口拉伸调整、空白处移动等交互
+    installEventFilter(this);
+    container->installEventFilter(this);
 }
 
 TagPickerPopover::~TagPickerPopover() {
@@ -288,13 +312,13 @@ void TagPickerPopover::setSidebarVisible(bool visible) {
     m_dividerLine->setVisible(visible);
     
     if (visible) {
-        setMinimumWidth(400);
-        setMaximumWidth(16777215);
-        resize(400, height());
+        setMinimumWidth(300);
+        setMaximumWidth(800);
+        resize(qMax(300, width()), height());
     } else {
-        setMinimumWidth(200);
-        setMaximumWidth(16777215);
-        resize(200, height());
+        setMinimumWidth(180);
+        setMaximumWidth(800);
+        resize(qMax(180, width()), height());
     }
     
     AppConfig::instance().setValue("TagPicker/SidebarVisible", visible);
@@ -332,23 +356,29 @@ void TagPickerPopover::showAt(const QPoint& globalPos) {
     refreshSidebar();
     refreshList();
     
-    if (parentWidget()) {
-        QPoint localPos = parentWidget()->mapFromGlobal(globalPos);
-        int x = localPos.x();
-        int y = localPos.y();
-        
-        if (x + width() > parentWidget()->width()) {
-            x = parentWidget()->width() - width() - 10;
+    // 两个界面必须彻底独立，所以这里使用绝对屏幕坐标进行精确放置，不依赖 parentWidget
+    int x = globalPos.x();
+    int y = globalPos.y();
+
+    // 限制在当前所在的屏幕矩形内，防止窗口飞出可见屏幕之外
+    QScreen* screen = QGuiApplication::screenAt(globalPos);
+    if (!screen) {
+        screen = QGuiApplication::primaryScreen();
+    }
+    if (screen) {
+        QRect screenGeometry = screen->geometry();
+        if (x + width() > screenGeometry.right() - 10) {
+            x = screenGeometry.right() - width() - 10;
         }
-        if (y + height() > parentWidget()->height()) {
-            y = parentWidget()->height() - height() - 10;
+        if (y + height() > screenGeometry.bottom() - 10) {
+            y = screenGeometry.bottom() - height() - 10;
         }
-        if (x < 10) x = 10;
-        if (y < 10) y = 10;
-        
-        move(x, y);
+        if (x < screenGeometry.left() + 10) x = screenGeometry.left() + 10;
+        if (y < screenGeometry.top() + 10) y = screenGeometry.top() + 10;
     }
     
+    move(x, y);
+
     show();
     raise(); 
     m_searchEdit->setFocus();
@@ -706,8 +736,182 @@ void TagPickerPopover::showEvent(QShowEvent* event) {
     m_searchEdit->setFocus();
 }
 
+TagPickerPopover::ResizeEdge TagPickerPopover::calculateResizeEdge(const QPoint& pos) {
+    const int border = 6;
+    int w = width();
+    int h = height();
+
+    bool left = pos.x() < border;
+    bool right = pos.x() > w - border;
+    bool top = pos.y() < border;
+    bool bottom = pos.y() > h - border;
+
+    if (left && top) return TopLeft;
+    if (right && top) return TopRight;
+    if (left && bottom) return BottomLeft;
+    if (right && bottom) return BottomRight;
+    if (left) return Left;
+    if (right) return Right;
+    if (top) return Top;
+    if (bottom) return Bottom;
+
+    return None;
+}
+
+void TagPickerPopover::updateCursorShape(const QPoint& pos) {
+    ResizeEdge edge = calculateResizeEdge(pos);
+    switch (edge) {
+        case Left:
+        case Right:
+            setCursor(Qt::SizeHorCursor);
+            break;
+        case Top:
+        case Bottom:
+            setCursor(Qt::SizeVerCursor);
+            break;
+        case TopLeft:
+        case BottomRight:
+            setCursor(Qt::SizeFDiagCursor);
+            break;
+        case TopRight:
+        case BottomLeft:
+            setCursor(Qt::SizeBDiagCursor);
+            break;
+        default:
+            setCursor(Qt::ArrowCursor);
+            break;
+    }
+}
+
 bool TagPickerPopover::eventFilter(QObject* watched, QEvent* event) {
-    // 全局鼠标点击：点击 Popover 外部时自动淡隐关闭
+    QWidget* container = findChild<QWidget*>("PopoverContainer");
+
+    // 1. 在容器或本身处理边缘拉伸 (Resize) 与按住空白背景移动拖拽 (Drag Move) 机制
+    if ((watched == this || watched == container) &&
+        (event->type() == QEvent::MouseButtonPress ||
+         event->type() == QEvent::MouseButtonRelease ||
+         event->type() == QEvent::MouseMove ||
+         event->type() == QEvent::HoverMove))
+    {
+        auto* mouseEvent = static_cast<QMouseEvent*>(event);
+        QPoint localPos = mouseEvent->position().toPoint();
+        if (watched == container) {
+            localPos = mapFromGlobal(mouseEvent->globalPosition().toPoint());
+        }
+
+        if (event->type() == QEvent::MouseButtonPress && mouseEvent->button() == Qt::LeftButton) {
+            ResizeEdge edge = calculateResizeEdge(localPos);
+            if (edge != None) {
+                m_isResizing = true;
+                m_resizeEdge = edge;
+                m_dragPos = mouseEvent->globalPosition().toPoint();
+                m_isDragging = false;
+                event->accept();
+                return true;
+            } else {
+                // 仅当点击了空白处背景、而不是子部件时才启动拖拽移动
+                QWidget* child = childAt(localPos);
+                if (!child || child == container || child->objectName() == "PopoverContainer") {
+                    m_isDragging = true;
+                    m_isResizing = false;
+                    m_dragPos = mouseEvent->globalPosition().toPoint() - frameGeometry().topLeft();
+                    event->accept();
+                    return true;
+                }
+            }
+        }
+        else if (event->type() == QEvent::MouseButtonRelease && mouseEvent->button() == Qt::LeftButton) {
+            m_isDragging = false;
+            m_isResizing = false;
+            m_resizeEdge = None;
+            setCursor(Qt::ArrowCursor);
+            event->accept();
+            return true;
+        }
+        else if (event->type() == QEvent::MouseMove) {
+            if (m_isResizing) {
+                QPoint globalDelta = mouseEvent->globalPosition().toPoint() - m_dragPos;
+                m_dragPos = mouseEvent->globalPosition().toPoint();
+
+                QRect geom = geometry();
+                int minW = minimumWidth();
+                int maxW = 800; // 限制最大宽度不超过 800
+                int minH = minimumHeight() > 0 ? minimumHeight() : 200;
+
+                switch (m_resizeEdge) {
+                    case Left: {
+                        int oldRight = geom.right();
+                        int newW = qBound(minW, geom.width() - globalDelta.x(), maxW);
+                        geom.setLeft(oldRight - newW + 1);
+                        break;
+                    }
+                    case Right: {
+                        int newW = qBound(minW, geom.width() + globalDelta.x(), maxW);
+                        geom.setWidth(newW);
+                        break;
+                    }
+                    case Top: {
+                        int oldBottom = geom.bottom();
+                        int newH = qBound(minH, geom.height() - globalDelta.y(), 1000);
+                        geom.setTop(oldBottom - newH + 1);
+                        break;
+                    }
+                    case Bottom: {
+                        int newH = qBound(minH, geom.height() + globalDelta.y(), 1000);
+                        geom.setHeight(newH);
+                        break;
+                    }
+                    case TopLeft: {
+                        int oldRight = geom.right();
+                        int newW = qBound(minW, geom.width() - globalDelta.x(), maxW);
+                        geom.setLeft(oldRight - newW + 1);
+                        int oldBottom = geom.bottom();
+                        int newH = qBound(minH, geom.height() - globalDelta.y(), 1000);
+                        geom.setTop(oldBottom - newH + 1);
+                        break;
+                    }
+                    case TopRight: {
+                        int newW = qBound(minW, geom.width() + globalDelta.x(), maxW);
+                        geom.setWidth(newW);
+                        int oldBottom = geom.bottom();
+                        int newH = qBound(minH, geom.height() - globalDelta.y(), 1000);
+                        geom.setTop(oldBottom - newH + 1);
+                        break;
+                    }
+                    case BottomLeft: {
+                        int oldRight = geom.right();
+                        int newW = qBound(minW, geom.width() - globalDelta.x(), maxW);
+                        geom.setLeft(oldRight - newW + 1);
+                        int newH = qBound(minH, geom.height() + globalDelta.y(), 1000);
+                        geom.setHeight(newH);
+                        break;
+                    }
+                    case BottomRight: {
+                        int newW = qBound(minW, geom.width() + globalDelta.x(), maxW);
+                        geom.setWidth(newW);
+                        int newH = qBound(minH, geom.height() + globalDelta.y(), 1000);
+                        geom.setHeight(newH);
+                        break;
+                    }
+                    default:
+                        break;
+                }
+                setGeometry(geom);
+                event->accept();
+                return true;
+            } else if (m_isDragging) {
+                move(mouseEvent->globalPosition().toPoint() - m_dragPos);
+                event->accept();
+                return true;
+            } else {
+                updateCursorShape(localPos);
+            }
+        } else if (event->type() == QEvent::HoverMove) {
+            updateCursorShape(localPos);
+        }
+    }
+
+    // 全局鼠标点击：点击 Popover 外部时自动隐藏
     if (event->type() == QEvent::MouseButtonPress) {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
         QPoint globalPos = mouseEvent->globalPosition().toPoint();

@@ -136,6 +136,15 @@ private:
 
     QMap<QString, int> m_allTags;
     QList<QPair<QString, int>> m_topTags;
+
+    // 拖动和拖拉缩放所需的成员变量
+    QPoint m_dragPos;
+    bool m_isDragging = false;
+    bool m_isResizing = false;
+    enum ResizeEdge { None, Left, Right, Top, Bottom, TopLeft, TopRight, BottomLeft, BottomRight };
+    ResizeEdge m_resizeEdge = None;
+    ResizeEdge calculateResizeEdge(const QPoint& pos);
+    void updateCursorShape(const QPoint& pos);
 };
 
 } // namespace ArcMeta
