@@ -37,8 +37,9 @@ void TagPill::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setBrush(QColor("#2B2B2B"));
-    painter.setPen(QPen(QColor("#3c3c3c"), 1));
-    painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 11, 11);
+    painter.setPen(QPen(QColor("#3C3C3C"), 1));
+    // 修正：将圆角半径从 11px 彻底修改为标准的 4px
+    painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 4, 4);
 }
 
 } // namespace ArcMeta
