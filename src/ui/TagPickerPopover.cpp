@@ -293,9 +293,10 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
 
     setSidebarVisible(sidebarVisible);
 
-    // 注册 Hover/Mouse 过滤器，用来处理窗口拉伸调整、空白处移动等交互
-    installEventFilter(this);
-    container->installEventFilter(this);
+    // 注册全局事件过滤器
+    if (qApp) {
+        qApp->installEventFilter(this);
+    }
 }
 
 TagPickerPopover::~TagPickerPopover() {
@@ -801,54 +802,69 @@ void TagPickerPopover::updateCursorShape(const QPoint& pos) {
 }
 
 bool TagPickerPopover::eventFilter(QObject* watched, QEvent* event) {
-    QWidget* container = findChild<QWidget*>("PopoverContainer");
+    if (!isVisible()) {
+        return QWidget::eventFilter(watched, event);
+    }
 
-    // 1. 在容器或本身处理边缘拉伸 (Resize) 与按住空白背景移动拖拽 (Drag Move) 机制
-    if ((watched == this || watched == container) &&
-        (event->type() == QEvent::MouseButtonPress ||
-         event->type() == QEvent::MouseButtonRelease ||
-         event->type() == QEvent::MouseMove ||
-         event->type() == QEvent::HoverMove))
+    // 1. 利用绝对屏幕坐标做全局边缘检测和拉伸 (Resize) / 拖拽 (Drag Move) 机制
+    if (event->type() == QEvent::MouseButtonPress ||
+        event->type() == QEvent::MouseButtonRelease ||
+        event->type() == QEvent::MouseMove)
     {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
-        QPoint localPos = mouseEvent->position().toPoint();
-        if (watched == container) {
-            localPos = mapFromGlobal(mouseEvent->globalPosition().toPoint());
-        }
+        QPoint globalPos = mouseEvent->globalPosition().toPoint();
+        QPoint localPos = mapFromGlobal(globalPos);
 
         if (event->type() == QEvent::MouseButtonPress && mouseEvent->button() == Qt::LeftButton) {
+            // 如果点击在窗口矩形外部，自动淡隐关闭
+            if (!rect().contains(localPos)) {
+                hide();
+                return false;
+            }
+
             ResizeEdge edge = calculateResizeEdge(localPos);
             if (edge != None) {
                 m_isResizing = true;
                 m_resizeEdge = edge;
-                m_dragPos = mouseEvent->globalPosition().toPoint();
+                m_dragPos = globalPos;
                 m_isDragging = false;
+                grabMouse(); // 强行捕获鼠标，保障拖拽至窗口外部时依旧极为平滑顺畅
                 event->accept();
                 return true;
             } else {
-                // 仅当点击了空白处背景、而不是子部件时才启动拖拽移动
+                // 按下的是背景空白区域或者提示标签/其它不吞事件的普通子部件
                 QWidget* child = childAt(localPos);
-                if (!child || child == container || child->objectName() == "PopoverContainer") {
+                QWidget* container = findChild<QWidget*>("PopoverContainer");
+                if (!child || child == container || child->objectName() == "PopoverContainer" ||
+                    qobject_cast<QLabel*>(child) || child == m_hintLabel)
+                {
                     m_isDragging = true;
                     m_isResizing = false;
-                    m_dragPos = mouseEvent->globalPosition().toPoint() - frameGeometry().topLeft();
+                    m_dragPos = globalPos - frameGeometry().topLeft();
                     event->accept();
                     return true;
                 }
             }
         }
         else if (event->type() == QEvent::MouseButtonRelease && mouseEvent->button() == Qt::LeftButton) {
-            m_isDragging = false;
-            m_isResizing = false;
-            m_resizeEdge = None;
-            setCursor(Qt::ArrowCursor);
-            event->accept();
-            return true;
+            if (m_isResizing) {
+                m_isResizing = false;
+                m_resizeEdge = None;
+                releaseMouse();
+                setCursor(Qt::ArrowCursor);
+                event->accept();
+                return true;
+            }
+            if (m_isDragging) {
+                m_isDragging = false;
+                event->accept();
+                return true;
+            }
         }
         else if (event->type() == QEvent::MouseMove) {
             if (m_isResizing) {
-                QPoint globalDelta = mouseEvent->globalPosition().toPoint() - m_dragPos;
-                m_dragPos = mouseEvent->globalPosition().toPoint();
+                QPoint globalDelta = globalPos - m_dragPos;
+                m_dragPos = globalPos;
 
                 QRect geom = geometry();
                 int minW = minimumWidth();
@@ -917,28 +933,16 @@ bool TagPickerPopover::eventFilter(QObject* watched, QEvent* event) {
                 event->accept();
                 return true;
             } else if (m_isDragging) {
-                move(mouseEvent->globalPosition().toPoint() - m_dragPos);
+                move(globalPos - m_dragPos);
                 event->accept();
                 return true;
             } else {
-                updateCursorShape(localPos);
+                if (rect().contains(localPos)) {
+                    updateCursorShape(localPos);
+                } else {
+                    setCursor(Qt::ArrowCursor);
+                }
             }
-        } else if (event->type() == QEvent::HoverMove) {
-            updateCursorShape(localPos);
-        }
-    }
-
-    // 全局鼠标点击：点击 Popover 外部时自动隐藏
-    if (event->type() == QEvent::MouseButtonPress) {
-        auto* mouseEvent = static_cast<QMouseEvent*>(event);
-        QPoint globalPos = mouseEvent->globalPosition().toPoint();
-        QPoint localPos = mapFromGlobal(globalPos);
-        if (!rect().contains(localPos)) {
-            hide();
-            if (qApp) {
-                qApp->removeEventFilter(this);
-            }
-            return false; // 放行点击，让外部响应
         }
     }
 
