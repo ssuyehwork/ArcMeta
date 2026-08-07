@@ -121,21 +121,25 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
     if (sourceRow < 0 || sourceRow >= (int)records.size()) return false; 
     const auto& record = records[sourceRow]; 
  
-    // 1. 文件夹与分类卡片控制 
-    if (record.isCategory || record.isDir) { 
-        auto* contentPanel = qobject_cast<ContentPanel*>(parent()); 
-        bool isDiskMode = contentPanel && (contentPanel->dataSourceType() == ContentPanel::DataSourceType::DiskNav); 
-        bool isEmptyFolder = isDiskMode && record.isDir && record.isEmpty; 
- 
-        bool isFolderExplicitlySelected = currentFilter.types.contains("folder") ||  
-                                         (isEmptyFolder && currentFilter.types.contains("空文件夹")); 
-         
-        if (!currentFilter.showFolders && !isFolderExplicitlySelected) { 
-            return false; 
+    auto* contentPanel = qobject_cast<ContentPanel*>(parent());
+    bool isTrashView = contentPanel && (contentPanel->getCurrentCategoryType() == "trash");
+
+    // 1. 文件夹与分类卡片控制 (回收站视图下不执行“显示/隐藏文件和文件夹”过滤限制，确保双轨资产百分百正常呈现)
+    if (!isTrashView) {
+        if (record.isCategory || record.isDir) {
+            bool isDiskMode = contentPanel && (contentPanel->dataSourceType() == ContentPanel::DataSourceType::DiskNav);
+            bool isEmptyFolder = isDiskMode && record.isDir && record.isEmpty;
+
+            bool isFolderExplicitlySelected = currentFilter.types.contains("folder") ||
+                                             (isEmptyFolder && currentFilter.types.contains("空文件夹"));
+
+            if (!currentFilter.showFolders && !isFolderExplicitlySelected) {
+                return false;
+            }
+        } else {
+            if (!currentFilter.showFiles) return false;
         } 
-    } else { 
-        if (!currentFilter.showFiles) return false; 
-    } 
+    }
 
     // 1. 评级过滤 
     if (!currentFilter.ratings.isEmpty()) { 
