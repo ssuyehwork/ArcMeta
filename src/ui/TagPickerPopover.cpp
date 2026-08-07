@@ -316,6 +316,8 @@ void TagPickerPopover::setSidebarVisible(bool visible) {
         setMinimumWidth(300);
         setMaximumWidth(800);
         resize(qMax(300, width()), height());
+        // 展开侧边栏时，自动激活或高亮当前选中的左侧分组以确保展现列表数据
+        updateSidebarHighlight();
     } else {
         setMinimumWidth(180);
         setMaximumWidth(800);
