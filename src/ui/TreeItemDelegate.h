@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include "ContentPanel.h"
 #include "../meta/MetadataManager.h"
+#include "../core/ModelContract.h"
 #include "UiHelper.h"
 #include "CardPainterHelper.h"
 #include "StyleLibrary.h"
@@ -28,6 +29,34 @@ public:
     
     void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
         if (!index.isValid()) return;
+
+        // 双轨回收站与分组展示：如果该项为组标题，在树形/列表模式下独立绘制
+        if (index.data(IsGroupHeaderRole).toBool()) {
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing, true);
+
+            // 绘制稍微偏暗或整洁的背景色
+            painter->fillRect(option.rect, QColor("#1c1c1c"));
+
+            // 仅在最左侧第一列绘制大标题文字，其余列只绘制分界线
+            if (index.column() == 0) {
+                painter->setPen(QPen(QColor("#333333"), 1, Qt::SolidLine));
+                painter->drawLine(option.rect.left(), option.rect.bottom() - 1, option.rect.right(), option.rect.bottom() - 1);
+
+                QFont font("Microsoft YaHei", 10, QFont::Bold);
+                painter->setFont(font);
+                painter->setPen(QColor("#1abc9c"));
+
+                QString text = index.data(Qt::DisplayRole).toString();
+                painter->drawText(option.rect.adjusted(10, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, text);
+            } else {
+                painter->setPen(QPen(QColor("#333333"), 1, Qt::SolidLine));
+                painter->drawLine(option.rect.left(), option.rect.bottom() - 1, option.rect.right(), option.rect.bottom() - 1);
+            }
+
+            painter->restore();
+            return;
+        }
 
         bool selected = option.state & QStyle::State_Selected;
         bool hover = option.state & QStyle::State_MouseOver;

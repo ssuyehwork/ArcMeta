@@ -25,6 +25,13 @@ struct ItemRecord {
     QString categoryName;
     QString categoryColor;
 
+    // 双轨回收站与分组展示专属字段
+    bool isGroupHeader = false;
+    QString groupName;
+    bool isDiskTrash = false;
+    int diskTrashId = 0;
+    QString originalPath;
+
     // 2026-06-xx 物理对标：注入核心元数据，杜绝 UI 渲染时的同步 I/O
     int rating = 0;
     QString manualColor;
