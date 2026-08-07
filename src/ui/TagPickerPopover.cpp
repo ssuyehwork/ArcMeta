@@ -3,6 +3,7 @@
 #include "../meta/CategoryRepo.h"
 #include "../meta/TagRepository.h"
 #include "UiHelper.h"
+#include "../core/AppConfig.h"
 #include <QPainter>
 #include <QFontMetrics>
 #include <QScrollBar>
@@ -95,10 +96,9 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
     setAttribute(Qt::WA_TranslucentBackground);
     setFocusPolicy(Qt::StrongFocus);
 
-    // 物理开启输入法上下文，允许 Windows 输入法 (IME) 正常挂载
-    setAttribute(Qt::WA_InputMethodEnabled, true);
-
-    resize(320, 260); // 调整尺寸，使其在 480x360 主对话框中适配完美
+    // 读取折叠/展开习惯
+    bool sidebarVisible = AppConfig::instance().getValue("TagPicker/SidebarVisible", true).toBool();
+    resize(sidebarVisible ? 400 : 200, 260); // 动态初始化尺寸
 
     // 主布局
     auto* mainLayout = new QVBoxLayout(this);
@@ -143,15 +143,59 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
     // 1:1 矢量图标配置
     // 左侧：搜索图标
     m_searchEdit->addAction(UiHelper::getIcon("search", QColor("#888888"), 14), QLineEdit::LeadingPosition);
-    // 右侧：网格布局与筛选按钮
-    m_searchEdit->addAction(UiHelper::getIcon("layout_grid", QColor("#888888"), 14), QLineEdit::TrailingPosition);
+
+    // 右侧：网格布局（控制左侧栏收展）与筛选按钮
+    auto* sidebarAction = m_searchEdit->addAction(UiHelper::getIcon("layout_grid", QColor("#888888"), 14), QLineEdit::TrailingPosition);
+    connect(sidebarAction, &QAction::triggered, this, &TagPickerPopover::toggleSidebar);
+
     m_searchEdit->addAction(UiHelper::getIcon("filter_funnel_outline", QColor("#888888"), 14), QLineEdit::TrailingPosition);
 
     m_searchEdit->installEventFilter(this);
     connect(m_searchEdit, &QLineEdit::textChanged, this, &TagPickerPopover::onSearchTextChanged);
     containerLayout->addWidget(m_searchEdit);
 
-    // 2. 滚动区
+    // 2. 双栏布局核心装载
+    m_columnsLayout = new QHBoxLayout();
+    m_columnsLayout->setContentsMargins(0, 0, 0, 0);
+    m_columnsLayout->setSpacing(0);
+
+    // 2.1 左侧栏：标签组侧边栏 (宽120px)
+    m_sidebarWidget = new QWidget(container);
+    m_sidebarWidget->setFixedWidth(120);
+    m_sidebarWidget->setStyleSheet("background: transparent;");
+    auto* sidebarLayoutOuter = new QVBoxLayout(m_sidebarWidget);
+    sidebarLayoutOuter->setContentsMargins(0, 0, 0, 0);
+    sidebarLayoutOuter->setSpacing(0);
+
+    m_sidebarScroll = new QScrollArea(m_sidebarWidget);
+    m_sidebarScroll->setWidgetResizable(true);
+    m_sidebarScroll->setFrameShape(QFrame::NoFrame);
+    m_sidebarScroll->setStyleSheet("QScrollArea { background: transparent; }");
+    m_sidebarScroll->verticalScrollBar()->setStyleSheet(
+        "QScrollBar:vertical { background: transparent; width: 4px; }"
+        "QScrollBar::handle:vertical { background: #333; border-radius: 2px; }"
+    );
+
+    m_sidebarContainer = new QWidget(m_sidebarScroll);
+    m_sidebarContainer->setStyleSheet("background: transparent;");
+    m_sidebarLayout = new QVBoxLayout(m_sidebarContainer);
+    m_sidebarLayout->setContentsMargins(0, 0, 4, 0);
+    m_sidebarLayout->setSpacing(4);
+    m_sidebarLayout->addStretch(1); // 默认尾部拉伸
+
+    m_sidebarScroll->setWidget(m_sidebarContainer);
+    sidebarLayoutOuter->addWidget(m_sidebarScroll, 1);
+    m_columnsLayout->addWidget(m_sidebarWidget);
+
+    // 2.2 中间 1px 分割线 (#333333)
+    m_dividerLine = new QFrame(container);
+    m_dividerLine->setFrameShape(QFrame::VLine);
+    m_dividerLine->setFrameShadow(QFrame::Plain);
+    m_dividerLine->setFixedWidth(1);
+    m_dividerLine->setStyleSheet("background-color: #333333; border: none;");
+    m_columnsLayout->addWidget(m_dividerLine);
+
+    // 2.3 右侧栏：滚动列表区
     m_scrollArea = new QScrollArea(container);
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setFrameShape(QFrame::NoFrame);
@@ -166,7 +210,7 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
     m_scrollContainer = new QWidget(m_scrollArea);
     m_scrollContainer->setStyleSheet("background: transparent;");
     m_scrollLayout = new QVBoxLayout(m_scrollContainer);
-    m_scrollLayout->setContentsMargins(0, 0, 4, 0);
+    m_scrollLayout->setContentsMargins(8, 0, 4, 0);
     m_scrollLayout->setSpacing(12);
 
     // 最近使用分组（QGridLayout 二列网格排布）
@@ -219,13 +263,18 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
 
     m_scrollLayout->addStretch(1);
     m_scrollArea->setWidget(m_scrollContainer);
-    containerLayout->addWidget(m_scrollArea, 1);
+    m_columnsLayout->addWidget(m_scrollArea);
+
+    containerLayout->addLayout(m_columnsLayout, 1);
 
     // 3. 底部提示条
     m_hintLabel = new QLabel("移动 ↑↓←→  选中 ↵  关闭 ESC", container);
     m_hintLabel->setStyleSheet("color: #666666; font-size: 11px;");
     m_hintLabel->setAlignment(Qt::AlignCenter);
     containerLayout->addWidget(m_hintLabel);
+
+    // 设置初始隐藏或显示状态
+    setSidebarVisible(sidebarVisible);
 }
 
 TagPickerPopover::~TagPickerPopover() {
@@ -234,57 +283,59 @@ TagPickerPopover::~TagPickerPopover() {
     }
 }
 
+void TagPickerPopover::toggleSidebar() {
+    bool isVisible = m_sidebarWidget->isVisible();
+    setSidebarVisible(!isVisible);
+}
+
+void TagPickerPopover::setSidebarVisible(bool visible) {
+    m_sidebarWidget->setVisible(visible);
+    m_dividerLine->setVisible(visible);
+
+    if (visible) {
+        setMinimumWidth(400);
+        setMaximumWidth(16777215);
+        resize(400, height());
+    } else {
+        setMinimumWidth(200);
+        setMaximumWidth(16777215);
+        resize(200, height());
+    }
+
+    // 保存配置
+    AppConfig::instance().setValue("TagPicker/SidebarVisible", visible);
+    AppConfig::instance().sync();
+}
+
 void TagPickerPopover::showAt(const QPoint& globalPos) {
-    // 每次从三源接口汇总全量去重标签集合
-    m_allTags = MetadataManager::instance().getAllTags();
+    // 每次从全量去重合并接口汇总标签数据
+    m_allTags = CategoryRepo::getGlobalUniqueTags();
 
-    // 合并分类预设标签
-    auto allCats = CategoryRepo::getAll();
-    for (const auto& cat : allCats) {
-        for (const auto& t : cat.presetTags) {
-            QString tagStr = QString::fromStdWString(t).trimmed();
-            if (!tagStr.isEmpty() && !m_allTags.contains(tagStr)) {
-                m_allTags[tagStr] = 0;
-            }
-        }
-    }
-
-    // 合并标签组标签
-    auto allRepoGroups = TagRepository::getAllGroups();
-    for (const auto& g : allRepoGroups) {
-        for (const auto& t : g.tags) {
-            QString tagStr = t.trimmed();
-            if (!tagStr.isEmpty() && !m_allTags.contains(tagStr)) {
-                m_allTags[tagStr] = 0;
-            }
-        }
-    }
-
-    // 根据引用计数频次降序排序提取前 10 个作为最近使用，其余按升序排布
+    // 降序排序提炼最近使用的标签 (频次最高的前 10 个)
     m_topTags.clear();
     QList<QPair<QString, int>> tempSorted;
     for (auto it = m_allTags.begin(); it != m_allTags.end(); ++it) {
         tempSorted.append({it.key(), it.value()});
     }
-    // 降序排序
     std::sort(tempSorted.begin(), tempSorted.end(), [](const QPair<QString, int>& a, const QPair<QString, int>& b) {
         return a.second > b.second;
     });
-
     for (int i = 0; i < qMin(10, tempSorted.size()); ++i) {
         m_topTags.append(tempSorted[i]);
     }
 
     m_searchEdit->clear();
+    m_focusZone = SearchBar; // 默认焦点初始化在搜索框
+
+    refreshSidebar();
     refreshList();
 
-    // 计算父窗口中的相对位置，确保悬浮框完全容纳在父对话框内，不超出边界
+    // 计算坐标换算
     if (parentWidget()) {
         QPoint localPos = parentWidget()->mapFromGlobal(globalPos);
         int x = localPos.x();
         int y = localPos.y();
 
-        // 保证悬浮窗不会穿透/超出父对话框
         if (x + width() > parentWidget()->width()) {
             x = parentWidget()->width() - width() - 10;
         }
@@ -298,14 +349,115 @@ void TagPickerPopover::showAt(const QPoint& globalPos) {
     }
 
     show();
-    raise(); // 置于最顶层 Z-order，确保遮挡下方其它控件
+    raise();
     m_searchEdit->setFocus();
 
-    // 注册全局事件过滤器以实现点击外部自动关闭
+    // 注册全局事件过滤器
     if (qApp) {
-        qApp->removeEventFilter(this); // 防止重复注册
+        qApp->removeEventFilter(this);
         qApp->installEventFilter(this);
     }
+}
+
+void TagPickerPopover::refreshSidebar() {
+    // 1. 清除旧按钮
+    qDeleteAll(m_sidebarButtons);
+    m_sidebarButtons.clear();
+    m_selectedSidebarIndex = 0;
+
+    // 清除布局中的所有组件（不包括最后的 stretch）
+    for (int i = m_sidebarLayout->count() - 1; i >= 0; --i) {
+        QLayoutItem* item = m_sidebarLayout->itemAt(i);
+        if (item->widget()) {
+            item->widget()->deleteLater();
+            m_sidebarLayout->removeItem(item);
+            delete item;
+        }
+    }
+
+    // 2. 统计未分类的标签总数
+    QSet<QString> groupedTags;
+    auto allGroups = TagRepository::getAllGroups();
+    for (const auto& g : allGroups) {
+        for (const auto& t : g.tags) {
+            groupedTags.insert(t.trimmed());
+        }
+    }
+    int uncategorizedCount = 0;
+    for (auto it = m_allTags.begin(); it != m_allTags.end(); ++it) {
+        if (!groupedTags.contains(it.key())) {
+            uncategorizedCount++;
+        }
+    }
+
+    // 3. 构建“全部”与“未分类”按钮
+    auto createSidebarBtn = [this](const QString& label, int count, int groupId) {
+        QPushButton* btn = new QPushButton(m_sidebarContainer);
+        btn->setProperty("groupId", groupId);
+
+        QString btnText = QString("%1 (%2)").arg(label).arg(count);
+        btn->setText(btnText);
+
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setStyleSheet(
+            "QPushButton { text-align: left; background: transparent; border: none; color: #AAAAAA; padding: 6px 8px; font-size: 11px; border-radius: 4px; }"
+            "QPushButton:hover { background-color: #2D2D2D; color: #EEEEEE; }"
+        );
+        m_sidebarLayout->insertWidget(m_sidebarLayout->count() - 1, btn); // 插在 stretch 之前
+        m_sidebarButtons.append(btn);
+
+        connect(btn, &QPushButton::clicked, this, [this, btn]() {
+            int idx = m_sidebarButtons.indexOf(btn);
+            if (idx >= 0) {
+                m_selectedSidebarIndex = idx;
+                m_focusZone = SidebarZone;
+                updateSidebarHighlight();
+            }
+        });
+    };
+
+    createSidebarBtn("全部", m_allTags.size(), -1);
+    createSidebarBtn("未分类", uncategorizedCount, -2);
+
+    // 4. 构建自定义标签组按钮
+    for (const auto& g : allGroups) {
+        createSidebarBtn(g.name, g.tags.size(), g.id);
+    }
+
+    updateSidebarHighlight();
+}
+
+void TagPickerPopover::updateSidebarHighlight() {
+    if (m_selectedSidebarIndex < 0 || m_selectedSidebarIndex >= m_sidebarButtons.size()) {
+        return;
+    }
+
+    m_selectedGroupId = m_sidebarButtons[m_selectedSidebarIndex]->property("groupId").toInt();
+
+    for (int i = 0; i < m_sidebarButtons.size(); ++i) {
+        QPushButton* btn = m_sidebarButtons[i];
+        bool isActive = (i == m_selectedSidebarIndex);
+        if (isActive) {
+            btn->setStyleSheet(
+                "QPushButton { text-align: left; background-color: #2A2A2A; border: none; color: #1abc9c; padding: 6px 8px; font-weight: bold; font-size: 11px; border-radius: 4px; }"
+            );
+            m_sidebarScroll->ensureWidgetVisible(btn);
+        } else {
+            btn->setStyleSheet(
+                "QPushButton { text-align: left; background: transparent; border: none; color: #AAAAAA; padding: 6px 8px; font-size: 11px; border-radius: 4px; }"
+                "QPushButton:hover { background-color: #2D2D2D; color: #EEEEEE; }"
+            );
+        }
+    }
+
+    // 焦点边框指示
+    if (m_focusZone == SidebarZone) {
+        m_sidebarWidget->setStyleSheet("QWidget { border: 1px solid #1abc9c; border-radius: 4px; }");
+    } else {
+        m_sidebarWidget->setStyleSheet("QWidget { border: none; }");
+    }
+
+    refreshList();
 }
 
 void TagPickerPopover::refreshList() {
@@ -331,14 +483,55 @@ void TagPickerPopover::refreshList() {
 
     QString searchFilter = m_searchEdit->text().trimmed().toLower();
 
+    // 2. 统计并收集符合左侧栏分组和顶部过滤要求的标签
+    QSet<QString> activeTags; // 最终要展示的标签集合
+
+    QSet<QString> groupedTags; // 用于未分类分组判定
+    auto allGroups = TagRepository::getAllGroups();
+    for (const auto& g : allGroups) {
+        for (const auto& t : g.tags) {
+            groupedTags.insert(t.trimmed());
+        }
+    }
+
+    if (m_selectedGroupId == -1) {
+        // 全部
+        for (auto it = m_allTags.begin(); it != m_allTags.end(); ++it) {
+            activeTags.insert(it.key());
+        }
+    } else if (m_selectedGroupId == -2) {
+        // 未分类
+        for (auto it = m_allTags.begin(); it != m_allTags.end(); ++it) {
+            if (!groupedTags.contains(it.key())) {
+                activeTags.insert(it.key());
+            }
+        }
+    } else {
+        // 特定标签组
+        for (const auto& g : allGroups) {
+            if (g.id == m_selectedGroupId) {
+                for (const auto& t : g.tags) {
+                    QString tagStr = t.trimmed();
+                    if (!tagStr.isEmpty() && m_allTags.contains(tagStr)) {
+                        activeTags.insert(tagStr);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     // 记录已经添加到“最近”分组的标签名，避免“其它”分组中重复展示
     QSet<QString> displayedRecentTags;
 
-    // 2. 渲染“最近使用”分组
+    // 3. 渲染“最近使用”分组
     int recentCount = 0;
     for (const auto& pair : m_topTags) {
         QString tagName = pair.first;
         int count = pair.second;
+
+        // 需满足当前分组与搜索双重过滤
+        if (!activeTags.contains(tagName)) continue;
         if (!searchFilter.isEmpty() && !tagName.toLower().contains(searchFilter)) {
             continue;
         }
@@ -358,16 +551,15 @@ void TagPickerPopover::refreshList() {
         btn->installEventFilter(this);
     }
 
-    // 3. 渲染“其它 / 全局标签库”分组
+    // 4. 渲染“其它 / 全局标签库”分组
     int globalCount = 0;
     for (auto it = m_allTags.begin(); it != m_allTags.end(); ++it) {
         QString tagName = it.key();
         int count = it.value();
 
-        if (displayedRecentTags.contains(tagName)) {
-            continue;
-        }
-
+        // 需满足当前分组与搜索双重过滤，且不在最近使用中重复展示
+        if (!activeTags.contains(tagName)) continue;
+        if (displayedRecentTags.contains(tagName)) continue;
         if (!searchFilter.isEmpty() && !tagName.toLower().contains(searchFilter)) {
             continue;
         }
@@ -386,7 +578,7 @@ void TagPickerPopover::refreshList() {
         btn->installEventFilter(this);
     }
 
-    // 4. 显示与修改标题括号及显示状态
+    // 5. 显示与修改标题括号及显示状态
     m_recentLabel->setText(QString("最近使用 (%1)").arg(recentCount));
     bool hasRecent = recentCount > 0;
     m_recentGroup->setVisible(hasRecent);
@@ -395,7 +587,7 @@ void TagPickerPopover::refreshList() {
     bool hasGlobal = globalCount > 0;
     m_globalGroup->setVisible(hasGlobal);
 
-    // 5. 初始化默认选中
+    // 6. 初始化默认选中
     if (!m_visibleButtons.isEmpty()) {
         m_selectedIndex = 0;
         updateSelectionHighlight();
@@ -408,7 +600,8 @@ void TagPickerPopover::onSearchTextChanged(const QString&) {
 
 void TagPickerPopover::updateSelectionHighlight() {
     for (int i = 0; i < m_visibleButtons.size(); ++i) {
-        m_visibleButtons[i]->setSelected(i == m_selectedIndex);
+        bool shouldHighlight = (m_focusZone == GridZone) ? (i == m_selectedIndex) : false;
+        m_visibleButtons[i]->setSelected(shouldHighlight);
     }
 
     // 滚动区域自适应可视滚动，确保当前选中的按钮可见
@@ -439,6 +632,58 @@ void TagPickerPopover::keyPressEvent(QKeyEvent* event) {
         return;
     }
 
+    // 🚨 核心逻辑：Tab 键轮转焦点
+    if (event->key() == Qt::Key_Tab) {
+        if (m_focusZone == SearchBar) {
+            if (m_sidebarWidget->isVisible()) {
+                m_focusZone = SidebarZone;
+                m_searchEdit->clearFocus();
+                updateSidebarHighlight();
+                updateSelectionHighlight();
+            } else {
+                m_focusZone = GridZone;
+                m_searchEdit->clearFocus();
+                updateSelectionHighlight();
+            }
+        } else if (m_focusZone == SidebarZone) {
+            m_focusZone = GridZone;
+            m_sidebarWidget->setStyleSheet("QWidget { border: none; }");
+            updateSelectionHighlight();
+        } else {
+            m_focusZone = SearchBar;
+            m_searchEdit->setFocus();
+            updateSelectionHighlight();
+        }
+        event->accept();
+        return;
+    }
+
+    // 🚨 核心逻辑：左侧栏活动状态时的方向键与回车处理
+    if (m_focusZone == SidebarZone) {
+        int count = m_sidebarButtons.size();
+        if (count > 0) {
+            if (event->key() == Qt::Key_Down) {
+                m_selectedSidebarIndex = (m_selectedSidebarIndex + 1) % count;
+                updateSidebarHighlight();
+                event->accept();
+                return;
+            } else if (event->key() == Qt::Key_Up) {
+                m_selectedSidebarIndex = (m_selectedSidebarIndex - 1 + count) % count;
+                updateSidebarHighlight();
+                event->accept();
+                return;
+            } else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+                // 回车跳转到右侧标签网格
+                m_focusZone = GridZone;
+                updateSidebarHighlight();
+                updateSelectionHighlight();
+                event->accept();
+                return;
+            }
+        }
+    }
+
+    // 🚨 核心逻辑：右侧网格或搜索框的方向键与回车处理
     int btnCount = m_visibleButtons.size();
     if (btnCount > 0) {
         if (event->key() == Qt::Key_Down || event->key() == Qt::Key_Right) {
@@ -512,7 +757,7 @@ bool TagPickerPopover::eventFilter(QObject* watched, QEvent* event) {
         int key = keyEvent->key();
         if (key == Qt::Key_Down || key == Qt::Key_Up ||
             key == Qt::Key_Return || key == Qt::Key_Enter ||
-            key == Qt::Key_Escape)
+            key == Qt::Key_Escape || key == Qt::Key_Tab)
         {
             // 直接由 Popover 的 keyPressEvent 统一处理
             this->keyPressEvent(keyEvent);
@@ -527,6 +772,7 @@ bool TagPickerPopover::eventFilter(QObject* watched, QEvent* event) {
             int idx = m_visibleButtons.indexOf(btn);
             if (idx >= 0 && idx != m_selectedIndex) {
                 m_selectedIndex = idx;
+                m_focusZone = GridZone; // 鼠标划入时自动激活右侧 Grid 焦点状态
                 updateSelectionHighlight();
             }
         }

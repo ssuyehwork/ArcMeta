@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QGridLayout>
 #include <QList>
 #include <QMap>
@@ -15,6 +16,7 @@
 #include <QPaintEvent>
 #include <QShowEvent>
 #include <QFocusEvent>
+#include <QFrame>
 
 namespace ArcMeta {
 
@@ -45,11 +47,13 @@ private:
 };
 
 /**
- * @brief 标签检索与选择悬浮弹出框
+ * @brief 标签检索与选择悬浮弹出框 (双栏 SVG 标签选择器)
  */
 class TagPickerPopover : public QWidget {
     Q_OBJECT
 public:
+    enum FocusZone { SearchBar, SidebarZone, GridZone };
+
     explicit TagPickerPopover(QWidget* parent = nullptr);
     ~TagPickerPopover() override;
 
@@ -57,6 +61,12 @@ public:
      * @brief 弹出并展示在指定位置下方
      */
     void showAt(const QPoint& globalPos);
+
+    /**
+     * @brief 切换左侧栏显示与折叠状态
+     */
+    void toggleSidebar();
+    void setSidebarVisible(bool visible);
 
 signals:
     void tagSelected(const QString& tagName);
@@ -71,16 +81,36 @@ private slots:
     void onSearchTextChanged(const QString& text);
 
 private:
+    void refreshSidebar();
     void refreshList();
     void updateSelectionHighlight();
+    void updateSidebarHighlight();
     void selectCurrent();
 
+    // 搜索栏
     QLineEdit* m_searchEdit = nullptr;
+
+    // 双栏布局
+    QHBoxLayout* m_columnsLayout = nullptr;
+
+    // 左侧栏：标签组侧边栏
+    QWidget* m_sidebarWidget = nullptr;
+    QScrollArea* m_sidebarScroll = nullptr;
+    QWidget* m_sidebarContainer = nullptr;
+    QVBoxLayout* m_sidebarLayout = nullptr;
+    QList<QPushButton*> m_sidebarButtons;
+    int m_selectedSidebarIndex = 0; // 当前选中的侧边栏按钮索引
+    int m_selectedGroupId = -1;     // -1: 全部, -2: 未分类, >0: 自定义组ID
+
+    // 中间分割线
+    QFrame* m_dividerLine = nullptr;
+
+    // 右侧栏：滚动列表区
     QScrollArea* m_scrollArea = nullptr;
     QWidget* m_scrollContainer = nullptr;
     QVBoxLayout* m_scrollLayout = nullptr;
 
-    // 分组
+    // 右侧分组容器
     QWidget* m_recentGroup = nullptr;
     QLabel* m_recentLabel = nullptr;
     QWidget* m_recentContainer = nullptr;
@@ -92,6 +122,9 @@ private:
     QGridLayout* m_globalGrid = nullptr;
 
     QLabel* m_hintLabel = nullptr;
+
+    // 键盘焦点游走
+    FocusZone m_focusZone = SearchBar;
 
     // 数据缓存
     QList<TagItemButton*> m_visibleButtons;

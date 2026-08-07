@@ -1266,38 +1266,36 @@ int CategoryRepo::getUncategorizedItemCount() {
     return getSystemCounts()["uncategorized"];
 }
 
-int CategoryRepo::getGlobalTagsCount() {
-    QSet<QString> uniqueTags;
+QMap<QString, int> CategoryRepo::getGlobalUniqueTags() {
+    QMap<QString, int> mergedTags = MetadataManager::instance().getAllTags();
 
-    // 1. 已标记文件标签 (文件标签数据源)
-    QMap<QString, int> fileTags = MetadataManager::instance().getAllTags();
-    for (auto it = fileTags.begin(); it != fileTags.end(); ++it) {
-        uniqueTags.insert(it.key());
-    }
-
-    // 2. 分类预设标签 (分类预设数据源)
+    // 合并数据源 B：分类中的预设标签 (Category Preset Tags)
     auto allCats = getAll();
     for (const auto& cat : allCats) {
         for (const auto& t : cat.presetTags) {
             QString tagStr = QString::fromStdWString(t).trimmed();
-            if (!tagStr.isEmpty()) {
-                uniqueTags.insert(tagStr);
+            if (!tagStr.isEmpty() && !mergedTags.contains(tagStr)) {
+                mergedTags[tagStr] = 0; // 即使文件还没打标签，也以数量 0 进行展示
             }
         }
     }
 
-    // 3. 标签组标签 (标签组数据源)
+    // 合并数据源 C：标签组中的标签 (Tag Group Tags)
     auto allRepoGroups = TagRepository::getAllGroups();
     for (const auto& g : allRepoGroups) {
         for (const auto& t : g.tags) {
             QString tagStr = t.trimmed();
-            if (!tagStr.isEmpty()) {
-                uniqueTags.insert(tagStr);
+            if (!tagStr.isEmpty() && !mergedTags.contains(tagStr)) {
+                mergedTags[tagStr] = 0; // 即使文件还没打标签，也以数量 0 进行展示
             }
         }
     }
 
-    return uniqueTags.size();
+    return mergedTags;
+}
+
+int CategoryRepo::getGlobalTagsCount() {
+    return getGlobalUniqueTags().size();
 }
 
 QMap<QString, int> CategoryRepo::getSystemCounts() {
