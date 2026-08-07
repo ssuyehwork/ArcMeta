@@ -84,6 +84,12 @@ public:
     static QMap<QString, int> getSystemCounts();
     static QStringList getSystemCategoryPaths(const QString& type);
 
+    /**
+     * @brief 获取全局所有唯一标签及其使用频次映射
+     * @return QMap<标签名, 使用次数>
+     */
+    static QMap<QString, int> getGlobalUniqueTags();
+
     // 条目关联逻辑
     static bool updateCategoryColorByPath(const std::wstring& path, const std::wstring& color);
     static bool renamePhysicalCategoryPath(const std::wstring& oldPath, const std::wstring& newPath);
