@@ -8,6 +8,7 @@
 #include "../meta/AmMetaJson.h"
 #include "../ui/MediaColorExtractor.h" // 🚨 补全头文件引入
 #include "../../util/DiskMediaExtractor.h"
+#include "../DiskBatchRenameService.h"
 
 using namespace ArcMeta;
 
@@ -94,6 +95,43 @@ void DiskItemModel::updateRecordMetadata(const QString& path) {
 
 bool DiskItemModel::setData(const QModelIndex& index, const QVariant& value, int role) {
     if (!index.isValid() || index.row() >= static_cast<int>(m_allRecords.size())) return false;
+
+    // 处理 F2 / 右键菜单行内重命名提交
+    if (role == Qt::EditRole && index.column() == 0) {
+        QString newName = value.toString().trimmed();
+        if (newName.isEmpty()) return false;
+
+        auto& record = m_allRecords[index.row()];
+        QString oldPath = record.path;
+        QFileInfo oldInfo(oldPath);
+
+        // 如果名字没有改变，直接返回
+        if (newName == oldInfo.fileName() || newName == oldInfo.completeBaseName()) return true;
+
+        // 补全后缀
+        QString suffix = oldInfo.suffix();
+        if (!suffix.isEmpty() && !newName.endsWith("." + suffix, Qt::CaseInsensitive)) {
+            newName += "." + suffix;
+        }
+
+        // 调用磁盘模式专属重命名服务（处理主文件 + disk_thumbs 缩略图迁移 + 数据库索引更新）
+        int count = DiskBatchRenameService::execute({oldPath.toStdWString()},
+                                                    {newName.toStdWString()},
+                                                    DiskOperationMode::Rename, "");
+        if (count > 0) {
+            QString newPath = QDir(oldInfo.absolutePath()).filePath(newName);
+            record.path = newPath;
+            record.filename = newName;
+
+            // 更新路径映射索引
+            m_pathToIndex.erase(oldPath);
+            m_pathToIndex[newPath] = index.row();
+
+            emit dataChanged(this->index(index.row(), 0), this->index(index.row(), columnCount() - 1));
+            return true;
+        }
+        return false;
+    }
 
     auto& record = m_allRecords[index.row()];
     QString path = record.path;
@@ -230,7 +268,11 @@ void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
 
 Qt::ItemFlags DiskItemModel::flags(const QModelIndex& index) const {
     if (!index.isValid()) return QAbstractTableModel::flags(index);
-    return QAbstractTableModel::flags(index) | Qt::ItemIsDragEnabled;
+    Qt::ItemFlags f = QAbstractTableModel::flags(index) | Qt::ItemIsDragEnabled;
+    if (index.column() == 0) {
+        f |= Qt::ItemIsEditable; // 🚨 解封第 0 列（文件名列）的行内编辑权限！
+    }
+    return f;
 }
 
 QVariant DiskItemModel::data(const QModelIndex& index, int role) const {

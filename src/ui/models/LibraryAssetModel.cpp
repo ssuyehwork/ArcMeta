@@ -13,6 +13,7 @@ using namespace ArcMeta;
 #include "../meta/CategoryRepo.h"
 #include "../meta/CapsuleMediaExtractor.h"
 #include "../core/UndoManager.h"
+#include "../MemoryBatchRenameService.h"
 #include "../core/BasicCommands.h"
 #include "MediaColorExtractor.h"
 #include <QtConcurrent>
@@ -102,12 +103,42 @@ void LibraryAssetModel::clearCacheForFolder(const QString& folderPath) {
 bool LibraryAssetModel::setData(const QModelIndex& index, const QVariant& value, int role) {
     if (!index.isValid() || index.row() >= static_cast<int>(m_allRecords.size())) return false;
 
+    // 处理 F2 / 右键菜单行内重命名提交
+    if (role == Qt::EditRole && index.column() == 0) {
+        QString newName = value.toString().trimmed();
+        if (newName.isEmpty()) return false;
+
+        auto& record = m_allRecords[index.row()];
+        QString oldPath = record.path;
+        QFileInfo oldInfo(oldPath);
+
+        if (newName == oldInfo.fileName() || newName == oldInfo.completeBaseName()) return true;
+
+        QString suffix = oldInfo.suffix();
+        if (!suffix.isEmpty() && !newName.endsWith("." + suffix, Qt::CaseInsensitive)) {
+            newName += "." + suffix;
+        }
+
+        // 调用内存胶囊模式专属重命名服务（处理 .arc 胶囊内主文件 + _thumbnail.png 重命名）
+        int count = MemoryBatchRenameService::execute({oldPath.toStdWString()},
+                                                      {newName.toStdWString()});
+        if (count > 0) {
+            QString newPath = QDir(oldInfo.absolutePath()).filePath(newName);
+            record.path = newPath;
+            record.filename = newName;
+
+            m_pathToIndex.erase(oldPath);
+            m_pathToIndex[newPath] = index.row();
+
+            emit recordRenamed(oldPath, newPath, newName);
+            emit dataChanged(this->index(index.row(), 0), this->index(index.row(), columnCount() - 1));
+            return true;
+        }
+        return false;
+    }
+
     const auto& record = m_allRecords[index.row()];
     QString path = record.path;
-
-    if (role == Qt::EditRole && index.column() == 0) {
-        return false; // 内存模式重命名由 ContentPanel 统一处理
-    }
 
     bool metaUpdated = false;
     if (role == RatingRole) {
@@ -188,7 +219,11 @@ bool LibraryAssetModel::setData(const QModelIndex& index, const QVariant& value,
 
 Qt::ItemFlags LibraryAssetModel::flags(const QModelIndex& index) const {
     if (!index.isValid()) return QAbstractTableModel::flags(index);
-    return QAbstractTableModel::flags(index) | Qt::ItemIsDragEnabled;
+    Qt::ItemFlags f = QAbstractTableModel::flags(index) | Qt::ItemIsDragEnabled;
+    if (index.column() == 0) {
+        f |= Qt::ItemIsEditable; // 🚨 解封内存模式第 0 列的编辑权限！
+    }
+    return f;
 }
 
 void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
