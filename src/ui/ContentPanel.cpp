@@ -1441,9 +1441,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             // [镜像源：归类与元数据编辑区]
             QMenu* categorizeMenu = menu.addMenu("归类到..."); 
             UiHelper::applyMenuStyle(categorizeMenu); 
-            auto categories = CategoryRepo::getRecentlyUsed(15); 
-            if (categories.empty()) categories = CategoryRepo::getAll();
-            if (categories.size() > 15) categories.resize(15);
+            auto categories = CategoryRepo::getCachedRecentlyUsed(15); 
+            if (categories.empty()) categories = CategoryRepo::getCachedAll();
 
             QAction* actToUncat = categorizeMenu->addAction(UiHelper::getIcon("uncategorized", QColor("#95a5a6"), 16), "回归“未分类”");
             actToUncat->setData(ActionCategorize);
@@ -1669,7 +1668,23 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
     addOrderAct("升序", Qt::AscendingOrder);
     addOrderAct("降序", Qt::DescendingOrder);
 
+    // =========================================================================
+    // 🚨 核心防死锁机制：右键菜单弹出前，暂时阻塞 Model 信号与 View 的 updates，
+    // 阻止后台缩略图异步完成回调在 menu.exec() 模态循环内强行触发父窗口重绘导致 Win32 死锁！
+    // =========================================================================
+    bool oldBlockModel = m_model ? m_model->signalsBlocked() : false;
+    bool oldUpdatesView = view->updatesEnabled();
+
+    if (m_model) m_model->blockSignals(true); // 抑制 dataChanged 分发
+    view->setUpdatesEnabled(false);           // 锁住父视图刷新，防止绘图冲突
+
     QAction* selectedAction = menu.exec(view->viewport()->mapToGlobal(pos)); 
+
+    // 菜单关闭后，立刻恢复信号与视图刷新
+    view->setUpdatesEnabled(oldUpdatesView);
+    if (m_model) m_model->blockSignals(oldBlockModel);
+    view->viewport()->update(); // 恢复后统一补刷一次
+
     if (!selectedAction || !selectedAction->data().isValid()) return; 
  
     ContextAction action = static_cast<ContextAction>(selectedAction->data().toInt()); 
@@ -2545,7 +2560,7 @@ void ContentPanel::loadCategory(int categoryId) {
         m_proxyModel->setSourceModel(m_model);
     }
 
-    Category cat = CategoryRepo::getById(categoryId);
+    Category cat = CategoryRepo::getCachedById(categoryId);
     if (cat.id > 0) {
         // 🚨【加锁保护拦截】：若分类加锁且当前未解锁
         if (cat.encrypted && !CategoryLockManager::instance().isUnlocked(categoryId)) {
