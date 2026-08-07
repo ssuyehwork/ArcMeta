@@ -108,7 +108,7 @@ TagPickerPopover::TagPickerPopover(QWidget* parent)
         "  background-color: #2D2D2D;"
         "  border: 1px solid #444444;"
         "  border-radius: 4px;"
-        "  padding: 0px 8px 0px 24px;" // 左侧给放大镜图标留出空间
+        "  padding: 0px 8px 0px 2px;" // 修正：将左 Padding 从 24px 缩减至 2px，消除文本脱节缺口
         "  color: #FFFFFF;"
         "  font-size: 12px;"
         "}"
