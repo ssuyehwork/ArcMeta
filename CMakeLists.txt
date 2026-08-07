@@ -161,6 +161,14 @@ set(SOURCES
     src/ui/AddressBar.h
     src/ui/MetaPanel.cpp
     src/ui/MetaPanel.h
+    src/ui/components/ElasticEdit.h
+    src/ui/components/ElasticEdit.cpp
+    src/ui/components/TagPill.h
+    src/ui/components/TagPill.cpp
+    src/ui/components/FlowLayout.h
+    src/ui/components/FlowLayout.cpp
+    src/ui/components/ColorPill.h
+    src/ui/components/ColorPill.cpp
     src/ui/NavPanel.cpp
     src/ui/NavPanel.h
     src/ui/BatchProgressDialog.h
