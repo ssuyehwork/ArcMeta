@@ -1974,11 +1974,11 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     }
                 }
             }
-            if (targetPaths.isEmpty() && diskTrashItems.isEmpty() && !path.isEmpty()) {
+            if (targetPaths.isEmpty() && diskTrashItems.empty() && !path.isEmpty()) {
                 targetPaths << path;
             }
 
-            if (targetPaths.isEmpty() && diskTrashItems.isEmpty()) break;
+            if (targetPaths.isEmpty() && diskTrashItems.empty()) break;
 
             if (action == ActionDelete) {
                 // 1. 开启内部操作锁
