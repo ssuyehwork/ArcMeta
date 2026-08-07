@@ -2765,7 +2765,7 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
         m_proxyModel->setSourceModel(m_model);
     }
 
-    if (paths.isEmpty()) {
+    if (paths.isEmpty() && m_currentCategoryType != "trash") {
         ArcMeta::Logger::log("[Content] loadPaths 收到空路径，执行同步清空");
         if (reqId == 0) m_loadRequestId++;
         else m_loadRequestId = reqId;
