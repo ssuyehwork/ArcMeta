@@ -46,6 +46,8 @@ set(SOURCES
     src/meta/sqlite3.h
     src/meta/AmMetaJson.cpp
     src/meta/AmMetaJson.h
+    src/meta/MetaCacheDecorator.cpp
+    src/meta/MetaCacheDecorator.h
     src/core/CoreController.cpp
     src/core/CoreController.h
     src/core/PhysicalDiskSearchExtractor.cpp
@@ -62,6 +64,8 @@ set(SOURCES
     src/core/DatabaseSynchronizer.h
     src/core/DiskScanService.cpp
     src/core/DiskScanService.h
+    src/core/FileFilterService.cpp
+    src/core/FileFilterService.h
     src/core/CategoryLoadService.cpp
     src/core/CategoryLoadService.h
     src/core/DiskTrashService.cpp
@@ -79,6 +83,8 @@ set(SOURCES
     src/crypto/EncryptionManager.h
     src/meta/CategoryRepo.cpp
     src/meta/CategoryRepo.h
+    src/meta/DiskTrashRepo.cpp
+    src/meta/DiskTrashRepo.h
     src/meta/TagRepository.cpp
     src/meta/TagRepository.h
     src/meta/DatabaseManager.cpp

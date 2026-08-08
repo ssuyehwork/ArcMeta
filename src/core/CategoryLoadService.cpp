@@ -2,24 +2,9 @@
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
 #include "CategoryLockManager.h"
-#include "../meta/DatabaseManager.h"
+#include "FileFilterService.h"
+#include "../meta/DiskTrashRepo.h"
 #include <QFileInfo>
-
-namespace {
-static inline bool isAuxiliaryFile(const QString& path) {
-    if (path.isEmpty()) return true;
-
-    // 🚨 仅保留 .ArcMeta.json，彻底清除 .am_meta.json 历史判断
-    // 🚨 修正：移除对 .arc 的过滤！.arc 是托管资源库真实的资产胶囊，绝非无用辅助文件
-    if (path.endsWith(".ArcMeta.json", Qt::CaseInsensitive) ||
-        path.endsWith("_thumbnail.png", Qt::CaseInsensitive) ||
-        path.endsWith("metadata.scch", Qt::CaseInsensitive)) {
-        return true; // 屏蔽过滤真正的辅助配置文件与缩略图
-    }
-
-    return false;
-}
-}
 
 namespace ArcMeta {
 
@@ -62,7 +47,7 @@ std::vector<ItemRecord> CategoryLoadService::loadCategoryItems(int categoryId, b
                 continue;
             }
             QString qPath = QString::fromStdWString(wPath);
-            if (isAuxiliaryFile(qPath)) {
+            if (FileFilterService::isAuxiliaryFile(qPath)) {
                 continue;
             }
             allRecords.push_back(ItemRecord::create(qPath, nullptr, true));
@@ -77,7 +62,7 @@ std::vector<ItemRecord> CategoryLoadService::loadPathItems(const QStringList& pa
     records.reserve(static_cast<int>(paths.size()));
     for (const QString& p : paths) {
         if (!p.isEmpty()) {
-            if (isAuxiliaryFile(p)) {
+            if (FileFilterService::isAuxiliaryFile(p)) {
                 continue;
             }
             std::string assetId = MetadataManager::instance().getFolderIdSync(p.toStdWString());
@@ -116,7 +101,7 @@ std::vector<ItemRecord> CategoryLoadService::loadTrashItems() {
 
         // 过滤辅助文件
         QString qPath = QString::fromStdWString(path);
-        if (isAuxiliaryFile(qPath)) {
+        if (FileFilterService::isAuxiliaryFile(qPath)) {
             return;
         }
 
@@ -125,47 +110,30 @@ std::vector<ItemRecord> CategoryLoadService::loadTrashItems() {
         libraryTrash.push_back(r);
     });
 
-    // 2. 数据集 B：目录导航物理回收项
-    std::vector<sqlite3*> dbs = DatabaseManager::instance().getActiveMemoryDbs();
-    for (sqlite3* db : dbs) {
-        sqlite3_stmt* stmt = nullptr;
-        const char* sql = "SELECT id, trash_path, original_path, drive_letter, file_name, is_folder, file_size, deleted_at FROM disk_trash";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                int id = sqlite3_column_int(stmt, 0);
-                const wchar_t* wTrashPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
-                const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
-                const wchar_t* wFileName = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
-                int isFolder = sqlite3_column_int(stmt, 5);
-                long long fileSize = sqlite3_column_int64(stmt, 6);
-                long long deletedAt = sqlite3_column_int64(stmt, 7);
+    // 2. 数据集 B：目录导航物理回收项（通过 DiskTrashRepo 获取，杜绝数据库句柄跨线程崩溃）
+    auto trashItems = DiskTrashRepo::getAllTrashItems();
+    for (const auto& item : trashItems) {
+        ItemRecord r;
+        r.path = QString::fromStdWString(item.trashPath);
+        r.originalPath = QString::fromStdWString(item.originalPath);
+        r.filename = !item.fileName.empty() ? QString::fromStdWString(item.fileName) : QFileInfo(r.path).fileName();
+        r.isDir = item.isFolder;
+        r.size = item.fileSize;
+        r.mtime = item.deletedAt;
+        r.ctime = item.deletedAt;
+        r.atime = item.deletedAt;
+        r.isDiskTrash = true;
+        r.diskTrashId = item.id;
+        r.groupName = "DiskNav";
 
-                if (wTrashPath && wOrigPath) {
-                    ItemRecord r;
-                    r.path = QString::fromWCharArray(wTrashPath);
-                    r.originalPath = QString::fromWCharArray(wOrigPath);
-                    r.filename = wFileName ? QString::fromWCharArray(wFileName) : QFileInfo(r.path).fileName();
-                    r.isDir = (isFolder != 0);
-                    r.size = fileSize;
-                    r.mtime = deletedAt;
-                    r.ctime = deletedAt;
-                    r.atime = deletedAt;
-                    r.isDiskTrash = true;
-                    r.diskTrashId = id;
-                    r.groupName = "DiskNav";
-
-                    if (r.isDir) {
-                        r.suffix = "";
-                    } else {
-                        int lastDot = r.filename.lastIndexOf('.');
-                        r.suffix = (lastDot != -1) ? r.filename.mid(lastDot + 1).toLower() : "";
-                    }
-
-                    diskTrash.push_back(r);
-                }
-            }
-            sqlite3_finalize(stmt);
+        if (r.isDir) {
+            r.suffix = "";
+        } else {
+            int lastDot = r.filename.lastIndexOf('.');
+            r.suffix = (lastDot != -1) ? r.filename.mid(lastDot + 1).toLower() : "";
         }
+
+        diskTrash.push_back(r);
     }
 
     std::vector<ItemRecord> allRecords;

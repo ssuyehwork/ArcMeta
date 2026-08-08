@@ -992,12 +992,47 @@ void MetadataManager::saveToDiskModeJson(const std::wstring& nPath, std::functio
     std::wstring folderPath = info.absolutePath().toStdWString();
     std::wstring fileName = info.fileName().toStdWString();
 
-    AmMetaJson jsonCache(folderPath);
-    jsonCache.load();
-    ItemMeta& meta = jsonCache.items()[fileName];
+    // 1. 同步写入到父级目录的 .ArcMeta.json 中（保证父级视图渲染出子目录的颜色 and 星级）
+    AmMetaJson parentJson(folderPath);
+    parentJson.load();
+    ItemMeta& meta = parentJson.items()[fileName];
     meta.type = info.isDir() ? L"folder" : L"file";
     updater(meta);
-    jsonCache.save(); // 物理落盘写进 ArcMeta.cache/*.json，零 SQLite 污染！
+    parentJson.save();
+
+    // 2. 极致治愈：如果是文件夹，将其对应的高级属性同步写入该文件夹自身的 .ArcMeta.json 中的 folder 节点！
+    // 这样当双击进入该子目录作为主视图时，子目录加载自己作为根，颜色和星级 100% 对等保留，绝对不会丢失！
+    if (info.isDir()) {
+        std::wstring selfPath = nPath;
+        AmMetaJson selfJson(selfPath);
+        selfJson.load();
+
+        FolderMeta& fMeta = selfJson.folder();
+        ItemMeta dummyItem; // 用 dummyItem 桥接 ItemMeta 与 FolderMeta 字段更新
+        dummyItem.rating = fMeta.rating;
+        dummyItem.color = fMeta.color;
+        dummyItem.pinned = fMeta.pinned;
+        dummyItem.note = fMeta.note;
+        dummyItem.url = fMeta.url;
+        dummyItem.encrypted = fMeta.encrypted;
+        dummyItem.folderId = fMeta.folderId;
+        dummyItem.tags = fMeta.tags;
+        dummyItem.palettes = fMeta.palettes;
+
+        updater(dummyItem); // 触发业务更新器
+
+        fMeta.rating = dummyItem.rating;
+        fMeta.color = dummyItem.color;
+        fMeta.pinned = dummyItem.pinned;
+        fMeta.note = dummyItem.note;
+        fMeta.url = dummyItem.url;
+        fMeta.encrypted = dummyItem.encrypted;
+        fMeta.folderId = dummyItem.folderId;
+        fMeta.tags = dummyItem.tags;
+        fMeta.palettes = dummyItem.palettes;
+
+        selfJson.save(); // 双向原子同步写入落盘！
+    }
 }
 
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {

@@ -96,6 +96,7 @@ using namespace ArcMeta::Style;
 #include "DiskScanService.h"
 #include "CategoryLoadService.h"
 #include "../ui/MediaColorExtractor.h"
+#include "../meta/MetaCacheDecorator.h"
  
 namespace ArcMeta { 
 
@@ -2539,6 +2540,9 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
             [panelPtr]() { return static_cast<bool>(panelPtr); }
         );
         if (!panelPtr) return; 
+
+        // 🚀 线程安全地装配离散业务元数据（支持单级与深层递归目录）
+        MetaCacheDecorator::decorate(allItems);
  
         QMetaObject::invokeMethod(QCoreApplication::instance(), [panelPtr, path, allItems, reqId]() { 
             if (panelPtr && panelPtr->m_loadRequestId == reqId) { 
