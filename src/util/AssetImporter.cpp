@@ -52,7 +52,6 @@ void AssetImporter::importAssets(const QStringList& paths,
         HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); 
 #endif 
  
-        int total = paths.size(); 
         int successCount = 0; 
         QStringList outImportedPaths;
  
