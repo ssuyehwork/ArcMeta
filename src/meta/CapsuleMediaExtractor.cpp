@@ -11,6 +11,8 @@
 
 namespace ArcMeta {
 
+std::mutex CapsuleMediaExtractor::s_qtGuiMutex;
+
 QString CapsuleMediaExtractor::getDiskThumbCachePath(const QString& mainAssetPath) {
     if (mainAssetPath.isEmpty()) return "";
     
@@ -58,7 +60,7 @@ QImage CapsuleMediaExtractor::getCapsuleThumbnail(const QString& mainAssetPath, 
     QImage img;
 
     if (ext == "svg") {
-        std::lock_guard<std::mutex> guiLock(s_qtGuiMutex);
+        std::lock_guard<std::mutex> guiLock(CapsuleMediaExtractor::s_qtGuiMutex);
         QSvgRenderer renderer(mainAssetPath);
         if (renderer.isValid()) {
             img = QImage(size, size, QImage::Format_ARGB32);
