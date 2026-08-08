@@ -27,46 +27,36 @@ void AssetImporter::importAssets(const QStringList& paths,
                                  int targetCatId, 
                                  QWidget* parent, 
                                  std::function<void()> onComplete) { 
-    if (paths.isEmpty()) return; 
- 
-    BatchProgressDialog* progress = new BatchProgressDialog("正在导入资产包...", parent); 
-    progress->show(); 
+    importAssets(paths, targetCatId, parent, [onComplete](const QStringList& /*imported*/) {
+        if (onComplete) onComplete();
+    });
+}
+
+void AssetImporter::importAssets(const QStringList& paths,
+                                 int targetCatId,
+                                 QWidget* /*parent*/,
+                                 std::function<void(const QStringList&)> onComplete) {
+    if (paths.isEmpty()) {
+        if (onComplete) onComplete({});
+        return;
+    }
  
     struct ImportContext { 
         std::atomic<bool> isCancelled{false}; 
         QFuture<void> future; 
     }; 
     auto context = std::make_shared<ImportContext>(); 
-    QPointer<BatchProgressDialog> weakProgress(progress); 
  
-    QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent]() { 
-        if (!weakProgress) return; 
-        if (!FramelessMessageBox::question(parent, "中断导入", "导入尚未完成。确定要停止当前导入吗？")) { 
-            weakProgress->show(); 
-            return; 
-        } 
-        context->isCancelled = true; 
-        if (context->future.isRunning()) context->future.waitForFinished(); 
-        weakProgress->deleteLater(); 
-    }); 
- 
-    context->future = QtConcurrent::run([paths, targetCatId, weakProgress, context, onComplete]() { 
+    context->future = QtConcurrent::run([paths, targetCatId, context, onComplete]() {
 #ifdef Q_OS_WIN 
         HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); 
 #endif 
  
-        int total = paths.size(); 
-        int handled = 0; 
         int successCount = 0; 
+        QStringList outImportedPaths;
  
         for (const QString& src : paths) { 
             if (context->isCancelled) break; 
- 
-            handled++; 
-            if (weakProgress) { 
-                QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Qt::QueuedConnection, 
-                                         Q_ARG(int, handled), Q_ARG(int, total), Q_ARG(QString, QFileInfo(src).fileName())); 
-            } 
  
             // 获取目标资源库物理根目录 
             QString managedRoot; 
@@ -85,7 +75,6 @@ void AssetImporter::importAssets(const QStringList& paths,
             if (managedRoot.isEmpty()) { 
                 QString drive = QFileInfo(src).absolutePath().left(3); 
                 if (drive.isEmpty()) {
-                    // 🚨 探针探测运行盘符，废除 D:/ 临时硬编码
                     drive = QCoreApplication::applicationDirPath().left(3);
                 }
                 if (drive.isEmpty()) {
@@ -102,9 +91,9 @@ void AssetImporter::importAssets(const QStringList& paths,
             QFileInfo srcInfo(src); 
             bool ok = false; 
             if (srcInfo.isFile()) { 
-                ok = importSingleFile(src, targetCatId, managedRoot); 
+                ok = importSingleFile(src, targetCatId, managedRoot, outImportedPaths);
             } else if (srcInfo.isDir()) { 
-                ok = importDirectoryRecursive(src, targetCatId, managedRoot); 
+                ok = importDirectoryRecursive(src, targetCatId, managedRoot, outImportedPaths);
             } 
             if (ok) successCount++; 
         } 
@@ -113,23 +102,20 @@ void AssetImporter::importAssets(const QStringList& paths,
         if (SUCCEEDED(hr)) CoUninitialize(); 
 #endif 
  
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, successCount, onComplete]() { 
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [context, successCount, onComplete, outImportedPaths]() {
             if (context->isCancelled) return; 
-            if (weakProgress) { 
-                weakProgress->accept(); 
-                weakProgress->deleteLater(); 
-            } 
             ToolTipOverlay::instance()->showText(QCursor::pos(), 
                 QString("已成功导入 %1 个受控资产单元").arg(successCount), 2000, QColor("#2ecc71")); 
  
-            if (onComplete) onComplete(); 
+            if (onComplete) onComplete(outImportedPaths);
         }); 
     }); 
-} 
+}
  
 bool AssetImporter::importSingleFile(const QString& srcPath, 
                                      int targetCatId, 
-                                     const QString& managedRoot) { 
+                                     const QString& managedRoot,
+                                     QStringList& outImportedPaths) {
     QFileInfo srcInfo(srcPath); 
     if (!srcInfo.exists() || !srcInfo.isFile()) return false; 
  
@@ -164,12 +150,17 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
  
     // 🚨 重构核心：废除所有手写原始 SQL！统一转发给 MetadataManager 单一权威管线登记入库 
     std::wstring wDestPath = QDir::toNativeSeparators(destPath).toStdWString(); 
-    return MetadataManager::instance().registerAsset(fileId.toStdString(), wDestPath, targetCatId); 
+    if (MetadataManager::instance().registerAsset(fileId.toStdString(), wDestPath, targetCatId)) {
+        outImportedPaths.append(destPath);
+        return true;
+    }
+    return false;
 } 
  
 bool AssetImporter::importDirectoryRecursive(const QString& srcDir, 
                                              int parentCatId, 
-                                             const QString& managedRoot) { 
+                                             const QString& managedRoot,
+                                             QStringList& outImportedPaths) {
     QFileInfo dirInfo(srcDir); 
     if (!dirInfo.exists() || !dirInfo.isDir()) return false; 
  
@@ -188,9 +179,9 @@ bool AssetImporter::importDirectoryRecursive(const QString& srcDir,
     QFileInfoList entries = dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name); 
     for (const QFileInfo& entry : entries) { 
         if (entry.isFile()) { 
-            importSingleFile(entry.absoluteFilePath(), cat.id, managedRoot); 
+            importSingleFile(entry.absoluteFilePath(), cat.id, managedRoot, outImportedPaths);
         } else if (entry.isDir()) { 
-            importDirectoryRecursive(entry.absoluteFilePath(), cat.id, managedRoot); 
+            importDirectoryRecursive(entry.absoluteFilePath(), cat.id, managedRoot, outImportedPaths);
         } 
     } 
  

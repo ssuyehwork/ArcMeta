@@ -1,5 +1,6 @@
 #include "DropJustifiedView.h"
 #include "ContentPanel.h"
+#include "DragPayloadFactory.h"
 #include <QDrag>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -18,7 +19,7 @@ DropJustifiedView::DropJustifiedView(QWidget* parent) : JustifiedView(parent) {
 }
 
 void DropJustifiedView::dragEnterEvent(QDragEnterEvent* event) {
-    if (event->mimeData()->hasUrls()) {
+    if (DragPayloadFactory::hasLocalUriFormat(event->mimeData())) {
         event->acceptProposedAction();
     } else {
         JustifiedView::dragEnterEvent(event);
@@ -26,9 +27,7 @@ void DropJustifiedView::dragEnterEvent(QDragEnterEvent* event) {
 }
 
 void DropJustifiedView::dragMoveEvent(QDragMoveEvent* event) {
-    if (event->mimeData()->hasUrls()) {
-        // 物理隔离：不调用 setCurrentIndex(idx)
-        // 物理同步：显式调用基类逻辑以激活放置指示器 (Drop Indicator)
+    if (DragPayloadFactory::hasLocalUriFormat(event->mimeData())) {
         JustifiedView::dragMoveEvent(event);
         event->acceptProposedAction();
     } else {
@@ -37,13 +36,8 @@ void DropJustifiedView::dragMoveEvent(QDragMoveEvent* event) {
 }
 
 void DropJustifiedView::dropEvent(QDropEvent* event) {
-    if (event->mimeData()->hasUrls()) {
-        QStringList paths;
-        for (const QUrl& u : event->mimeData()->urls()) {
-            if (u.isLocalFile()) {
-                paths << QDir::toNativeSeparators(u.toLocalFile());
-            }
-        }
+    if (DragPayloadFactory::hasLocalUriFormat(event->mimeData())) {
+        QStringList paths = DragPayloadFactory::extractPathsFromMime(event->mimeData());
         QModelIndex idx = indexAt(event->position().toPoint());
         if (!paths.isEmpty()) {
             emit pathsDropped(paths, idx);
@@ -58,23 +52,7 @@ void DropJustifiedView::startDrag(Qt::DropActions supportedActions) {
     QModelIndexList indexes = selectedIndexes();
     if (indexes.isEmpty()) return;
 
-    QMimeData* mimeData = model()->mimeData(indexes);
-    if (!mimeData) {
-        mimeData = new QMimeData();
-    }
-    QList<QUrl> urls;
-    for (const QModelIndex& idx : indexes) {
-        if (idx.column() == 0) {
-            QString path = idx.data(PathRole).toString(); 
-            if (!path.isEmpty() && QFileInfo::exists(path)) {
-                urls << QUrl::fromLocalFile(path);
-            }
-        }
-    }
-    
-    if (!urls.isEmpty()) {
-        mimeData->setUrls(urls);
-    }
+    QMimeData* mimeData = DragPayloadFactory::createMimeDataFromIndexes(indexes);
 
     QDrag* drag = new QDrag(this);
     drag->setMimeData(mimeData);
