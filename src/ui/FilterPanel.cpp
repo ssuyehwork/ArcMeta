@@ -1,5 +1,6 @@
 #include "FilterPanel.h"
 #include "../core/AppConfig.h"
+#include <QSet>
 #include "ToolTipOverlay.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
@@ -542,10 +543,19 @@ void FilterPanel::populate(
         return;
     }
 
+    // 计算当前非 0 手动色标的数量变化
+    auto getNonZeroColorKeys = [](const QMap<QString, int>& counts) {
+        QSet<QString> keys;
+        for (auto it = counts.begin(); it != counts.end(); ++it) {
+            if (it.value() > 0) keys.insert(it.key());
+        }
+        return keys;
+    };
+
     // 2026-xx-xx 按照 Plan-106：增量更新判定
     // 判定依据：如果各项的数量（Keys）没有发生物理变动，仅执行增量同步，不重建 UI
     bool structureChanged = (m_ratingCounts.keys() != ratingCounts.keys() ||
-                             m_colorCounts.keys() != colorCounts.keys() ||
+                             getNonZeroColorKeys(m_colorCounts) != getNonZeroColorKeys(colorCounts) ||
                              m_typeCounts.keys() != typeCounts.keys() ||
                              m_createDateCounts.keys() != createDateCounts.keys() ||
                              m_modifyDateCounts.keys() != modifyDateCounts.keys() ||
@@ -938,12 +948,16 @@ void FilterPanel::rebuildGroups() {
         for (const auto& pair : exactManualColors) {
             QString name = pair.first;
             QString hex = pair.second;
-            // 精准获取手动绑定了该色值的项目数量
             int count = m_colorCounts.value(hex, 0); 
+            bool isChecked = m_filter.manualExactColors.contains(hex);
 
-            // 使用整行复选框 addFilterRow 渲染（左侧带圆点色标、中间名称、右侧数字）
+            // 核心规则：仅当数量 > 0 或当前已被用户勾选时才渲染显示；计数为 0 且未勾选的自动隐藏
+            if (count == 0 && !isChecked) {
+                continue;
+            }
+
             QCheckBox* cb = addFilterRow(gl, name, count, QColor(hex));
-            cb->setChecked(m_filter.manualExactColors.contains(hex));
+            cb->setChecked(isChecked);
 
             connect(cb, &QCheckBox::toggled, this, [this, hex](bool on) {
                 if (on) {
