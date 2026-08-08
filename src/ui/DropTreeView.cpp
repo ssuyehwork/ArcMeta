@@ -1,6 +1,7 @@
 #include "DropTreeView.h"
 #include "CategoryModel.h"
 #include "ContentPanel.h"
+#include "DragPayloadFactory.h"
 #include <QDrag>
 #include <QPainter>
 #include <QDragEnterEvent>
@@ -21,8 +22,6 @@ DropTreeView::DropTreeView(QWidget* parent) : QTreeView(parent) {
     setAcceptDrops(true);
     setDropIndicatorShown(true);
 }
-
-#include "DragPayloadFactory.h"
 
 void DropTreeView::dragEnterEvent(QDragEnterEvent* event) {
     if (DragPayloadFactory::hasLocalUriFormat(event->mimeData())) {

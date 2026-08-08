@@ -1,5 +1,6 @@
 #include "DropJustifiedView.h"
 #include "ContentPanel.h"
+#include "DragPayloadFactory.h"
 #include <QDrag>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -16,8 +17,6 @@ DropJustifiedView::DropJustifiedView(QWidget* parent) : JustifiedView(parent) {
     setDragEnabled(true);
     setAcceptDrops(true);
 }
-
-#include "DragPayloadFactory.h"
 
 void DropJustifiedView::dragEnterEvent(QDragEnterEvent* event) {
     if (DragPayloadFactory::hasLocalUriFormat(event->mimeData())) {
