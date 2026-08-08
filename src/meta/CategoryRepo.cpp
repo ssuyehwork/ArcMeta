@@ -365,7 +365,9 @@ bool CategoryRepo::moveToTrashBatch(const std::vector<std::string>& folderIds) {
 }
 
 bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& folderIds) {
-    return executeFidBatch(folderIds, [](sqlite3* db, const std::string& fid) {
+    if (folderIds.empty()) return true;
+
+    bool ok = executeFidBatch(folderIds, [](sqlite3* db, const std::string& fid) {
         // 1. Remove from trash bucket
         sqlite3_stmt* delStmt;
         if (sqlite3_prepare_v2(db,
@@ -398,6 +400,15 @@ bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& folderI
         MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
         return true;
     });
+
+    if (ok) {
+        int delta = static_cast<int>(folderIds.size());
+        s_uncategorizedCount.fetch_add(delta);
+        s_trashCount.fetch_sub(delta);
+        updatePersistentStat("sys_uncategorized_count", delta);
+        updatePersistentStat("sys_trash_count", -delta);
+    }
+    return ok;
 }
 
 bool CategoryRepo::restoreFromTrash(const std::string& folderId) {
