@@ -1,6 +1,7 @@
 #include "BatchCreateDialog.h"
 #include "ToolTipOverlay.h"
 #include "UiHelper.h"
+#include "StyleLibrary.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
@@ -138,7 +139,7 @@ void BatchCreateDialog::onExecute() {
     }
 
     QString finishMsg = QString("批量创建成功：文件夹 %1，文件 %2").arg(folderCreated).arg(fileCreated);
-    ToolTipOverlay::instance()->showText(QCursor::pos(), finishMsg, 2000, UiHelper::SuccessGreen);
+    ToolTipOverlay::instance()->showText(QCursor::pos(), finishMsg, 2000, Style::SuccessGreen);
     accept();
 }
 
