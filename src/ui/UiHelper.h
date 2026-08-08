@@ -44,6 +44,13 @@ public:
         return QColor();
     }
 
+    static inline QString normalizeColorHex(const QString& colorStr) {
+        if (colorStr.trimmed().isEmpty()) return "";
+        QColor c = parseColorName(colorStr);
+        if (!c.isValid()) return "";
+        return c.name().toUpper(); // 恒定返回 "#FECF0E" 格式
+    }
+
     static inline QPixmap renderIcon(const QString& key, const QSize& size, const QColor& color) {
         return SvgIconRenderer::renderIcon(key, size, color);
     }

@@ -28,6 +28,7 @@
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 #include "../ui/MediaColorExtractor.h"
+#include "../ui/UiHelper.h"
 #include "MediaExtractorPipeline.h"
 #include "../util/ShellHelper.h"
 #include "sqlite3.h"
@@ -179,7 +180,6 @@ void MetadataManager::initFromScchMode() {
         if (m_loaded) return;
     }
 
-    qint64 startTime = QDateTime::currentMSecsSinceEpoch();
     DatabaseManager::instance().init();
     
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
@@ -1130,6 +1130,9 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     
+    // 从源头上进行颜色 Hex 归一化处理
+    std::wstring normColor = UiHelper::normalizeColorHex(QString::fromStdWString(color)).toStdWString();
+    
     bool changed = false;
     bool isFolder = false;
     { 
@@ -1139,15 +1142,15 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
             auto it = currentSnapshot->find(nPath);
             if (it != currentSnapshot->end()) {
                 isFolder = it->second.isFolder;
-                if (it->second.manualColor != color) {
+                if (it->second.manualColor != normColor) {
                     auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
-                    (*newMap)[nPath].manualColor = color;
+                    (*newMap)[nPath].manualColor = normColor;
                     std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
                     changed = true;
                 }
             } else {
                 auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
-                (*newMap)[nPath].manualColor = color;
+                (*newMap)[nPath].manualColor = normColor;
                 std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
                 changed = true;
             }
@@ -1164,15 +1167,15 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
             
             // 自下而上：如果改变的是文件夹，同步更新映射分类颜色
             if (isFolder) {
-                if (CategoryRepo::updateCategoryColorByPath(nPath, color)) {
+                if (CategoryRepo::updateCategoryColorByPath(nPath, normColor)) {
                     if (notify) notifyUI(RefreshLevel::CategoryOnly);
                 }
             }
         }
     } else {
         // B. 磁盘导航模式：写入 ArcMeta.cache 高级 JSON 缓存文件
-        saveToDiskModeJson(nPath, [color](ItemMeta& meta) {
-            meta.color = color;
+        saveToDiskModeJson(nPath, [normColor](ItemMeta& meta) {
+            meta.color = normColor;
         });
     }
 }
