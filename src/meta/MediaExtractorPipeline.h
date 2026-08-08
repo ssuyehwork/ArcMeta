@@ -9,6 +9,7 @@
 #include <string>
 #include <mutex>
 #include <atomic>
+#include "CapsuleMediaExtractor.h"  // 复用其中声明的 s_qtGuiMutex
 
 namespace ArcMeta {
 

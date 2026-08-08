@@ -3,8 +3,15 @@
 
 #include <QImage>
 #include <QString>
+#include <mutex>
 
 namespace ArcMeta {
+
+// 全局唯一：串行化保护一切会触碰Qt Gui/SVG内部状态的代码段
+// （QSvgRenderer、QPainter、QPixmap等），跨MediaExtractorPipeline与
+// CapsuleMediaExtractor共用同一把锁，防止多个worker线程并发触碰
+// Qt6Gui.dll内部非线程安全缓存导致崩溃（进程会以0xC0000005访问冲突退出）
+static std::mutex s_qtGuiMutex;
 
 class CapsuleMediaExtractor {
 public:

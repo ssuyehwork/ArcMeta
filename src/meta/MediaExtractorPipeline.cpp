@@ -251,6 +251,7 @@ void MediaExtractorPipeline::extractDimensions(const std::wstring& path, int& ou
     if (!info.isFile()) return;
 
     if (info.suffix().toLower() == "svg") {
+        std::lock_guard<std::mutex> guiLock(CapsuleMediaExtractor::s_qtGuiMutex);
         QSvgRenderer renderer(info.absoluteFilePath());
         if (renderer.isValid()) {
             QSize sz = renderer.defaultSize();

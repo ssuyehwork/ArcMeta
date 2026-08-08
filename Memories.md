@@ -97,3 +97,9 @@
 - **铁律 3 (双轨标记落盘路由)**: 当打标或星级操作触发时，统一由数据源契约一键判断：
   - 在托管库上下文 (`isManagedContext() == true`) 内，元数据 100% 写入统一 SQLite 本地数据库；
   - 在库外普通磁盘模式 (`isManagedContext() == false`) 下，元数据自动调用 `AmMetaJson` 精准、非侵入式写入主程序 `ArcMeta.cache/文件夹哈希.json` 离散缓存中，确保不污染用户原始物理盘。
+
+# 13. 关于媒体提取管道的线程安全边界
+## 13.1 Qt Gui API 禁止无保护地在 worker 线程并发调用
+- `MediaExtractorPipeline` 与 `CapsuleMediaExtractor` 所在的后台提取管道，任何会触碰 `QSvgRenderer`/`QPainter`/`QPixmap`/`QIcon` 等 Qt Gui 模块 API 的代码段，必须用 `CapsuleMediaExtractor::s_qtGuiMutex` 显式串行化保护，不允许多个 worker 线程并发执行这类代码。
+- 这类 API 不保证线程安全，并发访问会导致 `Qt6Gui.dll` 内部缓存越界写入，进程直接崩溃 (`0xC0000005`)。此约束不因新增图形格式支持、性能优化理由被绕过，新增任何调用这类 API 的代码前必须先复用此锁。
+- 文件 I/O、哈希计算、数据库读写等与 Qt Gui 无关的部分不受此约束，维持并行。

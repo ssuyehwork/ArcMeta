@@ -58,6 +58,7 @@ QImage CapsuleMediaExtractor::getCapsuleThumbnail(const QString& mainAssetPath, 
     QImage img;
 
     if (ext == "svg") {
+        std::lock_guard<std::mutex> guiLock(s_qtGuiMutex);
         QSvgRenderer renderer(mainAssetPath);
         if (renderer.isValid()) {
             img = QImage(size, size, QImage::Format_ARGB32);
