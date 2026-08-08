@@ -180,7 +180,6 @@ void MetadataManager::initFromScchMode() {
         if (m_loaded) return;
     }
 
-    qint64 startTime = QDateTime::currentMSecsSinceEpoch();
     DatabaseManager::instance().init();
     
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
