@@ -206,62 +206,48 @@ QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QMod
     return QStyledItemDelegate::sizeHint(option, index);
 }
 
-QWidget* ThumbnailDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const {
-    QWidget* editor = QStyledItemDelegate::createEditor(parent, option, index);
-    if (editor) {
-        // 按照用户要求：修改为项目标准蓝 (#3498db)
-        editor->setStyleSheet(
-            "QLineEdit {"
-            "  background-color: #2D2D2D;"
-            "  color: #FFFFFF;"
-            "  selection-background-color: #3498db;"
-            "  border: 1px solid #3498db;"
-            "  border-radius: 4px;"
-            "  padding: 0px 4px;"
-            "  margin: 0px;"
-            "  font-size: 8pt;"
-            "}"
-        );
-        // 2026-07-26 极致重构：为编辑器安装事件过滤器，确保 eventFilter 能有效捕获键盘冲突并拦截（对应用户原话：“在编辑状态下按下向上/向下方向键时则不该向上游动选中项目”）
-        editor->installEventFilter(const_cast<ThumbnailDelegate*>(this));
-    }
-    return editor;
-}
-
-void ThumbnailDelegate::updateEditorGeometry(QWidget* editor,
-                                              const QStyleOptionViewItem& option,
-                                              const QModelIndex& /*index*/) const {
-    Metrics m = calculateMetrics(option);
-    // 修正编辑器位置，使其与文件名文字区域对齐并留出少量边距
-    // 高度降低 2 像素：通过上下各收缩 1 像素实现 (从 4 变 5)
-    editor->setGeometry(m.textRect.adjusted(1, 5, -1, -5));
-}
-
-void ThumbnailDelegate::setEditorData(QWidget* editor, const QModelIndex& index) const {
-    QString value = index.model()->data(index, Qt::EditRole).toString();
-    QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor); 
-    if (lineEdit) {
-        lineEdit->setText(value); 
-
-        // 如果是文件夹或分类，全选；如果是文件，仅选中名称部分
-        // 使用 QTimer::singleShot 确保在 Qt 内部默认全选逻辑之后执行，彻底解决失效问题
-        bool isFolder = (index.data(m_typeRole).toString() == "folder" || index.data(m_typeRole).toString() == "category");
-        
-        QTimer::singleShot(0, lineEdit, [lineEdit, value, isFolder]() {
-            if (!lineEdit) return;
-            if (isFolder) {
-                lineEdit->selectAll();
-            } else {
-                int lastDot = value.lastIndexOf('.'); 
-                if (lastDot > 0) { 
-                    lineEdit->setSelection(0, lastDot); 
-                } else { 
-                    lineEdit->selectAll(); 
-                }
-            }
-        });
-    }
-}
+QWidget* ThumbnailDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem& /*option*/, const QModelIndex& index) const { 
+    FileNameLineEdit* editor = new FileNameLineEdit(parent); 
+    editor->setStyleSheet( 
+        "QLineEdit {" 
+        "  background-color: #2D2D2D;" 
+        "  color: #FFFFFF;" 
+        "  selection-background-color: #3498db;" 
+        "  border: 1px solid #3498db;" 
+        "  border-radius: 4px;" 
+        "  padding: 0px 4px;" 
+        "  margin: 0px;" 
+        "  font-size: 8pt;" 
+        "}" 
+    ); 
+ 
+    bool isFolder = (index.data(m_typeRole).toString() == "folder" || index.data(m_typeRole).toString() == "category"); 
+    editor->setIsFolder(isFolder); 
+    editor->installEventFilter(const_cast<ThumbnailDelegate*>(this)); 
+    return editor; 
+} 
+ 
+void ThumbnailDelegate::updateEditorGeometry(QWidget* editor, 
+                                              const QStyleOptionViewItem& option, 
+                                              const QModelIndex& /*index*/) const { 
+    Metrics m = calculateMetrics(option); 
+    // 根据当前视图设备的 DPI 比例动态自适应放缩微调 
+    double dpr = option.widget ? option.widget->devicePixelRatio() : 1.0; 
+    int offsetLeft = static_cast<int>(1 * dpr); 
+    int offsetTop = static_cast<int>(5 * dpr); 
+    int offsetRight = static_cast<int>(-1 * dpr); 
+    int offsetBottom = static_cast<int>(-5 * dpr); 
+ 
+    editor->setGeometry(m.textRect.adjusted(offsetLeft, offsetTop, offsetRight, offsetBottom)); 
+} 
+ 
+void ThumbnailDelegate::setEditorData(QWidget* editor, const QModelIndex& index) const { 
+    QString value = index.model()->data(index, Qt::EditRole).toString(); 
+    FileNameLineEdit* lineEdit = qobject_cast<FileNameLineEdit*>(editor);  
+    if (lineEdit) { 
+        lineEdit->setText(value); // 纯粹同步赋值，高亮交由 FileNameLineEdit::focusInEvent 完美同步接管 
+    } 
+} 
 
 void ThumbnailDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const {
     QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor);

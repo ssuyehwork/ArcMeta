@@ -98,8 +98,27 @@ bool AmMetaJson::renameItem(const QString& folderPath, const QString& oldName, c
 }
 
 bool AmMetaJson::migrateFolderCache(const QString& oldFolderPath, const QString& newFolderPath) {
-    Q_UNUSED(oldFolderPath);
-    Q_UNUSED(newFolderPath);
+    if (oldFolderPath == newFolderPath) return true;
+    
+    // 物理自愈：当发生物理文件夹重命名时，自动原子迁移其目录内部隐藏的 .ArcMeta.json 配置
+    QString oldMetaFile = oldFolderPath + "/.ArcMeta.json";
+    QString newMetaFile = newFolderPath + "/.ArcMeta.json";
+
+    if (QFile::exists(oldMetaFile)) {
+        // 创建新物理目录（如果不存在）
+        QDir().mkpath(newFolderPath);
+        
+        if (QFile::exists(newMetaFile)) {
+            QFile::remove(newMetaFile);
+        }
+        if (QFile::copy(oldMetaFile, newMetaFile)) {
+            QFile::remove(oldMetaFile);
+            
+            // 赋予 Windows 环境隐藏文件属性
+            SetFileAttributesW(newMetaFile.toStdWString().c_str(), FILE_ATTRIBUTE_HIDDEN);
+            return true;
+        }
+    }
     return true;
 }
 

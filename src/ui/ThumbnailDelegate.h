@@ -1,8 +1,34 @@
 #pragma once
 
 #include <QStyledItemDelegate>
+#include <QLineEdit> 
 
 namespace ArcMeta {
+
+class FileNameLineEdit : public QLineEdit { 
+    Q_OBJECT 
+public: 
+    explicit FileNameLineEdit(QWidget* parent = nullptr) : QLineEdit(parent) {} 
+    void setIsFolder(bool isFolder) { m_isFolder = isFolder; } 
+ 
+protected: 
+    void focusInEvent(QFocusEvent* event) override { 
+        QLineEdit::focusInEvent(event); // 先执行基类 Focus 事件 
+        if (m_isFolder) { 
+            selectAll(); 
+        } else { 
+            int lastDot = text().lastIndexOf('.'); 
+            if (lastDot > 0) { 
+                setSelection(0, lastDot); 
+            } else { 
+                selectAll(); 
+            } 
+        } 
+    } 
+ 
+private: 
+    bool m_isFolder = false; 
+}; 
 
 class ThumbnailDelegate : public QStyledItemDelegate {
     Q_OBJECT
