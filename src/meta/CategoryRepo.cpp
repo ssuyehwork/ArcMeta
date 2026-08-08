@@ -1046,38 +1046,6 @@ std::vector<std::pair<int, int>> CategoryRepo::getCounts() {
         res.push_back({id, static_cast<int>(fids.size())});  
     }  
  
-    // 针对 parent_id = 0 的托管仓库根分类，全小写规范化对账核算资产总数 
-    auto allCats = getAll(); 
-    for (const auto& cat : allCats) { 
-        if (cat.parentId == 0 && !cat.physicalPath.empty()) { 
-            std::wstring normCatPath = MetadataManager::normalizePath(cat.physicalPath); 
-            int count = 0; 
- 
-            if (!normCatPath.empty()) { 
-                MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) { 
-                    if (meta.isTrash || meta.isFolder) return; 
- 
-                    // 规范化全小写匹配，彻底消除 G:\ 与 g:\ 造成的归零 Bug 
-                    if (path.rfind(normCatPath, 0) == 0) { 
-                        count++; 
-                    } 
-                }); 
-            } 
- 
-            bool updated = false; 
-            for (auto& pair : res) { 
-                if (pair.first == cat.id) { 
-                    pair.second = std::max(pair.second, count); 
-                    updated = true; 
-                    break; 
-                } 
-            } 
-            if (!updated) { 
-                res.push_back({cat.id, count}); 
-            } 
-        } 
-    } 
- 
     cachedCounts = res; 
     s_countsDirty.store(false); 
     return res;  
@@ -1368,7 +1336,7 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
         // 1. 核心修正：彻底过滤掉 .arc 物理容器目录（不渲染 DIR 壳）
         if (meta.isFolder) return;
 
-        // 2. 核心修正：彻底过滤掉容器内部的辅助缩略图与 SCCH 元数据文件
+        // 2. 核心修正：彻底过滤掉容器内部的辅助缩略图与辅助元数据文件
         QString qPath = QString::fromStdWString(path);
         if (qPath.endsWith("_thumbnail.png", Qt::CaseInsensitive) || 
             qPath.endsWith("metadata.scch", Qt::CaseInsensitive)) {

@@ -762,7 +762,7 @@ void MainWindow::initUi() {
             if(path.isEmpty()) continue;
             
             if (rating != -1) {
-                // 2026-05-24 按照用户要求：彻底移除 SCCH，改为中心化异步持久化
+                // 2026-05-24：改为中心化异步持久化
                 MetadataManager::instance().setRating(path.toStdWString(), rating);
             }
             if (color != L"__NO_CHANGE__") {
