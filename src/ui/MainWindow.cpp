@@ -375,6 +375,26 @@ void MainWindow::initUi() {
 
         // 利用局部实例，在后台进行大事务处理。为保证处理器生命周期随 MainWindow 销毁，声明 parent 为 this
         CategoryDropProcessor* processor = new CategoryDropProcessor(this);
+
+        // 增加进度更新接管信号
+        connect(processor, &CategoryDropProcessor::progressUpdated, this, [this](int processed, int total, int remainingSeconds) {
+            if (!m_statusLeft) return;
+            int pct = (total > 0) ? (processed * 100 / total) : 0;
+            QString timeStr = "计算中...";
+            if (remainingSeconds >= 0) {
+                int mins = remainingSeconds / 60;
+                int secs = remainingSeconds % 60;
+                timeStr = QString("%1:%2")
+                            .arg(mins, 2, 10, QChar('0'))
+                            .arg(secs, 2, 10, QChar('0'));
+            }
+            m_statusLeft->setText(QString("正在归类资产... %1% (%2/%3) | 预计剩余时间: %4")
+                                    .arg(pct)
+                                    .arg(processed)
+                                    .arg(total)
+                                    .arg(timeStr));
+        });
+
         connect(processor, &CategoryDropProcessor::processingFinished, this, [this, processor](bool success, int itemCount) {
             Q_UNUSED(success);
             Q_UNUSED(itemCount);
@@ -382,6 +402,28 @@ void MainWindow::initUi() {
             CategoryRepo::s_countsDirty.store(true);
             m_categoryPanel->requestRefresh(true);
             m_contentPanel->refreshAll();
+
+            // 启动 1 秒间隔定时器，触发 3s -> 2s -> 1s 倒计时复原，随后切回常态显示
+            if (m_statusLeft) {
+                QTimer* revertTimer = new QTimer(this);
+                revertTimer->setInterval(1000);
+                auto countdown = std::make_shared<int>(3);
+
+                m_statusLeft->setText(QString("归类完成！ 3 秒后恢复常态..."));
+
+                connect(revertTimer, &QTimer::timeout, this, [this, revertTimer, countdown]() {
+                    (*countdown)--;
+                    if (*countdown > 0) {
+                        m_statusLeft->setText(QString("归类完成！ %1 秒后恢复常态...").arg(*countdown));
+                    } else {
+                        revertTimer->stop();
+                        revertTimer->deleteLater();
+                        updateStatusBar(); // 切回 "X 个项目" 常态显示
+                    }
+                });
+
+                revertTimer->start();
+            }
 
             // 自动销毁处理器，防止内存泄漏
             processor->deleteLater();

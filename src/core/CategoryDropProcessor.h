@@ -16,6 +16,9 @@ public:
 signals:
     // 处理完成回调 UI 刷新信号，itemCount 包含落盘/处理成功项数
     void processingFinished(bool success, int itemCount);
+
+    // 新增：实时处理速率、推送当前进度及预计剩余秒数
+    void progressUpdated(int processed, int total, int remainingSeconds);
 };
 
 } // namespace ArcMeta
