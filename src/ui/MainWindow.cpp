@@ -190,7 +190,6 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent), m_currentDataSource("nav"), m_currentCategoryId(0) {
     // 2026-04-12 关键修复：显式初始化面板加载状态锁，防止未定义行为导致闪退
     m_panelsInitialized = false;
-    qDebug() << "[Main] MainWindow 构造开始执行";
 
     // 2026-04-11 按照用户要求：在程序启动的最顶端预初始化 ToolTipOverlay
     // 配合 ToolTipOverlay 内部的 winId() 强行预热，消除初次显示延迟
@@ -280,8 +279,6 @@ MainWindow::MainWindow(QWidget* parent)
     // 2026-05-29 性能优化：事件过滤器仅安装在 MainWindow 实例上，减少 qApp 全局事件分发的 overhead。
     this->installEventFilter(this);
 
-    qDebug() << "[Main] MainWindow 构造函数 UI/托盘初始化完成";
-
     // 2026-03-xx 性能优化：严禁在构造函数中执行任何可能导致阻塞的同步加载 (如 unifiedNavigateTo)。
     // 改为延迟 200ms 触发首次加载，确保 MainWindow 框架先瞬间弹出，提升用户感知的“秒开”响应速度。
     QTimer::singleShot(200, [this]() {
@@ -291,10 +288,8 @@ MainWindow::MainWindow(QWidget* parent)
         // 校验：如果是协议路径或存在的磁盘路径，则载入
         bool isValid = lastPath.contains("://") || QDir(lastPath).exists();
         if (isValid) {
-            qDebug() << "[Main] 执行延迟首次加载: 恢复历史状态 ->" << lastPath;
             unifiedNavigateTo(lastPath);
         } else {
-            qDebug() << "[Main] 历史路径无效，回退至: 此电脑";
             unifiedNavigateTo("computer://");
         }
     });
@@ -953,35 +948,19 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
 void MainWindow::showEvent(QShowEvent* event) {
     QMainWindow::showEvent(event);
     // 2026-04-12 关键修复：延迟初始化面板数据（确保窗口先渲染，避免主线程卡死导致无法显示）
-    qDebug() << "[Main] showEvent 触发, m_panelsInitialized =" << m_panelsInitialized;
     if (!m_panelsInitialized) {
         m_panelsInitialized = true;
-        qint64 scheduleStart = QDateTime::currentMSecsSinceEpoch();
-        qDebug() << "[Main] 正在排期延迟加载任务 (QTimer::singleShot(0))...";
-        QTimer::singleShot(0, [this, scheduleStart]() {
-            qint64 taskStart = QDateTime::currentMSecsSinceEpoch();
-            qDebug() << "[Main] 延迟加载任务开始执行，排期等待耗时:" << (taskStart - scheduleStart) << "ms";
-            
+        QTimer::singleShot(0, [this]() {
             if (m_categoryPanel) {
-                qint64 start = QDateTime::currentMSecsSinceEpoch();
                 m_categoryPanel->deferredInit();
-                qDebug() << "[PERF] CategoryPanel 初始化耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
             }
             if (m_navPanel) {
-                qint64 start = QDateTime::currentMSecsSinceEpoch();
                 m_navPanel->deferredInit();
-                qDebug() << "[PERF] NavPanel 初始化耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
             }
             if (m_contentPanel) {
-                qint64 start = QDateTime::currentMSecsSinceEpoch();
                 m_contentPanel->deferredInit();
-                qDebug() << "[PERF] ContentPanel 初始化耗时:" << (QDateTime::currentMSecsSinceEpoch() - start) << "ms";
             }
             // MetaPanel 和 FilterPanel 暂时不需要延迟数据加载，因为它们通常随选中项动态刷新
-            
-            // 2026-04-14 按照用户要求：物理禁用"最后一个窗口关闭时退出"逻辑
-            // 确保程序只能通过托盘菜单显式退出，提高驻留稳定性
-            qDebug() << "[PERF] 所有核心面板数据延迟加载完成，总耗时:" << (QDateTime::currentMSecsSinceEpoch() - taskStart) << "ms";
         });
     }
     
@@ -2011,7 +1990,6 @@ void MainWindow::initDriveBar() {
 
 void MainWindow::onDriveButtonClicked() {
     // TODO: 盘符点击逻辑待后期安排
-    qDebug() << "[Main] Drive button clicked (TODO)";
 }
 
 void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
@@ -2101,7 +2079,7 @@ void MainWindow::updateCustomFolderButtons() {
 
         // 🚨 核心自愈逻辑：如果在物理磁盘上文件夹已经不存在（被移走或删除），自动触发数据清洗与自动解绑！
         if (!QDir(finalPath).exists()) {
-            qDebug() << "[DriveBar] 检测到监控文件夹在硬盘上已失效，自动清退:" << finalPath;
+            qWarning() << "[DriveBar] 检测到监控文件夹在硬盘上已失效，自动清退:" << finalPath;
             
             // 1. 从 NativeFolderWatcher 监控中注销此路径
             NativeFolderWatcher::instance().removeWatch(normPath);

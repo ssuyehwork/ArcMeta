@@ -65,7 +65,6 @@ void MediaExtractorPipeline::cancelAll() {
     }
     m_activeCount.store(0);
     SyncStatusService::instance().updateMediaPending(0);
-    qDebug() << "[DB_TRACE] MediaExtractorPipeline::cancelAll 触发全局取消，已安全丢弃排队中的" << abandoned.size() << "个任务";
 }
 
 void MediaExtractorPipeline::cancelBatch(const std::vector<std::wstring>& paths) {
@@ -100,15 +99,12 @@ void MediaExtractorPipeline::cancelBatch(const std::vector<std::wstring>& paths)
     int remaining = static_cast<int>(m_queue.size()) + m_activeCount.load();
     if (remaining < 0) remaining = 0;
     SyncStatusService::instance().updateMediaPending(remaining);
-
-    qDebug() << "[DB_TRACE] MediaExtractorPipeline::cancelBatch 批量取消过滤。从主队列丢弃:" << removedFromQueue;
 }
 
 void MediaExtractorPipeline::enqueue(const std::wstring& path) {
     m_isCanceled.store(false); // 投递新任务时自动重置取消状态
     std::lock_guard<std::mutex> lock(m_queueMutex);
     m_queue.push_back(path);
-    qDebug() << "[DB_TRACE] MediaExtractorPipeline::enqueue 推入提取队列，路径:" << QString::fromStdWString(path) << "总队列大小:" << m_queue.size();
     
     // 🚨 联动通知：特征待提取总项数（排队 + 正在解析数）
     SyncStatusService::instance().updateMediaPending(static_cast<int>(m_queue.size()) + m_activeCount.load());
@@ -120,7 +116,6 @@ void MediaExtractorPipeline::enqueueBatch(const std::vector<std::wstring>& paths
     m_isCanceled.store(false); // 投递新任务时自动重置取消状态
     std::lock_guard<std::mutex> lock(m_queueMutex);
     m_queue.insert(m_queue.end(), paths.begin(), paths.end());
-    qDebug() << "[DB_TRACE] MediaExtractorPipeline::enqueueBatch 批量推入提取队列，新增数量:" << paths.size() << "总队列大小:" << m_queue.size();
     
     // 🚨 联动通知：特征待提取总项数（排队 + 正在解析数）
     SyncStatusService::instance().updateMediaPending(static_cast<int>(m_queue.size()) + m_activeCount.load());
@@ -139,7 +134,6 @@ void MediaExtractorPipeline::processNextBatch() {
         batch = std::move(m_queue);
         m_queue.clear();
     }
-    qDebug() << "[DB_TRACE] MediaExtractorPipeline::processNextBatch 开始处理提取任务批次，任务数量:" << batch.size();
 
     // 增加正在处理的计数，并上报最新的待提取总项数
     m_activeCount.fetch_add(static_cast<int>(batch.size()));
@@ -154,7 +148,6 @@ void MediaExtractorPipeline::processNextBatch() {
 #endif
         for (const auto& path : batch) {
             if (m_isCanceled.load()) {
-                qDebug() << "[DB_TRACE] MediaExtractorPipeline 检测到全局已取消，平滑丢弃子任务:" << QString::fromStdWString(path);
                 int active = m_activeCount.fetch_sub(1) - 1;
                 if (active < 0) {
                     m_activeCount.store(0);

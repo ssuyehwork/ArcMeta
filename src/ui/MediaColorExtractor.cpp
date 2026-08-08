@@ -273,7 +273,6 @@ QImage MediaColorExtractor::renderPdfAiFirstPage(const QString& filePath, int ta
 #ifdef Q_OS_WIN
     QImage img = WindowsShellThumbnailProvider::getShellThumbnail(filePath, targetSize);
     if (!img.isNull()) {
-        qDebug() << "[MediaColorExtractor][AI/PDF] 方案 B：Windows 原生系统 PDF 引擎矢量渲染成功：" << filePath;
         return img;
     }
 #else
@@ -352,7 +351,6 @@ QImage MediaColorExtractor::renderWithGhostscript(const QString& filePath, int t
             QFile::remove(tempPng);
 
             if (!img.isNull()) {
-                qDebug() << "[MediaColorExtractor][GS] 终极通道：Ghostscript 矢量光栅化成功：" << filePath;
                 return img.scaled(targetSize, targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
             }
         }
@@ -428,7 +426,6 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath, in
                             memcpy(img.scanLine(y), pixelPtr + y * width, width);
                         }
                         if (!img.isNull()) {
-                            qDebug() << "[MediaColorExtractor][AI] 二进制游标提取 %AI_Thumbnail 成功：" << filePath;
                             return img.convertToFormat(QImage::Format_ARGB32);
                         }
                     }
@@ -450,7 +447,6 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath, in
             QByteArray jpgBytes = QByteArray::fromBase64(base64Data);
             QImage img;
             if (img.loadFromData(jpgBytes)) {
-                qDebug() << "[MediaColorExtractor][AI] 成功解包 Adobe XMP 内嵌 Base64 预览图：" << filePath;
                 return img;
             }
         }
@@ -478,7 +474,6 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath, in
             QByteArray pngData = rawData.mid(pngStart, (pngEnd + 8) - pngStart);
             QImage img;
             if (img.loadFromData(pngData, "PNG") && img.width() >= 32) {
-                qDebug() << "[MediaColorExtractor][AI] 成功提取 PNG 裸数据流：" << filePath;
                 return img;
             }
         }
@@ -491,7 +486,6 @@ QImage MediaColorExtractor::extractEmbeddedAiPreview(const QString& filePath, in
             QByteArray jpgData = rawData.mid(jpgStart, (jpgEnd + 2) - jpgStart);
             QImage img;
             if (img.loadFromData(jpgData, "JPEG") && img.width() >= 32) {
-                qDebug() << "[MediaColorExtractor][AI] 成功提取 JPEG 裸数据流：" << filePath;
                 return img;
             }
         }
@@ -527,7 +521,6 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path, int t
             QByteArray tiffData = file.read(tiffLength);
             QImage img = decodeTiffFromMemory(tiffData);
             if (!img.isNull()) {
-                qDebug() << "[MediaColorExtractor][EPS] 内嵌预览通过 libtiff 提取成功：" << path;
                 return img;
             }
         }
@@ -567,7 +560,6 @@ QImage MediaColorExtractor::extractEmbeddedEpsPreview(const QString& path, int t
         QByteArray binaryData = QByteArray::fromHex(hexData.toLatin1());
         QImage img;
         if (img.loadFromData(binaryData)) {
-            qDebug() << "[MediaColorExtractor][EPS] 普通文本格式 ASCII EPS 内嵌 %%BeginPreview 提取成功：" << path;
             return img;
         }
     }

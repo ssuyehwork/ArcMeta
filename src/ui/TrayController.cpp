@@ -76,7 +76,6 @@ void TrayController::onQuitApp() {
     // 数据已在运行期通过增量任务实时落地，此处仅执行排空队列动作，通常为毫秒级。
     DatabaseManager::instance().shutdown();
 
-    qDebug() << "[Exit] 增量数据同步完成，物理占用已释放。程序实现秒退出。";
     QApplication::quit();
 }
 

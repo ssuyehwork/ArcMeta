@@ -219,7 +219,7 @@ void TagRepository::checkAndMigrate() {
 
             if (!hasGroups) continue;
 
-            qDebug() << "[TagRepository] Detected unmigrated tag data in drive" << QString::fromStdWString(drive) << ". Migrating...";
+            qWarning() << "[TagRepository] Detected unmigrated tag data in drive" << QString::fromStdWString(drive) << ". Migrating...";
             
             struct MigratingGroup {
                 int id;
@@ -290,7 +290,7 @@ void TagRepository::checkAndMigrate() {
                     sqlite3_finalize(itemInsertStmt);
                     
                     if (trans.commit()) {
-                        qDebug() << "[TagRepository] Successfully migrated" << migratingGroups.size() << "tag groups from drive" << QString::fromStdWString(drive) << "to global.db.";
+                        qWarning() << "[TagRepository] Successfully migrated" << migratingGroups.size() << "tag groups from drive" << QString::fromStdWString(drive) << "to global.db.";
                     } else {
                         qWarning() << "[TagRepository] FAILED to commit migrating transaction!";
                     }
