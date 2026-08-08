@@ -423,8 +423,11 @@ void MainWindow::initUi() {
                                     // 绑定已存在资产 ID：直接调用 CategoryRepo::addItemToCategory 并清理新物理文件 (destPath)
                                     // 1. 物理删除刚刚静默导入的新冗余物理文件：
                                     QFile::remove(group.newItem.path);
-                                    // 2. 移除其父目录胶囊
-                                    QDir(QFileInfo(group.newItem.path).absolutePath()).removeRecursively();
+                                    // 2. 安全清理可能为空的 .arc 胶囊包文件夹，绝不使用危险的 removeRecursively()
+                                    QDir parentDir(QFileInfo(group.newItem.path).absolutePath());
+                                    if (parentDir.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty()) {
+                                        parentDir.rmdir(".");
+                                    }
                                     // 3. 从数据库中彻底清除新文件的元数据条目
                                     MetadataManager::instance().removeMetadataSync(group.newItem.path.toStdWString());
                                     // 4. 将库内已有文件关联到当前目标分类
