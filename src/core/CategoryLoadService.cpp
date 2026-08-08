@@ -4,6 +4,8 @@
 #include "CategoryLockManager.h"
 #include "../meta/DatabaseManager.h"
 #include <QFileInfo>
+#include <QDir>
+#include <QImageReader>
 
 namespace {
 static inline bool isAuxiliaryFile(const QString& path) {
@@ -144,6 +146,20 @@ std::vector<ItemRecord> CategoryLoadService::loadTrashItems() {
 
         ItemRecord r = ItemRecord::create(qPath, &meta, true);
         r.groupName = "Library";
+
+        // 🚨 补全缩略图检测：自动读取 .arc 容器中的 _thumbnail.png 并解析宽度和高度
+        QDir arcDir(qPath);
+        QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
+        if (!thumbFiles.isEmpty()) {
+            QString thumbPath = qPath + "/" + thumbFiles.first();
+            QImageReader reader(thumbPath);
+            QSize sz = reader.size();
+            if (sz.width() > 0 && sz.height() > 0) {
+                r.width = sz.width();
+                r.height = sz.height();
+            }
+        }
+
         libraryTrash.push_back(r);
     });
 

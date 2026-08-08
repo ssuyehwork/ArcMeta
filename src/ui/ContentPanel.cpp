@@ -1992,10 +1992,19 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 if (dataSourceType() == DataSourceType::DiskNav) {
                     ok = DiskTrashService::moveToDiskTrash(targetPaths);
                 } else {
-                    ok = ShellHelper::moveToTrash(targetPaths);
+                    // 内存模式下：彻底禁止调用物理删除，仅调用 CategoryRepo::moveToTrashBatch() 执行数据库标记。
+                    std::vector<std::string> targetFids;
+                    for (const QString& tp : targetPaths) {
+                        std::string fid = MetadataManager::instance().getFolderIdSync(tp.toStdWString());
+                        if (!fid.empty()) {
+                            targetFids.push_back(fid);
+                        }
+                    }
+                    ok = CategoryRepo::moveToTrashBatch(targetFids);
                 }
 
                 if (ok) {
+                    CategoryRepo::s_countsDirty = true;
                     refreshAll();
                 }
 
