@@ -702,13 +702,18 @@ void FilterPanel::rebuildGroups() {
         QWidget* g = buildGroup("颜色标记", gl, &hdrLayout);
         m_groupColor = g;
 
-        // 新增快速输入框
-        m_editColor = new QLineEdit(g);
+        // 带有左右 5px 缩进外壳的快速输入框
+        QWidget* wColor = new QWidget(g);
+        QHBoxLayout* lColor = new QHBoxLayout(wColor);
+        lColor->setContentsMargins(5, 2, 5, 2);
+        lColor->setSpacing(0);
+
+        m_editColor = new QLineEdit(wColor);
         m_editColor->setClearButtonEnabled(true);
         m_editColor->setPlaceholderText("例： 红 / #E24B4A / 无色标");
         m_editColor->setText(m_filter.colorFilterText);
         m_editColor->setObjectName("FilterSearchEdit");
-        m_editColor->setFixedHeight(24);
+        m_editColor->setFixedHeight(22);
         m_editColor->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
@@ -732,7 +737,8 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             }
         });
-        gl->addWidget(m_editColor);
+        lColor->addWidget(m_editColor);
+        gl->addWidget(wColor);
 
         // 2.1 顶部色相滑块
         // 2026-06-xx 物理对齐：滑块及其容器增加 4px 左右边距（相对于 gl 的 0 边距），实现视觉平衡
@@ -980,12 +986,17 @@ void FilterPanel::rebuildGroups() {
         QVBoxLayout* gl = nullptr;
         QWidget* g = buildGroup("文件类型", gl);
 
-        m_editType = new QLineEdit(g);
+        QWidget* wType = new QWidget(g);
+        QHBoxLayout* lType = new QHBoxLayout(wType);
+        lType->setContentsMargins(5, 2, 5, 2);
+        lType->setSpacing(0);
+
+        m_editType = new QLineEdit(wType);
         m_editType->setClearButtonEnabled(true);
         m_editType->setPlaceholderText("例： png / 文件夹...");
         m_editType->setText(m_filter.typeFilterText);
         m_editType->setObjectName("FilterSearchEdit");
-        m_editType->setFixedHeight(24);
+        m_editType->setFixedHeight(22);
         m_editType->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
@@ -1009,7 +1020,8 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             }
         });
-        gl->addWidget(m_editType);
+        lType->addWidget(m_editType);
+        gl->addWidget(wType);
 
         if (m_emptyFolderCount > 0) {
             QCheckBox* cb = addFilterRow(gl, "空文件夹", m_emptyFolderCount);
@@ -1082,12 +1094,17 @@ void FilterPanel::rebuildGroups() {
             rebuildDateCheckboxes(true, m_createDateDesc);
         });
 
-        m_editCreateDate = new QLineEdit(g);
+        QWidget* wCreateDate = new QWidget(g);
+        QHBoxLayout* lCreateDate = new QHBoxLayout(wCreateDate);
+        lCreateDate->setContentsMargins(5, 2, 5, 2);
+        lCreateDate->setSpacing(0);
+
+        m_editCreateDate = new QLineEdit(wCreateDate);
         m_editCreateDate->setClearButtonEnabled(true);
         m_editCreateDate->setPlaceholderText("例： 2025 / 03-2025...");
         m_editCreateDate->setText(m_filter.createDateFilterText);
         m_editCreateDate->setObjectName("FilterSearchEdit");
-        m_editCreateDate->setFixedHeight(24);
+        m_editCreateDate->setFixedHeight(22);
         m_editCreateDate->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
@@ -1111,7 +1128,8 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             }
         });
-        gl->addWidget(m_editCreateDate);
+        lCreateDate->addWidget(m_editCreateDate);
+        gl->addWidget(wCreateDate);
 
         rebuildDateCheckboxes(true, m_createDateDesc);
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
@@ -1137,12 +1155,17 @@ void FilterPanel::rebuildGroups() {
             rebuildDateCheckboxes(false, m_modifyDateDesc);
         });
 
-        m_editModifyDate = new QLineEdit(g);
+        QWidget* wModifyDate = new QWidget(g);
+        QHBoxLayout* lModifyDate = new QHBoxLayout(wModifyDate);
+        lModifyDate->setContentsMargins(5, 2, 5, 2);
+        lModifyDate->setSpacing(0);
+
+        m_editModifyDate = new QLineEdit(wModifyDate);
         m_editModifyDate->setClearButtonEnabled(true);
         m_editModifyDate->setPlaceholderText("例： 2025 / 03-2025...");
         m_editModifyDate->setText(m_filter.modifyDateFilterText);
         m_editModifyDate->setObjectName("FilterSearchEdit");
-        m_editModifyDate->setFixedHeight(24);
+        m_editModifyDate->setFixedHeight(22);
         m_editModifyDate->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
@@ -1166,7 +1189,8 @@ void FilterPanel::rebuildGroups() {
                 emit filterChanged(m_filter);
             }
         });
-        gl->addWidget(m_editModifyDate);
+        lModifyDate->addWidget(m_editModifyDate);
+        gl->addWidget(wModifyDate);
 
         rebuildDateCheckboxes(false, m_modifyDateDesc);
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
