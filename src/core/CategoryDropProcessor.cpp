@@ -14,7 +14,13 @@ namespace ArcMeta {
 
 CategoryDropProcessor::CategoryDropProcessor(QObject* parent) : QObject(parent) {}
 
+void CategoryDropProcessor::cancel() {
+    m_isCancelled.store(true);
+}
+
 void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, int targetCategoryId) {
+    m_isCancelled.store(false);
+
     // 异步后台运行：封装 QtConcurrent::run
     auto future = QtConcurrent::run([this, paths, targetCategoryId]() {
         bool success = true;
@@ -32,6 +38,11 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
         int total = paths.size();
 
         for (int i = 0; i < total; ++i) {
+            if (m_isCancelled.load()) {
+                success = false;
+                break;
+            }
+
             const QString& srcPath = paths[i];
             std::wstring wPath = MetadataManager::normalizePath(srcPath.toStdWString());
 
@@ -72,7 +83,7 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
         }
 
         // 大事务批量落盘
-        if (!virtualAssocItems.empty()) {
+        if (!m_isCancelled.load() && !virtualAssocItems.empty()) {
             bool batchOk = CategoryRepo::addItemToCategoryBatch(targetCategoryId, virtualAssocItems);
             if (batchOk) {
                 processedCount += static_cast<int>(virtualAssocItems.size());
@@ -83,15 +94,15 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
 
         // 如果存在需要打包导入的库外资产，目前 AssetImporter 包含 QProgressDialog 等 UI 操作，
         // 故必须通过 invokeMethod 回调主线程调用 AssetImporter 进行导入。
-        if (!importPaths.isEmpty()) {
+        if (!m_isCancelled.load() && !importPaths.isEmpty()) {
             QMetaObject::invokeMethod(this, [this, importPaths, targetCategoryId, success, processedCount]() {
                 QWidget* parentWidget = qobject_cast<QWidget*>(parent());
-                AssetImporter::importAssets(importPaths, targetCategoryId, parentWidget, [this, success, processedCount, importPaths]() {
-                    emit processingFinished(success, processedCount + importPaths.size());
+                AssetImporter::importAssets(importPaths, targetCategoryId, parentWidget, [this, success, processedCount](const QStringList& newlyImported) {
+                    emit processingFinished(success, processedCount + newlyImported.size(), newlyImported);
                 });
             }, Qt::BlockingQueuedConnection);
         } else {
-            emit processingFinished(success, processedCount);
+            emit processingFinished(success, processedCount, {});
         }
     });
     Q_UNUSED(future);

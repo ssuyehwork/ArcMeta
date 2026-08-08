@@ -28,6 +28,7 @@ class ContentPanel;
 class MetaPanel;
 class FilterPanel;
 class SearchHistoryPanel;
+class TaskProgressToolBar;
 
 class CustomFolderImportDialog : public FramelessDialog {
     Q_OBJECT
@@ -196,6 +197,8 @@ private:
 
     // 底部状态栏
     QLabel* m_statusLeft = nullptr;
+    QWidget* m_statusBarWidget = nullptr;
+    TaskProgressToolBar* m_taskProgressToolBar = nullptr;
 
     // 窗口拖动
     bool m_isDragging = false;

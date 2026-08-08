@@ -30,6 +30,9 @@
 #include "../meta/CategoryRepo.h"
 #include "../core/CategoryDropProcessor.h"
 #include "DragPayloadFactory.h"
+#include "TaskProgressToolBar.h"
+#include "../meta/DuplicateDetectorService.h"
+#include "DuplicateConflictDialog.h"
 
 #include "SearchHistoryPanel.h"
 #include "SvgIcons.h"
@@ -369,61 +372,74 @@ void MainWindow::initUi() {
         }
     });
 
-    // 监听侧边栏分类拖拽事件，由专门的处理器 CategoryDropProcessor 进行高效后台多线程+批量大事务落盘
+    // 监听侧边栏分类拖拽事件，由专门 of CategoryDropProcessor 进行后台处理
     connect(m_categoryPanel, &CategoryPanel::pathsDroppedToCategory, this, [this](const QStringList& paths, int targetCatId) {
         if (paths.isEmpty()) return;
 
         // 利用局部实例，在后台进行大事务处理。为保证处理器生命周期随 MainWindow 销毁，声明 parent 为 this
         CategoryDropProcessor* processor = new CategoryDropProcessor(this);
 
-        // 增加进度更新接管信号
+        // 增加进度更新接管信号到无感底栏进度工具栏
         connect(processor, &CategoryDropProcessor::progressUpdated, this, [this](int processed, int total, int remainingSeconds) {
-            if (!m_statusLeft) return;
-            int pct = (total > 0) ? (processed * 100 / total) : 0;
-            QString timeStr = "计算中...";
-            if (remainingSeconds >= 0) {
-                int mins = remainingSeconds / 60;
-                int secs = remainingSeconds % 60;
-                timeStr = QString("%1:%2")
-                            .arg(mins, 2, 10, QChar('0'))
-                            .arg(secs, 2, 10, QChar('0'));
+            if (m_statusBarWidget) m_statusBarWidget->hide();
+            if (m_taskProgressToolBar) {
+                m_taskProgressToolBar->show();
+                m_taskProgressToolBar->updateProgress(processed, total, remainingSeconds);
             }
-            m_statusLeft->setText(QString("正在归类资产... %1% (%2/%3) | 预计剩余时间: %4")
-                                    .arg(pct)
-                                    .arg(processed)
-                                    .arg(total)
-                                    .arg(timeStr));
         });
 
-        connect(processor, &CategoryDropProcessor::processingFinished, this, [this, processor](bool success, int itemCount) {
+        // 点击底栏 '×' 触发取消：
+        connect(m_taskProgressToolBar, &TaskProgressToolBar::cancelRequested, this, [processor]() {
+            processor->cancel();
+        });
+
+        connect(processor, &CategoryDropProcessor::processingFinished, this, [this, processor, targetCatId](bool success, int itemCount, const QStringList& newlyImportedPaths) {
             Q_UNUSED(success);
-            Q_UNUSED(itemCount);
+
             // 刷新侧边栏和内容面板
             CategoryRepo::s_countsDirty.store(true);
             m_categoryPanel->requestRefresh(true);
             m_contentPanel->refreshAll();
 
-            // 启动 1 秒间隔定时器，触发 3s -> 2s -> 1s 倒计时复原，随后切回常态显示
-            if (m_statusLeft) {
-                QTimer* revertTimer = new QTimer(this);
-                revertTimer->setInterval(1000);
-                auto countdown = std::make_shared<int>(3);
-
-                m_statusLeft->setText(QString("归类完成！ 3 秒后恢复常态..."));
-
-                connect(revertTimer, &QTimer::timeout, this, [this, revertTimer, countdown]() {
-                    (*countdown)--;
-                    if (*countdown > 0) {
-                        m_statusLeft->setText(QString("归类完成！ %1 秒后恢复常态...").arg(*countdown));
-                    } else {
-                        revertTimer->stop();
-                        revertTimer->deleteLater();
-                        updateStatusBar(); // 切回 "X 个项目" 常态显示
-                    }
-                });
-
-                revertTimer->start();
+            if (m_taskProgressToolBar) {
+                m_taskProgressToolBar->showCompleted(itemCount, itemCount);
             }
+
+            // 延迟 3 秒后无缝切回常规状态栏
+            QTimer::singleShot(3000, this, [this]() {
+                if (m_taskProgressToolBar) m_taskProgressToolBar->hide();
+                if (m_statusBarWidget) m_statusBarWidget->show();
+            });
+
+            // 启动后台查重：
+            auto future = QtConcurrent::run([this, newlyImportedPaths, targetCatId]() {
+                auto conflicts = DuplicateDetectorService::detectDuplicates(newlyImportedPaths);
+                if (!conflicts.empty()) {
+                    QMetaObject::invokeMethod(this, [this, conflicts, targetCatId]() {
+                        for (const auto& group : conflicts) {
+                            DuplicateConflictDialog dlg(group, this);
+                            if (dlg.exec() == QDialog::Accepted) {
+                                if (dlg.selectedAction() == DuplicateResolveAction::UseExisting) {
+                                    // 绑定已存在资产 ID：直接调用 CategoryRepo::addItemToCategory 并清理新物理文件 (destPath)
+                                    // 1. 物理删除刚刚静默导入的新冗余物理文件：
+                                    QFile::remove(group.newItem.path);
+                                    // 2. 移除其父目录胶囊
+                                    QDir(QFileInfo(group.newItem.path).absolutePath()).removeRecursively();
+                                    // 3. 从数据库中彻底清除新文件的元数据条目
+                                    MetadataManager::instance().removeMetadataSync(group.newItem.path.toStdWString());
+                                    // 4. 将库内已有文件关联到当前目标分类
+                                    CategoryRepo::addItemToCategory(targetCatId, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
+                                }
+                            }
+                        }
+                        // 处理完成后，触发一次刷新
+                        CategoryRepo::s_countsDirty.store(true);
+                        m_categoryPanel->requestRefresh(true);
+                        m_contentPanel->refreshAll();
+                    });
+                }
+            });
+            Q_UNUSED(future);
 
             // 自动销毁处理器，防止内存泄漏
             processor->deleteLater();
@@ -1323,14 +1339,14 @@ void MainWindow::setupSplitters() {
     m_bodyLayout->addWidget(m_mainSplitter);
 
     // --- 4. 底部状态栏 (0 边距) ---
-    QWidget* statusBar = new QWidget(centralC);
-    statusBar->setObjectName("StatusBar");
-    statusBar->setFixedHeight(28);
-    QHBoxLayout* statusL = new QHBoxLayout(statusBar);
+    m_statusBarWidget = new QWidget(centralC);
+    m_statusBarWidget->setObjectName("StatusBar");
+    m_statusBarWidget->setFixedHeight(28);
+    QHBoxLayout* statusL = new QHBoxLayout(m_statusBarWidget);
     statusL->setContentsMargins(kStatusBarMargin, 0, kStatusBarMargin, 0);
     statusL->setSpacing(0);
 
-    m_statusLeft = new QLabel("就绪中...", statusBar);
+    m_statusLeft = new QLabel("就绪中...", m_statusBarWidget);
     m_statusLeft->setStyleSheet(QString("font-size: 11px; color: %1; background: transparent;").arg(qssColor(TextDim)));
 
     statusL->addWidget(m_statusLeft);
@@ -1351,13 +1367,18 @@ void MainWindow::setupSplitters() {
     connect(&CoreController::instance(), &CoreController::isIndexingChanged, this, updateStatus);
     updateStatus();
 
+    // 初始化任务进度栏 (隐藏状态)
+    m_taskProgressToolBar = new TaskProgressToolBar(centralC);
+    m_taskProgressToolBar->hide();
+
     initDriveBar();
 
     mainL->addWidget(m_titleBarWidget);
     mainL->addWidget(m_driveBarWidget);
     mainL->addWidget(m_navBarWidget);
     mainL->addWidget(bodyWrapper, 1);
-    mainL->addWidget(statusBar);
+    mainL->addWidget(m_statusBarWidget);
+    mainL->addWidget(m_taskProgressToolBar);
 
     // --- 3.5 创建不占位、不加布局的 5px 悬浮覆盖进度条 ---
     m_topProgressBar = new QProgressBar(centralC); // 父对象绑定为 centralC
