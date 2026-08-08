@@ -588,6 +588,7 @@ void FilterPanel::populate(
                  else if (name == "蓝色") count = m_colorCounts.value("#378ADD", 0);
                  else if (name == "紫色") count = m_colorCounts.value("#7F77DD", 0);
                  else if (name == "灰色") count = m_colorCounts.value("#5F5E5A", 0);
+                 else if (name == "无色标") count = m_colorCounts.value("", 0);
                  
                  cntLabel->setText(QString::number(count));
              }

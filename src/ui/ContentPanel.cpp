@@ -2969,11 +2969,8 @@ void ContentPanel::recalculateAndEmitStats() {
 
             stats.ratingCounts[record.rating]++;
             
-            if (!record.manualColor.isEmpty()) {
-                stats.colorCounts[record.manualColor.toUpper()]++;
-            } else {
-                stats.colorCounts[""]++;
-            }
+            QString normHex = UiHelper::normalizeColorHex(record.manualColor);
+            stats.colorCounts[normHex]++;
             
             if (record.isDir || record.isCategory) {
                 stats.typeCounts["folder"]++;

@@ -47,7 +47,7 @@ std::vector<ItemRecord> CategoryLoadService::loadCategoryItems(int categoryId, b
                 continue;
             }
             QString qPath = QString::fromStdWString(wPath);
-            if (FileFilterService::isAuxiliaryFile(qPath)) {
+            if (FileFilterService::isAuxiliaryFile(qPath, false)) {
                 continue;
             }
             allRecords.push_back(ItemRecord::create(qPath, nullptr, true));
@@ -62,7 +62,7 @@ std::vector<ItemRecord> CategoryLoadService::loadPathItems(const QStringList& pa
     records.reserve(static_cast<int>(paths.size()));
     for (const QString& p : paths) {
         if (!p.isEmpty()) {
-            if (FileFilterService::isAuxiliaryFile(p)) {
+            if (FileFilterService::isAuxiliaryFile(p, false)) {
                 continue;
             }
             std::string assetId = MetadataManager::instance().getFolderIdSync(p.toStdWString());
@@ -101,7 +101,7 @@ std::vector<ItemRecord> CategoryLoadService::loadTrashItems() {
 
         // 过滤辅助文件
         QString qPath = QString::fromStdWString(path);
-        if (FileFilterService::isAuxiliaryFile(qPath)) {
+        if (FileFilterService::isAuxiliaryFile(qPath, false)) {
             return;
         }
 
