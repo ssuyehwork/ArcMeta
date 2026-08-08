@@ -53,9 +53,7 @@ NavPanel::NavPanel(QWidget* parent)
  * @brief 初始化 UI 组件
  */
 void NavPanel::deferredInit() {
-    qDebug() << "[NavPanel] deferredInit 开始执行";
     if (m_model && m_model->rowCount() > 0) {
-        qDebug() << "[NavPanel] 模型已存在数据，跳过重复初始化";
         return;
     }
 
@@ -88,14 +86,12 @@ void NavPanel::deferredInit() {
     // 2026-03-xx 线程安全修复：图标提取必须在主线程执行。
     // 为了平衡性能与安全，图标提取在主线程分批次（Idle 状态）补全。
     QTimer::singleShot(0, [this, drives]() {
-        qDebug() << "[NavPanel] 开始异步填充磁盘图标 (SVG 版)...";
         for (int i = 0; i < drives.size(); ++i) {
             if (i + 2 < m_model->rowCount()) {
                 QIcon driveIcon = UiHelper::getIcon("hard_drive", QColor("#95a5a6"), 18);
                 m_model->item(i + 2)->setIcon(driveIcon);
             }
         }
-        qDebug() << "[NavPanel] 磁盘图标填充完成";
     });
 
     // 延迟加载收藏夹
@@ -113,8 +109,6 @@ void NavPanel::deferredInit() {
             m_splitter->setStretchFactor(1, 1);
         }
     }
-
-    qDebug() << "[NavPanel] deferredInit 同步部分执行完毕";
 }
 
 void NavPanel::setFocusHighlight(bool visible) {

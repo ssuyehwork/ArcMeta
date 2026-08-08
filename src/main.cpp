@@ -54,17 +54,11 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext &context, con
  * @brief 退出时调用的清场函数，优雅停止各子系统线程、确保数据完整落盘不损坏。
  */
 void onApplicationAboutToQuit(HANDLE hMutex) {
-    qDebug() << "[Shutdown] >>> 开启 Clean Shutdown 优雅退出流程 <<<";
-
     // 1. 阻塞等待全局工作线程池中所有子任务退场，防止多线程写冲突与硬截断
-    qDebug() << "[Shutdown] 正在等待子线程池安全退场...";
     QThreadPool::globalInstance()->waitForDone();
-    qDebug() << "[Shutdown] 全局子线程已完全退场";
 
     // 2. 将高频落盘缓存中的所有待写数据同步强力落盘写入，安全闭卷
-    qDebug() << "[Shutdown] 正在强制元数据及 SQLite 落盘...";
     ArcMeta::DatabaseManager::instance().flushAll(true);
-    qDebug() << "[Shutdown] 持久化落盘完毕";
 
     // 3. 挂起并关闭异步日志写出线程，使其后续降级同步写
     ArcMeta::Logger::stopAsyncLogger();
@@ -72,16 +66,13 @@ void onApplicationAboutToQuit(HANDLE hMutex) {
     // 4. 释放 COM 套间环境
 #ifdef Q_OS_WIN
     CoUninitialize();
-    qDebug() << "[Shutdown] COM 套间释放完毕";
 
     // 5. 释放单实例互斥量锁
     if (hMutex) {
         ReleaseMutex(hMutex);
         CloseHandle(hMutex);
-        qDebug() << "[Shutdown] 单实例 Mutex 互斥锁已完全释放";
     }
 #endif
-    qDebug() << "[Shutdown] <<< Clean Shutdown 正常退场，系统安全关闭 <<<";
 }
 
 int main(int argc, char *argv[]) {
@@ -111,8 +102,6 @@ int main(int argc, char *argv[]) {
 
     // 1. 安装自定义日志处理器（使用超高吞吐无阻塞的内存队列异步写入）
     qInstallMessageHandler(customMessageHandler);
-    qDebug() << "================ ArcMeta 启动加载 ================";
-    qDebug() << "[PERF] 程序入口点计时开始";
 
     // 设置高 DPI 支持：Qt 6 默认行为，此处显式设置 PassThrough 以防旧设备缩放模糊
     QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
@@ -153,16 +142,14 @@ int main(int argc, char *argv[]) {
     // -------------------------------------------------------------
     qint64 windowCreateStart = QDateTime::currentMSecsSinceEpoch();
     ArcMeta::MainWindow w;
-    qDebug() << "[PERF] MainWindow 构造耗时:" << (QDateTime::currentMSecsSinceEpoch() - windowCreateStart) << "ms";
     
     // 启动异步系统扫描与监控监听
     ArcMeta::CoreController::instance().startSystem();
     ArcMeta::AutoImportManager::instance().startListening();
 
     // 利用主线程第一个 Tick 调度，平滑显示窗口，消解首帧信号洪暴导致的渲染卡顿
-    QTimer::singleShot(0, [&w, windowCreateStart]() {
+    QTimer::singleShot(0, [&w]() {
         w.show();
-        qDebug() << "[PERF] MainWindow->show() 调用已下发（至首帧渲染前）:" << (QDateTime::currentMSecsSinceEpoch() - windowCreateStart) << "ms";
     });
 
     // -------------------------------------------------------------
@@ -171,8 +158,6 @@ int main(int argc, char *argv[]) {
     QObject::connect(&a, &QApplication::aboutToQuit, [&a, hMutex]() {
         onApplicationAboutToQuit(hMutex);
     });
-
-    qDebug() << "[PERF] main 函数逻辑执行完毕，进入事件循环。总耗时:" << (QDateTime::currentMSecsSinceEpoch() - mainStartTime) << "ms";
 
     return a.exec();
 }

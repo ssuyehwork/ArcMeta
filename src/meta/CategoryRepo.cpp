@@ -132,7 +132,7 @@ void syncManagedLibraries() {
             cat.icon = L"folder_filled";
             
             CategoryRepo::add(cat);
-            qDebug() << "[CategoryRepo] 自动修复补全托管根分类:" << QString::fromStdWString(libName);
+            qWarning() << "[CategoryRepo] 自动修复补全托管根分类:" << QString::fromStdWString(libName);
         } else {
             CategoryRepo::updatePhysicalMapping(existingId, 0, managedAbsW);
         }
@@ -263,15 +263,14 @@ bool CategoryRepo::add(Category& cat) {
                 }
             }
             s_countsDirty.store(true);
-            qDebug() << "[CategoryRepo] add success across dbs: Name =" << QString::fromStdWString(cat.name) << "ID =" << cat.id << "Parent =" << cat.parentId;
             refreshMemoryCache();
             return true;
         } else {
-            qDebug() << "[CategoryRepo] add FAILED during step:" << sqlite3_errmsg(mainDb) << "Code:" << rc;
+            qCritical() << "[CategoryRepo] add FAILED during step:" << sqlite3_errmsg(mainDb) << "Code:" << rc;
         }
         sqlite3_finalize(stmt);
     } else {
-        qDebug() << "[CategoryRepo] add FAILED during prepare:" << sqlite3_errmsg(mainDb) << "Code:" << rc;
+        qCritical() << "[CategoryRepo] add FAILED during prepare:" << sqlite3_errmsg(mainDb) << "Code:" << rc;
     }
     return false;
 }
@@ -366,7 +365,9 @@ bool CategoryRepo::moveToTrashBatch(const std::vector<std::string>& folderIds) {
 }
 
 bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& folderIds) {
-    return executeFidBatch(folderIds, [](sqlite3* db, const std::string& fid) {
+    if (folderIds.empty()) return true;
+
+    bool ok = executeFidBatch(folderIds, [](sqlite3* db, const std::string& fid) {
         // 1. Remove from trash bucket
         sqlite3_stmt* delStmt;
         if (sqlite3_prepare_v2(db,
@@ -399,6 +400,15 @@ bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& folderI
         MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
         return true;
     });
+
+    if (ok) {
+        int delta = static_cast<int>(folderIds.size());
+        s_uncategorizedCount.fetch_add(delta);
+        s_trashCount.fetch_sub(delta);
+        updatePersistentStat("sys_uncategorized_count", delta);
+        updatePersistentStat("sys_trash_count", -delta);
+    }
+    return ok;
 }
 
 bool CategoryRepo::restoreFromTrash(const std::string& folderId) {
@@ -569,9 +579,6 @@ int CategoryRepo::findCategoryId(int parentId, const std::wstring& name) {
             id = sqlite3_column_int(stmt, 0);
         }
         sqlite3_finalize(stmt);
-        if (id > 0) {
-            qDebug() << "[CategoryRepo] findCategoryId found:" << QString::fromStdWString(name) << "->" << id << "under parent" << parentId;
-        }
         return id;
     }
     return 0;
@@ -724,7 +731,6 @@ bool CategoryRepo::updateCategoryColorByPath(const std::wstring& path, const std
         bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
         sqlite3_finalize(stmt);
         if (ok) {
-            qDebug() << "[DB_TRACE] updateCategoryColorByPath 成功同步更新 categories 表分类颜色，路径:" << QString::fromStdWString(path) << "颜色:" << QString::fromStdWString(color);
             DatabaseManager::instance().flushAll();
             refreshMemoryCache();
             return true;
@@ -1190,8 +1196,6 @@ void CategoryRepo::loadStatsFromDb() {
 }
 
 void CategoryRepo::fullRecount() {
-    qDebug() << "[Recount] CategoryRepo::fullRecount triggered. Starting SQL self-healing alignment.";
-    
     // 🚨 重新计数时，先执行 SQL 补全对账，防止根分类计数被归零！
     const char* repairSql = 
         "INSERT OR IGNORE INTO category_items (category_id, folder_id, path_hint, added_at) "

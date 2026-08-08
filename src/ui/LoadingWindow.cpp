@@ -20,8 +20,6 @@ namespace ArcMeta {
 
 LoadingWindow::LoadingWindow(QWidget* parent)
     : QWidget(parent), m_rotationAngle(0) {
-    qDebug() << "[LoadingWindow] 开始构造";
-    
     // 设置窗口属性
     setWindowTitle("ArcMeta - 初始化中...");
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
@@ -55,9 +53,7 @@ LoadingWindow::LoadingWindow(QWidget* parent)
     QString refreshSvg = SvgIcons::icons.value("refresh");
     if (!refreshSvg.isEmpty()) {
         m_svgRenderer = std::make_unique<QSvgRenderer>();
-        if (m_svgRenderer->load(refreshSvg.toLatin1())) {
-            qDebug() << "[LoadingWindow] SVG 加载成功";
-        } else {
+        if (!m_svgRenderer->load(refreshSvg.toLatin1())) {
             qWarning() << "[LoadingWindow] SVG 加载失败";
         }
     } else {
@@ -95,8 +91,6 @@ LoadingWindow::LoadingWindow(QWidget* parent)
     m_animationTimer = new QTimer(this);
     connect(m_animationTimer, &QTimer::timeout, this, &LoadingWindow::onAnimationTimeout);
     m_animationTimer->start(30);
-    
-    qDebug() << "[LoadingWindow] 构造完成";
 }
 
 void LoadingWindow::showEvent(QShowEvent* event) {
@@ -109,32 +103,27 @@ void LoadingWindow::showEvent(QShowEvent* event) {
         int x = (screenGeometry.width() - width()) / 2;
         int y = (screenGeometry.height() - height()) / 2;
         move(x, y);
-        qDebug() << "[LoadingWindow] 窗口已移动到位置:" << x << y;
     }
     
     // 获取焦点并置顶
     raise();
     activateWindow();
     setFocus();
-    qDebug() << "[LoadingWindow] 已激活窗口并获得焦点";
 }
 
 void LoadingWindow::updateStatus(const QString& text) {
     if (m_statusLabel) {
         m_statusLabel->setText(text);
-        qDebug() << "[LoadingWindow] 进度更新:" << text;
     }
 }
 
 void LoadingWindow::onInitializationFinished() {
-    qDebug() << "[LoadingWindow] 收到初始化完成信号";
     if (m_animationTimer) {
         m_animationTimer->stop();
     }
     
     // 简单延迟后关闭
     QTimer::singleShot(300, this, [this]() {
-        qDebug() << "[LoadingWindow] 正在关闭窗口";
         close();
         emit finished();
     });
