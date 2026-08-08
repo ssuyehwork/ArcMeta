@@ -503,6 +503,14 @@ Jules 每次读取 `AGENTS.md` 时，**必须同时完整读取 `Development_Pla
    // 返回 false 说明当前内容源于：目录导航模式（实时 I/O 驱动 / 磁盘物理路径）
    bool isFromMemory = m_contentPanel->isMirrorSource();
    ```
+### 6.4 内存模式数据源唯一性铁律
+
+内存模式（托管库/侧边栏分类模式）下，唯一合法的数据读取方式是 SQLite 数据库
+查询（category_items / categories 等表）。严禁任何绕开数据库、依赖物理路径
+前缀匹配或独立元数据侧车文件（如 .scch）来枚举分类内容的实现方式，无论其
+名称、包装方式或声称的性能优势如何。此规则不因"性能优化""架构升级"等
+理由被绕过或另起分支替代，任何相关改动必须先在 Development_Plan.md 中
+归档到本条之下，不得脱离本条独立处理。
 
 ---
 
