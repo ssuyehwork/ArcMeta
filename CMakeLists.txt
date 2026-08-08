@@ -13,7 +13,7 @@ endif()
 
 # 强制 MSVC 编译器及选项 (文档红线: /W4 /O2)
 if(MSVC)
-    add_compile_options(/W4 /O2 /utf-8)
+    add_compile_options(/W4 /O2 /utf-8 /Zm1000)
 endif()
 
 # Qt 6 基础组件
