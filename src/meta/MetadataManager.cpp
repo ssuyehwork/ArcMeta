@@ -164,7 +164,6 @@ MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
 
     // 2026-06-xx 物理加固：监听程序退出信号
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, [this]() {
-        qDebug() << "[Metadata] 程序正在退出，等待异步同步完成...";
         // 2026-06-xx 物理切换：强制刷新 SQLite 到磁盘
         DatabaseManager::instance().shutdown();
         AppConfig::instance().setValue("System/LastCleanShutdown", true);
@@ -182,8 +181,6 @@ void MetadataManager::initFromScchMode() {
 
     qint64 startTime = QDateTime::currentMSecsSinceEpoch();
     DatabaseManager::instance().init();
-
-    qDebug() << "[PERF] 正在从 SQLite 内存模式初始化元数据缓存...";
     
     std::unordered_map<std::wstring, RuntimeMeta> tempCache;
     std::unordered_map<std::string, std::wstring> tempFidToPath;
@@ -297,7 +294,6 @@ void MetadataManager::initFromScchMode() {
     QDir dir(metaDir);
     if (dir.exists()) {
         QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files | QDir::Hidden | QDir::System);
-        qDebug() << "[Metadata] 发现物理分库数量:" << dbFiles.size();
 
         // 使用正则解析：^Arcmeta_([0-9A-F]{8})(?:_([A-Z]))?\.db$
         QRegularExpression re("^Arcmeta_([0-9A-F]{8})(?:_([A-Z]))?\\.db$", QRegularExpression::CaseInsensitiveOption);
@@ -368,9 +364,6 @@ void MetadataManager::initFromScchMode() {
 
     // 2026-06-xx 物理对账：在初始化结束后（m_loaded 为 true 且缓存就绪），加载缓存计数
     CategoryRepo::loadStatsFromDb();
-    qDebug() << "[PERF] SQLite 元数据镜像构建完成。内存映射数:" << tempCache.size() 
-             << " ID索引数:" << tempFidToPath.size()
-             << " 耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
     notifyUI(RefreshLevel::FullRebuild);
 }
 
@@ -591,8 +584,6 @@ void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
         }
     }
 
-    qDebug() << "[Metadata] [Plan-131] 执行解析流水线 ->" << QString::fromStdWString(nPath);
-
     // 1. 激活项目 (获取 FID/FRN 等物理属性)
     // 注意：ensureActivated 内部对已存在项会跳过，故此处需确保若指纹变化能更新缓存
     {
@@ -728,7 +719,6 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
     // 互斥锁定该物理分库递归句柄，解决高并发下在同一个 sqlite3 连接中冲突导致的死锁，确保重入安全
     auto dbLock = DatabaseManager::instance().getDriveMutex(volSerial);
     std::lock_guard<std::recursive_mutex> lockConn(*dbLock);
-    qDebug() << "[DB_TRACE] calculateAndPersistProgress 开始计算导入进度，获取连接递归互斥锁，文件夹:" << QString::fromStdWString(nFolder);
 
     // 2. 统计状态（严禁物理读盘，仅使用数据库标记）
     // 进度 = (该目录下状态为 1 的项目数) / (该目录下状态为 0 和 1 的项目总数)
@@ -763,9 +753,7 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
         std::string key = "PROGRESS:" + QString::fromStdWString(nFolder).toUtf8().toStdString();
         sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_double(stmt, 2, progress);
-        if (sqlite3_step(stmt) == SQLITE_DONE) {
-            qDebug() << "[DB_TRACE] calculateAndPersistProgress 写入进度数据成功，进度:" << progress << "文件夹:" << QString::fromStdWString(nFolder);
-        } else {
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
             qWarning() << "[DB_TRACE] calculateAndPersistProgress 写入进度失败！Error:" << sqlite3_errmsg(db);
         }
         sqlite3_finalize(stmt);
@@ -1363,7 +1351,6 @@ void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std:
     
     // 【同步逻辑】如果是文件夹主色提取，则同步更新 categories 分类定义表中的颜色
     if (isFolder) {
-        qDebug() << "[DB_TRACE] setItemVisualMetadata 判定为文件夹，触发 categories 颜色同步。路径:" << QString::fromStdWString(nPath) << "颜色:" << QString::fromStdWString(color);
         CategoryRepo::updateCategoryColorByPath(nPath, color);
     }
     
@@ -1929,7 +1916,7 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
 
                     newMap->erase(oldPath);
                     std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
-                    qDebug() << "[Metadata] 检测到路径偏移，已从内存清理旧条目以防止重复计数:" << QString::fromStdWString(oldPath);
+                    qWarning() << "[Metadata] 检测到路径偏移，已从内存清理旧条目以防止重复计数:" << QString::fromStdWString(oldPath);
                 }
             }
         }
@@ -2098,14 +2085,14 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
             if (it != m_folderIdToPath.end()) {
                 nPath = it->second; // 修正为缓存中的原始路径，确保 removeMetadataSync 能正确匹配
                 existsInDb = true;
-                qDebug() << "[Metadata] 路径匹配失败，已通过 FID 校准原始路径:" << QString::fromStdWString(nPath);
+                qWarning() << "[Metadata] 路径匹配失败，已通过 FID 校准原始路径:" << QString::fromStdWString(nPath);
             }
         }
     }
 
     // 3. 如果项目从未被记入数据库，则无需执行任何数据库清理逻辑。
     if (!existsInDb) {
-        qDebug() << "[Metadata] 永久删除项不在数据库中，跳过清理动作:" << QString::fromStdWString(nPath);
+        qWarning() << "[Metadata] 永久删除项不在数据库中，跳过清理动作:" << QString::fromStdWString(nPath);
         notifyUI(RefreshLevel::FullRebuild);
         return;
     }
@@ -2114,7 +2101,6 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
     removeMetadataSync(nPath);
 
     // 5. 物理修复：发射全量刷新信号，确保侧边栏计数立即同步
-    qDebug() << "[Metadata] 已执行永久删除清理，通知 UI 刷新:" << QString::fromStdWString(nPath);
     notifyUI(RefreshLevel::FullRebuild);
 }
 
@@ -2388,7 +2374,6 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     std::unique_lock<std::recursive_mutex> lockConn;
     if (dbLock) {
         lockConn = std::unique_lock<std::recursive_mutex>(*dbLock);
-        qDebug() << "[DB_TRACE] persistAsync 成功锁定驱动盘递归互斥锁，开始写入内存库，路径:" << QString::fromStdWString(nPath);
     }
 
     // 1. 内存库操作 (Memory Commit)
@@ -2462,7 +2447,6 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
                     std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
                 }
             }
-            qDebug() << "[DB_TRACE] persistAsync 写入内存库成功，是否新项:" << isNew << "路径:" << QString::fromStdWString(nPath);
         } else {
             qWarning() << "[DB_TRACE] persistAsync 写入内存库失败！Error:" << sqlite3_errmsg(memDb) << "路径:" << QString::fromStdWString(nPath);
         }

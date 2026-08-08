@@ -561,9 +561,7 @@ ContentPanel::ContentPanel(QWidget* parent)
 } 
  
 void ContentPanel::deferredInit() { 
-    qDebug() << "[ContentPanel] deferredInit 开始执行"; 
     // 2026-04-12 按照用户要求：补全延迟初始化逻辑，此处可处理模型预热或首屏数据对齐 
-    qDebug() << "[ContentPanel] deferredInit 执行完毕"; 
 } 
 
  
@@ -832,8 +830,6 @@ void ContentPanel::updateGridSize() {
 
     // 持久化保存当前的缩放级别
     AppConfig::instance().setValue("UI/GridZoomLevel", m_zoomLevel);
-
-    qDebug() << "[GridSize] Zoom:" << m_zoomLevel;
 } 
  
 bool ContentPanel::eventFilter(QObject* obj, QEvent* event) { 
@@ -1864,7 +1860,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 // 执行物理迁移，并提供无缝无感刷新执行动作 (对应用户原话："行，试试吧")
                 ImportHelper::importPaths(paths, target, this, [weakThis]() {
                     if (weakThis) {
-                        qDebug() << "[Content] 后台物理迁移完成，安全触发 UI 异步无感防闪载入";
                         weakThis->refreshAll(); 
                     }
                 });
