@@ -141,7 +141,8 @@ public:
         ActionAddToFavorites,
         ActionRescan,
         ActionRefresh,
-        ActionCancelImport
+        ActionCancelImport,
+        ActionBatchCreate
     };
 
     explicit ContentPanel(QWidget* parent = nullptr);
