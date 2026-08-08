@@ -705,7 +705,7 @@ void FilterPanel::rebuildGroups() {
         // 带有左右 5px 缩进外壳的快速输入框
         QWidget* wColor = new QWidget(g);
         QHBoxLayout* lColor = new QHBoxLayout(wColor);
-        lColor->setContentsMargins(5, 2, 5, 2);
+        lColor->setContentsMargins(5, 6, 5, 4);
         lColor->setSpacing(0);
 
         m_editColor = new QLineEdit(wColor);
@@ -988,7 +988,7 @@ void FilterPanel::rebuildGroups() {
 
         QWidget* wType = new QWidget(g);
         QHBoxLayout* lType = new QHBoxLayout(wType);
-        lType->setContentsMargins(5, 2, 5, 2);
+        lType->setContentsMargins(5, 6, 5, 4);
         lType->setSpacing(0);
 
         m_editType = new QLineEdit(wType);
@@ -1096,7 +1096,7 @@ void FilterPanel::rebuildGroups() {
 
         QWidget* wCreateDate = new QWidget(g);
         QHBoxLayout* lCreateDate = new QHBoxLayout(wCreateDate);
-        lCreateDate->setContentsMargins(5, 2, 5, 2);
+        lCreateDate->setContentsMargins(5, 6, 5, 4);
         lCreateDate->setSpacing(0);
 
         m_editCreateDate = new QLineEdit(wCreateDate);
@@ -1157,7 +1157,7 @@ void FilterPanel::rebuildGroups() {
 
         QWidget* wModifyDate = new QWidget(g);
         QHBoxLayout* lModifyDate = new QHBoxLayout(wModifyDate);
-        lModifyDate->setContentsMargins(5, 2, 5, 2);
+        lModifyDate->setContentsMargins(5, 6, 5, 4);
         lModifyDate->setSpacing(0);
 
         m_editModifyDate = new QLineEdit(wModifyDate);
