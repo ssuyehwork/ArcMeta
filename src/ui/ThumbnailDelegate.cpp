@@ -206,7 +206,7 @@ QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option, const QMod
     return QStyledItemDelegate::sizeHint(option, index);
 }
 
-QWidget* ThumbnailDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const {
+QWidget* ThumbnailDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem& /*option*/, const QModelIndex& index) const {
     FileNameLineEdit* editor = new FileNameLineEdit(parent);
     editor->setStyleSheet(
         "QLineEdit {"
