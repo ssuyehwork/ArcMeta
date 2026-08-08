@@ -16,7 +16,7 @@ CategoryDropProcessor::CategoryDropProcessor(QObject* parent) : QObject(parent) 
 
 void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, int targetCategoryId) {
     // 异步后台运行：封装 QtConcurrent::run
-    QtConcurrent::run([this, paths, targetCategoryId]() {
+    auto future = QtConcurrent::run([this, paths, targetCategoryId]() {
         bool success = true;
         int processedCount = 0;
 
@@ -94,6 +94,7 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
             emit processingFinished(success, processedCount);
         }
     });
+    Q_UNUSED(future);
 }
 
 } // namespace ArcMeta
