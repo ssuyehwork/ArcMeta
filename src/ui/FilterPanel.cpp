@@ -708,14 +708,14 @@ void FilterPanel::rebuildGroups() {
         m_editColor->setPlaceholderText("例： 红 / #E24B4A / 无色标");
         m_editColor->setText(m_filter.colorFilterText);
         m_editColor->setObjectName("FilterSearchEdit");
+        m_editColor->setFixedHeight(24);
         m_editColor->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
             "  color: #CCCCCC;"
             "  border: 1px solid #444444;"
-            "  border-radius: 6px;"
-            "  padding: 4px 8px;"
-            "  margin: 4px 5px;"
+            "  border-radius: 4px;"
+            "  padding: 0px 6px;"
             "  font-size: 11px;"
             "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
@@ -985,14 +985,14 @@ void FilterPanel::rebuildGroups() {
         m_editType->setPlaceholderText("例： png / 文件夹...");
         m_editType->setText(m_filter.typeFilterText);
         m_editType->setObjectName("FilterSearchEdit");
+        m_editType->setFixedHeight(24);
         m_editType->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
             "  color: #CCCCCC;"
             "  border: 1px solid #444444;"
-            "  border-radius: 6px;"
-            "  padding: 4px 8px;"
-            "  margin: 4px 5px;"
+            "  border-radius: 4px;"
+            "  padding: 0px 6px;"
             "  font-size: 11px;"
             "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
@@ -1087,14 +1087,14 @@ void FilterPanel::rebuildGroups() {
         m_editCreateDate->setPlaceholderText("例： 2025 / 03-2025...");
         m_editCreateDate->setText(m_filter.createDateFilterText);
         m_editCreateDate->setObjectName("FilterSearchEdit");
+        m_editCreateDate->setFixedHeight(24);
         m_editCreateDate->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
             "  color: #CCCCCC;"
             "  border: 1px solid #444444;"
-            "  border-radius: 6px;"
-            "  padding: 4px 8px;"
-            "  margin: 4px 5px;"
+            "  border-radius: 4px;"
+            "  padding: 0px 6px;"
             "  font-size: 11px;"
             "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
@@ -1142,14 +1142,14 @@ void FilterPanel::rebuildGroups() {
         m_editModifyDate->setPlaceholderText("例： 2025 / 03-2025...");
         m_editModifyDate->setText(m_filter.modifyDateFilterText);
         m_editModifyDate->setObjectName("FilterSearchEdit");
+        m_editModifyDate->setFixedHeight(24);
         m_editModifyDate->setStyleSheet(
             "QLineEdit#FilterSearchEdit {"
             "  background: #2D2D2D;"
             "  color: #CCCCCC;"
             "  border: 1px solid #444444;"
-            "  border-radius: 6px;"
-            "  padding: 4px 8px;"
-            "  margin: 4px 5px;"
+            "  border-radius: 4px;"
+            "  padding: 0px 6px;"
             "  font-size: 11px;"
             "}"
             "QLineEdit#FilterSearchEdit:focus { border-color: #378ADD; color: #FFFFFF; }"
