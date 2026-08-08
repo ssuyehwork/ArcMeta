@@ -39,8 +39,7 @@ struct CategoryItem {
 };
 
 /**
- * @brief 分类持久层
- * 彻底废除数据库，全量转向 SCCH 架构
+ * @brief 分类持久层，基于中心化数据库实现
  */
 class CategoryRepo {
 public:

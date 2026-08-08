@@ -42,52 +42,30 @@ std::vector<ItemRecord> CategoryLoadService::loadCategoryItems(int categoryId, b
         }
     }
 
-    // 2. 加载文件 (SCCH 分离模式)
-    Category cat = CategoryRepo::getById(categoryId);
-    if (cat.id > 0 && cat.parentId == 0 && !cat.physicalPath.empty()) {
-        std::wstring normCatPath = MetadataManager::normalizePath(cat.physicalPath);
-        if (!normCatPath.empty()) {
-            MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
-                if (meta.isTrash || meta.isFolder) return;
-
-                QString qPath = QString::fromStdWString(path);
-                if (isAuxiliaryFile(qPath)) {
-                    return;
-                }
-
-                if (path.rfind(normCatPath, 0) == 0) {
-                    if (isAssetLocked(meta.folderId)) {
-                        return;
-                    }
-                    allRecords.push_back(ItemRecord::create(qPath, nullptr, true));
-                }
-            });
-        }
+    // 2. 统一使用数据库模式加载关联分类项
+    std::vector<CategoryItem> items;
+    if (recursive) {
+        items = CategoryRepo::getItemsRecursive(categoryId);
     } else {
-        std::vector<CategoryItem> items;
-        if (recursive) {
-            items = CategoryRepo::getItemsRecursive(categoryId);
-        } else {
-            items = CategoryRepo::getItemsInCategory(categoryId);
+        items = CategoryRepo::getItemsInCategory(categoryId);
+    }
+
+    allRecords.reserve(allRecords.size() + items.size());
+    for (const auto& item : items) {
+        std::wstring wPath = MetadataManager::instance().getPathByFolderId(item.folderId);
+        if (wPath.empty() && !item.pathHint.empty()) {
+            wPath = item.pathHint;
         }
 
-        allRecords.reserve(allRecords.size() + items.size());
-        for (const auto& item : items) {
-            std::wstring wPath = MetadataManager::instance().getPathByFolderId(item.folderId);
-            if (wPath.empty() && !item.pathHint.empty()) {
-                wPath = item.pathHint;
+        if (!wPath.empty()) {
+            if (isAssetLocked(item.folderId)) {
+                continue;
             }
-
-            if (!wPath.empty()) {
-                if (isAssetLocked(item.folderId)) {
-                    continue;
-                }
-                QString qPath = QString::fromStdWString(wPath);
-                if (isAuxiliaryFile(qPath)) {
-                    continue;
-                }
-                allRecords.push_back(ItemRecord::create(qPath, nullptr, true));
+            QString qPath = QString::fromStdWString(wPath);
+            if (isAuxiliaryFile(qPath)) {
+                continue;
             }
+            allRecords.push_back(ItemRecord::create(qPath, nullptr, true));
         }
     }
 

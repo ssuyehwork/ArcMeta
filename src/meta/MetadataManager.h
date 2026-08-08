@@ -93,7 +93,7 @@ public:
     std::wstring getPathByFolderId(const std::string& fid);
 
     /**
-     * @brief 2026-06-xx 按照用户要求：在 SCCH 内存模式下执行多维搜索
+     * @brief 2026-06-xx：在内存模式下执行多维搜索
      * @param keyword 关键词
      * @param scopeSource 范围来源 ("category" 或 "nav")
      * @param categoryId 分类 ID (当 scopeSource 为 "category" 时有效)
