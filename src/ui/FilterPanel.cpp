@@ -455,6 +455,9 @@ FilterPanel::FilterPanel(QWidget* parent) : QFrame(parent) {
 
     // 2026-xx-xx 按照用户要求：当筛选状态改变时，同步更新标题栏图标颜色
     connect(this, &FilterPanel::filterChanged, this, &FilterPanel::updateHeaderStatus);
+
+    // 预热构建初始 UI 框架，防止启动首帧控件未打磨闪烁
+    rebuildGroups();
 }
 
 void FilterPanel::saveFilterHistory(const QString& key, const QString& text) {
@@ -1450,7 +1453,7 @@ QWidget* FilterPanel::buildGroup(const QString& title, QVBoxLayout*& outContentL
     hdr->setFixedHeight(24);
     hdr->setStyleSheet(
         "QPushButton {"
-        "  background: transparent;"   // hdrRow 已提供背景，此处透明即可
+        "  background: transparent;"
         "  border: none;"
         "  color: #AAAAAA;"
         "  font-size: 11px;"
@@ -1462,8 +1465,10 @@ QWidget* FilterPanel::buildGroup(const QString& title, QVBoxLayout*& outContentL
         "  padding-bottom: 0px;"
         "  margin: 0px;"
         "}"
-        "QPushButton:hover { color: #EEEEEE; }"
-        "QPushButton:pressed { background: transparent; }");
+        "QPushButton:hover { color: #EEEEEE; background: transparent; }"
+        "QPushButton:pressed { background: transparent; }"
+        "QPushButton:checked { background: transparent; color: #AAAAAA; }"
+        "QPushButton:checked:hover { color: #EEEEEE; background: transparent; }");
     hdrRowLayout->addWidget(hdr);   // hdr 占满剩余宽度
 
     if (outHdrLayout) *outHdrLayout = hdrRowLayout; // 暴露 hdrRow 布局，供追加右侧按钮
