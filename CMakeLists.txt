@@ -68,6 +68,8 @@ set(SOURCES
     src/core/FileFilterService.h
     src/core/CategoryLoadService.cpp
     src/core/CategoryLoadService.h
+    src/core/CategoryDropProcessor.cpp
+    src/core/CategoryDropProcessor.h
     src/core/DiskTrashService.cpp
     src/core/DiskTrashService.h
     src/core/SyncStatusService.cpp
@@ -136,6 +138,8 @@ set(SOURCES
     src/ui/DropListView.h
     src/ui/DropTreeView.cpp
     src/ui/DropTreeView.h
+    src/ui/DragPayloadFactory.cpp
+    src/ui/DragPayloadFactory.h
     src/ui/IScanResultView.h
     src/ui/ListResultView.cpp
     src/ui/ListResultView.h

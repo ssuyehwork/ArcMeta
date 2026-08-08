@@ -22,8 +22,10 @@ DropTreeView::DropTreeView(QWidget* parent) : QTreeView(parent) {
     setDropIndicatorShown(true);
 }
 
+#include "DragPayloadFactory.h"
+
 void DropTreeView::dragEnterEvent(QDragEnterEvent* event) {
-    if (event->mimeData()->hasUrls()) {
+    if (DragPayloadFactory::hasLocalUriFormat(event->mimeData())) {
         event->acceptProposedAction();
     } else {
         QTreeView::dragEnterEvent(event);
@@ -31,8 +33,7 @@ void DropTreeView::dragEnterEvent(QDragEnterEvent* event) {
 }
 
 void DropTreeView::dragMoveEvent(QDragMoveEvent* event) {
-    if (event->mimeData()->hasUrls()) {
-        // 物理同步：显式调用基类逻辑以激活放置指示器 (Drop Indicator)
+    if (DragPayloadFactory::hasLocalUriFormat(event->mimeData())) {
         QTreeView::dragMoveEvent(event);
         event->acceptProposedAction();
     } else {
@@ -41,13 +42,8 @@ void DropTreeView::dragMoveEvent(QDragMoveEvent* event) {
 }
 
 void DropTreeView::dropEvent(QDropEvent* event) {
-    if (event->mimeData()->hasUrls()) {
-        QStringList paths;
-        for (const QUrl& u : event->mimeData()->urls()) {
-            if (u.isLocalFile()) {
-                paths << QDir::toNativeSeparators(u.toLocalFile());
-            }
-        }
+    if (DragPayloadFactory::hasLocalUriFormat(event->mimeData())) {
+        QStringList paths = DragPayloadFactory::extractPathsFromMime(event->mimeData());
         QModelIndex idx = indexAt(event->position().toPoint());
         if (!paths.isEmpty()) {
             emit pathsDropped(paths, idx);
@@ -62,32 +58,7 @@ void DropTreeView::startDrag(Qt::DropActions supportedActions) {
     QModelIndexList indexes = selectedIndexes();
     if (indexes.isEmpty()) return;
 
-    // 核心增强：拦截并注入物理路径 QUrl，确保 CategoryPanel 接收校验通过
-    QMimeData* mimeData = model()->mimeData(indexes);
-    if (!mimeData) {
-        mimeData = new QMimeData();
-    }
-    QList<QUrl> urls;
-    for (const QModelIndex& idx : indexes) {
-        if (idx.column() != 0) continue;
-        
-        // 2026-06-xx 工业级增强：优先从 PathRole 提取以规避 ContentPanel 中的角色冲突 (UserRole+1 为 Rating)
-        QString path;
-        QVariant pathVar = idx.data(PathRole);
-        if (pathVar.isValid()) {
-            path = pathVar.toString();
-        } else {
-            path = idx.data(Qt::UserRole + 1).toString();
-        }
-        
-        if (!path.isEmpty() && QFileInfo::exists(path)) {
-            urls << QUrl::fromLocalFile(path);
-        }
-    }
-    
-    if (!urls.isEmpty()) {
-        mimeData->setUrls(urls);
-    }
+    QMimeData* mimeData = DragPayloadFactory::createMimeDataFromIndexes(indexes);
 
     QDrag* drag = new QDrag(this);
     drag->setMimeData(mimeData);

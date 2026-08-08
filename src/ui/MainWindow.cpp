@@ -28,6 +28,8 @@
 #endif
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
+#include "../core/CategoryDropProcessor.h"
+#include "DragPayloadFactory.h"
 
 #include "SearchHistoryPanel.h"
 #include "SvgIcons.h"
@@ -367,50 +369,25 @@ void MainWindow::initUi() {
         }
     });
 
-    // 监听侧边栏分类拖拽事件并交由控制层 (MainWindow) 处理物理导入与迁移决策
+    // 监听侧边栏分类拖拽事件，由专门的处理器 CategoryDropProcessor 进行高效后台多线程+批量大事务落盘
     connect(m_categoryPanel, &CategoryPanel::pathsDroppedToCategory, this, [this](const QStringList& paths, int targetCatId) {
         if (paths.isEmpty()) return;
 
-        Category targetCat = CategoryRepo::getById(targetCatId);
-        bool isTargetManagedLibraryRoot = (targetCat.parentId == 0 && 
-            QString::fromStdWString(targetCat.name).startsWith("ArcMeta.Library_"));
-
-        QStringList importPaths;
-        for (const QString& srcPath : paths) {
-            std::wstring wPath = MetadataManager::normalizePath(srcPath.toStdWString());
-            
-            // 1. 判断拖拽的卡片是否已经是库内受控资产
-            bool isManaged = MetadataManager::isInsideManagedLibrary(wPath);
-
-            if (isManaged) {
-                // 🚨【库内资产拖拽】：绝对不调用 AssetImporter，零弹窗硬拦截！
-                std::string assetId = MetadataManager::instance().getFolderIdSync(wPath);
-
-                if (isTargetManagedLibraryRoot) {
-                    // 【分支 A】：拖到另一个 ArcMeta.Library_盘符 ➔ 触发跨盘物理迁移
-                    QString targetLibraryPath = QString::fromStdWString(targetCat.physicalPath);
-                    MetadataManager::instance().migrateCapsuleToLibrary(assetId, targetLibraryPath);
-                } else {
-                    // 【分支 B】：拖到自定义虚拟分类 ➔ 1:N 虚拟关联绑定
-                    CategoryRepo::addItemToCategory(targetCatId, assetId, wPath);
-                }
-            } else {
-                // 🚨【库外操作系统文件拖拽】：才触发真正的资产打包入库流程
-                importPaths << srcPath;
-            }
-        }
-
-        if (!importPaths.isEmpty()) {
-            AssetImporter::importAssets(importPaths, targetCatId, this, [this]() {
-                m_categoryPanel->requestRefresh(true);
-                m_contentPanel->refreshAll();
-            });
-        } else {
-            // 标记脏数据并通知侧边栏与内容区实时刷新
+        // 利用局部实例，在后台进行大事务处理。为保证处理器生命周期随 MainWindow 销毁，声明 parent 为 this
+        CategoryDropProcessor* processor = new CategoryDropProcessor(this);
+        connect(processor, &CategoryDropProcessor::processingFinished, this, [this, processor](bool success, int itemCount) {
+            Q_UNUSED(success);
+            Q_UNUSED(itemCount);
+            // 刷新侧边栏和内容面板
             CategoryRepo::s_countsDirty.store(true);
             m_categoryPanel->requestRefresh(true);
             m_contentPanel->refreshAll();
-        }
+
+            // 自动销毁处理器，防止内存泄漏
+            processor->deleteLater();
+        });
+
+        processor->processDroppedPathsAsync(paths, targetCatId);
     });
 
     // 1b. 内容面板内部跳转分类 (双击同步) -> 统一导航中枢 (Plan-56)
