@@ -323,8 +323,21 @@ bool CategoryRepo::moveToTrashBatch(const std::vector<std::string>& folderIds) {
             sqlite3_step(delStmt);
             sqlite3_finalize(delStmt);
         }
-        // 2. Insert into trash bucket
+        // 后备查询：若内存路径为空，直接执行 SELECT path FROM metadata WHERE folder_id = ? 获取真实路径
         std::wstring path = MetadataManager::instance().getPathByFolderId(fid);
+        if (path.empty()) {
+            sqlite3_stmt* selStmt = nullptr;
+            const char* sqlSel = "SELECT path FROM metadata WHERE folder_id = ?";
+            if (sqlite3_prepare_v2(db, sqlSel, -1, &selStmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(selStmt, 1, fid.c_str(), -1, SQLITE_TRANSIENT);
+                if (sqlite3_step(selStmt) == SQLITE_ROW) {
+                    const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(selStmt, 0));
+                    if (wpath) path = wpath;
+                }
+                sqlite3_finalize(selStmt);
+            }
+        }
+        // 2. Insert into trash bucket
         sqlite3_stmt* insStmt;
         if (sqlite3_prepare_v2(db,
             "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)",
@@ -339,6 +352,14 @@ bool CategoryRepo::moveToTrashBatch(const std::vector<std::string>& folderIds) {
         // 3. Update is_trash flag
         if (!path.empty()) {
             MetadataManager::instance().setTrash(path, true);
+        }
+        // 执行 UPDATE metadata SET is_trash = 1 WHERE folder_id = ? 将标记置为 1
+        sqlite3_stmt* updStmt = nullptr;
+        const char* sqlUpd = "UPDATE metadata SET is_trash = 1 WHERE folder_id = ?";
+        if (sqlite3_prepare_v2(db, sqlUpd, -1, &updStmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(updStmt, 1, fid.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(updStmt);
+            sqlite3_finalize(updStmt);
         }
         return true;
     });
@@ -1265,6 +1286,25 @@ int CategoryRepo::getUncategorizedItemCount() {
     return getSystemCounts()["uncategorized"];
 }
 
+QMap<QString, int> CategoryRepo::getGlobalUniqueTags() { 
+    QMap<QString, int> tagCounts; 
+ 
+    // 遍历所有非回收站资产的 RuntimeMeta 标签数据 
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring& /*path*/, const RuntimeMeta& meta) { 
+        if (meta.isTrash || meta.isFolder) return; 
+ 
+        // meta.tags 本身已是 QStringList / QList<QString> 容器，直接迭代 
+        for (const QString& tag : meta.tags) { 
+            QString cleanTag = tag.trimmed(); 
+            if (!cleanTag.isEmpty()) { 
+                tagCounts[cleanTag]++; 
+            } 
+        } 
+    }); 
+ 
+    return tagCounts; 
+} 
+
 QMap<QString, int> CategoryRepo::getSystemCounts() {
     QMap<QString, int> res;
     res["all"] = s_totalCount.load();
@@ -1275,18 +1315,30 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     
     // 双轨隔离：汇总资源库垃圾箱计数和所有磁盘独立回收站计数
     int diskTrashCount = 0;
+    int libraryTrashCount = 0;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
     for (sqlite3* db : dbs) {
+        // 1. 统计磁盘模式回收站项目数
         sqlite3_stmt* stmt = nullptr;
-        const char* sql = "SELECT COUNT(*) FROM disk_trash";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        const char* sqlDisk = "SELECT COUNT(*) FROM disk_trash";
+        if (sqlite3_prepare_v2(db, sqlDisk, -1, &stmt, nullptr) == SQLITE_OK) {
             if (sqlite3_step(stmt) == SQLITE_ROW) {
                 diskTrashCount += sqlite3_column_int(stmt, 0);
             }
             sqlite3_finalize(stmt);
         }
+
+        // 2. 统计托管模式下已标记删除的资产总数
+        sqlite3_stmt* stmtLib = nullptr;
+        const char* sqlLib = "SELECT COUNT(DISTINCT folder_id) FROM metadata WHERE is_trash = 1";
+        if (sqlite3_prepare_v2(db, sqlLib, -1, &stmtLib, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmtLib) == SQLITE_ROW) {
+                libraryTrashCount += sqlite3_column_int(stmtLib, 0);
+            }
+            sqlite3_finalize(stmtLib);
+        }
     }
-    res["trash"] = s_trashCount.load() + diskTrashCount;
+    res["trash"] = libraryTrashCount + diskTrashCount;
     return res;
 }
 

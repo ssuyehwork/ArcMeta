@@ -10,11 +10,11 @@ static inline bool isAuxiliaryFile(const QString& path) {
     if (path.isEmpty()) return true;
 
     // 🚨 仅保留 .ArcMeta.json，彻底清除 .am_meta.json 历史判断
+    // 🚨 修正：移除对 .arc 的过滤！.arc 是托管资源库真实的资产胶囊，绝非无用辅助文件
     if (path.endsWith(".ArcMeta.json", Qt::CaseInsensitive) ||
         path.endsWith("_thumbnail.png", Qt::CaseInsensitive) ||
-        path.endsWith("metadata.scch", Qt::CaseInsensitive) ||
-        path.endsWith(".arc", Qt::CaseInsensitive)) {
-        return true; // 屏蔽过滤
+        path.endsWith("metadata.scch", Qt::CaseInsensitive)) {
+        return true; // 屏蔽过滤真正的辅助配置文件与缩略图
     }
 
     return false;
@@ -157,7 +157,6 @@ std::vector<ItemRecord> CategoryLoadService::loadTrashItems() {
                 int id = sqlite3_column_int(stmt, 0);
                 const wchar_t* wTrashPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
                 const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 2));
-                const wchar_t* wDriveLetter = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 3));
                 const wchar_t* wFileName = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
                 int isFolder = sqlite3_column_int(stmt, 5);
                 long long fileSize = sqlite3_column_int64(stmt, 6);
