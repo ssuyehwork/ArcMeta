@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "ContentPanel.h" 
+#include "BatchCreateDialog.h"
 #include "ColorPicker.h"
 #include "../core/DiskTrashService.h"
 #include <QWidgetAction>
@@ -1630,6 +1631,16 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         newMenu->addAction(UiHelper::getIcon("text", QColor("#EEEEEE")), "创建 Markdown")->setData(ActionNewMd); 
         newMenu->addAction(UiHelper::getIcon("text", QColor("#EEEEEE")), "创建纯文本文件 (txt)")->setData(ActionNewTxt); 
  
+        menu.addSeparator();
+
+        QAction* actBatchCreate = menu.addAction(UiHelper::getIcon("add", QColor("#EEEEEE")), "批量创建项目...");
+        actBatchCreate->setData(ActionBatchCreate);
+        // 6.1 磁盘目录模式独占
+        if (isMirrorSource()) {
+            actBatchCreate->setEnabled(false);
+            actBatchCreate->setToolTip("批量创建仅支持在物理磁盘模式下使用");
+        }
+
         menu.addSeparator(); 
         QAction* actPaste = menu.addAction("粘贴"); 
         actPaste->setData(ActionPaste); 
@@ -1741,6 +1752,13 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionNewFolder: createNewItem("folder"); break; 
         case ActionNewMd: createNewItem("md"); break; 
         case ActionNewTxt: createNewItem("txt"); break; 
+        case ActionBatchCreate: {
+            BatchCreateDialog dlg(m_currentPath, this);
+            if (dlg.exec() == QDialog::Accepted) {
+                refreshAll();
+            }
+            break;
+        }
         case ActionCategorize: { 
             int catId = selectedAction->property("catId").toInt(); 
             auto indexes = view->selectionModel()->selectedIndexes(); 

@@ -100,6 +100,8 @@ set(SOURCES
     src/mft/MftReader.h
     src/mft/ScchCache.cpp
     src/mft/ScchCache.h
+    src/ui/BatchCreateDialog.cpp
+    src/ui/BatchCreateDialog.h
     src/ui/BatchRenameDialog.cpp
     src/ui/BatchRenameDialog.h
     src/ui/BatchRenamePreviewDialog.cpp
