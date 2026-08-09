@@ -130,6 +130,7 @@ void syncManagedLibraries() {
             cat.color = L"#378ADD";
             cat.physicalPath = managedAbsW;
             cat.icon = L"folder_filled";
+            cat.kind = CategoryKind::SystemLibrary; // 显式标记为托管根分类
             
             CategoryRepo::add(cat);
             qWarning() << "[CategoryRepo] 自动修复补全托管根分类:" << QString::fromStdWString(libName);
@@ -148,7 +149,7 @@ std::vector<Category> CategoryRepo::getAll() {
     std::vector<Category> results;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
 
-    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon FROM categories WHERE id > 0 ORDER BY sort_order ASC";
+    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon, category_kind FROM categories WHERE id > 0 ORDER BY sort_order ASC";
     std::set<int> seenIds;
 
     for (sqlite3* db : dbs) {
@@ -180,6 +181,7 @@ std::vector<Category> CategoryRepo::getAll() {
                 if (wpath) c.physicalPath = wpath;
                 const wchar_t* wicon = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 11));
                 if (wicon) c.icon = wicon;
+                c.kind = static_cast<CategoryKind>(sqlite3_column_int(stmt, 12));
                 results.push_back(c);
             }
             sqlite3_finalize(stmt);
@@ -216,7 +218,7 @@ bool CategoryRepo::add(Category& cat) {
     if (!mainDb) return false;
 
     sqlite3_stmt* stmt;
-    const char* sql = "INSERT INTO categories (parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT INTO categories (parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon, category_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     int rc = sqlite3_prepare_v2(mainDb, sql, -1, &stmt, nullptr);
     if (rc == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, cat.parentId);
@@ -234,6 +236,7 @@ bool CategoryRepo::add(Category& cat) {
         sqlite3_bind_int64(stmt, 9, cat.physicalFrn);
         sqlite3_bind_text16(stmt, 10, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text16(stmt, 11, cat.icon.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 12, static_cast<int>(cat.kind));
 
         rc = sqlite3_step(stmt);
         if (rc == SQLITE_DONE) {
@@ -241,7 +244,7 @@ bool CategoryRepo::add(Category& cat) {
             sqlite3_finalize(stmt);
 
             // Now write to all OTHER active databases with the same explicit ID!
-            const char* sqlWithId = "INSERT OR REPLACE INTO categories (id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            const char* sqlWithId = "INSERT OR REPLACE INTO categories (id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon, category_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             for (sqlite3* db : dbs) {
                 if (db == mainDb) continue;
                 sqlite3_stmt* stmtOther;
@@ -258,6 +261,7 @@ bool CategoryRepo::add(Category& cat) {
                     sqlite3_bind_int64(stmtOther, 10, cat.physicalFrn);
                     sqlite3_bind_text16(stmtOther, 11, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_text16(stmtOther, 12, cat.icon.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_int(stmtOther, 13, static_cast<int>(cat.kind));
                     sqlite3_step(stmtOther);
                     sqlite3_finalize(stmtOther);
                 }
@@ -460,7 +464,7 @@ Category CategoryRepo::getById(int id) {
     if (!db) return c;
 
     sqlite3_stmt* stmt;
-    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon FROM categories WHERE id = ?";
+    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon, category_kind FROM categories WHERE id = ?";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, id);
         if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -483,6 +487,7 @@ Category CategoryRepo::getById(int id) {
             if (wpath) c.physicalPath = wpath;
             const wchar_t* wicon = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 11));
             if (wicon) c.icon = wicon;
+            c.kind = static_cast<CategoryKind>(sqlite3_column_int(stmt, 12));
         }
         sqlite3_finalize(stmt);
     }
@@ -492,7 +497,7 @@ Category CategoryRepo::getById(int id) {
 bool CategoryRepo::update(const Category& cat) {
     WriteGuard guard;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
-    const char* sql = "UPDATE categories SET parent_id=?, name=?, color=?, preset_tags=?, sort_order=?, pinned=?, encrypted=?, encrypt_hint=?, physical_frn=?, physical_path=?, icon=? WHERE id=?";
+    const char* sql = "UPDATE categories SET parent_id=?, name=?, color=?, preset_tags=?, sort_order=?, pinned=?, encrypted=?, encrypt_hint=?, physical_frn=?, physical_path=?, icon=?, category_kind=? WHERE id=?";
     
     bool anyOk = false;
     for (sqlite3* db : dbs) {
@@ -511,7 +516,8 @@ bool CategoryRepo::update(const Category& cat) {
             sqlite3_bind_int64(stmt, 9, cat.physicalFrn);
             sqlite3_bind_text16(stmt, 10, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_text16(stmt, 11, cat.icon.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_int(stmt, 12, cat.id);
+            sqlite3_bind_int(stmt, 12, static_cast<int>(cat.kind));
+            sqlite3_bind_int(stmt, 13, cat.id);
 
             if (sqlite3_step(stmt) == SQLITE_DONE) anyOk = true;
             sqlite3_finalize(stmt);
@@ -1147,7 +1153,7 @@ void CategoryRepo::syncCategorizedCountForFid(const std::string& /*folderId*/) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT DISTINCT folder_id FROM category_items "
                           "WHERE category_id > 0 AND category_id NOT IN "
-                          "(SELECT id FROM categories WHERE parent_id = 0 AND name LIKE 'ArcMeta.Library_%')";
+                          "(SELECT id FROM categories WHERE category_kind = 1)";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* fidPtr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
@@ -1192,6 +1198,22 @@ void CategoryRepo::loadStatsFromDb() {
             else if (key == "sys_trash_count") s_trashCount.store(val);
         }
         sqlite3_finalize(stmt);
+    }
+
+    // 修正后的未分类数量查询：仅当项目未关联任何 category_kind = 0 (用户自定义分类) 时，才计入未分类数量！
+    const char* uncategorizedSql =
+        "SELECT COUNT(DISTINCT folder_id) FROM metadata WHERE is_trash = 0 AND folder_id NOT IN ("
+        "    SELECT ci.folder_id FROM category_items ci "
+        "    JOIN categories c ON ci.category_id = c.id "
+        "    WHERE c.category_kind = 0"  // 物理显式筛选用户分类
+        ");";
+
+    sqlite3_stmt* stmtUncat = nullptr;
+    if (sqlite3_prepare_v2(db, uncategorizedSql, -1, &stmtUncat, nullptr) == SQLITE_OK) {
+        if (sqlite3_step(stmtUncat) == SQLITE_ROW) {
+            s_uncategorizedCount.store(sqlite3_column_int(stmtUncat, 0));
+        }
+        sqlite3_finalize(stmtUncat);
     }
 }
 
@@ -1324,7 +1346,7 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
             // 2026-06-xx 性能优化：查询“未分类”路径时，排除掉已在自定义分类 (ID > 0) 中的文件
             const char* sql = "SELECT DISTINCT folder_id FROM category_items "
                               "WHERE category_id > 0 AND category_id NOT IN "
-                              "(SELECT id FROM categories WHERE parent_id = 0 AND name LIKE 'ArcMeta.Library_%')";
+                              "(SELECT id FROM categories WHERE category_kind = 1)";
             if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
                 while (sqlite3_step(stmt) == SQLITE_ROW) {
                     const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
