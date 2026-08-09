@@ -45,8 +45,8 @@ int MemoryBatchRenameService::execute(const std::vector<std::wstring>& originalP
             std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
             std::wstring newW = QDir::toNativeSeparators(newMainPath).toStdWString();
 
-            // 3. 更新内存数据库与索引
-            MetadataManager::instance().renameItem(oldW, newW);
+            // 3. 更新内存数据库与索引 (调用 renameItemSync 同步机制)
+            MetadataManager::instance().renameItemSync(oldW, newW);
             CategoryRepo::renamePhysicalCategoryPath(oldW, newW);
         }
     }

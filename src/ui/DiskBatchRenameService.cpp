@@ -54,7 +54,8 @@ int DiskBatchRenameService::execute(const std::vector<std::wstring>& originalPat
                 std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
                 std::wstring newW = QDir(destDir).absoluteFilePath(QString::fromStdWString(newNames[i])).toStdWString();
 
-                MetadataManager::instance().renameItem(oldW, newW);
+                // 调用 renameItemSync 同步机制
+                MetadataManager::instance().renameItemSync(oldW, newW);
                 CategoryRepo::renamePhysicalCategoryPath(oldW, newW);
             }
         }

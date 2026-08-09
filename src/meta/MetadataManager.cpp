@@ -1451,60 +1451,51 @@ QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
 
 
 void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring& newPath) {
+    renameItemSync(oldPath, newPath);
+}
+
+void MetadataManager::renameItemSync(const std::wstring& oldPath, const std::wstring& newPath) {
     std::wstring nOld = normalizePath(oldPath);
     std::wstring nNew = normalizePath(newPath);
     if (nOld == nNew) return;
 
-    // 2026-08-xx 按照性能优化要求：将级联更名逻辑移至后台线程，杜绝大目录重命名阻塞主线程 (Plan-128)
-    (void)QtConcurrent::run([this, nOld, nNew]() {
-        std::vector<std::pair<std::wstring, std::wstring>> itemsToRename;
+    std::vector<std::pair<std::wstring, std::wstring>> itemsToRename;
+
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (!currentSnapshot) return;
         
-        {
-            std::unique_lock<std::shared_mutex> lock(m_mutex);
-            auto currentSnapshot = std::atomic_load(&m_snapshot);
-            if (!currentSnapshot) return;
-            
-            // 1. 深度收集所有子孙路径
-            for (auto it = currentSnapshot->begin(); it != currentSnapshot->end(); ++it) {
-                const std::wstring& p = it->first;
-                if (p == nOld) {
-                    itemsToRename.push_back({p, nNew});
-                } else if (p.find(nOld + L"\\") == 0 || p.find(nOld + L"/") == 0) {
-                    std::wstring relative = p.substr(nOld.length());
-                    itemsToRename.push_back({p, nNew + relative});
-                }
+        // 1. 深度收集所有子孙路径
+        for (auto it = currentSnapshot->begin(); it != currentSnapshot->end(); ++it) {
+            const std::wstring& p = it->first;
+            if (p == nOld) {
+                itemsToRename.push_back({p, nNew});
+            } else if (p.find(nOld + L"\\") == 0 || p.find(nOld + L"/") == 0) {
+                std::wstring relative = p.substr(nOld.length());
+                itemsToRename.push_back({p, nNew + relative});
             }
+        }
 
-            if (itemsToRename.empty()) return;
+        if (itemsToRename.empty()) return;
 
-            // 2. 优化：先一次性切断根级树索引关系，防止循环内 O(K^2) 的 std::remove 开销
-            std::wstring rootOldParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nOld)).absolutePath()).toStdWString());
-            if (m_parentToChildren.count(rootOldParent)) {
-                auto& children = m_parentToChildren[rootOldParent];
-                children.erase(std::remove(children.begin(), children.end(), nOld), children.end());
-                if (children.empty()) m_parentToChildren.erase(rootOldParent);
-            }
+        // 2. 优化：先一次性切断根级树索引关系，防止循环内 O(K^2) 的 std::remove 开销
+        std::wstring rootOldParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nOld)).absolutePath()).toStdWString());
+        if (m_parentToChildren.count(rootOldParent)) {
+            auto& children = m_parentToChildren[rootOldParent];
+            children.erase(std::remove(children.begin(), children.end(), nOld), children.end());
+            if (children.empty()) m_parentToChildren.erase(rootOldParent);
+        }
 
-            auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
 
-            for (const auto& pair : itemsToRename) {
-                const std::wstring& curOld = pair.first;
-                const std::wstring& curNew = pair.second;
+        for (const auto& pair : itemsToRename) {
+            const std::wstring& curOld = pair.first;
+            const std::wstring& curNew = pair.second;
 
-                auto it = newMap->find(curOld);
-                if (it == newMap->end()) {
-                    // 即使内存缓存不含有，由于处于 DiskNav 模式，我们依然需要支持对离散 JSON 的平滑重命名同步
-                    QFileInfo oldFileInfo(QString::fromStdWString(curOld));
-                    QFileInfo newFileInfo(QString::fromStdWString(curNew));
-                    if (oldFileInfo.isDir()) {
-                        AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
-                    } else {
-                        AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
-                    }
-                    continue;
-                }
-
-                // 同步迁移离散 JSON 缓存
+            auto it = newMap->find(curOld);
+            if (it == newMap->end()) {
+                // 即使内存缓存不含有，由于处于 DiskNav 模式，我们依然需要支持对离散 JSON 的平滑重命名同步
                 QFileInfo oldFileInfo(QString::fromStdWString(curOld));
                 QFileInfo newFileInfo(QString::fromStdWString(curNew));
                 if (oldFileInfo.isDir()) {
@@ -1512,135 +1503,145 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 } else {
                     AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
                 }
+                continue;
+            }
 
-                std::string fid = it->second.folderId;
-                bool isFolder = it->second.isFolder;
+            // 同步迁移离散 JSON 缓存
+            QFileInfo oldFileInfo(QString::fromStdWString(curOld));
+            QFileInfo newFileInfo(QString::fromStdWString(curNew));
+            if (oldFileInfo.isDir()) {
+                AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
+            } else {
+                AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
+            }
 
-                // [倒排索引维护]
-                std::wstring oldName, oldExt;
-                parsePathComponents(curOld, isFolder, oldName, oldExt);
-                if (!oldName.empty()) {
-                    if (isFolder) {
-                        auto& v = m_subFolderNameToFolderIds[oldName];
-                        v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                        if (v.empty()) m_subFolderNameToFolderIds.erase(oldName);
-                    } else {
-                        auto& v = m_assetNameToFolderIds[oldName];
-                        v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-                        if (v.empty()) m_assetNameToFolderIds.erase(oldName);
-                        if (!oldExt.empty()) {
-                            auto& ve = m_extensionToFolderIds[oldExt];
-                            ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
-                            if (ve.empty()) m_extensionToFolderIds.erase(oldExt);
-                        }
+            std::string fid = it->second.folderId;
+            bool isFolder = it->second.isFolder;
+
+            // [倒排索引维护]
+            std::wstring oldName, oldExt;
+            parsePathComponents(curOld, isFolder, oldName, oldExt);
+            if (!oldName.empty()) {
+                if (isFolder) {
+                    auto& v = m_subFolderNameToFolderIds[oldName];
+                    v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                    if (v.empty()) m_subFolderNameToFolderIds.erase(oldName);
+                } else {
+                    auto& v = m_assetNameToFolderIds[oldName];
+                    v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                    if (v.empty()) m_assetNameToFolderIds.erase(oldName);
+                    if (!oldExt.empty()) {
+                        auto& ve = m_extensionToFolderIds[oldExt];
+                        ve.erase(std::remove(ve.begin(), ve.end(), fid), v.end());
+                        if (ve.empty()) m_extensionToFolderIds.erase(oldExt);
                     }
                 }
+            }
 
-                // [树级索引维护] - 内部项仅移除
-                if (curOld != nOld) {
-                    m_parentToChildren.erase(curOld); 
+            // [树级索引维护] - 内部项仅移除
+            if (curOld != nOld) {
+                m_parentToChildren.erase(curOld);
+            }
+
+            // 3. 缓存迁移
+            RuntimeMeta meta = it->second;
+            newMap->erase(it);
+            // 重新解析出最新基名与后缀塞入，确保内存基名已更新
+            parsePathComponents(curNew, meta.isFolder, meta.baseName, meta.ext);
+            (*newMap)[curNew] = meta;
+            if (!fid.empty()) m_folderIdToPath[fid] = curNew;
+
+            // [倒排索引重建]
+            std::wstring newName, newExt;
+            parsePathComponents(curNew, isFolder, newName, newExt);
+            if (!newName.empty()) {
+                if (isFolder) {
+                    auto& v = m_subFolderNameToFolderIds[newName];
+                    if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
+                } else {
+                    auto& v = m_assetNameToFolderIds[newName];
+                    if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
+                    if (!newExt.empty()) {
+                        auto& ve = m_extensionToFolderIds[newExt];
+                        // 2026-08-xx 物理修复：修正容器指向错误导致的扩展名索引失效
+                        if (std::find(ve.begin(), ve.end(), fid) == ve.end()) ve.push_back(fid);
+                    }
                 }
+            }
 
-                // 3. 缓存迁移
-                RuntimeMeta meta = it->second;
-                newMap->erase(it);
-                // 重新解析出最新基名与后缀塞入，确保内存基名已更新
-                parsePathComponents(curNew, meta.isFolder, meta.baseName, meta.ext);
-                (*newMap)[curNew] = meta;
-                if (!fid.empty()) m_folderIdToPath[fid] = curNew;
+            std::wstring curNewParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(curNew)).absolutePath()).toStdWString());
+            if (curNewParent != curNew) {
+                auto& children = m_parentToChildren[curNewParent];
+                if (std::find(children.begin(), children.end(), curNew) == children.end()) {
+                    children.push_back(curNew);
+                }
+            }
 
-                // [倒排索引重建]
+            // [进度缓存迁移]
+            if (isFolder && m_folderProgressCache.count(curOld)) {
+                double prog = m_folderProgressCache[curOld];
+                m_folderProgressCache.erase(curOld);
+                m_folderProgressCache[curNew] = prog;
+            }
+        }
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
+
+    // 4. 物理数据库批量同步 (Plan-128: 引入事务保护)
+    // 极致优化：预取根路径的卷信息，避免在循环中重复执行耗时的 Win32 磁盘查询
+    std::wstring volSerial = getVolumeSerialNumber(nNew);
+    QString letter = (nNew.length() >= 2 && nNew[1] == L':') ? QString::fromWCharArray(&nNew[0], 1) : "";
+    sqlite3* memDb = DatabaseManager::instance().getDriveDb(volSerial, letter);
+
+    std::map<sqlite3*, std::vector<std::pair<std::string, std::wstring>>> groupedSyncTasks;
+    for (const auto& pair : itemsToRename) {
+        const std::wstring& curNew = pair.second;
+        std::string fid;
+        {
+            auto currentSnapshot = std::atomic_load(&m_snapshot);
+            if (currentSnapshot && currentSnapshot->count(curNew)) fid = currentSnapshot->at(curNew).folderId;
+        }
+        if (fid.empty()) continue;
+
+        if (memDb) {
+            groupedSyncTasks[memDb].push_back({fid, curNew});
+        }
+    }
+
+    const char* updSql = "UPDATE metadata SET path = ?, base_name = ?, ext = ? WHERE folder_id = ?";
+    for (auto& entry : groupedSyncTasks) {
+        sqlite3* targetDb = entry.first;
+        auto& tasks = entry.second;
+
+        // [Plan-131 方案 A] 直连磁盘模式，无需重复异步分发
+        SqlTransaction trans(targetDb);
+        sqlite3_stmt* memStmt;
+        if (sqlite3_prepare_v2(targetDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
+            for (const auto& task : tasks) {
+                // 重新解析出最新基名与后缀以供数据库绑定，防止仅移动了 path 却没有重写 base_name / ext
                 std::wstring newName, newExt;
-                parsePathComponents(curNew, isFolder, newName, newExt);
-                if (!newName.empty()) {
-                    if (isFolder) {
-                        auto& v = m_subFolderNameToFolderIds[newName];
-                        if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
-                    } else {
-                        auto& v = m_assetNameToFolderIds[newName];
-                        if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
-                        if (!newExt.empty()) {
-                            auto& ve = m_extensionToFolderIds[newExt];
-                            // 2026-08-xx 物理修复：修正容器指向错误导致的扩展名索引失效
-                            if (std::find(ve.begin(), ve.end(), fid) == ve.end()) ve.push_back(fid);
-                        }
+                bool isFolder = false;
+                {
+                    auto currentSnapshot = std::atomic_load(&m_snapshot);
+                    if (currentSnapshot && currentSnapshot->count(task.second)) {
+                        isFolder = currentSnapshot->at(task.second).isFolder;
                     }
                 }
+                parsePathComponents(task.second, isFolder, newName, newExt);
 
-                std::wstring curNewParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(curNew)).absolutePath()).toStdWString());
-                if (curNewParent != curNew) {
-                    auto& children = m_parentToChildren[curNewParent];
-                    if (std::find(children.begin(), children.end(), curNew) == children.end()) {
-                        children.push_back(curNew);
-                    }
-                }
-
-                // [进度缓存迁移]
-                if (isFolder && m_folderProgressCache.count(curOld)) {
-                    double prog = m_folderProgressCache[curOld];
-                    m_folderProgressCache.erase(curOld);
-                    m_folderProgressCache[curNew] = prog;
-                }
+                sqlite3_bind_text16(memStmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(memStmt, 2, newName.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(memStmt, 3, newExt.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(memStmt, 4, task.first.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(memStmt);
+                sqlite3_reset(memStmt);
             }
-            std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+            sqlite3_finalize(memStmt);
         }
+        trans.commit();
+    }
 
-        // 4. 物理数据库批量同步 (Plan-128: 引入事务保护)
-        // 极致优化：预取根路径的卷信息，避免在循环中重复执行耗时的 Win32 磁盘查询
-        std::wstring volSerial = getVolumeSerialNumber(nNew);
-        QString letter = (nNew.length() >= 2 && nNew[1] == L':') ? QString::fromWCharArray(&nNew[0], 1) : "";
-        sqlite3* memDb = DatabaseManager::instance().getDriveDb(volSerial, letter);
-        
-        std::map<sqlite3*, std::vector<std::pair<std::string, std::wstring>>> groupedSyncTasks;
-        for (const auto& pair : itemsToRename) {
-            const std::wstring& curNew = pair.second;
-            std::string fid;
-            {
-                auto currentSnapshot = std::atomic_load(&m_snapshot);
-                if (currentSnapshot && currentSnapshot->count(curNew)) fid = currentSnapshot->at(curNew).folderId;
-            }
-            if (fid.empty()) continue;
-
-            if (memDb) {
-                groupedSyncTasks[memDb].push_back({fid, curNew});
-            }
-        }
-
-        const char* updSql = "UPDATE metadata SET path = ?, base_name = ?, ext = ? WHERE folder_id = ?";
-        for (auto& entry : groupedSyncTasks) {
-            sqlite3* targetDb = entry.first;
-            auto& tasks = entry.second;
-
-            // [Plan-131 方案 A] 直连磁盘模式，无需重复异步分发
-            SqlTransaction trans(targetDb);
-            sqlite3_stmt* memStmt;
-            if (sqlite3_prepare_v2(targetDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
-                for (const auto& task : tasks) {
-                    // 重新解析出最新基名与后缀以供数据库绑定，防止仅移动了 path 却没有重写 base_name / ext
-                    std::wstring newName, newExt;
-                    bool isFolder = false;
-                    {
-                        auto currentSnapshot = std::atomic_load(&m_snapshot);
-                        if (currentSnapshot && currentSnapshot->count(task.second)) {
-                            isFolder = currentSnapshot->at(task.second).isFolder;
-                        }
-                    }
-                    parsePathComponents(task.second, isFolder, newName, newExt);
-
-                    sqlite3_bind_text16(memStmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(memStmt, 2, newName.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(memStmt, 3, newExt.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text(memStmt, 4, task.first.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_step(memStmt);
-                    sqlite3_reset(memStmt);
-                }
-                sqlite3_finalize(memStmt);
-            }
-            trans.commit();
-        }
-
-        notifyFullUIRebuild();
-    });
+    notifyFullUIRebuild();
 }
 
 void MetadataManager::syncAfterMove(const std::wstring& oldPath, const std::wstring& newPath) {

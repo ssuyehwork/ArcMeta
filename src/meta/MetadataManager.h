@@ -248,6 +248,7 @@ public:
     QVector<QColor> getPalettes(const std::wstring& path);
 
     void renameItem(const std::wstring& oldPath, const std::wstring& newPath);
+    void renameItemSync(const std::wstring& oldPath, const std::wstring& newPath);
     void removeMetadataSync(const std::wstring& path);
 
     /**
