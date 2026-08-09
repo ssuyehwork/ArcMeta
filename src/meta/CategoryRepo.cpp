@@ -858,7 +858,9 @@ bool CategoryRepo::renamePhysicalCategoryPath(const std::wstring& oldPath, const
     }
 
     if (anyOk) {
-        DatabaseManager::instance().flushAll();
+        DatabaseManager::instance().enqueueSyncTask([]() {
+            DatabaseManager::instance().flushAll();
+        });
         refreshMemoryCache();
     }
     return anyOk;

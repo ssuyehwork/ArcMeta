@@ -145,6 +145,7 @@ MetadataManager& MetadataManager::instance() {
 MetadataManager::MetadataManager(QObject* parent) : QObject(parent) {
     // [RCU 内存快照初始化]：分配空快照，防空指针异常
     m_snapshot = std::make_shared<const std::unordered_map<std::wstring, RuntimeMeta>>();
+    m_fidToPathSnapshot = std::make_shared<const std::unordered_map<std::string, std::wstring>>();
     m_uiSignalTimer = new QTimer(this);
     m_uiSignalTimer->setInterval(200); // 200ms 时间窗口
     m_uiSignalTimer->setSingleShot(true);
@@ -340,7 +341,9 @@ void MetadataManager::initFromScchMode() {
 
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_folderIdToPath = tempFidToPath;
+        std::atomic_store(&m_fidToPathSnapshot, std::shared_ptr<const std::unordered_map<std::string, std::wstring>>(
+            std::make_shared<const std::unordered_map<std::string, std::wstring>>(tempFidToPath)
+        ));
         m_parentToChildren = tempParentToChildren;
         m_folderProgressCache = tempFolderProgressCache;
 
@@ -502,7 +505,11 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
         auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
         (*newMap)[nPath] = rm;
         std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
-        m_folderIdToPath[folderId] = nPath; 
+
+        auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+        auto newFidMap = std::make_shared<std::unordered_map<std::string, std::wstring>>(*currentFidSnapshot);
+        (*newFidMap)[folderId] = nPath;
+        std::atomic_store(&m_fidToPathSnapshot, std::shared_ptr<const std::unordered_map<std::string, std::wstring>>(newFidMap));
     } 
  
     // 5. 实时驱动原子计数器加 1 与全系统通知 
@@ -563,7 +570,11 @@ bool MetadataManager::migrateCapsuleToLibrary(const std::string& assetId, const 
         auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
         (*newMap)[wNewPath] = oldMeta;
         std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
-        m_folderIdToPath[assetId] = wNewPath; 
+
+        auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+        auto newFidMap = std::make_shared<std::unordered_map<std::string, std::wstring>>(*currentFidSnapshot);
+        (*newFidMap)[assetId] = wNewPath;
+        std::atomic_store(&m_fidToPathSnapshot, std::shared_ptr<const std::unordered_map<std::string, std::wstring>>(newFidMap));
     } 
  
     // 5. 异步落盘到新库并通知 UI 刷新 
@@ -885,9 +896,10 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
 
 std::wstring MetadataManager::getPathByFolderId(const std::string& fid) {
     if (fid.empty()) return L"";
-    std::shared_lock<std::shared_mutex> lock(m_mutex);
-    auto it = m_folderIdToPath.find(fid);
-    return (it != m_folderIdToPath.end()) ? it->second : L"";
+    auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+    if (!currentFidSnapshot) return L"";
+    auto it = currentFidSnapshot->find(fid);
+    return (it != currentFidSnapshot->end()) ? it->second : L"";
 }
 
 void MetadataManager::ensureActivated(const std::wstring& nPath) {
@@ -933,8 +945,9 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         }
 
         // 共享元数据逻辑 (FID 关联)
-        if (!rm.folderId.empty() && m_folderIdToPath.count(rm.folderId)) {
-            auto existingIt = currentSnapshot->find(m_folderIdToPath[rm.folderId]);
+        auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+        if (!rm.folderId.empty() && currentFidSnapshot && currentFidSnapshot->count(rm.folderId)) {
+            auto existingIt = currentSnapshot->find(currentFidSnapshot->at(rm.folderId));
             if (existingIt != currentSnapshot->end()) {
                 const RuntimeMeta& existing = existingIt->second;
                 rm.rating    = existing.rating;
@@ -975,7 +988,10 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             }
         }
         if (!rm.folderId.empty()) {
-            m_folderIdToPath[rm.folderId] = nPath;
+            auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+            auto newFidMap = std::make_shared<std::unordered_map<std::string, std::wstring>>(*currentFidSnapshot);
+            (*newFidMap)[rm.folderId] = nPath;
+            std::atomic_store(&m_fidToPathSnapshot, std::shared_ptr<const std::unordered_map<std::string, std::wstring>>(newFidMap));
 
             // Plan-124: 维护树级索引
             std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nPath)).absolutePath()).toStdWString();
@@ -1529,7 +1545,12 @@ void MetadataManager::renameItemsBatch(const std::vector<std::pair<std::wstring,
             // 迁移快照
             newMap->erase(it);
             (*newMap)[curNew] = meta;
-            if (!fid.empty()) m_folderIdToPath[fid] = curNew;
+            if (!fid.empty()) {
+                auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+                auto newFidMap = std::make_shared<std::unordered_map<std::string, std::wstring>>(*currentFidSnapshot);
+                (*newFidMap)[fid] = curNew;
+                std::atomic_store(&m_fidToPathSnapshot, std::shared_ptr<const std::unordered_map<std::string, std::wstring>>(newFidMap));
+            }
 
             // 建立新倒排索引
             if (!meta.baseName.empty()) {
@@ -1699,7 +1720,12 @@ void MetadataManager::renameItemSync(const std::wstring& oldPath, const std::wst
             // 重新解析出最新基名与后缀塞入，确保内存基名已更新
             parsePathComponents(curNew, meta.isFolder, meta.baseName, meta.ext);
             (*newMap)[curNew] = meta;
-            if (!fid.empty()) m_folderIdToPath[fid] = curNew;
+            if (!fid.empty()) {
+                auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+                auto newFidMap = std::make_shared<std::unordered_map<std::string, std::wstring>>(*currentFidSnapshot);
+                (*newFidMap)[fid] = curNew;
+                std::atomic_store(&m_fidToPathSnapshot, std::shared_ptr<const std::unordered_map<std::string, std::wstring>>(newFidMap));
+            }
 
             // [倒排索引重建]
             std::wstring newName, newExt;
@@ -1868,7 +1894,11 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                         std::string fid = it->second.folderId;
                         bool isFolder = it->second.isFolder;
                         fids.push_back(fid);
-                        m_folderIdToPath.erase(fid);
+
+                        auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+                        auto newFidMap = std::make_shared<std::unordered_map<std::string, std::wstring>>(*currentFidSnapshot);
+                        newFidMap->erase(fid);
+                        std::atomic_store(&m_fidToPathSnapshot, std::shared_ptr<const std::unordered_map<std::string, std::wstring>>(newFidMap));
 
                         // [倒排索引维护]
                         std::wstring name, ext;
@@ -1999,7 +2029,11 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                 std::string fid = it->second.folderId;
                 if (!fid.empty()) {
                     allFids.push_back(fid);
-                    m_folderIdToPath.erase(fid);
+
+                    auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+                    auto newFidMap = std::make_shared<std::unordered_map<std::string, std::wstring>>(*currentFidSnapshot);
+                    newFidMap->erase(fid);
+                    std::atomic_store(&m_fidToPathSnapshot, std::shared_ptr<const std::unordered_map<std::string, std::wstring>>(newFidMap));
 
                     // 数据库定位
                     std::wstring volSerial = getVolumeSerialNumber(p);
@@ -2100,10 +2134,11 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         auto currentSnapshot = std::atomic_load(&m_snapshot);
-        if (currentSnapshot) {
+        auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+        if (currentSnapshot && currentFidSnapshot) {
             // 核心修复：防止内存中出现同一个 FID 的多条路径记录（物理偏移导致的重复计数）
-            if (!fid.empty() && m_folderIdToPath.count(fid)) {
-                std::wstring oldPath = m_folderIdToPath[fid];
+            if (!fid.empty() && currentFidSnapshot->count(fid)) {
+                std::wstring oldPath = currentFidSnapshot->at(fid);
                 if (oldPath != nPath) {
                     auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
                     // 在清理旧路径前，同步清理隔离索引
@@ -2166,7 +2201,12 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
                 std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
             }
         }
-        if (!fid.empty()) m_folderIdToPath[fid] = nPath;
+        if (!fid.empty()) {
+            auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+            auto newFidMap = std::make_shared<std::unordered_map<std::string, std::wstring>>(*currentFidSnapshot);
+            (*newFidMap)[fid] = nPath;
+            std::atomic_store(&m_fidToPathSnapshot, std::shared_ptr<const std::unordered_map<std::string, std::wstring>>(newFidMap));
+        }
     }
     
     if (changed) {
@@ -2304,12 +2344,14 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
     // 2. 物理加固：如果路径匹配失败（常见于 OS 将文件移入回收站后路径发生偏移），尝试通过物理 FID 反查
     if (!existsInDb) {
         if (fetchWinApiMetadataDirect(nPath, fid)) {
-            std::shared_lock<std::shared_mutex> lock(m_mutex);
-            auto it = m_folderIdToPath.find(fid);
-            if (it != m_folderIdToPath.end()) {
-                nPath = it->second; // 修正为缓存中的原始路径，确保 removeMetadataSync 能正确匹配
-                existsInDb = true;
-                qWarning() << "[Metadata] 路径匹配失败，已通过 FID 校准原始路径:" << QString::fromStdWString(nPath);
+            auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
+            if (currentFidSnapshot) {
+                auto it = currentFidSnapshot->find(fid);
+                if (it != currentFidSnapshot->end()) {
+                    nPath = it->second; // 修正为缓存中的原始路径，确保 removeMetadataSync 能正确匹配
+                    existsInDb = true;
+                    qWarning() << "[Metadata] 路径匹配失败，已通过 FID 校准原始路径:" << QString::fromStdWString(nPath);
+                }
             }
         }
     }

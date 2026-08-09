@@ -443,7 +443,7 @@ private:
 
     // [RCU 内存快照设计]：将缓存升级为原子共享智能指针快照，实现 Lock-Free 共享读取
     std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>> m_snapshot;
-    std::unordered_map<std::string, std::wstring> m_folderIdToPath;
+    std::shared_ptr<const std::unordered_map<std::string, std::wstring>> m_fidToPathSnapshot;
 
     // 2026-xx-xx 按照 Plan-124：快速层级倒排索引与进度缓存
     // Key: 标准化父级目录路径 (结尾不含斜杠), Value: 直接子项的完整标准化路径集合
