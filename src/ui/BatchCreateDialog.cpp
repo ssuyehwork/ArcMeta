@@ -337,6 +337,15 @@ void BatchCreateDialog::onExecute() {
         }
     }
 
+    // 按照用户最新要求：成功创建后，自动递增累加序列数字的起始值，并落盘保存
+    for (auto* row : m_ruleRows) {
+        RenameRule r = row->getRule();
+        if (r.type == RenameComponentType::Sequence) {
+            r.start += createCount; // 起始值自动递增累加本次创建的数量
+            row->setRule(r);        // 重新应用使 UI 与内部值同步
+        }
+    }
+
     QString msg = QString("成功创建 %1 个项目").arg(itemsCreated);
     ToolTipOverlay::instance()->showText(QCursor::pos(), msg, 2000, Style::SuccessGreen);
 
