@@ -2389,6 +2389,11 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
                         }
                     }
                     recordsToSync.push_back({p, rMeta});
+
+                    // 按照用户最新要求：在批量持久化最底层强行注入分类关系自动绑定护栏
+                    if (isInsideManagedLibrary(p)) {
+                        CategoryRepo::bindToLibraryRootCategory(rMeta.folderId, p);
+                    }
                 }
                 sqlite3_finalize(memStmt);
             }
@@ -2506,6 +2511,11 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
                     (*newMap)[nPath] = rMeta;
                     std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
                 }
+            }
+
+            // 按照用户最新要求：在单文件持久化最底层强行注入分类关系自动绑定护栏
+            if (isInsideManagedLibrary(nPath)) {
+                CategoryRepo::bindToLibraryRootCategory(rMeta.folderId, nPath);
             }
         } else {
             qWarning() << "[DB_TRACE] persistAsync 写入内存库失败！Error:" << sqlite3_errmsg(memDb) << "路径:" << QString::fromStdWString(nPath);
