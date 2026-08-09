@@ -90,7 +90,6 @@ public:
     static QMap<QString, int> getGlobalUniqueTags();
 
     // 条目关联逻辑
-    static bool addItemToCategoryBatch(int categoryId, const std::vector<std::pair<std::string, std::wstring>>& items);
     static bool updateCategoryColorByPath(const std::wstring& path, const std::wstring& color);
     static bool renamePhysicalCategoryPath(const std::wstring& oldPath, const std::wstring& newPath);
     static bool addItemToCategory(int categoryId, const std::string& folderId, const std::wstring& pathHint = L"");

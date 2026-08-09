@@ -180,12 +180,10 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             auto_color TEXT DEFAULT '',
             base_name TEXT DEFAULT '',
             ext TEXT DEFAULT '',
-            added_at INTEGER DEFAULT 0,
-            sha256 TEXT DEFAULT ''
+            added_at INTEGER DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
         CREATE INDEX IF NOT EXISTS idx_metadata_added_at ON metadata(added_at);
-        CREATE INDEX IF NOT EXISTS idx_metadata_sha256 ON metadata(sha256);
 
         -- 分类定义表
         CREATE TABLE IF NOT EXISTS categories (
@@ -322,7 +320,6 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     bool hasIngestionStatusColumn = false;
     bool hasAutoColorColumn = false;
     bool hasAddedAtColumn = false;
-    bool hasSha256Column = false;
 
     if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(checkStmt) == SQLITE_ROW) {
@@ -336,7 +333,6 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
                 if (name == "ingestion_status") hasIngestionStatusColumn = true;
                 if (name == "auto_color") hasAutoColorColumn = true;
                 if (name == "added_at") hasAddedAtColumn = true;
-                if (name == "sha256") hasSha256Column = true;
             }
         }
         sqlite3_finalize(checkStmt);
@@ -387,11 +383,6 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 added_at 字段...";
         sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN added_at INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
         sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_metadata_added_at ON metadata(added_at);", nullptr, nullptr, nullptr);
-    }
-    if (!hasSha256Column) {
-        qDebug() << "[DB] 检测到旧版数据库，正在添加 sha256 字段...";
-        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN sha256 TEXT DEFAULT ''", nullptr, nullptr, nullptr);
-        sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_metadata_sha256 ON metadata(sha256);", nullptr, nullptr, nullptr);
     }
 
     // 2026-08-xx 新增字段：持久化基名与后缀名，避免每次启动现算并优化回填

@@ -89,7 +89,7 @@ void MediaExtractorPipeline::cancelBatch(const std::vector<std::wstring>& paths)
 
     int originalQueueSize = static_cast<int>(m_queue.size());
     m_queue.erase(std::remove_if(m_queue.begin(), m_queue.end(), isPrefixMatched), m_queue.end());
-    (void)originalQueueSize; // 抑制 unused variable 警告
+    int removedFromQueue = originalQueueSize - static_cast<int>(m_queue.size());
 
     {
         std::lock_guard<std::mutex> retryLock(m_retryMutex);

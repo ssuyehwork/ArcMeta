@@ -23,24 +23,14 @@ public:
                              QWidget* parent = nullptr,
                              std::function<void()> onComplete = nullptr);
 
-    /**
-     * @brief 执行智能分流导入并返回成功导入的文件路径列表
-     */
-    static void importAssets(const QStringList& paths,
-                             int targetCatId,
-                             QWidget* parent,
-                             std::function<void(const QStringList&)> onComplete);
-
 private:
     static bool importSingleFile(const QString& srcPath,
                                  int targetCatId,
-                                 const QString& managedRoot,
-                                 QStringList& outImportedPaths);
+                                 const QString& managedRoot);
 
     static bool importDirectoryRecursive(const QString& srcDir,
                                          int parentCatId,
-                                         const QString& managedRoot,
-                                         QStringList& outImportedPaths);
+                                         const QString& managedRoot);
 };
 
 } // namespace ArcMeta

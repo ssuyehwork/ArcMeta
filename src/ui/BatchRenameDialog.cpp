@@ -1,7 +1,6 @@
 #include "BatchRenameDialog.h"
 #include "BatchRenamePreviewDialog.h"
 #include "RuleRow.h"
-#include "ToolTipOverlay.h"
 #include "UiHelper.h"
 #include "MemoryBatchRenameService.h"
 #include "DiskBatchRenameService.h"
@@ -425,8 +424,7 @@ void BatchRenameDialog::onExecute() {
         }
     }
 
-    // 🚀【异步非阻塞】：彻底清除模态阻断弹窗，转用扁平、独立的 ToolTipOverlay 在当前鼠标位置提示 2 秒
-    ToolTipOverlay::instance()->showText(QCursor::pos(), QString("成功处理 %1 个项目").arg(successCount), 2000);
+    FramelessMessageBox::information(this, "操作完成", QString("成功处理 %1 个项目").arg(successCount));
     accept();
 }
 

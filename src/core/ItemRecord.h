@@ -16,7 +16,6 @@ struct RuntimeMeta;
  * @brief 轻量级条目记录，用于虚拟化模型索引
  */
 struct ItemRecord {
-    QString sha256; // 2026-08-xx 缓存文件 SHA-256 哈希值
     QString volume;
     QString frn;
     QString path; 

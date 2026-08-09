@@ -68,8 +68,6 @@ set(SOURCES
     src/core/FileFilterService.h
     src/core/CategoryLoadService.cpp
     src/core/CategoryLoadService.h
-    src/core/CategoryDropProcessor.cpp
-    src/core/CategoryDropProcessor.h
     src/core/DiskTrashService.cpp
     src/core/DiskTrashService.h
     src/core/SyncStatusService.cpp
@@ -85,8 +83,6 @@ set(SOURCES
     src/crypto/EncryptionManager.h
     src/meta/CategoryRepo.cpp
     src/meta/CategoryRepo.h
-    src/meta/DuplicateDetectorService.cpp
-    src/meta/DuplicateDetectorService.h
     src/meta/DiskTrashRepo.cpp
     src/meta/DiskTrashRepo.h
     src/meta/TagRepository.cpp
@@ -104,8 +100,6 @@ set(SOURCES
     src/mft/MftReader.h
     src/mft/ScchCache.cpp
     src/mft/ScchCache.h
-    src/ui/BatchCreateDialog.cpp
-    src/ui/BatchCreateDialog.h
     src/ui/BatchRenameDialog.cpp
     src/ui/BatchRenameDialog.h
     src/ui/BatchRenamePreviewDialog.cpp
@@ -140,8 +134,6 @@ set(SOURCES
     src/ui/DropListView.h
     src/ui/DropTreeView.cpp
     src/ui/DropTreeView.h
-    src/ui/DragPayloadFactory.cpp
-    src/ui/DragPayloadFactory.h
     src/ui/IScanResultView.h
     src/ui/ListResultView.cpp
     src/ui/ListResultView.h
@@ -153,10 +145,6 @@ set(SOURCES
     src/ui/FilterPanel.h
     src/ui/FramelessDialog.cpp
     src/ui/FramelessDialog.h
-    src/ui/DuplicateConflictDialog.cpp
-    src/ui/DuplicateConflictDialog.h
-    src/ui/TaskProgressToolBar.cpp
-    src/ui/TaskProgressToolBar.h
     src/ui/FramelessFileDialog.cpp
     src/ui/FramelessFileDialog.h
     src/ui/JustifiedView.cpp

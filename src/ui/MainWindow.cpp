@@ -28,11 +28,6 @@
 #endif
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
-#include "../core/CategoryDropProcessor.h"
-#include "DragPayloadFactory.h"
-#include "TaskProgressToolBar.h"
-#include "../meta/DuplicateDetectorService.h"
-#include "DuplicateConflictDialog.h"
 
 #include "SearchHistoryPanel.h"
 #include "SvgIcons.h"
@@ -239,12 +234,41 @@ MainWindow::MainWindow(QWidget* parent)
     }
 
     // 应用全局样式（优先尝试从资源系统加载以支持动态同步）
-    // 2026-11-xx 极简自愈重构：如果外部 style.qss 资源加载失败，退化为简单的黑色主背景，避免冗余字符串兜底引发维护黑洞
+    // 2026-06-xx 物理修复：如果资源加载失败，则回退到内联样式以确保“物理切割感”永不消失
     QFile file(":/style.qss");
     if (file.open(QFile::ReadOnly)) {
         setStyleSheet(QLatin1String(file.readAll()));
     } else {
-        setStyleSheet("QMainWindow { background-color: #1E1E1E; }");
+        QString qss = QString(R"(
+            QMainWindow { background-color: %1; }
+            #SidebarContainer, #ListContainer, #EditorContainer, #MetadataContainer, #FilterContainer {
+                background-color: %1; border: 1px solid %2; border-radius: 0px;
+            }
+            #ContainerHeader {
+                background-color: %3; border-bottom: 1px solid %2;
+            }
+            QScrollBar:vertical { border: none; background: transparent; width: 10px; }
+            QScrollBar::handle:vertical { background: %2; min-height: 20px; border-radius: 3px; }
+            QScrollBar::handle:vertical:hover { background: %4; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { width: 0px; height: 0px; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+            QScrollBar:horizontal { border: none; background: transparent; height: 10px; }
+            QScrollBar::handle:horizontal { background: %2; min-width: 20px; border-radius: 3px; }
+            QScrollBar::handle:horizontal:hover { background: %4; }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; height: 0px; }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+            QLineEdit, QPlainTextEdit, QTextEdit {
+                background: %1; border: 1px solid %2; border-radius: 6px; color: %5; padding-left: 8px;
+            }
+            QLineEdit:focus { border: 1px solid %6; }
+        )")
+        .arg(qssColor(BackgroundDeep))
+        .arg(qssColor(BorderColor))
+        .arg(qssColor(BackgroundHeader))
+        .arg(qssColor(BorderDark))
+        .arg(qssColor(TextMain))
+        .arg(qssColor(PrimaryBlue));
+        setStyleSheet(qss);
     }
 
     initUi();
@@ -372,84 +396,51 @@ void MainWindow::initUi() {
         }
     });
 
-    // 监听侧边栏分类拖拽事件，由专门 of CategoryDropProcessor 进行后台处理 
-    connect(m_categoryPanel, &CategoryPanel::pathsDroppedToCategory, this, [this](const QStringList& paths, int targetCatId) { 
-        if (paths.isEmpty()) return; 
- 
-        // 利用局部实例，在后台进行大事务处理。为保证处理器生命周期随 MainWindow 销毁，声明 parent 为 this 
-        CategoryDropProcessor* processor = new CategoryDropProcessor(this); 
-        
-        // 增加进度更新接管信号到无感底栏进度工具栏
-        connect(processor, &CategoryDropProcessor::progressUpdated, this, [this](int processed, int total, int remainingSeconds) {
-            if (m_statusBarWidget) m_statusBarWidget->hide();
-            if (m_taskProgressToolBar) {
-                m_taskProgressToolBar->show();
-                m_taskProgressToolBar->updateProgress(processed, total, remainingSeconds);
-            }
-        });
+    // 监听侧边栏分类拖拽事件并交由控制层 (MainWindow) 处理物理导入与迁移决策
+    connect(m_categoryPanel, &CategoryPanel::pathsDroppedToCategory, this, [this](const QStringList& paths, int targetCatId) {
+        if (paths.isEmpty()) return;
 
-        // 点击底栏 '×' 触发取消：
-        connect(m_taskProgressToolBar, &TaskProgressToolBar::cancelRequested, this, [processor]() {
-            processor->cancel();
-        });
+        Category targetCat = CategoryRepo::getById(targetCatId);
+        bool isTargetManagedLibraryRoot = (targetCat.parentId == 0 && 
+            QString::fromStdWString(targetCat.name).startsWith("ArcMeta.Library_"));
 
-        connect(processor, &CategoryDropProcessor::processingFinished, this, [this, processor, targetCatId](bool success, int itemCount, const QStringList& newlyImportedPaths) { 
-            Q_UNUSED(success); 
+        QStringList importPaths;
+        for (const QString& srcPath : paths) {
+            std::wstring wPath = MetadataManager::normalizePath(srcPath.toStdWString());
             
-            // 刷新侧边栏和内容面板 
-            CategoryRepo::s_countsDirty.store(true); 
-            m_categoryPanel->requestRefresh(true); 
-            m_contentPanel->refreshAll(); 
-             
-            if (m_taskProgressToolBar) {
-                m_taskProgressToolBar->showCompleted(itemCount, itemCount);
-            }
+            // 1. 判断拖拽的卡片是否已经是库内受控资产
+            bool isManaged = MetadataManager::isInsideManagedLibrary(wPath);
 
-            // 延迟 3 秒后无缝切回常规状态栏
-            QTimer::singleShot(3000, this, [this]() {
-                if (m_taskProgressToolBar) m_taskProgressToolBar->hide();
-                if (m_statusBarWidget) m_statusBarWidget->show();
-            });
+            if (isManaged) {
+                // 🚨【库内资产拖拽】：绝对不调用 AssetImporter，零弹窗硬拦截！
+                std::string assetId = MetadataManager::instance().getFolderIdSync(wPath);
 
-            // 启动后台查重：
-            auto future = QtConcurrent::run([this, newlyImportedPaths, targetCatId]() {
-                auto conflicts = DuplicateDetectorService::detectDuplicates(newlyImportedPaths);
-                if (!conflicts.empty()) {
-                    QMetaObject::invokeMethod(this, [this, conflicts, targetCatId]() {
-                        for (const auto& group : conflicts) {
-                            DuplicateConflictDialog dlg(group, this);
-                            if (dlg.exec() == QDialog::Accepted) {
-                                if (dlg.selectedAction() == DuplicateResolveAction::UseExisting) {
-                                    // 绑定已存在资产 ID：直接调用 CategoryRepo::addItemToCategory 并清理新物理文件 (destPath)
-                                    // 1. 物理删除刚刚静默导入的新冗余物理文件：
-                                    QFile::remove(group.newItem.path);
-                                    // 2. 安全清理可能为空的 .arc 胶囊包文件夹，绝不使用危险的 removeRecursively()
-                                    QDir parentDir(QFileInfo(group.newItem.path).absolutePath());
-                                    if (parentDir.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty()) {
-                                        parentDir.rmdir(".");
-                                    }
-                                    // 3. 从数据库中彻底清除新文件的元数据条目
-                                    MetadataManager::instance().removeMetadataSync(group.newItem.path.toStdWString());
-                                    // 4. 将库内已有文件关联到当前目标分类
-                                    CategoryRepo::addItemToCategory(targetCatId, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
-                                }
-                            }
-                        }
-                        // 处理完成后，触发一次刷新
-                        CategoryRepo::s_countsDirty.store(true);
-                        m_categoryPanel->requestRefresh(true);
-                        m_contentPanel->refreshAll();
-                    });
+                if (isTargetManagedLibraryRoot) {
+                    // 【分支 A】：拖到另一个 ArcMeta.Library_盘符 ➔ 触发跨盘物理迁移
+                    QString targetLibraryPath = QString::fromStdWString(targetCat.physicalPath);
+                    MetadataManager::instance().migrateCapsuleToLibrary(assetId, targetLibraryPath);
+                } else {
+                    // 【分支 B】：拖到自定义虚拟分类 ➔ 1:N 虚拟关联绑定
+                    CategoryRepo::addItemToCategory(targetCatId, assetId, wPath);
                 }
-            });
-            Q_UNUSED(future);
+            } else {
+                // 🚨【库外操作系统文件拖拽】：才触发真正的资产打包入库流程
+                importPaths << srcPath;
+            }
+        }
 
-            // 自动销毁处理器，防止内存泄漏 
-            processor->deleteLater(); 
-        }); 
-         
-        processor->processDroppedPathsAsync(paths, targetCatId); 
-    }); 
+        if (!importPaths.isEmpty()) {
+            AssetImporter::importAssets(importPaths, targetCatId, this, [this]() {
+                m_categoryPanel->requestRefresh(true);
+                m_contentPanel->refreshAll();
+            });
+        } else {
+            // 标记脏数据并通知侧边栏与内容区实时刷新
+            CategoryRepo::s_countsDirty.store(true);
+            m_categoryPanel->requestRefresh(true);
+            m_contentPanel->refreshAll();
+        }
+    });
 
     // 1b. 内容面板内部跳转分类 (双击同步) -> 统一导航中枢 (Plan-56)
     connect(m_contentPanel, &ContentPanel::categoryClicked, this, [this](int id) {
@@ -1342,14 +1333,14 @@ void MainWindow::setupSplitters() {
     m_bodyLayout->addWidget(m_mainSplitter);
 
     // --- 4. 底部状态栏 (0 边距) ---
-    m_statusBarWidget = new QWidget(centralC);
-    m_statusBarWidget->setObjectName("StatusBar");
-    m_statusBarWidget->setFixedHeight(28);
-    QHBoxLayout* statusL = new QHBoxLayout(m_statusBarWidget);
+    QWidget* statusBar = new QWidget(centralC);
+    statusBar->setObjectName("StatusBar");
+    statusBar->setFixedHeight(28);
+    QHBoxLayout* statusL = new QHBoxLayout(statusBar);
     statusL->setContentsMargins(kStatusBarMargin, 0, kStatusBarMargin, 0);
     statusL->setSpacing(0);
 
-    m_statusLeft = new QLabel("就绪中...", m_statusBarWidget);
+    m_statusLeft = new QLabel("就绪中...", statusBar);
     m_statusLeft->setStyleSheet(QString("font-size: 11px; color: %1; background: transparent;").arg(qssColor(TextDim)));
 
     statusL->addWidget(m_statusLeft);
@@ -1370,18 +1361,13 @@ void MainWindow::setupSplitters() {
     connect(&CoreController::instance(), &CoreController::isIndexingChanged, this, updateStatus);
     updateStatus();
 
-    // 初始化任务进度栏 (隐藏状态)
-    m_taskProgressToolBar = new TaskProgressToolBar(centralC);
-    m_taskProgressToolBar->hide();
-
     initDriveBar();
 
     mainL->addWidget(m_titleBarWidget);
     mainL->addWidget(m_driveBarWidget);
     mainL->addWidget(m_navBarWidget);
     mainL->addWidget(bodyWrapper, 1);
-    mainL->addWidget(m_statusBarWidget);
-    mainL->addWidget(m_taskProgressToolBar);
+    mainL->addWidget(statusBar);
 
     // --- 3.5 创建不占位、不加布局的 5px 悬浮覆盖进度条 ---
     m_topProgressBar = new QProgressBar(centralC); // 父对象绑定为 centralC
