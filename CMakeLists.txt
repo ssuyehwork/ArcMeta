@@ -213,6 +213,12 @@ set(SOURCES
     src/ui/WindowsShellThumbnailProvider.cpp
     src/ui/MediaColorExtractor.h
     src/ui/MediaColorExtractor.cpp
+    src/ui/FormatDecoders.h
+    src/ui/FormatDecoders.cpp
+    src/ui/ImageDecoderFacade.h
+    src/ui/ImageDecoderFacade.cpp
+    src/ui/ColorAlgorithmEngine.h
+    src/ui/ColorAlgorithmEngine.cpp
     src/util/DiskMediaExtractor.h
     src/util/DiskMediaExtractor.cpp
     src/meta/CapsuleMediaExtractor.h

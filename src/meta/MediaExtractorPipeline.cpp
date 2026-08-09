@@ -6,6 +6,8 @@
 #include "MetadataManager.h"
 #include "CapsuleMediaExtractor.h"
 #include "../ui/MediaColorExtractor.h"
+#include "../ui/ImageDecoderFacade.h"
+#include "../ui/ColorAlgorithmEngine.h"
 #include "../core/SyncStatusService.h"
 #include "DatabaseManager.h"
 #include <QImageReader>
@@ -34,13 +36,6 @@ MediaExtractorPipeline::MediaExtractorPipeline(QObject* parent) : QObject(parent
     m_timer->setInterval(1500);
     connect(m_timer, &QTimer::timeout, this, &MediaExtractorPipeline::processNextBatch);
 
-    m_retryTimer = new QTimer(this);
-    m_retryTimer->setInterval(3000);
-    connect(m_retryTimer, &QTimer::timeout, this, &MediaExtractorPipeline::processRetryQueue);
-
-    // 【修复】必须放在两个定时器创建完成之后：moveToThread 只会带走
-    // 调用时已存在的子对象，先创建子对象、最后再整体迁移线程，
-    // 才能保证 m_timer/m_retryTimer 真正跟随主线程事件循环运行，避免后台线程因没有事件循环导致定时器哑死的问题。
     if (QCoreApplication::instance()) {
         this->moveToThread(QCoreApplication::instance()->thread());
     }
@@ -48,20 +43,13 @@ MediaExtractorPipeline::MediaExtractorPipeline(QObject* parent) : QObject(parent
 
 MediaExtractorPipeline::~MediaExtractorPipeline() {
     m_timer->stop();
-    m_retryTimer->stop();
 }
 
 void MediaExtractorPipeline::cancelAll() {
     m_isCanceled.store(true);
-    std::vector<std::wstring> abandoned;
     {
         std::lock_guard<std::mutex> queueLock(m_queueMutex);
-        abandoned = std::move(m_queue);
         m_queue.clear();
-    }
-    {
-        std::lock_guard<std::mutex> retryLock(m_retryMutex);
-        m_visualRetryQueue.clear();
     }
     m_activeCount.store(0);
     SyncStatusService::instance().updateMediaPending(0);
@@ -90,11 +78,7 @@ void MediaExtractorPipeline::cancelBatch(const std::vector<std::wstring>& paths)
     int originalQueueSize = static_cast<int>(m_queue.size());
     m_queue.erase(std::remove_if(m_queue.begin(), m_queue.end(), isPrefixMatched), m_queue.end());
     int removedFromQueue = originalQueueSize - static_cast<int>(m_queue.size());
-
-    {
-        std::lock_guard<std::mutex> retryLock(m_retryMutex);
-        m_visualRetryQueue.erase(std::remove_if(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), isPrefixMatched), m_visualRetryQueue.end());
-    }
+    Q_UNUSED(removedFromQueue);
 
     int remaining = static_cast<int>(m_queue.size()) + m_activeCount.load();
     if (remaining < 0) remaining = 0;
@@ -124,29 +108,33 @@ void MediaExtractorPipeline::enqueueBatch(const std::vector<std::wstring>& paths
 }
 
 void MediaExtractorPipeline::processNextBatch() {
-    std::vector<std::wstring> batch;
+    std::vector<std::wstring> chunk;
+    const size_t CHUNK_SIZE = 16; // 强行规定每批次最多处理 16 个文件
+
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         if (m_queue.empty() || m_isCanceled.load()) {
             m_timer->stop();
             return;
         }
-        batch = std::move(m_queue);
-        m_queue.clear();
+
+        size_t count = std::min(m_queue.size(), CHUNK_SIZE);
+        chunk.assign(m_queue.begin(), m_queue.begin() + count);
+        m_queue.erase(m_queue.begin(), m_queue.begin() + count);
     }
 
-    // 增加正在处理的计数，并上报最新的待提取总项数
-    m_activeCount.fetch_add(static_cast<int>(batch.size()));
+    m_activeCount.fetch_add(static_cast<int>(chunk.size()));
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         SyncStatusService::instance().updateMediaPending(static_cast<int>(m_queue.size()) + m_activeCount.load());
     }
 
-    (void)QtConcurrent::run([this, batch]() {
+    // 异步分片执行
+    (void)QtConcurrent::run([this, chunk]() {
 #ifdef Q_OS_WIN
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 #endif
-        for (const auto& path : batch) {
+        for (const auto& path : chunk) {
             if (m_isCanceled.load()) {
                 int active = m_activeCount.fetch_sub(1) - 1;
                 if (active < 0) {
@@ -161,8 +149,6 @@ void MediaExtractorPipeline::processNextBatch() {
 #ifdef Q_OS_WIN
         CoUninitialize();
 #endif
-                // 彻底删除此处的 flushAll()，解除对 UI 读锁的死锁骚扰！
-                // 数据库写盘改由 15 秒定时器后台平滑兜底。
     });
 }
 
@@ -201,10 +187,12 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     
     if (!m_isCanceled.load()) {
         if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-            // 🚨 管道二单线直达：直接调用 CapsuleMediaExtractor，零分支判断！
-            QImage img = CapsuleMediaExtractor::getCapsuleThumbnail(qPath, 512);
-            if (!img.isNull()) {
-                auto pal = MediaColorExtractor::extractPalette(qPath);
+            // 步骤一：调用 ImageDecoderFacade::loadScaledImage(qPath, 512) 获取 QImage thumb。
+            QImage thumb = ImageDecoderFacade::loadScaledImage(qPath, 512);
+            if (!thumb.isNull()) {
+                // 步骤三：将 thumb 直接（或通过 thumb.scaled(200, 200)）传给 ColorAlgorithmEngine::extractPaletteFromImage(thumb)。
+                // 彻底禁止再次发起磁盘读取。
+                auto pal = ColorAlgorithmEngine::extractPaletteFromImage(thumb);
                 if (!pal.isEmpty()) {
                     QColor dominant = MediaColorExtractor::quantizeColor(pal.first().first);
                     colorStr = dominant.name().toUpper().toStdWString();
@@ -232,8 +220,6 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     MetadataManager::instance().updateIngestionStatus(path, 1);
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::PathUpdate, QString::fromStdWString(path));
 
-    // 🚨 彻底注销重试队列逻辑，绝不执行 3 秒死循环重试！
-
     // 递减正在处理的计数并实时通知上报，供主界面进度条平滑由左向右推进
     int active = m_activeCount.fetch_sub(1) - 1;
     if (active < 0) {
@@ -259,8 +245,7 @@ void MediaExtractorPipeline::extractDimensions(const std::wstring& path, int& ou
             outH = sz.height();
         }
     } else {
-        QImageReader reader(info.absoluteFilePath());
-        QSize sz = reader.size();
+        QSize sz = ImageDecoderFacade::readImageDimensions(info.absoluteFilePath());
         if (sz.isValid()) {
             outW = sz.width();
             outH = sz.height();
@@ -275,10 +260,9 @@ bool MediaExtractorPipeline::extractColor(const std::wstring& path, std::wstring
 
     if (info.isFile()) {
         if (MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-            // 🚨 管道二单线直达：直接调用 CapsuleMediaExtractor，零分支判断！
-            QImage img = CapsuleMediaExtractor::getCapsuleThumbnail(qPath, 512);
+            QImage img = ImageDecoderFacade::loadScaledImage(qPath, 512);
             if (!img.isNull()) {
-                auto palette = MediaColorExtractor::extractPalette(qPath);
+                auto palette = ColorAlgorithmEngine::extractPaletteFromImage(img);
                 if (!palette.isEmpty()) {
                     QColor dominant = MediaColorExtractor::quantizeColor(palette.first().first);
                     outColorStr = dominant.name().toUpper().toStdWString();
@@ -296,9 +280,12 @@ bool MediaExtractorPipeline::extractColor(const std::wstring& path, std::wstring
 
         for (const auto& sf : subFiles) {
             if (MediaColorExtractor::isGraphicsFile(sf.suffix().toLower())) {
-                auto palette = MediaColorExtractor::extractPalette(sf.absoluteFilePath());
-                if (!palette.isEmpty()) {
-                    samples.append({palette.first().first, palette});
+                QImage img = ImageDecoderFacade::loadScaledImage(sf.absoluteFilePath(), 512);
+                if (!img.isNull()) {
+                    auto palette = ColorAlgorithmEngine::extractPaletteFromImage(img);
+                    if (!palette.isEmpty()) {
+                        samples.append({palette.first().first, palette});
+                    }
                 }
                 if (samples.size() >= 10) break;
             }
@@ -310,7 +297,7 @@ bool MediaExtractorPipeline::extractColor(const std::wstring& path, std::wstring
             for (int i = 0; i < samples.size(); ++i) {
                 int votes = 0;
                 for (int j = 0; j < samples.size(); ++j) {
-                    if (MediaColorExtractor::calculateDeltaE(samples[i].dominant, samples[j].dominant) < 20.0) {
+                    if (ColorAlgorithmEngine::calculateDeltaE(samples[i].dominant, samples[j].dominant) < 20.0) {
                         votes++;
                     }
                 }
@@ -329,59 +316,6 @@ bool MediaExtractorPipeline::extractColor(const std::wstring& path, std::wstring
         }
     }
     return success;
-}
-
-void MediaExtractorPipeline::processRetryQueue() {
-    std::vector<std::wstring> batch;
-    {
-        std::lock_guard<std::mutex> lock(m_retryMutex);
-        if (m_visualRetryQueue.empty() || m_isCanceled.load()) {
-            m_retryTimer->stop();
-            return;
-        }
-        size_t count = std::min(m_visualRetryQueue.size(), (size_t)5);
-        for (size_t i = 0; i < count; ++i) {
-            batch.push_back(m_visualRetryQueue[i]);
-        }
-    }
-
-    (void)QtConcurrent::run([this, batch]() {
-#ifdef Q_OS_WIN
-        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-#endif
-        std::vector<std::wstring> finished;
-        for (const auto& path : batch) {
-            if (m_isCanceled.load()) break;
-
-            std::wstring colorStr;
-            QVector<QPair<QColor, float>> palette;
-            bool ok = extractColor(path, colorStr, palette);
-            if (ok && !m_isCanceled.load()) {
-                MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, true);
-            }
-
-            QFileInfo info(QString::fromStdWString(path));
-            bool isGraphics = MediaColorExtractor::isGraphicsFile(info.suffix().toLower());
-            if (ok || (!isGraphics && !info.isDir())) {
-                finished.push_back(path);
-            }
-        }
-#ifdef Q_OS_WIN
-        CoUninitialize();
-#endif
-
-        if (!finished.empty()) {
-            QMetaObject::invokeMethod(this, [this, finished]() {
-                std::lock_guard<std::mutex> lock(m_retryMutex);
-                for (const auto& p : finished) {
-                    auto it = std::find(m_visualRetryQueue.begin(), m_visualRetryQueue.end(), p);
-                    if (it != m_visualRetryQueue.end()) {
-                        m_visualRetryQueue.erase(it);
-                    }
-                }
-            }, Qt::QueuedConnection);
-        }
-    });
 }
 
 } // namespace ArcMeta

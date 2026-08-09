@@ -27,7 +27,6 @@ public:
 
 private slots:
     void processNextBatch();
-    void processRetryQueue();
 
 private:
     MediaExtractorPipeline(QObject* parent = nullptr);
@@ -38,11 +37,8 @@ private:
     bool extractColor(const std::wstring& path, std::wstring& outColorStr, QVector<QPair<QColor, float>>& outPalette);
 
     std::vector<std::wstring> m_queue;
-    std::vector<std::wstring> m_visualRetryQueue;
     QTimer* m_timer;
-    QTimer* m_retryTimer;
     std::mutex m_queueMutex;
-    std::mutex m_retryMutex;
     std::atomic<int> m_activeCount{0}; // 正在处理解析中 of 任务数量
     std::atomic<bool> m_isCanceled{false}; // 2026-07-27 按照 Plan-107：原子取消中止标记
 };
