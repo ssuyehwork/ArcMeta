@@ -41,6 +41,10 @@ BatchCreateDialog::BatchCreateDialog(const QString& currentDirectory, QWidget* p
     m_suffixEdit->setText(lastSuffix);
     m_countSpin->setValue(lastCount);
 
+    // 显式触发一次后缀名和点号的启用状态同步，避免由于 QComboBox 索引未实质改变导致状态错步
+    m_suffixEdit->setEnabled(lastType == 1);
+    m_dotLabel->setEnabled(lastType == 1);
+
     // 3. 还原上次命名规则管道
     QString lastRules = AppConfig::instance().getValue("BatchCreate/LastRules").toString();
     if (!lastRules.isEmpty()) {
@@ -115,6 +119,7 @@ void BatchCreateDialog::initContent() {
 
     m_dotLabel = new QLabel(".", suffixContainer);
     m_dotLabel->setStyleSheet("color: #AAA; font-weight: bold; font-size: 13px; background: transparent; border: none;");
+    m_dotLabel->setEnabled(false); // 默认初始与“文件夹”选择同步禁用
 
     m_suffixEdit = new QLineEdit(suffixContainer);
     m_suffixEdit->setPlaceholderText("txt");
@@ -122,6 +127,7 @@ void BatchCreateDialog::initContent() {
     m_suffixEdit->setFixedHeight(23);
     m_suffixEdit->setFixedWidth(65);
     m_suffixEdit->setStyleSheet("QLineEdit { background: transparent; border: none; color: #EEE; padding: 0px 2px; }");
+    m_suffixEdit->setEnabled(false); // 默认初始与“文件夹”选择同步禁用
 
     suffixContainerL->addWidget(m_dotLabel);
     suffixContainerL->addWidget(m_suffixEdit);
@@ -199,20 +205,19 @@ void BatchCreateDialog::initContent() {
 }
 
 void BatchCreateDialog::onAddRow() {
-    RuleRow* row = new RuleRow(m_rulesContainer);
-    row->setIsCreateMode(true); // 物理强制移除“原文件名”选项！
+    CreateRuleRow* row = new CreateRuleRow(m_rulesContainer);
     m_rulesLayout->addWidget(row);
     m_ruleRows.append(row);
 
-    connect(row, &RuleRow::addRequested, this, &BatchCreateDialog::onAddRow);
-    connect(row, &RuleRow::removeRequested, [this, row]() {
+    connect(row, &CreateRuleRow::addRequested, this, &BatchCreateDialog::onAddRow);
+    connect(row, &CreateRuleRow::removeRequested, [this, row]() {
         if (m_ruleRows.size() > 1) {
             m_ruleRows.removeOne(row);
             row->deleteLater();
             scheduleAutoSave();
         }
     });
-    connect(row, &RuleRow::changed, this, &BatchCreateDialog::scheduleAutoSave);
+    connect(row, &CreateRuleRow::changed, this, &BatchCreateDialog::scheduleAutoSave);
     scheduleAutoSave();
 }
 

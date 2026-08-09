@@ -12,13 +12,13 @@
 namespace ArcMeta {
 
 /**
- * @brief 批量重命名规则行组件
+ * @brief 批量创建专属规则行组件（无原文件名选项）
  */
-class RuleRow : public QWidget {
+class CreateRuleRow : public QWidget {
     Q_OBJECT
 public:
-    explicit RuleRow(QWidget* parent = nullptr);
-    
+    explicit CreateRuleRow(QWidget* parent = nullptr);
+
     RenameRule getRule() const;
     void setRule(const RenameRule& rule);
 
@@ -32,17 +32,17 @@ private:
 
     QComboBox* m_typeCombo = nullptr;
     QStackedWidget* m_paramStack = nullptr;
-    
+
     // Params for Text
     QLineEdit* m_textEdit = nullptr;
-    
+
     // Params for Sequence
     QSpinBox* m_startSpin = nullptr;
     QComboBox* m_paddingCombo = nullptr;
-    
+
     // Params for Date
     QComboBox* m_dateFormatCombo = nullptr;
-    
+
     QPushButton* m_btnAdd = nullptr;
     QPushButton* m_btnRemove = nullptr;
 };

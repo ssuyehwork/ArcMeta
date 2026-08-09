@@ -1,37 +1,33 @@
-#include "RuleRow.h"
+#include "CreateRuleRow.h"
 #include "UiHelper.h"
 #include <QLabel>
 
 namespace ArcMeta {
 
-RuleRow::RuleRow(QWidget* parent) : QWidget(parent) {
+CreateRuleRow::CreateRuleRow(QWidget* parent) : QWidget(parent) {
     initUi();
 }
 
-void RuleRow::initUi() {
+void CreateRuleRow::initUi() {
     QHBoxLayout* layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 2, 0, 2);
     layout->setSpacing(6);
 
-    // 2026-07-xx 按照用户要求：升级下拉框 UI，圆角设计 + 实心三角形箭头
-    // 性能优化：使用静态变量快取路径，避免每行构造时重复触发 IO 写入
-    // 修正：改用紧凑型 dropdown_triangle 图标，并重算参数确保清晰可见
     static const QString arrowPath = UiHelper::getSvgTempFilePath("dropdown_triangle", QColor("#AAAAAA"));
 
     m_typeCombo = new QComboBox(this);
     m_typeCombo->addItem("文本", static_cast<int>(RenameComponentType::Text));
     m_typeCombo->addItem("序列数字", static_cast<int>(RenameComponentType::Sequence));
-    m_typeCombo->addItem("原文件名", static_cast<int>(RenameComponentType::OriginalName));
     m_typeCombo->addItem("日期", static_cast<int>(RenameComponentType::Date));
     m_typeCombo->setFixedWidth(100);
-    m_typeCombo->setFixedHeight(25); // 2026-04-11 按照用户要求：物理锁定最高高度为25像素
-    
+    m_typeCombo->setFixedHeight(25);
+
     m_typeCombo->setStyleSheet(QString(
         "QComboBox { background: #2B2B2B; border: 1px solid #444; border-radius: 4px; padding: 2px 4px; color: #EEE; }"
         "QComboBox::drop-down { border: none; width: 24px; }"
         "QComboBox::down-arrow { image: url(%1); width: 12px; height: 12px; }"
         "QComboBox QAbstractItemView { background-color: #2D2D2D; border: 1px solid #444; selection-background-color: #3E3E42; selection-color: white; color: #EEE; outline: 0; }"
-        "QComboBox QAbstractItemView::item { height: 22px; padding: 2px; }" 
+        "QComboBox QAbstractItemView::item { height: 22px; padding: 2px; }"
     ).arg(arrowPath));
 
     m_paramStack = new QStackedWidget(this);
@@ -49,14 +45,14 @@ void RuleRow::initUi() {
     QHBoxLayout* seqL = new QHBoxLayout(seqW);
     seqL->setContentsMargins(0, 0, 0, 0);
     seqL->setSpacing(5);
-    
+
     m_startSpin = new QSpinBox(seqW);
     m_startSpin->setRange(0, 999999);
     m_startSpin->setValue(1);
     m_startSpin->setFixedHeight(25);
     m_startSpin->setFixedWidth(70);
     m_startSpin->setStyleSheet("QSpinBox { background: #1E1E1E; border: 1px solid #444; border-radius: 4px; color: #EEE; }");
-    
+
     m_paddingCombo = new QComboBox(seqW);
     for(int i=1; i<=6; ++i) m_paddingCombo->addItem(QString("%1 位数").arg(i), i);
     m_paddingCombo->setCurrentIndex(2); // Default 3
@@ -68,17 +64,13 @@ void RuleRow::initUi() {
         "QComboBox::down-arrow { image: url(%1); width: 12px; height: 12px; }"
         "QComboBox QAbstractItemView { background-color: #2D2D2D; border: 1px solid #444; selection-background-color: #3E3E42; color: #EEE; outline: 0; }"
     ).arg(arrowPath));
-    
+
     seqL->addWidget(m_startSpin);
     seqL->addWidget(m_paddingCombo);
     seqL->addStretch();
     m_paramStack->addWidget(seqW);
 
-    // 3. OriginalName Param (Empty)
-    QWidget* emptyW = new QWidget(this);
-    m_paramStack->addWidget(emptyW);
-
-    // 4. Date Param
+    // 3. Date Param
     m_dateFormatCombo = new QComboBox(this);
     m_dateFormatCombo->addItems({"yyyyMMdd", "yyyy-MM-dd", "yyyy_MM_dd", "yyyy", "MM", "dd"});
     m_dateFormatCombo->setEditable(true);
@@ -93,7 +85,7 @@ void RuleRow::initUi() {
 
     auto createBtn = [this](const QString& text) {
         QPushButton* btn = new QPushButton(text, this);
-        btn->setFixedSize(22, 22); // 回归紧凑尺寸
+        btn->setFixedSize(22, 22);
         btn->setStyleSheet(
             "QPushButton { background: transparent; border: 1px solid #434343; border-radius: 2px; color: #888; font-weight: bold; font-size: 14px; }"
             "QPushButton:hover { background: #3E3E42; color: #EEE; border-color: #666; }"
@@ -101,7 +93,7 @@ void RuleRow::initUi() {
         return btn;
     };
 
-    m_btnRemove = createBtn("-"); 
+    m_btnRemove = createBtn("-");
     m_btnAdd = createBtn("+");
 
     layout->addWidget(m_typeCombo);
@@ -115,19 +107,19 @@ void RuleRow::initUi() {
         emit changed();
     });
 
-    connect(m_textEdit, &QLineEdit::textChanged, this, &RuleRow::changed);
-    connect(m_startSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &RuleRow::changed);
-    connect(m_paddingCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RuleRow::changed);
-    connect(m_dateFormatCombo, &QComboBox::currentTextChanged, this, &RuleRow::changed);
+    connect(m_textEdit, &QLineEdit::textChanged, this, &CreateRuleRow::changed);
+    connect(m_startSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &CreateRuleRow::changed);
+    connect(m_paddingCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CreateRuleRow::changed);
+    connect(m_dateFormatCombo, &QComboBox::currentTextChanged, this, &CreateRuleRow::changed);
 
-    connect(m_btnAdd, &QPushButton::clicked, this, &RuleRow::addRequested);
-    connect(m_btnRemove, &QPushButton::clicked, this, &RuleRow::removeRequested);
+    connect(m_btnAdd, &QPushButton::clicked, this, &CreateRuleRow::addRequested);
+    connect(m_btnRemove, &QPushButton::clicked, this, &CreateRuleRow::removeRequested);
 }
 
-RenameRule RuleRow::getRule() const {
+RenameRule CreateRuleRow::getRule() const {
     RenameRule rule;
     rule.type = static_cast<RenameComponentType>(m_typeCombo->currentData().toInt());
-    
+
     if (rule.type == RenameComponentType::Text) {
         rule.value = m_textEdit->text();
     } else if (rule.type == RenameComponentType::Sequence) {
@@ -136,11 +128,11 @@ RenameRule RuleRow::getRule() const {
     } else if (rule.type == RenameComponentType::Date) {
         rule.value = m_dateFormatCombo->currentText();
     }
-    
+
     return rule;
 }
 
-void RuleRow::setRule(const RenameRule& rule) {
+void CreateRuleRow::setRule(const RenameRule& rule) {
     blockSignals(true);
     for (int i = 0; i < m_typeCombo->count(); ++i) {
         if (m_typeCombo->itemData(i).toInt() == static_cast<int>(rule.type)) {

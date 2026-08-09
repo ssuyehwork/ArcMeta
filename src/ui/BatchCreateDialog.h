@@ -4,7 +4,7 @@
 #include <QPlainTextEdit>
 #include <QStringList>
 
-#include "RuleRow.h"
+#include "CreateRuleRow.h"
 #include <QSpinBox>
 #include <QComboBox>
 #include <QLineEdit>
@@ -39,7 +39,7 @@ private:
 
     QWidget* m_rulesContainer = nullptr;
     QVBoxLayout* m_rulesLayout = nullptr;
-    QList<RuleRow*> m_ruleRows;
+    QList<CreateRuleRow*> m_ruleRows;
 
     QTimer* m_autoSaveTimer = nullptr;
 };
