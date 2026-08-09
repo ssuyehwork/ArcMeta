@@ -682,6 +682,10 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         } 
          
         if (trans.commit()) { 
+            for (const auto& p : pathsToRegister) {
+                std::string fid = getFolderIdSync(p);
+                CategoryRepo::bindToLibraryRootCategory(fid, p);
+            }
             registerItemsAsync(qPathsToRegister, true); 
         } 
     }); 

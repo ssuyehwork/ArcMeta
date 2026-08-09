@@ -1271,7 +1271,7 @@ void CategoryRepo::fullRecount() {
         "INSERT OR IGNORE INTO category_items (category_id, folder_id, path_hint, added_at) "
         "SELECT c.id, m.folder_id, m.path, m.added_at "
         "FROM categories c "
-        "JOIN metadata m ON m.path LIKE (c.physical_path || '%') "
+        "JOIN metadata m ON (m.path = c.physical_path OR m.path LIKE (c.physical_path || '\\%') OR m.path LIKE (c.physical_path || '/%')) "
         "WHERE c.parent_id = 0 AND c.physical_path IS NOT NULL AND c.physical_path != '';";
     
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
