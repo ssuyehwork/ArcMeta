@@ -5,6 +5,7 @@
 #include "../core/AppConfig.h"
 #include "../core/CategoryLockManager.h"
 #include <QDebug>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
@@ -130,6 +131,7 @@ void syncManagedLibraries() {
             cat.color = L"#378ADD";
             cat.physicalPath = managedAbsW;
             cat.icon = L"folder_filled";
+            cat.kind = CategoryKind::SystemLibrary;
             
             CategoryRepo::add(cat);
             qWarning() << "[CategoryRepo] 自动修复补全托管根分类:" << QString::fromStdWString(libName);
@@ -148,7 +150,7 @@ std::vector<Category> CategoryRepo::getAll() {
     std::vector<Category> results;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
 
-    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon FROM categories WHERE id > 0 ORDER BY sort_order ASC";
+    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon, category_kind FROM categories WHERE id > 0 ORDER BY sort_order ASC";
     std::set<int> seenIds;
 
     for (sqlite3* db : dbs) {
@@ -180,6 +182,7 @@ std::vector<Category> CategoryRepo::getAll() {
                 if (wpath) c.physicalPath = wpath;
                 const wchar_t* wicon = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 11));
                 if (wicon) c.icon = wicon;
+                c.kind = static_cast<CategoryKind>(sqlite3_column_int(stmt, 12));
                 results.push_back(c);
             }
             sqlite3_finalize(stmt);
@@ -194,7 +197,7 @@ void CategoryRepo::bindToLibraryRootCategory(const std::string& folderId, const 
     // 1. 获取所有根分类 (parentId == 0)
     auto allCats = getAll();
     for (const auto& cat : allCats) {
-        if (cat.parentId == 0 && !cat.physicalPath.empty()) {
+        if (cat.parentId == 0 && !cat.physicalPath.empty() && cat.kind == CategoryKind::SystemLibrary) {
             // 2. 检查物理路径是否属于该托管库目录 (前缀匹配)
             std::wstring normCatPath = MetadataManager::normalizePath(cat.physicalPath);
             std::wstring normPhysPath = MetadataManager::normalizePath(physicalPath);
@@ -216,7 +219,7 @@ bool CategoryRepo::add(Category& cat) {
     if (!mainDb) return false;
 
     sqlite3_stmt* stmt;
-    const char* sql = "INSERT INTO categories (parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT INTO categories (parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon, category_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     int rc = sqlite3_prepare_v2(mainDb, sql, -1, &stmt, nullptr);
     if (rc == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, cat.parentId);
@@ -234,6 +237,7 @@ bool CategoryRepo::add(Category& cat) {
         sqlite3_bind_int64(stmt, 9, cat.physicalFrn);
         sqlite3_bind_text16(stmt, 10, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text16(stmt, 11, cat.icon.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 12, static_cast<int>(cat.kind));
 
         rc = sqlite3_step(stmt);
         if (rc == SQLITE_DONE) {
@@ -241,7 +245,7 @@ bool CategoryRepo::add(Category& cat) {
             sqlite3_finalize(stmt);
 
             // Now write to all OTHER active databases with the same explicit ID!
-            const char* sqlWithId = "INSERT OR REPLACE INTO categories (id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            const char* sqlWithId = "INSERT OR REPLACE INTO categories (id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon, category_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             for (sqlite3* db : dbs) {
                 if (db == mainDb) continue;
                 sqlite3_stmt* stmtOther;
@@ -258,6 +262,7 @@ bool CategoryRepo::add(Category& cat) {
                     sqlite3_bind_int64(stmtOther, 10, cat.physicalFrn);
                     sqlite3_bind_text16(stmtOther, 11, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_text16(stmtOther, 12, cat.icon.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_int(stmtOther, 13, static_cast<int>(cat.kind));
                     sqlite3_step(stmtOther);
                     sqlite3_finalize(stmtOther);
                 }
@@ -460,7 +465,7 @@ Category CategoryRepo::getById(int id) {
     if (!db) return c;
 
     sqlite3_stmt* stmt;
-    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon FROM categories WHERE id = ?";
+    const char* sql = "SELECT id, parent_id, name, color, preset_tags, sort_order, pinned, encrypted, encrypt_hint, physical_frn, physical_path, icon, category_kind FROM categories WHERE id = ?";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, id);
         if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -483,6 +488,7 @@ Category CategoryRepo::getById(int id) {
             if (wpath) c.physicalPath = wpath;
             const wchar_t* wicon = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 11));
             if (wicon) c.icon = wicon;
+            c.kind = static_cast<CategoryKind>(sqlite3_column_int(stmt, 12));
         }
         sqlite3_finalize(stmt);
     }
@@ -492,7 +498,7 @@ Category CategoryRepo::getById(int id) {
 bool CategoryRepo::update(const Category& cat) {
     WriteGuard guard;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
-    const char* sql = "UPDATE categories SET parent_id=?, name=?, color=?, preset_tags=?, sort_order=?, pinned=?, encrypted=?, encrypt_hint=?, physical_frn=?, physical_path=?, icon=? WHERE id=?";
+    const char* sql = "UPDATE categories SET parent_id=?, name=?, color=?, preset_tags=?, sort_order=?, pinned=?, encrypted=?, encrypt_hint=?, physical_frn=?, physical_path=?, icon=?, category_kind=? WHERE id=?";
     
     bool anyOk = false;
     for (sqlite3* db : dbs) {
@@ -511,7 +517,8 @@ bool CategoryRepo::update(const Category& cat) {
             sqlite3_bind_int64(stmt, 9, cat.physicalFrn);
             sqlite3_bind_text16(stmt, 10, cat.physicalPath.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_text16(stmt, 11, cat.icon.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_int(stmt, 12, cat.id);
+            sqlite3_bind_int(stmt, 12, static_cast<int>(cat.kind));
+            sqlite3_bind_int(stmt, 13, cat.id);
 
             if (sqlite3_step(stmt) == SQLITE_DONE) anyOk = true;
             sqlite3_finalize(stmt);
@@ -1147,7 +1154,7 @@ void CategoryRepo::syncCategorizedCountForFid(const std::string& /*folderId*/) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT DISTINCT folder_id FROM category_items "
                           "WHERE category_id > 0 AND category_id NOT IN "
-                          "(SELECT id FROM categories WHERE parent_id = 0 AND name LIKE 'ArcMeta.Library_%')";
+                          "(SELECT id FROM categories WHERE category_kind = 1)";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* fidPtr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
@@ -1193,26 +1200,140 @@ void CategoryRepo::loadStatsFromDb() {
         }
         sqlite3_finalize(stmt);
     }
+
+    // 修正后的未分类数量查询：仅当项目未关联任何 category_kind = 0 (用户自定义分类) 时，才计入未分类数量！
+    int uncategorizedCount = 0;
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    const char* uncategorizedSql =
+        "SELECT COUNT(DISTINCT folder_id) FROM metadata WHERE is_trash = 0 AND folder_id NOT IN ("
+        "    SELECT ci.folder_id FROM category_items ci "
+        "    JOIN categories c ON ci.category_id = c.id "
+        "    WHERE c.category_kind = 0"
+        ");";
+    for (sqlite3* mdb : dbs) {
+        if (!mdb) continue;
+        sqlite3_stmt* uncStmt = nullptr;
+        if (sqlite3_prepare_v2(mdb, uncategorizedSql, -1, &uncStmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(uncStmt) == SQLITE_ROW) {
+                uncategorizedCount += sqlite3_column_int(uncStmt, 0);
+            }
+            sqlite3_finalize(uncStmt);
+        }
+    }
+    s_uncategorizedCount.store(uncategorizedCount);
+
+    // 🚨【启动纠偏】：读取完成后，若发现未分类数据异常膨胀，直接在启动期触发强力重新对账！
+    if (s_uncategorizedCount.load() > s_totalCount.load() || s_totalCount.load() < 0) {
+        qWarning() << "[DB] 启动期检测到数据库历史数值错乱，执行全库物理重建对账...";
+        fullRecount();
+    }
 }
 
 void CategoryRepo::fullRecount() {
-    // 🚨 重新计数时，先执行 SQL 补全对账，防止根分类计数被归零！
-    const char* repairSql = 
-        "INSERT OR IGNORE INTO category_items (category_id, folder_id, path_hint, added_at) "
-        "SELECT c.id, m.folder_id, m.path, m.added_at "
-        "FROM categories c "
-        "JOIN metadata m ON m.path LIKE (c.physical_path || '%') "
-        "WHERE c.parent_id = 0 AND c.physical_path IS NOT NULL AND c.physical_path != '';";
-    
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    if (dbs.empty()) return;
+
+    int realTotalCount = 0;
+    int realUncategorizedCount = 0;
+    int realTrashCount = 0;
+    int realUntaggedCount = 0;
+
     for (sqlite3* db : dbs) {
-        if (db) {
-            sqlite3_exec(db, repairSql, nullptr, nullptr, nullptr);
+        if (!db) continue;
+        SqlTransaction trans(db);
+
+        // 1.【物理清理 1】：强力擦除 category_items 中所有在 metadata 中已不存在的孤立关联（死尸数据）
+        const char* sqlPurgeOrphans = "DELETE FROM category_items WHERE folder_id NOT IN (SELECT folder_id FROM metadata);";
+        sqlite3_exec(db, sqlPurgeOrphans, nullptr, nullptr, nullptr);
+
+        // 2.【物理清理 2】：强力擦除 metadata 表中误入的无效条目
+        const char* sqlPurgeInvalid = "DELETE FROM metadata WHERE folder_id IS NULL OR folder_id = '';";
+        sqlite3_exec(db, sqlPurgeInvalid, nullptr, nullptr, nullptr);
+
+        // 3.【真实物理统计】：精确统计全部有效数据总数 (非文件夹、非垃圾箱)
+        const char* sqlTotal = "SELECT COUNT(DISTINCT folder_id) FROM metadata WHERE is_trash = 0 AND is_folder = 0;";
+        sqlite3_stmt* stmtTotal = nullptr;
+        if (sqlite3_prepare_v2(db, sqlTotal, -1, &stmtTotal, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmtTotal) == SQLITE_ROW) {
+                realTotalCount += sqlite3_column_int(stmtTotal, 0);
+            }
+            sqlite3_finalize(stmtTotal);
         }
+
+        // 4.【真实物理统计】：精确统计未分类总数 (未绑定任何用户自定义分类 category_kind = 0 的项目)
+        const char* sqlUncat =
+            "SELECT COUNT(DISTINCT m.folder_id) FROM metadata m "
+            "WHERE m.is_trash = 0 AND m.is_folder = 0 "
+            "AND m.folder_id NOT IN ("
+            "    SELECT ci.folder_id FROM category_items ci "
+            "    JOIN categories c ON ci.category_id = c.id "
+            "    WHERE c.category_kind = 0"
+            ");";
+        sqlite3_stmt* stmtUncat = nullptr;
+        if (sqlite3_prepare_v2(db, sqlUncat, -1, &stmtUncat, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmtUncat) == SQLITE_ROW) {
+                realUncategorizedCount += sqlite3_column_int(stmtUncat, 0);
+            }
+            sqlite3_finalize(stmtUncat);
+        }
+
+        // 5.【真实物理统计】：精确统计未标签总数
+        const char* sqlUntagged = "SELECT COUNT(DISTINCT folder_id) FROM metadata WHERE is_trash = 0 AND is_folder = 0 AND (tags IS NULL OR tags = '');";
+        sqlite3_stmt* stmtUntagged = nullptr;
+        if (sqlite3_prepare_v2(db, sqlUntagged, -1, &stmtUntagged, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmtUntagged) == SQLITE_ROW) {
+                realUntaggedCount += sqlite3_column_int(stmtUntagged, 0);
+            }
+            sqlite3_finalize(stmtUntagged);
+        }
+
+        // 6.【真实物理统计】：精确统计回收站总数
+        const char* sqlTrash = "SELECT COUNT(DISTINCT folder_id) FROM metadata WHERE is_trash = 1;";
+        sqlite3_stmt* stmtTrash = nullptr;
+        if (sqlite3_prepare_v2(db, sqlTrash, -1, &stmtTrash, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmtTrash) == SQLITE_ROW) {
+                realTrashCount += sqlite3_column_int(stmtTrash, 0);
+            }
+            sqlite3_finalize(stmtTrash);
+        }
+
+        trans.commit();
     }
 
-    s_countsDirty.store(true);
-    getCounts(); // 物理强制重新更新
+    // 7.【强制数学防错纠偏】：未分类数严禁超过总数
+    if (realUncategorizedCount > realTotalCount) {
+        realUncategorizedCount = realTotalCount;
+    }
+
+    // 8. 强行覆写内存原子变量
+    s_totalCount.store(realTotalCount);
+    s_uncategorizedCount.store(realUncategorizedCount);
+    s_untaggedCount.store(realUntaggedCount);
+    s_trashCount.store(realTrashCount);
+
+    // 9. 强行落盘持久化校准 system_stats 表，清除坏账
+    sqlite3* mainDb = DatabaseManager::instance().getGlobalDb();
+    if (mainDb) {
+        SqlTransaction trans(mainDb);
+        auto updateStatDirect = [](sqlite3* db, const char* key, int val) {
+            const char* sql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?);";
+            sqlite3_stmt* stmt;
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(stmt, 2, val);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+        };
+        updateStatDirect(mainDb, "sys_total_count", realTotalCount);
+        updateStatDirect(mainDb, "sys_uncategorized_count", realUncategorizedCount);
+        updateStatDirect(mainDb, "sys_untagged_count", realUntaggedCount);
+        updateStatDirect(mainDb, "sys_trash_count", realTrashCount);
+        trans.commit();
+    }
+
+    s_countsDirty.store(false);
+    qDebug() << "[Recount] 全物理账本对账完成！总数:" << realTotalCount << "未分类:" << realUncategorizedCount;
 }
 
 std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
@@ -1221,7 +1342,7 @@ std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
     if (!db) return results;
 
     sqlite3_stmt* stmt;
-    const char* sql = "SELECT c.id, c.parent_id, c.name, c.color, c.preset_tags, c.sort_order, c.pinned, c.encrypted, c.encrypt_hint "
+    const char* sql = "SELECT c.id, c.parent_id, c.name, c.color, c.preset_tags, c.sort_order, c.pinned, c.encrypted, c.encrypt_hint, c.physical_frn, c.physical_path, c.icon, c.category_kind "
                       "FROM categories c JOIN (SELECT category_id, MAX(added_at) as last_added FROM category_items GROUP BY category_id) r "
                       "ON c.id = r.category_id ORDER BY r.last_added DESC LIMIT ?";
                       
@@ -1243,6 +1364,12 @@ std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
             c.encrypted = sqlite3_column_int(stmt, 7) != 0;
             const wchar_t* hint = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 8));
             if (hint) c.encryptHint = hint;
+            c.physicalFrn = sqlite3_column_int64(stmt, 9);
+            const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 10));
+            if (wpath) c.physicalPath = wpath;
+            const wchar_t* wicon = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 11));
+            if (wicon) c.icon = wicon;
+            c.kind = static_cast<CategoryKind>(sqlite3_column_int(stmt, 12));
             results.push_back(c);
         }
         sqlite3_finalize(stmt);
@@ -1279,11 +1406,25 @@ QMap<QString, int> CategoryRepo::getGlobalUniqueTags() {
 
 QMap<QString, int> CategoryRepo::getSystemCounts() {
     QMap<QString, int> res;
-    res["all"] = s_totalCount.load();
-    res["tags"] = s_tagsCount.load();
-    res["recently_visited"] = s_recentlyVisitedCount.load();
-    res["untagged"] = s_untaggedCount.load();
-    res["uncategorized"] = s_uncategorizedCount.load();
+    int total = std::max(0, s_totalCount.load());
+    int uncat = std::max(0, s_uncategorizedCount.load());
+
+    // 🚨【数学逻辑强约束契约】：未分类数严禁大于全部数据总数！
+    if (uncat > total) {
+        qWarning() << "[BugGuard] 检测到未分类异常漂移 (" << uncat << ">" << total << ")，立即触发纠偏自愈！";
+        uncat = total; // 强制降维矫正
+
+        // 异步抛入后台进行全物理对账纠偏
+        QMetaObject::invokeMethod(QCoreApplication::instance(), []() {
+            CategoryRepo::fullRecount();
+        }, Qt::QueuedConnection);
+    }
+
+    res["all"] = total;
+    res["tags"] = std::max(0, s_tagsCount.load());
+    res["recently_visited"] = std::max(0, s_recentlyVisitedCount.load());
+    res["untagged"] = std::min(total, std::max(0, s_untaggedCount.load()));
+    res["uncategorized"] = uncat;
     
     // 双轨隔离：汇总资源库垃圾箱计数和所有磁盘独立回收站计数
     int diskTrashCount = 0;
@@ -1310,7 +1451,7 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
             sqlite3_finalize(stmtLib);
         }
     }
-    res["trash"] = libraryTrashCount + diskTrashCount;
+    res["trash"] = std::max(0, s_trashCount.load()) + diskTrashCount;
     return res;
 }
 
@@ -1324,7 +1465,7 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
             // 2026-06-xx 性能优化：查询“未分类”路径时，排除掉已在自定义分类 (ID > 0) 中的文件
             const char* sql = "SELECT DISTINCT folder_id FROM category_items "
                               "WHERE category_id > 0 AND category_id NOT IN "
-                              "(SELECT id FROM categories WHERE parent_id = 0 AND name LIKE 'ArcMeta.Library_%')";
+                              "(SELECT id FROM categories WHERE category_kind = 1)";
             if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
                 while (sqlite3_step(stmt) == SQLITE_ROW) {
                     const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));

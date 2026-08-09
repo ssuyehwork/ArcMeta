@@ -402,7 +402,7 @@ void MainWindow::initUi() {
 
         Category targetCat = CategoryRepo::getById(targetCatId);
         bool isTargetManagedLibraryRoot = (targetCat.parentId == 0 && 
-            QString::fromStdWString(targetCat.name).startsWith("ArcMeta.Library_"));
+            targetCat.kind == CategoryKind::SystemLibrary);
 
         QStringList importPaths;
         for (const QString& srcPath : paths) {
