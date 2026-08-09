@@ -1454,6 +1454,158 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
     renameItemSync(oldPath, newPath);
 }
 
+void MetadataManager::renameItemsBatch(const std::vector<std::pair<std::wstring, std::wstring>>& renamePairs) {
+    if (renamePairs.empty()) return;
+
+    // 整个批量任务只开启 1 个后台线程
+    (void)QtConcurrent::run([this, renamePairs]() {
+        std::vector<std::pair<std::wstring, std::wstring>> allSubItemsToRename;
+
+        // 1. 在单次内存写锁下，集中更新所有内存快照、离散 JSON 与倒排/树级索引
+        {
+            std::unique_lock<std::shared_mutex> lock(m_mutex);
+            auto currentSnapshot = std::atomic_load(&m_snapshot);
+            if (!currentSnapshot) return;
+
+            auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+
+            for (const auto& pair : renamePairs) {
+                std::wstring nOld = normalizePath(pair.first);
+                std::wstring nNew = normalizePath(pair.second);
+                if (nOld == nNew) continue;
+
+                for (auto it = currentSnapshot->begin(); it != currentSnapshot->end(); ++it) {
+                    const std::wstring& p = it->first;
+                    if (p == nOld) {
+                        allSubItemsToRename.push_back({p, nNew});
+                    } else if (p.find(nOld + L"\\") == 0 || p.find(nOld + L"/") == 0) {
+                        std::wstring relative = p.substr(nOld.length());
+                        allSubItemsToRename.push_back({p, nNew + relative});
+                    }
+                }
+
+                std::wstring rootOldParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(nOld)).absolutePath()).toStdWString());
+                if (m_parentToChildren.count(rootOldParent)) {
+                    auto& children = m_parentToChildren[rootOldParent];
+                    children.erase(std::remove(children.begin(), children.end(), nOld), children.end());
+                    if (children.empty()) m_parentToChildren.erase(rootOldParent);
+                }
+            }
+
+            for (const auto& itemPair : allSubItemsToRename) {
+                const std::wstring& curOld = itemPair.first;
+                const std::wstring& curNew = itemPair.second;
+
+                auto it = newMap->find(curOld);
+                if (it == newMap->end()) continue;
+
+                RuntimeMeta meta = it->second;
+                std::string fid = meta.folderId;
+                bool isFolder = meta.isFolder;
+
+                // 关键修复 1：重新解析并更新内存中的 baseName 与 ext（解决重命名后内存名称不更新 Bug）
+                parsePathComponents(curNew, isFolder, meta.baseName, meta.ext);
+
+                // 清理旧索引
+                std::wstring oldName, oldExt;
+                parsePathComponents(curOld, isFolder, oldName, oldExt);
+                if (!oldName.empty()) {
+                    if (isFolder) {
+                        auto& v = m_subFolderNameToFolderIds[oldName];
+                        v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                        if (v.empty()) m_subFolderNameToFolderIds.erase(oldName);
+                    } else {
+                        auto& v = m_assetNameToFolderIds[oldName];
+                        v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                        if (v.empty()) m_assetNameToFolderIds.erase(oldName);
+                        if (!oldExt.empty()) {
+                            auto& ve = m_extensionToFolderIds[oldExt];
+                            ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
+                            if (ve.empty()) m_extensionToFolderIds.erase(oldExt);
+                        }
+                    }
+                }
+
+                if (curOld != curNew) m_parentToChildren.erase(curOld);
+
+                // 更新快照与 FID 映射
+                newMap->erase(it);
+                (*newMap)[curNew] = meta;
+                if (!fid.empty()) m_folderIdToPath[fid] = curNew;
+
+                // 建立新索引
+                if (!meta.baseName.empty()) {
+                    if (isFolder) {
+                        auto& v = m_subFolderNameToFolderIds[meta.baseName];
+                        if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
+                    } else {
+                        auto& v = m_assetNameToFolderIds[meta.baseName];
+                        if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
+                        if (!meta.ext.empty()) {
+                            auto& ve = m_extensionToFolderIds[meta.ext];
+                            if (std::find(ve.begin(), ve.end(), fid) == ve.end()) ve.push_back(fid);
+                        }
+                    }
+                }
+
+                std::wstring curNewParent = normalizePath(QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(curNew)).absolutePath()).toStdWString());
+                if (curNewParent != curNew) {
+                    auto& children = m_parentToChildren[curNewParent];
+                    if (std::find(children.begin(), children.end(), curNew) == children.end()) {
+                        children.push_back(curNew);
+                    }
+                }
+            }
+
+            std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+        }
+
+        // 2. 按数据库连接分组，执行单大事务写落盘（更新 path, base_name, ext，根除数据库文件名不更新 Bug）
+        std::map<sqlite3*, std::vector<std::pair<std::string, std::wstring>>> groupedSyncTasks;
+        for (const auto& pair : allSubItemsToRename) {
+            const std::wstring& curNew = pair.second;
+            std::string fid;
+            {
+                auto currentSnapshot = std::atomic_load(&m_snapshot);
+                if (currentSnapshot && currentSnapshot->count(curNew)) fid = currentSnapshot->at(curNew).folderId;
+            }
+            if (fid.empty()) continue;
+
+            std::wstring volSerial = getVolumeSerialNumber(curNew);
+            QString letter = (curNew.length() >= 2 && curNew[1] == L':') ? QString::fromWCharArray(&curNew[0], 1) : "";
+            sqlite3* db = DatabaseManager::instance().getDriveDb(volSerial, letter);
+            if (db) groupedSyncTasks[db].push_back({fid, curNew});
+        }
+
+        // 关键修复 2：SQL 增加更新 base_name 和 ext 字段
+        const char* updSql = "UPDATE metadata SET path = ?, base_name = ?, ext = ? WHERE folder_id = ?";
+        for (auto& entry : groupedSyncTasks) {
+            sqlite3* targetDb = entry.first;
+            const auto& tasks = entry.second;
+
+            SqlTransaction trans(targetDb); // 开启单大事务
+            sqlite3_stmt* memStmt;
+            if (sqlite3_prepare_v2(targetDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
+                for (const auto& task : tasks) {
+                    std::wstring baseName, ext;
+                    parsePathComponents(task.second, false, baseName, ext);
+
+                    sqlite3_bind_text16(memStmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(memStmt, 2, baseName.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(memStmt, 3, ext.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(memStmt, 4, task.first.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(memStmt);
+                    sqlite3_reset(memStmt);
+                }
+                sqlite3_finalize(memStmt);
+            }
+            trans.commit(); // 一次性提交大事务
+        }
+
+        notifyFullUIRebuild();
+    });
+}
+
 void MetadataManager::renameItemSync(const std::wstring& oldPath, const std::wstring& newPath) {
     std::wstring nOld = normalizePath(oldPath);
     std::wstring nNew = normalizePath(newPath);
@@ -1465,7 +1617,7 @@ void MetadataManager::renameItemSync(const std::wstring& oldPath, const std::wst
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         auto currentSnapshot = std::atomic_load(&m_snapshot);
         if (!currentSnapshot) return;
-        
+
         // 1. 深度收集所有子孙路径
         for (auto it = currentSnapshot->begin(); it != currentSnapshot->end(); ++it) {
             const std::wstring& p = it->first;

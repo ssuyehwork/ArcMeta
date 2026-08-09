@@ -14,6 +14,8 @@ int MemoryBatchRenameService::execute(const std::vector<std::wstring>& originalP
     int successCount = 0;
     MetadataManager::instance().setInternalOperating(true);
 
+    std::vector<std::pair<std::wstring, std::wstring>> renamePairs;
+
     for (size_t i = 0; i < originalPaths.size(); ++i) {
         QString oldPath = QString::fromStdWString(originalPaths[i]);
         QFileInfo oldInfo(oldPath);
@@ -45,14 +47,18 @@ int MemoryBatchRenameService::execute(const std::vector<std::wstring>& originalP
             std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
             std::wstring newW = QDir::toNativeSeparators(newMainPath).toStdWString();
 
-            // 3. 更新内存数据库与索引 (调用 renameItemSync 同步机制)
-            MetadataManager::instance().renameItemSync(oldW, newW);
+            // 收集重命名路径对
+            renamePairs.push_back({oldW, newW});
             CategoryRepo::renamePhysicalCategoryPath(oldW, newW);
         }
     }
 
+    // 关键修复：统一交由 renameItemsBatch 单线程大事务落盘，彻底解决线程风暴死锁
+    if (!renamePairs.empty()) {
+        MetadataManager::instance().renameItemsBatch(renamePairs);
+    }
+
     MetadataManager::instance().setInternalOperating(false);
-    MetadataManager::instance().notifyFullUIRebuild();
 
     return successCount;
 }

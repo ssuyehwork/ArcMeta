@@ -249,6 +249,13 @@ public:
 
     void renameItem(const std::wstring& oldPath, const std::wstring& newPath);
     void renameItemSync(const std::wstring& oldPath, const std::wstring& newPath);
+
+    /**
+     * @brief 批量重命名资产（1 个后台线程、1 次内存锁、1 个 SQLite 事务），彻底根除并发死锁与文件名不更新 Bug
+     * @param renamePairs <旧路径, 新路径> 的映射数组
+     */
+    void renameItemsBatch(const std::vector<std::pair<std::wstring, std::wstring>>& renamePairs);
+
     void removeMetadataSync(const std::wstring& path);
 
     /**
