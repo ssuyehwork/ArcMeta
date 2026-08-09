@@ -988,7 +988,6 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
             }
         }
         if (!rm.folderId.empty()) {
-            auto currentFidSnapshot = std::atomic_load(&m_fidToPathSnapshot);
             auto newFidMap = std::make_shared<std::unordered_map<std::string, std::wstring>>(*currentFidSnapshot);
             (*newFidMap)[rm.folderId] = nPath;
             std::atomic_store(&m_fidToPathSnapshot, std::shared_ptr<const std::unordered_map<std::string, std::wstring>>(newFidMap));
