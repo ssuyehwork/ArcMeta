@@ -67,35 +67,41 @@ std::vector<DuplicateConflictGroup> DuplicateDetectorService::detectDuplicates(c
                 if (QString::fromStdWString(existPathW) == newPath) continue;
 
                 // 只有大小相同时，才对已有文件在后台进行 SHA-256 哈希抽取比对，将 I/O 开销降到最低
-                QFile existFile(QString::fromStdWString(existPathW));
-                if (existFile.open(QIODevice::ReadOnly)) {
-                    QCryptographicHash existHash(QCryptographicHash::Sha256);
-                    if (existHash.addData(&existFile)) {
-                        QString existSha = QString(existHash.result().toHex()).toLower();
-                        if (existSha == sha256Hex) {
-                            matchedPaths.insert(existPathW);
-
-                            DuplicateConflictGroup group;
-                            group.existingItem.folderId = QString::fromStdString(meta.folderId);
-                            group.existingItem.path = QString::fromStdWString(existPathW);
-                            group.existingItem.filename = QFileInfo(QString::fromStdWString(existPathW)).fileName();
-                            group.existingItem.width = meta.width;
-                            group.existingItem.height = meta.height;
-                            group.existingItem.size = meta.fileSize;
-                            group.existingItem.tagHint = meta.tags.isEmpty() ? "" : meta.tags.first();
-                            group.existingItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(QString::fromStdWString(existPathW));
-
-                            group.newItem.path = newPath;
-                            group.newItem.filename = fileName;
-                            group.newItem.width = newWidth; 
-                            group.newItem.height = newHeight;
-                            group.newItem.size = size;
-                            group.newItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnail(newPath, 512);
-
-                            conflicts.push_back(group);
+                QString existSha;
+                if (!meta.sha256.empty()) {
+                    existSha = QString::fromStdString(meta.sha256).toLower();
+                } else {
+                    QFile existFile(QString::fromStdWString(existPathW));
+                    if (existFile.open(QIODevice::ReadOnly)) {
+                        QCryptographicHash existHash(QCryptographicHash::Sha256);
+                        if (existHash.addData(&existFile)) {
+                            existSha = QString(existHash.result().toHex()).toLower();
                         }
+                        existFile.close();
                     }
-                    existFile.close();
+                }
+
+                if (!existSha.isEmpty() && existSha == sha256Hex) {
+                    matchedPaths.insert(existPathW);
+
+                    DuplicateConflictGroup group;
+                    group.existingItem.folderId = QString::fromStdString(meta.folderId);
+                    group.existingItem.path = QString::fromStdWString(existPathW);
+                    group.existingItem.filename = QFileInfo(QString::fromStdWString(existPathW)).fileName();
+                    group.existingItem.width = meta.width;
+                    group.existingItem.height = meta.height;
+                    group.existingItem.size = meta.fileSize;
+                    group.existingItem.tagHint = meta.tags.isEmpty() ? "" : meta.tags.first();
+                    group.existingItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(QString::fromStdWString(existPathW));
+
+                    group.newItem.path = newPath;
+                    group.newItem.filename = fileName;
+                    group.newItem.width = newWidth; 
+                    group.newItem.height = newHeight;
+                    group.newItem.size = size;
+                    group.newItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnail(newPath, 512);
+
+                    conflicts.push_back(group);
                 }
             }
         }

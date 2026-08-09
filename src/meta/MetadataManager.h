@@ -21,6 +21,7 @@ namespace ArcMeta {
  * @brief 内存元数据镜像结构
  */
 struct RuntimeMeta {
+    std::string sha256; // 2026-08-xx 缓存文件 SHA-256 哈希值
     int rating;
     std::wstring manualColor;
     std::wstring autoColor;

@@ -8,6 +8,7 @@
 namespace ArcMeta {
 
 void ItemRecord::fromMetadata(ItemRecord& r, const RuntimeMeta& meta) {
+    r.sha256 = QString::fromStdString(meta.sha256);
     r.rating = meta.rating;
     r.manualColor = QString::fromStdWString(meta.manualColor);
     r.autoColor = QString::fromStdWString(meta.autoColor);
@@ -92,6 +93,7 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         r.width = 0;
         r.height = 0;
         r.added_at = 0;
+        r.sha256 = "";
     }
 
     if (r.isDir) {
