@@ -21,6 +21,7 @@ public:
     
     RenameRule getRule() const;
     void setRule(const RenameRule& rule);
+    void setIsCreateMode(bool isCreate);
 
 signals:
     void changed();

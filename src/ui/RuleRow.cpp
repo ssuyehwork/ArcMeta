@@ -167,4 +167,13 @@ void RuleRow::setRule(const RenameRule& rule) {
     emit changed();
 }
 
+void RuleRow::setIsCreateMode(bool isCreate) {
+    if (isCreate) {
+        int idx = m_typeCombo->findData(static_cast<int>(RenameComponentType::OriginalName));
+        if (idx != -1) {
+            m_typeCombo->removeItem(idx);
+        }
+    }
+}
+
 } // namespace ArcMeta

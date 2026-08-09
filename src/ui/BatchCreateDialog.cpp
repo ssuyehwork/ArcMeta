@@ -30,7 +30,11 @@ BatchCreateDialog::BatchCreateDialog(const QString& currentDirectory, QWidget* p
 
     // 2. 还原上次配置（类型、后缀名、数量）
     int lastType = AppConfig::instance().getValue("BatchCreate/LastType", 0).toInt();
-    QString lastSuffix = AppConfig::instance().getValue("BatchCreate/LastSuffix", ".txt").toString();
+    QString lastSuffix = AppConfig::instance().getValue("BatchCreate/LastSuffix", "txt").toString();
+    // 自动清洗点号，确保输入框中不含点号
+    while (lastSuffix.startsWith(".")) {
+        lastSuffix.remove(0, 1);
+    }
     int lastCount = AppConfig::instance().getValue("BatchCreate/LastCount", 5).toInt();
 
     m_typeCombo->setCurrentIndex(lastType);
@@ -77,45 +81,75 @@ void BatchCreateDialog::initContent() {
     layout->setContentsMargins(20, 15, 20, 20);
     layout->setSpacing(12);
 
-    // 顶部设置
+    // 顶部设置行
     QHBoxLayout* topSettingsL = new QHBoxLayout();
-    topSettingsL->setSpacing(15);
+    topSettingsL->setContentsMargins(0, 0, 0, 0);
+    topSettingsL->setSpacing(0); // 禁用默认间距，采用精确控制
 
-    // 1. 创建类型
+    // ===== 1. 类型组 =====
+    QHBoxLayout* typeGroupL = new QHBoxLayout();
+    typeGroupL->setSpacing(4); // 组内标签与控件间距设为 4px（紧密靠拢）
     QLabel* typeLabel = new QLabel("类型:", this);
     typeLabel->setStyleSheet("color: #BBB; font-weight: bold;");
     m_typeCombo = new QComboBox(this);
     m_typeCombo->addItem("文件夹", 0);
     m_typeCombo->addItem("文件", 1);
     m_typeCombo->setFixedHeight(25);
-    m_typeCombo->setFixedWidth(100);
+    m_typeCombo->setFixedWidth(90);
+    typeGroupL->addWidget(typeLabel);
+    typeGroupL->addWidget(m_typeCombo);
 
-    // 2. 后缀名设置 (仅在创建类型为文件时有效)
+    // ===== 2. 后缀名组（内置点号 .） =====
+    QHBoxLayout* suffixGroupL = new QHBoxLayout();
+    suffixGroupL->setSpacing(4); // 组内间距 4px
     QLabel* suffixLabel = new QLabel("后缀名:", this);
     suffixLabel->setStyleSheet("color: #BBB; font-weight: bold;");
-    m_suffixEdit = new QLineEdit(this);
-    m_suffixEdit->setPlaceholderText(".txt");
-    m_suffixEdit->setText(".txt");
-    m_suffixEdit->setFixedHeight(25);
-    m_suffixEdit->setFixedWidth(80);
-    m_suffixEdit->setEnabled(false); // 默认选择文件夹时禁用
 
-    // 3. 创建数量
+    // 内置点号容器
+    QWidget* suffixContainer = new QWidget(this);
+    suffixContainer->setFixedHeight(25);
+    QHBoxLayout* suffixContainerL = new QHBoxLayout(suffixContainer);
+    suffixContainerL->setContentsMargins(5, 0, 0, 0);
+    suffixContainerL->setSpacing(0);
+    suffixContainer->setStyleSheet("background: #252526; border: 1px solid #444; border-radius: 4px;");
+
+    m_dotLabel = new QLabel(".", suffixContainer);
+    m_dotLabel->setStyleSheet("color: #AAA; font-weight: bold; font-size: 13px; background: transparent; border: none;");
+
+    m_suffixEdit = new QLineEdit(suffixContainer);
+    m_suffixEdit->setPlaceholderText("txt");
+    m_suffixEdit->setText("txt");
+    m_suffixEdit->setFixedHeight(23);
+    m_suffixEdit->setFixedWidth(65);
+    m_suffixEdit->setStyleSheet("QLineEdit { background: transparent; border: none; color: #EEE; padding: 0px 2px; }");
+
+    suffixContainerL->addWidget(m_dotLabel);
+    suffixContainerL->addWidget(m_suffixEdit);
+
+    suffixGroupL->addWidget(suffixLabel);
+    suffixGroupL->addWidget(suffixContainer);
+
+    // ===== 3. 数量组 =====
+    QHBoxLayout* countGroupL = new QHBoxLayout();
+    countGroupL->setSpacing(4); // 组内间距 4px
     QLabel* countLabel = new QLabel("数量:", this);
     countLabel->setStyleSheet("color: #BBB; font-weight: bold;");
     m_countSpin = new QSpinBox(this);
     m_countSpin->setRange(1, 10000);
     m_countSpin->setValue(5);
     m_countSpin->setFixedHeight(25);
-    m_countSpin->setFixedWidth(80);
+    m_countSpin->setFixedWidth(75);
+    countGroupL->addWidget(countLabel);
+    countGroupL->addWidget(m_countSpin);
 
-    topSettingsL->addWidget(typeLabel);
-    topSettingsL->addWidget(m_typeCombo);
-    topSettingsL->addWidget(suffixLabel);
-    topSettingsL->addWidget(m_suffixEdit);
-    topSettingsL->addWidget(countLabel);
-    topSettingsL->addWidget(m_countSpin);
+    // 组合至主布局，组间间距保持 18px（清晰视觉隔离）
+    topSettingsL->addLayout(typeGroupL);
+    topSettingsL->addSpacing(18); // 组间距 18px
+    topSettingsL->addLayout(suffixGroupL);
+    topSettingsL->addSpacing(18); // 组间距 18px
+    topSettingsL->addLayout(countGroupL);
     topSettingsL->addStretch();
+
     layout->addLayout(topSettingsL);
 
     // 规则容器区
@@ -157,6 +191,7 @@ void BatchCreateDialog::initContent() {
     // 触发联动：类型切换控制后缀可用性
     connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), [this](int index) {
         m_suffixEdit->setEnabled(index == 1);
+        m_dotLabel->setEnabled(index == 1);
     });
 
     connect(btnCancel, &QPushButton::clicked, this, &QDialog::reject);
@@ -165,6 +200,7 @@ void BatchCreateDialog::initContent() {
 
 void BatchCreateDialog::onAddRow() {
     RuleRow* row = new RuleRow(m_rulesContainer);
+    row->setIsCreateMode(true); // 物理强制移除“原文件名”选项！
     m_rulesLayout->addWidget(row);
     m_ruleRows.append(row);
 
@@ -264,10 +300,13 @@ void BatchCreateDialog::onExecute() {
 
     int createCount = m_countSpin->value();
     bool isFile = m_typeCombo->currentData().toInt() == 1;
-    QString rawSuffix = isFile ? m_suffixEdit->text().trimmed() : "";
-    if (isFile && !rawSuffix.startsWith(".")) {
-        rawSuffix = "." + rawSuffix;
+
+    // 自动清洗点号防呆：无论用户输入 txt 还是 .txt，统一清洗为 .txt
+    QString rawSuffix = m_suffixEdit->text().trimmed();
+    while (rawSuffix.startsWith(".")) {
+        rawSuffix.remove(0, 1); // 清除前导点号
     }
+    QString finalSuffix = isFile ? ("." + (rawSuffix.isEmpty() ? "txt" : rawSuffix)) : "";
 
     QDir dir(m_currentDir);
     int itemsCreated = 0;
@@ -279,7 +318,7 @@ void BatchCreateDialog::onExecute() {
         }
 
         if (isFile) {
-            renderedName += rawSuffix;
+            renderedName += finalSuffix;
         }
 
         QString targetPath = dir.absoluteFilePath(renderedName);
@@ -313,6 +352,8 @@ void BatchCreateDialog::onExecute() {
 
     QString msg = QString("成功创建 %1 个项目").arg(itemsCreated);
     ToolTipOverlay::instance()->showText(QCursor::pos(), msg, 2000, Style::SuccessGreen);
+
+    doAutoSave();
     accept();
 }
 
