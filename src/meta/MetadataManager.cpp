@@ -1544,6 +1544,8 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 // 3. 缓存迁移
                 RuntimeMeta meta = it->second;
                 newMap->erase(it);
+                // 重新解析出最新基名与后缀塞入，确保内存基名已更新
+                parsePathComponents(curNew, meta.isFolder, meta.baseName, meta.ext);
                 (*newMap)[curNew] = meta;
                 if (!fid.empty()) m_folderIdToPath[fid] = curNew;
 
@@ -1604,7 +1606,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             }
         }
 
-        const char* updSql = "UPDATE metadata SET path = ? WHERE folder_id = ?";
+        const char* updSql = "UPDATE metadata SET path = ?, base_name = ?, ext = ? WHERE folder_id = ?";
         for (auto& entry : groupedSyncTasks) {
             sqlite3* targetDb = entry.first;
             auto& tasks = entry.second;
@@ -1614,8 +1616,21 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             sqlite3_stmt* memStmt;
             if (sqlite3_prepare_v2(targetDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
                 for (const auto& task : tasks) {
+                    // 重新解析出最新基名与后缀以供数据库绑定，防止仅移动了 path 却没有重写 base_name / ext
+                    std::wstring newName, newExt;
+                    bool isFolder = false;
+                    {
+                        auto currentSnapshot = std::atomic_load(&m_snapshot);
+                        if (currentSnapshot && currentSnapshot->count(task.second)) {
+                            isFolder = currentSnapshot->at(task.second).isFolder;
+                        }
+                    }
+                    parsePathComponents(task.second, isFolder, newName, newExt);
+
                     sqlite3_bind_text16(memStmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text(memStmt, 2, task.first.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(memStmt, 2, newName.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(memStmt, 3, newExt.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(memStmt, 4, task.first.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_step(memStmt);
                     sqlite3_reset(memStmt);
                 }
