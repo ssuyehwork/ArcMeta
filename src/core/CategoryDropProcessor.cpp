@@ -27,8 +27,7 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
         int processedCount = 0; 
          
         Category targetCat = CategoryRepo::getById(targetCategoryId); 
-        bool isTargetManagedLibraryRoot = (targetCat.parentId == 0 &&  
-            QString::fromStdWString(targetCat.name).startsWith("ArcMeta.Library_")); 
+        bool isTargetManagedLibraryRoot = (targetCat.kind == CategoryKind::ManagedRoot);
  
         QStringList importPaths; 
         std::vector<std::pair<std::string, std::wstring>> virtualAssocItems; 

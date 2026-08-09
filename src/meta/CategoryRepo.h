@@ -15,9 +15,15 @@
 
 namespace ArcMeta {
 
+enum class CategoryKind {
+    UserCustom = 0,   // 用户自定义分类
+    ManagedRoot = 1   // 系统托管库根分类
+};
+
 struct Category {
     int id = 0;
     int parentId = 0;
+    CategoryKind kind = CategoryKind::UserCustom; // 显式分类类型
     std::wstring name;
     std::wstring color;
     std::vector<std::wstring> presetTags;

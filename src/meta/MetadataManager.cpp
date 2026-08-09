@@ -2391,7 +2391,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
                     recordsToSync.push_back({p, rMeta});
 
                     // 按照用户最新要求：在批量持久化最底层强行注入分类关系自动绑定护栏
-                    if (isInsideManagedLibrary(p)) {
+                    if (!rMeta.folderId.empty() && isInsideManagedLibrary(p)) {
                         CategoryRepo::bindToLibraryRootCategory(rMeta.folderId, p);
                     }
                 }
@@ -2514,7 +2514,7 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
             }
 
             // 按照用户最新要求：在单文件持久化最底层强行注入分类关系自动绑定护栏
-            if (isInsideManagedLibrary(nPath)) {
+            if (!rMeta.folderId.empty() && isInsideManagedLibrary(nPath)) {
                 CategoryRepo::bindToLibraryRootCategory(rMeta.folderId, nPath);
             }
         } else {

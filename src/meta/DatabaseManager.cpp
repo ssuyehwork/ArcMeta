@@ -191,6 +191,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             parent_id INTEGER DEFAULT 0,
+            category_kind INTEGER DEFAULT 0,
             name TEXT NOT NULL,
             color TEXT,
             preset_tags TEXT,
@@ -199,7 +200,8 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             encrypted INTEGER DEFAULT 0,
             encrypt_hint TEXT,
             physical_frn INTEGER DEFAULT 0,
-            physical_path TEXT
+            physical_path TEXT,
+            icon TEXT DEFAULT 'folder_filled'
         );
         CREATE INDEX IF NOT EXISTS idx_categories_frn ON categories(physical_frn);
 
@@ -489,6 +491,22 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     }
     if (!hasIconColumn) {
         sqlite3_exec(conn.memDb, "ALTER TABLE categories ADD COLUMN icon TEXT DEFAULT 'folder_filled'", nullptr, nullptr, nullptr);
+    }
+
+    // 2. categories 表添加 category_kind 字段并精准回填历史数据
+    bool hasCategoryKind = false;
+    sqlite3_stmt* checkKind = nullptr;
+    if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(categories)", -1, &checkKind, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(checkKind) == SQLITE_ROW) {
+            const char* col = reinterpret_cast<const char*>(sqlite3_column_text(checkKind, 1));
+            if (col && std::string(col) == "category_kind") { hasCategoryKind = true; break; }
+        }
+        sqlite3_finalize(checkKind);
+    }
+    if (!hasCategoryKind) {
+        sqlite3_exec(conn.memDb, "ALTER TABLE categories ADD COLUMN category_kind INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+        // 严格带上 parent_id = 0 条件回填，杜绝任何同名子分类被误改！
+        sqlite3_exec(conn.memDb, "UPDATE categories SET category_kind = 1 WHERE parent_id = 0 AND name LIKE 'ArcMeta.Library_%';", nullptr, nullptr, nullptr);
     }
 
     // 2026-08-xx 索引优化
