@@ -1,6 +1,5 @@
 #include "MediaColorExtractor.h"
 #include "../core/AppConfig.h"
-#include "../meta/CapsuleMediaExtractor.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QFile>
@@ -54,8 +53,8 @@ QColor MediaColorExtractor::quantizeColor(const QColor& color) {
 }
 
 QVector<QPair<QColor, float>> MediaColorExtractor::extractPalette(const QString& targetFile) {
-    // 调用专属管道一的 getCapsuleThumbnail 读取或提取图片
-    QImage targetImg = CapsuleMediaExtractor::getCapsuleThumbnail(targetFile, 256);
+    // 统一改为通过 ImageDecoderFacade 加载安全缩略图
+    QImage targetImg = ImageDecoderFacade::loadScaledImage(targetFile, 256);
     if (targetImg.isNull()) return {};
 
     // 委托给 ColorAlgorithmEngine 处理
