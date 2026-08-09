@@ -16,6 +16,9 @@ if(MSVC)
     add_compile_options(/W4 /O2 /utf-8 /Zm1000)
 endif()
 
+# 全局屏蔽 MSVC 针对标准 C 函数 (如 strcpy 等) 抛出的 C4996 安全警告
+add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+
 # Qt 6 基础组件
 # 2026-05-10 修复：添加缺失的Core和Gui组件
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent)
@@ -213,6 +216,12 @@ set(SOURCES
     src/ui/WindowsShellThumbnailProvider.cpp
     src/ui/MediaColorExtractor.h
     src/ui/MediaColorExtractor.cpp
+    src/ui/FormatDecoders.h
+    src/ui/FormatDecoders.cpp
+    src/ui/ImageDecoderFacade.h
+    src/ui/ImageDecoderFacade.cpp
+    src/ui/ColorAlgorithmEngine.h
+    src/ui/ColorAlgorithmEngine.cpp
     src/util/DiskMediaExtractor.h
     src/util/DiskMediaExtractor.cpp
     src/meta/CapsuleMediaExtractor.h
