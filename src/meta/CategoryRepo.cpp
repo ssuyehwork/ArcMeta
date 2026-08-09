@@ -595,7 +595,7 @@ bool CategoryRepo::remove(int id) {
     sqlite3* mainDb = DatabaseManager::instance().getGlobalDb();
     if (!mainDb) return false;
 
-    // Step 1: Recursively collect all category IDs to delete (using mainDb as source of truth for tree structure)
+    // 1. 递归收集该分类及所有子分类的 ID
     std::vector<int> toDelete = {id};
     size_t i = 0;
     while (i < toDelete.size()) {
@@ -608,73 +608,19 @@ bool CategoryRepo::remove(int id) {
         }
     }
 
-    // Step 2: Collect all unique Folder IDs from those categories (deduplicated)
-    std::vector<std::string> fids;
-    std::unordered_map<std::string, std::wstring> fidToPath; // fid -> path_hint
-    for (int catId : toDelete) {
-        auto items = getItemsInCategory(catId);
-        for (const auto& item : items) {
-            if (fidToPath.find(item.folderId) == fidToPath.end()) {
-                fidToPath[item.folderId] = item.pathHint;
-                fids.push_back(item.folderId);
-            }
-        }
-    }
-
-    // Step 3: For each Folder ID — remove all its category associations, then insert one row into trash bucket
-    executeFidBatch(fids, [&](sqlite3* innerDb, const std::string& fid) {
-        const std::wstring& pathHint = fidToPath[fid];
-
-        // Remove ALL existing category_items rows for this fid
-        sqlite3_stmt* delStmt;
-        if (sqlite3_prepare_v2(innerDb, "DELETE FROM category_items WHERE folder_id = ?", -1, &delStmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(delStmt, 1, fid.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_step(delStmt);
-            sqlite3_finalize(delStmt);
-        }
-        // Insert one row into trash bucket
-        sqlite3_stmt* insStmt;
-        if (sqlite3_prepare_v2(innerDb,
-            "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)",
-            -1, &insStmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(insStmt, 1, TRASH_CATEGORY_ID);
-            sqlite3_bind_text(insStmt, 2, fid.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text16(insStmt, 3, pathHint.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_double(insStmt, 4, static_cast<double>(QDateTime::currentMSecsSinceEpoch()));
-            sqlite3_step(insStmt);
-            sqlite3_finalize(insStmt);
-        }
-        // Update in-memory cache: set isTrash = true, then persist
-        std::wstring path = MetadataManager::instance().getPathByFolderId(fid);
-        if (path.empty()) path = pathHint;
-        if (!path.empty()) {
-            MetadataManager::instance().setTrash(path, true);
-        }
-        return true;
-    });
-
-    // 收集所有关联了物理路径的文件夹分类
-    std::vector<std::wstring> physicalDirsToDelete;
-    for (int delId : toDelete) {
-        Category cat = getById(delId);
-        if (cat.id > 0 && !cat.physicalPath.empty()) {
-            physicalDirsToDelete.push_back(cat.physicalPath);
-        }
-    }
-
-    // 4. Delete the category rows and associations from ALL active databases
+    // 2. 仅从所有数据库中清理分类节点与 mappings，绝对不改变文件的 is_trash 状态
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
     for (sqlite3* db : dbs) {
         SqlTransaction trans(db);
         for (int delId : toDelete) {
-            // 首先清理子项关联，防止幽灵关联
+            // 清理 category_items 关联
             sqlite3_stmt* itemDelStmt;
             if (sqlite3_prepare_v2(db, "DELETE FROM category_items WHERE category_id = ?", -1, &itemDelStmt, nullptr) == SQLITE_OK) {
                 sqlite3_bind_int(itemDelStmt, 1, delId);
                 sqlite3_step(itemDelStmt);
                 sqlite3_finalize(itemDelStmt);
             }
-
+            // 清理 categories 分类节点
             sqlite3_stmt* stmt;
             if (sqlite3_prepare_v2(db, "DELETE FROM categories WHERE id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
                 sqlite3_bind_int(stmt, 1, delId);
@@ -686,9 +632,10 @@ bool CategoryRepo::remove(int id) {
     }
 
     s_countsDirty.store(true);
-    // ✅ 修正后：删除分类只清理数据库与内存关联，严禁物理删除用户磁盘上的实际文件夹！
-    MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
     refreshMemoryCache();
+    // 物理对账重新计算未分类
+    fullRecount();
+    MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
     return true;
 }
 
