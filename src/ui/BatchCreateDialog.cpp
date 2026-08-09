@@ -43,7 +43,6 @@ BatchCreateDialog::BatchCreateDialog(const QString& currentDirectory, QWidget* p
 
     // 显式触发一次后缀名和点号的启用状态同步，避免由于 QComboBox 索引未实质改变导致状态错步
     m_suffixEdit->setEnabled(lastType == 1);
-    m_dotLabel->setEnabled(lastType == 1);
 
     // 3. 还原上次命名规则管道
     QString lastRules = AppConfig::instance().getValue("BatchCreate/LastRules").toString();
@@ -103,37 +102,21 @@ void BatchCreateDialog::initContent() {
     typeGroupL->addWidget(typeLabel);
     typeGroupL->addWidget(m_typeCombo);
 
-    // ===== 2. 后缀名组（内置点号 .） =====
+    // ===== 2. 后缀名组 =====
     QHBoxLayout* suffixGroupL = new QHBoxLayout();
     suffixGroupL->setSpacing(4); // 组内间距 4px
     QLabel* suffixLabel = new QLabel("后缀名:", this);
     suffixLabel->setStyleSheet("color: #BBB; font-weight: bold;");
 
-    // 内置点号容器
-    QWidget* suffixContainer = new QWidget(this);
-    suffixContainer->setFixedHeight(25);
-    QHBoxLayout* suffixContainerL = new QHBoxLayout(suffixContainer);
-    suffixContainerL->setContentsMargins(5, 0, 0, 0);
-    suffixContainerL->setSpacing(0);
-    suffixContainer->setStyleSheet("background: #252526; border: 1px solid #444; border-radius: 4px;");
-
-    m_dotLabel = new QLabel(".", suffixContainer);
-    m_dotLabel->setStyleSheet("color: #AAA; font-weight: bold; font-size: 13px; background: transparent; border: none;");
-    m_dotLabel->setEnabled(false); // 默认初始与“文件夹”选择同步禁用
-
-    m_suffixEdit = new QLineEdit(suffixContainer);
+    m_suffixEdit = new QLineEdit(this);
     m_suffixEdit->setPlaceholderText("txt");
     m_suffixEdit->setText("txt");
-    m_suffixEdit->setFixedHeight(23);
-    m_suffixEdit->setFixedWidth(65);
-    m_suffixEdit->setStyleSheet("QLineEdit { background: transparent; border: none; color: #EEE; padding: 0px 2px; }");
+    m_suffixEdit->setFixedHeight(25);
+    m_suffixEdit->setFixedWidth(80);
     m_suffixEdit->setEnabled(false); // 默认初始与“文件夹”选择同步禁用
 
-    suffixContainerL->addWidget(m_dotLabel);
-    suffixContainerL->addWidget(m_suffixEdit);
-
     suffixGroupL->addWidget(suffixLabel);
-    suffixGroupL->addWidget(suffixContainer);
+    suffixGroupL->addWidget(m_suffixEdit);
 
     // ===== 3. 数量组 =====
     QHBoxLayout* countGroupL = new QHBoxLayout();
@@ -197,7 +180,6 @@ void BatchCreateDialog::initContent() {
     // 触发联动：类型切换控制后缀可用性
     connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), [this](int index) {
         m_suffixEdit->setEnabled(index == 1);
-        m_dotLabel->setEnabled(index == 1);
     });
 
     connect(btnCancel, &QPushButton::clicked, this, &QDialog::reject);

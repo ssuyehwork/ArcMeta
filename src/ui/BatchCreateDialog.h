@@ -34,8 +34,7 @@ private:
 
     QSpinBox* m_countSpin = nullptr;
     QComboBox* m_typeCombo = nullptr; // 文件夹 / 文件
-    QLineEdit* m_suffixEdit = nullptr; // 后缀名 (.txt 等)
-    QLabel* m_dotLabel = nullptr; // 内置 '.' 标签
+    QLineEdit* m_suffixEdit = nullptr; // 后缀名
 
     QWidget* m_rulesContainer = nullptr;
     QVBoxLayout* m_rulesLayout = nullptr;
