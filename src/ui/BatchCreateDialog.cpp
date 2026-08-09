@@ -2,6 +2,7 @@
 #include "ToolTipOverlay.h"
 #include "UiHelper.h"
 #include "StyleLibrary.h"
+#include "../core/AppConfig.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
@@ -10,6 +11,9 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QDateTime>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
 
 namespace ArcMeta {
 
@@ -18,6 +22,53 @@ BatchCreateDialog::BatchCreateDialog(const QString& currentDirectory, QWidget* p
     resize(550, 420);
     initContent();
     applyTheme();
+
+    // 1. 初始化自动保存防抖定时器
+    m_autoSaveTimer = new QTimer(this);
+    m_autoSaveTimer->setSingleShot(true);
+    connect(m_autoSaveTimer, &QTimer::timeout, this, &BatchCreateDialog::doAutoSave);
+
+    // 2. 还原上次配置（类型、后缀名、数量）
+    int lastType = AppConfig::instance().getValue("BatchCreate/LastType", 0).toInt();
+    QString lastSuffix = AppConfig::instance().getValue("BatchCreate/LastSuffix", ".txt").toString();
+    int lastCount = AppConfig::instance().getValue("BatchCreate/LastCount", 5).toInt();
+
+    m_typeCombo->setCurrentIndex(lastType);
+    m_suffixEdit->setText(lastSuffix);
+    m_countSpin->setValue(lastCount);
+
+    // 3. 还原上次命名规则管道
+    QString lastRules = AppConfig::instance().getValue("BatchCreate/LastRules").toString();
+    if (!lastRules.isEmpty()) {
+        QJsonDocument doc = QJsonDocument::fromJson(lastRules.toUtf8());
+        if (doc.isArray()) {
+            QJsonArray arr = doc.array();
+            for (const auto& v : arr) {
+                onAddRow();
+                QJsonObject obj = v.toObject();
+                RenameRule rule;
+                QString typeStr = obj["type"].toString();
+                if (typeStr == "Text") rule.type = RenameComponentType::Text;
+                else if (typeStr == "Sequence") rule.type = RenameComponentType::Sequence;
+                else if (typeStr == "OriginalName") rule.type = RenameComponentType::OriginalName;
+                else if (typeStr == "Date") rule.type = RenameComponentType::Date;
+
+                rule.value = obj["value"].toString();
+                rule.start = obj["start"].toInt();
+                rule.padding = obj["padding"].toInt();
+                m_ruleRows.last()->setRule(rule);
+            }
+        }
+    }
+
+    if (m_ruleRows.isEmpty()) {
+        onAddRow();
+    }
+
+    // 绑定控件改变自动保存
+    connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &BatchCreateDialog::scheduleAutoSave);
+    connect(m_suffixEdit, &QLineEdit::textChanged, this, &BatchCreateDialog::scheduleAutoSave);
+    connect(m_countSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &BatchCreateDialog::scheduleAutoSave);
 }
 
 void BatchCreateDialog::initContent() {
@@ -110,9 +161,6 @@ void BatchCreateDialog::initContent() {
 
     connect(btnCancel, &QPushButton::clicked, this, &QDialog::reject);
     connect(btnOk, &QPushButton::clicked, this, &BatchCreateDialog::onExecute);
-
-    // 初始配置一行规则文本
-    onAddRow();
 }
 
 void BatchCreateDialog::onAddRow() {
@@ -125,8 +173,11 @@ void BatchCreateDialog::onAddRow() {
         if (m_ruleRows.size() > 1) {
             m_ruleRows.removeOne(row);
             row->deleteLater();
+            scheduleAutoSave();
         }
     });
+    connect(row, &RuleRow::changed, this, &BatchCreateDialog::scheduleAutoSave);
+    scheduleAutoSave();
 }
 
 void BatchCreateDialog::applyTheme() {
@@ -166,6 +217,38 @@ QString BatchCreateDialog::renderOne(int index, const std::vector<RenameRule>& r
         }
     }
     return name;
+}
+
+void BatchCreateDialog::scheduleAutoSave() {
+    if (m_autoSaveTimer) {
+        m_autoSaveTimer->start(300);
+    }
+}
+
+void BatchCreateDialog::doAutoSave() {
+    AppConfig::instance().setValue("BatchCreate/LastType", m_typeCombo->currentIndex());
+    AppConfig::instance().setValue("BatchCreate/LastSuffix", m_suffixEdit->text());
+    AppConfig::instance().setValue("BatchCreate/LastCount", m_countSpin->value());
+
+    QJsonArray arr;
+    for (auto* row : m_ruleRows) {
+        RenameRule rule = row->getRule();
+        QJsonObject obj;
+        QString typeStr;
+        switch (rule.type) {
+            case RenameComponentType::Text: typeStr = "Text"; break;
+            case RenameComponentType::Sequence: typeStr = "Sequence"; break;
+            case RenameComponentType::OriginalName: typeStr = "OriginalName"; break;
+            case RenameComponentType::Date: typeStr = "Date"; break;
+            default: typeStr = "Unknown";
+        }
+        obj["type"] = typeStr;
+        obj["value"] = rule.value;
+        obj["start"] = rule.start;
+        obj["padding"] = rule.padding;
+        arr.append(obj);
+    }
+    AppConfig::instance().setValue("BatchCreate/LastRules", QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
 }
 
 void BatchCreateDialog::onExecute() {

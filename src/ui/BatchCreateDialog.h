@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QLineEdit>
 #include <QScrollArea>
+#include <QTimer>
 
 namespace ArcMeta {
 
@@ -17,6 +18,10 @@ class BatchCreateDialog : public FramelessDialog {
 public:
     explicit BatchCreateDialog(const QString& currentDirectory, QWidget* parent = nullptr);
     ~BatchCreateDialog() override = default;
+
+private slots:
+    void scheduleAutoSave();
+    void doAutoSave();
 
 private:
     void initContent();
@@ -34,6 +39,8 @@ private:
     QWidget* m_rulesContainer = nullptr;
     QVBoxLayout* m_rulesLayout = nullptr;
     QList<RuleRow*> m_ruleRows;
+
+    QTimer* m_autoSaveTimer = nullptr;
 };
 
 } // namespace ArcMeta
