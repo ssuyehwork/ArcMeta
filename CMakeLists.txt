@@ -16,6 +16,9 @@ if(MSVC)
     add_compile_options(/W4 /O2 /utf-8 /Zm1000)
 endif()
 
+# 全局屏蔽 MSVC 针对标准 C 函数 (如 strcpy 等) 抛出的 C4996 安全警告
+add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+
 # Qt 6 基础组件
 # 2026-05-10 修复：添加缺失的Core和Gui组件
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent)
