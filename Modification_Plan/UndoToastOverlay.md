@@ -258,8 +258,6 @@ UndoToastOverlay::instance()->showToast(
 图纸已完整生成，请授权执行者新建文件并编译接入。
 
 应用场景：
-剪切
-复制
 重命名
 批量重命名
 拖拽分类

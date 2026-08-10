@@ -23,14 +23,21 @@ public:
                              QWidget* parent = nullptr,
                              std::function<void()> onComplete = nullptr);
 
+    static void importAssets(const QStringList& paths,
+                             int targetCatId,
+                             QWidget* parent,
+                             std::function<void(const QStringList& newlyImportedPaths)> onComplete);
+
 private:
     static bool importSingleFile(const QString& srcPath,
                                  int targetCatId,
-                                 const QString& managedRoot);
+                                 const QString& managedRoot,
+                                 QStringList* newlyImportedPaths = nullptr);
 
     static bool importDirectoryRecursive(const QString& srcDir,
                                          int parentCatId,
-                                         const QString& managedRoot);
+                                         const QString& managedRoot,
+                                         QStringList* newlyImportedPaths = nullptr);
 };
 
 } // namespace ArcMeta

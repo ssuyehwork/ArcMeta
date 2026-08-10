@@ -75,6 +75,8 @@ set(SOURCES
     src/core/DiskTrashService.h
     src/core/SyncStatusService.cpp
     src/core/SyncStatusService.h
+    src/core/OperationSnapshotEngine.h
+    src/core/OperationSnapshotEngine.cpp
     src/core/AutoImportManager.cpp
     src/core/AutoImportManager.h
     src/core/AppConfig.h
@@ -94,6 +96,8 @@ set(SOURCES
     src/meta/DatabaseManager.h
     src/meta/BatchRenameEngine.cpp
     src/meta/BatchRenameEngine.h
+    src/meta/DuplicateDetectorService.h
+    src/meta/DuplicateDetectorService.cpp
     src/meta/MetadataDefs.h
     src/meta/MetadataManager.cpp
     src/meta/MetadataManager.h
@@ -107,6 +111,8 @@ set(SOURCES
     src/ui/BatchRenameDialog.h
     src/ui/BatchRenamePreviewDialog.cpp
     src/ui/BatchRenamePreviewDialog.h
+    src/ui/DuplicateConflictDialog.h
+    src/ui/DuplicateConflictDialog.cpp
     src/ui/MemoryBatchRenameService.cpp
     src/ui/MemoryBatchRenameService.h
     src/ui/PresetManager.cpp

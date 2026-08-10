@@ -27,6 +27,16 @@ void AssetImporter::importAssets(const QStringList& paths,
                                  int targetCatId, 
                                  QWidget* parent, 
                                  std::function<void()> onComplete) { 
+    importAssets(paths, targetCatId, parent, [onComplete](const QStringList& newlyImportedPaths) {
+        Q_UNUSED(newlyImportedPaths);
+        if (onComplete) onComplete();
+    });
+}
+
+void AssetImporter::importAssets(const QStringList& paths, 
+                                 int targetCatId, 
+                                 QWidget* parent, 
+                                 std::function<void(const QStringList& newlyImportedPaths)> onComplete) { 
     if (paths.isEmpty()) return; 
  
     BatchProgressDialog* progress = new BatchProgressDialog("正在导入资产包...", parent); 
@@ -58,6 +68,7 @@ void AssetImporter::importAssets(const QStringList& paths,
         int total = paths.size(); 
         int handled = 0; 
         int successCount = 0; 
+        QStringList newlyImportedPaths;
  
         for (const QString& src : paths) { 
             if (context->isCancelled) break; 
@@ -102,9 +113,9 @@ void AssetImporter::importAssets(const QStringList& paths,
             QFileInfo srcInfo(src); 
             bool ok = false; 
             if (srcInfo.isFile()) { 
-                ok = importSingleFile(src, targetCatId, managedRoot); 
+                ok = importSingleFile(src, targetCatId, managedRoot, &newlyImportedPaths); 
             } else if (srcInfo.isDir()) { 
-                ok = importDirectoryRecursive(src, targetCatId, managedRoot); 
+                ok = importDirectoryRecursive(src, targetCatId, managedRoot, &newlyImportedPaths); 
             } 
             if (ok) successCount++; 
         } 
@@ -113,7 +124,7 @@ void AssetImporter::importAssets(const QStringList& paths,
         if (SUCCEEDED(hr)) CoUninitialize(); 
 #endif 
  
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, successCount, onComplete]() { 
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, successCount, newlyImportedPaths, onComplete]() { 
             if (context->isCancelled) return; 
             if (weakProgress) { 
                 weakProgress->accept(); 
@@ -122,14 +133,15 @@ void AssetImporter::importAssets(const QStringList& paths,
             ToolTipOverlay::instance()->showText(QCursor::pos(), 
                 QString("已成功导入 %1 个受控资产单元").arg(successCount), 2000, QColor("#2ecc71")); 
  
-            if (onComplete) onComplete(); 
+            if (onComplete) onComplete(newlyImportedPaths); 
         }); 
     }); 
 } 
  
 bool AssetImporter::importSingleFile(const QString& srcPath, 
                                      int targetCatId, 
-                                     const QString& managedRoot) { 
+                                     const QString& managedRoot,
+                                     QStringList* newlyImportedPaths) { 
     QFileInfo srcInfo(srcPath); 
     if (!srcInfo.exists() || !srcInfo.isFile()) return false; 
  
@@ -161,6 +173,10 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
  
     // 4. 生成容器内配套的预渲染缩略图 
     (void)CapsuleMediaExtractor::getCapsuleThumbnail(destPath, 512);
+
+    if (newlyImportedPaths) {
+        newlyImportedPaths->append(destPath);
+    }
  
     // 🚨 重构核心：废除所有手写原始 SQL！统一转发给 MetadataManager 单一权威管线登记入库 
     std::wstring wDestPath = QDir::toNativeSeparators(destPath).toStdWString(); 
@@ -169,7 +185,8 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
  
 bool AssetImporter::importDirectoryRecursive(const QString& srcDir, 
                                              int parentCatId, 
-                                             const QString& managedRoot) { 
+                                             const QString& managedRoot,
+                                             QStringList* newlyImportedPaths) { 
     QFileInfo dirInfo(srcDir); 
     if (!dirInfo.exists() || !dirInfo.isDir()) return false; 
  
@@ -188,9 +205,9 @@ bool AssetImporter::importDirectoryRecursive(const QString& srcDir,
     QFileInfoList entries = dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name); 
     for (const QFileInfo& entry : entries) { 
         if (entry.isFile()) { 
-            importSingleFile(entry.absoluteFilePath(), cat.id, managedRoot); 
+            importSingleFile(entry.absoluteFilePath(), cat.id, managedRoot, newlyImportedPaths); 
         } else if (entry.isDir()) { 
-            importDirectoryRecursive(entry.absoluteFilePath(), cat.id, managedRoot); 
+            importDirectoryRecursive(entry.absoluteFilePath(), cat.id, managedRoot, newlyImportedPaths); 
         } 
     } 
  

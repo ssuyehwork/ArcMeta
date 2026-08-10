@@ -22,6 +22,8 @@
 #include "../core/NavigationHistoryService.h"
 #include "QuickLookWindow.h"
 #include "ToolTipOverlay.h"
+#include "../meta/DuplicateDetectorService.h"
+#include "DuplicateConflictDialog.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -430,7 +432,44 @@ void MainWindow::initUi() {
         }
 
         if (!importPaths.isEmpty()) {
-            AssetImporter::importAssets(importPaths, targetCatId, this, [this]() {
+            AssetImporter::importAssets(importPaths, targetCatId, this, [this, targetCatId](const QStringList& newlyImportedPaths) {
+                if (!newlyImportedPaths.isEmpty()) {
+                    (void)QtConcurrent::run([this, newlyImportedPaths, targetCatId]() {
+                        auto conflicts = DuplicateDetectorService::detectDuplicates(newlyImportedPaths);
+                        if (!conflicts.empty()) {
+                            QMetaObject::invokeMethod(this, [this, conflicts, targetCatId]() {
+                                int totalCount = static_cast<int>(conflicts.size());
+                                bool batchApplied = false;
+                                DuplicateResolveAction batchAction = DuplicateResolveAction::UseExisting;
+
+                                for (const auto& group : conflicts) {
+                                    DuplicateResolveAction chosenAction;
+                                    if (batchApplied) {
+                                        chosenAction = batchAction;
+                                    } else {
+                                        DuplicateConflictDialog dlg(group, totalCount, this);
+                                        if (dlg.exec() != QDialog::Accepted) break;
+
+                                        chosenAction = dlg.selectedAction();
+                                        if (dlg.applyToAll()) {
+                                            batchApplied = true;
+                                            batchAction = chosenAction;
+                                        }
+                                    }
+
+                                    if (chosenAction == DuplicateResolveAction::UseExisting) {
+                                        QFile::remove(group.newItem.path);
+                                        MetadataManager::instance().removeMetadataSync(group.newItem.path.toStdWString());
+                                        CategoryRepo::addItemToCategory(targetCatId, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
+                                    }
+                                }
+                                CategoryRepo::s_countsDirty.store(true);
+                                m_categoryPanel->requestRefresh(true);
+                                m_contentPanel->refreshAll();
+                            });
+                        }
+                    });
+                }
                 m_categoryPanel->requestRefresh(true);
                 m_contentPanel->refreshAll();
             });
@@ -481,7 +520,7 @@ void MainWindow::initUi() {
             
             // 1. 基础信息展示（0 Win32 磁盘 Blocking）
             m_metaPanel->updateInfo(
-                name.isEmpty() ? path : name, 
+                name.isEmpty() ? QFileInfo(path).fileName() : name, 
                 type,
                 sizeStr,
                 "-", // ctime 懒加载

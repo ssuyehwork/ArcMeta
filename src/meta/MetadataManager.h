@@ -218,6 +218,7 @@ public:
     void setEncrypted(const std::wstring& path, bool encrypted, bool notify = true);
 
     void saveToDiskModeJson(const std::wstring& nPath, std::function<void(ItemMeta&)> updater);
+    void loadDiskModeJsonForDirectory(const std::wstring& folderPath);
 
 
     void setManaged(const std::wstring& path, bool managed, bool notify = true);

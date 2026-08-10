@@ -1035,6 +1035,47 @@ void MetadataManager::saveToDiskModeJson(const std::wstring& nPath, std::functio
     }
 }
 
+void MetadataManager::loadDiskModeJsonForDirectory(const std::wstring& folderPath) {
+    AmMetaJson metaJson(folderPath);
+    if (!metaJson.load()) return;
+
+    const auto& items = metaJson.items();
+    if (items.empty()) return;
+
+    std::wstring normDir = MetadataManager::normalizePath(folderPath);
+    if (!normDir.empty() && normDir.back() != L'\\' && normDir.back() != L'/') {
+        normDir += L'\\';
+    }
+
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    auto currentSnapshot = std::atomic_load(&m_snapshot);
+    auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+
+    for (const auto& pair : items) {
+        const std::wstring& fileName = pair.first;
+        const ItemMeta& itemMeta = pair.second;
+        std::wstring fullPath = normDir + fileName;
+        std::wstring nPath = MetadataManager::normalizePath(fullPath);
+
+        auto& rm = (*newMap)[nPath];
+        rm.rating = itemMeta.rating;
+        rm.manualColor = itemMeta.color;
+        rm.pinned = itemMeta.pinned;
+        rm.note = itemMeta.note;
+        rm.url = itemMeta.url;
+        
+        // 转换 tags List 格式
+        QStringList qTags;
+        for (const auto& t : itemMeta.tags) {
+            qTags.append(QString::fromStdWString(t));
+        }
+        rm.tags = qTags;
+        rm.palettes = itemMeta.palettes;
+    }
+
+    std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+}
+
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     
