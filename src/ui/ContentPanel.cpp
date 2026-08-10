@@ -2352,7 +2352,7 @@ void ContentPanel::performBatchRename() {
                     m_pendingSelectName = firstNew;
                     m_isPendingEdit = false;
                 }
-                // 🚨 联动支持：不应强绑定物理 loadDirectory，统一调用 refreshAll 以自适应数据库和系统分类下的异步刷新，
+                // 🚨 联动支持：不应强绑定物理 loadDirectory，统一调用 refreshAll 以自适应数据库 and 系统分类下的异步刷新，
                 // 并实现完美的选中态无缝自愈高亮！
                 refreshAll();
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "批量重命名操作已成功执行", 1500, QColor("#2ecc71"));
@@ -2360,11 +2360,7 @@ void ContentPanel::performBatchRename() {
             }
             return false;
         },
-        [](const QVector<AssetItemSnapshot>& beforeState) {
-            Q_UNUSED(beforeState);
-            UndoManager::instance().undo();
-            return true;
-        }
+        nullptr // 传入 nullptr 防止 executeWithSnapshot 弹出重复的多余的 showToast 覆盖，直接使用 BatchRenameDialog 内精准的带有真实成功数 successCount 的 showToast 提示！
     );
 } 
  
