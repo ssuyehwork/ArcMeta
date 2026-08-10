@@ -481,7 +481,7 @@ void MainWindow::initUi() {
             
             // 1. 基础信息展示（0 Win32 磁盘 Blocking）
             m_metaPanel->updateInfo(
-                name.isEmpty() ? path : name, 
+                name.isEmpty() ? QFileInfo(path).fileName() : name,
                 type,
                 sizeStr,
                 "-", // ctime 懒加载

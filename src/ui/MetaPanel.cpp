@@ -265,6 +265,8 @@ void MetaPanel::showEvent(QShowEvent* event) {
 void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s, 
                             const QString& ct, const QString& mt, const QString& at, 
                             const QString& p, bool e, int width, int height) {
+    if (m_isUserEditing) return;
+
     m_isInternalUpdating = true;
     
     QFileInfo info(n);
@@ -387,6 +389,16 @@ void MetaPanel::setPalettes(const QVector<QPair<QColor, float>>& palette) {
 
 bool MetaPanel::eventFilter(QObject* watched, QEvent* event) {
     if (m_isInternalUpdating) return QFrame::eventFilter(watched, event);
+
+    if (event->type() == QEvent::FocusIn) {
+        if (watched == m_noteEdit || watched == m_linkEdit || watched == m_nameEdit || watched == m_tagEdit) {
+            m_isUserEditing = true;
+        }
+    } else if (event->type() == QEvent::FocusOut) {
+        if (watched == m_noteEdit || watched == m_linkEdit || watched == m_nameEdit || watched == m_tagEdit) {
+            m_isUserEditing = false;
+        }
+    }
 
     if (watched == m_noteEdit && event->type() == QEvent::FocusOut) {
         if (!m_selectedPaths.isEmpty()) {

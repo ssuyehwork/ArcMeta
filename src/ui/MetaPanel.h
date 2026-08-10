@@ -87,6 +87,7 @@ private:
     QList<ColorPill*> m_colorPool;
     QTimer* m_adjustTimer = nullptr;
     bool m_isInternalUpdating = false;
+    bool m_isUserEditing = false; // 增加编辑态锁，防护焦点与异步刷新冲刷
 
 private slots:
     void onTagAdded();
