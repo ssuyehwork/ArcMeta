@@ -2,6 +2,8 @@
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
 #include "../ui/UndoToastOverlay.h"
+#include "UndoManager.h"
+#include "ActionCommand.h"
 #include <QFileInfo>
 
 namespace ArcMeta {
@@ -51,7 +53,7 @@ bool OperationSnapshotEngine::executeWithSnapshot(
     const QStringList& targetPaths,
     const QString& successToastMsg,
     std::function<bool()> doAction,
-    std::function<bool(const QVector<AssetItemSnapshot>& beforeState)> undoAction) 
+    std::function<bool(const QVector<AssetItemSnapshot>& beforeState)> undoAction)
 {
     Q_UNUSED(opType);
     if (!doAction) return false;
@@ -63,15 +65,43 @@ bool OperationSnapshotEngine::executeWithSnapshot(
     bool ok = doAction();
     if (!ok) return false;
 
-    // 3. 操作成功：结合 UndoToastOverlay 进行撤销反馈弹出
-    // 对应用户原话：“快照结合UndoToastOverlay”
+    // 3. 操作成功：如果外部传入了专用的 undoAction，
+    // 在主线程中生成一个通用快照回滚 ActionCommand 并推送给 UndoManager，实现 100% 物理与虚拟并轨！
     if (undoAction) {
+        class GeneralSnapshotUndoCommand : public ActionCommand {
+        public:
+            GeneralSnapshotUndoCommand(QVector<AssetItemSnapshot> before,
+                                       std::function<bool(const QVector<AssetItemSnapshot>& beforeState)> undo)
+                : m_before(before), m_undoFunc(undo) {}
+
+            void execute() override {}
+            void undo() override {
+                if (m_undoFunc) {
+                    m_undoFunc(m_before);
+                }
+            }
+            void redo() override {}
+            QString description() const override { return "快照撤销"; }
+            bool affectsPath(const QString& path) const override {
+                for (const auto& snap : m_before) {
+                    if (snap.path == path) return true;
+                }
+                return false;
+            }
+        private:
+            QVector<AssetItemSnapshot> m_before;
+            std::function<bool(const QVector<AssetItemSnapshot>& beforeState)> m_undoFunc;
+        };
+
+        // 压入全局撤销栈，这样无论是按 Ctrl+Z 还是点击气泡，均能完美统一调用同一个 Command 恢复物理与逻辑状态
+        UndoManager::instance().pushCommand(std::make_unique<GeneralSnapshotUndoCommand>(beforeState, undoAction));
+
+        // 弹出反馈气泡，点击撤销会直接调用 UndoManager::instance().undo()
         UndoToastOverlay::instance()->showToast(
             parentWidget,
             successToastMsg,
-            [undoAction, beforeState]() {
-                // 点击“撤销”按钮时，传入捕获的物理快照回滚
-                undoAction(beforeState);
+            []() {
+                // 回调闭包留空或传入 dummy 即可，因为在 4.1 节中 UndoToastOverlay 已经并轨至 UndoManager
             },
             5000
         );
