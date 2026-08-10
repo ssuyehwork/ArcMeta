@@ -4,6 +4,7 @@
 #include "UiHelper.h"
 #include "MemoryBatchRenameService.h"
 #include "DiskBatchRenameService.h"
+#include "PresetManager.h"
 #include "../meta/BatchRenameEngine.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
@@ -22,10 +23,9 @@
 #include <QTableWidgetItem>
 #include <QRadioButton>
 #include <QScrollArea>
-#include <QJsonDocument>
-#include <QJsonArray>
-#include <QJsonObject>
 #include "../core/AppConfig.h"
+#include "../core/UndoManager.h"
+#include "../core/BasicCommands.h"
 
 namespace ArcMeta {
 
@@ -42,24 +42,10 @@ BatchRenameDialog::BatchRenameDialog(const std::vector<std::wstring>& originalPa
     // 还原上次规则
     QString lastRules = AppConfig::instance().getValue("LastBatchRenameRules").toString();
     if (!lastRules.isEmpty()) {
-        QJsonDocument doc = QJsonDocument::fromJson(lastRules.toUtf8());
-        if (doc.isArray()) {
-            QJsonArray arr = doc.array();
-            for (const auto& v : arr) {
-                onAddRow();
-                QJsonObject obj = v.toObject();
-                RenameRule rule;
-                QString typeStr = obj["type"].toString();
-                if (typeStr == "Text") rule.type = RenameComponentType::Text;
-                else if (typeStr == "Sequence") rule.type = RenameComponentType::Sequence;
-                else if (typeStr == "OriginalName") rule.type = RenameComponentType::OriginalName;
-                else if (typeStr == "Date") rule.type = RenameComponentType::Date;
-                
-                rule.value = obj["value"].toString();
-                rule.start = obj["start"].toInt();
-                rule.padding = obj["padding"].toInt();
-                m_ruleRows.last()->setRule(rule);
-            }
+        auto rules = PresetManager::deserializeRules(lastRules);
+        for (const auto& rule : rules) {
+            onAddRow();
+            m_ruleRows.last()->setRule(rule);
         }
     }
 
@@ -88,28 +74,26 @@ void BatchRenameDialog::initContent() {
     m_presetCombo->setFixedHeight(25); 
     presetL->addWidget(m_presetCombo, 1);
 
-    // 标记 ③：快速删除 "×" 按钮
-    m_btnQuickDelete = new QPushButton("×", presetGroup);
-    m_btnQuickDelete->setFixedSize(20, 20);
-    m_btnQuickDelete->setCursor(Qt::PointingHandCursor);
-    m_btnQuickDelete->setStyleSheet(
+    // 删除预设按钮 "×"
+    m_btnDeletePreset = new QPushButton("×", presetGroup);
+    m_btnDeletePreset->setFixedSize(20, 20);
+    m_btnDeletePreset->setCursor(Qt::PointingHandCursor);
+    m_btnDeletePreset->setStyleSheet(
         "QPushButton { background: #3E3E42; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold; }" // 2026-07-xx 按照用户要求：持续显示灰色高亮
         "QPushButton:hover { background: #4E4E52; }"
     );
-    connect(m_btnQuickDelete, &QPushButton::clicked, this, &BatchRenameDialog::onDeleteCurrentPreset);
-    presetL->addWidget(m_btnQuickDelete);
-
-    // 标记 ②：导入/导出按钮重构
-    // 映射关系修正：m_btnSavePreset(原存储) -> 导出，m_btnDeletePreset(原删除) -> 导入
-    m_btnDeletePreset = new QPushButton("导入...", presetGroup);
-    m_btnSavePreset = new QPushButton("导出...", presetGroup);
-    m_btnDeletePreset->setFixedHeight(25);
-    m_btnSavePreset->setFixedHeight(25);
-    m_btnDeletePreset->setFixedWidth(80);
-    m_btnSavePreset->setFixedWidth(80);
-    
     presetL->addWidget(m_btnDeletePreset);
-    presetL->addWidget(m_btnSavePreset);
+
+    // 导入/导出按钮
+    m_btnImportPreset = new QPushButton("导入...", presetGroup);
+    m_btnExportPreset = new QPushButton("导出...", presetGroup);
+    m_btnImportPreset->setFixedHeight(25);
+    m_btnExportPreset->setFixedHeight(25);
+    m_btnImportPreset->setFixedWidth(80);
+    m_btnExportPreset->setFixedWidth(80);
+    
+    presetL->addWidget(m_btnImportPreset);
+    presetL->addWidget(m_btnExportPreset);
     configL->addWidget(presetGroup);
 
     // 2. 目标文件夹
@@ -169,7 +153,6 @@ void BatchRenameDialog::initContent() {
     m_rulesLayout = new QVBoxLayout(m_rulesContainer);
     m_rulesLayout->setContentsMargins(0, 0, 0, 0);
     m_rulesLayout->setSpacing(2);
-    // 2026-04-11 按照用户要求：移除 addStretch()，它会致使所有弹性空间顶压在规则行上方
     
     scroll->setWidget(m_rulesContainer);
     rulesGroupL->addWidget(scroll);
@@ -217,14 +200,13 @@ void BatchRenameDialog::initContent() {
     connect(m_btnCancel, &QPushButton::clicked, this, &QDialog::reject);
     connect(m_btnExecute, &QPushButton::clicked, this, &BatchRenameDialog::onExecute);
     connect(m_btnPreview, &QPushButton::clicked, this, &BatchRenameDialog::onPreview);
-    connect(m_btnDeletePreset, &QPushButton::clicked, this, &BatchRenameDialog::onImportPreset);
-    connect(m_btnSavePreset, &QPushButton::clicked, this, &BatchRenameDialog::onExportPreset);
+    connect(m_btnImportPreset, &QPushButton::clicked, this, &BatchRenameDialog::onImportPreset);
+    connect(m_btnExportPreset, &QPushButton::clicked, this, &BatchRenameDialog::onExportPreset);
+    connect(m_btnDeletePreset, &QPushButton::clicked, this, &BatchRenameDialog::onDeleteCurrentPreset);
 }
 
 void BatchRenameDialog::applyTheme() {
     // 2026-07-xx 按照用户要求：升级下拉框 UI，圆角设计 + 实心三角形箭头
-    // 性能优化：使用静态变量快取路径
-    // 修正：改用紧凑型 dropdown_triangle 图标，并重算参数确保清晰可见
     static const QString arrowPath = UiHelper::getSvgTempFilePath("dropdown_triangle", QColor("#AAAAAA"));
 
     setStyleSheet(QString(
@@ -270,34 +252,19 @@ void BatchRenameDialog::onImportPreset() {
     QString path = FramelessFileDialog::getOpenFileName(this, "导入重命名预设", "", "JSON Files (*.json)");
     if (path.isEmpty()) return;
 
-    QFile file(path);
-    if (file.open(QIODevice::ReadOnly)) {
-        QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-        if (doc.isArray()) {
-            // 清空现有规则
-            while (m_ruleRows.size() > 0) {
-                auto* row = m_ruleRows.takeAt(0);
-                row->deleteLater();
-            }
-
-            QJsonArray arr = doc.array();
-            for (const auto& v : arr) {
-                onAddRow();
-                QJsonObject obj = v.toObject();
-                RenameRule rule;
-                QString typeStr = obj["type"].toString();
-                if (typeStr == "Text") rule.type = RenameComponentType::Text;
-                else if (typeStr == "Sequence") rule.type = RenameComponentType::Sequence;
-                else if (typeStr == "OriginalName") rule.type = RenameComponentType::OriginalName;
-                else if (typeStr == "Date") rule.type = RenameComponentType::Date;
-                
-                rule.value = obj["value"].toString();
-                rule.start = obj["start"].toInt();
-                rule.padding = obj["padding"].toInt();
-                m_ruleRows.last()->setRule(rule);
-            }
-            scheduleAutoSave();
+    auto rules = PresetManager::importFromFile(path);
+    if (!rules.empty()) {
+        // 清空现有规则
+        while (m_ruleRows.size() > 0) {
+            auto* row = m_ruleRows.takeAt(0);
+            row->deleteLater();
         }
+
+        for (const auto& rule : rules) {
+            onAddRow();
+            m_ruleRows.last()->setRule(rule);
+        }
+        scheduleAutoSave();
     }
 }
 
@@ -305,29 +272,12 @@ void BatchRenameDialog::onExportPreset() {
     QString path = FramelessFileDialog::getSaveFileName(this, "导出重命名预设", "Preset.json", "JSON Files (*.json)");
     if (path.isEmpty()) return;
 
-    QJsonArray arr;
+    std::vector<RenameRule> rules;
     for (auto* row : m_ruleRows) {
-        RenameRule rule = row->getRule();
-        QJsonObject obj;
-        QString typeStr;
-        switch (rule.type) {
-            case RenameComponentType::Text: typeStr = "Text"; break;
-            case RenameComponentType::Sequence: typeStr = "Sequence"; break;
-            case RenameComponentType::OriginalName: typeStr = "OriginalName"; break;
-            case RenameComponentType::Date: typeStr = "Date"; break;
-            default: typeStr = "Unknown";
-        }
-        obj["type"] = typeStr;
-        obj["value"] = rule.value;
-        obj["start"] = rule.start;
-        obj["padding"] = rule.padding;
-        arr.append(obj);
+        rules.push_back(row->getRule());
     }
 
-    QFile file(path);
-    if (file.open(QIODevice::WriteOnly)) {
-        file.write(QJsonDocument(arr).toJson());
-        file.close();
+    if (PresetManager::exportToFile(path, rules)) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "预设导出成功", 1500, QColor("#2ecc71"));
     }
 }
@@ -345,25 +295,12 @@ void BatchRenameDialog::scheduleAutoSave() {
 }
 
 void BatchRenameDialog::doAutoSave() {
-    QJsonArray arr;
+    std::vector<RenameRule> rules;
     for (auto* row : m_ruleRows) {
-        RenameRule rule = row->getRule();
-        QJsonObject obj;
-        QString typeStr;
-        switch (rule.type) {
-            case RenameComponentType::Text: typeStr = "Text"; break;
-            case RenameComponentType::Sequence: typeStr = "Sequence"; break;
-            case RenameComponentType::OriginalName: typeStr = "OriginalName"; break;
-            case RenameComponentType::Date: typeStr = "Date"; break;
-            default: typeStr = "Unknown";
-        }
-        obj["type"] = typeStr;
-        obj["value"] = rule.value;
-        obj["start"] = rule.start;
-        obj["padding"] = rule.padding;
-        arr.append(obj);
+        rules.push_back(row->getRule());
     }
-    AppConfig::instance().setValue("LastBatchRenameRules", QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+    QString compactJson = PresetManager::serializeRules(rules);
+    AppConfig::instance().setValue("LastBatchRenameRules", compactJson);
 }
 
 void BatchRenameDialog::onPreview() {
@@ -389,43 +326,79 @@ void BatchRenameDialog::onExecute() {
     for (auto* row : m_ruleRows) rules.push_back(row->getRule());
     
     auto newNames = BatchRenameEngine::instance().preview(m_originalPaths, rules);
-    int successCount = 0;
+    if (newNames.empty()) return;
+
+    // 禁用执行按钮以防重复点击
+    m_btnExecute->setEnabled(false);
+
+    // 记录本次执行所操作的旧路径、旧物理目标及新物理目标（为撤销快照提供完整物理对账依据）
+    bool isCapsule = m_isMirrorSource;
+    DiskOperationMode mode = DiskOperationMode::Rename;
+    if (m_rbMove->isChecked()) mode = DiskOperationMode::Move;
+    else if (m_rbCopy->isChecked()) mode = DiskOperationMode::Copy;
+
+    QString targetDir = m_targetPathEdit->text();
+    if (!isCapsule && mode != DiskOperationMode::Rename && targetDir.isEmpty()) {
+        FramelessMessageBox::warning(this, "错误", "请先选择目标文件夹");
+        m_btnExecute->setEnabled(true);
+        return;
+    }
+
+    std::vector<std::wstring> oldPathsSnap = m_originalPaths;
+    std::vector<std::wstring> newPathsSnap;
+    newPathsSnap.reserve(m_originalPaths.size());
+
+    for (size_t i = 0; i < m_originalPaths.size(); ++i) {
+        QString oldPath = QString::fromStdWString(m_originalPaths[i]);
+        QFileInfo oldInfo(oldPath);
+        QString destDir = (mode == DiskOperationMode::Rename || isCapsule) ? oldInfo.absolutePath() : targetDir;
+        QString newPathStr = QDir(destDir).absoluteFilePath(QString::fromStdWString(newNames[i]));
+        newPathsSnap.push_back(QDir::toNativeSeparators(newPathStr).toStdWString());
+    }
+
+    QPointer<BatchRenameDialog> safeThis(this);
+    auto onCompletedCallback = [safeThis, isCapsule, mode, oldPathsSnap, newPathsSnap](int successCount) {
+        if (!safeThis) return;
+        // 确保回到 UI 主线程
+        safeThis->m_btnExecute->setEnabled(true);
+
+        if (successCount > 0) {
+            // 只有在存在实际成功记录时，才依据真实成功数自增序列号，杜绝跳号
+            for (auto* row : safeThis->m_ruleRows) {
+                RenameRule rule = row->getRule();
+                if (rule.type == RenameComponentType::Sequence) {
+                    rule.start = rule.start + successCount * rule.step;
+                    row->setRule(rule);
+                }
+            }
+            safeThis->doAutoSave();
+
+            // 成功物理移动或重命名或复制后，向 UndoManager 推送一次完整的原子 BatchRenameCommand
+            UndoManager::instance().pushCommand(std::make_unique<BatchRenameCommand>(isCapsule, mode, oldPathsSnap, newPathsSnap));
+        }
+
+        std::vector<RenameRule> currentRules;
+        for (auto* row : safeThis->m_ruleRows) currentRules.push_back(row->getRule());
+        auto finalNames = BatchRenameEngine::instance().preview(safeThis->m_originalPaths, currentRules);
+        if (!finalNames.empty()) {
+            safeThis->m_firstNewName = QString::fromStdWString(finalNames.front());
+        }
+
+        QPoint targetPos = QCursor::pos();
+        if (safeThis->parentWidget()) {
+            QWidget* cp = safeThis->parentWidget();
+            targetPos = cp->mapToGlobal(QPoint(cp->width() / 2, 45));
+        }
+        ToolTipOverlay::instance()->showText(targetPos, QString("成功处理 %1 个项目").arg(successCount), 1500, successCount > 0 ? QColor("#2ecc71") : QColor("#e74c3c"));
+        safeThis->accept();
+    };
 
     if (m_isMirrorSource) {
         // 调度【内存模式独立模块】
-        successCount = MemoryBatchRenameService::execute(m_originalPaths, newNames);
+        MemoryBatchRenameService::execute(m_originalPaths, newNames, onCompletedCallback);
     } else {
-        // 调度【磁盘模式独立模块】
-        DiskOperationMode mode = DiskOperationMode::Rename;
-        if (m_rbMove->isChecked()) mode = DiskOperationMode::Move;
-        else if (m_rbCopy->isChecked()) mode = DiskOperationMode::Copy;
-
-        QString targetDir = m_targetPathEdit->text();
-        if (mode != DiskOperationMode::Rename && targetDir.isEmpty()) {
-            FramelessMessageBox::warning(this, "错误", "请先选择目标文件夹");
-            return;
-        }
-
-        successCount = DiskBatchRenameService::execute(m_originalPaths, newNames, mode, targetDir);
+        DiskBatchRenameService::execute(m_originalPaths, newNames, mode, targetDir, onCompletedCallback);
     }
-
-    // 只有在存在实际成功记录时，才依据真实成功数自增序列号，杜绝跳号
-    if (successCount > 0) {
-        for (auto* row : m_ruleRows) {
-            RenameRule rule = row->getRule();
-            if (rule.type == RenameComponentType::Sequence) {
-                rule.start = rule.start + successCount * rule.step;
-                row->setRule(rule);
-            }
-        }
-        doAutoSave();
-        if (!newNames.empty()) {
-            m_firstNewName = QString::fromStdWString(newNames.front());
-        }
-    }
-
-    FramelessMessageBox::information(this, "操作完成", QString("成功处理 %1 个项目").arg(successCount));
-    accept();
 }
 
 } // namespace ArcMeta

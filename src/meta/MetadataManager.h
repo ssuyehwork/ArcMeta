@@ -247,6 +247,17 @@ public:
     QVector<QColor> getPalettes(const std::wstring& path);
 
     void renameItem(const std::wstring& oldPath, const std::wstring& newPath);
+
+    /**
+     * @brief 异步批量重命名元数据（单事务高性能版）
+     * @param rawPathPairs 旧路径 -> 新路径 映射对列表
+     * @param onCompleted 完成后的回调函数，参数为成功更新的元数据条数
+     */
+    void renameBatchAsync(
+        const std::vector<std::pair<std::wstring, std::wstring>>& rawPathPairs,
+        std::function<void(int successCount)> onCompleted = nullptr
+    );
+
     void removeMetadataSync(const std::wstring& path);
 
     /**

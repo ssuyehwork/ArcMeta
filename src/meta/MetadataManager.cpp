@@ -1430,6 +1430,182 @@ QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
 }
 
 
+void MetadataManager::renameBatchAsync(
+    const std::vector<std::pair<std::wstring, std::wstring>>& rawPathPairs,
+    std::function<void(int successCount)> onCompleted) 
+{
+    if (rawPathPairs.empty()) {
+        if (onCompleted) onCompleted(0);
+        return;
+    }
+
+    // 1. 全局开启信号锁，挂起并发 UI 刷新
+    setInternalOperating(true);
+
+    // 2. 将全量改名合并为【唯一 1 个后台异步线程】
+    (void)QtConcurrent::run([this, rawPathPairs, onCompleted]() {
+        int successCount = 0;
+
+        // A. 路径归一化预处理（解决 Windows 斜杠/盘符大小写造成的幽灵数据）
+        std::vector<std::pair<std::wstring, std::wstring>> normalizedPairs;
+        normalizedPairs.reserve(rawPathPairs.size());
+        for (const auto& pair : rawPathPairs) {
+            std::wstring nOld = normalizePath(pair.first);
+            std::wstring nNew = normalizePath(pair.second);
+            if (!nOld.empty() && !nNew.empty() && nOld != nNew) {
+                normalizedPairs.emplace_back(nOld, nNew);
+            }
+        }
+
+        if (normalizedPairs.empty()) {
+            setInternalOperating(false);
+            if (onCompleted) {
+                QMetaObject::invokeMethod(qApp, [onCompleted]() { onCompleted(0); }, Qt::QueuedConnection);
+            }
+            return;
+        }
+
+        // B. 内存快照深拷贝与批量替换（只加锁 1 次，内存快照只复制 1 次）
+        {
+            std::unique_lock<std::shared_mutex> lock(m_mutex);
+            auto currentSnapshot = std::atomic_load(&m_snapshot);
+            if (currentSnapshot) {
+                auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+
+                for (const auto& pair : normalizedPairs) {
+                    const std::wstring& curOld = pair.first;
+                    const std::wstring& curNew = pair.second;
+
+                    auto it = newMap->find(curOld);
+                    if (it == newMap->end()) {
+                        // 离散 JSON 缓存更新
+                        QFileInfo oldFileInfo(QString::fromStdWString(curOld));
+                        QFileInfo newFileInfo(QString::fromStdWString(curNew));
+                        if (oldFileInfo.isDir()) {
+                            AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
+                        } else {
+                            AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
+                        }
+                        continue;
+                    }
+
+                    // 同步离散 JSON 缓存
+                    QFileInfo oldFileInfo(QString::fromStdWString(curOld));
+                    QFileInfo newFileInfo(QString::fromStdWString(curNew));
+                    if (oldFileInfo.isDir()) {
+                        AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
+                    } else {
+                        AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
+                    }
+
+                    std::string fid = it->second.folderId;
+                    bool isFolder = it->second.isFolder;
+
+                    // 维护倒排索引与树索引
+                    std::wstring oldName, oldExt;
+                    parsePathComponents(curOld, isFolder, oldName, oldExt);
+                    if (!oldName.empty()) {
+                        if (isFolder) {
+                            auto& v = m_subFolderNameToFolderIds[oldName];
+                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                            if (v.empty()) m_subFolderNameToFolderIds.erase(oldName);
+                        } else {
+                            auto& v = m_assetNameToFolderIds[oldName];
+                            v.erase(std::remove(v.begin(), v.end(), fid), v.end());
+                            if (v.empty()) m_assetNameToFolderIds.erase(oldName);
+                            if (!oldExt.empty()) {
+                                auto& ve = m_extensionToFolderIds[oldExt];
+                                ve.erase(std::remove(ve.begin(), ve.end(), fid), ve.end());
+                                if (ve.empty()) m_extensionToFolderIds.erase(oldExt);
+                            }
+                        }
+                    }
+
+                    // 转移内存节点
+                    RuntimeMeta meta = it->second;
+                    newMap->erase(it);
+                    (*newMap)[curNew] = meta;
+                    if (!fid.empty()) m_folderIdToPath[fid] = curNew;
+
+                    // 重建新倒排索引
+                    std::wstring newName, newExt;
+                    parsePathComponents(curNew, isFolder, newName, newExt);
+                    if (!newName.empty()) {
+                        if (isFolder) {
+                            auto& v = m_subFolderNameToFolderIds[newName];
+                            if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
+                        } else {
+                            auto& v = m_assetNameToFolderIds[newName];
+                            if (std::find(v.begin(), v.end(), fid) == v.end()) v.push_back(fid);
+                            if (!newExt.empty()) {
+                                auto& ve = m_extensionToFolderIds[newExt];
+                                if (std::find(ve.begin(), ve.end(), fid) == ve.end()) v.push_back(fid);
+                            }
+                        }
+                    }
+
+                    successCount++;
+                }
+                std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+            }
+        }
+
+        // C. SQLite 数据库分库批量提交大事务（彻底消除 SQLITE_BUSY 报错）
+        std::map<sqlite3*, std::vector<std::pair<std::string, std::wstring>>> groupedTasks;
+        for (const auto& pair : normalizedPairs) {
+            const std::wstring& curNew = pair.second;
+            std::string fid;
+            {
+                auto currentSnapshot = std::atomic_load(&m_snapshot);
+                if (currentSnapshot && currentSnapshot->count(curNew)) {
+                    fid = currentSnapshot->at(curNew).folderId;
+                }
+            }
+            if (fid.empty()) continue;
+
+            std::wstring volSerial = getVolumeSerialNumber(curNew);
+            QString letter = (curNew.length() >= 2 && curNew[1] == L':') ? QString::fromWCharArray(&curNew[0], 1) : "";
+            sqlite3* db = DatabaseManager::instance().getDriveDb(volSerial, letter);
+            if (db) {
+                groupedTasks[db].push_back({fid, curNew});
+            }
+        }
+
+        const char* updSql = "UPDATE metadata SET path = ? WHERE folder_id = ?";
+        for (auto& entry : groupedTasks) {
+            sqlite3* targetDb = entry.first;
+            const auto& tasks = entry.second;
+
+            SqlTransaction trans(targetDb); // 【仅开启 1 次事务】
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(targetDb, updSql, -1, &stmt, nullptr) == SQLITE_OK) {
+                for (const auto& task : tasks) {
+                    sqlite3_bind_text16(stmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(stmt, 2, task.first.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(stmt);
+                    sqlite3_reset(stmt);
+                }
+                sqlite3_finalize(stmt);
+            }
+            trans.commit(); // 【仅提交 1 次事务】
+        }
+
+        // D. 同步更新 CategoryRepo 物理路径
+        for (const auto& pair : normalizedPairs) {
+            CategoryRepo::renamePhysicalCategoryPath(pair.first, pair.second);
+        }
+
+        // E. 清理操作标志位，安全回到 UI 主线程通知
+        setInternalOperating(false);
+
+        QMetaObject::invokeMethod(qApp, [this, successCount, onCompleted]() {
+            notifyFullUIRebuild(); // 【仅发射 1 次全量 UI 刷新信号】
+            if (onCompleted) onCompleted(successCount);
+        }, Qt::QueuedConnection);
+    });
+}
+
+
 void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring& newPath) {
     std::wstring nOld = normalizePath(oldPath);
     std::wstring nNew = normalizePath(newPath);

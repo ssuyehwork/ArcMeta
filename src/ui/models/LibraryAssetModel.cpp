@@ -9,13 +9,14 @@
 
 using namespace ArcMeta;
 
-#include "../meta/MetadataManager.h"
-#include "../meta/CategoryRepo.h"
-#include "../meta/CapsuleMediaExtractor.h"
+#include "../../meta/MetadataManager.h"
+#include "../../meta/CategoryRepo.h"
+#include "../../meta/CapsuleMediaExtractor.h"
 #include "../core/UndoManager.h"
 #include "../MemoryBatchRenameService.h"
 #include "../core/BasicCommands.h"
 #include "MediaColorExtractor.h"
+#include "../../meta/FileOperationHelper.h"
 #include <QtConcurrent>
 #include <QSvgRenderer>
 #include <QPainter>
@@ -119,10 +120,35 @@ bool LibraryAssetModel::setData(const QModelIndex& index, const QVariant& value,
             newName += "." + suffix;
         }
 
-        // 调用内存胶囊模式专属重命名服务（处理 .arc 胶囊内主文件 + _thumbnail.png 重命名）
-        int count = MemoryBatchRenameService::execute({oldPath.toStdWString()}, 
-                                                      {newName.toStdWString()});
-        if (count > 0) {
+        // 调用内存胶囊模式物理改名与索引同步
+        bool success = false;
+        QDir arcDir = oldInfo.absoluteDir(); // 直接定位到 .arc 胶囊目录
+        QString newBaseName = QFileInfo(newName).completeBaseName();
+        QString newMainPath = arcDir.filePath(newName);
+
+        if (oldPath == newMainPath) {
+            success = true;
+        } else if (FileOperationHelper::safeRename(oldPath, newMainPath)) {
+            success = true;
+            // 物理扫描 .arc 胶囊目录，精准强杀并重命名 *_thumbnail.png
+            QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
+            for (const QString& oldThumbName : thumbFiles) {
+                QString oldThumbAbsPath = arcDir.filePath(oldThumbName);
+                QString newThumbAbsPath = arcDir.filePath(newBaseName + "_thumbnail.png");
+                if (oldThumbAbsPath != newThumbAbsPath) {
+                    FileOperationHelper::safeRename(oldThumbAbsPath, newThumbAbsPath);
+                }
+            }
+
+            std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
+            std::wstring newW = QDir::toNativeSeparators(newMainPath).toStdWString();
+
+            // 更新内存数据库与索引
+            MetadataManager::instance().renameItem(oldW, newW);
+            CategoryRepo::renamePhysicalCategoryPath(oldW, newW);
+        }
+
+        if (success) {
             QString newPath = QDir(oldInfo.absolutePath()).filePath(newName);
             record.path = newPath;
             record.filename = newName;

@@ -3,16 +3,18 @@
 #include <string>
 #include <QString>
 
+#include <functional>
+
 namespace ArcMeta {
 
 class MemoryBatchRenameService {
 public:
     /**
      * @brief 执行内存胶囊模式下的批量重命名
-     * @return 实际成功重命名的资产数量
      */
-    static int execute(const std::vector<std::wstring>& originalPaths, 
-                       const std::vector<std::wstring>& newNames);
+    static void execute(const std::vector<std::wstring>& originalPaths, 
+                        const std::vector<std::wstring>& newNames,
+                        std::function<void(int successCount)> callback = nullptr);
 };
 
 } // namespace ArcMeta

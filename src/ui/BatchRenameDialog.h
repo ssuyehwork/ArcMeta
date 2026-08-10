@@ -2,6 +2,7 @@
 
 #include "FramelessDialog.h"
 #include <QRadioButton>
+#include <QPointer>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QComboBox>
@@ -51,9 +52,9 @@ private:
     
     // 预设相关
     QComboBox* m_presetCombo = nullptr;
-    QPushButton* m_btnQuickDelete = nullptr;
-    QPushButton* m_btnSavePreset = nullptr;   // 映射为“导出”
-    QPushButton* m_btnDeletePreset = nullptr; // 映射为“导入”
+    QPushButton* m_btnImportPreset = nullptr; // 导入按钮
+    QPushButton* m_btnExportPreset = nullptr; // 导出按钮
+    QPushButton* m_btnDeletePreset = nullptr; // 删除预设按钮
 
     QTimer* m_autoSaveTimer = nullptr;
 
