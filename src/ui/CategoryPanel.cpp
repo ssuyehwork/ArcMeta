@@ -1443,7 +1443,6 @@ void CategoryPanel::initUi() {
                 if (ShellHelper::moveToTrash(paths)) {
                     m_categoryModel->refresh();
                     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
-                    ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e74c3c;'>已成功移入回收站</b>", 1500, ErrorRed);
                 }
                 return;
             }

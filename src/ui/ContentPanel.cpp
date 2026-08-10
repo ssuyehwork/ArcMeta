@@ -1781,7 +1781,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         }
                     } 
                     refreshAll();
-                    ToolTipOverlay::instance()->showText(QCursor::pos(), "已完成扫描并成功归类", 1500, QColor("#2ecc71"));
                     return anyOk;
                 },
                 [this](const QVector<AssetItemSnapshot>& beforeState) {
@@ -2167,7 +2166,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
                         if (weakThis) {
                             weakThis->refreshAll();
-                            ToolTipOverlay::instance()->showText(QCursor::pos(), "深层抹除已完成，关联记录已物理清空", 1500, QColor("#2ecc71"));
                         }
                     });
                 });
@@ -2193,7 +2191,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     "已成功添加至收藏夹",
                     [this, selectedPaths]() {
                         emit requestAddFavorite(selectedPaths);
-                        ToolTipOverlay::instance()->showText(QCursor::pos(), "已成功添加至收藏夹", 1500, QColor("#2ecc71"));
                         return true;
                     },
                     [](const QVector<AssetItemSnapshot>& beforeState) {
@@ -2334,7 +2331,6 @@ void ContentPanel::performBatchRename() {
     } 
  
     if (originalPaths.empty()) { 
-        ToolTipOverlay::instance()->showText(QCursor::pos(), "请先选择需要重命名的项目", 2000, QColor("#E81123")); 
         return; 
     } 
  
@@ -2355,7 +2351,6 @@ void ContentPanel::performBatchRename() {
                 // 🚨 联动支持：不应强绑定物理 loadDirectory，统一调用 refreshAll 以自适应数据库 and 系统分类下的异步刷新，
                 // 并实现完美的选中态无缝自愈高亮！
                 refreshAll();
-                ToolTipOverlay::instance()->showText(QCursor::pos(), "批量重命名操作已成功执行", 1500, QColor("#2ecc71"));
                 return true;
             }
             return false;
