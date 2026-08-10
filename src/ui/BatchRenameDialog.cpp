@@ -5,6 +5,7 @@
 #include "MemoryBatchRenameService.h"
 #include "DiskBatchRenameService.h"
 #include "PresetManager.h"
+#include "UndoToastOverlay.h"
 #include "../meta/BatchRenameEngine.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
@@ -384,12 +385,26 @@ void BatchRenameDialog::onExecute() {
             safeThis->m_firstNewName = QString::fromStdWString(finalNames.front());
         }
 
-        QPoint targetPos = QCursor::pos();
-        if (safeThis->parentWidget()) {
-            QWidget* cp = safeThis->parentWidget();
-            targetPos = cp->mapToGlobal(QPoint(cp->width() / 2, 45));
+        QWidget* mainWindowPtr = nullptr;
+        QWidget* parentW = safeThis->parentWidget();
+        while (parentW) {
+            if (parentW->inherits("ArcMeta::MainWindow") || parentW->objectName() == "MainWindow") {
+                mainWindowPtr = parentW;
+                break;
+            }
+            parentW = parentW->parentWidget();
         }
-        ToolTipOverlay::instance()->showText(targetPos, QString("成功处理 %1 个项目").arg(successCount), 1500, successCount > 0 ? QColor("#2ecc71") : QColor("#e74c3c"));
+
+        UndoToastOverlay::instance()->showToast(
+            mainWindowPtr,
+            QString("成功处理 %1 个项目").arg(successCount),
+            [successCount]() {
+                if (successCount > 0) {
+                    UndoManager::instance().undo();
+                }
+            },
+            5000
+        );
         safeThis->accept();
     };
 

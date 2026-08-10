@@ -113,6 +113,8 @@ set(SOURCES
     src/ui/PresetManager.h
     src/ui/DiskBatchRenameService.cpp
     src/ui/DiskBatchRenameService.h
+    src/ui/UndoToastOverlay.cpp
+    src/ui/UndoToastOverlay.h
     src/ui/CategoryFilterProxyModel.h
     src/ui/BreadcrumbBar.cpp
     src/ui/BreadcrumbBar.h
