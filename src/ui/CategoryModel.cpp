@@ -138,8 +138,7 @@ void CategoryModel::refresh() {
             int parentId = cat.parentId;
 
             if (parentId == 0) {
-                QString name = QString::fromStdWString(cat.name);
-                if (name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                if (cat.kind == CategoryKind::SystemLibrary) {
                     root->appendRow(item);
                 }
             } else if (parentId > 0 && itemMap.contains(parentId)) {
@@ -160,8 +159,7 @@ void CategoryModel::refresh() {
             int parentId = cat.parentId;
 
             if (parentId == 0) {
-                QString name = QString::fromStdWString(cat.name);
-                if (!name.startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+                if (cat.kind != CategoryKind::SystemLibrary) {
                     userTopCatCount++;
                     if (catGroup) {
                         catGroup->appendRow(item);
@@ -288,12 +286,8 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
             }
             if (!found) return false;
 
-            if (!targetCat.physicalPath.empty()) {
-                QString oldPath = QString::fromStdWString(targetCat.physicalPath);
-                QFileInfo oldInfo(oldPath);
-                if (oldInfo.fileName().startsWith("ArcMeta.Library_", Qt::CaseInsensitive) && targetCat.parentId == 0) {
-                    return false; 
-                }
+            if (targetCat.kind == CategoryKind::SystemLibrary && targetCat.parentId == 0) {
+                return false; 
             }
 
             (void)QtConcurrent::run([this, targetCat, newName]() mutable {
@@ -391,7 +385,7 @@ bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction actio
         if (cat.id == draggedCatId) {
             draggedCat = cat;
             foundDragged = true;
-        } else if (cat.parentId == targetParentId && !QString::fromStdWString(cat.name).startsWith("ArcMeta.Library_", Qt::CaseInsensitive)) {
+        } else if (cat.parentId == targetParentId && cat.kind != CategoryKind::SystemLibrary) {
             siblings.push_back(cat);
         }
     }

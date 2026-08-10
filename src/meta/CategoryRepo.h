@@ -15,6 +15,11 @@
 
 namespace ArcMeta {
 
+enum class CategoryKind : int {
+    User = 0,           // 用户自定义分类（默认）
+    SystemLibrary = 1   // 系统托管库根分类
+};
+
 struct Category {
     int id = 0;
     int parentId = 0;
@@ -28,6 +33,7 @@ struct Category {
     uint64_t physicalFrn = 0;
     std::wstring physicalPath;
     std::wstring icon = L"folder_filled";
+    CategoryKind kind = CategoryKind::User; // 新增：0=User, 1=SystemLibrary
 };
 
 /**

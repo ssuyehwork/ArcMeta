@@ -197,9 +197,12 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             encrypted INTEGER DEFAULT 0,
             encrypt_hint TEXT,
             physical_frn INTEGER DEFAULT 0,
-            physical_path TEXT
+            physical_path TEXT,
+            icon TEXT DEFAULT 'folder_filled',
+            category_kind INTEGER DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_categories_frn ON categories(physical_frn);
+        CREATE INDEX IF NOT EXISTS idx_categories_kind ON categories(category_kind);
 
         -- 分类与项目关联表
         CREATE TABLE IF NOT EXISTS category_items (
@@ -459,6 +462,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     bool hasFrnColumn = false;
     bool hasPhysicalPathColumn = false;
     bool hasIconColumn = false;
+    bool hasCategoryKindColumn = false;
     if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(categories)", -1, &catCheckStmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(catCheckStmt) == SQLITE_ROW) {
             const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(catCheckStmt, 1));
@@ -467,6 +471,7 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
                 if (name == "physical_frn") hasFrnColumn = true;
                 if (name == "physical_path") hasPhysicalPathColumn = true;
                 if (name == "icon") hasIconColumn = true;
+                if (name == "category_kind") hasCategoryKindColumn = true;
             }
         }
         sqlite3_finalize(catCheckStmt);
@@ -481,9 +486,20 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     if (!hasIconColumn) {
         sqlite3_exec(conn.memDb, "ALTER TABLE categories ADD COLUMN icon TEXT DEFAULT 'folder_filled'", nullptr, nullptr, nullptr);
     }
+    if (!hasCategoryKindColumn) {
+        qDebug() << "[DB] 检测到旧版数据库，正在添加 category_kind 字段并执行数据迁移...";
+        // 1. 新增字段
+        sqlite3_exec(conn.memDb, "ALTER TABLE categories ADD COLUMN category_kind INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
+        // 2. 根据历史 name 前缀回填 category_kind = 1
+        sqlite3_exec(conn.memDb, "UPDATE categories SET category_kind = 1 WHERE name LIKE 'ArcMeta.Library_%'", nullptr, nullptr, nullptr);
+        // 3. 创建索引
+        sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_kind ON categories(category_kind);", nullptr, nullptr, nullptr);
+        qDebug() << "[DB] categories 表 category_kind 字段迁移完成。";
+    }
 
     // 2026-08-xx 索引优化
     sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_frn ON categories(physical_frn);", nullptr, nullptr, nullptr);
+    sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_kind ON categories(category_kind);", nullptr, nullptr, nullptr);
     sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_category_items_folder_id ON category_items(folder_id);", nullptr, nullptr, nullptr);
     sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_category_items_path_hint ON category_items(path_hint);", nullptr, nullptr, nullptr);
     sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id);", nullptr, nullptr, nullptr);
