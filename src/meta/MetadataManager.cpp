@@ -56,6 +56,54 @@
 
 namespace ArcMeta {
 
+// 🚨 全系统唯一权威 22 字段查询 SQL
+static const char* kSqlSelectAllMeta =
+    "SELECT folder_id, path, is_folder, rating, color, tags, note, url, "
+    "ctime, mtime, atime, file_size, palettes, is_trash, original_path, "
+    "width, height, ingestion_status, auto_color, base_name, ext, added_at "
+    "FROM metadata";
+
+// 🚨 全系统唯一权威 22 字段插入/更新 SQL
+static const char* kSqlInsertMeta =
+    "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, "
+    "ctime, mtime, atime, file_size, palettes, is_trash, original_path, "
+    "width, height, ingestion_status, auto_color, base_name, ext, added_at) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+static void bindMetaHelper(sqlite3_stmt* stmt, const std::wstring& path, const RuntimeMeta& meta) {
+    sqlite3_bind_text(stmt, 1, meta.folderId.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 3, meta.isFolder ? 1 : 0);
+    sqlite3_bind_int(stmt, 4, meta.rating);
+    sqlite3_bind_text16(stmt, 5, meta.manualColor.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text16(stmt, 6, meta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text16(stmt, 7, meta.note.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text16(stmt, 8, meta.url.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 9, meta.ctime);
+    sqlite3_bind_int64(stmt, 10, meta.mtime);
+    sqlite3_bind_int64(stmt, 11, meta.atime);
+    sqlite3_bind_int64(stmt, 12, meta.fileSize);
+
+    QJsonArray arr;
+    for (const auto& pe : meta.palettes) {
+        QJsonObject obj;
+        obj["color"] = pe.color.name();
+        obj["ratio"] = (double)pe.ratio;
+        arr.append(obj);
+    }
+    QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
+    sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 14, meta.isTrash ? 1 : 0);
+    sqlite3_bind_text16(stmt, 15, meta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 16, meta.width);
+    sqlite3_bind_int(stmt, 17, meta.height);
+    sqlite3_bind_int(stmt, 18, meta.ingestionStatus);
+    sqlite3_bind_text16(stmt, 19, meta.autoColor.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text16(stmt, 20, meta.baseName.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text16(stmt, 21, meta.ext.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 22, meta.added_at);
+}
+
 // --- Helper Functions ---
 
 // 统一资产判定静态函数，物理上不管是文件夹还是文件，只要以 .arc 结尾在内存语义中均为原子资产
@@ -189,9 +237,8 @@ void MetadataManager::initFromScchMode() {
 
     auto loadFromDb = [&](sqlite3* db) {
         if (!db) return;
-        sqlite3_stmt* stmt;
-        const char* sql = "SELECT * FROM metadata";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db, kSqlSelectAllMeta, -1, &stmt, nullptr) == SQLITE_OK) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 RuntimeMeta rm;
                 const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
@@ -200,45 +247,44 @@ void MetadataManager::initFromScchMode() {
                 const wchar_t* wpath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
                 std::wstring path = normalizePath(wpath ? wpath : L"");
 
-                rm.isFolder = sqlite3_column_int(stmt, 2);
+                rm.isFolder = sqlite3_column_int(stmt, 2) != 0;
                 rm.rating = sqlite3_column_int(stmt, 3);
+
                 const wchar_t* color = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 4));
                 if (color) rm.manualColor = color;
 
-                const wchar_t* autoColor = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 18));
-                if (autoColor) rm.autoColor = autoColor;
-
-                const wchar_t* wBaseName = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 19));
-                if (wBaseName) rm.baseName = wBaseName;
-
-                const wchar_t* wExt = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 20));
-                if (wExt) rm.ext = wExt;
-                
+                // 🚨 Column 5: 标签字段提取与物理路径数据清洗 (Data Sanitizer)
                 const wchar_t* wtags = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 5));
-                QString tags = wtags ? QString::fromWCharArray(wtags) : "";
-                rm.tags = tags.split(",", Qt::SkipEmptyParts);
+                QString tagsStr = wtags ? QString::fromWCharArray(wtags) : "";
+                QStringList rawTags = tagsStr.split(",", Qt::SkipEmptyParts);
+                QStringList cleanTags;
+                bool isDirtyData = false;
 
+                for (const QString& t : rawTags) {
+                    QString trimmed = t.trimmed();
+                    // 物理清洗拦截：过滤包含盘符冒号(:)、路径斜杠(\ or /) 或 .arc 胶囊后缀的错误路径数据
+                    if (trimmed.contains(":\\") || trimmed.contains(":/") || trimmed.contains(".arc", Qt::CaseInsensitive)) {
+                        isDirtyData = true;
+                        continue; // 强行丢弃垃圾标签
+                    }
+                    cleanTags.append(trimmed);
+                }
+                rm.tags = cleanTags;
+
+                // Column 6 ~ 21 严格按 kSqlSelectAllMeta 顺序列提取
                 const wchar_t* note = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 6));
                 if (note) rm.note = note;
+
                 const wchar_t* url = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 7));
                 if (url) rm.url = url;
+
                 rm.ctime = sqlite3_column_int64(stmt, 8);
                 rm.mtime = sqlite3_column_int64(stmt, 9);
                 rm.atime = sqlite3_column_int64(stmt, 10);
                 rm.fileSize = sqlite3_column_int64(stmt, 11);
-                if (sqlite3_column_count(stmt) > 21) {
-                    rm.added_at = sqlite3_column_int64(stmt, 21);
-                }
 
                 const void* paletteBlob = sqlite3_column_blob(stmt, 12);
                 int paletteSize = sqlite3_column_bytes(stmt, 12);
-
-                rm.isTrash = sqlite3_column_int(stmt, 13) != 0;
-                const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 14));
-                if (wOrigPath) rm.originalPath = wOrigPath;
-                rm.width = sqlite3_column_int(stmt, 15);
-                rm.height = sqlite3_column_int(stmt, 16);
-                rm.ingestionStatus = sqlite3_column_int(stmt, 17);
                 if (paletteBlob && paletteSize > 0) {
                     QByteArray ba(reinterpret_cast<const char*>(paletteBlob), paletteSize);
                     QJsonDocument doc = QJsonDocument::fromJson(ba);
@@ -252,11 +298,41 @@ void MetadataManager::initFromScchMode() {
                     }
                 }
 
+                rm.isTrash = sqlite3_column_int(stmt, 13) != 0;
+                const wchar_t* wOrigPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 14));
+                if (wOrigPath) rm.originalPath = wOrigPath;
+
+                rm.width = sqlite3_column_int(stmt, 15);
+                rm.height = sqlite3_column_int(stmt, 16);
+                rm.ingestionStatus = sqlite3_column_int(stmt, 17);
+
+                const wchar_t* autoColor = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 18));
+                if (autoColor) rm.autoColor = autoColor;
+
+                const wchar_t* wBaseName = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 19));
+                if (wBaseName) rm.baseName = wBaseName;
+
+                const wchar_t* wExt = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 20));
+                if (wExt) rm.ext = wExt;
+
+                rm.added_at = sqlite3_column_int64(stmt, 21);
                 rm.isManaged = true;
+
                 tempCache[path] = rm;
                 if (!rm.folderId.empty()) tempFidToPath[rm.folderId] = path;
 
-                // Plan-124: 维护树级索引
+                // 若检测到历史污染数据，自动回写更正 SQLite 数据库
+                if (isDirtyData) {
+                    sqlite3_stmt* fixStmt = nullptr;
+                    if (sqlite3_prepare_v2(db, "UPDATE metadata SET tags = ? WHERE folder_id = ?", -1, &fixStmt, nullptr) == SQLITE_OK) {
+                        sqlite3_bind_text16(fixStmt, 1, cleanTags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_text(fixStmt, 2, fid, -1, SQLITE_TRANSIENT);
+                        sqlite3_step(fixStmt);
+                        sqlite3_finalize(fixStmt);
+                    }
+                }
+
+                // 维护树级索引...
                 std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(path)).absolutePath()).toStdWString();
                 parentPath = normalizePath(parentPath);
                 if (parentPath != path) {
@@ -265,6 +341,7 @@ void MetadataManager::initFromScchMode() {
             }
             sqlite3_finalize(stmt);
         }
+    };
 
         // Plan-124: 加载进度缓存
         const char* statsSql = "SELECT key, value FROM system_stats WHERE key LIKE 'PROGRESS:%'";
@@ -426,23 +503,24 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
     std::wstring baseName, ext; 
     parsePathComponents(nPath, false, baseName, ext); 
  
-    // 2. 写入数据库 metadata 表 (绝对绑定内部主文件路径，is_folder 恒为 0) 
-    const char* sqlMeta = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, is_trash, width, height, ingestion_status, auto_color, base_name, ext, added_at) " 
-                          "VALUES (?, ?, 0, 0, '', '', '', '', ?, ?, ?, ?, 0, 0, 0, 0, '', ?, ?, ?)"; 
+    // 准备 RuntimeMeta 对象用于参数绑定与后续内存缓存更新
+    RuntimeMeta rm;
+    rm.folderId = folderId;
+    rm.isFolder = false; // 强契约：资产恒为非目录
+    QFileInfo fi(QString::fromStdWString(nPath));
+    rm.fileSize = fi.size();
+    rm.ctime = nowMsecs;
+    rm.mtime = nowMsecs;
+    rm.atime = nowMsecs;
+    rm.added_at = nowMsecs;
+    rm.baseName = baseName;
+    rm.ext = ext;
+    rm.isManaged = true;
+
+    // 2. 写入数据库 metadata 表 (绝对绑定内部主文件路径，使用全局 kSqlInsertMeta 声明)
     sqlite3_stmt* stmtMeta = nullptr; 
-    if (sqlite3_prepare_v2(db, sqlMeta, -1, &stmtMeta, nullptr) == SQLITE_OK) { 
-        sqlite3_bind_text(stmtMeta, 1, folderId.c_str(), -1, SQLITE_TRANSIENT); 
-        sqlite3_bind_text16(stmtMeta, 2, nPath.c_str(), -1, SQLITE_TRANSIENT); 
-        sqlite3_bind_int64(stmtMeta, 3, nowMsecs); 
-        sqlite3_bind_int64(stmtMeta, 4, nowMsecs); 
-        sqlite3_bind_int64(stmtMeta, 5, nowMsecs); 
-         
-        QFileInfo fi(QString::fromStdWString(nPath)); 
-        sqlite3_bind_int64(stmtMeta, 6, fi.size()); 
-        sqlite3_bind_text16(stmtMeta, 7, baseName.c_str(), -1, SQLITE_TRANSIENT); 
-        sqlite3_bind_text16(stmtMeta, 8, ext.c_str(), -1, SQLITE_TRANSIENT); 
-        sqlite3_bind_int64(stmtMeta, 9, nowMsecs); 
- 
+    if (sqlite3_prepare_v2(db, kSqlInsertMeta, -1, &stmtMeta, nullptr) == SQLITE_OK) {
+        bindMetaHelper(stmtMeta, nPath, rm);
         sqlite3_step(stmtMeta); 
         sqlite3_finalize(stmtMeta); 
     } 
@@ -467,19 +545,6 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
     if (!trans.commit()) return false; 
  
     // 4. 同步更新内存缓存 RuntimeMeta (SSOT 规则) 
-    RuntimeMeta rm; 
-    rm.folderId = folderId; 
-    rm.isFolder = false; // 强契约：资产恒为非目录 
-    QFileInfo fi(QString::fromStdWString(nPath));
-    rm.fileSize = fi.size(); 
-    rm.ctime = nowMsecs; 
-    rm.mtime = nowMsecs; 
-    rm.atime = nowMsecs; 
-    rm.added_at = nowMsecs; 
-    rm.baseName = baseName; 
-    rm.ext = ext; 
-    rm.isManaged = true; 
- 
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
         auto currentSnapshot = std::atomic_load(&m_snapshot);
@@ -2505,8 +2570,6 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
         if (db) groups[db].push_back(p);
     }
 
-    const char* sql = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-
     for (auto& entry : groups) {
         sqlite3* memDb = entry.first;
         const auto& groupPaths = entry.second;
@@ -2536,39 +2599,8 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
             parsePathComponents(p, rMeta.isFolder, rMeta.baseName, rMeta.ext);
 
             sqlite3_stmt* memStmt;
-            if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
-                // 绑定逻辑 (复用 persistAsync 中的绑定逻辑，此处为了清晰直接展开或调用辅助函数)
-                auto bindLogic = [](sqlite3_stmt* stmt, const std::wstring& path, const RuntimeMeta& meta) {
-                    sqlite3_bind_text(stmt, 1, meta.folderId.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_int(stmt, 3, meta.isFolder ? 1 : 0);
-                    sqlite3_bind_int(stmt, 4, meta.rating);
-                    sqlite3_bind_text16(stmt, 5, meta.manualColor.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(stmt, 6, meta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(stmt, 7, meta.note.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(stmt, 8, meta.url.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_int64(stmt, 9, meta.ctime);
-                    sqlite3_bind_int64(stmt, 10, meta.mtime);
-                    sqlite3_bind_int64(stmt, 11, meta.atime);
-                    sqlite3_bind_int64(stmt, 12, meta.fileSize);
-                    QJsonArray arr;
-                    for (const auto& pe : meta.palettes) {
-                        QJsonObject obj; obj["color"] = pe.color.name(); obj["ratio"] = (double)pe.ratio;
-                        arr.append(obj);
-                    }
-                    QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
-                    sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
-                    sqlite3_bind_int(stmt, 14, meta.isTrash ? 1 : 0);
-                    sqlite3_bind_text16(stmt, 15, meta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_int(stmt, 16, meta.width);
-                    sqlite3_bind_int(stmt, 17, meta.height);
-                    sqlite3_bind_int(stmt, 18, meta.ingestionStatus);
-                    sqlite3_bind_text16(stmt, 19, meta.autoColor.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(stmt, 20, meta.baseName.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text16(stmt, 21, meta.ext.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_int64(stmt, 22, meta.added_at);
-                };
-                bindLogic(memStmt, p, rMeta);
+            if (sqlite3_prepare_v2(memDb, kSqlInsertMeta, -1, &memStmt, nullptr) == SQLITE_OK) {
+                bindMetaHelper(memStmt, p, rMeta);
 
                 if (sqlite3_step(memStmt) == SQLITE_DONE) {
                     if (isNew && !rMeta.isFolder && !rMeta.isTrash) {
@@ -2647,45 +2679,9 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         authorized = true;
     }
 
-    auto bindMeta = [](sqlite3_stmt* stmt, const std::wstring& path, const RuntimeMeta& meta) {
-        sqlite3_bind_text(stmt, 1, meta.folderId.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 3, meta.isFolder ? 1 : 0);
-        sqlite3_bind_int(stmt, 4, meta.rating);
-        sqlite3_bind_text16(stmt, 5, meta.manualColor.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 6, meta.tags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 7, meta.note.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 8, meta.url.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(stmt, 9, meta.ctime);
-        sqlite3_bind_int64(stmt, 10, meta.mtime);
-        sqlite3_bind_int64(stmt, 11, meta.atime);
-        sqlite3_bind_int64(stmt, 12, meta.fileSize);
-
-        QJsonArray arr;
-        for (const auto& pe : meta.palettes) {
-            QJsonObject obj;
-            obj["color"] = pe.color.name();
-            obj["ratio"] = (double)pe.ratio;
-            arr.append(obj);
-        }
-        QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
-        sqlite3_bind_blob(stmt, 13, ba.constData(), ba.size(), SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 14, meta.isTrash ? 1 : 0);
-        sqlite3_bind_text16(stmt, 15, meta.originalPath.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 16, meta.width);
-        sqlite3_bind_int(stmt, 17, meta.height);
-        sqlite3_bind_int(stmt, 18, meta.ingestionStatus);
-        sqlite3_bind_text16(stmt, 19, meta.autoColor.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 20, meta.baseName.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(stmt, 21, meta.ext.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(stmt, 22, meta.added_at);
-    };
-
-    const char* sql = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-    
     sqlite3_stmt* memStmt;
-    if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
-        bindMeta(memStmt, nPath, rMeta);
+    if (sqlite3_prepare_v2(memDb, kSqlInsertMeta, -1, &memStmt, nullptr) == SQLITE_OK) {
+        bindMetaHelper(memStmt, nPath, rMeta);
         if (sqlite3_step(memStmt) == SQLITE_DONE) {
             if (isNew) {
                 if (!rMeta.isFolder && !rMeta.isTrash) {
