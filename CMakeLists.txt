@@ -109,6 +109,8 @@ set(SOURCES
     src/ui/BatchRenamePreviewDialog.h
     src/ui/MemoryBatchRenameService.cpp
     src/ui/MemoryBatchRenameService.h
+    src/ui/PresetManager.cpp
+    src/ui/PresetManager.h
     src/ui/DiskBatchRenameService.cpp
     src/ui/DiskBatchRenameService.h
     src/ui/CategoryFilterProxyModel.h
