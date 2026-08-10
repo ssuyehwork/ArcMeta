@@ -96,6 +96,8 @@ set(SOURCES
     src/meta/DatabaseManager.h
     src/meta/BatchRenameEngine.cpp
     src/meta/BatchRenameEngine.h
+    src/meta/DuplicateDetectorService.h
+    src/meta/DuplicateDetectorService.cpp
     src/meta/MetadataDefs.h
     src/meta/MetadataManager.cpp
     src/meta/MetadataManager.h
@@ -109,6 +111,8 @@ set(SOURCES
     src/ui/BatchRenameDialog.h
     src/ui/BatchRenamePreviewDialog.cpp
     src/ui/BatchRenamePreviewDialog.h
+    src/ui/DuplicateConflictDialog.h
+    src/ui/DuplicateConflictDialog.cpp
     src/ui/MemoryBatchRenameService.cpp
     src/ui/MemoryBatchRenameService.h
     src/ui/PresetManager.cpp
