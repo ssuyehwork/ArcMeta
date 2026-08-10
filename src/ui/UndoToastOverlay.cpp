@@ -1,5 +1,6 @@
 #include "UndoToastOverlay.h"
 #include "UiHelper.h"
+#include "../core/UndoManager.h"
 #include <QPainter>
 #include <QPainterPath>
 #include <QApplication>
@@ -66,9 +67,8 @@ UndoToastOverlay::UndoToastOverlay(QWidget* parent) : QWidget(parent) {
 
     // 按钮事件绑定
     connect(m_btnUndo, &QPushButton::clicked, this, [this]() {
-        if (m_undoCallback) {
-            m_undoCallback();
-        }
+        // 点击气泡“撤销”时，物理对位统一并轨并分发至全局 UndoManager
+        UndoManager::instance().undo();
         hideToast();
     });
 
@@ -82,6 +82,7 @@ void UndoToastOverlay::showToast(QWidget* parent, const QString& message, std::f
     m_fadeAnim->stop();
     disconnect(m_fadeAnim, &QPropertyAnimation::finished, nullptr, nullptr);
 
+    // 依然接收 undoCallback 用于判断是否可见“撤销”按钮（若为 nullptr 代表该操作物理不可逆），但实际执行已物理并轨
     m_undoCallback = undoCallback;
     m_msgLabel->setText(message);
     m_btnUndo->setVisible(m_undoCallback != nullptr);

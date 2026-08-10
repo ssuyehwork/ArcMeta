@@ -13,7 +13,7 @@
         "url": ""
     },
     "items": {
-        "batch rename.md": {
+        "architectural_audit_report.md": {
             "added_at": 0,
             "auto_color": "",
             "color": "",
@@ -27,9 +27,9 @@
             "note": "",
             "original_name": "",
             "pinned": false,
-            "rating": 5,
+            "rating": 0,
             "tags": [
-                "g:\\c++\\arcmeta\\arcmeta\\modification_plan\\batch rename.md"
+                "g:\\c++\\arcmeta\\arcmeta\\modification_plan\\architectural_audit_report.md"
             ],
             "type": "file",
             "url": "",

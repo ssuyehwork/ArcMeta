@@ -156,6 +156,10 @@ bool LibraryAssetModel::setData(const QModelIndex& index, const QVariant& value,
             m_pathToIndex.erase(oldPath);
             m_pathToIndex[newPath] = index.row();
 
+            // 物理与虚拟并轨：将单项重命名动作作为 RenameCommand 推送入全局 UndoManager 撤销栈
+            // 对应用户原话：“在弹出 UndoToastOverlay 并点击撤销按钮时，能成功撤销吗？”
+            UndoManager::instance().pushCommand(std::make_unique<RenameCommand>(oldPath, newPath));
+
             emit recordRenamed(oldPath, newPath, newName);
             emit dataChanged(this->index(index.row(), 0), this->index(index.row(), columnCount() - 1));
             return true;

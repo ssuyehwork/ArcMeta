@@ -263,6 +263,4 @@ UndoToastOverlay::instance()->showToast(
 拖拽分类
 删除
 添加至收藏
-复制名称
-复制路径
 归类到...
