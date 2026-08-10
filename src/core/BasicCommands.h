@@ -13,6 +13,12 @@
 #include <vector>
 #include <utility>
 
+#include <QtConcurrent>
+#include <QCoreApplication>
+#include "../meta/FileOperationHelper.h"
+#include "../meta/CapsuleMediaExtractor.h"
+#include "../ui/DiskBatchRenameService.h"
+
 namespace ArcMeta {
 
 /**
@@ -342,6 +348,192 @@ public:
 private:
     QStringList m_targetPaths;
     std::string m_pwd;
+};
+
+/**
+ * @brief 2026-06-xx 按照用户期望：增加批量重命名/移动/复制大事务的撤销与重做指令
+ */
+class BatchRenameCommand : public ActionCommand {
+public:
+    BatchRenameCommand(bool isCapsule,
+                       DiskOperationMode mode,
+                       const std::vector<std::wstring>& oldPaths,
+                       const std::vector<std::wstring>& newPaths)
+        : m_isCapsule(isCapsule), m_mode(mode), m_oldPaths(oldPaths), m_newPaths(newPaths) {}
+
+    void execute() override {
+        // 第一次 execute 已由 BatchRenameDialog 直接执行，无需重复操作
+    }
+
+    void undo() override {
+        // 进行安全的局部变量值捕获，彻底避免 Lambda 后台线程运行期间 "this" 被释放析构带来的 Use-After-Free 悬空崩溃隐患
+        std::vector<std::wstring> oldPaths = m_oldPaths;
+        std::vector<std::wstring> newPaths = m_newPaths;
+        bool isCapsule = m_isCapsule;
+        DiskOperationMode mode = m_mode;
+
+        (void)QtConcurrent::run([oldPaths, newPaths, isCapsule, mode]() {
+            std::vector<std::pair<std::wstring, std::wstring>> rawPairs;
+            for (size_t i = 0; i < oldPaths.size(); ++i) {
+                QString oldPathStr = QString::fromStdWString(oldPaths[i]);
+                QString newPathStr = QString::fromStdWString(newPaths[i]);
+
+                if (isCapsule) {
+                    QFileInfo newInfo(newPathStr);
+                    QFileInfo oldInfo(oldPathStr);
+                    QDir arcDir = newInfo.absoluteDir();
+                    QString oldBaseName = oldInfo.completeBaseName();
+                    QString newBaseName = newInfo.completeBaseName();
+                    QString oldThumbPath = arcDir.filePath(oldBaseName + "_thumbnail.png");
+                    QString newThumbPath = arcDir.filePath(newBaseName + "_thumbnail.png");
+
+                    // 物理重命名主资产
+                    if (FileOperationHelper::safeRename(newPathStr, oldPathStr)) {
+                        if (QFile::exists(newThumbPath)) {
+                            FileOperationHelper::safeRename(newThumbPath, oldThumbPath);
+                        }
+                        rawPairs.push_back({newPaths[i], oldPaths[i]});
+                    }
+                } else {
+                    if (mode == DiskOperationMode::Copy) {
+                        QFile::remove(newPathStr);
+                        QString newThumbHashPath = CapsuleMediaExtractor::getDiskThumbCachePath(newPathStr);
+                        if (QFile::exists(newThumbHashPath)) {
+                            QFile::remove(newThumbHashPath);
+                        }
+                    } else {
+                        bool ok = false;
+                        if (mode == DiskOperationMode::Move) {
+                            ok = FileOperationHelper::safeMove(newPathStr, oldPathStr);
+                        } else {
+                            ok = FileOperationHelper::safeRename(newPathStr, oldPathStr);
+                        }
+
+                        if (ok) {
+                            QString oldThumbHashPath = CapsuleMediaExtractor::getDiskThumbCachePath(oldPathStr);
+                            QString newThumbHashPath = CapsuleMediaExtractor::getDiskThumbCachePath(newPathStr);
+                            if (QFile::exists(newThumbHashPath)) {
+                                if (mode == DiskOperationMode::Move) {
+                                    FileOperationHelper::safeMove(newThumbHashPath, oldThumbHashPath);
+                                } else {
+                                    FileOperationHelper::safeRename(newThumbHashPath, oldThumbHashPath);
+                                }
+                            }
+                            rawPairs.push_back({newPaths[i], oldPaths[i]});
+                        }
+                    }
+                }
+            }
+
+            if (!rawPairs.empty()) {
+                MetadataManager::instance().renameBatchAsync(rawPairs);
+            } else if (mode == DiskOperationMode::Copy) {
+                // Copy 模式下虽然不修改 metadata，但删除文件后需要通知 UI 全局重建/刷新
+                QMetaObject::invokeMethod(qApp, []() {
+                    MetadataManager::instance().notifyFullUIRebuild();
+                }, Qt::QueuedConnection);
+            }
+        });
+    }
+
+    void redo() override {
+        // 进行安全的局部变量值捕获，彻底避免 Lambda 后台线程运行期间 "this" 被释放析构带来的 Use-After-Free 悬空崩溃隐患
+        std::vector<std::wstring> oldPaths = m_oldPaths;
+        std::vector<std::wstring> newPaths = m_newPaths;
+        bool isCapsule = m_isCapsule;
+        DiskOperationMode mode = m_mode;
+
+        (void)QtConcurrent::run([oldPaths, newPaths, isCapsule, mode]() {
+            std::vector<std::pair<std::wstring, std::wstring>> rawPairs;
+            for (size_t i = 0; i < oldPaths.size(); ++i) {
+                QString oldPathStr = QString::fromStdWString(oldPaths[i]);
+                QString newPathStr = QString::fromStdWString(newPaths[i]);
+
+                if (isCapsule) {
+                    QFileInfo newInfo(newPathStr);
+                    QFileInfo oldInfo(oldPathStr);
+                    QDir arcDir = oldInfo.absoluteDir();
+                    QString oldBaseName = oldInfo.completeBaseName();
+                    QString newBaseName = newInfo.completeBaseName();
+                    QString oldThumbPath = arcDir.filePath(oldBaseName + "_thumbnail.png");
+                    QString newThumbPath = arcDir.filePath(newBaseName + "_thumbnail.png");
+
+                    if (FileOperationHelper::safeRename(oldPathStr, newPathStr)) {
+                        if (QFile::exists(oldThumbPath)) {
+                            FileOperationHelper::safeRename(oldThumbPath, newThumbPath);
+                        }
+                        rawPairs.push_back({oldPaths[i], newPaths[i]});
+                    }
+                } else {
+                    if (mode == DiskOperationMode::Copy) {
+                        if (QFile::copy(oldPathStr, newPathStr)) {
+                            QString oldThumbHashPath = CapsuleMediaExtractor::getDiskThumbCachePath(oldPathStr);
+                            QString newThumbHashPath = CapsuleMediaExtractor::getDiskThumbCachePath(newPathStr);
+                            if (QFile::exists(oldThumbHashPath)) {
+                                QFile::copy(oldThumbHashPath, newThumbHashPath);
+                            }
+                        }
+                    } else {
+                        bool ok = false;
+                        if (mode == DiskOperationMode::Move) {
+                            ok = FileOperationHelper::safeMove(oldPathStr, newPathStr);
+                        } else {
+                            ok = FileOperationHelper::safeRename(oldPathStr, newPathStr);
+                        }
+
+                        if (ok) {
+                            QString oldThumbHashPath = CapsuleMediaExtractor::getDiskThumbCachePath(oldPathStr);
+                            QString newThumbHashPath = CapsuleMediaExtractor::getDiskThumbCachePath(newPathStr);
+                            if (QFile::exists(oldThumbHashPath)) {
+                                if (mode == DiskOperationMode::Move) {
+                                    FileOperationHelper::safeMove(oldThumbHashPath, newThumbHashPath);
+                                } else {
+                                    FileOperationHelper::safeRename(oldThumbHashPath, newThumbHashPath);
+                                }
+                            }
+                            rawPairs.push_back({oldPaths[i], newPaths[i]});
+                        }
+                    }
+                }
+            }
+
+            if (!rawPairs.empty()) {
+                MetadataManager::instance().renameBatchAsync(rawPairs);
+            } else if (mode == DiskOperationMode::Copy) {
+                // Copy 模式重新生成物理文件后也需要通知 UI 刷新
+                QMetaObject::invokeMethod(qApp, []() {
+                    MetadataManager::instance().notifyFullUIRebuild();
+                }, Qt::QueuedConnection);
+            }
+        });
+    }
+
+    QString description() const override {
+        if (m_isCapsule) return "批量重命名 (胶囊)";
+        switch (m_mode) {
+            case DiskOperationMode::Rename: return "批量重命名 (磁盘)";
+            case DiskOperationMode::Move: return "批量移动";
+            case DiskOperationMode::Copy: return "批量复制";
+        }
+        return "批量操作";
+    }
+
+    bool affectsPath(const QString& path) const override {
+        std::wstring p = QDir::toNativeSeparators(path).toStdWString();
+        for (const auto& op : m_oldPaths) {
+            if (op == p) return true;
+        }
+        for (const auto& np : m_newPaths) {
+            if (np == p) return true;
+        }
+        return false;
+    }
+
+private:
+    bool m_isCapsule;
+    DiskOperationMode m_mode;
+    std::vector<std::wstring> m_oldPaths;
+    std::vector<std::wstring> m_newPaths;
 };
 
 } // namespace ArcMeta
