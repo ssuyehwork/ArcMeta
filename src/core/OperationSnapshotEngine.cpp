@@ -20,7 +20,11 @@ AssetItemSnapshot OperationSnapshotEngine::captureSingle(const QString& path) {
     std::string fid = MetadataManager::instance().getFolderIdSync(wpath);
 
     if (!fid.empty()) {
-        snap.categoryIds = QVector<int>::fromStdVector(CategoryRepo::getItemCategoryIds(fid));
+        auto stdIds = CategoryRepo::getItemCategoryIds(fid);
+        snap.categoryIds.reserve(static_cast<int>(stdIds.size()));
+        for (int cid : stdIds) {
+            snap.categoryIds.append(cid);
+        }
         // 读取收藏/置顶与元数据属性
         auto meta = MetadataManager::instance().getMeta(wpath);
         snap.isPinned = meta.pinned;
