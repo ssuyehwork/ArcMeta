@@ -91,6 +91,7 @@
 #include "../core/CoreController.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"
+#include "../core/OperationSnapshotEngine.h"
 using namespace ArcMeta::Style;
 #include "../util/ShellHelper.h"
 #include "DiskScanService.h"
@@ -1744,33 +1745,60 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         case ActionCategorize: { 
             int catId = selectedAction->property("catId").toInt(); 
             auto indexes = view->selectionModel()->selectedIndexes(); 
-             
-            for (const auto& idx : indexes) { 
-                if (idx.column() == 0) { 
-                    QString itemPath = idx.data(PathRole).toString(); 
-                    std::wstring wPath = itemPath.toStdWString();
+            QStringList selectedPaths;
+            for (const auto& idx : indexes) {
+                if (idx.column() == 0) {
+                    QString itemPath = idx.data(PathRole).toString();
+                    if (!itemPath.isEmpty()) selectedPaths << itemPath;
+                }
+            }
 
-                    // 2026-06-xx 物理同步：基于同步获取的 File ID 进行归类，解决新文件关联失败冲突。 
-                    std::string fid = MetadataManager::instance().getFolderIdSync(wPath); 
-                    if (!fid.empty()) { 
-                        // 2026-06-xx 按照用户需求：如果在系统层选择了“未分类”，则清除该项所有其他分类关联
-                        if (catId == -2) { // 未分类的负数 ID
-                             // 2026-07-xx 按照 Plan-83：实现撤销支持
-                             std::vector<int> oldCatIds = CategoryRepo::getItemCategoryIds(fid);
-                             if (!oldCatIds.empty()) {
-                                 if (CategoryRepo::removeAllCategories(fid)) {
-                                     UndoManager::instance().pushCommand(std::make_unique<BulkUncategorizeCommand>(itemPath, fid, oldCatIds));
+            OperationSnapshotEngine::instance().executeWithSnapshot(
+                this,
+                SnapshotOperationType::AssignToCategory,
+                selectedPaths,
+                "已成功归类至指定分类",
+                [this, catId, selectedPaths]() {
+                    bool anyOk = false;
+                    for (const auto& itemPath : selectedPaths) {
+                        std::wstring wPath = itemPath.toStdWString();
+                        std::string fid = MetadataManager::instance().getFolderIdSync(wPath);
+                        if (!fid.empty()) {
+                            if (catId == -2) {
+                                 std::vector<int> oldCatIds = CategoryRepo::getItemCategoryIds(fid);
+                                 if (!oldCatIds.empty()) {
+                                     if (CategoryRepo::removeAllCategories(fid)) {
+                                         UndoManager::instance().pushCommand(std::make_unique<BulkUncategorizeCommand>(itemPath, fid, oldCatIds));
+                                         anyOk = true;
+                                     }
                                  }
-                             }
-                        } else if (catId > 0) {
-                             if (CategoryRepo::addItemToCategory(catId, fid, wPath)) {
-                                 UndoManager::instance().pushCommand(std::make_unique<CategorizeCommand>(itemPath, fid, catId, true));
-                             }
+                            } else if (catId > 0) {
+                                 if (CategoryRepo::addItemToCategory(catId, fid, wPath)) {
+                                     UndoManager::instance().pushCommand(std::make_unique<CategorizeCommand>(itemPath, fid, catId, true));
+                                     anyOk = true;
+                                 }
+                            }
                         }
                     } 
-                } 
-            } 
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "已完成扫描并成功归类", 1500, QColor("#2ecc71")); 
+                    refreshAll();
+                    ToolTipOverlay::instance()->showText(QCursor::pos(), "已完成扫描并成功归类", 1500, QColor("#2ecc71"));
+                    return anyOk;
+                },
+                [this](const QVector<AssetItemSnapshot>& beforeState) {
+                    for (const auto& snap : beforeState) {
+                        std::wstring wPath = snap.path.toStdWString();
+                        std::string fid = MetadataManager::instance().getFolderIdSync(wPath);
+                        if (!fid.empty()) {
+                            CategoryRepo::removeAllCategories(fid);
+                            for (int oldId : snap.categoryIds) {
+                                CategoryRepo::addItemToCategory(oldId, fid, wPath);
+                            }
+                        }
+                    }
+                    refreshAll();
+                    return true;
+                }
+            );
             break; 
         } 
         case ActionPin: 
@@ -1981,30 +2009,78 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             if (targetPaths.isEmpty() && diskTrashItems.empty()) break;
 
             if (action == ActionDelete) {
-                // 1. 开启内部操作锁
-                MetadataManager::instance().beginInternalOperation();
+                OperationSnapshotEngine::instance().executeWithSnapshot(
+                    this,
+                    SnapshotOperationType::DeleteToTrash,
+                    targetPaths,
+                    QString("已将 %1 个项目移入回收站").arg(targetPaths.size()),
+                    [this, targetPaths]() {
+                        // 1. 开启内部操作锁
+                        MetadataManager::instance().beginInternalOperation();
 
-                bool ok = false;
-                if (dataSourceType() == DataSourceType::DiskNav) {
-                    ok = DiskTrashService::moveToDiskTrash(targetPaths);
-                } else {
-                    // 内存模式下：彻底禁止调用物理删除，仅调用 CategoryRepo::moveToTrashBatch() 执行数据库标记。
-                    std::vector<std::string> targetFids;
-                    for (const QString& tp : targetPaths) {
-                        std::string fid = MetadataManager::instance().getFolderIdSync(tp.toStdWString());
-                        if (!fid.empty()) {
-                            targetFids.push_back(fid);
+                        bool ok = false;
+                        if (dataSourceType() == DataSourceType::DiskNav) {
+                            ok = DiskTrashService::moveToDiskTrash(targetPaths);
+                        } else {
+                            // 内存模式下：彻底禁止调用物理删除，仅调用 CategoryRepo::moveToTrashBatch() 执行数据库标记。
+                            std::vector<std::string> targetFids;
+                            for (const QString& tp : targetPaths) {
+                                std::string fid = MetadataManager::instance().getFolderIdSync(tp.toStdWString());
+                                if (!fid.empty()) {
+                                    targetFids.push_back(fid);
+                                }
+                            }
+                            ok = CategoryRepo::moveToTrashBatch(targetFids);
                         }
+
+                        if (ok) {
+                            CategoryRepo::s_countsDirty = true;
+                            refreshAll();
+                        }
+
+                        MetadataManager::instance().endInternalOperation();
+                        return ok;
+                    },
+                    [this](const QVector<AssetItemSnapshot>& beforeState) {
+                        for (const auto& snap : beforeState) {
+                            if (dataSourceType() == DataSourceType::DiskNav) {
+                                sqlite3* db = DatabaseManager::instance().getDbForPath(snap.path.toStdWString());
+                                if (db) {
+                                    sqlite3_stmt* stmt = nullptr;
+                                    const char* sql = "SELECT id, trash_path FROM disk_trash WHERE original_path = ?";
+                                    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                                        sqlite3_bind_text16(stmt, 1, snap.path.toStdWString().c_str(), -1, SQLITE_TRANSIENT);
+                                        if (sqlite3_step(stmt) == SQLITE_ROW) {
+                                            int id = sqlite3_column_int(stmt, 0);
+                                            const wchar_t* wPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
+                                            if (wPath) {
+                                                DiskTrashService::restoreFromDiskTrash(id, QString::fromWCharArray(wPath));
+                                            }
+                                        }
+                                        sqlite3_finalize(stmt);
+                                    }
+                                }
+                            } else {
+                                std::wstring wpath = snap.path.toStdWString();
+                                std::string fid = MetadataManager::instance().getFolderIdSync(wpath);
+                                if (!fid.empty()) {
+                                    CategoryRepo::restoreFromTrash(fid);
+                                    for (int catId : snap.categoryIds) {
+                                        CategoryRepo::addItemToCategory(catId, fid, wpath);
+                                    }
+                                    MetadataManager::instance().setRating(wpath, snap.rating, false);
+                                    MetadataManager::instance().setColor(wpath, snap.color.toStdWString(), false);
+                                    MetadataManager::instance().setPinned(wpath, snap.isPinned, false);
+                                    MetadataManager::instance().setTags(wpath, snap.tags, false);
+                                    MetadataManager::instance().setNote(wpath, snap.note.toStdWString(), false);
+                                }
+                            }
+                        }
+                        refreshAll();
+                        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
+                        return true;
                     }
-                    ok = CategoryRepo::moveToTrashBatch(targetFids);
-                }
-
-                if (ok) {
-                    CategoryRepo::s_countsDirty = true;
-                    refreshAll();
-                }
-
-                MetadataManager::instance().endInternalOperation();
+                );
             } else {
                 QString msg = "确定要永久删除选中的项目吗？数据将被物理覆写并彻底抹除，此操作不可恢复。";
                 if (!FramelessMessageBox::question(this, "确认删除", msg)) break;
@@ -2110,8 +2186,23 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 }
             }
             if (!selectedPaths.isEmpty()) {
-                emit requestAddFavorite(selectedPaths);
-                ToolTipOverlay::instance()->showText(QCursor::pos(), "已成功添加至收藏夹", 1500, QColor("#2ecc71"));
+                OperationSnapshotEngine::instance().executeWithSnapshot(
+                    this,
+                    SnapshotOperationType::ToggleFavorite,
+                    selectedPaths,
+                    "已成功添加至收藏夹",
+                    [this, selectedPaths]() {
+                        emit requestAddFavorite(selectedPaths);
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "已成功添加至收藏夹", 1500, QColor("#2ecc71"));
+                        return true;
+                    },
+                    [](const QVector<AssetItemSnapshot>& beforeState) {
+                        for (const auto& snap : beforeState) {
+                            MetadataManager::instance().setPinned(snap.path.toStdWString(), snap.isPinned, true);
+                        }
+                        return true;
+                    }
+                );
             }
             break;
         }
@@ -2230,11 +2321,13 @@ void ContentPanel::performPaste() {
 void ContentPanel::performBatchRename() { 
     // 2026-03-xx 按照用户要求：弹出深度集成的高级批量重命名对话框 
     QModelIndexList indexes = getSelectedIndexes(); 
+    QStringList selectedPaths;
     std::vector<std::wstring> originalPaths; 
     for (const auto& idx : indexes) { 
         if (idx.column() == 0) { 
             QString path = idx.data(PathRole).toString(); 
             if (!path.isEmpty()) {
+                selectedPaths << path;
                 originalPaths.push_back(QDir::toNativeSeparators(path).toStdWString()); 
             }
         } 
@@ -2245,19 +2338,34 @@ void ContentPanel::performBatchRename() {
         return; 
     } 
  
-    BatchRenameDialog dlg(originalPaths, isMirrorSource(), this); 
-    if (dlg.exec() == QDialog::Accepted) { 
-        // 🚨 极致自愈高亮：如果对话框成功重命名，将其返回的首个新名称作为 pendingSelectName
-        QString firstNew = dlg.getFirstNewName();
-        if (!firstNew.isEmpty()) {
-            m_pendingSelectName = firstNew;
-            m_isPendingEdit = false;
+    OperationSnapshotEngine::instance().executeWithSnapshot(
+        this,
+        SnapshotOperationType::BatchRename,
+        selectedPaths,
+        QString("成功处理 %1 个项目").arg(selectedPaths.size()),
+        [this, originalPaths]() {
+            BatchRenameDialog dlg(originalPaths, isMirrorSource(), this);
+            if (dlg.exec() == QDialog::Accepted) {
+                // 🚨 极致自愈高亮：如果对话框成功重命名，将其返回的首个新名称作为 pendingSelectName
+                QString firstNew = dlg.getFirstNewName();
+                if (!firstNew.isEmpty()) {
+                    m_pendingSelectName = firstNew;
+                    m_isPendingEdit = false;
+                }
+                // 🚨 联动支持：不应强绑定物理 loadDirectory，统一调用 refreshAll 以自适应数据库和系统分类下的异步刷新，
+                // 并实现完美的选中态无缝自愈高亮！
+                refreshAll();
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "批量重命名操作已成功执行", 1500, QColor("#2ecc71"));
+                return true;
+            }
+            return false;
+        },
+        [](const QVector<AssetItemSnapshot>& beforeState) {
+            Q_UNUSED(beforeState);
+            UndoManager::instance().undo();
+            return true;
         }
-        // 🚨 联动支持：不应强绑定物理 loadDirectory，统一调用 refreshAll 以自适应数据库和系统分类下的异步刷新，
-        // 并实现完美的选中态无缝自愈高亮！
-        refreshAll(); 
-        ToolTipOverlay::instance()->showText(QCursor::pos(), "批量重命名操作已成功执行", 1500, QColor("#2ecc71")); 
-    } 
+    );
 } 
  
 ContentPanel::DataSourceType ContentPanel::dataSourceType() const {

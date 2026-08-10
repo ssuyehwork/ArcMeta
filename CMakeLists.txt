@@ -75,6 +75,8 @@ set(SOURCES
     src/core/DiskTrashService.h
     src/core/SyncStatusService.cpp
     src/core/SyncStatusService.h
+    src/core/OperationSnapshotEngine.h
+    src/core/OperationSnapshotEngine.cpp
     src/core/AutoImportManager.cpp
     src/core/AutoImportManager.h
     src/core/AppConfig.h

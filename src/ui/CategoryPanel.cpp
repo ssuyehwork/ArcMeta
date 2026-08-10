@@ -28,6 +28,7 @@ using namespace ArcMeta::Style;
 
 #include "../meta/MetadataManager.h"
 #include "../core/CoreController.h"
+#include "../core/OperationSnapshotEngine.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -1458,7 +1459,35 @@ void CategoryPanel::initUi() {
         }
 
         if (!paths.isEmpty()) {
-            emit pathsDroppedToCategory(paths, targetCatId);
+            OperationSnapshotEngine::instance().executeWithSnapshot(
+                this,
+                SnapshotOperationType::DragCategorize,
+                paths,
+                "已完成拖拽分类操作",
+                [this, paths, targetCatId]() {
+                    emit pathsDroppedToCategory(paths, targetCatId);
+                    return true;
+                },
+                [this](const QVector<AssetItemSnapshot>& beforeState) {
+                    for (const auto& snap : beforeState) {
+                        std::wstring wPath = snap.path.toStdWString();
+                        std::string fid = MetadataManager::instance().getFolderIdSync(wPath);
+                        if (!fid.empty()) {
+                            CategoryRepo::removeAllCategories(fid);
+                            for (int catId : snap.categoryIds) {
+                                CategoryRepo::addItemToCategory(catId, fid, wPath);
+                            }
+                        }
+                    }
+                    m_categoryModel->refresh();
+                    MainWindow* win = qobject_cast<MainWindow*>(window());
+                    if (win) {
+                        ContentPanel* cp = win->findChild<ContentPanel*>();
+                        if (cp) cp->refreshAll();
+                    }
+                    return true;
+                }
+            );
         }
     });
     
