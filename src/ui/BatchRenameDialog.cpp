@@ -354,7 +354,12 @@ void BatchRenameDialog::onExecute() {
             safeThis->m_firstNewName = QString::fromStdWString(finalNames.front());
         }
 
-        FramelessMessageBox::information(safeThis.data(), "操作完成", QString("成功处理 %1 个项目").arg(successCount));
+        QPoint targetPos = QCursor::pos();
+        if (safeThis->parentWidget()) {
+            QWidget* cp = safeThis->parentWidget();
+            targetPos = cp->mapToGlobal(QPoint(cp->width() / 2, 45));
+        }
+        ToolTipOverlay::instance()->showText(targetPos, QString("成功处理 %1 个项目").arg(successCount), 1500, successCount > 0 ? QColor("#2ecc71") : QColor("#e74c3c"));
         safeThis->accept();
     };
 
