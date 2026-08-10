@@ -238,6 +238,8 @@ void MetadataManager::initFromScchMode() {
     auto loadFromDb = [&](sqlite3* db) {
         if (!db) return;
         sqlite3_stmt* stmt = nullptr;
+
+        // 1. 读取主元数据表
         if (sqlite3_prepare_v2(db, kSqlSelectAllMeta, -1, &stmt, nullptr) == SQLITE_OK) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 RuntimeMeta rm;
@@ -341,9 +343,8 @@ void MetadataManager::initFromScchMode() {
             }
             sqlite3_finalize(stmt);
         }
-    };
 
-        // Plan-124: 加载进度缓存
+        // 2. Plan-124: 加载进度缓存 (正确的闭包内部位置)
         const char* statsSql = "SELECT key, value FROM system_stats WHERE key LIKE 'PROGRESS:%'";
         if (sqlite3_prepare_v2(db, statsSql, -1, &stmt, nullptr) == SQLITE_OK) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -359,24 +360,20 @@ void MetadataManager::initFromScchMode() {
             }
             sqlite3_finalize(stmt);
         }
-    };
+    }; // 🚨 正确：loadFromDb 闭包在这里统一结束！
 
     // 0. 加载全局库 (盘符置顶等全局元数据)
     loadFromDb(DatabaseManager::instance().getGlobalDb());
 
     // 1. 扫描所有已加载的数据库
-    // 2026-06-xx 逻辑加固：由于驱动器序列号在不同机器上可能重复或变化，
-    // 我们必须确保启动时扫描 .arcmeta 目录下所有物理分库。
     QString metaDir = QCoreApplication::applicationDirPath() + "/.arcmeta";
     QDir dir(metaDir);
     if (dir.exists()) {
         QStringList dbFiles = dir.entryList({"Arcmeta_*.db"}, QDir::Files | QDir::Hidden | QDir::System);
 
-        // 使用正则解析：^Arcmeta_([0-9A-F]{8})(?:_([A-Z]))?\.db$
         QRegularExpression re("^Arcmeta_([0-9A-F]{8})(?:_([A-Z]))?\\.db$", QRegularExpression::CaseInsensitiveOption);
         std::set<std::wstring> loadedSerials;
 
-        // 构建当前在线磁盘的 序列号 -> 盘符 映射，用于初始化时的自适应重命名
         QMap<std::wstring, QString> serialToLetter;
         const auto drives = QDir::drives();
         for (const QFileInfo& d : drives) {
@@ -393,7 +390,6 @@ void MetadataManager::initFromScchMode() {
                 std::wstring wSerial = volSerialStr.toStdWString();
                 
                 if (loadedSerials.find(wSerial) == loadedSerials.end()) {
-                    // 启动阶段：若检测到该序列号的磁盘当前在线，则传入盘符触发自适应重命名
                     QString currentLetter = serialToLetter.value(wSerial, "");
                     loadFromDb(DatabaseManager::instance().getDriveDb(wSerial, currentLetter));
                     loadedSerials.insert(wSerial);
@@ -408,13 +404,11 @@ void MetadataManager::initFromScchMode() {
         m_parentToChildren = tempParentToChildren;
         m_folderProgressCache = tempFolderProgressCache;
 
-        // Plan-124: 确保层级索引中不含重复项 (针对启动阶段的多库合并场景)
         for (auto& entry : m_parentToChildren) {
             std::sort(entry.second.begin(), entry.second.end());
             entry.second.erase(std::unique(entry.second.begin(), entry.second.end()), entry.second.end());
         }
 
-        // 2026-07-xx 物理同步：初始化时构建所有已加载卷的隔离索引
         for (const auto& pair : tempCache) {
             const RuntimeMeta& meta = pair.second;
             if (!meta.baseName.empty()) {
@@ -433,13 +427,11 @@ void MetadataManager::initFromScchMode() {
         }
 
         m_loaded = true;
-        // 原子同步内存快照缓存指针
         std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(
             std::make_shared<const std::unordered_map<std::wstring, RuntimeMeta>>(tempCache)
         ));
     }
 
-    // 2026-06-xx 物理对账：在初始化结束后（m_loaded 为 true 且缓存就绪），加载缓存计数
     CategoryRepo::loadStatsFromDb();
     notifyUI(RefreshLevel::FullRebuild);
 }
