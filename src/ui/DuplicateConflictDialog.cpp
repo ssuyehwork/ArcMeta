@@ -115,6 +115,9 @@ DuplicateConflictDialog::DuplicateConflictDialog(const DuplicateConflictGroup& c
     connect(m_btnSubmit, &QPushButton::clicked, this, &QDialog::accept);
 }
 
+DuplicateConflictDialog::DuplicateConflictDialog(const DuplicateConflictGroup& conflict, QWidget* parent)
+    : DuplicateConflictDialog(conflict, 1, parent) {}
+
 DuplicateResolveAction DuplicateConflictDialog::selectedAction() const {
     return m_radUseExisting->isChecked() ? DuplicateResolveAction::UseExisting : DuplicateResolveAction::KeepBoth;
 }

@@ -279,6 +279,66 @@ bool CategoryRepo::add(Category& cat) {
     return false;
 }
 
+bool CategoryRepo::addItemToCategoryBatch(int categoryId, const std::vector<std::pair<std::string, std::wstring>>& items) {
+    if (items.empty()) return true;
+
+    WriteGuard guard;
+
+    // Group items by database connection
+    std::map<sqlite3*, std::vector<std::pair<std::string, std::wstring>>> dbToItems;
+    for (const auto& item : items) {
+        std::wstring finalPath = MetadataManager::normalizePath(item.second);
+        if (finalPath.empty()) {
+            finalPath = MetadataManager::instance().getPathByFolderId(item.first);
+        }
+        sqlite3* db = DatabaseManager::instance().getDbForPath(finalPath);
+        if (db) {
+            dbToItems[db].push_back({item.first, finalPath});
+        }
+    }
+
+    bool allOk = true;
+    double addedAt = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
+
+    for (auto& [db, itemsInDb] : dbToItems) {
+        SqlTransaction trans(db);
+        bool transOk = true;
+
+        const char* sql = "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            for (const auto& pair : itemsInDb) {
+                sqlite3_reset(stmt);
+                sqlite3_bind_int(stmt, 1, categoryId);
+                sqlite3_bind_text(stmt, 2, pair.first.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(stmt, 3, pair.second.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_double(stmt, 4, addedAt);
+
+                if (sqlite3_step(stmt) != SQLITE_DONE) {
+                    transOk = false;
+                    break;
+                }
+            }
+            sqlite3_finalize(stmt);
+        } else {
+            transOk = false;
+        }
+
+        if (transOk) {
+            trans.commit();
+        } else {
+            trans.rollback();
+            allOk = false;
+        }
+    }
+
+    s_countsDirty.store(true);
+    refreshMemoryCache();
+    MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
+
+    return allOk;
+}
+
 bool CategoryRepo::removeAllCategories(const std::string& folderId) {
     return removeAllCategoriesBatch({folderId});
 }
