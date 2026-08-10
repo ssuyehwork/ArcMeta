@@ -9,9 +9,9 @@
 
 using namespace ArcMeta;
 
-#include "../meta/MetadataManager.h"
-#include "../meta/CategoryRepo.h"
-#include "../meta/CapsuleMediaExtractor.h"
+#include "../../meta/MetadataManager.h"
+#include "../../meta/CategoryRepo.h"
+#include "../../meta/CapsuleMediaExtractor.h"
 #include "../core/UndoManager.h"
 #include "../MemoryBatchRenameService.h"
 #include "../core/BasicCommands.h"

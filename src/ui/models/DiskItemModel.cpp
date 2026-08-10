@@ -11,6 +11,8 @@
 #include "../DiskBatchRenameService.h"
 #include "../../meta/FileOperationHelper.h"
 #include "../../meta/CapsuleMediaExtractor.h"
+#include "../../meta/MetadataManager.h"
+#include "../../meta/CategoryRepo.h"
 
 using namespace ArcMeta;
 
