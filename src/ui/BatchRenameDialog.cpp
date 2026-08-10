@@ -329,31 +329,33 @@ void BatchRenameDialog::onExecute() {
     // 禁用执行按钮以防重复点击
     m_btnExecute->setEnabled(false);
 
-    auto onCompletedCallback = [this](int successCount) {
+    QPointer<BatchRenameDialog> safeThis(this);
+    auto onCompletedCallback = [safeThis](int successCount) {
+        if (!safeThis) return;
         // 确保回到 UI 主线程
-        m_btnExecute->setEnabled(true);
+        safeThis->m_btnExecute->setEnabled(true);
 
         if (successCount > 0) {
             // 只有在存在实际成功记录时，才依据真实成功数自增序列号，杜绝跳号
-            for (auto* row : m_ruleRows) {
+            for (auto* row : safeThis->m_ruleRows) {
                 RenameRule rule = row->getRule();
                 if (rule.type == RenameComponentType::Sequence) {
                     rule.start = rule.start + successCount * rule.step;
                     row->setRule(rule);
                 }
             }
-            doAutoSave();
+            safeThis->doAutoSave();
         }
 
         std::vector<RenameRule> currentRules;
-        for (auto* row : m_ruleRows) currentRules.push_back(row->getRule());
-        auto finalNames = BatchRenameEngine::instance().preview(m_originalPaths, currentRules);
+        for (auto* row : safeThis->m_ruleRows) currentRules.push_back(row->getRule());
+        auto finalNames = BatchRenameEngine::instance().preview(safeThis->m_originalPaths, currentRules);
         if (!finalNames.empty()) {
-            m_firstNewName = QString::fromStdWString(finalNames.front());
+            safeThis->m_firstNewName = QString::fromStdWString(finalNames.front());
         }
 
-        FramelessMessageBox::information(this, "操作完成", QString("成功处理 %1 个项目").arg(successCount));
-        accept();
+        FramelessMessageBox::information(safeThis.data(), "操作完成", QString("成功处理 %1 个项目").arg(successCount));
+        safeThis->accept();
     };
 
     if (m_isMirrorSource) {

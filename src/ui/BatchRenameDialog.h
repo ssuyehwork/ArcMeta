@@ -2,6 +2,7 @@
 
 #include "FramelessDialog.h"
 #include <QRadioButton>
+#include <QPointer>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QComboBox>

@@ -1,6 +1,7 @@
 #pragma once
 #include <QString>
 #include <QFileInfo>
+#include <string>
 #include <QFile>
 #include <QUuid>
 #include <QDir>

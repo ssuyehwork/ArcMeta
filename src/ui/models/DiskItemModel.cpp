@@ -9,6 +9,8 @@
 #include "../ui/MediaColorExtractor.h" // 🚨 补全头文件引入
 #include "../../util/DiskMediaExtractor.h"
 #include "../DiskBatchRenameService.h"
+#include "../../meta/FileOperationHelper.h"
+#include "../../meta/CapsuleMediaExtractor.h"
 
 using namespace ArcMeta;
 
@@ -114,11 +116,32 @@ bool DiskItemModel::setData(const QModelIndex& index, const QVariant& value, int
             newName += "." + suffix;
         }
 
-        // 调用磁盘模式专属重命名服务（处理主文件 + disk_thumbs 缩略图迁移 + 数据库索引更新）
-        int count = DiskBatchRenameService::execute({oldPath.toStdWString()}, 
-                                                    {newName.toStdWString()}, 
-                                                    DiskOperationMode::Rename, "");
-        if (count > 0) {
+        // 调用磁盘模式物理改名与索引及缩略图同步
+        bool success = false;
+        QString destDir = oldInfo.absolutePath();
+        QString newPathStr = QDir(destDir).filePath(newName);
+
+        if (oldPath == newPathStr) {
+            success = true;
+        } else if (FileOperationHelper::safeRename(oldPath, newPathStr)) {
+            success = true;
+
+            // 同步对 .arcmeta/disk_thumbs/ 中的哈希缩略图进行重命名
+            QString oldThumbHashPath = CapsuleMediaExtractor::getDiskThumbCachePath(oldPath);
+            QString newThumbHashPath = CapsuleMediaExtractor::getDiskThumbCachePath(newPathStr);
+
+            if (QFile::exists(oldThumbHashPath)) {
+                FileOperationHelper::safeRename(oldThumbHashPath, newThumbHashPath);
+            }
+
+            std::wstring oldW = oldInfo.absoluteFilePath().toStdWString();
+            std::wstring newW = QDir(destDir).absoluteFilePath(newPathStr).toStdWString();
+
+            MetadataManager::instance().renameItem(oldW, newW);
+            CategoryRepo::renamePhysicalCategoryPath(oldW, newW);
+        }
+
+        if (success) {
             QString newPath = QDir(oldInfo.absolutePath()).filePath(newName);
             record.path = newPath;
             record.filename = newName;
