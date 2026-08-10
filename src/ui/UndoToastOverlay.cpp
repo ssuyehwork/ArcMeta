@@ -78,6 +78,10 @@ UndoToastOverlay::UndoToastOverlay(QWidget* parent) : QWidget(parent) {
 }
 
 void UndoToastOverlay::showToast(QWidget* parent, const QString& message, std::function<void()> undoCallback, int durationMs) {
+    // 🚨 核心修复：淡入前强行断开之前遗留的一切 finished 信号绑定，防止淡入动画结束后误触发上一轮的隐藏闭包！
+    m_fadeAnim->stop();
+    disconnect(m_fadeAnim, &QPropertyAnimation::finished, nullptr, nullptr);
+
     m_undoCallback = undoCallback;
     m_msgLabel->setText(message);
     m_btnUndo->setVisible(m_undoCallback != nullptr);
@@ -111,7 +115,6 @@ void UndoToastOverlay::showToast(QWidget* parent, const QString& message, std::f
     move(targetPos);
 
     // 淡入显示
-    m_fadeAnim->stop();
     setWindowOpacity(0.0);
     show();
     raise();
