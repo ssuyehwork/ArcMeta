@@ -89,6 +89,7 @@ private:
 
     bool m_isDiskNavMode = false;
     QWidget* m_categoryBox = nullptr;
+    QWidget* m_categoryContainer = nullptr;
     FlowLayout* m_categoryFlowLayout = nullptr;
 
     QStringList m_selectedPaths;

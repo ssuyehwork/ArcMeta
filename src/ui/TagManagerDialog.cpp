@@ -18,7 +18,7 @@ void TagManagerDialog::showDialog(QWidget* parent, const QString& currentPath, b
 
 TagManagerDialog::TagManagerDialog(const QString& currentPath, bool isMirrorSource, QWidget* parent)
     : FramelessDialog("标签管理", parent), m_currentPath(currentPath), m_isMirrorSource(isMirrorSource) {
-    
+
     // 默认最小尺寸硬约束：有侧边栏时 400px 宽，固定 180px 侧边栏
     setMinimumSize(400, 350);
     resize(550, 450);
@@ -59,7 +59,7 @@ void TagManagerDialog::initContent() {
     });
     topL->addWidget(m_searchEdit, 1);
 
-    // 折叠侧边栏按钮 (使用 sidebar.svg)
+    // 折叠侧边栏按钮 (使用 sidebar)
     m_btnToggleSidebar = new QPushButton(topBar);
     m_btnToggleSidebar->setFixedSize(24, 24);
     m_btnToggleSidebar->setCheckable(true);
@@ -182,14 +182,14 @@ void TagManagerDialog::createTag(const QString& tagName) {
 
     if (m_isMirrorSource) {
         // 托管库模式：直接存入 MetadataManager / SQLite
-        MetadataManager::instance().setTags(m_currentPath.toStdWString(), {tagName});
+        MetadataManager::instance().setTags(m_currentPath.toStdWString(), QStringList() << tagName);
     } else {
         // 磁盘导航模式：直接写入本地 .ArcMeta.json
         QFileInfo info(m_currentPath);
         AmMetaJson amJson(info.absolutePath().toStdWString());
         amJson.load();
         ItemMeta& item = amJson.items()[info.fileName().toStdWString()];
-        
+
         bool exists = false;
         for (const auto& t : item.tags) {
             if (QString::fromStdWString(t) == tagName) { exists = true; break; }

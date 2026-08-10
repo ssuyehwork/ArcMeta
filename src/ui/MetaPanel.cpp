@@ -115,9 +115,9 @@ void MetaPanel::initUi() {
     catBoxL->setContentsMargins(0, 0, 0, 0);
     catBoxL->setSpacing(4);
 
-    QWidget* catFlowWidget = new QWidget(m_categoryBox);
-    m_categoryFlowLayout = new FlowLayout(catFlowWidget, 0, 4, 4);
-    catBoxL->addWidget(catFlowWidget);
+    m_categoryContainer = new QWidget(m_categoryBox);
+    m_categoryFlowLayout = new FlowLayout(m_categoryContainer, 0, 4, 4);
+    catBoxL->addWidget(m_categoryContainer);
 
     m_categoryLayoutBox = catBoxL;
     m_containerLayout->addWidget(m_categoryBox);
@@ -245,6 +245,7 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
             if (m_tagBox) m_tagBox->setFixedWidth(maxW);
             if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
             if (m_categoryBox) m_categoryBox->setFixedWidth(maxW);
+            if (m_categoryContainer) m_categoryContainer->setFixedWidth(maxW);
             
             adjustFlowHeights();
             m_container->adjustSize();
@@ -267,6 +268,13 @@ void MetaPanel::adjustFlowHeights() {
             m_tagContainer->setFixedHeight(contentH);
         }
         m_tagFlowLayout->activate();
+    }
+    if (m_categoryContainer && m_categoryFlowLayout) {
+        int contentH = m_categoryFlowLayout->heightForWidth(m_categoryContainer->width());
+        if (m_categoryContainer->height() != contentH) {
+            m_categoryContainer->setFixedHeight(contentH);
+        }
+        m_categoryFlowLayout->activate();
     }
 }
 
