@@ -182,6 +182,8 @@ set(SOURCES
     src/ui/AddressBar.h
     src/ui/MetaPanel.cpp
     src/ui/MetaPanel.h
+    src/ui/TagManagerDialog.h
+    src/ui/TagManagerDialog.cpp
     src/ui/components/ElasticEdit.h
     src/ui/components/ElasticEdit.cpp
     src/ui/components/TagPill.h

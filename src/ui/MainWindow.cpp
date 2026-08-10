@@ -840,6 +840,18 @@ void MainWindow::initUi() {
         }
     });
 
+    connect(m_metaPanel, &MetaPanel::noteEdited, this, [](const QStringList& paths, const QString& newNote) {
+        for (const QString& path : paths) {
+            MetadataManager::instance().setNote(path.toStdWString(), newNote.toStdWString());
+        }
+    });
+
+    connect(m_metaPanel, &MetaPanel::linkEdited, this, [](const QStringList& paths, const QString& newLink) {
+        for (const QString& path : paths) {
+            MetadataManager::instance().setURL(path.toStdWString(), newLink.toStdWString());
+        }
+    });
+
     // 9. 2026-03-xx 响应元数据全局变更，同步刷新 UI (合并优化，消除重复连接与性能损耗)
     m_sidebarRefreshTimer = new QTimer(this);
     m_sidebarRefreshTimer->setInterval(800);
