@@ -22,7 +22,7 @@ public:
                         const std::vector<std::wstring>& newNames,
                         DiskOperationMode mode,
                         const QString& targetDir,
-                        std::function<void(int successCount)> callback);
+                        std::function<void(int successCount)> callback = nullptr);
 };
 
 } // namespace ArcMeta

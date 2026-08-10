@@ -14,7 +14,7 @@ public:
      */
     static void execute(const std::vector<std::wstring>& originalPaths,
                         const std::vector<std::wstring>& newNames,
-                        std::function<void(int successCount)> callback);
+                        std::function<void(int successCount)> callback = nullptr);
 };
 
 } // namespace ArcMeta
