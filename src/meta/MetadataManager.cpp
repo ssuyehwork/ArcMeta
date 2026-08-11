@@ -911,11 +911,49 @@ RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     
     // 1. 无锁（Lock-Free）原子获取当前最新快照指针 —— 耗时恒定为 0 毫秒
     auto currentSnapshot = std::atomic_load(&m_snapshot);
-    if (!currentSnapshot) return RuntimeMeta();
+    if (currentSnapshot) {
+        auto it = currentSnapshot->find(nPath);
+        if (it != currentSnapshot->end()) return it->second;
+    }
 
-    // 2. 在只读快照副本中查找，绝不与后台持久化线程竞争锁
-    auto it = currentSnapshot->find(nPath);
-    if (it != currentSnapshot->end()) return it->second;
+    // 🚨 2. 磁盘模式回退读取：若内存快照中不存在（非托管库模式），实时从物理文件夹下的 .ArcMeta.json 预载回填
+    if (!isInsideManagedLibrary(nPath)) {
+        QFileInfo info(QString::fromStdWString(nPath));
+        if (info.exists()) {
+            std::wstring folderPath = info.absolutePath().toStdWString();
+            std::wstring fileName = info.fileName().toStdWString();
+
+            AmMetaJson amJson(folderPath);
+            if (amJson.load()) {
+                const auto& items = amJson.items();
+                auto it = items.find(fileName);
+                if (it != items.end()) {
+                    const ItemMeta& itemMeta = it->second;
+                    RuntimeMeta rm;
+                    rm.rating = itemMeta.rating;
+                    rm.manualColor = itemMeta.color;
+                    rm.pinned = itemMeta.pinned;
+                    rm.note = itemMeta.note;
+                    rm.url = itemMeta.url;
+                    rm.encrypted = itemMeta.encrypted;
+                    rm.isFolder = (itemMeta.type == L"folder");
+                    for (const auto& t : itemMeta.tags) rm.tags.append(QString::fromStdWString(t));
+                    rm.palettes = itemMeta.palettes;
+                    rm.isManaged = false; // 标记为磁盘非受控资产
+
+                    // 预载写入内存快照，防止频繁 I/O
+                    std::unique_lock<std::shared_mutex> lock(m_mutex);
+                    currentSnapshot = std::atomic_load(&m_snapshot);
+                    if (currentSnapshot) {
+                        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+                        (*newMap)[nPath] = rm;
+                        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+                    }
+                    return rm;
+                }
+            }
+        }
+    }
     
     return RuntimeMeta();
 }

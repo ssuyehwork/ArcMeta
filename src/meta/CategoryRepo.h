@@ -99,6 +99,7 @@ public:
     static bool updateCategoryColorByPath(const std::wstring& path, const std::wstring& color);
     static bool renamePhysicalCategoryPath(const std::wstring& oldPath, const std::wstring& newPath);
     static bool addItemToCategory(int categoryId, const std::string& folderId, const std::wstring& pathHint = L"");
+    static bool addItemToCategoryBatch(int categoryId, const std::vector<std::pair<std::string, std::wstring>>& items);
     static bool removeItemFromCategory(int categoryId, const std::string& folderId);
     static bool removeAllCategories(const std::string& folderId);
     static bool removeAllCategoriesBatch(const std::vector<std::string>& folderIds);

@@ -10,14 +10,21 @@
 #include <QScrollArea>
 #include <QLabel>
 #include <QFrame>
+#include <QButtonGroup>
 
 namespace ArcMeta {
 
+/**
+ * @brief 高级标签管理弹窗 (模块化组件，对应图二/图三规范)
+ */
 class TagManagerDialog : public FramelessDialog {
     Q_OBJECT
 public:
     /**
-     * @brief 模块化入口：在全软件任何位置一键弹出标签管理弹窗
+     * @brief 全局统一模块化静态调用入口
+     * @param parent 父窗口指针
+     * @param currentPath 当前操作的文件/目录绝对路径
+     * @param isMirrorSource 是否处于托管库模式 (true: 托管库, false: 磁盘导航模式)
      */
     static void showDialog(QWidget* parent, const QString& currentPath, bool isMirrorSource);
 
@@ -28,6 +35,7 @@ protected:
 private slots:
     void onSearchTextChanged(const QString& text);
     void onSidebarToggled(bool checked);
+    void onSidebarItemClicked(int id);
 
 private:
     void initContent();
@@ -37,6 +45,7 @@ private:
 
     QString m_currentPath;
     bool m_isMirrorSource = false;
+    QString m_currentFilter = "all"; // "all" | "uncategorized" | "frequent"
 
     // 顶部组件
     QLineEdit* m_searchEdit = nullptr;
@@ -45,25 +54,22 @@ private:
     // 左侧 180px 侧边栏
     QFrame* m_sidebar = nullptr;
     QVBoxLayout* m_sidebarLayout = nullptr;
+    QButtonGroup* m_sidebarGroup = nullptr;
 
     // 右侧内容区
     QScrollArea* m_scrollArea = nullptr;
     QWidget* m_contentWidget = nullptr;
     QVBoxLayout* m_contentLayout = nullptr;
 
-    // 动态新增提示胶囊
+    // 动态新增提示胶囊 (`+ 新增 "关键字"`)
     QWidget* m_addNewTagWidget = nullptr;
     QPushButton* m_btnAddNewTag = nullptr;
 
-    // 标签容器与流式布局
-    QWidget* m_recentTagsContainer = nullptr;
-    FlowLayout* m_recentFlowLayout = nullptr;
+    // 数据列表容器
+    QVBoxLayout* m_tagsScrollLayout = nullptr;
 
-    QWidget* m_allTagsContainer = nullptr;
-    FlowLayout* m_allFlowLayout = nullptr;
-
-    // 记忆数据
-    QStringList m_recentTags;
+    // 数据缓存
+    static QStringList s_sessionRecentTags; // 全局会话级“最近使用”历史队列
     QMap<QString, int> m_allTagCounts;
 };
 
