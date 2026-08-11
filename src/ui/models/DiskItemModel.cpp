@@ -33,6 +33,22 @@ int DiskItemModel::columnCount(const QModelIndex&) const {
     return 7;
 }
 
+QVariant DiskItemModel::headerData(int section, Qt::Orientation orientation, int role) const {
+    if (orientation == Qt::Horizontal && role == Qt::DisplayRole) {
+        switch (section) {
+            case 0: return QString("名称");
+            case 1: return QString("状态");
+            case 2: return QString("评分");
+            case 3: return QString("尺寸");
+            case 4: return QString("类型");
+            case 5: return QString("大小");
+            case 6: return QString("修改日期");
+            default: break;
+        }
+    }
+    return QAbstractTableModel::headerData(section, orientation, role);
+}
+
 void DiskItemModel::setRecords(const std::vector<ItemRecord>& records) {
     beginResetModel();
     m_allRecords = records;
