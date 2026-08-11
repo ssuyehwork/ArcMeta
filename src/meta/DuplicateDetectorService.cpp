@@ -1,6 +1,6 @@
 #include "DuplicateDetectorService.h"
 #include "MetadataManager.h"
-#include "../ui/CapsuleMediaExtractor.h"
+#include "CapsuleMediaExtractor.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QFile>
