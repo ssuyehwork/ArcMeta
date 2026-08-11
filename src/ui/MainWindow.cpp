@@ -24,6 +24,8 @@
 #include "ToolTipOverlay.h"
 #include "../meta/DuplicateDetectorService.h"
 #include "DuplicateConflictDialog.h"
+#include "../meta/CapsuleMediaExtractor.h"
+#include "../util/DiskMediaExtractor.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -442,7 +444,13 @@ void MainWindow::initUi() {
                                 bool batchApplied = false;
                                 DuplicateResolveAction batchAction = DuplicateResolveAction::UseExisting;
 
-                                for (const auto& group : conflicts) {
+                                for (auto& group : conflicts) {
+                                    // 仅在弹窗前，按需对被判定为冲突的少量组，补充计算缩略图与尺寸信息
+                                    group.existingItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(group.existingItem.path);
+                                    group.newItem.thumbnail = DiskMediaExtractor::getDiskThumbnail(group.newItem.path, 256);
+                                    group.newItem.width = group.newItem.thumbnail.width();
+                                    group.newItem.height = group.newItem.thumbnail.height();
+
                                     DuplicateResolveAction chosenAction;
                                     if (batchApplied) {
                                         chosenAction = batchAction;

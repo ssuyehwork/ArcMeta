@@ -39,6 +39,7 @@ struct RuntimeMeta {
     std::string folderId; // 2026-06-xx 物理关联：缓存 ID 以供反向查询分类
     std::wstring baseName; // 2026-08-xx 持久化基名，避免重复解析计算
     std::wstring ext;      // 2026-08-xx 持久化后缀名，统一小写
+    std::string sha256;    // 文件 SHA256 哈希持久化字段
     
     // 2026-06-xx 物理对标：补充时间戳与大小字段
     long long ctime;
@@ -209,6 +210,7 @@ public:
     void ensureActivated(const std::wstring& nPath);
 
     void setRating(const std::wstring& path, int rating, bool notify = true);
+    void setSha256(const std::wstring& path, const std::string& sha256, bool notify = false);
     void setAddedAt(const std::wstring& path, long long addedAt, bool notify = true);
     void setColor(const std::wstring& path, const std::wstring& color, bool notify = true);
     void setPinned(const std::wstring& path, bool pinned, bool notify = true);

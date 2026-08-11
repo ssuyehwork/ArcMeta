@@ -180,10 +180,12 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             auto_color TEXT DEFAULT '',
             base_name TEXT DEFAULT '',
             ext TEXT DEFAULT '',
-            added_at INTEGER DEFAULT 0
+            added_at INTEGER DEFAULT 0,
+            sha256 TEXT DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
         CREATE INDEX IF NOT EXISTS idx_metadata_added_at ON metadata(added_at);
+        CREATE INDEX IF NOT EXISTS idx_metadata_hash ON metadata(file_size, sha256);
 
         -- 分类定义表
         CREATE TABLE IF NOT EXISTS categories (
@@ -456,6 +458,22 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
     }
 
     sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_metadata_ext ON metadata(ext);", nullptr, nullptr, nullptr);
+
+    // 自动平滑迁移现有数据库，增加对 sha256 字段的检测与自适应补全
+    bool hasSha256Column = false;
+    sqlite3_stmt* checkStmt3 = nullptr;
+    if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &checkStmt3, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(checkStmt3) == SQLITE_ROW) {
+            const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(checkStmt3, 1));
+            if (colName && std::string(colName) == "sha256") {
+                hasSha256Column = true;
+            }
+        }
+        sqlite3_finalize(checkStmt3);
+    }
+    if (!hasSha256Column) {
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN sha256 TEXT DEFAULT ''", nullptr, nullptr, nullptr);
+    }
 
     // 2026-08-xx 物理同步扩展：迁移 categories 表字段
     sqlite3_stmt* catCheckStmt;

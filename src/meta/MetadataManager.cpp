@@ -229,6 +229,10 @@ void MetadataManager::initFromScchMode() {
                 if (sqlite3_column_count(stmt) > 21) {
                     rm.added_at = sqlite3_column_int64(stmt, 21);
                 }
+                if (sqlite3_column_count(stmt) > 22) {
+                    const char* hashText = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 22));
+                    if (hashText) rm.sha256 = hashText;
+                }
 
                 const void* paletteBlob = sqlite3_column_blob(stmt, 12);
                 int paletteSize = sqlite3_column_bytes(stmt, 12);
@@ -427,8 +431,8 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
     parsePathComponents(nPath, false, baseName, ext); 
  
     // 2. 写入数据库 metadata 表 (绝对绑定内部主文件路径，is_folder 恒为 0) 
-    const char* sqlMeta = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, is_trash, width, height, ingestion_status, auto_color, base_name, ext, added_at) " 
-                          "VALUES (?, ?, 0, 0, '', '', '', '', ?, ?, ?, ?, 0, 0, 0, 0, '', ?, ?, ?)"; 
+    const char* sqlMeta = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, is_trash, width, height, ingestion_status, auto_color, base_name, ext, added_at, sha256) "
+                          "VALUES (?, ?, 0, 0, '', '', '', '', ?, ?, ?, ?, 0, 0, 0, 0, '', ?, ?, ?, '')";
     sqlite3_stmt* stmtMeta = nullptr; 
     if (sqlite3_prepare_v2(db, sqlMeta, -1, &stmtMeta, nullptr) == SQLITE_OK) { 
         sqlite3_bind_text(stmtMeta, 1, folderId.c_str(), -1, SQLITE_TRANSIENT); 
@@ -1074,6 +1078,22 @@ void MetadataManager::loadDiskModeJsonForDirectory(const std::wstring& folderPat
     }
 
     std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+}
+
+void MetadataManager::setSha256(const std::wstring& path, const std::string& sha256, bool notify) {
+    std::wstring nPath = MetadataManager::normalizePath(path);
+    ensureActivated(nPath);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath].sha256 = sha256;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+        persistAsync(nPath);
+    });
 }
 
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
@@ -2505,7 +2525,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
         if (db) groups[db].push_back(p);
     }
 
-    const char* sql = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext, added_at, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     for (auto& entry : groups) {
         sqlite3* memDb = entry.first;
@@ -2567,6 +2587,7 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
                     sqlite3_bind_text16(stmt, 20, meta.baseName.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_text16(stmt, 21, meta.ext.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_bind_int64(stmt, 22, meta.added_at);
+                    sqlite3_bind_text(stmt, 23, meta.sha256.c_str(), -1, SQLITE_TRANSIENT);
                 };
                 bindLogic(memStmt, p, rMeta);
 
@@ -2679,9 +2700,10 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         sqlite3_bind_text16(stmt, 20, meta.baseName.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text16(stmt, 21, meta.ext.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int64(stmt, 22, meta.added_at);
+        sqlite3_bind_text(stmt, 23, meta.sha256.c_str(), -1, SQLITE_TRANSIENT);
     };
 
-    const char* sql = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    const char* sql = "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, ctime, mtime, atime, file_size, palettes, is_trash, original_path, width, height, ingestion_status, auto_color, base_name, ext, added_at, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     
     sqlite3_stmt* memStmt;
     if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
