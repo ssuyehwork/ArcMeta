@@ -1,4 +1,4 @@
-请使用中文解说，不允许使用英文答复用户（包括："Running code review..." 和 "Ready for review 🎉"）
+语言：始终中文
 
 # AGENTS.md — Jules 行为规范
 
