@@ -138,8 +138,6 @@ void CardPainterHelper::drawExtensionBadge(QPainter* painter, const QRect& cardR
 void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect, 
                                         const QRect& capsuleRect, int starSize, int starSpacing, int ratingY, int ratingH, int starsStartX,
                                         int rating, const QString& colorStr, bool isSelected) {
-    Q_UNUSED(starSpacing);
-
     if (!colorStr.isEmpty()) {
         QColor bgColor = UiHelper::parseColorName(colorStr);
         if (bgColor.isValid()) {
@@ -183,7 +181,7 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
         QPixmap emptyStar  = UiHelper::getPixmap("star", QSize(starSize, starSize), emptyStarColor);
         
         for (int i = 0; i < 5; ++i) {
-            QRect starRect(starsStartX + i * (starSize + unifiedSpacing), 
+            QRect starRect(starsStartX + i * (starSize + starSpacing),
                            ratingY + (ratingH - starSize) / 2, 
                            starSize, starSize);
             painter->drawPixmap(starRect, (i < rating) ? filledStar : emptyStar);
