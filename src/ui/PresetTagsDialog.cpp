@@ -199,7 +199,6 @@ private:
         m_tagButtons.clear();
         for (int i = 0; i < m_displayedTags.size(); ++i) {
             QString tag = m_displayedTags[i];
-            int count = m_allTagCounts.value(tag, 0);
 
             QPushButton* btn = new QPushButton(m_tagGridWidget);
             btn->setCheckable(true);

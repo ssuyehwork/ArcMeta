@@ -180,10 +180,12 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
             auto_color TEXT DEFAULT '',
             base_name TEXT DEFAULT '',
             ext TEXT DEFAULT '',
-            added_at INTEGER DEFAULT 0
+            added_at INTEGER DEFAULT 0,
+            sha256 TEXT DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_path ON metadata(path);
         CREATE INDEX IF NOT EXISTS idx_metadata_added_at ON metadata(added_at);
+        CREATE INDEX IF NOT EXISTS idx_metadata_hash ON metadata(file_size, sha256);
 
         -- 分类定义表
         CREATE TABLE IF NOT EXISTS categories (
@@ -386,6 +388,24 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         qDebug() << "[DB] 检测到旧版数据库，正在添加 added_at 字段...";
         sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN added_at INTEGER DEFAULT 0", nullptr, nullptr, nullptr);
         sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_metadata_added_at ON metadata(added_at);", nullptr, nullptr, nullptr);
+    }
+
+    // 自动检测并补全 sha256 字段
+    bool hasSha256Column = false;
+    sqlite3_stmt* shaCheckStmt = nullptr;
+    if (sqlite3_prepare_v2(conn.memDb, "PRAGMA table_info(metadata)", -1, &shaCheckStmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(shaCheckStmt) == SQLITE_ROW) {
+            const char* colName = reinterpret_cast<const char*>(sqlite3_column_text(shaCheckStmt, 1));
+            if (colName && std::string(colName) == "sha256") {
+                hasSha256Column = true;
+            }
+        }
+        sqlite3_finalize(shaCheckStmt);
+    }
+    if (!hasSha256Column) {
+        qDebug() << "[DB] 检测到旧版数据库，正在添加 sha256 字段...";
+        sqlite3_exec(conn.memDb, "ALTER TABLE metadata ADD COLUMN sha256 TEXT DEFAULT ''", nullptr, nullptr, nullptr);
+        sqlite3_exec(conn.memDb, "CREATE INDEX IF NOT EXISTS idx_metadata_hash ON metadata(file_size, sha256);", nullptr, nullptr, nullptr);
     }
 
     // 2026-08-xx 新增字段：持久化基名与后缀名，避免每次启动现算并优化回填
