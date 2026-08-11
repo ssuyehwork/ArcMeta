@@ -3,6 +3,7 @@
 #include "StyleLibrary.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/AmMetaJson.h"
+#include "components/FlowLayout.h"
 #include <QApplication>
 #include <QScreen>
 #include <QFileInfo>
@@ -23,7 +24,7 @@ TagManagerDialog::TagManagerDialog(const QString& currentPath, bool isMirrorSour
 
     // 尺寸硬性约束：显示 180px 侧边栏时最小宽度 400px
     setMinimumSize(400, 350);
-    resize(580, 460);
+    resize(580, 480);
 
     initContent();
     applyTheme();
@@ -35,7 +36,7 @@ void TagManagerDialog::initContent() {
     mainL->setContentsMargins(0, 0, 0, 0);
     mainL->setSpacing(0);
 
-    // ================= 1. 顶部操作栏（透明搜索框 + 右侧 sidebar.svg 按钮） =================
+    // ================= 1. 顶部操作栏（透明搜索框 + 右侧 sidebar 按钮） =================
     QWidget* topBar = new QWidget(this);
     topBar->setFixedHeight(40);
     topBar->setStyleSheet("background: transparent; border-bottom: 1px solid #333;");
@@ -61,7 +62,7 @@ void TagManagerDialog::initContent() {
     });
     topL->addWidget(m_searchEdit, 1);
 
-    // 侧边栏折叠按钮 (使用 sidebar.svg)
+    // 侧边栏折叠按钮
     m_btnToggleSidebar = new QPushButton(topBar);
     m_btnToggleSidebar->setFixedSize(24, 24);
     m_btnToggleSidebar->setCheckable(true);
@@ -88,14 +89,40 @@ void TagManagerDialog::initContent() {
     m_sidebar->setFixedWidth(180); // 规则：侧边栏宽度恒定 180px，不可调整
     m_sidebar->setStyleSheet("QFrame { background-color: #252526; border-right: 1px solid #333; }");
     m_sidebarLayout = new QVBoxLayout(m_sidebar);
-    m_sidebarLayout->setContentsMargins(10, 10, 10, 10);
+    m_sidebarLayout->setContentsMargins(10, 15, 10, 10);
     m_sidebarLayout->setSpacing(6);
 
     QLabel* sideTitle = new QLabel("分类导航", m_sidebar);
-    sideTitle->setStyleSheet("color: #888; font-size: 11px; font-weight: bold;");
+    sideTitle->setStyleSheet("color: #888; font-size: 11px; font-weight: bold; margin-bottom: 4px;");
     m_sidebarLayout->addWidget(sideTitle);
 
-    // 追加全部、未分类等导航项...
+    m_sidebarGroup = new QButtonGroup(this);
+    m_sidebarGroup->setExclusive(true);
+
+    auto addSidebarBtn = [this](int id, const QString& icon, const QString& name) {
+        QPushButton* btn = new QPushButton(m_sidebar);
+        btn->setText(" " + name);
+        btn->setIcon(UiHelper::getIcon(icon, QColor("#AAAAAA"), 13));
+        btn->setIconSize(QSize(13, 13));
+        btn->setCheckable(true);
+        btn->setFixedSize(160, 28);
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setStyleSheet(
+            "QPushButton { background: transparent; color: #CCC; border: none; text-align: left; padding-left: 10px; border-radius: 4px; font-size: 11px; }"
+            "QPushButton:hover { background-color: #2D2D30; color: #FFF; }"
+            "QPushButton:checked { background-color: #3E3E42; color: #3498DB; font-weight: bold; }"
+        );
+        m_sidebarLayout->addWidget(btn);
+        m_sidebarGroup->addButton(btn, id);
+    };
+
+    addSidebarBtn(0, "all_data", "全部标签");
+    addSidebarBtn(1, "uncategorized", "未分类标签");
+    addSidebarBtn(2, "star_filled", "常用标签");
+
+    m_sidebarGroup->button(0)->setChecked(true);
+    connect(m_sidebarGroup, &QButtonGroup::idClicked, this, &TagManagerDialog::onSidebarItemClicked);
+
     m_sidebarLayout->addStretch();
     bodyL->addWidget(m_sidebar);
 
@@ -116,7 +143,7 @@ void TagManagerDialog::initContent() {
     m_btnAddNewTag = new QPushButton(m_addNewTagWidget);
     m_btnAddNewTag->setCursor(Qt::PointingHandCursor);
     m_btnAddNewTag->setStyleSheet(
-        "QPushButton { background: #1C97EA; color: #FFF; border: none; border-radius: 4px; padding: 4px 12px; font-weight: bold; font-size: 12px; }"
+        "QPushButton { background: #1C97EA; color: #FFF; border: none; border-radius: 4px; padding: 4px 12px; font-weight: bold; font-size: 11px; }"
         "QPushButton:hover { background: #1886D2; }"
     );
     connect(m_btnAddNewTag, &QPushButton::clicked, [this]() {
@@ -130,23 +157,12 @@ void TagManagerDialog::initContent() {
     m_addNewTagWidget->hide();
     m_contentLayout->addWidget(m_addNewTagWidget);
 
-    // 最近使用区块
-    QLabel* lblRecent = new QLabel("最近使用", m_contentWidget);
-    lblRecent->setStyleSheet("color: #1ABC9C; font-size: 12px; font-weight: bold;");
-    m_contentLayout->addWidget(lblRecent);
-
-    m_recentTagsContainer = new QWidget(m_contentWidget);
-    m_recentFlowLayout = new FlowLayout(m_recentTagsContainer, 0, 8, 6);
-    m_contentLayout->addWidget(m_recentTagsContainer);
-
-    // 全部标签区块
-    QLabel* lblAll = new QLabel("全部标签", m_contentWidget);
-    lblAll->setStyleSheet("color: #888; font-size: 12px; font-weight: bold;");
-    m_contentLayout->addWidget(lblAll);
-
-    m_allTagsContainer = new QWidget(m_contentWidget);
-    m_allFlowLayout = new FlowLayout(m_allTagsContainer, 0, 8, 6);
-    m_contentLayout->addWidget(m_allTagsContainer);
+    // 标签分组滚动区域主布局
+    QWidget* tagsScrollWidget = new QWidget(m_contentWidget);
+    m_tagsScrollLayout = new QVBoxLayout(tagsScrollWidget);
+    m_tagsScrollLayout->setContentsMargins(0, 0, 0, 0);
+    m_tagsScrollLayout->setSpacing(15);
+    m_contentLayout->addWidget(tagsScrollWidget);
 
     m_contentLayout->addStretch();
     m_scrollArea->setWidget(m_contentWidget);
@@ -164,6 +180,14 @@ void TagManagerDialog::onSidebarToggled(bool checked) {
     }
 }
 
+void TagManagerDialog::onSidebarItemClicked(int id) {
+    if (id == 0) m_currentFilter = "all";
+    else if (id == 1) m_currentFilter = "uncategorized";
+    else if (id == 2) m_currentFilter = "frequent";
+
+    refreshTags();
+}
+
 void TagManagerDialog::onSearchTextChanged(const QString& text) {
     QString kw = text.trimmed();
     if (kw.isEmpty()) {
@@ -177,6 +201,7 @@ void TagManagerDialog::onSearchTextChanged(const QString& text) {
             m_addNewTagWidget->hide();
         }
     }
+    refreshTags();
 }
 
 void TagManagerDialog::createTag(const QString& tagName) {
@@ -202,7 +227,7 @@ void TagManagerDialog::createTag(const QString& tagName) {
         }
     }
 
-    // 🚨 实时更新规则：新新增的标签瞬时挂载到“最近使用”区域首位
+    // 实时更新规则：新新增的标签瞬时挂载到“最近使用”区域首位
     s_sessionRecentTags.removeAll(tagName);
     s_sessionRecentTags.prepend(tagName);
 
@@ -223,33 +248,120 @@ void TagManagerDialog::refreshTags() {
         }
     }
 
-    // 1. 渲染“最近使用”流式布局 (实时更新)
-    while (QLayoutItem* item = m_recentFlowLayout->takeAt(0)) {
-        delete item->widget(); delete item;
-    }
-    for (const QString& tag : s_sessionRecentTags) {
-        QPushButton* btn = new QPushButton(tag, m_recentTagsContainer);
-        btn->setCursor(Qt::PointingHandCursor);
-        btn->setStyleSheet("QPushButton { background: #2D2D30; border: 1px solid #3498DB; color: #3498DB; border-radius: 4px; padding: 3px 8px; font-size: 12px; }");
-        m_recentFlowLayout->addWidget(btn);
+    // 清理标签滚动区域
+    while (QLayoutItem* item = m_tagsScrollLayout->takeAt(0)) {
+        delete item->widget();
+        delete item;
     }
 
-    // 2. 渲染“全部标签”流式布局
-    while (QLayoutItem* item = m_allFlowLayout->takeAt(0)) {
-        delete item->widget(); delete item;
-    }
+    QString searchKeyword = m_searchEdit->text().trimmed().toLower();
+
+    // 过滤出符合搜索关键字的标签
+    QMap<QString, int> filteredTagCounts;
     for (auto it = m_allTagCounts.begin(); it != m_allTagCounts.end(); ++it) {
-        QPushButton* btn = new QPushButton(QString("%1 (%2)").arg(it.key()).arg(it.value()), m_allTagsContainer);
-        btn->setCursor(Qt::PointingHandCursor);
-        btn->setStyleSheet("QPushButton { background: transparent; border: 1px solid #444; color: #AAA; border-radius: 4px; padding: 3px 8px; font-size: 12px; }");
-        m_allFlowLayout->addWidget(btn);
+        if (searchKeyword.isEmpty() || it.key().toLower().contains(searchKeyword)) {
+            filteredTagCounts.insert(it.key(), it.value());
+        }
+    }
+
+    // 1. 最近使用标签组
+    QStringList filteredRecent;
+    for (const QString& tag : s_sessionRecentTags) {
+        if (searchKeyword.isEmpty() || tag.toLower().contains(searchKeyword)) {
+            filteredRecent.append(tag);
+        }
+    }
+
+    if (!filteredRecent.isEmpty() && m_currentFilter == "all") {
+        QWidget* groupWidget = new QWidget();
+        QVBoxLayout* groupL = new QVBoxLayout(groupWidget);
+        groupL->setContentsMargins(0, 0, 0, 0);
+        groupL->setSpacing(6);
+
+        QLabel* titleLabel = new QLabel("最近使用", groupWidget);
+        titleLabel->setStyleSheet("color: #1ABC9C; font-size: 11px; font-weight: bold;");
+        groupL->addWidget(titleLabel);
+
+        QWidget* flowContainer = new QWidget(groupWidget);
+        FlowLayout* flowL = new FlowLayout(flowContainer, 0, 6, 6);
+        for (const QString& tag : filteredRecent) {
+            int count = m_allTagCounts.value(tag, 0);
+            QPushButton* btn = new QPushButton(QString("• %1 (%2)").arg(tag).arg(count), flowContainer);
+            btn->setCursor(Qt::PointingHandCursor);
+            btn->setStyleSheet(
+                "QPushButton { background: transparent; border: 1px solid #333; color: #3498DB; border-radius: 12px; padding: 3px 10px; font-size: 11px; }"
+                "QPushButton:hover { border-color: #3498DB; background-color: #2D2D30; }"
+            );
+            connect(btn, &QPushButton::clicked, [this, tag]() {
+                createTag(tag);
+            });
+            flowL->addWidget(btn);
+        }
+        groupL->addWidget(flowContainer);
+        m_tagsScrollLayout->addWidget(groupWidget);
+    }
+
+    // 2. 字母与其它 A-Z 分组标签
+    QMap<QString, QMap<QString, int>> alphabetGroups;
+    for (auto it = filteredTagCounts.begin(); it != filteredTagCounts.end(); ++it) {
+        QString tag = it.key();
+        int count = it.value();
+
+        // 筛选逻辑
+        if (m_currentFilter == "uncategorized" && count > 2) {
+            continue; // 未分类标签：展现轻量/低频标签
+        }
+        if (m_currentFilter == "frequent" && count < 3) {
+            continue; // 常用标签：展现高频标签
+        }
+
+        QChar firstChar = tag.at(0).toUpper();
+        QString groupKey = "其它";
+        if (firstChar >= 'A' && firstChar <= 'Z') {
+            groupKey = QString(firstChar);
+        }
+        alphabetGroups[groupKey][tag] = count;
+    }
+
+    // 排序并绘制分组
+    for (auto git = alphabetGroups.begin(); git != alphabetGroups.end(); ++git) {
+        QString groupName = git.key();
+        const auto& tagMap = git.value();
+
+        QWidget* groupWidget = new QWidget();
+        QVBoxLayout* groupL = new QVBoxLayout(groupWidget);
+        groupL->setContentsMargins(0, 0, 0, 0);
+        groupL->setSpacing(6);
+
+        QLabel* titleLabel = new QLabel(groupName, groupWidget);
+        titleLabel->setStyleSheet("color: #888888; font-size: 11px; font-weight: bold;");
+        groupL->addWidget(titleLabel);
+
+        QWidget* flowContainer = new QWidget(groupWidget);
+        FlowLayout* flowL = new FlowLayout(flowContainer, 0, 6, 6);
+        for (auto tit = tagMap.begin(); tit != tagMap.end(); ++tit) {
+            QString tag = tit.key();
+            int count = tit.value();
+
+            QPushButton* btn = new QPushButton(QString("• %1 (%2)").arg(tag).arg(count), flowContainer);
+            btn->setCursor(Qt::PointingHandCursor);
+            btn->setStyleSheet(
+                "QPushButton { background: transparent; border: 1px solid #333; color: #BBB; border-radius: 12px; padding: 3px 10px; font-size: 11px; }"
+                "QPushButton:hover { border-color: #1ABC9C; color: #1ABC9C; background-color: #252526; }"
+            );
+            connect(btn, &QPushButton::clicked, [this, tag]() {
+                createTag(tag);
+            });
+            flowL->addWidget(btn);
+        }
+        groupL->addWidget(flowContainer);
+        m_tagsScrollLayout->addWidget(groupWidget);
     }
 }
 
 void TagManagerDialog::resizeEvent(QResizeEvent* event) {
     FramelessDialog::resizeEvent(event);
-    if (m_recentFlowLayout) m_recentFlowLayout->activate();
-    if (m_allFlowLayout) m_allFlowLayout->activate();
+    refreshTags(); // 自适应布局刷新流式布局
 }
 
 void TagManagerDialog::applyTheme() {

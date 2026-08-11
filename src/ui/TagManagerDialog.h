@@ -10,6 +10,7 @@
 #include <QScrollArea>
 #include <QLabel>
 #include <QFrame>
+#include <QButtonGroup>
 
 namespace ArcMeta {
 
@@ -34,6 +35,7 @@ protected:
 private slots:
     void onSearchTextChanged(const QString& text);
     void onSidebarToggled(bool checked);
+    void onSidebarItemClicked(int id);
 
 private:
     void initContent();
@@ -43,6 +45,7 @@ private:
 
     QString m_currentPath;
     bool m_isMirrorSource = false;
+    QString m_currentFilter = "all"; // "all" | "uncategorized" | "frequent"
 
     // 顶部组件
     QLineEdit* m_searchEdit = nullptr;
@@ -51,6 +54,7 @@ private:
     // 左侧 180px 侧边栏
     QFrame* m_sidebar = nullptr;
     QVBoxLayout* m_sidebarLayout = nullptr;
+    QButtonGroup* m_sidebarGroup = nullptr;
 
     // 右侧内容区
     QScrollArea* m_scrollArea = nullptr;
@@ -61,12 +65,8 @@ private:
     QWidget* m_addNewTagWidget = nullptr;
     QPushButton* m_btnAddNewTag = nullptr;
 
-    // 标签流式容器
-    QWidget* m_recentTagsContainer = nullptr;
-    FlowLayout* m_recentFlowLayout = nullptr;
-
-    QWidget* m_allTagsContainer = nullptr;
-    FlowLayout* m_allFlowLayout = nullptr;
+    // 数据列表容器
+    QVBoxLayout* m_tagsScrollLayout = nullptr;
 
     // 数据缓存
     static QStringList s_sessionRecentTags; // 全局会话级“最近使用”历史队列
