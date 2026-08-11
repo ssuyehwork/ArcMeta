@@ -58,6 +58,7 @@ public:
         QRect cardRect;
         QRect textRect;
         QRect banRect;
+        QRect capsuleRect;
         int starsStartX;
         int starSize;
         int starSpacing;
@@ -71,6 +72,7 @@ public:
         }
     };
     Metrics calculateMetrics(const QStyleOptionViewItem& option) const;
+    static int calculateGridItemHeight(int zoomLevel);
 
 private:
     void drawFileNameText(QPainter* painter, const QRect& textRect, bool isSelected, const QModelIndex& index, const QStyleOptionViewItem& option) const;

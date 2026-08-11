@@ -71,7 +71,20 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
     m.banRect = QRect(infoStartX, m.ratingY + (m.ratingH - banW) / 2, banW, banW);
     m.starsStartX = infoStartX + banW + banGap;
 
+    // 统一计算并装配胶囊体位置
+    int capsuleLeft = m.banRect.left() - 4;
+    int capsuleRight = m.starsStartX + 4 * (m.starSize + m.starSpacing) + m.starSize + 4;
+    m.capsuleRect = QRect(capsuleLeft, m.ratingY, capsuleRight - capsuleLeft, m.ratingH);
+
     return m;
+}
+
+int ThumbnailDelegate::calculateGridItemHeight(int zoomLevel) {
+    const int textHeight = 36;
+    const int ratingHeight = 24;
+    const int gap = 4;
+    int cardHeight = zoomLevel + 40;
+    return cardHeight + 3 + (textHeight + ratingHeight + gap + 3);
 }
 
 void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const {
@@ -166,7 +179,7 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         int rating = index.data(m_ratingRole).toInt();
         QString colorStr = (m_colorRole != -1) ? index.data(m_colorRole).toString() : "";
 
-        CardPainterHelper::drawRatingStars(painter, m.banRect, m.cardRect, m.starSize, m.starSpacing, m.ratingY, m.ratingH, m.starsStartX,
+        CardPainterHelper::drawRatingStars(painter, m.banRect, m.capsuleRect, m.starSize, m.starSpacing, m.ratingY, m.ratingH, m.starsStartX,
                                           rating, colorStr, isSelected);
     }
 
@@ -198,7 +211,7 @@ void ThumbnailDelegate::drawFileNameText(QPainter* painter, const QRect& textRec
 
     // 调用提取的静态排版工具方法，限制文件名最多2行
     QString displayName = ElidedTextUtility::elideTwoLinesText(name, option.fontMetrics, textRect.width() - 8);
-    painter->drawText(textRect.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::TextWordWrap, displayName);
+    painter->drawText(textRect.adjusted(4, 0, -4, 0), Qt::AlignTop | Qt::AlignHCenter | Qt::TextWordWrap, displayName);
     painter->restore();
 }
 

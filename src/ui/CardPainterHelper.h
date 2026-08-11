@@ -29,7 +29,7 @@ public:
 
     // 5. 绘制评级星级与彩色胶囊底色
     static void drawRatingStars(QPainter* painter, const QRect& banRect, 
-                                const QRect& cardRect, int starSize, int starSpacing, int ratingY, int ratingH, int starsStartX,
+                                const QRect& capsuleRect, int starSize, int starSpacing, int ratingY, int ratingH, int starsStartX,
                                 int rating, const QString& colorStr, bool isSelected);
 
     // 6. 绘制空文件夹特异虚线边框

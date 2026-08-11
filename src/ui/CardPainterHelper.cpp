@@ -136,12 +136,9 @@ void CardPainterHelper::drawExtensionBadge(QPainter* painter, const QRect& cardR
 }
 
 void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect, 
-                                        const QRect& cardRect, int starSize, int starSpacing, int ratingY, int ratingH, int starsStartX,
+                                        const QRect& capsuleRect, int starSize, int starSpacing, int ratingY, int ratingH, int starsStartX,
                                         int rating, const QString& colorStr, bool isSelected) {
-    Q_UNUSED(cardRect);
     Q_UNUSED(starSpacing);
-
-    int unifiedSpacing = -4;
 
     if (!colorStr.isEmpty()) {
         QColor bgColor = UiHelper::parseColorName(colorStr);
@@ -151,12 +148,7 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
             painter->setBrush(bgColor);
             painter->setPen(Qt::NoPen);
             
-            // 1. 准确使用传入的 ratingH 决定彩色胶囊底色的真实高度
-            int capsuleLeft = banRect.left() - 4;
-            int capsuleRight = starsStartX + 4 * (starSize + unifiedSpacing) + starSize + 4;
-            QRect capsuleRect(capsuleLeft, ratingY, capsuleRight - capsuleLeft, ratingH);
-
-            // 2. 绘制精确高度的圆角胶囊背景
+            // 直接绘制传入的圆角胶囊背景
             painter->drawRoundedRect(capsuleRect, 4, 4);
             painter->restore();
         }

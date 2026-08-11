@@ -229,8 +229,12 @@ public:
                     QRect banRect(startX, option.rect.top() + (option.rect.height() - banW) / 2, banW, banW);
                     int starsStartX = startX + banW + banGap; 
 
+                    int capsuleLeft = banRect.left() - 4;
+                    int capsuleRight = starsStartX + 4 * (starSize + starSpacing) + starSize + 4;
+                    QRect capsuleRect(capsuleLeft, option.rect.top(), capsuleRight - capsuleLeft, option.rect.height());
+
                     // 2. 一行代码委托绘制 5 星与彩色胶囊背景（含感知对比度自动计算）
-                    CardPainterHelper::drawRatingStars(painter, banRect, option.rect, starSize, starSpacing, 
+                    CardPainterHelper::drawRatingStars(painter, banRect, capsuleRect, starSize, starSpacing,
                                                       option.rect.top(), option.rect.height(), starsStartX,
                                                       rating, colorName, isSelected);
                 }

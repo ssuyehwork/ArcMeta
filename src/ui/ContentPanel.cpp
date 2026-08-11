@@ -812,10 +812,7 @@ void ContentPanel::updateGridSize() {
         } else if (auto* lv = qobject_cast<QListView*>(m_gridView)) {
             lv->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
             int side = m_zoomLevel + 46;
-            int ratingH = 24;
-            int nameH = (int)(m_zoomLevel * 0.25);
-            int gap = 4; // 统一修改为 4，与 ThumbnailDelegate.cpp 保持绝对物理对齐
-            int totalH = side + gap + ratingH + gap + nameH + 8;
+            int totalH = ThumbnailDelegate::calculateGridItemHeight(m_zoomLevel);
             lv->setGridSize(QSize(side, totalH));
         }
     } else if (m_viewStack->currentWidget() == m_treeView) {
