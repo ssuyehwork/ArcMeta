@@ -811,7 +811,7 @@ void ContentPanel::updateGridSize() {
         } else if (auto* lv = qobject_cast<QListView*>(m_gridView)) {
             lv->setIconSize(QSize(m_zoomLevel, m_zoomLevel));
             int side = m_zoomLevel + 46;
-            int ratingH = 24;
+            int ratingH = 20; // 统一修改为 20 像素
             int nameH = (int)(m_zoomLevel * 0.25);
             int gap = 6;
             int totalH = side + gap + ratingH + gap + nameH + 8;
