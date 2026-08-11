@@ -5,6 +5,7 @@
 #include <QRadioButton>
 #include <QCheckBox>
 #include <QPushButton>
+#include <QButtonGroup>
 
 namespace ArcMeta {
 
