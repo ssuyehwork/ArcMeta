@@ -403,20 +403,21 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
         }
     }
 
-    // 3. 物理第一权重：文件夹与子分类始终置顶 (绝对强制，升降序下均不动摇)
+    // 3. 物理第一权重与第二权重：文件夹与置顶优先规则 (升降序下均强制置顶，不随用户排序取反下沉)
+    bool isAsc = (sortOrder() == Qt::AscendingOrder);
+
     bool leftIsDir = (leftRec.isDir || leftRec.isCategory);
     bool rightIsDir = (rightRec.isDir || rightRec.isCategory);
 
     if (leftIsDir != rightIsDir) {
-        return leftIsDir; // 文件夹永远“更小”排在前面
+        return isAsc ? leftIsDir : !leftIsDir;
     }
 
-    // 4. 物理第二权重：置顶优先规则 (升降序下均强制置顶，不随用户排序取反下沉)
     bool leftPinned = leftRec.pinned || leftRec.encrypted;
     bool rightPinned = rightRec.pinned || rightRec.encrypted;
  
     if (leftPinned != rightPinned) { 
-        return leftPinned; // 置顶项永远排在前面
+        return isAsc ? leftPinned : !leftPinned;
     } 
 
     // 5. 物理第三权重：具体的排序类型逻辑，平局时统一追加二级决胜键 (localeAwareCompare 拼音/文件名)
@@ -813,7 +814,7 @@ void ContentPanel::updateGridSize() {
             int side = m_zoomLevel + 46;
             int ratingH = 24;
             int nameH = (int)(m_zoomLevel * 0.25);
-            int gap = 6;
+            int gap = 4; // 统一修改为 4，与 ThumbnailDelegate.cpp 保持绝对物理对齐
             int totalH = side + gap + ratingH + gap + nameH + 8;
             lv->setGridSize(QSize(side, totalH));
         }
