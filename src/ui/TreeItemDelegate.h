@@ -230,8 +230,10 @@ public:
                     int starsStartX = startX + banW + banGap; 
 
                     // 2. 一行代码委托绘制 5 星与彩色胶囊背景（含感知对比度自动计算）
+                    int colorBarH = 20; // 单独控制颜色条高度为 20 像素
+                    int colorBarY = option.rect.top() + (option.rect.height() - colorBarH) / 2; // 行内垂直居中
                     CardPainterHelper::drawRatingStars(painter, banRect, option.rect, starSize, starSpacing, 
-                                                      option.rect.top(), option.rect.height(), starsStartX,
+                                                      colorBarY, colorBarH, starsStartX,
                                                       rating, colorName, isSelected);
                 }
             }
