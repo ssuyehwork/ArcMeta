@@ -622,14 +622,6 @@ void CategoryPanel::onCreateSubCategory() {
     }
 }
 
-void CategoryPanel::onSetPresetTags() {
-    QModelIndex index = m_categoryTree->currentIndex();
-    QString path = index.data(PathRole).toString();
-
-    // 一键弹出模块化高级标签管理弹窗
-    TagManagerDialog::showDialog(this, path, false);
-}
-
 void CategoryPanel::onTogglePin() {
     QModelIndex index = m_categoryTree->currentIndex();
     int id = getTargetCategoryId(index);
@@ -869,6 +861,14 @@ void CategoryPanel::onSortByNameDesc() {
         m_categoryModel->refresh();
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#2ecc71;'>[OK] 已按 Z→A 排列</b>");
     }
+}
+
+void CategoryPanel::onSetPresetTags() {
+    QModelIndex index = m_categoryTree->currentIndex();
+    QString path = index.data(PathRole).toString();
+
+    // 一键弹出全新的模块化高级标签管理弹窗
+    TagManagerDialog::showDialog(this, path, false);
 }
 
 void CategoryPanel::onSortAllByNameAsc() {
