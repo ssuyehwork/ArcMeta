@@ -8,7 +8,6 @@
 namespace ArcMeta {
 
 static QWidget* createCard(const DuplicateItemInfo& item, const QString& badgeText, bool isExisting) {
-    Q_UNUSED(isExisting);
     QWidget* card = new QWidget();
     card->setFixedSize(320, 320);
     card->setStyleSheet("background-color: #232325; border-radius: 8px;");
@@ -17,35 +16,40 @@ static QWidget* createCard(const DuplicateItemInfo& item, const QString& badgeTe
     layout->setContentsMargins(15, 15, 15, 15);
     layout->setSpacing(8);
 
+    // 图片卡片容器
     QLabel* imgLabel = new QLabel(card);
     imgLabel->setFixedSize(290, 200);
-    imgLabel->setStyleSheet("background-color: #2D2D30; border-radius: 6px;");
+    imgLabel->setStyleSheet(isExisting ? "background-color: #2D2D30; border-radius: 6px;" : "background-color: #2D2D30; border-radius: 6px;");
     imgLabel->setAlignment(Qt::AlignCenter);
 
     if (!item.thumbnail.isNull()) {
         imgLabel->setPixmap(QPixmap::fromImage(item.thumbnail).scaled(290, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }
 
+    // 徽章 ("已存在" / "新的文件")
     QLabel* badge = new QLabel(badgeText, imgLabel);
     badge->setStyleSheet("background-color: rgba(0, 0, 0, 0.6); color: #FFFFFF; border-radius: 4px; padding: 2px 8px; font-size: 11px;");
     badge->move(10, 10);
 
     layout->addWidget(imgLabel);
 
+    // 文件名
     QLabel* nameLabel = new QLabel(item.filename, card);
     nameLabel->setAlignment(Qt::AlignCenter);
     nameLabel->setStyleSheet("color: #FFFFFF; font-weight: bold; font-size: 12px;");
     layout->addWidget(nameLabel);
 
+    // 分辨率 / 大小
     QString infoText = QString("%1 x %2 / %3 KB")
-                        .arg(item.width > 0 ? item.width : 510)
-                        .arg(item.height > 0 ? item.height : 510)
+                        .arg(item.width > 0 ? item.width : 4180)
+                        .arg(item.height > 0 ? item.height : 4180)
                         .arg(item.size / 1024);
     QLabel* infoLabel = new QLabel(infoText, card);
     infoLabel->setAlignment(Qt::AlignCenter);
     infoLabel->setStyleSheet("color: #AAAAAA; font-size: 11px;");
     layout->addWidget(infoLabel);
 
+    // 标签徽章
     if (!item.tagHint.isEmpty()) {
         QLabel* tagBadge = new QLabel(item.tagHint, card);
         tagBadge->setAlignment(Qt::AlignCenter);
@@ -74,7 +78,6 @@ DuplicateConflictDialog::DuplicateConflictDialog(const DuplicateConflictGroup& c
 
     // 2. 底部单选按钮、复选框与提交按钮区域
     QHBoxLayout* bottomLayout = new QHBoxLayout();
-    bottomLayout->setSpacing(15);
 
     m_radUseExisting = new QRadioButton("使用已存在文件导入", this);
     m_radKeepBoth = new QRadioButton("保留两者", this);
@@ -82,10 +85,6 @@ DuplicateConflictDialog::DuplicateConflictDialog(const DuplicateConflictGroup& c
 
     m_radUseExisting->setStyleSheet("QRadioButton { color: #FFFFFF; font-size: 12px; }");
     m_radKeepBoth->setStyleSheet("QRadioButton { color: #FFFFFF; font-size: 12px; }");
-
-    QButtonGroup* group = new QButtonGroup(this);
-    group->addButton(m_radUseExisting);
-    group->addButton(m_radKeepBoth);
 
     bottomLayout->addWidget(m_radUseExisting);
     bottomLayout->addWidget(m_radKeepBoth);
@@ -111,6 +110,10 @@ DuplicateConflictDialog::DuplicateConflictDialog(const DuplicateConflictGroup& c
     bottomLayout->addWidget(m_btnSubmit);
 
     mainL->addLayout(bottomLayout);
+
+    QButtonGroup* group = new QButtonGroup(this);
+    group->addButton(m_radUseExisting);
+    group->addButton(m_radKeepBoth);
 
     connect(m_btnSubmit, &QPushButton::clicked, this, &QDialog::accept);
 }

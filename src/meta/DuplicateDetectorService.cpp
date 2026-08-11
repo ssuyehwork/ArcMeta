@@ -1,128 +1,146 @@
 #include "DuplicateDetectorService.h"
 #include "MetadataManager.h"
+#include "CapsuleMediaExtractor.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QFile>
 #include <QCryptographicHash>
-#include <QDebug>
+#include <QImageReader>
+#include <unordered_map>
+#include <unordered_set>
+#include <algorithm>
 
 namespace ArcMeta {
 
-std::string DuplicateDetectorService::calculateFastHash(const QString& filePath) {
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return "";
-    }
-    qint64 size = file.size();
-    if (size <= 8192) {
-        QByteArray data = file.readAll();
-        return QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex().toStdString();
-    }
-    
-    QByteArray buffer;
-    buffer.reserve(8192);
-    
-    // 读取头部 4KB
-    buffer.append(file.read(4096));
-    
-    // 读取尾部 4KB
-    if (file.seek(size - 4096)) {
-        buffer.append(file.read(4096));
-    }
-    
-    return QCryptographicHash::hash(buffer, QCryptographicHash::Sha256).toHex().toStdString();
-}
-
-std::string DuplicateDetectorService::calculateFullSha256(const QString& filePath) {
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return "";
-    }
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    if (hash.addData(&file)) {
-        return hash.result().toHex().toStdString();
-    }
-    return "";
-}
-
 std::vector<DuplicateConflictGroup> DuplicateDetectorService::detectDuplicates(const QStringList& newImportedPaths) {
     std::vector<DuplicateConflictGroup> conflicts;
-    
+    if (newImportedPaths.isEmpty()) return conflicts;
+
+    // 预索引：在进入大循环前，对已缓存的资产进行一次性建图索引，降低时间复杂度至 O(M)
+    std::unordered_map<long long, std::vector<std::pair<std::wstring, RuntimeMeta>>> sizeIndexMap;
+    std::unordered_map<std::wstring, std::vector<std::pair<std::wstring, RuntimeMeta>>> nameIndexMap;
+
+    MetadataManager::instance().forEachCachedItem([&](const std::wstring& existPathW, const RuntimeMeta& meta) {
+        if (meta.isFolder || meta.isTrash) return;
+
+        // 大小索引
+        sizeIndexMap[meta.fileSize].push_back({existPathW, meta});
+
+        // 文件名索引 (统一转小写以进行不区分大小写的比对)
+        QFileInfo info(QString::fromStdWString(existPathW));
+        std::wstring lowerName = info.fileName().toStdWString();
+        std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+        nameIndexMap[lowerName].push_back({existPathW, meta});
+    });
+
     for (const QString& newPath : newImportedPaths) {
-        QFileInfo newFi(newPath);
-        if (!newFi.exists() || !newFi.isFile()) continue;
-        
-        qint64 newSize = newFi.size();
-        std::wstring wNewPath = MetadataManager::normalizePath(newPath.toStdWString());
-        
-        // 我们需要缓存在这轮循环中新算出的哈希
-        bool hasNewFastHash = false;
-        std::string newFastHash = "";
-        
-        bool hasNewSha256 = false;
-        std::string newSha256 = "";
-        
-        MetadataManager::instance().forEachCachedItem([&](const std::wstring& cachedWPath, const RuntimeMeta& rm) {
-            if (cachedWPath == wNewPath) return;
-            
-            // 第一级（体积排除）
-            if (rm.isFolder || rm.isTrash) return;
-            if (rm.fileSize != newSize) return;
-            
-            // 第二级（快速采样 Hash 比对）
-            if (!hasNewFastHash) {
-                newFastHash = calculateFastHash(newPath);
-                hasNewFastHash = true;
-            }
-            if (newFastHash.empty()) return;
-            
-            QString cachedPath = QString::fromStdWString(cachedWPath);
-            std::string cachedFastHash = calculateFastHash(cachedPath);
-            if (cachedFastHash.empty() || cachedFastHash != newFastHash) return;
-            
-            // 第三级（全量 SHA256 确认）
-            if (!hasNewSha256) {
-                newSha256 = calculateFullSha256(newPath);
-                hasNewSha256 = true;
-            }
-            if (newSha256.empty()) return;
-            
-            std::string cachedSha256 = rm.sha256;
-            if (cachedSha256.empty()) {
-                // 如果历史文件缺失 sha256，对历史文件计算一次并立即持久化落盘
-                cachedSha256 = calculateFullSha256(cachedPath);
-                if (!cachedSha256.empty()) {
-                    MetadataManager::instance().setSha256(cachedWPath, cachedSha256, false);
+        QFileInfo newInfo(newPath);
+        if (!newInfo.exists() || newInfo.isDir()) continue;
+
+        qint64 size = newInfo.size();
+        QString fileName = newInfo.fileName();
+        std::wstring lowerNewName = fileName.toStdWString();
+        std::transform(lowerNewName.begin(), lowerNewName.end(), lowerNewName.begin(), ::tolower);
+
+        // 1. 计算新文件的 SHA-256 哈希
+        QFile file(newPath);
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        if (!hash.addData(&file)) continue;
+        QString sha256Hex = QString(hash.result().toHex()).toLower();
+        file.close();
+
+        // 2. 获取新文件的分辨率
+        QImageReader reader(newPath);
+        QSize newImgSize = reader.size();
+        int newWidth = newImgSize.width();
+        int newHeight = newImgSize.height();
+
+        // 匹配集，用来去重，避免重复添加相同的冲突记录
+        std::unordered_set<std::wstring> matchedPaths;
+
+        // 一重判定：文件大小相同且哈希相同
+        auto sizeIt = sizeIndexMap.find(size);
+        if (sizeIt != sizeIndexMap.end()) {
+            for (const auto& pair : sizeIt->second) {
+                const std::wstring& existPathW = pair.first;
+                const RuntimeMeta& meta = pair.second;
+                if (QString::fromStdWString(existPathW) == newPath) continue;
+
+                // 只有大小相同时，才对已有文件在后台进行 SHA-256 哈希抽取比对，将 I/O 开销降到最低
+                QString existSha;
+                if (!meta.sha256.empty()) {
+                    existSha = QString::fromStdString(meta.sha256).toLower();
+                } else {
+                    QFile existFile(QString::fromStdWString(existPathW));
+                    if (existFile.open(QIODevice::ReadOnly)) {
+                        QCryptographicHash existHash(QCryptographicHash::Sha256);
+                        if (existHash.addData(&existFile)) {
+                            existSha = QString(existHash.result().toHex()).toLower();
+                        }
+                        existFile.close();
+                    }
+                }
+
+                if (!existSha.isEmpty() && existSha == sha256Hex) {
+                    matchedPaths.insert(existPathW);
+
+                    DuplicateConflictGroup group;
+                    group.existingItem.folderId = QString::fromStdString(meta.folderId);
+                    group.existingItem.path = QString::fromStdWString(existPathW);
+                    group.existingItem.filename = QFileInfo(QString::fromStdWString(existPathW)).fileName();
+                    group.existingItem.width = meta.width;
+                    group.existingItem.height = meta.height;
+                    group.existingItem.size = meta.fileSize;
+                    group.existingItem.tagHint = meta.tags.isEmpty() ? "" : meta.tags.first();
+                    group.existingItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(QString::fromStdWString(existPathW));
+
+                    group.newItem.path = newPath;
+                    group.newItem.filename = fileName;
+                    group.newItem.width = newWidth; 
+                    group.newItem.height = newHeight;
+                    group.newItem.size = size;
+                    group.newItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnail(newPath, 512);
+
+                    conflicts.push_back(group);
                 }
             }
-            
-            if (cachedSha256.empty() || cachedSha256 != newSha256) return;
-            
-            // 第四级（生成冲突项，不加载图片）
-            DuplicateConflictGroup group;
-            
-            // 1. 已存在项信息
-            group.existingItem.folderId = QString::fromStdString(rm.folderId);
-            group.existingItem.path = QString::fromStdWString(cachedWPath);
-            group.existingItem.filename = QFileInfo(cachedPath).fileName();
-            group.existingItem.size = rm.fileSize;
-            group.existingItem.width = rm.width;
-            group.existingItem.height = rm.height;
-            group.existingItem.sha256 = cachedSha256;
-            if (!rm.tags.isEmpty()) {
-                group.existingItem.tagHint = rm.tags.join(", ");
+        }
+
+        // 二重判定：文件名相同且分辨率相同
+        auto nameIt = nameIndexMap.find(lowerNewName);
+        if (nameIt != nameIndexMap.end()) {
+            for (const auto& pair : nameIt->second) {
+                const std::wstring& existPathW = pair.first;
+                const RuntimeMeta& meta = pair.second;
+                if (QString::fromStdWString(existPathW) == newPath) continue;
+                if (matchedPaths.count(existPathW)) continue; // 已经在一重判定中匹配成功
+
+                if (meta.width > 0 && meta.height > 0 && meta.width == newWidth && meta.height == newHeight) {
+                    DuplicateConflictGroup group;
+                    
+                    group.existingItem.folderId = QString::fromStdString(meta.folderId);
+                    group.existingItem.path = QString::fromStdWString(existPathW);
+                    group.existingItem.filename = QFileInfo(QString::fromStdWString(existPathW)).fileName();
+                    group.existingItem.width = meta.width;
+                    group.existingItem.height = meta.height;
+                    group.existingItem.size = meta.fileSize;
+                    group.existingItem.tagHint = meta.tags.isEmpty() ? "" : meta.tags.first();
+                    group.existingItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(QString::fromStdWString(existPathW));
+
+                    group.newItem.path = newPath;
+                    group.newItem.filename = fileName;
+                    group.newItem.width = newWidth; 
+                    group.newItem.height = newHeight;
+                    group.newItem.size = size;
+                    group.newItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnail(newPath, 512);
+
+                    conflicts.push_back(group);
+                }
             }
-            // 🚨 注意：禁止在该处进行缩略图提取与解码
-            
-            // 2. 新文件项信息
-            group.newItem.path = newPath;
-            group.newItem.filename = newFi.fileName();
-            group.newItem.size = newSize;
-            group.newItem.sha256 = newSha256;
-            
-            conflicts.push_back(group);
-        });
+        }
     }
+
     return conflicts;
 }
 

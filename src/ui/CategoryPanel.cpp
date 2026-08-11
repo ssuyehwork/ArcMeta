@@ -569,57 +569,105 @@ void CategoryPanel::restoreExpandedState(const QModelIndex& parent, const QSet<i
 }
 
 void CategoryPanel::onCreateCategory() {
-    FramelessInputDialog dlg("新建分类", "请输入分类名称:", "", this);
-    if (dlg.exec() == QDialog::Accepted) {
-        QString text = dlg.text();
-        if (!text.isEmpty()) {
-            Category cat;
-            cat.name = text.toStdWString();
-            cat.parentId = 0;
-            cat.color = getDefaultCategoryColor();
-            
-            QSet<int> expandedIds;
-            QStringList expandedNames;
-            saveExpandedState(QModelIndex(), expandedIds, expandedNames);
-
-            CategoryRepo::add(cat);
-            m_categoryModel->refresh();
-
-            restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
+    // 1. 扫描当前所有的分类，计算出在顶级（parentId = 0）不冲突的默认名字："新建分类"、"新建分类 (1)"、"新建分类 (2)"...
+    auto allCats = CategoryRepo::getAll();
+    QString baseName = "新建分类";
+    QString finalName = baseName;
+    int suffix = 1;
+    bool conflict = true;
+    while (conflict) {
+        conflict = false;
+        for (const auto& c : allCats) {
+            if (c.parentId == 0 && QString::fromStdWString(c.name) == finalName) {
+                conflict = true;
+                break;
+            }
         }
+        if (conflict) {
+            finalName = QString("%1 (%2)").arg(baseName).arg(suffix++);
+        }
+    }
+
+    // 2. 构造实体并持久化
+    Category cat;
+    cat.name = finalName.toStdWString();
+    cat.parentId = 0;
+    cat.color = getDefaultCategoryColor();
+
+    QSet<int> expandedIds;
+    QStringList expandedNames;
+    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
+
+    if (CategoryRepo::add(cat)) {
+        m_categoryModel->refresh();
+        restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
+
+        // 3. 在树更新完毕后，立刻获取新节点的 Index 并进入行内编辑状态
+        int newId = cat.id;
+        QTimer::singleShot(50, this, [this, newId]() {
+            selectCategory(newId);
+            QModelIndex proxyIdx = m_categoryTree->currentIndex();
+            if (proxyIdx.isValid()) {
+                m_categoryTree->edit(proxyIdx);
+            }
+        });
     }
 }
 
 void CategoryPanel::onCreateSubCategory() {
     QModelIndex index = m_categoryTree->currentIndex();
-    int id = getTargetCategoryId(index);
-    if (id <= 0) return;
+    int parentId = getTargetCategoryId(index);
+    if (parentId <= 0) return;
 
-    Category catObj = CategoryRepo::getById(id);
-    if (catObj.encrypted && !CategoryLockManager::instance().isUnlocked(id)) {
+    Category catObj = CategoryRepo::getById(parentId);
+    if (catObj.encrypted && !CategoryLockManager::instance().isUnlocked(parentId)) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>分类处于锁定状态，请先解锁后再执行操作！</b>", 2000, QColor("#e81123"));
         return;
     }
 
-    FramelessInputDialog dlg("新建子分类", "请输入子分类名称:", "", this);
-    if (dlg.exec() == QDialog::Accepted) {
-        QString text = dlg.text();
-        if (!text.isEmpty()) {
-            Category cat;
-            cat.name = text.toStdWString();
-            cat.parentId = id;
-            cat.color = getDefaultCategoryColor();
-
-            QSet<int> expandedIds;
-            QStringList expandedNames;
-            saveExpandedState(QModelIndex(), expandedIds, expandedNames);
-            expandedIds.insert(id);
-
-            CategoryRepo::add(cat);
-            m_categoryModel->refresh();
-
-            restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
+    // 1. 扫描同级分类，计算出在 parentId 下不冲突的默认子分类名字
+    auto allCats = CategoryRepo::getAll();
+    QString baseName = "新建分类";
+    QString finalName = baseName;
+    int suffix = 1;
+    bool conflict = true;
+    while (conflict) {
+        conflict = false;
+        for (const auto& c : allCats) {
+            if (c.parentId == parentId && QString::fromStdWString(c.name) == finalName) {
+                conflict = true;
+                break;
+            }
         }
+        if (conflict) {
+            finalName = QString("%1 (%2)").arg(baseName).arg(suffix++);
+        }
+    }
+
+    // 2. 构造子分类实体并持久化
+    Category cat;
+    cat.name = finalName.toStdWString();
+    cat.parentId = parentId;
+    cat.color = getDefaultCategoryColor();
+
+    QSet<int> expandedIds;
+    QStringList expandedNames;
+    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
+    expandedIds.insert(parentId);
+
+    if (CategoryRepo::add(cat)) {
+        m_categoryModel->refresh();
+        restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
+
+        // 3. 展开父节点并自动对新子节点进入行内编辑状态
+        int newId = cat.id;
+        QTimer::singleShot(50, this, [this, newId]() {
+            selectCategory(newId);
+            QModelIndex proxyIdx = m_categoryTree->currentIndex();
+            if (proxyIdx.isValid()) {
+                m_categoryTree->edit(proxyIdx);
+            }
+        });
     }
 }
 
