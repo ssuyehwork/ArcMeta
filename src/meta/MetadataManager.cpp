@@ -56,19 +56,19 @@
 
 namespace ArcMeta {
 
-// 🚨 全系统唯一权威 22 字段查询 SQL
+// 🚨 全系统唯一权威 23 字段查询 SQL
 static const char* kSqlSelectAllMeta = 
     "SELECT folder_id, path, is_folder, rating, color, tags, note, url, "
     "ctime, mtime, atime, file_size, palettes, is_trash, original_path, "
-    "width, height, ingestion_status, auto_color, base_name, ext, added_at "
+    "width, height, ingestion_status, auto_color, base_name, ext, added_at, sha256 "
     "FROM metadata";
 
-// 🚨 全系统唯一权威 22 字段插入/更新 SQL
+// 🚨 全系统唯一权威 23 字段插入/更新 SQL
 static const char* kSqlInsertMeta = 
     "INSERT OR REPLACE INTO metadata (folder_id, path, is_folder, rating, color, tags, note, url, "
     "ctime, mtime, atime, file_size, palettes, is_trash, original_path, "
-    "width, height, ingestion_status, auto_color, base_name, ext, added_at) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    "width, height, ingestion_status, auto_color, base_name, ext, added_at, sha256) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 static void bindMetaHelper(sqlite3_stmt* stmt, const std::wstring& path, const RuntimeMeta& meta) {
     sqlite3_bind_text(stmt, 1, meta.folderId.c_str(), -1, SQLITE_TRANSIENT);
@@ -102,6 +102,7 @@ static void bindMetaHelper(sqlite3_stmt* stmt, const std::wstring& path, const R
     sqlite3_bind_text16(stmt, 20, meta.baseName.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text16(stmt, 21, meta.ext.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(stmt, 22, meta.added_at);
+    sqlite3_bind_text(stmt, 23, meta.sha256.c_str(), -1, SQLITE_TRANSIENT);
 }
 
 // --- Helper Functions ---
@@ -318,6 +319,10 @@ void MetadataManager::initFromScchMode() {
                 if (wExt) rm.ext = wExt;
 
                 rm.added_at = sqlite3_column_int64(stmt, 21);
+
+                const char* hash = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 22));
+                if (hash) rm.sha256 = hash;
+
                 rm.isManaged = true;
 
                 tempCache[path] = rm;
@@ -1197,6 +1202,22 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
             meta.rating = rating;
         });
     }
+}
+
+void MetadataManager::setSha256(const std::wstring& path, const std::string& sha256, bool notify) {
+    std::wstring nPath = MetadataManager::normalizePath(path);
+    ensureActivated(nPath);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        (*newMap)[nPath].sha256 = sha256;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
+    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
+    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+        persistAsync(nPath);
+    });
 }
 
 void MetadataManager::setAddedAt(const std::wstring& path, long long addedAt, bool notify) {

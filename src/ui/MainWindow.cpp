@@ -23,6 +23,8 @@
 #include "QuickLookWindow.h"
 #include "ToolTipOverlay.h"
 #include "../meta/DuplicateDetectorService.h"
+#include "../meta/CapsuleMediaExtractor.h"
+#include "../util/DiskMediaExtractor.h"
 #include "DuplicateConflictDialog.h"
 #include "TaskProgressToolBar.h"
 #include "../core/CategoryDropProcessor.h"
@@ -448,11 +450,17 @@ void MainWindow::initUi() {
                             bool batchApplied = false;
                             DuplicateResolveAction batchAction = DuplicateResolveAction::UseExisting;
 
-                            for (const auto& group : conflicts) {
+                            for (auto group : conflicts) {
                                 DuplicateResolveAction chosenAction;
                                 if (batchApplied) {
                                     chosenAction = batchAction;
                                 } else {
+                                    // 按需延迟加载缩略图及宽高特征
+                                    group.existingItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(group.existingItem.path);
+                                    group.newItem.thumbnail = DiskMediaExtractor::getDiskThumbnail(group.newItem.path, 256);
+                                    group.newItem.width = group.newItem.thumbnail.width();
+                                    group.newItem.height = group.newItem.thumbnail.height();
+
                                     DuplicateConflictDialog dlg(group, totalCount, this);
                                     if (dlg.exec() != QDialog::Accepted) break;
 
