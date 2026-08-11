@@ -390,33 +390,35 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
     const auto& leftRec = records[leftRow];
     const auto& rightRec = records[rightRow];
 
+    bool isAsc = (sortOrder() == Qt::AscendingOrder);
+
     // 2. 双轨隔离与分组展示：在任何排序逻辑下，优先保持 Library 在前，DiskNav 在后；组标题绝对在最前面。
-    // 强制无状态（不掺杂 sortOrder），交给代理模型本身反转
+    // 结合 isAsc 提前纠偏以抵消 Qt 降序取反机制，确保在降序模式下布局依然正确置顶
     if (!leftRec.groupName.isEmpty() || !rightRec.groupName.isEmpty()) {
         if (leftRec.groupName != rightRec.groupName) {
             bool leftIsLibrary = (leftRec.groupName == "Library" || leftRec.groupName.isEmpty());
-            return leftIsLibrary;
+            return isAsc ? leftIsLibrary : !leftIsLibrary;
         }
         // 在同一分组内，组标题置顶
         if (leftRec.isGroupHeader != rightRec.isGroupHeader) {
-            return leftRec.isGroupHeader;
+            return isAsc ? leftRec.isGroupHeader : !leftRec.isGroupHeader;
         }
     }
 
-    // 3. 物理第一权重：文件夹与子分类始终置顶 (绝对强制，升降序下均不动摇)
+    // 3. 物理第一权重：文件夹与子分类始终置顶 (结合 isAsc 提前纠偏，升降序下均不沉底)
     bool leftIsDir = (leftRec.isDir || leftRec.isCategory);
     bool rightIsDir = (rightRec.isDir || rightRec.isCategory);
 
     if (leftIsDir != rightIsDir) {
-        return leftIsDir; // 文件夹永远“更小”排在前面
+        return isAsc ? leftIsDir : !leftIsDir; // 文件夹永远排在前面
     }
 
-    // 4. 物理第二权重：置顶优先规则 (升降序下均强制置顶，不随用户排序取反下沉)
+    // 4. 物理第二权重：置顶优先规则 (结合 isAsc 提前纠偏，升降序下均强制置顶，不随用户排序取反下沉)
     bool leftPinned = leftRec.pinned || leftRec.encrypted;
     bool rightPinned = rightRec.pinned || rightRec.encrypted;
 
     if (leftPinned != rightPinned) {
-        return leftPinned; // 置顶项永远排在前面
+        return isAsc ? leftPinned : !leftPinned; // 置顶项永远排在前面
     }
 
     // 5. 物理第三权重：具体的排序类型逻辑，平局时统一追加二级决胜键 (localeAwareCompare 拼音/文件名)
@@ -813,7 +815,7 @@ void ContentPanel::updateGridSize() {
             int side = m_zoomLevel + 46;
             int ratingH = 20; // 统一修改为 20 像素
             int nameH = (int)(m_zoomLevel * 0.25);
-            int gap = 6;
+            int gap = 4; // 统一修改为 4 像素，与 ThumbnailDelegate::calculateMetrics 保持 100% 绝对对齐
             int totalH = side + gap + ratingH + gap + nameH + 8;
             lv->setGridSize(QSize(side, totalH));
         }
