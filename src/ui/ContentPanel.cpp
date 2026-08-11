@@ -394,8 +394,12 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
     // 强制无状态（不掺杂 sortOrder），交给代理模型本身反转
     if (!leftRec.groupName.isEmpty() || !rightRec.groupName.isEmpty()) {
         if (leftRec.groupName != rightRec.groupName) {
-            bool leftIsLibrary = (leftRec.groupName == "Library" || leftRec.groupName.isEmpty());
-            return leftIsLibrary; 
+            auto getGroupPriority = [](const QString& g) {
+                if (g == "Library") return 1;
+                if (g == "DiskNav") return 2;
+                return 0; // 非垃圾箱普通项或空分组排最前
+            };
+            return getGroupPriority(leftRec.groupName) < getGroupPriority(rightRec.groupName);
         }
         // 在同一分组内，组标题置顶
         if (leftRec.isGroupHeader != rightRec.isGroupHeader) {
@@ -422,6 +426,11 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
     // 5. 物理第三权重：具体的排序类型逻辑，平局时统一追加二级决胜键 (localeAwareCompare 拼音/文件名)
     auto* contentPanel = qobject_cast<ContentPanel*>(parent());
     ContentPanel::SortType sType = contentPanel ? contentPanel->currentSortType() : ContentPanel::SortByName;
+
+    bool isMirror = contentPanel ? contentPanel->isMirrorSource() : false;
+    if (sType == ContentPanel::SortByAddedDate && !isMirror) {
+        sType = ContentPanel::SortByName; // 磁盘导航模式下不支持“添加日期”排序，降级退化为名称排序
+    }
 
     auto compareNames = [](const ItemRecord& l, const ItemRecord& r) {
         const QString& lName = l.isCategory ? l.categoryName : l.filename;
@@ -1678,7 +1687,9 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
     addTypeAct("大小", ContentPanel::SortBySize);
     addTypeAct("尺寸", ContentPanel::SortByDimension);
     addTypeAct("评分", ContentPanel::SortByRating);
-    addTypeAct("添加日期", ContentPanel::SortByAddedDate);
+    if (isMirrorSource()) {
+        addTypeAct("添加日期", ContentPanel::SortByAddedDate);
+    }
 
     sortMenu->addSeparator();
 
