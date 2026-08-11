@@ -439,7 +439,7 @@ void MainWindow::initUi() {
                     (void)QtConcurrent::run([this, newlyImportedPaths, targetCatId]() {
                         auto conflicts = DuplicateDetectorService::detectDuplicates(newlyImportedPaths);
                         if (!conflicts.empty()) {
-                            QMetaObject::invokeMethod(this, [this, conflicts, targetCatId]() {
+                            QMetaObject::invokeMethod(this, [this, conflicts, targetCatId]() mutable {
                                 int totalCount = static_cast<int>(conflicts.size());
                                 bool batchApplied = false;
                                 DuplicateResolveAction batchAction = DuplicateResolveAction::UseExisting;
