@@ -376,37 +376,7 @@ bool FilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& source
 } 
  
 bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelIndex& source_right) const { 
-    // 2026-07-xx 物理强制：文件夹与子分类始终置顶 (绝对第一权重)
-    QString leftType = source_left.data(TypeRole).toString();
-    QString rightType = source_right.data(TypeRole).toString();
-    bool leftIsDir = (leftType == "folder" || leftType == "category");
-    bool rightIsDir = (rightType == "folder" || rightType == "category");
-
-    if (leftIsDir != rightIsDir) {
-        // 文件夹 vs 文件：文件夹永远被视为“更小”（在升序中排在前）
-        if (sortOrder() == Qt::AscendingOrder) return leftIsDir;
-        else return !leftIsDir;
-    }
-
-    // 2026-06-xx 工业级纠偏：置顶优先规则 (物理排序第二权重)
-    // 必须确保 PinnedRole 或 IsLockedRole 的判定逻辑在排序中具有绝对优先级
-    QVariant leftPinnedVar = source_left.data(PinnedRole);
-    if (!leftPinnedVar.isValid()) leftPinnedVar = source_left.data(IsLockedRole);
-    
-    QVariant rightPinnedVar = source_right.data(PinnedRole);
-    if (!rightPinnedVar.isValid()) rightPinnedVar = source_right.data(IsLockedRole);
-
-    bool leftPinned = leftPinnedVar.toBool();
-    bool rightPinned = rightPinnedVar.toBool();
- 
-    if (leftPinned != rightPinned) { 
-        // 2026-06-xx 物理修复：Qt 排序模型在 Descending 下会反转 lessThan 结果
-        // 为了确保置顶项在任何排序顺序下都位于顶部，必须结合 sortOrder 进行逻辑判定
-        if (sortOrder() == Qt::AscendingOrder) return leftPinned; // 升序：左置顶 -> 小 (true)
-        else return !leftPinned; // 降序：左置顶 -> 结果反转 -> 需要返回 false 以保持顶部
-    } 
-
-    // 3. 第三级：由右键选择的 m_sortType 驱动的七维精确物理属性对位排序（对应用户原话：“名称、创建日期、修改日期、扩展名、大小、尺寸、评分”）
+    // 1. 直取内存结构，废除 source_left.data(...) 虚拟调用与冗余内存分配
     const auto* sourceModelPtr = qobject_cast<const ItemModelBase*>(sourceModel());
     if (!sourceModelPtr) return QSortFilterProxyModel::lessThan(source_left, source_right);
 
@@ -420,65 +390,103 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
     const auto& leftRec = records[leftRow];
     const auto& rightRec = records[rightRow];
 
-    // 双轨隔离与分组展示：在任何排序逻辑下，优先保持 Library 在前，DiskNav 在后；组标题绝对在最前面
+    // 2. 双轨隔离与分组展示：在任何排序逻辑下，优先保持 Library 在前，DiskNav 在后；组标题绝对在最前面。
+    // 强制无状态（不掺杂 sortOrder），交给代理模型本身反转
     if (!leftRec.groupName.isEmpty() || !rightRec.groupName.isEmpty()) {
         if (leftRec.groupName != rightRec.groupName) {
             bool leftIsLibrary = (leftRec.groupName == "Library" || leftRec.groupName.isEmpty());
-            return (sortOrder() == Qt::AscendingOrder) ? leftIsLibrary : !leftIsLibrary;
+            return leftIsLibrary; 
         }
         // 在同一分组内，组标题置顶
-        if (leftRec.isGroupHeader) {
-            return (sortOrder() == Qt::AscendingOrder);
-        }
-        if (rightRec.isGroupHeader) {
-            return (sortOrder() == Qt::AscendingOrder) ? false : true;
+        if (leftRec.isGroupHeader != rightRec.isGroupHeader) {
+            return leftRec.isGroupHeader;
         }
     }
 
+    // 3. 物理第一权重：文件夹与子分类始终置顶 (绝对强制，升降序下均不动摇)
+    bool leftIsDir = (leftRec.isDir || leftRec.isCategory);
+    bool rightIsDir = (rightRec.isDir || rightRec.isCategory);
+
+    if (leftIsDir != rightIsDir) {
+        return leftIsDir; // 文件夹永远“更小”排在前面
+    }
+
+    // 4. 物理第二权重：置顶优先规则 (升降序下均强制置顶，不随用户排序取反下沉)
+    bool leftPinned = leftRec.pinned || leftRec.encrypted;
+    bool rightPinned = rightRec.pinned || rightRec.encrypted;
+ 
+    if (leftPinned != rightPinned) { 
+        return leftPinned; // 置顶项永远排在前面
+    } 
+
+    // 5. 物理第三权重：具体的排序类型逻辑，平局时统一追加二级决胜键 (localeAwareCompare 拼音/文件名)
     auto* contentPanel = qobject_cast<ContentPanel*>(parent());
     ContentPanel::SortType sType = contentPanel ? contentPanel->currentSortType() : ContentPanel::SortByName;
 
+    auto compareNames = [](const ItemRecord& l, const ItemRecord& r) {
+        const QString& lName = l.isCategory ? l.categoryName : l.filename;
+        const QString& rName = r.isCategory ? r.categoryName : r.filename;
+        return lName.localeAwareCompare(rName) < 0;
+    };
+
     switch (sType) {
         case ContentPanel::SortByName: {
-            const QString& lName = leftRec.isCategory ? leftRec.categoryName : leftRec.filename;
-            const QString& rName = rightRec.isCategory ? rightRec.categoryName : rightRec.filename;
-            return lName.localeAwareCompare(rName) < 0;
+            return compareNames(leftRec, rightRec);
         }
         case ContentPanel::SortByCreateDate: {
-            // 对比 ctime (创建时间戳)
-            return leftRec.ctime < rightRec.ctime;
+            if (leftRec.ctime != rightRec.ctime) {
+                return leftRec.ctime < rightRec.ctime;
+            }
+            return compareNames(leftRec, rightRec);
         }
         case ContentPanel::SortByModifyDate: {
-            // 对比 mtime (修改时间戳)
-            return leftRec.mtime < rightRec.mtime;
+            if (leftRec.mtime != rightRec.mtime) {
+                return leftRec.mtime < rightRec.mtime;
+            }
+            return compareNames(leftRec, rightRec);
         }
         case ContentPanel::SortByExtension: {
-            // 对比文件后缀名
-            return leftRec.suffix.localeAwareCompare(rightRec.suffix) < 0;
+            int comp = leftRec.suffix.localeAwareCompare(rightRec.suffix);
+            if (comp != 0) {
+                return comp < 0;
+            }
+            return compareNames(leftRec, rightRec);
         }
         case ContentPanel::SortBySize: {
-            // 对比文件大小 (文件夹或子分类默认视为 -1)
             long long lSize = (leftRec.isCategory || leftRec.isDir) ? -1 : leftRec.size;
             long long rSize = (rightRec.isCategory || rightRec.isDir) ? -1 : rightRec.size;
-            return lSize < rSize;
+            if (lSize != rSize) {
+                return lSize < rSize;
+            }
+            return compareNames(leftRec, rightRec);
         }
         case ContentPanel::SortByDimension: {
-            // 对比图片的总尺寸 (宽 x 高，无尺寸信息视为 0)
             long long lDim = (long long)leftRec.width * leftRec.height;
             long long rDim = (long long)rightRec.width * rightRec.height;
-            return lDim < rDim;
+            if (lDim != rDim) {
+                return lDim < rDim;
+            }
+            if (leftRec.width != rightRec.width) {
+                return leftRec.width < rightRec.width;
+            }
+            if (leftRec.height != rightRec.height) {
+                return leftRec.height < rightRec.height;
+            }
+            return compareNames(leftRec, rightRec);
         }
         case ContentPanel::SortByRating: {
-            // 对比文件评分
-            return leftRec.rating < rightRec.rating;
+            if (leftRec.rating != rightRec.rating) {
+                return leftRec.rating < rightRec.rating;
+            }
+            return compareNames(leftRec, rightRec);
         }
         case ContentPanel::SortByAddedDate: {
-            // 对比添加时间 (对 added_at == 0 的自愈回退到 ctime)
-            long long leftAdded = leftRec.added_at;
-            long long rightAdded = rightRec.added_at;
-            if (leftAdded == 0) leftAdded = leftRec.ctime;
-            if (rightAdded == 0) rightAdded = rightRec.ctime;
-            return leftAdded < rightAdded;
+            long long leftAdded = leftRec.added_at == 0 ? leftRec.ctime : leftRec.added_at;
+            long long rightAdded = rightRec.added_at == 0 ? rightRec.ctime : rightRec.added_at;
+            if (leftAdded != rightAdded) {
+                return leftAdded < rightAdded;
+            }
+            return compareNames(leftRec, rightRec);
         }
     }
 
