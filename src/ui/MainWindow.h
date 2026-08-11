@@ -22,7 +22,6 @@ class TrayController;
 class HoverEventFilter;
 class ResizeEventFilter;
 class AddressBar;
-class TaskProgressToolBar;
 class CategoryPanel;
 class NavPanel;
 class ContentPanel;
@@ -197,8 +196,6 @@ private:
 
     // 底部状态栏
     QLabel* m_statusLeft = nullptr;
-    QWidget* m_statusBarWidget = nullptr;
-    TaskProgressToolBar* m_taskProgressToolBar = nullptr;
 
     // 窗口拖动
     bool m_isDragging = false;

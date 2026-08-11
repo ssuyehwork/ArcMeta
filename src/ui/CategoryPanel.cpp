@@ -15,7 +15,6 @@
 using namespace ArcMeta::Style;
 #include "ToolTipOverlay.h"
 #include "FramelessDialog.h"
-#include "TagManagerDialog.h"
 #include "BatchProgressDialog.h"
 #include <QDir>
 #include <QFile>
@@ -624,10 +623,33 @@ void CategoryPanel::onCreateSubCategory() {
 
 void CategoryPanel::onSetPresetTags() {
     QModelIndex index = m_categoryTree->currentIndex();
-    QString path = index.data(PathRole).toString();
-    
-    // 一键弹出模块化高级标签管理弹窗
-    TagManagerDialog::showDialog(this, path, false);
+    int id = getTargetCategoryId(index);
+    if (id <= 0) return;
+
+    auto all = CategoryRepo::getAll();
+    Category current;
+    for(auto& c : all) if(c.id == id) { current = c; break; }
+
+    QString initial;
+    for(const auto& t : current.presetTags) initial += QString::fromStdWString(t) + ",";
+    if (initial.endsWith(",")) initial.chop(1);
+
+    FramelessInputDialog dlg("设置预设标签", "请输入标签 (用逗号分隔):", initial, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        QStringList tags = dlg.text().split(QRegularExpression("[,，]"), Qt::SkipEmptyParts);
+        current.presetTags.clear();
+        for(const QString& t : tags) current.presetTags.push_back(t.trimmed().toStdWString());
+        
+        QSet<int> expandedIds;
+        QStringList expandedNames;
+        saveExpandedState(QModelIndex(), expandedIds, expandedNames);
+
+        CategoryRepo::update(current);
+        m_categoryModel->refresh();
+
+        restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
+        ToolTipOverlay::instance()->showText(QCursor::pos(), "预设标签已更新", 1000);
+    }
 }
 
 void CategoryPanel::onTogglePin() {
