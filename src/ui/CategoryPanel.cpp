@@ -622,12 +622,17 @@ void CategoryPanel::onCreateSubCategory() {
     }
 }
 
+#include "PresetTagsDialog.h"
+
 void CategoryPanel::onSetPresetTags() {
     QModelIndex index = m_categoryTree->currentIndex();
-    QString path = index.data(PathRole).toString();
-    
-    // 一键弹出模块化高级标签管理弹窗
-    TagManagerDialog::showDialog(this, path, false);
+    int catId = getTargetCategoryId(index);
+    if (catId <= 0) return;
+
+    PresetTagsDialog dlg(catId, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        m_categoryModel->refresh();
+    }
 }
 
 void CategoryPanel::onTogglePin() {
