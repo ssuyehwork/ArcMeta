@@ -18,6 +18,7 @@ class DuplicateConflictDialog : public FramelessDialog {
 public:
     // totalCount 代表冲突组总数 N（用于显示标题与复选框文本）
     explicit DuplicateConflictDialog(const DuplicateConflictGroup& conflict, int totalCount, QWidget* parent = nullptr);
+    explicit DuplicateConflictDialog(const DuplicateConflictGroup& conflict, QWidget* parent = nullptr);
 
     DuplicateResolveAction selectedAction() const;
     bool applyToAll() const; // 返回是否勾选了“全部应用(N)”

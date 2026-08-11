@@ -33,6 +33,8 @@ public:
     void setURL(const QString& url);
     void setURL(const std::wstring& url);
     void setCategory(const QString& category);
+    void setCategoryPills(const std::vector<std::pair<int, QString>>& categories);
+    void setDiskPathMode(bool isDiskMode, const QString& rawPath);
 
     // 兼容层占位
     void setRating(int rating) { Q_UNUSED(rating); }
@@ -47,6 +49,8 @@ signals:
     void tagsChanged(const QStringList& paths, const QStringList& tags);
     void searchByColor(const QColor& color);
     void renameRequested(const QString& oldPath, const QString& newPath);
+    void unbindCategoryRequested(const QString& path, int categoryId);
+    void bindCategoryRequested(const QString& path);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -81,6 +85,12 @@ private:
     ElasticEdit* m_noteEdit = nullptr;
     ElasticEdit* m_linkEdit = nullptr;
     ElasticEdit* m_categoryEdit = nullptr;
+    QVBoxLayout* m_categoryLayoutBox = nullptr;
+
+    bool m_isDiskNavMode = false;
+    QWidget* m_categoryBox = nullptr;
+    QWidget* m_categoryContainer = nullptr;
+    FlowLayout* m_categoryFlowLayout = nullptr;
 
     QStringList m_selectedPaths;
     QList<TagPill*> m_tagPool;

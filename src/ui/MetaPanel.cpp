@@ -3,6 +3,7 @@
 #include "ToolTipOverlay.h"
 #include "UiHelper.h"
 #include <QVBoxLayout>
+#include <QPushButton>
 #include <QHBoxLayout>
 #include <QFileInfo>
 #include <QLabel>
@@ -108,6 +109,18 @@ void MetaPanel::initUi() {
     m_categoryEdit->setPlaceholderText("所属分类...");
     m_categoryEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #EEEEEE; font-weight: normal; }");
     m_containerLayout->addWidget(m_categoryEdit);
+
+    m_categoryBox = new QWidget(m_container);
+    QVBoxLayout* catBoxL = new QVBoxLayout(m_categoryBox);
+    catBoxL->setContentsMargins(0, 0, 0, 0);
+    catBoxL->setSpacing(4);
+
+    m_categoryContainer = new QWidget(m_categoryBox);
+    m_categoryFlowLayout = new FlowLayout(m_categoryContainer, 0, 4, 4);
+    catBoxL->addWidget(m_categoryContainer);
+
+    m_categoryLayoutBox = catBoxL;
+    m_containerLayout->addWidget(m_categoryBox);
 
     m_containerLayout->addWidget(createSeparator());
 
@@ -231,6 +244,8 @@ void MetaPanel::resizeEvent(QResizeEvent* event) {
             if (m_paletteBox) m_paletteBox->setFixedWidth(maxW);
             if (m_tagBox) m_tagBox->setFixedWidth(maxW);
             if (m_tagContainer) m_tagContainer->setFixedWidth(maxW);
+            if (m_categoryBox) m_categoryBox->setFixedWidth(maxW);
+            if (m_categoryContainer) m_categoryContainer->setFixedWidth(maxW);
             
             adjustFlowHeights();
             m_container->adjustSize();
@@ -253,6 +268,13 @@ void MetaPanel::adjustFlowHeights() {
             m_tagContainer->setFixedHeight(contentH);
         }
         m_tagFlowLayout->activate();
+    }
+    if (m_categoryContainer && m_categoryFlowLayout) {
+        int contentH = m_categoryFlowLayout->heightForWidth(m_categoryContainer->width());
+        if (m_categoryContainer->height() != contentH) {
+            m_categoryContainer->setFixedHeight(contentH);
+        }
+        m_categoryFlowLayout->activate();
     }
 }
 
@@ -296,6 +318,65 @@ void MetaPanel::updateInfo(const QString& n, const QString& t, const QString& s,
 
     if (m_container) m_container->adjustSize();
     m_isInternalUpdating = false;
+}
+
+void MetaPanel::setDiskPathMode(bool isDiskMode, const QString& rawPath) {
+    m_isDiskNavMode = isDiskMode;
+    if (m_isDiskNavMode) {
+        // 磁盘导航模式：清空胶囊，直接渲染纯文本物理路径
+        while (QLayoutItem* item = m_categoryFlowLayout->takeAt(0)) {
+            delete item->widget();
+            delete item;
+        }
+        m_categoryEdit->setVisible(true);
+        m_categoryEdit->setPlainText(rawPath);
+        m_categoryEdit->adjustHeight();
+        m_categoryBox->setVisible(false);
+    } else {
+        // 托管库模式：隐藏原始路径框，展示胶囊布局
+        m_categoryEdit->setVisible(false);
+        m_categoryBox->setVisible(true);
+    }
+}
+
+void MetaPanel::setCategoryPills(const std::vector<std::pair<int, QString>>& categories) {
+    if (m_isDiskNavMode) return;
+
+    while (QLayoutItem* item = m_categoryFlowLayout->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+
+    for (const auto& cat : categories) {
+        int catId = cat.first;
+        QString catName = cat.second;
+
+        TagPill* pill = new TagPill(catName, m_categoryBox);
+        pill->setStyleSheet("background: #2D2D30; border: 1px solid #3E3E42; color: #EEE; border-radius: 4px;");
+        
+        connect(pill, &TagPill::deleteRequested, [this, catId]() {
+            if (!m_selectedPaths.isEmpty()) {
+                emit unbindCategoryRequested(m_selectedPaths.first(), catId);
+            }
+        });
+        m_categoryFlowLayout->addWidget(pill);
+    }
+
+    // 追加 "+" 绑定按钮
+    QPushButton* btnAddCat = new QPushButton("+", m_categoryBox);
+    btnAddCat->setFixedSize(20, 20);
+    btnAddCat->setCursor(Qt::PointingHandCursor);
+    btnAddCat->setStyleSheet(
+        "QPushButton { background: #3E3E42; color: #888; border: none; border-radius: 4px; font-weight: bold; }"
+        "QPushButton:hover { background: #4E4E52; color: #FFF; }"
+    );
+    connect(btnAddCat, &QPushButton::clicked, [this]() {
+        if (!m_selectedPaths.isEmpty()) {
+            emit bindCategoryRequested(m_selectedPaths.first());
+        }
+    });
+    m_categoryFlowLayout->addWidget(btnAddCat);
+    m_adjustTimer->start();
 }
 
 void MetaPanel::setTags(const QStringList& tags) {

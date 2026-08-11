@@ -77,6 +77,8 @@ set(SOURCES
     src/core/SyncStatusService.h
     src/core/OperationSnapshotEngine.h
     src/core/OperationSnapshotEngine.cpp
+    src/core/CategoryDropProcessor.h
+    src/core/CategoryDropProcessor.cpp
     src/core/AutoImportManager.cpp
     src/core/AutoImportManager.h
     src/core/AppConfig.h
@@ -182,6 +184,11 @@ set(SOURCES
     src/ui/AddressBar.h
     src/ui/MetaPanel.cpp
     src/ui/MetaPanel.h
+    src/ui/TagManagerDialog.h
+    src/ui/PresetTagsDialog.cpp
+    src/ui/TagManagerDialog.cpp
+    src/ui/TaskProgressToolBar.h
+    src/ui/TaskProgressToolBar.cpp
     src/ui/components/ElasticEdit.h
     src/ui/components/ElasticEdit.cpp
     src/ui/components/TagPill.h
