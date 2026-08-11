@@ -151,11 +151,13 @@ void CardPainterHelper::drawRatingStars(QPainter* painter, const QRect& banRect,
             painter->setBrush(bgColor);
             painter->setPen(Qt::NoPen);
             
-            QRect lastStarRect(starsStartX + 4 * (starSize + unifiedSpacing), 
-                               ratingY + (ratingH - starSize) / 2, 
-                               starSize, starSize);
-            QRect totalRect = banRect.united(lastStarRect);
-            painter->drawRoundedRect(totalRect.adjusted(-4, -1, 4, 1), 4, 4);
+            // 1. 准确使用传入的 ratingH 决定彩色胶囊底色的真实高度
+            int capsuleLeft = banRect.left() - 4;
+            int capsuleRight = starsStartX + 4 * (starSize + unifiedSpacing) + starSize + 4;
+            QRect capsuleRect(capsuleLeft, ratingY, capsuleRight - capsuleLeft, ratingH);
+
+            // 2. 绘制精确高度的圆角胶囊背景
+            painter->drawRoundedRect(capsuleRect, 4, 4);
             painter->restore();
         }
     }
