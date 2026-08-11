@@ -7,8 +7,22 @@
 
 ## 0. 顶层架构原则
 
-### 0.1 职责单一（Single Responsibility Principle）
-凡是违反职责单一、逻辑不纯、跨模块相互耦合抢锁的实现，一律视为失败。在 UI 交互与大批量数据处理时，必须严格解耦，视图类不应包含复杂的持久化大事务、磁盘 I/O 或大文件扫描逻辑，必须提取专门的业务处理器（Processor）与数据工厂（Factory）。
+### 0.1 职责单一（Single Responsibility Principle）与 ContentPanel 极简主义
+
+凡是违反职责单一、逻辑不纯、跨模块相互耦合抢锁的实现，一律视为失败。在 UI 交互与大批量数据处理时，必须严格解耦，视图类不应包含复杂的持久化大事务、磁盘 I/O 或大文件扫描逻辑，必须提取专门的业务处理器（Processor）、服务（Service）或控制器（Controller）。
+
+#### 0.1.1 ContentPanel 职责划分三守则（画板与传声筒）
+作为核心 UI 视图面板，`ContentPanel` 必须回归最纯粹的视图渲染职责，仅承担以下 3 项核心本职工作，严禁发生任何重型业务下沉耦合：
+1. **界面组件持有与布局管理 (UI Layout)**：管理容器内部的所有子控件，响应窗口拉伸、堆栈（`QStackedWidget`）切换与流式尺寸计算。
+2. **视图渲染与视觉状态展示 (View & Visual State)**：将后台传输的数据列表（`ItemRecord`）递交给 Model/Delegate 并完成高效率像素绘制，维护网格缩放比例等纯 UI 层视觉状态。
+3. **用户原生交互捕捉与信号分发 (User Input & Signal Forwarding)**：拦截并捕捉鼠标点击、双击、右键菜单、键盘快捷键（如空格键预览），将交互意图 100% 抽象分发为特定的信号或转发给特定的控制器（如 `ContentController` / `CryptoController` / `DiskIoService`），绝不亲自执行任何实际业务处理。
+
+#### 0.1.2 物理外包业务的绝对剥离红线（零磁盘、零数据库、零加解密）
+1. **物理文件读写与抹除**：彻底剥离任何 `QFile::remove`、`QDir::mkdir`、`QFile::rename` 的物理磁盘读写。所有物理删除、文件夹创建、文件粘贴均交由后台 `DiskIoService` 的异步线程池（`QtConcurrent::run`）托管，UI 线程绝不阻塞。
+2. **原生 SQL 查询与回收站恢复**：彻底移除 `ContentPanel` 里的 `sqlite3.h` 头文件及任何原生 SQL 语句绑定。回收站还原、持久层大事务逻辑收拢至 `DiskTrashService` 和 `UndoCommand` 底层命令模型中。
+3. **文件加密与解密**：完全剥离与 `EncryptionManager` 的同步加密、解密及密码修改计算。加解密的 UI 操作（弹出密码框、异步控制等）由专门的 `CryptoController` 进行高内聚代管。
+4. **磁盘扫描与元数据加载**：`ContentPanel` 对具体的磁盘递归扫描对账（`addItemsFromDirectory` 等）完全不可知，扫描行为由 `DiskScanService` 异步进行，数据通过多态数据模型（`DiskItemModel` / `LibraryAssetModel`）直接推送到视图层。
+5. **撤销/重做快照**：禁止在右键菜单逻辑中拼装和定义冗长的状态捕获闭包，状态快照与 RCU 安全快照生成一律在 `OperationSnapshotEngine` 内部进行高内聚解耦。
 
 ### 0.2 双轨路由物理隔离
 应用分为 **"SQLite 内存模式"（Library模式 / 镜像加速态）** 和 **"磁盘目录模式"（DiskNav模式 / 实时 I/O 驱动）** 2 种：
@@ -63,7 +77,7 @@
 
 ### 1.6 操作状态快照与 UndoToastOverlay 通用撤销机制
 - **状态快照抽象 (Operation Snapshot Engine)**：
-  - 在执行关键数据修改操作（包含：重命名、批量重命名、拖拽分类、删除/移入回收站、添加至收藏、归类到...）之前，系统必须统一通过 `OperationSnapshotManager`（或对应快照引擎）捕获操作前受影响资产的完整元数据快照（如原始路径、分类 ID 映射、收藏/星级状态、标签等）。
+  - 在执行 critical 数据修改操作（包含：重命名、批量重命名、拖拽分类、删除/移入回收站、添加至收藏、归类到...）之前，系统必须统一通过 `OperationSnapshotManager`（或对应快照引擎）捕获操作前受影响资产的完整元数据快照（如原始路径、分类 ID 映射、收藏/星级状态、标签等）。
   - 快照对象支持单一与批量操作的开箱即用打包，避免各 UI 动作自行编写零散的状态记录逻辑。
 - **与 UI 撤销浮窗 (UndoToastOverlay) 的无缝桥接**：
   - 任何包含状态修改的操作执行成功后，一律通过 `UndoToastOverlay::instance()->showToast()` 弹出 Snackbar 提示。
@@ -206,4 +220,4 @@
 * **红线**：严禁在样式表或绘图事件中手写使用半透明 `rgba` 颜色蒙版。
 
 ### 3.4 其他 UI 对齐偏好
-* 所有新 UI 组件、新样式在实现前，**必须强制在代码库中进行同类案例“考古”（Code Archaeology First）**。如果已经存在同类组件（如卡片圆角、颜色条、进度条），必须以该现有案例为模板保持 100% 样式、间距、调色和交互一致，严禁新建一套样式定义。
+* 所有新 UI 组件、新样式在实现前，**必须强制在代码库中进行同类案例“考古”（Code Archaeology First）**。如果已经存在同类组件（如卡片圆角、颜色条、进度条），必须以该现有案例为模板保持 100% 样式、间距、调色 and 交互一致，严禁新建一套样式定义。
