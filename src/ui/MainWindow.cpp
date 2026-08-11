@@ -544,15 +544,23 @@ void MainWindow::initUi() {
             m_metaPanel->setNote(rm.note);
             m_metaPanel->setURL(rm.url);
 
-            // 🚨 核心优化 2：使用纯内存字符串计算父路径，避免在主线程调 isDir() / absolutePath() 触发任何磁盘阻碍
-            QString category;
-            if (idx.data(TypeRole).toString() == "folder") {
-                category = path;
-            } else {
-                int lastSlash = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
-                category = (lastSlash != -1) ? path.left(lastSlash) : path;
+            bool isDiskMode = !m_contentPanel->isMirrorSource() && !MetadataManager::isInsideManagedLibrary(path.toStdWString());
+            m_metaPanel->setDiskPathMode(isDiskMode, path);
+
+            if (!isDiskMode) {
+                // 托管库模式：拉取文件绑定的真实分类列表并转为胶囊展示
+                std::string fid = MetadataManager::instance().getFolderIdSync(path.toStdWString());
+                std::vector<int> catIds = CategoryRepo::getItemCategoryIds(fid, path.toStdWString());
+                std::vector<std::pair<int, QString>> catPills;
+
+                for (int cid : catIds) {
+                    Category c = CategoryRepo::getById(cid);
+                    if (c.id > 0) {
+                        catPills.push_back({c.id, QString::fromStdWString(c.name)});
+                    }
+                }
+                m_metaPanel->setCategoryPills(catPills);
             }
-            m_metaPanel->setCategory(category);
 
             // 将色板数据转换为 QVector<QPair<QColor, float>>
             QVector<QPair<QColor, float>> pal;
@@ -853,6 +861,23 @@ void MainWindow::initUi() {
         for (const QString& path : paths) {
             MetadataManager::instance().setURL(path.toStdWString(), newLink.toStdWString());
         }
+    });
+
+    // 解绑分类事件响应
+    connect(m_metaPanel, &MetaPanel::unbindCategoryRequested, this, [this](const QString& path, int catId) {
+        std::string fid = MetadataManager::instance().getFolderIdSync(path.toStdWString());
+        if (!fid.empty()) {
+            CategoryRepo::removeItemFromCategory(catId, fid);
+            CategoryRepo::s_countsDirty.store(true);
+            if (m_categoryPanel) m_categoryPanel->requestRefresh(true);
+            m_contentPanel->updateItemMetadata(path);
+        }
+    });
+
+    // 绑定分类事件响应
+    connect(m_metaPanel, &MetaPanel::bindCategoryRequested, this, [this](const QString& path) {
+        // 触发绑定逻辑，弹出分类选择列表
+        Q_UNUSED(path);
     });
 
     // 9. 2026-03-xx 响应元数据全局变更，同步刷新 UI (合并优化，消除重复连接与性能损耗)
