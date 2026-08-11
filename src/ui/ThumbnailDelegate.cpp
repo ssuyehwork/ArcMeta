@@ -50,18 +50,17 @@ ThumbnailDelegate::Metrics ThumbnailDelegate::calculateMetrics(const QStyleOptio
                        option.rect.width() - 6,
                        textHeight);
     
-    int zoom = option.decorationSize.width(); // 物理缩放级别
+    int zoom = option.decorationSize.width();
 
-    m.starSize = 18; // 等比缩小以匹配 20px 胶囊
-    m.starSpacing = -4; // 2026-06-08 优化：默认间距调紧
-    int banW = 12;
+    // 恢复原始星级大小与胶囊宽度！不缩小星级，不缩窄宽度！
+    m.starSize = 22;      // 恢复原始 22px 星级大小
+    m.starSpacing = -4;   // 恢复原始间距
+    int banW = 14;        // 恢复原始 14px 图标宽度
 
-    // 2026-06-08 按照调试增强版 V2 优化：实现“动态比例星级”
-    // 虽然底限是 96，但在接近极限 (100) 时提前缩小星级，确保视觉紧凑感
     if (zoom < 100) {
-        m.starSize = 14; // 等比缩小
-        m.starSpacing = -3;
-        banW = 10;
+        m.starSize = 18;  // 恢复原始 18px 星级大小
+        m.starSpacing = -4;
+        banW = 12;        // 恢复原始 12px 图标宽度
     }
 
     int banGap = 2; // 保持间隙一致性
