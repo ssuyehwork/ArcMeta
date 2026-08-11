@@ -1,5 +1,6 @@
 #include "CategoryPanel.h"
 #include "MainWindow.h"
+#include "PresetTagsDialog.h"
 #include "CategoryModel.h"
 #include "ContentPanel.h"
 #include "../core/DiskTrashService.h"
@@ -622,8 +623,6 @@ void CategoryPanel::onCreateSubCategory() {
     }
 }
 
-#include "PresetTagsDialog.h"
-
 void CategoryPanel::onSetPresetTags() {
     QModelIndex index = m_categoryTree->currentIndex();
     int catId = getTargetCategoryId(index);
@@ -828,7 +827,7 @@ void CategoryPanel::onDeleteCategory() {
     
     (void)QThreadPool::globalInstance()->start([this, idList, totalCount]() {
         for (int id : idList) {
-            ArcMeta::CategoryRepo::remove(id);
+            ::ArcMeta::CategoryRepo::remove(id);
         }
         
         // 删除完成后回到主线程刷新 UI
