@@ -255,7 +255,7 @@ void CategoryPanel::setupContextMenu() {
             menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "清空回收站", this, &CategoryPanel::onEmptyTrash);
             menu.addAction(UiHelper::getIcon("sync", PrimaryBlue, 18), "还原全部项目", this, &CategoryPanel::onRestoreAllFromTrash);
         } else if (!index.isValid()) {
-            menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建分类", this, &CategoryPanel::onCreateCategory);
+            menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建文件夹", this, &CategoryPanel::onCreateCategory);
             
             auto* sortMenu = menu.addMenu(UiHelper::getIcon("list_ul", QColor("#aaaaaa"), 18), "排列");
             sortMenu->setStyleSheet(menu.styleSheet());
@@ -383,14 +383,14 @@ void CategoryPanel::setupContextMenu() {
 
                 menu.addSeparator();
 
-                menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建分类", this, &CategoryPanel::onCreateCategory);
+                menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建文件夹", this, &CategoryPanel::onCreateCategory);
                 
                 int catId = index.data(IdRole).toInt();
                 Category cat = CategoryRepo::getById(catId);
                 bool isManagedLibraryRoot = (cat.id > 0 && cat.parentId == 0 && !cat.physicalPath.empty());
 
                 if (!isManagedLibraryRoot) {
-                    menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建子分类", this, &CategoryPanel::onCreateSubCategory);
+                    menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建子文件夹", this, &CategoryPanel::onCreateSubCategory);
                 }
 
                 menu.addSeparator();
@@ -400,8 +400,8 @@ void CategoryPanel::setupContextMenu() {
                                isPinned ? "从“快速访问”中移除" : "添加至“快速访问”", this, &CategoryPanel::onTogglePin);
                                
                 if (!isManagedLibraryRoot) {
-                    menu.addAction(UiHelper::getIcon("edit", TextMuted, 18), "重命名分类", this, &CategoryPanel::onRenameCategory);
-                    menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "删除分类", this, &CategoryPanel::onDeleteCategory);
+                    menu.addAction(UiHelper::getIcon("edit", TextMuted, 18), "重命名", this, &CategoryPanel::onRenameCategory);
+                    menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "删除", this, &CategoryPanel::onDeleteCategory);
                 }
 
                 menu.addSeparator();
@@ -569,9 +569,9 @@ void CategoryPanel::restoreExpandedState(const QModelIndex& parent, const QSet<i
 }
 
 void CategoryPanel::onCreateCategory() {
-    // 1. 扫描当前所有的分类，计算出在顶级（parentId = 0）不冲突的默认名字："新建分类"、"新建分类 (1)"、"新建分类 (2)"...
+    // 1. 扫描当前所有的分类，计算出在顶级（parentId = 0）不冲突的默认名字："新建文件夹"、"新建文件夹 (1)"、"新建文件夹 (2)"...
     auto allCats = CategoryRepo::getAll();
-    QString baseName = "新建分类";
+    QString baseName = "新建文件夹";
     QString finalName = baseName;
     int suffix = 1;
     bool conflict = true;
@@ -627,7 +627,7 @@ void CategoryPanel::onCreateSubCategory() {
 
     // 1. 扫描同级分类，计算出在 parentId 下不冲突的默认子分类名字
     auto allCats = CategoryRepo::getAll();
-    QString baseName = "新建分类";
+    QString baseName = "新建文件夹";
     QString finalName = baseName;
     int suffix = 1;
     bool conflict = true;
