@@ -135,17 +135,49 @@ void CategoryModel::refresh() {
             root->appendRow(favGroup);
         }
 
-        // 6. 挂载用户自定义分类，一律作为一等公民顶级分类，直接挂载到 root 下
+        // 3. “文件夹”主标题组节点（精准挂载在第 4 个物理位置，位于“快速访问”下方）
+        QStandardItem* catGroup = nullptr;
+        if (m_type == Both || m_type == User) {
+            catGroup = new QStandardItem();
+            catGroup->setData("category_root_group", TypeRole);
+            catGroup->setData("文件夹", NameRole);
+            catGroup->setData(CAT_GROUP_SYS_ID, IdRole); // CAT_GROUP_SYS_ID = -9
+            catGroup->setSelectable(false);
+            catGroup->setEditable(false);
+            catGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#378ADD"), 16));
+
+            QFont font = catGroup->font();
+            font.setBold(true);
+            catGroup->setFont(font);
+            catGroup->setForeground(QColor("#FFFFFF"));
+        }
+
+        // 4. 计算全树自定义文件夹总数
+        int totalUserFolderCount = 0;
+        for (const auto& cat : categories) {
+            if (cat.kind != CategoryKind::SystemLibrary) totalUserFolderCount++;
+        }
+
+        if (catGroup) {
+            catGroup->setText(QString("文件夹 (%1)").arg(totalUserFolderCount));
+        }
+
+        // 5. 挂载顶级自定义分类至“文件夹”主标题组节点下
         for (const auto& cat : categories) {
             int id = cat.id;
             QStandardItem* item = itemMap[id];
-            int parentId = cat.parentId;
-
-            if (parentId == 0) {
-                if (cat.kind != CategoryKind::SystemLibrary) {
+            if (cat.parentId == 0 && cat.kind != CategoryKind::SystemLibrary) {
+                if (catGroup) {
+                    catGroup->appendRow(item);
+                } else {
                     root->appendRow(item);
                 }
             }
+        }
+
+        // 6. 将“文件夹”主标题组精准挂载至 root（位于“快速访问”下方）
+        if (catGroup) {
+            root->appendRow(catGroup);
         }
 
         // 7. 挂载快速访问快捷镜像
