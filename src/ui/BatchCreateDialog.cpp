@@ -216,7 +216,7 @@ void BatchCreateDialog::applyTheme() {
     ).arg(arrowPath));
 }
 
-QString BatchCreateDialog::renderOne(int index, const std::vector<RenameRule>& rules) {
+QString BatchCreateDialog::renderOne(int index, const std::vector<RenameRule>& rules) const {
     QString name = "";
     for (const auto& rule : rules) {
         switch (rule.type) {
@@ -272,6 +272,28 @@ void BatchCreateDialog::doAutoSave() {
         arr.append(obj);
     }
     AppConfig::instance().setValue("BatchCreate/LastRules", QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+}
+
+bool BatchCreateDialog::isFile() const {
+    return m_typeCombo->currentData().toInt() == 1;
+}
+
+QString BatchCreateDialog::fileSuffix() const {
+    return m_suffixEdit->text();
+}
+
+QStringList BatchCreateDialog::renderAllNames() const {
+    QStringList names;
+    int count = m_countSpin->value();
+    std::vector<RenameRule> rules;
+    for (auto* row : m_ruleRows) rules.push_back(row->getRule());
+
+    for (int i = 0; i < count; ++i) {
+        QString n = renderOne(i, rules);
+        if (n.isEmpty()) n = QString("NewItem_%1").arg(i + 1);
+        names << n;
+    }
+    return names;
 }
 
 void BatchCreateDialog::onExecute() {
