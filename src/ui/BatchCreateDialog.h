@@ -30,7 +30,7 @@ private slots:
 private:
     void initContent();
     void onExecute();
-    void onAddRow();
+    void onInsertRowAfter(CreateRuleRow* targetRow = nullptr);
     void applyTheme();
     QString renderOne(int index, const std::vector<RenameRule>& rules) const;
 

@@ -2028,7 +2028,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             // 场景 B2：批量创建【受控物理资产文件 (txt/md)】
             QString rawSuffix = dlg.fileSuffix().trimmed();
             while (rawSuffix.startsWith(".")) rawSuffix.remove(0, 1);
-            QString ext = "." + (rawSuffix.isEmpty() ? "txt" : rawSuffix);
+            QString ext = "." + (rawSuffix.isEmpty() ? "md" : rawSuffix);
 
             QString drive = QCoreApplication::applicationDirPath().left(3);
             if (!m_currentPath.isEmpty() && m_currentPath.length() >= 3 && m_currentPath[1] == ':') {
