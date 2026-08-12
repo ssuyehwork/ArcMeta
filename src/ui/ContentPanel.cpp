@@ -84,6 +84,7 @@
 #include "CategoryLockWidget.h"
 #include "CategoryPanel.h"
 #include "BatchRenameDialog.h" 
+#include "BatchCreateDialog.h"
 #include "UiHelper.h" 
 #include "ShellIconManager.h"
 #include "StyleLibrary.h"
@@ -1649,6 +1650,16 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
         newMenu->addAction(UiHelper::getIcon("text", QColor("#EEEEEE")), "创建纯文本文件 (txt)")->setData(ActionNewTxt); 
  
         menu.addSeparator(); 
+
+        QAction* actBatchCreate = menu.addAction(UiHelper::getIcon("add", QColor("#EEEEEE")), "批量创建项目...");
+        actBatchCreate->setData(ActionBatchCreate);
+        // 6.1 磁盘目录模式独占
+        if (isMirrorSource()) {
+            actBatchCreate->setEnabled(false);
+            actBatchCreate->setToolTip("批量创建仅支持在物理磁盘模式下使用");
+        }
+
+        menu.addSeparator(); 
         QAction* actPaste = menu.addAction("粘贴"); 
         actPaste->setData(ActionPaste); 
         actPaste->setEnabled(!m_currentPath.isEmpty() && m_currentPath != "computer://"); 
@@ -1962,6 +1973,13 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 MetadataManager::instance().removeMetadataBatchSync(targetPaths);
 
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "已取消自动导入并彻底擦除相关元数据", 2000, QColor("#e81123"));
+                refreshAll();
+            }
+            break;
+        }
+        case ActionBatchCreate: {
+            BatchCreateDialog dlg(m_currentPath, this);
+            if (dlg.exec() == QDialog::Accepted) {
                 refreshAll();
             }
             break;

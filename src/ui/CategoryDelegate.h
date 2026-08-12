@@ -34,7 +34,8 @@ public:
             painter->setRenderHint(QPainter::Antialiasing);
 
             QString colorHex = index.data(ColorRole).toString();
-            QColor baseColor = colorHex.isEmpty() ? QColor("#3498db") : QColor(colorHex);
+            // 当未指定设色时，默认回退色采用标志性的亮丽文件夹黄色 (#FDB70A)
+            QColor baseColor = colorHex.isEmpty() ? QColor("#FDB70A") : QColor(colorHex);
             QColor bg = selected ? baseColor : QColor("#2a2d2e");
             if (selected) bg.setAlphaF(0.2f); 
 
