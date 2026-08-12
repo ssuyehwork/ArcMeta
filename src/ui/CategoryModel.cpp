@@ -109,7 +109,12 @@ void CategoryModel::refresh() {
             catMap[cat.id] = cat;
             int id = cat.id;
             QString name = QString::fromStdWString(cat.name);
-            QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
+
+            QString colorStr = QString::fromStdWString(cat.color);
+            if (colorStr.isEmpty() || colorStr.compare("#555555", Qt::CaseInsensitive) == 0) {
+                colorStr = "#FDB70A"; // 强制亮黄
+            }
+            QString color = colorStr;
 
             int count = catCounts.value(id, 0);
             QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
@@ -121,6 +126,7 @@ void CategoryModel::refresh() {
             item->setData(cat.encrypted, EncryptedRole);
             item->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
             item->setFlags(item->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+            item->setForeground(QColor("#FFFFFF")); // 纯白高亮文本
             
             if (cat.encrypted && !m_unlockedIds.contains(id)) {
                 item->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
@@ -179,7 +185,12 @@ void CategoryModel::refresh() {
                 if (cat.pinned) {
                     int id = cat.id;
                     QString name = QString::fromStdWString(cat.name);
-                    QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
+
+                    QString colorStr = QString::fromStdWString(cat.color);
+                    if (colorStr.isEmpty() || colorStr.compare("#555555", Qt::CaseInsensitive) == 0) {
+                        colorStr = "#FDB70A"; // 强制亮黄
+                    }
+                    QString color = colorStr;
                     
                     int count = catCounts.value(id, 0);
                     QStandardItem* mirror = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
@@ -188,6 +199,7 @@ void CategoryModel::refresh() {
                     mirror->setData(color, ColorRole);
                     mirror->setData(name, NameRole);
                     mirror->setData(true, PinnedRole);
+                    mirror->setForeground(QColor("#FFFFFF")); // 纯白高亮文本
                     
                     if (cat.encrypted && !m_unlockedIds.contains(id)) {
                         mirror->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));

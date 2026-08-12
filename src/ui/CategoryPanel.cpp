@@ -1304,11 +1304,11 @@ void CategoryPanel::initUi() {
     QString arrowDown  = UiHelper::getSvgTempFilePath("arrow_down",  PrimaryBlue);
 
     QString treeStyle = QString(R"(
-        QTreeView { background-color: transparent; border: none; color: #CCC; outline: none; }
+        QTreeView { background-color: transparent; border: none; color: #FFFFFF; outline: none; }
         
         QTreeView::branch {
             background-color: transparent;
-            width: 20px;
+            width: 16px;
         }
 
         QTreeView::branch:has-children:closed { image: url("%1"); }
@@ -1316,7 +1316,7 @@ void CategoryPanel::initUi() {
         QTreeView::branch:has-children:closed:has-siblings { image: url("%1"); }
         QTreeView::branch:has-children:open:has-siblings   { image: url("%2"); }
 
-        QTreeView::item { height: 26px; padding-left: 0px; }
+        QTreeView::item { height: 30px; padding-left: 0px; color: #FFFFFF; }
     )").arg(arrowRight).arg(arrowDown);
 
     // 物理还原：单树架构，合并系统项与用户分类
@@ -1334,7 +1334,7 @@ void CategoryPanel::initUi() {
     
     m_categoryTree->setHeaderHidden(true);
     m_categoryTree->setRootIsDecorated(true);
-    m_categoryTree->setIndentation(20);
+    m_categoryTree->setIndentation(12);
     m_categoryTree->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_categoryTree->setDragEnabled(true);
     m_categoryTree->setAcceptDrops(true);
