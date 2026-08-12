@@ -501,6 +501,14 @@ void MainWindow::initUi() {
         unifiedNavigateTo(kProtocolCategory + QString::number(id) + "?name=" + name);
     });
 
+    // 绑定 requestCreateSubCategory 信号到侧边栏 CategoryPanel 的创建方法（对应用户原话：“绑定 requestCreateSubCategory 信号到侧边栏 CategoryPanel 的创建方法”）
+    connect(m_contentPanel, &ContentPanel::requestCreateSubCategory, this, [this](int parentCatId) {
+        if (m_categoryPanel) {
+            m_categoryPanel->selectCategory(parentCatId);
+            m_categoryPanel->onCreateSubCategory();
+        }
+    });
+
     // 2. 内容面板选中项改变 -> 元数据面板刷新 & 自动预览
     // 2026-03-xx 按照高性能要求，优先从模型 Role 读取元数据缓存，避免频繁磁盘 IO
     // 2026-05-27 物理加固：补全 this 上下文

@@ -34,8 +34,8 @@ public:
             painter->setRenderHint(QPainter::Antialiasing);
 
             QString colorHex = index.data(ColorRole).toString();
-            // 当未指定设色时，默认回退色采用标志性的亮丽文件夹黄色 (#FDB70A)
-            QColor baseColor = colorHex.isEmpty() ? QColor("#FDB70A") : QColor(colorHex);
+            // 当未指定设色时，默认回退色采用标志性的深灰色 (#555555)（对应用户原话：“自定义文件夹（分类）的颜色只能为#555555”）
+            QColor baseColor = colorHex.isEmpty() ? QColor("#555555") : QColor(colorHex);
             QColor bg = selected ? baseColor : QColor("#2a2d2e");
             if (selected) bg.setAlphaF(0.2f); 
 

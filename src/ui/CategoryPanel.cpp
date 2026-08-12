@@ -54,10 +54,10 @@ namespace ArcMeta {
 
 /**
  * @brief 获取默认分类颜色：深灰色 (#555555)
- * 2026-06-xx 按照用户要求：废除随机色，统一默认使用深灰色
+ * 2026-06-xx 按照用户要求：废除随机色，统一默认使用深灰色（对应用户原话：“自定义文件夹（分类）的颜色只能为#555555”）
  */
 static std::wstring getDefaultCategoryColor() {
-    return L"#FDB70A";
+    return L"#555555";
 }
 
 CategoryPanel::~CategoryPanel() {

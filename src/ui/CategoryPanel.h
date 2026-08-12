@@ -71,9 +71,11 @@ signals:
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
 
-private slots:
+public slots:
     void onCreateCategory();
     void onCreateSubCategory();
+
+private slots:
     void onRenameCategory();
     void onDeleteCategory();
     void onSetPresetTags();

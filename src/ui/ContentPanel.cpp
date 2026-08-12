@@ -3141,34 +3141,85 @@ void ContentPanel::recalculateAndEmitStats() {
 }
 
 void ContentPanel::createNewItem(const QString& type) { 
-    if (m_currentPath.isEmpty() || m_currentPath == "computer://") return; 
- 
-    QString baseName = (type == "folder") ? "新建文件夹" : "未命名"; 
-    QString ext = (type == "md") ? ".md" : ((type == "txt") ? ".txt" : ""); 
-    QString finalName = baseName + ext; 
-    QString fullPath = m_currentPath + "/" + finalName; 
- 
-    int counter = 1; 
-    while (QFileInfo::exists(fullPath)) { 
-        finalName = baseName + QString(" (%1)").arg(counter++) + ext; 
-        fullPath = m_currentPath + "/" + finalName; 
-    } 
- 
-    bool success = false; 
-    if (type == "folder") { 
-        success = QDir(m_currentPath).mkdir(finalName); 
-    } else { 
-        QFile file(fullPath); 
-        if (file.open(QIODevice::WriteOnly)) { 
-            file.close(); 
-            success = true; 
+    // --- 分流 A：物理磁盘导航模式 (DiskNav) ---
+    if (dataSourceType() == DataSourceType::DiskNav) {
+        if (m_currentPath.isEmpty() || m_currentPath == "computer://") return; 
+
+        QString baseName = (type == "folder") ? "新建文件夹" : "未命名"; 
+        QString ext = (type == "md") ? ".md" : ((type == "txt") ? ".txt" : ""); 
+        QString finalName = baseName + ext; 
+        QString fullPath = m_currentPath + "/" + finalName; 
+
+        int counter = 1; 
+        while (QFileInfo::exists(fullPath)) { 
+            finalName = baseName + QString(" (%1)").arg(counter++) + ext; 
+            fullPath = m_currentPath + "/" + finalName; 
         } 
-    } 
- 
-    if (success) { 
-        m_pendingSelectName = finalName;
+
+        bool success = false; 
+        if (type == "folder") { 
+            success = QDir(m_currentPath).mkdir(finalName); 
+        } else { 
+            QFile file(fullPath); 
+            if (file.open(QIODevice::WriteOnly)) { 
+                file.close(); 
+                success = true; 
+            } 
+        } 
+
+        if (success) { 
+            m_pendingSelectName = finalName;
+            m_isPendingEdit = true;
+            loadDirectory(m_currentPath, m_isRecursive); 
+        }
+        return;
+    }
+
+    // --- 分流 B：内存受控托管库模式 (UserCategory) ---
+    if (m_currentCategoryId <= 0) return;
+
+    // 场景 B1：新建文件夹 ➔ 生成逻辑子分类（对应用户原话：“场景 B1：新建文件夹 ➔ 生成逻辑子分类”）
+    if (type == "folder") {
+        // 向侧边栏发射请求，由 CategoryPanel 自动展开并直接进入行内编辑重命名
+        emit requestCreateSubCategory(m_currentCategoryId);
+        return;
+    }
+
+    // 场景 B2：新建 Markdown / txt ➔ 生成受控物理资产胶囊文件（对应用户原话：“场景 B2：新建 Markdown / txt ➔ 生成受控物理资产胶囊文件”）
+    QString baseName = "未命名";
+    QString ext = (type == "md") ? ".md" : ".txt";
+    QString fileName = baseName + ext;
+
+    // 1. 获取当前盘符托管库根目录 (例如 G:\ArcMeta.Library_G)
+    QString drive = QCoreApplication::applicationDirPath().left(3);
+    if (!m_currentPath.isEmpty() && m_currentPath.length() >= 3 && m_currentPath[1] == ':') {
+        drive = m_currentPath.left(3);
+    }
+    QString managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
+    if (!QDir().exists(managedRoot)) {
+        QDir().mkpath(managedRoot);
+    }
+
+    // 2. 分配 13 位 Base36 胶囊 ID 并物理创建 file
+    QString fileId = ShellHelper::generateBase36Id();
+    QString containerDir = managedRoot + "/" + fileId + ".arc";
+    if (!QDir().mkpath(containerDir)) return;
+
+    QString destPath = containerDir + "/" + fileName;
+    QFile file(destPath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        QDir(containerDir).removeRecursively();
+        return;
+    }
+    file.close();
+
+    // 3. 登记写入 SQLite 数据库并绑定至当前分类 ID
+    std::wstring wDestPath = QDir::toNativeSeparators(destPath).toStdWString();
+    if (MetadataManager::instance().registerAsset(fileId.toStdString(), wDestPath, m_currentCategoryId)) {
+        // 4. 定位高亮并进入行内编辑状态
+        m_pendingSelectName = fileName;
         m_isPendingEdit = true;
-        loadDirectory(m_currentPath, m_isRecursive); 
+        refreshAll();
     } 
 } 
  

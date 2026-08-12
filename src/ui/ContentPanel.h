@@ -408,6 +408,12 @@ public slots:
 
 signals:
     /**
+     * @brief 在内存模式下，请求在指定分类下创建 logical 子分类（对应用户原话：“在内存模式下，请求在指定分类下创建逻辑子分类”）
+     */
+    void requestCreateSubCategory(int parentCategoryId);
+
+signals:
+    /**
      * @brief 当在内容区点击子分类时触发，告知 MainWindow 切换侧边栏选中状态
      */
     void categoryClicked(int categoryId);

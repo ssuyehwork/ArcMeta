@@ -3,6 +3,7 @@
 #include "../meta/MetadataManager.h"
 
 #include "UiHelper.h"
+#include <functional>
 #include <QtConcurrent>
 #include <QMimeData>
 #include <QFileInfo>
@@ -152,7 +153,14 @@ void CategoryModel::refresh() {
         }
 
         // 6. 挂载用户自定义分类至“分类”主标题下
-        int userTopCatCount = 0;
+        // 按照产品标准：全量统计全树所有深度的自定义文件夹总数（对应用户原话：“按照产品标准：全量统计全树所有深度的自定义文件夹总数”）
+        int totalUserFolderCount = 0;
+        for (const auto& cat : categories) {
+            if (cat.kind != CategoryKind::SystemLibrary) {
+                totalUserFolderCount++;
+            }
+        }
+
         for (const auto& cat : categories) {
             int id = cat.id;
             QStandardItem* item = itemMap[id];
@@ -160,7 +168,6 @@ void CategoryModel::refresh() {
 
             if (parentId == 0) {
                 if (cat.kind != CategoryKind::SystemLibrary) {
-                    userTopCatCount++;
                     if (catGroup) {
                         catGroup->appendRow(item);
                     } else {
@@ -171,7 +178,7 @@ void CategoryModel::refresh() {
         }
 
         if (catGroup) {
-            catGroup->setText(QString("文件夹 (%1)").arg(userTopCatCount));
+            catGroup->setText(QString("文件夹 (%1)").arg(totalUserFolderCount));
             root->appendRow(catGroup);
         }
 
@@ -228,7 +235,23 @@ void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const 
             int id = item->data(IdRole).toInt();
 
             if (id == CAT_GROUP_SYS_ID) {
-                item->setText(QString("文件夹 (%1)").arg(item->rowCount()));
+                // 动态更新时，同样显示包含所有深度的子文件夹总数（对应用户原话：“动态更新时，同样显示包含所有深度的子文件夹总数”）
+                std::function<int(QStandardItem*)> countCategories;
+                countCategories = [&](QStandardItem* node) -> int {
+                    int c = 0;
+                    for (int j = 0; j < node->rowCount(); ++j) {
+                        QStandardItem* child = node->child(j);
+                        if (child->data(TypeRole).toString() == "category") {
+                            c++;
+                        }
+                        if (child->hasChildren()) {
+                            c += countCategories(child);
+                        }
+                    }
+                    return c;
+                };
+                int totalFolders = countCategories(item);
+                item->setText(QString("文件夹 (%1)").arg(totalFolders));
             } else if (id < 0) { 
                 int count = sysCounts.value(type, 0);
                 QString newText = QString("%1 (%2)").arg(name).arg(count);
