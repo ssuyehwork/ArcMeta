@@ -216,7 +216,7 @@ void BatchCreateDialog::applyTheme() {
     ).arg(arrowPath));
 }
 
-QString BatchCreateDialog::renderOne(int index, const std::vector<RenameRule>& rules) {
+QString BatchCreateDialog::renderOne(int index, const std::vector<RenameRule>& rules) const {
     QString name = "";
     for (const auto& rule : rules) {
         switch (rule.type) {

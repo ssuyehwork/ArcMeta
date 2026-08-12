@@ -2009,7 +2009,17 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     }
                     trans.commit();
                 }
-                if (m_categoryPanel) m_categoryPanel->requestRefresh(true);
+                // 修复 m_categoryPanel 未声明错误：向上查找到 MainWindow 并获得 CategoryPanel 指针
+                MainWindow* mw = nullptr;
+                QWidget* parentWin = window();
+                while (parentWin) {
+                    if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
+                    parentWin = parentWin->parentWidget();
+                }
+                if (mw) {
+                    CategoryPanel* cp = mw->findChild<CategoryPanel*>();
+                    if (cp) cp->requestRefresh(true);
+                }
                 refreshAll();
                 ToolTipOverlay::instance()->showText(QCursor::pos(), QString("已成功批量创建 %1 个子分类").arg(renderedNames.size()), 2000, Style::SuccessGreen);
                 break;

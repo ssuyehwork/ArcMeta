@@ -32,7 +32,7 @@ private:
     void onExecute();
     void onAddRow();
     void applyTheme();
-    QString renderOne(int index, const std::vector<RenameRule>& rules);
+    QString renderOne(int index, const std::vector<RenameRule>& rules) const;
 
     QString m_currentDir;
     
