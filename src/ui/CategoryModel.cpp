@@ -83,6 +83,23 @@ void CategoryModel::refresh() {
         favGroup->setForeground(QColor("#FFFFFF"));
     }
 
+    // 3. “文件夹”主标题节点
+    QStandardItem* catGroup = nullptr;
+    if (m_type == Both || m_type == User) {
+        catGroup = new QStandardItem();
+        catGroup->setData("category_root_group", TypeRole);
+        catGroup->setData("文件夹", NameRole);
+        catGroup->setData(CAT_GROUP_SYS_ID, IdRole);
+        catGroup->setSelectable(false);
+        catGroup->setEditable(false);
+        catGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#378ADD"), 16));
+
+        QFont font = catGroup->font();
+        font.setBold(true);
+        catGroup->setFont(font);
+        catGroup->setForeground(QColor("#FFFFFF"));
+    }
+
     if (m_type == User || m_type == Both) {
         auto categories = CategoryRepo::getAll();
         QMap<int, QStandardItem*> itemMap;
@@ -134,16 +151,26 @@ void CategoryModel::refresh() {
             root->appendRow(favGroup);
         }
 
-        // 6. 挂载用户自定义分类（彻底扁平化平铺，作为一级公民呈现，无树枝缩进）
+        // 6. 挂载用户自定义分类（重新挂载回 “文件夹” 主折叠大标题下，带 ▼ 箭头）
+        int userTopCatCount = 0;
         for (const auto& cat : categories) {
             int id = cat.id;
             QStandardItem* item = itemMap[id];
             int parentId = cat.parentId;
 
             if (parentId == 0 && cat.kind != CategoryKind::SystemLibrary) {
-                // 一律直接挂载至 root 根节点，实现不缩进、无折叠箭头的平铺效果
-                root->appendRow(item);
+                userTopCatCount++;
+                if (catGroup) {
+                    catGroup->appendRow(item);
+                } else {
+                    root->appendRow(item);
+                }
             }
+        }
+
+        if (catGroup) {
+            catGroup->setText(QString("文件夹 (%1)").arg(userTopCatCount));
+            root->appendRow(catGroup);
         }
 
         // 7. 挂载快速访问快捷镜像

@@ -29,6 +29,12 @@ public:
         bool hover = option.state & QStyle::State_MouseOver;
         bool isSelectable = index.flags() & Qt::ItemIsSelectable;
 
+        QStyleOptionViewItem opt = option;
+        // 对“文件夹”内部的二级分类消除冗余树枝缩进，提升为一等视觉质感
+        if (index.parent().isValid()) {
+            opt.rect.adjust(-10, 0, 0, 0); // 抹平多余的树枝缩进空白
+        }
+
         if (isSelectable && (selected || hover)) {
             painter->save();
             painter->setRenderHint(QPainter::Antialiasing);
@@ -41,16 +47,16 @@ public:
 
             // 2026-03-xx 按照用户要求：物理隔离 branch 区域，解决选中背景遮挡折叠图标的问题
             // 严格执行宪法第五定律第 6 条：padding: 2px 4px, margin: 1px 2px
-            QStyle* style = option.widget ? option.widget->style() : QApplication::style();
-            QRect decoRect = style->subElementRect(QStyle::SE_ItemViewItemDecoration, &option, option.widget);
-            QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &option, option.widget);
+            QStyle* style = opt.widget ? opt.widget->style() : QApplication::style();
+            QRect decoRect = style->subElementRect(QStyle::SE_ItemViewItemDecoration, &opt, opt.widget);
+            QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget);
             
             // 高亮矩形仅包含图标与文本，不触碰左侧 branch 区域
             QRect contentRect = decoRect.united(textRect);
             
             // 2026-03-xx 物理对齐修正：确保 contentRect 的左边界从图标开始，右边界延展至 widget 边缘（减去右边距）
-            if (option.widget) {
-                contentRect.setRight(option.widget->width() - 4);
+            if (opt.widget) {
+                contentRect.setRight(opt.widget->width() - 4);
             }
 
             // 应用宪法规范：margin 1px 2px (上下 1px, 左右 2px)
@@ -60,7 +66,6 @@ public:
             painter->restore();
         }
 
-        QStyleOptionViewItem opt = option;
         opt.state &= ~QStyle::State_Selected;
         opt.state &= ~QStyle::State_MouseOver;
         
@@ -83,12 +88,12 @@ public:
             if (start >= 0) {
                 // 执行自定义绘制
                 painter->save();
-                QStyle* style = option.widget ? option.widget->style() : QApplication::style();
+                QStyle* style = opt.widget ? opt.widget->style() : QApplication::style();
                 
                 // 绘制图标 (Decoration)
-                style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, option.widget);
+                style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
                 
-                QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, option.widget);
+                QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget);
                 textRect.adjust(2, 0, 0, 0); // 微调
                 
                 // 计算文本布局
