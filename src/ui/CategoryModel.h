@@ -18,6 +18,7 @@ public:
     void setUnlockedIds(const QSet<int>& ids);
     void deferredRefresh();
     void loadCategoryItems(const QModelIndex& parentIndex);
+    int allUserFolderCount() const;
 
 public slots:
     void refresh();

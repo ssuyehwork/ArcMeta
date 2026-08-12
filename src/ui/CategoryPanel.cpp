@@ -255,7 +255,7 @@ void CategoryPanel::setupContextMenu() {
             menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "清空回收站", this, &CategoryPanel::onEmptyTrash);
             menu.addAction(UiHelper::getIcon("sync", PrimaryBlue, 18), "还原全部项目", this, &CategoryPanel::onRestoreAllFromTrash);
         } else if (!index.isValid()) {
-            menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建分类", this, &CategoryPanel::onCreateCategory);
+            menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建文件夹", this, &CategoryPanel::onCreateCategory);
             
             auto* sortMenu = menu.addMenu(UiHelper::getIcon("list_ul", QColor("#aaaaaa"), 18), "排列");
             sortMenu->setStyleSheet(menu.styleSheet());
@@ -383,14 +383,14 @@ void CategoryPanel::setupContextMenu() {
 
                 menu.addSeparator();
 
-                menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建分类", this, &CategoryPanel::onCreateCategory);
+                menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建文件夹", this, &CategoryPanel::onCreateCategory);
                 
                 int catId = index.data(IdRole).toInt();
                 Category cat = CategoryRepo::getById(catId);
                 bool isManagedLibraryRoot = (cat.id > 0 && cat.parentId == 0 && !cat.physicalPath.empty());
 
                 if (!isManagedLibraryRoot) {
-                    menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建子分类", this, &CategoryPanel::onCreateSubCategory);
+                    menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建子文件夹", this, &CategoryPanel::onCreateSubCategory);
                 }
 
                 menu.addSeparator();
@@ -400,8 +400,8 @@ void CategoryPanel::setupContextMenu() {
                                isPinned ? "从“快速访问”中移除" : "添加至“快速访问”", this, &CategoryPanel::onTogglePin);
                                
                 if (!isManagedLibraryRoot) {
-                    menu.addAction(UiHelper::getIcon("edit", TextMuted, 18), "重命名分类", this, &CategoryPanel::onRenameCategory);
-                    menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "删除分类", this, &CategoryPanel::onDeleteCategory);
+                    menu.addAction(UiHelper::getIcon("edit", TextMuted, 18), "重命名", this, &CategoryPanel::onRenameCategory);
+                    menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "删除", this, &CategoryPanel::onDeleteCategory);
                 }
 
                 menu.addSeparator();
@@ -569,9 +569,9 @@ void CategoryPanel::restoreExpandedState(const QModelIndex& parent, const QSet<i
 }
 
 void CategoryPanel::onCreateCategory() {
-    // 1. 扫描当前所有的分类，计算出在顶级（parentId = 0）不冲突的默认名字："新建分类"、"新建分类 (1)"、"新建分类 (2)"...
+    // 1. 扫描当前所有的分类，计算出在顶级（parentId = 0）不冲突的默认名字："新建文件夹"、"新建文件夹 (1)"、"新建文件夹 (2)"...
     auto allCats = CategoryRepo::getAll();
-    QString baseName = "新建分类";
+    QString baseName = "新建文件夹";
     QString finalName = baseName;
     int suffix = 1;
     bool conflict = true;
@@ -627,7 +627,7 @@ void CategoryPanel::onCreateSubCategory() {
 
     // 1. 扫描同级分类，计算出在 parentId 下不冲突的默认子分类名字
     auto allCats = CategoryRepo::getAll();
-    QString baseName = "新建分类";
+    QString baseName = "新建文件夹";
     QString finalName = baseName;
     int suffix = 1;
     bool conflict = true;
@@ -1435,6 +1435,20 @@ void CategoryPanel::initUi() {
         m_isRestoringState = false;
         m_isInternalUpdating = false;
         Logger::log("[CategoryPanel] modelReset: Restore finished, m_isInternalUpdating set to false");
+
+        // 更新“文件夹 (N)”组按钮文本和计数
+        int count = m_categoryModel ? m_categoryModel->allUserFolderCount() : 0;
+        updateFolderGroupButtonText(count);
+
+        // 如果之前的折叠状态是折叠的，我们需要在 modelReset 之后隐藏顶级自定义分类行
+        if (!m_isFolderGroupExpanded && m_categoryTree && m_proxyModel) {
+            for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
+                QModelIndex proxyIdx = m_proxyModel->index(i, 0);
+                if (proxyIdx.data(IdRole).toInt() > 0) { // 顶级自定义分类
+                    m_categoryTree->setRowHidden(i, QModelIndex(), true);
+                }
+            }
+        }
     });
 
     connect(m_categoryTree, &QTreeView::clicked, this, [this](const QModelIndex& proxyIndex) {
@@ -1520,6 +1534,42 @@ void CategoryPanel::initUi() {
         }
     });
     
+    // 1. 构造“文件夹 (N)”专用组按钮
+    m_btnFolderGroup = new QPushButton(this);
+    m_btnFolderGroup->setFixedHeight(28);
+    m_btnFolderGroup->setCursor(Qt::PointingHandCursor);
+    m_btnFolderGroup->setStyleSheet(
+        "QPushButton { "
+        "  background: transparent; "
+        "  border: none; "
+        "  color: #FFFFFF; "
+        "  font-weight: bold; "
+        "  font-size: 12px; "
+        "  text-align: left; "
+        "  padding-left: 4px; "
+        "} "
+        "QPushButton:hover { background-color: #2A2A2A; border-radius: 4px; }"
+    );
+
+    // 2. 点击按钮：无缝切换下方自定义分类列表的隐藏/显示（折叠/展开）
+    connect(m_btnFolderGroup, &QPushButton::clicked, this, [this]() {
+        m_isFolderGroupExpanded = !m_isFolderGroupExpanded;
+
+        // 控制 TreeView 中顶级分类节点的展开/收起状态
+        if (m_categoryTree && m_proxyModel) {
+            for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
+                QModelIndex proxyIdx = m_proxyModel->index(i, 0);
+                if (proxyIdx.data(IdRole).toInt() > 0) { // 顶级自定义分类
+                    m_categoryTree->setRowHidden(i, QModelIndex(), !m_isFolderGroupExpanded);
+                }
+            }
+        }
+        // 动态更新箭头图标 (▼ / ▶)
+        int count = m_categoryModel ? m_categoryModel->allUserFolderCount() : 0;
+        updateFolderGroupButtonText(count);
+    });
+
+    sbContentLayout->addWidget(m_btnFolderGroup);
     sbContentLayout->addWidget(m_categoryTree);
     m_mainLayout->addWidget(sbContent, 1);
 
@@ -1789,6 +1839,13 @@ bool CategoryPanel::eventFilter(QObject* obj, QEvent* event) {
         }
     }
     return QFrame::eventFilter(obj, event);
+}
+
+void CategoryPanel::updateFolderGroupButtonText(int count) {
+    if (!m_btnFolderGroup) return;
+    QString arrow = m_isFolderGroupExpanded ? "▼ " : "▶ ";
+    m_btnFolderGroup->setText(QString("%1文件夹 (%2)").arg(arrow).arg(count));
+    m_btnFolderGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#378ADD"), 16));
 }
 
 } // namespace ArcMeta

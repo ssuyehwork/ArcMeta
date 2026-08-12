@@ -1998,15 +1998,13 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
             // 场景 B1：批量创建【分类】
             if (!isFile) {
-                int targetParentId = isLibraryRoot ? 0 : m_currentCategoryId; // 若选中的是托管库根节点，强制设为 0 (一等公民顶级分类)
-
                 auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
                 if (!dbs.empty() && dbs[0]) {
                     SqlTransaction trans(dbs[0]);
                     for (const QString& name : renderedNames) {
                         Category cat;
                         cat.name = name.toStdWString();
-                        cat.parentId = targetParentId;
+                        cat.parentId = 0; // 恒为 0 (一等公民顶级分类)
                         cat.color = CategoryRepo::getDefaultColor();
                         CategoryRepo::add(cat);
                     }
@@ -3266,15 +3264,9 @@ void ContentPanel::createNewItem(const QString& type) {
     Category currentCat = CategoryRepo::getCachedById(m_currentCategoryId);
     bool isLibraryRoot = (currentCat.id > 0 && currentCat.parentId == 0 && currentCat.kind == CategoryKind::SystemLibrary);
 
-    // 场景 B1：新建文件夹
+    // 内存受控模式下，新建文件夹一律立为“一等公民”顶级分类 (parentId 恒为 0)
     if (type == "folder") {
-        if (isLibraryRoot) {
-            // 托管库根节点禁止嵌套子分类：直接请求侧边栏生成“一等公民”顶级分类 (parentId = 0)
-            emit requestCreateSubCategory(0);
-        } else {
-            // 普通自定义分类：生成当前分类下的逻辑子分类
-            emit requestCreateSubCategory(m_currentCategoryId);
-        }
+        emit requestCreateSubCategory(0); // 恒传 0
         return;
     }
 

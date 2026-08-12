@@ -84,23 +84,6 @@ void CategoryModel::refresh() {
         favGroup->setForeground(QColor("#FFFFFF"));
     }
 
-    // 3. “文件夹”主标题节点 
-    QStandardItem* catGroup = nullptr; 
-    if (m_type == Both || m_type == User) { 
-        catGroup = new QStandardItem(); 
-        catGroup->setData("category_root_group", TypeRole); 
-        catGroup->setData("文件夹", NameRole); // 升级名称 
-        catGroup->setData(CAT_GROUP_SYS_ID, IdRole); 
-        catGroup->setSelectable(false); 
-        catGroup->setEditable(false); 
-        catGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#378ADD"), 16)); // 恢复实心文件夹图标 
- 
-        QFont font = catGroup->font(); 
-        font.setBold(true); 
-        catGroup->setFont(font); 
-        catGroup->setForeground(QColor("#FFFFFF")); 
-    } 
-
     if (m_type == User || m_type == Both) {
         auto categories = CategoryRepo::getAll();
         QMap<int, QStandardItem*> itemMap;
@@ -152,15 +135,7 @@ void CategoryModel::refresh() {
             root->appendRow(favGroup);
         }
 
-        // 6. 挂载用户自定义分类至“分类”主标题下
-        // 按照产品标准：全量统计全树所有深度的自定义文件夹总数（对应用户原话：“按照产品标准：全量统计全树所有深度的自定义文件夹总数”）
-        int totalUserFolderCount = 0;
-        for (const auto& cat : categories) {
-            if (cat.kind != CategoryKind::SystemLibrary) {
-                totalUserFolderCount++;
-            }
-        }
-
+        // 6. 挂载用户自定义分类，一律作为一等公民顶级分类，直接挂载到 root 下
         for (const auto& cat : categories) {
             int id = cat.id;
             QStandardItem* item = itemMap[id];
@@ -168,18 +143,9 @@ void CategoryModel::refresh() {
 
             if (parentId == 0) {
                 if (cat.kind != CategoryKind::SystemLibrary) {
-                    if (catGroup) {
-                        catGroup->appendRow(item);
-                    } else {
-                        root->appendRow(item);
-                    }
+                    root->appendRow(item);
                 }
             }
-        }
-
-        if (catGroup) {
-            catGroup->setText(QString("文件夹 (%1)").arg(totalUserFolderCount));
-            root->appendRow(catGroup);
         }
 
         // 7. 挂载快速访问快捷镜像
@@ -436,6 +402,15 @@ bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction actio
     }, Qt::QueuedConnection);
 
     return true; // 物理阻断 Qt 原生深拷贝！
+}
+
+int CategoryModel::allUserFolderCount() const {
+    auto categories = CategoryRepo::getAll();
+    int c = 0;
+    for (const auto& cat : categories) {
+        if (cat.kind != CategoryKind::SystemLibrary) c++;
+    }
+    return c;
 }
 
 } // namespace ArcMeta
