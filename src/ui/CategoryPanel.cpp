@@ -1534,7 +1534,7 @@ void CategoryPanel::initUi() {
         }
     });
     
-    // 1. 构造“文件夹 (N)”专用组按钮
+    // 1. 构造“文件夹 (N)”专用组按钮（对应用户原话：“将标记为①的主分类““文件夹 (N)” (▼ / ▶)”变成按钮，该按钮是专用来隐藏或显示自定义创建的分类文件夹”）
     m_btnFolderGroup = new QPushButton(this);
     m_btnFolderGroup->setFixedHeight(28);
     m_btnFolderGroup->setCursor(Qt::PointingHandCursor);
@@ -1542,13 +1542,15 @@ void CategoryPanel::initUi() {
         "QPushButton { "
         "  background: transparent; "
         "  border: none; "
-        "  color: #FFFFFF; "
+        "  color: #EEEEEE; "
         "  font-weight: bold; "
         "  font-size: 12px; "
         "  text-align: left; "
-        "  padding-left: 4px; "
+        "  padding-left: 15px; " // 左侧对齐边距：使其图标和文字完美对齐系统分类
+        "  margin-right: 5px; "
         "} "
-        "QPushButton:hover { background-color: #2A2A2A; border-radius: 4px; }"
+        "QPushButton:hover { background-color: #2D2D30; border-radius: 4px; color: #FFFFFF; }"
+        "QPushButton:pressed { background-color: #3E3E40; border-radius: 4px; }"
     );
 
     // 2. 点击按钮：无缝切换下方自定义分类列表的隐藏/显示（折叠/展开）
@@ -1843,7 +1845,8 @@ bool CategoryPanel::eventFilter(QObject* obj, QEvent* event) {
 
 void CategoryPanel::updateFolderGroupButtonText(int count) {
     if (!m_btnFolderGroup) return;
-    QString arrow = m_isFolderGroupExpanded ? "▼ " : "▶ ";
+    // 使用统一美观的双态符号（对应用户原话：“(▼ / ▶)”）
+    QString arrow = m_isFolderGroupExpanded ? "▼  " : "▶  ";
     m_btnFolderGroup->setText(QString("%1文件夹 (%2)").arg(arrow).arg(count));
     m_btnFolderGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#378ADD"), 16));
 }
