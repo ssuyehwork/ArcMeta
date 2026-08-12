@@ -3141,6 +3141,7 @@ void ContentPanel::recalculateAndEmitStats() {
 }
 
 void ContentPanel::createNewItem(const QString& type) { 
+    // 2026-11-xx: 选中分类 A 时，在此处新建文件夹作为 A 的逻辑子分类，新建 md/txt 自动绑定到分类 A。
     // --- 分流 A：物理磁盘导航模式 (DiskNav) ---
     if (dataSourceType() == DataSourceType::DiskNav) {
         if (m_currentPath.isEmpty() || m_currentPath == "computer://") return; 
