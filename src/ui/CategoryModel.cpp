@@ -83,16 +83,16 @@ void CategoryModel::refresh() {
         favGroup->setForeground(QColor("#FFFFFF"));
     }
 
-    // 3. “分类”主标题节点
+    // 3. “文件夹”主标题节点
     QStandardItem* catGroup = nullptr;
     if (m_type == Both || m_type == User) {
         catGroup = new QStandardItem();
         catGroup->setData("category_root_group", TypeRole);
-        catGroup->setData("分类", NameRole);
+        catGroup->setData("文件夹", NameRole);
         catGroup->setData(CAT_GROUP_SYS_ID, IdRole);
         catGroup->setSelectable(false);
         catGroup->setEditable(false);
-        catGroup->setIcon(UiHelper::getIcon("category", QColor("#378ADD"), 16));
+        catGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#378ADD"), 16));
 
         QFont font = catGroup->font();
         font.setBold(true);
@@ -171,7 +171,7 @@ void CategoryModel::refresh() {
         }
 
         if (catGroup) {
-            catGroup->setText(QString("分类 (%1)").arg(userTopCatCount));
+            catGroup->setText(QString("文件夹 (%1)").arg(userTopCatCount));
             root->appendRow(catGroup);
         }
 
@@ -228,7 +228,7 @@ void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const 
             int id = item->data(IdRole).toInt();
 
             if (id == CAT_GROUP_SYS_ID) {
-                item->setText(QString("分类 (%1)").arg(item->rowCount()));
+                item->setText(QString("文件夹 (%1)").arg(item->rowCount()));
             } else if (id < 0) { 
                 int count = sysCounts.value(type, 0);
                 QString newText = QString("%1 (%2)").arg(name).arg(count);

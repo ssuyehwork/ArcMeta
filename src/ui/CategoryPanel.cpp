@@ -57,7 +57,7 @@ namespace ArcMeta {
  * 2026-06-xx 按照用户要求：废除随机色，统一默认使用深灰色
  */
 static std::wstring getDefaultCategoryColor() {
-    return L"#555555";
+    return L"#FDB70A";
 }
 
 CategoryPanel::~CategoryPanel() {
@@ -1263,7 +1263,7 @@ void CategoryPanel::initUi() {
     iconLabel->setPixmap(UiHelper::getIcon("folder_filled", PrimaryBlue, 18).pixmap(18, 18));
     headerLayout->addWidget(iconLabel);
 
-    QLabel* titleLabel = new QLabel("分类", header);
+    QLabel* titleLabel = new QLabel("文件夹", header);
     titleLabel->setStyleSheet(QString("font-size: 13px; font-weight: bold; color: %1; background: transparent; border: none;").arg(qssColor(PrimaryBlue)));
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch();
