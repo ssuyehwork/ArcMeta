@@ -19,6 +19,10 @@ public:
     explicit BatchCreateDialog(const QString& currentDirectory, QWidget* parent = nullptr);
     ~BatchCreateDialog() override = default;
 
+    bool isFile() const;
+    QString fileSuffix() const;
+    QStringList renderAllNames() const;
+
 private slots:
     void scheduleAutoSave();
     void doAutoSave();
