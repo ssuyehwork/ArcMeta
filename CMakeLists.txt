@@ -206,6 +206,10 @@ set(SOURCES
     src/ui/QuickLookMinimap.h
     src/ui/RuleRow.cpp
     src/ui/RuleRow.h
+    src/ui/CreateRuleRow.cpp
+    src/ui/CreateRuleRow.h
+    src/ui/BatchCreateDialog.cpp
+    src/ui/BatchCreateDialog.h
     src/ui/SearchHistoryPanel.cpp
     src/ui/SearchHistoryPanel.h
     src/ui/AddressHistoryPanel.cpp
