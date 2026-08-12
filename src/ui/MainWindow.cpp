@@ -501,6 +501,7 @@ void MainWindow::initUi() {
         unifiedNavigateTo(kProtocolCategory + QString::number(id) + "?name=" + name);
     });
 
+    // 2026-11-xx: 当用户点击新建逻辑子文件夹时，由此信号驱动侧边栏进行无缝联动
     // 绑定 requestCreateSubCategory 信号到侧边栏 CategoryPanel 的创建方法（对应用户原话：“绑定 requestCreateSubCategory 信号到侧边栏 CategoryPanel 的创建方法”）
     connect(m_contentPanel, &ContentPanel::requestCreateSubCategory, this, [this](int parentCatId) {
         if (m_categoryPanel) {

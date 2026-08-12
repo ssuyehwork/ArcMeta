@@ -84,22 +84,22 @@ void CategoryModel::refresh() {
         favGroup->setForeground(QColor("#FFFFFF"));
     }
 
-    // 3. “文件夹”主标题节点
-    QStandardItem* catGroup = nullptr;
-    if (m_type == Both || m_type == User) {
-        catGroup = new QStandardItem();
-        catGroup->setData("category_root_group", TypeRole);
-        catGroup->setData("文件夹", NameRole);
-        catGroup->setData(CAT_GROUP_SYS_ID, IdRole);
-        catGroup->setSelectable(false);
-        catGroup->setEditable(false);
-        catGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#378ADD"), 16));
-
-        QFont font = catGroup->font();
-        font.setBold(true);
-        catGroup->setFont(font);
-        catGroup->setForeground(QColor("#FFFFFF"));
-    }
+    // 3. “文件夹”主标题节点 
+    QStandardItem* catGroup = nullptr; 
+    if (m_type == Both || m_type == User) { 
+        catGroup = new QStandardItem(); 
+        catGroup->setData("category_root_group", TypeRole); 
+        catGroup->setData("文件夹", NameRole); // 升级名称 
+        catGroup->setData(CAT_GROUP_SYS_ID, IdRole); 
+        catGroup->setSelectable(false); 
+        catGroup->setEditable(false); 
+        catGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#378ADD"), 16)); // 恢复实心文件夹图标 
+ 
+        QFont font = catGroup->font(); 
+        font.setBold(true); 
+        catGroup->setFont(font); 
+        catGroup->setForeground(QColor("#FFFFFF")); 
+    } 
 
     if (m_type == User || m_type == Both) {
         auto categories = CategoryRepo::getAll();
@@ -234,24 +234,19 @@ void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const 
             QString name = item->data(NameRole).toString();
             int id = item->data(IdRole).toInt();
 
-            if (id == CAT_GROUP_SYS_ID) {
-                // 动态更新时，同样显示包含所有深度的子文件夹总数（对应用户原话：“动态更新时，同样显示包含所有深度的子文件夹总数”）
-                std::function<int(QStandardItem*)> countCategories;
-                countCategories = [&](QStandardItem* node) -> int {
-                    int c = 0;
-                    for (int j = 0; j < node->rowCount(); ++j) {
-                        QStandardItem* child = node->child(j);
-                        if (child->data(TypeRole).toString() == "category") {
-                            c++;
-                        }
-                        if (child->hasChildren()) {
-                            c += countCategories(child);
-                        }
-                    }
-                    return c;
-                };
-                int totalFolders = countCategories(item);
-                item->setText(QString("文件夹 (%1)").arg(totalFolders));
+                        if (id == CAT_GROUP_SYS_ID) { 
+                std::function<int(QStandardItem*)> countAllSubFolders; 
+                countAllSubFolders = [&](QStandardItem* node) -> int { 
+                    int c = 0; 
+                    for (int j = 0; j < node->rowCount(); ++j) { 
+                        QStandardItem* child = node->child(j); 
+                        if (child->data(TypeRole).toString() == "category") c++; 
+                        if (child->hasChildren()) c += countAllSubFolders(child); 
+                    } 
+                    return c; 
+                }; 
+                int totalFolders = countAllSubFolders(item); 
+                item->setText(QString("文件夹 (%1)").arg(totalFolders)); 
             } else if (id < 0) { 
                 int count = sysCounts.value(type, 0);
                 QString newText = QString("%1 (%2)").arg(name).arg(count);
