@@ -130,6 +130,10 @@ private:
 
     QVBoxLayout* m_mainLayout = nullptr;
     QWidget* m_focusLine = nullptr;
+
+    QPushButton* m_btnFolderGroup = nullptr; // “文件夹 (N)”组按钮
+    bool m_isFolderGroupExpanded = true;    // 文件夹组展开/收起状态
+    void updateFolderGroupButtonText(int count); // 动态更新计数
     
     DropTreeView* m_categoryTree = nullptr;
     CategoryModel* m_categoryModel = nullptr;
