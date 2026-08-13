@@ -308,40 +308,8 @@ bool CategoryModel::setData(const QModelIndex& index, const QVariant& val, int r
                 return false; 
             }
 
-            (void)QtConcurrent::run([this, targetCat, newName]() mutable {
-                bool renameSuccess = true;
-                bool physicalRenamed = false;
-                QString oldPath;
-                QString newPath;
-                if (!targetCat.physicalPath.empty()) {
-                    oldPath = QString::fromStdWString(targetCat.physicalPath);
-                    QFileInfo oldInfo(oldPath);
-                    newPath = QDir::toNativeSeparators(oldInfo.absoluteDir().absoluteFilePath(newName));
-                    if (oldPath != newPath) {
-                        if (QFile::rename(oldPath, newPath)) {
-                            targetCat.physicalPath = newPath.toStdWString();
-                            physicalRenamed = true;
-                        } else {
-                            renameSuccess = false;
-                            qWarning() << "[CategoryModel] QFile::rename failed from" << oldPath << "to" << newPath;
-                        }
-                    }
-                }
-
-                if (renameSuccess) {
-                    targetCat.name = newName.toStdWString();
-                    CategoryRepo::update(targetCat);
-                    
-                    if (physicalRenamed) {
-                        MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
-                    }
-                }
-
-                QMetaObject::invokeMethod(this, [this]() {
-                    refresh();
-                }, Qt::QueuedConnection);
-            });
-
+            // 🚀 【重构净化】：Model 不直接跑线程和修改磁盘/数据库，直接发射重命名信号由控制器接收处理
+            emit categoryRenameRequested(id, newName);
             return true;
         }
         return false;
@@ -421,20 +389,8 @@ bool CategoryModel::dropMimeData(const QMimeData* mimeData, Qt::DropAction actio
         insertRow = static_cast<int>(siblings.size()); // 默认插入尾部
     }
 
-    draggedCat.parentId = targetParentId;
-    siblings.insert(siblings.begin() + insertRow, draggedCat);
-
-    // 6. 100% 物理写盘：批量重新计算并更新 SQLite 中的 sortOrder 序号与 parentId
-    for (size_t i = 0; i < siblings.size(); ++i) {
-        siblings[i].sortOrder = static_cast<int>(i);
-        CategoryRepo::update(siblings[i]);
-    }
-
-    // 7. 彻底阻断 Qt 原生深拷贝克隆坏行为，投递异步 refresh() 从数据库权威重绘！
-    QMetaObject::invokeMethod(this, [this]() {
-        refresh();
-    }, Qt::QueuedConnection);
-
+    // 🚀 【重构净化】：拖拽落盘排序动作直接向上派发通知，Model 保持纯净只读
+    emit categoryOrderChanged(draggedCatId, targetParentId, insertRow);
     return true; // 物理阻断 Qt 原生深拷贝！
 }
 

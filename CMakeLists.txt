@@ -71,6 +71,8 @@ set(SOURCES
     src/core/FileFilterService.h
     src/core/CategoryLoadService.cpp
     src/core/CategoryLoadService.h
+    src/core/LibraryMaintenanceService.cpp
+    src/core/LibraryMaintenanceService.h
     src/core/DiskTrashService.cpp
     src/core/DiskTrashService.h
     src/core/SyncStatusService.cpp
