@@ -7,9 +7,11 @@
 #include <QFileInfo>
 #include <QFile>
 #include <functional>
+#include <memory>
 #include "SecureFileEraser.h"
 #include "../meta/MetadataManager.h"
 #include "../core/UndoManager.h"
+#include "../core/BasicCommands.h"
 #include "ShellHelper.h"
 
 namespace ArcMeta {

@@ -27,7 +27,7 @@ namespace ArcMeta {
 void AssetImporter::importAssets(const ImportContext& ctx) {
     if (ctx.sourcePaths.isEmpty()) {
         if (ctx.completionCallback) {
-            ctx.completionCallback(false, 0);
+            ctx.completionCallback(false, 0, QStringList());
         }
         return;
     }
@@ -101,9 +101,9 @@ void AssetImporter::importAssets(const ImportContext& ctx) {
         if (SUCCEEDED(hr)) CoUninitialize();
 #endif
 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [ctx, successCount]() {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [ctx, successCount, newlyImportedPaths]() {
             if (ctx.completionCallback) {
-                ctx.completionCallback(true, successCount);
+                ctx.completionCallback(true, successCount, newlyImportedPaths);
             }
         });
     });
@@ -162,7 +162,9 @@ void AssetImporter::importAssets(const QStringList& paths,
         }
     };
 
-    ctx.completionCallback = [weakProgress, pCtx, onComplete](bool success, int successCount) {
+    ctx.completionCallback = [weakProgress, pCtx, onComplete](bool success, int successCount, const QStringList& newlyImportedPaths) {
+        Q_UNUSED(success);
+        Q_UNUSED(successCount);
         if (pCtx->isCancelled) return;
         if (weakProgress) {
             weakProgress->accept();
@@ -171,7 +173,7 @@ void AssetImporter::importAssets(const QStringList& paths,
         ToolTipOverlay::instance()->showText(QCursor::pos(),
             QString("已成功导入 %1 个受控资产单元").arg(successCount), 2000, QColor("#2ecc71"));
  
-        if (onComplete) onComplete(QStringList()); // 保持向后兼容
+        if (onComplete) onComplete(newlyImportedPaths);
     };
 
     importAssets(ctx);

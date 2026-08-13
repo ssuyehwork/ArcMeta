@@ -13,7 +13,7 @@ struct ImportContext {
     QString targetPhysicalPath;
     bool allowMove = false;
     std::function<void(int, int)> progressCallback;
-    std::function<void(bool, int)> completionCallback;
+    std::function<void(bool, int, const QStringList&)> completionCallback;
 };
 
 /**

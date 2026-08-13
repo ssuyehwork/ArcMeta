@@ -1,6 +1,4 @@
 #include "CategoryDropProcessor.h" 
-#include <QWidget>
-#include <QApplication>
 #include "../meta/CategoryRepo.h" 
 #include "../meta/MetadataManager.h" 
 #include "../util/AssetImporter.h"
@@ -10,7 +8,9 @@
 #include <QtConcurrent> 
 #include <QDebug> 
 #include <QCoreApplication>
+#include <QWidget>
 #include <QDateTime>
+#include <QApplication>
 #include <cmath>
  
 namespace ArcMeta { 
@@ -30,9 +30,9 @@ void CategoryDropProcessor::executeImportPipeline(const QStringList& paths, int 
     ctx.progressCallback = [this](int current, int total) {
         emit progressUpdated(current, total, -1);
     };
-    ctx.completionCallback = [this, paths, targetCategoryId](bool success, int count) {
-        triggerDuplicateCheck(paths, targetCategoryId);
-        emit processingFinished(success, count, paths);
+    ctx.completionCallback = [this, paths, targetCategoryId](bool success, int count, const QStringList& newlyImportedPaths) {
+        triggerDuplicateCheck(newlyImportedPaths, targetCategoryId);
+        emit processingFinished(success, count, newlyImportedPaths);
     };
 
     AssetImporter::importAssets(ctx);
@@ -177,12 +177,12 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
                 ImportContext ctx;
                 ctx.sourcePaths = importPaths;
                 ctx.targetCategoryId = targetCategoryId;
-                ctx.progressCallback = [this, processedCount, importPaths](int current, int total) {
+                ctx.progressCallback = [this, processedCount](int current, int total) {
                     emit progressUpdated(processedCount + current, processedCount + total, -1);
                 };
-                ctx.completionCallback = [this, success, processedCount, importPaths](bool ok, int successCount) {
+                ctx.completionCallback = [this, success, processedCount](bool ok, int successCount, const QStringList& newlyImported) {
                     Q_UNUSED(ok);
-                    emit processingFinished(success, processedCount + successCount, importPaths);
+                    emit processingFinished(success, processedCount + successCount, newlyImported);
                 };
                 AssetImporter::importAssets(ctx);
             }, Qt::BlockingQueuedConnection); 
