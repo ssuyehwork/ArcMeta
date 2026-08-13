@@ -370,7 +370,7 @@ void MainWindow::initUi() {
     });
 
     // 1a. 分类选择多选与单选并存联动 -> 统一导航中枢 (Plan-56)
-    connect(m_categoryPanel, &CategoryPanel::categoriesSelected, this, [this](const QList<int>& ids, const QStringList& names, const QString& type) {
+    connect(m_categoryPanel, &CategoryPanel::categoriesSelected, this, [this](const QList<int>& ids, const QStringList& /*names*/, const QString& type) {
         if (type == "category") {
             QStringList idStrs;
             for (int id : ids) idStrs.append(QString::number(id));
