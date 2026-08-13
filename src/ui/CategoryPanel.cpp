@@ -1448,6 +1448,7 @@ void CategoryPanel::initUi() {
                 if (proxyIdx.data(IdRole).toInt() == CategoryModel::FOLDER_GROUP_PLACEHOLDER_ID) {
                     // QTreeView 自动销毁了之前的按钮。我们在 Reset 后直接重新 new 一个完美的全新按钮！
                     // 父对象指定为 m_categoryTree 以符合 setIndexWidget 规范
+                    // 1. 构造“文件夹 (N)”专用组按钮（对应用户原话：“将标记为①的主分类““文件夹 (N)” (▼ / ▶)”变成按钮，该按钮是专用来隐藏或显示自定义创建的分类文件夹”）
                     m_btnFolderGroup = new QPushButton(m_categoryTree);
                     m_btnFolderGroup->setFixedHeight(28);
                     m_btnFolderGroup->setCursor(Qt::PointingHandCursor);
