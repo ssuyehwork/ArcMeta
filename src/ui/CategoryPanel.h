@@ -59,6 +59,7 @@ public:
 
 signals:
     void categorySelected(int id, const QString& name, const QString& type, const QString& path = "");
+    void categoriesSelected(const QList<int>& ids, const QStringList& names, const QString& type);
     void fileSelected(const QString& path);
 
     /**

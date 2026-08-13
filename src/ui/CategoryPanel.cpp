@@ -1343,6 +1343,49 @@ void CategoryPanel::initUi() {
     m_categoryTree->setDragDropMode(QAbstractItemView::DragDrop);
     m_categoryTree->setDefaultDropAction(Qt::MoveAction);
     m_categoryTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+
+    // 监听多选改变信号，抛出联合信号
+    connect(m_categoryTree->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() {
+        if (m_isInternalUpdating) return;
+
+        QModelIndexList selectedRows = m_categoryTree->selectionModel()->selectedRows();
+        if (selectedRows.isEmpty()) return;
+
+        QList<int> catIds;
+        QStringList catNames;
+        QString type;
+
+        for (const QModelIndex& proxyIdx : selectedRows) {
+            QModelIndex index = m_proxyModel->mapToSource(proxyIdx);
+            if (!index.isValid()) continue;
+
+            int id = index.data(IdRole).toInt();
+            QString t = index.data(TypeRole).toString();
+            QString name = index.data(NameRole).toString();
+
+            if (t == "category" && id > 0) {
+                catIds.append(id);
+                catNames.append(name);
+                type = "category";
+            } else if (id < 0) {
+                // 如果用户选中了系统桶（如回收站、全部数据等），则强制单选该项，杜绝系统项与分类项多选混淆
+                catIds = {id};
+                catNames = {name};
+                type = t;
+                break;
+            }
+        }
+
+        if (!catIds.isEmpty()) {
+            if (catIds.size() == 1) {
+                // 仅有一项时，依然兼容发射单选信号，确保单项定制操作（如颜色设定/重命名）对齐
+                QModelIndex idx = m_proxyModel->mapToSource(selectedRows.first());
+                emit categorySelected(catIds.first(), catNames.first(), type, idx.data(PathRole).toString());
+            } else {
+                emit categoriesSelected(catIds, catNames, "category");
+            }
+        }
+    });
     
     // 2026-06-xx 按照用户要求：支持 Delete 键物理删除选中分类，使用 Action 提升快捷键响应等级
     QAction* deleteCatAction = new QAction(this);
@@ -1437,6 +1480,7 @@ void CategoryPanel::initUi() {
         Logger::log("[CategoryPanel] modelReset: Restore finished, m_isInternalUpdating set to false");
     });
 
+    // 彻底重构点击事件。由于多选点击会触发多选改变信号（selectionChanged），点击事件仅承担锁屏验证拦截工作，杜绝信号二次激增造成的死锁
     connect(m_categoryTree, &QTreeView::clicked, this, [this](const QModelIndex& proxyIndex) {
         QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         QString type = index.data(TypeRole).toString();
@@ -1449,12 +1493,6 @@ void CategoryPanel::initUi() {
         if (isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
             emit categorySelected(id, name, type, path);
             return;
-        }
-
-        // 核心联动：如果点击的是有效的分类、系统项或快速访问项
-        if (!type.isEmpty()) {
-             // 2026-06-xx 重构：点击项不再加载文件到树中，而是直接通过信号触发 ContentPanel 加载
-             emit categorySelected(id, name, type, path);
         }
     });
 

@@ -2897,6 +2897,66 @@ void ContentPanel::previewFile(const QString& path) {
     } 
 } 
  
+void ContentPanel::loadCategories(const QList<int>& categoryIds) {
+    if (categoryIds.isEmpty()) return;
+
+    // 多选统一标记为主分类数据源
+    m_currentCategoryType = "user_category";
+    m_currentCategoryId = categoryIds.first(); // 兼容单选的回退主ID
+
+    m_isLoading = true;
+    m_loadRequestId++;
+    int reqId = m_loadRequestId;
+
+    QPointer<ContentPanel> weakThis(this);
+    (void)QtConcurrent::run([weakThis, categoryIds, reqId]() {
+        // 多选模式下递归开启标记由 CategoryLoadService 重载函数自动内部计算
+        bool isRecursive = AppConfig::instance().getValue("Category/RecursiveLoad", true).toBool();
+        std::vector<ItemRecord> allRecords;
+
+        // 分别对所有分类 ID 加载并在数据库底层（getCategories）完成 DISTINCT 去重组装
+        for (int cid : categoryIds) {
+            auto chunk = CategoryLoadService::loadCategoryItems(cid, isRecursive);
+            allRecords.insert(allRecords.end(), chunk.begin(), chunk.end());
+        }
+
+        // 本地再进行一次 AssetPath 去重对账，保证联合数据干净整洁
+        std::vector<ItemRecord> uniqueRecords;
+        QSet<QString> seenPaths;
+        for (auto& r : allRecords) {
+            if (r.isCategory) {
+                // 多选不展示子分类卡片，只展示资产
+                continue;
+            }
+            if (!seenPaths.contains(r.path)) {
+                seenPaths.insert(r.path);
+                uniqueRecords.push_back(std::move(r));
+            }
+        }
+
+        QMetaObject::invokeMethod(weakThis.data(), [weakThis, uniqueRecords, reqId]() {
+            if (weakThis && weakThis->m_loadRequestId == reqId) {
+                weakThis->m_isLoading = false;
+
+                // 🚨 0 与 1 彻底断连多态自动分流：逻辑切断
+                if (weakThis->m_model != weakThis->m_libraryModel) {
+                    weakThis->m_model = weakThis->m_libraryModel;
+                    weakThis->m_proxyModel->setSourceModel(weakThis->m_model);
+                }
+
+                // 平滑原子刷新 UI
+                weakThis->m_model->setRecords(uniqueRecords);
+                weakThis->m_proxyModel->invalidate();
+                weakThis->m_proxyModel->sort(0, Qt::AscendingOrder);
+
+                weakThis->recalculateAndEmitStats();
+                weakThis->applyFilters();
+                emit weakThis->dataSourceChanged("category");
+            }
+        });
+    });
+}
+
 void ContentPanel::loadCategory(int categoryId) { 
     // 🚨 0 与 1 彻底断连多态自动分流：逻辑切断
     if (m_model != m_libraryModel) {
