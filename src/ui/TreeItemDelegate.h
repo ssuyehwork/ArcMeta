@@ -345,22 +345,18 @@ public:
 
         lineEdit->setText(value);
 
-        // 2026-xx-xx 按照用户要求：仅选中不含扩展名的部分
-        // 物理修复：使用 QTimer 确保在 Qt 默认 selectAll 之后执行，防止逻辑被覆盖
+        // 🚀 【拔除 0ms 补丁】：同步精准设定选区，无需使用 QTimer 在下一个事件循环中强行覆盖
         bool isFolder = (index.data(TypeRole).toString() == "folder" || index.data(TypeRole).toString() == "category");
-        QTimer::singleShot(0, lineEdit, [lineEdit, value, isFolder]() {
-            if (!lineEdit) return;
-            if (isFolder) {
-                lineEdit->selectAll();
+        if (isFolder) {
+            lineEdit->selectAll();
+        } else {
+            int lastDot = value.lastIndexOf('.');
+            if (lastDot > 0) {
+                lineEdit->setSelection(0, lastDot);
             } else {
-                int lastDot = value.lastIndexOf('.');
-                if (lastDot > 0) {
-                    lineEdit->setSelection(0, lastDot);
-                } else {
-                    lineEdit->selectAll();
-                }
+                lineEdit->selectAll();
             }
-        });
+        }
     }
 
 private:
