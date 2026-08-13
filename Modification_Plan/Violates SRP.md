@@ -1,0 +1,1 @@
+# 职责不单一 —— Violates SRP
