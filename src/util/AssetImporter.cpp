@@ -26,17 +26,19 @@ namespace ArcMeta {
 void AssetImporter::importAssets(const QStringList& paths, 
                                  int targetCatId, 
                                  QWidget* parent, 
-                                 std::function<void()> onComplete) { 
+                                 std::function<void()> onComplete,
+                                 bool allowMove) {
     importAssets(paths, targetCatId, parent, [onComplete](const QStringList& newlyImportedPaths) {
         Q_UNUSED(newlyImportedPaths);
         if (onComplete) onComplete();
-    });
+    }, allowMove);
 }
 
 void AssetImporter::importAssets(const QStringList& paths, 
                                  int targetCatId, 
                                  QWidget* parent, 
-                                 std::function<void(const QStringList& newlyImportedPaths)> onComplete) { 
+                                 std::function<void(const QStringList& newlyImportedPaths)> onComplete,
+                                 bool allowMove) {
     if (paths.isEmpty()) return; 
  
     BatchProgressDialog* progress = new BatchProgressDialog("正在导入资产包...", parent); 
@@ -60,7 +62,7 @@ void AssetImporter::importAssets(const QStringList& paths,
         weakProgress->deleteLater(); 
     }); 
  
-    context->future = QtConcurrent::run([paths, targetCatId, weakProgress, context, onComplete]() { 
+    context->future = QtConcurrent::run([paths, targetCatId, weakProgress, context, onComplete, allowMove]() {
 #ifdef Q_OS_WIN 
         HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); 
 #endif 
@@ -113,9 +115,9 @@ void AssetImporter::importAssets(const QStringList& paths,
             QFileInfo srcInfo(src); 
             bool ok = false; 
             if (srcInfo.isFile()) { 
-                ok = importSingleFile(src, targetCatId, managedRoot, &newlyImportedPaths); 
+                ok = importSingleFile(src, targetCatId, managedRoot, &newlyImportedPaths, allowMove);
             } else if (srcInfo.isDir()) { 
-                ok = importDirectoryRecursive(src, targetCatId, managedRoot, &newlyImportedPaths); 
+                ok = importDirectoryRecursive(src, targetCatId, managedRoot, &newlyImportedPaths, allowMove);
             } 
             if (ok) successCount++; 
         } 
@@ -141,7 +143,8 @@ void AssetImporter::importAssets(const QStringList& paths,
 bool AssetImporter::importSingleFile(const QString& srcPath, 
                                      int targetCatId, 
                                      const QString& managedRoot,
-                                     QStringList* newlyImportedPaths) { 
+                                     QStringList* newlyImportedPaths,
+                                     bool allowMove) {
     QFileInfo srcInfo(srcPath); 
     if (!srcInfo.exists() || !srcInfo.isFile()) return false; 
  
@@ -160,7 +163,7 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
     QString destDrive = QFileInfo(destPath).absolutePath().left(3); 
  
     bool copied = false; 
-    if (srcDrive.compare(destDrive, Qt::CaseInsensitive) == 0) { 
+    if (allowMove && srcDrive.compare(destDrive, Qt::CaseInsensitive) == 0) {
         copied = QFile::rename(srcPath, destPath); 
     } else { 
         copied = QFile::copy(srcPath, destPath); 
@@ -186,7 +189,8 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
 bool AssetImporter::importDirectoryRecursive(const QString& srcDir, 
                                              int parentCatId, 
                                              const QString& managedRoot,
-                                             QStringList* newlyImportedPaths) { 
+                                             QStringList* newlyImportedPaths,
+                                             bool allowMove) {
     QFileInfo dirInfo(srcDir); 
     if (!dirInfo.exists() || !dirInfo.isDir()) return false; 
  
@@ -205,9 +209,9 @@ bool AssetImporter::importDirectoryRecursive(const QString& srcDir,
     QFileInfoList entries = dir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name); 
     for (const QFileInfo& entry : entries) { 
         if (entry.isFile()) { 
-            importSingleFile(entry.absoluteFilePath(), cat.id, managedRoot, newlyImportedPaths); 
+            importSingleFile(entry.absoluteFilePath(), cat.id, managedRoot, newlyImportedPaths, allowMove);
         } else if (entry.isDir()) { 
-            importDirectoryRecursive(entry.absoluteFilePath(), cat.id, managedRoot, newlyImportedPaths); 
+            importDirectoryRecursive(entry.absoluteFilePath(), cat.id, managedRoot, newlyImportedPaths, allowMove);
         } 
     } 
  

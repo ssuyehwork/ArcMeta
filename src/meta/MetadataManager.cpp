@@ -587,8 +587,8 @@ bool MetadataManager::migrateCapsuleToLibrary(const std::string& assetId, const 
         return true; // 已在目标托管库，无需移动 
     } 
  
-    // 1. 物理跨盘剪切整个 .arc 胶囊文件夹 
-    if (!ShellHelper::copyOrMoveItems({containerDir.absolutePath()}, targetLibraryPath, true)) { 
+    // 1. 物理跨盘复制整个 .arc 胶囊文件夹（同盘异盘一律复制，含库内跨库迁移路径。对应用户原话：“无论同盘异盘一律复制，含 migrateCapsuleToLibrary 这条库内跨库迁移路径”）
+    if (!ShellHelper::copyOrMoveItems({containerDir.absolutePath()}, targetLibraryPath, false)) {
         return false; 
     } 
  

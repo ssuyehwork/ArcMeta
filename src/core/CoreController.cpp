@@ -108,7 +108,7 @@ CoreController::CoreController(QObject* parent) : QObject(parent) {
                             s_currentlyMigrating.erase(wTopLevelPath);
                             // 迁移完成后，自动调用 MetadataManager::instance().notifyFullUIRebuild() 进行自愈式刷新
                             MetadataManager::instance().notifyFullUIRebuild();
-                        });
+                        }, true);
                     }
                 } else if (ev.action == ArcMeta::WatcherAction::Removed) {
                     // 处理 Removed 事件：在 CoreController 中处理 WatcherAction::Removed 时，若该路径是外部监控目录，调用 removeMetadataSync 即使返回未注册也不产生任何影响

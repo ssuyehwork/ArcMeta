@@ -2293,7 +2293,7 @@ void MainWindow::showNewAutoImportDialog() {
                 // 统一调用 AssetImporter::importAssets 搬运，targetCatId = 0，不弹窗问询
                 AssetImporter::importAssets(pathsToImport, 0, nullptr, [this]() {
                     MetadataManager::instance().notifyFullUIRebuild();
-                });
+                }, true);
             }
 
             // 3. 重新加载渲染盘符栏 FolderButtons
