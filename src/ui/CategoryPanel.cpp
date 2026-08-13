@@ -1405,12 +1405,9 @@ void CategoryPanel::initUi() {
             Logger::log("[CategoryPanel] modelAboutToBeReset: No real data, skipped saving state to properties.");
         }
 
-        // 🚨 核心修复：QTreeView 在 modelAboutToBeReset 时会销毁其内部所有的 indexWidget。
-        // 为了避免 m_btnFolderGroup 按钮被连带销毁导致生命周期终止，我们在 Model 重置前，
-        // 临时将按钮的父级重设为 CategoryPanel，主动从 QTreeView 所有权下移出，实现生命周期完全保护。
-        if (m_btnFolderGroup) {
-            m_btnFolderGroup->setParent(this);
-        }
+        // QTreeView 会自动在其 view 内部销毁现有的 indexWidgets。
+        // 为了避免悬空指针与非法访问崩溃，我们直接在此处将 raw pointer 置为 nullptr。
+        m_btnFolderGroup = nullptr;
 
         // 开启数据流拦截锁，防止接下来 beginResetModel / removeRows 触发大量的 collapsed 虚假信号泄露覆写
         m_isInternalUpdating = true;
@@ -1443,6 +1440,59 @@ void CategoryPanel::initUi() {
         m_isInternalUpdating = false;
         Logger::log("[CategoryPanel] modelReset: Restore finished, m_isInternalUpdating set to false");
 
+        // 2026-08-xx 按照用户要求修复：定位"文件夹分组占位行"，把真实按钮控件贴合嵌入该行
+        if (m_categoryTree && m_proxyModel) {
+            bool found = false;
+            for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
+                QModelIndex proxyIdx = m_proxyModel->index(i, 0);
+                if (proxyIdx.data(IdRole).toInt() == CategoryModel::FOLDER_GROUP_PLACEHOLDER_ID) {
+                    // QTreeView 自动销毁了之前的按钮。我们在 Reset 后直接重新 new 一个完美的全新按钮！
+                    // 父对象指定为 m_categoryTree 以符合 setIndexWidget 规范
+                    m_btnFolderGroup = new QPushButton(m_categoryTree);
+                    m_btnFolderGroup->setFixedHeight(28);
+                    m_btnFolderGroup->setCursor(Qt::PointingHandCursor);
+                    m_btnFolderGroup->setStyleSheet(
+                        "QPushButton { "
+                        "  background: transparent; "
+                        "  border: none; "
+                        "  color: #EEEEEE; "
+                        "  font-weight: bold; "
+                        "  font-size: 12px; "
+                        "  text-align: left; "
+                        "  padding-left: 15px; " // 左侧对齐边距：使其图标和文字完美对齐系统分类
+                        "  margin-right: 5px; "
+                        "} "
+                        "QPushButton:hover { background-color: #2D2D30; border-radius: 4px; color: #FFFFFF; }"
+                        "QPushButton:pressed { background-color: #3E3E40; border-radius: 4px; }"
+                    );
+
+                    // 2. 绑定点击隐藏/显示逻辑
+                    connect(m_btnFolderGroup, &QPushButton::clicked, this, [this]() {
+                        m_isFolderGroupExpanded = !m_isFolderGroupExpanded;
+
+                        // 控制 TreeView 中顶级分类节点的展开/收起状态
+                        if (m_categoryTree && m_proxyModel) {
+                            for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
+                                QModelIndex proxyIdx = m_proxyModel->index(i, 0);
+                                if (proxyIdx.data(IdRole).toInt() > 0) { // 顶级自定义分类
+                                    m_categoryTree->setRowHidden(i, QModelIndex(), !m_isFolderGroupExpanded);
+                                }
+                            }
+                        }
+                        // 动态更新箭头图标 (▼ / ▶)
+                        int count = m_categoryModel ? m_categoryModel->allUserFolderCount() : 0;
+                        updateFolderGroupButtonText(count);
+                    });
+
+                    m_categoryTree->setIndexWidget(proxyIdx, m_btnFolderGroup);
+                    found = true;
+                    break;
+                }
+            }
+            Logger::log(QString("[CategoryPanel] 占位行查找结果: found=%1, m_proxyModel->rowCount()=%2")
+                .arg(found).arg(m_proxyModel->rowCount()));
+        }
+
         // 更新“文件夹 (N)”组按钮文本和计数
         int count = m_categoryModel ? m_categoryModel->allUserFolderCount() : 0;
         updateFolderGroupButtonText(count);
@@ -1455,21 +1505,6 @@ void CategoryPanel::initUi() {
                     m_categoryTree->setRowHidden(i, QModelIndex(), true);
                 }
             }
-        }
-
-        // 2026-08-xx 按照用户要求修复：定位"文件夹分组占位行"，把真实按钮控件贴合嵌入该行
-        if (m_categoryTree && m_proxyModel && m_btnFolderGroup) {
-            bool found = false;
-            for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
-                QModelIndex proxyIdx = m_proxyModel->index(i, 0);
-                if (proxyIdx.data(IdRole).toInt() == CategoryModel::FOLDER_GROUP_PLACEHOLDER_ID) {
-                    m_categoryTree->setIndexWidget(proxyIdx, m_btnFolderGroup);
-                    found = true;
-                    break;
-                }
-            }
-            Logger::log(QString("[CategoryPanel] 占位行查找结果: found=%1, m_proxyModel->rowCount()=%2")
-                .arg(found).arg(m_proxyModel->rowCount()));
         }
     });
 
@@ -1556,43 +1591,6 @@ void CategoryPanel::initUi() {
         }
     });
     
-    // 1. 构造“文件夹 (N)”专用组按钮（对应用户原话：“将标记为①的主分类““文件夹 (N)” (▼ / ▶)”变成按钮，该按钮是专用来隐藏或显示自定义创建的分类文件夹”）
-    m_btnFolderGroup = new QPushButton(this);
-    m_btnFolderGroup->setFixedHeight(28);
-    m_btnFolderGroup->setCursor(Qt::PointingHandCursor);
-    m_btnFolderGroup->setStyleSheet(
-        "QPushButton { "
-        "  background: transparent; "
-        "  border: none; "
-        "  color: #EEEEEE; "
-        "  font-weight: bold; "
-        "  font-size: 12px; "
-        "  text-align: left; "
-        "  padding-left: 15px; " // 左侧对齐边距：使其图标和文字完美对齐系统分类
-        "  margin-right: 5px; "
-        "} "
-        "QPushButton:hover { background-color: #2D2D30; border-radius: 4px; color: #FFFFFF; }"
-        "QPushButton:pressed { background-color: #3E3E40; border-radius: 4px; }"
-    );
-
-    // 2. 点击按钮：无缝切换下方自定义分类列表的隐藏/显示（折叠/展开）
-    connect(m_btnFolderGroup, &QPushButton::clicked, this, [this]() {
-        m_isFolderGroupExpanded = !m_isFolderGroupExpanded;
-        
-        // 控制 TreeView 中顶级分类节点的展开/收起状态
-        if (m_categoryTree && m_proxyModel) {
-            for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
-                QModelIndex proxyIdx = m_proxyModel->index(i, 0);
-                if (proxyIdx.data(IdRole).toInt() > 0) { // 顶级自定义分类
-                    m_categoryTree->setRowHidden(i, QModelIndex(), !m_isFolderGroupExpanded);
-                }
-            }
-        }
-        // 动态更新箭头图标 (▼ / ▶)
-        int count = m_categoryModel ? m_categoryModel->allUserFolderCount() : 0;
-        updateFolderGroupButtonText(count);
-    });
-
     // 2026-08-xx 按照用户要求修复：m_btnFolderGroup 不再作为独立堆叠 Widget 添加到布局，
     // 改为在 modelReset 时通过 setIndexWidget() 精确嵌入模型中的“文件夹分组占位行”，
     // 从物理上保证按钮永远卡在“快速访问”与自定义分类之间
