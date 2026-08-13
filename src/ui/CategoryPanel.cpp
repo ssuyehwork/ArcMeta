@@ -1371,9 +1371,9 @@ void CategoryPanel::initUi() {
         }
     });
 
-    // 2026-03-xx 物理兼容：监听模型重置信号，在刷新后尝试恢复展开状态
+    // 2026-03-xx 物理兼容：监听代理模型重置信号，在刷新后尝试恢复展开状态，确保时序 100% 同步
     // 2026-05-27 物理加固：补全 this 上下文
-    connect(m_categoryModel, &QAbstractItemModel::modelAboutToBeReset, this, [this]() {
+    connect(m_proxyModel, &QAbstractItemModel::modelAboutToBeReset, this, [this]() {
         Logger::log(QString("[CategoryPanel] modelAboutToBeReset: rowCount before reset: %1").arg(m_categoryModel->rowCount()));
         // 同步解锁 ID 到模型
         m_categoryModel->setUnlockedIds(m_unlockedIds);
@@ -1417,7 +1417,7 @@ void CategoryPanel::initUi() {
         Logger::log("[CategoryPanel] modelAboutToBeReset: m_isInternalUpdating set to true");
     });
 
-    connect(m_categoryModel, &QAbstractItemModel::modelReset, this, [this]() {
+    connect(m_proxyModel, &QAbstractItemModel::modelReset, this, [this]() {
         Logger::log(QString("[CategoryPanel] modelReset: rowCount after reset: %1").arg(m_categoryModel->rowCount()));
         QVariant varIds = m_categoryTree->property("expandedIds");
         QStringList expandedNames = m_categoryTree->property("expandedNames").toStringList();
@@ -1459,13 +1459,17 @@ void CategoryPanel::initUi() {
 
         // 2026-08-xx 按照用户要求修复：定位"文件夹分组占位行"，把真实按钮控件贴合嵌入该行
         if (m_categoryTree && m_proxyModel && m_btnFolderGroup) {
+            bool found = false;
             for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
                 QModelIndex proxyIdx = m_proxyModel->index(i, 0);
                 if (proxyIdx.data(IdRole).toInt() == CategoryModel::FOLDER_GROUP_PLACEHOLDER_ID) {
                     m_categoryTree->setIndexWidget(proxyIdx, m_btnFolderGroup);
+                    found = true;
                     break;
                 }
             }
+            Logger::log(QString("[CategoryPanel] 占位行查找结果: found=%1, m_proxyModel->rowCount()=%2")
+                .arg(found).arg(m_proxyModel->rowCount()));
         }
     });
 
