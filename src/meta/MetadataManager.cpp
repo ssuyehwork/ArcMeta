@@ -574,34 +574,40 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
 }
 
 // 🚨 SSOT 重构核心：跨盘托管库胶囊物理迁移（跨盘 1:1 重锚定）
-bool MetadataManager::migrateCapsuleToLibrary(const std::string& assetId, const QString& targetLibraryPath) { 
+std::string MetadataManager::migrateCapsuleToLibrary(const std::string& assetId, const QString& targetLibraryPath) { 
     std::wstring currentPath = getPathByFolderId(assetId); 
-    if (currentPath.empty()) return false; 
+    if (currentPath.empty()) return ""; 
  
     QFileInfo fileInfo(QString::fromStdWString(currentPath)); 
     QDir containerDir = fileInfo.dir(); // 获取 00ms73182x000.arc 胶囊文件夹 
     QString containerName = containerDir.dirName(); 
  
-    QString targetContainerDir = targetLibraryPath + "/" + containerName; 
-    if (containerDir.absolutePath().compare(targetContainerDir, Qt::CaseInsensitive) == 0) { 
-        return true; // 已在目标托管库，无需移动 
-    } 
+    // 生成全新唯一ID，保证ID唯一性（即便数据完全一致，但ID不同。对应用户原话：“复制整套数据到了之后，只需要修改其ID即可，这样就能保证ID的唯一性”）
+    std::string newAssetId = ShellHelper::generateBase36Id().toStdString();
+    QString targetContainerDir = targetLibraryPath + "/" + QString::fromStdString(newAssetId) + ".arc"; 
  
-    // 1. 物理跨盘复制整个 .arc 胶囊文件夹（同盘异盘一律复制，含库内跨库迁移路径。对应用户原话：“无论同盘异盘一律复制，含 migrateCapsuleToLibrary 这条库内跨库迁移路径”）
-    if (!ShellHelper::copyOrMoveItems({containerDir.absolutePath()}, targetLibraryPath, false)) { 
-        return false; 
-    } 
+    // 1. 物理复制整套胶囊包内部的文件
+    if (!QDir().mkpath(targetContainerDir)) {
+        return "";
+    }
+    QDir srcDir(containerDir.absolutePath());
+    QStringList files = srcDir.entryList(QDir::Files | QDir::NoDotAndDotDot);
+    for (const QString& file : files) {
+        if (!QFile::copy(srcDir.absoluteFilePath(file), targetContainerDir + "/" + file)) {
+            QDir(targetContainerDir).removeRecursively();
+            return "";
+        }
+    }
  
-    // 2. 计算迁移后的主资产新路径 
+    // 2. 计算迁移/复制后的主资产新路径 
     QString newMainFilePath = targetContainerDir + "/" + fileInfo.fileName(); 
     std::wstring wNewPath = normalizePath(newMainFilePath.toStdWString()); 
  
-    // 3. 获取旧的元数据并从旧库彻底清除 
+    // 3. 获取旧的元数据并进行移植（不从旧库清除，保留整套原始数据与ID，以实现复制式归入）
     RuntimeMeta oldMeta = getMeta(currentPath); 
-    removeMetadataSync(currentPath); 
  
-    // 4. 将旧的元数据移植并写入到新库 
-    oldMeta.folderId = assetId; 
+    // 4. 将旧的元数据移植并写入到新库，只修改其ID
+    oldMeta.folderId = newAssetId; 
     oldMeta.isManaged = true; 
     { 
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
@@ -609,13 +615,13 @@ bool MetadataManager::migrateCapsuleToLibrary(const std::string& assetId, const 
         auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
         (*newMap)[wNewPath] = oldMeta;
         std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
-        m_folderIdToPath[assetId] = wNewPath; 
+        m_folderIdToPath[newAssetId] = wNewPath; 
     } 
  
     // 5. 异步落盘到新库并通知 UI 刷新 
     persistAsync(wNewPath, true, true); 
  
-    return true; 
+    return newAssetId; 
 }
 
 void MetadataManager::registerItem(const std::wstring& path, bool authorized) {
