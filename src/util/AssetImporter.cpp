@@ -8,6 +8,7 @@
 #include "../meta/DatabaseManager.h" 
 #include "../ui/MediaColorExtractor.h" 
 #include "../meta/CapsuleMediaExtractor.h"
+#include "../meta/MediaExtractorPipeline.h"
 #include <QDir> 
 #include <QFileInfo> 
 #include <QtConcurrent> 
@@ -22,6 +23,91 @@
 #endif 
  
 namespace ArcMeta { 
+
+void AssetImporter::importAssets(const ImportContext& ctx) {
+    if (ctx.sourcePaths.isEmpty()) {
+        if (ctx.completionCallback) {
+            ctx.completionCallback(false, 0);
+        }
+        return;
+    }
+
+    (void)QtConcurrent::run([ctx]() {
+#ifdef Q_OS_WIN
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+#endif
+
+        int total = ctx.sourcePaths.size();
+        int handled = 0;
+        int successCount = 0;
+        QStringList newlyImportedPaths;
+
+        for (const QString& src : ctx.sourcePaths) {
+            handled++;
+            if (ctx.progressCallback) {
+                ctx.progressCallback(handled, total);
+            }
+
+            // 获取目标资源库物理根目录
+            QString managedRoot = ctx.targetPhysicalPath;
+            if (managedRoot.isEmpty() && ctx.targetCategoryId > 0) {
+                Category targetCat = CategoryRepo::getById(ctx.targetCategoryId);
+                Category cur = targetCat;
+                while (cur.parentId != 0) {
+                    Category parent = CategoryRepo::getById(cur.parentId);
+                    if (parent.id == 0) break;
+                    cur = parent;
+                }
+                if (!cur.physicalPath.empty()) {
+                    managedRoot = QString::fromStdWString(cur.physicalPath);
+                }
+            }
+            if (managedRoot.isEmpty()) {
+                QString drive = QFileInfo(src).absolutePath().left(3);
+                if (drive.isEmpty()) {
+                    drive = QCoreApplication::applicationDirPath().left(3);
+                }
+                if (drive.isEmpty()) {
+                    drive = "C:/";
+                }
+                managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
+            }
+
+            if (!QDir().mkpath(managedRoot)) {
+                qWarning() << "[AssetImporter] 无法建立资源库根目录:" << managedRoot;
+                continue;
+            }
+
+            QFileInfo srcInfo(src);
+            bool ok = false;
+            if (srcInfo.isFile()) {
+                ok = importSingleFile(src, ctx.targetCategoryId, managedRoot, &newlyImportedPaths, ctx.allowMove);
+            } else if (srcInfo.isDir()) {
+                ok = importDirectoryRecursive(src, ctx.targetCategoryId, managedRoot, &newlyImportedPaths, ctx.allowMove);
+            }
+            if (ok) successCount++;
+        }
+
+        // 将文件路径批量投递至 MediaExtractorPipeline 异步队列中提取缩略图，避免同步阻塞
+        if (!newlyImportedPaths.isEmpty()) {
+            std::vector<std::wstring> stdPaths;
+            for (const QString& p : newlyImportedPaths) {
+                stdPaths.push_back(p.toStdWString());
+            }
+            MediaExtractorPipeline::instance().enqueueBatch(stdPaths);
+        }
+
+#ifdef Q_OS_WIN
+        if (SUCCEEDED(hr)) CoUninitialize();
+#endif
+
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [ctx, successCount]() {
+            if (ctx.completionCallback) {
+                ctx.completionCallback(true, successCount);
+            }
+        });
+    });
+}
  
 void AssetImporter::importAssets(const QStringList& paths, 
                                  int targetCatId, 
@@ -44,100 +130,51 @@ void AssetImporter::importAssets(const QStringList& paths,
     BatchProgressDialog* progress = new BatchProgressDialog("正在导入资产包...", parent); 
     progress->show(); 
  
-    struct ImportContext { 
+    struct ProgressContext {
         std::atomic<bool> isCancelled{false}; 
-        QFuture<void> future; 
     }; 
-    auto context = std::make_shared<ImportContext>(); 
+    auto pCtx = std::make_shared<ProgressContext>();
     QPointer<BatchProgressDialog> weakProgress(progress); 
  
-    QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, context, parent]() { 
+    QObject::connect(progress, &BatchProgressDialog::rejected, [weakProgress, pCtx, parent]() {
         if (!weakProgress) return; 
         if (!FramelessMessageBox::question(parent, "中断导入", "导入尚未完成。确定要停止当前导入吗？")) { 
             weakProgress->show(); 
             return; 
         } 
-        context->isCancelled = true; 
-        if (context->future.isRunning()) context->future.waitForFinished(); 
+        pCtx->isCancelled = true;
         weakProgress->deleteLater(); 
     }); 
  
-    context->future = QtConcurrent::run([paths, targetCatId, weakProgress, context, onComplete, allowMove]() { 
-#ifdef Q_OS_WIN 
-        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); 
-#endif 
+    ImportContext ctx;
+    ctx.sourcePaths = paths;
+    ctx.targetCategoryId = targetCatId;
+    ctx.allowMove = allowMove;
+
+    ctx.progressCallback = [weakProgress, pCtx, paths](int handled, int total) {
+        if (weakProgress && !pCtx->isCancelled) {
+            QString currentFileName = "";
+            if (handled - 1 >= 0 && handled - 1 < paths.size()) {
+                currentFileName = QFileInfo(paths[handled - 1]).fileName();
+            }
+            QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Qt::QueuedConnection,
+                                     Q_ARG(int, handled), Q_ARG(int, total), Q_ARG(QString, currentFileName));
+        }
+    };
+
+    ctx.completionCallback = [weakProgress, pCtx, onComplete](bool success, int successCount) {
+        if (pCtx->isCancelled) return;
+        if (weakProgress) {
+            weakProgress->accept();
+            weakProgress->deleteLater();
+        }
+        ToolTipOverlay::instance()->showText(QCursor::pos(),
+            QString("已成功导入 %1 个受控资产单元").arg(successCount), 2000, QColor("#2ecc71"));
  
-        int total = paths.size(); 
-        int handled = 0; 
-        int successCount = 0; 
-        QStringList newlyImportedPaths;
- 
-        for (const QString& src : paths) { 
-            if (context->isCancelled) break; 
- 
-            handled++; 
-            if (weakProgress) { 
-                QMetaObject::invokeMethod(weakProgress.data(), "updateProgress", Qt::QueuedConnection, 
-                                         Q_ARG(int, handled), Q_ARG(int, total), Q_ARG(QString, QFileInfo(src).fileName())); 
-            } 
- 
-            // 获取目标资源库物理根目录 
-            QString managedRoot; 
-            if (targetCatId > 0) { 
-                Category targetCat = CategoryRepo::getById(targetCatId); 
-                Category cur = targetCat; 
-                while (cur.parentId != 0) { 
-                    Category parent = CategoryRepo::getById(cur.parentId); 
-                    if (parent.id == 0) break; 
-                    cur = parent; 
-                } 
-                if (!cur.physicalPath.empty()) { 
-                    managedRoot = QString::fromStdWString(cur.physicalPath); 
-                } 
-            } 
-            if (managedRoot.isEmpty()) { 
-                QString drive = QFileInfo(src).absolutePath().left(3); 
-                if (drive.isEmpty()) {
-                    // 🚨 探针探测运行盘符，废除 D:/ 临时硬编码
-                    drive = QCoreApplication::applicationDirPath().left(3);
-                }
-                if (drive.isEmpty()) {
-                    drive = "C:/";
-                }
-                managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper(); 
-            } 
-             
-            if (!QDir().mkpath(managedRoot)) { 
-                qWarning() << "[AssetImporter] 无法建立资源库根目录:" << managedRoot; 
-                continue; 
-            } 
- 
-            QFileInfo srcInfo(src); 
-            bool ok = false; 
-            if (srcInfo.isFile()) { 
-                ok = importSingleFile(src, targetCatId, managedRoot, &newlyImportedPaths, allowMove); 
-            } else if (srcInfo.isDir()) { 
-                ok = importDirectoryRecursive(src, targetCatId, managedRoot, &newlyImportedPaths, allowMove); 
-            } 
-            if (ok) successCount++; 
-        } 
- 
-#ifdef Q_OS_WIN 
-        if (SUCCEEDED(hr)) CoUninitialize(); 
-#endif 
- 
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakProgress, context, successCount, newlyImportedPaths, onComplete]() { 
-            if (context->isCancelled) return; 
-            if (weakProgress) { 
-                weakProgress->accept(); 
-                weakProgress->deleteLater(); 
-            } 
-            ToolTipOverlay::instance()->showText(QCursor::pos(), 
-                QString("已成功导入 %1 个受控资产单元").arg(successCount), 2000, QColor("#2ecc71")); 
- 
-            if (onComplete) onComplete(newlyImportedPaths); 
-        }); 
-    }); 
+        if (onComplete) onComplete(QStringList()); // 保持向后兼容
+    };
+
+    importAssets(ctx);
 } 
  
 bool AssetImporter::importSingleFile(const QString& srcPath, 
@@ -174,9 +211,7 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
         return false; 
     } 
  
-    // 4. 生成容器内配套的预渲染缩略图 
-    (void)CapsuleMediaExtractor::getCapsuleThumbnail(destPath, 512);
-
+    // 4. 彻底切断同步缩略图物理提取，改为在 importAssets 外部统一后台异步队列提取
     if (newlyImportedPaths) {
         newlyImportedPaths->append(destPath);
     }

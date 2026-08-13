@@ -22,6 +22,9 @@ public:
 public slots:
     void refresh();
     void updateStatistics(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts);
+    void updateItemCounts(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
+        updateStatistics(sysCounts, catCounts);
+    }
     void updateSystemCounts();
 
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;

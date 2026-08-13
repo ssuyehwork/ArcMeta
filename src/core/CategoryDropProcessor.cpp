@@ -2,11 +2,15 @@
 #include "../meta/CategoryRepo.h" 
 #include "../meta/MetadataManager.h" 
 #include "../util/AssetImporter.h"
+#include "../meta/DuplicateDetectorService.h"
+#include "../meta/CapsuleMediaExtractor.h"
+#include "../ui/DuplicateConflictDialog.h"
 #include <QtConcurrent> 
 #include <QDebug> 
 #include <QCoreApplication>
 #include <QWidget>
 #include <QDateTime>
+#include <QApplication>
 #include <cmath>
  
 namespace ArcMeta { 
@@ -15,6 +19,70 @@ CategoryDropProcessor::CategoryDropProcessor(QObject* parent) : QObject(parent) 
  
 void CategoryDropProcessor::cancel() {
     m_isCancelled.store(true);
+}
+
+void CategoryDropProcessor::executeImportPipeline(const QStringList& paths, int targetCategoryId) {
+    emit progressStarted();
+
+    ImportContext ctx;
+    ctx.sourcePaths = paths;
+    ctx.targetCategoryId = targetCategoryId;
+    ctx.progressCallback = [this](int current, int total) {
+        emit progressUpdated(current, total, -1);
+    };
+    ctx.completionCallback = [this, paths, targetCategoryId](bool success, int count) {
+        triggerDuplicateCheck(paths, targetCategoryId);
+        emit processingFinished(success, count, paths);
+    };
+
+    AssetImporter::importAssets(ctx);
+}
+
+void CategoryDropProcessor::triggerDuplicateCheck(const QStringList& paths, int targetCategoryId) {
+    (void)QtConcurrent::run([this, paths, targetCategoryId]() {
+        auto conflicts = DuplicateDetectorService::detectDuplicates(paths);
+        if (!conflicts.empty()) {
+            QMetaObject::invokeMethod(this, [this, conflicts, targetCategoryId]() {
+                QWidget* parentWidget = qobject_cast<QWidget*>(parent());
+                if (!parentWidget) {
+                    parentWidget = QApplication::activeWindow();
+                }
+                if (parentWidget) {
+                    // 弹出 DuplicateConflictDialog
+                    bool batchApplied = false;
+                    DuplicateResolveAction batchAction = DuplicateResolveAction::UseExisting;
+
+                    for (auto group : conflicts) {
+                        DuplicateResolveAction chosenAction;
+                        if (batchApplied) {
+                            chosenAction = batchAction;
+                        } else {
+                            group.existingItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(group.existingItem.path);
+                            // Ensure newItem has thumbnail loaded safely
+                            // group.newItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(group.newItem.path);
+
+                            DuplicateConflictDialog dlg(group.existingItem, group.newItem, parentWidget);
+                            if (dlg.exec() == QDialog::Accepted) {
+                                chosenAction = dlg.selectedAction();
+                                if (dlg.applyToAll()) {
+                                    batchApplied = true;
+                                    batchAction = chosenAction;
+                                }
+                            } else {
+                                continue;
+                            }
+                        }
+
+                        if (chosenAction == DuplicateResolveAction::UseExisting) {
+                            // 使用已存在文件：删除新文件并在数据库中做 1:N 映射
+                            QFile::remove(group.newItem.path);
+                            CategoryRepo::addItemToCategory(targetCategoryId, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
+                        }
+                    }
+                }
+            });
+        }
+    });
 }
 
 void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, int targetCategoryId) { 
@@ -50,7 +118,6 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
                 if (assetId.empty()) {
                     // 保持进度计数
                 } else {
-                    // 递归找到分类属于哪一个托管库根节点，以确定目标托管库物理根目录
                     Category cur = targetCat;
                     while (cur.id > 0 && cur.parentId != 0) {
                         cur = CategoryRepo::getById(cur.parentId);
@@ -63,18 +130,14 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
                     }
 
                     if (isCrossLibrary) {
-                        // 跨托管库拖拽/粘贴：复制整套数据（元数据+胶囊包）并分配全新唯一ID，保证ID唯一性
                         std::string newAssetId = MetadataManager::instance().migrateCapsuleToLibrary(assetId, targetLibraryPath);
                         if (!newAssetId.empty()) {
                             std::wstring newPath = MetadataManager::instance().getPathByFolderId(newAssetId);
-                            // 同时也应当把复制好的新资产关联到目标分类或目标库根分类中！
                             CategoryRepo::addItemToCategory(targetCategoryId, newAssetId, newPath);
                             processedCount++;
                         }
                     } else {
-                        // 同一托管库内部的分类指派
                         if (isTargetManagedLibraryRoot) {
-                            // 已经在当前托管库，不需要任何处理
                             processedCount++;
                         } else {
                             virtualAssocItems.push_back({assetId, wPath}); 
@@ -82,7 +145,6 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
                     }
                 }
             } else { 
-                // 库外文件拖入，交由 AssetImporter 后续处理 
                 importPaths << srcPath; 
             } 
 
@@ -100,7 +162,6 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
             }
         } 
  
-        // 数据库大事务批量落盘 
         if (!m_isCancelled.load() && !virtualAssocItems.empty()) { 
             bool batchOk = CategoryRepo::addItemToCategoryBatch(targetCategoryId, virtualAssocItems); 
             if (batchOk) { 
@@ -112,10 +173,17 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
  
         if (!m_isCancelled.load() && !importPaths.isEmpty()) { 
             QMetaObject::invokeMethod(this, [this, importPaths, targetCategoryId, success, processedCount]() { 
-                QWidget* parentWidget = qobject_cast<QWidget*>(parent());
-                AssetImporter::importAssets(importPaths, targetCategoryId, parentWidget, [this, success, processedCount](const QStringList& newlyImported) {
-                    emit processingFinished(success, processedCount + newlyImported.size(), newlyImported);
-                });
+                ImportContext ctx;
+                ctx.sourcePaths = importPaths;
+                ctx.targetCategoryId = targetCategoryId;
+                ctx.progressCallback = [this, processedCount, importPaths](int current, int total) {
+                    emit progressUpdated(processedCount + current, processedCount + total, -1);
+                };
+                ctx.completionCallback = [this, success, processedCount, importPaths](bool ok, int successCount) {
+                    Q_UNUSED(ok);
+                    emit processingFinished(success, processedCount + successCount, importPaths);
+                };
+                AssetImporter::importAssets(ctx);
             }, Qt::BlockingQueuedConnection); 
         } else {
             emit processingFinished(success, processedCount, {}); 

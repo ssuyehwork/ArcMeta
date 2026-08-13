@@ -1,4 +1,5 @@
 #include "DatabaseManager.h"
+#include "DatabaseMigrator.h"
 #include <chrono>
 #include <QDir>
 #include <QFile>
@@ -20,14 +21,8 @@ SqlTransaction::SqlTransaction(struct sqlite3* db) : m_db(db) {
         m_isNested = (sqlite3_get_autocommit(m_db) == 0);
         
         if (!m_isNested) {
-            // 2026-06-xx 物理加固：内置针对 SQLITE_BUSY 的重试机制
-            int retry = 0;
-            int rc;
-            // 100% 隔离：凡是触发本重试忙等待的写事务一律已由调用端（如 MetadataManager 的写属性 API）
-            // enqueued 至后台 Worker 异步线程异步执行，主线程从源头已彻底物理切断，绝不发生阻塞 UI 的忙等待。
-            while ((rc = sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr)) == SQLITE_BUSY && retry++ < 5) {
-                Sleep(50);
-            }
+            // 彻底剥离 L30 忙等 Sleep(50) 补丁，完全基于连接建立时内置的 sqlite3_busy_timeout(25000) 机制进行优雅挂起
+            int rc = sqlite3_exec(m_db, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
             if (rc != SQLITE_OK) {
                 qWarning() << "[DB] 事务开启失败:" << sqlite3_errmsg(m_db);
             }
@@ -256,26 +251,8 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         qDebug() << "[DB] Schema error:" << errMsg;
         sqlite3_free(errMsg);
     } else {
-        // 2026-06-xx 按照用户要求：清理任何误入 categories 表的系统保留 ID。
-        // 系统分类 ID (-1, -2) 仅作为桶位标记存在于逻辑层，绝不可作为 UI 节点存储在 categories 表中。
-        const char* cleanup = "DELETE FROM categories WHERE id <= 0;";
-        sqlite3_exec(conn.memDb, cleanup, nullptr, nullptr, nullptr);
-
-        // 🚨 2026-07-xx 按照 Modification_Plan-6：一键执行历史上误把 .arc 资产包当成逻辑文件和子分类载入的脏数据清洗
-        const char* arcCleanup1 = "DELETE FROM categories WHERE name LIKE '%.arc';";
-        sqlite3_exec(conn.memDb, arcCleanup1, nullptr, nullptr, nullptr);
-
-        const char* arcCleanup2 =
-            "DELETE FROM category_items WHERE path_hint LIKE '%.arc' ESCAPE '\\' "
-            "OR path_hint LIKE '%.arc\\%' ESCAPE '\\';";
-        sqlite3_exec(conn.memDb, arcCleanup2, nullptr, nullptr, nullptr);
-
-        // 🚨 2026-08-02 一键清除历史上误把 .arc 内部的 _thumbnail.png 登记为独立资产的脏数据
-        const char* thumbCleanup1 = "DELETE FROM metadata WHERE path LIKE '%_thumbnail.png';";
-        sqlite3_exec(conn.memDb, thumbCleanup1, nullptr, nullptr, nullptr);
-
-        const char* thumbCleanup2 = "DELETE FROM category_items WHERE path_hint LIKE '%_thumbnail.png';";
-        sqlite3_exec(conn.memDb, thumbCleanup2, nullptr, nullptr, nullptr);
+        // 彻底剥离出的 DELETE 清洗脚本，保持连接池开库轻量级与单一职责原则
+        DatabaseMigrator::performDataCleanup(conn.memDb);
 
         // FTS5 trigram 模糊匹配与自动触发器同步
         const char* ftsSchema = R"(
@@ -807,23 +784,13 @@ void DatabaseManager::workerLoop() {
     }
 }
 
-static std::wstring getVolumeSerialNumberHelper(const std::wstring& path) {
-    if (path.length() < 2 || path[1] != L':') return L"UNKNOWN";
-    wchar_t root[4] = { static_cast<wchar_t>(towupper(path[0])), L':', L'\\', L'\0' };
-    DWORD serial = 0;
-    if (GetVolumeInformationW(root, nullptr, 0, &serial, nullptr, nullptr, nullptr, 0)) {
-        wchar_t buf[16]; swprintf(buf, 16, L"%08X", serial); return buf;
-    }
-    return L"UNKNOWN";
-}
-
 sqlite3* DatabaseManager::getDbForPath(const std::wstring& path) { 
     std::wstring nPath = QDir::toNativeSeparators(QString::fromStdWString(path)).toStdWString(); 
     // 如果是程序安装目录下的全局主配置，或者无法获取卷序列号，则预热并返回全局主配置库 
     if (nPath.length() == 3 && nPath[1] == L':' && (nPath[2] == L'\\' || nPath[2] == L'/')) { 
         return getGlobalDb(); 
     } 
-    std::wstring volSerial = getVolumeSerialNumberHelper(nPath); 
+    std::wstring volSerial = VolumePathResolver::getVolumeSerialNumber(nPath);
     if (volSerial == L"UNKNOWN") { 
         return getGlobalDb(); 
     } 

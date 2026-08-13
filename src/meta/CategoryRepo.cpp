@@ -11,6 +11,7 @@
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QtConcurrent>
+#include <QCoreApplication>
 #include <set>
 #include <unordered_set>
 #include <algorithm>
@@ -1295,6 +1296,25 @@ void CategoryRepo::fullRecount() {
 
     s_countsDirty.store(true);
     getCounts(); // 物理强制重新更新
+}
+
+void CategoryRepo::fullRecountAsync(std::function<void(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts)> callback) {
+    (void)QtConcurrent::run([callback]() {
+        CategoryRepo::fullRecount();
+        auto sysCounts = CategoryRepo::getSystemCounts();
+        auto catCountsVec = CategoryRepo::getCounts();
+
+        QMap<int, int> catCounts;
+        for (const auto& entry : catCountsVec) {
+            catCounts[entry.first] = entry.second;
+        }
+
+        if (callback) {
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [callback, sysCounts, catCounts]() {
+                callback(sysCounts, catCounts);
+            });
+        }
+    });
 }
 
 std::vector<Category> CategoryRepo::getRecentlyUsed(int limit) {
