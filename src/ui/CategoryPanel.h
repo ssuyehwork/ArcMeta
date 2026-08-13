@@ -98,9 +98,6 @@ private slots:
     // 2026-xx-xx 按照 Plan-98：搜索过滤
     void onSearchTextChanged(const QString& text);
 
-    // 🚀 【时序补丁根除】：同步处理待编辑的项目，无需依赖赌博延时
-    void handlePendingEdit();
-
 private:
     void initUi();
     void setupContextMenu();
@@ -154,7 +151,7 @@ private:
     bool m_isInternalUpdating = false;
 
     // 🚀 【时序补丁根除】：零延时事件驱动行内编辑缓存
-    int m_pendingEditId = 0;
+    int m_pendingEditCategoryId = 0;
 };
 
 // 2026-07-26 极致重构：RAII 数据流状态防护锁

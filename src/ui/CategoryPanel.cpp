@@ -595,10 +595,8 @@ void CategoryPanel::onCreateCategory() {
         m_categoryModel->refresh();
         restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
 
-        // 🚀 【时序补丁根除】：绝不依赖 50ms 赌博延时！直接记录待编辑的 ID
-        m_pendingEditId = cat.id;
-        // 当模型下一次完全重刷完毕（如 layoutChanged 或 modelReset）时，同步队列触发编辑
-        connect(m_categoryModel, &CategoryModel::modelReset, this, &CategoryPanel::handlePendingEdit, Qt::QueuedConnection);
+        // 🚀 【时序对齐】：记录待编辑 ID，待代理模型完全恢复展开状态后精密触发
+        m_pendingEditCategoryId = cat.id;
         m_categoryModel->refresh();
     }
 }
@@ -648,10 +646,8 @@ void CategoryPanel::onCreateSubCategory() {
         m_categoryModel->refresh();
         restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
 
-        // 🚀 【时序补丁根除】：绝不依赖 50ms 赌博延时！直接记录待编辑的 ID
-        m_pendingEditId = cat.id;
-        // 当模型下一次完全重刷完毕（如 layoutChanged 或 modelReset）时，同步队列触发编辑
-        connect(m_categoryModel, &CategoryModel::modelReset, this, &CategoryPanel::handlePendingEdit, Qt::QueuedConnection);
+        // 🚀 【时序对齐】：记录待编辑 ID，待代理模型完全恢复展开状态后精密触发
+        m_pendingEditCategoryId = cat.id;
         m_categoryModel->refresh();
     }
 }
@@ -972,6 +968,27 @@ void CategoryPanel::onScanAndCleanEmptyArcs() {
     // 🚀 【重构解耦】：UI 仅处理界面的 loading 与交互，不执行任何 I/O 与数据库事务
     m_btnScan->setEnabled(false);
     m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#888888"), 16));
+
+    connect(&LibraryMaintenanceService::instance(), &LibraryMaintenanceService::cleanFinished,
+            this, [this](int cleanCount, int ghostCount, int orphanCount) {
+        m_btnScan->setEnabled(true);
+        m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#B0B0B0"), 16));
+
+        int totalCleaned = cleanCount + ghostCount;
+        if (totalCleaned > 0 || orphanCount > 0) {
+            requestRefresh(true);
+            QWidget* mw = window();
+            if (mw) QMetaObject::invokeMethod(mw, "refreshAll", Qt::QueuedConnection);
+
+            QString msg = QString("<b style='color:#00A650;'>已成功清理 %1 个空白/幽灵资产</b>").arg(totalCleaned);
+            if (orphanCount > 0) {
+                msg += QString("<br/><span style='color:#00A650; font-size:11px;'>同步剔除 %1 条孤立分类关系</span>").arg(orphanCount);
+            }
+            ToolTipOverlay::instance()->showText(QCursor::pos(), msg, 3500, QColor("#00A650"));
+        } else {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#CCCCCC;'>未检测到多余的空白托管包与幽灵数据</b>", 2000, QColor("#2D2D2D"));
+        }
+    }, Qt::UniqueConnection);
 
     LibraryMaintenanceService::instance().scanAndCleanEmptyArcsAsync();
 }
@@ -1345,6 +1362,17 @@ void CategoryPanel::initUi() {
         m_isRestoringState = false;
         m_isInternalUpdating = false;
         Logger::log("[CategoryPanel] modelReset: Restore finished, m_isInternalUpdating set to false");
+
+        // 🚀 【完美时序】：代理模型展开状态处理完毕后，精确触发新节点编辑
+        if (m_pendingEditCategoryId > 0) {
+            int targetId = m_pendingEditCategoryId;
+            m_pendingEditCategoryId = 0; // 及时重置
+            selectCategory(targetId);
+            QModelIndex proxyIdx = m_categoryTree->currentIndex();
+            if (proxyIdx.isValid()) {
+                m_categoryTree->edit(proxyIdx);
+            }
+        }
     });
 
     // 彻底重构点击事件。由于多选点击会触发多选改变信号（selectionChanged），点击事件仅承担锁屏验证拦截工作，杜绝信号二次激增造成的死锁
@@ -1459,39 +1487,6 @@ void CategoryPanel::initUi() {
 
     searchLayout->addWidget(m_searchEdit);
     m_mainLayout->addWidget(searchContainer);
-
-    // 🚀 【重构解耦单次绑定】：清理完成后的计数、通知、刷新自愈及 UI 状态同步
-    connect(&LibraryMaintenanceService::instance(), &LibraryMaintenanceService::cleanFinished, this, [this](int cleanCount, int ghostCount, int orphanCount) {
-        m_btnScan->setEnabled(true);
-        m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#B0B0B0"), 16));
-
-        int totalCleaned = cleanCount + ghostCount;
-        if (totalCleaned > 0 || orphanCount > 0) {
-            QPointer<CategoryPanel> weakThis(this);
-            CategoryRepo::fullRecountAsync([weakThis](const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
-                if (weakThis && weakThis->m_categoryModel) {
-                    weakThis->m_categoryModel->updateItemCounts(sysCounts, catCounts);
-                }
-            });
-            requestRefresh(true);
-
-            QWidget* mw = window();
-            if (mw) {
-                QMetaObject::invokeMethod(mw, "refreshAll", Qt::QueuedConnection);
-            }
-
-            QString msg = QString("<b style='color:#00A650;'>已成功清理 %1 个空白/幽灵资产</b>").arg(totalCleaned);
-            if (orphanCount > 0) {
-                msg += QString("<br/><span style='color:#00A650; font-size:11px;'>同步剔除 %1 条孤立分类关系</span>").arg(orphanCount);
-            }
-
-            ToolTipOverlay::instance()->showText(QCursor::pos(), msg, 3500, QColor("#00A650"));
-        } else {
-            ToolTipOverlay::instance()->showText(QCursor::pos(),
-                "<b style='color:#CCCCCC;'>未检测到多余的空白托管包与幽灵数据</b>",
-                2000, QColor("#2D2D2D"));
-        }
-    });
 
     // 2026-xx-xx 按照 Plan-106：防抖处理
     connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
@@ -1727,20 +1722,6 @@ bool CategoryPanel::eventFilter(QObject* obj, QEvent* event) {
         }
     }
     return QFrame::eventFilter(obj, event);
-}
-
-void CategoryPanel::handlePendingEdit() {
-    if (m_pendingEditId > 0) {
-        int targetId = m_pendingEditId;
-        m_pendingEditId = 0; // 重置
-        disconnect(m_categoryModel, &CategoryModel::modelReset, this, &CategoryPanel::handlePendingEdit);
-
-        selectCategory(targetId);
-        QModelIndex proxyIdx = m_categoryTree->currentIndex();
-        if (proxyIdx.isValid()) {
-            m_categoryTree->edit(proxyIdx);
-        }
-    }
 }
 
 } // namespace ArcMeta

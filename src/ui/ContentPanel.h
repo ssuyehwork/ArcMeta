@@ -76,6 +76,7 @@ public:
     bool isMirrorSource() const;
     bool isManagedContext() const;
     int currentCategoryId() const { return m_currentCategoryId; }
+    bool isContextMenuActive() const { return m_isContextMenuActive; }
 
     enum SortType {
         SortByName,
@@ -281,6 +282,7 @@ private:
     SortType m_sortType = SortByName;
     Qt::SortOrder m_sortOrder = Qt::AscendingOrder;
     std::atomic<bool> m_isLoading{false}; // 2026-06-16 物理状态锁：防止加载数据时的布局抖动覆盖用户配置
+    bool m_isContextMenuActive = false;
     std::atomic<int> m_loadRequestId{0}; // 2026-07-xx 物理请求 ID：防止异步回调导致的视图内容乱跳
 
     // --- 2026-06-xx 性能优化：递归扫描指纹缓存 ---

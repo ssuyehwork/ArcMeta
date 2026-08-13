@@ -29,6 +29,7 @@ public:
     virtual void loadThumbnailsForRows(const QList<int>& rows) = 0;
     virtual void migrateCache(const QString& oldPath, const QString& newPath) = 0;
     virtual void clearCacheForFolder(const QString& folderPath) = 0;
+    virtual void flushPendingUpdates() {}
 };
 
 #endif // ITEMMODELBASE_H
