@@ -399,6 +399,7 @@ public slots:
      * @brief 2026-06-xx 彻底重构：加载分类及其子项 (分类 ID 联动)
      */
     void loadCategory(int categoryId);
+    void loadCategories(const QList<int>& categoryIds);
 
     /**
      * @brief 获取/设置当前分类类型，用于驱动右键菜单差异化

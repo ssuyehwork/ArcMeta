@@ -89,8 +89,28 @@
 ### 2.15 行内编辑新建逻辑子分类联动规范
 * **双轨模式分流对齐**：
   - 在磁盘目录导航模式（DiskNav）下：新建文件夹动作仍直接在物理磁盘上通过文件系统创建物理目录。
-  - 在受控托管库模式（UserCategory）下：新建文件夹动作自动转化为在 SQLite 数据库中创建指向当前分类的“逻辑子分类（Sub-category）”节点，而不在磁盘上生成冗余物理空目录。
+  - 在受控托管库模式（UserCategory）下：新建文件夹动作自动转化为在 SQLite 数据库中创建指向当前分类的“逻辑子分类（Sub-category）”节点，而不在磁盘上生成冗余物理空目录.
 * **一键行内编辑跨域联动**：为了提供极速流畅的用户体验，内容面板（ContentPanel）必须向外发射 `requestCreateSubCategory` 信号；主窗口（MainWindow）绑定信号后，驱动侧边栏分类面板（CategoryPanel）自动定位展开至该父类、自动创建并立即拉起该子类新节点的行内编辑状态，实现零摩擦交互。
+
+### 2.16 侧边栏分类树多维联合多选检索规范
+* **多选原子化信号转发**：分类面板（CategoryPanel）在多选激活时，必须将多选信号重构为具名的、以 QList<int> 列表 and QStringList 列表承载的联合多选信号 `categoriesSelected`。
+* **无锁高性能多维联合数据查询**：
+  - 核心多选加载由内容加载服务（CategoryLoadService）实现，重构为支持 `QList<int>` 的 `loadCategoryItems` 多选联合重载函数。
+  - 检索底层直接无缝利用 `CategoryRepo::getItemsInCategories` 进行中心化、去重的 SQLite 大大提升高并发检索效率，消除任何主线程阻塞及 CPU 重复计算开销。
+* **多选路由协议自愈对齐**：
+  - MainWindow 路由导航体系支持多值逗号分割的多选协议，格式为：`category://id1,id2,id3?name=已选择 N 个分类`。
+  - 支持前进、后退（Navigation History）对多选分类状态的无缝重现。
+* **多选状态下的右键菜单隔离回退与高强度级联删除**：
+  - **右键多选防重置保护**：当多选状态处于激活态，且右键点击了“已选中的项”时，系统强制禁止调用 `setCurrentIndex` 进行无条件选中状态清空；只有当右键点击了“未选中的项”时才执行常规单选切换，从而保全批量右键操作。
+  - **多选模型级联对账删除**：批量删除收集时，系统必须首先将代理模型（Proxy Index）在第一时序完全转换为源模型索引（Source Index），再递归累加下辖的所有子孙自定义分类。严禁直接将 Proxy Index 喂给 Source Model 执行 rowCount()，彻底自愈级联失效缺陷。
+  - 单项编辑操作（新建子类、密码设置、重命名）则物理隔离、安全回退到指针所在的单点 currentIndex，绝对杜绝多维状态污染。
+
+### 2.17 受控托管库导入行为统一复制规范
+* **默认安全复制准则**：所有大资产导入到资源托管库的行为，无论源文件路径与目标路径是否在“同一个磁盘分区”，默认 100% 绝对执行“安全复制 (QFile::copy)”，而不再是隐式 rename（剪切），确保绝对保护用户原本的物理原始资产不丢失。
+* **显式参数控制隔离 (allowMove)**：
+  - 在 `AssetImporter` 类所有相关导入方法（含 `importSingleFile` 及 `importDirectoryRecursive` 递归）中，增设显式调用控制标志 `allowMove`，且默认值恒常为 `false`（即默认复制）。
+  - **唯一允许剪切场景（自动监控导入）**：只有由文件系统在后台发现的“自动监控目录检测导入 (CoreController::watch)”与“首置自定义监控同步导入 (showNewAutoImportDialog)”两个自动后台范畴，且同盘时才显式传入 `allowMove = true` 触发 QFile::rename。用户主动触发的拖拽、剪切粘贴一律强制使用复制，彻底消除因分区一致导致外部源文件被“剪切”走的情况。
+* **跨库迁移行为安全复制化**：在进行跨盘托管库资产转移（`MetadataManager::migrateCapsuleToLibrary`）时，同样将对容器胶囊目录的搬移参数改为 `isMove = false`（复制）。
 
 ---
 

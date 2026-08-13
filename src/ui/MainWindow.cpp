@@ -369,7 +369,17 @@ void MainWindow::initUi() {
         }
     });
 
-    // 1a. 分类选择 -> 统一导航中枢 (Plan-56)
+    // 1a. 分类选择多选与单选并存联动 -> 统一导航中枢 (Plan-56)
+    connect(m_categoryPanel, &CategoryPanel::categoriesSelected, this, [this](const QList<int>& ids, const QStringList& /*names*/, const QString& type) {
+        if (type == "category") {
+            QStringList idStrs;
+            for (int id : ids) idStrs.append(QString::number(id));
+            QString compoundId = idStrs.join(",");
+            QString compoundName = QString("已选择 %1 个分类").arg(ids.size());
+            unifiedNavigateTo(kProtocolCategory + compoundId + "?name=" + compoundName);
+        }
+    });
+
     connect(m_categoryPanel, &CategoryPanel::categorySelected, this, [this](int id, const QString& name, const QString& type, const QString& path) {
         m_currentCategoryId = id;
         
@@ -1745,16 +1755,30 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
         // category://{id}?name={name}
         QString params = url.mid(kProtocolCategory.length());
         int qMark = params.indexOf('?');
-        int id = params.left(qMark == -1 ? params.length() : qMark).toInt();
-        QString name = (qMark != -1) ? params.mid(qMark + 6) : QString::number(id);
+        QString rawIds = params.left(qMark == -1 ? params.length() : qMark);
+        QString name = (qMark != -1) ? params.mid(qMark + 6) : rawIds;
 
-        if (m_categoryPanel) {
-            m_categoryPanel->blockSignals(true);
-            m_categoryPanel->selectCategory(id);
-            m_categoryPanel->blockSignals(false);
+        QList<int> ids;
+        for (const QString& part : rawIds.split(",", Qt::SkipEmptyParts)) {
+            bool ok;
+            int parsed = part.toInt(&ok);
+            if (ok) ids.append(parsed);
         }
-        if (m_contentPanel) m_contentPanel->loadCategory(id);
-        if (m_addressBar) m_addressBar->setPath("分类: " + name);
+
+        if (ids.size() == 1) {
+            int id = ids.first();
+            if (m_categoryPanel) {
+                m_categoryPanel->blockSignals(true);
+                m_categoryPanel->selectCategory(id);
+                m_categoryPanel->blockSignals(false);
+            }
+            if (m_contentPanel) m_contentPanel->loadCategory(id);
+            if (m_addressBar) m_addressBar->setPath("分类: " + name);
+        } else if (!ids.isEmpty()) {
+            // 多选场景，批量加载分类列表
+            if (m_contentPanel) m_contentPanel->loadCategories(ids);
+            if (m_addressBar) m_addressBar->setPath(name);
+        }
         m_currentPath = url; // 逻辑路径
     }
     else if (url.startsWith(kProtocolSystem)) {
@@ -2269,7 +2293,7 @@ void MainWindow::showNewAutoImportDialog() {
                 // 统一调用 AssetImporter::importAssets 搬运，targetCatId = 0，不弹窗问询
                 AssetImporter::importAssets(pathsToImport, 0, nullptr, [this]() {
                     MetadataManager::instance().notifyFullUIRebuild();
-                });
+                }, true);
             }
 
             // 3. 重新加载渲染盘符栏 FolderButtons
