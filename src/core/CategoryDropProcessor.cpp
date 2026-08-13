@@ -49,15 +49,38 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
                 std::string assetId = MetadataManager::instance().getFolderIdSync(wPath); 
                 if (assetId.empty()) {
                     // 保持进度计数
-                } else if (isTargetManagedLibraryRoot) { 
-                    // 分支 A：跨盘迁移 
-                    QString targetLibraryPath = QString::fromStdWString(targetCat.physicalPath); 
-                    MetadataManager::instance().migrateCapsuleToLibrary(assetId, targetLibraryPath); 
-                    processedCount++; 
-                } else { 
-                    // 分支 B：存入收集容器，后续统一大事务落盘 
-                    virtualAssocItems.push_back({assetId, wPath}); 
-                } 
+                } else {
+                    // 递归找到分类属于哪一个托管库根节点，以确定目标托管库物理根目录
+                    Category cur = targetCat;
+                    while (cur.id > 0 && cur.parentId != 0) {
+                        cur = CategoryRepo::getById(cur.parentId);
+                    }
+                    QString targetLibraryPath = QString::fromStdWString(cur.physicalPath);
+
+                    bool isCrossLibrary = false;
+                    if (!targetLibraryPath.isEmpty()) {
+                        isCrossLibrary = !srcPath.startsWith(targetLibraryPath, Qt::CaseInsensitive);
+                    }
+
+                    if (isCrossLibrary) {
+                        // 跨托管库拖拽/粘贴：复制整套数据（元数据+胶囊包）并分配全新唯一ID，保证ID唯一性
+                        std::string newAssetId = MetadataManager::instance().migrateCapsuleToLibrary(assetId, targetLibraryPath);
+                        if (!newAssetId.empty()) {
+                            std::wstring newPath = MetadataManager::instance().getPathByFolderId(newAssetId);
+                            // 同时也应当把复制好的新资产关联到目标分类或目标库根分类中！
+                            CategoryRepo::addItemToCategory(targetCategoryId, newAssetId, newPath);
+                            processedCount++;
+                        }
+                    } else {
+                        // 同一托管库内部的分类指派
+                        if (isTargetManagedLibraryRoot) {
+                            // 已经在当前托管库，不需要任何处理
+                            processedCount++;
+                        } else {
+                            virtualAssocItems.push_back({assetId, wPath});
+                        }
+                    }
+                }
             } else { 
                 // 库外文件拖入，交由 AssetImporter 后续处理 
                 importPaths << srcPath; 

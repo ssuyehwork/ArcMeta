@@ -149,7 +149,7 @@ public:
     /**
      * @brief 🚨 SSOT 重构核心：跨盘托管库胶囊物理迁移（跨盘 1:1 重锚定）
      */
-    bool migrateCapsuleToLibrary(const std::string& assetId, const QString& targetLibraryPath);
+    std::string migrateCapsuleToLibrary(const std::string& assetId, const QString& targetLibraryPath);
 
     /**
      * @brief 一站式项目注册流程（受控模式）
