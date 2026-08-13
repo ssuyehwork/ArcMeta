@@ -2208,20 +2208,21 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 BatchProgressDialog* progress = new BatchProgressDialog("正在执行永久删除（深层抹除）...", this);
                 progress->show();
 
-                QPointer<ContentPanel> weakThis(this);
+                // 异步多线程执行物理安全删除与数据库记录清除 (双轨隔离)
+                // 强制使用 QPointer 哨兵保护，防止 ContentPanel 提前析构导致主线程异步回调发生野指针悬空崩溃
+                QPointer<ContentPanel> weakPanel(this);
                 QPointer<BatchProgressDialog> weakProgress(progress);
 
                 // 1. 开启内部操作锁
                 MetadataManager::instance().beginInternalOperation();
 
-                // 异步多线程执行物理安全删除与数据库记录清除 (双轨隔离)
-                (void)QtConcurrent::run([targetPaths, diskTrashItems, action, weakThis, weakProgress]() {
+                (void)QtConcurrent::run([targetPaths, diskTrashItems, action, weakPanel, weakProgress]() {
                     int total = static_cast<int>(targetPaths.size() + diskTrashItems.size());
                     int count = 0;
 
                     // A. 处理常规项目 (资源库托管或非回收站物理文件)
                     for (const QString& p : targetPaths) {
-                        if (!weakThis) return;
+                        if (!weakPanel) return;
                         std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
                         
                         bool physicalOk = false;
@@ -2261,7 +2262,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
                     // B. 处理磁盘回收站中未还原项目 (通过专用表清除)
                     for (const auto& item : diskTrashItems) {
-                        if (!weakThis) return;
+                        if (!weakPanel) return;
                         int id = item.first;
                         QString p = item.second;
 
@@ -2276,8 +2277,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         }
                     }
 
-                    // 完成后回调主线程刷新 UI
-                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, weakProgress]() {
+                    // 完成后回到主线程安全执行 UI 级刷新与锁释放
+                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakPanel, weakProgress]() {
                         if (weakProgress) {
                             weakProgress->accept();
                             weakProgress->deleteLater();
@@ -2285,8 +2286,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         // 无论 UI 控件是否被销毁，操作锁都能被正确安全地释放 (双轨防护)
                         MetadataManager::instance().endInternalOperation();
 
-                        if (weakThis) {
-                            weakThis->refreshAll();
+                        if (weakPanel) {
+                            weakPanel->refreshAll();
                         }
                     });
                 });
