@@ -1,4 +1,6 @@
 #include "CategoryDropProcessor.h" 
+#include <QWidget>
+#include <QApplication>
 #include "../meta/CategoryRepo.h" 
 #include "../meta/MetadataManager.h" 
 #include "../util/AssetImporter.h"
@@ -8,9 +10,7 @@
 #include <QtConcurrent> 
 #include <QDebug> 
 #include <QCoreApplication>
-#include <QWidget>
 #include <QDateTime>
-#include <QApplication>
 #include <cmath>
  
 namespace ArcMeta { 
@@ -52,6 +52,7 @@ void CategoryDropProcessor::triggerDuplicateCheck(const QStringList& paths, int 
                     bool batchApplied = false;
                     DuplicateResolveAction batchAction = DuplicateResolveAction::UseExisting;
 
+                    int totalCount = static_cast<int>(conflicts.size());
                     for (auto group : conflicts) {
                         DuplicateResolveAction chosenAction;
                         if (batchApplied) {
@@ -61,7 +62,7 @@ void CategoryDropProcessor::triggerDuplicateCheck(const QStringList& paths, int 
                             // Ensure newItem has thumbnail loaded safely
                             // group.newItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(group.newItem.path);
 
-                            DuplicateConflictDialog dlg(group.existingItem, group.newItem, parentWidget);
+                            DuplicateConflictDialog dlg(group, totalCount, parentWidget);
                             if (dlg.exec() == QDialog::Accepted) {
                                 chosenAction = dlg.selectedAction();
                                 if (dlg.applyToAll()) {
