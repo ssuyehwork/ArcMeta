@@ -28,7 +28,8 @@ public:
 
     void setFilterMode(FilterMode mode) {
         m_filterMode = mode;
-        invalidateFilter();
+        beginFilterChange();
+        endFilterChange();
     }
 
     FilterMode filterMode() const { return m_filterMode; }

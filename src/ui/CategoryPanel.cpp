@@ -1412,7 +1412,7 @@ void CategoryPanel::initUi() {
     m_proxyModelUser->setSourceModel(m_categoryModel);
     m_categoryTreeUser->setModel(m_proxyModelUser);
 
-    auto configureTree = [&](DropTreeView* tree, CategoryFilterProxyModel* proxy) {
+    auto configureTree = [&](DropTreeView* tree) {
         tree->setHeaderHidden(true);
         tree->setRootIsDecorated(true);
         tree->setIndentation(20);
@@ -1433,8 +1433,8 @@ void CategoryPanel::initUi() {
         tree->installEventFilter(this);
     };
 
-    configureTree(m_categoryTree, m_proxyModel);
-    configureTree(m_categoryTreeUser, m_proxyModelUser);
+    configureTree(m_categoryTree);
+    configureTree(m_categoryTreeUser);
 
     auto connectTreeExpanded = [&](DropTreeView* tree, CategoryFilterProxyModel* proxy) {
         connect(tree, &QTreeView::expanded, this, [this, tree, proxy](const QModelIndex& proxyIndex) {
