@@ -18,7 +18,7 @@ void LibraryMaintenanceService::scanAndCleanEmptyArcsAsync() {
         auto dbs = DatabaseManager::instance().getActiveMemoryDbs(); 
  
         // ==========================================
-        // 🚨 第一步：盘查并物理清理空托管包 (磁盘 -> 数据库) 
+        // 第一步：盘查并物理清理空托管包 (磁盘 -> 数据库)
         // ==========================================
         const auto drives = QDir::drives(); 
         QStringList allEmptyArcDirs; 
@@ -60,7 +60,7 @@ void LibraryMaintenanceService::scanAndCleanEmptyArcsAsync() {
         } 
  
         // ==========================================
-        // 🚨 第二步：反查数据库死记录 (数据库 -> 磁盘)
+        // 第二步：反查数据库死记录 (数据库 -> 磁盘)
         // ==========================================
         QStringList allGhostFolderIds;
         QStringList allGhostPaths;
@@ -74,13 +74,7 @@ void LibraryMaintenanceService::scanAndCleanEmptyArcsAsync() {
                     const wchar_t* pathText = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
                     if (fidText && pathText) {
                         QString qPath = QString::fromStdWString(pathText);
-                        bool exists = false;
-                        if (QFileInfo(qPath).isDir()) {
-                            exists = QDir(qPath).exists();
-                        } else {
-                            exists = QFile::exists(qPath);
-                        }
-
+                        bool exists = QFileInfo(qPath).isDir() ? QDir(qPath).exists() : QFile::exists(qPath);
                         if (!exists) {
                             allGhostFolderIds << QString::fromUtf8(fidText);
                             allGhostPaths << qPath;
@@ -91,33 +85,27 @@ void LibraryMaintenanceService::scanAndCleanEmptyArcsAsync() {
             }
         }
 
-        // 合并空包和幽灵文件的 folderIds & paths 进行强力物理+数据库级联删除
         QStringList targetsToRemovePaths = allEmptyArcDirs + allGhostPaths;
         QStringList targetsToRemoveFolderIds = allEmptyFolderIds + allGhostFolderIds;
 
         if (!targetsToRemovePaths.isEmpty()) {
-            // 1. 先通过常规 removeMetadataBatchSync 进行内存缓存/索引同步清理及总计数调整
             MetadataManager::instance().removeMetadataBatchSync(targetsToRemovePaths);
 
-            // 2. 数据库强力后备死角兜底：对所有可能未载入内存的幽灵数据进行纯 SQL 直接落盘删除
+            // 🚀 【事务安全】：强行使用 SqlTransaction 保护批量删除，杜绝锁死
             for (sqlite3* db : dbs) {
                 SqlTransaction trans(db);
                 sqlite3_stmt* stmtMeta = nullptr;
                 sqlite3_stmt* stmtItems = nullptr;
-                sqlite3_stmt* stmtStats = nullptr;
 
                 if (sqlite3_prepare_v2(db, "DELETE FROM metadata WHERE folder_id = ?", -1, &stmtMeta, nullptr) == SQLITE_OK &&
                     sqlite3_prepare_v2(db, "DELETE FROM category_items WHERE folder_id = ?", -1, &stmtItems, nullptr) == SQLITE_OK) {
-                    
+
                     for (const QString& fid : targetsToRemoveFolderIds) {
                         std::string stdFid = fid.toStdString();
-                        
-                        // 从 metadata 删除
                         sqlite3_bind_text(stmtMeta, 1, stdFid.c_str(), -1, SQLITE_TRANSIENT);
                         sqlite3_step(stmtMeta);
                         sqlite3_reset(stmtMeta);
 
-                        // 从 category_items 删除
                         sqlite3_bind_text(stmtItems, 1, stdFid.c_str(), -1, SQLITE_TRANSIENT);
                         sqlite3_step(stmtItems);
                         sqlite3_reset(stmtItems);
@@ -125,20 +113,9 @@ void LibraryMaintenanceService::scanAndCleanEmptyArcsAsync() {
                 }
                 if (stmtMeta) sqlite3_finalize(stmtMeta);
                 if (stmtItems) sqlite3_finalize(stmtItems);
-
-                // 同时清理关联的 PROGRESS 进度记录
-                for (const QString& qp : targetsToRemovePaths) {
-                    std::string progressKey = "PROGRESS:" + qp.toUtf8().toStdString();
-                    if (sqlite3_prepare_v2(db, "DELETE FROM system_stats WHERE key = ?", -1, &stmtStats, nullptr) == SQLITE_OK) {
-                        sqlite3_bind_text(stmtStats, 1, progressKey.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_step(stmtStats);
-                        sqlite3_finalize(stmtStats);
-                    }
-                }
                 trans.commit();
             }
 
-            // 3. 物理彻底擦除磁盘空目录（仅针对第一步判定为空的包）
             for (const QString& path : allEmptyArcDirs) {
                 QDir(path).removeRecursively();
             }
@@ -148,23 +125,16 @@ void LibraryMaintenanceService::scanAndCleanEmptyArcsAsync() {
         }
 
         // ==========================================
-        // 🚨 第三步：清洗孤立关联 (category_items -> metadata)
+        // 第三步：清洗孤立关联 (category_items -> metadata)
         // ==========================================
         for (sqlite3* db : dbs) {
             SqlTransaction trans(db);
             char* errMsg = nullptr;
             const char* sqlCleanOrphans = "DELETE FROM category_items WHERE folder_id NOT IN (SELECT folder_id FROM metadata)";
-            int rc = sqlite3_exec(db, sqlCleanOrphans, nullptr, nullptr, &errMsg);
-            if (rc == SQLITE_OK) {
-                int affected = sqlite3_changes(db);
-                if (affected > 0) {
-                    orphanCount += affected;
-                }
-            } else {
-                if (errMsg) {
-                    qWarning() << "[Cleanup] Clean orphans error:" << errMsg;
-                    sqlite3_free(errMsg);
-                }
+            if (sqlite3_exec(db, sqlCleanOrphans, nullptr, nullptr, &errMsg) == SQLITE_OK) {
+                orphanCount += sqlite3_changes(db);
+            } else if (errMsg) {
+                sqlite3_free(errMsg);
             }
             trans.commit();
         }
