@@ -7,17 +7,47 @@
 #include <QFileInfo>
 #include <QFile>
 #include <functional>
+#include <memory>
 #include "SecureFileEraser.h"
 #include "../meta/MetadataManager.h"
 #include "../core/UndoManager.h"
+#include "../core/BasicCommands.h"
+#include "ShellHelper.h"
 
 namespace ArcMeta {
+
+struct DiskIoContext {
+    QStringList sources;
+    QString destination;
+    bool isMove = false;
+};
 
 /**
  * @brief DiskIoService: 专门接管磁盘物理文件系统 I/O 操作的服务委托，将复杂的物理磁盘删改及后续数据库状态更新从 UI 中彻底剥离。
  */
 class DiskIoService {
 public:
+    static DiskIoService& instance() {
+        static DiskIoService inst;
+        return inst;
+    }
+
+    void executeAsync(const DiskIoContext& ctx, std::function<void(bool)> callback) {
+        (void)QtConcurrent::run([ctx, callback]() {
+            bool success = ShellHelper::copyOrMoveItems(ctx.sources, ctx.destination, ctx.isMove);
+            if (success && ctx.isMove) {
+                UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(
+                    ctx.sources, 
+                    QFileInfo(ctx.sources.first()).absolutePath(), 
+                    ctx.destination
+                ));
+            }
+            if (callback) {
+                callback(success);
+            }
+        });
+    }
+
     /**
      * @brief 异步执行物理删除或安全抹除操作，支持 QPointer 弱引用保护生命周期
      * @param targetPaths 待删除项的绝对路径列表

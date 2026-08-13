@@ -105,29 +105,19 @@ CategoryPanel::CategoryPanel(QWidget* parent)
 
         // 2026-07-xx 性能优化：执行重建后立即继续统计计算，不再触发 requestRefresh 导致二次等待
         // 2026-06-xx 物理分流：将耗时的统计计算（fullRecount）移出 UI 线程
-        // 采用 QPointer 确保线程安全性
+        // 采用 QPointer 确保线程安全性并完美对接 CategoryRepo::fullRecountAsync 异步计数器
         QPointer<CategoryPanel> weakThis(this);
-        (void)QtConcurrent::run([weakThis]() {
-            CategoryRepo::fullRecount();
-            auto sysCounts = CategoryRepo::getSystemCounts();
-            auto catCountsVec = CategoryRepo::getCounts();
-            
-            QMap<int, int> catCounts;
-            for (const auto& entry : catCountsVec) catCounts[entry.first] = entry.second;
-            
-            // 计算完成后，通过消息队列回传主线程执行局部 UI 更新
-            QMetaObject::invokeMethod(weakThis.data(), [weakThis, sysCounts, catCounts]() {
-                if (weakThis && weakThis->m_categoryModel) {
-                    // 物理修复：若统计数据全为0，且系统元数据尚未加载完成，则拒绝执行 UI 更新以防止计数清零
-                    bool isSysUnready = !MetadataManager::instance().isLoaded();
-                    bool allCountsZero = (sysCounts.value("all", 0) == 0 && sysCounts.value("trash", 0) == 0);
-                    if (isSysUnready && allCountsZero) {
-                        return;
-                    }
-                    // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
-                    weakThis->m_categoryModel->updateStatistics(sysCounts, catCounts);
+        CategoryRepo::fullRecountAsync([weakThis](const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
+            if (weakThis && weakThis->m_categoryModel) {
+                // 物理修复：若统计数据全为0，且系统元数据尚未加载完成，则拒绝执行 UI 更新以防止计数清零
+                bool isSysUnready = !MetadataManager::instance().isLoaded();
+                bool allCountsZero = (sysCounts.value("all", 0) == 0 && sysCounts.value("trash", 0) == 0);
+                if (isSysUnready && allCountsZero) {
+                    return;
                 }
-            });
+                // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
+                weakThis->m_categoryModel->updateItemCounts(sysCounts, catCounts);
+            }
         });
     });
 
@@ -1171,8 +1161,13 @@ void CategoryPanel::onScanAndCleanEmptyArcs() {
 
             int totalCleaned = cleanCount + ghostCount;
             if (totalCleaned > 0 || orphanCount > 0) {
-                // 重新计数对账以更新侧边栏和主界面
-                CategoryRepo::fullRecount();
+                // 重新计数对账以更新侧边栏和主界面 (全异步执行)
+                QPointer<CategoryPanel> weakThis(this);
+                CategoryRepo::fullRecountAsync([weakThis](const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
+                    if (weakThis && weakThis->m_categoryModel) {
+                        weakThis->m_categoryModel->updateItemCounts(sysCounts, catCounts);
+                    }
+                });
                 requestRefresh(true);
 
                 // 尝试寻找主面板进行内容区全局自愈重构刷新

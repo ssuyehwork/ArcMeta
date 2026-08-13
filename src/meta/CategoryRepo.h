@@ -146,6 +146,11 @@ public:
     static void fullRecount();
 
     /**
+     * @brief 异步强制执行全量计数重计 (物理账本对账)
+     */
+    static void fullRecountAsync(std::function<void(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts)> callback = nullptr);
+
+    /**
      * @brief 统计指标更新原子化
      * @param key 统计项 Key (total_file_count, categorized_count)
      * @param delta 增量

@@ -7,6 +7,8 @@
 #include <QPushButton>
 #include <QButtonGroup>
 
+class QWidget;
+
 namespace ArcMeta {
 
 enum class DuplicateResolveAction {

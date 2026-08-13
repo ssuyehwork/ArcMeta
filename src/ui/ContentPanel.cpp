@@ -2208,20 +2208,21 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 BatchProgressDialog* progress = new BatchProgressDialog("正在执行永久删除（深层抹除）...", this);
                 progress->show();
 
-                QPointer<ContentPanel> weakThis(this);
+                // 异步多线程执行物理安全删除与数据库记录清除 (双轨隔离)
+                // 强制使用 QPointer 哨兵保护，防止 ContentPanel 提前析构导致主线程异步回调发生野指针悬空崩溃
+                QPointer<ContentPanel> weakPanel(this);
                 QPointer<BatchProgressDialog> weakProgress(progress);
 
                 // 1. 开启内部操作锁
                 MetadataManager::instance().beginInternalOperation();
 
-                // 异步多线程执行物理安全删除与数据库记录清除 (双轨隔离)
-                (void)QtConcurrent::run([targetPaths, diskTrashItems, action, weakThis, weakProgress]() {
+                (void)QtConcurrent::run([targetPaths, diskTrashItems, action, weakPanel, weakProgress]() {
                     int total = static_cast<int>(targetPaths.size() + diskTrashItems.size());
                     int count = 0;
 
                     // A. 处理常规项目 (资源库托管或非回收站物理文件)
                     for (const QString& p : targetPaths) {
-                        if (!weakThis) return;
+                        if (!weakPanel) return;
                         std::wstring wp = QDir::toNativeSeparators(p).toStdWString();
                         
                         bool physicalOk = false;
@@ -2261,7 +2262,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
                     // B. 处理磁盘回收站中未还原项目 (通过专用表清除)
                     for (const auto& item : diskTrashItems) {
-                        if (!weakThis) return;
+                        if (!weakPanel) return;
                         int id = item.first;
                         QString p = item.second;
 
@@ -2276,8 +2277,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         }
                     }
 
-                    // 完成后回调主线程刷新 UI
-                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, weakProgress]() {
+                    // 完成后回到主线程安全执行 UI 级刷新与锁释放
+                    QMetaObject::invokeMethod(QCoreApplication::instance(), [weakPanel, weakProgress]() {
                         if (weakProgress) {
                             weakProgress->accept();
                             weakProgress->deleteLater();
@@ -2285,8 +2286,8 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         // 无论 UI 控件是否被销毁，操作锁都能被正确安全地释放 (双轨防护)
                         MetadataManager::instance().endInternalOperation();
 
-                        if (weakThis) {
-                            weakThis->refreshAll();
+                        if (weakPanel) {
+                            weakPanel->refreshAll();
                         }
                     });
                 });
@@ -2416,15 +2417,25 @@ void ContentPanel::performPaste() {
             if (!effect.isEmpty() && (effect.at(0) & 0x02)) isMove = true; 
         } 
 
-        if (ShellHelper::copyOrMoveItems(fromPaths, m_currentPath, isMove)) {  
-            if (isMove) { 
-                // 🚨 [双轨不隔离违规点-5 物理隔离修复]: 磁盘模式（DiskNav）物理移动仅作纯粹的文件 I/O 处理，不回调 syncAfterMove。 
-                UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(fromPaths, QFileInfo(fromPaths.first()).absolutePath(), m_currentPath)); 
-            } 
-            loadDirectory(m_currentPath, m_isRecursive);  
-        } else {
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "粘贴失败：文件写入操作未能完成", 2000, QColor("#e81123"));
-        }
+        // 彻底切断主线程物理 I/O，全权交由 DiskIoService 异步处理，UI 主线程 0 毫秒阻塞
+        DiskIoContext ioCtx;
+        ioCtx.sources = fromPaths;
+        ioCtx.destination = m_currentPath;
+        ioCtx.isMove = isMove;
+        
+        QPointer<ContentPanel> weakThis(this);
+        DiskIoService::instance().executeAsync(ioCtx, [weakThis, fromPaths](bool success) {
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, success, fromPaths]() {
+                Q_UNUSED(fromPaths);
+                if (weakThis) {
+                    if (success) {
+                        weakThis->loadDirectory(weakThis->m_currentPath, weakThis->m_isRecursive);
+                    } else {
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "粘贴失败：文件写入操作未能完成", 2000, QColor("#e81123"));
+                    }
+                }
+            });
+        });
     } else {
         QString msg = QString("确定要将剪贴板中的 %1 个项目分流导入并打包至该分类吗？").arg(fromPaths.size());
         if (FramelessMessageBox::question(this, "资产导入", msg)) {
@@ -2614,16 +2625,22 @@ void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& t
         // 开启内部操作原子锁，彻底废除 QTimer::singleShot 2000ms 补丁
         MetadataManager::instance().beginInternalOperation();
 
-        if (ShellHelper::copyOrMoveItems(paths, destDir, isMove)) {
-            if (isMove) {
-                // 🚨 [双轨不隔离违规点-4 物理隔离修复]: 磁盘模式（DiskNav）物理拖拽移动仅作纯粹的文件 I/O 处理，不回调 syncAfterMove。
-                UndoManager::instance().pushCommand(std::make_unique<MoveCommand>(paths, QFileInfo(paths.first()).absolutePath(), destDir));
-            }
-            loadDirectory(m_currentPath, m_isRecursive);
-        }
+        DiskIoContext ioCtx;
+        ioCtx.sources = paths;
+        ioCtx.destination = destDir;
+        ioCtx.isMove = isMove;
 
-        // 物理转移完成后直接释放原子锁
-        MetadataManager::instance().endInternalOperation();
+        QPointer<ContentPanel> weakThis(this);
+        DiskIoService::instance().executeAsync(ioCtx, [weakThis](bool success) {
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, success]() {
+                if (weakThis) {
+                    if (success) {
+                        weakThis->loadDirectory(weakThis->m_currentPath, weakThis->m_isRecursive);
+                    }
+                }
+                MetadataManager::instance().endInternalOperation();
+            });
+        });
     } else {
         // 优先尊重"拖拽到具体子分类节点上"这个更精确的用户意图
         int targetCatId = 0;
