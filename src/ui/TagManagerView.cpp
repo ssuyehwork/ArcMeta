@@ -354,21 +354,17 @@ void TagManagerView::removeTagFromGroup(const QString& tagName, int groupId) {
 }
 
 void TagManagerView::renameGroup(int groupId, const QString& newName) {
-    QPointer<TagManagerView> weakThis(this);
-    (void)QtConcurrent::run([weakThis, groupId, newName]() {
-        if (TagRepository::renameGroup(groupId, newName)) {
-            if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
-        }
-    });
+    // 🚀 【一键解耦】：View 不再直接起并发线程去写库，直接交由控制器
+    if (m_controller) {
+        m_controller->renameGroupAsync(groupId, newName);
+    }
 }
 
 void TagManagerView::deleteGroup(int groupId) {
-    QPointer<TagManagerView> weakThis(this);
-    (void)QtConcurrent::run([weakThis, groupId]() {
-        if (TagRepository::deleteGroup(groupId)) {
-            if (weakThis) QMetaObject::invokeMethod(weakThis.data(), "refresh", Qt::QueuedConnection);
-        }
-    });
+    // 🚀 【一键解耦】：View 不再直接起并发线程去写库，直接交由控制器
+    if (m_controller) {
+        m_controller->deleteGroupAsync(groupId);
+    }
 }
 
 void TagManagerView::createNewGroup() {

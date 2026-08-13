@@ -14,6 +14,22 @@ void TagManagerController::addTagToGroupAsync(const QString& tagName, int groupI
     });
 }
 
+void TagManagerController::renameGroupAsync(int groupId, const QString& newName) {
+    (void)QtConcurrent::run([this, groupId, newName]() {
+        if (TagRepository::renameGroup(groupId, newName)) {
+            emit tagGroupStateChanged();
+        }
+    });
+}
+
+void TagManagerController::deleteGroupAsync(int groupId) {
+    (void)QtConcurrent::run([this, groupId]() {
+        if (TagRepository::deleteGroup(groupId)) {
+            emit tagGroupStateChanged();
+        }
+    });
+}
+
 void TagManagerController::removeTagFromGroupAsync(const QString& tagName, int groupId) {
     (void)QtConcurrent::run([this, tagName, groupId]() {
         if (TagRepository::removeTagFromGroup(tagName, groupId)) {

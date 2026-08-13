@@ -31,11 +31,14 @@ public:
     void loadThumbnailsForRows(const QList<int>& rows) override;
     void migrateCache(const QString& oldPath, const QString& newPath) override;
     void clearCacheForFolder(const QString& folderPath) override;
+    void flushPendingUpdates() override;
 
 signals:
     void recordRenamed(const QString& oldPath, const QString& newPath, const QString& newName);
 
 protected:
+    bool isSuspended() const;
+
     std::vector<ArcMeta::ItemRecord> m_allRecords;
     std::unordered_map<QString, int, ArcMeta::QStringHash> m_pathToIndex;
     mutable QCache<QString, QIcon> m_iconCache;
@@ -43,6 +46,8 @@ protected:
     mutable QMap<QString, double> m_aspectRatios;
     mutable QCache<QString, ArcMeta::RuntimeMeta> m_metaCache;
     QString m_query;
+
+    QSet<int> m_pendingUpdateRows;
 };
 
 #endif // LIBRARYASSETMODEL_H

@@ -149,6 +149,9 @@ private:
 
     // 2026-07-26 极致重构：引入单向数据流与非交互控制标志位，彻底消灭 blockSignals
     bool m_isInternalUpdating = false;
+
+    // 🚀 【时序补丁根除】：零延时事件驱动行内编辑缓存
+    int m_pendingEditCategoryId = 0;
 };
 
 // 2026-07-26 极致重构：RAII 数据流状态防护锁

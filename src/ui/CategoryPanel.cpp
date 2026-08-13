@@ -4,6 +4,7 @@
 #include "CategoryModel.h"
 #include "ContentPanel.h"
 #include "../core/DiskTrashService.h"
+#include "../core/LibraryMaintenanceService.h"
 #include "ColorPicker.h"
 #include "CategoryFilterProxyModel.h"
 #include "CategoryLockDialog.h"
@@ -595,15 +596,9 @@ void CategoryPanel::onCreateCategory() {
         m_categoryModel->refresh();
         restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
 
-        // 3. 在树更新完毕后，立刻获取新节点的 Index 并进入行内编辑状态
-        int newId = cat.id;
-        QTimer::singleShot(50, this, [this, newId]() {
-            selectCategory(newId);
-            QModelIndex proxyIdx = m_categoryTree->currentIndex();
-            if (proxyIdx.isValid()) {
-                m_categoryTree->edit(proxyIdx);
-            }
-        });
+        // 🚀 【时序对齐】：记录待编辑 ID，待代理模型完全恢复展开状态后精密触发
+        m_pendingEditCategoryId = cat.id;
+        m_categoryModel->refresh();
     }
 }
 
@@ -652,15 +647,9 @@ void CategoryPanel::onCreateSubCategory() {
         m_categoryModel->refresh();
         restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
 
-        // 3. 展开父节点并自动对新子节点进入行内编辑状态
-        int newId = cat.id;
-        QTimer::singleShot(50, this, [this, newId]() {
-            selectCategory(newId);
-            QModelIndex proxyIdx = m_categoryTree->currentIndex();
-            if (proxyIdx.isValid()) {
-                m_categoryTree->edit(proxyIdx);
-            }
-        });
+        // 🚀 【时序对齐】：记录待编辑 ID，待代理模型完全恢复展开状态后精密触发
+        m_pendingEditCategoryId = cat.id;
+        m_categoryModel->refresh();
     }
 }
 
@@ -975,220 +964,32 @@ void CategoryPanel::onEmptyTrash() {
 }
 
 void CategoryPanel::onScanAndCleanEmptyArcs() {
-    // 🚨 核心阻断：防止重复高频点击触发扫描风暴
+    // 🚀 【重构解耦】：UI 仅处理界面的 loading 与交互，不执行任何 I/O 与数据库事务
     m_btnScan->setEnabled(false);
     m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#888888"), 16));
 
-    // 使用 QtConcurrent 在线程池中执行物理磁盘与数据库双向深度清理对账扫描，避免阻塞主线程 UI
-    (void)QtConcurrent::run([this]() {
-        int cleanCount = 0;
-        int ghostCount = 0;
-        int orphanCount = 0;
+    connect(&LibraryMaintenanceService::instance(), &LibraryMaintenanceService::cleanFinished,
+            this, [this](int cleanCount, int ghostCount, int orphanCount) {
+        m_btnScan->setEnabled(true);
+        m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#B0B0B0"), 16));
 
-        auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+        int totalCleaned = cleanCount + ghostCount;
+        if (totalCleaned > 0 || orphanCount > 0) {
+            requestRefresh(true);
+            QWidget* mw = window();
+            if (mw) QMetaObject::invokeMethod(mw, "refreshAll", Qt::QueuedConnection);
 
-        // ==========================================
-        // 🚨 第一步：盘查并物理清理空托管包 (磁盘 -> 数据库)
-        // ==========================================
-        const auto drives = QDir::drives();
-        QStringList allEmptyArcDirs;
-        QStringList allEmptyFolderIds;
-
-        for (const QFileInfo& drive : drives) {
-            QString letter = drive.absolutePath().left(1).toUpper();
-            std::wstring volSerial = MetadataManager::getVolumeSerialNumber(drive.absolutePath().toStdWString());
-            if (volSerial == L"UNKNOWN") continue;
-
-            // 获取资源库根目录绝对路径
-            std::wstring managedRootW = MetadataManager::getManagedLibraryPath(volSerial, letter);
-            if (managedRootW.empty()) continue;
-
-            QString managedRoot = QString::fromStdWString(managedRootW);
-            QDir libDir(managedRoot);
-            if (!libDir.exists()) continue;
-
-            // 寻找全部 .arc 格式容器文件夹
-            QStringList arcEntries = libDir.entryList({"*.arc"}, QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
-            for (const QString& arcName : arcEntries) {
-                // 托管包文件夹名格式必须为 13 位 Base36 (例如 00ms73182x000.arc)
-                QFileInfo arcInfo(libDir.absoluteFilePath(arcName));
-                QString baseName = arcInfo.completeBaseName();
-                if (baseName.length() != 13) continue;
-
-                QDir arcDir(arcInfo.absoluteFilePath());
-                // 获取包内所有物理项：排除隐藏的 _thumbnail.png 以及 .ArcMeta.json 配置文件以外
-                QStringList entries = arcDir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
-                bool hasRealMaterials = false;
-                for (const QString& fName : entries) {
-                    if (fName.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
-                    if (fName.compare(".ArcMeta.json", Qt::CaseInsensitive) == 0) continue;
-                    hasRealMaterials = true;
-                    break;
-                }
-
-                // 如果确实是空的包，记录路径 and 13 位 ID 进行级联抹除
-                if (!hasRealMaterials) {
-                    allEmptyArcDirs << arcInfo.absoluteFilePath();
-                    allEmptyFolderIds << baseName;
-                }
+            QString msg = QString("<b style='color:#00A650;'>已成功清理 %1 个空白/幽灵资产</b>").arg(totalCleaned);
+            if (orphanCount > 0) {
+                msg += QString("<br/><span style='color:#00A650; font-size:11px;'>同步剔除 %1 条孤立分类关系</span>").arg(orphanCount);
             }
+            ToolTipOverlay::instance()->showText(QCursor::pos(), msg, 3500, QColor("#00A650"));
+        } else {
+            ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#CCCCCC;'>未检测到多余的空白托管包与幽灵数据</b>", 2000, QColor("#2D2D2D"));
         }
+    }, Qt::UniqueConnection);
 
-        // ==========================================
-        // 🚨 第二步：反查数据库死记录 (数据库 -> 磁盘)
-        // ==========================================
-        // 直接从所有活跃的内存分库中查出所有的 metadata 记录，反向校验文件在磁盘上是否存在。
-        // 如果文件不存在，即使它未载入内存 m_cache，也通过纯 SQL 进行强力擦除。
-        QStringList allGhostFolderIds;
-        QStringList allGhostPaths;
-
-        for (sqlite3* db : dbs) {
-            sqlite3_stmt* stmt = nullptr;
-            const char* sqlQuery = "SELECT folder_id, path FROM metadata";
-            if (sqlite3_prepare_v2(db, sqlQuery, -1, &stmt, nullptr) == SQLITE_OK) {
-                while (sqlite3_step(stmt) == SQLITE_ROW) {
-                    const char* fidText = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                    const wchar_t* pathText = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
-                    if (fidText && pathText) {
-                        QString qPath = QString::fromStdWString(pathText);
-                        // 校验物理路径是否存在
-                        bool exists = false;
-                        if (QFileInfo(qPath).isDir()) {
-                            exists = QDir(qPath).exists();
-                        } else {
-                            exists = QFile::exists(qPath);
-                        }
-
-                        if (!exists) {
-                            allGhostFolderIds << QString::fromUtf8(fidText);
-                            allGhostPaths << qPath;
-                        }
-                    }
-                }
-                sqlite3_finalize(stmt);
-            }
-        }
-
-        // 合并空包和幽灵文件的 folderIds & paths 进行强力物理+数据库级联删除
-        QStringList targetsToRemovePaths = allEmptyArcDirs + allGhostPaths;
-        QStringList targetsToRemoveFolderIds = allEmptyFolderIds + allGhostFolderIds;
-
-        if (!targetsToRemovePaths.isEmpty()) {
-            // 1. 先通过常规 removeMetadataBatchSync 进行内存缓存/索引同步清理及总计数调整
-            // 这个操作会在 MetadataManager 内自动清理已经加载到 m_cache/m_folderIdToPath 的内存条目，并安全微调总计数
-            MetadataManager::instance().removeMetadataBatchSync(targetsToRemovePaths);
-
-            // 2. 数据库强力后备死角兜底：对所有可能未载入内存的幽灵数据进行纯 SQL 直接落盘删除
-            for (sqlite3* db : dbs) {
-                SqlTransaction trans(db);
-                sqlite3_stmt* stmtMeta = nullptr;
-                sqlite3_stmt* stmtItems = nullptr;
-                sqlite3_stmt* stmtStats = nullptr;
-
-                if (sqlite3_prepare_v2(db, "DELETE FROM metadata WHERE folder_id = ?", -1, &stmtMeta, nullptr) == SQLITE_OK &&
-                    sqlite3_prepare_v2(db, "DELETE FROM category_items WHERE folder_id = ?", -1, &stmtItems, nullptr) == SQLITE_OK) {
-                    
-                    for (const QString& fid : targetsToRemoveFolderIds) {
-                        std::string stdFid = fid.toStdString();
-                        
-                        // 从 metadata 删除
-                        sqlite3_bind_text(stmtMeta, 1, stdFid.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_step(stmtMeta);
-                        sqlite3_reset(stmtMeta);
-
-                        // 从 category_items 删除
-                        sqlite3_bind_text(stmtItems, 1, stdFid.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_step(stmtItems);
-                        sqlite3_reset(stmtItems);
-                    }
-                }
-                if (stmtMeta) sqlite3_finalize(stmtMeta);
-                if (stmtItems) sqlite3_finalize(stmtItems);
-
-                // 同时清理关联的 PROGRESS 进度记录
-                for (const QString& qp : targetsToRemovePaths) {
-                    std::string progressKey = "PROGRESS:" + qp.toUtf8().toStdString();
-                    if (sqlite3_prepare_v2(db, "DELETE FROM system_stats WHERE key = ?", -1, &stmtStats, nullptr) == SQLITE_OK) {
-                        sqlite3_bind_text(stmtStats, 1, progressKey.c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_step(stmtStats);
-                        sqlite3_finalize(stmtStats);
-                    }
-                }
-                trans.commit();
-            }
-
-            // 3. 物理彻底擦除磁盘空目录（仅针对第一步判定为空的包）
-            for (const QString& path : allEmptyArcDirs) {
-                QDir(path).removeRecursively();
-            }
-
-            cleanCount = allEmptyArcDirs.size();
-            ghostCount = allGhostFolderIds.size();
-        }
-
-        // ==========================================
-        // 🚨 第三步：清洗孤立关联 (category_items -> metadata)
-        // ==========================================
-        // 清理所有 category_items（分类关系表）中那些其 folder_id 已经在 metadata（主元数据表）中不存在的断线幽灵关联
-        for (sqlite3* db : dbs) {
-            SqlTransaction trans(db);
-            char* errMsg = nullptr;
-            const char* sqlCleanOrphans = "DELETE FROM category_items WHERE folder_id NOT IN (SELECT folder_id FROM metadata)";
-            int rc = sqlite3_exec(db, sqlCleanOrphans, nullptr, nullptr, &errMsg);
-            if (rc == SQLITE_OK) {
-                int affected = sqlite3_changes(db);
-                if (affected > 0) {
-                    orphanCount += affected;
-                }
-            } else {
-                if (errMsg) {
-                    qWarning() << "[Cleanup] Clean orphans error:" << errMsg;
-                    sqlite3_free(errMsg);
-                }
-            }
-            trans.commit();
-        }
-
-        // 强力对账与同步通知
-        if (cleanCount > 0 || ghostCount > 0 || orphanCount > 0) {
-            CategoryRepo::s_countsDirty.store(true);
-        }
-
-        // 4. 在主线程同步 UI 数据、播放反馈通知并恢复按钮状态
-        QMetaObject::invokeMethod(this, [this, cleanCount, ghostCount, orphanCount]() {
-            m_btnScan->setEnabled(true);
-            m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#B0B0B0"), 16));
-
-            int totalCleaned = cleanCount + ghostCount;
-            if (totalCleaned > 0 || orphanCount > 0) {
-                // 重新计数对账以更新侧边栏和主界面 (全异步执行)
-                QPointer<CategoryPanel> weakThis(this);
-                CategoryRepo::fullRecountAsync([weakThis](const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
-                    if (weakThis && weakThis->m_categoryModel) {
-                        weakThis->m_categoryModel->updateItemCounts(sysCounts, catCounts);
-                    }
-                });
-                requestRefresh(true);
-
-                // 尝试寻找主面板进行内容区全局自愈重构刷新
-                QWidget* mw = window();
-                if (mw) {
-                    QMetaObject::invokeMethod(mw, "refreshAll", Qt::QueuedConnection);
-                }
-
-                QString msg = QString("<b style='color:#00A650;'>已成功清理 %1 个空白/幽灵资产</b>").arg(totalCleaned);
-                if (orphanCount > 0) {
-                    msg += QString("<br/><span style='color:#00A650; font-size:11px;'>同步剔除 %1 条孤立分类关系</span>").arg(orphanCount);
-                }
-
-                ToolTipOverlay::instance()->showText(QCursor::pos(), msg, 3500, QColor("#00A650"));
-            } else {
-                ToolTipOverlay::instance()->showText(QCursor::pos(), 
-                    "<b style='color:#CCCCCC;'>未检测到多余的空白托管包与幽灵数据</b>", 
-                    2000, QColor("#2D2D2D"));
-            }
-        });
-    });
+    LibraryMaintenanceService::instance().scanAndCleanEmptyArcsAsync();
 }
 
 void CategoryPanel::onRestoreAllFromTrash() {
@@ -1326,6 +1127,88 @@ void CategoryPanel::initUi() {
     
     // 2026-04-12 关键修复：延迟初始化模型数据（仅构造空壳）
     m_categoryModel = new CategoryModel(CategoryModel::Both, this);
+
+    // 🚀 【重构解耦】：在中介接收器中统一处理物理改名与排序写库，保持 Model 100% 只读 (生命周期安全保护)
+    connect(m_categoryModel, &CategoryModel::categoryRenameRequested, this, [this](int catId, const QString& newName) {
+        auto cat = CategoryRepo::getById(catId);
+        if (cat.id <= 0) return;
+        
+        QPointer<CategoryModel> safeModel(m_categoryModel);
+        (void)QtConcurrent::run([safeModel, cat, newName]() mutable {
+            bool renameSuccess = true;
+            bool physicalRenamed = false;
+            QString oldPath;
+            QString newPath;
+            if (!cat.physicalPath.empty()) {
+                oldPath = QString::fromStdWString(cat.physicalPath);
+                QFileInfo oldInfo(oldPath);
+                newPath = QDir::toNativeSeparators(oldInfo.absoluteDir().absoluteFilePath(newName));
+                if (oldPath != newPath) {
+                    if (QFile::rename(oldPath, newPath)) {
+                        cat.physicalPath = newPath.toStdWString();
+                        physicalRenamed = true;
+                    } else {
+                        renameSuccess = false;
+                        qWarning() << "[CategoryPanel] QFile::rename failed from" << oldPath << "to" << newPath;
+                    }
+                }
+            }
+
+            if (renameSuccess) {
+                cat.name = newName.toStdWString();
+                CategoryRepo::update(cat);
+                
+                if (physicalRenamed) {
+                    MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
+                }
+            }
+
+            if (safeModel) {
+                QMetaObject::invokeMethod(safeModel.data(), [safeModel]() {
+                    if (safeModel) {
+                        safeModel->refresh();
+                    }
+                }, Qt::QueuedConnection);
+            }
+        });
+    });
+
+    connect(m_categoryModel, &CategoryModel::categoryOrderChanged, this, [this](int draggedId, int targetParentId, int insertRow) {
+        auto allCats = CategoryRepo::getAll();
+        std::vector<Category> siblings;
+        Category draggedCat;
+        bool foundDragged = false;
+
+        for (const auto& cat : allCats) {
+            if (cat.id == draggedId) {
+                draggedCat = cat;
+                foundDragged = true;
+            } else if (cat.parentId == targetParentId && cat.kind != CategoryKind::SystemLibrary) {
+                siblings.push_back(cat);
+            }
+        }
+
+        if (!foundDragged) return;
+
+        // 按已有的 sortOrder 升序排列同级项
+        std::sort(siblings.begin(), siblings.end(), [](const Category& a, const Category& b) {
+            return a.sortOrder < b.sortOrder;
+        });
+
+        draggedCat.parentId = targetParentId;
+        if (insertRow < 0 || insertRow > static_cast<int>(siblings.size())) {
+            insertRow = static_cast<int>(siblings.size());
+        }
+        siblings.insert(siblings.begin() + insertRow, draggedCat);
+
+        // 100% 物理写盘：批量重新计算并更新 SQLite 中的 sortOrder 序号与 parentId
+        for (size_t i = 0; i < siblings.size(); ++i) {
+            siblings[i].sortOrder = static_cast<int>(i);
+            CategoryRepo::update(siblings[i]);
+        }
+
+        m_categoryModel->refresh();
+    });
     
     // 2026-xx-xx 按照 Plan-98：注入代理模型
     m_proxyModel = new CategoryFilterProxyModel(this);
@@ -1478,6 +1361,17 @@ void CategoryPanel::initUi() {
         m_isRestoringState = false;
         m_isInternalUpdating = false;
         Logger::log("[CategoryPanel] modelReset: Restore finished, m_isInternalUpdating set to false");
+
+        // 🚀 【完美时序】：代理模型展开状态处理完毕后，精确触发新节点编辑
+        if (m_pendingEditCategoryId > 0) {
+            int targetId = m_pendingEditCategoryId;
+            m_pendingEditCategoryId = 0; // 及时重置
+            selectCategory(targetId);
+            QModelIndex proxyIdx = m_categoryTree->currentIndex();
+            if (proxyIdx.isValid()) {
+                m_categoryTree->edit(proxyIdx);
+            }
+        }
     });
 
     // 彻底重构点击事件。由于多选点击会触发多选改变信号（selectionChanged），点击事件仅承担锁屏验证拦截工作，杜绝信号二次激增造成的死锁

@@ -12,6 +12,8 @@ public:
     // 🚀 专职异步写库：后台线程写入，不引入 QWidget 等 UI 依赖
     void addTagToGroupAsync(const QString& tagName, int groupId);
     void removeTagFromGroupAsync(const QString& tagName, int groupId = -1);
+    void renameGroupAsync(int groupId, const QString& newName);
+    void deleteGroupAsync(int groupId);
 
 signals:
     void tagGroupStateChanged();

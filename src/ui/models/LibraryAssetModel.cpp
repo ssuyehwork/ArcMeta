@@ -2,6 +2,7 @@
 #include "UiHelper.h"
 #include "ShellIconManager.h"
 #include "ModelContract.h"
+#include "../ContentPanel.h"
 #include <QDateTime>
 #include <QFileInfo>
 #include <QDir>
@@ -383,7 +384,11 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
                     auto it = weakThis->m_pathToIndex.find(path);
                     if (it != weakThis->m_pathToIndex.end()) {
                         int rIdx = it->second;
-                        emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+                        if (weakThis->isSuspended()) {
+                            weakThis->m_pendingUpdateRows.insert(rIdx);
+                        } else {
+                            emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+                        }
                     }
                 }
             });
@@ -555,4 +560,17 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
     }
 
     return QVariant();
+}
+
+bool LibraryAssetModel::isSuspended() const {
+    auto* cp = qobject_cast<ContentPanel*>(parent());
+    return cp && cp->isContextMenuActive();
+}
+
+void LibraryAssetModel::flushPendingUpdates() {
+    if (m_pendingUpdateRows.isEmpty()) return;
+    for (int rIdx : m_pendingUpdateRows) {
+        emit dataChanged(index(rIdx, 0), index(rIdx, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+    }
+    m_pendingUpdateRows.clear();
 }

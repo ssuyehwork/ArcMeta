@@ -30,8 +30,11 @@ public:
     void loadThumbnailsForRows(const QList<int>& rows) override;
     void migrateCache(const QString& oldPath, const QString& newPath) override;
     void clearCacheForFolder(const QString& folderPath) override;
+    void flushPendingUpdates() override;
 
 protected:
+    bool isSuspended() const;
+
     std::vector<ArcMeta::ItemRecord> m_allRecords;
     std::unordered_map<QString, int, ArcMeta::QStringHash> m_pathToIndex;
     mutable QCache<QString, QIcon> m_iconCache;
@@ -39,6 +42,8 @@ protected:
     QSet<QString> m_requestedPaths; // 🚨 核心防爆锁：记录已经在排队/处理中的任务路径
     mutable QMap<QString, double> m_aspectRatios;
     QString m_query;
+
+    QSet<int> m_pendingUpdateRows;
 };
 
 #endif // DISKITEMMODEL_H
