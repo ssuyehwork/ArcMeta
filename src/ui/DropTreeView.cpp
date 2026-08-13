@@ -1,6 +1,7 @@
 #include "DropTreeView.h"
 #include "CategoryModel.h"
 #include "ContentPanel.h"
+#include "../core/ModelContract.h"
 #include <QDrag>
 #include <QPainter>
 #include <QDragEnterEvent>
@@ -115,6 +116,56 @@ void DropTreeView::paintEvent(QPaintEvent* event) {
         painter.drawText(viewport()->rect(), Qt::AlignCenter, m_emptyHint);
         painter.restore();
     }
+}
+
+bool DropTreeView::isDescendantOfFolder(const QModelIndex& index, int& levels) const {
+    levels = 0;
+    if (!index.isValid()) return false;
+
+    QModelIndex p = index.parent();
+    while (p.isValid()) {
+        levels++;
+        int id = p.data(IdRole).toInt();
+        if (id == CategoryModel::CAT_GROUP_SYS_ID) {
+            return true;
+        }
+        p = p.parent();
+    }
+    return false;
+}
+
+QRect DropTreeView::visualRect(const QModelIndex& index) const {
+    int levels = 0;
+    if (isDescendantOfFolder(index, levels)) {
+        (void)levels;
+        return QTreeView::visualRect(index).translated(-indentation(), 0);
+    }
+    return QTreeView::visualRect(index);
+}
+
+void DropTreeView::drawBranches(QPainter* painter, const QRect& rect, const QModelIndex& index) const {
+    int levels = 0;
+    if (isDescendantOfFolder(index, levels)) {
+        (void)levels;
+        if (model()->hasChildren(index)) {
+            bool isExpanded = this->isExpanded(index);
+            QRect itemRect = visualRect(index);
+            int indent = indentation();
+            QRect arrowRect(itemRect.left() - indent, itemRect.top(), indent, itemRect.height());
+
+            QStyleOptionViewItem option;
+            option.initFrom(this);
+            option.rect = arrowRect;
+            option.state = QStyle::State_Item | QStyle::State_Children;
+            if (isExpanded) {
+                option.state |= QStyle::State_Open;
+            }
+
+            style()->drawPrimitive(QStyle::PE_IndicatorBranch, &option, painter, this);
+        }
+        return;
+    }
+    QTreeView::drawBranches(painter, rect, index);
 }
 
 } // namespace ArcMeta

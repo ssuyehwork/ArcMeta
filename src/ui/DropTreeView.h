@@ -37,7 +37,12 @@ protected:
     void keyboardSearch(const QString& search) override;
     void paintEvent(QPaintEvent* event) override;
 
+    QRect visualRect(const QModelIndex& index) const override;
+    void drawBranches(QPainter* painter, const QRect& rect, const QModelIndex& index) const override;
+
 private:
+    bool isDescendantOfFolder(const QModelIndex& index, int& levels) const;
+
     // 2026-06-xx 物理辅助：拖拽悬停自动展开
     QTimer* m_autoExpandTimer = nullptr;
     QModelIndex m_hoverIndex;
