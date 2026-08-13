@@ -115,15 +115,12 @@ private:
     /**
      * @brief 递归保存 QTreeView 的展开状态
      */
-    void saveExpandedState(QTreeView* tree, const QModelIndex& parent, QSet<int>& expandedIds, QStringList& expandedNames);
+    void saveExpandedState(const QModelIndex& parent, QSet<int>& expandedIds, QStringList& expandedNames);
 
     /**
      * @brief 递归恢复 QTreeView 的展开状态
      */
-    void restoreExpandedState(QTreeView* tree, const QModelIndex& parent, const QSet<int>& expandedIds, const QStringList& expandedNames);
-
-    void saveBothExpandedStates(QSet<int>& expandedIds, QStringList& expandedNames);
-    void restoreBothExpandedStates(const QSet<int>& expandedIds, const QStringList& expandedNames);
+    void restoreExpandedState(const QModelIndex& parent, const QSet<int>& expandedIds, const QStringList& expandedNames);
 
     /**
      * @brief 2026-03-xx 安全逻辑：尝试解锁分类
@@ -139,10 +136,8 @@ private:
     void updateFolderGroupButtonText(int count); // 动态更新计数
     
     DropTreeView* m_categoryTree = nullptr;
-    DropTreeView* m_categoryTreeUser = nullptr;
     CategoryModel* m_categoryModel = nullptr;
     CategoryFilterProxyModel* m_proxyModel = nullptr;
-    CategoryFilterProxyModel* m_proxyModelUser = nullptr;
     QLineEdit* m_searchEdit = nullptr;
     QPushButton* m_btnScan = nullptr;
     QTimer* m_refreshTimer = nullptr;

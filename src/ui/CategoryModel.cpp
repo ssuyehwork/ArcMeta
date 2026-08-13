@@ -104,7 +104,6 @@ void CategoryModel::refresh() {
             item->setData(cat.pinned, PinnedRole);
             item->setData(cat.encrypted, EncryptedRole);
             item->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
-            item->setData(static_cast<int>(cat.kind), CategoryKindRole);
             item->setFlags(item->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
             
             if (cat.encrypted && !m_unlockedIds.contains(id)) {
@@ -136,6 +135,18 @@ void CategoryModel::refresh() {
             root->appendRow(favGroup);
         }
 
+        // 5.5 挂载“文件夹”分组占位行（对应用户原话：①把“文件夹(N)”变成专用隐藏/显示按钮）
+        // 本行不显示任何文字/图标，纯粹用于让 CategoryPanel 通过 setIndexWidget() 把真实的
+        // m_btnFolderGroup 按钮控件严丝合缝嵌入到“快速访问”与自定义分类之间，物理保证
+        // 按钮位置固定，绝不会再被挤到“全部数据”等系统项之上
+        {
+            QStandardItem* folderGroupPlaceholder = new QStandardItem("");
+            folderGroupPlaceholder->setData("folder_group_placeholder", TypeRole);
+            folderGroupPlaceholder->setData(FOLDER_GROUP_PLACEHOLDER_ID, IdRole);
+            folderGroupPlaceholder->setFlags(Qt::NoItemFlags);
+            root->appendRow(folderGroupPlaceholder);
+        }
+
         // 6. 挂载用户自定义分类，一律作为一等公民顶级分类，直接挂载到 root 下
         for (const auto& cat : categories) {
             int id = cat.id;
@@ -164,7 +175,6 @@ void CategoryModel::refresh() {
                     mirror->setData(color, ColorRole);
                     mirror->setData(name, NameRole);
                     mirror->setData(true, PinnedRole);
-                    mirror->setData(static_cast<int>(cat.kind), CategoryKindRole);
                     
                     if (cat.encrypted && !m_unlockedIds.contains(id)) {
                         mirror->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));

@@ -70,10 +70,6 @@ CategoryPanel::~CategoryPanel() {
         disconnect(m_categoryTree, &QTreeView::expanded, this, &CategoryPanel::saveExpandedStateToSettings);
         disconnect(m_categoryTree, &QTreeView::collapsed, this, &CategoryPanel::saveExpandedStateToSettings);
     }
-    if (m_categoryTreeUser) {
-        disconnect(m_categoryTreeUser, &QTreeView::expanded, this, &CategoryPanel::saveExpandedStateToSettings);
-        disconnect(m_categoryTreeUser, &QTreeView::collapsed, this, &CategoryPanel::saveExpandedStateToSettings);
-    }
 }
 
 CategoryPanel::CategoryPanel(QWidget* parent)
@@ -189,30 +185,13 @@ void CategoryPanel::selectCategory(int id) {
 
     QModelIndex target = findId(QModelIndex());
     if (target.isValid()) {
+        // 2026-xx-xx 按照 Plan-98：映射至代理模型索引
         QModelIndex proxyIdx = m_proxyModel->mapFromSource(target);
-        if (proxyIdx.isValid() && m_categoryTree) {
+        if (proxyIdx.isValid()) {
+            // 2026-07-26 极致重构：利用 DataFlowGuard 优雅控制，彻底消灭 blockSignals
             DataFlowGuard guard(m_isInternalUpdating);
             m_categoryTree->setCurrentIndex(proxyIdx);
             m_categoryTree->scrollTo(proxyIdx);
-            if (m_categoryTree->selectionModel()) {
-                m_categoryTree->selectionModel()->select(proxyIdx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-            }
-            if (m_categoryTreeUser && m_categoryTreeUser->selectionModel()) {
-                m_categoryTreeUser->selectionModel()->clearSelection();
-            }
-        } else if (m_proxyModelUser && m_categoryTreeUser) {
-            QModelIndex proxyIdxUser = m_proxyModelUser->mapFromSource(target);
-            if (proxyIdxUser.isValid()) {
-                DataFlowGuard guard(m_isInternalUpdating);
-                m_categoryTreeUser->setCurrentIndex(proxyIdxUser);
-                m_categoryTreeUser->scrollTo(proxyIdxUser);
-                if (m_categoryTreeUser->selectionModel()) {
-                    m_categoryTreeUser->selectionModel()->select(proxyIdxUser, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-                }
-                if (m_categoryTree && m_categoryTree->selectionModel()) {
-                    m_categoryTree->selectionModel()->clearSelection();
-                }
-            }
         }
     }
 }
@@ -235,16 +214,11 @@ void CategoryPanel::selectCategoryByType(const QString& type) {
     QModelIndex target = findType(QModelIndex());
     if (target.isValid()) {
         QModelIndex proxyIdx = m_proxyModel->mapFromSource(target);
-        if (proxyIdx.isValid() && m_categoryTree) {
+        if (proxyIdx.isValid()) {
+            // 2026-07-26 极致重构：利用 DataFlowGuard 优雅控制，彻底消灭 blockSignals
             DataFlowGuard guard(m_isInternalUpdating);
             m_categoryTree->setCurrentIndex(proxyIdx);
             m_categoryTree->scrollTo(proxyIdx);
-            if (m_categoryTree->selectionModel()) {
-                m_categoryTree->selectionModel()->select(proxyIdx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-            }
-            if (m_categoryTreeUser && m_categoryTreeUser->selectionModel()) {
-                m_categoryTreeUser->selectionModel()->clearSelection();
-            }
         }
     }
 }
@@ -258,280 +232,276 @@ void CategoryPanel::deferredInit() {
 }
 
 void CategoryPanel::setupContextMenu() {
-    auto setupMenuForTree = [&](DropTreeView* tree, CategoryFilterProxyModel* proxy) {
-        tree->setContextMenuPolicy(Qt::CustomContextMenu);
-        connect(tree, &QWidget::customContextMenuRequested, this, [this, tree, proxy](const QPoint& pos) {
-            QModelIndex proxyIndex = tree->indexAt(pos);
-            QModelIndex index = proxy->mapToSource(proxyIndex);
+    m_categoryTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    // 2026-05-27 物理加固：补全 this 上下文
+    connect(m_categoryTree, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        QModelIndex proxyIndex = m_categoryTree->indexAt(pos);
+        QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
 
-            if (proxyIndex.isValid()) {
-                tree->setCurrentIndex(proxyIndex);
-            }
+        // 2026-03-xx 按照用户要求：实现右键点击即选中，解决“分类与其子分类”交互一致性问题
+        if (proxyIndex.isValid()) {
+            m_categoryTree->setCurrentIndex(proxyIndex);
+        }
 
-            QMenu menu(this);
-            UiHelper::applyMenuStyle(&menu);
+        QMenu menu(this);
+        UiHelper::applyMenuStyle(&menu);
 
-            QString itemName = index.data(NameRole).toString();
-            QString itemType = index.data(TypeRole).toString();
+        // 基于规范逻辑：如果没有选中项
+        QString itemName = index.data(NameRole).toString();
+        QString itemType = index.data(TypeRole).toString();
 
-            if (itemType == "trash") {
-                menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "清空回收站", this, &CategoryPanel::onEmptyTrash);
-                menu.addAction(UiHelper::getIcon("sync", PrimaryBlue, 18), "还原全部项目", this, &CategoryPanel::onRestoreAllFromTrash);
-            } else if (!index.isValid()) {
-                menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建文件夹", this, &CategoryPanel::onCreateCategory);
+        if (itemType == "trash") {
+            // 2026-06-xx 物理级 1:1 还原：回收站专属右键菜单
+            menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "清空回收站", this, &CategoryPanel::onEmptyTrash);
+            menu.addAction(UiHelper::getIcon("sync", PrimaryBlue, 18), "还原全部项目", this, &CategoryPanel::onRestoreAllFromTrash);
+        } else if (!index.isValid()) {
+            menu.addAction(UiHelper::getIcon("folder_filled", QColor("#aaaaaa"), 18), "新建文件夹", this, &CategoryPanel::onCreateCategory);
+
+            auto* sortMenu = menu.addMenu(UiHelper::getIcon("list_ul", QColor("#aaaaaa"), 18), "排列");
+            sortMenu->setStyleSheet(menu.styleSheet());
+            sortMenu->addAction("标题(全部) (A→Z)", this, &CategoryPanel::onSortAllByNameAsc);
+            sortMenu->addAction("标题(全部) (Z→A)", this, &CategoryPanel::onSortAllByNameDesc);
+        } else {
+            // 2026-03-xx 按照用户要求：补全子层级（子分类、文件、文件夹）的右键菜单
+            // 物理修复：移除重复声明，使用统一的 itemType 变量
+
+            // 只要不是系统根节点，都弹出完整菜单
+            if (itemType == "category" || itemType == "file" || itemType == "folder") {
                 
-                auto* sortMenu = menu.addMenu(UiHelper::getIcon("list_ul", QColor("#aaaaaa"), 18), "排列");
-                sortMenu->setStyleSheet(menu.styleSheet());
-                sortMenu->addAction("标题(全部) (A→Z)", this, &CategoryPanel::onSortAllByNameAsc);
-                sortMenu->addAction("标题(全部) (Z→A)", this, &CategoryPanel::onSortAllByNameDesc);
-            } else {
-                if (itemType == "category" || itemType == "file" || itemType == "folder") {
-                    QString colorStr = index.data(ColorRole).toString();
+                QString colorStr = index.data(ColorRole).toString();
 
-                    QWidgetAction* colorPickerAction = new QWidgetAction(&menu);
-                    ColorStripPicker* colorPickerWidget = new ColorStripPicker(colorStr, &menu);
-                    colorPickerAction->setDefaultWidget(colorPickerWidget);
-                    menu.addAction(colorPickerAction);
+                // 使用 ColorStripPicker 快捷菜单项，直接展露在主菜单上
+                QWidgetAction* colorPickerAction = new QWidgetAction(&menu);
+                ColorStripPicker* colorPickerWidget = new ColorStripPicker(colorStr, &menu);
+                colorPickerAction->setDefaultWidget(colorPickerWidget);
+                menu.addAction(colorPickerAction);
 
-                    int id = index.data(IdRole).toInt();
-                    connect(colorPickerWidget, &ColorStripPicker::colorSelected, this, [this, id, &menu](const QString& hexColor) {
-                        auto all = CategoryRepo::getAll();
-                        for (auto& cat : all) {
+                int id = index.data(IdRole).toInt();
+                connect(colorPickerWidget, &ColorStripPicker::colorSelected, this, [this, id, &menu](const QString& hexColor) {
+                    auto all = CategoryRepo::getAll();
+                    for (auto& cat : all) {
+                        if (cat.id == id) {
+                            cat.color = hexColor.toUpper().toStdWString();
+                            CategoryRepo::update(cat);
+                            if (!cat.physicalPath.empty()) {
+                                MetadataManager::instance().setColor(cat.physicalPath, cat.color, true);
+                            }
+                            break;
+                        }
+                    }
+
+                    QSet<int> expandedIds;
+                    QStringList expandedNames;
+                    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
+
+                    m_categoryModel->refresh();
+
+                    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
+                    menu.close();
+                });
+
+                menu.addAction(UiHelper::getIcon("tag_filled", QColor("#9b59b6"), 18), "设置预设标签", this, &CategoryPanel::onSetPresetTags);
+
+                // [Plan-6] 创建主选项“文件夹图标”
+                QMenu* iconMenu = menu.addMenu(UiHelper::getIcon("folder_filled", WarningOrange, 18), "文件夹图标");
+                UiHelper::applyMenuStyle(iconMenu);
+
+                QColor catColor = colorStr.isEmpty() ? QColor("#555555") : QColor(colorStr);
+
+                // 使用 QWidgetAction 构建纯图标选择器（无任何文字，网格排列，支持 Hover 色值对齐与 Tooltip）
+                QWidgetAction* pickerAction = new QWidgetAction(iconMenu);
+                QWidget* pickerWidget = new QWidget(iconMenu);
+                QGridLayout* pickerLayout = new QGridLayout(pickerWidget);
+                pickerLayout->setContentsMargins(6, 6, 6, 6);
+                pickerLayout->setSpacing(6);
+
+                static const QList<QPair<QString, QString>> builtInIcons = {
+                    {"默认文件夹", "folder_filled"},
+                    {"层级分类", "category"},
+                    {"照片媒体", "image_filled"},
+                    {"时钟历史", "clock_filled"},
+                    {"星标收藏", "star_filled"},
+                    {"爱心常用", "heart_filled"},
+                    {"加密安全", "lock_filled"},
+                    {"图书文档", "book"},
+                    {"配置管理", "settings_filled"},
+                    {"网络球体", "globe_filled"}
+                };
+
+                int row = 0;
+                int col = 0;
+                for (const auto& pair : builtInIcons) {
+                    QString label = pair.first;
+                    QString iconKey = pair.second;
+
+                    QPushButton* btn = new QPushButton(pickerWidget);
+                    btn->setFixedSize(28, 28);
+                    btn->setCursor(Qt::PointingHandCursor);
+                    btn->setStyleSheet(
+                        "QPushButton { "
+                        "  background-color: transparent; "
+                        "  border: 1px solid transparent; "
+                        "  border-radius: 4px; "
+                        "}"
+                        "QPushButton:hover { "
+                        "  background-color: #3E3E42; "
+                        "  border: 1px solid #555555; "
+                        "}"
+                        "QPushButton:pressed { "
+                        "  background-color: #4E4E52; "
+                        "}"
+                    );
+                    btn->setIcon(UiHelper::getIcon(iconKey, catColor, 18));
+                    btn->setIconSize(QSize(18, 18));
+                    btn->setToolTip(label); // 使用中文 label 作为 tooltip 提示
+
+                    pickerLayout->addWidget(btn, row, col);
+
+                    connect(btn, &QPushButton::clicked, this, [this, id, iconKey, iconMenu]() {
+                        auto cats = CategoryRepo::getAll();
+                        for (auto& cat : cats) {
                             if (cat.id == id) {
-                                cat.color = hexColor.toUpper().toStdWString();
+                                cat.icon = iconKey.toStdWString();
                                 CategoryRepo::update(cat);
-                                if (!cat.physicalPath.empty()) {
-                                    MetadataManager::instance().setColor(cat.physicalPath, cat.color, true);
-                                }
                                 break;
                             }
                         }
-
-                        QSet<int> expandedIds;
-                        QStringList expandedNames;
-                        saveBothExpandedStates(expandedIds, expandedNames);
-
                         m_categoryModel->refresh();
-
-                        restoreBothExpandedStates(expandedIds, expandedNames);
-                        menu.close();
+                        iconMenu->close(); // 选中后关闭菜单
                     });
 
-                    menu.addAction(UiHelper::getIcon("tag_filled", QColor("#9b59b6"), 18), "设置预设标签", this, &CategoryPanel::onSetPresetTags);
-
-                    QMenu* iconMenu = menu.addMenu(UiHelper::getIcon("folder_filled", WarningOrange, 18), "文件夹图标");
-                    UiHelper::applyMenuStyle(iconMenu);
-
-                    QColor catColor = colorStr.isEmpty() ? QColor("#555555") : QColor(colorStr);
-
-                    QWidgetAction* pickerAction = new QWidgetAction(iconMenu);
-                    QWidget* pickerWidget = new QWidget(iconMenu);
-                    QGridLayout* pickerLayout = new QGridLayout(pickerWidget);
-                    pickerLayout->setContentsMargins(6, 6, 6, 6);
-                    pickerLayout->setSpacing(6);
-
-                    static const QList<QPair<QString, QString>> builtInIcons = {
-                        {"默认文件夹", "folder_filled"},
-                        {"层级分类", "category"},
-                        {"照片媒体", "image_filled"},
-                        {"时钟历史", "clock_filled"},
-                        {"星标收藏", "star_filled"},
-                        {"爱心常用", "heart_filled"},
-                        {"加密安全", "lock_filled"},
-                        {"图书文档", "book"},
-                        {"配置管理", "settings_filled"},
-                        {"网络球体", "globe_filled"}
-                    };
-
-                    int row = 0;
-                    int col = 0;
-                    for (const auto& pair : builtInIcons) {
-                        QString label = pair.first;
-                        QString iconKey = pair.second;
-
-                        QPushButton* btn = new QPushButton(pickerWidget);
-                        btn->setFixedSize(28, 28);
-                        btn->setCursor(Qt::PointingHandCursor);
-                        btn->setStyleSheet(
-                            "QPushButton { "
-                            "  background-color: transparent; "
-                            "  border: 1px solid transparent; "
-                            "  border-radius: 4px; "
-                            "}"
-                            "QPushButton:hover { "
-                            "  background-color: #3E3E42; "
-                            "  border: 1px solid #555555; "
-                            "}"
-                            "QPushButton:pressed { "
-                            "  background-color: #4E4E52; "
-                            "}"
-                        );
-                        btn->setIcon(UiHelper::getIcon(iconKey, catColor, 18));
-                        btn->setIconSize(QSize(18, 18));
-                        btn->setToolTip(label);
-
-                        pickerLayout->addWidget(btn, row, col);
-
-                        connect(btn, &QPushButton::clicked, this, [this, id, iconKey, iconMenu]() {
-                            auto cats = CategoryRepo::getAll();
-                            for (auto& cat : cats) {
-                                if (cat.id == id) {
-                                    cat.icon = iconKey.toStdWString();
-                                    CategoryRepo::update(cat);
-                                    break;
-                                }
-                            }
-                            m_categoryModel->refresh();
-                            iconMenu->close();
-                        });
-
-                        col++;
-                        if (col >= 5) {
-                            col = 0;
-                            row++;
-                        }
-                    }
-
-                    pickerWidget->setLayout(pickerLayout);
-                    pickerAction->setDefaultWidget(pickerWidget);
-                    iconMenu->addAction(pickerAction);
-
-                    menu.addSeparator();
-
-                    menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建文件夹", this, &CategoryPanel::onCreateCategory);
-
-                    int catId = index.data(IdRole).toInt();
-                    Category cat = CategoryRepo::getById(catId);
-                    bool isManagedLibraryRoot = (cat.id > 0 && cat.parentId == 0 && !cat.physicalPath.empty());
-
-                    if (!isManagedLibraryRoot) {
-                        menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建子文件夹", this, &CategoryPanel::onCreateSubCategory);
-                    }
-
-                    menu.addSeparator();
-
-                    bool isPinned = index.data(PinnedRole).toBool();
-                    menu.addAction(UiHelper::getIcon("pin_vertical", isPinned ? Style::ActiveOrange : TextMuted, 18),
-                                   isPinned ? "从“快速访问”中移除" : "添加至“快速访问”", this, &CategoryPanel::onTogglePin);
-
-                    if (!isManagedLibraryRoot) {
-                        menu.addAction(UiHelper::getIcon("edit", TextMuted, 18), "重命名", this, &CategoryPanel::onRenameCategory);
-                        menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "删除", this, &CategoryPanel::onDeleteCategory);
-                    }
-
-                    menu.addSeparator();
-
-                    auto* sortMenu = menu.addMenu(UiHelper::getIcon("list_ul", QColor("#aaaaaa"), 18), "排列");
-                    sortMenu->setStyleSheet(menu.styleSheet());
-                    sortMenu->addAction("标题(当前层级) (A→Z)", this, &CategoryPanel::onSortByNameAsc);
-                    sortMenu->addAction("标题(当前层级) (Z→A)", this, &CategoryPanel::onSortByNameDesc);
-                    sortMenu->addAction("标题(全部) (A→Z)", this, &CategoryPanel::onSortAllByNameAsc);
-                    sortMenu->addAction("标题(全部) (Z→A)", this, &CategoryPanel::onSortAllByNameDesc);
-
-                    auto* pwdMenu = menu.addMenu(UiHelper::getIcon("lock_secure", QColor("#EEEEEE"), 16), "密码保护");
-                    UiHelper::applyMenuStyle(pwdMenu);
-
-                    bool isEncrypted = index.data(EncryptedRole).toBool();
-                    bool isUnlocked = CategoryLockManager::instance().isUnlocked(catId);
-
-                    if (!isEncrypted) {
-                        QAction* setAct = pwdMenu->addAction("设置密码");
-                        connect(setAct, &QAction::triggered, this, &CategoryPanel::onSetPassword);
-                    } else {
-                        QAction* changeAct = pwdMenu->addAction("修改密码");
-                        connect(changeAct, &QAction::triggered, this, [this, index, catId]() {
-                            QString storedData = index.data(EncryptHintRole).toString();
-                            QString realHint = storedData.contains(":::") ? storedData.section(":::", 1) : storedData;
-                            CategoryLockDialog dlg(realHint, this);
-                            if (dlg.exec() == QDialog::Accepted) {
-                                CategorySetPasswordDialog setDlg(this);
-                                if (setDlg.exec() == QDialog::Accepted) {
-                                    QString newPwd = setDlg.password();
-                                    QString newHint = setDlg.hint();
-
-                                    if (newPwd.isEmpty()) {
-                                        ToolTipOverlay::instance()->showText(QCursor::pos(), "密码不能为空！", 1500, QColor("#e81123"));
-                                        return;
-                                    }
-
-                                    QString pwdHash = QCryptographicHash::hash(newPwd.toUtf8(), QCryptographicHash::Sha256).toHex();
-                                    QString combinedData = pwdHash + ":::" + newHint;
-
-                                    auto all = CategoryRepo::getAll();
-                                    for (auto& cat : all) {
-                                        if (cat.id == catId) {
-                                            cat.encrypted = true;
-                                            cat.encryptHint = combinedData.toStdWString();
-                                            CategoryRepo::update(cat);
-                                            break;
-                                        }
-                                    }
-                                    syncUnlockedIds();
-                                    ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 密码修改成功</b>", 1000, QColor("#00A650"));
-                                }
-                            }
-                        });
-
-                        QAction* clearAct = pwdMenu->addAction("清除密码");
-                        connect(clearAct, &QAction::triggered, this, &CategoryPanel::onClearPassword);
-
-                        pwdMenu->addSeparator();
-
-                        QAction* lockNowAct = pwdMenu->addAction("立即锁定");
-                        lockNowAct->setEnabled(isUnlocked);
-                        connect(lockNowAct, &QAction::triggered, this, [this, catId]() {
-                            CategoryLockManager::instance().lockCategory(catId);
-                            syncUnlockedIds();
-
-                            MainWindow* mw = nullptr;
-                            QWidget* parentWin = window();
-                            while (parentWin) {
-                                if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
-                                parentWin = parentWin->parentWidget();
-                            }
-                            if (mw) {
-                                ContentPanel* cp = mw->findChild<ContentPanel*>();
-                                if (cp) {
-                                    cp->loadCategory(catId);
-                                }
-                            }
-                            ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 分类已重新锁定</b>", 1000, QColor("#00A650"));
-                        });
+                    col++;
+                    if (col >= 5) {
+                        col = 0;
+                        row++;
                     }
                 }
+
+                pickerWidget->setLayout(pickerLayout);
+                pickerAction->setDefaultWidget(pickerWidget);
+                iconMenu->addAction(pickerAction);
+
+                menu.addSeparator();
+
+                menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建文件夹", this, &CategoryPanel::onCreateCategory);
+
+                int catId = index.data(IdRole).toInt();
+                Category cat = CategoryRepo::getById(catId);
+                bool isManagedLibraryRoot = (cat.id > 0 && cat.parentId == 0 && !cat.physicalPath.empty());
+
+                if (!isManagedLibraryRoot) {
+                    menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建子文件夹", this, &CategoryPanel::onCreateSubCategory);
+                }
+
+                menu.addSeparator();
+
+                bool isPinned = index.data(PinnedRole).toBool();
+                menu.addAction(UiHelper::getIcon("pin_vertical", isPinned ? Style::ActiveOrange : TextMuted, 18),
+                               isPinned ? "从“快速访问”中移除" : "添加至“快速访问”", this, &CategoryPanel::onTogglePin);
+
+                if (!isManagedLibraryRoot) {
+                    menu.addAction(UiHelper::getIcon("edit", TextMuted, 18), "重命名", this, &CategoryPanel::onRenameCategory);
+                    menu.addAction(UiHelper::getIcon("trash", ErrorRed, 18), "删除", this, &CategoryPanel::onDeleteCategory);
+                }
+
+                menu.addSeparator();
+
+                // 2026-03-xx 按照用户要求：补全排列与密码保护逻辑
+                auto* sortMenu = menu.addMenu(UiHelper::getIcon("list_ul", QColor("#aaaaaa"), 18), "排列");
+                sortMenu->setStyleSheet(menu.styleSheet());
+                sortMenu->addAction("标题(当前层级) (A→Z)", this, &CategoryPanel::onSortByNameAsc);
+                sortMenu->addAction("标题(当前层级) (Z→A)", this, &CategoryPanel::onSortByNameDesc);
+                sortMenu->addAction("标题(全部) (A→Z)", this, &CategoryPanel::onSortAllByNameAsc);
+                sortMenu->addAction("标题(全部) (Z→A)", this, &CategoryPanel::onSortAllByNameDesc);
+
+                auto* pwdMenu = menu.addMenu(UiHelper::getIcon("lock_secure", QColor("#EEEEEE"), 16), "密码保护");
+                UiHelper::applyMenuStyle(pwdMenu);
+
+                bool isEncrypted = index.data(EncryptedRole).toBool();
+                bool isUnlocked = CategoryLockManager::instance().isUnlocked(catId);
+
+                if (!isEncrypted) {
+                    QAction* setAct = pwdMenu->addAction("设置密码");
+                    connect(setAct, &QAction::triggered, this, &CategoryPanel::onSetPassword);
+                } else {
+                    QAction* changeAct = pwdMenu->addAction("修改密码");
+                    connect(changeAct, &QAction::triggered, this, [this, index, catId]() {
+                        QString storedData = index.data(EncryptHintRole).toString();
+                        QString realHint = storedData.contains(":::") ? storedData.section(":::", 1) : storedData;
+                        CategoryLockDialog dlg(realHint, this);
+                        if (dlg.exec() == QDialog::Accepted) {
+                            CategorySetPasswordDialog setDlg(this);
+                            if (setDlg.exec() == QDialog::Accepted) {
+                                QString newPwd = setDlg.password();
+                                QString newHint = setDlg.hint();
+
+                                if (newPwd.isEmpty()) {
+                                    ToolTipOverlay::instance()->showText(QCursor::pos(), "密码不能为空！", 1500, QColor("#e81123"));
+                                    return;
+                                }
+
+                                QString pwdHash = QCryptographicHash::hash(newPwd.toUtf8(), QCryptographicHash::Sha256).toHex();
+                                QString combinedData = pwdHash + ":::" + newHint;
+
+                                auto all = CategoryRepo::getAll();
+                                for (auto& cat : all) {
+                                    if (cat.id == catId) {
+                                        cat.encrypted = true;
+                                        cat.encryptHint = combinedData.toStdWString();
+                                        CategoryRepo::update(cat);
+                                        break;
+                                    }
+                                }
+                                syncUnlockedIds();
+                                ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 密码修改成功</b>", 1000, QColor("#00A650"));
+                            }
+                        }
+                    });
+
+                    QAction* clearAct = pwdMenu->addAction("清除密码");
+                    connect(clearAct, &QAction::triggered, this, &CategoryPanel::onClearPassword);
+
+                    pwdMenu->addSeparator();
+
+                    QAction* lockNowAct = pwdMenu->addAction("立即锁定");
+                    lockNowAct->setEnabled(isUnlocked);
+                    connect(lockNowAct, &QAction::triggered, this, [this, catId]() {
+                        CategoryLockManager::instance().lockCategory(catId);
+                        syncUnlockedIds();
+
+                        MainWindow* mw = nullptr;
+                        QWidget* parentWin = window();
+                        while (parentWin) {
+                            if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
+                            parentWin = parentWin->parentWidget();
+                        }
+                        if (mw) {
+                            ContentPanel* cp = mw->findChild<ContentPanel*>();
+                            if (cp) {
+                                cp->loadCategory(catId);
+                            }
+                        }
+                        ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 分类已重新锁定</b>", 1000, QColor("#00A650"));
+                    });
+                }
             }
+        }
 
-            if (!menu.isEmpty()) {
-                menu.exec(tree->viewport()->mapToGlobal(pos));
-            }
-        });
-    };
-
-    setupMenuForTree(m_categoryTree, m_proxyModel);
-    if (m_categoryTreeUser) {
-        setupMenuForTree(m_categoryTreeUser, m_proxyModelUser);
-    }
-}
-
-void CategoryPanel::saveBothExpandedStates(QSet<int>& expandedIds, QStringList& expandedNames) {
-    saveExpandedState(m_categoryTree, QModelIndex(), expandedIds, expandedNames);
-    saveExpandedState(m_categoryTreeUser, QModelIndex(), expandedIds, expandedNames);
-}
-
-void CategoryPanel::restoreBothExpandedStates(const QSet<int>& expandedIds, const QStringList& expandedNames) {
-    restoreExpandedState(m_categoryTree, QModelIndex(), expandedIds, expandedNames);
-    restoreExpandedState(m_categoryTreeUser, QModelIndex(), expandedIds, expandedNames);
+        if (!menu.isEmpty()) {
+            menu.exec(m_categoryTree->viewport()->mapToGlobal(pos));
+        }
+    });
 }
 
 /**
  * @brief 递归保存 QTreeView 的展开状态
  */
-void CategoryPanel::saveExpandedState(QTreeView* tree, const QModelIndex& parent, QSet<int>& expandedIds, QStringList& expandedNames) {
-    if (!tree || !tree->model()) return;
-    int rowCount = tree->model()->rowCount(parent);
+void CategoryPanel::saveExpandedState(const QModelIndex& parent, QSet<int>& expandedIds, QStringList& expandedNames) {
+    if (!m_categoryTree || !m_categoryTree->model()) return;
+    int rowCount = m_categoryTree->model()->rowCount(parent);
     for (int i = 0; i < rowCount; ++i) {
-        QModelIndex idx = tree->model()->index(i, 0, parent);
-        if (tree->isExpanded(idx)) {
+        QModelIndex idx = m_categoryTree->model()->index(i, 0, parent);
+        if (m_categoryTree->isExpanded(idx)) {
             int id = idx.data(IdRole).toInt();
             QString name = idx.data(NameRole).toString();
             if (id != 0) {
@@ -539,7 +509,7 @@ void CategoryPanel::saveExpandedState(QTreeView* tree, const QModelIndex& parent
             } else {
                 expandedNames << name;
             }
-            saveExpandedState(tree, idx, expandedIds, expandedNames);
+            saveExpandedState(idx, expandedIds, expandedNames);
         }
     }
 }
@@ -554,29 +524,20 @@ void CategoryPanel::onSearchTextChanged(const QString& text) {
             loadExpandedStateFromSettings();
         }
     }
-    if (m_proxyModelUser) {
-        m_proxyModelUser->setFilterText(text);
-        if (!text.isEmpty()) {
-            m_categoryTreeUser->expandAll();
-        } else {
-            // 搜索清除时，恢复常规展开状态
-            loadExpandedStateFromSettings();
-        }
-    }
 }
 
 /**
  * @brief 递归恢复 QTreeView 的展开状态
  * 2026-03-xx 物理拦截：加密且未解锁的分类在恢复时强制跳过展开
  */
-void CategoryPanel::restoreExpandedState(QTreeView* tree, const QModelIndex& parent, const QSet<int>& expandedIds, const QStringList& expandedNames) {
-    if (!tree || !tree->model()) return;
+void CategoryPanel::restoreExpandedState(const QModelIndex& parent, const QSet<int>& expandedIds, const QStringList& expandedNames) {
+    if (!m_categoryTree || !m_categoryTree->model()) return;
     
-    bool hasHistory = tree->property("hasHistoryRecord").toBool();
-    int rowCount = tree->model()->rowCount(parent);
+    bool hasHistory = m_categoryTree->property("hasHistoryRecord").toBool();
+    int rowCount = m_categoryTree->model()->rowCount(parent);
     
     for (int i = 0; i < rowCount; ++i) {
-        QModelIndex idx = tree->model()->index(i, 0, parent);
+        QModelIndex idx = m_categoryTree->model()->index(i, 0, parent);
         int id = idx.data(IdRole).toInt();
         QString name = idx.data(NameRole).toString();
         bool isEncrypted = idx.data(EncryptedRole).toBool();
@@ -601,8 +562,8 @@ void CategoryPanel::restoreExpandedState(QTreeView* tree, const QModelIndex& par
         }
 
         if (shouldExpand) {
-            tree->setExpanded(idx, true);
-            restoreExpandedState(tree, idx, expandedIds, expandedNames);
+            m_categoryTree->setExpanded(idx, true);
+            restoreExpandedState(idx, expandedIds, expandedNames);
         }
     }
 }
@@ -635,24 +596,19 @@ void CategoryPanel::onCreateCategory() {
 
     QSet<int> expandedIds;
     QStringList expandedNames;
-    saveBothExpandedStates(expandedIds, expandedNames);
+    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
     if (CategoryRepo::add(cat)) {
         m_categoryModel->refresh();
-        restoreBothExpandedStates(expandedIds, expandedNames);
+        restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
 
         // 3. 在树更新完毕后，立刻获取新节点的 Index 并进入行内编辑状态
         int newId = cat.id;
         QTimer::singleShot(50, this, [this, newId]() {
             selectCategory(newId);
             QModelIndex proxyIdx = m_categoryTree->currentIndex();
-            DropTreeView* activeTree = m_categoryTree;
-            if (!proxyIdx.isValid() && m_categoryTreeUser) {
-                proxyIdx = m_categoryTreeUser->currentIndex();
-                activeTree = m_categoryTreeUser;
-            }
             if (proxyIdx.isValid()) {
-                activeTree->edit(proxyIdx);
+                m_categoryTree->edit(proxyIdx);
             }
         });
     }
@@ -660,9 +616,6 @@ void CategoryPanel::onCreateCategory() {
 
 void CategoryPanel::onCreateSubCategory() {
     QModelIndex index = m_categoryTree->currentIndex();
-    if (!index.isValid() && m_categoryTreeUser) {
-        index = m_categoryTreeUser->currentIndex();
-    }
     int parentId = getTargetCategoryId(index);
     if (parentId <= 0) return;
 
@@ -699,25 +652,20 @@ void CategoryPanel::onCreateSubCategory() {
 
     QSet<int> expandedIds;
     QStringList expandedNames;
-    saveBothExpandedStates(expandedIds, expandedNames);
+    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
     expandedIds.insert(parentId);
 
     if (CategoryRepo::add(cat)) {
         m_categoryModel->refresh();
-        restoreBothExpandedStates(expandedIds, expandedNames);
+        restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
 
         // 3. 展开父节点并自动对新子节点进入行内编辑状态
         int newId = cat.id;
         QTimer::singleShot(50, this, [this, newId]() {
             selectCategory(newId);
             QModelIndex proxyIdx = m_categoryTree->currentIndex();
-            DropTreeView* activeTree = m_categoryTree;
-            if (!proxyIdx.isValid() && m_categoryTreeUser) {
-                proxyIdx = m_categoryTreeUser->currentIndex();
-                activeTree = m_categoryTreeUser;
-            }
             if (proxyIdx.isValid()) {
-                activeTree->edit(proxyIdx);
+                m_categoryTree->edit(proxyIdx);
             }
         });
     }
@@ -736,9 +684,6 @@ void CategoryPanel::onSetPresetTags() {
 
 void CategoryPanel::onTogglePin() {
     QModelIndex index = m_categoryTree->currentIndex();
-    if (!index.isValid() && m_categoryTreeUser) {
-        index = m_categoryTreeUser->currentIndex();
-    }
     int id = getTargetCategoryId(index);
     if (id <= 0) return;
     
@@ -755,11 +700,11 @@ void CategoryPanel::onTogglePin() {
 
     QSet<int> expandedIds;
     QStringList expandedNames;
-    saveBothExpandedStates(expandedIds, expandedNames);
+    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
     m_categoryModel->refresh();
 
-    restoreBothExpandedStates(expandedIds, expandedNames);
+    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
 }
 
 void CategoryPanel::onSetPassword() {
@@ -786,7 +731,7 @@ void CategoryPanel::onSetPassword() {
 
         QSet<int> expandedIds;
         QStringList expandedNames;
-        saveBothExpandedStates(expandedIds, expandedNames);
+        saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
         auto all = CategoryRepo::getAll();
         for(auto& cat : all) {
@@ -816,7 +761,7 @@ void CategoryPanel::onSetPassword() {
             }
         }
 
-        restoreBothExpandedStates(expandedIds, expandedNames);
+        restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 分类已加密并立即锁定</b>", 1500, QColor("#00A650"));
     }
 }
@@ -837,7 +782,7 @@ void CategoryPanel::onClearPassword() {
         if (CategoryLockManager::instance().verifyAndUnlock(id, dlg.password())) {
             QSet<int> expandedIds;
             QStringList expandedNames;
-            saveBothExpandedStates(expandedIds, expandedNames);
+            saveExpandedState(QModelIndex(), expandedIds, expandedNames);
 
             auto all = CategoryRepo::getAll();
             for(auto& c : all) {
@@ -851,7 +796,7 @@ void CategoryPanel::onClearPassword() {
 
             syncUnlockedIds();
 
-            restoreBothExpandedStates(expandedIds, expandedNames);
+            restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
             ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#00A650;'>[OK] 验证成功，分类已解除加密</b>", 1500, QColor("#00A650"));
         } else {
             ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>旧密码错误，无法解除密码保护！</b>", 2000, QColor("#e81123"));
@@ -861,11 +806,6 @@ void CategoryPanel::onClearPassword() {
 
 void CategoryPanel::onRenameCategory() {
     QModelIndex index = m_categoryTree->currentIndex();
-    DropTreeView* activeTree = m_categoryTree;
-    if (!index.isValid() && m_categoryTreeUser) {
-        index = m_categoryTreeUser->currentIndex();
-        activeTree = m_categoryTreeUser;
-    }
     if (index.isValid()) {
         int catId = getTargetCategoryId(index);
         if (catId > 0) {
@@ -878,7 +818,7 @@ void CategoryPanel::onRenameCategory() {
         QString type = index.data(TypeRole).toString();
         // 2026-03-xx 物理兼容：允许重命名分类或文件项 (逻辑处理见 Model)
         if (type == "category" || type == "file" || type == "folder") {
-            activeTree->edit(index);
+            m_categoryTree->edit(index);
         }
     }
 }
@@ -886,15 +826,9 @@ void CategoryPanel::onRenameCategory() {
 void CategoryPanel::onDeleteCategory() {
     // 2026-06-xx 彻底重构：支持多选批量删除分类，杜绝单项操作的低效
     QModelIndexList selectedRows = m_categoryTree->selectionModel()->selectedRows();
-    if (selectedRows.isEmpty() && m_categoryTreeUser) {
-        selectedRows = m_categoryTreeUser->selectionModel()->selectedRows();
-    }
     if (selectedRows.isEmpty()) {
         // 如果没有整行选中，尝试回退到 currentIndex
         QModelIndex current = m_categoryTree->currentIndex();
-        if (!current.isValid() && m_categoryTreeUser) {
-            current = m_categoryTreeUser->currentIndex();
-        }
         if (current.isValid()) selectedRows << current;
     }
 
@@ -966,9 +900,6 @@ int CategoryPanel::getTargetCategoryId(const QModelIndex& index) {
 
 void CategoryPanel::onSortByNameAsc() {
     QModelIndex index = m_categoryTree->currentIndex();
-    if (!index.isValid() && m_categoryTreeUser) {
-        index = m_categoryTreeUser->currentIndex();
-    }
     // 逻辑：获取该项的父级分类 ID，执行重排
     int parentCatId = 0;
     QModelIndex pIdx = index.parent();
@@ -982,9 +913,6 @@ void CategoryPanel::onSortByNameAsc() {
 
 void CategoryPanel::onSortByNameDesc() {
     QModelIndex index = m_categoryTree->currentIndex();
-    if (!index.isValid() && m_categoryTreeUser) {
-        index = m_categoryTreeUser->currentIndex();
-    }
     int parentCatId = 0;
     QModelIndex pIdx = index.parent();
     if (pIdx.isValid()) parentCatId = pIdx.data(IdRole).toInt();
@@ -1388,78 +1316,70 @@ void CategoryPanel::initUi() {
         QTreeView::branch:has-children:closed:has-siblings { image: url("%1"); }
         QTreeView::branch:has-children:open:has-siblings   { image: url("%2"); }
 
-        QTreeView::item { height: 26px; padding-left: 0px; }
+        QTreeView::item { height: 28px; padding-left: 0px; }
     )").arg(arrowRight).arg(arrowDown);
 
-    // 2026-04-12 关键修复：延迟初始化模型数据（仅构造空壳），由两棵树共用一个数据源
-    m_categoryModel = new CategoryModel(CategoryModel::Both, this);
-
-    // 2.1 构造上半部分：系统项与托管库 QTreeView
+    // 物理还原：单树架构，合并系统项与用户分类
     m_categoryTree = new DropTreeView(this);
     m_categoryTree->setStyleSheet(treeStyle); 
     m_categoryTree->setItemDelegate(new CategoryDelegate(this));
+
+    // 2026-04-12 关键修复：延迟初始化模型数据（仅构造空壳）
+    m_categoryModel = new CategoryModel(CategoryModel::Both, this);
+
+    // 2026-xx-xx 按照 Plan-98：注入代理模型
     m_proxyModel = new CategoryFilterProxyModel(this);
-    m_proxyModel->setFilterMode(CategoryFilterProxyModel::FilterMode::SystemAndManaged);
     m_proxyModel->setSourceModel(m_categoryModel);
     m_categoryTree->setModel(m_proxyModel);
 
-    // 2.2 构造下半部分：自定义分类 QTreeView
-    m_categoryTreeUser = new DropTreeView(this);
-    m_categoryTreeUser->setStyleSheet(treeStyle);
-    m_categoryTreeUser->setItemDelegate(new CategoryDelegate(this));
-    m_proxyModelUser = new CategoryFilterProxyModel(this);
-    m_proxyModelUser->setFilterMode(CategoryFilterProxyModel::FilterMode::CustomCategoriesOnly);
-    m_proxyModelUser->setSourceModel(m_categoryModel);
-    m_categoryTreeUser->setModel(m_proxyModelUser);
+    m_categoryTree->setHeaderHidden(true);
+    m_categoryTree->setRootIsDecorated(true);
+    m_categoryTree->setIndentation(20);
+    m_categoryTree->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_categoryTree->setDragEnabled(true);
+    m_categoryTree->setAcceptDrops(true);
+    m_categoryTree->setDropIndicatorShown(true);
+    // 核心修正：解除 InternalMove 模式封锁，允许接收外部容器（NavPanel/ContentPanel）的拖拽
+    m_categoryTree->setDragDropMode(QAbstractItemView::DragDrop);
+    m_categoryTree->setDefaultDropAction(Qt::MoveAction);
+    m_categoryTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
 
-    auto configureTree = [&](DropTreeView* tree) {
-        tree->setHeaderHidden(true);
-        tree->setRootIsDecorated(true);
-        tree->setIndentation(20);
-        tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
-        tree->setDragEnabled(true);
-        tree->setAcceptDrops(true);
-        tree->setDropIndicatorShown(true);
-        tree->setDragDropMode(QAbstractItemView::DragDrop);
-        tree->setDefaultDropAction(Qt::MoveAction);
-        tree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    // 2026-06-xx 按照用户要求：支持 Delete 键物理删除选中分类，使用 Action 提升快捷键响应等级
+    QAction* deleteCatAction = new QAction(this);
+    deleteCatAction->setShortcut(QKeySequence::Delete);
+    deleteCatAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(deleteCatAction, &QAction::triggered, this, &CategoryPanel::onDeleteCategory);
+    m_categoryTree->addAction(deleteCatAction);
 
-        QAction* deleteAction = new QAction(this);
-        deleteAction->setShortcut(QKeySequence::Delete);
-        deleteAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-        connect(deleteAction, &QAction::triggered, this, &CategoryPanel::onDeleteCategory);
-        tree->addAction(deleteAction);
+    m_categoryTree->installEventFilter(this);
 
-        tree->installEventFilter(this);
-    };
+    // 2026-03-xx 物理拦截：严禁加密分类在未解锁时被展开，直接触发内容面板卡片密码输入
+    // 2026-05-27 物理加固：补全 this 上下文
+    connect(m_categoryTree, &QTreeView::expanded, this, [this](const QModelIndex& index) {
+        int id = index.data(IdRole).toInt();
+        bool isEncrypted = index.data(EncryptedRole).toBool();
 
-    configureTree(m_categoryTree);
-    configureTree(m_categoryTreeUser);
+        // 物理修复：加密校验仅针对数据库分类（ID > 0），跳过系统项（ID < 0）
+        if (isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
+            // 物理阻断：立即折叠，防止其在未解锁时显示子项
+            m_categoryTree->collapse(index);
+            m_categoryTree->setCurrentIndex(index);
+            emit categorySelected(id, index.data(NameRole).toString(), index.data(TypeRole).toString(), index.data(PathRole).toString());
+        } else {
+            // 2026-05-27 物理修复：展开时按需动态加载分类关联的文件，杜绝启动挂起
+            m_categoryModel->loadCategoryItems(index);
+        }
+    });
 
-    auto connectTreeExpanded = [&](DropTreeView* tree, CategoryFilterProxyModel* proxy) {
-        connect(tree, &QTreeView::expanded, this, [this, tree, proxy](const QModelIndex& proxyIndex) {
-            QModelIndex index = proxy->mapToSource(proxyIndex);
-            int id = index.data(IdRole).toInt();
-            bool isEncrypted = index.data(EncryptedRole).toBool();
-
-            if (isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
-                tree->collapse(proxyIndex);
-                tree->setCurrentIndex(proxyIndex);
-                emit categorySelected(id, index.data(NameRole).toString(), index.data(TypeRole).toString(), index.data(PathRole).toString());
-            } else {
-                m_categoryModel->loadCategoryItems(index);
-            }
-        });
-    };
-
-    connectTreeExpanded(m_categoryTree, m_proxyModel);
-    connectTreeExpanded(m_categoryTreeUser, m_proxyModelUser);
-
-    // 2.3 绑定 AboutToBeReset 与 Reset 逻辑以安全暂存/恢复展开状态
+    // 2026-03-xx 物理兼容：监听模型重置信号，在刷新后尝试恢复展开状态
+    // 2026-05-27 物理加固：补全 this 上下文
     connect(m_categoryModel, &QAbstractItemModel::modelAboutToBeReset, this, [this]() {
         Logger::log(QString("[CategoryPanel] modelAboutToBeReset: rowCount before reset: %1").arg(m_categoryModel->rowCount()));
+        // 同步解锁 ID 到模型
         m_categoryModel->setUnlockedIds(m_unlockedIds);
         
+        // 物理防护：只有当模型确实有真实数据时，才暂存当前 UI 状态。
+        // 如果当前是“加载中”或者为空，则不覆盖暂存值，保留从 Settings 加载或上一次有效的记录。
         bool hasRealData = false;
         if (m_categoryModel->rowCount() > 1) {
             hasRealData = true;
@@ -1473,15 +1393,28 @@ void CategoryPanel::initUi() {
         if (hasRealData) {
             QSet<int> expandedIds;
             QStringList expandedNames;
-            saveBothExpandedStates(expandedIds, expandedNames);
+            saveExpandedState(QModelIndex(), expandedIds, expandedNames);
             
             QList<int> idList;
             for (int id : expandedIds) idList << id;
             m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idList));
             m_categoryTree->setProperty("expandedNames", expandedNames);
+            Logger::log(QString("[CategoryPanel] modelAboutToBeReset: Saved state. expandedIds size: %1, expandedNames size: %2")
+                .arg(expandedIds.size()).arg(expandedNames.size()));
+        } else {
+            Logger::log("[CategoryPanel] modelAboutToBeReset: No real data, skipped saving state to properties.");
         }
 
+        // 🚨 核心修复：QTreeView 在 modelAboutToBeReset 时会销毁其内部所有的 indexWidget。
+        // 为了避免 m_btnFolderGroup 按钮被连带销毁导致生命周期终止，我们在 Model 重置前，
+        // 临时将按钮的父级重设为 CategoryPanel，主动从 QTreeView 所有权下移出，实现生命周期完全保护。
+        if (m_btnFolderGroup) {
+            m_btnFolderGroup->setParent(this);
+        }
+
+        // 开启数据流拦截锁，防止接下来 beginResetModel / removeRows 触发大量的 collapsed 虚假信号泄露覆写
         m_isInternalUpdating = true;
+        Logger::log("[CategoryPanel] modelAboutToBeReset: m_isInternalUpdating set to true");
     });
 
     connect(m_categoryModel, &QAbstractItemModel::modelReset, this, [this]() {
@@ -1489,6 +1422,7 @@ void CategoryPanel::initUi() {
         QVariant varIds = m_categoryTree->property("expandedIds");
         QStringList expandedNames = m_categoryTree->property("expandedNames").toStringList();
         
+        // 兼容性读取：同时支持 QList<int> 与 QVariantList 两种变体
         QSet<int> expandedIds;
         if (varIds.canConvert<QList<int>>()) {
             QList<int> list = varIds.value<QList<int>>();
@@ -1497,28 +1431,45 @@ void CategoryPanel::initUi() {
             QVariantList list = varIds.toList();
             for (const auto& v : list) expandedIds.insert(v.toInt());
         }
+        Logger::log(QString("[CategoryPanel] modelReset: Restoring state. properties expandedIds count: %1, expandedNames count: %2")
+            .arg(expandedIds.size()).arg(expandedNames.size()));
 
         m_isRestoringState = true;
         {
             DataFlowGuard guard(m_isInternalUpdating);
-            restoreBothExpandedStates(expandedIds, expandedNames);
+            restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
         }
         m_isRestoringState = false;
         m_isInternalUpdating = false;
+        Logger::log("[CategoryPanel] modelReset: Restore finished, m_isInternalUpdating set to false");
 
+        // 更新“文件夹 (N)”组按钮文本和计数
         int count = m_categoryModel ? m_categoryModel->allUserFolderCount() : 0;
         updateFolderGroupButtonText(count);
 
-        if (m_categoryTreeUser) {
-            m_categoryTreeUser->setVisible(m_isFolderGroupExpanded);
+        // 如果之前的折叠状态是折叠的，我们需要在 modelReset 之后隐藏顶级自定义分类行
+        if (!m_isFolderGroupExpanded && m_categoryTree && m_proxyModel) {
+            for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
+                QModelIndex proxyIdx = m_proxyModel->index(i, 0);
+                if (proxyIdx.data(IdRole).toInt() > 0) { // 顶级自定义分类
+                    m_categoryTree->setRowHidden(i, QModelIndex(), true);
+                }
+            }
+        }
+
+        // 2026-08-xx 按照用户要求修复：定位"文件夹分组占位行"，把真实按钮控件贴合嵌入该行
+        if (m_categoryTree && m_proxyModel && m_btnFolderGroup) {
+            for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
+                QModelIndex proxyIdx = m_proxyModel->index(i, 0);
+                if (proxyIdx.data(IdRole).toInt() == CategoryModel::FOLDER_GROUP_PLACEHOLDER_ID) {
+                    m_categoryTree->setIndexWidget(proxyIdx, m_btnFolderGroup);
+                    break;
+                }
+            }
         }
     });
 
-    // 2.4 绑定点击选择事件
     connect(m_categoryTree, &QTreeView::clicked, this, [this](const QModelIndex& proxyIndex) {
-        if (m_categoryTreeUser && m_categoryTreeUser->selectionModel()) {
-            m_categoryTreeUser->selectionModel()->clearSelection();
-        }
         QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         QString type = index.data(TypeRole).toString();
         QString name = index.data(NameRole).toString();
@@ -1526,45 +1477,30 @@ void CategoryPanel::initUi() {
         QString path = index.data(PathRole).toString();
         bool isEncrypted = index.data(EncryptedRole).toBool();
 
+        // 2026-03-xx 物理防御：加密分类点击时直接进入，内容面板内置卡片接管验证
         if (isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
             emit categorySelected(id, name, type, path);
             return;
         }
 
+        // 核心联动：如果点击的是有效的分类、系统项或快速访问项
         if (!type.isEmpty()) {
+             // 2026-06-xx 重构：点击项不再加载文件到树中，而是直接通过信号触发 ContentPanel 加载
              emit categorySelected(id, name, type, path);
         }
     });
 
-    connect(m_categoryTreeUser, &QTreeView::clicked, this, [this](const QModelIndex& proxyIndex) {
-        if (m_categoryTree && m_categoryTree->selectionModel()) {
-            m_categoryTree->selectionModel()->clearSelection();
-        }
-        QModelIndex index = m_proxyModelUser->mapToSource(proxyIndex);
-        QString type = index.data(TypeRole).toString();
-        QString name = index.data(NameRole).toString();
-        int id = index.data(IdRole).toInt();
-        QString path = index.data(PathRole).toString();
-        bool isEncrypted = index.data(EncryptedRole).toBool();
-
-        if (isEncrypted && id > 0 && !m_unlockedIds.contains(id)) {
-            emit categorySelected(id, name, type, path);
-            return;
-        }
-
-        if (!type.isEmpty()) {
-             emit categorySelected(id, name, type, path);
-        }
-    });
-
-    // 2.5 绑定拖拽事件
-    auto handlePathsDropped = [this](const QStringList& paths, const QModelIndex& srcIndex) {
+    connect(m_categoryTree, &DropTreeView::pathsDropped, this, [this](const QStringList& paths, const QModelIndex& proxyIndex) {
+        QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
+        // 2026-06-xx 彻底重构：物理递归遍历 + 分类镜像创建 + SHA-256 物理加固
+        // 🚨 修正：拖到空白处时，目标分类 ID 必须为 0（顶级根分类），绝不能是 -2！
         int targetCatId = 0; 
 
-        if (srcIndex.isValid()) {
-            QString type = srcIndex.data(TypeRole).toString();
-            QString name = srcIndex.data(NameRole).toString();
+        if (index.isValid()) {
+            QString type = index.data(TypeRole).toString();
+            QString name = index.data(NameRole).toString();
 
+            // 2026-06-xx 物理联动：拖拽到回收站
             if (type == "trash") {
                 if (ShellHelper::moveToTrash(paths)) {
                     m_categoryModel->refresh();
@@ -1573,13 +1509,14 @@ void CategoryPanel::initUi() {
                 return;
             }
 
-            if (type == "category" && srcIndex.data(IdRole).toInt() > 0) {
-                targetCatId = srcIndex.data(IdRole).toInt();
+            // 拖到具体的子分类上 (ID > 0)
+            if (type == "category" && index.data(IdRole).toInt() > 0) {
+                targetCatId = index.data(IdRole).toInt();
             } else {
-                targetCatId = 0;
+                targetCatId = 0; // 其余全部归为顶级分类 (0)
             }
         } else {
-            targetCatId = 0;
+            targetCatId = 0; // 拖到空白处归为顶级分类 (0)
         }
 
         if (!paths.isEmpty()) {
@@ -1613,19 +1550,9 @@ void CategoryPanel::initUi() {
                 }
             );
         }
-    };
-
-    connect(m_categoryTree, &DropTreeView::pathsDropped, this, [this, handlePathsDropped](const QStringList& paths, const QModelIndex& proxyIndex) {
-        QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
-        handlePathsDropped(paths, index);
-    });
-
-    connect(m_categoryTreeUser, &DropTreeView::pathsDropped, this, [this, handlePathsDropped](const QStringList& paths, const QModelIndex& proxyIndex) {
-        QModelIndex index = m_proxyModelUser->mapToSource(proxyIndex);
-        handlePathsDropped(paths, index);
     });
     
-    // 2.6 构造“文件夹 (N)”专用组按钮
+    // 1. 构造“文件夹 (N)”专用组按钮（对应用户原话：“将标记为①的主分类““文件夹 (N)” (▼ / ▶)”变成按钮，该按钮是专用来隐藏或显示自定义创建的分类文件夹”）
     m_btnFolderGroup = new QPushButton(this);
     m_btnFolderGroup->setFixedHeight(28);
     m_btnFolderGroup->setCursor(Qt::PointingHandCursor);
@@ -1644,21 +1571,28 @@ void CategoryPanel::initUi() {
         "QPushButton:pressed { background-color: #3E3E40; border-radius: 4px; }"
     );
 
-    // 2.7 点击按钮：折叠/展开自定义分类列表
+    // 2. 点击按钮：无缝切换下方自定义分类列表的隐藏/显示（折叠/展开）
     connect(m_btnFolderGroup, &QPushButton::clicked, this, [this]() {
         m_isFolderGroupExpanded = !m_isFolderGroupExpanded;
         
-        if (m_categoryTreeUser) {
-            m_categoryTreeUser->setVisible(m_isFolderGroupExpanded);
+        // 控制 TreeView 中顶级分类节点的展开/收起状态
+        if (m_categoryTree && m_proxyModel) {
+            for (int i = 0; i < m_proxyModel->rowCount(); ++i) {
+                QModelIndex proxyIdx = m_proxyModel->index(i, 0);
+                if (proxyIdx.data(IdRole).toInt() > 0) { // 顶级自定义分类
+                    m_categoryTree->setRowHidden(i, QModelIndex(), !m_isFolderGroupExpanded);
+                }
+            }
         }
-
+        // 动态更新箭头图标 (▼ / ▶)
         int count = m_categoryModel ? m_categoryModel->allUserFolderCount() : 0;
         updateFolderGroupButtonText(count);
     });
 
+    // 2026-08-xx 按照用户要求修复：m_btnFolderGroup 不再作为独立堆叠 Widget 添加到布局，
+    // 改为在 modelReset 时通过 setIndexWidget() 精确嵌入模型中的“文件夹分组占位行”，
+    // 从物理上保证按钮永远卡在“快速访问”与自定义分类之间
     sbContentLayout->addWidget(m_categoryTree);
-    sbContentLayout->addWidget(m_btnFolderGroup);
-    sbContentLayout->addWidget(m_categoryTreeUser);
     m_mainLayout->addWidget(sbContent, 1);
 
     // 2026-xx-xx 按照 Plan-98：新增底部搜索过滤框
@@ -1775,7 +1709,7 @@ void CategoryPanel::saveExpandedStateToSettings() {
 
     QSet<int> ids;
     QStringList names;
-    saveBothExpandedStates(ids, names);
+    saveExpandedState(QModelIndex(), ids, names);
 
     // 构造标准化的写入列表
     QVariantList idVarList;
@@ -1790,10 +1724,6 @@ void CategoryPanel::saveExpandedStateToSettings() {
     // 关键点：物理同步更新当前 Tree 的 Property，确保后续刷新时能拿到最新的展开记忆
     m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idIntList));
     m_categoryTree->setProperty("expandedNames", names);
-    if (m_categoryTreeUser) {
-        m_categoryTreeUser->setProperty("expandedIds", QVariant::fromValue(idIntList));
-        m_categoryTreeUser->setProperty("expandedNames", names);
-    }
     Logger::log(QString("[CategoryPanel] saveExpandedStateToSettings: Successfully saved to Settings and updated Property. ids count: %1, names count: %2")
         .arg(ids.size()).arg(names.size()));
 }
@@ -1821,17 +1751,11 @@ void CategoryPanel::loadExpandedStateFromSettings() {
     m_categoryTree->setProperty("expandedNames", names);
     m_categoryTree->setProperty("hasHistoryRecord", hasRecord);
 
-    if (m_categoryTreeUser) {
-        m_categoryTreeUser->setProperty("expandedIds", QVariant::fromValue(idIntList));
-        m_categoryTreeUser->setProperty("expandedNames", names);
-        m_categoryTreeUser->setProperty("hasHistoryRecord", hasRecord);
-    }
-
     // 尝试立即恢复一次
     m_isRestoringState = true;
     {
         DataFlowGuard guard(m_isInternalUpdating);
-        restoreBothExpandedStates(ids, names);
+        restoreExpandedState(QModelIndex(), ids, names);
     }
     m_isRestoringState = false;
 }
@@ -1843,9 +1767,6 @@ void CategoryPanel::syncUnlockedIds() {
         m_categoryModel->refresh();
         if (m_proxyModel) {
             m_proxyModel->invalidate();
-        }
-        if (m_proxyModelUser) {
-            m_proxyModelUser->invalidate();
         }
     }
 }
@@ -1867,13 +1788,8 @@ void CategoryPanel::expandCategory(int id) {
     QModelIndex target = findId(QModelIndex());
     if (target.isValid()) {
         QModelIndex proxyIdx = m_proxyModel->mapFromSource(target);
-        if (proxyIdx.isValid() && m_categoryTree) {
+        if (proxyIdx.isValid()) {
             m_categoryTree->expand(proxyIdx);
-        } else if (m_proxyModelUser && m_categoryTreeUser) {
-            QModelIndex proxyIdxUser = m_proxyModelUser->mapFromSource(target);
-            if (proxyIdxUser.isValid()) {
-                m_categoryTreeUser->expand(proxyIdxUser);
-            }
         }
     }
 }
@@ -1919,18 +1835,18 @@ bool CategoryPanel::eventFilter(QObject* obj, QEvent* event) {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
         
         // 2026-06-xx 按照用户要求：禁用 Ctrl+A 全选
-        if ((obj == m_categoryTree || obj == m_categoryTreeUser) && keyEvent->modifiers() == Qt::ControlModifier && keyEvent->key() == Qt::Key_A) {
+        if (obj == m_categoryTree && keyEvent->modifiers() == Qt::ControlModifier && keyEvent->key() == Qt::Key_A) {
             return true; 
         }
 
         // 2026-06-xx 按照用户要求：支持 Delete 键物理删除选中分类
-        if ((obj == m_categoryTree || obj == m_categoryTreeUser) && keyEvent->key() == Qt::Key_Delete) {
+        if (obj == m_categoryTree && keyEvent->key() == Qt::Key_Delete) {
             onDeleteCategory();
             return true;
         }
 
         // 2026-xx-xx 按照 Plan-63：按 F2 同步进入行内编辑状态
-        if ((obj == m_categoryTree || obj == m_categoryTreeUser) && keyEvent->key() == Qt::Key_F2) {
+        if (obj == m_categoryTree && keyEvent->key() == Qt::Key_F2) {
             onRenameCategory();
             return true;
         }

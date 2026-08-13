@@ -11,6 +11,7 @@ class CategoryModel : public QStandardItemModel {
     Q_OBJECT
 public:
     static constexpr int CAT_GROUP_SYS_ID = -9;
+    static constexpr int FOLDER_GROUP_PLACEHOLDER_ID = -100;
 
     enum Type { System, User, Both };
     explicit CategoryModel(Type type, QObject* parent = nullptr);
