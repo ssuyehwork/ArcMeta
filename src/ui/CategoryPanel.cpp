@@ -239,8 +239,11 @@ void CategoryPanel::setupContextMenu() {
         QModelIndex index = m_proxyModel->mapToSource(proxyIndex);
         
         // 2026-03-xx 按照用户要求：实现右键点击即选中，解决“分类与其子分类”交互一致性问题
+        // 多选防护：若右键所在的节点已在当前多选集合中，绝对禁止重置，以保全批量删除操作（对应用户原话：“当我在侧边栏选中多个之后，再来执行‘删除’，结果只能删除其中一个”）
         if (proxyIndex.isValid()) {
-            m_categoryTree->setCurrentIndex(proxyIndex);
+            if (!m_categoryTree->selectionModel()->isSelected(proxyIndex)) {
+                m_categoryTree->setCurrentIndex(proxyIndex);
+            }
         }
 
         QMenu menu(this);
@@ -848,23 +851,25 @@ void CategoryPanel::onDeleteCategory() {
 
     QSet<int> idsToDelete;
     
-    // 递归收集分类及其所有子分类 ID 的辅助函数
+    // 递归收集分类及其所有子分类 ID 的辅助函数。在第一时序完全运行于 Source Index 的无损索引之上，彻底修复 rowCount() 失效导致的级联删除中断
     std::function<void(const QModelIndex&)> collectIds;
-    collectIds = [&](const QModelIndex& index) {
-        QString type = index.data(TypeRole).toString();
-        int id = index.data(IdRole).toInt();
+    collectIds = [&](const QModelIndex& srcIndex) {
+        if (!srcIndex.isValid()) return;
+        QString type = srcIndex.data(TypeRole).toString();
+        int id = srcIndex.data(IdRole).toInt();
         
         if (type == "category" && id > 0) {
             idsToDelete.insert(id);
             // 递归收集子分类
-            for (int i = 0; i < m_categoryModel->rowCount(index); ++i) {
-                collectIds(m_categoryModel->index(i, 0, index));
+            for (int i = 0; i < m_categoryModel->rowCount(srcIndex); ++i) {
+                collectIds(m_categoryModel->index(i, 0, srcIndex));
             }
         }
     };
 
-    for (const QModelIndex& index : selectedRows) {
-        collectIds(index);
+    for (const QModelIndex& proxyIdx : selectedRows) {
+        QModelIndex srcIndex = m_proxyModel->mapToSource(proxyIdx);
+        collectIds(srcIndex);
     }
 
     if (idsToDelete.isEmpty()) return;
