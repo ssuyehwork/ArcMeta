@@ -4,6 +4,7 @@
 #include "CategoryModel.h"
 #include "ContentPanel.h"
 #include "../core/DiskTrashService.h"
+#include "../core/LibraryMaintenanceService.h"
 #include "ColorPicker.h"
 #include "CategoryFilterProxyModel.h"
 #include "CategoryLockDialog.h"
@@ -961,8 +962,6 @@ void CategoryPanel::onEmptyTrash() {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e74c3c;'>[OK] 已清空回收站</b>", 1500, ErrorRed);
     }
 }
-
-#include "../core/LibraryMaintenanceService.h"
 
 void CategoryPanel::onScanAndCleanEmptyArcs() {
     // 🚀 【重构解耦】：UI 仅处理界面的 loading 与交互，不执行任何 I/O 与数据库事务
