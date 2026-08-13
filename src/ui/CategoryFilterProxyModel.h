@@ -3,6 +3,7 @@
 #include <QSortFilterProxyModel>
 #include <QMimeData>
 #include "../core/ModelContract.h"
+#include "../meta/CategoryRepo.h"
 
 namespace ArcMeta {
 
@@ -14,10 +15,23 @@ namespace ArcMeta {
 class CategoryFilterProxyModel : public QSortFilterProxyModel {
     Q_OBJECT
 public:
+    enum class FilterMode {
+        All,
+        SystemAndManaged,
+        CustomCategoriesOnly
+    };
+
     explicit CategoryFilterProxyModel(QObject* parent = nullptr) : QSortFilterProxyModel(parent) {
         setRecursiveFilteringEnabled(false); 
         setDynamicSortFilter(false); // 屏蔽代理模型默认按字母强行重排，完全交由数据库 sortOrder 决定
     }
+
+    void setFilterMode(FilterMode mode) {
+        m_filterMode = mode;
+        invalidateFilter();
+    }
+
+    FilterMode filterMode() const { return m_filterMode; }
 
     void setFilterText(const QString& text) {
         m_filterText = text;
@@ -59,6 +73,30 @@ protected:
     }
 
     bool filterAcceptsRow(int source_row, const QModelIndex& source_parent) const override {
+        // 第一阶段：按过滤模式分类过滤（仅对 invisibleRootItem 下的直接子节点进行物理过滤隔离）
+        if (!source_parent.isValid()) {
+            QModelIndex index = sourceModel()->index(source_row, 0, source_parent);
+            int id = index.data(IdRole).toInt();
+            QString name = index.data(NameRole).toString();
+            int kindVal = index.data(CategoryKindRole).toInt();
+
+            if (m_filterMode == FilterMode::SystemAndManaged) {
+                // 系统和托管库树：接受 id < 0（系统逻辑桶）OR name == "快速访问" OR kind == SystemLibrary
+                bool isSys = (id < 0);
+                bool isFav = (name == "快速访问");
+                bool isManaged = (id > 0 && kindVal == static_cast<int>(CategoryKind::SystemLibrary));
+                if (!isSys && !isFav && !isManaged) {
+                    return false;
+                }
+            } else if (m_filterMode == FilterMode::CustomCategoriesOnly) {
+                // 用户自定义分类树：仅接受 id > 0 且 kind != SystemLibrary 且 name != "快速访问"
+                bool isCustom = (id > 0 && name != "快速访问" && kindVal != static_cast<int>(CategoryKind::SystemLibrary));
+                if (!isCustom) {
+                    return false;
+                }
+            }
+        }
+
         if (m_filterText.isEmpty()) return true;
 
         QModelIndex index = sourceModel()->index(source_row, 0, source_parent);
@@ -81,6 +119,7 @@ protected:
     }
 
 private:
+    FilterMode m_filterMode = FilterMode::All;
     bool hasMatchingChild(const QModelIndex& parent) const {
         int rowCount = sourceModel()->rowCount(parent);
         for (int i = 0; i < rowCount; ++i) {

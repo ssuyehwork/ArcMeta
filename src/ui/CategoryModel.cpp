@@ -104,6 +104,7 @@ void CategoryModel::refresh() {
             item->setData(cat.pinned, PinnedRole);
             item->setData(cat.encrypted, EncryptedRole);
             item->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
+            item->setData(static_cast<int>(cat.kind), CategoryKindRole);
             item->setFlags(item->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
             
             if (cat.encrypted && !m_unlockedIds.contains(id)) {
@@ -163,6 +164,7 @@ void CategoryModel::refresh() {
                     mirror->setData(color, ColorRole);
                     mirror->setData(name, NameRole);
                     mirror->setData(true, PinnedRole);
+                    mirror->setData(static_cast<int>(cat.kind), CategoryKindRole);
                     
                     if (cat.encrypted && !m_unlockedIds.contains(id)) {
                         mirror->setIcon(UiHelper::getIcon("lock", QColor("#aaaaaa"), 16));
