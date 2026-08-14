@@ -87,22 +87,25 @@ void MetaPanel::initUi() {
     m_linkEdit->installEventFilter(this);
     m_containerLayout->addWidget(m_linkEdit);
 
-    m_tagBox = new QWidget(m_container);
-    QVBoxLayout* tagL = new QVBoxLayout(m_tagBox);
-    tagL->setContentsMargins(0, 0, 0, 0);
-    tagL->setSpacing(8);
-    
-    m_tagContainer = new QWidget(m_tagBox);
-    m_tagFlowLayout = new FlowLayout(m_tagContainer, 0, 4, 4);
-    tagL->addWidget(m_tagContainer);
-
-    m_tagEdit = new ElasticEdit(m_tagBox);
-    m_tagEdit->setPlaceholderText("输入标签...");
-    m_tagEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }");
-    connect(m_tagEdit, &ElasticEdit::returnPressed, this, &MetaPanel::onTagAdded);
-    m_tagEdit->installEventFilter(this);
-    tagL->addWidget(m_tagEdit);
-    m_containerLayout->addWidget(m_tagBox);
+    m_tagBox = new QWidget(m_container); 
+    QVBoxLayout* tagL = new QVBoxLayout(m_tagBox); 
+    tagL->setContentsMargins(0, 0, 0, 0); 
+    tagL->setSpacing(6); 
+ 
+    // 1. 上半部分：输入框 
+    m_tagEdit = new ElasticEdit(m_tagBox); 
+    m_tagEdit->setPlaceholderText("输入标签..."); 
+    m_tagEdit->setStyleSheet("QTextEdit { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px 10px; font-size: 12px; color: #AAAAAA; font-weight: normal; }"); 
+    connect(m_tagEdit, &ElasticEdit::returnPressed, this, &MetaPanel::onTagAdded); 
+    m_tagEdit->installEventFilter(this); 
+    tagL->addWidget(m_tagEdit); 
+ 
+    // 2. 下半部分：已打上的标签展示区 
+    m_tagContainer = new QWidget(m_tagBox); 
+    m_tagFlowLayout = new FlowLayout(m_tagContainer, 0, 4, 4); 
+    tagL->addWidget(m_tagContainer); 
+ 
+    m_containerLayout->addWidget(m_tagBox); 
 
     m_categoryEdit = new ElasticEdit(m_container);
     m_categoryEdit->setReadOnly(true);
@@ -182,32 +185,54 @@ QFrame* MetaPanel::createSeparator() {
     return l; 
 }
 
-void MetaPanel::onTagAdded() {
-    QString text = m_tagEdit->toPlainText().trimmed();
-    if (!text.isEmpty() && !m_selectedPaths.isEmpty()) {
-        emit tagsChanged(m_selectedPaths, QStringList() << text);
-        m_tagEdit->clear();
-        m_tagEdit->adjustHeight();
-    }
-}
-
-void MetaPanel::onTagDeleted(const QString& text) {
-    if (m_selectedPaths.isEmpty()) return;
-    
-    for (int i = 0; i < m_tagFlowLayout->count(); ++i) {
-        QLayoutItem* item = m_tagFlowLayout->itemAt(i);
-        TagPill* pill = qobject_cast<TagPill*>(item->widget());
-        if (pill && pill->property("tagText").toString() == text) {
-            m_tagFlowLayout->takeAt(i);
-            pill->deleteLater();
-            delete item;
-            break;
-        }
-    }
-    m_adjustTimer->start();
-    
-    emit tagsChanged(m_selectedPaths, QStringList() << "-" + text);
-}
+void MetaPanel::onTagAdded() { 
+    QString text = m_tagEdit->toPlainText().trimmed(); 
+    if (text.isEmpty() || m_selectedPaths.isEmpty()) return; 
+ 
+    // 查重 
+    for (int i = 0; i < m_tagFlowLayout->count(); ++i) { 
+        TagPill* pill = qobject_cast<TagPill*>(m_tagFlowLayout->itemAt(i)->widget()); 
+        if (pill && pill->property("tagText").toString() == text) { 
+            m_tagEdit->clear(); 
+            m_tagEdit->adjustHeight(); 
+            return; 
+        } 
+    } 
+ 
+    // 本地 0 毫秒瞬时生成 2px 胶囊 
+    TagPill* pill = new TagPill(text, m_tagContainer); 
+    pill->setProperty("tagText", text); 
+    pill->setStyleSheet("QFrame { background-color: #2D2D30; border: 1px solid #3E3E42; border-radius: 2px; }"); 
+    connect(pill, &TagPill::deleteRequested, this, &MetaPanel::onTagDeleted); 
+    m_tagFlowLayout->addWidget(pill); 
+ 
+    m_tagEdit->clear(); 
+    m_tagEdit->adjustHeight(); 
+    adjustFlowHeights(); 
+    if (m_container) m_container->adjustSize(); 
+ 
+    emit tagAddRequested(m_selectedPaths, text); 
+} 
+ 
+void MetaPanel::onTagDeleted(const QString& text) { 
+    if (m_selectedPaths.isEmpty()) return; 
+ 
+    for (int i = 0; i < m_tagFlowLayout->count(); ++i) { 
+        QLayoutItem* item = m_tagFlowLayout->itemAt(i); 
+        TagPill* pill = qobject_cast<TagPill*>(item->widget()); 
+        if (pill && pill->property("tagText").toString() == text) { 
+            m_tagFlowLayout->takeAt(i); 
+            pill->deleteLater(); 
+            delete item; 
+            break; 
+        } 
+    } 
+ 
+    adjustFlowHeights(); 
+    if (m_container) m_container->adjustSize(); 
+ 
+    emit tagRemoveRequested(m_selectedPaths, text); 
+} 
 
 void MetaPanel::resizeEvent(QResizeEvent* event) {
     QFrame::resizeEvent(event);
@@ -398,6 +423,8 @@ void MetaPanel::setTags(const QStringList& tags) {
             pill = new TagPill(tag, m_tagContainer);
             connect(pill, &TagPill::deleteRequested, this, &MetaPanel::onTagDeleted);
         }
+        pill->setProperty("tagText", tag);
+        pill->setStyleSheet("QFrame { background-color: #2D2D30; border: 1px solid #3E3E42; border-radius: 2px; }");
         pill->show();
         m_tagFlowLayout->addWidget(pill);
     }

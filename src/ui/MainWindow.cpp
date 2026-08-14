@@ -3,6 +3,8 @@
 #endif
 #include "MainWindow.h"
 #include <QDateTime>
+#include <algorithm>
+#include "../meta/AmMetaJson.h"
 #include "Logger.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"
@@ -564,7 +566,17 @@ void MainWindow::initUi() {
             m_metaPanel->setRating(idx.data(RatingRole).toInt());
             m_metaPanel->setColor(idx.data(ColorRole).toString().toStdWString());
             m_metaPanel->setPinned(idx.data(IsLockedRole).toBool());
-            m_metaPanel->setTags(idx.data(TagsRole).toStringList());
+            
+            QStringList rawTags = idx.data(TagsRole).toStringList(); 
+            QStringList cleanTags; 
+            for (const QString& t : rawTags) { 
+                QString cleanT = t.trimmed(); 
+                // 物理防御：严禁将路径或包含盘符冒号的内容当标签渲染 
+                if (!cleanT.isEmpty() && !cleanT.contains(":\\") && !cleanT.contains(":/") && cleanT != path) { 
+                    cleanTags.append(cleanT); 
+                } 
+            } 
+            m_metaPanel->setTags(cleanTags); 
             
             // 3. 极速读取备注与链接（非阻塞读）
             RuntimeMeta rm = MetadataManager::instance().getMeta(path.toStdWString());
@@ -843,18 +855,78 @@ void MainWindow::initUi() {
         }
     });
 
-    // 2026-07-xx 按照用户要求：响应元数据面板标签批量变更信号
-    connect(m_metaPanel, &MetaPanel::tagsChanged, this, [this](const QStringList& tags) {
-        auto indexes = m_contentPanel->getSelectedIndexes();
-        for (const auto& idx : indexes) {
-            QString path = idx.data(PathRole).toString();
-            if (path.isEmpty()) continue;
-            
-            std::wstring wPath = path.toStdWString();
-            
-            MetadataManager::instance().setTags(wPath, tags);
-        }
-    });
+    // 添加标签管网 
+    connect(m_metaPanel, &MetaPanel::tagAddRequested, this, [this](const QStringList& paths, const QString& newTag) { 
+        for (const QString& p : paths) { 
+            if (p.isEmpty()) continue; 
+            std::wstring wPath = p.toStdWString(); 
+            bool isManaged = MetadataManager::isInsideManagedLibrary(wPath); 
+ 
+            if (isManaged) { 
+                auto meta = MetadataManager::instance().getMeta(wPath); 
+                QStringList curTags = meta.tags; 
+                if (!curTags.contains(newTag)) { 
+                    curTags.append(newTag); 
+                    MetadataManager::instance().setTags(wPath, curTags, false); 
+                } 
+            } else { 
+                QFileInfo info(p); 
+                QString parentDir = QDir::toNativeSeparators(info.absolutePath()); 
+                QString fileName = info.fileName(); 
+ 
+                AmMetaJson jsonCache(parentDir.toStdWString()); 
+                jsonCache.load(); 
+                auto& cachedItems = jsonCache.items(); 
+                std::wstring wFileName = fileName.toStdWString(); 
+ 
+                if (cachedItems.find(wFileName) == cachedItems.end()) { 
+                    ItemMeta emptyMeta; 
+                    emptyMeta.type = info.isDir() ? L"folder" : L"file"; 
+                    cachedItems[wFileName] = emptyMeta; 
+                } 
+                auto& fileMeta = cachedItems[wFileName]; 
+                std::wstring wNewTag = newTag.toStdWString(); 
+                if (std::find(fileMeta.tags.begin(), fileMeta.tags.end(), wNewTag) == fileMeta.tags.end()) { 
+                    fileMeta.tags.push_back(wNewTag); 
+                    jsonCache.save(); // 物理写入 .ArcMeta.json 
+                } 
+            } 
+            m_contentPanel->updateItemMetadata(p); 
+        } 
+    }); 
+ 
+    // 删除标签管网 
+    connect(m_metaPanel, &MetaPanel::tagRemoveRequested, this, [this](const QStringList& paths, const QString& removeTag) { 
+        for (const QString& p : paths) { 
+            if (p.isEmpty()) continue; 
+            std::wstring wPath = p.toStdWString(); 
+            bool isManaged = MetadataManager::isInsideManagedLibrary(wPath); 
+ 
+            if (isManaged) { 
+                auto meta = MetadataManager::instance().getMeta(wPath); 
+                QStringList curTags = meta.tags; 
+                curTags.removeAll(removeTag); 
+                MetadataManager::instance().setTags(wPath, curTags, false); 
+            } else { 
+                QFileInfo info(p); 
+                QString parentDir = QDir::toNativeSeparators(info.absolutePath()); 
+                QString fileName = info.fileName(); 
+ 
+                AmMetaJson jsonCache(parentDir.toStdWString()); 
+                jsonCache.load(); 
+                auto& cachedItems = jsonCache.items(); 
+                std::wstring wFileName = fileName.toStdWString(); 
+ 
+                if (cachedItems.find(wFileName) != cachedItems.end()) { 
+                    auto& fileMeta = cachedItems[wFileName]; 
+                    std::wstring wRemoveTag = removeTag.toStdWString(); 
+                    fileMeta.tags.erase(std::remove(fileMeta.tags.begin(), fileMeta.tags.end(), wRemoveTag), fileMeta.tags.end()); 
+                    jsonCache.save(); // 物理写入 .ArcMeta.json 
+                } 
+            } 
+            m_contentPanel->updateItemMetadata(p); 
+        } 
+    }); 
 
     // 2026-06-xx调色盘搜索联动：将颜色喂给筛选器，由筛选器驱动过滤
     connect(m_metaPanel, &MetaPanel::searchByColor, this, [this](const QColor& color) {

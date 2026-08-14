@@ -25,6 +25,13 @@ public:
     static bool migrateFolderCache(const QString& oldFolderPath, const QString& newFolderPath);
 
     /**
+     * @brief 当文件被移动/剪切到新文件夹或新硬盘时，原子化迁移该文件的元数据记录（永不丢失）
+     * @param oldFilePath 移动前的物理绝对路径
+     * @param newFilePath 移动后的物理绝对路径
+     */
+    static bool migrateItemMetadata(const QString& oldFilePath, const QString& newFilePath);
+
+    /**
      * @param folderPath 目标物理文件夹的完整路径
      */
     explicit AmMetaJson(const std::wstring& folderPath);

@@ -97,6 +97,41 @@ bool AmMetaJson::renameItem(const QString& folderPath, const QString& oldName, c
     return true;
 }
 
+bool AmMetaJson::migrateItemMetadata(const QString& oldFilePath, const QString& newFilePath) { 
+    if (oldFilePath == newFilePath) return true; 
+ 
+    QFileInfo oldInfo(oldFilePath); 
+    QFileInfo newInfo(newFilePath); 
+ 
+    QString oldParent = QDir::toNativeSeparators(oldInfo.absolutePath()); 
+    QString newParent = QDir::toNativeSeparators(newInfo.absolutePath()); 
+    std::wstring oldFileName = oldInfo.fileName().toStdWString(); 
+    std::wstring newFileName = newInfo.fileName().toStdWString(); 
+ 
+    // 1. 从源目录的 .ArcMeta.json 读取元数据 
+    AmMetaJson oldJson(oldParent.toStdWString()); 
+    if (!oldJson.load()) return false; 
+ 
+    auto& oldItems = oldJson.items(); 
+    auto it = oldItems.find(oldFileName); 
+    if (it == oldItems.end()) { 
+        // 源目录无特殊元数据，无需迁移 
+        return true; 
+    } 
+ 
+    ItemMeta metaCopy = it->second; // 完整复制元数据（星级、颜色、标签、备注等） 
+ 
+    // 2. 从源目录抹除该条目并物理保存 
+    oldItems.erase(it); 
+    oldJson.save(); 
+ 
+    // 3. 将元数据注入到目标目录的 .ArcMeta.json 
+    AmMetaJson newJson(newParent.toStdWString()); 
+    newJson.load(); // 加载或自动初始化 
+    newJson.items()[newFileName] = metaCopy; 
+    return newJson.save(); // 100% 物理落盘并保持隐藏属性 
+}
+
 bool AmMetaJson::migrateFolderCache(const QString& oldFolderPath, const QString& newFolderPath) {
     if (oldFolderPath == newFolderPath) return true;
     
