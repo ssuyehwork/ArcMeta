@@ -33,7 +33,8 @@ void DiskNavigatorService::saveItemMeta(const std::wstring& filePath, std::funct
 }
 
 void DiskNavigatorService::handleDiskRename(const std::wstring& oldPath, const std::wstring& newPath, bool isDir) {
-    AmMetaJson::migrateItemMetadata(oldPath, newPath, isDir);
+    Q_UNUSED(isDir);
+    AmMetaJson::migrateItemMetadata(QString::fromStdWString(oldPath), QString::fromStdWString(newPath));
 }
 
 } // namespace ArcMeta

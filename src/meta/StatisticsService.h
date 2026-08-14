@@ -30,7 +30,8 @@ signals:
 
 private:
     StatisticsService(QObject* parent = nullptr);
-    StatisticsSnapshot computeSnapshotFromDb(); // 私有函数：仅在 QThreadPool 线程中执行 SQL
+public:
+    StatisticsSnapshot computeSnapshotFromDb(); // 仅在 QThreadPool 线程中执行 SQL
 
     mutable std::mutex m_snapshotMutex;
     StatisticsSnapshot m_cachedSnapshot;
