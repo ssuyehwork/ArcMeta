@@ -189,6 +189,8 @@ set(SOURCES
     src/ui/MetaPanel.h
     src/ui/TagManagerDialog.h
     src/ui/PresetTagsDialog.cpp
+    src/ui/TagSelectorOverlay.h
+    src/ui/TagSelectorOverlay.cpp
     src/ui/TagManagerDialog.cpp
     src/ui/TaskProgressToolBar.h
     src/ui/TaskProgressToolBar.cpp

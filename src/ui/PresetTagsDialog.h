@@ -3,15 +3,15 @@
 #include "FramelessDialog.h"
 #include "components/FlowLayout.h"
 #include "components/TagPill.h"
+#include "TagSelectorOverlay.h"
 #include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QFrame>
+#include <QPointer>
 
 namespace ArcMeta {
-
-class TagSelectorOverlay;
 
 class PresetTagsDialog : public FramelessDialog {
     Q_OBJECT
@@ -21,6 +21,9 @@ public:
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
 
 private slots:
     void onSaveClicked();
@@ -32,7 +35,7 @@ private:
     void initUi();
     void loadTags();
     void populateTagPills();
-    void updateDialogHeight();
+    void recalculateAdaptiveHeight();
 
     int m_categoryId;
     QString m_categoryName;
@@ -41,7 +44,7 @@ private:
     QLineEdit* m_folderNameEdit = nullptr;
     QFrame* m_tagContainer = nullptr;
     FlowLayout* m_flowLayout = nullptr;
-    TagSelectorOverlay* m_selectorOverlay = nullptr;
+    QPointer<TagSelectorOverlay> m_selectorOverlay;
 };
 
 } // namespace ArcMeta

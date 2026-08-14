@@ -288,9 +288,9 @@ void CategoryModel::updateStatisticsWithSnapshot(const StatisticsSnapshot& snaps
                 }
             } else if (type == "category" && id > 0) { 
                 int count = 0;
-                // 看是 SystemLibrary 还是 User 分类
-                Category cat = CategoryRepo::getCachedById(id);
-                if (cat.kind == CategoryKind::SystemLibrary) {
+                // 优化：直接从节点属性获取 CategoryKindRole，避免高频调用 RCU 缓存或数据库
+                int kind = item->data(CategoryKindRole).toInt();
+                if (kind == static_cast<int>(CategoryKind::SystemLibrary)) {
                     count = snapshot.libraryCounts.value(id, 0);
                 } else {
                     count = snapshot.userCategoryCounts.value(id, 0);

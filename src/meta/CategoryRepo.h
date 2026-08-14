@@ -84,6 +84,11 @@ public:
      */
     static StatisticsSnapshot calculateAllStatistics();
 
+    /**
+     * @brief 唯一合法的异步统计接口
+     */
+    static void calculateAllStatisticsAsync(std::function<void(const StatisticsSnapshot&)> callback);
+
     static bool add(Category& cat);
     static bool update(const Category& cat);
     static Category getById(int id);

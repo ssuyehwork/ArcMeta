@@ -140,22 +140,16 @@ CategoryPanel::CategoryPanel(QWidget* parent)
 void CategoryPanel::refreshCountsOnly() {
     if (!m_categoryModel) return;
     QPointer<CategoryPanel> weakThis(this);
-
-    // 异步执行 calculateAllStatistics，彻底 offload UI 线程
-    (void)QtConcurrent::run([weakThis]() {
-        StatisticsSnapshot snapshot = CategoryRepo::calculateAllStatistics();
-
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, snapshot]() {
-            if (weakThis && weakThis->m_categoryModel) {
-                // 物理防护：若统计数据全为0，且系统元数据尚未加载完成，则拒绝执行 UI 更新以防止计数清零
-                bool isSysUnready = !MetadataManager::instance().isLoaded();
-                bool allCountsZero = (snapshot.systemCounts.value("all", 0) == 0 && snapshot.systemCounts.value("trash", 0) == 0);
-                if (isSysUnready && allCountsZero) {
-                    return;
-                }
-                weakThis->m_categoryModel->updateStatisticsWithSnapshot(snapshot);
+    CategoryRepo::calculateAllStatisticsAsync([weakThis](const StatisticsSnapshot& snapshot) {
+        if (weakThis && weakThis->m_categoryModel) {
+            // 物理防护：若统计数据全为0，且系统元数据尚未加载完成，则拒绝执行 UI 更新以防止计数清零
+            bool isSysUnready = !MetadataManager::instance().isLoaded();
+            bool allCountsZero = (snapshot.systemCounts.value("all", 0) == 0 && snapshot.systemCounts.value("trash", 0) == 0);
+            if (isSysUnready && allCountsZero) {
+                return;
             }
-        });
+            weakThis->m_categoryModel->updateStatisticsWithSnapshot(snapshot);
+        }
     });
 }
 

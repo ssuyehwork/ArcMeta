@@ -1429,9 +1429,9 @@ StatisticsSnapshot CategoryRepo::calculateAllStatistics() {
     for (sqlite3* db : dbs) {
         if (!db) continue;
         sqlite3_stmt* stmt = nullptr;
-        // 查所有 is_trash = 0 的 metadata，看它们是否在用户自定义分类(category_kind=0)中有关联
+        // 查所有 is_trash = 0 且 is_folder = 0 的 metadata，看它们是否在用户自定义分类(category_kind=0)中有关联
         const char* sql =
-            "SELECT COUNT(DISTINCT folder_id) FROM metadata WHERE is_trash = 0 AND folder_id NOT IN ("
+            "SELECT COUNT(DISTINCT folder_id) FROM metadata WHERE is_trash = 0 AND is_folder = 0 AND folder_id NOT IN ("
             "    SELECT ci.folder_id FROM category_items ci "
             "    JOIN categories c ON ci.category_id = c.id "
             "    WHERE c.category_kind = 0"
@@ -1502,6 +1502,17 @@ StatisticsSnapshot CategoryRepo::calculateAllStatistics() {
     }
 
     return snapshot;
+}
+
+void CategoryRepo::calculateAllStatisticsAsync(std::function<void(const StatisticsSnapshot&)> callback) {
+    (void)QtConcurrent::run([callback]() {
+        StatisticsSnapshot snapshot = calculateAllStatistics();
+        if (callback) {
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [callback, snapshot]() {
+                callback(snapshot);
+            });
+        }
+    });
 }
 
 QMap<QString, int> CategoryRepo::getGlobalUniqueTags() { 
