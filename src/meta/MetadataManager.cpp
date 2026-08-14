@@ -437,7 +437,6 @@ void MetadataManager::initFromScchMode() {
         ));
     }
 
-    CategoryRepo::loadStatsFromDb();
     notifyUI(RefreshLevel::FullRebuild);
 }
 
@@ -1054,27 +1053,6 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
         auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
         (*newMap)[nPath] = rm;
         std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
-        if (isManagedAsset(rm.isFolder, nPath)) {
-            CategoryRepo::s_totalCount.fetch_add(1);
-            CategoryRepo::updatePersistentStat("sys_total_count", 1);
-            if (rm.tags.isEmpty()) {
-                CategoryRepo::s_untaggedCount.fetch_add(1);
-                CategoryRepo::updatePersistentStat("sys_untagged_count", 1);
-            } else {
-                std::lock_guard<std::mutex> tagsLock(CategoryRepo::s_tagsMutex);
-                for (const auto& t : rm.tags) {
-                    if (!CategoryRepo::s_globalTagsSet.contains(t)) {
-                        CategoryRepo::s_globalTagsSet.insert(t);
-                        CategoryRepo::s_tagsCount.fetch_add(1);
-                        CategoryRepo::updatePersistentStat("sys_tags_count", 1);
-                    }
-                }
-            }
-            if (CategoryRepo::getItemCategoryIds(rm.folderId, nPath).empty()) {
-                CategoryRepo::s_uncategorizedCount.fetch_add(1);
-                CategoryRepo::updatePersistentStat("sys_uncategorized_count", 1);
-            }
-        }
         if (!rm.folderId.empty()) {
             m_folderIdToPath[rm.folderId] = nPath;
 
@@ -1475,26 +1453,6 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 
     if (isInsideManagedLibrary(nPath)) {
-        if (isManagedAsset(isFolder, nPath)) {
-            if (oldEmpty && !newEmpty) {
-                CategoryRepo::s_untaggedCount.fetch_sub(1);
-                CategoryRepo::updatePersistentStat("sys_untagged_count", -1);
-            } else if (!oldEmpty && newEmpty) {
-                CategoryRepo::s_untaggedCount.fetch_add(1);
-                CategoryRepo::updatePersistentStat("sys_untagged_count", 1);
-            }
-
-            // Update global tags and tagsCount
-            std::lock_guard<std::mutex> tagsLock(CategoryRepo::s_tagsMutex);
-            for (const auto& t : tags) {
-                if (!CategoryRepo::s_globalTagsSet.contains(t)) {
-                    CategoryRepo::s_globalTagsSet.insert(t);
-                    CategoryRepo::s_tagsCount.fetch_add(1);
-                    CategoryRepo::updatePersistentStat("sys_tags_count", 1);
-                }
-            }
-        }
-
         DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
             persistAsync(nPath);
         });
@@ -2073,23 +2031,6 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                 if (it->first == nPath || it->first.find(nPath + L"\\") == 0 || it->first.find(nPath + L"/") == 0) {
                     std::wstring curPath = it->first;
 
-                    if (isManagedAsset(it->second.isFolder, curPath)) {
-                        if (it->second.isTrash) {
-                            CategoryRepo::s_trashCount.fetch_sub(1);
-                            CategoryRepo::updatePersistentStat("sys_trash_count", -1);
-                        } else {
-                            CategoryRepo::s_totalCount.fetch_sub(1);
-                            CategoryRepo::updatePersistentStat("sys_total_count", -1);
-                            if (it->second.tags.isEmpty()) {
-                                CategoryRepo::s_untaggedCount.fetch_sub(1);
-                                CategoryRepo::updatePersistentStat("sys_untagged_count", -1);
-                            }
-                            if (CategoryRepo::getItemCategoryIds(it->second.folderId, curPath).empty()) {
-                                CategoryRepo::s_uncategorizedCount.fetch_sub(1);
-                                CategoryRepo::updatePersistentStat("sys_uncategorized_count", -1);
-                            }
-                        }
-                    }
 
                     if (isManagedAsset(it->second.isFolder, curPath) && !it->second.isTrash) {
                         totalDelta--;
@@ -2202,23 +2143,6 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
                 auto it = newMap->find(p);
                 if (it == newMap->end()) continue;
 
-                if (isManagedAsset(it->second.isFolder, p)) {
-                    if (it->second.isTrash) {
-                        CategoryRepo::s_trashCount.fetch_sub(1);
-                        CategoryRepo::updatePersistentStat("sys_trash_count", -1);
-                    } else {
-                        CategoryRepo::s_totalCount.fetch_sub(1);
-                        CategoryRepo::updatePersistentStat("sys_total_count", -1);
-                        if (it->second.tags.isEmpty()) {
-                            CategoryRepo::s_untaggedCount.fetch_sub(1);
-                            CategoryRepo::updatePersistentStat("sys_untagged_count", -1);
-                        }
-                        if (CategoryRepo::getItemCategoryIds(it->second.folderId, p).empty()) {
-                            CategoryRepo::s_uncategorizedCount.fetch_sub(1);
-                            CategoryRepo::updatePersistentStat("sys_uncategorized_count", -1);
-                        }
-                    }
-                }
 
                 if (isManagedAsset(it->second.isFolder, p) && !it->second.isTrash) {
                     totalDelta--;
@@ -2401,35 +2325,6 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
         }
 
 
-        if (isManagedAsset(isFolder, nPath)) {
-            if (isTrash) {
-                CategoryRepo::s_totalCount.fetch_sub(1);
-                CategoryRepo::updatePersistentStat("sys_total_count", -1);
-                CategoryRepo::s_trashCount.fetch_add(1);
-                CategoryRepo::updatePersistentStat("sys_trash_count", 1);
-                if (oldEmpty) {
-                    CategoryRepo::s_untaggedCount.fetch_sub(1);
-                    CategoryRepo::updatePersistentStat("sys_untagged_count", -1);
-                }
-                if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
-                    CategoryRepo::s_uncategorizedCount.fetch_sub(1);
-                    CategoryRepo::updatePersistentStat("sys_uncategorized_count", -1);
-                }
-            } else {
-                CategoryRepo::s_totalCount.fetch_add(1);
-                CategoryRepo::updatePersistentStat("sys_total_count", 1);
-                CategoryRepo::s_trashCount.fetch_sub(1);
-                CategoryRepo::updatePersistentStat("sys_trash_count", -1);
-                if (oldEmpty) {
-                    CategoryRepo::s_untaggedCount.fetch_add(1);
-                    CategoryRepo::updatePersistentStat("sys_untagged_count", 1);
-                }
-                if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
-                    CategoryRepo::s_uncategorizedCount.fetch_add(1);
-                    CategoryRepo::updatePersistentStat("sys_uncategorized_count", 1);
-                }
-            }
-        }
 
         persistAsync(nPath);
         
@@ -2463,35 +2358,6 @@ void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
                     fid = meta.folderId;
                     std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
                 }
-            }
-        }
-    }
-    if (changed && isManagedAsset(isFolder, nPath)) {
-        if (isTrash) {
-            CategoryRepo::s_totalCount.fetch_sub(1);
-            CategoryRepo::updatePersistentStat("sys_total_count", -1);
-            CategoryRepo::s_trashCount.fetch_add(1);
-            CategoryRepo::updatePersistentStat("sys_trash_count", 1);
-            if (oldEmpty) {
-                CategoryRepo::s_untaggedCount.fetch_sub(1);
-                CategoryRepo::updatePersistentStat("sys_untagged_count", -1);
-            }
-            if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
-                CategoryRepo::s_uncategorizedCount.fetch_sub(1);
-                CategoryRepo::updatePersistentStat("sys_uncategorized_count", -1);
-            }
-        } else {
-            CategoryRepo::s_totalCount.fetch_add(1);
-            CategoryRepo::updatePersistentStat("sys_total_count", 1);
-            CategoryRepo::s_trashCount.fetch_sub(1);
-            CategoryRepo::updatePersistentStat("sys_trash_count", -1);
-            if (oldEmpty) {
-                CategoryRepo::s_untaggedCount.fetch_add(1);
-                CategoryRepo::updatePersistentStat("sys_untagged_count", 1);
-            }
-            if (CategoryRepo::getItemCategoryIds(fid, nPath).empty()) {
-                CategoryRepo::s_uncategorizedCount.fetch_add(1);
-                CategoryRepo::updatePersistentStat("sys_uncategorized_count", 1);
             }
         }
     }
@@ -3087,7 +2953,6 @@ void MetadataManager::recordAccess(const std::wstring& path) {
             m_recentVisitedQueue.erase(it);
         } else {
             m_recentVisitedSet.insert(nPath);
-            CategoryRepo::s_recentlyVisitedCount.fetch_add(1);
         }
         m_recentVisitedQueue.push_back(nPath);
     }
@@ -3150,9 +3015,7 @@ void MetadataManager::slideRecentWindow() {
     for (const auto& path : toErase) {
         if (!m_recentVisitedQueue.empty() && m_recentVisitedQueue.front() == path) {
             m_recentVisitedQueue.pop_front();
-            if (m_recentVisitedSet.erase(path) > 0) {
-                CategoryRepo::s_recentlyVisitedCount.fetch_sub(1);
-            }
+            m_recentVisitedSet.erase(path);
         }
     }
 }
