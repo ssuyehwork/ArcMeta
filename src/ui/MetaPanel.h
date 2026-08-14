@@ -42,6 +42,8 @@ public:
     void setPinned(bool pinned) { Q_UNUSED(pinned); }
 
 signals:
+    void tagAddRequested(const QStringList& paths, const QString& tag);
+    void tagRemoveRequested(const QStringList& paths, const QString& tag);
     void metadataChanged(int rating, const std::wstring& color);
     void noteEdited(const QStringList& paths, const QString& newNote);
     void linkEdited(const QStringList& paths, const QString& newLink);

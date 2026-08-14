@@ -36,9 +36,9 @@ void TagPill::setData(const QString& text) {
 void TagPill::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.setBrush(QColor("#2B2B2B"));
-    painter.setPen(QPen(QColor("#3c3c3c"), 1));
-    painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 11, 11);
+    painter.setBrush(QColor("#2D2D30"));
+    painter.setPen(QPen(QColor("#3E3E42"), 1));
+    painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 2, 2);
 }
 
 } // namespace ArcMeta
