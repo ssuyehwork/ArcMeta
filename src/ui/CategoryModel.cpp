@@ -70,31 +70,25 @@ void CategoryModel::refresh() {
     auto categories = CategoryRepo::getAll();
 
     // ----------------------------------------------------
-    // 层级二：半静态托管库区（跟随硬件挂载）
+    // 恢复原版：直接使用数据库原始名称 (arcmeta.library_*) 与图标
     // ----------------------------------------------------
     if (m_type == Both || m_type == User) {
         for (const auto& cat : categories) {
             if (cat.kind == CategoryKind::SystemLibrary && cat.parentId == 0) {
-                QString rawPath = QString::fromStdWString(cat.physicalPath);
-                QString letter = "";
-                if (rawPath.length() >= 2 && rawPath[1] == ':') {
-                    letter = rawPath.left(1).toUpper();
-                }
-                QString displayName = letter.isEmpty() ? "本地磁盘托管库" : QString("本地磁盘 (%1:)").arg(letter);
-
+                QString origName = QString::fromStdWString(cat.name).toLower();
                 int count = snapshot.libraryCounts.value(cat.id, 0);
-                QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(displayName).arg(count));
+
+                QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(origName).arg(count));
                 item->setData("category", TypeRole);
                 item->setData(cat.id, IdRole);
                 item->setData("#378ADD", ColorRole);
-                item->setData(displayName, NameRole);
+                item->setData(origName, NameRole);
                 item->setData(cat.pinned, PinnedRole);
                 item->setData(cat.encrypted, EncryptedRole);
                 item->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
                 item->setData(static_cast<int>(cat.kind), CategoryKindRole);
-                // 标记为不可拖拽、不可更名、不可删除
                 item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-                item->setIcon(UiHelper::getIcon("drive_filled", QColor("#378ADD"), 16));
+                item->setIcon(UiHelper::getIcon("folder_filled", QColor("#378ADD"), 16)); // 恢复原版蓝色文件夹图标
                 
                 root->appendRow(item);
             }
