@@ -1,6 +1,7 @@
 #include "CategoryModel.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
+#include "../meta/StatisticsService.h"
 
 #include "UiHelper.h"
 #include <functional>
@@ -22,6 +23,8 @@ namespace ArcMeta {
 CategoryModel::CategoryModel(Type type, QObject* parent) 
     : QStandardItemModel(parent), m_type(type) 
 {
+    connect(&StatisticsService::instance(), &StatisticsService::statisticsUpdated, 
+            this, &CategoryModel::updateStatisticsWithSnapshot);
 }
 
 void CategoryModel::setUnlockedIds(const QSet<int>& ids) {
@@ -35,8 +38,9 @@ void CategoryModel::deferredRefresh() {
 void CategoryModel::refresh() {
     m_isFirstLoad = false;
 
-    // 获取权威统计账本
-    StatisticsSnapshot snapshot = CategoryRepo::calculateAllStatistics();
+    // 1. 0ms 纯内存只读读取（零 SQL、零磁盘 I/O）
+    auto categories = CategoryRepo::getCachedAll();
+    StatisticsSnapshot snapshot = StatisticsService::instance().getCachedSnapshot();
 
     beginResetModel();
     removeRows(0, rowCount());
@@ -226,10 +230,14 @@ void CategoryModel::refresh() {
     }
     
     endResetModel();
+
+    // 3. 异步触发后台核对账本（算完自动通过 statisticsUpdated 槽函数回填数字）
+    StatisticsService::instance().requestFullRecountAsync();
 }
 
 void CategoryModel::updateSystemCounts() {
-    auto counts = CategoryRepo::getSystemCounts();
+    auto snapshot = StatisticsService::instance().getCachedSnapshot();
+    auto counts = snapshot.systemCounts;
     for (int i = 0; i < invisibleRootItem()->rowCount(); ++i) {
         QStandardItem* item = invisibleRootItem()->child(i);
         QString type = item->data(TypeRole).toString();

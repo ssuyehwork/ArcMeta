@@ -2146,7 +2146,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                         }
 
                         if (ok) {
-                            CategoryRepo::s_countsDirty = true;
                             refreshAll();
                         }
 

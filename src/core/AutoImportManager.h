@@ -33,14 +33,6 @@ public:
      */
     static std::wstring getManagedLibraryPath(const std::wstring& pathOrVolSerial);
 
-    /**
-     * @brief 2026-08-xx 自动同步对账和递归 1:1 分类建立
-     */
-    void handleRecursiveIngestion(const std::wstring& rootPath, bool allowLightweight = false);
-
-    bool hasTopLevelChanged(const std::wstring& rootPath);
-    void saveTopLevelSnapshot(const std::wstring& rootPath);
-
 private slots:
     // 去抖超时，合并写入数据库
     void processImportQueue();
@@ -49,18 +41,10 @@ private:
     AutoImportManager(QObject* parent = nullptr);
     ~AutoImportManager() override;
 
-    /**
-     * @brief 2026-08-xx 按照 Plan-126：基于 FRN 链的高效托管路径过滤
-     */
-    bool isUnderManagedLibrary(uint64_t key);
-
     QTimer* m_debounceTimer = nullptr;
     std::vector<std::wstring> m_pendingPaths;
     std::mutex m_queueMutex;
     bool m_isListening = false;
-
-    // 2026-08-xx [Plan-131 方案 B]：资源库根目录 FRN 缓存
-    std::unordered_set<uint64_t> m_managedFrnCache;
 };
 
 } // namespace ArcMeta

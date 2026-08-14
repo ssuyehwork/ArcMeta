@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "PresetTagsDialog.h"
 #include "CategoryModel.h"
+#include "../meta/StatisticsService.h"
 #include "ContentPanel.h"
 #include "../core/DiskTrashService.h"
 #include "../core/LibraryMaintenanceService.h"
@@ -140,9 +141,8 @@ CategoryPanel::CategoryPanel(QWidget* parent)
 void CategoryPanel::refreshCountsOnly() {
     if (!m_categoryModel) return;
     QPointer<CategoryPanel> weakThis(this);
-    CategoryRepo::calculateAllStatisticsAsync([weakThis](const StatisticsSnapshot& snapshot) {
+    StatisticsService::instance().requestFullRecountAsync([weakThis](const StatisticsSnapshot& snapshot) {
         if (weakThis && weakThis->m_categoryModel) {
-            // 物理防护：若统计数据全为0，且系统元数据尚未加载完成，则拒绝执行 UI 更新以防止计数清零
             bool isSysUnready = !MetadataManager::instance().isLoaded();
             bool allCountsZero = (snapshot.systemCounts.value("all", 0) == 0 && snapshot.systemCounts.value("trash", 0) == 0);
             if (isSysUnready && allCountsZero) {
@@ -165,8 +165,6 @@ void CategoryPanel::requestRefresh(bool fullRebuild) {
     // 2026-07-xx 性能优化：缩短防抖时间至 200ms 以提升 UI 响应灵敏度
     if (fullRebuild) {
         m_refreshTimer->setProperty("fullRebuild", true);
-        // 🚀 【强行失效缓存】：标记计数状态为脏，驱动 fullRecountAsync 重新计算所有顶级根分类总和
-        CategoryRepo::s_countsDirty.store(true);
     }
     m_refreshTimer->start(200);
 }

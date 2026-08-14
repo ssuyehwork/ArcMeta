@@ -49,6 +49,10 @@ set(SOURCES
     src/meta/sqlite3.h
     src/meta/AmMetaJson.cpp
     src/meta/AmMetaJson.h
+    src/meta/DiskNavigatorService.cpp
+    src/meta/DiskNavigatorService.h
+    src/meta/StatisticsService.cpp
+    src/meta/StatisticsService.h
     src/meta/MetaCacheDecorator.cpp
     src/meta/MetaCacheDecorator.h
     src/core/CoreController.cpp

@@ -63,6 +63,16 @@ public:
      */
     static bool renameItem(const QString& folderPath, const QString& oldName, const QString& newName);
 
+    /**
+     * @brief 静态辅助方法：读取指定物理文件夹的全部条目 ItemMeta 集合
+     */
+    static std::unordered_map<std::wstring, ItemMeta> readFolderMeta(const std::wstring& folderPath);
+
+    /**
+     * @brief 静态辅助方法：修改并落盘指定路径对应文件的 ItemMeta 记录
+     */
+    static void updateItemMeta(const std::wstring& filePath, std::function<void(ItemMeta&)> updater);
+
 private:
     std::wstring m_folderPath;
     std::wstring m_filePath; // 映射到物理文件夹中的 .ArcMeta.json 路径

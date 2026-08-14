@@ -25,15 +25,6 @@ public:
         return sqlite3_exec(db, sqlCreateMetadata, nullptr, nullptr, nullptr) == SQLITE_OK;
     }
 
-    static void performDataCleanup(sqlite3* db) {
-        // 彻底剥离出的 DELETE 清洗脚本，保持开库轻量级
-        sqlite3_exec(db, "DELETE FROM categories WHERE id <= 0;", nullptr, nullptr, nullptr);
-        sqlite3_exec(db, "DELETE FROM categories WHERE name LIKE '%.arc';", nullptr, nullptr, nullptr);
-        sqlite3_exec(db, "DELETE FROM category_items WHERE path_hint LIKE '%.arc' ESCAPE '\\' "
-                         "OR path_hint LIKE '%.arc\\%' ESCAPE '\\';", nullptr, nullptr, nullptr);
-        sqlite3_exec(db, "DELETE FROM metadata WHERE path LIKE '%_thumbnail.png';", nullptr, nullptr, nullptr);
-        sqlite3_exec(db, "DELETE FROM category_items WHERE path_hint LIKE '%_thumbnail.png';", nullptr, nullptr, nullptr);
-    }
 };
 
 class VolumePathResolver {

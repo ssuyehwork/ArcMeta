@@ -97,6 +97,62 @@ bool AmMetaJson::renameItem(const QString& folderPath, const QString& oldName, c
     return true;
 }
 
+std::unordered_map<std::wstring, ItemMeta> AmMetaJson::readFolderMeta(const std::wstring& folderPath) {
+    std::unordered_map<std::wstring, ItemMeta> result;
+    AmMetaJson meta(folderPath);
+    if (meta.load()) {
+        const auto& itemsMap = meta.items();
+        for (const auto& pair : itemsMap) {
+            result[pair.first] = pair.second;
+        }
+    }
+    return result;
+}
+
+void AmMetaJson::updateItemMeta(const std::wstring& filePath, std::function<void(ItemMeta&)> updater) {
+    QFileInfo info(QString::fromStdWString(filePath));
+    std::wstring folderPath = info.absolutePath().toStdWString();
+    std::wstring fileName = info.fileName().toStdWString();
+
+    AmMetaJson parentJson(folderPath);
+    parentJson.load();
+    ItemMeta& meta = parentJson.items()[fileName];
+    meta.type = info.isDir() ? L"folder" : L"file";
+    updater(meta);
+    parentJson.save();
+
+    if (info.isDir()) {
+        AmMetaJson selfJson(filePath);
+        selfJson.load();
+        
+        FolderMeta& fMeta = selfJson.folder();
+        ItemMeta dummyItem;
+        dummyItem.rating = fMeta.rating;
+        dummyItem.color = fMeta.color;
+        dummyItem.pinned = fMeta.pinned;
+        dummyItem.note = fMeta.note;
+        dummyItem.url = fMeta.url;
+        dummyItem.encrypted = fMeta.encrypted;
+        dummyItem.folderId = fMeta.folderId;
+        dummyItem.tags = fMeta.tags;
+        dummyItem.palettes = fMeta.palettes;
+
+        updater(dummyItem);
+
+        fMeta.rating = dummyItem.rating;
+        fMeta.color = dummyItem.color;
+        fMeta.pinned = dummyItem.pinned;
+        fMeta.note = dummyItem.note;
+        fMeta.url = dummyItem.url;
+        fMeta.encrypted = dummyItem.encrypted;
+        fMeta.folderId = dummyItem.folderId;
+        fMeta.tags = dummyItem.tags;
+        fMeta.palettes = dummyItem.palettes;
+
+        selfJson.save();
+    }
+}
+
 bool AmMetaJson::migrateItemMetadata(const QString& oldFilePath, const QString& newFilePath) { 
     if (oldFilePath == newFilePath) return true; 
  

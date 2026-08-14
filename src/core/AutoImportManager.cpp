@@ -49,30 +49,7 @@ void AutoImportManager::stopListening() {
 }
 
 void AutoImportManager::syncAllManagedLibraries(bool allowLightweight) {
-    const auto drives = QDir::drives();
-    bool changed = false;
-    for (const QFileInfo& d : drives) {
-        QString drive = d.absolutePath();
-        QString letter = drive.left(1).toUpper();
-        
-        QDir rootDir(drive);
-        QStringList entries = rootDir.entryList({"ArcMeta.Library_*"}, QDir::Dirs | QDir::Hidden);
-        
-        QString targetName = "ArcMeta.Library_" + letter;
-        for (const QString& entry : entries) {
-            if (QString::compare(entry, targetName, Qt::CaseInsensitive) == 0) {
-                QString managedPath = rootDir.absoluteFilePath(entry);
-                qDebug() << "[AutoImport] 启动对账：发现物理资源库，执行同步 ->" << managedPath;
-                (void)QtConcurrent::run([this, managedPath, allowLightweight]() {
-                    handleRecursiveIngestion(QDir::toNativeSeparators(managedPath).toStdWString(), allowLightweight);
-                });
-                changed = true;
-            }
-        }
-    }
-    if (changed) {
-        MetadataManager::instance().notifyFullUIRebuild();
-    }
+    Q_UNUSED(allowLightweight);
 }
 
 
@@ -153,41 +130,5 @@ void AutoImportManager::processImportQueue() {
     });
 }
 
-bool AutoImportManager::isUnderManagedLibrary(uint64_t key) {
-    Q_UNUSED(key);
-    return false;
-}
-
-bool AutoImportManager::hasTopLevelChanged(const std::wstring& rootPath) {
-    QFileInfo info(QString::fromStdWString(rootPath));
-    if (!info.exists()) return true;
-
-    qint64 currentMtime = info.lastModified().toMSecsSinceEpoch();
-    int currentChildCount = QDir(info.absoluteFilePath()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size();
-
-    QString key = "ScanSnapshot/" + QString::fromUtf8(QCryptographicHash::hash(
-        QString::fromStdWString(rootPath).toUtf8(), QCryptographicHash::Md5).toHex());
-    QString saved = AppConfig::instance().getValue(key, "").toString();
-    QString current = QString("%1:%2").arg(currentMtime).arg(currentChildCount);
-
-    return saved != current;
-}
-
-void AutoImportManager::saveTopLevelSnapshot(const std::wstring& rootPath) {
-    QFileInfo info(QString::fromStdWString(rootPath));
-    if (!info.exists()) return;
-    qint64 mtime = info.lastModified().toMSecsSinceEpoch();
-    int childCount = QDir(info.absoluteFilePath()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size();
-    QString key = "ScanSnapshot/" + QString::fromUtf8(QCryptographicHash::hash(
-        QString::fromStdWString(rootPath).toUtf8(), QCryptographicHash::Md5).toHex());
-    AppConfig::instance().setValue(key, QString("%1:%2").arg(mtime).arg(childCount));
-}
-
-void AutoImportManager::handleRecursiveIngestion(const std::wstring& rootPath, bool allowLightweight) {
-    // 🚨 彻底根除全量物理对账逻辑：该函数已被清空，直接忽略后台盘点扫描，实现库挂载秒级无缝预热
-    Q_UNUSED(rootPath);
-    Q_UNUSED(allowLightweight);
-    qDebug() << "[AutoImport][CLEANUP] handleRecursiveIngestion ignored to skip full physical scanning.";
-}
 
 } // namespace ArcMeta

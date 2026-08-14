@@ -139,9 +139,6 @@ void LibraryMaintenanceService::scanAndCleanEmptyArcsAsync() {
             trans.commit(); 
         } 
  
-        if (cleanCount > 0 || ghostCount > 0 || orphanCount > 0) { 
-            CategoryRepo::s_countsDirty.store(true); 
-        } 
  
         emit cleanFinished(cleanCount, ghostCount, orphanCount); 
     }); 

@@ -226,6 +226,15 @@ public:
     void setManaged(const std::wstring& path, bool managed, bool notify = true);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
 
+    void updateExtractedMediaFeatures(
+        const std::wstring& path, 
+        int width, 
+        int height, 
+        const std::wstring& autoColor, 
+        const QVector<QPair<QColor, float>>& palettes, 
+        int ingestionStatus = 1
+    );
+
     /**
      * @brief 全局重命名标签
      */
