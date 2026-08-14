@@ -20,10 +20,9 @@ public:
     void loadCategoryItems(const QModelIndex& parentIndex);
 
 signals:
-    // 🚀 【重构解耦】：通知外部控制器进行异步物理改名和数据库更新
-    void categoryRenameRequested(int catId, const QString& newName);
-    // 🚀 【重构解耦】：通知外部控制器执行同级分类重新排序
-    void categoryOrderChanged(int draggedId, int targetParentId, int insertRow);
+    // 🚀 【重构解耦】：通知外部中介控制器执行改名与排序写库 
+    void categoryRenameRequested(int catId, const QString& newName); 
+    void categoryOrderChanged(int draggedId, int targetParentId, int insertRow); 
 
 public slots:
     void refresh();

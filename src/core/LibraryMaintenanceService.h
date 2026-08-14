@@ -12,11 +12,10 @@ public:
         return inst; 
     } 
  
-    // 🚀 【SRP 拆分】：专门承接后台物理磁盘托管包盘点与 SQLite 幽灵数据异步强力清除逻辑 
+    // 🚀 【SRP 拆分】：后台专职三步走完整清扫（空包物理删除 + 幽灵元数据擦除 + 孤立分类关系清洗） 
     void scanAndCleanEmptyArcsAsync(); 
  
 signals: 
-    void cleanProgress(int percent); 
     void cleanFinished(int cleanCount, int ghostCount, int orphanCount); 
  
 private: 

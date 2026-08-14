@@ -408,13 +408,13 @@ bool FilterProxyModel::lessThan(const QModelIndex& source_left, const QModelInde
         }
     }
 
-    // 3. 物理第一权重：文件夹与子分类始终置顶 (绝对强制，升降序下均不动摇)
-    bool leftIsDir = (leftRec.isDir || leftRec.isCategory);
-    bool rightIsDir = (rightRec.isDir || rightRec.isCategory);
-
-    if (leftIsDir != rightIsDir) {
-        return leftIsDir; // 文件夹永远“更小”排在前面
-    }
+    // 🚀 【绝对结构权重 1】：文件夹/分类 永远排在 文件 前面（物理隔绝，不受用户升降序取反下沉影响，实现无缝上下两区！） 
+    bool leftIsDir  = (leftRec.isDir || leftRec.isCategory); 
+    bool rightIsDir = (rightRec.isDir || rightRec.isCategory); 
+ 
+    if (leftIsDir != rightIsDir) { 
+        return (sortOrder() == Qt::AscendingOrder) ? leftIsDir : !leftIsDir; 
+    } 
 
     // 4. 物理第二权重：置顶优先规则 (升降序下均强制置顶，不随用户排序取反下沉)
     bool leftPinned = leftRec.pinned || leftRec.encrypted;
@@ -2614,25 +2614,20 @@ void ContentPanel::onPathsDropped(const QStringList& paths, const QModelIndex& t
 
         bool isMove = !(QApplication::keyboardModifiers() & Qt::ControlModifier);
         
-        // 开启内部操作原子锁，彻底废除 QTimer::singleShot 2000ms 补丁
-        MetadataManager::instance().beginInternalOperation();
-
-        DiskIoContext ioCtx;
-        ioCtx.sources = paths;
-        ioCtx.destination = destDir;
-        ioCtx.isMove = isMove;
-
-        QPointer<ContentPanel> weakThis(this);
-        DiskIoService::instance().executeAsync(ioCtx, [weakThis](bool success) {
-            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, success]() {
-                if (weakThis) {
-                    if (success) {
-                        weakThis->loadDirectory(weakThis->m_currentPath, weakThis->m_isRecursive);
-                    }
-                }
-                MetadataManager::instance().endInternalOperation();
-            });
-        });
+        // 🚀 【双轨绝对隔离】：DiskNav 磁盘导航模式下直接调用 DiskIoService，绝对禁止穿透调用 MetadataManager！ 
+        DiskIoContext ioCtx; 
+        ioCtx.sources = paths; 
+        ioCtx.destination = destDir; 
+        ioCtx.isMove = isMove; 
+ 
+        QPointer<ContentPanel> weakThis(this); 
+        DiskIoService::instance().executeAsync(ioCtx, [weakThis](bool success) { 
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, success]() { 
+                if (weakThis && success) { 
+                    weakThis->loadDirectory(weakThis->m_currentPath, weakThis->m_isRecursive); 
+                } 
+            }); 
+        }); 
     } else {
         // 优先尊重"拖拽到具体子分类节点上"这个更精确的用户意图
         int targetCatId = 0;
