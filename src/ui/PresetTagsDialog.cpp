@@ -157,17 +157,23 @@ void PresetTagsDialog::onTagContainerClicked() {
         return;
     }
 
-    m_selectorOverlay = new TagSelectorOverlay(m_presetTags, nullptr); // 作为独立 Window 弹出
-    m_selectorOverlay->setAttribute(Qt::WA_DeleteOnClose);
+    // 实例化独立窗口，父对象传 nullptr 确保作为独立顶层 Tool 弹出
+    m_selectorOverlay = new TagSelectorOverlay(m_presetTags, nullptr);
     
+    // 计算弹出在红框正下方
     QPoint globalPos = m_tagContainer->mapToGlobal(QPoint(0, m_tagContainer->height() + 4));
     m_selectorOverlay->move(globalPos);
     m_selectorOverlay->show();
-    m_selectorOverlay->activateWindow();
+    m_selectorOverlay->raise();
+    m_selectorOverlay->activateWindow(); // 显式夺取焦点
 
     connect(m_selectorOverlay, &TagSelectorOverlay::selectionChanged, this, [this](const QStringList& selected) {
         m_presetTags = selected;
         populateTagPills(); // 内部自动触发 recalculateAdaptiveHeight()
+    });
+
+    connect(m_selectorOverlay, &TagSelectorOverlay::overlayClosed, this, [this]() {
+        m_selectorOverlay = nullptr;
     });
 }
 

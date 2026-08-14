@@ -342,7 +342,10 @@ void TagSelectorOverlay::mouseReleaseEvent(QMouseEvent* event) {
 // -------------------------------------------------------------------------
 void TagSelectorOverlay::changeEvent(QEvent* event) {
     if (event->type() == QEvent::ActivationChange) {
-        if (!isActiveWindow()) {
+        if (isActiveWindow()) {
+            m_wasActivated = true; // 真正获得焦点，进入监控态
+        } else if (m_wasActivated) {
+            // 只有曾经激活过、后来失去焦点时，才允许自毁！
             emit overlayClosed();
             close();
             deleteLater();
