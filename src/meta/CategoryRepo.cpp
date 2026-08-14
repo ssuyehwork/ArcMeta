@@ -1301,13 +1301,26 @@ void CategoryRepo::fullRecount() {
 void CategoryRepo::fullRecountAsync(std::function<void(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts)> callback) {
     (void)QtConcurrent::run([callback]() {
         CategoryRepo::fullRecount();
-        auto sysCounts = CategoryRepo::getSystemCounts();
         auto catCountsVec = CategoryRepo::getCounts();
         
         QMap<int, int> catCounts;
         for (const auto& entry : catCountsVec) {
             catCounts[entry.first] = entry.second;
         }
+
+        auto sysCounts = CategoryRepo::getRawSystemCounts();
+
+        // 3. 🚀【产品硬线规则】：对所有 parentId == 0 的顶级根分类计数进行全量累加
+        auto allCategories = CategoryRepo::getAll();
+        int sumOfRootCategories = 0;
+        for (const auto& cat : allCategories) {
+            if (cat.parentId == 0 && cat.kind != CategoryKind::SystemLibrary) {
+                sumOfRootCategories += catCounts.value(cat.id, 0);
+            }
+        }
+
+        // 4. 锁定“全部数据”数值等于顶级根分类之和
+        sysCounts["all"] = sumOfRootCategories;
 
         if (callback) {
             QMetaObject::invokeMethod(QCoreApplication::instance(), [callback, sysCounts, catCounts]() {
@@ -1379,7 +1392,7 @@ QMap<QString, int> CategoryRepo::getGlobalUniqueTags() {
     return tagCounts; 
 } 
 
-QMap<QString, int> CategoryRepo::getSystemCounts() {
+QMap<QString, int> CategoryRepo::getRawSystemCounts() {
     QMap<QString, int> res;
     res["all"] = s_totalCount.load();
     res["tags"] = s_tagsCount.load();
@@ -1414,6 +1427,28 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     }
     res["trash"] = libraryTrashCount + diskTrashCount;
     return res;
+}
+
+QMap<QString, int> CategoryRepo::getSystemCounts() {
+    QMap<QString, int> sysCounts = getRawSystemCounts();
+    QMap<int, int> catCounts; // 获取全库各分类（含根分类）的精准计数
+    for (const auto& entry : getCounts()) {
+        catCounts[entry.first] = entry.second;
+    }
+
+    // 🚀【产品硬线规则】：获取所有 parentId == 0 的顶级根分类，累加其计数作为“全部数据”数值
+    auto allCategories = getAll();
+    int sumOfRootCategories = 0;
+
+    for (const auto& cat : allCategories) {
+        if (cat.parentId == 0 && cat.kind != CategoryKind::SystemLibrary) {
+            sumOfRootCategories += catCounts.value(cat.id, 0);
+        }
+    }
+
+    // 🚀 “全部数据”数值与顶级根分类总和锁定 100% 绝对同步！
+    sysCounts["all"] = sumOfRootCategories;
+    return sysCounts;
 }
 
 QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
