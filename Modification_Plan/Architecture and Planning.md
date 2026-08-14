@@ -112,6 +112,10 @@
   - **唯一允许剪切场景（自动监控导入）**：只有由文件系统在后台发现的“自动监控目录检测导入 (CoreController::watch)”与“首置自定义监控同步导入 (showNewAutoImportDialog)”两个自动后台范畴，且同盘时才显式传入 `allowMove = true` 触发 QFile::rename。用户主动触发的拖拽、剪切粘贴一律强制使用复制，彻底消除因分区一致导致外部源文件被“剪切”走的情况。
 * **跨库迁移行为安全复制化**：在进行跨盘托管库资产转移（`MetadataManager::migrateCapsuleToLibrary`）时，同样将对容器胶囊目录的搬移参数改为 `isMove = false`（复制）。
 
+### 2.18 托管库同库与跨库拖拽归类防重判定规范
+* **物理路径 100% 预规范化对齐**：为了解决拖拽输入物理路径 `srcPath` 与数据库存储的目标库路径 `targetLibraryPath` 在运行时因斜杠方向差异（`/` 与 `\`）或大小写不匹配导致的判定失效，在进行同库/跨库判定前，必须将两者的路径完全转换并对齐至经过 `MetadataManager::normalizePath()` 的标准化物理绝对路径。
+* **同库 0 毫秒静默归类**：当判定拖拽源路径属于目标托管库内部时（即 `isCrossLibrary` 判定为 `false`），必须无条件进入物理库内静默分类关联分支，直接批量写入 `category_items` 数据，严禁触发任何新 ID 生成、胶囊重制、文件系统复制以及任何查重机制（`DuplicateConflictDialog`）弹窗。
+
 ---
 
 ## 区块三：UI视口板块划分与数据联动规范

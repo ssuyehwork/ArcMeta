@@ -127,7 +127,14 @@ void CategoryDropProcessor::processDroppedPathsAsync(const QStringList& paths, i
 
                     bool isCrossLibrary = false;
                     if (!targetLibraryPath.isEmpty()) {
-                        isCrossLibrary = !srcPath.startsWith(targetLibraryPath, Qt::CaseInsensitive);
+                        // 预对齐：对目标库路径进行完备的物理标准化转换
+                        std::wstring normTargetW = MetadataManager::normalizePath(targetLibraryPath.toStdWString());
+                        QString normTarget = QString::fromStdWString(normTargetW);
+                        
+                        // 预对齐：使用已经过 normalizePath 标准化的 wPath 变量转换作为判定源
+                        QString normSrc = QString::fromStdWString(wPath);
+                        
+                        isCrossLibrary = !normSrc.startsWith(normTarget, Qt::CaseInsensitive);
                     }
 
                     if (isCrossLibrary) {
