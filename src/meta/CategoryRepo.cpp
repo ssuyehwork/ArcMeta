@@ -254,7 +254,6 @@ bool CategoryRepo::add(Category& cat) {
                     sqlite3_finalize(stmtOther);
                 }
             }
-            s_countsDirty.store(true);
             refreshMemoryCache();
             return true;
         } else {
@@ -320,7 +319,6 @@ bool CategoryRepo::addItemToCategoryBatch(int categoryId, const std::vector<std:
         }
     }
 
-    s_countsDirty.store(true);
     refreshMemoryCache();
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
 
@@ -548,7 +546,6 @@ bool CategoryRepo::update(const Category& cat) {
         }
     }
     if (anyOk) {
-        s_countsDirty.store(true);
         refreshMemoryCache();
     }
     return anyOk;
@@ -708,7 +705,6 @@ bool CategoryRepo::remove(int id) {
         trans.commit();
     }
 
-    s_countsDirty.store(true);
     // ✅ 修正后：删除分类只清理数据库与内存关联，严禁物理删除用户磁盘上的实际文件夹！
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
     refreshMemoryCache();
@@ -1062,7 +1058,6 @@ bool CategoryRepo::executeFidBatch(const std::vector<std::string>& folderIds, st
         }
     }
 
-    s_countsDirty.store(true);
     refreshMemoryCache();
     // 批量处理后通知 UI 刷新
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);

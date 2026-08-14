@@ -71,8 +71,6 @@ void CategoryModel::refresh() {
         addSystemItem("回收站", "trash", "trash", "#e74c3c", -8);
     }
 
-    auto categories = CategoryRepo::getAll();
-
     // ----------------------------------------------------
     // 恢复原版：直接使用数据库原始名称 (arcmeta.library_*) 与图标
     // ----------------------------------------------------
