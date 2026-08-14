@@ -1458,7 +1458,21 @@ StatisticsSnapshot CategoryRepo::calculateAllStatistics() {
     auto allCats = getAll();
     for (const auto& cat : allCats) {
         if (cat.kind == CategoryKind::SystemLibrary) {
-            sqlite3* targetDb = DatabaseManager::instance().getDbForPath(cat.physicalPath);
+            QString rawPath = QString::fromStdWString(cat.physicalPath);
+            sqlite3* targetDb = nullptr;
+
+            // 严格提取盘符直取分库句柄
+            if (rawPath.length() >= 2 && rawPath[1] == ':') {
+                QString letter = rawPath.left(1).toUpper();
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(rawPath.left(3).toStdWString());
+                if (volSerial != L"UNKNOWN") {
+                    targetDb = DatabaseManager::instance().getDriveDb(volSerial, letter);
+                }
+            }
+            if (!targetDb) {
+                targetDb = DatabaseManager::instance().getDbForPath(cat.physicalPath);
+            }
+
             int libCount = 0;
             if (targetDb) {
                 sqlite3_stmt* stmt = nullptr;

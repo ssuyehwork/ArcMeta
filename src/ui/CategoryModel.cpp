@@ -76,13 +76,11 @@ void CategoryModel::refresh() {
         for (const auto& cat : categories) {
             if (cat.kind == CategoryKind::SystemLibrary && cat.parentId == 0) {
                 QString rawPath = QString::fromStdWString(cat.physicalPath);
-                // 提取盘符，比如 "G:\\" -> "G:"
-                QFileInfo fileInfo(rawPath);
-                QString driveLetter = fileInfo.absolutePath().left(2);
-                if (driveLetter.endsWith("/") || driveLetter.endsWith("\\")) {
-                    driveLetter = driveLetter.left(1) + ":";
+                QString letter = "";
+                if (rawPath.length() >= 2 && rawPath[1] == ':') {
+                    letter = rawPath.left(1).toUpper();
                 }
-                QString displayName = QString("本地磁盘 (%1)").arg(driveLetter.toUpper());
+                QString displayName = letter.isEmpty() ? "本地磁盘托管库" : QString("本地磁盘 (%1:)").arg(letter);
 
                 int count = snapshot.libraryCounts.value(cat.id, 0);
                 QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(displayName).arg(count));
@@ -93,6 +91,7 @@ void CategoryModel::refresh() {
                 item->setData(cat.pinned, PinnedRole);
                 item->setData(cat.encrypted, EncryptedRole);
                 item->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
+                item->setData(static_cast<int>(cat.kind), CategoryKindRole);
                 // 标记为不可拖拽、不可更名、不可删除
                 item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
                 item->setIcon(UiHelper::getIcon("drive_filled", QColor("#378ADD"), 16));
