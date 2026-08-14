@@ -1301,8 +1301,8 @@ void CategoryRepo::fullRecount() {
 void CategoryRepo::fullRecountAsync(std::function<void(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts)> callback) {
     (void)QtConcurrent::run([callback]() {
         CategoryRepo::fullRecount();
-        auto sysCounts = CategoryRepo::getSystemCounts();
-        auto catCountsVec = CategoryRepo::getCounts();
+        auto sysCounts = CategoryRepo::getSystemCounts(); // 1. 直接获取准确的受控资产文件总数 (如 403)
+        auto catCountsVec = CategoryRepo::getCounts();    // 2. 获取各个分类目录各自的项数
         
         QMap<int, int> catCounts;
         for (const auto& entry : catCountsVec) {
@@ -1379,7 +1379,7 @@ QMap<QString, int> CategoryRepo::getGlobalUniqueTags() {
     return tagCounts; 
 } 
 
-QMap<QString, int> CategoryRepo::getSystemCounts() {
+QMap<QString, int> CategoryRepo::getRawSystemCounts() {
     QMap<QString, int> res;
     res["all"] = s_totalCount.load();
     res["tags"] = s_tagsCount.load();
@@ -1414,6 +1414,28 @@ QMap<QString, int> CategoryRepo::getSystemCounts() {
     }
     res["trash"] = libraryTrashCount + diskTrashCount;
     return res;
+}
+
+QMap<QString, int> CategoryRepo::getSystemCounts() {
+    QMap<QString, int> sysCounts = getRawSystemCounts();
+    
+    // 🚀 【资产素材物理全量 COUNT】：直接统计全库 metadata 表中的受控资产文件总数（如 403 项）
+    int totalAssetFiles = 0;
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    for (sqlite3* db : dbs) {
+        sqlite3_stmt* stmt = nullptr;
+        const char* sql = "SELECT COUNT(*) FROM metadata WHERE is_trash = 0 OR is_trash IS NULL";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                totalAssetFiles += sqlite3_column_int(stmt, 0);
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    // 🚀 “全部数据”必须且只能是受控文件/素材的总项数（403），严禁错算为分类目录个数！
+    sysCounts["all"] = totalAssetFiles;
+    return sysCounts;
 }
 
 QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {

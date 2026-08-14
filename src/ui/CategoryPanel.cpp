@@ -155,6 +155,8 @@ void CategoryPanel::requestRefresh(bool fullRebuild) {
     // 2026-07-xx 性能优化：缩短防抖时间至 200ms 以提升 UI 响应灵敏度
     if (fullRebuild) {
         m_refreshTimer->setProperty("fullRebuild", true);
+        // 🚀 【强行失效缓存】：标记计数状态为脏，驱动 fullRecountAsync 重新计算所有顶级根分类总和
+        CategoryRepo::s_countsDirty.store(true);
     }
     m_refreshTimer->start(200);
 }

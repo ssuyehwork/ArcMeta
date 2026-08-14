@@ -218,9 +218,15 @@ bool AssetImporter::importSingleFile(const QString& srcPath,
         newlyImportedPaths->append(destPath);
     }
  
-    // 🚨 重构核心：废除所有手写原始 SQL！统一转发给 MetadataManager 单一权威管线登记入库 
+    // 🚀 【乐观生成并发登记】：直接提交 Base36 ID，若数据库触发极小概率碰撞，内部将自动自愈重试
     std::wstring wDestPath = QDir::toNativeSeparators(destPath).toStdWString(); 
-    return MetadataManager::instance().registerAsset(fileId.toStdString(), wDestPath, targetCatId); 
+    bool registered = MetadataManager::instance().registerAsset(fileId.toStdString(), wDestPath, targetCatId); 
+    if (!registered) {
+        // 若最终注册失败，清理物理胶囊容器
+        QDir(containerDir).removeRecursively();
+        return false;
+    }
+    return true;
 } 
  
 bool AssetImporter::importDirectoryRecursive(const QString& srcDir, 

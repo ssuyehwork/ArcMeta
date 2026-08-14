@@ -488,12 +488,12 @@ void MetadataManager::notifyFullUIRebuild() {
 }
 
 // 🚨 SSOT 重构核心：单一权威资产入库登记管线
-bool MetadataManager::registerAsset(const std::string& folderId, const std::wstring& assetPath, int targetCatId) { 
+bool MetadataManager::registerAsset(const std::string& initialFolderId, const std::wstring& assetPath, int targetCatId) { 
     std::wstring nPath = normalizePath(assetPath); 
     sqlite3* db = DatabaseManager::instance().getDbForPath(nPath); 
     if (!db) return false; 
  
-    SqlTransaction trans(db); 
+    std::string folderId = initialFolderId;
     long long nowMsecs = QDateTime::currentMSecsSinceEpoch(); 
  
     // 1. 拆分主文件名与后缀 
@@ -502,7 +502,6 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
  
     // 准备 RuntimeMeta 对象用于参数绑定与后续内存缓存更新
     RuntimeMeta rm; 
-    rm.folderId = folderId; 
     rm.isFolder = false; // 强契约：资产恒为非目录 
     QFileInfo fi(QString::fromStdWString(nPath));
     rm.fileSize = fi.size(); 
@@ -514,32 +513,58 @@ bool MetadataManager::registerAsset(const std::string& folderId, const std::wstr
     rm.ext = ext; 
     rm.isManaged = true;
 
-    // 2. 写入数据库 metadata 表 (绝对绑定内部主文件路径，使用全局 kSqlInsertMeta 声明) 
-    sqlite3_stmt* stmtMeta = nullptr; 
-    if (sqlite3_prepare_v2(db, kSqlInsertMeta, -1, &stmtMeta, nullptr) == SQLITE_OK) { 
-        bindMetaHelper(stmtMeta, nPath, rm);
-        sqlite3_step(stmtMeta); 
-        sqlite3_finalize(stmtMeta); 
-    } 
- 
-    // 3. 若指定了有效用户分类，写入 category_items 表 
-    if (targetCatId > 0) { 
-        const char* sqlItems = "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)"; 
-        sqlite3_stmt* stmtItems = nullptr; 
-        if (sqlite3_prepare_v2(db, sqlItems, -1, &stmtItems, nullptr) == SQLITE_OK) { 
-            sqlite3_bind_int(stmtItems, 1, targetCatId); 
-            sqlite3_bind_text(stmtItems, 2, folderId.c_str(), -1, SQLITE_TRANSIENT); 
-            sqlite3_bind_text16(stmtItems, 3, nPath.c_str(), -1, SQLITE_TRANSIENT); 
-            sqlite3_bind_double(stmtItems, 4, static_cast<double>(nowMsecs)); 
-            sqlite3_step(stmtItems); 
-            sqlite3_finalize(stmtItems); 
-        } 
-    } 
+    // 🚀 【乐观生成 + UNIQUE 碰撞捕获】：0 次预检 SELECT，碰撞时仅捕获 SQLITE_CONSTRAINT 重试
+    int attempts = 0;
+    const int maxAttempts = 5;
+    bool success = false;
 
-    // 🚨 3.5：无论是否有自定义分类，入库资产都自动检测并绑定到物理托管根库分类
-    CategoryRepo::bindToLibraryRootCategory(folderId, nPath);
- 
-    if (!trans.commit()) return false; 
+    while (attempts++ < maxAttempts) {
+        SqlTransaction trans(db); 
+        rm.folderId = folderId;
+
+        // 2. 写入数据库 metadata 表 (绝对绑定内部主文件路径，使用全局 kSqlInsertMeta 声明) 
+        sqlite3_stmt* stmtMeta = nullptr; 
+        int rc = SQLITE_ERROR;
+        if (sqlite3_prepare_v2(db, kSqlInsertMeta, -1, &stmtMeta, nullptr) == SQLITE_OK) { 
+            bindMetaHelper(stmtMeta, nPath, rm);
+            rc = sqlite3_step(stmtMeta); 
+            sqlite3_finalize(stmtMeta); 
+        } 
+
+        if (rc == SQLITE_DONE) {
+            // 3. 若指定了有效用户分类，写入 category_items 表 
+            if (targetCatId > 0) { 
+                const char* sqlItems = "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)"; 
+                sqlite3_stmt* stmtItems = nullptr; 
+                if (sqlite3_prepare_v2(db, sqlItems, -1, &stmtItems, nullptr) == SQLITE_OK) { 
+                    sqlite3_bind_int(stmtItems, 1, targetCatId); 
+                    sqlite3_bind_text(stmtItems, 2, folderId.c_str(), -1, SQLITE_TRANSIENT); 
+                    sqlite3_bind_text16(stmtItems, 3, nPath.c_str(), -1, SQLITE_TRANSIENT); 
+                    sqlite3_bind_double(stmtItems, 4, static_cast<double>(nowMsecs)); 
+                    sqlite3_step(stmtItems); 
+                    sqlite3_finalize(stmtItems); 
+                } 
+            } 
+
+            // 🚨 3.5：无论是否有自定义分类，入库资产都自动检测并绑定到物理托管根库分类
+            CategoryRepo::bindToLibraryRootCategory(folderId, nPath);
+
+            if (trans.commit()) {
+                success = true;
+                break;
+            }
+        }
+
+        // 🚀 仅在触发 UNIQUE 约束碰撞（SQLITE_CONSTRAINT）时，重新生成 ID 并重试
+        if (rc == SQLITE_CONSTRAINT || rc == SQLITE_CONSTRAINT_PRIMARYKEY || rc == 19) {
+            folderId = ShellHelper::generateBase36Id().toStdString();
+        } else {
+            // 其他常规数据库错误直接退出
+            break;
+        }
+    }
+
+    if (!success) return false;
  
     // 4. 同步更新内存缓存 RuntimeMeta (SSOT 规则) 
     { 

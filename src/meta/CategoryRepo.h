@@ -86,6 +86,7 @@ public:
     static std::vector<std::pair<int, int>> getCounts();
     static int getUniqueItemCount();
     static int getUncategorizedItemCount();
+    static QMap<QString, int> getRawSystemCounts();
     static QMap<QString, int> getSystemCounts();
     static QStringList getSystemCategoryPaths(const QString& type);
 

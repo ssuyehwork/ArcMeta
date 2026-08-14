@@ -16,8 +16,8 @@ public:
         // 专门负责 CREATE TABLE、ALTER TABLE 升级
         const char* sqlCreateMetadata = 
             "CREATE TABLE IF NOT EXISTS metadata ("
-            "  path TEXT PRIMARY KEY, "
-            "  folder_id TEXT, "
+            "  folder_id TEXT PRIMARY KEY, "
+            "  path TEXT UNIQUE, "
             "  rating INTEGER, "
             "  color TEXT, "
             "  pinned INTEGER"
