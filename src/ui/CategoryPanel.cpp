@@ -50,6 +50,7 @@ using namespace ArcMeta::Style;
 
 #include "Logger.h"
 #include <QtConcurrent>
+#include <QCoreApplication>
 
 namespace ArcMeta {
 
@@ -99,27 +100,12 @@ CategoryPanel::CategoryPanel(QWidget* parent)
         bool needsFullRebuild = m_refreshTimer->property("fullRebuild").toBool();
 
         if (m_isFirstLoad || needsFullRebuild) {
-            m_categoryModel->refresh();
+            refreshFullTree();
             m_isFirstLoad = false;
             m_refreshTimer->setProperty("fullRebuild", false); // 消费完重置
+        } else {
+            refreshCountsOnly();
         }
-
-        // 2026-07-xx 性能优化：执行重建后立即继续统计计算，不再触发 requestRefresh 导致二次等待
-        // 2026-06-xx 物理分流：将耗时的统计计算（fullRecount）移出 UI 线程
-        // 采用 QPointer 确保线程安全性并完美对接 CategoryRepo::fullRecountAsync 异步计数器
-        QPointer<CategoryPanel> weakThis(this);
-        CategoryRepo::fullRecountAsync([weakThis](const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
-            if (weakThis && weakThis->m_categoryModel) {
-                // 物理修复：若统计数据全为0，且系统元数据尚未加载完成，则拒绝执行 UI 更新以防止计数清零
-                bool isSysUnready = !MetadataManager::instance().isLoaded();
-                bool allCountsZero = (sysCounts.value("all", 0) == 0 && sysCounts.value("trash", 0) == 0);
-                if (isSysUnready && allCountsZero) {
-                    return;
-                }
-                // 第三阶段：执行局部数据更新，杜绝 beginResetModel 引发全量布局计算
-                weakThis->m_categoryModel->updateItemCounts(sysCounts, catCounts);
-            }
-        });
     });
 
     // 2026-xx-xx 按照 Plan-106：初始化搜索防抖计时器
@@ -149,6 +135,36 @@ CategoryPanel::CategoryPanel(QWidget* parent)
             requestRefresh();
         }
     });
+}
+
+void CategoryPanel::refreshCountsOnly() {
+    if (!m_categoryModel) return;
+    QPointer<CategoryPanel> weakThis(this);
+
+    // 异步执行 calculateAllStatistics，彻底 offload UI 线程
+    (void)QtConcurrent::run([weakThis]() {
+        StatisticsSnapshot snapshot = CategoryRepo::calculateAllStatistics();
+
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, snapshot]() {
+            if (weakThis && weakThis->m_categoryModel) {
+                // 物理防护：若统计数据全为0，且系统元数据尚未加载完成，则拒绝执行 UI 更新以防止计数清零
+                bool isSysUnready = !MetadataManager::instance().isLoaded();
+                bool allCountsZero = (snapshot.systemCounts.value("all", 0) == 0 && snapshot.systemCounts.value("trash", 0) == 0);
+                if (isSysUnready && allCountsZero) {
+                    return;
+                }
+                weakThis->m_categoryModel->updateStatisticsWithSnapshot(snapshot);
+            }
+        });
+    });
+}
+
+void CategoryPanel::refreshFullTree() {
+    if (!m_categoryModel) return;
+    m_categoryModel->refresh();
+
+    // 树重建完成后自动触发一次统计计算填入最新数字
+    refreshCountsOnly();
 }
 
 void CategoryPanel::requestRefresh(bool fullRebuild) {

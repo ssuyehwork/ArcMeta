@@ -20,6 +20,20 @@ enum class CategoryKind : int {
     SystemLibrary = 1   // 系统托管库根分类
 };
 
+struct StatisticsSnapshot {
+    // 1. 静态分类计数 (key -> count)
+    // 包含: "all", "uncategorized", "untagged", "recently_visited", "tags", "trash"
+    QMap<QString, int> systemCounts;
+
+    // 2. 半静态托管库计数 (categoryId -> count)
+    // 键为托管库分类ID，值为对应盘中有效素材总数
+    QMap<int, int> libraryCounts;
+
+    // 3. 全动态用户分类计数 (categoryId -> count)
+    // 键为用户分类ID，值为关联的去重有效素材数
+    QMap<int, int> userCategoryCounts;
+};
+
 struct Category {
     int id = 0;
     int parentId = 0;
@@ -64,6 +78,11 @@ public:
      * @param physicalPath 文件绝对路径
      */
     static void bindToLibraryRootCategory(const std::string& folderId, const std::wstring& physicalPath);
+
+    /**
+     * @brief 唯一合法的统计函数，一次性产出标准化账本结构体 StatisticsSnapshot
+     */
+    static StatisticsSnapshot calculateAllStatistics();
 
     static bool add(Category& cat);
     static bool update(const Category& cat);

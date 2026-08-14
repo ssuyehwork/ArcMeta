@@ -4,6 +4,7 @@
 #include <QSet>
 #include <QMimeData>
 #include "../core/ModelContract.h"
+#include "../meta/CategoryRepo.h"
 
 namespace ArcMeta {
 
@@ -27,6 +28,7 @@ signals:
 public slots:
     void refresh();
     void updateStatistics(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts);
+    void updateStatisticsWithSnapshot(const StatisticsSnapshot& snapshot);
     void updateItemCounts(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
         updateStatistics(sysCounts, catCounts);
     }

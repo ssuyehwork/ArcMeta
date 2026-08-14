@@ -51,6 +51,16 @@ public:
     void selectCategoryByType(const QString& type);
 
     /**
+     * @brief 轻量级数据变动（增删素材、打标、进回收站）：树结构完全不动，精准刷新数字
+     */
+    void refreshCountsOnly();
+
+    /**
+     * @brief 结构级变动（用户新建/删除分类、插入/拔出硬盘）：重建树结构并刷新数字
+     */
+    void refreshFullTree();
+
+    /**
      * @brief 2026-06-xx 物理削峰：请求刷新侧边栏计数
      * 采用 500ms 防抖逻辑，合并高频信号风暴
      * @param fullRebuild 2026-07-xx: 是否强制重建树结构 (用于导入后即时显示新分类)

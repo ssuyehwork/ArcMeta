@@ -1360,6 +1360,150 @@ int CategoryRepo::getUncategorizedItemCount() {
     return getSystemCounts()["uncategorized"];
 }
 
+StatisticsSnapshot CategoryRepo::calculateAllStatistics() {
+    StatisticsSnapshot snapshot;
+
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+
+    // ----------------------------------------------------
+    // 步骤 2（静态层计算）
+    // ----------------------------------------------------
+
+    // 1. "all"：所有库中 is_trash = 0 且 is_folder = 0 的素材总和；
+    int allCount = 0;
+    for (sqlite3* db : dbs) {
+        if (!db) continue;
+        sqlite3_stmt* stmt = nullptr;
+        const char* sql = "SELECT COUNT(*) FROM metadata WHERE is_trash = 0 AND is_folder = 0";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                allCount += sqlite3_column_int(stmt, 0);
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+    snapshot.systemCounts["all"] = allCount;
+
+    // 2. "trash"：各库 is_trash = 1 的总和 + 各盘 disk_trash 表记录总和；
+    int trashCount = 0;
+    for (sqlite3* db : dbs) {
+        if (!db) continue;
+        // 托管模式回收站
+        sqlite3_stmt* stmtLib = nullptr;
+        const char* sqlLib = "SELECT COUNT(DISTINCT folder_id) FROM metadata WHERE is_trash = 1";
+        if (sqlite3_prepare_v2(db, sqlLib, -1, &stmtLib, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmtLib) == SQLITE_ROW) {
+                trashCount += sqlite3_column_int(stmtLib, 0);
+            }
+            sqlite3_finalize(stmtLib);
+        }
+        // 磁盘物理回收站
+        sqlite3_stmt* stmtDisk = nullptr;
+        const char* sqlDisk = "SELECT COUNT(*) FROM disk_trash";
+        if (sqlite3_prepare_v2(db, sqlDisk, -1, &stmtDisk, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmtDisk) == SQLITE_ROW) {
+                trashCount += sqlite3_column_int(stmtDisk, 0);
+            }
+            sqlite3_finalize(stmtDisk);
+        }
+    }
+    snapshot.systemCounts["trash"] = trashCount;
+
+    // 3. "untagged"：所有库中 is_trash = 0 且 (tags IS NULL OR tags = '') 的素材总和；
+    int untaggedCount = 0;
+    for (sqlite3* db : dbs) {
+        if (!db) continue;
+        sqlite3_stmt* stmt = nullptr;
+        const char* sql = "SELECT COUNT(*) FROM metadata WHERE is_trash = 0 AND (tags IS NULL OR tags = '')";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                untaggedCount += sqlite3_column_int(stmt, 0);
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+    snapshot.systemCounts["untagged"] = untaggedCount;
+
+    // 4. "uncategorized"：所有库中 is_trash = 0 且其 folder_id 从未出现在任何用户自定义分类（category_kind == 0）关联中的素材总和。
+    int uncategorizedCount = 0;
+    for (sqlite3* db : dbs) {
+        if (!db) continue;
+        sqlite3_stmt* stmt = nullptr;
+        // 查所有 is_trash = 0 的 metadata，看它们是否在用户自定义分类(category_kind=0)中有关联
+        const char* sql =
+            "SELECT COUNT(DISTINCT folder_id) FROM metadata WHERE is_trash = 0 AND folder_id NOT IN ("
+            "    SELECT ci.folder_id FROM category_items ci "
+            "    JOIN categories c ON ci.category_id = c.id "
+            "    WHERE c.category_kind = 0"
+            ")";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                uncategorizedCount += sqlite3_column_int(stmt, 0);
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+    snapshot.systemCounts["uncategorized"] = uncategorizedCount;
+
+    // 5. "recently_visited", "tags" 为动态/辅助统计，这里可赋默认值，由 getSystemCounts() 中统一收敛，或在此填入默认 0。
+    // tags 可根据 getGlobalUniqueTags().size() 来决定。
+    snapshot.systemCounts["tags"] = 0;
+    snapshot.systemCounts["recently_visited"] = 0;
+
+    // ----------------------------------------------------
+    // 步骤 3（半静态层计算）
+    // ----------------------------------------------------
+    // 遍历所有 category_kind == 1（SystemLibrary）的分类：
+    // 通过其 physical_path 路由到对应盘的数据库，执行 SELECT COUNT(*) FROM metadata WHERE is_trash = 0 AND is_folder = 0，直接将该盘的有效素材总数填入 libraryCounts[cat.id]
+    auto allCats = getAll();
+    for (const auto& cat : allCats) {
+        if (cat.kind == CategoryKind::SystemLibrary) {
+            sqlite3* targetDb = DatabaseManager::instance().getDbForPath(cat.physicalPath);
+            int libCount = 0;
+            if (targetDb) {
+                sqlite3_stmt* stmt = nullptr;
+                const char* sql = "SELECT COUNT(*) FROM metadata WHERE is_trash = 0 AND is_folder = 0";
+                if (sqlite3_prepare_v2(targetDb, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                    if (sqlite3_step(stmt) == SQLITE_ROW) {
+                        libCount = sqlite3_column_int(stmt, 0);
+                    }
+                    sqlite3_finalize(stmt);
+                }
+            }
+            snapshot.libraryCounts[cat.id] = libCount;
+        }
+    }
+
+    // ----------------------------------------------------
+    // 步骤 4（全动态层计算）
+    // ----------------------------------------------------
+    // 遍历所有 category_kind == 0（User）的分类：
+    // 统计其在 category_items 中关联的有效资产总数，填入 userCategoryCounts[cat.id]。
+    for (const auto& cat : allCats) {
+        if (cat.kind == CategoryKind::User) {
+            int userCount = 0;
+            for (sqlite3* db : dbs) {
+                if (!db) continue;
+                sqlite3_stmt* stmt = nullptr;
+                // 仅统计有效资产(is_trash = 0 并且 is_folder = 0)
+                const char* sql = "SELECT COUNT(DISTINCT ci.folder_id) FROM category_items ci "
+                                  "JOIN metadata m ON ci.folder_id = m.folder_id "
+                                  "WHERE ci.category_id = ? AND m.is_trash = 0 AND m.is_folder = 0";
+                if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_int(stmt, 1, cat.id);
+                    if (sqlite3_step(stmt) == SQLITE_ROW) {
+                        userCount += sqlite3_column_int(stmt, 0);
+                    }
+                    sqlite3_finalize(stmt);
+                }
+            }
+            snapshot.userCategoryCounts[cat.id] = userCount;
+        }
+    }
+
+    return snapshot;
+}
+
 QMap<QString, int> CategoryRepo::getGlobalUniqueTags() { 
     QMap<QString, int> tagCounts; 
  

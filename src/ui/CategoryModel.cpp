@@ -35,22 +35,20 @@ void CategoryModel::deferredRefresh() {
 void CategoryModel::refresh() {
     m_isFirstLoad = false;
 
-    auto sysCounts = CategoryRepo::getSystemCounts();
-    auto catCountsVec = CategoryRepo::getCounts();
-    QMap<int, int> catCounts;
-    for (const auto& entry : catCountsVec) {
-        catCounts[entry.first] = entry.second;
-    }
+    // 获取权威统计账本
+    StatisticsSnapshot snapshot = CategoryRepo::calculateAllStatistics();
 
     beginResetModel();
     removeRows(0, rowCount());
     
     QStandardItem* root = invisibleRootItem();
 
-    // 1. 系统逻辑桶
+    // ----------------------------------------------------
+    // 层级一：静态分类区（固定顶部）
+    // ----------------------------------------------------
     if (m_type == System || m_type == Both) {
         auto addSystemItem = [&](const QString& name, const QString& type, const QString& icon, const QString& color, int sysId) {
-            int count = sysCounts.value(type, 0);
+            int count = snapshot.systemCounts.value(type, 0);
             QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
             item->setData(type, TypeRole);
             item->setData(name, NameRole);
@@ -69,7 +67,44 @@ void CategoryModel::refresh() {
         addSystemItem("回收站", "trash", "trash", "#e74c3c", -8);
     }
 
-    // 2. “快速访问”分组节点
+    auto categories = CategoryRepo::getAll();
+
+    // ----------------------------------------------------
+    // 层级二：半静态托管库区（跟随硬件挂载）
+    // ----------------------------------------------------
+    if (m_type == Both || m_type == User) {
+        for (const auto& cat : categories) {
+            if (cat.kind == CategoryKind::SystemLibrary && cat.parentId == 0) {
+                QString rawPath = QString::fromStdWString(cat.physicalPath);
+                // 提取盘符，比如 "G:\\" -> "G:"
+                QFileInfo fileInfo(rawPath);
+                QString driveLetter = fileInfo.absolutePath().left(2);
+                if (driveLetter.endsWith("/") || driveLetter.endsWith("\\")) {
+                    driveLetter = driveLetter.left(1) + ":";
+                }
+                QString displayName = QString("本地磁盘 (%1)").arg(driveLetter.toUpper());
+
+                int count = snapshot.libraryCounts.value(cat.id, 0);
+                QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(displayName).arg(count));
+                item->setData("category", TypeRole);
+                item->setData(cat.id, IdRole);
+                item->setData("#378ADD", ColorRole);
+                item->setData(displayName, NameRole);
+                item->setData(cat.pinned, PinnedRole);
+                item->setData(cat.encrypted, EncryptedRole);
+                item->setData(QString::fromStdWString(cat.encryptHint), EncryptHintRole);
+                // 标记为不可拖拽、不可更名、不可删除
+                item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+                item->setIcon(UiHelper::getIcon("drive_filled", QColor("#378ADD"), 16));
+
+                root->appendRow(item);
+            }
+        }
+    }
+
+    // ----------------------------------------------------
+    // 层级三：全动态分类区（用户自主管理）
+    // ----------------------------------------------------
     QStandardItem* favGroup = nullptr;
     if (m_type == Both || m_type == User) {
         favGroup = new QStandardItem("快速访问");
@@ -84,16 +119,15 @@ void CategoryModel::refresh() {
         favGroup->setForeground(QColor("#FFFFFF"));
     }
 
-    // 3. “文件夹”主标题节点 
     QStandardItem* catGroup = nullptr; 
     if (m_type == Both || m_type == User) { 
         catGroup = new QStandardItem(); 
         catGroup->setData("category_root_group", TypeRole); 
-        catGroup->setData("文件夹", NameRole); // 升级名称 
+        catGroup->setData("文件夹", NameRole);
         catGroup->setData(CAT_GROUP_SYS_ID, IdRole); 
         catGroup->setSelectable(false); 
         catGroup->setEditable(false); 
-        catGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#378ADD"), 16)); // 恢复实心文件夹图标 
+        catGroup->setIcon(UiHelper::getIcon("folder_filled", QColor("#378ADD"), 16));
  
         QFont font = catGroup->font(); 
         font.setBold(true); 
@@ -102,17 +136,17 @@ void CategoryModel::refresh() {
     } 
 
     if (m_type == User || m_type == Both) {
-        auto categories = CategoryRepo::getAll();
         QMap<int, QStandardItem*> itemMap;
-        QMap<int, Category> catMap;
 
         for (const auto& cat : categories) {
-            catMap[cat.id] = cat;
+            if (cat.kind == CategoryKind::SystemLibrary) {
+                continue; // 系统托管库不纳入自定义文件夹树
+            }
             int id = cat.id;
             QString name = QString::fromStdWString(cat.name);
             QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
 
-            int count = catCounts.value(id, 0);
+            int count = snapshot.userCategoryCounts.value(id, 0);
             QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
             item->setData("category", TypeRole);
             item->setData(id, IdRole);
@@ -132,14 +166,19 @@ void CategoryModel::refresh() {
             itemMap[id] = item;
         }
 
-        // 4. 物理托管库根分类
+        // 组装用户自定义层级树
         for (const auto& cat : categories) {
+            if (cat.kind == CategoryKind::SystemLibrary) {
+                continue;
+            }
             int id = cat.id;
             QStandardItem* item = itemMap[id];
             int parentId = cat.parentId;
 
             if (parentId == 0) {
-                if (cat.kind == CategoryKind::SystemLibrary) {
+                if (catGroup) {
+                    catGroup->appendRow(item);
+                } else {
                     root->appendRow(item);
                 }
             } else if (parentId > 0 && itemMap.contains(parentId)) {
@@ -147,33 +186,16 @@ void CategoryModel::refresh() {
             }
         }
 
-        // 5. 挂载“快速访问”
+        // 挂载“快速访问”
         if (favGroup) {
             root->appendRow(favGroup);
         }
 
-        // 6. 挂载用户自定义分类至“分类”主标题下
-        // 按照产品标准：全量统计全树所有深度的自定义文件夹总数（对应用户原话：“按照产品标准：全量统计全树所有深度的自定义文件夹总数”）
+        // 挂载用户自定义分类文件夹
         int totalUserFolderCount = 0;
         for (const auto& cat : categories) {
             if (cat.kind != CategoryKind::SystemLibrary) {
                 totalUserFolderCount++;
-            }
-        }
-
-        for (const auto& cat : categories) {
-            int id = cat.id;
-            QStandardItem* item = itemMap[id];
-            int parentId = cat.parentId;
-
-            if (parentId == 0) {
-                if (cat.kind != CategoryKind::SystemLibrary) {
-                    if (catGroup) {
-                        catGroup->appendRow(item);
-                    } else {
-                        root->appendRow(item);
-                    }
-                }
             }
         }
 
@@ -182,15 +204,15 @@ void CategoryModel::refresh() {
             root->appendRow(catGroup);
         }
 
-        // 7. 挂载快速访问快捷镜像
+        // 挂载快速访问快捷镜像
         if (favGroup) {
             for (const auto& cat : categories) {
-                if (cat.pinned) {
+                if (cat.pinned && cat.kind != CategoryKind::SystemLibrary) {
                     int id = cat.id;
                     QString name = QString::fromStdWString(cat.name);
                     QString color = QString::fromStdWString(cat.color).isEmpty() ? "#555555" : QString::fromStdWString(cat.color);
                     
-                    int count = catCounts.value(id, 0);
+                    int count = snapshot.userCategoryCounts.value(id, 0);
                     QStandardItem* mirror = new QStandardItem(QString("%1 (%2)").arg(name).arg(count));
                     mirror->setData("category", TypeRole);
                     mirror->setData(id, IdRole);
@@ -226,6 +248,17 @@ void CategoryModel::updateSystemCounts() {
 }
 
 void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts) {
+    // 兼容传统接口
+    StatisticsSnapshot snapshot;
+    snapshot.systemCounts = sysCounts;
+    for (auto it = catCounts.begin(); it != catCounts.end(); ++it) {
+        snapshot.libraryCounts[it.key()] = it.value();
+        snapshot.userCategoryCounts[it.key()] = it.value();
+    }
+    updateStatisticsWithSnapshot(snapshot);
+}
+
+void CategoryModel::updateStatisticsWithSnapshot(const StatisticsSnapshot& snapshot) {
     std::function<void(QStandardItem*)> updateItem;
     updateItem = [&](QStandardItem* parent) {
         for (int i = 0; i < parent->rowCount(); ++i) {
@@ -234,7 +267,7 @@ void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const 
             QString name = item->data(NameRole).toString();
             int id = item->data(IdRole).toInt();
 
-                        if (id == CAT_GROUP_SYS_ID) { 
+            if (id == CAT_GROUP_SYS_ID) {
                 std::function<int(QStandardItem*)> countAllSubFolders; 
                 countAllSubFolders = [&](QStandardItem* node) -> int { 
                     int c = 0; 
@@ -248,13 +281,20 @@ void CategoryModel::updateStatistics(const QMap<QString, int>& sysCounts, const 
                 int totalFolders = countAllSubFolders(item); 
                 item->setText(QString("文件夹 (%1)").arg(totalFolders)); 
             } else if (id < 0) { 
-                int count = sysCounts.value(type, 0);
+                int count = snapshot.systemCounts.value(type, 0);
                 QString newText = QString("%1 (%2)").arg(name).arg(count);
                 if (item->text() != newText) {
                     item->setText(newText);
                 }
             } else if (type == "category" && id > 0) { 
-                int count = catCounts.value(id, 0);
+                int count = 0;
+                // 看是 SystemLibrary 还是 User 分类
+                Category cat = CategoryRepo::getCachedById(id);
+                if (cat.kind == CategoryKind::SystemLibrary) {
+                    count = snapshot.libraryCounts.value(id, 0);
+                } else {
+                    count = snapshot.userCategoryCounts.value(id, 0);
+                }
                 QString newText = QString("%1 (%2)").arg(name).arg(count);
                 if (item->text() != newText) {
                     item->setText(newText);
