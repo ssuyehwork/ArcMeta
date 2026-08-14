@@ -213,5 +213,3 @@ bool PresetTagsDialog::eventFilter(QObject* obj, QEvent* event) {
 }
 
 } // namespace ArcMeta
-
-#include "PresetTagsDialog.moc"
