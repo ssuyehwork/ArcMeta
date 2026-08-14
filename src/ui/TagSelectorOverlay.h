@@ -61,6 +61,7 @@ private:
     bool m_isDragging = false;
     int m_resizeDir = 0; // 0=None, 1=Left, 2=Right, 4=Top, 8=Bottom, etc.
     const int m_margin = 6;
+    bool m_wasActivated = false; // 是否已经完成首次激活
 };
 
 } // namespace ArcMeta
