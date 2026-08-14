@@ -1301,26 +1301,13 @@ void CategoryRepo::fullRecount() {
 void CategoryRepo::fullRecountAsync(std::function<void(const QMap<QString, int>& sysCounts, const QMap<int, int>& catCounts)> callback) {
     (void)QtConcurrent::run([callback]() {
         CategoryRepo::fullRecount();
-        auto catCountsVec = CategoryRepo::getCounts();
+        auto sysCounts = CategoryRepo::getSystemCounts(); // 1. 直接获取准确的受控资产文件总数 (如 403)
+        auto catCountsVec = CategoryRepo::getCounts();    // 2. 获取各个分类目录各自的项数
         
         QMap<int, int> catCounts;
         for (const auto& entry : catCountsVec) {
             catCounts[entry.first] = entry.second;
         }
-
-        auto sysCounts = CategoryRepo::getRawSystemCounts();
-
-        // 3. 🚀【产品硬线规则】：对所有 parentId == 0 的顶级根分类计数进行全量累加
-        auto allCategories = CategoryRepo::getAll();
-        int sumOfRootCategories = 0;
-        for (const auto& cat : allCategories) {
-            if (cat.parentId == 0 && cat.kind != CategoryKind::SystemLibrary) {
-                sumOfRootCategories += catCounts.value(cat.id, 0);
-            }
-        }
-
-        // 4. 锁定“全部数据”数值等于顶级根分类之和
-        sysCounts["all"] = sumOfRootCategories;
 
         if (callback) {
             QMetaObject::invokeMethod(QCoreApplication::instance(), [callback, sysCounts, catCounts]() {
@@ -1431,23 +1418,23 @@ QMap<QString, int> CategoryRepo::getRawSystemCounts() {
 
 QMap<QString, int> CategoryRepo::getSystemCounts() {
     QMap<QString, int> sysCounts = getRawSystemCounts();
-    QMap<int, int> catCounts; // 获取全库各分类（含根分类）的精准计数
-    for (const auto& entry : getCounts()) {
-        catCounts[entry.first] = entry.second;
-    }
 
-    // 🚀【产品硬线规则】：获取所有 parentId == 0 的顶级根分类，累加其计数作为“全部数据”数值
-    auto allCategories = getAll();
-    int sumOfRootCategories = 0;
-
-    for (const auto& cat : allCategories) {
-        if (cat.parentId == 0 && cat.kind != CategoryKind::SystemLibrary) {
-            sumOfRootCategories += catCounts.value(cat.id, 0);
+    // 🚀 【资产素材物理全量 COUNT】：直接统计全库 metadata 表中的受控资产文件总数（如 403 项）
+    int totalAssetFiles = 0;
+    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+    for (sqlite3* db : dbs) {
+        sqlite3_stmt* stmt = nullptr;
+        const char* sql = "SELECT COUNT(*) FROM metadata WHERE is_trash = 0 OR is_trash IS NULL";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                totalAssetFiles += sqlite3_column_int(stmt, 0);
+            }
+            sqlite3_finalize(stmt);
         }
     }
 
-    // 🚀 “全部数据”数值与顶级根分类总和锁定 100% 绝对同步！
-    sysCounts["all"] = sumOfRootCategories;
+    // 🚀 “全部数据”必须且只能是受控文件/素材的总项数（403），严禁错算为分类目录个数！
+    sysCounts["all"] = totalAssetFiles;
     return sysCounts;
 }
 
