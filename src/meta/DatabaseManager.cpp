@@ -251,9 +251,6 @@ bool DatabaseManager::loadDb(const std::wstring& diskPath, DbConnection& conn) {
         qDebug() << "[DB] Schema error:" << errMsg;
         sqlite3_free(errMsg);
     } else {
-        // 彻底剥离出的 DELETE 清洗脚本，保持连接池开库轻量级与单一职责原则
-        DatabaseMigrator::performDataCleanup(conn.memDb);
-
         // FTS5 trigram 模糊匹配与自动触发器同步
         const char* ftsSchema = R"(
             CREATE VIRTUAL TABLE IF NOT EXISTS metadata_fts USING fts5(

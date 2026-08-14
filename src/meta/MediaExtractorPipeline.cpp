@@ -177,13 +177,8 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
         return;
     }
 
-    if (w > 0 && h > 0) {
-        MetadataManager::instance().setItemDimensions(path, w, h);
-    }
-
     std::wstring colorStr;
     QVector<QPair<QColor, float>> palette;
-    bool success = false;
     
     if (!m_isCanceled.load()) {
         if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
@@ -197,11 +192,10 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
                     QColor dominant = MediaColorExtractor::quantizeColor(pal.first().first);
                     colorStr = dominant.name().toUpper().toStdWString();
                     palette = pal;
-                    success = true;
                 }
             }
         } else if (info.isDir()) {
-            success = extractColor(path, colorStr, palette);
+            extractColor(path, colorStr, palette);
         }
     }
 
@@ -213,12 +207,7 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
         return;
     }
 
-    if (success) {
-        MetadataManager::instance().setItemVisualMetadata(path, colorStr, palette, false);
-    }
-
-    MetadataManager::instance().updateIngestionStatus(path, 1);
-    MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::PathUpdate, QString::fromStdWString(path));
+    MetadataManager::instance().updateExtractedMediaFeatures(path, w, h, colorStr, palette, 1);
 
     // 递减正在处理的计数并实时通知上报，供主界面进度条平滑由左向右推进
     int active = m_activeCount.fetch_sub(1) - 1;

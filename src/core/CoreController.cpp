@@ -119,11 +119,7 @@ CoreController::CoreController(QObject* parent) : QObject(parent) {
 
             // 2. 原普通资源库/常规文件的 IOCP 变动响应逻辑
             if (ev.action == ArcMeta::WatcherAction::Added || ev.action == ArcMeta::WatcherAction::Modified) {
-                if (ev.isDirectory) {
-                    (void)QtConcurrent::run([normNewPath]() {
-                        AutoImportManager::instance().handleRecursiveIngestion(normNewPath);
-                    });
-                } else {
+                if (!ev.isDirectory) {
                     MetadataManager::instance().registerItemsAsync(QStringList() << ev.newPath, true);
                 }
             } else if (ev.action == ArcMeta::WatcherAction::Removed) {

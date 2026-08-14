@@ -438,7 +438,6 @@ void MainWindow::initUi() {
         connect(processor, &CategoryDropProcessor::processingFinished, this, [this, processor, targetCatId](bool success, int itemCount, const QStringList& newlyImportedPaths) { 
             Q_UNUSED(success); 
             
-            CategoryRepo::s_countsDirty.store(true); 
             m_categoryPanel->requestRefresh(true); 
             m_contentPanel->refreshAll(); 
              
@@ -490,7 +489,6 @@ void MainWindow::initUi() {
                                     CategoryRepo::addItemToCategory(targetCatId, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
                                 }
                             }
-                            CategoryRepo::s_countsDirty.store(true);
                             m_categoryPanel->requestRefresh(true);
                             m_contentPanel->refreshAll();
                         });
@@ -967,7 +965,6 @@ void MainWindow::initUi() {
         std::string fid = MetadataManager::instance().getFolderIdSync(path.toStdWString());
         if (!fid.empty()) {
             CategoryRepo::removeItemFromCategory(catId, fid);
-            CategoryRepo::s_countsDirty.store(true);
             if (m_categoryPanel) m_categoryPanel->requestRefresh(true);
             m_contentPanel->updateItemMetadata(path);
         }

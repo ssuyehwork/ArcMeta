@@ -576,22 +576,12 @@ bool MetadataManager::registerAsset(const std::string& initialFolderId, const st
         m_folderIdToPath[folderId] = nPath; 
     } 
  
-    // 5. 实时驱动原子计数器加 1 与全系统通知 
-    CategoryRepo::incrementTotalFileCount(1); 
-    CategoryRepo::s_totalCount.fetch_add(1); 
-    CategoryRepo::updatePersistentStat("sys_total_count", 1); 
-    if (targetCatId <= 0) { 
-        CategoryRepo::s_uncategorizedCount.fetch_add(1); 
-        CategoryRepo::updatePersistentStat("sys_uncategorized_count", 1); 
-    } 
  
     // 6. 激活后台提取流水线解析分辨率与调色盘 
     ensureActivated(nPath); 
     updateIngestionStatus(nPath, 0); 
     registerItemsAsync({QString::fromStdWString(nPath)}, true); 
  
-    // 🚨 修复：强制标记侧边栏计数已过期，并通知 UI 刷新
-    CategoryRepo::s_countsDirty.store(true);
     notifyCategoryCountChanged();
 
     notifyUI(RefreshLevel::FullRebuild); 
@@ -1249,6 +1239,68 @@ void MetadataManager::setSha256(const std::wstring& path, const std::string& sha
     DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
         persistAsync(nPath);
     });
+}
+
+void MetadataManager::updateExtractedMediaFeatures(
+    const std::wstring& path,
+    int width,
+    int height,
+    const std::wstring& autoColor,
+    const QVector<QPair<QColor, float>>& palettes,
+    int ingestionStatus)
+{
+    std::wstring nPath = normalizePath(path);
+    RuntimeMeta metaCopy;
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        auto currentSnapshot = std::atomic_load(&m_snapshot);
+        if (!currentSnapshot || !currentSnapshot->count(nPath)) return;
+
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        RuntimeMeta& meta = (*newMap)[nPath];
+        meta.width = width;
+        meta.height = height;
+        meta.autoColor = autoColor;
+        meta.ingestionStatus = ingestionStatus;
+
+        meta.palettes.clear();
+        for (const auto& p : palettes) {
+            meta.palettes.emplace_back(p.first, p.second);
+        }
+        metaCopy = meta;
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
+
+    // 仅发起 1 次数据库事务
+    DatabaseManager::instance().enqueueSyncTask([this, nPath, metaCopy]() {
+        sqlite3* db = DatabaseManager::instance().getDbForPath(nPath);
+        if (!db) return;
+
+        SqlTransaction trans(db);
+        const char* sql = "UPDATE metadata SET width = ?, height = ?, auto_color = ?, palettes = ?, ingestion_status = ? WHERE folder_id = ?";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, metaCopy.width);
+            sqlite3_bind_int(stmt, 2, metaCopy.height);
+            sqlite3_bind_text16(stmt, 3, metaCopy.autoColor.c_str(), -1, SQLITE_TRANSIENT);
+
+            // 序列化调色盘 JSON
+            QJsonArray arr;
+            for (const auto& pe : metaCopy.palettes) {
+                QJsonObject obj; obj["color"] = pe.color.name(); obj["ratio"] = (double)pe.ratio; arr.append(obj);
+            }
+            QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
+            sqlite3_bind_blob(stmt, 4, ba.constData(), ba.size(), SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 5, metaCopy.ingestionStatus);
+            sqlite3_bind_text(stmt, 6, metaCopy.folderId.c_str(), -1, SQLITE_TRANSIENT);
+
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+        trans.commit();
+    });
+
+    notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 }
 
 void MetadataManager::setAddedAt(const std::wstring& path, long long addedAt, bool notify) {
@@ -2097,8 +2149,6 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
         trans.commit();
     }
 
-    if (totalDelta != 0) CategoryRepo::incrementTotalFileCount(totalDelta);
-    
     // 2026-06-xx 物理级根除：基于 File ID (FRN) 批量清理所有分类关联，彻底杜绝“幽灵关联”
     if (!fids.empty()) {
         CategoryRepo::removeAllCategoriesBatch(fids);
@@ -2254,12 +2304,8 @@ void MetadataManager::removeMetadataBatchSync(const QStringList& paths) {
         }
     }
 
-    if (totalDelta != 0) CategoryRepo::incrementTotalFileCount(totalDelta);
     if (!allFids.empty()) CategoryRepo::removeAllCategoriesBatch(allFids);
     
-    // 🚨 按照用户对账反馈：强制标记侧边栏计数已过期，防止缓存导致侧边栏计数未同步刷新
-    CategoryRepo::s_countsDirty.store(true);
-
     notifyFullUIRebuild();
 
     // 关键操作后即时异步落盘
@@ -2354,11 +2400,6 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
             CategoryRepo::moveToTrashBatch({fid});
         }
 
-        // 2026-07-xx 架构修正：移入回收站应视为从活跃池移除。
-        // 核心红线：仅当项已登记时，才执行计数同步。
-        if (isManaged) {
-            CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
-        }
 
         if (isManagedAsset(isFolder, nPath)) {
             if (isTrash) {
@@ -2412,10 +2453,6 @@ void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
                 if (it->second.isTrash != isTrash) {
                     auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
                     RuntimeMeta& meta = (*newMap)[nPath];
-                    // 2026-07-xx 按照规则同步活跃计数：仅对已登记项执行
-                    if (meta.isManaged) {
-                        CategoryRepo::incrementTotalFileCount(isTrash ? -1 : 1);
-                    }
                     meta.isTrash = isTrash;
                     if (!isTrash) {
                         meta.originalPath = L""; // Clear on restore
@@ -2685,9 +2722,6 @@ void MetadataManager::persistBatchAsync(const std::vector<std::wstring>& paths, 
                 bindMetaHelper(memStmt, p, rMeta);
 
                 if (sqlite3_step(memStmt) == SQLITE_DONE) {
-                    if (isNew && !rMeta.isFolder && !rMeta.isTrash) {
-                        CategoryRepo::incrementTotalFileCount(1);
-                    }
                     rMeta.isManaged = true;
                     {
                         std::unique_lock<std::shared_mutex> lock(m_mutex);
@@ -2765,11 +2799,6 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
     if (sqlite3_prepare_v2(memDb, kSqlInsertMeta, -1, &memStmt, nullptr) == SQLITE_OK) {
         bindMetaHelper(memStmt, nPath, rMeta);
         if (sqlite3_step(memStmt) == SQLITE_DONE) {
-            if (isNew) {
-                if (!rMeta.isFolder && !rMeta.isTrash) {
-                    CategoryRepo::incrementTotalFileCount(1);
-                }
-            }
             {
                 std::unique_lock<std::shared_mutex> lock(m_mutex);
                 rMeta.isManaged = true;
