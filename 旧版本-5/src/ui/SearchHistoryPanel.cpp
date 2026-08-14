@@ -1,0 +1,168 @@
+#include "SearchHistoryPanel.h"
+#include "SvgIcons.h"
+#include "UiHelper.h"
+#include "../core/SearchHistoryService.h"
+
+#include <QCursor>
+#include <QApplication>
+#include <QMouseEvent>
+
+namespace ArcMeta {
+
+SearchHistoryPanel::SearchHistoryPanel(QWidget* parent)
+    : QFrame(parent, Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint)
+{
+    setAttribute(Qt::WA_TranslucentBackground, false);
+
+    setObjectName("SearchHistoryPanel");
+    setStyleSheet(
+        "#SearchHistoryPanel {"
+        "  background-color: #252526;"
+        "  border: 1px solid #444444;"
+        "  border-radius: 8px;"
+        "}"
+    );
+
+    m_layout = new QVBoxLayout(this);
+    m_layout->setContentsMargins(6, 6, 6, 6);
+    m_layout->setSpacing(2);
+
+    // 绑定中心化服务信号
+    connect(&SearchHistoryService::instance(), &SearchHistoryService::searchHistoryChanged,
+            this, &SearchHistoryPanel::onSearchHistoryChanged);
+
+    hide();
+}
+
+void SearchHistoryPanel::setHistory(const QStringList& history, const QString& title) {
+    m_history = history;
+    m_currentTitle = title;
+    rebuild();
+}
+
+void SearchHistoryPanel::onSearchHistoryChanged(const QString& category, const QStringList& newHistory) {
+    if (category == m_category) {
+        m_history = newHistory;
+        rebuild();
+    }
+}
+
+void SearchHistoryPanel::rebuild() {
+    QLayoutItem* child;
+    while ((child = m_layout->takeAt(0)) != nullptr) {
+        if (child->widget()) {
+            child->widget()->deleteLater();
+        }
+        delete child;
+    }
+
+    if (m_history.isEmpty()) {
+        QLabel* empty = new QLabel(QString("暂无%1").arg(m_currentTitle), this);
+        empty->setStyleSheet("color: #666666; font-size: 12px; padding: 4px 8px;");
+        m_layout->addWidget(empty);
+    } else {
+        QWidget* titleRow = new QWidget(this);
+        titleRow->setStyleSheet("QWidget { background: transparent; }");
+        QHBoxLayout* titleLayout = new QHBoxLayout(titleRow);
+        titleLayout->setContentsMargins(4, 0, 4, 0);
+        titleLayout->setSpacing(0);
+
+        QLabel* titleLabel = new QLabel(m_currentTitle, titleRow);
+        titleLabel->setStyleSheet("color: #888888; font-size: 11px;");
+
+        QPushButton* btnClearAll = new QPushButton("全部清除", titleRow);
+        btnClearAll->setFixedHeight(20);
+        btnClearAll->setFlat(true);
+        btnClearAll->setStyleSheet(
+            "QPushButton { color: #666666; font-size: 11px; border: none; background: transparent; }"
+            "QPushButton:hover { color: #378ADD; }"
+        );
+        connect(btnClearAll, &QPushButton::clicked, this, [this]() {
+            SearchHistoryService::instance().clearAll(m_category);
+        });
+
+        titleLayout->addWidget(titleLabel);
+        titleLayout->addStretch();
+        titleLayout->addWidget(btnClearAll);
+        m_layout->addWidget(titleRow);
+
+        QFrame* sep = new QFrame(this);
+        sep->setFrameShape(QFrame::HLine);
+        sep->setStyleSheet("background: #333333; border: none; max-height: 1px;");
+        m_layout->addWidget(sep);
+
+        for (int i = 0; i < m_history.size(); ++i) {
+            const QString& keyword = m_history[i];
+
+            QWidget* row = new QWidget(this);
+            row->setObjectName("historyRow");
+            row->setStyleSheet(
+                "QWidget#historyRow { background: transparent; border-radius: 4px; }"
+                "QWidget#historyRow:hover { background: #2A2A2A; }"
+            );
+            row->setCursor(Qt::PointingHandCursor);
+            row->setFixedHeight(30);
+
+            QHBoxLayout* rowLayout = new QHBoxLayout(row);
+            rowLayout->setContentsMargins(6, 0, 4, 0);
+            rowLayout->setSpacing(8);
+
+            QLabel* icon = new QLabel(row);
+            icon->setPixmap(UiHelper::getIcon("search", QColor("#555555"), 14).pixmap(14, 14));
+            icon->setFixedSize(14, 14);
+
+            QLabel* keywordLabel = new QLabel(keyword, row);
+            keywordLabel->setStyleSheet("color: #CCCCCC; font-size: 12px; background: transparent;");
+
+            QPushButton* btnRemove = new QPushButton(row);
+            btnRemove->setFixedSize(16, 16);
+            btnRemove->setFlat(true);
+            btnRemove->setIcon(UiHelper::getIcon("close", QColor("#555555"), 12));
+            btnRemove->setIconSize(QSize(12, 12));
+            btnRemove->setStyleSheet(
+                "QPushButton { background: transparent; border: none; border-radius: 3px; }"
+                "QPushButton:hover { background: #3E3E42; }"
+            );
+            connect(btnRemove, &QPushButton::clicked, this, [this, keyword]() {
+                SearchHistoryService::instance().removeSearch(m_category, keyword);
+            });
+
+            rowLayout->addWidget(icon);
+            rowLayout->addWidget(keywordLabel, 1);
+            rowLayout->addWidget(btnRemove);
+
+            row->installEventFilter(this);
+            row->setProperty("keyword", keyword);
+
+            m_layout->addWidget(row);
+        }
+    }
+
+    adjustSize();
+}
+
+void SearchHistoryPanel::showBelow(QWidget* anchor) {
+    if (!anchor) return;
+    QPoint pos = anchor->mapToGlobal(QPoint(0, anchor->height() + 3));
+    move(pos);
+    setFixedWidth(anchor->width());
+    rebuild();
+    show();
+    raise();
+}
+
+bool SearchHistoryPanel::eventFilter(QObject* obj, QEvent* event) {
+    if (event->type() == QEvent::MouseButtonPress) {
+        QWidget* w = qobject_cast<QWidget*>(obj);
+        if (w && w->objectName() == "historyRow") {
+            QString keyword = w->property("keyword").toString();
+            if (!keyword.isEmpty()) {
+                emit historyItemClicked(keyword);
+            }
+            return true;
+        }
+    }
+    return QFrame::eventFilter(obj, event);
+}
+
+} // namespace ArcMeta
