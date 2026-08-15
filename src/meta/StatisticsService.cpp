@@ -120,14 +120,14 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
     StatisticsSnapshot snapshot;
     auto allCats = CategoryRepo::getCachedAll();
 
-    // 1. 提取所有 ③ 自定义分类 ID 集合
+    // 1. 初始化所有分类映射
     std::unordered_set<int> userCatIds;
     for (const auto& cat : allCats) {
         if (cat.kind == CategoryKind::User && cat.id > 0) {
             userCatIds.insert(cat.id);
-            snapshot.userCategoryCounts[cat.id] = 0; // 初始化为 0
+            snapshot.userCategoryCounts[cat.id] = 0;
         } else if (cat.kind == CategoryKind::SystemLibrary) {
-            snapshot.libraryCounts[cat.id] = 0;     // 初始化为 0
+            snapshot.libraryCounts[cat.id] = 0;
         }
     }
 
@@ -136,53 +136,50 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
     int uncategorizedCount = 0;
     int libraryTrashCount = 0;
 
-    // 2. 遍历唯一权威内存快照（0ms，免疫一切 SQLite 跨库与字段差异）
+    // 2. 纯内存 0ms 秒级核算（绝对真相源）
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
         if (meta.isFolder) return;
 
-        // 2.1 统计托管回收站
+        // 回收站
         if (meta.isTrash) {
             libraryTrashCount++;
             return;
         }
 
-        // 2.2 统计全部有效数据
+        // 全部有效数据
         allCount++;
 
-        // 2.3 统计未标签
+        // 未标签
         if (meta.tags.isEmpty()) {
             untaggedCount++;
         }
 
-        // 2.4 统计 ③ 自定义分类与“未分类”
-        std::vector<int> associatedCatIds = CategoryRepo::getItemCategoryIds(meta.folderId, path);
-        bool hasUserCategory = false;
-
-        for (int cid : associatedCatIds) {
-            if (userCatIds.find(cid) != userCatIds.end()) {
+        // 自定义分类 ③ 与 未分类 判定
+        bool hasUserCat = false;
+        for (int cid : meta.categoryIds) {
+            if (userCatIds.count(cid)) {
                 snapshot.userCategoryCounts[cid]++;
-                hasUserCategory = true;
+                hasUserCat = true;
             }
         }
 
-        // 核心规则：若未关联任何 ③ 自定义分类，严格计入“未分类”
-        if (!hasUserCategory) {
+        if (!hasUserCat) {
             uncategorizedCount++;
         }
 
-        // 2.5 统计托管根分类（按盘符前缀归属分账）
+        // 托管库分账统计
         for (const auto& cat : allCats) {
             if (cat.kind == CategoryKind::SystemLibrary && !cat.physicalPath.empty()) {
-                std::wstring normLibPath = MetadataManager::normalizePath(cat.physicalPath);
-                std::wstring normAssetPath = MetadataManager::normalizePath(path);
-                if (normAssetPath.rfind(normLibPath, 0) == 0) {
+                std::wstring normLib = MetadataManager::normalizePath(cat.physicalPath);
+                std::wstring normAsset = MetadataManager::normalizePath(path);
+                if (normAsset.rfind(normLib, 0) == 0) {
                     snapshot.libraryCounts[cat.id]++;
                 }
             }
         }
     });
 
-    // 3. 统计物理磁盘回收站
+    // 3. 汇总物理磁盘回收站
     int diskTrashCount = 0;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
     for (sqlite3* db : dbs) {
@@ -203,7 +200,7 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
     snapshot.systemCounts["tags"] = 0;
     snapshot.systemCounts["recently_visited"] = 0;
 
-    // 4. 同步原子内存变量
+    // 4. 同步原子内存缓存
     m_totalCount.store(allCount);
     m_uncategorizedCount.store(uncategorizedCount);
     m_untaggedCount.store(untaggedCount);

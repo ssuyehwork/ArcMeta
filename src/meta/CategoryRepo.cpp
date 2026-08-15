@@ -277,6 +277,17 @@ bool CategoryRepo::addItemToCategoryBatch(int categoryId, const std::vector<std:
         }
     }
 
+    if (allOk) {
+        for (const auto& pair : items) {
+            std::wstring p = MetadataManager::normalizePath(pair.second);
+            if (p.empty()) p = MetadataManager::instance().getPathByFolderId(pair.first);
+            if (!p.empty()) {
+                MetadataManager::instance().addCategoryToItemMemory(p, categoryId);
+                MetadataManager::instance().persistAsync(p, false);
+            }
+        }
+    }
+
     refreshMemoryCache();
     StatisticsService::instance().requestFullRecountAsync();
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
@@ -289,6 +300,12 @@ bool CategoryRepo::removeAllCategories(const std::string& folderId) {
 }
 
 bool CategoryRepo::removeAllCategoriesBatch(const std::vector<std::string>& folderIds) {
+    for (const auto& fid : folderIds) {
+        std::wstring p = MetadataManager::instance().getPathByFolderId(fid);
+        if (!p.empty()) {
+            MetadataManager::instance().clearCategoriesFromItemMemory(p);
+        }
+    }
     return executeFidBatch(folderIds, [](sqlite3* db, const std::string& fid) {
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "DELETE FROM category_items WHERE folder_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
@@ -348,6 +365,7 @@ bool CategoryRepo::moveToTrashBatch(const std::vector<std::string>& folderIds) {
         }
         // 3. Update is_trash flag
         if (!path.empty()) {
+            MetadataManager::instance().clearCategoriesFromItemMemory(path);
             MetadataManager::instance().setTrash(path, true);
         }
         // 执行 UPDATE metadata SET is_trash = 1 WHERE folder_id = ? 将标记置为 1
@@ -395,6 +413,7 @@ bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& folderI
         }
         // 3. Clear is_trash flag in metadata cache + persist
         if (!path.empty()) {
+            MetadataManager::instance().clearCategoriesFromItemMemory(path);
             MetadataManager::instance().setTrash(path, false);
         }
         
@@ -873,6 +892,8 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& folderId
         if (sqlite3_step(memStmt) == SQLITE_DONE) {
             sqlite3_finalize(memStmt);
 
+            MetadataManager::instance().addCategoryToItemMemory(finalPath, categoryId);
+
             refreshMemoryCache();
             StatisticsService::instance().requestFullRecountAsync();
 
@@ -897,6 +918,8 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fol
         sqlite3_bind_text(memStmt, 2, folderId.c_str(), -1, SQLITE_TRANSIENT);
         if (sqlite3_step(memStmt) == SQLITE_DONE) {
             sqlite3_finalize(memStmt);
+
+            MetadataManager::instance().removeCategoryFromItemMemory(path, categoryId);
 
             refreshMemoryCache();
             StatisticsService::instance().requestFullRecountAsync();
