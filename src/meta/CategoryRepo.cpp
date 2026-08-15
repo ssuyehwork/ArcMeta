@@ -1,4 +1,5 @@
 #include "CategoryRepo.h"
+#include "StatisticsService.h"
 #include "DatabaseManager.h"
 #include "MetadataManager.h"
 #include "sqlite3.h"
