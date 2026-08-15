@@ -77,7 +77,7 @@ void StatisticsService::notifyAssetAdded(int targetCatId, bool hasTags) {
     emit statisticsUpdated(m_cachedSnapshot);
 }
 
-void StatisticsService::notifyAssetRemoved(int targetCatId, bool hadTags, bool wasTrash) {
+void StatisticsService::notifyAssetRemoved(int targetCatId, int libraryCatId, bool hadTags, bool wasTrash) {
     if (wasTrash) {
         m_trashCount.fetch_sub(1);
     } else {
@@ -95,8 +95,16 @@ void StatisticsService::notifyAssetRemoved(int targetCatId, bool hadTags, bool w
     m_cachedSnapshot.systemCounts["uncategorized"] = m_uncategorizedCount.load();
     m_cachedSnapshot.systemCounts["untagged"] = m_untaggedCount.load();
     m_cachedSnapshot.systemCounts["trash"] = m_trashCount.load();
+
+    // 🛡️ 补全：同步精准扣减半静态托管库分类 (arcmeta.library_*) 的内存快照计数
+    if (libraryCatId > 0 && m_cachedSnapshot.libraryCounts.contains(libraryCatId)) {
+        if (m_cachedSnapshot.libraryCounts[libraryCatId] > 0) {
+            m_cachedSnapshot.libraryCounts[libraryCatId]--;
+        }
+    }
+
     if (targetCatId > 0 && !wasTrash) {
-        if (m_cachedSnapshot.userCategoryCounts[targetCatId] > 0) {
+        if (m_cachedSnapshot.userCategoryCounts.contains(targetCatId) && m_cachedSnapshot.userCategoryCounts[targetCatId] > 0) {
             m_cachedSnapshot.userCategoryCounts[targetCatId]--;
         }
     }

@@ -29,6 +29,7 @@
 #include "../meta/CategoryRepo.h"
 #include "../ui/MediaColorExtractor.h"
 #include "StatisticsService.h"
+#include "VolumeOnlineManager.h"
 #include "../ui/UiHelper.h"
 #include "MediaExtractorPipeline.h"
 #include "../util/ShellHelper.h"
@@ -1944,8 +1945,14 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
 
                     if (isManagedAsset(it->second.isFolder, curPath)) {
                         totalDelta--;
+                        QString driveLetter = VolumeOnlineManager::extractDriveLetter(QString::fromStdWString(curPath));
+                        int libCatId = CategoryRepo::getLibraryCategoryIdByDrive(driveLetter);
+                        int targetCatId = 0;
+                        if (!it->second.categoryIds.empty()) {
+                            targetCatId = it->second.categoryIds.front();
+                        }
                         // 实时通知统计服务扣减 (无论是否处于回收站，永久删除均需扣减)
-                        StatisticsService::instance().notifyAssetRemoved(0, !it->second.tags.isEmpty(), it->second.isTrash); 
+                        StatisticsService::instance().notifyAssetRemoved(targetCatId, libCatId, !it->second.tags.isEmpty(), it->second.isTrash);
                     }
                     if (!it->second.folderId.empty()) {
                         std::string fid = it->second.folderId;
@@ -2290,44 +2297,10 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
         }
     }
 
-    // 1. 首先检查内存缓存，判断该项目是否曾记入数据库。
-    std::string fid;
-    bool existsInDb = false;
-    {
-        auto currentSnapshot = std::atomic_load(&m_snapshot);
-        if (currentSnapshot) {
-            auto it = currentSnapshot->find(nPath);
-            if (it != currentSnapshot->end()) {
-                fid = it->second.folderId;
-                existsInDb = true;
-            }
-        }
-    }
-
-    // 2. 物理加固：如果路径匹配失败，尝试通过物理 FID 反查
-    if (!existsInDb) {
-        if (fetchWinApiMetadataDirect(nPath, fid)) {
-            std::shared_lock<std::shared_mutex> lock(m_mutex);
-            auto it = m_folderIdToPath.find(fid);
-            if (it != m_folderIdToPath.end()) {
-                nPath = it->second; // 修正为缓存中的原始路径，确保 removeMetadataSync 能正确匹配
-                existsInDb = true;
-                qWarning() << "[Metadata] 路径匹配失败，已通过 FID 校准原始路径:" << QString::fromStdWString(nPath);
-            }
-        }
-    }
-
-    // 3. 如果项目从未被记入数据库，则无需执行任何数据库清理逻辑。
-    if (!existsInDb) {
-        qWarning() << "[Metadata] 永久删除项不在数据库中，跳过清理动作:" << QString::fromStdWString(nPath);
-        notifyUI(RefreshLevel::FullRebuild);
-        return;
-    }
-    
-    // 4. 执行彻底根除。
+    // 执行彻底根除 (removeMetadataSync 会级联擦除 SQLite metadata 与 category_items)
     removeMetadataSync(nPath);
 
-    // 5. 物理修复：发射全量刷新信号，确保侧边栏计数立即同步
+    // 广播 UI 全量刷新信号
     notifyUI(RefreshLevel::FullRebuild);
 }
 

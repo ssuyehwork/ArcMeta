@@ -82,6 +82,7 @@ public:
     static bool add(Category& cat);
     static bool update(const Category& cat);
     static Category getById(int id);
+    static int getLibraryCategoryIdByDrive(const QString& driveLetter);
     static int findCategoryId(int parentId, const std::wstring& name);
     static int findByFrn(uint64_t frn);
     static bool updatePhysicalMapping(int id, uint64_t frn, const std::wstring& path);
