@@ -1,35 +1,47 @@
-# 内存模式“永久删除”三重彻底根除修复方案 —— PermanentDelete.md
+# 内存模式“永久删除”极简原子根除重构方案 —— PermanentDelete.md
 
-> **核心原则**：在内存模式（托管库）下，当用户选中项目并执行“永久删除”（Delete Permanently）时，系统必须 100% 执行 **物理胶囊 + 数据库元数据 + 内存快照** 的三重彻底根除，严禁产生 any 遗留垃圾或“幽灵记录”。
-
----
-
-## 一、 实际代码中的 3 处核心缺陷分析 (Root Cause)
-
-经过对 `src/ui/ContentPanel.cpp`、`src/meta/MetadataManager.cpp` 以及 `src/meta/StatisticsService.cpp` 底层源码的深度排查，发现当前代码存在以下不符合规范的缺陷：
-
-### 1. 物理层级不彻底：解包视图删除遗留空白 `.arc` 胶囊壳
-- **代码位置**：`ContentPanel.cpp`（第 2226~2238 行）
-- **现象**：当在解包视图下对素材（如 `00ms73182x000.arc/artwork.png`）执行“永久删除”时，`recursiveRemove` 仅删除了内部的 `artwork.png` 文件，**未将外层的空 `.arc` 胶囊文件夹本身销毁**。
-- **后果**：磁盘上残留无用的 `.arc` 物理空胶囊。
-
-### 2. 数据库与内存层级失效：路径不匹配导致跳过元数据擦除
-- **代码位置**：`MetadataManager.cpp`（第 2280~2300 行 `deletePermanently`）
-- **现象**：因为传入的路径与内存快照映射表中的 Key 未进行 Base36 ID 归一化转换，导致 `currentSnapshot->find(nPath)` 匹配失败，系统错误打印 `永久删除项不在数据库中，跳过清理动作` 并直接退出。
-- **后果**：SQLite `metadata` 主表、`category_items` 分类关联表里的数据库记录未被删除，产生“僵尸元数据”。
-
-### 3. UI 状态不同步：回收站项永久删除未扣减侧边栏计数
-- **代码位置**：`MetadataManager.cpp`（第 1935 行 `removeMetadataSync`）
-- **现象**：代码中判定 `if (isManagedAsset(...) && !it->second.isTrash)` 含有 `!it->second.isTrash` 限制。当在“回收站”选项卡中执行永久删除时，因为文件的 `isTrash` 已经是 `true`，导致 `notifyAssetRemoved` 扣减通知被跳过。
-- **后果**：侧边栏“回收站 (N)”数字未能及时归零扣减。
+> **核心架构原则**：无论数据当前被挂载在任何分类或视口（全部数据、回收站、托管库、自定义分类）中，只要执行“永久删除”，**直接且干脆地将该数据彻底脱离所有分类关系（全量清空 `category_items` 中的关联记录）**。绝对禁止根据删除视口/上下文编写繁琐交织的条件分支特判！
 
 ---
 
-## 二、 核心修复技术方案 (Technical Fix)
+## 一、 旧架构变复杂与缺陷根因分析 (Root Cause)
 
-### 1. 物理层级彻底销毁：`ContentPanel.cpp` 向上追溯并销毁 `.arc` 容器
+经过对 `src/ui/ContentPanel.cpp`、`src/meta/MetadataManager.cpp` 以及 `src/meta/StatisticsService.cpp` 底层源码的深度排查，发现旧代码陷入了“补丁思维”：
 
-在物理递归删除函数中，删除内部文件后增加对父级 `.arc` 容器的检查与销毁：
+### 1. 条件分支缠绕交织，导致某些视图删除时扣减被跳过
+- **缺陷表现**：代码中大量充斥着 `if (!wasTrash)`、`if (targetCatId > 0)` 等条件分支判断，试图去“猜测”用户是在哪个视口发起的删除。
+- **后果**：一旦用户在“回收站”或“托管库”视口发起永久删除，由于条件判断被跳过，导致侧边栏 **`arcmeta.library_g (5)`** 或其他分类节点的计数无法更新，依然停留显示旧数字 **(5)**。
+
+### 2. 物理层级销毁不彻底：解包视图删除遗留空白 `.arc` 胶囊壳
+- **代码位置**：`ContentPanel.cpp`（`recursiveRemove`）
+- **现象**：在解包视图下对素材执行永久删除时，仅删除了内部素材文件，**未将外层的空 `.arc` 胶囊文件夹本身销毁**，造成磁盘垃圾残留。
+
+### 3. ID 强校准缺失：路径不匹配导致跳过 DB 元数据擦除
+- **代码位置**：`MetadataManager.cpp`（`deletePermanently`）
+- **现象**：传入路径未与 Base36 ID 对齐，导致 `m_folderIdToPath` 匹配失败，系统错误跳过 SQLite `metadata` 主表的删除动作，产生“僵尸元数据”。
+
+---
+
+## 二、 极简原子根除管线 (Atomic Purge Pipeline)
+
+彻底废除所有特定上下文的 `if-else` 条件特判，建立统一、干净、原子化的彻底注销管线：
+
+```
+[ 用户触发“永久删除” ]
+       │
+       ├── 1. 物理层彻底销毁：递归删除内部文件，并同步销毁外层空白 `.arc` 胶囊文件夹
+       │
+       ├── 2. 数据库级彻底解绑：
+       │     ├── 彻底删除 SQLite `metadata` 主表对应条目
+       │     └── 彻底擦除关联表（DELETE FROM category_items WHERE asset_id = :id）
+       │         👉 无论资产挂载在多少个分类下，直接 100% 强行彻底脱离所有分类关系！
+       │
+       └── 3. 内存与 UI 计数全向原子扣减：
+             ├── 反查该资产删除前关联的所有分类集合（托管库 ID + 用户分类 ID）
+             └── 无视视口上下文，对涉及的所有维度（全局静态桶、托管库、用户分类）统一全向 -1 并刷重绘！
+```
+
+### 1. 物理层级彻底销毁：向上追溯并销毁空 `.arc` 胶囊
 
 ```cpp
 // 彻底物理递归删除逻辑修正
@@ -59,58 +71,63 @@ recursiveRemove = [&](const QString& target) -> bool {
 };
 ```
 
----
-
-### 2. 数据库与内存彻底擦除：`MetadataManager.cpp` ID 强校准反查
-
-在 `deletePermanently` 入口，通过 Base36 ID 强行校准路径，确保 100% 触发擦除：
+### 2. 数据库级原子解绑：强行彻底脱离所有分类
 
 ```cpp
-void MetadataManager::deletePermanently(const std::wstring& path) {
-    std::wstring nPath = MetadataManager::normalizePath(path);
-    
-    // 🛡️ 优先通过路径中的 13 位 Base36 ID 反查内存缓存 Key，防止路径解包不一致导致的匹配失败
-    std::string base36Id = extractBase36Id(nPath);
-    if (!base36Id.empty()) {
-        std::shared_lock<std::shared_mutex> lock(m_mutex);
-        auto it = m_folderIdToPath.find(base36Id);
-        if (it != m_folderIdToPath.end()) {
-            nPath = it->second; // 强行对齐为数据库与缓存中存储的标准路径
+void CategoryRepo::removeAllCategoryAssociations(const QString& assetId) {
+    // 🛡️ 极简管线：直接彻底清除 category_items 中该资产的所有关联记录！
+    QSqlQuery query(m_db);
+    query.prepare("DELETE FROM category_items WHERE asset_id = :asset_id");
+    query.bindValue(":asset_id", assetId);
+    query.exec();
+}
+```
+
+### 3. 内存与 UI 全向原子扣减：摒弃分支特判
+
+```cpp
+// 彻底废除旧有的 conditional branch，统一全向扣减
+void StatisticsService::purgeAsset(const AssetInfo& deletedAsset) {
+    std::lock_guard<std::mutex> lock(m_snapshotMutex);
+
+    // 1. 全局静态桶扣减
+    if (m_cachedSnapshot.systemCounts["all"] > 0) m_cachedSnapshot.systemCounts["all"]--;
+    if (deletedAsset.isTrash) {
+        if (m_cachedSnapshot.systemCounts["trash"] > 0) m_cachedSnapshot.systemCounts["trash"]--;
+    } else {
+        if (deletedAsset.categories.isEmpty() && m_cachedSnapshot.systemCounts["uncategorized"] > 0) {
+            m_cachedSnapshot.systemCounts["uncategorized"]--;
         }
     }
 
-    // 执行彻底根除 (removeMetadataSync 会级联擦除 SQLite metadata 与 category_items)
-    removeMetadataSync(nPath);
+    // 2. 托管库分类扣减 (直击 arcmeta.library_g 扣减归零)
+    int libCatId = deletedAsset.libraryCatId;
+    if (libCatId > 0 && m_cachedSnapshot.libraryCounts[libCatId] > 0) {
+        m_cachedSnapshot.libraryCounts[libCatId]--;
+    }
 
-    // 广播 UI 全量刷新信号
-    notifyUI(RefreshLevel::FullRebuild);
+    // 3. 该资产挂载过的所有用户分类全量扣减
+    for (int userCatId : deletedAsset.categories) {
+        if (m_cachedSnapshot.userCategoryCounts[userCatId] > 0) {
+            m_cachedSnapshot.userCategoryCounts[userCatId]--;
+        }
+    }
+
+    // 4. 广播统一刷新，驱动侧边栏数字 instant 归零
+    emit statisticsUpdated(m_cachedSnapshot);
 }
 ```
 
 ---
 
-### 3. UI 计数及时扣减：`removeMetadataSync` 移除 `!isTrash` 拦截
+## 三、 重构后效果验证矩阵 (Verification Matrix)
 
-修正 `removeMetadataSync`，保证回收站资产永久删除时依然触发计数扣减：
-
-```cpp
-// 在 removeMetadataSync 遍历扣减逻辑中：
-if (isManagedAsset(it->second.isFolder, curPath)) {
-    totalDelta--;
-    // 🚨 无论是否处于回收站 (isTrash)，永久删除均必须通知 StatisticsService 扣减计数！
-    StatisticsService::instance().notifyAssetRemoved(0, !it->second.tags.isEmpty(), it->second.isTrash); 
-}
-```
-
----
-
-## 三、 修复后效果验证 (Verification Matrix)
-
-| 擦除维度 | 旧代码表现 | 修复后标准表现 |
+| 场景维度 | 旧代码表现（复杂分支特判） | 极简原子管线表现 |
 | :--- | :--- | :--- |
+| **分类脱离彻底性** | 仅根据当前视口试图删除局部关系 | **直接彻底清空该资产在 `category_items` 中的所有关联，100% 彻底脱离所有分类** |
 | **物理磁盘** | 残留空白 `00ms73182x000.arc` 文件夹 | **物理胶囊文件夹及其内部文件 100% 被销毁清空** |
-| **SQLite 数据库** | `metadata` 主表与 `category_items` 表残存记录 | **数据库中该 ID 的所有行记录被 100% 清除** |
-| **侧边栏 UI 计数** | 永久删除后“回收站 (5)”数字不发生改变 | **侧边栏“回收站”以及“全部数据”等数字立刻精准扣减归零** |
+| **SQLite 数据库** | `metadata` 主表与 `category_items` 表残存记录 | **数据库中该资产 ID 的所有行记录被 100% 原子擦除** |
+| **侧边栏 UI 各类计数** | 永久删除 G 盘 5 个项目后 `arcmeta.library_g (5)` 数字不变 | **侧边栏所有关联维度（回收站、托管库 `arcmeta.library_g`、全部数据等）数字统一即时精准扣减归零** |
 
 ---
-*文档建立时间：2026-08-13*
+*文档更新时间：2026-08-13*

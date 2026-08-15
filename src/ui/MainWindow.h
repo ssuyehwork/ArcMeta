@@ -79,6 +79,7 @@ private slots:
     void onDriveButtonClicked();
     void onDriveButtonContextMenu(const QPoint& pos);
     void rescanManagedLibrary(const QString& libraryPath);
+    void onVolumeUnplugged(const QString& driveLetter);
 
 protected:
     void closeEvent(QCloseEvent* event) override;

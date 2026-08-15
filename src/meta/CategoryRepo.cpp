@@ -1,5 +1,6 @@
 #include "CategoryRepo.h"
 #include "StatisticsService.h"
+#include "../core/VolumeOnlineManager.h"
 #include "DatabaseManager.h"
 #include "MetadataManager.h"
 #include "sqlite3.h"
@@ -465,6 +466,24 @@ bool CategoryRepo::permanentlyDeleteBatch(const std::vector<std::string>& folder
 
 bool CategoryRepo::permanentlyDelete(const std::string& folderId) {
     return permanentlyDeleteBatch({folderId});
+}
+
+int CategoryRepo::getLibraryCategoryIdByDrive(const QString& driveLetter) {
+    if (driveLetter.isEmpty()) return 0;
+    auto cats = getCachedAll();
+    for (const auto& cat : cats) {
+        if (cat.kind == CategoryKind::SystemLibrary) {
+            QString nameStr = QString::fromStdWString(cat.name).toLower();
+            QString letter = VolumeOnlineManager::extractDriveLetter(nameStr);
+            if (letter.isEmpty() && !cat.physicalPath.empty()) {
+                letter = VolumeOnlineManager::extractDriveLetter(QString::fromStdWString(cat.physicalPath));
+            }
+            if (!letter.isEmpty() && letter.compare(driveLetter, Qt::CaseInsensitive) == 0) {
+                return cat.id;
+            }
+        }
+    }
+    return 0;
 }
 
 Category CategoryRepo::getById(int id) {

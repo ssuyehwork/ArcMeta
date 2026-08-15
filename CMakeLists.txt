@@ -77,6 +77,8 @@ set(SOURCES
     src/core/CategoryLoadService.h
     src/core/LibraryMaintenanceService.cpp
     src/core/LibraryMaintenanceService.h
+    src/core/VolumeOnlineManager.cpp
+    src/core/VolumeOnlineManager.h
     src/core/DiskTrashService.cpp
     src/core/DiskTrashService.h
     src/core/SyncStatusService.cpp

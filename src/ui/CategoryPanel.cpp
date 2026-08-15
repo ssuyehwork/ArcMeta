@@ -268,127 +268,130 @@ void CategoryPanel::setupContextMenu() {
             
             // 只要不是系统根节点，都弹出完整菜单
             if (itemType == "category" || itemType == "file" || itemType == "folder") {
-                
-                QString colorStr = index.data(ColorRole).toString();
-                
-                // 使用 ColorStripPicker 快捷菜单项，直接展露在主菜单上
-                QWidgetAction* colorPickerAction = new QWidgetAction(&menu);
-                ColorStripPicker* colorPickerWidget = new ColorStripPicker(colorStr, &menu);
-                colorPickerAction->setDefaultWidget(colorPickerWidget);
-                menu.addAction(colorPickerAction);
+                int catId = index.data(IdRole).toInt();
+                Category cat = CategoryRepo::getById(catId);
+                int kindVal = index.data(CategoryKindRole).toInt();
+                bool isManagedLibraryRoot = (kindVal == static_cast<int>(CategoryKind::SystemLibrary)) ||
+                                            (cat.kind == CategoryKind::SystemLibrary) ||
+                                            (cat.id > 0 && cat.parentId == 0 && !cat.physicalPath.empty());
 
-                int id = index.data(IdRole).toInt();
-                connect(colorPickerWidget, &ColorStripPicker::colorSelected, this, [this, id, &menu](const QString& hexColor) {
-                    auto all = CategoryRepo::getAll();
-                    for (auto& cat : all) {
-                        if (cat.id == id) {
-                            cat.color = hexColor.toUpper().toStdWString();
-                            CategoryRepo::update(cat);
-                            if (!cat.physicalPath.empty()) {
-                                MetadataManager::instance().setColor(cat.physicalPath, cat.color, true);
-                            }
-                            break;
-                        }
-                    }
+                if (!isManagedLibraryRoot) {
+                    QString colorStr = index.data(ColorRole).toString();
                     
-                    QSet<int> expandedIds;
-                    QStringList expandedNames;
-                    saveExpandedState(QModelIndex(), expandedIds, expandedNames);
+                    // 使用 ColorStripPicker 快捷菜单项，直接展露在主菜单上
+                    QWidgetAction* colorPickerAction = new QWidgetAction(&menu);
+                    ColorStripPicker* colorPickerWidget = new ColorStripPicker(colorStr, &menu);
+                    colorPickerAction->setDefaultWidget(colorPickerWidget);
+                    menu.addAction(colorPickerAction);
 
-                    m_categoryModel->refresh();
-
-                    restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
-                    menu.close();
-                });
-
-                menu.addAction(UiHelper::getIcon("tag_filled", QColor("#9b59b6"), 18), "设置预设标签", this, &CategoryPanel::onSetPresetTags);
-
-                // [Plan-6] 创建主选项“文件夹图标”
-                QMenu* iconMenu = menu.addMenu(UiHelper::getIcon("folder_filled", WarningOrange, 18), "文件夹图标");
-                UiHelper::applyMenuStyle(iconMenu);
-
-                QColor catColor = colorStr.isEmpty() ? QColor("#555555") : QColor(colorStr);
-
-                // 使用 QWidgetAction 构建纯图标选择器（无任何文字，网格排列，支持 Hover 色值对齐与 Tooltip）
-                QWidgetAction* pickerAction = new QWidgetAction(iconMenu);
-                QWidget* pickerWidget = new QWidget(iconMenu);
-                QGridLayout* pickerLayout = new QGridLayout(pickerWidget);
-                pickerLayout->setContentsMargins(6, 6, 6, 6);
-                pickerLayout->setSpacing(6);
-
-                static const QList<QPair<QString, QString>> builtInIcons = {
-                    {"默认文件夹", "folder_filled"},
-                    {"层级分类", "category"},
-                    {"照片媒体", "image_filled"},
-                    {"时钟历史", "clock_filled"},
-                    {"星标收藏", "star_filled"},
-                    {"爱心常用", "heart_filled"},
-                    {"加密安全", "lock_filled"},
-                    {"图书文档", "book"},
-                    {"配置管理", "settings_filled"},
-                    {"网络球体", "globe_filled"}
-                };
-
-                int row = 0;
-                int col = 0;
-                for (const auto& pair : builtInIcons) {
-                    QString label = pair.first;
-                    QString iconKey = pair.second;
-
-                    QPushButton* btn = new QPushButton(pickerWidget);
-                    btn->setFixedSize(28, 28);
-                    btn->setCursor(Qt::PointingHandCursor);
-                    btn->setStyleSheet(
-                        "QPushButton { "
-                        "  background-color: transparent; "
-                        "  border: 1px solid transparent; "
-                        "  border-radius: 4px; "
-                        "}"
-                        "QPushButton:hover { "
-                        "  background-color: #3E3E42; "
-                        "  border: 1px solid #555555; "
-                        "}"
-                        "QPushButton:pressed { "
-                        "  background-color: #4E4E52; "
-                        "}"
-                    );
-                    btn->setIcon(UiHelper::getIcon(iconKey, catColor, 18));
-                    btn->setIconSize(QSize(18, 18));
-                    btn->setToolTip(label); // 使用中文 label 作为 tooltip 提示
-
-                    pickerLayout->addWidget(btn, row, col);
-
-                    connect(btn, &QPushButton::clicked, this, [this, id, iconKey, iconMenu]() {
-                        auto cats = CategoryRepo::getAll();
-                        for (auto& cat : cats) {
-                            if (cat.id == id) {
-                                cat.icon = iconKey.toStdWString();
+                    connect(colorPickerWidget, &ColorStripPicker::colorSelected, this, [this, catId, &menu](const QString& hexColor) {
+                        auto all = CategoryRepo::getAll();
+                        for (auto& cat : all) {
+                            if (cat.id == catId) {
+                                cat.color = hexColor.toUpper().toStdWString();
                                 CategoryRepo::update(cat);
+                                if (!cat.physicalPath.empty()) {
+                                    MetadataManager::instance().setColor(cat.physicalPath, cat.color, true);
+                                }
                                 break;
                             }
                         }
+                        
+                        QSet<int> expandedIds;
+                        QStringList expandedNames;
+                        saveExpandedState(QModelIndex(), expandedIds, expandedNames);
+
                         m_categoryModel->refresh();
-                        iconMenu->close(); // 选中后关闭菜单
+
+                        restoreExpandedState(QModelIndex(), expandedIds, expandedNames);
+                        menu.close();
                     });
 
-                    col++;
-                    if (col >= 5) {
-                        col = 0;
-                        row++;
+                    menu.addAction(UiHelper::getIcon("tag_filled", QColor("#9b59b6"), 18), "设置预设标签", this, &CategoryPanel::onSetPresetTags);
+
+                    // [Plan-6] 创建主选项“文件夹图标”
+                    QMenu* iconMenu = menu.addMenu(UiHelper::getIcon("folder_filled", WarningOrange, 18), "文件夹图标");
+                    UiHelper::applyMenuStyle(iconMenu);
+
+                    QColor catColor = colorStr.isEmpty() ? QColor("#555555") : QColor(colorStr);
+
+                    // 使用 QWidgetAction 构建纯图标选择器
+                    QWidgetAction* pickerAction = new QWidgetAction(iconMenu);
+                    QWidget* pickerWidget = new QWidget(iconMenu);
+                    QGridLayout* pickerLayout = new QGridLayout(pickerWidget);
+                    pickerLayout->setContentsMargins(6, 6, 6, 6);
+                    pickerLayout->setSpacing(6);
+
+                    static const QList<QPair<QString, QString>> builtInIcons = {
+                        {"默认文件夹", "folder_filled"},
+                        {"层级分类", "category"},
+                        {"照片媒体", "image_filled"},
+                        {"时钟历史", "clock_filled"},
+                        {"星标收藏", "star_filled"},
+                        {"爱心常用", "heart_filled"},
+                        {"加密安全", "lock_filled"},
+                        {"图书文档", "book"},
+                        {"配置管理", "settings_filled"},
+                        {"网络球体", "globe_filled"}
+                    };
+
+                    int row = 0;
+                    int col = 0;
+                    for (const auto& pair : builtInIcons) {
+                        QString label = pair.first;
+                        QString iconKey = pair.second;
+
+                        QPushButton* btn = new QPushButton(pickerWidget);
+                        btn->setFixedSize(28, 28);
+                        btn->setCursor(Qt::PointingHandCursor);
+                        btn->setStyleSheet(
+                            "QPushButton { "
+                            "  background-color: transparent; "
+                            "  border: 1px solid transparent; "
+                            "  border-radius: 4px; "
+                            "}"
+                            "QPushButton:hover { "
+                            "  background-color: #3E3E42; "
+                            "  border: 1px solid #555555; "
+                            "}"
+                            "QPushButton:pressed { "
+                            "  background-color: #4E4E52; "
+                            "}"
+                        );
+                        btn->setIcon(UiHelper::getIcon(iconKey, catColor, 18));
+                        btn->setIconSize(QSize(18, 18));
+                        btn->setToolTip(label);
+
+                        pickerLayout->addWidget(btn, row, col);
+
+                        connect(btn, &QPushButton::clicked, this, [this, catId, iconKey, iconMenu]() {
+                            auto cats = CategoryRepo::getAll();
+                            for (auto& cat : cats) {
+                                if (cat.id == catId) {
+                                    cat.icon = iconKey.toStdWString();
+                                    CategoryRepo::update(cat);
+                                    break;
+                                }
+                            }
+                            m_categoryModel->refresh();
+                            iconMenu->close();
+                        });
+
+                        col++;
+                        if (col >= 5) {
+                            col = 0;
+                            row++;
+                        }
                     }
+
+                    pickerWidget->setLayout(pickerLayout);
+                    pickerAction->setDefaultWidget(pickerWidget);
+                    iconMenu->addAction(pickerAction);
+
+                    menu.addSeparator();
                 }
 
-                pickerWidget->setLayout(pickerLayout);
-                pickerAction->setDefaultWidget(pickerWidget);
-                iconMenu->addAction(pickerAction);
-
-                menu.addSeparator();
-
                 menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建文件夹", this, &CategoryPanel::onCreateCategory);
-                
-                int catId = index.data(IdRole).toInt();
-                Category cat = CategoryRepo::getById(catId);
-                bool isManagedLibraryRoot = (cat.id > 0 && cat.parentId == 0 && !cat.physicalPath.empty());
 
                 if (!isManagedLibraryRoot) {
                     menu.addAction(UiHelper::getIcon("folder_filled", TextMuted, 18), "新建子文件夹", this, &CategoryPanel::onCreateSubCategory);
@@ -802,6 +805,10 @@ void CategoryPanel::onRenameCategory() {
         int catId = getTargetCategoryId(index);
         if (catId > 0) {
             Category cat = CategoryRepo::getById(catId);
+            if (cat.kind == CategoryKind::SystemLibrary || (!cat.physicalPath.empty() && cat.parentId == 0)) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>受保护的托管库分类禁止重命名！</b>", 2000, QColor("#e81123"));
+                return;
+            }
             if (cat.encrypted && !CategoryLockManager::instance().isUnlocked(catId)) {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>分类处于锁定状态，请先解锁后再执行操作！</b>", 2000, QColor("#e81123"));
                 return;
@@ -826,11 +833,15 @@ void CategoryPanel::onDeleteCategory() {
 
     if (selectedRows.isEmpty()) return;
 
-    // 🚨 核心修复：检查任何选中的分类是否被加密并处于锁定状态
+    // 🚨 核心修复：检查任何选中的分类是否包含受保护托管库或处于锁定状态
     for (const QModelIndex& index : selectedRows) {
         int id = getTargetCategoryId(index);
         if (id > 0) {
             Category cat = CategoryRepo::getById(id);
+            if (cat.kind == CategoryKind::SystemLibrary || (!cat.physicalPath.empty() && cat.parentId == 0)) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>受保护的托管库分类禁止删除！</b>", 2000, QColor("#e81123"));
+                return;
+            }
             if (cat.encrypted && !CategoryLockManager::instance().isUnlocked(id)) {
                 ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>分类处于锁定状态，请先解锁后再执行操作！</b>", 2000, QColor("#e81123"));
                 return;

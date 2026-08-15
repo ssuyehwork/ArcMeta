@@ -30,6 +30,7 @@
 #include "DuplicateConflictDialog.h"
 #include "TaskProgressToolBar.h"
 #include "../core/CategoryDropProcessor.h"
+#include "../core/VolumeOnlineManager.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -379,6 +380,15 @@ void MainWindow::initUi() {
             QString compoundId = idStrs.join(",");
             QString compoundName = QString("已选择 %1 个分类").arg(ids.size());
             unifiedNavigateTo(kProtocolCategory + compoundId + "?name=" + compoundName);
+        }
+    });
+
+    connect(&VolumeOnlineManager::instance(), &VolumeOnlineManager::volumeStateChanged,
+            this, [this](const QString& driveLetter, bool isOnline) {
+        if (!isOnline) {
+            onVolumeUnplugged(driveLetter);
+        } else {
+            if (m_categoryPanel) m_categoryPanel->requestRefresh(true);
         }
     });
 
@@ -1916,6 +1926,25 @@ void MainWindow::updateNavButtons() {
     bool isLogic = m_currentPath.contains("://");
     bool atRoot = (m_currentPath == "computer://" || (!isLogic && QDir(m_currentPath).isRoot()));
     m_btnUp->setEnabled(!atRoot && !m_currentPath.isEmpty());
+}
+
+void MainWindow::onVolumeUnplugged(const QString& driveLetter) {
+    QString targetLib = "arcmeta.library_" + driveLetter.toLower();
+    
+    bool isCurrentOnUnpluggedDrive = false;
+    if (m_currentPath.contains(targetLib, Qt::CaseInsensitive) ||
+        m_currentPath.contains(driveLetter + ":", Qt::CaseInsensitive)) {
+        isCurrentOnUnpluggedDrive = true;
+    }
+
+    if (isCurrentOnUnpluggedDrive) {
+        // 🛡️ 如果当前正在浏览已被拔出的托管库或盘符，平滑自动回退至“全部数据”
+        unifiedNavigateTo("system://all");
+    }
+
+    if (m_categoryPanel) {
+        m_categoryPanel->requestRefresh(true);
+    }
 }
 
 void MainWindow::onStatusBarStatsUpdated(int fileCount, int folderCount, int totalCount) {

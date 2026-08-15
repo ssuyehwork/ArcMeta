@@ -2225,6 +2225,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                             recursiveRemove = [&](const QString& target) -> bool {
                                 QFileInfo info(target);
                                 bool ok = false;
+                                QDir parentDir = info.dir();
                                 if (info.isDir()) {
                                     QDir dir(target);
                                     for (const QString& entry : dir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot)) {
@@ -2233,14 +2234,13 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                                     ok = QDir().rmdir(target);
                                 } else {
                                     ok = QFile::remove(target);
-                                    
-                                    // 🛡️ 物理加固：如果删除的是 .arc 胶囊内部的文件，检查并销毁父目录 .arc
-                                    QDir parentDir = info.dir();
-                                    if (parentDir.dirName().endsWith(".arc", Qt::CaseInsensitive)) {
-                                        QStringList remaining = parentDir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-                                        if (remaining.isEmpty()) {
-                                            parentDir.rmdir(parentDir.absolutePath());
-                                        }
+                                }
+
+                                // 🛡️ 物理加固：如果删除的是 .arc 胶囊内部的文件或子文件夹，检查并销毁父目录 .arc
+                                if (ok && parentDir.dirName().endsWith(".arc", Qt::CaseInsensitive)) {
+                                    QStringList remaining = parentDir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+                                    if (remaining.isEmpty()) {
+                                        parentDir.rmdir(parentDir.absolutePath());
                                     }
                                 }
                                 return ok;

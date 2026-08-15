@@ -1,6 +1,7 @@
 #include "StatisticsService.h"
 #include "DatabaseManager.h"
 #include "MetadataManager.h"
+#include "../core/VolumeOnlineManager.h"
 #include <QThreadPool>
 #include <QRunnable>
 #include <QCoreApplication>
@@ -30,7 +31,22 @@ StatisticsService& StatisticsService::instance() {
 }
 
 StatisticsService::StatisticsService(QObject* parent)
-    : QObject(parent) {}
+    : QObject(parent) {
+    m_debounceTimer = new QTimer(this);
+    m_debounceTimer->setSingleShot(true);
+    connect(m_debounceTimer, &QTimer::timeout, this, [this]() {
+        requestFullRecountAsync();
+    });
+
+    connect(&VolumeOnlineManager::instance(), &VolumeOnlineManager::volumeStateChanged,
+            this, [this](const QString& driveLetter, bool isOnline) {
+        Q_UNUSED(driveLetter);
+        Q_UNUSED(isOnline);
+        if (m_debounceTimer) {
+            m_debounceTimer->start(300); // 300ms 防抖出账
+        }
+    });
+}
 
 StatisticsSnapshot StatisticsService::getCachedSnapshot() const {
     std::lock_guard<std::mutex> lock(m_snapshotMutex);
@@ -61,15 +77,21 @@ void StatisticsService::notifyAssetAdded(int targetCatId, bool hasTags) {
     emit statisticsUpdated(m_cachedSnapshot);
 }
 
-void StatisticsService::notifyAssetRemoved(int targetCatId, bool hadTags, bool wasTrash) {
-    if (wasTrash) {
-        m_trashCount.fetch_sub(1);
+void StatisticsService::notifyAssetRemoved(int targetCatId, int libraryCatId, bool hadTags, bool wasTrash) {
+    std::vector<int> userCatIds;
+    if (targetCatId > 0) userCatIds.push_back(targetCatId);
+    purgeAsset(libraryCatId, userCatIds, !hadTags, wasTrash);
+}
+
+void StatisticsService::purgeAsset(int libraryCatId, const std::vector<int>& userCatIds, bool hasTags, bool isTrash) {
+    if (isTrash) {
+        if (m_trashCount.load() > 0) m_trashCount.fetch_sub(1);
     } else {
-        m_totalCount.fetch_sub(1);
-        if (targetCatId <= 0) {
+        if (m_totalCount.load() > 0) m_totalCount.fetch_sub(1);
+        if (userCatIds.empty() && m_uncategorizedCount.load() > 0) {
             m_uncategorizedCount.fetch_sub(1);
         }
-        if (!hadTags) {
+        if (!hasTags && m_untaggedCount.load() > 0) {
             m_untaggedCount.fetch_sub(1);
         }
     }
@@ -79,9 +101,18 @@ void StatisticsService::notifyAssetRemoved(int targetCatId, bool hadTags, bool w
     m_cachedSnapshot.systemCounts["uncategorized"] = m_uncategorizedCount.load();
     m_cachedSnapshot.systemCounts["untagged"] = m_untaggedCount.load();
     m_cachedSnapshot.systemCounts["trash"] = m_trashCount.load();
-    if (targetCatId > 0 && !wasTrash) {
-        if (m_cachedSnapshot.userCategoryCounts[targetCatId] > 0) {
-            m_cachedSnapshot.userCategoryCounts[targetCatId]--;
+
+    // 1. 托管库分类扣减
+    if (libraryCatId > 0 && m_cachedSnapshot.libraryCounts.contains(libraryCatId)) {
+        if (m_cachedSnapshot.libraryCounts[libraryCatId] > 0) {
+            m_cachedSnapshot.libraryCounts[libraryCatId]--;
+        }
+    }
+
+    // 2. 所有挂载过的用户分类全量扣减
+    for (int userCatId : userCatIds) {
+        if (m_cachedSnapshot.userCategoryCounts.contains(userCatId) && m_cachedSnapshot.userCategoryCounts[userCatId] > 0) {
+            m_cachedSnapshot.userCategoryCounts[userCatId]--;
         }
     }
 
@@ -120,6 +151,9 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
     StatisticsSnapshot snapshot;
     auto allCats = CategoryRepo::getCachedAll();
 
+    // 0. 获取当前物理在线托管盘符集合
+    QSet<QString> onlineDrives = VolumeOnlineManager::instance().getOnlineDrives();
+
     // 1. 初始化所有分类映射
     std::unordered_set<int> userCatIds;
     for (const auto& cat : allCats) {
@@ -139,6 +173,17 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
     // 2. 纯内存 0ms 秒级核算（绝对真相源）
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
         if (meta.isFolder) return;
+
+        // 🛡️ 物理在线断言 (谓词：drive_letter IN onlineDrives)
+        if (path.length() >= 2 && path[1] == L':') {
+            QChar dChar = QChar(path[0]).toUpper();
+            if (dChar.isLetter()) {
+                QString driveStr(dChar);
+                if (!onlineDrives.contains(driveStr)) {
+                    return; // 🚨 盘符离线直接排除该资产，不参与全库任何计数！
+                }
+            }
+        }
 
         // 🛡️ 第一防线：强力回收站拦截 (兼顾标志位与物理路径特征)
         bool isInTrash = meta.isTrash || 
@@ -183,15 +228,22 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
         }
     });
 
-    // 3. 汇总物理磁盘回收站
+    // 3. 汇总物理磁盘回收站 (离线盘过滤)
     int diskTrashCount = 0;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
     for (sqlite3* db : dbs) {
         if (!db) continue;
         sqlite3_stmt* stmtDisk = nullptr;
-        if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM disk_trash", -1, &stmtDisk, nullptr) == SQLITE_OK) {
-            if (sqlite3_step(stmtDisk) == SQLITE_ROW) {
-                diskTrashCount += sqlite3_column_int(stmtDisk, 0);
+        if (sqlite3_prepare_v2(db, "SELECT original_path FROM disk_trash", -1, &stmtDisk, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmtDisk) == SQLITE_ROW) {
+                const unsigned char* rawPath = sqlite3_column_text(stmtDisk, 0);
+                if (rawPath) {
+                    QString origP = QString::fromUtf8(reinterpret_cast<const char*>(rawPath));
+                    QString letter = VolumeOnlineManager::extractDriveLetter(origP);
+                    if (letter.isEmpty() || onlineDrives.contains(letter.toUpper())) {
+                        diskTrashCount++;
+                    }
+                }
             }
             sqlite3_finalize(stmtDisk);
         }

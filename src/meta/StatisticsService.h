@@ -2,6 +2,7 @@
 #include <QObject> 
 #include <QMap> 
 #include <QString> 
+#include <QTimer>
 #include <atomic> 
 #include <mutex> 
 #include <functional> 
@@ -21,7 +22,8 @@ public:
 
     // 3. 增量变更接口（由托管生命周期服务单向驱动原子计数） 
     void notifyAssetAdded(int targetCatId, bool hasTags); 
-    void notifyAssetRemoved(int targetCatId, bool hadTags, bool wasTrash); 
+    void notifyAssetRemoved(int targetCatId, int libraryCatId, bool hadTags, bool wasTrash); 
+    void purgeAsset(int libraryCatId, const std::vector<int>& userCatIds, bool hasTags, bool isTrash);
     void notifyAssetTrashChanged(bool toTrash, bool hasTags); 
     void notifyDiskTrashCountChanged(int delta); 
 
@@ -40,5 +42,7 @@ public:
     std::atomic<int> m_uncategorizedCount{0}; 
     std::atomic<int> m_untaggedCount{0}; 
     std::atomic<int> m_trashCount{0}; 
+
+    QTimer* m_debounceTimer{nullptr};
 }; 
 } 
