@@ -233,6 +233,7 @@ private:
     void initUi();
     void initGridView();
     void restoreActiveView();
+    void restoreSelections();
     void initListView();
     void setupContextMenu();
     void updateLayersButtonState();

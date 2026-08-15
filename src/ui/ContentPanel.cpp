@@ -2712,6 +2712,36 @@ void ContentPanel::restoreActiveView() {
     }
 }
 
+void ContentPanel::restoreSelections() {
+    if (!m_pendingSelectNames.isEmpty()) {
+        QAbstractItemView* view = (m_viewStack->currentWidget() == m_gridView) ?
+            static_cast<QAbstractItemView*>(m_gridView) : static_cast<QAbstractItemView*>(m_treeView);
+
+        if (view && view->selectionModel()) {
+            QItemSelection selection;
+            QModelIndex lastProxyIdx;
+            const auto& records = m_model->allRecords();
+            for (size_t i = 0; i < records.size(); ++i) {
+                QString fn = QFileInfo(records[i].path).fileName();
+                if (m_pendingSelectNames.contains(fn)) {
+                    QModelIndex srcIdx = m_model->index(static_cast<int>(i), 0);
+                    QModelIndex proxyIdx = m_proxyModel->mapFromSource(srcIdx);
+                    if (proxyIdx.isValid()) {
+                        selection.select(proxyIdx, proxyIdx);
+                        lastProxyIdx = proxyIdx;
+                    }
+                }
+            }
+            view->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+            if (lastProxyIdx.isValid()) {
+                view->scrollTo(lastProxyIdx);
+                if (m_isPendingEdit) view->edit(lastProxyIdx);
+            }
+        }
+        m_pendingSelectNames.clear();
+    }
+}
+
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     restoreActiveView(); // 🚨 强行切离开锁屏页，恢复卡片网格/列表页！
 
@@ -2779,34 +2809,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
                 panelPtr->applyFilters();
 
-                // 2026-07-xx 按照 Plan-66：处理新建项后的自动定位与编辑（批量多选恢复）
-                if (!panelPtr->m_pendingSelectNames.isEmpty()) {
-                    QAbstractItemView* view = (panelPtr->m_viewStack->currentWidget() == panelPtr->m_gridView) ? 
-                        static_cast<QAbstractItemView*>(panelPtr->m_gridView) : static_cast<QAbstractItemView*>(panelPtr->m_treeView);
-
-                    if (view && view->selectionModel()) {
-                        QItemSelection selection;
-                        QModelIndex lastProxyIdx;
-                        const auto& records = panelPtr->m_model->allRecords();
-                        for (size_t i = 0; i < records.size(); ++i) {
-                            QString fn = QFileInfo(records[i].path).fileName();
-                            if (panelPtr->m_pendingSelectNames.contains(fn)) {
-                                QModelIndex srcIdx = panelPtr->m_model->index(static_cast<int>(i), 0);
-                                QModelIndex proxyIdx = panelPtr->m_proxyModel->mapFromSource(srcIdx);
-                                if (proxyIdx.isValid()) {
-                                    selection.select(proxyIdx, proxyIdx);
-                                    lastProxyIdx = proxyIdx;
-                                }
-                            }
-                        }
-                        view->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-                        if (lastProxyIdx.isValid()) {
-                            view->scrollTo(lastProxyIdx);
-                            if (panelPtr->m_isPendingEdit) view->edit(lastProxyIdx);
-                        }
-                    }
-                    panelPtr->m_pendingSelectNames.clear();
-                }
+                panelPtr->restoreSelections();
 
                 ArcMeta::Logger::log(QString("[Content] 目录扫描完成并已应用到 UI [%1]").arg(reqId));
                 panelPtr->m_visibleTimer->start();
@@ -3030,33 +3033,7 @@ void ContentPanel::loadCategory(int categoryId) {
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
 
-                // 2026-07-26 极致重构：系统或分类加载完成，自动重新选中之前的选中高亮目标（多选恢复）
-                if (!weakThis->m_pendingSelectNames.isEmpty()) {
-                    QAbstractItemView* view = (weakThis->m_viewStack->currentWidget() == weakThis->m_gridView) ? 
-                        static_cast<QAbstractItemView*>(weakThis->m_gridView) : static_cast<QAbstractItemView*>(weakThis->m_treeView);
-
-                    if (view && view->selectionModel()) {
-                        QItemSelection selection;
-                        QModelIndex lastProxyIdx;
-                        const auto& records = weakThis->m_model->allRecords();
-                        for (size_t i = 0; i < records.size(); ++i) {
-                            QString fn = QFileInfo(records[i].path).fileName();
-                            if (weakThis->m_pendingSelectNames.contains(fn)) {
-                                QModelIndex srcIdx = weakThis->m_model->index(static_cast<int>(i), 0);
-                                QModelIndex proxyIdx = weakThis->m_proxyModel->mapFromSource(srcIdx);
-                                if (proxyIdx.isValid()) {
-                                    selection.select(proxyIdx, proxyIdx);
-                                    lastProxyIdx = proxyIdx;
-                                }
-                            }
-                        }
-                        view->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-                        if (lastProxyIdx.isValid()) {
-                            view->scrollTo(lastProxyIdx);
-                        }
-                    }
-                    weakThis->m_pendingSelectNames.clear();
-                }
+                weakThis->restoreSelections();
 
                 ArcMeta::Logger::log(QString("[Content] 分类加载完成 [%1]").arg(reqId));
             } else if (weakThis) {
@@ -3119,32 +3096,7 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
 
-                if (!weakThis->m_pendingSelectNames.isEmpty()) {
-                    QAbstractItemView* view = (weakThis->m_viewStack->currentWidget() == weakThis->m_gridView) ? 
-                        static_cast<QAbstractItemView*>(weakThis->m_gridView) : static_cast<QAbstractItemView*>(weakThis->m_treeView);
-
-                    if (view && view->selectionModel()) {
-                        QItemSelection selection;
-                        QModelIndex lastProxyIdx;
-                        const auto& rList = weakThis->m_model->allRecords();
-                        for (size_t i = 0; i < rList.size(); ++i) {
-                            QString fn = QFileInfo(rList[i].path).fileName();
-                            if (weakThis->m_pendingSelectNames.contains(fn)) {
-                                QModelIndex srcIdx = weakThis->m_model->index(static_cast<int>(i), 0);
-                                QModelIndex proxyIdx = weakThis->m_proxyModel->mapFromSource(srcIdx);
-                                if (proxyIdx.isValid()) {
-                                    selection.select(proxyIdx, proxyIdx);
-                                    lastProxyIdx = proxyIdx;
-                                }
-                            }
-                        }
-                        view->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-                        if (lastProxyIdx.isValid()) {
-                            view->scrollTo(lastProxyIdx);
-                        }
-                    }
-                    weakThis->m_pendingSelectNames.clear();
-                }
+                weakThis->restoreSelections();
 
                 ArcMeta::Logger::log(QString("[Content] 路径列表加载完成 [%1]").arg(reqId));
             } else if (weakThis) {

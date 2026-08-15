@@ -350,6 +350,26 @@ void MetadataManager::initFromScchMode() {
             sqlite3_finalize(stmt);
         }
 
+        // 读取该库的 category_items 表，将关联关系一次性填入 RuntimeMeta 内存对象中
+        const char* itemsSql = "SELECT folder_id, category_id FROM category_items WHERE category_id > 0";
+        sqlite3_stmt* stmtItems = nullptr;
+        if (sqlite3_prepare_v2(db, itemsSql, -1, &stmtItems, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmtItems) == SQLITE_ROW) {
+                const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmtItems, 0));
+                int catId = sqlite3_column_int(stmtItems, 1);
+                if (fid) {
+                    std::string sFid(fid);
+                    if (tempFidToPath.count(sFid)) {
+                        auto& catVector = tempCache[tempFidToPath[sFid]].categoryIds;
+                        if (std::find(catVector.begin(), catVector.end(), catId) == catVector.end()) {
+                            catVector.push_back(catId);
+                        }
+                    }
+                }
+            }
+            sqlite3_finalize(stmtItems);
+        }
+
         // 2. Plan-124: 加载进度缓存 (正确的闭包内部位置)
         const char* statsSql = "SELECT key, value FROM system_stats WHERE key LIKE 'PROGRESS:%'";
         if (sqlite3_prepare_v2(db, statsSql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -1167,6 +1187,50 @@ void MetadataManager::setAddedAt(const std::wstring& path, long long addedAt, bo
     DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
         persistAsync(nPath);
     });
+}
+
+void MetadataManager::addCategoryToItemMemory(const std::wstring& path, int categoryId) {
+    std::wstring nPath = normalizePath(path);
+    ensureActivated(nPath);
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    auto currentSnapshot = std::atomic_load(&m_snapshot);
+    if (currentSnapshot) {
+        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+        auto& cats = (*newMap)[nPath].categoryIds;
+        if (std::find(cats.begin(), cats.end(), categoryId) == cats.end()) {
+            cats.push_back(categoryId);
+        }
+        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    }
+}
+
+void MetadataManager::removeCategoryFromItemMemory(const std::wstring& path, int categoryId) {
+    std::wstring nPath = normalizePath(path);
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    auto currentSnapshot = std::atomic_load(&m_snapshot);
+    if (currentSnapshot) {
+        auto it = currentSnapshot->find(nPath);
+        if (it != currentSnapshot->end()) {
+            auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+            auto& cats = (*newMap)[nPath].categoryIds;
+            cats.erase(std::remove(cats.begin(), cats.end(), categoryId), cats.end());
+            std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+        }
+    }
+}
+
+void MetadataManager::clearCategoriesFromItemMemory(const std::wstring& path) {
+    std::wstring nPath = normalizePath(path);
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    auto currentSnapshot = std::atomic_load(&m_snapshot);
+    if (currentSnapshot) {
+        auto it = currentSnapshot->find(nPath);
+        if (it != currentSnapshot->end()) {
+            auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
+            (*newMap)[nPath].categoryIds.clear();
+            std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+        }
+    }
 }
 
 void MetadataManager::renameTag(const QString& oldName, const QString& newName) {

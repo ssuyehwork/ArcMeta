@@ -40,6 +40,7 @@ struct RuntimeMeta {
     std::wstring baseName; // 2026-08-xx 持久化基名，避免重复解析计算
     std::wstring ext;      // 2026-08-xx 持久化后缀名，统一小写
     std::string sha256;    // 新增：储存文件的 SHA256 / FastHash 哈希值
+    std::vector<int> categoryIds; // 🚨 SSOT 核心：资产直接在内存中持有其绑定的分类 ID 列表
     
     // 2026-06-xx 物理对标：补充时间戳与大小字段
     long long ctime;
@@ -113,6 +114,13 @@ public:
      * @brief 获取权重最高的前 N 个标签 (Plan-82)
      */
     QList<QPair<QString, int>> getTopTags(int limit = 20) const;
+
+    /**
+     * @brief 🚨 SSOT 核心：内存分类关联维护接口
+     */
+    void addCategoryToItemMemory(const std::wstring& path, int categoryId);
+    void removeCategoryFromItemMemory(const std::wstring& path, int categoryId);
+    void clearCategoriesFromItemMemory(const std::wstring& path);
 
     /**
      * @brief 物理刷新级别
