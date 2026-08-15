@@ -1567,6 +1567,9 @@ void FilterPanel::updateHeaderStatus() {
     QColor brandYellow = QColor("#f1c40f");
     m_iconLabel->setPixmap(UiHelper::getIcon("filter_funnel_outline", brandYellow, 18).pixmap(18, 18));
     m_titleLabel->setStyleSheet(QString("font-size: 13px; font-weight: bold; color: %1; background: transparent; border: none;").arg(brandYellow.name()));
+    m_titleLabel->style()->unpolish(m_titleLabel);
+    m_titleLabel->style()->polish(m_titleLabel);
+    m_titleLabel->update();
 
     // 标记 ②：根据筛选状态动态切换颜色（激活为彩色，空闲为灰色）
     QColor btnColor = active ? brandYellow : QColor("#B0B0B0");
