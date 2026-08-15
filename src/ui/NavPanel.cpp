@@ -428,6 +428,9 @@ QWidget* NavPanel::buildGroup(const QString& title, const QIcon& icon, const QCo
         "  margin: 0px;"
         "}"
     ).arg(color.name()));
+    hdrBtn->style()->unpolish(hdrBtn);
+    hdrBtn->style()->polish(hdrBtn);
+    hdrBtn->update();
     hdrLayout->addWidget(hdrBtn);
 
     QWidget* content = new QWidget(wrapper);

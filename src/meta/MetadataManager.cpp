@@ -589,6 +589,10 @@ bool MetadataManager::registerAsset(const std::string& initialFolderId, const st
  
     // 4. 同步更新内存缓存 RuntimeMeta (SSOT 规则) 
     { 
+        // 补齐分类 ID 到内存对象中，防止内存中分类列表为空
+        if (targetCatId > 0) {
+            rm.categoryIds.push_back(targetCatId);
+        }
         std::unique_lock<std::shared_mutex> lock(m_mutex); 
         auto currentSnapshot = std::atomic_load(&m_snapshot);
         auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
@@ -606,6 +610,12 @@ bool MetadataManager::registerAsset(const std::string& initialFolderId, const st
     registerItemsAsync({QString::fromStdWString(nPath)}, true); 
  
     notifyCategoryCountChanged();
+
+    // 1. 同步刷新分类仓储内存快照
+    CategoryRepo::refreshMemoryCache();
+
+    // 2. 触发统计服务异步全量重算账本，推动侧边栏数字刷新
+    StatisticsService::instance().requestFullRecountAsync();
 
     notifyUI(RefreshLevel::FullRebuild); 
     return true; 
