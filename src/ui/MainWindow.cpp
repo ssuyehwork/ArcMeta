@@ -493,12 +493,26 @@ void MainWindow::initUi() {
                                 }
 
                                 if (chosenAction == DuplicateResolveAction::UseExisting) {
-                                    // 清理新文件并关联已有资产到目标分类
+                                    // 查出 newItem 当前在数据库中已关联的所有分类 ID
+                                    std::vector<int> catIds = CategoryRepo::getItemCategoryIds(group.newItem.folderId.toStdString(), group.newItem.path.toStdWString());
+                                    if (catIds.empty() && targetCatId > 0) {
+                                        catIds.push_back(targetCatId);
+                                    }
+
+                                    // 清理新文件物理文件与元数据
                                     QFile::remove(group.newItem.path);
                                     MetadataManager::instance().removeMetadataSync(group.newItem.path.toStdWString());
-                                    CategoryRepo::addItemToCategory(targetCatId, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
+
+                                    // 将已有资产（existingItem）关联到这些分类中
+                                    for (int cid : catIds) {
+                                        if (cid > 0) {
+                                            CategoryRepo::addItemToCategory(cid, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
+                                        }
+                                    }
                                 }
                             }
+                            CategoryRepo::refreshMemoryCache();
+                            StatisticsService::instance().requestFullRecountAsync();
                             m_categoryPanel->requestRefresh(true);
                             m_contentPanel->refreshAll();
                         });

@@ -5,6 +5,7 @@
 #include "../meta/DuplicateDetectorService.h"
 #include "../meta/CapsuleMediaExtractor.h"
 #include "../ui/DuplicateConflictDialog.h"
+#include "../meta/StatisticsService.h"
 #include <QtConcurrent> 
 #include <QDebug> 
 #include <QCoreApplication>
@@ -75,11 +76,26 @@ void CategoryDropProcessor::triggerDuplicateCheck(const QStringList& paths, int 
                         }
 
                         if (chosenAction == DuplicateResolveAction::UseExisting) {
-                            // 使用已存在文件：删除新文件并在数据库中做 1:N 映射
+                            // 查出 newItem 当前关联的所有分类 ID
+                            std::vector<int> catIds = CategoryRepo::getItemCategoryIds(group.newItem.folderId.toStdString(), group.newItem.path.toStdWString());
+                            if (catIds.empty() && targetCategoryId > 0) {
+                                catIds.push_back(targetCategoryId);
+                            }
+
+                            // 清理新文件物理文件与元数据
                             QFile::remove(group.newItem.path);
-                            CategoryRepo::addItemToCategory(targetCategoryId, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
+                            MetadataManager::instance().removeMetadataSync(group.newItem.path.toStdWString());
+
+                            // 将已有资产关联到这些分类中
+                            for (int cid : catIds) {
+                                if (cid > 0) {
+                                    CategoryRepo::addItemToCategory(cid, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
+                                }
+                            }
                         }
                     }
+                    CategoryRepo::refreshMemoryCache();
+                    StatisticsService::instance().requestFullRecountAsync();
                 }
             });
         }
