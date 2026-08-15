@@ -11,10 +11,54 @@ namespace ArcMeta {
 std::vector<ItemRecord> CategoryLoadService::loadCategoryItems(int categoryId, bool recursive) {
     std::vector<ItemRecord> allRecords;
 
-    // 1. 加载子分类
+    // 1. 获取当前分类元数据
+    Category currentCat = CategoryRepo::getCachedById(categoryId);
+    if (currentCat.id == 0) {
+        currentCat = CategoryRepo::getById(categoryId);
+    }
+
+    // =========================================================================
+    // 分支 A：系统托管根分类（SystemLibrary）—— 100% 对齐 StatisticsService 口径
+    // 直接提取归属于该库物理路径的所有有效素材，彻底消除 category_items 关联断链造成的空白！
+    // =========================================================================
+    if (currentCat.kind == CategoryKind::SystemLibrary && !currentCat.physicalPath.empty()) {
+        std::wstring normLibPath = MetadataManager::normalizePath(currentCat.physicalPath);
+        if (!normLibPath.empty() && normLibPath.back() != L'\\' && normLibPath.back() != L'/') {
+            normLibPath += L'\\';
+        }
+
+        MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
+            // 过滤非受控、回收站、以及容器目录本身
+            if (meta.isTrash || meta.isFolder) return;
+
+            // 物理路径前缀比对，锁定属于当前盘托管库的素材
+            std::wstring normAssetPath = MetadataManager::normalizePath(path);
+            if (normAssetPath.rfind(normLibPath, 0) == 0) {
+                // 安全加锁过滤
+                if (!meta.folderId.empty() && isAssetLocked(meta.folderId)) {
+                    return;
+                }
+
+                QString qPath = QString::fromStdWString(normAssetPath);
+                if (FileFilterService::isAuxiliaryFile(qPath, false)) {
+                    return;
+                }
+
+                allRecords.push_back(ItemRecord::create(qPath, &meta, true));
+            }
+        });
+
+        return allRecords;
+    }
+
+    // =========================================================================
+    // 分支 B：用户自定义逻辑分类（User）—— 走子分类及 category_items 关联加载
+    // =========================================================================
+
+    // 1. 加载直属子分类
     auto allCategories = CategoryRepo::getAll();
     for (const auto& cat : allCategories) {
-        if (cat.parentId == categoryId) {
+        if (cat.parentId == categoryId && cat.kind != CategoryKind::SystemLibrary) {
             ItemRecord r;
             r.isCategory = true;
             r.categoryId = cat.id;
@@ -27,7 +71,7 @@ std::vector<ItemRecord> CategoryLoadService::loadCategoryItems(int categoryId, b
         }
     }
 
-    // 2. 统一使用数据库模式加载关联分类项
+    // 2. 加载关联资产项
     std::vector<CategoryItem> items;
     if (recursive) {
         items = CategoryRepo::getItemsRecursive(categoryId);
