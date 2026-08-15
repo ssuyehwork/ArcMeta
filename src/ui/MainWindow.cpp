@@ -2211,21 +2211,26 @@ void MainWindow::onDriveButtonContextMenu(const QPoint& pos) {
         if (QDir().mkpath(managedPath)) {
             btn->setState(DriveButton::Active);
             
-            // 2026-08-xx 物理同步：创建资源库时，同步注册逻辑分类并锚定 FRN
             std::wstring wPath = QDir::toNativeSeparators(managedPath).toStdWString();
+            
+            // 1. 构造半静态托管库分类记录
+            Category cat;
+            cat.name = QFileInfo(managedPath).fileName().toStdWString();
+            cat.parentId = 0;
+            cat.kind = CategoryKind::SystemLibrary;
+            cat.physicalPath = wPath;
+            cat.color = CategoryRepo::getDefaultColor();
+            
+            // 2. 尝试锚定 Win32 物理 FRN (如果可用)
             std::string fid;
             std::wstring frnStr;
             if (MetadataManager::fetchWinApiMetadataDirect(wPath, fid, &frnStr)) {
-                try {
-                    Category cat;
-                    cat.name = QFileInfo(managedPath).fileName().toStdWString();
-                    cat.physicalFrn = std::stoull(frnStr, nullptr, 16);
-                    cat.physicalPath = wPath;
-                    cat.color = CategoryRepo::getDefaultColor();
-                    if (CategoryRepo::add(cat)) {
-                        MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
-                    }
-                } catch (...) {}
+                try { cat.physicalFrn = std::stoull(frnStr, nullptr, 16); } catch (...) {}
+            }
+
+            // 3. 写入分类表并通知侧边栏 UI 1:1 重建刷新
+            if (CategoryRepo::add(cat)) {
+                MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
             }
 
             ToolTipOverlay::instance()->showText(QCursor::pos(), "资源库创建成功", 1500, Style::SuccessGreen);
