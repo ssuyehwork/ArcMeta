@@ -806,7 +806,7 @@ void CategoryPanel::onRenameCategory() {
         if (catId > 0) {
             Category cat = CategoryRepo::getById(catId);
             if (cat.kind == CategoryKind::SystemLibrary || (!cat.physicalPath.empty() && cat.parentId == 0)) {
-                ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>受保护的托管库分类禁止重命名！</b>", 2000, QColor("#e81123"));
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>受保护的托管库分类禁止编辑/删除！</b>", 2000, QColor("#e81123"));
                 return;
             }
             if (cat.encrypted && !CategoryLockManager::instance().isUnlocked(catId)) {
@@ -839,7 +839,7 @@ void CategoryPanel::onDeleteCategory() {
         if (id > 0) {
             Category cat = CategoryRepo::getById(id);
             if (cat.kind == CategoryKind::SystemLibrary || (!cat.physicalPath.empty() && cat.parentId == 0)) {
-                ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>受保护的托管库分类禁止删除！</b>", 2000, QColor("#e81123"));
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#e81123;'>受保护的托管库分类禁止编辑/删除！</b>", 2000, QColor("#e81123"));
                 return;
             }
             if (cat.encrypted && !CategoryLockManager::instance().isUnlocked(id)) {
