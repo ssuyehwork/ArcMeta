@@ -2053,6 +2053,23 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 }
             }
 
+            // 1. 刷新分类与统计内存缓存
+            CategoryRepo::refreshMemoryCache();
+            StatisticsService::instance().requestFullRecountAsync();
+
+            // 2. 通知侧边栏 CategoryPanel 立即重绘计数
+            MainWindow* mw = nullptr;
+            QWidget* parentWin = window();
+            while (parentWin) {
+                if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
+                parentWin = parentWin->parentWidget();
+            }
+            if (mw) {
+                CategoryPanel* cp = mw->findChild<CategoryPanel*>();
+                if (cp) cp->requestRefresh(true);
+            }
+
+            // 3. 刷新内容区视图
             refreshAll();
             ToolTipOverlay::instance()->showText(QCursor::pos(), QString("已成功批量创建 %1 个受控文件").arg(successCount), 2000, Style::SuccessGreen);
             break;
