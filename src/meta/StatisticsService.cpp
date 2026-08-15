@@ -1,7 +1,7 @@
 #include "StatisticsService.h"
 #include "DatabaseManager.h"
 #include "MetadataManager.h"
-#include "VolumeOnlineManager.h"
+#include "../core/VolumeOnlineManager.h"
 #include <QThreadPool>
 #include <QRunnable>
 #include <QCoreApplication>
@@ -78,14 +78,20 @@ void StatisticsService::notifyAssetAdded(int targetCatId, bool hasTags) {
 }
 
 void StatisticsService::notifyAssetRemoved(int targetCatId, int libraryCatId, bool hadTags, bool wasTrash) {
-    if (wasTrash) {
-        m_trashCount.fetch_sub(1);
+    std::vector<int> userCatIds;
+    if (targetCatId > 0) userCatIds.push_back(targetCatId);
+    purgeAsset(libraryCatId, userCatIds, !hadTags, wasTrash);
+}
+
+void StatisticsService::purgeAsset(int libraryCatId, const std::vector<int>& userCatIds, bool hasTags, bool isTrash) {
+    if (isTrash) {
+        if (m_trashCount.load() > 0) m_trashCount.fetch_sub(1);
     } else {
-        m_totalCount.fetch_sub(1);
-        if (targetCatId <= 0) {
+        if (m_totalCount.load() > 0) m_totalCount.fetch_sub(1);
+        if (userCatIds.empty() && m_uncategorizedCount.load() > 0) {
             m_uncategorizedCount.fetch_sub(1);
         }
-        if (!hadTags) {
+        if (!hasTags && m_untaggedCount.load() > 0) {
             m_untaggedCount.fetch_sub(1);
         }
     }
@@ -96,16 +102,17 @@ void StatisticsService::notifyAssetRemoved(int targetCatId, int libraryCatId, bo
     m_cachedSnapshot.systemCounts["untagged"] = m_untaggedCount.load();
     m_cachedSnapshot.systemCounts["trash"] = m_trashCount.load();
 
-    // 🛡️ 补全：同步精准扣减半静态托管库分类 (arcmeta.library_*) 的内存快照计数
+    // 1. 托管库分类扣减
     if (libraryCatId > 0 && m_cachedSnapshot.libraryCounts.contains(libraryCatId)) {
         if (m_cachedSnapshot.libraryCounts[libraryCatId] > 0) {
             m_cachedSnapshot.libraryCounts[libraryCatId]--;
         }
     }
 
-    if (targetCatId > 0 && !wasTrash) {
-        if (m_cachedSnapshot.userCategoryCounts.contains(targetCatId) && m_cachedSnapshot.userCategoryCounts[targetCatId] > 0) {
-            m_cachedSnapshot.userCategoryCounts[targetCatId]--;
+    // 2. 所有挂载过的用户分类全量扣减
+    for (int userCatId : userCatIds) {
+        if (m_cachedSnapshot.userCategoryCounts.contains(userCatId) && m_cachedSnapshot.userCategoryCounts[userCatId] > 0) {
+            m_cachedSnapshot.userCategoryCounts[userCatId]--;
         }
     }
 

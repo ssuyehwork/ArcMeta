@@ -23,6 +23,7 @@ public:
     // 3. 增量变更接口（由托管生命周期服务单向驱动原子计数） 
     void notifyAssetAdded(int targetCatId, bool hasTags); 
     void notifyAssetRemoved(int targetCatId, int libraryCatId, bool hadTags, bool wasTrash);
+    void purgeAsset(int libraryCatId, const std::vector<int>& userCatIds, bool hasTags, bool isTrash);
     void notifyAssetTrashChanged(bool toTrash, bool hasTags); 
     void notifyDiskTrashCountChanged(int delta); 
 

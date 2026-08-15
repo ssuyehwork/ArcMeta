@@ -29,7 +29,7 @@
 #include "../meta/CategoryRepo.h"
 #include "../ui/MediaColorExtractor.h"
 #include "StatisticsService.h"
-#include "VolumeOnlineManager.h"
+#include "../core/VolumeOnlineManager.h"
 #include "../ui/UiHelper.h"
 #include "MediaExtractorPipeline.h"
 #include "../util/ShellHelper.h"
@@ -1947,12 +1947,8 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                         totalDelta--;
                         QString driveLetter = VolumeOnlineManager::extractDriveLetter(QString::fromStdWString(curPath));
                         int libCatId = CategoryRepo::getLibraryCategoryIdByDrive(driveLetter);
-                        int targetCatId = 0;
-                        if (!it->second.categoryIds.empty()) {
-                            targetCatId = it->second.categoryIds.front();
-                        }
-                        // 实时通知统计服务扣减 (无论是否处于回收站，永久删除均需扣减)
-                        StatisticsService::instance().notifyAssetRemoved(targetCatId, libCatId, !it->second.tags.isEmpty(), it->second.isTrash);
+                        // 极简原子根除：无视视口上下文，全向扣减所属托管库及挂载过的所有用户分类
+                        StatisticsService::instance().purgeAsset(libCatId, it->second.categoryIds, !it->second.tags.isEmpty(), it->second.isTrash);
                     }
                     if (!it->second.folderId.empty()) {
                         std::string fid = it->second.folderId;
