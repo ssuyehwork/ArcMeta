@@ -161,9 +161,9 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
 
         // 🛡️ 物理在线断言 (谓词：drive_letter IN onlineDrives)
         if (path.length() >= 2 && path[1] == L':') {
-            wchar_t dChar = std::towupper(path[0]);
-            if (dChar >= L'A' && dChar <= L'Z') {
-                QString driveStr(QChar(dChar));
+            QChar dChar = QChar(path[0]).toUpper();
+            if (dChar.isLetter()) {
+                QString driveStr(dChar);
                 if (!onlineDrives.contains(driveStr)) {
                     return; // 🚨 盘符离线直接排除该资产，不参与全库任何计数！
                 }

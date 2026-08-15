@@ -1939,7 +1939,7 @@ void MainWindow::onVolumeUnplugged(const QString& driveLetter) {
 
     if (isCurrentOnUnpluggedDrive) {
         // 🛡️ 如果当前正在浏览已被拔出的托管库或盘符，平滑自动回退至“全部数据”
-        navigateTo("system://all");
+        unifiedNavigateTo("system://all");
     }
 
     if (m_categoryPanel) {
