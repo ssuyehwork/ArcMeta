@@ -4,6 +4,9 @@
 #include <QThreadPool>
 #include <QRunnable>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QSet>
 
 namespace ArcMeta {
 
@@ -120,6 +123,16 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
     StatisticsSnapshot snapshot;
     auto allCats = CategoryRepo::getCachedAll();
 
+    // 0. 获取当前物理在线的磁盘盘符集合 (如 {"C", "D", "Z"})
+    std::unordered_set<wchar_t> onlineLetters;
+    const auto activeDrives = QDir::drives();
+    for (const QFileInfo& drive : activeDrives) {
+        std::wstring p = drive.absolutePath().toStdWString();
+        if (p.length() >= 1) {
+            onlineLetters.insert(static_cast<wchar_t>(towupper(p[0])));
+        }
+    }
+
     // 1. 初始化所有分类映射
     std::unordered_set<int> userCatIds;
     for (const auto& cat : allCats) {
@@ -139,6 +152,14 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
     // 2. 纯内存 0ms 秒级核算（绝对真相源）
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
         if (meta.isFolder) return;
+
+        // 🛡️ 物理在线断言：若资产所属盘符当前处于拔出/离线状态，严禁计入全库任何统计！
+        if (path.length() >= 2 && path[1] == L':') {
+            wchar_t driveLetter = static_cast<wchar_t>(towupper(path[0]));
+            if (onlineLetters.find(driveLetter) == onlineLetters.end()) {
+                return; // 离线盘符下的资产跳过核算
+            }
+        }
 
         // 🛡️ 第一防线：强力回收站拦截 (兼顾标志位与物理路径特征)
         bool isInTrash = meta.isTrash ||
