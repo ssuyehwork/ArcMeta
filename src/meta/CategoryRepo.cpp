@@ -18,19 +18,6 @@
 
 namespace ArcMeta {
 
-std::atomic<int> CategoryRepo::s_totalFileCount{0};
-std::atomic<int> CategoryRepo::s_categorizedCount{0};
-std::atomic<bool> CategoryRepo::s_countsDirty{true};
-
-std::atomic<int> CategoryRepo::s_totalCount{0};
-std::atomic<int> CategoryRepo::s_tagsCount{0};
-std::atomic<int> CategoryRepo::s_recentlyVisitedCount{0};
-std::atomic<int> CategoryRepo::s_untaggedCount{0};
-std::atomic<int> CategoryRepo::s_uncategorizedCount{0};
-std::atomic<int> CategoryRepo::s_trashCount{0};
-
-std::mutex CategoryRepo::s_tagsMutex;
-QSet<QString> CategoryRepo::s_globalTagsSet;
 
 // 初始化静态内存快照指针
 std::shared_ptr<const std::vector<Category>> CategoryRepo::s_categoryCache = std::make_shared<const std::vector<Category>>();
@@ -267,7 +254,6 @@ bool CategoryRepo::add(Category& cat) {
                     sqlite3_finalize(stmtOther);
                 }
             }
-            s_countsDirty.store(true);
             refreshMemoryCache();
             return true;
         } else {
@@ -333,7 +319,6 @@ bool CategoryRepo::addItemToCategoryBatch(int categoryId, const std::vector<std:
         }
     }
 
-    s_countsDirty.store(true);
     refreshMemoryCache();
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
 
@@ -345,17 +330,6 @@ bool CategoryRepo::removeAllCategories(const std::string& folderId) {
 }
 
 bool CategoryRepo::removeAllCategoriesBatch(const std::vector<std::string>& folderIds) {
-    int categorizedDelta = 0;
-    for (const auto& fid : folderIds) {
-        if (!getItemCategoryIds(fid).empty()) {
-            s_uncategorizedCount.fetch_add(1);
-            s_categorizedCount.fetch_sub(1);
-            categorizedDelta--;
-        }
-    }
-    if (categorizedDelta != 0) {
-        updatePersistentStat(STAT_CATEGORIZED, categorizedDelta);
-    }
     return executeFidBatch(folderIds, [](sqlite3* db, const std::string& fid) {
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "DELETE FROM category_items WHERE folder_id = ?", -1, &stmt, nullptr) == SQLITE_OK) {
@@ -466,13 +440,6 @@ bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& folderI
         return true;
     });
 
-    if (ok) {
-        int delta = static_cast<int>(folderIds.size());
-        s_uncategorizedCount.fetch_add(delta);
-        s_trashCount.fetch_sub(delta);
-        updatePersistentStat("sys_uncategorized_count", delta);
-        updatePersistentStat("sys_trash_count", -delta);
-    }
     return ok;
 }
 
@@ -579,7 +546,6 @@ bool CategoryRepo::update(const Category& cat) {
         }
     }
     if (anyOk) {
-        s_countsDirty.store(true);
         refreshMemoryCache();
     }
     return anyOk;
@@ -739,7 +705,6 @@ bool CategoryRepo::remove(int id) {
         trans.commit();
     }
 
-    s_countsDirty.store(true);
     // ✅ 修正后：删除分类只清理数据库与内存关联，严禁物理删除用户磁盘上的实际文件夹！
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
     refreshMemoryCache();
@@ -942,16 +907,6 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& folderId
 
             refreshMemoryCache();
 
-            // 如果之前未分类，增加后变成有分类，则减去 uncategorizedCount，增加 categorizedCount 并持久化
-            if (getItemCategoryIds(folderId, finalPath).size() == 1) {
-                s_uncategorizedCount.fetch_sub(1);
-                s_categorizedCount.fetch_add(1);
-                updatePersistentStat(STAT_CATEGORIZED, 1);
-            }
-
-            // 归类操作不应直接触发表入库，应由物理位移（如迁移）后再由 AutoImportManager 驱动。
-
-            s_countsDirty.store(true);
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
             return true;
         }
@@ -976,14 +931,6 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fol
 
             refreshMemoryCache();
 
-            // 如果移除后不再有任何分类，则增加 uncategorizedCount，减少 categorizedCount 并持久化
-            if (getItemCategoryIds(folderId, path).empty()) {
-                s_uncategorizedCount.fetch_add(1);
-                s_categorizedCount.fetch_sub(1);
-                updatePersistentStat(STAT_CATEGORIZED, -1);
-            }
-
-            s_countsDirty.store(true);
             return true;
         }
         sqlite3_finalize(memStmt);
@@ -1111,7 +1058,6 @@ bool CategoryRepo::executeFidBatch(const std::vector<std::string>& folderIds, st
         }
     }
 
-    s_countsDirty.store(true);
     refreshMemoryCache();
     // 批量处理后通知 UI 刷新
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
