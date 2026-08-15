@@ -2764,9 +2764,6 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
         );
         if (!panelPtr) return; 
 
-        // 加载当前目录下的 .ArcMeta.json 到内存中，实现离散元数据的对称读取
-        MetadataManager::instance().loadDiskModeJsonForDirectory(path.toStdWString());
-
         // 🚀 线程安全地装配离散业务元数据（支持单级与深层递归目录） 
         MetaCacheDecorator::decorate(allItems); 
  
