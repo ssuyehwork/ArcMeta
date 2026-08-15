@@ -1,4 +1,5 @@
 #include "CategoryRepo.h"
+#include "StatisticsService.h"
 #include "DatabaseManager.h"
 #include "MetadataManager.h"
 #include "sqlite3.h"
@@ -277,6 +278,7 @@ bool CategoryRepo::addItemToCategoryBatch(int categoryId, const std::vector<std:
     }
 
     refreshMemoryCache();
+    StatisticsService::instance().requestFullRecountAsync();
     MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
 
     return allOk;
@@ -358,6 +360,10 @@ bool CategoryRepo::moveToTrashBatch(const std::vector<std::string>& folderIds) {
         }
         return true;
     });
+
+    refreshMemoryCache();
+    StatisticsService::instance().requestFullRecountAsync();
+    return true;
 }
 
 bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& folderIds) {
@@ -396,6 +402,11 @@ bool CategoryRepo::restoreFromTrashBatch(const std::vector<std::string>& folderI
         MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::FullRebuild);
         return true;
     });
+
+    if (ok) {
+        refreshMemoryCache();
+        StatisticsService::instance().requestFullRecountAsync();
+    }
 
     return ok;
 }
@@ -863,6 +874,7 @@ bool CategoryRepo::addItemToCategory(int categoryId, const std::string& folderId
             sqlite3_finalize(memStmt);
 
             refreshMemoryCache();
+            StatisticsService::instance().requestFullRecountAsync();
 
             MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
             return true;
@@ -887,6 +899,7 @@ bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& fol
             sqlite3_finalize(memStmt);
 
             refreshMemoryCache();
+            StatisticsService::instance().requestFullRecountAsync();
 
             return true;
         }
@@ -1061,19 +1074,37 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
     QStringList paths;
     std::unordered_set<std::string> categorizedIds;
     if (type == "uncategorized") {
-        auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
-        for (sqlite3* db : dbs) {
-            sqlite3_stmt* stmt;
-            // 2026-06-xx 性能优化：查询“未分类”路径时，排除掉已在自定义分类 (ID > 0) 中的文件
-            const char* sql = "SELECT DISTINCT folder_id FROM category_items "
-                              "WHERE category_id > 0 AND category_id NOT IN "
-                              "(SELECT id FROM categories WHERE category_kind = 1)";
-            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                while (sqlite3_step(stmt) == SQLITE_ROW) {
-                    const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                    if (fid) categorizedIds.insert(fid);
+        // 1. 提取所有属于 ③ 的用户自定义分类 ID
+        std::unordered_set<int> userCatIds;
+        auto allCats = CategoryRepo::getCachedAll();
+        for (const auto& cat : allCats) {
+            if (cat.kind == CategoryKind::User && cat.id > 0) {
+                userCatIds.insert(cat.id);
+            }
+        }
+
+        // 2. 收集所有已归入 ③ 的 folder_id
+        if (!userCatIds.empty()) {
+            auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
+            QStringList placeholders;
+            for (size_t i = 0; i < userCatIds.size(); ++i) placeholders << "?";
+            QString sql = QString("SELECT DISTINCT folder_id FROM category_items WHERE category_id IN (%1)").arg(placeholders.join(","));
+            QByteArray sqlUtf8 = sql.toUtf8();
+
+            for (sqlite3* db : dbs) {
+                if (!db) continue;
+                sqlite3_stmt* stmt = nullptr;
+                if (sqlite3_prepare_v2(db, sqlUtf8.constData(), -1, &stmt, nullptr) == SQLITE_OK) {
+                    int bindIdx = 1;
+                    for (int cid : userCatIds) {
+                        sqlite3_bind_int(stmt, bindIdx++, cid);
+                    }
+                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                        const char* fid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                        if (fid) categorizedIds.insert(fid);
+                    }
+                    sqlite3_finalize(stmt);
                 }
-                sqlite3_finalize(stmt);
             }
         }
     }
