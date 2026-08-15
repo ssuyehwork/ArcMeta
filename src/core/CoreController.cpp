@@ -152,6 +152,32 @@ void CoreController::startSystem() {
             // 仅执行 SQLite 模式初始化
             MetadataManager::instance().initFromScchMode();
 
+            // 仅在系统启动/盘符加载时执行一次托管根分类物理对齐，绝不放在 getAll() 热路径中
+            const auto drivesList = QDir::drives();
+            for (const QFileInfo& drive : drivesList) {
+                QString letter = drive.absolutePath().left(1).toUpper();
+                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(drive.absolutePath().toStdWString());
+                if (volSerial == L"UNKNOWN") continue;
+
+                std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
+                if (managedAbsW.empty() || !QFileInfo::exists(QString::fromStdWString(managedAbsW))) continue;
+
+                std::wstring libName = QFileInfo(QString::fromStdWString(managedAbsW)).fileName().toStdWString();
+                int existingId = CategoryRepo::findCategoryId(0, libName);
+                if (existingId == 0) {
+                    Category cat;
+                    cat.parentId = 0;
+                    cat.name = libName;
+                    cat.color = L"#378ADD";
+                    cat.physicalPath = managedAbsW;
+                    cat.icon = L"folder_filled";
+                    cat.kind = CategoryKind::SystemLibrary;
+                    CategoryRepo::add(cat);
+                } else {
+                    CategoryRepo::updatePhysicalMapping(existingId, 0, managedAbsW);
+                }
+            }
+
             // 在系统顶层统一提取一次“上次是否正常关闭”状态，提取后立刻置脏
             bool wasCleanShutdown = AppConfig::instance().getValue("System/LastCleanShutdown", false).toBool();
             AppConfig::instance().setValue("System/LastCleanShutdown", false);
