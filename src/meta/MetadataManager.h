@@ -219,10 +219,6 @@ public:
     void setURL(const std::wstring& path, const std::wstring& url, bool notify = true);
     void setEncrypted(const std::wstring& path, bool encrypted, bool notify = true);
 
-    void saveToDiskModeJson(const std::wstring& nPath, std::function<void(ItemMeta&)> updater);
-    void loadDiskModeJsonForDirectory(const std::wstring& folderPath);
-
-
     void setManaged(const std::wstring& path, bool managed, bool notify = true);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
 

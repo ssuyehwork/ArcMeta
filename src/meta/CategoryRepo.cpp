@@ -90,50 +90,7 @@ void CategoryRepo::saveImmediately() {
     DatabaseManager::instance().flushAll();
 }
 
-// 自动对齐修复被误删的 ArcMeta.Library_ 托管根分类
-void syncManagedLibraries() {
-    static std::atomic<bool> s_inSync{false};
-    if (s_inSync.exchange(true)) return;
-
-    const auto drives = QDir::drives();
-    for (const QFileInfo& drive : drives) {
-        QString letter = drive.absolutePath().left(1).toUpper();
-        std::wstring volSerial = MetadataManager::getVolumeSerialNumber(drive.absolutePath().toStdWString());
-        if (volSerial == L"UNKNOWN") continue;
-
-        std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
-        if (managedAbsW.empty()) continue;
-
-        QFileInfo libInfo(QString::fromStdWString(managedAbsW));
-        if (!libInfo.exists()) continue;
-
-        std::wstring libName = libInfo.fileName().toStdWString();
-
-        // 检查数据库中是否存在 parent_id = 0 且名称为 ArcMeta.Library_X 的分类
-        int existingId = CategoryRepo::findCategoryId(0, libName);
-        if (existingId == 0) {
-            Category cat;
-            cat.parentId = 0;
-            cat.name = libName;
-            cat.color = L"#378ADD";
-            cat.physicalPath = managedAbsW;
-            cat.icon = L"folder_filled";
-            cat.kind = CategoryKind::SystemLibrary; // 显式标记为托管根分类
-            
-            CategoryRepo::add(cat);
-            qWarning() << "[CategoryRepo] 自动修复补全托管根分类:" << QString::fromStdWString(libName);
-        } else {
-            CategoryRepo::updatePhysicalMapping(existingId, 0, managedAbsW);
-        }
-    }
-
-    s_inSync.store(false);
-}
-
 std::vector<Category> CategoryRepo::getAll() {
-    // 启动/读取时自动修复补全缺失的 ArcMeta.Library_ 根分类
-    syncManagedLibraries();
-
     std::vector<Category> results;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
 
