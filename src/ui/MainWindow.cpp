@@ -4,7 +4,7 @@
 #include "MainWindow.h"
 #include <QDateTime>
 #include <algorithm>
-#include "../meta/AmMetaJson.h"
+#include "../meta/DiskNavigatorService.h"
 #include "Logger.h"
 #include "../core/UndoManager.h"
 #include "../core/BasicCommands.h"
@@ -867,28 +867,14 @@ void MainWindow::initUi() {
                     curTags.append(newTag); 
                     MetadataManager::instance().setTags(wPath, curTags, false); 
                 } 
-            } else { 
-                QFileInfo info(p); 
-                QString parentDir = QDir::toNativeSeparators(info.absolutePath()); 
-                QString fileName = info.fileName(); 
- 
-                AmMetaJson jsonCache(parentDir.toStdWString()); 
-                jsonCache.load(); 
-                auto& cachedItems = jsonCache.items(); 
-                std::wstring wFileName = fileName.toStdWString(); 
- 
-                if (cachedItems.find(wFileName) == cachedItems.end()) { 
-                    ItemMeta emptyMeta; 
-                    emptyMeta.type = info.isDir() ? L"folder" : L"file"; 
-                    cachedItems[wFileName] = emptyMeta; 
-                } 
-                auto& fileMeta = cachedItems[wFileName]; 
-                std::wstring wNewTag = newTag.toStdWString(); 
-                if (std::find(fileMeta.tags.begin(), fileMeta.tags.end(), wNewTag) == fileMeta.tags.end()) { 
-                    fileMeta.tags.push_back(wNewTag); 
-                    jsonCache.save(); // 物理写入 .ArcMeta.json 
-                } 
-            } 
+            } else {
+                DiskNavigatorService::instance().saveItemMeta(p.toStdWString(), [newTag](ItemMeta& meta) {
+                    std::wstring wNewTag = newTag.toStdWString();
+                    if (std::find(meta.tags.begin(), meta.tags.end(), wNewTag) == meta.tags.end()) {
+                        meta.tags.push_back(wNewTag);
+                    }
+                });
+            }
             m_contentPanel->updateItemMetadata(p); 
         } 
     }); 
@@ -905,23 +891,12 @@ void MainWindow::initUi() {
                 QStringList curTags = meta.tags; 
                 curTags.removeAll(removeTag); 
                 MetadataManager::instance().setTags(wPath, curTags, false); 
-            } else { 
-                QFileInfo info(p); 
-                QString parentDir = QDir::toNativeSeparators(info.absolutePath()); 
-                QString fileName = info.fileName(); 
- 
-                AmMetaJson jsonCache(parentDir.toStdWString()); 
-                jsonCache.load(); 
-                auto& cachedItems = jsonCache.items(); 
-                std::wstring wFileName = fileName.toStdWString(); 
- 
-                if (cachedItems.find(wFileName) != cachedItems.end()) { 
-                    auto& fileMeta = cachedItems[wFileName]; 
+            } else {
+                DiskNavigatorService::instance().saveItemMeta(p.toStdWString(), [removeTag](ItemMeta& meta) {
                     std::wstring wRemoveTag = removeTag.toStdWString(); 
-                    fileMeta.tags.erase(std::remove(fileMeta.tags.begin(), fileMeta.tags.end(), wRemoveTag), fileMeta.tags.end()); 
-                    jsonCache.save(); // 物理写入 .ArcMeta.json 
-                } 
-            } 
+                    meta.tags.erase(std::remove(meta.tags.begin(), meta.tags.end(), wRemoveTag), meta.tags.end());
+                });
+            }
             m_contentPanel->updateItemMetadata(p); 
         } 
     }); 

@@ -28,6 +28,7 @@
 #include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 #include "../ui/MediaColorExtractor.h"
+#include "StatisticsService.h"
 #include "../ui/UiHelper.h"
 #include "MediaExtractorPipeline.h"
 #include "../util/ShellHelper.h"
@@ -575,6 +576,8 @@ bool MetadataManager::registerAsset(const std::string& initialFolderId, const st
         m_folderIdToPath[folderId] = nPath; 
     } 
  
+    // 实时通知统计服务增量更新
+    StatisticsService::instance().notifyAssetAdded(targetCatId, false);
  
     // 6. 激活后台提取流水线解析分辨率与调色盘 
     ensureActivated(nPath); 
@@ -933,53 +936,15 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
 
 RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
-    
-    // 1. 无锁（Lock-Free）原子获取当前最新快照指针 —— 耗时恒定为 0 毫秒
+
+    // 1. 无锁（Lock-Free）原子获取内存快照
     auto currentSnapshot = std::atomic_load(&m_snapshot);
     if (currentSnapshot) {
         auto it = currentSnapshot->find(nPath);
         if (it != currentSnapshot->end()) return it->second;
     }
 
-    // 🚨 2. 磁盘模式回退读取：若内存快照中不存在（非托管库模式），实时从物理文件夹下的 .ArcMeta.json 预载回填
-    if (!isInsideManagedLibrary(nPath)) {
-        QFileInfo info(QString::fromStdWString(nPath));
-        if (info.exists()) {
-            std::wstring folderPath = info.absolutePath().toStdWString();
-            std::wstring fileName = info.fileName().toStdWString();
-
-            AmMetaJson amJson(folderPath);
-            if (amJson.load()) {
-                const auto& items = amJson.items();
-                auto it = items.find(fileName);
-                if (it != items.end()) {
-                    const ItemMeta& itemMeta = it->second;
-                    RuntimeMeta rm;
-                    rm.rating = itemMeta.rating;
-                    rm.manualColor = itemMeta.color;
-                    rm.pinned = itemMeta.pinned;
-                    rm.note = itemMeta.note;
-                    rm.url = itemMeta.url;
-                    rm.encrypted = itemMeta.encrypted;
-                    rm.isFolder = (itemMeta.type == L"folder");
-                    for (const auto& t : itemMeta.tags) rm.tags.append(QString::fromStdWString(t));
-                    rm.palettes = itemMeta.palettes;
-                    rm.isManaged = false; // 标记为磁盘非受控资产
-
-                    // 预载写入内存快照，防止频繁 I/O
-                    std::unique_lock<std::shared_mutex> lock(m_mutex);
-                    currentSnapshot = std::atomic_load(&m_snapshot);
-                    if (currentSnapshot) {
-                        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
-                        (*newMap)[nPath] = rm;
-                        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
-                    }
-                    return rm;
-                }
-            }
-        }
-    }
-    
+    // 2. 纯粹返回空对象，严禁读取 .ArcMeta.json 污染托管快照
     return RuntimeMeta();
 }
 
@@ -1086,94 +1051,6 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
     }
 }
 
-void MetadataManager::saveToDiskModeJson(const std::wstring& nPath, std::function<void(ItemMeta&)> updater) {
-    QFileInfo info(QString::fromStdWString(nPath));
-    std::wstring folderPath = info.absolutePath().toStdWString();
-    std::wstring fileName = info.fileName().toStdWString();
-
-    // 1. 同步写入到父级目录的 .ArcMeta.json 中（保证父级视图渲染出子目录的颜色 and 星级）
-    AmMetaJson parentJson(folderPath);
-    parentJson.load();
-    ItemMeta& meta = parentJson.items()[fileName];
-    meta.type = info.isDir() ? L"folder" : L"file";
-    updater(meta);
-    parentJson.save();
-
-    // 2. 极致治愈：如果是文件夹，将其对应的高级属性同步写入该文件夹自身的 .ArcMeta.json 中的 folder 节点！
-    // 这样当双击进入该子目录作为主视图时，子目录加载自己作为根，颜色和星级 100% 对等保留，绝对不会丢失！
-    if (info.isDir()) {
-        std::wstring selfPath = nPath;
-        AmMetaJson selfJson(selfPath);
-        selfJson.load();
-        
-        FolderMeta& fMeta = selfJson.folder();
-        ItemMeta dummyItem; // 用 dummyItem 桥接 ItemMeta 与 FolderMeta 字段更新
-        dummyItem.rating = fMeta.rating;
-        dummyItem.color = fMeta.color;
-        dummyItem.pinned = fMeta.pinned;
-        dummyItem.note = fMeta.note;
-        dummyItem.url = fMeta.url;
-        dummyItem.encrypted = fMeta.encrypted;
-        dummyItem.folderId = fMeta.folderId;
-        dummyItem.tags = fMeta.tags;
-        dummyItem.palettes = fMeta.palettes;
-
-        updater(dummyItem); // 触发业务更新器
-
-        fMeta.rating = dummyItem.rating;
-        fMeta.color = dummyItem.color;
-        fMeta.pinned = dummyItem.pinned;
-        fMeta.note = dummyItem.note;
-        fMeta.url = dummyItem.url;
-        fMeta.encrypted = dummyItem.encrypted;
-        fMeta.folderId = dummyItem.folderId;
-        fMeta.tags = dummyItem.tags;
-        fMeta.palettes = dummyItem.palettes;
-
-        selfJson.save(); // 双向原子同步写入落盘！
-    }
-}
-
-void MetadataManager::loadDiskModeJsonForDirectory(const std::wstring& folderPath) {
-    AmMetaJson metaJson(folderPath);
-    if (!metaJson.load()) return;
-
-    const auto& items = metaJson.items();
-    if (items.empty()) return;
-
-    std::wstring normDir = MetadataManager::normalizePath(folderPath);
-    if (!normDir.empty() && normDir.back() != L'\\' && normDir.back() != L'/') {
-        normDir += L'\\';
-    }
-
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
-    auto currentSnapshot = std::atomic_load(&m_snapshot);
-    auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
-
-    for (const auto& pair : items) {
-        const std::wstring& fileName = pair.first;
-        const ItemMeta& itemMeta = pair.second;
-        std::wstring fullPath = normDir + fileName;
-        std::wstring nPath = MetadataManager::normalizePath(fullPath);
-
-        auto& rm = (*newMap)[nPath];
-        rm.rating = itemMeta.rating;
-        rm.manualColor = itemMeta.color;
-        rm.pinned = itemMeta.pinned;
-        rm.note = itemMeta.note;
-        rm.url = itemMeta.url;
-        
-        // 转换 tags List 格式
-        QStringList qTags;
-        for (const auto& t : itemMeta.tags) {
-            qTags.append(QString::fromStdWString(t));
-        }
-        rm.tags = qTags;
-        rm.palettes = itemMeta.palettes;
-    }
-
-    std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
-}
 
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
     std::wstring nPath = MetadataManager::normalizePath(path);
@@ -1194,11 +1071,6 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
         // A. 资源库模式：流放至后台写入 SQLite 数据库，主线程 0 毫秒返回，免除任何 SqlTransaction 的 Sleep 忙等待
         DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
             persistAsync(nPath);
-        });
-    } else {
-        // B. 磁盘导航模式：写入 ArcMeta.cache 高级 JSON 缓存文件
-        saveToDiskModeJson(nPath, [rating](ItemMeta& meta) {
-            meta.rating = rating;
         });
     }
 }
@@ -1390,11 +1262,6 @@ void MetadataManager::setColor(const std::wstring& path, const std::wstring& col
                 }
             }
         }
-    } else {
-        // B. 磁盘导航模式：写入 ArcMeta.cache 高级 JSON 缓存文件
-        saveToDiskModeJson(nPath, [normColor](ItemMeta& meta) {
-            meta.color = normColor;
-        });
     }
 }
 
@@ -1413,10 +1280,6 @@ void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool noti
     if (isInsideManagedLibrary(nPath)) {
         DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
             persistAsync(nPath);
-        });
-    } else {
-        saveToDiskModeJson(nPath, [pinned](ItemMeta& meta) {
-            meta.pinned = pinned;
         });
     }
 }
@@ -1456,14 +1319,6 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
         DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
             persistAsync(nPath);
         });
-    } else {
-        saveToDiskModeJson(nPath, [tags](ItemMeta& meta) {
-            std::vector<std::wstring> wTags;
-            for (const QString& t : tags) {
-                wTags.push_back(t.toStdWString());
-            }
-            meta.tags = wTags;
-        });
     }
 }
 
@@ -1483,10 +1338,6 @@ void MetadataManager::setNote(const std::wstring& path, const std::wstring& note
         DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
             persistAsync(nPath);
         });
-    } else {
-        saveToDiskModeJson(nPath, [note](ItemMeta& meta) {
-            meta.note = note;
-        });
     }
 }
 
@@ -1505,10 +1356,6 @@ void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, 
     if (isInsideManagedLibrary(nPath)) {
         DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
             persistAsync(nPath);
-        });
-    } else {
-        saveToDiskModeJson(nPath, [url](ItemMeta& meta) {
-            meta.url = url;
         });
     }
 }
@@ -2034,6 +1881,8 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
 
                     if (isManagedAsset(it->second.isFolder, curPath) && !it->second.isTrash) {
                         totalDelta--;
+                        // 实时通知统计服务扣减
+                        StatisticsService::instance().notifyAssetRemoved(0, !it->second.tags.isEmpty(), it->second.isTrash);
                     }
                     if (!it->second.folderId.empty()) {
                         std::string fid = it->second.folderId;
@@ -2324,7 +2173,8 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
             CategoryRepo::moveToTrashBatch({fid});
         }
 
-
+        // 实时通知统计服务回收站状态变更
+        StatisticsService::instance().notifyAssetTrashChanged(isTrash, oldEmpty);
 
         persistAsync(nPath);
         
