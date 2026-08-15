@@ -1970,18 +1970,14 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             break;
         }
         case ActionBatchCreate: {
-            BatchCreateDialog dlg(m_currentPath, this);
+            bool isMemory = (dataSourceType() != DataSourceType::DiskNav);
+            BatchCreateDialog dlg(m_currentPath, isMemory, this);
             if (dlg.exec() != QDialog::Accepted) break;
 
             if (dataSourceType() == DataSourceType::DiskNav) {
                 refreshAll();
                 break;
             }
-
-            if (m_currentCategoryId <= 0) break;
-
-            Category currentCat = CategoryRepo::getCachedById(m_currentCategoryId);
-            bool isLibraryRoot = (currentCat.id > 0 && currentCat.parentId == 0 && currentCat.kind == CategoryKind::SystemLibrary);
 
             QStringList renderedNames = dlg.renderAllNames();
             if (renderedNames.isEmpty()) break;
@@ -1990,6 +1986,10 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
 
             // 场景 B1：批量创建【分类】
             if (!isFile) {
+                if (m_currentCategoryId <= 0) break;
+
+                Category currentCat = CategoryRepo::getCachedById(m_currentCategoryId);
+                bool isLibraryRoot = (currentCat.id > 0 && currentCat.parentId == 0 && currentCat.kind == CategoryKind::SystemLibrary);
                 int targetParentId = isLibraryRoot ? 0 : m_currentCategoryId; // 若选中的是托管库根节点，强制设为 0 (一等公民顶级分类)
 
                 auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
@@ -2026,17 +2026,14 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             QString ext = "." + (rawSuffix.isEmpty() ? "md" : rawSuffix);
 
             // 确定物理托管库落地路径
-            QString managedRoot;
-            if (isLibraryRoot && !currentCat.physicalPath.empty()) {
-                managedRoot = QString::fromStdWString(currentCat.physicalPath);
-            } else {
-                QString drive = QCoreApplication::applicationDirPath().left(3);
-                if (!m_currentPath.isEmpty() && m_currentPath.length() >= 3 && m_currentPath[1] == ':') {
-                    drive = m_currentPath.left(3);
-                }
-                managedRoot = drive + "ArcMeta.Library_" + drive.at(0).toUpper();
+            QString managedRoot = dlg.selectedLibraryPath();
+            if (managedRoot.isEmpty() || !QDir(managedRoot).exists()) {
+                ToolTipOverlay::instance()->showText(QCursor::pos(), "无效的资源库路径！", 2000, QColor("#e81123"));
+                break;
             }
             QDir().mkpath(managedRoot);
+
+            int targetCatId = m_currentCategoryId > 0 ? m_currentCategoryId : 0;
 
             int successCount = 0;
             for (const QString& baseName : renderedNames) {
@@ -2050,7 +2047,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                 if (file.open(QIODevice::WriteOnly)) {
                     file.close();
                     std::wstring wDestPath = QDir::toNativeSeparators(destPath).toStdWString();
-                    if (MetadataManager::instance().registerAsset(fileId.toStdString(), wDestPath, m_currentCategoryId)) {
+                    if (MetadataManager::instance().registerAsset(fileId.toStdString(), wDestPath, targetCatId)) {
                         successCount++;
                     }
                 }
