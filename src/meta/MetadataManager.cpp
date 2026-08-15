@@ -1353,7 +1353,6 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
     ensureActivated(nPath);
 
     bool oldEmpty = false;
-    bool newEmpty = tags.isEmpty();
     QStringList oldTags;
     bool isFolder = false;
 
