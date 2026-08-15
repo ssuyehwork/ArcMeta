@@ -15,6 +15,7 @@
 
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
+#include "../meta/StatisticsService.h"
 #include "../meta/AmMetaJson.h"
 
 namespace ArcMeta {
@@ -71,6 +72,10 @@ bool ShellHelper::moveToTrash(const QStringList& paths) {
         } else {
             allOk = false;
         }
+    }
+
+    if (allOk) {
+        StatisticsService::instance().requestFullRecountAsync();
     }
     return allOk;
 }

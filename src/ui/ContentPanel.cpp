@@ -2224,15 +2224,26 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                             std::function<bool(const QString&)> recursiveRemove;
                             recursiveRemove = [&](const QString& target) -> bool {
                                 QFileInfo info(target);
+                                bool ok = false;
                                 if (info.isDir()) {
                                     QDir dir(target);
                                     for (const QString& entry : dir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot)) {
                                         recursiveRemove(target + "/" + entry);
                                     }
-                                    return QDir().rmdir(target);
+                                    ok = QDir().rmdir(target);
                                 } else {
-                                    return QFile::remove(target);
+                                    ok = QFile::remove(target);
+                                    
+                                    // 🛡️ 物理加固：如果删除的是 .arc 胶囊内部的文件，检查并销毁父目录 .arc
+                                    QDir parentDir = info.dir();
+                                    if (parentDir.dirName().endsWith(".arc", Qt::CaseInsensitive)) {
+                                        QStringList remaining = parentDir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+                                        if (remaining.isEmpty()) {
+                                            parentDir.rmdir(parentDir.absolutePath());
+                                        }
+                                    }
                                 }
+                                return ok;
                             };
                             physicalOk = recursiveRemove(p);
                         }

@@ -140,10 +140,14 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
         if (meta.isFolder) return;
 
-        // 回收站
-        if (meta.isTrash) {
+        // 🛡️ 第一防线：强力回收站拦截 (兼顾标志位与物理路径特征)
+        bool isInTrash = meta.isTrash || 
+                         (path.find(L"/.arcmeta/trash") != std::wstring::npos) ||
+                         (path.find(L"\\.arcmeta\\trash") != std::wstring::npos);
+
+        if (isInTrash) {
             libraryTrashCount++;
-            return;
+            return; // 🚨 绝对提前退出！绝不参与 全部数据、未分类、托管库、自定义分类 的任何计数！
         }
 
         // 全部有效数据
