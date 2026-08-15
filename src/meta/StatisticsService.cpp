@@ -1,6 +1,7 @@
 #include "StatisticsService.h"
 #include "DatabaseManager.h"
 #include "MetadataManager.h"
+#include "VolumeOnlineManager.h"
 #include <QThreadPool>
 #include <QRunnable>
 #include <QCoreApplication>
@@ -30,7 +31,22 @@ StatisticsService& StatisticsService::instance() {
 }
 
 StatisticsService::StatisticsService(QObject* parent)
-    : QObject(parent) {}
+    : QObject(parent) {
+    m_debounceTimer = new QTimer(this);
+    m_debounceTimer->setSingleShot(true);
+    connect(m_debounceTimer, &QTimer::timeout, this, [this]() {
+        requestFullRecountAsync();
+    });
+
+    connect(&VolumeOnlineManager::instance(), &VolumeOnlineManager::volumeStateChanged,
+            this, [this](const QString& driveLetter, bool isOnline) {
+        Q_UNUSED(driveLetter);
+        Q_UNUSED(isOnline);
+        if (m_debounceTimer) {
+            m_debounceTimer->start(300); // 300ms 防抖出账
+        }
+    });
+}
 
 StatisticsSnapshot StatisticsService::getCachedSnapshot() const {
     std::lock_guard<std::mutex> lock(m_snapshotMutex);
@@ -120,6 +136,9 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
     StatisticsSnapshot snapshot;
     auto allCats = CategoryRepo::getCachedAll();
 
+    // 0. 获取当前物理在线托管盘符集合
+    QSet<QString> onlineDrives = VolumeOnlineManager::instance().getOnlineDrives();
+
     // 1. 初始化所有分类映射
     std::unordered_set<int> userCatIds;
     for (const auto& cat : allCats) {
@@ -139,6 +158,17 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
     // 2. 纯内存 0ms 秒级核算（绝对真相源）
     MetadataManager::instance().forEachCachedItem([&](const std::wstring& path, const RuntimeMeta& meta) {
         if (meta.isFolder) return;
+
+        // 🛡️ 物理在线断言 (谓词：drive_letter IN onlineDrives)
+        if (path.length() >= 2 && path[1] == L':') {
+            wchar_t dChar = std::towupper(path[0]);
+            if (dChar >= L'A' && dChar <= L'Z') {
+                QString driveStr(QChar(dChar));
+                if (!onlineDrives.contains(driveStr)) {
+                    return; // 🚨 盘符离线直接排除该资产，不参与全库任何计数！
+                }
+            }
+        }
 
         // 🛡️ 第一防线：强力回收站拦截 (兼顾标志位与物理路径特征)
         bool isInTrash = meta.isTrash || 
@@ -183,15 +213,22 @@ StatisticsSnapshot StatisticsService::computeSnapshotFromDb() {
         }
     });
 
-    // 3. 汇总物理磁盘回收站
+    // 3. 汇总物理磁盘回收站 (离线盘过滤)
     int diskTrashCount = 0;
     auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
     for (sqlite3* db : dbs) {
         if (!db) continue;
         sqlite3_stmt* stmtDisk = nullptr;
-        if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM disk_trash", -1, &stmtDisk, nullptr) == SQLITE_OK) {
-            if (sqlite3_step(stmtDisk) == SQLITE_ROW) {
-                diskTrashCount += sqlite3_column_int(stmtDisk, 0);
+        if (sqlite3_prepare_v2(db, "SELECT original_path FROM disk_trash", -1, &stmtDisk, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmtDisk) == SQLITE_ROW) {
+                const unsigned char* rawPath = sqlite3_column_text(stmtDisk, 0);
+                if (rawPath) {
+                    QString origP = QString::fromUtf8(reinterpret_cast<const char*>(rawPath));
+                    QString letter = VolumeOnlineManager::extractDriveLetter(origP);
+                    if (letter.isEmpty() || onlineDrives.contains(letter.toUpper())) {
+                        diskTrashCount++;
+                    }
+                }
             }
             sqlite3_finalize(stmtDisk);
         }

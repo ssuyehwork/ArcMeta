@@ -2,6 +2,7 @@
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
 #include "../meta/StatisticsService.h"
+#include "../core/VolumeOnlineManager.h"
 
 #include "UiHelper.h"
 #include <functional>
@@ -75,9 +76,20 @@ void CategoryModel::refresh() {
     // 恢复原版：直接使用数据库原始名称 (arcmeta.library_*) 与图标
     // ----------------------------------------------------
     if (m_type == Both || m_type == User) {
+        QSet<QString> onlineDrives = VolumeOnlineManager::instance().getOnlineDrives();
         for (const auto& cat : categories) {
             if (cat.kind == CategoryKind::SystemLibrary && cat.parentId == 0) {
                 QString origName = QString::fromStdWString(cat.name).toLower();
+
+                // 🛡️ 离线拦截：如果对应的盘符已拔出/离线，直接跳过，不在侧边栏渲染该节点！
+                QString driveLetter = VolumeOnlineManager::extractDriveLetter(origName);
+                if (driveLetter.isEmpty() && !cat.physicalPath.empty()) {
+                    driveLetter = VolumeOnlineManager::extractDriveLetter(QString::fromStdWString(cat.physicalPath));
+                }
+                if (!driveLetter.isEmpty() && !onlineDrives.contains(driveLetter.toUpper())) {
+                    continue;
+                }
+
                 int count = snapshot.libraryCounts.value(cat.id, 0);
 
                 QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(origName).arg(count));

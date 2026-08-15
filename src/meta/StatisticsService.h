@@ -2,6 +2,7 @@
 #include <QObject> 
 #include <QMap> 
 #include <QString> 
+#include <QTimer>
 #include <atomic> 
 #include <mutex> 
 #include <functional> 
@@ -40,5 +41,7 @@ public:
     std::atomic<int> m_uncategorizedCount{0}; 
     std::atomic<int> m_untaggedCount{0}; 
     std::atomic<int> m_trashCount{0}; 
+
+    QTimer* m_debounceTimer{nullptr};
 }; 
 } 
