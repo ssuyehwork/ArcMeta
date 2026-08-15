@@ -1942,9 +1942,9 @@ void MetadataManager::removeMetadataSync(const std::wstring& path) {
                     std::wstring curPath = it->first;
 
 
-                    if (isManagedAsset(it->second.isFolder, curPath) && !it->second.isTrash) {
+                    if (isManagedAsset(it->second.isFolder, curPath)) {
                         totalDelta--;
-                        // 实时通知统计服务扣减 
+                        // 实时通知统计服务扣减 (无论是否处于回收站，永久删除均需扣减)
                         StatisticsService::instance().notifyAssetRemoved(0, !it->second.tags.isEmpty(), it->second.isTrash); 
                     }
                     if (!it->second.folderId.empty()) {
@@ -2280,8 +2280,17 @@ void MetadataManager::setTrash(const std::wstring& path, bool isTrash) {
 void MetadataManager::deletePermanently(const std::wstring& path) {
     std::wstring nPath = MetadataManager::normalizePath(path);
     
-    // 2026-06-xx 逻辑优化：遵循“按需根除”原则。
-    // 1. 首先检查内存缓存，判断该项目是否曾 be 记入数据库。
+    // 🛡️ 优先通过路径中的 13 位 Base36 ID 反查内存缓存 Key，防止路径解包不一致导致的匹配失败
+    std::string base36Id = extractBase36Id(nPath);
+    if (!base36Id.empty()) {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        auto it = m_folderIdToPath.find(base36Id);
+        if (it != m_folderIdToPath.end()) {
+            nPath = it->second; // 强行对齐为数据库与缓存中存储的标准路径
+        }
+    }
+
+    // 1. 首先检查内存缓存，判断该项目是否曾记入数据库。
     std::string fid;
     bool existsInDb = false;
     {
@@ -2295,7 +2304,7 @@ void MetadataManager::deletePermanently(const std::wstring& path) {
         }
     }
 
-    // 2. 物理加固：如果路径匹配失败（常见于 OS 将文件移入回收站后路径发生偏移），尝试通过物理 FID 反查
+    // 2. 物理加固：如果路径匹配失败，尝试通过物理 FID 反查
     if (!existsInDb) {
         if (fetchWinApiMetadataDirect(nPath, fid)) {
             std::shared_lock<std::shared_mutex> lock(m_mutex);
