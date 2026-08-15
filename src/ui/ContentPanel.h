@@ -270,7 +270,7 @@ private:
 
     int m_zoomLevel = 64;
     QString m_currentPath;
-    QString m_pendingSelectName;
+    QSet<QString> m_pendingSelectNames;
     bool m_isPendingEdit = false;
     int m_currentCategoryId = -1;
     QString m_currentCategoryType; // 用于驱动差异化右键菜单
@@ -335,7 +335,8 @@ public slots:
      * @param edit 是否进入编辑模式
      */
     void setPendingSelectName(const QString& name, bool edit = false) { 
-        m_pendingSelectName = name; 
+        m_pendingSelectNames.clear();
+        if (!name.isEmpty()) m_pendingSelectNames.insert(name);
         m_isPendingEdit = edit;
     }
 

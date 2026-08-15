@@ -2468,8 +2468,7 @@ void ContentPanel::performBatchRename() {
                 // 🚨 极致自愈高亮：如果对话框成功重命名，将其返回的首个新名称作为 pendingSelectName
                 QString firstNew = dlg.getFirstNewName();
                 if (!firstNew.isEmpty()) {
-                    m_pendingSelectName = firstNew;
-                    m_isPendingEdit = false;
+                    setPendingSelectName(firstNew, false);
                 }
                 // 🚨 联动支持：不应强绑定物理 loadDirectory，统一调用 refreshAll 以自适应数据库 and 系统分类下的异步刷新，
                 // 并实现完美的选中态无缝自愈高亮！
@@ -2540,14 +2539,18 @@ void ContentPanel::onSelectionChanged() {
 } 
  
 void ContentPanel::refreshAll() {
-    // 2026-07-26 极致重构：在执行刷新前，自动暂存当前选中项的文件名，确保异步刷新后依然处于选中高亮状态（对应用户原话：“对某个文件夹/文件进行重命名 或 进行其他操作后仍然处于选中高亮状态”）
+    // 1. 批量暂存所有当前选中项的文件名，杜绝多选丢失！
     QModelIndexList selected = getSelectedIndexes();
-    if (!selected.isEmpty() && m_pendingSelectName.isEmpty()) {
-        QString p = selected.first().data(PathRole).toString();
-        if (!p.isEmpty()) {
-            m_pendingSelectName = QFileInfo(p).fileName();
-            m_isPendingEdit = false;
+    if (!selected.isEmpty() && m_pendingSelectNames.isEmpty()) {
+        for (const auto& idx : selected) {
+            if (idx.column() == 0) {
+                QString p = idx.data(PathRole).toString();
+                if (!p.isEmpty()) {
+                    m_pendingSelectNames.insert(QFileInfo(p).fileName());
+                }
+            }
         }
+        m_isPendingEdit = false;
     }
 
     // 2026-06-xx 物理对标：完善刷新逻辑，支持所有上下文类型
@@ -2776,28 +2779,33 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
                 // 2026-06-xx 物理同步：数据加载完成后强制重新应用筛选，防止显示已过滤掉的占位符记录
                 panelPtr->applyFilters();
 
-                // 2026-07-xx 按照 Plan-66：处理新建项后的自动定位与编辑
-                if (!panelPtr->m_pendingSelectName.isEmpty()) {
-                    const auto& records = panelPtr->m_model->allRecords();
-                    for (size_t i = 0; i < records.size(); ++i) {
-                        if (QFileInfo(records[i].path).fileName() == panelPtr->m_pendingSelectName) {
-                            QModelIndex srcIdx = panelPtr->m_model->index(static_cast<int>(i), 0);
-                            QModelIndex proxyIdx = panelPtr->m_proxyModel->mapFromSource(srcIdx);
-                            if (proxyIdx.isValid()) {
-                                if (panelPtr->m_viewStack->currentWidget() == panelPtr->m_gridView) {
-                                    panelPtr->m_gridView->scrollTo(proxyIdx);
-                                    panelPtr->m_gridView->setCurrentIndex(proxyIdx);
-                                    if (panelPtr->m_isPendingEdit) panelPtr->m_gridView->edit(proxyIdx);
-                                } else {
-                                    panelPtr->m_treeView->scrollTo(proxyIdx);
-                                    panelPtr->m_treeView->setCurrentIndex(proxyIdx);
-                                    if (panelPtr->m_isPendingEdit) panelPtr->m_treeView->edit(proxyIdx);
+                // 2026-07-xx 按照 Plan-66：处理新建项后的自动定位与编辑（批量多选恢复）
+                if (!panelPtr->m_pendingSelectNames.isEmpty()) {
+                    QAbstractItemView* view = (panelPtr->m_viewStack->currentWidget() == panelPtr->m_gridView) ? 
+                        static_cast<QAbstractItemView*>(panelPtr->m_gridView) : static_cast<QAbstractItemView*>(panelPtr->m_treeView);
+
+                    if (view && view->selectionModel()) {
+                        QItemSelection selection;
+                        QModelIndex lastProxyIdx;
+                        const auto& records = panelPtr->m_model->allRecords();
+                        for (size_t i = 0; i < records.size(); ++i) {
+                            QString fn = QFileInfo(records[i].path).fileName();
+                            if (panelPtr->m_pendingSelectNames.contains(fn)) {
+                                QModelIndex srcIdx = panelPtr->m_model->index(static_cast<int>(i), 0);
+                                QModelIndex proxyIdx = panelPtr->m_proxyModel->mapFromSource(srcIdx);
+                                if (proxyIdx.isValid()) {
+                                    selection.select(proxyIdx, proxyIdx);
+                                    lastProxyIdx = proxyIdx;
                                 }
                             }
-                            break;
+                        }
+                        view->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+                        if (lastProxyIdx.isValid()) {
+                            view->scrollTo(lastProxyIdx);
+                            if (panelPtr->m_isPendingEdit) view->edit(lastProxyIdx);
                         }
                     }
-                    panelPtr->m_pendingSelectName = ""; // 必须物理清空状态
+                    panelPtr->m_pendingSelectNames.clear();
                 }
 
                 ArcMeta::Logger::log(QString("[Content] 目录扫描完成并已应用到 UI [%1]").arg(reqId));
@@ -3022,26 +3030,32 @@ void ContentPanel::loadCategory(int categoryId) {
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
 
-                // 2026-07-26 极致重构：系统或分类加载完成，自动重新选中之前的选中高亮目标（对应用户原话：“对某个文件夹/文件进行重命名 或 进行其他操作后仍然处于选中高亮状态”）
-                if (!weakThis->m_pendingSelectName.isEmpty()) {
-                    const auto& records = weakThis->m_model->allRecords();
-                    for (size_t i = 0; i < records.size(); ++i) {
-                        if (QFileInfo(records[i].path).fileName() == weakThis->m_pendingSelectName) {
-                            QModelIndex srcIdx = weakThis->m_model->index(static_cast<int>(i), 0);
-                            QModelIndex proxyIdx = weakThis->m_proxyModel->mapFromSource(srcIdx);
-                            if (proxyIdx.isValid()) {
-                                if (weakThis->m_viewStack->currentWidget() == weakThis->m_gridView) {
-                                    weakThis->m_gridView->scrollTo(proxyIdx);
-                                    weakThis->m_gridView->setCurrentIndex(proxyIdx);
-                                } else {
-                                    weakThis->m_treeView->scrollTo(proxyIdx);
-                                    weakThis->m_treeView->setCurrentIndex(proxyIdx);
+                // 2026-07-26 极致重构：系统或分类加载完成，自动重新选中之前的选中高亮目标（多选恢复）
+                if (!weakThis->m_pendingSelectNames.isEmpty()) {
+                    QAbstractItemView* view = (weakThis->m_viewStack->currentWidget() == weakThis->m_gridView) ? 
+                        static_cast<QAbstractItemView*>(weakThis->m_gridView) : static_cast<QAbstractItemView*>(weakThis->m_treeView);
+
+                    if (view && view->selectionModel()) {
+                        QItemSelection selection;
+                        QModelIndex lastProxyIdx;
+                        const auto& records = weakThis->m_model->allRecords();
+                        for (size_t i = 0; i < records.size(); ++i) {
+                            QString fn = QFileInfo(records[i].path).fileName();
+                            if (weakThis->m_pendingSelectNames.contains(fn)) {
+                                QModelIndex srcIdx = weakThis->m_model->index(static_cast<int>(i), 0);
+                                QModelIndex proxyIdx = weakThis->m_proxyModel->mapFromSource(srcIdx);
+                                if (proxyIdx.isValid()) {
+                                    selection.select(proxyIdx, proxyIdx);
+                                    lastProxyIdx = proxyIdx;
                                 }
                             }
-                            break;
+                        }
+                        view->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+                        if (lastProxyIdx.isValid()) {
+                            view->scrollTo(lastProxyIdx);
                         }
                     }
-                    weakThis->m_pendingSelectName = ""; // 清空
+                    weakThis->m_pendingSelectNames.clear();
                 }
 
                 ArcMeta::Logger::log(QString("[Content] 分类加载完成 [%1]").arg(reqId));
@@ -3105,25 +3119,31 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters(); 
 
-                if (!weakThis->m_pendingSelectName.isEmpty()) {
-                    const auto& rList = weakThis->m_model->allRecords();
-                    for (size_t i = 0; i < rList.size(); ++i) {
-                        if (QFileInfo(rList[i].path).fileName() == weakThis->m_pendingSelectName) {
-                            QModelIndex srcIdx = weakThis->m_model->index(static_cast<int>(i), 0);
-                            QModelIndex proxyIdx = weakThis->m_proxyModel->mapFromSource(srcIdx);
-                            if (proxyIdx.isValid()) {
-                                if (weakThis->m_viewStack->currentWidget() == weakThis->m_gridView) {
-                                    weakThis->m_gridView->scrollTo(proxyIdx);
-                                    weakThis->m_gridView->setCurrentIndex(proxyIdx);
-                                } else {
-                                    weakThis->m_treeView->scrollTo(proxyIdx);
-                                    weakThis->m_treeView->setCurrentIndex(proxyIdx);
+                if (!weakThis->m_pendingSelectNames.isEmpty()) {
+                    QAbstractItemView* view = (weakThis->m_viewStack->currentWidget() == weakThis->m_gridView) ? 
+                        static_cast<QAbstractItemView*>(weakThis->m_gridView) : static_cast<QAbstractItemView*>(weakThis->m_treeView);
+
+                    if (view && view->selectionModel()) {
+                        QItemSelection selection;
+                        QModelIndex lastProxyIdx;
+                        const auto& rList = weakThis->m_model->allRecords();
+                        for (size_t i = 0; i < rList.size(); ++i) {
+                            QString fn = QFileInfo(rList[i].path).fileName();
+                            if (weakThis->m_pendingSelectNames.contains(fn)) {
+                                QModelIndex srcIdx = weakThis->m_model->index(static_cast<int>(i), 0);
+                                QModelIndex proxyIdx = weakThis->m_proxyModel->mapFromSource(srcIdx);
+                                if (proxyIdx.isValid()) {
+                                    selection.select(proxyIdx, proxyIdx);
+                                    lastProxyIdx = proxyIdx;
                                 }
                             }
-                            break;
+                        }
+                        view->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+                        if (lastProxyIdx.isValid()) {
+                            view->scrollTo(lastProxyIdx);
                         }
                     }
-                    weakThis->m_pendingSelectName = "";
+                    weakThis->m_pendingSelectNames.clear();
                 }
 
                 ArcMeta::Logger::log(QString("[Content] 路径列表加载完成 [%1]").arg(reqId));
@@ -3313,8 +3333,7 @@ void ContentPanel::createNewItem(const QString& type) {
         } 
 
         if (success) { 
-            m_pendingSelectName = finalName;
-            m_isPendingEdit = true;
+            setPendingSelectName(finalName, true);
             loadDirectory(m_currentPath, m_isRecursive); 
         }
         return;
@@ -3374,8 +3393,7 @@ void ContentPanel::createNewItem(const QString& type) {
     // 3. 登记写入 SQLite 数据库（绑定至对应分类 ID）
     std::wstring wDestPath = QDir::toNativeSeparators(destPath).toStdWString();
     if (MetadataManager::instance().registerAsset(fileId.toStdString(), wDestPath, m_currentCategoryId)) {
-        m_pendingSelectName = fileName;
-        m_isPendingEdit = true;
+        setPendingSelectName(fileName, true);
         refreshAll();
     }
 } 
