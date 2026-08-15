@@ -75,9 +75,30 @@ void CategoryModel::refresh() {
     // 恢复原版：直接使用数据库原始名称 (arcmeta.library_*) 与图标
     // ----------------------------------------------------
     if (m_type == Both || m_type == User) {
+        // 获取当前物理在线的磁盘驱动器盘符集合
+        QSet<QString> onlineLetters;
+        const auto activeDrives = QDir::drives();
+        for (const QFileInfo& drive : activeDrives) {
+            QString letter = drive.absolutePath().left(1).toUpper();
+            if (!letter.isEmpty()) onlineLetters.insert(letter);
+        }
+
         for (const auto& cat : categories) {
             if (cat.kind == CategoryKind::SystemLibrary && cat.parentId == 0) {
                 QString origName = QString::fromStdWString(cat.name).toLower();
+
+                // 🛡️ 离线过滤：提取托管库绑定的盘符字母 (如从 "arcmeta.library_g" 提取 "G")
+                QString targetLetter = "";
+                if (origName.startsWith("arcmeta.library_") && origName.length() >= 17) {
+                    targetLetter = origName.mid(16, 1).toUpper();
+                } else if (!cat.physicalPath.empty()) {
+                    targetLetter = QString::fromStdWString(cat.physicalPath).left(1).toUpper();
+                }
+
+                if (!targetLetter.isEmpty() && !onlineLetters.contains(targetLetter)) {
+                    continue; // 盘符当前处于拔出/离线状态，不在侧边栏渲染该托管库节点
+                }
+
                 int count = snapshot.libraryCounts.value(cat.id, 0);
 
                 QStandardItem* item = new QStandardItem(QString("%1 (%2)").arg(origName).arg(count));
