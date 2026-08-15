@@ -79,6 +79,7 @@
 #include "../meta/MetadataManager.h" 
 #include "../meta/BatchRenameEngine.h" 
 #include "../meta/CategoryRepo.h" 
+#include "../meta/StatisticsService.h"
 #include "../crypto/EncryptionManager.h" 
 #include "CategoryLockDialog.h" 
 #include "CategoryLockWidget.h"
