@@ -156,9 +156,6 @@ void CategoryPanel::refreshCountsOnly() {
 void CategoryPanel::refreshFullTree() {
     if (!m_categoryModel) return;
     m_categoryModel->refresh();
-    
-    // 树重建完成后自动触发一次统计计算填入最新数字
-    refreshCountsOnly();
 }
 
 void CategoryPanel::requestRefresh(bool fullRebuild) {
@@ -615,7 +612,10 @@ void CategoryPanel::onCreateCategory() {
 void CategoryPanel::onCreateSubCategory() {
     QModelIndex index = m_categoryTree->currentIndex();
     int parentId = getTargetCategoryId(index);
-    if (parentId <= 0) return;
+    // 🚨 修正：若选中的是“文件夹”根组节点 (ID: -9) 或系统项 (<0)，强制归为顶级分类 (parentId = 0)
+    if (parentId <= 0) {
+        parentId = 0;
+    }
 
     Category catObj = CategoryRepo::getById(parentId);
     if (catObj.encrypted && !CategoryLockManager::instance().isUnlocked(parentId)) {
@@ -1513,44 +1513,6 @@ void CategoryPanel::initUi() {
     // 2026-03-xx 物理记忆：连接展开/折叠信号，实时持久化
     connect(m_categoryTree, &QTreeView::expanded, this, &CategoryPanel::saveExpandedStateToSettings);
     connect(m_categoryTree, &QTreeView::collapsed, this, &CategoryPanel::saveExpandedStateToSettings);
-    // 2026-06-xx 物理同步：支持内部拖拽重排持久化
-    connect(m_categoryModel, &QAbstractItemModel::rowsMoved, this, [this](const QModelIndex&, int, int, const QModelIndex&, int) {
-        // 核心逻辑：深度优先遍历分类树，根据 UI 层级物理同步 DB 中的 parent_id 与 sort_order
-        std::function<void(const QModelIndex&, int)> syncSubtree;
-        syncSubtree = [&](const QModelIndex& parentIdx, int parentIdInDb) {
-            for (int i = 0; i < m_categoryModel->rowCount(parentIdx); ++i) {
-                QModelIndex childIdx = m_categoryModel->index(i, 0, parentIdx);
-                int id = childIdx.data(IdRole).toInt();
-                QString type = childIdx.data(TypeRole).toString();
-                bool isPinned = childIdx.data(PinnedRole).toBool();
-
-                // 物理阻断：严禁处理“镜像节点”（即 Pinned 为 true 的节点）。
-                // 理由：镜像节点仅作为 UI 快捷方式，其移动不应改写原始数据库中的 parentId 关系。
-                if (isPinned) {
-                    continue;
-                }
-
-                if (type == "category" && id > 0) {
-                    int actualParentId = parentIdx.isValid() ? parentIdInDb : 0;
-                    // 只有在数据真正发生位移时才触发数据库 UPDATE，优化性能
-                    auto all = CategoryRepo::getAll();
-                    for (auto& cat : all) {
-                        if (cat.id == id) {
-                            if (cat.parentId != actualParentId || cat.sortOrder != i) {
-                                cat.parentId = actualParentId;
-                                cat.sortOrder = i;
-                                CategoryRepo::update(cat);
-                            }
-                            break;
-                        }
-                    }
-                    // 递归同步子分类
-                    syncSubtree(childIdx, id);
-                }
-            }
-        };
-        syncSubtree(QModelIndex(), 0); // 从隐式根开始，0 表示顶层
-    });
 }
 
 void CategoryPanel::saveExpandedStateToSettings() {
