@@ -1,7 +1,8 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include "ContentPanel.h" 
+#include "ContentPanel.h"
+#include "../meta/TrashRepository.h"
 #include "ColorPicker.h"
 #include "../core/DiskTrashService.h"
 #include <QWidgetAction>
@@ -2223,7 +2224,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                             if (dataSourceType() == DataSourceType::DiskNav) {
                                 int trashId = -1;
                                 QString trashPath;
-                                if (TrashRepository::instance().getDiskTrashRecordByPath(snap.path.toStdWString(), trashId, trashPath)) {
+                                if (ArcMeta::TrashRepository::instance().getDiskTrashRecordByPath(snap.path.toStdWString(), trashId, trashPath)) {
                                     DiskTrashService::restoreFromDiskTrash(trashId, trashPath);
                                 }
                             } else {

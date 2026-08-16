@@ -948,7 +948,7 @@ void CategoryPanel::onEmptyTrash() {
     std::vector<std::string> trashItems = CategoryRepo::getFolderIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
     
     // 双轨回收站：检测是否有物理磁盘删除项目
-    bool hasDiskTrash = TrashRepository::instance().hasTrashItems();
+    bool hasDiskTrash = ArcMeta::TrashRepository::instance().hasTrashItems();
 
     if (trashItems.empty() && !hasDiskTrash) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站已空", 1000);
@@ -1008,7 +1008,7 @@ void CategoryPanel::onRestoreAllFromTrash() {
     std::vector<std::string> trashItems = CategoryRepo::getFolderIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
     
     // 双轨回收站：检测是否有物理磁盘删除项目
-    bool hasDiskTrash = TrashRepository::instance().hasTrashItems();
+    bool hasDiskTrash = ArcMeta::TrashRepository::instance().hasTrashItems();
 
     if (trashItems.empty() && !hasDiskTrash) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站内无项目", 1000);
