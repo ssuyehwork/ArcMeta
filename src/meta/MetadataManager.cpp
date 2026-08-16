@@ -452,16 +452,6 @@ void MetadataManager::initFromDatabase() {
                 }
             }
 
-            // 开库自愈检查：如果是 SVG 文件且历史数据中宽高为 0x0，投递至后台抽取管线重新计算填补
-            if (!meta.isFolder && (meta.width <= 0 || meta.height <= 0)) {
-                if (meta.ext == L"svg" || meta.ext == L"SVG") {
-                    dirtySvgPaths.push_back(pair.first);
-                }
-            }
-        }
-
-        if (!dirtySvgPaths.empty()) {
-            MediaExtractorPipeline::instance().enqueueBatch(dirtySvgPaths);
         }
 
         m_loaded = true;

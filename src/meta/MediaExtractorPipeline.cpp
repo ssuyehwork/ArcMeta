@@ -239,6 +239,11 @@ void MediaExtractorPipeline::extractDimensions(const std::wstring& path, int& ou
             outW = sz.width();
             outH = sz.height();
         }
+        // 若经过 defaultSize 和 viewBox 解析后宽高仍无效，设置 512x512 保底尺寸，防止 0x0 脏数据落库
+        if (outW <= 0 || outH <= 0) {
+            outW = 512;
+            outH = 512;
+        }
     } else {
         QSize sz = ImageDecoderFacade::readImageDimensions(info.absoluteFilePath());
         if (sz.isValid()) {
