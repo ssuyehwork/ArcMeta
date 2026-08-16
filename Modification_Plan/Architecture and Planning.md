@@ -30,6 +30,7 @@
 | 1.1-DebugLogCleaning | 冗余调试日志根除与 Logger 基础设施保留规范 | /specs/DebugLogCleaning.md | 1.1 全局数据与内存管理 |
 | 1.1-MftDecoupling | MftReader 杂糅解耦、图标缓存抽离与模块物理清理方案 | /specs/MftDecoupling.md | 1.1 全局数据与内存管理 |
 | 1.1-UiSqlDecoupling | UI 层原生 SQL 越权剥离与 MVC 架构收拢规范 | /specs/UiSqlDecoupling.md | 1.1 全局数据与内存管理 |
+| 1.1-ManagedLibraryScanPipeline | 托管库增量扫描准入与特征提取流水线并发优化 | /specs/ManagedLibraryScanPipeline.md | 1.1 全局数据与内存管理 |
 
 - 编号格式固定为 `<所属章节号>-<英文功能名>`（如 `1.1-Trash`），编号本身即可定位该功能挂靠在大纲哪一章节下。
 - 严禁编号重复；同一功能只允许对应唯一一份实施方案文档。
@@ -239,3 +240,17 @@
 
 ##### B. 磁盘目录模式下：
 > *（注：磁盘目录模式 下的 UI层原生SQL剥离与MVC架构收拢规范 逻辑架构尚未进行专题探讨与定义，暂时留空。）*
+
+
+#### 1.1.10 托管库增量扫描准入与特征提取流水线并发优化规范
+
+##### A. 内存模式下：
+- **架构要求**：严禁在“重新扫描托管库”时将库内资产全量无脑重置特征完成状态（`ingestion_status = 0`），严禁使用低效的单定时器（1500ms 仅 16 条）串行卡顿解析与单条 SQL UPDATE。
+- **重构设计**：
+  1. **增量指纹准入**：在 `MetadataManager::markAsRegistered` 中比对资产物理 `mtime`（修改时间）与 `size`（文件大小）。已解析且文件未变动的资产跳过状态重置与流水线投递；
+  2. **多核并行流水线**：重构 `MediaExtractorPipeline`，根据 CPU 核心数全速并发消费任务队列；
+  3. **批量写盘与大事务**：特征提取完成后，以批次（Chunked Batch）或 SQLite 显式事务汇总落盘，将万级资产扫描吞吐压至极短时间内完成。
+- **具体实施方案**：详见 [/specs/ManagedLibraryScanPipeline.md](/specs/ManagedLibraryScanPipeline.md)。
+
+##### B. 磁盘目录模式下：
+> *（注：磁盘目录模式 下的 托管库增量扫描准入与特征提取流水线并发优化规范 逻辑架构尚未进行专题探讨与定义，暂时留空。）*
