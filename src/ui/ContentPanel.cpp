@@ -867,8 +867,6 @@ void ContentPanel::refreshVisibleThumbnails() {
 }
 
 void ContentPanel::updateGridSize() {
-    ArcMeta::Logger::log(QString("[UI_DEBUG] 缩放级: %1").arg(m_zoomLevel));
-
     if (m_viewStack->currentWidget() == m_gridView) {
         if (auto* jv = qobject_cast<JustifiedView*>(m_gridView)) {
             jv->setTargetRowHeight(m_zoomLevel); // 自适应/网格模式下的卡片/行高
@@ -2833,8 +2831,6 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
     m_isLoading = true;
     int reqId = ++m_loadRequestId;
     m_currentCategoryType = ""; // 物理导航模式下清除系统类型
-    ArcMeta::Logger::log(QString("[Content] 开始物理递归扫描 (虚拟化) [%1] -> %2 (%3)")
-                        .arg(reqId).arg(path).arg(recursive ? "递归" : "单级"));
     emit dataSourceChanged("nav"); 
     if (m_viewStack) m_viewStack->show(); 
     if (m_textPreview) m_textPreview->hide(); 
@@ -2890,10 +2886,7 @@ void ContentPanel::loadDirectory(const QString& path, bool recursive) {
 
                 panelPtr->restoreSelections();
 
-                ArcMeta::Logger::log(QString("[Content] 目录扫描完成并已应用到 UI [%1]").arg(reqId));
                 panelPtr->m_visibleTimer->start();
-            } else if (panelPtr) {
-                ArcMeta::Logger::log(QString("[Content] 拦截到过期的目录扫描回调 [%1], 当前 ID: %2").arg(reqId).arg(panelPtr->m_loadRequestId.load()));
             }
         }, Qt::QueuedConnection); 
     }); 
@@ -2920,9 +2913,6 @@ void ContentPanel::search(const QString& query) {
     if (m_textPreview) m_textPreview->hide(); 
     if (m_imagePreview) m_imagePreview->hide(); 
     if (m_viewStack) m_viewStack->show(); 
-
-    ArcMeta::Logger::log(QString("[Search] 本地搜索关键词更新: %1 (当前视图类型: %2)")
-                        .arg(query).arg(m_currentCategoryType.isEmpty() ? "nav" : m_currentCategoryType));
 } 
  
 void ContentPanel::applyFilters(const FilterState& state) { 
@@ -3113,10 +3103,6 @@ void ContentPanel::loadCategory(int categoryId) {
                 weakThis->applyFilters(); 
 
                 weakThis->restoreSelections();
-
-                ArcMeta::Logger::log(QString("[Content] 分类加载完成 [%1]").arg(reqId));
-            } else if (weakThis) {
-                ArcMeta::Logger::log(QString("[Content] 拦截到过期的分类加载回调 [%1]").arg(reqId));
             }
         });
     });
@@ -3131,7 +3117,6 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
     }
 
     if (paths.isEmpty() && m_currentCategoryType != "trash") {
-        ArcMeta::Logger::log("[Content] loadPaths 收到空路径，执行同步清空");
         if (reqId == 0) m_loadRequestId++;
         else m_loadRequestId = reqId;
         
@@ -3176,10 +3161,6 @@ void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
                 weakThis->applyFilters(); 
 
                 weakThis->restoreSelections();
-
-                ArcMeta::Logger::log(QString("[Content] 路径列表加载完成 [%1]").arg(reqId));
-            } else if (weakThis) {
-                ArcMeta::Logger::log(QString("[Content] 拦截到过期的路径列表加载回调 [%1]").arg(reqId));
             }
         });
     });
@@ -3190,8 +3171,6 @@ void ContentPanel::appendPaths(const QStringList& paths, int reqId) {
 
     // 物理校验：如果指定了请求 ID，则必须与当前 ID 匹配，否则视为过期搜索结果
     if (reqId != 0 && m_loadRequestId != reqId) {
-        ArcMeta::Logger::log(QString("[Content] appendPaths 拦截到过期的异步追加请求 [%1], 当前 ID: %2")
-                            .arg(reqId).arg(m_loadRequestId.load()));
         return;
     }
 
@@ -3212,9 +3191,6 @@ void ContentPanel::appendPaths(const QStringList& paths, int reqId) {
                 // 异步流式追加时，每批次都尝试更新一次统计与筛选
                 weakThis->recalculateAndEmitStats();
                 weakThis->applyFilters();
-                ArcMeta::Logger::log(QString("[Content] 异步追加了 %1 条路径 [%2]").arg(newRecords.size()).arg(reqId));
-            } else if (weakThis) {
-                ArcMeta::Logger::log(QString("[Content] appendPaths 在回调阶段拦截到过期结果 [%1]").arg(reqId));
             }
         });
     });
