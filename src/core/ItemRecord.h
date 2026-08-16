@@ -43,6 +43,7 @@ struct ItemRecord {
     double registrationProgress = -1.0; // 初始为 -1.0 表示未计算
     QString url;  // 2026-07-xx 支撑筛选：链接
     QString note; // 2026-07-xx 支撑筛选：备注
+    QString sha256;
     int width = 0;
     int height = 0;
 
