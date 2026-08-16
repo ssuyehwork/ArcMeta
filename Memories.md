@@ -96,7 +96,7 @@
 - **铁律 2 (统一辅助判定)**: `ContentPanel` 必须公开 `isMirrorSource()` (返回是否为逻辑/镜像源数据) 与 `isManagedContext()` (返回当前是否处于已激活的托管库内可读写 SQLite DB 的可信生命周期内)。
 - **铁律 3 (双轨标记落盘路由)**: 当打标或星级操作触发时，统一由数据源契约一键判断：
   - 在托管库上下文 (`isManagedContext() == true`) 内，元数据 100% 写入统一 SQLite 本地数据库；
-  - 在库外普通磁盘模式 (`isManagedContext() == false`) 下，元数据自动调用 `AmMetaJson` 精准、非侵入式写入主程序 `ArcMeta.cache/文件夹哈希.json` 离散缓存中，确保不污染用户原始物理盘。
+  - 在库外普通磁盘模式 (`isManagedContext() == false`) 下，元数据自动调用 `AmMetaJson` 精准写入同级 `.ArcMeta.json` 离散缓存中，确保不污染用户原始物理盘。
 
 # 13. 关于媒体提取管道的线程安全边界
 ## 13.1 Qt Gui API 禁止无保护地在 worker 线程并发调用

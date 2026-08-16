@@ -91,7 +91,7 @@ public:
     static std::wstring generateDeterministicFrn(const std::wstring& path);
     static std::wstring normalizePath(const std::wstring& path);
     
-    void initFromScchMode();
+    void initFromDatabase();
     RuntimeMeta getMeta(const std::wstring& path);
     std::wstring getPathByFolderId(const std::string& fid);
 

@@ -23,7 +23,6 @@ typedef MFT_ENUM_DATA MFT_ENUM_DATA_V0;
 #endif
 #include <QIcon>
 #include <QHash>
-#include "ScchCache.h"
 
 #ifdef min
 #undef min
@@ -56,9 +55,6 @@ signals:
 public:
     // 生命周期管理
     void buildIndex(const QStringList& drives = QStringList());
-    bool loadFromCache();
-    bool saveToCache(); 
-    bool saveDriveToCache(size_t driveIdx); 
     void clear();
     bool isClearing() const { return m_is_clearing.load(); }
 
@@ -126,7 +122,6 @@ private:
         std::vector<RawEntry> entries;
     };
 
-    bool saveDriveToCacheInternal(size_t driveIdx); 
     void clearInternal(); 
     void rebuildFrnToIndexMap();
     void compact();
@@ -159,7 +154,6 @@ private:
 
     bool m_isInitialized = false;
     std::atomic<bool> m_is_compacting{false}; // 标识是否处于碎片整理中
-    std::atomic<bool> m_is_saving{false};   // 防止并发存盘导致的文件损坏与性能竞争
     std::atomic<bool> m_is_clearing{false}; // 标识是否处于异步清理过程中
     std::atomic<bool> m_abort_scan{false}; // 2026-07-xx 按照用户要求 (1.21)：强制中断扫描位
     

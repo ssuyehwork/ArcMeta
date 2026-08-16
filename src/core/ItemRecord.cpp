@@ -123,7 +123,6 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
             QString fn = fi.fileName();
             if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
             if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
-            if (fn.compare("metadata.scch", Qt::CaseInsensitive) == 0) continue;
             
             r.filename = fn;
             r.suffix = fi.suffix().toLower();
