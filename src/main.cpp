@@ -96,7 +96,6 @@ int main(int argc, char *argv[]) {
 #endif
 
     // 单实例锁定成功，安全哨兵放行。此时再执行日志容量哨兵轮转切片
-    ArcMeta::Logger::rotateLogFiles("arcmeta_debug.log");
 
     // 1. 安装自定义日志处理器（使用超高吞吐无阻塞的内存队列异步写入）
     qInstallMessageHandler(customMessageHandler);

@@ -109,71 +109,9 @@ private:
  */
 class Logger {
 public:
-    static void rotateLogFiles(const QString& fileName) {
-        QFileInfo info(fileName);
-        if (info.exists() && info.size() > 4 * 1024 * 1024) { // 4MB 阈值
-            QString oldFile = fileName + ".old";
-            QFile::remove(oldFile);
-            if (!QFile::rename(fileName, oldFile)) {
-                QFile file(fileName);
-                (void)file.open(QIODevice::WriteOnly | QIODevice::Truncate);
-                file.close();
-            }
-        }
-    }
-
-    static void log(const QString& msg) {
-        // 使用递归锁 QRecursiveMutex 替代默认的 QMutex，完美杜绝 stopAsyncLogger 内部 log 重入导致的程序退出死锁 Bug
-        QMutexLocker lock(&s_initMutex);
-
-        // 如果日志异步写线程已被显式关闭，进入降级逻辑：直接同步追加至本地文件，保障退出时日志记录完整不崩溃
-        if (s_writerStopped.load(std::memory_order_relaxed)) {
-            rotateLogFiles("arcmeta_debug.log");
-            QFile file("arcmeta_debug.log");
-            if (file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-                QTextStream out(&file);
-                QString timeStr = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
-                out << QString("[%1] %2").arg(timeStr, msg) << Qt::endl;
-                out.flush();
-                file.flush();
-                file.close();
-            }
-            return;
-        }
-
-        if (!s_writer) {
-            s_writer = new LoggerWriterThread("arcmeta_debug.log");
-            s_writer->start(QThread::LowPriority);
-        }
-
-        QString timeStr = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
-        s_writer->append(QString("[%1] %2").arg(timeStr, msg));
-    }
-
-    static void stopAsyncLogger() {
-        QMutexLocker lock(&s_initMutex);
-
-        if (s_writerStopped.load(std::memory_order_relaxed)) {
-            return;
-        }
-
-        // 先记录停止标志，防止由于 log 重入导致二次实例化
-        s_writerStopped.store(true, std::memory_order_relaxed);
-
-        log("Async LoggerWriterThread is stopping...");
-
-        // 停止后台写线程，并将其安全释放
-        if (s_writer) {
-            s_writer->stop();
-            delete s_writer;
-            s_writer = nullptr;
-        }
-    }
-
-private:
-    static inline LoggerWriterThread* s_writer = nullptr;
-    static inline std::atomic<bool> s_writerStopped{false};
-    static inline QRecursiveMutex s_initMutex; // 递归锁，彻底解除同一线程重入死锁隐患
+    static void rotateLogFiles(const QString&) {}
+    static void log(const QString&) {}
+    static void stopAsyncLogger() {}
 };
 
 } // namespace ArcMeta
