@@ -1,7 +1,8 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include "ContentPanel.h" 
+#include "ContentPanel.h"
+#include "../meta/TrashRepository.h" 
 #include "ColorPicker.h"
 #include "../core/DiskTrashService.h"
 #include <QWidgetAction>
@@ -2221,21 +2222,10 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     [this](const QVector<AssetItemSnapshot>& beforeState) {
                         for (const auto& snap : beforeState) {
                             if (dataSourceType() == DataSourceType::DiskNav) {
-                                sqlite3* db = DatabaseManager::instance().getDbForPath(snap.path.toStdWString());
-                                if (db) {
-                                    sqlite3_stmt* stmt = nullptr;
-                                    const char* sql = "SELECT id, trash_path FROM disk_trash WHERE original_path = ?";
-                                    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-                                        sqlite3_bind_text16(stmt, 1, snap.path.toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-                                        if (sqlite3_step(stmt) == SQLITE_ROW) {
-                                            int id = sqlite3_column_int(stmt, 0);
-                                            const wchar_t* wPath = reinterpret_cast<const wchar_t*>(sqlite3_column_text16(stmt, 1));
-                                            if (wPath) {
-                                                DiskTrashService::restoreFromDiskTrash(id, QString::fromWCharArray(wPath));
-                                            }
-                                        }
-                                        sqlite3_finalize(stmt);
-                                    }
+                                int trashId = -1;
+                                QString trashPath;
+                                if (ArcMeta::TrashRepository::instance().getDiskTrashRecordByPath(snap.path.toStdWString(), trashId, trashPath)) {
+                                    DiskTrashService::restoreFromDiskTrash(trashId, trashPath);
                                 }
                             } else {
                                 std::wstring wpath = snap.path.toStdWString();

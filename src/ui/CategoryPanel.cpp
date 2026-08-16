@@ -1,4 +1,5 @@
 #include "CategoryPanel.h"
+#include "../meta/TrashRepository.h"
 #include "MainWindow.h"
 #include "PresetTagsDialog.h"
 #include "CategoryModel.h"
@@ -947,18 +948,7 @@ void CategoryPanel::onEmptyTrash() {
     std::vector<std::string> trashItems = CategoryRepo::getFolderIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
     
     // 双轨回收站：检测是否有物理磁盘删除项目
-    bool hasDiskTrash = false;
-    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
-    for (sqlite3* db : dbs) {
-        sqlite3_stmt* stmt = nullptr;
-        const char* sql = "SELECT COUNT(*) FROM disk_trash";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            if (sqlite3_step(stmt) == SQLITE_ROW) {
-                if (sqlite3_column_int(stmt, 0) > 0) hasDiskTrash = true;
-            }
-            sqlite3_finalize(stmt);
-        }
-    }
+    bool hasDiskTrash = ArcMeta::TrashRepository::instance().hasTrashItems();
 
     if (trashItems.empty() && !hasDiskTrash) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站已空", 1000);
@@ -1018,18 +1008,7 @@ void CategoryPanel::onRestoreAllFromTrash() {
     std::vector<std::string> trashItems = CategoryRepo::getFolderIdsInCategory(CategoryRepo::TRASH_CATEGORY_ID);
     
     // 双轨回收站：检测是否有物理磁盘删除项目
-    bool hasDiskTrash = false;
-    auto dbs = DatabaseManager::instance().getActiveMemoryDbs();
-    for (sqlite3* db : dbs) {
-        sqlite3_stmt* stmt = nullptr;
-        const char* sql = "SELECT COUNT(*) FROM disk_trash";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            if (sqlite3_step(stmt) == SQLITE_ROW) {
-                if (sqlite3_column_int(stmt, 0) > 0) hasDiskTrash = true;
-            }
-            sqlite3_finalize(stmt);
-        }
-    }
+    bool hasDiskTrash = ArcMeta::TrashRepository::instance().hasTrashItems();
 
     if (trashItems.empty() && !hasDiskTrash) {
         ToolTipOverlay::instance()->showText(QCursor::pos(), "回收站内无项目", 1000);

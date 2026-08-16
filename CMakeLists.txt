@@ -102,6 +102,8 @@ set(SOURCES
     src/meta/DiskTrashRepo.h
     src/meta/TagRepository.cpp
     src/meta/TagRepository.h
+    src/meta/TrashRepository.cpp
+    src/meta/TrashRepository.h
     src/meta/DatabaseManager.cpp
     src/meta/DatabaseManager.h
     src/meta/DatabaseMigrator.h
