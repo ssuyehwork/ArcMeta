@@ -96,6 +96,8 @@ set(SOURCES
     src/core/SearchHistoryService.h
     src/crypto/EncryptionManager.cpp
     src/crypto/EncryptionManager.h
+    src/meta/CategoryBindingManager.cpp
+    src/meta/CategoryBindingManager.h
     src/meta/CategoryRepo.cpp
     src/meta/CategoryRepo.h
     src/meta/DiskTrashRepo.cpp

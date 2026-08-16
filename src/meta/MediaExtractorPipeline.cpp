@@ -230,7 +230,7 @@ void MediaExtractorPipeline::extractDimensions(const std::wstring& path, int& ou
         QSvgRenderer renderer(info.absoluteFilePath());
         if (renderer.isValid()) {
             QSize sz = renderer.defaultSize();
-            if (sz.isEmpty()) {
+            if (sz.isEmpty() || sz.width() <= 0 || sz.height() <= 0) {
                 // defaultSize() 依赖显式 width/height 属性，部分SVG（尤其Illustrator导出）只有viewBox没有该属性会返回0x0
                 // 改用 viewBox 尺寸兜底，viewBox 是矢量图形合法性的必要条件，一定存在
                 QRectF vb = renderer.viewBoxF();
