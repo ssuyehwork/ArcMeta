@@ -49,6 +49,10 @@ public:
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override;
     bool lessThan(const QModelIndex& source_left, const QModelIndex& source_right) const override;
+
+private:
+    void recomputeDuplicateCache();
+    std::unordered_set<QString> m_cachedDuplicatePaths; // 缓存当前所有重复项的路径集合
 };
 
 /**
