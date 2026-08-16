@@ -312,6 +312,8 @@ void FilterPanel::syncUIFromFilterState() {
         else if (text == "有链接") shouldCheck = (m_filter.linkPresence == FilterState::Yes);
         else if (text == "无链接") shouldCheck = (m_filter.linkPresence == FilterState::No);
         else if (text == "有备注") shouldCheck = (m_filter.notePresence == FilterState::Yes);
+        else if (text == "重复项") shouldCheck = (m_filter.duplicatePresence == FilterState::DuplicateOnly);
+        else if (text == "未重复") shouldCheck = (m_filter.duplicatePresence == FilterState::UniqueOnly);
         else if (text == "无备注") shouldCheck = (m_filter.notePresence == FilterState::No);
         else if (text == "横图") shouldCheck = (m_filter.ratio == FilterState::Horizontal);
         else if (text == "竖图") shouldCheck = (m_filter.ratio == FilterState::Vertical);
@@ -1402,6 +1404,56 @@ void FilterPanel::rebuildGroups() {
         }
         m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
     }
+
+    // ── 12. 重复状态 (最底部独立主选项) ───────────────────────────
+    {
+        QVBoxLayout* gl = nullptr;
+        QWidget* g = buildGroup("重复状态", gl);
+        m_groupDuplicate = g;
+
+        QButtonGroup* dupGroup = new QButtonGroup(g);
+        dupGroup->setExclusive(false); // 允许取消勾选
+
+        static const QList<QPair<FilterState::DuplicatePresence, QString>> dupOptions = {
+            {FilterState::DuplicateOnly, "重复项"},
+            {FilterState::UniqueOnly, "未重复"}
+        };
+
+        for (const auto& pair : dupOptions) {
+            StyledCheckBox* cb = new StyledCheckBox();
+            ClickableRow* row = new ClickableRow(cb);
+            row->setFixedHeight(24);
+            QHBoxLayout* rl = new QHBoxLayout(row);
+            rl->setContentsMargins(5, 0, 5, 0);
+            rl->setSpacing(5);
+            rl->addWidget(cb);
+            QLabel* lbl = new QLabel(pair.second, row);
+            lbl->setStyleSheet("font-size: 12px; color: #CCCCCC; background: transparent;");
+            rl->addWidget(lbl, 1);
+            gl->addWidget(row);
+
+            if (m_filter.duplicatePresence == pair.first) cb->setChecked(true);
+
+            connect(cb, &QCheckBox::toggled, this, [this, pair, dupGroup, cb](bool on) {
+                if (on) {
+                    // 单选互斥逻辑
+                    for (QAbstractButton* b : dupGroup->buttons()) {
+                        if (b != cb && b->isChecked()) {
+                            b->blockSignals(true);
+                            b->setChecked(false);
+                            b->blockSignals(false);
+                        }
+                    }
+                    m_filter.duplicatePresence = pair.first;
+                } else {
+                    m_filter.duplicatePresence = FilterState::DupAll;
+                }
+                emit filterChanged(m_filter);
+            });
+            dupGroup->addButton(cb);
+        }
+        m_containerLayout->insertWidget(m_containerLayout->count() - 1, g);
+    }
 }
 
 // ─── buildGroup ───────────────────────────────────────────────────
@@ -1542,6 +1594,7 @@ void FilterPanel::clearAllFilters(bool force) {
     // 2026-06-xx 物理修复：重置所有筛选内存状态
     m_filter = FilterState{};
     m_filter.manualExactColors.clear();
+    m_filter.duplicatePresence = FilterState::DupAll;
     m_hueSliderColor.clear();
 
     // 2026-xx-xx 按照用户要求：清空剩余输入框的文字

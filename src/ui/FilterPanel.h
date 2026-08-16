@@ -119,6 +119,9 @@ struct FilterState {
     bool showFolders = true; // 2026-07-xx 按照 Plan-73：显示/隐藏文件夹
     bool showFiles = true;   // 2026-07-xx 按照 Plan-73：显示/隐藏文件
 
+    enum DuplicatePresence { DupAll, DuplicateOnly, UniqueOnly };
+    DuplicatePresence duplicatePresence = DupAll;
+
     bool isEmpty() const {
         return ratings.isEmpty() && colors.isEmpty() && manualExactColors.isEmpty() && keyword.isEmpty() && types.isEmpty() &&
                createDates.isEmpty() && modifyDates.isEmpty() &&
@@ -126,7 +129,7 @@ struct FilterState {
                minSize == -1 && maxSize == -1 && minColorArea == 0 &&
                colorFilterText.trimmed().isEmpty() &&
                typeFilterText.trimmed().isEmpty() && createDateFilterText.trimmed().isEmpty() &&
-               modifyDateFilterText.trimmed().isEmpty();
+               modifyDateFilterText.trimmed().isEmpty() && duplicatePresence == DupAll;
     }
 };
 
@@ -226,6 +229,7 @@ private:
     QWidget* m_groupLink = nullptr;
     QWidget* m_groupNote = nullptr;
     QWidget* m_groupRatio = nullptr;
+    QWidget* m_groupDuplicate = nullptr;
 
     bool m_isMirrorSource = true;
 

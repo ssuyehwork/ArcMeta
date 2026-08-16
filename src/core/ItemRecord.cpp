@@ -16,6 +16,7 @@ void ItemRecord::fromMetadata(ItemRecord& r, const RuntimeMeta& meta) {
     r.encrypted = meta.encrypted;
     r.url = QString::fromStdWString(meta.url);
     r.note = QString::fromStdWString(meta.note);
+    r.sha256 = QString::fromStdString(meta.sha256);
     r.width = meta.width;
     r.height = meta.height;
     r.added_at = meta.added_at;
