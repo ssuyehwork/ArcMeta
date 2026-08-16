@@ -26,8 +26,6 @@ CoreController& CoreController::instance() {
 }
 
 void CoreController::initializeCoreComponents() {
-    qint64 metaInitStart = QDateTime::currentMSecsSinceEpoch();
-    
     // 1. 底层持久化 SQLite 连接启动与定时机制保障
     ArcMeta::DatabaseManager::instance();
     
@@ -140,7 +138,6 @@ CoreController::~CoreController() {}
 void CoreController::startSystem() {
     QThreadPool::globalInstance()->start([this]() {
         try {
-            qint64 startTime = QDateTime::currentMSecsSinceEpoch();
             
             QMetaObject::invokeMethod(this, [this]() {
                 setStatus("正在载入元数据缓存...", true);
@@ -199,7 +196,7 @@ void CoreController::startSystem() {
             // 2026-08-xx 物理同步：初始化完成后执行一次全量物理库对账 (在后台线程执行，避免阻塞 UI)
             AutoImportManager::instance().syncAllManagedLibraries(wasCleanShutdown);
 
-            QMetaObject::invokeMethod(this, [this, startTime]() {
+            QMetaObject::invokeMethod(this, [this]() {
                 setStatus("系统就绪", false);
                 emit initializationFinished();
             }, Qt::QueuedConnection);
