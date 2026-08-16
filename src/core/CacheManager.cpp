@@ -341,7 +341,7 @@ void CacheManager::clearAllCache() {
     }
     
     QStringList filters;
-    filters << "*.scch";
+    filters << "*.cache";
     
     QFileInfoList files = cacheDir.entryInfoList(filters, QDir::Files);
     for (const QFileInfo& fileInfo : files) {
@@ -365,7 +365,7 @@ QString CacheManager::getCacheFilePath(const QString& drivePath) const {
         normalizedDrive.remove("/");
     }
     
-    return m_cacheDir + QString("/Drive_%1.scch").arg(normalizedDrive);
+    return m_cacheDir + QString("/Drive_%1.cache").arg(normalizedDrive);
 }
 
 uint64_t CacheManager::getDriveSerial(const QString& drivePath) const {

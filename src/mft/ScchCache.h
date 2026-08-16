@@ -10,7 +10,7 @@ namespace ArcMeta {
 constexpr uint16_t SCCH_VERSION_MAJOR = 1;
 constexpr uint16_t SCCH_VERSION_MINOR = 0;
 constexpr char     SCCH_MAGIC[4]      = {'S','C','C','H'};
-constexpr char     SCCH_DEFAULT_PATH[] = "ArcMeta/cache/index.scch";
+constexpr char     SCCH_DEFAULT_PATH[] = "ArcMeta/cache/index.cache";
 
 #pragma pack(push, 1)
 struct ScchHeader {

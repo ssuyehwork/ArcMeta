@@ -771,14 +771,12 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
                     QFileInfoList innerFiles = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot); 
                     for (const QFileInfo& inner : innerFiles) { 
                         QString innerFn = inner.fileName(); 
-                        if (!innerFn.endsWith("_thumbnail.png", Qt::CaseInsensitive) &&  
-                            innerFn.compare("metadata.scch", Qt::CaseInsensitive) != 0) { 
+                        if (!innerFn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) {
                             pathsToRegister.push_back(normalizePath(inner.absoluteFilePath().toStdWString())); 
                         } 
                     } 
                 } 
-                else if (entry.isFile() && !fn.endsWith("_thumbnail.png", Qt::CaseInsensitive) &&  
-                         fn.compare("metadata.scch", Qt::CaseInsensitive) != 0) { 
+                else if (entry.isFile() && !fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) {
                     pathsToRegister.push_back(normalizePath(entry.absoluteFilePath().toStdWString())); 
                 } 
             } 

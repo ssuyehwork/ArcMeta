@@ -10,9 +10,7 @@ bool FileFilterService::isAuxiliaryFile(const QString& path, bool filterArc) {
  
     // 1. 过滤内部配置文件与缩略图 
     if (fileName.endsWith(".ArcMeta.json", Qt::CaseInsensitive) || 
-        fileName.endsWith("_thumbnail.png", Qt::CaseInsensitive) || 
-        fileName.endsWith("metadata.scch", Qt::CaseInsensitive) || 
-        fileName.endsWith("metadata.scch.tmp", Qt::CaseInsensitive)) { 
+        fileName.endsWith("_thumbnail.png", Qt::CaseInsensitive)) {
         return true;  
     } 
  

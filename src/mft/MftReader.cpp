@@ -267,7 +267,7 @@ bool MftReader::loadFromCache() {
     std::vector<DriveIndices> allSortedIndices;
 
     for (auto const& entry : std::filesystem::directory_iterator{cacheDir}) {
-        if (entry.path().extension() == ".scch") {
+        if (entry.path().extension() == ".cache") {
             std::vector<uint64_t> f, pf;
             std::vector<int64_t> s, t;
             std::vector<uint32_t> no, attr, ds;
@@ -434,7 +434,7 @@ bool MftReader::saveToCache() {
     // 锁外并行存盘 (QtConcurrent)
     for (const auto& snap : snapshots) {
         if (snap.f.empty()) continue;
-        QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(snap.volume).left(1));
+        QString path = QString("ArcMeta/cache/%1.cache").arg(QString::fromStdWString(snap.volume).left(1));
         ScchCache::save(path.toStdString().c_str(), snap.f, snap.pf, snap.s, snap.t, snap.no, snap.attr, snap.mf, snap.sp, snap.ds);
     }
     return true;
@@ -511,7 +511,7 @@ bool MftReader::saveDriveToCacheInternal(size_t driveIdx) {
 
     // [阶段 2] 锁外 I/O（Unlocked Persistence）
     // 此时已释放 m_dataLock，UI 线程可以自由执行搜索、渲染等操作。
-    QString path = QString("ArcMeta/cache/%1.scch").arg(QString::fromStdWString(volume).left(1));
+    QString path = QString("ArcMeta/cache/%1.cache").arg(QString::fromStdWString(volume).left(1));
     
     // 释放调用者的锁以允许并发（由于 saveToCache 等函数持有锁，这里需要特殊的逻辑处理）
     // 为了不破坏现有调用链，我们将 saveToCache 逻辑也进行重构。

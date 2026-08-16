@@ -1158,8 +1158,7 @@ QStringList CategoryRepo::getSystemCategoryPaths(const QString& type) {
 
         // 2. 核心修正：彻底过滤掉容器内部的辅助缩略图与辅助元数据文件
         QString qPath = QString::fromStdWString(path);
-        if (qPath.endsWith("_thumbnail.png", Qt::CaseInsensitive) || 
-            qPath.endsWith("metadata.scch", Qt::CaseInsensitive)) {
+        if (qPath.endsWith("_thumbnail.png", Qt::CaseInsensitive)) {
             return;
         }
 

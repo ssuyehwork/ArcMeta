@@ -27,7 +27,7 @@ const char* scchResultString(ScchResult r) {
     switch (r) {
         case ScchResult::Ok:               return "Ok";
         case ScchResult::FileNotFound:     return "文件不存在";
-        case ScchResult::BadMagic:         return "魔数不匹配（非 .scch 文件）";
+        case ScchResult::BadMagic:         return "魔数不匹配（非有效缓存文件）";
         case ScchResult::VersionMismatch:  return "版本不兼容，需要重新扫描";
         case ScchResult::CrcMismatch:      return "CRC 校验失败，文件已损坏";
         case ScchResult::Truncated:        return "文件不完整（意外截断）";
