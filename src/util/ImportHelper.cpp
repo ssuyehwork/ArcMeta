@@ -77,7 +77,6 @@ void ImportHelper::importPaths(const QStringList& paths,
                 
                 QString arcContainer = QDir(targetPhysicalPath).filePath(QString::fromStdString(assetId) + ".arc");
                 if (!QDir().mkpath(arcContainer)) {
-                    qWarning() << "[ImportHelper] 无法建立 .arc 资产包容器:" << arcContainer << " 源项目:" << src;
                     continue;
                 }
                 destPath = QDir(arcContainer).filePath(QFileInfo(src).fileName());
@@ -93,7 +92,6 @@ void ImportHelper::importPaths(const QStringList& paths,
                     QDir::toNativeSeparators(destPath).toStdWString());
                 successCount++;
             } else {
-                qWarning() << "[ImportHelper] copyOrMoveItems 失败！ 源文件:" << src << " 目标文件夹:" << QFileInfo(destPath).absolutePath();
             }
         }
 

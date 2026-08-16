@@ -64,7 +64,6 @@ static std::wstring getDefaultCategoryColor() {
 }
 
 CategoryPanel::~CategoryPanel() {
-    Logger::log("[CategoryPanel] ~CategoryPanel called, m_isInternalUpdating set to true, disconnecting signals");
     // 1. 在面板被析构前，将控制标志设为内部更新态，彻底屏蔽 QTreeView 卸载时的折叠信号回流
     m_isInternalUpdating = true;
      
@@ -1170,7 +1169,6 @@ void CategoryPanel::initUi() {
                         physicalRenamed = true;
                     } else {
                         renameSuccess = false;
-                        qWarning() << "[CategoryPanel] QFile::rename failed from" << oldPath << "to" << newPath;
                     }
                 }
             }
@@ -1321,7 +1319,6 @@ void CategoryPanel::initUi() {
     // 2026-03-xx 物理兼容：监听模型重置信号，在刷新后尝试恢复展开状态
     // 2026-05-27 物理加固：补全 this 上下文
     connect(m_categoryModel, &QAbstractItemModel::modelAboutToBeReset, this, [this]() {
-        Logger::log(QString("[CategoryPanel] modelAboutToBeReset: rowCount before reset: %1").arg(m_categoryModel->rowCount()));
         // 同步解锁 ID 到模型
         m_categoryModel->setUnlockedIds(m_unlockedIds);
         
@@ -1346,19 +1343,13 @@ void CategoryPanel::initUi() {
             for (int id : expandedIds) idList << id;
             m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idList));
             m_categoryTree->setProperty("expandedNames", expandedNames);
-            Logger::log(QString("[CategoryPanel] modelAboutToBeReset: Saved state. expandedIds size: %1, expandedNames size: %2")
-                .arg(expandedIds.size()).arg(expandedNames.size()));
-        } else {
-            Logger::log("[CategoryPanel] modelAboutToBeReset: No real data, skipped saving state to properties.");
         }
 
         // 开启数据流拦截锁，防止接下来 beginResetModel / removeRows 触发大量的 collapsed 虚假信号泄露覆写
         m_isInternalUpdating = true;
-        Logger::log("[CategoryPanel] modelAboutToBeReset: m_isInternalUpdating set to true");
     });
 
     connect(m_categoryModel, &QAbstractItemModel::modelReset, this, [this]() {
-        Logger::log(QString("[CategoryPanel] modelReset: rowCount after reset: %1").arg(m_categoryModel->rowCount()));
         QVariant varIds = m_categoryTree->property("expandedIds");
         QStringList expandedNames = m_categoryTree->property("expandedNames").toStringList();
         
@@ -1371,8 +1362,6 @@ void CategoryPanel::initUi() {
             QVariantList list = varIds.toList();
             for (const auto& v : list) expandedIds.insert(v.toInt());
         }
-        Logger::log(QString("[CategoryPanel] modelReset: Restoring state. properties expandedIds count: %1, expandedNames count: %2")
-            .arg(expandedIds.size()).arg(expandedNames.size()));
 
         m_isRestoringState = true;
         {
@@ -1381,7 +1370,6 @@ void CategoryPanel::initUi() {
         }
         m_isRestoringState = false;
         m_isInternalUpdating = false;
-        Logger::log("[CategoryPanel] modelReset: Restore finished, m_isInternalUpdating set to false");
 
         // 🚀 【完美时序】：代理模型展开状态处理完毕后，精确触发新节点编辑
         if (m_pendingEditCategoryId > 0) {
@@ -1529,14 +1517,11 @@ void CategoryPanel::initUi() {
 void CategoryPanel::saveExpandedStateToSettings() {
     // 1. 状态还原或内部更新中，绝不保存
     if (m_isRestoringState || m_isInternalUpdating) {
-        Logger::log(QString("[CategoryPanel] saveExpandedStateToSettings: Ignored. m_isRestoringState: %1, m_isInternalUpdating: %2")
-            .arg(m_isRestoringState).arg(m_isInternalUpdating));
         return;
     }
     
     // 2. 模型为空或正在重置，绝不保存
     if (!m_categoryModel || m_categoryModel->rowCount() <= 0) {
-        Logger::log("[CategoryPanel] saveExpandedStateToSettings: Ignored. Model is null or empty rowCount.");
         return;
     }
 
@@ -1545,7 +1530,6 @@ void CategoryPanel::saveExpandedStateToSettings() {
         QModelIndex first = m_categoryModel->index(0, 0);
         QString type = first.data(TypeRole).toString();
         if (type == "placeholder" || first.data(Qt::DisplayRole).toString().contains("正在统计")) {
-            Logger::log("[CategoryPanel] saveExpandedStateToSettings: Ignored. Only placeholder or statistics pending.");
             return;
         }
     }
@@ -1567,8 +1551,6 @@ void CategoryPanel::saveExpandedStateToSettings() {
     // 关键点：物理同步更新当前 Tree 的 Property，确保后续刷新时能拿到最新的展开记忆
     m_categoryTree->setProperty("expandedIds", QVariant::fromValue(idIntList));
     m_categoryTree->setProperty("expandedNames", names);
-    Logger::log(QString("[CategoryPanel] saveExpandedStateToSettings: Successfully saved to Settings and updated Property. ids count: %1, names count: %2")
-        .arg(ids.size()).arg(names.size()));
 }
 
 void CategoryPanel::loadExpandedStateFromSettings() {
@@ -1577,9 +1559,6 @@ void CategoryPanel::loadExpandedStateFromSettings() {
     
     QVariantList idVarList = AppConfig::instance().getValue("Category/ExpandedIds").toList();
     QStringList names = AppConfig::instance().getValue("Category/ExpandedNames").toStringList();
-
-    Logger::log(QString("[CategoryPanel] loadExpandedStateFromSettings: Loaded settings. ids count: %1, names count: %2, hasRecord: %3")
-        .arg(idVarList.size()).arg(names.size()).arg(hasRecord));
 
     QSet<int> ids;
     QList<int> idIntList;

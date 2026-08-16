@@ -1,6 +1,5 @@
 #include "TagRepository.h"
 #include "DatabaseManager.h"
-#include "../mft/MftReader.h"
 #include "MetadataManager.h"
 #include <QDebug>
 #include <QFileInfo>
@@ -193,11 +192,9 @@ void TagRepository::checkAndMigrate() {
 
     // 3. 执行迁移
     if (!globalHasGroups) {
-        std::vector<std::wstring> drives = MftReader::instance().getDriveList();
-        if (drives.empty()) {
-            for (const QFileInfo& driveInfo : QDir::drives()) {
-                drives.push_back(driveInfo.absolutePath().toStdWString());
-            }
+        std::vector<std::wstring> drives;
+        for (const QFileInfo& driveInfo : QDir::drives()) {
+            drives.push_back(driveInfo.absolutePath().toStdWString());
         }
 
         for (const std::wstring& drive : drives) {
@@ -219,7 +216,6 @@ void TagRepository::checkAndMigrate() {
 
             if (!hasGroups) continue;
 
-            qWarning() << "[TagRepository] Detected unmigrated tag data in drive" << QString::fromStdWString(drive) << ". Migrating...";
             
             struct MigratingGroup {
                 int id;
@@ -289,11 +285,7 @@ void TagRepository::checkAndMigrate() {
                     sqlite3_finalize(groupInsertStmt);
                     sqlite3_finalize(itemInsertStmt);
                     
-                    if (trans.commit()) {
-                        qWarning() << "[TagRepository] Successfully migrated" << migratingGroups.size() << "tag groups from drive" << QString::fromStdWString(drive) << "to global.db.";
-                    } else {
-                        qWarning() << "[TagRepository] FAILED to commit migrating transaction!";
-                    }
+                    trans.commit();
                 } else {
                     if (groupInsertStmt) sqlite3_finalize(groupInsertStmt);
                     if (itemInsertStmt) sqlite3_finalize(itemInsertStmt);

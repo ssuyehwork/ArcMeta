@@ -22,9 +22,6 @@ int PhysicalDiskSearchExtractor::performDiskSearch(
     while (it.hasNext()) {
         if (abortFlag || currentSearchId != searchId) break;
         scanCount++;
-        if (scanCount % 2000 == 0) {
-             ArcMeta::Logger::log(QString("[Core] I/O 扫描进度: 已检查 %1 个项目 [%2]").arg(scanCount).arg(searchId));
-        }
         
         QString fullPath = it.next();
         QString fileName = it.fileName();
