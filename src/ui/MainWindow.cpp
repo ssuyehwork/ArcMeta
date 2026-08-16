@@ -1039,68 +1039,91 @@ void MainWindow::initUi() {
     m_elapsedTimer = new QTimer(this);
     m_elapsedTimer->setInterval(100); // 100ms 动态刷新率
 
-    // 100ms 刷新率计算预计耗时与文案
-    connect(m_elapsedTimer, &QTimer::timeout, this, [this]() {
-        if (m_syncStartTime > 0) {
+    // 时间格式化辅助函数 (秒 -> 00:00 或 00:00:00)
+    auto formatTime = [](qint64 totalSeconds) -> QString {
+        if (totalSeconds < 0) totalSeconds = 0;
+        qint64 hours = totalSeconds / 3600;
+        qint64 mins = (totalSeconds % 3600) / 60;
+        qint64 secs = totalSeconds % 60;
+        if (hours > 0) {
+            return QString("%1:%2:%3")
+                .arg(hours, 2, 10, QChar('0'))
+                .arg(mins, 2, 10, QChar('0'))
+                .arg(secs, 2, 10, QChar('0'));
+        }
+        return QString("%1:%2")
+            .arg(mins, 2, 10, QChar('0'))
+            .arg(secs, 2, 10, QChar('0'));
+    };
+
+    // 1. 扫描进行中定时刷新
+    connect(m_elapsedTimer, &QTimer::timeout, this, [this, formatTime]() {
+        if (m_syncStartTime > 0 && m_totalBatchCount > 0) {
             double elapsedSec = (QDateTime::currentMSecsSinceEpoch() - m_syncStartTime) / 1000.0;
             int currentPct = m_topProgressBar->value();
             
-            // 动态推算预计剩余耗时 (ETA)
-            QString etaStr = "计算中...";
+            int completedCount = qBound(0, (int)((double)currentPct / 100.0 * m_totalBatchCount), m_totalBatchCount);
+
+            QString countdownStr = "00:00";
+            QString totalEstStr = "00:00";
+
             if (currentPct >= 5) {
-                double estRemainingSec = elapsedSec * (100.0 - currentPct) / (double)currentPct;
-                etaStr = QString("%1s").arg(QString::number(estRemainingSec, 'f', 1));
+                qint64 remainingSec = static_cast<qint64>(elapsedSec * (100.0 - currentPct) / (double)currentPct);
+                qint64 totalEstSec = static_cast<qint64>(elapsedSec) + remainingSec;
+                countdownStr = formatTime(remainingSec);
+                totalEstStr = formatTime(totalEstSec);
             }
 
-            // 1. 文案更正为“扫描数据中...”
-            // 2. 耗词更正为“预计耗时”
-            m_statusLeft->setText(QString("扫描数据中... %1%  |  预计耗时: %2")
+            // 统一展示为标准格式
+            m_statusLeft->setText(QString("扫描数据中... %1%  数量：%2/%3  |  倒计时分 %4 / 预计时分: %5")
                                   .arg(currentPct)
-                                  .arg(etaStr));
+                                  .arg(completedCount)
+                                  .arg(m_totalBatchCount)
+                                  .arg(countdownStr)
+                                  .arg(totalEstStr));
         }
     });
 
-    // 监听后台数据感知与扫描变动
+    // 2. 监听后台扫描状态变动
     connect(&SyncStatusService::instance(), &SyncStatusService::statusUpdated,
-            this, [this](bool syncing, int pendingCount) {
+            this, [this, formatTime](bool syncing, int pendingCount) {
         if (syncing && pendingCount > 0) {
-            // --- 扫描任务启动 ---
             if (m_syncStartTime == 0) {
                 m_syncStartTime = QDateTime::currentMSecsSinceEpoch();
-                m_totalBatchCount = pendingCount; // 锁定初始任务总量
+                m_totalBatchCount = pendingCount;
                 m_elapsedTimer->start();
                 updateProgressBarGeometry();
                 
-                m_topProgressBar->setValue(1); // 从左侧 1% 开始
+                m_topProgressBar->setValue(1);
                 m_topProgressBar->show();
             }
             
-            // 动态修正总量（防止扫描过程中新追加任务导致溢出）
             if (pendingCount > m_totalBatchCount) {
                 m_totalBatchCount = pendingCount;
             }
 
-            // 3. 严格计算【由左向右】递增的百分比：已完成 / 总项数
             int completedCount = m_totalBatchCount - pendingCount;
             int pct = qBound(1, (int)((double)completedCount / m_totalBatchCount * 100), 99);
-            
-            m_topProgressBar->setValue(pct); // 百分比递增，推动进度条从 Left -> Right
+            m_topProgressBar->setValue(pct);
         } else {
-            // --- 扫描任务完成 ---
             if (m_syncStartTime > 0) {
-                m_topProgressBar->setValue(100); // 光条拉满至最右侧 100%
+                m_topProgressBar->setValue(100);
                 m_elapsedTimer->stop();
                 
-                double totalSec = (QDateTime::currentMSecsSinceEpoch() - m_syncStartTime) / 1000.0;
-                m_statusLeft->setText(QString("数据扫描完成  |  实际耗时: %1s").arg(QString::number(totalSec, 'f', 1)));
+                qint64 totalSec = (QDateTime::currentMSecsSinceEpoch() - m_syncStartTime) / 1000;
                 
-                // 400ms 后平滑淡出隐藏，3 秒后恢复常规项目计数
+                // 完成时展示标准格式
+                m_statusLeft->setText(QString("数据扫描完成  数量：%1  |  实际耗时: %2")
+                                      .arg(m_totalBatchCount)
+                                      .arg(formatTime(totalSec)));
+                
+                // 400ms 后隐藏顶层进度条，3 秒后恢复常态项目计数
                 QTimer::singleShot(400, this, [this]() {
                     m_topProgressBar->hide();
                     m_syncStartTime = 0;
                     m_totalBatchCount = 0;
                     QTimer::singleShot(3000, this, [this]() {
-                        updateStatusBar(); // 恢复常态“10 个项目, 已选中 1 个”
+                        updateStatusBar();
                     });
                 });
             }
