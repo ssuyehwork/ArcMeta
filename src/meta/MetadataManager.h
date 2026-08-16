@@ -14,6 +14,7 @@
 #include <deque>
 #include <mutex>
 #include <memory>
+#include <array>
 
 namespace ArcMeta {
 
@@ -404,10 +405,12 @@ public:
      */
     template<typename Func>
     void forEachCachedItem(Func&& fn) const {
-        auto currentSnapshot = std::atomic_load(&m_snapshot);
-        if (!currentSnapshot) return;
-        for (auto it = currentSnapshot->begin(); it != currentSnapshot->end(); ++it) {
-            fn(it->first, it->second);
+        // [1.1.4 规范] 256分片弱一致性遍历：逐分片获取 shared_lock 读取，读毕即释
+        for (size_t i = 0; i < NUM_SHARDS; ++i) {
+            std::shared_lock<std::shared_mutex> lock(m_shards[i].mutex);
+            for (const auto& pair : m_shards[i].items) {
+                fn(pair.first, pair.second);
+            }
         }
     }
 
@@ -459,8 +462,18 @@ private:
     MetadataManager(QObject* parent = nullptr);
     ~MetadataManager() override = default;
 
-    // [RCU 内存快照设计]：将缓存升级为原子共享智能指针快照，实现 Lock-Free 共享读取
-    std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>> m_snapshot;
+    // 256 分片并发哈希容器：替代全量深拷贝 COW 快照
+    struct MetaShard {
+        mutable std::shared_mutex mutex;
+        std::unordered_map<std::wstring, RuntimeMeta> items;
+    };
+    static constexpr size_t NUM_SHARDS = 256;
+    std::array<MetaShard, NUM_SHARDS> m_shards;
+
+    inline size_t getShardIndex(const std::wstring& path) const {
+        return std::hash<std::wstring>{}(normalizePath(path)) % NUM_SHARDS;
+    }
+
     std::unordered_map<std::string, std::wstring> m_folderIdToPath;
 
     // 2026-xx-xx 按照 Plan-124：快速层级倒排索引与进度缓存

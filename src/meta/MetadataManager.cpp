@@ -977,18 +977,15 @@ void MetadataManager::registerItemsAsync(const QStringList& paths, bool authoriz
     });
 }
 
-RuntimeMeta MetadataManager::getMeta(const std::wstring& path) { 
-    std::wstring nPath = MetadataManager::normalizePath(path); 
-     
-    // 1. 无锁（Lock-Free）原子获取内存快照 
-    auto currentSnapshot = std::atomic_load(&m_snapshot); 
-    if (currentSnapshot) { 
-        auto it = currentSnapshot->find(nPath); 
-        if (it != currentSnapshot->end()) return it->second; 
-    } 
-
-    // 2. 纯粹返回空对象，严禁读取 .ArcMeta.json 污染托管快照 
-    return RuntimeMeta(); 
+RuntimeMeta MetadataManager::getMeta(const std::wstring& path) {
+    std::wstring nPath = normalizePath(path);
+    size_t idx = getShardIndex(nPath);
+    std::shared_lock<std::shared_mutex> lock(m_shards[idx].mutex);
+    auto it = m_shards[idx].items.find(nPath);
+    if (it != m_shards[idx].items.end()) {
+        return it->second;
+    }
+    return RuntimeMeta();
 }
 
 std::wstring MetadataManager::getPathByFolderId(const std::string& fid) {
@@ -1096,25 +1093,14 @@ void MetadataManager::ensureActivated(const std::wstring& nPath) {
 
 
 void MetadataManager::setRating(const std::wstring& path, int rating, bool notify) {
-    std::wstring nPath = MetadataManager::normalizePath(path);
-    
-    // 1. RCU 内存快照极速更新
-    ensureActivated(nPath);
-    { 
-        std::unique_lock<std::shared_mutex> lock(m_mutex); 
-        auto currentSnapshot = std::atomic_load(&m_snapshot);
-        auto newMap = std::make_shared<std::unordered_map<std::wstring, RuntimeMeta>>(*currentSnapshot);
-        (*newMap)[nPath].rating = rating;
-        std::atomic_store(&m_snapshot, std::shared_ptr<const std::unordered_map<std::wstring, RuntimeMeta>>(newMap));
+    std::wstring nPath = normalizePath(path);
+    size_t idx = getShardIndex(nPath);
+    {
+        std::unique_lock<std::shared_mutex> lock(m_shards[idx].mutex);
+        m_shards[idx].items[nPath].rating = rating;
     }
-    
-    if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-
-    if (isInsideManagedLibrary(nPath)) {
-        // A. 资源库模式：流放至后台写入 SQLite 数据库，主线程 0 毫秒返回，免除任何 SqlTransaction 的 Sleep 忙等待
-        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
-            persistAsync(nPath);
-        });
+    if (notify) {
+        notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     }
 }
 

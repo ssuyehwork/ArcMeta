@@ -43,6 +43,10 @@ public:
     std::atomic<int> m_untaggedCount{0}; 
     std::atomic<int> m_trashCount{0}; 
 
+    // 增量账本分类与标签映射表
+    std::unordered_map<int, int> m_categoryCounts;
+    std::unordered_map<int, int> m_tagCounts;
+
     QTimer* m_debounceTimer{nullptr};
 }; 
 } 
