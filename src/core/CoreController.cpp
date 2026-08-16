@@ -150,7 +150,7 @@ void CoreController::startSystem() {
             }, Qt::QueuedConnection);
             
             // 仅执行 SQLite 模式初始化
-            MetadataManager::instance().initFromScchMode();
+            MetadataManager::instance().initFromDatabase();
 
             // 仅在系统启动/盘符加载时执行一次托管根分类物理对齐，绝不放在 getAll() 热路径中
             const auto drivesList = QDir::drives();

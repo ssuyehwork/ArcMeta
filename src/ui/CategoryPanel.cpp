@@ -121,7 +121,7 @@ CategoryPanel::CategoryPanel(QWidget* parent)
     setupContextMenu();
 
     // 2026-06-xx 物理修复：连接 CoreController 的初始化完成信号
-    // 理由：系统启动时的 initFromScchMode 是异步进行的，完成后必须强制刷新侧边栏
+    // 理由：系统启动时的 initFromDatabase 是异步进行的，完成后必须强制刷新侧边栏
     // 以解决数据库加载延迟导致的系统项（如“全部数据”、“未分类”）显示为 0 的问题
     connect(&CoreController::instance(), &CoreController::initializationFinished, this, [this]() {
         m_isFirstLoad = true; // 强制执行 refresh() 重建树结构并拉取最新计数
