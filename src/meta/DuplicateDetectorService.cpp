@@ -56,8 +56,7 @@ std::vector<DuplicateConflictGroup> DuplicateDetectorService::detectDuplicates(c
         int newWidth = newImgSize.width();
         int newHeight = newImgSize.height();
 
-        // 匹配集，用来去重，避免重复添加相同的冲突记录
-        std::unordered_set<std::wstring> matchedPaths;
+        bool alreadyMatched = false;   // 标记这个新文件是否已经找到过一次重复
 
         // 一重判定：文件大小相同且哈希相同
         auto sizeIt = sizeIndexMap.find(size);
@@ -83,8 +82,6 @@ std::vector<DuplicateConflictGroup> DuplicateDetectorService::detectDuplicates(c
                 }
 
                 if (!existSha.isEmpty() && existSha == sha256Hex) {
-                    matchedPaths.insert(existPathW);
-
                     DuplicateConflictGroup group;
                     group.existingItem.folderId = QString::fromStdString(meta.folderId);
                     group.existingItem.path = QString::fromStdWString(existPathW);
@@ -103,39 +100,43 @@ std::vector<DuplicateConflictGroup> DuplicateDetectorService::detectDuplicates(c
                     group.newItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnail(newPath, 512);
 
                     conflicts.push_back(group);
+                    alreadyMatched = true;
+                    break;   // 找到第一个就够了，不再比对该 size 桶里剩下的旧文件
                 }
             }
         }
 
-        // 二重判定：文件名相同且分辨率相同
-        auto nameIt = nameIndexMap.find(lowerNewName);
-        if (nameIt != nameIndexMap.end()) {
-            for (const auto& pair : nameIt->second) {
-                const std::wstring& existPathW = pair.first;
-                const RuntimeMeta& meta = pair.second;
-                if (QString::fromStdWString(existPathW) == newPath) continue;
-                if (matchedPaths.count(existPathW)) continue; // 已经在一重判定中匹配成功
+        // 二重判定：只有一重判定完全没找到匹配时才需要执行
+        if (!alreadyMatched) {
+            auto nameIt = nameIndexMap.find(lowerNewName);
+            if (nameIt != nameIndexMap.end()) {
+                for (const auto& pair : nameIt->second) {
+                    const std::wstring& existPathW = pair.first;
+                    const RuntimeMeta& meta = pair.second;
+                    if (QString::fromStdWString(existPathW) == newPath) continue;
 
-                if (meta.width > 0 && meta.height > 0 && meta.width == newWidth && meta.height == newHeight) {
-                    DuplicateConflictGroup group;
-                    
-                    group.existingItem.folderId = QString::fromStdString(meta.folderId);
-                    group.existingItem.path = QString::fromStdWString(existPathW);
-                    group.existingItem.filename = QFileInfo(QString::fromStdWString(existPathW)).fileName();
-                    group.existingItem.width = meta.width;
-                    group.existingItem.height = meta.height;
-                    group.existingItem.size = meta.fileSize;
-                    group.existingItem.tagHint = meta.tags.isEmpty() ? "" : meta.tags.first();
-                    group.existingItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(QString::fromStdWString(existPathW));
+                    if (meta.width > 0 && meta.height > 0 && meta.width == newWidth && meta.height == newHeight) {
+                        DuplicateConflictGroup group;
 
-                    group.newItem.path = newPath;
-                    group.newItem.filename = fileName;
-                    group.newItem.width = newWidth; 
-                    group.newItem.height = newHeight;
-                    group.newItem.size = size;
-                    group.newItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnail(newPath, 512);
+                        group.existingItem.folderId = QString::fromStdString(meta.folderId);
+                        group.existingItem.path = QString::fromStdWString(existPathW);
+                        group.existingItem.filename = QFileInfo(QString::fromStdWString(existPathW)).fileName();
+                        group.existingItem.width = meta.width;
+                        group.existingItem.height = meta.height;
+                        group.existingItem.size = meta.fileSize;
+                        group.existingItem.tagHint = meta.tags.isEmpty() ? "" : meta.tags.first();
+                        group.existingItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(QString::fromStdWString(existPathW));
 
-                    conflicts.push_back(group);
+                        group.newItem.path = newPath;
+                        group.newItem.filename = fileName;
+                        group.newItem.width = newWidth;
+                        group.newItem.height = newHeight;
+                        group.newItem.size = size;
+                        group.newItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnail(newPath, 512);
+
+                        conflicts.push_back(group);
+                        break;   // 同样找到第一个就够了
+                    }
                 }
             }
         }
