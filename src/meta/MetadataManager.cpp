@@ -770,11 +770,17 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         SqlTransaction trans(db); 
         for (const auto& p : pathsToRegister) { 
             ensureActivated(p); 
+            RuntimeMeta meta = getMeta(p);
+            QFileInfo fi(QString::fromStdWString(p));
+            // 🚨 增量准入准则：已解析完成且物理文件修改时间与大小未发生变化的资产，跳过状态重置与重复投递
+            if (meta.ingestionStatus == 1 && meta.mtime == fi.lastModified().toMSecsSinceEpoch() && meta.fileSize == fi.size()) {
+                continue;
+            }
             updateIngestionStatus(p, 0); 
             qPathsToRegister << QString::fromStdWString(p); 
         } 
          
-        if (trans.commit()) { 
+        if (trans.commit() && !qPathsToRegister.isEmpty()) {
             registerItemsAsync(qPathsToRegister, true); 
         } 
     }); 

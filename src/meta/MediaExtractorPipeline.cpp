@@ -109,7 +109,7 @@ void MediaExtractorPipeline::enqueueBatch(const std::vector<std::wstring>& paths
 
 void MediaExtractorPipeline::processNextBatch() {
     std::vector<std::wstring> chunk;
-    const size_t CHUNK_SIZE = 16; // 强行规定每批次最多处理 16 个文件
+    const size_t CHUNK_SIZE = 128; // 提升并发批次至 128 条，大幅利用多核并发
      
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
