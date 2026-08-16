@@ -53,11 +53,7 @@ LoadingWindow::LoadingWindow(QWidget* parent)
     QString refreshSvg = SvgIcons::icons.value("refresh");
     if (!refreshSvg.isEmpty()) {
         m_svgRenderer = std::make_unique<QSvgRenderer>();
-        if (!m_svgRenderer->load(refreshSvg.toLatin1())) {
-            qWarning() << "[LoadingWindow] SVG 加载失败";
-        }
-    } else {
-        qWarning() << "[LoadingWindow] refresh 图标不存在";
+        m_svgRenderer->load(refreshSvg.toLatin1());
     }
     
     // 标题标签

@@ -97,7 +97,6 @@ QImage FormatDecoders::decodeTiffMemorySafely(const QByteArray& tiffData, int ma
     // 2.【强制安全防御】预算字节数，超过 maxMemoryMB 立即拒载
     uint64_t requiredBytes = static_cast<uint64_t>(width) * height * 4; // RGBA 4字节
     if (requiredBytes > static_cast<uint64_t>(maxMemoryMB) * 1024 * 1024 || width == 0 || height == 0) {
-        qWarning() << "[MemoryGuard] TIFF 解码预估内存超出安全上限或尺寸非法，拒绝分配！" << requiredBytes;
         TIFFClose(tif);
         return QImage();
     }
@@ -313,13 +312,11 @@ QImage FormatDecoders::extractAiPreview(const QString& filePath, int targetSize)
 QImage FormatDecoders::extractEpsPreview(const QString& filePath, int targetSize) {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
-        qWarning() << "[FormatDecoders][EPS] 文件打开失败：" << filePath;
         return QImage();
     }
 
     QByteArray header = file.read(30);
     if (header.size() < 30) {
-        qWarning() << "[FormatDecoders][EPS] 文件头不足 30 字节：" << filePath;
         return QImage();
     }
 
@@ -385,7 +382,6 @@ QImage FormatDecoders::extractEpsPreview(const QString& filePath, int targetSize
         return gsImg;
     }
 
-    qWarning() << "[FormatDecoders][EPS] 未能通过 DOS 二进制、ASCII %%BeginPreview 或 Ghostscript 提取内嵌位图预览：" << filePath;
     return QImage();
 }
 

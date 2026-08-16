@@ -74,7 +74,6 @@ void AssetImporter::importAssets(const ImportContext& ctx) {
             }
 
             if (!QDir().mkpath(managedRoot)) {
-                qWarning() << "[AssetImporter] 无法建立资源库根目录:" << managedRoot;
                 continue;
             }
 

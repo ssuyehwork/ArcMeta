@@ -60,8 +60,6 @@ void onApplicationAboutToQuit(HANDLE hMutex) {
     // 2. 将高频落盘缓存中的所有待写数据同步强力落盘写入，安全闭卷
     ArcMeta::DatabaseManager::instance().flushAll(true);
 
-    // 3. 挂起并关闭异步日志写出线程，使其后续降级同步写
-    ArcMeta::Logger::stopAsyncLogger();
 
     // 4. 释放 COM 套间环境
 #ifdef Q_OS_WIN
@@ -95,8 +93,6 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-    // 单实例锁定成功，安全哨兵放行。此时再执行日志容量哨兵轮转切片
-    ArcMeta::Logger::rotateLogFiles("arcmeta_debug.log");
 
     // 1. 安装自定义日志处理器（使用超高吞吐无阻塞的内存队列异步写入）
     qInstallMessageHandler(customMessageHandler);

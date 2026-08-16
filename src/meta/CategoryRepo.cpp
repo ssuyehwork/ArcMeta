@@ -216,11 +216,9 @@ bool CategoryRepo::add(Category& cat) {
             refreshMemoryCache();
             return true;
         } else {
-            qCritical() << "[CategoryRepo] add FAILED during step:" << sqlite3_errmsg(mainDb) << "Code:" << rc;
         }
         sqlite3_finalize(stmt);
     } else {
-        qCritical() << "[CategoryRepo] add FAILED during prepare:" << sqlite3_errmsg(mainDb) << "Code:" << rc;
     }
     return false;
 }
@@ -768,7 +766,6 @@ bool CategoryRepo::updateCategoryColorByPath(const std::wstring& path, const std
             return true;
         }
     }
-    qWarning() << "[DB_TRACE] updateCategoryColorByPath 执行失败！路径:" << QString::fromStdWString(path);
     return false;
 }
 

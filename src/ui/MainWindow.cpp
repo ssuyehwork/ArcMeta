@@ -1810,7 +1810,6 @@ void MainWindow::setupCustomTitleBarButtons() {
 
 void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
     if (url.isEmpty()) return;
-    ArcMeta::Logger::log(QString("[Main] 统一导航调度 -> %1 %2").arg(url).arg(record ? "(记录历史)" : "(不记录)"));
 
     // 1. 物理重置搜索与筛选状态
     if (m_searchEdit) {
@@ -2315,7 +2314,6 @@ void MainWindow::updateCustomFolderButtons() {
 
         // 🚨 核心自愈逻辑：如果在物理磁盘上文件夹已经不存在（被移走或删除），自动触发数据清洗与自动解绑！
         if (!QDir(finalPath).exists()) {
-            qWarning() << "[DriveBar] 检测到监控文件夹在硬盘上已失效，自动清退:" << finalPath;
             
             // 1. 从 NativeFolderWatcher 监控中注销此路径
             NativeFolderWatcher::instance().removeWatch(normPath);

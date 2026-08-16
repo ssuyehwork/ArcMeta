@@ -185,7 +185,6 @@ QString ShellHelper::resolveAndAlignDatabasePath(const std::wstring& volumeSeria
     if (isLoaded) {
         if (!cleanLetter.isEmpty()) {
             if (!currentDiskPathInConn.endsWith(expectedFileName)) {
-                qWarning() << "[ShellHelper] 检测到盘符漂移，执行物理纠偏重命名:" << currentDiskPathInConn << " -> " << targetPath;
                 
                 // 如果目标已存在且不是自己，先将其移走（按用户规则重命名为无效）
                 if (QFile::exists(targetPath) && targetPath != currentDiskPathInConn) {
@@ -195,15 +194,11 @@ QString ShellHelper::resolveAndAlignDatabasePath(const std::wstring& volumeSeria
                     while (QFile::exists(invalidPath)) {
                         invalidPath = QString("%1_%2.db").arg(invalidBase).arg(counter++);
                     }
-                    qWarning() << "[ShellHelper] 目标文件已存在，先将其重命名为无效:" << invalidPath;
                     QFile::rename(targetPath, invalidPath);
                 }
 
                 if (QFile::rename(currentDiskPathInConn, targetPath)) {
-                    qWarning() << "[ShellHelper] 物理重命名成功";
                     return targetPath;
-                } else {
-                    qWarning() << "[ShellHelper] 物理重命名失败";
                 }
             }
         }
@@ -221,10 +216,7 @@ QString ShellHelper::resolveAndAlignDatabasePath(const std::wstring& volumeSeria
             // Case A: 有旧文件。选择最近修改的一个作为目标进行重命名。
             QFileInfo bestInfo = list.first();
             if (!cleanLetter.isEmpty()) {
-                if (QFile::rename(bestInfo.absoluteFilePath(), targetPath)) {
-                    qWarning() << "[ShellHelper] 自动纠偏：重命名数据库" << bestInfo.fileName() << "->" << expectedFileName;
-                } else {
-                    qWarning() << "[ShellHelper] 重命名失败，降级使用原文件加载:" << bestInfo.absoluteFilePath();
+                if (!QFile::rename(bestInfo.absoluteFilePath(), targetPath)) {
                     targetPath = bestInfo.absoluteFilePath();
                 }
             } else {
@@ -241,7 +233,6 @@ QString ShellHelper::resolveAndAlignDatabasePath(const std::wstring& volumeSeria
                     invalidPath = QString("%1_%2.db").arg(invalidBase).arg(counter++);
                 }
                 if (QFile::rename(conflictPath, invalidPath)) {
-                    qWarning() << "[ShellHelper] 冲突处理：将冗余数据库标记为无效" << list.at(i).fileName() << "->" << QFileInfo(invalidPath).fileName();
                 }
             }
         }

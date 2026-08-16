@@ -840,7 +840,6 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
     QString letter = (nFolder.length() >= 2 && nFolder[1] == L':') ? QString::fromWCharArray(&nFolder[0], 1) : "";
     sqlite3* db = DatabaseManager::instance().getDriveDb(volSerial, letter);
     if (!db) {
-        qWarning() << "[DB_TRACE] calculateAndPersistProgress 失败：无法取得分库，文件夹:" << QString::fromStdWString(nFolder);
         return;
     }
 
@@ -882,7 +881,6 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
         sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_double(stmt, 2, progress);
         if (sqlite3_step(stmt) != SQLITE_DONE) {
-            qWarning() << "[DB_TRACE] calculateAndPersistProgress 写入进度失败！Error:" << sqlite3_errmsg(db);
         }
         sqlite3_finalize(stmt);
     }
@@ -2156,7 +2154,6 @@ void MetadataManager::markAsTrash(const std::wstring& path, bool isTrash, const 
                     }
 
                     m_shards[oldIdx].items.erase(itOld);
-                    qWarning() << "[Metadata] 检测到路径偏移，已从内存清理旧条目以防止重复计数:" << QString::fromStdWString(oldPath);
                 }
             }
         }
@@ -2468,7 +2465,6 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
         memDb = DatabaseManager::instance().getDriveDb(volSerial, letter);
     }
     if (!memDb) {
-        qWarning() << "[DB_TRACE] persistAsync 失败：未能获取 memDb，路径:" << QString::fromStdWString(nPath);
         return;
     }
 
@@ -2508,12 +2504,8 @@ void MetadataManager::persistAsync(const std::wstring& path, bool notify, bool a
                 std::unique_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
                 m_shards[idx].items[nPath] = rMeta;
             }
-        } else {
-            qWarning() << "[DB_TRACE] persistAsync 写入内存库失败！Error:" << sqlite3_errmsg(memDb) << "路径:" << QString::fromStdWString(nPath);
         }
         sqlite3_finalize(memStmt);
-    } else {
-        qWarning() << "[DB_TRACE] persistAsync SQL prepare 失败！Error:" << sqlite3_errmsg(memDb) << "路径:" << QString::fromStdWString(nPath);
     }
         
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));

@@ -40,7 +40,6 @@ void CoreController::initializeCoreComponents() {
     // 4. 后台提取特征管道、定时器及事件队列预热
     ArcMeta::MediaExtractorPipeline::instance();
     
-    qDebug() << "[PERF] [CoreController] CoreComponents 单例拓扑链预热耗时:" << (QDateTime::currentMSecsSinceEpoch() - metaInitStart) << "ms";
 }
 
 CoreController::CoreController(QObject* parent) : QObject(parent) {
@@ -101,7 +100,6 @@ CoreController::CoreController(QObject* parent) : QObject(parent) {
                     if (QFileInfo(topLevelPath).exists() && s_currentlyMigrating.find(wTopLevelPath) == s_currentlyMigrating.end()) {
                         s_currentlyMigrating.insert(wTopLevelPath);
 
-                        qDebug() << "[CoreController] 检测到自动导入目录变动，开始执行静默迁移:" << topLevelPath;
 
                         // 直接调用资产打包导入器进行剪切迁移入库 (targetCatId = 0)，后台静默进行
                         AssetImporter::importAssets(QStringList() << topLevelPath, 0, nullptr, [wTopLevelPath]() {
@@ -143,7 +141,6 @@ void CoreController::startSystem() {
     QThreadPool::globalInstance()->start([this]() {
         try {
             qint64 startTime = QDateTime::currentMSecsSinceEpoch();
-            qDebug() << "[Core] >>> 开始后台异步初始化 (SQLite 内存模式) <<<";
             
             QMetaObject::invokeMethod(this, [this]() {
                 setStatus("正在载入元数据缓存...", true);
@@ -194,7 +191,6 @@ void CoreController::startSystem() {
                 if (volSerial != L"UNKNOWN") {
                     std::wstring managedAbsW = MetadataManager::getManagedLibraryPath(volSerial, letter);
                     if (!managedAbsW.empty()) {
-                        qDebug() << "[Core] 识别到资源库，已取消开启 IOCP 监控:" << QString::fromStdWString(managedAbsW);
                         // NativeFolderWatcher::instance().addWatch(managedAbsW);
                     }
                 }
@@ -205,12 +201,10 @@ void CoreController::startSystem() {
 
             QMetaObject::invokeMethod(this, [this, startTime]() {
                 setStatus("系统就绪", false);
-                qDebug() << "[Core] !!! SQLite 内存模式初始化就绪，耗时:" << (QDateTime::currentMSecsSinceEpoch() - startTime) << "ms";
                 emit initializationFinished();
             }, Qt::QueuedConnection);
 
         } catch (...) {
-            qCritical() << "[Core] 初始化过程中发生异常";
             QMetaObject::invokeMethod(this, [this]() {
                 setStatus("初始化失败", false);
                 emit initializationFinished();
@@ -223,11 +217,7 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
     // 1. 物理中止旧任务：无论新词是否为空，只要发起 performSearch 就必须清理前序任务
     abortSearch();
     
-    ArcMeta::Logger::log(QString("[Core] performSearch 触发 -> 词: %1 | 来源: %2 | 路径: %3")
-                        .arg(keyword).arg(scopeSource).arg(parentPath));
-
     if (keyword.isEmpty()) {
-        ArcMeta::Logger::log("[Core] 关键词为空，跳过执行检索流程");
         return;
     }
     
@@ -235,7 +225,6 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
     m_isSearching = true;
     int searchId = ++m_currentSearchId;
 
-    ArcMeta::Logger::log(QString("[Core] 搜索任务已启动 [%1]，正在发射 searchStarted 信号...").arg(searchId));
     emit searchStarted();
 
     // 2. 异步启动双轨搜索任务
@@ -253,7 +242,6 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
 
         // 发射第一批缓存结果
         if (!m_isSearchAborted && m_currentSearchId == searchId) {
-            ArcMeta::Logger::log(QString("[Core] 缓存阶段发现 %1 条结果 [%2]，正在流式传输...").arg(cacheResults.size()).arg(searchId));
             emit searchResultsAvailable(cacheResults, false);
         }
 
@@ -270,10 +258,7 @@ void CoreController::performSearch(const QString& keyword, const QString& scopeS
 
         m_isSearching = false;
         if (!m_isSearchAborted && m_currentSearchId == searchId) {
-            ArcMeta::Logger::log(QString("[Core] 搜索总计发现 %1 项 [%2]，发送 searchFinished 信号").arg(totalFound).arg(searchId));
             emit searchFinished(totalFound);
-        } else {
-            ArcMeta::Logger::log(QString("[Core] 搜索任务被中途中止或作废 [%1]").arg(searchId));
         }
     });
 }
@@ -288,7 +273,6 @@ void CoreController::handleDeviceChange(unsigned long wParam, unsigned long long
     // 2026-05-24 按照用户要求：捕捉硬件变更，硬盘插入时触发 GLOB 扫描对账
     // [Plan-131 方案 E] 从 MainWindow 迁移至此
     if (wParam == 0x8000 /* DBT_DEVICEARRIVAL */ || wParam == 0x8004 /* DBT_DEVICEREMOVECOMPLETE */) {
-        qDebug() << "[Core] [Plan-131] 检测到磁盘硬件变更，触发全量 GLOB 对账...";
         // 异步触发扫描，防止阻塞 UI
         (void)QtConcurrent::run([]() {
             // 或者 AutoImportManager::instance().syncAllManagedLibraries();
