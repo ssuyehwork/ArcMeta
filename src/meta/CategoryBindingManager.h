@@ -21,7 +21,7 @@ public:
     std::vector<std::wstring> getAssetsInCategory(int categoryId) const;
 
 private:
-    CategoryBindingManager(QObject* parent = nullptr) : QObject(parent) {}
+    explicit CategoryBindingManager(QObject* parent = nullptr);
 
     mutable std::shared_mutex m_mutex;
     std::unordered_map<int, std::unordered_set<std::wstring>> m_categoryToAssets;

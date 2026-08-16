@@ -1,6 +1,4 @@
 #include "CategoryBindingManager.h"
-#include "CategoryRepo.h"
-#include "MetadataManager.h"
 
 namespace ArcMeta {
 
@@ -9,42 +7,37 @@ CategoryBindingManager& CategoryBindingManager::instance() {
     return inst;
 }
 
+CategoryBindingManager::CategoryBindingManager(QObject* parent)
+    : QObject(parent) {
+}
+
 bool CategoryBindingManager::bindAssetToCategory(const std::wstring& path, int categoryId) {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
-    std::wstring nPath = MetadataManager::normalizePath(path);
-    m_categoryToAssets[categoryId].insert(nPath);
-    m_assetToCategories[nPath].insert(categoryId);
-    std::string fid = MetadataManager::instance().getFolderIdSync(nPath);
-    if (!fid.empty()) {
-        return CategoryRepo::addItemToCategory(categoryId, fid, nPath);
-    }
-    return false;
+    m_categoryToAssets[categoryId].insert(path);
+    m_assetToCategories[path].insert(categoryId);
+    return true;
 }
 
 bool CategoryBindingManager::unbindAssetFromCategory(const std::wstring& path, int categoryId) {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
-    std::wstring nPath = MetadataManager::normalizePath(path);
-    if (m_categoryToAssets.count(categoryId)) {
-        m_categoryToAssets[categoryId].erase(nPath);
+    auto catIt = m_categoryToAssets.find(categoryId);
+    if (catIt != m_categoryToAssets.end()) {
+        catIt->second.erase(path);
     }
-    if (m_assetToCategories.count(nPath)) {
-        m_assetToCategories[nPath].erase(categoryId);
+    auto assetIt = m_assetToCategories.find(path);
+    if (assetIt != m_assetToCategories.end()) {
+        assetIt->second.erase(categoryId);
     }
-    std::string fid = MetadataManager::instance().getFolderIdSync(nPath);
-    if (!fid.empty()) {
-        return CategoryRepo::removeItemFromCategory(categoryId, fid);
-    }
-    return false;
+    return true;
 }
 
 std::vector<std::wstring> CategoryBindingManager::getAssetsInCategory(int categoryId) const {
     std::shared_lock<std::shared_mutex> lock(m_mutex);
-    std::vector<std::wstring> result;
     auto it = m_categoryToAssets.find(categoryId);
-    if (it != m_categoryToAssets.end()) {
-        result.assign(it->second.begin(), it->second.end());
+    if (it == m_categoryToAssets.end()) {
+        return {};
     }
-    return result;
+    return std::vector<std::wstring>(it->second.begin(), it->second.end());
 }
 
 } // namespace ArcMeta
