@@ -75,9 +75,25 @@ void CategoryDropProcessor::triggerDuplicateCheck(const QStringList& paths, int 
                         }
 
                         if (chosenAction == DuplicateResolveAction::UseExisting) {
-                            // 使用已存在文件：删除新文件并在数据库中做 1:N 映射
+                            std::wstring newWPath = group.newItem.path.toStdWString();
+                            std::string newFid = MetadataManager::instance().getFolderIdSync(newWPath);
+
+                            // 1. 优先提取新文件所在的新建分类 ID（例如 "pin" 的 ID）
+                            std::vector<int> boundCatIds = CategoryRepo::getItemCategoryIds(newFid, newWPath);
+                            if (boundCatIds.empty() && targetCategoryId > 0) {
+                                boundCatIds.push_back(targetCategoryId);
+                            }
+
+                            // 2. 将已存在文件关联至新分类
+                            for (int cid : boundCatIds) {
+                                if (cid > 0) {
+                                    CategoryRepo::addItemToCategory(cid, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
+                                }
+                            }
+
+                            // 3. 删除重复的新文件
                             QFile::remove(group.newItem.path);
-                            CategoryRepo::addItemToCategory(targetCategoryId, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
+                            MetadataManager::instance().removeMetadataSync(newWPath);
                         }
                     }
                 }

@@ -493,10 +493,27 @@ void MainWindow::initUi() {
                                 }
 
                                 if (chosenAction == DuplicateResolveAction::UseExisting) {
-                                    // 清理新文件并关联已有资产到目标分类
+                                    std::wstring newWPath = group.newItem.path.toStdWString();
+                                    std::string newFid = MetadataManager::instance().getFolderIdSync(newWPath);
+
+                                    // 1. 【核心修复】：在删除新文件之前，先提取新文件在导入时绑定的真实分类列表（例如新建的 "pin" 分类 ID）
+                                    std::vector<int> boundCatIds = CategoryRepo::getItemCategoryIds(newFid, newWPath);
+
+                                    // 2. 如果新文件没有独立分类（例如单文件拖入），则回退使用外层传入的目标分类 targetCatId
+                                    if (boundCatIds.empty() && targetCatId > 0) {
+                                        boundCatIds.push_back(targetCatId);
+                                    }
+
+                                    // 3. 【核心修复】：将资源库里已存在的那个老文件，绑定到新分类名下
+                                    for (int cid : boundCatIds) {
+                                        if (cid > 0) {
+                                            CategoryRepo::addItemToCategory(cid, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
+                                        }
+                                    }
+
+                                    // 4. 清理多余的新文件与胶囊记录（避免重复占用磁盘）
                                     QFile::remove(group.newItem.path);
-                                    MetadataManager::instance().removeMetadataSync(group.newItem.path.toStdWString());
-                                    CategoryRepo::addItemToCategory(targetCatId, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
+                                    MetadataManager::instance().removeMetadataSync(newWPath);
                                 }
                             }
                             m_categoryPanel->requestRefresh(true);
