@@ -329,16 +329,7 @@ void MetadataManager::initFromDatabase() {
                 tempCache[path] = rm;
                 if (!rm.folderId.empty()) tempFidToPath[rm.folderId] = path;
 
-                // 若检测到历史污染数据，自动回写更正 SQLite 数据库
-                if (isDirtyData) {
-                    sqlite3_stmt* fixStmt = nullptr;
-                    if (sqlite3_prepare_v2(db, "UPDATE metadata SET tags = ? WHERE folder_id = ?", -1, &fixStmt, nullptr) == SQLITE_OK) {
-                        sqlite3_bind_text16(fixStmt, 1, cleanTags.join(",").toStdWString().c_str(), -1, SQLITE_TRANSIENT);
-                        sqlite3_bind_text(fixStmt, 2, fid, -1, SQLITE_TRANSIENT);
-                        sqlite3_step(fixStmt);
-                        sqlite3_finalize(fixStmt);
-                    }
-                }
+                // 若检测到历史污染数据，仅在内存中清洗，不进行数据库写回，保证开库过程纯只读
 
                 // 维护树级索引...
                 std::wstring parentPath = QDir::toNativeSeparators(QFileInfo(QString::fromStdWString(path)).absolutePath()).toStdWString();
@@ -2771,10 +2762,7 @@ void MetadataManager::recordAccess(const std::wstring& path) {
         }
     }
     
-    // 2. 🚨 真正的异步：绝对不在 UI 主线程跑 SQL！抛入后台 Worker 线程异步持久化！
-    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
-        persistAsync(nPath);
-    });
+    // 2. 纯内存更新访问时间，取消隐式数据库持久化写库任务
 }
 
 double MetadataManager::getCachedAtime(const std::wstring& path) {
