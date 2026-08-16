@@ -29,7 +29,6 @@
 #include "meta/CategoryRepo.h"
 #include "meta/MediaExtractorPipeline.h"
 #include "meta/DatabaseManager.h"
-#include "mft/MftReader.h"
 #include "core/CoreController.h"
 #include "core/AutoImportManager.h"
 

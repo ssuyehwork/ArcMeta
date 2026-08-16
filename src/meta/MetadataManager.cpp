@@ -25,7 +25,6 @@
 #include "PhysicalDataExtractor.h"
 #include "IngestionProgressEngine.h"
 #include "../core/AppConfig.h"
-#include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 #include "../ui/MediaColorExtractor.h"
 #include "StatisticsService.h"

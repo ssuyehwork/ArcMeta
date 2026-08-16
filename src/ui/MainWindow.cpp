@@ -35,7 +35,6 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
-#include "../mft/MftReader.h"
 #include "../meta/CategoryRepo.h"
 
 #include "SearchHistoryPanel.h"

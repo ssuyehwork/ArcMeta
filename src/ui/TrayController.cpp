@@ -3,7 +3,6 @@
 #include <QIcon>
 #include <QDebug>
 #include <QProgressDialog>
-#include "../mft/MftReader.h"
 #include "../meta/DatabaseManager.h"
 #include "BatchProgressDialog.h"
 
@@ -68,9 +67,6 @@ void TrayController::onShowMainWindow() {
 void TrayController::onQuitApp() {
     // 2026-07-xx 按照用户要求 (Plan-119)：秒退出架构实现
     if (m_trayIcon) m_trayIcon->hide();
-
-    // 1. 强制中断所有后台扫描任务
-    MftReader::instance().clear(); 
 
     // 2. 调用 DatabaseManager 停用异步同步队列并释放句柄
     // 数据已在运行期通过增量任务实时落地，此处仅执行排空队列动作，通常为毫秒级。

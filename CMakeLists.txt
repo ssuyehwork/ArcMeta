@@ -114,8 +114,6 @@ set(SOURCES
     src/meta/MetadataManager.h
     src/meta/MediaExtractorPipeline.cpp
     src/meta/MediaExtractorPipeline.h
-    src/mft/MftReader.cpp
-    src/mft/MftReader.h
     src/ui/BatchRenameDialog.cpp
     src/ui/BatchRenameDialog.h
     src/ui/BatchRenamePreviewDialog.cpp
@@ -239,6 +237,8 @@ set(SOURCES
     src/ui/models/LibraryAssetModel.h
     src/ui/models/LibraryAssetModel.cpp
     src/ui/UiHelper.h
+    src/ui/IconCacheManager.h
+    src/ui/IconCacheManager.cpp
     src/ui/ShellIconManager.h
     src/ui/SvgIconRenderer.h
     src/ui/SvgIconRenderer.cpp
@@ -332,7 +332,6 @@ target_include_directories(ArcMeta PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/models
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/mft
     ${CMAKE_CURRENT_SOURCE_DIR}/src/crypto
     ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libtiff
 )

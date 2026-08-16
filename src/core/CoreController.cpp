@@ -1,7 +1,6 @@
 #include "CoreController.h"
 #include "AutoImportManager.h"
 #include "NativeFolderWatcher.h"
-#include "../mft/MftReader.h"
 #include "AppConfig.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/MetadataManager.h"
