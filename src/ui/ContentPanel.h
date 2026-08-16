@@ -22,6 +22,7 @@
 #include <QPersistentModelIndex>
 #include <QDebug>
 #include <QIcon>
+#include "ScanStats.h"
 #include "FilterPanel.h"
 #include "models/DiskItemModel.h"
 #include "models/LibraryAssetModel.h"
@@ -96,17 +97,6 @@ public:
     SortType currentSortType() const { return m_sortType; }
     Qt::SortOrder currentSortOrder() const { return m_sortOrder; }
 
-    /**
-     * @brief 统计结构
-     */
-    struct ScanStats {
-        QMap<int, int> ratingCounts;
-        QMap<QString, int> colorCounts;
-        QMap<QString, int> typeCounts;
-        QMap<QString, int> createDateCounts;
-        QMap<QString, int> modifyDateCounts;
-        int emptyFolderCount = 0;
-    };
 
     enum ViewMode {
         ListView,
@@ -225,13 +215,7 @@ signals:
     /**
      * @brief 目录装载完成后发出，携带统计数据供 FilterPanel 填充
      */
-    void directoryStatsReady(
-        const QMap<int, int>&     ratingCounts,
-        const QMap<QString, int>& colorCounts,
-        const QMap<QString, int>& typeCounts,
-        const QMap<QString, int>& createDateCounts,
-        const QMap<QString, int>& modifyDateCounts,
-        int emptyFolderCount);
+    void directoryStatsReady(const ArcMeta::ScanStats& stats);
 
 private:
     void initUi();

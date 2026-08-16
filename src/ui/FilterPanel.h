@@ -11,6 +11,7 @@
 #include <QSlider>
 #include <QMap>
 #include <QStringList>
+#include "ScanStats.h"
 #include "MetaPanel.h" // 引用 FlowLayout
 
 namespace ArcMeta {
@@ -147,6 +148,8 @@ public:
     ~FilterPanel() override = default;
 
 
+    void populateStats(const ArcMeta::ScanStats& stats);
+    void populate(const ArcMeta::ScanStats& stats) { populateStats(stats); }
     void populate(
         const QMap<int, int>&        ratingCounts,
         const QMap<QString, int>&    colorCounts,
@@ -200,6 +203,8 @@ private:
     FilterState m_filter;
     QString     m_hueSliderColor;
     QStringList m_recentColors; // LRU 缓存
+
+    ArcMeta::ScanStats m_currentStats;
 
     QMap<int, int>      m_ratingCounts;
     QMap<QString, int>  m_colorCounts;

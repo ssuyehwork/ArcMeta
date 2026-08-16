@@ -3285,51 +3285,75 @@ bool ContentPanel::resolvePasteDestination(int& outCatId) {
 
 void ContentPanel::recalculateAndEmitStats() {
     const std::vector<ItemRecord>& records = m_model->allRecords();
-    if (records.empty()) {
-        // 2026-06-xx 物理修复：严禁向筛选面板发送“全空”统计信号，
-        // 防止在加载大目录或执行搜索切换的中间态强行清空筛选器界面。
-        return;
-    }
+    if (records.empty()) return;
 
-    // 判断当前是否为纯物理磁盘模式
     bool isDiskMode = (dataSourceType() == DataSourceType::DiskNav);
 
     QPointer<ContentPanel> weakThis(this);
     (void)QtConcurrent::run([weakThis, records, isDiskMode]() {
         ScanStats stats;
 
+        // 1. 预统计重复项（内存快速桶）
+        std::unordered_map<std::string, int> hashCounts;
+        for (const auto& record : records) {
+            if (record.isDir || record.isCategory) continue;
+            std::string key = std::to_string(record.size) + "_" + std::to_string(record.width) + "_" + std::to_string(record.height) + "_" + record.filename.toLower().toStdString();
+            hashCounts[key]++;
+        }
+
+        // 2. 遍历全量记录进行多维统计
         for (const auto& record : records) {
             if (!weakThis) return;
 
             stats.ratingCounts[record.rating]++;
-            
             QString normHex = UiHelper::normalizeColorHex(record.manualColor);
             stats.colorCounts[normHex]++;
             
             if (record.isDir || record.isCategory) {
                 stats.typeCounts["folder"]++;
-                // 物理限制：仅在磁盘模式下才累计空文件夹
                 if (isDiskMode && record.isDir && record.isEmpty) {
                     stats.emptyFolderCount++;
                 }
             } else {
                 stats.typeCounts["file"]++;
                 stats.typeCounts[record.suffix.toUpper()]++;
+
+                // 链接统计
+                if (!record.url.isEmpty()) stats.hasLinkCount++;
+                else stats.noLinkCount++;
+
+                // 备注统计
+                if (!record.note.isEmpty()) stats.hasNoteCount++;
+                else stats.noNoteCount++;
+
+                // 图像比例统计
+                if (record.width > 0 && record.height > 0) {
+                    double r = (double)record.width / record.height;
+                    if (record.width > record.height) stats.ratioHorizontalCount++;
+                    if (record.height > record.width) stats.ratioVerticalCount++;
+                    if (std::abs(r - 1.0) <= 0.05) stats.ratioSquareCount++;
+                    if (std::abs(r - 1.77) <= 0.05) stats.ratio169Count++;
+                }
+
+                // 重复状态统计
+                std::string key = std::to_string(record.size) + "_" + std::to_string(record.width) + "_" + std::to_string(record.height) + "_" + record.filename.toLower().toStdString();
+                if (hashCounts[key] > 1) {
+                    stats.duplicateCount++;
+                } else {
+                    stats.uniqueCount++;
+                }
             }
             
             auto dateKey = [&](long long ts) {
                 return QDateTime::fromMSecsSinceEpoch(ts).date().toString("dd-MM-yyyy");
             };
-
             stats.createDateCounts[dateKey(record.ctime)]++;
             stats.modifyDateCounts[dateKey(record.mtime)]++;
         }
 
         QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, stats]() {
             if (weakThis) {
-                emit weakThis->directoryStatsReady(stats.ratingCounts, stats.colorCounts,
-                                                 stats.typeCounts, stats.createDateCounts, stats.modifyDateCounts,
-                                                 stats.emptyFolderCount);
+                emit weakThis->directoryStatsReady(stats);
             }
         });
     });
