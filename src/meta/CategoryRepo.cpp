@@ -282,7 +282,7 @@ bool CategoryRepo::addItemToCategoryBatch(int categoryId, const std::vector<std:
             if (p.empty()) p = MetadataManager::instance().getPathByFolderId(pair.first);
             if (!p.empty()) {
                 MetadataManager::instance().addCategoryToItemMemory(p, categoryId);
-                MetadataManager::instance().persistAsync(p, false);
+                // 🛡️ 绝不在此处循环内调用 persistAsync 进行写放大投递，直接依靠 SQLite 事务写入完成落盘
             }
         }
     }
@@ -888,37 +888,36 @@ bool CategoryRepo::renamePhysicalCategoryPath(const std::wstring& oldPath, const
 }
 
 bool CategoryRepo::addItemToCategory(int categoryId, const std::string& folderId, const std::wstring& pathHint) {
-    WriteGuard guard;
     std::wstring finalPath = MetadataManager::normalizePath(pathHint);
     if (finalPath.empty()) finalPath = MetadataManager::instance().getPathByFolderId(folderId);
+    if (finalPath.empty()) return false;
 
+    // 1. 同步更新内存单一事实源（0 阻塞）
+    MetadataManager::instance().addCategoryToItemMemory(finalPath, categoryId);
+
+    // 2. 投递异步 SQLite 事务落盘
     sqlite3* memDb = DatabaseManager::instance().getDbForPath(finalPath);
-    if (!memDb) return false;
-
-    const char* sql = "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)";
-    double addedAt = static_cast<double>(QDateTime::currentMSecsSinceEpoch());
-
-    sqlite3_stmt* memStmt;
-    if (sqlite3_prepare_v2(memDb, sql, -1, &memStmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int(memStmt, 1, categoryId);
-        sqlite3_bind_text(memStmt, 2, folderId.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text16(memStmt, 3, finalPath.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_double(memStmt, 4, addedAt);
-        
-        if (sqlite3_step(memStmt) == SQLITE_DONE) {
-            sqlite3_finalize(memStmt);
-
-            MetadataManager::instance().addCategoryToItemMemory(finalPath, categoryId);
-
-            refreshMemoryCache();
-            StatisticsService::instance().requestFullRecountAsync();
-
-            MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
-            return true;
-        }
-        sqlite3_finalize(memStmt);
+    if (memDb) {
+        DatabaseManager::instance().enqueueSyncTask([memDb, categoryId, folderId, finalPath]() {
+            SqlTransaction trans(memDb);
+            const char* sql = "INSERT OR REPLACE INTO category_items (category_id, folder_id, path_hint, added_at) VALUES (?, ?, ?, ?)";
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(memDb, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, categoryId);
+                sqlite3_bind_text(stmt, 2, folderId.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(stmt, 3, finalPath.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_double(stmt, 4, static_cast<double>(QDateTime::currentMSecsSinceEpoch()));
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+            trans.commit();
+        });
     }
-    return false;
+
+    refreshMemoryCache();
+    StatisticsService::instance().requestFullRecountAsync();
+    MetadataManager::instance().notifyUI(MetadataManager::RefreshLevel::CountsOnly);
+    return true;
 }
 
 bool CategoryRepo::removeItemFromCategory(int categoryId, const std::string& folderId) {

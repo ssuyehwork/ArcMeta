@@ -839,49 +839,47 @@ void MetadataManager::calculateAndPersistProgress(const std::wstring& folderPath
         return;
     }
 
-    // 互斥锁定该物理分库递归句柄，解决高并发下在同一个 sqlite3 连接中冲突导致的死锁，确保重入安全
-    auto dbLock = DatabaseManager::instance().getDriveMutex(volSerial);
-    std::lock_guard<std::recursive_mutex> lockConn(*dbLock);
-
-    // 2. 统计状态（严禁物理读盘，仅使用数据库标记）
-    // 进度 = (该目录下状态为 1 的项目数) / (该目录下状态为 0 和 1 的项目总数)
-    int count0 = 0;
-    int count1 = 0;
-
-    sqlite3_stmt* stmt;
-    const char* sql = "SELECT ingestion_status, COUNT(*) FROM metadata WHERE path LIKE ? GROUP BY ingestion_status";
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        std::wstring pattern = nFolder;
-        if (pattern.back() != L'\\' && pattern.back() != L'/') pattern += L'\\';
-        pattern += L"%";
-
-        sqlite3_bind_text16(stmt, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            int status = sqlite3_column_int(stmt, 0);
-            int count = sqlite3_column_int(stmt, 1);
-            if (status == 0) count0 = count;
-            else if (status == 1) count1 = count;
-        }
-        sqlite3_finalize(stmt);
-    }
-
     double progress = 0.0;
-    if (count0 + count1 > 0) {
-        progress = (double)count1 / (count0 + count1);
-    }
+    {
+        // 1. 仅在 SQLite 统计与持久化期间持有 dbLock（不嵌套持有 m_mutex）
+        auto dbLock = DatabaseManager::instance().getDriveMutex(volSerial);
+        std::lock_guard<std::recursive_mutex> lockConn(*dbLock);
 
-    // 3. 持久化进度到 system_stats 表
-    const char* upsertSql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?)";
-    if (sqlite3_prepare_v2(db, upsertSql, -1, &stmt, nullptr) == SQLITE_OK) {
-        std::string key = "PROGRESS:" + QString::fromStdWString(nFolder).toUtf8().toStdString();
-        sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_double(stmt, 2, progress);
-        if (sqlite3_step(stmt) != SQLITE_DONE) {
+        int count0 = 0;
+        int count1 = 0;
+
+        sqlite3_stmt* stmt = nullptr;
+        const char* sql = "SELECT ingestion_status, COUNT(*) FROM metadata WHERE path LIKE ? GROUP BY ingestion_status";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            std::wstring pattern = nFolder;
+            if (pattern.back() != L'\\' && pattern.back() != L'/') pattern += L'\\';
+            pattern += L"%";
+
+            sqlite3_bind_text16(stmt, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                int status = sqlite3_column_int(stmt, 0);
+                int count = sqlite3_column_int(stmt, 1);
+                if (status == 0) count0 = count;
+                else if (status == 1) count1 = count;
+            }
+            sqlite3_finalize(stmt);
         }
-        sqlite3_finalize(stmt);
-    }
 
-    // Plan-124: 更新内存缓存
+        if (count0 + count1 > 0) {
+            progress = (double)count1 / (count0 + count1);
+        }
+
+        const char* upsertSql = "INSERT OR REPLACE INTO system_stats (key, value) VALUES (?, ?)";
+        if (sqlite3_prepare_v2(db, upsertSql, -1, &stmt, nullptr) == SQLITE_OK) {
+            std::string key = "PROGRESS:" + QString::fromStdWString(nFolder).toUtf8().toStdString();
+            sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(stmt, 2, progress);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+    } // 🔓 离开作用域，dbLock 在此处彻底释放！
+
+    // 2. 在释放 dbLock 之后，单独获取 m_mutex 更新内存进度缓存（彻底消除锁嵌套风险）
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
         m_folderProgressCache[nFolder] = progress;
@@ -1097,10 +1095,16 @@ void MetadataManager::setRating(const std::wstring& path, int rating, bool notif
     std::wstring nPath = normalizePath(path);
     ensureActivated(nPath);
     size_t idx = getShardIndex(nPath);
+    bool changed = false;
     {
         std::unique_lock<std::shared_mutex> lock(m_shards[idx].mutex);
-        m_shards[idx].items[nPath].rating = rating;
+        if (m_shards[idx].items[nPath].rating != rating) {
+            m_shards[idx].items[nPath].rating = rating;
+            changed = true;
+        }
     }
+    if (!changed) return; // 🛡️ 无实质变动，直接返回，杜绝冗余落盘和信号风暴
+
     if (notify) {
         notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     }
@@ -1115,10 +1119,16 @@ void MetadataManager::setSha256(const std::wstring& path, const std::string& sha
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     size_t idx = getShardIndex(nPath);
+    bool changed = false;
     {
         std::unique_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
-        m_shards[idx].items[nPath].sha256 = sha256;
+        if (m_shards[idx].items[nPath].sha256 != sha256) {
+            m_shards[idx].items[nPath].sha256 = sha256;
+            changed = true;
+        }
     }
+    if (!changed) return;
+
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     if (isInsideManagedLibrary(nPath)) {
         DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
@@ -1390,10 +1400,16 @@ void MetadataManager::setPinned(const std::wstring& path, bool pinned, bool noti
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     size_t idx = getShardIndex(nPath);
+    bool changed = false;
     {
         std::unique_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
-        m_shards[idx].items[nPath].pinned = pinned;
+        if (m_shards[idx].items[nPath].pinned != pinned) {
+            m_shards[idx].items[nPath].pinned = pinned;
+            changed = true;
+        }
     }
+    if (!changed) return;
+
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 
     if (isInsideManagedLibrary(nPath)) {
@@ -1407,28 +1423,16 @@ void MetadataManager::setTags(const std::wstring& path, const QStringList& tags,
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
 
-    bool oldEmpty = false;
-    QStringList oldTags;
-    bool isFolder = false;
-
-    {
-        size_t idx = getShardIndex(nPath);
-        {
-            std::unique_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
-            auto it = m_shards[idx].items.find(nPath);
-            if (it != m_shards[idx].items.end()) {
-                oldEmpty = it->second.tags.isEmpty();
-                oldTags = it->second.tags;
-                isFolder = it->second.isFolder;
-            }
-        }
-    }
-
+    bool changed = false;
     {
         size_t idx = getShardIndex(nPath);
         std::unique_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
-        m_shards[idx].items[nPath].tags = tags;
+        if (m_shards[idx].items[nPath].tags != tags) {
+            m_shards[idx].items[nPath].tags = tags;
+            changed = true;
+        }
     }
+    if (!changed) return;
 
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 
@@ -1443,10 +1447,16 @@ void MetadataManager::setNote(const std::wstring& path, const std::wstring& note
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     size_t idx = getShardIndex(nPath);
+    bool changed = false;
     {
         std::unique_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
-        m_shards[idx].items[nPath].note = note;
+        if (m_shards[idx].items[nPath].note != note) {
+            m_shards[idx].items[nPath].note = note;
+            changed = true;
+        }
     }
+    if (!changed) return;
+
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 
     if (isInsideManagedLibrary(nPath)) {
@@ -1460,10 +1470,16 @@ void MetadataManager::setURL(const std::wstring& path, const std::wstring& url, 
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     size_t idx = getShardIndex(nPath);
+    bool changed = false;
     {
         std::unique_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
-        m_shards[idx].items[nPath].url = url;
+        if (m_shards[idx].items[nPath].url != url) {
+            m_shards[idx].items[nPath].url = url;
+            changed = true;
+        }
     }
+    if (!changed) return;
+
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
 
     if (isInsideManagedLibrary(nPath)) {
@@ -1477,10 +1493,16 @@ void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, boo
     std::wstring nPath = MetadataManager::normalizePath(path);
     ensureActivated(nPath);
     size_t idx = getShardIndex(nPath);
+    bool changed = false;
     {
         std::unique_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
-        m_shards[idx].items[nPath].encrypted = encrypted;
+        if (m_shards[idx].items[nPath].encrypted != encrypted) {
+            m_shards[idx].items[nPath].encrypted = encrypted;
+            changed = true;
+        }
     }
+    if (!changed) return;
+
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
     if (isInsideManagedLibrary(nPath)) {
         DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
