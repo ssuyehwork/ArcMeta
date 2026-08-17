@@ -40,94 +40,64 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         wPath = nPath.toStdWString();
     }
 
-    // 1. 物理属性采样 (零 I/O 核心)
-    // 🚨 [双轨不隔离极简解耦重构]: 磁盘导航模式下（isFromMemory == false）100% 拒绝穿透去读受控库数据库！
     RuntimeMeta meta;
-    bool isArcPath = isFromMemory && (wPath.find(L".arc") != std::wstring::npos);
     if (providedMeta) {
         meta = *providedMeta;
-    } else if (isArcPath) {
+    } else if (isFromMemory) {
         meta = MetadataManager::instance().getMeta(wPath);
     }
 
-    if (meta.folderId.empty() || (meta.ctime == 0 && meta.mtime == 0)) {
-        std::string fid;
-        long long size = 0, ctime = 0, mtime = 0, atime = 0;
-        MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
-        r.size = size;
-        r.ctime = ctime;
-        r.mtime = mtime;
-        r.atime = atime;
-        
-        if (isFromMemory && wPath.find(L".arc") != std::wstring::npos) {
-            r.folderId = MetadataManager::instance().getFolderIdSync(wPath);
-        } else {
-            r.folderId = fid;
-        }
-        
-        r.isDir = QFileInfo(nPath).isDir();
-    } else {
+    if (isFromMemory) {
+        // 🚨【真·纯内存模式】：100% 从内存 RuntimeMeta 镜像读取，严禁任何物理磁盘 I/O
         r.size = meta.fileSize;
         r.ctime = meta.ctime;
         r.mtime = meta.mtime;
         r.atime = meta.atime;
         r.folderId = meta.folderId;
         r.isDir = meta.isFolder;
-    }
+        r.isManaged = true;
+        r.isEmpty = false;
+        r.path = nPath;
 
-    r.path = nPath;
-    {
-        int lastSlash = nPath.lastIndexOf('\\');
-        if (lastSlash == -1) lastSlash = nPath.lastIndexOf('/');
-        r.filename = (lastSlash != -1) ? nPath.mid(lastSlash + 1) : nPath;
-    }
+        // 直接从内存元数据注入真实素材文件名与后缀
+        if (!meta.baseName.empty()) {
+            QString bName = QString::fromStdWString(meta.baseName);
+            QString ext = QString::fromStdWString(meta.ext);
+            r.filename = ext.isEmpty() ? bName : (bName + "." + ext);
+            r.suffix = ext.toLower();
+        } else {
+            int lastSlash = std::max(nPath.lastIndexOf('\\'), nPath.lastIndexOf('/'));
+            r.filename = (lastSlash != -1) ? nPath.mid(lastSlash + 1) : nPath;
+            int lastDot = r.filename.lastIndexOf('.');
+            r.suffix = (lastDot != -1) ? r.filename.mid(lastDot + 1).toLower() : "";
+        }
 
-    // 2. 核心元数据注入 (确保 width/height/palettes 物理对齐)
-    if (providedMeta || isArcPath) {
         ItemRecord::fromMetadata(r, meta);
-    } else {
-        r.rating = 0;
-        r.isManaged = false;
-        r.pinned = false;
-        r.encrypted = false;
-        r.width = 0;
-        r.height = 0;
-        r.added_at = 0;
+        return r;
     }
+
+    // 磁盘模式分支（保持原有 Win32 探测）
+    std::string fid;
+    long long size = 0, ctime = 0, mtime = 0, atime = 0;
+    MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);
+    r.size = size;
+    r.ctime = ctime;
+    r.mtime = mtime;
+    r.atime = atime;
+    r.folderId = fid;
+    r.isDir = QFileInfo(nPath).isDir();
+    r.path = nPath;
+
+    int lastSlash = std::max(nPath.lastIndexOf('\\'), nPath.lastIndexOf('/'));
+    r.filename = (lastSlash != -1) ? nPath.mid(lastSlash + 1) : nPath;
 
     if (r.isDir) {
-        // 从数据库加载持久化的进度值
-        if (isFromMemory) {
-            r.registrationProgress = MetadataManager::instance().getProgressFromDb(wPath);
-        } else {
-            r.registrationProgress = -1.0;
-        }
-
-        if (providedMeta || (isFromMemory && meta.isManaged)) {
-            r.isEmpty = false; 
-        } else {
-            QDir sub(nPath);
-            r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty(); // 仅磁盘模式生效
-        }
-        r.suffix = ""; 
+        QDir sub(nPath);
+        r.isEmpty = sub.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty();
+        r.suffix = "";
     } else {
         int lastDot = nPath.lastIndexOf('.');
         r.suffix = (lastDot != -1) ? nPath.mid(lastDot + 1).toLower() : "";
-    }
-
-    // 3. 内存模式下彻底穿透包内查找主素材文件，将其真实文件名与扩展名注入 ItemRecord
-    if (isFromMemory && r.isDir && nPath.endsWith(".arc", Qt::CaseInsensitive)) {
-        QDir arcDir(nPath);
-        QFileInfoList files = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-        for (const QFileInfo& fi : files) {
-            QString fn = fi.fileName();
-            if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
-            if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
-            
-            r.filename = fn;
-            r.suffix = fi.suffix().toLower();
-            break;
-        }
     }
 
     return r;

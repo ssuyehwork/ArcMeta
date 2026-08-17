@@ -374,7 +374,8 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
                         if (weakThis->isSuspended()) {
                             weakThis->m_pendingUpdateRows.insert(rIdx);
                         } else {
-                            emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+                            // 仅通知卡片重绘，绝不发射 AspectRatioRole 触发全量网格重排！
+                            emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, HasThumbnailRole});
                         }
                     }
                 }

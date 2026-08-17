@@ -582,7 +582,7 @@ ContentPanel::ContentPanel(QWidget* parent)
     m_proxyModel->setSourceModel(m_model); 
 
     m_visibleTimer = new QTimer(this);
-    m_visibleTimer->setSingleShot(true);
+    m_visibleTimer->setSingleShot(false);
     m_visibleTimer->setInterval(30);
     connect(m_visibleTimer, &QTimer::timeout, this, &ContentPanel::refreshVisibleThumbnails);
     
@@ -1413,7 +1413,13 @@ void ContentPanel::initGridView() {
     connect(m_gridView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
     connect(m_gridView, &QAbstractItemView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
     connect(m_gridView->verticalScrollBar(), &QScrollBar::valueChanged, this, [this]() {
-        m_visibleTimer->start();
+        if (!m_visibleTimer->isActive()) {
+            m_visibleTimer->start();
+        }
+        refreshVisibleThumbnails();
+    });
+    connect(m_gridView->verticalScrollBar(), &QScrollBar::sliderReleased, this, [this]() {
+        refreshVisibleThumbnails();
     });
 } 
  
