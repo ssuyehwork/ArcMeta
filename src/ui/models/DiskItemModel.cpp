@@ -254,7 +254,9 @@ void DiskItemModel::clearCacheForFolder(const QString& folderPath) {
 }
 
 void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
-    std::vector<std::pair<QString, QString>> newQueue;
+    uint64_t myGen = ++m_currentGen;
+
+    std::vector<QString> newQueue;
     for (int r : rows) {
         if (r < 0 || r >= static_cast<int>(m_allRecords.size())) continue;
         const auto& rec = m_allRecords[r];
@@ -266,16 +268,27 @@ void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
         if (m_iconCache.contains(path) || m_requestedPaths.contains(path)) continue;
 
         m_requestedPaths.insert(path);
-        newQueue.push_back({path, path});
+        newQueue.push_back(path);
     }
 
     if (newQueue.empty()) return;
 
     QPointer<DiskItemModel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, newQueue]() {
-        for (const auto& task : newQueue) {
-            if (!weakThis) break;
-            QString path = task.first;
+    (void)QtConcurrent::run([weakThis, newQueue, myGen]() {
+        struct LoadedItem {
+            QString path;
+            QImage img;
+            double ar{1.0};
+            bool hasThumb{false};
+        };
+        std::vector<LoadedItem> loadedBatch;
+        loadedBatch.reserve(newQueue.size());
+
+        for (const QString& path : newQueue) {
+            if (!weakThis || weakThis->m_currentGen.load() != myGen) {
+                // 视口过时，即刻熔断！
+                break;
+            }
 
             QImage img = DiskMediaExtractor::getDiskThumbnail(path, 512);
 
@@ -286,25 +299,51 @@ void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
                 hasThumb = true;
             }
 
-            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, img, ar, hasThumb]() {
-                if (weakThis) {
-                    QIcon icon = img.isNull() ? ShellIconManager::getFileIcon(path, 128) : QIcon(QPixmap::fromImage(img));
-                    weakThis->m_iconCache.insert(path, new QIcon(icon));
-                    weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
-                    weakThis->m_requestedPaths.remove(path);
+            loadedBatch.push_back({path, img, ar, hasThumb});
+        }
 
-                    auto it = weakThis->m_pathToIndex.find(path);
+        if (loadedBatch.empty()) {
+            if (weakThis) {
+                QMetaObject::invokeMethod(weakThis.data(), [weakThis, newQueue]() {
+                    if (weakThis) {
+                        for (const auto& p : newQueue) weakThis->m_requestedPaths.remove(p);
+                    }
+                });
+            }
+            return;
+        }
+
+        QMetaObject::invokeMethod(weakThis.data(), [weakThis, loadedBatch, newQueue, myGen]() {
+            if (weakThis) {
+                for (const auto& p : newQueue) weakThis->m_requestedPaths.remove(p);
+
+                if (weakThis->m_currentGen.load() != myGen) return;
+
+                int minRow = -1;
+                int maxRow = -1;
+
+                for (const auto& item : loadedBatch) {
+                    QIcon icon = item.img.isNull() ? ShellIconManager::getFileIcon(item.path, 128) : QIcon(QPixmap::fromImage(item.img));
+                    weakThis->m_iconCache.insert(item.path, new QIcon(icon));
+                    weakThis->m_aspectRatios[QDir::toNativeSeparators(item.path)] = item.hasThumb ? item.ar : -1.0;
+
+                    auto it = weakThis->m_pathToIndex.find(item.path);
                     if (it != weakThis->m_pathToIndex.end()) {
                         int rIdx = it->second;
+                        if (minRow == -1 || rIdx < minRow) minRow = rIdx;
+                        if (maxRow == -1 || rIdx > maxRow) maxRow = rIdx;
+
                         if (weakThis->isSuspended()) {
                             weakThis->m_pendingUpdateRows.insert(rIdx);
-                        } else {
-                            emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
                         }
                     }
                 }
-            });
-        }
+
+                if (!weakThis->isSuspended() && minRow != -1 && maxRow != -1) {
+                    emit weakThis->dataChanged(weakThis->index(minRow, 0), weakThis->index(maxRow, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+                }
+            }
+        });
     });
 }
 

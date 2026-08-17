@@ -101,6 +101,33 @@ void MediaExtractorPipeline::enqueueBatch(const std::vector<std::wstring>& paths
     QMetaObject::invokeMethod(m_timer, "start", Qt::QueuedConnection);
 }
 
+void MediaExtractorPipeline::prioritizeBatch(const std::vector<std::wstring>& paths) {
+    if (paths.empty()) return;
+    m_isCanceled.store(false);
+
+    std::vector<std::wstring> normPaths;
+    normPaths.reserve(paths.size());
+    for (const auto& p : paths) {
+        normPaths.push_back(MetadataManager::normalizePath(p));
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        // 1. 先从现有队列中剔除这些路径
+        std::unordered_set<std::wstring> targetSet(normPaths.begin(), normPaths.end());
+        m_queue.erase(std::remove_if(m_queue.begin(), m_queue.end(), [&](const std::wstring& item) {
+            return targetSet.count(MetadataManager::normalizePath(item)) > 0;
+        }), m_queue.end());
+
+        // 2. 将这批路径插入到队列最前面 (LIFO 插队优先)
+        m_queue.insert(m_queue.begin(), paths.begin(), paths.end());
+        SyncStatusService::instance().updateMediaPending(static_cast<int>(m_queue.size()) + m_activeCount.load());
+    }
+
+    dispatchWorkersIfNeeded();
+    QMetaObject::invokeMethod(m_timer, "start", Qt::QueuedConnection);
+}
+
 void MediaExtractorPipeline::dispatchWorkersIfNeeded() {
     size_t qSize = 0;
     {
@@ -169,6 +196,16 @@ void MediaExtractorPipeline::dispatchWorkerLoop() {
                         QColor dominant = MediaColorExtractor::quantizeColor(pal.first().first);
                         item.autoColor = dominant.name().toUpper().toStdWString();
                         item.palettes = pal;
+                    }
+
+                    // 🚀【补齐落盘闭环】：将已解码的 512px 缩略图存入缓存，供 UI 直接秒读
+                    QString containerDir = info.absolutePath();
+                    if (containerDir.endsWith(".arc", Qt::CaseInsensitive)) {
+                        QString thumbPath = containerDir + "/" + info.completeBaseName() + "_thumbnail.png";
+                        thumb.save(thumbPath, "PNG");
+                    } else {
+                        QString diskThumbPath = CapsuleMediaExtractor::getDiskThumbCachePath(qPath);
+                        thumb.save(diskThumbPath, "PNG");
                     }
                 }
             } else if (info.isDir()) {
@@ -276,20 +313,48 @@ void MediaExtractorPipeline::extractDimensions(const std::wstring& path, int& ou
     if (!info.isFile()) return;
 
     if (info.suffix().toLower() == "svg") {
-        std::lock_guard<std::mutex> guiLock(CapsuleMediaExtractor::s_qtGuiMutex);
-        QSvgRenderer renderer(info.absoluteFilePath());
-        if (renderer.isValid()) {
-            QSize sz = renderer.defaultSize();
-            if (sz.isEmpty() || sz.width() <= 0 || sz.height() <= 0) {
-                // defaultSize() 依赖显式 width/height 属性，部分SVG（尤其Illustrator导出）只有viewBox没有该属性会返回0x0
-                // 改用 viewBox 尺寸兜底，viewBox 是矢量图形合法性的必要条件，一定存在
-                QRectF vb = renderer.viewBoxF();
-                sz = vb.size().toSize();
+        // 🚀【改造点 3】：轻量级 XML 正则/文本快速解析 SVG 尺寸，避免实例化 QSvgRenderer 争抢全局 s_qtGuiMutex
+        QFile file(info.absoluteFilePath());
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QByteArray header = file.read(4096); // 仅读取前 4KB xml 头部，开销极微
+            file.close();
+
+            QString xmlHead = QString::fromUtf8(header);
+            static QRegularExpression regW("width\\s*=\\s*\"([0-9.]+)(?:px)?\"", QRegularExpression::CaseInsensitiveOption);
+            static QRegularExpression regH("height\\s*=\\s*\"([0-9.]+)(?:px)?\"", QRegularExpression::CaseInsensitiveOption);
+            static QRegularExpression regVB("viewBox\\s*=\\s*\"\\s*[-0-9.]+\\s+[-0-9.]+\\s+([0-9.]+)\\s+([0-9.]+)\\s*\"", QRegularExpression::CaseInsensitiveOption);
+
+            auto matchW = regW.match(xmlHead);
+            auto matchH = regH.match(xmlHead);
+            if (matchW.hasMatch() && matchH.hasMatch()) {
+                outW = qRound(matchW.captured(1).toDouble());
+                outH = qRound(matchH.captured(1).toDouble());
             }
-            outW = sz.width();
-            outH = sz.height();
+
+            if (outW <= 0 || outH <= 0) {
+                auto matchVB = regVB.match(xmlHead);
+                if (matchVB.hasMatch()) {
+                    outW = qRound(matchVB.captured(1).toDouble());
+                    outH = qRound(matchVB.captured(2).toDouble());
+                }
+            }
         }
-        // 若经过 defaultSize 和 viewBox 解析后宽高仍无效，设置 512x512 保底尺寸，防止 0x0 脏数据落库
+
+        // 后备逻辑：当快速正则未能解析出宽高时，才尝试加锁使用 QSvgRenderer 兜底
+        if (outW <= 0 || outH <= 0) {
+            std::lock_guard<std::mutex> guiLock(CapsuleMediaExtractor::s_qtGuiMutex);
+            QSvgRenderer renderer(info.absoluteFilePath());
+            if (renderer.isValid()) {
+                QSize sz = renderer.defaultSize();
+                if (sz.isEmpty() || sz.width() <= 0 || sz.height() <= 0) {
+                    QRectF vb = renderer.viewBoxF();
+                    sz = vb.size().toSize();
+                }
+                outW = sz.width();
+                outH = sz.height();
+            }
+        }
+
         if (outW <= 0 || outH <= 0) {
             outW = 512;
             outH = 512;

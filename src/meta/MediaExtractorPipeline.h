@@ -21,6 +21,9 @@ public:
     void enqueue(const std::wstring& path);
     void enqueueBatch(const std::vector<std::wstring>& paths);
 
+    // 视口强插队优先接口：将视口内的路径插队到队列最前端，优先提取特征并生成缩略图
+    void prioritizeBatch(const std::vector<std::wstring>& paths);
+
     // 2026-07-27 按照 Plan-107：安全、平滑取消与中止接口
     void cancelAll();
     void cancelBatch(const std::vector<std::wstring>& paths);
