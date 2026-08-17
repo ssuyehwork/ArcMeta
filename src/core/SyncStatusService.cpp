@@ -27,9 +27,8 @@ SyncStatusService::SyncStatusService() {
 }
 
 int SyncStatusService::pendingCount() const {
-    // 只有真正的后台全盘扫描待处理数（scanPending）才作为全局扫描进度条的衡量标准
-    // mediaPending 和 dbPending 仅在后台静默执行，不干扰底栏
-    return m_scanPending.load();
+    // 三方后台任务池总量叠加：数据库 + 多媒体提取 + 扫描
+    return m_dbPending.load() + m_mediaPending.load() + m_scanPending.load();
 }
 
 void SyncStatusService::updateDbPending(int count) {

@@ -13,7 +13,6 @@ using namespace ArcMeta;
 #include "../../meta/MetadataManager.h"
 #include "../../meta/CategoryRepo.h"
 #include "../../meta/CapsuleMediaExtractor.h"
-#include "../../meta/MediaExtractorPipeline.h"
 #include "../core/UndoManager.h"
 #include "../MemoryBatchRenameService.h"
 #include "../core/BasicCommands.h"
@@ -275,11 +274,7 @@ Qt::ItemFlags LibraryAssetModel::flags(const QModelIndex& index) const {
 }
 
 void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
-    uint64_t myGen = ++m_currentGen;
-
-    std::vector<QString> newQueue;
-    std::vector<std::wstring> unbakedWPaths;
-
+    std::vector<std::pair<QString, QString>> newQueue;
     for (int r : rows) {
         if (r < 0 || r >= static_cast<int>(m_allRecords.size())) continue;
         const auto& rec = m_allRecords[r];
@@ -298,34 +293,17 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
 
         if (needLoad) {
             m_requestedIcons.insert(path);
-            newQueue.push_back(path);
-            unbakedWPaths.push_back(path.toStdWString());
+            newQueue.push_back({path, path});
         }
     }
 
     if (newQueue.empty()) return;
 
-    // 🚨 彻底移除 MediaExtractorPipeline::instance().prioritizeBatch(unbakedWPaths); 
-    // 杜绝日常浏览时把已完成素材重复推入全局扫描流水线！
-
-    // 🚀【改造点 2】：聚合为单个工作线程批量调度 + Generation 机制，消除无界线程风暴
     QPointer<LibraryAssetModel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, newQueue, myGen]() {
-        struct LoadedItem {
-            QString path;
-            QIcon icon;
-            double ar{1.0};
-            bool hasThumb{false};
-        };
-        std::vector<LoadedItem> loadedBatch;
-        loadedBatch.reserve(newQueue.size());
-
-        for (const QString& path : newQueue) {
-            if (!weakThis || weakThis->m_currentGen.load() != myGen) {
-                // 视口已滑动触发新一轮加载，旧视口任务立刻熔断！
-                break;
-            }
-
+    for (const auto& task : newQueue) {
+        QString path = task.first;
+        (void)QtConcurrent::run([weakThis, path]() {
+            if (!weakThis) return;
             QFileInfo info(path);
             QString ext = info.suffix().toLower();
 
@@ -337,9 +315,6 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
 
             if (isInsideArc || ext == "svg" || ext == "psd" || ext == "psb" || ext == "ai" || ext == "eps" || UiHelper::isGraphicsFile(ext)) {
                 img = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(path);
-                if (img.isNull()) {
-                    img = CapsuleMediaExtractor::getCapsuleThumbnail(path, 512);
-                }
                 if (!img.isNull()) {
                     ar = (double)img.width() / img.height();
                     hasThumb = true;
@@ -382,53 +357,25 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
                 icon = ShellIconManager::getFileIcon(iconTarget, 128);
             }
 
-            loadedBatch.push_back({path, icon, ar, hasThumb});
-        }
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, icon, ar, hasThumb]() {
+                if (weakThis) {
+                    weakThis->m_iconCache.insert(path, new QIcon(icon));
+                    weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
+                    weakThis->m_requestedIcons.remove(path); // 🚨 保证解锁，释放请求锁
 
-        if (loadedBatch.empty()) {
-            if (weakThis) {
-                QMetaObject::invokeMethod(weakThis.data(), [weakThis, newQueue]() {
-                    if (weakThis) {
-                        for (const auto& p : newQueue) weakThis->m_requestedIcons.remove(p);
-                    }
-                });
-            }
-            return;
-        }
-
-        QMetaObject::invokeMethod(weakThis.data(), [weakThis, loadedBatch, newQueue, myGen]() {
-            if (weakThis) {
-                // 清理所有请求标记
-                for (const auto& p : newQueue) weakThis->m_requestedIcons.remove(p);
-
-                // 若这批数据到达时已被新代数覆盖，作废UI绘制
-                if (weakThis->m_currentGen.load() != myGen) return;
-
-                int minRow = -1;
-                int maxRow = -1;
-
-                for (const auto& item : loadedBatch) {
-                    weakThis->m_iconCache.insert(item.path, new QIcon(item.icon));
-                    weakThis->m_aspectRatios[QDir::toNativeSeparators(item.path)] = item.hasThumb ? item.ar : -1.0;
-
-                    auto it = weakThis->m_pathToIndex.find(item.path);
+                    auto it = weakThis->m_pathToIndex.find(path);
                     if (it != weakThis->m_pathToIndex.end()) {
                         int rIdx = it->second;
-                        if (minRow == -1 || rIdx < minRow) minRow = rIdx;
-                        if (maxRow == -1 || rIdx > maxRow) maxRow = rIdx;
-
                         if (weakThis->isSuspended()) {
                             weakThis->m_pendingUpdateRows.insert(rIdx);
+                        } else {
+                            emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, HasThumbnailRole});
                         }
                     }
                 }
-
-                if (!weakThis->isSuspended() && minRow != -1 && maxRow != -1) {
-                    emit weakThis->dataChanged(weakThis->index(minRow, 0), weakThis->index(maxRow, 0), {Qt::DecorationRole, HasThumbnailRole});
-                }
-            }
+            });
         });
-    });
+    }
 }
 
 QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
