@@ -1676,6 +1676,11 @@ void MetadataManager::renameBatchAsync(
                     }
                 }
 
+                std::wstring newName, newExt;
+                parsePathComponents(curNew, isFolder, newName, newExt);
+                meta.baseName = newName;
+                meta.ext = newExt;
+
                 size_t newIdx = getShardIndex(curNew);
                 {
                     std::unique_lock<std::shared_mutex> shardLock(m_shards[newIdx].mutex);
@@ -1683,8 +1688,6 @@ void MetadataManager::renameBatchAsync(
                 }
                 if (!fid.empty()) m_folderIdToPath[fid] = curNew;
 
-                std::wstring newName, newExt;
-                parsePathComponents(curNew, isFolder, newName, newExt);
                 if (!newName.empty()) {
                     if (isFolder) {
                         auto& v = m_subFolderNameToFolderIds[newName];
@@ -1716,16 +1719,25 @@ void MetadataManager::renameBatchAsync(
         }
 
         // C. SQLite 数据库分库批量提交大事务（彻底消除 SQLITE_BUSY 报错）
-        std::map<sqlite3*, std::vector<std::pair<std::string, std::wstring>>> groupedTasks;
+        struct DbBatchRenameTask {
+            std::string fid;
+            std::wstring newPath;
+            std::wstring newName;
+            std::wstring newExt;
+        };
+        std::map<sqlite3*, std::vector<DbBatchRenameTask>> groupedTasks;
         for (const auto& pair : normalizedPairs) {
             const std::wstring& curNew = pair.second;
             std::string fid;
+            std::wstring newName, newExt;
             {
                 size_t idx = getShardIndex(curNew);
                 std::shared_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
                 auto it = m_shards[idx].items.find(curNew);
                 if (it != m_shards[idx].items.end()) {
                     fid = it->second.folderId;
+                    newName = it->second.baseName;
+                    newExt = it->second.ext;
                 }
             }
             if (fid.empty()) continue;
@@ -1734,11 +1746,11 @@ void MetadataManager::renameBatchAsync(
             QString letter = (curNew.length() >= 2 && curNew[1] == L':') ? QString::fromWCharArray(&curNew[0], 1) : "";
             sqlite3* db = DatabaseManager::instance().getDriveDb(volSerial, letter);
             if (db) {
-                groupedTasks[db].push_back({fid, curNew});
+                groupedTasks[db].push_back({fid, curNew, newName, newExt});
             }
         }
 
-        const char* updSql = "UPDATE metadata SET path = ? WHERE folder_id = ?";
+        const char* updSql = "UPDATE metadata SET path = ?, base_name = ?, ext = ? WHERE folder_id = ?";
         for (auto& entry : groupedTasks) {
             sqlite3* targetDb = entry.first;
             const auto& tasks = entry.second;
@@ -1747,8 +1759,10 @@ void MetadataManager::renameBatchAsync(
             sqlite3_stmt* stmt = nullptr;
             if (sqlite3_prepare_v2(targetDb, updSql, -1, &stmt, nullptr) == SQLITE_OK) {
                 for (const auto& task : tasks) {
-                    sqlite3_bind_text16(stmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text(stmt, 2, task.first.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(stmt, 1, task.newPath.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(stmt, 2, task.newName.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(stmt, 3, task.newExt.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(stmt, 4, task.fid.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_step(stmt);
                     sqlite3_reset(stmt);
                 }
@@ -1853,6 +1867,11 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 }
 
                 // 3. 缓存迁移
+                std::wstring newName, newExt;
+                parsePathComponents(curNew, isFolder, newName, newExt);
+                meta.baseName = newName;
+                meta.ext = newExt;
+
                 size_t newIdx = getShardIndex(curNew);
                 {
                     std::unique_lock<std::shared_mutex> shardLock(m_shards[newIdx].mutex);
@@ -1861,8 +1880,6 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                 if (!fid.empty()) m_folderIdToPath[fid] = curNew;
 
                 // [倒排索引重建]
-                std::wstring newName, newExt;
-                parsePathComponents(curNew, isFolder, newName, newExt);
                 if (!newName.empty()) {
                     if (isFolder) {
                         auto& v = m_subFolderNameToFolderIds[newName];
@@ -1913,24 +1930,35 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
         QString letter = (nNew.length() >= 2 && nNew[1] == L':') ? QString::fromWCharArray(&nNew[0], 1) : "";
         sqlite3* memDb = DatabaseManager::instance().getDriveDb(volSerial, letter);
         
-        std::map<sqlite3*, std::vector<std::pair<std::string, std::wstring>>> groupedSyncTasks;
+        struct DbItemRenameTask {
+            std::string fid;
+            std::wstring newPath;
+            std::wstring newName;
+            std::wstring newExt;
+        };
+        std::map<sqlite3*, std::vector<DbItemRenameTask>> groupedSyncTasks;
         for (const auto& pair : itemsToRename) {
             const std::wstring& curNew = pair.second;
             std::string fid;
+            std::wstring newName, newExt;
             {
                 size_t idx = getShardIndex(curNew);
                 std::shared_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
                 auto it = m_shards[idx].items.find(curNew);
-                if (it != m_shards[idx].items.end()) fid = it->second.folderId;
+                if (it != m_shards[idx].items.end()) {
+                    fid = it->second.folderId;
+                    newName = it->second.baseName;
+                    newExt = it->second.ext;
+                }
             }
             if (fid.empty()) continue;
 
             if (memDb) {
-                groupedSyncTasks[memDb].push_back({fid, curNew});
+                groupedSyncTasks[memDb].push_back({fid, curNew, newName, newExt});
             }
         }
 
-        const char* updSql = "UPDATE metadata SET path = ? WHERE folder_id = ?";
+        const char* updSql = "UPDATE metadata SET path = ?, base_name = ?, ext = ? WHERE folder_id = ?";
         for (auto& entry : groupedSyncTasks) {
             sqlite3* targetDb = entry.first;
             auto& tasks = entry.second;
@@ -1940,8 +1968,10 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             sqlite3_stmt* memStmt;
             if (sqlite3_prepare_v2(targetDb, updSql, -1, &memStmt, nullptr) == SQLITE_OK) {
                 for (const auto& task : tasks) {
-                    sqlite3_bind_text16(memStmt, 1, task.second.c_str(), -1, SQLITE_TRANSIENT);
-                    sqlite3_bind_text(memStmt, 2, task.first.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(memStmt, 1, task.newPath.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(memStmt, 2, task.newName.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text16(memStmt, 3, task.newExt.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(memStmt, 4, task.fid.c_str(), -1, SQLITE_TRANSIENT);
                     sqlite3_step(memStmt);
                     sqlite3_reset(memStmt);
                 }

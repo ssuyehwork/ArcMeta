@@ -1,6 +1,7 @@
 #include "DiskMediaExtractor.h"
 #include "../ui/WindowsShellThumbnailProvider.h"
 #include "../ui/MediaColorExtractor.h"
+#include "../meta/CapsuleMediaExtractor.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QFile>
@@ -11,13 +12,9 @@
 namespace ArcMeta {
 
 QString DiskMediaExtractor::diskThumbCachePath(const QString& path, int size) {
-    QString appDir = QCoreApplication::applicationDirPath();
-    QString cacheDir = QDir(appDir).filePath(".arcmeta/disk_thumbs/");
-    QDir().mkpath(cacheDir);
-
-    QFileInfo fi(path);
-    QString hashKey = QString("%1_%2_%3_%4").arg(path).arg(fi.size()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(size);
-    return cacheDir + QString::number(qHash(hashKey), 16) + ".png";
+    (void)size;
+    // 统一收口至 CapsuleMediaExtractor::getDiskThumbCachePath（具备父文件夹 SHA-256 哈希子目录隔离功能）
+    return CapsuleMediaExtractor::getDiskThumbCachePath(path);
 }
 
 QImage DiskMediaExtractor::getDiskThumbnail(const QString& path, int size) {
