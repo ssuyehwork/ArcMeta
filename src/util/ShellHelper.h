@@ -50,10 +50,6 @@ public:
      */
     static void ensureHidden(const std::wstring& path);
 
-    /**
-     * @brief 盘符漂移与冗余数据库物理纠偏路由 (解耦自 DatabaseManager)
-     */
-    static QString resolveAndAlignDatabasePath(const std::wstring& volumeSerial, const QString& driveLetter, const QString& currentDiskPathInConn = "", bool isLoaded = false);
 };
 
 } // namespace ArcMeta
