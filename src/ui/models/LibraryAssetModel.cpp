@@ -23,7 +23,7 @@ using namespace ArcMeta;
 #include <QPainter>
 
 LibraryAssetModel::LibraryAssetModel(QObject* parent) : ItemModelBase(parent) {
-    m_iconCache.setMaxCost(500);
+    m_iconCache.setMaxCost(2000);
 }
 
 LibraryAssetModel::~LibraryAssetModel() {}
@@ -57,11 +57,11 @@ void LibraryAssetModel::setRecords(const std::vector<ItemRecord>& records) {
     beginResetModel();
     m_allRecords = records;
     m_pathToIndex.clear();
+    m_pathToIndex.reserve(records.size());
     for (int i = 0; i < static_cast<int>(m_allRecords.size()); ++i) {
         m_pathToIndex[m_allRecords[i].path] = i;
     }
-    m_iconCache.setMaxCost(qMax(500, static_cast<int>(m_allRecords.size()) + 50));
-    m_requestedIcons.clear();
+    m_iconCache.setMaxCost(qMax(2000, static_cast<int>(m_allRecords.size()) + 100));
     m_metaCache.clear();
     endResetModel();
 }
@@ -274,102 +274,45 @@ Qt::ItemFlags LibraryAssetModel::flags(const QModelIndex& index) const {
 }
 
 void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
-    std::vector<std::pair<QString, QString>> newQueue;
+    std::vector<QString> loadList;
     for (int r : rows) {
         if (r < 0 || r >= static_cast<int>(m_allRecords.size())) continue;
         const auto& rec = m_allRecords[r];
         if (rec.isCategory) continue;
 
-        QString path = rec.path;
-        bool isArcContainer = rec.isDir && rec.path.endsWith(".arc", Qt::CaseInsensitive);
-        bool needLoad = !m_iconCache.contains(path);
-        if ((UiHelper::isGraphicsFile(rec.suffix) || isArcContainer) && !m_aspectRatios.contains(QDir::toNativeSeparators(path))) {
-            needLoad = true;
-        }
-
-        if (m_requestedIcons.contains(path)) {
-            needLoad = false;
-        }
-
-        if (needLoad) {
-            m_requestedIcons.insert(path);
-            newQueue.push_back({path, path});
+        if (!m_iconCache.contains(rec.path)) {
+            loadList.push_back(rec.path);
         }
     }
 
-    if (newQueue.empty()) return;
+    if (loadList.empty()) return;
 
     QPointer<LibraryAssetModel> weakThis(this);
-    for (const auto& task : newQueue) {
-        QString path = task.first;
+    for (const QString& path : loadList) {
         (void)QtConcurrent::run([weakThis, path]() {
             if (!weakThis) return;
             QFileInfo info(path);
             QString ext = info.suffix().toLower();
 
-            QImage img;
-            double ar = 1.0;
-            bool hasThumb = false;
-
-            bool isInsideArc = path.contains(".arc/", Qt::CaseInsensitive) || path.contains(".arc\\", Qt::CaseInsensitive);
-
-            if (isInsideArc || ext == "svg" || ext == "psd" || ext == "psb" || ext == "ai" || ext == "eps" || UiHelper::isGraphicsFile(ext)) {
-                img = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(path);
-                if (!img.isNull()) {
-                    ar = (double)img.width() / img.height();
-                    hasThumb = true;
-                }
-            } else if ((ext == "arc" || path.endsWith(".arc", Qt::CaseInsensitive)) && info.isDir()) {
-                QString cleanPath = path;
-                if (cleanPath.endsWith("/") || cleanPath.endsWith("\\")) {
-                    cleanPath = cleanPath.left(cleanPath.length() - 1);
-                }
-                QDir arcDir(cleanPath);
-                QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
-                if (!thumbFiles.isEmpty()) {
-                    img = QImage(cleanPath + "/" + thumbFiles.first());
-                    if (!img.isNull()) {
-                        ar = (double)img.width() / img.height();
-                        hasThumb = true;
-                    }
-                }
-            }
+            QImage img = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(path);
 
             QIcon icon;
             if (!img.isNull()) {
                 icon = QIcon(QPixmap::fromImage(img));
             } else {
-                QString iconTarget = path;
-                if (ext == "arc" && info.isDir()) {
-                    QString cleanPath = path;
-                    if (cleanPath.endsWith("/") || cleanPath.endsWith("\\")) {
-                        cleanPath = cleanPath.left(cleanPath.length() - 1);
-                    }
-                    QDir arcDir(cleanPath);
-                    QStringList files = arcDir.entryList(QDir::Files | QDir::NoDotAndDotDot);
-                    for (const QString& fn : files) {
-                        if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
-                        if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
-                        iconTarget = cleanPath + "/" + fn;
-                        break;
-                    }
-                }
-                icon = ShellIconManager::getFileIcon(iconTarget, 128);
+                icon = ShellIconManager::getFileIcon(path, 128);
             }
 
-            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, icon, ar, hasThumb]() {
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, icon]() {
                 if (weakThis) {
                     weakThis->m_iconCache.insert(path, new QIcon(icon));
-                    weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
-                    weakThis->m_requestedIcons.remove(path); // 🚨 保证解锁，释放请求锁
-
                     auto it = weakThis->m_pathToIndex.find(path);
                     if (it != weakThis->m_pathToIndex.end()) {
                         int rIdx = it->second;
                         if (weakThis->isSuspended()) {
                             weakThis->m_pendingUpdateRows.insert(rIdx);
                         } else {
-                            emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, HasThumbnailRole});
+                            emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole});
                         }
                     }
                 }
@@ -434,36 +377,16 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
     // 内存托管库内已解包条目
     if (role == Qt::DisplayRole || role == Qt::EditRole) {
         switch (index.column()) {
-            case 0: {
-                // 优先使用 ItemRecord 中解包好的真实素材文件名（对应用户原话：“内存模式下彻底解包 .arc 容器，显示真实素材文件名”）
-                if (!record.filename.isEmpty()) return record.filename;
-                int lastSlash = std::max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
-                if (lastSlash == -1) return path;
-                QString name = path.mid(lastSlash + 1);
-                if (name.isEmpty() && path.length() >= 2 && path[1] == ':') return path;
-                return name;
-            }
-            case 3: {
-                if (record.isDir) return "-";
-                if (record.width > 0 && record.height > 0) {
-                    return QString("%1 x %2").arg(record.width).arg(record.height);
-                }
-                return "-";
-            }
-            case 4: {
-                if (record.isDir) return "文件夹";
-                int lastDot = path.lastIndexOf('.');
-                return (lastDot != -1) ? path.mid(lastDot + 1).toUpper() : "";
-            }
+            case 0: return record.filename;
+            case 3: return (record.width > 0 && record.height > 0) ? QString("%1 x %2").arg(record.width).arg(record.height) : "-";
+            case 4: return record.isDir ? "文件夹" : record.suffix.toUpper();
             case 5: {
                 if (record.isDir) return "-";
                 if (record.size < 1024) return QString::number(record.size) + " B";
                 if (record.size < 1024 * 1024) return QString::number(record.size / 1024.0, 'f', 1) + " KB";
                 return QString::number(record.size / (1024.0 * 1024.0), 'f', 1) + " MB";
             }
-            case 6: {
-                return QDateTime::fromMSecsSinceEpoch(record.mtime).toString("dd-MM-yyyy HH:mm");
-            }
+            case 6: return QDateTime::fromMSecsSinceEpoch(record.mtime).toString("dd-MM-yyyy HH:mm");
         }
     } else if (role == PathRole) {
         return path;

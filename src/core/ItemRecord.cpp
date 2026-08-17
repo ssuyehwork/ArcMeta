@@ -40,15 +40,8 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         wPath = nPath.toStdWString();
     }
 
-    RuntimeMeta meta;
-    if (providedMeta) {
-        meta = *providedMeta;
-    } else if (isFromMemory) {
-        meta = MetadataManager::instance().getMeta(wPath);
-    }
-
     if (isFromMemory) {
-        // 🚨【真·纯内存模式】：100% 从内存 RuntimeMeta 镜像读取，严禁任何物理磁盘 I/O
+        RuntimeMeta meta = providedMeta ? *providedMeta : MetadataManager::instance().getMeta(wPath);
         r.size = meta.fileSize;
         r.ctime = meta.ctime;
         r.mtime = meta.mtime;
@@ -59,7 +52,6 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         r.isEmpty = false;
         r.path = nPath;
 
-        // 直接从内存元数据注入真实素材文件名与后缀
         if (!meta.baseName.empty()) {
             QString bName = QString::fromStdWString(meta.baseName);
             QString ext = QString::fromStdWString(meta.ext);
@@ -76,7 +68,7 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
         return r;
     }
 
-    // 磁盘模式分支（保持原有 Win32 探测）
+    // 磁盘模式分支
     std::string fid;
     long long size = 0, ctime = 0, mtime = 0, atime = 0;
     MetadataManager::fetchWinApiMetadataDirect(wPath, fid, nullptr, &size, nullptr, &ctime, &mtime, &atime);

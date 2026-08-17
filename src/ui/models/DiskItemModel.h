@@ -44,7 +44,6 @@ protected:
     QString m_query;
 
     QSet<int> m_pendingUpdateRows;
-    std::atomic<uint64_t> m_currentGen{0};
 };
 
 #endif // DISKITEMMODEL_H
