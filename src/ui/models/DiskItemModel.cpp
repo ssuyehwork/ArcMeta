@@ -254,6 +254,8 @@ void DiskItemModel::clearCacheForFolder(const QString& folderPath) {
 }
 
 void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
+    uint64_t thisGen = ++m_currentGen;
+
     // 磁盘模型：缩略图提取流 100% 盲区拦截：对 .arc、文件夹和非标准图形直接忽略，不生成 any _thumbnail.png，不穿透
     std::vector<std::pair<QString, QString>> newQueue;
     for (int r : rows) {
@@ -275,9 +277,9 @@ void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
     if (newQueue.empty()) return;
 
     QPointer<DiskItemModel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, newQueue]() {
+    (void)QtConcurrent::run([weakThis, newQueue, thisGen]() {
         for (const auto& task : newQueue) {
-            if (!weakThis) break;
+            if (!weakThis || weakThis->m_currentGen.load() != thisGen) break;
             QString path = task.first;
 
             // 🚨 单线直达：直接调用 DiskMediaExtractor，零分支判断！
@@ -290,8 +292,8 @@ void DiskItemModel::loadThumbnailsForRows(const QList<int>& rows) {
                 hasThumb = true;
             }
 
-            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, img, ar, hasThumb]() {
-                if (weakThis) {
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, img, ar, hasThumb, thisGen]() {
+                if (weakThis && weakThis->m_currentGen.load() == thisGen) {
                     QIcon icon = img.isNull() ? ShellIconManager::getFileIcon(path, 128) : QIcon(QPixmap::fromImage(img));
                     weakThis->m_iconCache.insert(path, new QIcon(icon));
                     weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;

@@ -1414,9 +1414,8 @@ void ContentPanel::initGridView() {
     connect(m_gridView, &QAbstractItemView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
     connect(m_gridView->verticalScrollBar(), &QScrollBar::valueChanged, this, [this]() {
         if (!m_visibleTimer->isActive()) {
-            m_visibleTimer->start();
+            m_visibleTimer->start(50);
         }
-        refreshVisibleThumbnails();
     });
     connect(m_gridView->verticalScrollBar(), &QScrollBar::sliderReleased, this, [this]() {
         refreshVisibleThumbnails();

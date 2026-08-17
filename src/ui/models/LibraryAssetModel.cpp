@@ -274,6 +274,8 @@ Qt::ItemFlags LibraryAssetModel::flags(const QModelIndex& index) const {
 }
 
 void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
+    uint64_t thisGen = ++m_currentGen;
+
     // 内存模式：穿透 .arc 搜寻高清缩略图与宽高比
     std::vector<std::pair<QString, QString>> newQueue;
     for (int r : rows) {
@@ -305,8 +307,8 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
     QPointer<LibraryAssetModel> weakThis(this);
     for (const auto& task : newQueue) {
         QString path = task.first;
-        (void)QtConcurrent::run([weakThis, path]() {
-            if (!weakThis) return;
+        (void)QtConcurrent::run([weakThis, path, thisGen]() {
+            if (!weakThis || weakThis->m_currentGen.load() != thisGen) return;
             QFileInfo info(path);
             QString ext = info.suffix().toLower();
 
@@ -362,8 +364,8 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
             }
 
             // 主线程只做 0.0001ms 纯内存赋值，零 I/O，绝不假死
-            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, icon, ar, hasThumb]() {
-                if (weakThis) {
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, icon, ar, hasThumb, thisGen]() {
+                if (weakThis && weakThis->m_currentGen.load() == thisGen) {
                     weakThis->m_iconCache.insert(path, new QIcon(icon));
                     weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
                     weakThis->m_requestedIcons.remove(path);
