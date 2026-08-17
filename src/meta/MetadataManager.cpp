@@ -520,9 +520,9 @@ bool MetadataManager::registerAsset(const std::string& initialFolderId, const st
     rm.isFolder = false; // 强契约：资产恒为非目录 
     QFileInfo fi(QString::fromStdWString(nPath));
     rm.fileSize = fi.size(); 
-    rm.ctime = nowMsecs; 
-    rm.mtime = nowMsecs; 
-    rm.atime = nowMsecs; 
+    rm.ctime = fi.exists() ? fi.birthTime().toMSecsSinceEpoch() : nowMsecs; 
+    rm.mtime = fi.exists() ? fi.lastModified().toMSecsSinceEpoch() : nowMsecs; 
+    rm.atime = fi.exists() ? fi.lastRead().toMSecsSinceEpoch() : nowMsecs; 
     rm.added_at = nowMsecs; 
     rm.baseName = baseName; 
     rm.ext = ext; 
@@ -740,26 +740,32 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
  
         QFileInfo info(QString::fromStdWString(nPath)); 
         if (info.isDir()) { 
-            QDir dir(info.absoluteFilePath()); 
-            QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot); 
-            for (const QFileInfo& entry : entries) { 
-                QString fn = entry.fileName(); 
-                 
-                // 🚨 穿透 .arc 胶囊，直接提取内部的主资产文件，绝不将 .arc 目录入库 
-                if (entry.isDir() && fn.endsWith(".arc", Qt::CaseInsensitive)) { 
-                    QDir arcDir(entry.absoluteFilePath()); 
-                    QFileInfoList innerFiles = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot); 
-                    for (const QFileInfo& inner : innerFiles) { 
-                        QString innerFn = inner.fileName(); 
-                        if (!innerFn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) { 
-                            pathsToRegister.push_back(normalizePath(inner.absoluteFilePath().toStdWString())); 
-                        } 
-                    } 
-                } 
-                else if (entry.isFile() && !fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) { 
-                    pathsToRegister.push_back(normalizePath(entry.absoluteFilePath().toStdWString())); 
-                } 
-            } 
+            std::function<void(const QDir&)> recursiveScan = [&](const QDir& targetDir) {
+                QFileInfoList entries = targetDir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot);
+                for (const QFileInfo& entry : entries) {
+                    QString fn = entry.fileName();
+                    
+                    // 🚨 穿透 .arc 胶囊，直接提取内部的主资产文件，绝不将 .arc 目录入库
+                    if (entry.isDir() && fn.endsWith(".arc", Qt::CaseInsensitive)) {
+                        QDir arcDir(entry.absoluteFilePath());
+                        QFileInfoList innerFiles = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                        for (const QFileInfo& inner : innerFiles) {
+                            QString innerFn = inner.fileName();
+                            if (!innerFn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) {
+                                pathsToRegister.push_back(normalizePath(inner.absoluteFilePath().toStdWString()));
+                            }
+                        }
+                    }
+                    else if (entry.isDir()) {
+                        // 递归深入普通子目录
+                        recursiveScan(QDir(entry.absoluteFilePath()));
+                    }
+                    else if (entry.isFile() && !fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) {
+                        pathsToRegister.push_back(normalizePath(entry.absoluteFilePath().toStdWString()));
+                    }
+                }
+            };
+            recursiveScan(QDir(info.absoluteFilePath()));
         } else { 
             pathsToRegister.push_back(nPath); 
         } 
@@ -1113,6 +1119,74 @@ void MetadataManager::setSha256(const std::wstring& path, const std::string& sha
     DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
         persistAsync(nPath);
     });
+}
+
+void MetadataManager::updateExtractedMediaFeaturesBatch(const std::vector<ExtractedFeatureItem>& items) {
+    if (items.empty()) return;
+
+    std::unordered_map<sqlite3*, std::vector<ExtractedFeatureItem>> dbGroupMap;
+    for (const auto& item : items) {
+        std::wstring nPath = normalizePath(item.path);
+        {
+            size_t idx = getShardIndex(nPath);
+            std::unique_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
+            if (m_shards[idx].items.count(nPath)) {
+                RuntimeMeta& meta = m_shards[idx].items[nPath];
+                meta.width = item.width;
+                meta.height = item.height;
+                if (item.mtime > 0) meta.mtime = item.mtime;
+                if (item.fileSize > 0) meta.fileSize = item.fileSize;
+                meta.autoColor = item.autoColor;
+                meta.ingestionStatus = item.ingestionStatus;
+                meta.palettes.clear();
+                for (const auto& p : item.palettes) {
+                    meta.palettes.emplace_back(p.first, p.second);
+                }
+            }
+        }
+
+        sqlite3* db = DatabaseManager::instance().getDbForPath(nPath);
+        if (db) {
+            dbGroupMap[db].push_back(item);
+        }
+    }
+
+    for (auto& pair : dbGroupMap) {
+        sqlite3* db = pair.first;
+        auto itemList = pair.second;
+        DatabaseManager::instance().enqueueSyncTask([db, itemList]() {
+            SqlTransaction trans(db);
+            const char* sql = "UPDATE metadata SET width = ?, height = ?, auto_color = ?, palettes = ?, ingestion_status = ?, mtime = ?, file_size = ? WHERE path = ?";
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                for (const auto& it : itemList) {
+                    sqlite3_bind_int(stmt, 1, it.width);
+                    sqlite3_bind_int(stmt, 2, it.height);
+                    
+                    QString qColor = QString::fromStdWString(it.autoColor);
+                    sqlite3_bind_text16(stmt, 3, qColor.utf16(), -1, SQLITE_TRANSIENT);
+                    
+                    QJsonArray arr;
+                    for (const auto& pe : it.palettes) {
+                        QJsonObject obj; obj["color"] = pe.first.name(); obj["ratio"] = (double)pe.second; arr.append(obj);
+                    }
+                    QByteArray ba = QJsonDocument(arr).toJson(QJsonDocument::Compact);
+                    sqlite3_bind_blob(stmt, 4, ba.constData(), ba.size(), SQLITE_TRANSIENT);
+                    sqlite3_bind_int(stmt, 5, it.ingestionStatus);
+                    sqlite3_bind_int64(stmt, 6, it.mtime);
+                    sqlite3_bind_int64(stmt, 7, it.fileSize);
+
+                    QString qPath = QString::fromStdWString(it.path);
+                    sqlite3_bind_text16(stmt, 8, qPath.utf16(), -1, SQLITE_TRANSIENT);
+
+                    sqlite3_step(stmt);
+                    sqlite3_reset(stmt);
+                }
+                sqlite3_finalize(stmt);
+            }
+            trans.commit();
+        });
+    }
 }
 
 void MetadataManager::updateExtractedMediaFeatures( 

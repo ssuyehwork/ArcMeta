@@ -36,10 +36,14 @@ private:
     void extractDimensions(const std::wstring& path, int& outW, int& outH);
     bool extractColor(const std::wstring& path, std::wstring& outColorStr, QVector<QPair<QColor, float>>& outPalette);
 
+    void dispatchWorkersIfNeeded();
+    void dispatchWorkerLoop();
+
     std::vector<std::wstring> m_queue;
     QTimer* m_timer;
     std::mutex m_queueMutex;
     std::atomic<int> m_activeCount{0}; // 正在处理解析中 of 任务数量
+    std::atomic<int> m_activeWorkers{0}; // 活跃工作线程数
     std::atomic<bool> m_isCanceled{false}; // 2026-07-27 按照 Plan-107：原子取消中止标记
 };
 

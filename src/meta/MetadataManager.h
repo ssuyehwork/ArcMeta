@@ -231,6 +231,17 @@ public:
     void setManaged(const std::wstring& path, bool managed, bool notify = true);
     void setPalettes(const std::wstring& path, const QVector<QPair<QColor, float>>& palettes, bool notify = true);
 
+    struct ExtractedFeatureItem {
+        std::wstring path;
+        int width{0};
+        int height{0};
+        int64_t mtime{0};
+        int64_t fileSize{0};
+        std::wstring autoColor;
+        QVector<QPair<QColor, float>> palettes;
+        int ingestionStatus{1};
+    };
+
     void updateExtractedMediaFeatures(
         const std::wstring& path, 
         int width, 
@@ -239,6 +250,8 @@ public:
         const QVector<QPair<QColor, float>>& palettes, 
         int ingestionStatus = 1
     );
+
+    void updateExtractedMediaFeaturesBatch(const std::vector<ExtractedFeatureItem>& items);
 
     /**
      * @brief 全局重命名标签
