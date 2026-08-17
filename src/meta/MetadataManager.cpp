@@ -777,20 +777,24 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         if (pathsToRegister.empty()) return; 
  
         std::vector<std::wstring> actualEnqueues; 
-        SqlTransaction trans(db); 
         for (const auto& p : pathsToRegister) { 
             ensureActivated(p); 
             RuntimeMeta meta = getMeta(p);
             QFileInfo fi(QString::fromStdWString(p));
-            // 🚨 增量准入准则：已解析完成且物理文件修改时间与大小未发生变化的资产，跳过状态重置与重复投递
+            // 🚨 准入跳过：如果元数据已解析完成且物理文件修改时间与大小未发生变化，坚决跳过，绝不重置为 0！
             if (meta.ingestionStatus == 1 && meta.mtime == fi.lastModified().toMSecsSinceEpoch() && meta.fileSize == fi.size()) {
                 continue;
             }
-            updateIngestionStatus(p, 0); 
+            // 直接更新内存分片状态，不触发单条 persistAsync
+            size_t idx = getShardIndex(p);
+            {
+                std::unique_lock<std::shared_mutex> shardLock(m_shards[idx].mutex);
+                m_shards[idx].items[p].ingestionStatus = 0;
+            }
             actualEnqueues.push_back(p); 
         } 
          
-        if (trans.commit() && !actualEnqueues.empty()) { 
+        if (!actualEnqueues.empty()) {
             MediaExtractorPipeline::instance().enqueueBatch(actualEnqueues); 
         } 
     }); 
