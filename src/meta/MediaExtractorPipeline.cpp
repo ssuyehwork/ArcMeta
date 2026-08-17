@@ -223,12 +223,23 @@ void MediaExtractorPipeline::dispatchWorkerLoop() {
             MetadataManager::instance().updateExtractedMediaFeaturesBatch(results);
         }
 
+        bool queueEmpty = false;
         {
             std::lock_guard<std::mutex> lock(m_queueMutex);
             m_activeCount.fetch_sub(static_cast<int>(batch.size()));
             int remaining = static_cast<int>(m_queue.size()) + m_activeCount.load();
-            if (remaining < 0) remaining = 0;
+            if (remaining <= 0) {
+                remaining = 0;
+                queueEmpty = true;
+            }
             SyncStatusService::instance().updateMediaPending(remaining);
+        }
+
+        // 🚀【关键闭环】：当队列全部处理完成时，立即触发一次强制落盘，确保 ingestion_status = 1 物理固化！
+        if (queueEmpty) {
+            DatabaseManager::instance().enqueueSyncTask([]() {
+                DatabaseManager::instance().flushAll(true);
+            });
         }
     }
 

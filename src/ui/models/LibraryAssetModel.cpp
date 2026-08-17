@@ -305,10 +305,8 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
 
     if (newQueue.empty()) return;
 
-    // 🚀【改造点 1】：将当前视口定位的缺失缩略图素材批量插队至 MediaExtractorPipeline 最前端，强行优先生成！
-    if (!unbakedWPaths.empty()) {
-        MediaExtractorPipeline::instance().prioritizeBatch(unbakedWPaths);
-    }
+    // 🚨 彻底移除 MediaExtractorPipeline::instance().prioritizeBatch(unbakedWPaths); 
+    // 杜绝日常浏览时把已完成素材重复推入全局扫描流水线！
 
     // 🚀【改造点 2】：聚合为单个工作线程批量调度 + Generation 机制，消除无界线程风暴
     QPointer<LibraryAssetModel> weakThis(this);
