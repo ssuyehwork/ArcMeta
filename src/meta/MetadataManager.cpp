@@ -781,9 +781,20 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
         for (const auto& p : pathsToRegister) { 
             ensureActivated(p); 
             RuntimeMeta meta = getMeta(p);
-            QFileInfo fi(QString::fromStdWString(p));
-            // 🚨 增量准入准则：已解析完成且物理文件修改时间与大小未发生变化的资产，跳过状态重置与重复投递
-            if (meta.ingestionStatus == 1 && meta.mtime == fi.lastModified().toMSecsSinceEpoch() && meta.fileSize == fi.size()) {
+            QString qp = QString::fromStdWString(p);
+            QFileInfo fi(qp);
+
+            // 🚨 缩略图缺失检测器 (Thumbnail Missing Detector)
+            bool missingThumbnail = false;
+            if (MediaColorExtractor::isGraphicsFile(fi.suffix().toLower())) {
+                QImage cached = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(qp);
+                if (cached.isNull()) {
+                    missingThumbnail = true;
+                }
+            }
+
+            // 🚨 增量准入准则：只有在已解析完成 (ingestionStatus == 1)、物理修改时间与大小未变，且缩略图未缺失时，才跳过
+            if (!missingThumbnail && meta.ingestionStatus == 1 && meta.mtime == fi.lastModified().toMSecsSinceEpoch() && meta.fileSize == fi.size()) {
                 continue;
             }
             updateIngestionStatus(p, 0); 

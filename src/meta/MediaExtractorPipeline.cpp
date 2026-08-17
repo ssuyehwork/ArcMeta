@@ -162,7 +162,8 @@ void MediaExtractorPipeline::dispatchWorkerLoop() {
             item.fileSize = info.size();
 
             if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-                QImage thumb = ImageDecoderFacade::loadScaledImage(qPath, 512);
+                // 必定提取并生成保存标准缩略图（如 512x512 PNG 缓存至 .arc 胶囊或 disk_thumbs 目录）
+                QImage thumb = CapsuleMediaExtractor::getCapsuleThumbnail(qPath, 512);
                 if (!thumb.isNull()) {
                     auto pal = ColorAlgorithmEngine::extractPaletteFromImage(thumb);
                     if (!pal.isEmpty()) {
@@ -232,11 +233,8 @@ void MediaExtractorPipeline::processItemDirect(const std::wstring& path) {
     
     if (!m_isCanceled.load()) {
         if (info.isFile() && MediaColorExtractor::isGraphicsFile(info.suffix().toLower())) {
-            // 步骤一：调用 ImageDecoderFacade::loadScaledImage(qPath, 512) 获取 QImage thumb。
-            QImage thumb = ImageDecoderFacade::loadScaledImage(qPath, 512);
+            QImage thumb = CapsuleMediaExtractor::getCapsuleThumbnail(qPath, 512);
             if (!thumb.isNull()) {
-                // 步骤三：将 thumb 直接（或通过 thumb.scaled(200, 200)）传给 ColorAlgorithmEngine::extractPaletteFromImage(thumb)。
-                // 彻底禁止再次发起磁盘读取。
                 auto pal = ColorAlgorithmEngine::extractPaletteFromImage(thumb);
                 if (!pal.isEmpty()) {
                     QColor dominant = MediaColorExtractor::quantizeColor(pal.first().first);
