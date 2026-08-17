@@ -274,9 +274,6 @@ Qt::ItemFlags LibraryAssetModel::flags(const QModelIndex& index) const {
 }
 
 void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
-    uint64_t thisGen = ++m_currentGen;
-
-    // 内存模式：穿透 .arc 搜寻高清缩略图与宽高比
     std::vector<std::pair<QString, QString>> newQueue;
     for (int r : rows) {
         if (r < 0 || r >= static_cast<int>(m_allRecords.size())) continue;
@@ -290,13 +287,11 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
             needLoad = true;
         }
 
-        // 🚨 核心防爆锁：如果正在后台处理排队中，立刻 0 毫秒跳过！
         if (m_requestedIcons.contains(path)) {
             needLoad = false;
         }
 
         if (needLoad) {
-            // 🚨 0 毫秒瞬间上锁！阻断高频重复开启渲染进程！
             m_requestedIcons.insert(path);
             newQueue.push_back({path, path});
         }
@@ -307,8 +302,8 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
     QPointer<LibraryAssetModel> weakThis(this);
     for (const auto& task : newQueue) {
         QString path = task.first;
-        (void)QtConcurrent::run([weakThis, path, thisGen]() {
-            if (!weakThis || weakThis->m_currentGen.load() != thisGen) return;
+        (void)QtConcurrent::run([weakThis, path]() {
+            if (!weakThis) return;
             QFileInfo info(path);
             QString ext = info.suffix().toLower();
 
@@ -340,7 +335,6 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
                 }
             }
 
-            // 🚨 核心保命准则：图标提取（包括 ShellIconManager）100% 在子线程完成！
             QIcon icon;
             if (!img.isNull()) {
                 icon = QIcon(QPixmap::fromImage(img));
@@ -363,12 +357,11 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
                 icon = ShellIconManager::getFileIcon(iconTarget, 128);
             }
 
-            // 主线程只做 0.0001ms 纯内存赋值，零 I/O，绝不假死
-            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, icon, ar, hasThumb, thisGen]() {
-                if (weakThis && weakThis->m_currentGen.load() == thisGen) {
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, icon, ar, hasThumb]() {
+                if (weakThis) {
                     weakThis->m_iconCache.insert(path, new QIcon(icon));
                     weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
-                    weakThis->m_requestedIcons.remove(path);
+                    weakThis->m_requestedIcons.remove(path); // 🚨 保证解锁，释放请求锁
 
                     auto it = weakThis->m_pathToIndex.find(path);
                     if (it != weakThis->m_pathToIndex.end()) {
@@ -376,7 +369,6 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
                         if (weakThis->isSuspended()) {
                             weakThis->m_pendingUpdateRows.insert(rIdx);
                         } else {
-                            // 仅通知卡片重绘，绝不发射 AspectRatioRole 触发全量网格重排！
                             emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, HasThumbnailRole});
                         }
                     }
