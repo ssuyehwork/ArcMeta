@@ -114,10 +114,19 @@ void JustifiedView::scrollTo(const QModelIndex& index, ScrollHint hint) {
 }
 
 QModelIndex JustifiedView::indexAt(const QPoint& point) const {
+    if (m_geometries.empty()) return QModelIndex();
     int y = point.y() + verticalScrollBar()->value();
-    for (const auto& geo : m_geometries) {
-        if (geo.rect.contains(point.x(), y)) {
-            return model()->index(geo.index, 0);
+
+    // 二分查找匹配行/区域，大幅提升成千上万条目下的查找性能
+    auto it = std::lower_bound(m_geometries.begin(), m_geometries.end(), y,
+        [](const ItemGeometry& geo, int targetY) {
+            return geo.rect.bottom() < targetY;
+        });
+
+    for (; it != m_geometries.end(); ++it) {
+        if (it->rect.top() > y) break;
+        if (it->rect.contains(point.x(), y)) {
+            return model()->index(it->index, 0);
         }
     }
     return QModelIndex();
@@ -333,12 +342,19 @@ void JustifiedView::paintEvent(QPaintEvent*) {
     }
     
     painter.save();
-    painter.translate(0, -verticalScrollBar()->value());
+    int scrollY = verticalScrollBar()->value();
+    int vHeight = viewport()->height();
+    painter.translate(0, -scrollY);
     
-    for (int i = 0; i < (int)m_geometries.size(); ++i) {
-        const auto& geo = m_geometries[i];
-        if (geo.rect.bottom() < verticalScrollBar()->value()) continue;
-        if (geo.rect.top() > verticalScrollBar()->value() + viewport()->height()) break;
+    // 使用 std::lower_bound 快速裁剪进入视口的条目范围
+    auto startIt = std::lower_bound(m_geometries.begin(), m_geometries.end(), scrollY,
+        [](const ItemGeometry& geo, int targetY) {
+            return geo.rect.bottom() < targetY;
+        });
+
+    for (auto it = startIt; it != m_geometries.end(); ++it) {
+        const auto& geo = *it;
+        if (geo.rect.top() > scrollY + vHeight) break;
 
         QModelIndex idx = model()->index(geo.index, 0);
         QStyleOptionViewItem option;
